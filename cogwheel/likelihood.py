@@ -1,0 +1,808 @@
+"""Compute likelihood of GW events."""
+
+import inspect
+import itertools
+from functools import wraps
+import numpy as np
+from scipy import special, stats
+from scipy.optimize import differential_evolution, minimize_scalar
+
+from . import gw_utils
+from . gw_prior import UniformTimePrior
+from . skyloc_angles import SkyLocAngles
+from . waveform import out_of_bounds, TIDES
+
+
+class LikelihoodError(Exception):
+    """Base class for all Exceptions in this module."""
+
+
+def hole_edges(mask):
+    """
+    Return nholes x 2 array with edges of holes (holes extend from
+    [left_edge : right_edge]).
+    Append ones at left and right to catch end holes if present.
+    """
+    edges = np.diff(np.r_[1, mask, 1])
+    left_edges = np.where(edges == -1)[0].astype(np.uint32)
+    right_edges = np.where(edges == 1)[0].astype(np.uint32)
+    return np.c_[left_edges, right_edges]
+
+
+def std_from_median(arr):
+    """
+    Estimator of the standard deviation of an array based on
+    the median absolute deviation for robustness to outliers.
+    """
+    mad = np.median(np.abs(arr - np.median(arr)))
+    return mad / (np.sqrt(2) * special.erfinv(.5))
+
+
+def safe_std(arr, max_contiguous_low=100, expected_high=1.,
+             reject_nearby=10):
+    """
+    Compute the standard deviation of a real array rejecting outliers.
+    Outliers may be:
+        * Values too high to be likely to come from white Gaussian noise.
+        * A contiguous array of values too low to come from white Gaussian
+          noise (likely from a hole).
+    Once outliers are identified, an extra amount of nearby samples
+    is rejected for safety.
+    max_contiguous_low: How many contiguous samples below 1 sigma to
+                        allow.
+    expected_high: Number of times we expect to trigger in white
+                   Gaussian noise (used to set the clipping threshold).
+    reject_nearby: By how many samples to expand holes for safety.
+    """
+    std_est = std_from_median(arr)
+
+    good = np.ones(len(arr), dtype=bool)
+
+    # Reject long stretches of low values
+    above_one_sigma = np.abs(arr) > std_est
+    low_edges = hole_edges(above_one_sigma)
+    too_long = np.diff(low_edges)[:, 0] > max_contiguous_low
+    for left, right in low_edges[too_long]:
+        good[left : right] = False
+
+    # Reject high values
+    thresh = std_est * stats.chi.isf(expected_high / np.count_nonzero(good), 1)
+    good[np.abs(arr) > thresh] = False
+
+    # Reject extra nearby samples
+    bad_edges = hole_edges(good)
+    for left, right in bad_edges:
+        good[max(0, left-reject_nearby) : right+reject_nearby] = False
+
+    return np.std(arr[good])
+
+
+def _check_bounds(lnlike_func):
+    """
+    Decorator that adds parameter bound checks to a lnlike function.
+    `lnlike_func` needs to accept a parameter called `par_dic`, it is
+    assumed that it will be passed by position.
+    Check parameter ranges, return -inf if they are out of bounds.
+    """
+    parameters = list(inspect.signature(lnlike_func).parameters)
+    par_dic_place = parameters.index('par_dic')
+
+    @wraps(lnlike_func)
+    def new_lnlike_func(*args, **kwargs):
+        try:
+            par_dic = args[par_dic_place]
+        except ValueError:
+            par_dic = kwargs['par_dic']
+
+        if out_of_bounds(par_dic):
+            return -np.inf
+
+        return lnlike_func(*args, **kwargs)
+
+    return new_lnlike_func
+
+
+class CBCLikelihood:
+    """
+    Class that accesses the event data and waveform generator; provides
+    methods for computing likelihood as a function of compact binary
+    coalescence parameters without using relative binning, and also the
+    asd-drift correction.
+    Subclassed by `ReferenceWaveformFinder` and
+    `RelativeBinningLikelihood`.
+    """
+    def __init__(self, event_data, waveform_generator):
+        """
+        Parameters
+        ----------
+        event_data: Instance of `bookkeeping.EventData`.
+        waveform_generator: Instance of `waveform.WaveformGenerator`.
+        """
+        # Check consistency between `event_data` and `waveform_generator`:
+        for attr in ['detector_names', 'tgps', 'tcoarse']:
+            if getattr(event_data, attr) != getattr(waveform_generator, attr):
+                raise ValueError('`event_data` and `waveform_generator` have '
+                                 f'inconsistent values of {attr}.')
+
+        self.event_data = event_data
+        self.waveform_generator = waveform_generator
+
+        self.asd_drift = None
+
+    @property
+    def asd_drift(self):
+        """
+        Array of len ndetectors with ASD drift-correction.
+        Values > 1 mean local noise variance is higher than average.
+        """
+        return self._asd_drift
+
+    @asd_drift.setter
+    def asd_drift(self, value):
+        """Ensure asd_drift is a numpy array of the correct length."""
+        if value is None:
+            value = np.ones(len(self.event_data.detector_names))
+        elif len(value) != len(self.event_data.detector_names):
+            raise ValueError(f'ASD-drift must match number of detectors.')
+
+        self._asd_drift = np.asarray(value, dtype=np.float_)
+
+    def compute_asd_drift(self, par_dic, tol=.02, **kwargs):
+        """
+        Estimate local standard deviation of the matched-filter output
+        at the time of the event for each detector.
+
+        Parameters
+        ----------
+        par_dic: dictionary of waveform parameters.
+        tol: stochastic error tolerance in the measurement, used to
+             decide the number of samples.
+        """
+        normalized_h_f = self._get_h_f(par_dic, normalize=True)
+        z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
+
+        whitened_h_f = (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
+                        * self.event_data.wht_filter * normalized_h_f)
+        # Undo previous asd_drift so nsamples is independent of it
+        nsamples = np.ceil(4 * self.asd_drift**-4
+                           * np.sum(np.abs(whitened_h_f)**4, axis=-1)
+                           / (tol**2 * self.event_data.nfft)).astype(int)
+
+        asd_drift = self.asd_drift.copy()
+        for i_det, n_s in enumerate(nsamples):
+            places = (i_det, np.arange(-n_s//2, n_s//2))
+            asd_drift[i_det] *= safe_std(np.r_[z_cos[places], z_sin[places]],
+                                         **kwargs)
+        return asd_drift
+
+    @_check_bounds
+    def lnlike_fft(self, par_dic):
+        """
+        Return log likelihood computed on the FFT grid, without using
+        relative binning.
+        """
+        h_f = self._get_h_f(par_dic)
+        h_h = self._compute_h_h(h_f)
+        d_h = self._compute_d_h(h_f)
+        return np.sum(d_h.real) - np.sum(h_h) / 2
+
+    def _get_h_f(self, par_dic, *, normalize=False, by_m=False):
+        """
+        Return ndet x nfreq array with waveform strain at detectors,
+        evaluated on the FFT frequency grid and zeroized outside
+        `(fmin, fmax)`.
+        Parameters
+        ----------
+        par_dic: dictionary of waveform parameters.
+        normalize: bool, whether to normalize the waveform by sqrt(h|h)
+                   at each detector.
+        """
+
+        shape = ((len(self.waveform_generator._harmonic_modes_by_m),) if by_m
+                 else ()) + self.event_data.strain.shape
+        h_f = np.zeros(shape, dtype=np.complex_)
+        h_f[..., self.event_data.fslice] \
+            = self.waveform_generator.get_strain_at_detectors(
+                self.event_data.frequencies[self.event_data.fslice], par_dic,
+                by_m)
+        if normalize:
+            h_f /= np.sqrt(self._compute_h_h(h_f))[..., np.newaxis]
+        return h_f
+
+    def _compute_h_h(self, h_f):
+        """
+        Return array of len ndetectors with inner product (h|h).
+        ASD drift correction is applied. Relative binning is not used.
+        """
+        return (4 * self.event_data.df * self.asd_drift**-2
+                * np.linalg.norm(h_f * self.event_data.wht_filter, axis=-1)**2)
+
+    def _compute_d_h(self, h_f):
+        """
+        Return array of len ndetectors with complex inner product (d|h).
+        ASD drift correction is applied. Relative binning is not used.
+        """
+        return (4 * self.event_data.df * self.asd_drift**-2
+                * np.sum(self.event_data.blued_strain * np.conj(h_f), axis=-1))
+
+    def _matched_filter_timeseries(self, normalized_h_f):
+        """
+        Return (z_cos, z_sin), the matched filter output of a normalized
+        template and its Hilbert transform.
+        A constant asd drift correction per `self.asd_drift` is applied.
+
+        Parameters
+        ----------
+        h_f: ndet x nfft array with normalized frequency domain waveform.
+
+        Return
+        ------
+        z_cos, z_sin: each is a ndet x nfft time series.
+        """
+        factor = (2 * self.event_data.nfft * self.event_data.df
+                  * self.asd_drift[:, np.newaxis]**-2)
+        z_cos = factor * np.fft.irfft(self.event_data.blued_strain
+                                      * np.conj(normalized_h_f))
+        z_sin = factor * np.fft.irfft(self.event_data.blued_strain
+                                      * np.conj(1j * normalized_h_f))
+        return z_cos, z_sin
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}({self.event_data.eventname})'
+
+    def _get_whitened_td(self, strain_f):
+        """
+        Take a frequency-domain strain defined on the FFT grid
+        `self.event_data.frequencies` and return a whitened time domain
+        strain defined on `self.event_data.t`.
+        """
+        return (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
+                * np.fft.irfft(strain_f * self.event_data.wht_filter))
+
+    def plot_whitened_wf(self, par_dic, trng=(-.7, .1), **kwargs):
+        """
+        Plot the whitened strain and waveform model in the time domain
+        in all detectors.
+
+        Parameters:
+        -----------
+        par_dic: Waveform parameters to use, as per `self.params`.
+                 Defaults to fiducial waveform.
+        trng: Range of time to plot relative to `self.tgps`.
+        kwargs: Keyword arguments are passed to plot().
+
+        Return:
+        -------
+        fig, axes: Figure and axes array.
+        """
+        import matplotlib.pyplot as plt
+
+        fig, axes = plt.subplots(len(self.event_data.detector_names),
+                                 sharex=True, sharey=True)
+        axes = np.atleast_1d(axes)
+        fig.text(.0, .54, 'Whitened Strain', rotation=90, ha='left',
+                 va='center', fontsize='large')
+
+        time = self.event_data.t - self.event_data.tcoarse
+        data_t_wht = self._get_whitened_td(self.event_data.strain)
+        wf_t_wht = self._get_whitened_td(self._get_h_f(par_dic))
+
+        for ax, det, data_det, wf_det in zip(
+                axes, self.event_data.detector_names, data_t_wht, wf_t_wht):
+            ax.text(.02, .95, det, ha='left', va='top', transform=ax.transAxes)
+            ax.tick_params(which='both', direction='in', right=True, top=True)
+            ax.plot(time, data_det, f'C0', lw=.2)
+            ax.plot(time, wf_det, **kwargs)
+
+        plt.xlim(trng)
+        plt.xlabel('Time (s)', size=12)
+        plt.tight_layout()
+        return fig, axes
+
+
+class ReferenceWaveformFinder(CBCLikelihood):
+    """
+    Find a high-likelihood solution without using relative binning.
+    Identify best reference detector and detector pair based on SNR.
+    Identify best reference frequency based on best-fit waveform.
+
+    Some simplfying restrictions are placed, for speed:
+        * `asd_drift` = 1
+        * (2, 2) mode
+        * Aligned, equal spins
+        * Inclination = 1 radian
+        * Polarization = 0
+    """
+    def __init__(self, event_data, waveform_generator):
+        super().__init__(event_data, waveform_generator)
+        waveform_generator.harmonic_modes = [(2, 2)]
+
+    def find_bestfit_pars(self, tc_rng=(-.1, .1), seed=0):
+        """
+        Find a good fit solution with restricted parameters
+        (face-on, equal aligned spins).
+        Does not use relative binning so it can be used to find
+        a fiducial relative binning waveform.
+
+        First maximize likelihood incoherently w.r.t. intrinsic parameters
+        using mchirp, eta, chieff.
+        Then maximize likelihood w.r.t. extrinsic parameters, leaving
+        the intrinsic fixed.
+        """
+        # Set initial parameter values, will improve them in stages.
+        par_dic = {par: 0. for par in self.waveform_generator.params}
+        par_dic['d_luminosity'] = 1.
+        par_dic['iota'] = 1.  # So we have higher modes
+
+        # Optimize intrinsic parameters
+        self._optimize_m1m2s1zs2z_incoherently(par_dic, tc_rng, seed)
+
+        # Use wf to define asd_drift, ref detector, detector pair and f_ref
+        self.asd_drift = self.compute_asd_drift(par_dic)
+        lnl_by_detectors = self.lnlike_max_amp_phase_time(
+            par_dic, tc_rng, return_by_detectors=True)
+        sorted_dets = [det for _, det in sorted(zip(
+            lnl_by_detectors, self.waveform_generator.detector_names))][::-1]
+        ref_det_name = sorted_dets[0]
+        detector_pair = ''.join(
+            dict.fromkeys(sorted_dets + ['H', 'L']))[:2]  # 2 dets guaranteed
+        f_ref = self.get_best_f_ref(par_dic, ref_det_name)
+        self.waveform_generator.f_ref = f_ref
+
+        # Optimize time, sky location, polarization, distance
+        self._optimize_t_refdet(par_dic, ref_det_name, tc_rng)
+        self._optimize_skyloc(par_dic, ref_det_name, detector_pair, seed)
+        self._optimize_phase_and_distance(par_dic)
+
+        return {'par_dic': par_dic,
+                'f_ref': f_ref,
+                'ref_det_name': ref_det_name,
+                'detector_pair': detector_pair}
+
+    @_check_bounds
+    def lnlike_max_amp_phase_time(self, par_dic, tc_rng,
+                                  return_by_detectors=False):
+        """
+        Return log likelihood maximized over amplitude, phase and time
+        incoherently across detectors.
+        """
+        normalized_h_f = self._get_h_f(par_dic, normalize=True)
+        z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
+        inds = np.arange(int(tc_rng[0] / self.event_data.dt),
+                         int(tc_rng[1] / self.event_data.dt))
+        lnl = np.max(z_cos[:, inds]**2 + z_sin[:, inds]**2, axis=1) / 2
+        if return_by_detectors:
+            return lnl
+        return np.sum(lnl)
+
+    @_check_bounds
+    def lnlike_max_amp_phase(self, par_dic, ret_amp_phase_bf=False,
+                             det_inds=...):
+        """
+        Return log likelihood maximized over amplitude and phase
+        coherently across detectors (the same amplitude rescaling
+        and phase is applied to all detectors).
+        """
+        h_f = self._get_h_f(par_dic)
+        h_h = np.sum(self._compute_h_h(h_f)[det_inds])
+        d_h = np.sum(self._compute_d_h(h_f)[det_inds])
+        lnl = np.abs(d_h)**2 / h_h / 2
+
+        if not ret_amp_phase_bf:
+            return lnl
+
+        phase_bf = np.angle(d_h)
+        amp_bf = np.abs(d_h) / h_h
+        return lnl, amp_bf, phase_bf
+
+    def _optimize_m1m2s1zs2z_incoherently(self, par_dic, tc_rng, seed):
+        """
+        Optimize mchirp, eta and chieff by likelihood maximized over
+        amplitude, phase and time incoherently across detectors.
+        Modify inplace the entries of `par_dic` correspondig to
+        `m1, m2, s1z, s2z` with the new solution.
+        """
+        eta_rng = gw_utils.q_to_eta(self.event_data.q_min), .25
+        chieff_rng = (-1, 1)
+
+        def lnlike_incoherent(mchirp, eta, chieff):
+            m1, m2 = gw_utils.mchirpeta_to_m1m2(mchirp, eta)
+            intrinsic = dict(m1=m1, m2=m2, s1z=chieff, s2z=chieff)
+            return self.lnlike_max_amp_phase_time({**par_dic, **intrinsic},
+                                                  tc_rng)
+
+        print(f'Searching incoherent solution for {self.event_data.eventname}')
+        result = differential_evolution(
+            lambda mchirp_eta_chieff: -lnlike_incoherent(*mchirp_eta_chieff),
+            bounds=[self.event_data.mchirp_range, eta_rng, chieff_rng],
+            seed=seed)
+        print(f'Set intrinsic parameters, lnL = {-result.fun}')
+
+        mchirp, eta, chieff = result.x
+        par_dic['m1'], par_dic['m2'] = gw_utils.mchirpeta_to_m1m2(mchirp, eta)
+        par_dic['s1z'] = par_dic['s2z'] = chieff
+
+    def _optimize_t_refdet(self, par_dic, ref_det_name, tc_rng):
+        """
+        Find coalescence time that optimizes SNR maximized over
+        amplitude and phase at reference detector.
+        Update the 't_geocenter' entry of `par_dic` inplace.
+        Note that `t_geocenter` can and should be recomputed if `ra`,
+        `dec` change.
+        """
+        i_refdet = self.event_data.detector_names.index(ref_det_name)
+
+        def lnlike_refdet(t_geocenter):
+            return self.lnlike_max_amp_phase(
+                {**par_dic, 't_geocenter': t_geocenter}, det_inds=i_refdet)
+
+        tc_arr = np.arange(*tc_rng, 2**-10)
+        ind = np.argmax([lnlike_refdet(tgeo) for tgeo in tc_arr])
+        result = minimize_scalar(lambda tgeo: -lnlike_refdet(tgeo),
+                                 bracket=tc_arr[ind-1 : ind+2], bounds=tc_rng)
+        par_dic['t_geocenter'] = result.x
+        print(f'Set time, lnL({ref_det_name}) = {-result.fun}')
+
+    def _optimize_skyloc(self, par_dic, ref_det_name, detector_pair, seed):
+        """
+        Find right ascension and declination that optimize likelihood
+        maximized over amplitude and phase.
+        t_geocenter is readjusted so as to leave t_refdet unchanged.
+        Update 't_geocenter', ra', 'dec' entries of `par_dic` inplace.
+        """
+        skyloc = SkyLocAngles(detector_pair, self.event_data.tgps)
+        time_transformer = UniformTimePrior(t_range=(np.nan, np.nan),
+                                            tgps=self.event_data.tgps,
+                                            ref_det_name=ref_det_name)
+        t_refdet = time_transformer.inverse_transform(
+            **{key: par_dic[key] for key in ['t_geocenter', 'ra', 'dec']}
+            )['t_refdet']  # Will hold t_refdet fixed
+
+
+        def lnlike_skyloc(thetanet, phinet):
+            ra, dec = skyloc.thetaphinet_to_radec(thetanet, phinet)
+            t_geocenter_dic = time_transformer.transform(t_refdet=t_refdet,
+                                                         ra=ra, dec=dec)
+            return self.lnlike_max_amp_phase(
+                {**par_dic, 'ra': ra, 'dec': dec, **t_geocenter_dic})
+
+        result = differential_evolution(
+            lambda thetaphinet: -lnlike_skyloc(*thetaphinet),
+            bounds=[(0, np.pi), (0, 2*np.pi)], seed=seed)
+        thetanet, phinet = result.x
+        par_dic['ra'], par_dic['dec'] = skyloc.thetaphinet_to_radec(thetanet,
+                                                                    phinet)
+        par_dic['t_geocenter'] = time_transformer.transform(
+            t_refdet=t_refdet, ra=par_dic['ra'], dec=par_dic['dec']
+            )['t_geocenter']
+
+        print(f'Set sky location, lnL = {-result.fun}')
+
+    def _optimize_phase_and_distance(self, par_dic):
+        """
+        Find phase and distance that optimize coherent likelihood.
+        Update 'vphi', 'd_luminosity' entries of `par_dic` inplace.
+        Return log likelihood.
+        """
+        max_lnl, amp_bf, phase_bf = self.lnlike_max_amp_phase(
+            par_dic, ret_amp_phase_bf=True)
+        par_dic['vphi'] += phase_bf / 2
+        par_dic['d_luminosity'] /= amp_bf
+        lnl = self.lnlike_fft(par_dic)
+        np.testing.assert_allclose(max_lnl, lnl)
+
+        print(f'Set polarization and distance, lnL = {lnl}')
+
+    def get_best_f_ref(self, par_dic, ref_det_name):
+        """
+        Return reference frequency that makes phase shifts orthogonal to
+        time shifts.
+        """
+        i_refdet = self.event_data.detector_names.index(ref_det_name)
+        h_f_refdet = self._get_h_f(par_dic)[i_refdet]
+
+        h_white = h_f_refdet * self.event_data.wht_filter
+
+        return (np.linalg.norm(h_white * np.sqrt(self.event_data.frequencies))
+                / np.linalg.norm(h_white))**2
+
+
+TOLERANCE_PARAMS = {'ref_wf_lnl_difference': 1.,
+                    'raise_ref_wf_outperformed': False,
+                    'check_relative_binning_every': 10**4,
+                    'relative_binning_dlnl_tol': .1,
+                    'lnl_drop_from_peak': 20.}
+
+
+class ReferenceWaveformOutperformedError(LikelihoodError):
+    """
+    The relative-binning reference waveform's log likelihood was
+    exceeded by more than `tolerance_params['ref_wf_lnl_difference']` at
+    some other parameter values and
+    `tolerance_params['raise_ref_wf_outperformed']` was `True`.
+    """
+
+
+class RelativeBinningError(LikelihoodError):
+    """
+    The log likelihood computed with relative-binning was different than
+    that on the FFT grid by more than
+    `tolerance_params['relative_binning_dlnl_tol']`.
+    """
+
+
+class RelativeBinningLikelihood(CBCLikelihood):
+    """
+    Generalization of `CBCLikelihood` that implements computation of
+    likelihood with the relative binning method.
+    """
+    def __init__(self, event_data, waveform_generator, par_dic_0,
+                 fbin=None, pn_phase_tol=None, tolerance_params=None):
+        """
+        Parameters
+        ----------
+        event_data: Instance of `bookkeeping.EventData`
+        waveform_generator: Instance of `waveform.WaveformGenerator`.
+        par_dic_0: dictionary with parameters of the reference waveform,
+                   should be close to the maximum likelihood waveform.
+        fbin: Array with edges of the frequency bins used for relative
+              binning [Hz]. Alternatively, pass `pn_phase_tol`.
+        pn_phase_tol: Tolerance in the post-Newtonian phase [rad] used
+                      for defining frequency bins. Alternatively, pass
+                      `fbin`.
+        tolerance_params: dictionary with relative-binning tolerance
+                          parameters. Keys may include a subset of:
+          * `ref_wf_lnl_difference`: float, tolerable improvement in
+            value of log likelihood with respect to reference waveform.
+          * `raise_ref_wf_outperformed`: bool. If `True`, raise a
+            `RelativeBinningError` if the reference waveform is
+            outperformed by more than `ref_wf_lnl_difference`.
+            If `False`, silently update the reference waveform.
+          * check_relative_binning_every: int, every how many
+            evaluations to test accuracy of log likelihood computation
+            with relative binning against the expensive full FFT grid.
+          * relative_binning_dlnl_tol: float, absolute tolerance in
+            log likelihood for the accuracy of relative binning.
+            Whenever the tolerance is exceeded, `RelativeBinningError`
+            is raised.
+          * lnl_drop_from_peak: float, disregard accuracy tests if the
+            tested waveform achieves a poor log likelihood compared to
+            the reference waveform.
+        """
+        if (fbin is None) == (pn_phase_tol is None):
+            raise ValueError('Pass exactly one of `fbin` or `pn_phase_tol`.')
+
+        super().__init__(event_data, waveform_generator)
+
+        if pn_phase_tol:
+            self.pn_phase_tol = pn_phase_tol
+        else:
+            self.fbin = fbin
+
+        self.par_dic_0 = par_dic_0
+
+        tolerance_params = tolerance_params or {}
+        self.tolerance_params = {**TOLERANCE_PARAMS, **tolerance_params}
+
+        self._lnlike_evaluations = 0
+
+    @_check_bounds
+    def lnlike(self, par_dic, bypass_tests=False):
+        """
+        Return log likelihood using relative binning. Apply relative-
+        binning robustness tests per `self.tolerance_params`.
+        """
+        h_fbin = self.waveform_generator.get_strain_at_detectors(
+            self.fbin, par_dic, by_m=True)
+
+        # Sum over m and f axes, leave det ax unsummed to apply asd_drift.
+        d_h = np.sum(np.real(self._d_h_weights * np.conj(h_fbin)),
+                     axis=(0, -1))
+
+        m_inds, mprime_inds = self._get_m_mprime_inds()
+        h_h = np.sum(np.real(
+            self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()),
+            axis=(0, -1))
+
+        lnl = np.sum((d_h - h_h/2) * self.asd_drift**-2)
+
+        if bypass_tests:
+            return lnl
+
+        # Relative-binning robustness tests
+        self._lnlike_evaluations += 1
+        if lnl - self._lnl_0 > self.tolerance_params['ref_wf_lnl_difference']:
+            self.test_relative_binning_accuracy(par_dic)
+            if self.tolerance_params['raise_ref_wf_outperformed']:
+                raise ReferenceWaveformOutperformedError(
+                    f'lnl = {lnl}, lnl_0 = {self._lnl_0}, par_dic = {par_dic}')
+            self.par_dic_0 = par_dic  # Update relative binning solution
+
+        if (self._lnlike_evaluations
+                % self.tolerance_params['check_relative_binning_every'] == 0):
+            self.test_relative_binning_accuracy(par_dic)
+
+        return lnl
+
+    @property
+    def fbin(self):
+        """Edges of the frequency bins for relative binning [Hz]."""
+        return self._fbin
+
+    @fbin.setter
+    def fbin(self, fbin):
+        """
+        Set frequency bin edges, round them to fall in the FFT array.
+        Compute auxiliary quantities related to frequency bins.
+        Set `_pn_phase_tol` to `None` to keep logs clean.
+        """
+        fbin_ind = np.unique(np.searchsorted(
+            self.event_data.frequencies, fbin - self.event_data.df/2))
+        self._fbin = self.event_data.frequencies[fbin_ind]  # Bin edges
+        self._bin_slices = [slice(fbin_ind[i_bin], fbin_ind[i_bin + 1])
+                            for i_bin in range(len(self.fbin) - 1)]
+
+        bin_centers = (self.fbin[:-1] + self.fbin[1:]) / 2
+        bin_widths = np.diff(self.fbin)
+        self._scaled_fbin = [
+            (self.event_data.frequencies[bin_slice] - bin_cent) / bin_width
+            for bin_slice, bin_cent, bin_width
+            in zip(self._bin_slices, bin_centers, bin_widths)]
+
+        if hasattr(self, '_par_dic_0'):
+            self.par_dic_0 = self.par_dic_0  # Reset summary data
+
+        self._pn_phase_tol = None  # Erase potentially outdated information
+
+    @property
+    def pn_phase_tol(self):
+        """
+        Tolerance in the post-Newtonian phase [rad] used for defining
+        frequency bins.
+        """
+        return self._pn_phase_tol
+
+    @pn_phase_tol.setter
+    def pn_phase_tol(self, pn_phase_tol):
+        """
+        Compute frequency bins such that across each frequency bin the
+        change in the post-Newtonian waveform phase with respect to the
+        fiducial waveform is bounded by `pn_phase_tol` [rad].
+        """
+        pn_exponents = [-5/3, -2/3, 1]
+        if TIDES[self.waveform_generator.approximant]:
+            pn_exponents += [5/3]
+        pn_exponents = np.array(pn_exponents)
+
+        pn_coeff_rng = 2*np.pi / np.abs(self.event_data.fmin**pn_exponents
+                                        - self.event_data.fmax**pn_exponents)
+
+        f_arr = np.linspace(self.event_data.fmin, self.event_data.fmax, 10000)
+
+        diff_phase = np.sum([np.sign(exp) * rng * f_arr**exp
+                             for rng, exp in zip(pn_coeff_rng, pn_exponents)],
+                            axis=0)
+        diff_phase -= diff_phase[0]  # Worst case scenario differential phase
+
+        # Construct frequency bins
+        nbin = np.ceil(diff_phase[-1] / pn_phase_tol).astype(int)
+        diff_phase_arr = np.linspace(0, diff_phase[-1], nbin + 1)
+        self.fbin = np.interp(diff_phase_arr, diff_phase, f_arr)
+        self._pn_phase_tol = pn_phase_tol
+
+    @property
+    def par_dic_0(self):
+        """Dictionary with reference waveform parameters."""
+        return self._par_dic_0
+
+    @par_dic_0.setter
+    def par_dic_0(self, par_dic_0):
+        """
+        Compute summary data for the fiducial waveform at all detectors.
+        `asd_drift` is not applied to the summary data, to not have to
+        keep track of it.
+        Update `asd_drift` using the reference waveform.
+        The summary data `self._d_h_weights` and `self._d_h_weights` are
+        such that:
+            (d|h) ~= sum(self._d_h_weights * conj(h_fbin)) / asd_drift**2
+            (h|h) ~= sum(self._h_h_weights * np.abs(h_fbin)**2)
+                     / asd_drift**2
+
+        # TODO: enforce a minimum amplitude for h_0?
+        """
+        h0_f = self._get_h_f(par_dic_0, by_m=True)
+        h0_fbin = self.waveform_generator.get_strain_at_detectors(
+            self.fbin, par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
+
+        d_h0_by_bins = [self.event_data.blued_strain[..., bin_]
+                        * np.conj(h0_f[..., bin_])
+                        for bin_ in self._bin_slices]
+        self._d_h_weights = (self._get_summary_weights(d_h0_by_bins)
+                             / np.conj(h0_fbin))
+
+        h0_h0_by_bins = [
+            np.abs(h0_f[..., bin_] * self.event_data.wht_filter[:, bin_])**2
+            for bin_ in self._bin_slices]
+
+        m_inds, mprime_inds = self._get_m_mprime_inds()
+        h0m_h0mprime_by_bins = [h0_f[m_inds, ..., bin_]
+                                * h0_f[mprime_inds, ..., bin_].conj()
+                                * self.event_data.wht_filter[:, bin_]**2
+                                for bin_ in self._bin_slices]
+        self._h_h_weights = (self._get_summary_weights(h0m_h0mprime_by_bins)
+                             / (h0_fbin[m_inds] * h0_fbin[mprime_inds].conj()))
+        # Count off-diagonal terms twice:
+        self._h_h_weights[~np.equal(*self._get_m_mprime_inds())] *= 2
+
+        self.asd_drift = self.compute_asd_drift(par_dic_0)
+        self._par_dic_0 = par_dic_0
+        self._lnl_0 = self.lnlike(par_dic_0, bypass_tests=True)
+
+    def _get_m_mprime_inds(self):
+        """
+        Return two lists of integers, these zipped are pairs (i, j) of
+        indices with j >= i that run through the number of m modes.
+        """
+        return map(list, zip(*itertools.combinations_with_replacement(
+            range(len(self.waveform_generator._harmonic_modes_by_m)),2)))
+
+    def _get_summary_weights(self, integrand_by_bins):
+        """
+        Return summary data to compute efficiently integrals of the form
+            4 integral g(f) r(f) df,
+        where r(f) is a smooth function.
+        The above integral is approximated by
+            summary_weights * r(fbin).
+
+        Parameters
+        ----------
+        integrand_by_bins:
+            g(f) in the above notation (the oscillatory part of the
+            integrand), in the form of a list with one element per bin,
+            each element is a `(n_m, n_det, n_frequencies)` array where
+            `n_m` is the number of harmonic modes with distinct `m`,
+            `n_det` is the number of detectors and `n_frequencies` is
+            the number of frequencies on the FFT grid that fall in the
+            corresponding bin.
+
+        Return
+        ------
+        summary_weights: array of shape `(n_m, n_det, n_bins+1)`.
+        """
+        constant = np.transpose(
+            [4 * self.event_data.df * np.sum(bin_integrand, axis=-1)
+             for bin_integrand in integrand_by_bins], axes=(1, 2, 0))
+        linear = np.transpose(
+            [4 * self.event_data.df * np.sum(bin_integrand * scaled_fbin,
+                                             axis=-1)
+             for bin_integrand, scaled_fbin
+             in zip(integrand_by_bins, self._scaled_fbin)], axes=(1, 2, 0))
+
+        shape = list(constant.shape)
+        shape[-1] += 1
+        summary_weights = np.zeros(shape, dtype=constant.dtype)
+        summary_weights[..., :-1] = constant / 2 - linear
+        summary_weights[..., 1:] += constant / 2 + linear
+        return summary_weights
+
+    def test_relative_binning_accuracy(self, par_dic):
+        """
+        Return 2-tuple with log likelihood evaluated with and without
+        the relative binning method.
+        Raise `RelativeBinningError` if the difference is bigger than
+        `self.tolerance_params['relative_binning_dlnl_tol']`.
+        """
+        lnl_rb = self.lnlike(par_dic, bypass_tests=True)
+        lnl_fft = self.lnlike_fft(par_dic)
+
+        good_wf = (self._lnl_0 - max(lnl_rb, lnl_fft)
+                   < self.tolerance_params['lnl_drop_from_peak'])
+
+        tol_exceeded = (np.abs(lnl_rb - lnl_fft)
+                        > self.tolerance_params['relative_binning_dlnl_tol'])
+
+        if good_wf and tol_exceeded:
+            raise RelativeBinningError(
+                'Relative-binning tolerance exceeded:\n'
+                f'lnl_rb = {lnl_rb}\nlnl_fft = {lnl_fft}\npar_dic = {par_dic}')
+        return lnl_rb, lnl_fft
