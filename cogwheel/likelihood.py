@@ -6,6 +6,7 @@ from functools import wraps
 import numpy as np
 from scipy import special, stats
 from scipy.optimize import differential_evolution, minimize_scalar
+from scipy.interpolate import InterpolatedUnivariateSpline
 
 from . import gw_utils
 from . gw_prior import UniformTimePrior
@@ -537,7 +538,8 @@ class RelativeBinningLikelihood(CBCLikelihood):
     likelihood with the relative binning method.
     """
     def __init__(self, event_data, waveform_generator, par_dic_0,
-                 fbin=None, pn_phase_tol=None, tolerance_params=None):
+                 fbin=None, pn_phase_tol=None, tolerance_params=None,
+                 spline_degree=3):
         """
         Parameters
         ----------
@@ -574,6 +576,8 @@ class RelativeBinningLikelihood(CBCLikelihood):
 
         super().__init__(event_data, waveform_generator)
 
+        self.spline_degree = spline_degree
+
         if pn_phase_tol:
             self.pn_phase_tol = pn_phase_tol
         else:
@@ -596,13 +600,12 @@ class RelativeBinningLikelihood(CBCLikelihood):
             self.fbin, par_dic, by_m=True)
 
         # Sum over m and f axes, leave det ax unsummed to apply asd_drift.
-        d_h = np.sum(np.real(self._d_h_weights * np.conj(h_fbin)),
-                     axis=(0, -1))
+        d_h = np.sum(np.real(self._d_h_weights * h_fbin.conj()), axis=(0, -1))
 
         m_inds, mprime_inds = self._get_m_mprime_inds()
-        h_h = np.sum(np.real(
-            self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()),
-            axis=(0, -1))
+        h_h = np.sum(np.real(self._h_h_weights
+                             * h_fbin[m_inds] * h_fbin[mprime_inds].conj()),
+                     axis=(0, -1))
 
         lnl = np.sum((d_h - h_h/2) * self.asd_drift**-2)
 
@@ -623,36 +626,6 @@ class RelativeBinningLikelihood(CBCLikelihood):
             self.test_relative_binning_accuracy(par_dic)
 
         return lnl
-
-    @property
-    def fbin(self):
-        """Edges of the frequency bins for relative binning [Hz]."""
-        return self._fbin
-
-    @fbin.setter
-    def fbin(self, fbin):
-        """
-        Set frequency bin edges, round them to fall in the FFT array.
-        Compute auxiliary quantities related to frequency bins.
-        Set `_pn_phase_tol` to `None` to keep logs clean.
-        """
-        fbin_ind = np.unique(np.searchsorted(
-            self.event_data.frequencies, fbin - self.event_data.df/2))
-        self._fbin = self.event_data.frequencies[fbin_ind]  # Bin edges
-        self._bin_slices = [slice(fbin_ind[i_bin], fbin_ind[i_bin + 1])
-                            for i_bin in range(len(self.fbin) - 1)]
-
-        bin_centers = (self.fbin[:-1] + self.fbin[1:]) / 2
-        bin_widths = np.diff(self.fbin)
-        self._scaled_fbin = [
-            (self.event_data.frequencies[bin_slice] - bin_cent) / bin_width
-            for bin_slice, bin_cent, bin_width
-            in zip(self._bin_slices, bin_centers, bin_widths)]
-
-        if hasattr(self, '_par_dic_0'):
-            self.par_dic_0 = self.par_dic_0  # Reset summary data
-
-        self._pn_phase_tol = None  # Erase potentially outdated information
 
     @property
     def pn_phase_tol(self):
@@ -691,6 +664,55 @@ class RelativeBinningLikelihood(CBCLikelihood):
         self._pn_phase_tol = pn_phase_tol
 
     @property
+    def fbin(self):
+        """Edges of the frequency bins for relative binning [Hz]."""
+        return self._fbin
+
+    @fbin.setter
+    def fbin(self, fbin):
+        """
+        Set frequency bin edges, round them to fall in the FFT array.
+        Compute auxiliary quantities related to frequency bins.
+        Set `_pn_phase_tol` to `None` to keep logs clean.
+        """
+        fbin_ind = np.unique(np.searchsorted(
+            self.event_data.frequencies, fbin - self.event_data.df/2))
+        self._fbin = self.event_data.frequencies[fbin_ind]  # Bin edges
+
+        self._set_splines()
+
+        if hasattr(self, '_par_dic_0'):
+            self.par_dic_0 = self.par_dic_0  # Reset summary data
+
+        self._pn_phase_tol = None  # Erase potentially outdated information
+
+    @property
+    def spline_degree(self):
+        """
+        Integer between 1 and 5, degree of the spline used to approximate
+        waveform ratios.
+        """
+        return self._spline_degree
+
+    @spline_degree.setter
+    def spline_degree(self, value):
+        self._spline_degree = value
+        self._set_splines()
+
+    def _set_splines(self):
+        """
+        Set `self._splines`, array of shape `(n_fft, n_fbin)` whose i-th
+        column is a spline that interpolates the i-th `fbin` through 1
+        and the rest of the `fbin` through 0.
+        Called automatically whenever `fbin` or `spline_degree` are set.
+        """
+        basis_splines = [
+            InterpolatedUnivariateSpline(self.fbin, y_i, k=self.spline_degree)
+            for y_i in np.eye(len(self.fbin))]
+        self._splines = np.transpose([basis_spline(self.event_data.frequencies)
+                                      for basis_spline in basis_splines])
+
+    @property
     def par_dic_0(self):
         """Dictionary with reference waveform parameters."""
         return self._par_dic_0
@@ -708,31 +730,22 @@ class RelativeBinningLikelihood(CBCLikelihood):
             (h|h) ~= sum(self._h_h_weights * np.abs(h_fbin)**2)
                      / asd_drift**2
 
-        # TODO: enforce a minimum amplitude for h_0?
+        # TODO: maybe enforce a minimum amplitude for h_0?
         """
         h0_f = self._get_h_f(par_dic_0, by_m=True)
         h0_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
 
-        d_h0_by_bins = [self.event_data.blued_strain[..., bin_]
-                        * np.conj(h0_f[..., bin_])
-                        for bin_ in self._bin_slices]
-        self._d_h_weights = (self._get_summary_weights(d_h0_by_bins)
-                             / np.conj(h0_fbin))
-
-        h0_h0_by_bins = [
-            np.abs(h0_f[..., bin_] * self.event_data.wht_filter[:, bin_])**2
-            for bin_ in self._bin_slices]
+        d_h0 = self.event_data.blued_strain * np.conj(h0_f)
+        self._d_h_weights = self._get_summary_weights(d_h0) / np.conj(h0_fbin)
 
         m_inds, mprime_inds = self._get_m_mprime_inds()
-        h0m_h0mprime_by_bins = [h0_f[m_inds, ..., bin_]
-                                * h0_f[mprime_inds, ..., bin_].conj()
-                                * self.event_data.wht_filter[:, bin_]**2
-                                for bin_ in self._bin_slices]
-        self._h_h_weights = (self._get_summary_weights(h0m_h0mprime_by_bins)
+        h0m_h0mprime = (h0_f[m_inds] * h0_f[mprime_inds].conj()
+                        * self.event_data.wht_filter**2)
+        self._h_h_weights = (self._get_summary_weights(h0m_h0mprime)
                              / (h0_fbin[m_inds] * h0_fbin[mprime_inds].conj()))
         # Count off-diagonal terms twice:
-        self._h_h_weights[~np.equal(*self._get_m_mprime_inds())] *= 2
+        self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
 
         self.asd_drift = self.compute_asd_drift(par_dic_0)
         self._par_dic_0 = par_dic_0
@@ -744,46 +757,32 @@ class RelativeBinningLikelihood(CBCLikelihood):
         indices with j >= i that run through the number of m modes.
         """
         return map(list, zip(*itertools.combinations_with_replacement(
-            range(len(self.waveform_generator._harmonic_modes_by_m)),2)))
+            range(len(self.waveform_generator._harmonic_modes_by_m)), 2)))
 
-    def _get_summary_weights(self, integrand_by_bins):
+    def _get_summary_weights(self, integrand):
         """
         Return summary data to compute efficiently integrals of the form
             4 integral g(f) r(f) df,
         where r(f) is a smooth function.
         The above integral is approximated by
-            summary_weights * r(fbin).
+            summary_weights * r(fbin)
+        which is the exact result of replacing `r(f)` by a spline that
+        interpolates it at `fbin`.
 
         Parameters
         ----------
         integrand_by_bins:
             g(f) in the above notation (the oscillatory part of the
             integrand), in the form of a list with one element per bin,
-            each element is a `(n_m, n_det, n_frequencies)` array where
-            `n_m` is the number of harmonic modes with distinct `m`,
-            `n_det` is the number of detectors and `n_frequencies` is
-            the number of frequencies on the FFT grid that fall in the
-            corresponding bin.
+            each element is an array where the last axis corresponds to
+            the FFT frequency grid.
 
         Return
         ------
-        summary_weights: array of shape `(n_m, n_det, n_bins+1)`.
+        summary_weights: array shaped like `integrand` except the last axis
+                         now correponds to the frequency bins.
         """
-        constant = np.transpose(
-            [4 * self.event_data.df * np.sum(bin_integrand, axis=-1)
-             for bin_integrand in integrand_by_bins], axes=(1, 2, 0))
-        linear = np.transpose(
-            [4 * self.event_data.df * np.sum(bin_integrand * scaled_fbin,
-                                             axis=-1)
-             for bin_integrand, scaled_fbin
-             in zip(integrand_by_bins, self._scaled_fbin)], axes=(1, 2, 0))
-
-        shape = list(constant.shape)
-        shape[-1] += 1
-        summary_weights = np.zeros(shape, dtype=constant.dtype)
-        summary_weights[..., :-1] = constant / 2 - linear
-        summary_weights[..., 1:] += constant / 2 + linear
-        return summary_weights
+        return 4 * self.event_data.df * np.dot(integrand, self._splines)
 
     def test_relative_binning_accuracy(self, par_dic):
         """
