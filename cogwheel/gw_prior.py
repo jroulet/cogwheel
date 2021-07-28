@@ -463,3 +463,16 @@ class IASPrior(CombinedPrior, RegisteredPriorMixin):
                      FlatChieffPrior,
                      UniformDiskInplaneSpinsPrior,
                      ZeroTidalDeformabilityPrior]
+
+
+class AlignedSpinIASPrior(CombinedPrior, RegisteredPriorMixin):
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformLuminosityVolumePrior,
+                     FlatChieffPrior,
+                     ZeroInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior]
