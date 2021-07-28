@@ -100,9 +100,9 @@ class Prior(ABC):
         return list(self.range_dic)
 
     @utils.ClassProperty
-    def periodic_inds(self):
-        """List of indices of sampled parameters that are periodic."""
-        return [self.sampled_params.index(par) for par in self.periodic_params]
+    def periodic(self):
+        """List of booleans, whether samped parameters are periodic."""
+        return [par in self.periodic_params for par in self.sampled_params]
 
     @utils.ClassProperty
     @abstractmethod
@@ -202,6 +202,18 @@ class Prior(ABC):
             rep += f' | {", ".join(self.conditioned_on)}'
         rep += f') → [{", ".join(self.standard_params)}]'
         return rep
+
+    @classmethod
+    def get_fast_sampled_params(cls, fast_standard_params):
+        """
+        Return a list of parameter names that map to given "fast"
+        standard parameters, useful for sampling fast-slow parameters.
+        Updating fast sampling parameters is guaranteed to only
+        change fast standard parameters.
+        """
+        if set(cls.standard_params) <= set(fast_standard_params):
+            return cls.sampled_params
+        return []
 
 
 class CombinedPrior(Prior):
@@ -346,10 +358,12 @@ class CombinedPrior(Prior):
             return self.lnprior_and_transform(*par_vals, **par_dic)[0]
 
         # Witchcraft to fix the functions' signatures:
-        direct_parameters = [
+        self_parameter = inspect.Parameter(
+            'self', inspect.Parameter.POSITIONAL_ONLY)
+        direct_parameters = [self_parameter] + [
             inspect.Parameter(par, inspect.Parameter.POSITIONAL_OR_KEYWORD)
             for par in direct_params]
-        inverse_parameters = [
+        inverse_parameters = [self_parameter] + [
             inspect.Parameter(par, inspect.Parameter.POSITIONAL_OR_KEYWORD)
             for par in inverse_params]
         cls._change_signature(transform, direct_parameters)
@@ -408,6 +422,17 @@ class CombinedPrior(Prior):
         init_dics = [subprior.get_init_dic() for subprior in self.subpriors]
         return utils.merge_dictionaries_safely(init_dics)
 
+    @classmethod
+    def get_fast_sampled_params(cls, fast_standard_params):
+        """
+        Return a list of parameter names that map to given "fast"
+        standard parameters, useful for sampling fast-slow parameters.
+        Updating fast sampling parameters is guaranteed to only
+        change fast standard parameters.
+        """
+        return [par for prior_class in cls.prior_classes
+                for par in prior_class.get_fast_sampled_params(
+                    fast_standard_params)]
 
 
 class FixedPrior(Prior):
