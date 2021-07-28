@@ -5,6 +5,9 @@ import json
 import os
 import numpy as np
 
+import ultranest
+import ultranest.stepsampler
+
 from . import bookkeeping
 from . import gw_prior
 from . import likelihood
@@ -244,3 +247,41 @@ class ParameterEstimation:
             event_data, waveform_generator, **dic['relative_binning_kwargs'])
 
         return cls(prior_instance, likelihood_instance)
+
+
+class ParameterEstimationUltranest(ParameterEstimation):
+    def instatiate_sampler(self, run=False, *, prior_only=False,
+                           n_fast_steps=8, **kwargs):
+        if prior_only:
+            lnprob = self._lnprior_ultranest
+        else:
+            lnprob = self._lnposterior_ultranest
+
+        self.sampler = ultranest.ReactiveNestedSampler(
+            self.prior.sampled_params, lnprob, self._cubetransform,
+            wrapped_params=self.prior.periodic)
+        self.sampler.stepsampler \
+            = ultranest.stepsampler.SpeedVariableRegionSliceSampler(
+                self._get_step_matrix(n_fast_steps))
+        if run:
+            return self.sampler.run(**kwargs)
+
+    def _get_step_matrix(self, n_fast_steps):
+        fast_sampled_params = self.prior.get_fast_sampled_params(
+            self.likelihood.waveform_generator.fast_params)
+
+        step_matrix = np.ones((n_fast_steps, len(self.prior.sampled_params)),
+                              bool)
+        step_matrix[1:] = [par in fast_sampled_params
+                           for par in self.prior.sampled_params]
+        return step_matrix
+
+    def _cubetransform(self, cube):
+        return self.prior.cubemin + cube * self.prior.cubesize
+
+    def _lnprior_ultranest(self, par_vals):
+        return self.prior.lnprior(*par_vals)
+
+    def _lnposterior_ultranest(self, par_vals):
+        lnprior, standard_par_dic = self.prior.lnprior_and_transform(*par_vals)
+        return lnprior + self.likelihood.lnlike(standard_par_dic)
