@@ -44,7 +44,7 @@ class EventMetadata:
     about events, and provides a method `get_event_data()` to create
     EventData instances.
     """
-    def __init__(self, eventname, tgps, mchirp_range, qmin=1/20,
+    def __init__(self, eventname, tgps, mchirp_range, q_min=1/20,
                  t_interval=128., tcoarse=None, bank_id=None,
                  fnames=None, load_data=False, triggerlist_kw=None):
         """
@@ -56,7 +56,7 @@ class EventMetadata:
         eventname: string.
         tgps: float, GPS time.
         mchirp_range: 2-tuple of floats, chirp-mass range to probe.
-        qmin: float between 0 and 1, minimum mass ratio to probe.
+        q_min: float between 0 and 1, minimum mass ratio to probe.
         t_interval: length of data to analyze, in seconds.
         tcoarse: where to "center" the event (at `tgps`) in seconds,
                  defaults to `t_interval / 2`
@@ -77,7 +77,7 @@ class EventMetadata:
         self.eventname = eventname
         self.tgps = tgps
         self.mchirp_range = mchirp_range
-        self.qmin = qmin
+        self.q_min = q_min
         self.t_interval = t_interval
         self.tcoarse = t_interval / 2 if tcoarse is None else tcoarse
 
@@ -104,7 +104,7 @@ class EventMetadata:
         """
         dic = {key: getattr(self, key)
                for key in ['eventname', 'detector_names', 'tgps', 'tcoarse',
-                           'mchirp_range', 'qmin']}
+                           'mchirp_range', 'q_min']}
 
         triggerlists = self.load_triggerlists()
 
