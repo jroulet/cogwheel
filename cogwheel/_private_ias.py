@@ -202,7 +202,10 @@ EventMetadata('GW170817A', 1186974184.716, (25, 100), bank_id=('BBH', 4, 2),
 
 EventMetadata('GW150914', 1126259462.4, (10, 50), bank_id=('BBH', 3, 0))
 EventMetadata('GW151012', 1128678900.4, (15, 21), bank_id=('BBH', 2, 0))
-EventMetadata('GW151226', 1135136350.6, (9.5, 10.5), bank_id=('BBH', 1, 0))
+EventMetadata('GW151226', 1135136350.6, (9.5, 10.5), bank_id=('BBH', 1, 0),
+              fnames=(
+    "/data/srolsen/GW/gw_pe/GW151226_reweighting_triggerlists/trigH1notch1024.json",
+    "/data/srolsen/GW/gw_pe/GW151226_reweighting_triggerlists/trigL1notch1024.json"))
 EventMetadata('GW170104', 1167559936.6, (10, 50), bank_id=('BBH', 3, 0))
 EventMetadata('GW170608', 1180922494.5, (8.2, 9), bank_id=('BBH', 1, 0),
               fnames=(
