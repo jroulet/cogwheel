@@ -420,7 +420,9 @@ class PyMultinest:
                        + cube[i] * self.posterior.cubesize[i])
 
     def _lnprior_pymultinest(self, par_vals, ndim, nparams, lnew):
-        return self.posterior.prior.lnprior(*par_vals)
+        return self.posterior.prior.lnprior(
+            *[par_vals[i] for i in range(self.nparams)])
 
     def _lnposterior_pymultinest(self, par_vals, ndim, nparams, lnew):
-        return self.posterior.lnposterior(*par_vals)
+        return self.posterior.lnposterior(
+            *[par_vals[i] for i in range(self.nparams)])
