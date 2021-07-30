@@ -211,8 +211,9 @@ class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin, Prior):
     range_dic = {'t_refdet': NotImplemented}
     conditioned_on = ['ra', 'dec']
 
-    def __init__(self, *, t_range, tgps, ref_det_name, **kwargs):
-        self.range_dic = {'t_refdet': t_range}
+    def __init__(self, *, tgps, ref_det_name, t0_refdet=0, dt0=.07,
+                 **kwargs):
+        self.range_dic = {'t_refdet': (t0_refdet - dt0, t0_refdet + dt0)}
         super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
 
         self.tgps = tgps
@@ -229,7 +230,8 @@ class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin, Prior):
         Return dictionary with keyword arguments to reproduce the class
         instance.
         """
-        return {'t_range': self.range_dic['t_refdet'],
+        return {'t0_refdet': np.mean(self.range_dic['t_refdet']),
+                'dt0': np.diff(self.range_dic['t_refdet'])[0],
                 'tgps': self.tgps,
                 'ref_det_name': self.ref_det_name}
 

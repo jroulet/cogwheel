@@ -246,9 +246,9 @@ class CombinedPrior(Prior):
 
             * `range_dic`
             * `standard_params`
-            * `periodic_params`
             * `conditioned_on`
             * `lnprior_and_transform`
+            * `periodic_params`
             * `lnprior`
             * `transform`
             * `inverse_transform`

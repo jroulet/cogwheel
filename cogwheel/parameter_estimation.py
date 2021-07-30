@@ -23,6 +23,10 @@ from . import waveform
 posterior_registry = {}
 
 
+class PosteriorError(Exception):
+    """Error raised by the Posterior class."""
+
+
 def read_json(json_filename):
     """
     Load an instance of `Posterior` previously saved with `to_json()`,
@@ -67,6 +71,11 @@ class Posterior:
             Instance of `likelihood.RelativeBinningLikelihood`,
             provides likelihood computation.
         """
+        if set(prior_instance.standard_params) != set(
+                likelihood_instance.waveform_generator.params):
+            raise PosteriorError('The prior and likelihood instances passed '
+                                 'have incompatible parameters.')
+
         self.prior = prior_instance
         self.likelihood = likelihood_instance
 
@@ -138,13 +147,13 @@ class Posterior:
         # before doing any expensive maximization
         sig = inspect.signature(prior_class.__init__)
         required_pars = {
-            name for name, par in sig.parameters.items()
-            if par.default is inspect._empty
-            and par.kind not in (inspect.Parameter.VAR_POSITIONAL,
-                                 inspect.Parameter.VAR_KEYWORD)
+            name for name, parameter in sig.parameters.items()
+            if parameter.default is inspect._empty
+            and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL,
+                                       inspect.Parameter.VAR_KEYWORD)
             and name != 'self'}
         event_data_keys = {'mchirp_range', 'tgps', 'q_min'}
-        bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref'}
+        bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref', 't0_refdet'}
         missing_pars = (required_pars - event_data_keys - bestfit_keys
                         - set(kwargs))
         if missing_pars:

@@ -176,7 +176,7 @@ class CBCLikelihood:
                                          **kwargs)
         return asd_drift
 
-    # @_check_bounds
+    @_check_bounds
     def lnlike_fft(self, par_dic):
         """
         Return log likelihood computed on the FFT grid, without using
@@ -351,15 +351,17 @@ class ReferenceWaveformFinder(CBCLikelihood):
 
         # Optimize time, sky location, polarization, distance
         self._optimize_t_refdet(par_dic, ref_det_name, tc_rng)
-        self._optimize_skyloc(par_dic, ref_det_name, detector_pair, seed)
+        t0_refdet = self._optimize_skyloc(par_dic, ref_det_name, detector_pair,
+                                          seed)
         self._optimize_phase_and_distance(par_dic)
 
         return {'par_dic': par_dic,
                 'f_ref': f_ref,
                 'ref_det_name': ref_det_name,
-                'detector_pair': detector_pair}
+                'detector_pair': detector_pair,
+                't0_refdet': t0_refdet}
 
-    # @_check_bounds
+    @_check_bounds
     def lnlike_max_amp_phase_time(self, par_dic, tc_rng,
                                   return_by_detectors=False):
         """
@@ -375,7 +377,7 @@ class ReferenceWaveformFinder(CBCLikelihood):
             return lnl
         return np.sum(lnl)
 
-    # @_check_bounds
+    @_check_bounds
     def lnlike_max_amp_phase(self, par_dic, ret_amp_phase_bf=False,
                              det_inds=...):
         """
@@ -449,19 +451,21 @@ class ReferenceWaveformFinder(CBCLikelihood):
         maximized over amplitude and phase.
         t_geocenter is readjusted so as to leave t_refdet unchanged.
         Update 't_geocenter', ra', 'dec' entries of `par_dic` inplace.
+        Return `t_refdet`, best fit time [s] relative to `tgps` at the
+        reference detector.
         """
         skyloc = SkyLocAngles(detector_pair, self.event_data.tgps)
-        time_transformer = UniformTimePrior(t_range=(np.nan, np.nan),
-                                            tgps=self.event_data.tgps,
-                                            ref_det_name=ref_det_name)
-        t_refdet = time_transformer.inverse_transform(
+        time_transformer = UniformTimePrior(tgps=self.event_data.tgps,
+                                            ref_det_name=ref_det_name,
+                                            t0_refdet=np.nan, dt0=np.nan)
+        t0_refdet = time_transformer.inverse_transform(
             **{key: par_dic[key] for key in ['t_geocenter', 'ra', 'dec']}
             )['t_refdet']  # Will hold t_refdet fixed
 
 
         def lnlike_skyloc(thetanet, phinet):
             ra, dec = skyloc.thetaphinet_to_radec(thetanet, phinet)
-            t_geocenter_dic = time_transformer.transform(t_refdet=t_refdet,
+            t_geocenter_dic = time_transformer.transform(t_refdet=t0_refdet,
                                                          ra=ra, dec=dec)
             return self.lnlike_max_amp_phase(
                 {**par_dic, 'ra': ra, 'dec': dec, **t_geocenter_dic})
@@ -473,10 +477,11 @@ class ReferenceWaveformFinder(CBCLikelihood):
         par_dic['ra'], par_dic['dec'] = skyloc.thetaphinet_to_radec(thetanet,
                                                                     phinet)
         par_dic['t_geocenter'] = time_transformer.transform(
-            t_refdet=t_refdet, ra=par_dic['ra'], dec=par_dic['dec']
+            t_refdet=t0_refdet, ra=par_dic['ra'], dec=par_dic['dec']
             )['t_geocenter']
 
         print(f'Set sky location, lnL = {-result.fun}')
+        return t0_refdet
 
     def _optimize_phase_and_distance(self, par_dic):
         """
@@ -588,7 +593,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
 
         self._lnlike_evaluations = 0
 
-    # @_check_bounds
+    @_check_bounds
     def lnlike(self, par_dic, bypass_tests=False):
         """
         Return log likelihood using relative binning. Apply relative-
@@ -761,7 +766,6 @@ class RelativeBinningLikelihood(CBCLikelihood):
         This implementation is simple but slow and memory-intensive.
         Could be faster by using a sparse basis for the splines.
         Could use less memory with a `for` loop instead of `np.dot`.
-
 
         Parameters
         ----------
