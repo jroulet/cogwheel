@@ -95,44 +95,50 @@ def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
 
     par_dic['f_ref'] = f_ref
 
-    f0_is_0 = int(f[0] == 0)  # In this case we will set h(f=0) = 0
-    par_dic['f'] = lal.CreateREAL8Sequence(len(f) - f0_is_0)
-    par_dic['f'].data = f[f0_is_0:]
+    f0_is_0 = f[0] == 0  # In this case we will set h(f=0) = 0
+    par_dic['f'] = lal.CreateREAL8Sequence(len(f))
+    par_dic['f'].data = f
+    if f0_is_0:
+        par_dic['f'].data[0] = par_dic['f'].data[1]
 
     try:
         hplus, hcross = lalsimulation.SimInspiralChooseFDWaveformSequence(
             *[par_dic[par] for par in lal_params])
     except:
-        print('Error when calling LAL at these parameters: ', par_dic)
+        print('Error while calling LAL at these parameters: ', par_dic)
         raise
-    hplus_hcross = np.zeros((2, len(f)), dtype=np.complex_)
-    hplus_hcross[0, f0_is_0:] = hplus.data.data
-    hplus_hcross[1, f0_is_0:] = hcross.data.data
+    hplus_hcross = np.stack([hplus.data.data, hcross.data.data])
+    if f0_is_0:
+        hplus_hcross[:, 0] = 0
     return hplus_hcross
 
 
 class WaveformGenerator:
     """
     Class that provides methods for generating frequency domain
-    waveforms.
+    waveforms, in terms of `hplus, hcross` or projected onto detectors.
     "Fast" and "slow" parameters are distinguished: the last waveform
-    call is cached and can be computed fast if only fast parameters
+    calls are cached and can be computed fast when only fast parameters
     are changed.
     The boolean attribute `disable_precession` can be set to ignore
     inplane spins.
     """
-    params = {
-        'm1', 'm2', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z', 'l1', 'l2',
-        'iota', 'vphi', 'ra', 'dec', 'psi', 't_geocenter', 'd_luminosity'}
+    params = sorted(['d_luminosity', 'dec', 'iota', 'l1', 'l2', 'm1', 'm2',
+                     'psi', 'ra', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z',
+                     't_geocenter', 'vphi'])
 
-    fast_params = {'ra', 'dec', 'psi', 't_geocenter', 'd_luminosity'}
-    slow_params = params - fast_params
+    fast_params = sorted(['d_luminosity', 'dec', 'psi', 'ra', 't_geocenter'])
+    slow_params = sorted(set(params) - set(fast_params))
 
-    _projection_params = {'ra', 'dec', 'psi', 't_geocenter'}
-    _waveform_params = params - _projection_params
+    _projection_params = sorted(['dec', 'psi', 'ra', 't_geocenter'])
+    _waveform_params = sorted(set(params) - set(_projection_params))
+
+    _s1xy_inds = list(map(slow_params.index, ['s1x', 's1y']))
+    _s2xy_inds = list(map(slow_params.index, ['s2x', 's2y']))
 
     def __init__(self, detector_names, tgps, tcoarse, approximant, f_ref,
-                 harmonic_modes=None, disable_precession=False):
+                 harmonic_modes=None, disable_precession=False,
+                 n_cached_waveforms=1):
         super().__init__()
 
         self.detector_names = detector_names
@@ -142,15 +148,10 @@ class WaveformGenerator:
         self.harmonic_modes = harmonic_modes
         self.disable_precession = disable_precession
         self.f_ref = f_ref
+        self.n_cached_waveforms = n_cached_waveforms
 
         self.n_slow_evaluations = 0
         self.n_fast_evaluations = 0
-        self.cache = {'slow_par_dic': {},
-                      'approximant': None,
-                      'f_ref': None,
-                      'f': None,
-                      'harmonic_modes_by_m': {},
-                      'hplus_hcross_0': None}
 
     @property
     def approximant(self):
@@ -193,6 +194,21 @@ class WaveformGenerator:
         self._harmonic_modes_by_m = defaultdict(list)
         for l, m in self._harmonic_modes:
             self._harmonic_modes_by_m[m].append((l, m))
+
+    @property
+    def n_cached_waveforms(self):
+        return self._n_cached_waveforms
+
+    @n_cached_waveforms.setter
+    def n_cached_waveforms(self, n_cached_waveforms):
+        self.cache = [{'slow_par_vals': np.array(np.nan),
+                       'approximant': None,
+                       'f_ref': None,
+                       'f': None,
+                       'harmonic_modes_by_m': {},
+                       'hplus_hcross_0': None}
+                       for _ in range(n_cached_waveforms)]
+        self._n_cached_waveforms = n_cached_waveforms
 
     def get_strain_at_detectors(self, f, par_dic, by_m=False):
         """
@@ -249,36 +265,35 @@ class WaveformGenerator:
         if self.disable_precession:
             waveform_par_dic.update(ZERO_INPLANE_SPINS)
 
-        slow_par_dic = {par: waveform_par_dic[par] for par in self.slow_params}
-        self._rotate_inplane_spins(slow_par_dic, waveform_par_dic['vphi'])
+        slow_par_vals = np.array([waveform_par_dic[par]
+                                  for par in self.slow_params])
+        self._rotate_inplane_spins(slow_par_vals, waveform_par_dic['vphi'])
 
-        # Are cached parameters the same?
-        same_cache = (
-            all(np.isclose(self.cache['slow_par_dic'].get(par, np.nan),
-                           slow_par_dic[par]) for par in self.slow_params)
-            and self.cache['approximant'] == self.approximant
-            and self.cache['f_ref'] == self.f_ref
-            and np.array_equal(self.cache['f'], f)
-            and self.cache['harmonic_modes_by_m'] == self._harmonic_modes_by_m)
-        if same_cache:
-            hplus_hcross_0 = self.cache['hplus_hcross_0']
+        # Attempt to use cached waveform for fast evaluation:
+        matching_cache = self._matching_cache(slow_par_vals, f)
+        if matching_cache:
+            hplus_hcross_0 = matching_cache['hplus_hcross_0']
             self.n_fast_evaluations += 1
         else:
             # Compute the waveform mode by mode and update cache.
-            waveform_par_dic_0 = {**slow_par_dic,
-                                  'd_luminosity': 1., 'vphi': 0.}
+            waveform_par_dic_0 = dict(zip(self.slow_params, slow_par_vals),
+                                      d_luminosity=1., vphi=0.)
             # hplus_hcross_0 is a (n_m x 2 x n_frequencies) arrays with
             # sum_l (hlm+, hlmx), at vphi=0, d_luminosity=1Mpc.
             hplus_hcross_0 = np.array(
                 [compute_hplus_hcross(self.f_ref, f, waveform_par_dic_0,
                                       self.approximant, modes)
                  for modes in self._harmonic_modes_by_m.values()])
-            self.cache = {'approximant': self.approximant,
-                          'f_ref': self.f_ref,
-                          'f': f,
-                          'slow_par_dic': slow_par_dic,
-                          'harmonic_modes_by_m': self._harmonic_modes_by_m,
-                          'hplus_hcross_0': hplus_hcross_0}
+            cache_dic = {'approximant': self.approximant,
+                         'f_ref': self.f_ref,
+                         'f': f,
+                         'slow_par_vals': slow_par_vals,
+                         'harmonic_modes_by_m': self._harmonic_modes_by_m,
+                         'hplus_hcross_0': hplus_hcross_0}
+            # Append new cached waveform and delete oldest
+            self.cache.append(cache_dic)
+            self.cache.pop(0)
+
             self.n_slow_evaluations += 1
 
         # hplus_hcross is a (n_m x 2 x n_frequencies) array.
@@ -289,15 +304,36 @@ class WaveformGenerator:
             return hplus_hcross
         return np.sum(hplus_hcross, axis=0)
 
-    @staticmethod
-    def _rotate_inplane_spins(dic, vphi):
+    def _rotate_inplane_spins(self, slow_par_vals, vphi):
         """
         Rotate inplane spins (s1x, s1y) and (s2x, s2y) by an angle `vphi`,
-        inplace in `dic`.
+        inplace in `slow_par_vals`.
+        `slow_par_vals` must be a numpy array whose values correspond to
+        `self.slow_params`.
         """
         sin_vphi = np.sin(vphi)
         cos_vphi = np.cos(vphi)
         rotation = np.array([[cos_vphi, -sin_vphi],
                              [sin_vphi, cos_vphi]])
-        dic['s1x'], dic['s1y'] = rotation @ np.array([dic['s1x'], dic['s1y']])
-        dic['s2x'], dic['s2y'] = rotation @ np.array([dic['s2x'], dic['s2y']])
+        slow_par_vals[self._s1xy_inds] = (rotation
+                                          @ slow_par_vals[self._s1xy_inds])
+        slow_par_vals[self._s2xy_inds] = (rotation
+                                          @ slow_par_vals[self._s2xy_inds])
+        # dic['s1x'], dic['s1y'] = rotation @ np.array([dic['s1x'], dic['s1y']])
+        # dic['s2x'], dic['s2y'] = rotation @ np.array([dic['s2x'], dic['s2y']])
+
+    def _matching_cache(self, slow_par_vals, f, eps=1e-6):
+        """
+        Return entry of the cache that matches the requested waveform, or
+        `False` if none of the cached waveforms matches that requested.
+        """
+        for cache_dic in self.cache[ : : -1]:
+            if (np.linalg.norm(slow_par_vals-cache_dic['slow_par_vals']) < eps
+                    and cache_dic['approximant'] == self.approximant
+                    and cache_dic['f_ref'] == self.f_ref
+                    and np.array_equal(cache_dic['f'], f)
+                    and cache_dic['harmonic_modes_by_m']
+                        == self._harmonic_modes_by_m):
+                return cache_dic
+
+        return False
