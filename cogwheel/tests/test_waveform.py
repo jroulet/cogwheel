@@ -4,10 +4,10 @@ import itertools
 from unittest import TestCase, main
 import numpy as np
 
-from cogwheel import waveform, DETECTORS
+from cogwheel import waveform, gw_utils
 
 DETECTOR_PAIRS = [''.join(pair)
-                  for pair in itertools.combinations(DETECTORS, 2)]
+                  for pair in itertools.combinations(gw_utils.DETECTORS, 2)]
 
 
 def get_random_init_parameters():
@@ -59,7 +59,7 @@ def get_random_par_dic(aligned_spin=False, tides=False):
 
     par_dic['d_luminosity'] = np.random.uniform(10, 1e3)
 
-    assert set(par_dic) == waveform.WaveformGenerator.params
+    assert sorted(par_dic) == waveform.WaveformGenerator.params
     return par_dic
 
 

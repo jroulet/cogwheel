@@ -44,9 +44,9 @@ def safe_std(arr, max_contiguous_low=100, expected_high=1.,
     """
     Compute the standard deviation of a real array rejecting outliers.
     Outliers may be:
-        * Values too high to be likely to come from white Gaussian noise.
-        * A contiguous array of values too low to come from white Gaussian
-          noise (likely from a hole).
+      * Values too high to be likely to come from white Gaussian noise.
+      * A contiguous array of values too low to come from white Gaussian
+        noise (likely from a hole).
     Once outliers are identified, an extra amount of nearby samples
     is rejected for safety.
     max_contiguous_low: How many contiguous samples below 1 sigma to
@@ -176,7 +176,7 @@ class CBCLikelihood:
                                          **kwargs)
         return asd_drift
 
-    @_check_bounds
+    # @_check_bounds
     def lnlike_fft(self, par_dic):
         """
         Return log likelihood computed on the FFT grid, without using
@@ -234,7 +234,7 @@ class CBCLikelihood:
 
         Parameters
         ----------
-        h_f: ndet x nfft array with normalized frequency domain waveform.
+        h_f: ndet x nfft array, normalized frequency domain waveform.
 
         Return
         ------
@@ -324,8 +324,8 @@ class ReferenceWaveformFinder(CBCLikelihood):
         Does not use relative binning so it can be used to find
         a fiducial relative binning waveform.
 
-        First maximize likelihood incoherently w.r.t. intrinsic parameters
-        using mchirp, eta, chieff.
+        First maximize likelihood incoherently w.r.t. intrinsic
+        parameters using mchirp, eta, chieff.
         Then maximize likelihood w.r.t. extrinsic parameters, leaving
         the intrinsic fixed.
         """
@@ -359,7 +359,7 @@ class ReferenceWaveformFinder(CBCLikelihood):
                 'ref_det_name': ref_det_name,
                 'detector_pair': detector_pair}
 
-    @_check_bounds
+    # @_check_bounds
     def lnlike_max_amp_phase_time(self, par_dic, tc_rng,
                                   return_by_detectors=False):
         """
@@ -375,7 +375,7 @@ class ReferenceWaveformFinder(CBCLikelihood):
             return lnl
         return np.sum(lnl)
 
-    @_check_bounds
+    # @_check_bounds
     def lnlike_max_amp_phase(self, par_dic, ret_amp_phase_bf=False,
                              det_inds=...):
         """
@@ -588,7 +588,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
 
         self._lnlike_evaluations = 0
 
-    @_check_bounds
+    # @_check_bounds
     def lnlike(self, par_dic, bypass_tests=False):
         """
         Return log likelihood using relative binning. Apply relative-
@@ -598,12 +598,11 @@ class RelativeBinningLikelihood(CBCLikelihood):
             self.fbin, par_dic, by_m=True)
 
         # Sum over m and f axes, leave det ax unsummed to apply asd_drift.
-        d_h = np.sum(np.real(self._d_h_weights * h_fbin.conj()), axis=(0, -1))
+        d_h = (self._d_h_weights * h_fbin.conj()).real.sum(axis=(0, -1))
 
         m_inds, mprime_inds = self._get_m_mprime_inds()
-        h_h = np.sum(np.real(self._h_h_weights
-                             * h_fbin[m_inds] * h_fbin[mprime_inds].conj()),
-                     axis=(0, -1))
+        h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
+               ).real.sum(axis=(0, -1)))
 
         lnl = np.sum((d_h - h_h/2) * self.asd_drift**-2)
 
@@ -618,6 +617,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
                 raise ReferenceWaveformOutperformedError(
                     f'lnl = {lnl}, lnl_0 = {self._lnl_0}, par_dic = {par_dic}')
             self.par_dic_0 = par_dic  # Update relative binning solution
+            lnl = self._lnl_0
 
         if (self._lnlike_evaluations
                 % self.tolerance_params['check_relative_binning_every'] == 0):
@@ -685,8 +685,8 @@ class RelativeBinningLikelihood(CBCLikelihood):
     @property
     def spline_degree(self):
         """
-        Integer between 1 and 5, degree of the spline used to approximate
-        waveform ratios.
+        Integer between 1 and 5, degree of the spline used to
+        interpolate waveform ratios.
         """
         return self._spline_degree
 
@@ -713,15 +713,14 @@ class RelativeBinningLikelihood(CBCLikelihood):
         Update `asd_drift` using the reference waveform.
         The summary data `self._d_h_weights` and `self._d_h_weights` are
         such that:
-            (d|h) ~= sum(self._d_h_weights * conj(h_fbin)) / asd_drift**2
-            (h|h) ~= sum(self._h_h_weights * np.abs(h_fbin)**2)
-                     / asd_drift**2
+            (d|h) ~= sum(_d_h_weights * conj(h_fbin)) / asd_drift^2
+            (h|h) ~= sum(_h_h_weights * abs(h_fbin)^2) / asd_drift^2
 
         # TODO: maybe enforce a minimum amplitude for h_0?
         """
-        basis_splines = [
-            InterpolatedUnivariateSpline(self.fbin, y_i, k=self.spline_degree)
-            for y_i in np.eye(len(self.fbin))]
+        basis_splines = [InterpolatedUnivariateSpline(
+            self.fbin, y_i, k=self.spline_degree, ext='zeros')
+                         for y_i in np.eye(len(self.fbin))]
         self._splines = np.transpose([basis_spline(self.event_data.frequencies)
                                       for basis_spline in basis_splines])
         h0_f = self._get_h_f(self.par_dic_0, by_m=True)
@@ -759,19 +758,21 @@ class RelativeBinningLikelihood(CBCLikelihood):
             summary_weights * r(fbin)
         which is the exact result of replacing `r(f)` by a spline that
         interpolates it at `fbin`.
+        This implementation is simple but slow and memory-intensive.
+        Could be faster by using a sparse basis for the splines.
+        Could use less memory with a `for` loop instead of `np.dot`.
+
 
         Parameters
         ----------
-        integrand_by_bins:
-            g(f) in the above notation (the oscillatory part of the
-            integrand), in the form of a list with one element per bin,
-            each element is an array where the last axis corresponds to
-            the FFT frequency grid.
+        integrand: g(f) in the above notation (the oscillatory part of
+                   the integrand), array whose last axis corresponds to
+                   the fft frequency grid.
 
         Return
         ------
-        summary_weights: array shaped like `integrand` except the last axis
-                         now correponds to the frequency bins.
+        summary_weights: array shaped like `integrand` except the last
+                         axis now correponds to the frequency bins.
         """
         return 4 * self.event_data.df * np.dot(integrand, self._splines)
 

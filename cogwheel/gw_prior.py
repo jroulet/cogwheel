@@ -34,6 +34,9 @@ class RegisteredPriorMixin:
         """Validate subclass and register it in prior_registry."""
         check_inheritance_order(cls, Prior, RegisteredPriorMixin)
 
+        if cls.conditioned_on:
+            raise GWPriorError('Only register fully defined priors.')
+
         prior_registry[cls.__name__] = cls
 
 

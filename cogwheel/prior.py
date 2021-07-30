@@ -85,12 +85,8 @@ class Prior(ABC):
 
         self._check_range_dic()
 
-        self.ndim = len(self.range_dic)
-        self.cubemin = np.array(
-            [self.range_dic[par][0] for par in self.sampled_params])
-        self.cubemax = np.array(
-            [self.range_dic[par][1] for par in self.sampled_params])
-        self.cubecenter = (self.cubemax + self.cubemin) / 2
+        self.cubemin = np.array([rng[0] for rng in self.range_dic.values()])
+        self.cubemax = np.array([rng[1] for rng in self.range_dic.values()])
         self.cubesize = self.cubemax - self.cubemin
         self.log_volume = np.log(np.prod(self.cubesize))
 
@@ -98,11 +94,6 @@ class Prior(ABC):
     def sampled_params(self):
         """List of sampled parameter names."""
         return list(self.range_dic)
-
-    @utils.ClassProperty
-    def periodic(self):
-        """List of booleans, whether samped parameters are periodic."""
-        return [par in self.periodic_params for par in self.sampled_params]
 
     @utils.ClassProperty
     @abstractmethod
@@ -255,6 +246,7 @@ class CombinedPrior(Prior):
 
             * `range_dic`
             * `standard_params`
+            * `periodic_params`
             * `conditioned_on`
             * `lnprior_and_transform`
             * `lnprior`
@@ -515,8 +507,7 @@ class IdentityTransformMixin:
         """
         par_dic.update(dict(zip(self.sampled_params + self.conditioned_on,
                                 par_vals)))
-        return {par: val for par, val in par_dic.items()
-                if par in self.standard_params}
+        return {par: par_dic[par] for par in self.standard_params}
 
     inverse_transform = transform
 

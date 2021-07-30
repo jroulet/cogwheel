@@ -6,7 +6,8 @@ import numpy as np
 
 import lal
 
-from cogwheel import gw_prior, DETECTORS
+from cogwheel import gw_prior
+from cogwheel.gw_utils import DETECTORS
 
 
 DETECTOR_PAIRS = [''.join(pair)
@@ -27,8 +28,9 @@ def get_random_init_parameters():
         )
 
 
-def gen_random_pars(prior):
-    return prior.cubemin + prior.cubesize * np.random.uniform(size=prior.ndim)
+def gen_random_par_dic(prior):
+    r = np.random.uniform(size=len(prior.sampled_params))
+    return dict(zip(prior.sampled_params, prior.cubemin + r * prior.cubesize))
 
 
 class PriorTestCase(TestCase):
@@ -41,13 +43,13 @@ class PriorTestCase(TestCase):
         for prior_class in gw_prior.prior_registry.values():
             init_params = get_random_init_parameters()
             prior = prior_class(**init_params)
-            par_vals = gen_random_pars(prior)
-            par_vals_ = list(
-                prior.inverse_transform(**prior.transform(*par_vals)).values())
-            assert np.allclose(par_vals, par_vals_), (
+            par_dic = gen_random_par_dic(prior)
+            par_dic_ = prior.inverse_transform(**prior.transform(**par_dic))
+            assert np.allclose(list(par_dic.values()),
+                               list(par_dic.values())), (
                 f'{prior} initialized with {init_params} does not have '
                 '`transform` inverse to `inverse_transform`:\n'
-                f'{par_vals} != {par_vals_}.')
+                f'{par_dic} != {par_dic_}.')
 
     def test_periodicity(self):
         """
@@ -57,24 +59,22 @@ class PriorTestCase(TestCase):
         for prior_class in gw_prior.prior_registry.values():
             init_params = get_random_init_parameters()
             prior = prior_class(**init_params)
-            for i_par in prior.periodic_inds:
-                if prior.sampled_params[i_par] in prior.standard_params:
+            for par in prior.periodic_params:
+                if par in prior.standard_params:
                     continue  # Identity transforms don't apply mod period
-                sampled_par_vals = gen_random_pars(prior)
-                sampled_par_vals_shifted = sampled_par_vals.copy()
-                sampled_par_vals_shifted[i_par] += prior.cubesize[i_par]
+                par_dic = gen_random_par_dic(prior)
+                par_dic_shifted = par_dic.copy()
+                period = prior.cubesize[prior.sampled_params.index(par)]
+                par_dic_shifted[par] += period
 
-                standard_par_dic = prior.transform(*sampled_par_vals)
-                standard_par_dic_shifted = prior.transform(*sampled_par_vals_shifted)
+                standard_par_dic = prior.transform(**par_dic)
+                standard_par_dic_shifted = prior.transform(**par_dic_shifted)
 
                 assert np.allclose(list(standard_par_dic.values()),
                                    list(standard_par_dic_shifted.values())), (
-                    f'Parameter {i_par} of {prior} ({prior.sampled_params[i_par]}) '
-                    f'does not have period {prior.cubesize[i_par]}:\n\n'
-                    'Sampled parameters: '
-                    f'{dict(zip(prior.sampled_params, sampled_par_vals))}\n\n'
-                    'Sampled parameters shifted: '
-                    f'{dict(zip(prior.sampled_params, sampled_par_vals_shifted))}\n\n'
+                    f'Parameter {par} of {prior} does not have period {period}'
+                    f'\n\nSampled parameters: {par_dic}\n\n'
+                    f'Sampled parameters shifted: {par_dic_shifted}\n\n'
                     f'Standard parameters: {standard_par_dic}\n\n'
                     f'Standard parameters shifted: {standard_par_dic_shifted}')
 
