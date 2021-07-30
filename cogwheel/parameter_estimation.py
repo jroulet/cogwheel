@@ -304,7 +304,6 @@ class FoldedPosterior(Posterior, ABC):
         self.likelihood.waveform_generator.n_cached_waveforms \
             = 2**n_slow_folded
 
-
         # Overwrite lnposterior method
         self._lnposterior_no_folding = self.lnposterior
         sig = inspect.signature(self.prior.transform)
@@ -343,8 +342,8 @@ class FoldedPosterior(Posterior, ABC):
         posterior_registry[cls.__name__] = cls
 
 
-class FoldedIASPosterior(FoldedPosterior):
-    """Works both with `IASPrior` and `AlignedIASPrior`."""
+class FoldedInclinationAndAzimuthPosterior(FoldedPosterior):
+    """Map the 4 points (+-cosiota, +-phinet_hat)"""
     folded_params = ['cosiota', 'phinet_hat']
 
 
