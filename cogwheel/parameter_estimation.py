@@ -101,7 +101,7 @@ class Posterior:
 
     @classmethod
     def from_event(cls, event, approximant, prior_class, fbin=None,
-                   pn_phase_tol=.1, disable_precession=False,
+                   pn_phase_tol=.05, disable_precession=False,
                    harmonic_modes=None, tolerance_params=None, seed=0,
                    **kwargs):
         """
