@@ -1,7 +1,7 @@
 """Generate strain waveforms and project them onto detectors."""
 
-import numpy as np
 from collections import defaultdict
+import numpy as np
 
 import lal
 import lalsimulation
@@ -176,6 +176,7 @@ class WaveformGenerator:
 
     @property
     def harmonic_modes(self):
+        """List of `(l, m)` pairs."""
         return self._harmonic_modes
 
     @harmonic_modes.setter
@@ -197,6 +198,7 @@ class WaveformGenerator:
 
     @property
     def n_cached_waveforms(self):
+        """Nonnegative integer, number of cached waveforms."""
         return self._n_cached_waveforms
 
     @n_cached_waveforms.setter
@@ -207,7 +209,7 @@ class WaveformGenerator:
                        'f': None,
                        'harmonic_modes_by_m': {},
                        'hplus_hcross_0': None}
-                       for _ in range(n_cached_waveforms)]
+                      for _ in range(n_cached_waveforms)]
         self._n_cached_waveforms = n_cached_waveforms
 
     def get_strain_at_detectors(self, f, par_dic, by_m=False):
@@ -297,7 +299,7 @@ class WaveformGenerator:
             self.n_slow_evaluations += 1
 
         # hplus_hcross is a (n_m x 2 x n_frequencies) array.
-        m_arr = np.array(list(self._harmonic_modes_by_m)).reshape(-1, 1, 1)
+        m_arr = np.array(list(self._harmonic_modes_by_m)).reshape((-1, 1, 1))
         hplus_hcross = (np.exp(1j * m_arr * waveform_par_dic['vphi'])
                         / waveform_par_dic['d_luminosity'] * hplus_hcross_0)
         if by_m:
@@ -332,8 +334,8 @@ class WaveformGenerator:
                     and cache_dic['approximant'] == self.approximant
                     and cache_dic['f_ref'] == self.f_ref
                     and np.array_equal(cache_dic['f'], f)
-                    and cache_dic['harmonic_modes_by_m']
-                        == self._harmonic_modes_by_m):
+                    and (cache_dic['harmonic_modes_by_m']
+                         == self._harmonic_modes_by_m)):
                 return cache_dic
 
         return False

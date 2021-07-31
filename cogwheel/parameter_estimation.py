@@ -1,12 +1,10 @@
 """Sample posterior distributions."""
 
-import copy
 import inspect
 import itertools
 import json
 import os
 import numpy as np
-from abc import ABC, abstractmethod
 from scipy import special
 
 import ultranest
@@ -21,6 +19,12 @@ from . import utils
 from . import waveform
 
 posterior_registry = {}
+
+
+class RegisteredPosteriorMixin:
+    """Register subclasses in `posterior_registry`."""
+    def __init_subclass__(cls):
+        posterior_registry[cls.__name__] = cls
 
 
 class PosteriorError(Exception):
@@ -55,7 +59,7 @@ def read_json(json_filename):
     return posterior_class(prior_instance, likelihood_instance)
 
 
-class Posterior:
+class Posterior(RegisteredPosteriorMixin):
     """
     Class that instantiates a prior and a likelihood and provides
     methods for sampling the posterior distribution.
@@ -79,12 +83,9 @@ class Posterior:
         self.prior = prior_instance
         self.likelihood = likelihood_instance
 
-        # These are overwritten by `FoldedPosterior`
-        self.range_dic = self.prior.range_dic
+        self.cubemin = self.prior.cubemin.copy()
+        self.cubesize = self.prior.cubesize.copy()
         self.periodic_params = self.prior.periodic_params
-        self.cubemin = self.prior.cubemin
-        self.cubemax = self.prior.cubemax
-        self.cubesize  = self.prior.cubesize
 
         # Transform signature is only known at init, so define lnposterior here
         def lnposterior(*args, **kwargs):
@@ -246,14 +247,7 @@ class Posterior:
         os.system(f'chmod {file_permissions} {event_data_filename}')
 
 
-posterior_registry['Posterior'] = Posterior
-
-
-class FoldedPosteriorError(Exception):
-    """Errors raised by FoldedPosterior class"""
-
-
-class FoldedPosterior(Posterior, ABC):
+class FoldedPosterior(Posterior, RegisteredPosteriorMixin):
     """
     A posterior distribution that has been folded in parameter space.
     This means that some ("folded") dimensions are sampled over half
@@ -262,47 +256,26 @@ class FoldedPosterior(Posterior, ABC):
     The folded posterior distribution is defined as the sum of the
     original posterior over all `2**n_folds` mapped points.
     This is intended to reduce the number of modes in the posterior.
-    This class has an abstract attribute `folded_params` (overriden by
-    subclasses).
     """
-    @utils.ClassProperty
-    @staticmethod
-    @abstractmethod
-    def folded_params():
-        """List of folded parameter names."""
-        return []
-
     def __init__(self, prior_instance, likelihood_instance):
-        if not (set(self.folded_params) <= set(prior_instance.sampled_params)):
-            raise FoldedPosteriorError(
-                'Attempted to instantiate a prior that does not match folded '
-                f'parameters {self.folded_params}.')
-
         super().__init__(prior_instance, likelihood_instance)
 
         # Half range for folder parameters
-        # TODO find a better way of handling this
-        self.range_dic = copy.deepcopy(self.range_dic)
-        for par in self.folded_params:
-            self.range_dic[par][1] = np.mean(self.range_dic[par])
-        self.cubemin = np.array([rng[0] for rng in self.range_dic.values()])
-        self.cubemax = np.array([rng[1] for rng in self.range_dic.values()])
-        self.cubesize = self.cubemax - self.cubemin
+        self._folded_inds = [self.prior.sampled_params.index(par)
+                             for par in self.prior.foldable_params]
+        self.cubesize[self._folded_inds] /= 2
 
         # Folded parameters lose their periodicity
         self.periodic_params = [par for par in self.periodic_params
-                                if par not in self.folded_params]
+                                if par not in self.prior.foldable_params]
 
-        self._folded_inds = [self.prior.sampled_params.index(par)
-                             for par in self.folded_params]
-
-        # Increase n_cached_waveforms to guarantee that fast moves remain fast
+        # Increase `n_cached_waveforms` to ensure fast moves remain fast
         fast_sampled_params = self.prior.get_fast_sampled_params(
             self.likelihood.waveform_generator.fast_params)
-        n_slow_folded = np.count_nonzero([par not in fast_sampled_params
-                                          for par in self.folded_params])
+        n_slow_folded = len(set(self.prior.foldable_params)
+                            - set(fast_sampled_params))
         self.likelihood.waveform_generator.n_cached_waveforms \
-            = 2**n_slow_folded
+            = 2 ** n_slow_folded
 
         # Overwrite lnposterior method
         self._lnposterior_no_folding = self.lnposterior
@@ -327,33 +300,30 @@ class FoldedPosterior(Posterior, ABC):
         with the different ways to unfold parameters.
         """
         original_values = par_values[self._folded_inds]
-        unfolded_values = (self.prior.cubemin[self._folded_inds]
-                           + self.prior.cubemax[self._folded_inds]
+        unfolded_values = (2 * (self.cubemin[self._folded_inds]
+                                + self.cubesize[self._folded_inds])
                            - original_values)
 
-        unfolded = np.array([par_values] * 2**len(self.folded_params))
+        unfolded = np.array([par_values] * 2**len(self._folded_inds))
         unfolded[:, self._folded_inds] = list(itertools.product(
             *zip(original_values, unfolded_values)))
 
         return unfolded
 
-    def __init_subclass__(cls):
-        """Register subclasses in `posterior_registry`."""
-        posterior_registry[cls.__name__] = cls
-
-
-class FoldedInclinationAndAzimuthPosterior(FoldedPosterior):
-    """Map the 4 points (+-cosiota, +-phinet_hat)"""
-    folded_params = ['cosiota', 'phinet_hat']
-
 
 class Ultranest:
+    """
+    Sample a posterior using Ultranest.
+    (Doesn't work well yet)
+    """
     def __init__(self, posterior):
         self.posterior = posterior
         self.sampler = None
+        print("Warning: I couldn't produce reasonable results with this class")
 
     def instantiate_sampler(self, run=False, *, prior_only=False,
                             n_fast_steps=8, **kwargs):
+        """Set up `self.sampler`."""
         lnprob = (self._lnprior_ultranest if prior_only
                   else self._lnposterior_ultranest)
 
@@ -367,7 +337,7 @@ class Ultranest:
             = ultranest.stepsampler.SpeedVariableRegionSliceSampler(
                 self._get_step_matrix(n_fast_steps))
         if run:
-            return self.sampler.run(**kwargs)
+            self.sampler.run(**kwargs)
 
     def _get_step_matrix(self, n_steps):
         """
@@ -396,13 +366,16 @@ class Ultranest:
     def _lnposterior_ultranest(self, par_vals):
         return self.posterior.lnposterior(*par_vals)
 
+
 class PyMultinest:
+    """Sample a posterior using PyMultinest."""
     def __init__(self, posterior):
         self.posterior = posterior
-        self.nparams = len(self.posterior.range_dic)
+        self._nparams = len(self.posterior.cubemin)
 
     def run_pymultinest(self, rundir, prior_only=False, n_live_points=400,
                         tol=.1):
+        """Make a directory to save results and run pymultinest."""
         rundir = rundir.rstrip('/') + '/'
 
         lnprob = (self._lnprior_pymultinest if prior_only
@@ -411,26 +384,27 @@ class PyMultinest:
         wrapped_params = [self.posterior.prior.sampled_params.index(par)
                           for par in self.posterior.periodic_params]
 
-        umask = os.umask(0o022)  # Change permissions to 755 (rwxr-xr-x)
-        os.mkdir(rundir)
-        os.umask(umask)  # Restore previous default permissions
+        if not os.path.exists(rundir):
+            umask = os.umask(0o022)  # Change permissions to 755 (rwxr-xr-x)
+            os.mkdir(rundir)
+            os.umask(umask)  # Restore previous default permissions
 
         pymultinest.run(
-            lnprob, self._cubetransform, self.nparams,
+            lnprob, self._cubetransform, self._nparams,
             outputfiles_basename=rundir, wrapped_params=wrapped_params,
             n_live_points=n_live_points, evidence_tolerance=tol)
 
         os.system(f'chmod 666 {rundir}*')
 
-    def _cubetransform(self, cube, ndim, npars):
-        for i in range(self.nparams):
+    def _cubetransform(self, cube, *_):
+        for i in range(self._nparams):
             cube[i] = (self.posterior.cubemin[i]
                        + cube[i] * self.posterior.cubesize[i])
 
-    def _lnprior_pymultinest(self, par_vals, ndim, nparams, lnew):
+    def _lnprior_pymultinest(self, par_vals, *_):
         return self.posterior.prior.lnprior(
-            *[par_vals[i] for i in range(self.nparams)])
+            *[par_vals[i] for i in range(self._nparams)])
 
-    def _lnposterior_pymultinest(self, par_vals, ndim, nparams, lnew):
+    def _lnposterior_pymultinest(self, par_vals, *_):
         return self.posterior.lnposterior(
-            *[par_vals[i] for i in range(self.nparams)])
+            *[par_vals[i] for i in range(self._nparams)])

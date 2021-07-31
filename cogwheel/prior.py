@@ -58,8 +58,9 @@ class Prior(ABC):
                     of another prior.
     periodic_params: List of names of sampled parameters that are
                      periodic.
-    periodic_inds: List of indices of sampled parameters that are
-                   periodic.
+    foldable_params: List of names of sampled parameters that are well
+                     suited for folding (for details, see
+                     `parameter_estimation.FoldedPosterior`)
 
     Methods
     -------
@@ -78,16 +79,16 @@ class Prior(ABC):
                        parameters. Provided by the subclass.
     """
 
-    periodic_params = []
     conditioned_on = []
+    periodic_params = []
+    foldable_params = []
 
     def __init__(self, **kwargs):
 
         self._check_range_dic()
-
         self.cubemin = np.array([rng[0] for rng in self.range_dic.values()])
-        self.cubemax = np.array([rng[1] for rng in self.range_dic.values()])
-        self.cubesize = self.cubemax - self.cubemin
+        cubemax = np.array([rng[1] for rng in self.range_dic.values()])
+        self.cubesize = cubemax - self.cubemin
         self.log_volume = np.log(np.prod(self.cubesize))
 
     @utils.ClassProperty
@@ -159,6 +160,17 @@ class Prior(ABC):
             if not hasattr(value, '__len__') or len(value) != 2:
                 raise PriorError(f'`range_dic` {self.range_dic} needs to have '
                                  'ranges defined as pair of floats.')
+
+            missing = set(self.periodic_params) - self.range_dic.keys()
+            if missing:
+                raise PriorError('Periodic parameters are missing from '
+                                 f'`range_dic`: {", ".join(missing)}')
+
+            missing = set(self.foldable_params) - self.range_dic.keys()
+            if missing:
+                raise PriorError('Foldable parameters are missing from '
+                                 f'`range_dic`: {", ".join(missing)}')
+
             self.range_dic[key] = np.asarray(value, dtype=np.float_)
 
     @staticmethod
@@ -247,10 +259,11 @@ class CombinedPrior(Prior):
             * `range_dic`
             * `standard_params`
             * `conditioned_on`
-            * `lnprior_and_transform`
             * `periodic_params`
+            * `foldable_params`
             * `lnprior`
             * `transform`
+            * `lnprior_and_transform`
             * `inverse_transform`
 
         which are used to override the corresponding attributes and
@@ -262,8 +275,6 @@ class CombinedPrior(Prior):
                           for par in prior_class.sampled_params]
         standard_params = [par for prior_class in cls.prior_classes
                            for par in prior_class.standard_params]
-        periodic_params = [par for prior_class in cls.prior_classes
-                           for par in prior_class.periodic_params]
 
         # Check that the provided prior_classes can be combined:
         if len(sampled_params) != len(set(sampled_params)):
@@ -365,7 +376,10 @@ class CombinedPrior(Prior):
 
         cls.range_dic = range_dic
         cls.standard_params = standard_params
-        cls.periodic_params = periodic_params
+        cls.periodic_params = [par for prior_class in cls.prior_classes
+                               for par in prior_class.periodic_params]
+        cls.foldable_params = [par for prior_class in cls.prior_classes
+                               for par in prior_class.foldable_params]
         cls.conditioned_on = conditioned_on
         cls.lnprior_and_transform = lnprior_and_transform
         cls.lnprior = lnprior

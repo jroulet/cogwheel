@@ -151,6 +151,7 @@ class IsotropicInclinationPrior(UniformPriorMixin, Prior):
     """Uniform-in-cosine prior for the binary's inclination."""
     standard_params = ['iota']
     range_dic = {'cosiota': (-1, 1)}
+    foldable_params = ['cosiota']
 
     def transform(self, cosiota):
         """cos(inclination) to inclination."""
@@ -175,6 +176,7 @@ class IsotropicSkyLocationPrior(UniformPriorMixin, Prior):
                  'phinet_hat': (0, 2*np.pi)}
     periodic_params = ['phinet_hat']
     conditioned_on = ['iota']
+    foldable_params = ['phinet_hat']
 
     def __init__(self, *, detector_pair, tgps, **kwargs):
         super().__init__(detector_pair=detector_pair, tgps=tgps,
@@ -413,6 +415,7 @@ class UniformDiskInplaneSpinsPrior(UniformPriorMixin, Prior):
 
     def transform(self, cums1r_s1z, s1phi_hat, cums2r_s2z, s2phi_hat,
                   s1z, s2z, vphi, iota):
+        """Spin prior cumulatives to spin components."""
         s1x, s1y = self._spin_transform(cums1r_s1z, s1phi_hat, s1z, vphi, iota)
         s2x, s2y = self._spin_transform(cums2r_s2z, s2phi_hat, s2z, vphi, iota)
         return {'s1x': s1x,
@@ -429,6 +432,7 @@ class UniformDiskInplaneSpinsPrior(UniformPriorMixin, Prior):
         return cumsr_sz, sphi_hat
 
     def inverse_transform(self, s1x, s1y, s2x, s2y, s1z, s2z, vphi, iota):
+        """Spin components to spin prior cumulatives."""
         cums1r_s1z, s1phi_hat = self._inverse_spin_transform(s1x, s1y, s1z,
                                                              vphi, iota)
         cums2r_s2z, s2phi_hat = self._inverse_spin_transform(s2x, s2y, s2z,
@@ -458,6 +462,7 @@ class ZeroTidalDeformabilityPrior(FixedPrior):
 # Default priors for the full set of variables, for convenience.
 
 class IASPrior(CombinedPrior, RegisteredPriorMixin):
+    """Precessing, flat in chieff."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
@@ -471,6 +476,7 @@ class IASPrior(CombinedPrior, RegisteredPriorMixin):
 
 
 class AlignedSpinIASPrior(CombinedPrior, RegisteredPriorMixin):
+    """Aligned spin, flat in chieff."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
