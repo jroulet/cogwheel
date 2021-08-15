@@ -96,9 +96,7 @@ class EventData:
         self.blued_strain = self.wht_filter**2 * self.strain
 
     def to_npz(self, *, filename=None, overwrite=False):
-        """
-        Save class as `.npz` file in `DATADIR`.
-        """
+        """Save class as `.npz` file (by default in `DATADIR`)."""
         filename = filename or self.get_filename(self.eventname)
         if not overwrite and os.path.isfile(filename):
             raise FileExistsError(f'{filename} already exists. '
@@ -107,9 +105,7 @@ class EventData:
 
     @classmethod
     def from_npz(cls, eventname=None, *, filename=None):
-        """
-        Load a `.npz` file previously saved with `to_npz()`.
-        """
+        """Load a `.npz` file previously saved with `to_npz()`."""
         if eventname:
             if filename:
                 raise ValueError('Pass exactly one of `eventname`, `filename`')

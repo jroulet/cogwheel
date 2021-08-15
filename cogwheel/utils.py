@@ -6,7 +6,7 @@ import numpy as np
 from scipy.optimize import _differentialevolution
 
 
-class ClassProperty(object):
+class ClassProperty:
     """
     Can be used like `@property` but for class attributes instead of
     instance attributes.
@@ -21,30 +21,29 @@ class ClassProperty(object):
 class NumpyEncoder(json.JSONEncoder):
     """
     Encoder for numpy data types.
-    From github.com/hmallen/numpyencoder
     """
-    def default(self, obj):
-        if isinstance(obj, (np.int_, np.intc, np.intp, np.int8,
+    def default(self, o):
+        if isinstance(o, (np.int_, np.intc, np.intp, np.int8,
                             np.int16, np.int32, np.int64, np.uint8,
                             np.uint16, np.uint32, np.uint64)):
-            return int(obj)
+            return int(o)
 
-        elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
-            return float(obj)
+        if isinstance(o, (np.float_, np.float16, np.float32, np.float64)):
+            return float(o)
 
-        elif isinstance(obj, (np.complex_, np.complex64, np.complex128)):
-            return {'real': obj.real, 'imag': obj.imag}
+        if isinstance(o, (np.complex_, np.complex64, np.complex128)):
+            return {'real': o.real, 'imag': o.imag}
 
-        elif isinstance(obj, (np.ndarray,)):
-            return obj.tolist()
+        if isinstance(o, np.ndarray):
+            return o.tolist()
 
-        elif isinstance(obj, (np.bool_)):
-            return bool(obj)
+        if isinstance(o, np.bool_):
+            return bool(o)
 
-        elif isinstance(obj, (np.void)):
+        if isinstance(o, np.void):
             return None
 
-        return json.JSONEncoder.default(self, obj)
+        return super().default(o)
 
 
 def differential_evolution_with_guesses(

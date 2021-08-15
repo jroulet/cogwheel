@@ -84,12 +84,10 @@ class Prior(ABC):
     foldable_params = []
 
     def __init__(self, **kwargs):
-
         self._check_range_dic()
         self.cubemin = np.array([rng[0] for rng in self.range_dic.values()])
         cubemax = np.array([rng[1] for rng in self.range_dic.values()])
         self.cubesize = cubemax - self.cubemin
-        self.log_volume = np.log(np.prod(self.cubesize))
 
     @utils.ClassProperty
     def sampled_params(self):
@@ -486,7 +484,7 @@ class UniformPriorMixin:
         Take `self.sampled_params + self.conditioned_on` parameters and
         return a float.
         """
-        return - self.log_volume
+        return - np.log(np.prod(self.cubesize))
 
     def __init_subclass__(cls):
         """
