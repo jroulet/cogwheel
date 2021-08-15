@@ -31,18 +31,26 @@ class PosteriorError(Exception):
     """Error raised by the Posterior class."""
 
 
-def read_json(json_filename):
+def read_json(json_path):
     """
     Load an instance of `Posterior` previously saved with `to_json()`,
     figuring out the correct subclass.
 
     Parameters
     ----------
-    json_filename: string, path to a json file.
+    json_path: string, path to a json file. It can be a directory if it
+               contains a single json file.
     """
-    with open(json_filename, 'r') as json_file:
-        dic = json.load(json_file)
+    if os.path.isdir(json_path):
+        jsons = [fname for fname in os.listdir(json_path)
+                 if fname.endswith('.json')]
+        if len(jsons) != 1:
+            raise ValueError(
+                f'{json_path!r} contains {len(jsons)} json files.')
+        json_path = os.path.join(json_path, jsons[0])
 
+    with open(json_path, 'r') as json_file:
+        dic = json.load(json_file)
 
     prior_instance = gw_prior.prior_registry[dic['prior_class']](
         **dic['prior_kwargs'])
@@ -50,7 +58,7 @@ def read_json(json_filename):
     waveform_generator = waveform.WaveformGenerator(
         **dic['waveform_generator_kwargs'])
     event_data = bookkeeping.EventData.from_npz(
-        filename=os.path.join(os.path.dirname(json_filename),
+        filename=os.path.join(os.path.dirname(json_path),
                               dic['event_data_filename']))
     likelihood_instance = likelihood.RelativeBinningLikelihood(
         event_data, waveform_generator, **dic['relative_binning_kwargs'])
@@ -371,6 +379,9 @@ class PyMultinest:
     """Sample a posterior using PyMultinest."""
     def __init__(self, posterior):
         self.posterior = posterior
+        # PyMultinest doesn't know how to use fast parameters, don't cache
+        self.posterior.likelihood.waveform_generator.n_cached_waveforms = 0
+
         self._nparams = len(self.posterior.cubemin)
 
     def run_pymultinest(self, rundir, prior_only=False, n_live_points=400,
