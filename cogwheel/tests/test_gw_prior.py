@@ -15,6 +15,7 @@ DETECTOR_PAIRS = [''.join(pair)
 
 
 def get_random_init_parameters():
+    """Return dictionary of keyword arguments to initialize priors."""
     return dict(
         mchirp_range=np.sort(np.random.uniform(2, 40, 2)),
         q_min=np.random.uniform(.01, .9),
@@ -29,13 +30,15 @@ def get_random_init_parameters():
 
 
 def gen_random_par_dic(prior):
+    """Return dirctionary of sampled parameter values."""
     r = np.random.uniform(size=len(prior.sampled_params))
     return dict(zip(prior.sampled_params, prior.cubemin + r * prior.cubesize))
 
 
 class PriorTestCase(TestCase):
     """Class to test `Prior` subclasses."""
-    def test_inverse_transform(self):
+    @staticmethod
+    def test_inverse_transform():
         """
         Test that `prior.transform()` and `prior.inverse_transform()`
         are mutual inverses.
@@ -51,7 +54,8 @@ class PriorTestCase(TestCase):
                 '`transform` inverse to `inverse_transform`:\n'
                 f'{par_dic} != {par_dic_}.')
 
-    def test_periodicity(self):
+    @staticmethod
+    def test_periodicity():
         """
         Test that sampled parameters and sampled parameters shifted by
         their period produced the same standard parameters.

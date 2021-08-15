@@ -7,6 +7,7 @@ import lal
 import lalsimulation
 
 from . import gw_utils
+from . import utils
 
 ZERO_INPLANE_SPINS = {'s1x': 0.,
                       's1y': 0.,
@@ -113,7 +114,7 @@ def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
     return hplus_hcross
 
 
-class WaveformGenerator:
+class WaveformGenerator(utils.JSONMixin):
     """
     Class that provides methods for generating frequency domain
     waveforms, in terms of `hplus, hcross` or projected onto detectors.

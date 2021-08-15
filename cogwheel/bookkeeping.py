@@ -1,6 +1,7 @@
 """Store data about GW events."""
 
 import os
+import pathlib
 import numpy as np
 
 from . import utils
@@ -8,7 +9,7 @@ from . import utils
 DATADIR = os.path.join(os.path.dirname(__file__), 'data')
 
 
-class EventData:
+class EventData(utils.JSONMixin):
     """
     Class to save an event's frequency-domain strain data and psd for
     multiple detectors, as well as some metadata.
@@ -95,13 +96,16 @@ class EventData:
         self.wht_filter = self.fd_filter / np.sqrt(self.psd)
         self.blued_strain = self.wht_filter**2 * self.strain
 
-    def to_npz(self, *, filename=None, overwrite=False):
+    def to_npz(self, *, filename=None, overwrite=False,
+               permissions=0o644):
         """Save class as `.npz` file (by default in `DATADIR`)."""
         filename = filename or self.get_filename(self.eventname)
         if not overwrite and os.path.isfile(filename):
             raise FileExistsError(f'{filename} already exists. '
                                   'Pass `overwrite=True` to overwrite.')
-        np.savez(filename, **utils.get_init_dic(self))
+        np.savez(filename, **self.get_init_dict())
+        pathlib.Path(filename).chmod(permissions)
+
 
     @classmethod
     def from_npz(cls, eventname=None, *, filename=None):

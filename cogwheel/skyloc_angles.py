@@ -6,10 +6,10 @@ import numpy as np
 
 import lal
 
+from . import utils
 from . gw_utils import DETECTORS
 
-
-class SkyLocAngles:
+class SkyLocAngles(utils.JSONMixin):
     """
     Class that defines a coordinate system for sky localization.
     Converts back and forth between (ra, dec) and (thetanet,

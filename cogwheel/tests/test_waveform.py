@@ -26,7 +26,7 @@ def get_random_par_dic(aligned_spin=False, tides=False):
     `waveform.WaveformGenerator.params`.
     """
     par_dic = {}
-    
+
     par_dic['m2'], par_dic['m1'] = np.sort(np.random.uniform(1, 100, 2))
 
     s1tilt, s2tilt = np.arccos(np.random.uniform(-1, 1, 2))
@@ -65,7 +65,8 @@ def get_random_par_dic(aligned_spin=False, tides=False):
 
 class WaveformGeneratorTestCase(TestCase):
     """Class to test `WaveformGenerator`."""
-    def test_vphi_and_distance(self):
+    @staticmethod
+    def test_vphi_and_distance():
         """
         Test that `WaveformGenerator` correctly implements `vphi` and
         `d_luminosity` as fast parameters.
@@ -82,7 +83,7 @@ class WaveformGeneratorTestCase(TestCase):
                                     for par in wfg._waveform_params}
 
                 wfg.f_ref = np.random.uniform(50, 250)
-                
+
                 f = np.linspace(0, 1e3, 500)
 
                 # These two ways should give the same answer:
@@ -98,7 +99,7 @@ class WaveformGeneratorTestCase(TestCase):
                                    atol=1e-3*h_100hz, rtol=1e-3), (
                     '`waveform.WaveformGenerator.get_waveform()` gives a '
                     'different answer than `waveform.compute_waveform()` for '
-                    f'waveform_par_dic={waveform_par_dic}\nf_ref={f_ref}\n'
+                    f'waveform_par_dic={waveform_par_dic}\nf_ref={wfg.f_ref}\n'
                     f'f=\n{f}\napproximant={approximant}\n'
                     f'harmonic_modes={harmonic_modes}\nNumber of waveforms '
                     f'tried before failure={i}.\nThe relative difference is\n'

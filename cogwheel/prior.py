@@ -24,7 +24,7 @@ class PriorError(Exception):
     """Base class for all exceptions in this module"""
 
 
-class Prior(ABC):
+class Prior(ABC, utils.JSONMixin):
     """"
     Abstract base class to define priors for Bayesian parameter
     estimation, together with coordinate transformations from "sampled"
@@ -172,7 +172,7 @@ class Prior(ABC):
             self.range_dic[key] = np.asarray(value, dtype=np.float_)
 
     @staticmethod
-    def get_init_dic():
+    def get_init_dict():
         """
         Return dictionary with keyword arguments to reproduce the class
         instance. Subclasses should override this method if they require
@@ -183,14 +183,14 @@ class Prior(ABC):
     def __init_subclass__(cls):
         """
         Check that subclasses that change the `__init__` signature also
-        define their own `get_init_dic` method."""
+        define their own `get_init_dict` method."""
         super().__init_subclass__()
 
         if (inspect.signature(cls.__init__)
                 != inspect.signature(Prior.__init__)
-                and cls.get_init_dic is Prior.get_init_dic):
+                and cls.get_init_dict is Prior.get_init_dict):
             raise PriorError(
-                f'{cls.__name__} must override `get_init_dic` method.')
+                f'{cls.__name__} must override `get_init_dict` method.')
 
 
     def __repr__(self):
@@ -418,13 +418,13 @@ class CombinedPrior(Prior):
         func.__signature__ = inspect.signature(func).replace(
             parameters=parameters)
 
-    def get_init_dic(self):
+    def get_init_dict(self):
         """
         Return dictionary with keyword arguments to reproduce the class
         instance.
         """
-        init_dics = [subprior.get_init_dic() for subprior in self.subpriors]
-        return utils.merge_dictionaries_safely(init_dics)
+        init_dicts = [subprior.get_init_dict() for subprior in self.subpriors]
+        return utils.merge_dictionaries_safely(init_dicts)
 
     @classmethod
     def get_fast_sampled_params(cls, fast_standard_params):
@@ -490,6 +490,7 @@ class UniformPriorMixin:
         """
         Check that UniformPriorMixin comes before Prior in the MRO.
         """
+        super().__init_subclass__()
         check_inheritance_order(cls, UniformPriorMixin, Prior)
 
 

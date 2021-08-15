@@ -1,7 +1,11 @@
 """Utility functions."""
 
+import glob
+import importlib
 import inspect
 import json
+import os
+import pathlib
 import numpy as np
 from scipy.optimize import _differentialevolution
 
@@ -16,34 +20,6 @@ class ClassProperty:
 
     def __get__(self, inst, cls):
         return self.func(cls)
-
-
-class NumpyEncoder(json.JSONEncoder):
-    """
-    Encoder for numpy data types.
-    """
-    def default(self, o):
-        if isinstance(o, (np.int_, np.intc, np.intp, np.int8,
-                            np.int16, np.int32, np.int64, np.uint8,
-                            np.uint16, np.uint32, np.uint64)):
-            return int(o)
-
-        if isinstance(o, (np.float_, np.float16, np.float32, np.float64)):
-            return float(o)
-
-        if isinstance(o, (np.complex_, np.complex64, np.complex128)):
-            return {'real': o.real, 'imag': o.imag}
-
-        if isinstance(o, np.ndarray):
-            return o.tolist()
-
-        if isinstance(o, np.bool_):
-            return bool(o)
-
-        if isinstance(o, np.void):
-            return None
-
-        return super().default(o)
 
 
 def differential_evolution_with_guesses(
@@ -78,16 +54,6 @@ class _DifferentialEvolutionSolverWithGuesses(
         self.init_population_array(population)
 
 
-def get_init_dic(class_instance):
-    """
-    Return a dictionary that can be used to recreate a class instance.
-    Requires that all init parameters are stored as instance attributes
-    with the same name.
-    """
-    keys = list(inspect.signature(class_instance.__init__).parameters)
-    return {key: getattr(class_instance, key) for key in keys}
-
-
 def merge_dictionaries_safely(dics):
     """
     Merge multiple dictionaries into one.
@@ -101,3 +67,156 @@ def merge_dictionaries_safely(dics):
                 raise ValueError(f'Found incompatible values for {key}')
         merged.update(dic)
     return merged
+
+
+# ----------------------------------------------------------------------
+# JSON I/O:
+
+class_registry = {}
+
+
+def read_json(json_path):
+    """
+    Return a class instance that was saved to json.
+    """
+    # Accept a directory that contains a single json file
+    if os.path.isdir(json_path):
+        jsons = glob.glob(os.path.join(json_path, '*.json'))
+        if njsons := len(jsons) != 1:
+            raise ValueError(f'{json_path!r} contains {njsons} json files.')
+        json_path = jsons[0]
+
+    with open(json_path) as json_file:
+        obj = json.load(json_file, cls=CogwheelDecoder,
+                        dirname=os.path.dirname(json_path))
+
+    return obj
+
+
+class JSONMixin:
+    """
+    Provide JSON output to subclasses.
+    Register subclasses in `class_registry`.
+
+    Define a method `get_init_dict` which works for classes that store
+    their init parameters as attributes with the same names. If this is
+    not the case, the subclass should override `get_init_dict`.
+    """
+    def to_json(self, dirname, basename=None, *, dir_permissions=0o755,
+                file_permissions=0o644, overwrite=False):
+        """
+        Write class instance to json file.
+        It can then be loaded with `read_json`.
+        """
+        basename = basename or f'{self.__class__.__name__}.json'
+        filename = os.path.join(dirname, basename)
+
+        if not overwrite and os.path.exists(filename):
+            raise FileExistsError(
+                f'{filename} exists. Pass `overwrite=True` to overwrite.')
+
+        pathlib.Path(dirname).mkdir(mode=dir_permissions, parents=True,
+                                    exist_ok=True)
+        with open(filename, 'w') as outfile:
+            json.dump(self, outfile, cls=CogwheelEncoder, dirname=dirname,
+                      file_permissions=file_permissions, overwrite=overwrite,
+                      indent=2)
+        pathlib.Path(filename).chmod(file_permissions)
+
+    def __init_subclass__(cls):
+        """Register subclasses."""
+        super().__init_subclass__()
+        class_registry[cls.__name__] = cls
+
+    def get_init_dict(self):
+        """
+        Return dictionary with keyword arguments to `__init__`.
+        Only works if the class stores its init parameters as attributes
+        with the same names. Otherwise, the subclass should override
+        this method.
+        """
+        keys = list(inspect.signature(self.__init__).parameters)
+        if any(not hasattr(self, key) for key in keys):
+            raise KeyError(
+                f'`{self.__class__.__name__}` must override `get_init_dict` '
+                '(or store its init parameters with the same names).')
+        return {key: getattr(self, key) for key in keys}
+
+
+class NumpyEncoder(json.JSONEncoder):
+    """
+    Encoder for numpy data types.
+    """
+    def default(self, o):
+        if isinstance(o, (np.int_, np.intc, np.intp, np.int8,
+                            np.int16, np.int32, np.int64, np.uint8,
+                            np.uint16, np.uint32, np.uint64)):
+            return int(o)
+
+        if isinstance(o, (np.float_, np.float16, np.float32, np.float64)):
+            return float(o)
+
+        if isinstance(o, (np.complex_, np.complex64, np.complex128)):
+            return {'real': o.real, 'imag': o.imag}
+
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+
+        if isinstance(o, np.bool_):
+            return bool(o)
+
+        if isinstance(o, np.void):
+            return None
+
+        return super().default(o)
+
+
+class CogwheelEncoder(NumpyEncoder):
+    """
+    Encoder for classes in the `cogwheel` package that subclass
+    `JSONMixin`.
+    """
+
+    def __init__(self, dirname=None, file_permissions=0o644,
+                 overwrite=False, **kwargs):
+        super().__init__(**kwargs)
+
+        self.dirname = dirname
+        self.file_permissions = file_permissions
+        self.overwrite = overwrite
+
+    def default(self, o):
+        if o.__class__.__name__ == 'EventData':
+            filename = os.path.join(self.dirname, f'{o.eventname}.npz')
+            o.to_npz(filename=filename, overwrite=self.overwrite,
+                     permissions=self.file_permissions)
+            return {'__cogwheel_class__': o.__class__.__name__,
+                    '__module__': o.__class__.__module__,
+                    'filename': os.path.basename(filename)}
+
+        if o.__class__.__name__ in class_registry:
+            return {'__cogwheel_class__': o.__class__.__name__,
+                    '__module__': o.__class__.__module__,
+                    'init_kwargs': o.get_init_dict()}
+
+        return super().default(o)
+
+
+class CogwheelDecoder(json.JSONDecoder):
+    """
+    Decoder for classes in the `cogwheel` package that subclass
+    `JSONMixin`.
+    """
+    def __init__(self, dirname, **kwargs):
+        self.dirname = dirname
+        super().__init__(object_hook=self._object_hook, **kwargs)
+
+    def _object_hook(self, obj):
+        if isinstance(obj, dict) and '__cogwheel_class__' in obj:
+            importlib.import_module(obj['__module__'])
+            cls = class_registry[obj['__cogwheel_class__']]
+            if cls.__name__ == 'EventData':
+                return cls.from_npz(filename=os.path.join(self.dirname,
+                                                          obj['filename']))
+            return cls(**obj['init_kwargs'])
+        return obj

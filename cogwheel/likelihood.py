@@ -9,6 +9,7 @@ from scipy.optimize import differential_evolution, minimize_scalar
 from scipy.interpolate import InterpolatedUnivariateSpline
 
 from . import gw_utils
+from . import utils
 from . gw_prior import UniformTimePrior
 from . skyloc_angles import SkyLocAngles
 from . waveform import out_of_bounds, TIDES
@@ -103,7 +104,7 @@ def _check_bounds(lnlike_func):
     return new_lnlike_func
 
 
-class CBCLikelihood:
+class CBCLikelihood(utils.JSONMixin):
     """
     Class that accesses the event data and waveform generator; provides
     methods for computing likelihood as a function of compact binary
@@ -801,3 +802,13 @@ class RelativeBinningLikelihood(CBCLikelihood):
                 'Relative-binning tolerance exceeded:\n'
                 f'lnl_rb = {lnl_rb}\nlnl_fft = {lnl_fft}\npar_dic = {par_dic}')
         return lnl_rb, lnl_fft
+
+    def get_init_dict(self):
+        """
+        Return dictionary with keyword arguments to reproduce the class
+        instance.
+        """
+        dic = super().get_init_dict()
+        if {'fbin', 'pn_phase_tol'} < dic.keys():
+            dic['fbin'] = None
+        return dic

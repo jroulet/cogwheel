@@ -9,7 +9,6 @@ import lal
 
 from . import gw_utils
 from . import skyloc_angles
-from . import utils
 
 from . prior import Prior, CombinedPrior, FixedPrior, UniformPriorMixin, \
     IdentityTransformMixin, check_inheritance_order
@@ -32,6 +31,7 @@ class RegisteredPriorMixin:
     """
     def __init_subclass__(cls):
         """Validate subclass and register it in prior_registry."""
+        super().__init_subclass__()
         check_inheritance_order(cls, Prior, RegisteredPriorMixin)
 
         if cls.conditioned_on:
@@ -130,7 +130,7 @@ class UniformDetectorFrameMassesPrior(Prior):
     def lnprior(self, mchirp, lnq):
         return np.log(mchirp * np.cosh(lnq/2)**.4 / self.prior_norm)
 
-    def get_init_dic(self):
+    def get_init_dict(self):
         """
         Return dictionary with keyword arguments to reproduce the class
         instance.
@@ -199,12 +199,12 @@ class IsotropicSkyLocationPrior(UniformPriorMixin, Prior):
         return {'costhetanet': costhetanet,
                 'phinet_hat': phinet_hat}
 
-    def get_init_dic(self):
+    def get_init_dict(self):
         """
         Return dictionary with keyword arguments to reproduce the class
         instance.
         """
-        return utils.get_init_dic(self.skyloc)
+        return self.skyloc.get_init_dict()
 
 
 class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin, Prior):
@@ -227,13 +227,13 @@ class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin, Prior):
     def inverse_transform(self, t_geocenter, ra, dec):
         return {'t_refdet': t_geocenter + self.time_delay_refdet(ra, dec)}
 
-    def get_init_dic(self):
+    def get_init_dict(self):
         """
         Return dictionary with keyword arguments to reproduce the class
         instance.
         """
         return {'t0_refdet': np.mean(self.range_dic['t_refdet']),
-                'dt0': np.diff(self.range_dic['t_refdet'])[0],
+                'dt0': np.diff(self.range_dic['t_refdet'])[0] / 2,
                 'tgps': self.tgps,
                 'ref_det_name': self.ref_det_name}
 
@@ -275,7 +275,7 @@ class UniformPolarizationPrior(ReferenceDetectorMixin, UniformPriorMixin,
                    - np.pi*self.f_ref*t_refdet) % np.pi
         return {'psi_hat': psi_hat}
 
-    def get_init_dic(self):
+    def get_init_dict(self):
         """
         Return dictionary with keyword arguments to reproduce the class
         instance.
@@ -331,7 +331,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
         return np.log(self._conversion_factor(ra, dec, psi, iota, m1, m2)**3
                       * d_hat**2)
 
-    def get_init_dic(self):
+    def get_init_dict(self):
         """
         Return dictionary with keyword arguments to reproduce the class
         instance.

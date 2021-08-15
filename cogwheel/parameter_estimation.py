@@ -2,7 +2,6 @@
 
 import inspect
 import itertools
-import json
 import os
 import numpy as np
 from scipy import special
@@ -11,85 +10,42 @@ import ultranest
 import ultranest.stepsampler
 import pymultinest
 
-
 from . import bookkeeping
 from . import gw_prior
-from . import likelihood
 from . import utils
 from . import waveform
+from . likelihood import RelativeBinningLikelihood, ReferenceWaveformFinder
 
 posterior_registry = {}
-
-
-class RegisteredPosteriorMixin:
-    """Register subclasses in `posterior_registry`."""
-    def __init_subclass__(cls):
-        posterior_registry[cls.__name__] = cls
 
 
 class PosteriorError(Exception):
     """Error raised by the Posterior class."""
 
 
-def read_json(json_path):
-    """
-    Load an instance of `Posterior` previously saved with `to_json()`,
-    figuring out the correct subclass.
-
-    Parameters
-    ----------
-    json_path: string, path to a json file. It can be a directory if it
-               contains a single json file.
-    """
-    if os.path.isdir(json_path):
-        jsons = [fname for fname in os.listdir(json_path)
-                 if fname.endswith('.json')]
-        if len(jsons) != 1:
-            raise ValueError(
-                f'{json_path!r} contains {len(jsons)} json files.')
-        json_path = os.path.join(json_path, jsons[0])
-
-    with open(json_path, 'r') as json_file:
-        dic = json.load(json_file)
-
-    prior_instance = gw_prior.prior_registry[dic['prior_class']](
-        **dic['prior_kwargs'])
-
-    waveform_generator = waveform.WaveformGenerator(
-        **dic['waveform_generator_kwargs'])
-    event_data = bookkeeping.EventData.from_npz(
-        filename=os.path.join(os.path.dirname(json_path),
-                              dic['event_data_filename']))
-    likelihood_instance = likelihood.RelativeBinningLikelihood(
-        event_data, waveform_generator, **dic['relative_binning_kwargs'])
-
-    posterior_class = posterior_registry[dic['posterior_class']]
-    return posterior_class(prior_instance, likelihood_instance)
-
-
-class Posterior(RegisteredPosteriorMixin):
+class Posterior(utils.JSONMixin):
     """
     Class that instantiates a prior and a likelihood and provides
     methods for sampling the posterior distribution.
     """
-    def __init__(self, prior_instance, likelihood_instance):
+    def __init__(self, prior, likelihood):
         """
         Parameters
         ----------
-        prior_instance:
+        prior:
             Instance of `prior.Prior`, provides coordinate
             transformations and priors.
-        likelihood_instance:
-            Instance of `likelihood.RelativeBinningLikelihood`,
-            provides likelihood computation.
+        likelihood:
+            Instance of `likelihood.RelativeBinningLikelihood`, provides
+            likelihood computation.
         """
-        if set(prior_instance.standard_params) != set(
-                likelihood_instance.waveform_generator.params):
+        if set(prior.standard_params) != set(
+                likelihood.waveform_generator.params):
             raise PosteriorError('The prior and likelihood instances passed '
                                  'have incompatible parameters.')
 
-        self.prior = prior_instance
-        self.likelihood = likelihood_instance
+        self.prior = prior
+        self.likelihood = likelihood
 
         self.cubemin = self.prior.cubemin.copy()
         self.cubesize = self.prior.cubesize.copy()
@@ -172,12 +128,12 @@ class Posterior(RegisteredPosteriorMixin):
         aux_waveform_generator = waveform.WaveformGenerator(
             event_data.detector_names, event_data.tgps, event_data.tcoarse,
             approximant, f_ref=20., harmonic_modes=[(2, 2)])
-        bestfit = likelihood.ReferenceWaveformFinder(
+        bestfit = ReferenceWaveformFinder(
             event_data, aux_waveform_generator).find_bestfit_pars()
         waveform_generator = waveform.WaveformGenerator(
             event_data.detector_names, event_data.tgps, event_data.tcoarse,
             approximant, bestfit['f_ref'], harmonic_modes, disable_precession)
-        likelihood_instance = likelihood.RelativeBinningLikelihood(
+        likelihood_instance = RelativeBinningLikelihood(
             event_data, waveform_generator, bestfit['par_dic'], fbin,
             pn_phase_tol, tolerance_params)
 
@@ -204,58 +160,8 @@ class Posterior(RegisteredPosteriorMixin):
 
         return pe_instance
 
-    def to_json(self, outdir, overwrite=True, dir_permissions=755,
-                file_permissions=644):
-        """
-        Save class instance to disk; files that can be loaded later
-        using `Posterior.from_json()`.
-        A directory `outdir` is created if missing, and two files are
-        created in it: 'EventData_{eventname}.npz' and
-        'Posterior_{eventname}.json'.
-        The directory can later be moved since relative paths are used.
 
-        Parameters
-        ----------
-        outdir: string, path to output directory. Will be created if it
-                does not exist.
-        overwrite: bool, whether to overwrite existing files.
-        dir_permissions: passed to `chmod`, permissions to give to the
-                         output directory.
-        file_permissions: permissions to give to the files.
-        """
-        relative_binning_kwargs = {
-            key: getattr(self.likelihood, key) for key
-            in ['par_dic_0', 'fbin', 'pn_phase_tol', 'tolerance_params']}
-        if relative_binning_kwargs['pn_phase_tol']:
-            relative_binning_kwargs.pop('fbin')
-
-        eventname = self.likelihood.event_data.eventname
-
-        dic = {'posterior_class': self.__class__.__name__,
-               'prior_class': self.prior.__class__.__name__,
-               'prior_kwargs': self.prior.get_init_dic(),
-               'waveform_generator_kwargs':  utils.get_init_dic(
-                   self.likelihood.waveform_generator),
-               'relative_binning_kwargs': relative_binning_kwargs,
-               'event_data_filename': f'EventData_{eventname}.npz'}
-
-        if not os.path.isdir(outdir):
-            os.mkdir(outdir)
-            os.system(f'chmod {dir_permissions} {outdir}')
-
-        json_filename = os.path.join(outdir, f'Posterior_{eventname}.json')
-        with open(json_filename, 'w') as outfile:
-            json.dump(dic, outfile, indent=2, cls=utils.NumpyEncoder)
-            outfile.write('\n')
-        os.system(f'chmod {file_permissions} {json_filename}')
-
-        event_data_filename = os.path.join(outdir, dic['event_data_filename'])
-        self.likelihood.event_data.to_npz(filename=event_data_filename,
-                                          overwrite=overwrite)
-        os.system(f'chmod {file_permissions} {event_data_filename}')
-
-
-class FoldedPosterior(Posterior, RegisteredPosteriorMixin):
+class FoldedPosterior(Posterior):
     """
     A posterior distribution that has been folded in parameter space.
     This means that some ("folded") dimensions are sampled over half
@@ -265,8 +171,8 @@ class FoldedPosterior(Posterior, RegisteredPosteriorMixin):
     original posterior over all `2**n_folds` mapped points.
     This is intended to reduce the number of modes in the posterior.
     """
-    def __init__(self, prior_instance, likelihood_instance):
-        super().__init__(prior_instance, likelihood_instance)
+    def __init__(self, prior, likelihood):
+        super().__init__(prior, likelihood)
 
         # Half range for folder parameters
         self._folded_inds = [self.prior.sampled_params.index(par)
@@ -319,7 +225,7 @@ class FoldedPosterior(Posterior, RegisteredPosteriorMixin):
         return unfolded
 
 
-class Ultranest:
+class Ultranest(utils.JSONMixin):
     """
     Sample a posterior using Ultranest.
     (Doesn't work well yet)
@@ -375,7 +281,7 @@ class Ultranest:
         return self.posterior.lnposterior(*par_vals)
 
 
-class PyMultinest:
+class PyMultinest(utils.JSONMixin):
     """Sample a posterior using PyMultinest."""
     def __init__(self, posterior):
         self.posterior = posterior
