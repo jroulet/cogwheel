@@ -13,14 +13,14 @@ PIPELINE_PATH = os.path.abspath(os.path.join(
 sys.path.append(PIPELINE_PATH)
 import triggers_single_detector as trig
 
-from . import bookkeeping
+from . import data
 
 
 event_registry = {}  # EventMetadata instances register themselves here
 
 
 def get_event_data(eventname):
-    """Return `bookkeeping.EventData` instance of the desired event."""
+    """Return `data.EventData` instance of the desired event."""
     return event_registry[eventname].get_event_data()
 
 
@@ -40,7 +40,7 @@ def guess_bank_id(mchirp, i_subbank=0):
 
 class EventMetadata:
     """
-    Lightweight class that can be used for bookkeeping information
+    Lightweight class that can be used for data information
     about events, and provides a method `get_event_data()` to create
     EventData instances.
     """
@@ -96,7 +96,7 @@ class EventMetadata:
 
     def get_event_data(self):
         """
-        Return an instance of `bookkeeping.EventData`.
+        Return an instance of `data.EventData`.
 
         Load a triggerlist corresponding to the event, use it to extract
         frequency domain strain and psd, and combine with the rest of
@@ -115,7 +115,7 @@ class EventMetadata:
         for freq_arr in copies:
             np.testing.assert_array_equal(dic['frequencies'], freq_arr)
 
-        return bookkeeping.EventData(**dic)
+        return data.EventData(**dic)
 
     def load_triggerlists(self):
         """Return triggerlists associated to the event."""

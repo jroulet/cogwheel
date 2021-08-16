@@ -117,7 +117,7 @@ class CBCLikelihood(utils.JSONMixin):
         """
         Parameters
         ----------
-        event_data: Instance of `bookkeeping.EventData`.
+        event_data: Instance of `data.EventData`.
         waveform_generator: Instance of `waveform.WaveformGenerator`.
         """
         # Check consistency between `event_data` and `waveform_generator`:
@@ -549,7 +549,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         """
         Parameters
         ----------
-        event_data: Instance of `bookkeeping.EventData`
+        event_data: Instance of `data.EventData`
         waveform_generator: Instance of `waveform.WaveformGenerator`.
         par_dic_0: dictionary with parameters of the reference waveform,
                    should be close to the maximum likelihood waveform.

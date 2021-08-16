@@ -10,7 +10,7 @@ import ultranest
 import ultranest.stepsampler
 import pymultinest
 
-from . import bookkeeping
+from . import data
 from . import gw_prior
 from . import utils
 from . import waveform
@@ -75,7 +75,7 @@ class Posterior(utils.JSONMixin):
 
         Parameters
         ----------
-        event: Instance of `bookkeeping.EventData` or string with
+        event: Instance of `data.EventData` or string with
                event name.
         approximant: string with approximant name.
         prior_class: string with key from `gw_prior.prior_registry`,
@@ -98,10 +98,10 @@ class Posterior(utils.JSONMixin):
         ------
         Instance of `Posterior`.
         """
-        if isinstance(event, bookkeeping.EventData):
+        if isinstance(event, data.EventData):
             event_data = event
         elif isinstance(event, str):
-            event_data = bookkeeping.EventData.from_npz(event)
+            event_data = data.EventData.from_npz(event)
         else:
             raise ValueError('`event` must be of type `str` or `EventData`')
 
@@ -298,8 +298,8 @@ class PyMultinest(utils.JSONMixin):
         lnprob = (self._lnprior_pymultinest if prior_only
                   else self._lnposterior_pymultinest)
 
-        wrapped_params = [self.posterior.prior.sampled_params.index(par)
-                          for par in self.posterior.periodic_params]
+        wrapped_params = [par in self.posterior.periodic_params
+                          for par in self.posterior.prior.sampled_params]
 
         if not os.path.exists(rundir):
             umask = os.umask(0o022)  # Change permissions to 755 (rwxr-xr-x)
