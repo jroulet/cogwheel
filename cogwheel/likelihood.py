@@ -502,15 +502,16 @@ class ReferenceWaveformFinder(CBCLikelihood):
     def get_best_f_ref(self, par_dic, ref_det_name):
         """
         Return reference frequency that makes phase shifts orthogonal to
-        time shifts.
+        time shifts, rounded to nearest Hz to ease reporting.
         """
         i_refdet = self.event_data.detector_names.index(ref_det_name)
         h_f_refdet = self._get_h_f(par_dic)[i_refdet]
 
         h_white = h_f_refdet * self.event_data.wht_filter
 
-        return (np.linalg.norm(h_white * np.sqrt(self.event_data.frequencies))
-                / np.linalg.norm(h_white))**2
+        return np.round(
+            (np.linalg.norm(h_white * np.sqrt(self.event_data.frequencies))
+             / np.linalg.norm(h_white))**2)
 
 
 TOLERANCE_PARAMS = {'ref_wf_lnl_difference': 1.,
