@@ -90,7 +90,7 @@ class Posterior(utils.JSONMixin):
         harmonic_modes: list of 2-tuples with (l, m) of the harmonic
                         modes to include. Pass `None` to use
                         approximant-dependent defaults per
-                        `waveform.HARMONIC_MODES`.
+                        `waveform.APPROXIMANTS`.
         kwargs: Additional keyword arguments to instantiate the prior
                 class.
 

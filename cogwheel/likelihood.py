@@ -12,7 +12,7 @@ from . import gw_utils
 from . import utils
 from . gw_prior import UniformTimePrior
 from . skyloc_angles import SkyLocAngles
-from . waveform import out_of_bounds, TIDES
+from . waveform import out_of_bounds, APPROXIMANTS
 
 
 class LikelihoodError(Exception):
@@ -145,7 +145,7 @@ class CBCLikelihood(utils.JSONMixin):
         if value is None:
             value = np.ones(len(self.event_data.detector_names))
         elif len(value) != len(self.event_data.detector_names):
-            raise ValueError(f'ASD-drift must match number of detectors.')
+            raise ValueError('ASD-drift must match number of detectors.')
 
         self._asd_drift = np.asarray(value, dtype=np.float_)
 
@@ -648,7 +648,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         fiducial waveform is bounded by `pn_phase_tol` [rad].
         """
         pn_exponents = [-5/3, -2/3, 1]
-        if TIDES[self.waveform_generator.approximant]:
+        if APPROXIMANTS[self.waveform_generator.approximant].tides:
             pn_exponents += [5/3]
         pn_exponents = np.array(pn_exponents)
 

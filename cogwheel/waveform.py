@@ -20,14 +20,23 @@ DEFAULT_PARS = {**ZERO_INPLANE_SPINS,
                 'l1': 0.,
                 'l2': 0.}
 
-HARMONIC_MODES = {'IMRPhenomXPHM': [(2, 2), (2, 1), (3, 3), (3, 2), (4, 4)],
-                  'IMRPhenomD': [(2, 2)]}
+APPROXIMANTS = {}
 
-ALIGNED_SPINS = {'IMRPhenomXPHM': False,
-                 'IMRPhenomD': True}
 
-TIDES = {'IMRPhenomXPHM': False,
-         'IMRPhenomD': False}
+class Approximant:
+    """Bookkeeping of LAL approximants' metadata."""
+    def __init__(self, approximant: str, harmonic_modes: list,
+                 aligned_spins: bool, tides: bool):
+        self.approximant = approximant
+        self.harmonic_modes = harmonic_modes
+        self.aligned_spins = aligned_spins
+        self.tides = tides
+        APPROXIMANTS[approximant] = self
+
+
+Approximant('IMRPhenomD', [(2, 2)], True, False)
+Approximant('IMRPhenomXPHM', [(2, 2), (2, 1), (3, 3), (3, 2), (4, 4)], False,
+            False)
 
 
 def out_of_bounds(par_dic):
@@ -84,8 +93,6 @@ def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
     if harmonic_modes is not None:
         mode_array = lalsimulation.SimInspiralCreateModeArray()
         for l, m in harmonic_modes:
-            assert (l, abs(m)) in HARMONIC_MODES[approximant], \
-                f'Mode ({l}, {m}) not supported by {approximant}.'
             lalsimulation.SimInspiralModeArrayActivateMode(mode_array, l, m)
         lalsimulation.SimInspiralWaveformParamsInsertModeArray(lal_dic,
                                                                mode_array)
@@ -163,13 +170,13 @@ class WaveformGenerator(utils.JSONMixin):
     def approximant(self, app: str):
         """
         Set `approximant` and reset `harmonic_modes` per
-        `HARMONIC_MODES[approximant]`; print a warning that this
-        was done.
-        Raise `ValueError` if `HARMONIC_MODES` does not contain the
+        `APPROXIMANTS[approximant].harmonic_modes`; print a warning that
+        this was done.
+        Raise `ValueError` if `APPROXIMANTS` does not contain the
         requested approximant.
         """
-        if app not in HARMONIC_MODES:
-            raise ValueError(f'Add {app} to `waveform.HARMONIC_MODES`.')
+        if app not in APPROXIMANTS:
+            raise ValueError(f'Add {app} to `waveform.APPROXIMANTS`.')
         self._approximant = app
         self.harmonic_modes = None
         print(f'`approximant` changed to {app}, setting `harmonic_modes` to '
@@ -181,7 +188,7 @@ class WaveformGenerator(utils.JSONMixin):
         return self._harmonic_modes
 
     @harmonic_modes.setter
-    def harmonic_modes(self, modes):
+    def harmonic_modes(self, harmonic_modes):
         """
         Set `self._harmonic_modes` implementing defaults based on the
         approximant, this requires hardcoding which modes are
@@ -191,7 +198,8 @@ class WaveformGenerator(utils.JSONMixin):
         keys are `m` and whose values are a list of `(l, m)` tuples with
         that `m`.
         """
-        self._harmonic_modes = modes or HARMONIC_MODES[self.approximant]
+        self._harmonic_modes \
+            = harmonic_modes or APPROXIMANTS[self.approximant].harmonic_modes
 
         self._harmonic_modes_by_m = defaultdict(list)
         for l, m in self._harmonic_modes:

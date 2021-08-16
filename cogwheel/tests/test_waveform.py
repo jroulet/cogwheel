@@ -20,7 +20,7 @@ def get_random_init_parameters():
         tcoarse=np.random.uniform(0, 128))
 
 
-def get_random_par_dic(aligned_spin=False, tides=False):
+def get_random_par_dic(aligned_spins=False, tides=False):
     """
     Return a dictionary of waveform parameters, per
     `waveform.WaveformGenerator.params`.
@@ -30,7 +30,7 @@ def get_random_par_dic(aligned_spin=False, tides=False):
     par_dic['m2'], par_dic['m1'] = np.sort(np.random.uniform(1, 100, 2))
 
     s1tilt, s2tilt = np.arccos(np.random.uniform(-1, 1, 2))
-    if aligned_spin:
+    if aligned_spins:
         s1tilt, s2tilt = 0, 0
     s1phi, s2phi = np.random.uniform(0, 2*np.pi, 2)
     s1, s2 = np.random.uniform(0, 1, 2)
@@ -71,14 +71,13 @@ class WaveformGeneratorTestCase(TestCase):
         Test that `WaveformGenerator` correctly implements `vphi` and
         `d_luminosity` as fast parameters.
         """
-        for approximant, harmonic_modes in waveform.HARMONIC_MODES.items():
+        for approximant, app_metadata in waveform.APPROXIMANTS.items():
             wfg = waveform.WaveformGenerator(
                 **get_random_init_parameters(), approximant=approximant,
-                harmonic_modes=harmonic_modes, f_ref=None)
+                f_ref=None)
             for i in range(100):
-                par_dic = get_random_par_dic(
-                    waveform.ALIGNED_SPINS[approximant],
-                    waveform.TIDES[approximant])
+                par_dic = get_random_par_dic(app_metadata.aligned_spins,
+                                             app_metadata.tides)
                 waveform_par_dic = {par: par_dic[par]
                                     for par in wfg._waveform_params}
 
@@ -100,8 +99,7 @@ class WaveformGeneratorTestCase(TestCase):
                     '`waveform.WaveformGenerator.get_waveform()` gives a '
                     'different answer than `waveform.compute_waveform()` for '
                     f'waveform_par_dic={waveform_par_dic}\nf_ref={wfg.f_ref}\n'
-                    f'f=\n{f}\napproximant={approximant}\n'
-                    f'harmonic_modes={harmonic_modes}\nNumber of waveforms '
+                    f'f=\n{f}\napproximant={approximant}\nNumber of waveforms '
                     f'tried before failure={i}.\nThe relative difference is\n'
                     f'{np.abs(1 - hplus_hcross[mask] / hplus_hcross_[mask])}.')
 
