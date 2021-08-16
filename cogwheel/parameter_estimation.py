@@ -285,9 +285,6 @@ class PyMultinest(utils.JSONMixin):
     """Sample a posterior using PyMultinest."""
     def __init__(self, posterior):
         self.posterior = posterior
-        # PyMultinest doesn't know how to use fast parameters, don't cache
-        self.posterior.likelihood.waveform_generator.n_cached_waveforms = 0
-
         self._nparams = len(self.posterior.cubemin)
 
     def run_pymultinest(self, rundir, prior_only=False, n_live_points=400,
