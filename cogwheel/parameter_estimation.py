@@ -1,10 +1,16 @@
 """Sample posterior distributions."""
 
+import argparse
 import inspect
 import itertools
+import subprocess
+import sys
 import os
-import numpy as np
+import pathlib
+import tempfile
 from scipy import special
+import numpy as np
+import pandas as pd
 
 import ultranest
 import ultranest.stepsampler
@@ -16,8 +22,6 @@ from . import utils
 from . import waveform
 from . likelihood import RelativeBinningLikelihood, ReferenceWaveformFinder
 
-posterior_registry = {}
-
 
 class PosteriorError(Exception):
     """Error raised by the Posterior class."""
@@ -27,6 +31,14 @@ class Posterior(utils.JSONMixin):
     """
     Class that instantiates a prior and a likelihood and provides
     methods for sampling the posterior distribution.
+
+    Parameter space folding is implemented; this means that some
+    ("folded") dimensions are sampled over half their original range,
+    and a map to the other half of the range is defined by reflecting
+    about the midpoint. The folded posterior distribution is defined as
+    the sum of the original posterior over all `2**n_folds` mapped
+    points. This is intended to reduce the number of modes in the
+    posterior.
     """
     def __init__(self, prior, likelihood):
         """
@@ -34,7 +46,7 @@ class Posterior(utils.JSONMixin):
         ----------
         prior:
             Instance of `prior.Prior`, provides coordinate
-            transformations and priors.
+            transformations, priors, and foldable parameters.
         likelihood:
             Instance of `likelihood.RelativeBinningLikelihood`, provides
             likelihood computation.
@@ -47,22 +59,136 @@ class Posterior(utils.JSONMixin):
         self.prior = prior
         self.likelihood = likelihood
 
-        self.cubemin = self.prior.cubemin.copy()
+        # Half range for folded parameters
+        self._folded_inds = [self.prior.sampled_params.index(par)
+                             for par in self.prior.foldable_params]
         self.cubesize = self.prior.cubesize.copy()
-        self.periodic_params = self.prior.periodic_params
+        self.cubesize[self._folded_inds] /= 2
+
+        # Folded parameters lose their periodicity
+        self.periodic_params = [par for par in self.prior.periodic_params
+                                if par not in self.prior.foldable_params]
+
+        # Increase `n_cached_waveforms` to ensure fast moves remain fast
+        fast_sampled_params = self.prior.get_fast_sampled_params(
+            self.likelihood.waveform_generator.fast_params)
+        n_slow_folded = len(set(self.prior.foldable_params)
+                            - set(fast_sampled_params))
+        self.likelihood.waveform_generator.n_cached_waveforms \
+            = 2 ** n_slow_folded
 
         # Transform signature is only known at init, so define lnposterior here
+        sig = inspect.signature(self.prior.transform)
         def lnposterior(*args, **kwargs):
             """
             Natural logarithm of the posterior probability density in
-            the space of sampled parameters.
+            the space of sampled parameters (does not apply folding).
             """
             lnprior, standard_par_dic = self.prior.lnprior_and_transform(
                 *args, **kwargs)
             return lnprior + self.likelihood.lnlike(standard_par_dic)
 
-        lnposterior.__signature__ = inspect.signature(self.prior.transform)
+        lnposterior.__signature__ = sig
         self.lnposterior = lnposterior
+
+        def lnposteriors_folds(*args, **kwargs):
+            """
+            Take parameter values in the space of folded sampled
+            parameters, and return list of length `2**n_folded_params`
+            with natural logarithm of the posterior probability
+            densities corresponding to the different ways of unfolding.
+            """
+            par_values = np.array(sig.bind(*args, **kwargs).args)
+            unfolded = self._unfold(par_values)
+            lnposts = [self.lnposterior(*par_vals) for par_vals in unfolded]
+            return lnposts
+
+        lnposteriors_folds.__signature__ = sig
+        self.lnposteriors_folds = lnposteriors_folds
+
+    def _unfold(self, par_values):
+        """
+        Take an array of length `n_params` with parameter values in the
+        space of folded sampled parameters, and return an array of shape
+        `(2**n_folded_params, n_params)` with parameter values
+        corresponding to the different ways of unfolding.
+        """
+        original_values = par_values[self._folded_inds]
+        unfolded_values = (2 * (self.prior.cubemin[self._folded_inds]
+                                + self.cubesize[self._folded_inds])
+                           - original_values)
+
+        unfolded = np.array([par_values] * 2**len(self._folded_inds))
+        unfolded[:, self._folded_inds] = list(itertools.product(
+            *zip(original_values, unfolded_values)))
+
+        return unfolded
+
+    def resample(self, samples: pd.DataFrame, seed=0):
+        """
+        Take a pandas DataFrame of folded samples and return another one
+        with samples from the full phase space, drawn with the
+        appropriate probabilities.
+        """
+        choice = np.random.default_rng(seed=seed).choice
+        lnpost_cols = [f'lnpost{i}' for i in range(2**len(self._folded_inds))]
+
+        resampled = []
+        for _, sample in samples.iterrows():
+            unfolded = self._unfold(
+                sample[self.prior.sampled_params].to_numpy())
+            probabilities = np.exp(sample[lnpost_cols])
+            probabilities /= probabilities.sum()
+            resampled.append(choice(unfolded, p=probabilities))
+
+        return pd.DataFrame(resampled, columns=self.prior.sampled_params)
+
+    def test_relative_binning_accuracy(self, samples: pd.DataFrame,
+                                       max_workers=None):
+        """
+        Compute likelihood with and without relative binning.
+        Input a dataframe with samples, columns 'lnl_rb' and 'lnl_fft'
+        get added in-place.
+
+        Parameters
+        ----------
+        samples: pandas DataFrame with samples, its columns must contain
+                 all `self.prior.sampled_params`.
+        max_workers: maximum number of cores for parallelization,
+                     defaults to all available cores.
+        """
+        package = os.path.join(os.path.dirname(__file__), '..')
+        module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
+
+        n_samples = len(samples)
+        n_workers = min(n_samples, max_workers or os.cpu_count() or 1)
+        chunk_edges = np.linspace(0, n_samples, n_workers + 1, dtype=int)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            self.to_json(tmp_dir)
+
+            # Divide samples into chunks and launch programs to process them:
+            samples_paths = [os.path.join(tmp_dir, f'samples_{i}.pkl')
+                             for i in range(n_workers)]
+            processes = []
+            for i, samples_path in enumerate(samples_paths):
+                i_start, i_end = chunk_edges[[i, i+1]]
+                samples[i_start : i_end].to_pickle(samples_path)
+
+                processes.append(subprocess.Popen(
+                    (f'PYTHONPATH={package} {sys.executable} -m {module} '
+                     f'{tmp_dir} {samples_path}'),
+                    shell=True))
+
+            # Wait until they all finish:
+            for process in processes:
+                process.communicate()
+
+            result = pd.concat(map(pd.read_pickle, samples_paths))
+
+        # Add result to samples in-place
+        samples['lnl_rb'] = result['lnl_rb']
+        samples['lnl_fft'] = result['lnl_fft']
 
     @classmethod
     def from_event(cls, event, approximant, prior_class, fbin=None,
@@ -91,6 +217,7 @@ class Posterior(utils.JSONMixin):
                         modes to include. Pass `None` to use
                         approximant-dependent defaults per
                         `waveform.APPROXIMANTS`.
+        tolerance_params: dictionary
         kwargs: Additional keyword arguments to instantiate the prior
                 class.
 
@@ -119,9 +246,8 @@ class Posterior(utils.JSONMixin):
             and name != 'self'}
         event_data_keys = {'mchirp_range', 'tgps', 'q_min'}
         bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref', 't0_refdet'}
-        missing_pars = (required_pars - event_data_keys - bestfit_keys
-                        - set(kwargs))
-        if missing_pars:
+        if missing_pars := (required_pars - event_data_keys - bestfit_keys
+                            - set(kwargs)):
             raise ValueError(f'Missing parameters: {", ".join(missing_pars)}')
 
         # Initialize likelihood
@@ -139,8 +265,7 @@ class Posterior(utils.JSONMixin):
 
         # Initialize prior
         prior_kwargs = {key: getattr(event_data, key)
-                        for key in event_data_keys}
-        prior_kwargs.update({**bestfit, **kwargs})
+                        for key in event_data_keys} | bestfit | kwargs
         prior_instance = prior_class(**prior_kwargs)
 
         pe_instance = cls(prior_instance, likelihood_instance)
@@ -161,68 +286,94 @@ class Posterior(utils.JSONMixin):
         return pe_instance
 
 
-class FoldedPosterior(Posterior):
-    """
-    A posterior distribution that has been folded in parameter space.
-    This means that some ("folded") dimensions are sampled over half
-    their original range, and a map to the other half of the range is
-    defined by reflecting about the midpoint.
-    The folded posterior distribution is defined as the sum of the
-    original posterior over all `2**n_folds` mapped points.
-    This is intended to reduce the number of modes in the posterior.
-    """
-    def __init__(self, prior, likelihood):
-        super().__init__(prior, likelihood)
+class PyMultinest(utils.JSONMixin):
+    """Sample a posterior using PyMultinest."""
+    DEFAULT_RUN_KWARGS = {'n_iter_before_update': 10**5,
+                          'n_live_points': 2000,
+                          'evidence_tolerance': .1}
 
-        # Half range for folder parameters
-        self._folded_inds = [self.prior.sampled_params.index(par)
-                             for par in self.prior.foldable_params]
-        self.cubesize[self._folded_inds] /= 2
+    def __init__(self, posterior, run_kwargs=None):
+        self.posterior = posterior
+        self._ndim = len(self.posterior.prior.sampled_params)
+        nfolds = 2**len(self.posterior._folded_inds)
+        self._nparams = self._ndim + nfolds
+        self.params = (self.posterior.prior.sampled_params
+                       + [f'lnpost{i}' for i in range(nfolds)])
+        self.run_kwargs = self.DEFAULT_RUN_KWARGS | (run_kwargs or {})
+        self.samples = None
 
-        # Folded parameters lose their periodicity
-        self.periodic_params = [par for par in self.periodic_params
-                                if par not in self.prior.foldable_params]
-
-        # Increase `n_cached_waveforms` to ensure fast moves remain fast
-        fast_sampled_params = self.prior.get_fast_sampled_params(
-            self.likelihood.waveform_generator.fast_params)
-        n_slow_folded = len(set(self.prior.foldable_params)
-                            - set(fast_sampled_params))
-        self.likelihood.waveform_generator.n_cached_waveforms \
-            = 2 ** n_slow_folded
-
-        # Overwrite lnposterior method
-        self._lnposterior_no_folding = self.lnposterior
-        sig = inspect.signature(self.prior.transform)
-        def lnposterior(*args, **kwargs):
-            """
-            Natural logarithm of the posterior probability density in
-            the space of folded sampled parameters.
-            """
-            par_values = np.array(sig.bind(*args, **kwargs).args)
-            unfolded = self.unfold(par_values)
-            lnposts = [self._lnposterior_no_folding(*par_vals)
-                       for par_vals in unfolded]
-            return special.logsumexp(lnposts)
-
-        lnposterior.__signature__ = sig
-        self.lnposterior = lnposterior
-
-    def unfold(self, par_values):
+    def run_pymultinest(self, dirname, dir_permissions=0o755,
+                        file_permissions=0o644, **run_kwargs):
         """
-        Return an array of shape `(2**n_folded_params, n_params)`
-        with the different ways to unfold parameters.
+        Make a directory to save results and run pymultinest.
+
+        Parameters
+        ----------
+        dirname: directory where to save output, will create if needed.
+        dir_permissions: octal, permissions to give to the directory.
+        file_permissions: octal, permissions to give to the files.
+        n_iter_before_update: int, how often pymultinest should
+                              checkpoint. Checkpointing often is slow
+                              and increases the odds of getting
+                              corrupted files (if the job gets killed).
+        kwargs: passed to `pymultinest.run`, updates `self.run_kwargs`.
         """
-        original_values = par_values[self._folded_inds]
-        unfolded_values = (2 * (self.cubemin[self._folded_inds]
-                                + self.cubesize[self._folded_inds])
-                           - original_values)
+        dirname = os.path.join(dirname, '')
 
-        unfolded = np.array([par_values] * 2**len(self._folded_inds))
-        unfolded[:, self._folded_inds] = list(itertools.product(
-            *zip(original_values, unfolded_values)))
+        self.run_kwargs |= run_kwargs
+        self.run_kwargs['outputfiles_basename'] = dirname
+        self.run_kwargs['wrapped_params'] = [
+            par in self.posterior.periodic_params
+            for par in self.posterior.prior.sampled_params]
 
-        return unfolded
+        pathlib.Path(dirname).mkdir(mode=dir_permissions, parents=True,
+                                    exist_ok=True)
+        self.to_json(dirname, overwrite=True)
+
+        pymultinest.run(self._lnposterior, self._cubetransform, self._ndim,
+                        self._nparams, **self.run_kwargs)
+
+        for path in pathlib.Path(dirname).iterdir():
+            path.chmod(file_permissions)
+
+    def load_samples(self, dirname,
+                     test_relative_binning_accuracy=False) -> pd.DataFrame:
+        """
+        Collect pymultinest samples, resample from them to undo the
+        parameter folding, optionally compute the likelihood with and
+        without relative binning for testing.
+        A pandas DataFrame with the samples is stored as attribute
+        `samples` and also returned.
+
+        Parameters
+        ----------
+        dirname: Directory where pymultinest output is.
+        """
+        folded = pd.DataFrame(
+            np.loadtxt(os.path.join(dirname, 'post_equal_weights.dat'))[:, :-1],
+            columns=self.params)
+        samples = self.posterior.resample(folded)
+        if test_relative_binning_accuracy:
+            self.posterior.test_relative_binning_accuracy(samples)
+        self.samples = samples
+        return samples
+
+    def _cubetransform(self, cube, *_):
+        for i in range(self._ndim):
+            cube[i] = (self.posterior.prior.cubemin[i]
+                       + cube[i] * self.posterior.cubesize[i])
+
+    def _lnposterior(self, par_vals, *_):
+        """
+        Update the extra entries `par_vals[n_dim : n_params+1]` with the
+        log posterior evaulated at each unfold. Return the logarithm of
+        the folded posterior.
+        """
+        lnposts = self.posterior.lnposteriors_folds(
+            *[par_vals[i] for i in range(self._ndim)])
+        for i, lnpost in enumerate(lnposts):
+            par_vals[self._ndim + i] = lnpost
+        return special.logsumexp(lnposts)
 
 
 class Ultranest(utils.JSONMixin):
@@ -235,10 +386,10 @@ class Ultranest(utils.JSONMixin):
         self.sampler = None
         print("Warning: I couldn't produce reasonable results with this class")
 
-    def instantiate_sampler(self, run=False, *, prior_only=False,
+    def instantiate_sampler(self, run=False, *, sample_prior=False,
                             n_fast_steps=8, **kwargs):
         """Set up `self.sampler`."""
-        lnprob = (self._lnprior_ultranest if prior_only
+        lnprob = (self._lnprior_ultranest if sample_prior
                   else self._lnposterior_ultranest)
 
         wrapped_params = [par in self.posterior.periodic_params
@@ -253,7 +404,7 @@ class Ultranest(utils.JSONMixin):
         if run:
             self.sampler.run(**kwargs)
 
-    def _get_step_matrix(self, n_steps):
+    def _get_step_matrix(self, n_steps: int):
         """
         Return matrix with pattern of fast/slow steps.
 
@@ -272,7 +423,7 @@ class Ultranest(utils.JSONMixin):
         return step_matrix
 
     def _cubetransform(self, cube):
-        return self.posterior.cubemin + cube * self.posterior.cubesize
+        return self.posterior.prior.cubemin + cube * self.posterior.cubesize
 
     def _lnprior_ultranest(self, par_vals):
         return self.posterior.prior.lnprior(*par_vals)
@@ -281,44 +432,40 @@ class Ultranest(utils.JSONMixin):
         return self.posterior.lnposterior(*par_vals)
 
 
-class PyMultinest(utils.JSONMixin):
-    """Sample a posterior using PyMultinest."""
-    def __init__(self, posterior):
-        self.posterior = posterior
-        self._nparams = len(self.posterior.cubemin)
+def _test_relative_binning_accuracy(posterior_path, samples_path):
+    """
+    Compute log likelihood of parameter samples with and without
+    relative binning. Results are stored as columns on the samples
+    DataFrame, whose pickle file is overwritten.
 
-    def run_pymultinest(self, rundir, prior_only=False, n_live_points=400,
-                        tol=.1):
-        """Make a directory to save results and run pymultinest."""
-        rundir = rundir.rstrip('/') + '/'
+    Parameters
+    ----------
+    posterior_path: path to a json file from a Posterior instance.
+    samples_path: path to a pickle file from a pandas DataFrame.
+    """
+    print('Analyzing', samples_path)
+    posterior = utils.read_json(posterior_path)
+    samples = pd.read_pickle(samples_path)[posterior.prior.sampled_params]
+    result = [posterior.likelihood.test_relative_binning_accuracy(
+        posterior.prior.transform(**sample))
+              for _, sample in samples.iterrows()]
+    samples['lnl_rb'], samples['lnl_fft'] = np.transpose(result)
+    samples.to_pickle(samples_path)
 
-        lnprob = (self._lnprior_pymultinest if prior_only
-                  else self._lnposterior_pymultinest)
 
-        wrapped_params = [par in self.posterior.periodic_params
-                          for par in self.posterior.prior.sampled_params]
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='''Compute likelihood with and without relative binning.
+                       Input a dataframe with samples, results are saved as
+                       columns in the dataframe.''')
 
-        if not os.path.exists(rundir):
-            umask = os.umask(0o022)  # Change permissions to 755 (rwxr-xr-x)
-            os.mkdir(rundir)
-            os.umask(umask)  # Restore previous default permissions
+    parser.add_argument('posterior_path',
+                        help='''path to json file from a
+                                `cogwheel.parameter_estimation.Posterior`
+                                object.''')
+    parser.add_argument('samples_path',
+                        help='path to a `pandas` pickle file with samples.')
 
-        pymultinest.run(
-            lnprob, self._cubetransform, self._nparams,
-            outputfiles_basename=rundir, wrapped_params=wrapped_params,
-            n_live_points=n_live_points, evidence_tolerance=tol)
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-        os.system(f'chmod 666 {rundir}*')
-
-    def _cubetransform(self, cube, *_):
-        for i in range(self._nparams):
-            cube[i] = (self.posterior.cubemin[i]
-                       + cube[i] * self.posterior.cubesize[i])
-
-    def _lnprior_pymultinest(self, par_vals, *_):
-        return self.posterior.prior.lnprior(
-            *[par_vals[i] for i in range(self._nparams)])
-
-    def _lnposterior_pymultinest(self, par_vals, *_):
-        return self.posterior.lnposterior(
-            *[par_vals[i] for i in range(self._nparams)])
+    _test_relative_binning_accuracy(**vars(parser.parse_args()))

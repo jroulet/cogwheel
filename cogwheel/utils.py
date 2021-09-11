@@ -65,7 +65,7 @@ def merge_dictionaries_safely(dics):
         for key in merged.keys() & dic.keys():
             if merged[key] != dic[key]:
                 raise ValueError(f'Found incompatible values for {key}')
-        merged.update(dic)
+        merged |= dic
     return merged
 
 
@@ -82,7 +82,7 @@ def read_json(json_path):
     # Accept a directory that contains a single json file
     if os.path.isdir(json_path):
         jsons = glob.glob(os.path.join(json_path, '*.json'))
-        if njsons := len(jsons) != 1:
+        if (njsons := len(jsons)) != 1:
             raise ValueError(f'{json_path!r} contains {njsons} json files.')
         json_path = jsons[0]
 

@@ -113,7 +113,7 @@ def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
         hplus, hcross = lalsimulation.SimInspiralChooseFDWaveformSequence(
             *[par_dic[par] for par in lal_params])
     except:
-        print('Error while calling LAL at these parameters: ', par_dic)
+        print('Error while calling LAL at these parameters:', par_dic)
         raise
     hplus_hcross = np.stack([hplus.data.data, hcross.data.data])
     if f0_is_0:
