@@ -113,7 +113,7 @@ def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
         hplus, hcross = lalsimulation.SimInspiralChooseFDWaveformSequence(
             *[par_dic[par] for par in lal_params])
     except:
-        print('Error while calling LAL at these parameters: ', par_dic)
+        print('Error while calling LAL at these parameters:', par_dic)
         raise
     hplus_hcross = np.stack([hplus.data.data, hcross.data.data])
     if f0_is_0:
@@ -267,11 +267,16 @@ class WaveformGenerator(utils.JSONMixin):
         Parameters
         ----------
         f: 1d array of frequencies [Hz]
-        waveform_par_dic: dictionary per `WaveformGenerator._waveform_params`.
+        waveform_par_dic: dictionary per
+                          `WaveformGenerator._waveform_params`.
+        by_m: bool, whether to return harmonic modes separately by m (l
+              summed over) or all modes already summed over.
 
         Return
         ------
-        2 x len(f) array with (hplus, hcross).
+        array with (hplus, hcross), of shape `(2, len(f))` if `by_m` is
+        `False`, or `(n_m, 2, len(f))` if `by_m` is `True`, where `n_m`
+        is the number of harmonic modes with different `m`.
         """
         if self.disable_precession:
             waveform_par_dic.update(ZERO_INPLANE_SPINS)

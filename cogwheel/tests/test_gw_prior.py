@@ -4,8 +4,6 @@ import itertools
 from unittest import TestCase, main
 import numpy as np
 
-import lal
-
 from cogwheel import gw_prior
 from cogwheel.gw_utils import DETECTORS
 
