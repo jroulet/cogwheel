@@ -336,27 +336,25 @@ class PyMultinest(utils.JSONMixin):
         for path in pathlib.Path(dirname).iterdir():
             path.chmod(file_permissions)
 
-    def load_samples(self, dirname,
-                     test_relative_binning_accuracy=False) -> pd.DataFrame:
+    def load_samples(self, test_relative_binning_accuracy=False):
         """
         Collect pymultinest samples, resample from them to undo the
         parameter folding, optionally compute the likelihood with and
         without relative binning for testing.
         A pandas DataFrame with the samples is stored as attribute
-        `samples` and also returned.
+        `samples`.
 
         Parameters
         ----------
         dirname: Directory where pymultinest output is.
         """
-        folded = pd.DataFrame(
-            np.loadtxt(os.path.join(dirname, 'post_equal_weights.dat'))[:, :-1],
-            columns=self.params)
+        fname = os.path.join(self.run_kwargs['outputfiles_basename'],
+                             'post_equal_weights.dat')
+        folded = pd.DataFrame(np.loadtxt(fname)[:, :-1], columns=self.params)
         samples = self.posterior.resample(folded)
         if test_relative_binning_accuracy:
             self.posterior.test_relative_binning_accuracy(samples)
         self.samples = samples
-        return samples
 
     def _cubetransform(self, cube, *_):
         for i in range(self._ndim):
