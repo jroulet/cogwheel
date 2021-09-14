@@ -293,7 +293,7 @@ class CBCLikelihood(utils.JSONMixin):
                 axes, self.event_data.detector_names, data_t_wht, wf_t_wht):
             ax.text(.02, .95, det, ha='left', va='top', transform=ax.transAxes)
             ax.tick_params(which='both', direction='in', right=True, top=True)
-            ax.plot(time, data_det, f'C0', lw=.2)
+            ax.plot(time, data_det, 'C0', lw=.2)
             ax.plot(time, wf_det, **kwargs)
 
         plt.xlim(trng)

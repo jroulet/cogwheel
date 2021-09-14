@@ -15,6 +15,7 @@ uniform priors.
 
 from abc import ABC, abstractmethod
 import inspect
+import itertools
 import numpy as np
 
 from . import utils
@@ -58,9 +59,7 @@ class Prior(ABC, utils.JSONMixin):
                     of another prior.
     periodic_params: List of names of sampled parameters that are
                      periodic.
-    foldable_params: List of names of sampled parameters that are well
-                     suited for folding (for details, see
-                     `parameter_estimation.FoldedPosterior`)
+    folded_params: List of names of sampled parameters that are folded.
 
     Methods
     -------
@@ -81,13 +80,20 @@ class Prior(ABC, utils.JSONMixin):
 
     conditioned_on = []
     periodic_params = []
-    foldable_params = []
+    folded_params = []
 
     def __init__(self, **kwargs):
+        super().__init__()
         self._check_range_dic()
+
+        self._folded_inds = [self.sampled_params.index(par)
+                             for par in self.folded_params]
+
         self.cubemin = np.array([rng[0] for rng in self.range_dic.values()])
         cubemax = np.array([rng[1] for rng in self.range_dic.values()])
         self.cubesize = cubemax - self.cubemin
+        self.folded_cubesize = self.cubesize.copy()
+        self.folded_cubesize[self._folded_inds] /= 2
 
     @utils.ClassProperty
     def sampled_params(self):
@@ -154,55 +160,24 @@ class Prior(ABC, utils.JSONMixin):
                 self.transform(*par_vals, **par_dic))
 
     def _check_range_dic(self):
+        """
+        Ensure that range_dic values are stored as float arrays.
+        Verify that ranges for all periodic and folded parameters were
+        provided.
+        """
+        if missing := (set(self.periodic_params) - self.range_dic.keys()):
+            raise PriorError('Periodic parameters are missing from '
+                             f'`range_dic`: {", ".join(missing)}')
+
+        if missing := (set(self.folded_params) - self.range_dic.keys()):
+            raise PriorError('Folded parameters are missing from '
+                             f'`range_dic`: {", ".join(missing)}')
+
         for key, value in self.range_dic.items():
             if not hasattr(value, '__len__') or len(value) != 2:
-                raise PriorError(f'`range_dic` {self.range_dic} needs to have '
+                raise PriorError(f'`range_dic` {self.range_dic} must have '
                                  'ranges defined as pair of floats.')
-
-            missing = set(self.periodic_params) - self.range_dic.keys()
-            if missing:
-                raise PriorError('Periodic parameters are missing from '
-                                 f'`range_dic`: {", ".join(missing)}')
-
-            missing = set(self.foldable_params) - self.range_dic.keys()
-            if missing:
-                raise PriorError('Foldable parameters are missing from '
-                                 f'`range_dic`: {", ".join(missing)}')
-
             self.range_dic[key] = np.asarray(value, dtype=np.float_)
-
-    @staticmethod
-    def get_init_dict():
-        """
-        Return dictionary with keyword arguments to reproduce the class
-        instance. Subclasses should override this method if they require
-        initialization parameters.
-        """
-        return {}
-
-    def __init_subclass__(cls):
-        """
-        Check that subclasses that change the `__init__` signature also
-        define their own `get_init_dict` method."""
-        super().__init_subclass__()
-
-        if (inspect.signature(cls.__init__)
-                != inspect.signature(Prior.__init__)
-                and cls.get_init_dict is Prior.get_init_dict):
-            raise PriorError(
-                f'{cls.__name__} must override `get_init_dict` method.')
-
-
-    def __repr__(self):
-        """
-        Return a string of the form
-        `Prior(sampled_params | conditioned_on) → standard_params`.
-        """
-        rep = self.__class__.__name__ + f'({", ".join(self.sampled_params)}'
-        if self.conditioned_on:
-            rep += f' | {", ".join(self.conditioned_on)}'
-        rep += f') → [{", ".join(self.standard_params)}]'
-        return rep
 
     @classmethod
     def get_fast_sampled_params(cls, fast_standard_params):
@@ -215,6 +190,69 @@ class Prior(ABC, utils.JSONMixin):
         if set(cls.standard_params) <= set(fast_standard_params):
             return cls.sampled_params
         return []
+
+    def unfold_apply(self, func):
+        """
+        Return a function that unfolds its parameters and applies `func`
+        to each unfolding. The returned function returns a list of
+        length `2**n_folds`.
+        """
+        sig = inspect.signature(self.transform)
+
+        def unfolding_func(*par_vals, **par_dic):
+            par_values = np.array(sig.bind(*par_vals, **par_dic).args)
+            unfolded = self._unfold(par_values)
+            return [func(*par_vals) for par_vals in unfolded]
+
+        unfolding_func.__doc__ = f"""
+            Return a list of {2**len(self.folded_params)} elements
+            with the results of applying {func.__name__} to the
+            different unfoldings of the parameters passed.
+            """
+        unfolding_func.__signature__ = sig
+        return unfolding_func
+
+    def _unfold(self, par_values):
+        """
+        Take an array of length `n_params` with parameter values in the
+        space of folded sampled parameters, and return an array of shape
+        `(2**n_folded_params, n_params)` with parameter values
+        corresponding to the different ways of unfolding.
+        """
+        original_values = par_values[self._folded_inds]
+        mirrored_values = (2 * (self.cubemin[self._folded_inds]
+                                + self.folded_cubesize[self._folded_inds])
+                           - original_values)
+
+        unfolded = np.array([par_values] * 2**len(self._folded_inds))
+        unfolded[:, self._folded_inds] = list(itertools.product(
+            *zip(original_values, mirrored_values)))
+
+        return unfolded
+
+    def __init_subclass__(cls):
+        """
+        Check that subclasses that change the `__init__` signature also
+        define their own `get_init_dict` method.
+        """
+        super().__init_subclass__()
+
+        if (inspect.signature(cls.__init__)
+                != inspect.signature(Prior.__init__)
+                and cls.get_init_dict is Prior.get_init_dict):
+            raise PriorError(
+                f'{cls.__name__} must override `get_init_dict` method.')
+
+    def __repr__(self):
+        """
+        Return a string of the form
+        `Prior(sampled_params | conditioned_on) → standard_params`.
+        """
+        rep = self.__class__.__name__ + f'({", ".join(self.sampled_params)}'
+        if self.conditioned_on:
+            rep += f' | {", ".join(self.conditioned_on)}'
+        rep += f') → [{", ".join(self.standard_params)}]'
+        return rep
 
 
 class CombinedPrior(Prior):
@@ -258,51 +296,20 @@ class CombinedPrior(Prior):
             * `standard_params`
             * `conditioned_on`
             * `periodic_params`
-            * `foldable_params`
-            * `lnprior`
+            * `folded_params`
             * `transform`
-            * `lnprior_and_transform`
             * `inverse_transform`
+            * `lnprior_and_transform`
+            * `lnprior`
 
         which are used to override the corresponding attributes and
         methods of the new `CombinedPrior` subclass.
         """
         super().__init_subclass__()
 
-        sampled_params = [par for prior_class in cls.prior_classes
-                          for par in prior_class.sampled_params]
-        standard_params = [par for prior_class in cls.prior_classes
-                           for par in prior_class.standard_params]
-
-        # Check that the provided prior_classes can be combined:
-        if len(sampled_params) != len(set(sampled_params)):
-            raise PriorError(
-                f'Priors {cls.prior_classes} cannot be combined due to '
-                f'repeated sampled parameters: {sampled_params}')
-        if len(standard_params) != len(set(standard_params)):
-            raise PriorError(
-                f'Priors {cls.prior_classes} cannot be combined due to '
-                f'repeated standard parameters: {standard_params}')
-        for i, prior_class in enumerate(cls.prior_classes):
-            for following in cls.prior_classes[i:]:
-                for conditioned_par in prior_class.conditioned_on:
-                    if conditioned_par in following.standard_params:
-                        raise PriorError(
-                            f'{following} defines {conditioned_par}, which'
-                            f'{prior_class} requires. {following} should come '
-                            f'before {prior_class}.')
-
-        range_dic = {}
-        for prior_class in cls.prior_classes:
-            range_dic.update(prior_class.range_dic)
-
-        conditioned_on = [par
-                          for prior_class in cls.prior_classes
-                          for par in prior_class.conditioned_on
-                          if not par in standard_params]
-
-        direct_params = sampled_params + conditioned_on
-        inverse_params = standard_params + conditioned_on
+        cls._set_params()
+        direct_params = cls.sampled_params + cls.conditioned_on
+        inverse_params = cls.standard_params + cls.conditioned_on
 
         def transform(self, *par_vals, **par_dic):
             """
@@ -316,7 +323,7 @@ class CombinedPrior(Prior):
                              for par in (subprior.sampled_params
                                          + subprior.conditioned_on)}
                 par_dic.update(subprior.transform(**input_dic))
-            return {par: par_dic[par] for par in standard_params}
+            return {par: par_dic[par] for par in self.standard_params}
 
         def inverse_transform(self, *par_vals, **par_dic):
             """
@@ -330,7 +337,7 @@ class CombinedPrior(Prior):
                     par: par_dic[par] for par in (subprior.standard_params
                                                   + subprior.conditioned_on)}
                 par_dic.update(subprior.inverse_transform(**input_dic))
-            return {par: par_dic[par] for par in sampled_params}
+            return {par: par_dic[par] for par in self.sampled_params}
 
         def lnprior_and_transform(self, *par_vals, **par_dic):
             """
@@ -359,8 +366,8 @@ class CombinedPrior(Prior):
             return self.lnprior_and_transform(*par_vals, **par_dic)[0]
 
         # Witchcraft to fix the functions' signatures:
-        self_parameter = inspect.Parameter(
-            'self', inspect.Parameter.POSITIONAL_ONLY)
+        self_parameter = inspect.Parameter('self',
+                                           inspect.Parameter.POSITIONAL_ONLY)
         direct_parameters = [self_parameter] + [
             inspect.Parameter(par, inspect.Parameter.POSITIONAL_OR_KEYWORD)
             for par in direct_params]
@@ -372,20 +379,57 @@ class CombinedPrior(Prior):
         cls._change_signature(lnprior, direct_parameters)
         cls._change_signature(lnprior_and_transform, direct_parameters)
 
-        cls.range_dic = range_dic
-        cls.standard_params = standard_params
-        cls.periodic_params = [par for prior_class in cls.prior_classes
-                               for par in prior_class.periodic_params]
-        cls.foldable_params = [par for prior_class in cls.prior_classes
-                               for par in prior_class.foldable_params]
-        cls.conditioned_on = conditioned_on
-        cls.lnprior_and_transform = lnprior_and_transform
-        cls.lnprior = lnprior
         cls.transform = transform
         cls.inverse_transform = inverse_transform
+        cls.lnprior_and_transform = lnprior_and_transform
+        cls.lnprior = lnprior
 
         # Edit the `__init__()` signature of the new subclass:
         cls._change_signature(cls.__init__, cls._init_parameters())
+
+    @classmethod
+    def _set_params(cls):
+        """
+        Set these class attributes:
+            * `range_dic`
+            * `standard_params`
+            * `conditioned_on`
+            * `periodic_params`
+            * `folded_params`.
+        Check whether subpriors are compatible and raise `PriorError`
+        if not.
+        """
+        cls.range_dic = {}
+        for prior_class in cls.prior_classes:
+            cls.range_dic.update(prior_class.range_dic)
+
+        for params in ('standard_params', 'conditioned_on', 'periodic_params',
+                       'folded_params'):
+            setattr(cls, params, [par for prior_class in cls.prior_classes
+                                  for par in getattr(prior_class, params)])
+
+        cls.conditioned_on = [par for par in cls.conditioned_on
+                              if not par in cls.standard_params]
+
+        # Check that the provided prior_classes can be combined:
+        if len(cls.sampled_params) != len(set(cls.sampled_params)):
+            raise PriorError(
+                f'Priors {cls.prior_classes} cannot be combined due to '
+                f'repeated sampled parameters: {cls.sampled_params}')
+
+        if len(cls.standard_params) != len(set(cls.standard_params)):
+            raise PriorError(
+                f'Priors {cls.prior_classes} cannot be combined due to '
+                f'repeated standard parameters: {cls.standard_params}')
+
+        for i, prior_class in enumerate(cls.prior_classes):
+            for following in cls.prior_classes[i:]:
+                for conditioned_par in prior_class.conditioned_on:
+                    if conditioned_par in following.standard_params:
+                        raise PriorError(
+                            f'{following} defines {conditioned_par}, which'
+                            f'{prior_class} requires. {following} should come '
+                            f'before {prior_class}.')
 
     @classmethod
     def _init_parameters(cls):
