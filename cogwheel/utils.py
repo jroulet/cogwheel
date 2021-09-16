@@ -10,6 +10,10 @@ import numpy as np
 from scipy.optimize import _differentialevolution
 
 
+DIR_PERMISSIONS = 0o755
+FILE_PERMISSIONS = 0o644
+
+
 class ClassProperty:
     """
     Can be used like `@property` but for class attributes instead of
@@ -102,8 +106,9 @@ class JSONMixin:
     their init parameters as attributes with the same names. If this is
     not the case, the subclass should override `get_init_dict`.
     """
-    def to_json(self, dirname, basename=None, *, dir_permissions=0o755,
-                file_permissions=0o644, overwrite=False):
+    def to_json(self, dirname, basename=None, *,
+                dir_permissions=DIR_PERMISSIONS,
+                file_permissions=FILE_PERMISSIONS, overwrite=False):
         """
         Write class instance to json file.
         It can then be loaded with `read_json`.
@@ -177,7 +182,7 @@ class CogwheelEncoder(NumpyEncoder):
     `JSONMixin`.
     """
 
-    def __init__(self, dirname=None, file_permissions=0o644,
+    def __init__(self, dirname=None, file_permissions=FILE_PERMISSIONS,
                  overwrite=False, **kwargs):
         super().__init__(**kwargs)
 
