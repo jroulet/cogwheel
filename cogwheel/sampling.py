@@ -141,14 +141,16 @@ class Sampler(abc.ABC, utils.JSONMixin):
                              self.posterior.likelihood.event_data.eventname,
                              rundir.name])
         stdout_path = rundir.joinpath('output.out').resolve()
+        stderr_path = rundir.joinpath('errors.err').resolve()
 
         self.to_json(rundir, overwrite=resuming)
 
-        with tempfile.TemporaryFile() as file:
+        with tempfile.NamedTemporaryFile() as file:
             file.write(textwrap.dedent(f"""\
                 #!/bin/bash
                 #SBATCH --job-name={job_name}
                 #SBATCH --output={stdout_path}
+                #SBATCH --error={stderr_path}
                 #SBATCH --open-mode=append
                 #SBATCH --mem-per-cpu={memory_per_task}
                 #SBATCH --time={int(n_hours_limit)}:00:00
@@ -159,7 +161,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
                 srun {sys.executable} {__file__} {rundir.resolve()}
                 """))
             file.seek(0)  # Rewind
-            os.system(f'srun {file}')
+            os.system(f'srun {file.name}')
             print(f'Submitted job {job_name!r}.')
 
     @abc.abstractmethod
@@ -195,7 +197,6 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         for path in pathlib.Path(dirname).iterdir():
             path.chmod(self.file_permissions)
-
 
 
 class PyMultiNest(Sampler):
