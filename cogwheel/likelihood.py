@@ -82,8 +82,7 @@ def safe_std(arr, max_contiguous_low=100, expected_high=1.,
 def _check_bounds(lnlike_func):
     """
     Decorator that adds parameter bound checks to a lnlike function.
-    `lnlike_func` needs to accept a parameter called `par_dic`, it is
-    assumed that it will be passed by position.
+    `lnlike_func` needs to accept a parameter called `par_dic`.
     Check parameter ranges, return -inf if they are out of bounds.
     """
     parameters = list(inspect.signature(lnlike_func).parameters)
@@ -293,7 +292,7 @@ class CBCLikelihood(utils.JSONMixin):
                 axes, self.event_data.detector_names, data_t_wht, wf_t_wht):
             ax.text(.02, .95, det, ha='left', va='top', transform=ax.transAxes)
             ax.tick_params(which='both', direction='in', right=True, top=True)
-            ax.plot(time, data_det, f'C0', lw=.2)
+            ax.plot(time, data_det, 'C0', lw=.2)
             ax.plot(time, wf_det, **kwargs)
 
         plt.xlim(trng)
@@ -809,7 +808,5 @@ class RelativeBinningLikelihood(CBCLikelihood):
         Return dictionary with keyword arguments to reproduce the class
         instance.
         """
-        dic = super().get_init_dict()
-        if {'fbin', 'pn_phase_tol'} < dic.keys():
-            dic['fbin'] = None
-        return dic
+        return super().get_init_dict() | ({'fbin': None} if self.pn_phase_tol
+                                          else {})

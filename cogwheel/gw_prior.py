@@ -151,7 +151,7 @@ class IsotropicInclinationPrior(UniformPriorMixin, Prior):
     """Uniform-in-cosine prior for the binary's inclination."""
     standard_params = ['iota']
     range_dic = {'cosiota': (-1, 1)}
-    foldable_params = ['cosiota']
+    folded_params = ['cosiota']
 
     def transform(self, cosiota):
         """cos(inclination) to inclination."""
@@ -174,9 +174,8 @@ class IsotropicSkyLocationPrior(UniformPriorMixin, Prior):
     standard_params = ['ra', 'dec']
     range_dic = {'costhetanet': (-1, 1),
                  'phinet_hat': (0, 2*np.pi)}
-    periodic_params = ['phinet_hat']
     conditioned_on = ['iota']
-    foldable_params = ['phinet_hat']
+    folded_params = ['phinet_hat']
 
     def __init__(self, *, detector_pair, tgps, **kwargs):
         super().__init__(detector_pair=detector_pair, tgps=tgps,
