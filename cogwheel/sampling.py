@@ -1,29 +1,39 @@
 """Sample posterior or prior distributions."""
 
+import abc
+import argparse
 import pathlib
 import os
-import scipy.special
+import re
+import sys
+import tempfile
+import textwrap
+from cProfile import Profile
+from functools import wraps
 import numpy as np
 import pandas as pd
+import scipy.special
 
-import ultranest
-import ultranest.stepsampler
+# import ultranest
+# import ultranest.stepsampler
 import pymultinest
 
 from . import utils
 
-sampler_registry = {}
+PROFILING_FILENAME = 'profiling'
 
 
-class Sampler(utils.JSONMixin):
+class Sampler(abc.ABC, utils.JSONMixin):
     """
     Generic base class for sampling distributions.
     Subclasses implement the interface with specific sampling codes.
     """
-    DEFAULT_RUN_KWARGS = {}
+    DEFAULT_RUN_KWARGS = {}  # Implemented by subclasses
     RUNDIR_PREFIX = 'run_'
 
-    def __init__(self, posterior, run_kwargs=None, sample_prior=False):
+    def __init__(self, posterior, run_kwargs=None, sample_prior=False,
+                 dir_permissions=utils.DIR_PERMISSIONS,
+                 file_permissions=utils.FILE_PERMISSIONS):
         super().__init__()
 
         self.posterior = posterior
@@ -38,31 +48,52 @@ class Sampler(utils.JSONMixin):
         self.run_kwargs = self.DEFAULT_RUN_KWARGS | (run_kwargs or {})
         self.samples = None
 
+        self.dir_permissions = dir_permissions
+        self.file_permissions = file_permissions
+
+        self._get_lnprobs = None  # Set by sample_prior
         self.sample_prior = sample_prior
+
+    @property
+    def sample_prior(self):
+        """Whether to sample the prior instead of the posterior."""
+        return self._sample_prior
+
+    @sample_prior.setter
+    def sample_prior(self, sample_prior):
+        self._sample_prior = sample_prior
+        func = (self.posterior.prior.lnprior if sample_prior
+                else self.posterior.lnposterior)
+        self._get_lnprobs = self.posterior.prior.unfold_apply(func)
 
     def resample(self, samples: pd.DataFrame, seed=0):
         """
         Take a pandas DataFrame of folded samples and return another one
         with samples from the full phase space, drawn with the
         appropriate probabilities.
+
+        Parameters
+        ----------
+        samples: pandas.DataFrame whose columns match `self.params`
+        seed: Seed for the random number generator, determines to which
+              unfolding the samples are assigned.
+
+        Return
+        ------
+        pandas.DataFrame with columns per
+        `self.posterior.prior.sampled_params`.
         """
         choice = np.random.default_rng(seed=seed).choice
+        prior = self.posterior.prior
 
         resampled = []
         for _, sample in samples.iterrows():
-            unfolded = self.posterior.prior._unfold(
-                sample[self.posterior.prior.sampled_params].to_numpy())
+            unfolded = prior._unfold(sample[prior.sampled_params].to_numpy())
             probabilities = np.exp(sample[self._lnprob_cols])
             probabilities /= probabilities.sum()
             resampled.append(choice(unfolded, p=probabilities))
 
-        return pd.DataFrame(resampled,
-                            columns=self.posterior.prior.sampled_params)
-
-    def __init_subclass__(cls):
-        """Register subclass in `sampler_registry`."""
-        super().__init_subclass__()
-        sampler_registry[cls.__name__] = cls
+        return pd.DataFrame(resampled, columns=prior.sampled_params)
 
     def gen_rundir(self, parent_dir, mkdir=False,
                    dir_permissions=utils.DIR_PERMISSIONS):
@@ -93,76 +124,51 @@ class Sampler(utils.JSONMixin):
             rundir.mkdir(dir_permissions)
         return rundir
 
-    def submit_slurm(self, rundir, n_hours_limit=168, cpus_per_task=1,
-                     memory_per_node='32G', resume_previous_run=False,
-                     prior_only=False):
+    def submit_slurm(self, rundir, n_hours_limit=168,
+                     memory_per_task='32G', resuming=False):
         """
-        :param json_fname: absolute path to json file of pe object
-        :param rundir: absolute path of run directory
-        :param job name: name of slurm job shown in queue (generated from rundir if None)
-        :param stdout_path: absolute path to slurm outfile (in same directory as json_fname if None)
-        :param n_hours_limit: Number of hours to allocate for the job
-        :param n_cores: Number of cores to assign for the computation
-        :param mem_limit:
-            Amount of memory to assign for the computation (either n_cores or
-            this variable will determine the resource request)
-        :param submit: Flag whether to submit or just print and end
-        :param env_command:
-            If required, pass the command to activate the conda environment
-            If None, will infer from the username if it's in the code below
-        :param resume_previous_run:
-            bool flag (default=False): If True, do not create new run_dir,
-            instead resume a previously terminated sampling run from run_dir
+        Parameters
+        ----------
+        rundir: path of run directory
+        n_hours_limit: Number of hours to allocate for the job
+        memory_per_task: Determines the memory and number of cpus
+        resuming: bool, whether to attempt resuming a previous run if
+                  rundir already exists.
         """
-        # if job name and output file not given, make them this way
         rundir = pathlib.Path(rundir)
-        job_name = (self.__class__.__name__
-                    + self.posterior.likelihood.event_data.eventname
-                    + rundir.name)
+        job_name = '_'.join([self.__class__.__name__,
+                             self.posterior.prior.__class__.__name__,
+                             self.posterior.likelihood.event_data.eventname,
+                             rundir.name])
         stdout_path = rundir.joinpath('output.out').resolve()
-        if mem_limit is not None:
-            # Helios has 128/28 GB per core, ensure that jobs do not fight
-            n_cores_to_request = \
-                max(cpus_per_task,
-                    int(np.ceil(cpus_per_task * int(mem_limit) * 28/128)))
-        else:
-            n_cores_to_request = cpus_per_task
 
-        text = textwrap.dedent(f"""\
-            #!/bin/bash
-            #SBATCH --job-name={job_name}
-            #SBATCH --output={stdout_path}
-            #SBATCH --open-mode=append
-            #SBATCH --ntasks=1
-            #SBATCH --cpus-per-task={n_cores_to_request}
-            #SBATCH --mem={memory_per_node}
-            #SBATCH --time={int(n_hours_limit)}:00:00
+        self.to_json(rundir, overwrite=resuming)
 
-            eval "$(conda shell.bash hook)"
-            conda activate {os.environ['CONDA_DEFAULT_ENV']}
+        with tempfile.TemporaryFile() as file:
+            file.write(textwrap.dedent(f"""\
+                #!/bin/bash
+                #SBATCH --job-name={job_name}
+                #SBATCH --output={stdout_path}
+                #SBATCH --open-mode=append
+                #SBATCH --mem-per-cpu={memory_per_task}
+                #SBATCH --time={int(n_hours_limit)}:00:00
 
-            srun {sys.executable} {__file__}
-            """)
-        return text
+                eval "$(conda shell.bash hook)"
+                conda activate {os.environ['CONDA_DEFAULT_ENV']}
 
-class PyMultinest(Sampler):
-    """Sample a posterior using PyMultinest."""
-    DEFAULT_RUN_KWARGS = {'n_iter_before_update': 10**5,
-                          'n_live_points': 2000,
-                          'evidence_tolerance': .1}
+                srun {sys.executable} {__file__} {rundir.resolve()}
+                """))
+            file.seek(0)  # Rewind
+            os.system(f'srun {file}')
+            print(f'Submitted job {job_name!r}.')
 
-    def __init__(self, posterior, run_kwargs=None):
-        super().__init__(posterior, run_kwargs)
-        self.run_kwargs['wrapped_params'] = [
-            par in self.posterior.prior.periodic_params
-            for par in self.posterior.prior.sampled_params]
+    @abc.abstractmethod
+    def _run(self):
+        """Sample the distribution."""
 
-    def run_pymultinest(self, dirname,
-                        dir_permissions=utils.DIR_PERMISSIONS,
-                        file_permissions=utils.FILE_PERMISSIONS,
-                        **run_kwargs):
+    def run(self, dirname):
         """
-        Make a directory to save results and run pymultinest.
+        Make a directory to save results and run sampler.
 
         Parameters
         ----------
@@ -175,19 +181,39 @@ class PyMultinest(Sampler):
                               corrupted files (if the job gets killed).
         kwargs: passed to `pymultinest.run`, updates `self.run_kwargs`.
         """
+
         dirname = os.path.join(dirname, '')
 
-        self.run_kwargs |= run_kwargs
         self.run_kwargs['outputfiles_basename'] = dirname
 
-        self.to_json(dirname, dir_permissions=dir_permissions,
-                     file_permissions=file_permissions, overwrite=True)
+        self.to_json(dirname, dir_permissions=self.dir_permissions,
+                     file_permissions=self.file_permissions, overwrite=True)
 
-        pymultinest.run(self._lnposterior, self._cubetransform, self._ndim,
-                        self._nparams, **self.run_kwargs)
+        with Profile() as profiler:
+            self._run()
+        profiler.dump_stats(os.path.join(dirname, PROFILING_FILENAME))
 
         for path in pathlib.Path(dirname).iterdir():
-            path.chmod(file_permissions)
+            path.chmod(self.file_permissions)
+
+
+
+class PyMultiNest(Sampler):
+    """Sample a posterior using PyMultinest."""
+    DEFAULT_RUN_KWARGS = {'n_iter_before_update': 10**5,
+                          'n_live_points': 2000,
+                          'evidence_tolerance': .1}
+
+    @wraps(Sampler.__init__)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.run_kwargs['wrapped_params'] = [
+            par in self.posterior.prior.periodic_params
+            for par in self.posterior.prior.sampled_params]
+
+    def _run(self):
+        pymultinest.run(self._lnprob_pymultinest, self._cubetransform,
+                        self._ndim, self._nparams, **self.run_kwargs)
 
     def load_samples(self, test_relative_binning_accuracy=False):
         """
@@ -209,24 +235,29 @@ class PyMultinest(Sampler):
             self.posterior.test_relative_binning_accuracy(samples)
         self.samples = samples
 
-    def _cubetransform(self, cube, *_):
-        for i in range(self._ndim):
-            cube[i] = (self.posterior.prior.cubemin[i]
-                       + cube[i] * self.posterior.cubesize[i])
-
-    def _lnposterior(self, par_vals, *_):
+    def _lnprob_pymultinest(self, par_vals, *_):
         """
         Update the extra entries `par_vals[n_dim : n_params+1]` with the
         log posterior evaulated at each unfold. Return the logarithm of
         the folded posterior.
         """
-        lnposts = self.posterior.lnposteriors_folds(
-            *[par_vals[i] for i in range(self._ndim)])
-        for i, lnpost in enumerate(lnposts):
-            par_vals[self._ndim + i] = lnpost
-        return scipy.special.logsumexp(lnposts)
+        lnprobs = self._get_lnprobs(*[par_vals[i] for i in range(self._ndim)])
+        for i, lnprob in enumerate(lnprobs):
+            par_vals[self._ndim + i] = lnprob
+        return scipy.special.logsumexp(lnprobs)
 
+    def _cubetransform(self, cube, *_):
+        for i in range(self._ndim):
+            cube[i] = (self.posterior.prior.cubemin[i]
+                       + cube[i] * self.posterior.prior.folded_cubesize[i])
 
+    def to_json(self, dirname, *args, **kwargs):
+        """
+        Update run_kwargs['outputfiles_basename'] before saving.
+        Parameters are as in `utils.JSONMixin.to_json()`
+        """
+        self.run_kwargs['outputfiles_basename'] = os.path.join(dirname, '')
+        super().to_json(dirname, *args, **kwargs)
 
 
 # class Ultranest(Sampler):
@@ -285,29 +316,14 @@ class PyMultinest(Sampler):
 #         return self.posterior.lnposterior(*par_vals)
 
 
-def submit_slurm_script(text, current_tmp_filename=None):
-    if current_tmp_filename is None:
-        time.sleep(np.random.uniform(0.01, 0.11))
-        current_tmp_filename = f"{TMP_FILENAME}_{np.random.randint(0, 2 ** 40)}.tmp"
-    with open(current_tmp_filename, "w") as file:
-        file.write(text)
-    print("changing its permissions")
-    # Add user run permissions
-    os.system(f"chmod 777 {current_tmp_filename}")
-    print("sending jobs")
-    os.system(f"sbatch {current_tmp_filename}")
-    time.sleep(0.4)
-    print(f"removing config file {current_tmp_filename}")
-    os.remove(current_tmp_filename)
-    return
-
 def main(sampler_path):
-    dirname = os.path.dirname(sampler_path)
+    """Load sampler and run it."""
+    dirname = (sampler_path if os.path.isdir(sampler_path)
+               else os.path.dirname(sampler_path))
     utils.read_json(sampler_path).run(dirname)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('sampler_path')
-    args = parser.parse_args()
-    run_kwargs = dict(arg.split('=') for arg in args.run_kwargs)
-    main(args.dirname, **run_kwargs)
+    parser = argparse.ArgumentParser(description='Sample a distribution.')
+    parser.add_argument('sampler_path', help='''path to a json file from a
+                                                `sampling.Sampler` object.''')
+    main(**vars(parser.parse_args()))

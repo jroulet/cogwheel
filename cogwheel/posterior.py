@@ -248,8 +248,7 @@ if __name__ == '__main__':
                        saved as columns in the dataframe.''')
 
     parser.add_argument('posterior_path',
-                        help='''path to json file from a
-                                `cogwheel.parameter_estimation.Posterior`
+                        help='''path to json file from a `posterior.Posterior`
                                 object.''')
     parser.add_argument('samples_path',
                         help='path to a `pandas` pickle file with samples.')

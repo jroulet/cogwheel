@@ -1,6 +1,5 @@
 """Utility functions."""
 
-import glob
 import importlib
 import inspect
 import json
@@ -84,15 +83,16 @@ def read_json(json_path):
     Return a class instance that was saved to json.
     """
     # Accept a directory that contains a single json file
-    if os.path.isdir(json_path):
-        jsons = glob.glob(os.path.join(json_path, '*.json'))
+    json_path = pathlib.Path(json_path)
+    if json_path.is_dir():
+        jsons = json_path.glob('*.json')
         if (njsons := len(jsons)) != 1:
-            raise ValueError(f'{json_path!r} contains {njsons} json files.')
+            raise ValueError(f'{json_path} contains {njsons} json files.')
         json_path = jsons[0]
 
     with open(json_path) as json_file:
         obj = json.load(json_file, cls=CogwheelDecoder,
-                        dirname=os.path.dirname(json_path))
+                        dirname=json_path.parent)
 
     return obj
 
