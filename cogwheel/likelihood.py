@@ -23,7 +23,7 @@ def hole_edges(mask):
     """
     Return nholes x 2 array with edges of holes (holes extend from
     [left_edge : right_edge]).
-    Append ones at left and right to catch end holes if present.
+    Appends ones at left and right to catch end holes if present.
     """
     edges = np.diff(np.r_[1, mask, 1])
     left_edges = np.where(edges == -1)[0].astype(np.uint32)
@@ -158,6 +158,8 @@ class CBCLikelihood(utils.JSONMixin):
         par_dic: dictionary of waveform parameters.
         tol: stochastic error tolerance in the measurement, used to
              decide the number of samples.
+        kwargs: passed to `safe_std`, keys include:
+                `max_contiguous_low`, `expected_high`, `reject_nearby`.
         """
         normalized_h_f = self._get_h_f(par_dic, normalize=True)
         z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
@@ -513,9 +515,9 @@ class ReferenceWaveformFinder(CBCLikelihood):
              / np.linalg.norm(h_white))**2)
 
 
-TOLERANCE_PARAMS = {'ref_wf_lnl_difference': 1.,
+TOLERANCE_PARAMS = {'ref_wf_lnl_difference': np.inf,
                     'raise_ref_wf_outperformed': False,
-                    'check_relative_binning_every': 10**4,
+                    'check_relative_binning_every': np.inf,
                     'relative_binning_dlnl_tol': .1,
                     'lnl_drop_from_peak': 20.}
 
@@ -589,8 +591,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         else:
             self.fbin = fbin
 
-        tolerance_params = tolerance_params or {}
-        self.tolerance_params = {**TOLERANCE_PARAMS, **tolerance_params}
+        self.tolerance_params = TOLERANCE_PARAMS | (tolerance_params or {})
 
         self._lnlike_evaluations = 0
 
@@ -610,7 +611,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
                ).real.sum(axis=(0, -1)))
 
-        lnl = np.sum((d_h - h_h/2) * self.asd_drift**-2)
+        lnl = np.sum((d_h - h_h/2) / self.asd_drift**2)
 
         if bypass_tests:
             return lnl
@@ -683,9 +684,8 @@ class RelativeBinningLikelihood(CBCLikelihood):
             self.event_data.frequencies, fbin - self.event_data.df/2))
         self._fbin = self.event_data.frequencies[fbin_ind]  # Bin edges
 
-        if hasattr(self, '_par_dic_0'):
-            self._set_summary()  # Reset summary data
-
+        self._set_splines()
+        self._set_summary()
         self._pn_phase_tol = None  # Erase potentially outdated information
 
     @property
@@ -699,6 +699,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
     @spline_degree.setter
     def spline_degree(self, spline_degree):
         self._spline_degree = spline_degree
+        self._set_splines()
         self._set_summary()
 
     @property
@@ -710,6 +711,13 @@ class RelativeBinningLikelihood(CBCLikelihood):
     def par_dic_0(self, par_dic_0):
         self._par_dic_0 = par_dic_0
         self._set_summary()
+
+    def _set_splines(self):
+        basis_splines = [InterpolatedUnivariateSpline(
+            self.fbin, y_i, k=self.spline_degree, ext='zeros')
+                         for y_i in np.eye(len(self.fbin))]
+        self._splines = np.transpose([basis_spline(self.event_data.frequencies)
+                                      for basis_spline in basis_splines])
 
     def _set_summary(self):
         """
@@ -724,11 +732,6 @@ class RelativeBinningLikelihood(CBCLikelihood):
 
         # TODO: maybe enforce a minimum amplitude for h_0?
         """
-        basis_splines = [InterpolatedUnivariateSpline(
-            self.fbin, y_i, k=self.spline_degree, ext='zeros')
-                         for y_i in np.eye(len(self.fbin))]
-        self._splines = np.transpose([basis_spline(self.event_data.frequencies)
-                                      for basis_spline in basis_splines])
         h0_f = self._get_h_f(self.par_dic_0, by_m=True)
         h0_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, self.par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
