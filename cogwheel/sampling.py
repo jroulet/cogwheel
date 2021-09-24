@@ -6,7 +6,6 @@ import pathlib
 import os
 import re
 import sys
-import tempfile
 import textwrap
 from cProfile import Profile
 from functools import wraps
@@ -20,8 +19,6 @@ import pymultinest
 
 from . import utils
 
-PROFILING_FILENAME = 'profiling'
-
 
 class Sampler(abc.ABC, utils.JSONMixin):
     """
@@ -30,6 +27,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
     """
     DEFAULT_RUN_KWARGS = {}  # Implemented by subclasses
     RUNDIR_PREFIX = 'run_'
+    PROFILING_FILENAME = 'profiling'
 
     def __init__(self, posterior, run_kwargs=None, sample_prior=False,
                  dir_permissions=utils.DIR_PERMISSIONS,
@@ -95,41 +93,33 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         return pd.DataFrame(resampled, columns=prior.sampled_params)
 
-    def gen_rundir(self, parent_dir, mkdir=False,
-                   dir_permissions=utils.DIR_PERMISSIONS):
+    def get_rundir(self, parentdir):
         """
         Return a `pathlib.Path` object with a new run directory,
         following a standardized naming scheme for output directories.
         Directory will be of the form
-        {parent_dir}/{prior_class}/{eventname}/{RUNDIR_PREFIX}{i_run}
+        {parentdir}/{prior_class}/{eventname}/{RUNDIR_PREFIX}{i_run}
 
         Parameters
         ----------
-        parent_dir: str, path to a directory where to store parameter
-                    estimation data.
-        mkdir: bool, whether to actually make the rundir.
-        dir_permissions: octal, directory permissions.
+        parentdir: str, path to a directory where to store parameter
+                   estimation data.
         """
-        event_dir = pathlib.Path(parent_dir).joinpath(
-            self.posterior.prior.__class__.__name__,
-            self.posterior.likelihood.event_data.eventname)
-        old_rundirs = [path for path in event_dir.iterdir() if path.is_dir()
+        eventdir = self.posterior.get_eventdir(parentdir)
+        old_rundirs = [path for path in eventdir.iterdir() if path.is_dir()
                        and path.match(f'{self.RUNDIR_PREFIX}*')]
         run_id = 0
         if old_rundirs:
             run_id = max([int(re.search(r'\d+', rundir.name).group())
                           for rundir in old_rundirs]) + 1
-        rundir = event_dir.joinpath(f'{self.RUNDIR_PREFIX}{run_id}')
-        if mkdir:
-            rundir.mkdir(dir_permissions)
-        return rundir
+        return eventdir.joinpath(f'{self.RUNDIR_PREFIX}{run_id}')
 
     def submit_slurm(self, rundir, n_hours_limit=168,
                      memory_per_task='32G', resuming=False):
         """
         Parameters
         ----------
-        rundir: path of run directory
+        rundir: path of run directory, e.g. from `self.get_rundir`
         n_hours_limit: Number of hours to allocate for the job
         memory_per_task: Determines the memory and number of cpus
         resuming: bool, whether to attempt resuming a previous run if
@@ -145,24 +135,29 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         self.to_json(rundir, overwrite=resuming)
 
-        with tempfile.NamedTemporaryFile() as file:
-            file.write(textwrap.dedent(f"""\
+        package = os.path.normpath(os.path.join(os.path.dirname(__file__), '..'))
+        module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
+
+        batch_path = rundir/'batchfile'
+        with open(batch_path, 'w+') as batchfile:
+            batchfile.write(textwrap.dedent(f"""\
                 #!/bin/bash
                 #SBATCH --job-name={job_name}
                 #SBATCH --output={stdout_path}
                 #SBATCH --error={stderr_path}
                 #SBATCH --open-mode=append
                 #SBATCH --mem-per-cpu={memory_per_task}
-                #SBATCH --time={int(n_hours_limit)}:00:00
+                #SBATCH --time={n_hours_limit:02}:00:00
 
                 eval "$(conda shell.bash hook)"
                 conda activate {os.environ['CONDA_DEFAULT_ENV']}
 
-                srun {sys.executable} {__file__} {rundir.resolve()}
+                cd {package}
+                srun {sys.executable} -m {module} {rundir.resolve()}
                 """))
-            file.seek(0)  # Rewind
-            os.system(f'srun {file.name}')
-            print(f'Submitted job {job_name!r}.')
+        batch_path.chmod(0o777)
+        os.system(f'sbatch {batch_path.resolve()}')
+        print(f'Submitted job {job_name!r}.')
 
     @abc.abstractmethod
     def _run(self):
@@ -175,32 +170,22 @@ class Sampler(abc.ABC, utils.JSONMixin):
         Parameters
         ----------
         dirname: directory where to save output, will create if needed.
-        dir_permissions: octal, permissions to give to the directory.
-        file_permissions: octal, permissions to give to the files.
-        n_iter_before_update: int, how often pymultinest should
-                              checkpoint. Checkpointing often is slow
-                              and increases the odds of getting
-                              corrupted files (if the job gets killed).
-        kwargs: passed to `pymultinest.run`, updates `self.run_kwargs`.
         """
 
-        dirname = os.path.join(dirname, '')
-
-        self.run_kwargs['outputfiles_basename'] = dirname
-
+        dirname = pathlib.Path(dirname)
         self.to_json(dirname, dir_permissions=self.dir_permissions,
                      file_permissions=self.file_permissions, overwrite=True)
 
         with Profile() as profiler:
             self._run()
-        profiler.dump_stats(os.path.join(dirname, PROFILING_FILENAME))
+        profiler.dump_stats(dirname/self.PROFILING_FILENAME)
 
-        for path in pathlib.Path(dirname).iterdir():
+        for path in dirname.iterdir():
             path.chmod(self.file_permissions)
 
 
 class PyMultiNest(Sampler):
-    """Sample a posterior using PyMultinest."""
+    """Sample a posterior using PyMultiNest."""
     DEFAULT_RUN_KWARGS = {'n_iter_before_update': 10**5,
                           'n_live_points': 2000,
                           'evidence_tolerance': .1}
@@ -231,7 +216,7 @@ class PyMultiNest(Sampler):
         fname = os.path.join(self.run_kwargs['outputfiles_basename'],
                              'post_equal_weights.dat')
         folded = pd.DataFrame(np.loadtxt(fname)[:, :-1], columns=self.params)
-        samples = self.posterior.resample(folded)
+        samples = self.resample(folded)
         if test_relative_binning_accuracy:
             self.posterior.test_relative_binning_accuracy(samples)
         self.samples = samples

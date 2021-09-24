@@ -72,6 +72,17 @@ def merge_dictionaries_safely(dics):
     return merged
 
 
+def get_eventdir(parentdir, prior_class, eventname):
+    """
+    Return pathlib.Path object for a directory of the form
+    {parentdir}/{prior_class}/{eventname}/
+    This directory is intended to contain a Posterior instance
+    and multiple rundir directories with parameter estimation
+    output for different sampler settings.
+    """
+    return pathlib.Path(parentdir)/prior_class/eventname
+
+
 # ----------------------------------------------------------------------
 # JSON I/O:
 
@@ -85,7 +96,7 @@ def read_json(json_path):
     # Accept a directory that contains a single json file
     json_path = pathlib.Path(json_path)
     if json_path.is_dir():
-        jsons = json_path.glob('*.json')
+        jsons = list(json_path.glob('*.json'))
         if (njsons := len(jsons)) != 1:
             raise ValueError(f'{json_path} contains {njsons} json files.')
         json_path = jsons[0]

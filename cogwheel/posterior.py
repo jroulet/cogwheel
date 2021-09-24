@@ -5,6 +5,7 @@ Can run as a script to test relative binning accuracy on samples.
 
 import argparse
 import inspect
+import pathlib
 import subprocess
 import sys
 import os
@@ -58,7 +59,7 @@ class Posterior(utils.JSONMixin):
         # Increase `n_cached_waveforms` to ensure fast moves remain fast
         fast_sampled_params = self.prior.get_fast_sampled_params(
             self.likelihood.waveform_generator.fast_params)
-        n_slow_folded = len(set(self.prior.foldable_params)
+        n_slow_folded = len(set(self.prior.folded_params)
                             - set(fast_sampled_params))
         self.likelihood.waveform_generator.n_cached_waveforms \
             = 2 ** n_slow_folded
@@ -218,6 +219,16 @@ class Posterior(utils.JSONMixin):
         print(f'Found solution with lnl = {likelihood_instance._lnl_0}')
 
         return pe_instance
+
+    def get_eventdir(self, parentdir):
+        """
+        Return directory name in which the Posterior instance
+        should be saved, of the form
+        {parentdir}/{prior_class}/{eventname}/
+        """
+        return utils.get_eventdir(
+            parentdir, self.prior.__class__.__name__,
+            self.likelihood.event_data.eventname)
 
 
 def _test_relative_binning_accuracy(posterior_path, samples_path):
