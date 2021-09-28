@@ -102,10 +102,8 @@ def read_json(json_path):
         json_path = jsons[0]
 
     with open(json_path) as json_file:
-        obj = json.load(json_file, cls=CogwheelDecoder,
-                        dirname=json_path.parent)
-
-    return obj
+        return json.load(json_file, cls=CogwheelDecoder,
+                         dirname=json_path.parent)
 
 
 class JSONMixin:
@@ -131,8 +129,9 @@ class JSONMixin:
             raise FileExistsError(
                 f'{filename} exists. Pass `overwrite=True` to overwrite.')
 
-        pathlib.Path(dirname).mkdir(mode=dir_permissions, parents=True,
-                                    exist_ok=True)
+        for parent in reversed(pathlib.Path(dirname).parents):
+            parent.mkdir(mode=dir_permissions, exist_ok=True)
+
         with open(filename, 'w') as outfile:
             json.dump(self, outfile, cls=CogwheelEncoder, dirname=dirname,
                       file_permissions=file_permissions, overwrite=overwrite,
@@ -165,8 +164,8 @@ class NumpyEncoder(json.JSONEncoder):
     """
     def default(self, o):
         if isinstance(o, (np.int_, np.intc, np.intp, np.int8,
-                            np.int16, np.int32, np.int64, np.uint8,
-                            np.uint16, np.uint32, np.uint64)):
+                          np.int16, np.int32, np.int64, np.uint8,
+                          np.uint16, np.uint32, np.uint64)):
             return int(o)
 
         if isinstance(o, (np.float_, np.float16, np.float32, np.float64)):
