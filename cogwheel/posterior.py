@@ -10,6 +10,8 @@ import subprocess
 import sys
 import os
 import tempfile
+import textwrap
+import time
 import numpy as np
 import pandas as pd
 
@@ -231,39 +233,93 @@ class Posterior(utils.JSONMixin):
             self.likelihood.event_data.eventname)
 
 
-def _test_relative_binning_accuracy(posterior_path, samples_path):
+def initialize_posteriors_slurm(eventnames, approximant, prior_class,
+                                parentdir):
     """
-    Compute log likelihood of parameter samples with and without
-    relative binning. Results are stored as columns on the samples
-    DataFrame, whose pickle file is overwritten.
-
-    Parameters
-    ----------
-    posterior_path: path to a json file from a Posterior instance.
-    samples_path: path to a pickle file from a pandas DataFrame.
+    Submit jobs that initialize `Posterior.from_event()` for each event.
     """
-    print('Analyzing', samples_path)
-    posterior = utils.read_json(posterior_path)
-    samples = pd.read_pickle(samples_path)[posterior.prior.sampled_params]
-    result = [posterior.likelihood.test_relative_binning_accuracy(
-        posterior.prior.transform(**sample))
-              for _, sample in samples.iterrows()]
-    samples['lnl_rb'], samples['lnl_fft'] = np.transpose(result)
-    samples.to_pickle(samples_path)
+    package = pathlib.Path(__file__).parents[1].resolve()
+    module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
 
+    for eventname in eventnames:
+        eventdir = utils.get_eventdir(parentdir, prior_class, eventname)
+        job_name = f'{eventname}_posterior'
+        stdout_path = (eventdir/'posterior_from_event.out').resolve()
+        stderr_path = (eventdir/'posterior_from_event.err').resolve()
+        args = ' '.join(eventname, approximant, prior_class)
+
+
+        with tempfile.NamedTemporaryFile('w+') as batchfile:
+            batchfile.write(textwrap.dedent(f"""\
+                #!/bin/bash
+                #SBATCH --job-name={job_name}
+                #SBATCH --output={stdout_path}
+                #SBATCH --error={stderr_path}
+                #SBATCH --time=02:00:00
+
+                eval "$(conda shell.bash hook)"
+                conda activate {os.environ['CONDA_DEFAULT_ENV']}
+
+                cd {package}
+                srun {sys.executable} -m {module} {args}
+                """
+            batchfile.seek(0)
+
+            os.system(f'chmod 777 {batchfile.name}')
+            os.system(f'sbatch {batchfile.name}')
+            time.sleep(.1)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='''Compute likelihood with and without relative binning.
-                       Input a path to a dataframe with samples, results are
-                       saved as columns in the dataframe.''')
+        description='''Construct a Posterior instance and save it to json.''')
 
-    parser.add_argument('posterior_path',
-                        help='''path to json file from a `posterior.Posterior`
-                                object.''')
-    parser.add_argument('samples_path',
-                        help='path to a `pandas` pickle file with samples.')
+    parser.add_argument('eventname', help='key from `data.event_registry`.')
+    parser.add_argument('approximant', help='key from `waveform.APPROXIMANTS`')
+    parser.add_argument('prior_class',
+                        help='key from `gw_prior.prior_registry`')
+    parser.add_argument('parentdir', help='top directory to save output')
 
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    args = parser.parse_args()
+    post = Posterior.from_event(args.eventname, args.approximant,
+                                args.prior_class)
+    post.to_json(post.get_eventdir(args.parentdir))
 
-    _test_relative_binning_accuracy(**vars(parser.parse_args()))
+
+# def _test_relative_binning_accuracy(posterior_path, samples_path):
+#     """
+#     Compute log likelihood of parameter samples with and without
+#     relative binning. Results are stored as columns on the samples
+#     DataFrame, whose pickle file is overwritten.
+
+#     Parameters
+#     ----------
+#     posterior_path: path to a json file from a Posterior instance.
+#     samples_path: path to a pickle file from a pandas DataFrame.
+#     """
+#     print('Analyzing', samples_path)
+#     posterior = utils.read_json(posterior_path)
+#     samples = pd.read_pickle(samples_path)[posterior.prior.sampled_params]
+#     result = [posterior.likelihood.test_relative_binning_accuracy(
+#         posterior.prior.transform(**sample))
+#               for _, sample in samples.iterrows()]
+#     samples['lnl_rb'], samples['lnl_fft'] = np.transpose(result)
+#     samples.to_pickle(samples_path)
+
+
+# if __name__ == '__main__':
+#     parser = argparse.ArgumentParser(
+#         description='''Compute likelihood with and without relative binning.
+#                        Input a path to a dataframe with samples, results are
+#                        saved as columns in the dataframe.''')
+
+#     parser.add_argument('posterior_path',
+#                         help='''path to json file from a `posterior.Posterior`
+#                                 object.''')
+#     parser.add_argument('samples_path',
+#                         help='path to a `pandas` pickle file with samples.')
+
+#     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+#     _test_relative_binning_accuracy(**vars(parser.parse_args()))
+
+
