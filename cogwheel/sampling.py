@@ -2,6 +2,8 @@
 
 import abc
 import argparse
+import itertools
+import json
 import pathlib
 import os
 import re
@@ -9,6 +11,9 @@ import sys
 import textwrap
 from cProfile import Profile
 from functools import wraps
+from pstats import Stats
+from matplotlib.backends.backend_pdf import PdfPages
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.special
@@ -17,8 +22,10 @@ import scipy.special
 # import ultranest.stepsampler
 import pymultinest
 
+from . import grid
 from . import utils
 
+SAMPLES_FILENAME = 'samples.feather'
 
 class Sampler(abc.ABC, utils.JSONMixin):
     """
@@ -28,6 +35,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
     DEFAULT_RUN_KWARGS = {}  # Implemented by subclasses
     RUNDIR_PREFIX = 'run_'
     PROFILING_FILENAME = 'profiling'
+    JSON_FNAME = 'Sampler.json'
 
     def __init__(self, posterior, run_kwargs=None, sample_prior=False,
                  dir_permissions=utils.DIR_PERMISSIONS,
@@ -44,7 +52,6 @@ class Sampler(abc.ABC, utils.JSONMixin):
         self._nparams = len(self.params)
 
         self.run_kwargs = self.DEFAULT_RUN_KWARGS | (run_kwargs or {})
-        self.samples = None
 
         self.dir_permissions = dir_permissions
         self.file_permissions = file_permissions
@@ -135,7 +142,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         self.to_json(rundir, overwrite=resuming)
 
-        package = os.path.normpath(os.path.join(os.path.dirname(__file__), '..'))
+        package = pathlib.Path(__file__).parents[1].resolve()
         module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
 
         batch_path = rundir/'batchfile'
@@ -163,32 +170,55 @@ class Sampler(abc.ABC, utils.JSONMixin):
     def _run(self):
         """Sample the distribution."""
 
-    def run(self, dirname):
+    def run(self, rundir):
         """
         Make a directory to save results and run sampler.
 
         Parameters
         ----------
-        dirname: directory where to save output, will create if needed.
+        rundir: directory where to save output, will create if needed.
         """
 
-        dirname = pathlib.Path(dirname)
-        self.to_json(dirname, dir_permissions=self.dir_permissions,
+        rundir = pathlib.Path(rundir)
+        self.to_json(rundir, dir_permissions=self.dir_permissions,
                      file_permissions=self.file_permissions, overwrite=True)
 
         with Profile() as profiler:
             self._run()
-        profiler.dump_stats(dirname/self.PROFILING_FILENAME)
+        profiler.dump_stats(rundir/self.PROFILING_FILENAME)
 
-        for path in dirname.iterdir():
+        self.load_samples().to_feather(rundir/SAMPLES_FILENAME)
+
+        for path in rundir.iterdir():
             path.chmod(self.file_permissions)
+
+    @abc.abstractmethod
+    def load_samples(self):
+        """
+        Collect samples, resample from them to undo the parameter
+        folding. Return a pandas.DataFrame with the samples.
+        """
+
+    @staticmethod
+    def completed(rundir) -> bool:
+        """Return whether the run completed successfully."""
+        return (pathlib.Path(rundir)/SAMPLES_FILENAME).exists()
+
+    @wraps(utils.JSONMixin.to_json)
+    def to_json(self, dirname, basename=None, **kwargs):
+        """
+        Make `basename` default to 'Sampler.json' even for subclasses.
+        That way it is easier to locate the file if we don't know the
+        sampler subclass.
+        """
+        super().to_json(dirname, basename or self.JSON_FNAME, **kwargs)
 
 
 class PyMultiNest(Sampler):
-    """Sample a posterior using PyMultiNest."""
-    DEFAULT_RUN_KWARGS = {'n_iter_before_update': 10**5,
-                          'n_live_points': 2000,
-                          'evidence_tolerance': .1}
+    """Sample a posterior or prior using PyMultiNest."""
+    DEFAULT_RUN_KWARGS = {'n_iter_before_update': 1000,
+                          'n_live_points': 2048,
+                          'evidence_tolerance': 1/4}
 
     @wraps(Sampler.__init__)
     def __init__(self, *args, **kwargs):
@@ -201,25 +231,15 @@ class PyMultiNest(Sampler):
         pymultinest.run(self._lnprob_pymultinest, self._cubetransform,
                         self._ndim, self._nparams, **self.run_kwargs)
 
-    def load_samples(self, test_relative_binning_accuracy=False):
+    def load_samples(self):
         """
         Collect pymultinest samples, resample from them to undo the
-        parameter folding, optionally compute the likelihood with and
-        without relative binning for testing.
-        A pandas DataFrame with the samples is stored as attribute
-        `samples`.
-
-        Parameters
-        ----------
-        dirname: Directory where pymultinest output is.
+        parameter folding. Return a pandas.DataFrame with the samples.
         """
         fname = os.path.join(self.run_kwargs['outputfiles_basename'],
                              'post_equal_weights.dat')
         folded = pd.DataFrame(np.loadtxt(fname)[:, :-1], columns=self.params)
-        samples = self.resample(folded)
-        if test_relative_binning_accuracy:
-            self.posterior.test_relative_binning_accuracy(samples)
-        self.samples = samples
+        return self.resample(folded)
 
     def _lnprob_pymultinest(self, par_vals, *_):
         """
@@ -237,6 +257,7 @@ class PyMultiNest(Sampler):
             cube[i] = (self.posterior.prior.cubemin[i]
                        + cube[i] * self.posterior.prior.folded_cubesize[i])
 
+    @wraps(utils.JSONMixin.to_json)
     def to_json(self, dirname, *args, **kwargs):
         """
         Update run_kwargs['outputfiles_basename'] before saving.
@@ -244,7 +265,6 @@ class PyMultiNest(Sampler):
         """
         self.run_kwargs['outputfiles_basename'] = os.path.join(dirname, '')
         super().to_json(dirname, *args, **kwargs)
-
 
 # class Ultranest(Sampler):
 #     """
@@ -300,6 +320,175 @@ class PyMultiNest(Sampler):
 
 #     def _lnposterior_ultranest(self, par_vals):
 #         return self.posterior.lnposterior(*par_vals)
+
+
+# ----------------------------------------------------------------------
+# Postprocessing samples:
+
+def diagnostics(eventdir, reference_rundir=None, outfile=None):
+    """
+    Make diagnostics plots aggregating multiple runs of an event and
+    save them to pdf format.
+    These include a summary table of the parameters of the runs,
+    number of samples vs time to completion, and corner plots comparing
+    each run to a reference one.
+
+    Parameters
+    ----------
+    reference_rundir: path to rundir used as reference against which to
+                      overplot samples. Defaults to the first rundir by
+                      name.
+    outfile: path to save output as pdf. Defaults to
+             `{eventdir}/{Diagnostics.DIAGNOSTICS_FILENAME}`.
+    """
+    Diagnostics(eventdir, reference_rundir).diagnostics(outfile)
+
+
+class Diagnostics:
+    """Class to gather information from multiple runs of an event."""
+    DIAGNOSTICS_FILENAME = 'diagnostics.pdf'
+    _NSAMPLES_LABEL = r'$N_\mathrm{samples}$'
+    _RUNTIME_LABEL = 'Runtime (h)'
+
+    def __init__(self, eventdir, reference_rundir=None):
+        """
+        Parameters
+        ----------
+        eventdir: path to directory containing rundirs.
+        reference_rundir: path to reference run directory. Defaults to
+                          the first (by name) rundir in `eventdir`.
+        """
+        self.eventdir = pathlib.Path(eventdir)
+        self.rundirs = self.get_rundirs()
+        self.table = self.make_table()
+        self.reference_rundir = reference_rundir
+
+    def diagnostics(self, outfile=None):
+        """
+        Make diagnostics plots aggregating multiple runs of an event and
+        save them to pdf format in `{eventdir}/{DIAGNOSTICS_FILENAME}`.
+        These include a summary table of the parameters of the runs,
+        number of samples vs time to completion, and corner plots comparing
+        each run to a reference one.
+        """
+        outfile = outfile or self.eventdir/self.DIAGNOSTICS_FILENAME
+        print(f'Diagnostic plots will be saved to {outfile}...')
+
+        if self.reference_rundir:
+            # Move reference_rundir to front:
+            self.rundirs.insert(0, self.rundirs.pop(self.rundirs.index(
+                pathlib.Path(self.reference_rundir))))
+
+        with PdfPages(outfile) as pdf:
+            self._display_table()
+            plt.title(self.eventdir)
+            pdf.savefig(bbox_inches='tight')
+
+            self._scatter_nsamples_vs_runtime()
+            pdf.savefig(bbox_inches='tight')
+
+            refdir, *otherdirs = self.rundirs
+            ref_samples = pd.read_feather(refdir/'samples.feather')
+            ref_grid = grid.Grid.from_samples(list(ref_samples), ref_samples,
+                                               pdf_key=refdir.name)
+            for otherdir in otherdirs:
+                other_samples = pd.read_feather(otherdir/'samples.feather')
+                other_grid = grid.Grid.from_samples(
+                    list(other_samples), other_samples, pdf_key=otherdir.name)
+
+                grid.MultiGrid([ref_grid, other_grid]).corner_plot(
+                    figsize=(10, 10), set_legend=True)
+                pdf.savefig(bbox_inches='tight')
+
+    def get_rundirs(self):
+        """
+        Return a list of rundirs in `self.eventdir` for which sampling
+        has completed. Ignores incomplete runs, printing a warning.
+        """
+        rundirs = []
+        for rundir in sorted(self.eventdir.glob(Sampler.RUNDIR_PREFIX + '*')):
+            if Sampler.completed(rundir):
+                rundirs.append(rundir)
+            else:
+                print(f'{rundir} has not completed, excluding.')
+        return rundirs
+
+    def make_table(self, rundirs=None):
+        """
+        Return a pandas DataFrame with a table that summarizes the
+        different runs in `rundirs`.
+        The columns report the differences in the samplers' `run_kwargs`,
+        plus the runtime and number of samples of each run.
+
+        Parameters
+        ----------
+        rundirs: sequence of `pathlib.Path`s pointing to run directories.
+        """
+        rundirs = rundirs or self.rundirs
+
+        run_kwargs = []
+        for rundir in rundirs:
+            with open(rundir/Sampler.JSON_FNAME) as sampler_file:
+                dic = json.load(sampler_file)['init_kwargs']
+                run_kwargs.append({**dic['run_kwargs'],
+                                   'sample_prior': dic['sample_prior']})
+        run_kwargs = pd.DataFrame(run_kwargs)
+
+        const_cols = [col for col, (first, *others) in run_kwargs.iteritems()
+                      if all(first == other for other in others)]
+        drop_cols = const_cols + ['outputfiles_basename']
+
+        table = pd.concat([pd.DataFrame({'run': [x.name for x in rundirs]}),
+                           run_kwargs.drop(columns=drop_cols, errors='ignore')],
+                          axis=1)
+
+        table[self._NSAMPLES_LABEL] = [
+            len(pd.read_feather(rundir/SAMPLES_FILENAME))
+            for rundir in rundirs]
+
+        table[self._RUNTIME_LABEL] = [
+            Stats(str(rundir/Sampler.PROFILING_FILENAME)).total_tt / 3600
+            for rundir in rundirs]
+
+        return table
+
+    def _display_table(self):
+        """Make a matplotlib figure and display the table in it."""
+        cell_colors = np.full(self.table.shape, list(itertools.islice(
+            itertools.cycle([['whitesmoke'], ['w']]), len(self.table))))
+
+        _, ax = plt.subplots(figsize=(7, 5))
+        ax.axis([0, 1, len(self.table), -1])
+
+        tab = plt.table(
+            self.table.round({self._RUNTIME_LABEL: 2}).to_numpy(),
+            colLabels=self.table.columns,
+            loc='center',
+            cellColours=cell_colors,
+            bbox=[0, 0, 1, 1])
+
+        for cell in tab._cells.values():
+            cell.set_edgecolor(None)
+
+        tab.auto_set_column_width(range(self.table.shape[0]))
+
+        plt.axhline(0, color='k', lw=1)
+        plt.axis('off')
+        plt.tight_layout()
+
+    def _scatter_nsamples_vs_runtime(self):
+        """Scatter plot number of samples vs runtime from `table`."""
+        plt.figure()
+        xpar, ypar = self._RUNTIME_LABEL, self._NSAMPLES_LABEL
+        plt.scatter(self.table[xpar], self.table[ypar])
+        for run, *x_y in self.table[['run', xpar, ypar]].to_numpy():
+            plt.annotate(run.lstrip(Sampler.RUNDIR_PREFIX), x_y,
+                         fontsize='large')
+        plt.grid()
+        plt.xlim(0)
+        plt.ylim(0)
+        plt.xlabel(xpar)
+        plt.ylabel(ypar)
 
 
 def main(sampler_path):
