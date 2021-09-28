@@ -372,7 +372,7 @@ class Diagnostics:
         each run to a reference one.
         """
         outfile = outfile or self.eventdir/self.DIAGNOSTICS_FILENAME
-        print(f'Diagnostic plots will be saved to {outfile}...')
+        print(f'Diagnostic plots will be saved to "{outfile}"...')
 
         if self.reference_rundir:
             # Move reference_rundir to front:
