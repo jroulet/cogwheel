@@ -129,8 +129,8 @@ class JSONMixin:
             raise FileExistsError(
                 f'{filename} exists. Pass `overwrite=True` to overwrite.')
 
-        for parent in reversed(pathlib.Path(dirname).parents):
-            parent.mkdir(mode=dir_permissions, exist_ok=True)
+        for path in list(pathlib.Path(dirname).parents)[::-1] + [dirname]:
+            path.mkdir(mode=dir_permissions, exist_ok=True)
 
         with open(filename, 'w') as outfile:
             json.dump(self, outfile, cls=CogwheelEncoder, dirname=dirname,
