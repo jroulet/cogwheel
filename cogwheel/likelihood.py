@@ -406,7 +406,8 @@ class ReferenceWaveformFinder(CBCLikelihood):
         Modify inplace the entries of `par_dic` correspondig to
         `m1, m2, s1z, s2z` with the new solution.
         """
-        eta_rng = gw_utils.q_to_eta(self.event_data.q_min), .25
+        # eta_max < .25 to avoid q = 1 solutions that don't have all harmonics
+        eta_rng = gw_utils.q_to_eta(self.event_data.q_min), .24
         chieff_rng = (-1, 1)
 
         def lnlike_incoherent(mchirp, eta, chieff):
