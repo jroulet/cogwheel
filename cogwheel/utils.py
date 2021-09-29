@@ -9,10 +9,6 @@ import numpy as np
 from scipy.optimize import _differentialevolution
 
 
-DIR_PERMISSIONS = 0o755
-FILE_PERMISSIONS = 0o644
-
-
 class ClassProperty:
     """
     Can be used like `@property` but for class attributes instead of
@@ -41,8 +37,7 @@ def differential_evolution_with_guesses(
     """
     with _DifferentialEvolutionSolverWithGuesses(func, bounds, guesses,
                                                  **kwargs) as solver:
-        ret = solver.solve()
-    return ret
+        return solver.solve()
 
 
 class _DifferentialEvolutionSolverWithGuesses(
@@ -74,17 +69,29 @@ def merge_dictionaries_safely(dics):
 
 def get_eventdir(parentdir, prior_class, eventname):
     """
-    Return pathlib.Path object for a directory of the form
+    Return `pathlib.Path` object for a directory of the form
     {parentdir}/{prior_class}/{eventname}/
-    This directory is intended to contain a Posterior instance
+    This directory is intended to contain a `Posterior` instance,
     and multiple rundir directories with parameter estimation
     output for different sampler settings.
+    I.e. the file structure is as follows:
+
+        <parentdir>
+        └── <prior_class>
+            └── <eventdir>
+                ├── Posterior.json
+                └── <rundir>
+                    ├── Sampler.json
+                    └── <sampler_output_files>
     """
     return pathlib.Path(parentdir)/prior_class/eventname
 
 
 # ----------------------------------------------------------------------
 # JSON I/O:
+
+DIR_PERMISSIONS = 0o755
+FILE_PERMISSIONS = 0o644
 
 class_registry = {}
 
