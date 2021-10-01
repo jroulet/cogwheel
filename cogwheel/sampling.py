@@ -121,7 +121,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
                           for rundir in old_rundirs]) + 1
         return eventdir.joinpath(f'{self.RUNDIR_PREFIX}{run_id}')
 
-    def submit_slurm(self, rundir, n_hours_limit=168,
+    def submit_slurm(self, rundir, n_hours_limit=48,
                      memory_per_task='32G', resuming=False):
         """
         Parameters

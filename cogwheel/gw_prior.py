@@ -295,7 +295,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
     range_dic = {'d_hat': NotImplemented}
     conditioned_on = ['ra', 'dec', 'psi', 'iota', 'm1', 'm2']
 
-    def __init__(self, *, tgps, ref_det_name, d_hat_max=100, **kwargs):
+    def __init__(self, *, tgps, ref_det_name, d_hat_max=500, **kwargs):
         self.range_dic = {'d_hat': (0, d_hat_max)}
         super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
 
