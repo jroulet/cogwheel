@@ -87,6 +87,21 @@ def get_eventdir(parentdir, prior_class, eventname):
     return pathlib.Path(parentdir)/prior_class/eventname
 
 
+def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):
+    """
+    Create directory and its parents if needed, ensuring the
+    whole tree has the same permissions. Existing directories
+    are left unchanged.
+
+    Parameters
+    ----------
+    dirname: path of directory to make.
+    dir_permissions: octal with permissions.
+    """
+    dirname = pathlib.Path(dirname)
+    for path in list(dirname.parents)[::-1] + [dirname]:
+        path.mkdir(mode=dir_permissions, exist_ok=True)
+
 # ----------------------------------------------------------------------
 # JSON I/O:
 
@@ -130,20 +145,19 @@ class JSONMixin:
         It can then be loaded with `read_json`.
         """
         basename = basename or f'{self.__class__.__name__}.json'
-        filename = os.path.join(dirname, basename)
+        filepath = pathlib.Path(dirname)/basename
 
-        if not overwrite and os.path.exists(filename):
+        if not overwrite and filepath.exists():
             raise FileExistsError(
-                f'{filename} exists. Pass `overwrite=True` to overwrite.')
+                f'{filepath.name} exists. Pass `overwrite=True` to overwrite.')
 
-        for parent in reversed(pathlib.Path(dirname).parents):
-            parent.mkdir(mode=dir_permissions, exist_ok=True)
+        mkdirs(dirname, dir_permissions)
 
-        with open(filename, 'w') as outfile:
+        with open(filepath, 'w') as outfile:
             json.dump(self, outfile, cls=CogwheelEncoder, dirname=dirname,
                       file_permissions=file_permissions, overwrite=overwrite,
                       indent=2)
-        pathlib.Path(filename).chmod(file_permissions)
+        filepath.chmod(file_permissions)
 
     def __init_subclass__(cls):
         """Register subclasses."""

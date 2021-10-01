@@ -205,22 +205,22 @@ class Posterior(utils.JSONMixin):
                         for key in event_data_keys} | bestfit | kwargs
         prior_instance = prior_class(**prior_kwargs)
 
-        pe_instance = cls(prior_instance, likelihood_instance)
+        posterior_instance = cls(prior_instance, likelihood_instance)
 
         # Refine relative binning solution over all space
         print('Performing a second search...')
         guess = prior_instance.inverse_transform(
             **likelihood_instance.par_dic_0)
         result = utils.differential_evolution_with_guesses(
-            lambda pars: -pe_instance.likelihood.lnlike(
-                pe_instance.prior.transform(*pars)),
+            lambda pars: -posterior_instance.likelihood.lnlike(
+                posterior_instance.prior.transform(*pars)),
             list(prior_instance.range_dic.values()),
             list(guess.values()),
             seed=seed)
         likelihood_instance.par_dic_0 = prior_instance.transform(*result.x)
         print(f'Found solution with lnl = {likelihood_instance._lnl_0}')
 
-        return pe_instance
+        return posterior_instance
 
     def get_eventdir(self, parentdir):
         """
@@ -243,11 +243,12 @@ def initialize_posteriors_slurm(eventnames, approximant, prior_class,
 
     for eventname in eventnames:
         eventdir = utils.get_eventdir(parentdir, prior_class, eventname)
+        utils.mkdirs(eventdir)
+
         job_name = f'{eventname}_posterior'
         stdout_path = (eventdir/'posterior_from_event.out').resolve()
         stderr_path = (eventdir/'posterior_from_event.err').resolve()
-        args = ' '.join(eventname, approximant, prior_class)
-
+        args = ' '.join([eventname, approximant, prior_class, parentdir])
 
         with tempfile.NamedTemporaryFile('w+') as batchfile:
             batchfile.write(textwrap.dedent(f"""\
@@ -262,12 +263,18 @@ def initialize_posteriors_slurm(eventnames, approximant, prior_class,
 
                 cd {package}
                 srun {sys.executable} -m {module} {args}
-                """
+                """))
             batchfile.seek(0)
 
             os.system(f'chmod 777 {batchfile.name}')
             os.system(f'sbatch {batchfile.name}')
             time.sleep(.1)
+
+
+def main(eventname, approximant, prior_class, parentdir):
+    post = Posterior.from_event(eventname, approximant, prior_class)
+    post.to_json(post.get_eventdir(parentdir))
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -279,10 +286,7 @@ if __name__ == '__main__':
                         help='key from `gw_prior.prior_registry`')
     parser.add_argument('parentdir', help='top directory to save output')
 
-    args = parser.parse_args()
-    post = Posterior.from_event(args.eventname, args.approximant,
-                                args.prior_class)
-    post.to_json(post.get_eventdir(args.parentdir))
+    main(**vars(parser.parse_args()))
 
 
 # def _test_relative_binning_accuracy(posterior_path, samples_path):
