@@ -9,6 +9,10 @@ import numpy as np
 from scipy.optimize import _differentialevolution
 
 
+DIR_PERMISSIONS = 0o755
+FILE_PERMISSIONS = 0o644
+
+
 class ClassProperty:
     """
     Can be used like `@property` but for class attributes instead of
@@ -105,8 +109,6 @@ def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):
 # ----------------------------------------------------------------------
 # JSON I/O:
 
-DIR_PERMISSIONS = 0o755
-FILE_PERMISSIONS = 0o644
 
 class_registry = {}
 
