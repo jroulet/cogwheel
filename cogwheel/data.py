@@ -22,6 +22,7 @@ class EventData(utils.JSONMixin):
         ----------
         eventname: string, e.g. `'GW151914'`.
         frequencies: array of frequencies in Hz.
+                     As in np.fft.rfftfreq(), uniform and starting at zero
         strain: ndet x nfreq array, frequency-domain strain data.
         psd: ndet x nfreq array, frequency-domain PSD.
         detector_names: string, e.g. `'HLV'`.
@@ -43,7 +44,8 @@ class EventData(utils.JSONMixin):
         self.df = frequencies[1] - frequencies[0]
         np.testing.assert_allclose(self.df, np.diff(frequencies),
                                    err_msg='Irregular frequency grid.')
-
+        np.testing.assert_equal(frequencies[0], 0,
+                                err_msg=f'Frequency grid must start at 0')
         self.eventname = eventname
         self.frequencies = frequencies
         self.strain = strain

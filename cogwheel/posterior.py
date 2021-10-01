@@ -199,6 +199,7 @@ class Posterior(utils.JSONMixin):
         likelihood_instance = RelativeBinningLikelihood(
             event_data, waveform_generator, bestfit['par_dic'], fbin,
             pn_phase_tol, tolerance_params)
+        assert likelihood_instance._lnl_0 > 0
 
         # Initialize prior
         prior_kwargs = {key: getattr(event_data, key)
@@ -272,6 +273,7 @@ def initialize_posteriors_slurm(eventnames, approximant, prior_class,
 
 
 def main(eventname, approximant, prior_class, parentdir):
+    '''Construct a Posterior instance and save it to json.'''
     post = Posterior.from_event(eventname, approximant, prior_class)
     post.to_json(post.get_eventdir(parentdir))
 
