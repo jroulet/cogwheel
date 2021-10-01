@@ -67,6 +67,11 @@ def merge_dictionaries_safely(dics):
     return merged
 
 
+# ----------------------------------------------------------------------
+# Directory I/O:
+
+DIR_PERMISSIONS = 0o755
+
 def get_eventdir(parentdir, prior_class, eventname):
     """
     Return `pathlib.Path` object for a directory of the form
@@ -102,10 +107,10 @@ def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):
     for path in list(dirname.parents)[::-1] + [dirname]:
         path.mkdir(mode=dir_permissions, exist_ok=True)
 
+        
 # ----------------------------------------------------------------------
 # JSON I/O:
 
-DIR_PERMISSIONS = 0o755
 FILE_PERMISSIONS = 0o644
 
 class_registry = {}
