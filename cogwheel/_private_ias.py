@@ -131,13 +131,14 @@ class EventMetadata:
         """
         if fnames is not None and bank_id is None:
             return fnames
-
+        
         if bank_id is None:
             bank_id = guess_bank_id(np.mean(self.mchirp_range))
 
         source, i_multibank, i_subbank = bank_id
         json_fnames = trig.utils.get_detector_fnames(
-            self.tgps, i_multibank, i_subbank, source=source)
+            self.tgps, i_multibank, i_subbank, source=source,
+            n_multibanks=(None if i_multibank < 5 else i_multibank+1))
 
         if fnames is not None:
             # Override whenever fname is not None
