@@ -235,7 +235,8 @@ class Posterior(utils.JSONMixin):
 
 
 def initialize_posteriors_slurm(eventnames, approximant, prior_class,
-                                parentdir):
+                                parentdir, n_hours_limit=2,
+                                memory_per_task='4G'):
     """
     Submit jobs that initialize `Posterior.from_event()` for each event.
     """
@@ -257,7 +258,8 @@ def initialize_posteriors_slurm(eventnames, approximant, prior_class,
                 #SBATCH --job-name={job_name}
                 #SBATCH --output={stdout_path}
                 #SBATCH --error={stderr_path}
-                #SBATCH --time=02:00:00
+                #SBATCH --mem-per-cpu={memory_per_task}
+                #SBATCH --time={n_hours_limit:02}:00:00
 
                 eval "$(conda shell.bash hook)"
                 conda activate {os.environ['CONDA_DEFAULT_ENV']}
