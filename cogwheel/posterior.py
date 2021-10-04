@@ -242,7 +242,9 @@ def initialize_posteriors_slurm(eventnames, approximant, prior_class,
     """
     package = pathlib.Path(__file__).parents[1].resolve()
     module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
-
+    
+    if isinstance(eventnames, str):
+        eventnames = [eventnames]
     for eventname in eventnames:
         eventdir = utils.get_eventdir(parentdir, prior_class, eventname)
         utils.mkdirs(eventdir)
