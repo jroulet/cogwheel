@@ -223,6 +223,10 @@ class Posterior(utils.JSONMixin):
 
         return posterior_instance
 
+    def reinstantiate(self, new_prior_init_kwargs={}, new_likelihood_init_kwargs={}):
+        return self.__class__(self.prior.reinstantiate(**new_prior_init_kwargs),
+                              self.likelihood.reinstantiate(**new_likelihood_init_kwargs))
+
     def get_eventdir(self, parentdir):
         """
         Return directory name in which the Posterior instance

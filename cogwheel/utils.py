@@ -183,6 +183,18 @@ class JSONMixin:
                 '(or store its init parameters with the same names).')
         return {key: getattr(self, key) for key in keys}
 
+    def reinstantiate(self, **new_init_kwargs):
+        """
+        Return an new instance of the current instance's class, with an
+        option to update (some of) its `init_kwargs`.
+        """
+        init_kwargs = self.get_init_dict()
+
+        if not new_init_kwargs.keys() <= init_kwargs.keys():
+            raise ValueError(f'`new_init_kwargs` must be from {list(init_kwargs)}')
+
+        return self.__class__(**(init_kwargs | new_init_kwargs))
+
 
 class NumpyEncoder(json.JSONEncoder):
     """
