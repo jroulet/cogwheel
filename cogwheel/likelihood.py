@@ -602,17 +602,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         Return log likelihood using relative binning. Apply relative-
         binning robustness tests per `self.tolerance_params`.
         """
-        h_fbin = self.waveform_generator.get_strain_at_detectors(
-            self.fbin, par_dic, by_m=True)
-
-        # Sum over m and f axes, leave det ax unsummed to apply asd_drift.
-        d_h = (self._d_h_weights * h_fbin.conj()).real.sum(axis=(0, -1))
-
-        m_inds, mprime_inds = self._get_m_mprime_inds()
-        h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
-               ).real.sum(axis=(0, -1)))
-
-        lnl = np.sum((d_h - h_h/2) / self.asd_drift**2)
+        lnl = self.lnlike_detectors_no_asd_drift(par_dic) @ self.asd_drift**-2
 
         if bypass_tests:
             return lnl
@@ -632,6 +622,27 @@ class RelativeBinningLikelihood(CBCLikelihood):
             self.test_relative_binning_accuracy(par_dic)
 
         return lnl
+
+    def lnlike_detectors_no_asd_drift(self, par_dic):
+        """
+        Return an array of length n_detectors with the values of
+        `(d|h) - (h|h)/2`, no ASD-drift correction applied, using
+        relative binning.
+
+        Parameters
+        ----------
+        par_dic: dictionary per `self.waveform_generator.params`.
+        """
+        h_fbin = self.waveform_generator.get_strain_at_detectors(
+            self.fbin, par_dic, by_m=True)
+
+        # Sum over m and f axes, leave det ax unsummed.
+        d_h = (self._d_h_weights * h_fbin.conj()).real.sum(axis=(0, -1))
+
+        m_inds, mprime_inds = self._get_m_mprime_inds()
+        h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
+               ).real.sum(axis=(0, -1)))
+        return d_h - h_h/2
 
     @property
     def pn_phase_tol(self):
@@ -681,8 +692,8 @@ class RelativeBinningLikelihood(CBCLikelihood):
         Compute auxiliary quantities related to frequency bins.
         Set `_pn_phase_tol` to `None` to keep logs clean.
         """
-        fbin_ind = np.unique(np.searchsorted(
-            self.event_data.frequencies, fbin - self.event_data.df/2))
+        fbin_ind = np.unique(np.searchsorted(self.event_data.frequencies,
+                                             fbin - self.event_data.df/2))
         self._fbin = self.event_data.frequencies[fbin_ind]  # Bin edges
 
         self._set_splines()
