@@ -66,19 +66,18 @@ class Posterior(utils.JSONMixin):
         self.likelihood.waveform_generator.n_cached_waveforms \
             = 2 ** n_slow_folded
 
-        # Transform signature is only known at init, so define lnposterior here
-        sig = inspect.signature(self.prior.transform)
-        def lnposterior(*args, **kwargs):
-            """
-            Natural logarithm of the posterior probability density in
-            the space of sampled parameters (does not apply folding).
-            """
-            lnprior, standard_par_dic = self.prior.lnprior_and_transform(
-                *args, **kwargs)
-            return lnprior + self.likelihood.lnlike(standard_par_dic)
+        # Match lnposterior signature to that of transform
+        self.lnposterior.__func__.__signature__ = inspect.signature(
+            self.prior.__class__.transform)
 
-        lnposterior.__signature__ = sig
-        self.lnposterior = lnposterior
+    def lnposterior(self, *args, **kwargs):
+        """
+        Natural logarithm of the posterior probability density in
+        the space of sampled parameters (does not apply folding).
+        """
+        lnprior, standard_par_dic = self.prior.lnprior_and_transform(
+            *args, **kwargs)
+        return lnprior + self.likelihood.lnlike(standard_par_dic)
 
     def test_relative_binning_accuracy(self, samples: pd.DataFrame,
                                        max_workers=None):
@@ -229,9 +228,8 @@ class Posterior(utils.JSONMixin):
         should be saved, of the form
         {parentdir}/{prior_class}/{eventname}/
         """
-        return utils.get_eventdir(
-            parentdir, self.prior.__class__.__name__,
-            self.likelihood.event_data.eventname)
+        return utils.get_eventdir(parentdir, self.prior.__class__.__name__,
+                                  self.likelihood.event_data.eventname)
 
 
 def initialize_posteriors_slurm(eventnames, approximant, prior_class,
