@@ -201,7 +201,7 @@ class Prior(ABC, utils.JSONMixin):
 
         def unfolding_func(*par_vals, **par_dic):
             par_values = np.array(sig.bind(*par_vals, **par_dic).args)
-            unfolded = self._unfold(par_values)
+            unfolded = self.unfold(par_values)
             return [func(*par_vals) for par_vals in unfolded]
 
         unfolding_func.__doc__ = f"""
@@ -212,7 +212,7 @@ class Prior(ABC, utils.JSONMixin):
         unfolding_func.__signature__ = sig
         return unfolding_func
 
-    def _unfold(self, par_values):
+    def unfold(self, par_values):
         """
         Take an array of length `n_params` with parameter values in the
         space of folded sampled parameters, and return an array of shape
