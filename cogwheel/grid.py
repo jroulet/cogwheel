@@ -11,8 +11,6 @@ from scipy import ndimage
 
 class PlotStyle1d:
     """Arguments for 1d histograms in a corner plot's diagonal."""
-    DEFAULT_CONFIDENCE_LEVEL = .9
-    DEFAULT_INTERVAL_TYPE = 'central'  # 'minimal' or 'central'
     DEFAULT_KWARGS = {'color': 'C0'}
     def __init__(self, alpha_vlines=.5, lw_vlines=1, alpha_fill=.1,
                  step=False, **kwargs):
@@ -29,7 +27,7 @@ class PlotStyle2d:
 
     def __init__(self, color='k', linestyles='-', linewidths=1,
                  fill='gradient', fractions=None, show_cl=False,
-                 clabel_fs=8, clabel_colors=None, contourkwargs=None):
+                 clabel_fs=8, clabel_colors=None, contour_kwargs=None):
         """
         Store the 2d plot settings.
         2d pdfs are displayed as surface density (fill) and
@@ -71,7 +69,7 @@ class PlotStyle2d:
 
     @fractions.setter
     def fractions(self, fractions):
-        fractions = DEFAULT_FRACTIONS if fractions is None else fractions
+        fractions = self.DEFAULT_FRACTIONS if fractions is None else fractions
         self._fractions = sorted(fractions, reverse=True)
         self.alphas = [1 - fraction for fraction in self.fractions]
 
@@ -104,8 +102,9 @@ class PlotStyle:
         colors = colors[::2] + colors[1::2]
         return [colors[i] for i in np.arange(number) % len(colors)]
 
-
-DEFAULT_PLOTSTYLE = PlotStyle(PlotStyle1d(), PlotStyle2d())
+DEFAULT_PLOTSTYLE1D = PlotStyle1d()
+DEFAULT_PLOTSTYLE2D = PlotStyle2d()
+DEFAULT_PLOTSTYLE = PlotStyle(DEFAULT_PLOTSTYLE1D, DEFAULT_PLOTSTYLE2D)
 
 
 def parenthesized_unit(unit):
@@ -238,6 +237,8 @@ def get_edges(x):
 # -----------------------------------------------------------------
 
 class Grid1D(dict):
+    DEFAULT_INTERVAL_TYPE = 'central'  # 'minimal' or 'central'
+    DEFAULT_CONFIDENCE_LEVEL = .9
     def __init__(self, dic, param, arr, pdfs, labels, units, density=True):
         """
         Parameters
@@ -248,8 +249,8 @@ class Grid1D(dict):
         self.arr = arr
         self.pdfs = pdfs
         self.labels = labels
-        self.confidence_level = DEFAULT_CONFIDENCE_LEVEL
-        self.interval_type = DEFAULT_INTERVAL_TYPE
+        self.confidence_level = self.DEFAULT_CONFIDENCE_LEVEL
+        self.interval_type = self.DEFAULT_INTERVAL_TYPE
         self.estimates = {pdf: self.get_estimate(pdf) for pdf in pdfs}
         self.units = units
         self.dx = arr[1] - arr[0]
@@ -267,7 +268,7 @@ class Grid1D(dict):
         return median, a2, b2
 
     def plot_pdf(self, pdf, ax, set_label=False, set_title=False,
-                 style=DEFAULT_PLOTSTYLE1D, density=True, title_label=True):
+                 style=DEFAULT_PLOTSTYLE1D, title_label=True):
         if style.step:
             ax.step(self.arr, self[pdf], label=self.labels[pdf],
                     lw=style.linewidth, **style.kwargs, where='mid')
@@ -670,16 +671,18 @@ class Grid(dict):
             fig.legends = []
             fig.legend(handles_1d, labels_1d, loc='upper right',
                        bbox_to_anchor=(1, .95), frameon=False, title=legend_title)
-        fig, ax = self.embellish_plot(fig, ax, nbins=nbins, pdf=pdf, plot_params=plot_params,
-                                      **kwargs)
+        fig, ax = self.embellish_plot(fig, ax, nbins=nbins, pdf=pdf,
+                                      plot_params=plot_params, **kwargs)
 
         if scatter_points is not None:
-            for index, row in scatter_points.iterrows():
+            colors = PlotStyle._gen_colors(len(scatter_points))
+            for index, (_, row) in enumerate(scatter_points.iterrows()):
                 for i, xpar in enumerate(plot_params):
-                    ax[i][i].axvline(row[xpar], color=COLORS[index])
+                    ax[i][i].axvline(row[xpar], color=colors[index])
                     for j, ypar in enumerate(plot_params):
                         if j > i:
-                            ax[j][i].scatter(row[xpar], row[ypar], color=COLORS[index])
+                            ax[j][i].scatter(row[xpar], row[ypar],
+                                             color=colors[index])
 
         if save_as is not None:
             plt.savefig(save_as, bbox_inches='tight')

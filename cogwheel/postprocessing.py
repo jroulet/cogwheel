@@ -28,6 +28,15 @@ from .sampling import Sampler, SAMPLES_FILENAME
 TESTS_FILENAME = 'postprocessing_tests.json'
 
 
+def concat_drop_duplicates(df1, df2):
+    """
+    Concatenate DataFrames by columns, dropping repeated columns
+    from df2.
+    """
+    cols_to_use = df2.columns.difference(df1.columns)
+    return pd.concat([df1, df2[cols_to_use]], axis=1)
+
+
 def postprocess_rundir(rundir, relative_binning_boost=4):
     """
     Postprocess posterior samples from a single run.
@@ -101,10 +110,17 @@ class PostProcessor:
             * Tests for log likelihood differences arising from
               relative binning accuracy.
         """
+        print(f'Processing {self.rundir}')
+
+        print(' * Adding standard parameters...')
         self.add_standard_parameters()
+        print(' * Computing relative-binning likelihood...')
         self.compute_lnl()
+        print(' * Computing auxiliary likelihood products...')
         self.compute_lnl_aux()
+        print(' * Testing ASD-drift correction...')
         self.test_asd_drift()
+        print(' * Testing relative binning...')
         self.test_relative_binning()
         self.save_tests_and_samples()
 
@@ -114,15 +130,15 @@ class PostProcessor:
         """
         standard = pd.DataFrame([self.posterior.prior.transform(**sample)
                                  for _, sample in self.samples.iterrows()])
-        self.samples = self.samples.merge(standard)
+        self.samples = concat_drop_duplicates(self.samples, standard)
 
     def compute_lnl(self):
         """
         Add column to `self.samples` with log likelihood computed
         at original relative binning resolution
         """
-        self.samples[self.LNL_COL] = map(self.posterior.likelihood.lnlike,
-                                          self._standard_samples())
+        self.samples[self.LNL_COL] = list(
+            map(self.posterior.likelihood.lnlike, self._standard_samples()))
         self.tests['lnl_max'] = max(self.samples[self.LNL_COL])
 
     def compute_lnl_aux(self):
@@ -145,7 +161,7 @@ class PostProcessor:
         lnl_aux = pd.DataFrame(map(likelihood.lnlike_detectors_no_asd_drift,
                                    self._standard_samples()),
                                columns=self._lnl_aux_cols)
-        self.samples = self.samples.merge(lnl_aux)
+        self.samples = concat_drop_duplicates(self.samples, lnl_aux)
 
     def test_asd_drift(self):
         """
@@ -175,7 +191,7 @@ class PostProcessor:
     def save_tests_and_samples(self):
         """Save `self.tests` and `self.samples` in `self.rundir`."""
         with open(self.rundir/TESTS_FILENAME, 'w') as file:
-            json.dump(file, self.tests)
+            json.dump(self.tests, file)
 
         self.samples.to_feather(self.rundir/SAMPLES_FILENAME)
 
@@ -379,13 +395,13 @@ class Diagnostics:
 
         table = pd.DataFrame()
         table['run'] = [x.name for x in rundirs]
-        table = table.merge(self._collect_run_kwargs(rundirs))
+        table = concat_drop_duplicates(table, self._collect_run_kwargs(rundirs))
         table['n_samples'] = [len(pd.read_feather(rundir/SAMPLES_FILENAME))
                               for rundir in rundirs]
         table['runtime'] = [
             Stats(str(rundir/Sampler.PROFILING_FILENAME)).total_tt / 3600
             for rundir in rundirs]
-        table = table.merge(self._collect_tests(rundirs))
+        table = concat_drop_duplicates(table, self._collect_tests(rundirs))
 
         return table
 
