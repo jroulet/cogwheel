@@ -191,7 +191,7 @@ class PostProcessor:
     def save_tests_and_samples(self):
         """Save `self.tests` and `self.samples` in `self.rundir`."""
         with open(self.rundir/TESTS_FILENAME, 'w') as file:
-            json.dump(self.tests, file)
+            json.dump(self.tests, file, cls=utils.NumpyEncoder)
 
         self.samples.to_feather(self.rundir/SAMPLES_FILENAME)
 
