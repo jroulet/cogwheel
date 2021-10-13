@@ -1,15 +1,20 @@
-"""Generate strain waveforms and project them onto detectors."""
-
-from collections import defaultdict
+"""Generate strain waveforms with gwsurrogate and project them onto detectors."""
 import numpy as np
-
-import lal
-import lalsimulation
+import scipy.signal as spsig
+from copy import deepcopy as dcopy
+import os
+import sys
+from . import harmonic_mode_utils as hm_utils
 
 import gwsurrogate
 
-from . import gw_utils
-from . import utils
+
+COGWHEEL_PATH = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), '..', 'cogwheel'))
+sys.path.append(COGWHEEL_PATH)
+import gw_utils
+import utils
+import waveform
 
 ZERO_INPLANE_SPINS = {'s1x': 0.,
                       's1y': 0.,
@@ -67,16 +72,172 @@ def out_of_bounds(par_dic):
             or par_dic['iota'] > np.pi
             or np.abs(par_dic['dec'] > np.pi/2))
 
+def argmaxnd(arr):
+    return np.unravel_index(np.argmax(arr), arr.shape)
+
+#### WINDOWING and padding
+WINDOW_KWS_DEFAULTS = {'winfront':True, 'winback':True,
+                       'frontfrac':0.1, 'ampfrac':0.01}
+
+def marr_tail_pts(marr, ampfrac=0.01):
+    """get smallest ntail s.t. zav[-ntail] > frac*max(zav), zav = (abs(z) + np.roll(abs(z),1))/2"""
+    zamp = np.abs(marr)
+    zamp = 0.5*(zamp + np.roll(zamp, 1, axis=-1))
+    ampcuts = ampfrac * np.max(zamp, axis=-1)
+    minus_ind = 1
+    while np.all(zamp[..., -minus_ind] < ampcuts) == True:
+        minus_ind += 1
+    return minus_ind
+
+def tukwin_front(nfront):
+    return spsig.hann(2*nfront, sym=True)[:nfront]
+
+def tukwin_back(nback):
+    return spsig.hann(2*nback, sym=True)[-nback:]
+
+def tukwin_npts(ntot, nwin):
+    tukwin = np.ones(ntot)
+    hannwin = spsig.hann(2*nwin, sym=True)
+    tukwin[:nwin] = hannwin[:nwin]
+    tukwin[-nwin:] = hannwin[-nwin:]
+    return tukwin
+
+def get_double_tukey(wfarr, nfront=None, ampfrac=0.01, frontfrac=0.1):
+    if nfront is None:
+        nfront = int(np.floor(wfarr.shape[-1] * frontfrac))
+    tukout = np.ones_like(wfarr)
+    tukout[..., :nfront] *= tukwin_front(nfront)
+    nback = marr_tail_pts(wfarr, ampfrac=ampfrac)
+    tukout[..., -nback:] *= tukwin_back(nback)
+    return tukout
+
+def apply_double_tukey(wfarr, winfront=True, winback=True,
+                       ampfrac=0.01, nfront=None, frontfrac=0.1):
+    if winfront:
+        if nfront is None:
+            nfront = int(np.floor(wfarr.shape[-1] * frontfrac))
+        wfarr[..., :nfront] *= tukwin_front(nfront)
+    if winback:
+        nback = marr_tail_pts(wfarr, ampfrac=ampfrac)
+        wfarr[..., -nback:] *= tukwin_back(nback)
+    return
+
+def tukwin_bandpass(taper_width, f_nyq=None, rfft_len=None, f_rfft=None):
+    """
+    taper_width is frequency interval length in Hz to be tapered at each end
+    f_nyq & rfft_len are the nyquist frequency and length of the rfftfreq array
+    """
+    if f_rfft is None:
+        return spsig.tukey(rfft_len, alpha=(2 * taper_width / f_nyq), sym=True)
+    else:
+        return spsig.tukey(len(f_rfft), alpha=(2 * taper_width / f_rfft[-1]), sym=True)
+
+def zeropad_end(wfarr, pad_to_N):
+    if pad_to_N == wfarr.shape[-1]:
+        return wfarr
+    elif pad_to_N > wfarr.shape[-1]:
+        new_arr = np.zeros((*wfarr.shape[:-1], pad_to_N), dtype=wfarr.dtype)
+        new_arr[..., :wfarr.shape[-1]] = wfarr
+        return new_arr
+    else:
+        raise RuntimeError(f'wfarr of shape {wfarr.shape} cannot be padded to {pad_to_N}')
+
+
+########    WAVEFORM GENERATION TECHNICAL PARAMETERS
+# * f_ref * (float, hertz) is the frequency of the 22 mode at the reference epoch (<=> t_ref)
+FREF_PE = 36.  # standardized reference frequency (Hz) for precessing PE
+FREF_MB = 20.
+
+# * dt * (float, seconds) is the inverse of the sampling rate for generating the waveform,
+#  so it sets the true physical nyquist frequency of our fourier analysis
+DT_MB = 1. / 1024.
+DT_PE = 1. / 1024.
+
+NFFT_MB = 2 ** 14
+# * fcut22 * (float, hertz) is 22 frequency at the time when the front-end window reaches unity
+# --> so, if no front window is applied, this is the same as the model's f_low variable,
+#  but if the front is tukey-windowed, we have f_low < fcut22 so that we don't lose SNR from
+#  applying the "smooth to zero" on times when the 22 signal is in a band >= fcut22
+FCUT22_MB = 12.
+
+CONST_SUR_KWS = {'units':'mks', 'dist_mpc':1, 'skip_param_checks':True,
+                 'df':None, 'freqs':None, 'times':None, 'precessing_opts':None,
+                 'tidal_opts':None, 'par_dict':None, 'taper_end_duration':None}
+
+SUR_KWS_DEFAULTS_HYB = {'f_ref':FREF_MB, 'f_low':FCUT22_MB,
+                        'inclination':None, 'phi_ref':None, 'ellMax':None}
+SUR_KWS_DEFAULTS_PRE = {'f_ref':FREF_PE, 'f_low':0,
+                        'inclination':None, 'phi_ref':None, 'mode_list':None}
+
+DEFAULT_MARR_KWS = {APPROX_HYB: {**CONST_SUR_KWS, **SUR_KWS_DEFAULTS_HYB},
+                    APPROX_PRE: {**CONST_SUR_KWS, **SUR_KWS_DEFAULTS_PRE}}
+MODE_INPUT_KEY = {APPROX_HYB: 'mode_list', APPROX_PRE: 'ellMax'}
+FUNDAMENTAL_MODE_INPUT = {APPROX_HYB: [(2, 2)], APPROX_PRE: 2}
+HARMONIC_MODE_INPUT_FUNC = {APPROX_HYB: lambda lms: (None if lms is None else
+                                                     [tuple(lm) for lm in lms]),
+                            APPROX_PRE: lambda lms: (None if lms is None else
+                                                     np.max([lm[0] for lm in lms]))}
+
+#### GENERATING waveforms
+
+def gen_wfdic_1mpc(par_dic, approximant, dt, f_ref, harmonic_modes=None,
+                   return_t=False, max_inband=False, frontfrac=None,
+                   **surrogate_kwargs):
+    """
+    generate UNWINDOWED mode dictionary from gwsurrogate model
+    NOTE: max_inband likely to fail with precessing model, should be good for hybrid
+    """
+    if approximant == APPROX_PRE:
+        use_sur = SUR_PRE
+    elif approximant == APPROX_HYB:
+        use_sur = SUR_HYB
+    else:
+        raise RuntimeError(f'{approximant} is not a valid approximant')
+    tmarr_kws = {**DEFAULT_MARR_KWS[approximant], **surrogate_kwargs}
+    tmarr_kws[MODE_INPUT_KEY[approximant]] = HARMONIC_MODE_INPUT_FUNC[approximant](harmonic_modes)
+    tmarr_kws['dt'] = dt
+    tmarr_kws['f_ref'] = f_ref
+    tmarr_kws['dist_mpc'] = 1
+    q1 = par_dic['m1'] / par_dic['m2']
+    chi1 = [par_dic[k] for k in ['s1x', 's1y', 's1z']]
+    chi2 = [par_dic[k] for k in ['s2x', 's2y', 's2z']]
+    mt = par_dic['m1'] + par_dic['m2']
+
+    if max_inband:
+        # option for continuing to lower f_low until tukey window does not
+        # touch the part of the waveform with f_22 >= original_f_low
+        # **WARNING** for the precessing model this is likely to cause error
+        kws22 = dcopy(tmarr_kws)
+        kws22[MODE_INPUT_KEY[approximant]] = FUNDAMENTAL_MODE_INPUT[approximant]
+        t, _, _ = use_sur(q1, chi1, chi2, M=mt, **kws22)
+        if frontfrac is None:
+            frontfrac = WINDOW_KWS_DEFAULTS['frontfrac']
+        ntot = len(t) + int(np.floor(len(t) * frontfrac))
+        if ntot % 2 != 0:
+            ntot += 1
+        f_low = tmarr_kws.pop('f_low') / 2.
+        assert f_low > 0, 'max_inband version requires f_low > 0'
+        t, wfdic, _ = use_sur(q1, chi1, chi2, M=mt, f_low=f_low, **tmarr_kws)
+        while len(t) < ntot:
+            f_low /= 2.
+            t, wfdic, _ = use_sur(q1, chi1, chi2, M=mt, f_low=f_low, **tmarr_kws)
+        for k in wfdic.keys():
+            wfdic[k] = wfdic[k][-ntot:]
+    else:
+        t, wfdic, _ = use_sur(q1, chi1, chi2, M=mt, **tmarr_kws)
+    return ((t, wfdic) if return_t else wfdic)
+
 
 def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
-                         harmonic_modes=None):
+                         harmonic_modes=None, window_kwargs={},
+                         surrogate_kwargs={}):
     """
     Generate frequency domain waveform using gwsurrogate.
     Return hplus, hcross evaluated at f.
 
     Parameters
     ----------
-    approximant: String with the approximant name.
+    approximant: APPROX_PRE or APPROX_HYB string specifying surrogate
     f_ref: Reference frequency in Hz
     f: Frequency array in Hz
     par_dic: Dictionary of source parameters. Needs to have these keys:
@@ -87,53 +248,42 @@ def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
                   specifying which (co-precessing frame) higher-order
                   modes to include.
     """
+    # match f to time grid
+    dt = 0.5 / f[-1]
+    df = np.min(np.diff(f))
+    T = 1 / df
+    nfft = int(np.ceil(T / dt))
+    # ensure valid approximant
+    if approximant == APPROX_PRE:
+        use_sur = SUR_PRE
+    elif approximant == APPROX_HYB:
+        use_sur = SUR_HYB
+    else:
+        raise RuntimeError(f'{approximant} is not a valid approximant')
+    tmarr_kws = {**DEFAULT_MARR_KWS[approximant], **surrogate_kwargs}
+    tmarr_kws[MODE_INPUT_KEY[approximant]] = HARMONIC_MODE_INPUT_FUNC[approximant](harmonic_modes)
+    tmarr_kws['dt'] = dt
+    tmarr_kws['f_ref'] = f_ref
+    tmarr_kws['dist_mpc'] = 1
 
     par_dic = {**DEFAULT_PARS, **par_dic}
+    t, hpihc, _ = use_sur(par_dic['m1'] / par_dic['m2'], [par_dic[k] for k in ['s1x', 's1y', 's1z']],
+                          [par_dic[k] for k in ['s2x', 's2y', 's2z']], M=par_dic['m1'] + par_dic['m2'],
+                          phi_ref=par_dic['vphi'], inclination=par_dic['iota'], **tmarr_kws)
+    # windowing -- control with window_kwargs dict, defaults to WINDOW_KWS_DEFAULTS
+    apply_double_tukey(hpihc, **{**WINDOW_KWS_DEFAULTS, **window_kwargs})
 
-    # SI unit conversions
-    par_dic['d_luminosity_meters'] = par_dic['d_luminosity'] * 1e6 * lal.PC_SI
-    par_dic['m1_kg'] = par_dic['m1'] * lal.MSUN_SI
-    par_dic['m2_kg'] = par_dic['m2'] * lal.MSUN_SI
+    hp_hc_dimless = np.fft.rfft(np.roll(zeropad_end(np.array([hpihc.real, -hpihc.imag]), nfft),
+                                        -np.searchsorted(t, 0), axis=-1), n=nfft, axis=-1)
 
-    lal_dic = lal.CreateDict()  # Contains tidal and higher-mode parameters
-    # Tidal parameters
-    lalsimulation.SimInspiralWaveformParamsInsertTidalLambda1(
-        lal_dic, par_dic['l1'])
-    lalsimulation.SimInspiralWaveformParamsInsertTidalLambda2(
-        lal_dic, par_dic['l2'])
-    # Higher-mode parameters
-    if harmonic_modes is not None:
-        mode_array = lalsimulation.SimInspiralCreateModeArray()
-        for l, m in harmonic_modes:
-            lalsimulation.SimInspiralModeArrayActivateMode(mode_array, l, m)
-        lalsimulation.SimInspiralWaveformParamsInsertModeArray(lal_dic,
-                                                               mode_array)
-    par_dic['lal_dic'] = lal_dic
-
-    par_dic['approximant'] = lalsimulation.GetApproximantFromString(
-        approximant)
-
-    par_dic['f_ref'] = f_ref
-
-    f0_is_0 = f[0] == 0  # In this case we will set h(f=0) = 0
-    par_dic['f'] = lal.CreateREAL8Sequence(len(f))
-    par_dic['f'].data = f
-    if f0_is_0:
-        par_dic['f'].data[0] = par_dic['f'].data[1]
-
-    try:
-        hplus, hcross = lalsimulation.SimInspiralChooseFDWaveformSequence(
-            *[par_dic[par] for par in lal_params])
-    except:
-        print('Error while calling LAL at these parameters:', par_dic)
-        raise
-    hplus_hcross = np.stack([hplus.data.data, hcross.data.data])
-    if f0_is_0:
-        hplus_hcross[:, 0] = 0
-    return hplus_hcross
+    if f[0] == 0:
+        # In this case we will set h(f=0) = 0
+        hp_hc_dimless[:, 0] = 0
+    fmask = np.isin(np.fft.rfftfreq(nfft, d=dt), f)
+    return hp_hc_dimless[:, fmask] * dt / par_dic['d_luminosity']
 
 
-class WaveformGenerator(utils.JSONMixin):
+class SurrogateWaveformGenerator(waveform.WaveformGenerator):
     """
     Class that provides methods for generating frequency domain
     waveforms, in terms of `hplus, hcross` or projected onto detectors.
@@ -143,134 +293,17 @@ class WaveformGenerator(utils.JSONMixin):
     The boolean attribute `disable_precession` can be set to ignore
     inplane spins.
     """
-    params = sorted(['d_luminosity', 'dec', 'iota', 'l1', 'l2', 'm1', 'm2',
-                     'psi', 'ra', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z',
-                     't_geocenter', 'vphi'])
-
-    fast_params = sorted(['d_luminosity', 'dec', 'psi', 'ra', 't_geocenter'])
-    slow_params = sorted(set(params) - set(fast_params))
-
-    _projection_params = sorted(['dec', 'psi', 'ra', 't_geocenter'])
-    _waveform_params = sorted(set(params) - set(_projection_params))
-
-    _s1xy_inds = list(map(slow_params.index, ['s1x', 's1y']))
-    _s2xy_inds = list(map(slow_params.index, ['s2x', 's2y']))
-
     def __init__(self, detector_names, tgps, tcoarse, approximant, f_ref,
                  harmonic_modes=None, disable_precession=False,
-                 n_cached_waveforms=1):
-        super().__init__()
+                 n_cached_waveforms=1, window_kwargs={}, surrogate_kwargs={}):
+        super().__init__(detector_names, tgps, tcoarse, approximant, f_ref,
+                         harmonic_modes=harmonic_modes, disable_precession=disable_precession,
+                         n_cached_waveforms=n_cached_waveforms)
+        self.window_kwargs = {**WINDOW_KWS_DEFAULTS, **window_kwargs}
+        self.surrogate_kwargs = {**DEFAULT_MARR_KWS[approximant], **surrogate_kwargs}
+        self.surrogate_kwargs['f_ref'] = f_ref
 
-        self.detector_names = detector_names
-        self.tgps = tgps
-        self.tcoarse = tcoarse
-        self._approximant = approximant
-        self.harmonic_modes = harmonic_modes
-        self.disable_precession = disable_precession
-        self.f_ref = f_ref
-        self.n_cached_waveforms = n_cached_waveforms
-
-        self.n_slow_evaluations = 0
-        self.n_fast_evaluations = 0
-
-    @property
-    def approximant(self):
-        """String with waveform approximant name."""
-        return self._approximant
-
-    @approximant.setter
-    def approximant(self, app: str):
-        """
-        Set `approximant` and reset `harmonic_modes` per
-        `APPROXIMANTS[approximant].harmonic_modes`; print a warning that
-        this was done.
-        Raise `ValueError` if `APPROXIMANTS` does not contain the
-        requested approximant.
-        """
-        if app not in APPROXIMANTS:
-            raise ValueError(f'Add {app} to `waveform.APPROXIMANTS`.')
-        self._approximant = app
-        self.harmonic_modes = None
-        print(f'`approximant` changed to {app}, setting `harmonic_modes` to '
-              f'{self.harmonic_modes}.')
-
-    @property
-    def harmonic_modes(self):
-        """List of `(l, m)` pairs."""
-        return self._harmonic_modes
-
-    @harmonic_modes.setter
-    def harmonic_modes(self, harmonic_modes):
-        """
-        Set `self._harmonic_modes` implementing defaults based on the
-        approximant, this requires hardcoding which modes are
-        implemented by each approximant; it is a necessary evil because
-        we need to know `m` in order to make `vphi` a fast parameter.
-        Also set `self._harmonic_modes_by_m` with a dictionary whose
-        keys are `m` and whose values are a list of `(l, m)` tuples with
-        that `m`.
-        """
-        self._harmonic_modes \
-            = harmonic_modes or APPROXIMANTS[self.approximant].harmonic_modes
-
-        self._harmonic_modes_by_m = defaultdict(list)
-        for l, m in self._harmonic_modes:
-            self._harmonic_modes_by_m[m].append((l, m))
-
-    @property
-    def n_cached_waveforms(self):
-        """Nonnegative integer, number of cached waveforms."""
-        return self._n_cached_waveforms
-
-    @n_cached_waveforms.setter
-    def n_cached_waveforms(self, n_cached_waveforms):
-        self.cache = [{'slow_par_vals': np.array(np.nan),
-                       'approximant': None,
-                       'f_ref': None,
-                       'f': None,
-                       'harmonic_modes_by_m': {},
-                       'hplus_hcross_0': None}
-                      for _ in range(n_cached_waveforms)]
-        self._n_cached_waveforms = n_cached_waveforms
-
-    def get_strain_at_detectors(self, f, par_dic, by_m=False):
-        """
-        Get strain measurable at detectors.
-
-        Parameters
-        ----------
-        f: 1d array of frequencies [Hz]
-        par_dic: parameter dictionary per `WaveformGenerator.params`.
-        by_m: bool, whether to return waveform separated by `m`
-              harmonic mode (summed over `l`), or already summed.
-
-        Return
-        ------
-        n_detectors x n_frequencies array with strain at detector.
-        """
-        waveform_par_dic = {par: par_dic[par] for par in self._waveform_params}
-
-        # hplus_hcross shape: (n_m x 2 x n_frequencies), n_m optional
-        hplus_hcross = self.get_hplus_hcross(f, waveform_par_dic, by_m)
-
-        # fplus_fcross shape: (2 x n_detectors)
-        fplus_fcross = np.array(gw_utils.fplus_fcross(
-            self.detector_names, par_dic['ra'], par_dic['dec'], par_dic['psi'],
-            self.tgps))
-
-        time_delays = gw_utils.time_delay_from_geocenter(
-            self.detector_names, par_dic['ra'], par_dic['dec'], self.tgps)
-
-        # shifts shape: (n_detectors x n_frequencies)
-        shifts = np.exp(-2j*np.pi * f * (self.tcoarse
-                                         + par_dic['t_geocenter']
-                                         + time_delays[:, np.newaxis]))
-
-        # Detector strain (n_m x n_detectors x n_frequencies), n_m optional
-        return np.sum(fplus_fcross[..., np.newaxis]
-                      * hplus_hcross[..., np.newaxis, :], axis=-3) * shifts
-
-    def get_hplus_hcross(self, f, waveform_par_dic, by_m=False):
+    def get_hplus_hcross(self, f, waveform_par_dic, by_m=False, **surrogate_kwargs):
         """
         Return hplus, hcross waveform strain.
         Note: inplane spins will be zeroized if `self.disable_precession`
@@ -306,11 +339,22 @@ class WaveformGenerator(utils.JSONMixin):
             # Compute the waveform mode by mode and update cache.
             waveform_par_dic_0 = dict(zip(self.slow_params, slow_par_vals),
                                       d_luminosity=1., vphi=0.)
+            dt = 0.5 / f[-1]
+            df = np.min(np.diff(f))
+            T = 1 / df
+            nfft = int(np.ceil(T / dt))
+            #hm_utils.Y_lm()
             # hplus_hcross_0 is a (n_m x 2 x n_frequencies) arrays with
             # sum_l (hlm+, hlmx), at vphi=0, d_luminosity=1Mpc.
+            waveform_times, waveform_mode_dic_0 = gen_wfdic_1mpc(waveform_par_dic_0,
+                self.approximant, dt, self.f_ref, harmonic_modes=self.harmonic_modes,
+                return_t=True, **surrogate_kwargs)
+            ##################################################################
             hplus_hcross_0 = np.array(
                 [compute_hplus_hcross(self.f_ref, f, waveform_par_dic_0,
-                                      self.approximant, modes)
+                                      self.approximant, modes,
+                                      window_kwargs=self.window_kwargs,
+                                      surrogate_kwargs=self.surrogate_kwargs)
                  for modes in self._harmonic_modes_by_m.values()])
             cache_dic = {'approximant': self.approximant,
                          'f_ref': self.f_ref,
@@ -331,37 +375,3 @@ class WaveformGenerator(utils.JSONMixin):
         if by_m:
             return hplus_hcross
         return np.sum(hplus_hcross, axis=0)
-
-    def _rotate_inplane_spins(self, slow_par_vals, vphi):
-        """
-        Rotate inplane spins (s1x, s1y) and (s2x, s2y) by an angle `vphi`,
-        inplace in `slow_par_vals`.
-        `slow_par_vals` must be a numpy array whose values correspond to
-        `self.slow_params`.
-        """
-        sin_vphi = np.sin(vphi)
-        cos_vphi = np.cos(vphi)
-        rotation = np.array([[cos_vphi, -sin_vphi],
-                             [sin_vphi, cos_vphi]])
-        slow_par_vals[self._s1xy_inds] = (rotation
-                                          @ slow_par_vals[self._s1xy_inds])
-        slow_par_vals[self._s2xy_inds] = (rotation
-                                          @ slow_par_vals[self._s2xy_inds])
-        # dic['s1x'], dic['s1y'] = rotation @ np.array([dic['s1x'], dic['s1y']])
-        # dic['s2x'], dic['s2y'] = rotation @ np.array([dic['s2x'], dic['s2y']])
-
-    def _matching_cache(self, slow_par_vals, f, eps=1e-6):
-        """
-        Return entry of the cache that matches the requested waveform, or
-        `False` if none of the cached waveforms matches that requested.
-        """
-        for cache_dic in self.cache[ : : -1]:
-            if (np.linalg.norm(slow_par_vals-cache_dic['slow_par_vals']) < eps
-                    and cache_dic['approximant'] == self.approximant
-                    and cache_dic['f_ref'] == self.f_ref
-                    and np.array_equal(cache_dic['f'], f)
-                    and (cache_dic['harmonic_modes_by_m']
-                         == self._harmonic_modes_by_m)):
-                return cache_dic
-
-        return False
