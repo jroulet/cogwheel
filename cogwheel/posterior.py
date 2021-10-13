@@ -1,6 +1,6 @@
 """
 Define the Posterior class.
-Can run as a script to test relative binning accuracy on samples.
+Can run as a script to make and save a Posterior instance from scratch.
 """
 
 import argparse
@@ -66,19 +66,18 @@ class Posterior(utils.JSONMixin):
         self.likelihood.waveform_generator.n_cached_waveforms \
             = 2 ** n_slow_folded
 
-        # Transform signature is only known at init, so define lnposterior here
-        sig = inspect.signature(self.prior.transform)
-        def lnposterior(*args, **kwargs):
-            """
-            Natural logarithm of the posterior probability density in
-            the space of sampled parameters (does not apply folding).
-            """
-            lnprior, standard_par_dic = self.prior.lnprior_and_transform(
-                *args, **kwargs)
-            return lnprior + self.likelihood.lnlike(standard_par_dic)
+        # Match lnposterior signature to that of transform
+        self.lnposterior.__func__.__signature__ = inspect.signature(
+            self.prior.__class__.transform)
 
-        lnposterior.__signature__ = sig
-        self.lnposterior = lnposterior
+    def lnposterior(self, *args, **kwargs):
+        """
+        Natural logarithm of the posterior probability density in
+        the space of sampled parameters (does not apply folding).
+        """
+        lnprior, standard_par_dic = self.prior.lnprior_and_transform(
+            *args, **kwargs)
+        return lnprior + self.likelihood.lnlike(standard_par_dic)
 
     def test_relative_binning_accuracy(self, samples: pd.DataFrame,
                                        max_workers=None):
@@ -229,13 +228,13 @@ class Posterior(utils.JSONMixin):
         should be saved, of the form
         {parentdir}/{prior_class}/{eventname}/
         """
-        return utils.get_eventdir(
-            parentdir, self.prior.__class__.__name__,
-            self.likelihood.event_data.eventname)
+        return utils.get_eventdir(parentdir, self.prior.__class__.__name__,
+                                  self.likelihood.event_data.eventname)
 
 
 def initialize_posteriors_slurm(eventnames, approximant, prior_class,
-                                parentdir):
+                                parentdir, n_hours_limit=2,
+                                memory_per_task='4G'):
     """
     Submit jobs that initialize `Posterior.from_event()` for each event.
     """
@@ -259,7 +258,8 @@ def initialize_posteriors_slurm(eventnames, approximant, prior_class,
                 #SBATCH --job-name={job_name}
                 #SBATCH --output={stdout_path}
                 #SBATCH --error={stderr_path}
-                #SBATCH --time=02:00:00
+                #SBATCH --mem-per-cpu={memory_per_task}
+                #SBATCH --time={n_hours_limit:02}:00:00
 
                 eval "$(conda shell.bash hook)"
                 conda activate {os.environ['CONDA_DEFAULT_ENV']}

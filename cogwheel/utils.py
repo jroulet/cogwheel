@@ -141,6 +141,9 @@ class JSONMixin:
     Define a method `get_init_dict` which works for classes that store
     their init parameters as attributes with the same names. If this is
     not the case, the subclass should override `get_init_dict`.
+
+    Define a method `reinstantiate` that allows to safely modify
+    attributes defined at init.
     """
     def to_json(self, dirname, basename=None, *,
                 dir_permissions=DIR_PERMISSIONS,
@@ -182,6 +185,20 @@ class JSONMixin:
                 f'`{self.__class__.__name__}` must override `get_init_dict` '
                 '(or store its init parameters with the same names).')
         return {key: getattr(self, key) for key in keys}
+
+    def reinstantiate(self, **new_init_kwargs):
+        """
+        Return an new instance of the current instance's class, with an
+        option to update `init_kwargs`. Values not passed will be taken
+        from the current instance.
+        """
+        init_kwargs = self.get_init_dict()
+
+        if not new_init_kwargs.keys() <= init_kwargs.keys():
+            raise ValueError(
+                f'`new_init_kwargs` must be from ({", ".join(init_kwargs)})')
+
+        return self.__class__(**init_kwargs | new_init_kwargs)
 
 
 class NumpyEncoder(json.JSONEncoder):

@@ -7,33 +7,26 @@ import numpy as np
 from scipy import ndimage
 
 # -----------------------------------------------------------
-# For 1D plot confidence intervals:
-DEFAULT_CONFIDENCE_LEVEL = .9
-DEFAULT_INTERVAL_TYPE = 'central'  # 'minimal' or 'central'
-
-# Probability enclosed by 2D plot contours
-DEFAULT_FRACTIONS = [.5, .9]
-
-# -----------------------------------------------------------
 # Plot settings
 
 class PlotStyle1d:
-    def __init__(self, ls='-', c='C0', alpha_vlines=.5,
-                 lw_vlines=1, alpha_fill=.1, step=False,
-                 linewidth=None, **kwargs):
-        self.kwargs = {'ls': ls, 'color': c}
-        self.kwargs.update(kwargs)
+    """Arguments for 1d histograms in a corner plot's diagonal."""
+    DEFAULT_KWARGS = {'color': 'C0'}
+    def __init__(self, alpha_vlines=.5, lw_vlines=1, alpha_fill=.1,
+                 step=False, **kwargs):
+        self.kwargs = self.DEFAULT_KWARGS | kwargs
         self.alpha_vlines = alpha_vlines
         self.lw_vlines = lw_vlines
         self.alpha_fill = alpha_fill
         self.step = step
-        self.linewidth = linewidth
 
 
 class PlotStyle2d:
-    def __init__(self, color='k', linestyles='-',
-                 linewidths=1, alphas=None, fill='gradient',
-                 fractions=None, show_cl=False,
+    """Arguments for 2d histograms in a corner plot's off-diagonal."""
+    DEFAULT_FRACTIONS = .5, .9
+
+    def __init__(self, color='k', linestyles='-', linewidths=1,
+                 fill='gradient', fractions=None, show_cl=False,
                  clabel_fs=8, clabel_colors=None, contour_kwargs=None):
         """
         Store the 2d plot settings.
@@ -45,7 +38,7 @@ class PlotStyle2d:
         color: Color of both the fill and contours
         linestyles: of the contours
         linewidths: of the contours
-        alphas: of the filling, when *fill* is 'flat'
+        alphas: of the filling, when `fill` is 'flat'
         fill: 'gradient', 'flat' or 'none'.
             'gradient' displays the pdf using a transparency gradient
             'flat' fills the contours with a flat color
@@ -54,58 +47,75 @@ class PlotStyle2d:
                    contours when plotting.
         show_cl: Flag, whether to show the value of the confidence level
                  on the contour
-        clabel_fs: Fontsize of the contour label, used if show_cl == True.
-        clabel_colors: Color of the contour label, used if show_cl == True.
+        clabel_fs: Fontsize of the contour label, used if
+                   `show_cl == True`.
+        clabel_colors: Color of the contour label, used if
+                       `show_cl == True`.
         """
         self.color = color
         self.linestyles = linestyles
         self.linewidths = linewidths
         self.fill = fill
-        if fractions is None:
-            fractions = DEFAULT_FRACTIONS
-        self.set_fractions(fractions, alphas)
+        self.alphas = None  # Set by `fractions` by default
+        self.fractions = fractions
         self.show_cl = show_cl
         self.clabel_fs = clabel_fs
         self.clabel_colors = clabel_colors
         self.contour_kwargs = contour_kwargs or {}
 
-    def set_fractions(self, fractions, alphas=None):
-        self.fractions = sorted(fractions, reverse=True)
-        self.alphas = alphas or [1 - f for f in self.fractions]
+    @property
+    def fractions(self):
+        return self._fractions
+
+    @fractions.setter
+    def fractions(self, fractions):
+        fractions = self.DEFAULT_FRACTIONS if fractions is None else fractions
+        self._fractions = sorted(fractions, reverse=True)
+        self.alphas = [1 - fraction for fraction in self.fractions]
+
 
 class PlotStyle:
-    def __init__(self, style_1d, style_2d):
-        self.style_1d = style_1d
-        self.style_2d = style_2d
+    def __init__(self, plotstyle_1d, plotstyle_2d):
+        self.plotstyle_1d = plotstyle_1d
+        self.plotstyle_2d = plotstyle_2d
 
-blue_1d = PlotStyle1d(ls='-', c='C0', alpha_vlines=.5,
-                      lw_vlines=1, alpha_fill=.1, step=True)
-black_2d = PlotStyle2d(linestyles='-', color='k',
-                       linewidths=1, alphas=1)
-blue_black = PlotStyle(blue_1d, black_2d)
+    @classmethod
+    def get_many(cls, number, fractions=None):
+        linestyles = cls._gen_linestyles(number)
+        colors = cls._gen_colors(number)
 
-DEFAULT_PLOTSTYLE1D = blue_1d
-DEFAULT_PLOTSTYLE2D = black_2d
-DEFAULT_PLOTSTYLE = blue_black
+        return [cls(PlotStyle1d(color=color, alpha_vlines=0, alpha_fill=0),
+                    PlotStyle2d(color, linestyle, fill='flat',
+                                fractions=fractions))
+                for color, linestyle in zip(colors, linestyles)]
 
-# Hopefully long enough default list of colors:
-tab20 = list(mpl.cm.get_cmap('tab20').colors)
-tab20b = list(mpl.cm.get_cmap('tab20b').colors)
-COLORS = tab20[ : : 2] + tab20[1 : : 2] + tab20b  # 40 colors
-COLORS = COLORS * 10  # 400 colors
+    @classmethod
+    def _gen_linestyles(cls, number):
+        if number <= len(linestyles := ['-', '--', '-.', ':']):
+            return linestyles[:number]
+        return ['-'] + [(0, tuple([2, 2]*i + [7, 2])) for i in range(number-1)]
 
-LINESTYLES_SHORT = ['-', '--', '-.', ':']
-LINESTYLES_LONG = ['-'] + [(0, tuple([2, 2]*i + [7, 2])) for i in range(119)]
+    @classmethod
+    def _gen_colors(cls, number):
+        colors = (mpl.cm.get_cmap('tab20').colors
+                  + mpl.cm.get_cmap('tab20b').colors)
+        colors = colors[::2] + colors[1::2]
+        return [colors[i] for i in np.arange(number) % len(colors)]
 
-def format_unit(unit):
-    if unit == '':
-        return ''
-    return f' ({unit})'
+DEFAULT_PLOTSTYLE1D = PlotStyle1d()
+DEFAULT_PLOTSTYLE2D = PlotStyle2d()
+DEFAULT_PLOTSTYLE = PlotStyle(DEFAULT_PLOTSTYLE1D, DEFAULT_PLOTSTYLE2D)
+
+
+def parenthesized_unit(unit):
+    return f' ({unit})' if unit else ''
+
 
 def get_grid_dic(params, arrs_1d):
     if isinstance(arrs_1d, dict):
         arrs_1d = [arrs_1d[par] for par in params]
     return dict(zip(params, np.meshgrid(*arrs_1d, indexing='ij')))
+
 
 # Functions related to pdfs:
 # -----------------------------------------------------------
@@ -116,11 +126,11 @@ def get_levels(pdf, fractions):
     sum(pdf[pdf > P]) == f
     for f in fractions. fractions can be array or scalar.
     """
-    sorted_P = np.sort(pdf.ravel())
-    fraction_below = np.cumsum(sorted_P)
+    sorted_pdf = np.sort(pdf.ravel())
+    fraction_below = np.cumsum(sorted_pdf)
     fraction_below /= fraction_below[-1]
     fraction_above = 1 - fraction_below
-    return np.interp(fractions, fraction_above[::-1], sorted_P[::-1])
+    return np.interp(fractions, fraction_above[::-1], sorted_pdf[::-1])
 
 def get_minimal_interval(arr, pdf, confidence_level):
     """
@@ -140,18 +150,22 @@ def get_minimal_interval(arr, pdf, confidence_level):
     """
     pdf = pdf / pdf.sum()
     p0 = get_levels(pdf, confidence_level)
+
     if np.allclose(p0, pdf):  # Handle uniform pdfs
         r = (1 - confidence_level) / 2
         return np.interp([r, 1-r], [0, 1], [arr[0], arr[-1]])
+
     i_left, i_right = np.where(pdf > p0)[0][[0, -1]]
     if i_left == 0:
         a = arr[0]
     else:
         a = np.interp(p0, pdf[i_left-1 : i_left+1], arr[i_left-1 : i_left+1])
+
     if i_right == len(arr)-1:
         b = arr[-1]
     else:
         b = np.interp(p0, pdf[i_right : i_right+2], arr[i_right : i_right+2])
+
     return a, b
 
 
@@ -218,10 +232,13 @@ def get_edges(x):
     half_dx = (x[1] - x[0]) / 2
     return np.concatenate(([x[0] - half_dx], x + half_dx))
 
+
 # Grid classes:
 # -----------------------------------------------------------------
 
 class Grid1D(dict):
+    DEFAULT_INTERVAL_TYPE = 'central'  # 'minimal' or 'central'
+    DEFAULT_CONFIDENCE_LEVEL = .9
     def __init__(self, dic, param, arr, pdfs, labels, units, density=True):
         """
         Parameters
@@ -232,8 +249,8 @@ class Grid1D(dict):
         self.arr = arr
         self.pdfs = pdfs
         self.labels = labels
-        self.confidence_level = DEFAULT_CONFIDENCE_LEVEL
-        self.interval_type = DEFAULT_INTERVAL_TYPE
+        self.confidence_level = self.DEFAULT_CONFIDENCE_LEVEL
+        self.interval_type = self.DEFAULT_INTERVAL_TYPE
         self.estimates = {pdf: self.get_estimate(pdf) for pdf in pdfs}
         self.units = units
         self.dx = arr[1] - arr[0]
@@ -251,7 +268,7 @@ class Grid1D(dict):
         return median, a2, b2
 
     def plot_pdf(self, pdf, ax, set_label=False, set_title=False,
-                 style=DEFAULT_PLOTSTYLE1D, density=True, title_label=True):
+                 style=DEFAULT_PLOTSTYLE1D, title_label=True):
         if style.step:
             ax.step(self.arr, self[pdf], label=self.labels[pdf],
                     lw=style.linewidth, **style.kwargs, where='mid')
@@ -268,7 +285,7 @@ class Grid1D(dict):
             alpha=style.alpha_fill, color=style.kwargs['color'])
         if self.labels[self.param] is not None and set_label:
             ax.set_xlabel(self.labels[self.param]
-                          + format_unit(self.units[self.param]))
+                          + parenthesized_unit(self.units[self.param]))
 
         if set_title:
             median, low, high = self.estimates[pdf]
@@ -339,10 +356,10 @@ class Grid2D(dict):
                             linestyles=style.linestyles, alpha=style.alphas[i])
         if self.labels[self.params[0]] is not None and set_labels:
             ax.set_xlabel(self.labels[self.params[0]]
-                          + format_unit(self.units[self.params[0]]))
+                          + parenthesized_unit(self.units[self.params[0]]))
         if self.labels[self.params[1]] is not None and set_labels:
             ax.set_ylabel(self.labels[self.params[1]]
-                          + format_unit(self.units[self.params[1]]))
+                          + parenthesized_unit(self.units[self.params[1]]))
 
 class Grid(dict):
     """
@@ -497,7 +514,6 @@ class Grid(dict):
         self.compute_grids_1d()
         self.compute_grids_2d()
 
-
     def update_units(self):
         units = copy(self.units)
         self.units.update({p: '' for p in self.params})
@@ -640,11 +656,11 @@ class Grid(dict):
         for row, y_par in list(enumerate(plot_params))[1:]:
             for col, x_par in list(enumerate(plot_params))[:row]:
                 self.grids_2d[x_par, y_par].plot_pdf(pdf, ax[row][col],
-                                                     style=plotstyle.style_2d)
+                                                     style=plotstyle.plotstyle_2d)
         # Plot 1D pdf (diagonal)
         for i, par in enumerate(plot_params):
             self.grids_1d[par].plot_pdf(pdf, ax[i][i], set_title=show_titles_1d,
-                                        style=plotstyle.style_1d,
+                                        style=plotstyle.plotstyle_1d,
                                         title_label=title_label)
             ax[i][i].autoscale()
             ax[i][i].set_ylim(0)
@@ -655,16 +671,18 @@ class Grid(dict):
             fig.legends = []
             fig.legend(handles_1d, labels_1d, loc='upper right',
                        bbox_to_anchor=(1, .95), frameon=False, title=legend_title)
-        fig, ax = self.embellish_plot(fig, ax, nbins=nbins, pdf=pdf, plot_params=plot_params,
-                                      **kwargs)
+        fig, ax = self.embellish_plot(fig, ax, nbins=nbins, pdf=pdf,
+                                      plot_params=plot_params, **kwargs)
 
         if scatter_points is not None:
-            for index, row in scatter_points.iterrows():
+            colors = PlotStyle._gen_colors(len(scatter_points))
+            for index, (_, row) in enumerate(scatter_points.iterrows()):
                 for i, xpar in enumerate(plot_params):
-                    ax[i][i].axvline(row[xpar], color=COLORS[index])
+                    ax[i][i].axvline(row[xpar], color=colors[index])
                     for j, ypar in enumerate(plot_params):
                         if j > i:
-                            ax[j][i].scatter(row[xpar], row[ypar], color=COLORS[index])
+                            ax[j][i].scatter(row[xpar], row[ypar],
+                                             color=colors[index])
 
         if save_as is not None:
             plt.savefig(save_as, bbox_inches='tight')
@@ -698,17 +716,17 @@ class Grid(dict):
         # Force xlim
         for col, x_par in enumerate(plot_params):
             for row in range(n_rows):
-                ax[row][col].xaxis.set_major_locator(mpl.ticker.MaxNLocator(nbins=nbins))
+                ax[row][col].xaxis.set_major_locator(mpl.ticker.MaxNLocator(nbins))
                 ax[row][col].set_xlim(lim[x_par])
         # Force ylim
         for row, y_par in list(enumerate(plot_params))[1:]:
             for col in range(row - 1):
-                ax[row][col].yaxis.set_major_locator(mpl.ticker.MaxNLocator(nbins=nbins))
+                ax[row][col].yaxis.set_major_locator(mpl.ticker.MaxNLocator(nbins))
                 ax[row][col].set_ylim(lim[y_par])
         # Set x labels & ticks
         for col, x_par in enumerate(plot_params):
             ax[n_rows-1][col].set_xlabel(
-                self.labels[x_par] + format_unit(self.units[x_par]),
+                self.labels[x_par] + parenthesized_unit(self.units[x_par]),
                 size='large')
             plt.setp(ax[n_rows-1][col].get_xticklabels(), rotation=45)
             ax[n_rows-1][col].locator_params(nbins=nbins)
@@ -717,7 +735,7 @@ class Grid(dict):
         # Set y labels & ticks
         for row, y_par in list(enumerate(plot_params))[1:]:
             ax[row][0].set_ylabel(
-                self.labels[y_par] + format_unit(self.units[y_par]),
+                self.labels[y_par] + parenthesized_unit(self.units[y_par]),
                 size='large')
             plt.setp(ax[row][0].get_yticklabels(), rotation=45)
             ax[row][0].locator_params(nbins=nbins)
@@ -847,52 +865,16 @@ class Grid(dict):
 
 
 class MultiGrid:
-    def __init__(self, grids, colors=None, fill='flat',
-                 fractions=DEFAULT_FRACTIONS, linestyles=None,
-                 alpha_vlines=0):
+    def __init__(self, grids, plotstyles=None):
         self.grids = grids
         self.ngrids = len(self.grids)
         self.params = grids[0].params
         assert all(g.params == self.params for g in grids[1:])
 
-        self.set_plotstyles(colors, alpha_vlines)
-        self.set_fill(fill)
-        self.set_fractions(fractions)
-        self.set_linestyles(linestyles)
+        self.plotstyles = plotstyles or PlotStyle.get_many(len(grids))
 
         self.plot_line = self.grids[0].plot_line
         self.shade_region = self.grids[0].shade_region
-
-    def set_plotstyles(self, colors=None, alpha_vlines=0):
-        if colors is None:
-            colors = COLORS[:self.ngrids]
-        self.colors = colors
-        plotstyles_1d = [PlotStyle1d(c=c, alpha_vlines=alpha_vlines, alpha_fill=0)
-                         for c in self.colors]
-        plotstyles_2d = [PlotStyle2d(color=c) for c in self.colors]
-        self.plotstyles = [PlotStyle(style_1d, style_2d) for style_1d, style_2d
-                           in zip(plotstyles_1d, plotstyles_2d)]
-
-    def set_fill(self, fill):
-        for plotstyle in self.plotstyles:
-            plotstyle.style_2d.fill = fill
-
-    def set_fractions(self, fractions, alphas=None):
-        for plotstyle in self.plotstyles:
-            plotstyle.style_2d.set_fractions(fractions, alphas)
-
-    def set_linestyles(self, linestyles):
-        if linestyles is None:
-            if self.ngrids <= len(LINESTYLES_SHORT):
-                linestyles = LINESTYLES_SHORT[:self.ngrids]
-            else:
-                linestyles = LINESTYLES_LONG[:self.ngrids]
-        if not isinstance(linestyles, list):
-            linestyles = [linestyles] * self.ngrids
-        for plotstyle, ls in zip(self.plotstyles, linestyles):
-            plotstyle.style_2d.linestyles \
-                = [ls]*len(plotstyle.style_2d.fractions)
-            plotstyle.style_1d.kwargs['ls'] = ls
 
     def corner_plot(self, pdfs=None, grid_inds=None, tight=False, tightness=.99,
                     override_lim=None, fig=None, ax=None, show_titles_1d=False,
@@ -951,7 +933,7 @@ class MultiGrid:
             pdfs = [pdfs] * len(grid_inds)
         for i in grid_inds:
             self.grids[i].grids_2d[xpar, ypar].plot_pdf(
-                pdf=pdfs[i], ax=ax, style=self.plotstyles[i].style_2d,
+                pdf=pdfs[i], ax=ax, style=self.plotstyles[i].plotstyle_2d,
                 set_labels=set_labels)
         if set_legend:
             ax.legend(ax.legend_handles, pdfs)
