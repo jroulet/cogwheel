@@ -413,8 +413,7 @@ class ReferenceWaveformFinder(CBCLikelihood):
         def lnlike_incoherent(mchirp, eta, chieff):
             m1, m2 = gw_utils.mchirpeta_to_m1m2(mchirp, eta)
             intrinsic = dict(m1=m1, m2=m2, s1z=chieff, s2z=chieff)
-            return self.lnlike_max_amp_phase_time({**par_dic, **intrinsic},
-                                                  tc_rng)
+            return self.lnlike_max_amp_phase_time(par_dic | intrinsic, tc_rng)
 
         print(f'Searching incoherent solution for {self.event_data.eventname}')
         result = differential_evolution(

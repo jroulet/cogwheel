@@ -23,18 +23,10 @@ import pandas as pd
 
 from . import grid
 from . import utils
-from .sampling import Sampler, SAMPLES_FILENAME
+# from .sampling import sampling.Sampler, sampling.SAMPLES_FILENAME
+from . import sampling
 
 TESTS_FILENAME = 'postprocessing_tests.json'
-
-
-def concat_drop_duplicates(df1, df2):
-    """
-    Concatenate DataFrames by columns, dropping repeated columns
-    from df2.
-    """
-    cols_to_use = df2.columns.difference(df1.columns)
-    return pd.concat([df1, df2[cols_to_use]], axis=1)
 
 
 def postprocess_rundir(rundir, relative_binning_boost=4):
@@ -71,9 +63,9 @@ class PostProcessor:
         self.rundir = pathlib.Path(rundir)
         self.relative_binning_boost = relative_binning_boost
 
-        sampler = utils.read_json(self.rundir/Sampler.JSON_FILENAME)
+        sampler = utils.read_json(self.rundir/sampling.Sampler.JSON_FILENAME)
         self.posterior = sampler.posterior
-        self.samples = pd.read_feather(self.rundir/SAMPLES_FILENAME)
+        self.samples = pd.read_feather(self.rundir/sampling.SAMPLES_FILENAME)
 
         try:
             with open(self.rundir/TESTS_FILENAME) as file:
@@ -130,7 +122,7 @@ class PostProcessor:
         """
         standard = pd.DataFrame([self.posterior.prior.transform(**sample)
                                  for _, sample in self.samples.iterrows()])
-        self.samples = concat_drop_duplicates(self.samples, standard)
+        utils.update_dataframe(self.samples, standard)
 
     def compute_lnl(self):
         """
@@ -161,7 +153,7 @@ class PostProcessor:
         lnl_aux = pd.DataFrame(map(likelihood.lnlike_detectors_no_asd_drift,
                                    self._standard_samples()),
                                columns=self._lnl_aux_cols)
-        self.samples = concat_drop_duplicates(self.samples, lnl_aux)
+        utils.update_dataframe(self.samples, lnl_aux)
 
     def test_asd_drift(self):
         """
@@ -193,7 +185,7 @@ class PostProcessor:
         with open(self.rundir/TESTS_FILENAME, 'w') as file:
             json.dump(self.tests, file, cls=utils.NumpyEncoder)
 
-        self.samples.to_feather(self.rundir/SAMPLES_FILENAME)
+        self.samples.to_feather(self.rundir/sampling.SAMPLES_FILENAME)
 
     def _get_representative_asd_drifts(self, n_kmeans=5, n_subset=100,
                                        decimals=3):
@@ -354,7 +346,7 @@ class Diagnostics:
             ref_grid = grid.Grid.from_samples(list(ref_samples), ref_samples,
                                               pdf_key=refdir.name)
 
-            par_dic_0 = (utils.read_json(refdir/Sampler.JSON_FILENAME)
+            par_dic_0 = (utils.read_json(refdir/sampling.Sampler.JSON_FILENAME)
                          .posterior.likelihood.par_dic_0)
 
             for otherdir in otherdirs:
@@ -373,7 +365,8 @@ class Diagnostics:
         has completed. Ignores incomplete runs, printing a warning.
         """
         rundirs = []
-        for rundir in sorted(self.eventdir.glob(Sampler.RUNDIR_PREFIX + '*')):
+        for rundir in sorted(self.eventdir.glob(
+                sampling.Sampler.RUNDIR_PREFIX + '*')):
             if (rundir/TESTS_FILENAME).exists():
                 rundirs.append(rundir)
             else:
@@ -395,13 +388,15 @@ class Diagnostics:
 
         table = pd.DataFrame()
         table['run'] = [x.name for x in rundirs]
-        table = concat_drop_duplicates(table, self._collect_run_kwargs(rundirs))
-        table['n_samples'] = [len(pd.read_feather(rundir/SAMPLES_FILENAME))
-                              for rundir in rundirs]
-        table['runtime'] = [
-            Stats(str(rundir/Sampler.PROFILING_FILENAME)).total_tt / 3600
+        utils.update_dataframe(table, self._collect_run_kwargs(rundirs))
+        table['n_samples'] = [
+            len(pd.read_feather(rundir/sampling.SAMPLES_FILENAME))
             for rundir in rundirs]
-        table = concat_drop_duplicates(table, self._collect_tests(rundirs))
+        table['runtime'] = [
+            Stats(str(rundir/sampling.Sampler.PROFILING_FILENAME)).total_tt
+            / 3600
+            for rundir in rundirs]
+        utils.update_dataframe(table, self._collect_tests(rundirs))
 
         return table
 
@@ -410,7 +405,7 @@ class Diagnostics:
         """Return a DataFrame aggregating run_kwargs used in sampling."""
         run_kwargs = []
         for rundir in rundirs:
-            with open(rundir/Sampler.JSON_FILENAME) as sampler_file:
+            with open(rundir/sampling.Sampler.JSON_FILENAME) as sampler_file:
                 dic = json.load(sampler_file)['init_kwargs']
                 run_kwargs.append({**dic['run_kwargs'],
                                    'sample_prior': dic['sample_prior']})
@@ -489,7 +484,7 @@ class Diagnostics:
         xpar, ypar = 'runtime', 'n_samples'
         plt.scatter(self.table[xpar], self.table[ypar])
         for run, *x_y in self.table[['run', xpar, ypar]].to_numpy():
-            plt.annotate(run.lstrip(Sampler.RUNDIR_PREFIX), x_y,
+            plt.annotate(run.lstrip(sampling.Sampler.RUNDIR_PREFIX), x_y,
                          fontsize='large')
         plt.grid()
         plt.xlim(0)

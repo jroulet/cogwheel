@@ -71,6 +71,14 @@ def merge_dictionaries_safely(dics):
     return merged
 
 
+def update_dataframe(df1, df2):
+    """
+    Modify `df1` in-place by adding the columns from `df2`, where `df1`
+    and `df2` are pandas `DataFrame` objects.
+    """
+    for col, values in df2.iteritems():
+        df1[col] = values
+
 # ----------------------------------------------------------------------
 # Directory I/O:
 
