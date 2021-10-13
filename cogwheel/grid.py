@@ -3,6 +3,7 @@ import json
 import os
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import pandas as pd
 import numpy as np
 from scipy import ndimage
 
@@ -271,10 +272,10 @@ class Grid1D(dict):
                  style=DEFAULT_PLOTSTYLE1D, title_label=True):
         if style.step:
             ax.step(self.arr, self[pdf], label=self.labels[pdf],
-                    lw=style.linewidth, **style.kwargs, where='mid')
+                    **style.kwargs, where='mid')
         else:
             ax.plot(self.arr, self[pdf], label=self.labels[pdf],
-                    lw=style.linewidth, **style.kwargs)
+                    **style.kwargs)
         for val in self.estimates[pdf]:
             ax.plot([val]*2, [0, np.interp(val, self.arr, self[pdf])],
                     alpha=style.alpha_vlines, lw=style.lw_vlines,
@@ -675,6 +676,8 @@ class Grid(dict):
                                       plot_params=plot_params, **kwargs)
 
         if scatter_points is not None:
+            if isinstance(scatter_points, dict):
+                scatter_points = pd.DataFrame(scatter_points, index=[0])
             colors = PlotStyle._gen_colors(len(scatter_points))
             for index, (_, row) in enumerate(scatter_points.iterrows()):
                 for i, xpar in enumerate(plot_params):

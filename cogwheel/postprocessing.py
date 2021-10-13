@@ -264,7 +264,7 @@ class Diagnostics:
                                 'relative_binning_dlnl_std': .05,
                                 'relative_binning_dlnl_max': .25}
     _LABELS = {
-      'nsamples': r'$N_\mathrm{samples}$',
+      'n_samples': r'$N_\mathrm{samples}$',
       'runtime': 'Runtime (h)',
       'asd_drift_dlnl_std': r'$\sigma(\Delta_{\rm ASD\,drift}\ln\mathcal{L})$',
       'asd_drift_dlnl_max': r'$\max|\Delta_{\rm ASD\,drift}\ln\mathcal{L}|$',
@@ -314,8 +314,14 @@ class Diagnostics:
         self.rundirs = self.get_rundirs()
         self.table = self.make_table()
         self.reference_rundir = reference_rundir
-        self.tolerance_params = (self.DEFAULT_TOLERANCE_PARAMS
-                                 | (tolerance_params or {}))
+        
+        tolerance_params = tolerance_params or {}
+        if extra_keys := (tolerance_params.keys()
+                          - self.DEFAULT_TOLERANCE_PARAMS.keys()):
+            raise ValueError(
+                f'Extraneous tolerance key(s) {extra_keys}.\n'
+                f'Allowed keys are {self.DEFAULT_TOLERANCE_PARAMS.keys()}')
+        self.tolerance_params = self.DEFAULT_TOLERANCE_PARAMS | tolerance_params
 
     def diagnostics(self, outfile=None):
         """
@@ -342,21 +348,24 @@ class Diagnostics:
             pdf.savefig(bbox_inches='tight')
 
             refdir, *otherdirs = self.rundirs
+            
+            sampler = utils.read_json(refdir/sampling.Sampler.JSON_FILENAME)
+            sampled_params = sampler.posterior.prior.sampled_params
+            sampled_par_dic_0 = sampler.posterior.prior.inverse_transform(
+                **sampler.posterior.likelihood.par_dic_0)
+            
             ref_samples = pd.read_feather(refdir/'samples.feather')
-            ref_grid = grid.Grid.from_samples(list(ref_samples), ref_samples,
+            ref_grid = grid.Grid.from_samples(sampled_params, ref_samples,
                                               pdf_key=refdir.name)
-
-            par_dic_0 = (utils.read_json(refdir/sampling.Sampler.JSON_FILENAME)
-                         .posterior.likelihood.par_dic_0)
 
             for otherdir in otherdirs:
                 other_samples = pd.read_feather(otherdir/'samples.feather')
                 other_grid = grid.Grid.from_samples(
-                    list(other_samples), other_samples, pdf_key=otherdir.name)
+                    sampled_params, other_samples, pdf_key=otherdir.name)
 
                 grid.MultiGrid([ref_grid, other_grid]).corner_plot(
                     figsize=(10, 10), set_legend=True,
-                    scatter_points=par_dic_0)
+                    scatter_points=sampled_par_dic_0)
                 pdf.savefig(bbox_inches='tight')
 
     def get_rundirs(self):
@@ -422,13 +431,13 @@ class Diagnostics:
         tests = []
         for rundir in rundirs:
             with open(rundir/TESTS_FILENAME) as tests_file:
-                dic = json.load(tests_file)['init_kwargs']
+                dic = json.load(tests_file)
 
                 asd_drift_dlnl_std = np.sqrt(np.mean(
-                    val['dlnl_std']**2 for val in dic['asd_drift'].values()))
+                    [val['dlnl_std']**2 for val in dic['asd_drift']]))
 
-                asd_drift_dlnl_max = np.max(
-                    val['dlnl_max'] for val in dic['asd_drift'].values())
+                asd_drift_dlnl_max = max(
+                    val['dlnl_max'] for val in dic['asd_drift'])
 
                 tests.append({'lnl_max': dic['lnl_max'],
                               'lnl_0': dic['lnl_0'],
@@ -442,21 +451,19 @@ class Diagnostics:
 
     def _display_table(self, cell_size=(1., .3)):
         """Make a matplotlib figure and display the table in it."""
-        tests = self.table[['asd_drift_dlnl_std',
-                            'asd_drift_dlnl_max',
-                            'relative_binning_dlnl_std',
-                            'relative_binning_dlnl_max']].copy()
-        tests['lnl_max_exceeds_lnl_0'] = (self.table['lnl_max']
-                                          - self.table['lnl_0'])
-        tests['lnl_0_exceeds_lnl_max'] = (self.table['lnl_0']
-                                          - self.table['lnl_max'])
-
         cell_colors = self.table.copy()
         cell_colors[::2] = 'whitesmoke'
         cell_colors[1::2] = 'w'
-        for key, tol in self.tolerance_params.items():
-            # yellow = 1x tolerance, red = 2x tolerance
-            cell_colors[key] = list(mpl.cm.RdYlGn_r(tests[key] / tol / 2, .3))
+        for key in ['asd_drift_dlnl_std',
+                    'asd_drift_dlnl_max',
+                    'relative_binning_dlnl_std',
+                    'relative_binning_dlnl_max']:
+            cell_colors[key] = self._test_color(key, self.table[key])
+        dlnl_max = self.table['lnl_max'] - self.table['lnl_0']
+        cell_colors['lnl_0'] = self._test_color('lnl_max_exceeds_lnl_0',
+                                                dlnl_max)
+        cell_colors['lnl_max']  = self._test_color('lnl_0_exceeds_lnl_max',
+                                                   - dlnl_max)
 
         nrows, ncols = self.table.shape
         _, ax = plt.subplots(figsize=np.multiply((ncols, nrows+1), cell_size))
@@ -477,6 +484,14 @@ class Diagnostics:
         plt.axhline(0, color='k', lw=1)
         plt.axis('off')
         plt.tight_layout()
+    
+    def _test_color(self, key, values):
+        """
+        Return a list of colors depending on the value/tolerance ratio. 
+        green = 0, yellow = tolerance, red = 2x tolerance.
+        """
+        return list(mpl.cm.RdYlGn_r(values / self.tolerance_params[key] / 2,
+                                    alpha=.3))
 
     def _scatter_nsamples_vs_runtime(self):
         """Scatter plot number of samples vs runtime from `table`."""
