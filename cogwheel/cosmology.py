@@ -13,26 +13,6 @@ u_Mpc3 = u_Mpc ** 3
 u_Gpc3 = u_Gpc ** 3
 DEFAULT_COSMOLOGY = Planck15
 
-c_over_H0 = 4422  # [Mpc]
-Omega_m = 0.308
-z_max = 10
-
-def _x(z):
-    return (1 - Omega_m) / (Omega_m * (1 + z) ** 3)
-
-def phi(x):
-    return ((1 + 1.32 * x + 0.4415 * x ** 2 + 0.02656 * x ** 3)
-            / (1 + 1.392 * x + .5121 * x ** 2 + 0.03944 * x ** 3))
-
-def dL(z):
-    return (2 * c_over_H0 * (1 + z) / np.sqrt(Omega_m)
-            * (phi(_x(0)) - phi(_x(z)) / np.sqrt(1 + z)))
-
-zs = np.linspace(0, z_max, 1000)
-# z_of_DL = interp1d(dL(zs), zs)
-z_of_DL = UnivariateSpline(dL(zs), zs, s=0)
-dz_dDL = z_of_DL.derivative()  # Function of DL
-
 # distance and volume from z
 def DL_Mpc_of_z(z, cosmo=DEFAULT_COSMOLOGY):
     d_obj = cosmo.luminosity_distance(z)
@@ -56,7 +36,10 @@ def Vcomov_Mpc3_of_z(z, cosmo=DEFAULT_COSMOLOGY):
         raise RuntimeError(f'astropy.cosmology volume units changed from cubic Mpc to {v_obj.unit}')
 
 # FASTER z from distance (interpolated)
+z_max = 10
+zs = np.linspace(0, z_max, 10000)
 z_of_DL_Mpc = UnivariateSpline(DL_Mpc_of_z(zs, cosmo=DEFAULT_COSMOLOGY), zs, s=0)
+dz_dDL = z_of_DL_Mpc.derivative()  # Function of DL
 z_of_Dcomov_Mpc = UnivariateSpline(Dcomov_Mpc_of_z(zs, cosmo=DEFAULT_COSMOLOGY), zs, s=0)
 z_of_Vcomov_Mpc3 = UnivariateSpline(Vcomov_Mpc3_of_z(zs, cosmo=DEFAULT_COSMOLOGY), zs, s=0)
 
@@ -70,26 +53,30 @@ def z_at_value(f, val):
         return z_at_val(f, val)
 
 #### NOTE THESE ARE SLOW! use interpolated versions for arrays (same name with _Mpc suffix)
-def z_of_DL_astropy(DL, D_units=u_Mpc, cosmo=DEFAULT_COSMOLOGY):
-    xx = (np.asarray(DL) if hasattr(DL, '__len__') else DL)
-    return z_at_value(cosmo.luminosity_distance, xx * D_units)
+def z_of_DL_astropy(DL_astropy, cosmo=DEFAULT_COSMOLOGY):
+    """INPUT MUST BE AN ASTROPY OBJECT or array of astropy objects (needs units)"""
+    return z_at_value(cosmo.luminosity_distance, DL_astropy)
 
-def z_of_Dcomov(Dcomov, D_units=u_Mpc, cosmo=DEFAULT_COSMOLOGY):
-    xx = (np.asarray(Dcomov) if hasattr(Dcomov, '__len__') else Dcomov)
-    return z_at_value(cosmo.comoving_distance, xx * D_units)
+def z_of_Dcomov_astropy(Dcomov_astropy, cosmo=DEFAULT_COSMOLOGY):
+    """INPUT MUST BE AN ASTROPY OBJECT or array of astropy objects (needs units)"""
+    return z_at_value(cosmo.comoving_distance, Dcomov_astropy)
 
-def z_of_Vcomov(Vcomov, V_units=u_Mpc3, cosmo=DEFAULT_COSMOLOGY):
-    xx = (np.asarray(Vcomov) if hasattr(Vcomov, '__len__') else Vcomov)
-    return z_at_value(cosmo.comoving_volume, xx * V_units)
+def z_of_Vcomov_astropy(Vcomov_astropy, cosmo=DEFAULT_COSMOLOGY):
+    """INPUT MUST BE ASTROPY OBJECT or array of astropy objects (needs units)"""
+    return z_at_value(cosmo.comoving_volume, Vcomov_astropy)
 
 # distance and volume conversion
+def DtoV(distance):
+    return 4 * np.pi * (distance ** 3) / 3.
+
+def VtoD(volume):
+    return (0.75 * volume / np.pi) ** (1 / 3.)
+
 def Vcomov_of_Dcomov(Dcomov):
-    xx = (np.asarray(Dcomov) if hasattr(Dcomov, '__len__') else Dcomov)
-    return 4 * np.pi * (xx ** 3) / 3.
+    return DtoV((np.asarray(Dcomov) if hasattr(Dcomov, '__len__') else Dcomov))
 
 def Dcomov_of_Vcomov(Vcomov):
-    xx = (np.asarray(Vcomov) if hasattr(Vcomov, '__len__') else Vcomov)
-    return (0.75 * xx / np.pi) ** (1 / 3.)
+    return VtoD((np.asarray(Vcomov) if hasattr(Vcomov, '__len__') else Vcomov))
 
 def Dcomov_of_DL(DL, D_units=u_Mpc, cosmo=DEFAULT_COSMOLOGY):
     if hasattr(DL, '__len__'):
@@ -99,6 +86,9 @@ def Dcomov_of_DL(DL, D_units=u_Mpc, cosmo=DEFAULT_COSMOLOGY):
         return xx / (1 + zz)
     else:
         return DL / (1 + z_at_value(cosmo.luminosity_distance, DL * D_units))
+
+def Vcomov_of_DL(DL, D_units=u_Mpc, cosmo=DEFAULT_COSMOLOGY):
+    return DtoV(Dcomov_of_DL(DL, D_units=D_units, cosmo=cosmo))
 
 def DL_of_Dcomov(Dcomov, D_units=u_Mpc, cosmo=DEFAULT_COSMOLOGY):
     if hasattr(Dcomov, '__len__'):
@@ -116,6 +106,4 @@ def DL_of_Vcomov(Vcomov, V_units=u_Mpc3, cosmo=DEFAULT_COSMOLOGY):
           else z_at_value(cosmo.comoving_volume, xx * V_units))
     return Dcomov_of_Vcomov(xx) * (1 + zz)
 
-def Vcomov_of_DL(DL, D_units=u_Mpc, cosmo=DEFAULT_COSMOLOGY):
-    return Vcomov_of_Dcomov(Dcomov_of_DL(DL, D_units=D_units, cosmo=cosmo))
 
