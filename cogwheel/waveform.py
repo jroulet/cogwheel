@@ -76,7 +76,7 @@ def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
         'vphi', 'm1_kg', 'm2_kg', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z',
         'f_ref', 'd_luminosity_meters', 'iota', 'lal_dic', 'approximant', 'f']
 
-    par_dic = {**DEFAULT_PARS, **par_dic}
+    par_dic = DEFAULT_PARS | par_dic
 
     # SI unit conversions
     par_dic['d_luminosity_meters'] = par_dic['d_luminosity'] * 1e6 * lal.PC_SI
