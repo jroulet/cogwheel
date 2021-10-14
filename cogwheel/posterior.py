@@ -6,14 +6,11 @@ Can run as a script to make and save a Posterior instance from scratch.
 import argparse
 import inspect
 import pathlib
-import subprocess
 import sys
 import os
 import tempfile
 import textwrap
 import time
-import numpy as np
-import pandas as pd
 
 from . import data
 from . import gw_prior
@@ -78,53 +75,6 @@ class Posterior(utils.JSONMixin):
         lnprior, standard_par_dic = self.prior.lnprior_and_transform(
             *args, **kwargs)
         return lnprior + self.likelihood.lnlike(standard_par_dic)
-
-    def test_relative_binning_accuracy(self, samples: pd.DataFrame,
-                                       max_workers=None):
-        """
-        Compute likelihood with and without relative binning.
-        Input a dataframe with samples, columns 'lnl_rb' and 'lnl_fft'
-        get added in-place.
-
-        Parameters
-        ----------
-        samples: pandas DataFrame with samples, its columns must contain
-                 all `self.prior.sampled_params`.
-        max_workers: maximum number of cores for parallelization,
-                     defaults to all available cores.
-        """
-        package = os.path.join(os.path.dirname(__file__), '..')
-        module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
-
-        n_samples = len(samples)
-        n_workers = min(n_samples, max_workers or os.cpu_count() or 1)
-        chunk_edges = np.linspace(0, n_samples, n_workers + 1, dtype=int)
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            self.to_json(tmp_dir)
-
-            # Divide samples into chunks and launch programs to process them:
-            samples_paths = [os.path.join(tmp_dir, f'samples_{i}.pkl')
-                             for i in range(n_workers)]
-            processes = []
-            for i, samples_path in enumerate(samples_paths):
-                i_start, i_end = chunk_edges[[i, i+1]]
-                samples[i_start : i_end].to_pickle(samples_path)
-
-                processes.append(subprocess.Popen(
-                    (f'PYTHONPATH={package} {sys.executable} -m {module} '
-                     f'{tmp_dir} {samples_path}'),
-                    shell=True))
-
-            # Wait until they all finish:
-            for process in processes:
-                process.communicate()
-
-            result = pd.concat(map(pd.read_pickle, samples_paths))
-
-        # Add result to samples in-place
-        samples['lnl_rb'] = result['lnl_rb']
-        samples['lnl_fft'] = result['lnl_fft']
 
     @classmethod
     def from_event(cls, event, approximant, prior_class, fbin=None,
@@ -240,7 +190,7 @@ def initialize_posteriors_slurm(eventnames, approximant, prior_class,
     """
     package = pathlib.Path(__file__).parents[1].resolve()
     module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
-    
+
     if isinstance(eventnames, str):
         eventnames = [eventnames]
     for eventname in eventnames:
@@ -291,43 +241,3 @@ if __name__ == '__main__':
     parser.add_argument('parentdir', help='top directory to save output')
 
     main(**vars(parser.parse_args()))
-
-
-# def _test_relative_binning_accuracy(posterior_path, samples_path):
-#     """
-#     Compute log likelihood of parameter samples with and without
-#     relative binning. Results are stored as columns on the samples
-#     DataFrame, whose pickle file is overwritten.
-
-#     Parameters
-#     ----------
-#     posterior_path: path to a json file from a Posterior instance.
-#     samples_path: path to a pickle file from a pandas DataFrame.
-#     """
-#     print('Analyzing', samples_path)
-#     posterior = utils.read_json(posterior_path)
-#     samples = pd.read_pickle(samples_path)[posterior.prior.sampled_params]
-#     result = [posterior.likelihood.test_relative_binning_accuracy(
-#         posterior.prior.transform(**sample))
-#               for _, sample in samples.iterrows()]
-#     samples['lnl_rb'], samples['lnl_fft'] = np.transpose(result)
-#     samples.to_pickle(samples_path)
-
-
-# if __name__ == '__main__':
-#     parser = argparse.ArgumentParser(
-#         description='''Compute likelihood with and without relative binning.
-#                        Input a path to a dataframe with samples, results are
-#                        saved as columns in the dataframe.''')
-
-#     parser.add_argument('posterior_path',
-#                         help='''path to json file from a `posterior.Posterior`
-#                                 object.''')
-#     parser.add_argument('samples_path',
-#                         help='path to a `pandas` pickle file with samples.')
-
-#     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-#     _test_relative_binning_accuracy(**vars(parser.parse_args()))
-
-
