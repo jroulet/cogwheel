@@ -5,6 +5,9 @@ import inspect
 import json
 import os
 import pathlib
+import sys
+import tempfile
+import textwrap
 import numpy as np
 from scipy.optimize import _differentialevolution
 
@@ -79,6 +82,64 @@ def update_dataframe(df1, df2):
     for col, values in df2.iteritems():
         df1[col] = values
 
+
+def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
+                 args='', sbatch_cmds=(), batch_path=None):
+    """
+    Generic function to submit a job using slurm.
+    This function is intended to be called from other modules rather
+    than used interactively. The job will run the calling module as
+    script.
+
+    Parameters
+    ----------
+    job_name: string, name of slurm job
+    n_hours_limit: int, number of hours to allocate for the job.
+    stdout_path: file name, where to direct stdout.
+    stderr_path: file name, where to direct stderr.
+    args: string, command line arguments for the calling module's
+          `main()` to parse.
+    sbatch_cmds: sequence of strings with SBATCH commands, e.g.
+                 `('--mem-per-cpu=8G',)`
+    batch_path: file name where to save the batch script. If not
+                provided, a temporary file will be used.
+    """
+    cogwheel_dir = pathlib.Path(__file__).parents[1].resolve()
+    module = inspect.getmodule(inspect.stack()[1].frame).__name__
+
+    sbatch_lines = '\n'.join(f'#SBATCH {cmd}' for cmd in sbatch_cmds)
+
+    batch_text = textwrap.dedent(
+        f"""\
+        #!/bin/bash
+        #SBATCH --job-name={job_name}
+        #SBATCH --output={stdout_path}
+        #SBATCH --error={stderr_path}
+        #SBATCH --open-mode=append
+        #SBATCH --time={n_hours_limit:02}:00:00
+        {sbatch_lines}
+
+        eval "$(conda shell.bash hook)"
+        conda activate {os.environ['CONDA_DEFAULT_ENV']}
+
+        cd {cogwheel_dir}
+        srun {sys.executable} -m {module} {args}
+        """)
+
+    if batch_path:
+        getfile = lambda: open(batch_path, 'w+')
+    else:
+        getfile = lambda: tempfile.NamedTemporaryFile('w+')
+
+    with getfile() as batchfile:
+        batchfile.write(batch_text)
+        batchfile.seek(0)
+        os.chmod(batchfile.name, 0o777)
+        os.system(f'sbatch {os.path.abspath(batchfile.name)}')
+
+    print(f'Submitted job {job_name!r}.')
+
+
 # ----------------------------------------------------------------------
 # Directory I/O:
 
@@ -117,7 +178,7 @@ def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):
     for path in list(dirname.parents)[::-1] + [dirname]:
         path.mkdir(mode=dir_permissions, exist_ok=True)
 
-        
+
 # ----------------------------------------------------------------------
 # JSON I/O:
 
@@ -132,8 +193,12 @@ def read_json(json_path):
     json_path = pathlib.Path(json_path)
     if json_path.is_dir():
         jsons = list(json_path.glob('*.json'))
-        if (njsons := len(jsons)) != 1:
-            raise ValueError(f'{json_path} contains {njsons} json files.')
+        if not jsons:
+            raise ValueError(f'{json_path} contains no json files.')
+        if len(jsons) > 1:
+            raise ValueError(
+                f'{json_path} contains multiple json files {jsons}')
+
         json_path = jsons[0]
 
     with open(json_path) as json_file:
