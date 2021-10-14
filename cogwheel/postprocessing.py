@@ -10,6 +10,7 @@ The function `postprocess_rundir` is used to process samples from a
 single parameter estimation run.
 """
 
+import argparse
 import copy
 import json
 import pathlib
@@ -314,22 +315,23 @@ class Diagnostics:
         self.rundirs = self.get_rundirs()
         self.table = self.make_table()
         self.reference_rundir = reference_rundir
-        
+
         tolerance_params = tolerance_params or {}
         if extra_keys := (tolerance_params.keys()
                           - self.DEFAULT_TOLERANCE_PARAMS.keys()):
             raise ValueError(
                 f'Extraneous tolerance key(s) {extra_keys}.\n'
                 f'Allowed keys are {self.DEFAULT_TOLERANCE_PARAMS.keys()}')
-        self.tolerance_params = self.DEFAULT_TOLERANCE_PARAMS | tolerance_params
+        self.tolerance_params = (self.DEFAULT_TOLERANCE_PARAMS
+                                 | tolerance_params)
 
     def diagnostics(self, outfile=None):
         """
         Make diagnostics plots aggregating multiple runs of an event and
         save them to pdf format in `{eventdir}/{DIAGNOSTICS_FILENAME}`.
         These include a summary table of the parameters of the runs,
-        number of samples vs time to completion, and corner plots comparing
-        each run to a reference one.
+        number of samples vs time to completion, and corner plots
+        comparing each run to a reference one.
         """
         outfile = outfile or self.eventdir/self.DIAGNOSTICS_FILENAME
         print(f'Diagnostic plots will be saved to "{outfile}"...')
@@ -348,12 +350,12 @@ class Diagnostics:
             pdf.savefig(bbox_inches='tight')
 
             refdir, *otherdirs = self.rundirs
-            
+
             sampler = utils.read_json(refdir/sampling.Sampler.JSON_FILENAME)
             sampled_params = sampler.posterior.prior.sampled_params
             sampled_par_dic_0 = sampler.posterior.prior.inverse_transform(
                 **sampler.posterior.likelihood.par_dic_0)
-            
+
             ref_samples = pd.read_feather(refdir/'samples.feather')
             ref_grid = grid.Grid.from_samples(sampled_params, ref_samples,
                                               pdf_key=refdir.name)
@@ -386,12 +388,13 @@ class Diagnostics:
         """
         Return a pandas DataFrame with a table that summarizes the
         different runs in `rundirs`.
-        The columns report the differences in the samplers' `run_kwargs`,
+        The columns report differences in the samplers' `run_kwargs`,
         plus the runtime and number of samples of each run.
 
         Parameters
         ----------
-        rundirs: sequence of `pathlib.Path`s pointing to run directories.
+        rundirs: sequence of `pathlib.Path`s pointing to run
+                 directories.
         """
         rundirs = rundirs or self.rundirs
 
@@ -411,7 +414,9 @@ class Diagnostics:
 
     @staticmethod
     def _collect_run_kwargs(rundirs):
-        """Return a DataFrame aggregating run_kwargs used in sampling."""
+        """
+        Return a DataFrame aggregating run_kwargs used in sampling.
+        """
         run_kwargs = []
         for rundir in rundirs:
             with open(rundir/sampling.Sampler.JSON_FILENAME) as sampler_file:
@@ -484,10 +489,10 @@ class Diagnostics:
         plt.axhline(0, color='k', lw=1)
         plt.axis('off')
         plt.tight_layout()
-    
+
     def _test_color(self, key, values):
         """
-        Return a list of colors depending on the value/tolerance ratio. 
+        Return a list of colors depending on the value/tolerance ratio.
         green = 0, yellow = tolerance, red = 2x tolerance.
         """
         return list(mpl.cm.RdYlGn_r(values / self.tolerance_params[key] / 2,
@@ -506,3 +511,76 @@ class Diagnostics:
         plt.ylim(0)
         plt.xlabel(xpar)
         plt.ylabel(ypar)
+
+
+def submit_postprocess_rundir_slurm(
+        rundir, job_name=None, n_hours_limit=2, stdout_path=None,
+        stderr_path=None, sbatch_cmds=(), batch_path=None):
+    """
+    Submit a slurm job to postprocess a run directory where a
+    `sampling.Sampler` has been run.
+    Note this may not be necessary if the parameter estimation run was
+    done through `sampling.main` with `postprocess=True`.
+    """
+    rundir = pathlib.Path(rundir)
+    job_name = job_name or f'{rundir.name}_postprocessing'
+    stdout_path = stdout_path or rundir/'postprocessing.out'
+    stderr_path = stdout_path or rundir/'postprocessing.err'
+    args = f'--rundir {rundir.resolve()}'
+    utils.submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path, args,
+                       sbatch_cmds, batch_path)
+
+
+def submit_diagnostics_eventdir_slurm(
+        eventdir, job_name=None, n_hours_limit=2, stdout_path=None,
+        stderr_path=None, sbatch_cmds=(), batch_path=None):
+    """
+    Submit a slurm job to postprocess an event directory containing
+    postprocessed rundirs.
+    This will generate a pdf file in `eventdir` with diagnostic plots.
+    """
+    eventdir = pathlib.Path(eventdir)
+    job_name = job_name or f'{eventdir.name}_diagnostics'
+    stdout_path = stdout_path or eventdir/'diagnostics.out'
+    stderr_path = stdout_path or eventdir/'diagnostics.err'
+    args = f'--eventdir {eventdir.resolve()}'
+    utils.submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path, args,
+                       sbatch_cmds, batch_path)
+
+
+def main(*, rundir=None, eventdir=None):
+    """
+    Postprocess a run directory or an event directory.
+
+    Typically, an event directory will contain many run directories
+    corresponding to different sampler settings.
+    Processing a run directory generates a file
+    {rundir}/{TESTS_FILENAME} with test results.
+    Processing an event directory aggregates these files and generates
+    diagnostic plots summarizing them.
+
+    Parameters
+    ----------
+    rundir: path to a run directory to postprocess, can't be set
+            simultaneously with `eventdir` or a `ValueError` is raised.
+    eventdir: path to an event directory to postprocess, can't be set
+              simultaneously with `rundir` or a `ValueError` is raised.
+    """
+    if (rundir is None) == (eventdir is None):
+        raise ValueError('Pass exactly one of `rundir` or `eventdir`.')
+
+    if rundir:
+        postprocess_rundir(rundir)
+    else:
+        diagnostics(eventdir)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='postprocess either a rundir or an eventdir.')
+    parser.add_argument('--rundir', help='''path to a run directory where a
+                                            `sampling.Sampler` was run.''')
+    parser.add_argument('--eventdir',
+                        help='''path to an event directory containing
+                                postprocessed rundirs.''')
+    main(**vars(parser.parse_args()))
