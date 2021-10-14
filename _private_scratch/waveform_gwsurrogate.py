@@ -77,7 +77,7 @@ def argmaxnd(arr):
 
 #### WINDOWING and padding
 WINDOW_KWS_DEFAULTS = {'winfront':True, 'winback':True,
-                       'frontfrac':0.1, 'ampfrac':0.01}
+                       'nfront':None, 'ampfrac':0.01}
 
 def marr_tail_pts(marr, ampfrac=0.01):
     """get smallest ntail s.t. zav[-ntail] > frac*max(zav), zav = (abs(z) + np.roll(abs(z),1))/2"""
@@ -181,7 +181,7 @@ HARMONIC_MODE_INPUT_FUNC = {APPROX_HYB: lambda lms: (None if lms is None else
 #### GENERATING waveforms
 
 def gen_wfdic_1mpc(par_dic, approximant, dt, f_ref, harmonic_modes=None,
-                   return_t=False, max_inband=False, frontfrac=None,
+                   return_t=False, max_inband=False, tuktime=0.1,
                    **surrogate_kwargs):
     """
     generate UNWINDOWED mode dictionary from gwsurrogate model
@@ -210,9 +210,7 @@ def gen_wfdic_1mpc(par_dic, approximant, dt, f_ref, harmonic_modes=None,
         kws22 = dcopy(tmarr_kws)
         kws22[MODE_INPUT_KEY[approximant]] = FUNDAMENTAL_MODE_INPUT[approximant]
         t, _, _ = use_sur(q1, chi1, chi2, M=mt, **kws22)
-        if frontfrac is None:
-            frontfrac = WINDOW_KWS_DEFAULTS['frontfrac']
-        ntot = len(t) + int(np.floor(len(t) * frontfrac))
+        ntot = len(t) + int(np.ceil(tuktime / dt))
         if ntot % 2 != 0:
             ntot += 1
         f_low = tmarr_kws.pop('f_low') / 2.
@@ -250,8 +248,7 @@ def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
     """
     # match f to time grid
     dt = 0.5 / f[-1]
-    df = np.min(np.diff(f))
-    T = 1 / df
+    T = 1 / np.min(np.diff(f))
     nfft = int(np.ceil(T / dt))
     # ensure valid approximant
     if approximant == APPROX_PRE:
@@ -271,11 +268,15 @@ def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
                           [par_dic[k] for k in ['s2x', 's2y', 's2z']], M=par_dic['m1'] + par_dic['m2'],
                           phi_ref=par_dic['vphi'], inclination=par_dic['iota'], **tmarr_kws)
     # windowing -- control with window_kwargs dict, defaults to WINDOW_KWS_DEFAULTS
-    apply_double_tukey(hpihc, **{**WINDOW_KWS_DEFAULTS, **window_kwargs})
-
+    wkws = {**WINDOW_KWS_DEFAULTS, **window_kwargs}
+    tuktime = wkws.pop('tuktime', None)
+    if tuktime is not None:
+        wkws['nfront'] = int(np.ceil(tuktime / dt))
+    apply_double_tukey(hpihc, **wkws)
+    # take RFFT after shifting time axis to more closely match linear-free
     hp_hc_dimless = np.fft.rfft(np.roll(zeropad_end(np.array([hpihc.real, -hpihc.imag]), nfft),
                                         -np.searchsorted(t, 0), axis=-1), n=nfft, axis=-1)
-
+    # return the correct frequencies
     if f[0] == 0:
         # In this case we will set h(f=0) = 0
         hp_hc_dimless[:, 0] = 0
@@ -300,10 +301,15 @@ class SurrogateWaveformGenerator(waveform.WaveformGenerator):
                          harmonic_modes=harmonic_modes, disable_precession=disable_precession,
                          n_cached_waveforms=n_cached_waveforms)
         self.window_kwargs = {**WINDOW_KWS_DEFAULTS, **window_kwargs}
+        self.tuktime = None
+        if window_kwargs.get('nfront') is None:
+            tuktime = self.window_kwargs.pop('tuktime', 0.1)
+
         self.surrogate_kwargs = {**DEFAULT_MARR_KWS[approximant], **surrogate_kwargs}
         self.surrogate_kwargs['f_ref'] = f_ref
 
-    def get_hplus_hcross(self, f, waveform_par_dic, by_m=False, **surrogate_kwargs):
+    def get_hplus_hcross(self, f, waveform_par_dic, by_m=False,
+                         window_kwargs={}, surrogate_kwargs={}):
         """
         Return hplus, hcross waveform strain.
         Note: inplane spins will be zeroized if `self.disable_precession`
@@ -340,22 +346,39 @@ class SurrogateWaveformGenerator(waveform.WaveformGenerator):
             waveform_par_dic_0 = dict(zip(self.slow_params, slow_par_vals),
                                       d_luminosity=1., vphi=0.)
             dt = 0.5 / f[-1]
-            df = np.min(np.diff(f))
-            T = 1 / df
+            T = 1 / np.min(np.diff(f))
             nfft = int(np.ceil(T / dt))
-            #hm_utils.Y_lm()
             # hplus_hcross_0 is a (n_m x 2 x n_frequencies) arrays with
             # sum_l (hlm+, hlmx), at vphi=0, d_luminosity=1Mpc.
             waveform_times, waveform_mode_dic_0 = gen_wfdic_1mpc(waveform_par_dic_0,
                 self.approximant, dt, self.f_ref, harmonic_modes=self.harmonic_modes,
                 return_t=True, **surrogate_kwargs)
-            ##################################################################
-            hplus_hcross_0 = np.array(
-                [compute_hplus_hcross(self.f_ref, f, waveform_par_dic_0,
-                                      self.approximant, modes,
-                                      window_kwargs=self.window_kwargs,
-                                      surrogate_kwargs=self.surrogate_kwargs)
-                 for modes in self._harmonic_modes_by_m.values()])
+            hpihc_by_m = np.zeros((len(self._harmonic_modes_by_m.items()),
+                                   len(waveform_times)), dtype=np.complex128)
+            for j, lmlist in enumerate(self._harmonic_modes_by_m.values()):
+                for l, m in lmlist:
+                    # note that vphi = 0 ==> azimuth = pi/2 in sYlm function
+                    hpihc_by_m[j] += (waveform_mode_dic_0[(l, m)] *
+                                      hm_utils.Y_lm(l, m, iota=waveform_par_dic_0['iota'], azim=np.pi/2)
+                                      + waveform_mode_dic_0[(l, -m)] *
+                                      hm_utils.Y_lm(l, -m, iota=waveform_par_dic_0['iota'], azim=np.pi/2))
+            # windowing -- control with window_kwargs dict, defaults to WINDOW_KWS_DEFAULTS
+            wkws = {**WINDOW_KWS_DEFAULTS, **window_kwargs}
+            tuktime = wkws.pop('tuktime', None)
+            if tuktime is not None:
+                wkws['nfront'] = int(np.ceil(tuktime / dt))
+            apply_double_tukey(hpihc_by_m, **wkws)
+
+            # get hplus and hcross at frequencies in f
+            fmask = np.isin(np.fft.rfftfreq(nfft, d=dt), f)
+            hplus_hcross_0 = np.fft.rfft(np.roll(zeropad_end(np.array([[hpminusihc.real, -hpminusihc.imag]
+                                                                      for hpminusihc in hpihc_by_m]), nfft),
+                                                -np.searchsorted(waveform_times, 0), axis=-1),
+                                         n=nfft, axis=-1)[..., fmask] * dt
+            if f[0] == 0:
+                # In this case we will set h(f=0) = 0
+                hplus_hcross_0[..., 0] = 0
+            # cache waveform
             cache_dic = {'approximant': self.approximant,
                          'f_ref': self.f_ref,
                          'f': f,
