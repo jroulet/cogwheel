@@ -509,13 +509,14 @@ class Diagnostics:
         plt.grid()
         plt.xlim(0)
         plt.ylim(0)
-        plt.xlabel(xpar)
-        plt.ylabel(ypar)
+        plt.xlabel(self._LABELS[xpar])
+        plt.ylabel(self._LABELS[ypar])
 
 
 def submit_postprocess_rundir_slurm(
         rundir, job_name=None, n_hours_limit=2, stdout_path=None,
-        stderr_path=None, sbatch_cmds=(), batch_path=None):
+        stderr_path=None, sbatch_cmds=('--mem-per-cpu=16G',),
+        batch_path=None):
     """
     Submit a slurm job to postprocess a run directory where a
     `sampling.Sampler` has been run.
@@ -525,7 +526,7 @@ def submit_postprocess_rundir_slurm(
     rundir = pathlib.Path(rundir)
     job_name = job_name or f'{rundir.name}_postprocessing'
     stdout_path = stdout_path or rundir/'postprocessing.out'
-    stderr_path = stdout_path or rundir/'postprocessing.err'
+    stderr_path = stderr_path or rundir/'postprocessing.err'
     args = f'--rundir {rundir.resolve()}'
     utils.submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path, args,
                        sbatch_cmds, batch_path)
@@ -542,7 +543,7 @@ def submit_diagnostics_eventdir_slurm(
     eventdir = pathlib.Path(eventdir)
     job_name = job_name or f'{eventdir.name}_diagnostics'
     stdout_path = stdout_path or eventdir/'diagnostics.out'
-    stderr_path = stdout_path or eventdir/'diagnostics.err'
+    stderr_path = stderr_path or eventdir/'diagnostics.err'
     args = f'--eventdir {eventdir.resolve()}'
     utils.submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path, args,
                        sbatch_cmds, batch_path)
