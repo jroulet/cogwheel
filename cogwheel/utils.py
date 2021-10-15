@@ -239,6 +239,7 @@ class JSONMixin:
                       file_permissions=file_permissions, overwrite=overwrite,
                       indent=2)
         filepath.chmod(file_permissions)
+        self.last_json_filepath = filepath
 
     def __init_subclass__(cls):
         """Register subclasses."""
