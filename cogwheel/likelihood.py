@@ -56,18 +56,17 @@ def safe_std(arr, max_contiguous_low=100, expected_high=1.,
                    Gaussian noise (used to set the clipping threshold).
     reject_nearby: By how many samples to expand holes for safety.
     """
-    std_est = std_from_median(arr)
-
     good = np.ones(len(arr), dtype=bool)
 
     # Reject long stretches of low values
-    above_one_sigma = np.abs(arr) > std_est
+    above_one_sigma = np.abs(arr) > 1
     low_edges = hole_edges(above_one_sigma)
     too_long = np.diff(low_edges)[:, 0] > max_contiguous_low
     for left, right in low_edges[too_long]:
         good[left : right] = False
 
     # Reject high values
+    std_est = std_from_median(arr[good])
     thresh = std_est * stats.chi.isf(expected_high / np.count_nonzero(good), 1)
     good[np.abs(arr) > thresh] = False
 
