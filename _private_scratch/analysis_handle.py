@@ -78,7 +78,7 @@ class AnalysisHandle:
         if as_par_dics:
             s = s[[self.key(k) for k in self.wfgen.params]]
             if hasattr(get_best_inds, '__len__'):
-                return [dict(s.iloc[j]) for j in get_best_inds]
+                return [dict(idx_row[1]) for idx_row in s.iterrows()]
             return dict(s)
         return s
 
