@@ -56,7 +56,7 @@ class AnalysisHandle:
         self.prior = dcopy(sampler.posterior.prior)
         # make these references for direct access
         self.evdata = self.likelihood.event_data
-        self.wfgen = self.likelihood.event_data
+        self.wfgen = self.likelihood.waveform_generator
         self.evname = self.evdata.eventname
 
     def key(self, key):
