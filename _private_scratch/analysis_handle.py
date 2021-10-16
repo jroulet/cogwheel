@@ -4,11 +4,9 @@ after post-processing for data analysis and visualization.
 """
 import numpy as np
 import os
+import pathlib
 import sys
-import matplotlib as mpl
-import matplotlib.pyplot as plt
 import pandas as pd
-import json
 from copy import deepcopy as dcopy
 
 from matplotlib.colors import Normalize as colorsNormalize
@@ -17,14 +15,14 @@ from mpl_toolkits.mplot3d import Axes3D
 #import h5py
 
 
-from . import parameter_aliasing as aliasing
+import parameter_aliasing as aliasing
 
 COGWHEEL_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', 'cogwheel'))
 sys.path.append(COGWHEEL_PATH)
-import utils
-import sampling
-import grid as gd
+from cogwheel import utils
+from cogwheel import sampling
+from cogwheel import grid as gd
 
 class AnalysisHandle:
     """Class for analyzing posteriors."""
@@ -109,7 +107,7 @@ class AnalysisHandle:
         return gd.Grid.from_samples([self.key(k) for k in parkeys],
             self.samples, pdf_key=pdfnm, units=self.PAR_UNITS,
             labels=self.PAR_LABELS, weights=weights,
-            **grid_kwargs).corner_plot(pdf=pdfnm, **corner_plot_kwargs)
+            **extra_grid_kwargs).corner_plot(pdf=pdfnm, **corner_plot_kwargs)
 
     
 

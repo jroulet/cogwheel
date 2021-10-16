@@ -1,18 +1,19 @@
 import numpy as np
 from copy import deepcopy as dcopy
-from pandas.core.series import DataFrame as DATAFRAME_TYPE
-from pandas.core.series import Series as SERIES_TYPE
-from pandas.core.series import Index as INDEX_TYPE
-DICT_KEYS_TYPE = type({}.keys())
+import pandas as pd
+
+
+LISTLIKE_TYPES = [list, tuple, type(pd.DataFrame()), type(pd.Series({0:0}))]
+DICTLIKE_TYPES = [dict, type({}.keys()), type(pd.DataFrame().index),
+                  type(pd.DataFrame({0:[0]}).index),
+                  type(pd.DataFrame({0:[0]}).columns)]
 
 def islist(check):
     """check if list or tuple or dict_keys object"""
-    return (isinstance(check, list) or isinstance(check, DICT_KEYS_TYPE) or
-            isinstance(check, tuple) or isinstance(check, INDEX_TYPE))
+    return any([isinstance(check, ltype) for ltype in LISTLIKE_TYPES])
 
 def is_dict(check):
-    return (isinstance(check, dict) or isinstance(check, DATAFRAME_TYPE)
-            or isinstance(check, SERIES_TYPE))
+    return any([isinstance(check, dtype) for dtype in DICTLIKE_TYPES])
 
 #     Parameter Aliases
 # ----------------------------
