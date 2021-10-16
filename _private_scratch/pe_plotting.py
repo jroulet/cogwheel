@@ -36,33 +36,6 @@ def fmt(num, prec=4, form='f'):
     formstr = '{:.' + str(prec) + form + '}'
     return formstr.format(num)
 
-def invert_dict(dict_in, iter_val=False):
-    """return dictionary with inverted key-value pairs"""
-    if iter_val is True:
-        dict_out = {}
-        for key, val in dict_in.items():
-            dict_out.update({v: key for v in val})
-        return dict_out
-    else:
-        return {val: key for key, val in dict_in.items()}
-
-def pull_lvc_samples_from_ias(evname, dname='/data/bzackay/GW/LSC_PE_samples/', user='srolsen'):
-    paths = [os.path.join(dname, evname + suf) for suf in ['.h5', '_comoving.h5', '_prior.npy']]
-    cmds = [f'scp {user}@ssh1.sns.ias.edu:{p} {p}' for p in paths]
-    for cmd in cmds:
-        try:
-            os.system(cmd)
-        except:
-            print('cannot execute:', cmd)
-
-def get_best_pdics(samples, key_rngs={}, get_best_inds=np.arange(20, dtype=int), lnLmin=0):
-    s = samples[samples['lnL'] > lnLmin]
-    for k, rng in key_rngs.items():
-        s = s[s[k] > rng[0]]
-        s = s[s[k] < rng[1]]
-    s = s.sort_values('lnL', ascending=False).reset_index()
-    return [dict(s.iloc[j]) for j in get_best_inds]
-    
 ########################################
 #### NON-CLASS PLOTTING FUNCTIONS
 

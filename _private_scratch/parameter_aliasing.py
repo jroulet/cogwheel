@@ -116,7 +116,7 @@ EXTRINSIC_PARKEYS.update(DISTANCE_PARKEYS)
 EXTRINSIC_PARKEYS.update(TIME_PARKEYS)
 
 ANALYSIS_PARKEYS = {
-    'lnL': ['lnL', 'deltalogL', 'deltalogl', 'loglr', 'log_likelihood', 'lnlike', 'loglike', 'loglikelihood'],
+    'lnl': ['lnl', 'lnL', 'deltalogL', 'deltalogl', 'loglr', 'log_likelihood', 'lnlike', 'loglike', 'loglikelihood'],
     'lnPrior': ['lnPrior', 'ln_prior', 'log_prior', 'lnprior', 'logprior'],
     'lnPosterior': ['lnPosterior', 'lnPost', 'log_posterior', 'log_post', 'lnL+lnPrior', 'lnPrior+lnL'],
     'cosmo_prior': ['cosmo_prior', 'cosmo_jacobian'], 'prior': ['prior'],
@@ -131,11 +131,16 @@ ANALYSIS_PARKEYS = {
     'approximant': ['approximant', 'approx'], 'score': ['score'], 'index': ['index'], 'rank': ['rank'],
     'Fplus': ['Fplus', 'fplus'], 'Fcross': ['Fcross', 'fcross']
 }
-ANALYSIS_PARKEYS.update({f'lnL_{d}': [f'lnL_{d}', f'deltalogl{d}', f'logl{d}'] for d in ['H1', 'L1', 'V1']})
-ANALYSIS_PARKEYS.update({f'snr_{d}': [f'snr_{d}', f'{d}_matched_filter_snr'] for d in ['H1', 'L1', 'V1']})
-ANALYSIS_PARKEYS.update({f'fplus_{d}': [f'fplus_{d}', f'Fplus_{d}'] for d in ['H1', 'L1', 'V1']})
-ANALYSIS_PARKEYS.update({f'fcross_{d}': [f'fcross_{d}', f'Fcross_{d}'] for d in ['H1', 'L1', 'V1']})
-ANALYSIS_PARKEYS.update({f'antenna_{d}': [f'antenna_{d}', f'Antenna_{d}'] for d in ['H1', 'L1', 'V1']})
+ANALYSIS_PARKEYS.update({f'lnl_{d[0]}': [f'lnl_{d[0]}', f'lnL_{d}', f'deltalogl{d}', f'logl{d}']
+                         for d in ['H1', 'L1', 'V1']})
+ANALYSIS_PARKEYS.update({f'snr_{d[0]}': [f'snr_{d[0]}', f'{d[0]}_matched_filter_snr', f'snr_{d}', f'{d}_matched_filter_snr']
+                         for d in ['H1', 'L1', 'V1']})
+ANALYSIS_PARKEYS.update({f'fplus_{d[0]}': [f'fplus_{d[0]}', f'Fplus_{d[0]}', f'fplus_{d}', f'Fplus_{d}']
+                         for d in ['H1', 'L1', 'V1']})
+ANALYSIS_PARKEYS.update({f'fcross_{d[0]}': [f'fcross_{d[0]}', f'Fcross_{d[0]}', f'fcross_{d}', f'Fcross_{d}']
+                         for d in ['H1', 'L1', 'V1']})
+ANALYSIS_PARKEYS.update({f'antenna_{d[0]}': [f'antenna_{d[0]}', f'Antenna_{d[0]}', f'antenna_{d}', f'Antenna_{d}']
+                         for d in ['H1', 'L1', 'V1']})
 
 # combine intrinsic and extrinsic
 ALL_PARKEYS = dcopy(INTRINSIC_PARKEYS)
@@ -148,33 +153,18 @@ for k, alt_keys in ALL_PARKEYS.items():
     PARKEY_MAP.update({k_alt: k for k_alt in alt_keys})
 
 
-def get_dict_key(dic, key, all_keys=ALL_PARKEYS, map_to_all_keys=PARKEY_MAP):
+def get_key(dic, key, map_to_all_keys=PARKEY_MAP):
     if key in dic:
         return key
-    else:
-        map_key = map_to_all_keys.get(key, None)
-        if map_key is None:
-            raise KeyError(f'{key} is not in map_to_all_keys')
-        else:
-            for k in all_keys[map_key]:
-                if k in dic:
-                    return k
-            return None
+    return dic[map_to_all_keys[key]]
 
-
-def get_from_pdic(pdic, param_key, alt_val=None, all_keys=ALL_PARKEYS, map_to_all_keys=PARKEY_MAP):
-    dkey = get_dict_key(pdic, param_key, all_keys=all_keys, map_to_all_keys=map_to_all_keys)
+def get_from_pdic(pdic, param_key, alt_val=None, map_to_all_keys=PARKEY_MAP):
+    dkey = get_key(pdic, param_key, map_to_all_keys=map_to_all_keys)
     return (alt_val if dkey is None else pdic[dkey])
 
-
-# alias for get_dict_key (same functionality for dict, DataFrame, and GWParameterDictionary)
-get_samples_key = get_dict_key
-
-
-def get_param_samples(samples, key, alt_val=None, all_keys=ALL_PARKEYS, map_to_all_keys=PARKEY_MAP):
-    skey = get_samples_key(samples, key, all_keys=all_keys, map_to_all_keys=map_to_all_keys)
+def get_param_samples(samples, key, alt_val=None, map_to_all_keys=PARKEY_MAP):
+    skey = get_key(samples, key, map_to_all_keys=map_to_all_keys)
     return (alt_val if skey is None else np.asarray(samples[skey]))
-
 
 def compare_pdics(d1, d2, common_only=True, use_all_keys=None, map_to_all_keys=PARKEY_MAP):
     testkeys = d1.keys()
@@ -304,6 +294,10 @@ param_labels = {'mchirp': r'$\mathcal{{M}}^{\rm det}$',
                 't_geocenter': r'$t_{\rm geocenter}$',
                 'tgeo': r'$t_{\rm geocenter}$',
                 'tgps': r'$t_{\rm GPS}$',
+                'lnl': r'$\Delta \ln \mathcal{L}$',
+                'lnl_H': r'$\Delta \ln \mathcal{L}_{H}$',
+                'lnl_L': r'$\Delta \ln \mathcal{L}_{L}$',
+                'lnl_V': r'$\Delta \ln \mathcal{L}_{V}$',
                 'lnL': r'$\Delta \ln \mathcal{L}$',
                 'lnL_H1': r'$\Delta \ln \mathcal{L}_{H1}$',
                 'lnL_L1': r'$\Delta \ln \mathcal{L}_{L1}$',
@@ -316,15 +310,15 @@ param_labels = {'mchirp': r'$\mathcal{{M}}^{\rm det}$',
                 'snr2': r'$\rho^2$',
                 'Fplus': r'$F_+$',
                 'Fcross': r'$F_{\times}$',
-                'fplus_H1': r'$F_+^{(H1)}(\alpha, \delta, \psi)$',
-                'fplus_L1': r'$F_+^{(L1)}(\alpha, \delta, \psi)$',
-                'fplus_V1': r'$F_+^{(V1)}(\alpha, \delta, \psi)$',
-                'fcross_H1': r'$F_{\times}^{(H1)}(\alpha, \delta, \psi)$',
-                'fcross_L1': r'$F_{\times}^{(L1)}(\alpha, \delta, \psi)$',
-                'fcross_V1': r'$F_{\times}^{(V1)}(\alpha, \delta, \psi)$',
-                'antenna_H1': r'H1: $F_+^2 + F_{\times}^2$',
-                'antenna_L1': r'L1: $F_+^2 + F_{\times}^2$',
-                'antenna_V1': r'V1: $F_+^2 + F_{\times}^2$',
+                'fplus_H': r'$F_+^{(H1)}(\alpha, \delta, \psi)$',
+                'fplus_L': r'$F_+^{(L1)}(\alpha, \delta, \psi)$',
+                'fplus_V': r'$F_+^{(V1)}(\alpha, \delta, \psi)$',
+                'fcross_H': r'$F_{\times}^{(H1)}(\alpha, \delta, \psi)$',
+                'fcross_L': r'$F_{\times}^{(L1)}(\alpha, \delta, \psi)$',
+                'fcross_V': r'$F_{\times}^{(V1)}(\alpha, \delta, \psi)$',
+                'antenna_H': r'H1: $F_+^2 + F_{\times}^2$',
+                'antenna_L': r'L1: $F_+^2 + F_{\times}^2$',
+                'antenna_V': r'V1: $F_+^2 + F_{\times}^2$',
                 's1phi_plus_vphi': r'$\phi_{s1} + \varphi$',
                 's2phi_plus_vphi': r'$\phi_{s2} + \varphi$',
                 's1phi_hat': r'$\hat{\phi}_{s1}$',
@@ -434,6 +428,10 @@ param_names = {'mchirp': 'Detector Frame Chirp Mass',
                't_geocenter': 'Geocenter Time',
                'tgeo': 'Geocenter Time',
                'tgps': 'GPS Time',
+               'lnl': 'Log Likelihood',
+               'lnl_H': 'Hanford Log Likelihood',
+               'lnl_L': 'Livingston Log Likelihood',
+               'lnl_V': 'Virgo Log Likelihood',
                'lnL': 'Log Likelihood',
                'lnL_H1': 'Hanford Log Likelihood',
                'lnL_L1': 'Livingston Log Likelihood',
@@ -443,14 +441,14 @@ param_names = {'mchirp': 'Detector Frame Chirp Mass',
                'lnLmax': 'Maximized Log Likelihood',
                'snr': 'Signal-to-Noise Ratio',
                'snr2': 'Squared Signal-to-Noise Ratio',
-               'fplus_H1': 'Hanford Antenna Plus',
-               'fplus_L1': 'Livingston Antenna Plus',
-               'fplus_V1': 'Virgo Antenna Plus',
-               'fcross_H1': 'Hanford Antenna Cross',
-               'fcross_L1': 'Livingston Antenna Cross',
-               'fcross_V1': 'Virgo Antenna Cross',
-               'antenna_H1': 'Hanford Antenna Response',
-               'antenna_L1': 'Livingston Antenna Response',
-               'antenna_V1': 'Virgo Antenna Response',
+               'fplus_H': 'Hanford Antenna Plus',
+               'fplus_L': 'Livingston Antenna Plus',
+               'fplus_V': 'Virgo Antenna Plus',
+               'fcross_H': 'Hanford Antenna Cross',
+               'fcross_L': 'Livingston Antenna Cross',
+               'fcross_V': 'Virgo Antenna Cross',
+               'antenna_H': 'Hanford Antenna Response',
+               'antenna_L': 'Livingston Antenna Response',
+               'antenna_V': 'Virgo Antenna Response',
                'Fplus': 'Reference Detector Antenna Plus',
                'Fcross': 'Reference Detector Antenna Cross'}
