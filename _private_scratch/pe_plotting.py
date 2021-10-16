@@ -10,21 +10,14 @@ from matplotlib.cm import ScalarMappable
 from mpl_toolkits.mplot3d import Axes3D
 import lalsimulation as lalsim
 
-PIPELINE_PATH = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), '..', '..', 'gw_detection_ias'))
-sys.path.append(PIPELINE_PATH)
-import gw_pe
+from . import parameter_aliasing as aliasing
+
+COGWHEEL_PATH = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), '..', 'cogwheel'))
+sys.path.append(COGWHEEL_PATH)
 import utils
-import pop_inference.gw_pe_bookkeeping as ias_bookkeeping
-bookkeeping = ias_bookkeeping.bookkeeping
-
-from pop_inference import grid as gd
-from pop_inference import gw_utils
-from ligo_angles import radec_to_thetaphiLV
-from pop_inference.gw_utils import dz_dDL
-
-import gw_parameter_dictionary as gwpdic
-GWPD = gwpdic.GWParameterDictionary
+import sampling
+import grid as gd
 
 
 def printarr(arr, prec=4, pre='', post='', sep='  ', form='f'):
@@ -40,13 +33,13 @@ def fmt(num, prec=4, form='f'):
 #### NON-CLASS PLOTTING FUNCTIONS
 
 def label_from_key(key):
-    return gw_utils.param_labels.get(gw_utils.PARKEY_MAP.get(key, key), key)
+    return aliasing.param_labels.get(aliasing.PARKEY_MAP.get(key, key), key)
 
 def corner_plot_samples(samps, pvkeys=['mtot', 'q', 'chieff'], title=None,
                         figsize=(9,7), scatter_points=None, weights=None,
                         grid_kws={}, fig=None, ax=None, return_grid=False, **corner_plot_kws):
     """make corner plots"""
-    units, plabs = gw_utils.units, gw_utils.param_labels
+    units, plabs = aliasing.units, aliasing.param_labels
     for k in pvkeys:
         if k not in units.keys():
             units[k] = ''
@@ -64,7 +57,7 @@ def corner_plot_list(samps_list, samps_names, pvkeys=['mtot', 'q', 'chieff'], we
                      figsize=(9,7), scatter_points=None, fractions=[.5, .9], grid_kws={},
                      multigrid_kws={}, fig=None, ax=None, return_grid=False, **corner_plot_kws):
     grids = []
-    units, plabs = gw_utils.units, gw_utils.param_labels
+    units, plabs = aliasing.units, aliasing.param_labels
     for k in pvkeys:
         if k not in units.keys():
             units[k] = ''
@@ -251,7 +244,7 @@ def plot_spin4d(samples, ckey='q', use_V3=False, secondary_spin=False, sign_or_s
                       fig=fig, ax=ax)
     # plot extra points
     for dic in extra_point_dicts:
-        if gwpdic.is_dict(dic):
+        if aliasing.is_dict(dic):
             xx, yy, zz = dic[xkey], dic[ykey], dic[zkey]
             ax.scatter(xx, yy, zz, marker=dic.get('marker', dic.get('m')), s=dic.get('size', dic.get('s')),
                        c=dic.get('color', dic.get('c')))

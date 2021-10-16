@@ -35,10 +35,12 @@ class AnalysisHandle:
     PAR_UNITS = aliasing.units
     PAR_NAMES = aliasing.param_names
     
-    def __init__(self, rundir):
+    def __init__(self, rundir, name=None):
         super().__init__()
-        # load samples
+        # associate to run directory
         self.rundir = pathlib.Path(rundir)
+        self.name = name or self.rundir.parts[-1]
+        # load samples
         self.samples = pd.read_feather(self.rundir/sampling.SAMPLES_FILENAME)
         if self.LNL_COL not in self.samples:
             self.LNL_COL = self.key(self.LNL_COL)

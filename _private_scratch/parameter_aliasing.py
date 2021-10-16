@@ -1,6 +1,18 @@
 import numpy as np
 from copy import deepcopy as dcopy
+from pandas.core.series import DataFrame as DATAFRAME_TYPE
+from pandas.core.series import Series as SERIES_TYPE
+from pandas.core.series import Index as INDEX_TYPE
+DICT_KEYS_TYPE = type({}.keys())
 
+def islist(check):
+    """check if list or tuple or dict_keys object"""
+    return (isinstance(check, list) or isinstance(check, DICT_KEYS_TYPE) or
+            isinstance(check, tuple) or isinstance(check, INDEX_TYPE))
+
+def is_dict(check):
+    return (isinstance(check, dict) or isinstance(check, DATAFRAME_TYPE)
+            or isinstance(check, SERIES_TYPE))
 
 #     Parameter Aliases
 # ----------------------------
@@ -152,7 +164,6 @@ PARKEY_MAP = {}
 for k, alt_keys in ALL_PARKEYS.items():
     PARKEY_MAP.update({k_alt: k for k_alt in alt_keys})
 
-
 def get_key(dic, key, map_to_all_keys=PARKEY_MAP):
     if key in dic:
         return key
@@ -181,7 +192,7 @@ def compare_pdics(d1, d2, common_only=True, use_all_keys=None, map_to_all_keys=P
         if use_all_keys is True:
             use_all_keys = ALL_PARKEYS
         # see which parameters are contained in both
-        d2keys = [get_dict_key(d2, k, all_keys=use_all_keys, map_to_all_keys=map_to_all_keys) for k in testkeys]
+        d2keys = [get_key(d2, k, map_to_all_keys=map_to_all_keys) for k in testkeys]
         if common_only:
             testkeys = [(k1, k2) for k1, k2 in zip(testkeys, d2keys) if k2 is not None]
         elif (len(testkeys) != len(d2.keys())):
