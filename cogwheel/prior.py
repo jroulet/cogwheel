@@ -94,6 +94,7 @@ class Prior(ABC, utils.JSONMixin):
         self.cubesize = cubemax - self.cubemin
         self.folded_cubesize = self.cubesize.copy()
         self.folded_cubesize[self._folded_inds] /= 2
+        self.signature = inspect.signature(self.transform)
 
     @utils.ClassProperty
     def sampled_params(self):
@@ -212,23 +213,37 @@ class Prior(ABC, utils.JSONMixin):
         unfolding_func.__signature__ = sig
         return unfolding_func
 
-    def unfold(self, par_values):
+    def unfold(self, folded_par_values):
         """
         Take an array of length `n_params` with parameter values in the
         space of folded sampled parameters, and return an array of shape
         `(2**n_folded_params, n_params)` with parameter values
         corresponding to the different ways of unfolding.
         """
-        original_values = par_values[self._folded_inds]
+        original_values = folded_par_values[self._folded_inds]
         mirrored_values = (2 * (self.cubemin[self._folded_inds]
                                 + self.folded_cubesize[self._folded_inds])
                            - original_values)
 
-        unfolded = np.array([par_values] * 2**len(self._folded_inds))
+        unfolded = np.array([folded_par_values] * 2**len(self._folded_inds))
         unfolded[:, self._folded_inds] = list(itertools.product(
             *zip(original_values, mirrored_values)))
 
         return unfolded
+
+    def fold(self, *sampled_par_values, **sampled_par_dic):
+        """
+        Take an array of length `n_params` with parameter values in the
+        space of sampled parameters, and return an array of the same
+        shape with folded parameter values.
+        """
+        folded = np.array(self.signature.bind(*sampled_par_values,
+                                              **sampled_par_dic).args)
+        center = (self.cubemin[self._folded_inds]
+                  + self.folded_cubesize[self._folded_inds])
+        folded[self._folded_inds] = center - np.abs(folded[self._folded_inds]
+                                                    - center)
+        return folded
 
     def __init_subclass__(cls):
         """

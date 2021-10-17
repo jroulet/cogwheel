@@ -11,6 +11,7 @@ import os
 import tempfile
 import textwrap
 import time
+import numpy as np
 
 from . import data
 from . import gw_prior
@@ -121,8 +122,7 @@ class Posterior(utils.JSONMixin):
         if isinstance(prior_class, str):
             prior_class = gw_prior.prior_registry[prior_class]
 
-        # Check that we will have required parameters
-        # before doing any expensive maximization
+        # Check required input before doing expensive maximization:
         sig = inspect.signature(prior_class.__init__)
         required_pars = {
             name for name, parameter in sig.parameters.items()
@@ -136,41 +136,54 @@ class Posterior(utils.JSONMixin):
                             - set(kwargs)):
             raise ValueError(f'Missing parameters: {", ".join(missing_pars)}')
 
-        # Initialize likelihood
+        # Initialize likelihood:
         aux_waveform_generator = waveform.WaveformGenerator(
             event_data.detector_names, event_data.tgps, event_data.tcoarse,
             approximant, f_ref=20., harmonic_modes=[(2, 2)])
         bestfit = ReferenceWaveformFinder(
-            event_data, aux_waveform_generator).find_bestfit_pars()
+            event_data, aux_waveform_generator).find_bestfit_pars(seed=seed)
         waveform_generator = waveform.WaveformGenerator(
             event_data.detector_names, event_data.tgps, event_data.tcoarse,
             approximant, bestfit['f_ref'], harmonic_modes, disable_precession)
-        likelihood_instance = RelativeBinningLikelihood(
+        likelihood = RelativeBinningLikelihood(
             event_data, waveform_generator, bestfit['par_dic'], fbin,
             pn_phase_tol, tolerance_params)
-        assert likelihood_instance._lnl_0 > 0
+        assert likelihood._lnl_0 > 0
 
-        # Initialize prior
-        prior_kwargs = {key: getattr(event_data, key)
-                        for key in event_data_keys} | bestfit | kwargs
-        prior_instance = prior_class(**prior_kwargs)
+        # Initialize prior:
+        prior = prior_class(**
+            {key: getattr(event_data, key) for key in event_data_keys}
+            | bestfit | kwargs)
 
-        posterior_instance = cls(prior_instance, likelihood_instance)
+        # Initialize posterior and do second search:
+        posterior = cls(prior, likelihood)
+        posterior.refine_reference_waveform(seed)
+        return posterior
 
-        # Refine relative binning solution over all space
-        print('Performing a second search...')
-        guess = prior_instance.inverse_transform(
-            **likelihood_instance.par_dic_0)
-        result = utils.differential_evolution_with_guesses(
-            lambda pars: -posterior_instance.likelihood.lnlike(
-                posterior_instance.prior.transform(*pars)),
-            list(prior_instance.range_dic.values()),
-            list(guess.values()),
-            seed=seed)
-        likelihood_instance.par_dic_0 = prior_instance.transform(*result.x)
-        print(f'Found solution with lnl = {likelihood_instance._lnl_0}')
+    def refine_reference_waveform(self, seed=None):
+        """
+        Reset relative-binning reference waveform, using differential
+        evolution to find a good fit.
+        It is guaranteed that the new waveform will have at least as
+        good a fit as the current one.
+        """
+        folded_par_vals_0 = self.prior.fold(
+            **self.prior.inverse_transform(**self.likelihood.par_dic_0))
 
-        return posterior_instance
+        lnlike_unfolds = self.prior.unfold_apply(
+            lambda *pars: self.likelihood.lnlike(self.prior.transform(*pars)))
+
+        bestfit_folded = utils.differential_evolution_with_guesses(
+            func=lambda pars: -max(lnlike_unfolds(*pars)),
+            bounds=list(zip(self.prior.cubemin,
+                            self.prior.cubemin + self.prior.folded_cubesize)),
+            guesses=folded_par_vals_0,
+            seed=seed).x
+        i_fold = np.argmax(lnlike_unfolds(*bestfit_folded))
+
+        self.likelihood.par_dic_0 = self.prior.transform(
+            *self.prior.unfold(bestfit_folded)[i_fold])
+        print(f'Found solution with lnl = {self.likelihood._lnl_0}')
 
     def get_eventdir(self, parentdir):
         """

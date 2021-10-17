@@ -91,7 +91,7 @@ def _check_bounds(lnlike_func):
     def new_lnlike_func(*args, **kwargs):
         try:
             par_dic = args[par_dic_place]
-        except ValueError:
+        except IndexError:
             par_dic = kwargs['par_dic']
 
         if out_of_bounds(par_dic):

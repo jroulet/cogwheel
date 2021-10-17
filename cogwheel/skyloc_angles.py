@@ -110,7 +110,7 @@ def cart3d_to_thetaphi(unit_vector):
     vector r, assumed normalized to 1.
     """
     theta = np.arccos(unit_vector[2])
-    phi = np.arctan2(unit_vector[1], unit_vector[0]) % (2 * np.pi)
+    phi = np.arctan2(unit_vector[1], unit_vector[0]) % (2*np.pi)
     return theta, phi
 
 
