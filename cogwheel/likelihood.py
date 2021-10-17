@@ -170,6 +170,8 @@ class CBCLikelihood(utils.JSONMixin):
                            * np.sum(np.abs(whitened_h_f)**4, axis=-1)
                            / (tol**2 * self.event_data.nfft)).astype(int)
 
+        nsamples = np.minimum(nsamples, z_cos.shape[1])
+
         asd_drift = self.asd_drift.copy()
         for i_det, n_s in enumerate(nsamples):
             places = (i_det, np.arange(-n_s//2, n_s//2))

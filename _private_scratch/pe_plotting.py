@@ -10,21 +10,14 @@ from matplotlib.cm import ScalarMappable
 from mpl_toolkits.mplot3d import Axes3D
 import lalsimulation as lalsim
 
-PIPELINE_PATH = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), '..', '..', 'gw_detection_ias'))
-sys.path.append(PIPELINE_PATH)
-import gw_pe
+from . import parameter_aliasing as aliasing
+
+COGWHEEL_PATH = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), '..', 'cogwheel'))
+sys.path.append(COGWHEEL_PATH)
 import utils
-import pop_inference.gw_pe_bookkeeping as ias_bookkeeping
-bookkeeping = ias_bookkeeping.bookkeeping
-
-from pop_inference import grid as gd
-from pop_inference import gw_utils
-from ligo_angles import radec_to_thetaphiLV
-from pop_inference.gw_utils import dz_dDL
-
-import gw_parameter_dictionary as gwpdic
-GWPD = gwpdic.GWParameterDictionary
+import sampling
+import grid as gd
 
 
 def printarr(arr, prec=4, pre='', post='', sep='  ', form='f'):
@@ -36,44 +29,17 @@ def fmt(num, prec=4, form='f'):
     formstr = '{:.' + str(prec) + form + '}'
     return formstr.format(num)
 
-def invert_dict(dict_in, iter_val=False):
-    """return dictionary with inverted key-value pairs"""
-    if iter_val is True:
-        dict_out = {}
-        for key, val in dict_in.items():
-            dict_out.update({v: key for v in val})
-        return dict_out
-    else:
-        return {val: key for key, val in dict_in.items()}
-
-def pull_lvc_samples_from_ias(evname, dname='/data/bzackay/GW/LSC_PE_samples/', user='srolsen'):
-    paths = [os.path.join(dname, evname + suf) for suf in ['.h5', '_comoving.h5', '_prior.npy']]
-    cmds = [f'scp {user}@ssh1.sns.ias.edu:{p} {p}' for p in paths]
-    for cmd in cmds:
-        try:
-            os.system(cmd)
-        except:
-            print('cannot execute:', cmd)
-
-def get_best_pdics(samples, key_rngs={}, get_best_inds=np.arange(20, dtype=int), lnLmin=0):
-    s = samples[samples['lnL'] > lnLmin]
-    for k, rng in key_rngs.items():
-        s = s[s[k] > rng[0]]
-        s = s[s[k] < rng[1]]
-    s = s.sort_values('lnL', ascending=False).reset_index()
-    return [dict(s.iloc[j]) for j in get_best_inds]
-    
 ########################################
 #### NON-CLASS PLOTTING FUNCTIONS
 
 def label_from_key(key):
-    return gw_utils.param_labels.get(gw_utils.PARKEY_MAP.get(key, key), key)
+    return aliasing.param_labels.get(aliasing.PARKEY_MAP.get(key, key), key)
 
 def corner_plot_samples(samps, pvkeys=['mtot', 'q', 'chieff'], title=None,
                         figsize=(9,7), scatter_points=None, weights=None,
                         grid_kws={}, fig=None, ax=None, return_grid=False, **corner_plot_kws):
     """make corner plots"""
-    units, plabs = gw_utils.units, gw_utils.param_labels
+    units, plabs = aliasing.units, aliasing.param_labels
     for k in pvkeys:
         if k not in units.keys():
             units[k] = ''
@@ -91,7 +57,7 @@ def corner_plot_list(samps_list, samps_names, pvkeys=['mtot', 'q', 'chieff'], we
                      figsize=(9,7), scatter_points=None, fractions=[.5, .9], grid_kws={},
                      multigrid_kws={}, fig=None, ax=None, return_grid=False, **corner_plot_kws):
     grids = []
-    units, plabs = gw_utils.units, gw_utils.param_labels
+    units, plabs = aliasing.units, aliasing.param_labels
     for k in pvkeys:
         if k not in units.keys():
             units[k] = ''
@@ -278,7 +244,7 @@ def plot_spin4d(samples, ckey='q', use_V3=False, secondary_spin=False, sign_or_s
                       fig=fig, ax=ax)
     # plot extra points
     for dic in extra_point_dicts:
-        if gwpdic.is_dict(dic):
+        if aliasing.is_dict(dic):
             xx, yy, zz = dic[xkey], dic[ykey], dic[zkey]
             ax.scatter(xx, yy, zz, marker=dic.get('marker', dic.get('m')), s=dic.get('size', dic.get('s')),
                        c=dic.get('color', dic.get('c')))

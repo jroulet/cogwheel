@@ -1,4 +1,8 @@
 import numpy as np
+# until moved into lib
+import sys
+sys.path.append("..")
+from cogwheel import cosmology as cosmo
 
 #     Mass Variable Conversions
 # ---------------------------------
@@ -9,9 +13,6 @@ def eta2q(eta):
 def q2eta(q):
     return q / (1 + q) ** 2
 
-def mchirp_eta_chieff2mchirp_q_chieff(mchirp, eta, chieff):
-    return mchirp, eta2q(eta), chieff
-
 # component masses from chirp mass and ratio
 def m1_of_mchirp_q(mchirp, q):
     return mchirp * (1 + q) ** .2 / q ** .6
@@ -19,28 +20,12 @@ def m1_of_mchirp_q(mchirp, q):
 def m2_of_mchirp_q(mchirp, q):
     return mchirp * (1 + 1 / q) ** .2 * q ** .6
 
-def m1_of_mchirp_q1(mchirp, q1):
-    """using q1 = q^-1 = m1/m2"""
-    return mchirp * (1 + 1 / q1) ** .2 * q1 ** .6
-
-def m2_of_mchirp_q1(mchirp, q1):
-    """using q1 = q^-1 = m1/m2"""
-    return mchirp * (1 + q1) ** .2 / q1 ** .6
-
 # component masses from total mass and ratio
 def m1_of_mtot_q(mtot, q):
     return mtot / (1 + q)
 
 def m2_of_mtot_q(mtot, q):
     return mtot * q / (1 + q)
-
-def m1_of_mtot_q1(mtot, q1):
-    """using q1 = q^-1 = m1/m2"""
-    return mtot * q1 / (1 + q1)
-
-def m2_of_mtot_q1(mtot, q1):
-    """using q1 = q^-1 = m1/m2"""
-    return mtot / (1 + q1)
 
 # chirp mass
 def mchirp_of_m1_m2(m1, m2):
@@ -90,8 +75,8 @@ def standard_mass_conversion(**dic):
         (all can be scalars or numpy arrays)
     :return: dic with all values solved for
     """
-    mc = dic.get('mc', dic.get('mchirp'))
-    mt = dic.get('mt', dic.get('mtot'))
+    mc = dic.get('mchirp', dic.get('mc'))
+    mt = dic.get('mtot', dic.get('mt'))
     m1 = dic.get('m1')
     m2 = dic.get('m2')
     q = dic.get('q')
@@ -178,14 +163,14 @@ def standard_mass_conversion(**dic):
     else:
         if m1 is not None:
             dic['m2'] = m1 * q
-            dic['mt'] = m1 * (1 + q)
-            dic['mc'] = m1 * q**0.6 / (1 + q)**0.2
+            dic['mtot'] = m1 * (1 + q)
+            dic['mchirp'] = m1 * q**0.6 / (1 + q)**0.2
             return dic
         if mt is not None:
             dic['m1'] = mt / (1 + q)
             return standard_mass_conversion(**dic)
         if mc is not None:
-            dic['mt'] = mc / dic['eta']**0.6
+            dic['mtot'] = mc / dic['eta']**0.6
             return standard_mass_conversion(**dic)
         raise RuntimeError("Enough parameters weren't defined")
 
@@ -196,14 +181,6 @@ def standard_mass_conversion(**dic):
 def chieff_chia_of_s1z_s2z_m1_m2(s1z, s2z, m1, m2):
     mt = m1 + m2
     return (m1 * s1z + m2 * s2z) / mt, (m1 * s1z - m2 * s2z) / mt
-
-def m1_m2_s1_s2_to_chieff_chia(m1, m2, s1z, s2z, pe=True):
-    chieff = (m1 * s1z + m2 * s2z) / (m1 + m2)
-    if pe:
-        chia = (s1z - s2z) / 2
-    else:
-        chia = (m1 * s1z - m2 * s2z) / (m1 + m2)
-    return chieff, chia
 
 def chip(s1x, s1y, s2x, s2y, m1, m2):
     m1, m2 = np.maximum(m1, m2), np.minimum(m1, m2)
@@ -217,35 +194,24 @@ def chip(s1x, s1y, s2x, s2y, m1, m2):
     return np.maximum(A1 * s1P * m1 ** 2,
                       A2 * s2P * m2 ** 2) / A1 / m1 ** 2
 
-
 def sx_sy_of_s_theta_phi(s, theta, phi):
     return s * np.sin(theta) * np.cos(phi), s * np.sin(theta) * np.sin(phi)
-
-
-def chieff_chia_of_s1z_s2z_m1_m2(s1z, s2z, m1, m2):
-    mt = m1 + m2
-    return (m1 * s1z + m2 * s2z) / mt, (m1 * s1z - m2 * s2z) / mt
-
 
 def s1z_of_chieff_s2z_m1_m2(chieff, s2z, m1, m2):
     mt = m1 + m2
     return mt * (chieff - m2 * s2z / mt) / m1
 
-
 def s2z_of_chieff_s1z_m1_m2(chieff, s1z, m1, m2):
     mt = m1 + m2
     return mt * (chieff - m1 * s1z / mt) / m2
-
 
 def s1z_s2z_of_chieff_chia_m1_m2(chieff, chia, m1, m2):
     mt = m1 + m2
     return mt * (chieff + chia) / (2 * m1), mt * (chieff - chia) / (2 * m2)
 
-
 def s1z_of_chia_s2z_m1_m2(chia, s2z, m1, m2):
     mt = m1 + m2
     return mt * (chia + m2 * s2z / mt) / m1
-
 
 def s2z_of_chia_s1z_m1_m2(chia, s1z, m1, m2):
     mt = m1 + m2
@@ -256,6 +222,45 @@ def s2z_of_chia_s1z_m1_m2(chia, s1z, m1, m2):
 #### PARAMETER COMPLETION for SAMPLE DATAFRAMES
 
 def compute_samples_aux_vars(samples):
+    """
+    Takes a dict-like object with some set of masses, spins
+    etc. and adds entries for derived quantities like chieff
+    and source frame masses.
+    Samples MUST have all the standard parameters
+    """
+    # mass ratio variables
+    samples['q'] = np.asarray(samples['m2']) / np.asarray(samples['m1'])
+    samples['q1'] = 1 / np.asarray(samples['q'])
+    samples['lnq'] = np.log(np.asarray(samples['q']))
+    samples['eta'] = q2eta(np.asarray(samples['q']))
+    # mass variables
+    samples['mtot'] = np.asarray(samples['m1']) + np.asarray(samples['m2'])
+    samples['mchirp'] = mchirp_of_m1_m2(np.asarray(samples['m1']), np.asarray(samples['m2']))
+    # source frame
+    samples['z'] = cosmo.z_of_DL_Mpc(np.asarray(samples['d_luminosity']))
+    samples['d_comoving'] = np.asarray(samples['d_luminosity']) / (1 + np.asarray(samples['z']))
+    for k in ['m1', 'm2', 'mtot', 'mchirp']:
+        samples[f'{k}_source'] = np.asarray(samples[k]) / (1 + np.asarray(samples['z']))
+    # effective spin
+    samples['chieff'] = ((np.asarray(samples['s1z']) + np.asarray(samples['q']) * np.asarray(samples['s2z']))
+                             / (1 + np.asarray(samples['q'])))
+    samples['chia'] = .5 * (np.asarray(samples['s1z']) - np.asarray(samples['s2z']))
+    # spin polar variables
+    for j in [1, 2]:
+        sx, sy, sz = [np.asarray(samples[f's{j}{coord}']) for coord in ['x', 'y', 'z']]
+        samples[f's{j}'] = np.sqrt(sx ** 2 + sy ** 2 + sz ** 2)
+        samples[f's{j}costheta'] = sz / np.asarray(samples[f's{j}'])
+        samples[f's{j}theta'] = np.arccos(np.asarray(samples[f's{j}costheta']))
+        samples[f's{j}phi'] = np.arctan2(np.asarray(samples[f's{j}y']), np.asarray(samples[f's{j}x'])) % (2 * np.pi)
+    # chi_p for precession
+    samples['chip'] = chip(np.asarray(samples['s1x']), np.asarray(samples['s1y']),
+                           np.asarray(samples['s2x']), np.asarray(samples['s2y']),
+                           np.asarray(samples['m1']), np.asarray(samples['m2']))
+    
+    
+#### COMPLETION
+
+def complete_samples_intrinsic_params(samples):
     """
     Takes a dict-like object with some set of masses, spins
     etc. and adds entries for derived quantities like chieff,
@@ -310,25 +315,18 @@ def compute_samples_aux_vars(samples):
         samples['m2_source'] = m2_of_mtot_q(np.asarray(samples['mtot_source']), np.asarray(samples['q']))
 
     # distance options...priority:  distance_Mpc > volume, distance_Gpc > redshift  [and luminosity > comoving]
-    if ('DL' not in samples) and ('Dcomov' not in samples):
-        if 'DL_Gpc' in samples:
-            samples['DL'] = 1000 * np.asarray(samples['DL_Gpc'])
-        elif 'Vcomov' in samples:
-            samples['Dcomov'] = Dcomov_of_Vcomov(np.asarray(samples['Vcomov']))
-        else:
-            redshift_key = get_samples_key(samples, 'z')
-            if redshift_key is not None:
-                samples['DL'] = DL_Mpc_of_z(np.asarray(samples[redshift_key]))
-    # having made best effort to get DL or Dcomov, now get z and convert detector frame to source frame
-    if ('DL' in samples) or ('Dcomov' in samples):
-        if 'DL' in samples:
-            samples['z'] = z_of_DL_Mpc(np.asarray(samples['DL']))  # z_of_DL(np.asarray(samples['DL']))
-            samples['Dcomov'] = np.asarray(samples['DL']) / (1 + np.asarray(samples['z']))
-        elif 'Dcomov' in samples:
-            samples['z'] = z_of_Dcomov_Mpc(np.asarray(samples['Dcomov']))
-            samples['DL'] = np.asarray(samples['Dcomov']) * (1 + np.asarray(samples['z']))
-        samples['DL_Gpc'] = 0.001 * np.asarray(samples['DL'])
-        samples['Vcomov'] = Vcomov_of_Dcomov(np.asarray(samples['Dcomov']))
+    if ('d_luminosity' not in samples) and ('d_comoving' not in samples):
+        if 'z' in samples:
+            samples['d_luminosity'] = cosmo.DL_Mpc_of_z(np.asarray(samples['z']))
+    # having made best effort to get d_luminosity or d_comoving, now get z and convert detector frame to source frame
+    if ('d_luminosity' in samples) or ('d_comoving' in samples):
+        if 'd_luminosity' in samples:
+            samples['z'] = cosmo.z_of_DL_Mpc(np.asarray(samples['d_luminosity']))  # z_of_d_luminosity(np.asarray(samples['d_luminosity']))
+            samples['d_comoving'] = np.asarray(samples['d_luminosity']) / (1 + np.asarray(samples['z']))
+        elif 'd_comoving' in samples:
+            samples['z'] = cosmo.z_of_Dcomov_Mpc(np.asarray(samples['d_comoving']))
+            samples['d_luminosity'] = np.asarray(samples['d_comoving']) * (1 + np.asarray(samples['z']))
+        
         if 'm1' in samples and (('m2' in samples) or ('q' in samples)):
             if 'm2' not in samples:
                 samples['m2'] = np.asarray(samples['q']) * np.asarray(samples['m1'])
