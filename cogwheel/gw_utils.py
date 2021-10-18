@@ -65,7 +65,7 @@ LABELS = {
     'mchirp_source': r'$\mathcal{M}^{\rm src}$',
     # Spin
     'chieff': r'$\chi_{\rm eff}$',
-    'cumchidiff': r"$\chi_{\rm cum}^{\rm diff}$"
+    'cumchidiff': r'$\int \pi (\chi_{\rm diff})$',
     's1phi_hat': r'$\hat{\phi}_{s1}$',
     's2phi_hat': r'$\hat{\phi}_{s2}$',
     'cums1r_s1z': r'$\int \pi (s_1^\perp | s_{1z})$',
