@@ -147,24 +147,24 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
 RUNDIR_PREFIX = 'run_'
 
 
-def get_eventdir(parentdir, prior_class, eventname):
+def get_eventdir(parentdir, prior_name, eventname):
     """
     Return `pathlib.Path` object for a directory of the form
-    {parentdir}/{prior_class}/{eventname}/
+    {parentdir}/{prior_name}/{eventname}/
     This directory is intended to contain a `Posterior` instance,
     and multiple rundir directories with parameter estimation
     output for different sampler settings.
     I.e. the file structure is as follows:
 
         <parentdir>
-        └── <prior_class>
+        └── <prior_name>
             └── <eventdir>
                 ├── Posterior.json
                 └── <rundir>
                     ├── Sampler.json
                     └── <sampler_output_files>
     """
-    return pathlib.Path(parentdir)/prior_class/eventname
+    return pathlib.Path(parentdir)/prior_name/eventname
 
 
 def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):

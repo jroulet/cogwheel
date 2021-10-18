@@ -98,7 +98,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         Return a `pathlib.Path` object with a new run directory,
         following a standardized naming scheme for output directories.
         Directory will be of the form
-        {parentdir}/{prior_class}/{eventname}/{RUNDIR_PREFIX}{i_run}
+        {parentdir}/{prior_name}/{eventname}/{RUNDIR_PREFIX}{i_run}
 
         Parameters
         ----------
