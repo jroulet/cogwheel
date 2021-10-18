@@ -1,4 +1,5 @@
 from copy import copy, deepcopy
+from collections import defaultdict
 import json
 import os
 import matplotlib as mpl
@@ -108,7 +109,42 @@ DEFAULT_PLOTSTYLE2D = PlotStyle2d()
 DEFAULT_PLOTSTYLE = PlotStyle(DEFAULT_PLOTSTYLE1D, DEFAULT_PLOTSTYLE2D)
 
 
+class LatexLabels(dict):
+    """
+    Helper class for plotting parameter labels.
+
+    Example
+    -------
+    >>> labels = LatexLabels(labels={'m': '$m$', 'theta': r'$\theta$'},
+    ...                      units={'m': 'kg'})
+    >>> labels['m']
+    '$m$'
+    >>> labels.units['m']
+    'kg'
+    >>> labels.units['theta']
+    ''
+    >>> labels.with_units('m')
+    '$m$ (kg)'
+    >>> labels.with_units('theta')
+    '$\\theta$'
+    >>> labels.with_units('x')
+    'x'
+    """
+    def __init__(self, labels: dict = None, units: dict = None):
+        super().__init__(labels or {})
+
+        self.units = defaultdict(str, units or {})
+
+    def with_units(self, par):
+        parenthesised_unit = f' ({self.units[par]})' if self.units[par] else ''
+        return self[par] + parenthesised_unit
+
+    def __missing__(self, par):
+        return par
+
+
 def parenthesized_unit(unit):
+    # deprecated, TODO remove in favor of LatexLabels
     return f' ({unit})' if unit else ''
 
 

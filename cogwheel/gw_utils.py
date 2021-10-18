@@ -3,6 +3,8 @@ import numpy as np
 
 import lal
 
+from . import grid
+
 DETECTORS = {'H': lal.CachedDetectors[lal.LHO_4K_DETECTOR],
              'L': lal.CachedDetectors[lal.LLO_4K_DETECTOR],
              'V': lal.CachedDetectors[lal.VIRGO_DETECTOR]}
@@ -28,7 +30,6 @@ def time_delay_from_geocenter(detector_names, ra, dec, tgps):
 #-----------------------------------------------------------------------
 # Coordinate transformations
 
-
 def eta_to_q(eta):
     """q = m2/m1 as a function of eta = q / (1+q)**2."""
     return (1 - np.sqrt(1 - 4*eta) - 2*eta) / (2*eta)
@@ -50,8 +51,8 @@ def mchirpeta_to_m1m2(mchirp, eta):
 # ----------------------------------------------------------------------
 # Latex formatting
 
-LABELS = {
-     # Mass
+_LABELS = {
+    # Mass
     'mchirp': r'$\mathcal{M}^{\rm det}$',
     'lnq': r'$\ln q$',
     'q': r'$q$',
@@ -65,11 +66,11 @@ LABELS = {
     'mchirp_source': r'$\mathcal{M}^{\rm src}$',
     # Spin
     'chieff': r'$\chi_{\rm eff}$',
-    'cumchidiff': r"$\chi_{\rm cum}^{\rm diff}$"
+    'cumchidiff': r'$\int \pi (\chi_{\rm diff})$',
     's1phi_hat': r'$\hat{\phi}_{s1}$',
     's2phi_hat': r'$\hat{\phi}_{s2}$',
     'cums1r_s1z': r'$\int \pi (s_1^\perp | s_{1z})$',
-    'cums1r_s1z': r'$\int \pi (s_2^\perp | s_{2z})$',
+    'cums2r_s2z': r'$\int \pi (s_2^\perp | s_{2z})$',
     's1x': r'$s_{1x}$',
     's1y': r'$s_{1y}$',
     's1z': r'$s_{1z}$',
@@ -101,7 +102,7 @@ LABELS = {
     'phi12': r'$\phi_{12}$',
     # Location
     'costhetanet': r'$\cos \theta_{\rm net}$',
-    'phinet_hat': r'$\hat{phi}_{\rm net}$',
+    'phinet_hat': r'$\hat{\phi}_{\rm net}$',
     'ra': r'$\alpha$',
     'dec': r'$\delta$',
     'thetanet': r'$\theta_{\rm net}$',
@@ -117,11 +118,12 @@ LABELS = {
     'lnl_V': r'$\ln \mathcal{L}_V$',
     }
 
-UNITS = (
-    dict.fromkeys(['mchirp', 'm1', 'm2', 'mtot', 'm1_source', 'm2_source',
-                   'mtot_source', 'mchirp_source'], r'M$_{\odot}$')
-    | dict.fromkeys(['t_refdet', 'tc', 't_geocenter'], 's')
-    | {'d_hat': r'M$_{\odot}$Mpc$^{-1}$',
-       'd_luminosity': 'Mpc',
-       }
-    )
+_UNITS = (dict.fromkeys(['mchirp', 'm1', 'm2', 'mtot', 'mtot_source',
+                         'm1_source', 'm2_source', 'mchirp_source'],
+                        r'M$_{\odot}$')
+          | dict.fromkeys(['t_refdet', 'tc', 't_geocenter'], 's')
+          | {'d_hat': r'M$_{\odot}$Mpc$^{-1}$',
+             'd_luminosity': 'Mpc',
+             })
+
+LATEX_LABELS = grid.LatexLabels(_LABELS, _UNITS)
