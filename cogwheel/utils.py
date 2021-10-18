@@ -5,6 +5,7 @@ import inspect
 import json
 import os
 import pathlib
+import re
 import sys
 import tempfile
 import textwrap
@@ -143,6 +144,9 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
 # ----------------------------------------------------------------------
 # Directory I/O:
 
+RUNDIR_PREFIX = 'run_'
+
+
 def get_eventdir(parentdir, prior_class, eventname):
     """
     Return `pathlib.Path` object for a directory of the form
@@ -177,6 +181,18 @@ def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):
     dirname = pathlib.Path(dirname)
     for path in list(dirname.parents)[::-1] + [dirname]:
         path.mkdir(mode=dir_permissions, exist_ok=True)
+
+
+def rundir_number(rundir) -> int:
+    """Return first strech of numbers in `rundir` as `int`."""
+    return int(re.search(r'\d+', os.path.basename(rundir)).group())
+
+
+def sorted_rundirs(rundirs):
+    """
+    Return `rundirs` sorted by number (i.e. 'run_2' before 'run_10').
+    """
+    return sorted(rundirs, key=rundir_number)
 
 
 # ----------------------------------------------------------------------

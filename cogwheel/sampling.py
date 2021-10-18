@@ -4,7 +4,6 @@ import abc
 import argparse
 import pathlib
 import os
-import re
 import sys
 import textwrap
 from cProfile import Profile
@@ -28,7 +27,6 @@ class Sampler(abc.ABC, utils.JSONMixin):
     Subclasses implement the interface with specific sampling codes.
     """
     DEFAULT_RUN_KWARGS = {}  # Implemented by subclasses
-    RUNDIR_PREFIX = 'run_'
     PROFILING_FILENAME = 'profiling'
     JSON_FILENAME = 'Sampler.json'
 
@@ -109,12 +107,12 @@ class Sampler(abc.ABC, utils.JSONMixin):
         """
         eventdir = self.posterior.get_eventdir(parentdir)
         old_rundirs = [path for path in eventdir.iterdir() if path.is_dir()
-                       and path.match(f'{self.RUNDIR_PREFIX}*')]
+                       and path.match(f'{utils.RUNDIR_PREFIX}*')]
         run_id = 0
         if old_rundirs:
-            run_id = max([int(re.search(r'\d+', rundir.name).group())
-                          for rundir in old_rundirs]) + 1
-        return eventdir.joinpath(f'{self.RUNDIR_PREFIX}{run_id}')
+            run_id = 1 + max(utils.rundir_number(rundir)
+                             for rundir in old_rundirs)
+        return eventdir.joinpath(f'{utils.RUNDIR_PREFIX}{run_id}')
 
     def submit_slurm(self, rundir, n_hours_limit=48,
                      memory_per_task='32G', resuming=False):
