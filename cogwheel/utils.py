@@ -157,14 +157,34 @@ def get_eventdir(parentdir, prior_name, eventname):
     I.e. the file structure is as follows:
 
         <parentdir>
-        └── <prior_name>
+        └── <priordir>
             └── <eventdir>
                 ├── Posterior.json
                 └── <rundir>
                     ├── Sampler.json
                     └── <sampler_output_files>
     """
-    return pathlib.Path(parentdir)/prior_name/eventname
+    return get_priordir(parentdir, prior_name)/eventname
+
+
+def get_priordir(parentdir, prior_name, eventname):
+    """
+    Return `pathlib.Path` object for a directory of the form
+    {parentdir}/{prior_name}
+    This directory is intended to contain multiple eventdir
+    directories, one for each event.
+    I.e. the file structure is as follows:
+
+        <parentdir>
+        └── <priordir>
+            └── <eventdir>
+                ├── Posterior.json
+                └── <rundir>
+                    ├── Sampler.json
+                    └── <sampler_output_files>
+    """
+    return pathlib.Path(parentdir)/prior_name
+
 
 
 def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):
