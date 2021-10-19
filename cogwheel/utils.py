@@ -167,7 +167,7 @@ def get_eventdir(parentdir, prior_name, eventname):
     return get_priordir(parentdir, prior_name)/eventname
 
 
-def get_priordir(parentdir, prior_name, eventname):
+def get_priordir(parentdir, prior_name):
     """
     Return `pathlib.Path` object for a directory of the form
     {parentdir}/{prior_name}
