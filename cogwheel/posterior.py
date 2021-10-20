@@ -166,6 +166,7 @@ class Posterior(utils.JSONMixin):
         evolution to find a good fit.
         It is guaranteed that the new waveform will have at least as
         good a fit as the current one.
+        The likelihood maximization uses folded sampled parameters.
         """
         folded_par_vals_0 = self.prior.fold(
             **self.prior.inverse_transform(**self.likelihood.par_dic_0))
