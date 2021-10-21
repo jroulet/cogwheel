@@ -256,8 +256,8 @@ class PyMultiNest(Sampler):
                 evdic['log_ev_std'] = float(line.strip().split()[7])
             line = stats_file.readline()
             if 'Nested Importance Sampling Global Log-Evidence' in line:
-                evdic['log_ev_NIS'] = float(line.strip().split()[6])
-                evdic['log_ev_std_NIS'] = float(line.strip().split()[8])
+                evdic['log_ev_NIS'] = float(line.strip().split()[5])
+                evdic['log_ev_std_NIS'] = float(line.strip().split()[7])
         return evdic
 
     def _lnprob_pymultinest(self, par_vals, *_):
