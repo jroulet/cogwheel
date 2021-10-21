@@ -192,17 +192,18 @@ class Sampler(abc.ABC, utils.JSONMixin):
         folding. Return a pandas.DataFrame with the samples.
         """
 
-    @abc.abstractmethod
-    def load_evidence(self):
+    def load_evidence(self) -> dict:
         """
-        Read evidence from sampling output.
+        Define for sampling classes which compute evidence.
         Return a dict with the following items:
-          'log_ev' = log evidence from nested sampling
+          'log_ev' = log evidence from sampling
           'log_ev_std' = log standard deviation of evidence
-        If using nested importance sampling (NIS), will also have:
+        If using nested importance sampling (NIS), should also have:
           'log_ev_NIS' = log evidence from nested importance sampling
           'log_ev_std_NIS' = log standard deviation of NIS evidence
         """
+        raise NotImplementedError(
+            'Implement in subclass (if sampler computes evidence).')
 
     @staticmethod
     def completed(rundir) -> bool:
