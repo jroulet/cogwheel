@@ -5,6 +5,7 @@ import inspect
 import json
 import os
 import pathlib
+import re
 import sys
 import tempfile
 import textwrap
@@ -143,24 +144,47 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
 # ----------------------------------------------------------------------
 # Directory I/O:
 
-def get_eventdir(parentdir, prior_class, eventname):
+RUNDIR_PREFIX = 'run_'
+
+
+def get_eventdir(parentdir, prior_name, eventname):
     """
     Return `pathlib.Path` object for a directory of the form
-    {parentdir}/{prior_class}/{eventname}/
+    {parentdir}/{prior_name}/{eventname}/
     This directory is intended to contain a `Posterior` instance,
     and multiple rundir directories with parameter estimation
     output for different sampler settings.
     I.e. the file structure is as follows:
 
         <parentdir>
-        └── <prior_class>
+        └── <priordir>
             └── <eventdir>
                 ├── Posterior.json
                 └── <rundir>
                     ├── Sampler.json
                     └── <sampler_output_files>
     """
-    return pathlib.Path(parentdir)/prior_class/eventname
+    return get_priordir(parentdir, prior_name)/eventname
+
+
+def get_priordir(parentdir, prior_name):
+    """
+    Return `pathlib.Path` object for a directory of the form
+    {parentdir}/{prior_name}
+    This directory is intended to contain multiple eventdir
+    directories, one for each event.
+    I.e. the file structure is as follows:
+
+        <parentdir>
+        └── <priordir>
+            └── <eventdir>
+                ├── Posterior.json
+                └── <rundir>
+                    ├── Sampler.json
+                    └── <sampler_output_files>
+    """
+    return pathlib.Path(parentdir)/prior_name
+
 
 
 def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):
@@ -177,6 +201,18 @@ def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):
     dirname = pathlib.Path(dirname)
     for path in list(dirname.parents)[::-1] + [dirname]:
         path.mkdir(mode=dir_permissions, exist_ok=True)
+
+
+def rundir_number(rundir) -> int:
+    """Return first strech of numbers in `rundir` as `int`."""
+    return int(re.search(r'\d+', os.path.basename(rundir)).group())
+
+
+def sorted_rundirs(rundirs):
+    """
+    Return `rundirs` sorted by number (i.e. 'run_2' before 'run_10').
+    """
+    return sorted(rundirs, key=rundir_number)
 
 
 # ----------------------------------------------------------------------

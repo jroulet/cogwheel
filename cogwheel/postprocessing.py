@@ -24,7 +24,6 @@ import pandas as pd
 
 from . import grid
 from . import utils
-# from .sampling import sampling.Sampler, sampling.SAMPLES_FILENAME
 from . import sampling
 
 TESTS_FILENAME = 'postprocessing_tests.json'
@@ -267,12 +266,12 @@ class Diagnostics:
     _LABELS = {
       'n_samples': r'$N_\mathrm{samples}$',
       'runtime': 'Runtime (h)',
-      'asd_drift_dlnl_std': r'$\sigma(\Delta_{\rm ASD\,drift}\ln\mathcal{L})$',
-      'asd_drift_dlnl_max': r'$\max|\Delta_{\rm ASD\,drift}\ln\mathcal{L}|$',
+      'asd_drift_dlnl_std': r'$\sigma(\Delta\ln\mathcal{L}_{\rm ASD\,drift})$',
+      'asd_drift_dlnl_max': r'$\max|\Delta\ln\mathcal{L}_{\rm ASD\,drift}|$',
       'lnl_max': r'$\max \ln\mathcal{L}$',
       'lnl_0': r'$\ln\mathcal{L}_0$',
-      'relative_binning_dlnl_std': r'$\sigma(\Delta_{\rm RB}\ln\mathcal{L})$',
-      'relative_binning_dlnl_max': r'$\max|\Delta_{\rm RB}\ln\mathcal{L}|$'}
+      'relative_binning_dlnl_std': r'$\sigma(\Delta\ln\mathcal{L}_{\rm RB})$',
+      'relative_binning_dlnl_max': r'$\max|\Delta\ln\mathcal{L}_{\rm RB}|$'}
 
     def __init__(self, eventdir, reference_rundir=None,
                  tolerance_params=None):
@@ -376,8 +375,8 @@ class Diagnostics:
         has completed. Ignores incomplete runs, printing a warning.
         """
         rundirs = []
-        for rundir in sorted(self.eventdir.glob(
-                sampling.Sampler.RUNDIR_PREFIX + '*')):
+        for rundir in utils.sorted_rundirs(
+                self.eventdir.glob(f'{utils.RUNDIR_PREFIX}*')):
             if (rundir/TESTS_FILENAME).exists():
                 rundirs.append(rundir)
             else:
@@ -475,7 +474,7 @@ class Diagnostics:
         ax.axis([0, 1, nrows, -1])
 
         tab = plt.table(
-            self.table.round(2).to_numpy(),
+            self.table.round(3).to_numpy(),
             colLabels=self.table.rename(columns=self._LABELS).columns,
             loc='center',
             cellColours=cell_colors.to_numpy(),
@@ -504,7 +503,7 @@ class Diagnostics:
         xpar, ypar = 'runtime', 'n_samples'
         plt.scatter(self.table[xpar], self.table[ypar])
         for run, *x_y in self.table[['run', xpar, ypar]].to_numpy():
-            plt.annotate(run.lstrip(sampling.Sampler.RUNDIR_PREFIX), x_y,
+            plt.annotate(run.lstrip(utils.RUNDIR_PREFIX), x_y,
                          fontsize='large')
         plt.grid()
         plt.xlim(0)

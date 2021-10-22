@@ -190,13 +190,13 @@ class Posterior(utils.JSONMixin):
         """
         Return directory name in which the Posterior instance
         should be saved, of the form
-        {parentdir}/{prior_class}/{eventname}/
+        {parentdir}/{prior_name}/{eventname}/
         """
         return utils.get_eventdir(parentdir, self.prior.__class__.__name__,
                                   self.likelihood.event_data.eventname)
 
 
-def initialize_posteriors_slurm(eventnames, approximant, prior_class,
+def initialize_posteriors_slurm(eventnames, approximant, prior_name,
                                 parentdir, n_hours_limit=2,
                                 memory_per_task='4G'):
     """
@@ -208,13 +208,13 @@ def initialize_posteriors_slurm(eventnames, approximant, prior_class,
     if isinstance(eventnames, str):
         eventnames = [eventnames]
     for eventname in eventnames:
-        eventdir = utils.get_eventdir(parentdir, prior_class, eventname)
+        eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
         utils.mkdirs(eventdir)
 
         job_name = f'{eventname}_posterior'
         stdout_path = (eventdir/'posterior_from_event.out').resolve()
         stderr_path = (eventdir/'posterior_from_event.err').resolve()
-        args = ' '.join([eventname, approximant, prior_class, parentdir])
+        args = ' '.join([eventname, approximant, prior_name, parentdir])
 
         with tempfile.NamedTemporaryFile('w+') as batchfile:
             batchfile.write(textwrap.dedent(f"""\
@@ -238,9 +238,9 @@ def initialize_posteriors_slurm(eventnames, approximant, prior_class,
             time.sleep(.1)
 
 
-def main(eventname, approximant, prior_class, parentdir):
+def main(eventname, approximant, prior_name, parentdir):
     '''Construct a Posterior instance and save it to json.'''
-    post = Posterior.from_event(eventname, approximant, prior_class)
+    post = Posterior.from_event(eventname, approximant, prior_name)
     post.to_json(post.get_eventdir(parentdir))
 
 
@@ -250,7 +250,7 @@ if __name__ == '__main__':
 
     parser.add_argument('eventname', help='key from `data.event_registry`.')
     parser.add_argument('approximant', help='key from `waveform.APPROXIMANTS`')
-    parser.add_argument('prior_class',
+    parser.add_argument('prior_name',
                         help='key from `gw_prior.prior_registry`')
     parser.add_argument('parentdir', help='top directory to save output')
 

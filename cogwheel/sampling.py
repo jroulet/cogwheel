@@ -4,7 +4,6 @@ import abc
 import argparse
 import pathlib
 import os
-import re
 import sys
 import textwrap
 from cProfile import Profile
@@ -28,7 +27,6 @@ class Sampler(abc.ABC, utils.JSONMixin):
     Subclasses implement the interface with specific sampling codes.
     """
     DEFAULT_RUN_KWARGS = {}  # Implemented by subclasses
-    RUNDIR_PREFIX = 'run_'
     PROFILING_FILENAME = 'profiling'
     JSON_FILENAME = 'Sampler.json'
 
@@ -100,7 +98,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         Return a `pathlib.Path` object with a new run directory,
         following a standardized naming scheme for output directories.
         Directory will be of the form
-        {parentdir}/{prior_class}/{eventname}/{RUNDIR_PREFIX}{i_run}
+        {parentdir}/{prior_name}/{eventname}/{RUNDIR_PREFIX}{i_run}
 
         Parameters
         ----------
@@ -109,12 +107,12 @@ class Sampler(abc.ABC, utils.JSONMixin):
         """
         eventdir = self.posterior.get_eventdir(parentdir)
         old_rundirs = [path for path in eventdir.iterdir() if path.is_dir()
-                       and path.match(f'{self.RUNDIR_PREFIX}*')]
+                       and path.match(f'{utils.RUNDIR_PREFIX}*')]
         run_id = 0
         if old_rundirs:
-            run_id = max([int(re.search(r'\d+', rundir.name).group())
-                          for rundir in old_rundirs]) + 1
-        return eventdir.joinpath(f'{self.RUNDIR_PREFIX}{run_id}')
+            run_id = 1 + max(utils.rundir_number(rundir)
+                             for rundir in old_rundirs)
+        return eventdir.joinpath(f'{utils.RUNDIR_PREFIX}{run_id}')
 
     def submit_slurm(self, rundir, n_hours_limit=48,
                      memory_per_task='32G', resuming=False):
@@ -194,6 +192,19 @@ class Sampler(abc.ABC, utils.JSONMixin):
         folding. Return a pandas.DataFrame with the samples.
         """
 
+    def load_evidence(self) -> dict:
+        """
+        Define for sampling classes which compute evidence.
+        Return a dict with the following items:
+          'log_ev' = log evidence from sampling
+          'log_ev_std' = log standard deviation of evidence
+        If using nested importance sampling (NIS), should also have:
+          'log_ev_NIS' = log evidence from nested importance sampling
+          'log_ev_std_NIS' = log standard deviation of NIS evidence
+        """
+        raise NotImplementedError(
+            'Implement in subclass (if sampler computes evidence).')
+
     @staticmethod
     def completed(rundir) -> bool:
         """Return whether the run completed successfully."""
@@ -235,6 +246,20 @@ class PyMultiNest(Sampler):
                              'post_equal_weights.dat')
         folded = pd.DataFrame(np.loadtxt(fname)[:, :-1], columns=self.params)
         return self.resample(folded)
+
+    def load_evidence(self):
+        evdic = {}
+        with open(os.path.join(self.run_kwargs['outputfiles_basename'],
+                               'stats.dat')) as stats_file:
+            line = stats_file.readline()
+            if 'Nested Sampling Global Log-Evidence' in line:
+                evdic['log_ev'] = float(line.strip().split()[5])
+                evdic['log_ev_std'] = float(line.strip().split()[7])
+            line = stats_file.readline()
+            if 'Nested Importance Sampling Global Log-Evidence' in line:
+                evdic['log_ev_NIS'] = float(line.strip().split()[5])
+                evdic['log_ev_std_NIS'] = float(line.strip().split()[7])
+        return evdic
 
     def _lnprob_pymultinest(self, par_vals, *_):
         """
