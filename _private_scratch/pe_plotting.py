@@ -29,7 +29,6 @@ from cogwheel import grid as gd
 from cogwheel import cosmology as cosmo
 
 
-
 def label_from_key(key):
     return PAR_LABELS.get(aliasing.PARKEY_MAP.get(key, key), key)
 

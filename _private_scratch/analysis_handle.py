@@ -9,7 +9,6 @@ import sys
 import pandas as pd
 from copy import deepcopy as dcopy
 
-
 from . import parameter_aliasing as aliasing
 from . import parameter_label_formatting as label_formatting
 
@@ -23,7 +22,6 @@ from cogwheel import grid as gd
 class AnalysisHandle:
     """Class for analyzing posteriors."""
     LNL_COL = 'lnl'
-
     KEYMAP = aliasing.PARKEY_MAP
     PAR_LABELS = label_formatting.param_labels
     PAR_UNITS = label_formatting.units
