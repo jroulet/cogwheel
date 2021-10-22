@@ -10,6 +10,10 @@ from matplotlib.cm import ScalarMappable
 from mpl_toolkits.mplot3d import Axes3D
 import lalsimulation as lalsim
 
+DICTLIKE_TYPES = [dict, type(pd.DataFrame([{0: 0}])), type(pd.Series({0: 0}))]
+def is_dict(check):
+    return any([isinstance(check, dtype) for dtype in DICTLIKE_TYPES])
+
 from . import parameter_aliasing as aliasing
 from . import standard_intrinsic_transformations as pxform
 
@@ -23,6 +27,10 @@ from cogwheel import grid as gd
 from cogwheel import cosmology as cosmo
 
 
+
+def label_from_key(key):
+    return aliasing.param_labels.get(aliasing.PARKEY_MAP.get(key, key), key)
+
 def printarr(arr, prec=4, pre='', post='', sep='  ', form='f'):
     print(pre + np.array2string(np.asarray(arr), separator=sep,
                                 max_line_width=np.inf, threshold=np.inf,
@@ -33,11 +41,7 @@ def fmt(num, prec=4, form='f'):
     return formstr.format(num)
 
 ########################################
-#### NON-CLASS PLOTTING FUNCTIONS
-
-def label_from_key(key):
-    return aliasing.param_labels.get(aliasing.PARKEY_MAP.get(key, key), key)
-
+#### CORNER PLOTTING FUNCTIONS
 def corner_plot_samples(samps, pvkeys=['mtot', 'q', 'chieff'], title=None,
                         figsize=(9,7), scatter_points=None, weights=None,
                         grid_kws={}, fig=None, ax=None, return_grid=False, **corner_plot_kws):
@@ -247,7 +251,7 @@ def plot_spin4d(samples, ckey='q', use_V3=False, secondary_spin=False, sign_or_s
                       fig=fig, ax=ax)
     # plot extra points
     for dic in extra_point_dicts:
-        if aliasing.is_dict(dic):
+        if is_dict(dic):
             xx, yy, zz = dic[xkey], dic[ykey], dic[zkey]
             ax.scatter(xx, yy, zz, marker=dic.get('marker', dic.get('m')), s=dic.get('size', dic.get('s')),
                        c=dic.get('color', dic.get('c')))

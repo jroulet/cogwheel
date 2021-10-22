@@ -1,23 +1,8 @@
 import numpy as np
 from copy import deepcopy as dcopy
-import pandas as pd
-
-
-LISTLIKE_TYPES = [list, tuple, type({}.keys()), type(pd.DataFrame().index),
-                  type(pd.DataFrame({0:[0]}).index),
-                  type(pd.DataFrame({0:[0]}).columns)]
-DICTLIKE_TYPES = [dict, type(pd.DataFrame()), type(pd.Series({0:0}))]
-
-def islist(check):
-    """check if list or tuple or dict_keys object"""
-    return any([isinstance(check, ltype) for ltype in LISTLIKE_TYPES])
-
-def is_dict(check):
-    return any([isinstance(check, dtype) for dtype in DICTLIKE_TYPES])
 
 #     Parameter Aliases
 # ----------------------------
-
 MASS_PARKEYS = {
     'mchirp': ['mchirp', 'mc', 'mchirp_det', 'mc_det', 'chirp_mass', 'detector_chirp_mass'],
     'mtot': ['mtot', 'mt', 'mtot_det', 'mt_det', 'total_mass', 'detector_total_mass'],
@@ -38,7 +23,6 @@ MASS_PARKEYS = {
     'm2_source': ['m2_source', 'm2_src', 'source_mass_2', 'source_mass2', 'source_m2', 'm2src', 'mass2src', 'srcmass2',
                   'mass2_src', 'mass2_source', 'mass_2_src', 'mass_2_source']
 }
-
 # NOTE: chip and chi_p separated because LVC chi_p is NOT same as IAS chip (closer to IAS chi_perp, but not exact?)
 SPIN_PARKEYS = {
     's1x': ['s1x', 'spin1x', 'spin_1x', 'spin_1_x', 's1_x'],
@@ -203,41 +187,6 @@ def compare_pdics(d1, d2, common_only=True, use_all_keys=None, map_to_all_keys=P
             # if same number of keys but not the same params, common_only=False will raise key error
             testkeys = zip(testkeys, d2keys)
         return {k1: np.allclose(d1[k1], d2[k2]) for k1, k2 in testkeys}
-
-
-
-# STANDARD PARAMETER RANGES
-# --------------------------
-
-SPIN_MAG_LIM = 0.99
-
-DEFAULT_RNG_DIC = {
-    'mchirp': [3, 300], 'mchirp_source': [3, 300],
-    'mtot': [5, 500], 'mtot_source': [5, 500],
-    'q': [0.05, 1], 'q1': [1, 20],
-    'lnq': [-2.9, 0], 'eta': [0.049, 0.25],
-    'm1': [3, 400], 'm1_source': [3, 400],
-    'm2': [3, 400], 'm1_source': [3, 400],
-    's1x': [-SPIN_MAG_LIM, SPIN_MAG_LIM], 's1y': [-SPIN_MAG_LIM, SPIN_MAG_LIM], 's1z': [-SPIN_MAG_LIM, SPIN_MAG_LIM],
-    's2x': [-SPIN_MAG_LIM, SPIN_MAG_LIM], 's2y': [-SPIN_MAG_LIM, SPIN_MAG_LIM], 's2z': [-SPIN_MAG_LIM, SPIN_MAG_LIM],
-    'chieff': [-SPIN_MAG_LIM, SPIN_MAG_LIM],
-    'chiperp': [1 - SPIN_MAG_LIM, SPIN_MAG_LIM],
-    'chip': None, 'chia': None,
-    'cumchidiff': [0, 1],
-    's1': [0, SPIN_MAG_LIM], 's2': [0, SPIN_MAG_LIM],
-    's1theta': [0, np.pi], 's2theta': [0, np.pi],
-    's1costheta': [-1, 1], 's2costheta': [-1, 1],
-    's1phi': [0, 2 * np.pi], 's2phi': [0, 2 * np.pi],
-    'cums1r_s1z': [0, SPIN_MAG_LIM], 'cums2r_s2z': [0, SPIN_MAG_LIM],
-    'cums1z': [1 - SPIN_MAG_LIM, SPIN_MAG_LIM], 'cums2z': [1 - SPIN_MAG_LIM, SPIN_MAG_LIM],
-    'd_luminosity': [0.001, 10000], 'DL': [0.001, 10000], 'Dcomov': [0.001, 5000],
-    'Vcomov': [1e-9, 1e12], 'z': [0, 10], 'DL_Gpc': [1e-6, 10], 'd_hat': [0.001, 500],
-    'ra': [0, 2 * np.pi], 'dec': [-np.pi / 2, np.pi / 2], 'psi': [0, np.pi],
-    'philigo': [0, 2 * np.pi], 'thetaligo': [0, np.pi], 'costhetaligo': [-1, 1],
-    'vphi': [0, 2 * np.pi], 'iota': [0, np.pi], 'cosiota': [-1, 1],
-    'deff': [.001, 10000], 'psiplusvphi': [0, 3 * np.pi], 'psiminusvphi': [-2 * np.pi, np.pi], 'tc': [-1, 1]
-}
-
 
 
 # Latex formatting
