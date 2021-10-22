@@ -140,12 +140,10 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
 
     print(f'Submitted job {job_name!r}.')
 
-def zip_hold_length(*args):
+def zip_to_array(*args):
     """
-    Take a mixture of scalar and 1D inputs and return them as
-     the columns of a 2D array, analogous to zip() but enforcing length.
-    All arguments with length > 1 must have the same length.
-    Data type will be taken from the first array-like argument.
+    O(10^3)x faster np.array([row for row in np.broadcast(*args)])
+    usable when args are all at most 1d.
     """
     lengths = [(len(a) if hasattr(a, '__len__') else 1) for a in args]
     imaxlen = np.argmax(lengths)
