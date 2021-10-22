@@ -81,18 +81,41 @@ class EventMetadata:
         self.t_interval = t_interval
         self.tcoarse = t_interval / 2 if tcoarse is None else tcoarse
 
-        fnames = self._get_fnames(bank_id, fnames)
-        self.detector_names = ''.join([
-            det for det, fname in zip('HLV', fnames) if fname is not None])
-        self.fnames = [fname for fname in fnames if fname is not None]
+        self._setup_pars = {'bank_id': bank_id,
+                            'fnames': fnames,
+                            'load_data': load_data}
 
-        if load_data in (True, False):
-            load_data = [load_data] * len(self.fnames)
-        self.load_data = load_data
+        # These are set by `self._setup()`:
+        self.fnames = NotImplemented
+        self.detector_names = NotImplemented
+        self.load_data = NotImplemented
 
         self.triggerlist_kw = {} if triggerlist_kw is None else triggerlist_kw
 
         event_registry[self.eventname] = self
+
+    def _setup(self):
+        """
+        Set attributes `self.fnames`, `self.detector_names`,
+        `self.load_data`. This will crash if the user does not have
+        access to the IAS filesystem. This method is there so that the
+        module can be imported without crashing.
+        """
+        if self.fnames is not NotImplemented:
+            return
+
+        fnames = self._get_fnames(self._setup_pars['bank_id'],
+                                  self._setup_pars['fnames'])
+
+        self.detector_names = ''.join(
+            [det for det, fname in zip('HLV', fnames) if fname is not None])
+
+        self.fnames = [fname for fname in fnames if fname is not None]
+
+        load_data = self._setup_pars['load_data']
+        if load_data in (True, False):
+            load_data = [load_data] * len(self.fnames)
+        self.load_data = load_data
 
     def get_event_data(self):
         """
@@ -102,6 +125,7 @@ class EventMetadata:
         frequency domain strain and psd, and combine with the rest of
         the metadata.
         """
+        self._setup()
         dic = {key: getattr(self, key)
                for key in ['eventname', 'detector_names', 'tgps', 'tcoarse',
                            'mchirp_range', 'q_min']}
@@ -119,6 +143,7 @@ class EventMetadata:
 
     def load_triggerlists(self):
         """Return triggerlists associated to the event."""
+        self._setup()
         return [trig.TriggerList.from_json(fname, load_data=load,
                                            do_signal_processing=False,
                                            **self.triggerlist_kw)
@@ -131,14 +156,13 @@ class EventMetadata:
         """
         if fnames is not None and bank_id is None:
             return fnames
-        
+
         if bank_id is None:
             bank_id = guess_bank_id(np.mean(self.mchirp_range))
 
         source, i_multibank, i_subbank = bank_id
         json_fnames = trig.utils.get_detector_fnames(
-            self.tgps, i_multibank, i_subbank, source=source,
-            n_multibanks=(None if i_multibank < 5 else i_multibank+1))
+            self.tgps, i_multibank, i_subbank, source=source)
 
         if fnames is not None:
             # Override whenever fname is not None
@@ -180,6 +204,9 @@ class EventMetadata:
         psd = np.abs(wt_filter_fd_nfft) ** -2
 
         return frequencies, strain, psd
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}({self.eventname})'
 
 
 # ----------------------------------------------------------------------
