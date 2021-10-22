@@ -140,6 +140,27 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
 
     print(f'Submitted job {job_name!r}.')
 
+def zip_hold_length(*args):
+    """
+    Take a mixture of scalar and 1D inputs and return them as
+     the columns of a 2D array, analogous to zip() but enforcing length.
+    All arguments with length > 1 must have the same length.
+    Data type will be taken from the first array-like argument.
+    """
+    lengths = [(len(a) if hasattr(a, '__len__') else 1) for a in args]
+    imaxlen = np.argmax(lengths)
+    maxlen = lengths[imaxlen]
+    if maxlen == 1: # if all scalars or length 1
+        return np.transpose([np.atleast_1d(a) for a in args])
+    if np.allclose(lengths, maxlen): # if all same length > 1
+        return np.transpose(args)
+    # otherwise combine with broadcasting
+    assert all([(l == maxlen) for l in lengths if (l != 1)]), \
+        'All non-scalar arguments must have the same length!'
+    outrows = np.zeros((maxlen, len(args)), dtype=type(args[imaxlen][0]))
+    for jcol, a in enumerate(args):
+        outrows[:, jcol] = a
+    return outrows
 
 # ----------------------------------------------------------------------
 # Directory I/O:
