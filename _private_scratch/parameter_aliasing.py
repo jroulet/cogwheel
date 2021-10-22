@@ -3,10 +3,10 @@ from copy import deepcopy as dcopy
 import pandas as pd
 
 
-LISTLIKE_TYPES = [list, tuple, type(pd.DataFrame()), type(pd.Series({0:0}))]
-DICTLIKE_TYPES = [dict, type({}.keys()), type(pd.DataFrame().index),
+LISTLIKE_TYPES = [list, tuple, type({}.keys()), type(pd.DataFrame().index),
                   type(pd.DataFrame({0:[0]}).index),
                   type(pd.DataFrame({0:[0]}).columns)]
+DICTLIKE_TYPES = [dict, type(pd.DataFrame()), type(pd.Series({0:0}))]
 
 def islist(check):
     """check if list or tuple or dict_keys object"""
