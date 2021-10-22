@@ -9,13 +9,9 @@ import sys
 import pandas as pd
 from copy import deepcopy as dcopy
 
-from matplotlib.colors import Normalize as colorsNormalize
-from matplotlib.cm import ScalarMappable
-from mpl_toolkits.mplot3d import Axes3D
-#import h5py
-
 
 from . import parameter_aliasing as aliasing
+from . import parameter_label_formatting as label_formatting
 
 COGWHEEL_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', 'cogwheel'))
@@ -29,9 +25,9 @@ class AnalysisHandle:
     LNL_COL = 'lnl'
 
     KEYMAP = aliasing.PARKEY_MAP
-    PAR_LABELS = aliasing.param_labels
-    PAR_UNITS = aliasing.units
-    PAR_NAMES = aliasing.param_names
+    PAR_LABELS = label_formatting.param_labels
+    PAR_UNITS = label_formatting.units
+    PAR_NAMES = label_formatting.param_names
     
     def __init__(self, rundir, name=None):
         super().__init__()
@@ -108,8 +104,3 @@ class AnalysisHandle:
             self.samples, pdf_key=pdfnm, units=self.PAR_UNITS,
             labels=self.PAR_LABELS, weights=weights,
             **extra_grid_kwargs).corner_plot(pdf=pdfnm, **corner_plot_kwargs)
-
-    
-
-
-

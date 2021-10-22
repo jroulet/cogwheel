@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from copy import deepcopy as dcopy
 import os
-import json
 import h5py
 from matplotlib.colors import Normalize as colorsNormalize
 from matplotlib.cm import ScalarMappable
@@ -16,6 +15,9 @@ def is_dict(check):
 
 from . import parameter_aliasing as aliasing
 from . import standard_intrinsic_transformations as pxform
+from . import parameter_label_formatting as label_formatting
+PAR_LABELS = label_formatting.param_labels
+PAR_UNITS = label_formatting.units
 
 import sys
 COGWHEEL_PATH = os.path.abspath(os.path.join(
@@ -29,7 +31,7 @@ from cogwheel import cosmology as cosmo
 
 
 def label_from_key(key):
-    return aliasing.param_labels.get(aliasing.PARKEY_MAP.get(key, key), key)
+    return PAR_LABELS.get(aliasing.PARKEY_MAP.get(key, key), key)
 
 def printarr(arr, prec=4, pre='', post='', sep='  ', form='f'):
     print(pre + np.array2string(np.asarray(arr), separator=sep,
@@ -46,7 +48,7 @@ def corner_plot_samples(samps, pvkeys=['mtot', 'q', 'chieff'], title=None,
                         figsize=(9,7), scatter_points=None, weights=None,
                         grid_kws={}, fig=None, ax=None, return_grid=False, **corner_plot_kws):
     """make corner plots"""
-    units, plabs = aliasing.units, aliasing.param_labels
+    units, plabs = PAR_UNITS, PAR_LABELS
     for k in pvkeys:
         if k not in units.keys():
             units[k] = ''
@@ -64,7 +66,7 @@ def corner_plot_list(samps_list, samps_names, pvkeys=['mtot', 'q', 'chieff'], we
                      figsize=(9,7), scatter_points=None, fractions=[.5, .9], grid_kws={},
                      multigrid_kws={}, fig=None, ax=None, return_grid=False, **corner_plot_kws):
     grids = []
-    units, plabs = aliasing.units, aliasing.param_labels
+    units, plabs = PAR_UNITS, PAR_LABELS
     for k in pvkeys:
         if k not in units.keys():
             units[k] = ''
@@ -1191,7 +1193,7 @@ class LVCsampleHandle(object):
     def corner_plot(self, pvkeys=['m2_source', 'mchirp', 'q', 'chieff'],
                     title=None, figsize=(9,7), scatter_points=None, weights=None, **kwargs):
         """make corner plots"""
-        units, plabs = aliasing.units, aliasing.param_labels
+        units, plabs = PAR_UNITS, PAR_LABELS
         for k in pvkeys:
             if k not in units.keys():
                 units[k] = ''
@@ -1205,7 +1207,3 @@ class LVCsampleHandle(object):
         sg =  gd.Grid.from_samples(pvkeys, self.samples, weights=weights, pdf_key=pdfnm, units=units, labels=plabs)
         return sg.corner_plot(pdf=pdfnm, title=title, figsize=figsize, set_legend=True,
                               scatter_points=scatter_points, **kwargs)
-
-######## CLASS ALIAS ########
-LVCHAND = LVCsampleHandle
-########################################################################################
