@@ -192,6 +192,19 @@ class Sampler(abc.ABC, utils.JSONMixin):
         folding. Return a pandas.DataFrame with the samples.
         """
 
+    def load_evidence(self) -> dict:
+        """
+        Define for sampling classes which compute evidence.
+        Return a dict with the following items:
+          'log_ev' = log evidence from sampling
+          'log_ev_std' = log standard deviation of evidence
+        If using nested importance sampling (NIS), should also have:
+          'log_ev_NIS' = log evidence from nested importance sampling
+          'log_ev_std_NIS' = log standard deviation of NIS evidence
+        """
+        raise NotImplementedError(
+            'Implement in subclass (if sampler computes evidence).')
+
     @staticmethod
     def completed(rundir) -> bool:
         """Return whether the run completed successfully."""
@@ -233,6 +246,20 @@ class PyMultiNest(Sampler):
                              'post_equal_weights.dat')
         folded = pd.DataFrame(np.loadtxt(fname)[:, :-1], columns=self.params)
         return self.resample(folded)
+
+    def load_evidence(self):
+        evdic = {}
+        with open(os.path.join(self.run_kwargs['outputfiles_basename'],
+                               'stats.dat')) as stats_file:
+            line = stats_file.readline()
+            if 'Nested Sampling Global Log-Evidence' in line:
+                evdic['log_ev'] = float(line.strip().split()[5])
+                evdic['log_ev_std'] = float(line.strip().split()[7])
+            line = stats_file.readline()
+            if 'Nested Importance Sampling Global Log-Evidence' in line:
+                evdic['log_ev_NIS'] = float(line.strip().split()[5])
+                evdic['log_ev_std_NIS'] = float(line.strip().split()[7])
+        return evdic
 
     def _lnprob_pymultinest(self, par_vals, *_):
         """

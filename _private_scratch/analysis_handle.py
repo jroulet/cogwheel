@@ -15,7 +15,7 @@ from mpl_toolkits.mplot3d import Axes3D
 #import h5py
 
 
-import parameter_aliasing as aliasing
+from . import parameter_aliasing as aliasing
 
 COGWHEEL_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', 'cogwheel'))
