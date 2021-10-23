@@ -38,6 +38,61 @@ def guess_bank_id(mchirp, i_subbank=0):
     return bank_ids[np.searchsorted(mchirp_multibank_edges, mchirp)]
 
 
+def _get_f_strain_psd_from_triggerlist(triggerlist, tgps, tcoarse,
+                                       t_interval):
+    """
+    Extract frequency array, frequency domain strain and PSD from a
+    triggerlist instance.
+    """
+    f_sampling = int(1 / triggerlist.dt)
+
+    t_start = tgps - triggerlist.time[0] - tcoarse
+    ind_start = int(t_start * f_sampling)
+    ind_end = ind_start + int(t_interval * f_sampling)
+    nfft = ind_end - ind_start
+
+    # Compute whitening filter for the data segment
+    wt_filter_fd = triggerlist.templatebank.wt_filter_fd
+    wt_filter_fd_full = trig.utils.change_filter_times_fd(
+        wt_filter_fd, triggerlist.fftsize, len(triggerlist.strain))
+    wt_filter_td_full = np.fft.irfft(wt_filter_fd_full)
+    wt_filter_td_nfft = trig.utils.change_filter_times_td(
+        wt_filter_td_full, len(wt_filter_td_full),
+        int(t_interval * f_sampling))
+    wt_filter_fd_nfft = np.fft.rfft(wt_filter_td_nfft)
+
+    wt_data_td_nfft = triggerlist.strain[ind_start : ind_end]
+    wt_data_fd_nfft = np.fft.rfft(wt_data_td_nfft)
+
+    frequencies = np.fft.rfftfreq(nfft, triggerlist.dt)
+    strain = (wt_data_fd_nfft / wt_filter_fd_nfft
+              * np.sqrt(t_interval / 2 / nfft))
+    psd = np.abs(wt_filter_fd_nfft) ** -2
+
+    return frequencies, strain, psd
+
+
+def get_f_strain_psd_dic(triggerlists, tgps, tcoarse, t_interval):
+    """
+    Return a dictionary with keys `'strain', 'psd', 'frequencies'`.
+    The values for 'strain' and 'psd' are arrays of shape
+    `(n_triggerlists, n_frequencies)`. The value for 'frequencies'
+    is an array of length 'n_frequencies'
+    """
+    dic = {}
+
+    data_by_det = [_get_f_strain_psd_from_triggerlist(triggerlist, tgps, tcoarse,
+                                                      t_interval)
+                   for triggerlist in triggerlists]
+
+    freq_arrs, dic['strain'], dic['psd'] = np.moveaxis(data_by_det, 0, 1)
+    dic['frequencies'], *copies = freq_arrs
+    for freq_arr in copies:
+        np.testing.assert_array_equal(dic['frequencies'], freq_arr)
+
+    return dic
+
+
 class EventMetadata:
     """
     Lightweight class that can be used for data information
@@ -94,29 +149,6 @@ class EventMetadata:
 
         event_registry[self.eventname] = self
 
-    def _setup(self):
-        """
-        Set attributes `self.fnames`, `self.detector_names`,
-        `self.load_data`. This will crash if the user does not have
-        access to the IAS filesystem. This method is there so that the
-        module can be imported without crashing.
-        """
-        if self.fnames is not NotImplemented:
-            return
-
-        fnames = self._get_fnames(self._setup_pars['bank_id'],
-                                  self._setup_pars['fnames'])
-
-        self.detector_names = ''.join(
-            [det for det, fname in zip('HLV', fnames) if fname is not None])
-
-        self.fnames = [fname for fname in fnames if fname is not None]
-
-        load_data = self._setup_pars['load_data']
-        if load_data in (True, False):
-            load_data = [load_data] * len(self.fnames)
-        self.load_data = load_data
-
     def get_event_data(self):
         """
         Return an instance of `data.EventData`.
@@ -132,12 +164,8 @@ class EventMetadata:
 
         triggerlists = self.load_triggerlists()
 
-        freq_arrs, dic['strain'], dic['psd'] = [np.array(arr) for arr in zip(
-            *[self._get_f_strain_psd_from_triggerlist(triggerlist)
-              for triggerlist in triggerlists])]
-        dic['frequencies'], *copies = freq_arrs
-        for freq_arr in copies:
-            np.testing.assert_array_equal(dic['frequencies'], freq_arr)
+        dic |= get_f_strain_psd_dic(triggerlists, self.tgps,
+                                    self.tcoarse, self.t_interval)
 
         return data.EventData(**dic)
 
@@ -173,37 +201,28 @@ class EventMetadata:
         assert len(json_fnames) in (2, 3)
         return json_fnames
 
-    def _get_f_strain_psd_from_triggerlist(self, triggerlist):
+    def _setup(self):
         """
-        Extract frequency array, frequency domain strain and PSD from a
-        triggerlist instance.
+        Set attributes `self.fnames`, `self.detector_names`,
+        `self.load_data`. This will crash if the user does not have
+        access to the IAS filesystem. This method is there so that the
+        module can be imported without crashing.
         """
-        f_sampling = int(1 / triggerlist.dt)
+        if self.fnames is not NotImplemented:
+            return
 
-        t_start = self.tgps - triggerlist.time[0] - self.tcoarse
-        ind_start = int(t_start * f_sampling)
-        ind_end = ind_start + int(self.t_interval * f_sampling)
-        nfft = ind_end - ind_start
+        fnames = self._get_fnames(self._setup_pars['bank_id'],
+                                  self._setup_pars['fnames'])
 
-        # Compute whitening filter for the data segment
-        wt_filter_fd = triggerlist.templatebank.wt_filter_fd
-        wt_filter_fd_full = trig.utils.change_filter_times_fd(
-            wt_filter_fd, triggerlist.fftsize, len(triggerlist.strain))
-        wt_filter_td_full = np.fft.irfft(wt_filter_fd_full)
-        wt_filter_td_nfft = trig.utils.change_filter_times_td(
-            wt_filter_td_full, len(wt_filter_td_full),
-            int(self.t_interval * f_sampling))
-        wt_filter_fd_nfft = np.fft.rfft(wt_filter_td_nfft)
+        self.detector_names = ''.join(
+            det for det, fname in zip('HLV', fnames) if fname is not None)
 
-        wt_data_td_nfft = triggerlist.strain[ind_start : ind_end]
-        wt_data_fd_nfft = np.fft.rfft(wt_data_td_nfft)
+        self.fnames = [fname for fname in fnames if fname is not None]
 
-        frequencies = np.fft.rfftfreq(nfft, triggerlist.dt)
-        strain = (wt_data_fd_nfft / wt_filter_fd_nfft
-                  * np.sqrt(self.t_interval / 2 / nfft))
-        psd = np.abs(wt_filter_fd_nfft) ** -2
-
-        return frequencies, strain, psd
+        load_data = self._setup_pars['load_data']
+        if load_data in (True, False):
+            load_data = [load_data] * len(self.fnames)
+        self.load_data = load_data
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self.eventname})'
