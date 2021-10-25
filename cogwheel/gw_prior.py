@@ -575,7 +575,7 @@ class ZeroTidalDeformabilityPrior(FixedPrior):
 # Default priors for the full set of variables, for convenience.
 
 class IASPrior(CombinedPrior, RegisteredPriorMixin):
-    """Precessing, flat in chieff."""
+    """Precessing, flat in chieff, uniform luminosity volume."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
@@ -589,7 +589,7 @@ class IASPrior(CombinedPrior, RegisteredPriorMixin):
 
 
 class AlignedSpinIASPrior(CombinedPrior, RegisteredPriorMixin):
-    """Aligned spin, flat in chieff."""
+    """Aligned spin, flat in chieff, uniform luminosity volume."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
@@ -603,7 +603,7 @@ class AlignedSpinIASPrior(CombinedPrior, RegisteredPriorMixin):
 
 
 class LVCPrior(CombinedPrior, RegisteredPriorMixin):
-    """Precessing, flat in chieff."""
+    """Precessing, isotropic spins, uniform luminosity volume."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
@@ -614,3 +614,37 @@ class LVCPrior(CombinedPrior, RegisteredPriorMixin):
                      IsotropicSpinsAlignedComponentsPrior,
                      IsotropicSpinsInplaneComponentsPrior,
                      ZeroTidalDeformabilityPrior]
+
+class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
+    """Aligned spins from isotropic distribution, uniform luminosity volume."""
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformLuminosityVolumePrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     ZeroInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior]
+
+class IASPriorComovingVT(IASPrior):
+    """Precessing, flat in chieff, uniform comoving volume-time."""
+    prior_classes = super().prior_classes.copy()
+    prior_classes[-4] = UniformComovingVolumePrior
+
+class AlignedSpinIASPriorComovingVT(AlignedSpinIASPrior):
+    """Aligned spin, flat in chieff, uniform comoving volume-time."""
+    prior_classes = super().prior_classes.copy()
+    prior_classes[-4] = UniformComovingVolumePrior
+
+
+class LVCPriorComovingVT(LVCPrior):
+    """Precessing, isotropic spins, uniform comoving volume-time."""
+    prior_classes = super().prior_classes.copy()
+    prior_classes[-4] = UniformComovingVolumePrior
+
+class AlignedSpinLVCPriorComovingVT(AlignedSpinLVCPrior):
+    """Aligned spins from isotropic distribution, uniform comoving volume-time."""
+    prior_classes = super().prior_classes.copy()
+    prior_classes[-4] = UniformComovingVolumePrior
