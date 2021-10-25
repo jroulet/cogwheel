@@ -4,6 +4,7 @@ Priors for parameter estimation of compact binary mergers.
 
 import numpy as np
 from scipy.integrate import dblquad
+from scipy.interpolate import interp1d
 
 import lal
 
@@ -442,6 +443,99 @@ class UniformDiskInplaneSpinsPrior(UniformPriorMixin, Prior):
                 's2phi_hat': s2phi_hat}
 
 
+class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
+    """
+    Spin prior for aligned spin components that can be combined with
+    IsotropicSpinsInplaneComponentsPrior to give constituent spin priors
+    that are independently uniform in magnitude and solid angle.
+    The sampled parameters are `cums1z` and `cums2z`, both from U(0, 1).
+    """
+    standard_params = ['s1z', 's2z']
+    range_dic = {'cums1z': (0, 1),
+                 'cums2z': (0, 1)}
+    # Spin coordinates that are convenient for the
+    # LVC isotropic spin prior (0 <= cumsz <= 1)
+    sz_grid = np.linspace(-1, 1, 2000)
+    cumsz_grid = (1 + sz_grid - sz_grid * np.log(np.abs(sz_grid))) / 2
+    sz_interp = interp1d(cumsz_grid, sz_grid, bounds_error=True)
+
+    @classmethod
+    def _spin_transform(cls, cumsz):
+        return cls.sz_interp(cumsz)[()]
+
+    def transform(self, cums1z, cums2z):
+        """(cums1z, cums2z) to (s1z, s2z)."""
+        return {'s1z': self._spin_transform(cums1z),
+                's2z': self._spin_transform(cums2z)}
+
+    @staticmethod
+    def _inverse_spin_transform(sz):
+        return (1 + sz - sz * np.log(np.abs(sz))) / 2
+
+    def inverse_transform(self, s1z, s2z):
+        """(s1z, s2z) to (cums1z, cums2z)."""
+        return {'cums1z': self._inverse_spin_transform(s1z),
+                'cums2z': self._inverse_spin_transform(s2z)}
+
+
+class IsotropicSpinsInplaneComponentsPrior(UniformPriorMixin, Prior):
+    """
+    Spin prior uniform in magnitude and solid angle (isotropic)
+    for each of the constituent spins independently when combined
+    with IsotropicSpinsAlignedComponentsPrior.
+    The sampled parameters are `cums1r_s1z`, `cums1r_s1z` ~ U(0, 1)
+    and (periodic) `s1phi_hat', `s2phi_hat' ~ U(0, 2*np.pi),
+    conditioned on s1z, s2z, vphi, iota.
+    """
+    standard_params = ['s1x', 's1y', 's2x', 's2y']
+    range_dic = {'cums1r_s1z': (0, 1),
+                 's1phi_hat': (0, 2*np.pi),
+                 'cums2r_s2z': (0, 1),
+                 's2phi_hat': (0, 2*np.pi)}
+    periodic_params = ['s1phi_hat', 's2phi_hat']
+    conditioned_on = ['s1z', 's2z', 'vphi', 'iota']
+
+    @staticmethod
+    def _spin_transform(cumsr_sz, sphi_hat, sz, vphi, iota):
+        """get (sx, sy) from (cumsr_sz, sphi_hat, sz, vphi, iota)"""
+        sphi = (sphi_hat - vphi - np.pi*(np.cos(iota) > 0)) % (2*np.pi)
+        sr = np.sqrt(sz**2 * (1 / (sz**2)**cumsr_sz - 1))
+        sx = sr * np.cos(sphi)
+        sy = sr * np.sin(sphi)
+        return sx, sy
+
+    def transform(self, cums1r_s1z, s1phi_hat, cums2r_s2z, s2phi_hat,
+                  s1z, s2z, vphi, iota):
+        """Spin prior cumulatives to spin components."""
+        s1x, s1y = self._spin_transform(cums1r_s1z, s1phi_hat, s1z, vphi, iota)
+        s2x, s2y = self._spin_transform(cums2r_s2z, s2phi_hat, s2z, vphi, iota)
+        return {'s1x': s1x,
+                's1y': s1y,
+                's2x': s2x,
+                's2y': s2y}
+
+    @staticmethod
+    def _inverse_spin_transform(sx, sy, sz, vphi, iota):
+        """get (cumsr_sz, sphi_hat) from (sx, sy, sz, vphi, iota)"""
+        sz_sq = sz**2
+        cumsr_sz = np.log(sz_sq / (sx**2 + sy**2 + sz_sq)) / np.log(sz_sq)
+        sphi = np.arctan2(sy, sx)
+        sphi_hat = (sphi + vphi + np.pi*(np.cos(iota) > 0)) % (2*np.pi)
+        return cumsr_sz, sphi_hat
+
+    def inverse_transform(self, s1x, s1y, s2x, s2y, s1z, s2z, vphi, iota):
+        """Spin components to spin prior cumulatives."""
+        cums1r_s1z, s1phi_hat = self._inverse_spin_transform(s1x, s1y, s1z,
+                                                             vphi, iota)
+        cums2r_s2z, s2phi_hat = self._inverse_spin_transform(s2x, s2y, s2z,
+                                                             vphi, iota)
+        return {'cums1r_s1z': cums1r_s1z,
+                's1phi_hat': s1phi_hat,
+                'cums2r_s2z': cums2r_s2z,
+                's2phi_hat': s2phi_hat}
+
+
+
 class ZeroInplaneSpinsPrior(FixedPrior):
     """Set inplane spins to zero."""
     standard_par_dic = {'s1x': 0,
@@ -485,4 +579,18 @@ class AlignedSpinIASPrior(CombinedPrior, RegisteredPriorMixin):
                      UniformLuminosityVolumePrior,
                      FlatChieffPrior,
                      ZeroInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior]
+
+
+class LVCPrior(CombinedPrior, RegisteredPriorMixin):
+    """Precessing, flat in chieff."""
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformLuminosityVolumePrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     IsotropicSpinsInplaneComponentsPrior,
                      ZeroTidalDeformabilityPrior]
