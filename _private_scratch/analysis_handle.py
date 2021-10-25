@@ -11,6 +11,7 @@ from copy import deepcopy as dcopy
 
 from . import parameter_aliasing as aliasing
 from . import parameter_label_formatting as label_formatting
+from . import standard_intrinsic_transformations as pxform
 
 COGWHEEL_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', 'cogwheel'))
@@ -18,6 +19,7 @@ sys.path.append(COGWHEEL_PATH)
 from cogwheel import utils
 from cogwheel import sampling
 from cogwheel import grid as gd
+from cogwheel import cosmology as cosmo
 
 class AnalysisHandle:
     """Class for analyzing posteriors."""
@@ -75,6 +77,21 @@ class AnalysisHandle:
                 return [dict(idx_row[1]) for idx_row in s.iterrows()]
             return dict(s)
         return s
+
+    def add_source_parameters(self, redshift_key=None, mass_keys=['m1', 'm2', 'mtot', 'mchirp']):
+        """
+        Add _source version of each mass in mass_keys using *= 1+self.samples[redshift_key].
+        If redshift_key is None, do intrinsic parameter completion with pxform.compute_samples_aux_vars
+        """
+        if redshift_key is None:
+            # this completes intrinsic parameter space and adds redshift and source frame information
+            pxform.compute_samples_aux_vars(self.samples)
+            return
+        rkey = self.key(redshift_key)
+        if rkey not in self.samples:
+            self.samples[rkey] = cosmo.z_of_DL_Mpc(self.samples['d_luminosity'])
+        for k in mass_keys:
+            self.samples[self.key(k)+'_source'] = self.samples[self.key(k)] / (1+self.samples[rkey])
 
     def corner_plot(self, parkeys=['mchirp', 'q', 'chieff'],
                     weights=None, scatter_points=None,
