@@ -83,16 +83,20 @@ def corner_plot_list(samps_list, samps_names, pvkeys=['mtot', 'q', 'chieff'], we
         return ff, aa, multigrid
     return ff, aa
 
+def get_dets_figure(detector_names, xlabel='Frequency (Hz)', ylabel='Amplitude', figsize=None):
+    fig, ax = plt.subplots(len(detector_names), sharex=True, figsize=figsize)
+    fig.text(.004, .54, ylabel, rotation=90, ha='left', va='center', size=10)
+    ax[0].set_xlabel(xlabel)
+    for a, det in zip(ax, detector_names):
+        a.text(.02, .95, det, ha='left', va='top', transform=a.transAxes)
+        a.tick_params(which='both', direction='in', right=True, top=True)
+    return fig, ax
+
 def plot_at_dets(xplot, dets_yplot, ax=None, fig=None, label=None, xlabel='Frequency (Hz)', ylabel='Amplitude',
                  plot_type='loglog', xlim=None, ylim=None, title=None, det_names=['H1', 'L1', 'V1'],
                  figsize=None, **plot_kws):
     if ax is None:
-        fig, ax = plt.subplots(len(det_names), sharex=True, figsize=figsize)
-        fig.text(.004, .54, ylabel, rotation=90, ha='left', va='center', size=10)
-        ax[0].set_xlabel(xlabel)
-        for a, det in zip(ax, det_names):
-            a.text(.02, .95, det, ha='left', va='top', transform=a.transAxes)
-            a.tick_params(which='both', direction='in', right=True, top=True)
+        fig, ax = get_dets_figure(det_names, xlabel=xlabel, ylabel=ylabel, figsize=figsize)
     if np.ndim(xplot) == 1:
         xplot = [xplot]*len(det_names)
     mask = slice(None)

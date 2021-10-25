@@ -570,7 +570,6 @@ class ZeroTidalDeformabilityPrior(FixedPrior):
                         'l2': 0}
 
 
-
 # ----------------------------------------------------------------------
 # Default priors for the full set of variables, for convenience.
 
@@ -628,10 +627,12 @@ class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
                      ZeroInplaneSpinsPrior,
                      ZeroTidalDeformabilityPrior]
 
+
 class IASPriorComovingVT(IASPrior):
     """Precessing, flat in chieff, uniform comoving volume-time."""
     prior_classes = IASPrior.prior_classes.copy()
     prior_classes[-4] = UniformComovingVolumePrior
+
 
 class AlignedSpinIASPriorComovingVT(AlignedSpinIASPrior):
     """Aligned spin, flat in chieff, uniform comoving volume-time."""
@@ -643,6 +644,7 @@ class LVCPriorComovingVT(LVCPrior):
     """Precessing, isotropic spins, uniform comoving volume-time."""
     prior_classes = LVCPrior.prior_classes.copy()
     prior_classes[-4] = UniformComovingVolumePrior
+
 
 class AlignedSpinLVCPriorComovingVT(AlignedSpinLVCPrior):
     """Aligned spins from isotropic distribution, uniform comoving volume-time."""

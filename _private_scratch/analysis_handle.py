@@ -12,6 +12,7 @@ from copy import deepcopy as dcopy
 from . import parameter_aliasing as aliasing
 from . import parameter_label_formatting as label_formatting
 from . import standard_intrinsic_transformations as pxform
+from . import pe_plotting as peplot
 
 COGWHEEL_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', 'cogwheel'))
@@ -93,8 +94,7 @@ class AnalysisHandle:
         for k in mass_keys:
             self.samples[self.key(k)+'_source'] = self.samples[self.key(k)] / (1+self.samples[rkey])
 
-    def corner_plot(self, parkeys=['mchirp', 'q', 'chieff'],
-                    weights=None, scatter_points=None,
+    def corner_plot(self, parkeys=['mchirp', 'q', 'chieff'], weights=None,
                     extra_grid_kwargs={}, **corner_plot_kwargs):
         """
         Make corner plot of self.samples for the parameter keys in parkeys.
@@ -106,7 +106,7 @@ class AnalysisHandle:
         --> NAMELY, pass fig=myfig, ax=myax to plot with existing axes
 
         weights can be an array of weights or a key to use from self.samples
-        scatter_points can be a dataframe of extra samples to plot
+        scatter_points (corner_plot_kwargs) can be DataFrame of extra samples to plot
         """
         if isinstance(weights, str):
             weights = self.samples[self.key(weights)]
@@ -119,3 +119,27 @@ class AnalysisHandle:
             self.samples, pdf_key=pdfnm, units=self.PAR_UNITS,
             labels=self.PAR_LABELS, weights=weights,
             **extra_grid_kwargs).corner_plot(pdf=pdfnm, **corner_plot_kwargs)
+
+    def plot_psd(self, ax=None, fig=None, label=None, plot_type='loglog', weights=None,
+                 xlim=None, ylim=None, title=None, figsize=None, use_fmask=False, **plot_kws):
+        msk = (self.evdata.fslice if use_fmask else slice(None))
+        dets_xplot = self.evdata.frequencies[msk]
+        dets_yplot = self.evdata.psd[..., msk]
+        ylabel = 'Power Spectral Density'
+        if weights is not None:
+            dets_yplot *= weights[msk]
+            ylabel = 'Weighted ' + ylabel
+        return peplot.plot_at_dets(dets_xplot, dets_yplot, ax=ax, fig=fig, label=label,
+                                   xlabel='Frequency (Hz)', ylabel=ylabel, plot_type=plot_type,
+                                   xlim=xlim, ylim=ylim, title=title, det_names=self.evdata.detector_names,
+                                   figsize=figsize, **plot_kws)
+
+    def plot_wf_amp(self, pdic, whiten=False, ax=None, fig=None, label=None,
+                    plot_type='loglog', weights=None, xlim=None, ylim=None,
+                    title=None, figsize=None, use_fmask=False, **plot_kws):
+        msk = (self.evdata.fslice if use_fmask else slice(None))
+        dets_xplot = self.evdata.frequencies[msk]
+        raise NotImplementedError
+
+    def plot_whitened_wf(self, par_dic, trng=(-.7, .1), **kwargs):
+        return self.likelihood.plot_whitened_wf(par_dic, trng=trng, **kwargs)
