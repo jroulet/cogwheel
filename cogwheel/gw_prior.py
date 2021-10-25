@@ -10,6 +10,7 @@ import lal
 
 from . import gw_utils
 from . import skyloc_angles
+from . import cosmology as cosmo
 
 from . prior import Prior, CombinedPrior, FixedPrior, UniformPriorMixin, \
     IdentityTransformMixin, check_inheritance_order
@@ -339,6 +340,25 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
         return {'tgps': self.tgps,
                 'ref_det_name': self.ref_det_name,
                 'd_hat_max': self.range_dic['d_hat'][1]}
+
+class UniformComovingVolumePrior(UniformLuminosityVolumePrior):
+    """
+    Distance prior uniform in comoving volume-time.
+    The sampled parameter is
+        d_hat := d_effective / mchirp
+    where the effective distance is defined in one "reference" detector.
+    """
+    def lnprior(self, d_hat, ra, dec, psi, iota, m1, m2):
+        """
+        Natural log of the prior probability density for d_hat.
+        This prior is not normalized, as that would need to know
+        the masses' integration region.
+        """
+        d_luminosity = d_hat * self._conversion_factor(ra, dec, psi, iota, m1, m2)
+        z = cosmo.z_of_DL_Mpc(d_luminosity)
+        cosmo_weight = ((1 - d_luminosity * cosmo.dz_dDL(d_luminosity) / (1 + z))
+                        / (1 + z)**4)
+        return np.log(cosmo_weight * d_luminosity**3 / d_hat)
 
 
 class FlatChieffPrior(UniformPriorMixin, Prior):
