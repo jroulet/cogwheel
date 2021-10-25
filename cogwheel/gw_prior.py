@@ -630,21 +630,21 @@ class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
 
 class IASPriorComovingVT(IASPrior):
     """Precessing, flat in chieff, uniform comoving volume-time."""
-    prior_classes = super().prior_classes.copy()
+    prior_classes = IASPrior.prior_classes.copy()
     prior_classes[-4] = UniformComovingVolumePrior
 
 class AlignedSpinIASPriorComovingVT(AlignedSpinIASPrior):
     """Aligned spin, flat in chieff, uniform comoving volume-time."""
-    prior_classes = super().prior_classes.copy()
+    prior_classes = AlignedSpinIASPrior.prior_classes.copy()
     prior_classes[-4] = UniformComovingVolumePrior
 
 
 class LVCPriorComovingVT(LVCPrior):
     """Precessing, isotropic spins, uniform comoving volume-time."""
-    prior_classes = super().prior_classes.copy()
+    prior_classes = LVCPrior.prior_classes.copy()
     prior_classes[-4] = UniformComovingVolumePrior
 
 class AlignedSpinLVCPriorComovingVT(AlignedSpinLVCPrior):
     """Aligned spins from isotropic distribution, uniform comoving volume-time."""
-    prior_classes = super().prior_classes.copy()
+    prior_classes = AlignedSpinLVCPrior.prior_classes.copy()
     prior_classes[-4] = UniformComovingVolumePrior
