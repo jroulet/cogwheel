@@ -18,6 +18,7 @@ from . import standard_intrinsic_transformations as pxform
 from . import parameter_label_formatting as label_formatting
 PAR_LABELS = label_formatting.param_labels
 PAR_UNITS = label_formatting.units
+PARKEY_MAP = aliasing.PARKEY_MAP
 
 import sys
 COGWHEEL_PATH = os.path.abspath(os.path.join(
@@ -854,7 +855,7 @@ class LVCsampleHandle(object):
     default_approximant_priority = ['PrecessingSpinIMRHM', 'IMRPhenomPv3HM', 'NRSur7dq4',
                                     'SEOBNRv4PHM', 'IMRPhenomPv2_posterior']
     def __init__(self, lvc_h5, evname, dataset_name=None, keymap=None, tgps=None,
-                 compute_aux_O3=False, convert_angles=False, gwpdic_keymap=gw_utils.PARKEY_MAP,
+                 compute_aux_O3=False, convert_angles=False, gwpdic_keymap=PARKEY_MAP,
                  no_print=False, keep_unmatched_keys=False, try_dataset_variants=True):
         """
         class for handling LVC posterior samples, maybe easier to initialize with cls.from_evname()
@@ -1143,7 +1144,7 @@ class LVCsampleHandle(object):
     @classmethod
     def prior_only(cls, lvc_h5, dataset_name=None, evname=None, keymap=None,
                    compute_aux_O3=False, convert_angles=False, tgps=None,
-                   gwpdic_keymap=gw_utils.PARKEY_MAP, no_print=False, keep_unmatched_keys=False):
+                   gwpdic_keymap=PARKEY_MAP, no_print=False, keep_unmatched_keys=False):
         """load only the prior samples as self.samples"""
         if dataset_name is None:
             dataset_name = ('combined' if run_from_evname(evname) == 'O3'
