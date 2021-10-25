@@ -389,11 +389,11 @@ def complete_samples_intrinsic_params(samples):
         samples['s1z'] = chis + np.asarray(samples['chia'])
         samples['s2z'] = chis - np.asarray(samples['chia'])
     for j in [1, 2]:
-        sx, sy, sz = [get_param_samples(samples, f's{j}{coord}') for coord in ['x', 'y', 'z']]
+        sx, sy, sz = [samples.get(f's{j}{coord}', None) for coord in ['x', 'y', 'z']]
         if (sx is None) or (sy is None) or (sz is None):
-            sj, thetaj, phij = [get_param_samples(samples, k) for k in [f's{j}', f's{j}theta', f's{j}phi']]
+            sj, thetaj, phij = [samples.get(k, None) for k in [f's{j}', f's{j}theta', f's{j}phi']]
             if thetaj is None:
-                costhetakey = get_samples_key(samples, f's{j}costheta')
+                costhetakey = samples.get(f's{j}costheta', None)
                 if costhetakey is not None:
                     thetaj = np.arccos(np.asarray(samples[costhetakey]))
                     samples[f's{j}theta'] = thetaj
