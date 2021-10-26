@@ -142,15 +142,17 @@ class AnalysisHandle:
         h_f = self.likelihood._get_h_f(par_dic, by_m=by_m)
         if whiten:
             h_f = self.evdata.dt * np.fft.rfft(self.likelihood._get_whitened_td(h_f), axis=-1)
+        if weights is not None:
+            h_f *= weights
         if by_m:
             for j, lmlist in enumerate(self.wfgen._harmonic_modes_by_m.values()):
-                dets_yplot = h_f[j, :, msk]
+                dets_yplot = np.abs(h_f[j, :, msk])
                 fig, ax = peplot.plot_at_dets(dets_xplot, dets_yplot, ax=ax, fig=fig, label=str(lmlist),
                     xlabel='Frequency (Hz)', ylabel='Waveform Amplitude', plot_type=plot_type,
                     xlim=xlim, ylim=ylim, title=title, det_names=self.evdata.detector_names,
                     figsize=figsize, **plot_kws)
             return fig, ax
-        return peplot.plot_at_dets(dets_xplot, h_f[:, msk], ax=ax, fig=fig, label=label,
+        return peplot.plot_at_dets(dets_xplot, np.abs(h_f[:, msk]), ax=ax, fig=fig, label=label,
                                    xlabel='Frequency (Hz)', ylabel='Waveform Amplitude',
                                    plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
                                    det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
