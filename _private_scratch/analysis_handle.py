@@ -170,7 +170,7 @@ class AnalysisHandle:
 
     def corner_plot_comparison(self, compare_posteriors=[], compare_names=[],
                                pvkeys=['mtot', 'q', 'chieff'], fig=None, ax=None, weight_key=None,
-                               figsize=(9, 7), scatter_points=None, fractions=[.5, .9],
+                               figsize=(10, 10), scatter_points=None, fractions=[.5, .9],
                                grid_kws={}, multigrid_kws={}, return_grid=False, **corner_plot_kws):
         return peplot.corner_plot_list([self.samples]+compare_posteriors, [self.name]+compare_names,
             pvkeys=pvkeys, weight_key=weight_key, figsize=figsize, scatter_points=scatter_points,
@@ -232,7 +232,7 @@ class AnalysisHandle:
     def plot_3d_spin(self, ckey='lnl', use_V3=False, secondary_spin=False, sign_or_scale=True,
                      fig=None, ax=None, xkey='s1x', ykey='s1y', zkey='s1z', nstep=1, title=None,
                      xlab='auto', ylab='auto', zlab='auto', clab='auto', plotlim=[-1.01, 1.01],
-                     mask_keys_min={}, mask_keys_max={}, plot_kws=None, figsize=(14, 14),
+                     mask_keys_min={}, mask_keys_max={}, plot_kws=None, figsize=(10, 10),
                      titlesize=20, colorbar_kws=None, extra_point_dicts=[(0, 0, 0)],
                      marker_if_not_dict='o', size_if_not_dict=20, color_if_not_dict='k'):
         return peplot.plot_spin4d(self.samples, use_V3=use_V3, secondary_spin=secondary_spin,
@@ -247,7 +247,7 @@ class AnalysisHandle:
     def plot_3d_location(self, fig=None, ax=None, ckey='lnl', nstep=1,
                          clab=None, mask_keys_min={}, mask_keys_max={},
                          extra_point_dicts=[], title=None, units='Mpc',
-                         figsize=(12, 12), xlim='auto', ylim='auto', zlim='auto',
+                         figsize=(10, 10), xlim='auto', ylim='auto', zlim='auto',
                          titlesize=20, plot_kws=None, colorbar_kws=None):
         return peplot.plot_loc3d(self.samples, title=title, xlim=xlim, ylim=ylim, zlim=zlim,
                                  nstep=nstep, ckey=ckey, clab=clab, mask_keys_min=mask_keys_min,
@@ -256,9 +256,9 @@ class AnalysisHandle:
                                  extra_point_dicts=extra_point_dicts, fig=fig, ax=ax)
 
     def plot_2d_color(self, xkey='chieff', ykey='q', ckey='lnl', extra_posteriors=[],
-                      samples_per_posterior=None, fig=None, ax=None, figsize=(12, 12),
+                      samples_per_posterior=None, fig=None, ax=None, figsize=(10, 10),
                       title=None, titlesize=20, xlim='auto', ylim='auto', clim=None,
-                      size_key=None, size_scale=1, alpha_key=None, alpha_scale=1,
+                      size_key=None, size_scale=.1, alpha_key=None, alpha_scale=1,
                       colorbar_kws=None, colorsMap='jet', **plot_kws):
         """make 2d scatter plot with colorbar for visualizing third dimension"""
         return peplot.plot_samples2d_color([self.samples]+extra_posteriors, xkey=self.key(xkey),
@@ -270,8 +270,8 @@ class AnalysisHandle:
     def plot_3d_color(self, xkey='chieff', ykey='q', zkey='mtot', ckey='lnl', fig=None, ax=None,
                       nstep=1, title=None, mask_keys_min={}, mask_keys_max={}, xlim='auto',
                       ylim='auto', zlim='auto', xlab='auto', ylab='auto', zlab='auto', clab='auto',
-                      plot_kws=None, figsize=(12, 12), titlesize=20, colorbar_kws=None,
-                      extra_point_dicts=[], size_key=None, size_scale=1):
+                      plot_kws=None, figsize=(10, 10), titlesize=20, colorbar_kws=None,
+                      extra_point_dicts=[], size_key=None, size_scale=.1):
         return peplot.plot_samples4d(self.samples, xkey=self.key(xkey), ykey=self.key(ykey),
             zkey=self.key(zkey), ckey=self.key(ckey), xlim=xlim, ylim=ylim, zlim=zlim,
             nstep=nstep, title=title, xlab=xlab, ylab=ylab, zlab=zlab, clab=clab,
