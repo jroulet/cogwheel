@@ -139,21 +139,21 @@ class AnalysisHandle:
                     title=None, figsize=None, use_fmask=False, **plot_kws):
         msk = (self.evdata.fslice if use_fmask else slice(None))
         dets_xplot = self.evdata.frequencies[msk]
-        h_f = self.wfgen._get_h_f(par_dic, by_m=by_m)
+        h_f = self.likelihood._get_h_f(par_dic, by_m=by_m)
         if whiten:
             h_f = self.evdata.dt * np.fft.rfft(self.likelihood._get_whitened_td(h_f), axis=-1)
         if by_m:
             for j, lmlist in enumerate(self.wfgen._harmonic_modes_by_m.values()):
-                dets_yplot = h_f[:, j, msk]
+                dets_yplot = h_f[j, :, msk]
                 fig, ax = peplot.plot_at_dets(dets_xplot, dets_yplot, ax=ax, fig=fig, label=str(lmlist),
                     xlabel='Frequency (Hz)', ylabel='Waveform Amplitude', plot_type=plot_type,
                     xlim=xlim, ylim=ylim, title=title, det_names=self.evdata.detector_names,
                     figsize=figsize, **plot_kws)
             return fig, ax
-        peplot.plot_at_dets(dets_xplot, h_f[:, msk], ax=ax, fig=fig, label=label,
-                            xlabel='Frequency (Hz)', ylabel='Waveform Amplitude',
-                            plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
-                            det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
+        return peplot.plot_at_dets(dets_xplot, h_f[:, msk], ax=ax, fig=fig, label=label,
+                                   xlabel='Frequency (Hz)', ylabel='Waveform Amplitude',
+                                   plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
+                                   det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
 
     def plot_whitened_wf(self, par_dic, trng=(-.7, .1), **kwargs):
         return self.likelihood.plot_whitened_wf(par_dic, trng=trng, **kwargs)
