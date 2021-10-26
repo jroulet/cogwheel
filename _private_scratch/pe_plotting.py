@@ -63,7 +63,7 @@ def corner_plot_samples(samps, pvkeys=['mtot', 'q', 'chieff'], title=None,
     return ff, aa
 
 def corner_plot_list(samps_list, samps_names, pvkeys=['mtot', 'q', 'chieff'], weight_key=None,
-                     figsize=(9,7), scatter_points=None, fractions=[.5, .9], grid_kws={},
+                     figsize=(9,7), scatter_points=None, grid_kws={},
                      multigrid_kws={}, fig=None, ax=None, return_grid=False, **corner_plot_kws):
     grids = []
     units, plabs = PAR_UNITS, PAR_LABELS
@@ -76,7 +76,7 @@ def corner_plot_list(samps_list, samps_names, pvkeys=['mtot', 'q', 'chieff'], we
         grids.append(gd.Grid.from_samples(pvkeys, p, units=units, labels=plabs, pdf_key=nm,
                                           weights=(None if weight_key is None
                                                    else p.samples[weight_key]), **grid_kws))
-    multigrid = gd.MultiGrid(grids, fractions=fractions, **multigrid_kws)
+    multigrid = gd.MultiGrid(grids, **multigrid_kws)
     ff, aa = multigrid.corner_plot(set_legend=True, figsize=figsize, scatter_points=scatter_points,
                                    fig=fig, ax=ax, **corner_plot_kws)
     if return_grid:
