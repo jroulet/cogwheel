@@ -221,18 +221,7 @@ class AnalysisHandle:
     def plot_whitened_wf(self, par_dic, trng=(-.7, .1), **kwargs):
         return self.likelihood.plot_whitened_wf(par_dic, trng=trng, **kwargs)
 
-    def plot_3d_location(self, fig=None, ax=None, ckey='lnl', nstep=1,
-                         clab=None, mask_keys_min={}, mask_keys_max={},
-                         extra_point_dicts=[], title=None, units='Mpc',
-                         figsize=(12, 12), xlim='auto', ylim='auto', zlim='auto',
-                         titlesize=20, plot_kws=None, colorbar_kws=None):
-        return peplot.plot_loc3d(self.samples, title=title, xlim=xlim, ylim=ylim, zlim=zlim,
-                                 nstep=nstep, ckey=ckey, clab=clab, mask_keys_min=mask_keys_min,
-                                 mask_keys_max=mask_keys_max, plot_kws=plot_kws, figsize=figsize,
-                                 titlesize=titlesize, colorbar_kws=colorbar_kws, units=units,
-                                 extra_point_dicts=extra_point_dicts, fig=fig, ax=ax)
-
-    def plot_inplane_spin(self, color_key='q', use_V3=False, secondary_spin=False,
+    def plot_inplane_spin(self, color_key='lnl', use_V3=False, secondary_spin=False,
                           fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
                           figsize=None, title=None, tight=False, **colorbar_kws):
         return peplot.plot_inplane_spin(self.samples, color_key=self.key(color_key), use_V3=use_V3,
@@ -240,34 +229,9 @@ class AnalysisHandle:
                                         plotstyle_color=plotstyle_color, scatter_alpha=scatter_alpha,
                                         figsize=figsize, title=title, tight=tight, **colorbar_kws)
 
-    def plot_3d_color(self, xkey='chieff', ykey='q', zkey='mtot', ckey='lnL', fig=None, ax=None,
-                      nstep=2, title=None, mask_keys_min={}, mask_keys_max={}, xlim='auto',
-                      ylim='auto', zlim='auto', xlab='auto', ylab='auto', zlab='auto', clab='auto',
-                      plot_kws=None, figsize=(12, 12), titlesize=20, colorbar_kws=None,
-                      extra_point_dicts=[], size_key=None, size_scale=1):
-        return peplot.plot_samples4d(self.samples, xkey=self.key(xkey), ykey=self.key(ykey),
-            zkey=self.key(zkey), ckey=self.key(ckey), xlim=xlim, ylim=ylim, zlim=zlim,
-            nstep=nstep, title=title, xlab=xlab, ylab=ylab, zlab=zlab, clab=clab,
-            mask_keys_min={self.key(k): v for k, v in mask_keys_min.items()},
-            mask_keys_max={self.key(k): v for k, v in mask_keys_max.items()}, fig=fig, ax=ax,
-            figsize=figsize, titlesize=titlesize, extra_point_dicts=extra_point_dicts,
-            size_key=size_key, size_scale=size_scale, plot_kws=plot_kws, colorbar_kws=colorbar_kws)
-
-    def plot_2d_color(self, xkey='chieff', ykey='q', ckey='lnL', extra_posteriors=[],
-                      samples_per_posterior=None, fig=None, ax=None, figsize=(14, 14),
-                      title=None, titlesize=20, xlim='auto', ylim='auto', clim=None,
-                      size_key=None, size_scale=1, alpha_key=None, alpha_scale=1,
-                      colorbar_kws=None, colorsMap='jet', **plot_kws):
-        """make 2d scatter plot with colorbar for visualizing third dimension"""
-        return peplot.plot_samples2d_color([self.samples]+extra_posteriors, xkey=self.key(xkey),
-            ykey=self.key(ykey), ckey=self.key(ckey), samples_per_posterior=samples_per_posterior,
-            fig=fig, ax=ax, colorbar_kws=colorbar_kws, colorsMap=colorsMap, figsize=figsize,
-            title=title, titlesize=titlesize, xlim=xlim, ylim=ylim, clim=clim, size_key=size_key,
-            size_scale=size_scale, alpha_key=alpha_key, alpha_scale=alpha_scale, **plot_kws)
-
-    def plot_3d_spin(self, ckey='q', use_V3=False, secondary_spin=False, sign_or_scale=True,
+    def plot_3d_spin(self, ckey='lnl', use_V3=False, secondary_spin=False, sign_or_scale=True,
                      fig=None, ax=None, xkey='s1x', ykey='s1y', zkey='s1z', nstep=1, title=None,
-                     xlab='auto', ylab='auto', zlab='auto', clab='auto', plotlim=[-1.1, 1.1],
+                     xlab='auto', ylab='auto', zlab='auto', clab='auto', plotlim=[-1.01, 1.01],
                      mask_keys_min={}, mask_keys_max={}, plot_kws=None, figsize=(14, 14),
                      titlesize=20, colorbar_kws=None, extra_point_dicts=[(0, 0, 0)],
                      marker_if_not_dict='o', size_if_not_dict=20, color_if_not_dict='k'):
@@ -279,3 +243,43 @@ class AnalysisHandle:
             mask_keys_max={self.key(k): v for k, v in mask_keys_max.items()}, plot_kws=plot_kws,
             colorbar_kws=colorbar_kws, marker_if_not_dict=marker_if_not_dict,
             size_if_not_dict=size_if_not_dict, color_if_not_dict=color_if_not_dict)
+
+    def plot_3d_location(self, fig=None, ax=None, ckey='lnl', nstep=1,
+                         clab=None, mask_keys_min={}, mask_keys_max={},
+                         extra_point_dicts=[], title=None, units='Mpc',
+                         figsize=(12, 12), xlim='auto', ylim='auto', zlim='auto',
+                         titlesize=20, plot_kws=None, colorbar_kws=None):
+        return peplot.plot_loc3d(self.samples, title=title, xlim=xlim, ylim=ylim, zlim=zlim,
+                                 nstep=nstep, ckey=ckey, clab=clab, mask_keys_min=mask_keys_min,
+                                 mask_keys_max=mask_keys_max, plot_kws=plot_kws, figsize=figsize,
+                                 titlesize=titlesize, colorbar_kws=colorbar_kws, units=units,
+                                 extra_point_dicts=extra_point_dicts, fig=fig, ax=ax)
+
+    def plot_2d_color(self, xkey='chieff', ykey='q', ckey='lnl', extra_posteriors=[],
+                      samples_per_posterior=None, fig=None, ax=None, figsize=(12, 12),
+                      title=None, titlesize=20, xlim='auto', ylim='auto', clim=None,
+                      size_key=None, size_scale=1, alpha_key=None, alpha_scale=1,
+                      colorbar_kws=None, colorsMap='jet', **plot_kws):
+        """make 2d scatter plot with colorbar for visualizing third dimension"""
+        return peplot.plot_samples2d_color([self.samples]+extra_posteriors, xkey=self.key(xkey),
+            ykey=self.key(ykey), ckey=self.key(ckey), samples_per_posterior=samples_per_posterior,
+            fig=fig, ax=ax, colorbar_kws=colorbar_kws, colorsMap=colorsMap, figsize=figsize,
+            title=title, titlesize=titlesize, xlim=xlim, ylim=ylim, clim=clim, size_key=size_key,
+            size_scale=size_scale, alpha_key=alpha_key, alpha_scale=alpha_scale, **plot_kws)
+
+    def plot_3d_color(self, xkey='chieff', ykey='q', zkey='mtot', ckey='lnl', fig=None, ax=None,
+                      nstep=1, title=None, mask_keys_min={}, mask_keys_max={}, xlim='auto',
+                      ylim='auto', zlim='auto', xlab='auto', ylab='auto', zlab='auto', clab='auto',
+                      plot_kws=None, figsize=(12, 12), titlesize=20, colorbar_kws=None,
+                      extra_point_dicts=[], size_key=None, size_scale=1):
+        return peplot.plot_samples4d(self.samples, xkey=self.key(xkey), ykey=self.key(ykey),
+            zkey=self.key(zkey), ckey=self.key(ckey), xlim=xlim, ylim=ylim, zlim=zlim,
+            nstep=nstep, title=title, xlab=xlab, ylab=ylab, zlab=zlab, clab=clab,
+            mask_keys_min={self.key(k): v for k, v in mask_keys_min.items()},
+            mask_keys_max={self.key(k): v for k, v in mask_keys_max.items()}, fig=fig, ax=ax,
+            figsize=figsize, titlesize=titlesize, extra_point_dicts=extra_point_dicts,
+            size_key=size_key, size_scale=size_scale, plot_kws=plot_kws, colorbar_kws=colorbar_kws)
+
+
+
+
