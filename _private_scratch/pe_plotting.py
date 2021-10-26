@@ -299,7 +299,7 @@ def ra_dec_DL_from_xyzMpc(xmpc, ympc, zmpc):
 #### 4-DIMENSIONAL SAMPLE PLOTTING
 
 def plot_loc3d(samples, title='flat', xlim='auto', ylim='auto', zlim='auto', nstep=2,
-               ckey='lnL', clab=None, mask_keys_min={'lnL': 90}, mask_keys_max={},
+               ckey='lnl', clab=None, mask_keys_min={}, mask_keys_max={},
                plot_kws=None, figsize=(14, 14), titlesize=20, colorbar_kws=None, units='Mpc',
                extra_point_dicts=[], fig=None, ax=None):
     x, y, z = xyzMpc_from_ra_dec_DL(samples['ra'].to_numpy(), samples['dec'].to_numpy(),
