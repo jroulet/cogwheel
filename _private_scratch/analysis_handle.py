@@ -168,13 +168,12 @@ class AnalysisHandle:
             labels=self.PAR_LABELS, weights=weights,
             **extra_grid_kwargs).corner_plot(pdf=pdfnm, **corner_plot_kwargs)
 
-    def corner_plot_comparison(self, compare_posteriors=[], compare_names=[],
-                               pvkeys=['mtot', 'q', 'chieff'], fig=None, ax=None, weight_key=None,
-                               figsize=(10, 10), scatter_points=None, fractions=[.5, .9],
+    def corner_plot_comparison(self, compare_posteriors=[], compare_names=[], pvkeys=['mtot', 'q', 'chieff'],
+                               fig=None, ax=None, weight_key=None, figsize=(10, 10), scatter_points=None,
                                grid_kws={}, multigrid_kws={}, return_grid=False, **corner_plot_kws):
         return peplot.corner_plot_list([self.samples]+compare_posteriors, [self.name]+compare_names,
             pvkeys=pvkeys, weight_key=weight_key, figsize=figsize, scatter_points=scatter_points,
-            fractions=fractions, grid_kws=grid_kws, multigrid_kws=multigrid_kws, fig=fig, ax=ax,
+            grid_kws=grid_kws, multigrid_kws=multigrid_kws, fig=fig, ax=ax,
             return_grid=return_grid, **corner_plot_kws)
 
     def plot_psd(self, ax=None, fig=None, label=None, plot_type='loglog',
