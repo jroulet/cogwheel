@@ -218,7 +218,7 @@ class AnalysisHandle:
                                    plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
                                    det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
 
-    def plot_whitened_wf(self, par_dic, trng=(-.7, .1), **kwargs):
+    def plot_whitened_wf(self, par_dic, trng=(-.7, .1), plot_data=True, **kwargs):
         return self.likelihood.plot_whitened_wf(par_dic, trng=trng, **kwargs)
 
     def plot_inplane_spin(self, color_key='lnl', use_V3=False, secondary_spin=False,
