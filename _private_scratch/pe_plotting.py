@@ -285,7 +285,7 @@ def plot_spin4d(samples, ckey='q', use_V3=False, secondary_spin=False, sign_or_s
 def xyzMpc_from_ra_dec_DL(ra, dec, DL):
     """DL in Mpc, ra in [0, 2pi], dec in [-pi/2, pi/2]"""
     theta = 0.5*np.pi - dec
-    return np.array([DL*np.sin(theta)*np.cos(ra), DL*np.sin(theta)*np.sin(ra), DL*np.cos(theta)])
+    return DL * np.array([np.sin(theta)*np.cos(ra), np.sin(theta)*np.sin(ra), np.cos(theta)])
 
 def xyzGpc_from_ra_dec_DLMpc(ra, dec, DL):
     return xyzMpc_from_ra_dec_DL(ra, dec, DL) / 1000.
@@ -302,8 +302,11 @@ def plot_loc3d(samples, title='flat', xlim='auto', ylim='auto', zlim='auto', nst
                ckey='lnl', clab=None, mask_keys_min={}, mask_keys_max={},
                plot_kws=None, figsize=(14, 14), titlesize=20, colorbar_kws=None, units='Mpc',
                extra_point_dicts=[], fig=None, ax=None):
+    dkey = 'DL'
+    if dkey not in samples:
+        dkey = PARKEY_MAP[dkey]
     x, y, z = xyzMpc_from_ra_dec_DL(samples['ra'].to_numpy(), samples['dec'].to_numpy(),
-                                    samples['DL'].to_numpy())
+                                    samples[dkey].to_numpy())
     if units in ['kpc', 'Gpc']:
         x, y, z = np.array([x, y, z]) * (10**(3 if units == 'kpc' else -3))
     elif units != 'Mpc':
@@ -523,7 +526,7 @@ def samples_add_antenna_response(old_samps, det_chars='HLV', tgps=None):
     return
 
 def samples_add_cosmo_prior(old_samps):
-    z, DL = old_samps['z'], old_samps['DL']
+    z, DL = old_samps['z'], old_samps.get('d_luminosity', old_samps.get('DL'))
     old_samps['cosmo_prior'] = (1+z)**-4 * (1 - DL/(1+z)*cosmo.dz_dDL(DL))
     return
 
