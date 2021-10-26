@@ -39,6 +39,15 @@ class AnalysisHandle:
         self.rundir = pathlib.Path(rundir)
         self.name = name or self.rundir.parts[-1]
 
+        # load posterior attributes
+        sampler = utils.read_json(self.rundir / sampling.Sampler.JSON_FILENAME)
+        self.likelihood = dcopy(sampler.posterior.likelihood)
+        self.prior = dcopy(sampler.posterior.prior)
+        # make these references for direct access
+        self.evdata = self.likelihood.event_data
+        self.wfgen = self.likelihood.waveform_generator
+        self.evname = self.evdata.eventname
+
         # load samples
         self.samples_path = self.rundir/sampling.SAMPLES_FILENAME
         self.samples = pd.read_feather(self.samples_path)
@@ -63,14 +72,6 @@ class AnalysisHandle:
         if os.path.isfile(self.tests_path):
             self.tests_dict = json.load(open(self.tests_path, 'r'))
 
-        # load posterior attributes
-        sampler = utils.read_json(self.rundir/sampling.Sampler.JSON_FILENAME)
-        self.likelihood = dcopy(sampler.posterior.likelihood)
-        self.prior = dcopy(sampler.posterior.prior)
-        # make these references for direct access
-        self.evdata = self.likelihood.event_data
-        self.wfgen = self.likelihood.waveform_generator
-        self.evname = self.evdata.eventname
 
     def key(self, key):
         return self.KEYMAP.get(key, key)
