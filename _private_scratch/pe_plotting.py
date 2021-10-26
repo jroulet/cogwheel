@@ -342,7 +342,7 @@ def plot_loc3d(samples, title='flat', xlim='auto', ylim='auto', zlim='auto', nst
         if dic.get('text', None) is not None:
             ax.text(xx - 0.15, yy - 0.15, zz - 0.48, dic['text'], color=dic.get('textcolor'),
                     size=dic.get('textsize'))
-    print(f'Plotted {np.count_nonzero(mask)} of {Ns} samples')
+    print(f'Plotted {int(np.floor(np.count_nonzero(mask) / nstep))} of {Ns} samples')
     return fig, ax
 
 

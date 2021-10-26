@@ -72,7 +72,6 @@ class AnalysisHandle:
         if os.path.isfile(self.tests_path):
             self.tests_dict = json.load(open(self.tests_path, 'r'))
 
-
     def key(self, key):
         return self.KEYMAP.get(key, key)
 
@@ -98,6 +97,24 @@ class AnalysisHandle:
             return dict(s)
         return s
 
+    def complete_samples(self, antenna=False, cosmo_weights=False, ligo_angles=False):
+        self.add_source_parameters()
+        if ligo_angles:
+            self.add_ligo_angles()
+        if antenna:
+            self.add_antenna()
+        if cosmo_weights:
+            self.add_cosmo_weights()
+
+    def write_complete_samples(self, fname=None, overwrite=False, antenna=False,
+                               cosmo_weights=False, ligo_angles=False):
+        if fname is None:
+            fname = self.samples_path
+        if os.path.exists(fname) and (not overwrite):
+            raise FileExistsError(f'Set overwrite=True to overwrite {fname}')
+        self.complete_samples(antenna=antenna, cosmo_weights=cosmo_weights, ligo_angles=ligo_angles)
+        self.samples.to_feather(self.samples_path)
+
     def add_source_parameters(self, redshift_key=None, mass_keys=['m1', 'm2', 'mtot', 'mchirp']):
         """
         Add _source version of each mass in mass_keys using *= 1+self.samples[redshift_key].
@@ -112,21 +129,6 @@ class AnalysisHandle:
             self.samples[rkey] = cosmo.z_of_DL_Mpc(self.samples['d_luminosity'])
         for k in mass_keys:
             self.samples[self.key(k)+'_source'] = self.samples[self.key(k)] / (1+self.samples[rkey])
-
-    def write_complete_samples(self, fname=None, overwrite=False, antenna=False,
-                               cosmo_weights=False, ligo_angles=False):
-        if fname is None:
-            fname = self.samples_path
-        if os.path.exists(fname) and (not overwrite):
-            raise FileExistsError(f'Set overwrite=True to overwrite {fname}')
-        self.add_source_parameters()
-        if ligo_angles:
-            self.add_ligo_angles()
-        if antenna:
-            self.add_antenna()
-        if cosmo_weights:
-            self.add_cosmo_weights()
-        self.samples.to_feather(self.samples_path)
 
     def add_ligo_angles(self, keep_new_spins=False):
         self.samples = peplot.samples_with_ligo_angles(self.samples, self.wfgen.f_ref,
@@ -165,6 +167,15 @@ class AnalysisHandle:
             self.samples, pdf_key=pdfnm, units=self.PAR_UNITS,
             labels=self.PAR_LABELS, weights=weights,
             **extra_grid_kwargs).corner_plot(pdf=pdfnm, **corner_plot_kwargs)
+
+    def corner_plot_comparison(self, compare_posteriors=[], compare_names=[],
+                               pvkeys=['mtot', 'q', 'chieff'], fig=None, ax=None, weight_key=None,
+                               figsize=(9, 7), scatter_points=None, fractions=[.5, .9],
+                               grid_kws={}, multigrid_kws={}, return_grid=False, **corner_plot_kws):
+        return peplot.corner_plot_list([self.samples]+compare_posteriors, [self.name]+compare_names,
+            pvkeys=pvkeys, weight_key=weight_key, figsize=figsize, scatter_points=scatter_points,
+            fractions=fractions, grid_kws=grid_kws, multigrid_kws=multigrid_kws, fig=fig, ax=ax,
+            return_grid=return_grid, **corner_plot_kws)
 
     def plot_psd(self, ax=None, fig=None, label=None, plot_type='loglog',
                  weights=None, plot_asd=False, xlim=None, ylim=None, title=None,
@@ -210,7 +221,7 @@ class AnalysisHandle:
     def plot_whitened_wf(self, par_dic, trng=(-.7, .1), **kwargs):
         return self.likelihood.plot_whitened_wf(par_dic, trng=trng, **kwargs)
 
-    def plot_3d_location(self, fig=None, ax=None, ckey='lnl', nstep=2,
+    def plot_3d_location(self, fig=None, ax=None, ckey='lnl', nstep=1,
                          clab=None, mask_keys_min={}, mask_keys_max={},
                          extra_point_dicts=[], title=None, units='Mpc',
                          figsize=(12, 12), xlim='auto', ylim='auto', zlim='auto',
@@ -224,7 +235,47 @@ class AnalysisHandle:
     def plot_inplane_spin(self, color_key='q', use_V3=False, secondary_spin=False,
                           fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
                           figsize=None, title=None, tight=False, **colorbar_kws):
-        return peplot.plot_inplane_spin(self.samples, color_key=color_key, use_V3=use_V3,
+        return peplot.plot_inplane_spin(self.samples, color_key=self.key(color_key), use_V3=use_V3,
                                         secondary_spin=secondary_spin, fractions=fractions,
                                         plotstyle_color=plotstyle_color, scatter_alpha=scatter_alpha,
                                         figsize=figsize, title=title, tight=tight, **colorbar_kws)
+
+    def plot_3d_color(self, xkey='chieff', ykey='q', zkey='mtot', ckey='lnL', fig=None, ax=None,
+                      nstep=2, title=None, mask_keys_min={}, mask_keys_max={}, xlim='auto',
+                      ylim='auto', zlim='auto', xlab='auto', ylab='auto', zlab='auto', clab='auto',
+                      plot_kws=None, figsize=(12, 12), titlesize=20, colorbar_kws=None,
+                      extra_point_dicts=[], size_key=None, size_scale=1):
+        return peplot.plot_samples4d(self.samples, xkey=self.key(xkey), ykey=self.key(ykey),
+            zkey=self.key(zkey), ckey=self.key(ckey), xlim=xlim, ylim=ylim, zlim=zlim,
+            nstep=nstep, title=title, xlab=xlab, ylab=ylab, zlab=zlab, clab=clab,
+            mask_keys_min={self.key(k): v for k, v in mask_keys_min.items()},
+            mask_keys_max={self.key(k): v for k, v in mask_keys_max.items()}, fig=fig, ax=ax,
+            figsize=figsize, titlesize=titlesize, extra_point_dicts=extra_point_dicts,
+            size_key=size_key, size_scale=size_scale, plot_kws=plot_kws, colorbar_kws=colorbar_kws)
+
+    def plot_2d_color(self, xkey='chieff', ykey='q', ckey='lnL', extra_posteriors=[],
+                      samples_per_posterior=None, fig=None, ax=None, figsize=(14, 14),
+                      title=None, titlesize=20, xlim='auto', ylim='auto', clim=None,
+                      size_key=None, size_scale=1, alpha_key=None, alpha_scale=1,
+                      colorbar_kws=None, colorsMap='jet', **plot_kws):
+        """make 2d scatter plot with colorbar for visualizing third dimension"""
+        return peplot.plot_samples2d_color([self.samples]+extra_posteriors, xkey=self.key(xkey),
+            ykey=self.key(ykey), ckey=self.key(ckey), samples_per_posterior=samples_per_posterior,
+            fig=fig, ax=ax, colorbar_kws=colorbar_kws, colorsMap=colorsMap, figsize=figsize,
+            title=title, titlesize=titlesize, xlim=xlim, ylim=ylim, clim=clim, size_key=size_key,
+            size_scale=size_scale, alpha_key=alpha_key, alpha_scale=alpha_scale, **plot_kws)
+
+    def plot_3d_spin(self, ckey='q', use_V3=False, secondary_spin=False, sign_or_scale=True,
+                     fig=None, ax=None, xkey='s1x', ykey='s1y', zkey='s1z', nstep=1, title=None,
+                     xlab='auto', ylab='auto', zlab='auto', clab='auto', plotlim=[-1.1, 1.1],
+                     mask_keys_min={}, mask_keys_max={}, plot_kws=None, figsize=(14, 14),
+                     titlesize=20, colorbar_kws=None, extra_point_dicts=[(0, 0, 0)],
+                     marker_if_not_dict='o', size_if_not_dict=20, color_if_not_dict='k'):
+        return peplot.plot_spin4d(self.samples, use_V3=use_V3, secondary_spin=secondary_spin,
+            sign_or_scale=sign_or_scale, xkey=self.key(xkey), ykey=self.key(ykey), plotlim=plotlim,
+            zkey=self.key(zkey), ckey=self.key(ckey), nstep=nstep, title=title, titlesize=titlesize,
+            xlab=xlab, ylab=ylab, zlab=zlab, clab=clab, fig=fig, ax=ax, extra_point_dicts=extra_point_dicts,
+            mask_keys_min={self.key(k): v for k, v in mask_keys_min.items()}, figsize=figsize,
+            mask_keys_max={self.key(k): v for k, v in mask_keys_max.items()}, plot_kws=plot_kws,
+            colorbar_kws=colorbar_kws, marker_if_not_dict=marker_if_not_dict,
+            size_if_not_dict=size_if_not_dict, color_if_not_dict=color_if_not_dict)
