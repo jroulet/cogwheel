@@ -85,7 +85,8 @@ def get_f_strain_psd_dic(triggerlists, tgps, tcoarse, t_interval):
                                                       t_interval)
                    for triggerlist in triggerlists]
 
-    freq_arrs, dic['strain'], dic['psd'] = np.moveaxis(data_by_det, 0, 1)
+    freq_arrs, dic['strain'], dic['psd'] = (
+        np.array(arr) for arr in zip(*data_by_det))
     dic['frequencies'], *copies = freq_arrs
     for freq_arr in copies:
         np.testing.assert_array_equal(dic['frequencies'], freq_arr)
