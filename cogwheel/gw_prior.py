@@ -160,8 +160,8 @@ class UniformDetectorFrameTotalMassInverseMassRatioPrior(UniformPriorMixin, Prio
 
         self.prior_norm = 1
         self.prior_norm = dblquad(
-            lambda mtot, q: np.exp(self.lnprior(mtot, q)),
-            *self.range_dic['q'], *self.range_dic['mtot'])[0]
+            lambda mtot, lnq: np.exp(self.lnprior(mtot, lnq)),
+            *self.range_dic['lnq'], *self.range_dic['mtot'])[0]
         self.prior_lognorm = np.log(self.prior_norm)
     
     @staticmethod
@@ -212,7 +212,7 @@ class UniformSourceFrameTotalMassInverseMassRatioPrior(UniformPriorMixin, Prior)
             *self.range_dic['lnq'], *self.range_dic['mtot_source'])[0]
         self.prior_lognorm = np.log(self.prior_norm)
 
-    def transform(self, mtot_source, q, d_luminosity):
+    def transform(self, mtot_source, lnq, d_luminosity):
         """(mtot_source, lnq, d_luminosity) to (m1, m2)"""
         q = np.exp(-np.abs(lnq))
         redshift_factor = 1 + cosmo.z_of_DL_Mpc(d_luminosity)
