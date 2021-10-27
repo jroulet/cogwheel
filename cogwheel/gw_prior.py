@@ -141,6 +141,99 @@ class UniformDetectorFrameMassesPrior(Prior):
                 'q_min': np.exp(self.range_dic['lnq'][0]),
                 'symmetrize_lnq': self.range_dic['lnq'][1] != 0}
 
+class UniformDetectorFrameTotalMassInverseMassRatioPrior(UniformPriorMixin, Prior):
+    """
+    Uniform in detector-frame total mass mtot = m1 + m2
+    and inverse mass ratio 1 / q = m1 / m2.
+    Samples params are mtot, lnq --> m1, m2
+    """
+    standard_params = ['m1', 'm2']
+    range_dic = {'mtot': NotImplemented,
+                 'lnq': NotImplemented}
+    
+    def __init__(self, *, mtot_range, q_min, symmetrize_lnq=False, **kwargs):
+        assert q_min < 1, 'q_min = minimum mass ratio 0 < m2 / m1 < 1'
+        lnq_min = np.log(q_min)
+        self.range_dic = {'mtot': mtot_range,
+                          'lnq': (lnq_min, -lnq_min * symmetrize_lnq)}
+        super().__init__(**kwargs)
+
+        self.prior_norm = 1
+        self.prior_norm = dblquad(
+            lambda mtot, q: np.exp(self.lnprior(mtot, q)),
+            *self.range_dic['q'], *self.range_dic['mtot'])[0]
+        self.prior_lognorm = np.log(self.prior_norm)
+    
+    @staticmethod
+    def transform(self, mtot, lnq):
+        """(mtot, lnq) to (m1, m2)"""
+        q = np.exp(-np.abs(lnq))
+        return {'m1': mtot / q,
+                'm2': mtot * q}
+
+    @staticmethod
+    def inverse_transform(self, m1, m2):
+        """(m1, m2) to (mtot, lnq)"""
+        return {'mtot': m1 + m2,
+                'lnq': np.log(m2 / m1)}
+    
+    def lnprior(self, mtot, lnq):
+        """Uniform P(1/q) = C ==> P(lnq) = C/q ==> lnP(lnq) = lnC - lnq"""
+        return -np.abs(lnq) - self.prior_lognorm
+    
+    def get_init_dict(self):
+        """Dictionary with arguments to reproduce class instance."""
+        return {'mtot_range': self.range_dic['mtot'],
+                'q_min': np.exp(self.range_dic['lnq'][0]),
+                'symmetrize_lnq': self.range_dic['lnq'][1] != 0}
+
+class UniformSourceFrameTotalMassInverseMassRatioPrior(UniformPriorMixin, Prior):
+    """
+    NOTE: CANNOT be combined with distance prior that requires mass conditioning
+    Uniform in source-frame total mass, mtot_source = (m1 + m2)/(1 + z(d_luminosity))
+    and inverse mass ratio, 1/q = m1/m2.
+    Samples params are mtot_source, lnq --> m1, m2 conditioned on d_luminosity
+    """
+    standard_params = ['m1', 'm2']
+    range_dic = {'mtot_source': NotImplemented,
+                 'lnq': NotImplemented}
+    conditioned_on = ['d_luminosity']
+    
+    def __init__(self, *, mtot_source_range, q_min, symmetrize_lnq=False, **kwargs):
+        assert q_min < 1, 'q_min = minimum mass ratio 0 < m2 / m1 < 1'
+        lnq_min = np.log(q_min)
+        self.range_dic = {'mtot_source': mtot_source_range,
+                          'lnq': (lnq_min, -lnq_min * symmetrize_lnq)}
+        super().__init__(**kwargs)
+
+        self.prior_norm = 1
+        self.prior_norm = dblquad(
+            lambda mtot_source, lnq: np.exp(self.lnprior(mtot_source, lnq)),
+            *self.range_dic['lnq'], *self.range_dic['mtot_source'])[0]
+        self.prior_lognorm = np.log(self.prior_norm)
+
+    def transform(self, mtot_source, q, d_luminosity):
+        """(mtot_source, lnq, d_luminosity) to (m1, m2)"""
+        q = np.exp(-np.abs(lnq))
+        redshift_factor = 1 + cosmo.z_of_DL_Mpc(d_luminosity)
+        return {'m1': redshift_factor * mtot_source / q,
+                'm2': redshift_factor * mtot_source * q}
+
+    def inverse_transform(self, m1, m2, d_luminosity):
+        """(m1, m2, d_luminosity) to (mtot_source, lnq)"""
+        return {'mtot_source': (m1 + m2) / (1 + cosmo.z_of_DL_Mpc(d_luminosity)),
+                'lnq': np.log(m2 / m1)}
+    
+    def lnprior(self, mtot_source, lnq):
+        """Uniform P(1/q) = C ==> P(lnq) = C/q ==> lnP(lnq) = lnC - lnq"""
+        return -np.abs(lnq) - self.prior_lognorm
+    
+    def get_init_dict(self):
+        """Dictionary with arguments to reproduce class instance."""
+        return {'mtot_source_range': self.range_dic['mtot_source'],
+                'q_min': np.exp(self.range_dic['lnq'][0]),
+                'symmetrize_lnq': self.range_dic['lnq'][1] != 0}
+
 
 class UniformPhasePrior(UniformPriorMixin, IdentityTransformMixin, Prior):
     """Uniform prior for the orbital phase. No change of coordinates."""
