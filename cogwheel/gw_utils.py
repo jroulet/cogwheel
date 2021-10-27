@@ -4,7 +4,6 @@ import numpy as np
 import lal
 
 from . import grid
-from . import utils
 
 DETECTORS = {'H': lal.CachedDetectors[lal.LHO_4K_DETECTOR],
              'L': lal.CachedDetectors[lal.LLO_4K_DETECTOR],
@@ -32,7 +31,7 @@ def fplus_fcross_detector(detector_name, ra, dec, psi, tgps):
         gmst = lal.GreenwichMeanSiderealTime(tgps)
     return np.transpose([
         lal.ComputeDetAMResponse(DETECTORS[detector_name].response, r, d, p, g)
-        for r, d, p, g in utils.zip_hold_length(ra, dec, psi, gmst)])
+        for r, d, p, g in np.broadcast(ra, dec, psi, gmst)])
 
 
 def time_delay_from_geocenter(detector_names, ra, dec, tgps):

@@ -263,7 +263,8 @@ class CBCLikelihood(utils.JSONMixin):
         return (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
                 * np.fft.irfft(strain_f * self.event_data.wht_filter))
 
-    def plot_whitened_wf(self, par_dic, trng=(-.7, .1), **kwargs):
+    def plot_whitened_wf(self, par_dic, trng=(-.7, .1), plot_data=True,
+                         **kwargs):
         """
         Plot the whitened strain and waveform model in the time domain
         in all detectors.
@@ -295,7 +296,8 @@ class CBCLikelihood(utils.JSONMixin):
                 axes, self.event_data.detector_names, data_t_wht, wf_t_wht):
             ax.text(.02, .95, det, ha='left', va='top', transform=ax.transAxes)
             ax.tick_params(which='both', direction='in', right=True, top=True)
-            ax.plot(time, data_det, 'C0', lw=.2)
+            if plot_data:
+                ax.plot(time, data_det, 'C0', lw=.2, label='data')
             ax.plot(time, wf_det, **kwargs)
 
         plt.xlim(trng)

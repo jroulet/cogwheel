@@ -3,15 +3,22 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from copy import deepcopy as dcopy
 import os
-import json
 import h5py
 from matplotlib.colors import Normalize as colorsNormalize
 from matplotlib.cm import ScalarMappable
 from mpl_toolkits.mplot3d import Axes3D
 import lalsimulation as lalsim
 
+DICTLIKE_TYPES = [dict, type(pd.DataFrame([{0: 0}])), type(pd.Series({0: 0}))]
+def is_dict(check):
+    return any([isinstance(check, dtype) for dtype in DICTLIKE_TYPES])
+
 from . import parameter_aliasing as aliasing
 from . import standard_intrinsic_transformations as pxform
+from . import parameter_label_formatting as label_formatting
+PAR_LABELS = label_formatting.param_labels
+PAR_UNITS = label_formatting.units
+PARKEY_MAP = aliasing.PARKEY_MAP
 
 import sys
 COGWHEEL_PATH = os.path.abspath(os.path.join(
@@ -23,6 +30,9 @@ from cogwheel import grid as gd
 from cogwheel import cosmology as cosmo
 
 
+def label_from_key(key):
+    return PAR_LABELS.get(aliasing.PARKEY_MAP.get(key, key), key)
+
 def printarr(arr, prec=4, pre='', post='', sep='  ', form='f'):
     print(pre + np.array2string(np.asarray(arr), separator=sep,
                                 max_line_width=np.inf, threshold=np.inf,
@@ -33,16 +43,12 @@ def fmt(num, prec=4, form='f'):
     return formstr.format(num)
 
 ########################################
-#### NON-CLASS PLOTTING FUNCTIONS
-
-def label_from_key(key):
-    return aliasing.param_labels.get(aliasing.PARKEY_MAP.get(key, key), key)
-
+#### CORNER PLOTTING FUNCTIONS
 def corner_plot_samples(samps, pvkeys=['mtot', 'q', 'chieff'], title=None,
                         figsize=(9,7), scatter_points=None, weights=None,
                         grid_kws={}, fig=None, ax=None, return_grid=False, **corner_plot_kws):
     """make corner plots"""
-    units, plabs = aliasing.units, aliasing.param_labels
+    units, plabs = PAR_UNITS, PAR_LABELS
     for k in pvkeys:
         if k not in units.keys():
             units[k] = ''
@@ -57,10 +63,10 @@ def corner_plot_samples(samps, pvkeys=['mtot', 'q', 'chieff'], title=None,
     return ff, aa
 
 def corner_plot_list(samps_list, samps_names, pvkeys=['mtot', 'q', 'chieff'], weight_key=None,
-                     figsize=(9,7), scatter_points=None, fractions=[.5, .9], grid_kws={},
+                     figsize=(9,7), scatter_points=None, grid_kws={},
                      multigrid_kws={}, fig=None, ax=None, return_grid=False, **corner_plot_kws):
     grids = []
-    units, plabs = aliasing.units, aliasing.param_labels
+    units, plabs = PAR_UNITS, PAR_LABELS
     for k in pvkeys:
         if k not in units.keys():
             units[k] = ''
@@ -70,23 +76,27 @@ def corner_plot_list(samps_list, samps_names, pvkeys=['mtot', 'q', 'chieff'], we
         grids.append(gd.Grid.from_samples(pvkeys, p, units=units, labels=plabs, pdf_key=nm,
                                           weights=(None if weight_key is None
                                                    else p.samples[weight_key]), **grid_kws))
-    multigrid = gd.MultiGrid(grids, fractions=fractions, **multigrid_kws)
+    multigrid = gd.MultiGrid(grids, **multigrid_kws)
     ff, aa = multigrid.corner_plot(set_legend=True, figsize=figsize, scatter_points=scatter_points,
                                    fig=fig, ax=ax, **corner_plot_kws)
     if return_grid:
         return ff, aa, multigrid
     return ff, aa
 
+def get_dets_figure(detector_names, xlabel='Frequency (Hz)', ylabel='Amplitude', figsize=None):
+    fig, ax = plt.subplots(len(detector_names), sharex=True, figsize=figsize)
+    fig.text(.004, .54, ylabel, rotation=90, ha='left', va='center', size=10)
+    ax[0].set_xlabel(xlabel)
+    for a, det in zip(ax, detector_names):
+        a.text(.02, .95, det, ha='left', va='top', transform=a.transAxes)
+        a.tick_params(which='both', direction='in', right=True, top=True)
+    return fig, ax
+
 def plot_at_dets(xplot, dets_yplot, ax=None, fig=None, label=None, xlabel='Frequency (Hz)', ylabel='Amplitude',
                  plot_type='loglog', xlim=None, ylim=None, title=None, det_names=['H1', 'L1', 'V1'],
                  figsize=None, **plot_kws):
     if ax is None:
-        fig, ax = plt.subplots(len(det_names), sharex=True, figsize=figsize)
-        fig.text(.004, .54, ylabel, rotation=90, ha='left', va='center', size=10)
-        ax[0].set_xlabel(xlabel)
-        for a, det in zip(ax, det_names):
-            a.text(.02, .95, det, ha='left', va='top', transform=a.transAxes)
-            a.tick_params(which='both', direction='in', right=True, top=True)
+        fig, ax = get_dets_figure(det_names, xlabel=xlabel, ylabel=ylabel, figsize=figsize)
     if np.ndim(xplot) == 1:
         xplot = [xplot]*len(det_names)
     mask = slice(None)
@@ -247,7 +257,7 @@ def plot_spin4d(samples, ckey='q', use_V3=False, secondary_spin=False, sign_or_s
                       fig=fig, ax=ax)
     # plot extra points
     for dic in extra_point_dicts:
-        if aliasing.is_dict(dic):
+        if is_dict(dic):
             xx, yy, zz = dic[xkey], dic[ykey], dic[zkey]
             ax.scatter(xx, yy, zz, marker=dic.get('marker', dic.get('m')), s=dic.get('size', dic.get('s')),
                        c=dic.get('color', dic.get('c')))
@@ -275,7 +285,7 @@ def plot_spin4d(samples, ckey='q', use_V3=False, secondary_spin=False, sign_or_s
 def xyzMpc_from_ra_dec_DL(ra, dec, DL):
     """DL in Mpc, ra in [0, 2pi], dec in [-pi/2, pi/2]"""
     theta = 0.5*np.pi - dec
-    return np.array([DL*np.sin(theta)*np.cos(ra), DL*np.sin(theta)*np.sin(ra), DL*np.cos(theta)])
+    return DL * np.array([np.sin(theta)*np.cos(ra), np.sin(theta)*np.sin(ra), np.cos(theta)])
 
 def xyzGpc_from_ra_dec_DLMpc(ra, dec, DL):
     return xyzMpc_from_ra_dec_DL(ra, dec, DL) / 1000.
@@ -289,11 +299,14 @@ def ra_dec_DL_from_xyzMpc(xmpc, ympc, zmpc):
 #### 4-DIMENSIONAL SAMPLE PLOTTING
 
 def plot_loc3d(samples, title='flat', xlim='auto', ylim='auto', zlim='auto', nstep=2,
-               ckey='lnL', clab=None, mask_keys_min={'lnL': 90}, mask_keys_max={},
+               ckey='lnl', clab=None, mask_keys_min={}, mask_keys_max={},
                plot_kws=None, figsize=(14, 14), titlesize=20, colorbar_kws=None, units='Mpc',
                extra_point_dicts=[], fig=None, ax=None):
+    dkey = 'DL'
+    if dkey not in samples:
+        dkey = PARKEY_MAP[dkey]
     x, y, z = xyzMpc_from_ra_dec_DL(samples['ra'].to_numpy(), samples['dec'].to_numpy(),
-                                    samples['DL'].to_numpy())
+                                    samples[dkey].to_numpy())
     if units in ['kpc', 'Gpc']:
         x, y, z = np.array([x, y, z]) * (10**(3 if units == 'kpc' else -3))
     elif units != 'Mpc':
@@ -329,7 +342,7 @@ def plot_loc3d(samples, title='flat', xlim='auto', ylim='auto', zlim='auto', nst
         if dic.get('text', None) is not None:
             ax.text(xx - 0.15, yy - 0.15, zz - 0.48, dic['text'], color=dic.get('textcolor'),
                     size=dic.get('textsize'))
-    print(f'Plotted {np.count_nonzero(mask)} of {Ns} samples')
+    print(f'Plotted {int(np.floor(np.count_nonzero(mask) / nstep))} of {Ns} samples')
     return fig, ax
 
 
@@ -513,7 +526,7 @@ def samples_add_antenna_response(old_samps, det_chars='HLV', tgps=None):
     return
 
 def samples_add_cosmo_prior(old_samps):
-    z, DL = old_samps['z'], old_samps['DL']
+    z, DL = old_samps['z'], old_samps.get('d_luminosity', old_samps.get('DL'))
     old_samps['cosmo_prior'] = (1+z)**-4 * (1 - DL/(1+z)*cosmo.dz_dDL(DL))
     return
 
@@ -849,7 +862,7 @@ class LVCsampleHandle(object):
     default_approximant_priority = ['PrecessingSpinIMRHM', 'IMRPhenomPv3HM', 'NRSur7dq4',
                                     'SEOBNRv4PHM', 'IMRPhenomPv2_posterior']
     def __init__(self, lvc_h5, evname, dataset_name=None, keymap=None, tgps=None,
-                 compute_aux_O3=False, convert_angles=False, gwpdic_keymap=gw_utils.PARKEY_MAP,
+                 compute_aux_O3=False, convert_angles=False, gwpdic_keymap=PARKEY_MAP,
                  no_print=False, keep_unmatched_keys=False, try_dataset_variants=True):
         """
         class for handling LVC posterior samples, maybe easier to initialize with cls.from_evname()
@@ -1138,7 +1151,7 @@ class LVCsampleHandle(object):
     @classmethod
     def prior_only(cls, lvc_h5, dataset_name=None, evname=None, keymap=None,
                    compute_aux_O3=False, convert_angles=False, tgps=None,
-                   gwpdic_keymap=gw_utils.PARKEY_MAP, no_print=False, keep_unmatched_keys=False):
+                   gwpdic_keymap=PARKEY_MAP, no_print=False, keep_unmatched_keys=False):
         """load only the prior samples as self.samples"""
         if dataset_name is None:
             dataset_name = ('combined' if run_from_evname(evname) == 'O3'
@@ -1187,7 +1200,7 @@ class LVCsampleHandle(object):
     def corner_plot(self, pvkeys=['m2_source', 'mchirp', 'q', 'chieff'],
                     title=None, figsize=(9,7), scatter_points=None, weights=None, **kwargs):
         """make corner plots"""
-        units, plabs = aliasing.units, aliasing.param_labels
+        units, plabs = PAR_UNITS, PAR_LABELS
         for k in pvkeys:
             if k not in units.keys():
                 units[k] = ''
@@ -1201,7 +1214,3 @@ class LVCsampleHandle(object):
         sg =  gd.Grid.from_samples(pvkeys, self.samples, weights=weights, pdf_key=pdfnm, units=units, labels=plabs)
         return sg.corner_plot(pdf=pdfnm, title=title, figsize=figsize, set_legend=True,
                               scatter_points=scatter_points, **kwargs)
-
-######## CLASS ALIAS ########
-LVCHAND = LVCsampleHandle
-########################################################################################
