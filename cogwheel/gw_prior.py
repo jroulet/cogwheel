@@ -68,7 +68,7 @@ class ReferenceDetectorMixin:
             R = (1+cos^2(iota)) Fp / 2 + i cos(iota) Fc
         that relates a waveform with generic orientation to an overhead
         face-on one to leading post-Newtonian order.
-        Note that the amplitude |R|
+        Note that the amplitude |R| is between 0 and 1.
         """
         fplus, fcross = self.fplus_fcross_refdet(ra, dec, psi)
         return (1 + np.cos(iota)**2) / 2 * fplus + 1j * np.cos(iota) * fcross
@@ -834,3 +834,39 @@ class AlignedSpinLVCPriorComovingVT(CombinedPrior,
     prior_classes = AlignedSpinLVCPrior.prior_classes.copy()
     prior_classes[prior_classes.index(UniformLuminosityVolumePrior)] \
         = UniformComovingVolumePrior
+
+class NitzMassIASSpinPrior(CombinedPrior, RegisteredPriorMixin):
+    """
+    Priors are uniform in source-frame total mass, inverse mass ratio,
+    effective spin, and comoving VT.
+    Sampling is in mtot_source, lnq, d_effective, and the rest of the
+    IAS spin and extrinsic parameters.
+    """
+    prior_classes = [UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePriorSampleEffectiveDistance,
+                     UniformSourceFrameTotalMassInverseMassRatioPrior,
+                     FlatChieffPrior,
+                     UniformDiskInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior]
+
+class NitzMassLVCSpinPrior(CombinedPrior, RegisteredPriorMixin):
+    """
+    Priors have isotropic spins and are uniform in source-frame total mass,
+    inverse mass ratio, and comoving VT.
+    Sampling is in mtot_source, lnq, d_effective, and the rest of the
+    LVC spin and extrinsic parameters.
+    """
+    prior_classes = [UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePriorSampleEffectiveDistance,
+                     UniformSourceFrameTotalMassInverseMassRatioPrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     IsotropicSpinsInplaneComponentsPrior,
+                     ZeroTidalDeformabilityPrior]
