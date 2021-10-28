@@ -151,48 +151,55 @@ class UniformDetectorFrameTotalMassInverseMassRatioPrior(Prior):
     Uniform in detector-frame total mass and inverse mass ratio,
         mtot = m1 + m2
         1 / q = m1 / m2.
-    Sampled params are mtot, lnq, these are transformed to m1, m2.
+    Sampled params are mchirp, lnq, these are transformed to m1, m2.
     """
     standard_params = ['m1', 'm2']
-    range_dic = {'mtot': NotImplemented,
+    range_dic = {'mchirp': NotImplemented,
                  'lnq': NotImplemented}
 
-    def __init__(self, *, mtot_range, q_min, symmetrize_lnq=False,
+    def __init__(self, *, mchirp_range, q_min, symmetrize_lnq=False,
                  **kwargs):
         if not 0 < q_min <= 1:
             raise ValueError('`q_min` should be between 0 and 1.')
 
         lnq_min = np.log(q_min)
-        self.range_dic = {'mtot': mtot_range,
+        self.range_dic = {'mchirp': mchirp_range,
                           'lnq': (lnq_min, -lnq_min * symmetrize_lnq)}
         super().__init__(**kwargs)
 
         self.prior_lognorm = 0
         self.prior_lognorm = np.log(dblquad(
-            lambda mtot, lnq: np.exp(self.lnprior(mtot, lnq)),
-            *self.range_dic['lnq'], *self.range_dic['mtot'])[0])
+            lambda mchirp, lnq: np.exp(self.lnprior(mchirp, lnq)),
+            *self.range_dic['lnq'], *self.range_dic['mchirp'])[0])
 
     @staticmethod
-    def transform(mtot, lnq):
-        """(mtot, lnq) to (m1, m2)."""
+    def transform(mchirp, lnq):
+        """(mchirp, lnq) to (m1, m2)."""
         q = np.exp(-np.abs(lnq))
-        m1 = mtot / (1 + q)
-        return {'m1': m1,
-                'm2': q * m1}
+        return {'m1': mchirp * (1 + q)**.2 / q**.6,
+                'm2': mchirp * (1 + 1/q)**.2 * q**.6}
 
     @staticmethod
     def inverse_transform(m1, m2):
-        """(m1, m2) to (mtot, lnq)."""
-        return {'mtot': m1 + m2,
+        """(m1, m2) to (mchirp, lnq)."""
+        return {'mchirp': (m1 * m2)**.6 / (m1 + m2)**.2,
                 'lnq': np.log(m2 / m1)}
 
-    def lnprior(self, mtot, lnq):
-        """Uniform in 1/q."""
-        return -np.abs(lnq) - self.prior_lognorm
+    def lnprior(self, mchirp, lnq):
+        """
+        Uniform in 1/q and mtot ==>
+        (using mchirp = eta**(3/5) * mtot, eta = q / (1+q)**2)
+        P(lnq, mchirp) = (C/q) * q**(3/5) / (1+q)**(6/5) = C / q**.4 / (1+q)**1.2
+          = C / q / cosh(lnq / 2)**1.2  ==>
+        lnP - lnC = -.4*lnq - 1.2*ln(1+q) = -lnq - 1.2*ln(2*cosh(.5*lnq))
+        """
+        true_lnq = -np.abs(lnq)
+        q = np.exp(true_lnq)
+        return -.4*true_lnq - 1.2*np.log(1 + q) - self.prior_lognorm
 
     def get_init_dict(self):
         """Dictionary with arguments to reproduce class instance."""
-        return {'mtot_range': self.range_dic['mtot'],
+        return {'mchirp_range': self.range_dic['mchirp'],
                 'q_min': np.exp(self.range_dic['lnq'][0]),
                 'symmetrize_lnq': self.range_dic['lnq'][1] != 0}
 
