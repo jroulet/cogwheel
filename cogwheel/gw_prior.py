@@ -68,6 +68,7 @@ class ReferenceDetectorMixin:
             R = (1+cos^2(iota)) Fp / 2 + i cos(iota) Fc
         that relates a waveform with generic orientation to an overhead
         face-on one to leading post-Newtonian order.
+        Note that the amplitude |R|
         """
         fplus, fcross = self.fplus_fcross_refdet(ra, dec, psi)
         return (1 + np.cos(iota)**2) / 2 * fplus + 1j * np.cos(iota) * fcross
@@ -479,6 +480,57 @@ class UniformComovingVolumePrior(UniformLuminosityVolumePrior):
         cosmo_weight = ((1 - d_luminosity * cosmo.dz_dDL(d_luminosity) / (1+z))
                         / (1 + z)**4)
         return np.log(cosmo_weight * d_luminosity**3 / d_hat)
+
+
+class UniformComovingVolumePriorSampleEffectiveDistance(ReferenceDetectorMixin, Prior):
+    """
+    Distance prior uniform in luminosity volume and detector-frame time.
+    The sampled parameter is:
+      d_effective = d_luminosity / |self.geometric_factor_refdet(ra, dec, psi, iota)|
+    where the effective distance is defined in one "reference" detector
+    (see parent class ReferenceDetectorMixin).
+    """
+    standard_params = ['d_luminosity']
+    range_dic = {'d_effective': NotImplemented}
+    conditioned_on = ['ra', 'dec', 'psi', 'iota']
+
+    def __init__(self, *, tgps, ref_det_name, d_effective_max=50000, **kwargs):
+        self.range_dic = {'d_hat': (0, d_effective_max)}
+        super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
+        self.tgps = tgps
+        self.ref_det_name = ref_det_name
+
+    def _conversion_factor(self, ra, dec, psi, iota):
+        """
+        Return conversion factor such that
+            d_luminosity = d_effective * conversion_factor.
+        """
+        return
+
+    def transform(self, d_effective, ra, dec, psi, iota):
+        """d_effective to d_luminosity"""
+        return {'d_luminosity': d_effective * np.abs(
+            self.geometric_factor_refdet(ra, dec, psi, iota))}
+
+    def inverse_transform(self, d_luminosity, ra, dec, psi, iota):
+        """d_luminosity to d_effective"""
+        return {'d_effective': d_luminosity / np.abs(
+            self.geometric_factor_refdet(ra, dec, psi, iota))}
+
+    def lnprior(self, d_effective, ra, dec, psi, iota):
+        """Natural log of the prior probability density for d_effective."""
+        d_luminosity = d_effective * np.abs(
+            self.geometric_factor_refdet(ra, dec, psi, iota))
+        z = cosmo.z_of_DL_Mpc(d_luminosity)
+        cosmo_weight = ((1 - d_luminosity * cosmo.dz_dDL(d_luminosity) / (1+z))
+                        / (1 + z)**4)
+        return np.log(cosmo_weight * d_luminosity**3 / d_effective)
+
+    def get_init_dict(self):
+        """Return dict with keyword arguments to reproduce the class instance."""
+        return {'tgps': self.tgps,
+                'ref_det_name': self.ref_det_name,
+                'd_effective_max': self.range_dic['d_effective'][1]}
 
 
 class FlatChieffPrior(UniformPriorMixin, Prior):
