@@ -198,7 +198,7 @@ class Posterior(utils.JSONMixin):
 
 def initialize_posteriors_slurm(eventnames, approximant, prior_name,
                                 parentdir, n_hours_limit=2,
-                                memory_per_task='4G'):
+                                memory_per_task='4G', overwrite=False):
     """
     Submit jobs that initialize `Posterior.from_event()` for each event.
     """
@@ -209,12 +209,20 @@ def initialize_posteriors_slurm(eventnames, approximant, prior_name,
         eventnames = [eventnames]
     for eventname in eventnames:
         eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
+
+        if not overwrite and (filename := eventdir/'Posterior.json').exists():
+            raise FileExistsError(
+                f'{filename} exists, pass `overwrite=True` to overwrite.')
+
         utils.mkdirs(eventdir)
 
         job_name = f'{eventname}_posterior'
         stdout_path = (eventdir/'posterior_from_event.out').resolve()
         stderr_path = (eventdir/'posterior_from_event.err').resolve()
+
         args = ' '.join([eventname, approximant, prior_name, parentdir])
+        if overwrite:
+            args += ' --overwrite'
 
         with tempfile.NamedTemporaryFile('w+') as batchfile:
             batchfile.write(textwrap.dedent(f"""\
@@ -238,10 +246,10 @@ def initialize_posteriors_slurm(eventnames, approximant, prior_name,
             time.sleep(.1)
 
 
-def main(eventname, approximant, prior_name, parentdir):
+def main(eventname, approximant, prior_name, parentdir, overwrite):
     '''Construct a Posterior instance and save it to json.'''
     post = Posterior.from_event(eventname, approximant, prior_name)
-    post.to_json(post.get_eventdir(parentdir))
+    post.to_json(post.get_eventdir(parentdir), overwrite=overwrite)
 
 
 if __name__ == '__main__':
@@ -253,5 +261,7 @@ if __name__ == '__main__':
     parser.add_argument('prior_name',
                         help='key from `gw_prior.prior_registry`')
     parser.add_argument('parentdir', help='top directory to save output')
+    parser.add_argument('--overwrite', action='store_true',
+                        help='pass to overwrite existing json file')
 
     main(**vars(parser.parse_args()))

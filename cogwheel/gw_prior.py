@@ -215,7 +215,7 @@ class UniformSourceFrameTotalMassInverseMassRatioPrior(Prior):
     def __init__(self, *, mtot_source_range, q_min,
                  symmetrize_lnq=False, **kwargs):
         if not 0 < q_min <= 1:
-            raise ValueError(f'`q_min` should be between 0 and 1.')
+            raise ValueError('`q_min` should be between 0 and 1.')
 
         lnq_min = np.log(q_min)
         self.range_dic = {'mtot_source': mtot_source_range,
