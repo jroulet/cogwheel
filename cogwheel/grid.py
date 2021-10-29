@@ -136,8 +136,10 @@ class LatexLabels(dict):
         self.units = defaultdict(str, units or {})
 
     def with_units(self, par):
-        parenthesised_unit = f' ({self.units[par]})' if self.units[par] else ''
-        return self[par] + parenthesised_unit
+        """Return string of the form '{label} ({unit})'."""
+        if self.units[par]:
+            return self[par] + f' ({self.units[par]})'
+        return self[par]
 
     def __missing__(self, par):
         return par

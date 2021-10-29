@@ -68,6 +68,7 @@ class ReferenceDetectorMixin:
             R = (1+cos^2(iota)) Fp / 2 + i cos(iota) Fc
         that relates a waveform with generic orientation to an overhead
         face-on one to leading post-Newtonian order.
+        Note that the amplitude |R| is between 0 and 1.
         """
         fplus, fcross = self.fplus_fcross_refdet(ra, dec, psi)
         return (1 + np.cos(iota)**2) / 2 * fplus + 1j * np.cos(iota) * fcross
@@ -93,6 +94,10 @@ class ReferenceDetectorMixin:
 # as `**kwargs` any arguments that other priors may need.
 
 class UniformDetectorFrameMassesPrior(Prior):
+    """
+    Uniform prior for detector frame masses.
+    Sampled variables are mchirp, lnq. These are transformed to m1, m2.
+    """
     standard_params = ['m1', 'm2']
     range_dic = {'mchirp': NotImplemented,
                  'lnq': NotImplemented}
@@ -142,7 +147,120 @@ class UniformDetectorFrameMassesPrior(Prior):
                 'symmetrize_lnq': self.range_dic['lnq'][1] != 0}
 
 
-class UniformPhasePrior(UniformPriorMixin, IdentityTransformMixin, Prior):
+class UniformDetectorFrameTotalMassInverseMassRatioPrior(Prior):
+    """
+    Uniform in detector-frame total mass and inverse mass ratio,
+        mtot = m1 + m2
+        1 / q = m1 / m2.
+    Sampled params are mchirp, lnq, these are transformed to m1, m2.
+    """
+    standard_params = ['m1', 'm2']
+    range_dic = {'mchirp': NotImplemented,
+                 'lnq': NotImplemented}
+
+    def __init__(self, *, mchirp_range, q_min, symmetrize_lnq=False,
+                 **kwargs):
+        if not 0 < q_min <= 1:
+            raise ValueError('`q_min` should be between 0 and 1.')
+
+        lnq_min = np.log(q_min)
+        self.range_dic = {'mchirp': mchirp_range,
+                          'lnq': (lnq_min, -lnq_min * symmetrize_lnq)}
+        super().__init__(**kwargs)
+
+        self.prior_lognorm = 0
+        self.prior_lognorm = np.log(dblquad(
+            lambda mchirp, lnq: np.exp(self.lnprior(mchirp, lnq)),
+            *self.range_dic['lnq'], *self.range_dic['mchirp'])[0])
+
+    @staticmethod
+    def transform(mchirp, lnq):
+        """(mchirp, lnq) to (m1, m2)."""
+        q = np.exp(-np.abs(lnq))
+        return {'m1': mchirp * (1 + q)**.2 / q**.6,
+                'm2': mchirp * (1 + 1/q)**.2 * q**.6}
+
+    @staticmethod
+    def inverse_transform(m1, m2):
+        """(m1, m2) to (mchirp, lnq)."""
+        return {'mchirp': (m1 * m2)**.6 / (m1 + m2)**.2,
+                'lnq': np.log(m2 / m1)}
+
+    def lnprior(self, mchirp, lnq):
+        """
+        Uniform in 1/q and mtot ==>
+        (using mchirp = eta**(3/5) * mtot, eta = q / (1+q)**2)
+        P(lnq, mchirp) = (C/q) * q**(3/5) / (1+q)**(6/5) = C / q**.4 / (1+q)**1.2
+          = C / q / cosh(lnq / 2)**1.2  ==>
+        lnP - lnC = -.4*lnq - 1.2*ln(1+q) = -lnq - 1.2*ln(2*cosh(.5*lnq))
+        """
+        true_lnq = -np.abs(lnq)
+        q = np.exp(true_lnq)
+        return -.4*true_lnq - 1.2*np.log(1 + q) - self.prior_lognorm
+
+    def get_init_dict(self):
+        """Dictionary with arguments to reproduce class instance."""
+        return {'mchirp_range': self.range_dic['mchirp'],
+                'q_min': np.exp(self.range_dic['lnq'][0]),
+                'symmetrize_lnq': self.range_dic['lnq'][1] != 0}
+
+
+class UniformSourceFrameTotalMassInverseMassRatioPrior(Prior):
+    """
+    Uniform in source-frame total mass and inverse mass ratio
+        mtot_source = (m1 + m2) / (1 + z),
+        1/q = m1/m2.
+    Sampled params are mtot_source, lnq, these are transformed to m1, m2
+    conditioned on d_luminosity.
+    Note: cannot be combined with distance prior that requires mass
+    conditioning.
+    """
+    standard_params = ['m1', 'm2']
+    range_dic = {'mtot_source': NotImplemented,
+                 'lnq': NotImplemented}
+    conditioned_on = ['d_luminosity']
+
+    def __init__(self, *, mtot_source_range, q_min,
+                 symmetrize_lnq=False, **kwargs):
+        if not 0 < q_min <= 1:
+            raise ValueError('`q_min` should be between 0 and 1.')
+
+        lnq_min = np.log(q_min)
+        self.range_dic = {'mtot_source': mtot_source_range,
+                          'lnq': (lnq_min, -lnq_min * symmetrize_lnq)}
+        super().__init__(**kwargs)
+
+        self.prior_lognorm = 0
+        self.prior_lognorm = np.log(dblquad(
+            lambda mtot_source, lnq: np.exp(self.lnprior(mtot_source, lnq)),
+            *self.range_dic['lnq'], *self.range_dic['mtot_source'])[0])
+
+    def transform(self, mtot_source, lnq, d_luminosity):
+        """(mtot_source, lnq, d_luminosity) to (m1, m2)"""
+        q = np.exp(-np.abs(lnq))
+        m1 = (1 + cosmo.z_of_DL_Mpc(d_luminosity)) * mtot_source / (1 + q)
+
+        return {'m1': m1,
+                'm2': q * m1}
+
+    def inverse_transform(self, m1, m2, d_luminosity):
+        """(m1, m2, d_luminosity) to (mtot_source, lnq)"""
+        return {'mtot_source': (m1+m2) / (1+cosmo.z_of_DL_Mpc(d_luminosity)),
+                'lnq': np.log(m2 / m1)}
+
+    def lnprior(self, mtot_source, lnq):
+        """Uniform in 1/q."""
+        return -np.abs(lnq) - self.prior_lognorm
+
+    def get_init_dict(self):
+        """Dictionary with arguments to reproduce class instance."""
+        return {'mtot_source_range': self.range_dic['mtot_source'],
+                'q_min': np.exp(self.range_dic['lnq'][0]),
+                'symmetrize_lnq': self.range_dic['lnq'][1] != 0}
+
+
+class UniformPhasePrior(UniformPriorMixin, IdentityTransformMixin,
+                        Prior):
     """Uniform prior for the orbital phase. No change of coordinates."""
     standard_params = ['vphi']
     range_dic = {'vphi': (0, 2*np.pi)}
@@ -208,7 +326,8 @@ class IsotropicSkyLocationPrior(UniformPriorMixin, Prior):
         return self.skyloc.get_init_dict()
 
 
-class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin, Prior):
+class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin,
+                       Prior):
     """Prior for the time of arrival at a reference detector."""
     standard_params = ['t_geocenter']
     range_dic = {'t_refdet': NotImplemented}
@@ -239,8 +358,8 @@ class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin, Prior):
                 'ref_det_name': self.ref_det_name}
 
 
-class UniformPolarizationPrior(ReferenceDetectorMixin, UniformPriorMixin,
-                               Prior):
+class UniformPolarizationPrior(ReferenceDetectorMixin,
+                               UniformPriorMixin, Prior):
     """
     Prior for the polarization.
     The sampled variable `psi_hat` differs from the standard
@@ -341,6 +460,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
                 'ref_det_name': self.ref_det_name,
                 'd_hat_max': self.range_dic['d_hat'][1]}
 
+
 class UniformComovingVolumePrior(UniformLuminosityVolumePrior):
     """
     Distance prior uniform in comoving volume-time.
@@ -354,11 +474,63 @@ class UniformComovingVolumePrior(UniformLuminosityVolumePrior):
         This prior is not normalized, as that would need to know
         the masses' integration region.
         """
-        d_luminosity = d_hat * self._conversion_factor(ra, dec, psi, iota, m1, m2)
+        d_luminosity = d_hat * self._conversion_factor(ra, dec, psi, iota,
+                                                       m1, m2)
         z = cosmo.z_of_DL_Mpc(d_luminosity)
-        cosmo_weight = ((1 - d_luminosity * cosmo.dz_dDL(d_luminosity) / (1 + z))
+        cosmo_weight = ((1 - d_luminosity * cosmo.dz_dDL(d_luminosity) / (1+z))
                         / (1 + z)**4)
         return np.log(cosmo_weight * d_luminosity**3 / d_hat)
+
+
+class UniformComovingVolumePriorSampleEffectiveDistance(ReferenceDetectorMixin, Prior):
+    """
+    Distance prior uniform in luminosity volume and detector-frame time.
+    The sampled parameter is:
+      d_effective = d_luminosity / |self.geometric_factor_refdet(ra, dec, psi, iota)|
+    where the effective distance is defined in one "reference" detector
+    (see parent class ReferenceDetectorMixin).
+    """
+    standard_params = ['d_luminosity']
+    range_dic = {'d_effective': NotImplemented}
+    conditioned_on = ['ra', 'dec', 'psi', 'iota']
+
+    def __init__(self, *, tgps, ref_det_name, d_effective_max=50000, **kwargs):
+        self.range_dic = {'d_hat': (0, d_effective_max)}
+        super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
+        self.tgps = tgps
+        self.ref_det_name = ref_det_name
+
+    def _conversion_factor(self, ra, dec, psi, iota):
+        """
+        Return conversion factor such that
+            d_luminosity = d_effective * conversion_factor.
+        """
+        return
+
+    def transform(self, d_effective, ra, dec, psi, iota):
+        """d_effective to d_luminosity"""
+        return {'d_luminosity': d_effective * np.abs(
+            self.geometric_factor_refdet(ra, dec, psi, iota))}
+
+    def inverse_transform(self, d_luminosity, ra, dec, psi, iota):
+        """d_luminosity to d_effective"""
+        return {'d_effective': d_luminosity / np.abs(
+            self.geometric_factor_refdet(ra, dec, psi, iota))}
+
+    def lnprior(self, d_effective, ra, dec, psi, iota):
+        """Natural log of the prior probability density for d_effective."""
+        d_luminosity = d_effective * np.abs(
+            self.geometric_factor_refdet(ra, dec, psi, iota))
+        z = cosmo.z_of_DL_Mpc(d_luminosity)
+        cosmo_weight = ((1 - d_luminosity * cosmo.dz_dDL(d_luminosity) / (1+z))
+                        / (1 + z)**4)
+        return np.log(cosmo_weight * d_luminosity**3 / d_effective)
+
+    def get_init_dict(self):
+        """Return dict with keyword arguments to reproduce the class instance."""
+        return {'tgps': self.tgps,
+                'ref_det_name': self.ref_det_name,
+                'd_effective_max': self.range_dic['d_effective'][1]}
 
 
 class FlatChieffPrior(UniformPriorMixin, Prior):
@@ -555,7 +727,6 @@ class IsotropicSpinsInplaneComponentsPrior(UniformPriorMixin, Prior):
                 's2phi_hat': s2phi_hat}
 
 
-
 class ZeroInplaneSpinsPrior(FixedPrior):
     """Set inplane spins to zero."""
     standard_par_dic = {'s1x': 0,
@@ -614,8 +785,12 @@ class LVCPrior(CombinedPrior, RegisteredPriorMixin):
                      IsotropicSpinsInplaneComponentsPrior,
                      ZeroTidalDeformabilityPrior]
 
+
 class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
-    """Aligned spins from isotropic distribution, uniform luminosity volume."""
+    """
+    Aligned spins from isotropic distribution, uniform luminosity
+    volume.
+    """
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
@@ -628,25 +803,99 @@ class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
                      ZeroTidalDeformabilityPrior]
 
 
-class IASPriorComovingVT(IASPrior):
+class IASPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
     """Precessing, flat in chieff, uniform comoving volume-time."""
-    prior_classes = IASPrior.prior_classes.copy()
-    prior_classes[-4] = UniformComovingVolumePrior
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePrior,
+                     FlatChieffPrior,
+                     UniformDiskInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior]
 
 
-class AlignedSpinIASPriorComovingVT(AlignedSpinIASPrior):
+class AlignedSpinIASPriorComovingVT(CombinedPrior,
+                                    RegisteredPriorMixin):
     """Aligned spin, flat in chieff, uniform comoving volume-time."""
-    prior_classes = AlignedSpinIASPrior.prior_classes.copy()
-    prior_classes[-4] = UniformComovingVolumePrior
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePrior,
+                     FlatChieffPrior,
+                     ZeroInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior]
 
 
-class LVCPriorComovingVT(LVCPrior):
+class LVCPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
     """Precessing, isotropic spins, uniform comoving volume-time."""
-    prior_classes = LVCPrior.prior_classes.copy()
-    prior_classes[-4] = UniformComovingVolumePrior
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     IsotropicSpinsInplaneComponentsPrior,
+                     ZeroTidalDeformabilityPrior]
 
 
-class AlignedSpinLVCPriorComovingVT(AlignedSpinLVCPrior):
-    """Aligned spins from isotropic distribution, uniform comoving volume-time."""
-    prior_classes = AlignedSpinLVCPrior.prior_classes.copy()
-    prior_classes[-4] = UniformComovingVolumePrior
+class AlignedSpinLVCPriorComovingVT(CombinedPrior,
+                                    RegisteredPriorMixin):
+    """
+    Aligned spins from isotropic distribution, uniform comoving
+    volume-time.
+    """
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     ZeroInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior]
+
+
+class NitzMassIASSpinPrior(CombinedPrior, RegisteredPriorMixin):
+    """
+    Priors are uniform in source-frame total mass, inverse mass ratio,
+    effective spin, and comoving VT.
+    Sampling is in mtot_source, lnq, d_effective, and the rest of the
+    IAS spin and extrinsic parameters.
+    """
+    prior_classes = [UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePriorSampleEffectiveDistance,
+                     UniformSourceFrameTotalMassInverseMassRatioPrior,
+                     FlatChieffPrior,
+                     UniformDiskInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior]
+
+class NitzMassLVCSpinPrior(CombinedPrior, RegisteredPriorMixin):
+    """
+    Priors have isotropic spins and are uniform in source-frame total mass,
+    inverse mass ratio, and comoving VT.
+    Sampling is in mtot_source, lnq, d_effective, and the rest of the
+    LVC spin and extrinsic parameters.
+    """
+    prior_classes = [UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePriorSampleEffectiveDistance,
+                     UniformSourceFrameTotalMassInverseMassRatioPrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     IsotropicSpinsInplaneComponentsPrior,
+                     ZeroTidalDeformabilityPrior]

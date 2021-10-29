@@ -411,7 +411,7 @@ class ReferenceWaveformFinder(CBCLikelihood):
         """
         # eta_max < .25 to avoid q = 1 solutions that don't have all harmonics
         eta_rng = gw_utils.q_to_eta(self.event_data.q_min), .24
-        chieff_rng = (-1, 1)
+        chieff_rng = (-.999, .999)
 
         def lnlike_incoherent(mchirp, eta, chieff):
             m1, m2 = gw_utils.mchirpeta_to_m1m2(mchirp, eta)

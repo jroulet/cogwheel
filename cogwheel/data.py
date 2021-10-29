@@ -116,7 +116,7 @@ class EventData(utils.JSONMixin):
             if filename:
                 raise ValueError('Pass exactly one of `eventname`, `filename`')
             filename = cls.get_filename(eventname)
-        dic = {key: val[()] for key, val in np.load(filename).iteritems()}
+        dic = {key: val[()] for key, val in np.load(filename, allow_pickle=True).iteritems()}
         return cls(**dic)
 
     @staticmethod
