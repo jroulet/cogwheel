@@ -500,13 +500,6 @@ class UniformComovingVolumePriorSampleEffectiveDistance(ReferenceDetectorMixin, 
         self.tgps = tgps
         self.ref_det_name = ref_det_name
 
-    def _conversion_factor(self, ra, dec, psi, iota):
-        """
-        Return conversion factor such that
-            d_luminosity = d_effective * conversion_factor.
-        """
-        return
-
     def transform(self, d_effective, ra, dec, psi, iota):
         """d_effective to d_luminosity"""
         return {'d_luminosity': d_effective * np.abs(
@@ -787,10 +780,7 @@ class LVCPrior(CombinedPrior, RegisteredPriorMixin):
 
 
 class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
-    """
-    Aligned spins from isotropic distribution, uniform luminosity
-    volume.
-    """
+    """Aligned spins from isotropic distribution, uniform luminosity volume."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
@@ -804,7 +794,7 @@ class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
 
 
 class IASPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
-    """Precessing, flat in chieff, uniform comoving volume-time."""
+    """Precessing, flat in chieff, uniform comoving VT."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
@@ -817,9 +807,8 @@ class IASPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
                      ZeroTidalDeformabilityPrior]
 
 
-class AlignedSpinIASPriorComovingVT(CombinedPrior,
-                                    RegisteredPriorMixin):
-    """Aligned spin, flat in chieff, uniform comoving volume-time."""
+class AlignedSpinIASPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
+    """Aligned spin, flat in chieff, uniform comoving VT."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
@@ -833,7 +822,7 @@ class AlignedSpinIASPriorComovingVT(CombinedPrior,
 
 
 class LVCPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
-    """Precessing, isotropic spins, uniform comoving volume-time."""
+    """Precessing, isotropic spins, uniform comoving VT."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
@@ -846,12 +835,8 @@ class LVCPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
                      ZeroTidalDeformabilityPrior]
 
 
-class AlignedSpinLVCPriorComovingVT(CombinedPrior,
-                                    RegisteredPriorMixin):
-    """
-    Aligned spins from isotropic distribution, uniform comoving
-    volume-time.
-    """
+class AlignedSpinLVCPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
+    """Aligned spins from isotropic distribution, uniform comoving VT."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
