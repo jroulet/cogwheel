@@ -481,7 +481,7 @@ class CombinedPrior(Prior):
         Parameters
         ----------
         func: function.
-        parameters: sequence of `signature.Parameter` objects.
+        parameters: sequence of `inspect.Parameter` objects.
         """
         func.__signature__ = inspect.signature(func).replace(
             parameters=parameters)
