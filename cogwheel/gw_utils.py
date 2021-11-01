@@ -114,7 +114,7 @@ _LABELS = {
     's2phi': r'$\phi_{s2}$',
     'chip': r'$\chi_p$',
     # Distance
-    'd_hat': r'$D_{\rm eff} / \mathcal{M}$',
+    'd_hat': r'$\hat{D}$',
     'd_luminosity': r'$D_L$',
     'z': r'$z$',
     # Orientation
