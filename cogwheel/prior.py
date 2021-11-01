@@ -306,6 +306,8 @@ class CombinedPrior(Prior):
         kwargs.update(dict(zip([par.name for par in self._init_parameters()],
                                args)))
         self.subpriors = [cls(**kwargs) for cls in self.prior_classes]
+
+        self.range_dic = {}
         for subprior in self.subpriors:
             self.range_dic.update(subprior.range_dic)
 
