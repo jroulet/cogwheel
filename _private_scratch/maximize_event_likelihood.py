@@ -21,7 +21,7 @@ def maximize_event(evname, mchirp_intervals, parentdir=DEF_PARENTDIR,
                    overwrite=False, wait_to_collect=False,
                    collect_path=None):
     eventnames_j = []
-    for j, mcrng in mchirp_intervals:
+    for j, mcrng in enumerate(mchirp_intervals):
         evn_j = evname + f'_{j}'
         eventnames_j.append(evn_j)
         evdat_j = data.EventData.from_npz(eventname=evname).reinstantiate(
