@@ -391,6 +391,7 @@ class CombinedPrior(Prior):
             """
             return self.lnprior_and_transform(*par_vals, **par_dic)[0]
 
+
         # Witchcraft to fix the functions' signatures:
         self_parameter = inspect.Parameter('self',
                                            inspect.Parameter.POSITIONAL_ONLY)
@@ -411,6 +412,13 @@ class CombinedPrior(Prior):
         cls.lnprior = lnprior
 
         # Edit the `__init__()` signature of the new subclass:
+        if not cls._method_is_native(cls.__init__):
+            # Override subclass `__init__` so we can change its signature
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            cls.__init__ = __init__
+
         cls._change_signature(cls.__init__, cls._init_parameters())
 
     @classmethod
@@ -456,6 +464,15 @@ class CombinedPrior(Prior):
                             f'{following} defines {conditioned_par}, which'
                             f'{prior_class} requires. {following} should come '
                             f'before {prior_class}.')
+
+    @classmethod
+    def _method_is_native(cls, method):
+        """
+        Return whether `method` was defined in the class (as opposed to
+        inherited from a parent class).
+        It is assumed that `cls` is a top-level class (not nested).
+        """
+        return method.__qualname__.split('.')[0] == cls.__name__
 
     @classmethod
     def _init_parameters(cls):
