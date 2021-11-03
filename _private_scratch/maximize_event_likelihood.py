@@ -17,7 +17,7 @@ DEF_PRIOR_NAME = 'IASPrior'
 
 def maximize_event(evname, mchirp_intervals, parentdir=DEF_PARENTDIR,
                    approximant=DEF_APPROX, prior_name=DEF_PRIOR_NAME,
-                   memory_per_task='4G', n_hours_limit='4',
+                   memory_per_task='4G', n_hours_limit=4,
                    overwrite=False, wait_to_collect=False,
                    collect_path=None, data_already_split=False):
     eventnames_j = []
