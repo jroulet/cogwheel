@@ -11,7 +11,7 @@ COGWHEEL_PATH = os.path.abspath(os.path.join(
 sys.path.append(COGWHEEL_PATH)
 from cogwheel import data, posterior, prior, gw_prior, utils
 
-DEF_PARENTDIR = '/data/srolsen/GW/cogwheel/o3a_cands'
+DEF_PARENTDIR = '/data/srolsen/GW/cogwheel/o3a_cands/'
 DEF_APPROX = 'IMRPhenomXPHM'
 DEF_PRIOR_NAME = 'IASPrior'
 
@@ -19,14 +19,15 @@ def maximize_event(evname, mchirp_intervals, parentdir=DEF_PARENTDIR,
                    approximant=DEF_APPROX, prior_name=DEF_PRIOR_NAME,
                    memory_per_task='4G', n_hours_limit='4',
                    overwrite=False, wait_to_collect=False,
-                   collect_path=None):
+                   collect_path=None, data_already_split=False):
     eventnames_j = []
     for j, mcrng in enumerate(mchirp_intervals):
         evn_j = evname + f'_{j}'
         eventnames_j.append(evn_j)
-        evdat_j = data.EventData.from_npz(eventname=evname).reinstantiate(
-            eventname=evn_j, mchirp_range=mcrng)
-        evdat_j.to_npz()
+        if not data_already_split:
+            evdat_j = data.EventData.from_npz(eventname=evname).reinstantiate(
+                eventname=evn_j, mchirp_range=mcrng)
+            evdat_j.to_npz()
 
     posterior.initialize_posteriors_slurm(eventnames_j, approximant, prior_name,
                                           parentdir, n_hours_limit=n_hours_limit,
@@ -36,8 +37,7 @@ def maximize_event(evname, mchirp_intervals, parentdir=DEF_PARENTDIR,
     if wait_to_collect:
         while np.any([not os.path.exists(pp) for pp in postpaths]):
             time.sleep(120.)
-        return collect_event(postpaths, parentdir=parentdir, prior_name=prior_name,
-                             outpath=collect_path)
+        return collect_event(postpaths, outpath=collect_path)
     return postpaths
 
 
@@ -46,8 +46,7 @@ def get_postpaths(eventnames_j, parentdir, prior_name):
                          'Posterior.json') for evnj in eventnames_j]
 
 
-def collect_event(postpaths, parentdir=DEF_PARENTDIR, prior_name=DEF_PRIOR_NAME,
-                  outpath=None):
+def collect_event(postpaths, outpath=None):
     lnls, pdics, drifts, rngs = [], [], [], []
     for pp in postpaths:
         post = utils.read_json(pp)
@@ -73,6 +72,7 @@ def main():
     mchirp_intervals = np.load(cmdline_args[2])
     # .json filename for saving the result
     outpath = cmdline_args[3]
+    # run maximization and wait for result collection
     maximize_event(evname, mchirp_intervals, parentdir=DEF_PARENTDIR,
                    approximant=DEF_APPROX, prior_name=DEF_PRIOR_NAME,
                    memory_per_task='4G', n_hours_limit='4',
