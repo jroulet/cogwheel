@@ -303,7 +303,7 @@ class CombinedPrior(Prior):
         """
         Instantiate prior classes and define `range_dic`.
         """
-        kwargs.update(dict(zip([par.name for par in self._init_parameters()],
+        kwargs.update(dict(zip([par.name for par in self.init_parameters()],
                                args)))
         self.subpriors = [cls(**kwargs) for cls in self.prior_classes]
 
@@ -419,7 +419,7 @@ class CombinedPrior(Prior):
 
             cls.__init__ = __init__
 
-        cls._change_signature(cls.__init__, cls._init_parameters())
+        cls._change_signature(cls.__init__, cls.init_parameters())
 
     @classmethod
     def _set_params(cls):
@@ -475,7 +475,7 @@ class CombinedPrior(Prior):
         return method.__qualname__.split('.')[0] == cls.__name__
 
     @classmethod
-    def _init_parameters(cls):
+    def init_parameters(cls):
         """
         Return list of `inspect.Parameter` objects, for the aggregated
         parameters taken by the `__init__` of `prior_classes`, without

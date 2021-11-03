@@ -123,13 +123,11 @@ class Posterior(utils.JSONMixin):
             prior_class = gw_prior.prior_registry[prior_class]
 
         # Check required input before doing expensive maximization:
-        sig = inspect.signature(prior_class.__init__)
         required_pars = {
-            name for name, parameter in sig.parameters.items()
+            parameter.name for parameter in prior_class.init_parameters()[1:]
             if parameter.default is inspect._empty
             and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL,
-                                       inspect.Parameter.VAR_KEYWORD)
-            and name != 'self'}
+                                       inspect.Parameter.VAR_KEYWORD)}
         event_data_keys = {'mchirp_range', 'tgps', 'q_min'}
         bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref', 't0_refdet'}
         if missing_pars := (required_pars - event_data_keys - bestfit_keys
