@@ -302,6 +302,9 @@ class CombinedPrior(Prior):
     def __init__(self, *args, **kwargs):
         """
         Instantiate prior classes and define `range_dic`.
+
+        The list of parameters to pass to a subclass `cls` can be found
+        using `cls.init_parameters()`.
         """
         kwargs.update(dict(zip([par.name for par in self.init_parameters()],
                                args)))
