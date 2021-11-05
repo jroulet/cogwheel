@@ -390,12 +390,12 @@ class AnalysisHandle:
                                    plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
                                    det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
 
-    def plot_whitened_wf(self, par_dic=None, trng=(-.7, .1), plot_data=True,
-                         fig=None, ax=None, **kwargs):
-        if par_dic is None:
-            par_dic = self.best_par_dic
-        return self.likelihood.plot_whitened_wf(par_dic, trng=trng, plot_data=plot_data,
-                                                fig=fig, ax=ax, **kwargs)
+    def plot_whitened_wf(self, par_dic=None, trng=(-.7, .1), **kwargs):
+        """
+        par_dic can be None (take self.likelihood.par_dic_0), dict-like,
+        int (index in self.samples), or array (form as in self.wfgen.params).
+        """
+        return self.likelihood.plot_whitened_wf(self.get_par_dic(par_dic), trng=trng, **kwargs)
 
     def plot_inplane_spin(self, color_key='lnl', use_V3=False, secondary_spin=False,
                           key_rngs=None, fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
