@@ -24,6 +24,24 @@ from cogwheel import grid as gd
 from cogwheel import cosmology as cosmo
 from cogwheel import postprocessing
 
+def key_rngs_mask(df_to_mask, key_rngs={}, keep_nans=False):
+    """
+    Mask for samples satisfying rng[0] < samples[k] < rng[1]
+    for k, rng in key_rngs.items().
+    If key_rngs is empty, return mask to select samples with no NaNs.
+    Set keep_nans=True to allow samples with NaNs to be considered.
+    """
+    mask0 = (np.ones(len(df_to_mask), dtype=bool) if keep_nans
+             else (df_to_mask.isna().any(axis=1) == False))
+    if not key_rngs:
+        return mask0
+    samps = df_to_mask[mask0]
+    mask = np.zeros(len(df_to_mask), dtype=bool)
+    for k, rng in key_rngs.items():
+        mask[mask0] = (mask[mask0] & (samps[k] > rng[0])
+                       & (samps[k] < rng[1]))
+    return mask
+
 
 class AnalysisHandle:
     """Class for analyzing posteriors."""
@@ -33,7 +51,8 @@ class AnalysisHandle:
     PAR_UNITS = label_formatting.units
     PAR_NAMES = label_formatting.param_names
     
-    def __init__(self, rundir, name=None):
+    def __init__(self, rundir, name=None, samples_completion=False,
+                 separate_nans=True):
         super().__init__()
         # associate to run directory
         self.rundir = pathlib.Path(rundir)
@@ -51,15 +70,25 @@ class AnalysisHandle:
         # load samples
         self.samples_path = self.rundir/sampling.SAMPLES_FILENAME
         self.samples = pd.read_feather(self.samples_path)
+        if samples_completion:
+            self.complete_samples()
 
         # check likelihood information
         if self.LNL_COL not in self.samples:
             self.LNL_COL = self.key(self.LNL_COL)
         if self.LNL_COL not in self.samples:
-            print('WARNING: No likelihood information found in samples.')
+            print('WARNING: No likelihood information found in samples. Setting lnL = 0.')
+            self.samples[self.LNL_COL] = np.zeros(len(self.samples))
             self.best_par_dic = None
         else:
             self.best_par_dic = self.get_best_par_dics()
+
+        # separate samples with NaNs
+        nan_mask = self.samples.isna().any(axis=1)
+        self.nan_samples = dcopy(self.samples[nan_mask])
+        if separate_nans:
+            self.samples = self.samples[nan_mask == False].reset_index()
+            self.nan_samples = self.nan_samples.reset_index()
 
         # see if the keymap is faithful to samples
         if not all([self.key(k) == k for k in self.samples.columns]):
@@ -72,6 +101,9 @@ class AnalysisHandle:
         if os.path.isfile(self.tests_path):
             self.tests_dict = json.load(open(self.tests_path, 'r'))
 
+    #######################
+    ##  KEYS and LABELS  ##
+    #######################
     def key(self, key):
         return self.KEYMAP.get(key, key)
 
@@ -84,20 +116,97 @@ class AnalysisHandle:
     def par_unit(self, key):
         return self.PAR_UNITS.get(self.key(key), key)
 
+    #######################
+    ##  MASKING SAMPLES  ##
+    #######################
+    def mask(self, key_rngs={}, keep_nans=False):
+        """
+        Mask for samples satisfying rng[0] < samples[self.key(k)] < rng[1]
+        for k, rng in key_rngs.items().
+        If key_rngs is empty, return mask to select samples with no NaNs.
+        Set keep_nans=True to allow samples with NaNs to be considered.
+        """
+        return key_rngs_mask(self.samples,
+                             {self.key(k): v for k, v in key_rngs.items()},
+                             keep_nans)
+
+    def masked_samples(self, key_rngs={}, keep_nans=False):
+        """
+        Get samples without NaNs (unless keep_nans=True) and
+        satisfying rng[0] < samples[self.key(k)] < rng[1]
+        for k, rng in key_rngs.items().
+        """
+        return self.samples[self.mask(key_rngs, keep_nans)]
+
+    #######################
+    ##  GETTING PAR_DIC  ##
+    #######################
+    def get_par_dic(self, par_dic=None):
+        if par_dic is None:
+            return self.likelihood.par_dic_0
+        if not hasattr(par_dic, '__len__'):
+            return dict(self.samples[self.wfgen.params].iloc[par_dic])
+        if isinstance(par_dic, np.ndarray):
+            assert len(par_dic) == len(self.wfgen.params), \
+                f'If par_dic is an array, form must follow {self.wfgen.params}'
+            return dict(zip(self.wfgen.params, par_dic))
+        return {k: par_dic[k] for k in self.wfgen.params}
+
     def get_best_par_dics(self, key_rngs={}, get_best_inds=0, as_par_dics=True):
-        s = self.samples[np.isnan(self.samples[self.LNL_COL]) == False]
-        for k, rng in key_rngs.items():
-            s = s[s[self.key(k)] > rng[0]]
-            s = s[s[self.key(k)] < rng[1]]
-        s = s.sort_values(self.LNL_COL, ascending=False).reset_index().iloc[get_best_inds]
+        """
+        Get index/indices in get_best_inds from samples sorted by likelihood.
+        If as_par_dics=True, output will be dict(s) with the keys from self.wfgen.params,
+        Otherwise output will be pandas Series/DataFrame with all columns.
+        Use key_rngs[key] = (min_val_for_key, max_val_for_key) to filter the
+        considered samples by parameter ranges.
+        """
+        s = self.masked_samples(key_rngs).sort_values(
+                self.LNL_COL, ascending=False).reset_index().iloc[get_best_inds]
         if as_par_dics:
-            s = s[[self.key(k) for k in self.wfgen.params]]
             if hasattr(get_best_inds, '__len__'):
-                return [dict(idx_row[1]) for idx_row in s.iterrows()]
-            return dict(s)
+                return [self.get_par_dic(idx_row[1]) for idx_row in s.iterrows()]
+            return self.get_par_dic(s)
         return s
 
+    ##################
+    ##  LIKELIHOOD  ##
+    ##################
+    def lnL(self, pdic_or_ind=None, use_relative_binning=False,
+            bypass_relative_binning_tests=True):
+        """
+        Defaults to returning array of log likelihood (lnL).
+        If pdic_or_ind is an int, compute lnL for sample at that index.
+        Otherwise pdic_or_ind must be a par_dic to be passed to
+        self.likelihood.lnlike() if use_relative_binning else
+        self.likelihood.lnlike_fft().
+        """
+        if pdic_or_ind is None:
+            return self.samples[self.LNL_COL].to_numpy()
+        if not hasattr(pdic_or_ind, '__len__'):
+            pdic_or_ind = self.get_par_dic(self.samples.iloc[pdic_or_ind])
+        if use_relative_binning:
+            return self.likelihood.lnlike(pdic_or_ind,
+                bypass_tests=bypass_relative_binning_tests)
+        return self.likelihood.lnlike_fft(pdic_or_ind)
+
+    def lnL_dets(self, pdic_or_ind):
+        """Return log likelihood at all detectors."""
+        if not hasattr(pdic_or_ind, '__len__'):
+            pdic_or_ind = self.get_par_dic(self.samples.iloc[pdic_or_ind])
+        h_f = self.likelihood._get_h_f(pdic_or_ind)
+        h_h = self.likelihood._compute_h_h(h_f)
+        d_h = self.likelihood._compute_d_h(h_f)
+        return d_h - .5*h_h
+
+    #########################
+    ##  SAMPLE COMPLETION  ##
+    #########################
     def complete_samples(self, antenna=False, cosmo_weights=False, ligo_angles=False):
+        """
+        Complete samples with self.add_source_parameters() and other options
+        (self.add_ligo_angles, self.add_antenna, self.add_cosmo_weights).
+        TODO: still need a way to get these peplot functions to use self.KEYMAP
+        """
         self.add_source_parameters()
         if ligo_angles:
             self.add_ligo_angles()
@@ -108,6 +217,10 @@ class AnalysisHandle:
 
     def write_complete_samples(self, fname=None, overwrite=False, antenna=False,
                                cosmo_weights=False, ligo_angles=False):
+        """
+        Complete samples with self.add_source_parameters() and other options,
+        then write new samples to path given by fname (Defaults to self.samples_path).
+        """
         if fname is None:
             fname = self.samples_path
         if os.path.exists(fname) and (not overwrite):
@@ -118,7 +231,7 @@ class AnalysisHandle:
     def add_source_parameters(self, redshift_key=None, mass_keys=['m1', 'm2', 'mtot', 'mchirp']):
         """
         Add _source version of each mass in mass_keys using *= 1+self.samples[redshift_key].
-        If redshift_key is None, do intrinsic parameter completion with pxform.compute_samples_aux_vars
+        If redshift_key is None, do intrinsic parameter completion with pxform.compute_samples_aux_vars().
         """
         if redshift_key is None:
             # this completes intrinsic parameter space and adds redshift and source frame information
@@ -131,19 +244,36 @@ class AnalysisHandle:
             self.samples[self.key(k)+'_source'] = self.samples[self.key(k)] / (1+self.samples[rkey])
 
     def add_ligo_angles(self, keep_new_spins=False):
+        """
+        Add angular variables from lalsimulation.SimInspiralTransformPrecessingWvf2PE
+        with the option to also keep the spin variables output by this function
+        (which should be equal to the existing spin parameters if conventions align).
+        Keys are `thetaJN`, `phiJL`, `phi12`.
+        If keep_new_spins=True, will also replace `s1`, `s1theta`, `s2`, `s2theta`.
+        """
         self.samples = peplot.samples_with_ligo_angles(self.samples, self.wfgen.f_ref,
                                                        keep_new_spins=keep_new_spins)
 
     def add_antenna(self):
+        """
+        Add antenna responses F_+, F_x, F_+^2 + F_x^2 for each detector.
+        Keys are `fplus_{det_char}`, `fcross_{det_char}`, `antenna_{det_char}`.
+        """
         peplot.samples_add_antenna_response(self.samples, det_chars=self.evdata.detector_names,
                                             tgps=self.evdata.tgps)
 
     def add_cosmo_weights(self):
-        peplot.samples_add_cosmo_prior(self.samples)
+        """
+        Add weights for prior reweighting from uniform luminosity volume to comoving volume.
+        Key is `cosmo_weight`.
+        """
+        peplot.samples_add_cosmo_weight(self.samples)
 
-
+    ################
+    ##  PLOTTING  ##
+    ################
     def corner_plot(self, parkeys=['mchirp', 'q', 'chieff'], weights=None,
-                    extra_grid_kwargs={}, **corner_plot_kwargs):
+                    key_rngs={}, extra_grid_kwargs={}, **corner_plot_kwargs):
         """
         Make corner plot of self.samples for the parameter keys in parkeys.
 
@@ -156,29 +286,49 @@ class AnalysisHandle:
         weights can be an array of weights or a key to use from self.samples
         scatter_points (corner_plot_kwargs) can be DataFrame of extra samples to plot
         """
+        samps = self.masked_samples(key_rngs)
         if isinstance(weights, str):
-            weights = self.samples[self.key(weights)]
-        pdfnm = f'{self.evname}: {self.name}\n{len(self.samples)} samples'
+            weights = samps[self.key(weights)]
+        pdfnm = f'{self.evname}: {self.name}\n{len(samps)} samples'
         corner_plot_kwargs['set_legend'] = corner_plot_kwargs.get('set_legend', True)
         if 'title' not in corner_plot_kwargs:
             corner_plot_kwargs['title'] = pdfnm
             pdfnm = None
-        return gd.Grid.from_samples([self.key(k) for k in parkeys],
-            self.samples, pdf_key=pdfnm, units=self.PAR_UNITS,
-            labels=self.PAR_LABELS, weights=weights,
+        return gd.Grid.from_samples([self.key(k) for k in parkeys], samps,
+            pdf_key=pdfnm, units=self.PAR_UNITS, labels=self.PAR_LABELS, weights=weights,
             **extra_grid_kwargs).corner_plot(pdf=pdfnm, **corner_plot_kwargs)
 
-    def corner_plot_comparison(self, compare_posteriors=[], compare_names=[], pvkeys=['mtot', 'q', 'chieff'],
-                               fig=None, ax=None, weight_key=None, figsize=(10, 10), scatter_points=None,
-                               grid_kws={}, multigrid_kws={}, return_grid=False, **corner_plot_kws):
-        return peplot.corner_plot_list([self.samples]+compare_posteriors, [self.name]+compare_names,
-            pvkeys=pvkeys, weight_key=weight_key, figsize=figsize, scatter_points=scatter_points,
-            grid_kws=grid_kws, multigrid_kws=multigrid_kws, fig=fig, ax=ax,
-            return_grid=return_grid, **corner_plot_kws)
+    def corner_plot_comparison(self, compare_posteriors=[], compare_names=[],
+                               parkeys=['mtot', 'q', 'chieff'], weight_key=None,
+                               key_rngs={}, extra_grid_kwargs={}, multigrid_kwargs={},
+                               return_grid=False, **corner_plot_kwargs):
+        """
+        Make corner plot for the parameter keys in parkeys comparing self.samples
+        with the posteriors in compare_posteriors (list of pd.DataFrame objects),
+        labeling them by the corresponding elements of compare_names.
+
+        **corner_plot_kwargs can include anything (except pdf) from
+          Grid.corner_plot(pdf=None, title=None, subplot_size=2., fig=None, ax=None,
+                figsize=None, nbins=6, set_legend=True, save_as=None, y_title=.98,
+                plotstyle=None, show_titles_1d=True, scatter_points=None, **kwargs)
+        --> NAMELY, pass fig=myfig, ax=myax to plot with existing axes
+
+        weight_key is key (str) to use for reweighting samples.
+        scatter_points (corner_plot_kwargs) can be DataFrame of extra samples to plot.
+        return_grid=True will return the multigrid along with the figure and axes.
+        multigrid_kwargs will be unpacked into MultiGrid.from_grids().
+        extra_grid_kwargs will be unpacked into Grid.from_samples().
+        """
+        return peplot.corner_plot_list(([self.masked_samples(key_rngs)] +
+                                        [s[key_rngs_mask(s, key_rngs)] for s in compare_posteriors]),
+                                       [self.name]+compare_names, pvkeys=parkeys, weight_key=weight_key,
+                                       grid_kws=extra_grid_kwargs, multigrid_kws=multigrid_kwargs,
+                                       return_grid=return_grid, **corner_plot_kwargs)
 
     def plot_psd(self, ax=None, fig=None, label=None, plot_type='loglog',
                  weights=None, plot_asd=False, xlim=None, ylim=None, title=None,
                  figsize=None, use_fmask=False, **plot_kws):
+        """Plot PSD at all detectors"""
         msk = (self.evdata.fslice if use_fmask else slice(None))
         dets_xplot = self.evdata.frequencies[msk]
         dets_yplot = self.evdata.psd[..., msk]
@@ -194,9 +344,10 @@ class AnalysisHandle:
                                    xlim=xlim, ylim=ylim, title=title, det_names=self.evdata.detector_names,
                                    figsize=figsize, **plot_kws)
 
-    def plot_wf_amp(self, par_dic, whiten=True, by_m=False, ax=None, fig=None, label=None,
+    def plot_wf_amp(self, par_dic=None, whiten=True, by_m=False, ax=None, fig=None, label=None,
                     plot_type='loglog', weights=None, xlim=None, ylim=None,
                     title=None, figsize=None, use_fmask=False, **plot_kws):
+        """Plot waveform amplitude at all detectors"""
         msk = (self.evdata.fslice if use_fmask else slice(None))
         dets_xplot = self.evdata.frequencies[msk]
         h_f = self.likelihood._get_h_f(par_dic, by_m=by_m)
@@ -217,8 +368,34 @@ class AnalysisHandle:
                                    plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
                                    det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
 
-    def plot_whitened_wf(self, par_dic, trng=(-.7, .1), plot_data=True, **kwargs):
-        return self.likelihood.plot_whitened_wf(par_dic, trng=trng, **kwargs)
+    def plot_wf_phase(self, par_dic, unwrap=True, by_m=False, ax=None, fig=None, label=None,
+                      plot_type='linear', weights=None, xlim=None, ylim=None,
+                      title=None, figsize=None, use_fmask=False, **plot_kws):
+        """Plot waveform phase at all detectors"""
+        msk = (self.evdata.fslice if use_fmask else slice(None))
+        dets_xplot = self.evdata.frequencies[msk]
+        h_f = self.likelihood._get_h_f(par_dic, by_m=by_m)
+        if weights is not None:
+            h_f *= weights
+        func = (np.unwrap if unwrap else (lambda x: x))
+        if by_m:
+            for j, lmlist in enumerate(self.wfgen._harmonic_modes_by_m.values()):
+                fig, ax = peplot.plot_at_dets(dets_xplot, func(np.angle(h_f[j, :, msk])), ax=ax, fig=fig,
+                                label=str(lmlist), xlabel='Frequency (Hz)', ylabel='Waveform Phase (rad)',
+                                plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
+                                det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
+            return fig, ax
+        return peplot.plot_at_dets(dets_xplot, func(np.angle(h_f[:, msk])), ax=ax, fig=fig, label=label,
+                                   xlabel='Frequency (Hz)', ylabel='Waveform Phase (rad)',
+                                   plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
+                                   det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
+
+    def plot_whitened_wf(self, par_dic=None, trng=(-.7, .1), plot_data=True,
+                         fig=None, ax=None, **kwargs):
+        if par_dic is None:
+            par_dic = self.best_par_dic
+        return self.likelihood.plot_whitened_wf(par_dic, trng=trng, plot_data=plot_data,
+                                                fig=fig, ax=ax, **kwargs)
 
     def plot_inplane_spin(self, color_key='lnl', use_V3=False, secondary_spin=False,
                           key_rngs=None, fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
