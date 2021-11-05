@@ -269,62 +269,9 @@ class AnalysisHandle:
         """
         peplot.samples_add_cosmo_weight(self.samples)
 
-    ################
-    ##  PLOTTING  ##
-    ################
-    def corner_plot(self, parkeys=['mchirp', 'q', 'chieff'], weights=None,
-                    key_rngs={}, extra_grid_kwargs={}, **corner_plot_kwargs):
-        """
-        Make corner plot of self.samples for the parameter keys in parkeys.
-
-        **corner_plot_kwargs can include anything (except pdf) from
-          Grid.corner_plot(pdf=None, title=None, subplot_size=2., fig=None, ax=None,
-                figsize=None, nbins=6, set_legend=True, save_as=None, y_title=.98,
-                plotstyle=None, show_titles_1d=True, scatter_points=None, **kwargs)
-        --> NAMELY, pass fig=myfig, ax=myax to plot with existing axes
-
-        weights can be an array of weights or a key to use from self.samples
-        scatter_points (corner_plot_kwargs) can be DataFrame of extra samples to plot
-        """
-        samps = self.masked_samples(key_rngs)
-        if isinstance(weights, str):
-            weights = samps[self.key(weights)]
-        pdfnm = f'{self.evname}: {self.name}\n{len(samps)} samples'
-        corner_plot_kwargs['set_legend'] = corner_plot_kwargs.get('set_legend', True)
-        if 'title' not in corner_plot_kwargs:
-            corner_plot_kwargs['title'] = pdfnm
-            pdfnm = None
-        return gd.Grid.from_samples([self.key(k) for k in parkeys], samps,
-            pdf_key=pdfnm, units=self.PAR_UNITS, labels=self.PAR_LABELS, weights=weights,
-            **extra_grid_kwargs).corner_plot(pdf=pdfnm, **corner_plot_kwargs)
-
-    def corner_plot_comparison(self, compare_posteriors=[], compare_names=[],
-                               parkeys=['mtot', 'q', 'chieff'], weight_key=None,
-                               key_rngs={}, extra_grid_kwargs={}, multigrid_kwargs={},
-                               return_grid=False, **corner_plot_kwargs):
-        """
-        Make corner plot for the parameter keys in parkeys comparing self.samples
-        with the posteriors in compare_posteriors (list of pd.DataFrame objects),
-        labeling them by the corresponding elements of compare_names.
-
-        **corner_plot_kwargs can include anything (except pdf) from
-          Grid.corner_plot(pdf=None, title=None, subplot_size=2., fig=None, ax=None,
-                figsize=None, nbins=6, set_legend=True, save_as=None, y_title=.98,
-                plotstyle=None, show_titles_1d=True, scatter_points=None, **kwargs)
-        --> NAMELY, pass fig=myfig, ax=myax to plot with existing axes
-
-        weight_key is key (str) to use for reweighting samples.
-        scatter_points (corner_plot_kwargs) can be DataFrame of extra samples to plot.
-        return_grid=True will return the multigrid along with the figure and axes.
-        multigrid_kwargs will be unpacked into MultiGrid.from_grids().
-        extra_grid_kwargs will be unpacked into Grid.from_samples().
-        """
-        return peplot.corner_plot_list(([self.masked_samples(key_rngs)] +
-                                        [s[key_rngs_mask(s, key_rngs)] for s in compare_posteriors]),
-                                       [self.name]+compare_names, pvkeys=parkeys, weight_key=weight_key,
-                                       grid_kws=extra_grid_kwargs, multigrid_kws=multigrid_kwargs,
-                                       return_grid=return_grid, **corner_plot_kwargs)
-
+    #########################
+    ##  WAVEFORM PLOTTING  ##
+    #########################
     def plot_psd(self, ax=None, fig=None, label=None, plot_type='loglog',
                  weights=None, plot_asd=False, xlim=None, ylim=None, title=None,
                  figsize=None, use_fmask=False, **plot_kws):
@@ -397,85 +344,140 @@ class AnalysisHandle:
         """
         return self.likelihood.plot_whitened_wf(self.get_par_dic(par_dic), trng=trng, **kwargs)
 
+    #######################
+    ##  CORNER PLOTTING  ##
+    #######################
+    def corner_plot(self, parkeys=['mchirp', 'q', 'chieff'], weights=None,
+                    key_rngs={}, extra_grid_kwargs={}, **corner_plot_kwargs):
+        """
+        Make corner plot of self.samples for the parameter keys in parkeys.
+
+        **corner_plot_kwargs can include anything (except pdf) from
+          Grid.corner_plot(pdf=None, title=None, subplot_size=2., fig=None, ax=None,
+                figsize=None, nbins=6, set_legend=True, save_as=None, y_title=.98,
+                plotstyle=None, show_titles_1d=True, scatter_points=None, **kwargs)
+        --> NAMELY, pass fig=myfig, ax=myax to plot with existing axes
+
+        weights can be an array of weights or a key to use from self.samples
+        scatter_points (corner_plot_kwargs) can be DataFrame of extra samples to plot
+        """
+        samps = self.masked_samples(key_rngs)
+        if isinstance(weights, str):
+            weights = samps[self.key(weights)]
+        pdfnm = f'{self.evname}: {self.name}\n{len(samps)} samples'
+        corner_plot_kwargs['set_legend'] = corner_plot_kwargs.get('set_legend', True)
+        if 'title' not in corner_plot_kwargs:
+            corner_plot_kwargs['title'] = pdfnm
+            pdfnm = None
+        return gd.Grid.from_samples([self.key(k) for k in parkeys], samps,
+                                    pdf_key=pdfnm, units=self.PAR_UNITS, labels=self.PAR_LABELS, weights=weights,
+                                    **extra_grid_kwargs).corner_plot(pdf=pdfnm, **corner_plot_kwargs)
+
+    def corner_plot_comparison(self, compare_posteriors=[], compare_names=[],
+                               parkeys=['mtot', 'q', 'chieff'], weight_key=None,
+                               key_rngs={}, extra_grid_kwargs={}, multigrid_kwargs={},
+                               return_grid=False, **corner_plot_kwargs):
+        """
+        Make corner plot for the parameter keys in parkeys comparing self.samples
+        with the posteriors in compare_posteriors (list of pd.DataFrame objects),
+        labeling them by the corresponding elements of compare_names.
+
+        **corner_plot_kwargs can include anything (except pdf) from
+          Grid.corner_plot(pdf=None, title=None, subplot_size=2., fig=None, ax=None,
+                figsize=None, nbins=6, set_legend=True, save_as=None, y_title=.98,
+                plotstyle=None, show_titles_1d=True, scatter_points=None, **kwargs)
+        --> NAMELY, pass fig=myfig, ax=myax to plot with existing axes
+
+        weight_key is key (str) to use for reweighting samples.
+        scatter_points (corner_plot_kwargs) can be DataFrame of extra samples to plot.
+        return_grid=True will return the multigrid along with the figure and axes.
+        multigrid_kwargs will be unpacked into MultiGrid.from_grids().
+        extra_grid_kwargs will be unpacked into Grid.from_samples().
+        """
+        return peplot.corner_plot_list(([self.masked_samples(key_rngs)] +
+                                        [s[key_rngs_mask(s, key_rngs)] for s in compare_posteriors]),
+                                       [self.name] + compare_names, pvkeys=parkeys, weight_key=weight_key,
+                                       grid_kws=extra_grid_kwargs, multigrid_kws=multigrid_kwargs,
+                                       return_grid=return_grid, **corner_plot_kwargs)
+
+    ###############################################################
+    ##  SCATTER PLOTTING WITH COLOR+SIZE+TRANSPARENCY GRADIENTS  ##
+    ###############################################################
+    def plot_2d_color(self, xkey='chieff', ykey='q', ckey='lnl', extra_posteriors=[], key_rngs=None,
+                      samples_per_posterior=None, fig=None, ax=None, figsize=(8, 8), title=None,
+                      titlesize=20, xlim='auto', ylim='auto', clim=None, size_key=None, size_scale=1,
+                      alpha_key=None, alpha_scale=1, colorbar_kws=None, colorsMap='jet', **plot_kws):
+        """Make two-dimensional scatter plot with colorbar for visualizing third dimension."""
+        return peplot.plot_samples2d_color(([self.masked_samples(key_rngs)] +
+                                            [s[key_rngs_mask(s, key_rngs)] for s in extra_posteriors]),
+            xkey=self.key(xkey), ykey=self.key(ykey), ckey=self.key(ckey), fig=fig, ax=ax, figsize=figsize,
+            samples_per_posterior=samples_per_posterior, colorbar_kws=colorbar_kws, colorsMap=colorsMap,
+            title=title, titlesize=titlesize, xlim=xlim, ylim=ylim, clim=clim, size_key=size_key,
+            size_scale=size_scale, alpha_key=alpha_key, alpha_scale=alpha_scale, **plot_kws)
+
+    def plot_3d_color(self, xkey='chieff', ykey='q', zkey='mtot', ckey='lnl', key_rngs=None,
+                      nstep=1, fig=None, ax=None, xlim='auto', ylim='auto', zlim='auto',
+                      xlab='auto', ylab='auto', zlab='auto', clab='auto', title=None,
+                      plot_kws=None, figsize=(8, 8), titlesize=20, colorbar_kws=None,
+                      extra_point_dicts=[], size_key=None, size_scale=1):
+        """
+        Make three-dimensional scatter plot with colorbar for visualizing fourth dimension.
+        Additional gradient dimensions are size (size_key)
+        """
+        return peplot.plot_samples4d(self.masked_samples(key_rngs), xkey=self.key(xkey), ykey=self.key(ykey),
+            zkey=self.key(zkey), ckey=self.key(ckey), xlim=xlim, ylim=ylim, zlim=zlim,
+            nstep=nstep, title=title, xlab=xlab, ylab=ylab, zlab=zlab, clab=clab, fig=fig, ax=ax,
+            figsize=figsize, titlesize=titlesize, extra_point_dicts=extra_point_dicts,
+            size_key=size_key, size_scale=size_scale, plot_kws=plot_kws, colorbar_kws=colorbar_kws)
+
+    #####################
+    ##  SPIN PLOTTING  ##
+    #####################
     def plot_inplane_spin(self, color_key='lnl', use_V3=False, secondary_spin=False,
                           key_rngs=None, fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
                           figsize=None, title=None, tight=False, **colorbar_kws):
-        samps = self.samples
-        if key_rngs is not None:
-            for k, vminmax in key_rngs.items():
-                samps = samps[(samps[k] > vminmax[0]) & (samps[k] < vminmax[1])]
-        return peplot.plot_inplane_spin(self.samples, color_key=self.key(color_key), use_V3=use_V3,
-                                        secondary_spin=secondary_spin, fractions=fractions,
+        """
+        Plot constituent spin posterior projected onto the plane of the orbit with colorbar.
+        Defaults to primary BH, use secondary_spin=True to plot spin of the secondary BH.
+        """
+        return peplot.plot_inplane_spin(self.masked_samples(key_rngs), color_key=self.key(color_key),
+                                        use_V3=use_V3, secondary_spin=secondary_spin, fractions=fractions,
                                         plotstyle_color=plotstyle_color, scatter_alpha=scatter_alpha,
                                         figsize=figsize, title=title, tight=tight, **colorbar_kws)
 
     def plot_3d_spin(self, ckey='lnl', use_V3=False, secondary_spin=False, sign_or_scale=True,
-                     fig=None, ax=None, xkey='s1x', ykey='s1y', zkey='s1z', nstep=1, title=None,
-                     xlab='auto', ylab='auto', zlab='auto', clab='auto', plotlim=[-1.01, 1.01],
-                     mask_keys_min={}, mask_keys_max={}, plot_kws=None, figsize=(8, 8),
-                     titlesize=20, colorbar_kws=None, extra_point_dicts=[(0, 0, 0)],
-                     marker_if_not_dict='o', size_if_not_dict=20, color_if_not_dict='k', key_rngs=None):
-        samps = self.samples
-        if key_rngs is not None:
-            for k, vminmax in key_rngs.items():
-                samps = samps[(samps[k] > vminmax[0]) & (samps[k] < vminmax[1])]
-        return peplot.plot_spin4d(self.samples, use_V3=use_V3, secondary_spin=secondary_spin,
+                     key_rngs=None, fig=None, ax=None, xkey='s1x', ykey='s1y', zkey='s1z',
+                     nstep=1, title=None, xlab='auto', ylab='auto', zlab='auto', clab='auto',
+                     plotlim=[-1.01, 1.01], plot_kws=None, figsize=(8, 8), titlesize=20,
+                     colorbar_kws=None, extra_point_dicts=[(0, 0, 0)],
+                     marker_if_not_dict='o', size_if_not_dict=20, color_if_not_dict='k', ):
+        """
+        Plot constituent spin posterior in three-dimensional space with colorbar
+        and unit sphere wire frame option (default).
+        Defaults to primary BH, use secondary_spin=True to plot spin of the secondary BH.
+        """
+        return peplot.plot_spin4d(self.masked_samples(key_rngs), use_V3=use_V3, secondary_spin=secondary_spin,
             sign_or_scale=sign_or_scale, xkey=self.key(xkey), ykey=self.key(ykey), plotlim=plotlim,
             zkey=self.key(zkey), ckey=self.key(ckey), nstep=nstep, title=title, titlesize=titlesize,
             xlab=xlab, ylab=ylab, zlab=zlab, clab=clab, fig=fig, ax=ax, extra_point_dicts=extra_point_dicts,
-            mask_keys_min={self.key(k): v for k, v in mask_keys_min.items()}, figsize=figsize,
-            mask_keys_max={self.key(k): v for k, v in mask_keys_max.items()}, plot_kws=plot_kws,
-            colorbar_kws=colorbar_kws, marker_if_not_dict=marker_if_not_dict,
+            figsize=figsize, plot_kws=plot_kws, colorbar_kws=colorbar_kws, marker_if_not_dict=marker_if_not_dict,
             size_if_not_dict=size_if_not_dict, color_if_not_dict=color_if_not_dict)
 
-    def plot_3d_location(self, fig=None, ax=None, ckey='lnl', nstep=1,
-                         clab=None, mask_keys_min={}, mask_keys_max={},
-                         extra_point_dicts=[], title=None, units='Mpc',
+    #########################
+    ##  LOCATION PLOTTING  ##
+    #########################
+    def plot_3d_location(self, fig=None, ax=None, ckey='lnl', key_rngs=None, nstep=1,
+                         clab=None, extra_point_dicts=[], title=None, units='Mpc',
                          figsize=(8, 8), xlim='auto', ylim='auto', zlim='auto',
-                         titlesize=20, plot_kws=None, colorbar_kws=None, key_rngs=None):
-        samps = self.samples
-        if key_rngs is not None:
-            for k, vminmax in key_rngs.items():
-                samps = samps[(samps[k] > vminmax[0]) & (samps[k] < vminmax[1])]
-        return peplot.plot_loc3d(self.samples, title=title, xlim=xlim, ylim=ylim, zlim=zlim,
-                                 nstep=nstep, ckey=ckey, clab=clab, mask_keys_min=mask_keys_min,
-                                 mask_keys_max=mask_keys_max, plot_kws=plot_kws, figsize=figsize,
+                         titlesize=20, plot_kws=None, colorbar_kws=None):
+        """
+        Plot posteriors in physical space using luminosity distance and RA/DEC.
+        Color points by value of samples[ckey].
+        Use key_rngs={k: (vlo, vhi), ...} to put bounds (vlo, vhi) on samples[k].
+        """
+        return peplot.plot_loc3d(self.masked_samples(key_rngs), title=title, xlim=xlim, ylim=ylim, zlim=zlim,
+                                 nstep=nstep, ckey=ckey, clab=clab, plot_kws=plot_kws, figsize=figsize,
                                  titlesize=titlesize, colorbar_kws=colorbar_kws, units=units,
                                  extra_point_dicts=extra_point_dicts, fig=fig, ax=ax)
-
-    def plot_2d_color(self, xkey='chieff', ykey='q', ckey='lnl', extra_posteriors=[],
-                      samples_per_posterior=None, fig=None, ax=None, figsize=(8, 8),
-                      title=None, titlesize=20, xlim='auto', ylim='auto', clim=None,
-                      size_key=None, size_scale=1, alpha_key=None, alpha_scale=1,
-                      colorbar_kws=None, colorsMap='jet', key_rngs=None, **plot_kws):
-        """make 2d scatter plot with colorbar for visualizing third dimension"""
-        samps = self.samples
-        if key_rngs is not None:
-            for k, vminmax in key_rngs.items():
-                samps = samps[(samps[k] > vminmax[0]) & (samps[k] < vminmax[1])]
-        return peplot.plot_samples2d_color([self.samples]+extra_posteriors, xkey=self.key(xkey),
-            ykey=self.key(ykey), ckey=self.key(ckey), samples_per_posterior=samples_per_posterior,
-            fig=fig, ax=ax, colorbar_kws=colorbar_kws, colorsMap=colorsMap, figsize=figsize,
-            title=title, titlesize=titlesize, xlim=xlim, ylim=ylim, clim=clim, size_key=size_key,
-            size_scale=size_scale, alpha_key=alpha_key, alpha_scale=alpha_scale, **plot_kws)
-
-    def plot_3d_color(self, xkey='chieff', ykey='q', zkey='mtot', ckey='lnl', fig=None, ax=None,
-                      nstep=1, title=None, mask_keys_min={}, mask_keys_max={}, xlim='auto',
-                      ylim='auto', zlim='auto', xlab='auto', ylab='auto', zlab='auto', clab='auto',
-                      plot_kws=None, figsize=(8, 8), titlesize=20, colorbar_kws=None,
-                      extra_point_dicts=[], size_key=None, size_scale=1, key_rngs=None):
-        samps = self.samples
-        if key_rngs is not None:
-            for k, vminmax in key_rngs.items():
-                samps = samps[(samps[k] > vminmax[0]) & (samps[k] < vminmax[1])]
-        return peplot.plot_samples4d(self.samples, xkey=self.key(xkey), ykey=self.key(ykey),
-            zkey=self.key(zkey), ckey=self.key(ckey), xlim=xlim, ylim=ylim, zlim=zlim,
-            nstep=nstep, title=title, xlab=xlab, ylab=ylab, zlab=zlab, clab=clab,
-            mask_keys_min={self.key(k): v for k, v in mask_keys_min.items()},
-            mask_keys_max={self.key(k): v for k, v in mask_keys_max.items()}, fig=fig, ax=ax,
-            figsize=figsize, titlesize=titlesize, extra_point_dicts=extra_point_dicts,
-            size_key=size_key, size_scale=size_scale, plot_kws=plot_kws, colorbar_kws=colorbar_kws)
-
-
 
 
