@@ -36,7 +36,7 @@ def key_rngs_mask(df_to_mask, key_rngs={}, keep_nans=False):
     if not key_rngs:
         return mask0
     samps = df_to_mask[mask0]
-    mask = np.zeros(len(df_to_mask), dtype=bool)
+    mask = mask0.copy()
     for k, rng in key_rngs.items():
         mask[mask0] = (mask[mask0] & (samps[k] > rng[0])
                        & (samps[k] < rng[1]))
