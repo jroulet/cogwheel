@@ -142,6 +142,16 @@ class AnalysisHandle:
     ##  GETTING PAR_DIC  ##
     #######################
     def get_par_dic(self, par_dic=None):
+        """
+        Returns a dict with the keys in self.wfgen.params.
+        Default par_dic=None will return self.likelihood.par_dic_0
+        If par_dic is a dict-like object, the correct params are isolated
+        Else can pass np.array([<values ordered as in self.wfgen.params>])
+        Else can pass an integer to get row from self.samples
+        NOTE if you pass a scalar that is not integer-like
+        OR an iterable that is not a numpy array, it will be
+        treated as a dict-like object and an error will occur.
+        """
         if par_dic is None:
             return self.likelihood.par_dic_0
         if not hasattr(par_dic, '__len__'):
@@ -174,26 +184,30 @@ class AnalysisHandle:
     def lnL(self, pdic_or_ind=None, use_relative_binning=False,
             bypass_relative_binning_tests=True):
         """
-        Defaults to returning array of log likelihood (lnL).
+        Defaults to returning log likelihood (lnL) of reference waveform.
+        If pdic_or_ind is any string, get array of lnL for all samples.
         If pdic_or_ind is an int, compute lnL for sample at that index.
-        Otherwise pdic_or_ind must be a par_dic to be passed to
+        Otherwise pdic_or_ind can be a numpy array ordered as in
+        self.wfgen.params or a dict-like containing at least those keys.
+        This, i.e., self.get_par_dic(pdic_or_ind), will be passed to
         self.likelihood.lnlike() if use_relative_binning else
         self.likelihood.lnlike_fft().
         """
-        if pdic_or_ind is None:
+        if isinstance(pdic_or_ind, str):
             return self.samples[self.LNL_COL].to_numpy()
-        if not hasattr(pdic_or_ind, '__len__'):
-            pdic_or_ind = self.get_par_dic(self.samples.iloc[pdic_or_ind])
         if use_relative_binning:
-            return self.likelihood.lnlike(pdic_or_ind,
+            return self.likelihood.lnlike(self.get_par_dic(pdic_or_ind),
                 bypass_tests=bypass_relative_binning_tests)
-        return self.likelihood.lnlike_fft(pdic_or_ind)
+        return self.likelihood.lnlike_fft(self.get_par_dic(pdic_or_ind))
 
     def lnL_dets(self, pdic_or_ind):
-        """Return log likelihood at all detectors."""
-        if not hasattr(pdic_or_ind, '__len__'):
-            pdic_or_ind = self.get_par_dic(self.samples.iloc[pdic_or_ind])
-        h_f = self.likelihood._get_h_f(pdic_or_ind)
+        """
+        Return log likelihood at all detectors of parameters for
+        par_dic = self.get_par_dic(pdic_or_ind)
+        WITHOUT applying any ASD drift.
+        See self.get_par_dic for accepted input formats.
+        """
+        h_f = self.likelihood._get_h_f(self.get_par_dic(pdic_or_ind))
         h_h = self.likelihood._compute_h_h(h_f)
         d_h = self.likelihood._compute_d_h(h_f)
         return d_h - .5*h_h
