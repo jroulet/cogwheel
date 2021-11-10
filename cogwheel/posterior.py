@@ -81,7 +81,7 @@ class Posterior(utils.JSONMixin):
     def from_event(cls, event, approximant, prior_class, fbin=None,
                    pn_phase_tol=.05, disable_precession=False,
                    harmonic_modes=None, tolerance_params=None, seed=0,
-                   **kwargs):
+                   tc_rng=(-.1, .1), **kwargs):
         """
         Instantiate a `Posterior` class from the strain data.
         Automatically find a good fit solution for relative binning.
@@ -139,7 +139,7 @@ class Posterior(utils.JSONMixin):
             event_data.detector_names, event_data.tgps, event_data.tcoarse,
             approximant, f_ref=20., harmonic_modes=[(2, 2)])
         bestfit = ReferenceWaveformFinder(
-            event_data, aux_waveform_generator).find_bestfit_pars(seed=seed)
+            event_data, aux_waveform_generator).find_bestfit_pars(tc_rng, seed)
         waveform_generator = waveform.WaveformGenerator(
             event_data.detector_names, event_data.tgps, event_data.tcoarse,
             approximant, bestfit['f_ref'], harmonic_modes, disable_precession)
