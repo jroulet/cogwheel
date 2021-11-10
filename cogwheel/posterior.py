@@ -5,11 +5,8 @@ Can run as a script to make and save a Posterior instance from scratch.
 
 import argparse
 import inspect
-import pathlib
-import sys
-import os
+import json
 import tempfile
-import textwrap
 import time
 import numpy as np
 
@@ -17,7 +14,7 @@ from . import data
 from . import gw_prior
 from . import utils
 from . import waveform
-from . likelihood import RelativeBinningLikelihood, ReferenceWaveformFinder
+from .likelihood import RelativeBinningLikelihood, ReferenceWaveformFinder
 
 
 class PosteriorError(Exception):
@@ -194,59 +191,68 @@ class Posterior(utils.JSONMixin):
                                   self.likelihood.event_data.eventname)
 
 
-def initialize_posteriors_slurm(eventnames, approximant, prior_name,
-                                parentdir, n_hours_limit=2,
-                                memory_per_task='4G', overwrite=False):
+def initialize_posteriors_slurm(
+        eventnames, approximant, prior_name, parentdir, n_hours_limit=2,
+        sbatch_cmds=('--mem-per-cpu=4G',), overwrite=False, **kwargs):
     """
-    Submit jobs that initialize `Posterior.from_event()` for each event.
-    """
-    package = pathlib.Path(__file__).parents[1].resolve()
-    module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
+    Submit jobs that run `main()` for each event.
+    This will initialize `Posterior.from_event()` and save the
+    `Posterior` to JSON inside the appropriate `eventdir` (per
+    `Posterior.get_eventdir`).
 
+    Parameters
+    ----------
+    eventnames: List of strings with event names.
+    approximant: string with approximant name.
+    prior_name: string, key of `gw_prior.prior_registry`.
+    parentdir: path to top directory where to save output.
+    n_hours_limit: int, hours until slurm jobs are terminated.
+    memory_per_task: string, how much RAM to allocate.
+    overwrite: bool, whether to overwrite preexisting files.
+               `False` (default) raises an error if the file exists.
+    **kwargs: optional keyword arguments to `Posterior.from_event()`.
+              Must be JSON-serializable.
+
+    """
     if isinstance(eventnames, str):
         eventnames = [eventnames]
-    for eventname in eventnames:
-        eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
 
-        if not overwrite and (filename := eventdir/'Posterior.json').exists():
-            raise FileExistsError(
-                f'{filename} exists, pass `overwrite=True` to overwrite.')
+    with tempfile.NamedTemporaryFile('w+') as kwargs_file:
+        json.dump(kwargs, kwargs_file)
+        kwargs_file.seek(0)
 
-        utils.mkdirs(eventdir)
+        for eventname in eventnames:
+            eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
+            filename = eventdir/'Posterior.json'
+            if not overwrite and filename.exists():
+                raise FileExistsError(
+                    f'{filename} exists, pass `overwrite=True` to overwrite.')
 
-        job_name = f'{eventname}_posterior'
-        stdout_path = (eventdir/'posterior_from_event.out').resolve()
-        stderr_path = (eventdir/'posterior_from_event.err').resolve()
+            utils.mkdirs(eventdir)
 
-        args = ' '.join([eventname, approximant, prior_name, parentdir])
-        if overwrite:
-            args += ' --overwrite'
+            job_name = f'{eventname}_posterior'
+            stdout_path = (eventdir/'posterior_from_event.out').resolve()
+            stderr_path = (eventdir/'posterior_from_event.err').resolve()
 
-        with tempfile.NamedTemporaryFile('w+') as batchfile:
-            batchfile.write(textwrap.dedent(f"""\
-                #!/bin/bash
-                #SBATCH --job-name={job_name}
-                #SBATCH --output={stdout_path}
-                #SBATCH --error={stderr_path}
-                #SBATCH --mem-per-cpu={memory_per_task}
-                #SBATCH --time={n_hours_limit:02}:00:00
+            args = ' '.join([eventname, approximant, prior_name, parentdir,
+                             kwargs_file.name])
+            if overwrite:
+                args += ' --overwrite'
 
-                eval "$(conda shell.bash hook)"
-                conda activate {os.environ['CONDA_DEFAULT_ENV']}
-
-                cd {package}
-                srun {sys.executable} -m {module} {args}
-                """))
-            batchfile.seek(0)
-
-            os.system(f'chmod 777 {batchfile.name}')
-            os.system(f'sbatch {batchfile.name}')
+            utils.submit_slurm(job_name, n_hours_limit, stdout_path,
+                               stderr_path, args, sbatch_cmds)
             time.sleep(.1)
 
 
-def main(eventname, approximant, prior_name, parentdir, overwrite):
+def main(eventname, approximant, prior_name, parentdir, overwrite,
+         kwargs_filename=None):
     '''Construct a Posterior instance and save it to json.'''
-    post = Posterior.from_event(eventname, approximant, prior_name)
+    kwargs = {}
+    if kwargs_filename:
+        with open(kwargs_filename) as kwargs_file:
+            kwargs = json.load(kwargs_file)
+
+    post = Posterior.from_event(eventname, approximant, prior_name, **kwargs)
     post.to_json(post.get_eventdir(parentdir), overwrite=overwrite)
 
 
@@ -261,5 +267,8 @@ if __name__ == '__main__':
     parser.add_argument('parentdir', help='top directory to save output')
     parser.add_argument('--overwrite', action='store_true',
                         help='pass to overwrite existing json file')
+    parser.add_argument('--kwargs_filename',
+                        help='''optional json file with keyword arguments to
+                                Posterior.from_event()''')
 
     main(**vars(parser.parse_args()))
