@@ -7,6 +7,7 @@ import numpy as np
 from scipy import special, stats
 from scipy.optimize import differential_evolution, minimize_scalar
 from scipy.interpolate import InterpolatedUnivariateSpline
+import matplotlib.pyplot as plt
 
 from . import gw_utils
 from . import utils
@@ -264,7 +265,7 @@ class CBCLikelihood(utils.JSONMixin):
                 * np.fft.irfft(strain_f * self.event_data.wht_filter))
 
     def plot_whitened_wf(self, par_dic, trng=(-.7, .1), plot_data=True,
-                         **kwargs):
+                         fig=None, figsize=None, **wf_plot_kwargs):
         """
         Plot the whitened strain and waveform model in the time domain
         in all detectors.
@@ -272,38 +273,48 @@ class CBCLikelihood(utils.JSONMixin):
         Parameters:
         -----------
         par_dic: Waveform parameters to use, as per `self.params`.
-                 Defaults to fiducial waveform.
         trng: Range of time to plot relative to `self.tgps`.
-        kwargs: Keyword arguments are passed to plot().
+        plot_data: Flag to include detector data in plot.
+        fig: `plt.Figure` object. `None` (default) creates a new figure.
+        figsize: Figure (width, height) in inches, used if `fig=None`.
+        **wf_plot_kwargs: Keyword arguments passed to pyplot.plot()
+                          for waveform (data plot arguments are fixed).
 
         Return:
         -------
-        fig, axes: Figure and axes array.
+        fig, ax: Figure and axes array with plots.
         """
-        import matplotlib.pyplot as plt
-
-        fig, axes = plt.subplots(len(self.event_data.detector_names),
-                                 sharex=True, sharey=True)
-        axes = np.atleast_1d(axes)
-        fig.text(.0, .54, 'Whitened Strain', rotation=90, ha='left',
-                 va='center', fontsize='large')
+        if fig is None:
+            fig = self._setup_data_figure(figsize)
+        axes = fig.get_axes()
 
         time = self.event_data.t - self.event_data.tcoarse
         data_t_wht = self._get_whitened_td(self.event_data.strain)
         wf_t_wht = self._get_whitened_td(self._get_h_f(par_dic))
 
-        for ax, det, data_det, wf_det in zip(
-                axes, self.event_data.detector_names, data_t_wht, wf_t_wht):
-            ax.text(.02, .95, det, ha='left', va='top', transform=ax.transAxes)
-            ax.tick_params(which='both', direction='in', right=True, top=True)
+        for ax, data_det, wf_det in zip(axes, data_t_wht, wf_t_wht):
             if plot_data:
-                ax.plot(time, data_det, 'C0', lw=.2, label='data')
-            ax.plot(time, wf_det, **kwargs)
+                ax.plot(time, data_det, 'C0', lw=.2, label='Data')
+            ax.plot(time, wf_det, **wf_plot_kwargs)
 
         plt.xlim(trng)
+        return fig
+
+    def _setup_data_figure(self, figsize=None):
+        """Return a new `Figure` with subplots for each detector."""
+        fig, axes = plt.subplots(len(self.event_data.detector_names),
+                                 sharex=True, sharey=True, figsize=figsize,
+                                 tight_layout=True)
+        axes = np.atleast_1d(axes)
+        fig.text(.0, .54, 'Whitened Strain', rotation=90, ha='left',
+                 va='center', fontsize='large')
+
+        for ax, det in zip(axes, self.event_data.detector_names):
+            ax.text(.02, .95, det, ha='left', va='top', transform=ax.transAxes)
+            ax.tick_params(which='both', direction='in', right=True, top=True)
+
         plt.xlabel('Time (s)', size=12)
-        plt.tight_layout()
-        return fig, axes
+        return fig
 
 
 class ReferenceWaveformFinder(CBCLikelihood):

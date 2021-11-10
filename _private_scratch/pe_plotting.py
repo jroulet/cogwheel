@@ -63,8 +63,8 @@ def corner_plot_samples(samps, pvkeys=['mtot', 'q', 'chieff'], title=None,
     return ff, aa
 
 def corner_plot_list(samps_list, samps_names, pvkeys=['mtot', 'q', 'chieff'], weight_key=None,
-                     figsize=(9,7), scatter_points=None, grid_kws={},
-                     multigrid_kws={}, fig=None, ax=None, return_grid=False, **corner_plot_kws):
+                     fig=None, ax=None, figsize=(9,7), scatter_points=None, grid_kws={},
+                     multigrid_kws={}, return_grid=False, **corner_plot_kws):
     grids = []
     units, plabs = PAR_UNITS, PAR_LABELS
     for k in pvkeys:
@@ -489,6 +489,13 @@ def plot_samples2d_color(samples_list, xkey='chieff', ykey='q', ckey='lnL', samp
 #### ADDING COMPUTED PARAMETERS TO SAMPLES
 
 def samples_with_ligo_angles(old_samps, f_ref, keep_new_spins=False):
+    """
+    Add angular variables from lalsimulation.SimInspiralTransformPrecessingWvf2PE
+    with the option to also keep the spin variables output by this function
+    (which should be equal to the existing spin parameters if conventions align).
+    Keys are `thetaJN`, `phiJL`, `phi12`.
+    If keep_new_spins=True, will also replace `s1`, `s1theta`, `s2`, `s2theta`.
+    """
     new_samps = old_samps.copy()
     ns = len(old_samps)
     getparkeys = ['iota', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z', 'm1', 'm2', 'vphi']
@@ -515,6 +522,10 @@ def samples_with_ligo_angles(old_samps, f_ref, keep_new_spins=False):
     return new_samps
 
 def samples_add_antenna_response(old_samps, det_chars='HLV', tgps=None):
+    """
+    Add antenna responses F_+, F_x, F_+^2 + F_x^2 for each detector.
+    Keys are `fplus_{det_char}`, `fcross_{det_char}`, `antenna_{det_char}`.
+    """
     if tgps is None:
         tgps = np.asarray(old_samps['tgps'])
     ra, dec, psi = [np.asarray(old_samps[k]) for k in ['ra', 'dec', 'psi']]
@@ -525,9 +536,13 @@ def samples_add_antenna_response(old_samps, det_chars='HLV', tgps=None):
         old_samps[f'antenna_{d}'] = fp**2 + fc**2
     return
 
-def samples_add_cosmo_prior(old_samps):
+def samples_add_cosmo_weight(old_samps):
+    """
+    Add weights for prior reweighting from uniform luminosity volume to comoving volume.
+    Key is `cosmo_weight`.
+    """
     z, DL = old_samps['z'], old_samps.get('d_luminosity', old_samps.get('DL'))
-    old_samps['cosmo_prior'] = (1+z)**-4 * (1 - DL/(1+z)*cosmo.dz_dDL(DL))
+    old_samps['cosmo_weight'] = (1+z)**-4 * (1 - DL/(1+z)*cosmo.dz_dDL(DL))
     return
 
 
