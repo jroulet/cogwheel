@@ -52,24 +52,41 @@ class AnalysisHandle:
     PAR_NAMES = label_formatting.param_names
     
     def __init__(self, rundir, name=None, samples_completion=False,
-                 separate_nans=True):
+                 separate_nans=True, no_samples=False):
+        """
+        If rundir has `run` in final path layer then will get samples
+        Otherwise treat rundir as an eventdir and make the samples just
+        a dataframe with the reference waveform's parameters.
+        """
         super().__init__()
         # associate to run directory
         self.rundir = pathlib.Path(rundir)
         self.name = name or self.rundir.parts[-1]
 
         # load posterior attributes
-        sampler = utils.read_json(self.rundir / sampling.Sampler.JSON_FILENAME)
-        self.likelihood = dcopy(sampler.posterior.likelihood)
-        self.prior = dcopy(sampler.posterior.prior)
+        if 'run' not in self.rundir.parts[-1]:
+            self.sampler = None
+            self.posterior = utils.read_json(self.rundir/'Posterior.json')
+        else:
+            self.sampler = utils.read_json(self.rundir/sampling.Sampler.JSON_FILENAME)
+            self.posterior = self.sampler.posterior
         # make these references for direct access
+        self.likelihood = self.posterior.likelihood
+        self.prior = self.posterior.prior
         self.evdata = self.likelihood.event_data
         self.wfgen = self.likelihood.waveform_generator
         self.evname = self.evdata.eventname
 
         # load samples
-        self.samples_path = self.rundir/sampling.SAMPLES_FILENAME
-        self.samples = pd.read_feather(self.samples_path)
+        if self.sampler is None:
+            self.samples_path = None
+            self.samples = pd.DataFrame([{self.LNL_COL: self.likelihood._lnl_0,
+                                          **self.likelihood.par_dic_0,
+                                          **self.prior.inverse_transform(
+                                              **self.likelihood.par_dic_0)}])
+        else:
+            self.samples_path = self.rundir/sampling.SAMPLES_FILENAME
+            self.samples = pd.read_feather(self.samples_path)
         if samples_completion:
             self.complete_samples()
 
