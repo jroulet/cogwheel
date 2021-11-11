@@ -8,6 +8,7 @@ import inspect
 import json
 import tempfile
 import time
+import os
 import numpy as np
 
 from . import data
@@ -190,6 +191,7 @@ class Posterior(utils.JSONMixin):
         return utils.get_eventdir(parentdir, self.prior.__class__.__name__,
                                   self.likelihood.event_data.eventname)
 
+_KWARGS_FILENAME = 'kwargs.json'
 
 def initialize_posteriors_slurm(
         eventnames, approximant, prior_name, parentdir, n_hours_limit=2,
@@ -212,36 +214,36 @@ def initialize_posteriors_slurm(
                `False` (default) raises an error if the file exists.
     **kwargs: optional keyword arguments to `Posterior.from_event()`.
               Must be JSON-serializable.
-
     """
     if isinstance(eventnames, str):
         eventnames = [eventnames]
 
-    with tempfile.NamedTemporaryFile('w+') as kwargs_file:
-        json.dump(kwargs, kwargs_file)
-        kwargs_file.seek(0)
+    for eventname in eventnames:
 
-        for eventname in eventnames:
-            eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
-            filename = eventdir/'Posterior.json'
-            if not overwrite and filename.exists():
-                raise FileExistsError(
-                    f'{filename} exists, pass `overwrite=True` to overwrite.')
+        eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
+        filename = eventdir/'Posterior.json'
+        if not overwrite and filename.exists():
+            raise FileExistsError(
+                f'{filename} exists, pass `overwrite=True` to overwrite.')
 
-            utils.mkdirs(eventdir)
+        utils.mkdirs(eventdir)
 
-            job_name = f'{eventname}_posterior'
-            stdout_path = (eventdir/'posterior_from_event.out').resolve()
-            stderr_path = (eventdir/'posterior_from_event.err').resolve()
+        job_name = f'{eventname}_posterior'
+        stdout_path = (eventdir/'posterior_from_event.out').resolve()
+        stderr_path = (eventdir/'posterior_from_event.err').resolve()
 
-            args = ' '.join([eventname, approximant, prior_name, parentdir,
-                             kwargs_file.name])
-            if overwrite:
-                args += ' --overwrite'
+        args = ' '.join([eventname, approximant, prior_name, parentdir])
 
-            utils.submit_slurm(job_name, n_hours_limit, stdout_path,
-                               stderr_path, args, sbatch_cmds)
-            time.sleep(.1)
+        if kwargs:
+            with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
+                json.dump(kwargs, kwargs_file)
+                args += f' {kwargs_file.name}'
+
+        if overwrite:
+            args += ' --overwrite'
+
+        utils.submit_slurm(job_name, n_hours_limit, stdout_path,
+                           stderr_path, args, sbatch_cmds)
 
 
 def main(eventname, approximant, prior_name, parentdir, overwrite,
@@ -265,10 +267,10 @@ if __name__ == '__main__':
     parser.add_argument('prior_name',
                         help='key from `gw_prior.prior_registry`')
     parser.add_argument('parentdir', help='top directory to save output')
-    parser.add_argument('--overwrite', action='store_true',
-                        help='pass to overwrite existing json file')
-    parser.add_argument('--kwargs_filename',
+    parser.add_argument('kwargs_filename', nargs='?', default=None,
                         help='''optional json file with keyword arguments to
                                 Posterior.from_event()''')
+    parser.add_argument('--overwrite', action='store_true',
+                        help='pass to overwrite existing json file')
 
     main(**vars(parser.parse_args()))
