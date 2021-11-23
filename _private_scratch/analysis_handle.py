@@ -24,6 +24,9 @@ from cogwheel import grid as gd
 from cogwheel import cosmology as cosmo
 from cogwheel import postprocessing
 
+DEFAULT_PRIOR = 'IASPrior'
+DEFAULT_PARENTDIR = '/data/srolsen/GW/cogwheel/o3a_cands/'
+
 def key_rngs_mask(df_to_mask, key_rngs={}, keep_nans=False):
     """
     Mask for samples satisfying rng[0] < samples[k] < rng[1]
@@ -118,6 +121,13 @@ class AnalysisHandle:
         if os.path.isfile(self.tests_path):
             self.tests_dict = json.load(open(self.tests_path, 'r'))
 
+    @classmethod
+    def from_evname(cls, evname, i_run=0, parentdir=DEFAULT_PARENTDIR,
+                    prior_name=DEFAULT_PRIOR, **init_kwargs):
+        evdir = utils.get_eventdir(parentdir=parentdir, prior_name=prior_name,
+                                   eventname=evname)
+        return cls(os.path.join(evdir, f'run_{i_run}'), **init_kwargs)
+    
     #######################
     ##  KEYS and LABELS  ##
     #######################
