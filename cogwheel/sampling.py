@@ -244,7 +244,11 @@ class PyMultiNest(Sampler):
         """
         fname = os.path.join(self.run_kwargs['outputfiles_basename'],
                              'post_equal_weights.dat')
-        folded = pd.DataFrame(np.loadtxt(fname)[:, :-1], columns=self.params)
+        try:
+            folded = pd.DataFrame(np.loadtxt(fname)[:, :-1], columns=self.params)
+        except (FileNotFoundError, OSError) as e:
+            # Weird PyMultinest filename length limit?
+            folded = pd.DataFrame(np.loadtxt(fname[:100])[:, :-1], columns=self.params)
         return self.resample(folded)
 
     def load_evidence(self):
