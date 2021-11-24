@@ -28,6 +28,17 @@ def m2_of_mtot_q(mtot, q):
     return mtot * q / (1 + q)
 
 # chirp mass
+def mchirp(**pars):
+    """
+    Compute chirp mass = (m1 * m2) ** .6 / (m1 + m2) ** .2
+    from `m1`, `m2` if they are present,
+    otherwise return pars.get(`mchirp`, None)
+    """
+    m1, m2 = pars.get('m1', None), pars.get('m2', None)
+    if (m1 is None) or (m2 is None):
+        return pars.get('mchirp', None)
+    return mchirp_of_m1_m2(m1, m2)
+
 def mchirp_of_m1_m2(m1, m2):
     return (m1 * m2) ** .6 / (m1 + m2) ** .2
 
@@ -177,11 +188,36 @@ def standard_mass_conversion(**dic):
 
 #     Spin (and Mass) Variable Conversions
 # --------------------------------------------
+# spin magnitudes from parameter dictionaries
+def spin_mag_j(pdic, j=1):
+    return np.sqrt(np.sum([pdic[f's{j}{coord}']**2
+                           for coord in ['x', 'y', 'z']]))
+
+def spin_magnitudes(**pars):
+    """
+    Return the constituent spin magnitudes |s_1|, |s_2|
+    computed as the Euclidean norms of `s1x`, `s1y`, `s1z`,
+    and `s2x`, `s2y`, `s2z`.
+    """
+    return np.array([spin_mag_j(pars, 1), spin_mag_j(pars, 2)])
+
+# getting effective spin
+def chieff(**pars):
+    """
+    Compute effective spin = (s1z + q*s2z) / (1 + q)
+    from `s1z`, `s2z`, and `q`, where q = m2 / m1 will be
+    computed from `m1`, `m2` if not present.
+    """
+    q = pars.get('q', None)
+    if q is None:
+        q = pars['m2'] / pars['m1']
+    return (pars['s1z'] + q*pars['s2z']) / (1 + q)
 
 def chieff_chia_of_s1z_s2z_m1_m2(s1z, s2z, m1, m2):
     mt = m1 + m2
     return (m1 * s1z + m2 * s2z) / mt, (m1 * s1z - m2 * s2z) / mt
 
+# getting spin precession parameter
 def chip(s1x, s1y, s2x, s2y, m1, m2):
     m1, m2 = np.maximum(m1, m2), np.minimum(m1, m2)
     q = m2 / m1
@@ -194,9 +230,11 @@ def chip(s1x, s1y, s2x, s2y, m1, m2):
     return np.maximum(A1 * s1P * m1 ** 2,
                       A2 * s2P * m2 ** 2) / A1 / m1 ** 2
 
+# getting in-plane spin components from polar spin variables
 def sx_sy_of_s_theta_phi(s, theta, phi):
     return s * np.sin(theta) * np.cos(phi), s * np.sin(theta) * np.sin(phi)
 
+# getting constituent spin z-components
 def s1z_of_chieff_s2z_m1_m2(chieff, s2z, m1, m2):
     mt = m1 + m2
     return mt * (chieff - m2 * s2z / mt) / m1
