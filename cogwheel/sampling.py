@@ -11,6 +11,7 @@ from functools import wraps
 import numpy as np
 import pandas as pd
 import scipy.special
+import datetime
 
 import pymultinest
 # import ultranest
@@ -20,6 +21,7 @@ from . import postprocessing
 from . import utils
 
 SAMPLES_FILENAME = 'samples.feather'
+FINISHED_FILENAME = 'FINISHED.out'
 
 class Sampler(abc.ABC, utils.JSONMixin):
     """
@@ -177,7 +179,9 @@ class Sampler(abc.ABC, utils.JSONMixin):
                      file_permissions=self.file_permissions, overwrite=True)
 
         with Profile() as profiler:
-            self._run()
+            exit_code = self._run()
+            with open(str(rundir/FINISHED_FILENAME), 'w') as fobj:
+                fobj.write(f'{exit_code}\n{datetime.datetime.now()}')
         profiler.dump_stats(rundir/self.PROFILING_FILENAME)
 
         self.load_samples().to_feather(rundir/SAMPLES_FILENAME)

@@ -65,7 +65,10 @@ class PostProcessor:
 
         sampler = utils.read_json(self.rundir/sampling.Sampler.JSON_FILENAME)
         self.posterior = sampler.posterior
-        self.samples = pd.read_feather(self.rundir/sampling.SAMPLES_FILENAME)
+        self.samples_path = self.rundir/sampling.SAMPLES_FILENAME
+        if not self.samples_path.exists():
+            sampler.load_samples().to_feather(self.samples_path)
+        self.samples = pd.read_feather(self.samples_path)
 
         try:
             with open(self.rundir/TESTS_FILENAME) as file:
