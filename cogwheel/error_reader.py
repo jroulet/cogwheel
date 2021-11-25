@@ -1,10 +1,21 @@
 import os
 
+def is_xphm_warning(x):
+    return (('XLAL Error - IMRPhenomX' in x) and
+            (('Defaulting to NNLO angles' in x)
+             or ('Triggering MSA failure' in x)))
+
 class ErrorReader:
     """Class for reading error file and other textual output"""
-    def __init__(self, dirname, get_outfiles=False, print_tail=False):
+    def __init__(self, dirname=None, get_outfiles=False, print_tail=False):
         self.lines = {}
-        self.dirname = dirname
+        self.dirname, self.subdir_paths = dirname, None
+        self.errorfile_paths, self.outfile_paths = None, None
+        if dirname is not None:
+            self.refresh_and_print(self, get_outfiles=get_outfiles,
+                                   print_tail=print_tail)
+
+    def refresh_and_print(self, get_outfiles=False, print_tail=False):
         self.subdir_paths = self.get_subdir_paths()
         self.errorfile_paths = self.get_errorfile_paths()
         self.print(print_tail)
@@ -38,24 +49,30 @@ class ErrorReader:
     def get_outfile_paths(self, dir=None, subdirs=True):
         return self.get_paths(dir=dir, subdirs=subdirs, ext='.out')
 
+    def get_lines(self, paths=None, keep_empty=False,
+                  keep_xphm_warnings=False):
+        lineok0 = ((lambda x: True) if keep_empty else
+                   (lambda x: (len(x.strip()) > 0)))
+        lineok = ((lambda x: lineok0(x)) if keep_xphm_warnings else
+                  (lambda x: (lineok0(x) and (not is_xphm_warning(x)))))
+        lines = {}
+        for p in [str(p) for p in (paths or self.errorfile_paths)]:
+            lines[p] = [l for l in open(p, 'r').readlines() if lineok(l)]
+        return lines
+
     def print(self, print_tail, paths=None, get_lines=True):
         pathstrs = [str(p) for p in (paths or self.errorfile_paths)]
         ntail = int(print_tail)
         print(f'....Printing {ntail} lines for {len(pathstrs)} files....')
         if get_lines:
-            for p in pathstrs:
-                self.lines[p] = list(open(p, 'r').readlines())
+            self.lines.update(self.get_lines(pathstrs))
         for i, p in enumerate(pathstrs):
             print(f'[{i}]\t' + '-' * 64 + f'\n{p}:\n({len(self.lines[p])} lines)')
             for jback in range(ntail):
                 print(f'[[-{ntail - jback}]] {self.lines[p][-(ntail - jback)]}')
 
     def archive_paths(self, paths=None):
-        if paths is None:
-            paths =  self.errorfile_paths
-        if isinstance(paths, str) or (not hasattr(paths, '__len__')):
-            paths = [paths]
-        for p in [str(p) for p in paths]:
+        for p in [str(p) for p in (paths or self.errorfile_paths)]:
             new_p = p + '.old'
             if os.path.exists(new_p):
                 self.archive_paths(new_p)
