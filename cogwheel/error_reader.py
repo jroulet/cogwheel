@@ -67,8 +67,9 @@ class ErrorReader:
         if get_lines:
             self.lines.update(self.get_lines(pathstrs))
         for i, p in enumerate(pathstrs):
-            print(f'[{i}]\t' + '-' * 64 + f'\n{p}:\n({len(self.lines[p])} lines)')
-            for jback in range(ntail):
+            nlines = len(self.lines[p])
+            print(f'[{i}]\t' + '-' * 64 + f'\n{p}:\n({nlines} lines)')
+            for jback in range(min(ntail, nlines)):
                 print(f'[[-{ntail - jback}]] {self.lines[p][-(ntail - jback)]}')
 
     def archive_paths(self, paths=None):
