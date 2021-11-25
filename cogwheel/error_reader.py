@@ -12,7 +12,7 @@ class ErrorReader:
         self.dirname, self.subdir_paths = dirname, None
         self.errorfile_paths, self.outfile_paths = None, None
         if dirname is not None:
-            self.refresh_and_print(self, get_outfiles=get_outfiles,
+            self.refresh_and_print(get_outfiles=get_outfiles,
                                    print_tail=print_tail)
 
     def refresh_and_print(self, get_outfiles=False, print_tail=False):
