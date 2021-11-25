@@ -40,12 +40,23 @@ class ErrorReader:
 
     def print(self, print_tail, paths=None, get_lines=True):
         pathstrs = [str(p) for p in (paths or self.errorfile_paths)]
-        print(' {}')
+        ntail = int(print_tail)
+        print(f'....Printing {ntail} lines for {len(pathstrs)} files....')
         if get_lines:
             for p in pathstrs:
                 self.lines[p] = list(open(p, 'r').readlines())
         for i, p in enumerate(pathstrs):
-            ntail = int(print_tail)
             print(f'[{i}]\t' + '-' * 64 + f'\n{p}:\n({len(self.lines[p])} lines)')
             for jback in range(ntail):
                 print(f'[[-{ntail - jback}]] {self.lines[p][-(ntail - jback)]}')
+
+    def archive_paths(self, paths=None):
+        if paths is None:
+            paths =  self.errorfile_paths
+        if isinstance(paths, str) or (not hasattr(paths, '__len__')):
+            paths = [paths]
+        for p in [str(p) for p in paths]:
+            new_p = p + '.old'
+            if os.path.exists(new_p):
+                self.archive_paths(new_p)
+            os.system(f'mv {p} {new_p}')
