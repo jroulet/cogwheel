@@ -127,7 +127,7 @@ class AnalysisHandle:
         evdir = utils.get_eventdir(parentdir=parentdir, prior_name=prior_name,
                                    eventname=evname)
         return cls(os.path.join(evdir, f'run_{i_run}'), **init_kwargs)
-    
+
     #######################
     ##  KEYS and LABELS  ##
     #######################
@@ -435,6 +435,13 @@ class AnalysisHandle:
         multigrid_kwargs will be unpacked into MultiGrid.from_grids().
         extra_grid_kwargs will be unpacked into Grid.from_samples().
         """
+        if len(compare_names) < len(compare_posteriors):
+            compare_names += [''] * (len(compare_posteriors) - len(compare_names))
+        for j in range(len(compare_posteriors)):
+            if isinstance(compare_posteriors[j], AnalysisHandle):
+                if compare_names[j] == '':
+                    compare_names[j] = compare_posteriors[j].name
+                compare_posteriors[j] = compare_posteriors[j].samples
         return peplot.corner_plot_list(([self.masked_samples(key_rngs)] +
                                         [s[key_rngs_mask(s, key_rngs)] for s in compare_posteriors]),
                                        [self.name] + compare_names, pvkeys=parkeys, weight_key=weight_key,
