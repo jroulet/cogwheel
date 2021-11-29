@@ -198,7 +198,7 @@ class AnalysisHandle:
         considered samples by parameter ranges.
         """
         s = self.masked_samples(key_rngs).sort_values(
-                self.LNL_COL, ascending=False).reset_index().iloc[get_best_inds]
+                self.LNL_COL, ascending=False).reset_index(drop=True).iloc[get_best_inds]
         if as_par_dics:
             if hasattr(get_best_inds, '__len__'):
                 return [self.get_par_dic(idx_row[1]) for idx_row in s.iterrows()]
