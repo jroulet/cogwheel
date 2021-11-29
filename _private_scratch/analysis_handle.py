@@ -54,8 +54,8 @@ class AnalysisHandle:
     PAR_UNITS = label_formatting.units
     PAR_NAMES = label_formatting.param_names
     
-    def __init__(self, rundir, name=None, samples_completion=False,
-                 separate_nans=True, no_samples=False):
+    def __init__(self, rundir, name=None, separate_nans=True,
+                 complete_samples=False, add_all=False):
         """
         If rundir has `run` in final path layer then will get samples
         Otherwise treat rundir as an eventdir and make the samples just
@@ -90,8 +90,8 @@ class AnalysisHandle:
         else:
             self.samples_path = self.rundir/sampling.SAMPLES_FILENAME
             self.samples = pd.read_feather(self.samples_path)
-        if samples_completion:
-            self.complete_samples()
+        if complete_samples or add_all:
+            self.complete_samples(add_all=add_all)
 
         # check likelihood information
         if self.LNL_COL not in self.samples:
@@ -107,8 +107,8 @@ class AnalysisHandle:
         nan_mask = self.samples.isna().any(axis=1)
         self.nan_samples = dcopy(self.samples[nan_mask])
         if separate_nans:
-            self.samples = self.samples[nan_mask == False].reset_index()
-            self.nan_samples = self.nan_samples.reset_index()
+            self.samples = self.samples[nan_mask == False].reset_index(drop=True)
+            self.nan_samples = self.nan_samples.reset_index(drop=True)
 
         # see if the keymap is faithful to samples
         if not all([self.key(k) == k for k in self.samples.columns]):
@@ -242,13 +242,16 @@ class AnalysisHandle:
     #########################
     ##  SAMPLE COMPLETION  ##
     #########################
-    def complete_samples(self, antenna=False, cosmo_weights=False, ligo_angles=False):
+    def complete_samples(self, antenna=False, cosmo_weights=False,
+                         ligo_angles=False, add_all=False):
         """
         Complete samples with self.add_source_parameters() and other options
         (self.add_ligo_angles, self.add_antenna, self.add_cosmo_weights).
         TODO: still need a way to get these peplot functions to use self.KEYMAP
         """
         self.add_source_parameters()
+        if add_all:
+            antenna, cosmo_weights, ligo_angles = True, True, True
         if ligo_angles:
             self.add_ligo_angles()
         if antenna:
