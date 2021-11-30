@@ -137,7 +137,7 @@ class CBCLikelihood(utils.JSONMixin):
         Values > 1 mean local noise variance is higher than average.
         """
         return self._asd_drift
- for j in [0, 1]]
+
     @asd_drift.setter
     def asd_drift(self, value):
         """Ensure asd_drift is a numpy array of the correct length."""
