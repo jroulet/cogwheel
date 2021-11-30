@@ -37,6 +37,25 @@ def guess_bank_id(mchirp, i_subbank=0):
                 *[('BBH', i_mb, i_subbank) for i_mb in range(n_bbh)]]
     return bank_ids[np.searchsorted(mchirp_multibank_edges, mchirp)]
 
+def _get_linear_free_shift_from_bank(bank, calpha=None, **pars):
+    if calpha is not None:
+        return bank.get_linear_free_shift_from_calpha(calpha)
+    return bank.get_linear_free_shift_from_pars(**pars)
+
+def get_linear_free_time_shift(triggerlists, calpha=None, i_refdet=0,
+                               max_tsep=0.07, **pars):
+    """
+    max_tsep: maximum time difference (seconds) between shifts
+      from different triggerlists above which error is raised
+    """
+    if isinstance(triggerlists, trig.TriggerList):
+        triggerlists = [triggerlists]
+    shifts = [_get_linear_free_shift_from_bank(tgl.templatebank,
+                                               calpha=calpha, **pars)
+              for tgl in triggerlists]
+    if np.abs(np.max(shifts) - np.min(shifts)) > max_tsep:
+        raise ValueError(f'Disparate trigger times! Shifts = {shifts}')
+    return shifts[i_refdet]
 
 def _get_f_strain_psd_from_triggerlist(triggerlist, tgps, tcoarse,
                                        t_interval):
@@ -102,7 +121,8 @@ class EventMetadata:
     """
     def __init__(self, eventname, tgps, mchirp_range, q_min=1/20,
                  t_interval=128., tcoarse=None, bank_id=None,
-                 fnames=None, load_data=False, triggerlist_kw=None):
+                 fnames=None, load_data=False, triggerlist_kw=None,
+                 calpha=None):
         """
         Instantiate `EventMetadata`, register the instance in
         `event_registry`.
