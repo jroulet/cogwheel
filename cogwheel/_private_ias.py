@@ -198,29 +198,31 @@ class EventMetadata:
                                            **self.triggerlist_kw)
                 for fname, load in zip(self.fnames, self.load_data)]
 
-    def _get_fnames(self, bank_id, fnames):
+    def _get_fnames(self, bank_id, fnames=None):
         """
         Auxiliary function to get json filenames of triggerlists
         implementing defaults.
+        fnames = list of  trigglerlist config filenames
+            [filename(det) for det in [Hanford, Virgo, Livingston]]
+            --> filename = None: no file for that detector
+            --> filename = 0: get from trig.utils.get_detector_fnames()
+            Default fnames=None sets fnames = [0,0,0] => all from pipeline,
+            and wherever the pipeline cannot find a file, will
+            have filename = None (as when passing fnames with None values).
         """
-        if fnames is not None and bank_id is None:
-            return fnames
+        if fnames is None:
+            fnames = [0, 0, 0]
+        i_get_default = np.where([fnm == 0 for fnm in fnames])[0]
+        if len(i_get_default) > 0:
+            if bank_id is None:
+                bank_id = guess_bank_id(np.mean(self.mchirp_range))
+            source, i_multibank, i_subbank = bank_id
+            json_fnames = trig.utils.get_detector_fnames(
+                self.tgps, i_multibank, i_subbank, source=source)
+            for ii in i_get_default:
+                fnames[ii] = json_fnames[ii]
 
-        if bank_id is None:
-            bank_id = guess_bank_id(np.mean(self.mchirp_range))
-
-        source, i_multibank, i_subbank = bank_id
-        json_fnames = trig.utils.get_detector_fnames(
-            self.tgps, i_multibank, i_subbank, source=source)
-
-        if fnames is not None:
-            # Override whenever fname is not None
-            for i, fname in enumerate(fnames):
-                if fname is not None:
-                    json_fnames[i] = fname
-
-        assert len(json_fnames) in (2, 3)
-        return json_fnames
+        return fnames
 
     def _setup(self):
         """
