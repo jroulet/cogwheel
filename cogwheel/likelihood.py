@@ -137,7 +137,7 @@ class CBCLikelihood(utils.JSONMixin):
         Values > 1 mean local noise variance is higher than average.
         """
         return self._asd_drift
-
+ for j in [0, 1]]
     @asd_drift.setter
     def asd_drift(self, value):
         """Ensure asd_drift is a numpy array of the correct length."""
@@ -440,6 +440,7 @@ class ReferenceWaveformFinder(CBCLikelihood):
         par_dic['m1'], par_dic['m2'] = gw_utils.mchirpeta_to_m1m2(mchirp, eta)
         par_dic['s1z'] = par_dic['s2z'] = chieff
 
+    #### EVDAT QUESTION: should this be talking more with event_data?
     def _optimize_t_refdet(self, par_dic, ref_det_name, tc_rng):
         """
         Find coalescence time that optimizes SNR maximized over

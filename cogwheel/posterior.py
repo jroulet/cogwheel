@@ -126,6 +126,7 @@ class Posterior(utils.JSONMixin):
             if parameter.default is inspect._empty
             and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL,
                                        inspect.Parameter.VAR_KEYWORD)}
+        #### EVDAT QUESTION: can't we just pass this stuff?
         event_data_keys = {'mchirp_range', 'tgps', 'q_min'}
         bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref', 't0_refdet'}
         if missing_pars := (required_pars - event_data_keys - bestfit_keys
