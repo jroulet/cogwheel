@@ -24,6 +24,9 @@ from cogwheel import grid as gd
 from cogwheel import cosmology as cosmo
 from cogwheel import postprocessing
 
+DEFAULT_PRIOR = 'IASPrior'
+DEFAULT_PARENTDIR = '/data/srolsen/GW/cogwheel/o3a_cands/'
+
 def key_rngs_mask(df_to_mask, key_rngs={}, keep_nans=False):
     """
     Mask for samples satisfying rng[0] < samples[k] < rng[1]
@@ -51,8 +54,8 @@ class AnalysisHandle:
     PAR_UNITS = label_formatting.units
     PAR_NAMES = label_formatting.param_names
     
-    def __init__(self, rundir, name=None, samples_completion=False,
-                 separate_nans=True, no_samples=False):
+    def __init__(self, rundir, name=None, separate_nans=True,
+                 complete_samples=False, add_all=False):
         """
         If rundir has `run` in final path layer then will get samples
         Otherwise treat rundir as an eventdir and make the samples just
@@ -87,8 +90,8 @@ class AnalysisHandle:
         else:
             self.samples_path = self.rundir/sampling.SAMPLES_FILENAME
             self.samples = pd.read_feather(self.samples_path)
-        if samples_completion:
-            self.complete_samples()
+        if complete_samples or add_all:
+            self.complete_samples(add_all=add_all)
 
         # check likelihood information
         if self.LNL_COL not in self.samples:
@@ -104,8 +107,8 @@ class AnalysisHandle:
         nan_mask = self.samples.isna().any(axis=1)
         self.nan_samples = dcopy(self.samples[nan_mask])
         if separate_nans:
-            self.samples = self.samples[nan_mask == False].reset_index()
-            self.nan_samples = self.nan_samples.reset_index()
+            self.samples = self.samples[nan_mask == False].reset_index(drop=True)
+            self.nan_samples = self.nan_samples.reset_index(drop=True)
 
         # see if the keymap is faithful to samples
         if not all([self.key(k) == k for k in self.samples.columns]):
@@ -117,6 +120,13 @@ class AnalysisHandle:
         self.tests_dict = None
         if os.path.isfile(self.tests_path):
             self.tests_dict = json.load(open(self.tests_path, 'r'))
+
+    @classmethod
+    def from_evname(cls, evname, i_run=0, parentdir=DEFAULT_PARENTDIR,
+                    prior_name=DEFAULT_PRIOR, **init_kwargs):
+        evdir = utils.get_eventdir(parentdir=parentdir, prior_name=prior_name,
+                                   eventname=evname)
+        return cls(os.path.join(evdir, f'run_{i_run}'), **init_kwargs)
 
     #######################
     ##  KEYS and LABELS  ##
@@ -188,7 +198,7 @@ class AnalysisHandle:
         considered samples by parameter ranges.
         """
         s = self.masked_samples(key_rngs).sort_values(
-                self.LNL_COL, ascending=False).reset_index().iloc[get_best_inds]
+                self.LNL_COL, ascending=False).reset_index(drop=True).iloc[get_best_inds]
         if as_par_dics:
             if hasattr(get_best_inds, '__len__'):
                 return [self.get_par_dic(idx_row[1]) for idx_row in s.iterrows()]
@@ -232,13 +242,16 @@ class AnalysisHandle:
     #########################
     ##  SAMPLE COMPLETION  ##
     #########################
-    def complete_samples(self, antenna=False, cosmo_weights=False, ligo_angles=False):
+    def complete_samples(self, antenna=False, cosmo_weights=False,
+                         ligo_angles=False, add_all=False):
         """
         Complete samples with self.add_source_parameters() and other options
         (self.add_ligo_angles, self.add_antenna, self.add_cosmo_weights).
         TODO: still need a way to get these peplot functions to use self.KEYMAP
         """
         self.add_source_parameters()
+        if add_all:
+            antenna, cosmo_weights, ligo_angles = True, True, True
         if ligo_angles:
             self.add_ligo_angles()
         if antenna:
@@ -425,9 +438,17 @@ class AnalysisHandle:
         multigrid_kwargs will be unpacked into MultiGrid.from_grids().
         extra_grid_kwargs will be unpacked into Grid.from_samples().
         """
+        comp_names = dcopy(compare_names)
+        if len(comp_names) < len(compare_posteriors):
+            comp_names += [''] * (len(compare_posteriors) - len(comp_names))
+        for j in range(len(compare_posteriors)):
+            if isinstance(compare_posteriors[j], AnalysisHandle):
+                if comp_names[j] == '':
+                    comp_names[j] = compare_posteriors[j].name
+                compare_posteriors[j] = compare_posteriors[j].samples
         return peplot.corner_plot_list(([self.masked_samples(key_rngs)] +
                                         [s[key_rngs_mask(s, key_rngs)] for s in compare_posteriors]),
-                                       [self.name] + compare_names, pvkeys=parkeys, weight_key=weight_key,
+                                       [self.name] + comp_names, pvkeys=parkeys, weight_key=weight_key,
                                        grid_kws=extra_grid_kwargs, multigrid_kws=multigrid_kwargs,
                                        return_grid=return_grid, **corner_plot_kwargs)
 

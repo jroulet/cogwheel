@@ -495,7 +495,7 @@ class UniformComovingVolumePriorSampleEffectiveDistance(ReferenceDetectorMixin, 
     conditioned_on = ['ra', 'dec', 'psi', 'iota']
 
     def __init__(self, *, tgps, ref_det_name, d_effective_max=50000, **kwargs):
-        self.range_dic = {'d_hat': (0, d_effective_max)}
+        self.range_dic = {'d_effective': (0, d_effective_max)}
         super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
         self.tgps = tgps
         self.ref_det_name = ref_det_name

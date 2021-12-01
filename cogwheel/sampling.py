@@ -11,6 +11,7 @@ from functools import wraps
 import numpy as np
 import pandas as pd
 import scipy.special
+import datetime
 
 import pymultinest
 # import ultranest
@@ -20,6 +21,7 @@ from . import postprocessing
 from . import utils
 
 SAMPLES_FILENAME = 'samples.feather'
+FINISHED_FILENAME = 'FINISHED.out'
 
 class Sampler(abc.ABC, utils.JSONMixin):
     """
@@ -177,7 +179,9 @@ class Sampler(abc.ABC, utils.JSONMixin):
                      file_permissions=self.file_permissions, overwrite=True)
 
         with Profile() as profiler:
-            self._run()
+            exit_code = self._run()
+            with open(str(rundir/FINISHED_FILENAME), 'w') as fobj:
+                fobj.write(f'{exit_code}\n{datetime.datetime.now()}')
         profiler.dump_stats(rundir/self.PROFILING_FILENAME)
 
         self.load_samples().to_feather(rundir/SAMPLES_FILENAME)
@@ -244,7 +248,11 @@ class PyMultiNest(Sampler):
         """
         fname = os.path.join(self.run_kwargs['outputfiles_basename'],
                              'post_equal_weights.dat')
-        folded = pd.DataFrame(np.loadtxt(fname)[:, :-1], columns=self.params)
+        try:
+            folded = pd.DataFrame(np.loadtxt(fname)[:, :-1], columns=self.params)
+        except (FileNotFoundError, OSError) as e:
+            # Weird PyMultinest filename length limit?
+            folded = pd.DataFrame(np.loadtxt(fname[:100])[:, :-1], columns=self.params)
         return self.resample(folded)
 
     def load_evidence(self):

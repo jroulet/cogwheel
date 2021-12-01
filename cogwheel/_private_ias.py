@@ -37,6 +37,25 @@ def guess_bank_id(mchirp, i_subbank=0):
                 *[('BBH', i_mb, i_subbank) for i_mb in range(n_bbh)]]
     return bank_ids[np.searchsorted(mchirp_multibank_edges, mchirp)]
 
+def _get_linear_free_shift_from_bank(bank, calpha=None, **pars):
+    if calpha is not None:
+        return bank.get_linear_free_shift_from_calpha(calpha)
+    return bank.get_linear_free_shift_from_pars(**pars)
+
+def get_linear_free_time_shift(triggerlists, calpha=None, i_refdet=0,
+                               max_tsep=0.07, **pars):
+    """
+    max_tsep: maximum time difference (seconds) between shifts
+      from different triggerlists above which error is raised
+    """
+    if isinstance(triggerlists, trig.TriggerList):
+        triggerlists = [triggerlists]
+    shifts = [_get_linear_free_shift_from_bank(tgl.templatebank,
+                                               calpha=calpha, **pars)
+              for tgl in triggerlists]
+    if np.abs(np.max(shifts) - np.min(shifts)) > max_tsep:
+        raise ValueError(f'Disparate trigger times! Shifts = {shifts}')
+    return shifts[i_refdet]
 
 def _get_f_strain_psd_from_triggerlist(triggerlist, tgps, tcoarse,
                                        t_interval):
@@ -102,7 +121,8 @@ class EventMetadata:
     """
     def __init__(self, eventname, tgps, mchirp_range, q_min=1/20,
                  t_interval=128., tcoarse=None, bank_id=None,
-                 fnames=None, load_data=False, triggerlist_kw=None):
+                 fnames=None, load_data=False, triggerlist_kw=None,
+                 calpha=None):
         """
         Instantiate `EventMetadata`, register the instance in
         `event_registry`.
@@ -178,29 +198,31 @@ class EventMetadata:
                                            **self.triggerlist_kw)
                 for fname, load in zip(self.fnames, self.load_data)]
 
-    def _get_fnames(self, bank_id, fnames):
+    def _get_fnames(self, bank_id, fnames=None):
         """
         Auxiliary function to get json filenames of triggerlists
         implementing defaults.
+        fnames = list of  trigglerlist config filenames
+            [filename(det) for det in [Hanford, Virgo, Livingston]]
+            --> filename = None: no file for that detector
+            --> filename = 0: get from trig.utils.get_detector_fnames()
+            Default fnames=None sets fnames = [0,0,0] => all from pipeline,
+            and wherever the pipeline cannot find a file, will
+            have filename = None (as when passing fnames with None values).
         """
-        if fnames is not None and bank_id is None:
-            return fnames
+        if fnames is None:
+            fnames = [0, 0, 0]
+        i_get_default = np.where([fnm == 0 for fnm in fnames])[0]
+        if len(i_get_default) > 0:
+            if bank_id is None:
+                bank_id = guess_bank_id(np.mean(self.mchirp_range))
+            source, i_multibank, i_subbank = bank_id
+            json_fnames = trig.utils.get_detector_fnames(
+                self.tgps, i_multibank, i_subbank, source=source)
+            for ii in i_get_default:
+                fnames[ii] = json_fnames[ii]
 
-        if bank_id is None:
-            bank_id = guess_bank_id(np.mean(self.mchirp_range))
-
-        source, i_multibank, i_subbank = bank_id
-        json_fnames = trig.utils.get_detector_fnames(
-            self.tgps, i_multibank, i_subbank, source=source)
-
-        if fnames is not None:
-            # Override whenever fname is not None
-            for i, fname in enumerate(fnames):
-                if fname is not None:
-                    json_fnames[i] = fname
-
-        assert len(json_fnames) in (2, 3)
-        return json_fnames
+        return fnames
 
     def _setup(self):
         """
