@@ -7,6 +7,7 @@ We should keep it as small as possible.
 import os
 import sys
 import numpy as np
+from copy import deepcopy as dcopy
 
 PIPELINE_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', '..', 'gw_detection_ias'))
@@ -15,6 +16,7 @@ import triggers_single_detector as trig
 
 from . import data
 
+DETECTOR_NAMES_ORDERED = 'HLV'
 
 event_registry = {}  # EventMetadata instances register themselves here
 
@@ -122,7 +124,9 @@ class EventMetadata:
     def __init__(self, eventname, tgps, mchirp_range, q_min=1/20,
                  t_interval=128., tcoarse=None, bank_id=None,
                  fnames=None, load_data=False, triggerlist_kw=None,
-                 calpha=None):
+                 tc_range=(-.1, .1), ref_det_name=None,
+                 calpha=None, compute_linear_free_shift=False,
+                 max_tsep=0.07, compute_par_dic_0=False, **par_dic_0):
         """
         Instantiate `EventMetadata`, register the instance in
         `event_registry`.
@@ -148,55 +152,132 @@ class EventMetadata:
                    the triggerlist for each detector H, L, V.
                    `False` means it's loaded as is from json.
                    A single boolean is ok, applied to all detectors.
+        triggerlist_kw: dict of kwargs to pass TriggerList.from_json()
+        tc_range: range of times around tcoarse that should be searched
+        ref_det_name: `H`/`L`/`V` indiciating detector that gave highest SNR
+        calpha: calpha coefficients for bank template that triggered
+        **par_dic_0: physical parameters `m1`, `m2`, `s1z`, `s2z` (and
+          others if the bank has a precessing and/or HM waveform generator)
+          for best fit waveform -- note that if this is not passed then
+          upon calling self.get_event_data() it will be set using
+          bank.get_pdic_from_calpha(self.calpha), and if calpha is None
+          then it will not be set
         """
-
-        self.eventname = eventname
-        self.tgps = tgps
-        self.mchirp_range = mchirp_range
-        self.q_min = q_min
-        self.t_interval = t_interval
-        self.tcoarse = t_interval / 2 if tcoarse is None else tcoarse
-
-        self._setup_pars = {'bank_id': bank_id,
-                            'fnames': fnames,
-                            'load_data': load_data}
-
         # These are set by `self._setup()`:
         self.fnames = NotImplemented
         self.detector_names = NotImplemented
         self.load_data = NotImplemented
-
-        self.triggerlist_kw = {} if triggerlist_kw is None else triggerlist_kw
-
+        self.triggerlists = None
+        self.triggerlist_kw = ({} if triggerlist_kw is None
+                               else dcopy(triggerlist_kw))
+        # These are passed
+        self._setup_pars = {'bank_id': bank_id,
+                            'fnames': fnames,
+                            'load_data': load_data}
+        self.eventname = eventname
+        self.tgps = tgps
+        self.t_interval = t_interval
+        self.tcoarse = t_interval / 2 if tcoarse is None else tcoarse
+        # Now specify (and optionally compute) physical waveform properties
+        self.par_dic_0 = par_dic_0
+        self.update_guess(mchirp_range=mchirp_range, q_min=q_min, tc_range=tc_range,
+                          ref_det_name=ref_det_name, calpha=calpha, **par_dic_0)
+        self.compute_from_guess(compute_linear_free_shift=compute_linear_free_shift,
+                                compute_par_dic_0=compute_par_dic_0, max_tsep=max_tsep)
+        # update event registry and save previous instance if it exists
+        self.old_metadata = event_registry.get(self.eventname, None)
+        if self.old_metadata is not None:
+            print(f"Updating metadata for {self.eventname}, see",
+                  f"event_registry[`{self.eventname}`].old_metadata for old version.")
         event_registry[self.eventname] = self
 
-    def get_event_data(self):
+    def update_guess(self, mchirp_range=None, q_min=None, tc_range=None,
+                     ref_det_name=None, calpha=None, **par_dic_0):
+        # set attributes with inputs that are not None
+        if mchirp_range is not None:
+            self.mchirp_range = mchirp_range
+        if q_min is not None:
+            self.q_min = q_min
+        if tc_range is not None:
+            self.tc_range = tc_range
+        if ref_det_name is not None:
+            self.ref_det_name = ref_det_name
+            self.i_refdet = DETECTOR_NAMES_ORDERED.index(ref_det_name)
+        if calpha is not None:
+            self.calpha = calpha
+        self.par_dic_0.update(par_dic_0)
+
+    def compute_from_guess(self, triggerlists=None, calpha=None, ref_det_name=None,
+                           compute_linear_free_shift=True, compute_par_dic_0=None,
+                           max_tsep=0.07, **par_dic_0):
+        if compute_par_dic_0 is None:
+            compute_par_dic_0 = (not par_dic_0) and (calpha is not None)
+        # if we are doing something, do it
+        if compute_linear_free_shift or compute_par_dic_0:
+            # update guesses with whatever new stuff was passed
+            self.update_guess(calpha=calpha, ref_det_name=ref_det_name, **par_dic_0)
+            # if no triggerlists passed, get them from self (load if necessary)
+            if triggerlists is None:
+                triggerlists = self.triggerlists or self.load_triggerlists()
+            # computing linear free time shift
+            if compute_linear_free_shift:
+                self.tgps_shift = get_linear_free_time_shift(triggerlists, calpha=self.calpha,
+                    i_refdet=self.i_refdet, max_tsep=max_tsep, **self.par_dic_0)
+            # computing physical parameters from calpha
+            if compute_par_dic_0:
+                self.par_dic_0 = triggerlists[self.i_refdet].templatebank.get_pdic_from_calpha(self.calpha)
+
+
+    def get_event_data(self, shift_tgps=False, max_tsep=0.07, store_triggerlists=False,
+                       calpha=None, **par_dic_0):
         """
         Return an instance of `data.EventData`.
 
         Load a triggerlist corresponding to the event, use it to extract
         frequency domain strain and psd, and combine with the rest of
         the metadata.
+
+        :param store_triggerlists: flag to set self.triggerlists
+        :param shift_tgps: flag to shift tgps in event data from self.tgps
+          to self.tgps + self.tgps_shift; if this flag is set to True,
+          upon loading the triggerlists the shift will be computed
+          from the linear free time shift of the bank template with
+          geometric coefficients given in :param calpha:, or if
+          :param calpha: is None will use self.calpha, or if no calpha
+          then will use template bank approximant (usually IMRPhenomD)
+          with physical parameters given in
+          self.par_dic_0.update(:param par_dic_0:)
+
+        :param max_tsep: if shifting tgps, a shift larger than this will result in error
         """
-        self._setup()
+        # load triggerlists (NOTE: this calls self._setup())
+        triggerlists = self.load_triggerlists(store=store_triggerlists)
+        use_tgps = self.tgps
+        if shift_tgps:
+            use_tgps += self.tgps_shift
+
         dic = {key: getattr(self, key)
-               for key in ['eventname', 'detector_names', 'tgps', 'tcoarse',
+               for key in ['eventname', 'detector_names', 'tcoarse',
                            'mchirp_range', 'q_min']}
-
-        triggerlists = self.load_triggerlists()
-
-        dic |= get_f_strain_psd_dic(triggerlists, self.tgps,
+        dic['tgps'] = use_tgps
+        dic |= get_f_strain_psd_dic(triggerlists, use_tgps,
                                     self.tcoarse, self.t_interval)
 
         return data.EventData(**dic)
 
-    def load_triggerlists(self):
-        """Return triggerlists associated to the event."""
+    def load_triggerlists(self, store=False):
+        """
+        Run self._setup() and return triggerlists associated to the event.
+        :param store: flag to set self.triggerlists with output
+        """
         self._setup()
-        return [trig.TriggerList.from_json(fname, load_data=load,
+        triggerlists = [trig.TriggerList.from_json(fname, load_data=load,
                                            do_signal_processing=False,
                                            **self.triggerlist_kw)
-                for fname, load in zip(self.fnames, self.load_data)]
+                        for fname, load in zip(self.fnames, self.load_data)]
+        if store:
+            self.triggerlists = triggerlists
+        return triggerlists
 
     def _get_fnames(self, bank_id, fnames=None):
         """
@@ -238,7 +319,8 @@ class EventMetadata:
                                   self._setup_pars['fnames'])
 
         self.detector_names = ''.join(
-            det for det, fname in zip('HLV', fnames) if fname is not None)
+            det for det, fname in zip(DETECTOR_NAMES_ORDERED, fnames)
+            if fname is not None)
 
         self.fnames = [fname for fname in fnames if fname is not None]
 
