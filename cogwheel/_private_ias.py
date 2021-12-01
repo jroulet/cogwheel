@@ -179,9 +179,9 @@ class EventMetadata:
         self.t_interval = t_interval
         self.tcoarse = t_interval / 2 if tcoarse is None else tcoarse
         # Now specify (and optionally compute) physical waveform properties
-        self.par_dic_0 = par_dic_0
+        self.par_dic_0 = dcopy(par_dic_0)
         self.update_guess(mchirp_range=mchirp_range, q_min=q_min, tc_range=tc_range,
-                          ref_det_name=ref_det_name, calpha=calpha, **par_dic_0)
+                          ref_det_name=ref_det_name, calpha=calpha)
         self.compute_from_guess(compute_linear_free_shift=compute_linear_free_shift,
                                 compute_par_dic_0=compute_par_dic_0, max_tsep=max_tsep)
         # update event registry and save previous instance if it exists
@@ -228,8 +228,8 @@ class EventMetadata:
                 self.par_dic_0 = triggerlists[self.i_refdet].templatebank.get_pdic_from_calpha(self.calpha)
 
 
-    def get_event_data(self, shift_tgps=False, max_tsep=0.07, store_triggerlists=False,
-                       calpha=None, **par_dic_0):
+    def get_event_data(self, shift_tgps=False, calpha=None, ref_det_name=None,
+                       store_triggerlists=False, max_tsep=0.07, **par_dic_0):
         """
         Return an instance of `data.EventData`.
 
@@ -247,13 +247,16 @@ class EventMetadata:
           then will use template bank approximant (usually IMRPhenomD)
           with physical parameters given in
           self.par_dic_0.update(:param par_dic_0:)
-
+        :param ref_det_name: set new self.ref_det_name and self.i_refdet
         :param max_tsep: if shifting tgps, a shift larger than this will result in error
         """
         # load triggerlists (NOTE: this calls self._setup())
         triggerlists = self.load_triggerlists(store=store_triggerlists)
         use_tgps = self.tgps
         if shift_tgps:
+            self.compute_from_guess(triggerlists=triggerlists, calpha=calpha, ref_det_name=ref_det_name,
+                                    compute_linear_free_shift=True, compute_par_dic_0=False, max_tsep=max_tsep,
+                                    **par_dic_0)
             use_tgps += self.tgps_shift
 
         dic = {key: getattr(self, key)
