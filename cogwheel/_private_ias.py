@@ -178,17 +178,19 @@ class EventMetadata:
         self.tgps = tgps
         self.t_interval = t_interval
         self.tcoarse = t_interval / 2 if tcoarse is None else tcoarse
-        # Now specify (and optionally compute) physical waveform properties
+        # Now specify (and compute) physical waveform properties
         self.par_dic_0 = dcopy(par_dic_0)
-        self.update_guess(mchirp_range=mchirp_range, q_min=q_min, tc_range=tc_range,
-                          ref_det_name=ref_det_name, calpha=calpha)
-        self.compute_from_guess(compute_linear_free_shift=compute_linear_free_shift,
-                                compute_par_dic_0=compute_par_dic_0, max_tsep=max_tsep)
+        self.update_guess(mchirp_range=mchirp_range, q_min=q_min,
+            tc_range=tc_range, ref_det_name=ref_det_name, calpha=calpha)
+        self.compute_from_guess(compute_par_dic_0=compute_par_dic_0,
+            compute_linear_free_shift=compute_linear_free_shift,
+            max_tsep=max_tsep)
         # update event registry and save previous instance if it exists
         self.old_metadata = event_registry.get(self.eventname, None)
         if self.old_metadata is not None:
             print(f"Updating metadata for {self.eventname}, see",
-                  f"event_registry[`{self.eventname}`].old_metadata for old version.")
+                  f"event_registry[`{self.eventname}`].old_metadata",
+                  "for old version.")
         event_registry[self.eventname] = self
 
     def update_guess(self, mchirp_range=None, q_min=None, tc_range=None,
@@ -207,29 +209,35 @@ class EventMetadata:
             self.calpha = calpha
         self.par_dic_0.update(par_dic_0)
 
-    def compute_from_guess(self, triggerlists=None, calpha=None, ref_det_name=None,
-                           compute_linear_free_shift=True, compute_par_dic_0=None,
-                           max_tsep=0.07, **par_dic_0):
+    def compute_from_guess(self, triggerlists=None, calpha=None,
+                           ref_det_name=None, compute_par_dic_0=None,
+                           compute_linear_free_shift=True, max_tsep=0.07,
+                           **par_dic_0):
         if compute_par_dic_0 is None:
             compute_par_dic_0 = (not par_dic_0) and (calpha is not None)
         # if we are doing something, do it
         if compute_linear_free_shift or compute_par_dic_0:
             # update guesses with whatever new stuff was passed
-            self.update_guess(calpha=calpha, ref_det_name=ref_det_name, **par_dic_0)
-            # if no triggerlists passed, get them from self (load if necessary)
+            self.update_guess(calpha=calpha, ref_det_name=ref_det_name,
+                              **par_dic_0)
+            # if no triggerlists passed, get them from self (load if None)
             if triggerlists is None:
                 triggerlists = self.triggerlists or self.load_triggerlists()
             # computing linear free time shift
             if compute_linear_free_shift:
-                self.tgps_shift = get_linear_free_time_shift(triggerlists, calpha=self.calpha,
-                    i_refdet=self.i_refdet, max_tsep=max_tsep, **self.par_dic_0)
+                self.tgps_shift = get_linear_free_time_shift(triggerlists,
+                    calpha=self.calpha, i_refdet=self.i_refdet,
+                    max_tsep=max_tsep, **self.par_dic_0)
             # computing physical parameters from calpha
             if compute_par_dic_0:
-                self.par_dic_0 = triggerlists[self.i_refdet].templatebank.get_pdic_from_calpha(self.calpha)
+                self.par_dic_0 = triggerlists[
+                    self.i_refdet].templatebank.get_pdic_from_calpha(
+                        self.calpha)
 
 
-    def get_event_data(self, shift_tgps=False, calpha=None, ref_det_name=None,
-                       store_triggerlists=False, max_tsep=0.07, **par_dic_0):
+    def get_event_data(self, shift_tgps=False, max_tsep=0.07, calpha=None,
+                       ref_det_name=None, store_triggerlists=False,
+                       compute_par_dic_0=False, **par_dic_0):
         """
         Return an instance of `data.EventData`.
 
@@ -248,15 +256,17 @@ class EventMetadata:
           with physical parameters given in
           self.par_dic_0.update(:param par_dic_0:)
         :param ref_det_name: set new self.ref_det_name and self.i_refdet
-        :param max_tsep: if shifting tgps, a shift larger than this will result in error
+        :param max_tsep: if shifting tgps, a shift larger than this will
+          result in error
         """
         # load triggerlists (NOTE: this calls self._setup())
         triggerlists = self.load_triggerlists(store=store_triggerlists)
         use_tgps = self.tgps
         if shift_tgps:
-            self.compute_from_guess(triggerlists=triggerlists, calpha=calpha, ref_det_name=ref_det_name,
-                                    compute_linear_free_shift=True, compute_par_dic_0=False, max_tsep=max_tsep,
-                                    **par_dic_0)
+            self.compute_from_guess(triggerlists=triggerlists, calpha=calpha,
+                ref_det_name=ref_det_name, compute_par_dic_0=False,
+                compute_linear_free_shift=True, max_tsep=max_tsep,
+                **par_dic_0)
             use_tgps += self.tgps_shift
 
         dic = {key: getattr(self, key)
