@@ -294,7 +294,7 @@ class WaveformGenerator(utils.JSONMixin):
             # Compute the waveform mode by mode and update cache.
             waveform_par_dic_0 = dict(zip(self.slow_params, slow_par_vals),
                                       d_luminosity=1., vphi=0.)
-            # hplus_hcross_0 is a (n_m x 2 x n_frequencies) arrays with
+            # hplus_hcross_0 is a (n_m x 2 x n_frequencies) array with
             # sum_l (hlm+, hlmx), at vphi=0, d_luminosity=1Mpc.
             hplus_hcross_0 = np.array(
                 [compute_hplus_hcross(self.f_ref, f, waveform_par_dic_0,
