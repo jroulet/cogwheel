@@ -11,10 +11,11 @@ import numpy as np
 
 PIPELINE_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', '..', 'gw_detection_ias'))
-sys.path.append(PIPELINE_PATH)
+sys.path.insert(0, PIPELINE_PATH)
+#sys.path.append(PIPELINE_PATH)
 import triggers_single_detector as trig
 
-from . import data, utils
+from . import data
 
 # ordering of detector names for passing fnames
 DETECTOR_NAMES_ORDERED = 'HLV'
@@ -124,7 +125,7 @@ def get_f_strain_psd_dic(triggerlists, tgps, tcoarse, t_interval):
     return dic
 
 
-class EventMetadata(utils.JSONMixin):
+class EventMetadata(data.utils.JSONMixin):
     """
     Class that can be used for data information about events, and
     provides a method `get_event_data()` to create EventData instances.
