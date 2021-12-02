@@ -14,9 +14,16 @@ PIPELINE_PATH = os.path.abspath(os.path.join(
 sys.path.append(PIPELINE_PATH)
 import triggers_single_detector as trig
 
-from . import data
+from . import data, utils
 
+# ordering of detector names for passing fnames
 DETECTOR_NAMES_ORDERED = 'HLV'
+# default maximization range
+DEFAULT_TC_RANGE = (-.1, .1)
+# default minimum mass ratio m2 / m1
+DEFAULT_Q_MIN = 1 / 20
+# default total time interval for data
+DEFAULT_T_INTERVAL = 128.
 
 event_registry = {}  # EventMetadata instances register themselves here
 
@@ -117,15 +124,16 @@ def get_f_strain_psd_dic(triggerlists, tgps, tcoarse, t_interval):
     return dic
 
 
-class EventMetadata:
+class EventMetadata(utils.JSONMixin):
     """
     Class that can be used for data information about events, and
     provides a method `get_event_data()` to create EventData instances.
     """
-    def __init__(self, eventname, tgps, mchirp_range, q_min=1/20,
-                 t_interval=128., tcoarse=None, bank_id=None,
-                 fnames=None, load_data=False, triggerlist_kw=None,
-                 tc_range=(-.1, .1), ref_det_name=None,
+    def __init__(self, eventname, tgps, mchirp_range,
+                 q_min=DEFAULT_Q_MIN, t_interval=DEFAULT_T_INTERVAL,
+                 tcoarse=None, bank_id=None, fnames=None,
+                 load_data=False, triggerlist_kw=None,
+                 tc_range=DEFAULT_TC_RANGE, ref_det_name=None,
                  calpha=None, compute_linear_free_shift=False,
                  max_tsep=0.07, compute_par_dic_0=False, **par_dic_0):
         """
@@ -197,6 +205,33 @@ class EventMetadata:
                   "for old version.")
         event_registry[self.eventname] = self
 
+    def get_init_dict(self):
+        """Return dictionary with keyword arguments to `__init__`."""
+        # vv these must be taken from self (always set on init)
+        init_dict = {key: getattr(self, key) for key in
+                     ['eventname', 'tgps', 'mchirp_range',
+                      'q_min', 't_interval', 'tcoarse']}
+        # vv bankid, fnames, load_data come from self._setup_pars,
+        # representing a snapshot of the initialization, so changes
+        # made to these parameters post-init are not in JSON file
+        init_dict.update(self._setup_pars)
+        # vv these also must be taken from self (always set on init)
+        init_dict.update({key: getattr(self, key, None) for key in
+                          ['triggerlist_kw', 'tc_range']})
+        # vv these will be taken from self if set, else set to None
+        init_dict.update({key: getattr(self, key, None) for key in
+            ['triggerlist_kw', 'tc_range', 'ref_det_name', 'calpha']})
+        # par_dic_0 should just contain physical params, but since it
+        # eats kwargs in many functions let us check that we have not
+        # accidentally put another init kwarg in it during usage
+        for k, v in self.par_dic_0.items():
+            if k not in init_dict:
+                init_dict[k] = v
+            else:
+                print(f'Warning! self.par_dic_0[`{k}`] = {v} lost' +
+                      f' in init_dict, using {k} = {init_dict[k]}')
+        return init_dict
+
     def update_guess(self, mchirp_range=None, q_min=None, tc_range=None,
                      ref_det_name=None, calpha=None, **par_dic_0):
         # set attributes with inputs that are not None
@@ -208,7 +243,9 @@ class EventMetadata:
             self.tc_range = tc_range
         if ref_det_name is not None:
             self.ref_det_name = ref_det_name
-            self.i_refdet = DETECTOR_NAMES_ORDERED.index(ref_det_name)
+            self.i_refdet = (DETECTOR_NAMES_ORDERED
+                             if self.detector_names is NotImplemented
+                             else self.detector_names).index(ref_det_name)
         if calpha is not None:
             self.calpha = calpha
         self.par_dic_0.update(par_dic_0)
@@ -346,6 +383,13 @@ class EventMetadata:
         self.detector_names = ''.join(
             det for det, fname in zip(DETECTOR_NAMES_ORDERED, fnames)
             if fname is not None)
+        # Reference detector information, if it exists
+        refdet_name = getattr(self, 'ref_det_name', None)
+        if refdet_name is not None:
+            assert refdet_name in self.detector_names, \
+                (f'Detector mismatch! self.ref_det_name={refdet_name}' +
+                 f' is not in self.detector_names={self.detector_names}')
+            self.i_refdet = self.detector_names.index(refdet_name)
 
         self.fnames = [fname for fname in fnames if fname is not None]
 
