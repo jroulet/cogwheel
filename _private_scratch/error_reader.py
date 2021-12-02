@@ -13,22 +13,26 @@ def is_xphm_warning(x):
 
 class ErrorReader:
     """Class for reading error file and other textual output"""
-    def __init__(self, dirname=None, get_outfiles=False, print_tail=False):
+    def __init__(self, dirname=None, get_outfiles=False,
+                 print_tail=False, **print_kwargs):
         self.lines = {}
         self.dirname, self.subdir_paths = dirname, None
         self.errorfile_paths, self.outfile_paths = None, None
         if dirname is not None:
             self.refresh_and_print(get_outfiles=get_outfiles,
-                                   print_tail=print_tail)
+                                   print_tail=print_tail,
+                                   **print_kwargs)
 
-    def refresh_and_print(self, get_outfiles=False, print_tail=False):
+    def refresh_and_print(self, get_outfiles=False,
+                          print_tail=False, **print_kwargs):
         self.subdir_paths = self.get_subdir_paths()
         self.errorfile_paths = self.get_errorfile_paths()
-        self.print(print_tail)
+        self.print(print_tail, **print_kwargs)
         self.outfile_paths = None
         if get_outfiles:
             self.outfile_paths = self.get_outfile_paths()
-            self.print(print_tail, self.outfile_paths)
+            self.print(print_tail, self.outfile_paths,
+                       **print_kwargs)
 
     def path(self, filename):
         if str(self.dirname) in str(filename):
