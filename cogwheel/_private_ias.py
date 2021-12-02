@@ -6,8 +6,8 @@ We should keep it as small as possible.
 
 import os
 import sys
+from copy import deepcopy
 import numpy as np
-from copy import deepcopy as dcopy
 
 PIPELINE_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', '..', 'gw_detection_ias'))
@@ -44,6 +44,7 @@ def _get_linear_free_shift_from_bank(bank, calpha=None, **pars):
         return bank.get_linear_free_shift_from_calpha(calpha)
     return bank.get_linear_free_shift_from_pars(**pars)
 
+
 def get_linear_free_time_shift(triggerlists, calpha=None, i_refdet=0,
                                max_tsep=0.07, **pars):
     """
@@ -58,6 +59,7 @@ def get_linear_free_time_shift(triggerlists, calpha=None, i_refdet=0,
     if np.abs(np.max(shifts) - np.min(shifts)) > max_tsep:
         raise ValueError(f'Disparate trigger times! Shifts = {shifts}')
     return shifts[i_refdet]
+
 
 def _get_f_strain_psd_from_triggerlist(triggerlist, tgps, tcoarse,
                                        t_interval):
@@ -102,8 +104,8 @@ def get_f_strain_psd_dic(triggerlists, tgps, tcoarse, t_interval):
     """
     dic = {}
 
-    data_by_det = [_get_f_strain_psd_from_triggerlist(triggerlist, tgps, tcoarse,
-                                                      t_interval)
+    data_by_det = [_get_f_strain_psd_from_triggerlist(triggerlist, tgps,
+                                                      tcoarse, t_interval)
                    for triggerlist in triggerlists]
 
     freq_arrs, dic['strain'], dic['psd'] = (
@@ -117,9 +119,8 @@ def get_f_strain_psd_dic(triggerlists, tgps, tcoarse, t_interval):
 
 class EventMetadata:
     """
-    Lightweight class that can be used for data information
-    about events, and provides a method `get_event_data()` to create
-    EventData instances.
+    Class that can be used for data information about events, and
+    provides a method `get_event_data()` to create EventData instances.
     """
     def __init__(self, eventname, tgps, mchirp_range, q_min=1/20,
                  t_interval=128., tcoarse=None, bank_id=None,
@@ -144,17 +145,19 @@ class EventMetadata:
                  `source` is 'BNS', 'NSBH' or 'BBH', `i_multibank` and
                  `i_subbank` are integers. Can be left as `None` to
                  guess a good choice from `mchirp_range`.
-        fnames: 3-tuple with strings or `None`s, with filenames pointing
-                to Hanford, Livingston and Virgo triggerlists.
-                `None` values mean that the pipeline's file will be
-                retrieved.
+        fnames: 3-list with strings or `None`s or `0`s specifying
+                the Hanford, Livingston and Virgo triggerlists.
+                Strings are interpreted as filenames, `None` will ignore
+                that detector, and `0` means that the pipeline's file
+                will be retrieved. Passing a single `None` (default) is
+                equivalent to [0, 0, 0].
         load_data: 3-tuple with booleans, whether to reload the data in
                    the triggerlist for each detector H, L, V.
                    `False` means it's loaded as is from json.
                    A single boolean is ok, applied to all detectors.
         triggerlist_kw: dict of kwargs to pass TriggerList.from_json()
         tc_range: range of times around tcoarse that should be searched
-        ref_det_name: `H`/`L`/`V` indiciating detector that gave highest SNR
+        ref_det_name: 'H'/'L'/'V' indicating detector with highest SNR
         calpha: calpha coefficients for bank template that triggered
         **par_dic_0: physical parameters `m1`, `m2`, `s1z`, `s2z` (and
           others if the bank has a precessing and/or HM waveform generator)
@@ -169,7 +172,7 @@ class EventMetadata:
         self.load_data = NotImplemented
         self.triggerlists = None
         self.triggerlist_kw = ({} if triggerlist_kw is None
-                               else dcopy(triggerlist_kw))
+                               else deepcopy(triggerlist_kw))
         # These are passed
         self._setup_pars = {'bank_id': bank_id,
                             'fnames': fnames,
@@ -179,10 +182,11 @@ class EventMetadata:
         self.t_interval = t_interval
         self.tcoarse = t_interval / 2 if tcoarse is None else tcoarse
         # Now specify (and compute) physical waveform properties
-        self.par_dic_0 = dcopy(par_dic_0)
+        self.par_dic_0 = deepcopy(par_dic_0)
         self.update_guess(mchirp_range=mchirp_range, q_min=q_min,
             tc_range=tc_range, ref_det_name=ref_det_name, calpha=calpha)
-        self.compute_from_guess(compute_par_dic_0=compute_par_dic_0,
+        self.compute_from_guess(
+            compute_par_dic_0=compute_par_dic_0,
             compute_linear_free_shift=compute_linear_free_shift,
             max_tsep=max_tsep)
         # update event registry and save previous instance if it exists
@@ -215,25 +219,26 @@ class EventMetadata:
                            **par_dic_0):
         if compute_par_dic_0 is None:
             compute_par_dic_0 = (not par_dic_0) and (calpha is not None)
-        # if we are doing something, do it
-        if compute_linear_free_shift or compute_par_dic_0:
-            # update guesses with whatever new stuff was passed
-            self.update_guess(calpha=calpha, ref_det_name=ref_det_name,
-                              **par_dic_0)
-            # if no triggerlists passed, get them from self (load if None)
-            if triggerlists is None:
-                triggerlists = self.triggerlists or self.load_triggerlists()
-            # computing linear free time shift
-            if compute_linear_free_shift:
-                self.tgps_shift = get_linear_free_time_shift(triggerlists,
-                    calpha=self.calpha, i_refdet=self.i_refdet,
-                    max_tsep=max_tsep, **self.par_dic_0)
-            # computing physical parameters from calpha
-            if compute_par_dic_0:
-                self.par_dic_0 = triggerlists[
-                    self.i_refdet].templatebank.get_pdic_from_calpha(
-                        self.calpha)
 
+        if not (compute_linear_free_shift or compute_par_dic_0):
+            return
+
+        # update guesses with whatever new stuff was passed
+        self.update_guess(calpha=calpha, ref_det_name=ref_det_name,
+                          **par_dic_0)
+        # if no triggerlists passed, get them from self (load if None)
+        if triggerlists is None:
+            triggerlists = self.triggerlists or self.load_triggerlists()
+        # computing linear free time shift
+        if compute_linear_free_shift:
+            self.tgps_shift = get_linear_free_time_shift(
+                triggerlists, calpha=self.calpha, i_refdet=self.i_refdet,
+                max_tsep=max_tsep, **self.par_dic_0)
+        # computing physical parameters from calpha
+        if compute_par_dic_0:
+            self.par_dic_0 = triggerlists[
+                self.i_refdet].templatebank.get_pdic_from_calpha(
+                    self.calpha)
 
     def get_event_data(self, shift_tgps=False, max_tsep=0.07,
                        calpha=None, ref_det_name=None,
@@ -261,14 +266,14 @@ class EventMetadata:
         :param ref_det_name: set new self.ref_det_name and self.i_refdet
         :param **par_dic_0: update self.par_dic_0
         """
-        # load triggerlists (NOTE: this calls self._setup())
+        # Load triggerlists (note: this calls self._setup())
         triggerlists = self.load_triggerlists(store=store_triggerlists)
         use_tgps = self.tgps
         if shift_tgps:
-            self.compute_from_guess(triggerlists=triggerlists,
-                calpha=calpha, ref_det_name=ref_det_name,
-                compute_linear_free_shift=True, max_tsep=max_tsep,
-                compute_par_dic_0=False, **par_dic_0)
+            self.compute_from_guess(
+                triggerlists=triggerlists, calpha=calpha,
+                ref_det_name=ref_det_name, compute_linear_free_shift=True,
+                max_tsep=max_tsep, compute_par_dic_0=False, **par_dic_0)
             use_tgps += self.tgps_shift
 
         dic = {key: getattr(self, key)
@@ -287,8 +292,8 @@ class EventMetadata:
         """
         self._setup()
         triggerlists = [trig.TriggerList.from_json(fname, load_data=load,
-                                           do_signal_processing=False,
-                                           **self.triggerlist_kw)
+                                                   do_signal_processing=False,
+                                                   **self.triggerlist_kw)
                         for fname, load in zip(self.fnames, self.load_data)]
         if store:
             self.triggerlists = triggerlists
@@ -298,16 +303,21 @@ class EventMetadata:
         """
         Auxiliary function to get json filenames of triggerlists
         implementing defaults.
-        fnames = list of  trigglerlist config filenames
-            [filename(det) for det in [Hanford, Virgo, Livingston]]
-            --> filename = None: no file for that detector
-            --> filename = 0: get from trig.utils.get_detector_fnames()
-            Default fnames=None sets fnames = [0,0,0] => all from pipeline,
-            and wherever the pipeline cannot find a file, will
-            have filename = None (as when passing fnames with None values).
+
+        bank_id: 3-tuple with (source, i_multibank, i_subbank) where
+                 `source` is 'BNS', 'NSBH' or 'BBH', `i_multibank` and
+                 `i_subbank` are integers. Can be left as `None` to
+                 guess a good choice from `mchirp_range`.
+        fnames: 3-list with strings or `None`s or `0`s specifying
+                the Hanford, Livingston and Virgo triggerlists.
+                Strings are interpreted as filenames, `None` will ignore
+                that detector, and `0` means that the pipeline's file
+                will be retrieved. Passing a single `None` (default) is
+                equivalent to [0, 0, 0].
         """
         if fnames is None:
             fnames = [0, 0, 0]
+
         i_get_default = np.where([fnm == 0 for fnm in fnames])[0]
         if len(i_get_default) > 0:
             if bank_id is None:
@@ -315,8 +325,8 @@ class EventMetadata:
             source, i_multibank, i_subbank = bank_id
             json_fnames = trig.utils.get_detector_fnames(
                 self.tgps, i_multibank, i_subbank, source=source)
-            for ii in i_get_default:
-                fnames[ii] = json_fnames[ii]
+            for ind in i_get_default:
+                fnames[ind] = json_fnames[ind]
 
         return fnames
 
@@ -361,10 +371,10 @@ EventMetadata('GW170727', 1185152688.019, (20, 80), bank_id=('BBH', 4, 0))
 EventMetadata('GW170403', 1175295989.221, (20, 80), bank_id=('BBH', 4, 1))
 EventMetadata('GWC170402', 1175205128.567, (10, 100), bank_id=('BBH', 3, 0))
 EventMetadata('GW170817A', 1186974184.716, (25, 100), bank_id=('BBH', 4, 2),
-              fnames=(
+              fnames=[
     '/data/bzackay/GW/H-H1_GWOSC_O2_4KHZ_R1-1186971648-4096_notched_config.json',
-    None,
-    None),
+    0,
+    0],
               load_data=(False, False, True), triggerlist_kw={'fmax': 512.})
 
 EventMetadata('GW150914', 1126259462.4, (10, 50), bank_id=('BBH', 3, 0))
@@ -375,43 +385,43 @@ EventMetadata('GW151226', 1135136350.6, (9.5, 10.5), bank_id=('BBH', 1, 0),
     "/data/srolsen/GW/gw_pe/GW151226_reweighting_triggerlists/trigL1notch1024.json"))
 EventMetadata('GW170104', 1167559936.6, (10, 50), bank_id=('BBH', 3, 0))
 EventMetadata('GW170608', 1180922494.5, (8.2, 9), bank_id=('BBH', 1, 0),
-              fnames=(
+              fnames=[
     '/data/bzackay/GW/H-H1_GWOSC_O2_4KHZ_R1-1180920447-4096_notched_config.json',
-    '/data/bzackay/GW/L-L1_GWOSC_O2_4KHZ_R1-1180920447-4096_config.json'))
+    '/data/bzackay/GW/L-L1_GWOSC_O2_4KHZ_R1-1180920447-4096_config.json'])
 EventMetadata('GW170729', 1185389807.3, (20, 80), bank_id=('BBH', 4, 0),
-              fnames=(
-    None,
-    None,
-    '/data/bzackay/GW/V-V1_GWOSC_4KHZ_R1-1185387760-4096_holefilled.json'))
+              fnames=[
+    0,
+    0,
+    '/data/bzackay/GW/V-V1_GWOSC_4KHZ_R1-1185387760-4096_holefilled.json'])
 EventMetadata('GW170809', 1186302519.8, (10, 50), bank_id=('BBH', 3, 0),
               load_data=(False, False, True), triggerlist_kw={'fmax': 512.})
 EventMetadata('GW170814', 1186741861.5, (10, 50), bank_id=('BBH', 3, 0),
               load_data=(False, False, True), triggerlist_kw={'fmax': 512.})
 EventMetadata('GW170818', 1187058327.1, (10, 50), bank_id=('BBH', 3, 0))
 EventMetadata('GW170823', 1187529256.5, (10, 50),
-              fnames=(
+              fnames=[
     '/data/bzackay/GW/OutputDir/O2_Fri_Mar_8_12_29O2_BBH_3_multibank_bank_0/H-H1_GWOSC_O2_4KHZ_R1-1187528704-4096_config.json',
-    '/data/bzackay/GW/OutputDir/O2_Fri_Mar_8_12_29O2_BBH_3_multibank_bank_0/L-L1_GWOSC_O2_4KHZ_R1-1187528704-4096_config.json')
+    '/data/bzackay/GW/OutputDir/O2_Fri_Mar_8_12_29O2_BBH_3_multibank_bank_0/L-L1_GWOSC_O2_4KHZ_R1-1187528704-4096_config.json']
              )  # There's a Virgo file but no Virgo data at tgps
 
 EventMetadata('GW190412', 1239082262.2, (13.9, 16.8))
 EventMetadata('GW190814', 1249852257.0, (6.25, 6.57),
-              fnames=(
+              fnames=[
     '/data/bzackay/GW/O3Events/GW190814/H-H1_GWOSC_4KHZ_R1-1249850209-4096.json',
     '/data/bzackay/GW/O3Events/GW190814/H-L1_GWOSC_4KHZ_R1-1249850209-4096.json',
-    '/data/bzackay/GW/O3Events/GW190814/H-V1_GWOSC_4KHZ_R1-1249850209-4096.json'))
+    '/data/bzackay/GW/O3Events/GW190814/H-V1_GWOSC_4KHZ_R1-1249850209-4096.json'])
 EventMetadata('GW190521', 1242442967.4, (25, 155))
 EventMetadata('GW190408_181802', 1238782700.3, (14.1, 32.9))
 EventMetadata('GW190413_052954', 1239168612.5, (7.91, 84.6))
 EventMetadata('GW190413_134308', 1239198206.7, (9.57, 109))
 EventMetadata('GW190421_213856', 1239917954.3, (11.2, 86),
-              fnames=(
+              fnames=[
     '/data/bzackay/GW/O3Events/GW190421_213856/H-H1_GWOSC_4KHZ_R1-1239915907-4096.json',
-    '/data/bzackay/GW/O3Events/GW190421_213856/L-L1_GWOSC_4KHZ_R1-1239915907-4096.json'))
+    '/data/bzackay/GW/O3Events/GW190421_213856/L-L1_GWOSC_4KHZ_R1-1239915907-4096.json'])
 EventMetadata('GW190424_180648', 1240164426.1, (12.6, 77.9),
-              fnames=(
+              fnames=[
     None,  # H, V were off
-    '/data/bzackay/GW/O3Events/GW190424_180648/L-L1_GWOSC_4KHZ_R1-1240162379-4096.json'))
+    '/data/bzackay/GW/O3Events/GW190424_180648/L-L1_GWOSC_4KHZ_R1-1240162379-4096.json'])
 # EventMetadata('GW190426_152155', 1240327333.3, (2.53, 2.67))  # BNS
 EventMetadata('GW190503_185404', 1240944862.3, (9.36, 72.2))
 EventMetadata('GW190512_180714', 1241719652.4, (13.7, 23.9))
@@ -421,9 +431,9 @@ EventMetadata('GW190517_055101', 1242107479.8, (15, 58))
 EventMetadata('GW190519_153544', 1242315362.4, (13.8, 114))
 EventMetadata('GW190521_074359', 1242459857.5, (24.9, 53.5))
 EventMetadata('GW190527_092055', 1242984073.8, (4.25, 156),
-              fnames=(
+              fnames=[
     '/data/bzackay/GW/O3Events/GW190527_092055/H-H1_GWOSC_4KHZ_R1-1242982026-4096.json',
-    '/data/bzackay/GW/O3Events/GW190527_092055/L-L1_GWOSC_4KHZ_R1-1242982026-4096.json'))
+    '/data/bzackay/GW/O3Events/GW190527_092055/L-L1_GWOSC_4KHZ_R1-1242982026-4096.json'])
 EventMetadata('GW190602_175927', 1243533585.1, (8.43, 142))
 EventMetadata('GW190620_030421', 1245035079.3, (8.51, 113))
 EventMetadata('GW190630_185205', 1245955943.2, (20.5, 38.6))
@@ -441,10 +451,10 @@ EventMetadata('GW190828_063405', 1251009263.8, (18.8, 50.4))
 EventMetadata('GW190828_065509', 1251010527.9, (13.7, 21.1))
 EventMetadata('GW190909_114149', 1252064527.7, (3.8, 199))
 EventMetadata('GW190910_112807', 1252150105.3, (20.8, 68.8),
-              fnames=(
+              fnames=[
     None,
     '/data/bzackay/GW/O3Events/GW190910_112807/L-L1_GWOSC_4KHZ_R1-1252148058-4096.json',
-    '/data/bzackay/GW/O3Events/GW190910_112807/V-V1_GWOSC_4KHZ_R1-1252148058-4096.json'))
+    '/data/bzackay/GW/O3Events/GW190910_112807/V-V1_GWOSC_4KHZ_R1-1252148058-4096.json'])
 EventMetadata('GW190915_235702', 1252627040.7, (12.8, 53))
 EventMetadata('GW190924_021846', 1253326744.8, (6.22, 6.72))
 EventMetadata('GW190929_012149', 1253755327.5, (5.24, 143))
