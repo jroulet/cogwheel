@@ -302,10 +302,15 @@ class CombinedPrior(Prior):
     def __init__(self, *args, **kwargs):
         """
         Instantiate prior classes and define `range_dic`.
+
+        The list of parameters to pass to a subclass `cls` can be found
+        using `cls.init_parameters()`.
         """
-        kwargs.update(dict(zip([par.name for par in self._init_parameters()],
+        kwargs.update(dict(zip([par.name for par in self.init_parameters()],
                                args)))
         self.subpriors = [cls(**kwargs) for cls in self.prior_classes]
+
+        self.range_dic = {}
         for subprior in self.subpriors:
             self.range_dic.update(subprior.range_dic)
 
@@ -389,6 +394,7 @@ class CombinedPrior(Prior):
             """
             return self.lnprior_and_transform(*par_vals, **par_dic)[0]
 
+
         # Witchcraft to fix the functions' signatures:
         self_parameter = inspect.Parameter('self',
                                            inspect.Parameter.POSITIONAL_ONLY)
@@ -407,9 +413,6 @@ class CombinedPrior(Prior):
         cls.inverse_transform = inverse_transform
         cls.lnprior_and_transform = lnprior_and_transform
         cls.lnprior = lnprior
-
-        # Edit the `__init__()` signature of the new subclass:
-        cls._change_signature(cls.__init__, cls._init_parameters())
 
     @classmethod
     def _set_params(cls):
@@ -456,7 +459,7 @@ class CombinedPrior(Prior):
                             f'before {prior_class}.')
 
     @classmethod
-    def _init_parameters(cls):
+    def init_parameters(cls):
         """
         Return list of `inspect.Parameter` objects, for the aggregated
         parameters taken by the `__init__` of `prior_classes`, without
@@ -481,7 +484,7 @@ class CombinedPrior(Prior):
         Parameters
         ----------
         func: function.
-        parameters: sequence of `signature.Parameter` objects.
+        parameters: sequence of `inspect.Parameter` objects.
         """
         func.__signature__ = inspect.signature(func).replace(
             parameters=parameters)

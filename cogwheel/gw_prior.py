@@ -68,6 +68,7 @@ class ReferenceDetectorMixin:
             R = (1+cos^2(iota)) Fp / 2 + i cos(iota) Fc
         that relates a waveform with generic orientation to an overhead
         face-on one to leading post-Newtonian order.
+        Note that the amplitude |R| is between 0 and 1.
         """
         fplus, fcross = self.fplus_fcross_refdet(ra, dec, psi)
         return (1 + np.cos(iota)**2) / 2 * fplus + 1j * np.cos(iota) * fcross
@@ -416,7 +417,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
     conditioned_on = ['ra', 'dec', 'psi', 'iota', 'm1', 'm2']
 
     def __init__(self, *, tgps, ref_det_name, d_hat_max=500, **kwargs):
-        self.range_dic = {'d_hat': (0, d_hat_max)}
+        self.range_dic = {'d_hat': (0.001, d_hat_max)}
         super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
 
         self.tgps = tgps
@@ -479,6 +480,50 @@ class UniformComovingVolumePrior(UniformLuminosityVolumePrior):
         cosmo_weight = ((1 - d_luminosity * cosmo.dz_dDL(d_luminosity) / (1+z))
                         / (1 + z)**4)
         return np.log(cosmo_weight * d_luminosity**3 / d_hat)
+
+
+class UniformComovingVolumePriorSampleEffectiveDistance(ReferenceDetectorMixin, Prior):
+    """
+    Distance prior uniform in luminosity volume and detector-frame time.
+    The sampled parameter is:
+      d_effective = d_luminosity / |self.geometric_factor_refdet(ra, dec, psi, iota)|
+    where the effective distance is defined in one "reference" detector
+    (see parent class ReferenceDetectorMixin).
+    """
+    standard_params = ['d_luminosity']
+    range_dic = {'d_effective': NotImplemented}
+    conditioned_on = ['ra', 'dec', 'psi', 'iota']
+
+    def __init__(self, *, tgps, ref_det_name, d_effective_max=50000, **kwargs):
+        self.range_dic = {'d_effective': (0.001, d_effective_max)}
+        super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
+        self.tgps = tgps
+        self.ref_det_name = ref_det_name
+
+    def transform(self, d_effective, ra, dec, psi, iota):
+        """d_effective to d_luminosity"""
+        return {'d_luminosity': d_effective * np.abs(
+            self.geometric_factor_refdet(ra, dec, psi, iota))}
+
+    def inverse_transform(self, d_luminosity, ra, dec, psi, iota):
+        """d_luminosity to d_effective"""
+        return {'d_effective': d_luminosity / np.abs(
+            self.geometric_factor_refdet(ra, dec, psi, iota))}
+
+    def lnprior(self, d_effective, ra, dec, psi, iota):
+        """Natural log of the prior probability density for d_effective."""
+        d_luminosity = d_effective * np.abs(
+            self.geometric_factor_refdet(ra, dec, psi, iota))
+        z = cosmo.z_of_DL_Mpc(d_luminosity)
+        cosmo_weight = ((1 - d_luminosity * cosmo.dz_dDL(d_luminosity) / (1+z))
+                        / (1 + z)**4)
+        return np.log(cosmo_weight * d_luminosity**3 / d_effective)
+
+    def get_init_dict(self):
+        """Return dict with keyword arguments to reproduce the class instance."""
+        return {'tgps': self.tgps,
+                'ref_det_name': self.ref_det_name,
+                'd_effective_max': self.range_dic['d_effective'][1]}
 
 
 class FlatChieffPrior(UniformPriorMixin, Prior):
@@ -735,10 +780,7 @@ class LVCPrior(CombinedPrior, RegisteredPriorMixin):
 
 
 class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
-    """
-    Aligned spins from isotropic distribution, uniform luminosity
-    volume.
-    """
+    """Aligned spins from isotropic distribution, uniform luminosity volume."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
@@ -752,33 +794,93 @@ class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
 
 
 class IASPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
-    """Precessing, flat in chieff, uniform comoving volume-time."""
-    prior_classes = IASPrior.prior_classes.copy()
-    prior_classes[prior_classes.index(UniformLuminosityVolumePrior)] \
-        = UniformComovingVolumePrior
+    """Precessing, flat in chieff, uniform comoving VT."""
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePrior,
+                     FlatChieffPrior,
+                     UniformDiskInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior]
 
 
-class AlignedSpinIASPriorComovingVT(CombinedPrior,
-                                    RegisteredPriorMixin):
-    """Aligned spin, flat in chieff, uniform comoving volume-time."""
-    prior_classes = AlignedSpinIASPrior.prior_classes.copy()
-    prior_classes[prior_classes.index(UniformLuminosityVolumePrior)] \
-        = UniformComovingVolumePrior
+class AlignedSpinIASPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
+    """Aligned spin, flat in chieff, uniform comoving VT."""
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePrior,
+                     FlatChieffPrior,
+                     ZeroInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior]
 
 
 class LVCPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
-    """Precessing, isotropic spins, uniform comoving volume-time."""
-    prior_classes = LVCPrior.prior_classes.copy()
-    prior_classes[prior_classes.index(UniformLuminosityVolumePrior)] \
-        = UniformComovingVolumePrior
+    """Precessing, isotropic spins, uniform comoving VT."""
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     IsotropicSpinsInplaneComponentsPrior,
+                     ZeroTidalDeformabilityPrior]
 
 
-class AlignedSpinLVCPriorComovingVT(CombinedPrior,
-                                    RegisteredPriorMixin):
+class AlignedSpinLVCPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
+    """Aligned spins from isotropic distribution, uniform comoving VT."""
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     ZeroInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior]
+
+
+class NitzMassIASSpinPrior(CombinedPrior, RegisteredPriorMixin):
     """
-    Aligned spins from isotropic distribution, uniform comoving
-    volume-time.
+    Priors are uniform in source-frame total mass, inverse mass ratio,
+    effective spin, and comoving VT.
+    Sampling is in mtot_source, lnq, d_effective, and the rest of the
+    IAS spin and extrinsic parameters.
     """
-    prior_classes = AlignedSpinLVCPrior.prior_classes.copy()
-    prior_classes[prior_classes.index(UniformLuminosityVolumePrior)] \
-        = UniformComovingVolumePrior
+    prior_classes = [UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePriorSampleEffectiveDistance,
+                     UniformSourceFrameTotalMassInverseMassRatioPrior,
+                     FlatChieffPrior,
+                     UniformDiskInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior]
+
+class NitzMassLVCSpinPrior(CombinedPrior, RegisteredPriorMixin):
+    """
+    Priors have isotropic spins and are uniform in source-frame total mass,
+    inverse mass ratio, and comoving VT.
+    Sampling is in mtot_source, lnq, d_effective, and the rest of the
+    LVC spin and extrinsic parameters.
+    """
+    prior_classes = [UniformPhasePrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformComovingVolumePriorSampleEffectiveDistance,
+                     UniformSourceFrameTotalMassInverseMassRatioPrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     IsotropicSpinsInplaneComponentsPrior,
+                     ZeroTidalDeformabilityPrior]

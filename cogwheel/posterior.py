@@ -5,19 +5,17 @@ Can run as a script to make and save a Posterior instance from scratch.
 
 import argparse
 import inspect
-import pathlib
-import sys
-import os
+import json
 import tempfile
-import textwrap
 import time
+import os
 import numpy as np
 
 from . import data
 from . import gw_prior
 from . import utils
 from . import waveform
-from . likelihood import RelativeBinningLikelihood, ReferenceWaveformFinder
+from .likelihood import RelativeBinningLikelihood, ReferenceWaveformFinder
 
 
 class PosteriorError(Exception):
@@ -81,7 +79,7 @@ class Posterior(utils.JSONMixin):
     def from_event(cls, event, approximant, prior_class, fbin=None,
                    pn_phase_tol=.05, disable_precession=False,
                    harmonic_modes=None, tolerance_params=None, seed=0,
-                   **kwargs):
+                   tc_rng=(-.1, .1), **kwargs):
         """
         Instantiate a `Posterior` class from the strain data.
         Automatically find a good fit solution for relative binning.
@@ -123,13 +121,12 @@ class Posterior(utils.JSONMixin):
             prior_class = gw_prior.prior_registry[prior_class]
 
         # Check required input before doing expensive maximization:
-        sig = inspect.signature(prior_class.__init__)
         required_pars = {
-            name for name, parameter in sig.parameters.items()
+            parameter.name for parameter in prior_class.init_parameters()[1:]
             if parameter.default is inspect._empty
             and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL,
-                                       inspect.Parameter.VAR_KEYWORD)
-            and name != 'self'}
+                                       inspect.Parameter.VAR_KEYWORD)}
+        #### EVDAT QUESTION: can't we just pass this stuff?
         event_data_keys = {'mchirp_range', 'tgps', 'q_min'}
         bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref', 't0_refdet'}
         if missing_pars := (required_pars - event_data_keys - bestfit_keys
@@ -141,7 +138,7 @@ class Posterior(utils.JSONMixin):
             event_data.detector_names, event_data.tgps, event_data.tcoarse,
             approximant, f_ref=20., harmonic_modes=[(2, 2)])
         bestfit = ReferenceWaveformFinder(
-            event_data, aux_waveform_generator).find_bestfit_pars(seed=seed)
+            event_data, aux_waveform_generator).find_bestfit_pars(tc_rng, seed)
         waveform_generator = waveform.WaveformGenerator(
             event_data.detector_names, event_data.tgps, event_data.tcoarse,
             approximant, bestfit['f_ref'], harmonic_modes, disable_precession)
@@ -195,22 +192,38 @@ class Posterior(utils.JSONMixin):
         return utils.get_eventdir(parentdir, self.prior.__class__.__name__,
                                   self.likelihood.event_data.eventname)
 
+_KWARGS_FILENAME = 'kwargs.json'
 
-def initialize_posteriors_slurm(eventnames, approximant, prior_name,
-                                parentdir, n_hours_limit=2,
-                                memory_per_task='4G', overwrite=False):
+def initialize_posteriors_slurm(
+        eventnames, approximant, prior_name, parentdir, n_hours_limit=2,
+        sbatch_cmds=('--mem-per-cpu=4G',), overwrite=False, **kwargs):
     """
-    Submit jobs that initialize `Posterior.from_event()` for each event.
-    """
-    package = pathlib.Path(__file__).parents[1].resolve()
-    module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
+    Submit jobs that run `main()` for each event.
+    This will initialize `Posterior.from_event()` and save the
+    `Posterior` to JSON inside the appropriate `eventdir` (per
+    `Posterior.get_eventdir`).
 
+    Parameters
+    ----------
+    eventnames: List of strings with event names.
+    approximant: string with approximant name.
+    prior_name: string, key of `gw_prior.prior_registry`.
+    parentdir: path to top directory where to save output.
+    n_hours_limit: int, hours until slurm jobs are terminated.
+    memory_per_task: string, how much RAM to allocate.
+    overwrite: bool, whether to overwrite preexisting files.
+               `False` (default) raises an error if the file exists.
+    **kwargs: optional keyword arguments to `Posterior.from_event()`.
+              Must be JSON-serializable.
+    """
     if isinstance(eventnames, str):
         eventnames = [eventnames]
-    for eventname in eventnames:
-        eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
 
-        if not overwrite and (filename := eventdir/'Posterior.json').exists():
+    for eventname in eventnames:
+
+        eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
+        filename = eventdir/'Posterior.json'
+        if not overwrite and filename.exists():
             raise FileExistsError(
                 f'{filename} exists, pass `overwrite=True` to overwrite.')
 
@@ -221,34 +234,28 @@ def initialize_posteriors_slurm(eventnames, approximant, prior_name,
         stderr_path = (eventdir/'posterior_from_event.err').resolve()
 
         args = ' '.join([eventname, approximant, prior_name, parentdir])
+
+        if kwargs:
+            with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
+                json.dump(kwargs, kwargs_file)
+                args += f' {kwargs_file.name}'
+
         if overwrite:
             args += ' --overwrite'
 
-        with tempfile.NamedTemporaryFile('w+') as batchfile:
-            batchfile.write(textwrap.dedent(f"""\
-                #!/bin/bash
-                #SBATCH --job-name={job_name}
-                #SBATCH --output={stdout_path}
-                #SBATCH --error={stderr_path}
-                #SBATCH --mem-per-cpu={memory_per_task}
-                #SBATCH --time={n_hours_limit:02}:00:00
-
-                eval "$(conda shell.bash hook)"
-                conda activate {os.environ['CONDA_DEFAULT_ENV']}
-
-                cd {package}
-                srun {sys.executable} -m {module} {args}
-                """))
-            batchfile.seek(0)
-
-            os.system(f'chmod 777 {batchfile.name}')
-            os.system(f'sbatch {batchfile.name}')
-            time.sleep(.1)
+        utils.submit_slurm(job_name, n_hours_limit, stdout_path,
+                           stderr_path, args, sbatch_cmds)
 
 
-def main(eventname, approximant, prior_name, parentdir, overwrite):
+def main(eventname, approximant, prior_name, parentdir, overwrite,
+         kwargs_filename=None):
     '''Construct a Posterior instance and save it to json.'''
-    post = Posterior.from_event(eventname, approximant, prior_name)
+    kwargs = {}
+    if kwargs_filename:
+        with open(kwargs_filename) as kwargs_file:
+            kwargs = json.load(kwargs_file)
+
+    post = Posterior.from_event(eventname, approximant, prior_name, **kwargs)
     post.to_json(post.get_eventdir(parentdir), overwrite=overwrite)
 
 
@@ -261,6 +268,9 @@ if __name__ == '__main__':
     parser.add_argument('prior_name',
                         help='key from `gw_prior.prior_registry`')
     parser.add_argument('parentdir', help='top directory to save output')
+    parser.add_argument('kwargs_filename', nargs='?', default=None,
+                        help='''optional json file with keyword arguments to
+                                Posterior.from_event()''')
     parser.add_argument('--overwrite', action='store_true',
                         help='pass to overwrite existing json file')
 

@@ -33,7 +33,6 @@ def fplus_fcross_detector(detector_name, ra, dec, psi, tgps):
         lal.ComputeDetAMResponse(DETECTORS[detector_name].response, r, d, p, g)
         for r, d, p, g in np.broadcast(ra, dec, psi, gmst)])
 
-
 def time_delay_from_geocenter(detector_names, ra, dec, tgps):
     """Return an array with delay times from Earth center [seconds]."""
     return np.array([
@@ -48,11 +47,9 @@ def eta_to_q(eta):
     """q = m2/m1 as a function of eta = q / (1+q)**2."""
     return (1 - np.sqrt(1 - 4*eta) - 2*eta) / (2*eta)
 
-
 def q_to_eta(q):
     """eta = q / (1+q)**2 as a function of q = m2/m1."""
     return q / (1+q)**2
-
 
 def mchirpeta_to_m1m2(mchirp, eta):
     """Return `m1, m2` given `mchirp, eta`."""
@@ -60,7 +57,6 @@ def mchirpeta_to_m1m2(mchirp, eta):
     m1 = mchirp * (1 + q)**.2 / q**.6
     m2 = q * m1
     return m1, m2
-
 
 # ----------------------------------------------------------------------
 # Latex formatting
@@ -101,7 +97,7 @@ _LABELS = {
     's2phi': r'$\phi_{s2}$',
     'chip': r'$\chi_p$',
     # Distance
-    'd_hat': r'$D_{\rm eff} / \mathcal{M}$',
+    'd_hat': r'$\hat{D}$',
     'd_luminosity': r'$D_L$',
     'z': r'$z$',
     # Orientation

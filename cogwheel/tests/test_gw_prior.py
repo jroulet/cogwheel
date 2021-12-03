@@ -16,6 +16,8 @@ def get_random_init_parameters():
     """Return dictionary of keyword arguments to initialize priors."""
     return dict(
         mchirp_range=np.sort(np.random.uniform(2, 40, 2)),
+        mtot_range=np.sort(np.random.uniform(2, 40, 2)),
+        mtot_source_range=np.sort(np.random.uniform(2, 40, 2)),
         q_min=np.random.uniform(.01, .9),
         detector_pair=np.random.choice(DETECTOR_PAIRS),
         tgps=np.random.uniform(0, 1e9),
