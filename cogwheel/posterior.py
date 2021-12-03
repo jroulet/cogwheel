@@ -191,7 +191,9 @@ class Posterior(utils.JSONMixin):
         return utils.get_eventdir(parentdir, self.prior.__class__.__name__,
                                   self.likelihood.event_data.eventname)
 
+
 _KWARGS_FILENAME = 'kwargs.json'
+
 
 def initialize_posteriors_slurm(
         eventnames, approximant, prior_name, parentdir, n_hours_limit=2,
