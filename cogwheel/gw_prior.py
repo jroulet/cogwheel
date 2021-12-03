@@ -417,7 +417,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
     conditioned_on = ['ra', 'dec', 'psi', 'iota', 'm1', 'm2']
 
     def __init__(self, *, tgps, ref_det_name, d_hat_max=500, **kwargs):
-        self.range_dic = {'d_hat': (0, d_hat_max)}
+        self.range_dic = {'d_hat': (0.001, d_hat_max)}
         super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
 
         self.tgps = tgps
@@ -495,7 +495,7 @@ class UniformComovingVolumePriorSampleEffectiveDistance(ReferenceDetectorMixin, 
     conditioned_on = ['ra', 'dec', 'psi', 'iota']
 
     def __init__(self, *, tgps, ref_det_name, d_effective_max=50000, **kwargs):
-        self.range_dic = {'d_hat': (0, d_effective_max)}
+        self.range_dic = {'d_effective': (0.001, d_effective_max)}
         super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
         self.tgps = tgps
         self.ref_det_name = ref_det_name

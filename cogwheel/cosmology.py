@@ -43,6 +43,21 @@ dz_dDL = z_of_DL_Mpc.derivative()  # Function of DL
 z_of_Dcomov_Mpc = UnivariateSpline(Dcomov_Mpc_of_z(zs, cosmo=DEFAULT_COSMOLOGY), zs, s=0)
 z_of_Vcomov_Mpc3 = UnivariateSpline(Vcomov_Mpc3_of_z(zs, cosmo=DEFAULT_COSMOLOGY), zs, s=0)
 
+# z from keyword-specified parameters
+def redshift(**pars):
+    """
+    Try to compute redshift from `d_luminosity` or `DL`,
+    else try to compute from `d_comoving` or `Dcomov`,
+    else return pars.get(`z`, pars.get(`redshift`, None))
+    """
+    d_luminosity = pars.get('d_luminosity', pars.get('DL', None))
+    if d_luminosity is not None:
+        return z_of_DL_Mpc(d_luminosity)
+    d_comoving = pars.get('d_comoving', pars.get('Dcomov', None))
+    if d_comoving is not None:
+        return z_of_Dcomov_Mpc(d_comoving)
+    return pars.get('z', pars.get('redshift', None))
+
 # z from distance or volume
 def z_at_value(f, val):
     """INPUT MUST HAVE ASTROPY UNITS"""
