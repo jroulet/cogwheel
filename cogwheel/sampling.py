@@ -87,11 +87,19 @@ class Sampler(abc.ABC, utils.JSONMixin):
         resampled = []
         for _, sample in samples.iterrows():
             unfolded = prior.unfold(sample[prior.sampled_params].to_numpy())
-            probabilities = np.exp(sample[self._lnprob_cols])
-            probabilities /= probabilities.sum()
+            probabilities = self._exp_normalize(sample[self._lnprob_cols])
             resampled.append(choice(unfolded, p=probabilities))
 
         return pd.DataFrame(resampled, columns=prior.sampled_params)
+
+    @staticmethod
+    def _exp_normalize(lnprobs):
+        """
+        Return normalized probabilities from unnormalized log
+        probabilities, safe to overflow.
+        """
+        probs = np.exp(lnprobs - np.max(lnprobs))
+        return probs / probs.sum()
 
     def get_rundir(self, parentdir):
         """
