@@ -121,10 +121,11 @@ units.update({k: 'Mpc' for k in ['DL', 'dL', 'deff', 'Dcomov',
 units['DL_Gpc'] = 'Gpc'
 units['Vcomov'] = r'Mpc$^3$'
 units.update({k: 's' for k in ['tc', 'tgeo', 'tgps', 't_geocenter']})
-units.update({k: 'rad' for k in ['ra', 'RA', 'dec', 'DEC', 'psi', 'iota', 'vphi', 'thetaligo', 'philigo',
-                                 'psiplusvphi', 'psiminusvphi', 's1theta', 's2theta', 's1phi', 's2phi',
-                                 'thetaJN', 'phiJL', 'phi12', 's1phi_plus_vphi', 's2phi_plus_vphi',
-                                 's1phi_hat', 's2phi_hat', 'psi_minus_psidet', 'psi_hat', 'philigo_hat']})
+units.update({k: 'rad' for k in ['ra', 'RA', 'dec', 'DEC', 'psi',
+    'iota', 'vphi', 'thetaligo', 'philigo', 'psiplusvphi', 'psiminusvphi',
+    's1theta', 's2theta', 's1phi', 's2phi', 'thetaJN', 'phiJL', 'phi12',
+    's1phi_plus_vphi', 's2phi_plus_vphi', 's1phi_hat', 's2phi_hat',
+    'psi_minus_psidet', 'psi_hat', 'philigo_hat']})
 for k in param_labels.keys():
     if units.get(k, None) is None:
         units[k] = ''
@@ -224,92 +225,6 @@ param_names = {'mchirp': 'Detector Frame Chirp Mass',
                'Fcross': 'Reference Detector Antenna Cross'}
 
 
-param_print_prec = {'mchirp': 1, 'q': 2, 'q1': 1, 'chieff': 2, 'chip': 2,
-                'eta': 2, 'm1': 1, 'm2': 1, 'mtot': 1}\
-for k in ['mchirp', 'm1', 'm2', 'mtot']:
-    param_print_prec[k+'_source'] = param_print_prec[k]
-
-param_print_prec.update({'d_luminosity': 0, 'DL': 0,
-                'dL': 0, 'DL_Gpc': 0, 'Dcomov': 0,
-                'Vcomov': 0, 'z': 2,
-                's1': 2, 's2': 2, 'spin1': 2, 'spin2': 2,
-                's1theta': 1, 's2theta': 1, 's1costheta': 2, 's2costheta': 2,
-                's1r': 2, 's2r': 2, 's1phi': 2, 's2phi': 2,
-                's1x': 2, 's1y': 2, 's1z': 2, 's2x': 2, 's2y': 2, 's2z': 2,
-                'thetaJN': 2,
-                'costhetaJN': 2,
-                'phiJL': 2,
-                'phi12': 2,
-                'RA': 1,
-                'DEC': 1,
-                'ra': 1,
-                'dec': 1,
-                'psi': 1,
-                'vphi': 1,
-                'thetaligo': 1,
-                'philigo': 1,
-                'log10rate': 2,
-                'costhetaligo': 2,
-                'cosiota': 2,
-                'iota': 1,
-                'lnq': 1,
-                'deff': 0,
-                'd_hat': 0,
-                'chiperp': 2,
-                'psiplusvphi': 1,
-                'psiminusvphi': r'$\psi - \varphi$',
-                'tc': r'$t_c$',
-                't_geocenter': r'$t_{\rm geocenter}$',
-                'tgeo': r'$t_{\rm geocenter}$',
-                'tgps': r'$t_{\rm GPS}$',
-                'lnl': r'$\Delta \ln \mathcal{L}$',
-                'lnl_H': r'$\Delta \ln \mathcal{L}_{H}$',
-                'lnl_L': r'$\Delta \ln \mathcal{L}_{L}$',
-                'lnl_V': r'$\Delta \ln \mathcal{L}_{V}$',
-                'lnL': r'$\Delta \ln \mathcal{L}$',
-                'lnL_H1': r'$\Delta \ln \mathcal{L}_{H1}$',
-                'lnL_L1': r'$\Delta \ln \mathcal{L}_{L1}$',
-                'lnL_V1': r'$\Delta \ln \mathcal{L}_{V1}$',
-                'lnPrior': r'$\Delta \ln \Pi$',
-                'lnPosterior': r'$\Delta \ln \mathcal{L} + \Delta \ln \Pi$',
-                'lnLmax': r'$max_{\vec{\theta}} \Delta \ln \mathcal{L}(\vec{\theta} | d)$',
-                'lnL_Lmax': r'$\ln( \mathcal{L} / \mathcal{L}_{\rm{max}} )$',
-                'snr': r'$\rho$',
-                'snr2': r'$\rho^2$',
-                'Fplus': r'$F_+$',
-                'Fcross': r'$F_{\times}$',
-                'fplus_H': r'$F_+^{(H1)}(\alpha, \delta, \psi)$',
-                'fplus_L': r'$F_+^{(L1)}(\alpha, \delta, \psi)$',
-                'fplus_V': r'$F_+^{(V1)}(\alpha, \delta, \psi)$',
-                'fcross_H': r'$F_{\times}^{(H1)}(\alpha, \delta, \psi)$',
-                'fcross_L': r'$F_{\times}^{(L1)}(\alpha, \delta, \psi)$',
-                'fcross_V': r'$F_{\times}^{(V1)}(\alpha, \delta, \psi)$',
-                'antenna_H': r'H1: $F_+^2 + F_{\times}^2$',
-                'antenna_L': r'L1: $F_+^2 + F_{\times}^2$',
-                'antenna_V': r'V1: $F_+^2 + F_{\times}^2$',
-                's1phi_plus_vphi': r'$\phi_{s1} + \varphi$',
-                's2phi_plus_vphi': r'$\phi_{s2} + \varphi$',
-                's1phi_hat': r'$\hat{\phi}_{s1}$',
-                's2phi_hat': r'$\hat{\phi}_{s2}$',
-                'psi_minus_psidet': r'$\psi - \psi_{\rm det}$',
-                'psi_hat': r'$\hat{\psi}$',
-                'philigo_hat': r'$\hat{\phi}_{\rm LIGO}$',
-                'effective_distance': r'$D_{\rm eff}(D_L, \iota, F_+, F_{\times})$',
-                's1x_prime': r"$s_{1,x'}$",
-                's1y_prime': r"$s_{1,y'}$",
-                's2x_prime': r"$s_{2,x'}$",
-                's2y_prime': r"$s_{2,y'}$",
-                's1x_prime_rescale': r"$\dfrac{s_{1,x'}}{\sqrt{1-s_{1,z}^2}}$",
-                's1y_prime_rescale': r"$\dfrac{s_{1,y'}}{\sqrt{1-s_{1,z}^2}}$",
-                's2x_prime_rescale': r"$\dfrac{s_{2,x'}}{\sqrt{1-s_{2,z}^2}}$",
-                's2y_prime_rescale': r"$\dfrac{s_{2,y'}}{\sqrt{1-s_{2,z}^2}}$",
-                's1x_newsign': r"$s_{1,x}$ $\cdot$ sign[cos($\iota$)]",
-                's1y_newsign': r"$s_{1,y}$ $\cdot$ sign[cos($\iota$)]",
-                's2x_newsign': r"$s_{2,x}$ $\cdot$ sign[cos($\iota$)]",
-                's2y_newsign': r"$s_{2,y}$ $\cdot$ sign[cos($\iota$)]",
-                'cumchidiff': r"$\chi_{\rm cum}^{\rm diff}$"
-                })
-
 def fmt_num(num, prec_override=None):
     if prec_override is not None:
         return ('{:.'+str(prec_override)+'f}').format(num)
@@ -322,11 +237,16 @@ def fmt_num(num, prec_override=None):
     return f'{num:.2f}'
 
 def label_from_pdic(pdic, keys=['mchirp', 'chieff'], pre='', post='',
-                    sep=' ', connector=' = ', prec_override=None):
+                    sep=' ', connector=' = ', prec_override=None,
+                    add_units=False):
     pstr = ''
+    get_sep = lambda k: sep
+    if add_units:
+        get_sep = lambda k: ' (' + units[k] + ')' + sep
+    get_num = lambda k: (r'$' + fmt_num(pdic.get(k), prec_override)
+                         + r'$' + get_sep(k))
     for k in keys:
-        pstr += (param_labels.get(k) + connector +
-                 fmt_num(pdic.get(k), prec_override=prec_override) + sep)
+        pstr += param_labels.get(k) + connector + get_num(k)
     return pre + pstr[:-len(sep)] + post
 
 
