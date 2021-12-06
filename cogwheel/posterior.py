@@ -245,7 +245,57 @@ def initialize_posteriors_slurm(
 
         utils.submit_slurm(job_name, n_hours_limit, stdout_path,
                            stderr_path, args, sbatch_cmds)
+def initialize_posteriors_lsf(
+        eventnames, approximant, prior_name, parentdir, n_hours_limit=2,
+        bsub_cmds=('-R "span[hosts=1] rusage[mem=4096]"',), overwrite=False, **kwargs):
+    """
+    Submit jobs that run `main()` for each event.
+    This will initialize `Posterior.from_event()` and save the
+    `Posterior` to JSON inside the appropriate `eventdir` (per
+    `Posterior.get_eventdir`).
+'-R "span[hosts=1] rusage[mem=4096MB]" '
+    Parameters
+    ----------
+    eventnames: List of strings with event names.
+    approximant: string with approximant name.
+    prior_name: string, key of `gw_prior.prior_registry`.
+    parentdir: path to top directory where to save output.
+    n_hours_limit: int, hours until slurm jobs are terminated.
+    memory_per_task: string, how much RAM to allocate.
+    overwrite: bool, whether to overwrite preexisting files.
+               `False` (default) raises an error if the file exists.
+    **kwargs: optional keyword arguments to `Posterior.from_event()`.
+              Must be JSON-serializable.
+    """
+    if isinstance(eventnames, str):
+        eventnames = [eventnames]
 
+    for eventname in eventnames:
+
+        eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
+        filename = eventdir/'Posterior.json'
+        if not overwrite and filename.exists():
+            raise FileExistsError(
+                f'{filename} exists, pass `overwrite=True` to overwrite.')
+
+        utils.mkdirs(eventdir)
+
+        job_name = f'{eventname}_posterior'
+        stdout_path = (eventdir/'posterior_from_event.out').resolve()
+        stderr_path = (eventdir/'posterior_from_event.err').resolve()
+
+        args = ' '.join([eventname, approximant, prior_name, parentdir])
+
+        if kwargs:
+            with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
+                json.dump(kwargs, kwargs_file)
+                args += f' {kwargs_file.name}'
+
+        if overwrite:
+            args += ' --overwrite'
+
+        utils.submit_lsf(job_name, n_hours_limit, stdout_path,
+                           stderr_path, args, bsub_cmds)
 
 def main(eventname, approximant, prior_name, parentdir, overwrite,
          kwargs_filename=None):
