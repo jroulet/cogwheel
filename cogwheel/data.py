@@ -53,8 +53,10 @@ class EventData(utils.JSONMixin):
         self.detector_names = detector_names
         self.tgps = tgps
         self.tcoarse = tcoarse
-
+        #### EVDAT QUESTION: do we really need these in the instance?
         self.mchirp_range = mchirp_range
+        #### EVDAT QUESTION: if so, should we take tc_range too?
+        ## --> maybe mchirp is needed but I think qmin less than tc_range
         self.q_min = q_min
 
         self.nfft = 2 * (len(self.frequencies) - 1)
