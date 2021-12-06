@@ -25,7 +25,7 @@ from cogwheel import cosmology as cosmo
 from cogwheel import postprocessing
 
 DEFAULT_PRIOR = 'IASPrior'
-DEFAULT_PARENTDIR = '/data/srolsen/GW/cogwheel/o3a_cands/'
+DEFAULT_PARENTDIR = '/scratch/srolsen/GW/O3a/PE/'
 
 def key_rngs_mask(df_to_mask, key_rngs={}, keep_nans=False):
     """
