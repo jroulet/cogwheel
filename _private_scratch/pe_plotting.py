@@ -334,7 +334,7 @@ def plot_loc3d(samples, title='flat', xlim='auto', ylim='auto', zlim='auto', nst
     ax.scatter(0, 0, 0, marker='*', s=24, c='k')
     ax.text(-0.15, -0.15, -0.4, 'Earth', color='k', size=14)
     for dic in extra_point_dicts:
-        xx, yy, zz = xyzMpc_from_ra_dec_DL(dic['ra'], dic['dec'], dic['DL'])
+        xx, yy, zz = xyzMpc_from_ra_dec_DL(dic['ra'], dic['dec'], dic[dkey])
         if units in ['kpc', 'Gpc']:
             xx, yy, zz = np.array([xx, yy, zz]) * (10**(3 if units == 'kpc' else -3))
         ax.scatter(xx, yy, zz, marker=dic.get('marker', dic.get('m')), s=dic.get('size', dic.get('s')),
