@@ -153,6 +153,8 @@ class AnalysisHandle:
         If key_rngs is empty, return mask to select samples with no NaNs.
         Set keep_nans=True to allow samples with NaNs to be considered.
         """
+        if not key_rngs:
+            return np.ones(len(self.samples), dtype=bool)
         return key_rngs_mask(self.samples,
                              {self.key(k): v for k, v in key_rngs.items()},
                              keep_nans)
@@ -455,7 +457,7 @@ class AnalysisHandle:
     ###############################################################
     ##  SCATTER PLOTTING WITH COLOR+SIZE+TRANSPARENCY GRADIENTS  ##
     ###############################################################
-    def plot_2d_color(self, xkey='chieff', ykey='q', ckey='lnl', extra_posteriors=[], key_rngs=None,
+    def plot_2d_color(self, xkey='chieff', ykey='q', ckey='lnl', extra_posteriors=[], key_rngs={},
                       samples_per_posterior=None, fig=None, ax=None, figsize=(8, 8), title=None,
                       titlesize=20, xlim='auto', ylim='auto', clim=None, size_key=None, size_scale=1,
                       alpha_key=None, alpha_scale=1, colorbar_kws=None, colorsMap='jet', **plot_kws):
@@ -467,7 +469,7 @@ class AnalysisHandle:
             title=title, titlesize=titlesize, xlim=xlim, ylim=ylim, clim=clim, size_key=size_key,
             size_scale=size_scale, alpha_key=alpha_key, alpha_scale=alpha_scale, **plot_kws)
 
-    def plot_3d_color(self, xkey='chieff', ykey='q', zkey='mtot', ckey='lnl', key_rngs=None,
+    def plot_3d_color(self, xkey='chieff', ykey='q', zkey='mtot', ckey='lnl', key_rngs={},
                       nstep=1, fig=None, ax=None, xlim='auto', ylim='auto', zlim='auto',
                       xlab='auto', ylab='auto', zlab='auto', clab='auto', title=None,
                       plot_kws=None, figsize=(8, 8), titlesize=20, colorbar_kws=None,
@@ -486,7 +488,7 @@ class AnalysisHandle:
     ##  SPIN PLOTTING  ##
     #####################
     def plot_inplane_spin(self, color_key='lnl', use_V3=False, secondary_spin=False,
-                          key_rngs=None, fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
+                          key_rngs={}, fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
                           figsize=None, title=None, tight=False, **colorbar_kws):
         """
         Plot constituent spin posterior projected onto the plane of the orbit with colorbar.
@@ -498,7 +500,7 @@ class AnalysisHandle:
                                         figsize=figsize, title=title, tight=tight, **colorbar_kws)
 
     def plot_3d_spin(self, ckey='lnl', use_V3=False, secondary_spin=False, sign_or_scale=True,
-                     key_rngs=None, fig=None, ax=None, xkey='s1x', ykey='s1y', zkey='s1z',
+                     key_rngs={}, fig=None, ax=None, xkey='s1x', ykey='s1y', zkey='s1z',
                      nstep=1, title=None, xlab='auto', ylab='auto', zlab='auto', clab='auto',
                      plotlim=[-1.01, 1.01], plot_kws=None, figsize=(8, 8), titlesize=20,
                      colorbar_kws=None, extra_point_dicts=[(0, 0, 0)],
@@ -518,7 +520,7 @@ class AnalysisHandle:
     #########################
     ##  LOCATION PLOTTING  ##
     #########################
-    def plot_3d_location(self, fig=None, ax=None, ckey='lnl', key_rngs=None, nstep=1,
+    def plot_3d_location(self, fig=None, ax=None, ckey='lnl', key_rngs={}, nstep=1,
                          clab=None, extra_point_dicts=[], title=None, units='Mpc',
                          figsize=(8, 8), xlim='auto', ylim='auto', zlim='auto',
                          titlesize=20, plot_kws=None, colorbar_kws=None):
