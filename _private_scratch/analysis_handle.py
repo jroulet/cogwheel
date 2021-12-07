@@ -272,7 +272,9 @@ class AnalysisHandle:
         if os.path.exists(fname) and (not overwrite):
             raise FileExistsError(f'Set overwrite=True to overwrite {fname}')
         self.complete_samples(antenna=antenna, cosmo_weights=cosmo_weights, ligo_angles=ligo_angles)
-        self.samples.to_feather(self.samples_path)
+        self.samples.to_feather(fname)
+        for path in pathlib.Path(os.path.dirname(fname)).iterdir():
+            path.chmod(self.sampler.file_permissions)
 
     def add_source_parameters(self, redshift_key=None, mass_keys=['m1', 'm2', 'mtot', 'mchirp']):
         """
