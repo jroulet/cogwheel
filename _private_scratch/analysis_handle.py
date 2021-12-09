@@ -124,9 +124,23 @@ class AnalysisHandle:
     @classmethod
     def from_evname(cls, evname, i_run=0, parentdir=DEFAULT_PARENTDIR,
                     prior_name=DEFAULT_PRIOR, **init_kwargs):
+        """
+        Initialize AnalysisHandle from the run directory
+        os.path.join(parentdir, prior_name, evname, f`run_{i_run}`)
+        """
         evdir = utils.get_eventdir(parentdir=parentdir, prior_name=prior_name,
                                    eventname=evname)
         return cls(os.path.join(evdir, f'run_{i_run}'), **init_kwargs)
+
+    def load_evidence(self, rundir=True):
+        self.evidence = {}
+        if self.sampler is not None:
+            if rundir is True:
+                rundir = self.rundir
+            if rundir is not None:
+                self.sampler.run_kwargs['outputfiles_basename'] = str(rundir)
+            self.evidence = self.sampler.load_evidence()
+        return self.evidence
 
     #######################
     ##  KEYS and LABELS  ##
@@ -214,7 +228,8 @@ class AnalysisHandle:
             bypass_relative_binning_tests=True):
         """
         Defaults to returning log likelihood (lnL) of reference waveform.
-        If pdic_or_ind is any string, get array of lnL for all samples.
+        If pdic_or_ind is any slice, get array of lnL for all samples, and
+          any string is equivalent to slice(None)
         If pdic_or_ind is an int, compute lnL for sample at that index.
         Otherwise pdic_or_ind can be a numpy array ordered as in
         self.wfgen.params or a dict-like containing at least those keys.
@@ -224,6 +239,8 @@ class AnalysisHandle:
         """
         if isinstance(pdic_or_ind, str):
             return self.samples[self.LNL_COL].to_numpy()
+        if isinstance(pdic_or_ind, slice):
+            return self.samples[self.LNL_COL].to_numpy()[pdic_or_ind]
         if use_relative_binning:
             return self.likelihood.lnlike(self.get_par_dic(pdic_or_ind),
                 bypass_tests=bypass_relative_binning_tests)
