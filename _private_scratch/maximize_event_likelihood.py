@@ -19,7 +19,7 @@ def maximize_event(evname, mchirp_intervals, parentdir=DEF_PARENTDIR,
                    approximant=DEF_APPROX, prior_name=DEF_PRIOR_NAME,
                    memory_per_task='4G', n_hours_limit=4,
                    overwrite=False, wait_to_collect=False,
-                   collect_path=None, data_already_split=False):
+                   collect_path=None, data_already_split=False, **kwargs):
     eventnames_j = []
     for j, mcrng in enumerate(mchirp_intervals):
         evn_j = evname + f'_{j}'
@@ -32,7 +32,7 @@ def maximize_event(evname, mchirp_intervals, parentdir=DEF_PARENTDIR,
     posterior.initialize_posteriors_slurm(eventnames_j, approximant, prior_name,
                                           parentdir, n_hours_limit=n_hours_limit,
                                           memory_per_task=memory_per_task,
-                                          overwrite=overwrite)
+                                          overwrite=overwrite, **kwargs)
     postpaths = get_postpaths(eventnames_j, parentdir, prior_name)
     if wait_to_collect:
         while np.any([not os.path.exists(pp) for pp in postpaths]):
