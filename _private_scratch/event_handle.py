@@ -180,10 +180,9 @@ class EventHandle(ahand.AnalysisHandle):
             # if only one detector, just return match there
             return trig.utils.match(wf1[det_inds], wf2[det_inds], allow_shift=allow_shift,
                                     allow_phase=allow_phase, return_cov=return_cov)
-        return np.array([matches.append(trig.utils.match(wf1[j], wf2[j],
-                                                         allow_shift=allow_shift, allow_phase=allow_phase,
-                                                         return_cov=return_cov))
-                         for j in det_inds])
+        return np.array([trig.utils.match(wf1[j], wf2[j],
+                    allow_shift=allow_shift, allow_phase=allow_phase,
+                    return_cov=return_cov) for j in det_inds])
 
     def trigger_cov(self, pdic1=None, calpha=None, det_inds=None,
                     bank_grid=False, use_approximant=False, allow_shift=True,
@@ -260,32 +259,44 @@ class EventHandle(ahand.AnalysisHandle):
                           return_cov=return_cov, det_inds=det_inds)
 
     def plot_cov(self, pdic1='max', pdic2='trig', allow_shift=True, allow_phase=True,
-                 fig=None, ax=None, xlab=None, ylab=None, figsize=None,
-                 det_inds=None, cov_kwargs={}, **plot_kwargs):
+                 fig=None, ax=None, xlab=None, ylab=None, figsize=None, bank_grid=False,
+                 det_inds=None, label_max=True, take_abs=False, cov_kwargs={}, **plot_kwargs):
+        """
+        if pdic2 = 'trig' or contains this substring then will get cov from self.trigger_cov()
+        use cov_kwargs={``: True} to generate trigger with IMRPhenomD instead of self.calpha
+        NOTE: MUST call self.set_candidate(cand_dict) before using trigger option
+        """
         if xlab is None:
             xlab = 'Time (s)'
         if ylab is None:
             ylab = r'$\langle h_1 | h_2 \rangle / \sqrt{\langle h_1 | h_1 \rangle \langle h_2 | h_2 \rangle}$'
         if isinstance(pdic2, str) and ('trig' in pdic2):
             dt = self.triggerlists[0].templatebank.dt
-            covplot = self.trigger_cov(pdic1=None, calpha=None, det_inds=None,
-                                       bank_grid=False, use_approximant=False, allow_shift=True,
-                                       allow_phase=True, return_cov=False, linear_free=True)
+            covplot = self.trigger_cov(pdic1=pdic1, calpha=None, det_inds=det_inds,
+                                       bank_grid=bank_grid, allow_shift=allow_shift,
+                                       allow_phase=allow_phase, return_cov=True,
+                                       **cov_kwargs)
         else:
             dt = self.evdata.dt
             covplot = self.match(pdic1, pdic2, allow_shift=allow_shift,
                                  allow_phase=allow_phase, return_cov=True,
-                                 det_inds=det_inds)
+                                 det_inds=det_inds, **cov_kwargs)
         if det_inds is None:
             det_inds = range(len(covplot))
         elif not hasattr(det_inds, '__len__'):
             det_inds = [det_inds]
         if ax is None:
             fig, ax = ahand.peplot.get_dets_figure(xlabel=xlab, ylabel=ylab, figsize=figsize,
-                                                   det_names=[self.evdata.detector_names[dind]
-                                                              for dind in det_inds],
-                                                   plot_type='linear')
+                detector_names=[self.evdata.detector_names[dind] for dind in det_inds])
+        lab0 = plot_kwargs.get('label', '')
         for aa, yy in zip(ax, covplot):
+            xx = np.arange(len(yy)) * dt
+            if take_abs:
+                yy = np.abs(yy)
+            if label_max:
+                imax = np.argmax(yy)
+                plot_kwargs['label'] = ((lab0+', ' if lab0 else '') +
+                    f"max = {yy[imax]:.2f} at t = {xx[imax]:.4f}")
             aa.plot(np.arange(len(yy)) * dt, yy, **plot_kwargs)
         return fig, ax
 
