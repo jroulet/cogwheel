@@ -191,11 +191,31 @@ class AnalysisHandle:
         If par_dic is a dict-like object, the correct params are isolated
         Else can pass np.array([<values ordered as in self.wfgen.params>])
         Else can pass an integer to get row from self.samples
+        Else can pass a string code:
+         `max` or `best` gets the maximum likelihood sample
+         `eqm` or `hiq` gets the maximum likelihood sample for q > 0.4
+         `uneq` or `loq` gets the maximum likelihood sample for q < 0.4
+         `avg` or `mid` or `median` gets the median likelihood sample
+         if string code not recognized, revert to default (reference)
         NOTE if you pass a scalar that is not integer-like
         OR an iterable that is not a numpy array, it will be
         treated as a dict-like object and an error will occur.
         """
         if par_dic is None:
+            return self.likelihood.par_dic_0
+        if isinstance(par_dic, str):
+            if ('max' in par_dic) or ('best' in par_dic):
+                return self.get_best_par_dics()
+            if 'rand' in par_dic:
+                return dict(self.samples[self.wfgen.params].iloc[
+                    np.random.randint(len(self.samples))])
+            if ('av' in par_dic) or ('mid' in par_dic) or ('med' in par_dic):
+                return self.get_best_par_dics(get_best_inds=int(len(self.samples)//2))
+            if ('eqm' in par_dic) or ('hi' in par_dic):
+                return self.get_best_par_dics(key_rngs={'q': (0.4, 1)})
+            if ('uneq' in par_dic) or ('lo' in par_dic):
+                return self.get_best_par_dics(key_rngs={'q': (0, 0.4)})
+            print(f'par_dic={par_dic} not a recognized code, using reference.')
             return self.likelihood.par_dic_0
         if not hasattr(par_dic, '__len__'):
             return dict(self.samples[self.wfgen.params].iloc[par_dic])
@@ -221,6 +241,22 @@ class AnalysisHandle:
             return self.get_par_dic(s)
         return s
 
+    ########################
+    ##  GETTING WAVEFORM  ##
+    ########################
+    def get_h_f(self, pdic_or_ind=None, whiten=False, normalize=False):
+        pdic = self.get_par_dic(pdic_or_ind)
+        h_dets = self.likelihood._get_h_f(pdic, normalize=normalize)
+        if whiten:
+            h_dets *= (np.sqrt(2 * self.evdata.nfft * self.evdata.df)
+                       * self.evdata.wht_filter)
+        return h_dets
+
+    def get_h_t(self, pdic_or_ind=None, whiten=True, normalize=False):
+        return np.fft.irfft(self.get_h_f(pdic_or_ind=pdic_or_ind,
+                                         whiten=whiten, normalize=normalize),
+                            axis=-1)
+
     ##################
     ##  LIKELIHOOD  ##
     ##################
@@ -229,15 +265,16 @@ class AnalysisHandle:
         """
         Defaults to returning log likelihood (lnL) of reference waveform.
         If pdic_or_ind is any slice, get array of lnL for all samples, and
-          any string is equivalent to slice(None)
+          empty string is equivalent to slice(None)
         If pdic_or_ind is an int, compute lnL for sample at that index.
         Otherwise pdic_or_ind can be a numpy array ordered as in
-        self.wfgen.params or a dict-like containing at least those keys.
+         self.wfgen.params or a dict-like containing at least those keys,
+         or a string code (see self.get_par_dic)
         This, i.e., self.get_par_dic(pdic_or_ind), will be passed to
         self.likelihood.lnlike() if use_relative_binning else
         self.likelihood.lnlike_fft().
         """
-        if isinstance(pdic_or_ind, str):
+        if isinstance(pdic_or_ind, str) and (pdic_or_ind == ''):
             return self.samples[self.LNL_COL].to_numpy()
         if isinstance(pdic_or_ind, slice):
             return self.samples[self.LNL_COL].to_numpy()[pdic_or_ind]
