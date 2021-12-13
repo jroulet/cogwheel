@@ -161,9 +161,14 @@ class CBCLikelihood(utils.JSONMixin):
         kwargs: passed to `safe_std`, keys include:
                 `max_contiguous_low`, `expected_high`, `reject_nearby`.
         """
+        # get waveform using all available modes in model
+        harmonic_modes = self.waveform_generator.harmonic_modes
+        self.waveform_generator.harmonic_modes = None
         normalized_h_f = self._get_h_f(par_dic, normalize=True)
+        self.waveform_generator.harmonic_modes = harmonic_modes
+        # compute overlaps from unwhitened waveform (uses blued data)
         z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
-
+        # whiten waveform
         whitened_h_f = (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
                         * self.event_data.wht_filter * normalized_h_f)
         # Undo previous asd_drift so nsamples is independent of it
@@ -744,6 +749,44 @@ class RelativeBinningLikelihood(CBCLikelihood):
                          for y_i in np.eye(len(self.fbin))]
         self._splines = np.transpose([basis_spline(self.event_data.frequencies)
                                       for basis_spline in basis_splines])
+
+    def _set_summary(self):
+        """
+        Compute summary data for the fiducial waveform at all detectors.
+        `asd_drift` is not applied to the summary data, to not have to
+        keep track of it.
+        Update `asd_drift` using the reference waveform.
+        The summary data `self._d_h_weights` and `self._d_h_weights` are
+        such that:
+            (d|h) ~= sum(_d_h_weights * conj(h_fbin)) / asd_drift^2
+            (h|h) ~= sum(_h_h_weights * abs(h_fbin)^2) / asd_drift^2
+
+        # TODO: maybe enforce a minimum amplitude for h_0?
+        """
+        # don't zero the in-plane spins for the reference waveform
+        # (note: alignment can be achieved via par_dic_0 if desired)
+        disable_precession = self.waveform_generator.disable_precession
+        self.waveform_generator.disable_precession = False
+        # get waveform
+        h0_f = self._get_h_f(self.par_dic_0, by_m=True)
+        h0_fbin = self.waveform_generator.get_strain_at_detectors(
+            self.fbin, self.par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
+        # get overlap
+        d_h0 = self.event_data.blued_strain * np.conj(h0_f)
+        self._d_h_weights = self._get_summary_weights(d_h0) / np.conj(h0_fbin)
+        # combine modes
+        m_inds, mprime_inds = self._get_m_mprime_inds()
+        h0m_h0mprime = (h0_f[m_inds] * h0_f[mprime_inds].conj()
+                        * self.event_data.wht_filter ** 2)
+        self._h_h_weights = (self._get_summary_weights(h0m_h0mprime)
+                             / (h0_fbin[m_inds] * h0_fbin[mprime_inds].conj()))
+        # Count off-diagonal terms twice:
+        self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
+
+        self.asd_drift = self.compute_asd_drift(self.par_dic_0)
+        self._lnl_0 = self.lnlike(self.par_dic_0, bypass_tests=True)
+        # need to wait until after drift computation to reset
+        self.waveform_generator.disable_precession = disable_precession
 
     def _set_summary(self):
         """
