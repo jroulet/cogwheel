@@ -8,6 +8,7 @@ import os
 import sys
 from copy import deepcopy
 import numpy as np
+from scipy.interpolate import interp1d
 
 PIPELINE_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', '..', 'gw_detection_ias'))
@@ -46,6 +47,50 @@ def guess_bank_id(mchirp, i_subbank=0):
     bank_ids = [*[('BNS', i_mb, i_subbank) for i_mb in range(n_bns)],
                 *[('BBH', i_mb, i_subbank) for i_mb in range(n_bbh)]]
     return bank_ids[np.searchsorted(mchirp_multibank_edges, mchirp)]
+
+#@np.vectorize
+# take off decorator because may be causing problems in cluster runs?
+def _x_of_mchirp(mchirp):
+    """
+    Chirp-mass reparametrization in which the uncertainty
+    is approximately homogeneous.
+    """
+    mchirp0 = 60
+    if not hasattr(mchirp, '__len__') and mchirp > mchirp0:
+        return mchirp
+    a = -3/5 * mchirp0**(8/3)
+    b = 8/5 * mchirp0
+    # compute for all
+    mchirpout = a * mchirp**(-5/3) + b
+    if isinstance(mchirp, np.ndarray):
+        # if input is array, revert to original mchirp where > mchirp0
+        revertmask = mchirp > mchirp0
+        mchirpout[revertmask] = mchirp[revertmask]
+    return mchirpout
+
+_mchirp_grid = np.geomspace(.1, 1000, 10000)
+_mchirp_of_x = interp1d(_x_of_mchirp(_mchirp_grid), _mchirp_grid)
+
+def estimate_mchirp_range(mchirp, sigmas=5, snr=8):
+    """
+    Return an array with the minimum and maximum estimated
+    values of mchirp with posterior support.
+    Intended for setting ranges for sampling.
+    Keep in mind this is very approximate, check your results
+    responsibly.
+
+    Parameters
+    ----------
+    mchirp: Estimate of the center of the mchirp distribution.
+    sigmas: How big (conservative) to make the range compared
+            to the expected width of the distribution.
+    snr: Signal-to-noise ratio, lower values give bigger ranges.
+    """
+    x = _x_of_mchirp(mchirp)
+    dx = 200. * sigmas / snr
+    mcmin = _mchirp_of_x(x - dx)
+    mcmax = _mchirp_of_x(x + dx)
+    return np.array([mcmin, mcmax])
 
 def _get_linear_free_shift_from_bank(bank, calpha=None, **pars):
     if calpha is not None:
@@ -205,6 +250,32 @@ class EventMetadata(data.utils.JSONMixin):
                   f"event_registry[`{self.eventname}`].old_metadata",
                   "for old version.")
         event_registry[self.eventname] = self
+
+    @classmethod
+    def from_cand(cls, cand_dict, **init_kwargs):
+        eventname = cand_dict.get('evname',
+            trig.utils.get_evname_from_tgps(cand_dict['tgps']))
+        init_dict = {'eventname': eventname}
+        init_dict.update({k: v for k, v in cand_dict.items()
+            if k in ['tgps', 'mchirp_range', 'tc_range', 'calpha',
+                     'max_tsep', 'compute_linear_free_shift',
+                     'bank_id', 'fnames', 'q_min', 'ref_det_name',
+                     'compute_par_dic_0']})
+        init_dict.update(init_kwargs)
+        if 'mchirp_range' not in init_dict:
+            init_dict['compute_par_dic_0'] = True
+            sigmas = init_dict.pop('sigmas',
+                init_dict.pop('mchirp_sigmas', 5))
+            snr = np.sqrt(np.min([v for k, v in cand_dict.items()
+                                  if 'snr2' in k]))
+        instance = cls(**init_dict)
+        instance.load_triggerlists(store=True)
+        if 'mchirp_range' not in init_dict:
+            m1, m2 = instance.par_dic_0['m1'], instance.par_dic_0['m2']
+            mc0 = (m1*m2)**.6/(m1+m2)**.2
+            instance.mchirp_range = estimate_mchirp_range(mchirp=mc0,
+                sigmas=sigmas, snr=snr)
+        return instance
 
     def get_init_dict(self):
         """Return dictionary with keyword arguments to `__init__`."""
