@@ -102,6 +102,15 @@ class EventName(str):
 class EventHandle(ahand.AnalysisHandle):
     """Adding triggerlist stuff to AnalysisHandle"""
 
+    @classmethod
+    def from_cand(cls, cand_dict, i_run=0, parentdir=ahand.DEFAULT_PARENTDIR,
+                  prior_name=ahand.DEFAULT_PRIOR, **init_kwargs):
+        instance = cls.from_evname(EventName.from_tgps(cand_dict['tgps']),
+                                   i_run=i_run, parentdir=parentdir,
+                                   prior_name=prior_name, **init_kwargs)
+        instance.set_candidate(cand_dict, det_names=instance.evdata.detector_names)
+        return instance
+
     def eventname(self):
         evn = EventName(self.evname)
         evn.tgps = self.evdata.tgps
@@ -161,13 +170,13 @@ class EventHandle(ahand.AnalysisHandle):
         else:
             wf2 = self.get_h_t(pdic2_or_wf2_wtd_td, whiten=True)
         # broadcast so that number of detectors is the same
-        if wf1.ndim == 1:
+        if np.ndim(wf1) == 1:
             # if only one detector, just return match there
-            if wf2.ndim == 1:
+            if np.ndim(wf2) == 1:
                 return trig.utils.match(wf1, wf2, allow_shift=allow_shift,
                                         allow_phase=allow_phase, return_cov=return_cov)
             wf1 = [wf1] * len(wf2)
-        elif wf2.ndim == 1:
+        elif np.ndim(wf2) == 1:
             wf2 = [wf2] * len(wf1)
         # check that number of detectors is the same
         ndet = len(wf1)
@@ -181,8 +190,8 @@ class EventHandle(ahand.AnalysisHandle):
             return trig.utils.match(wf1[det_inds], wf2[det_inds], allow_shift=allow_shift,
                                     allow_phase=allow_phase, return_cov=return_cov)
         return np.array([trig.utils.match(wf1[j], wf2[j],
-                    allow_shift=allow_shift, allow_phase=allow_phase,
-                    return_cov=return_cov) for j in det_inds])
+                                          allow_shift=allow_shift, allow_phase=allow_phase,
+                                          return_cov=return_cov) for j in det_inds])
 
     def trigger_cov(self, pdic1=None, calpha=None, det_inds=None,
                     bank_grid=False, use_approximant=False, allow_shift=True,
@@ -202,43 +211,60 @@ class EventHandle(ahand.AnalysisHandle):
         # get trigger parameters
         if calpha is None:
             calpha = self.calpha
+        # should we include shift? _private_ias._get_linear_free_shift_from_bank(bank, calpha=None, **pars)
+        match1 = None
+        trigVtrig = (isinstance(pdic1, str) and ('trig' in pdic1))
         pdic2 = None
-        if use_approximant:
+        if use_approximant or trigVtrig:
             pdic2 = tgls[0].templatebank.get_pdic_from_calpha(calpha)
 
-        # should we include shift? _private_ias._get_linear_free_shift_from_bank(bank, calpha=None, **pars)
         if bank_grid:
             # USING BANK GRID
             f = tgls[0].templatebank.fs_fft
             # get trigger wfs from bank's generator
-            if pdic2 is None:
+            if (pdic2 is None) or trigVtrig:
                 trig_wfs = [tgl.templatebank.gen_whitened_wfs_td(calpha=calpha)
                             for tgl in tgls]
+                # if we want to match the calpha trigger to the approximant
+                if trigVtrig:
+                    match1 = [tgl.templatebank.gen_whitened_wf_td_from_pars(
+                        approximant='IMRPhenomD', highpass=False, trimmed=False,
+                        target_snr=None, gen_domain='fd', phase=0, dt_extra=0,
+                        **pdic2) for tgl in tgls]
             else:
                 trig_wfs = [tgl.templatebank.gen_whitened_wf_td_from_pars(
                     approximant='IMRPhenomD', highpass=False, trimmed=False,
                     target_snr=None, gen_domain='fd', phase=0, dt_extra=0,
                     **pdic2) for tgl in tgls]
             # in this case we also get sample wfs from bank's generator
-            match1 = [tgl.templatebank.gen_whitened_wfs_td(
-                wfs_fd=tgl.templatebank.gen_strain_fd_from_pars(
-                    fs_out=tgl.templatebank.fs_fft, linear_free=linear_free,
-                    det_name=(d if d[-1] == '1' else d + '1'),
-                    tgps=self.cdic.get('tgps', self.evdata.tgps),
-                    approximant=self.wfgen.approximant, f_ref=self.wfgen.f_ref,
-                    f_min=self.evdata.fmin, xphm_modes=self.wfgen.harmonic_modes,
-                    whiten=False, **self.get_par_dic(pdic1)))
-                for d, tgl in zip(self.cand_det_names, tgls)]
+            if match1 is None:
+                match1 = [tgl.templatebank.gen_whitened_wfs_td(
+                    wfs_fd=tgl.templatebank.gen_strain_fd_from_pars(
+                        fs_out=tgl.templatebank.fs_fft, linear_free=linear_free,
+                        det_name=(d if d[-1] == '1' else d + '1'),
+                        tgps=self.cdic.get('tgps', self.evdata.tgps),
+                        approximant=self.wfgen.approximant, f_ref=self.wfgen.f_ref,
+                        f_min=self.evdata.fmin, xphm_modes=self.wfgen.harmonic_modes,
+                        whiten=False, **self.get_par_dic(pdic1)))
+                    for d, tgl in zip(self.cand_det_names, tgls)]
         else:
             # USING PE GRID
-            match1 = pdic1
             trig_wfs = [np.zeros_like(self.evdata.frequencies,
                                       dtype=np.complex128)] * len(tgls)
-            if pdic2 is None:
+            if (pdic2 is None) or trigVtrig:
                 for jj, tgl in enumerate(tgls):
                     trig_wfs[jj][self.evdata.fslice] = \
                         tgl.templatebank.gen_wfs_fd_from_calpha(calpha=calpha,
                                                                 fs_out=self.evdata.frequencies[self.evdata.fslice])
+                # if we want to match the calpha trigger to the approximant
+                if trigVtrig:
+                    match1 = [np.zeros_like(self.evdata.frequencies, dtype=np.complex128)] * len(tgls)
+                    for jj, tgl in enumerate(tgls):
+                        match1[jj][self.evdata.fslice] = \
+                            tgl.templatebank.gen_wf_fd_from_pars(
+                                fs_out=self.evdata.frequencies[self.evdata.fslice],
+                                gen_domain='fd', phase=0, linear_free=linear_free,
+                                approximant='IMRPhenomD', **pdic2)
             else:
                 for jj, tgl in enumerate(tgls):
                     trig_wfs[jj][self.evdata.fslice] = \
@@ -253,6 +279,13 @@ class EventHandle(ahand.AnalysisHandle):
             trig_wfs = (np.sqrt(2 * self.evdata.nfft * self.evdata.df) *
                         np.fft.irfft(np.array([wffd * self.evdata.wht_filter[jj]
                                                for jj, wffd in zip(det_inds, trig_wfs)])))
+            # if not doing trig vs trig, set this with regular pe waveform generator
+            if match1 is None:
+                match1 = pdic1
+            else:
+                match1 = (np.sqrt(2 * self.evdata.nfft * self.evdata.df) *
+                          np.fft.irfft(np.array([wffd * self.evdata.wht_filter[jj]
+                                                 for jj, wffd in zip(det_inds, match1)])))
 
         return self.match(match1, pdic2_or_wf2_wtd_td=trig_wfs,
                           allow_shift=allow_shift, allow_phase=allow_phase,
@@ -263,7 +296,7 @@ class EventHandle(ahand.AnalysisHandle):
                  det_inds=None, label_max=True, take_abs=False, cov_kwargs={}, **plot_kwargs):
         """
         if pdic2 = 'trig' or contains this substring then will get cov from self.trigger_cov()
-        use cov_kwargs={``: True} to generate trigger with IMRPhenomD instead of self.calpha
+        use cov_kwargs={`use_approximant`: True} to generate trigger with IMRPhenomD instead of self.calpha
         NOTE: MUST call self.set_candidate(cand_dict) before using trigger option
         """
         if xlab is None:
@@ -287,26 +320,18 @@ class EventHandle(ahand.AnalysisHandle):
             det_inds = [det_inds]
         if ax is None:
             fig, ax = ahand.peplot.get_dets_figure(xlabel=xlab, ylabel=ylab, figsize=figsize,
-                detector_names=[self.evdata.detector_names[dind] for dind in det_inds])
+                                                   detector_names=[self.evdata.detector_names[dind] for dind in
+                                                                   det_inds])
         lab0 = plot_kwargs.get('label', '')
+        zfunc = (np.abs if take_abs else np.real)
         for aa, yy in zip(ax, covplot):
             xx = np.arange(len(yy)) * dt
-            if take_abs:
-                yy = np.abs(yy)
+            yy = zfunc(yy)
             if label_max:
                 imax = np.argmax(yy)
-                plot_kwargs['label'] = ((lab0+', ' if lab0 else '') +
-                    f"max = {yy[imax]:.2f} at t = {xx[imax]:.4f}")
+                plot_kwargs['label'] = ((lab0 + ', ' if lab0 else '') +
+                                        f"max = {yy[imax]:.2f} at t = {xx[imax]:.4f}")
             aa.plot(np.arange(len(yy)) * dt, yy, **plot_kwargs)
         return fig, ax
-
-
-
-
-
-
-
-
-
 
 
