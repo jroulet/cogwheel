@@ -206,6 +206,11 @@ class CBCLikelihood(utils.JSONMixin):
         par_dic: dictionary of waveform parameters.
         normalize: bool, whether to normalize the waveform by sqrt(h|h)
                    at each detector.
+
+        Return
+        ------
+        n_detectors x n_frequencies array with strain at detector.
+        If by_m, output is (n_m x n_detectors x n_frequencies)
         """
 
         shape = ((len(self.waveform_generator._harmonic_modes_by_m),) if by_m

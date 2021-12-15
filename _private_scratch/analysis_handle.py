@@ -244,17 +244,20 @@ class AnalysisHandle:
     ########################
     ##  GETTING WAVEFORM  ##
     ########################
-    def get_h_f(self, pdic_or_ind=None, whiten=False, normalize=False):
+    def get_h_f(self, pdic_or_ind=None, whiten=False, normalize=False,
+                by_m=False):
         pdic = self.get_par_dic(pdic_or_ind)
-        h_dets = self.likelihood._get_h_f(pdic, normalize=normalize)
+        h_dets = self.likelihood._get_h_f(pdic, normalize=normalize,
+                                          by_m=by_m)
         if whiten:
             h_dets *= (np.sqrt(2 * self.evdata.nfft * self.evdata.df)
                        * self.evdata.wht_filter)
         return h_dets
 
-    def get_h_t(self, pdic_or_ind=None, whiten=True, normalize=False):
+    def get_h_t(self, pdic_or_ind=None, whiten=True, normalize=False,
+                by_m=False):
         return np.fft.irfft(self.get_h_f(pdic_or_ind=pdic_or_ind,
-                                         whiten=whiten, normalize=normalize),
+                    whiten=whiten, normalize=normalize, by_m=by_m),
                             axis=-1)
 
     ##################
@@ -393,14 +396,19 @@ class AnalysisHandle:
                                    xlim=xlim, ylim=ylim, title=title, det_names=self.evdata.detector_names,
                                    figsize=figsize, **plot_kws)
 
-    def plot_wf_amp(self, par_dic=None, whiten=True, by_m=False, ax=None, fig=None, label=None,
-                    plot_type='loglog', weights=None, xlim=None, ylim=None,
-                    title=None, figsize=None, use_fmask=False, **plot_kws):
+    def plot_wf_amp(self, par_dic=None, whiten=True, by_m=False, cumsum=False,
+                    ax=None, fig=None, label=None, plot_type='loglog', weights=None,
+                    xlim=None, ylim=None, title=None, figsize=None, use_fmask=False, **plot_kws):
         """Plot waveform amplitude at all detectors"""
         msk = (self.evdata.fslice if use_fmask else slice(None))
         dets_xplot = self.evdata.frequencies[msk]
         h_f = self.likelihood._get_h_f(par_dic, by_m=by_m)
-        if whiten:
+        ylab = 'Waveform Amplitude'
+        if cumsum:
+            ylab = r"$\int^{f} | h_w(f') |^2 \rm{d}f'$"
+            h_f = np.cumsum(self.likelihood._compute_h_h(h_f), axis=-1)
+        elif whiten:
+            ylab = 'Whitened Waveform Amplitude'
             h_f = self.evdata.dt * np.fft.rfft(self.likelihood._get_whitened_td(h_f), axis=-1)
         if weights is not None:
             h_f *= weights
@@ -408,12 +416,12 @@ class AnalysisHandle:
             for j, lmlist in enumerate(self.wfgen._harmonic_modes_by_m.values()):
                 dets_yplot = np.abs(h_f[j, :, msk])
                 fig, ax = peplot.plot_at_dets(dets_xplot, dets_yplot, ax=ax, fig=fig, label=str(lmlist),
-                    xlabel='Frequency (Hz)', ylabel='Waveform Amplitude', plot_type=plot_type,
+                    xlabel='Frequency (Hz)', ylabel=ylab, plot_type=plot_type,
                     xlim=xlim, ylim=ylim, title=title, det_names=self.evdata.detector_names,
                     figsize=figsize, **plot_kws)
             return fig, ax
         return peplot.plot_at_dets(dets_xplot, np.abs(h_f[:, msk]), ax=ax, fig=fig, label=label,
-                                   xlabel='Frequency (Hz)', ylabel='Waveform Amplitude',
+                                   xlabel='Frequency (Hz)', ylabel=ylab,
                                    plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
                                    det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
 
