@@ -396,9 +396,9 @@ class AnalysisHandle:
                                    xlim=xlim, ylim=ylim, title=title, det_names=self.evdata.detector_names,
                                    figsize=figsize, **plot_kws)
 
-    def plot_wf_amp(self, par_dic=None, whiten=True, by_m=False, cumsum=False,
+    def plot_wf_amp(self, par_dic=None, whiten=True, by_m=False, cumsum=False, use_fmask=True,
                     ax=None, fig=None, label=None, plot_type='loglog', weights=None,
-                    xlim=None, ylim=None, title=None, figsize=None, use_fmask=False, **plot_kws):
+                    xlim=None, ylim=None, title=None, figsize=None, **plot_kws):
         """Plot waveform amplitude at all detectors"""
         msk = (self.evdata.fslice if use_fmask else slice(None))
         dets_xplot = self.evdata.frequencies[msk]
@@ -427,9 +427,9 @@ class AnalysisHandle:
                                    plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
                                    det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
 
-    def plot_wf_phase(self, par_dic=None, unwrap=True, by_m=False, ax=None, fig=None, label=None,
-                      plot_type='linear', weights=None, xlim=None, ylim=None,
-                      title=None, figsize=None, use_fmask=False, **plot_kws):
+    def plot_wf_phase(self, par_dic=None, unwrap=True, by_m=False, use_fmask=True,
+                      ax=None, fig=None, label=None, plot_type='linear', weights=None,
+                      xlim=None, ylim=None, title=None, figsize=None, **plot_kws):
         """Plot waveform phase at all detectors"""
         msk = (self.evdata.fslice if use_fmask else slice(None))
         dets_xplot = self.evdata.frequencies[msk]
@@ -449,7 +449,7 @@ class AnalysisHandle:
                                    plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
                                    det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
 
-    def plot_whitened_wf(self, par_dic=None, trng=(-.7, .1), **kwargs):
+    def plot_whitened_wf(self, par_dic=None, trng=(-.7, .2), **kwargs):
         """
         par_dic can be None (take self.likelihood.par_dic_0), dict-like,
         int (index in self.samples), or array (form as in self.wfgen.params).
