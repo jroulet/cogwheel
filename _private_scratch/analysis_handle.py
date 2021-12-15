@@ -406,12 +406,13 @@ class AnalysisHandle:
         ylab = 'Waveform Amplitude'
         if cumsum:
             ylab = r"$\int^{f} | h_w(f') |^2 \rm{d}f'$"
-            h_f = np.cumsum((4 * self.event_data.df * self.asd_drift**-2)[..., np.newaxis]
-                            * np.abs(h_f * self.event_data.wht_filter)**2, axis=-1)
+            h_f = np.cumsum((4 * self.evdata.df * self.likelihood.asd_drift**-2)[..., np.newaxis]
+                            * np.abs(h_f * self.evdata.wht_filter)**2, axis=-1)
         elif whiten:
             ylab = 'Whitened Waveform Amplitude'
             h_f = self.evdata.dt * np.fft.rfft(self.likelihood._get_whitened_td(h_f), axis=-1)
         if weights is not None:
+            ylab = 'Weighted ' + ylab
             h_f *= weights
         if by_m:
             for j, lmlist in enumerate(self.wfgen._harmonic_modes_by_m.values()):
