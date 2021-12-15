@@ -402,7 +402,7 @@ class AnalysisHandle:
         """Plot waveform amplitude at all detectors"""
         msk = (self.evdata.fslice if use_fmask else slice(None))
         dets_xplot = self.evdata.frequencies[msk]
-        h_f = self.likelihood._get_h_f(par_dic, by_m=by_m)
+        h_f = self.likelihood._get_h_f(self.get_par_dic(par_dic), by_m=by_m)
         ylab = 'Waveform Amplitude'
         if cumsum:
             ylab = r"$\int^{f} | h_w(f') |^2 \rm{d}f'$"
@@ -425,13 +425,13 @@ class AnalysisHandle:
                                    plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
                                    det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
 
-    def plot_wf_phase(self, par_dic, unwrap=True, by_m=False, ax=None, fig=None, label=None,
+    def plot_wf_phase(self, par_dic=None, unwrap=True, by_m=False, ax=None, fig=None, label=None,
                       plot_type='linear', weights=None, xlim=None, ylim=None,
                       title=None, figsize=None, use_fmask=False, **plot_kws):
         """Plot waveform phase at all detectors"""
         msk = (self.evdata.fslice if use_fmask else slice(None))
         dets_xplot = self.evdata.frequencies[msk]
-        h_f = self.likelihood._get_h_f(par_dic, by_m=by_m)
+        h_f = self.likelihood._get_h_f(self.get_par_dic(par_dic), by_m=by_m)
         if weights is not None:
             h_f *= weights
         func = (np.unwrap if unwrap else (lambda x: x))
