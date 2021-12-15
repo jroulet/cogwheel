@@ -302,7 +302,8 @@ class CBCLikelihood(utils.JSONMixin):
         data_t_wht = self._get_whitened_td(self.event_data.strain)
         wf_t_wht = self._get_whitened_td(self._get_h_f(par_dic, by_m=by_m))
         if by_m:
-            wf_t_wht = np.array([wf_t_wht[:, j, :] for j in len(data_t_wht)])
+            wf_t_wht = np.array([wf_t_wht[:, j, :]
+                                 for j in range(len(data_t_wht))])
             plt_kws = {k: v for k, v in wf_plot_kwargs.items()
                        if k != 'label'}
             lab0 = ''
