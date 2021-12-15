@@ -417,8 +417,8 @@ class AnalysisHandle:
         if by_m:
             for j, lmlist in enumerate(self.wfgen._harmonic_modes_by_m.values()):
                 dets_yplot = np.abs(h_f[j, :, msk])
-                fig, ax = peplot.plot_at_dets(dets_xplot, dets_yplot, ax=ax, fig=fig, label=str(lmlist),
-                    xlabel='Frequency (Hz)', ylabel=ylab, plot_type=plot_type,
+                fig, ax = peplot.plot_at_dets(dets_xplot, dets_yplot, ax=ax, fig=fig,
+                    label=str(lmlist), xlabel='Frequency (Hz)', ylabel=ylab, plot_type=plot_type,
                     xlim=xlim, ylim=ylim, title=title, det_names=self.evdata.detector_names,
                     figsize=figsize, **plot_kws)
             return fig, ax
@@ -449,12 +449,13 @@ class AnalysisHandle:
                                    plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
                                    det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
 
-    def plot_whitened_wf(self, par_dic=None, trng=(-.7, .2), **kwargs):
+    def plot_whitened_wf(self, par_dic=None, trng=(-.7, .2), by_m=False, **kwargs):
         """
         par_dic can be None (take self.likelihood.par_dic_0), dict-like,
         int (index in self.samples), or array (form as in self.wfgen.params).
         """
-        return self.likelihood.plot_whitened_wf(self.get_par_dic(par_dic), trng=trng, **kwargs)
+        return self.likelihood.plot_whitened_wf(self.get_par_dic(par_dic), trng=trng,
+                                                by_m=by_m, **kwargs)
 
     #######################
     ##  CORNER PLOTTING  ##

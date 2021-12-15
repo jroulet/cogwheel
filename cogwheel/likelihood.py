@@ -275,7 +275,7 @@ class CBCLikelihood(utils.JSONMixin):
                 * np.fft.irfft(strain_f * self.event_data.wht_filter))
 
     def plot_whitened_wf(self, par_dic, trng=(-.7, .1), plot_data=True,
-                         fig=None, figsize=None, **wf_plot_kwargs):
+                         fig=None, figsize=None, by_m=False, **wf_plot_kwargs):
         """
         Plot the whitened strain and waveform model in the time domain
         in all detectors.
@@ -300,12 +300,25 @@ class CBCLikelihood(utils.JSONMixin):
 
         time = self.event_data.t - self.event_data.tcoarse
         data_t_wht = self._get_whitened_td(self.event_data.strain)
-        wf_t_wht = self._get_whitened_td(self._get_h_f(par_dic))
+        wf_t_wht = self._get_whitened_td(self._get_h_f(par_dic, by_m=by_m))
+        if by_m:
+            wf_t_wht = np.array([wf_t_wht[:, j, :] for j in len(data_t_wht)])
+            plt_kws = {k: v for k, v in wf_plot_kwargs.items()
+                       if k != 'label'}
+            lab0 = ''
+            if isinstance(wf_plot_kwargs.get('label'), str):
+                lab0 = wf_plot_kwargs['label'] + ': '
 
         for ax, data_det, wf_det in zip(axes, data_t_wht, wf_t_wht):
             if plot_data:
                 ax.plot(time, data_det, 'C0', lw=.2, label='Data')
-            ax.plot(time, wf_det, **wf_plot_kwargs)
+            if by_m:
+                for j, lmlist in enumerate(
+                    self.waveform_generator._harmonic_modes_by_m.values()):
+                    ax.plot(time, wf_det[j], label=(lab0+str(lmlist)),
+                            **plt_kws)
+            else:
+                ax.plot(time, wf_det, **wf_plot_kwargs)
 
         plt.xlim(trng)
         return fig
