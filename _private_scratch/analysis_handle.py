@@ -64,7 +64,6 @@ class AnalysisHandle:
         super().__init__()
         # associate to run directory
         self.rundir = pathlib.Path(rundir)
-        self.name = name or self.rundir.parts[-1]
 
         # load posterior attributes
         if 'run' not in self.rundir.parts[-1]:
@@ -79,6 +78,15 @@ class AnalysisHandle:
         self.evdata = self.likelihood.event_data
         self.wfgen = self.likelihood.waveform_generator
         self.evname = self.evdata.eventname
+        self.reference = pd.Series(self.likelihood.par_dic_0)
+        self.reference['lnl'] = self.lnL(None)
+        pxform.compute_samples_aux_vars(self.reference)
+        self.reference_label = ('Reference: ' +
+            label_formatting.label_from_pdic(self.reference,
+                keys=['lnl', 'mchirp', 'q', 'chieff']))
+        self.reference_label_source = ('Reference: ' +
+            label_formatting.label_from_pdic(self.reference,
+                keys=['lnl', 'm1_source', 'm2_source', 'z']))
 
         # load samples
         if self.sampler is None:
@@ -99,9 +107,19 @@ class AnalysisHandle:
         if self.LNL_COL not in self.samples:
             print('WARNING: No likelihood information found in samples. Setting lnL = 0.')
             self.samples[self.LNL_COL] = np.zeros(len(self.samples))
-            self.best_par_dic = None
+            self.bestfit = None
+            self.bestfit_label = self.reference_label
+            self.bestfit_label_source = self.reference_label_source
         else:
-            self.best_par_dic = self.get_best_par_dics()
+            self.bestfit = self.get_best_par_dics(as_par_dics=False)
+            self.bestfit_label = ('Bestfit: ' +
+                label_formatting.label_from_pdic(self.bestfit,
+                    keys=[self.LNL_COL, 'mchirp', 'q', 'chieff']))
+            self.bestfit_label_source = ('Bestfit: ' +
+                label_formatting.label_from_pdic(self.bestfit,
+                    keys=[self.LNL_COL, 'm1_source', 'm2_source', 'z']))
+        # this will be the reference waveform if no likelihood information
+        self.best_par_dic = self.get_par_dic(self.bestfit)
 
         # separate samples with NaNs
         nan_mask = self.samples.isna().any(axis=1)
@@ -120,6 +138,17 @@ class AnalysisHandle:
         self.tests_dict = None
         if os.path.isfile(self.tests_path):
             self.tests_dict = json.load(open(self.tests_path, 'r'))
+
+        # naming
+        if name is None:
+            name = self.rundir.parts[-1]
+            if self.bestfit is not None:
+                name = (name + r": $\ln\mathcal{L}_{\rm max} = $" +
+                        f"{self.lnL(self.best_par_dic):.1f}, " +
+                        r": $\ln\mathcal{L}_{\rm ref} = $" +
+                        f"{self.reference['lnl']:.1f}")
+        self.name = name
+
 
     @classmethod
     def from_evname(cls, evname, i_run=0, parentdir=DEFAULT_PARENTDIR,

@@ -139,7 +139,7 @@ class EventHandle(ahand.AnalysisHandle):
         if self.fnames is None:
             self.fnames = trig.utils.get_detector_fnames(
                 self.cdic.get('tgps', self.evdata.tgps),
-                *self.bank, n_multibanks=6)
+                *self.bank_id, n_multibanks=6)
         # loading triggerlists
         if set_triggerlists:
             self.triggerlists = self.load_triggerlists()
@@ -192,7 +192,7 @@ class EventHandle(ahand.AnalysisHandle):
         ndet = len(wf1)
         assert len(wf2) == ndet, 'Mismatch between number of detectors for match input!'
         if ndet == 1:
-            det_inds == 0
+            det_inds = 0
         elif det_inds is None:
             det_inds = range(ndet)
         if not hasattr(det_inds, '__len__'):
@@ -252,7 +252,7 @@ class EventHandle(ahand.AnalysisHandle):
         """MUST CALL self.set_candidate() BEFORE using this function."""
         if det_inds is None:
             tgls = self.triggerlists
-        elif hasattr('__len__'):
+        elif hasattr(det_inds, '__len__'):
             tgls = [self.triggerlists[j] for j in det_inds]
         else:
             tgls = [self.triggerlists[int(det_inds)]]
@@ -298,7 +298,8 @@ class EventHandle(ahand.AnalysisHandle):
 
     def plot_cov(self, pdic1='max', pdic2='trig', allow_shift=True, allow_phase=True,
                  fig=None, ax=None, xlab=None, ylab=None, figsize=None, bank_grid=False,
-                 det_inds=None, label_max=True, take_abs=False, cov_kwargs={}, **plot_kwargs):
+                 det_inds=None, label_max=True, take_abs=False, cov_kwargs_trig={},
+                 **plot_kwargs):
         """
         if pdic2 = 'trig' or contains this substring then will get cov from self.trigger_cov()
         use cov_kwargs={`use_approximant`: True} to generate trigger with IMRPhenomD instead of self.calpha
@@ -310,15 +311,14 @@ class EventHandle(ahand.AnalysisHandle):
             ylab = r'$\langle h_1 | h_2 \rangle / \sqrt{\langle h_1 | h_1 \rangle \langle h_2 | h_2 \rangle}$'
         if isinstance(pdic2, str) and ('trig' in pdic2):
             dt = self.triggerlists[0].templatebank.dt
-            covplot = self.trigger_cov(pdic1=pdic1, calpha=None, det_inds=det_inds,
-                                       bank_grid=bank_grid, allow_shift=allow_shift,
-                                       allow_phase=allow_phase, return_cov=True,
-                                       **cov_kwargs)
+            covplot = self.trigger_cov(pdic1=pdic1, calpha=cov_kwargs_trig.pop('calpha', None),
+                det_inds=det_inds, bank_grid=bank_grid, allow_shift=allow_shift,
+                allow_phase=allow_phase, return_cov=True, **cov_kwargs_trig)
         else:
             dt = self.evdata.dt
             covplot = self.match(pdic1, pdic2, allow_shift=allow_shift,
                                  allow_phase=allow_phase, return_cov=True,
-                                 det_inds=det_inds, **cov_kwargs)
+                                 det_inds=det_inds)
         if det_inds is None:
             det_inds = range(len(covplot))
         elif not hasattr(det_inds, '__len__'):

@@ -4,6 +4,9 @@ import sys
 sys.path.append("..")
 from cogwheel import cosmology as cosmo
 
+STANDARD_INTRINSIC_PARAMS = \
+    ['m1', 'm2', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z']
+
 #     Mass Variable Conversions
 # ---------------------------------
 # q and eta
@@ -264,33 +267,40 @@ def compute_samples_aux_vars(samples):
     Takes a dict-like object with some set of masses, spins
     etc. and adds entries for derived quantities like chieff
     and source frame masses.
-    Samples MUST have all the standard parameters
+    Samples MUST have all the standard intrinsic parameters
+    and luminosity distance associated to the following keys:
+    ['m1', 'm2', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z', 'd_luminosity']
     """
+    numfunc = np.asarray
+    if not np.any([hasattr(samples[k], '__len__')
+                   for k in STANDARD_INTRINSIC_PARAMS]):
+        # this means it's just a dict or pandas Series (single sample)
+        numfunc = lambda x: x
     # mass ratio variables
-    samples['q'] = np.asarray(samples['m2']) / np.asarray(samples['m1'])
-    samples['q1'] = 1 / np.asarray(samples['q'])
-    samples['lnq'] = np.log(np.asarray(samples['q']))
-    samples['eta'] = q2eta(np.asarray(samples['q']))
+    samples['q'] = numfunc(samples['m2']) / numfunc(samples['m1'])
+    samples['q1'] = 1 / numfunc(samples['q'])
+    samples['lnq'] = np.log(numfunc(samples['q']))
+    samples['eta'] = q2eta(numfunc(samples['q']))
     # mass variables
-    samples['mtot'] = np.asarray(samples['m1']) + np.asarray(samples['m2'])
-    samples['mchirp'] = mchirp_of_m1_m2(np.asarray(samples['m1']), np.asarray(samples['m2']))
+    samples['mtot'] = numfunc(samples['m1']) + numfunc(samples['m2'])
+    samples['mchirp'] = mchirp_of_m1_m2(numfunc(samples['m1']), numfunc(samples['m2']))
     # source frame
-    samples['z'] = cosmo.z_of_DL_Mpc(np.asarray(samples['d_luminosity']))
-    samples['d_comoving'] = np.asarray(samples['d_luminosity']) / (1 + np.asarray(samples['z']))
+    samples['z'] = cosmo.z_of_DL_Mpc(numfunc(samples['d_luminosity']))
+    samples['d_comoving'] = numfunc(samples['d_luminosity']) / (1 + numfunc(samples['z']))
     for k in ['m1', 'm2', 'mtot', 'mchirp']:
-        samples[f'{k}_source'] = np.asarray(samples[k]) / (1 + np.asarray(samples['z']))
+        samples[f'{k}_source'] = numfunc(samples[k]) / (1 + numfunc(samples['z']))
     # effective spin
-    samples['chieff'] = ((np.asarray(samples['s1z']) + np.asarray(samples['q']) * np.asarray(samples['s2z']))
-                             / (1 + np.asarray(samples['q'])))
-    samples['chia'] = .5 * (np.asarray(samples['s1z']) - np.asarray(samples['s2z']))
+    samples['chieff'] = ((numfunc(samples['s1z']) + numfunc(samples['q']) * numfunc(samples['s2z']))
+                             / (1 + numfunc(samples['q'])))
+    samples['chia'] = .5 * (numfunc(samples['s1z']) - numfunc(samples['s2z']))
     # spin polar variables
     for j in [1, 2]:
-        sx, sy, sz = [np.asarray(samples[f's{j}{coord}']) for coord in ['x', 'y', 'z']]
+        sx, sy, sz = [numfunc(samples[f's{j}{coord}']) for coord in ['x', 'y', 'z']]
         samples[f's{j}'] = np.sqrt(sx ** 2 + sy ** 2 + sz ** 2)
-        samples[f's{j}costheta'] = sz / np.asarray(samples[f's{j}'])
-        samples[f's{j}theta'] = np.arccos(np.asarray(samples[f's{j}costheta']))
-        samples[f's{j}phi'] = np.arctan2(np.asarray(samples[f's{j}y']), np.asarray(samples[f's{j}x'])) % (2 * np.pi)
+        samples[f's{j}costheta'] = sz / numfunc(samples[f's{j}'])
+        samples[f's{j}theta'] = np.arccos(numfunc(samples[f's{j}costheta']))
+        samples[f's{j}phi'] = np.arctan2(numfunc(samples[f's{j}y']), numfunc(samples[f's{j}x'])) % (2 * np.pi)
     # chi_p for precession
-    samples['chip'] = chip(np.asarray(samples['s1x']), np.asarray(samples['s1y']),
-                           np.asarray(samples['s2x']), np.asarray(samples['s2y']),
-                           np.asarray(samples['m1']), np.asarray(samples['m2']))
+    samples['chip'] = chip(numfunc(samples['s1x']), numfunc(samples['s1y']),
+                           numfunc(samples['s2x']), numfunc(samples['s2y']),
+                           numfunc(samples['m1']), numfunc(samples['m2']))

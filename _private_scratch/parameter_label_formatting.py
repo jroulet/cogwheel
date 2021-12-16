@@ -1,3 +1,5 @@
+from . import standard_intrinsic_transformations as pxform
+
 # Latex formatting
 # ----------------
 param_labels = {'mchirp': r'$\mathcal{{M}}^{\rm det}$',
@@ -243,7 +245,10 @@ def label_from_pdic(pdic, keys=['mchirp', 'chieff'], pre='', post='',
     get_sep = lambda k: sep
     if add_units:
         get_sep = lambda k: ' (' + units[k] + ')' + sep
-    get_num = lambda k: (r'$' + fmt_num(pdic.get(k), prec_override)
+    pdic_use = dict(pdic)
+    if any([(pdic_use.get(k) is None) for k in keys]):
+        pxform.compute_samples_aux_vars(pdic_use)
+    get_num = lambda k: (r'$' + fmt_num(pdic_use.get(k), prec_override)
                          + r'$' + get_sep(k))
     for k in keys:
         pstr += param_labels.get(k) + connector + get_num(k)
