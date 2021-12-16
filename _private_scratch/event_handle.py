@@ -47,6 +47,9 @@ SPECIAL_EVNAMES = {'GW150914': {'tgps': 1126259462.4},
                    'GW190521': {'tgps': 1242442967.4},
                    'GW190814': {'tgps': 1249852257.0}}
 
+def get_run(tgps_or_evname):
+    return peplot.run_from_evname(str(tgps_or_evname))
+
 def evname_from_tgps(tgps_sec, prefix='GW'):
     if hasattr(tgps_sec, '__len__'):
         return [evname_from_tgps(tt, prefix) for tt in tgps_sec]
@@ -68,6 +71,7 @@ class EventName(str):
     """Class for GW event names of form GWyymmdd<_hhmmss>"""
     def __init__(self, evname, events_dict=SPECIAL_EVNAMES):
         super().__init__()
+        # this sets self._tgps, self.left, self.right, and self.run
         self.tgps = tgps_from_evname(evname, events_dict=events_dict)
 
     @property
@@ -77,10 +81,11 @@ class EventName(str):
 
     @tgps.setter
     def tgps(self, value):
-        """Set GPS time, """
+        """Set GPS time, lef and right evnames, and data run"""
         self._tgps = float(value)
         self.left = evname_from_tgps(self._tgps - 1)
         self.right = evname_from_tgps(self._tgps + 1)
+        self.run = get_run(self._tgps)
 
     @classmethod
     def from_tgps(cls, tgps, recompute_tgps=False):
