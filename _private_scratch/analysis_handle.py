@@ -143,10 +143,10 @@ class AnalysisHandle:
         if name is None:
             name = self.rundir.parts[-1]
             if self.bestfit is not None:
-                name = (name + r": $\ln\mathcal{L}_{\rm max} = $" +
+                name = (r"$\ln\mathcal{L}_{\rm max} = $" +
                         f"{self.lnL(self.best_par_dic):.1f}, " +
-                        r": $\ln\mathcal{L}_{\rm ref} = $" +
-                        f"{self.reference['lnl']:.1f}")
+                        r" $\ln\mathcal{L}_{\rm ref} = $" +
+                        f"{self.reference['lnl']:.1f} [{name}]")
         self.name = name
 
 
