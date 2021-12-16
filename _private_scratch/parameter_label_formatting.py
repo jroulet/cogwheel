@@ -251,7 +251,7 @@ def label_from_pdic(pdic, keys=['mchirp', 'chieff'], pre='', post='',
     get_num = lambda k: (r'$' + fmt_num(pdic_use.get(k), prec_override)
                          + r'$' + get_sep(k))
     for k in keys:
-        pstr += param_labels.get(k) + connector + get_num(k)
+        pstr += param_labels.get(k, k) + connector + get_num(k)
     return pre + pstr[:-len(sep)] + post
 
 
