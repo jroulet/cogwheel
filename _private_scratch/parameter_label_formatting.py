@@ -239,7 +239,7 @@ def fmt_num(num, prec_override=None):
     return f'{num:.2f}'
 
 def label_from_pdic(pdic, keys=['mchirp', 'chieff'], pre='', post='',
-                    sep=' ', connector=' = ', prec_override=None,
+                    sep=', ', connector=' = ', prec_override=None,
                     add_units=False):
     pstr = ''
     get_sep = lambda k: sep
