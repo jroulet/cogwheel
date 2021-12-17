@@ -634,7 +634,7 @@ def run_from_evname(evname):
         event_yr_mo = int(evname[3:7])
     elif evname.isnumeric() and 1e9 < int(evname) < 2e9:
         # It's a gps time
-        return utils.get_run(int(evname))
+        return utils.get_run(float(evname))
     else:
         raise RuntimeError(f'evname = {evname} is not a recognized format')
     return ('O3' if event_yr_mo > 1802 else

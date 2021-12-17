@@ -48,7 +48,10 @@ SPECIAL_EVNAMES = {'GW150914': {'tgps': 1126259462.4},
                    'GW190814': {'tgps': 1249852257.0}}
 
 def get_run(tgps_or_evname):
-    return peplot.run_from_evname(str(tgps_or_evname))
+    if (isinstance(tgps_or_evname, str) and
+        (not tgps_or_evname.replace('.', '').isnumeric())):
+        return trig.utils.get_run(tgps_from_evname(tgps_or_evname))
+    return trig.utils.get_run(float(tgps_or_evname))
 
 def evname_from_tgps(tgps_sec, prefix='GW'):
     if hasattr(tgps_sec, '__len__'):
