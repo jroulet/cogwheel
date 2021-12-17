@@ -539,14 +539,17 @@ class AnalysisHandle:
         comp_names = dcopy(compare_names)
         if len(comp_names) < len(compare_posteriors):
             comp_names += [''] * (len(compare_posteriors) - len(comp_names))
+        if not (len(comp_names) == len(compare_posteriors) + 1):
+            comp_names = [self.name] + comp_names
+
         for j in range(len(compare_posteriors)):
             if isinstance(compare_posteriors[j], AnalysisHandle):
-                if comp_names[j] == '':
-                    comp_names[j] = compare_posteriors[j].name
+                if comp_names[j+1] == '':
+                    comp_names[j+1] = compare_posteriors[j].name
                 compare_posteriors[j] = compare_posteriors[j].samples
         return peplot.corner_plot_list(([self.masked_samples(key_rngs)] +
                                         [s[key_rngs_mask(s, key_rngs)] for s in compare_posteriors]),
-                                       [self.name] + comp_names, pvkeys=parkeys, weight_key=weight_key,
+                                       comp_names, pvkeys=parkeys, weight_key=weight_key,
                                        grid_kws=extra_grid_kwargs, multigrid_kws=multigrid_kwargs,
                                        return_grid=return_grid, **corner_plot_kwargs)
 
