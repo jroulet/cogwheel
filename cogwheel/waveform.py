@@ -235,6 +235,7 @@ class WaveformGenerator(utils.JSONMixin):
         Return
         ------
         n_detectors x n_frequencies array with strain at detector.
+        If by_m, output is (n_m x n_detectors x n_frequencies)
         """
         waveform_par_dic = {par: par_dic[par] for par in self._waveform_params}
 

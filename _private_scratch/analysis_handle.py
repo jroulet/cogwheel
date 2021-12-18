@@ -25,7 +25,7 @@ from cogwheel import cosmology as cosmo
 from cogwheel import postprocessing
 
 DEFAULT_PRIOR = 'IASPrior'
-DEFAULT_PARENTDIR = '/data/srolsen/GW/cogwheel/o3a_cands/'
+DEFAULT_PARENTDIR = '/scratch/srolsen/GW/O3a/PE/'
 
 def key_rngs_mask(df_to_mask, key_rngs={}, keep_nans=False):
     """
@@ -64,7 +64,6 @@ class AnalysisHandle:
         super().__init__()
         # associate to run directory
         self.rundir = pathlib.Path(rundir)
-        self.name = name or self.rundir.parts[-1]
 
         # load posterior attributes
         if 'run' not in self.rundir.parts[-1]:
@@ -79,6 +78,15 @@ class AnalysisHandle:
         self.evdata = self.likelihood.event_data
         self.wfgen = self.likelihood.waveform_generator
         self.evname = self.evdata.eventname
+        self.reference = pd.Series(self.likelihood.par_dic_0)
+        self.reference['lnl'] = self.lnL(None)
+        pxform.compute_samples_aux_vars(self.reference)
+        self.reference_label = ('Reference: ' +
+            label_formatting.label_from_pdic(self.reference,
+                keys=['lnl', 'mchirp', 'q', 'chieff']))
+        self.reference_label_source = ('Reference: ' +
+            label_formatting.label_from_pdic(self.reference,
+                keys=['lnl', 'm1_source', 'm2_source', 'z']))
 
         # load samples
         if self.sampler is None:
@@ -99,9 +107,19 @@ class AnalysisHandle:
         if self.LNL_COL not in self.samples:
             print('WARNING: No likelihood information found in samples. Setting lnL = 0.')
             self.samples[self.LNL_COL] = np.zeros(len(self.samples))
-            self.best_par_dic = None
+            self.bestfit = None
+            self.bestfit_label = self.reference_label
+            self.bestfit_label_source = self.reference_label_source
         else:
-            self.best_par_dic = self.get_best_par_dics()
+            self.bestfit = self.get_best_par_dics(as_par_dics=False)
+            self.bestfit_label = ('Bestfit: ' +
+                label_formatting.label_from_pdic(self.bestfit,
+                    keys=[self.LNL_COL, 'mchirp', 'q', 'chieff']))
+            self.bestfit_label_source = ('Bestfit: ' +
+                label_formatting.label_from_pdic(self.bestfit,
+                    keys=[self.LNL_COL, 'm1_source', 'm2_source', 'z']))
+        # this will be the reference waveform if no likelihood information
+        self.best_par_dic = self.get_par_dic(self.bestfit)
 
         # separate samples with NaNs
         nan_mask = self.samples.isna().any(axis=1)
@@ -121,12 +139,37 @@ class AnalysisHandle:
         if os.path.isfile(self.tests_path):
             self.tests_dict = json.load(open(self.tests_path, 'r'))
 
+        # naming
+        if name is None:
+            name = self.rundir.parts[-1]
+            if self.bestfit is not None:
+                name = (r"$\ln\mathcal{L}_{\rm max} = $" +
+                        f"{self.lnL(self.best_par_dic):.1f}, " +
+                        r" $\ln\mathcal{L}_{\rm ref} = $" +
+                        f"{self.reference['lnl']:.1f} [{name}]")
+        self.name = name
+
+
     @classmethod
     def from_evname(cls, evname, i_run=0, parentdir=DEFAULT_PARENTDIR,
                     prior_name=DEFAULT_PRIOR, **init_kwargs):
+        """
+        Initialize AnalysisHandle from the run directory
+        os.path.join(parentdir, prior_name, evname, f`run_{i_run}`)
+        """
         evdir = utils.get_eventdir(parentdir=parentdir, prior_name=prior_name,
                                    eventname=evname)
         return cls(os.path.join(evdir, f'run_{i_run}'), **init_kwargs)
+
+    def load_evidence(self, rundir=True):
+        self.evidence = {}
+        if self.sampler is not None:
+            if rundir is True:
+                rundir = self.rundir
+            if rundir is not None:
+                self.sampler.run_kwargs['outputfiles_basename'] = str(rundir)
+            self.evidence = self.sampler.load_evidence()
+        return self.evidence
 
     #######################
     ##  KEYS and LABELS  ##
@@ -153,6 +196,8 @@ class AnalysisHandle:
         If key_rngs is empty, return mask to select samples with no NaNs.
         Set keep_nans=True to allow samples with NaNs to be considered.
         """
+        if not key_rngs:
+            return np.ones(len(self.samples), dtype=bool)
         return key_rngs_mask(self.samples,
                              {self.key(k): v for k, v in key_rngs.items()},
                              keep_nans)
@@ -175,11 +220,31 @@ class AnalysisHandle:
         If par_dic is a dict-like object, the correct params are isolated
         Else can pass np.array([<values ordered as in self.wfgen.params>])
         Else can pass an integer to get row from self.samples
+        Else can pass a string code:
+         `max` or `best` gets the maximum likelihood sample
+         `eqm` or `hiq` gets the maximum likelihood sample for q > 0.4
+         `uneq` or `loq` gets the maximum likelihood sample for q < 0.4
+         `avg` or `mid` or `median` gets the median likelihood sample
+         if string code not recognized, revert to default (reference)
         NOTE if you pass a scalar that is not integer-like
         OR an iterable that is not a numpy array, it will be
         treated as a dict-like object and an error will occur.
         """
         if par_dic is None:
+            return self.likelihood.par_dic_0
+        if isinstance(par_dic, str):
+            if ('max' in par_dic) or ('best' in par_dic):
+                return self.get_best_par_dics()
+            if 'rand' in par_dic:
+                return dict(self.samples[self.wfgen.params].iloc[
+                    np.random.randint(len(self.samples))])
+            if ('av' in par_dic) or ('mid' in par_dic) or ('med' in par_dic):
+                return self.get_best_par_dics(get_best_inds=int(len(self.samples)//2))
+            if ('eqm' in par_dic) or ('hi' in par_dic):
+                return self.get_best_par_dics(key_rngs={'q': (0.4, 1)})
+            if ('uneq' in par_dic) or ('lo' in par_dic):
+                return self.get_best_par_dics(key_rngs={'q': (0, 0.4)})
+            print(f'par_dic={par_dic} not a recognized code, using reference.')
             return self.likelihood.par_dic_0
         if not hasattr(par_dic, '__len__'):
             return dict(self.samples[self.wfgen.params].iloc[par_dic])
@@ -205,6 +270,25 @@ class AnalysisHandle:
             return self.get_par_dic(s)
         return s
 
+    ########################
+    ##  GETTING WAVEFORM  ##
+    ########################
+    def get_h_f(self, pdic_or_ind=None, whiten=False, normalize=False,
+                by_m=False):
+        pdic = self.get_par_dic(pdic_or_ind)
+        h_dets = self.likelihood._get_h_f(pdic, normalize=normalize,
+                                          by_m=by_m)
+        if whiten:
+            h_dets *= (np.sqrt(2 * self.evdata.nfft * self.evdata.df)
+                       * self.evdata.wht_filter)
+        return h_dets
+
+    def get_h_t(self, pdic_or_ind=None, whiten=True, normalize=False,
+                by_m=False):
+        return np.fft.irfft(self.get_h_f(pdic_or_ind=pdic_or_ind,
+                    whiten=whiten, normalize=normalize, by_m=by_m),
+                            axis=-1)
+
     ##################
     ##  LIKELIHOOD  ##
     ##################
@@ -212,16 +296,20 @@ class AnalysisHandle:
             bypass_relative_binning_tests=True):
         """
         Defaults to returning log likelihood (lnL) of reference waveform.
-        If pdic_or_ind is any string, get array of lnL for all samples.
+        If pdic_or_ind is any slice, get array of lnL for all samples, and
+          empty string is equivalent to slice(None)
         If pdic_or_ind is an int, compute lnL for sample at that index.
         Otherwise pdic_or_ind can be a numpy array ordered as in
-        self.wfgen.params or a dict-like containing at least those keys.
+         self.wfgen.params or a dict-like containing at least those keys,
+         or a string code (see self.get_par_dic)
         This, i.e., self.get_par_dic(pdic_or_ind), will be passed to
         self.likelihood.lnlike() if use_relative_binning else
         self.likelihood.lnlike_fft().
         """
-        if isinstance(pdic_or_ind, str):
+        if isinstance(pdic_or_ind, str) and (pdic_or_ind == ''):
             return self.samples[self.LNL_COL].to_numpy()
+        if isinstance(pdic_or_ind, slice):
+            return self.samples[self.LNL_COL].to_numpy()[pdic_or_ind]
         if use_relative_binning:
             return self.likelihood.lnlike(self.get_par_dic(pdic_or_ind),
                 bypass_tests=bypass_relative_binning_tests)
@@ -270,7 +358,9 @@ class AnalysisHandle:
         if os.path.exists(fname) and (not overwrite):
             raise FileExistsError(f'Set overwrite=True to overwrite {fname}')
         self.complete_samples(antenna=antenna, cosmo_weights=cosmo_weights, ligo_angles=ligo_angles)
-        self.samples.to_feather(self.samples_path)
+        self.samples.to_feather(fname)
+        for path in pathlib.Path(os.path.dirname(fname)).iterdir():
+            path.chmod(self.sampler.file_permissions)
 
     def add_source_parameters(self, redshift_key=None, mass_keys=['m1', 'm2', 'mtot', 'mchirp']):
         """
@@ -335,37 +425,44 @@ class AnalysisHandle:
                                    xlim=xlim, ylim=ylim, title=title, det_names=self.evdata.detector_names,
                                    figsize=figsize, **plot_kws)
 
-    def plot_wf_amp(self, par_dic=None, whiten=True, by_m=False, ax=None, fig=None, label=None,
-                    plot_type='loglog', weights=None, xlim=None, ylim=None,
-                    title=None, figsize=None, use_fmask=False, **plot_kws):
+    def plot_wf_amp(self, par_dic=None, whiten=True, by_m=False, cumsum=False, use_fmask=True,
+                    ax=None, fig=None, label=None, plot_type='loglog', weights=None,
+                    xlim=None, ylim=None, title=None, figsize=None, **plot_kws):
         """Plot waveform amplitude at all detectors"""
         msk = (self.evdata.fslice if use_fmask else slice(None))
         dets_xplot = self.evdata.frequencies[msk]
-        h_f = self.likelihood._get_h_f(par_dic, by_m=by_m)
-        if whiten:
+        h_f = self.likelihood._get_h_f(self.get_par_dic(par_dic), by_m=by_m)
+        ylab = 'Waveform Amplitude'
+        if cumsum:
+            ylab = r"$\int^{f} | h_w(f') |^2 \rm{d}f'$"
+            h_f = np.cumsum((4 * self.evdata.df * self.likelihood.asd_drift**-2)[..., np.newaxis]
+                            * np.abs(h_f * self.evdata.wht_filter)**2, axis=-1)
+        elif whiten:
+            ylab = 'Whitened Waveform Amplitude'
             h_f = self.evdata.dt * np.fft.rfft(self.likelihood._get_whitened_td(h_f), axis=-1)
         if weights is not None:
+            ylab = 'Weighted ' + ylab
             h_f *= weights
         if by_m:
             for j, lmlist in enumerate(self.wfgen._harmonic_modes_by_m.values()):
                 dets_yplot = np.abs(h_f[j, :, msk])
-                fig, ax = peplot.plot_at_dets(dets_xplot, dets_yplot, ax=ax, fig=fig, label=str(lmlist),
-                    xlabel='Frequency (Hz)', ylabel='Waveform Amplitude', plot_type=plot_type,
+                fig, ax = peplot.plot_at_dets(dets_xplot, dets_yplot, ax=ax, fig=fig,
+                    label=str(lmlist), xlabel='Frequency (Hz)', ylabel=ylab, plot_type=plot_type,
                     xlim=xlim, ylim=ylim, title=title, det_names=self.evdata.detector_names,
                     figsize=figsize, **plot_kws)
             return fig, ax
         return peplot.plot_at_dets(dets_xplot, np.abs(h_f[:, msk]), ax=ax, fig=fig, label=label,
-                                   xlabel='Frequency (Hz)', ylabel='Waveform Amplitude',
+                                   xlabel='Frequency (Hz)', ylabel=ylab,
                                    plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
                                    det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
 
-    def plot_wf_phase(self, par_dic, unwrap=True, by_m=False, ax=None, fig=None, label=None,
-                      plot_type='linear', weights=None, xlim=None, ylim=None,
-                      title=None, figsize=None, use_fmask=False, **plot_kws):
+    def plot_wf_phase(self, par_dic=None, unwrap=True, by_m=False, use_fmask=True,
+                      ax=None, fig=None, label=None, plot_type='linear', weights=None,
+                      xlim=None, ylim=None, title=None, figsize=None, **plot_kws):
         """Plot waveform phase at all detectors"""
         msk = (self.evdata.fslice if use_fmask else slice(None))
         dets_xplot = self.evdata.frequencies[msk]
-        h_f = self.likelihood._get_h_f(par_dic, by_m=by_m)
+        h_f = self.likelihood._get_h_f(self.get_par_dic(par_dic), by_m=by_m)
         if weights is not None:
             h_f *= weights
         func = (np.unwrap if unwrap else (lambda x: x))
@@ -381,12 +478,13 @@ class AnalysisHandle:
                                    plot_type=plot_type, xlim=xlim, ylim=ylim, title=title,
                                    det_names=self.evdata.detector_names, figsize=figsize, **plot_kws)
 
-    def plot_whitened_wf(self, par_dic=None, trng=(-.7, .1), **kwargs):
+    def plot_whitened_wf(self, par_dic=None, trng=(-.7, .2), by_m=False, **kwargs):
         """
         par_dic can be None (take self.likelihood.par_dic_0), dict-like,
         int (index in self.samples), or array (form as in self.wfgen.params).
         """
-        return self.likelihood.plot_whitened_wf(self.get_par_dic(par_dic), trng=trng, **kwargs)
+        return self.likelihood.plot_whitened_wf(self.get_par_dic(par_dic), trng=trng,
+                                                by_m=by_m, **kwargs)
 
     #######################
     ##  CORNER PLOTTING  ##
@@ -441,21 +539,24 @@ class AnalysisHandle:
         comp_names = dcopy(compare_names)
         if len(comp_names) < len(compare_posteriors):
             comp_names += [''] * (len(compare_posteriors) - len(comp_names))
+        if not (len(comp_names) == len(compare_posteriors) + 1):
+            comp_names = [self.name] + comp_names
+
         for j in range(len(compare_posteriors)):
             if isinstance(compare_posteriors[j], AnalysisHandle):
-                if comp_names[j] == '':
-                    comp_names[j] = compare_posteriors[j].name
+                if comp_names[j+1] == '':
+                    comp_names[j+1] = compare_posteriors[j].name
                 compare_posteriors[j] = compare_posteriors[j].samples
         return peplot.corner_plot_list(([self.masked_samples(key_rngs)] +
                                         [s[key_rngs_mask(s, key_rngs)] for s in compare_posteriors]),
-                                       [self.name] + comp_names, pvkeys=parkeys, weight_key=weight_key,
+                                       comp_names, pvkeys=parkeys, weight_key=weight_key,
                                        grid_kws=extra_grid_kwargs, multigrid_kws=multigrid_kwargs,
                                        return_grid=return_grid, **corner_plot_kwargs)
 
     ###############################################################
     ##  SCATTER PLOTTING WITH COLOR+SIZE+TRANSPARENCY GRADIENTS  ##
     ###############################################################
-    def plot_2d_color(self, xkey='chieff', ykey='q', ckey='lnl', extra_posteriors=[], key_rngs=None,
+    def plot_2d_color(self, xkey='chieff', ykey='q', ckey='lnl', extra_posteriors=[], key_rngs={},
                       samples_per_posterior=None, fig=None, ax=None, figsize=(8, 8), title=None,
                       titlesize=20, xlim='auto', ylim='auto', clim=None, size_key=None, size_scale=1,
                       alpha_key=None, alpha_scale=1, colorbar_kws=None, colorsMap='jet', **plot_kws):
@@ -467,11 +568,11 @@ class AnalysisHandle:
             title=title, titlesize=titlesize, xlim=xlim, ylim=ylim, clim=clim, size_key=size_key,
             size_scale=size_scale, alpha_key=alpha_key, alpha_scale=alpha_scale, **plot_kws)
 
-    def plot_3d_color(self, xkey='chieff', ykey='q', zkey='mtot', ckey='lnl', key_rngs=None,
+    def plot_3d_color(self, xkey='chieff', ykey='q', zkey='mtot', ckey='lnl', key_rngs={},
                       nstep=1, fig=None, ax=None, xlim='auto', ylim='auto', zlim='auto',
                       xlab='auto', ylab='auto', zlab='auto', clab='auto', title=None,
                       plot_kws=None, figsize=(8, 8), titlesize=20, colorbar_kws=None,
-                      extra_point_dicts=[], size_key=None, size_scale=1):
+                      extra_point_dicts=[], size_key=None, size_scale=1, colorsMap='jet'):
         """
         Make three-dimensional scatter plot with colorbar for visualizing fourth dimension.
         Additional gradient dimensions are size (size_key)
@@ -480,14 +581,15 @@ class AnalysisHandle:
             zkey=self.key(zkey), ckey=self.key(ckey), xlim=xlim, ylim=ylim, zlim=zlim,
             nstep=nstep, title=title, xlab=xlab, ylab=ylab, zlab=zlab, clab=clab, fig=fig, ax=ax,
             figsize=figsize, titlesize=titlesize, extra_point_dicts=extra_point_dicts,
-            size_key=size_key, size_scale=size_scale, plot_kws=plot_kws, colorbar_kws=colorbar_kws)
+            size_key=size_key, size_scale=size_scale, plot_kws=plot_kws,
+            colorsMap=colorsMap, colorbar_kws=colorbar_kws)
 
     #####################
     ##  SPIN PLOTTING  ##
     #####################
     def plot_inplane_spin(self, color_key='lnl', use_V3=False, secondary_spin=False,
-                          key_rngs=None, fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
-                          figsize=None, title=None, tight=False, **colorbar_kws):
+                          key_rngs={}, fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
+                          figsize=None, title=None, tight=False, colorsMap='jet', **colorbar_kws):
         """
         Plot constituent spin posterior projected onto the plane of the orbit with colorbar.
         Defaults to primary BH, use secondary_spin=True to plot spin of the secondary BH.
@@ -495,14 +597,16 @@ class AnalysisHandle:
         return peplot.plot_inplane_spin(self.masked_samples(key_rngs), color_key=self.key(color_key),
                                         use_V3=use_V3, secondary_spin=secondary_spin, fractions=fractions,
                                         plotstyle_color=plotstyle_color, scatter_alpha=scatter_alpha,
-                                        figsize=figsize, title=title, tight=tight, **colorbar_kws)
+                                        figsize=figsize, title=title, tight=tight, colorsMap=colorsMap,
+                                        **colorbar_kws)
 
     def plot_3d_spin(self, ckey='lnl', use_V3=False, secondary_spin=False, sign_or_scale=True,
-                     key_rngs=None, fig=None, ax=None, xkey='s1x', ykey='s1y', zkey='s1z',
+                     key_rngs={}, fig=None, ax=None, xkey='s1x', ykey='s1y', zkey='s1z',
                      nstep=1, title=None, xlab='auto', ylab='auto', zlab='auto', clab='auto',
                      plotlim=[-1.01, 1.01], plot_kws=None, figsize=(8, 8), titlesize=20,
                      colorbar_kws=None, extra_point_dicts=[(0, 0, 0)],
-                     marker_if_not_dict='o', size_if_not_dict=20, color_if_not_dict='k', ):
+                     marker_if_not_dict='o', size_if_not_dict=20, color_if_not_dict='k',
+                     colorsMap='jet'):
         """
         Plot constituent spin posterior in three-dimensional space with colorbar
         and unit sphere wire frame option (default).
@@ -513,15 +617,15 @@ class AnalysisHandle:
             zkey=self.key(zkey), ckey=self.key(ckey), nstep=nstep, title=title, titlesize=titlesize,
             xlab=xlab, ylab=ylab, zlab=zlab, clab=clab, fig=fig, ax=ax, extra_point_dicts=extra_point_dicts,
             figsize=figsize, plot_kws=plot_kws, colorbar_kws=colorbar_kws, marker_if_not_dict=marker_if_not_dict,
-            size_if_not_dict=size_if_not_dict, color_if_not_dict=color_if_not_dict)
+            size_if_not_dict=size_if_not_dict, color_if_not_dict=color_if_not_dict, colorsMap=colorsMap)
 
     #########################
     ##  LOCATION PLOTTING  ##
     #########################
-    def plot_3d_location(self, fig=None, ax=None, ckey='lnl', key_rngs=None, nstep=1,
+    def plot_3d_location(self, fig=None, ax=None, ckey='lnl', key_rngs={}, nstep=1,
                          clab=None, extra_point_dicts=[], title=None, units='Mpc',
                          figsize=(8, 8), xlim='auto', ylim='auto', zlim='auto',
-                         titlesize=20, plot_kws=None, colorbar_kws=None):
+                         titlesize=20, plot_kws=None, colorsMap='jet', colorbar_kws=None):
         """
         Plot posteriors in physical space using luminosity distance and RA/DEC.
         Color points by value of samples[ckey].
@@ -530,6 +634,6 @@ class AnalysisHandle:
         return peplot.plot_loc3d(self.masked_samples(key_rngs), title=title, xlim=xlim, ylim=ylim, zlim=zlim,
                                  nstep=nstep, ckey=ckey, clab=clab, plot_kws=plot_kws, figsize=figsize,
                                  titlesize=titlesize, colorbar_kws=colorbar_kws, units=units,
-                                 extra_point_dicts=extra_point_dicts, fig=fig, ax=ax)
+                                 extra_point_dicts=extra_point_dicts, fig=fig, ax=ax, colorsMap=colorsMap)
 
 
