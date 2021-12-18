@@ -572,7 +572,7 @@ class AnalysisHandle:
                       nstep=1, fig=None, ax=None, xlim='auto', ylim='auto', zlim='auto',
                       xlab='auto', ylab='auto', zlab='auto', clab='auto', title=None,
                       plot_kws=None, figsize=(8, 8), titlesize=20, colorbar_kws=None,
-                      extra_point_dicts=[], size_key=None, size_scale=1):
+                      extra_point_dicts=[], size_key=None, size_scale=1, colorsMap='jet'):
         """
         Make three-dimensional scatter plot with colorbar for visualizing fourth dimension.
         Additional gradient dimensions are size (size_key)
@@ -581,14 +581,15 @@ class AnalysisHandle:
             zkey=self.key(zkey), ckey=self.key(ckey), xlim=xlim, ylim=ylim, zlim=zlim,
             nstep=nstep, title=title, xlab=xlab, ylab=ylab, zlab=zlab, clab=clab, fig=fig, ax=ax,
             figsize=figsize, titlesize=titlesize, extra_point_dicts=extra_point_dicts,
-            size_key=size_key, size_scale=size_scale, plot_kws=plot_kws, colorbar_kws=colorbar_kws)
+            size_key=size_key, size_scale=size_scale, plot_kws=plot_kws,
+            colorsMap=colorsMap, colorbar_kws=colorbar_kws)
 
     #####################
     ##  SPIN PLOTTING  ##
     #####################
     def plot_inplane_spin(self, color_key='lnl', use_V3=False, secondary_spin=False,
                           key_rngs={}, fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
-                          figsize=None, title=None, tight=False, **colorbar_kws):
+                          figsize=None, title=None, tight=False, colorsMap='jet', **colorbar_kws):
         """
         Plot constituent spin posterior projected onto the plane of the orbit with colorbar.
         Defaults to primary BH, use secondary_spin=True to plot spin of the secondary BH.
@@ -596,14 +597,16 @@ class AnalysisHandle:
         return peplot.plot_inplane_spin(self.masked_samples(key_rngs), color_key=self.key(color_key),
                                         use_V3=use_V3, secondary_spin=secondary_spin, fractions=fractions,
                                         plotstyle_color=plotstyle_color, scatter_alpha=scatter_alpha,
-                                        figsize=figsize, title=title, tight=tight, **colorbar_kws)
+                                        figsize=figsize, title=title, tight=tight, colorsMap=colorsMap,
+                                        **colorbar_kws)
 
     def plot_3d_spin(self, ckey='lnl', use_V3=False, secondary_spin=False, sign_or_scale=True,
                      key_rngs={}, fig=None, ax=None, xkey='s1x', ykey='s1y', zkey='s1z',
                      nstep=1, title=None, xlab='auto', ylab='auto', zlab='auto', clab='auto',
                      plotlim=[-1.01, 1.01], plot_kws=None, figsize=(8, 8), titlesize=20,
                      colorbar_kws=None, extra_point_dicts=[(0, 0, 0)],
-                     marker_if_not_dict='o', size_if_not_dict=20, color_if_not_dict='k', ):
+                     marker_if_not_dict='o', size_if_not_dict=20, color_if_not_dict='k',
+                     colorsMap='jet'):
         """
         Plot constituent spin posterior in three-dimensional space with colorbar
         and unit sphere wire frame option (default).
@@ -614,7 +617,7 @@ class AnalysisHandle:
             zkey=self.key(zkey), ckey=self.key(ckey), nstep=nstep, title=title, titlesize=titlesize,
             xlab=xlab, ylab=ylab, zlab=zlab, clab=clab, fig=fig, ax=ax, extra_point_dicts=extra_point_dicts,
             figsize=figsize, plot_kws=plot_kws, colorbar_kws=colorbar_kws, marker_if_not_dict=marker_if_not_dict,
-            size_if_not_dict=size_if_not_dict, color_if_not_dict=color_if_not_dict)
+            size_if_not_dict=size_if_not_dict, color_if_not_dict=color_if_not_dict, colorsMap=colorsMap)
 
     #########################
     ##  LOCATION PLOTTING  ##
@@ -622,7 +625,7 @@ class AnalysisHandle:
     def plot_3d_location(self, fig=None, ax=None, ckey='lnl', key_rngs={}, nstep=1,
                          clab=None, extra_point_dicts=[], title=None, units='Mpc',
                          figsize=(8, 8), xlim='auto', ylim='auto', zlim='auto',
-                         titlesize=20, plot_kws=None, colorbar_kws=None):
+                         titlesize=20, plot_kws=None, colorsMap='jet', colorbar_kws=None):
         """
         Plot posteriors in physical space using luminosity distance and RA/DEC.
         Color points by value of samples[ckey].
@@ -631,6 +634,6 @@ class AnalysisHandle:
         return peplot.plot_loc3d(self.masked_samples(key_rngs), title=title, xlim=xlim, ylim=ylim, zlim=zlim,
                                  nstep=nstep, ckey=ckey, clab=clab, plot_kws=plot_kws, figsize=figsize,
                                  titlesize=titlesize, colorbar_kws=colorbar_kws, units=units,
-                                 extra_point_dicts=extra_point_dicts, fig=fig, ax=ax)
+                                 extra_point_dicts=extra_point_dicts, fig=fig, ax=ax, colorsMap=colorsMap)
 
 

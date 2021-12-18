@@ -178,7 +178,8 @@ def get_spin_plot_par(samples, key):
 
 def plot_inplane_spin(pe_samples, color_key='q', use_V3=False, secondary_spin=False,
                       fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
-                      figsize=None, title=None, tight=False, **colorbar_kws):
+                      figsize=None, title=None, tight=False, colorsMap='jet',
+                      **colorbar_kws):
     plotstyle_2d = gd.PlotStyle2d(plotstyle_color, fractions=fractions,
                                   show_cl=True, clabel_fs=11)
     j = (2 if secondary_spin else 1)
@@ -190,7 +191,7 @@ def plot_inplane_spin(pe_samples, color_key='q', use_V3=False, secondary_spin=Fa
     fig, ax = plt.subplots(figsize=figsize)
     if isinstance(color_key, str):
         plt.scatter(plot_samples[plotkeys[0]], plot_samples[plotkeys[1]], s=.8, lw=0,
-                    c=pe_samples[color_key], alpha=scatter_alpha)
+                    c=pe_samples[color_key], alpha=scatter_alpha, cmap=colorsMap)
         colorbar_kws['label'] = colorbar_kws.get('label', label_from_key(color_key))
         plt.colorbar(**colorbar_kws)
     plt.plot(np.cos(x), np.sin(x), lw=1, c='k')
@@ -213,9 +214,9 @@ def plot_spin4d(samples, ckey='q', use_V3=False, secondary_spin=False, sign_or_s
                  xkey='s1x', ykey='s1y', zkey='s1z', nstep=1, title=None,
                  xlab='auto', ylab='auto', zlab='auto', clab='auto', plotlim=[-1.1, 1.1],
                  mask_keys_min={}, mask_keys_max={}, fig=None, ax=None, plot_kws=None,
-                 figsize=(14, 14), titlesize=20, colorbar_kws=None,
-                 extra_point_dicts=[(0, 0, 0)],
-                 marker_if_not_dict='o', size_if_not_dict=20, color_if_not_dict='k'):
+                 figsize=(14, 14), titlesize=20, colorbar_kws=None, colorsMap='jet',
+                 extra_point_dicts=[(0, 0, 0)], marker_if_not_dict='o',
+                size_if_not_dict=20, color_if_not_dict='k'):
     """scatter3d but using a dataframe and keys instead of using x/y/z/color arrays directly"""
     # get x, y, z to plot
     if use_V3:
@@ -251,10 +252,11 @@ def plot_spin4d(samples, ckey='q', use_V3=False, secondary_spin=False, sign_or_s
         title = 'Posterior Samples from PE with Flat $\\chi_{eff}$ Prior'
     elif title == 'iso':
         title = 'Posterior Samples from PE with Isotropic $\\vec{\\chi}_1, \\vec{\\chi}_2$ Priors'
+
     fig, ax = scatter3d(x[mask][::nstep], y[mask][::nstep], z[mask][::nstep], clr[mask][::nstep], title=title,
                       xlab=xlab, ylab=ylab, zlab=zlab, clab=clab, xlim=plotlim, ylim=plotlim, zlim=plotlim,
                       titlesize=titlesize, figsize=figsize, plot_kws=plot_kws, colorbar_kws=colorbar_kws,
-                      fig=fig, ax=ax)
+                      fig=fig, ax=ax, colorsMap=colorsMap)
     # plot extra points
     for dic in extra_point_dicts:
         if is_dict(dic):
@@ -301,7 +303,7 @@ def ra_dec_DL_from_xyzMpc(xmpc, ympc, zmpc):
 def plot_loc3d(samples, title='flat', xlim='auto', ylim='auto', zlim='auto', nstep=2,
                ckey='lnl', clab=None, mask_keys_min={}, mask_keys_max={},
                plot_kws=None, figsize=(14, 14), titlesize=20, colorbar_kws=None, units='Mpc',
-               extra_point_dicts=[], fig=None, ax=None):
+               extra_point_dicts=[], fig=None, ax=None, colorsMap='jet'):
     dkey = 'DL'
     if dkey not in samples:
         dkey = PARKEY_MAP[dkey]
@@ -326,10 +328,12 @@ def plot_loc3d(samples, title='flat', xlim='auto', ylim='auto', zlim='auto', nst
         title = 'Posterior Samples from PE with Isotropic $\\vec{\\chi}_1, \\vec{\\chi}_2$ Prior'
     if (clab is None) or (clab == 'auto'):
         clab = label_from_key(ckey)
+    cmap = colorbar_kws.pop('cmap', 'jet')
     fig, ax = scatter3d(x[mask][::nstep], y[mask][::nstep], z[mask][::nstep], clr[mask][::nstep],
                         title=title, xlab=f'X ({units})', ylab=f'Y ({units})', zlab=f'Z ({units})',
                         clab=clab, xlim=xlim, ylim=ylim, zlim=zlim, titlesize=titlesize,
-                        figsize=figsize, plot_kws=plot_kws, colorbar_kws=colorbar_kws, fig=fig, ax=ax)
+                        figsize=figsize, plot_kws=plot_kws, colorbar_kws=colorbar_kws,
+                        fig=fig, ax=ax, colorsMap=colorsMap)
     # plot earth at origin
     ax.scatter(0, 0, 0, marker='*', s=24, c='k')
     ax.text(-0.15, -0.15, -0.4, 'Earth', color='k', size=14)
@@ -351,7 +355,7 @@ def plot_samples4d(samples, xkey='chieff', ykey='q', zkey='mtot', ckey='lnL',
                    xlab='auto', ylab='auto', zlab='auto', clab='auto',
                    mask_keys_min={}, mask_keys_max={}, fig=None, ax=None,
                    plot_kws=None, figsize=(14, 14), titlesize=20, colorbar_kws=None,
-                   extra_point_dicts=[], size_key=None, size_scale=1):
+                   extra_point_dicts=[], size_key=None, size_scale=1, colorsMap='jet'):
     """scatter3d but using a dataframe and keys instead of using x/y/z/color arrays directly"""
     if (xlab is None) or (xlab == 'auto'):
         xlab = label_from_key(xkey)
@@ -380,7 +384,7 @@ def plot_samples4d(samples, xkey='chieff', ykey='q', zkey='mtot', ckey='lnL',
     fig, ax = scatter3d(x[mask][::nstep], y[mask][::nstep], z[mask][::nstep], clr[mask][::nstep], title=title,
                       xlab=xlab, ylab=ylab, zlab=zlab, clab=clab, xlim=xlim, ylim=ylim, zlim=zlim,
                       titlesize=titlesize, figsize=figsize, plot_kws=plot_kws, colorbar_kws=colorbar_kws,
-                      fig=fig, ax=ax)
+                      fig=fig, ax=ax, colorsMap=colorsMap)
     # plot extra points
     for dic in extra_point_dicts:
         xx, yy, zz = dic[xkey], dic[ykey], dic[zkey]
