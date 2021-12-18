@@ -310,7 +310,7 @@ class CBCLikelihood(utils.JSONMixin):
             if isinstance(wf_plot_kwargs.get('label'), str):
                 lab0 = wf_plot_kwargs['label'] + ': '
 
-        data_plog_kwargs = wf_plot_kwargs.pop('data_plot_kwargs', {})
+        data_plot_kwargs = wf_plot_kwargs.pop('data_plot_kwargs', {})
         for ax, data_det, wf_det in zip(axes, data_t_wht, wf_t_wht):
             if plot_data:
                 ax.plot(time, data_det, 'C0', lw=.2, label='Data',
