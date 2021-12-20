@@ -179,7 +179,7 @@ def get_spin_plot_par(samples, key):
 def plot_inplane_spin(pe_samples, color_key='q', use_V3=False, secondary_spin=False,
                       fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
                       figsize=None, title=None, tight=False, colorsMap='jet',
-                      **colorbar_kws):
+                      scatter_size=.8, scatter_nstep=1, **colorbar_kws):
     plotstyle_2d = gd.PlotStyle2d(plotstyle_color, fractions=fractions,
                                   show_cl=True, clabel_fs=11)
     j = (2 if secondary_spin else 1)
@@ -190,8 +190,10 @@ def plot_inplane_spin(pe_samples, color_key='q', use_V3=False, secondary_spin=Fa
     x = np.linspace(0, 2*np.pi, 300)
     fig, ax = plt.subplots(figsize=figsize)
     if isinstance(color_key, str):
-        plt.scatter(plot_samples[plotkeys[0]], plot_samples[plotkeys[1]], s=.8, lw=0,
-                    c=pe_samples[color_key], alpha=scatter_alpha, cmap=colorsMap)
+        plt.scatter(plot_samples[plotkeys[0]].to_numpy()[::scatter_nstep],
+                    plot_samples[plotkeys[1]].to_numpy()[::scatter_nstep],
+                    s=scatter_size, lw=0, c=pe_samples[color_key].to_numpy()[::scatter_nstep],
+                    alpha=scatter_alpha, cmap=colorsMap)
         colorbar_kws['label'] = colorbar_kws.get('label', label_from_key(color_key))
         plt.colorbar(**colorbar_kws)
     plt.plot(np.cos(x), np.sin(x), lw=1, c='k')

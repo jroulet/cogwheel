@@ -589,7 +589,8 @@ class AnalysisHandle:
     #####################
     def plot_inplane_spin(self, color_key='lnl', use_V3=False, secondary_spin=False,
                           key_rngs={}, fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
-                          figsize=None, title=None, tight=False, colorsMap='jet', **colorbar_kws):
+                          figsize=None, title=None, tight=False, colorsMap='jet',
+                          scatter_size=.8, scatter_nstep=1, **colorbar_kws):
         """
         Plot constituent spin posterior projected onto the plane of the orbit with colorbar.
         Defaults to primary BH, use secondary_spin=True to plot spin of the secondary BH.
@@ -598,6 +599,7 @@ class AnalysisHandle:
                                         use_V3=use_V3, secondary_spin=secondary_spin, fractions=fractions,
                                         plotstyle_color=plotstyle_color, scatter_alpha=scatter_alpha,
                                         figsize=figsize, title=title, tight=tight, colorsMap=colorsMap,
+                                        scatter_size=scatter_size, scatter_nstep=scatter_nstep,
                                         **colorbar_kws)
 
     def plot_3d_spin(self, ckey='lnl', use_V3=False, secondary_spin=False, sign_or_scale=True,
