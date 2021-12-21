@@ -360,7 +360,7 @@ class Grid2D(dict):
 
 
     def plot_pdf(self, pdf, ax, set_labels=False,
-                 style=DEFAULT_PLOTSTYLE2D):
+                 style=DEFAULT_PLOTSTYLE2D, get_contour=False):
         levels = list(get_levels(self[pdf], style.fractions))
         contour = ax.contour(*[self[par] for par in self.params], self[pdf],
                              levels=levels, colors=[style.color],
@@ -399,6 +399,9 @@ class Grid2D(dict):
         if self.labels[self.params[1]] is not None and set_labels:
             ax.set_ylabel(self.labels[self.params[1]]
                           + parenthesized_unit(self.units[self.params[1]]))
+        if get_contour:
+            return contour
+
 
 class Grid(dict):
     """

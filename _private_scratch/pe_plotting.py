@@ -179,7 +179,7 @@ def get_spin_plot_par(samples, key):
 def plot_inplane_spin(pe_samples, color_key='q', use_V3=False, secondary_spin=False,
                       fractions=[.5, .95], plotstyle_color='r', scatter_alpha=.5,
                       figsize=None, title=None, tight=False, colorsMap='jet',
-                      scatter_size=.8, scatter_nstep=1, **colorbar_kws):
+                      scatter_size=.8, scatter_nstep=1, get_contour=False, **colorbar_kws):
     plotstyle_2d = gd.PlotStyle2d(plotstyle_color, fractions=fractions,
                                   show_cl=True, clabel_fs=11)
     j = (2 if secondary_spin else 1)
@@ -200,7 +200,8 @@ def plot_inplane_spin(pe_samples, color_key='q', use_V3=False, secondary_spin=Fa
     # Make grid
     g = gd.Grid.from_samples(plotkeys, plot_samples)
     # Make 2d plot
-    g.grids_2d[plotkeys[0], plotkeys[1]].plot_pdf('posterior', ax, style=plotstyle_2d)
+    contourout = g.grids_2d[plotkeys[0], plotkeys[1]].plot_pdf(
+        'posterior', ax, style=plotstyle_2d, get_contour=get_contour)
     ax.set_xlim(-1, 1)
     ax.set_ylim(-1, 1)
     plt.grid()
@@ -210,6 +211,8 @@ def plot_inplane_spin(pe_samples, color_key='q', use_V3=False, secondary_spin=Fa
     if tight:
         plt.tight_layout()
     ax.set_title(title)
+    if get_contour:
+        return fig, ax, contourout
     return fig, ax
 
 def plot_spin4d(samples, ckey='q', use_V3=False, secondary_spin=False, sign_or_scale=True,
