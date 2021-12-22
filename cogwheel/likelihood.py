@@ -289,15 +289,22 @@ class CBCLikelihood(utils.JSONMixin):
         figsize: Figure (width, height) in inches, used if `fig=None`.
         **wf_plot_kwargs: Keyword arguments passed to pyplot.plot()
                           for waveform (data plot arguments are fixed).
+                          Data plot arguments are set to
+                          c=`C0`, lw=.2, label=`Data` and can be changed
+                          or expanded using the keyword data_plot_kwargs.
+                          That is, the data's plot arguments will be
+                          updated after the defaults are set, using
+                          wf_plot_kwargs.pop(`data_plot_kwargs`)
 
         Return:
         -------
         fig, ax: Figure and axes array with plots.
         """
+        # make figure if not passed
         if fig is None:
             fig = self._setup_data_figure(figsize)
         axes = fig.get_axes()
-
+        # get arrays for plotting
         time = self.event_data.t - self.event_data.tcoarse
         data_t_wht = self._get_whitened_td(self.event_data.strain)
         wf_t_wht = self._get_whitened_td(self._get_h_f(par_dic, by_m=by_m))
@@ -309,7 +316,7 @@ class CBCLikelihood(utils.JSONMixin):
                 lab0 = ''
             else:
                 lab0 = str(lab0) + ': '
-
+        # plot
         data_plot_kwargs = wf_plot_kwargs.pop('data_plot_kwargs', {})
         for ax, data_det, wf_det in zip(axes, data_t_wht, wf_t_wht):
             if plot_data:
