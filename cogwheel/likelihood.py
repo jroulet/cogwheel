@@ -304,11 +304,11 @@ class CBCLikelihood(utils.JSONMixin):
         if by_m:
             wf_t_wht = np.array([wf_t_wht[:, j, :]
                                  for j in range(len(data_t_wht))])
-            plt_kws = {k: v for k, v in wf_plot_kwargs.items()
-                       if k != 'label'}
-            lab0 = ''
-            if isinstance(wf_plot_kwargs.get('label'), str):
-                lab0 = wf_plot_kwargs['label'] + ': '
+            lab0 = wf_plot_kwargs.pop('label', None)
+            if lab0 is None:
+                lab0 = ''
+            else:
+                lab0 = str(lab0) + ': '
 
         data_plot_kwargs = wf_plot_kwargs.pop('data_plot_kwargs', {})
         for ax, data_det, wf_det in zip(axes, data_t_wht, wf_t_wht):
@@ -318,8 +318,8 @@ class CBCLikelihood(utils.JSONMixin):
             if by_m:
                 for j, lmlist in enumerate(
                     self.waveform_generator._harmonic_modes_by_m.values()):
-                    ax.plot(time, wf_det[j], label=(lab0+str(lmlist)),
-                            **plt_kws)
+                    lab_lm = lab0 + ', '.join([str(lm) for lm in lmlist])
+                    ax.plot(time, wf_det[j], label=lab_lm, **wf_plot_kwargs)
             else:
                 ax.plot(time, wf_det, **wf_plot_kwargs)
 
