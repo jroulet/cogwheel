@@ -672,7 +672,8 @@ class Grid(dict):
             self, pdf=None, title=None, subplot_size=2., fig=None, ax=None,
             figsize=None, nbins=6, set_legend=False, save_as=None, y_title=.98,
             plotstyle=None, show_titles_1d=True, scatter_points=None,
-            title_label=True, legend_title=None, plot_params=None, **kwargs):
+            title_label=True, legend_title=None, plot_params=None,
+            scatter_point_kwargs={}, **kwargs):
         if pdf is None:
             if len(self.pdfs) == 1:
                 pdf = self.pdfs[0]
@@ -726,7 +727,8 @@ class Grid(dict):
                     for j, ypar in enumerate(plot_params):
                         if j > i:
                             ax[j][i].scatter(row[xpar], row[ypar],
-                                             color=colors[index])
+                                             color=colors[index],
+                                             **scatter_point_kwargs)
 
         if save_as is not None:
             plt.savefig(save_as, bbox_inches='tight')
