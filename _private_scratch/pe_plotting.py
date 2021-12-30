@@ -333,7 +333,6 @@ def plot_loc3d(samples, title='flat', xlim='auto', ylim='auto', zlim='auto', nst
         title = 'Posterior Samples from PE with Isotropic $\\vec{\\chi}_1, \\vec{\\chi}_2$ Prior'
     if (clab is None) or (clab == 'auto'):
         clab = label_from_key(ckey)
-    cmap = colorbar_kws.pop('cmap', 'jet')
     fig, ax = scatter3d(x[mask][::nstep], y[mask][::nstep], z[mask][::nstep], clr[mask][::nstep],
                         title=title, xlab=f'X ({units})', ylab=f'Y ({units})', zlab=f'Z ({units})',
                         clab=clab, xlim=xlim, ylim=ylim, zlim=zlim, titlesize=titlesize,
