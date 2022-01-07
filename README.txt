@@ -1,4 +1,4 @@
-Last Update: 2021-10-01
+Last Update: 2022-01-07
 
 Conda enviroment setup:
 
