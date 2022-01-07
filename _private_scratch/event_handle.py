@@ -9,8 +9,9 @@ import sys
 import json
 import pandas as pd
 import datetime
+from astropy.time import Time as astrotime
 from copy import deepcopy as dcopy
-from gwpy.time import tconvert
+
 
 from . import parameter_label_formatting as label_formatting
 from . import standard_intrinsic_transformations as pxform
@@ -53,10 +54,12 @@ def get_run(tgps_or_evname):
         return trig.utils.get_run(tgps_from_evname(tgps_or_evname))
     return trig.utils.get_run(float(tgps_or_evname))
 
-def evname_from_tgps(tgps_sec, prefix='GW'):
+def evname_from_tgps(tgps_sec, prefix='GW', force_full=False):
     if hasattr(tgps_sec, '__len__'):
-        return [evname_from_tgps(tt, prefix) for tt in tgps_sec]
-    return trig.utils.get_evname_from_tgps(tgps_sec, prefix)
+        return [evname_from_tgps(tt, prefix, force_full=force_full)
+                for tt in tgps_sec]
+    return trig.utils.get_evname_from_tgps(tgps_sec, prefix,
+                                           force_full=force_full)
 
 def tgps_from_evname(evn, events_dict=SPECIAL_EVNAMES):
     tgpsout = events_dict.get(evn, {}).get('tgps', None)
@@ -64,9 +67,9 @@ def tgps_from_evname(evn, events_dict=SPECIAL_EVNAMES):
         evn = evn.replace('GWC', 'GW')
         assert (len(evn) == 15) and (evn[:2]+evn[8:9] == 'GW_'), \
             'evn must have form GWyymmdd_hhmmss'
-        tgpsout = tconvert(datetime.datetime(2000+int(evn[2:4]),
+        tgpsout = astrotime(datetime.datetime(2000+int(evn[2:4]),
                     int(evn[4:6]), int(evn[6:8]), int(evn[9:11]),
-                    int(evn[11:13]), int(evn[13:]))).gpsSeconds
+                    int(evn[11:13]), int(evn[13:]))).gps
     return tgpsout
 
 
