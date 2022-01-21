@@ -141,7 +141,7 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
     print(f'Submitted job {job_name!r}.')
 
 def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
-                 args='', bsub_cmds=(), batch_path=None):
+               args='', bsub_cmds=(), batch_path=None):
     """
     Generic function to submit a job using IBM Spectrum LSF.
     This function is intended to be called from other modules rather
@@ -192,6 +192,7 @@ def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
         os.system(f'bsub < {os.path.abspath(batchfile.name)}')
 
     print(f'Submitted job {job_name!r}.')
+
 
 # ----------------------------------------------------------------------
 # Directory I/O:

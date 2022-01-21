@@ -237,8 +237,9 @@ class EventMetadata(data.utils.JSONMixin):
         self.tcoarse = t_interval / 2 if tcoarse is None else tcoarse
         # Now specify (and compute) physical waveform properties
         self.par_dic_0 = deepcopy(par_dic_0)
-        self.update_guess(mchirp_range=mchirp_range, q_min=q_min,
-            tc_range=tc_range, ref_det_name=ref_det_name, calpha=calpha)
+        self.update_guess(
+            mchirp_range=mchirp_range, q_min=q_min, tc_range=tc_range,
+            ref_det_name=ref_det_name, calpha=calpha)
         self.compute_from_guess(
             compute_par_dic_0=compute_par_dic_0,
             compute_linear_free_shift=compute_linear_free_shift,
@@ -253,19 +254,17 @@ class EventMetadata(data.utils.JSONMixin):
 
     @classmethod
     def from_cand(cls, cand_dict, **init_kwargs):
-        eventname = cand_dict.get('evname',
-            trig.utils.get_evname_from_tgps(cand_dict['tgps']))
+        eventname = cand_dict.get(
+            'evname', trig.utils.get_evname_from_tgps(cand_dict['tgps']))
         init_dict = {'eventname': eventname}
-        init_dict.update({k: v for k, v in cand_dict.items()
-            if k in ['tgps', 'mchirp_range', 'tc_range', 'calpha',
-                     'max_tsep', 'compute_linear_free_shift',
-                     'bank_id', 'fnames', 'q_min', 'ref_det_name',
-                     'compute_par_dic_0']})
+        init_dict.update({k: v for k, v in cand_dict.items() if k in [
+            'tgps', 'mchirp_range', 'tc_range', 'calpha', 'max_tsep',
+            'compute_linear_free_shift', 'bank_id', 'fnames', 'q_min',
+            'ref_det_name', 'compute_par_dic_0']})
         init_dict.update(init_kwargs)
         if 'mchirp_range' not in init_dict:
             init_dict['compute_par_dic_0'] = True
-            sigmas = init_dict.pop('sigmas',
-                init_dict.pop('mchirp_sigmas', 5))
+            sigmas = init_dict.pop('sigmas', init_dict.pop('mchirp_sigmas', 5))
             snr = np.sqrt(np.min([v for k, v in cand_dict.items()
                                   if 'snr2' in k]))
         instance = cls(**init_dict)
@@ -273,8 +272,8 @@ class EventMetadata(data.utils.JSONMixin):
         if 'mchirp_range' not in init_dict:
             m1, m2 = instance.par_dic_0['m1'], instance.par_dic_0['m2']
             mc0 = (m1*m2)**.6/(m1+m2)**.2
-            instance.mchirp_range = estimate_mchirp_range(mchirp=mc0,
-                sigmas=sigmas, snr=snr)
+            instance.mchirp_range = estimate_mchirp_range(
+                mchirp=mc0, sigmas=sigmas, snr=snr)
         return instance
 
     def get_init_dict(self):
@@ -291,8 +290,8 @@ class EventMetadata(data.utils.JSONMixin):
         init_dict.update({key: getattr(self, key, None) for key in
                           ['triggerlist_kw', 'tc_range']})
         # vv these will be taken from self if set, else set to None
-        init_dict.update({key: getattr(self, key, None) for key in
-            ['triggerlist_kw', 'tc_range', 'ref_det_name', 'calpha']})
+        init_dict.update({key: getattr(self, key, None) for key in [
+            'triggerlist_kw', 'tc_range', 'ref_det_name', 'calpha']})
         # par_dic_0 should just contain physical params, but since it
         # eats kwargs in many functions let us check that we have not
         # accidentally put another init kwarg in it during usage
@@ -300,7 +299,7 @@ class EventMetadata(data.utils.JSONMixin):
             if k not in init_dict:
                 init_dict[k] = v
             else:
-                print(f'Warning! self.par_dic_0[`{k}`] = {v} lost' +
+                print(f'Warning! self.par_dic_0[`{k}`] = {v} lost'
                       f' in init_dict, using {k} = {init_dict[k]}')
         return init_dict
 

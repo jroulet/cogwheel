@@ -2,6 +2,7 @@
 
 import abc
 import argparse
+import datetime
 import pathlib
 import os
 import sys
@@ -11,7 +12,6 @@ from functools import wraps
 import numpy as np
 import pandas as pd
 import scipy.special
-import datetime
 
 import pymultinest
 # import ultranest
@@ -170,7 +170,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         print(f'Submitted job {job_name!r}.')
 
     def submit_lsf(self, rundir, n_hours_limit=48,
-                     memory_per_task='32G', resuming=False):
+                   memory_per_task='32G', resuming=False):
         """
         Parameters
         ----------
