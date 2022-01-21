@@ -6,7 +6,7 @@ from functools import wraps
 import numpy as np
 from scipy import special, stats
 from scipy.optimize import differential_evolution, minimize_scalar
-from scipy.interpolate import InterpolatedUnivariateSpline, interp1d
+import scipy.interpolate
 import matplotlib.pyplot as plt
 
 from . import gw_utils
@@ -326,7 +326,7 @@ class CBCLikelihood(utils.JSONMixin):
                         **data_plot_kwargs)
             if by_m:
                 for j, lmlist in enumerate(
-                    self.waveform_generator._harmonic_modes_by_m.values()):
+                        self.waveform_generator._harmonic_modes_by_m.values()):
                     lab_lm = lab0 + ', '.join([str(lm) for lm in lmlist])
                     ax.plot(time, wf_det[j], label=lab_lm, **wf_plot_kwargs)
             else:
@@ -774,11 +774,9 @@ class RelativeBinningLikelihood(CBCLikelihood):
         self._set_summary()
 
     def _set_splines(self):
-        basis_splines = [InterpolatedUnivariateSpline(
-            self.fbin, y_i, k=self.spline_degree, ext='zeros')
-                         for y_i in np.eye(len(self.fbin))]
-        self._splines = np.transpose([basis_spline(self.event_data.frequencies)
-                                      for basis_spline in basis_splines])
+        self._splines = scipy.interpolate.interp1d(
+            self.fbin, np.eye(len(self.fbin)), kind=self._spline_degree,
+            bounds_error=False, fill_value=0.)(self.event_data.frequencies).T
 
     def _set_summary(self):
         """
@@ -870,13 +868,13 @@ class RelativeBinningLikelihood(CBCLikelihood):
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True)
 
-        ratio = interpolate.interp1d(
-            self.fbin, h_fbin / self.h0_fbin, assume_sorted=True,
+        ratio = scipy.interpolate.interp1d(
+            self.fbin, h_fbin / self._h0_fbin, assume_sorted=True,
             kind=self.spline_degree, bounds_error=False, fill_value=0.
             )(self.event_data.frequencies)
 
         # Sum over harmonic modes
-        return np.sum(ratio * self.h0_f, axis=0)
+        return np.sum(ratio * self._h0_f, axis=0)
 
     def test_relative_binning_accuracy(self, par_dic):
         """
