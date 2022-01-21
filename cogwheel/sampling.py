@@ -231,7 +231,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         with Profile() as profiler:
             exit_code = self._run()
-            with open(str(rundir/FINISHED_FILENAME), 'w') as fobj:
+            with open(rundir/FINISHED_FILENAME, 'w') as fobj:
                 fobj.write(f'{exit_code}\n{datetime.datetime.now()}')
         profiler.dump_stats(rundir/self.PROFILING_FILENAME)
 
@@ -299,11 +299,10 @@ class PyMultiNest(Sampler):
         """
         fname = os.path.join(self.run_kwargs['outputfiles_basename'],
                              'post_equal_weights.dat')
-        try:
-            folded = pd.DataFrame(np.loadtxt(fname)[:, :-1], columns=self.params)
-        except (FileNotFoundError, OSError) as e:
-            # Weird PyMultinest filename length limit?
-            folded = pd.DataFrame(np.loadtxt(fname[:100])[:, :-1], columns=self.params)
+        if not os.path.exists(fname):
+            fname = fname[:100]  # Weird PyMultinest filename length limit
+
+        folded = pd.DataFrame(np.loadtxt(fname)[:, :-1], columns=self.params)
         return self.resample(folded)
 
     def load_evidence(self):
