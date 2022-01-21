@@ -6,7 +6,7 @@ from functools import wraps
 import numpy as np
 from scipy import special, stats
 from scipy.optimize import differential_evolution, minimize_scalar
-from scipy.interpolate import InterpolatedUnivariateSpline
+from scipy.interpolate import InterpolatedUnivariateSpline, interp1d
 import matplotlib.pyplot as plt
 
 from . import gw_utils
@@ -153,6 +153,12 @@ class CBCLikelihood(utils.JSONMixin):
         Estimate local standard deviation of the matched-filter output
         at the time of the event for each detector.
 
+        Note: all harmonic_modes of the approximant are used even if
+        `waveform_generator.harmonic_modes` is set differently. This is
+        so that `asd_drift` does not change and one can make apples-to-
+        apples comparisons of the likelihood toggling harmonic modes on
+        and off.
+
         Parameters
         ----------
         par_dic: dictionary of waveform parameters.
@@ -161,14 +167,13 @@ class CBCLikelihood(utils.JSONMixin):
         kwargs: passed to `safe_std`, keys include:
                 `max_contiguous_low`, `expected_high`, `reject_nearby`.
         """
-        # get waveform using all available modes in model
+        # Use all available modes to get a waveform, then reset
         harmonic_modes = self.waveform_generator.harmonic_modes
         self.waveform_generator.harmonic_modes = None
         normalized_h_f = self._get_h_f(par_dic, normalize=True)
         self.waveform_generator.harmonic_modes = harmonic_modes
-        # compute overlaps from unwhitened waveform (uses blued data)
+
         z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
-        # whiten waveform
         whitened_h_f = (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
                         * self.event_data.wht_filter * normalized_h_f)
         # Undo previous asd_drift so nsamples is independent of it
@@ -300,23 +305,20 @@ class CBCLikelihood(utils.JSONMixin):
         -------
         fig, ax: Figure and axes array with plots.
         """
-        # make figure if not passed
         if fig is None:
             fig = self._setup_data_figure(figsize)
         axes = fig.get_axes()
-        # get arrays for plotting
+
         time = self.event_data.t - self.event_data.tcoarse
         data_t_wht = self._get_whitened_td(self.event_data.strain)
         wf_t_wht = self._get_whitened_td(self._get_h_f(par_dic, by_m=by_m))
         if by_m:
             wf_t_wht = np.array([wf_t_wht[:, j, :]
                                  for j in range(len(data_t_wht))])
-            lab0 = wf_plot_kwargs.pop('label', None)
-            if lab0 is None:
-                lab0 = ''
-            else:
-                lab0 = str(lab0) + ': '
-        # plot
+            lab0 = wf_plot_kwargs.pop('label', '')
+            if lab0:
+                lab0 = f'{lab0}: '
+        # Plot
         data_plot_kwargs = wf_plot_kwargs.pop('data_plot_kwargs', {})
         for ax, data_det, wf_det in zip(axes, data_t_wht, wf_t_wht):
             if plot_data:
@@ -789,63 +791,39 @@ class RelativeBinningLikelihood(CBCLikelihood):
             (d|h) ~= sum(_d_h_weights * conj(h_fbin)) / asd_drift^2
             (h|h) ~= sum(_h_h_weights * abs(h_fbin)^2) / asd_drift^2
 
+        Note: all spin components in `self.par_dic_0` are used, even if
+        `self.waveform_generator.disable_precession` is set to `True`.
+        This is so that the reference waveform remains the same when
+        toggling `disable_precession`.
+
         # TODO: maybe enforce a minimum amplitude for h_0?
         """
-        # don't zero the in-plane spins for the reference waveform
-        # (note: alignment can be achieved via par_dic_0 if desired)
+        # Don't zero the in-plane spins for the reference waveform
         disable_precession = self.waveform_generator.disable_precession
         self.waveform_generator.disable_precession = False
-        # get waveform
-        h0_f = self._get_h_f(self.par_dic_0, by_m=True)
-        h0_fbin = self.waveform_generator.get_strain_at_detectors(
+
+        self._h0_f = self._get_h_f(self.par_dic_0, by_m=True)
+        self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, self.par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
-        # get overlap
-        d_h0 = self.event_data.blued_strain * np.conj(h0_f)
-        self._d_h_weights = self._get_summary_weights(d_h0) / np.conj(h0_fbin)
-        # combine modes
+
+        d_h0 = self.event_data.blued_strain * np.conj(self._h0_f)
+        self._d_h_weights = (self._get_summary_weights(d_h0)
+                             / np.conj(self._h0_fbin))
+
         m_inds, mprime_inds = self._get_m_mprime_inds()
-        h0m_h0mprime = (h0_f[m_inds] * h0_f[mprime_inds].conj()
+        h0m_h0mprime = (self._h0_f[m_inds] * self._h0_f[mprime_inds].conj()
                         * self.event_data.wht_filter ** 2)
         self._h_h_weights = (self._get_summary_weights(h0m_h0mprime)
-                             / (h0_fbin[m_inds] * h0_fbin[mprime_inds].conj()))
+                             / (self._h0_fbin[m_inds]
+                                * self._h0_fbin[mprime_inds].conj()))
         # Count off-diagonal terms twice:
         self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
 
         self.asd_drift = self.compute_asd_drift(self.par_dic_0)
         self._lnl_0 = self.lnlike(self.par_dic_0, bypass_tests=True)
-        # need to wait until after drift computation to reset
+
+        # Reset
         self.waveform_generator.disable_precession = disable_precession
-
-    def _set_summary(self):
-        """
-        Compute summary data for the fiducial waveform at all detectors.
-        `asd_drift` is not applied to the summary data, to not have to
-        keep track of it.
-        Update `asd_drift` using the reference waveform.
-        The summary data `self._d_h_weights` and `self._d_h_weights` are
-        such that:
-            (d|h) ~= sum(_d_h_weights * conj(h_fbin)) / asd_drift^2
-            (h|h) ~= sum(_h_h_weights * abs(h_fbin)^2) / asd_drift^2
-
-        # TODO: maybe enforce a minimum amplitude for h_0?
-        """
-        h0_f = self._get_h_f(self.par_dic_0, by_m=True)
-        h0_fbin = self.waveform_generator.get_strain_at_detectors(
-            self.fbin, self.par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
-
-        d_h0 = self.event_data.blued_strain * np.conj(h0_f)
-        self._d_h_weights = self._get_summary_weights(d_h0) / np.conj(h0_fbin)
-
-        m_inds, mprime_inds = self._get_m_mprime_inds()
-        h0m_h0mprime = (h0_f[m_inds] * h0_f[mprime_inds].conj()
-                        * self.event_data.wht_filter**2)
-        self._h_h_weights = (self._get_summary_weights(h0m_h0mprime)
-                             / (h0_fbin[m_inds] * h0_fbin[mprime_inds].conj()))
-        # Count off-diagonal terms twice:
-        self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
-
-        self.asd_drift = self.compute_asd_drift(self.par_dic_0)
-        self._lnl_0 = self.lnlike(self.par_dic_0, bypass_tests=True)
 
     def _get_m_mprime_inds(self):
         """
@@ -880,6 +858,25 @@ class RelativeBinningLikelihood(CBCLikelihood):
                          axis now correponds to the frequency bins.
         """
         return 4 * self.event_data.df * np.dot(integrand, self._splines)
+
+    def _get_h_f_interpolated(self, par_dic):
+        """
+        Fast approximation to `_get_h_f`.
+        Return ndet x nfreq array with waveform strain at detectors
+        evaluated on the FFT frequency grid and zeroized outside
+        `(fmin, fmax)`, computed using relative binning from a low
+        frequency resolution waveform.
+        """
+        h_fbin = self.waveform_generator.get_strain_at_detectors(
+            self.fbin, par_dic, by_m=True)
+
+        ratio = interpolate.interp1d(
+            self.fbin, h_fbin / self.h0_fbin, assume_sorted=True,
+            kind=self.spline_degree, bounds_error=False, fill_value=0.
+            )(self.event_data.frequencies)
+
+        # Sum over harmonic modes
+        return np.sum(ratio * self.h0_f, axis=0)
 
     def test_relative_binning_accuracy(self, par_dic):
         """
