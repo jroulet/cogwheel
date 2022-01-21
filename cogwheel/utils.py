@@ -140,6 +140,58 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
 
     print(f'Submitted job {job_name!r}.')
 
+def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
+                 args='', bsub_cmds=(), batch_path=None):
+    """
+    Generic function to submit a job using IBM Spectrum LSF.
+    This function is intended to be called from other modules rather
+    than used interactively. The job will run the calling module as
+    script.
+
+    Parameters
+    ----------
+    job_name: string, name of LSF job
+    n_hours_limit: int, number of hours to allocate for the job.
+    stdout_path: file name, where to direct stdout.
+    stderr_path: file name, where to direct stderr.
+    args: string, command line arguments for the calling module's
+          `main()` to parse.
+    sbatch_cmds: sequence of strings with SBATCH commands, e.g.
+                 `('-M 8GB',)`
+    """
+    cogwheel_dir = pathlib.Path(__file__).parents[1].resolve()
+    module = inspect.getmodule(inspect.stack()[1].frame).__name__
+
+    bsub_lines = '\n'.join(f'#BSUB {cmd}' for cmd in bsub_cmds)
+
+    batch_text = textwrap.dedent(
+        f"""\
+            #!/bin/bash
+            #BSUB -J {job_name}
+            #BSUB -o {stdout_path}
+            #BSUB -e {stderr_path}
+            #BSUB -W {n_hours_limit:02}:00
+            {bsub_lines}
+
+            eval "$(conda shell.bash hook)"
+            conda activate {os.environ['CONDA_DEFAULT_ENV']}
+
+            cd {cogwheel_dir}
+            {sys.executable} -m {module} {args}
+            """)
+
+    if batch_path:
+        getfile = lambda: open(batch_path, 'w+')
+    else:
+        getfile = lambda: tempfile.NamedTemporaryFile('w+')
+
+    with getfile() as batchfile:
+        batchfile.write(batch_text)
+        batchfile.seek(0)
+        os.chmod(batchfile.name, 0o777)
+        os.system(f'bsub < {os.path.abspath(batchfile.name)}')
+
+    print(f'Submitted job {job_name!r}.')
 
 # ----------------------------------------------------------------------
 # Directory I/O:

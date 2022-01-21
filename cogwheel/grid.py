@@ -74,6 +74,7 @@ class PlotStyle2d:
         fractions = self.DEFAULT_FRACTIONS if fractions is None else fractions
         self._fractions = sorted(fractions, reverse=True)
         self.alphas = [1 - fraction for fraction in self.fractions]
+        self.linestyles = [self.linestyles[0]] * len(fractions)
 
 
 class PlotStyle:
@@ -86,8 +87,9 @@ class PlotStyle:
         linestyles = cls._gen_linestyles(number)
         colors = cls._gen_colors(number)
 
-        return [cls(PlotStyle1d(color=color, alpha_vlines=0, alpha_fill=0),
-                    PlotStyle2d(color, linestyle, fill='flat',
+        return [cls(PlotStyle1d(color=color, alpha_vlines=0, alpha_fill=0,
+                                linestyle=linestyle),
+                    PlotStyle2d(color, [linestyle], fill='flat',
                                 fractions=fractions))
                 for color, linestyle in zip(colors, linestyles)]
 
@@ -95,7 +97,7 @@ class PlotStyle:
     def _gen_linestyles(cls, number):
         if number <= len(linestyles := ['-', '--', '-.', ':']):
             return linestyles[:number]
-        return ['-'] + [(0, tuple([2, 2]*i + [7, 2])) for i in range(number-1)]
+        return ['-'] + [(0, (2, 2)*i + (7, 2)) for i in range(number-1)]
 
     @classmethod
     def _gen_colors(cls, number):
@@ -136,10 +138,8 @@ class LatexLabels(dict):
         self.units = defaultdict(str, units or {})
 
     def with_units(self, par):
-        """Return string of the form '{label} ({unit})'."""
-        if self.units[par]:
-            return self[par] + f' ({self.units[par]})'
-        return self[par]
+        parenthesised_unit = f' ({self.units[par]})' if self.units[par] else ''
+        return self[par] + parenthesised_unit
 
     def __missing__(self, par):
         return par
@@ -360,7 +360,7 @@ class Grid2D(dict):
 
 
     def plot_pdf(self, pdf, ax, set_labels=False,
-                 style=DEFAULT_PLOTSTYLE2D):
+                 style=DEFAULT_PLOTSTYLE2D, get_contour=False):
         levels = list(get_levels(self[pdf], style.fractions))
         contour = ax.contour(*[self[par] for par in self.params], self[pdf],
                              levels=levels, colors=[style.color],
@@ -399,6 +399,9 @@ class Grid2D(dict):
         if self.labels[self.params[1]] is not None and set_labels:
             ax.set_ylabel(self.labels[self.params[1]]
                           + parenthesized_unit(self.units[self.params[1]]))
+        if get_contour:
+            return contour
+
 
 class Grid(dict):
     """
@@ -669,7 +672,8 @@ class Grid(dict):
             self, pdf=None, title=None, subplot_size=2., fig=None, ax=None,
             figsize=None, nbins=6, set_legend=False, save_as=None, y_title=.98,
             plotstyle=None, show_titles_1d=True, scatter_points=None,
-            title_label=True, legend_title=None, plot_params=None, **kwargs):
+            title_label=True, legend_title=None, plot_params=None,
+            scatter_point_kwargs={}, **kwargs):
         if pdf is None:
             if len(self.pdfs) == 1:
                 pdf = self.pdfs[0]
@@ -723,7 +727,8 @@ class Grid(dict):
                     for j, ypar in enumerate(plot_params):
                         if j > i:
                             ax[j][i].scatter(row[xpar], row[ypar],
-                                             color=colors[index])
+                                             color=colors[index],
+                                             **scatter_point_kwargs)
 
         if save_as is not None:
             plt.savefig(save_as, bbox_inches='tight')

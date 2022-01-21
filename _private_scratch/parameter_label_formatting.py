@@ -1,3 +1,5 @@
+from . import standard_intrinsic_transformations as pxform
+
 # Latex formatting
 # ----------------
 param_labels = {'mchirp': r'$\mathcal{{M}}^{\rm det}$',
@@ -68,6 +70,9 @@ param_labels = {'mchirp': r'$\mathcal{{M}}^{\rm det}$',
                 'lnl_H': r'$\Delta \ln \mathcal{L}_{H}$',
                 'lnl_L': r'$\Delta \ln \mathcal{L}_{L}$',
                 'lnl_V': r'$\Delta \ln \mathcal{L}_{V}$',
+                'lnl_aux_H': r'$\Delta \ln \mathcal{L}_{H}^{(\rm{stationary})}$',
+                'lnl_aux_L': r'$\Delta \ln \mathcal{L}_{L}^{(\rm{stationary})}$',
+                'lnl_aux_V': r'$\Delta \ln \mathcal{L}_{V}^{(\rm{stationary})}$',
                 'lnL': r'$\Delta \ln \mathcal{L}$',
                 'lnL_H1': r'$\Delta \ln \mathcal{L}_{H1}$',
                 'lnL_L1': r'$\Delta \ln \mathcal{L}_{L1}$',
@@ -121,10 +126,11 @@ units.update({k: 'Mpc' for k in ['DL', 'dL', 'deff', 'Dcomov',
 units['DL_Gpc'] = 'Gpc'
 units['Vcomov'] = r'Mpc$^3$'
 units.update({k: 's' for k in ['tc', 'tgeo', 'tgps', 't_geocenter']})
-units.update({k: 'rad' for k in ['ra', 'RA', 'dec', 'DEC', 'psi', 'iota', 'vphi', 'thetaligo', 'philigo',
-                                 'psiplusvphi', 'psiminusvphi', 's1theta', 's2theta', 's1phi', 's2phi',
-                                 'thetaJN', 'phiJL', 'phi12', 's1phi_plus_vphi', 's2phi_plus_vphi',
-                                 's1phi_hat', 's2phi_hat', 'psi_minus_psidet', 'psi_hat', 'philigo_hat']})
+units.update({k: 'rad' for k in ['ra', 'RA', 'dec', 'DEC', 'psi',
+    'iota', 'vphi', 'thetaligo', 'philigo', 'psiplusvphi', 'psiminusvphi',
+    's1theta', 's2theta', 's1phi', 's2phi', 'thetaJN', 'phiJL', 'phi12',
+    's1phi_plus_vphi', 's2phi_plus_vphi', 's1phi_hat', 's2phi_hat',
+    'psi_minus_psidet', 'psi_hat', 'philigo_hat']})
 for k in param_labels.keys():
     if units.get(k, None) is None:
         units[k] = ''
@@ -202,6 +208,9 @@ param_names = {'mchirp': 'Detector Frame Chirp Mass',
                'lnl_H': 'Hanford Log Likelihood',
                'lnl_L': 'Livingston Log Likelihood',
                'lnl_V': 'Virgo Log Likelihood',
+               'lnl_aux_H': 'Hanford Log Likelihood (Stationary Noise)',
+               'lnl_aux_L': 'Livingston Log Likelihood (Stationary Noise)',
+               'lnl_aux_V': 'Virgo Log Likelihood (Stationary Noise)',
                'lnL': 'Log Likelihood',
                'lnL_H1': 'Hanford Log Likelihood',
                'lnL_L1': 'Livingston Log Likelihood',
@@ -222,3 +231,33 @@ param_names = {'mchirp': 'Detector Frame Chirp Mass',
                'antenna_V': 'Virgo Antenna Response',
                'Fplus': 'Reference Detector Antenna Plus',
                'Fcross': 'Reference Detector Antenna Cross'}
+
+
+def fmt_num(num, prec_override=None):
+    if prec_override is not None:
+        return ('{:.'+str(prec_override)+'f}').format(num)
+    if abs(num) > 10000:
+        return f'{num:.1e}'
+    if abs(num) > 10:
+        return f'{num:.0f}'
+    if abs(num) > 1:
+        return f'{num:.1f}'
+    return f'{num:.2f}'
+
+def label_from_pdic(pdic, keys=['mchirp', 'chieff'], pre='', post='',
+                    sep=', ', connector=' = ', prec_override=None,
+                    add_units=False):
+    pstr = ''
+    get_sep = lambda k: sep
+    if add_units:
+        get_sep = lambda k: ' (' + units[k] + ')' + sep
+    pdic_use = dict(pdic)
+    if any([(pdic_use.get(k) is None) for k in keys]):
+        pxform.compute_samples_aux_vars(pdic_use)
+    get_num = lambda k: (r'$' + fmt_num(pdic_use.get(k), prec_override)
+                         + r'$' + get_sep(k))
+    for k in keys:
+        pstr += param_labels.get(k, k) + connector + get_num(k)
+    return pre + pstr[:-len(sep)] + post
+
+
