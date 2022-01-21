@@ -6,6 +6,7 @@ import numpy as np
 
 from cogwheel import gw_prior
 from cogwheel.gw_utils import DETECTORS
+from cogwheel.tests import test_waveform
 
 
 DETECTOR_PAIRS = [''.join(pair)
@@ -21,16 +22,17 @@ def get_random_init_parameters():
         q_min=np.random.uniform(.01, .9),
         detector_pair=np.random.choice(DETECTOR_PAIRS),
         tgps=np.random.uniform(0, 1e9),
-        t_range=np.sort(np.random.uniform([-.1, .1])),
+        t_range=np.sort(np.random.uniform(-.1, .1, 2)),
         ref_det_name=np.random.choice(list(DETECTORS)),
         f_ref=np.random.uniform(20, 100),
         d_hat_max=np.random.uniform(1e2, 1e4),
         symmetrize_lnq=False,  # Note `symmetrize_lnq=True` is not invertible
+        standard_par_dic=test_waveform.get_random_par_dic()
         )
 
 
 def gen_random_par_dic(prior):
-    """Return dirctionary of sampled parameter values."""
+    """Return dictionary of sampled parameter values."""
     r = np.random.uniform(size=len(prior.sampled_params))
     return dict(zip(prior.sampled_params, prior.cubemin + r * prior.cubesize))
 

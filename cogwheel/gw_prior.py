@@ -786,8 +786,8 @@ class FixedIntrinsicParametersPrior(FixedPrior):
         """
         self.standard_par_dic = waveform.DEFAULT_PARS | standard_par_dic
 
-        if missing := (self.standard_par_dic.keys()
-                       - self.__class__.standard_par_dic.keys()):
+        if missing := (self.__class__.standard_par_dic.keys()
+                       - self.standard_par_dic.keys()):
             raise ValueError(f'`standard_par_dic` is missing keys: {missing}')
 
         super().__init__(standard_par_dic=self.standard_par_dic, **kwargs)
