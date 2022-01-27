@@ -782,13 +782,18 @@ class FixedIntrinsicParametersPrior(FixedPrior):
             dictionary containing entries for
             `m1, m2, s1x, s1y, s1z, s2x, s2y, s2z, l1, l2`.
             Spins and tidal deformabilities would default to `0.` if not
-            passed.
+            passed. Passing a `standard_par_dic` with other additional
+            or missing keys will raise a `ValueError`.
         """
         self.standard_par_dic = waveform.DEFAULT_PARS | standard_par_dic
 
         if missing := (self.__class__.standard_par_dic.keys()
                        - self.standard_par_dic.keys()):
             raise ValueError(f'`standard_par_dic` is missing keys: {missing}')
+
+        if extra := (self.standard_par_dic.keys()
+                     - self.__class__.standard_par_dic.keys()):
+            raise ValueError(f'`standard_par_dic` has extra keys: {extra}')
 
         super().__init__(standard_par_dic=self.standard_par_dic, **kwargs)
 
