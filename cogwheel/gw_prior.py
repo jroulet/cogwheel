@@ -556,11 +556,8 @@ class FlatChieffPrior(UniformPriorMixin, Prior):
     Spin prior for aligned spins that is flat in effective spin chieff.
     The sampled parameters are `chieff` and `cumchidiff`.
     `cumchidiff` ranges from 0 to 1 and is typically poorly measured.
-    cumchidiff is derived from
-        chidiff = (q*s1z-s2z) / (1+q),
-    but rescaled to [0, 1].
-    In other words, cumchidiff is the cumulative of a uniform
-    prior(chidiff | chieff, q).
+    `cumchidiff` is the cumulative of a prior on the spin difference
+    that is uniform conditioned on `chieff`, `q`.
     """
     standard_params = ['s1z', 's2z']
     range_dic = {'chieff': (-1, 1),
@@ -568,25 +565,24 @@ class FlatChieffPrior(UniformPriorMixin, Prior):
     conditioned_on = ['m1', 'm2']
 
     @staticmethod
-    def _aux_chidiff_lim(s1, s2, s3, s4, chieff, q):
-        chi0 = (1-q) / (1+q)
-        return ((s2*chi0 - s4)/(s1 - s3*chi0)*chieff + s2*chi0
-                - s1*(s2*chi0 - s4)/(s1 - s3*chi0))
+    def _get_s1z(chieff, q, s2z):
+        return (1+q)*chieff - q*s2z
 
-    def _chidiff_lim(self, chieff, q):
-        chidiffmin = np.maximum(self._aux_chidiff_lim(1, -1, -1, -1, chieff, q),
-                                self._aux_chidiff_lim(-1, 1, -1, -1, chieff, q))
-        chidiffmax = np.minimum(self._aux_chidiff_lim(1, -1, 1, 1, chieff, q),
-                                self._aux_chidiff_lim(-1, 1, 1, 1, chieff, q))
-        return chidiffmin, chidiffmax
+    @staticmethod
+    def _get_s2z(chieff, q, s1z):
+        return ((1+q)*chieff - s1z) / q
+
+    def _s1z_lim(self, chieff, q):
+        s1z_min = np.maximum(self._get_s1z(chieff, q, s2z=1), -1)
+        s1z_max = np.minimum(self._get_s1z(chieff, q, s2z=-1), 1)
+        return s1z_min, s1z_max
 
     def transform(self, chieff, cumchidiff, m1, m2):
         """(chieff, cumchidiff) to (s1z, s2z)."""
         q = m2 / m1
-        chidiffmin, chidiffmax = self._chidiff_lim(chieff, q)
-        chidiff = chidiffmin + cumchidiff * (chidiffmax - chidiffmin)
-        s1z = (1 + q) / (1 + q**2) * (q*chidiff + chieff)
-        s2z = (1 + q) / (1 + q**2) * (q*chieff - chidiff)
+        s1z_min, s1z_max = self._s1z_lim(chieff, q)
+        s1z = s1z_min + cumchidiff * (s1z_max - s1z_min)
+        s2z = self._get_s2z(chieff, q, s1z)
         return {'s1z': s1z,
                 's2z': s2z}
 
@@ -594,9 +590,8 @@ class FlatChieffPrior(UniformPriorMixin, Prior):
         """(s1z, s2z) to (chieff, cumchidiff)."""
         q = m2 / m1
         chieff = (s1z + q*s2z) / (1 + q)
-        chidiffmin, chidiffmax = self._chidiff_lim(chieff, q)
-        chidiff = (q*s1z - s2z) / (1 + q)
-        cumchidiff = (chidiff - chidiffmin) / (chidiffmax - chidiffmin)
+        s1z_min, s1z_max = self._s1z_lim(chieff, q)
+        cumchidiff = (s1z - s1z_min) / (s1z_max - s1z_min)
         return {'chieff': chieff,
                 'cumchidiff': cumchidiff}
 
