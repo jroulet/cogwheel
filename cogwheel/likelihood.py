@@ -384,6 +384,7 @@ class ReferenceWaveformFinder(CBCLikelihood):
         par_dic = {par: 0. for par in self.waveform_generator.params}
         par_dic['d_luminosity'] = 1.
         par_dic['iota'] = 1.  # So we have higher modes
+        par_dic['f_ref'] = 20.
 
         # Optimize intrinsic parameters
         self._optimize_m1m2s1zs2z_incoherently(par_dic, tc_rng, seed)
@@ -397,8 +398,7 @@ class ReferenceWaveformFinder(CBCLikelihood):
         ref_det_name = sorted_dets[0]
         detector_pair = ''.join(
             dict.fromkeys(sorted_dets + ['H', 'L']))[:2]  # 2 dets guaranteed
-        f_ref = self.get_best_f_ref(par_dic, ref_det_name)
-        self.waveform_generator.f_ref = f_ref
+        par_dic['f_ref'] = self.get_best_f_ref(par_dic, ref_det_name)
 
         # Optimize time, sky location, polarization, distance
         self._optimize_t_refdet(par_dic, ref_det_name, tc_rng)
@@ -407,7 +407,7 @@ class ReferenceWaveformFinder(CBCLikelihood):
         self._optimize_phase_and_distance(par_dic)
 
         return {'par_dic': par_dic,
-                'f_ref': f_ref,
+                'f_ref': par_dic['f_ref'],
                 'ref_det_name': ref_det_name,
                 'detector_pair': detector_pair,
                 't0_refdet': t0_refdet}

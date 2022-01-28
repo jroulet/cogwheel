@@ -52,7 +52,7 @@ def out_of_bounds(par_dic):
             or np.abs(par_dic['dec'] > np.pi/2))
 
 
-def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
+def compute_hplus_hcross(f, par_dic, approximant: str,
                          harmonic_modes=None):
     """
     Generate frequency domain waveform using LAL.
@@ -61,12 +61,16 @@ def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
     Parameters
     ----------
     approximant: String with the approximant name.
-    f_ref: Reference frequency in Hz
     f: Frequency array in Hz
     par_dic: Dictionary of source parameters. Needs to have these keys:
-                 m1, m2, d_luminosity, iota, vphi;
+                 * m1, m2: component masses (Msun)
+                 * d_luminosity: luminosity distance (Mpc)
+                 * iota: inclination (rad)
+                 * vphi: phase at reference frequency (rad)
+                 * f_ref: reference frequency (Hz)
              plus, optionally:
-                 s1x, s1y, s1z, s2x, s2y, s2z, l1, l2.
+                 * s1x, s1y, s1z, s2x, s2y, s2z: dimensionless spins
+                 * l1, l2: dimensionless tidal deformabilities
     harmonic_modes: Optional, list of 2-tuples with (l, m) pairs
                   specifying which (co-precessing frame) higher-order
                   modes to include.
@@ -101,8 +105,6 @@ def compute_hplus_hcross(f_ref, f, par_dic, approximant: str,
     par_dic['approximant'] = lalsimulation.GetApproximantFromString(
         approximant)
 
-    par_dic['f_ref'] = f_ref
-
     f0_is_0 = f[0] == 0  # In this case we will set h(f=0) = 0
     par_dic['f'] = lal.CreateREAL8Sequence(len(f))
     par_dic['f'].data = f
@@ -131,9 +133,9 @@ class WaveformGenerator(utils.JSONMixin):
     The boolean attribute `disable_precession` can be set to ignore
     inplane spins.
     """
-    params = sorted(['d_luminosity', 'dec', 'iota', 'l1', 'l2', 'm1', 'm2',
-                     'psi', 'ra', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z',
-                     't_geocenter', 'vphi'])
+    params = sorted(['d_luminosity', 'dec', 'f_ref', 'iota', 'l1', 'l2',
+                     'm1', 'm2', 'psi', 'ra', 's1x', 's1y', 's1z',
+                     's2x', 's2y', 's2z', 't_geocenter', 'vphi'])
 
     fast_params = sorted(['d_luminosity', 'dec', 'psi', 'ra', 't_geocenter'])
     slow_params = sorted(set(params) - set(fast_params))
@@ -144,7 +146,7 @@ class WaveformGenerator(utils.JSONMixin):
     _s1xy_inds = list(map(slow_params.index, ['s1x', 's1y']))
     _s2xy_inds = list(map(slow_params.index, ['s2x', 's2y']))
 
-    def __init__(self, detector_names, tgps, tcoarse, approximant, f_ref,
+    def __init__(self, detector_names, tgps, tcoarse, approximant,
                  harmonic_modes=None, disable_precession=False,
                  n_cached_waveforms=1):
         super().__init__()
@@ -155,7 +157,6 @@ class WaveformGenerator(utils.JSONMixin):
         self._approximant = approximant
         self.harmonic_modes = harmonic_modes
         self.disable_precession = disable_precession
-        self.f_ref = f_ref
         self.n_cached_waveforms = n_cached_waveforms
 
         self.n_slow_evaluations = 0
@@ -214,7 +215,6 @@ class WaveformGenerator(utils.JSONMixin):
     def n_cached_waveforms(self, n_cached_waveforms):
         self.cache = [{'slow_par_vals': np.array(np.nan),
                        'approximant': None,
-                       'f_ref': None,
                        'f': None,
                        'harmonic_modes_by_m': {},
                        'hplus_hcross_0': None}
@@ -298,11 +298,10 @@ class WaveformGenerator(utils.JSONMixin):
             # hplus_hcross_0 is a (n_m x 2 x n_frequencies) array with
             # sum_l (hlm+, hlmx), at vphi=0, d_luminosity=1Mpc.
             hplus_hcross_0 = np.array(
-                [compute_hplus_hcross(self.f_ref, f, waveform_par_dic_0,
+                [compute_hplus_hcross(f, waveform_par_dic_0,
                                       self.approximant, modes)
                  for modes in self._harmonic_modes_by_m.values()])
             cache_dic = {'approximant': self.approximant,
-                         'f_ref': self.f_ref,
                          'f': f,
                          'slow_par_vals': slow_par_vals,
                          'harmonic_modes_by_m': self._harmonic_modes_by_m,
@@ -347,7 +346,6 @@ class WaveformGenerator(utils.JSONMixin):
         for cache_dic in self.cache[ : : -1]:
             if (np.linalg.norm(slow_par_vals-cache_dic['slow_par_vals']) < eps
                     and cache_dic['approximant'] == self.approximant
-                    and cache_dic['f_ref'] == self.f_ref
                     and np.array_equal(cache_dic['f'], f)
                     and (cache_dic['harmonic_modes_by_m']
                          == self._harmonic_modes_by_m)):

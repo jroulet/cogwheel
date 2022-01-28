@@ -136,12 +136,12 @@ class Posterior(utils.JSONMixin):
         # Initialize likelihood:
         aux_waveform_generator = waveform.WaveformGenerator(
             event_data.detector_names, event_data.tgps, event_data.tcoarse,
-            approximant, f_ref=20., harmonic_modes=[(2, 2)])
+            approximant, harmonic_modes=[(2, 2)])
         bestfit = ReferenceWaveformFinder(
             event_data, aux_waveform_generator).find_bestfit_pars(tc_rng, seed)
         waveform_generator = waveform.WaveformGenerator(
             event_data.detector_names, event_data.tgps, event_data.tcoarse,
-            approximant, bestfit['f_ref'], harmonic_modes, disable_precession)
+            approximant, harmonic_modes, disable_precession)
         likelihood = RelativeBinningLikelihood(
             event_data, waveform_generator, bestfit['par_dic'], fbin,
             pn_phase_tol, tolerance_params)

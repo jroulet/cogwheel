@@ -797,6 +797,47 @@ class FixedIntrinsicParametersPrior(FixedPrior):
         return {'standard_par_dic': self.standard_par_dic}
 
 
+class FixedReferenceFrequencyPrior(FixedPrior):
+    """Fix reference frequency `f_ref`."""
+    standard_par_dic = {'f_ref': NotImplemented}
+
+    def __init__(self, f_ref, **kwargs):
+        super().__init__(f_ref=f_ref, **kwargs)
+
+        self.standard_par_dic = {'f_ref': f_ref}
+
+    def get_init_dict(self):
+        """Dictionary with arguments to reproduce class instance."""
+        return self.standard_par_dic
+
+
+class LogarithmicReferenceFrequencyPrior(UniformPriorMixin, Prior):
+    """Promote `f_ref` to a sampled parameter to explore its effect."""
+    standard_params = ['f_ref']
+    range_dic = {'ln_f_ref': NotImplemented}
+
+    def __init__(self, f_ref_rng=(15, 300), **kwargs):
+        """
+        Parameters
+        ----------
+        `f_ref_rng`: minimum and maximum reference frequencies in Hz.
+        """
+        self.range_dic = {'ln_f_ref': np.log(f_ref_rng)}
+        super().__init__(**kwargs)
+
+    def transform(self, ln_f_ref):
+        """`ln_f_ref` to `f_ref`."""
+        return {'f_ref': np.exp(ln_f_ref)}
+
+    def inverse_transform(self, f_ref):
+        """`f_ref` to `ln_f_ref`."""
+        return {'ln_f_ref': np.log(f_ref)}
+
+    def get_init_dict(self):
+        """Dictionary with arguments to reproduce class instance."""
+        return {'f_ref_rng': np.exp(self.range_dic['ln_f_ref'])}
+
+
 # ----------------------------------------------------------------------
 # Default priors for the full set of variables, for convenience.
 
@@ -811,7 +852,8 @@ class IASPrior(CombinedPrior, RegisteredPriorMixin):
                      UniformLuminosityVolumePrior,
                      FlatChieffPrior,
                      UniformDiskInplaneSpinsPrior,
-                     ZeroTidalDeformabilityPrior]
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 class AlignedSpinIASPrior(CombinedPrior, RegisteredPriorMixin):
@@ -825,7 +867,8 @@ class AlignedSpinIASPrior(CombinedPrior, RegisteredPriorMixin):
                      UniformLuminosityVolumePrior,
                      FlatChieffPrior,
                      ZeroInplaneSpinsPrior,
-                     ZeroTidalDeformabilityPrior]
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 class LVCPrior(CombinedPrior, RegisteredPriorMixin):
@@ -839,7 +882,8 @@ class LVCPrior(CombinedPrior, RegisteredPriorMixin):
                      UniformLuminosityVolumePrior,
                      IsotropicSpinsAlignedComponentsPrior,
                      IsotropicSpinsInplaneComponentsPrior,
-                     ZeroTidalDeformabilityPrior]
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
@@ -856,7 +900,8 @@ class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
                      UniformLuminosityVolumePrior,
                      IsotropicSpinsAlignedComponentsPrior,
                      ZeroInplaneSpinsPrior,
-                     ZeroTidalDeformabilityPrior]
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 class IASPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
@@ -870,7 +915,8 @@ class IASPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
                      UniformComovingVolumePrior,
                      FlatChieffPrior,
                      UniformDiskInplaneSpinsPrior,
-                     ZeroTidalDeformabilityPrior]
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 class AlignedSpinIASPriorComovingVT(CombinedPrior,
@@ -885,7 +931,8 @@ class AlignedSpinIASPriorComovingVT(CombinedPrior,
                      UniformComovingVolumePrior,
                      FlatChieffPrior,
                      ZeroInplaneSpinsPrior,
-                     ZeroTidalDeformabilityPrior]
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 class LVCPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
@@ -899,7 +946,8 @@ class LVCPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
                      UniformComovingVolumePrior,
                      IsotropicSpinsAlignedComponentsPrior,
                      IsotropicSpinsInplaneComponentsPrior,
-                     ZeroTidalDeformabilityPrior]
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 class AlignedSpinLVCPriorComovingVT(CombinedPrior,
@@ -916,7 +964,8 @@ class AlignedSpinLVCPriorComovingVT(CombinedPrior,
                      UniformComovingVolumePrior,
                      IsotropicSpinsAlignedComponentsPrior,
                      ZeroInplaneSpinsPrior,
-                     ZeroTidalDeformabilityPrior]
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 class NitzMassIASSpinPrior(CombinedPrior, RegisteredPriorMixin):
@@ -935,7 +984,8 @@ class NitzMassIASSpinPrior(CombinedPrior, RegisteredPriorMixin):
                      UniformSourceFrameTotalMassInverseMassRatioPrior,
                      FlatChieffPrior,
                      UniformDiskInplaneSpinsPrior,
-                     ZeroTidalDeformabilityPrior]
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 class NitzMassLVCSpinPrior(CombinedPrior, RegisteredPriorMixin):
@@ -954,7 +1004,8 @@ class NitzMassLVCSpinPrior(CombinedPrior, RegisteredPriorMixin):
                      UniformSourceFrameTotalMassInverseMassRatioPrior,
                      IsotropicSpinsAlignedComponentsPrior,
                      IsotropicSpinsInplaneComponentsPrior,
-                     ZeroTidalDeformabilityPrior]
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 class ExtrinsicParametersPrior(CombinedPrior, RegisteredPriorMixin):
@@ -965,4 +1016,5 @@ class ExtrinsicParametersPrior(CombinedPrior, RegisteredPriorMixin):
                      IsotropicSkyLocationPrior,
                      UniformTimePrior,
                      UniformPolarizationPrior,
-                     UniformLuminosityVolumePrior]
+                     UniformLuminosityVolumePrior,
+                     FixedReferenceFrequencyPrior]
