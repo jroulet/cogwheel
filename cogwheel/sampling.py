@@ -115,13 +115,14 @@ class Sampler(abc.ABC, utils.JSONMixin):
         parentdir: str, path to a directory where to store parameter
                    estimation data.
         """
-        eventdir = self.posterior.get_eventdir(parentdir)
-        old_rundirs = [path for path in eventdir.iterdir() if path.is_dir()
-                       and path.match(f'{utils.RUNDIR_PREFIX}*')]
         run_id = 0
-        if old_rundirs:
-            run_id = 1 + max(utils.rundir_number(rundir)
-                             for rundir in old_rundirs)
+        eventdir = self.posterior.get_eventdir(parentdir)
+        if eventdir.exists():
+            old_rundirs = [path for path in eventdir.iterdir() if path.is_dir()
+                           and path.match(f'{utils.RUNDIR_PREFIX}*')]
+            if old_rundirs:
+                run_id = 1 + max(utils.rundir_number(rundir)
+                                 for rundir in old_rundirs)
         return eventdir.joinpath(f'{utils.RUNDIR_PREFIX}{run_id}')
 
     def submit_slurm(self, rundir, n_hours_limit=48,
