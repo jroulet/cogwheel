@@ -212,7 +212,8 @@ def initialize_posteriors_slurm(
     prior_name: string, key of `gw_prior.prior_registry`.
     parentdir: path to top directory where to save output.
     n_hours_limit: int, hours until slurm jobs are terminated.
-    memory_per_task: string, how much RAM to allocate.
+    sbatch_cmds: sequence of strings with SBATCH commands, e.g.
+                 `('--mem-per-cpu=4G',)`
     overwrite: bool, whether to overwrite preexisting files.
                `False` (default) raises an error if the file exists.
     **kwargs: optional keyword arguments to `Posterior.from_event()`.
@@ -247,15 +248,17 @@ def initialize_posteriors_slurm(
 
         utils.submit_slurm(job_name, n_hours_limit, stdout_path,
                            stderr_path, args, sbatch_cmds)
+
 def initialize_posteriors_lsf(
         eventnames, approximant, prior_name, parentdir, n_hours_limit=2,
-        bsub_cmds=('-R "span[hosts=1] rusage[mem=4096]"',), overwrite=False, **kwargs):
+        bsub_cmds=('-R "span[hosts=1] rusage[mem=4096]"',),
+        overwrite=False, **kwargs):
     """
     Submit jobs that run `main()` for each event.
     This will initialize `Posterior.from_event()` and save the
     `Posterior` to JSON inside the appropriate `eventdir` (per
     `Posterior.get_eventdir`).
-'-R "span[hosts=1] rusage[mem=4096MB]" '
+
     Parameters
     ----------
     eventnames: List of strings with event names.
@@ -263,7 +266,7 @@ def initialize_posteriors_lsf(
     prior_name: string, key of `gw_prior.prior_registry`.
     parentdir: path to top directory where to save output.
     n_hours_limit: int, hours until slurm jobs are terminated.
-    memory_per_task: string, how much RAM to allocate.
+    bsub_cmds: sequence of strings with BSUB commands.
     overwrite: bool, whether to overwrite preexisting files.
                `False` (default) raises an error if the file exists.
     **kwargs: optional keyword arguments to `Posterior.from_event()`.
