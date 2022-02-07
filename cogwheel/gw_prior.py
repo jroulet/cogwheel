@@ -21,7 +21,7 @@ prior_registry = {}
 
 
 class GWPriorError(Exception):
-    """Base class for all exceptions in this module"""
+    """Base class for all exceptions in this module."""
 
 
 class RegisteredPriorMixin:
@@ -68,7 +68,7 @@ class ReferenceDetectorMixin:
         Return the complex geometric factor
             R = (1+cos^2(iota)) Fp / 2 + i cos(iota) Fc
         that relates a waveform with generic orientation to an overhead
-        face-on one to leading post-Newtonian order.
+        face-on one for quadrupolar waveforms.
         Note that the amplitude |R| is between 0 and 1.
         """
         fplus, fcross = self.fplus_fcross_refdet(ra, dec, psi)
@@ -244,7 +244,7 @@ class UniformSourceFrameTotalMassInverseMassRatioPrior(Prior):
 
     @staticmethod
     def transform(mtot_source, lnq, d_luminosity):
-        """(mtot_source, lnq, d_luminosity) to (m1, m2)"""
+        """(mtot_source, lnq, d_luminosity) to (m1, m2)."""
         q = np.exp(-np.abs(lnq))
         m1 = (1 + cosmology.z_of_DL_Mpc(d_luminosity)) * mtot_source / (1 + q)
 
@@ -253,7 +253,7 @@ class UniformSourceFrameTotalMassInverseMassRatioPrior(Prior):
 
     @staticmethod
     def inverse_transform(m1, m2, d_luminosity):
-        """(m1, m2, d_luminosity) to (mtot_source, lnq)"""
+        """(m1, m2, d_luminosity) to (mtot_source, lnq)."""
         mtot_source = (m1 + m2) / (1 + cosmology.z_of_DL_Mpc(d_luminosity))
         return {'mtot_source': mtot_source,
                 'lnq': np.log(m2 / m1)}
@@ -386,18 +386,29 @@ class UniformPolarizationPrior(ReferenceDetectorMixin,
     periodic_params = ['psi_hat']
     conditioned_on = ['ra', 'dec', 'iota', 'vphi', 't_geocenter']
 
-    def __init__(self, *, tgps, ref_det_name, f_ref, **kwargs):
-        super().__init__(tgps=tgps, ref_det_name=ref_det_name, f_ref=f_ref,
+    def __init__(self, *, tgps, ref_det_name, f_avg, **kwargs):
+        super().__init__(tgps=tgps, ref_det_name=ref_det_name, f_avg=f_avg,
                          **kwargs)
+        """
+        Parameters
+        ----------
+        tgps: float, GPS time of the event, sets Earth orientation.
+        ref_det_name: str, reference detector name, e.g. 'H' for
+                      Hanford.
+        f_avg: float, estimate of the first frequency moment of a
+               fiducial waveform using the reference detector PSD:
+               f_avg = (Integrate[f * |h(f)|^2 / PSD(f)]
+                        / Integrate[|h(f)|^2 / PSD(f)])
+        """
         self.tgps = tgps
         self.ref_det_name = ref_det_name
-        self.f_ref = f_ref
+        self.f_avg = f_avg
 
     def transform(self, psi_hat, ra, dec, iota, vphi, t_geocenter):
         """psi_hat to psi."""
         psi_refdet = self.psi_refdet(vphi, iota, ra, dec)
         t_refdet = t_geocenter + self.time_delay_refdet(ra, dec)
-        psi = ((psi_hat + np.pi*self.f_ref*t_refdet) * np.sign(np.cos(iota))
+        psi = ((psi_hat + np.pi*self.f_avg*t_refdet) * np.sign(np.cos(iota))
                + psi_refdet) % np.pi
         return {'psi': psi}
 
@@ -406,7 +417,7 @@ class UniformPolarizationPrior(ReferenceDetectorMixin,
         psi_refdet = self.psi_refdet(vphi, iota, ra, dec)
         t_refdet = t_geocenter + self.time_delay_refdet(ra, dec)
         psi_hat = ((psi - psi_refdet) * np.sign(np.cos(iota))
-                   - np.pi*self.f_ref*t_refdet) % np.pi
+                   - np.pi*self.f_avg*t_refdet) % np.pi
         return {'psi_hat': psi_hat}
 
     def get_init_dict(self):
@@ -416,7 +427,7 @@ class UniformPolarizationPrior(ReferenceDetectorMixin,
         """
         return {'tgps': self.tgps,
                 'ref_det_name': self.ref_det_name,
-                'f_ref': self.f_ref}
+                'f_avg': self.f_avg}
 
 
 class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):

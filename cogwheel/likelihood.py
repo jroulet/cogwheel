@@ -190,6 +190,36 @@ class CBCLikelihood(utils.JSONMixin):
                                          **kwargs)
         return asd_drift
 
+    def get_average_frequency(self, par_dic, ref_det_name=None, moment=1.):
+        """
+        Return average frequency in Hz, defined as
+        ``(avg(f^moment))^(1/moment)``
+        where ``avg`` is the frequency-domain average with weight
+        ~ |h(f)|^2 / PSD(f).
+
+        The answer is rounded to nearest Hz to ease reporting.
+
+        Parameters
+        ----------
+        par_dic: dictionary of waveform parameters.
+        ref_det_name: name of the detector from which to get the PSD,
+                      e.g. 'H' for Hanford, or `None` (default) to
+                      combine the PSDs of all detectors.
+        moment: nonzero float, controls the frequency weights in the
+                average.
+        """
+        det_ind = ...
+        if ref_det_name:
+            det_ind = self.event_data.detector_names.index(ref_det_name)
+
+        weight = (np.abs(self._get_h_f(par_dic) * self.event_data.wht_filter)**2
+                 )[det_ind, self.event_data.fslice]
+        weight /= weight.sum()
+
+        frequencies = self.event_data.frequencies[self.event_data.fslice]
+
+        return np.round((weight * frequencies**moment).sum() ** (1/moment))
+
     @_check_bounds
     def lnlike_fft(self, par_dic):
         """
@@ -267,18 +297,6 @@ class CBCLikelihood(utils.JSONMixin):
                                       * np.conj(1j * normalized_h_f))
         return z_cos, z_sin
 
-    def __repr__(self):
-        return f'{self.__class__.__name__}({self.event_data.eventname})'
-
-    def _get_whitened_td(self, strain_f):
-        """
-        Take a frequency-domain strain defined on the FFT grid
-        `self.event_data.frequencies` and return a whitened time domain
-        strain defined on `self.event_data.t`.
-        """
-        return (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
-                * np.fft.irfft(strain_f * self.event_data.wht_filter))
-
     def plot_whitened_wf(self, par_dic, trng=(-.7, .1), plot_data=True,
                          fig=None, figsize=None, by_m=False, **wf_plot_kwargs):
         """
@@ -335,6 +353,15 @@ class CBCLikelihood(utils.JSONMixin):
         plt.xlim(trng)
         return fig
 
+    def _get_whitened_td(self, strain_f):
+        """
+        Take a frequency-domain strain defined on the FFT grid
+        `self.event_data.frequencies` and return a whitened time domain
+        strain defined on `self.event_data.t`.
+        """
+        return (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
+                * np.fft.irfft(strain_f * self.event_data.wht_filter))
+
     def _setup_data_figure(self, figsize=None):
         """Return a new `Figure` with subplots for each detector."""
         fig, axes = plt.subplots(len(self.event_data.detector_names),
@@ -351,6 +378,9 @@ class CBCLikelihood(utils.JSONMixin):
         plt.xlabel('Time (s)', size=12)
         return fig
 
+    def __repr__(self):
+        return f'{self.__class__.__name__}({self.event_data.eventname})'
+
 
 class ReferenceWaveformFinder(CBCLikelihood):
     """
@@ -365,10 +395,17 @@ class ReferenceWaveformFinder(CBCLikelihood):
         * Polarization = 0
     """
     def __init__(self, event_data, waveform_generator):
+        """
+        Parameters
+        ----------
+        event_data: Instance of `data.EventData`.
+        waveform_generator: Instance of `waveform.WaveformGenerator`.
+        """
         super().__init__(event_data, waveform_generator)
         waveform_generator.harmonic_modes = [(2, 2)]
 
-    def find_bestfit_pars(self, tc_rng=(-.1, .1), seed=0):
+    def find_bestfit_pars(self, tc_rng=(-.1, .1), seed=0,
+                          f_ref_moment=1.):
         """
         Find a good fit solution with restricted parameters
         (face-on, equal aligned spins).
@@ -379,6 +416,14 @@ class ReferenceWaveformFinder(CBCLikelihood):
         parameters using mchirp, eta, chieff.
         Then maximize likelihood w.r.t. extrinsic parameters, leaving
         the intrinsic fixed.
+
+        Parameters
+        ----------
+        tc_rng: 2-tuple with minimum and maximum times to look for
+                triggers.
+        seed: To initialize the random state of stochastic maximizers.
+        f_ref_moment: nonzero float, controls the choice of `f_ref`.
+                      See `CBCLikelihood.get_average_frequency`.
         """
         # Set initial parameter values, will improve them in stages.
         par_dic = {par: 0. for par in self.waveform_generator.params}
@@ -389,7 +434,8 @@ class ReferenceWaveformFinder(CBCLikelihood):
         # Optimize intrinsic parameters
         self._optimize_m1m2s1zs2z_incoherently(par_dic, tc_rng, seed)
 
-        # Use wf to define asd_drift, ref detector, detector pair and f_ref
+        # Use waveform to define asd_drift, reference detector, detector
+        # pair and reference frequency:
         self.asd_drift = self.compute_asd_drift(par_dic)
         lnl_by_detectors = self.lnlike_max_amp_phase_time(
             par_dic, tc_rng, return_by_detectors=True)
@@ -398,9 +444,10 @@ class ReferenceWaveformFinder(CBCLikelihood):
         ref_det_name = sorted_dets[0]
         detector_pair = ''.join(
             dict.fromkeys(sorted_dets + ['H', 'L']))[:2]  # 2 dets guaranteed
-        par_dic['f_ref'] = self.get_best_f_ref(par_dic, ref_det_name)
+        par_dic['f_ref'] = self.get_average_frequency(
+            par_dic, ref_det_name, f_ref_moment)
 
-        # Optimize time, sky location, polarization, distance
+        # Optimize time, sky location, orbital phase and distance
         self._optimize_t_refdet(par_dic, ref_det_name, tc_rng)
         t0_refdet = self._optimize_skyloc(par_dic, ref_det_name, detector_pair,
                                           seed)
@@ -455,7 +502,7 @@ class ReferenceWaveformFinder(CBCLikelihood):
         Modify inplace the entries of `par_dic` correspondig to
         `m1, m2, s1z, s2z` with the new solution.
         """
-        # eta_max < .25 to avoid q = 1 solutions that don't have all harmonics
+        # eta_max < .25 to avoid q = 1 solutions that lack harmonics:
         eta_rng = gw_utils.q_to_eta(self.event_data.q_min), .24
         chieff_rng = (-.999, .999)
 
@@ -503,7 +550,7 @@ class ReferenceWaveformFinder(CBCLikelihood):
         maximized over amplitude and phase.
         t_geocenter is readjusted so as to leave t_refdet unchanged.
         Update 't_geocenter', ra', 'dec' entries of `par_dic` inplace.
-        Return `t_refdet`, best fit time [s] relative to `tgps` at the
+        Return `t0_refdet`, best fit time [s] relative to `tgps` at the
         reference detector.
         """
         skyloc = SkyLocAngles(detector_pair, self.event_data.tgps)
@@ -549,20 +596,6 @@ class ReferenceWaveformFinder(CBCLikelihood):
         np.testing.assert_allclose(max_lnl, lnl)
 
         print(f'Set polarization and distance, lnL = {lnl}')
-
-    def get_best_f_ref(self, par_dic, ref_det_name):
-        """
-        Return reference frequency that makes phase shifts orthogonal to
-        time shifts, rounded to nearest Hz to ease reporting.
-        """
-        i_refdet = self.event_data.detector_names.index(ref_det_name)
-        h_f_refdet = self._get_h_f(par_dic)[i_refdet]
-
-        h_white = h_f_refdet * self.event_data.wht_filter
-
-        return np.round(
-            (np.linalg.norm(h_white * np.sqrt(self.event_data.frequencies))
-             / np.linalg.norm(h_white))**2)
 
 
 TOLERANCE_PARAMS = {'ref_wf_lnl_difference': np.inf,

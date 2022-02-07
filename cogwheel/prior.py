@@ -318,8 +318,8 @@ class CombinedPrior(Prior):
 
     def __init_subclass__(cls):
         """
-        Define the following attributes from the combination of priors
-        in `cls.prior_classes`:
+        Define the following attributes and methods from the combination
+        of priors in `cls.prior_classes`:
 
             * `range_dic`
             * `standard_params`
@@ -342,9 +342,11 @@ class CombinedPrior(Prior):
 
         def transform(self, *par_vals, **par_dic):
             """
-            Transform sampled parameter values to standard parameter values.
-            Take `self.sampled_params + self.conditioned_on` parameters and
-            return a dictionary with `self.standard_params` parameters.
+            Transform sampled parameter values to standard parameter
+            values.
+            Take `self.sampled_params + self.conditioned_on` parameters
+            and return a dictionary with `self.standard_params`
+            parameters.
             """
             par_dic.update(dict(zip(direct_params, par_vals)))
             for subprior in self.subpriors:
@@ -537,9 +539,20 @@ class FixedPrior(Prior):
         """Return a fixed dictionary of standard parameters."""
         return self.standard_par_dic
 
-    @staticmethod
-    def inverse_transform(**standard_par_dic):
-        """Return an empty dictionary of sampled parameters."""
+    def inverse_transform(self, **standard_par_dic):
+        """
+        Return an empty dictionary of sampled parameters.
+        If `require_consistency` is set to `True`, verify that the
+        `standard_par_dic` passed matches the one stored and raise
+        `PriorError` if it does not.
+        """
+        if mismatched := [par for par, value in self.standard_par_dic.items()
+                          if value != standard_par_dic[par]]:
+            raise PriorError(
+                'Cannot invert `standard_par_dic` because it does not '
+                f'match the entries for {", ".join(mismatched)} in the '
+                'fixed prior.')
+
         return {}
 
 

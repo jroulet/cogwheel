@@ -30,7 +30,8 @@ def get_random_init_parameters():
         f_ref=np.random.uniform(20, 100),
         d_hat_max=np.random.uniform(1e2, 1e4),
         symmetrize_lnq=False,  # Note `symmetrize_lnq=True` is not invertible
-        standard_par_dic=standard_par_dic
+        standard_par_dic=standard_par_dic,
+        f_avg = np.random.uniform(10, 200)
         )
 
 

@@ -59,6 +59,8 @@ def get_random_par_dic(aligned_spins=False, tides=False):
 
     par_dic['d_luminosity'] = np.random.uniform(10, 1e3)
 
+    par_dic['f_ref'] = np.random.uniform(10, 200)
+
     assert sorted(par_dic) == waveform.WaveformGenerator.params
     return par_dic
 
@@ -73,15 +75,12 @@ class WaveformGeneratorTestCase(TestCase):
         """
         for approximant, app_metadata in waveform.APPROXIMANTS.items():
             wfg = waveform.WaveformGenerator(
-                **get_random_init_parameters(), approximant=approximant,
-                f_ref=None)
+                **get_random_init_parameters(), approximant=approximant)
             for i in range(100):
                 par_dic = get_random_par_dic(app_metadata.aligned_spins,
                                              app_metadata.tides)
                 waveform_par_dic = {par: par_dic[par]
                                     for par in wfg._waveform_params}
-
-                wfg.f_ref = np.random.uniform(50, 250)
 
                 f = np.linspace(0, 1e3, 500)
 
@@ -89,7 +88,7 @@ class WaveformGeneratorTestCase(TestCase):
                 hplus_hcross = wfg.get_hplus_hcross(f, waveform_par_dic)
 
                 hplus_hcross_ = waveform.compute_hplus_hcross(
-                    wfg.f_ref, f, waveform_par_dic, approximant)
+                    f, waveform_par_dic, approximant)
 
                 mask = hplus_hcross_ != 0
                 h_100hz = np.linalg.norm(
@@ -98,7 +97,7 @@ class WaveformGeneratorTestCase(TestCase):
                                    atol=1e-3*h_100hz, rtol=1e-3), (
                     '`waveform.WaveformGenerator.get_waveform()` gives a '
                     'different answer than `waveform.compute_waveform()` for '
-                    f'waveform_par_dic={waveform_par_dic}\nf_ref={wfg.f_ref}\n'
+                    f'waveform_par_dic={waveform_par_dic}\n'
                     f'f=\n{f}\napproximant={approximant}\nNumber of waveforms '
                     f'tried before failure={i}.\nThe relative difference is\n'
                     f'{np.abs(1 - hplus_hcross[mask] / hplus_hcross_[mask])}.')

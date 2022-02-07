@@ -79,7 +79,7 @@ class Posterior(utils.JSONMixin):
     def from_event(cls, event, approximant, prior_class, fbin=None,
                    pn_phase_tol=.05, disable_precession=False,
                    harmonic_modes=None, tolerance_params=None, seed=0,
-                   tc_rng=(-.1, .1), **kwargs):
+                   tc_rng=(-.1, .1), f_ref_moment=1., **kwargs):
         """
         Instantiate a `Posterior` class from the strain data.
         Automatically find a good fit solution for relative binning.
@@ -128,7 +128,8 @@ class Posterior(utils.JSONMixin):
                                        inspect.Parameter.VAR_KEYWORD)}
         #### EVDAT QUESTION: can't we just pass this stuff?
         event_data_keys = {'mchirp_range', 'tgps', 'q_min'}
-        bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref', 't0_refdet'}
+        bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref', 'f_avg',
+                        't0_refdet'}
         if missing_pars := (required_pars - event_data_keys - bestfit_keys
                             - set(kwargs)):
             raise ValueError(f'Missing parameters: {", ".join(missing_pars)}')
@@ -146,6 +147,9 @@ class Posterior(utils.JSONMixin):
             event_data, waveform_generator, bestfit['par_dic'], fbin,
             pn_phase_tol, tolerance_params)
         assert likelihood._lnl_0 > 0
+
+        bestfit['f_avg'] = likelihood.get_average_frequency(
+            bestfit['par_dic'], bestfit['ref_det_name'])
 
         # Initialize prior:
         prior = prior_class(**
