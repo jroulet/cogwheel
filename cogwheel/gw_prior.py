@@ -7,6 +7,7 @@ from scipy.integrate import dblquad
 from scipy.interpolate import interp1d
 
 import lal
+import lalsimulation
 
 from . import cosmology
 from . import gw_utils
@@ -29,13 +30,14 @@ class RegisteredPriorMixin:
     Register existence of a `Prior` subclass in `prior_registry`.
     Intended usage is to only register the final priors (i.e., for the
     full set of GW parameters).
-    `RegisteredPriorMixin` should be inherited after `Prior` (otherwise
-    `PriorError` is raised) so that abstract methods get overriden.
+    `RegisteredPriorMixin` should be inherited before `Prior` (otherwise
+    `PriorError` is raised) in order to test for conditioned-on
+    parameters.
     """
     def __init_subclass__(cls):
         """Validate subclass and register it in prior_registry."""
         super().__init_subclass__()
-        check_inheritance_order(cls, Prior, RegisteredPriorMixin)
+        check_inheritance_order(cls, RegisteredPriorMixin, Prior)
 
         if cls.conditioned_on:
             raise GWPriorError('Only register fully defined priors.')
@@ -813,8 +815,7 @@ class FixedReferenceFrequencyPrior(FixedPrior):
     standard_par_dic = {'f_ref': NotImplemented}
 
     def __init__(self, f_ref, **kwargs):
-        super().__init__(f_ref=f_ref, **kwargs)
-
+        super().__init__(**kwargs)
         self.standard_par_dic = {'f_ref': f_ref}
 
     def get_init_dict(self):
@@ -849,10 +850,87 @@ class LogarithmicReferenceFrequencyPrior(UniformPriorMixin, Prior):
         return {'f_ref_rng': np.exp(self.range_dic['ln_f_ref'])}
 
 
+class IsotropicInclinationUniformDiskInplaneSpinsPrior(
+        UniformPriorMixin, Prior):
+    """
+    Prior for in-plane spins and inclination that is uniform in the disk
+        sx^2 + sy^2 < 1 - sz^2
+    for each of the component spins and isotropic in the inclination.
+    """
+    standard_params = ['iota', 's1x', 's1y', 's2x', 's2y']
+    range_dic = {'costheta_jn': (-1, 1),
+                 'phi_jl_hat': (0, 2*np.pi),
+                 'phi12': (0, 2*np.pi),
+                 'cums1r_s1z': (0, 1),
+                 'cums2r_s2z': (0, 1)}
+    periodic_params = ['phi_jl_hat', 'phi12']
+    folded_params = ['costheta_jn']
+    conditioned_on = ['s1z', 's2z', 'vphi', 'm1', 'm2', 'f_ref']
+
+    @staticmethod
+    def _spin_transform(cumsr_sz, sz):
+        sr = np.sqrt(cumsr_sz * (1 - sz ** 2))
+        chi = np.sqrt(sr**2 + sz**2)
+        tilt = np.arctan2(sr, sz)
+        return chi, tilt
+
+    def transform(self, costheta_jn, phi_jl_hat, phi12, cums1r_s1z,
+                  cums2r_s2z, s1z, s2z, vphi, m1, m2, f_ref):
+        """Spin prior cumulatives to spin components."""
+        chi1, tilt1 = self._spin_transform(cums1r_s1z, s1z)
+        chi2, tilt2 = self._spin_transform(cums2r_s2z, s2z)
+        theta_jn = np.arccos(costheta_jn)
+        phi_jl = (phi_jl_hat + np.pi * (costheta_jn < 0)) % (2*np.pi)
+
+        iota, s1x, s1y, s1z, s2x, s2y, s2z \
+            = lalsimulation.SimInspiralTransformPrecessingNewInitialConditions(
+                theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2,
+                m1*lal.MSUN_SI, m2*lal.MSUN_SI, f_ref, vphi)
+
+        return {'iota': iota,
+                's1x': s1x,
+                's1y': s1y,
+                's2x': s2x,
+                's2y': s2y}
+
+    @staticmethod
+    def _inverse_spin_transform(chi, tilt, sz):
+        """
+        Return value of `cumsr_sz`, the cumulative of the prior on
+        in-plane spin magnitude given the aligned spin magnitude `sz`,
+        for either companion.
+        The in-plane spin prior is flat in the disk.
+        """
+        cumsr_sz = (chi*np.sin(tilt))**2 / (1-sz**2)
+        return cumsr_sz
+
+    def inverse_transform(self, iota, s1x, s1y, s2x, s2y, s1z, s2z,
+                          vphi, m1, m2, f_ref):
+        """
+        Inclination and spin components to theta_jn, phi_jl, phi12 and
+        inplane-spin-magnitude prior cumulatives.
+        """
+        theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2 \
+            = lalsimulation.SimInspiralTransformPrecessingWvf2PE(
+                iota, s1x, s1y, s1z, s2x, s2y, s2z, m1, m2, f_ref, vphi)
+
+        cums1r_s1z = self._inverse_spin_transform(chi1, tilt1, s1z)
+        cums2r_s2z = self._inverse_spin_transform(chi2, tilt2, s2z)
+
+        costheta_jn = np.cos(theta_jn)
+        phi_jl_hat = (phi_jl + np.pi * (costheta_jn < 0)) % (2*np.pi)
+
+        return {'costheta_jn': costheta_jn,
+                'phi_jl_hat': phi_jl_hat,
+                'phi12': phi12,
+                'cums1r_s1z': cums1r_s1z,
+                'cums2r_s2z': cums2r_s2z}
+
+
 # ----------------------------------------------------------------------
 # Default priors for the full set of variables, for convenience.
 
-class IASPrior(CombinedPrior, RegisteredPriorMixin):
+class IASPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, flat in chieff, uniform luminosity volume."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
@@ -867,7 +945,23 @@ class IASPrior(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class AlignedSpinIASPrior(CombinedPrior, RegisteredPriorMixin):
+class IASPrior2(RegisteredPriorMixin, CombinedPrior):
+    """Precessing, flat in chieff, uniform luminosity volume."""
+    prior_classes = [
+                     FixedReferenceFrequencyPrior,
+                     UniformPhasePrior,
+                     UniformDetectorFrameMassesPrior,
+                     FlatChieffPrior,
+                     IsotropicInclinationUniformDiskInplaneSpinsPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformLuminosityVolumePrior,
+                     ZeroTidalDeformabilityPrior,
+                     ]
+
+
+class AlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
     """Aligned spin, flat in chieff, uniform luminosity volume."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
@@ -882,7 +976,7 @@ class AlignedSpinIASPrior(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class LVCPrior(CombinedPrior, RegisteredPriorMixin):
+class LVCPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, isotropic spins, uniform luminosity volume."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
@@ -897,7 +991,7 @@ class LVCPrior(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
+class AlignedSpinLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Aligned spin components from isotropic distribution, uniform
     luminosity volume.
@@ -915,7 +1009,7 @@ class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class IASPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
+class IASPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
     """Precessing, flat in chieff, uniform comoving VT."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
@@ -930,8 +1024,8 @@ class IASPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class AlignedSpinIASPriorComovingVT(CombinedPrior,
-                                    RegisteredPriorMixin):
+class AlignedSpinIASPriorComovingVT(RegisteredPriorMixin,
+                                    CombinedPrior):
     """Aligned spin, flat in chieff, uniform comoving VT."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
@@ -946,7 +1040,7 @@ class AlignedSpinIASPriorComovingVT(CombinedPrior,
                      FixedReferenceFrequencyPrior]
 
 
-class LVCPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
+class LVCPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
     """Precessing, isotropic spins, uniform comoving VT."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
@@ -961,8 +1055,8 @@ class LVCPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class AlignedSpinLVCPriorComovingVT(CombinedPrior,
-                                    RegisteredPriorMixin):
+class AlignedSpinLVCPriorComovingVT(RegisteredPriorMixin,
+                                    CombinedPrior):
     """
     Aligned spins from isotropic distribution, uniform comoving VT.
     """
@@ -979,7 +1073,7 @@ class AlignedSpinLVCPriorComovingVT(CombinedPrior,
                      FixedReferenceFrequencyPrior]
 
 
-class NitzMassIASSpinPrior(CombinedPrior, RegisteredPriorMixin):
+class NitzMassIASSpinPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Priors are uniform in source-frame total mass, inverse mass ratio,
     effective spin, and comoving VT.
@@ -999,7 +1093,7 @@ class NitzMassIASSpinPrior(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class NitzMassLVCSpinPrior(CombinedPrior, RegisteredPriorMixin):
+class NitzMassLVCSpinPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Priors have isotropic spins and are uniform in source-frame total
     mass, inverse mass ratio, and comoving VT.
@@ -1019,7 +1113,7 @@ class NitzMassLVCSpinPrior(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class ExtrinsicParametersPrior(CombinedPrior, RegisteredPriorMixin):
+class ExtrinsicParametersPrior(RegisteredPriorMixin, CombinedPrior):
     """Uniform luminosity volume, fixed intrinsic parameters."""
     prior_classes = [FixedIntrinsicParametersPrior,
                      UniformPhasePrior,
