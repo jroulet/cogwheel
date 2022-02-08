@@ -437,8 +437,9 @@ class CombinedPrior(Prior):
             setattr(cls, params, [par for prior_class in cls.prior_classes
                                   for par in getattr(prior_class, params)])
 
-        cls.conditioned_on = [par for par in cls.conditioned_on
-                              if not par in cls.standard_params]
+        cls.conditioned_on = list(dict.fromkeys(
+            [par for par in cls.conditioned_on
+             if not par in cls.standard_params]))
 
         # Check that the provided prior_classes can be combined:
         if len(cls.sampled_params) != len(set(cls.sampled_params)):
@@ -456,7 +457,7 @@ class CombinedPrior(Prior):
                 for conditioned_par in prior_class.conditioned_on:
                     if conditioned_par in following.standard_params:
                         raise PriorError(
-                            f'{following} defines {conditioned_par}, which'
+                            f'{following} defines {conditioned_par}, which '
                             f'{prior_class} requires. {following} should come '
                             f'before {prior_class}.')
 
