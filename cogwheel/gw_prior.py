@@ -191,6 +191,7 @@ class UniformDetectorFrameTotalMassInverseMassRatioPrior(Prior):
         lnP - lnC = -.4*lnq - 1.2*ln(1+q)
                   = -lnq - 1.2*ln(2*cosh(.5*lnq))
         """
+        del mchirp
         true_lnq = -np.abs(lnq)
         q = np.exp(true_lnq)
         return -.4*true_lnq - 1.2*np.log(1 + q) - self.prior_lognorm
@@ -250,6 +251,7 @@ class UniformSourceFrameTotalMassInverseMassRatioPrior(Prior):
 
     def lnprior(self, mtot_source, lnq):
         """Uniform in 1/q."""
+        del mtot_source
         return -np.abs(lnq) - self.prior_lognorm
 
     def get_init_dict(self):
@@ -977,8 +979,7 @@ class IASPrior(RegisteredPriorMixin, CombinedPrior):
 
 class IASPrior2(RegisteredPriorMixin, CombinedPrior):
     """Precessing, flat in chieff, uniform luminosity volume."""
-    prior_classes = [
-                     FixedReferenceFrequencyPrior,
+    prior_classes = [FixedReferenceFrequencyPrior,
                      UniformPhasePrior,
                      UniformDetectorFrameMassesPrior,
                      FlatChieffPrior,
@@ -987,8 +988,7 @@ class IASPrior2(RegisteredPriorMixin, CombinedPrior):
                      UniformTimePrior,
                      UniformPolarizationPrior,
                      UniformLuminosityVolumePrior,
-                     ZeroTidalDeformabilityPrior,
-                     ]
+                     ZeroTidalDeformabilityPrior]
 
 
 class AlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
