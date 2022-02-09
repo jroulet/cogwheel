@@ -116,11 +116,20 @@ def get_linear_free_time_shift(triggerlists, calpha=None, i_refdet=0,
 
 def _get_f_strain_psd_from_triggerlist(triggerlist, tgps, tcoarse,
                                        t_interval, wfac=0.001,
-                                       min_time_from_edge=8.):
+                                       min_time_from_edge=4.,
+                                       auto_update_times=False):
     """
     Extract frequency array, frequency domain strain and PSD from a
     triggerlist instance.
     """
+    # Check that we're not at the edge of the file
+    if min(tgps - triggerlist.time[0],
+           triggerlist.time[-1] - tgps) < min_time_from_edge:
+        raise RuntimeError(f'tgps={tgps:.1f} is too close to ' +
+                           f'edge(s): [{triggerlist.time[0]:.1f}' +
+                           f', {triggerlist.time[-1]:.1f}]')
+
+    dt = triggerlist.dt
     # Get whitening filter for the data segment
     wt_filter_fd = triggerlist.templatebank.wt_filter_fd
     wt_filter_fd_full = trig.utils.change_filter_times_fd(
@@ -132,28 +141,43 @@ def _get_f_strain_psd_from_triggerlist(triggerlist, tgps, tcoarse,
     tot_cum_wt = cum_wt[-1]
     inds_wt = np.searchsorted(
         cum_wt, [wfac * tot_cum_wt, (1. - wfac) * tot_cum_wt])
-    t_support = triggerlist.dt * (inds_wt[1] - inds_wt[0])
+    t_support = dt * (inds_wt[1] - inds_wt[0])
     # Warn if asking for less time than filter support
     if t_support > t_interval:
         raise RuntimeWarning(f't_support={t_support:.1f} > '+
                              f't_interval={t_interval:.1f}')
-    # Find out if we have room at edges
-    f_sampling = int(1 / triggerlist.dt)
-    nfft = int(t_interval * f_sampling)
 
+    # Find out if we have room at edges for full t_interval
+    f_sampling = int(1 / dt)
+    nfft = int(t_interval * f_sampling)
     t_start = tgps - triggerlist.time[0] - tcoarse
     ind_start = int(t_start * f_sampling)
     ind_end = ind_start + nfft
+    extra_end, extra_start = 0, 0
     if ind_start < 0:
+        extra_start = -ind_start
         raise NotImplementedError(
             f'ind_start={ind_start} is before start of file')
     if ind_end > len(triggerlist.strain):
+        extra_end = ind_end - len(triggerlist.strain)
         raise NotImplementedError(
             f'ind_end={ind_end} is after end of file')
     # Align PE data grid to correct place in TriggerList
     # given required support and distance from edges
-
-
+    if (extra_end > 0) or (extra_start > 0):
+        if auto_update_times:
+            t_start_shift = dt * extra_start
+            t_end_cut = dt * extra_end
+            t_interval_new = t_interval - t_start_shift - t_end_cut
+            tcoarse_new = tcoarse - t_start_shift
+            print(f'\n*UPDATING*\nt_interval={t_interval_new:.3f}' +
+                  f'\ntcoarse={tcoarse_new:.3f}\n')
+            return _get_f_strain_psd_from_triggerlist(
+                triggerlist, tgps, tcoarse_new, t_interval_new,
+                wfac=wfac, min_time_from_edge=min_time_from_edge,
+                auto_update_times=auto_update_times)
+        raise RuntimeError(f'Not enough data for t_interval={t_interval}'
+                           + f', tcoarse={tcoarse} at tgps={tgps}')
 
     wt_filter_td_nfft = trig.utils.change_filter_times_td(
         wt_filter_td_full, len(wt_filter_td_full),
@@ -163,7 +187,7 @@ def _get_f_strain_psd_from_triggerlist(triggerlist, tgps, tcoarse,
     wt_data_td_nfft = triggerlist.strain[ind_start : ind_end]
     wt_data_fd_nfft = np.fft.rfft(wt_data_td_nfft)
 
-    frequencies = np.fft.rfftfreq(nfft, triggerlist.dt)
+    frequencies = np.fft.rfftfreq(nfft, dt)
     strain = (wt_data_fd_nfft / wt_filter_fd_nfft
               * np.sqrt(t_interval / 2 / nfft))
     psd = np.abs(wt_filter_fd_nfft) ** -2
