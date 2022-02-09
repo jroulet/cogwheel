@@ -48,7 +48,7 @@ class RegisteredPriorMixin:
 class ReferenceDetectorMixin:
     """
     Methods for priors that need to know about the reference detector.
-    They must have `tgps`, `ref_det_name`, `phase_refdet_0` attributes.
+    They must have `tgps`, `ref_det_name` attributes.
     """
     @property
     def ref_det_location(self):
@@ -467,7 +467,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
     """
     Distance prior uniform in luminosity volume and detector-frame time.
     The sampled parameter is
-        d_hat := d_effective / mchirp
+        d_hat := d_effective / mchirp^(5/6)
     where the effective distance is defined in one "reference" detector.
     """
     standard_params = ['d_luminosity']
@@ -475,7 +475,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
     conditioned_on = ['ra', 'dec', 'psi', 'iota', 'm1', 'm2']
 
     def __init__(self, *, tgps, ref_det_name, d_hat_max=500, **kwargs):
-        self.range_dic = {'d_hat': (0.001, d_hat_max)}
+        self.range_dic = {'d_hat': (0, d_hat_max)}
         super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
 
         self.tgps = tgps
@@ -487,16 +487,15 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
             d_luminosity = d_hat * conversion_factor.
         """
         mchirp = (m1*m2)**.6 / (m1+m2)**.2
-        amplitude = np.abs(self.geometric_factor_refdet(ra, dec, psi, iota))
-        return mchirp * amplitude
+        response = np.abs(self.geometric_factor_refdet(ra, dec, psi, iota))
+        return mchirp**(5/6) * response
 
     def transform(self, d_hat, ra, dec, psi, iota, m1, m2):
         """d_hat to d_luminosity"""
         return {'d_luminosity': d_hat * self._conversion_factor(ra, dec, psi,
                                                                 iota, m1, m2)}
 
-    def inverse_transform(
-            self, d_luminosity, ra, dec, psi, iota, m1, m2):
+    def inverse_transform(self, d_luminosity, ra, dec, psi, iota, m1, m2):
         """d_luminosity to d_hat"""
         return {'d_hat': d_luminosity / self._conversion_factor(ra, dec, psi,
                                                                 iota, m1, m2)}
