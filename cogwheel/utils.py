@@ -140,6 +140,7 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
 
     print(f'Submitted job {job_name!r}.')
 
+
 def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
                args='', bsub_cmds=(), batch_path=None):
     """
@@ -239,7 +240,6 @@ def get_priordir(parentdir, prior_name):
                     └── <sampler_output_files>
     """
     return pathlib.Path(parentdir)/prior_name
-
 
 
 def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):

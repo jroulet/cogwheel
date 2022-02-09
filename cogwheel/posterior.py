@@ -6,9 +6,6 @@ Can run as a script to make and save a Posterior instance from scratch.
 import argparse
 import inspect
 import json
-import tempfile
-import time
-import os
 import numpy as np
 
 from . import data
@@ -200,8 +197,8 @@ class Posterior(utils.JSONMixin):
 _KWARGS_FILENAME = 'kwargs.json'
 
 
-def initialize_posteriors_slurm(
-        eventnames, approximant, prior_name, parentdir, n_hours_limit=2,
+def initialize_posterior_slurm(
+        eventname, approximant, prior_name, parentdir, n_hours_limit=2,
         sbatch_cmds=('--mem-per-cpu=4G',), overwrite=False, **kwargs):
     """
     Submit jobs that run `main()` for each event.
@@ -211,7 +208,7 @@ def initialize_posteriors_slurm(
 
     Parameters
     ----------
-    eventnames: List of strings with event names.
+    eventname: string with event name.
     approximant: string with approximant name.
     prior_name: string, key of `gw_prior.prior_registry`.
     parentdir: path to top directory where to save output.
@@ -223,38 +220,34 @@ def initialize_posteriors_slurm(
     **kwargs: optional keyword arguments to `Posterior.from_event()`.
               Must be JSON-serializable.
     """
-    if isinstance(eventnames, str):
-        eventnames = [eventnames]
+    eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
+    filename = eventdir/'Posterior.json'
+    if not overwrite and filename.exists():
+        raise FileExistsError(
+            f'{filename} exists, pass `overwrite=True` to overwrite.')
 
-    for eventname in eventnames:
+    utils.mkdirs(eventdir)
 
-        eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
-        filename = eventdir/'Posterior.json'
-        if not overwrite and filename.exists():
-            raise FileExistsError(
-                f'{filename} exists, pass `overwrite=True` to overwrite.')
+    job_name = f'{eventname}_posterior'
+    stdout_path = (eventdir/'posterior_from_event.out').resolve()
+    stderr_path = (eventdir/'posterior_from_event.err').resolve()
 
-        utils.mkdirs(eventdir)
+    args = ' '.join([eventname, approximant, prior_name, parentdir])
 
-        job_name = f'{eventname}_posterior'
-        stdout_path = (eventdir/'posterior_from_event.out').resolve()
-        stderr_path = (eventdir/'posterior_from_event.err').resolve()
+    if kwargs:
+        with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
+            json.dump(kwargs, kwargs_file)
+            args += f' {kwargs_file.name}'
 
-        args = ' '.join([eventname, approximant, prior_name, parentdir])
+    if overwrite:
+        args += ' --overwrite'
 
-        if kwargs:
-            with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
-                json.dump(kwargs, kwargs_file)
-                args += f' {kwargs_file.name}'
+    utils.submit_slurm(job_name, n_hours_limit, stdout_path,
+                       stderr_path, args, sbatch_cmds)
 
-        if overwrite:
-            args += ' --overwrite'
 
-        utils.submit_slurm(job_name, n_hours_limit, stdout_path,
-                           stderr_path, args, sbatch_cmds)
-
-def initialize_posteriors_lsf(
-        eventnames, approximant, prior_name, parentdir, n_hours_limit=2,
+def initialize_posterior_lsf(
+        eventname, approximant, prior_name, parentdir, n_hours_limit=2,
         bsub_cmds=('-R "span[hosts=1] rusage[mem=4096]"',),
         overwrite=False, **kwargs):
     """
@@ -265,7 +258,7 @@ def initialize_posteriors_lsf(
 
     Parameters
     ----------
-    eventnames: List of strings with event names.
+    eventname: string with event name.
     approximant: string with approximant name.
     prior_name: string, key of `gw_prior.prior_registry`.
     parentdir: path to top directory where to save output.
@@ -276,35 +269,31 @@ def initialize_posteriors_lsf(
     **kwargs: optional keyword arguments to `Posterior.from_event()`.
               Must be JSON-serializable.
     """
-    if isinstance(eventnames, str):
-        eventnames = [eventnames]
+    eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
+    filename = eventdir/'Posterior.json'
+    if not overwrite and filename.exists():
+        raise FileExistsError(
+            f'{filename} exists, pass `overwrite=True` to overwrite.')
 
-    for eventname in eventnames:
+    utils.mkdirs(eventdir)
 
-        eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
-        filename = eventdir/'Posterior.json'
-        if not overwrite and filename.exists():
-            raise FileExistsError(
-                f'{filename} exists, pass `overwrite=True` to overwrite.')
+    job_name = f'{eventname}_posterior'
+    stdout_path = (eventdir/'posterior_from_event.out').resolve()
+    stderr_path = (eventdir/'posterior_from_event.err').resolve()
 
-        utils.mkdirs(eventdir)
+    args = ' '.join([eventname, approximant, prior_name, parentdir])
 
-        job_name = f'{eventname}_posterior'
-        stdout_path = (eventdir/'posterior_from_event.out').resolve()
-        stderr_path = (eventdir/'posterior_from_event.err').resolve()
+    if kwargs:
+        with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
+            json.dump(kwargs, kwargs_file)
+            args += f' {kwargs_file.name}'
 
-        args = ' '.join([eventname, approximant, prior_name, parentdir])
+    if overwrite:
+        args += ' --overwrite'
 
-        if kwargs:
-            with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
-                json.dump(kwargs, kwargs_file)
-                args += f' {kwargs_file.name}'
+    utils.submit_lsf(job_name, n_hours_limit, stdout_path,
+                       stderr_path, args, bsub_cmds)
 
-        if overwrite:
-            args += ' --overwrite'
-
-        utils.submit_lsf(job_name, n_hours_limit, stdout_path,
-                           stderr_path, args, bsub_cmds)
 
 def main(eventname, approximant, prior_name, parentdir, overwrite,
          kwargs_filename=None):
