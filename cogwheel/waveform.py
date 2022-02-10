@@ -39,17 +39,19 @@ Approximant('IMRPhenomXPHM', [(2, 2), (2, 1), (3, 3), (3, 2), (4, 4)], False,
             False)
 
 
-def out_of_bounds(par_dic):
+def within_bounds(par_dic):
     """
-    Return whether parameters in `par_dic` are out of physical bounds.
+    Return whether parameters in `par_dic` are within physical bounds.
     """
-    return (any(par_dic[positive] < 0 for positive in
+    return (all(par_dic[positive] >= 0 for positive in
                 ['m1', 'm2', 'd_luminosity', 'l1', 'l2', 'iota'])
-            or any(np.linalg.norm(s) > 1 for s in [
-                [par_dic['s1x'], par_dic['s1y'], par_dic['s1z']],
-                [par_dic['s2x'], par_dic['s2y'], par_dic['s2z']]])
-            or par_dic['iota'] > np.pi
-            or np.abs(par_dic['dec'] > np.pi/2))
+            and np.all(np.linalg.norm(
+                [(par_dic['s1x'], par_dic['s1y'], par_dic['s1z']),
+                 (par_dic['s2x'], par_dic['s2y'], par_dic['s2z'])],
+                axis=1) <= 1)
+            and par_dic['iota'] <= np.pi
+            and np.abs(par_dic['dec']) <= np.pi/2
+           )
 
 
 def compute_hplus_hcross(f, par_dic, approximant: str,

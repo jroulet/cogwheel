@@ -13,7 +13,7 @@ from . import gw_utils
 from . import utils
 from . gw_prior import UniformTimePrior
 from . skyloc_angles import SkyLocAngles
-from . waveform import out_of_bounds, APPROXIMANTS
+from . waveform import within_bounds, APPROXIMANTS
 
 
 class LikelihoodError(Exception):
@@ -95,7 +95,7 @@ def _check_bounds(lnlike_func):
         except IndexError:
             par_dic = kwargs['par_dic']
 
-        if out_of_bounds(par_dic):
+        if not within_bounds(par_dic):
             return -np.inf
 
         return lnlike_func(*args, **kwargs)
