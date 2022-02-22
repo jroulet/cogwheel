@@ -308,7 +308,7 @@ class CombinedPrior(Prior):
         """
         kwargs.update(dict(zip([par.name for par in self.init_parameters()],
                                args)))
-        print(kwargs)
+
         # Check for all required arguments at once:
         required = [
             par.name for par in self.init_parameters(include_optional=False)]
@@ -461,14 +461,14 @@ class CombinedPrior(Prior):
                 f'Priors {cls.prior_classes} cannot be combined due to '
                 f'repeated standard parameters: {cls.standard_params}')
 
-        for i, prior_class in enumerate(cls.prior_classes):
-            for following in cls.prior_classes[i:]:
-                for conditioned_par in prior_class.conditioned_on:
-                    if conditioned_par in following.standard_params:
-                        raise PriorError(
-                            f'{following} defines {conditioned_par}, which '
-                            f'{prior_class} requires. {following} should come '
-                            f'before {prior_class}.')
+        for preceding, following in itertools.combinations(
+                cls.prior_classes, 2):
+            for conditioned_par in preceding.conditioned_on:
+                if conditioned_par in following.standard_params:
+                    raise PriorError(
+                        f'{following} defines {conditioned_par}, which '
+                        f'{preceding} requires. {following} should come before'
+                        f' {preceding}.')
 
     @classmethod
     def init_parameters(cls, include_optional=True):
