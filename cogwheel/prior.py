@@ -308,6 +308,15 @@ class CombinedPrior(Prior):
         """
         kwargs.update(dict(zip([par.name for par in self.init_parameters()],
                                args)))
+        print(kwargs)
+        # Check for all required arguments at once:
+        required = [
+            par.name for par in self.init_parameters(include_optional=False)]
+        missing = [par for par in required if par not in kwargs]
+        if missing:
+            raise TypeError(f'Missing {len(missing)} required arguments: '
+                            f'{", ".join(missing)}')
+
         self.subpriors = [cls(**kwargs) for cls in self.prior_classes]
 
         self.range_dic = {}
@@ -462,21 +471,33 @@ class CombinedPrior(Prior):
                             f'before {prior_class}.')
 
     @classmethod
-    def init_parameters(cls):
+    def init_parameters(cls, include_optional=True):
         """
         Return list of `inspect.Parameter` objects, for the aggregated
         parameters taken by the `__init__` of `prior_classes`, without
         duplicates and sorted by parameter kind (i.e. positional
-        arguments first, keyword arguments last).
+        arguments first, keyword arguments last). The `self` parameter
+        is excluded.
+
+        Parameters
+        ----------
+        include_optional: bool, whether to include parameters with
+                          defaults in the returned list.
         """
         signatures = [inspect.signature(prior_class.__init__)
                       for prior_class in cls.prior_classes]
         all_parameters = [par for signature in signatures
-                          for par in signature.parameters.values()]
+                          for par in list(signature.parameters.values())[1:]]
         sorted_unique_parameters = sorted(
             dict.fromkeys(all_parameters),
-            key=lambda par: (par.kind, par.default is not inspect._empty))
-        return sorted_unique_parameters
+            key=lambda par: (par.kind, par.default is not par.empty))
+
+        if include_optional:
+            return sorted_unique_parameters
+
+        return [par for par in sorted_unique_parameters
+                if par.default is par.empty
+                and par.kind not in (par.VAR_POSITIONAL, par.VAR_KEYWORD)]
 
     @staticmethod
     def _change_signature(func, parameters):
