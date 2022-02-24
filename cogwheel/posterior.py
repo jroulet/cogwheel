@@ -43,8 +43,7 @@ class Posterior(utils.JSONMixin):
             Instance of `likelihood.RelativeBinningLikelihood`, provides
             likelihood computation.
         """
-        if set(prior.standard_params) != set(
-                likelihood.waveform_generator.params):
+        if set(prior.standard_params) != set(likelihood.params):
             raise PosteriorError('The prior and likelihood instances passed '
                                  'have incompatible parameters.')
 

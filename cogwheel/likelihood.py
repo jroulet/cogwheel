@@ -131,6 +131,15 @@ class CBCLikelihood(utils.JSONMixin):
         self.asd_drift = None
 
     @property
+    def params(self):
+        """
+        Parameters expected in `par_dic` for likelihood evaluations.
+        Should be overriden appropriately if a subclass also overrides
+        the likelihood function.
+        """
+        return self.waveform_generator.params
+
+    @property
     def asd_drift(self):
         """
         Array of len ndetectors with ASD drift-correction.
@@ -716,7 +725,20 @@ class RelativeBinningLikelihood(CBCLikelihood):
 
         Parameters
         ----------
-        par_dic: dictionary per `self.waveform_generator.params`.
+        par_dic: dictionary per `self.params`.
+        """
+        d_h, h_h = self._get_dh_hh_no_asd_drift(par_dic)
+        return d_h - h_h/2
+
+    def _get_dh_hh_no_asd_drift(self, par_dic):
+        """
+        Return two arrays of length n_detectors with the values of
+        `(d|h)`, `(h|h)`, no ASD-drift correction applied, using
+        relative binning.
+
+        Parameters
+        ----------
+        par_dic: dictionary per `self.params`.
         """
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True)
@@ -727,7 +749,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         m_inds, mprime_inds = self._get_m_mprime_inds()
         h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
                ).real.sum(axis=(0, -1)))
-        return d_h - h_h/2
+        return d_h, h_h
 
     @property
     def pn_phase_tol(self):

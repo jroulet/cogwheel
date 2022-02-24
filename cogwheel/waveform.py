@@ -44,7 +44,8 @@ def within_bounds(par_dic):
     Return whether parameters in `par_dic` are within physical bounds.
     """
     return (all(par_dic[positive] >= 0 for positive in
-                ['m1', 'm2', 'd_luminosity', 'l1', 'l2', 'iota'])
+                ({'m1', 'm2', 'd_luminosity', 'l1', 'l2', 'iota'}
+                 & par_dic.keys()))
             and np.all(np.linalg.norm(
                 [(par_dic['s1x'], par_dic['s1y'], par_dic['s1z']),
                  (par_dic['s2x'], par_dic['s2y'], par_dic['s2z'])],
