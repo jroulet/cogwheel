@@ -115,23 +115,70 @@ def get_linear_free_time_shift(triggerlists, calpha=None, i_refdet=0,
 
 
 def _get_f_strain_psd_from_triggerlist(triggerlist, tgps, tcoarse,
-                                       t_interval):
+                                       t_interval, wfac=0.001,
+                                       min_time_from_edge=4.,
+                                       auto_update_times=False):
     """
     Extract frequency array, frequency domain strain and PSD from a
     triggerlist instance.
     """
-    f_sampling = int(1 / triggerlist.dt)
+    # Check that we're not at the edge of the file
+    if min(tgps - triggerlist.time[0],
+           triggerlist.time[-1] - tgps) < min_time_from_edge:
+        raise RuntimeError(f'tgps={tgps:.1f} is too close to ' +
+                           f'edge(s): [{triggerlist.time[0]:.1f}' +
+                           f', {triggerlist.time[-1]:.1f}]')
 
-    t_start = tgps - triggerlist.time[0] - tcoarse
-    ind_start = int(t_start * f_sampling)
-    ind_end = ind_start + int(t_interval * f_sampling)
-    nfft = ind_end - ind_start
-
-    # Compute whitening filter for the data segment
+    dt = triggerlist.dt
+    # Get whitening filter for the data segment
     wt_filter_fd = triggerlist.templatebank.wt_filter_fd
     wt_filter_fd_full = trig.utils.change_filter_times_fd(
         wt_filter_fd, triggerlist.fftsize, len(triggerlist.strain))
     wt_filter_td_full = np.fft.irfft(wt_filter_fd_full)
+
+    # Compute whitening filter support
+    cum_wt = np.cumsum(np.fft.fftshift(wt_filter_td_full) ** 2)
+    tot_cum_wt = cum_wt[-1]
+    inds_wt = np.searchsorted(
+        cum_wt, [wfac * tot_cum_wt, (1. - wfac) * tot_cum_wt])
+    t_support = dt * (inds_wt[1] - inds_wt[0])
+    # Warn if asking for less time than filter support
+    if t_support > t_interval:
+        raise RuntimeWarning(f't_support={t_support:.1f} > '+
+                             f't_interval={t_interval:.1f}')
+
+    # Find out if we have room at edges for full t_interval
+    f_sampling = int(1 / dt)
+    nfft = int(t_interval * f_sampling)
+    t_start = tgps - triggerlist.time[0] - tcoarse
+    ind_start = int(t_start * f_sampling)
+    ind_end = ind_start + nfft
+    extra_end, extra_start = 0, 0
+    if ind_start < 0:
+        extra_start = -ind_start
+        raise NotImplementedError(
+            f'ind_start={ind_start} is before start of file')
+    if ind_end > len(triggerlist.strain):
+        extra_end = ind_end - len(triggerlist.strain)
+        raise NotImplementedError(
+            f'ind_end={ind_end} is after end of file')
+    # Align PE data grid to correct place in TriggerList
+    # given required support and distance from edges
+    if (extra_end > 0) or (extra_start > 0):
+        if auto_update_times:
+            t_start_shift = dt * extra_start
+            t_end_cut = dt * extra_end
+            t_interval_new = t_interval - t_start_shift - t_end_cut
+            tcoarse_new = tcoarse - t_start_shift
+            print(f'\n*UPDATING*\nt_interval={t_interval_new:.3f}' +
+                  f'\ntcoarse={tcoarse_new:.3f}\n')
+            return _get_f_strain_psd_from_triggerlist(
+                triggerlist, tgps, tcoarse_new, t_interval_new,
+                wfac=wfac, min_time_from_edge=min_time_from_edge,
+                auto_update_times=auto_update_times)
+        raise RuntimeError(f'Not enough data for t_interval={t_interval}'
+                           + f', tcoarse={tcoarse} at tgps={tgps}')
+
     wt_filter_td_nfft = trig.utils.change_filter_times_td(
         wt_filter_td_full, len(wt_filter_td_full),
         int(t_interval * f_sampling))
@@ -140,7 +187,7 @@ def _get_f_strain_psd_from_triggerlist(triggerlist, tgps, tcoarse,
     wt_data_td_nfft = triggerlist.strain[ind_start : ind_end]
     wt_data_fd_nfft = np.fft.rfft(wt_data_td_nfft)
 
-    frequencies = np.fft.rfftfreq(nfft, triggerlist.dt)
+    frequencies = np.fft.rfftfreq(nfft, dt)
     strain = (wt_data_fd_nfft / wt_filter_fd_nfft
               * np.sqrt(t_interval / 2 / nfft))
     psd = np.abs(wt_filter_fd_nfft) ** -2
@@ -243,7 +290,7 @@ class EventMetadata(data.utils.JSONMixin):
         self.compute_from_guess(
             compute_par_dic_0=compute_par_dic_0,
             compute_linear_free_shift=compute_linear_free_shift,
-            max_tsep=max_tsep)
+            max_tsep=max_tsep, update=False)
         # update event registry and save previous instance if it exists
         self.old_metadata = event_registry.get(self.eventname, None)
         if self.old_metadata is not None:
@@ -262,14 +309,14 @@ class EventMetadata(data.utils.JSONMixin):
             'compute_linear_free_shift', 'bank_id', 'fnames', 'q_min',
             'ref_det_name', 'compute_par_dic_0']})
         init_dict.update(init_kwargs)
-        if 'mchirp_range' not in init_dict:
+        if init_dict.get('mchirp_range') is None:
             init_dict['compute_par_dic_0'] = True
             sigmas = init_dict.pop('sigmas', init_dict.pop('mchirp_sigmas', 5))
             snr = np.sqrt(np.min([v for k, v in cand_dict.items()
                                   if 'snr2' in k]))
         instance = cls(**init_dict)
         instance.load_triggerlists(store=True)
-        if 'mchirp_range' not in init_dict:
+        if init_dict.get('mchirp_range') is None:
             m1, m2 = instance.par_dic_0['m1'], instance.par_dic_0['m2']
             mc0 = (m1*m2)**.6/(m1+m2)**.2
             instance.mchirp_range = estimate_mchirp_range(
@@ -324,29 +371,33 @@ class EventMetadata(data.utils.JSONMixin):
     def compute_from_guess(self, triggerlists=None, calpha=None,
                            ref_det_name=None, compute_par_dic_0=None,
                            compute_linear_free_shift=True, max_tsep=0.07,
-                           **par_dic_0):
+                           update=True, **par_dic_0):
         if compute_par_dic_0 is None:
             compute_par_dic_0 = (not par_dic_0) and (calpha is not None)
 
         if not (compute_linear_free_shift or compute_par_dic_0):
             return
 
-        # update guesses with whatever new stuff was passed
-        self.update_guess(calpha=calpha, ref_det_name=ref_det_name,
-                          **par_dic_0)
+        if update:
+            # update guesses with whatever new stuff was passed
+            self.update_guess(calpha=calpha, ref_det_name=ref_det_name,
+                              **par_dic_0)
         # if no triggerlists passed, get them from self (load if None)
         if triggerlists is None:
             triggerlists = self.triggerlists or self.load_triggerlists()
-        # computing linear free time shift
-        if compute_linear_free_shift:
-            self.tgps_shift = get_linear_free_time_shift(
-                triggerlists, calpha=self.calpha, i_refdet=self.i_refdet,
-                max_tsep=max_tsep, **self.par_dic_0)
         # computing physical parameters from calpha
         if compute_par_dic_0:
             self.par_dic_0 = triggerlists[
                 self.i_refdet].templatebank.get_pdic_from_calpha(
-                    self.calpha)
+                self.calpha)
+        # computing linear free time shift
+        if compute_linear_free_shift:
+            self.tgps_shift = get_linear_free_time_shift(
+                triggerlists, calpha=(None if compute_par_dic_0
+                                      else self.calpha),
+                i_refdet=self.i_refdet, max_tsep=max_tsep,
+                **self.par_dic_0)
+
 
     def get_event_data(self, shift_tgps=False, max_tsep=0.07,
                        calpha=None, ref_det_name=None,
