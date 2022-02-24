@@ -264,7 +264,6 @@ class UniformSourceFrameTotalMassInverseMassRatioPrior(Prior):
 class UniformPhasePrior(UniformPriorMixin, IdentityTransformMixin,
                         Prior):
     """Uniform prior for the orbital phase. No change of coordinates."""
-    standard_params = ['vphi']
     range_dic = {'vphi': (0, 2*np.pi)}
     periodic_params = ['vphi']
 

@@ -37,6 +37,7 @@ class Approximant:
 Approximant('IMRPhenomD', [(2, 2)], True, False)
 Approximant('IMRPhenomXPHM', [(2, 2), (2, 1), (3, 3), (3, 2), (4, 4)], False,
             False)
+Approximant('IMRPhenomXAS', [(2, 2)], True, False)
 
 
 def within_bounds(par_dic):
@@ -337,8 +338,6 @@ class WaveformGenerator(utils.JSONMixin):
                                           @ slow_par_vals[self._s1xy_inds])
         slow_par_vals[self._s2xy_inds] = (rotation
                                           @ slow_par_vals[self._s2xy_inds])
-        # dic['s1x'], dic['s1y'] = rotation @ np.array([dic['s1x'], dic['s1y']])
-        # dic['s2x'], dic['s2y'] = rotation @ np.array([dic['s2x'], dic['s2y']])
 
     def _matching_cache(self, slow_par_vals, f, eps=1e-6):
         """
