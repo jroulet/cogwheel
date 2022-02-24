@@ -118,17 +118,13 @@ class Posterior(utils.JSONMixin):
             prior_class = gw_prior.prior_registry[prior_class]
 
         # Check required input before doing expensive maximization:
-        required_pars = {
-            parameter.name for parameter in prior_class.init_parameters()[1:]
-            if parameter.default is inspect._empty
-            and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL,
-                                       inspect.Parameter.VAR_KEYWORD)}
-        #### EVDAT QUESTION: can't we just pass this stuff?
+        required_pars = {par.name for par in
+                         prior_class.init_parameters(include_optional=False)}
         event_data_keys = {'mchirp_range', 'tgps', 'q_min'}
         bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref', 'f_avg',
                         't0_refdet'}
         if missing_pars := (required_pars - event_data_keys - bestfit_keys
-                            - set(kwargs)):
+                            - kwargs.keys()):
             raise ValueError(f'Missing parameters: {", ".join(missing_pars)}')
 
         # Initialize likelihood:
@@ -297,7 +293,7 @@ def initialize_posterior_lsf(
 
 def main(eventname, approximant, prior_name, parentdir, overwrite,
          kwargs_filename=None):
-    '''Construct a Posterior instance and save it to json.'''
+    """Construct a Posterior instance and save it to json."""
     kwargs = {}
     if kwargs_filename:
         with open(kwargs_filename) as kwargs_file:
