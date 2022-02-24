@@ -846,7 +846,7 @@ class FixedReferenceFrequencyPrior(FixedPrior):
     """Fix reference frequency `f_ref`."""
     standard_par_dic = {'f_ref': NotImplemented}
 
-    def __init__(self, f_ref, **kwargs):
+    def __init__(self, *, f_ref, **kwargs):
         super().__init__(**kwargs)
         self.standard_par_dic = {'f_ref': f_ref}
 
