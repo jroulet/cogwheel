@@ -1,6 +1,6 @@
 """Generate strain waveforms and project them onto detectors."""
 
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 import numpy as np
 
 import lal
@@ -20,23 +20,17 @@ DEFAULT_PARS = {**ZERO_INPLANE_SPINS,
                 'l1': 0.,
                 'l2': 0.}
 
-APPROXIMANTS = {}
+Approximant = namedtuple('Approximant',
+                         ('harmonic_modes', 'aligned_spins', 'tides'),
+                         defaults=([(2, 2)], True, False))
 
+APPROXIMANTS = {
+    'IMRPhenomD': Approximant(),
+    'IMRPhenomXPHM': Approximant(harmonic_modes=[(2, 2), (2, 1), (3, 3),
+                                                 (3, 2), (4, 4)],
+                                 aligned_spins=False),
+    }
 
-class Approximant:
-    """Bookkeeping of LAL approximants' metadata."""
-    def __init__(self, approximant: str, harmonic_modes: list,
-                 aligned_spins: bool, tides: bool):
-        self.approximant = approximant
-        self.harmonic_modes = harmonic_modes
-        self.aligned_spins = aligned_spins
-        self.tides = tides
-        APPROXIMANTS[approximant] = self
-
-
-Approximant('IMRPhenomD', [(2, 2)], True, False)
-Approximant('IMRPhenomXPHM', [(2, 2), (2, 1), (3, 3), (3, 2), (4, 4)], False,
-            False)
 
 
 def out_of_bounds(par_dic):
