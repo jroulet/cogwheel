@@ -68,8 +68,8 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
                  * s1x, s1y, s1z, s2x, s2y, s2z: dimensionless spins
                  * l1, l2: dimensionless tidal deformabilities
     harmonic_modes: Optional, list of 2-tuples with (l, m) pairs
-                  specifying which (co-precessing frame) higher-order
-                  modes to include.
+                    specifying which (co-precessing frame) higher-order
+                    modes to include.
     """
     # Parameters ordered for lalsimulation.SimInspiralChooseFDWaveformSequence
     lal_params = [
@@ -126,6 +126,8 @@ class WaveformGenerator(utils.JSONMixin):
     "Fast" and "slow" parameters are distinguished: the last waveform
     calls are cached and can be computed fast when only fast parameters
     are changed.
+    The attribute `n_cached_waveforms` can be used to control how many
+    waveform calls to save in the cache.
     The boolean attribute `disable_precession` can be set to ignore
     inplane spins.
     """
