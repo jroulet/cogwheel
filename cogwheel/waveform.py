@@ -156,6 +156,18 @@ class WaveformGenerator(utils.JSONMixin):
         self.n_slow_evaluations = 0
         self.n_fast_evaluations = 0
 
+    @classmethod
+    def from_event_data(cls, event_data, approximant,
+                        harmonic_modes=None, disable_precession=False,
+                        n_cached_waveforms=1):
+        """
+        Constructor that takes `detector_names`, `tgps` and `tcoarse`
+        from an instance of `data.EventData`.
+        """
+        return cls(event_data.detector_names, event_data.tgps,
+                   event_data.tcoarse, approximant, harmonic_modes,
+                   disable_precession, n_cached_waveforms)
+
     @property
     def approximant(self):
         """String with waveform approximant name."""

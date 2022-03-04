@@ -135,14 +135,12 @@ class Posterior(utils.JSONMixin):
             raise ValueError(f'Missing parameters: {", ".join(missing_pars)}')
 
         # Initialize likelihood:
-        aux_waveform_generator = waveform.WaveformGenerator(
-            event_data.detector_names, event_data.tgps, event_data.tcoarse,
-            approximant, harmonic_modes=[(2, 2)])
+        aux_waveform_generator = waveform.WaveformGenerator.from_event_data(
+            event_data, approximant, harmonic_modes=[(2, 2)])
         bestfit = ReferenceWaveformFinder(
             event_data, aux_waveform_generator).find_bestfit_pars(tc_rng, seed)
-        waveform_generator = waveform.WaveformGenerator(
-            event_data.detector_names, event_data.tgps, event_data.tcoarse,
-            approximant, harmonic_modes, disable_precession)
+        waveform_generator = waveform.WaveformGenerator.from_event_data(
+            event_data, approximant, harmonic_modes, disable_precession)
         likelihood = RelativeBinningLikelihood(
             event_data, waveform_generator, bestfit['par_dic'], fbin,
             pn_phase_tol, tolerance_params)
