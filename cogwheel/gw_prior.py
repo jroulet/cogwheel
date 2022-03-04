@@ -7,6 +7,7 @@ from scipy.integrate import dblquad
 from scipy.interpolate import interp1d
 
 import lal
+import lalsimulation
 
 from . import cosmology
 from . import gw_utils
@@ -29,13 +30,14 @@ class RegisteredPriorMixin:
     Register existence of a `Prior` subclass in `prior_registry`.
     Intended usage is to only register the final priors (i.e., for the
     full set of GW parameters).
-    `RegisteredPriorMixin` should be inherited after `Prior` (otherwise
-    `PriorError` is raised) so that abstract methods get overriden.
+    `RegisteredPriorMixin` should be inherited before `Prior` (otherwise
+    `PriorError` is raised) in order to test for conditioned-on
+    parameters.
     """
     def __init_subclass__(cls):
         """Validate subclass and register it in prior_registry."""
         super().__init_subclass__()
-        check_inheritance_order(cls, Prior, RegisteredPriorMixin)
+        check_inheritance_order(cls, RegisteredPriorMixin, Prior)
 
         if cls.conditioned_on:
             raise GWPriorError('Only register fully defined priors.')
@@ -46,7 +48,7 @@ class RegisteredPriorMixin:
 class ReferenceDetectorMixin:
     """
     Methods for priors that need to know about the reference detector.
-    They must have `tgps` and `ref_det_name` attributes.
+    They must have `tgps`, `ref_det_name` attributes.
     """
     @property
     def ref_det_location(self):
@@ -66,25 +68,13 @@ class ReferenceDetectorMixin:
     def geometric_factor_refdet(self, ra, dec, psi, iota):
         """
         Return the complex geometric factor
-            R = (1+cos^2(iota)) Fp / 2 + i cos(iota) Fc
+            R = (1+cos^2(iota)) Fp / 2 - i cos(iota) Fc
         that relates a waveform with generic orientation to an overhead
         face-on one for quadrupolar waveforms.
         Note that the amplitude |R| is between 0 and 1.
         """
         fplus, fcross = self.fplus_fcross_refdet(ra, dec, psi)
-        return (1 + np.cos(iota)**2) / 2 * fplus + 1j * np.cos(iota) * fcross
-
-    def psi_refdet(self, vphi, iota, ra, dec):
-        """
-        Find psi such that arg(R e^(-i 2 vphi)) == 0 at the reference
-        detector, where R = (1+cos^2(iota)) Fp / 2 + i cos(iota) Fc.
-        """
-        fp0, fc0 = self.fplus_fcross_refdet(ra, dec, psi=0)
-        cosiota = np.cos(iota)
-        a = 2 * cosiota * np.cos(2*vphi)
-        b = (1+cosiota**2) * np.sin(2*vphi)
-        delta = np.pi * (cosiota * (fp0*a + fc0*b) < 0)  # 0 or pi
-        return .5 * (np.arctan((fc0*a - fp0*b) / (fp0*a + fc0*b)) + delta)
+        return (1 + np.cos(iota)**2) / 2 * fplus - 1j * np.cos(iota) * fcross
 
 
 # ----------------------------------------------------------------------
@@ -201,6 +191,7 @@ class UniformDetectorFrameTotalMassInverseMassRatioPrior(Prior):
         lnP - lnC = -.4*lnq - 1.2*ln(1+q)
                   = -lnq - 1.2*ln(2*cosh(.5*lnq))
         """
+        del mchirp
         true_lnq = -np.abs(lnq)
         q = np.exp(true_lnq)
         return -.4*true_lnq - 1.2*np.log(1 + q) - self.prior_lognorm
@@ -260,6 +251,7 @@ class UniformSourceFrameTotalMassInverseMassRatioPrior(Prior):
 
     def lnprior(self, mtot_source, lnq):
         """Uniform in 1/q."""
+        del mtot_source
         return -np.abs(lnq) - self.prior_lognorm
 
     def get_init_dict(self):
@@ -272,7 +264,6 @@ class UniformSourceFrameTotalMassInverseMassRatioPrior(Prior):
 class UniformPhasePrior(UniformPriorMixin, IdentityTransformMixin,
                         Prior):
     """Uniform prior for the orbital phase. No change of coordinates."""
-    standard_params = ['vphi']
     range_dic = {'vphi': (0, 2*np.pi)}
     periodic_params = ['vphi']
 
@@ -382,42 +373,84 @@ class UniformPolarizationPrior(ReferenceDetectorMixin,
     measured phase of the waveform at a reference detector.
     """
     standard_params = ['psi']
-    range_dic = {'psi_hat': (0, np.pi)}
+    range_dic = {'psi_hat': (-np.pi/2, np.pi/2)}
     periodic_params = ['psi_hat']
-    conditioned_on = ['ra', 'dec', 'iota', 'vphi', 't_geocenter']
+    conditioned_on = ['iota', 'ra', 'dec', 'vphi', 't_geocenter']
 
-    def __init__(self, *, tgps, ref_det_name, f_avg, **kwargs):
-        super().__init__(tgps=tgps, ref_det_name=ref_det_name, f_avg=f_avg,
-                         **kwargs)
+    def __init__(self, *, tgps, ref_det_name, f_avg, par_dic_0=None, **kwargs):
         """
         Parameters
         ----------
         tgps: float, GPS time of the event, sets Earth orientation.
         ref_det_name: str, reference detector name, e.g. 'H' for
                       Hanford.
-        f_avg: float, estimate of the first frequency moment of a
+        f_avg: float, estimate of the first frequency moment (Hz) of a
                fiducial waveform using the reference detector PSD:
                f_avg = (Integrate[f * |h(f)|^2 / PSD(f)]
                         / Integrate[|h(f)|^2 / PSD(f)])
+        par_dic_0: Optional dictionary, must have entries for
+                   (vphi, iota, ra, dec, psi, t_geocenter) of a solution
+                   with high likelihood (additional keys are ignored).
+                   It is not essential but might remove residual
+                   correlations between `psi_hat` and other extrinsic
+                   parameters. If passed, it will center the measured
+                   `psi_hat` near 0.
         """
+        super().__init__(tgps=tgps, ref_det_name=ref_det_name, f_avg=f_avg,
+                         par_dic_0=par_dic_0, **kwargs)
         self.tgps = tgps
         self.ref_det_name = ref_det_name
         self.f_avg = f_avg
+        self.par_dic_0 = par_dic_0
 
-    def transform(self, psi_hat, ra, dec, iota, vphi, t_geocenter):
-        """psi_hat to psi."""
-        psi_refdet = self.psi_refdet(vphi, iota, ra, dec)
+        self._phase_refdet_0 = 0.
+        if par_dic_0:
+            par_dic_0 = {
+                par: par_dic_0[par]
+                for par in ('vphi', 'iota', 'ra', 'dec', 'psi', 't_geocenter')}
+            self._phase_refdet_0 = self._phase_refdet(**par_dic_0)
+
+    def _phase_refdet(self, iota, ra, dec, psi, vphi, t_geocenter):
+        """
+        Return the well-measurable overall phase at the reference detector.
+        The intuition is that all allowed values of (vphi, iota, ra, dec,
+        psi, t_geocenter) would have a consistent value of phase_refdet.
+        """
         t_refdet = t_geocenter + self.time_delay_refdet(ra, dec)
-        psi = ((psi_hat + np.pi*self.f_avg*t_refdet) * np.sign(np.cos(iota))
-               + psi_refdet) % np.pi
+        return (np.angle(self.geometric_factor_refdet(ra, dec, psi, iota))
+                + 2*vphi - 2*np.pi*self.f_avg*t_refdet) % (2*np.pi)
+
+    def _psi_refdet(self, iota, ra, dec, vphi, t_geocenter):
+        """
+        Return psi that solves
+            arg(R) + gamma = 0
+        at the reference detector, where
+            R = (1+cos^2(iota)) Fplus / 2 - i cos(iota) Fcross,
+            gamma = 2 vphi - 2 pi f_avg t_refdet - phase_refdet_0.
+        """
+        t_refdet = t_geocenter + self.time_delay_refdet(ra, dec)
+        gamma = 2*vphi - 2*np.pi*self.f_avg*t_refdet - self._phase_refdet_0
+
+        fp0, fc0 = self.fplus_fcross_refdet(ra, dec, psi=0)
+        cosiota = np.cos(iota)
+
+        a = 2 * cosiota * np.cos(gamma)
+        b = (1+cosiota**2) * np.sin(gamma)
+        c = fp0*a + fc0*b
+        delta = np.pi * (cosiota * c < 0)  # 0 or pi
+        return .5 * (np.arctan((fc0*a - fp0*b) / c) + delta)
+
+    def transform(self, psi_hat, iota, ra, dec, vphi, t_geocenter):
+        """psi_hat to psi."""
+        psi_refdet = self._psi_refdet(iota, ra, dec, vphi, t_geocenter)
+        psi = (psi_hat * np.sign(np.cos(iota)) + psi_refdet) % np.pi
         return {'psi': psi}
 
-    def inverse_transform(self, psi, ra, dec, iota, vphi, t_geocenter):
+    def inverse_transform(self, psi, iota, ra, dec, vphi, t_geocenter):
         """psi to psi_hat"""
-        psi_refdet = self.psi_refdet(vphi, iota, ra, dec)
-        t_refdet = t_geocenter + self.time_delay_refdet(ra, dec)
+        psi_refdet = self._psi_refdet(iota, ra, dec, vphi, t_geocenter)
         psi_hat = ((psi - psi_refdet) * np.sign(np.cos(iota))
-                   - np.pi*self.f_avg*t_refdet) % np.pi
+                   + np.pi/2) % np.pi - np.pi/2
         return {'psi_hat': psi_hat}
 
     def get_init_dict(self):
@@ -427,14 +460,15 @@ class UniformPolarizationPrior(ReferenceDetectorMixin,
         """
         return {'tgps': self.tgps,
                 'ref_det_name': self.ref_det_name,
-                'f_avg': self.f_avg}
+                'f_avg': self.f_avg,
+                'par_dic_0': self.par_dic_0}
 
 
 class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
     """
     Distance prior uniform in luminosity volume and detector-frame time.
     The sampled parameter is
-        d_hat := d_effective / mchirp
+        d_hat := d_effective / mchirp^(5/6)
     where the effective distance is defined in one "reference" detector.
     """
     standard_params = ['d_luminosity']
@@ -442,7 +476,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
     conditioned_on = ['ra', 'dec', 'psi', 'iota', 'm1', 'm2']
 
     def __init__(self, *, tgps, ref_det_name, d_hat_max=500, **kwargs):
-        self.range_dic = {'d_hat': (0.001, d_hat_max)}
+        self.range_dic = {'d_hat': (0, d_hat_max)}
         super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
 
         self.tgps = tgps
@@ -454,16 +488,15 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
             d_luminosity = d_hat * conversion_factor.
         """
         mchirp = (m1*m2)**.6 / (m1+m2)**.2
-        amplitude = np.abs(self.geometric_factor_refdet(ra, dec, psi, iota))
-        return mchirp * amplitude
+        response = np.abs(self.geometric_factor_refdet(ra, dec, psi, iota))
+        return mchirp**(5/6) * response
 
     def transform(self, d_hat, ra, dec, psi, iota, m1, m2):
         """d_hat to d_luminosity"""
         return {'d_luminosity': d_hat * self._conversion_factor(ra, dec, psi,
                                                                 iota, m1, m2)}
 
-    def inverse_transform(
-            self, d_luminosity, ra, dec, psi, iota, m1, m2):
+    def inverse_transform(self, d_luminosity, ra, dec, psi, iota, m1, m2):
         """d_luminosity to d_hat"""
         return {'d_hat': d_luminosity / self._conversion_factor(ra, dec, psi,
                                                                 iota, m1, m2)}
@@ -812,9 +845,8 @@ class FixedReferenceFrequencyPrior(FixedPrior):
     """Fix reference frequency `f_ref`."""
     standard_par_dic = {'f_ref': NotImplemented}
 
-    def __init__(self, f_ref, **kwargs):
-        super().__init__(f_ref=f_ref, **kwargs)
-
+    def __init__(self, *, f_ref, **kwargs):
+        super().__init__(**kwargs)
         self.standard_par_dic = {'f_ref': f_ref}
 
     def get_init_dict(self):
@@ -849,10 +881,87 @@ class LogarithmicReferenceFrequencyPrior(UniformPriorMixin, Prior):
         return {'f_ref_rng': np.exp(self.range_dic['ln_f_ref'])}
 
 
+class IsotropicInclinationUniformDiskInplaneSpinsPrior(
+        UniformPriorMixin, Prior):
+    """
+    Prior for in-plane spins and inclination that is uniform in the disk
+        sx^2 + sy^2 < 1 - sz^2
+    for each of the component spins and isotropic in the inclination.
+    """
+    standard_params = ['iota', 's1x', 's1y', 's2x', 's2y']
+    range_dic = {'costheta_jn': (-1, 1),
+                 'phi_jl_hat': (0, 2*np.pi),
+                 'phi12': (0, 2*np.pi),
+                 'cums1r_s1z': (0, 1),
+                 'cums2r_s2z': (0, 1)}
+    periodic_params = ['phi_jl_hat', 'phi12']
+    folded_params = ['costheta_jn']
+    conditioned_on = ['s1z', 's2z', 'vphi', 'm1', 'm2', 'f_ref']
+
+    @staticmethod
+    def _spin_transform(cumsr_sz, sz):
+        sr = np.sqrt(cumsr_sz * (1 - sz ** 2))
+        chi = np.sqrt(sr**2 + sz**2)
+        tilt = np.arctan2(sr, sz)
+        return chi, tilt
+
+    def transform(self, costheta_jn, phi_jl_hat, phi12, cums1r_s1z,
+                  cums2r_s2z, s1z, s2z, vphi, m1, m2, f_ref):
+        """Spin prior cumulatives to spin components."""
+        chi1, tilt1 = self._spin_transform(cums1r_s1z, s1z)
+        chi2, tilt2 = self._spin_transform(cums2r_s2z, s2z)
+        theta_jn = np.arccos(costheta_jn)
+        phi_jl = (phi_jl_hat + np.pi * (costheta_jn < 0)) % (2*np.pi)
+
+        iota, s1x, s1y, s1z, s2x, s2y, s2z \
+            = lalsimulation.SimInspiralTransformPrecessingNewInitialConditions(
+                theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2,
+                m1*lal.MSUN_SI, m2*lal.MSUN_SI, f_ref, vphi)
+
+        return {'iota': iota,
+                's1x': s1x,
+                's1y': s1y,
+                's2x': s2x,
+                's2y': s2y}
+
+    @staticmethod
+    def _inverse_spin_transform(chi, tilt, sz):
+        """
+        Return value of `cumsr_sz`, the cumulative of the prior on
+        in-plane spin magnitude given the aligned spin magnitude `sz`,
+        for either companion.
+        The in-plane spin prior is flat in the disk.
+        """
+        cumsr_sz = (chi*np.sin(tilt))**2 / (1-sz**2)
+        return cumsr_sz
+
+    def inverse_transform(self, iota, s1x, s1y, s2x, s2y, s1z, s2z,
+                          vphi, m1, m2, f_ref):
+        """
+        Inclination and spin components to theta_jn, phi_jl, phi12 and
+        inplane-spin-magnitude prior cumulatives.
+        """
+        theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2 \
+            = lalsimulation.SimInspiralTransformPrecessingWvf2PE(
+                iota, s1x, s1y, s1z, s2x, s2y, s2z, m1, m2, f_ref, vphi)
+
+        cums1r_s1z = self._inverse_spin_transform(chi1, tilt1, s1z)
+        cums2r_s2z = self._inverse_spin_transform(chi2, tilt2, s2z)
+
+        costheta_jn = np.cos(theta_jn)
+        phi_jl_hat = (phi_jl + np.pi * (costheta_jn < 0)) % (2*np.pi)
+
+        return {'costheta_jn': costheta_jn,
+                'phi_jl_hat': phi_jl_hat,
+                'phi12': phi12,
+                'cums1r_s1z': cums1r_s1z,
+                'cums2r_s2z': cums2r_s2z}
+
+
 # ----------------------------------------------------------------------
 # Default priors for the full set of variables, for convenience.
 
-class IASPrior(CombinedPrior, RegisteredPriorMixin):
+class IASPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, flat in chieff, uniform luminosity volume."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
@@ -867,7 +976,21 @@ class IASPrior(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class AlignedSpinIASPrior(CombinedPrior, RegisteredPriorMixin):
+class IASPrior2(RegisteredPriorMixin, CombinedPrior):
+    """Precessing, flat in chieff, uniform luminosity volume."""
+    prior_classes = [FixedReferenceFrequencyPrior,
+                     UniformPhasePrior,
+                     UniformDetectorFrameMassesPrior,
+                     FlatChieffPrior,
+                     IsotropicInclinationUniformDiskInplaneSpinsPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformLuminosityVolumePrior,
+                     ZeroTidalDeformabilityPrior]
+
+
+class AlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
     """Aligned spin, flat in chieff, uniform luminosity volume."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
@@ -882,7 +1005,7 @@ class AlignedSpinIASPrior(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class LVCPrior(CombinedPrior, RegisteredPriorMixin):
+class LVCPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, isotropic spins, uniform luminosity volume."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
@@ -897,7 +1020,7 @@ class LVCPrior(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
+class AlignedSpinLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Aligned spin components from isotropic distribution, uniform
     luminosity volume.
@@ -915,7 +1038,7 @@ class AlignedSpinLVCPrior(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class IASPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
+class IASPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
     """Precessing, flat in chieff, uniform comoving VT."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
@@ -930,8 +1053,8 @@ class IASPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class AlignedSpinIASPriorComovingVT(CombinedPrior,
-                                    RegisteredPriorMixin):
+class AlignedSpinIASPriorComovingVT(RegisteredPriorMixin,
+                                    CombinedPrior):
     """Aligned spin, flat in chieff, uniform comoving VT."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
@@ -946,7 +1069,7 @@ class AlignedSpinIASPriorComovingVT(CombinedPrior,
                      FixedReferenceFrequencyPrior]
 
 
-class LVCPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
+class LVCPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
     """Precessing, isotropic spins, uniform comoving VT."""
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
@@ -961,8 +1084,8 @@ class LVCPriorComovingVT(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class AlignedSpinLVCPriorComovingVT(CombinedPrior,
-                                    RegisteredPriorMixin):
+class AlignedSpinLVCPriorComovingVT(RegisteredPriorMixin,
+                                    CombinedPrior):
     """
     Aligned spins from isotropic distribution, uniform comoving VT.
     """
@@ -979,7 +1102,7 @@ class AlignedSpinLVCPriorComovingVT(CombinedPrior,
                      FixedReferenceFrequencyPrior]
 
 
-class NitzMassIASSpinPrior(CombinedPrior, RegisteredPriorMixin):
+class NitzMassIASSpinPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Priors are uniform in source-frame total mass, inverse mass ratio,
     effective spin, and comoving VT.
@@ -999,7 +1122,7 @@ class NitzMassIASSpinPrior(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class NitzMassLVCSpinPrior(CombinedPrior, RegisteredPriorMixin):
+class NitzMassLVCSpinPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Priors have isotropic spins and are uniform in source-frame total
     mass, inverse mass ratio, and comoving VT.
@@ -1019,7 +1142,7 @@ class NitzMassLVCSpinPrior(CombinedPrior, RegisteredPriorMixin):
                      FixedReferenceFrequencyPrior]
 
 
-class ExtrinsicParametersPrior(CombinedPrior, RegisteredPriorMixin):
+class ExtrinsicParametersPrior(RegisteredPriorMixin, CombinedPrior):
     """Uniform luminosity volume, fixed intrinsic parameters."""
     prior_classes = [FixedIntrinsicParametersPrior,
                      UniformPhasePrior,

@@ -175,7 +175,7 @@ class EventMetadata(data.utils.JSONMixin):
     Class that can be used for data information about events, and
     provides a method `get_event_data()` to create EventData instances.
     """
-    def __init__(self, eventname, tgps, mchirp_range,
+    def __init__(self, eventname, tgps, mchirp_range=None,
                  q_min=DEFAULT_Q_MIN, t_interval=DEFAULT_T_INTERVAL,
                  tcoarse=None, bank_id=None, fnames=None,
                  load_data=False, triggerlist_kw=None,

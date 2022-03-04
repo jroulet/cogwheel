@@ -25,6 +25,7 @@ import pandas as pd
 from . import grid
 from . import utils
 from . import sampling
+from . import prior
 
 TESTS_FILENAME = 'postprocessing_tests.json'
 
@@ -355,8 +356,11 @@ class Diagnostics:
 
             sampler = utils.read_json(refdir/sampling.Sampler.JSON_FILENAME)
             sampled_params = sampler.posterior.prior.sampled_params
-            sampled_par_dic_0 = sampler.posterior.prior.inverse_transform(
-                **sampler.posterior.likelihood.par_dic_0)
+            try:
+                sampled_par_dic_0 = sampler.posterior.prior.inverse_transform(
+                    **sampler.posterior.likelihood.par_dic_0)
+            except prior.PriorError:
+                sampled_par_dic_0 = None
 
             ref_samples = pd.read_feather(refdir/'samples.feather')
             ref_grid = grid.Grid.from_samples(sampled_params, ref_samples,

@@ -13,7 +13,7 @@ from . import gw_utils
 from . import utils
 from . gw_prior import UniformTimePrior
 from . skyloc_angles import SkyLocAngles
-from . waveform import out_of_bounds, APPROXIMANTS
+from . waveform import within_bounds, APPROXIMANTS
 
 
 class LikelihoodError(Exception):
@@ -95,7 +95,7 @@ def _check_bounds(lnlike_func):
         except IndexError:
             par_dic = kwargs['par_dic']
 
-        if out_of_bounds(par_dic):
+        if not within_bounds(par_dic):
             return -np.inf
 
         return lnlike_func(*args, **kwargs)
@@ -660,6 +660,9 @@ class RelativeBinningLikelihood(CBCLikelihood):
           * lnl_drop_from_peak: float, disregard accuracy tests if the
             tested waveform achieves a poor log likelihood compared to
             the reference waveform.
+        spline_degree: int, degree of the spline used to interpolate the
+                       ratio between waveform and reference waveform for
+                       relative binning.
         """
         if (fbin is None) == (pn_phase_tol is None):
             raise ValueError('Pass exactly one of `fbin` or `pn_phase_tol`.')

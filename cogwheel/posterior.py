@@ -6,9 +6,6 @@ Can run as a script to make and save a Posterior instance from scratch.
 import argparse
 import inspect
 import json
-import tempfile
-import time
-import os
 import numpy as np
 
 from . import data
@@ -121,17 +118,13 @@ class Posterior(utils.JSONMixin):
             prior_class = gw_prior.prior_registry[prior_class]
 
         # Check required input before doing expensive maximization:
-        required_pars = {
-            parameter.name for parameter in prior_class.init_parameters()[1:]
-            if parameter.default is inspect._empty
-            and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL,
-                                       inspect.Parameter.VAR_KEYWORD)}
-        #### EVDAT QUESTION: can't we just pass this stuff?
+        required_pars = {par.name for par in
+                         prior_class.init_parameters(include_optional=False)}
         event_data_keys = {'mchirp_range', 'tgps', 'q_min'}
         bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref', 'f_avg',
                         't0_refdet'}
         if missing_pars := (required_pars - event_data_keys - bestfit_keys
-                            - set(kwargs)):
+                            - kwargs.keys()):
             raise ValueError(f'Missing parameters: {", ".join(missing_pars)}')
 
         # Initialize likelihood:
@@ -198,8 +191,8 @@ class Posterior(utils.JSONMixin):
 _KWARGS_FILENAME = 'kwargs.json'
 
 
-def initialize_posteriors_slurm(
-        eventnames, approximant, prior_name, parentdir, n_hours_limit=2,
+def initialize_posterior_slurm(
+        eventname, approximant, prior_name, parentdir, n_hours_limit=2,
         sbatch_cmds=('--mem-per-cpu=4G',), overwrite=False, **kwargs):
     """
     Submit jobs that run `main()` for each event.
@@ -209,101 +202,96 @@ def initialize_posteriors_slurm(
 
     Parameters
     ----------
-    eventnames: List of strings with event names.
+    eventname: string with event name.
     approximant: string with approximant name.
     prior_name: string, key of `gw_prior.prior_registry`.
     parentdir: path to top directory where to save output.
     n_hours_limit: int, hours until slurm jobs are terminated.
-    memory_per_task: string, how much RAM to allocate.
+    sbatch_cmds: sequence of strings with SBATCH commands, e.g.
+                 `('--mem-per-cpu=4G',)`
     overwrite: bool, whether to overwrite preexisting files.
                `False` (default) raises an error if the file exists.
     **kwargs: optional keyword arguments to `Posterior.from_event()`.
               Must be JSON-serializable.
     """
-    if isinstance(eventnames, str):
-        eventnames = [eventnames]
+    eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
+    filename = eventdir/'Posterior.json'
+    if not overwrite and filename.exists():
+        raise FileExistsError(
+            f'{filename} exists, pass `overwrite=True` to overwrite.')
 
-    for eventname in eventnames:
+    utils.mkdirs(eventdir)
 
-        eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
-        filename = eventdir/'Posterior.json'
-        if not overwrite and filename.exists():
-            raise FileExistsError(
-                f'{filename} exists, pass `overwrite=True` to overwrite.')
+    job_name = f'{eventname}_posterior'
+    stdout_path = (eventdir/'posterior_from_event.out').resolve()
+    stderr_path = (eventdir/'posterior_from_event.err').resolve()
 
-        utils.mkdirs(eventdir)
+    args = ' '.join([eventname, approximant, prior_name, parentdir])
 
-        job_name = f'{eventname}_posterior'
-        stdout_path = (eventdir/'posterior_from_event.out').resolve()
-        stderr_path = (eventdir/'posterior_from_event.err').resolve()
+    if kwargs:
+        with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
+            json.dump(kwargs, kwargs_file)
+            args += f' {kwargs_file.name}'
 
-        args = ' '.join([eventname, approximant, prior_name, parentdir])
+    if overwrite:
+        args += ' --overwrite'
 
-        if kwargs:
-            with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
-                json.dump(kwargs, kwargs_file)
-                args += f' {kwargs_file.name}'
+    utils.submit_slurm(job_name, n_hours_limit, stdout_path,
+                       stderr_path, args, sbatch_cmds)
 
-        if overwrite:
-            args += ' --overwrite'
 
-        utils.submit_slurm(job_name, n_hours_limit, stdout_path,
-                           stderr_path, args, sbatch_cmds)
-def initialize_posteriors_lsf(
-        eventnames, approximant, prior_name, parentdir, n_hours_limit=2,
-        bsub_cmds=('-R "span[hosts=1] rusage[mem=4096]"',), overwrite=False, **kwargs):
+def initialize_posterior_lsf(
+        eventname, approximant, prior_name, parentdir, n_hours_limit=2,
+        bsub_cmds=('-R "span[hosts=1] rusage[mem=4096]"',),
+        overwrite=False, **kwargs):
     """
     Submit jobs that run `main()` for each event.
     This will initialize `Posterior.from_event()` and save the
     `Posterior` to JSON inside the appropriate `eventdir` (per
     `Posterior.get_eventdir`).
-'-R "span[hosts=1] rusage[mem=4096MB]" '
+
     Parameters
     ----------
-    eventnames: List of strings with event names.
+    eventname: string with event name.
     approximant: string with approximant name.
     prior_name: string, key of `gw_prior.prior_registry`.
     parentdir: path to top directory where to save output.
     n_hours_limit: int, hours until slurm jobs are terminated.
-    memory_per_task: string, how much RAM to allocate.
+    bsub_cmds: sequence of strings with BSUB commands.
     overwrite: bool, whether to overwrite preexisting files.
                `False` (default) raises an error if the file exists.
     **kwargs: optional keyword arguments to `Posterior.from_event()`.
               Must be JSON-serializable.
     """
-    if isinstance(eventnames, str):
-        eventnames = [eventnames]
+    eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
+    filename = eventdir/'Posterior.json'
+    if not overwrite and filename.exists():
+        raise FileExistsError(
+            f'{filename} exists, pass `overwrite=True` to overwrite.')
 
-    for eventname in eventnames:
+    utils.mkdirs(eventdir)
 
-        eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
-        filename = eventdir/'Posterior.json'
-        if not overwrite and filename.exists():
-            raise FileExistsError(
-                f'{filename} exists, pass `overwrite=True` to overwrite.')
+    job_name = f'{eventname}_posterior'
+    stdout_path = (eventdir/'posterior_from_event.out').resolve()
+    stderr_path = (eventdir/'posterior_from_event.err').resolve()
 
-        utils.mkdirs(eventdir)
+    args = ' '.join([eventname, approximant, prior_name, parentdir])
 
-        job_name = f'{eventname}_posterior'
-        stdout_path = (eventdir/'posterior_from_event.out').resolve()
-        stderr_path = (eventdir/'posterior_from_event.err').resolve()
+    if kwargs:
+        with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
+            json.dump(kwargs, kwargs_file)
+            args += f' {kwargs_file.name}'
 
-        args = ' '.join([eventname, approximant, prior_name, parentdir])
+    if overwrite:
+        args += ' --overwrite'
 
-        if kwargs:
-            with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
-                json.dump(kwargs, kwargs_file)
-                args += f' {kwargs_file.name}'
+    utils.submit_lsf(job_name, n_hours_limit, stdout_path,
+                       stderr_path, args, bsub_cmds)
 
-        if overwrite:
-            args += ' --overwrite'
-
-        utils.submit_lsf(job_name, n_hours_limit, stdout_path,
-                           stderr_path, args, bsub_cmds)
 
 def main(eventname, approximant, prior_name, parentdir, overwrite,
          kwargs_filename=None):
-    '''Construct a Posterior instance and save it to json.'''
+    """Construct a Posterior instance and save it to json."""
     kwargs = {}
     if kwargs_filename:
         with open(kwargs_filename) as kwargs_file:

@@ -140,6 +140,7 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
 
     print(f'Submitted job {job_name!r}.')
 
+
 def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
                args='', bsub_cmds=(), batch_path=None):
     """
@@ -156,8 +157,10 @@ def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
     stderr_path: file name, where to direct stderr.
     args: string, command line arguments for the calling module's
           `main()` to parse.
-    sbatch_cmds: sequence of strings with SBATCH commands, e.g.
-                 `('-M 8GB',)`
+    bsub_cmds: sequence of strings with BSUB commands, e.g.
+               `('-M 8GB',)`
+    batch_path: file name where to save the batch script. If not
+                provided, a temporary file will be used.
     """
     cogwheel_dir = pathlib.Path(__file__).parents[1].resolve()
     module = inspect.getmodule(inspect.stack()[1].frame).__name__
@@ -237,7 +240,6 @@ def get_priordir(parentdir, prior_name):
                     └── <sampler_output_files>
     """
     return pathlib.Path(parentdir)/prior_name
-
 
 
 def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):
