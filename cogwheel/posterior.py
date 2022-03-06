@@ -153,10 +153,7 @@ class Posterior(utils.JSONMixin):
             {key: getattr(event_data, key) for key in event_data_keys}
             | bestfit | kwargs)
 
-        # Initialize posterior and do second search:
-        posterior = cls(prior, likelihood)
-        posterior.refine_reference_waveform(seed)
-        return posterior
+        return cls(prior, likelihood)
 
     def refine_reference_waveform(self, seed=None):
         """
