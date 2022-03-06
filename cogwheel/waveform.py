@@ -20,6 +20,10 @@ DEFAULT_PARS = {**ZERO_INPLANE_SPINS,
                 'l1': 0.,
                 'l2': 0.}
 
+DEFAULT_LALSIMULATION_COMMANDS = (
+    # ('SimInspiralWaveformParamsInsertPhenomXPrecVersion', 102),  # NNLO angles
+    )
+
 Approximant = namedtuple('Approximant',
                          ('harmonic_modes', 'aligned_spins', 'tides'),
                          defaults=([(2, 2)], True, False))
@@ -49,7 +53,7 @@ def within_bounds(par_dic):
 
 
 def compute_hplus_hcross(f, par_dic, approximant: str,
-                         harmonic_modes=None):
+                         harmonic_modes=None, lal_dic=None):
     """
     Generate frequency domain waveform using LAL.
     Return hplus, hcross evaluated at f.
@@ -67,10 +71,12 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
              plus, optionally:
                  * s1x, s1y, s1z, s2x, s2y, s2z: dimensionless spins
                  * l1, l2: dimensionless tidal deformabilities
+                 * lal_dic: LALDict instance with special approximant settings.
     harmonic_modes: Optional, list of 2-tuples with (l, m) pairs
                     specifying which (co-precessing frame) higher-order
                     modes to include.
     """
+
     # Parameters ordered for lalsimulation.SimInspiralChooseFDWaveformSequence
     lal_params = [
         'vphi', 'm1_kg', 'm2_kg', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z',
@@ -83,20 +89,19 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
     par_dic['m1_kg'] = par_dic['m1'] * lal.MSUN_SI
     par_dic['m2_kg'] = par_dic['m2'] * lal.MSUN_SI
 
-    lal_dic = lal.CreateDict()  # Contains tidal and higher-mode parameters
+    par_dic['lal_dic'] = lal_dic or lal.CreateDict()
     # Tidal parameters
     lalsimulation.SimInspiralWaveformParamsInsertTidalLambda1(
-        lal_dic, par_dic['l1'])
+        par_dic['lal_dic'], par_dic['l1'])
     lalsimulation.SimInspiralWaveformParamsInsertTidalLambda2(
-        lal_dic, par_dic['l2'])
+        par_dic['lal_dic'], par_dic['l2'])
     # Higher-mode parameters
     if harmonic_modes is not None:
         mode_array = lalsimulation.SimInspiralCreateModeArray()
         for l, m in harmonic_modes:
             lalsimulation.SimInspiralModeArrayActivateMode(mode_array, l, m)
-        lalsimulation.SimInspiralWaveformParamsInsertModeArray(lal_dic,
-                                                               mode_array)
-    par_dic['lal_dic'] = lal_dic
+        lalsimulation.SimInspiralWaveformParamsInsertModeArray(
+            par_dic['lal_dic'], mode_array)
 
     par_dic['approximant'] = lalsimulation.GetApproximantFromString(
         approximant)
@@ -146,7 +151,8 @@ class WaveformGenerator(utils.JSONMixin):
 
     def __init__(self, detector_names, tgps, tcoarse, approximant,
                  harmonic_modes=None, disable_precession=False,
-                 n_cached_waveforms=1):
+                 n_cached_waveforms=1,
+                 lalsimulation_commands=DEFAULT_LALSIMULATION_COMMANDS):
         super().__init__()
 
         self.detector_names = detector_names
@@ -156,6 +162,7 @@ class WaveformGenerator(utils.JSONMixin):
         self.harmonic_modes = harmonic_modes
         self.disable_precession = disable_precession
         self.n_cached_waveforms = n_cached_waveforms
+        self.lalsimulation_commands = lalsimulation_commands
 
         self.n_slow_evaluations = 0
         self.n_fast_evaluations = 0
@@ -203,8 +210,7 @@ class WaveformGenerator(utils.JSONMixin):
         """
         Set `self._harmonic_modes` implementing defaults based on the
         approximant, this requires hardcoding which modes are
-        implemented by each approximant; it is a necessary evil because
-        we need to know `m` in order to make `vphi` a fast parameter.
+        implemented by each approximant.
         Also set `self._harmonic_modes_by_m` with a dictionary whose
         keys are `m` and whose values are a list of `(l, m)` tuples with
         that `m`.
@@ -227,7 +233,8 @@ class WaveformGenerator(utils.JSONMixin):
                        'approximant': None,
                        'f': None,
                        'harmonic_modes_by_m': {},
-                       'hplus_hcross_0': None}
+                       'hplus_hcross_0': None,
+                       'lalsimulation_commands': ()}
                       for _ in range(n_cached_waveforms)]
         self._n_cached_waveforms = n_cached_waveforms
 
@@ -297,19 +304,23 @@ class WaveformGenerator(utils.JSONMixin):
         self._rotate_inplane_spins(slow_par_vals, waveform_par_dic['vphi'])
 
         # Attempt to use cached waveform for fast evaluation:
-        matching_cache = self._matching_cache(slow_par_vals, f)
-        if matching_cache:
+        if matching_cache := self._matching_cache(slow_par_vals, f):
             hplus_hcross_0 = matching_cache['hplus_hcross_0']
             self.n_fast_evaluations += 1
         else:
             # Compute the waveform mode by mode and update cache.
+            lal_dic = lal.CreateDict()
+            for function_name, value in self.lalsimulation_commands:
+                getattr(lalsimulation, function_name)(lal_dic, value)
+
             waveform_par_dic_0 = dict(zip(self.slow_params, slow_par_vals),
                                       d_luminosity=1., vphi=0.)
+
             # hplus_hcross_0 is a (n_m x 2 x n_frequencies) array with
             # sum_l (hlm+, hlmx), at vphi=0, d_luminosity=1Mpc.
             hplus_hcross_0 = np.array(
-                [compute_hplus_hcross(f, waveform_par_dic_0,
-                                      self.approximant, modes)
+                [compute_hplus_hcross(f, waveform_par_dic_0, self.approximant,
+                                      modes, lal_dic)
                  for modes in self._harmonic_modes_by_m.values()])
             cache_dic = {'approximant': self.approximant,
                          'f': f,
@@ -355,8 +366,10 @@ class WaveformGenerator(utils.JSONMixin):
             if (np.linalg.norm(slow_par_vals-cache_dic['slow_par_vals']) < eps
                     and cache_dic['approximant'] == self.approximant
                     and np.array_equal(cache_dic['f'], f)
-                    and (cache_dic['harmonic_modes_by_m']
-                         == self._harmonic_modes_by_m)):
+                    and cache_dic['harmonic_modes_by_m']
+                        == self._harmonic_modes_by_m
+                    and cache_dic['lalsimulation_commands']
+                        == self.lalsimulation_commands):
                 return cache_dic
 
         return False
