@@ -118,28 +118,22 @@ class Posterior(utils.JSONMixin):
             prior_class = gw_prior.prior_registry[prior_class]
 
         # Check required input before doing expensive maximization:
-        required_pars = {
-            parameter.name for parameter in prior_class.init_parameters()[1:]
-            if parameter.default is inspect._empty
-            and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL,
-                                       inspect.Parameter.VAR_KEYWORD)}
-        #### EVDAT QUESTION: can't we just pass this stuff?
+        required_pars = {par.name for par in
+                         prior_class.init_parameters(include_optional=False)}
         event_data_keys = {'mchirp_range', 'tgps', 'q_min'}
         bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref', 'f_avg',
                         't0_refdet'}
         if missing_pars := (required_pars - event_data_keys - bestfit_keys
-                            - set(kwargs)):
+                            - kwargs.keys()):
             raise ValueError(f'Missing parameters: {", ".join(missing_pars)}')
 
         # Initialize likelihood:
-        aux_waveform_generator = waveform.WaveformGenerator(
-            event_data.detector_names, event_data.tgps, event_data.tcoarse,
-            approximant, harmonic_modes=[(2, 2)])
+        aux_waveform_generator = waveform.WaveformGenerator.from_event_data(
+            event_data, approximant, harmonic_modes=[(2, 2)])
         bestfit = ReferenceWaveformFinder(
             event_data, aux_waveform_generator).find_bestfit_pars(tc_rng, seed)
-        waveform_generator = waveform.WaveformGenerator(
-            event_data.detector_names, event_data.tgps, event_data.tcoarse,
-            approximant, harmonic_modes, disable_precession)
+        waveform_generator = waveform.WaveformGenerator.from_event_data(
+            event_data, approximant, harmonic_modes, disable_precession)
         likelihood = RelativeBinningLikelihood(
             event_data, waveform_generator, bestfit['par_dic'], fbin,
             pn_phase_tol, tolerance_params)
@@ -294,7 +288,7 @@ def initialize_posterior_lsf(
 
 def main(eventname, approximant, prior_name, parentdir, overwrite,
          kwargs_filename=None):
-    '''Construct a Posterior instance and save it to json.'''
+    """Construct a Posterior instance and save it to json."""
     kwargs = {}
     if kwargs_filename:
         with open(kwargs_filename) as kwargs_file:

@@ -660,6 +660,9 @@ class RelativeBinningLikelihood(CBCLikelihood):
           * lnl_drop_from_peak: float, disregard accuracy tests if the
             tested waveform achieves a poor log likelihood compared to
             the reference waveform.
+        spline_degree: int, degree of the spline used to interpolate the
+                       ratio between waveform and reference waveform for
+                       relative binning.
         """
         if (fbin is None) == (pn_phase_tol is None):
             raise ValueError('Pass exactly one of `fbin` or `pn_phase_tol`.')
