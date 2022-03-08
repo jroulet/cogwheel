@@ -721,7 +721,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True)
 
-        # Sum over m and f axes, leave det ax unsummed.
+        # Sum over m and f axes, leave detector axis unsummed.
         d_h = (self._d_h_weights * h_fbin.conj()).real.sum(axis=(0, -1))
 
         m_inds, mprime_inds = self._get_m_mprime_inds()

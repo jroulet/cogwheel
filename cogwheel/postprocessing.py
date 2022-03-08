@@ -286,8 +286,8 @@ class Diagnostics:
         reference_rundir: path to reference run directory. Defaults to
                           the first (by name) rundir in `eventdir`.
         tolerance_params: dict with items to update the defaults from
-                          `TOLERANCE_PARAMS`. Values higher than their
-                          tolerance are highlighted in the table.
+                          `DEFAULT_TOLERANCE_PARAMS`. Values higher than
+                          their tolerance are highlighted in the table.
                           Keys include:
             * 'asd_drift_dlnl_std'
                 Tolerable standard deviation of log likelihood
