@@ -78,7 +78,8 @@ class PostProcessor:
             self.tests = {'asd_drift': [],
                           'relative_binning': {},
                           'lnl_max': None,
-                          'lnl_0': self.posterior.likelihood._lnl_0}
+                          'lnl_0': self.posterior.likelihood.lnlike(
+                              self.posterior.likelihood.par_dic_0)}
 
         self._lnl_aux_cols = self.get_lnl_aux_cols(
             self.posterior.likelihood.event_data.detector_names)

@@ -161,8 +161,8 @@ class WaveformGenerator(utils.JSONMixin):
         self._approximant = approximant
         self.harmonic_modes = harmonic_modes
         self.disable_precession = disable_precession
-        self.n_cached_waveforms = n_cached_waveforms
         self.lalsimulation_commands = lalsimulation_commands
+        self.n_cached_waveforms = n_cached_waveforms
 
         self.n_slow_evaluations = 0
         self.n_fast_evaluations = 0
@@ -325,7 +325,8 @@ class WaveformGenerator(utils.JSONMixin):
                          'f': f,
                          'slow_par_vals': slow_par_vals,
                          'harmonic_modes_by_m': self._harmonic_modes_by_m,
-                         'hplus_hcross_0': hplus_hcross_0}
+                         'hplus_hcross_0': hplus_hcross_0,
+                         'lalsimulation_commands': self.lalsimulation_commands}
 
             # Append new cached waveform and delete oldest
             self.cache.append(cache_dic)

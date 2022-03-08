@@ -136,7 +136,6 @@ class Posterior(utils.JSONMixin):
         likelihood = RelativeBinningLikelihood(
             event_data, waveform_generator, bestfit['par_dic'], fbin,
             pn_phase_tol)
-        assert likelihood._lnl_0 > 0
 
         bestfit['f_avg'] = likelihood.get_average_frequency(
             bestfit['par_dic'], bestfit['ref_det_name'])
@@ -146,10 +145,7 @@ class Posterior(utils.JSONMixin):
             {key: getattr(event_data, key) for key in event_data_keys}
             | bestfit | kwargs)
 
-        # Initialize posterior and do second search:
-        posterior = cls(prior, likelihood)
-        posterior.refine_reference_waveform(seed)
-        return posterior
+        return cls(prior, likelihood)
 
     def refine_reference_waveform(self, seed=None):
         """
