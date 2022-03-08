@@ -893,7 +893,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         """
         return 4 * self.event_data.df * np.dot(integrand, self._splines)
 
-    def _get_h_f_interpolated(self, par_dic):
+    def _get_h_f_interpolated(self, par_dic, *, normalize=False, by_m=False):
         """
         Fast approximation to `_get_h_f`.
         Return ndet x nfreq array with waveform strain at detectors
@@ -909,8 +909,14 @@ class RelativeBinningLikelihood(CBCLikelihood):
             kind=self.spline_degree, bounds_error=False, fill_value=0.
             )(self.event_data.frequencies)
 
-        # Sum over harmonic modes
-        return np.sum(ratio * self._h0_f, axis=0)
+        h_f = ratio * self._h0_f
+
+        if normalize:
+            h_f /= np.sqrt(self._compute_h_h(h_f))[..., np.newaxis]
+
+        if by_m:
+            return h_f
+        return np.sum(h_f, axis=0)
 
     def test_relative_binning_accuracy(self, par_dic):
         """
