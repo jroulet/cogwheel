@@ -75,8 +75,8 @@ class Posterior(utils.JSONMixin):
     @classmethod
     def from_event(cls, event, approximant, prior_class, fbin=None,
                    pn_phase_tol=.05, disable_precession=False,
-                   harmonic_modes=None, tolerance_params=None, seed=0,
-                   tc_rng=(-.1, .1), f_ref_moment=1., **kwargs):
+                   harmonic_modes=None, seed=0, tc_rng=(-.1, .1),
+                   f_ref_moment=1., **kwargs):
         """
         Instantiate a `Posterior` class from the strain data.
         Automatically find a good fit solution for relative binning.
@@ -99,7 +99,6 @@ class Posterior(utils.JSONMixin):
                         modes to include. Pass `None` to use
                         approximant-dependent defaults per
                         `waveform.APPROXIMANTS`.
-        tolerance_params: dictionary
         kwargs: Additional keyword arguments to instantiate the prior
                 class.
 
@@ -136,7 +135,7 @@ class Posterior(utils.JSONMixin):
             event_data, approximant, harmonic_modes, disable_precession)
         likelihood = RelativeBinningLikelihood(
             event_data, waveform_generator, bestfit['par_dic'], fbin,
-            pn_phase_tol, tolerance_params)
+            pn_phase_tol)
         assert likelihood._lnl_0 > 0
 
         bestfit['f_avg'] = likelihood.get_average_frequency(

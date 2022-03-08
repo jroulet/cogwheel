@@ -598,38 +598,13 @@ class ReferenceWaveformFinder(CBCLikelihood):
         print(f'Set polarization and distance, lnL = {lnl}')
 
 
-TOLERANCE_PARAMS = {'ref_wf_lnl_difference': np.inf,
-                    'raise_ref_wf_outperformed': False,
-                    'check_relative_binning_every': np.inf,
-                    'relative_binning_dlnl_tol': .1,
-                    'lnl_drop_from_peak': 20.}
-
-
-class ReferenceWaveformOutperformedError(LikelihoodError):
-    """
-    The relative-binning reference waveform's log likelihood was
-    exceeded by more than `tolerance_params['ref_wf_lnl_difference']` at
-    some other parameter values and
-    `tolerance_params['raise_ref_wf_outperformed']` was `True`.
-    """
-
-
-class RelativeBinningError(LikelihoodError):
-    """
-    The log likelihood computed with relative-binning was different than
-    that on the FFT grid by more than
-    `tolerance_params['relative_binning_dlnl_tol']`.
-    """
-
-
 class RelativeBinningLikelihood(CBCLikelihood):
     """
     Generalization of `CBCLikelihood` that implements computation of
     likelihood with the relative binning method.
     """
     def __init__(self, event_data, waveform_generator, par_dic_0,
-                 fbin=None, pn_phase_tol=None, tolerance_params=None,
-                 spline_degree=3):
+                 fbin=None, pn_phase_tol=None, spline_degree=3):
         """
         Parameters
         ----------
@@ -642,24 +617,6 @@ class RelativeBinningLikelihood(CBCLikelihood):
         pn_phase_tol: Tolerance in the post-Newtonian phase [rad] used
                       for defining frequency bins. Alternatively, pass
                       `fbin`.
-        tolerance_params: dictionary with relative-binning tolerance
-                          parameters. Keys may include a subset of:
-          * `ref_wf_lnl_difference`: float, tolerable improvement in
-            value of log likelihood with respect to reference waveform.
-          * `raise_ref_wf_outperformed`: bool. If `True`, raise a
-            `RelativeBinningError` if the reference waveform is
-            outperformed by more than `ref_wf_lnl_difference`.
-            If `False`, silently update the reference waveform.
-          * check_relative_binning_every: int, every how many
-            evaluations to test accuracy of log likelihood computation
-            with relative binning against the expensive full FFT grid.
-          * relative_binning_dlnl_tol: float, absolute tolerance in
-            log likelihood for the accuracy of relative binning.
-            Whenever the tolerance is exceeded, `RelativeBinningError`
-            is raised.
-          * lnl_drop_from_peak: float, disregard accuracy tests if the
-            tested waveform achieves a poor log likelihood compared to
-            the reference waveform.
         spline_degree: int, degree of the spline used to interpolate the
                        ratio between waveform and reference waveform for
                        relative binning.
@@ -677,36 +634,10 @@ class RelativeBinningLikelihood(CBCLikelihood):
         else:
             self.fbin = fbin
 
-        self.tolerance_params = TOLERANCE_PARAMS | (tolerance_params or {})
-
-        self._lnlike_evaluations = 0
-
     @_check_bounds
-    def lnlike(self, par_dic, bypass_tests=False):
-        """
-        Return log likelihood using relative binning. Apply relative-
-        binning robustness tests per `self.tolerance_params`.
-        """
-        lnl = self.lnlike_detectors_no_asd_drift(par_dic) @ self.asd_drift**-2
-
-        if bypass_tests:
-            return lnl
-
-        # Relative-binning robustness tests
-        self._lnlike_evaluations += 1
-        if lnl - self._lnl_0 > self.tolerance_params['ref_wf_lnl_difference']:
-            self.test_relative_binning_accuracy(par_dic)
-            if self.tolerance_params['raise_ref_wf_outperformed']:
-                raise ReferenceWaveformOutperformedError(
-                    f'lnl = {lnl}, lnl_0 = {self._lnl_0}, par_dic = {par_dic}')
-            self.par_dic_0 = par_dic  # Update relative binning solution
-            lnl = self._lnl_0
-
-        if (self._lnlike_evaluations
-                % self.tolerance_params['check_relative_binning_every'] == 0):
-            self.test_relative_binning_accuracy(par_dic)
-
-        return lnl
+    def lnlike(self, par_dic):
+        """Return log likelihood using relative binning."""
+        return self.lnlike_detectors_no_asd_drift(par_dic) @ self.asd_drift**-2
 
     def lnlike_detectors_no_asd_drift(self, par_dic):
         """
@@ -911,28 +842,6 @@ class RelativeBinningLikelihood(CBCLikelihood):
 
         # Sum over harmonic modes
         return np.sum(ratio * self._h0_f, axis=0)
-
-    def test_relative_binning_accuracy(self, par_dic):
-        """
-        Return 2-tuple with log likelihood evaluated with and without
-        the relative binning method.
-        Raise `RelativeBinningError` if the difference is bigger than
-        `self.tolerance_params['relative_binning_dlnl_tol']`.
-        """
-        lnl_rb = self.lnlike(par_dic, bypass_tests=True)
-        lnl_fft = self.lnlike_fft(par_dic)
-
-        good_wf = (self._lnl_0 - max(lnl_rb, lnl_fft)
-                   < self.tolerance_params['lnl_drop_from_peak'])
-
-        tol_exceeded = (np.abs(lnl_rb - lnl_fft)
-                        > self.tolerance_params['relative_binning_dlnl_tol'])
-
-        if good_wf and tol_exceeded:
-            raise RelativeBinningError(
-                'Relative-binning tolerance exceeded:\n'
-                f'lnl_rb = {lnl_rb}\nlnl_fft = {lnl_fft}\npar_dic = {par_dic}')
-        return lnl_rb, lnl_fft
 
     def get_init_dict(self):
         """
