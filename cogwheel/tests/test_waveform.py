@@ -81,6 +81,7 @@ class WaveformGeneratorTestCase(TestCase):
                                              app_metadata.tides)
                 waveform_par_dic = {par: par_dic[par]
                                     for par in wfg._waveform_params}
+                lal_dic = wfg.create_lal_dict()
 
                 f = np.linspace(0, 1e3, 500)
 
@@ -88,7 +89,7 @@ class WaveformGeneratorTestCase(TestCase):
                 hplus_hcross = wfg.get_hplus_hcross(f, waveform_par_dic)
 
                 hplus_hcross_ = waveform.compute_hplus_hcross(
-                    f, waveform_par_dic, approximant)
+                    f, waveform_par_dic, approximant, lal_dic=lal_dic)
 
                 mask = hplus_hcross_ != 0
                 h_100hz = np.linalg.norm(

@@ -21,7 +21,7 @@ DEFAULT_PARS = {**ZERO_INPLANE_SPINS,
                 'l2': 0.}
 
 DEFAULT_LALSIMULATION_COMMANDS = (
-    # ('SimInspiralWaveformParamsInsertPhenomXPrecVersion', 102),  # NNLO angles
+    ('SimInspiralWaveformParamsInsertPhenomXPrecVersion', 102),  # NNLO angles
     )
 
 Approximant = namedtuple('Approximant',
@@ -309,9 +309,7 @@ class WaveformGenerator(utils.JSONMixin):
             self.n_fast_evaluations += 1
         else:
             # Compute the waveform mode by mode and update cache.
-            lal_dic = lal.CreateDict()
-            for function_name, value in self.lalsimulation_commands:
-                getattr(lalsimulation, function_name)(lal_dic, value)
+            lal_dic = self.create_lal_dict()
 
             waveform_par_dic_0 = dict(zip(self.slow_params, slow_par_vals),
                                       d_luminosity=1., vphi=0.)
@@ -322,11 +320,13 @@ class WaveformGenerator(utils.JSONMixin):
                 [compute_hplus_hcross(f, waveform_par_dic_0, self.approximant,
                                       modes, lal_dic)
                  for modes in self._harmonic_modes_by_m.values()])
+
             cache_dic = {'approximant': self.approximant,
                          'f': f,
                          'slow_par_vals': slow_par_vals,
                          'harmonic_modes_by_m': self._harmonic_modes_by_m,
                          'hplus_hcross_0': hplus_hcross_0}
+
             # Append new cached waveform and delete oldest
             self.cache.append(cache_dic)
             self.cache.pop(0)
@@ -340,6 +340,12 @@ class WaveformGenerator(utils.JSONMixin):
         if by_m:
             return hplus_hcross
         return np.sum(hplus_hcross, axis=0)
+
+    def create_lal_dict(self):
+        lal_dic = lal.CreateDict()
+        for function_name, value in self.lalsimulation_commands:
+            getattr(lalsimulation, function_name)(lal_dic, value)
+        return lal_dic
 
     def _rotate_inplane_spins(self, slow_par_vals, vphi):
         """
