@@ -171,7 +171,9 @@ class Posterior(utils.JSONMixin):
 
         self.likelihood.par_dic_0 = self.prior.transform(
             *self.prior.unfold(bestfit_folded)[i_fold])
-        print(f'Found solution with lnl = {self.likelihood._lnl_0}')
+
+        lnl = self.likelihood.lnlike(self.likelihood.par_dic_0)
+        print(f'Found solution with lnl = {lnl}')
 
     def get_eventdir(self, parentdir):
         """
