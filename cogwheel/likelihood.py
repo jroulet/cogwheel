@@ -895,6 +895,18 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             maximized over amplitude, phase, and time in (tmin, tmax)
             relative to `self.event_data.tgps`.
             Otherwise, likelihood is coherent (default).
+
+        Return
+        ------
+        dictionary with entries for:
+            * tgps
+            * par_dic
+            * f_avg
+            * f_ref
+            * ref_det_name
+            * detector_pair
+            * t0_refdet
+            * mchirp_range
         """
         if time_range:
             lnl_by_detectors = self.lnlike_max_amp_phase_time(
@@ -914,10 +926,15 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             ref_det_name, self.par_dic_0['ra'], self.par_dic_0['dec'],
             self.event_data.tgps)[0]
         t0_refdet = self.par_dic_0['t_geocenter'] + delay
+        mchirp_range = gw_utils.estimate_mchirp_range(
+            gw_utils.mchirp(self.par_dic_0['m1'], self.par_dic_0['m2']),
+            snr=np.sqrt(2*lnl_by_detectors.sum()))
 
         return {'tgps': self.event_data.tgps,
                 'par_dic': self.par_dic_0,
                 'f_avg': f_avg,
+                'f_ref': self.par_dic_0['f_ref'],
                 'ref_det_name': ref_det_name,
                 'detector_pair': detector_pair,
-                't0_refdet': t0_refdet}
+                't0_refdet': t0_refdet,
+                'mchirp_range': mchirp_range}

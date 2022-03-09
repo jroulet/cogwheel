@@ -25,7 +25,34 @@ class GWPriorError(Exception):
     """Base class for all exceptions in this module."""
 
 
-class RegisteredPriorMixin:
+class ReferenceWaveformFinderMixin:
+    """
+    Provide a constructor based on a `likelihood.ReferenceWaveformFinder`
+    instance to provide initialization arguments.
+    """
+    @classmethod
+    def from_reference_waveform_finder(
+            cls, reference_waveform_finder, **kwargs):
+        """
+        Instantiate `prior.Prior` subclass with help from a
+        `likelihood.ReferenceWaveformFinder` instance.
+        This will generate kwargs for:
+            * tgps
+            * par_dic
+            * f_avg
+            * f_ref
+            * ref_det_name
+            * detector_pair
+            * t0_refdet
+            * mchirp_range
+        Additional `**kwargs` can be passed to complete missing entries
+        or override these.
+        """
+        return cls(**reference_waveform_finder.get_coordinate_system_kwargs()
+                   | kwargs)
+
+
+class RegisteredPriorMixin(ReferenceWaveformFinderMixin):
     """
     Register existence of a `Prior` subclass in `prior_registry`.
     Intended usage is to only register the final priors (i.e., for the
