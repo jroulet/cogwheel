@@ -140,7 +140,8 @@ class WaveformGenerator(utils.JSONMixin):
                      'm1', 'm2', 'psi', 'ra', 's1x', 's1y', 's1z',
                      's2x', 's2y', 's2z', 't_geocenter', 'vphi'])
 
-    fast_params = sorted(['d_luminosity', 'dec', 'psi', 'ra', 't_geocenter'])
+    fast_params = sorted(['d_luminosity', 'dec', 'psi', 'ra', 't_geocenter',
+                          'vphi'])
     slow_params = sorted(set(params) - set(fast_params))
 
     _projection_params = sorted(['dec', 'psi', 'ra', 't_geocenter'])
