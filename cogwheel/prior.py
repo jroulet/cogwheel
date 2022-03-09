@@ -312,8 +312,7 @@ class CombinedPrior(Prior):
         # Check for all required arguments at once:
         required = [
             par.name for par in self.init_parameters(include_optional=False)]
-        missing = [par for par in required if par not in kwargs]
-        if missing:
+        if missing := [par for par in required if par not in kwargs]:
             raise TypeError(f'Missing {len(missing)} required arguments: '
                             f'{", ".join(missing)}')
 

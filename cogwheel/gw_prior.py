@@ -9,13 +9,13 @@ from scipy.interpolate import interp1d
 import lal
 import lalsimulation
 
-from . import cosmology
-from . import gw_utils
-from . import skyloc_angles
-from . import waveform
+from cogwheel import cosmology
+from cogwheel import gw_utils
+from cogwheel import skyloc_angles
+from cogwheel import waveform
 
-from .prior import Prior, CombinedPrior, FixedPrior, UniformPriorMixin, \
-    IdentityTransformMixin, check_inheritance_order
+from cogwheel.prior import Prior, CombinedPrior, FixedPrior, \
+    UniformPriorMixin, IdentityTransformMixin, check_inheritance_order
 
 
 prior_registry = {}
