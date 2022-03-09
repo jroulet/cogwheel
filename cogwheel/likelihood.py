@@ -665,7 +665,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
     """
     @classmethod
     def from_event(cls, event, mchirp_guess, approximant='IMRPhenomXAS',
-                   pn_phase_tol=.02, spline_degree=3):
+                   pn_phase_tol=.02, spline_degree=3,
+                   **maximization_kwargs):
         """
         Constructor that finds a reference waveform solution
         automatically by maximizing the likelihood.
@@ -684,6 +685,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         spline_degree: int, degree of the spline used to interpolate the
                        ratio between waveform and reference waveform for
                        relative binning.
+        **maximization_kwargs: passed to `self.find_bestfit_pars()`.
         """
         if isinstance(event, data.EventData):
             event_data = event
@@ -709,7 +711,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         ref_wf_finder = cls(event_data, waveform_generator, par_dic_0,
                             pn_phase_tol=pn_phase_tol,
                             spline_degree=spline_degree)
-        ref_wf_finder.find_bestfit_pars()
+        ref_wf_finder.find_bestfit_pars(**maximization_kwargs)
         return ref_wf_finder
 
     def find_bestfit_pars(self, mchirp_range=None, time_range=(-.1, .1),
