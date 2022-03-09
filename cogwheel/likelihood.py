@@ -637,6 +637,20 @@ class RelativeBinningLikelihood(CBCLikelihood):
         return super().get_init_dict() | ({'fbin': None} if self.pn_phase_tol
                                           else {})
 
+    @classmethod
+    def from_reference_waveform_finder(
+            cls, reference_waveform_finder, approximant,
+            fbin=None, pn_phase_tol=.05, spline_degree=3):
+        """
+        Provide
+        """
+        waveform_generator = reference_waveform_finder.waveform_generator \
+            .reinstantiate(approximant=approximant, harmonic_modes=None)
+
+        return cls(reference_waveform_finder.event_data, waveform_generator,
+                   reference_waveform_finder.par_dic_0, fbin,
+                   pn_phase_tol, spline_degree)
+
 
 
 class ReferenceWaveformFinder(RelativeBinningLikelihood):
