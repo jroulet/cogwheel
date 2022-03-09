@@ -9,15 +9,12 @@ from scipy.optimize import differential_evolution, minimize_scalar
 import scipy.interpolate
 import matplotlib.pyplot as plt
 
-from . import gw_utils
-from . import utils
-from . gw_prior import UniformTimePrior
-from . skyloc_angles import SkyLocAngles
-from . waveform import within_bounds, APPROXIMANTS
-
-
-class LikelihoodError(Exception):
-    """Base class for all Exceptions in this module."""
+from cogwheel import data
+from cogwheel import gw_utils
+from cogwheel import utils
+from cogwheel import waveform
+from cogwheel.gw_prior import UniformTimePrior
+from cogwheel.skyloc_angles import SkyLocAngles
 
 
 def hole_edges(mask):
@@ -95,7 +92,7 @@ def _check_bounds(lnlike_func):
         except IndexError:
             par_dic = kwargs['par_dic']
 
-        if not within_bounds(par_dic):
+        if not waveform.within_bounds(par_dic):
             return -np.inf
 
         return lnlike_func(*args, **kwargs)
@@ -290,7 +287,7 @@ class CBCLikelihood(utils.JSONMixin):
         z_cos, z_sin: each is a ndet x nfft time series.
         """
         factor = (2 * self.event_data.nfft * self.event_data.df
-                  * self.asd_drift[:, np.newaxis]**-2)
+                  * self.asd_drift**-2)[:, np.newaxis]
         z_cos = factor * np.fft.irfft(self.event_data.blued_strain
                                       * np.conj(normalized_h_f))
         z_sin = factor * np.fft.irfft(self.event_data.blued_strain
@@ -382,222 +379,6 @@ class CBCLikelihood(utils.JSONMixin):
         return f'{self.__class__.__name__}({self.event_data.eventname})'
 
 
-class ReferenceWaveformFinder(CBCLikelihood):
-    """
-    Find a high-likelihood solution without using relative binning.
-    Identify best reference detector and detector pair based on SNR.
-    Identify best reference frequency based on best-fit waveform.
-
-    Some simplfying restrictions are placed, for speed:
-        * (2, 2) mode
-        * Aligned, equal spins
-        * Inclination = 1 radian
-        * Polarization = 0
-    """
-    def __init__(self, event_data, waveform_generator):
-        """
-        Parameters
-        ----------
-        event_data: Instance of `data.EventData`.
-        waveform_generator: Instance of `waveform.WaveformGenerator`.
-        """
-        super().__init__(event_data, waveform_generator)
-        waveform_generator.harmonic_modes = [(2, 2)]
-
-    def find_bestfit_pars(self, tc_rng=(-.1, .1), seed=0,
-                          f_ref_moment=1.):
-        """
-        Find a good fit solution with restricted parameters
-        (face-on, equal aligned spins).
-        Does not use relative binning so it can be used to find
-        a fiducial relative binning waveform.
-
-        First maximize likelihood incoherently w.r.t. intrinsic
-        parameters using mchirp, eta, chieff.
-        Then maximize likelihood w.r.t. extrinsic parameters, leaving
-        the intrinsic fixed.
-
-        Parameters
-        ----------
-        tc_rng: 2-tuple with minimum and maximum times to look for
-                triggers.
-        seed: To initialize the random state of stochastic maximizers.
-        f_ref_moment: nonzero float, controls the choice of `f_ref`.
-                      See `CBCLikelihood.get_average_frequency`.
-        """
-        # Set initial parameter values, will improve them in stages.
-        par_dic = {par: 0. for par in self.waveform_generator.params}
-        par_dic['d_luminosity'] = 1.
-        par_dic['iota'] = 1.  # So we have higher modes
-        par_dic['f_ref'] = 20.
-
-        # Optimize intrinsic parameters
-        self._optimize_m1m2s1zs2z_incoherently(par_dic, tc_rng, seed)
-
-        # Use waveform to define asd_drift, reference detector, detector
-        # pair and reference frequency:
-        self.asd_drift = self.compute_asd_drift(par_dic)
-        lnl_by_detectors = self.lnlike_max_amp_phase_time(
-            par_dic, tc_rng, return_by_detectors=True)
-        sorted_dets = [det for _, det in sorted(zip(
-            lnl_by_detectors, self.waveform_generator.detector_names))][::-1]
-        ref_det_name = sorted_dets[0]
-        detector_pair = ''.join(
-            dict.fromkeys(sorted_dets + ['H', 'L']))[:2]  # 2 dets guaranteed
-        par_dic['f_ref'] = self.get_average_frequency(
-            par_dic, ref_det_name, f_ref_moment)
-
-        # Optimize time, sky location, orbital phase and distance
-        self._optimize_t_refdet(par_dic, ref_det_name, tc_rng)
-        t0_refdet = self._optimize_skyloc(par_dic, ref_det_name, detector_pair,
-                                          seed)
-        self._optimize_phase_and_distance(par_dic)
-
-        return {'par_dic': par_dic,
-                'f_ref': par_dic['f_ref'],
-                'ref_det_name': ref_det_name,
-                'detector_pair': detector_pair,
-                't0_refdet': t0_refdet}
-
-    @_check_bounds
-    def lnlike_max_amp_phase_time(self, par_dic, tc_rng,
-                                  return_by_detectors=False):
-        """
-        Return log likelihood maximized over amplitude, phase and time
-        incoherently across detectors.
-        """
-        normalized_h_f = self._get_h_f(par_dic, normalize=True)
-        z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
-        inds = np.arange(int(tc_rng[0] / self.event_data.dt),
-                         int(tc_rng[1] / self.event_data.dt))
-        lnl = np.max(z_cos[:, inds]**2 + z_sin[:, inds]**2, axis=1) / 2
-        if return_by_detectors:
-            return lnl
-        return np.sum(lnl)
-
-    @_check_bounds
-    def lnlike_max_amp_phase(self, par_dic, ret_amp_phase_bf=False,
-                             det_inds=...):
-        """
-        Return log likelihood maximized over amplitude and phase
-        coherently across detectors (the same amplitude rescaling
-        and phase is applied to all detectors).
-        """
-        h_f = self._get_h_f(par_dic)
-        h_h = np.sum(self._compute_h_h(h_f)[det_inds])
-        d_h = np.sum(self._compute_d_h(h_f)[det_inds])
-        lnl = np.abs(d_h)**2 / h_h / 2
-
-        if not ret_amp_phase_bf:
-            return lnl
-
-        phase_bf = np.angle(d_h)
-        amp_bf = np.abs(d_h) / h_h
-        return lnl, amp_bf, phase_bf
-
-    def _optimize_m1m2s1zs2z_incoherently(self, par_dic, tc_rng, seed):
-        """
-        Optimize mchirp, eta and chieff by likelihood maximized over
-        amplitude, phase and time incoherently across detectors.
-        Modify inplace the entries of `par_dic` correspondig to
-        `m1, m2, s1z, s2z` with the new solution.
-        """
-        # eta_max < .25 to avoid q = 1 solutions that lack harmonics:
-        eta_rng = gw_utils.q_to_eta(self.event_data.q_min), .24
-        chieff_rng = (-.999, .999)
-
-        def lnlike_incoherent(mchirp, eta, chieff):
-            m1, m2 = gw_utils.mchirpeta_to_m1m2(mchirp, eta)
-            intrinsic = dict(m1=m1, m2=m2, s1z=chieff, s2z=chieff)
-            return self.lnlike_max_amp_phase_time(par_dic | intrinsic, tc_rng)
-
-        print(f'Searching incoherent solution for {self.event_data.eventname}')
-        result = differential_evolution(
-            lambda mchirp_eta_chieff: -lnlike_incoherent(*mchirp_eta_chieff),
-            bounds=[self.event_data.mchirp_range, eta_rng, chieff_rng],
-            seed=seed)
-        print(f'Set intrinsic parameters, lnL = {-result.fun}')
-
-        mchirp, eta, chieff = result.x
-        par_dic['m1'], par_dic['m2'] = gw_utils.mchirpeta_to_m1m2(mchirp, eta)
-        par_dic['s1z'] = par_dic['s2z'] = chieff
-
-    #### EVDAT QUESTION: should this be talking more with event_data?
-    def _optimize_t_refdet(self, par_dic, ref_det_name, tc_rng):
-        """
-        Find coalescence time that optimizes SNR maximized over
-        amplitude and phase at reference detector.
-        Update the 't_geocenter' entry of `par_dic` inplace.
-        Note that `t_geocenter` can and should be recomputed if `ra`,
-        `dec` change.
-        """
-        i_refdet = self.event_data.detector_names.index(ref_det_name)
-
-        def lnlike_refdet(t_geocenter):
-            return self.lnlike_max_amp_phase(
-                {**par_dic, 't_geocenter': t_geocenter}, det_inds=i_refdet)
-
-        tc_arr = np.arange(*tc_rng, 2**-10)
-        ind = np.argmax([lnlike_refdet(tgeo) for tgeo in tc_arr])
-        result = minimize_scalar(lambda tgeo: -lnlike_refdet(tgeo),
-                                 bracket=tc_arr[ind-1 : ind+2], bounds=tc_rng)
-        par_dic['t_geocenter'] = result.x
-        print(f'Set time, lnL({ref_det_name}) = {-result.fun}')
-
-    def _optimize_skyloc(self, par_dic, ref_det_name, detector_pair, seed):
-        """
-        Find right ascension and declination that optimize likelihood
-        maximized over amplitude and phase.
-        t_geocenter is readjusted so as to leave t_refdet unchanged.
-        Update 't_geocenter', ra', 'dec' entries of `par_dic` inplace.
-        Return `t0_refdet`, best fit time [s] relative to `tgps` at the
-        reference detector.
-        """
-        skyloc = SkyLocAngles(detector_pair, self.event_data.tgps)
-        time_transformer = UniformTimePrior(tgps=self.event_data.tgps,
-                                            ref_det_name=ref_det_name,
-                                            t0_refdet=np.nan, dt0=np.nan)
-        t0_refdet = time_transformer.inverse_transform(
-            **{key: par_dic[key] for key in ['t_geocenter', 'ra', 'dec']}
-            )['t_refdet']  # Will hold t_refdet fixed
-
-
-        def lnlike_skyloc(thetanet, phinet):
-            ra, dec = skyloc.thetaphinet_to_radec(thetanet, phinet)
-            t_geocenter_dic = time_transformer.transform(t_refdet=t0_refdet,
-                                                         ra=ra, dec=dec)
-            return self.lnlike_max_amp_phase(
-                {**par_dic, 'ra': ra, 'dec': dec, **t_geocenter_dic})
-
-        result = differential_evolution(
-            lambda thetaphinet: -lnlike_skyloc(*thetaphinet),
-            bounds=[(0, np.pi), (0, 2*np.pi)], seed=seed)
-        thetanet, phinet = result.x
-        par_dic['ra'], par_dic['dec'] = skyloc.thetaphinet_to_radec(thetanet,
-                                                                    phinet)
-        par_dic['t_geocenter'] = time_transformer.transform(
-            t_refdet=t0_refdet, ra=par_dic['ra'], dec=par_dic['dec']
-            )['t_geocenter']
-
-        print(f'Set sky location, lnL = {-result.fun}')
-        return t0_refdet
-
-    def _optimize_phase_and_distance(self, par_dic):
-        """
-        Find phase and distance that optimize coherent likelihood.
-        Update 'vphi', 'd_luminosity' entries of `par_dic` inplace.
-        Return log likelihood.
-        """
-        max_lnl, amp_bf, phase_bf = self.lnlike_max_amp_phase(
-            par_dic, ret_amp_phase_bf=True)
-        par_dic['vphi'] += phase_bf / 2
-        par_dic['d_luminosity'] /= amp_bf
-        lnl = self.lnlike_fft(par_dic)
-        np.testing.assert_allclose(max_lnl, lnl)
-
-        print(f'Set polarization and distance, lnL = {lnl}')
-
-
 class RelativeBinningLikelihood(CBCLikelihood):
     """
     Generalization of `CBCLikelihood` that implements computation of
@@ -676,7 +457,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         fiducial waveform is bounded by `pn_phase_tol` [rad].
         """
         pn_exponents = [-5/3, -2/3, 1]
-        if APPROXIMANTS[self.waveform_generator.approximant].tides:
+        if waveform.APPROXIMANTS[self.waveform_generator.approximant].tides:
             pn_exponents += [5/3]
         pn_exponents = np.array(pn_exponents)
 
@@ -855,3 +636,288 @@ class RelativeBinningLikelihood(CBCLikelihood):
         """
         return super().get_init_dict() | ({'fbin': None} if self.pn_phase_tol
                                           else {})
+
+
+
+class ReferenceWaveformFinder(RelativeBinningLikelihood):
+    """
+    Find a high-likelihood solution.
+
+    Some simplfying restrictions are placed, for speed:
+        * (2, 2) mode
+        * Aligned, equal spins
+        * Inclination = 1 radian
+        * Polarization = 0
+    """
+    @classmethod
+    def from_event(cls, event, mchirp_guess, approximant='IMRPhenomXAS',
+                   pn_phase_tol=.02, spline_degree=3):
+        """
+        Constructor that finds a reference waveform solution
+        automatically by maximizing the likelihood.
+
+        Parameters
+        ----------
+        event_data: Instance of `data.EventData`, or string with event
+                    name (must correspond to a file in `data.DATADIR`),
+                    or path to ``npz`` file with `EventData` instance.
+        mchirp_guess: float, estimate of the detector-frame chirp mass
+                      of the signal.
+        approximant: str, approximant name.
+        pn_phase_tol: float
+            Tolerance in the post-Newtonian phase [rad] used for
+            defining frequency bins.
+        spline_degree: int, degree of the spline used to interpolate the
+                       ratio between waveform and reference waveform for
+                       relative binning.
+        """
+        if isinstance(event, data.EventData):
+            event_data = event
+        else:
+            try:
+                event_data = data.EventData.from_npz(event)
+            except FileNotFoundError:
+                event_data = data.EventData.from_npz(filename=event)
+
+        waveform_generator = waveform.WaveformGenerator.from_event_data(
+            event_data, approximant, harmonic_modes=[(2, 2)])
+
+        # Set initial parameter dictionary. Will get improved by
+        # `find_bestfit_pars()`. Serves dual purpose as maximum
+        # likelihood result and relative binning reference.
+        par_dic_0 = dict.fromkeys(waveform_generator.params, 0.)
+        par_dic_0['d_luminosity'] = 1.
+        par_dic_0['iota'] = 1.  # So waveform has higher modes
+        par_dic_0['f_ref'] = 100.
+        par_dic_0['m1'], par_dic_0['m2'] = gw_utils.mchirpeta_to_m1m2(
+            mchirp_guess, eta=.2)
+
+        ref_wf_finder = cls(event_data, waveform_generator, par_dic_0,
+                            pn_phase_tol=pn_phase_tol,
+                            spline_degree=spline_degree)
+        ref_wf_finder.find_bestfit_pars()
+        return ref_wf_finder
+
+    def find_bestfit_pars(self, mchirp_range=None, time_range=(-.1, .1),
+                          seed=0):
+        """
+        Find a good fit solution with restricted parameters
+        (face-on, equal aligned spins).
+        Will update `self.par_dic_0` in stages. The relative binning
+        summary data (and `asd_drift`) will be updated after maximizing
+        over intrinsic parameters and also after setting the sky
+        location.
+
+        First maximize likelihood incoherently w.r.t. intrinsic
+        parameters using mchirp, eta, chieff.
+        Then maximize likelihood w.r.t. extrinsic parameters, leaving
+        the intrinsic fixed.
+        Speed is prioritized over quality of the maximization. Use
+        `Posterior.refine_reference_waveform()` to refine the solution
+        if needed.
+
+        Parameters
+        ----------
+        mchirp_range: 2-tuple with minimum and maximum detector-frame
+                      chirp mass (Msun), optional. If not given, will
+                      guess based on `self.par_dic_0`.
+        time_range: 2-tuple with minimum and maximum times to look for
+                    triggers.
+        seed: To initialize the random state of stochastic maximizers.
+        """
+        # Optimize intrinsic parameters, update relative binning summary:
+        mchirp_range = mchirp_range or gw_utils.estimate_mchirp_range(
+            gw_utils.mchirp(self.par_dic_0['m1'], self.par_dic_0['m2']))
+        self._optimize_m1m2s1zs2z_incoherently(mchirp_range, time_range, seed)
+
+        # Use waveform to define reference detector, detector pair
+        # and reference frequency:
+        kwargs = self.get_coordinate_system_kwargs(time_range)
+        self.par_dic_0['f_ref'] = kwargs['f_avg']
+
+        # Optimize time, sky location, orbital phase and distance
+        self._optimize_t_refdet(kwargs['ref_det_name'], time_range)
+        self._optimize_skyloc(kwargs['detector_pair'], seed)
+        self._optimize_phase_and_distance()
+
+    @_check_bounds
+    def lnlike_max_amp_phase_time(self, par_dic, time_range,
+                                  return_by_detectors=False):
+        """
+        Return log likelihood maximized over amplitude, phase and time
+        incoherently across detectors.
+        """
+        normalized_h_f = self._get_h_f_interpolated(par_dic, normalize=True)
+        z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
+        inds = np.arange(int(time_range[0] / self.event_data.dt),
+                         int(time_range[1] / self.event_data.dt))
+        lnl = np.max(z_cos[:, inds]**2 + z_sin[:, inds]**2, axis=1) / 2
+        if return_by_detectors:
+            return lnl
+        return np.sum(lnl)
+
+    @_check_bounds
+    def lnlike_max_amp_phase(self, par_dic, ret_amp_phase_bf=False,
+                             det_inds=...):
+        """
+        Return log likelihood maximized over amplitude and phase
+        coherently across detectors (the same amplitude rescaling
+        and phase is applied to all detectors).
+        """
+        h_f = self._get_h_f_interpolated(par_dic)
+        h_h = np.sum(self._compute_h_h(h_f)[det_inds])
+        d_h = np.sum(self._compute_d_h(h_f)[det_inds])
+        lnl = np.abs(d_h)**2 / h_h / 2
+
+        if not ret_amp_phase_bf:
+            return lnl
+
+        phase_bf = np.angle(d_h)
+        amp_bf = np.abs(d_h) / h_h
+        return lnl, amp_bf, phase_bf
+
+    def _optimize_m1m2s1zs2z_incoherently(self, mchirp_range, time_range,
+                                          seed):
+        """
+        Optimize mchirp, eta and chieff by likelihood maximized over
+        amplitude, phase and time incoherently across detectors.
+        Modify in-place the entries of `self.par_dic_0` correspondig to
+        `m1, m2, s1z, s2z` with the new solution.
+        """
+        # eta_max < .25 to avoid q = 1 solutions that lack harmonics:
+        eta_range = (.05, .24)
+        chieff_range = (-.999, .999)
+
+        def get_updated_par_dic(mchirp, eta, chieff):
+            """Return `self.par_dic_0` with updated m1, m2, s1z, s2z."""
+            m1, m2 = gw_utils.mchirpeta_to_m1m2(mchirp, eta)
+            intrinsic = dict(m1=m1, m2=m2, s1z=chieff, s2z=chieff)
+            return self.par_dic_0 | intrinsic
+
+        def lnlike_incoherent(mchirp, eta, chieff):
+            """
+            Log likelihood maximized over amplitude, phase and time
+            incoherently across detectors.
+            """
+            par_dic = get_updated_par_dic(mchirp, eta, chieff)
+            return self.lnlike_max_amp_phase_time(par_dic, time_range)
+
+        print(f'Searching incoherent solution for {self.event_data.eventname}')
+
+        result = differential_evolution(
+            lambda mchirp_eta_chieff: -lnlike_incoherent(*mchirp_eta_chieff),
+            bounds=[mchirp_range, eta_range, chieff_range], seed=seed)
+
+        self.par_dic_0 = get_updated_par_dic(*result.x)
+        print(f'Set intrinsic parameters, lnL = {-result.fun}')
+
+    def _optimize_t_refdet(self, ref_det_name, time_range):
+        """
+        Find coalescence time that optimizes SNR maximized over
+        amplitude and phase at reference detector.
+        Update the 't_geocenter' entry of `par_dic` in-place.
+        Note that `t_geocenter` can and should be recomputed if `ra`,
+        `dec` change.
+        """
+        i_refdet = self.event_data.detector_names.index(ref_det_name)
+
+        def lnlike_refdet(t_geocenter):
+            return self.lnlike_max_amp_phase(
+                self.par_dic_0 | {'t_geocenter': t_geocenter}, det_inds=i_refdet)
+
+        tc_arr = np.arange(*time_range, 2**-10)
+        ind = np.argmax([lnlike_refdet(tgeo) for tgeo in tc_arr])
+        result = minimize_scalar(lambda tgeo: -lnlike_refdet(tgeo),
+                                 bracket=tc_arr[ind-1 : ind+2],
+                                 bounds=time_range)
+        self.par_dic_0['t_geocenter'] = result.x
+        print(f'Set time, lnL({ref_det_name}) = {-result.fun}')
+
+    def _optimize_skyloc(self, detector_pair, seed):
+        """
+        Find right ascension and declination that optimize likelihood
+        maximized over amplitude and phase.
+        t_geocenter is readjusted so as to leave t_refdet unchanged.
+        Update 't_geocenter', ra', 'dec' entries of `self.par_dic_0`
+        in-place.
+        """
+        skyloc = SkyLocAngles(detector_pair, self.event_data.tgps)
+        time_transformer = UniformTimePrior(tgps=self.event_data.tgps,
+                                            ref_det_name=detector_pair[0],
+                                            t0_refdet=np.nan, dt0=np.nan)
+        t0_refdet = time_transformer.inverse_transform(
+            **{key: self.par_dic_0[key] for key in ['t_geocenter', 'ra', 'dec']}
+            )['t_refdet']  # Will hold t_refdet fixed
+
+        def get_updated_par_dic(thetanet, phinet):
+            """Return `self.par_dic_0` with updated ra, dec, t_geocenter."""
+            ra, dec = skyloc.thetaphinet_to_radec(thetanet, phinet)
+            t_geocenter_dic = time_transformer.transform(
+                t_refdet=t0_refdet, ra=ra, dec=dec)
+            return self.par_dic_0 | {'ra': ra, 'dec': dec} | t_geocenter_dic
+
+        def lnlike_skyloc(thetanet, phinet):
+            par_dic = get_updated_par_dic(thetanet, phinet)
+            return self.lnlike_max_amp_phase(par_dic)
+
+        result = differential_evolution(
+            lambda thetaphinet: -lnlike_skyloc(*thetaphinet),
+            bounds=[(0, np.pi), (0, 2*np.pi)], seed=seed)
+
+        self.par_dic_0 = get_updated_par_dic(*result.x)
+        print(f'Set sky location, lnL = {-result.fun}')
+
+    def _optimize_phase_and_distance(self):
+        """
+        Find phase and distance that optimize coherent likelihood.
+        Update 'vphi', 'd_luminosity' entries of `self.par_dic_0`
+        in-place.
+        Return log likelihood.
+        """
+        max_lnl, amp_bf, phase_bf = self.lnlike_max_amp_phase(
+            self.par_dic_0, ret_amp_phase_bf=True)
+        self.par_dic_0['vphi'] += phase_bf / 2
+        self.par_dic_0['d_luminosity'] /= amp_bf
+
+        print(f'Set polarization and distance, lnL = {max_lnl}')
+
+    def get_coordinate_system_kwargs(self, time_range=None):
+        """
+        Return dictionary with parameters commonly required to set up
+        coordinate system for sampling.
+        Can be used to instantiate some classes defined in `gw_prior`.
+
+        Parameters
+        ----------
+        time_range: 2-tuple or None
+            Used to set criterion for sorting detectors by decreasing
+            likelihood. If passed, likelihood will be incoherent,
+            maximized over amplitude, phase, and time in (tmin, tmax)
+            relative to `self.event_data.tgps`.
+            Otherwise, likelihood is coherent (default).
+        """
+        if time_range:
+            lnl_by_detectors = self.lnlike_max_amp_phase_time(
+                self.par_dic_0, time_range, return_by_detectors=True)
+        else:
+            lnl_by_detectors = self.lnlike_detectors_no_asd_drift(
+                self.par_dic_0) * self.asd_drift**-2
+
+        sorted_dets = [det for _, det in sorted(zip(
+            lnl_by_detectors, self.waveform_generator.detector_names))][::-1]
+        ref_det_name = sorted_dets[0]
+        detector_pair = ''.join(dict.fromkeys(sorted_dets + ['H', 'L']))[:2]
+
+        f_avg = self.get_average_frequency(self.par_dic_0, ref_det_name)
+
+        delay = gw_utils.time_delay_from_geocenter(
+            ref_det_name, self.par_dic_0['ra'], self.par_dic_0['dec'],
+            self.event_data.tgps)[0]
+        t0_refdet = self.par_dic_0['t_geocenter'] + delay
+
+        return {'tgps': self.event_data.tgps,
+                'par_dic': self.par_dic_0,
+                'f_avg': f_avg,
+                'ref_det_name': ref_det_name,
+                'detector_pair': detector_pair,
+                't0_refdet': t0_refdet}

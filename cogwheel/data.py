@@ -110,7 +110,6 @@ class EventData(utils.JSONMixin):
         np.savez(filename, **self.get_init_dict())
         pathlib.Path(filename).chmod(permissions)
 
-
     @classmethod
     def from_npz(cls, eventname=None, *, filename=None):
         """Load a `.npz` file previously saved with `to_npz()`."""

@@ -1,4 +1,5 @@
 """Utility functions specific to gravitational waves."""
+import scipy.interpolate
 import numpy as np
 
 import lal
@@ -19,6 +20,7 @@ def fplus_fcross(detector_names, ra, dec, psi, tgps):
         lal.ComputeDetAMResponse(DETECTORS[det].response, ra, dec, psi, gmst)
         for det in detector_names])
 
+
 def fplus_fcross_detector(detector_name, ra, dec, psi, tgps):
     """
     Return a (2 x n_angles) array with F+, Fx for many angles at one detector.
@@ -32,6 +34,7 @@ def fplus_fcross_detector(detector_name, ra, dec, psi, tgps):
     return np.transpose([
         lal.ComputeDetAMResponse(DETECTORS[detector_name].response, r, d, p, g)
         for r, d, p, g in np.broadcast(ra, dec, psi, gmst)])
+
 
 def time_delay_from_geocenter(detector_names, ra, dec, tgps):
     """Return an array with delay times from Earth center [seconds]."""
@@ -47,9 +50,11 @@ def eta_to_q(eta):
     """q = m2/m1 as a function of eta = q / (1+q)**2."""
     return (1 - np.sqrt(1 - 4*eta) - 2*eta) / (2*eta)
 
+
 def q_to_eta(q):
     """eta = q / (1+q)**2 as a function of q = m2/m1."""
     return q / (1+q)**2
+
 
 def mchirpeta_to_m1m2(mchirp, eta):
     """Return `m1, m2` given `mchirp, eta`."""
@@ -57,6 +62,62 @@ def mchirpeta_to_m1m2(mchirp, eta):
     m1 = mchirp * (1 + q)**.2 / q**.6
     m2 = q * m1
     return m1, m2
+
+
+def mchirp(m1, m2):
+    """Return chirp mass given component masses."""
+    return (m1*m2)**.6 / (m1+m2)**.2
+
+
+class _ChirpMassRangeEstimator:
+    """
+    Class that implements a rough estimation of the chirp mass posterior
+    support based on the best fit chirp mass value and the signal to
+    noise ratio.
+    Intended for setting ranges for sampling or maximization.
+    Keep in mind this is very approximate, check your results
+    responsibly.
+    """
+    def __init__(self, mchirp_0=60):
+        self.mchirp_0 = mchirp_0
+        mchirp_grid = np.geomspace(.1, 1000, 10000)
+        x_grid = np.vectorize(self._x_of_mchirp)(mchirp_grid)
+        self._mchirp_of_x = scipy.interpolate.interp1d(x_grid, mchirp_grid)
+
+    def _x_of_mchirp(self, mchirp):
+        """
+        Chirp-mass reparametrization in which the uncertainty
+        is approximately homogeneous.
+        """
+        if mchirp > self.mchirp_0:
+            return mchirp
+        return (-3/5 * self.mchirp_0**(8/3) * mchirp**(-5/3)
+                + 8/5 * self.mchirp_0)
+
+    def __call__(self, mchirp, sigmas=5, snr=8):
+        """
+        Return an array with the minimum and maximum estimated
+        values of mchirp with posterior support.
+        Intended for setting ranges for sampling or maximization.
+        Keep in mind this is very approximate, check your results
+        responsibly.
+
+        Parameters
+        ----------
+        mchirp: Estimate of the center of the mchirp distribution.
+        sigmas: How big (conservative) to make the range compared
+                to the expected width of the distribution.
+        snr: Signal-to-noise ratio, lower values give bigger ranges.
+        """
+        x = self._x_of_mchirp(mchirp)
+        dx = 200. * sigmas / snr
+        mchirp_min = self._mchirp_of_x(x - dx)
+        mchirp_max = self._mchirp_of_x(x + dx)
+        return np.array([mchirp_min, mchirp_max])
+
+
+estimate_mchirp_range = _ChirpMassRangeEstimator()
+
 
 # ----------------------------------------------------------------------
 # Latex formatting
