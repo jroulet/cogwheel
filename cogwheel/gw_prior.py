@@ -120,7 +120,7 @@ class UniformDetectorFrameMassesPrior(Prior):
     range_dic = {'mchirp': NotImplemented,
                  'lnq': NotImplemented}
 
-    def __init__(self, *, mchirp_range, q_min, symmetrize_lnq=False,
+    def __init__(self, *, mchirp_range, q_min=.05, symmetrize_lnq=False,
                  **kwargs):
         lnq_min = np.log(q_min)
         self.range_dic = {'mchirp': mchirp_range,
@@ -180,7 +180,7 @@ class UniformDetectorFrameTotalMassInverseMassRatioPrior(Prior):
     range_dic = {'mchirp': NotImplemented,
                  'lnq': NotImplemented}
 
-    def __init__(self, *, mchirp_range, q_min, symmetrize_lnq=False,
+    def __init__(self, *, mchirp_range, q_min=.05, symmetrize_lnq=False,
                  **kwargs):
         if not 0 < q_min <= 1:
             raise ValueError('`q_min` should be between 0 and 1.')
@@ -245,7 +245,7 @@ class UniformSourceFrameTotalMassInverseMassRatioPrior(Prior):
                  'lnq': NotImplemented}
     conditioned_on = ['d_luminosity']
 
-    def __init__(self, *, mtot_source_range, q_min,
+    def __init__(self, *, mtot_source_range, q_min=.05,
                  symmetrize_lnq=False, **kwargs):
         if not 0 < q_min <= 1:
             raise ValueError('`q_min` should be between 0 and 1.')
