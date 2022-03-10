@@ -7,6 +7,7 @@ import numpy as np
 from scipy import special, stats
 from scipy.optimize import differential_evolution, minimize_scalar
 import scipy.interpolate
+import scipy.sparse
 import matplotlib.pyplot as plt
 
 from cogwheel import data
@@ -522,9 +523,36 @@ class RelativeBinningLikelihood(CBCLikelihood):
         self._set_summary()
 
     def _set_splines(self):
-        self._splines = scipy.interpolate.interp1d(
-            self.fbin, np.eye(len(self.fbin)), kind=self._spline_degree,
-            bounds_error=False, fill_value=0.)(self.event_data.frequencies).T
+        """
+        Set attributes `_basis_splines` and `_coefficients`.
+        `_basis_splines` is a sparse array of shape `(nbin, nfft)`
+        whose rows are the B-spline basis elements for `fbin` evaluated
+        on the FFT grid.
+        `_coefficients` is an array of shape `(nbin, nbin)` whose i-th
+        row are the B-spline coefficients for a spline that interpolates
+        an array of zeros with a one in the i-th place, on `fbin`.
+        """
+        nbin = len(self.fbin)
+        coefficients = np.empty((nbin, nbin))
+        for i_bin, y_points in enumerate(np.eye(nbin)):
+            # Note knots depend on fbin only, they're always the same
+            knots, coeffs, _ = scipy.interpolate.splrep(
+                self.fbin, y_points, s=0, k=self.spline_degree)
+            coefficients[i_bin] = coeffs[:nbin]
+        self._coefficients = coefficients
+
+        nfft = len(self.event_data.frequencies)
+        basis_splines = scipy.sparse.lil_array((nbin, nfft))
+        for i_bin in range(nbin):
+            element_knots = knots[i_bin : i_bin + self.spline_degree + 2]
+            basis_element = scipy.interpolate.BSpline.basis_element(
+                element_knots)
+            i_start, i_end = np.searchsorted(self.event_data.frequencies,
+                                             element_knots[[0, -1]])
+            basis_splines[i_bin, i_start : i_end] = basis_element(
+                self.event_data.frequencies[i_start : i_end])
+
+        self._basis_splines = basis_splines.tocsr()
 
     def _set_summary(self):
         """
@@ -587,9 +615,6 @@ class RelativeBinningLikelihood(CBCLikelihood):
             summary_weights * r(fbin)
         which is the exact result of replacing `r(f)` by a spline that
         interpolates it at `fbin`.
-        This implementation is simple but slow and memory-intensive.
-        Could be faster by using a sparse basis for the splines.
-        Could use less memory with a `for` loop instead of `np.dot`.
 
         Parameters
         ----------
@@ -602,7 +627,16 @@ class RelativeBinningLikelihood(CBCLikelihood):
         summary_weights: array shaped like `integrand` except the last
                          axis now correponds to the frequency bins.
         """
-        return 4 * self.event_data.df * np.dot(integrand, self._splines)
+
+        # Broadcast manually
+        *pre_shape, nfft = integrand.shape
+        shape = pre_shape + [len(self.fbin)]
+        projected_integrand = np.zeros(shape, dtype=np.complex_)
+        for i, arr_f in enumerate(integrand.reshape(-1, nfft)):
+            projected_integrand[np.unravel_index(i, pre_shape)] \
+                = self._basis_splines @ arr_f
+
+        return 4*self.event_data.df * projected_integrand @ self._coefficients
 
     def _get_h_f_interpolated(self, par_dic, *, normalize=False, by_m=False):
         """
