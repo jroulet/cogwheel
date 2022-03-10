@@ -652,7 +652,6 @@ class RelativeBinningLikelihood(CBCLikelihood):
                    pn_phase_tol, spline_degree)
 
 
-
 class ReferenceWaveformFinder(RelativeBinningLikelihood):
     """
     Find a high-likelihood solution.
