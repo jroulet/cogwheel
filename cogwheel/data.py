@@ -1,12 +1,11 @@
 """Store data about GW events."""
 
-import os
 import pathlib
 import numpy as np
 
 from . import utils
 
-DATADIR = os.path.join(os.path.dirname(__file__), 'data')
+DATADIR = pathlib.Path(__file__).parent/'data'
 
 
 class EventData(utils.JSONMixin):
@@ -103,12 +102,12 @@ class EventData(utils.JSONMixin):
     def to_npz(self, *, filename=None, overwrite=False,
                permissions=0o644):
         """Save class as `.npz` file (by default in `DATADIR`)."""
-        filename = filename or self.get_filename(self.eventname)
-        if not overwrite and os.path.isfile(filename):
+        filename = pathlib.Path(filename or self.get_filename(self.eventname))
+        if not overwrite and filename.exists():
             raise FileExistsError(f'{filename} already exists. '
                                   'Pass `overwrite=True` to overwrite.')
         np.savez(filename, **self.get_init_dict())
-        pathlib.Path(filename).chmod(permissions)
+        filename.chmod(permissions)
 
     @classmethod
     def from_npz(cls, eventname=None, *, filename=None):
@@ -117,13 +116,13 @@ class EventData(utils.JSONMixin):
             if filename:
                 raise ValueError('Pass exactly one of `eventname`, `filename`')
             filename = cls.get_filename(eventname)
-        dic = {key: val[()] for key, val in np.load(filename, allow_pickle=True).iteritems()}
+        dic = {key: val[()] for key, val in np.load(filename).iteritems()}
         return cls(**dic)
 
     @staticmethod
     def get_filename(eventname=None):
         """Return npz filename to save/load class instance."""
-        return os.path.join(DATADIR, f'{eventname}.npz')
+        return DATADIR/f'{eventname}.npz'
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self.eventname})'
