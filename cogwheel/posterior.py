@@ -73,78 +73,43 @@ class Posterior(utils.JSONMixin):
         return lnprior + self.likelihood.lnlike(standard_par_dic)
 
     @classmethod
-    def from_event(cls, event, approximant, prior_class, fbin=None,
-                   pn_phase_tol=.05, disable_precession=False,
-                   harmonic_modes=None, seed=0, tc_rng=(-.1, .1),
-                   f_ref_moment=1., **kwargs):
+    def from_event(
+            cls, event, mchirp_guess, approximant, prior_class,
+            likelihood_class=RelativeBinningLikelihood,
+            prior_kwargs=None, likelihood_kwargs=None):
         """
         Instantiate a `Posterior` class from the strain data.
         Automatically find a good fit solution for relative binning.
 
         Parameters
         ----------
-        event: Instance of `data.EventData` or string with
-               event name.
-        approximant: string with approximant name.
+        event: Instance of `data.EventData` or string with event name,
+               or path to npz file with `EventData` instance.
+        approximant: str, approximant name.
         prior_class: string with key from `gw_prior.prior_registry`,
                      or subclass of `prior.Prior`.
-        fbin: Array with edges of the frequency bins used for relative
-              binning [Hz]. Alternatively, pass `pn_phase_tol`.
-        pn_phase_tol: Tolerance in the post-Newtonian phase [rad] used
-                      for defining frequency bins. Alternatively, pass
-                      `fbin`.
-        disable_precession: bool, whether to set inplane spins to 0
-                            when evaluating the waveform.
-        harmonic_modes: list of 2-tuples with (l, m) of the harmonic
-                        modes to include. Pass `None` to use
-                        approximant-dependent defaults per
-                        `waveform.APPROXIMANTS`.
-        kwargs: Additional keyword arguments to instantiate the prior
-                class.
+        likelihood_class: subclass of likelihood.RelativeBinningLikelihood
+        prior_kwargs: dict, kwargs for `prior_class` constructor.
+        likelihood_kwargs: : dict, kwargs for `prior_class` constructor.
 
         Return
         ------
         Instance of `Posterior`.
         """
-        if isinstance(event, data.EventData):
-            event_data = event
-        elif isinstance(event, str):
-            event_data = data.EventData.from_npz(event)
-        else:
-            raise ValueError('`event` must be of type `str` or `EventData`')
+        prior_kwargs = prior_kwargs or {}
+        likelihood_kwargs = likelihood_kwargs or {}
 
         if isinstance(prior_class, str):
             prior_class = gw_prior.prior_registry[prior_class]
 
-        # Check required input before doing expensive maximization:
-        required_pars = {par.name for par in
-                         prior_class.init_parameters(include_optional=False)}
-        event_data_keys = {'mchirp_range', 'tgps', 'q_min'}
-        bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref', 'f_avg',
-                        't0_refdet'}
-        if missing_pars := (required_pars - event_data_keys - bestfit_keys
-                            - kwargs.keys()):
-            raise ValueError(f'Missing parameters: {", ".join(missing_pars)}')
+        ref_wf_finder = ReferenceWaveformFinder.from_event(
+            event, mchirp_guess)
 
-        # Initialize likelihood:
-        aux_waveform_generator = waveform.WaveformGenerator.from_event_data(
-            event_data, approximant, harmonic_modes=[(2, 2)])
-        bestfit = ReferenceWaveformFinder(
-            event_data, aux_waveform_generator).find_bestfit_pars(tc_rng, seed)
-        waveform_generator = waveform.WaveformGenerator.from_event_data(
-            event_data, approximant, harmonic_modes, disable_precession)
-        likelihood = RelativeBinningLikelihood(
-            event_data, waveform_generator, bestfit['par_dic'], fbin,
-            pn_phase_tol)
+        likelihood = likelihood_class.from_reference_waveform_finder(
+            ref_wf_finder, approximant=approximant, **likelihood_kwargs)
 
-        bestfit['f_avg'] = likelihood.get_average_frequency(
-            bestfit['par_dic'], bestfit['ref_det_name'])
-
-        # Initialize prior:
-        prior = prior_class(**
-            {key: getattr(event_data, key) for key in event_data_keys}
-            | bestfit | kwargs)
-
+        prior = prior_class.from_reference_waveform_finder(ref_wf_finder,
+                                                           **prior_kwargs)
         return cls(prior, likelihood)
 
     def refine_reference_waveform(self, seed=None):
