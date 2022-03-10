@@ -688,18 +688,65 @@ class RelativeBinningLikelihood(CBCLikelihood):
 
 class ReferenceWaveformFinder(RelativeBinningLikelihood):
     """
-    Find a high-likelihood solution.
+    Find parameters of a high-likelihood solution.
 
     Some simplfying restrictions are placed, for speed:
         * (2, 2) mode
         * Aligned, equal spins
         * Inclination = 1 radian
         * Polarization = 0
+
+
     """
+    def __init__(self, event_data, waveform_generator, par_dic_0,
+                 fbin=None, pn_phase_tol=None, spline_degree=3,
+                 time_range=(-.1, .1)):
+        """
+        Parameters
+        ----------
+        event_data: Instance of `data.EventData`
+        waveform_generator: Instance of `waveform.WaveformGenerator`.
+        par_dic_0: dictionary with parameters of the reference waveform,
+                   should be close to the maximum likelihood waveform.
+        fbin: Array with edges of the frequency bins used for relative
+              binning [Hz]. Alternatively, pass `pn_phase_tol`.
+        pn_phase_tol: Tolerance in the post-Newtonian phase [rad] used
+                      for defining frequency bins. Alternatively, pass
+                      `fbin`.
+        spline_degree: int, degree of the spline used to interpolate the
+                       ratio between waveform and reference waveform for
+                       relative binning.
+        time_range: 2-tuple, minimum and maximum times to search
+                    relative to tgps [s].
+        """
+        self._time_range = time_range
+        super().__init__(event_data, waveform_generator, par_dic_0,
+                         fbin, pn_phase_tol, spline_degree)
+
+    @property
+    def time_range(self):
+        """Minimum and maximum times to search relative to tgps [s]."""
+        return self._time_range
+
+    @time_range.setter
+    def time_range(self, time_range):
+        self._time_range = time_range
+        self._set_summary()
+
+    def _set_summary(self):
+        """Set usual summary data plus `_d_h_timeseries_weights`."""
+        super()._set_summary()
+        times = np.arange(*self.time_range, self.event_data.dt
+                         ).reshape(-1, 1, 1, 1)  # time, m, det, freq
+        shifts = np.exp(2j*np.pi * times * self.event_data.frequencies)
+        d_h0_t = self.event_data.blued_strain * self._h0_f.conj() * shifts
+        self._d_h_timeseries_weights = (self._get_summary_weights(d_h0_t)
+                                        / np.conj(self._h0_fbin))
+
     @classmethod
     def from_event(cls, event, mchirp_guess, approximant='IMRPhenomXAS',
                    pn_phase_tol=.02, spline_degree=3,
-                   **maximization_kwargs):
+                   time_range=(-.1, .1), **maximization_kwargs):
         """
         Constructor that finds a reference waveform solution
         automatically by maximizing the likelihood.
@@ -743,12 +790,12 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         ref_wf_finder = cls(event_data, waveform_generator, par_dic_0,
                             pn_phase_tol=pn_phase_tol,
-                            spline_degree=spline_degree)
+                            spline_degree=spline_degree,
+                            time_range=time_range)
         ref_wf_finder.find_bestfit_pars(**maximization_kwargs)
         return ref_wf_finder
 
-    def find_bestfit_pars(self, mchirp_range=None, time_range=(-.1, .1),
-                          seed=0):
+    def find_bestfit_pars(self, mchirp_range=None, seed=0):
         """
         Find a good fit solution with restricted parameters
         (face-on, equal aligned spins).
@@ -770,40 +817,48 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         mchirp_range: 2-tuple with minimum and maximum detector-frame
                       chirp mass (Msun), optional. If not given, will
                       guess based on `self.par_dic_0`.
-        time_range: 2-tuple with minimum and maximum times to look for
-                    triggers.
         seed: To initialize the random state of stochastic maximizers.
         """
         # Optimize intrinsic parameters, update relative binning summary:
         mchirp_range = mchirp_range or gw_utils.estimate_mchirp_range(
             gw_utils.mchirp(self.par_dic_0['m1'], self.par_dic_0['m2']))
-        self._optimize_m1m2s1zs2z_incoherently(mchirp_range, time_range, seed)
+        self._optimize_m1m2s1zs2z_incoherently(mchirp_range, seed)
 
         # Use waveform to define reference detector, detector pair
         # and reference frequency:
-        kwargs = self.get_coordinate_system_kwargs(time_range)
+        kwargs = self.get_coordinate_system_kwargs()
         self.par_dic_0['f_ref'] = kwargs['f_avg']
 
         # Optimize time, sky location, orbital phase and distance
-        self._optimize_t_refdet(kwargs['ref_det_name'], time_range)
+        self._optimize_t_refdet(kwargs['ref_det_name'])
         self._optimize_skyloc(kwargs['detector_pair'], seed)
         self._optimize_phase_and_distance()
 
     @_check_bounds
-    def lnlike_max_amp_phase_time(self, par_dic, time_range,
+    def lnlike_max_amp_phase_time(self, par_dic,
                                   return_by_detectors=False):
         """
         Return log likelihood maximized over amplitude, phase and time
         incoherently across detectors.
         """
-        normalized_h_f = self._get_h_f_interpolated(par_dic, normalize=True)
-        z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
-        inds = np.arange(int(time_range[0] / self.event_data.dt),
-                         int(time_range[1] / self.event_data.dt))
-        lnl = np.max(z_cos[:, inds]**2 + z_sin[:, inds]**2, axis=1) / 2
+        h_fbin = self.waveform_generator.get_strain_at_detectors(
+            self.fbin, par_dic, by_m=True)
+
+        # Sum over m and f axes, leave time and detector axis unsummed.
+        d_h_timeseries = (self._d_h_timeseries_weights * h_fbin.conj()
+                          ).sum(axis=(-3, -1))
+
+        m_inds, mprime_inds = self._get_m_mprime_inds()
+        h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
+               ).real.sum(axis=(0, -1)))
+
+        matched_filter_timeseries = d_h_timeseries / np.sqrt(h_h)
+        lnl = np.max(np.abs(matched_filter_timeseries), axis=0)**2 / 2
+
         if return_by_detectors:
             return lnl
         return np.sum(lnl)
+
 
     @_check_bounds
     def lnlike_max_amp_phase(self, par_dic, ret_amp_phase_bf=False,
@@ -813,9 +868,16 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         coherently across detectors (the same amplitude rescaling
         and phase is applied to all detectors).
         """
-        h_f = self._get_h_f_interpolated(par_dic)
-        h_h = np.sum(self._compute_h_h(h_f)[det_inds])
-        d_h = np.sum(self._compute_d_h(h_f)[det_inds])
+        h_fbin = self.waveform_generator.get_strain_at_detectors(
+            self.fbin, par_dic, by_m=True)
+
+        slice_ = np.s_[:, det_inds, :]
+        d_h = (self._d_h_weights * h_fbin.conj())[slice_].sum()
+
+        m_inds, mprime_inds = self._get_m_mprime_inds()
+        h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
+               ).real[slice_].sum())
+
         lnl = np.abs(d_h)**2 / h_h / 2
 
         if not ret_amp_phase_bf:
@@ -825,8 +887,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         amp_bf = np.abs(d_h) / h_h
         return lnl, amp_bf, phase_bf
 
-    def _optimize_m1m2s1zs2z_incoherently(self, mchirp_range, time_range,
-                                          seed):
+    def _optimize_m1m2s1zs2z_incoherently(self, mchirp_range, seed):
         """
         Optimize mchirp, eta and chieff by likelihood maximized over
         amplitude, phase and time incoherently across detectors.
@@ -849,7 +910,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             incoherently across detectors.
             """
             par_dic = get_updated_par_dic(mchirp, eta, chieff)
-            return self.lnlike_max_amp_phase_time(par_dic, time_range)
+            return self.lnlike_max_amp_phase_time(par_dic)
 
         print(f'Searching incoherent solution for {self.event_data.eventname}')
 
@@ -860,7 +921,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self.par_dic_0 = get_updated_par_dic(*result.x)
         print(f'Set intrinsic parameters, lnL = {-result.fun}')
 
-    def _optimize_t_refdet(self, ref_det_name, time_range):
+    def _optimize_t_refdet(self, ref_det_name):
         """
         Find coalescence time that optimizes SNR maximized over
         amplitude and phase at reference detector.
@@ -874,11 +935,11 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             return self.lnlike_max_amp_phase(
                 self.par_dic_0 | {'t_geocenter': t_geocenter}, det_inds=i_refdet)
 
-        tc_arr = np.arange(*time_range, 2**-10)
+        tc_arr = np.arange(*self.time_range, 2**-10)
         ind = np.argmax([lnlike_refdet(tgeo) for tgeo in tc_arr])
         result = minimize_scalar(lambda tgeo: -lnlike_refdet(tgeo),
                                  bracket=tc_arr[ind-1 : ind+2],
-                                 bounds=time_range)
+                                 bounds=self.time_range)
         self.par_dic_0['t_geocenter'] = result.x
         print(f'Set time, lnL({ref_det_name}) = {-result.fun}')
 
@@ -913,7 +974,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             lambda thetaphinet: -lnlike_skyloc(*thetaphinet),
             bounds=[(0, np.pi), (0, 2*np.pi)], seed=seed)
 
-        self.par_dic_0 = get_updated_par_dic(*result.x)
+        self._par_dic_0 = get_updated_par_dic(*result.x)
         print(f'Set sky location, lnL = {-result.fun}')
 
     def _optimize_phase_and_distance(self):
@@ -930,20 +991,11 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         print(f'Set polarization and distance, lnL = {max_lnl}')
 
-    def get_coordinate_system_kwargs(self, time_range=None):
+    def get_coordinate_system_kwargs(self):
         """
         Return dictionary with parameters commonly required to set up
         coordinate system for sampling.
         Can be used to instantiate some classes defined in `gw_prior`.
-
-        Parameters
-        ----------
-        time_range: 2-tuple or None
-            Used to set criterion for sorting detectors by decreasing
-            likelihood. If passed, likelihood will be incoherent,
-            maximized over amplitude, phase, and time in (tmin, tmax)
-            relative to `self.event_data.tgps`.
-            Otherwise, likelihood is coherent (default).
 
         Return
         ------
@@ -957,12 +1009,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             * t0_refdet
             * mchirp_range
         """
-        if time_range:
-            lnl_by_detectors = self.lnlike_max_amp_phase_time(
-                self.par_dic_0, time_range, return_by_detectors=True)
-        else:
-            lnl_by_detectors = self.lnlike_detectors_no_asd_drift(
-                self.par_dic_0) * self.asd_drift**-2
+        lnl_by_detectors = self.lnlike_max_amp_phase_time(
+            self.par_dic_0, return_by_detectors=True)
 
         sorted_dets = [det for _, det in sorted(zip(
             lnl_by_detectors, self.waveform_generator.detector_names))][::-1]
