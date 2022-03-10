@@ -639,10 +639,6 @@ class FlatChieffPrior(UniformPriorMixin, Prior):
     def _get_s1z(chieff, q, s2z):
         return (1+q)*chieff - q*s2z
 
-    @staticmethod
-    def _get_s2z(chieff, q, s1z):
-        return ((1+q)*chieff - s1z) / q
-
     def _s1z_lim(self, chieff, q):
         s1z_min = np.maximum(self._get_s1z(chieff, q, s2z=1), -1)
         s1z_max = np.minimum(self._get_s1z(chieff, q, s2z=-1), 1)
@@ -653,7 +649,7 @@ class FlatChieffPrior(UniformPriorMixin, Prior):
         q = m2 / m1
         s1z_min, s1z_max = self._s1z_lim(chieff, q)
         s1z = s1z_min + cumchidiff * (s1z_max - s1z_min)
-        s2z = self._get_s2z(chieff, q, s1z)
+        s2z = ((1+q)*chieff - s1z) / q
         return {'s1z': s1z,
                 's2z': s2z}
 
