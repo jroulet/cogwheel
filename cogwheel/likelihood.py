@@ -676,7 +676,22 @@ class RelativeBinningLikelihood(CBCLikelihood):
             cls, reference_waveform_finder, approximant,
             fbin=None, pn_phase_tol=.05, spline_degree=3):
         """
-        Provide
+        Instantiate with help from a `ReferenceWaveformFinder` instance,
+        which provides `waveform_generator`, `event_data` and
+        `par_dic_0` objects.
+
+        Parameters
+        ----------
+        reference_waveform_finder: `ReferenceWaveformFinder` instance.
+        approximant: str, approximant name.
+        fbin: Array with edges of the frequency bins used for relative
+              binning [Hz]. Alternatively, pass `pn_phase_tol`.
+        pn_phase_tol: Tolerance in the post-Newtonian phase [rad] used
+                      for defining frequency bins. Alternatively, pass
+                      `fbin`.
+        spline_degree: int, degree of the spline used to interpolate the
+                       ratio between waveform and reference waveform for
+                       relative binning.
         """
         waveform_generator = reference_waveform_finder.waveform_generator \
             .reinstantiate(approximant=approximant, harmonic_modes=None)
@@ -695,8 +710,6 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         * Aligned, equal spins
         * Inclination = 1 radian
         * Polarization = 0
-
-
     """
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None, spline_degree=3,
@@ -732,16 +745,6 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
     def time_range(self, time_range):
         self._time_range = time_range
         self._set_summary()
-
-    def _set_summary(self):
-        """Set usual summary data plus `_d_h_timeseries_weights`."""
-        super()._set_summary()
-        times = np.arange(*self.time_range, self.event_data.dt
-                         ).reshape(-1, 1, 1, 1)  # time, m, det, freq
-        shifts = np.exp(2j*np.pi * times * self.event_data.frequencies)
-        d_h0_t = self.event_data.blued_strain * self._h0_f.conj() * shifts
-        self._d_h_timeseries_weights = (self._get_summary_weights(d_h0_t)
-                                        / np.conj(self._h0_fbin))
 
     @classmethod
     def from_event(cls, event, mchirp_guess, approximant='IMRPhenomXAS',
@@ -801,8 +804,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         (face-on, equal aligned spins).
         Will update `self.par_dic_0` in stages. The relative binning
         summary data (and `asd_drift`) will be updated after maximizing
-        over intrinsic parameters and also after setting the sky
-        location.
+        over intrinsic parameters.
 
         First maximize likelihood incoherently w.r.t. intrinsic
         parameters using mchirp, eta, chieff.
@@ -859,7 +861,6 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             return lnl
         return np.sum(lnl)
 
-
     @_check_bounds
     def lnlike_max_amp_phase(self, par_dic, ret_amp_phase_bf=False,
                              det_inds=...):
@@ -886,6 +887,16 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         phase_bf = np.angle(d_h)
         amp_bf = np.abs(d_h) / h_h
         return lnl, amp_bf, phase_bf
+
+    def _set_summary(self):
+        """Set usual summary data plus `_d_h_timeseries_weights`."""
+        super()._set_summary()
+        times = np.arange(*self.time_range, self.event_data.dt
+                         ).reshape(-1, 1, 1, 1)  # time, m, det, freq
+        shifts = np.exp(2j*np.pi * times * self.event_data.frequencies)
+        d_h0_t = self.event_data.blued_strain * self._h0_f.conj() * shifts
+        self._d_h_timeseries_weights = (self._get_summary_weights(d_h0_t)
+                                        / np.conj(self._h0_fbin))
 
     def _optimize_m1m2s1zs2z_incoherently(self, mchirp_range, seed):
         """
