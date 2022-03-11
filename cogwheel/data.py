@@ -1,6 +1,7 @@
 """Store data about GW events."""
 
 import pathlib
+import warnings
 import numpy as np
 
 from . import utils
@@ -14,8 +15,7 @@ class EventData(utils.JSONMixin):
     multiple detectors, as well as some metadata.
     """
     def __init__(self, eventname, frequencies, strain, psd,
-                 detector_names, tgps, tcoarse, mchirp_range, q_min,
-                 fd_filter=None):
+                 detector_names, tgps, tcoarse, fd_filter=None):
         """
         Parameters
         ----------
@@ -27,8 +27,6 @@ class EventData(utils.JSONMixin):
         detector_names: string, e.g. `'HLV'`.
         tgps: float, GPS time of the event.
         tcoarse: float, time of event relative to beginning of data.
-        mchirp_range: array with detector-frame chirp mass bounds.
-        q_min: float, minimum mass ratio 0 < q_min <= 1.
         fd_filter: ndet x nfreq (or just nfreq) array, frequency-domain
                    filter to apply multiplicatively to the whitened data
                    and template. Defaults to `default_filter()` in all
@@ -52,11 +50,6 @@ class EventData(utils.JSONMixin):
         self.detector_names = detector_names
         self.tgps = tgps
         self.tcoarse = tcoarse
-        #### EVDAT QUESTION: do we really need these in the instance?
-        self.mchirp_range = mchirp_range
-        #### EVDAT QUESTION: if so, should we take tc_range too?
-        ## --> maybe mchirp is needed but I think qmin less than tc_range
-        self.q_min = q_min
 
         self.nfft = 2 * (len(self.frequencies) - 1)
         self.t = np.linspace(0, 1/self.df, self.nfft, endpoint=False)
@@ -116,7 +109,14 @@ class EventData(utils.JSONMixin):
             if filename:
                 raise ValueError('Pass exactly one of `eventname`, `filename`')
             filename = cls.get_filename(eventname)
-        dic = {key: val[()] for key, val in np.load(filename).iteritems()}
+        dic = {key: val[()] for key, val in np.load(filename).items()}
+
+        deprecated_keys = {'mchirp_range', 'q_min'}
+        for key in deprecated_keys & dic.keys():
+            warnings.warn(f'{key!r} is deprecated. Please use `to_npz()` to '
+                          'overwrite this file ', DeprecationWarning)
+            del dic[key]
+
         return cls(**dic)
 
     @staticmethod
