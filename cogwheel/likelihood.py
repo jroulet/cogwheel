@@ -638,7 +638,8 @@ class RelativeBinningLikelihood(CBCLikelihood):
 
         return 4*self.event_data.df * projected_integrand @ self._coefficients
 
-    def _get_h_f_interpolated(self, par_dic, *, normalize=False, by_m=False):
+    def _get_h_f_interpolated(self, par_dic, *, normalize=False,
+                              by_m=False):
         """
         Fast approximation to `_get_h_f`.
         Return ndet x nfreq array with waveform strain at detectors
