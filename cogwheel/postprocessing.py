@@ -22,10 +22,10 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import pandas as pd
 
-from . import grid
-from . import utils
-from . import sampling
-from . import prior
+from cogwheel import grid
+from cogwheel import utils
+from cogwheel import sampling
+from cogwheel import prior
 
 TESTS_FILENAME = 'postprocessing_tests.json'
 

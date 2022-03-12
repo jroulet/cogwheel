@@ -17,8 +17,8 @@ import pymultinest
 # import ultranest
 # import ultranest.stepsampler
 
-from . import postprocessing
-from . import utils
+from cogwheel import postprocessing
+from cogwheel import utils
 
 SAMPLES_FILENAME = 'samples.feather'
 FINISHED_FILENAME = 'FINISHED.out'

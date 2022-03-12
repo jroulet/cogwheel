@@ -18,7 +18,7 @@ import inspect
 import itertools
 import numpy as np
 
-from . import utils
+from cogwheel import utils
 
 
 class PriorError(Exception):

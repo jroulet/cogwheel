@@ -6,8 +6,8 @@ import numpy as np
 
 import lal
 
-from . import utils
-from . gw_utils import DETECTORS
+from cogwheel import utils
+from cogwheel.gw_utils import DETECTORS
 
 class SkyLocAngles(utils.JSONMixin):
     """
