@@ -4,7 +4,7 @@ import numpy as np
 
 import lal
 
-from . import grid
+from cogwheel import grid
 
 DETECTORS = {'H': lal.CachedDetectors[lal.LHO_4K_DETECTOR],
              'L': lal.CachedDetectors[lal.LLO_4K_DETECTOR],

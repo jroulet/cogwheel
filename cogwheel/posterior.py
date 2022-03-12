@@ -9,11 +9,12 @@ import inspect
 import json
 import numpy as np
 
-from . import data
-from . import gw_prior
-from . import utils
-from . import waveform
-from .likelihood import RelativeBinningLikelihood, ReferenceWaveformFinder
+from cogwheel import data
+from cogwheel import gw_prior
+from cogwheel import utils
+from cogwheel import waveform
+from cogwheel.likelihood import RelativeBinningLikelihood, \
+    ReferenceWaveformFinder
 
 
 class PosteriorError(Exception):

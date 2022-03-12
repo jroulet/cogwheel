@@ -6,8 +6,8 @@ import numpy as np
 import lal
 import lalsimulation
 
-from . import gw_utils
-from . import utils
+from cogwheel import gw_utils
+from cogwheel import utils
 
 ZERO_INPLANE_SPINS = {'s1x': 0.,
                       's1y': 0.,

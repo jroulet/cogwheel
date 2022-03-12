@@ -4,7 +4,7 @@ import pathlib
 import warnings
 import numpy as np
 
-from . import utils
+from cogwheel import utils
 
 DATADIR = pathlib.Path(__file__).parent/'data'
 
