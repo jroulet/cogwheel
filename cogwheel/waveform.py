@@ -20,9 +20,8 @@ DEFAULT_PARS = {**ZERO_INPLANE_SPINS,
                 'l1': 0.,
                 'l2': 0.}
 
-DEFAULT_LALSIMULATION_COMMANDS = (
-    ('SimInspiralWaveformParamsInsertPhenomXPrecVersion', 102),  # NNLO angles
-    )
+FORCE_NNLO_ANGLES = (
+    ('SimInspiralWaveformParamsInsertPhenomXPrecVersion', 102),)
 
 Approximant = namedtuple('Approximant',
                          ('harmonic_modes', 'aligned_spins', 'tides'),
@@ -153,7 +152,7 @@ class WaveformGenerator(utils.JSONMixin):
     def __init__(self, detector_names, tgps, tcoarse, approximant,
                  harmonic_modes=None, disable_precession=False,
                  n_cached_waveforms=1,
-                 lalsimulation_commands=DEFAULT_LALSIMULATION_COMMANDS):
+                 lalsimulation_commands=FORCE_NNLO_ANGLES):
         super().__init__()
 
         self.detector_names = detector_names
