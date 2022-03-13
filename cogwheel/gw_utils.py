@@ -10,6 +10,26 @@ DETECTORS = {'H': lal.CachedDetectors[lal.LHO_4K_DETECTOR],
              'L': lal.CachedDetectors[lal.LLO_4K_DETECTOR],
              'V': lal.CachedDetectors[lal.VIRGO_DETECTOR]}
 
+DETECTOR_ARMS = {
+    'H': (np.array([lal.LHO_4K_ARM_X_DIRECTION_X,
+                    lal.LHO_4K_ARM_X_DIRECTION_Y,
+                    lal.LHO_4K_ARM_X_DIRECTION_Z]),
+          np.array([lal.LHO_4K_ARM_Y_DIRECTION_X,
+                    lal.LHO_4K_ARM_Y_DIRECTION_Y,
+                    lal.LHO_4K_ARM_Y_DIRECTION_Z])),
+    'L': (np.array([lal.LLO_4K_ARM_X_DIRECTION_X,
+                    lal.LLO_4K_ARM_X_DIRECTION_Y,
+                    lal.LLO_4K_ARM_X_DIRECTION_Z]),
+          np.array([lal.LLO_4K_ARM_Y_DIRECTION_X,
+                    lal.LLO_4K_ARM_Y_DIRECTION_Y,
+                    lal.LLO_4K_ARM_Y_DIRECTION_Z])),
+    'V': (np.array([lal.VIRGO_ARM_X_DIRECTION_X,
+                    lal.VIRGO_ARM_X_DIRECTION_Y,
+                    lal.VIRGO_ARM_X_DIRECTION_Z]),
+          np.array([lal.VIRGO_ARM_Y_DIRECTION_X,
+                    lal.VIRGO_ARM_Y_DIRECTION_Y,
+                    lal.VIRGO_ARM_Y_DIRECTION_Z]))}
+
 
 def fplus_fcross(detector_names, ra, dec, psi, tgps):
     """
