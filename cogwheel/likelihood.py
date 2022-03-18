@@ -525,7 +525,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
     def _set_splines(self):
         """
         Set attributes `_basis_splines` and `_coefficients`.
-        `_basis_splines` is a sparse array of shape `(nbin, nfft)`
+        `_basis_splines` is a sparse array of shape `(nbin, nrfft)`
         whose rows are the B-spline basis elements for `fbin` evaluated
         on the FFT grid.
         `_coefficients` is an array of shape `(nbin, nbin)` whose i-th
@@ -541,8 +541,8 @@ class RelativeBinningLikelihood(CBCLikelihood):
             coefficients[i_bin] = coeffs[:nbin]
         self._coefficients = coefficients
 
-        nfft = len(self.event_data.frequencies)
-        basis_splines = scipy.sparse.lil_array((nbin, nfft))
+        nrfft = len(self.event_data.frequencies)
+        basis_splines = scipy.sparse.lil_array((nbin, nrfft))
         for i_bin in range(nbin):
             element_knots = knots[i_bin : i_bin + self.spline_degree + 2]
             basis_element = scipy.interpolate.BSpline.basis_element(
@@ -629,10 +629,10 @@ class RelativeBinningLikelihood(CBCLikelihood):
         """
 
         # Broadcast manually
-        *pre_shape, nfft = integrand.shape
+        *pre_shape, nrfft = integrand.shape
         shape = pre_shape + [len(self.fbin)]
         projected_integrand = np.zeros(shape, dtype=np.complex_)
-        for i, arr_f in enumerate(integrand.reshape(-1, nfft)):
+        for i, arr_f in enumerate(integrand.reshape(-1, nrfft)):
             projected_integrand[np.unravel_index(i, pre_shape)] \
                 = self._basis_splines @ arr_f
 
