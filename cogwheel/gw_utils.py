@@ -182,14 +182,14 @@ _LABELS = {
     'd_luminosity': r'$D_L$',
     'z': r'$z$',
     # Orientation
-    'vphi': r'$\varphi$',
+    'phi_ref': r'$\phi_{\rm ref}$',
     'psi_hat': r'$\hat{\psi}$',
     'psi': r'$\psi$',
     'cosiota': r'$\cos \iota$',
     'iota': r'$\iota$',
     'thetaJN': r'$\theta_{JN}$',
-    'costhetaJN': r'$\cos \theta_{JN}$',
-    'phiJL': r'$\phi_{JL}$',
+    'costheta_jn': r'$\cos \theta_{JN}$',
+    'phi_jl': r'$\phi_{JL}$',
     'phi12': r'$\phi_{12}$',
     # Location
     'costhetanet': r'$\cos \theta_{\rm net}$',

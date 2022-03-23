@@ -291,8 +291,8 @@ class UniformSourceFrameTotalMassInverseMassRatioPrior(Prior):
 class UniformPhasePrior(UniformPriorMixin, IdentityTransformMixin,
                         Prior):
     """Uniform prior for the orbital phase. No change of coordinates."""
-    range_dic = {'vphi': (0, 2*np.pi)}
-    periodic_params = ['vphi']
+    range_dic = {'phi_ref': (0, 2*np.pi)}
+    periodic_params = ['phi_ref']
 
 
 class IsotropicInclinationPrior(UniformPriorMixin, Prior):
@@ -396,13 +396,13 @@ class UniformPolarizationPrior(ReferenceDetectorMixin,
     Prior for the polarization.
     The sampled variable `psi_hat` differs from the standard
     polarization `psi` by an inclination-dependent sign and an additive
-    function of `vphi, iota, ra, dec`, such that it describes the well-
+    function of `phi_ref, iota, ra, dec`, such that it describes the well-
     measured phase of the waveform at a reference detector.
     """
     standard_params = ['psi']
     range_dic = {'psi_hat': (-np.pi/2, np.pi/2)}
     periodic_params = ['psi_hat']
-    conditioned_on = ['iota', 'ra', 'dec', 'vphi', 't_geocenter']
+    conditioned_on = ['iota', 'ra', 'dec', 'phi_ref', 't_geocenter']
 
     def __init__(self, *, tgps, ref_det_name, f_avg, par_dic_0=None, **kwargs):
         """
@@ -416,7 +416,7 @@ class UniformPolarizationPrior(ReferenceDetectorMixin,
                f_avg = (Integrate[f * |h(f)|^2 / PSD(f)]
                         / Integrate[|h(f)|^2 / PSD(f)])
         par_dic_0: Optional dictionary, must have entries for
-                   (vphi, iota, ra, dec, psi, t_geocenter) of a solution
+                   (phi_ref, iota, ra, dec, psi, t_geocenter) of a solution
                    with high likelihood (additional keys are ignored).
                    It is not essential but might remove residual
                    correlations between `psi_hat` and other extrinsic
@@ -434,29 +434,30 @@ class UniformPolarizationPrior(ReferenceDetectorMixin,
         if par_dic_0:
             par_dic_0 = {
                 par: par_dic_0[par]
-                for par in ('vphi', 'iota', 'ra', 'dec', 'psi', 't_geocenter')}
+                for par in ('phi_ref', 'iota', 'ra', 'dec', 'psi',
+                            't_geocenter')}
             self._phase_refdet_0 = self._phase_refdet(**par_dic_0)
 
-    def _phase_refdet(self, iota, ra, dec, psi, vphi, t_geocenter):
+    def _phase_refdet(self, iota, ra, dec, psi, phi_ref, t_geocenter):
         """
         Return the well-measurable overall phase at the reference detector.
-        The intuition is that all allowed values of (vphi, iota, ra, dec,
+        The intuition is that all allowed values of (phi_ref, iota, ra, dec,
         psi, t_geocenter) would have a consistent value of phase_refdet.
         """
         t_refdet = t_geocenter + self.time_delay_refdet(ra, dec)
         return (np.angle(self.geometric_factor_refdet(ra, dec, psi, iota))
-                + 2*vphi - 2*np.pi*self.f_avg*t_refdet) % (2*np.pi)
+                + 2*phi_ref - 2*np.pi*self.f_avg*t_refdet) % (2*np.pi)
 
-    def _psi_refdet(self, iota, ra, dec, vphi, t_geocenter):
+    def _psi_refdet(self, iota, ra, dec, phi_ref, t_geocenter):
         """
         Return psi that solves
             arg(R) + gamma = 0
         at the reference detector, where
             R = (1+cos^2(iota)) Fplus / 2 - i cos(iota) Fcross,
-            gamma = 2 vphi - 2 pi f_avg t_refdet - phase_refdet_0.
+            gamma = 2 phi_ref - 2 pi f_avg t_refdet - phase_refdet_0.
         """
         t_refdet = t_geocenter + self.time_delay_refdet(ra, dec)
-        gamma = 2*vphi - 2*np.pi*self.f_avg*t_refdet - self._phase_refdet_0
+        gamma = 2*phi_ref - 2*np.pi*self.f_avg*t_refdet - self._phase_refdet_0
 
         fp0, fc0 = self.fplus_fcross_refdet(ra, dec, psi=0)
         cosiota = np.cos(iota)
@@ -467,15 +468,15 @@ class UniformPolarizationPrior(ReferenceDetectorMixin,
         delta = np.pi * (cosiota * c < 0)  # 0 or pi
         return .5 * (np.arctan((fc0*a - fp0*b) / c) + delta)
 
-    def transform(self, psi_hat, iota, ra, dec, vphi, t_geocenter):
+    def transform(self, psi_hat, iota, ra, dec, phi_ref, t_geocenter):
         """psi_hat to psi."""
-        psi_refdet = self._psi_refdet(iota, ra, dec, vphi, t_geocenter)
+        psi_refdet = self._psi_refdet(iota, ra, dec, phi_ref, t_geocenter)
         psi = (psi_hat * np.sign(np.cos(iota)) + psi_refdet) % np.pi
         return {'psi': psi}
 
-    def inverse_transform(self, psi, iota, ra, dec, vphi, t_geocenter):
+    def inverse_transform(self, psi, iota, ra, dec, phi_ref, t_geocenter):
         """psi to psi_hat"""
-        psi_refdet = self._psi_refdet(iota, ra, dec, vphi, t_geocenter)
+        psi_refdet = self._psi_refdet(iota, ra, dec, phi_ref, t_geocenter)
         psi_hat = ((psi - psi_refdet) * np.sign(np.cos(iota))
                    + np.pi/2) % np.pi - np.pi/2
         return {'psi_hat': psi_hat}
@@ -675,41 +676,43 @@ class UniformDiskInplaneSpinsPrior(UniformPriorMixin, Prior):
                  'cums2r_s2z': (0, 1),
                  's2phi_hat': (0, 2*np.pi)}
     periodic_params = ['s1phi_hat', 's2phi_hat']
-    conditioned_on = ['s1z', 's2z', 'vphi', 'iota']
+    conditioned_on = ['s1z', 's2z', 'phi_ref', 'iota']
 
     @staticmethod
-    def _spin_transform(cumsr_sz, sphi_hat, sz, vphi, iota):
-        sphi = (sphi_hat - vphi - np.pi*(np.cos(iota) > 0)) % (2*np.pi)
+    def _spin_transform(cumsr_sz, sphi_hat, sz, phi_ref, iota):
+        sphi = (sphi_hat - phi_ref - np.pi*(np.cos(iota) > 0)) % (2*np.pi)
         sr = np.sqrt(cumsr_sz * (1 - sz ** 2))
         sx = sr * np.cos(sphi)
         sy = sr * np.sin(sphi)
         return sx, sy
 
     def transform(self, cums1r_s1z, s1phi_hat, cums2r_s2z, s2phi_hat,
-                  s1z, s2z, vphi, iota):
+                  s1z, s2z, phi_ref, iota):
         """Spin prior cumulatives to spin components."""
-        s1x, s1y = self._spin_transform(cums1r_s1z, s1phi_hat, s1z, vphi, iota)
-        s2x, s2y = self._spin_transform(cums2r_s2z, s2phi_hat, s2z, vphi, iota)
+        s1x, s1y = self._spin_transform(cums1r_s1z, s1phi_hat, s1z, phi_ref,
+                                        iota)
+        s2x, s2y = self._spin_transform(cums2r_s2z, s2phi_hat, s2z, phi_ref,
+                                        iota)
         return {'s1x': s1x,
                 's1y': s1y,
                 's2x': s2x,
                 's2y': s2y}
 
     @staticmethod
-    def _inverse_spin_transform(sx, sy, sz, vphi, iota):
+    def _inverse_spin_transform(sx, sy, sz, phi_ref, iota):
         sr = np.sqrt(sx**2 + sy**2)
         sphi = np.arctan2(sy, sx)
         cumsr_sz = sr**2 / (1-sz**2)
-        sphi_hat = (sphi + vphi + np.pi*(np.cos(iota) > 0)) % (2*np.pi)
+        sphi_hat = (sphi + phi_ref + np.pi*(np.cos(iota) > 0)) % (2*np.pi)
         return cumsr_sz, sphi_hat
 
     def inverse_transform(
-            self, s1x, s1y, s2x, s2y, s1z, s2z, vphi, iota):
+            self, s1x, s1y, s2x, s2y, s1z, s2z, phi_ref, iota):
         """Spin components to spin prior cumulatives."""
         cums1r_s1z, s1phi_hat = self._inverse_spin_transform(s1x, s1y, s1z,
-                                                             vphi, iota)
+                                                             phi_ref, iota)
         cums2r_s2z, s2phi_hat = self._inverse_spin_transform(s2x, s2y, s2z,
-                                                             vphi, iota)
+                                                             phi_ref, iota)
         return {'cums1r_s1z': cums1r_s1z,
                 's1phi_hat': s1phi_hat,
                 'cums2r_s2z': cums2r_s2z,
@@ -758,7 +761,7 @@ class IsotropicSpinsInplaneComponentsPrior(UniformPriorMixin, Prior):
     with IsotropicSpinsAlignedComponentsPrior.
     The sampled parameters are `cums1r_s1z`, `cums1r_s1z` ~ U(0, 1)
     and (periodic) `s1phi_hat', `s2phi_hat' ~ U(0, 2*np.pi),
-    conditioned on s1z, s2z, vphi, iota.
+    conditioned on s1z, s2z, phi_ref, iota.
     """
     standard_params = ['s1x', 's1y', 's2x', 's2y']
     range_dic = {'cums1r_s1z': (0, 1),
@@ -766,43 +769,45 @@ class IsotropicSpinsInplaneComponentsPrior(UniformPriorMixin, Prior):
                  'cums2r_s2z': (0, 1),
                  's2phi_hat': (0, 2*np.pi)}
     periodic_params = ['s1phi_hat', 's2phi_hat']
-    conditioned_on = ['s1z', 's2z', 'vphi', 'iota']
+    conditioned_on = ['s1z', 's2z', 'phi_ref', 'iota']
 
     @staticmethod
-    def _spin_transform(cumsr_sz, sphi_hat, sz, vphi, iota):
-        """get (sx, sy) from (cumsr_sz, sphi_hat, sz, vphi, iota)"""
-        sphi = (sphi_hat - vphi - np.pi*(np.cos(iota) > 0)) % (2*np.pi)
+    def _spin_transform(cumsr_sz, sphi_hat, sz, phi_ref, iota):
+        """get (sx, sy) from (cumsr_sz, sphi_hat, sz, phi_ref, iota)"""
+        sphi = (sphi_hat - phi_ref - np.pi*(np.cos(iota) > 0)) % (2*np.pi)
         sr = np.sqrt(sz**2 * (1 / (sz**2)**cumsr_sz - 1))
         sx = sr * np.cos(sphi)
         sy = sr * np.sin(sphi)
         return sx, sy
 
     def transform(self, cums1r_s1z, s1phi_hat, cums2r_s2z, s2phi_hat,
-                  s1z, s2z, vphi, iota):
+                  s1z, s2z, phi_ref, iota):
         """Spin prior cumulatives to spin components."""
-        s1x, s1y = self._spin_transform(cums1r_s1z, s1phi_hat, s1z, vphi, iota)
-        s2x, s2y = self._spin_transform(cums2r_s2z, s2phi_hat, s2z, vphi, iota)
+        s1x, s1y = self._spin_transform(cums1r_s1z, s1phi_hat, s1z, phi_ref,
+                                        iota)
+        s2x, s2y = self._spin_transform(cums2r_s2z, s2phi_hat, s2z, phi_ref,
+                                        iota)
         return {'s1x': s1x,
                 's1y': s1y,
                 's2x': s2x,
                 's2y': s2y}
 
     @staticmethod
-    def _inverse_spin_transform(sx, sy, sz, vphi, iota):
-        """(cumsr_sz, sphi_hat) from (sx, sy, sz, vphi, iota)."""
+    def _inverse_spin_transform(sx, sy, sz, phi_ref, iota):
+        """(cumsr_sz, sphi_hat) from (sx, sy, sz, phi_ref, iota)."""
         sz_sq = sz**2
         cumsr_sz = np.log(sz_sq / (sx**2 + sy**2 + sz_sq)) / np.log(sz_sq)
         sphi = np.arctan2(sy, sx)
-        sphi_hat = (sphi + vphi + np.pi*(np.cos(iota) > 0)) % (2*np.pi)
+        sphi_hat = (sphi + phi_ref + np.pi*(np.cos(iota) > 0)) % (2*np.pi)
         return cumsr_sz, sphi_hat
 
     def inverse_transform(
-            self, s1x, s1y, s2x, s2y, s1z, s2z, vphi, iota):
+            self, s1x, s1y, s2x, s2y, s1z, s2z, phi_ref, iota):
         """Spin components to spin prior cumulatives."""
         cums1r_s1z, s1phi_hat = self._inverse_spin_transform(s1x, s1y, s1z,
-                                                             vphi, iota)
+                                                             phi_ref, iota)
         cums2r_s2z, s2phi_hat = self._inverse_spin_transform(s2x, s2y, s2z,
-                                                             vphi, iota)
+                                                             phi_ref, iota)
         return {'cums1r_s1z': cums1r_s1z,
                 's1phi_hat': s1phi_hat,
                 'cums2r_s2z': cums2r_s2z,
@@ -919,7 +924,7 @@ class IsotropicInclinationUniformDiskInplaneSpinsPrior(
                  'cums2r_s2z': (0, 1)}
     periodic_params = ['phi_jl_hat', 'phi12']
     folded_params = ['costheta_jn']
-    conditioned_on = ['s1z', 's2z', 'vphi', 'm1', 'm2', 'f_ref']
+    conditioned_on = ['s1z', 's2z', 'phi_ref', 'm1', 'm2', 'f_ref']
 
     @staticmethod
     def _spin_transform(cumsr_sz, sz):
@@ -929,7 +934,7 @@ class IsotropicInclinationUniformDiskInplaneSpinsPrior(
         return chi, tilt
 
     def transform(self, costheta_jn, phi_jl_hat, phi12, cums1r_s1z,
-                  cums2r_s2z, s1z, s2z, vphi, m1, m2, f_ref):
+                  cums2r_s2z, s1z, s2z, phi_ref, m1, m2, f_ref):
         """Spin prior cumulatives to spin components."""
         chi1, tilt1 = self._spin_transform(cums1r_s1z, s1z)
         chi2, tilt2 = self._spin_transform(cums2r_s2z, s2z)
@@ -939,7 +944,7 @@ class IsotropicInclinationUniformDiskInplaneSpinsPrior(
         iota, s1x, s1y, s1z, s2x, s2y, s2z \
             = lalsimulation.SimInspiralTransformPrecessingNewInitialConditions(
                 theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2,
-                m1*lal.MSUN_SI, m2*lal.MSUN_SI, f_ref, vphi)
+                m1*lal.MSUN_SI, m2*lal.MSUN_SI, f_ref, phi_ref)
 
         return {'iota': iota,
                 's1x': s1x,
@@ -959,14 +964,14 @@ class IsotropicInclinationUniformDiskInplaneSpinsPrior(
         return cumsr_sz
 
     def inverse_transform(self, iota, s1x, s1y, s2x, s2y, s1z, s2z,
-                          vphi, m1, m2, f_ref):
+                          phi_ref, m1, m2, f_ref):
         """
         Inclination and spin components to theta_jn, phi_jl, phi12 and
         inplane-spin-magnitude prior cumulatives.
         """
         theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2 \
             = lalsimulation.SimInspiralTransformPrecessingWvf2PE(
-                iota, s1x, s1y, s1z, s2x, s2y, s2z, m1, m2, f_ref, vphi)
+                iota, s1x, s1y, s1z, s2x, s2y, s2z, m1, m2, f_ref, phi_ref)
 
         cums1r_s1z = self._inverse_spin_transform(chi1, tilt1, s1z)
         cums2r_s2z = self._inverse_spin_transform(chi2, tilt2, s2z)

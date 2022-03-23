@@ -992,13 +992,13 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
     def _optimize_phase_and_distance(self):
         """
         Find phase and distance that optimize coherent likelihood.
-        Update 'vphi', 'd_luminosity' entries of `self.par_dic_0`
+        Update 'phi_ref', 'd_luminosity' entries of `self.par_dic_0`
         in-place.
         Return log likelihood.
         """
         max_lnl, amp_bf, phase_bf = self.lnlike_max_amp_phase(
             self.par_dic_0, ret_amp_phase_bf=True)
-        self.par_dic_0['vphi'] += phase_bf / 2
+        self.par_dic_0['phi_ref'] += phase_bf / 2
         self.par_dic_0['d_luminosity'] /= amp_bf
 
         print(f'Set polarization and distance, lnL = {max_lnl}')
