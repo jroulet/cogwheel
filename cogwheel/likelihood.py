@@ -462,10 +462,10 @@ class RelativeBinningLikelihood(CBCLikelihood):
             pn_exponents += [5/3]
         pn_exponents = np.array(pn_exponents)
 
-        pn_coeff_rng = 2*np.pi / np.abs(self.event_data.fmin**pn_exponents
-                                        - self.event_data.fmax**pn_exponents)
+        pn_coeff_rng = 2*np.pi / np.abs(np.subtract(
+            *self.event_data.fbounds[:, np.newaxis] ** pn_exponents))
 
-        f_arr = np.linspace(self.event_data.fmin, self.event_data.fmax, 10000)
+        f_arr = np.linspace(*self.event_data.fbounds, 10000)
 
         diff_phase = np.sum([np.sign(exp) * rng * f_arr**exp
                              for rng, exp in zip(pn_coeff_rng, pn_exponents)],
@@ -542,7 +542,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         self._coefficients = coefficients
 
         nrfft = len(self.event_data.frequencies)
-        basis_splines = scipy.sparse.lil_array((nbin, nrfft))
+        basis_splines = scipy.sparse.lil_matrix((nbin, nrfft))
         for i_bin in range(nbin):
             element_knots = knots[i_bin : i_bin + self.spline_degree + 2]
             basis_element = scipy.interpolate.BSpline.basis_element(
@@ -890,9 +890,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         return lnl, amp_bf, phase_bf
 
     def _set_summary(self):
-        """Set usual summary data plus `_d_h_timeseries_weights`."""
+        """Set usual summary data plus ``_d_h_timeseries_weights``."""
         super()._set_summary()
-        times = np.arange(*self.time_range, self.event_data.dt
+        times = np.arange(*self.time_range, 2**-10
                          ).reshape(-1, 1, 1, 1)  # time, m, det, freq
         shifts = np.exp(2j*np.pi * times * self.event_data.frequencies)
         d_h0_t = self.event_data.blued_strain * self._h0_f.conj() * shifts

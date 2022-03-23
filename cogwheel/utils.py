@@ -60,6 +60,11 @@ class _DifferentialEvolutionSolverWithGuesses(
         self.init_population_array(population)
 
 
+def next_pow_2(number):
+    """Return smallest power of 2 greater or equal than `number`."""
+    return 2 ** np.ceil(np.log2(number))
+
+
 def merge_dictionaries_safely(dics):
     """
     Merge multiple dictionaries into one.
