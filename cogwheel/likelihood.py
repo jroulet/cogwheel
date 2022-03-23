@@ -325,7 +325,7 @@ class CBCLikelihood(utils.JSONMixin):
             fig = self._setup_data_figure(figsize)
         axes = fig.get_axes()
 
-        time = self.event_data.t - self.event_data.tcoarse
+        time = self.event_data.times - self.event_data.tcoarse
         data_t_wht = self._get_whitened_td(self.event_data.strain)
         wf_t_wht = self._get_whitened_td(self._get_h_f(par_dic, by_m=by_m))
         if by_m:
@@ -355,7 +355,7 @@ class CBCLikelihood(utils.JSONMixin):
         """
         Take a frequency-domain strain defined on the FFT grid
         `self.event_data.frequencies` and return a whitened time domain
-        strain defined on `self.event_data.t`.
+        strain defined on `self.event_data.times`.
         """
         return (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
                 * np.fft.irfft(strain_f * self.event_data.wht_filter))
