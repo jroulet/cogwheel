@@ -622,7 +622,7 @@ class UniformComovingVolumePriorSampleEffectiveDistance(
                 'd_effective_max': self.range_dic['d_effective'][1]}
 
 
-class FlatChieffPrior(UniformPriorMixin, Prior):
+class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
     """
     Spin prior for aligned spins that is flat in effective spin chieff.
     The sampled parameters are `chieff` and `cumchidiff`.
@@ -986,6 +986,27 @@ class IsotropicInclinationUniformDiskInplaneSpinsPrior(
 
 class IASPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, flat in chieff, uniform luminosity volume."""
+    prior_classes = [FixedReferenceFrequencyPrior,
+                     UniformPhasePrior,
+                     UniformDetectorFrameMassesPrior,
+                     UniformEffectiveSpinPrior,
+                     IsotropicInclinationUniformDiskInplaneSpinsPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformLuminosityVolumePrior,
+                     ZeroTidalDeformabilityPrior]
+
+
+class IASPriorLSystem(RegisteredPriorMixin, CombinedPrior):
+    """
+    Precessing, flat in chieff, uniform luminosity volume.
+    Physically equivalent to IASPrior, but using L (the orbital angular
+    momentum at `f_ref`) as opposed to J (the total angular momentum at
+    `f_ref`) to define zeniths and azimuths for spins and direction of
+    propagation. In practice, spin azimuths are slightly worse measured
+    but the orbital phase becomes a fast parameter.
+    """
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformPhasePrior,
                      IsotropicInclinationPrior,
@@ -993,24 +1014,10 @@ class IASPrior(RegisteredPriorMixin, CombinedPrior):
                      UniformTimePrior,
                      UniformPolarizationPrior,
                      UniformLuminosityVolumePrior,
-                     FlatChieffPrior,
+                     UniformEffectiveSpinPrior,
                      UniformDiskInplaneSpinsPrior,
                      ZeroTidalDeformabilityPrior,
                      FixedReferenceFrequencyPrior]
-
-
-class IASPrior2(RegisteredPriorMixin, CombinedPrior):
-    """Precessing, flat in chieff, uniform luminosity volume."""
-    prior_classes = [FixedReferenceFrequencyPrior,
-                     UniformPhasePrior,
-                     UniformDetectorFrameMassesPrior,
-                     FlatChieffPrior,
-                     IsotropicInclinationUniformDiskInplaneSpinsPrior,
-                     IsotropicSkyLocationPrior,
-                     UniformTimePrior,
-                     UniformPolarizationPrior,
-                     UniformLuminosityVolumePrior,
-                     ZeroTidalDeformabilityPrior]
 
 
 class AlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
@@ -1022,7 +1029,7 @@ class AlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
                      UniformTimePrior,
                      UniformPolarizationPrior,
                      UniformLuminosityVolumePrior,
-                     FlatChieffPrior,
+                     UniformEffectiveSpinPrior,
                      ZeroInplaneSpinsPrior,
                      ZeroTidalDeformabilityPrior,
                      FixedReferenceFrequencyPrior]
@@ -1070,7 +1077,7 @@ class IASPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
                      UniformTimePrior,
                      UniformPolarizationPrior,
                      UniformComovingVolumePrior,
-                     FlatChieffPrior,
+                     UniformEffectiveSpinPrior,
                      UniformDiskInplaneSpinsPrior,
                      ZeroTidalDeformabilityPrior,
                      FixedReferenceFrequencyPrior]
@@ -1086,7 +1093,7 @@ class AlignedSpinIASPriorComovingVT(RegisteredPriorMixin,
                      UniformTimePrior,
                      UniformPolarizationPrior,
                      UniformComovingVolumePrior,
-                     FlatChieffPrior,
+                     UniformEffectiveSpinPrior,
                      ZeroInplaneSpinsPrior,
                      ZeroTidalDeformabilityPrior,
                      FixedReferenceFrequencyPrior]
@@ -1139,7 +1146,7 @@ class NitzMassIASSpinPrior(RegisteredPriorMixin, CombinedPrior):
                      UniformPolarizationPrior,
                      UniformComovingVolumePriorSampleEffectiveDistance,
                      UniformSourceFrameTotalMassInverseMassRatioPrior,
-                     FlatChieffPrior,
+                     UniformEffectiveSpinPrior,
                      UniformDiskInplaneSpinsPrior,
                      ZeroTidalDeformabilityPrior,
                      FixedReferenceFrequencyPrior]
