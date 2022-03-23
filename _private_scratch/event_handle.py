@@ -10,13 +10,11 @@ from astropy.time import Time as astrotime
 from copy import deepcopy as dcopy
 
 from . import analysis_handle as ahand
+from . import _private_ias
+
 DEFAULT_PRIOR, DEFAULT_PARENTDIR = ahand.DEFAULT_PRIOR, ahand.DEFAULT_PARENTDIR
 key_rngs_mask, AnalysisHandle = ahand.key_rngs_mask, ahand.AnalysisHandle
 
-COGWHEEL_PATH = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), '..', 'cogwheel'))
-sys.path.append(COGWHEEL_PATH)
-from cogwheel import _private_ias
 trig = _private_ias.trig
 
 # back when evnames were 8 chars

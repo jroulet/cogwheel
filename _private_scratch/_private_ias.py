@@ -12,11 +12,15 @@ from scipy.interpolate import interp1d
 
 PIPELINE_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', '..', 'gw_detection_ias'))
-sys.path.insert(0, PIPELINE_PATH)
-#sys.path.append(PIPELINE_PATH)
-import triggers_single_detector as trig
 
-from . import data
+COGWHEEL_PATH = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), '..'))
+
+sys.path.insert(0, COGWHEEL_PATH)
+sys.path.insert(0, PIPELINE_PATH)
+
+import triggers_single_detector as trig
+from cogwheel import data
 
 # ordering of detector names for passing fnames
 DETECTOR_NAMES_ORDERED = 'HLV'
@@ -385,8 +389,7 @@ class EventMetadata(data.utils.JSONMixin):
             use_tgps += self.tgps_shift
 
         dic = {key: getattr(self, key)
-               for key in ['eventname', 'detector_names', 'tcoarse',
-                           'mchirp_range', 'q_min']}
+               for key in ['eventname', 'detector_names', 'tcoarse']}
         dic['tgps'] = use_tgps
         dic |= get_f_strain_psd_dic(triggerlists, use_tgps,
                                     self.tcoarse, self.t_interval)
