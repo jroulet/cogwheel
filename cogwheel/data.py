@@ -15,6 +15,10 @@ DATADIR = pathlib.Path(__file__).parent/'data'
 GWOSC_FILES_DIR = DATADIR/'gwosc_files'
 
 
+class DataError(Exception):
+    """Base class for exceptions in this module."""
+
+
 class EventData(utils.JSONMixin):
     """
     Class to save an event's frequency-domain strain data and whitening
@@ -92,7 +96,7 @@ class EventData(utils.JSONMixin):
     @classmethod
     def from_timeseries(
             cls, filenames, eventname, detector_names, tgps,
-            signal_duration=16., wht_filter_duration=16., fmin=15.,
+            signal_duration=16., wht_filter_duration=32., fmin=15.,
             df_taper=1., fmax=1024.):
         """
         Parameters
@@ -121,9 +125,10 @@ class EventData(utils.JSONMixin):
             individual PSDs are measured for Welch, and the extent of
             the tapering in time-domain (s).
 
-        fmin: float
+        fmin: float or sequence of floats
             Minimum frequency at which the whitening filter will have
-            support (Hz). It is important for performance.
+            support (Hz). It is important for performance. Multiple
+            values can be passed, one for each detector.
 
         df_taper: float
             Whitening filter is highpassed. See ``highpass_filter``.
@@ -135,24 +140,55 @@ class EventData(utils.JSONMixin):
         ------
             ``EventData`` instance.
         """
+        if len(filenames) != len(detector_names):
+            raise ValueError(
+                'Length of `filenames` and `detector_names` are mismatched.')
+
         f_strain_whtfilter_tcoarses = []
-        for filename in filenames:
-            timeseries = gwpy.timeseries.TimeSeries.read(filename)
+        for filename, fmin_ in np.transpose(np.broadcast_arrays(filenames,
+                                                                fmin)):
+            timeseries = cls._read_timeseries(filename, tgps)
             f_strain_whtfilter_tcoarses.append(
                 cls._get_f_strain_whtfilter_from_timeseries(
                     timeseries, tgps, signal_duration, wht_filter_duration,
-                    fmin, df_taper, fmax))
+                    fmin_, df_taper, fmax))
         (frequencies, *f_copies), strain, wht_filter, (tcoarse, *t_copies) = (
             np.array(arr) for arr in zip(*f_strain_whtfilter_tcoarses))
 
-        for freq_arr in f_copies:
-            np.testing.assert_array_equal(frequencies, freq_arr)
+        for f_copy in f_copies:
+            np.testing.assert_array_equal(frequencies, f_copy)
 
         for t_copy in t_copies:
             np.testing.assert_equal(tcoarse, t_copy)
 
         return cls(eventname, frequencies, strain, wht_filter,
                    detector_names, tgps, tcoarse)
+
+    @staticmethod
+    def _read_timeseries(filename, tgps):
+        timeseries = gwpy.timeseries.TimeSeries.read(filename)
+
+        i_event = np.searchsorted(timeseries.times.value, tgps)
+        i_nan = np.where(np.isnan(timeseries.value))[0]
+
+        i_start = 0
+        if np.any(before := (i_nan < i_event)):
+            i_start = np.max(i_nan[before]) + 1
+
+        i_end = len(timeseries)
+        if np.any(after := (i_nan > i_event)):
+            i_end = np.min(i_nan[after]) - 1
+
+        t_start = timeseries.times[i_start]
+        t_end = timeseries.times[i_end - 1] + timeseries.dt
+
+        if len(i_nan) > 0:
+            print(f'Warning: keeping only {(t_end - t_start)} of valid data '
+                  'near event.')
+
+        timeseries = timeseries.crop(t_start, t_end)
+        assert not any(np.isnan(timeseries))
+        return timeseries
 
     @classmethod
     def _get_f_strain_whtfilter_from_timeseries(
@@ -198,7 +234,8 @@ class EventData(utils.JSONMixin):
                                             + 2 * wht_filter_duration)
         tcoarse = (segment_duration + signal_duration) / 2
         t_start = tgps - tcoarse
-        segment = timeseries.crop(t_start, t_start + segment_duration)
+        segment = timeseries.pad(int(segment_duration / timeseries.dt.value)
+                                ).crop(t_start, t_start + segment_duration)
 
         rfftfreq = np.fft.rfftfreq(len(segment), timeseries.dt.value)
         i_max = np.searchsorted(rfftfreq, fmax) + 1
@@ -223,9 +260,19 @@ class EventData(utils.JSONMixin):
             window_fir_padded_shifted * raw_wht_filter_td).real
 
         # Taper and downsample data
-        tapering_window = signal.tukey(len(segment),
-                                       wht_filter_duration / segment_duration)
-        data_fd = np.fft.rfft(segment.value * tapering_window)
+        ntaper = int(wht_filter_duration / 2 / segment.dt.value)
+        taper = np.sin(np.linspace(0, np.pi/2, ntaper))**2
+        first_valid_ind, last_valid_ind = np.where(segment.value)[0][[0, -1]]
+        i_event = np.searchsorted(segment.times.value, tgps)
+        if (first_valid_ind + ntaper > i_event
+                or last_valid_ind - ntaper < i_event):
+            raise DataError('Event too close to the edge of valid data. '
+                            'Consider reducing `wht_filter_duration`')
+
+        segment[first_valid_ind : first_valid_ind + ntaper] *= taper
+        segment[last_valid_ind - ntaper : last_valid_ind] *= taper[::-1]
+
+        data_fd = np.fft.rfft(segment.value)
 
         data_fd_down = data_fd[:i_max] * rfftfreq_down[-1] / rfftfreq[-1]
         data_fd_down[-1] = data_fd_down[-1].real
@@ -323,10 +370,10 @@ def highpass_filter(frequencies, fmin=15., df_taper=1.):
     `fmin` and `fmin + df_taper` [Hz].
     """
     fd_filter = np.ones(len(frequencies))
-    i1 = np.searchsorted(frequencies, fmin) - 1
-    i2 = np.searchsorted(frequencies, fmin + df_taper)
-    fd_filter[:i1] = 0.
-    fd_filter[i1 : i2] = np.sin(np.linspace(0, np.pi/2, i2-i1))**2
+    i_1 = np.searchsorted(frequencies, fmin) - 1
+    i_2 = np.searchsorted(frequencies, fmin + df_taper)
+    fd_filter[:i_1] = 0.
+    fd_filter[i_1 : i_2] = np.sin(np.linspace(0, np.pi/2, i_2-i_1))**2
     return fd_filter
 
 
@@ -364,7 +411,7 @@ def download_timeseries(eventname, outdir=None, tgps=None,
     for det in gw_utils.DETECTORS:
         path = outdir/f'{det}_{eventname}.hdf5'
         if path.exists() and not overwrite:
-            print(f'Skipping existing file {path}')
+            print(f'Skipping existing file {path.resolve()}')
             continue
 
         try:
