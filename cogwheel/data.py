@@ -270,12 +270,12 @@ class EventData(utils.JSONMixin):
                             'Consider reducing `wht_filter_duration`')
 
         segment[first_valid_ind : first_valid_ind + ntaper] *= taper
-        segment[last_valid_ind - ntaper : last_valid_ind] *= taper[::-1]
+        segment[last_valid_ind - ntaper + 1 : last_valid_ind + 1] *= taper[::-1]
 
         data_fd = np.fft.rfft(segment.value)
 
         data_fd_down = data_fd[:i_max] * rfftfreq_down[-1] / rfftfreq[-1]
-        data_fd_down[-1] = data_fd_down[-1].real
+#         data_fd_down[-1] = data_fd_down[-1].real
 
         # Multiply by dt because the rest of the code uses the
         # convention of the continuous Fourier transform:
