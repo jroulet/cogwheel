@@ -170,10 +170,17 @@ class EventData(utils.JSONMixin):
         Return a ``gwpy.timeseries.TimeSeries``, cropped around
         the event to exclude any nans.
         """
-        timeseries = gwpy.timeseries.TimeSeries.read(filename)
+        try:
+            timeseries = gwpy.timeseries.TimeSeries.read(filename)
+        except ValueError:
+            timeseries = gwpy.timeseries.TimeSeries.read(filename,
+                                                         format='hdf5.gwosc')
 
         i_event = np.searchsorted(timeseries.times.value, tgps)
         i_nan = np.where(np.isnan(timeseries.value))[0]
+
+        if i_event in i_nan:
+            raise DataError(f'{filename} has no data at event time.')
 
         i_start = 0
         if np.any(before := (i_nan < i_event)):
@@ -274,7 +281,7 @@ class EventData(utils.JSONMixin):
                             'Consider reducing `wht_filter_duration`')
 
         segment[first_valid_ind : first_valid_ind + ntaper] *= taper
-        segment[last_valid_ind - ntaper : last_valid_ind] *= taper[::-1]
+        segment[last_valid_ind - ntaper + 1 : last_valid_ind + 1] *= taper[::-1]
 
         data_fd = np.fft.rfft(segment.value)
 
@@ -424,4 +431,5 @@ def download_timeseries(eventname, outdir=None, tgps=None,
         except ValueError:  # That detector has no data
             pass
         else:
-            timeseries.write(path)
+            if not np.isnan(timeseries[np.searchsorted(timeseries.times, tgps)]):
+                timeseries.write(path)
