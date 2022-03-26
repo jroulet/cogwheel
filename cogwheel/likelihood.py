@@ -1040,7 +1040,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             snr=np.sqrt(2*lnl_by_detectors.sum()))
 
         return {'tgps': self.event_data.tgps,
-                'par_dic': self.par_dic_0,
+                'par_dic_0': self.par_dic_0,
                 'f_avg': f_avg,
                 'f_ref': self.par_dic_0['f_ref'],
                 'ref_det_name': ref_det_name,
