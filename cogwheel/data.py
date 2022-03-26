@@ -166,10 +166,17 @@ class EventData(utils.JSONMixin):
 
     @staticmethod
     def _read_timeseries(filename, tgps):
-        timeseries = gwpy.timeseries.TimeSeries.read(filename)
+        try:
+            timeseries = gwpy.timeseries.TimeSeries.read(filename)
+        except ValueError:
+            timeseries = gwpy.timeseries.TimeSeries.read(filename,
+                                                         format='hdf5.gwosc')
 
         i_event = np.searchsorted(timeseries.times.value, tgps)
         i_nan = np.where(np.isnan(timeseries.value))[0]
+
+        if i_event in i_nan:
+            raise DataError(f'{filename} has no data at event time.')
 
         i_start = 0
         if np.any(before := (i_nan < i_event)):
@@ -275,7 +282,7 @@ class EventData(utils.JSONMixin):
         data_fd = np.fft.rfft(segment.value)
 
         data_fd_down = data_fd[:i_max] * rfftfreq_down[-1] / rfftfreq[-1]
-#         data_fd_down[-1] = data_fd_down[-1].real
+        data_fd_down[-1] = data_fd_down[-1].real
 
         # Multiply by dt because the rest of the code uses the
         # convention of the continuous Fourier transform:
@@ -420,4 +427,5 @@ def download_timeseries(eventname, outdir=None, tgps=None,
         except ValueError:  # That detector has no data
             pass
         else:
-            timeseries.write(path)
+            if not np.isnan(timeseries[np.searchsorted(timeseries.times, tgps)]):
+                timeseries.write(path)
