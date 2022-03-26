@@ -65,7 +65,7 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
                  * m1, m2: component masses (Msun)
                  * d_luminosity: luminosity distance (Mpc)
                  * iota: inclination (rad)
-                 * vphi: phase at reference frequency (rad)
+                 * phi_ref: phase at reference frequency (rad)
                  * f_ref: reference frequency (Hz)
              plus, optionally:
                  * s1x, s1y, s1z, s2x, s2y, s2z: dimensionless spins
@@ -78,7 +78,7 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
 
     # Parameters ordered for lalsimulation.SimInspiralChooseFDWaveformSequence
     lal_params = [
-        'vphi', 'm1_kg', 'm2_kg', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z',
+        'phi_ref', 'm1_kg', 'm2_kg', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z',
         'f_ref', 'd_luminosity_meters', 'iota', 'lal_dic', 'approximant', 'f']
 
     par_dic = DEFAULT_PARS | par_dic
@@ -137,10 +137,10 @@ class WaveformGenerator(utils.JSONMixin):
     """
     params = sorted(['d_luminosity', 'dec', 'f_ref', 'iota', 'l1', 'l2',
                      'm1', 'm2', 'psi', 'ra', 's1x', 's1y', 's1z',
-                     's2x', 's2y', 's2z', 't_geocenter', 'vphi'])
+                     's2x', 's2y', 's2z', 't_geocenter', 'phi_ref'])
 
     fast_params = sorted(['d_luminosity', 'dec', 'psi', 'ra', 't_geocenter',
-                          'vphi'])
+                          'phi_ref'])
     slow_params = sorted(set(params) - set(fast_params))
 
     _projection_params = sorted(['dec', 'psi', 'ra', 't_geocenter'])
@@ -301,7 +301,7 @@ class WaveformGenerator(utils.JSONMixin):
 
         slow_par_vals = np.array([waveform_par_dic[par]
                                   for par in self.slow_params])
-        self._rotate_inplane_spins(slow_par_vals, waveform_par_dic['vphi'])
+        self._rotate_inplane_spins(slow_par_vals, waveform_par_dic['phi_ref'])
 
         # Attempt to use cached waveform for fast evaluation:
         if matching_cache := self._matching_cache(slow_par_vals, f):
@@ -312,10 +312,10 @@ class WaveformGenerator(utils.JSONMixin):
             lal_dic = self.create_lal_dict()
 
             waveform_par_dic_0 = dict(zip(self.slow_params, slow_par_vals),
-                                      d_luminosity=1., vphi=0.)
+                                      d_luminosity=1., phi_ref=0.)
 
             # hplus_hcross_0 is a (n_m x 2 x n_frequencies) array with
-            # sum_l (hlm+, hlmx), at vphi=0, d_luminosity=1Mpc.
+            # sum_l (hlm+, hlmx), at phi_ref=0, d_luminosity=1Mpc.
             hplus_hcross_0 = np.array(
                 [compute_hplus_hcross(f, waveform_par_dic_0, self.approximant,
                                       modes, lal_dic)
@@ -336,7 +336,7 @@ class WaveformGenerator(utils.JSONMixin):
 
         # hplus_hcross is a (n_m x 2 x n_frequencies) array.
         m_arr = np.array(list(self._harmonic_modes_by_m)).reshape((-1, 1, 1))
-        hplus_hcross = (np.exp(1j * m_arr * waveform_par_dic['vphi'])
+        hplus_hcross = (np.exp(1j * m_arr * waveform_par_dic['phi_ref'])
                         / waveform_par_dic['d_luminosity'] * hplus_hcross_0)
         if by_m:
             return hplus_hcross
@@ -348,17 +348,17 @@ class WaveformGenerator(utils.JSONMixin):
             getattr(lalsimulation, function_name)(lal_dic, value)
         return lal_dic
 
-    def _rotate_inplane_spins(self, slow_par_vals, vphi):
+    def _rotate_inplane_spins(self, slow_par_vals, phi_ref):
         """
-        Rotate inplane spins (s1x, s1y) and (s2x, s2y) by an angle `vphi`,
+        Rotate inplane spins (s1x, s1y) and (s2x, s2y) by an angle `phi_ref`,
         inplace in `slow_par_vals`.
         `slow_par_vals` must be a numpy array whose values correspond to
         `self.slow_params`.
         """
-        sin_vphi = np.sin(vphi)
-        cos_vphi = np.cos(vphi)
-        rotation = np.array([[cos_vphi, -sin_vphi],
-                             [sin_vphi, cos_vphi]])
+        sin_phi_ref = np.sin(phi_ref)
+        cos_phi_ref = np.cos(phi_ref)
+        rotation = np.array([[cos_phi_ref, -sin_phi_ref],
+                             [sin_phi_ref, cos_phi_ref]])
         slow_par_vals[self._s1xy_inds] = (rotation
                                           @ slow_par_vals[self._s1xy_inds])
         slow_par_vals[self._s2xy_inds] = (rotation
