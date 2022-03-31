@@ -147,7 +147,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         self.to_json(rundir, overwrite=resuming)
 
         package = pathlib.Path(__file__).parents[1].resolve()
-        module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
+        module = f'cogwheel.{os.path.basename(__file__)}'.removesuffix('.py')
 
         batch_path = rundir/'batchfile'
         with open(batch_path, 'w+') as batchfile:
@@ -192,7 +192,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         self.to_json(rundir, overwrite=resuming)
 
         package = pathlib.Path(__file__).parents[1].resolve()
-        module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
+        module = f'cogwheel.{os.path.basename(__file__)}'.removesuffix('.py')
 
         batch_path = rundir/'batchfile'
         with open(batch_path, 'w+') as batchfile:
