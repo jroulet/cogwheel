@@ -5,7 +5,7 @@ import itertools
 from functools import wraps
 import numpy as np
 from scipy import special, stats
-from scipy.optimize import differential_evolution, minimize_scalar
+from scipy.optimize import differential_evolution, minimize, minimize_scalar
 import scipy.interpolate
 import scipy.sparse
 import matplotlib.pyplot as plt
@@ -834,7 +834,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         # Optimize time, sky location, orbital phase and distance
         self._optimize_t_refdet(kwargs['ref_det_name'])
-        self._optimize_skyloc(kwargs['detector_pair'], seed)
+        self._optimize_skyloc(kwargs['detector_pair'])
         self._optimize_phase_and_distance()
 
     @_check_bounds
@@ -873,12 +873,12 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True)
 
-        slice_ = np.s_[:, det_inds, :]
-        d_h = (self._d_h_weights * h_fbin.conj())[slice_].sum()
+        det_slice = np.s_[:, det_inds, :]
+        d_h = (self._d_h_weights * h_fbin.conj())[det_slice].sum()
 
         m_inds, mprime_inds = self._get_m_mprime_inds()
         h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
-               ).real[slice_].sum())
+               ).real[det_slice].sum())
 
         lnl = np.abs(d_h)**2 / h_h / 2
 
@@ -903,8 +903,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         """
         Optimize mchirp, eta and chieff by likelihood maximized over
         amplitude, phase and time incoherently across detectors.
-        Modify in-place the entries of `self.par_dic_0` correspondig to
-        `m1, m2, s1z, s2z` with the new solution.
+        Modify the entries of `self.par_dic_0` correspondig to
+        `m1, m2, s1z, s2z` with the new solution (this will update the
+        relative-binning summary data).
         """
         # eta_max < .25 to avoid q = 1 solutions that lack harmonics:
         eta_range = (.05, .24)
@@ -955,7 +956,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self.par_dic_0['t_geocenter'] = result.x
         print(f'Set time, lnL({ref_det_name}) = {-result.fun}')
 
-    def _optimize_skyloc(self, detector_pair, seed):
+    def _optimize_skyloc(self, detector_pair):
         """
         Find right ascension and declination that optimize likelihood
         maximized over amplitude and phase.
@@ -978,13 +979,21 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                 t_refdet=t0_refdet, ra=ra, dec=dec)
             return self.par_dic_0 | {'ra': ra, 'dec': dec} | t_geocenter_dic
 
+        @np.vectorize
         def lnlike_skyloc(thetanet, phinet):
             par_dic = get_updated_par_dic(thetanet, phinet)
             return self.lnlike_max_amp_phase(par_dic)
 
-        result = differential_evolution(
-            lambda thetaphinet: -lnlike_skyloc(*thetaphinet),
-            bounds=[(0, np.pi), (0, 2*np.pi)], seed=seed)
+        # Maximize on a grid, then refine
+        thetanets = np.linspace(0, np.pi, 40)
+        phinets = np.linspace(0, 2*np.pi, 40)
+        thetaphinets = np.meshgrid(thetanets, phinets, indexing='ij')
+        lnl = lnlike_skyloc(*thetaphinets)
+        i_theta, i_phi = np.unravel_index(np.argmax(lnl), lnl.shape)
+
+        result = minimize(lambda thetaphinet: -lnlike_skyloc(*thetaphinet),
+                          x0=(thetanets[i_theta], phinets[i_phi]),
+                          bounds=[(0, np.pi), (0, 2*np.pi)])
 
         self._par_dic_0 = get_updated_par_dic(*result.x)
         print(f'Set sky location, lnL = {-result.fun}')
@@ -1013,7 +1022,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         ------
         dictionary with entries for:
             * tgps
-            * par_dic
+            * par_dic_0
             * f_avg
             * f_ref
             * ref_det_name
@@ -1040,7 +1049,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             snr=np.sqrt(2*lnl_by_detectors.sum()))
 
         return {'tgps': self.event_data.tgps,
-                'par_dic': self.par_dic_0,
+                'par_dic_0': self.par_dic_0,
                 'f_avg': f_avg,
                 'f_ref': self.par_dic_0['f_ref'],
                 'ref_det_name': ref_det_name,
