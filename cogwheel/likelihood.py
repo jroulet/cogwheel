@@ -873,12 +873,12 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True)
 
-        slice_ = np.s_[:, det_inds, :]
-        d_h = (self._d_h_weights * h_fbin.conj())[slice_].sum()
+        det_slice = np.s_[:, det_inds, :]
+        d_h = (self._d_h_weights * h_fbin.conj())[det_slice].sum()
 
         m_inds, mprime_inds = self._get_m_mprime_inds()
         h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
-               ).real[slice_].sum())
+               ).real[det_slice].sum())
 
         lnl = np.abs(d_h)**2 / h_h / 2
 
@@ -903,8 +903,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         """
         Optimize mchirp, eta and chieff by likelihood maximized over
         amplitude, phase and time incoherently across detectors.
-        Modify in-place the entries of `self.par_dic_0` correspondig to
-        `m1, m2, s1z, s2z` with the new solution.
+        Modify the entries of `self.par_dic_0` correspondig to
+        `m1, m2, s1z, s2z` with the new solution (this will update the
+        relative-binning summary data).
         """
         # eta_max < .25 to avoid q = 1 solutions that lack harmonics:
         eta_range = (.05, .24)
@@ -1013,7 +1014,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         ------
         dictionary with entries for:
             * tgps
-            * par_dic
+            * par_dic_0
             * f_avg
             * f_ref
             * ref_det_name
