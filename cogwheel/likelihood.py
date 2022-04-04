@@ -210,8 +210,8 @@ class CBCLikelihood(utils.JSONMixin):
         if ref_det_name:
             det_ind = self.event_data.detector_names.index(ref_det_name)
 
-        weight = (np.abs(self._get_h_f(par_dic) * self.event_data.wht_filter)**2
-                 )[det_ind, self.event_data.fslice]
+        weight = np.abs(self._get_h_f(par_dic) * self.event_data.wht_filter
+                       )[det_ind, self.event_data.fslice] ** 2
         weight /= weight.sum()
 
         frequencies = self.event_data.frequencies[self.event_data.fslice]
@@ -946,7 +946,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         def lnlike_refdet(t_geocenter):
             return self.lnlike_max_amp_phase(
-                self.par_dic_0 | {'t_geocenter': t_geocenter}, det_inds=i_refdet)
+                self.par_dic_0 | {'t_geocenter': t_geocenter},
+                det_inds=i_refdet)
 
         tc_arr = np.arange(*self.time_range, 2**-10)
         ind = np.argmax([lnlike_refdet(tgeo) for tgeo in tc_arr])
@@ -969,7 +970,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                                             ref_det_name=detector_pair[0],
                                             t0_refdet=np.nan, dt0=np.nan)
         t0_refdet = time_transformer.inverse_transform(
-            **{key: self.par_dic_0[key] for key in ['t_geocenter', 'ra', 'dec']}
+            **{key: self.par_dic_0[key]
+               for key in ['t_geocenter', 'ra', 'dec']}
             )['t_refdet']  # Will hold t_refdet fixed
 
         def get_updated_par_dic(thetanet, phinet):
