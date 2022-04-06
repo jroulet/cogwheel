@@ -210,8 +210,8 @@ class CBCLikelihood(utils.JSONMixin):
         if ref_det_name:
             det_ind = self.event_data.detector_names.index(ref_det_name)
 
-        weight = (np.abs(self._get_h_f(par_dic) * self.event_data.wht_filter)**2
-                 )[det_ind, self.event_data.fslice]
+        weight = np.abs(self._get_h_f(par_dic) * self.event_data.wht_filter
+                       )[det_ind, self.event_data.fslice] ** 2
         weight /= weight.sum()
 
         frequencies = self.event_data.frequencies[self.event_data.fslice]
@@ -712,9 +712,13 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         * Inclination = 1 radian
         * Polarization = 0
     """
+    # eta_max < .25 to avoid q = 1 solutions that lack harmonics:
+    eta_range = (.05, .24)
+    chieff_range = (-.999, .999)
+
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None, spline_degree=3,
-                 time_range=(-.1, .1)):
+                 time_range=(-.1, .1), mchirp_range=None):
         """
         Parameters
         ----------
@@ -734,6 +738,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                     relative to tgps [s].
         """
         self._time_range = time_range
+        self._mchirp_range = mchirp_range
         super().__init__(event_data, waveform_generator, par_dic_0,
                          fbin, pn_phase_tol, spline_degree)
 
@@ -747,10 +752,23 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self._time_range = time_range
         self._set_summary()
 
+    @property
+    def mchirp_range(self):
+        """
+        If `self._mchirp_range` is set return that, otherwise return a
+        crude estimate based on the reference waveform's chirp mass.
+        See also: `set_mchirp_range`.
+        """
+        if self._mchirp_range:
+            return self._mchirp_range
+
+        mchirp = gw_utils.mchirp(self.par_dic_0['m1'], self.par_dic_0['m2'])
+        return gw_utils.estimate_mchirp_range(mchirp)
+
     @classmethod
     def from_event(cls, event, mchirp_guess, approximant='IMRPhenomXAS',
                    pn_phase_tol=.02, spline_degree=3,
-                   time_range=(-.1, .1), **maximization_kwargs):
+                   time_range=(-.1, .1), mchirp_range=None):
         """
         Constructor that finds a reference waveform solution
         automatically by maximizing the likelihood.
@@ -795,14 +813,16 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         ref_wf_finder = cls(event_data, waveform_generator, par_dic_0,
                             pn_phase_tol=pn_phase_tol,
                             spline_degree=spline_degree,
-                            time_range=time_range)
-        ref_wf_finder.find_bestfit_pars(**maximization_kwargs)
+                            time_range=time_range,
+                            mchirp_range=mchirp_range)
+        ref_wf_finder.find_bestfit_pars()
         return ref_wf_finder
 
-    def find_bestfit_pars(self, mchirp_range=None, seed=0):
+    def find_bestfit_pars(self, seed=0):
         """
-        Find a good fit solution with restricted parameters
-        (face-on, equal aligned spins).
+        Find a good fit solution with restricted parameters (face-on,
+        equal aligned spins). Additionally, use that to set
+        ``self.mchirp_range`` if it has not been set already.
         Will update `self.par_dic_0` in stages. The relative binning
         summary data (and `asd_drift`) will be updated after maximizing
         over intrinsic parameters.
@@ -817,15 +837,10 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         Parameters
         ----------
-        mchirp_range: 2-tuple with minimum and maximum detector-frame
-                      chirp mass (Msun), optional. If not given, will
-                      guess based on `self.par_dic_0`.
         seed: To initialize the random state of stochastic maximizers.
         """
         # Optimize intrinsic parameters, update relative binning summary:
-        mchirp_range = mchirp_range or gw_utils.estimate_mchirp_range(
-            gw_utils.mchirp(self.par_dic_0['m1'], self.par_dic_0['m2']))
-        self._optimize_m1m2s1zs2z_incoherently(mchirp_range, seed)
+        self._optimize_m1m2s1zs2z_incoherently(seed)
 
         # Use waveform to define reference detector, detector pair
         # and reference frequency:
@@ -836,6 +851,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self._optimize_t_refdet(kwargs['ref_det_name'])
         self._optimize_skyloc(kwargs['detector_pair'])
         self._optimize_phase_and_distance()
+
+        if not self._mchirp_range:
+            self.set_mchirp_range()
 
     @_check_bounds
     def lnlike_max_amp_phase_time(self, par_dic,
@@ -899,7 +917,21 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self._d_h_timeseries_weights = (self._get_summary_weights(d_h0_t)
                                         / np.conj(self._h0_fbin))
 
-    def _optimize_m1m2s1zs2z_incoherently(self, mchirp_range, seed):
+    def _updated_intrinsic(self, mchirp, eta, chieff):
+        """Return `self.par_dic_0` with updated m1, m2, s1z, s2z."""
+        m1, m2 = gw_utils.mchirpeta_to_m1m2(mchirp, eta)
+        intrinsic = dict(m1=m1, m2=m2, s1z=chieff, s2z=chieff)
+        return self.par_dic_0 | intrinsic
+
+    def _lnlike_incoherent(self, mchirp, eta, chieff):
+        """
+        Log likelihood maximized over amplitude, phase and time
+        incoherently across detectors.
+        """
+        par_dic = self._updated_intrinsic(mchirp, eta, chieff)
+        return self.lnlike_max_amp_phase_time(par_dic)
+
+    def _optimize_m1m2s1zs2z_incoherently(self, seed):
         """
         Optimize mchirp, eta and chieff by likelihood maximized over
         amplitude, phase and time incoherently across detectors.
@@ -907,31 +939,15 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         `m1, m2, s1z, s2z` with the new solution (this will update the
         relative-binning summary data).
         """
-        # eta_max < .25 to avoid q = 1 solutions that lack harmonics:
-        eta_range = (.05, .24)
-        chieff_range = (-.999, .999)
-
-        def get_updated_par_dic(mchirp, eta, chieff):
-            """Return `self.par_dic_0` with updated m1, m2, s1z, s2z."""
-            m1, m2 = gw_utils.mchirpeta_to_m1m2(mchirp, eta)
-            intrinsic = dict(m1=m1, m2=m2, s1z=chieff, s2z=chieff)
-            return self.par_dic_0 | intrinsic
-
-        def lnlike_incoherent(mchirp, eta, chieff):
-            """
-            Log likelihood maximized over amplitude, phase and time
-            incoherently across detectors.
-            """
-            par_dic = get_updated_par_dic(mchirp, eta, chieff)
-            return self.lnlike_max_amp_phase_time(par_dic)
-
         print(f'Searching incoherent solution for {self.event_data.eventname}')
 
         result = differential_evolution(
-            lambda mchirp_eta_chieff: -lnlike_incoherent(*mchirp_eta_chieff),
-            bounds=[mchirp_range, eta_range, chieff_range], seed=seed)
+            lambda mchirp_eta_chieff:
+                -self._lnlike_incoherent(*mchirp_eta_chieff),
+            bounds=[self.mchirp_range, self.eta_range, self.chieff_range],
+            seed=seed, init='sobol')
 
-        self.par_dic_0 = get_updated_par_dic(*result.x)
+        self.par_dic_0 = self._updated_intrinsic(*result.x)
         print(f'Set intrinsic parameters, lnL = {-result.fun}')
 
     def _optimize_t_refdet(self, ref_det_name):
@@ -946,7 +962,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         def lnlike_refdet(t_geocenter):
             return self.lnlike_max_amp_phase(
-                self.par_dic_0 | {'t_geocenter': t_geocenter}, det_inds=i_refdet)
+                self.par_dic_0 | {'t_geocenter': t_geocenter},
+                det_inds=i_refdet)
 
         tc_arr = np.arange(*self.time_range, 2**-10)
         ind = np.argmax([lnlike_refdet(tgeo) for tgeo in tc_arr])
@@ -969,7 +986,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                                             ref_det_name=detector_pair[0],
                                             t0_refdet=np.nan, dt0=np.nan)
         t0_refdet = time_transformer.inverse_transform(
-            **{key: self.par_dic_0[key] for key in ['t_geocenter', 'ra', 'dec']}
+            **{key: self.par_dic_0[key]
+               for key in ['t_geocenter', 'ra', 'dec']}
             )['t_refdet']  # Will hold t_refdet fixed
 
         def get_updated_par_dic(thetanet, phinet):
@@ -1012,6 +1030,36 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         print(f'Set polarization and distance, lnL = {max_lnl}')
 
+    def set_mchirp_range(self, lnl_drop=5., seed=0):
+        """
+        Return `(mchirp_min, mchirp_max)`, bounds for the chirp mass
+        that are deemed safe for parameter esimation bounds.
+        The criterion is that the incoherent likelihood maximized over
+        ``(eta, chieff)`` drops by at least `lnl_drop` of its value for
+        the reference waveform. Note this can give wrong results if the
+        reference waveform is not close to maximum likelihood, or the
+        likelihood is multimodal as a function of chirp mass.
+        """
+        lnl_0 = self.lnlike_max_amp_phase_time(self.par_dic_0)
+        mchirp_0 = gw_utils.mchirp(self.par_dic_0['m1'], self.par_dic_0['m2'])
+        mchirp_range = list(
+            gw_utils.estimate_mchirp_range(mchirp_0, snr=np.sqrt(2*lnl_0)))
+
+        def has_low_likelihood(mchirp):
+            lnl = -differential_evolution(
+                lambda eta_chieff:
+                    -self._lnlike_incoherent(mchirp, *eta_chieff),
+                bounds=[self.eta_range, self.chieff_range],
+                seed=seed, init='sobol').fun
+            return lnl < lnl_0 - lnl_drop
+
+        # Expand left and right edges of the range as necessary:
+        for i in (0, 1):
+            while not has_low_likelihood(mchirp_range[i]):
+                mchirp_range[i] += mchirp_range[i] - mchirp_0
+
+        self._mchirp_range = tuple(mchirp_range)
+
     def get_coordinate_system_kwargs(self):
         """
         Return dictionary with parameters commonly required to set up
@@ -1044,9 +1092,6 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             ref_det_name, self.par_dic_0['ra'], self.par_dic_0['dec'],
             self.event_data.tgps)[0]
         t0_refdet = self.par_dic_0['t_geocenter'] + delay
-        mchirp_range = gw_utils.estimate_mchirp_range(
-            gw_utils.mchirp(self.par_dic_0['m1'], self.par_dic_0['m2']),
-            snr=np.sqrt(2*lnl_by_detectors.sum()))
 
         return {'tgps': self.event_data.tgps,
                 'par_dic_0': self.par_dic_0,
@@ -1055,4 +1100,4 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                 'ref_det_name': ref_det_name,
                 'detector_pair': detector_pair,
                 't0_refdet': t0_refdet,
-                'mchirp_range': mchirp_range}
+                'mchirp_range': self.mchirp_range}
