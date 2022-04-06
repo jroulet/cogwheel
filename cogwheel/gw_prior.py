@@ -503,12 +503,29 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
     range_dic = {'d_hat': NotImplemented}
     conditioned_on = ['ra', 'dec', 'psi', 'iota', 'm1', 'm2']
 
-    def __init__(self, *, tgps, ref_det_name, d_hat_max=500, **kwargs):
+    def __init__(self, *, tgps, ref_det_name, d_hat_max=500,
+                 d_luminosity_max=np.inf, **kwargs):
+        """
+        Parameters
+        ----------
+        tgps: float
+            GPS time of the event, sets Earth orientation.
+
+        ref_det_name: str
+            Reference detector name, e.g. 'H' for Hanford.
+
+        d_hat_max: float
+            Upper bound for sampling `d_hat` (Mpc Msun^(-5/6)).
+
+        d_luminosity_max: float
+            Maximum luminosity distance allowed by the prior (Msun).
+        """
         self.range_dic = {'d_hat': (0, d_hat_max)}
         super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
 
         self.tgps = tgps
         self.ref_det_name = ref_det_name
+        self.d_luminosity_max = d_luminosity_max
 
     def _conversion_factor(self, ra, dec, psi, iota, m1, m2):
         """
@@ -535,8 +552,12 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
         This prior is not normalized, as that would need to know
         the masses' integration region.
         """
-        return np.log(self._conversion_factor(ra, dec, psi, iota, m1, m2)**3
-                      * d_hat**2)
+        d_luminosity = self.transform(
+            d_hat, ra, dec, psi, iota, m1, m2)['d_luminosity']
+
+        if d_luminosity > self.d_luminosity_max:
+            return -np.inf
+        return np.log(d_luminosity**3 / d_hat)
 
     def get_init_dict(self):
         """
@@ -545,7 +566,8 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
         """
         return {'tgps': self.tgps,
                 'ref_det_name': self.ref_det_name,
-                'd_hat_max': self.range_dic['d_hat'][1]}
+                'd_hat_max': self.range_dic['d_hat'][1],
+                'd_luminosity_max': self.d_luminosity_max}
 
 
 class UniformComovingVolumePrior(UniformLuminosityVolumePrior):
