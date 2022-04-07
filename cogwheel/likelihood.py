@@ -531,6 +531,10 @@ class RelativeBinningLikelihood(CBCLikelihood):
         `_coefficients` is an array of shape `(nbin, nbin)` whose i-th
         row are the B-spline coefficients for a spline that interpolates
         an array of zeros with a one in the i-th place, on `fbin`.
+        In other words, `_coefficients @ _basis_splines` is an array of
+        shape `(nbin, nrfft)` whose i-th row is a spline that interpolates
+        on `fbin` an array of zeros with a one in the i-th place; this
+        spline is evaluated on the RFFT grid.
         """
         nbin = len(self.fbin)
         coefficients = np.empty((nbin, nbin))
@@ -636,7 +640,8 @@ class RelativeBinningLikelihood(CBCLikelihood):
             projected_integrand[np.unravel_index(i, pre_shape)] \
                 = self._basis_splines @ arr_f
 
-        return 4*self.event_data.df * projected_integrand @ self._coefficients
+        return (4 * self.event_data.df
+                * projected_integrand @ self._coefficients.T)
 
     def _get_h_f_interpolated(self, par_dic, *, normalize=False,
                               by_m=False):
