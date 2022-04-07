@@ -1061,7 +1061,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         # Expand left and right edges of the range as necessary:
         for i in (0, 1):
             while not has_low_likelihood(mchirp_range[i]):
-                mchirp_range[i] += mchirp_range[i] - mchirp_0
+                mchirp_range[i] = gw_utils.estimate_mchirp_range.expand_range(
+                    mchirp_0, mchirp_range[i])
 
         self._mchirp_range = tuple(mchirp_range)
 
