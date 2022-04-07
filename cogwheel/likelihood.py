@@ -546,7 +546,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         self._coefficients = coefficients
 
         nrfft = len(self.event_data.frequencies)
-        basis_splines = scipy.sparse.lil_array((nbin, nrfft))
+        basis_splines = scipy.sparse.lil_matrix((nbin, nrfft))
         for i_bin in range(nbin):
             element_knots = knots[i_bin : i_bin + self.spline_degree + 2]
             basis_element = scipy.interpolate.BSpline.basis_element(
