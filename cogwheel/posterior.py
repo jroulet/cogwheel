@@ -133,8 +133,7 @@ class Posterior(utils.JSONMixin):
             func=lambda pars: -max(lnlike_unfolds(*pars)),
             bounds=list(zip(self.prior.cubemin,
                             self.prior.cubemin + self.prior.folded_cubesize)),
-            guesses=folded_par_vals_0,
-            seed=seed).x
+            guesses=folded_par_vals_0, seed=seed, init='sobol').x
         i_fold = np.argmax(lnlike_unfolds(*bestfit_folded))
 
         self.likelihood.par_dic_0 = self.prior.transform(
