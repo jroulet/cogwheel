@@ -168,24 +168,24 @@ class CBCLikelihood(utils.JSONMixin):
         # Use all available modes to get a waveform, then reset
         harmonic_modes = self.waveform_generator.harmonic_modes
         self.waveform_generator.harmonic_modes = None
-        normalized_h_f = self._get_h_f(par_dic, normalize=True)
+        # Undo previous asd_drift so result is independent of it
+        normalized_h_f = (self._get_h_f(par_dic, normalize=True)
+                          / self.asd_drift[:, np.newaxis])
         self.waveform_generator.harmonic_modes = harmonic_modes
 
         z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
         whitened_h_f = (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
                         * self.event_data.wht_filter * normalized_h_f)
-        # Undo previous asd_drift so nsamples is independent of it
-        nsamples = np.ceil(4 * self.asd_drift**-4
-                           * np.sum(np.abs(whitened_h_f)**4, axis=-1)
+        nsamples = np.ceil(4 * np.sum(np.abs(whitened_h_f)**4, axis=-1)
                            / (tol**2 * self.event_data.nfft)).astype(int)
 
         nsamples = np.minimum(nsamples, z_cos.shape[1])
 
-        asd_drift = self.asd_drift.copy()
+        asd_drift = np.ones_like(self.asd_drift)
         for i_det, n_s in enumerate(nsamples):
             places = (i_det, np.arange(-n_s//2, n_s//2))
-            asd_drift[i_det] *= safe_std(np.r_[z_cos[places], z_sin[places]],
-                                         **kwargs)
+            asd_drift[i_det] = safe_std(np.r_[z_cos[places], z_sin[places]],
+                                        **kwargs)
         return asd_drift
 
     def get_average_frequency(self, par_dic, ref_det_name=None, moment=1.):
@@ -277,7 +277,7 @@ class CBCLikelihood(utils.JSONMixin):
         """
         Return (z_cos, z_sin), the matched filter output of a normalized
         template and its Hilbert transform.
-        A constant asd drift correction per `self.asd_drift` is applied.
+        No asd drift correction is applied.
 
         Parameters
         ----------
@@ -287,8 +287,7 @@ class CBCLikelihood(utils.JSONMixin):
         ------
         z_cos, z_sin: each is a ndet x nfft time series.
         """
-        factor = (2 * self.event_data.nfft * self.event_data.df
-                  * self.asd_drift**-2)[:, np.newaxis]
+        factor = 2 * self.event_data.nfft * self.event_data.df
         z_cos = factor * np.fft.irfft(self.event_data.blued_strain
                                       * np.conj(normalized_h_f))
         z_sin = factor * np.fft.irfft(self.event_data.blued_strain
