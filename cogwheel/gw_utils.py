@@ -135,6 +135,35 @@ class _ChirpMassRangeEstimator:
         mchirp_max = self._mchirp_of_x(x + dx)
         return np.array([mchirp_min, mchirp_max])
 
+    def expand_range(self, mchirp_0, mchirp_bound, factor=2):
+        """
+        Auxiliary function to adjust one of the edges of the chirp mass
+        range.
+        Return a new value for the edge of the mchirp interval that is
+        expanded by `factor` (in terms of a reparametrization of chirp
+        mass in which the uncertainty is approximately homogeneous).
+        For example, if one decides that (say) the lower end of the
+        chirp mass range is overestimated, one can use this function to
+        get a more conservative (lower) value.
+
+        Parameters
+        ----------
+        mchirp_0: float
+            A central value of the chirp mass range (Msun), typically
+            the `mchirp` argument passed to ``__call__``.
+
+        mchirp_bound: float
+            Value of the chirp mass bound that we want to adjust (Msun).
+
+        factor: float
+            By how much to change `mchirp_bound` away from `mchirp_0`.
+            A value larger than 1 expands the range.
+        """
+        x_0 = self._x_of_mchirp(mchirp_0)
+        x_bound = self._x_of_mchirp(mchirp_bound)
+        new_x_bound = x_0 + factor * (x_bound - x_0)
+        return self._mchirp_of_x(new_x_bound)
+
 
 estimate_mchirp_range = _ChirpMassRangeEstimator()
 

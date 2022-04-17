@@ -166,6 +166,10 @@ class EventData(utils.JSONMixin):
 
     @staticmethod
     def _read_timeseries(filename, tgps):
+        """
+        Return a ``gwpy.timeseries.TimeSeries``, cropped around
+        the event to exclude any nans.
+        """
         try:
             timeseries = gwpy.timeseries.TimeSeries.read(filename)
         except ValueError:
@@ -197,9 +201,9 @@ class EventData(utils.JSONMixin):
         assert not any(np.isnan(timeseries))
         return timeseries
 
-    @classmethod
+    @staticmethod
     def _get_f_strain_whtfilter_from_timeseries(
-            cls, timeseries: gwpy.timeseries.TimeSeries, tgps: float,
+            timeseries: gwpy.timeseries.TimeSeries, tgps: float,
             signal_duration=15., wht_filter_duration=16.,
             fmin=15., df_taper=1., fmax=1024.):
         """

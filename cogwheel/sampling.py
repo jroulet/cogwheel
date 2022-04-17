@@ -27,6 +27,13 @@ class Sampler(abc.ABC, utils.JSONMixin):
     """
     Generic base class for sampling distributions.
     Subclasses implement the interface with specific sampling codes.
+
+    Parameter space folding is used; this means that some ("folded")
+    dimensions are sampled over half their original range, and a map to
+    the other half of the range is defined by reflecting about the
+    midpoint. The folded posterior distribution is defined as the sum of
+    the original posterior over all `2**n_folds` mapped points. This is
+    intended to reduce the number of modes in the posterior.
     """
     DEFAULT_RUN_KWARGS = {}  # Implemented by subclasses
     PROFILING_FILENAME = 'profiling'
@@ -323,7 +330,7 @@ class PyMultiNest(Sampler):
     def _lnprob_pymultinest(self, par_vals, *_):
         """
         Update the extra entries `par_vals[n_dim : n_params+1]` with the
-        log posterior evaulated at each unfold. Return the logarithm of
+        log posterior evaluated at each unfold. Return the logarithm of
         the folded posterior.
         """
         lnprobs = self._get_lnprobs(*[par_vals[i] for i in range(self._ndim)])
