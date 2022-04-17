@@ -105,7 +105,7 @@ class Posterior(utils.JSONMixin):
             prior_class = gw_prior.prior_registry[prior_class]
 
         ref_wf_finder = ReferenceWaveformFinder.from_event(
-            event, mchirp_guess)
+            event, mchirp_guess, approximant=approximant)
 
         likelihood = likelihood_class.from_reference_waveform_finder(
             ref_wf_finder, approximant=approximant, **likelihood_kwargs)
