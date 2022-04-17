@@ -1033,7 +1033,19 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self.par_dic_0['phi_ref'] += phase_bf / 2
         self.par_dic_0['d_luminosity'] /= amp_bf
 
-        print(f'Set polarization and distance, lnL = {max_lnl}')
+        # Decide between phi_ref or (phi_ref + pi) based on higher modes:
+        if (waveform.APPROXIMANTS[self.waveform_generator.approximant]
+                .harmonic_modes != [(2, 2)]):
+            wfg = self.waveform_generator
+            self.waveform_generator = wfg.reinstantiate(harmonic_modes=None)
+            par_dic_1 = self.par_dic_0 | {'phi_ref': self.par_dic_0['phi_ref']
+                                                     + np.pi}
+            # No relative binning (current weights are for (2, 2) mode)
+            if self.lnlike_fft(par_dic_1) > self.lnlike_fft(self.par_dic_0):
+                self.par_dic_0['phi_ref'] += np.pi
+            self.waveform_generator = wfg  # Reset to (2, 2)
+
+        print(f'Set phase and distance, lnL = {max_lnl}')
 
     def set_mchirp_range(self, lnl_drop=5., seed=0):
         """
