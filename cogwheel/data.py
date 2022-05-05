@@ -370,6 +370,13 @@ class EventData(utils.JSONMixin):
             filename = cls.get_filename(eventname)
         dic = {key: val[()] for key, val in np.load(filename).items()}
 
+        # Backward compatibility:
+        if 'psd' in dic:
+            assert 'wht_filter' not in dic
+            dic['wht_filter'] = 1 / dic.pop('psd')
+        for deprecated_key in {'mchirp_range', 'q_min'} & dic.keys():
+            del dic[deprecated_key]
+
         return cls(**dic)
 
     @staticmethod
