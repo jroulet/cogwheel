@@ -277,7 +277,7 @@ class CBCLikelihood(utils.JSONMixin):
         """
         Return (z_cos, z_sin), the matched filter output of a normalized
         template and its Hilbert transform.
-        No asd drift correction is applied.
+        No ASD drift correction is applied.
 
         Parameters
         ----------
@@ -1044,15 +1044,19 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         print(f'Set phase and distance, lnL = {max_lnl}')
 
-    def set_mchirp_range(self, lnl_drop=5., seed=0):
+    def set_mchirp_range(self, lnl_drop=5., max_doublings=2, seed=0):
         """
-        Return `(mchirp_min, mchirp_max)`, bounds for the chirp mass
-        that are deemed safe for parameter esimation bounds.
+        Set self._mchirp_range as `(mchirp_min, mchirp_max)`, bounds for
+        the chirp mass that are deemed safe for parameter esimation
+        bounds.
         The criterion is that the incoherent likelihood maximized over
         ``(eta, chieff)`` drops by at least `lnl_drop` of its value for
         the reference waveform. Note this can give wrong results if the
         reference waveform is not close to maximum likelihood, or the
         likelihood is multimodal as a function of chirp mass.
+        The chirp-mass range is expanded (roughly doubled) a maximum
+        number of times given by `max_doublings`, if this is reached a
+        warning is issued.
         """
         lnl_0 = self.lnlike_max_amp_phase_time(self.par_dic_0)
         mchirp_0 = gw_utils.mchirp(self.par_dic_0['m1'], self.par_dic_0['m2'])
@@ -1060,6 +1064,11 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             gw_utils.estimate_mchirp_range(mchirp_0, snr=np.sqrt(2*lnl_0)))
 
         def has_low_likelihood(mchirp):
+            """
+            Return boolean, whether the incoherent likelihood maximized
+            over ``(eta, chieff)`` drops by at least `lnl_drop` of its
+            value for the reference waveform.
+            """
             lnl = -differential_evolution(
                 lambda eta_chieff:
                     -self._lnlike_incoherent(mchirp, *eta_chieff),
@@ -1069,9 +1078,15 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         # Expand left and right edges of the range as necessary:
         for i in (0, 1):
+            n_doublings = 0
             while not has_low_likelihood(mchirp_range[i]):
+                if n_doublings >= max_doublings:
+                    warnings.warn('Reached maximum `mchirp_range` expansions.')
+                    break
+
                 mchirp_range[i] = gw_utils.estimate_mchirp_range.expand_range(
                     mchirp_0, mchirp_range[i])
+                n_doublings += 1
 
         self._mchirp_range = tuple(mchirp_range)
 
