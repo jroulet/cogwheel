@@ -783,16 +783,30 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         event_data: Instance of `data.EventData`, or string with event
                     name (must correspond to a file in `data.DATADIR`),
                     or path to ``npz`` file with `EventData` instance.
-        mchirp_guess: float, estimate of the detector-frame chirp mass
-                      of the signal.
-        approximant: str, approximant name.
+
+        mchirp_guess: float
+            Estimate of the detector-frame chirp mass of the signal.
+
+        approximant: str
+            Approximant name.
+
         pn_phase_tol: float
             Tolerance in the post-Newtonian phase [rad] used for
             defining frequency bins.
-        spline_degree: int, degree of the spline used to interpolate the
-                       ratio between waveform and reference waveform for
-                       relative binning.
-        **maximization_kwargs: passed to `self.find_bestfit_pars()`.
+
+        spline_degree: int
+            Degree of the spline used to interpolate the ratio between
+            waveform and reference waveform for relative binning.
+
+        time_range: (float, float)
+            Range of arrival times relative to ``tgps`` to explore (s).
+            (``tgps`` is given by the ``data.EventData`` instance
+            created from `event`.)
+
+        mchirp_range: (float, float), optional.
+            Range of chirp mass to explore (Msun). If not provided, an
+            automatic choice will be made (see method
+            ``set_mchirp_range``).
         """
         if isinstance(event, data.EventData):
             event_data = event
