@@ -168,24 +168,24 @@ class CBCLikelihood(utils.JSONMixin):
         # Use all available modes to get a waveform, then reset
         harmonic_modes = self.waveform_generator.harmonic_modes
         self.waveform_generator.harmonic_modes = None
-        normalized_h_f = self._get_h_f(par_dic, normalize=True)
+        # Undo previous asd_drift so result is independent of it
+        normalized_h_f = (self._get_h_f(par_dic, normalize=True)
+                          / self.asd_drift[:, np.newaxis])
         self.waveform_generator.harmonic_modes = harmonic_modes
 
         z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
         whitened_h_f = (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
                         * self.event_data.wht_filter * normalized_h_f)
-        # Undo previous asd_drift so nsamples is independent of it
-        nsamples = np.ceil(4 * self.asd_drift**-4
-                           * np.sum(np.abs(whitened_h_f)**4, axis=-1)
+        nsamples = np.ceil(4 * np.sum(np.abs(whitened_h_f)**4, axis=-1)
                            / (tol**2 * self.event_data.nfft)).astype(int)
 
         nsamples = np.minimum(nsamples, z_cos.shape[1])
 
-        asd_drift = self.asd_drift.copy()
+        asd_drift = np.ones_like(self.asd_drift)
         for i_det, n_s in enumerate(nsamples):
             places = (i_det, np.arange(-n_s//2, n_s//2))
-            asd_drift[i_det] *= safe_std(np.r_[z_cos[places], z_sin[places]],
-                                         **kwargs)
+            asd_drift[i_det] = safe_std(np.r_[z_cos[places], z_sin[places]],
+                                        **kwargs)
         return asd_drift
 
     def get_average_frequency(self, par_dic, ref_det_name=None, moment=1.):
@@ -277,7 +277,7 @@ class CBCLikelihood(utils.JSONMixin):
         """
         Return (z_cos, z_sin), the matched filter output of a normalized
         template and its Hilbert transform.
-        A constant asd drift correction per `self.asd_drift` is applied.
+        No ASD drift correction is applied.
 
         Parameters
         ----------
@@ -287,8 +287,7 @@ class CBCLikelihood(utils.JSONMixin):
         ------
         z_cos, z_sin: each is a ndet x nfft time series.
         """
-        factor = (2 * self.event_data.nfft * self.event_data.df
-                  * self.asd_drift**-2)[:, np.newaxis]
+        factor = 2 * self.event_data.nfft * self.event_data.df
         z_cos = factor * np.fft.irfft(self.event_data.blued_strain
                                       * np.conj(normalized_h_f))
         z_sin = factor * np.fft.irfft(self.event_data.blued_strain
@@ -325,7 +324,7 @@ class CBCLikelihood(utils.JSONMixin):
             fig = self._setup_data_figure(figsize)
         axes = fig.get_axes()
 
-        time = self.event_data.t - self.event_data.tcoarse
+        time = self.event_data.times - self.event_data.tcoarse
         data_t_wht = self._get_whitened_td(self.event_data.strain)
         wf_t_wht = self._get_whitened_td(self._get_h_f(par_dic, by_m=by_m))
         if by_m:
@@ -355,7 +354,7 @@ class CBCLikelihood(utils.JSONMixin):
         """
         Take a frequency-domain strain defined on the FFT grid
         `self.event_data.frequencies` and return a whitened time domain
-        strain defined on `self.event_data.t`.
+        strain defined on `self.event_data.times`.
         """
         return (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
                 * np.fft.irfft(strain_f * self.event_data.wht_filter))
@@ -462,10 +461,10 @@ class RelativeBinningLikelihood(CBCLikelihood):
             pn_exponents += [5/3]
         pn_exponents = np.array(pn_exponents)
 
-        pn_coeff_rng = 2*np.pi / np.abs(self.event_data.fmin**pn_exponents
-                                        - self.event_data.fmax**pn_exponents)
+        pn_coeff_rng = 2*np.pi / np.abs(np.subtract(
+            *self.event_data.fbounds[:, np.newaxis] ** pn_exponents))
 
-        f_arr = np.linspace(self.event_data.fmin, self.event_data.fmax, 10000)
+        f_arr = np.linspace(*self.event_data.fbounds, 10000)
 
         diff_phase = np.sum([np.sign(exp) * rng * f_arr**exp
                              for rng, exp in zip(pn_coeff_rng, pn_exponents)],
@@ -927,9 +926,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         return lnl, amp_bf, phase_bf
 
     def _set_summary(self):
-        """Set usual summary data plus `_d_h_timeseries_weights`."""
+        """Set usual summary data plus ``_d_h_timeseries_weights``."""
         super()._set_summary()
-        times = np.arange(*self.time_range, self.event_data.dt
+        times = np.arange(*self.time_range, 2**-10
                          ).reshape(-1, 1, 1, 1)  # time, m, det, freq
         shifts = np.exp(2j*np.pi * times * self.event_data.frequencies)
         d_h0_t = self.event_data.blued_strain * self._h0_f.conj() * shifts
@@ -1047,17 +1046,31 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self.par_dic_0['phi_ref'] += phase_bf / 2
         self.par_dic_0['d_luminosity'] /= amp_bf
 
-        print(f'Set polarization and distance, lnL = {max_lnl}')
+        # Decide between phi_ref or (phi_ref + pi) based on higher modes:
+        self.waveform_generator.harmonic_modes = None  # Activate all modes
+        if self.waveform_generator.harmonic_modes != [(2, 2)]:
+            par_dic_1 = self.par_dic_0 | {'phi_ref': self.par_dic_0['phi_ref']
+                                                     + np.pi}
+            # No relative binning (current weights are for (2, 2) mode)
+            if self.lnlike_fft(par_dic_1) > self.lnlike_fft(self.par_dic_0):
+                self.par_dic_0['phi_ref'] += np.pi
+            self.waveform_generator.harmonic_modes = [(2, 2)]  # Reset
 
-    def set_mchirp_range(self, lnl_drop=5., seed=0):
+        print(f'Set phase and distance, lnL = {max_lnl}')
+
+    def set_mchirp_range(self, lnl_drop=5., max_doublings=2, seed=0):
         """
-        Return `(mchirp_min, mchirp_max)`, bounds for the chirp mass
-        that are deemed safe for parameter esimation bounds.
+        Set self._mchirp_range as `(mchirp_min, mchirp_max)`, bounds for
+        the chirp mass that are deemed safe for parameter esimation
+        bounds.
         The criterion is that the incoherent likelihood maximized over
         ``(eta, chieff)`` drops by at least `lnl_drop` of its value for
         the reference waveform. Note this can give wrong results if the
         reference waveform is not close to maximum likelihood, or the
         likelihood is multimodal as a function of chirp mass.
+        The chirp-mass range is expanded (roughly doubled) a maximum
+        number of times given by `max_doublings`, if this is reached a
+        warning is issued.
         """
         lnl_0 = self.lnlike_max_amp_phase_time(self.par_dic_0)
         mchirp_0 = gw_utils.mchirp(self.par_dic_0['m1'], self.par_dic_0['m2'])
@@ -1065,6 +1078,11 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             gw_utils.estimate_mchirp_range(mchirp_0, snr=np.sqrt(2*lnl_0)))
 
         def has_low_likelihood(mchirp):
+            """
+            Return boolean, whether the incoherent likelihood maximized
+            over ``(eta, chieff)`` drops by at least `lnl_drop` of its
+            value for the reference waveform.
+            """
             lnl = -differential_evolution(
                 lambda eta_chieff:
                     -self._lnlike_incoherent(mchirp, *eta_chieff),
@@ -1074,9 +1092,15 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         # Expand left and right edges of the range as necessary:
         for i in (0, 1):
+            n_doublings = 0
             while not has_low_likelihood(mchirp_range[i]):
+                if n_doublings >= max_doublings:
+                    warnings.warn('Reached maximum `mchirp_range` expansions.')
+                    break
+
                 mchirp_range[i] = gw_utils.estimate_mchirp_range.expand_range(
                     mchirp_0, mchirp_range[i])
+                n_doublings += 1
 
         self._mchirp_range = tuple(mchirp_range)
 
