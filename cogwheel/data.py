@@ -96,7 +96,7 @@ class EventData(utils.JSONMixin):
     @classmethod
     def from_timeseries(
             cls, filenames, eventname, detector_names, tgps,
-            signal_duration=16., wht_filter_duration=32., fmin=15.,
+            t_before=16., t_after=16., wht_filter_duration=32., fmin=15.,
             df_taper=1., fmax=1024.):
         """
         Parameters
@@ -115,11 +115,15 @@ class EventData(utils.JSONMixin):
         tgps: float
             GPS time of the event (s).
 
-        signal_duration: float
-            Estimated lower bound for the duration of the signal (s).
+        t_before, t_after: float
+            Number of seconds of valid data (i.e. without edge effects)
+            to keep before/after `tgps`. The total segment of data will
+            have extra duration of ``wht_filter_duration / 2`` seconds
+            to either side.
 
         wht_filter_duration: float
-            Desired impulse response length of the whitening filter (s).
+            Desired impulse response length of the whitening filter (s),
+            will be ``wht_filter_duration / 2`` seconds to either side.
             Note: the whitening filter will only be approximately FIR.
             This is also the duration of each chunk in which the
             individual PSDs are measured for Welch, and the extent of
@@ -127,8 +131,8 @@ class EventData(utils.JSONMixin):
 
         fmin: float or sequence of floats
             Minimum frequency at which the whitening filter will have
-            support (Hz). It is important for performance. Multiple
-            values can be passed, one for each detector.
+            support (Hz). Multiple values can be passed, one for each
+            detector.
 
         df_taper: float
             Whitening filter is highpassed. See ``highpass_filter``.
@@ -150,7 +154,7 @@ class EventData(utils.JSONMixin):
             timeseries = cls._read_timeseries(filename, tgps)
             f_strain_whtfilter_tcoarses.append(
                 cls._get_f_strain_whtfilter_from_timeseries(
-                    timeseries, tgps, signal_duration, wht_filter_duration,
+                    timeseries, tgps, t_before, t_after, wht_filter_duration,
                     fmin_, df_taper, fmax))
         (frequencies, *f_copies), strain, wht_filter, (tcoarse, *t_copies) = (
             np.array(arr) for arr in zip(*f_strain_whtfilter_tcoarses))
@@ -204,7 +208,7 @@ class EventData(utils.JSONMixin):
     @staticmethod
     def _get_f_strain_whtfilter_from_timeseries(
             timeseries: gwpy.timeseries.TimeSeries, tgps: float,
-            signal_duration=15., wht_filter_duration=16.,
+            t_before=16., t_after=16., wht_filter_duration=16.,
             fmin=15., df_taper=1., fmax=1024.):
         """
         Parameters
@@ -215,8 +219,11 @@ class EventData(utils.JSONMixin):
 
         tgps: float, GPS time of event.
 
-        signal_duration: float
-            Estimated lower bound for the duration of the signal (s).
+        t_before, t_after: float
+            Number of seconds of valid data (i.e. without edge effects)
+            to keep before/after `tgps`. The total segment of data will
+            have extra duration of ``wht_filter_duration / 2`` seconds
+            to either side.
 
         wht_filter_duration: float
             Desired impulse response length of the whitening filter (s).
@@ -241,9 +248,8 @@ class EventData(utils.JSONMixin):
 
         timeseries = timeseries.detrend()
 
-        segment_duration = utils.next_pow_2(signal_duration
-                                            + 2 * wht_filter_duration)
-        tcoarse = (segment_duration + signal_duration) / 2
+        segment_duration = wht_filter_duration + t_before + t_after
+        tcoarse = wht_filter_duration / 2 + t_before
         t_start = tgps - tcoarse
         segment = timeseries.pad(int(segment_duration / timeseries.dt.value)
                                 ).crop(t_start, t_start + segment_duration)
@@ -280,8 +286,8 @@ class EventData(utils.JSONMixin):
             raise DataError('Event too close to the edge of valid data. '
                             'Consider reducing `wht_filter_duration`')
 
-        segment[first_valid_ind : first_valid_ind + ntaper] *= taper
-        segment[last_valid_ind - ntaper + 1 : last_valid_ind + 1] *= taper[::-1]
+        segment[first_valid_ind : first_valid_ind+ntaper] *= taper
+        segment[last_valid_ind-ntaper+1 : last_valid_ind+1] *= taper[::-1]
 
         data_fd = np.fft.rfft(segment.value)
 
