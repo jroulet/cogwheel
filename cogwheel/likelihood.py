@@ -621,16 +621,17 @@ class RelativeBinningLikelihood(CBCLikelihood):
 
         Parameters
         ----------
-        integrand: g(f) in the above notation (the oscillatory part of
-                   the integrand), array whose last axis corresponds to
-                   the fft frequency grid.
+        integrand: array of shape (..., nrfft)
+            g(f) in the above notation (the oscillatory part of the
+            integrand), array whose last axis corresponds to the FFT
+            frequency grid.
 
         Return
         ------
-        summary_weights: array shaped like `integrand` except the last
-                         axis now correponds to the frequency bins.
+        summary_weights: array of shape (..., nbin)
+            array shaped like `integrand` except the last axis now
+            correponds to the frequency bins.
         """
-
         # Broadcast manually
         *pre_shape, nrfft = integrand.shape
         shape = pre_shape + [len(self.fbin)]
