@@ -217,7 +217,8 @@ class EventData(utils.JSONMixin):
             Object containing single-detector data. Needs to be long
             enough to measure the PSD with the Welch method.
 
-        tgps: float, GPS time of event.
+        tgps: float
+            GPS time of event.
 
         t_before, t_after: float
             Number of seconds of valid data (i.e. without edge effects)
@@ -444,5 +445,6 @@ def download_timeseries(eventname, outdir=None, tgps=None,
         except ValueError:  # That detector has no data
             pass
         else:
-            if not np.isnan(timeseries[np.searchsorted(timeseries.times, tgps)]):
+            if not np.isnan(timeseries[np.searchsorted(timeseries.times,
+                                                       tgps)]):
                 timeseries.write(path)
