@@ -208,7 +208,7 @@ class EventData(utils.JSONMixin):
     @staticmethod
     def _get_f_strain_whtfilter_from_timeseries(
             timeseries: gwpy.timeseries.TimeSeries, tgps: float,
-            t_before=16., t_after=16., wht_filter_duration=16.,
+            t_before=16., t_after=16., wht_filter_duration=32.,
             fmin=15., df_taper=1., fmax=1024.):
         """
         Parameters
