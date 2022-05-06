@@ -2,6 +2,7 @@
 
 import inspect
 import itertools
+import warnings
 from functools import wraps
 import numpy as np
 from scipy import special, stats
@@ -37,44 +38,6 @@ def std_from_median(arr):
     """
     mad = np.median(np.abs(arr - np.median(arr)))
     return mad / (np.sqrt(2) * special.erfinv(.5))
-
-
-def safe_std(arr, max_contiguous_low=100, expected_high=1.,
-             reject_nearby=10):
-    """
-    Compute the standard deviation of a real array rejecting outliers.
-    Outliers may be:
-      * Values too high to be likely to come from white Gaussian noise.
-      * A contiguous array of values too low to come from white Gaussian
-        noise (likely from a hole).
-    Once outliers are identified, an extra amount of nearby samples
-    is rejected for safety.
-    max_contiguous_low: How many contiguous samples below 1 sigma to
-                        allow.
-    expected_high: Number of times we expect to trigger in white
-                   Gaussian noise (used to set the clipping threshold).
-    reject_nearby: By how many samples to expand holes for safety.
-    """
-    good = np.ones(len(arr), dtype=bool)
-
-    # Reject long stretches of low values
-    above_one_sigma = np.abs(arr) > 1
-    low_edges = hole_edges(above_one_sigma)
-    too_long = np.diff(low_edges)[:, 0] > max_contiguous_low
-    for left, right in low_edges[too_long]:
-        good[left : right] = False
-
-    # Reject high values
-    std_est = std_from_median(arr[good])
-    thresh = std_est * stats.chi.isf(expected_high / np.count_nonzero(good), 1)
-    good[np.abs(arr) > thresh] = False
-
-    # Reject extra nearby samples
-    bad_edges = hole_edges(good)
-    for left, right in bad_edges:
-        good[max(0, left-reject_nearby) : right+reject_nearby] = False
-
-    return np.std(arr[good])
 
 
 def _check_bounds(lnlike_func):
@@ -184,9 +147,48 @@ class CBCLikelihood(utils.JSONMixin):
         asd_drift = np.ones_like(self.asd_drift)
         for i_det, n_s in enumerate(nsamples):
             places = (i_det, np.arange(-n_s//2, n_s//2))
-            asd_drift[i_det] = safe_std(np.r_[z_cos[places], z_sin[places]],
-                                        **kwargs)
+            asd_drift[i_det] = self._safe_std(
+                np.r_[z_cos[places], z_sin[places]], **kwargs)
         return asd_drift
+
+    def _safe_std(self, arr, max_contiguous_low=100, expected_high=1.,
+                  reject_nearby=.5):
+        """
+        Compute the standard deviation of a real array rejecting outliers.
+        Outliers may be:
+          * Values too high to be likely to come from white Gaussian noise.
+          * A contiguous array of values too low to come from white Gaussian
+            noise (likely from a hole).
+        Once outliers are identified, an extra amount of nearby samples
+        is rejected for safety.
+        max_contiguous_low: How many contiguous samples below 1 sigma to
+                            allow.
+        expected_high: Number of times we expect to trigger in white
+                       Gaussian noise (used to set the clipping threshold).
+        reject_nearby: By how many seconds to expand holes for safety.
+        """
+        good = np.ones(len(arr), dtype=bool)
+
+        # Reject long stretches of low values
+        above_one_sigma = np.abs(arr) > 1
+        low_edges = hole_edges(above_one_sigma)
+        too_long = np.diff(low_edges)[:, 0] > max_contiguous_low
+        for left, right in low_edges[too_long]:
+            good[left : right] = False
+
+        # Reject high values
+        std_est = std_from_median(arr[good])
+        thresh = std_est * stats.chi.isf(
+            expected_high / np.count_nonzero(good), 1)
+        good[np.abs(arr) > thresh] = False
+
+        # Reject extra nearby samples
+        bad_edges = hole_edges(good)
+        for left, right in bad_edges:
+            reject_inds = int(reject_nearby*2*self.event_data.frequencies[-1])
+            good[max(0, left-reject_inds) : right+reject_inds] = False
+
+        return np.std(arr[good])
 
     def get_average_frequency(self, par_dic, ref_det_name=None, moment=1.):
         """

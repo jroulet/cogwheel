@@ -329,7 +329,7 @@ class EventData(utils.JSONMixin):
         norm = plt.Normalize(0, vmax)
         fig, axes = plt.subplots(len(self.detector_names),
                                  sharex=True, sharey=True,
-                                 gridspec_kw={'hspace': .1, 'wspace': .1})
+                                 gridspec_kw={'hspace': .1})
         for i, ax in enumerate(axes):
             wht_data_td = (np.fft.irfft(self.strain[i] * self.wht_filter[i])
                            * np.sqrt(2 * f_sampling))
