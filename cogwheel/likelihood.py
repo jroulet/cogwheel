@@ -2,6 +2,7 @@
 
 import inspect
 import itertools
+import warnings
 from functools import wraps
 import numpy as np
 from scipy import special, stats
