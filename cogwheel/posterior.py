@@ -153,6 +153,10 @@ class Posterior(utils.JSONMixin):
         return utils.get_eventdir(parentdir, self.prior.__class__.__name__,
                                   self.likelihood.event_data.eventname)
 
+    def __repr__(self):
+        return (f'{self.__class__.__name__}({self.prior.__class__.__name__}, '
+                f'{self.likelihood.event_data.eventname})')
+
 
 _KWARGS_FILENAME = 'kwargs.json'
 
