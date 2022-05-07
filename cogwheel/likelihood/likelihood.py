@@ -1,4 +1,9 @@
-"""Compute likelihood of GW events."""
+"""Compute likelihood of GW events.
+
+A class ``CBCLikelihood`` is defined. This can be used to compute
+likelihoods without resorting to the relative binning algorithm (slow)
+and is subclassed by ``RelativeBinningLikelihood``.
+"""
 import inspect
 from functools import wraps
 import numpy as np
@@ -60,14 +65,14 @@ class CBCLikelihood(utils.JSONMixin):
     methods for computing likelihood as a function of compact binary
     coalescence parameters without using relative binning, and also the
     asd-drift correction.
-    Subclassed by `ReferenceWaveformFinder` and
-    `RelativeBinningLikelihood`.
+    Subclassed by ``RelativeBinningLikelihood``.
     """
     def __init__(self, event_data, waveform_generator):
         """
         Parameters
         ----------
         event_data: Instance of `data.EventData`.
+
         waveform_generator: Instance of `waveform.WaveformGenerator`.
         """
         # Check consistency between `event_data` and `waveform_generator`:
