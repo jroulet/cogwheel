@@ -48,7 +48,7 @@ def get_random_par_dic(aligned_spins=False, tides=False):
         par_dic['l1'], par_dic['l2'] = np.random.uniform(0, 1000, 2)
 
     par_dic['iota'] = np.arccos(np.random.uniform(-1, 1))
-    par_dic['vphi'] = np.random.uniform(0, 2*np.pi)
+    par_dic['phi_ref'] = np.random.uniform(0, 2*np.pi)
 
     par_dic['ra'] = np.random.uniform(0, 2*np.pi)
     par_dic['dec'] = np.arcsin(np.random.uniform(-1, 1))
@@ -68,9 +68,9 @@ def get_random_par_dic(aligned_spins=False, tides=False):
 class WaveformGeneratorTestCase(TestCase):
     """Class to test `WaveformGenerator`."""
     @staticmethod
-    def test_vphi_and_distance():
+    def test_phi_ref_and_distance():
         """
-        Test that `WaveformGenerator` correctly implements `vphi` and
+        Test that `WaveformGenerator` correctly implements `phi_ref` and
         `d_luminosity` as fast parameters.
         """
         for approximant, app_metadata in waveform.APPROXIMANTS.items():
