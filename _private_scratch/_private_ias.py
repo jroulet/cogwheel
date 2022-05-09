@@ -394,7 +394,7 @@ class EventMetadata(data.utils.JSONMixin):
         dic |= get_f_strain_psd_dic(triggerlists, use_tgps,
                                     self.tcoarse, self.t_interval)
         dic['wht_filter'] = (data.highpass_filter(dic['frequencies'])
-                             / dic.pop('psd'))
+                             / np.sqrt(dic.pop('psd')))
 
         return data.EventData(**dic)
 
