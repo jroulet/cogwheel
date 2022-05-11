@@ -36,7 +36,7 @@ def _construct_z_of_d_luminosity(cosmology=Planck18, z_max=10.):
     return z_of_d_luminosity, dz_dd_luminosity
 
 
-z_of_d_luminosity, dz_dd_luminosity = _construct_z_of_d_luminosity()
+z_of_d_luminosity, _dz_dd_luminosity = _construct_z_of_d_luminosity()
 
 
 def comoving_to_luminosity_diff_vt_ratio(d_luminosity):
@@ -52,5 +52,5 @@ def comoving_to_luminosity_diff_vt_ratio(d_luminosity):
     distance.
     """
     z = z_of_d_luminosity(d_luminosity)
-    dz_dd = dz_dd_luminosity(d_luminosity)
+    dz_dd = _dz_dd_luminosity(d_luminosity)
     return (1+z)**-4 * (1 - d_luminosity / (1+z) * dz_dd)
