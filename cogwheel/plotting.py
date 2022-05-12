@@ -376,7 +376,8 @@ class CornerPlot:
             bbox_to_anchor=(1, 1), frameon=False,
             loc='upper right', borderaxespad=0, borderpad=0)
 
-    def scatter_points(self, scatter_points, colors=None, **kwargs):
+    def scatter_points(self, scatter_points, colors=None,
+                       adjust_lims=False, **kwargs):
         """
         Add scatter points to an existing corner plot.
         For every point passed, one vertical line in the diagonal panels
@@ -392,6 +393,10 @@ class CornerPlot:
         colors: iterable, optional
             Colors corresponding to each scatter point passed.
 
+        adjust_lims: bool
+            Whether to adjust x and y limits in the case that the scatter
+            points lie outside or very near the current limits.
+
         **kwargs:
             Passed to ``matplotlib.axes.Axes.scatter``.
         """
@@ -404,6 +409,8 @@ class CornerPlot:
 
         colors = colors or PlotStyle._gen_colors(len(scatter_points))
 
+        lims = self.get_current_lims()
+
         for color, (_, point) in zip(colors, scatter_points.iterrows()):
             for ax, par in zip(np.diagonal(self.axes), self.params):
                 ax.axvline(point[par], color=color)
@@ -412,6 +419,9 @@ class CornerPlot:
                 self.axes[row][col].scatter(point[self.params[col]],
                                             point[self.params[row]],
                                             color=color, **kwargs)
+
+        if not adjust_lims:
+            self.set_lims(lims)
 
     def _plot_2d(self, xpar, ypar):
         ax = self.axes[self.params.index(ypar), self.params.index(xpar)]
@@ -514,7 +524,7 @@ class CornerPlot:
             n_params, n_params, squeeze=False, sharex='col', sharey='row',
             **self._get_subplot_kwargs(max_figsize, max_subplot_size))
 
-        # # Diagonal:
+        # Diagonal:
         for ax in np.diagonal(self.axes):
             ax.get_shared_y_axes().remove(ax)
             ax.tick_params(axis='x', direction='in', top=True)
@@ -528,10 +538,8 @@ class CornerPlot:
         for ax in self.axes[np.tril_indices_from(self.axes, -1)]:
             ax.tick_params(which='both', direction='in', right=True, top=True,
                            rotation=45)
-
             for axis in ax.xaxis, ax.yaxis:
                 axis.set_major_locator(mpl.ticker.MaxNLocator(max_n_ticks))
-
 
         for i, par in enumerate(self.params):
             label = self.latex_labels.with_units(par)
@@ -547,15 +555,16 @@ class CornerPlot:
             max_figsize - 2 * self.MARGIN_INCHES)
 
         side = box_side + 2 * self.MARGIN_INCHES
+        margin_fraction = self.MARGIN_INCHES / side
 
         return {'figsize': (side, side),
                 'gridspec_kw': dict(wspace=space, hspace=space,
-                                    bottom=self.MARGIN_INCHES / side,
-                                    top=1-self.MARGIN_INCHES / side,
-                                    left=self.MARGIN_INCHES / side,
-                                    right=1-self.MARGIN_INCHES / side)}
+                                    bottom=margin_fraction,
+                                    top=1 - margin_fraction,
+                                    left=margin_fraction,
+                                    right=1 - margin_fraction)}
 
-    def get_lims(self, tightness=.99):
+    def get_lims(self, tightness=1.):
         """
         Return dictionary of the form ``{par: (vmin, vmax)}`` with
         limits for plotting for all parameters in ``self.params``.
@@ -569,6 +578,14 @@ class CornerPlot:
         """
         return {par: self.get_median_and_central_interval(par, tightness)[1:]
                 for par in self.params}
+
+    def get_current_lims(self):
+        """
+        Return dictionary of the form ``{par: (vmin, vmax)}`` with
+        current plot limits for all parameters in ``self.params``.
+        """
+        return {par: ax.get_xlim()
+                for par, ax in zip(self.params, self.axes[-1])}
 
     def set_lims(self, lims: dict):
         """
@@ -684,7 +701,7 @@ class MultiCornerPlot:
         if tightness:
             self.set_lims(self.get_lims(tightness))
 
-    def get_lims(self, tightness):
+    def get_lims(self, tightness=1.):
         """
         Return dictionary of the form ``{par: (vmin, vmax)}`` with
         limits for plotting for all parameters in ``self.params``.
@@ -717,8 +734,8 @@ class MultiCornerPlot:
         """
         self.corner_plots[0].set_lims(lims)
 
-
-    def scatter_points(self, scatter_points, colors=None, **kwargs):
+    def scatter_points(self, scatter_points, colors=None,
+                       adjust_lims=False, **kwargs):
         """
         Add scatter points to an existing corner plot.
         For every point passed, one vertical line in the diagonal panels
@@ -734,7 +751,12 @@ class MultiCornerPlot:
         colors: iterable, optional
             Colors corresponding to each scatter point passed.
 
+        adjust_lims: bool
+            Whether to adjust x and y limits in the case that the scatter
+            points lie outside or very near the current limits.
+
         **kwargs:
             Passed to ``matplotlib.axes.Axes.scatter``.
         """
-        self.corner_plots[0].scatter_points(scatter_points, colors, **kwargs)
+        self.corner_plots[0].scatter_points(scatter_points, colors,
+                                            adjust_lims, **kwargs)
