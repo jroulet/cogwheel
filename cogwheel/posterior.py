@@ -78,7 +78,8 @@ class Posterior(utils.JSONMixin):
     def from_event(
             cls, event, mchirp_guess, approximant, prior_class,
             likelihood_class=RelativeBinningLikelihood,
-            prior_kwargs=None, likelihood_kwargs=None):
+            prior_kwargs=None, likelihood_kwargs=None,
+            ref_wf_finder_kwargs=None):
         """
         Instantiate a `Posterior` class from the strain data.
         Automatically find a good fit solution for relative binning.
@@ -100,12 +101,13 @@ class Posterior(utils.JSONMixin):
         """
         prior_kwargs = prior_kwargs or {}
         likelihood_kwargs = likelihood_kwargs or {}
-
+        ref_wf_finder_kwargs = ref_wf_finder_kwargs or {}
         if isinstance(prior_class, str):
             prior_class = gw_prior.prior_registry[prior_class]
 
         ref_wf_finder = ReferenceWaveformFinder.from_event(
-            event, mchirp_guess)
+            event, mchirp_guess, approximant=approximant,
+            **ref_wf_finder_kwargs)
 
         likelihood = likelihood_class.from_reference_waveform_finder(
             ref_wf_finder, approximant=approximant, **likelihood_kwargs)
@@ -150,6 +152,10 @@ class Posterior(utils.JSONMixin):
         """
         return utils.get_eventdir(parentdir, self.prior.__class__.__name__,
                                   self.likelihood.event_data.eventname)
+
+    def __repr__(self):
+        return (f'{self.__class__.__name__}({self.prior.__class__.__name__}, '
+                f'{self.likelihood.event_data.eventname})')
 
 
 _KWARGS_FILENAME = 'kwargs.json'

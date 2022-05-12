@@ -245,6 +245,32 @@ class Prior(ABC, utils.JSONMixin):
                                                     - center)
         return folded
 
+    @classmethod
+    def init_parameters(cls, include_optional=True):
+        """
+        Return list of `inspect.Parameter` objects, for the parameters
+        taken by the `__init__` of the class, sorted by parameter kind
+        (i.e. positional arguments first, keyword arguments last).
+        The `self` parameter is excluded.
+
+        Parameters
+        ----------
+        include_optional: bool, whether to include parameters with
+                          defaults in the returned list.
+        """
+        signature = inspect.signature(cls.__init__)
+        all_parameters = list(signature.parameters.values())[1:]
+        sorted_unique_parameters = sorted(
+            dict.fromkeys(all_parameters),
+            key=lambda par: (par.kind, par.default is not par.empty))
+
+        if include_optional:
+            return sorted_unique_parameters
+
+        return [par for par in sorted_unique_parameters
+                if par.default is par.empty
+                and par.kind not in (par.VAR_POSITIONAL, par.VAR_KEYWORD)]
+
     def __init_subclass__(cls):
         """
         Check that subclasses that change the `__init__` signature also

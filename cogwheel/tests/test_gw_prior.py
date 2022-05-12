@@ -17,7 +17,8 @@ def get_random_init_parameters():
     """Return dictionary of keyword arguments to initialize priors."""
     standard_par_dic = {
         key: value for key, value in test_waveform.get_random_par_dic().items()
-        if key in gw_prior.FixedIntrinsicParametersPrior.standard_par_dic}
+        if key in
+        gw_prior.miscellaneous.FixedIntrinsicParametersPrior.standard_par_dic}
     return dict(
         mchirp_range=np.sort(np.random.uniform(2, 40, 2)),
         mtot_range=np.sort(np.random.uniform(2, 40, 2)),
