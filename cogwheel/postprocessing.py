@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import pandas as pd
 
-from cogwheel import grid
+from cogwheel import gw_plotting
 from cogwheel import utils
 from cogwheel import sampling
 from cogwheel import prior
@@ -364,17 +364,15 @@ class Diagnostics:
                 sampled_par_dic_0 = None
 
             ref_samples = pd.read_feather(refdir/'samples.feather')
-            ref_grid = grid.Grid.from_samples(sampled_params, ref_samples,
-                                              pdf_key=refdir.name)
-
             for otherdir in otherdirs:
                 other_samples = pd.read_feather(otherdir/'samples.feather')
-                other_grid = grid.Grid.from_samples(
-                    sampled_params, other_samples, pdf_key=otherdir.name)
-
-                grid.MultiGrid([ref_grid, other_grid]).corner_plot(
-                    figsize=(10, 10), set_legend=True,
-                    scatter_points=sampled_par_dic_0)
+                cornerplot = gw_plotting.MultiCornerPlot.from_samples(
+                    [ref_samples, other_samples],
+                    labels=[refdir.name, otherdir.name],
+                    params=sampled_params)
+                cornerplot.plot()
+                if sampled_par_dic_0:
+                    cornerplot.scatter_points(sampled_par_dic_0)
                 pdf.savefig(bbox_inches='tight')
 
     def get_rundirs(self):
