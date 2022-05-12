@@ -293,7 +293,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
         Return conversion factor such that
             d_luminosity = d_hat * conversion_factor.
         """
-        mchirp = (m1*m2)**.6 / (m1+m2)**.2
+        mchirp = gw_utils.mchirp(m1, m2)
         response = np.abs(self.geometric_factor_refdet(ra, dec, psi, iota))
         return mchirp**(5/6) * response
 
