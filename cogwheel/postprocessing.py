@@ -264,7 +264,7 @@ class Diagnostics:
     DIAGNOSTICS_FILENAME = 'diagnostics.pdf'
     DEFAULT_TOLERANCE_PARAMS = {'asd_drift_dlnl_std': .1,
                                 'asd_drift_dlnl_max': .5,
-                                'lnl_max_exceeds_lnl_0': 5.,
+                                'lnl_max_exceeds_lnl_0': 15.,
                                 'lnl_0_exceeds_lnl_max': .1,
                                 'relative_binning_dlnl_std': .05,
                                 'relative_binning_dlnl_max': .25}
@@ -370,7 +370,7 @@ class Diagnostics:
                     [ref_samples, other_samples],
                     labels=[refdir.name, otherdir.name],
                     params=sampled_params)
-                cornerplot.plot()
+                cornerplot.plot(max_n_ticks=3)
                 if sampled_par_dic_0:
                     cornerplot.scatter_points(sampled_par_dic_0)
                 pdf.savefig(bbox_inches='tight')
