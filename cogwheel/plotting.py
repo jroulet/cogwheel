@@ -527,7 +527,7 @@ class CornerPlot:
         # Diagonal:
         for ax in np.diagonal(self.axes):
             ax.get_shared_y_axes().remove(ax)
-            ax.tick_params(axis='x', direction='in', top=True)
+            ax.tick_params(axis='x', direction='in', top=True, rotation=45)
             ax.tick_params(axis='y', left=False, right=False, labelleft=False)
 
         # Upper triangle:
