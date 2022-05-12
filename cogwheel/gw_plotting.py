@@ -77,7 +77,7 @@ _UNITS = (dict.fromkeys(['mchirp', 'm1', 'm2', 'mtot', 'mtot_source',
                          'm1_source', 'm2_source', 'mchirp_source'],
                         r'M$_\odot$')
           | dict.fromkeys(['t_refdet', 'tc', 't_geocenter'], 's')
-          | {'d_hat': r'Mpc M$_\odot^{-1}$',
+          | {'d_hat': r'Mpc M$_\odot^{-5/6}$',
              'd_luminosity': 'Mpc',
              })
 
