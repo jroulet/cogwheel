@@ -11,6 +11,11 @@ import gwosc
 from cogwheel import utils
 from cogwheel import gw_utils
 
+# gwpy fiddles with matplotlib, undo:
+plt.rcdefaults()
+gwpy.plot.axes.register_projection(gwpy.plot.axes._Axes)
+
+
 DATADIR = pathlib.Path(__file__).parent/'data'
 GWOSC_FILES_DIR = DATADIR/'gwosc_files'
 
