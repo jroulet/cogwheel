@@ -376,6 +376,43 @@ class CornerPlot:
             bbox_to_anchor=(1, 1), frameon=False,
             loc='upper right', borderaxespad=0, borderpad=0)
 
+    def scatter_points(self, scatter_points, colors=None, **kwargs):
+        """
+        Add scatter points to an existing corner plot.
+        For every point passed, one vertical line in the diagonal panels
+        and one dot in each off-diagonal panel will be plotted.
+
+        Parameters
+        ----------
+        scatter_points: pandas.DataFrame or dict
+            Columns are parameter names, must contain ``self.params``.
+            Rows correspond to parameter values. A dict is acceptable to
+            plot a single point.
+
+        colors: iterable, optional
+            Colors corresponding to each scatter point passed.
+
+        **kwargs:
+            Passed to ``matplotlib.axes.Axes.scatter``.
+        """
+        if self.axes is None:
+            raise RuntimeError('There is no plot to scatter points on. '
+                               'Call ``plot`` before ``scatter_points``.')
+
+        if isinstance(scatter_points, dict):
+            scatter_points = pd.DataFrame(scatter_points, index=[0])
+
+        colors = colors or PlotStyle._gen_colors(len(scatter_points))
+
+        for color, (_, point) in zip(colors, scatter_points.iterrows()):
+            for ax, par in zip(np.diagonal(self.axes), self.params):
+                ax.axvline(point[par], color=color)
+
+            for row, col in zip(*np.tril_indices_from(self.axes, -1)):
+                self.axes[row][col].scatter(point[self.params[col]],
+                                            point[self.params[row]],
+                                            color=color, **kwargs)
+
     def _plot_2d(self, xpar, ypar):
         ax = self.axes[self.params.index(ypar), self.params.index(xpar)]
         xarr = self.arrs_1d[xpar]
@@ -477,29 +514,24 @@ class CornerPlot:
             n_params, n_params, squeeze=False, sharex='col', sharey='row',
             **self._get_subplot_kwargs(max_figsize, max_subplot_size))
 
-        # Undo sharey in the diagonal
+        # # Diagonal:
         for ax in np.diagonal(self.axes):
             ax.get_shared_y_axes().remove(ax)
-            ax.yaxis.major = mpl.axis.Ticker()
-            ax.yaxis.set_major_locator(mpl.ticker.AutoLocator())
-            ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+            ax.tick_params(axis='x', direction='in', top=True)
+            ax.tick_params(axis='y', left=False, right=False, labelleft=False)
 
         # Upper triangle:
         for ax in self.axes[np.triu_indices_from(self.axes, 1)]:
             ax.axis('off')
 
         # Lower triangle
-        for ax in self.axes[np.tril_indices_from(self.axes, 1)]:
+        for ax in self.axes[np.tril_indices_from(self.axes, -1)]:
             ax.tick_params(which='both', direction='in', right=True, top=True,
                            rotation=45)
 
             for axis in ax.xaxis, ax.yaxis:
                 axis.set_major_locator(mpl.ticker.MaxNLocator(max_n_ticks))
 
-        # Diagonal:
-        for ax in np.diagonal(self.axes):
-            ax.tick_params(axis='x', direction='in', top=True)
-            ax.tick_params(axis='y', left=False, right=False, labelleft=False)
 
         for i, par in enumerate(self.params):
             label = self.latex_labels.with_units(par)
@@ -548,11 +580,11 @@ class CornerPlot:
             Dictionary of the form ``{par: (vmin, vmax)}`` for those
             parameters whose limits that are to be adjusted.
         """
-        for ax, par in zip(np.diagonal(self.axes), self.params):
+        for ax, par in zip(self.axes[-1], self.params):
             if par in lims:
                 ax.set_xlim(lims[par])
 
-        for ax, par in zip(self.axes[:, 0][1:], self.params[1:]):
+        for ax, par in zip(self.axes[1:, 0], self.params[1:]):
             if par in lims:
                 ax.set_ylim(lims[par])
 
@@ -607,9 +639,9 @@ class MultiCornerPlot:
             How many histogram bins to use, the same for all parameters
             and all distributions.
 
-        params: sequence of strings
-            Optional subset of columns present in all dataframes, to
-            plot a reduced number of parameters.
+        params: list of strings, optional
+            Subset of columns present in all dataframes, to plot a
+            reduced number of parameters.
 
         **plotstyle_kwargs:
             Passed to ``PlotStyle`` constructor to override defaults.
@@ -684,3 +716,25 @@ class MultiCornerPlot:
             parameters whose limits that are to be adjusted.
         """
         self.corner_plots[0].set_lims(lims)
+
+
+    def scatter_points(self, scatter_points, colors=None, **kwargs):
+        """
+        Add scatter points to an existing corner plot.
+        For every point passed, one vertical line in the diagonal panels
+        and one dot in each off-diagonal panel will be plotted.
+
+        Parameters
+        ----------
+        scatter_points: pandas.DataFrame or dict
+            Columns are parameter names, must contain ``self.params``.
+            Rows correspond to parameter values. A dict is acceptable to
+            plot a single point.
+
+        colors: iterable, optional
+            Colors corresponding to each scatter point passed.
+
+        **kwargs:
+            Passed to ``matplotlib.axes.Axes.scatter``.
+        """
+        self.corner_plots[0].scatter_points(scatter_points, colors, **kwargs)
