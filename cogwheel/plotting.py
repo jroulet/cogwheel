@@ -293,7 +293,7 @@ class CornerPlot:
 
     @classmethod
     def from_samples(cls, samples: pd.DataFrame, plotstyle=None,
-                     bins=40):
+                     bins=40, density=True):
         """
         Contructor that estimates the probability densities from a
         histogram of samples.
@@ -309,6 +309,9 @@ class CornerPlot:
 
         bins: int
             How many histogram bins to use, the same for all parameters.
+
+        density: bool
+            Whether to normalize the 1-d histograms to integrate to 1.
         """
         bin_edges = {}
         arrs_1d = {}
@@ -316,7 +319,8 @@ class CornerPlot:
         pdfs_2d = {}
 
         for par, values in samples.iteritems():
-            pdfs_1d[par], bin_edges[par] = np.histogram(values, bins=bins)
+            pdfs_1d[par], bin_edges[par] = np.histogram(values, bins=bins,
+                                                        density=density)
             arrs_1d[par] = get_midpoints(bin_edges[par])
 
         for xpar, ypar in itertools.combinations(samples, 2):
