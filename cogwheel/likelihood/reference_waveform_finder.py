@@ -89,7 +89,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         if self._mchirp_range:
             return self._mchirp_range
 
-        mchirp = gw_utils.mchirp(self.par_dic_0['m1'], self.par_dic_0['m2'])
+        mchirp = gw_utils.m1m2_to_mchirp(self.par_dic_0['m1'],
+                                         self.par_dic_0['m2'])
         return gw_utils.estimate_mchirp_range(mchirp)
 
     @classmethod
@@ -396,7 +397,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         warning is issued.
         """
         lnl_0 = self.lnlike_max_amp_phase_time(self.par_dic_0)
-        mchirp_0 = gw_utils.mchirp(self.par_dic_0['m1'], self.par_dic_0['m2'])
+        mchirp_0 = gw_utils.m1m2_to_mchirp(self.par_dic_0['m1'],
+                                           self.par_dic_0['m2'])
         mchirp_range = list(
             gw_utils.estimate_mchirp_range(mchirp_0, snr=np.sqrt(2*lnl_0)))
 

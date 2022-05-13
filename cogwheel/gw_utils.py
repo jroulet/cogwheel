@@ -4,8 +4,6 @@ import numpy as np
 
 import lal
 
-from cogwheel import grid
-
 DETECTORS = {'H': lal.CachedDetectors[lal.LHO_4K_DETECTOR],
              'L': lal.CachedDetectors[lal.LLO_4K_DETECTOR],
              'V': lal.CachedDetectors[lal.VIRGO_DETECTOR]}
@@ -84,7 +82,7 @@ def mchirpeta_to_m1m2(mchirp, eta):
     return m1, m2
 
 
-def mchirp(m1, m2):
+def m1m2_to_mchirp(m1, m2):
     """Return chirp mass given component masses."""
     return (m1*m2)**.6 / (m1+m2)**.2
 
