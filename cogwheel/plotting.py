@@ -48,6 +48,35 @@ class LatexLabels(dict):
 # -----------------------------------------------------------
 # Plot settings
 
+def gen_linestyles(number):
+    """
+    Return list of linestyles.
+
+    Parameters
+    ----------
+    number: int
+        How many linestyles are desired.
+    """
+    if number <= len(few_linestyles := ['-', '--', '-.', ':']):
+        return few_linestyles[:number]
+    return ['-'] + [(0, tuple([2, 2]*i + [7, 2])) for i in range(number-1)]
+
+
+def gen_colors(number):
+    """
+    Return list of colors.
+
+    Parameters
+    ----------
+    number: int
+        How many colors are desired.
+    """
+    colors = (mpl.cm.get_cmap('tab20').colors
+              + mpl.cm.get_cmap('tab20b').colors)
+    colors = colors[::2] + colors[1::2]
+    return [colors[i] for i in np.arange(number) % len(colors)]
+
+
 class PlotStyle:
     """
     Class that encapsulates plotting choices (colors, linestyles, etc.)
@@ -144,8 +173,8 @@ class PlotStyle:
         Return generator of plostyles with different colors and
         linestyles.
         """
-        linestyles = cls._gen_linestyles(number)
-        colors = cls._gen_colors(number)
+        linestyles = gen_linestyles(number)
+        colors = gen_colors(number)
         kwargs = dict(fill='flat') | kwargs
         for color, linestyle in zip(colors, linestyles):
             yield cls(contour_kwargs={'linestyles': [linestyle]},
@@ -153,18 +182,6 @@ class PlotStyle:
                       kwargs_1d={'color': color, 'linestyle': linestyle},
                       confidence_level=None, **kwargs)
 
-    @classmethod
-    def _gen_linestyles(cls, number):
-        if number <= len(few_linestyles := ['-', '--', '-.', ':']):
-            return few_linestyles[:number]
-        return ['-'] + [(0, tuple([2, 2]*i + [7, 2])) for i in range(number-1)]
-
-    @classmethod
-    def _gen_colors(cls, number):
-        colors = (mpl.cm.get_cmap('tab20').colors
-                  + mpl.cm.get_cmap('tab20b').colors)
-        colors = colors[::2] + colors[1::2]
-        return [colors[i] for i in np.arange(number) % len(colors)]
 
 
 def get_transparency_colormap(color):
@@ -411,7 +428,7 @@ class CornerPlot:
         if isinstance(scatter_points, dict):
             scatter_points = pd.DataFrame(scatter_points, index=[0])
 
-        colors = colors or PlotStyle._gen_colors(len(scatter_points))
+        colors = colors or gen_colors(len(scatter_points))
 
         lims = self.get_current_lims()
 

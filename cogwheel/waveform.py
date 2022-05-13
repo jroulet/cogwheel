@@ -343,6 +343,7 @@ class WaveformGenerator(utils.JSONMixin):
         return np.sum(hplus_hcross, axis=0)
 
     def create_lal_dict(self):
+        """Return a LAL dict object per ``self.lalsimulation_commands``."""
         lal_dic = lal.CreateDict()
         for function_name, value in self.lalsimulation_commands:
             getattr(lalsimulation, function_name)(lal_dic, value)

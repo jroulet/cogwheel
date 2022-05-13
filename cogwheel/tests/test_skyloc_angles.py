@@ -4,8 +4,6 @@ import itertools
 from unittest import TestCase, main
 import numpy as np
 
-import lal
-
 from cogwheel import skyloc_angles
 from cogwheel import gw_utils
 
