@@ -1,21 +1,20 @@
 """
 Define the Posterior class.
-Can run as a script to make and save a Posterior instance from scratch.
+Can run as a script to make a Posterior instance from scratch and find
+the maximum likelihood solution on the full parameter space.
 """
 
 import argparse
 import inspect
 import json
-import tempfile
-import time
-import os
 import numpy as np
 
-from . import data
-from . import gw_prior
-from . import utils
-from . import waveform
-from .likelihood import RelativeBinningLikelihood, ReferenceWaveformFinder
+from cogwheel import data
+from cogwheel import gw_prior
+from cogwheel import utils
+from cogwheel import waveform
+from cogwheel.likelihood import RelativeBinningLikelihood, \
+    ReferenceWaveformFinder
 
 
 class PosteriorError(Exception):
@@ -76,86 +75,46 @@ class Posterior(utils.JSONMixin):
         return lnprior + self.likelihood.lnlike(standard_par_dic)
 
     @classmethod
-    def from_event(cls, event, approximant, prior_class, fbin=None,
-                   pn_phase_tol=.05, disable_precession=False,
-                   harmonic_modes=None, tolerance_params=None, seed=0,
-                   tc_rng=(-.1, .1), **kwargs):
+    def from_event(
+            cls, event, mchirp_guess, approximant, prior_class,
+            likelihood_class=RelativeBinningLikelihood,
+            prior_kwargs=None, likelihood_kwargs=None,
+            ref_wf_finder_kwargs=None):
         """
         Instantiate a `Posterior` class from the strain data.
         Automatically find a good fit solution for relative binning.
 
         Parameters
         ----------
-        event: Instance of `data.EventData` or string with
-               event name.
-        approximant: string with approximant name.
+        event: Instance of `data.EventData` or string with event name,
+               or path to npz file with `EventData` instance.
+        approximant: str, approximant name.
         prior_class: string with key from `gw_prior.prior_registry`,
                      or subclass of `prior.Prior`.
-        fbin: Array with edges of the frequency bins used for relative
-              binning [Hz]. Alternatively, pass `pn_phase_tol`.
-        pn_phase_tol: Tolerance in the post-Newtonian phase [rad] used
-                      for defining frequency bins. Alternatively, pass
-                      `fbin`.
-        disable_precession: bool, whether to set inplane spins to 0
-                            when evaluating the waveform.
-        harmonic_modes: list of 2-tuples with (l, m) of the harmonic
-                        modes to include. Pass `None` to use
-                        approximant-dependent defaults per
-                        `waveform.APPROXIMANTS`.
-        tolerance_params: dictionary
-        kwargs: Additional keyword arguments to instantiate the prior
-                class.
+        likelihood_class: subclass of likelihood.RelativeBinningLikelihood
+        prior_kwargs: dict, kwargs for `prior_class` constructor.
+        likelihood_kwargs: : dict, kwargs for `prior_class` constructor.
 
         Return
         ------
         Instance of `Posterior`.
         """
-        if isinstance(event, data.EventData):
-            event_data = event
-        elif isinstance(event, str):
-            event_data = data.EventData.from_npz(event)
-        else:
-            raise ValueError('`event` must be of type `str` or `EventData`')
-
+        prior_kwargs = prior_kwargs or {}
+        likelihood_kwargs = likelihood_kwargs or {}
+        ref_wf_finder_kwargs = ref_wf_finder_kwargs or {}
         if isinstance(prior_class, str):
             prior_class = gw_prior.prior_registry[prior_class]
 
-        # Check required input before doing expensive maximization:
-        required_pars = {
-            parameter.name for parameter in prior_class.init_parameters()[1:]
-            if parameter.default is inspect._empty
-            and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL,
-                                       inspect.Parameter.VAR_KEYWORD)}
-        #### EVDAT QUESTION: can't we just pass this stuff?
-        event_data_keys = {'mchirp_range', 'tgps', 'q_min'}
-        bestfit_keys = {'ref_det_name', 'detector_pair', 'f_ref', 't0_refdet'}
-        if missing_pars := (required_pars - event_data_keys - bestfit_keys
-                            - set(kwargs)):
-            raise ValueError(f'Missing parameters: {", ".join(missing_pars)}')
+        ref_wf_finder = ReferenceWaveformFinder.from_event(
+            event, mchirp_guess, approximant=approximant,
+            **ref_wf_finder_kwargs)
 
-        # Initialize likelihood:
-        aux_waveform_generator = waveform.WaveformGenerator(
-            event_data.detector_names, event_data.tgps, event_data.tcoarse,
-            approximant, f_ref=20., harmonic_modes=[(2, 2)])
-        bestfit = ReferenceWaveformFinder(
-            event_data, aux_waveform_generator).find_bestfit_pars(tc_rng, seed)
-        waveform_generator = waveform.WaveformGenerator(
-            event_data.detector_names, event_data.tgps, event_data.tcoarse,
-            approximant, bestfit['f_ref'], harmonic_modes, disable_precession)
-        likelihood = RelativeBinningLikelihood(
-            event_data, waveform_generator, bestfit['par_dic'], fbin,
-            pn_phase_tol, tolerance_params)
-        assert likelihood._lnl_0 > 0
+        likelihood = likelihood_class.from_reference_waveform_finder(
+            ref_wf_finder, approximant=approximant, **likelihood_kwargs)
 
-        # Initialize prior:
-        prior = prior_class(**
-            {key: getattr(event_data, key) for key in event_data_keys}
-            | bestfit | kwargs)
-
-        # Initialize posterior and do second search:
-        posterior = cls(prior, likelihood)
-        posterior.refine_reference_waveform(seed)
-        return posterior
+        prior = prior_class.from_reference_waveform_finder(ref_wf_finder,
+                                                           **prior_kwargs)
+        return cls(prior, likelihood)
 
     def refine_reference_waveform(self, seed=None):
         """
@@ -165,6 +124,7 @@ class Posterior(utils.JSONMixin):
         good a fit as the current one.
         The likelihood maximization uses folded sampled parameters.
         """
+        print('Maximizing likelihood over full parameter space...')
         folded_par_vals_0 = self.prior.fold(
             **self.prior.inverse_transform(**self.likelihood.par_dic_0))
 
@@ -175,13 +135,14 @@ class Posterior(utils.JSONMixin):
             func=lambda pars: -max(lnlike_unfolds(*pars)),
             bounds=list(zip(self.prior.cubemin,
                             self.prior.cubemin + self.prior.folded_cubesize)),
-            guesses=folded_par_vals_0,
-            seed=seed).x
+            guesses=folded_par_vals_0, seed=seed, init='sobol').x
         i_fold = np.argmax(lnlike_unfolds(*bestfit_folded))
 
         self.likelihood.par_dic_0 = self.prior.transform(
             *self.prior.unfold(bestfit_folded)[i_fold])
-        print(f'Found solution with lnl = {self.likelihood._lnl_0}')
+
+        lnl = self.likelihood.lnlike(self.likelihood.par_dic_0)
+        print(f'Found solution with lnl = {lnl}')
 
     def get_eventdir(self, parentdir):
         """
@@ -192,133 +153,95 @@ class Posterior(utils.JSONMixin):
         return utils.get_eventdir(parentdir, self.prior.__class__.__name__,
                                   self.likelihood.event_data.eventname)
 
+    def __repr__(self):
+        return (f'{self.__class__.__name__}({self.prior.__class__.__name__}, '
+                f'{self.likelihood.event_data.eventname})')
+
 
 _KWARGS_FILENAME = 'kwargs.json'
 
 
-def initialize_posteriors_slurm(
-        eventnames, approximant, prior_name, parentdir, n_hours_limit=2,
-        sbatch_cmds=('--mem-per-cpu=4G',), overwrite=False, **kwargs):
-    """
-    Submit jobs that run `main()` for each event.
-    This will initialize `Posterior.from_event()` and save the
-    `Posterior` to JSON inside the appropriate `eventdir` (per
-    `Posterior.get_eventdir`).
-
-    Parameters
-    ----------
-    eventnames: List of strings with event names.
-    approximant: string with approximant name.
-    prior_name: string, key of `gw_prior.prior_registry`.
-    parentdir: path to top directory where to save output.
-    n_hours_limit: int, hours until slurm jobs are terminated.
-    sbatch_cmds: sequence of strings with SBATCH commands, e.g.
-                 `('--mem-per-cpu=4G',)`
-    overwrite: bool, whether to overwrite preexisting files.
-               `False` (default) raises an error if the file exists.
-    **kwargs: optional keyword arguments to `Posterior.from_event()`.
-              Must be JSON-serializable.
-    """
-    if isinstance(eventnames, str):
-        eventnames = [eventnames]
-
-    for eventname in eventnames:
-
-        eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
-        filename = eventdir/'Posterior.json'
-        if not overwrite and filename.exists():
-            raise FileExistsError(
-                f'{filename} exists, pass `overwrite=True` to overwrite.')
-
-        utils.mkdirs(eventdir)
-
-        job_name = f'{eventname}_posterior'
-        stdout_path = (eventdir/'posterior_from_event.out').resolve()
-        stderr_path = (eventdir/'posterior_from_event.err').resolve()
-
-        args = ' '.join([eventname, approximant, prior_name, parentdir])
-
-        if kwargs:
-            with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
-                json.dump(kwargs, kwargs_file)
-                args += f' {kwargs_file.name}'
-
-        if overwrite:
-            args += ' --overwrite'
-
-        utils.submit_slurm(job_name, n_hours_limit, stdout_path,
-                           stderr_path, args, sbatch_cmds)
-
-def initialize_posteriors_lsf(
-        eventnames, approximant, prior_name, parentdir, n_hours_limit=2,
-        bsub_cmds=('-R "span[hosts=1] rusage[mem=4096]"',),
+def submit_likelihood_maximization(
+        eventname, approximant, prior_name, parentdir,
+        scheduler='slurm', n_hours_limit=2, scheduler_cmds=(),
         overwrite=False, **kwargs):
     """
-    Submit jobs that run `main()` for each event.
-    This will initialize `Posterior.from_event()` and save the
-    `Posterior` to JSON inside the appropriate `eventdir` (per
+    Submit a job that runs `main()`, which maximizes the likelihood for
+    an event.
+    This will initialize `Posterior.from_event()` and
+    `Posterior.refine_reference_waveform` and save the `Posterior` to
+    JSON inside the appropriate `eventdir` (per
     `Posterior.get_eventdir`).
 
     Parameters
     ----------
-    eventnames: List of strings with event names.
+    eventname: string with event name.
     approximant: string with approximant name.
     prior_name: string, key of `gw_prior.prior_registry`.
     parentdir: path to top directory where to save output.
+    scheduler: 'slurm' or 'lsf'.
     n_hours_limit: int, hours until slurm jobs are terminated.
-    bsub_cmds: sequence of strings with BSUB commands.
+    sbatch_cmds: sequence of strings with commands for the scheduler.
+        E.g., `('--mem-per-cpu=4G',)` for slurm,
+        or `('-R "span[hosts=1] rusage[mem=4096]"')` for lsf.
     overwrite: bool, whether to overwrite preexisting files.
                `False` (default) raises an error if the file exists.
     **kwargs: optional keyword arguments to `Posterior.from_event()`.
               Must be JSON-serializable.
     """
-    if isinstance(eventnames, str):
-        eventnames = [eventnames]
+    eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
+    filename = eventdir/'Posterior.json'
+    if not overwrite and filename.exists():
+        raise FileExistsError(
+            f'{filename} exists, pass `overwrite=True` to overwrite.')
 
-    for eventname in eventnames:
+    utils.mkdirs(eventdir)
 
-        eventdir = utils.get_eventdir(parentdir, prior_name, eventname)
-        filename = eventdir/'Posterior.json'
-        if not overwrite and filename.exists():
-            raise FileExistsError(
-                f'{filename} exists, pass `overwrite=True` to overwrite.')
+    job_name = f'{eventname}_posterior'
+    stdout_path = (eventdir/'posterior_from_event.out').resolve()
+    stderr_path = (eventdir/'posterior_from_event.err').resolve()
 
-        utils.mkdirs(eventdir)
+    args = ' '.join([eventname, mchirp_guess, approximant, prior_name,
+                     parentdir])
 
-        job_name = f'{eventname}_posterior'
-        stdout_path = (eventdir/'posterior_from_event.out').resolve()
-        stderr_path = (eventdir/'posterior_from_event.err').resolve()
+    if kwargs:
+        with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
+            json.dump(kwargs, kwargs_file)
+            args += f' {kwargs_file.name}'
 
-        args = ' '.join([eventname, approximant, prior_name, parentdir])
+    if overwrite:
+        args += ' --overwrite'
 
-        if kwargs:
-            with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
-                json.dump(kwargs, kwargs_file)
-                args += f' {kwargs_file.name}'
+    submit = {'slurm': utils.submit_slurm, 'lsf': utils.submit_lsf}[scheduler]
+    submit(job_name, n_hours_limit, stdout_path, stderr_path, args,
+           scheduler_cmds)
 
-        if overwrite:
-            args += ' --overwrite'
 
-        utils.submit_lsf(job_name, n_hours_limit, stdout_path,
-                           stderr_path, args, bsub_cmds)
-
-def main(eventname, approximant, prior_name, parentdir, overwrite,
-         kwargs_filename=None):
-    '''Construct a Posterior instance and save it to json.'''
+def main(eventname, mchirp_guess, approximant, prior_name, parentdir,
+         overwrite, kwargs_filename=None):
+    """
+    Construct a Posterior instance, refine its reference waveform and
+    save it to json.
+    """
     kwargs = {}
     if kwargs_filename:
         with open(kwargs_filename) as kwargs_file:
             kwargs = json.load(kwargs_file)
 
-    post = Posterior.from_event(eventname, approximant, prior_name, **kwargs)
+    post = Posterior.from_event(eventname, mchirp_guess, approximant,
+                                prior_name, **kwargs)
+    post.refine_reference_waveform()
     post.to_json(post.get_eventdir(parentdir), overwrite=overwrite)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='''Construct a Posterior instance and save it to json.''')
+        description="""Construct a Posterior instance, refine its reference
+                       waveform and save it to json.""")
 
     parser.add_argument('eventname', help='key from `data.event_registry`.')
+    parser.add_argument('mchirp_guess', help='approximate chirp mass (Msun).',
+                        type=float)
     parser.add_argument('approximant', help='key from `waveform.APPROXIMANTS`')
     parser.add_argument('prior_name',
                         help='key from `gw_prior.prior_registry`')

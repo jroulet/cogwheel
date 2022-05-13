@@ -140,6 +140,7 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
 
     print(f'Submitted job {job_name!r}.')
 
+
 def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
                args='', bsub_cmds=(), batch_path=None):
     """
@@ -239,7 +240,6 @@ def get_priordir(parentdir, prior_name):
                     └── <sampler_output_files>
     """
     return pathlib.Path(parentdir)/prior_name
-
 
 
 def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):
@@ -407,18 +407,25 @@ class CogwheelEncoder(NumpyEncoder):
         self.file_permissions = file_permissions
         self.overwrite = overwrite
 
+    @staticmethod
+    def _get_module_name(obj):
+        module = obj.__class__.__module__
+        if module == '__main__':
+            module = inspect.getmodule(obj).__spec__.name
+        return module
+
     def default(self, o):
         if o.__class__.__name__ == 'EventData':
             filename = os.path.join(self.dirname, f'{o.eventname}.npz')
             o.to_npz(filename=filename, overwrite=self.overwrite,
                      permissions=self.file_permissions)
             return {'__cogwheel_class__': o.__class__.__name__,
-                    '__module__': o.__class__.__module__,
+                    '__module__': self._get_module_name(o),
                     'filename': os.path.basename(filename)}
 
         if o.__class__.__name__ in class_registry:
             return {'__cogwheel_class__': o.__class__.__name__,
-                    '__module__': o.__class__.__module__,
+                    '__module__': self._get_module_name(o),
                     'init_kwargs': o.get_init_dict()}
 
         return super().default(o)

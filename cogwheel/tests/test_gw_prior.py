@@ -17,7 +17,8 @@ def get_random_init_parameters():
     """Return dictionary of keyword arguments to initialize priors."""
     standard_par_dic = {
         key: value for key, value in test_waveform.get_random_par_dic().items()
-        if key in gw_prior.FixedIntrinsicParametersPrior.standard_par_dic}
+        if key in
+        gw_prior.miscellaneous.FixedIntrinsicParametersPrior.standard_par_dic}
     return dict(
         mchirp_range=np.sort(np.random.uniform(2, 40, 2)),
         mtot_range=np.sort(np.random.uniform(2, 40, 2)),
@@ -30,7 +31,8 @@ def get_random_init_parameters():
         f_ref=np.random.uniform(20, 100),
         d_hat_max=np.random.uniform(1e2, 1e4),
         symmetrize_lnq=False,  # Note `symmetrize_lnq=True` is not invertible
-        standard_par_dic=standard_par_dic
+        standard_par_dic=standard_par_dic,
+        f_avg = np.random.uniform(10, 200)
         )
 
 

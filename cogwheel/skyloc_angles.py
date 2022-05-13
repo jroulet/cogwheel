@@ -6,8 +6,8 @@ import numpy as np
 
 import lal
 
-from . import utils
-from . gw_utils import DETECTORS
+from cogwheel import utils
+from cogwheel import gw_utils
 
 class SkyLocAngles(utils.JSONMixin):
     """
@@ -24,29 +24,14 @@ class SkyLocAngles(utils.JSONMixin):
         Parameters
         ----------
         detector_pair: Length-2 string with names of the detectors
-                       used to define the coordinate system, e.g. "HL".
+                       used to define the coordinate system, e.g. "HL",
+                       or length-1 string, e.g. "H".
         tgps: GPS time used to define the coordinate system.
         """
-        assert len(detector_pair) == 2, \
-            f'Need 2 detectors from {list(DETECTORS)}, e.g. "HL".'
         self.detector_pair = detector_pair
         self.tgps = tgps
         self._gmst = lal.GreenwichMeanSiderealTime(tgps)  # [radians]
-
-        # 2 detector cartesian locations in meters, fixed to Earth:
-        # x = Greenwich & Equator, z = North pole.
-        self._det1_location = DETECTORS[self.detector_pair[0]].location
-        self._det2_location = DETECTORS[self.detector_pair[1]].location
-        midpoint_location = (self._det1_location + self._det2_location) / 2
-
-        # Cartesian axes of the new coordinate system, fixed to Earth:
-        # i = horizon, j = zenith, k = line connecting 2 detectors.
-        self._k_axis = normalize(self._det1_location - self._det2_location)
-        self._i_axis = normalize(np.cross(midpoint_location, self._k_axis))
-        self._j_axis = np.cross(self._k_axis, self._i_axis)
-
-        self._rotation_matrix = get_rotation_matrix(
-            self._i_axis, self._j_axis, self._k_axis)
+        self._rotation_matrix = get_rotation_matrix(*self._get_ij_axes())
 
     def radec_to_thetaphinet(self, ra, dec):
         """
@@ -69,6 +54,44 @@ class SkyLocAngles(utils.JSONMixin):
         dec, lon = cart3d_to_latlon(xyz)
         ra = lon_to_ra(lon, self._gmst)
         return ra, dec
+
+    def _get_ij_axes(self):
+        """
+        First two cartesian axes of the new coordinate system, fixed to
+        Earth (the third axis is their cross product).
+        If `self.detector_pair` has 2 detectors the system is:
+            i = horizon
+            j = zenith
+            k = line connecting 2 detectors.
+        If it has 1 detector the system is:
+            k = x_arm + y_arm
+            i = y_arm - x_arm
+            j = zenith
+        Otherwise a `ValueError` is raised.
+        """
+        if len(self.detector_pair) == 2:
+            det1_location = gw_utils.DETECTORS[self.detector_pair[0]].location
+            det2_location = gw_utils.DETECTORS[self.detector_pair[1]].location
+            midpoint_location = (det1_location + det2_location) / 2
+
+            k_axis = normalize(det1_location - det2_location)
+            i_axis = normalize(np.cross(midpoint_location, k_axis))
+            j_axis = np.cross(k_axis, i_axis)
+            return i_axis, j_axis
+
+        elif len(self.detector_pair) == 1:
+            x_arm, y_arm = gw_utils.DETECTOR_ARMS[self.detector_pair[0]]
+
+            # Arms are normalized but not perfectly orthogonal, fix:
+            y_arm = np.cross(np.cross(x_arm, y_arm), x_arm)
+
+            k_axis = normalize(x_arm + y_arm)
+            i_axis = normalize(y_arm - x_arm)
+            j_axis = np.cross(k_axis, i_axis)
+            return i_axis, j_axis
+
+        raise ValueError('Need 1 or 2 detectors from '
+                         f'{list(gw_utils.DETECTORS)}, e.g. "HL".')
 
     def __repr__(self):
         return f'SkyLocAngles({self.detector_pair!r}, {self.tgps})'
@@ -169,7 +192,7 @@ def z_rotation_matrix(angle):
                      [0, 0, 1]])
 
 
-def get_rotation_matrix(x_3d, y_3d, z_3d):
+def get_rotation_matrix(x_3d, y_3d):
     """
     Return a rotation matrix R such that
         R @ r = r',
@@ -182,6 +205,11 @@ def get_rotation_matrix(x_3d, y_3d, z_3d):
         R @ y_3d = (0, 1, 0)
         R @ z_3d = (0, 0, 1).
     """
+    if not np.allclose(np.matmul((x_3d, y_3d), np.transpose((x_3d, y_3d))),
+                       np.eye(2)):
+        raise ValueError('Pass normalized orthogonal axes.')
+
+    z_3d = np.cross(x_3d, y_3d)
     alpha = np.arctan2(z_3d[0], -z_3d[1])
     beta = np.arccos(z_3d[2])
     gamma = np.arctan2(x_3d[2], y_3d[2])

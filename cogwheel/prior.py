@@ -18,7 +18,7 @@ import inspect
 import itertools
 import numpy as np
 
-from . import utils
+from cogwheel import utils
 
 
 class PriorError(Exception):
@@ -245,6 +245,32 @@ class Prior(ABC, utils.JSONMixin):
                                                     - center)
         return folded
 
+    @classmethod
+    def init_parameters(cls, include_optional=True):
+        """
+        Return list of `inspect.Parameter` objects, for the parameters
+        taken by the `__init__` of the class, sorted by parameter kind
+        (i.e. positional arguments first, keyword arguments last).
+        The `self` parameter is excluded.
+
+        Parameters
+        ----------
+        include_optional: bool, whether to include parameters with
+                          defaults in the returned list.
+        """
+        signature = inspect.signature(cls.__init__)
+        all_parameters = list(signature.parameters.values())[1:]
+        sorted_unique_parameters = sorted(
+            dict.fromkeys(all_parameters),
+            key=lambda par: (par.kind, par.default is not par.empty))
+
+        if include_optional:
+            return sorted_unique_parameters
+
+        return [par for par in sorted_unique_parameters
+                if par.default is par.empty
+                and par.kind not in (par.VAR_POSITIONAL, par.VAR_KEYWORD)]
+
     def __init_subclass__(cls):
         """
         Check that subclasses that change the `__init__` signature also
@@ -308,6 +334,14 @@ class CombinedPrior(Prior):
         """
         kwargs.update(dict(zip([par.name for par in self.init_parameters()],
                                args)))
+
+        # Check for all required arguments at once:
+        required = [
+            par.name for par in self.init_parameters(include_optional=False)]
+        if missing := [par for par in required if par not in kwargs]:
+            raise TypeError(f'Missing {len(missing)} required arguments: '
+                            f'{", ".join(missing)}')
+
         self.subpriors = [cls(**kwargs) for cls in self.prior_classes]
 
         self.range_dic = {}
@@ -318,8 +352,8 @@ class CombinedPrior(Prior):
 
     def __init_subclass__(cls):
         """
-        Define the following attributes from the combination of priors
-        in `cls.prior_classes`:
+        Define the following attributes and methods from the combination
+        of priors in `cls.prior_classes`:
 
             * `range_dic`
             * `standard_params`
@@ -342,9 +376,11 @@ class CombinedPrior(Prior):
 
         def transform(self, *par_vals, **par_dic):
             """
-            Transform sampled parameter values to standard parameter values.
-            Take `self.sampled_params + self.conditioned_on` parameters and
-            return a dictionary with `self.standard_params` parameters.
+            Transform sampled parameter values to standard parameter
+            values.
+            Take `self.sampled_params + self.conditioned_on` parameters
+            and return a dictionary with `self.standard_params`
+            parameters.
             """
             par_dic.update(dict(zip(direct_params, par_vals)))
             for subprior in self.subpriors:
@@ -435,8 +471,9 @@ class CombinedPrior(Prior):
             setattr(cls, params, [par for prior_class in cls.prior_classes
                                   for par in getattr(prior_class, params)])
 
-        cls.conditioned_on = [par for par in cls.conditioned_on
-                              if not par in cls.standard_params]
+        cls.conditioned_on = list(dict.fromkeys(
+            [par for par in cls.conditioned_on
+             if not par in cls.standard_params]))
 
         # Check that the provided prior_classes can be combined:
         if len(cls.sampled_params) != len(set(cls.sampled_params)):
@@ -449,31 +486,43 @@ class CombinedPrior(Prior):
                 f'Priors {cls.prior_classes} cannot be combined due to '
                 f'repeated standard parameters: {cls.standard_params}')
 
-        for i, prior_class in enumerate(cls.prior_classes):
-            for following in cls.prior_classes[i:]:
-                for conditioned_par in prior_class.conditioned_on:
-                    if conditioned_par in following.standard_params:
-                        raise PriorError(
-                            f'{following} defines {conditioned_par}, which'
-                            f'{prior_class} requires. {following} should come '
-                            f'before {prior_class}.')
+        for preceding, following in itertools.combinations(
+                cls.prior_classes, 2):
+            for conditioned_par in preceding.conditioned_on:
+                if conditioned_par in following.standard_params:
+                    raise PriorError(
+                        f'{following} defines {conditioned_par}, which '
+                        f'{preceding} requires. {following} should come before'
+                        f' {preceding}.')
 
     @classmethod
-    def init_parameters(cls):
+    def init_parameters(cls, include_optional=True):
         """
         Return list of `inspect.Parameter` objects, for the aggregated
         parameters taken by the `__init__` of `prior_classes`, without
         duplicates and sorted by parameter kind (i.e. positional
-        arguments first, keyword arguments last).
+        arguments first, keyword arguments last). The `self` parameter
+        is excluded.
+
+        Parameters
+        ----------
+        include_optional: bool, whether to include parameters with
+                          defaults in the returned list.
         """
         signatures = [inspect.signature(prior_class.__init__)
                       for prior_class in cls.prior_classes]
         all_parameters = [par for signature in signatures
-                          for par in signature.parameters.values()]
+                          for par in list(signature.parameters.values())[1:]]
         sorted_unique_parameters = sorted(
             dict.fromkeys(all_parameters),
-            key=lambda par: (par.kind, par.default is not inspect._empty))
-        return sorted_unique_parameters
+            key=lambda par: (par.kind, par.default is not par.empty))
+
+        if include_optional:
+            return sorted_unique_parameters
+
+        return [par for par in sorted_unique_parameters
+                if par.default is par.empty
+                and par.kind not in (par.VAR_POSITIONAL, par.VAR_KEYWORD)]
 
     @staticmethod
     def _change_signature(func, parameters):
@@ -537,9 +586,20 @@ class FixedPrior(Prior):
         """Return a fixed dictionary of standard parameters."""
         return self.standard_par_dic
 
-    @staticmethod
-    def inverse_transform(**standard_par_dic):
-        """Return an empty dictionary of sampled parameters."""
+    def inverse_transform(self, **standard_par_dic):
+        """
+        Return an empty dictionary of sampled parameters.
+        If `require_consistency` is set to `True`, verify that the
+        `standard_par_dic` passed matches the one stored and raise
+        `PriorError` if it does not.
+        """
+        if mismatched := [par for par, value in self.standard_par_dic.items()
+                          if value != standard_par_dic[par]]:
+            raise PriorError(
+                'Cannot invert `standard_par_dic` because it does not '
+                f'match the entries for {", ".join(mismatched)} in the '
+                'fixed prior.')
+
         return {}
 
 
@@ -567,21 +627,21 @@ class UniformPriorMixin:
 
 class IdentityTransformMixin:
     """
-    Define `transform` and `inverse_transform` for priors where sampled
-    parameters and standard parameters are the same.
+    Define `standard_params`, `transform` and `inverse_transform` for
+    priors whose sampled and standard parameters are the same.
     It must be inherited before `Prior` (otherwise a `PriorError` is
     raised) so that abstract methods get overriden.
     """
     def __init_subclass__(cls):
         """
-        Check that subclasses have same sampled and standard parameters,
-        and that IdentityTransformMixin comes before Prior in the MRO.
+        Set ``standard_params`` to match ``sampled_params``, and check
+        that ``IdentityTransformMixin`` comes before ``Prior`` in the
+        MRO.
         """
         super().__init_subclass__()
-        if set(cls.sampled_params) != set(cls.standard_params):
-            raise PriorError('This prior does not have an identity transform.')
 
         check_inheritance_order(cls, IdentityTransformMixin, Prior)
+        cls.standard_params = cls.sampled_params
 
     def transform(self, *par_vals, **par_dic):
         """
