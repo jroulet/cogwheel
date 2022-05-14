@@ -87,6 +87,11 @@ class CBCLikelihood(utils.JSONMixin):
         self.asd_drift = None
 
     @property
+    def params(self):
+        """Parameters expected in `par_dic` for likelihood evaluation."""
+        return self.waveform_generator.params
+
+    @property
     def asd_drift(self):
         """
         Array of len ndetectors with ASD drift-correction.
