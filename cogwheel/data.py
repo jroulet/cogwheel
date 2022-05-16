@@ -379,7 +379,7 @@ class EventData(utils.JSONMixin):
         # Backward compatibility:
         if 'psd' in dic:
             assert 'wht_filter' not in dic
-            dic['wht_filter'] = 1 / dic.pop('psd')
+            dic['wht_filter'] = dic.pop('fd_filter') / np.sqrt(dic.pop('psd'))
         for deprecated_key in {'mchirp_range', 'q_min'} & dic.keys():
             del dic[deprecated_key]
 

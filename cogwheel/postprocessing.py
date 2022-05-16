@@ -88,9 +88,7 @@ class PostProcessor:
 
     @staticmethod
     def get_lnl_aux_cols(detector_names):
-        """
-        Return names of auxiliary log likelihood columns.
-        """
+        """Return names of auxiliary log likelihood columns."""
         return [f'lnl_aux_{det}' for det in detector_names]
 
     def process_samples(self):
@@ -122,11 +120,9 @@ class PostProcessor:
         self.save_tests_and_samples()
 
     def add_standard_parameters(self):
-        """
-        Add columns for `standard_params` to `self.samples`.
-        """
-        standard = pd.DataFrame([self.posterior.prior.transform(**sample)
-                                 for _, sample in self.samples.iterrows()])
+        """Add columns for `standard_params` to `self.samples`."""
+        standard = pd.DataFrame(list(
+            np.vectorize(self.posterior.prior.transform)(**self.samples)))
         utils.update_dataframe(self.samples, standard)
 
     def compute_lnl(self):
