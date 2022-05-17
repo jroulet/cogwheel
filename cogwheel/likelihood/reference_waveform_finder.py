@@ -201,12 +201,11 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         if not self._mchirp_range:
             self.set_mchirp_range()
 
-    @check_bounds
-    def lnlike_max_amp_phase_time(self, par_dic,
-                                  return_by_detectors=False):
+    def _matched_filter_timeseries_rb(self, par_dic):
         """
-        Return log likelihood maximized over amplitude, phase and time
-        incoherently across detectors.
+        Return array of shape ``(n_times, n_det)`` with matched filter
+        scores computed with relative binning, where ``n_times`` is
+        the number of timeshifts for which summary data were computed.
         """
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True)
@@ -219,7 +218,17 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
                ).real.sum(axis=(0, -1)))
 
-        matched_filter_timeseries = d_h_timeseries / np.sqrt(h_h)
+        return d_h_timeseries / np.sqrt(h_h)
+
+    @check_bounds
+    def lnlike_max_amp_phase_time(self, par_dic,
+                                  return_by_detectors=False):
+        """
+        Return log likelihood maximized over amplitude, phase and time
+        incoherently across detectors.
+        """
+        matched_filter_timeseries = self._matched_filter_timeseries_rb(
+            par_dic)
         lnl = np.max(np.abs(matched_filter_timeseries), axis=0)**2 / 2
 
         if return_by_detectors:
@@ -256,9 +265,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
     def _set_summary(self):
         """Set usual summary data plus ``_d_h_timeseries_weights``."""
         super()._set_summary()
-        times = np.arange(*self.time_range, 2**-10
-                         ).reshape(-1, 1, 1, 1)  # time, m, det, freq
-        shifts = np.exp(2j*np.pi * times * self.event_data.frequencies)
+        self._times = np.arange(*self.time_range, 2**-10
+                               ).reshape(-1, 1, 1, 1)  # time, m, det, freq
+        shifts = np.exp(2j*np.pi * self._times * self.event_data.frequencies)
         d_h0_t = self.event_data.blued_strain * self._h0_f.conj() * shifts
         self._d_h_timeseries_weights = (self._get_summary_weights(d_h0_t)
                                         / np.conj(self._h0_fbin))
@@ -306,15 +315,21 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         """
         i_refdet = self.event_data.detector_names.index(ref_det_name)
 
+        # Maximize over time on the timeshifts grid
+        ind = np.argmax(np.abs(
+            self._matched_filter_timeseries_rb(self.par_dic_0)[:, i_refdet]))
+        self.par_dic_0['t_geocenter'] = self._times[ind]
+
+        super()._set_summary()  # Recompute summary for non-timeshift
+
+        # Refine at subgrid resolution
         def lnlike_refdet(t_geocenter):
             return self.lnlike_max_amp_phase(
                 self.par_dic_0 | {'t_geocenter': t_geocenter},
                 det_inds=i_refdet)
 
-        tc_arr = np.arange(*self.time_range, 2**-10)
-        ind = np.argmax([lnlike_refdet(tgeo) for tgeo in tc_arr])
         result = minimize_scalar(lambda tgeo: -lnlike_refdet(tgeo),
-                                 bracket=tc_arr[ind-1 : ind+2],
+                                 bracket=self._times[ind-1 : ind+2],
                                  bounds=self.time_range)
         self.par_dic_0['t_geocenter'] = result.x
         print(f'Set time, lnL({ref_det_name}) = {-result.fun}')
