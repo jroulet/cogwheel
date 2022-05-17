@@ -29,6 +29,9 @@ DETECTOR_ARMS = {
                     lal.VIRGO_ARM_Y_DIRECTION_Z]))}
 
 
+EARTH_CROSSING_TIME = 2 * 0.02128  # 2 R_Earth / c (seconds)
+
+
 def fplus_fcross(detector_names, ra, dec, psi, tgps):
     """
     Return a (2 x n_detectors) array with F+, Fx antenna coefficients.

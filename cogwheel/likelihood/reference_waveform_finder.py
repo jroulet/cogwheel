@@ -76,6 +76,10 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
     @time_range.setter
     def time_range(self, time_range):
+        if time_range[1] - time_range[0] < gw_utils.EARTH_CROSSING_TIME:
+            raise ValueError('`time_range` must be broader than the Earth-'
+                             f'crossing time {gw_utils.EARTH_CROSSING_TIME} s')
+
         self._time_range = time_range
         self._set_summary()
 
