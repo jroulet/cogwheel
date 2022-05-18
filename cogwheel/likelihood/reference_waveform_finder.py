@@ -265,9 +265,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
     def _set_summary(self):
         """Set usual summary data plus ``_d_h_timeseries_weights``."""
         super()._set_summary()
-        self._times = np.arange(*self.time_range, 2**-10
-                               ).reshape(-1, 1, 1, 1)  # time, m, det, freq
-        shifts = np.exp(2j*np.pi * self._times * self.event_data.frequencies)
+        self._times = np.arange(*self.time_range, 2**-10)
+        shifts = np.exp(2j*np.pi * self._times.reshape(-1, 1, 1, 1)
+                        * self.event_data.frequencies)
         d_h0_t = self.event_data.blued_strain * self._h0_f.conj() * shifts
         self._d_h_timeseries_weights = (self._get_summary_weights(d_h0_t)
                                         / np.conj(self._h0_fbin))
