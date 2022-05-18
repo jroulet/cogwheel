@@ -9,10 +9,8 @@ import inspect
 import json
 import numpy as np
 
-from cogwheel import data
 from cogwheel import gw_prior
 from cogwheel import utils
-from cogwheel import waveform
 from cogwheel.likelihood import RelativeBinningLikelihood, \
     ReferenceWaveformFinder
 
