@@ -49,11 +49,76 @@ class ReferenceDetectorMixin:
         return (1 + np.cos(iota)**2) / 2 * fplus - 1j * np.cos(iota) * fcross
 
 
-class UniformPhasePrior(UniformPriorMixin, IdentityTransformMixin,
+class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
                         Prior):
-    """Uniform prior for the orbital phase. No change of coordinates."""
-    range_dic = {'phi_ref': (0, 2*np.pi)}
-    periodic_params = ['phi_ref']
+    """
+    Uniform prior for the orbital phase.
+    The sampled variable `phi_ref_hat` differs from the standard
+    coalescence phase `phi_ref` an additive function of
+    `psi, iota, ra, dec, time`, such that it describes the well-measured
+    phase of the waveform at a reference detector.
+    Note: for waveforms with higher modes the posterior will have a
+    discontinuity when ``angle(geometric_factor_refdet) = pi``. However
+    the folded posterior does not have this discontinuity.
+    TODO make the phase folded.
+    """
+    standard_params = ['phi_ref']
+    range_dic = {'phi_ref_hat': (-np.pi/2, 3*np.pi/2)}  # 0, pi away from edges
+    periodic_params = ['phi_ref_hat']
+    conditioned_on = ['iota', 'ra', 'dec', 'psi', 't_geocenter']
+
+    def __init__(self, *, tgps, ref_det_name, f_avg, par_dic_0=None,
+                 **kwargs):
+        super().__init__(tgps=tgps, ref_det_name=ref_det_name, f_avg=f_avg,
+                         par_dic_0=par_dic_0, **kwargs)
+        self.tgps = tgps
+        self.ref_det_name = ref_det_name
+        self.f_avg = f_avg
+        self.par_dic_0 = par_dic_0
+
+        self._phase_refdet_0 = 0.
+        if par_dic_0:
+            par_dic_0 = {par: par_dic_0[par]
+                         for par in ('phi_ref', 'iota', 'ra', 'dec',
+                                     'psi', 't_geocenter')}
+            self._phase_refdet_0 = self._phase_refdet(**par_dic_0)
+
+    def _phase_refdet(self, iota, ra, dec, psi, t_geocenter, phi_ref):
+        """
+        Return the well-measurable overall phase at the reference
+        detector. The intuition is that all allowed values of
+        (phi_ref, iota, ra, dec, psi, t_geocenter) would have a
+        consistent value of phase_refdet.
+        """
+        t_refdet = t_geocenter + self.time_delay_refdet(ra, dec)
+        return (np.angle(self.geometric_factor_refdet(ra, dec, psi, iota))
+                + 2*phi_ref - 2*np.pi*self.f_avg*t_refdet) % (2*np.pi)
+
+    def transform(self, phi_ref_hat, iota, ra, dec, psi, t_geocenter):
+        """phi_ref_hat to phi_ref."""
+        phase_refdet = self._phase_refdet(iota, ra, dec, psi, t_geocenter,
+                                          phi_ref=0)
+        phi_ref = (phi_ref_hat - (phase_refdet - self._phase_refdet_0) / 2
+                  ) % (2*np.pi)
+        return {'phi_ref': phi_ref}
+
+    def inverse_transform(self, psi, iota, ra, dec, phi_ref, t_geocenter):
+        """phi_ref to phi_ref_hat"""
+        phase_refdet = self._phase_refdet(iota, ra, dec, psi, t_geocenter,
+                                          phi_ref=0)
+        phi_ref_hat = (phi_ref + (phase_refdet - self._phase_refdet_0) / 2
+                      ) % (2*np.pi)
+        return {'phi_ref_hat': phi_ref_hat}
+
+    def get_init_dict(self):
+        """
+        Return dictionary with keyword arguments to reproduce the class
+        instance.
+        """
+        return {'tgps': self.tgps,
+                'ref_det_name': self.ref_det_name,
+                'f_avg': self.f_avg,
+                'par_dic_0': self.par_dic_0}
 
 
 class IsotropicInclinationPrior(UniformPriorMixin, Prior):
@@ -151,106 +216,11 @@ class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin,
                 'ref_det_name': self.ref_det_name}
 
 
-class UniformPolarizationPrior(ReferenceDetectorMixin,
-                               UniformPriorMixin, Prior):
-    """
-    Prior for the polarization.
-    The sampled variable `psi_hat` differs from the standard
-    polarization `psi` by an inclination-dependent sign and an additive
-    function of `phi_ref, iota, ra, dec`, such that it describes the well-
-    measured phase of the waveform at a reference detector.
-    """
-    standard_params = ['psi']
-    range_dic = {'psi_hat': (-np.pi/2, np.pi/2)}
-    periodic_params = ['psi_hat']
-    conditioned_on = ['iota', 'ra', 'dec', 'phi_ref', 't_geocenter']
-
-    def __init__(self, *, tgps, ref_det_name, f_avg, par_dic_0=None, **kwargs):
-        """
-        Parameters
-        ----------
-        tgps: float, GPS time of the event, sets Earth orientation.
-        ref_det_name: str, reference detector name, e.g. 'H' for
-                      Hanford.
-        f_avg: float, estimate of the first frequency moment (Hz) of a
-               fiducial waveform using the reference detector PSD:
-               f_avg = (Integrate[f * |h(f)|^2 / PSD(f)]
-                        / Integrate[|h(f)|^2 / PSD(f)])
-        par_dic_0: Optional dictionary, must have entries for
-                   (phi_ref, iota, ra, dec, psi, t_geocenter) of a solution
-                   with high likelihood (additional keys are ignored).
-                   It is not essential but might remove residual
-                   correlations between `psi_hat` and other extrinsic
-                   parameters. If passed, it will center the measured
-                   `psi_hat` near 0.
-        """
-        super().__init__(tgps=tgps, ref_det_name=ref_det_name, f_avg=f_avg,
-                         par_dic_0=par_dic_0, **kwargs)
-        self.tgps = tgps
-        self.ref_det_name = ref_det_name
-        self.f_avg = f_avg
-        self.par_dic_0 = par_dic_0
-
-        self._phase_refdet_0 = 0.
-        if par_dic_0:
-            par_dic_0 = {
-                par: par_dic_0[par]
-                for par in ('phi_ref', 'iota', 'ra', 'dec', 'psi',
-                            't_geocenter')}
-            self._phase_refdet_0 = self._phase_refdet(**par_dic_0)
-
-    def _phase_refdet(self, iota, ra, dec, psi, phi_ref, t_geocenter):
-        """
-        Return the well-measurable overall phase at the reference detector.
-        The intuition is that all allowed values of (phi_ref, iota, ra, dec,
-        psi, t_geocenter) would have a consistent value of phase_refdet.
-        """
-        t_refdet = t_geocenter + self.time_delay_refdet(ra, dec)
-        return (np.angle(self.geometric_factor_refdet(ra, dec, psi, iota))
-                + 2*phi_ref - 2*np.pi*self.f_avg*t_refdet) % (2*np.pi)
-
-    def _psi_refdet(self, iota, ra, dec, phi_ref, t_geocenter):
-        """
-        Return psi that solves
-            arg(R) + gamma = 0
-        at the reference detector, where
-            R = (1+cos^2(iota)) Fplus / 2 - i cos(iota) Fcross,
-            gamma = 2 phi_ref - 2 pi f_avg t_refdet - phase_refdet_0.
-        """
-        t_refdet = t_geocenter + self.time_delay_refdet(ra, dec)
-        gamma = 2*phi_ref - 2*np.pi*self.f_avg*t_refdet - self._phase_refdet_0
-
-        fp0, fc0 = self.fplus_fcross_refdet(ra, dec, psi=0)
-        cosiota = np.cos(iota)
-
-        a = 2 * cosiota * np.cos(gamma)
-        b = (1+cosiota**2) * np.sin(gamma)
-        c = fp0*a + fc0*b
-        delta = np.pi * (cosiota * c < 0)  # 0 or pi
-        return .5 * (np.arctan((fc0*a - fp0*b) / c) + delta)
-
-    def transform(self, psi_hat, iota, ra, dec, phi_ref, t_geocenter):
-        """psi_hat to psi."""
-        psi_refdet = self._psi_refdet(iota, ra, dec, phi_ref, t_geocenter)
-        psi = (psi_hat * np.sign(np.cos(iota)) + psi_refdet) % np.pi
-        return {'psi': psi}
-
-    def inverse_transform(self, psi, iota, ra, dec, phi_ref, t_geocenter):
-        """psi to psi_hat"""
-        psi_refdet = self._psi_refdet(iota, ra, dec, phi_ref, t_geocenter)
-        psi_hat = ((psi - psi_refdet) * np.sign(np.cos(iota))
-                   + np.pi/2) % np.pi - np.pi/2
-        return {'psi_hat': psi_hat}
-
-    def get_init_dict(self):
-        """
-        Return dictionary with keyword arguments to reproduce the class
-        instance.
-        """
-        return {'tgps': self.tgps,
-                'ref_det_name': self.ref_det_name,
-                'f_avg': self.f_avg,
-                'par_dic_0': self.par_dic_0}
+class UniformPolarizationPrior(UniformPriorMixin,
+                               IdentityTransformMixin, Prior):
+    """Uniform prior for the polarization. No change of coordinates."""
+    range_dic = {'psi': (0, np.pi)}
+    periodic_params = ['psi']
 
 
 class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
@@ -335,7 +305,7 @@ class UniformComovingVolumePrior(UniformLuminosityVolumePrior):
     """
     Distance prior uniform in comoving volume-time.
     The sampled parameter is
-        d_hat := d_effective / mchirp
+        d_hat := d_effective / mchirp^(5/6)
     where the effective distance is defined in one "reference" detector.
     """
     def lnprior(self, d_hat, ra, dec, psi, iota, m1, m2):
@@ -358,7 +328,7 @@ class UniformComovingVolumePriorSampleEffectiveDistance(
       d_effective = d_luminosity
                     / |self.geometric_factor_refdet(ra, dec, psi, iota)|
     where the effective distance is defined in one "reference" detector
-    (see parent class ReferenceDetectorMixin).
+    (see parent class ``ReferenceDetectorMixin``).
     """
     standard_params = ['d_luminosity']
     range_dic = {'d_effective': NotImplemented}

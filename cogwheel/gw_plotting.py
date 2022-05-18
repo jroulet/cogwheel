@@ -46,6 +46,7 @@ _LABELS = {
     'z': r'$z$',
     # Orientation
     'phi_ref': r'$\phi_{\rm ref}$',
+    'phi_ref_hat': r'$\hat{\phi}_{\rm ref}$',
     'psi_hat': r'$\hat{\psi}$',
     'psi': r'$\psi$',
     'cosiota': r'$\cos \iota$',
