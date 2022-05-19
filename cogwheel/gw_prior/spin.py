@@ -220,6 +220,8 @@ class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
         sx^2 + sy^2 < 1 - sz^2
     for each of the component spins, isotropic in the inclination and
     sky location and uniform in reference phase and time.
+    It corresponds to the IAS spin prior when combined with
+    `UniformEffectiveSpinPrior`.
     # TODO fold phi_ref_hat
     """
     standard_params = ['iota', 's1x', 's1y', 's2x', 's2y', 'phi_ref',
@@ -367,6 +369,30 @@ class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
                 'phi12': phi12,
                 'cums1r_s1z': cums1r_s1z,
                 'cums2r_s2z': cums2r_s2z}
+
+
+class IsotropicSpinsInplaneComponentsInclinationPhaseSkyLocationTimePrior(
+        UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior):
+    """
+    Like `UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior`
+    except it gives a spin prior uniform in magnitude and solid angle
+    (isotropic) for each of the constituent spins independently when
+    combined with `IsotropicSpinsAlignedComponentsPrior`.
+    """
+    @staticmethod
+    def _spin_transform(cumsr_sz, sz):
+        sr = np.sqrt(sz**2 * (1 / (sz**2)**cumsr_sz - 1))
+        chi = np.sqrt(sr**2 + sz**2)
+        tilt = np.arctan2(sr, sz)
+        return chi, tilt
+
+    @staticmethod
+    def _inverse_spin_transform(chi, tilt, sz):
+        """(cumsr_sz, sphi_hat) from (sx, sy, sz, phi_ref, iota)."""
+        sz_sq = sz**2
+        sr = np.tan(tilt) * sz
+        cumsr_sz = np.log(sz_sq / (sr**2 + sz_sq)) / np.log(sz_sq)
+        return cumsr_sz
 
 
 class ZeroInplaneSpinsPrior(FixedPrior):
