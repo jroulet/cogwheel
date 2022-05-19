@@ -16,6 +16,7 @@ uniform priors.
 from abc import ABC, abstractmethod
 import inspect
 import itertools
+import pandas as pd
 import numpy as np
 
 from cogwheel import utils
@@ -316,6 +317,25 @@ class Prior(ABC, utils.JSONMixin):
         initialization parameters.
         """
         return {}
+
+    def transform_samples(self, samples: pd.DataFrame):
+        """
+        Add columns for `self.standard_params` to `samples`.
+        `samples` must include columns for `self.sampled_params`.
+        """
+        sampled = samples[self.sampled_params]
+        standard = pd.DataFrame(list(np.vectorize(self.transform)(**sampled)))
+        utils.update_dataframe(samples, standard)
+
+    def inverse_transform_samples(self, samples: pd.DataFrame):
+        """
+        Add columns for `self.sampled_params` to `samples`.
+        `samples` must include columns for `self.standard_params`.
+        """
+        standard = samples[self.standard_params]
+        sampled = pd.DataFrame(list(
+            np.vectorize(self.inverse_transform)(**standard)))
+        utils.update_dataframe(samples, sampled)
 
 
 class CombinedPrior(Prior):

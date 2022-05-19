@@ -108,7 +108,7 @@ class PostProcessor:
         print(f'Processing {self.rundir}')
 
         print(' * Adding standard parameters...')
-        self.add_standard_parameters()
+        self.posterior.prior.transform_samples(self.samples)
         print(' * Computing relative-binning likelihood...')
         self.compute_lnl()
         print(' * Computing auxiliary likelihood products...')
@@ -118,12 +118,6 @@ class PostProcessor:
         print(' * Testing relative binning...')
         self.test_relative_binning()
         self.save_tests_and_samples()
-
-    def add_standard_parameters(self):
-        """Add columns for `standard_params` to `self.samples`."""
-        standard = pd.DataFrame(list(
-            np.vectorize(self.posterior.prior.transform)(**self.samples)))
-        utils.update_dataframe(self.samples, standard)
 
     def compute_lnl(self):
         """
@@ -243,7 +237,7 @@ def diagnostics(eventdir, reference_rundir=None, outfile=None):
                       overplot samples. Defaults to the first rundir by
                       name.
     outfile: path to save output as pdf. Defaults to
-             `{eventdir}/{Diagnostics.DIAGNOSTICS_FILENAME}`.
+             `eventdir/Diagnostics.DIAGNOSTICS_FILENAME`.
     """
     Diagnostics(eventdir, reference_rundir).diagnostics(outfile)
 
