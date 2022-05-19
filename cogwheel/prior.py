@@ -544,7 +544,7 @@ class CombinedPrior(Prior):
         instance.
         """
         init_dicts = [subprior.get_init_dict() for subprior in self.subpriors]
-        return utils.merge_dictionaries_safely(init_dicts)
+        return utils.merge_dictionaries_safely(*init_dicts)
 
     @classmethod
     def get_fast_sampled_params(cls, fast_standard_params):

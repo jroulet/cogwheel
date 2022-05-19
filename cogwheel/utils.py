@@ -60,7 +60,7 @@ class _DifferentialEvolutionSolverWithGuesses(
         self.init_population_array(population)
 
 
-def merge_dictionaries_safely(dics):
+def merge_dictionaries_safely(*dics):
     """
     Merge multiple dictionaries into one.
     Accept repeated keys if values are consistent, otherwise raise
