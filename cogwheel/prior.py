@@ -46,36 +46,49 @@ class Prior(ABC, utils.JSONMixin):
 
     Attributes
     ----------
-    range_dic: Dictionary whose keys are sampled parameter names and
-               whose values are pairs of floats defining their ranges.
-               Needs to be defined by the subclass (either as a class
-               attribute or instance attribute) before calling
-               `Prior.__init__()`.
-    sampled_params: List of sampled parameter names (keys of range_dic)
-    standard_params: List of standard parameter names.
-    conditioned_on: List of names of parameters on which this prior
-                    is conditioned on. To combine priors, conditioned-on
-                    parameters need to be among the standard parameters
-                    of another prior.
-    periodic_params: List of names of sampled parameters that are
-                     periodic.
-    folded_params: List of names of sampled parameters that are folded.
+    range_dic: dict
+        Dictionary whose keys are sampled parameter names and whose
+        values are pairs of floats defining their ranges.
+        Needs to be defined by the subclass (either as a class attribute
+        or instance attribute) before calling `Prior.__init__()`.
+
+    sampled_params: list of str
+        Names of sampled parameters (keys of `range_dic`).
+
+    standard_params: list of str
+        Names of standard parameters.
+
+    conditioned_on: list of str
+        Names of parameters on which this prior is conditioned on. To
+        combine priors, conditioned-on parameters need to be among the
+        standard parameters of another prior.
+
+    periodic_params: list of str
+        Names of sampled parameters that are periodic.
+
+    folded_params: list of str
+        Names of sampled parameters that are folded.
 
     Methods
     -------
-    lnprior: Method that takes sampled and conditioned-on parameters
-             and returns a float with the natural logarithm of the prior
-             probability density in the space of sampled parameters.
-             Provided by the subclass.
-    transform: Coordinate transformation, function that takes sampled
-               parameters and conditioned-on parameters and returns a
-               dict of standard parameters. Provided by the subclass.
-    lnprior_and_transform: Take sampled parameters and return a tuple
-                           with the result of (lnprior, transform).
-    inverse_transform: Inverse coordinate transformation, function that
-                       takes standard parameters and conditioned-on
-                       parameters and returns a dict of sampled
-                       parameters. Provided by the subclass.
+    lnprior:
+        Take sampled and conditioned-on parameters and return a float
+        with the natural logarithm of the prior probability density in
+        the space of sampled parameters. Provided by the subclass.
+
+    transform:
+        Coordinate transformation, take sampled parameters and
+        conditioned-on parameters and return a dict of standard
+        parameters. Provided by the subclass.
+
+    lnprior_and_transform:
+        Take sampled parameters and return a tuple with the result of
+        (lnprior, transform).
+
+    inverse_transform:
+        Inverse coordinate transformation, take standard parameters and
+        conditioned-on parameters and return a dict of sampled
+        parameters. Provided by the subclass.
     """
 
     conditioned_on = []
@@ -398,9 +411,9 @@ class CombinedPrior(Prior):
             """
             par_dic.update(dict(zip(inverse_params, par_vals)))
             for subprior in self.subpriors:
-                input_dic = {
-                    par: par_dic[par] for par in (subprior.standard_params
-                                                  + subprior.conditioned_on)}
+                input_dic = {par: par_dic[par]
+                             for par in (subprior.standard_params
+                                         + subprior.conditioned_on)}
                 par_dic.update(subprior.inverse_transform(**input_dic))
             return {par: par_dic[par] for par in self.sampled_params}
 
@@ -409,6 +422,9 @@ class CombinedPrior(Prior):
             Take sampled and conditioned-on parameters, and return a
             2-element tuple with the log of the prior and a dictionary
             with standard parameters.
+            The reason for this function is that it is necessary to
+            compute the transform in order to compute the prior, so if
+            both are wanted it is efficient to compute them at once.
             """
             par_dic.update(dict(zip(direct_params, par_vals)))
             standard_par_dic = self.transform(**par_dic)
