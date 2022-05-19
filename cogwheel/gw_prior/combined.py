@@ -170,35 +170,32 @@ class AlignedSpinLVCPrior(RegisteredPriorMixin, CombinedPrior):
                      FixedReferenceFrequencyPrior]
 
 
-# class IASPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
-#     """Precessing, flat in chieff, uniform comoving VT."""
-#     prior_classes = [UniformDetectorFrameMassesPrior,
-#                      UniformPhasePrior,
-#                      IsotropicInclinationPrior,
-#                      IsotropicSkyLocationPrior,
-#                      UniformTimePrior,
-#                      UniformPolarizationPrior,
-#                      UniformComovingVolumePrior,
-#                      UniformEffectiveSpinPrior,
-#                      UniformDiskInplaneSpinsPrior,
-#                      ZeroTidalDeformabilityPrior,
-#                      FixedReferenceFrequencyPrior]
+class IASPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
+    """Precessing, flat in chieff, uniform comoving VT."""
+    prior_classes = [
+        FixedReferenceFrequencyPrior,
+        UniformDetectorFrameMassesPrior,
+        UniformEffectiveSpinPrior,
+        UniformPolarizationPrior,
+        UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior,
+        UniformComovingVolumePrior,
+        ZeroTidalDeformabilityPrior]
 
 
-# class AlignedSpinIASPriorComovingVT(RegisteredPriorMixin,
-#                                     CombinedPrior):
-#     """Aligned spin, flat in chieff, uniform comoving VT."""
-#     prior_classes = [UniformDetectorFrameMassesPrior,
-#                      UniformPhasePrior,
-#                      IsotropicInclinationPrior,
-#                      IsotropicSkyLocationPrior,
-#                      UniformTimePrior,
-#                      UniformPolarizationPrior,
-#                      UniformComovingVolumePrior,
-#                      UniformEffectiveSpinPrior,
-#                      ZeroInplaneSpinsPrior,
-#                      ZeroTidalDeformabilityPrior,
-#                      FixedReferenceFrequencyPrior]
+class AlignedSpinIASPriorComovingVT(RegisteredPriorMixin,
+                                    CombinedPrior):
+    """Aligned spin, flat in chieff, uniform comoving VT."""
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformPhasePrior,
+                     UniformComovingVolumePrior,
+                     UniformEffectiveSpinPrior,
+                     ZeroInplaneSpinsPrior,
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 # class LVCPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
