@@ -14,6 +14,7 @@ import lal
 from cogwheel.cosmology import comoving_to_luminosity_diff_vt_ratio
 from cogwheel import gw_utils
 from cogwheel import skyloc_angles
+from cogwheel import utils
 from cogwheel.prior import Prior, UniformPriorMixin, IdentityTransformMixin
 
 
@@ -115,10 +116,13 @@ class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
         Return dictionary with keyword arguments to reproduce the class
         instance.
         """
-        return {'tgps': self.tgps,
-                'ref_det_name': self.ref_det_name,
-                'f_avg': self.f_avg,
-                'par_dic_0': self.par_dic_0}
+        init_dict = {'tgps': self.tgps,
+                     'ref_det_name': self.ref_det_name,
+                     'f_avg': self.f_avg,
+                     'par_dic_0': self.par_dic_0}
+
+        return utils.merge_dictionaries_safely(super().get_init_dict(),
+                                               init_dict)
 
 
 class IsotropicInclinationPrior(UniformPriorMixin, Prior):
@@ -179,7 +183,9 @@ class IsotropicSkyLocationPrior(UniformPriorMixin, Prior):
         Return dictionary with keyword arguments to reproduce the class
         instance.
         """
-        return self.skyloc.get_init_dict()
+        init_dict = self.skyloc.get_init_dict()
+        return utils.merge_dictionaries_safely(super().get_init_dict(),
+                                               init_dict)
 
 
 class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin,
@@ -191,7 +197,7 @@ class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin,
 
     def __init__(self, *, tgps, ref_det_name, t0_refdet=0, dt0=.07,
                  **kwargs):
-        self.range_dic = {'t_refdet': (t0_refdet - dt0, t0_refdet + dt0)}
+        self.range_dic['t_refdet'] = (t0_refdet - dt0, t0_refdet + dt0)
         super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
 
         self.tgps = tgps
@@ -210,10 +216,13 @@ class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin,
         Return dictionary with keyword arguments to reproduce the class
         instance.
         """
-        return {'t0_refdet': np.mean(self.range_dic['t_refdet']),
-                'dt0': np.diff(self.range_dic['t_refdet'])[0] / 2,
-                'tgps': self.tgps,
-                'ref_det_name': self.ref_det_name}
+        init_dict = {'t0_refdet': np.mean(self.range_dic['t_refdet']),
+                     'dt0': np.diff(self.range_dic['t_refdet'])[0] / 2,
+                     'tgps': self.tgps,
+                     'ref_det_name': self.ref_det_name}
+
+        return utils.merge_dictionaries_safely(super().get_init_dict(),
+                                               init_dict)
 
 
 class UniformPolarizationPrior(UniformPriorMixin,

@@ -28,7 +28,7 @@ from .spin import (UniformEffectiveSpinPrior,
                    UniformDiskInplaneSpinsPrior,
                    IsotropicSpinsAlignedComponentsPrior,
                    IsotropicSpinsInplaneComponentsPrior,
-                   IsotropicInclinationUniformDiskInplaneSpinsPrior,
+                   UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior,
                    ZeroInplaneSpinsPrior)
 
 prior_registry = {}
@@ -88,18 +88,16 @@ class RegisteredPriorMixin(ReferenceWaveformFinderMixin):
 # ----------------------------------------------------------------------
 # Default priors for the full set of variables, for convenience.
 
-# class IASPrior(RegisteredPriorMixin, CombinedPrior):
-#     """Precessing, flat in chieff, uniform luminosity volume."""
-#     prior_classes = [FixedReferenceFrequencyPrior,
-#                      UniformPhasePrior,
-#                      UniformDetectorFrameMassesPrior,
-#                      UniformEffectiveSpinPrior,
-#                      IsotropicInclinationUniformDiskInplaneSpinsPrior,
-#                      IsotropicSkyLocationPrior,
-#                      UniformTimePrior,
-#                      UniformPolarizationPrior,
-#                      UniformLuminosityVolumePrior,
-#                      ZeroTidalDeformabilityPrior]
+class IASPrior(RegisteredPriorMixin, CombinedPrior):
+    """Precessing, flat in chieff, uniform luminosity volume."""
+    prior_classes = [
+        FixedReferenceFrequencyPrior,
+        UniformDetectorFrameMassesPrior,
+        UniformEffectiveSpinPrior,
+        UniformPolarizationPrior,
+        UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior,
+        UniformLuminosityVolumePrior,
+        ZeroTidalDeformabilityPrior]
 
 
 # class IASPriorLSystem(RegisteredPriorMixin, CombinedPrior):

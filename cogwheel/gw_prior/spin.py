@@ -14,6 +14,9 @@ import lal
 import lalsimulation
 
 from cogwheel.prior import Prior, FixedPrior, UniformPriorMixin
+from .extrinsic import (UniformPhasePrior,
+                        UniformTimePrior,
+                        IsotropicSkyLocationPrior)
 
 
 class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
@@ -207,48 +210,43 @@ class IsotropicSpinsInplaneComponentsPrior(UniformPriorMixin, Prior):
                 's2phi_hat': s2phi_hat}
 
 
-class IsotropicInclinationUniformDiskInplaneSpinsPrior(
-        UniformPriorMixin, Prior):
+class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
+        UniformPhasePrior,
+        IsotropicSkyLocationPrior,
+        UniformTimePrior):
     """
-    Prior for in-plane spins and inclination that is uniform in the disk
+    Prior for in-plane spins, inclination, reference phase, sky location
+    and time that is uniform in the disk
         sx^2 + sy^2 < 1 - sz^2
-    for each of the component spins and isotropic in the inclination.
+    for each of the component spins, isotropic in the inclination and
+    sky location and uniform in reference phase and time.
+    # TODO fold phi_ref_hat
     """
-    standard_params = ['iota', 's1x', 's1y', 's2x', 's2y']
+    standard_params = ['iota', 's1x', 's1y', 's2x', 's2y', 'phi_ref',
+                       'ra', 'dec', 't_geocenter']
     range_dic = {'costheta_jn': (-1, 1),
                  'phi_jl_hat': (0, 2*np.pi),
                  'phi12': (0, 2*np.pi),
                  'cums1r_s1z': (0, 1),
-                 'cums2r_s2z': (0, 1)}
-    periodic_params = ['phi_jl_hat', 'phi12']
-    folded_params = ['costheta_jn']
-    conditioned_on = ['s1z', 's2z', 'phi_ref', 'm1', 'm2', 'f_ref']
+                 'cums2r_s2z': (0, 1),
+                 'phi_ref_hat': (-np.pi/2, 3*np.pi/2),
+                 'costhetanet': (-1, 1),
+                 'phinet_hat': (0, 2*np.pi),
+                 't_refdet': NotImplemented}
+    periodic_params = ['phi_jl_hat', 'phi12', 'phi_ref_hat']
+    folded_params = ['costheta_jn', 'phinet_hat']
+    conditioned_on = ['s1z', 's2z', 'm1', 'm2', 'f_ref', 'psi']
 
     @staticmethod
     def _spin_transform(cumsr_sz, sz):
+        """
+        The in-plane spin prior is flat in the disk.
+        Subclasses can override to change the spin prior.
+        """
         sr = np.sqrt(cumsr_sz * (1 - sz ** 2))
         chi = np.sqrt(sr**2 + sz**2)
         tilt = np.arctan2(sr, sz)
         return chi, tilt
-
-    def transform(self, costheta_jn, phi_jl_hat, phi12, cums1r_s1z,
-                  cums2r_s2z, s1z, s2z, phi_ref, m1, m2, f_ref):
-        """Spin prior cumulatives to spin components."""
-        chi1, tilt1 = self._spin_transform(cums1r_s1z, s1z)
-        chi2, tilt2 = self._spin_transform(cums2r_s2z, s2z)
-        theta_jn = np.arccos(costheta_jn)
-        phi_jl = (phi_jl_hat + np.pi * (costheta_jn < 0)) % (2*np.pi)
-
-        iota, s1x, s1y, s1z, s2x, s2y, s2z \
-            = lalsimulation.SimInspiralTransformPrecessingNewInitialConditions(
-                theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2,
-                m1*lal.MSUN_SI, m2*lal.MSUN_SI, f_ref, phi_ref)
-
-        return {'iota': iota,
-                's1x': s1x,
-                's1y': s1y,
-                's2x': s2x,
-                's2y': s2y}
 
     @staticmethod
     def _inverse_spin_transform(chi, tilt, sz):
@@ -256,17 +254,104 @@ class IsotropicInclinationUniformDiskInplaneSpinsPrior(
         Return value of `cumsr_sz`, the cumulative of the prior on
         in-plane spin magnitude given the aligned spin magnitude `sz`,
         for either companion.
-        The in-plane spin prior is flat in the disk.
+        The in-plane spin prior is flat in the disk. Subclasses can
+        override to change the spin prior.
         """
         cumsr_sz = (chi*np.sin(tilt))**2 / (1-sz**2)
         return cumsr_sz
 
+    def transform(self, costheta_jn, phi_jl_hat, phi12, cums1r_s1z,
+                  cums2r_s2z, phi_ref_hat, costhetanet, phinet_hat,
+                  t_refdet, s1z, s2z, m1, m2, f_ref, psi):
+        """
+        Return dictionary of standard parameters.
+        """
+        # Find `iota`, remember auxiliary spins for later:
+        iota, aux_inplane_spins = self._iota_aux_inplane_spins(
+            costheta_jn, phi_jl_hat, phi12, cums1r_s1z, cums2r_s2z, s1z, s2z,
+            m1, m2, f_ref)
+
+        # Use `iota` to get `ra, dec`:
+        ra_dec = IsotropicSkyLocationPrior.transform(
+            self, costhetanet, phinet_hat, iota)
+
+        # Use `t_refdet, ra, dec` to get `t_geocenter`:
+        t_geocenter = UniformTimePrior.transform(self, t_refdet, **ra_dec)
+
+        # Use `iota, ra, dec, t_geocenter` to get `phi_ref`:
+        phi_ref = UniformPhasePrior.transform(
+            self, phi_ref_hat, iota, **ra_dec, psi=psi, **t_geocenter)
+
+        # Use `phi_ref` to correct inplane spins:
+        inplane_spins = self._rotate_inplane_spins(**aux_inplane_spins,
+                                                   **phi_ref)
+
+        return {'iota': iota} | inplane_spins | phi_ref | ra_dec | t_geocenter
+
+    def _iota_aux_inplane_spins(self, costheta_jn, phi_jl_hat, phi12,
+                                cums1r_s1z, cums2r_s2z, s1z, s2z,
+                                m1, m2, f_ref):
+        """
+        Return inclination and dictionary of auxiliary inplane spins,
+        defined as the inplane spins corresponding to `phi_ref=0` at
+        fixed angles between total angular momentum J and line of sight.
+        """
+        chi1, tilt1 = self._spin_transform(cums1r_s1z, s1z)
+        chi2, tilt2 = self._spin_transform(cums2r_s2z, s2z)
+        theta_jn = np.arccos(costheta_jn)
+        phi_jl = (phi_jl_hat + np.pi * (costheta_jn < 0)) % (2*np.pi)
+
+        # Call transformation with `phi_ref=0`, which we don't know yet
+        # (inplane spins will be rotated by `-phi_ref` wrt final answer)
+        iota, s1x0, s1y0, s1z, s2x0, s2y0, s2z \
+            = lalsimulation.SimInspiralTransformPrecessingNewInitialConditions(
+                theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2,
+                m1*lal.MSUN_SI, m2*lal.MSUN_SI, f_ref, phiRef=0.)
+
+        return iota, {'s1x0': s1x0,
+                      's1y0': s1y0,
+                      's2x0': s2x0,
+                      's2y0': s2y0}
+
+    @staticmethod
+    def _rotate_inplane_spins(s1x0, s1y0, s2x0, s2y0, phi_ref):
+        """
+        Return dictionary of inplane spins from auxiliary inplane spins.
+        See method ``_iota_aux_inplane_spins``.
+        """
+        cos_phi = np.cos(phi_ref)
+        sin_phi = np.sin(phi_ref)
+        rotation = np.array([[cos_phi, sin_phi],
+                             [-sin_phi, cos_phi]])
+        s1x, s1y = rotation @ (s1x0, s1y0)
+        s2x, s2y = rotation @ (s2x0, s2y0)
+        return {'s1x': s1x,
+                's1y': s1y,
+                's2x': s2x,
+                's2y': s2y}
+
     def inverse_transform(self, iota, s1x, s1y, s2x, s2y, s1z, s2z,
-                          phi_ref, m1, m2, f_ref):
+                          phi_ref, ra, dec, m1, m2, f_ref, psi,
+                          t_geocenter):
         """
-        Inclination and spin components to theta_jn, phi_jl, phi12 and
-        inplane-spin-magnitude prior cumulatives.
+        Return dictionary of sampled parameters.
         """
+        costheta_jn_inplane_spins = self._invert_iota_inplane_spins(
+            iota, s1x, s1y, s1z, s2x, s2y, s2z, m1, m2, f_ref, phi_ref)
+
+        sky_angles = IsotropicSkyLocationPrior.inverse_transform(
+            self, ra, dec, iota)
+
+        phi_ref_hat = UniformPhasePrior.inverse_transform(
+            self, psi, iota, ra, dec, phi_ref, t_geocenter)
+
+        t_refdet = UniformTimePrior.inverse_transform(
+            self, t_geocenter, ra, dec)
+
+        return costheta_jn_inplane_spins | sky_angles | phi_ref_hat | t_refdet
+
+    def _invert_iota_inplane_spins(self, iota, s1x, s1y, s1z, s2x, s2y, s2z,
+                                   m1, m2, f_ref, phi_ref):
         theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2 \
             = lalsimulation.SimInspiralTransformPrecessingWvf2PE(
                 iota, s1x, s1y, s1z, s2x, s2y, s2z, m1, m2, f_ref, phi_ref)
