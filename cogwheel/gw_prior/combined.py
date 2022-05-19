@@ -100,28 +100,6 @@ class IASPrior(RegisteredPriorMixin, CombinedPrior):
         ZeroTidalDeformabilityPrior]
 
 
-# class IASPriorLSystem(RegisteredPriorMixin, CombinedPrior):
-#     """
-#     Precessing, flat in chieff, uniform luminosity volume.
-#     Physically equivalent to IASPrior, but using L (the orbital angular
-#     momentum at `f_ref`) as opposed to J (the total angular momentum at
-#     `f_ref`) to define azimuths for spins and zenith for direction of
-#     propagation. In practice, spin azimuths are slightly worse measured
-#     but the orbital phase becomes a fast parameter.
-#     """
-#     prior_classes = [UniformDetectorFrameMassesPrior,
-#                      UniformPhasePrior,
-#                      IsotropicInclinationPrior,
-#                      IsotropicSkyLocationPrior,
-#                      UniformTimePrior,
-#                      UniformPolarizationPrior,
-#                      UniformLuminosityVolumePrior,
-#                      UniformEffectiveSpinPrior,
-#                      UniformDiskInplaneSpinsPrior,
-#                      ZeroTidalDeformabilityPrior,
-#                      FixedReferenceFrequencyPrior]
-
-
 class AlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
     """Aligned spin, flat in chieff, uniform luminosity volume."""
     prior_classes = [UniformDetectorFrameMassesPrior,
