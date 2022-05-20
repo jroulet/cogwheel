@@ -61,12 +61,11 @@ class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
     Note: for waveforms with higher modes the posterior will have a
     discontinuity when ``angle(geometric_factor_refdet) = pi``. However
     the folded posterior does not have this discontinuity.
-    TODO make the phase folded.
     """
     standard_params = ['phi_ref']
     range_dic = {'phi_ref_hat': (-np.pi/2, 3*np.pi/2)}  # 0, pi away from edges
-    periodic_params = ['phi_ref_hat']
     conditioned_on = ['iota', 'ra', 'dec', 'psi', 't_geocenter']
+    folded_params = ['phi_ref_hat']
 
     def __init__(self, *, tgps, ref_det_name, f_avg, par_dic_0=None,
                  **kwargs):
@@ -84,6 +83,26 @@ class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
                                      'psi', 't_geocenter')}
             self._phase_refdet_0 = self._phase_refdet(**par_dic_0)
 
+    def _condition_folding(self, phi_ref_hat):
+        """
+        Function to flip `phi_ref_hat` on the right half of its range.
+        This is a hack to achieve a "shifting" folding for `phi_ref_hat`
+        with the current implementation in `Prior`, which actually
+        performs a reflective folding.
+        This function is useful for both the direct and inverse
+        transforms (i.e. this function is its own inverse).
+        """
+        left, right = self.range_dic['phi_ref_hat']
+        center = (left + right) / 2
+        if left <= phi_ref_hat <= center:
+            return phi_ref_hat
+
+        if center < phi_ref_hat <= right:
+            return self.range_dic['phi_ref_hat'][1] - (phi_ref_hat-center)
+
+        raise ValueError(f'`phi_ref_hat` out of bounds: {phi_ref_hat}')
+
+
     def _phase_refdet(self, iota, ra, dec, psi, t_geocenter, phi_ref):
         """
         Return the well-measurable overall phase at the reference
@@ -99,17 +118,18 @@ class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
         """phi_ref_hat to phi_ref."""
         phase_refdet = self._phase_refdet(iota, ra, dec, psi, t_geocenter,
                                           phi_ref=0)
-        phi_ref = (phi_ref_hat - (phase_refdet - self._phase_refdet_0) / 2
-                  ) % (2*np.pi)
+        unconditioned_phi_ref_hat = self._condition_folding(phi_ref_hat)
+        phi_ref = (unconditioned_phi_ref_hat
+                   - (phase_refdet - self._phase_refdet_0) / 2) % (2*np.pi)
         return {'phi_ref': phi_ref}
 
     def inverse_transform(self, psi, iota, ra, dec, phi_ref, t_geocenter):
         """phi_ref to phi_ref_hat"""
         phase_refdet = self._phase_refdet(iota, ra, dec, psi, t_geocenter,
                                           phi_ref=0)
-        phi_ref_hat = utils.mod(
+        phi_ref_hat = self._condition_folding(utils.mod(
             phi_ref + (phase_refdet - self._phase_refdet_0) / 2,
-            start=self.range_dic['phi_ref_hat'][0])
+            start=self.range_dic['phi_ref_hat'][0]))
         return {'phi_ref_hat': phi_ref_hat}
 
     def get_init_dict(self):

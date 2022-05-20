@@ -72,7 +72,6 @@ class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
     sky location and uniform in reference phase and time.
     It corresponds to the IAS spin prior when combined with
     `UniformEffectiveSpinPrior`.
-    # TODO fold phi_ref_hat
     """
     standard_params = ['iota', 's1x', 's1y', 's2x', 's2y', 'phi_ref',
                        'ra', 'dec', 't_geocenter']
@@ -85,8 +84,8 @@ class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
                  'costhetanet': (-1, 1),
                  'phinet_hat': (0, 2*np.pi),
                  't_refdet': NotImplemented}
-    periodic_params = ['phi_jl_hat', 'phi12', 'phi_ref_hat']
-    folded_params = ['costheta_jn', 'phinet_hat']
+    periodic_params = ['phi_jl_hat', 'phi12', 'phinet_hat']
+    folded_params = ['costheta_jn', 'phinet_hat', 'phi_ref_hat']
     conditioned_on = ['s1z', 's2z', 'm1', 'm2', 'f_ref', 'psi']
 
     @staticmethod
