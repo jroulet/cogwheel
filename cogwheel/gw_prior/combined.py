@@ -6,6 +6,7 @@ Prior classes defined here can be used for parameter estimation and
 are registered in a dictionary ``prior_registry``.
 """
 
+from cogwheel import utils
 from cogwheel.prior import CombinedPrior, Prior, check_inheritance_order
 
 from .extrinsic import (UniformPhasePrior,
@@ -145,42 +146,24 @@ class AlignedSpinLVCPrior(RegisteredPriorMixin, CombinedPrior):
 
 class IASPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
     """Precessing, flat in chieff, uniform comoving VT."""
-    prior_classes = [
-        FixedReferenceFrequencyPrior,
-        UniformDetectorFrameMassesPrior,
-        UniformEffectiveSpinPrior,
-        UniformPolarizationPrior,
-        UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior,
-        UniformComovingVolumePrior,
-        ZeroTidalDeformabilityPrior]
+    prior_classes = utils.replace(IASPrior.prior_classes,
+                                  UniformLuminosityVolumePrior,
+                                  UniformComovingVolumePrior)
 
 
 class AlignedSpinIASPriorComovingVT(RegisteredPriorMixin,
                                     CombinedPrior):
     """Aligned spin, flat in chieff, uniform comoving VT."""
-    prior_classes = [UniformDetectorFrameMassesPrior,
-                     IsotropicInclinationPrior,
-                     IsotropicSkyLocationPrior,
-                     UniformTimePrior,
-                     UniformPolarizationPrior,
-                     UniformPhasePrior,
-                     UniformComovingVolumePrior,
-                     UniformEffectiveSpinPrior,
-                     ZeroInplaneSpinsPrior,
-                     ZeroTidalDeformabilityPrior,
-                     FixedReferenceFrequencyPrior]
+    prior_classes = utils.replace(AlignedSpinIASPrior.prior_classes,
+                                  UniformLuminosityVolumePrior,
+                                  UniformComovingVolumePrior)
 
 
 class LVCPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
     """Precessing, isotropic spins, uniform comoving VT."""
-    prior_classes = [
-        FixedReferenceFrequencyPrior,
-        UniformDetectorFrameMassesPrior,
-        IsotropicSpinsAlignedComponentsPrior,
-        UniformPolarizationPrior,
-        IsotropicSpinsInplaneComponentsInclinationPhaseSkyLocationTimePrior,
-        UniformComovingVolumePrior,
-        ZeroTidalDeformabilityPrior]
+    prior_classes = utils.replace(LVCPrior.prior_classes,
+                                  UniformLuminosityVolumePrior,
+                                  UniformComovingVolumePrior)
 
 
 class AlignedSpinLVCPriorComovingVT(RegisteredPriorMixin,
@@ -188,17 +171,9 @@ class AlignedSpinLVCPriorComovingVT(RegisteredPriorMixin,
     """
     Aligned spins from isotropic distribution, uniform comoving VT.
     """
-    prior_classes = [UniformDetectorFrameMassesPrior,
-                     IsotropicInclinationPrior,
-                     IsotropicSkyLocationPrior,
-                     UniformTimePrior,
-                     UniformPolarizationPrior,
-                     UniformPhasePrior,
-                     UniformComovingVolumePrior,
-                     IsotropicSpinsAlignedComponentsPrior,
-                     ZeroInplaneSpinsPrior,
-                     ZeroTidalDeformabilityPrior,
-                     FixedReferenceFrequencyPrior]
+    prior_classes = utils.replace(AlignedSpinLVCPrior.prior_classes,
+                                  UniformLuminosityVolumePrior,
+                                  UniformComovingVolumePrior)
 
 
 class ExtrinsicParametersPrior(RegisteredPriorMixin, CombinedPrior):

@@ -87,9 +87,21 @@ def update_dataframe(df1, df2):
     """
     Modify `df1` in-place by adding the columns from `df2`, where `df1`
     and `df2` are pandas `DataFrame` objects.
+    Caution: if (some of) the columns of `df1` are also in `df2` they
+    get silently overwritten without checking for consistency.
     """
     for col, values in df2.iteritems():
         df1[col] = values
+
+
+def replace(sequence, old, new):
+    """
+    Return a list like `sequence` with the first occurrence of `old`
+    replaced by `new`.
+    """
+    out = list(sequence)
+    out[out.index(old)] = new
+    return out
 
 
 def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
