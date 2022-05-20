@@ -127,7 +127,7 @@ class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
                  'cums2z': (0, 1)}
     # Spin coordinates that are convenient for the
     # LVC isotropic spin prior (0 <= cumsz <= 1)
-    sz_grid = np.linspace(-1, 1, 2000)
+    sz_grid = np.linspace(-1, 1, 4000)
     cumsz_grid = (1 + sz_grid - sz_grid * np.log(np.abs(sz_grid))) / 2
     sz_interp = interp1d(cumsz_grid, sz_grid, bounds_error=True)
 
