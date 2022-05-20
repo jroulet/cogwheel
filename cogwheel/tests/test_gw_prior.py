@@ -56,10 +56,10 @@ class PriorTestCase(TestCase):
             par_dic = gen_random_par_dic(prior)
             par_dic_ = prior.inverse_transform(**prior.transform(**par_dic))
             assert np.allclose(list(par_dic.values()),
-                               list(par_dic_.values())), (
-                f'{prior} initialized with {init_params} does not have '
+                               list(par_dic_.values()), rtol=1e-4), (
+                f'{prior}\ninitialized with\n{init_params}\ndoes not have '
                 '`transform` inverse to `inverse_transform`:\n'
-                f'{par_dic} != {par_dic_}.')
+                f'{par_dic}\n!=\n{par_dic_}.')
 
     @staticmethod
     def test_periodicity():
