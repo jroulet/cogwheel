@@ -107,8 +107,9 @@ class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
         """phi_ref to phi_ref_hat"""
         phase_refdet = self._phase_refdet(iota, ra, dec, psi, t_geocenter,
                                           phi_ref=0)
-        phi_ref_hat = (phi_ref + (phase_refdet - self._phase_refdet_0) / 2
-                      ) % (2*np.pi)
+        phi_ref_hat = utils.mod(
+            phi_ref + (phase_refdet - self._phase_refdet_0) / 2,
+            start=self.range_dic['phi_ref_hat'][0])
         return {'phi_ref_hat': phi_ref_hat}
 
     def get_init_dict(self):

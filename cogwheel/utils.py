@@ -60,6 +60,14 @@ class _DifferentialEvolutionSolverWithGuesses(
         self.init_population_array(population)
 
 
+def mod(value, start=0, period=2*np.pi):
+    """
+    Modulus operation, generalized so that the domain of the output can
+    be specified.
+    """
+    return (value - start) % period + start
+
+
 def merge_dictionaries_safely(*dics):
     """
     Merge multiple dictionaries into one.
