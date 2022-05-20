@@ -40,24 +40,19 @@ class FixedIntrinsicParametersPrior(FixedPrior):
             dictionary containing entries for
             `m1, m2, s1x, s1y, s1z, s2x, s2y, s2z, l1, l2`.
             Spins and tidal deformabilities would default to `0.` if not
-            passed. Passing a `standard_par_dic` with other additional
-            or missing keys will raise a `ValueError`.
+            passed. Passing a `standard_par_dic` with other missing keys
+            will raise a `ValueError`. Extra keys are silently ignored
+            and passed to `super().__init__()`.
         """
-        self.standard_par_dic = waveform.DEFAULT_PARS | standard_par_dic
-
-        if missing := (self.__class__.standard_par_dic.keys()
-                       - self.standard_par_dic.keys()):
-            raise ValueError(f'`standard_par_dic` is missing keys: {missing}')
-
-        if extra := (self.standard_par_dic.keys()
-                     - self.__class__.standard_par_dic.keys()):
-            raise ValueError(f'`standard_par_dic` has extra keys: {extra}')
-
-        super().__init__(standard_par_dic=self.standard_par_dic, **kwargs)
+        self._original_par_dic = standard_par_dic
+        relevant_pars = self.standard_par_dic.keys() & standard_par_dic.keys()
+        relevant_dic = {par: standard_par_dic[par] for par in relevant_pars}
+        self.standard_par_dic = waveform.DEFAULT_PARS | relevant_dic
+        super().__init__(standard_par_dic=standard_par_dic, **kwargs)
 
     def get_init_dict(self):
         """Dictionary with arguments to reproduce class instance."""
-        return {'standard_par_dic': self.standard_par_dic}
+        return {'standard_par_dic': self._original_par_dic}
 
 
 class FixedReferenceFrequencyPrior(FixedPrior):

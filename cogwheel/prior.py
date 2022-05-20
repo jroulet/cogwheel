@@ -587,8 +587,8 @@ class CombinedPrior(Prior):
         """
         Return a list of parameter names that map to given "fast"
         standard parameters, useful for sampling fast-slow parameters.
-        Updating fast sampling parameters is guaranteed to only
-        change fast standard parameters.
+        Updating fast sampling parameters is guaranteed to only change
+        fast standard parameters.
         """
         return [par for prior_class in cls.prior_classes
                 for par in prior_class.get_fast_sampled_params(
@@ -601,6 +601,18 @@ class FixedPrior(Prior):
     Usage: Subclass `FixedPrior` and define a `standard_par_dic`
     attribute.
     """
+    def __init__(self, **kwargs):
+        """Check that `self.standard_par_dic` has the correct keys."""
+        super().__init__(**kwargs)
+
+        if missing := (self.__class__.standard_par_dic.keys()
+                       - self.standard_par_dic.keys()):
+            raise ValueError(f'`standard_par_dic` is missing keys: {missing}')
+
+        if extra := (self.standard_par_dic.keys()
+                     - self.__class__.standard_par_dic.keys()):
+            raise ValueError(f'`standard_par_dic` has extra keys: {extra}')
+
     @property
     @staticmethod
     @abstractmethod
