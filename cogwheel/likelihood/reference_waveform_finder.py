@@ -320,7 +320,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             self._matched_filter_timeseries_rb(self.par_dic_0)[:, i_refdet]))
         self.par_dic_0['t_geocenter'] = self._times[ind]
 
-        super()._set_summary()  # Recompute summary for non-timeshift
+        self._set_summary()  # Recompute summary
 
         # Refine at subgrid resolution
         def lnlike_refdet(t_geocenter):
