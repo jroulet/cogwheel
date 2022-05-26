@@ -230,6 +230,7 @@ class UniformPolarizationPrior(UniformPriorMixin,
     """Uniform prior for the polarization. No change of coordinates."""
     range_dic = {'psi': (0, np.pi)}
     periodic_params = ['psi']
+    folded_shifted_params = ['psi']
 
 
 class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):

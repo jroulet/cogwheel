@@ -86,7 +86,7 @@ class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
                  't_refdet': NotImplemented}
     periodic_params = ['phi_jl_hat', 'phi12', 'phinet_hat']
     folded_reflected_params = ['costheta_jn', 'phinet_hat']
-    folded_shifted_params = ['phi_ref_hat']
+    folded_shifted_params = ['phi_ref_hat', 'psi']
     conditioned_on = ['s1z', 's2z', 'm1', 'm2', 'f_ref', 'psi']
 
     @staticmethod
