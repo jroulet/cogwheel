@@ -25,8 +25,8 @@ _LABELS = {
     's2phi_hat': r'$\hat{\phi}_{s2}$',
     'cums1r_s1z': r'$C_1^\perp$',
     'cums2r_s2z': r'$C_2^\perp$',
-    'cums1z': r'$C_1^z$'
-    'cums2z': r'$C_2^z$'
+    'cums1z': r'$C_1^z$',
+    'cums2z': r'$C_2^z$',
     's1x': r'$s_{1x}$',
     's1y': r'$s_{1y}$',
     's1z': r'$s_{1z}$',
