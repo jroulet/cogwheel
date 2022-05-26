@@ -67,8 +67,16 @@ class Prior(ABC, utils.JSONMixin):
     periodic_params: list of str
         Names of sampled parameters that are periodic.
 
+    folded_reflected_params: list of str
+        Names of sampled parameters that are folded using reflection
+        about the center.
+
+    folded_shifted_params: list of str
+        Names of sampled parameters that are folded using
+        translation.
+
     folded_params: list of str
-        Names of sampled parameters that are folded.
+        ``folded_reflected_params + folded_shifted_params``.
 
     Methods
     -------
@@ -94,7 +102,8 @@ class Prior(ABC, utils.JSONMixin):
 
     conditioned_on = []
     periodic_params = []
-    folded_params = []
+    folded_reflected_params = []
+    folded_shifted_params = []
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -109,6 +118,10 @@ class Prior(ABC, utils.JSONMixin):
         self.folded_cubesize = self.cubesize.copy()
         self.folded_cubesize[self._folded_inds] /= 2
         self.signature = inspect.signature(self.transform)
+
+        self.fold = None  # Set by ``self._setup_folding_transforms()``
+        self.unfold = None  # Set by ``self._setup_folding_transforms()``
+        self._setup_folding_transforms()
 
     @utils.ClassProperty
     def sampled_params(self):
@@ -174,6 +187,15 @@ class Prior(ABC, utils.JSONMixin):
         return (self.lnprior(*par_vals, **par_dic),
                 self.transform(*par_vals, **par_dic))
 
+    @property
+    def folded_params(self):
+        """
+        Names of folded parameters that are either reflected or shifted,
+        in that order.
+        """
+        return self.folded_reflected_params + self.folded_shifted_params
+
+
     def _check_range_dic(self):
         """
         Ensure that range_dic values are stored as float arrays.
@@ -227,37 +249,81 @@ class Prior(ABC, utils.JSONMixin):
         unfolding_func.__signature__ = sig
         return unfolding_func
 
-    def unfold(self, folded_par_values):
-        """
-        Take an array of length `n_params` with parameter values in the
-        space of folded sampled parameters, and return an array of shape
-        `(2**n_folded_params, n_params)` with parameter values
-        corresponding to the different ways of unfolding.
-        """
-        original_values = folded_par_values[self._folded_inds]
-        mirrored_values = (2 * (self.cubemin[self._folded_inds]
-                                + self.folded_cubesize[self._folded_inds])
-                           - original_values)
+    def _setup_folding_transforms(self):
+        cubemin = self.cubemin[self._folded_inds]
+        folded_cubesize = self.folded_cubesize[self._folded_inds]
+        n_folds = 2 ** len(self.folded_params)
+        n_reflect = len(self.folded_reflected_params)
 
-        unfolded = np.array([folded_par_values] * 2**len(self._folded_inds))
-        unfolded[:, self._folded_inds] = list(itertools.product(
-            *zip(original_values, mirrored_values)))
+        # Helper functions, vectorized:
 
-        return unfolded
+        def normalize(sampled_par_values):
+            """Map folded parameters from their range to (0, 2)."""
+            return (sampled_par_values - cubemin) / folded_cubesize
 
-    def fold(self, *sampled_par_values, **sampled_par_dic):
-        """
-        Take an array of length `n_params` with parameter values in the
-        space of sampled parameters, and return an array of the same
-        shape with folded parameter values.
-        """
-        folded = np.array(self.signature.bind(*sampled_par_values,
-                                              **sampled_par_dic).args)
-        center = (self.cubemin[self._folded_inds]
-                  + self.folded_cubesize[self._folded_inds])
-        folded[self._folded_inds] = center - np.abs(folded[self._folded_inds]
-                                                    - center)
-        return folded
+        def unnormalize(normalized_values):
+            """Inverse of ``normalize``."""
+            return cubemin + normalized_values * folded_cubesize
+
+        def reflect(normalized_value):
+            """Linear interpolation of (0, 1, 2) -> (0, 1, 0)."""
+            return 1 - np.abs(1 - normalized_value)
+
+        def unreflect(normalized_value):
+            """(0, 1) -> (2, 1)"""
+            return 2 - normalized_value
+
+        def shift(normalized_value):
+            """(0, 1-, 1+, 2) -> (0, 1, 0, 1)."""
+            return normalized_value % 1
+
+        def unshift(normalized_value):
+            """(0, 1) -> (1, 2)."""
+            return normalized_value + 1
+
+        # Folding / unfolding transforms:
+
+        def unfold(folded_par_values):
+            """
+            Take an array of length `n_params` with parameter values in
+            the space of folded sampled parameters, and return an array
+            of shape `(2**n_folded_params, n_params)` with parameter
+            values corresponding to the different ways of unfolding.
+            """
+            folded_values = folded_par_values[self._folded_inds]
+            normalized = normalize(folded_values)
+            norm_unfolded = np.r_[unreflect(normalized[:n_reflect]),
+                                  unshift(normalized[n_reflect:])]
+            unfolded_values = unnormalize(norm_unfolded)
+
+            # Make 2**n copies of the original array and populate the
+            # places corresponding to folded parameters with all the
+            # combinations of unfold/no unfold:
+            unfoldings = np.tile(folded_par_values, (n_folds, 1))
+            unfoldings[:, self._folded_inds] = list(itertools.product(
+                *zip(folded_values, unfolded_values)))
+
+            return unfoldings
+
+        self.unfold = unfold
+
+        def fold(*sampled_par_values, **sampled_par_dic):
+            """
+            Take an array of length `n_params` with parameter values in
+            the space of sampled parameters, and return an array of the
+            same shape with folded parameter values.
+            """
+            out = np.array(self.signature.bind(*sampled_par_values,
+                                               **sampled_par_dic).args)
+            values = out[self._folded_inds]
+            normalized = normalize(values)
+            norm_folded = np.r_[reflect(normalized[:n_reflect]),
+                                shift(normalized[n_reflect:])]
+            out[self._folded_inds] = unnormalize(norm_folded)
+
+            return out
+
+        self.fold = fold
 
     @classmethod
     def init_parameters(cls, include_optional=True):
@@ -392,7 +458,8 @@ class CombinedPrior(Prior):
             * `standard_params`
             * `conditioned_on`
             * `periodic_params`
-            * `folded_params`
+            * `folded_reflected_params`
+            * `folded_shifted_params`
             * `transform`
             * `inverse_transform`
             * `lnprior_and_transform`
@@ -494,16 +561,16 @@ class CombinedPrior(Prior):
             * `standard_params`
             * `conditioned_on`
             * `periodic_params`
-            * `folded_params`.
-        Check whether subpriors are compatible and raise `PriorError`
-        if not.
+            * `folded_reflected_params`.
+            * `folded_shifted_params`
+        Raise `PriorError` if subpriors are incompatible.
         """
         cls.range_dic = {}
         for prior_class in cls.prior_classes:
             cls.range_dic.update(prior_class.range_dic)
 
         for params in ('standard_params', 'conditioned_on', 'periodic_params',
-                       'folded_params'):
+                       'folded_reflected_params', 'folded_shifted_params'):
             setattr(cls, params, [par for prior_class in cls.prior_classes
                                   for par in getattr(prior_class, params)])
 
