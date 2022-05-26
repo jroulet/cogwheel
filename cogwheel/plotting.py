@@ -310,7 +310,7 @@ class CornerPlot:
 
     @classmethod
     def from_samples(cls, samples: pd.DataFrame, plotstyle=None,
-                     bins=40, density=True):
+                     bins=40, density=True, weights=None):
         """
         Contructor that estimates the probability densities from a
         histogram of samples.
@@ -337,13 +337,14 @@ class CornerPlot:
 
         for par, values in samples.iteritems():
             pdfs_1d[par], bin_edges[par] = np.histogram(values, bins=bins,
-                                                        density=density)
+                                                        density=density,
+                                                        weights=weights)
             arrs_1d[par] = get_midpoints(bin_edges[par])
 
         for xpar, ypar in itertools.combinations(samples, 2):
             histogram_2d, _, _ = np.histogram2d(
                 samples[xpar], samples[ypar],
-                bins=(bin_edges[xpar], bin_edges[ypar]))
+                bins=(bin_edges[xpar], bin_edges[ypar]), weights=weights)
             pdfs_2d[xpar, ypar] = histogram_2d.T  # Cartesian convention
 
         return cls(arrs_1d, pdfs_1d, pdfs_2d, plotstyle=plotstyle)
@@ -663,7 +664,7 @@ class MultiCornerPlot:
 
     @classmethod
     def from_samples(cls, dataframes, labels=None, bins=40, params=None,
-                     **plotstyle_kwargs):
+                     weights_col=None, **plotstyle_kwargs):
         """
         Parameters
         ----------
@@ -677,22 +678,26 @@ class MultiCornerPlot:
             How many histogram bins to use, the same for all parameters
             and all distributions.
 
-        params: list of strings, optional
+        params: list of str, optional
             Subset of columns present in all dataframes, to plot a
             reduced number of parameters.
+
+        weights_col: str, optional
+            If existing, use a column with this name to set weights for
+            the samples.
 
         **plotstyle_kwargs:
             Passed to ``PlotStyle`` constructor to override defaults.
         """
-        if params:
-            dataframes = [samples[params] for samples in dataframes]
+        params = params or slice(None)
 
         plotstyles = PlotStyle.get_many(len(dataframes),
                                         **plotstyle_kwargs)
 
-        corner_plots = [
-            cls.corner_plot_cls.from_samples(samples, next(plotstyles), bins)
-            for samples in dataframes]
+        corner_plots = [cls.corner_plot_cls.from_samples(
+                             samples[params], next(plotstyles), bins,
+                             weights=samples.get(weights_col))
+                        for samples in dataframes]
         return cls(corner_plots, labels)
 
     def plot(self, max_figsize=10., max_n_ticks=6, tightness=None,
