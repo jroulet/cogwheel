@@ -398,7 +398,6 @@ class CogwheelEncoder(NumpyEncoder):
     Encoder for classes in the `cogwheel` package that subclass
     `JSONMixin`.
     """
-
     def __init__(self, dirname=None, file_permissions=FILE_PERMISSIONS,
                  overwrite=False, **kwargs):
         super().__init__(**kwargs)
@@ -410,8 +409,8 @@ class CogwheelEncoder(NumpyEncoder):
     @staticmethod
     def _get_module_name(obj):
         module = obj.__class__.__module__
-        if module == '__main__':
-            module = inspect.getmodule(obj).__spec__.name
+        if module == '__main__' and (spec := inspect.getmodule(obj).__spec__):
+            module = spec.name
         return module
 
     def default(self, o):

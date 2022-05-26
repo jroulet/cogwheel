@@ -43,8 +43,8 @@ _LABELS = {
     's2phi': r'$\phi_{s2}$',
     'chip': r'$\chi_p$',
     # Distance
-    'd_hat': r'$\hat{D}$',
-    'd_luminosity': r'$D_L$',
+    'd_hat': r'$\hat{d}$',
+    'd_luminosity': r'$d_L$',
     'z': r'$z$',
     # Orientation
     'phi_ref': r'$\phi_{\rm ref}$',
@@ -79,7 +79,7 @@ _UNITS = (dict.fromkeys(['mchirp', 'm1', 'm2', 'mtot', 'mtot_source',
                          'm1_source', 'm2_source', 'mchirp_source'],
                         r'M$_\odot$')
           | dict.fromkeys(['t_refdet', 'tc', 't_geocenter'], 's')
-          | {'d_hat': r'Mpc M$_\odot^{-5/6}$',
+          | {'d_hat': r'$\frac{\rm{Mpc}}{M_{\odot}^{5/6}}$',
              'd_luminosity': 'Mpc',
              })
 

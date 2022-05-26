@@ -26,7 +26,7 @@ COGWHEEL_PATH = os.path.abspath(os.path.join(
 sys.path.append(COGWHEEL_PATH)
 from cogwheel import utils
 from cogwheel import gw_utils
-from cogwheel import grid as gd
+from . import grid as gd
 from cogwheel import cosmology as cosmo
 
 
