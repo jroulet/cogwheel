@@ -67,6 +67,9 @@ class Prior(ABC, utils.JSONMixin):
     periodic_params: list of str
         Names of sampled parameters that are periodic.
 
+    reflective_params: list of str
+        Names of sampled parameters that are reflective.
+
     folded_reflected_params: list of str
         Names of sampled parameters that are folded using reflection
         about the center.
@@ -102,6 +105,7 @@ class Prior(ABC, utils.JSONMixin):
 
     conditioned_on = []
     periodic_params = []
+    reflective_params = []
     folded_reflected_params = []
     folded_shifted_params = []
 
@@ -199,11 +203,15 @@ class Prior(ABC, utils.JSONMixin):
     def _check_range_dic(self):
         """
         Ensure that range_dic values are stored as float arrays.
-        Verify that ranges for all periodic and folded parameters were
-        provided.
+        Verify that ranges for all periodic, reflective and folded
+        parameters were provided.
         """
         if missing := (set(self.periodic_params) - self.range_dic.keys()):
             raise PriorError('Periodic parameters are missing from '
+                             f'`range_dic`: {", ".join(missing)}')
+
+        if missing := (set(self.reflective_params) - self.range_dic.keys()):
+            raise PriorError('Reflective parameters are missing from '
                              f'`range_dic`: {", ".join(missing)}')
 
         if missing := (set(self.folded_params) - self.range_dic.keys()):
@@ -458,6 +466,7 @@ class CombinedPrior(Prior):
             * `standard_params`
             * `conditioned_on`
             * `periodic_params`
+            * `reflective_params`
             * `folded_reflected_params`
             * `folded_shifted_params`
             * `transform`
@@ -561,6 +570,7 @@ class CombinedPrior(Prior):
             * `standard_params`
             * `conditioned_on`
             * `periodic_params`
+            * `reflective_params`
             * `folded_reflected_params`.
             * `folded_shifted_params`
         Raise `PriorError` if subpriors are incompatible.
@@ -569,8 +579,9 @@ class CombinedPrior(Prior):
         for prior_class in cls.prior_classes:
             cls.range_dic.update(prior_class.range_dic)
 
-        for params in ('standard_params', 'conditioned_on', 'periodic_params',
-                       'folded_reflected_params', 'folded_shifted_params'):
+        for params in ('standard_params', 'conditioned_on',
+                       'periodic_params', 'reflective_params',
+                       'folded_reflected_params', 'folded_shifted_params',):
             setattr(cls, params, [par for prior_class in cls.prior_classes
                                   for par in getattr(prior_class, params)])
 

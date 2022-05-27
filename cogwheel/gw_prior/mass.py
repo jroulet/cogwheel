@@ -21,6 +21,7 @@ class UniformDetectorFrameMassesPrior(Prior):
     standard_params = ['m1', 'm2']
     range_dic = {'mchirp': NotImplemented,
                  'lnq': NotImplemented}
+    reflective_params = ['lnq']
 
     def __init__(self, *, mchirp_range, q_min=.05, symmetrize_lnq=False,
                  **kwargs):

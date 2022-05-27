@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import scipy.special
 
+import dynesty
 import pymultinest
 # import ultranest
 # import ultranest.stepsampler
@@ -351,6 +352,60 @@ class PyMultiNest(Sampler):
         """
         self.run_kwargs['outputfiles_basename'] = os.path.join(dirname, '')
         super().to_json(dirname, *args, **kwargs)
+
+
+class Dynesty(Sampler):
+    """Sample a posterior or prior using ``dynesty``."""
+
+    @wraps(Sampler.__init__)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sampler = None
+
+    def _run(self):
+        periodic = [self.posterior.prior.sampled_params.index(par)
+                    for par in self.posterior.prior.periodic_params]
+        reflective = [self.posterior.prior.sampled_params.index(par)
+                      for par in self.posterior.prior.reflective_params]
+
+        self.sampler = dynesty.DynamicNestedSampler(
+            self._lnprob_dynesty,
+            self._cubetransform,
+            len(self.posterior.prior.sampled_params),
+            rstate=np.random.default_rng(0),
+            periodic=periodic,
+            reflective=reflective)
+        self.sampler.run_nested(**self.run_kwargs)
+
+    def load_samples(self):
+        """
+        Collect dynesty samples, resample from them to undo the
+        parameter folding. Return a ``pandas.DataFrame`` with samples.
+        """
+        folded = pd.DataFrame(self.sampler.results.samples,
+                              columns=self.posterior.prior.sampled_params)
+
+        # ``dynesty`` doesn't allow to save samples' metadata, so we
+        # have to recompute ``lnprobs``:
+        lnprobs = pd.DataFrame(
+            [self._get_lnprobs(**row) for _, row in folded.iterrows()],
+            columns=self._lnprob_cols)
+        utils.update_dataframe(folded, lnprobs)
+
+        samples = self.resample(folded)
+        samples['weights'] = np.exp(self.sampler.results.logwt
+                                    - self.sampler.results.logwt.max())
+        return samples
+
+    def _lnprob_dynesty(self, par_vals):
+        """Return the logarithm of the folded probability density."""
+        return scipy.special.logsumexp(self._get_lnprobs(*par_vals))
+
+    def _cubetransform(self, cube):
+        return (self.posterior.prior.cubemin
+                + cube * self.posterior.prior.folded_cubesize)
+
+
 
 # class Ultranest(Sampler):
 #     """
