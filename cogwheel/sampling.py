@@ -374,7 +374,8 @@ class Dynesty(Sampler):
             len(self.posterior.prior.sampled_params),
             rstate=np.random.default_rng(0),
             periodic=periodic,
-            reflective=reflective)
+            reflective=reflective,
+            sample='rwalk')
         self.sampler.run_nested(**self.run_kwargs)
 
     def load_samples(self):
@@ -404,7 +405,6 @@ class Dynesty(Sampler):
     def _cubetransform(self, cube):
         return (self.posterior.prior.cubemin
                 + cube * self.posterior.prior.folded_cubesize)
-
 
 
 # class Ultranest(Sampler):
