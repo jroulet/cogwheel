@@ -373,8 +373,8 @@ class Dynesty(Sampler):
             self._cubetransform,
             len(self.posterior.prior.sampled_params),
             rstate=np.random.default_rng(0),
-            periodic=periodic,
-            reflective=reflective,
+            periodic=periodic or None,
+            reflective=reflective or None,
             sample='rwalk')
         self.sampler.run_nested(**self.run_kwargs)
 
