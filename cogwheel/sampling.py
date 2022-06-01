@@ -370,7 +370,9 @@ class Dynesty(Sampler):
         reflective = [self.posterior.prior.sampled_params.index(par)
                       for par in self.posterior.prior.reflective_params]
 
-        sampler_keys = set(inspect.signature(dynesty.DynamicNestedSampler))
+        sampler_keys = (
+            set(inspect.signature(dynesty.DynamicNestedSampler).parameters)
+            & self.run_kwargs.keys())
         sampler_kwargs = {par: self.run_kwargs[par] for par in sampler_keys}
 
         run_keys = self.run_kwargs.keys() - sampler_keys
