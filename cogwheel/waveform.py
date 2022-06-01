@@ -1,6 +1,7 @@
 """Generate strain waveforms and project them onto detectors."""
 
 from collections import defaultdict, namedtuple
+import functools
 import numpy as np
 
 import lal
@@ -167,6 +168,8 @@ class WaveformGenerator(utils.JSONMixin):
         self.n_slow_evaluations = 0
         self.n_fast_evaluations = 0
 
+        self._cached_f = None
+
     @classmethod
     def from_event_data(cls, event_data, approximant,
                         harmonic_modes=None, disable_precession=False,
@@ -238,6 +241,16 @@ class WaveformGenerator(utils.JSONMixin):
                       for _ in range(n_cached_waveforms)]
         self._n_cached_waveforms = n_cached_waveforms
 
+    @functools.lru_cache(maxsize=16)
+    def _get_shifts(self, ra, dec, t_geocenter):
+        """Return (n_det, n_freq) array with e^(-2 i f t_det)."""
+        time_delays = gw_utils.time_delay_from_geocenter(
+            self.detector_names, ra, dec, self.tgps)
+        return np.exp(-2j*np.pi * self._cached_f
+                      * (self.tcoarse
+                         + t_geocenter
+                         + time_delays[:, np.newaxis]))
+
     def get_strain_at_detectors(self, f, par_dic, by_m=False):
         """
         Get strain measurable at detectors.
@@ -251,30 +264,29 @@ class WaveformGenerator(utils.JSONMixin):
 
         Return
         ------
-        n_detectors x n_frequencies array with strain at detector.
-        If by_m, output is (n_m x n_detectors x n_frequencies)
+        Array of shape (n_m?, n_detectors, n_frequencies) with strain at
+        detector, `n_m` is there only if `by_m=True`.
         """
         waveform_par_dic = {par: par_dic[par] for par in self._waveform_params}
 
-        # hplus_hcross shape: (n_m x 2 x n_frequencies), n_m optional
+        # hplus_hcross shape: (n_m?, 2, n_frequencies)
         hplus_hcross = self.get_hplus_hcross(f, waveform_par_dic, by_m)
 
-        # fplus_fcross shape: (2 x n_detectors)
-        fplus_fcross = np.array(gw_utils.fplus_fcross(
+        # fplus_fcross shape: (2, n_detectors)
+        fplus_fcross = gw_utils.fplus_fcross(
             self.detector_names, par_dic['ra'], par_dic['dec'], par_dic['psi'],
-            self.tgps))
+            self.tgps)
 
-        time_delays = gw_utils.time_delay_from_geocenter(
-            self.detector_names, par_dic['ra'], par_dic['dec'], self.tgps)
+        if not np.array_equal(f, self._cached_f):
+            self._get_shifts.cache_clear()
+            self._cached_f = f
 
-        # shifts shape: (n_detectors x n_frequencies)
-        shifts = np.exp(-2j*np.pi * f * (self.tcoarse
-                                         + par_dic['t_geocenter']
-                                         + time_delays[:, np.newaxis]))
+        shifts = self._get_shifts(par_dic['ra'], par_dic['dec'],
+                                  par_dic['t_geocenter'])
 
-        # Detector strain (n_m x n_detectors x n_frequencies), n_m optional
-        return np.sum(fplus_fcross[..., np.newaxis]
-                      * hplus_hcross[..., np.newaxis, :], axis=-3) * shifts
+        # Detector strain (n_m?, n_detectors, n_frequencies)
+        return np.einsum('pd, ...pf, df -> ...df',
+                         fplus_fcross, hplus_hcross, shifts)
 
     def get_hplus_hcross(self, f, waveform_par_dic, by_m=False):
         """

@@ -14,6 +14,7 @@ uniform priors.
 """
 
 from abc import ABC, abstractmethod
+import functools
 import inspect
 import itertools
 import pandas as pd
@@ -735,6 +736,7 @@ class UniformPriorMixin:
     It must be inherited before `Prior` (otherwise a `PriorError` is
     raised) so that abstract methods get overriden.
     """
+    @functools.lru_cache
     def lnprior(self, *par_vals, **par_dic):
         """
         Natural logarithm of the prior probability density.

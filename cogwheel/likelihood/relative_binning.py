@@ -85,12 +85,13 @@ class RelativeBinningLikelihood(CBCLikelihood):
             self.fbin, par_dic, by_m=True)
 
         # Sum over m and f axes, leave detector axis unsummed.
-        d_h = (self._d_h_weights * h_fbin.conj()).real.sum(axis=(0, -1))
+        d_h = np.einsum('mdf, mdf -> d', self._d_h_weights, h_fbin.conj()).real
 
         m_inds, mprime_inds = self._get_m_mprime_inds()
-        h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
-               ).real.sum(axis=(0, -1)))
-        return d_h - h_h/2
+        h_h = np.einsum('mdf, mdf, mdf -> d', self._h_h_weights,
+                        h_fbin[m_inds], h_fbin[mprime_inds].conj()).real
+
+        return d_h - h_h / 2
 
     @property
     def pn_phase_tol(self):

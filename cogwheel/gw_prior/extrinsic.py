@@ -7,6 +7,7 @@ attribute `prior_classes` that is a list of such priors (see
 Each may consume some arguments in the __init__(), but should forward
 as ``**kwargs`` any arguments that other priors may need.
 """
+import functools
 import numpy as np
 
 import lal
@@ -38,6 +39,7 @@ class ReferenceDetectorMixin:
         return gw_utils.fplus_fcross(self.ref_det_name, ra, dec, psi,
                                      self.tgps)[:, 0]
 
+    @functools.lru_cache
     def geometric_factor_refdet(self, ra, dec, psi, iota):
         """
         Return the complex geometric factor
@@ -47,7 +49,8 @@ class ReferenceDetectorMixin:
         Note that the amplitude |R| is between 0 and 1.
         """
         fplus, fcross = self.fplus_fcross_refdet(ra, dec, psi)
-        return (1 + np.cos(iota)**2) / 2 * fplus - 1j * np.cos(iota) * fcross
+        cosiota = np.cos(iota)
+        return (1 + cosiota**2) / 2 * fplus - 1j * cosiota * fcross
 
 
 class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
