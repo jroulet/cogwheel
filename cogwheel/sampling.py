@@ -3,6 +3,7 @@
 import abc
 import argparse
 import datetime
+import inspect
 import pathlib
 import os
 import sys
@@ -356,6 +357,7 @@ class PyMultiNest(Sampler):
 
 class Dynesty(Sampler):
     """Sample a posterior or prior using ``dynesty``."""
+    DEFAULT_RUN_KWARGS = {}
 
     @wraps(Sampler.__init__)
     def __init__(self, *args, **kwargs):
@@ -368,6 +370,12 @@ class Dynesty(Sampler):
         reflective = [self.posterior.prior.sampled_params.index(par)
                       for par in self.posterior.prior.reflective_params]
 
+        sampler_keys = set(inspect.signature(dynesty.DynamicNestedSampler))
+        sampler_kwargs = {par: self.run_kwargs[par] for par in sampler_keys}
+
+        run_keys = self.run_kwargs.keys() - sampler_keys
+        run_kwargs = {par: self.run_kwargs[par] for par in run_keys}
+
         self.sampler = dynesty.DynamicNestedSampler(
             self._lnprob_dynesty,
             self._cubetransform,
@@ -375,8 +383,9 @@ class Dynesty(Sampler):
             rstate=np.random.default_rng(0),
             periodic=periodic or None,
             reflective=reflective or None,
-            sample='rwalk')
-        self.sampler.run_nested(**self.run_kwargs)
+            sample='rwalk',
+            **sampler_kwargs)
+        self.sampler.run_nested(**run_kwargs)
 
     def load_samples(self):
         """
