@@ -26,14 +26,14 @@ def _construct_z_of_d_luminosity(cosmology=Planck18, z_max=10.):
     d_luminosity_arr = d_luminosity_of_z(z_arr, cosmology)
     interp_z_of_d = InterpolatedUnivariateSpline(d_luminosity_arr, z_arr)
 
-    def z_of_d_luminosity(d_luminosity):
+    def _z_of_d_luminosity(d_luminosity):
         """
         Return redshift as a function of luminosity distance (Mpc).
         """
         return interp_z_of_d(d_luminosity)[()]
 
     dz_dd_luminosity = interp_z_of_d.derivative()
-    return z_of_d_luminosity, dz_dd_luminosity
+    return _z_of_d_luminosity, dz_dd_luminosity
 
 
 z_of_d_luminosity, _dz_dd_luminosity = _construct_z_of_d_luminosity()
