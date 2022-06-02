@@ -233,7 +233,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, self.par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
 
-        d_h0 = self.event_data.blued_strain * np.conj(self._h0_f)
+        d_h0 = self.event_data.blued_strain * self._h0_f.conj()
         self._d_h_weights = (self._get_summary_weights(d_h0)
                              / np.conj(self._h0_fbin))
 
@@ -291,7 +291,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
                 = self._basis_splines @ arr_f
 
         return (4 * self.event_data.df
-                * projected_integrand @ self._coefficients.T)
+                * projected_integrand.dot(self._coefficients.T))
 
     def _get_h_f_interpolated(self, par_dic, *, normalize=False,
                               by_m=False):
