@@ -346,6 +346,9 @@ class UniformComovingVolumePrior(UniformLuminosityVolumePrior):
         """
         d_luminosity = d_hat * self._conversion_factor(ra, dec, psi, iota,
                                                        m1, m2)
+
+        if d_luminosity > self.d_luminosity_max:
+            return -np.inf
         return np.log(d_luminosity**3 / d_hat
                       * comoving_to_luminosity_diff_vt_ratio(d_luminosity))
 
