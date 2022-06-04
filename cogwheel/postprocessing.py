@@ -109,6 +109,7 @@ class PostProcessor:
 
         print(' * Adding standard parameters...')
         self.posterior.prior.transform_samples(self.samples)
+        self.posterior.likelihood.postprocess_samples(self.samples)
         print(' * Computing relative-binning likelihood...')
         self.compute_lnl()
         print(' * Computing auxiliary likelihood products...')

@@ -78,8 +78,21 @@ class RelativeBinningLikelihood(CBCLikelihood):
         Parameters
         ----------
         par_dic: dict
-            Waveform parameters, keys should match
-            ``self.waveform_generator.params``.
+            Waveform parameters, keys should match ``self.params``.
+        """
+        d_h, h_h = self._get_dh_hh_no_asd_drift(par_dic)
+        return d_h - h_h/2
+
+    def _get_dh_hh_no_asd_drift(self, par_dic):
+        """
+        Return two arrays of length n_detectors with the values of
+        `(d|h)`, `(h|h)`, no ASD-drift correction applied, using
+        relative binning.
+
+        Parameters
+        ----------
+        par_dic: dict
+            Waveform parameters, keys should match ``self.params``.
         """
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True)
@@ -90,8 +103,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         m_inds, mprime_inds = self._get_m_mprime_inds()
         h_h = np.einsum('mdf, mdf, mdf -> d', self._h_h_weights,
                         h_fbin[m_inds], h_fbin[mprime_inds].conj()).real
-
-        return d_h - h_h / 2
+        return d_h, h_h
 
     @property
     def pn_phase_tol(self):
@@ -330,7 +342,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
     @classmethod
     def from_reference_waveform_finder(
             cls, reference_waveform_finder, approximant,
-            fbin=None, pn_phase_tol=.05, spline_degree=3):
+            fbin=None, pn_phase_tol=.05, spline_degree=3, **kwargs):
         """
         Instantiate with help from a `ReferenceWaveformFinder` instance,
         which provides `waveform_generator`, `event_data` and
@@ -363,6 +375,10 @@ class RelativeBinningLikelihood(CBCLikelihood):
         waveform_generator = reference_waveform_finder.waveform_generator \
             .reinstantiate(approximant=approximant, harmonic_modes=None)
 
-        return cls(reference_waveform_finder.event_data, waveform_generator,
-                   reference_waveform_finder.par_dic_0, fbin,
-                   pn_phase_tol, spline_degree)
+        return cls(event_data=reference_waveform_finder.event_data,
+                   waveform_generator=waveform_generator,
+                   par_dic_0=reference_waveform_finder.par_dic_0,
+                   fbin=fbin,
+                   pn_phase_tol=pn_phase_tol,
+                   spline_degree=spline_degree,
+                   **kwargs)

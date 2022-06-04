@@ -406,5 +406,13 @@ class CBCLikelihood(utils.JSONMixin):
         plt.xlabel('Time (s)', size=12)
         return fig
 
+    def postprocess_samples(self, samples):
+        """
+        Placeholder method that can be overriden by subclasses.
+        This method will be called after sampling (e.g. marginalized
+        likelihoods un-marginalize the distribution in postprocessing).
+        """
+        del self, samples
+
     def __repr__(self):
         return f'{self.__class__.__name__}({self.event_data.eventname})'

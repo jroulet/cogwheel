@@ -1,15 +1,14 @@
 """
 Provide classes ``LookupTable`` and ``MarginalizedDistanceLikelihood``
 to sample using a likelihood marginalized over distance.
-TODO: Implement resampling.
 """
 
 from scipy.integrate import quad
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import (RectBivariateSpline,
+                               InterpolatedUnivariateSpline)
 import numpy as np
 
 from cogwheel.likelihood import RelativeBinningLikelihood
-from cogwheel import gw_prior
 from cogwheel import utils
 
 
@@ -97,17 +96,68 @@ class LookupTable(utils.JSONMixin):
         return self._interpolated_table(*self._get_x_y(d_h, h_h),
                                         grid=False)[()]
 
+    def _get_distance_bounds(self, d_h, h_h, sigmas=5.):
+        """
+        Return ``(d_min, d_max)`` pair of luminosity distance bounds to
+        the distribution at the ``sigmas`` level.
+        Let ``u = REFERENCE_DISTANCE / d_luminosity``, the likelihood is
+        Gaussian in ``u``. This function returns the luminosity
+        distances corresponding to ``u`` +/- `sigmas` deviations away
+        from the maximum.
+        Note: this can return negative values for the distance. This
+        behavior is intentional. These may be interpreted as infinity.
+        """
+        u_peak = d_h / (self.REFERENCE_DISTANCE * h_h)
+        delta_u = sigmas / np.sqrt(h_h)
+        return np.array([self.REFERENCE_DISTANCE / (u_peak + delta_u),
+                         self.REFERENCE_DISTANCE / (u_peak - delta_u)])
+
+    def sample_distance(self, d_h, h_h, num=None, resolution=256):
+        """
+        Return samples from the luminosity distance distribution given
+        the inner products (d|h), (h|h) of a waveform at distance
+        ``REFERENCE_DISTANCE``.
+
+        Parameters
+        ----------
+        d_h: float
+            Inner product (summed over detectors) between data and
+            waveform at ``self.REFERENCE_DISTANCE``.
+
+        h_h: float
+            Inner product (summed over detectors) of waveform at
+            ``self.REFERENCE_DISTANCE`` with itself.
+
+        num: int or None
+            How many samples to generate. ``None`` (default) generates a
+            single (scalar) sample.
+
+        resolution: int
+            How finely to interpolate the distance distribution when
+            generating samples.
+        """
+        u_bounds = 1 / self._get_distance_bounds(d_h, h_h, sigmas=7.)
+        focused_grid = 1 / np.linspace(*u_bounds, resolution)
+        focused_grid = focused_grid[(focused_grid > 0)
+                                    & (focused_grid < self.d_luminosity_max)]
+        broad_grid = np.linspace(0, self.d_luminosity_max, resolution)[1:]
+        distances = np.sort(np.concatenate([broad_grid, focused_grid]))
+        posterior = self._function_integrand(distances, d_h, h_h)
+        cumulative = InterpolatedUnivariateSpline(distances, posterior, k=1
+                                                 ).antiderivative()(distances)
+        return np.interp(np.random.uniform(0, cumulative[-1], num),
+                         cumulative, distances)
+
     def _function(self, d_h, h_h):
         """
         Function to interpolate with the aid of a lookup table.
         Return ``log(evidence) - overlap**2 / 2``, where ``evidence``
         is the value of the likelihood marginalized over distance.
         """
-        d_peak = self.REFERENCE_DISTANCE * h_h / d_h
-        delta_d = 5 * d_peak * np.sqrt(h_h) / (d_h + 1e-2)  # 5 sigmas
         return np.log(quad(self._function_integrand, 0, self.d_luminosity_max,
                            args=(d_h, h_h),
-                           points=(d_peak - delta_d, d_peak + delta_d))[0]
+                           points=self._get_distance_bounds(d_h, h_h)
+                           )[0]
                       + 1e-100)
 
     def _function_integrand(self, d_luminosity, d_h, h_h):
@@ -169,8 +219,7 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
     """
     def __init__(self, lookup_table: LookupTable, event_data,
                  waveform_generator, par_dic_0, fbin=None,
-                 pn_phase_tol=None, tolerance_params=None,
-                 spline_degree=3):
+                 pn_phase_tol=None, spline_degree=3):
         """
         Parameters
         ----------
@@ -183,24 +232,6 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         pn_phase_tol: Tolerance in the post-Newtonian phase [rad] used
                       for defining frequency bins. Alternatively, pass
                       `fbin`.
-        tolerance_params: dictionary with relative-binning tolerance
-                          parameters. Keys may include a subset of:
-          * `ref_wf_lnl_difference`: float, tolerable improvement in
-            value of log likelihood with respect to reference waveform.
-          * `raise_ref_wf_outperformed`: bool. If `True`, raise a
-            `RelativeBinningError` if the reference waveform is
-            outperformed by more than `ref_wf_lnl_difference`.
-            If `False`, silently update the reference waveform.
-          * check_relative_binning_every: int, every how many
-            evaluations to test accuracy of log likelihood computation
-            with relative binning against the expensive full FFT grid.
-          * relative_binning_dlnl_tol: float, absolute tolerance in
-            log likelihood for the accuracy of relative binning.
-            Whenever the tolerance is exceeded, `RelativeBinningError`
-            is raised.
-          * lnl_drop_from_peak: float, disregard accuracy tests if the
-            tested waveform achieves a poor log likelihood compared to
-            the reference waveform.
         spline_degree: int, degree of the spline used to interpolate the
                        ratio between waveform and reference waveform for
                        relative binning.
@@ -209,7 +240,7 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         """
 
         super().__init__(event_data, waveform_generator, par_dic_0, fbin,
-                         pn_phase_tol, tolerance_params, spline_degree)
+                         pn_phase_tol, spline_degree)
 
         self.lookup_table = lookup_table
 
@@ -236,21 +267,17 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
 
         return self.lookup_table(d_h, h_h) + d_h**2 / h_h / 2
 
+    def postprocess_samples(self, samples):
+        """
+        Add a column 'd_luminosity' to a DataFrame of samples, with values taken
+        randomly from the conditional posterior.
+        `samples` needs to have columns for all `self.params`.
+        """
+        @np.vectorize
+        def sample_distance(**par_dic):
+            dh_hh = self._get_dh_hh_no_asd_drift(
+                par_dic | {'d_luminosity': self.lookup_table.REFERENCE_DISTANCE})
 
-class MarginalizedDistanceIASPrior(gw_prior.RegisteredPriorMixin,
-                                   gw_prior.CombinedPrior):
-    """
-    Prior for usage with ``MarginalizedDistanceLikelihood``.
-    Similar to ``IASPrior`` except it does not include distance.
-    Uniform in effective spin and detector-frame component masses.
-    """
-    prior_classes = [gw_prior.UniformDetectorFrameMassesPrior,
-                     gw_prior.UniformPhasePrior,
-                     gw_prior.IsotropicInclinationPrior,
-                     gw_prior.IsotropicSkyLocationPrior,
-                     gw_prior.UniformTimePrior,
-                     gw_prior.UniformPolarizationPrior,
-                     gw_prior.FlatChieffPrior,
-                     gw_prior.UniformDiskInplaneSpinsPrior,
-                     gw_prior.ZeroTidalDeformabilityPrior,
-                     gw_prior.FixedReferenceFrequencyPrior]
+            d_h, h_h = np.matmul(dh_hh, self.asd_drift**-1)
+            return self.lookup_table.sample_distance(d_h, h_h)
+        samples['d_luminosity'] = sample_distance(**samples[self.params])
