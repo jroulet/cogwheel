@@ -4,13 +4,13 @@ import itertools
 from unittest import TestCase, main
 import numpy as np
 
-import lal
-
-from cogwheel.skyloc_angles import SkyLocAngles, DETECTORS
+from cogwheel import skyloc_angles
+from cogwheel import gw_utils
 
 
 DETECTOR_PAIRS = [''.join(pair)
-                  for pair in itertools.combinations(DETECTORS, 2)]
+                  for pair in itertools.combinations(gw_utils.DETECTORS, 2)]
+
 
 def instantiate_skyloc(detector_pair=None, tgps=None):
     """
@@ -22,7 +22,7 @@ def instantiate_skyloc(detector_pair=None, tgps=None):
         detector_pair = np.random.choice(DETECTOR_PAIRS)
     if tgps is None:
         tgps = np.random.uniform(0, 1e9)
-    return SkyLocAngles(detector_pair, tgps)
+    return skyloc_angles.SkyLocAngles(detector_pair, tgps)
 
 
 class SkyLocAnglesTestCase(TestCase):
@@ -55,14 +55,13 @@ class SkyLocAnglesTestCase(TestCase):
             thetanet = np.arccos(np.random.uniform(-1, 1))
             phinets = np.linspace(0, 2*np.pi, 20)
 
-            ras, decs = zip(*[skyloc.thetaphinet_to_radec(thetanet, phinet)
-                              for phinet in phinets])
-            timelags = [lal.TimeDelayFromEarthCenter(skyloc._det1_location,
-                                                     ra, dec, skyloc.tgps)
-                        - lal.TimeDelayFromEarthCenter(skyloc._det2_location,
-                                                       ra, dec, skyloc.tgps)
-                        for ra, dec in zip(ras, decs)]
-            assert np.allclose(timelags[0], timelags), locals()
+            radecs = [skyloc.thetaphinet_to_radec(thetanet, phinet)
+                      for phinet in phinets]
+
+            timelags = [np.subtract(*gw_utils.time_delay_from_geocenter(
+                            detector_pair, ra, dec, skyloc.tgps))
+                        for ra, dec in radecs]
+            np.testing.assert_allclose(timelags, timelags[0]), locals()
 
 
 if __name__ == '__main__':

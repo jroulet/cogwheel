@@ -60,7 +60,15 @@ class _DifferentialEvolutionSolverWithGuesses(
         self.init_population_array(population)
 
 
-def merge_dictionaries_safely(dics):
+def mod(value, start=0, period=2*np.pi):
+    """
+    Modulus operation, generalized so that the domain of the output can
+    be specified.
+    """
+    return (value - start) % period + start
+
+
+def merge_dictionaries_safely(*dics):
     """
     Merge multiple dictionaries into one.
     Accept repeated keys if values are consistent, otherwise raise
@@ -79,9 +87,21 @@ def update_dataframe(df1, df2):
     """
     Modify `df1` in-place by adding the columns from `df2`, where `df1`
     and `df2` are pandas `DataFrame` objects.
+    Caution: if (some of) the columns of `df1` are also in `df2` they
+    get silently overwritten without checking for consistency.
     """
     for col, values in df2.iteritems():
         df1[col] = values
+
+
+def replace(sequence, old, new):
+    """
+    Return a list like `sequence` with the first occurrence of `old`
+    replaced by `new`.
+    """
+    out = list(sequence)
+    out[out.index(old)] = new
+    return out
 
 
 def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
@@ -398,7 +418,6 @@ class CogwheelEncoder(NumpyEncoder):
     Encoder for classes in the `cogwheel` package that subclass
     `JSONMixin`.
     """
-
     def __init__(self, dirname=None, file_permissions=FILE_PERMISSIONS,
                  overwrite=False, **kwargs):
         super().__init__(**kwargs)
@@ -407,18 +426,25 @@ class CogwheelEncoder(NumpyEncoder):
         self.file_permissions = file_permissions
         self.overwrite = overwrite
 
+    @staticmethod
+    def _get_module_name(obj):
+        module = obj.__class__.__module__
+        if module == '__main__' and (spec := inspect.getmodule(obj).__spec__):
+            module = spec.name
+        return module
+
     def default(self, o):
         if o.__class__.__name__ == 'EventData':
             filename = os.path.join(self.dirname, f'{o.eventname}.npz')
             o.to_npz(filename=filename, overwrite=self.overwrite,
                      permissions=self.file_permissions)
             return {'__cogwheel_class__': o.__class__.__name__,
-                    '__module__': o.__class__.__module__,
+                    '__module__': self._get_module_name(o),
                     'filename': os.path.basename(filename)}
 
         if o.__class__.__name__ in class_registry:
             return {'__cogwheel_class__': o.__class__.__name__,
-                    '__module__': o.__class__.__module__,
+                    '__module__': self._get_module_name(o),
                     'init_kwargs': o.get_init_dict()}
 
         return super().default(o)

@@ -3,6 +3,7 @@
 import abc
 import argparse
 import datetime
+import inspect
 import pathlib
 import os
 import sys
@@ -13,12 +14,13 @@ import numpy as np
 import pandas as pd
 import scipy.special
 
+import dynesty
 import pymultinest
 # import ultranest
 # import ultranest.stepsampler
 
-from . import postprocessing
-from . import utils
+from cogwheel import postprocessing
+from cogwheel import utils
 
 SAMPLES_FILENAME = 'samples.feather'
 FINISHED_FILENAME = 'FINISHED.out'
@@ -27,6 +29,13 @@ class Sampler(abc.ABC, utils.JSONMixin):
     """
     Generic base class for sampling distributions.
     Subclasses implement the interface with specific sampling codes.
+
+    Parameter space folding is used; this means that some ("folded")
+    dimensions are sampled over half their original range, and a map to
+    the other half of the range is defined by reflecting about the
+    midpoint. The folded posterior distribution is defined as the sum of
+    the original posterior over all `2**n_folds` mapped points. This is
+    intended to reduce the number of modes in the posterior.
     """
     DEFAULT_RUN_KWARGS = {}  # Implemented by subclasses
     PROFILING_FILENAME = 'profiling'
@@ -147,7 +156,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         self.to_json(rundir, overwrite=resuming)
 
         package = pathlib.Path(__file__).parents[1].resolve()
-        module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
+        module = f'cogwheel.{os.path.basename(__file__)}'.removesuffix('.py')
 
         batch_path = rundir/'batchfile'
         with open(batch_path, 'w+') as batchfile:
@@ -192,7 +201,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         self.to_json(rundir, overwrite=resuming)
 
         package = pathlib.Path(__file__).parents[1].resolve()
-        module = f'cogwheel.{os.path.basename(__file__)}'.rstrip('.py')
+        module = f'cogwheel.{os.path.basename(__file__)}'.removesuffix('.py')
 
         batch_path = rundir/'batchfile'
         with open(batch_path, 'w+') as batchfile:
@@ -323,7 +332,7 @@ class PyMultiNest(Sampler):
     def _lnprob_pymultinest(self, par_vals, *_):
         """
         Update the extra entries `par_vals[n_dim : n_params+1]` with the
-        log posterior evaulated at each unfold. Return the logarithm of
+        log posterior evaluated at each unfold. Return the logarithm of
         the folded posterior.
         """
         lnprobs = self._get_lnprobs(*[par_vals[i] for i in range(self._ndim)])
@@ -344,6 +353,70 @@ class PyMultiNest(Sampler):
         """
         self.run_kwargs['outputfiles_basename'] = os.path.join(dirname, '')
         super().to_json(dirname, *args, **kwargs)
+
+
+class Dynesty(Sampler):
+    """Sample a posterior or prior using ``dynesty``."""
+    DEFAULT_RUN_KWARGS = {}
+
+    @wraps(Sampler.__init__)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sampler = None
+
+    def _run(self):
+        periodic = [self.posterior.prior.sampled_params.index(par)
+                    for par in self.posterior.prior.periodic_params]
+        reflective = [self.posterior.prior.sampled_params.index(par)
+                      for par in self.posterior.prior.reflective_params]
+
+        sampler_keys = (
+            set(inspect.signature(dynesty.DynamicNestedSampler).parameters)
+            & self.run_kwargs.keys())
+        sampler_kwargs = {par: self.run_kwargs[par] for par in sampler_keys}
+
+        run_keys = self.run_kwargs.keys() - sampler_keys
+        run_kwargs = {par: self.run_kwargs[par] for par in run_keys}
+
+        self.sampler = dynesty.DynamicNestedSampler(
+            self._lnprob_dynesty,
+            self._cubetransform,
+            len(self.posterior.prior.sampled_params),
+            rstate=np.random.default_rng(0),
+            periodic=periodic or None,
+            reflective=reflective or None,
+            sample='rwalk',
+            **sampler_kwargs)
+        self.sampler.run_nested(**run_kwargs)
+
+    def load_samples(self):
+        """
+        Collect dynesty samples, resample from them to undo the
+        parameter folding. Return a ``pandas.DataFrame`` with samples.
+        """
+        folded = pd.DataFrame(self.sampler.results.samples,
+                              columns=self.posterior.prior.sampled_params)
+
+        # ``dynesty`` doesn't allow to save samples' metadata, so we
+        # have to recompute ``lnprobs``:
+        lnprobs = pd.DataFrame(
+            [self._get_lnprobs(**row) for _, row in folded.iterrows()],
+            columns=self._lnprob_cols)
+        utils.update_dataframe(folded, lnprobs)
+
+        samples = self.resample(folded)
+        samples['weights'] = np.exp(self.sampler.results.logwt
+                                    - self.sampler.results.logwt.max())
+        return samples
+
+    def _lnprob_dynesty(self, par_vals):
+        """Return the logarithm of the folded probability density."""
+        return scipy.special.logsumexp(self._get_lnprobs(*par_vals))
+
+    def _cubetransform(self, cube):
+        return (self.posterior.prior.cubemin
+                + cube * self.posterior.prior.folded_cubesize)
+
 
 # class Ultranest(Sampler):
 #     """

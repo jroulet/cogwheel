@@ -22,10 +22,10 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import pandas as pd
 
-from . import grid
-from . import utils
-from . import sampling
-from . import prior
+from cogwheel import gw_plotting
+from cogwheel import utils
+from cogwheel import sampling
+from cogwheel import prior
 
 TESTS_FILENAME = 'postprocessing_tests.json'
 
@@ -78,7 +78,8 @@ class PostProcessor:
             self.tests = {'asd_drift': [],
                           'relative_binning': {},
                           'lnl_max': None,
-                          'lnl_0': self.posterior.likelihood._lnl_0}
+                          'lnl_0': self.posterior.likelihood.lnlike(
+                              self.posterior.likelihood.par_dic_0)}
 
         self._lnl_aux_cols = self.get_lnl_aux_cols(
             self.posterior.likelihood.event_data.detector_names)
@@ -87,9 +88,7 @@ class PostProcessor:
 
     @staticmethod
     def get_lnl_aux_cols(detector_names):
-        """
-        Return names of auxiliary log likelihood columns.
-        """
+        """Return names of auxiliary log likelihood columns."""
         return [f'lnl_aux_{det}' for det in detector_names]
 
     def process_samples(self):
@@ -109,7 +108,7 @@ class PostProcessor:
         print(f'Processing {self.rundir}')
 
         print(' * Adding standard parameters...')
-        self.add_standard_parameters()
+        self.posterior.prior.transform_samples(self.samples)
         print(' * Computing relative-binning likelihood...')
         self.compute_lnl()
         print(' * Computing auxiliary likelihood products...')
@@ -119,14 +118,6 @@ class PostProcessor:
         print(' * Testing relative binning...')
         self.test_relative_binning()
         self.save_tests_and_samples()
-
-    def add_standard_parameters(self):
-        """
-        Add columns for `standard_params` to `self.samples`.
-        """
-        standard = pd.DataFrame([self.posterior.prior.transform(**sample)
-                                 for _, sample in self.samples.iterrows()])
-        utils.update_dataframe(self.samples, standard)
 
     def compute_lnl(self):
         """
@@ -246,7 +237,7 @@ def diagnostics(eventdir, reference_rundir=None, outfile=None):
                       overplot samples. Defaults to the first rundir by
                       name.
     outfile: path to save output as pdf. Defaults to
-             `{eventdir}/{Diagnostics.DIAGNOSTICS_FILENAME}`.
+             `eventdir/Diagnostics.DIAGNOSTICS_FILENAME`.
     """
     Diagnostics(eventdir, reference_rundir).diagnostics(outfile)
 
@@ -263,7 +254,7 @@ class Diagnostics:
     DIAGNOSTICS_FILENAME = 'diagnostics.pdf'
     DEFAULT_TOLERANCE_PARAMS = {'asd_drift_dlnl_std': .1,
                                 'asd_drift_dlnl_max': .5,
-                                'lnl_max_exceeds_lnl_0': 5.,
+                                'lnl_max_exceeds_lnl_0': 15.,
                                 'lnl_0_exceeds_lnl_max': .1,
                                 'relative_binning_dlnl_std': .05,
                                 'relative_binning_dlnl_max': .25}
@@ -286,8 +277,8 @@ class Diagnostics:
         reference_rundir: path to reference run directory. Defaults to
                           the first (by name) rundir in `eventdir`.
         tolerance_params: dict with items to update the defaults from
-                          `TOLERANCE_PARAMS`. Values higher than their
-                          tolerance are highlighted in the table.
+                          `DEFAULT_TOLERANCE_PARAMS`. Values higher than
+                          their tolerance are highlighted in the table.
                           Keys include:
             * 'asd_drift_dlnl_std'
                 Tolerable standard deviation of log likelihood
@@ -363,17 +354,15 @@ class Diagnostics:
                 sampled_par_dic_0 = None
 
             ref_samples = pd.read_feather(refdir/'samples.feather')
-            ref_grid = grid.Grid.from_samples(sampled_params, ref_samples,
-                                              pdf_key=refdir.name)
-
             for otherdir in otherdirs:
                 other_samples = pd.read_feather(otherdir/'samples.feather')
-                other_grid = grid.Grid.from_samples(
-                    sampled_params, other_samples, pdf_key=otherdir.name)
-
-                grid.MultiGrid([ref_grid, other_grid]).corner_plot(
-                    figsize=(10, 10), set_legend=True,
-                    scatter_points=sampled_par_dic_0)
+                cornerplot = gw_plotting.MultiCornerPlot.from_samples(
+                    [ref_samples, other_samples],
+                    labels=[refdir.name, otherdir.name],
+                    params=sampled_params)
+                cornerplot.plot(max_n_ticks=3)
+                if sampled_par_dic_0:
+                    cornerplot.scatter_points(sampled_par_dic_0)
                 pdf.savefig(bbox_inches='tight')
 
     def get_rundirs(self):

@@ -3,8 +3,7 @@
 from unittest import TestCase, main
 import numpy as np
 
-from cogwheel.gw_utils import fplus_fcross
-from cogwheel.skyloc_angles import DETECTORS
+from cogwheel.gw_utils import fplus_fcross, DETECTORS
 
 
 class PolarizationTestCase(TestCase):

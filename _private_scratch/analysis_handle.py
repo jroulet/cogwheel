@@ -11,6 +11,7 @@ import pandas as pd
 from copy import deepcopy as dcopy
 
 from . import parameter_aliasing as aliasing
+from . import grid as gd
 from . import parameter_label_formatting as label_formatting
 from . import standard_intrinsic_transformations as pxform
 from . import pe_plotting as peplot
@@ -20,7 +21,6 @@ COGWHEEL_PATH = os.path.abspath(os.path.join(
 sys.path.append(COGWHEEL_PATH)
 from cogwheel import utils
 from cogwheel import sampling
-from cogwheel import grid as gd
 from cogwheel import cosmology as cosmo
 from cogwheel import postprocessing
 

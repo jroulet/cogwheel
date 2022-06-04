@@ -48,7 +48,7 @@ def get_random_par_dic(aligned_spins=False, tides=False):
         par_dic['l1'], par_dic['l2'] = np.random.uniform(0, 1000, 2)
 
     par_dic['iota'] = np.arccos(np.random.uniform(-1, 1))
-    par_dic['vphi'] = np.random.uniform(0, 2*np.pi)
+    par_dic['phi_ref'] = np.random.uniform(0, 2*np.pi)
 
     par_dic['ra'] = np.random.uniform(0, 2*np.pi)
     par_dic['dec'] = np.arcsin(np.random.uniform(-1, 1))
@@ -68,9 +68,9 @@ def get_random_par_dic(aligned_spins=False, tides=False):
 class WaveformGeneratorTestCase(TestCase):
     """Class to test `WaveformGenerator`."""
     @staticmethod
-    def test_vphi_and_distance():
+    def test_phi_ref_and_distance():
         """
-        Test that `WaveformGenerator` correctly implements `vphi` and
+        Test that `WaveformGenerator` correctly implements `phi_ref` and
         `d_luminosity` as fast parameters.
         """
         for approximant, app_metadata in waveform.APPROXIMANTS.items():
@@ -81,6 +81,7 @@ class WaveformGeneratorTestCase(TestCase):
                                              app_metadata.tides)
                 waveform_par_dic = {par: par_dic[par]
                                     for par in wfg._waveform_params}
+                lal_dic = wfg.create_lal_dict()
 
                 f = np.linspace(0, 1e3, 500)
 
@@ -88,7 +89,7 @@ class WaveformGeneratorTestCase(TestCase):
                 hplus_hcross = wfg.get_hplus_hcross(f, waveform_par_dic)
 
                 hplus_hcross_ = waveform.compute_hplus_hcross(
-                    f, waveform_par_dic, approximant)
+                    f, waveform_par_dic, approximant, lal_dic=lal_dic)
 
                 mask = hplus_hcross_ != 0
                 h_100hz = np.linalg.norm(
