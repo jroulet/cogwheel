@@ -261,7 +261,7 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         ``(d|h)**2 / (h|h) := overlap**2`` and ``(h|h)``
         """
         dh_hh = self._get_dh_hh_no_asd_drift(
-            par_dic | {'d_luminosity': self.lookup_table.REFERENCE_DISTANCE})
+            dict(par_dic) | {'d_luminosity': self.lookup_table.REFERENCE_DISTANCE})
 
         d_h, h_h = np.matmul(dh_hh, self.asd_drift**-1)
 
