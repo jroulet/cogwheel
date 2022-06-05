@@ -10,12 +10,14 @@ arbitrary waveform and a reference waveform.
 A class ``RelativeBinningLikelihood`` is provided. Its method ``lnlike``
 computes the log likelihood using relative binning.
 """
+import functools
 import itertools
 import numpy as np
 import scipy.interpolate
 import scipy.sparse
 
 from cogwheel import waveform
+from cogwheel import gw_utils
 from .likelihood import CBCLikelihood, check_bounds
 
 class RelativeBinningLikelihood(CBCLikelihood):
@@ -25,6 +27,9 @@ class RelativeBinningLikelihood(CBCLikelihood):
 
     Subclassed by ``ReferenceWaveformFinder``.
     """
+    _FIDUCIAL_CONFIGURATION = {'d_luminosity': 1.,
+                               'phi_ref': 0.}
+
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None, spline_degree=3):
         """
@@ -86,23 +91,77 @@ class RelativeBinningLikelihood(CBCLikelihood):
     def _get_dh_hh_no_asd_drift(self, par_dic):
         """
         Return two arrays of length n_detectors with the values of
-        `(d|h)`, `(h|h)`, no ASD-drift correction applied, using
-        relative binning.
+        ``(d|h)``, ``(h|h)``, using relative binning.
 
         Parameters
         ----------
         par_dic: dict
             Waveform parameters, keys should match ``self.params``.
         """
-        h_fbin = self.waveform_generator.get_strain_at_detectors(
-            self.fbin, par_dic, by_m=True)
+        # Pass fiducial configuration to hit cache often:
+        d_h_mpd, h_h_mpd = self._get_dh_hh_by_m_polarization_detector(
+            tuple((par_dic | self._FIDUCIAL_CONFIGURATION).items()))
 
-        # Sum over m and f axes, leave detector axis unsummed.
-        d_h = np.einsum('mdf, mdf -> d', self._d_h_weights, h_fbin.conj()).real
+        m_arr = np.fromiter(self.waveform_generator._harmonic_modes_by_m, int)
+        m_inds, mprime_inds = self._get_m_mprime_inds()
+        dh_phasor = np.exp(-1j * m_arr * par_dic['phi_ref'])
+        hh_phasor = np.exp(1j * (m_arr[m_inds] - m_arr[mprime_inds])
+                           * par_dic['phi_ref'])
+
+        # fplus_fcross shape: (2, n_detectors)
+        fplus_fcross = gw_utils.fplus_fcross(
+            self.waveform_generator.detector_names,
+            par_dic['ra'], par_dic['dec'], par_dic['psi'],
+            self.waveform_generator.tgps)
+
+        d_h = (np.einsum('mpd, pd, m -> d',
+                         d_h_mpd, fplus_fcross, dh_phasor).real
+               / par_dic['d_luminosity'])
+
+        h_h = (np.einsum('mpPd, pd, Pd, m -> d',
+                         h_h_mpd, fplus_fcross, fplus_fcross, hh_phasor).real
+               / par_dic['d_luminosity']**2)
+
+        return d_h, h_h
+
+    @functools.lru_cache(maxsize=16)
+    def _get_dh_hh_by_m_polarization_detector(self, par_dic_items):
+        """
+        Return ``d_h_0`` and ``h_h_0``, complex inner products for a
+        waveform ``h`` by azimuthal mode ``m`` and polarization (plus
+        and cross).
+        Useful for reusing computations when only ``psi``, ``phi_ref``
+        and/or ``d_luminosity`` change, as these parameters only affect
+        ``h`` by a scalar factor dependent on m and polarization.
+
+        Parameters
+        ----------
+        par_dic_items: tuple of (key, value) tuples
+            Contents of ``par_dic``, in tuple format so it's hashable.
+
+        Return
+        ------
+        d_h: (n_m, 2) array
+            ``(d|h_mp)`` complex inner product, where ``d`` is data and
+            ``h_mp`` is the waveform with co-precessing azimuthal mode
+            ``m`` and polarization ``p`` (plus or cross).
+        h_h: (n_m*(n_m+1)/2, 2, 2, n_detectors) array
+            ``(h_mp|h_m'p')`` complex inner product.
+
+        """
+        par_dic = dict(par_dic_items)
+        hplus_hcross_at_detectors \
+            = self.waveform_generator.get_hplus_hcross_at_detectors(
+                self.fbin, par_dic, by_m=True)
+
+        # Sum over f axis, don't take real part. Shape (n_m, 2, n_detectors)
+        d_h = np.einsum('mdf, mpdf -> mpd',
+                        self._d_h_weights, hplus_hcross_at_detectors.conj())
 
         m_inds, mprime_inds = self._get_m_mprime_inds()
-        h_h = np.einsum('mdf, mdf, mdf -> d', self._h_h_weights,
-                        h_fbin[m_inds], h_fbin[mprime_inds].conj()).real
+        h_h = np.einsum('mdf, mpdf, mPdf -> mpPd', self._h_h_weights,
+                        hplus_hcross_at_detectors[m_inds],
+                        hplus_hcross_at_detectors[mprime_inds].conj())
         return d_h, h_h
 
     @property

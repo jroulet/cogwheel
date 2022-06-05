@@ -273,16 +273,6 @@ class WaveformGenerator(utils.JSONMixin):
                       for _ in range(n_cached_waveforms)]
         self._n_cached_waveforms = n_cached_waveforms
 
-    @functools.lru_cache(maxsize=16)
-    def _get_shifts(self, ra, dec, t_geocenter):
-        """Return (n_det, n_freq) array with e^(-2 i f t_det)."""
-        time_delays = gw_utils.time_delay_from_geocenter(
-            self.detector_names, ra, dec, self.tgps)
-        return np.exp(-2j*np.pi * self._cached_f
-                      * (self.tcoarse
-                         + t_geocenter
-                         + time_delays[:, np.newaxis]))
-
     def get_strain_at_detectors(self, f, par_dic, by_m=False):
         """
         Get strain measurable at detectors.
@@ -299,26 +289,60 @@ class WaveformGenerator(utils.JSONMixin):
         Array of shape (n_m?, n_detectors, n_frequencies) with strain at
         detector, `n_m` is there only if `by_m=True`.
         """
-        waveform_par_dic = {par: par_dic[par] for par in self._waveform_params}
-
-        # hplus_hcross shape: (n_m?, 2, n_frequencies)
-        hplus_hcross = self.get_hplus_hcross(f, waveform_par_dic, by_m)
+        # shape: (n_m?, 2, n_detectors, n_frequencies)
+        hplus_hcross_at_detectors = self.get_hplus_hcross_at_detectors(
+            f, par_dic, by_m)
 
         # fplus_fcross shape: (2, n_detectors)
         fplus_fcross = gw_utils.fplus_fcross(
             self.detector_names, par_dic['ra'], par_dic['dec'], par_dic['psi'],
             self.tgps)
 
+        # Detector strain (n_m?, n_detectors, n_frequencies)
+        return np.einsum('pd, ...pdf -> ...df',
+                         fplus_fcross, hplus_hcross_at_detectors)
+
+    def get_hplus_hcross_at_detectors(self, f, par_dic, by_m=False):
+        """
+        Return plus and cross polarizations with time shifts applied
+        (but no fplus, fcross).
+
+        Parameters
+        ----------
+        f: 1d array of frequencies [Hz]
+        par_dic: parameter dictionary per `WaveformGenerator.params`.
+        by_m: bool, whether to return waveform separated by `m`
+              harmonic mode (summed over `l`), or already summed.
+
+        Return
+        ------
+        Array of shape (n_m?, 2, n_detectors, n_frequencies) with hplus,
+        hcross at detector, `n_m` is there only if `by_m=True`.
+        """
+        waveform_par_dic = {par: par_dic[par] for par in self._waveform_params}
+
+        # hplus_hcross shape: (n_m?, 2, n_frequencies)
+        hplus_hcross = self.get_hplus_hcross(f, waveform_par_dic, by_m)
+
+        # shifts shape: (n_detectors, n_frequencies)
         if not np.array_equal(f, self._cached_f):
             self._get_shifts.cache_clear()
             self._cached_f = f
-
         shifts = self._get_shifts(par_dic['ra'], par_dic['dec'],
                                   par_dic['t_geocenter'])
 
-        # Detector strain (n_m?, n_detectors, n_frequencies)
-        return np.einsum('pd, ...pf, df -> ...df',
-                         fplus_fcross, hplus_hcross, shifts)
+        # hplus, hcross (n_m?, 2, n_detectors, n_frequencies)
+        return np.einsum('...pf, df -> ...pdf', hplus_hcross, shifts)
+
+    @functools.lru_cache(maxsize=16)
+    def _get_shifts(self, ra, dec, t_geocenter):
+        """Return (n_detectors, n_frequencies) array with e^(-2 i f t_det)."""
+        time_delays = gw_utils.time_delay_from_geocenter(
+            self.detector_names, ra, dec, self.tgps)
+        return np.exp(-2j*np.pi * self._cached_f
+                      * (self.tcoarse
+                         + t_geocenter
+                         + time_delays[:, np.newaxis]))
 
     def get_hplus_hcross(self, f, waveform_par_dic, by_m=False):
         """
