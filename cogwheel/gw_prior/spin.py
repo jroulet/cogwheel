@@ -72,8 +72,9 @@ class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
     sky location and uniform in reference phase and time.
     It corresponds to the IAS spin prior when combined with
     `UniformEffectiveSpinPrior`.
+    # TODO break into little pieces
     """
-    standard_params = ['iota', 's1x', 's1y', 's2x', 's2y', 'phi_ref',
+    standard_params = ['iota', 's1x_n', 's1y_n', 's2x_n', 's2y_n', 'phi_ref',
                        'ra', 'dec', 't_geocenter']
     range_dic = {'costheta_jn': (-1, 1),
                  'phi_jl_hat': (0, 2*np.pi),
@@ -119,7 +120,7 @@ class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
         Return dictionary of standard parameters.
         """
         # Find `iota`, remember auxiliary spins for later:
-        iota, aux_inplane_spins = self._iota_aux_inplane_spins(
+        iota, inplane_spins = self._iota_inplane_spins(
             costheta_jn, phi_jl_hat, phi12, cums1r_s1z, cums2r_s2z, s1z, s2z,
             m1, m2, f_ref)
 
@@ -134,62 +135,41 @@ class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
         phi_ref = UniformPhasePrior.transform(
             self, phi_ref_hat, iota, **ra_dec, psi=psi, **t_geocenter)
 
-        # Use `phi_ref` to correct inplane spins:
-        inplane_spins = self._rotate_inplane_spins(**aux_inplane_spins,
-                                                   **phi_ref)
-
         return {'iota': iota} | inplane_spins | phi_ref | ra_dec | t_geocenter
 
-    def _iota_aux_inplane_spins(self, costheta_jn, phi_jl_hat, phi12,
-                                cums1r_s1z, cums2r_s2z, s1z, s2z,
-                                m1, m2, f_ref):
+    def _iota_inplane_spins(self, costheta_jn, phi_jl_hat, phi12,
+                            cums1r_s1z, cums2r_s2z, s1z, s2z, m1, m2,
+                            f_ref):
         """
-        Return inclination and dictionary of auxiliary inplane spins,
-        defined as the inplane spins corresponding to `phi_ref=0` at
-        fixed angles between total angular momentum J and line of sight.
+        Return inclination and dictionary of inplane spins, defined in a
+        coordinate system where `z` is parallel to the orbital angular
+        momentum `L` and the line of sight `N` lies in the `y-z` plane.
         """
         chi1, tilt1 = self._spin_transform(cums1r_s1z, s1z)
         chi2, tilt2 = self._spin_transform(cums2r_s2z, s2z)
         theta_jn = np.arccos(costheta_jn)
         phi_jl = (phi_jl_hat + np.pi * (costheta_jn < 0)) % (2*np.pi)
 
-        # Call transformation with `phi_ref=0`, which we don't know yet
-        # (inplane spins will be rotated by `-phi_ref` wrt final answer)
-        iota, s1x0, s1y0, s1z, s2x0, s2y0, s2z \
+        # Use `phi_ref=0` as a trick to define azimuths based on the
+        # line of sight rather than orbital separation.
+        iota, s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z \
             = lalsimulation.SimInspiralTransformPrecessingNewInitialConditions(
                 theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2,
                 m1*lal.MSUN_SI, m2*lal.MSUN_SI, f_ref, phiRef=0.)
 
-        return iota, {'s1x0': s1x0,
-                      's1y0': s1y0,
-                      's2x0': s2x0,
-                      's2y0': s2y0}
+        return iota, {'s1x_n': s1x_n,
+                      's1y_n': s1y_n,
+                      's2x_n': s2x_n,
+                      's2y_n': s2y_n}
 
-    @staticmethod
-    def _rotate_inplane_spins(s1x0, s1y0, s2x0, s2y0, phi_ref):
-        """
-        Return dictionary of inplane spins from auxiliary inplane spins.
-        See method ``_iota_aux_inplane_spins``.
-        """
-        cos_phi = np.cos(phi_ref)
-        sin_phi = np.sin(phi_ref)
-        rotation = np.array([[cos_phi, sin_phi],
-                             [-sin_phi, cos_phi]])
-        s1x, s1y = rotation @ (s1x0, s1y0)
-        s2x, s2y = rotation @ (s2x0, s2y0)
-        return {'s1x': s1x,
-                's1y': s1y,
-                's2x': s2x,
-                's2y': s2y}
-
-    def inverse_transform(self, iota, s1x, s1y, s2x, s2y, s1z, s2z,
-                          phi_ref, ra, dec, m1, m2, f_ref, psi,
-                          t_geocenter):
+    def inverse_transform(self, iota, s1x_n, s1y_n, s2x_n, s2y_n,
+                          s1z, s2z, phi_ref, ra, dec, m1, m2, f_ref,
+                          psi, t_geocenter):
         """
         Return dictionary of sampled parameters.
         """
         costheta_jn_inplane_spins = self._invert_iota_inplane_spins(
-            iota, s1x, s1y, s1z, s2x, s2y, s2z, m1, m2, f_ref, phi_ref)
+            iota, s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z, m1, m2, f_ref)
 
         sky_angles = IsotropicSkyLocationPrior.inverse_transform(
             self, ra, dec, iota)
@@ -202,11 +182,12 @@ class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
 
         return costheta_jn_inplane_spins | sky_angles | phi_ref_hat | t_refdet
 
-    def _invert_iota_inplane_spins(self, iota, s1x, s1y, s1z, s2x, s2y, s2z,
-                                   m1, m2, f_ref, phi_ref):
+    def _invert_iota_inplane_spins(self, iota, s1x_n, s1y_n, s1z,
+                                   s2x_n, s2y_n, s2z, m1, m2, f_ref):
         theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2 \
             = lalsimulation.SimInspiralTransformPrecessingWvf2PE(
-                iota, s1x, s1y, s1z, s2x, s2y, s2z, m1, m2, f_ref, phi_ref)
+                iota, s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z, m1, m2, f_ref,
+                phiRef=0.)
 
         cums1r_s1z = self._inverse_spin_transform(chi1, tilt1, s1z)
         cums2r_s2z = self._inverse_spin_transform(chi2, tilt2, s2z)
@@ -282,7 +263,7 @@ class IsotropicSpinsInplaneComponentsInclinationPhaseSkyLocationTimePrior(
 
 class ZeroInplaneSpinsPrior(FixedPrior):
     """Set inplane spins to zero."""
-    standard_par_dic = {'s1x': 0,
-                        's1y': 0,
-                        's2x': 0,
-                        's2y': 0}
+    standard_par_dic = {'s1x_n': 0,
+                        's1y_n': 0,
+                        's2x_n': 0,
+                        's2y_n': 0}

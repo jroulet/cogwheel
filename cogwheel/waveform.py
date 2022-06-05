@@ -10,10 +10,10 @@ import lalsimulation
 from cogwheel import gw_utils
 from cogwheel import utils
 
-ZERO_INPLANE_SPINS = {'s1x': 0.,
-                      's1y': 0.,
-                      's2x': 0.,
-                      's2y': 0.}
+ZERO_INPLANE_SPINS = {'s1x_n': 0.,
+                      's1y_n': 0.,
+                      's2x_n': 0.,
+                      's2y_n': 0.}
 
 DEFAULT_PARS = {**ZERO_INPLANE_SPINS,
                 's1z': 0.,
@@ -37,6 +37,32 @@ APPROXIMANTS = {
     }
 
 
+def _inplane_spins_xy_n_to_xy(par_dic):
+    """
+    Rotate inplane spins (s1x_n, s1y_n) and (s2x_n, s2y_n) by an angle
+    `-phi_ref` to get (s1x, s1y), (s2x, s2y).
+    `par_dic` needs to have keys 's1x_n', 's1y_n', 's2x_n', 's2y_n'.
+    Entries for 's1x', 's1y', 's2x', 's2y' will be added.
+
+    `x_n`, `y_n` are axes perpendicular to the orbital angular momentum
+    `L`, so that the line of sight `N` lies in the y-z plane, i.e.
+        N = (0, sin(iota), cos(iota))
+    in the (x_n, y_n, z) system.
+    `x`, `y` are axes perpendicular to the orbital angular momentum `L`,
+    so that the orbital separation is the x direction.
+    The two systems coincide when `phi_ref=0`.
+    """
+    sin_phi_ref = np.sin(par_dic['phi_ref'])
+    cos_phi_ref = np.cos(par_dic['phi_ref'])
+    rotation = np.array([[cos_phi_ref, sin_phi_ref],
+                         [-sin_phi_ref, cos_phi_ref]])
+
+    ((par_dic['s1x'], par_dic['s2x']),
+     (par_dic['s1y'], par_dic['s2y'])
+        ) = rotation.dot(((par_dic['s1x_n'], par_dic['s2x_n']),
+                          (par_dic['s1y_n'], par_dic['s2y_n'])))
+
+
 def within_bounds(par_dic):
     """
     Return whether parameters in `par_dic` are within physical bounds.
@@ -45,8 +71,8 @@ def within_bounds(par_dic):
                 ({'m1', 'm2', 'd_luminosity', 'l1', 'l2', 'iota'}
                  & par_dic.keys()))
             and np.all(np.linalg.norm(
-                [(par_dic['s1x'], par_dic['s1y'], par_dic['s1z']),
-                 (par_dic['s2x'], par_dic['s2y'], par_dic['s2z'])],
+                [(par_dic['s1x_n'], par_dic['s1y_n'], par_dic['s1z']),
+                 (par_dic['s2x_n'], par_dic['s2y_n'], par_dic['s2z'])],
                 axis=1) <= 1)
             and par_dic['iota'] <= np.pi
             and np.abs(par_dic['dec']) <= np.pi/2
@@ -61,21 +87,26 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
 
     Parameters
     ----------
-    approximant: String with the approximant name.
-    f: Frequency array in Hz
-    par_dic: Dictionary of source parameters. Needs to have these keys:
-                 * m1, m2: component masses (Msun)
-                 * d_luminosity: luminosity distance (Mpc)
-                 * iota: inclination (rad)
-                 * phi_ref: phase at reference frequency (rad)
-                 * f_ref: reference frequency (Hz)
-             plus, optionally:
-                 * s1x, s1y, s1z, s2x, s2y, s2z: dimensionless spins
-                 * l1, l2: dimensionless tidal deformabilities
-                 * lal_dic: LALDict instance with special approximant settings.
-    harmonic_modes: Optional, list of 2-tuples with (l, m) pairs
-                    specifying which (co-precessing frame) higher-order
-                    modes to include.
+    f: 1d array of type float
+        Frequency array in Hz
+
+    par_dic: dict
+        Source parameters. Needs to have these keys:
+            * m1, m2: component masses (Msun)
+            * d_luminosity: luminosity distance (Mpc)
+            * iota: inclination (rad)
+            * phi_ref: phase at reference frequency (rad)
+            * f_ref: reference frequency (Hz)
+        plus, optionally:
+            * s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z: dimensionless spins
+            * l1, l2: dimensionless tidal deformabilities
+            * lal_dic: LALDict instance with special approximant settings.
+
+    approximant: str
+        Approximant name.
+
+    harmonic_modes: list of 2-tuples with (l, m) pairs, optional
+        Which (co-precessing frame) higher-order modes to include.
     """
 
     # Parameters ordered for lalsimulation.SimInspiralChooseFDWaveformSequence
@@ -84,6 +115,9 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
         'f_ref', 'd_luminosity_meters', 'iota', 'lal_dic', 'approximant', 'f']
 
     par_dic = DEFAULT_PARS | par_dic
+
+    # Transform inplane spins to LAL's coordinate system.
+    _inplane_spins_xy_n_to_xy(par_dic)
 
     # SI unit conversions
     par_dic['d_luminosity_meters'] = par_dic['d_luminosity'] * 1e6 * lal.PC_SI
@@ -116,7 +150,7 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
     try:
         hplus, hcross = lalsimulation.SimInspiralChooseFDWaveformSequence(
             *[par_dic[par] for par in lal_params])
-    except:
+    except Exception:
         print('Error while calling LAL at these parameters:', par_dic)
         raise
     hplus_hcross = np.stack([hplus.data.data, hcross.data.data])
@@ -138,8 +172,8 @@ class WaveformGenerator(utils.JSONMixin):
     inplane spins.
     """
     params = sorted(['d_luminosity', 'dec', 'f_ref', 'iota', 'l1', 'l2',
-                     'm1', 'm2', 'psi', 'ra', 's1x', 's1y', 's1z',
-                     's2x', 's2y', 's2z', 't_geocenter', 'phi_ref'])
+                     'm1', 'm2', 'psi', 'ra', 's1x_n', 's1y_n', 's1z',
+                     's2x_n', 's2y_n', 's2z', 't_geocenter', 'phi_ref'])
 
     fast_params = sorted(['d_luminosity', 'dec', 'psi', 'ra', 't_geocenter',
                           'phi_ref'])
@@ -147,9 +181,6 @@ class WaveformGenerator(utils.JSONMixin):
 
     _projection_params = sorted(['dec', 'psi', 'ra', 't_geocenter'])
     _waveform_params = sorted(set(params) - set(_projection_params))
-
-    _s1xy_inds = list(map(slow_params.index, ['s1x', 's1y']))
-    _s2xy_inds = list(map(slow_params.index, ['s2x', 's2y']))
 
     def __init__(self, detector_names, tgps, tcoarse, approximant,
                  harmonic_modes=None, disable_precession=False,
@@ -314,7 +345,6 @@ class WaveformGenerator(utils.JSONMixin):
 
         slow_par_vals = np.array([waveform_par_dic[par]
                                   for par in self.slow_params])
-        self._rotate_inplane_spins(slow_par_vals, waveform_par_dic['phi_ref'])
 
         # Attempt to use cached waveform for fast evaluation:
         if matching_cache := self._matching_cache(slow_par_vals, f):
@@ -361,22 +391,6 @@ class WaveformGenerator(utils.JSONMixin):
         for function_name, value in self.lalsimulation_commands:
             getattr(lalsimulation, function_name)(lal_dic, value)
         return lal_dic
-
-    def _rotate_inplane_spins(self, slow_par_vals, phi_ref):
-        """
-        Rotate inplane spins (s1x, s1y) and (s2x, s2y) by an angle `phi_ref`,
-        inplace in `slow_par_vals`.
-        `slow_par_vals` must be a numpy array whose values correspond to
-        `self.slow_params`.
-        """
-        sin_phi_ref = np.sin(phi_ref)
-        cos_phi_ref = np.cos(phi_ref)
-        rotation = np.array([[cos_phi_ref, -sin_phi_ref],
-                             [sin_phi_ref, cos_phi_ref]])
-        slow_par_vals[self._s1xy_inds] = (rotation
-                                          @ slow_par_vals[self._s1xy_inds])
-        slow_par_vals[self._s2xy_inds] = (rotation
-                                          @ slow_par_vals[self._s2xy_inds])
 
     def _matching_cache(self, slow_par_vals, f, eps=1e-6):
         """

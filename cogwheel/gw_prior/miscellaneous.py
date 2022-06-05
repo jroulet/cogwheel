@@ -23,11 +23,11 @@ class FixedIntrinsicParametersPrior(FixedPrior):
     """Fix masses, spins and tidal deformabilities."""
     standard_par_dic = {'m1': NotImplemented,
                         'm2': NotImplemented,
-                        's1x': NotImplemented,
-                        's1y': NotImplemented,
+                        's1x_n': NotImplemented,
+                        's1y_n': NotImplemented,
                         's1z': NotImplemented,
-                        's2x': NotImplemented,
-                        's2y': NotImplemented,
+                        's2x_n': NotImplemented,
+                        's2y_n': NotImplemented,
                         's2z': NotImplemented,
                         'l1': NotImplemented,
                         'l2': NotImplemented}
@@ -38,7 +38,7 @@ class FixedIntrinsicParametersPrior(FixedPrior):
         ----------
         standard_par_dic:
             dictionary containing entries for
-            `m1, m2, s1x, s1y, s1z, s2x, s2y, s2z, l1, l2`.
+            `m1, m2, s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z, l1, l2`.
             Spins and tidal deformabilities would default to `0.` if not
             passed. Passing a `standard_par_dic` with other missing keys
             will raise a `ValueError`. Extra keys are silently ignored

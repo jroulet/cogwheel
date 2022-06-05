@@ -33,6 +33,10 @@ _LABELS = {
     's2x': r'$s_{2x}$',
     's2y': r'$s_{2y}$',
     's2z': r'$s_{2z}$',
+    's1x_n': r'$s_{1x}^N$',
+    's1y_n': r'$s_{1y}^N$',
+    's2x_n': r'$s_{2x}^N$',
+    's2y_n': r'$s_{2y}^N$',
     's1': r'$|s_1|$',
     's2': r'$|s_2|$',
     's1theta': r'$\theta_{s1}$',
@@ -81,8 +85,8 @@ _UNITS = (dict.fromkeys(['mchirp', 'm1', 'm2', 'mtot', 'mtot_source',
                         r'M$_\odot$')
           | dict.fromkeys(['t_refdet', 'tc', 't_geocenter'], 's')
           | {'d_hat': r'$\frac{\rm{Mpc}}{M_{\odot}^{5/6}}$',
-             'd_luminosity': 'Mpc',
-             })
+             'd_luminosity': 'Mpc',}
+         )
 
 
 class CornerPlot(plotting.CornerPlot):
