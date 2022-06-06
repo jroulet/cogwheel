@@ -403,8 +403,8 @@ class WaveformGenerator(utils.JSONMixin):
             self.n_slow_evaluations += 1
 
         # hplus_hcross is a (n_m x 2 x n_frequencies) array.
-        m_arr = np.array(list(self._harmonic_modes_by_m)).reshape((-1, 1, 1))
-        hplus_hcross = (np.exp(1j * m_arr * waveform_par_dic['phi_ref'])
+        m_arr = np.fromiter(self._harmonic_modes_by_m, int).reshape(-1, 1, 1)
+        hplus_hcross = (np.exp(1j * waveform_par_dic['phi_ref'] * m_arr)
                         / waveform_par_dic['d_luminosity'] * hplus_hcross_0)
         if by_m:
             return hplus_hcross

@@ -99,6 +99,9 @@ class RelativeBinningLikelihood(CBCLikelihood):
             Waveform parameters, keys should match ``self.params``.
         """
         # Pass fiducial configuration to hit cache often:
+        dphi = par_dic['phi_ref'] - self._FIDUCIAL_CONFIGURATION['phi_ref']
+        amp_ratio = (self._FIDUCIAL_CONFIGURATION['d_luminosity']
+                     / par_dic['d_luminosity'])
         par_dic_fiducial = (
             {par: par_dic[par]
              for par in self.waveform_generator.polarization_params}
@@ -108,9 +111,8 @@ class RelativeBinningLikelihood(CBCLikelihood):
 
         m_arr = np.fromiter(self.waveform_generator._harmonic_modes_by_m, int)
         m_inds, mprime_inds = self._get_m_mprime_inds()
-        dh_phasor = np.exp(-1j * m_arr * par_dic['phi_ref'])
-        hh_phasor = np.exp(1j * (m_arr[m_inds] - m_arr[mprime_inds])
-                           * par_dic['phi_ref'])
+        dh_phasor = np.exp(-1j * dphi * m_arr)
+        hh_phasor = np.exp(1j * dphi * (m_arr[m_inds] - m_arr[mprime_inds]))
 
         # fplus_fcross shape: (2, n_detectors)
         fplus_fcross = gw_utils.fplus_fcross(
@@ -118,14 +120,11 @@ class RelativeBinningLikelihood(CBCLikelihood):
             par_dic['ra'], par_dic['dec'], par_dic['psi'],
             self.waveform_generator.tgps)
 
-        d_h = (np.einsum('mpd, pd, m -> d',
-                         d_h_mpd, fplus_fcross, dh_phasor).real
-               / par_dic['d_luminosity'])
-
-        h_h = (np.einsum('mpPd, pd, Pd, m -> d',
-                         h_h_mpd, fplus_fcross, fplus_fcross, hh_phasor).real
-               / par_dic['d_luminosity']**2)
-
+        d_h = amp_ratio * np.einsum('mpd, pd, m -> d',
+                                    d_h_mpd, fplus_fcross, dh_phasor).real
+        h_h = amp_ratio**2 * np.einsum(
+            'mpPd, pd, Pd, m -> d',
+            h_h_mpd, fplus_fcross, fplus_fcross, hh_phasor).real
         return d_h, h_h
 
     @functools.lru_cache(maxsize=16)
@@ -133,7 +132,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         """
         Return ``d_h_0`` and ``h_h_0``, complex inner products for a
         waveform ``h`` by azimuthal mode ``m`` and polarization (plus
-        and cross).
+        and cross). No ASD-drift correction is applied.
         Useful for reusing computations when only ``psi``, ``phi_ref``
         and/or ``d_luminosity`` change, as these parameters only affect
         ``h`` by a scalar factor dependent on m and polarization.
@@ -165,7 +164,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         m_inds, mprime_inds = self._get_m_mprime_inds()
         h_h = np.einsum('mdf, mpdf, mPdf -> mpPd', self._h_h_weights,
                         hplus_hcross_at_detectors[m_inds],
-                        hplus_hcross_at_detectors[mprime_inds].conj())
+                        hplus_hcross_at_detectors.conj()[mprime_inds])
         return d_h, h_h
 
     @property
