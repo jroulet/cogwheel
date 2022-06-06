@@ -99,8 +99,12 @@ class RelativeBinningLikelihood(CBCLikelihood):
             Waveform parameters, keys should match ``self.params``.
         """
         # Pass fiducial configuration to hit cache often:
+        par_dic_fiducial = (
+            {par: par_dic[par]
+             for par in self.waveform_generator.polarization_params}
+            | self._FIDUCIAL_CONFIGURATION)
         d_h_mpd, h_h_mpd = self._get_dh_hh_by_m_polarization_detector(
-            tuple((par_dic | self._FIDUCIAL_CONFIGURATION).items()))
+            tuple(par_dic_fiducial.items()))
 
         m_arr = np.fromiter(self.waveform_generator._harmonic_modes_by_m, int)
         m_inds, mprime_inds = self._get_m_mprime_inds()

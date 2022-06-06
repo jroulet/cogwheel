@@ -181,6 +181,7 @@ class WaveformGenerator(utils.JSONMixin):
 
     _projection_params = sorted(['dec', 'psi', 'ra', 't_geocenter'])
     _waveform_params = sorted(set(params) - set(_projection_params))
+    polarization_params = sorted(set(params) - {'psi'})
 
     def __init__(self, detector_names, tgps, tcoarse, approximant,
                  harmonic_modes=None, disable_precession=False,
