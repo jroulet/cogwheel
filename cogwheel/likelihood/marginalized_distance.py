@@ -263,7 +263,7 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         dh_hh = self._get_dh_hh_no_asd_drift(
             dict(par_dic) | {'d_luminosity': self.lookup_table.REFERENCE_DISTANCE})
 
-        d_h, h_h = np.matmul(dh_hh, self.asd_drift**-1)
+        d_h, h_h = np.matmul(dh_hh, self.asd_drift**-2)
 
         return self.lookup_table(d_h, h_h) + d_h**2 / h_h / 2
 
@@ -278,6 +278,6 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
             dh_hh = self._get_dh_hh_no_asd_drift(
                 par_dic | {'d_luminosity': self.lookup_table.REFERENCE_DISTANCE})
 
-            d_h, h_h = np.matmul(dh_hh, self.asd_drift**-1)
+            d_h, h_h = np.matmul(dh_hh, self.asd_drift**-2)
             return self.lookup_table.sample_distance(d_h, h_h)
         samples['d_luminosity'] = sample_distance(**samples[self.params])
