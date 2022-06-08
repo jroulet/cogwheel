@@ -50,6 +50,9 @@ class LookupTable(utils.JSONMixin):
                  d_luminosity_max=D_LUMINOSITY_MAX, shape=(256, 128)):
         """
         Construct the interpolation table.
+        If a table with the same settings is found in the file in
+        ``LOOKUP_TABLES_FNAME``, it will be loaded for faster
+        instantiation. If not, the table will be computed and saved.
 
         Parameters
         ----------
@@ -77,12 +80,11 @@ class LookupTable(utils.JSONMixin):
 
         table = self._get_table(dh_grid, hh_grid)
         self._interpolated_table = RectBivariateSpline(x_arr, y_arr, table)
-
         self.tabulated = {'x': x_grid,
                           'y': y_grid,
                           'd_h': dh_grid,
                           'h_h': hh_grid,
-                          'function': table}  # Bookkeeping, not used.
+                          'function': self.table}  # Bookkeeping, not used.
 
     def _get_table(self, dh_grid, hh_grid):
         """
