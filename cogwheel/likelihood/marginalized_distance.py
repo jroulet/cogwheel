@@ -46,7 +46,7 @@ class LookupTable(utils.JSONMixin):
 
     def __init__(self, d_luminosity_prior_name: str = 'euclidean',
                  d_luminosity_max=D_LUMINOSITY_MAX,
-                 shape=(256, 128)):
+                 shape=(256, 128), table=None):
         """
         Construct the interpolation table.
 
@@ -69,13 +69,14 @@ class LookupTable(utils.JSONMixin):
 
         dh_grid, hh_grid = self._get_dh_hh(x_grid, y_grid)
 
-        table = np.vectorize(self._function)(dh_grid, hh_grid)
-        self._interpolated_table = RectBivariateSpline(x_arr, y_arr, table)
+        self.table = table if table else np.vectorize(self._function)(dh_grid, hh_grid)
+
+        self._interpolated_table = RectBivariateSpline(x_arr, y_arr, self.table)
         self.tabulated = {'x': x_grid,
                           'y': y_grid,
                           'd_h': dh_grid,
                           'h_h': hh_grid,
-                          'function': table}  # Bookkeeping, not used.
+                          'function': self.table}  # Bookkeeping, not used.
 
     def __call__(self, d_h, h_h):
         """
