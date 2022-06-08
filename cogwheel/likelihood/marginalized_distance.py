@@ -3,6 +3,7 @@ Provide classes ``LookupTable`` and ``MarginalizedDistanceLikelihood``
 to sample using a likelihood marginalized over distance.
 """
 
+from pathlib import Path
 from scipy.integrate import quad
 from scipy.interpolate import (RectBivariateSpline,
                                InterpolatedUnivariateSpline)
@@ -12,6 +13,7 @@ from cogwheel.likelihood import RelativeBinningLikelihood
 from cogwheel import utils
 
 
+LOOKUP_TABLES_FNAME = Path(__file__).parent / 'lookup_tables.npz'
 D_LUMINOSITY_MAX = 1.5e4  # Default distance integration limit (Mpc)
 
 
@@ -45,16 +47,20 @@ class LookupTable(utils.JSONMixin):
     _SIGMAS = 10.  # How far out the tail of the distribution to tabulate.
 
     def __init__(self, d_luminosity_prior_name: str = 'euclidean',
-                 d_luminosity_max=D_LUMINOSITY_MAX,
-                 shape=(256, 128)):
+                 d_luminosity_max=D_LUMINOSITY_MAX, shape=(256, 128)):
         """
         Construct the interpolation table.
 
         Parameters
         ----------
-        d_luminosity_prior: string, a key in `d_luminosity_priors`.
-        d_luminosity_max: Maximum luminosity distance (Mpc).
-        shape: (int, int), number of interpolating points in x and y.
+        d_luminosity_prior: string
+            Key in `d_luminosity_priors`.
+
+        d_luminosity_max: float
+            Maximum luminosity distance (Mpc).
+
+        shape: (int, int)
+            Number of interpolating points in x and y.
         """
         self.d_luminosity_prior_name = d_luminosity_prior_name
         self.d_luminosity_prior = d_luminosity_priors[
@@ -69,13 +75,35 @@ class LookupTable(utils.JSONMixin):
 
         dh_grid, hh_grid = self._get_dh_hh(x_grid, y_grid)
 
-        table = np.vectorize(self._function)(dh_grid, hh_grid)
+        table = self._get_table(dh_grid, hh_grid)
         self._interpolated_table = RectBivariateSpline(x_arr, y_arr, table)
+
         self.tabulated = {'x': x_grid,
                           'y': y_grid,
                           'd_h': dh_grid,
                           'h_h': hh_grid,
                           'function': table}  # Bookkeeping, not used.
+
+    def _get_table(self, dh_grid, hh_grid):
+        """
+        Attempt to load a previously computed table with the requested
+        settings. If this is not possible, compute the table and save it
+        for faster access in the future.
+        Note: if at some point the ``LOOKUP_TABLES_FNAME`` file gets too
+        large you are free to delete it.
+        """
+        load = LOOKUP_TABLES_FNAME.exists()
+        lookup_tables = np.load(LOOKUP_TABLES_FNAME) if load else {}
+
+        key = repr(self.get_init_dict())
+
+        if key in lookup_tables:
+            table = lookup_tables.get(key)
+        else:
+            table = np.vectorize(self._function)(dh_grid, hh_grid)
+            np.savez(LOOKUP_TABLES_FNAME, **lookup_tables, **{key: table})
+
+        return table
 
     def __call__(self, d_h, h_h):
         """
