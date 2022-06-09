@@ -14,9 +14,6 @@ import lal
 import lalsimulation
 
 from cogwheel.prior import Prior, FixedPrior, UniformPriorMixin
-from .extrinsic import (UniformPhasePrior,
-                        UniformTimePrior,
-                        IsotropicSkyLocationPrior)
 
 
 class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
@@ -60,35 +57,24 @@ class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
                 'cumchidiff': cumchidiff}
 
 
-class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
-        UniformPhasePrior,
-        IsotropicSkyLocationPrior,
-        UniformTimePrior):
+class UniformDiskInplaneSpinsIsotropicInclinationPrior(
+        UniformPriorMixin, Prior):
     """
-    Prior for in-plane spins, inclination, reference phase, sky location
-    and time that is uniform in the disk
+    Prior for in-plane spins and inclination that is uniform in the disk
         sx^2 + sy^2 < 1 - sz^2
-    for each of the component spins, isotropic in the inclination and
-    sky location and uniform in reference phase and time.
+    for each of the component spins and isotropic in the inclination.
     It corresponds to the IAS spin prior when combined with
     `UniformEffectiveSpinPrior`.
-    # TODO break into little pieces
     """
-    standard_params = ['iota', 's1x_n', 's1y_n', 's2x_n', 's2y_n', 'phi_ref',
-                       'ra', 'dec', 't_geocenter']
+    standard_params = ['iota', 's1x_n', 's1y_n', 's2x_n', 's2y_n']
     range_dic = {'costheta_jn': (-1, 1),
                  'phi_jl_hat': (0, 2*np.pi),
                  'phi12': (0, 2*np.pi),
                  'cums1r_s1z': (0, 1),
-                 'cums2r_s2z': (0, 1),
-                 'phi_ref_hat': (-np.pi/2, 3*np.pi/2),
-                 'costhetanet': (-1, 1),
-                 'phinet_hat': (0, 2*np.pi),
-                 't_refdet': NotImplemented}
+                 'cums2r_s2z': (0, 1)}
     periodic_params = ['phi_jl_hat', 'phi12']
-    folded_reflected_params = ['costheta_jn', 'phinet_hat']
-    folded_shifted_params = ['phi_ref_hat']
-    conditioned_on = ['s1z', 's2z', 'm1', 'm2', 'f_ref', 'psi']
+    folded_reflected_params = ['costheta_jn']
+    conditioned_on = ['s1z', 's2z', 'm1', 'm2', 'f_ref']
 
     @staticmethod
     def _spin_transform(cumsr_sz, sz):
@@ -113,33 +99,8 @@ class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
         cumsr_sz = (chi*np.sin(tilt))**2 / (1-sz**2)
         return cumsr_sz
 
-    def transform(self, costheta_jn, phi_jl_hat, phi12, cums1r_s1z,
-                  cums2r_s2z, phi_ref_hat, costhetanet, phinet_hat,
-                  t_refdet, s1z, s2z, m1, m2, f_ref, psi):
-        """
-        Return dictionary of standard parameters.
-        """
-        # Find `iota`, remember auxiliary spins for later:
-        iota, inplane_spins = self._iota_inplane_spins(
-            costheta_jn, phi_jl_hat, phi12, cums1r_s1z, cums2r_s2z, s1z, s2z,
-            m1, m2, f_ref)
-
-        # Use `iota` to get `ra, dec`:
-        ra_dec = IsotropicSkyLocationPrior.transform(
-            self, costhetanet, phinet_hat, iota)
-
-        # Use `t_refdet, ra, dec` to get `t_geocenter`:
-        t_geocenter = UniformTimePrior.transform(self, t_refdet, **ra_dec)
-
-        # Use `iota, ra, dec, t_geocenter` to get `phi_ref`:
-        phi_ref = UniformPhasePrior.transform(
-            self, phi_ref_hat, iota, **ra_dec, psi=psi, **t_geocenter)
-
-        return {'iota': iota} | inplane_spins | phi_ref | ra_dec | t_geocenter
-
-    def _iota_inplane_spins(self, costheta_jn, phi_jl_hat, phi12,
-                            cums1r_s1z, cums2r_s2z, s1z, s2z, m1, m2,
-                            f_ref):
+    def transform(self, costheta_jn, phi_jl_hat, phi12,
+                  cums1r_s1z, cums2r_s2z, s1z, s2z, m1, m2, f_ref):
         """
         Return inclination and dictionary of inplane spins, defined in a
         coordinate system where `z` is parallel to the orbital angular
@@ -157,33 +118,14 @@ class UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior(
                 theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2,
                 m1*lal.MSUN_SI, m2*lal.MSUN_SI, f_ref, phiRef=0.)
 
-        return iota, {'s1x_n': s1x_n,
-                      's1y_n': s1y_n,
-                      's2x_n': s2x_n,
-                      's2y_n': s2y_n}
+        return {'iota': iota,
+                's1x_n': s1x_n,
+                's1y_n': s1y_n,
+                's2x_n': s2x_n,
+                's2y_n': s2y_n}
 
     def inverse_transform(self, iota, s1x_n, s1y_n, s2x_n, s2y_n,
-                          s1z, s2z, phi_ref, ra, dec, m1, m2, f_ref,
-                          psi, t_geocenter):
-        """
-        Return dictionary of sampled parameters.
-        """
-        costheta_jn_inplane_spins = self._invert_iota_inplane_spins(
-            iota, s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z, m1, m2, f_ref)
-
-        sky_angles = IsotropicSkyLocationPrior.inverse_transform(
-            self, ra, dec, iota)
-
-        phi_ref_hat = UniformPhasePrior.inverse_transform(
-            self, psi, iota, ra, dec, phi_ref, t_geocenter)
-
-        t_refdet = UniformTimePrior.inverse_transform(
-            self, t_geocenter, ra, dec)
-
-        return costheta_jn_inplane_spins | sky_angles | phi_ref_hat | t_refdet
-
-    def _invert_iota_inplane_spins(self, iota, s1x_n, s1y_n, s1z,
-                                   s2x_n, s2y_n, s2z, m1, m2, f_ref):
+                           s1z, s2z, m1, m2, f_ref):
         theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2 \
             = lalsimulation.SimInspiralTransformPrecessingWvf2PE(
                 iota, s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z, m1, m2, f_ref,
@@ -237,10 +179,10 @@ class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
                 'cums2z': self._inverse_spin_transform(s2z)}
 
 
-class IsotropicSpinsInplaneComponentsInclinationPhaseSkyLocationTimePrior(
-        UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior):
+class IsotropicSpinsInplaneComponentsIsotropicInclinationPrior(
+        UniformDiskInplaneSpinsIsotropicInclinationPrior):
     """
-    Like `UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior`
+    Like `UniformDiskInplaneSpinsIsotropicInclinationPrior`
     except it gives a spin prior uniform in magnitude and solid angle
     (isotropic) for each of the constituent spins independently when
     combined with `IsotropicSpinsAlignedComponentsPrior`.

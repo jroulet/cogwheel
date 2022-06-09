@@ -26,8 +26,8 @@ from .miscellaneous import (ZeroTidalDeformabilityPrior,
 from .spin import (
     UniformEffectiveSpinPrior,
     IsotropicSpinsAlignedComponentsPrior,
-    UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior,
-    IsotropicSpinsInplaneComponentsInclinationPhaseSkyLocationTimePrior,
+    UniformDiskInplaneSpinsIsotropicInclinationPrior,
+    IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
     ZeroInplaneSpinsPrior)
 
 prior_registry = {}
@@ -93,8 +93,11 @@ class IASPrior(RegisteredPriorMixin, CombinedPrior):
         FixedReferenceFrequencyPrior,
         UniformDetectorFrameMassesPrior,
         UniformEffectiveSpinPrior,
+        UniformDiskInplaneSpinsIsotropicInclinationPrior,
         UniformPolarizationPrior,
-        UniformDiskInplaneSpinsInclinationPhaseSkyLocationTimePrior,
+        IsotropicSkyLocationPrior,
+        UniformTimePrior,
+        UniformPhasePrior,
         UniformLuminosityVolumePrior,
         ZeroTidalDeformabilityPrior]
 
@@ -121,7 +124,10 @@ class LVCPrior(RegisteredPriorMixin, CombinedPrior):
         UniformDetectorFrameMassesPrior,
         IsotropicSpinsAlignedComponentsPrior,
         UniformPolarizationPrior,
-        IsotropicSpinsInplaneComponentsInclinationPhaseSkyLocationTimePrior,
+        IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
+        IsotropicSkyLocationPrior,
+        UniformTimePrior,
+        UniformPhasePrior,
         UniformLuminosityVolumePrior,
         ZeroTidalDeformabilityPrior]
 
