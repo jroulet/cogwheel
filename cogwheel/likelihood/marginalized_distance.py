@@ -84,7 +84,7 @@ class LookupTable(utils.JSONMixin):
                           'y': y_grid,
                           'd_h': dh_grid,
                           'h_h': hh_grid,
-                          'function': self.table}  # Bookkeeping, not used.
+                          'function': table}  # Bookkeeping, not used.
 
     def _get_table(self, dh_grid, hh_grid):
         """
