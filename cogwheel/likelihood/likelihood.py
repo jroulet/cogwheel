@@ -1,4 +1,5 @@
-"""Compute likelihood of GW events.
+"""
+Compute likelihood of GW events.
 
 A class ``CBCLikelihood`` is defined. This can be used to compute
 likelihoods without resorting to the relative binning algorithm (slow)
@@ -28,8 +29,8 @@ def hole_edges(mask):
 
 def std_from_median(arr):
     """
-    Estimator of the standard deviation of an array based on
-    the median absolute deviation for robustness to outliers.
+    Estimator of the standard deviation of an array based on the median
+    absolute deviation for robustness to outliers.
     """
     mad = np.median(np.abs(arr - np.median(arr)))
     return mad / (np.sqrt(2) * special.erfinv(.5))
@@ -204,7 +205,8 @@ class CBCLikelihood(utils.JSONMixin):
 
         return np.std(arr[good])
 
-    def get_average_frequency(self, par_dic, ref_det_name=None, moment=1.):
+    def get_average_frequency(self, par_dic, ref_det_name=None,
+                              moment=1.):
         """
         Return average frequency in Hz, defined as
         ``(avg(f^moment))^(1/moment)``
@@ -274,9 +276,8 @@ class CBCLikelihood(utils.JSONMixin):
 
         Return
         ------
-        Array of shape (n_detectors, n_frequencies) with strain at
-        detector.
-        If `by_m`, output shape is (n_m, n_detectors, n_frequencies).
+        Array of shape (n_m?, n_detectors, n_frequencies) with strain at
+        detector. `n_m` is there only if `by_m=True`.
         """
 
         shape = ((len(self.waveform_generator._harmonic_modes_by_m),) if by_m

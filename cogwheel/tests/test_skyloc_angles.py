@@ -61,7 +61,7 @@ class SkyLocAnglesTestCase(TestCase):
             timelags = [np.subtract(*gw_utils.time_delay_from_geocenter(
                             detector_pair, ra, dec, skyloc.tgps))
                         for ra, dec in radecs]
-            np.testing.assert_allclose(timelags, timelags[0]), locals()
+            np.testing.assert_allclose(timelags, timelags[0])
 
 
 if __name__ == '__main__':
