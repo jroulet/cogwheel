@@ -62,6 +62,15 @@ class RelativeBinningLikelihood(CBCLikelihood):
         super().__init__(event_data, waveform_generator)
 
         self._spline_degree = spline_degree
+
+        # Backward compatibility fix, shouldn't happen in new code:
+        if ({'s1x_n', 's1y_n', 's2x_n', 's2y_n'}.isdisjoint(par_dic_0.keys())
+                and {'s1x_n', 's1y_n', 's2x_n', 's2y_n'} <= set(self.params)
+                and {'s1x', 's1y', 's2x', 's2y', 'phi_ref'} <= par_dic_0.keys()):
+            waveform.inplane_spins_xy_to_xy_n(par_dic_0)
+            for key in 's1x', 's1y', 's2x', 's2y':
+                del par_dic_0[key]
+
         self._par_dic_0 = par_dic_0
 
         if pn_phase_tol:

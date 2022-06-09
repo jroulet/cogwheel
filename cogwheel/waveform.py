@@ -37,7 +37,7 @@ APPROXIMANTS = {
     }
 
 
-def _inplane_spins_xy_n_to_xy(par_dic):
+def inplane_spins_xy_n_to_xy(par_dic):
     """
     Rotate inplane spins (s1x_n, s1y_n) and (s2x_n, s2y_n) by an angle
     `-phi_ref` to get (s1x, s1y), (s2x, s2y).
@@ -61,6 +61,32 @@ def _inplane_spins_xy_n_to_xy(par_dic):
      (par_dic['s1y'], par_dic['s2y'])
         ) = rotation.dot(((par_dic['s1x_n'], par_dic['s2x_n']),
                           (par_dic['s1y_n'], par_dic['s2y_n'])))
+
+
+def inplane_spins_xy_to_xy_n(par_dic):
+    """
+    Rotate inplane spins (s1x, s1y) and (s2x, s2y) by an angle
+    `phi_ref` to get (s1x_n, s1y_n), (s2x_n, s2y_n).
+    `par_dic` needs to have keys 's1x', 's1y', 's2x', 's2y'.
+    Entries for 's1x_n', 's1y_n', 's2x_n', 's2y_n' will be added.
+
+    `x_n`, `y_n` are axes perpendicular to the orbital angular momentum
+    `L`, so that the line of sight `N` lies in the y-z plane, i.e.
+        N = (0, sin(iota), cos(iota))
+    in the (x_n, y_n, z) system.
+    `x`, `y` are axes perpendicular to the orbital angular momentum `L`,
+    so that the orbital separation is the x direction.
+    The two systems coincide when `phi_ref=0`.
+    """
+    sin_phi_ref = np.sin(par_dic['phi_ref'])
+    cos_phi_ref = np.cos(par_dic['phi_ref'])
+    rotation = np.array([[cos_phi_ref, -sin_phi_ref],
+                         [sin_phi_ref, cos_phi_ref]])
+
+    ((par_dic['s1x_n'], par_dic['s2x_n']),
+     (par_dic['s1y_n'], par_dic['s2y_n'])
+        ) = rotation.dot(((par_dic['s1x'], par_dic['s2x']),
+                          (par_dic['s1y'], par_dic['s2y'])))
 
 
 def within_bounds(par_dic):
@@ -117,7 +143,7 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
     par_dic = DEFAULT_PARS | par_dic
 
     # Transform inplane spins to LAL's coordinate system.
-    _inplane_spins_xy_n_to_xy(par_dic)
+    inplane_spins_xy_n_to_xy(par_dic)
 
     # SI unit conversions
     par_dic['d_luminosity_meters'] = par_dic['d_luminosity'] * 1e6 * lal.PC_SI
