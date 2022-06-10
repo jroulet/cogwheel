@@ -1,7 +1,6 @@
 """Generate strain waveforms and project them onto detectors."""
 
 from collections import defaultdict, namedtuple
-import functools
 import numpy as np
 
 import lal
@@ -247,7 +246,7 @@ class WaveformGenerator(utils.JSONMixin):
         return self._approximant
 
     @approximant.setter
-    def approximant(self, app: str):
+    def approximant(self, approximant: str):
         """
         Set `approximant` and reset `harmonic_modes` per
         `APPROXIMANTS[approximant].harmonic_modes`; print a warning that
@@ -255,12 +254,16 @@ class WaveformGenerator(utils.JSONMixin):
         Raise `ValueError` if `APPROXIMANTS` does not contain the
         requested approximant.
         """
-        if app not in APPROXIMANTS:
+        if approximant not in APPROXIMANTS:
             raise ValueError(f'Add {app} to `waveform.APPROXIMANTS`.')
-        self._approximant = app
+        self._approximant = approximant
+
+        old_harmonic_modes = self.harmonic_modes
         self.harmonic_modes = None
-        print(f'`approximant` changed to {app}, setting `harmonic_modes` to '
-              f'{self.harmonic_modes}.')
+        if self.harmonic_modes != old_harmonic_modes:
+            print(f'`approximant` changed to {approximant!r}, setting'
+                  f'`harmonic_modes` to {self.harmonic_modes}.')
+        utils.clear_caches()
 
     @property
     def harmonic_modes(self):
@@ -283,6 +286,7 @@ class WaveformGenerator(utils.JSONMixin):
         self._harmonic_modes_by_m = defaultdict(list)
         for l, m in self._harmonic_modes:
             self._harmonic_modes_by_m[m].append((l, m))
+        utils.clear_caches()
 
     @property
     def n_cached_waveforms(self):
@@ -361,7 +365,7 @@ class WaveformGenerator(utils.JSONMixin):
         # hplus, hcross (n_m?, 2, n_detectors, n_frequencies)
         return np.einsum('...pf, df -> ...pdf', hplus_hcross, shifts)
 
-    @functools.lru_cache(maxsize=16)
+    @utils.lru_cache(maxsize=16)
     def _get_shifts(self, ra, dec, t_geocenter):
         """Return (n_detectors, n_frequencies) array with e^(-2 i f t_det)."""
         time_delays = gw_utils.time_delay_from_geocenter(

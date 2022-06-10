@@ -13,6 +13,7 @@ from scipy.interpolate import interp1d
 import lal
 import lalsimulation
 
+from cogwheel import utils
 from cogwheel.prior import Prior, FixedPrior, UniformPriorMixin
 
 
@@ -38,6 +39,7 @@ class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
         s1z_max = np.minimum(self._get_s1z(chieff, q, s2z=-1), 1)
         return s1z_min, s1z_max
 
+    @utils.lru_cache()
     def transform(self, chieff, cumchidiff, m1, m2):
         """(chieff, cumchidiff) to (s1z, s2z)."""
         q = m2 / m1
@@ -99,6 +101,7 @@ class UniformDiskInplaneSpinsIsotropicInclinationPrior(
         cumsr_sz = (chi*np.sin(tilt))**2 / (1-sz**2)
         return cumsr_sz
 
+    @utils.lru_cache()
     def transform(self, costheta_jn, phi_jl_hat, phi12,
                   cums1r_s1z, cums2r_s2z, s1z, s2z, m1, m2, f_ref):
         """

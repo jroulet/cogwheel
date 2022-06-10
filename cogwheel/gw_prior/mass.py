@@ -10,6 +10,7 @@ as ``**kwargs`` any arguments that other priors may need.
 import numpy as np
 from scipy.integrate import dblquad
 
+from cogwheel import utils
 from cogwheel.prior import Prior
 
 
@@ -36,6 +37,7 @@ class UniformDetectorFrameMassesPrior(Prior):
             *self.range_dic['lnq'], *self.range_dic['mchirp'])[0]
 
     @staticmethod
+    @utils.lru_cache()
     def transform(mchirp, lnq):
         """(mchirp, lnq) to (m1, m2)."""
         q = np.exp(-np.abs(lnq))
@@ -53,6 +55,7 @@ class UniformDetectorFrameMassesPrior(Prior):
         return {'mchirp': m1 * q**.6 / (1 + q)**.2,
                 'lnq': np.log(q)}
 
+    @utils.lru_cache()
     def lnprior(self, mchirp, lnq):
         """
         Natural logarithm of the prior probability for `mchirp, lnq`

@@ -10,7 +10,6 @@ arbitrary waveform and a reference waveform.
 A class ``RelativeBinningLikelihood`` is provided. Its method ``lnlike``
 computes the log likelihood using relative binning.
 """
-import functools
 import itertools
 import warnings
 import numpy as np
@@ -19,6 +18,7 @@ import scipy.sparse
 
 from cogwheel import waveform
 from cogwheel import gw_utils
+from cogwheel import utils
 from .likelihood import CBCLikelihood, check_bounds
 
 
@@ -138,7 +138,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
             h_h_mpd, fplus_fcross, fplus_fcross, hh_phasor).real
         return d_h, h_h
 
-    @functools.lru_cache(maxsize=16)
+    @utils.lru_cache(maxsize=16)
     def _get_dh_hh_by_m_polarization_detector(self, par_dic_items):
         """
         Return ``d_h_0`` and ``h_h_0``, complex inner products for a

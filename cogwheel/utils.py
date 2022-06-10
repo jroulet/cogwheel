@@ -1,5 +1,6 @@
 """Utility functions."""
 
+import functools
 import importlib
 import inspect
 import json
@@ -58,6 +59,30 @@ class _DifferentialEvolutionSolverWithGuesses(
         initial_pop = self._scale_parameters(self.population)
         population = np.vstack((initial_pop, guesses))
         self.init_population_array(population)
+
+
+cached_functions_registry = []
+
+
+def lru_cache(*args, **kwargs):
+    """
+    Decorator like `functools.lru_cache` that also registers the
+    decorated function in ``cached_functions_registry`` so all caches
+    can easily be cleared with ``clear_caches()``.
+    """
+    def decorator(function):
+        function = functools.lru_cache(*args, **kwargs)(function)
+        cached_functions_registry.append(function)
+        return function
+    return decorator
+
+
+def clear_caches():
+    """
+    Clear caches of functions decorated with ``lru_cache``.
+    """
+    for function in cached_functions_registry:
+        function.cache_clear()
 
 
 def mod(value, start=0, period=2*np.pi):

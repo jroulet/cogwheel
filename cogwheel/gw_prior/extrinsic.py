@@ -7,7 +7,6 @@ attribute `prior_classes` that is a list of such priors (see
 Each may consume some arguments in the __init__(), but should forward
 as ``**kwargs`` any arguments that other priors may need.
 """
-import functools
 import numpy as np
 
 import lal
@@ -39,7 +38,7 @@ class ReferenceDetectorMixin:
         return gw_utils.fplus_fcross(self.ref_det_name, ra, dec, psi,
                                      self.tgps)[:, 0]
 
-    @functools.lru_cache
+    @utils.lru_cache()
     def geometric_factor_refdet(self, ra, dec, psi, iota):
         """
         Return the complex geometric factor
@@ -97,6 +96,7 @@ class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
         return (np.angle(self.geometric_factor_refdet(ra, dec, psi, iota))
                 + 2*phi_ref - 2*np.pi*self.f_avg*t_refdet) % (2*np.pi)
 
+    @utils.lru_cache()
     def transform(self, phi_ref_hat, iota, ra, dec, psi, t_geocenter):
         """phi_ref_hat to phi_ref."""
         phase_refdet = self._phase_refdet(iota, ra, dec, psi, t_geocenter,
@@ -135,6 +135,7 @@ class IsotropicInclinationPrior(UniformPriorMixin, Prior):
     folded_reflected_params = ['cosiota']
 
     @staticmethod
+    @utils.lru_cache()
     def transform(cosiota):
         """cos(inclination) to inclination."""
         return {'iota': np.arccos(cosiota)}
@@ -165,6 +166,7 @@ class IsotropicSkyLocationPrior(UniformPriorMixin, Prior):
                          **kwargs)
         self.skyloc = skyloc_angles.SkyLocAngles(detector_pair, tgps)
 
+    @utils.lru_cache()
     def transform(self, costhetanet, phinet_hat, iota):
         """Network sky angles to right ascension and declination."""
         thetanet = np.arccos(costhetanet)
@@ -206,6 +208,7 @@ class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin,
         self.tgps = tgps
         self.ref_det_name = ref_det_name
 
+    @utils.lru_cache()
     def transform(self, t_refdet, ra, dec):
         """`t_refdet` to `t_geocenter`"""
         return {'t_geocenter': t_refdet - self.time_delay_refdet(ra, dec)}
@@ -280,6 +283,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
         response = np.abs(self.geometric_factor_refdet(ra, dec, psi, iota))
         return mchirp**(5/6) * response
 
+    @utils.lru_cache()
     def transform(self, d_hat, ra, dec, psi, iota, m1, m2):
         """d_hat to d_luminosity"""
         return {'d_luminosity': d_hat * self._conversion_factor(ra, dec, psi,
@@ -290,6 +294,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
         return {'d_hat': d_luminosity / self._conversion_factor(ra, dec, psi,
                                                                 iota, m1, m2)}
 
+    @utils.lru_cache()
     def lnprior(self, d_hat, ra, dec, psi, iota, m1, m2):
         """
         Natural log of the prior probability density for d_hat.
@@ -321,6 +326,7 @@ class UniformComovingVolumePrior(UniformLuminosityVolumePrior):
         d_hat := d_effective / mchirp^(5/6)
     where the effective distance is defined in one "reference" detector.
     """
+    @utils.lru_cache()
     def lnprior(self, d_hat, ra, dec, psi, iota, m1, m2):
         """
         Natural log of the prior probability density for d_hat.

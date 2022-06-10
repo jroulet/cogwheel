@@ -1,9 +1,10 @@
 """Utility functions specific to gravitational waves."""
-import functools
 import scipy.interpolate
 import numpy as np
 
 import lal
+
+from cogwheel import utils
 
 DETECTORS = {'H': lal.CachedDetectors[lal.LHO_4K_DETECTOR],
              'L': lal.CachedDetectors[lal.LLO_4K_DETECTOR],
@@ -32,7 +33,7 @@ DETECTOR_ARMS = {
 
 EARTH_CROSSING_TIME = 2 * 0.02128  # 2 R_Earth / c (seconds)
 
-@functools.lru_cache
+@utils.lru_cache()
 def fplus_fcross(detector_names, ra, dec, psi, tgps):
     """
     Return a (2 x n_detectors) array with F+, Fx antenna coefficients.
@@ -60,7 +61,7 @@ def fplus_fcross_detector(detector_name, ra, dec, psi, tgps):
         for r, d, p, g in np.broadcast(ra, dec, psi, gmst)])
 
 
-@functools.lru_cache
+@utils.lru_cache()
 def time_delay_from_geocenter(detector_names, ra, dec, tgps):
     """
     Return an array with delay times from Earth center [seconds].
