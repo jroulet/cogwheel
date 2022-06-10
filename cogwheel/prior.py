@@ -244,14 +244,15 @@ class Prior(ABC, utils.JSONMixin):
         length `2**n_folds`.
         """
         sig = inspect.signature(self.transform)
+        vectorized_func = np.vectorize(func)
 
         def unfolding_func(*par_vals, **par_dic):
             par_values = np.array(sig.bind(*par_vals, **par_dic).args)
             unfolded = self.unfold(par_values)
-            return [func(*par_vals) for par_vals in unfolded]
+            return vectorized_func(*unfolded.T)
 
         unfolding_func.__doc__ = f"""
-            Return a list of {2**len(self.folded_params)} elements
+            Return an array of {2**len(self.folded_params)} elements
             with the results of applying {func.__name__} to the
             different unfoldings of the parameters passed.
             """
