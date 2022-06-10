@@ -12,6 +12,7 @@ computes the log likelihood using relative binning.
 """
 import functools
 import itertools
+import warnings
 import numpy as np
 import scipy.interpolate
 import scipy.sparse
@@ -19,6 +20,7 @@ import scipy.sparse
 from cogwheel import waveform
 from cogwheel import gw_utils
 from .likelihood import CBCLikelihood, check_bounds
+
 
 class RelativeBinningLikelihood(CBCLikelihood):
     """
@@ -166,10 +168,17 @@ class RelativeBinningLikelihood(CBCLikelihood):
             = self.waveform_generator.get_hplus_hcross_at_detectors(
                 self.fbin, par_dic, by_m=True)
 
-        # Sum over f axis, don't take real part. Shape (n_m, 2, n_detectors)
+        if len(hplus_hcross_at_detectors) != len(self._d_h_weights):
+            warnings.warn('Summary data and waveform_generator have '
+                          'incompatible number of harmonic modes, recomputing '
+                          'the summary data.')
+            self.par_dic_0 = self.par_dic_0  # Recomputes summary
+
+        # Shape (n_m, 2, n_detectors), complex
         d_h = np.einsum('mdf, mpdf -> mpd',
                         self._d_h_weights, hplus_hcross_at_detectors.conj())
 
+        # Shape (n_m, 2, 2, n_detectors), complex
         m_inds, mprime_inds = self._get_m_mprime_inds()
         h_h = np.einsum('mdf, mpdf, mPdf -> mpPd', self._h_h_weights,
                         hplus_hcross_at_detectors[m_inds],
