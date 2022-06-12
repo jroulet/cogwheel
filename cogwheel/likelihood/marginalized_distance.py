@@ -297,6 +297,13 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
 
         return self.lookup_table(d_h, h_h) + d_h**2 / h_h / 2
 
+    def lnlike_no_marginalization (self, par_dic):
+        """
+        Return log likelihood, not marginalized over distance, using
+        relative binning.
+        """
+        return super().lnlike(par_dic)
+
     def postprocess_samples(self, samples):
         """
         Add a column 'd_luminosity' to a DataFrame of samples, with values taken
