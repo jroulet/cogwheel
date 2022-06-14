@@ -170,10 +170,15 @@ class PostProcessor:
         """
         Compute typical and worst-case errors in log likelihood due to
         relative binning. Store in `self.tests['relative_binning']`.
+        If the samples are weighted, the weights are considered in the
+        standard deviation of the errors but ignored in the maximum.
         """
         dlnl = (self.samples[self.LNL_COL]
                 - self._apply_asd_drift(self.posterior.likelihood.asd_drift))
-        self.tests['relative_binning'] = {'dlnl_std': np.std(dlnl),
+        weights = self.samples.get(utils.WEIGHTS_NAME)
+        dlnl_avg = np.average(dlnl, weights=weights)
+        dlnl_std = np.sqrt(np.average((dlnl - dlnl_avg) ** 2, weights=weights))
+        self.tests['relative_binning'] = {'dlnl_std': dlnl_std,
                                           'dlnl_max': np.max(np.abs(dlnl))}
 
     def save_tests_and_samples(self):
