@@ -213,9 +213,11 @@ class PostProcessor:
         Compute asd_drifts for a random subset of the samples, store
         them in `self._asd_drifts_subset`.
         """
-        self._asd_drifts_subset = list(
-            map(self.posterior.likelihood.compute_asd_drift,
-                self._standard_samples(self.samples.sample(n_subset))))
+        subset = self.samples.sample(
+            n_subset, weigths=self.samples.get(utils.WEIGHTS_NAME))
+        self._asd_drifts_subset = [
+            self.posterior.likelihood.compute_asd_drift(sample)
+            for sample in self._standard_samples(subset)]
 
     def _standard_samples(self, samples=None):
         """Iterator over standard parameter samples."""
@@ -360,7 +362,8 @@ class Diagnostics:
                 cornerplot = gw_plotting.MultiCornerPlot(
                     [ref_samples, other_samples],
                     labels=[refdir.name, otherdir.name],
-                    params=sampled_params)
+                    params=sampled_params,
+                    weights_col=utils.WEIGHTS_NAME)
                 cornerplot.plot(max_n_ticks=3)
                 if sampled_par_dic_0:
                     cornerplot.scatter_points(sampled_par_dic_0)
@@ -416,9 +419,15 @@ class Diagnostics:
         run_kwargs = []
         for rundir in rundirs:
             with open(rundir/sampling.Sampler.JSON_FILENAME) as sampler_file:
-                dic = json.load(sampler_file)['init_kwargs']
-                run_kwargs.append({**dic['run_kwargs'],
-                                   'sample_prior': dic['sample_prior']})
+                dic = json.load(sampler_file)
+                sampler = utils.class_registry[dic['__cogwheel_class__']]
+                init_kwargs = dic['init_kwargs']
+                settings = {key: val
+                            for key, val in init_kwargs['run_kwargs'].items()
+                            if val != sampler.DEFAULT_RUN_KWARGS.get(key)}
+                run_kwargs.append({'sampler': sampler.__class__.__name__,
+                                   'sample_prior': init_kwargs['sample_prior'],
+                                   **settings})
 
         run_kwargs = pd.DataFrame(run_kwargs)
         const_cols = [col for col, (first, *others) in run_kwargs.iteritems()

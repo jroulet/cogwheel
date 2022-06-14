@@ -17,6 +17,8 @@ from scipy.optimize import _differentialevolution
 DIR_PERMISSIONS = 0o755
 FILE_PERMISSIONS = 0o644
 
+WEIGHTS_NAME = 'weights'
+
 
 class ClassProperty:
     """
