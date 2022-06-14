@@ -437,7 +437,7 @@ class Diagnostics:
         run_kwargs = pd.DataFrame(run_kwargs)
         const_cols = [col for col, (first, *others) in run_kwargs.iteritems()
                       if all(first == other for other in others)]
-        drop_cols = const_cols + ['outputfiles_basename']
+        drop_cols = const_cols + ['outputfiles_basename', 'wrapped_params']
         return run_kwargs.drop(columns=drop_cols, errors='ignore')
 
     @staticmethod
