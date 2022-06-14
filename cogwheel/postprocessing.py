@@ -214,7 +214,7 @@ class PostProcessor:
         them in `self._asd_drifts_subset`.
         """
         subset = self.samples.sample(
-            n_subset, weigths=self.samples.get(utils.WEIGHTS_NAME))
+            n_subset, weights=self.samples.get(utils.WEIGHTS_NAME))
         self._asd_drifts_subset = [
             self.posterior.likelihood.compute_asd_drift(sample)
             for sample in self._standard_samples(subset)]
