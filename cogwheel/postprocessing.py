@@ -425,12 +425,12 @@ class Diagnostics:
         for rundir in rundirs:
             with open(rundir/sampling.Sampler.JSON_FILENAME) as sampler_file:
                 dic = json.load(sampler_file)
-                sampler = utils.class_registry[dic['__cogwheel_class__']]
+                sampler_cls = utils.class_registry[dic['__cogwheel_class__']]
                 init_kwargs = dic['init_kwargs']
                 settings = {key: val
                             for key, val in init_kwargs['run_kwargs'].items()
-                            if val != sampler.DEFAULT_RUN_KWARGS.get(key)}
-                run_kwargs.append({'sampler': sampler.__class__.__name__,
+                            if val != sampler_cls.DEFAULT_RUN_KWARGS.get(key)}
+                run_kwargs.append({'sampler': sampler_cls.__name__,
                                    'sample_prior': init_kwargs['sample_prior'],
                                    **settings})
 
