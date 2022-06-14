@@ -477,8 +477,8 @@ class Diagnostics:
         dlnl_max = self.table['lnl_max'] - self.table['lnl_0']
         cell_colors['lnl_0'] = self._test_color('lnl_max_exceeds_lnl_0',
                                                 dlnl_max)
-        cell_colors['lnl_max']  = self._test_color('lnl_0_exceeds_lnl_max',
-                                                   - dlnl_max)
+        cell_colors['lnl_max'] = self._test_color('lnl_0_exceeds_lnl_max',
+                                                  - dlnl_max)
 
         nrows, ncols = self.table.shape
         _, ax = plt.subplots(figsize=np.multiply((ncols, nrows+1), cell_size))
