@@ -140,11 +140,10 @@ class PostProcessor:
         if likelihood.pn_phase_tol:
             likelihood.pn_phase_tol /= self.relative_binning_boost
         else:
-            likelihood.fbin = np.interp(
-                np.linspace(0, 1, (self.relative_binning_boost
-                                   * len(likelihood.fbin) - 1) + 1),
-                np.linspace(0, 1, len(likelihood.fbin)),
-                likelihood.fbin)
+            num = self.relative_binning_boost * (len(likelihood.fbin) - 1) + 1
+            likelihood.fbin = np.interp(np.linspace(0, 1, num),
+                                        np.linspace(0, 1, len(likelihood.fbin)),
+                                        likelihood.fbin)
 
         lnl_aux = pd.DataFrame(map(likelihood.lnlike_detectors_no_asd_drift,
                                    self._standard_samples()),
