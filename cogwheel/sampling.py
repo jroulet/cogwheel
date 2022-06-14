@@ -32,10 +32,11 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
     Parameter space folding is used; this means that some ("folded")
     dimensions are sampled over half their original range, and a map to
-    the other half of the range is defined by reflecting about the
-    midpoint. The folded posterior distribution is defined as the sum of
-    the original posterior over all `2**n_folds` mapped points. This is
-    intended to reduce the number of modes in the posterior.
+    the other half of the range is defined by reflecting or shifting
+    about the midpoint. The folded posterior distribution is defined as
+    the sum of the original posterior over all `2**n_folds` mapped
+    points. This is intended to reduce the number of modes in the
+    posterior.
     """
     DEFAULT_RUN_KWARGS = {}  # Implemented by subclasses
     PROFILING_FILENAME = 'profiling'
@@ -405,8 +406,8 @@ class Dynesty(Sampler):
         utils.update_dataframe(folded, lnprobs)
 
         samples = self.resample(folded)
-        samples['weights'] = np.exp(self.sampler.results.logwt
-                                    - self.sampler.results.logwt.max())
+        samples[utils.WEIGHTS_NAME] = np.exp(
+            self.sampler.results.logwt - self.sampler.results.logwt.max())
         return samples
 
     def _lnprob_dynesty(self, par_vals):

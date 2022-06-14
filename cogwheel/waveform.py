@@ -88,13 +88,13 @@ def inplane_spins_xy_to_xy_n(par_dic):
                           (par_dic['s1y'], par_dic['s2y'])))
 
 
-def within_bounds(par_dic):
+def within_bounds(par_dic: dict) -> bool:
     """
     Return whether parameters in `par_dic` are within physical bounds.
     """
-    return (all(par_dic[positive] >= 0 for positive in
-                ({'m1', 'm2', 'd_luminosity', 'l1', 'l2', 'iota'}
-                 & par_dic.keys()))
+    return (all(par_dic[positive] >= 0
+                for positive in {'m1', 'm2', 'd_luminosity', 'l1', 'l2', 'iota'
+                                }.intersection(par_dic))
             and np.all(np.linalg.norm(
                 [(par_dic['s1x_n'], par_dic['s1y_n'], par_dic['s1z']),
                  (par_dic['s2x_n'], par_dic['s2y_n'], par_dic['s2z'])],
@@ -125,13 +125,15 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
         plus, optionally:
             * s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z: dimensionless spins
             * l1, l2: dimensionless tidal deformabilities
-            * lal_dic: LALDict instance with special approximant settings.
 
     approximant: str
         Approximant name.
 
     harmonic_modes: list of 2-tuples with (l, m) pairs, optional
         Which (co-precessing frame) higher-order modes to include.
+
+    lal_dic: LALDict, optional
+        Contains special approximant settings.
     """
 
     # Parameters ordered for lalsimulation.SimInspiralChooseFDWaveformSequence
