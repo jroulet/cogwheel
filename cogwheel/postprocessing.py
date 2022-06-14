@@ -58,7 +58,7 @@ class PostProcessor:
     """
     LNL_COL = 'lnl'
 
-    def __init__(self, rundir, relative_binning_boost: int=4):
+    def __init__(self, rundir, relative_binning_boost: int = 4):
         super().__init__()
 
         self.rundir = pathlib.Path(rundir)

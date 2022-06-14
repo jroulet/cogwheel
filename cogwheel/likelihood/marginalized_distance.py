@@ -210,7 +210,7 @@ class LookupTable(utils.JSONMixin):
         norm_h = np.sqrt(h_h)
         overlap = d_h / norm_h
         x = np.log(norm_h / (self.d_luminosity_max
-                              * (self._SIGMAS + np.abs(overlap))))
+                             * (self._SIGMAS + np.abs(overlap))))
         y = self._compactify(overlap / self._Z0)
         return x, y
 
@@ -297,7 +297,7 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
 
         return self.lookup_table(d_h, h_h) + d_h**2 / h_h / 2
 
-    def lnlike_no_marginalization (self, par_dic):
+    def lnlike_no_marginalization(self, par_dic):
         """
         Return log likelihood, not marginalized over distance, using
         relative binning.
