@@ -267,7 +267,7 @@ class Diagnostics:
                                 'relative_binning_dlnl_std': .05,
                                 'relative_binning_dlnl_max': .25}
     _LABELS = {
-      'n_samples': r'$N_\mathrm{samples}$',
+      'n_effective': r'$N^\mathrm{samples}_\mathrm{eff}$',
       'runtime': 'Runtime (h)',
       'asd_drift_dlnl_std': r'$\sigma(\Delta\ln\mathcal{L}_{\rm ASD\,drift})$',
       'asd_drift_dlnl_max': r'$\max|\Delta\ln\mathcal{L}_{\rm ASD\,drift}|$',
@@ -405,9 +405,9 @@ class Diagnostics:
         table = pd.DataFrame()
         table['run'] = [x.name for x in rundirs]
         utils.update_dataframe(table, self._collect_run_kwargs(rundirs))
-        table['n_samples'] = [
-            len(pd.read_feather(rundir/sampling.SAMPLES_FILENAME))
-            for rundir in rundirs]
+
+        table['n_effective'] = [round(self._get_n_effective(rundir))
+                                for rundir in rundirs]
         table['runtime'] = [
             Stats(str(rundir/sampling.Sampler.PROFILING_FILENAME)).total_tt
             / 3600
@@ -415,6 +415,12 @@ class Diagnostics:
         utils.update_dataframe(table, self._collect_tests(rundirs))
 
         return table
+
+    @staticmethod
+    def _get_n_effective(rundir):
+        samples = pd.read_feather(rundir/sampling.SAMPLES_FILENAME)
+        weights = samples.get(utils.WEIGHTS_NAME, np.ones(len(samples)))
+        return utils.n_effective(weights)
 
     @staticmethod
     def _collect_run_kwargs(rundirs):
@@ -511,7 +517,7 @@ class Diagnostics:
     def _scatter_nsamples_vs_runtime(self):
         """Scatter plot number of samples vs runtime from `table`."""
         plt.figure()
-        xpar, ypar = 'runtime', 'n_samples'
+        xpar, ypar = 'runtime', 'n_effective'
         plt.scatter(self.table[xpar], self.table[ypar])
         for run, *x_y in self.table[['run', xpar, ypar]].to_numpy():
             plt.annotate(run.lstrip(utils.RUNDIR_PREFIX), x_y,
