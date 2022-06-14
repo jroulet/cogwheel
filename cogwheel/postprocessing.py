@@ -357,7 +357,7 @@ class Diagnostics:
             ref_samples = pd.read_feather(refdir/'samples.feather')
             for otherdir in otherdirs:
                 other_samples = pd.read_feather(otherdir/'samples.feather')
-                cornerplot = gw_plotting.MultiCornerPlot.from_samples(
+                cornerplot = gw_plotting.MultiCornerPlot(
                     [ref_samples, other_samples],
                     labels=[refdir.name, otherdir.name],
                     params=sampled_params)
