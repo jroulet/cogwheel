@@ -161,8 +161,10 @@ class PostProcessor:
             lnl = self._apply_asd_drift(asd_drift)
             # Difference in log likelihood from changing asd_drift:
             dlnl = lnl - lnl.mean() - (ref_lnl - ref_lnl.mean())
+            weights = self.samples.get(utils.WEIGHTS_NAME)
+            dlnl_std = utils.weighted_std(dlnl, weights=weights)
             self.tests['asd_drift'].append({'asd_drift': asd_drift,
-                                            'dlnl_std': np.std(dlnl),
+                                            'dlnl_std': dlnl_std,
                                             'dlnl_max': np.max(np.abs(dlnl))})
 
     def test_relative_binning(self):
@@ -175,8 +177,7 @@ class PostProcessor:
         dlnl = (self.samples[self.LNL_COL]
                 - self._apply_asd_drift(self.posterior.likelihood.asd_drift))
         weights = self.samples.get(utils.WEIGHTS_NAME)
-        dlnl_avg = np.average(dlnl, weights=weights)
-        dlnl_std = np.sqrt(np.average((dlnl - dlnl_avg) ** 2, weights=weights))
+        dlnl_std = utils.weighted_std(dlnl, weights=weights)
         self.tests['relative_binning'] = {'dlnl_std': dlnl_std,
                                           'dlnl_max': np.max(np.abs(dlnl))}
 
