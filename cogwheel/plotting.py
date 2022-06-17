@@ -317,7 +317,7 @@ class CornerPlot:
         """List of parameter values."""
         return list(self.arrs_1d)
 
-    def plot(self, fig=None, title=None, max_figsize=10., max_n_ticks=6,
+    def plot(self, fig=None, title=None, max_figsize=10., max_n_ticks=4,
              tightness=None, label=None):
         """
         Make a corner plot of the distribution.
@@ -502,7 +502,7 @@ class CornerPlot:
         return np.interp((.5, tail_prob, 1 - tail_prob), cum_prob, edges)
 
     def _setup_fig(self, fig=None, max_figsize=10.,
-                   max_subplot_size=1.5, max_n_ticks=6):
+                   max_subplot_size=1.5, max_n_ticks=4):
         n_params = len(self.params)
 
         if fig is not None:
@@ -528,6 +528,9 @@ class CornerPlot:
         for ax in self.axes[np.tril_indices_from(self.axes, -1)]:
             ax.tick_params(which='both', direction='in', right=True, top=True,
                            rotation=45)
+
+        # Left column and bottom row
+        for ax in np.r_[self.axes[-1, :], self.axes[:, 0]]:
             for axis in ax.xaxis, ax.yaxis:
                 axis.set_major_locator(mpl.ticker.MaxNLocator(max_n_ticks))
 
@@ -651,7 +654,7 @@ class MultiCornerPlot:
                                  density, weights=samples.get(weights_col))
             for samples in dataframes]
 
-    def plot(self, max_figsize=10., max_n_ticks=6, tightness=None,
+    def plot(self, max_figsize=10., max_n_ticks=4, tightness=None,
              title=None):
         """
         Make a corner plot with all distributions overlaid.
