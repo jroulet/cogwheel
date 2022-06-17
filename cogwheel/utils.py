@@ -17,6 +17,8 @@ from scipy.optimize import _differentialevolution
 DIR_PERMISSIONS = 0o755
 FILE_PERMISSIONS = 0o644
 
+WEIGHTS_NAME = 'weights'
+
 
 class ClassProperty:
     """
@@ -92,6 +94,16 @@ def mod(value, start=0, period=2*np.pi):
     """
     return (value - start) % period + start
 
+
+def weighted_std(values, weights=None):
+    """Return standard deviation of values with weights."""
+    avg = np.average(values, weights=weights)
+    return np.sqrt(np.average((values - avg) ** 2, weights=weights))
+
+
+def n_effective(weights):
+    """Return effective sample size."""
+    return np.sum(weights)**2 / np.sum(weights**2)
 
 def merge_dictionaries_safely(*dics):
     """

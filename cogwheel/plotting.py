@@ -45,7 +45,7 @@ class LatexLabels(dict):
         return par
 
 
-# -----------------------------------------------------------
+# ----------------------------------------------------------------------
 # Plot settings
 
 def gen_linestyles(number):
@@ -147,8 +147,8 @@ class PlotStyle:
     @contour_fractions.setter
     def contour_fractions(self, contour_fractions):
         """
-        Store contour_fractions in decreasing order, so contour levels are
-        increasing.
+        Store `contour_fractions` in decreasing order, so contour levels
+        are increasing.
         """
         self._contour_fractions = sorted(contour_fractions, reverse=True)
 
@@ -191,14 +191,15 @@ def get_transparency_colormap(color):
     return ListedColormap(rgba)
 
 
-# -----------------------------------------------------------
+# ----------------------------------------------------------------------
 # Functions related to pdfs:
 
 def get_levels(pdf, contour_fractions):
     """
     Return the values of P for which the
         sum(pdf[pdf > P]) == f
-    for f in contour_fractions. `contour_fractions` can be array or scalar.
+    for f in contour_fractions.
+    `contour_fractions` can be array or scalar.
     """
     sorted_pdf = [0.] + sorted(pdf.ravel())
     cdf = np.cumsum(sorted_pdf)
@@ -242,7 +243,7 @@ def latex_val_err(value, error):
 
 
 def get_midpoints(arr):
-    """Get bin midpoints from edges"""
+    """Get bin midpoints from edges."""
     return (arr[1:] + arr[:-1]) / 2
 
 
@@ -257,64 +258,15 @@ def get_edges(arr):
 
 class CornerPlot:
     """
-    Class for making a corner plot of a multivariate distribution.
-
-    Use constructor `from_samples` if you have samples from the
-    distribution.
+    Class for making a corner plot of a multivariate distribution if you
+    have samples from the distribution.
     """
     DEFAULT_LATEX_LABELS = LatexLabels()
     MARGIN_INCHES = .8
 
-    def __init__(self, arrs_1d: dict, pdfs_1d: dict, pdfs_2d: dict,
-                 latex_labels=None, plotstyle=None):
+    def __init__(self, samples: pd.DataFrame, plotstyle=None, bins=40,
+                 density=True, weights=None, latex_labels=None):
         """
-        Parameters
-        ----------
-        arrs_1d: dict
-            Dictionary whose keys are parameter names and whose values
-            are 1-d arrays with a grid of parameter values.
-
-        pdfs_1d: dict
-            Dictionary whose keys are parameter names and whose values
-            are 1-d arrays with the marginal 1-d probability density
-            function evaluated at the corresponding array in `arrs_1d`
-            (shapes must match those of `arrs_1d`).
-
-        pdfs_2d: dict,
-            whose keys are parameter names and whose values
-            are 2-d arrays of shape () with the marginal 2-d probability
-            density function evaluated at the corresponding array in
-            `arrs_1d`. The shapes are `(ny, nx)`, note this is the
-            transpose of what `np.histogram_2d` returns.
-
-        latex_labels: `LatexLabels` instance, optional.
-
-        plotstyle: `PlotStyle` instance, optional.
-        """
-        if missing := (set(itertools.combinations(arrs_1d, 2))
-                       - pdfs_2d.keys()):
-            raise ValueError(f'`pdfs_2d` missing entries: {missing}')
-
-        self.arrs_1d = arrs_1d
-        self.pdfs_1d = pdfs_1d
-        self.pdfs_2d = pdfs_2d
-        self.latex_labels = latex_labels or self.DEFAULT_LATEX_LABELS
-        self.fig = None
-        self.axes = None
-        self.plotstyle = plotstyle or PlotStyle()
-
-    @property
-    def params(self):
-        """List of parameter values."""
-        return list(self.arrs_1d)
-
-    @classmethod
-    def from_samples(cls, samples: pd.DataFrame, plotstyle=None,
-                     bins=40, density=True, weights=None):
-        """
-        Contructor that estimates the probability densities from a
-        histogram of samples.
-
         Parameters
         ----------
         samples: pandas DataFrame
@@ -329,27 +281,43 @@ class CornerPlot:
 
         density: bool
             Whether to normalize the 1-d histograms to integrate to 1.
+
+        weights: sequence of floats, optional
+            An array of weights, of the same length as `samples`.
+            Each value in a only contributes its associated weight
+            towards the bin count (instead of 1).
+
+        latex_labels: `LatexLabels` instance, optional.
+            Maps column names to latex strings and assigns units.
         """
+        self.latex_labels = latex_labels or self.DEFAULT_LATEX_LABELS
+        self.plotstyle = plotstyle or PlotStyle()
+
         bin_edges = {}
-        arrs_1d = {}
-        pdfs_1d = {}
-        pdfs_2d = {}
+        self.arrs_1d = {}
+        self.pdfs_1d = {}
+        self.pdfs_2d = {}
 
         for par, values in samples.iteritems():
-            pdfs_1d[par], bin_edges[par] = np.histogram(values, bins=bins,
-                                                        density=density,
-                                                        weights=weights)
-            arrs_1d[par] = get_midpoints(bin_edges[par])
+            self.pdfs_1d[par], bin_edges[par] = np.histogram(
+                values, bins=bins, density=density, weights=weights)
+            self.arrs_1d[par] = get_midpoints(bin_edges[par])
 
         for xpar, ypar in itertools.combinations(samples, 2):
             histogram_2d, _, _ = np.histogram2d(
                 samples[xpar], samples[ypar],
                 bins=(bin_edges[xpar], bin_edges[ypar]), weights=weights)
-            pdfs_2d[xpar, ypar] = histogram_2d.T  # Cartesian convention
+            self.pdfs_2d[xpar, ypar] = histogram_2d.T  # Cartesian convention
 
-        return cls(arrs_1d, pdfs_1d, pdfs_2d, plotstyle=plotstyle)
+        self.fig = None
+        self.axes = None
 
-    def plot(self, fig=None, title=None, max_figsize=10., max_n_ticks=6,
+    @property
+    def params(self):
+        """List of parameter values."""
+        return list(self.arrs_1d)
+
+    def plot(self, fig=None, title=None, max_figsize=10., max_n_ticks=4,
              tightness=None, label=None):
         """
         Make a corner plot of the distribution.
@@ -416,8 +384,8 @@ class CornerPlot:
             Colors corresponding to each scatter point passed.
 
         adjust_lims: bool
-            Whether to adjust x and y limits in the case that the scatter
-            points lie outside or very near the current limits.
+            Whether to adjust x and y limits in the case that the
+            scatter points lie outside or very near the current limits.
 
         **kwargs:
             Passed to ``matplotlib.axes.Axes.scatter``.
@@ -486,7 +454,7 @@ class CornerPlot:
             median, *span = self.get_median_and_central_interval(par)
             for val in (median, *span):
                 ax.plot([val]*2, [0, np.interp(val, self.arrs_1d[par],
-                        self.pdfs_1d[par])],
+                                               self.pdfs_1d[par])],
                         **self.plotstyle.get_vline_kwargs())
 
             # Plot vfill
@@ -534,7 +502,7 @@ class CornerPlot:
         return np.interp((.5, tail_prob, 1 - tail_prob), cum_prob, edges)
 
     def _setup_fig(self, fig=None, max_figsize=10.,
-                   max_subplot_size=1.5, max_n_ticks=6):
+                   max_subplot_size=1.5, max_n_ticks=4):
         n_params = len(self.params)
 
         if fig is not None:
@@ -560,6 +528,9 @@ class CornerPlot:
         for ax in self.axes[np.tril_indices_from(self.axes, -1)]:
             ax.tick_params(which='both', direction='in', right=True, top=True,
                            rotation=45)
+
+        # Left column and bottom row
+        for ax in np.r_[self.axes[-1, :], self.axes[:, 0]]:
             for axis in ax.xaxis, ax.yaxis:
                 axis.set_major_locator(mpl.ticker.MaxNLocator(max_n_ticks))
 
@@ -630,41 +601,14 @@ class CornerPlot:
 
 class MultiCornerPlot:
     """
-    Class for overlaying multiple distributions on the same corner plot.
-
-    Use constructor `from_samples` if you have samples from each of the
-    distributions.
+    Class for overlaying multiple distributions on the same corner plot
+    if you have samples from each of the distributions.
     """
-    # Default used in ``from_samples``, can be overriden by subclasses:
-    corner_plot_cls = CornerPlot
+    corner_plot_cls = CornerPlot  # Can be overriden by subclasses
 
-    def __init__(self, corner_plots, labels=None):
-        """
-        Parameters
-        ----------
-        corner_plots: sequence of ``CornerPlot`` instances.
-            Individual distributions to be overlaid.
-
-        labels: sequence of strings, optional
-            Legend labels corresponding to the different distributions.
-        """
-        if labels is None:
-            labels = [None for _ in corner_plots]
-
-        if any(corner_plot.params != corner_plots[0].params
-               for corner_plot in corner_plots):
-            raise ValueError('`corner_plots` have inconsistent `params`.')
-
-        if len(labels) != len(corner_plots):
-            raise ValueError(
-                '`corner_plots` and `labels` have different lengths.')
-
-        self.corner_plots = corner_plots
-        self.labels = labels
-
-    @classmethod
-    def from_samples(cls, dataframes, labels=None, bins=40, params=None,
-                     weights_col=None, **plotstyle_kwargs):
+    def __init__(self, dataframes, labels=None, bins=40, params=None,
+                 density=True, weights_col='weights',
+                 **plotstyle_kwargs):
         """
         Parameters
         ----------
@@ -682,25 +626,35 @@ class MultiCornerPlot:
             Subset of columns present in all dataframes, to plot a
             reduced number of parameters.
 
+        density: bool
+            Whether to normalize the 1-d histograms to integrate to 1.
+
         weights_col: str, optional
             If existing, use a column with this name to set weights for
-            the samples.
+            the samples. Pass `None` to ignore, if you have a column
+            named 'weights' that is not to be interpreted as weights.
 
         **plotstyle_kwargs:
             Passed to ``PlotStyle`` constructor to override defaults.
         """
-        params = params or slice(None)
+        if labels is None:
+            labels = [None for _ in dataframes]
 
+        if len(labels) != len(dataframes):
+            raise ValueError(
+                '`dataframes` and `labels` have different lengths.')
+
+        self.labels = labels
+
+        params = params or slice(None)
         plotstyles = PlotStyle.get_many(len(dataframes),
                                         **plotstyle_kwargs)
+        self.corner_plots = [
+            self.corner_plot_cls(samples[params], next(plotstyles), bins,
+                                 density, weights=samples.get(weights_col))
+            for samples in dataframes]
 
-        corner_plots = [cls.corner_plot_cls.from_samples(
-                             samples[params], next(plotstyles), bins,
-                             weights=samples.get(weights_col))
-                        for samples in dataframes]
-        return cls(corner_plots, labels)
-
-    def plot(self, max_figsize=10., max_n_ticks=6, tightness=None,
+    def plot(self, max_figsize=10., max_n_ticks=4, tightness=None,
              title=None):
         """
         Make a corner plot with all distributions overlaid.
@@ -778,8 +732,8 @@ class MultiCornerPlot:
             Colors corresponding to each scatter point passed.
 
         adjust_lims: bool
-            Whether to adjust x and y limits in the case that the scatter
-            points lie outside or very near the current limits.
+            Whether to adjust x and y limits in the case that the
+            scatter points lie outside or very near the current limits.
 
         **kwargs:
             Passed to ``matplotlib.axes.Axes.scatter``.

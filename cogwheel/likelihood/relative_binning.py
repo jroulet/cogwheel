@@ -102,7 +102,8 @@ class RelativeBinningLikelihood(CBCLikelihood):
     def _get_dh_hh_no_asd_drift(self, par_dic):
         """
         Return two arrays of length n_detectors with the values of
-        ``(d|h)``, ``(h|h)``, using relative binning.
+        ``(d|h)``, ``(h|h)``, no ASD-drift correction applied, using
+        relative binning.
 
         Parameters
         ----------
@@ -159,6 +160,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
             ``(d|h_mp)`` complex inner product, where ``d`` is data and
             ``h_mp`` is the waveform with co-precessing azimuthal mode
             ``m`` and polarization ``p`` (plus or cross).
+
         h_h: (n_m*(n_m+1)/2, 2, 2, n_detectors) array
             ``(h_mp|h_m'p')`` complex inner product.
 

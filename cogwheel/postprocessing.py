@@ -58,7 +58,7 @@ class PostProcessor:
     """
     LNL_COL = 'lnl'
 
-    def __init__(self, rundir, relative_binning_boost: int=4):
+    def __init__(self, rundir, relative_binning_boost: int = 4):
         super().__init__()
 
         self.rundir = pathlib.Path(rundir)
@@ -140,11 +140,10 @@ class PostProcessor:
         if likelihood.pn_phase_tol:
             likelihood.pn_phase_tol /= self.relative_binning_boost
         else:
-            likelihood.fbin = np.interp(
-                np.linspace(0, 1, (self.relative_binning_boost
-                                   * len(likelihood.fbin) - 1) + 1),
-                np.linspace(0, 1, len(likelihood.fbin)),
-                likelihood.fbin)
+            num = self.relative_binning_boost * (len(likelihood.fbin) - 1) + 1
+            likelihood.fbin = np.interp(np.linspace(0, 1, num),
+                                        np.linspace(0, 1, len(likelihood.fbin)),
+                                        likelihood.fbin)
 
         lnl_aux = pd.DataFrame(map(likelihood.lnlike_detectors_no_asd_drift,
                                    self._standard_samples()),
@@ -162,18 +161,24 @@ class PostProcessor:
             lnl = self._apply_asd_drift(asd_drift)
             # Difference in log likelihood from changing asd_drift:
             dlnl = lnl - lnl.mean() - (ref_lnl - ref_lnl.mean())
+            weights = self.samples.get(utils.WEIGHTS_NAME)
+            dlnl_std = utils.weighted_std(dlnl, weights=weights)
             self.tests['asd_drift'].append({'asd_drift': asd_drift,
-                                            'dlnl_std': np.std(dlnl),
+                                            'dlnl_std': dlnl_std,
                                             'dlnl_max': np.max(np.abs(dlnl))})
 
     def test_relative_binning(self):
         """
         Compute typical and worst-case errors in log likelihood due to
         relative binning. Store in `self.tests['relative_binning']`.
+        If the samples are weighted, the weights are considered in the
+        standard deviation of the errors but ignored in the maximum.
         """
         dlnl = (self.samples[self.LNL_COL]
                 - self._apply_asd_drift(self.posterior.likelihood.asd_drift))
-        self.tests['relative_binning'] = {'dlnl_std': np.std(dlnl),
+        weights = self.samples.get(utils.WEIGHTS_NAME)
+        dlnl_std = utils.weighted_std(dlnl, weights=weights)
+        self.tests['relative_binning'] = {'dlnl_std': dlnl_std,
                                           'dlnl_max': np.max(np.abs(dlnl))}
 
     def save_tests_and_samples(self):
@@ -213,9 +218,11 @@ class PostProcessor:
         Compute asd_drifts for a random subset of the samples, store
         them in `self._asd_drifts_subset`.
         """
-        self._asd_drifts_subset = list(
-            map(self.posterior.likelihood.compute_asd_drift,
-                self._standard_samples(self.samples.sample(n_subset))))
+        subset = self.samples.sample(
+            n_subset, weights=self.samples.get(utils.WEIGHTS_NAME))
+        self._asd_drifts_subset = [
+            self.posterior.likelihood.compute_asd_drift(sample)
+            for sample in self._standard_samples(subset)]
 
     def _standard_samples(self, samples=None):
         """Iterator over standard parameter samples."""
@@ -260,7 +267,7 @@ class Diagnostics:
                                 'relative_binning_dlnl_std': .05,
                                 'relative_binning_dlnl_max': .25}
     _LABELS = {
-      'n_samples': r'$N_\mathrm{samples}$',
+      'n_effective': r'$N^\mathrm{samples}_\mathrm{eff}$',
       'runtime': 'Runtime (h)',
       'asd_drift_dlnl_std': r'$\sigma(\Delta\ln\mathcal{L}_{\rm ASD\,drift})$',
       'asd_drift_dlnl_max': r'$\max|\Delta\ln\mathcal{L}_{\rm ASD\,drift}|$',
@@ -357,10 +364,11 @@ class Diagnostics:
             ref_samples = pd.read_feather(refdir/'samples.feather')
             for otherdir in otherdirs:
                 other_samples = pd.read_feather(otherdir/'samples.feather')
-                cornerplot = gw_plotting.MultiCornerPlot.from_samples(
+                cornerplot = gw_plotting.MultiCornerPlot(
                     [ref_samples, other_samples],
                     labels=[refdir.name, otherdir.name],
-                    params=sampled_params)
+                    params=sampled_params,
+                    weights_col=utils.WEIGHTS_NAME)
                 cornerplot.plot(max_n_ticks=3)
                 if sampled_par_dic_0:
                     cornerplot.scatter_points(sampled_par_dic_0)
@@ -397,9 +405,9 @@ class Diagnostics:
         table = pd.DataFrame()
         table['run'] = [x.name for x in rundirs]
         utils.update_dataframe(table, self._collect_run_kwargs(rundirs))
-        table['n_samples'] = [
-            len(pd.read_feather(rundir/sampling.SAMPLES_FILENAME))
-            for rundir in rundirs]
+
+        table['n_effective'] = [round(self._get_n_effective(rundir))
+                                for rundir in rundirs]
         table['runtime'] = [
             Stats(str(rundir/sampling.Sampler.PROFILING_FILENAME)).total_tt
             / 3600
@@ -409,6 +417,12 @@ class Diagnostics:
         return table
 
     @staticmethod
+    def _get_n_effective(rundir):
+        samples = pd.read_feather(rundir/sampling.SAMPLES_FILENAME)
+        weights = samples.get(utils.WEIGHTS_NAME, np.ones(len(samples)))
+        return utils.n_effective(weights)
+
+    @staticmethod
     def _collect_run_kwargs(rundirs):
         """
         Return a DataFrame aggregating run_kwargs used in sampling.
@@ -416,14 +430,20 @@ class Diagnostics:
         run_kwargs = []
         for rundir in rundirs:
             with open(rundir/sampling.Sampler.JSON_FILENAME) as sampler_file:
-                dic = json.load(sampler_file)['init_kwargs']
-                run_kwargs.append({**dic['run_kwargs'],
-                                   'sample_prior': dic['sample_prior']})
+                dic = json.load(sampler_file)
+                sampler_cls = utils.class_registry[dic['__cogwheel_class__']]
+                init_kwargs = dic['init_kwargs']
+                settings = {key: val
+                            for key, val in init_kwargs['run_kwargs'].items()
+                            if val != sampler_cls.DEFAULT_RUN_KWARGS.get(key)}
+                run_kwargs.append({'sampler': sampler_cls.__name__,
+                                   'sample_prior': init_kwargs['sample_prior'],
+                                   **settings})
 
         run_kwargs = pd.DataFrame(run_kwargs)
         const_cols = [col for col, (first, *others) in run_kwargs.iteritems()
                       if all(first == other for other in others)]
-        drop_cols = const_cols + ['outputfiles_basename']
+        drop_cols = const_cols + ['outputfiles_basename', 'wrapped_params']
         return run_kwargs.drop(columns=drop_cols, errors='ignore')
 
     @staticmethod
@@ -463,8 +483,8 @@ class Diagnostics:
         dlnl_max = self.table['lnl_max'] - self.table['lnl_0']
         cell_colors['lnl_0'] = self._test_color('lnl_max_exceeds_lnl_0',
                                                 dlnl_max)
-        cell_colors['lnl_max']  = self._test_color('lnl_0_exceeds_lnl_max',
-                                                   - dlnl_max)
+        cell_colors['lnl_max'] = self._test_color('lnl_0_exceeds_lnl_max',
+                                                  - dlnl_max)
 
         nrows, ncols = self.table.shape
         _, ax = plt.subplots(figsize=np.multiply((ncols, nrows+1), cell_size))
@@ -497,7 +517,7 @@ class Diagnostics:
     def _scatter_nsamples_vs_runtime(self):
         """Scatter plot number of samples vs runtime from `table`."""
         plt.figure()
-        xpar, ypar = 'runtime', 'n_samples'
+        xpar, ypar = 'runtime', 'n_effective'
         plt.scatter(self.table[xpar], self.table[ypar])
         for run, *x_y in self.table[['run', xpar, ypar]].to_numpy():
             plt.annotate(run.lstrip(utils.RUNDIR_PREFIX), x_y,
