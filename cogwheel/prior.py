@@ -323,12 +323,13 @@ class Prior(ABC, utils.JSONMixin):
             same shape with folded parameter values.
             """
             out = np.array(self.signature.bind(*sampled_par_values,
-                                               **sampled_par_dic).args)
-            values = out[self._folded_inds]
+                                               **sampled_par_dic).args).T
+            values = out[..., self._folded_inds]
             normalized = normalize(values)
-            norm_folded = np.r_[reflect(normalized[:n_reflect]),
-                                shift(normalized[n_reflect:])]
-            out[self._folded_inds] = unnormalize(norm_folded)
+            norm_folded = np.concatenate((reflect(normalized[..., :n_reflect]),
+                                          shift(normalized[..., n_reflect:])),
+                                         axis=-1)
+            out[..., self._folded_inds] = unnormalize(norm_folded)
 
             return out
 
