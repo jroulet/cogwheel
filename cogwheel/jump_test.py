@@ -31,7 +31,7 @@ class BaseJumpTest(ABC):
     the jump function. It is usually hard to devise a good jump function
     that involves correlated parameters.
     If a set of samples passes the jump test it does not mean it is
-    correct. If it does not pass the jump test it is incorrect.
+    correct. If it does not pass the jump test it means it is incorrect.
     """
     def __init__(self, posterior, samples):
         """
@@ -75,6 +75,23 @@ class BaseJumpTest(ABC):
         """
 
     def __call__(self):
+        """
+        Perform the jump test. This will:
+
+            * Print the percentage of samples that jumped; this depends
+              on how well the jump function was chosen. Ideally a
+              sizeable fraction should jump and the higher the better,
+              in the sense that if very few samples jump then the test
+              does not have a chance to fail.
+
+            * Make a corner plot of the samples before and after the
+              jump. If these are mismatched the samples do not follow
+              the allefed distribution.
+
+            * Return two `DataFrame`s, with samples before and after the
+              jump. Only samples for which the jump function is not the
+              identity are included.
+        """
         params = self.posterior.prior.sampled_params
         jumped_samples = self.jump_function(self.folded_samples)
 
@@ -99,8 +116,8 @@ class BaseJumpTest(ABC):
         test_samples = samples.copy()
         test_samples[jump] = jumped_samples[jump]
 
-        relevant_pars = samples.columns[~np.all(samples == jumped_samples,
-                                                axis=0)]
+        relevant_pars = list(
+            samples.columns[~np.all(samples == jumped_samples, axis=0)])
         gw_plotting.MultiCornerPlot([samples, test_samples],
                                     labels=['Original', 'Jump test'],
                                     params=relevant_pars
@@ -142,20 +159,19 @@ class AutomaticJumpTest(BaseJumpTest):
         super().__init__(posterior, samples)
 
         self.params = params
-        self.range_dic = {par: samples[par].quantile(quantile)
+        self.range_dic = {par: self.folded_samples[par].quantile(quantile)
                           for par in params}
 
     def jump_function(self, samples):
         jumped_samples = samples.copy()
 
         for par, rng in self.range_dic.items():
-            jumped_samples[par] = self._aux_jump(
-                self.folded_samples[par], *rng)
+            jumped_samples[par] = self._aux_jump(samples[par], *rng)
 
         return jumped_samples
 
-    @abstractmethod
     @staticmethod
+    @abstractmethod
     @np.vectorize
     def _aux_jump(value, low, high):
         """
