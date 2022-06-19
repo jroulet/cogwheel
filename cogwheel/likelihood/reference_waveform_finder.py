@@ -227,8 +227,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         Return log likelihood maximized over amplitude, phase and time
         incoherently across detectors.
         """
+        # We assume that all time shifts are encompassed by `self._times`
         matched_filter_timeseries = self._matched_filter_timeseries_rb(
-            par_dic)
+            par_dic | {'t_geocenter': 0.})
         lnl = np.max(np.abs(matched_filter_timeseries), axis=0)**2 / 2
 
         if return_by_detectors:

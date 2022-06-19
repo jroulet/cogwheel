@@ -11,12 +11,16 @@ A class ``RelativeBinningLikelihood`` is provided. Its method ``lnlike``
 computes the log likelihood using relative binning.
 """
 import itertools
+import warnings
 import numpy as np
 import scipy.interpolate
 import scipy.sparse
 
 from cogwheel import waveform
+from cogwheel import gw_utils
+from cogwheel import utils
 from .likelihood import CBCLikelihood, check_bounds
+
 
 class RelativeBinningLikelihood(CBCLikelihood):
     """
@@ -25,6 +29,9 @@ class RelativeBinningLikelihood(CBCLikelihood):
 
     Subclassed by ``ReferenceWaveformFinder``.
     """
+    _FIDUCIAL_CONFIGURATION = {'d_luminosity': 1.,
+                               'phi_ref': 0.}
+
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None, spline_degree=3):
         """
@@ -57,6 +64,15 @@ class RelativeBinningLikelihood(CBCLikelihood):
         super().__init__(event_data, waveform_generator)
 
         self._spline_degree = spline_degree
+
+        # Backward compatibility fix, shouldn't happen in new code:
+        if ({'s1x_n', 's1y_n', 's2x_n', 's2y_n'}.isdisjoint(par_dic_0.keys())
+                and {'s1x_n', 's1y_n', 's2x_n', 's2y_n'} <= set(self.params)
+                and {'s1x', 's1y', 's2x', 's2y', 'phi_ref'} <= par_dic_0.keys()):
+            waveform.inplane_spins_xy_to_xy_n(par_dic_0)
+            for key in 's1x', 's1y', 's2x', 's2y':
+                del par_dic_0[key]
+
         self._par_dic_0 = par_dic_0
 
         if pn_phase_tol:
@@ -78,19 +94,98 @@ class RelativeBinningLikelihood(CBCLikelihood):
         Parameters
         ----------
         par_dic: dict
-            Waveform parameters, keys should match
-            ``self.waveform_generator.params``.
+            Waveform parameters, keys should match ``self.params``.
         """
-        h_fbin = self.waveform_generator.get_strain_at_detectors(
-            self.fbin, par_dic, by_m=True)
-
-        # Sum over m and f axes, leave detector axis unsummed.
-        d_h = (self._d_h_weights * h_fbin.conj()).real.sum(axis=(0, -1))
-
-        m_inds, mprime_inds = self._get_m_mprime_inds()
-        h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
-               ).real.sum(axis=(0, -1)))
+        d_h, h_h = self._get_dh_hh_no_asd_drift(par_dic)
         return d_h - h_h/2
+
+    def _get_dh_hh_no_asd_drift(self, par_dic):
+        """
+        Return two arrays of length n_detectors with the values of
+        ``(d|h)``, ``(h|h)``, no ASD-drift correction applied, using
+        relative binning.
+
+        Parameters
+        ----------
+        par_dic: dict
+            Waveform parameters, keys should match ``self.params``.
+        """
+        # Pass fiducial configuration to hit cache often:
+        dphi = par_dic['phi_ref'] - self._FIDUCIAL_CONFIGURATION['phi_ref']
+        amp_ratio = (self._FIDUCIAL_CONFIGURATION['d_luminosity']
+                     / par_dic['d_luminosity'])
+        par_dic_fiducial = (
+            {par: par_dic[par]
+             for par in self.waveform_generator.polarization_params}
+            | self._FIDUCIAL_CONFIGURATION)
+        d_h_mpd, h_h_mpd = self._get_dh_hh_by_m_polarization_detector(
+            tuple(par_dic_fiducial.items()))
+
+        m_arr = np.fromiter(self.waveform_generator._harmonic_modes_by_m, int)
+        m_inds, mprime_inds = self._get_m_mprime_inds()
+        dh_phasor = np.exp(-1j * dphi * m_arr)
+        hh_phasor = np.exp(1j * dphi * (m_arr[m_inds] - m_arr[mprime_inds]))
+
+        # fplus_fcross shape: (2, n_detectors)
+        fplus_fcross = gw_utils.fplus_fcross(
+            self.waveform_generator.detector_names,
+            par_dic['ra'], par_dic['dec'], par_dic['psi'],
+            self.waveform_generator.tgps)
+
+        d_h = amp_ratio * np.einsum('mpd, pd, m -> d',
+                                    d_h_mpd, fplus_fcross, dh_phasor).real
+        h_h = amp_ratio**2 * np.einsum(
+            'mpPd, pd, Pd, m -> d',
+            h_h_mpd, fplus_fcross, fplus_fcross, hh_phasor).real
+        return d_h, h_h
+
+    @utils.lru_cache(maxsize=16)
+    def _get_dh_hh_by_m_polarization_detector(self, par_dic_items):
+        """
+        Return ``d_h_0`` and ``h_h_0``, complex inner products for a
+        waveform ``h`` by azimuthal mode ``m`` and polarization (plus
+        and cross). No ASD-drift correction is applied.
+        Useful for reusing computations when only ``psi``, ``phi_ref``
+        and/or ``d_luminosity`` change, as these parameters only affect
+        ``h`` by a scalar factor dependent on m and polarization.
+
+        Parameters
+        ----------
+        par_dic_items: tuple of (key, value) tuples
+            Contents of ``par_dic``, in tuple format so it's hashable.
+
+        Return
+        ------
+        d_h: (n_m, 2) array
+            ``(d|h_mp)`` complex inner product, where ``d`` is data and
+            ``h_mp`` is the waveform with co-precessing azimuthal mode
+            ``m`` and polarization ``p`` (plus or cross).
+
+        h_h: (n_m*(n_m+1)/2, 2, 2, n_detectors) array
+            ``(h_mp|h_m'p')`` complex inner product.
+
+        """
+        par_dic = dict(par_dic_items)
+        hplus_hcross_at_detectors \
+            = self.waveform_generator.get_hplus_hcross_at_detectors(
+                self.fbin, par_dic, by_m=True)
+
+        if len(hplus_hcross_at_detectors) != len(self._d_h_weights):
+            warnings.warn('Summary data and waveform_generator have '
+                          'incompatible number of harmonic modes, recomputing '
+                          'the summary data.')
+            self.par_dic_0 = self.par_dic_0  # Recomputes summary
+
+        # Shape (n_m, 2, n_detectors), complex
+        d_h = np.einsum('mdf, mpdf -> mpd',
+                        self._d_h_weights, hplus_hcross_at_detectors.conj())
+
+        # Shape (n_m, 2, 2, n_detectors), complex
+        m_inds, mprime_inds = self._get_m_mprime_inds()
+        h_h = np.einsum('mdf, mpdf, mPdf -> mpPd', self._h_h_weights,
+                        hplus_hcross_at_detectors[m_inds],
+                        hplus_hcross_at_detectors.conj()[mprime_inds])
+        return d_h, h_h
 
     @property
     def pn_phase_tol(self):
@@ -232,7 +327,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
         self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, self.par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
 
-        d_h0 = self.event_data.blued_strain * np.conj(self._h0_f)
+        d_h0 = self.event_data.blued_strain * self._h0_f.conj()
         self._d_h_weights = (self._get_summary_weights(d_h0)
                              / np.conj(self._h0_fbin))
 
@@ -290,7 +385,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
                 = self._basis_splines @ arr_f
 
         return (4 * self.event_data.df
-                * projected_integrand @ self._coefficients.T)
+                * projected_integrand.dot(self._coefficients.T))
 
     def _get_h_f_interpolated(self, par_dic, *, normalize=False,
                               by_m=False):
@@ -329,7 +424,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
     @classmethod
     def from_reference_waveform_finder(
             cls, reference_waveform_finder, approximant,
-            fbin=None, pn_phase_tol=.05, spline_degree=3):
+            fbin=None, pn_phase_tol=.05, spline_degree=3, **kwargs):
         """
         Instantiate with help from a `ReferenceWaveformFinder` instance,
         which provides `waveform_generator`, `event_data` and
@@ -362,6 +457,10 @@ class RelativeBinningLikelihood(CBCLikelihood):
         waveform_generator = reference_waveform_finder.waveform_generator \
             .reinstantiate(approximant=approximant, harmonic_modes=None)
 
-        return cls(reference_waveform_finder.event_data, waveform_generator,
-                   reference_waveform_finder.par_dic_0, fbin,
-                   pn_phase_tol, spline_degree)
+        return cls(event_data=reference_waveform_finder.event_data,
+                   waveform_generator=waveform_generator,
+                   par_dic_0=reference_waveform_finder.par_dic_0,
+                   fbin=fbin,
+                   pn_phase_tol=pn_phase_tol,
+                   spline_degree=spline_degree,
+                   **kwargs)

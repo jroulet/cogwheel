@@ -35,12 +35,12 @@ def get_random_par_dic(aligned_spins=False, tides=False):
     s1phi, s2phi = np.random.uniform(0, 2*np.pi, 2)
     s1, s2 = np.random.uniform(0, 1, 2)
 
-    par_dic['s1x'] = s1 * np.sin(s1tilt) * np.cos(s1phi)
-    par_dic['s1y'] = s1 * np.sin(s1tilt) * np.sin(s1phi)
+    par_dic['s1x_n'] = s1 * np.sin(s1tilt) * np.cos(s1phi)
+    par_dic['s1y_n'] = s1 * np.sin(s1tilt) * np.sin(s1phi)
     par_dic['s1z'] = s1 * np.cos(s1tilt)
 
-    par_dic['s2x'] = s2 * np.sin(s2tilt) * np.cos(s2phi)
-    par_dic['s2y'] = s2 * np.sin(s2tilt) * np.sin(s2phi)
+    par_dic['s2x_n'] = s2 * np.sin(s2tilt) * np.cos(s2phi)
+    par_dic['s2y_n'] = s2 * np.sin(s2tilt) * np.sin(s2phi)
     par_dic['s2z'] = s2 * np.cos(s2tilt)
 
     par_dic['l1'], par_dic['l2'] = 0, 0

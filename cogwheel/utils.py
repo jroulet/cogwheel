@@ -1,5 +1,6 @@
 """Utility functions."""
 
+import functools
 import importlib
 import inspect
 import json
@@ -15,6 +16,8 @@ from scipy.optimize import _differentialevolution
 
 DIR_PERMISSIONS = 0o755
 FILE_PERMISSIONS = 0o644
+
+WEIGHTS_NAME = 'weights'
 
 
 class ClassProperty:
@@ -60,7 +63,49 @@ class _DifferentialEvolutionSolverWithGuesses(
         self.init_population_array(population)
 
 
-def merge_dictionaries_safely(dics):
+cached_functions_registry = []
+
+
+def lru_cache(*args, **kwargs):
+    """
+    Decorator like `functools.lru_cache` that also registers the
+    decorated function in ``cached_functions_registry`` so all caches
+    can easily be cleared with ``clear_caches()``.
+    """
+    def decorator(function):
+        function = functools.lru_cache(*args, **kwargs)(function)
+        cached_functions_registry.append(function)
+        return function
+    return decorator
+
+
+def clear_caches():
+    """
+    Clear caches of functions decorated with ``lru_cache``.
+    """
+    for function in cached_functions_registry:
+        function.cache_clear()
+
+
+def mod(value, start=0, period=2*np.pi):
+    """
+    Modulus operation, generalized so that the domain of the output can
+    be specified.
+    """
+    return (value - start) % period + start
+
+
+def weighted_std(values, weights=None):
+    """Return standard deviation of values with weights."""
+    avg = np.average(values, weights=weights)
+    return np.sqrt(np.average((values - avg) ** 2, weights=weights))
+
+
+def n_effective(weights):
+    """Return effective sample size."""
+    return np.sum(weights)**2 / np.sum(weights**2)
+
+def merge_dictionaries_safely(*dics):
     """
     Merge multiple dictionaries into one.
     Accept repeated keys if values are consistent, otherwise raise
@@ -79,9 +124,21 @@ def update_dataframe(df1, df2):
     """
     Modify `df1` in-place by adding the columns from `df2`, where `df1`
     and `df2` are pandas `DataFrame` objects.
+    Caution: if (some of) the columns of `df1` are also in `df2` they
+    get silently overwritten without checking for consistency.
     """
     for col, values in df2.iteritems():
         df1[col] = values
+
+
+def replace(sequence, old, new):
+    """
+    Return a list like `sequence` with the first occurrence of `old`
+    replaced by `new`.
+    """
+    out = list(sequence)
+    out[out.index(old)] = new
+    return out
 
 
 def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,

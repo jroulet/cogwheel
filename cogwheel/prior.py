@@ -16,6 +16,7 @@ uniform priors.
 from abc import ABC, abstractmethod
 import inspect
 import itertools
+import pandas as pd
 import numpy as np
 
 from cogwheel import utils
@@ -46,41 +47,67 @@ class Prior(ABC, utils.JSONMixin):
 
     Attributes
     ----------
-    range_dic: Dictionary whose keys are sampled parameter names and
-               whose values are pairs of floats defining their ranges.
-               Needs to be defined by the subclass (either as a class
-               attribute or instance attribute) before calling
-               `Prior.__init__()`.
-    sampled_params: List of sampled parameter names (keys of range_dic)
-    standard_params: List of standard parameter names.
-    conditioned_on: List of names of parameters on which this prior
-                    is conditioned on. To combine priors, conditioned-on
-                    parameters need to be among the standard parameters
-                    of another prior.
-    periodic_params: List of names of sampled parameters that are
-                     periodic.
-    folded_params: List of names of sampled parameters that are folded.
+    range_dic: dict
+        Dictionary whose keys are sampled parameter names and whose
+        values are pairs of floats defining their ranges.
+        Needs to be defined by the subclass (either as a class attribute
+        or instance attribute) before calling `Prior.__init__()`.
+
+    sampled_params: list of str
+        Names of sampled parameters (keys of `range_dic`).
+
+    standard_params: list of str
+        Names of standard parameters.
+
+    conditioned_on: list of str
+        Names of parameters on which this prior is conditioned on. To
+        combine priors, conditioned-on parameters need to be among the
+        standard parameters of another prior.
+
+    periodic_params: list of str
+        Names of sampled parameters that are periodic.
+
+    reflective_params: list of str
+        Names of sampled parameters that are reflective.
+
+    folded_reflected_params: list of str
+        Names of sampled parameters that are folded using reflection
+        about the center.
+
+    folded_shifted_params: list of str
+        Names of sampled parameters that are folded using
+        translation.
+
+    folded_params: list of str
+        ``folded_reflected_params + folded_shifted_params``.
 
     Methods
     -------
-    lnprior: Method that takes sampled and conditioned-on parameters
-             and returns a float with the natural logarithm of the prior
-             probability density in the space of sampled parameters.
-             Provided by the subclass.
-    transform: Coordinate transformation, function that takes sampled
-               parameters and conditioned-on parameters and returns a
-               dict of standard parameters. Provided by the subclass.
-    lnprior_and_transform: Take sampled parameters and return a tuple
-                           with the result of (lnprior, transform).
-    inverse_transform: Inverse coordinate transformation, function that
-                       takes standard parameters and conditioned-on
-                       parameters and returns a dict of sampled
-                       parameters. Provided by the subclass.
+    lnprior:
+        Take sampled and conditioned-on parameters and return a float
+        with the natural logarithm of the prior probability density in
+        the space of sampled parameters. Provided by the subclass.
+
+    transform:
+        Coordinate transformation, take sampled parameters and
+        conditioned-on parameters and return a dict of standard
+        parameters. Provided by the subclass.
+
+    lnprior_and_transform:
+        Take sampled parameters and return a tuple with the result of
+        (lnprior, transform).
+
+    inverse_transform:
+        Inverse coordinate transformation, take standard parameters and
+        conditioned-on parameters and return a dict of sampled
+        parameters. Provided by the subclass.
     """
 
     conditioned_on = []
     periodic_params = []
-    folded_params = []
+    reflective_params = []
+    folded_reflected_params = []
+    folded_shifted_params = []
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -95,6 +122,10 @@ class Prior(ABC, utils.JSONMixin):
         self.folded_cubesize = self.cubesize.copy()
         self.folded_cubesize[self._folded_inds] /= 2
         self.signature = inspect.signature(self.transform)
+
+        self.fold = None  # Set by ``self._setup_folding_transforms()``
+        self.unfold = None  # Set by ``self._setup_folding_transforms()``
+        self._setup_folding_transforms()
 
     @utils.ClassProperty
     def sampled_params(self):
@@ -160,14 +191,27 @@ class Prior(ABC, utils.JSONMixin):
         return (self.lnprior(*par_vals, **par_dic),
                 self.transform(*par_vals, **par_dic))
 
+    @property
+    def folded_params(self):
+        """
+        Names of folded parameters that are either reflected or shifted,
+        in that order.
+        """
+        return self.folded_reflected_params + self.folded_shifted_params
+
+
     def _check_range_dic(self):
         """
         Ensure that range_dic values are stored as float arrays.
-        Verify that ranges for all periodic and folded parameters were
-        provided.
+        Verify that ranges for all periodic, reflective and folded
+        parameters were provided.
         """
         if missing := (set(self.periodic_params) - self.range_dic.keys()):
             raise PriorError('Periodic parameters are missing from '
+                             f'`range_dic`: {", ".join(missing)}')
+
+        if missing := (set(self.reflective_params) - self.range_dic.keys()):
+            raise PriorError('Reflective parameters are missing from '
                              f'`range_dic`: {", ".join(missing)}')
 
         if missing := (set(self.folded_params) - self.range_dic.keys()):
@@ -199,51 +243,96 @@ class Prior(ABC, utils.JSONMixin):
         length `2**n_folds`.
         """
         sig = inspect.signature(self.transform)
+        vectorized_func = np.vectorize(func)
 
         def unfolding_func(*par_vals, **par_dic):
             par_values = np.array(sig.bind(*par_vals, **par_dic).args)
             unfolded = self.unfold(par_values)
-            return [func(*par_vals) for par_vals in unfolded]
+            return vectorized_func(*unfolded.T)
 
         unfolding_func.__doc__ = f"""
-            Return a list of {2**len(self.folded_params)} elements
+            Return an array of {2**len(self.folded_params)} elements
             with the results of applying {func.__name__} to the
             different unfoldings of the parameters passed.
             """
         unfolding_func.__signature__ = sig
         return unfolding_func
 
-    def unfold(self, folded_par_values):
-        """
-        Take an array of length `n_params` with parameter values in the
-        space of folded sampled parameters, and return an array of shape
-        `(2**n_folded_params, n_params)` with parameter values
-        corresponding to the different ways of unfolding.
-        """
-        original_values = folded_par_values[self._folded_inds]
-        mirrored_values = (2 * (self.cubemin[self._folded_inds]
-                                + self.folded_cubesize[self._folded_inds])
-                           - original_values)
+    def _setup_folding_transforms(self):
+        cubemin = self.cubemin[self._folded_inds]
+        folded_cubesize = self.folded_cubesize[self._folded_inds]
+        n_folds = 2 ** len(self.folded_params)
+        n_reflect = len(self.folded_reflected_params)
 
-        unfolded = np.array([folded_par_values] * 2**len(self._folded_inds))
-        unfolded[:, self._folded_inds] = list(itertools.product(
-            *zip(original_values, mirrored_values)))
+        # Helper functions, vectorized:
 
-        return unfolded
+        def normalize(sampled_par_values):
+            """Map folded parameters from their range to (0, 2)."""
+            return (sampled_par_values - cubemin) / folded_cubesize
 
-    def fold(self, *sampled_par_values, **sampled_par_dic):
-        """
-        Take an array of length `n_params` with parameter values in the
-        space of sampled parameters, and return an array of the same
-        shape with folded parameter values.
-        """
-        folded = np.array(self.signature.bind(*sampled_par_values,
-                                              **sampled_par_dic).args)
-        center = (self.cubemin[self._folded_inds]
-                  + self.folded_cubesize[self._folded_inds])
-        folded[self._folded_inds] = center - np.abs(folded[self._folded_inds]
-                                                    - center)
-        return folded
+        def unnormalize(normalized_values):
+            """Inverse of ``normalize``."""
+            return cubemin + normalized_values * folded_cubesize
+
+        def reflect(normalized_value):
+            """Linear interpolation of (0, 1, 2) -> (0, 1, 0)."""
+            return 1 - np.abs(1 - normalized_value)
+
+        def unreflect(normalized_value):
+            """(0, 1) -> (2, 1)"""
+            return 2 - normalized_value
+
+        def shift(normalized_value):
+            """(0, 1-, 1+, 2) -> (0, 1, 0, 1)."""
+            return normalized_value % 1
+
+        def unshift(normalized_value):
+            """(0, 1) -> (1, 2)."""
+            return normalized_value + 1
+
+        # Folding / unfolding transforms:
+
+        def unfold(folded_par_values):
+            """
+            Take an array of length `n_params` with parameter values in
+            the space of folded sampled parameters, and return an array
+            of shape `(2**n_folded_params, n_params)` with parameter
+            values corresponding to the different ways of unfolding.
+            """
+            folded_values = folded_par_values[self._folded_inds]
+            normalized = normalize(folded_values)
+            norm_unfolded = np.r_[unreflect(normalized[:n_reflect]),
+                                  unshift(normalized[n_reflect:])]
+            unfolded_values = unnormalize(norm_unfolded)
+
+            # Make 2**n copies of the original array and populate the
+            # places corresponding to folded parameters with all the
+            # combinations of unfold/no unfold:
+            unfoldings = np.tile(folded_par_values, (n_folds, 1))
+            unfoldings[:, self._folded_inds] = list(itertools.product(
+                *zip(folded_values, unfolded_values)))
+
+            return unfoldings
+
+        self.unfold = unfold
+
+        def fold(*sampled_par_values, **sampled_par_dic):
+            """
+            Take an array of length `n_params` with parameter values in
+            the space of sampled parameters, and return an array of the
+            same shape with folded parameter values.
+            """
+            out = np.array(self.signature.bind(*sampled_par_values,
+                                               **sampled_par_dic).args)
+            values = out[self._folded_inds]
+            normalized = normalize(values)
+            norm_folded = np.r_[reflect(normalized[:n_reflect]),
+                                shift(normalized[n_reflect:])]
+            out[self._folded_inds] = unnormalize(norm_folded)
+
+            return out
+
+        self.fold = fold
 
     @classmethod
     def init_parameters(cls, include_optional=True):
@@ -304,6 +393,25 @@ class Prior(ABC, utils.JSONMixin):
         """
         return {}
 
+    def transform_samples(self, samples: pd.DataFrame):
+        """
+        Add columns for `self.standard_params` to `samples`.
+        `samples` must include columns for `self.sampled_params`.
+        """
+        sampled = samples[self.sampled_params]
+        standard = pd.DataFrame(list(np.vectorize(self.transform)(**sampled)))
+        utils.update_dataframe(samples, standard)
+
+    def inverse_transform_samples(self, samples: pd.DataFrame):
+        """
+        Add columns for `self.sampled_params` to `samples`.
+        `samples` must include columns for `self.standard_params`.
+        """
+        standard = samples[self.standard_params]
+        sampled = pd.DataFrame(list(
+            np.vectorize(self.inverse_transform)(**standard)))
+        utils.update_dataframe(samples, sampled)
+
 
 class CombinedPrior(Prior):
     """
@@ -359,7 +467,9 @@ class CombinedPrior(Prior):
             * `standard_params`
             * `conditioned_on`
             * `periodic_params`
-            * `folded_params`
+            * `reflective_params`
+            * `folded_reflected_params`
+            * `folded_shifted_params`
             * `transform`
             * `inverse_transform`
             * `lnprior_and_transform`
@@ -398,9 +508,9 @@ class CombinedPrior(Prior):
             """
             par_dic.update(dict(zip(inverse_params, par_vals)))
             for subprior in self.subpriors:
-                input_dic = {
-                    par: par_dic[par] for par in (subprior.standard_params
-                                                  + subprior.conditioned_on)}
+                input_dic = {par: par_dic[par]
+                             for par in (subprior.standard_params
+                                         + subprior.conditioned_on)}
                 par_dic.update(subprior.inverse_transform(**input_dic))
             return {par: par_dic[par] for par in self.sampled_params}
 
@@ -409,6 +519,9 @@ class CombinedPrior(Prior):
             Take sampled and conditioned-on parameters, and return a
             2-element tuple with the log of the prior and a dictionary
             with standard parameters.
+            The reason for this function is that it is necessary to
+            compute the transform in order to compute the prior, so if
+            both are wanted it is efficient to compute them at once.
             """
             par_dic.update(dict(zip(direct_params, par_vals)))
             standard_par_dic = self.transform(**par_dic)
@@ -458,16 +571,18 @@ class CombinedPrior(Prior):
             * `standard_params`
             * `conditioned_on`
             * `periodic_params`
-            * `folded_params`.
-        Check whether subpriors are compatible and raise `PriorError`
-        if not.
+            * `reflective_params`
+            * `folded_reflected_params`.
+            * `folded_shifted_params`
+        Raise `PriorError` if subpriors are incompatible.
         """
         cls.range_dic = {}
         for prior_class in cls.prior_classes:
             cls.range_dic.update(prior_class.range_dic)
 
-        for params in ('standard_params', 'conditioned_on', 'periodic_params',
-                       'folded_params'):
+        for params in ('standard_params', 'conditioned_on',
+                       'periodic_params', 'reflective_params',
+                       'folded_reflected_params', 'folded_shifted_params',):
             setattr(cls, params, [par for prior_class in cls.prior_classes
                                   for par in getattr(prior_class, params)])
 
@@ -544,15 +659,15 @@ class CombinedPrior(Prior):
         instance.
         """
         init_dicts = [subprior.get_init_dict() for subprior in self.subpriors]
-        return utils.merge_dictionaries_safely(init_dicts)
+        return utils.merge_dictionaries_safely(*init_dicts)
 
     @classmethod
     def get_fast_sampled_params(cls, fast_standard_params):
         """
         Return a list of parameter names that map to given "fast"
         standard parameters, useful for sampling fast-slow parameters.
-        Updating fast sampling parameters is guaranteed to only
-        change fast standard parameters.
+        Updating fast sampling parameters is guaranteed to only change
+        fast standard parameters.
         """
         return [par for prior_class in cls.prior_classes
                 for par in prior_class.get_fast_sampled_params(
@@ -565,6 +680,18 @@ class FixedPrior(Prior):
     Usage: Subclass `FixedPrior` and define a `standard_par_dic`
     attribute.
     """
+    def __init__(self, **kwargs):
+        """Check that `self.standard_par_dic` has the correct keys."""
+        super().__init__(**kwargs)
+
+        if missing := (self.__class__.standard_par_dic.keys()
+                       - self.standard_par_dic.keys()):
+            raise ValueError(f'`standard_par_dic` is missing keys: {missing}')
+
+        if extra := (self.standard_par_dic.keys()
+                     - self.__class__.standard_par_dic.keys()):
+            raise ValueError(f'`standard_par_dic` has extra keys: {extra}')
+
     @property
     @staticmethod
     @abstractmethod
@@ -609,6 +736,7 @@ class UniformPriorMixin:
     It must be inherited before `Prior` (otherwise a `PriorError` is
     raised) so that abstract methods get overriden.
     """
+    @utils.lru_cache()
     def lnprior(self, *par_vals, **par_dic):
         """
         Natural logarithm of the prior probability density.
@@ -643,6 +771,7 @@ class IdentityTransformMixin:
         check_inheritance_order(cls, IdentityTransformMixin, Prior)
         cls.standard_params = cls.sampled_params
 
+    @utils.lru_cache()
     def transform(self, *par_vals, **par_dic):
         """
         Transform sampled parameter values to standard parameter values.

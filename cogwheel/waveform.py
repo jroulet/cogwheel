@@ -9,10 +9,10 @@ import lalsimulation
 from cogwheel import gw_utils
 from cogwheel import utils
 
-ZERO_INPLANE_SPINS = {'s1x': 0.,
-                      's1y': 0.,
-                      's2x': 0.,
-                      's2y': 0.}
+ZERO_INPLANE_SPINS = {'s1x_n': 0.,
+                      's1y_n': 0.,
+                      's2x_n': 0.,
+                      's2y_n': 0.}
 
 DEFAULT_PARS = {**ZERO_INPLANE_SPINS,
                 's1z': 0.,
@@ -39,15 +39,68 @@ APPROXIMANTS = {
     }
 
 
-def within_bounds(par_dic):
+def inplane_spins_xy_n_to_xy(par_dic):
+    """
+    Rotate inplane spins (s1x_n, s1y_n) and (s2x_n, s2y_n) by an angle
+    `-phi_ref` to get (s1x, s1y), (s2x, s2y).
+    `par_dic` needs to have keys 's1x_n', 's1y_n', 's2x_n', 's2y_n'.
+    Entries for 's1x', 's1y', 's2x', 's2y' will be added.
+
+    `x_n`, `y_n` are axes perpendicular to the orbital angular momentum
+    `L`, so that the line of sight `N` lies in the y-z plane, i.e.
+        N = (0, sin(iota), cos(iota))
+    in the (x_n, y_n, z) system.
+    `x`, `y` are axes perpendicular to the orbital angular momentum `L`,
+    so that the orbital separation is the x direction.
+    The two systems coincide when `phi_ref=0`.
+    """
+    sin_phi_ref = np.sin(par_dic['phi_ref'])
+    cos_phi_ref = np.cos(par_dic['phi_ref'])
+    rotation = np.array([[cos_phi_ref, sin_phi_ref],
+                         [-sin_phi_ref, cos_phi_ref]])
+
+    ((par_dic['s1x'], par_dic['s2x']),
+     (par_dic['s1y'], par_dic['s2y'])
+        ) = rotation.dot(((par_dic['s1x_n'], par_dic['s2x_n']),
+                          (par_dic['s1y_n'], par_dic['s2y_n'])))
+
+
+def inplane_spins_xy_to_xy_n(par_dic):
+    """
+    Rotate inplane spins (s1x, s1y) and (s2x, s2y) by an angle
+    `phi_ref` to get (s1x_n, s1y_n), (s2x_n, s2y_n).
+    `par_dic` needs to have keys 's1x', 's1y', 's2x', 's2y'.
+    Entries for 's1x_n', 's1y_n', 's2x_n', 's2y_n' will be added.
+
+    `x_n`, `y_n` are axes perpendicular to the orbital angular momentum
+    `L`, so that the line of sight `N` lies in the y-z plane, i.e.
+        N = (0, sin(iota), cos(iota))
+    in the (x_n, y_n, z) system.
+    `x`, `y` are axes perpendicular to the orbital angular momentum `L`,
+    so that the orbital separation is the x direction.
+    The two systems coincide when `phi_ref=0`.
+    """
+    sin_phi_ref = np.sin(par_dic['phi_ref'])
+    cos_phi_ref = np.cos(par_dic['phi_ref'])
+    rotation = np.array([[cos_phi_ref, -sin_phi_ref],
+                         [sin_phi_ref, cos_phi_ref]])
+
+    ((par_dic['s1x_n'], par_dic['s2x_n']),
+     (par_dic['s1y_n'], par_dic['s2y_n'])
+        ) = rotation.dot(((par_dic['s1x'], par_dic['s2x']),
+                          (par_dic['s1y'], par_dic['s2y'])))
+
+
+def within_bounds(par_dic: dict) -> bool:
     """
     Return whether parameters in `par_dic` are within physical bounds.
     """
-    return (all(par_dic[positive] >= 0 for positive in
-                ['m1', 'm2', 'd_luminosity', 'l1', 'l2', 'iota'])
+    return (all(par_dic[positive] >= 0
+                for positive in {'m1', 'm2', 'd_luminosity', 'l1', 'l2', 'iota'
+                                }.intersection(par_dic))
             and np.all(np.linalg.norm(
-                [(par_dic['s1x'], par_dic['s1y'], par_dic['s1z']),
-                 (par_dic['s2x'], par_dic['s2y'], par_dic['s2z'])],
+                [(par_dic['s1x_n'], par_dic['s1y_n'], par_dic['s1z']),
+                 (par_dic['s2x_n'], par_dic['s2y_n'], par_dic['s2z'])],
                 axis=1) <= 1)
             and par_dic['iota'] <= np.pi
             and np.abs(par_dic['dec']) <= np.pi/2
@@ -62,21 +115,28 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
 
     Parameters
     ----------
-    approximant: String with the approximant name.
-    f: Frequency array in Hz
-    par_dic: Dictionary of source parameters. Needs to have these keys:
-                 * m1, m2: component masses (Msun)
-                 * d_luminosity: luminosity distance (Mpc)
-                 * iota: inclination (rad)
-                 * phi_ref: phase at reference frequency (rad)
-                 * f_ref: reference frequency (Hz)
-             plus, optionally:
-                 * s1x, s1y, s1z, s2x, s2y, s2z: dimensionless spins
-                 * l1, l2: dimensionless tidal deformabilities
-                 * lal_dic: LALDict instance with special approximant settings.
-    harmonic_modes: Optional, list of 2-tuples with (l, m) pairs
-                    specifying which (co-precessing frame) higher-order
-                    modes to include.
+    f: 1d array of type float
+        Frequency array in Hz
+
+    par_dic: dict
+        Source parameters. Needs to have these keys:
+            * m1, m2: component masses (Msun)
+            * d_luminosity: luminosity distance (Mpc)
+            * iota: inclination (rad)
+            * phi_ref: phase at reference frequency (rad)
+            * f_ref: reference frequency (Hz)
+        plus, optionally:
+            * s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z: dimensionless spins
+            * l1, l2: dimensionless tidal deformabilities
+
+    approximant: str
+        Approximant name.
+
+    harmonic_modes: list of 2-tuples with (l, m) pairs, optional
+        Which (co-precessing frame) higher-order modes to include.
+
+    lal_dic: LALDict, optional
+        Contains special approximant settings.
     """
 
     # Parameters ordered for lalsimulation.SimInspiralChooseFDWaveformSequence
@@ -85,6 +145,9 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
         'f_ref', 'd_luminosity_meters', 'iota', 'lal_dic', 'approximant', 'f']
 
     par_dic = DEFAULT_PARS | par_dic
+
+    # Transform inplane spins to LAL's coordinate system.
+    inplane_spins_xy_n_to_xy(par_dic)
 
     # SI unit conversions
     par_dic['d_luminosity_meters'] = par_dic['d_luminosity'] * 1e6 * lal.PC_SI
@@ -117,7 +180,7 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
     try:
         hplus, hcross = lalsimulation.SimInspiralChooseFDWaveformSequence(
             *[par_dic[par] for par in lal_params])
-    except:
+    except Exception:
         print('Error while calling LAL at these parameters:', par_dic)
         raise
     hplus_hcross = np.stack([hplus.data.data, hcross.data.data])
@@ -140,8 +203,8 @@ class WaveformGenerator(utils.JSONMixin):
     inplane spins.
     """
     params = sorted(['d_luminosity', 'dec', 'f_ref', 'iota', 'l1', 'l2',
-                     'm1', 'm2', 'psi', 'ra', 's1x', 's1y', 's1z',
-                     's2x', 's2y', 's2z', 't_geocenter', 'phi_ref'])
+                     'm1', 'm2', 'psi', 'ra', 's1x_n', 's1y_n', 's1z',
+                     's2x_n', 's2y_n', 's2z', 't_geocenter', 'phi_ref'])
 
     fast_params = sorted(['d_luminosity', 'dec', 'psi', 'ra', 't_geocenter',
                           'phi_ref'])
@@ -149,9 +212,7 @@ class WaveformGenerator(utils.JSONMixin):
 
     _projection_params = sorted(['dec', 'psi', 'ra', 't_geocenter'])
     _waveform_params = sorted(set(params) - set(_projection_params))
-
-    _s1xy_inds = list(map(slow_params.index, ['s1x', 's1y']))
-    _s2xy_inds = list(map(slow_params.index, ['s2x', 's2y']))
+    polarization_params = sorted(set(params) - {'psi'})
 
     def __init__(self, detector_names, tgps, tcoarse, approximant,
                  harmonic_modes=None, disable_precession=False,
@@ -171,6 +232,8 @@ class WaveformGenerator(utils.JSONMixin):
         self.n_slow_evaluations = 0
         self.n_fast_evaluations = 0
 
+        self._cached_f = None
+
     @classmethod
     def from_event_data(cls, event_data, approximant,
                         harmonic_modes=None, disable_precession=False,
@@ -189,7 +252,7 @@ class WaveformGenerator(utils.JSONMixin):
         return self._approximant
 
     @approximant.setter
-    def approximant(self, app: str):
+    def approximant(self, approximant: str):
         """
         Set `approximant` and reset `harmonic_modes` per
         `APPROXIMANTS[approximant].harmonic_modes`; print a warning that
@@ -197,12 +260,16 @@ class WaveformGenerator(utils.JSONMixin):
         Raise `ValueError` if `APPROXIMANTS` does not contain the
         requested approximant.
         """
-        if app not in APPROXIMANTS:
+        if approximant not in APPROXIMANTS:
             raise ValueError(f'Add {app} to `waveform.APPROXIMANTS`.')
-        self._approximant = app
+        self._approximant = approximant
+
+        old_harmonic_modes = self.harmonic_modes
         self.harmonic_modes = None
-        print(f'`approximant` changed to {app}, setting `harmonic_modes` to '
-              f'{self.harmonic_modes}.')
+        if self.harmonic_modes != old_harmonic_modes:
+            print(f'`approximant` changed to {approximant!r}, setting'
+                  f'`harmonic_modes` to {self.harmonic_modes}.')
+        utils.clear_caches()
 
     @property
     def harmonic_modes(self):
@@ -225,6 +292,7 @@ class WaveformGenerator(utils.JSONMixin):
         self._harmonic_modes_by_m = defaultdict(list)
         for l, m in self._harmonic_modes:
             self._harmonic_modes_by_m[m].append((l, m))
+        utils.clear_caches()
 
     @property
     def n_cached_waveforms(self):
@@ -255,30 +323,63 @@ class WaveformGenerator(utils.JSONMixin):
 
         Return
         ------
-        n_detectors x n_frequencies array with strain at detector.
-        If by_m, output is (n_m x n_detectors x n_frequencies)
+        Array of shape (n_m?, n_detectors, n_frequencies) with strain at
+        detector, `n_m` is there only if `by_m=True`.
+        """
+        # shape: (n_m?, 2, n_detectors, n_frequencies)
+        hplus_hcross_at_detectors = self.get_hplus_hcross_at_detectors(
+            f, par_dic, by_m)
+
+        # fplus_fcross shape: (2, n_detectors)
+        fplus_fcross = gw_utils.fplus_fcross(
+            self.detector_names, par_dic['ra'], par_dic['dec'], par_dic['psi'],
+            self.tgps)
+
+        # Detector strain (n_m?, n_detectors, n_frequencies)
+        return np.einsum('pd, ...pdf -> ...df',
+                         fplus_fcross, hplus_hcross_at_detectors)
+
+    def get_hplus_hcross_at_detectors(self, f, par_dic, by_m=False):
+        """
+        Return plus and cross polarizations with time shifts applied
+        (but no fplus, fcross).
+
+        Parameters
+        ----------
+        f: 1d array of frequencies [Hz]
+        par_dic: parameter dictionary per `WaveformGenerator.params`.
+        by_m: bool, whether to return waveform separated by `m`
+              harmonic mode (summed over `l`), or already summed.
+
+        Return
+        ------
+        Array of shape (n_m?, 2, n_detectors, n_frequencies) with hplus,
+        hcross at detector, `n_m` is there only if `by_m=True`.
         """
         waveform_par_dic = {par: par_dic[par] for par in self._waveform_params}
 
-        # hplus_hcross shape: (n_m x 2 x n_frequencies), n_m optional
+        # hplus_hcross shape: (n_m?, 2, n_frequencies)
         hplus_hcross = self.get_hplus_hcross(f, waveform_par_dic, by_m)
 
-        # fplus_fcross shape: (2 x n_detectors)
-        fplus_fcross = np.array(gw_utils.fplus_fcross(
-            self.detector_names, par_dic['ra'], par_dic['dec'], par_dic['psi'],
-            self.tgps))
+        # shifts shape: (n_detectors, n_frequencies)
+        if not np.array_equal(f, self._cached_f):
+            self._get_shifts.cache_clear()
+            self._cached_f = f
+        shifts = self._get_shifts(par_dic['ra'], par_dic['dec'],
+                                  par_dic['t_geocenter'])
 
+        # hplus, hcross (n_m?, 2, n_detectors, n_frequencies)
+        return np.einsum('...pf, df -> ...pdf', hplus_hcross, shifts)
+
+    @utils.lru_cache(maxsize=16)
+    def _get_shifts(self, ra, dec, t_geocenter):
+        """Return (n_detectors, n_frequencies) array with e^(-2 i f t_det)."""
         time_delays = gw_utils.time_delay_from_geocenter(
-            self.detector_names, par_dic['ra'], par_dic['dec'], self.tgps)
-
-        # shifts shape: (n_detectors x n_frequencies)
-        shifts = np.exp(-2j*np.pi * f * (self.tcoarse
-                                         + par_dic['t_geocenter']
-                                         + time_delays[:, np.newaxis]))
-
-        # Detector strain (n_m x n_detectors x n_frequencies), n_m optional
-        return np.sum(fplus_fcross[..., np.newaxis]
-                      * hplus_hcross[..., np.newaxis, :], axis=-3) * shifts
+            self.detector_names, ra, dec, self.tgps)
+        return np.exp(-2j*np.pi * self._cached_f
+                      * (self.tcoarse
+                         + t_geocenter
+                         + time_delays[:, np.newaxis]))
 
     def get_hplus_hcross(self, f, waveform_par_dic, by_m=False):
         """
@@ -305,7 +406,6 @@ class WaveformGenerator(utils.JSONMixin):
 
         slow_par_vals = np.array([waveform_par_dic[par]
                                   for par in self.slow_params])
-        self._rotate_inplane_spins(slow_par_vals, waveform_par_dic['phi_ref'])
 
         # Attempt to use cached waveform for fast evaluation:
         if matching_cache := self._matching_cache(slow_par_vals, f):
@@ -339,8 +439,8 @@ class WaveformGenerator(utils.JSONMixin):
             self.n_slow_evaluations += 1
 
         # hplus_hcross is a (n_m x 2 x n_frequencies) array.
-        m_arr = np.array(list(self._harmonic_modes_by_m)).reshape((-1, 1, 1))
-        hplus_hcross = (np.exp(1j * m_arr * waveform_par_dic['phi_ref'])
+        m_arr = np.fromiter(self._harmonic_modes_by_m, int).reshape(-1, 1, 1)
+        hplus_hcross = (np.exp(1j * waveform_par_dic['phi_ref'] * m_arr)
                         / waveform_par_dic['d_luminosity'] * hplus_hcross_0)
         if by_m:
             return hplus_hcross
@@ -352,22 +452,6 @@ class WaveformGenerator(utils.JSONMixin):
         for function_name, value in self.lalsimulation_commands:
             getattr(lalsimulation, function_name)(lal_dic, value)
         return lal_dic
-
-    def _rotate_inplane_spins(self, slow_par_vals, phi_ref):
-        """
-        Rotate inplane spins (s1x, s1y) and (s2x, s2y) by an angle `phi_ref`,
-        inplace in `slow_par_vals`.
-        `slow_par_vals` must be a numpy array whose values correspond to
-        `self.slow_params`.
-        """
-        sin_phi_ref = np.sin(phi_ref)
-        cos_phi_ref = np.cos(phi_ref)
-        rotation = np.array([[cos_phi_ref, -sin_phi_ref],
-                             [sin_phi_ref, cos_phi_ref]])
-        slow_par_vals[self._s1xy_inds] = (rotation
-                                          @ slow_par_vals[self._s1xy_inds])
-        slow_par_vals[self._s2xy_inds] = (rotation
-                                          @ slow_par_vals[self._s2xy_inds])
 
     def _matching_cache(self, slow_par_vals, f, eps=1e-6):
         """
