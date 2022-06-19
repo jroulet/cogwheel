@@ -33,6 +33,9 @@ APPROXIMANTS = {
                                                  (3, 2), (4, 4)],
                                  aligned_spins=False),
     'IMRPhenomXAS': Approximant(),
+    'IMRPhenomXP': Approximant(aligned_spins=False),
+    'IMRPhenomXHM': Approximant(harmonic_modes=[(2, 2), (2, 1), (3, 3), 
+                                                (3, 2), (4, 4)])
     }
 
 
@@ -120,6 +123,7 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
     hplus_hcross = np.stack([hplus.data.data, hcross.data.data])
     if f0_is_0:
         hplus_hcross[:, 0] = 0
+
     return hplus_hcross
 
 
