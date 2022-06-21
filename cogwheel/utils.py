@@ -101,6 +101,10 @@ def weighted_std(values, weights=None):
     return np.sqrt(np.average((values - avg) ** 2, weights=weights))
 
 
+def n_effective(weights):
+    """Return effective sample size."""
+    return np.sum(weights)**2 / np.sum(weights**2)
+
 def merge_dictionaries_safely(*dics):
     """
     Merge multiple dictionaries into one.

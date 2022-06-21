@@ -267,7 +267,7 @@ class Diagnostics:
                                 'relative_binning_dlnl_std': .05,
                                 'relative_binning_dlnl_max': .25}
     _LABELS = {
-      'n_samples': r'$N_\mathrm{samples}$',
+      'n_effective': r'$N^\mathrm{samples}_\mathrm{eff}$',
       'runtime': 'Runtime (h)',
       'asd_drift_dlnl_std': r'$\sigma(\Delta\ln\mathcal{L}_{\rm ASD\,drift})$',
       'asd_drift_dlnl_max': r'$\max|\Delta\ln\mathcal{L}_{\rm ASD\,drift}|$',
@@ -405,9 +405,9 @@ class Diagnostics:
         table = pd.DataFrame()
         table['run'] = [x.name for x in rundirs]
         utils.update_dataframe(table, self._collect_run_kwargs(rundirs))
-        table['n_samples'] = [
-            len(pd.read_feather(rundir/sampling.SAMPLES_FILENAME))
-            for rundir in rundirs]
+
+        table['n_effective'] = [round(self._get_n_effective(rundir))
+                                for rundir in rundirs]
         table['runtime'] = [
             Stats(str(rundir/sampling.Sampler.PROFILING_FILENAME)).total_tt
             / 3600
@@ -415,6 +415,12 @@ class Diagnostics:
         utils.update_dataframe(table, self._collect_tests(rundirs))
 
         return table
+
+    @staticmethod
+    def _get_n_effective(rundir):
+        samples = pd.read_feather(rundir/sampling.SAMPLES_FILENAME)
+        weights = samples.get(utils.WEIGHTS_NAME, np.ones(len(samples)))
+        return utils.n_effective(weights)
 
     @staticmethod
     def _collect_run_kwargs(rundirs):
@@ -425,19 +431,19 @@ class Diagnostics:
         for rundir in rundirs:
             with open(rundir/sampling.Sampler.JSON_FILENAME) as sampler_file:
                 dic = json.load(sampler_file)
-                sampler = utils.class_registry[dic['__cogwheel_class__']]
+                sampler_cls = utils.class_registry[dic['__cogwheel_class__']]
                 init_kwargs = dic['init_kwargs']
                 settings = {key: val
                             for key, val in init_kwargs['run_kwargs'].items()
-                            if val != sampler.DEFAULT_RUN_KWARGS.get(key)}
-                run_kwargs.append({'sampler': sampler.__class__.__name__,
+                            if val != sampler_cls.DEFAULT_RUN_KWARGS.get(key)}
+                run_kwargs.append({'sampler': sampler_cls.__name__,
                                    'sample_prior': init_kwargs['sample_prior'],
                                    **settings})
 
         run_kwargs = pd.DataFrame(run_kwargs)
         const_cols = [col for col, (first, *others) in run_kwargs.iteritems()
                       if all(first == other for other in others)]
-        drop_cols = const_cols + ['outputfiles_basename']
+        drop_cols = const_cols + ['outputfiles_basename', 'wrapped_params']
         return run_kwargs.drop(columns=drop_cols, errors='ignore')
 
     @staticmethod
@@ -511,7 +517,7 @@ class Diagnostics:
     def _scatter_nsamples_vs_runtime(self):
         """Scatter plot number of samples vs runtime from `table`."""
         plt.figure()
-        xpar, ypar = 'runtime', 'n_samples'
+        xpar, ypar = 'runtime', 'n_effective'
         plt.scatter(self.table[xpar], self.table[ypar])
         for run, *x_y in self.table[['run', xpar, ypar]].to_numpy():
             plt.annotate(run.lstrip(utils.RUNDIR_PREFIX), x_y,
