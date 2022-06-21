@@ -128,7 +128,7 @@ class UniformDiskInplaneSpinsIsotropicInclinationPrior(
                 's2y_n': s2y_n}
 
     def inverse_transform(self, iota, s1x_n, s1y_n, s2x_n, s2y_n,
-                           s1z, s2z, m1, m2, f_ref):
+                          s1z, s2z, m1, m2, f_ref):
         theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2 \
             = lalsimulation.SimInspiralTransformPrecessingWvf2PE(
                 iota, s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z, m1, m2, f_ref,
@@ -199,7 +199,6 @@ class IsotropicSpinsInplaneComponentsIsotropicInclinationPrior(
 
     @staticmethod
     def _inverse_spin_transform(chi, tilt, sz):
-        """(cumsr_sz, sphi_hat) from (sx, sy, sz, phi_ref, iota)."""
         sz_sq = sz**2
         sr = np.tan(tilt) * sz
         cumsr_sz = np.log(sz_sq / (sr**2 + sz_sq)) / np.log(sz_sq)

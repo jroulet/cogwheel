@@ -220,7 +220,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
                 srun {sys.executable} -m {module} {rundir.resolve()}
                 """))
         batch_path.chmod(0o777)
-        os.system(f'sbatch {batch_path.resolve()}')
+        os.system(f'bsub < {batch_path.resolve()}')
         print(f'Submitted job {job_name!r}.')
 
     @abc.abstractmethod
