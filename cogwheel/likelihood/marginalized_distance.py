@@ -166,7 +166,7 @@ class LookupTable(utils.JSONMixin):
             How finely to interpolate the distance distribution when
             generating samples.
         """
-        u_bounds = 1 / self._get_distance_bounds(d_h, h_h, sigmas=7.)
+        u_bounds = 1 / self._get_distance_bounds(d_h, h_h, sigmas=10.)
         focused_grid = 1 / np.linspace(*u_bounds, resolution)
         focused_grid = focused_grid[(focused_grid > 0)
                                     & (focused_grid < self.d_luminosity_max)]
