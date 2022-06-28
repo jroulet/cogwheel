@@ -193,6 +193,7 @@ class ExtrinsicParametersPrior(RegisteredPriorMixin, CombinedPrior):
                      UniformLuminosityVolumePrior,
                      FixedReferenceFrequencyPrior]
 
+
 class MarginalizedDistanceIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Prior for usage with ``MarginalizedDistanceLikelihood``.
@@ -200,4 +201,15 @@ class MarginalizedDistanceIASPrior(RegisteredPriorMixin, CombinedPrior):
     Uniform in effective spin and detector-frame component masses.
     """
     prior_classes = IASPrior.prior_classes.copy()
+    prior_classes.pop(prior_classes.index(UniformLuminosityVolumePrior))
+
+
+class MarginalizedDistanceLVCPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Prior for usage with ``MarginalizedDistanceLikelihood``.
+    Similar to ``LVCPrior`` except it does not include distance.
+    Isotropic spin orientations, uniform in component spin magnitudes
+    and detector-frame component masses.
+    """
+    prior_classes = LVCPrior.prior_classes.copy()
     prior_classes.pop(prior_classes.index(UniformLuminosityVolumePrior))

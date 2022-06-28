@@ -450,6 +450,6 @@ def download_timeseries(eventname, outdir=None, tgps=None,
         except ValueError:  # That detector has no data
             pass
         else:
-            if not np.isnan(timeseries[np.searchsorted(timeseries.times,
+            if not np.isnan(timeseries[np.searchsorted(timeseries.times.value,
                                                        tgps)]):
                 timeseries.write(path)
