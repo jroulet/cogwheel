@@ -89,17 +89,16 @@ class RegisteredPriorMixin(ReferenceWaveformFinderMixin):
 
 class IASPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, flat in chieff, uniform luminosity volume."""
-    prior_classes = [
-        FixedReferenceFrequencyPrior,
-        UniformDetectorFrameMassesPrior,
-        UniformEffectiveSpinPrior,
-        UniformDiskInplaneSpinsIsotropicInclinationPrior,
-        UniformPolarizationPrior,
-        IsotropicSkyLocationPrior,
-        UniformTimePrior,
-        UniformPhasePrior,
-        UniformLuminosityVolumePrior,
-        ZeroTidalDeformabilityPrior]
+    prior_classes = [FixedReferenceFrequencyPrior,
+                     UniformDetectorFrameMassesPrior,
+                     UniformEffectiveSpinPrior,
+                     UniformDiskInplaneSpinsIsotropicInclinationPrior,
+                     UniformPolarizationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPhasePrior,
+                     UniformLuminosityVolumePrior,
+                     ZeroTidalDeformabilityPrior]
 
 
 class AlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
@@ -119,17 +118,16 @@ class AlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
 
 class LVCPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, isotropic spins, uniform luminosity volume."""
-    prior_classes = [
-        FixedReferenceFrequencyPrior,
-        UniformDetectorFrameMassesPrior,
-        IsotropicSpinsAlignedComponentsPrior,
-        UniformPolarizationPrior,
-        IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
-        IsotropicSkyLocationPrior,
-        UniformTimePrior,
-        UniformPhasePrior,
-        UniformLuminosityVolumePrior,
-        ZeroTidalDeformabilityPrior]
+    prior_classes = [FixedReferenceFrequencyPrior,
+                     UniformDetectorFrameMassesPrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     UniformPolarizationPrior,
+                     IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPhasePrior,
+                     UniformLuminosityVolumePrior,
+                     ZeroTidalDeformabilityPrior]
 
 
 class AlignedSpinLVCPrior(RegisteredPriorMixin, CombinedPrior):
