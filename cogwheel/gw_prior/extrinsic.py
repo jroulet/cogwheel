@@ -202,7 +202,7 @@ class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin,
 
     def __init__(self, *, tgps, ref_det_name, t0_refdet=0, dt0=.07,
                  **kwargs):
-        self.range_dic['t_refdet'] = (t0_refdet - dt0, t0_refdet + dt0)
+        self.range_dic = {'t_refdet': (t0_refdet - dt0, t0_refdet + dt0)}
         super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
 
         self.tgps = tgps
