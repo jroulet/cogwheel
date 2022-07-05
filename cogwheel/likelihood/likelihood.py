@@ -110,7 +110,8 @@ class CBCLikelihood(utils.JSONMixin):
 
         self._asd_drift = np.asarray(value, dtype=np.float_)
 
-    def compute_asd_drift(self, par_dic, tol=.02, **kwargs):
+    def compute_asd_drift(self, par_dic, tol=.02,
+                          max_tcorr_contiguous_low=16., **kwargs):
         """
         Estimate local standard deviation of the matched-filter output
         at the time of the event for each detector.
@@ -131,9 +132,14 @@ class CBCLikelihood(utils.JSONMixin):
             Stochastic measurement error tolerance, used to decide the
             number of samples.
 
+        max_tcorr_contiguous_low: float
+            Maximum number of contiguous correlation times with values
+            below the average noise level to allow (these are classified
+            as a hole and disregarded in the average).
+
         **kwargs:
             Passed to `safe_std`, keys include:
-                `max_contiguous_low`, `expected_high`, `reject_nearby`.
+                `expected_high`, `reject_nearby`.
         """
         # Use all available modes to get a waveform, then reset
         harmonic_modes = self.waveform_generator.harmonic_modes
@@ -146,20 +152,26 @@ class CBCLikelihood(utils.JSONMixin):
         z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
         whitened_h_f = (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
                         * self.event_data.wht_filter * normalized_h_f)
-        nsamples = np.ceil(4 * np.sum(np.abs(whitened_h_f)**4, axis=-1)
-                           / (tol**2 * self.event_data.nfft)).astype(int)
 
-        nsamples = np.minimum(nsamples, z_cos.shape[1])
+        correlation_length = (4 * np.sum(np.abs(whitened_h_f)**4, axis=-1)
+                              / self.event_data.nfft)
 
         asd_drift = np.ones_like(self.asd_drift)
-        for i_det, n_s in enumerate(nsamples):
-            places = (i_det, np.arange(-n_s//2, n_s//2))
+        for i_det, ncorr in enumerate(correlation_length):
+            nsamples = min(np.ceil(ncorr / tol**2).astype(int),
+                           z_cos.shape[1])
+            max_contiguous_low = np.ceil(max_tcorr_contiguous_low * ncorr
+                                        ).astype(int)
+
+            places = (i_det, np.arange(-nsamples//2, nsamples//2))
             asd_drift[i_det] = self._safe_std(
-                np.r_[z_cos[places], z_sin[places]], **kwargs)
+                np.r_[z_cos[places], z_sin[places]], max_contiguous_low,
+                **kwargs)
+
         return asd_drift
 
-    def _safe_std(self, arr, max_contiguous_low=100, expected_high=1.,
-                  reject_nearby=.5):
+    def _safe_std(self, arr, max_contiguous_low=np.inf,
+                  expected_high=1., reject_nearby=.5):
         """
         Compute the standard deviation of a real array rejecting
         outliers.
