@@ -1,23 +1,25 @@
-# Cogwheel
+# cogwheel
 
 `cogwheel` is a code for parameter estimation of gravitational wave sources.
-It implements a convenient system of coordinates for sampling, a "folding" algorithm to reduce the multimodality of posteriors, and the relative binning algorithm for waveforms with higher modes.
+It implements a convenient system of coordinates for sampling, a "folding" algorithm to reduce the multimodality of posteriors, and the relative binning algorithm for fast likelihood evaluation (generalized to waveforms with higher modes).
 It interfaces with third-party routines for downloading public data (GWOSC, `GWpy`), generating waveforms (`lalsuite`) and sampling distributions (`PyMultiNest`, `dynesty`).
 
 ## Installation
 ```bash
 git clone git@github.com:jroulet/cogwheel.git
-cd cogwheel
-conda create --name <environment_name> python=3.9 numpy scipy swig h5py pkg-config matplotlib multiprocess numba pandas ipykernel python-lal python-lalsimulation pymultinest dynesty ultranest ipywidgets notebook pyarrow astropy gwpy
+conda create --name <environment_name> python=3.9 numpy scipy swig h5py pkg-config matplotlib multiprocess numba pandas ipykernel python-lal python-lalsimulation pymultinest dynesty ipywidgets notebook pyarrow astropy gwpy
 ```
 (replace `<environment_name>` by a name of your choice).
 
 
 ## Crash course
 
+Example: how to sample a gravitational wave source posterior using `PyMultiNest`:
 ```python
+path_to_cogwheel = ''  # Edit as appropriate
+
 import sys
-sys.path.append('..')
+sys.path.append(path_to_cogwheel)
 
 from cogwheel.posterior import Posterior
 from cogwheel import sampling
