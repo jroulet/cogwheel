@@ -31,7 +31,22 @@ approximant = 'IMRPhenomXPHM'
 prior_class = 'IASPrior'
 post = Posterior.from_event(eventname, mchirp_guess, approximant, prior_class)
 
-pym = sampling.PyMultiNest(post)
+pym = sampling.PyMultiNest(post, n_live_points=512)
 
-pym.run(pym.get_rundir(parentdir))  # Will take a while
+rundir = pym.get_rundir(parentdir)
+pym.run(rundir)  # Will take a while
+```
+Load and plot the samples:
+```python
+import pandas as pd
+from cogwheel import gw_plotting
+
+samples = pd.read_feather(rundir/sampling.SAMPLES_FILENAME)
+gw_plotting.CornerPlot(samples).plot()
+```
+Transform the samples to a standard system of coordinates:
+```python
+post.prior.transform_samples(samples)
+
+gw_plotting.CornerPlot(samples[['ra', 'dec']]).plot()
 ```
