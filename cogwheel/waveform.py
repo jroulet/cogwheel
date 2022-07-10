@@ -34,8 +34,6 @@ APPROXIMANTS = {
                                  aligned_spins=False),
     'IMRPhenomXAS': Approximant(),
     'IMRPhenomXP': Approximant(aligned_spins=False),
-    'IMRPhenomXHM': Approximant(harmonic_modes=[(2, 2), (2, 1), (3, 3), 
-                                                (3, 2), (4, 4)])
     }
 
 
