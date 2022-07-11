@@ -1,13 +1,17 @@
-# cogwheel
+# `cogwheel`
 
 `cogwheel` is a code for parameter estimation of gravitational wave sources.
 It implements a convenient system of coordinates for sampling, a "folding" algorithm to reduce the multimodality of posteriors, and the relative binning algorithm for fast likelihood evaluation (generalized to waveforms with higher modes).
+It supports likelihood marginalization over distance.
 It interfaces with third-party routines for downloading public data (GWOSC, `GWpy`), generating waveforms (`lalsuite`) and sampling distributions (`PyMultiNest`, `dynesty`).
+
+The coordinate system and folding algorithm are described in an accompanying article https://arxiv.org/abs/2207.03508
 
 ## Installation
 ```bash
 git clone git@github.com:jroulet/cogwheel.git
-conda create --name <environment_name> python=3.9 numpy scipy swig h5py pkg-config matplotlib multiprocess numba pandas ipykernel python-lal python-lalsimulation pymultinest dynesty ipywidgets notebook pyarrow astropy gwpy
+cd cogwheel
+conda create --name <environment_name> --file requirements.txt
 ```
 (replace `<environment_name>` by a name of your choice).
 
@@ -24,7 +28,7 @@ sys.path.append(path_to_cogwheel)
 from cogwheel.posterior import Posterior
 from cogwheel import sampling
 
-parentdir = 'example'  # Replace by a path to a directory that will contain parameter estimation runs
+parentdir = 'example'  # Directory that will contain parameter estimation runs
 
 eventname, mchirp_guess = 'GW150914', 20
 approximant = 'IMRPhenomXPHM'
