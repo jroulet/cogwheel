@@ -433,7 +433,7 @@ class CornerPlot:
             cmap = get_transparency_colormap(self.plotstyle.color_2d)
             ax.imshow(pdf, origin='lower', aspect='auto',
                       extent=(xarr.min(), xarr.max(), yarr.min(), yarr.max()),
-                      cmap=cmap, interpolation='bicubic')
+                      cmap=cmap, interpolation='bicubic', vmin=0)
 
         elif self.plotstyle.fill == 'flat':
             alphas = np.subtract(1, self.plotstyle.contour_fractions)
