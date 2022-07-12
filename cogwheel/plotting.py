@@ -356,7 +356,7 @@ class CornerPlot:
             self._plot_2d(xpar, ypar)
 
         if tightness:
-            self.set_lims(self.get_lims(tightness))
+            self.set_lims(**self.get_lims(tightness))
 
         y_title = 1 - .9 * self.MARGIN_INCHES / self.fig.get_figheight()
         self.fig.suptitle(title, y=y_title, verticalalignment='bottom')
@@ -411,7 +411,7 @@ class CornerPlot:
                                             color=color, **kwargs)
 
         if not adjust_lims:
-            self.set_lims(lims)
+            self.set_lims(**lims)
 
     def _plot_2d(self, xpar, ypar):
         ax = self.axes[self.params.index(ypar), self.params.index(xpar)]
@@ -580,14 +580,14 @@ class CornerPlot:
         return {par: ax.get_xlim()
                 for par, ax in zip(self.params, self.axes[-1])}
 
-    def set_lims(self, lims: dict):
+    def set_lims(self, **lims):
         """
         Set x and y limits of the plots.
 
         Parameters
         ----------
-        lims: dict
-            Dictionary of the form ``{par: (vmin, vmax)}`` for those
+        **lims:
+            Keyword arguments of the form ``par=(vmin, vmax)`` for those
             parameters whose limits that are to be adjusted.
         """
         for ax, par in zip(self.axes[-1], self.params):
@@ -679,7 +679,7 @@ class MultiCornerPlot:
             fig = corner_plot.fig
 
         if tightness:
-            self.set_lims(self.get_lims(tightness))
+            self.set_lims(**self.get_lims(tightness))
 
     def get_lims(self, tightness=1.):
         """
@@ -702,7 +702,7 @@ class MultiCornerPlot:
 
         return lims
 
-    def set_lims(self, lims: dict):
+    def set_lims(self, **lims: dict):
         """
         Set x and y limits of the plots.
 
@@ -712,7 +712,7 @@ class MultiCornerPlot:
             Dictionary of the form ``{par: (vmin, vmax)}`` for those
             parameters whose limits that are to be adjusted.
         """
-        self.corner_plots[0].set_lims(lims)
+        self.corner_plots[0].set_lims(**lims)
 
     def scatter_points(self, scatter_points, colors=None,
                        adjust_lims=False, **kwargs):
