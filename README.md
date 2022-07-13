@@ -11,7 +11,7 @@ The coordinate system and folding algorithm are described in an accompanying art
 ```bash
 git clone git@github.com:jroulet/cogwheel.git
 cd cogwheel
-conda create --name <environment_name> --file requirements.txt
+conda create --name <environment_name> --file requirements.txt --channel conda-forge
 ```
 (replace `<environment_name>` by a name of your choice).
 
