@@ -448,6 +448,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                 n_doublings += 1
 
         self._mchirp_range = tuple(mchirp_range)
+        print(f'Set mchirp_range = {self.mchirp_range}')
 
     def get_coordinate_system_kwargs(self):
         """

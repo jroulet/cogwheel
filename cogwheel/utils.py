@@ -105,6 +105,41 @@ def n_effective(weights):
     """Return effective sample size."""
     return np.sum(weights)**2 / np.sum(weights**2)
 
+
+def resample_equal(samples, weights_col=WEIGHTS_NAME, num=None):
+    """
+    Draw `num` samples from a DataFrame of weighted samples, so that the
+    resulting samples have equal weights.
+    Note: in general this does not produce independent samples, they may
+    be repeated.
+
+    Parameters
+    ----------
+    samples: pandas.DataFrame
+        Rows correspond to samples from a distribution.
+
+    weights_col: str
+        Name of a column in `samples` to interpret as weights.
+
+    num: int
+        Length of the returned DataFrame, defaults to ``len(samples)``.
+
+    Return
+    ------
+    equal_samples: pandas.DataFrame
+        Contains `num` rows with equal-weight samples. The columns match
+        those of `samples` except that `weights_col` is deleted.
+    """
+    if num is None:
+        num = len(samples)
+    weights = samples[weights_col]
+    weights /= weights.sum()
+    inds = np.random.choice(len(samples), num, p=weights)
+    samples_equal = samples.iloc[inds].reset_index()
+    del samples_equal[weights_col]
+    return samples_equal
+
+
 def merge_dictionaries_safely(*dics):
     """
     Merge multiple dictionaries into one.

@@ -30,12 +30,12 @@ from cogwheel import sampling
 
 parentdir = 'example'  # Directory that will contain parameter estimation runs
 
-eventname, mchirp_guess = 'GW150914', 20
+eventname, mchirp_guess = 'GW150914', 30
 approximant = 'IMRPhenomXPHM'
 prior_class = 'IASPrior'
 post = Posterior.from_event(eventname, mchirp_guess, approximant, prior_class)
 
-pym = sampling.PyMultiNest(post, n_live_points=512)
+pym = sampling.PyMultiNest(post, run_kwargs=dict(n_live_points=512))
 
 rundir = pym.get_rundir(parentdir)
 pym.run(rundir)  # Will take a while
