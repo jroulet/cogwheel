@@ -109,7 +109,7 @@ Instance of `cogwheel.likelihood.RelativeBinningLikelihood`.
 * Implements relative binning for fast likelihood evaluation (`RelativeBinningLikelihood.lnlike()`).
 * Stores the parameters of the reference waveform for relative binning (`RelativeBinningLikelihood.par_dic_0`).
 * Implements likelihood without the relative binning approximation, for testing purposes (`cogwheel.likelihood.CBCLikelihood.lnlike_fft()`).
-* A subclass implements distance marginalization (and un-marginalization for postprocessing), this is sometimes more robust (`cogwheel.likelihood.MarginalizedDistanceRelativeBinningLikelihood`). Use with a compatible prior, since the distance to the source is no longer a standard parameter.
+* A subclass implements distance marginalization (and un-marginalization for postprocessing), this is sometimes more robust (`cogwheel.likelihood.MarginalizedDistanceLikelihood`). Use with a compatible prior, since the distance to the source is no longer a standard parameter.
 * Can overplot a signal on the whitened data (`CBCLikelihood.plot_whitened_wf()`).
 
 ### Event data
