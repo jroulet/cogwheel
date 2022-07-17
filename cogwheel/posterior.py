@@ -125,30 +125,55 @@ class Posterior(utils.JSONMixin):
                                                            **prior_kwargs)
         return cls(prior, likelihood)
 
-    def refine_reference_waveform(self, seed=None):
+    def refine_reference_waveform(self, seed=None, params=None):
         """
         Reset relative-binning reference waveform, using differential
         evolution to find a good fit.
         It is guaranteed that the new waveform will have at least as
         good a fit as the current one.
         The likelihood maximization uses folded sampled parameters.
+
+        Parameters
+        ----------
+        seed: {None, int, numpy.random.Generator,
+               numpy.random.RandomState}, optional
+            Passed to ``scipy.optimize.differential_evolution``
+
+        params: list of str, optional
+            Which parameters to maximize over. If provided, must be
+            keys from ``self.prior.sampled_params``.
         """
-        print('Maximizing likelihood over full parameter space...')
+        params = params or self.prior.sampled_params
+        inds = [self.prior.sampled_params.index(par) for par in params]
+
         folded_par_vals_0 = self.prior.fold(
             **self.prior.inverse_transform(**self.likelihood.par_dic_0))
 
         lnlike_unfolds = self.prior.unfold_apply(
             lambda *pars: self.likelihood.lnlike(self.prior.transform(*pars)))
 
-        bestfit_folded = utils.differential_evolution_with_guesses(
-            func=lambda pars: -max(lnlike_unfolds(*pars)),
-            bounds=list(zip(self.prior.cubemin,
-                            self.prior.cubemin + self.prior.folded_cubesize)),
-            guesses=folded_par_vals_0, seed=seed, init='sobol').x
-        i_fold = np.argmax(lnlike_unfolds(*bestfit_folded))
+        folded_par_vals = folded_par_vals_0.copy()
+        def loss_function(pars):
+            """
+            Take parameter values on the folded space corresponding to
+            ``params``, complete the remaining coordinates using the
+            reference ``folded_par_vals``, return minus the maximum log
+            likelihood over unfolds .
+            """
+            folded_par_vals[inds] = pars
+            return -max(lnlike_unfolds(*folded_par_vals))
+
+        result = utils.differential_evolution_with_guesses(
+            func=loss_function,
+            bounds=list(zip(self.prior.cubemin[inds],
+                            (self.prior.cubemin + self.prior.folded_cubesize)[inds])),
+            guesses=folded_par_vals_0[inds], seed=seed, init='sobol').x
+
+        folded_par_vals[inds] = result
+        i_fold = np.argmax(lnlike_unfolds(*folded_par_vals))
 
         self.likelihood.par_dic_0 = self.prior.transform(
-            *self.prior.unfold(bestfit_folded)[i_fold])
+            *self.prior.unfold(folded_par_vals)[i_fold])
 
         lnl = self.likelihood.lnlike(self.likelihood.par_dic_0)
         print(f'Found solution with lnl = {lnl}')
