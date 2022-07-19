@@ -51,6 +51,7 @@ _LABELS = {
     'd_luminosity': r'$d_L$',
     'z': r'$z$',
     # Orientation
+    'phi_linfree': r'$\phi_{\rm LF}$',
     'phi_ref': r'$\phi_{\rm ref}$',
     'phi_ref_hat': r'$\hat{\phi}_{\rm ref}$',
     'psi_hat': r'$\hat{\psi}$',
@@ -73,6 +74,7 @@ _LABELS = {
     't_refdet': r'$t_{\rm ref\,det}$',
     'tc': r'$t_c$',
     't_geocenter': r'$t_{\rm geocenter}$',
+    't_linfree': r'$t_{\rm LF}$'
     # Likelihood
     'lnl': r'$\ln \mathcal{L}$',
     'lnl_H': r'$\ln \mathcal{L}_H$',
