@@ -50,7 +50,7 @@ class ReferenceWaveformFinderMixin:
         `likelihood.ReferenceWaveformFinder` instance.
         This will generate kwargs for:
             * tgps
-            * par_dic
+            * par_dic_0
             * f_avg
             * f_ref
             * ref_det_name
