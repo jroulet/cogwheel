@@ -166,13 +166,20 @@ def update_dataframe(df1, df2):
         df1[col] = values
 
 
-def replace(sequence, old, new):
+def replace(sequence, *args):
     """
-    Return a list like `sequence` with the first occurrence of `old`
-    replaced by `new`.
+    Return a list like `sequence` with the first occurrence of `old0`
+    replaced by `new0`, the first occurrence of `old1` replaced by
+    `new1`, and so on, where ``old0, new0, old1, new1, ... = args``.
+    Accepts an even number of arguments.
     """
+    if len(args) % 2:
+        raise ValueError('Pass an even number of args: '
+                         'old1, new1, old2, new2, ...')
+
     out = list(sequence)
-    out[out.index(old)] = new
+    for old, new in zip(args[::2], args[1::2]):
+        out[out.index(old)] = new
     return out
 
 
