@@ -74,7 +74,7 @@ _LABELS = {
     't_refdet': r'$t_{\rm ref\,det}$',
     'tc': r'$t_c$',
     't_geocenter': r'$t_{\rm geocenter}$',
-    't_linfree': r'$t_{\rm LF}$'
+    't_linfree': r'$t_{\rm LF}$',
     # Likelihood
     'lnl': r'$\ln \mathcal{L}$',
     'lnl_H': r'$\ln \mathcal{L}_H$',
@@ -85,7 +85,7 @@ _LABELS = {
 _UNITS = (dict.fromkeys(['mchirp', 'm1', 'm2', 'mtot', 'mtot_source',
                          'm1_source', 'm2_source', 'mchirp_source'],
                         r'M$_\odot$')
-          | dict.fromkeys(['t_refdet', 'tc', 't_geocenter'], 's')
+          | dict.fromkeys(['t_refdet', 'tc', 't_geocenter', 't_linfree'], 's')
           | {'d_hat': r'$\frac{\rm{Mpc}}{M_{\odot}^{5/6}}$',
              'd_luminosity': 'Mpc',}
          )
