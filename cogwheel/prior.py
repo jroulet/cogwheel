@@ -395,21 +395,22 @@ class Prior(ABC, utils.JSONMixin):
 
     def transform_samples(self, samples: pd.DataFrame):
         """
-        Add columns for `self.standard_params` to `samples`.
-        `samples` must include columns for `self.sampled_params`.
+        Add columns in-place for `self.standard_params` to `samples`.
+        `samples` must include columns for `self.sampled_params` and
+        `self.conditioned_on`.
         """
-        sampled = samples[self.sampled_params]
-        standard = pd.DataFrame(list(np.vectorize(self.transform)(**sampled)))
+        direct = samples[self.sampled_params + self.conditioned_on]
+        standard = pd.DataFrame(list(np.vectorize(self.transform)(**direct)))
         utils.update_dataframe(samples, standard)
 
     def inverse_transform_samples(self, samples: pd.DataFrame):
         """
-        Add columns for `self.sampled_params` to `samples`.
+        Add columns in-place for `self.sampled_params` to `samples`.
         `samples` must include columns for `self.standard_params`.
         """
-        standard = samples[self.standard_params]
+        inverse = samples[self.standard_params + self.conditioned_on]
         sampled = pd.DataFrame(list(
-            np.vectorize(self.inverse_transform)(**standard)))
+            np.vectorize(self.inverse_transform)(**inverse)))
         utils.update_dataframe(samples, sampled)
 
 
