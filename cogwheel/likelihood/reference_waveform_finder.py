@@ -468,6 +468,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             * detector_pair
             * t0_refdet
             * mchirp_range
+            * event_data
+            * approximant
         """
         lnl_by_detectors = self.lnlike_max_amp_phase_time(
             self.par_dic_0, return_by_detectors=True)
@@ -491,4 +493,6 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                 'ref_det_name': ref_det_name,
                 'detector_pair': detector_pair,
                 't0_refdet': t0_refdet,
-                'mchirp_range': self.mchirp_range}
+                'mchirp_range': self.mchirp_range,
+                'event_data': self.event_data,
+                'approximant': self.waveform_generator.approximant}
