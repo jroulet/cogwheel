@@ -69,29 +69,36 @@ class LinearFreePhaseTimePrior(UniformPriorMixin, Prior):
 
         # --------------------------------------------------------------
         # 2. Machinery for evaluating reference time and phase
-        snr_det = np.sqrt(2 * np.maximum(
-            self._likelihood_aux.lnlike_detectors_no_asd_drift(par_dic_0),
-            1e-4))
-        self._f_avg = ((event_data.frequencies * weights_f).sum(axis=1)
-                       / weights_f.sum(axis=1))  # (ndet,)
-        sigma_f = np.sqrt((event_data.frequencies**2 * weights_f).sum(axis=1)
-                          / weights_f.sum(1) - self._f_avg**2)  # (ndet,)
-        sigma_phase = 1 / snr_det
-        self._phase_weights = sigma_phase**-2 / (sigma_phase**-2).sum()
-        sigma_t = 1 / (2 * np.pi * sigma_f * snr_det)
-        self._time_weights = sigma_t**-2 / (sigma_t**-2).sum()
-        self._det_locations = [gw_utils.DETECTORS[det].location
-                               for det in event_data.detector_names]
-        self._geometric_phases_0 = self._geometric_phases(
-            **{par: par_dic_0[par] for par in ['iota', 'ra', 'dec', 'psi']})
-        self.t_detectors_0 = par_dic_0['t_geocenter'] - self._detector_delays(
-            **{par: par_dic_0[par] for par in ['ra', 'dec']})
+        self._ref = {}  # Summary metadata of reference solution
 
-        self._sampled_dic_0 = {'phi_linfree': 0., 't_linfree': 0.}
-        self._sampled_dic_0 = self.inverse_transform(**par_dic_0)
+        snr_det = np.sqrt(2 * np.maximum(
+            self._likelihood_aux.lnlike_detectors_no_asd_drift(par_dic_0)
+            * self._likelihood_aux.asd_drift**-2,
+            1e-4))
+        sigma_phases = 1 / snr_det
+        self._ref['sigma_phase'] = (sigma_phases**-2).sum()**-.5
+        self._ref['phase_weights'] = sigma_phases**-2 / (sigma_phases**-2).sum()
+
+        normalized_weights_f = weights_f / weights_f.sum(axis=1, keepdims=True)
+        self._ref['_f_avg'] = normalized_weights_f.dot(event_data.frequencies)
+        sigma_f = np.sqrt(normalized_weights_f.dot(event_data.frequencies**2)
+                          - self._ref['_f_avg']**2)
+        sigma_times = 1 / (2 * np.pi * sigma_f * snr_det)
+        self._ref['sigma_time'] = (sigma_times**-2).sum()**-.5
+        self._ref['time_weights'] = sigma_times**-2 / (sigma_times**-2).sum()
+        self._ref['det_locations'] = [gw_utils.DETECTORS[det].location
+                                      for det in event_data.detector_names]
+        self._ref['geometric_phases'] = self._geometric_phases(
+            **{par: par_dic_0[par] for par in ['iota', 'ra', 'dec', 'psi']})
+        self._ref['t_detectors'] = (par_dic_0['t_geocenter']
+                                    - self._detector_delays(par_dic_0['ra'],
+                                                            par_dic_0['dec']))
+
+        self._ref.update(phi_linfree=0., t_linfree=0.)
+        self._ref.update(self.inverse_transform(**par_dic_0))
+
         self.range_dic = self.__class__.range_dic | {
-            't_linfree': (self._sampled_dic_0['t_linfree'] - dt0,
-                          self._sampled_dic_0['t_linfree'] + dt0)}
+            't_linfree': np.add(self._ref['t_linfree'], (-dt0, dt0))}
 
         super().__init__(approximant=approximant, par_dic_0=par_dic_0,
                          event_data=event_data, **kwargs)
@@ -132,9 +139,9 @@ class LinearFreePhaseTimePrior(UniformPriorMixin, Prior):
             **intrinsic_dic)
 
         detector_delays = self._detector_delays(ra, dec)
-        return (detector_delays.dot(self._time_weights)
+        return (detector_delays.dot(self._ref['time_weights'])
                 + linfree_time_shift
-                - self._sampled_dic_0['t_linfree'])
+                - self._ref['t_linfree'])
 
     def _get_total_phase_shift(self, t_geocenter, iota, ra, dec, psi,
                                intrinsic_dic):
@@ -149,11 +156,12 @@ class LinearFreePhaseTimePrior(UniformPriorMixin, Prior):
         geometric_phases = self._geometric_phases(iota, ra, dec, psi)
         # Average angles with \arg(\sum_k(weight_k e^(i angle_k)))
         phasors = np.exp(1j*(
-            geometric_phases - self._geometric_phases_0
-            - 2*np.pi * self._f_avg * (t_detectors - self.t_detectors_0)))
-        return ((np.angle(self._phase_weights.dot(phasors))
+            geometric_phases - self._ref['geometric_phases']
+            - 2*np.pi * self._ref['_f_avg'] * (t_detectors
+                                               - self._ref['t_detectors'])))
+        return ((np.angle(self._ref['phase_weights'].dot(phasors))
                  + linfree_phase_shift) / 2
-                - self._sampled_dic_0['phi_linfree'])
+                - self._ref['phi_linfree'])
 
     @utils.lru_cache()
     def _get_linfree_phase_time_shift(self, **intrinsic_dic):
@@ -190,7 +198,7 @@ class LinearFreePhaseTimePrior(UniformPriorMixin, Prior):
         """
         return np.array([lal.TimeDelayFromEarthCenter(
             location, ra, dec, self._likelihood_aux.event_data.tgps)
-                         for location in self._det_locations])
+                         for location in self._ref['det_locations']])
 
     @utils.lru_cache()
     def _geometric_phases(self, iota, ra, dec, psi):
