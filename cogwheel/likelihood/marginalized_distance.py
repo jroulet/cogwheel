@@ -117,7 +117,7 @@ class LookupTable(utils.JSONMixin):
         ----------
         d_h, h_h: float
             Inner products (d|h), (h|h) where `d` is data and `h` is the
-            model strain at a fiducial distance _REFERENCE_DISTANCE.
+            model strain at a fiducial distance REFERENCE_DISTANCE.
             These are scalars (detectors are summed over). A real part
             is taken in (d|h), not an absolute value (phase is not
             marginalized over so the computation is robust to higher
