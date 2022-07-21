@@ -97,8 +97,7 @@ class LinearFreePhaseTimePrior(UniformPriorMixin, Prior):
         self._ref.update(phi_linfree=0., t_linfree=0.)
         self._ref.update(self.inverse_transform(**par_dic_0))
 
-        self.range_dic = self.__class__.range_dic | {
-            't_linfree': np.add(self._ref['t_linfree'], (-dt0, dt0))}
+        self.range_dic = self.__class__.range_dic | {'t_linfree': (-dt0, dt0)}
 
         super().__init__(approximant=approximant, par_dic_0=par_dic_0,
                          event_data=event_data, **kwargs)
