@@ -57,7 +57,7 @@ class LinearFreePhaseTimePrior(UniformPriorMixin, Prior):
             = waveform_generator_22._harmonic_modes_by_m[2]
 
         self._likelihood_aux = RelativeBinningLikelihood(
-            event_data, waveform_generator_22, par_dic_0, pn_phase_tol=1.)
+            event_data, waveform_generator_22, par_dic_0, pn_phase_tol=.1)
 
         self._hplus0_22 = self._get_hplus_22(par_dic_0)
 
