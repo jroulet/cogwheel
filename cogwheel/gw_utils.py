@@ -172,7 +172,7 @@ class _ChirpMassRangeEstimator:
         x_0 = self._x_of_mchirp(mchirp_0)
         x_bound = self._x_of_mchirp(mchirp_bound)
         new_x_bound = x_0 + factor * (x_bound - x_0)
-        return self._mchirp_of_x(new_x_bound)
+        return self._mchirp_of_x(new_x_bound)[()]
 
 
 estimate_mchirp_range = _ChirpMassRangeEstimator()
