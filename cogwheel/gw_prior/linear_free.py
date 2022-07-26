@@ -91,7 +91,7 @@ class LinearFreePhaseTimePrior(UniformPriorMixin, Prior):
         self._ref['geometric_phases'] = self._geometric_phases(
             **{par: par_dic_0[par] for par in ['iota', 'ra', 'dec', 'psi']})
         self._ref['t_detectors'] = (par_dic_0['t_geocenter']
-                                    - self._detector_delays(par_dic_0['ra'],
+                                    + self._detector_delays(par_dic_0['ra'],
                                                             par_dic_0['dec']))
 
         self._ref.update(phi_linfree=0., t_linfree=0.)
