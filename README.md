@@ -68,7 +68,7 @@ These tasks are implemented across a hierarchy of classes, the top-level object 
                 .event_data
                 .waveform_generator
 
-Here we briefly list the responsibilities and features of each of these classes, and in the tutorial notebooks (in preparation...) we expand on how to use them.
+Here we briefly list the responsibilities and features of each of these classes, and in the tutorial notebooks we expand on how to use them.
 
 ### Sampler
 
@@ -105,7 +105,7 @@ Instance of the abstract class `cogwheel.prior.Prior` (pre-built options are in 
 Instance of `cogwheel.likelihood.RelativeBinningLikelihood`.
 
 * Defines a (log) likelihood function in terms of a "standard" system of coordinates.
-* Measures, records and applies the [ASD drift-correction](https://arxiv.org/pdf/1908.05644.pdf#section*.9), defined as the standard deviation of the matched-filtered score of a reference template in a particular detector.
+* Measures, records and applies the [ASD drift-correction](https://arxiv.org/pdf/1908.05644.pdf#section*.9), defined as the local standard deviation of the matched-filtered score of a reference template in a particular detector.
 * Implements relative binning for fast likelihood evaluation (`RelativeBinningLikelihood.lnlike()`).
 * Stores the parameters of the reference waveform for relative binning (`RelativeBinningLikelihood.par_dic_0`).
 * Implements likelihood without the relative binning approximation, for testing purposes (`cogwheel.likelihood.CBCLikelihood.lnlike_fft()`).
