@@ -8,8 +8,9 @@ import numpy as np
 import gwpy.timeseries
 import gwosc
 
-from cogwheel import utils
 from cogwheel import gw_utils
+from cogwheel import utils
+from cogwheel import waveform
 
 # gwpy fiddles with matplotlib, undo:
 plt.rcdefaults()
@@ -75,13 +76,18 @@ class EventData(utils.JSONMixin):
         self.detector_names = detector_names
         self.tgps = tgps
         self.tcoarse = tcoarse
-        self.strain = strain
         self.wht_filter = wht_filter
-        self.blued_strain = self.wht_filter**2 * self.strain
+
+        self.blued_strain = None  # Set by ``set_strain()``
+        self._set_strain(strain)
 
         nonzero = np.nonzero(np.sum(self.wht_filter, axis=0))[0]
         self.fslice = slice(nonzero[0], nonzero[-1] + 1)
         self.fbounds = self.frequencies[nonzero[[0, -1]]]
+
+    def _set_strain(self, strain):
+        self.strain = strain
+        self.blued_strain = self.wht_filter**2 * self.strain
 
     @property
     def df(self):
@@ -305,6 +311,80 @@ class EventData(utils.JSONMixin):
         data_fd_down /= 2 * fmax
 
         return rfftfreq_down, data_fd_down, wht_filter, tcoarse
+
+    @classmethod
+    def gaussian_noise(
+            cls, eventname, duration, detector_names, asd_funcs, tgps,
+            tcoarse=None, fmin=15., df_taper=1., fmax=1024., seed=None):
+        """
+        Constructor that generates data with random stationary colored
+        Gaussian noise. Note: the data will be periodic.
+
+        Parameters
+        ----------
+        eventname: str
+            Name of event.
+
+        duration: float
+            Number of seconds of data.
+
+        detector_names: string
+            Detectors' initials, e.g. ``'HLV'`` for Hanford-Livingston-
+            Virgo.
+
+        asd_funcs: sequence of callables
+            Functions that return the noise amplitude spectral density
+            (1/Hz), of the same length as `detector_names`.
+
+        tgps: float
+            GPS time of event.
+
+        tcoarse: float
+            Time of event relative to beginning of data.
+
+        fmin: float
+            Minimum frequency at which the whitening filter will have
+            support (Hz). It is important for performance.
+
+        df_taper: float
+            Whitening filter is highpassed. See ``highpass_filter``.
+
+        fmax: float
+            Desired Nyquist frequency (Hz), half the sampling frequency.
+
+        seed: int, optional
+            Use some fixed value for reproducibility.
+
+        Return
+        ------
+        Instance of ``EventData``.
+        """
+        if len(detector_names) != len(asd_funcs):
+            raise ValueError(
+                'Lengths of `detector_names` and `asd_funcs` should match.')
+
+        tcoarse = duration / 2 if tcoarse is None else tcoarse
+        dt = 1 / (2*fmax)
+        frequencies = np.fft.rfftfreq(n=int(duration / dt), d=dt)
+        asd = np.array([asd_func(frequencies) for asd_func in asd_funcs])
+
+        globals()['dic'] = locals()
+
+        real, imag = np.random.default_rng(seed).normal(
+            scale=np.sqrt(duration) / 2 * asd, size=(2,) + asd.shape)
+        strain = real + 1j * imag
+        strain[:, [0, -1]] = strain[:, [0, -1]].real  # Real at f = 0 & Nyquist
+
+        wht_filter = highpass_filter(frequencies, fmin, df_taper) / asd
+        return cls(eventname, frequencies, strain, wht_filter, detector_names,
+                   tgps, tcoarse)
+
+    def inject_signal(self, par_dic, approximant):
+        waveform_generator = waveform.WaveformGenerator.from_event_data(
+            self, approximant)
+        h_f = waveform_generator.get_strain_at_detectors(self.frequencies,
+                                                         par_dic)
+        self._set_strain(self.strain + h_f)
 
     def specgram(self, xlim=None, nfft=64, noverlap=None, vmax=25.):
         """
