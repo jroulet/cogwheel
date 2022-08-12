@@ -84,6 +84,7 @@ class EventData(utils.JSONMixin):
         nonzero = np.nonzero(np.sum(self.wht_filter, axis=0))[0]
         self.fslice = slice(nonzero[0], nonzero[-1] + 1)
         self.fbounds = self.frequencies[nonzero[[0, -1]]]
+        self.injection = None
 
     def _set_strain(self, strain):
         self.strain = strain
@@ -368,8 +369,6 @@ class EventData(utils.JSONMixin):
         frequencies = np.fft.rfftfreq(n=int(duration / dt), d=dt)
         asd = np.array([asd_func(frequencies) for asd_func in asd_funcs])
 
-        globals()['dic'] = locals()
-
         real, imag = np.random.default_rng(seed).normal(
             scale=np.sqrt(duration) / 2 * asd, size=(2,) + asd.shape)
         strain = real + 1j * imag
@@ -380,11 +379,25 @@ class EventData(utils.JSONMixin):
                    tgps, tcoarse)
 
     def inject_signal(self, par_dic, approximant):
+        """
+        Add a signal to the data. Injection parameters will be stored in
+        the ``injection`` attribute.
+
+        Parameters
+        ----------
+        par_dic: dict
+            Parameter values, keys should match
+            ``waveform.WaveformGenerator.params``
+
+        approximant: str
+            Name of approximant.
+        """
         waveform_generator = waveform.WaveformGenerator.from_event_data(
             self, approximant)
         h_f = waveform_generator.get_strain_at_detectors(self.frequencies,
                                                          par_dic)
         self._set_strain(self.strain + h_f)
+        self.injection = (par_dic, approximant)
 
     def specgram(self, xlim=None, nfft=64, noverlap=None, vmax=25.):
         """
