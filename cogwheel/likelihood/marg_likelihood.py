@@ -20,8 +20,8 @@ from cogwheel import waveform
 from . import RelativeBinningLikelihood
 
 sys.path.append('/data/tislam/works/KITP/repos/fast_pe_using_cs/')
-#DEFAULT_CS_FNAME = '/data/tislam/works/KITP/example_files_O3a/dense_RA_dec_grid_H1_L1_32768_1136574828.npz' 
-DEFAULT_CS_FNAME = '/data/tislam/works/KITP/example_files_O3a/RA_dec_grid_H1_L1_4096_1136574828.npz'
+#DEFAULT_CS_FNAME = '/data/tislam/works/KITP/final_repo/fast_pe_using_cs/example_ra_dec_time_grid/dense_RA_dec_grid_H1_L1_32768_1136574828.npz' 
+DEFAULT_CS_FNAME = '/data/tislam/works/KITP/final_repo/fast_pe_using_cs/example_ra_dec_time_grid/RA_dec_grid_H1_L1_4096_1136574828.npz'
 import coherent_score_mz_fast_tousif as cs
 import lal
 
