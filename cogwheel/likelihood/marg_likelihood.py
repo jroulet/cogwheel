@@ -21,7 +21,7 @@ from . import RelativeBinningLikelihood
 
 sys.path.append('/data/tislam/works/KITP/repos/fast_pe_using_cs/')
 #DEFAULT_CS_FNAME = '/data/tislam/works/KITP/final_repo/fast_pe_using_cs/example_ra_dec_time_grid/dense_RA_dec_grid_H1_L1_32768_1136574828.npz' 
-DEFAULT_CS_FNAME = '/data/tislam/works/KITP/final_repo/fast_pe_using_cs/example_ra_dec_time_grid/RA_dec_grid_H1_L1_4096_1136574828.npz'
+#DEFAULT_CS_FNAME = '/data/tislam/works/KITP/final_repo/fast_pe_using_cs/example_ra_dec_time_grid/RA_dec_grid_H1_L1_4096_1136574828.npz'
 import coherent_score_mz_fast_tousif as cs
 import lal
 
@@ -39,13 +39,15 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
     """
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None,# tolerance_params=None,
-                 spline_degree=3, cs_fname=DEFAULT_CS_FNAME, t_rng=(-.06, .06), dist_ref=1): #reference distance dist_ref
+                 spline_degree=3, t_rng=(-.06, .06), dist_ref=1): #reference distance dist_ref
+                 #spline_degree=3, cs_fname=DEFAULT_CS_FNAME, t_rng=(-.06, .06), dist_ref=1): #reference distance dist_ref
         
         self.t_rng = t_rng
         self.dist_ref = dist_ref
         
-        self.cs_fname = cs_fname
-        self.cs_obj = cs.CoherentScoreMZ(samples_fname=cs_fname, run='03a')
+        #self.cs_fname = cs_fname
+        #self.cs_obj = cs.CoherentScoreMZ(samples_fname=cs_fname, run='03a')
+        self.cs_obj = cs.CoherentScoreMZ.from_new_samples(nra=100, ndec=100, gps_time=event_data.tgps)
         self.dt = self.cs_obj.dt_sinc/1000   # from milisecond to seconds
         self.timeshifts = np.arange(*t_rng, self.dt)
         
@@ -220,9 +222,12 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         psi = samples_all[0][:, 1][indx_rand]
         dec_all = self.cs_obj.dec_grid[samples_all[0][:,3].astype(int)]
         dec = dec_all[indx_rand]
-        dra = (lal.GreenwichMeanSiderealTime(self.event_data.tgps) - lal.GreenwichMeanSiderealTime(1136574828.0))
-        ra_all = (self.cs_obj.ra_grid[samples_all[0][:, 2].astype(int)] + dra) % (2*np.pi)
+        
+        #dra = (lal.GreenwichMeanSiderealTime(self.event_data.tgps) - lal.GreenwichMeanSiderealTime(1136574828.0))
+        #ra_all = (self.cs_obj.ra_grid[samples_all[0][:, 2].astype(int)] + dra) % (2*np.pi)
+        ra_all = self.cs_obj.ra_grid[samples_all[0][:, 2].astype(int)]
         ra = ra_all[indx_rand]
+        
         
         H_time = samples_all[0][:, 5][indx_rand]
         
