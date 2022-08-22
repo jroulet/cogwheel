@@ -212,8 +212,8 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
     cogwheel_dir = pathlib.Path(__file__).parents[1].resolve()
     module = inspect.getmodule(inspect.stack()[1].frame).__name__
 
-    sbatch_lines = '\n'.join(
-        f'        #SBATCH {cmd}' for cmd in sbatch_cmds)
+    sbatch_lines = '\n        '.join(
+        f'#SBATCH {cmd}' for cmd in sbatch_cmds)
 
     batch_text = textwrap.dedent(
         f"""\
