@@ -141,23 +141,34 @@ class Sampler(abc.ABC, utils.JSONMixin):
         """
         Parameters
         ----------
-        rundir: path of run directory, e.g. from `self.get_rundir`
-        n_hours_limit: Number of hours to allocate for the job
-        memory_per_task: Determines the memory and number of cpus
-        resuming: bool, whether to attempt resuming a previous run if
-                  rundir already exists.
+        rundir: str, os.PathLike
+            Run directory, e.g. from `self.get_rundir`
+
+        n_hours_limit: int
+            Number of hours to allocate for the job.
+
+        memory_per_task: str
+            Determines the memory and number of cpus.
+
+        resuming: bool
+            Whether to attempt resuming a previous run if rundir already
+            exists.
+
+        sbatch_cmds: tuple of str
+            Strings with SBATCH commands.
         """
         rundir = pathlib.Path(rundir)
-        job_name = '_'.join([self.__class__.__name__,
-                             self.posterior.prior.__class__.__name__,
+        job_name = '_'.join([rundir.name,
                              self.posterior.likelihood.event_data.eventname,
-                             rundir.name])
+                             self.posterior.prior.__class__.__name__,
+                             self.__class__.__name__])
+        batch_path = rundir/'batchfile'
         stdout_path = rundir.joinpath('output.out').resolve()
         stderr_path = rundir.joinpath('errors.err').resolve()
 
         self.to_json(rundir, overwrite=resuming)
 
-        sbatch_cmds += f'--mem-per-cpu={memory_per_task}',
+        sbatch_cmds += (f'--mem-per-cpu={memory_per_task}',)
         args = rundir.resolve()
         utils.submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
                            args, sbatch_cmds, batch_path)
