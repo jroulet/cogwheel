@@ -259,7 +259,7 @@ class WaveformGenerator(utils.JSONMixin):
         requested approximant.
         """
         if approximant not in APPROXIMANTS:
-            raise ValueError(f'Add {app} to `waveform.APPROXIMANTS`.')
+            raise ValueError(f'Add {approximant} to `waveform.APPROXIMANTS`.')
         self._approximant = approximant
 
         old_harmonic_modes = self.harmonic_modes
