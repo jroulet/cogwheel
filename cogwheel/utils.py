@@ -12,6 +12,7 @@ import tempfile
 import textwrap
 import numpy as np
 from scipy.optimize import _differentialevolution
+from numba import njit, vectorize
 
 
 DIR_PERMISSIONS = 0o755
@@ -140,6 +141,36 @@ def resample_equal(samples, weights_col=WEIGHTS_NAME, num=None):
     return samples_equal
 
 
+@njit
+def rand_choice_nb(arr, cprob, nvals):
+    """
+    Sample randomly from a list of probabilities
+
+    Parameters
+    ----------
+    arr: np.ndarray
+        A nD numpy array of values to sample from
+
+    cprob: np.arrray
+        A 1D numpy array of cumulative probabilities for the given samples
+
+    nvals: int
+        Number of samples desired
+
+    Return
+    ------
+    nvals random samples from the given array with the given probabilities
+    """
+    rsamps = np.random.random(size=nvals)
+    return arr[np.searchsorted(cprob, rsamps, side="right")]
+
+
+@vectorize(nopython=True)
+def abs_sq(x):
+    """x.real^2 + x.imag^2"""
+    return (x.real ** 2) + (x.imag ** 2)
+
+
 def merge_dictionaries_safely(*dics):
     """
     Merge multiple dictionaries into one.
@@ -153,6 +184,46 @@ def merge_dictionaries_safely(*dics):
                 raise ValueError(f'Found incompatible values for {key}')
         merged |= dic
     return merged
+
+
+def checkempty(array, verbose=False):
+    # First deal with irritating case when we can't make a numpy array
+    if hasattr(array, "__len__"):
+        # Deal with even more irritating edge case when the attribute exists,
+        # but throws an error when queried
+        try:
+            if len(array) > 0:
+                return False
+        except TypeError:
+            if verbose:
+                print("Object has `len' attribute that can't be queried")
+            return True
+    nparray = np.asarray(array)
+    if (((nparray is None) or
+         (nparray.dtype == np.dtype('O'))) or (nparray.size == 0)):
+        return True
+    else:
+        return False
+
+
+def rm_suffix(string, suffix='.json', new_suffix=None):
+    """
+    Removes suffix from string if present, and appends a new suffix if
+    requested.
+
+    Parameters
+    ----------
+    string: Input string to modify.
+    suffix: Suffix to remove if present.
+    new_suffix: Suffix to add.
+    """
+    if string.endswith(suffix):
+        outstr = string[:-len(suffix)]
+    else:
+        outstr = string
+    if new_suffix is not None:
+        outstr += new_suffix
+    return outstr
 
 
 def update_dataframe(df1, df2):
@@ -461,7 +532,9 @@ class NumpyEncoder(json.JSONEncoder):
     """
     Encoder for numpy data types.
     """
-    def default(self, o):
+    @staticmethod
+    def np_out_hook(o):
+        npf = NumpyEncoder.np_out_hook
         if isinstance(o, (np.int_, np.intc, np.intp, np.int8,
                           np.int16, np.int32, np.int64, np.uint8,
                           np.uint16, np.uint32, np.uint64)):
@@ -482,7 +555,14 @@ class NumpyEncoder(json.JSONEncoder):
         if isinstance(o, np.void):
             return None
 
-        return super().default(o)
+        if isinstance(o, dict):
+            # Fix for dict with numpy arrays
+            return {key: npf(value) for key, value in o.items()}
+
+        return super(NumpyEncoder, NumpyEncoder).default(o)
+
+    def default(self, o):
+        return self.np_out_hook(o)
 
 
 class CogwheelEncoder(NumpyEncoder):

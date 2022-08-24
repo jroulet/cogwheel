@@ -1,5 +1,6 @@
 notebooks
 figures
+largedata
 
 cogwheel/data/gwosc_files
 cogwheel/data/gwosc_files/*

@@ -393,12 +393,21 @@ class Prior(ABC, utils.JSONMixin):
         """
         return {}
 
-    def transform_samples(self, samples: pd.DataFrame):
+    def transform_samples(self, samples: pd.DataFrame, force_update=True):
         """
         Add columns in-place for `self.standard_params` to `samples`.
         `samples` must include columns for `self.sampled_params` and
         `self.conditioned_on`.
+
+        Parameters
+        ----------
+        samples: Dataframe with sampled params
+        force_update: bool, whether to force an update if the transformed
+                      standard samples already exist
         """
+        if (not force_update) and \
+                (set(self.standard_params) <= samples.columns):
+            return
         direct = samples[self.sampled_params + self.conditioned_on]
         standard = pd.DataFrame(list(np.vectorize(self.transform)(**direct)))
         utils.update_dataframe(samples, standard)
