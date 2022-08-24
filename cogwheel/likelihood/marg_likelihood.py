@@ -45,13 +45,16 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         self.nsamples = nsamples
 
         # Treat arguments to cs.CoherentScore.from_new_samples
+        # Add this attribute so get_init_dict() succeeds
         self.cs_kwargs = cs_kwargs.copy()
+        # Assuming the user isn't evil and passing 'cs_kwargs' inside cs_kwargs
+        self.__dict__.update(cs_kwargs)
         nra = cs_kwargs.pop("nra", 100)
         ndec = cs_kwargs.pop("ndec", 100)
         self.detnames = tuple(event_data.detector_names)
         cs_kwargs["gps_time"] = cs_kwargs.get("gps_time", event_data.tgps)
         cs_kwargs["dt_sinc"] = cs_kwargs.get("dt_sinc", cs.DEFAULT_DT)
-        cs_kwargs["nsamples_mupsi"] = cs_kwargs.pop(
+        cs_kwargs["nsamples_mupsi"] = cs_kwargs.get(
             "nsamples_mupsi", 10 * self.nsamples)
 
         self.cs_obj = cs.CoherentScore.from_new_samples(
@@ -60,7 +63,8 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         self.dt = self.cs_obj.dt_sinc/1000
         self.timeshifts = np.arange(*t_rng, self.dt)
 
-        self.ref_pardict = {'d_luminosity': self.dist_ref, 'iota': 0.0, 'phi_ref': 0.0}
+        self.ref_pardict = \
+            {'d_luminosity': self.dist_ref, 'iota': 0.0, 'phi_ref': 0.0}
         
         super().__init__(event_data, waveform_generator, par_dic_0, fbin,
                          pn_phase_tol, spline_degree)
@@ -173,14 +177,13 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
                 t_indices[ind_det] = np.searchsorted(self.timeshifts, tn)
             else:
                 t_indices[ind_det] = np.argmax(
-                    np.real(z_timeseries[:, ind_det]) ** 2 +
-                    np.imag(z_timeseries[:, ind_det]) ** 2)
+                    utils.abs_sq(z_timeseries[:, ind_det]))
 
         # Create a processedclist for the event
         event_phys = np.zeros((len(self.event_data.detector_names), 7))
         # Time, SNR^2, normfac, hole correction, ASD drift, Re(z), Im(z)
         event_phys[:, 0] = self.timeshifts[t_indices]
-        event_phys[:, 1] = [np.abs(z_timeseries[tind, i]) ** 2
+        event_phys[:, 1] = [utils.abs_sq(z_timeseries[tind, i])
                             for i, tind in enumerate(t_indices)]
         event_phys[:, 2] = norm_h
         event_phys[:, 3] = 1
@@ -329,7 +332,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         # Define weights and pick from the samples with these weights
         cweights = np.cumsum(samples[:, 4])
         cweights /= cweights[-1]
-        idx_rand = utils.rand_choice_nb(np.arange(len(samples)), cweights, 1)
+        idx_rand = utils.rand_choice_nb(np.arange(len(samples)), cweights, 1)[0]
 
         # Choose one point for iota, psi, ra, dec, t_geocenter from the
         # distributions
@@ -446,3 +449,12 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         sincM = np.tile(u, (len(s), 1)) - np.tile(s[:, None], (1, len(u)))
         y = np.dot(x, np.sinc(sincM / dt))
         return y
+
+    def get_init_dict(self):
+        """
+        Return dictionary with keyword arguments to reproduce the class
+        instance.
+        """
+        init_dict = super().get_init_dict()
+        init_dict.pop('cs_kwargs', None)
+        return init_dict

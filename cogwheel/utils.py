@@ -532,9 +532,7 @@ class NumpyEncoder(json.JSONEncoder):
     """
     Encoder for numpy data types.
     """
-    @staticmethod
-    def np_out_hook(o):
-        npf = NumpyEncoder.np_out_hook
+    def default(self, o):
         if isinstance(o, (np.int_, np.intc, np.intp, np.int8,
                           np.int16, np.int32, np.int64, np.uint8,
                           np.uint16, np.uint32, np.uint64)):
@@ -555,14 +553,7 @@ class NumpyEncoder(json.JSONEncoder):
         if isinstance(o, np.void):
             return None
 
-        if isinstance(o, dict):
-            # Fix for dict with numpy arrays
-            return {key: npf(value) for key, value in o.items()}
-
-        return super(NumpyEncoder, NumpyEncoder).default(o)
-
-    def default(self, o):
-        return self.np_out_hook(o)
+        return super().default(o)
 
 
 class CogwheelEncoder(NumpyEncoder):
