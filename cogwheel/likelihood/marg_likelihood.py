@@ -296,7 +296,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
                        'phi_ref',
                        't_geocenter',
                        'lnl']
-        if (not force_update) and (set(cols_to_add) <= samples.columns):
+        if (not force_update) and (set(cols_to_add) <= set(samples.columns)):
             return
 
         # Initialize the columns

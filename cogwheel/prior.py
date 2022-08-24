@@ -406,7 +406,7 @@ class Prior(ABC, utils.JSONMixin):
                       standard samples already exist
         """
         if (not force_update) and \
-                (set(self.standard_params) <= samples.columns):
+                (set(self.standard_params) <= set(samples.columns)):
             return
         direct = samples[self.sampled_params + self.conditioned_on]
         standard = pd.DataFrame(list(np.vectorize(self.transform)(**direct)))
