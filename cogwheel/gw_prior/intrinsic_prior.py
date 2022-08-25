@@ -7,8 +7,8 @@ from .mass import UniformDetectorFrameMassesPrior
 from .spin import UniformEffectiveSpinPrior, ZeroInplaneSpinsPrior
 from .miscellaneous import ZeroTidalDeformabilityPrior, FixedReferenceFrequencyPrior
 
+
 class IntrinsicParametersPrior(RegisteredPriorMixin, CombinedPrior):
-    
     prior_classes = [UniformDetectorFrameMassesPrior,
                     UniformEffectiveSpinPrior,
                     ZeroInplaneSpinsPrior,

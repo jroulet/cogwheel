@@ -199,7 +199,6 @@ class Prior(ABC, utils.JSONMixin):
         """
         return self.folded_reflected_params + self.folded_shifted_params
 
-
     def _check_range_dic(self):
         """
         Ensure that range_dic values are stored as float arrays.

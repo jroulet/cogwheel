@@ -310,8 +310,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
             par_dic = {key: val for key, val in zip(self.params, pvals)}
             ext_pars = self.generate_extrinsic_params_from_cs(
                 par_dic, accurate_lnl=accurate_lnl, **kwargs)
-            for key, val in zip(self.params, ext_pars):
-                samples.loc[ind, key] = val
+            samples.loc[ind, cols_to_add] = ext_pars
 
     def generate_extrinsic_params_from_cs(
             self, par_dic, accurate_lnl=False, **kwargs):
@@ -381,13 +380,14 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         marginalization for a single set of intrinsic params
         :return: Single value for distance and phase
         """
-        mean = abs(U) / T2  # expected mean for 1/distance in units of dist_ref
-        sigma = 1 / np.sqrt(T2) # spread for 1/distance in units of dist_ref
+        u_abs = np.abs(U)
+        mean = u_abs / T2  # expected mean for 1/distance in units of dist_ref
+        sigma = 1 / np.sqrt(T2)  # spread for 1/distance in units of dist_ref
         # Demand that the minimum of u_vals can't be zero or negative because
         # u_vals~1/dist
         u_vals = np.linspace(
             max(1e-5, mean - 7 * sigma), mean + 7 * sigma, 1000)
-        like_vals = self.posterior_func_for_dist(u_vals, U, T2)
+        like_vals = self.posterior_func_for_dist(u_vals, u_abs, T2)
         # Compute normalized cdf
         cdf = np.cumsum(like_vals)
         cdf /= cdf[-1]
@@ -395,10 +395,10 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         dist_pick = self.dist_ref / u_pick
 
         mean = np.angle(U) / 2  # central value for phase
-        sigma = 1 / np.sqrt(abs(U) * u_pick)  # spread for the d_phase
+        sigma = 1 / np.sqrt(u_abs * u_pick)  # spread for the d_phase
         v_vals = np.linspace(
             max(-7 * sigma, -np.pi / 2), min(7 * sigma, np.pi / 2), 1000)
-        like_vals = self.posterior_func_for_phase(v_vals, U, u_pick)
+        like_vals = self.posterior_func_for_phase(v_vals, u_abs, u_pick)
         # compute normalized cdf
         cdf = np.cumsum(like_vals)
         cdf /= cdf[-1]
@@ -413,25 +413,25 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         return dist_pick, phi_pick
 
     @staticmethod
-    def posterior_func_for_dist(u_pr, U, T2):
+    def posterior_func_for_dist(u_pr, u_abs, T2):
         """
         Analytical posterior funtion for distance
         Eq. (3.39) in Teja's note
         u_pr is 1/dist
         """
-        U_abs = abs(U)
-        exponent = - 0.5 * T2 * (u_pr - U_abs / T2) ** 2
-        return (1. / u_pr ** 4) * np.exp(exponent) * i0e(u_pr * U_abs)
+        exponent = - 0.5 * T2 * (u_pr - u_abs / T2) ** 2
+        return (1. / u_pr ** 4) * np.exp(exponent) * i0e(u_pr * u_abs)
 
     @staticmethod
-    def posterior_func_for_phase(v_pr, U, y):
+    def posterior_func_for_phase(v_pr, u_abs, y):
         """
         Analytical posterior funtion for phase
         Eq. (3.38) in Teja's note
         v_pr is d_phase
+        We multiply by e^{-u_abs * y} to avoid overflow errors, over a range
+        of v_pr, this makes no difference to the pdf if normalized
         """
-        U_abs = abs(U)
-        return np.exp(U_abs * y * np.cos(2 * v_pr))
+        return np.exp(u_abs * y * (np.cos(2 * v_pr) - 1))
 
     @staticmethod
     def sinc_interpolation_bruteforce(x, s, u):

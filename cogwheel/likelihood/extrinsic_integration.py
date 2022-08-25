@@ -896,8 +896,9 @@ class CoherentScore(object):
 
         return
 
-    def gen_t3_norm(self, nsamples=10 ** 6):
-        print('Old T3norm', self.T3norm)
+    def gen_t3_norm(self, nsamples=10 ** 6, verbose=False):
+        if verbose:
+            print('Old T3norm', self.T3norm)
         mus = np.random.choice(self.mus, size=nsamples, replace=True)
         psis = np.random.choice(self.psis, size=nsamples, replace=True)
         ra_inds = np.random.randint(0, len(self.ra_grid), size=nsamples)
@@ -912,7 +913,8 @@ class CoherentScore(object):
             t_list += utils.abs_sq(avec)
         t3mean = np.mean(t_list ** 1.5)
         self.T3norm = t3mean
-        print('New T3norm', self.T3norm)
+        if verbose:
+            print('New T3norm', self.T3norm)
 
         return
 
