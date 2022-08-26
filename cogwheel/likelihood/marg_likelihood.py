@@ -8,15 +8,16 @@ from scipy.special import i0e
 
 class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
     """
-    Generalization of 'RelativeBinningLikelihood' that implements computation of 
-    marginalized likelihood (over distance and phase) with the relative binning method.
+    Generalization of 'RelativeBinningLikelihood' that implements the
+    marginalized likelihood (over extrinsic parameters: inclination,
+    polarization, ra, dec, time, distance, phase) with the relative binning
+    method. Only applicable to non-precessing waveform models with (2, 2) only
     
     It integrates cogwheel and the extrinsic_integration routine.
-    Intrinsic parameters are sampled using cogwheel.
-    Extrinsic parameters (ra,dec,mu,psi,inclination) are sampled using the
-    extrinsic_integration routine.
+    Intrinsic parameters (m1, m2, s1z, s2z) are sampled using cogwheel.
+    Extrinsic parameters (ra,dec,mu,psi,inclination,time) are sampled using
+    the extrinsic_integration routine.
     Distance and Phase are sampled using analytical distribution functions.
-    dist_ref is set to 1Mpc.
 
     Warning: Assumes detector_names is not something like 'H1L1'
     """
@@ -35,7 +36,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         :param dist_ref:
         :param nsamples:
             The number of random extrinsic samples used while evaluating
-            the marginalized likelihood
+            the marginalized likelihood for each choice of intrinsic parameters
         :param cs_kwargs:
             Dictionary with extra parameters to pass to
             cs.CoherentScore.from_new_samples
@@ -45,7 +46,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         self.nsamples = nsamples
 
         # Treat arguments to cs.CoherentScore.from_new_samples
-        # Add this attribute so get_init_dict() succeeds
+        # Added this attribute so that get_init_dict() succeeds
         self.cs_kwargs = cs_kwargs.copy()
         # Assuming the user isn't evil and passing 'cs_kwargs' inside cs_kwargs
         self.__dict__.update(cs_kwargs)
@@ -121,7 +122,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         h_fbin, _ = self.waveform_generator.get_hplus_hcross(
             self.fbin, par_dic | self.ref_pardict)
         
-        # Sum over f axis, leave det and time axes unsummed.
+        # Sum over f axis, leave time and det axes unsummed.
         d_h = (self._d_h_weights * h_fbin.conj()).sum(axis=-1)
         h_h = (self._h_h_weights * h_fbin * h_fbin.conj()).real.sum(axis=-1)
         norm_h = np.sqrt(h_h)
@@ -145,6 +146,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
                 nsamples = Number of samples to use for the extrinsic parameters
                     while evaluating the marginalized likelihood, defaults to
                     self.nsamples
+                These might be useful for debugging/testing
         :return:
             1. log(marginalized likelihood)
             2. nsamples x 6 array with each row having
@@ -238,14 +240,14 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
                     *gw_utils.fplus_fcross_detector(
                         det,
                         par_dic['ra'],
-                        par_dic['det'],
+                        par_dic['dec'],
                         0.0,
                         self.event_data.tgps).T[0],
                     np.cos(par_dic['iota']),
                     par_dic['psi'])
 
         U = np.dot(zs, np.conj(ts))
-        T2 = np.dot(ts, np.conj(ts))
+        T2 = utils.abs_sq(ts).sum()
 
         Y_pick = \
             (self.dist_ref / par_dic['d_luminosity']) * \
@@ -264,6 +266,11 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
 
         return self.lnlike_no_marginalization_from_timeseries(
             z_timeseries, norm_h, par_dic)
+
+    def lnlike_detectors_no_asd_drift(self, par_dic):
+        raise NotImplementedError(
+            "MarginalizedRelativeBinningLikelihood only works with " +
+            "network-level likelihoods")
 
     def postprocess_samples(
             self, samples, force_update=False, accurate_lnl=False, **kwargs):
@@ -347,6 +354,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
             self.detnames[0], ra, dec, self.event_data.tgps)
         t_geocenter = time_det0 - dt_1 + self.par_dic_0['t_geocenter']
 
+        # Get corresponding value for U and T2
         U, T2 = UT2samples[:, idx_rand]
         T2 = T2.real
 
@@ -354,7 +362,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         d_luminosity, phi_ref = \
             self.get_distance_phase_point_for_given_U_T2(U, T2)
 
-        # get corresponding value for U and T2
+        # Evaluate the log likelihood
         if accurate_lnl:
             lnl = self.lnlike_no_marginalization_from_timeseries(
                 z_timeseries, norm_h, par_dic | {
@@ -367,7 +375,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
                     't_geocenter': t_geocenter})
         else:
             # Computes ln(likelihood)
-            # Note that this has discreteness errors corresponding to cogwheel
+            # Note that this has discreteness errors compared to full cogwheel
             Y_pick = (self.dist_ref / d_luminosity) * np.exp(2 * 1j * phi_ref)
             lnl = (np.abs(U) ** 2 / T2 - T2 * np.abs(Y_pick - U / T2) ** 2) / 2
         
