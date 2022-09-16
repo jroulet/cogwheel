@@ -33,6 +33,7 @@ DETECTOR_ARMS = {
 
 EARTH_CROSSING_TIME = 2 * 0.02128  # 2 R_Earth / c (seconds)
 
+
 @utils.lru_cache()
 def fplus_fcross(detector_names, ra, dec, psi, tgps):
     """
@@ -44,21 +45,6 @@ def fplus_fcross(detector_names, ra, dec, psi, tgps):
     return np.transpose([
         lal.ComputeDetAMResponse(DETECTORS[det].response, ra, dec, psi, gmst)
         for det in detector_names])
-
-
-def fplus_fcross_detector(detector_name, ra, dec, psi, tgps):
-    """
-    Return a (2 x n_angles) array with F+, Fx for many angles at one detector.
-    ra, dec, psi, tgps can be scalars or arrays, and any with length > 1 must
-     share the same length.all have length n_angles, tgps can be scalar or array
-    """
-    if hasattr(tgps, '__len__'):
-        gmst = [lal.GreenwichMeanSiderealTime(t) for t in tgps]
-    else:
-        gmst = lal.GreenwichMeanSiderealTime(tgps)
-    return np.transpose([
-        lal.ComputeDetAMResponse(DETECTORS[detector_name].response, r, d, p, g)
-        for r, d, p, g in np.broadcast(ra, dec, psi, gmst)])
 
 
 @utils.lru_cache()
