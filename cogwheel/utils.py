@@ -95,10 +95,11 @@ def mod(value, start=0, period=2*np.pi):
     return (value - start) % period + start
 
 
-def weighted_std(values, weights=None):
-    """Return standard deviation of values with weights."""
+def weighted_avg_and_std(values, weights=None):
+    """Return average and standard deviation of values with weights."""
     avg = np.average(values, weights=weights)
-    return np.sqrt(np.average((values - avg) ** 2, weights=weights))
+    std = np.sqrt(np.average((values - avg) ** 2, weights=weights))
+    return avg, std
 
 
 def n_effective(weights):
