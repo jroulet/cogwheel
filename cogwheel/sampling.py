@@ -228,7 +228,6 @@ class Sampler(abc.ABC, utils.JSONMixin):
         ----------
         rundir: directory where to save output, will create if needed.
         """
-
         rundir = pathlib.Path(rundir)
         self.to_json(rundir, dir_permissions=self.dir_permissions,
                      file_permissions=self.file_permissions, overwrite=True)
