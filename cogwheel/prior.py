@@ -235,14 +235,24 @@ class Prior(ABC, utils.JSONMixin):
             return cls.sampled_params
         return []
 
-    def unfold_apply(self, func):
+    def unfold_apply(self, func, otypes=[float]):
         """
         Return a function that unfolds its parameters and applies `func`
         to each unfolding. The returned function returns a list of
         length `2**n_folds`.
+
+        Parameters
+        ----------
+        func: callable
+            A python function or method.
+
+        otypes: str or list of dtypes
+            Output type, passed to ``np.vectorize``. You can pass
+            ``None`` to decide automatically, but then an extra function
+            call will be made.
         """
         sig = inspect.signature(self.transform)
-        vectorized_func = np.vectorize(func)
+        vectorized_func = np.vectorize(func, otypes=otypes)
 
         def unfolding_func(*par_vals, **par_dic):
             par_values = np.array(sig.bind(*par_vals, **par_dic).args)
