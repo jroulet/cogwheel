@@ -135,50 +135,43 @@ class Sampler(abc.ABC, utils.JSONMixin):
                                  for rundir in old_rundirs)
         return eventdir.joinpath(f'{utils.RUNDIR_PREFIX}{run_id}')
 
-    def submit_slurm(self, rundir, n_hours_limit=48,
-                     memory_per_task='32G', resuming=False):
+    def submit_slurm(
+            self, rundir, n_hours_limit=48, memory_per_task='32G',
+            resuming=False, sbatch_cmds=()):
         """
         Parameters
         ----------
-        rundir: path of run directory, e.g. from `self.get_rundir`
-        n_hours_limit: Number of hours to allocate for the job
-        memory_per_task: Determines the memory and number of cpus
-        resuming: bool, whether to attempt resuming a previous run if
-                  rundir already exists.
+        rundir: str, os.PathLike
+            Run directory, e.g. from `self.get_rundir`
+
+        n_hours_limit: int
+            Number of hours to allocate for the job.
+
+        memory_per_task: str
+            Determines the memory and number of cpus.
+
+        resuming: bool
+            Whether to attempt resuming a previous run if rundir already
+            exists.
+
+        sbatch_cmds: tuple of str
+            Strings with SBATCH commands.
         """
         rundir = pathlib.Path(rundir)
-        job_name = '_'.join([self.__class__.__name__,
-                             self.posterior.prior.__class__.__name__,
+        job_name = '_'.join([rundir.name,
                              self.posterior.likelihood.event_data.eventname,
-                             rundir.name])
+                             self.posterior.prior.__class__.__name__,
+                             self.__class__.__name__])
+        batch_path = rundir/'batchfile'
         stdout_path = rundir.joinpath('output.out').resolve()
         stderr_path = rundir.joinpath('errors.err').resolve()
 
         self.to_json(rundir, overwrite=resuming)
 
-        package = pathlib.Path(__file__).parents[1].resolve()
-        module = f'cogwheel.{os.path.basename(__file__)}'.removesuffix('.py')
-
-        batch_path = rundir/'batchfile'
-        with open(batch_path, 'w+') as batchfile:
-            batchfile.write(textwrap.dedent(f"""\
-                #!/bin/bash
-                #SBATCH --job-name={job_name}
-                #SBATCH --output={stdout_path}
-                #SBATCH --error={stderr_path}
-                #SBATCH --open-mode=append
-                #SBATCH --mem-per-cpu={memory_per_task}
-                #SBATCH --time={n_hours_limit:02}:00:00
-
-                eval "$(conda shell.bash hook)"
-                conda activate {os.environ['CONDA_DEFAULT_ENV']}
-
-                cd {package}
-                srun {sys.executable} -m {module} {rundir.resolve()}
-                """))
-        batch_path.chmod(0o777)
-        os.system(f'sbatch {batch_path.resolve()}')
-        print(f'Submitted job {job_name!r}.')
+        sbatch_cmds += (f'--mem-per-cpu={memory_per_task}',)
+        args = rundir.resolve()
+        utils.submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
+                           args, sbatch_cmds, batch_path)
 
     def submit_lsf(self, rundir, n_hours_limit=48,
                    memory_per_task='32G', resuming=False):
@@ -235,7 +228,6 @@ class Sampler(abc.ABC, utils.JSONMixin):
         ----------
         rundir: directory where to save output, will create if needed.
         """
-
         rundir = pathlib.Path(rundir)
         self.to_json(rundir, dir_permissions=self.dir_permissions,
                      file_permissions=self.file_permissions, overwrite=True)
