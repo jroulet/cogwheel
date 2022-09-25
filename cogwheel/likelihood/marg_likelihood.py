@@ -50,8 +50,8 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         self.cs_kwargs = cs_kwargs.copy()
         # Assuming the user isn't evil and passing 'cs_kwargs' inside cs_kwargs
         self.__dict__.update(cs_kwargs)
-        nra = cs_kwargs.pop("nra", 100)
-        ndec = cs_kwargs.pop("ndec", 100)
+        nra = cs_kwargs.pop("nra", 500) #
+        ndec = cs_kwargs.pop("ndec", 500) #
         self.detnames = tuple(event_data.detector_names)
         cs_kwargs["gps_time"] = cs_kwargs.get("gps_time", event_data.tgps)
         cs_kwargs["dt_sinc"] = cs_kwargs.get("dt_sinc", cs.DEFAULT_DT)
@@ -195,12 +195,19 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         event_phys[:, 6] = [np.imag(z_timeseries[tind, i])
                             for i, tind in enumerate(t_indices)]
 
-        z_timeseries_cs = np.zeros(
-            (len(self.event_data.detector_names), len(self.timeshifts), 3))
-        z_timeseries_cs[:, :, 0] = self.timeshifts[:]
-        z_timeseries_cs[:, :, 1] = np.transpose(z_timeseries.real)
-        z_timeseries_cs[:, :, 2] = np.transpose(z_timeseries.imag)
+#         z_timeseries_cs = np.zeros(
+#             (len(self.event_data.detector_names), len(self.timeshifts), 3))
+#         z_timeseries_cs[:, :, 0] = self.timeshifts[:]
+#         z_timeseries_cs[:, :, 1] = np.transpose(z_timeseries.real)
+#         z_timeseries_cs[:, :, 2] = np.transpose(z_timeseries.imag)
 
+        z_timeseries_cs = []
+        for i in range(len(self.event_data.detector_names)):
+            t_mask = utils.abs_sq(z_timeseries[:, i]) > event_phys[i,1] - 20
+            z_timeseries_cs.append(np.c_[self.timeshifts[t_mask], z_timeseries[t_mask,i].real, z_timeseries[t_mask,i].imag])
+
+        globals()["debug"]=locals()
+        
         # Fix the number of samples
         nsamples = kwargs.get("nsamples", self.nsamples)
         prior_terms, _, samples, UT2samples = \

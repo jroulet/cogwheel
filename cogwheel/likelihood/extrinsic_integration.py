@@ -332,8 +332,28 @@ def incoherent_score(triggers):
 
 
 # ############################ Compiled functions #############################
-@vectorize([complex128(float64, float64, float64, float64)], nopython=True)
-def gen_sample_amps_from_fplus_fcross(fplus, fcross, mu, psi):
+# @vectorize([complex128(float64, float64, float64, float64)], nopython=True)
+# def gen_sample_amps_from_fplus_fcross(fplus, fcross, mu, psi):
+#     """
+#     :param fplus: Response to the plus polarization for psi = 0
+#     :param fcross: Response to the cross polarization for psi = 0
+#     :param mu: Inclination
+#     :param psi: Polarization angle
+#     :returns A_p + 1j * A_c
+#     ## Note that this seems to have the wrong convention for mu
+#     """
+#     twopsi = 2. * psi
+#     c2psi = np.cos(twopsi)
+#     s2psi = np.sin(twopsi)
+#     fp = c2psi * fplus + s2psi * fcross
+#     fc = -s2psi * fplus + c2psi * fcross
+#     # Strain amplitude at the detector
+#     ap = fp * (1. + mu ** 2) / 2.
+#     ac = -fc * mu
+#     return ap + 1j * ac
+
+@vectorize([complex128(float64, float64, float64, float64, float64)], nopython=True)
+def gen_sample_amps_from_fplus_fcross(fplus, fcross, mu, c2psi, s2psi):
     """
     :param fplus: Response to the plus polarization for psi = 0
     :param fcross: Response to the cross polarization for psi = 0
@@ -342,9 +362,6 @@ def gen_sample_amps_from_fplus_fcross(fplus, fcross, mu, psi):
     :returns A_p + 1j * A_c
     ## Note that this seems to have the wrong convention for mu
     """
-    twopsi = 2. * psi
-    c2psi = np.cos(twopsi)
-    s2psi = np.sin(twopsi)
     fp = c2psi * fplus + s2psi * fcross
     fc = -s2psi * fplus + c2psi * fcross
     # Strain amplitude at the detector
@@ -477,7 +494,7 @@ def marg_lk(zz, tt, gtype=1, nsamp=None):
 @njit
 def coherent_score_montecarlo_sky(
         timeseries, offsets, nfacs, dt_dict_keys, dt_dict_items, responses,
-        t3norm, musamps=None, psisamps=None, gtype=1, dt_sinc=DEFAULT_DT,
+        t3norm, musamps=None, psisamps=None, c2psisamps=None, s2psisamps=None, gtype=1, dt_sinc=DEFAULT_DT,
         dt_max=DEFAULT_DT_MAX, nsamples=10000, fixed_pars=None, fixed_vals=None):
     """
     Evaluates the coherent score integral by montecarlo sampling all
@@ -544,7 +561,9 @@ def coherent_score_montecarlo_sky(
         psisamps = fixed_vals[psiind] * np.ones(nsamples)
     elif psisamps is None:
         psisamps = np.random.uniform(0, 2 * np.pi, size=nsamples)
-
+        c2psisamps = np.cos(2*psisamps)
+        s2psisamps = np.sin(2*psisamps)
+        
     # Pick samples of data points in each detector
     # -----------------------------------------------------------------------
     # Normalization factor for monte-carlo over times in the detectors
@@ -605,6 +624,11 @@ def coherent_score_montecarlo_sky(
     samples = np.zeros((nsamples, 6))
     
     dt_dict_key_inds = np.searchsorted(dt_dict_keys, keys)
+    
+    indx_offset_mu = np.random.randint(len(musamps))
+    indx_offset_psi = np.random.randint(len(psisamps))
+    indx_offset_ra = np.random.randint(10**7)
+    
     for ind_s in range(nsamples):
         dt_dict_key_ind = dt_dict_key_inds[ind_s]
         key = keys[ind_s]
@@ -625,7 +649,8 @@ def coherent_score_montecarlo_sky(
                     return float(-10 ** 5), samples, \
                         np.zeros((2, 0), dtype=np.complex128)
             else:
-                radec_ind = np.random.choice(len(radec_indlist))
+                #radec_ind = np.random.choice(len(radec_indlist))
+                radec_ind = (ind_s + indx_offset_ra)%len(radec_indlist)
                 # Record fsky
                 # (normalization factor for monte-carlo over ra and dec)
                 fskys[nsamp_phys] = len(radec_indlist)
@@ -633,8 +658,13 @@ def coherent_score_montecarlo_sky(
             ra_ind, dec_ind = radec_indlist[radec_ind]
 
             # Pick mu and psi
-            mu = np.random.choice(musamps)
-            psi = np.random.choice(psisamps)
+            #mu = np.random.choice(musamps)
+            #psi = np.random.choice(psisamps)
+            mu = musamps[(ind_s + indx_offset_mu)%len(musamps)]
+            psi_indx = (ind_s + indx_offset_psi)%len(psisamps)
+            psi = psisamps[psi_indx]
+            c2psi = c2psisamps[psi_indx]
+            s2psi = s2psisamps[psi_indx]
             
             samples[nsamp_phys, 0] = mu
             samples[nsamp_phys, 1] = psi
@@ -647,11 +677,16 @@ def coherent_score_montecarlo_sky(
 
             # Add to list of predicted z
             for ind_d in range(ndet):
+#                 tts[nsamp_phys, ind_d] = \
+#                     nfacs[ind_d] * gen_sample_amps_from_fplus_fcross(
+#                         responses[ra_ind, dec_ind, ind_d, 0],
+#                         responses[ra_ind, dec_ind, ind_d, 1],
+#                         mu, psi)
                 tts[nsamp_phys, ind_d] = \
-                    nfacs[ind_d] * gen_sample_amps_from_fplus_fcross(
-                        responses[ra_ind, dec_ind, ind_d, 0],
-                        responses[ra_ind, dec_ind, ind_d, 1],
-                        mu, psi)
+                nfacs[ind_d] * gen_sample_amps_from_fplus_fcross(
+                    responses[ra_ind, dec_ind, ind_d, 0],
+                    responses[ra_ind, dec_ind, ind_d, 1],
+                    mu, c2psi, s2psi)
 
             nsamp_phys += 1
 
@@ -732,6 +767,8 @@ class CoherentScore(object):
         # Samples of mu (cos inclination) and psis
         self.mus = npzfile['mus']
         self.psis = npzfile['psis']
+        self.c2psis = np.cos(2*self.psis)
+        self.s2psis = np.sin(2*self.psis)
 
         # Arrays for debugging purpose
         # n_ra x n_dec x (n_detectors - 1) array with delays w.r.t
@@ -839,6 +876,8 @@ class CoherentScore(object):
         # Samples of mu (cos inclination) and psis
         instance.mus = mus
         instance.psis = psis
+        instance.c2psis = np.cos(2*instance.psis)
+        instance.s2psis = np.sin(2*instance.psis)
 
         # Arrays for debugging purpose
         # n_ra x n_dec x (n_detectors - 1) array with delays w.r.t
@@ -901,6 +940,8 @@ class CoherentScore(object):
             print('Old T3norm', self.T3norm)
         mus = np.random.choice(self.mus, size=nsamples, replace=True)
         psis = np.random.choice(self.psis, size=nsamples, replace=True)
+        c2psis = np.cos(2*psis)
+        s2psis = np.sin(2*psis)
         ra_inds = np.random.randint(0, len(self.ra_grid), size=nsamples)
         dec_inds = np.random.randint(0, len(self.dec_grid), size=nsamples)
         t_list = np.zeros(nsamples)
@@ -909,7 +950,7 @@ class CoherentScore(object):
             fplus = responses[:, 0]
             fcross = responses[:, 1]
             #fplus, fcross = self.responses[ra_inds, dec_inds, det_ind, :]
-            avec = gen_sample_amps_from_fplus_fcross(fplus, fcross, mus, psis)
+            avec = gen_sample_amps_from_fplus_fcross(fplus, fcross, mus, c2psis, s2psis)
             t_list += utils.abs_sq(avec)
         t3mean = np.mean(t_list ** 1.5)
         self.T3norm = t3mean
@@ -1043,9 +1084,13 @@ class CoherentScore(object):
         if any([len(x) == 0 for x in timeseries]):
             return -100000, np.zeros((nsamples, 6)), \
                 np.zeros((2, 0), dtype=np.complex128)
+        
+        globals()['debug'] = locals()
+        
         return coherent_score_montecarlo_sky(
             timeseries, offsets, nfacs, self.dt_dict_keys, self.dt_dict_items,
             self.responses, self.T3norm, musamps=self.mus, psisamps=self.psis,
+            c2psisamps=self.c2psis, s2psisamps=self.s2psis,
             gtype=gtype, dt_sinc=self.dt_sinc, dt_max=self.dt_max,
             nsamples=nsamples, fixed_pars=kwargs.get("fixed_pars", None),
             fixed_vals=kwargs.get("fixed_vals", None))
