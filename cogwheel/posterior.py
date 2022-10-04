@@ -172,11 +172,20 @@ class Posterior(utils.JSONMixin):
         folded_par_vals[inds] = result
         i_fold = np.argmax(lnlike_unfolds(*folded_par_vals))
 
-        self.likelihood.par_dic_0 = self.prior.transform(
+        # Maximize distance analytically, also serves to add 'd_luminosity'
+        # entry to the dictionary in case it doesn't already have it.
+        par_dic_0 = self.prior.transform(
             *self.prior.unfold(folded_par_vals)[i_fold])
 
-        lnl = self.likelihood.lnlike(self.likelihood.par_dic_0)
-        print(f'Found solution with lnl = {lnl}')
+        d_h, h_h = self.likelihood._get_dh_hh_no_asd_drift(
+            par_dic_0 | {'d_luminosity': 1.}) @ self.likelihood.asd_drift**-2
+        par_dic_0['d_luminosity'] = h_h / d_h
+
+        self.likelihood.par_dic_0 = par_dic_0
+
+        lnlike = getattr(self.likelihood, 'lnlike_no_marginalization',
+                         self.likelihood.lnlike)
+        print(f'Found solution with lnl = {lnlike(self.likelihood.par_dic_0)}')
 
     def get_eventdir(self, parentdir):
         """
