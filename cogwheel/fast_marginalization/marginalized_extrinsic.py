@@ -1,17 +1,62 @@
-import itertools
-import numpy as np
+from collections import namedtuple
+import scipy
 from scipy.stats import qmc
+import numpy as np
+import pandas as pd
 
 from cogwheel import gw_prior
 from cogwheel import gw_utils
 from cogwheel import likelihood
 from cogwheel import skyloc_angles
+from cogwheel import utils
 from cogwheel.fast_marginalization.adaptive import ExtrinsicMap
 
+
+_MarginalizationProducts = namedtuple(
+    '_MarginalizationProducts',
+    ['lnl_max', 'marg_like', 'weights', 'd_h', 'h_h', 'sign_id',
+     'important', 'dt_linfree'])
+_MarginalizationProducts.__doc__ = """
+    Attributes
+    ----------
+    lnl_max: float
+        log(likelihood marginalized over distance) and maximized over
+        time, sky location, polarization and orbital phase.
+
+    marg_like: 1d float array (i)
+        log(likelihood marginalized over distance) of important samples.
+
+    weights: 1d float array (i)
+        Prior weight of important samples.
+
+    d_h: 2d float array (fm)
+        Inner product <d|h> for QMC samples, mode by mode.
+
+    h_h: 2d float array (fm)
+        Inner product <h|h> for QMC samples, mode by mode.
+
+    sign_id: 0 or 1
+        Whether costheta_jn > 0
+
+    important: [tuple of int, tuple of int]
+        Indices to QMC samples and orbital phases, of configurations
+        with incoherent likelihood sufficiently high to be included in
+        the marginalization integral.
+
+    dt_linfree: float
+        Time convention difference between LAL and the linear-free
+        waveform, the convention is t_lal = t_linfree + dt_linfree.
+    """
 
 class MarginalizedExtrinsicLikelihood(
         likelihood.RelativeBinningLikelihood):
     """
+    Class to evaluate the likelihood marginalized over sky location,
+    time of arrival, polarization, distance and orbital phase for
+    quasicircular waveforms with generic harmonic modes and spins, and
+    to resample these parameters from the conditional posterior for
+    demarginalization in postprocessing.
+
     # TODO: smooth to_json and fast_parameters_sequence
 
     Note: comments throughout the code refer to array indices as follows:
@@ -24,6 +69,7 @@ class MarginalizedExtrinsicLikelihood(
         r: rfft frequency id
         t: coarse-grained time id
         o: orbital phase id
+        i: important (i.e. with high enough likelihood) sample id
     """
     # Note: costheta_jn is redundant, but we don't want to compute it
     # here so it's required
@@ -31,8 +77,8 @@ class MarginalizedExtrinsicLikelihood(
               'm1', 'm2', 's1x_n', 's1y_n', 's1z', 's2x_n', 's2y_n', 's2z']
     qmc_params = sorted(['ra', 'dec', 'psi', 't_linfree_geocenter'])
 
-    # Remove points with a drop in log-likelihood from the peak bigger
-    # than ``DLNL_THRESHOLD`` from the orbital phase integral:
+    # Remove from the orbital phase integral any sample with a drop in
+    # log-likelihood from the peak bigger than ``DLNL_THRESHOLD``:
     DLNL_THRESHOLD = 12.
 
     def __init__(self, fast_parameters_sequence, lookup_table, event_data,
@@ -50,6 +96,7 @@ class MarginalizedExtrinsicLikelihood(
         self._hh_phasor = None  # Set by nphi.setter
         self._dphi = None  # Set by nphi.setter
         self.nphi = nphi
+        self.fast_parameter_slice = slice(None)
 
     @property
     def nphi(self):
@@ -57,15 +104,16 @@ class MarginalizedExtrinsicLikelihood(
 
     @nphi.setter
     def nphi(self, nphi):
-        phis, dphi = np.linspace(0, 2*np.pi, nphi, endpoint=False, retstep=True)
+        phi_ref, dphi = np.linspace(0, 2*np.pi, nphi,
+                                    endpoint=False, retstep=True)
         m_arr = np.fromiter(self.waveform_generator._harmonic_modes_by_m, int)
         m_inds, mprime_inds = self._get_m_mprime_inds()
         self._nphi = nphi
-        self._dh_phasor = np.exp(-1j * phis * m_arr[:, np.newaxis])  # mo
+        self._dh_phasor = np.exp(-1j * np.outer(m_arr, phi_ref))  # mo
         self._hh_phasor = np.exp(
-            1j * phis * (m_arr[m_inds]-m_arr[mprime_inds])[:, np.newaxis])  # mo
+            1j * np.outer(m_arr[m_inds] - m_arr[mprime_inds], phi_ref))  # mo
+        self._phi_ref = phi_ref
         self._dphi = dphi
-
 
     def _set_summary(self):
         """
@@ -98,10 +146,11 @@ class MarginalizedExtrinsicLikelihood(
         self._h0_fbin = self.waveform_generator.get_hplus_hcross(
             self.fbin, self.par_dic_0, by_m=True)  # mpb
 
-        fplus_fcross, time_delays \
-            = self._get_fplus_fcross_and_time_delays()  # sfpd, sfd
-        self._set_d_h_weights(fplus_fcross, time_delays)
-        self._set_h_h_weights(fplus_fcross)
+        self._set_fplus_fcross_and_detector_times()
+        self._coarse_times, self._t_inds, self._d_h_weights = zip(
+            *[self._get_d_h_weights_det(i_det)
+              for i_det in range(len(self.event_data.detector_names))])
+        self._set_h_h_weights()
 
         self.asd_drift = self.compute_asd_drift(self.par_dic_0)
 
@@ -120,48 +169,25 @@ class MarginalizedExtrinsicLikelihood(
         # Reset
         self.waveform_generator.disable_precession = disable_precession
 
-    def _set_d_h_weights(self, fplus_fcross, time_delays):
-        detector_times = (
-            self.fast_parameters_sequence['t_linfree_geocenter'][..., np.newaxis]
-            + time_delays)  # sfd
+    def _get_d_h_weights_det(self, i_det, time_resolution=5e-4):
+        coarse_times_det, t_inds_det = self._get_coarse_grained_times_and_inds(
+            self._detector_times[i_det], tol=time_resolution)  # t, sf
+        t_inds_det = [tuple(inds) for inds in t_inds_det]
 
-        # For some of the samples the arrival time at a detector might
-        # be different enough from that of the reference waveform that
-        # new summary data is warranted. Below we get coarse-grained
-        # times of arrival at each detector to compute summary data
-        # efficiently, because `sf` indices can take many more values
-        # than `t`. Avoid arrays with `sfr` indices at any point.
-        self._d_h_weights = np.zeros(
-            self.fast_parameters_sequence['ra'].shape + self._h0_fbin.shape,
-            np.complex_)  # sfmpb
+        shifts = np.exp(2j*np.pi * np.einsum(
+            'r,t->tr',
+            self.event_data.frequencies,
+            self.waveform_generator.tcoarse + coarse_times_det))
+        d_h_integrand = np.einsum('r,mpr,tr->tmpr',
+                                  self.event_data.blued_strain[i_det],
+                                  self._h0_f.conj(),
+                                  shifts)  # tmpr
+        d_h_weights = (self._get_summary_weights(d_h_integrand)
+                       / self._h0_fbin.conj()
+                       / self.asd_drift[i_det]**2)  # tmpb
+        return coarse_times_det, t_inds_det, d_h_weights
 
-        for i_det in range(len(self.event_data.detector_names)):
-            coarse_times, t_inds = self._get_coarse_grained_times_and_inds(
-                detector_times[..., i_det], tol=.005)  # t, sf
-
-            coarse_shifts = np.exp(2j * np.pi * np.einsum(
-                'r,t->tr', self.event_data.frequencies,
-                self.waveform_generator.tcoarse + coarse_times))  # tr
-
-            fine_shifts = np.exp(2j*np.pi * np.einsum(
-                'b,sf->sfb',
-                self.fbin,
-                detector_times[..., i_det] - coarse_times[t_inds]))  # sfb
-
-            d_h0 = np.einsum('r,mpr,tr->tmpr',
-                             self.event_data.blued_strain[i_det],
-                             self._h0_f.conj(),
-                             coarse_shifts)  # tmpr
-            aux_weights = (self._get_summary_weights(d_h0)
-                           / self.asd_drift[i_det]**2) # tmpb
-
-            self._d_h_weights += np.einsum('sfmpb,sfp,sfb,mpb->sfmpb',
-                                           aux_weights[t_inds],
-                                           fplus_fcross[..., i_det],
-                                           fine_shifts,
-                                           1 / self._h0_fbin.conj())  # sfmpb
-
-    def _set_h_h_weights(self, fplus_fcross):
+    def _set_h_h_weights(self):
         m_inds, mprime_inds = self._get_m_mprime_inds()
         h0_h0 = np.einsum('mpr,mPr,dr,d->mpPdr',
                           self._h0_f[m_inds],
@@ -177,33 +203,37 @@ class MarginalizedExtrinsicLikelihood(
         # Count off-diagonal terms twice:
         self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
 
-        n_s, n_f, n_p, n_d = fplus_fcross.shape
-        self._f_f = (np.einsum('sfpd,sfPd->sfpPd', fplus_fcross, fplus_fcross)
-                     .reshape(n_s, n_f, n_p * n_p * n_d)
-                     .copy())  # sf(pPd)
-
-    def _get_fplus_fcross_and_time_delays(self):
-        """Accepts arrays."""
-        get_fplus_fcross = np.vectorize(
-            gw_utils.fplus_fcross, excluded={0}, signature='(),(),(),()->(2,d)')
+    def _set_fplus_fcross_and_detector_times(self):
+        get_fplus_fcross = np.vectorize(gw_utils.fplus_fcross, excluded={0},
+                                        signature='(),(),(),()->(2,d)')
 
         get_time_delay_from_geocenter = np.vectorize(
             gw_utils.time_delay_from_geocenter, excluded={0},
             signature='(),(),()->(n)')
 
-        fplus_fcross = get_fplus_fcross(self.event_data.detector_names,
-                                        self.fast_parameters_sequence['ra'],
-                                        self.fast_parameters_sequence['dec'],
-                                        self.fast_parameters_sequence['psi'],
-                                        self.event_data.tgps)
+        self._fplus_fcross = get_fplus_fcross(
+            self.event_data.detector_names,
+            self.fast_parameters_sequence['ra'],
+            self.fast_parameters_sequence['dec'],
+            self.fast_parameters_sequence['psi'],
+            self.event_data.tgps)
+
+        n_s, n_f, n_p, n_d = self._fplus_fcross.shape
+        self._f_f = (np.einsum('sfpd,sfPd->sfpPd',
+                               self._fplus_fcross,
+                               self._fplus_fcross)
+                     .reshape(n_s, n_f, n_p * n_p * n_d)
+                     .copy())  # sf(pPd)
 
         time_delays = get_time_delay_from_geocenter(
             self.event_data.detector_names,
             self.fast_parameters_sequence['ra'],
             self.fast_parameters_sequence['dec'],
-            self.event_data.tgps)
+            self.event_data.tgps).transpose(2, 0, 1)  # dsf
 
-        return fplus_fcross, time_delays
+        self._detector_times = (
+            self.fast_parameters_sequence['t_linfree_geocenter']
+            + time_delays)  # dsf
 
     def _get_hplus_hcross_linear_free(self, par_dic):
         """
@@ -228,25 +258,41 @@ class MarginalizedExtrinsicLikelihood(
                                            w=self._polyfit_weights)
 
         slope = fit.convert().coef[1]
-        return np.exp(-1j * slope * self.fbin) * hplus_hcross  # mpb
+        hplus_hcross_lf = np.exp(-1j * slope * self.fbin) * hplus_hcross  # mpb
+        dt_linfree = slope / (2*np.pi)  # t_lal = t_linfree + dt_linfree
+        return hplus_hcross_lf, dt_linfree
 
     def _get_dh_hh(self, par_dic):
-        hplus_hcross = self._get_hplus_hcross_linear_free(par_dic)  # mpb
+        hplus_hcross, dt_linfree = self._get_hplus_hcross_linear_free(
+            par_dic)  # mpb
         sign_id = int(par_dic['costheta_jn'] > 0)
 
-        # (d|h): We compute the following quantity in faster way below
-        # d_h = np.einsum('fmpb,mpb->fm',
-        #                 self._d_h_weights[sign_id],
-        #                 hplus_hcross.conj())  # fm
+        # (d|h):
+        # Compute sparse (d|h) timeseries with hplus, hcross at detectors
+        n_detectors = len(self.event_data.detector_names)
+        d_h_timeseries = [np.einsum('tmpb,mpb->mpt',
+                                    self._d_h_weights[i_det],
+                                    hplus_hcross.conj())
+                          for i_det in range(n_detectors)]
 
-        n_f, n_m, n_p, n_b = self._d_h_weights[sign_id].shape
-        d_h = np.empty((n_f, n_m), np.complex_)  # fm
-        for i_m in range(n_m):
-            d_h[:, i_m] = (
-                self._d_h_weights[sign_id, :, i_m].reshape(n_f, n_p*n_b)
-                @ hplus_hcross[i_m].conj().reshape(n_p*n_b))  # f
+        # Spline-interpolate to the desired times
+        detector_times = self._detector_times[:,
+                                              sign_id,
+                                              self.fast_parameter_slice]
+        d_h_pluscross = np.array(
+            [scipy.interpolate.interp1d(self._coarse_times[i_det],
+                                        d_h_timeseries[i_det],
+                                        assume_sorted=True, kind=3,
+                                        bounds_error=False, fill_value=0.
+                                       )(detector_times[i_det])
+             for i_det in range(n_detectors)])  # dmpf
 
-        m_inds, mprime_inds = self._get_m_mprime_inds()
+        # Apply antenna factors:
+        d_h = np.einsum('dmpf,fpd->fm',
+                        d_h_pluscross,
+                        self._fplus_fcross[sign_id, self.fast_parameter_slice]
+                        )  # fm
+
         # (h|h): We compute the following quantity in a faster way below
         # h_h = np.einsum('mpPdb,fpPd,mpb,mPb->fm',
         #                 self._h_h_weights,
@@ -255,6 +301,7 @@ class MarginalizedExtrinsicLikelihood(
         #                 hplus_hcross.conj()[mprime_inds],
         #                 optimize=<precomputed_optimal_path>)  # fm
 
+        m_inds, mprime_inds = self._get_m_mprime_inds()
         h_h_mppb = np.einsum('mpb,mPb->mpPb',
                              hplus_hcross[m_inds],
                              hplus_hcross.conj()[mprime_inds])  # mpPb
@@ -263,11 +310,11 @@ class MarginalizedExtrinsicLikelihood(
                              h_h_mppb,
                              self._h_h_weights)  # mpPd
 
-        n_mm, n_p, n_p, n_d, n_b = self._h_h_weights.shape
-        n_ppd = np.prod((n_p, n_p, n_d))
-        h_h = self._f_f[sign_id] @ h_h_mppd.reshape(n_mm, n_ppd).T  # fm
+        n_mm, n_p, _, n_d = h_h_mppd.shape
+        h_h = (self._f_f[sign_id, self.fast_parameter_slice]
+               @ h_h_mppd.reshape(n_mm, n_p*n_p*n_d).T)  # fm
 
-        return d_h, h_h
+        return d_h, h_h, dt_linfree
 
     @staticmethod
     def _get_coarse_grained_times_and_inds(times, tol):
@@ -309,6 +356,21 @@ class MarginalizedExtrinsicLikelihood(
 
     @classmethod
     def from_aux_posterior(cls, aux_posterior, log2nsamples: int):
+        """
+        Constructor that automatically chooses a set of fast parameter
+        samples (as a quasi Monte Carlo sequence following a
+        distribution matched to slices of the posterior around the
+        maximum likelihood solution).
+
+        Parameters
+        ----------
+        aux_posterior: posterior.Posterior
+            A Posterior object, should be marginalized over distance
+            only.
+
+        log2nsamples: int
+            Base-2 logarithm of the length of the QMC sequence.
+        """
         if not isinstance(aux_posterior.likelihood,
                           likelihood.MarginalizedDistanceLikelihood):
             raise ValueError(
@@ -358,7 +420,8 @@ class MarginalizedExtrinsicLikelihood(
         """
         Return log of the distance-marginalized likelihood.
         Note, d_h and h_h are real numbers (already summed over modes,
-        polarizations, detectors).
+        polarizations, detectors). The strain must correspond to the
+        reference distance ``self.lookup_table.REFERENCE_DISTANCE``.
 
         Parameters
         ----------
@@ -370,8 +433,8 @@ class MarginalizedExtrinsicLikelihood(
         """
         return self.lookup_table(d_h, h_h) + d_h**2 / h_h / 2
 
-    def lnlike(self, par_dic):
-        d_h_0, h_h_0 = self._get_dh_hh(par_dic)  # fm, fm
+    def _get_marginalization_products(self, par_dic):
+        d_h_0, h_h_0, dt_linfree = self._get_dh_hh(par_dic)  # fm, fm, scalar
 
         d_h = (d_h_0 @ self._dh_phasor).real  # fo
         h_h = (h_h_0 @ self._hh_phasor).real  # fo
@@ -381,11 +444,66 @@ class MarginalizedExtrinsicLikelihood(
             max_over_distance_lnl
             > np.max(max_over_distance_lnl) - self.DLNL_THRESHOLD)
         lnl_marg_dist = self._lnlike_marginalized_over_distance(
-            d_h[important], h_h[important])
+            d_h[important], h_h[important])  # i
 
         lnl_max = lnl_marg_dist.max()
-        marg_like = np.exp(lnl_marg_dist - lnl_max)
+        marg_like = np.exp(lnl_marg_dist - lnl_max)  # i
         sign_id = int(par_dic['costheta_jn'] > 0)
-        weights = self.fast_parameters_sequence['weights'][sign_id,
-                                                           important[0]]
-        return lnl_max + np.log(marg_like.dot(weights) * self._dphi)
+        weights = self.fast_parameters_sequence['weights'][
+            sign_id, important[0]]  # i
+        return _MarginalizationProducts(lnl_max=lnl_max,
+                                        marg_like=marg_like,
+                                        weights=weights,
+                                        d_h=d_h,
+                                        h_h=h_h,
+                                        sign_id=sign_id,
+                                        important=important,
+                                        dt_linfree=dt_linfree)
+
+    def lnlike(self, par_dic):
+        """
+        Return natural logarithm of the marginalized likelihood.
+        The likelihood is marginalized over arrival time, polarization,
+        sky location, orbital phase and distance.
+        """
+        mar = self._get_marginalization_products(par_dic)
+        return mar.lnl_max + np.log(mar.marg_like.dot(mar.weights)
+                                    * self._dphi / len(mar.d_h))
+
+    def _sample_fast_parameters(self, **par_dic):
+        """
+        Return a dict with a sample of fast parameters drawn from the
+        posterior conditional on given slow parameters.
+        """
+        mar = self._get_marginalization_products(par_dic)
+        prob = mar.marg_like * mar.weights
+        prob /= prob.sum()
+        ind = np.random.choice(len(prob), p=prob)
+        f_ind = mar.important[0][ind]
+        o_ind = mar.important[1][ind]
+
+        fast_sample = {
+            par: self.fast_parameters_sequence[par][mar.sign_id, f_ind]
+            for par in self.qmc_params}
+
+        fast_sample['d_luminosity'] = self.lookup_table.sample_distance(
+            mar.d_h[f_ind, o_ind], mar.h_h[f_ind, o_ind])
+
+        fast_sample['phi_ref'] = self._phi_ref[o_ind]
+
+        fast_sample['t_geocenter'] = (
+            fast_sample['t_linfree_geocenter'] + mar.dt_linfree)
+        return fast_sample
+
+    def postprocess_samples(self, samples: pd.DataFrame):
+        """
+        Add columns for fast parameters (self.qmc_parameters,
+        'd_luminosity' and 'phi_ref') to a DataFrame of slow-parameter
+        samples, with values taken randomly from the conditional
+        posterior.
+        `samples` needs to have columns for all `self.params`.
+        """
+        slow = samples[self.params]
+        fast = pd.DataFrame(
+            list(np.vectorize(self._sample_fast_parameters)(**slow)))
+        utils.update_dataframe(samples, fast)
