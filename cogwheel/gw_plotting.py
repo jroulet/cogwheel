@@ -80,6 +80,11 @@ _LABELS = {
     'lnl_H': r'$\ln \mathcal{L}_H$',
     'lnl_L': r'$\ln \mathcal{L}_L$',
     'lnl_V': r'$\ln \mathcal{L}_V$',
+    # Cumulatives
+    'u_t_linfree': r'$u_t$',
+    'u_psi': r'$u_\psi$',
+    'u_costhetanet': r'$u_{\theta_{\rm net}}$',
+    'u_phinet_hat': r'$u_{\hat\phi_{\rm net}}$',
     }
 
 _UNITS = (dict.fromkeys(['mchirp', 'm1', 'm2', 'mtot', 'mtot_source',

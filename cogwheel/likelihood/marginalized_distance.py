@@ -285,10 +285,6 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         """
         Return log likelihood, marginalized over distance, using
         relative binning.
-
-        Note: the marginalized likelihood depends on two parameters,
-        ``(d|h)`` and ``(h|h)``. The dependence is recast in terms of
-        ``(d|h)**2 / (h|h) := overlap**2`` and ``(h|h)``
         """
         dh_hh = self._get_dh_hh_no_asd_drift(
             dict(par_dic) | {'d_luminosity': self.lookup_table.REFERENCE_DISTANCE})

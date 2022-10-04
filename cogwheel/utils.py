@@ -95,10 +95,11 @@ def mod(value, start=0, period=2*np.pi):
     return (value - start) % period + start
 
 
-def weighted_std(values, weights=None):
-    """Return standard deviation of values with weights."""
+def weighted_avg_and_std(values, weights=None):
+    """Return average and standard deviation of values with weights."""
     avg = np.average(values, weights=weights)
-    return np.sqrt(np.average((values - avg) ** 2, weights=weights))
+    std = np.sqrt(np.average((values - avg) ** 2, weights=weights))
+    return avg, std
 
 
 def n_effective(weights):
@@ -193,21 +194,34 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
 
     Parameters
     ----------
-    job_name: string, name of slurm job
-    n_hours_limit: int, number of hours to allocate for the job.
-    stdout_path: file name, where to direct stdout.
-    stderr_path: file name, where to direct stderr.
-    args: string, command line arguments for the calling module's
-          `main()` to parse.
-    sbatch_cmds: sequence of strings with SBATCH commands, e.g.
-                 `('--mem-per-cpu=8G',)`
-    batch_path: file name where to save the batch script. If not
-                provided, a temporary file will be used.
+    job_name: str
+        Name of slurm job.
+
+    n_hours_limit: int
+        Number of hours to allocate for the job.
+
+    stdout_path: str, os.PathLike
+        File name, where to direct stdout.
+
+    stderr_path: str, os.PathLike
+        File name, where to direct stderr.
+
+    args: str
+        Command line arguments for the calling module's ``main()`` to
+        parse.
+
+    sbatch_cmds: sequence of str
+        SBATCH commands, e.g. ``('--mem-per-cpu=8G',)``.
+
+    batch_path: str, os.PathLike, optional
+        File name where to save the batch script. If not provided, a
+        temporary file will be used.
     """
     cogwheel_dir = pathlib.Path(__file__).parents[1].resolve()
     module = inspect.getmodule(inspect.stack()[1].frame).__name__
 
-    sbatch_lines = '\n'.join(f'#SBATCH {cmd}' for cmd in sbatch_cmds)
+    sbatch_lines = '\n        '.join(
+        f'#SBATCH {cmd}' for cmd in sbatch_cmds)
 
     batch_text = textwrap.dedent(
         f"""\
