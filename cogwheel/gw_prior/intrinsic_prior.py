@@ -17,7 +17,7 @@ class IntrinsicParametersPrior(RegisteredPriorMixin, CombinedPrior):
                     FixedReferenceFrequencyPrior]
     
 # for BNS and NSBH systems
-class IntrinsicTidalPrior(RegisteredPriorMixin, prior.CombinedPrior):
+class IntrinsicTidalPrior(RegisteredPriorMixin, CombinedPrior):
     prior_classes = [UniformTidalDeformabilitiesBNSPrior,
                      UniformDetectorFrameMassesPrior,
                      UniformEffectiveSpinPrior,
