@@ -9,6 +9,7 @@ functionality to accept timeseries of matched-filtering scores and compute
 the marginalized likelihoods, as well as information that is useful to
 sample from the full (unmarginalized) posterior.
 """
+from numba.typed import List
 import numpy as np
 from numba import float64, complex128
 from numba import njit, vectorize
@@ -29,6 +30,7 @@ DETMAP = {'H1': lal.LALDetectorIndexLHODIFF,
           'GEO': lal.LALDetectorIndexGEO600DIFF,
           'GEO600': lal.LALDetectorIndexGEO600DIFF,
           'V1': lal.LALDetectorIndexVIRGODIFF,
+          'V': lal.LALDetectorIndexVIRGODIFF,
           'VIRGO': lal.LALDetectorIndexVIRGODIFF,
           'T1': lal.LALDetectorIndexTAMA300DIFF,
           'TAMA': lal.LALDetectorIndexTAMA300DIFF,
@@ -751,8 +753,11 @@ class CoherentScore(object):
         dt_dict = npzfile['dt_dict'].item()
         self.dt_dict_keys = np.fromiter(dt_dict.keys(), dtype=np.int32)
         self.dt_dict_keys.sort()
-        self.dt_dict_items = tuple([dt_dict[key] for key in self.dt_dict_keys])
-
+        #self.dt_dict_items = tuple([dt_dict[key] for key in self.dt_dict_keys])
+        self.dt_dict_items = List()
+        for key in self.dt_dict_keys:
+            self.dt_dict_items.append(dt_dict[key])
+        
         # n_ra x n_dec x n_detectors x 2 array with f_+/x for phi = 0
         self.responses = npzfile['responses']
         # Convenience for later
@@ -865,7 +870,10 @@ class CoherentScore(object):
 #         instance.dt_dict = dt_dict
         instance.dt_dict_keys = np.fromiter(dt_dict.keys(), dtype=np.int32)
         instance.dt_dict_keys.sort()
-        instance.dt_dict_items = tuple([dt_dict[key] for key in instance.dt_dict_keys])
+        #instance.dt_dict_items = tuple([dt_dict[key] for key in instance.dt_dict_keys])
+        instance.dt_dict_items = List()
+        for key in instance.dt_dict_keys:
+            instance.dt_dict_items.append(dt_dict[key])
 
         # n_ra x n_dec x n_detectors x 2 array with f_+/x for phi = 0
         instance.responses = responses
@@ -1085,7 +1093,6 @@ class CoherentScore(object):
             return -100000, np.zeros((nsamples, 6)), \
                 np.zeros((2, 0), dtype=np.complex128)
         
-        globals()['debug'] = locals()
         
         return coherent_score_montecarlo_sky(
             timeseries, offsets, nfacs, self.dt_dict_keys, self.dt_dict_items,

@@ -4,7 +4,7 @@ from . import RelativeBinningLikelihood
 from . import extrinsic_integration as cs
 from cogwheel import gw_utils, utils
 from scipy.special import i0e
-
+import scipy.signal as signal
 
 class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
     """
@@ -50,19 +50,22 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         self.cs_kwargs = cs_kwargs.copy()
         # Assuming the user isn't evil and passing 'cs_kwargs' inside cs_kwargs
         self.__dict__.update(cs_kwargs)
-        nra = cs_kwargs.pop("nra", 500) #
-        ndec = cs_kwargs.pop("ndec", 500) #
+        nra = cs_kwargs.pop("nra", 5000) #
+        ndec = cs_kwargs.pop("ndec", 5000) #
         self.detnames = tuple(event_data.detector_names)
+        self.nsinc_interp = cs_kwargs.pop("nsinc_interp", 8) # 
         cs_kwargs["gps_time"] = cs_kwargs.get("gps_time", event_data.tgps)
-        cs_kwargs["dt_sinc"] = cs_kwargs.get("dt_sinc", cs.DEFAULT_DT)
+        cs_kwargs["dt_sinc"] = cs_kwargs.get("dt_sinc", cs.DEFAULT_DT)/self.nsinc_interp #
         cs_kwargs["nsamples_mupsi"] = cs_kwargs.get(
             "nsamples_mupsi", 10 * self.nsamples)
 
         self.cs_obj = cs.CoherentScore.from_new_samples(
             nra, ndec, self.detnames, **cs_kwargs)
         # From milisecond to seconds
-        self.dt = self.cs_obj.dt_sinc/1000
+        self.dt = ( self.cs_obj.dt_sinc/1000 )* self.nsinc_interp #
+        self.dt_fine = self.cs_obj.dt_sinc/1000 #
         self.timeshifts = np.arange(*t_rng, self.dt)
+        self.timeshifts_fine = self.timeshifts[0] + self.dt_fine * np.arange(len(self.timeshifts)*self.nsinc_interp)
 
         self.ref_pardict = \
             {'d_luminosity': self.dist_ref, 'iota': 0.0, 'phi_ref': 0.0}
@@ -126,8 +129,10 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         d_h = (self._d_h_weights * h_fbin.conj()).sum(axis=-1)
         h_h = (self._h_h_weights * h_fbin * h_fbin.conj()).real.sum(axis=-1)
         norm_h = np.sqrt(h_h)
-        
-        return d_h / norm_h / self.asd_drift, norm_h
+        timeseries_coarse = d_h / norm_h / self.asd_drift 
+        timeseries_fine = signal.resample(timeseries_coarse, num=len(self.timeshifts_fine), axis=0)
+        return timeseries_fine, norm_h
+        #return d_h / norm_h / self.asd_drift, norm_h
 
     def query_extrinsic_integrator(self, par_dic, **kwargs):
         """
@@ -176,7 +181,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
             if fixing and (tnstr in fixed_pars):
                 tnind = fixed_pars.index(tnstr)
                 tn = fixed_vals[tnind]
-                t_indices[ind_det] = np.searchsorted(self.timeshifts, tn)
+                t_indices[ind_det] = np.searchsorted(self.timeshifts_fine, tn) #
             else:
                 t_indices[ind_det] = np.argmax(
                     utils.abs_sq(z_timeseries[:, ind_det]))
@@ -184,7 +189,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         # Create a processedclist for the event
         event_phys = np.zeros((len(self.event_data.detector_names), 7))
         # Time, SNR^2, normfac, hole correction, ASD drift, Re(z), Im(z)
-        event_phys[:, 0] = self.timeshifts[t_indices]
+        event_phys[:, 0] = self.timeshifts_fine[t_indices] #
         event_phys[:, 1] = [utils.abs_sq(z_timeseries[tind, i])
                             for i, tind in enumerate(t_indices)]
         event_phys[:, 2] = norm_h
@@ -204,9 +209,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         z_timeseries_cs = []
         for i in range(len(self.event_data.detector_names)):
             t_mask = utils.abs_sq(z_timeseries[:, i]) > event_phys[i,1] - 20
-            z_timeseries_cs.append(np.c_[self.timeshifts[t_mask], z_timeseries[t_mask,i].real, z_timeseries[t_mask,i].imag])
-
-        globals()["debug"]=locals()
+            z_timeseries_cs.append(np.c_[self.timeshifts_fine[t_mask], z_timeseries[t_mask,i].real, z_timeseries[t_mask,i].imag]) #
         
         # Fix the number of samples
         nsamples = kwargs.get("nsamples", self.nsamples)
@@ -241,7 +244,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
             tdet = \
                 par_dic['t_geocenter'] + dt_det - self.par_dic_0['t_geocenter']
             zs[ind_det] = self.sinc_interpolation_bruteforce(
-                z_timeseries[:, ind_det], self.timeshifts, np.array([tdet]))[0]
+                z_timeseries[:, ind_det], self.timeshifts_fine, np.array([tdet]))[0]  #
             ts[ind_det] = norm_h[ind_det] / self.asd_drift[ind_det] * \
                 cs.gen_sample_amps_from_fplus_fcross(
                     *gw_utils.fplus_fcross_detector(
