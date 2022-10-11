@@ -65,19 +65,20 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         self.dt = ( self.cs_obj.dt_sinc/1000 )* self.nsinc_interp #
         self.dt_fine = self.cs_obj.dt_sinc/1000 #
         self.timeshifts = np.arange(*t_rng, self.dt)
-        self.timeshifts_fine = self.timeshifts[0] + self.dt_fine * np.arange(len(self.timeshifts)*self.nsinc_interp)
+        self.timeshifts_fine = self.timeshifts[0] + self.dt_fine * np.arange(
+            len(self.timeshifts) * self.nsinc_interp)
 
-        self.ref_pardict = \
-            {'d_luminosity': self.dist_ref, 'iota': 0.0, 'phi_ref': 0.0}
+        self.ref_pardict = {'d_luminosity': self.dist_ref,
+                            'iota': 0.0,
+                            'phi_ref': 0.0}
         
         super().__init__(event_data, waveform_generator, par_dic_0, fbin,
                          pn_phase_tol, spline_degree)
         
     @property
     def params(self):
-        return sorted(
-            set(self.waveform_generator._waveform_params) -
-            self.ref_pardict.keys())
+        return sorted(set(self.waveform_generator._waveform_params)
+                      - self.ref_pardict.keys())
 
     def _set_summary(self):
         """
@@ -130,7 +131,9 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         h_h = (self._h_h_weights * h_fbin * h_fbin.conj()).real.sum(axis=-1)
         norm_h = np.sqrt(h_h)
         timeseries_coarse = d_h / norm_h / self.asd_drift 
-        timeseries_fine = signal.resample(timeseries_coarse, num=len(self.timeshifts_fine), axis=0)
+        timeseries_fine = signal.resample(timeseries_coarse,
+                                          num=len(self.timeshifts_fine),
+                                          axis=0)
         return timeseries_fine, norm_h
         #return d_h / norm_h / self.asd_drift, norm_h
 
@@ -181,7 +184,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
             if fixing and (tnstr in fixed_pars):
                 tnind = fixed_pars.index(tnstr)
                 tn = fixed_vals[tnind]
-                t_indices[ind_det] = np.searchsorted(self.timeshifts_fine, tn) #
+                t_indices[ind_det] = np.searchsorted(self.timeshifts_fine, tn)
             else:
                 t_indices[ind_det] = np.argmax(
                     utils.abs_sq(z_timeseries[:, ind_det]))
@@ -209,7 +212,9 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         z_timeseries_cs = []
         for i in range(len(self.event_data.detector_names)):
             t_mask = utils.abs_sq(z_timeseries[:, i]) > event_phys[i,1] - 20
-            z_timeseries_cs.append(np.c_[self.timeshifts_fine[t_mask], z_timeseries[t_mask,i].real, z_timeseries[t_mask,i].imag]) #
+            z_timeseries_cs.append(np.c_[self.timeshifts_fine[t_mask],
+                                         z_timeseries[t_mask,i].real,
+                                         z_timeseries[t_mask,i].imag])
         
         # Fix the number of samples
         nsamples = kwargs.get("nsamples", self.nsamples)
@@ -244,7 +249,9 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
             tdet = \
                 par_dic['t_geocenter'] + dt_det - self.par_dic_0['t_geocenter']
             zs[ind_det] = self.sinc_interpolation_bruteforce(
-                z_timeseries[:, ind_det], self.timeshifts_fine, np.array([tdet]))[0]  #
+                z_timeseries[:, ind_det],
+                self.timeshifts_fine,
+                np.array([tdet]))[0]
             ts[ind_det] = norm_h[ind_det] / self.asd_drift[ind_det] * \
                 cs.gen_sample_amps_from_fplus_fcross(
                     *gw_utils.fplus_fcross_detector(
