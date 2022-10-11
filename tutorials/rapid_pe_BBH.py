@@ -1,6 +1,6 @@
-import sys
-import os, glob, time, corner
+import os
 os.environ["OMP_NUM_THREADS"] = "1"
+import sys, glob, time, corner
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt

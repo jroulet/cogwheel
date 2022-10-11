@@ -1,6 +1,6 @@
-import sys
-import os, glob, time, corner
+import os
 os.environ["OMP_NUM_THREADS"] = "1"
+import sys, glob, time, corner
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 sys.path.append('/data/tislam/works/KITP/final_repo/cogwheel/')
 import cogwheel
 from cogwheel import prior, gw_prior, posterior, utils, data, sampling, gw_plotting
-from cogwheel.gw_prior.intrinsic_prior import IntrinsicParametersPrior, IntrinsicTidalPrior
+from cogwheel.gw_prior.intrinsic_prior import IntrinsicParametersPrior
 from cogwheel.likelihood.marg_likelihood import MarginalizedRelativeBinningLikelihood
 import gwosc
 import subprocess
@@ -37,7 +37,7 @@ print('*\ntime taken upto downloading strain data : %.7f seconds'%(t2-t1))
 post = posterior.Posterior.from_event(event=event_data, 
                                       mchirp_guess=1.198,
                                       approximant='IMRPhenomD_NRTidalv2',
-                                      prior_class=IntrinsicTidalPrior, 
+                                      prior_class=IntrinsicParametersPrior, 
                                       likelihood_class=MarginalizedRelativeBinningLikelihood,
                                       prior_kwargs={'d_hat_max': 120, 'symmetrize_lnq': True},
                                       likelihood_kwargs={'nra': 5000, 'ndec': 5000, 'nsinc_interp': 8},
