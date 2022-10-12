@@ -9,11 +9,10 @@ functionality to accept timeseries of matched-filtering scores and compute
 the marginalized likelihoods, as well as information that is useful to
 sample from the full (unmarginalized) posterior.
 """
-from numba.typed import List
 import numpy as np
+from numba.typed import List
 from numba import float64, complex128
 from numba import njit, vectorize
-from numpy.random import choice
 from scipy.special import i0e, i1e
 from cogwheel import utils
 
@@ -157,10 +156,11 @@ def dt2key(dt, dt_sinc=DEFAULT_DT, dt_max=DEFAULT_DT_MAX):
     nbase = int(np.floor(dt_max / dt_sinc)) * 2
     exparr = nbase ** np.arange(dt.shape[0])
     ind_arr = np.zeros(dt.shape[1], dtype=np.int32)
-    for i0 in range(dt.shape[0]):
-        for i1 in range(dt.shape[1]):
-            ind_arr[i1] += \
-                int(np.floor(dt[i0, i1] / dt_sinc + 0.5)) % nbase * exparr[i0]
+    for i_det_pair in range(dt.shape[0]):
+        for i_sample in range(dt.shape[1]):
+            ind_arr[i_sample] += (
+                int(np.rint(dt[i_det_pair, i_sample] / dt_sinc)) % nbase
+                * exparr[i_det_pair])
     return ind_arr
 
 
@@ -297,7 +297,6 @@ def create_samples(
              responses=responses, deltats=deltats, dphases=dphases,
              rtot2s=rtot2s, psis=psis, mus=mus, gps_time=gps_time,
              dt_sinc=dt_sinc, dt_max=dt_max)
-    return
 
 
 # ############################ Useful functions ###############################
@@ -464,25 +463,22 @@ def marg_lk(zz, tt, gtype=1, nsamp=None):
     z2 = np.zeros(nsamp)
     t2_pow = np.zeros(nsamp)
     zthatthatz = np.zeros(nsamp)
-    
     UT2samples = np.zeros((2, nsamp), dtype=np.complex128)
-    
     for i in range(nsamp):
         ztbar = 0. + 0.j
         t2 = 0
-        
         for j in range(zz.shape[1]):
             z2[i] += zz[i, j].real**2 + zz[i, j].imag**2
             t2 += tt[i, j].real**2 + tt[i, j].imag**2
             ztbar += zz[i, j] * np.conj(tt[i, j])
-            
+
         zttz = ztbar.real**2 + ztbar.imag**2
         zthatthatz[i] = zttz / t2
         t2_pow[i] = t2 ** 1.5
 
         UT2samples[0, i] = ztbar
         UT2samples[1, i] = t2
-    
+
     logg = lgg(zthatthatz, gtype)
 
     lk = np.zeros(nsamp)
@@ -495,9 +491,11 @@ def marg_lk(zz, tt, gtype=1, nsamp=None):
 
 @njit
 def coherent_score_montecarlo_sky(
-        timeseries, offsets, nfacs, dt_dict_keys, dt_dict_items, responses,
-        t3norm, musamps=None, psisamps=None, c2psisamps=None, s2psisamps=None, gtype=1, dt_sinc=DEFAULT_DT,
-        dt_max=DEFAULT_DT_MAX, nsamples=10000, fixed_pars=None, fixed_vals=None):
+        timeseries, offsets, nfacs, dt_dict_keys, dt_dict_items,
+        responses, t3norm, musamps=None, psisamps=None, c2psisamps=None,
+        s2psisamps=None, gtype=1, dt_sinc=DEFAULT_DT,
+        dt_max=DEFAULT_DT_MAX, nsamples=10000, fixed_pars=None,
+        fixed_vals=None):
     """
     Evaluates the coherent score integral by montecarlo sampling all
     relevant variables
@@ -565,7 +563,7 @@ def coherent_score_montecarlo_sky(
         psisamps = np.random.uniform(0, 2 * np.pi, size=nsamples)
         c2psisamps = np.cos(2*psisamps)
         s2psisamps = np.sin(2*psisamps)
-        
+
     # Pick samples of data points in each detector
     # -----------------------------------------------------------------------
     # Normalization factor for monte-carlo over times in the detectors
@@ -575,7 +573,7 @@ def coherent_score_montecarlo_sky(
     # Samples picked according to e^{\rho^2}/2
     tz_samples = np.zeros((ndet, 3, nsamples))
     z2max_samples = np.zeros(ndet)
-    
+
     # Go over each detector
     for ind_d in range(ndet):
         pclist_d = timeseries[ind_d]
@@ -622,15 +620,15 @@ def coherent_score_montecarlo_sky(
     zzs = np.zeros((nsamples, ndet), dtype=np.complex128)
     tts = np.zeros((nsamples, ndet), dtype=np.complex128)
     fskys = np.zeros(nsamples, dtype=np.int32)
-    
+
     samples = np.zeros((nsamples, 6))
-    
+
     dt_dict_key_inds = np.searchsorted(dt_dict_keys, keys)
-    
+
     indx_offset_mu = np.random.randint(len(musamps))
     indx_offset_psi = np.random.randint(len(psisamps))
     indx_offset_ra = np.random.randint(10**7)
-    
+
     for ind_s in range(nsamples):
         dt_dict_key_ind = dt_dict_key_inds[ind_s]
         key = keys[ind_s]
@@ -667,12 +665,12 @@ def coherent_score_montecarlo_sky(
             psi = psisamps[psi_indx]
             c2psi = c2psisamps[psi_indx]
             s2psi = s2psisamps[psi_indx]
-            
+
             samples[nsamp_phys, 0] = mu
             samples[nsamp_phys, 1] = psi
             samples[nsamp_phys, 2] = ra_ind
             samples[nsamp_phys, 3] = dec_ind
-            
+
             # Time entry
             # Zero for the first detector, 0 for time
             samples[nsamp_phys, 5] = tz_samples[0, 0, ind_s]
@@ -707,12 +705,11 @@ def coherent_score_montecarlo_sky(
         samples[:, 4] *= wfac
         score = 2. * np.log(s) + np.sum(z2max_samples)
         return score, samples, UT2samples
-    else:
-        return float(-10**5), samples, np.zeros((2, 0), dtype=np.complex128)
+    return -1e5, samples, np.zeros((2, 0), dtype=np.complex128)
 
 
 # ###############################################################################
-class CoherentScore(object):
+class CoherentScore:
     def __init__(
             self, samples_fname=None, detnames=None, norm_angles=False, run='O2',
             empty_init=False):
@@ -730,7 +727,8 @@ class CoherentScore(object):
         """
         if empty_init:
             return
-        elif samples_fname is None:
+
+        if samples_fname is None:
             raise ValueError("Need to know where to source samples from.")
 
         # Read the contents of the sample file
@@ -757,7 +755,7 @@ class CoherentScore(object):
         self.dt_dict_items = List()
         for key in self.dt_dict_keys:
             self.dt_dict_items.append(dt_dict[key])
-        
+
         # n_ra x n_dec x n_detectors x 2 array with f_+/x for phi = 0
         self.responses = npzfile['responses']
         # Convenience for later
@@ -818,8 +816,6 @@ class CoherentScore(object):
             self.rezpos = 5
             self.imzpos = 6
             self.c0_pos = 7
-
-        return
 
     @classmethod
     def from_new_samples(
@@ -941,8 +937,6 @@ class CoherentScore(object):
                  rtot2s=self.rtot2s, psis=self.psis, mus=self.mus,
                  gps_time=self.gps, dt_sinc=self.dt_sinc, dt_max=self.dt_max)
 
-        return
-
     def gen_t3_norm(self, nsamples=10 ** 6, verbose=False):
         if verbose:
             print('Old T3norm', self.T3norm)
@@ -965,16 +959,15 @@ class CoherentScore(object):
         if verbose:
             print('New T3norm', self.T3norm)
 
-        return
-
     def dt_dict(self, keyval):
         """Convenience function to simulate a dictionary"""
         ind = np.searchsorted(self.dt_dict_keys, keyval)
-        if ((ind < len(self.dt_dict_keys)) and
+
+        if not ((ind < len(self.dt_dict_keys)) and
                 (self.dt_dict_keys[ind] == keyval)):
-            return self.dt_dict_items[ind]
-        else:
-            raise KeyError(f"invalid key {keyval}")
+            raise KeyError(f"Invalid key {keyval}")
+
+        return self.dt_dict_items[ind]
 
     def get_all_prior_terms_with_samp(
             self, events, timeseries, ref_normfac=1,
@@ -1015,7 +1008,7 @@ class CoherentScore(object):
             events = events[None, :]
             squeeze = True
 
-        if any([type(x) == np.ndarray and x.ndim == 2 for x in timeseries]):
+        if any(isinstance(x, np.ndarray) and x.ndim == 2 for x in timeseries):
             # We're dealing with a single event and the user wants to omit
             # n_events
             timeseries = [timeseries]
@@ -1048,8 +1041,8 @@ class CoherentScore(object):
 
         if squeeze and len(events) == 1:
             return prior_terms[0], params[0], samples_all[0], UT2samples_all[0]
-        else:
-            return prior_terms, params, samples_all,  UT2samples_all
+
+        return prior_terms, params, samples_all,  UT2samples_all
 
     def comblist2cs(
             self, timeseries, offsets, nfacs, gtype=1, nsamples=10000,
@@ -1092,8 +1085,8 @@ class CoherentScore(object):
         if any([len(x) == 0 for x in timeseries]):
             return -100000, np.zeros((nsamples, 6)), \
                 np.zeros((2, 0), dtype=np.complex128)
-        
-        
+
+
         return coherent_score_montecarlo_sky(
             timeseries, offsets, nfacs, self.dt_dict_keys, self.dt_dict_items,
             self.responses, self.T3norm, musamps=self.mus, psisamps=self.psis,
@@ -1148,6 +1141,3 @@ class CoherentScore(object):
             n_effs = ns / asd_corrs ** 2
 
         return np.stack((ts_out, rezs, imzs, n_effs), axis=2)
-
-
-pass

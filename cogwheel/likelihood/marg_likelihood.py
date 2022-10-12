@@ -1,10 +1,12 @@
 """Compute likelihood of GW events."""
 import numpy as np
+
+from scipy.special import i0e
+import scipy.signal
+
+from cogwheel import gw_utils, utils
 from . import RelativeBinningLikelihood
 from . import extrinsic_integration as cs
-from cogwheel import gw_utils, utils
-from scipy.special import i0e
-import scipy.signal as signal
 
 class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
     """
@@ -12,14 +14,12 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
     marginalized likelihood (over extrinsic parameters: inclination,
     polarization, ra, dec, time, distance, phase) with the relative binning
     method. Only applicable to non-precessing waveform models with (2, 2) only
-    
+
     It integrates cogwheel and the extrinsic_integration routine.
     Intrinsic parameters (m1, m2, s1z, s2z) are sampled using cogwheel.
-    Extrinsic parameters (ra,dec,mu,psi,inclination,time) are sampled using
+    Extrinsic parameters (ra, dec, mu, psi, inclination, time) are sampled using
     the extrinsic_integration routine.
-    Distance and Phase are sampled using analytical distribution functions.
-
-    Warning: Assumes detector_names is not something like 'H1L1'
+    Distance and phase are sampled using analytical distribution functions.
     """
     def __init__(self, event_data, waveform_generator, par_dic_0, fbin=None,
                  pn_phase_tol=None, spline_degree=3,
@@ -50,12 +50,13 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         self.cs_kwargs = cs_kwargs.copy()
         # Assuming the user isn't evil and passing 'cs_kwargs' inside cs_kwargs
         self.__dict__.update(cs_kwargs)
-        nra = cs_kwargs.pop("nra", 5000) #
-        ndec = cs_kwargs.pop("ndec", 5000) #
+        nra = cs_kwargs.pop("nra", 5000)
+        ndec = cs_kwargs.pop("ndec", 5000)
         self.detnames = tuple(event_data.detector_names)
-        self.nsinc_interp = cs_kwargs.pop("nsinc_interp", 8) # 
+        self.nsinc_interp = cs_kwargs.pop("nsinc_interp", 8)
         cs_kwargs["gps_time"] = cs_kwargs.get("gps_time", event_data.tgps)
-        cs_kwargs["dt_sinc"] = cs_kwargs.get("dt_sinc", cs.DEFAULT_DT)/self.nsinc_interp #
+        cs_kwargs["dt_sinc"] = (cs_kwargs.get("dt_sinc", cs.DEFAULT_DT)
+                                / self.nsinc_interp)
         cs_kwargs["nsamples_mupsi"] = cs_kwargs.get(
             "nsamples_mupsi", 10 * self.nsamples)
 
@@ -71,10 +72,10 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         self.ref_pardict = {'d_luminosity': self.dist_ref,
                             'iota': 0.0,
                             'phi_ref': 0.0}
-        
+
         super().__init__(event_data, waveform_generator, par_dic_0, fbin,
                          pn_phase_tol, spline_degree)
-        
+
     @property
     def params(self):
         return sorted(set(self.waveform_generator._waveform_params)
@@ -116,8 +117,6 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         self.asd_drift = self.compute_asd_drift(self.par_dic_0)
         self._lnl_0 = self.lnlike(self.par_dic_0, bypass_tests=True)
 
-        self.timestamps = NotImplemented  # TODO
-
     def get_z_timeseries(self, par_dic):
         """
         Return (d|h)/sqrt(h|h) timeseries with asd_drift correction
@@ -125,17 +124,16 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         """
         h_fbin, _ = self.waveform_generator.get_hplus_hcross(
             self.fbin, par_dic | self.ref_pardict)
-        
+
         # Sum over f axis, leave time and det axes unsummed.
         d_h = (self._d_h_weights * h_fbin.conj()).sum(axis=-1)
         h_h = (self._h_h_weights * h_fbin * h_fbin.conj()).real.sum(axis=-1)
         norm_h = np.sqrt(h_h)
-        timeseries_coarse = d_h / norm_h / self.asd_drift 
-        timeseries_fine = signal.resample(timeseries_coarse,
-                                          num=len(self.timeshifts_fine),
-                                          axis=0)
+        timeseries_coarse = d_h / norm_h / self.asd_drift
+        timeseries_fine = scipy.signal.resample(
+            timeseries_coarse, num=len(self.timeshifts_fine), axis=0)
+
         return timeseries_fine, norm_h
-        #return d_h / norm_h / self.asd_drift, norm_h
 
     def query_extrinsic_integrator(self, par_dic, **kwargs):
         """
@@ -203,19 +201,14 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         event_phys[:, 6] = [np.imag(z_timeseries[tind, i])
                             for i, tind in enumerate(t_indices)]
 
-#         z_timeseries_cs = np.zeros(
-#             (len(self.event_data.detector_names), len(self.timeshifts), 3))
-#         z_timeseries_cs[:, :, 0] = self.timeshifts[:]
-#         z_timeseries_cs[:, :, 1] = np.transpose(z_timeseries.real)
-#         z_timeseries_cs[:, :, 2] = np.transpose(z_timeseries.imag)
-
         z_timeseries_cs = []
-        for i in range(len(self.event_data.detector_names)):
-            t_mask = utils.abs_sq(z_timeseries[:, i]) > event_phys[i,1] - 20
+        for i_det in range(len(self.event_data.detector_names)):
+            t_mask = (utils.abs_sq(z_timeseries[:, i_det])
+                      > event_phys[i_det, 1] - 20)
             z_timeseries_cs.append(np.c_[self.timeshifts_fine[t_mask],
-                                         z_timeseries[t_mask,i].real,
-                                         z_timeseries[t_mask,i].imag])
-        
+                                         z_timeseries[t_mask, i_det].real,
+                                         z_timeseries[t_mask, i_det].imag])
+
         # Fix the number of samples
         nsamples = kwargs.get("nsamples", self.nsamples)
         prior_terms, _, samples, UT2samples = \
@@ -237,8 +230,10 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
 
     def lnlike_no_marginalization_from_timeseries(
             self, z_timeseries, norm_h, par_dic):
-        """Note that par_dic is larger than the one for lnlike as it contains
-        all parameters in self.waveform_generator.params"""
+        """
+        Note that par_dic is larger than the one for lnlike as it contains
+        all parameters in self.waveform_generator.params
+        """
         # Find the times in each detector to pick from the timeseries, and
         # compute the z at that time, as well as the predicted z
         zs = np.zeros(len(self.detnames), dtype=np.complex128)
@@ -274,7 +269,8 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         return lnl
 
     def lnlike_no_marginalization(self, par_dic):
-        """Note that par_dic is larger than the one for lnlike as it contains
+        """
+        Note that par_dic is larger than the one for lnlike as it contains
         all parameters in self.waveform_generator.params
         """
         # 1) get z timeseries: (time x det)
@@ -286,7 +282,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
 
     def lnlike_detectors_no_asd_drift(self, par_dic):
         raise NotImplementedError(
-            "MarginalizedRelativeBinningLikelihood only works with " +
+            "MarginalizedRelativeBinningLikelihood only works with "
             "network-level likelihoods")
 
     def postprocess_samples(
@@ -331,7 +327,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
             samples[pname] = np.zeros(len(samples))
 
         for ind, pvals in enumerate(zip(*[samples[p] for p in self.params])):
-            par_dic = {key: val for key, val in zip(self.params, pvals)}
+            par_dic = dict(zip(self.params, pvals))
             ext_pars = self.generate_extrinsic_params_from_cs(
                 par_dic, accurate_lnl=accurate_lnl, **kwargs)
             samples.loc[ind, cols_to_add] = ext_pars
@@ -351,7 +347,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         # Call the extrinsic integrator routine
         coherent_score, samples, UT2samples, z_timeseries, norm_h = \
             self.query_extrinsic_integrator(par_dic, **kwargs)
-        
+
         # Define weights and pick from the samples with these weights
         cweights = np.cumsum(samples[:, 4])
         cweights /= cweights[-1]
@@ -395,7 +391,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
             # Note that this has discreteness errors compared to full cogwheel
             Y_pick = (self.dist_ref / d_luminosity) * np.exp(2 * 1j * phi_ref)
             lnl = (np.abs(U) ** 2 / T2 - T2 * np.abs(Y_pick - U / T2) ** 2) / 2
-        
+
         return iota, psi, ra, dec, d_luminosity, phi_ref, t_geocenter, lnl
 
     def get_distance_phase_point_for_given_U_T2(self, U, T2):
@@ -432,8 +428,8 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         # Add it to the central value of the phase
         # (np.random.random()>0.5)*np.pi to take care of the pi degeneracy
         # of the 22 mode
-        phi_pick = \
-            (v_pick + mean + (np.random.random() > 0.5) * np.pi) % (2 * np.pi)
+        phi_pick = (v_pick + mean + (np.random.random() > 0.5) * np.pi
+                   ) % (2 * np.pi)
 
         return dist_pick, phi_pick
 
@@ -445,7 +441,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         u_pr is 1/dist
         """
         exponent = - 0.5 * T2 * (u_pr - u_abs / T2) ** 2
-        return (1. / u_pr ** 4) * np.exp(exponent) * i0e(u_pr * u_abs)
+        return 1 / u_pr**4 * np.exp(exponent) * i0e(u_pr * u_abs)
 
     @staticmethod
     def posterior_func_for_phase(v_pr, u_abs, y):
