@@ -14,7 +14,8 @@ from numba.typed import List
 from numba import float64, complex128
 from numba import njit, vectorize
 from scipy.special import i0e, i1e
-from cogwheel import utils
+from cogwheel import utils, gw_utils, skyloc_angles
+import scipy.signal
 
 import lal
 # create Detector dictionary
@@ -48,7 +49,7 @@ DETMAP = {'H1': lal.LALDetectorIndexLHODIFF,
 # Loose upper bound to travel time between any detectors in ms
 DEFAULT_DT_MAX = 62.5
 # Spacing of samples in ms
-DEFAULT_DT = 1000/4096
+DEFAULT_DT = (1000/4096)/8
 # Least count of timeslides in ms
 DEFAULT_TIMESLIDE_JUMP = 100
 
@@ -95,6 +96,50 @@ LG_FAST_YP = np.asarray(
 
 
 # ############## Functions to create library of saved samples #################
+def get_geocenter_delays(detector_names, lat, lon):
+    """
+    Return array of shape (n_detectors, ...) time delays from geocenter [s].
+    Vectorized over lat, lon.
+    """
+    locations = np.array([gw_utils.DETECTORS[detector_name].location
+                          for detector_name in detector_names])  # (ndet, 3)
+
+    direction = skyloc_angles.latlon_to_cart3d(lat, lon)
+    return -np.einsum('di,i...->d...', locations, direction) / lal.C_SI
+
+
+def get_fplus_fcross_0(detector_names, lat, lon):
+    """
+    Return array with antenna response functions fplus, fcross with
+    polarization psi=0.
+    Vectorized over lat, lon. Return shape is (..., n_det, 2)
+    where `...` is the shape of broadcasting (lat, lon).
+    """
+    responses = np.array([gw_utils.DETECTORS[detector_name].response
+                          for detector_name in detector_names]
+                        )  # (n_det, 3, 3)
+
+    lat, lon = np.broadcast_arrays(lat, lon)
+    coslon = np.cos(lon)
+    sinlon = np.sin(lon)
+    coslat = np.cos(lat)
+    sinlat = np.sin(lat)
+
+    x = np.array([sinlon, -coslon, np.zeros_like(sinlon)])  # (3, ...)
+    dx = np.einsum('dij,j...->di...', responses, x)  # (n_det, 3, ...)
+
+    y = np.array([-coslon * sinlat,
+                  -sinlon * sinlat,
+                  coslat])  # (3, ...)
+    dy = np.einsum('dij,j...->di...', responses, y)
+    
+    fplus0 = (np.einsum('i...,di...->d...', x, dx)
+              - np.einsum('i...,di...->d...', y, dy))
+    fcross0 = (np.einsum('i...,di...->d...', x, dy)
+               + np.einsum('i...,di...->d...', y, dx))
+
+    return np.moveaxis([fplus0, fcross0], (0, 1), (-1, -2))
+
 def delays(ra, dec, detectors, gps_time):
     """
     Computes delays in arrival times between detectors, referred to the first
@@ -165,16 +210,14 @@ def dt2key(dt, dt_sinc=DEFAULT_DT, dt_max=DEFAULT_DT_MAX):
 
 
 def create_time_dict(
-        nra, ndec, detectors, gps_time=1136574828.0, dt_sinc=DEFAULT_DT,
+        nlon, nlat, detector_names, dt_sinc=DEFAULT_DT,
         dt_max=DEFAULT_DT_MAX):
     """
     Creates dictionary indexed by time, giving RA-Dec pairs for montecarlo
     integration
-    :param nra: number of ra points in grid
-    :param ndec: number of declinations in grid
-    :param detectors:
-        List of detectors, each with a location and response as given by LAL
-    :param gps_time: Reference GPS time to generate the dictionary for
+    :param nlon: number of longitude points in grid
+    :param nlat: number of lattitude in grid
+    :param detector_names: detector names
     :param dt_sinc:
         Size of the time binning used in ms; it must coincide with the time
         separation of samples in the overlap if this dictionary will be used
@@ -190,61 +233,34 @@ def create_time_dict(
         5. n_ra x n_dec x (n_detector - 1) array with delta phis
         6. n_ra x n_dec array with network sensitivity (sum_{det, pol} resp^2)
     """
-    ra_grid = np.linspace(0, 2.0 * np.pi, nra, endpoint=False)
+    lon_grid = np.linspace(0, 2.0 * np.pi, nlon, endpoint=False)
     # Declination minus the poles
-    sin_dec_grid = np.linspace(-1.0, 1.0, ndec + 1, endpoint=False)
+    sin_dec_grid = np.linspace(-1.0, 1.0, nlat + 1, endpoint=False)
     sin_dec_grid = sin_dec_grid[1:]
-    dec_grid = np.arcsin(sin_dec_grid)
+    lat_grid = np.arcsin(sin_dec_grid)
 
     # Greenwich mean sidereal time corresponding to the given GPS time
-    gmst = lal.GreenwichMeanSiderealTime(gps_time)
-
-    # Compute grids of response and phase difference for debugging
-    # deltats contains time difference in milliseconds
-    # We compute the other variables only for checking purposes
-    deltats = []
-    dphases = []
-    responses = []
-    rtot2s = []
-    for ra in ra_grid:
-        # Delays, phase differences, vector responses, scalar responses
-        arrs_ra = [[], [], [], []]
-        for dec in dec_grid:
-            # Time delays in milliseconds
-            deltat = 1000 * delays(ra, dec, detectors, gps_time)
-            # Detector responses for phi = zero
-            fs = [lal.ComputeDetAMResponse(det.response, ra, dec, 0, gmst)
-                  for det in detectors]
-            # Phases
-            phis = np.asarray([np.arctan2(f[1], f[0]) for f in fs])
-            # Phase differences w.r.t the first detector (e.g., H1 for H1, L1)
-            dphis = (phis[1:] - phis[0]) % (2 * np.pi)
-            # Network responses
-            xrs = [np.linalg.norm(f) for f in fs]
-            xrtot2 = sum(xr ** 2 for xr in xrs)
-            arrs_ra[0].append(deltat)
-            arrs_ra[1].append(dphis)
-            arrs_ra[2].append(fs)
-            arrs_ra[3].append(xrtot2)
-
-        deltats.append(arrs_ra[0])
-        dphases.append(arrs_ra[1])
-        responses.append(arrs_ra[2])
-        rtot2s.append(arrs_ra[3])
-
-    # Define return values for debugging
-    # n_ra x n_dec x (n_det - 1)
-    deltats = np.asarray(deltats)
-    dphases = np.asarray(dphases)
-    # n_ra x n_dec x n_det x 2
-    responses = np.asarray(responses)
-    # n_ra x n_dec
-    rtot2s = np.asarray(rtot2s)
-
+    gmst = 0.0
+    
+    lon_grid_2d, lat_grid_2d = np.meshgrid(lon_grid, lat_grid, indexing='ij') # n_ra x n_dec
+    # returns n_det x n_ra x n_dec
+    # later change ra_grid to lon_grid
+    delays_from_geocen = get_geocenter_delays(detector_names, lon_grid_2d, lat_grid_2d)
+    # Time delays in milliseconds :  n_ra x n_dec x (n_det-1)
+    deltats = np.moveaxis(1000 * (delays_from_geocen[1:,...] - delays_from_geocen[0,...]), 0, -1)
+    # Detector responses for psi = zero : n_ra x n_dec x n_det x 2
+    responses = get_fplus_fcross_0(detector_names, lon_grid_2d, lat_grid_2d)
+    # Phases : n_ra x n_dec x n_det
+    phis = np.arctan2(responses[...,1], responses[...,0])
+    # Phase differences w.r.t the first detector (e.g., H1 for H1, L1) : n_ra x n_dec x (n_det-1)
+    dphases = (phis[...,1:] - phis[...,(0,)]) % (2 * np.pi)
+    # Network responses
+    rtot2s = responses[...,1]**2 + responses[...,0]**2
+    
     # Make `contour maps' of delta t, with entries = index of ra, index of dec
     dt_dict = {}
-    for i in range(len(ra_grid)):
-        for j in range(len(dec_grid)):
+    for i in range(len(lon_grid)):
+        for j in range(len(lat_grid)):
             key = dt2key(deltats[i, j][:, None], dt_sinc=dt_sinc, dt_max=dt_max)[0]
             if key in dt_dict:
                 dt_dict[key].append((i, j))
@@ -255,49 +271,7 @@ def create_time_dict(
     for key in dt_dict.keys():
         dt_dict[key] = np.asarray(dt_dict[key], dtype=np.int32)
 
-    return dt_dict, ra_grid, dec_grid, responses, deltats, dphases, rtot2s
-
-
-def create_samples(
-        fname, nra=100, ndec=100, detnames=('H1', 'L1'), gps_time=1136574828.0,
-        dt_sinc=DEFAULT_DT, dt_max=DEFAULT_DT_MAX, nsamples_mupsi=100000):
-    """
-    Create samples and save to file
-    :param fname:
-        Name of archive file to create, it will be updated with the detector
-        names, the sampling rate, and GPS time
-    :param nra: Number of right ascensions
-    :param ndec: Number of declinations
-    :param detnames: Names of detectors for the structure
-    :param gps_time:
-        Fiducial GPS time for mapping between the RA-DEC and time delays
-        (arbitrary for typical usage)
-    :param dt_sinc: Time resolution for marginalization
-    :param dt_max: Rough upper bound on the individual delays
-    :param nsamples_mupsi:
-        Number of random samples of the inclination and the polarization
-    :return:
-    """
-    # Create detectors
-    detectors = [lal.CachedDetectors[DETMAP[det]] for det in detnames]
-    # Create structures to deal with the mapping of the sphere to delays
-    dt_dict, ra_grid, dec_grid, responses, deltats, dphases, rtot2s = \
-        create_time_dict(
-            nra, ndec, detectors, gps_time=gps_time, dt_sinc=dt_sinc,
-            dt_max=dt_max)
-    # Create random samples of the cosine of the inclination, and the
-    # polarization
-    psis = np.random.uniform(0, 2 * np.pi, size=nsamples_mupsi)
-    mus = np.random.uniform(-1, 1, size=nsamples_mupsi)  # cos(inclination)
-
-    filename = utils.rm_suffix(fname, suffix='.npz', new_suffix="_") + \
-        "_".join(detnames) + f"_{int(1000/dt_sinc)}" + f"_{int(gps_time)}.npz"
-    np.savez(filename,
-             dt_dict=dt_dict, ra_grid=ra_grid, dec_grid=dec_grid,
-             responses=responses, deltats=deltats, dphases=dphases,
-             rtot2s=rtot2s, psis=psis, mus=mus, gps_time=gps_time,
-             dt_sinc=dt_sinc, dt_max=dt_max)
-
+    return dt_dict, lon_grid, lat_grid, responses, deltats, dphases, rtot2s
 
 # ############################ Useful functions ###############################
 @vectorize(nopython=True)
@@ -331,27 +305,6 @@ def incoherent_score(triggers):
     """
     return np.sum(triggers[..., 1], axis=-1)
 
-
-# ############################ Compiled functions #############################
-# @vectorize([complex128(float64, float64, float64, float64)], nopython=True)
-# def gen_sample_amps_from_fplus_fcross(fplus, fcross, mu, psi):
-#     """
-#     :param fplus: Response to the plus polarization for psi = 0
-#     :param fcross: Response to the cross polarization for psi = 0
-#     :param mu: Inclination
-#     :param psi: Polarization angle
-#     :returns A_p + 1j * A_c
-#     ## Note that this seems to have the wrong convention for mu
-#     """
-#     twopsi = 2. * psi
-#     c2psi = np.cos(twopsi)
-#     s2psi = np.sin(twopsi)
-#     fp = c2psi * fplus + s2psi * fcross
-#     fc = -s2psi * fplus + c2psi * fcross
-#     # Strain amplitude at the detector
-#     ap = fp * (1. + mu ** 2) / 2.
-#     ac = -fc * mu
-#     return ap + 1j * ac
 
 @vectorize([complex128(float64, float64, float64, float64, float64)], nopython=True)
 def gen_sample_amps_from_fplus_fcross(fplus, fcross, mu, c2psi, s2psi):
@@ -739,12 +692,10 @@ class CoherentScore:
         self.dt_sinc = float(npzfile['dt_sinc'])
         # Upper bound on the delays in ms
         self.dt_max = float(npzfile['dt_max'])
-        # The epoch at which the delays were generated
-        self.gps = float(npzfile['gps_time'])
 
         # Arrays of RA and dec
-        self.ra_grid = npzfile['ra_grid']
-        self.dec_grid = npzfile['dec_grid']
+        self.lon_grid = npzfile['lon_grid']
+        self.lat_grid = npzfile['lat_grid']
 
         # Dictionary indexed by keys for delta_ts, containing
         # n_skypos x 2 arrays with indices into ra_grid and dec_grid
@@ -819,14 +770,14 @@ class CoherentScore:
 
     @classmethod
     def from_new_samples(
-            cls, nra, ndec, detnames, gps_time=1136574828.0,
+            cls, nlon, nlat, detnames,
             dt_sinc=DEFAULT_DT, dt_max=DEFAULT_DT_MAX, nsamples_mupsi=100000,
             run="O2"):
         """
         Function to create a new class instance with a dictionary from scratch
         :param nra: Number of points in the RA direction
         :param ndec: Number of points in the Dec direction
-        :param detnames: Tuple/list of detector names (e.g., ('H1', 'L1'))
+        :param detnames: iterable to detector names
         :param gps_time:
         :param dt_sinc: Time resolution of samples in ms for the dictionary
         :param dt_max: Maximum delay between detectors in ms
@@ -835,31 +786,29 @@ class CoherentScore:
         :param run:
         :return: Instance of CoherentScoreMZ
         """
-        # Create detectors
-        detectors = [lal.CachedDetectors[DETMAP[det]] for det in detnames]
-
+        
+        
         # Create structures to deal with the mapping of the sphere to delays
-        dt_dict, ra_grid, dec_grid, responses, deltats, dphases, rtot2s = \
+        dt_dict, lon_grid, lat_grid, responses, deltats, dphases, rtot2s = \
             create_time_dict(
-                nra, ndec, detectors, gps_time=gps_time, dt_sinc=dt_sinc,
+                nlon, nlat, detnames, dt_sinc=dt_sinc,
                 dt_max=dt_max)
 
         # Create random samples of the cosine of the inclination, and the
         # polarization
         psis = np.random.uniform(0, 2 * np.pi, size=nsamples_mupsi)
         mus = np.random.uniform(-1, 1, size=nsamples_mupsi)  # cos(inclination)
-
+        
         # Create an empty instance and read in the parameters
         instance = cls(empty_init=True)
 
         # Set parameters
         instance.dt_sinc = dt_sinc  # Time resolution of dictionary in ms
         instance.dt_max = dt_max  # Upper bound on the delays in ms
-        instance.gps = gps_time  # The epoch at which the delays were generated
 
         # Arrays of RA and DEC
-        instance.ra_grid = ra_grid
-        instance.dec_grid = dec_grid
+        instance.lon_grid = lon_grid
+        instance.lat_grid = lat_grid
 
         # Dictionary indexed by keys for delta_ts, containing
         # n_skypos x 2 arrays with indices into ra_grid and dec_grid
@@ -944,11 +893,11 @@ class CoherentScore:
         psis = np.random.choice(self.psis, size=nsamples, replace=True)
         c2psis = np.cos(2*psis)
         s2psis = np.sin(2*psis)
-        ra_inds = np.random.randint(0, len(self.ra_grid), size=nsamples)
-        dec_inds = np.random.randint(0, len(self.dec_grid), size=nsamples)
+        lon_inds = np.random.randint(0, len(self.lon_grid), size=nsamples)
+        lat_inds = np.random.randint(0, len(self.lat_grid), size=nsamples)
         t_list = np.zeros(nsamples)
         for det_ind in range(self.ndet):
-            responses = self.responses[ra_inds, dec_inds, det_ind, :]
+            responses = self.responses[lon_inds, lat_inds, det_ind, :]
             fplus = responses[:, 0]
             fcross = responses[:, 1]
             #fplus, fcross = self.responses[ra_inds, dec_inds, det_ind, :]
@@ -970,79 +919,55 @@ class CoherentScore:
         return self.dt_dict_items[ind]
 
     def get_all_prior_terms_with_samp(
-            self, events, timeseries, ref_normfac=1,
+            self, events, timeshifts, timeseries, ref_normfac=1,
             time_slide_jump=DEFAULT_TIMESLIDE_JUMP/1000, **score_kwargs):
         """
         :param events:
-            (n_events x (n_det=2) x processedclist)/((n_det=2) x processedclist)
+            n_detector x processedclist
             array with coincidence/background candidates (peaks of the
-            timeseries, can be 2D if n_events=1)
-        :param timeseries: List of lists/tuples of length n_detectors
-            with n_samp x 3 array with t, Re(z), Im(z)
-            (can be single list/tuple if n_events=1)
+            timeseries)
+        :param timeshifts: Array of times for timeseries
+        :param timeseries: 2D array of shape n_len(timeshifts) x n_detector 
+                    array with z
         :param ref_normfac: Reference normfac to scale the values relative to
         :param time_slide_jump: The least count of input time slides (s)
         :param score_kwargs: Extra arguments to comblist2cs
         :return:
-            1. n_events x 2 array with
-               2xlog(coherent score), 2xlog(coherent score) - \rho^2 per event
-            2. n_events x n_detector x 4 array with
-               shifted_ts, re(z), im(z), effective_sensitivity for each
-               candidate (peak of the timeseries)
-            3. List of length n_events with n_samples x 6 array for each event
-            3. List of length n_events with
+            1. 2xlog(coherent score)
+            2. Array n_samples x 6 array for each event
+            3. Array
                2 x nsamples complex array of Z \bar{T}, and \bar{T} T
                (implicit summation over detectors), useful for reconstructing the
                distance and phase samples
-            If events are 2D (n_events=1 indicated this way), then the n_events
-            part is omitted in the output
         """
         if utils.checkempty(timeseries):
             raise ValueError(
                 "Need input timeseries to compute the coherent score")
 
-        squeeze = False
-        if events.ndim == 2:
-            # We're dealing with a single event and the user wants to omit
-            # n_events
-            events = events[None, :]
-            squeeze = True
-
-        if any(isinstance(x, np.ndarray) and x.ndim == 2 for x in timeseries):
-            # We're dealing with a single event and the user wants to omit
-            # n_events
-            timeseries = [timeseries]
-            squeeze = True
-
-        # n_events x n_detector x 4
-        params = self.get_params(events, time_slide_jump=time_slide_jump)
+        # n_detector x 4
+        params = self.get_params(events, time_slide_jump=time_slide_jump)[0] #TODO
 
         # Some useful parameters
         rhosq = incoherent_score(events)
-        offsets = params[:, 1:, 0] - events[:, 1:, 0]
-        nfacs = params[:, :, 3] / ref_normfac
+        offsets = params[1:, 0] - events[1:, 0]
+        nfacs = params[:, 3] / ref_normfac
 
-        prior_terms = np.zeros((len(events), 2))
-        samples_all = []
-        UT2samples_all = []
-        for ind in range(len(events)):
-            timeseries_ev = timeseries[ind]
+        f_sampling = 1000/(self.dt_sinc) # ms to s
+        if (fs_ratio := f_sampling * (timeshifts[1]-timeshifts[0])) != 1:
+            timeseries, timeshifts = scipy.signal.resample(
+                timeseries, int(len(timeshifts) * fs_ratio), timeshifts, axis=0)
+        if not np.isclose(1/f_sampling, timeshifts[1] - timeshifts[0]):
+            raise ValueError('`timeshifts` is incommensurate with `f_sampling`.') 
 
-            if not isinstance(timeseries_ev, tuple):
-                timeseries_ev = tuple(timeseries_ev)
-
-            prior_terms[ind, 0], samples, UT2samples = self.comblist2cs(
-                timeseries_ev, offsets[ind], nfacs[ind], **score_kwargs)
-            samples_all.append(samples)
-            UT2samples_all.append(UT2samples)
-            # Extra term to remove the Gaussian part before adding the
-            # rank function
-            prior_terms[ind, 1] = - rhosq[ind]
-
-        if squeeze and len(events) == 1:
-            return prior_terms[0], params[0], samples_all[0], UT2samples_all[0]
-
-        return prior_terms, params, samples_all,  UT2samples_all
+        timeseries_ev = []
+        for ind_det in range(timeseries.shape[1]):
+            timeseries_ev.append(np.c_[timeshifts, timeseries[:,ind_det].real, timeseries[:,ind_det].imag ])
+        timeseries_ev = tuple(timeseries_ev)
+        
+        prior_terms, samples, UT2samples = self.comblist2cs(
+            timeseries_ev, offsets, nfacs, **score_kwargs)
+        
+        return prior_terms, samples,  UT2samples
 
     def comblist2cs(
             self, timeseries, offsets, nfacs, gtype=1, nsamples=10000,
