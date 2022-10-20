@@ -4,9 +4,10 @@ import numpy as np
 from scipy.special import i0e
 import scipy.signal
 
-from cogwheel import gw_utils, utils
+from cogwheel import gw_utils, utils, skyloc_angles
 from . import RelativeBinningLikelihood
 from . import extrinsic_integration as cs
+import lal
 
 class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
     """
@@ -50,24 +51,24 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         self.cs_kwargs = cs_kwargs.copy()
         # Assuming the user isn't evil and passing 'cs_kwargs' inside cs_kwargs
         self.__dict__.update(cs_kwargs)
-        nra = cs_kwargs.pop("nra", 5000)
-        ndec = cs_kwargs.pop("ndec", 5000)
+        nlon = cs_kwargs.pop("nlon", 5000)
+        nlat = cs_kwargs.pop("nlat", 5000)
         self.detnames = tuple(event_data.detector_names)
-        self.nsinc_interp = cs_kwargs.pop("nsinc_interp", 8)
+        
         cs_kwargs["gps_time"] = cs_kwargs.get("gps_time", event_data.tgps)
-        cs_kwargs["dt_sinc"] = (cs_kwargs.get("dt_sinc", cs.DEFAULT_DT)
-                                / self.nsinc_interp)
+        cs_kwargs["dt_sinc"] = cs_kwargs.get("dt_sinc", cs.DEFAULT_DT)
         cs_kwargs["nsamples_mupsi"] = cs_kwargs.get(
             "nsamples_mupsi", 10 * self.nsamples)
-
-        self.cs_obj = cs.CoherentScore.from_new_samples(
-            nra, ndec, self.detnames, **cs_kwargs)
+        
+        self.cs_obj = cs_kwargs.get("cs_obj")
+        if self.cs_obj is None:
+            self.cs_obj = cs.CoherentScore.from_new_samples(nlon, nlat, self.detnames, **cs_kwargs)
+        
+        nsinc_interp = cs_kwargs.pop("nsinc_interp", )
+        
         # From milisecond to seconds
-        self.dt = ( self.cs_obj.dt_sinc/1000 )* self.nsinc_interp #
-        self.dt_fine = self.cs_obj.dt_sinc/1000 #
+        self.dt = 1/(2*event_data.frequencies[-1]) 
         self.timeshifts = np.arange(*t_rng, self.dt)
-        self.timeshifts_fine = self.timeshifts[0] + self.dt_fine * np.arange(
-            len(self.timeshifts) * self.nsinc_interp)
 
         self.ref_pardict = {'d_luminosity': self.dist_ref,
                             'iota': 0.0,
@@ -130,10 +131,8 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         h_h = (self._h_h_weights * h_fbin * h_fbin.conj()).real.sum(axis=-1)
         norm_h = np.sqrt(h_h)
         timeseries_coarse = d_h / norm_h / self.asd_drift
-        timeseries_fine = scipy.signal.resample(
-            timeseries_coarse, num=len(self.timeshifts_fine), axis=0)
 
-        return timeseries_fine, norm_h
+        return timeseries_coarse, norm_h
 
     def query_extrinsic_integrator(self, par_dic, **kwargs):
         """
@@ -182,7 +181,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
             if fixing and (tnstr in fixed_pars):
                 tnind = fixed_pars.index(tnstr)
                 tn = fixed_vals[tnind]
-                t_indices[ind_det] = np.searchsorted(self.timeshifts_fine, tn)
+                t_indices[ind_det] = np.searchsorted(self.timeshifts, tn)
             else:
                 t_indices[ind_det] = np.argmax(
                     utils.abs_sq(z_timeseries[:, ind_det]))
@@ -190,7 +189,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         # Create a processedclist for the event
         event_phys = np.zeros((len(self.event_data.detector_names), 7))
         # Time, SNR^2, normfac, hole correction, ASD drift, Re(z), Im(z)
-        event_phys[:, 0] = self.timeshifts_fine[t_indices] #
+        event_phys[:, 0] = self.timeshifts[t_indices] #
         event_phys[:, 1] = [utils.abs_sq(z_timeseries[tind, i])
                             for i, tind in enumerate(t_indices)]
         event_phys[:, 2] = norm_h
@@ -201,23 +200,15 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         event_phys[:, 6] = [np.imag(z_timeseries[tind, i])
                             for i, tind in enumerate(t_indices)]
 
-        z_timeseries_cs = []
-        for i_det in range(len(self.event_data.detector_names)):
-            t_mask = (utils.abs_sq(z_timeseries[:, i_det])
-                      > event_phys[i_det, 1] - 20)
-            z_timeseries_cs.append(np.c_[self.timeshifts_fine[t_mask],
-                                         z_timeseries[t_mask, i_det].real,
-                                         z_timeseries[t_mask, i_det].imag])
-
+        
         # Fix the number of samples
         nsamples = kwargs.get("nsamples", self.nsamples)
-        prior_terms, _, samples, UT2samples = \
+        prior_terms, samples, UT2samples = \
             self.cs_obj.get_all_prior_terms_with_samp(
-                event_phys, timeseries=z_timeseries_cs, nsamples=nsamples,
+                event_phys, timeshifts=self.timeshifts, timeseries=z_timeseries, nsamples=nsamples,
                 fixed_pars=fixed_pars, fixed_vals=fixed_vals)
 
-        # Prior_terms[0] = 2 * log(marginalized likelihood)
-        coherent_score = prior_terms[0] / 2
+        coherent_score = prior_terms / 2
 
         return coherent_score, samples, UT2samples, z_timeseries, norm_h
 
@@ -245,7 +236,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
                 par_dic['t_geocenter'] + dt_det - self.par_dic_0['t_geocenter']
             zs[ind_det] = self.sinc_interpolation_bruteforce(
                 z_timeseries[:, ind_det],
-                self.timeshifts_fine,
+                self.timeshifts,
                 np.array([tdet]))[0]
             ts[ind_det] = norm_h[ind_det] / self.asd_drift[ind_det] * \
                 cs.gen_sample_amps_from_fplus_fcross(
@@ -358,9 +349,10 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         iota = np.arccos(samples[idx_rand, 0])
         psi = samples[idx_rand, 1]
         # Note: This loses a bit of sky resolution due to discreteness
-        ra = self.cs_obj.ra_grid[samples[idx_rand, 2].astype(int)]
-        dec = self.cs_obj.dec_grid[samples[idx_rand, 3].astype(int)]
-
+        lon = self.cs_obj.lon_grid[samples[idx_rand, 2].astype(int)]
+        ra = skyloc_angles.lon_to_ra(lon,lal.GreenwichMeanSiderealTime(self.event_data.tgps)) 
+        dec = self.cs_obj.lat_grid[samples[idx_rand, 3].astype(int)]
+        
         # Convert time at the first detector to geocentric time
         time_det0 = samples[idx_rand, 5]
         dt_1, = gw_utils.time_delay_from_geocenter(
