@@ -80,9 +80,18 @@ def mchirpeta_to_m1m2(mchirp, eta):
     return m1, m2
 
 
+def mchirpeta_to_mtot(mchirp, eta):
+    """Return `mtot` given `mchirp, eta`."""
+    return mchirp * eta**-.6
+
+
 def m1m2_to_mchirp(m1, m2):
     """Return chirp mass given component masses."""
     return (m1*m2)**.6 / (m1+m2)**.2
+
+
+def chieff(m1, m2, s1z, s2z):
+    return (m1*s1z + m2*s2z) / (m1+m2)
 
 
 class _ChirpMassRangeEstimator:
