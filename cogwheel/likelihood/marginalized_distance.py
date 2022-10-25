@@ -173,8 +173,8 @@ class LookupTable(utils.JSONMixin):
         broad_grid = np.linspace(0, self.d_luminosity_max, resolution)[1:]
         distances = np.sort(np.concatenate([broad_grid, focused_grid]))
         posterior = self._function_integrand(distances, d_h, h_h)
-        cumulative = InterpolatedUnivariateSpline(distances, posterior, k=1
-                                                 ).antiderivative()(distances)
+        cumulative = InterpolatedUnivariateSpline(
+            distances, posterior, k=1).antiderivative()(distances)[()]
         return np.interp(np.random.uniform(0, cumulative[-1], num),
                          cumulative, distances)
 
