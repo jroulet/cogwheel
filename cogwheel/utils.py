@@ -184,6 +184,21 @@ def replace(sequence, *args):
     return out
 
 
+def handle_scalars(function):
+    """
+    Decorator to change the behavior of functions that always return
+    numpy arrays even if the input is scalar (e.g.
+    ``scipy.interpolate.InterpolatedUnivariateSpline``).
+    The decorated function will return a scalar for scalar input and
+    array for array input like usual numpy ufuncs.
+    """
+    @functools.wraps(function)
+    def new_function(*args, **kwargs):
+        return function(*args, **kwargs)[()]
+    return new_function
+
+
+
 def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
                  args='', sbatch_cmds=(), batch_path=None):
     """
