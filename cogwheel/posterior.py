@@ -268,10 +268,10 @@ def submit_likelihood_maximization(
 
 
 def main(eventname, mchirp_guess, approximant, prior_name, parentdir,
-         overwrite, kwargs_filename=None):
+         overwrite, kwargs_filename=None, refine=False):
     """
-    Construct a Posterior instance, refine its reference waveform and
-    save it to JSON.
+    Construct a Posterior instance, optionally refine its reference
+    waveform and save it to JSON.
 
     Parameters
     ----------
@@ -297,6 +297,9 @@ def main(eventname, mchirp_guess, approximant, prior_name, parentdir,
     kwargs_filename: PathLike or None
         Path to JSON file from which to load kwargs to
         ``Posterior.from_event()``.
+
+    refine: bool
+        Whether to apply an expensive
     """
     kwargs = {}
     if kwargs_filename:
@@ -305,7 +308,8 @@ def main(eventname, mchirp_guess, approximant, prior_name, parentdir,
 
     post = Posterior.from_event(eventname, mchirp_guess, approximant,
                                 prior_name, **kwargs)
-    post.refine_reference_waveform()
+    if refine:
+        post.refine_reference_waveform()
     post.to_json(post.get_eventdir(parentdir), overwrite=overwrite)
 
 
@@ -326,5 +330,7 @@ if __name__ == '__main__':
                                 Posterior.from_event()''')
     parser.add_argument('--overwrite', action='store_true',
                         help='pass to overwrite existing json file')
+    parser.add_argument('--refine', action='store_true',
+                        help='pass to refine reference solution')
 
     main(**vars(parser.parse_args()))
