@@ -245,11 +245,11 @@ def create_time_dict(
     lon_grid_2d, lat_grid_2d = np.meshgrid(lon_grid, lat_grid, indexing='ij') # n_ra x n_dec
     # returns n_det x n_ra x n_dec
     # later change ra_grid to lon_grid
-    delays_from_geocen = get_geocenter_delays(detector_names, lon_grid_2d, lat_grid_2d)
+    delays_from_geocen = get_geocenter_delays(detector_names, lat_grid_2d, lon_grid_2d)
     # Time delays in milliseconds :  n_ra x n_dec x (n_det-1)
     deltats = np.moveaxis(1000 * (delays_from_geocen[1:,...] - delays_from_geocen[0,...]), 0, -1)
     # Detector responses for psi = zero : n_ra x n_dec x n_det x 2
-    responses = get_fplus_fcross_0(detector_names, lon_grid_2d, lat_grid_2d)
+    responses = get_fplus_fcross_0(detector_names, lat_grid_2d, lon_grid_2d)
     # Phases : n_ra x n_dec x n_det
     phis = np.arctan2(responses[...,1], responses[...,0])
     # Phase differences w.r.t the first detector (e.g., H1 for H1, L1) : n_ra x n_dec x (n_det-1)

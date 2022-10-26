@@ -64,8 +64,6 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         if self.cs_obj is None:
             self.cs_obj = cs.CoherentScore.from_new_samples(nlon, nlat, self.detnames, **cs_kwargs)
         
-        nsinc_interp = cs_kwargs.pop("nsinc_interp", )
-        
         # From milisecond to seconds
         self.dt = 1/(2*event_data.frequencies[-1]) 
         self.timeshifts = np.arange(*t_rng, self.dt)
