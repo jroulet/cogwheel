@@ -39,6 +39,9 @@ class LinearFreePhaseTimePrior(UniformPriorMixin, Prior):
     conditioned_on = ['iota', 'ra', 'dec', 'psi'] + _intrinsic
     folded_shifted_params = ['phi_linfree']
 
+    SNR_1DET_THRESHOLD = 4.5  # Single-detector triggers fainter than this
+                              # are disregarded for Fisher error estimation.
+
     def __init__(self, *, approximant, par_dic_0, event_data, dt0=.005,
                  **kwargs):
         # --------------------------------------------------------------
@@ -71,10 +74,14 @@ class LinearFreePhaseTimePrior(UniformPriorMixin, Prior):
         # 2. Machinery for evaluating reference time and phase
         self._ref = {}  # Summary metadata of reference solution
 
-        snr_det = np.sqrt(2 * np.maximum(
-            self._likelihood_aux.lnlike_detectors_no_asd_drift(par_dic_0)
-            * self._likelihood_aux.asd_drift**-2,
-            1e-4))
+        # Set low SNRs to ~0 in uncertainty estimation, because if the
+        # single-detector trigger is indistinguishable from Gaussian
+        # noise then another trigger many sigmas away could happen.
+        lnl_det = (self._likelihood_aux.lnlike_detectors_no_asd_drift(par_dic_0)
+                   * self._likelihood_aux.asd_drift**-2)
+        lnl_det[lnl_det < self.SNR_1DET_THRESHOLD**2 / 2] = 1e-4
+        snr_det = np.sqrt(2 * lnl_det)
+
         sigma_phases = 1 / snr_det
         self._ref['sigma_phase'] = (sigma_phases**-2).sum()**-.5
         self._ref['phase_weights'] = sigma_phases**-2 / (sigma_phases**-2).sum()
@@ -171,11 +178,12 @@ class LinearFreePhaseTimePrior(UniformPriorMixin, Prior):
         Note, the phase is phase of the gravitational wave, i.e. twice
         that of the orbit.
         """
-        hplus_22 = self._get_hplus_22(intrinsic_dic)
+        hplus_ratio = self._get_hplus_22(intrinsic_dic) / self._hplus0_22
 
-        dphase = np.unwrap(np.angle(hplus_22 / self._hplus0_22))
-        fit = np.polynomial.Polynomial.fit(self._likelihood_aux.fbin, dphase,
-                                           deg=1, w=self._polyfit_weights)
+        dphase = np.unwrap(np.angle(hplus_ratio))
+        fit = np.polynomial.Polynomial.fit(
+            self._likelihood_aux.fbin, dphase, deg=1,
+            w=self._polyfit_weights * np.abs(hplus_ratio))
 
         phase_shift = utils.mod(fit(intrinsic_dic['f_ref']), -np.pi)
         time_shift = - fit.deriv()(intrinsic_dic['f_ref']) / (2*np.pi)
