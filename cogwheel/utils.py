@@ -233,7 +233,7 @@ def update_dataframe(df1, df2):
     Caution: if (some of) the columns of `df1` are also in `df2` they
     get silently overwritten without checking for consistency.
     """
-    for col, values in df2.iteritems():
+    for col, values in df2.items():
         df1[col] = values
 
 
