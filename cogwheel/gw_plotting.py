@@ -18,6 +18,8 @@ _LABELS = {
     'm2_source': r'$m_2^{\rm src}$',
     'mtot_source': r'$M_{\rm tot}^{\rm src}$',
     'mchirp_source': r'$\mathcal{M}^{\rm src}$',
+    'l1': r'$\Lambda_1$',
+    'l2': r'$\Lambda_2$',
     # Spin
     'chieff': r'$\chi_{\rm eff}$',
     'cumchidiff': r'$C_{\rm diff}$',

@@ -28,6 +28,7 @@ Approximant = namedtuple('Approximant',
                          defaults=([(2, 2)], True, False))
 
 APPROXIMANTS = {
+    'IMRPhenomD_NRTidalv2': Approximant(tides=True),
     'IMRPhenomD': Approximant(),
     'IMRPhenomXPHM': Approximant(harmonic_modes=[(2, 2), (2, 1), (3, 3),
                                                  (3, 2), (4, 4)],

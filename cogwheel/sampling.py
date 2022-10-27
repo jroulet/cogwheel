@@ -238,7 +238,11 @@ class Sampler(abc.ABC, utils.JSONMixin):
                 fobj.write(f'{exit_code}\n{datetime.datetime.now()}')
         profiler.dump_stats(rundir/self.PROFILING_FILENAME)
 
-        self.load_samples().to_feather(rundir/SAMPLES_FILENAME)
+        samples = self.load_samples()
+        self.posterior.prior.transform_samples(samples)
+        self.posterior.likelihood.postprocess_samples(samples)
+
+        samples.to_feather(rundir/SAMPLES_FILENAME)
 
         for path in rundir.iterdir():
             path.chmod(self.file_permissions)
