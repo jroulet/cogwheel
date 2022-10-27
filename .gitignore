@@ -4,3 +4,9 @@ largedata
 
 cogwheel/data/gwosc_files
 cogwheel/data/gwosc_files/*
+
+cogwheel/factorized_qas/data/extrinsic_samples_*.npz
+
+*.pyc
+__pycache__
+.ipynb_checkpoints
