@@ -1,15 +1,15 @@
 """
 Compute marginalized likelihood of GW events, over extrinsic parameters
-(RA, DEC, time, inclination, phase, distance) for non-precessing quadrupolar
-waveforms.
+(RA, DEC, time, inclination, phase, distance) for non-precessing
+quadrupolar waveforms.
 
 A class ``CoherentScore`` is defined, which contains a dictionary with
 detector responses and sky locations indexed by lags, and this class has
-functionality to accept timeseries of matched-filtering scores and compute
-the marginalized likelihoods, as well as information that is useful to
-sample from the full (unmarginalized) posterior.
+functionality to accept timeseries of matched-filtering scores and
+compute the marginalized likelihoods, as well as information that is
+useful to sample from the full (unmarginalized) posterior.
 """
-import os, re
+import re
 from pathlib import Path
 import numpy as np
 from numba.typed import List
@@ -24,7 +24,7 @@ import lal
 # Loose upper bound to travel time between any detectors in ms
 DEFAULT_DT_MAX = 62.5
 # Spacing of samples in ms
-DEFAULT_DT = (1000/4096)/8
+DEFAULT_DT = 1000 / 4096 / 8
 # Number of samples in mu and psi
 NSAMPLES_MUPSI = 10**6
 
@@ -70,11 +70,11 @@ LG_FAST_YP = np.asarray(
      -10.75766078, -10.81269406, -10.86708726, -10.92085616])
 
 
-# ############## Functions to create library of saved samples #################
+# ############## Functions to create library of saved samples ##########
 def get_geocenter_delays(detector_names, lat, lon):
     """
-    Return array of shape (n_detectors, ...) time delays from geocenter [s].
-    Vectorized over lat, lon.
+    Return array of shape (n_detectors, ...) time delays from geocenter
+    [s]. Vectorized over lat, lon.
     """
     locations = np.array([gw_utils.DETECTORS[detector_name].location
                           for detector_name in detector_names])  # (ndet, 3)
@@ -107,7 +107,7 @@ def get_fplus_fcross_0(detector_names, lat, lon):
                   -sinlon * sinlat,
                   coslat])  # (3, ...)
     dy = np.einsum('dij,j...->di...', responses, y)
-    
+
     fplus0 = (np.einsum('i...,di...->d...', x, dx)
               - np.einsum('i...,di...->d...', y, dy))
     fcross0 = (np.einsum('i...,di...->d...', x, dy)
@@ -118,8 +118,9 @@ def get_fplus_fcross_0(detector_names, lat, lon):
 @njit
 def dt2key(dt, dt_sinc=DEFAULT_DT, dt_max=DEFAULT_DT_MAX):
     """
-    Jitable key for the dictionary from the time delays
-    This is clunky but faster than the nice expression by O(1) when vectorized
+    JITable key for the dictionary from the time delays
+    This is clunky but faster than the nice expression by O(1) when
+    vectorized.
     :param dt:
         (ndelays = ndetectors-1) x nsamp array with time delays in milliseconds
         (should be 2d)
@@ -143,37 +144,41 @@ def create_time_dict(
         nlon, nlat, detector_names, dt_sinc=DEFAULT_DT,
         dt_max=DEFAULT_DT_MAX):
     """
-    Creates dictionary indexed by time, giving RA-Dec pairs for montecarlo
-    integration
-    :param nlon: number of longitude points in grid
-    :param nlat: number of lattitude in grid
-    :param detector_names: detector names
+    Creates dictionary indexed by time, giving RA-Dec pairs for Monte
+    Carlo integration.
+    :param nlon: number of longitude points in grid.
+    :param nlat: number of latitude in grid.
+    :param detector_names: detector names.
     :param dt_sinc:
-        Size of the time binning used in ms; it must coincide with the time
-        separation of samples in the overlap if this dictionary will be used
-        to do the marginalization
-    :param dt_max: Rough upper bound on the individual delays
+        Size of the time binning used in ms; it must coincide with the
+        time separation of samples in the overlap if this dictionary
+        will be used to do the marginalization.
+    :param dt_max: Rough upper bound on the individual delays.
     :return:
-        0. Dictionary indexed by the dts key, returning n_sky x 2 array with
-           indices into ras and decs for each allowed dt tuple
-        1. List of longitudes
-        2. List of lattitudes
-        3. n_ra x n_dec x n_detector x 2 array with responses
+        0. Dictionary indexed by the dts key, returning n_sky x 2 array
+           with indices into ras and decs for each allowed dt tuple.
+        1. List of longitudes.
+        2. List of latitudes.
+        3. n_ra x n_dec x n_detector x 2 array with responses.
     """
     lon_grid = np.linspace(0, 2.0 * np.pi, nlon, endpoint=False)
     # Declination minus the poles
     sin_dec_grid = np.linspace(-1.0, 1.0, nlat + 1, endpoint=False)
     sin_dec_grid = sin_dec_grid[1:]
     lat_grid = np.arcsin(sin_dec_grid)
-    
-    lon_grid_2d, lat_grid_2d = np.meshgrid(lon_grid, lat_grid, indexing='ij') # n_lon x n_lat
+
+    lon_grid_2d, lat_grid_2d = np.meshgrid(lon_grid, lat_grid,
+                                           indexing='ij') # n_lon x n_lat
     # returns n_det x n_ra x n_dec
-    delays_from_geocen = get_geocenter_delays(detector_names, lat_grid_2d, lon_grid_2d)
+    delays_from_geocen = get_geocenter_delays(detector_names, lat_grid_2d,
+                                              lon_grid_2d)
     # Time delays in milliseconds :  n_ra x n_dec x (n_det-1)
-    deltats = np.moveaxis(1000 * (delays_from_geocen[1:,...] - delays_from_geocen[0,...]), 0, -1)
+    deltats = np.moveaxis(1000 * (delays_from_geocen[1:,...]
+                                  - delays_from_geocen[0,...]),
+                          0, -1)
     # Detector responses for psi = zero : n_ra x n_dec x n_det x 2
     responses = get_fplus_fcross_0(detector_names, lat_grid_2d, lon_grid_2d)
-    
+
     # Make `contour maps' of delta t, with entries = index of ra, index of dec
     dt_dict = {}
     for i in range(len(lon_grid)):
@@ -195,7 +200,6 @@ def create_time_dict(
     return dt_dict, lon_grid, lat_grid, responses
 
 
-# ############################ Useful functions ###############################
 def incoherent_score(triggers):
     """
     :param triggers:
@@ -206,7 +210,8 @@ def incoherent_score(triggers):
     return np.sum(triggers[..., 1], axis=-1)
 
 
-@vectorize([complex128(float64, float64, float64, float64, float64)], nopython=True)
+@vectorize([complex128(float64, float64, float64, float64, float64)],
+           nopython=True)
 def gen_sample_amps_from_fplus_fcross(fplus, fcross, mu, c2psi, s2psi):
     """
     :param fplus: Response to the plus polarization for psi = 0
@@ -229,16 +234,14 @@ def lgg(zthatthatz, gtype):
     """
     param: zthatthatz
     """
-    ## Formula obtained by bringing the prior to the exponent, expanding it to
-    # quadratic order and integrating, used for the marginal likelihood
-    ## The power law terms come from the prior and are not very important in
-    # practice. zthatthatz has size of SNR^2
+    # Formula obtained by bringing the prior to the exponent, expanding
+    # it to quadratic order and integrating, used for the marginal
+    # likelihood. The power law terms come from the prior and are not
+    # very important in practice. zthatthatz has size of SNR^2
     if gtype == 0:
-        ## Turn off distance prior
-        logg = np.zeros_like(zthatthatz)
-    else:
-        logg = lg_fast(zthatthatz ** 0.5)
-    return logg
+        # Turn off distance prior
+        return np.zeros_like(zthatthatz)
+    return lg_fast(zthatthatz ** 0.5)
 
 
 def lG(x, f1, f2):
@@ -274,9 +277,11 @@ def lg_approx(x, f1, f2):
 
 @njit
 def lg_fast(x):
-    """Fast evaluation of the marginalized piece via an interpolation table for
-    a vector x, much faster via vectors than many scalars due to vectorized
-    interp"""
+    """
+    Fast evaluation of the marginalized piece via an interpolation table
+    for a vector x, much faster via vectors than many scalars due to
+    vectorized interp.
+    """
     x = np.atleast_1d(np.asarray(x))
     out = np.zeros_like(x, dtype=np.float64)
     imask = x < 10
@@ -293,21 +298,22 @@ def marg_lk(zz, tt, gtype=1, nsamp=None):
     """
     Computes likelihood marginalized over distance and orbital phase
     :param zz:
-        nsamp x n_detector array with rows having complex overlaps for each
-        detector
+        nsamp x n_detector array with rows having complex overlaps for
+        each detector
     :param tt: nsamp x n_detector array with predicted overlaps in each
         detector for a fiducial orbital phase and distance
         (upto an arbitrary scaling factor)
-    :param gtype: Flag passed to function to compute marginalization over
-        distance and phase, determines which one to run
+    :param gtype: Flag passed to function to compute marginalization
+                  over distance and phase, determines which one to run
     :param nsamp: Pass to only sum over part of the arrays
     :returns:
-        1. nsamp array of likelihoods marginalized over the orbital phase, and
-           distance if needed (always 1D), with extra factor of e^{-|z^2|/2}
-           arising from importance sampling over arrival times
+        1. nsamp array of likelihoods marginalized over the orbital
+           phase, and distance if needed (always 1D), with extra factor
+           of e^{-|z^2|/2} arising from importance sampling over arrival
+           times
         2. 2 x nsamp complex array of Z \bar{T}, and \bar{T} T
-           (implicit summation over detectors), useful for reconstructing the
-           distance and phase samples
+           (implicit summation over detectors), useful for
+           reconstructing the distance and phase samples
     """
     if nsamp is None:
         nsamp = len(zz)
@@ -344,27 +350,28 @@ def marg_lk(zz, tt, gtype=1, nsamp=None):
 
 @njit
 def coherent_score_montecarlo_sky(
-        timeseries, nfacs, dt_dict_keys, dt_dict_values,
-        responses, musamps=None, psisamps=None, c2psisamps=None,
-        s2psisamps=None, gtype=1, dt_sinc=DEFAULT_DT,
-        nsamples=10000, fixed_pars=None,
+        timeseries, nfacs, dt_dict_keys, dt_dict_values, responses,
+        musamps=None, psisamps=None, c2psisamps=None, s2psisamps=None,
+        gtype=1, dt_sinc=DEFAULT_DT, nsamples=10000, fixed_pars=None,
         fixed_vals=None):
     """
     Evaluates the coherent score integral by montecarlo sampling all
     relevant variables
     :param timeseries:
-        Tuple with n_samp x 3 arrays with times, Re(z), Im(z) in each detector
+        Tuple with n_samp x 3 arrays with times, Re(z), Im(z) in each
+        detector.
     :param nfacs:
         n_det array of instantaneous sensitivities in each detector
         (normfac/psd_drift x hole_correction)
     :param dt_dict_keys:
-        Keys to dictionary computed using the delays in each dt_tuple, sorted
+        Keys to dictionary computed using the delays in each dt_tuple,
+        sorted.
     :param dt_dict_values:
-        Values in dictionary, tuple of n_sky x 2 arrays with indices into
-        ras, decs for each allowed dt tuple
+        Values in dictionary, tuple of n_sky x 2 arrays with indices
+        into ras, decs for each allowed dt tuple
     :param responses:
         n_ra x n_dec x n_detector x 2 array with detector responses
-    :param musamps: If available, array with samples of mu (cos inclination)
+    :param musamps: If available, array with samples of mu (cos iota)
     :param psisamps: If available, array with samples of psi (pol angle)
     :param gtype: 0/1 to not marginalize/marginalize over distance
     :param dt_sinc: Time resolution for the dictionary (ms)
@@ -380,12 +387,12 @@ def coherent_score_montecarlo_sky(
            psi,
            ra_index,
            dec_index,
-           (unnormalized) relative contribution of sample to coherent score
-           time corresponding to the sample in the first detector
+           (unnormalized) relative contribution of sample to coherent
+           score time corresponding to the sample in the first detector.
         3. 2 x nsamples_phys complex array of Z \bar{T}, and \bar{T} T
-           (implicit summation over detectors), useful for reconstructing the
-           distance and phase samples
-        Note that the number of physical samples < nsamples
+           (implicit summation over detectors), useful for
+           reconstructing the distance and phase samples.
+        Note that the number of physical samples <= nsamples.
     """
     # Set the seed from the first H1 time (hardcoded)
     # np.random.seed(int(timeseries[0][0, 0]))
@@ -457,8 +464,8 @@ def coherent_score_montecarlo_sky(
     dts *= 1000
     keys = dt2key(dt=dts, dt_sinc=dt_sinc, dt_max=DEFAULT_DT_MAX)
 
-    # Populate the structures to evaluate the marginalized likelihood with
-    # samples that have allowed delays
+    # Populate the structures to evaluate the marginalized likelihood
+    # with samples that have allowed delays
     nsamp_phys = 0
     zzs = np.zeros((nsamples, ndet), dtype=np.complex128)
     tts = np.zeros((nsamples, ndet), dtype=np.complex128)
@@ -489,11 +496,9 @@ def coherent_score_montecarlo_sky(
                 radec_ind = int(fixed_vals[radec_ind_ind])
                 fskys[nsamp_phys] = 1
                 if radec_ind >= len(radec_indlist):
-                    return float(-10 ** 5), samples, \
-                        np.zeros((2, 0), dtype=np.complex128)
+                    return -1e5, samples, np.zeros((2, 0), dtype=np.complex128)
             else:
-                #radec_ind = np.random.choice(len(radec_indlist))
-                radec_ind = (ind_s + indx_offset_ra)%len(radec_indlist)
+                radec_ind = (ind_s + indx_offset_ra) % len(radec_indlist)
                 # Record fsky
                 # (normalization factor for monte-carlo over ra and dec)
                 fskys[nsamp_phys] = len(radec_indlist)
@@ -501,8 +506,8 @@ def coherent_score_montecarlo_sky(
             ra_ind, dec_ind = radec_indlist[radec_ind]
 
             # Pick mu and psi
-            mu = musamps[(ind_s + indx_offset_mu)%len(musamps)]
-            psi_indx = (ind_s + indx_offset_psi)%len(psisamps)
+            mu = musamps[(ind_s + indx_offset_mu) % len(musamps)]
+            psi_indx = (ind_s + indx_offset_psi) % len(psisamps)
             psi = psisamps[psi_indx]
             c2psi = c2psisamps[psi_indx]
             s2psi = s2psisamps[psi_indx]
@@ -519,16 +524,17 @@ def coherent_score_montecarlo_sky(
             # Add to list of predicted z
             for ind_d in range(ndet):
                 tts[nsamp_phys, ind_d] = \
-                nfacs[ind_d] * gen_sample_amps_from_fplus_fcross(
-                    responses[ra_ind, dec_ind, ind_d, 0],
-                    responses[ra_ind, dec_ind, ind_d, 1],
-                    mu, c2psi, s2psi)
+                    nfacs[ind_d] * gen_sample_amps_from_fplus_fcross(
+                        responses[ra_ind, dec_ind, ind_d, 0],
+                        responses[ra_ind, dec_ind, ind_d, 1],
+                        mu, c2psi, s2psi)
 
             nsamp_phys += 1
 
     if nsamp_phys > 0:
         # Generate list of unnormalized marginalized likelihoods
-        marg_lk_list, UT2samples = marg_lk(zzs, tts, gtype=gtype, nsamp=nsamp_phys)
+        marg_lk_list, UT2samples = marg_lk(zzs, tts, gtype=gtype,
+                                           nsamp=nsamp_phys)
 
         # Sum with the right weights to get the net marginalized likelihood
         # The nsamples is not a bug, it needs to be to use weight = twt
@@ -544,9 +550,7 @@ def coherent_score_montecarlo_sky(
     return -1e5, samples, np.zeros((2, 0), dtype=np.complex128)
 
 
-# ###############################################################################
 class CoherentScore:
-    
     Gtype = 1
     normfac_pos = 2
     hole_correction_pos = 3
@@ -554,11 +558,9 @@ class CoherentScore:
     rezpos = 5
     imzpos = 6
     c0_pos = 7
-       
-    def __init__(
-            self, lon_grid, lat_grid, dt_dict, responses, detector_names, mus, psis,
-             dt_sinc=DEFAULT_DT):
 
+    def __init__(self, lon_grid, lat_grid, dt_dict, responses,
+                 detector_names, mus, psis, dt_sinc=DEFAULT_DT):
         # Set parameters
         self.dt_sinc = dt_sinc  # Time resolution of dictionary in ms
 
@@ -586,96 +588,95 @@ class CoherentScore:
         self.c2psis = np.cos(2*self.psis)
         self.s2psis = np.sin(2*self.psis)
 
-        
     @classmethod
-    def from_detectors(
-            cls, detector_names, nlon=3000, nlat=3000, dt_sinc=DEFAULT_DT):
+    def from_detectors(cls, detector_names, nlon=3000, nlat=3000,
+                       dt_sinc=DEFAULT_DT):
         """
-        :param detector_names: iterable to detector names
-        :param nlon: Number of points in the longitude direction
-        :param nlat: Number of points in the lattitude direction
-        :param dt_sinc: Time resolution of samples in ms for the dictionary
+        :param detector_names: iterable to detector names.
+        :param nlon: Number of points in the longitude direction.
+        :param nlat: Number of points in the latitude direction.
+        :param dt_sinc: Time resolution of samples in ms for the
+                        dictionary.
         """
         samples_fname = cls.get_filename(detector_names, nlon, nlat, dt_sinc)
-        
-        # read the extrinsic grid from file
-        if os.path.isfile(samples_fname):
-        
-            # Read the contents of the sample file
-            npzfile = np.load(samples_fname)
 
-            # Set some scalar parameters
-            # Time resolution of dictionary in ms
-            dt_sinc = float(npzfile['dt_sinc'])
+        if not samples_fname.exists():
+            return cls.from_new_samples(nlon, nlat, detector_names, dt_sinc)
 
-            # Arrays of RA and dec
-            lon_grid = npzfile['lon_grid']
-            lat_grid = npzfile['lat_grid']
+        # Read the contents of the sample file
+        npzfile = np.load(samples_fname)
 
-            # Dictionary indexed by keys for delta_ts, containing
-            # n_skypos x 2 arrays with indices into lon_grid and lat_grid
-            dt_dict = {int(re.search(r'\d+', key).group()): value
-                       for key,value in npzfile.items() if key.startswith("key_")}
+        # Set some scalar parameters
+        # Time resolution of dictionary in ms
+        dt_sinc = float(npzfile['dt_sinc'])
 
-            # n_ra x n_dec x n_detectors x 2 array with f_+/x for phi = 0
-            responses = npzfile['responses']
-        
-            # Samples of mu (cos inclination) and psis
-            mus = npzfile['mus']
-            psis = npzfile['psis']
-            
-            return cls(lon_grid, lat_grid, dt_dict, responses, detector_names, mus, psis, dt_sinc)
-             
-        # otherwise, 
-        return cls.from_new_samples(nlon, nlat, detector_names, dt_sinc)
-        
+        # Arrays of RA and dec
+        lon_grid = npzfile['lon_grid']
+        lat_grid = npzfile['lat_grid']
+
+        # Dictionary indexed by keys for delta_ts, containing
+        # n_skypos x 2 arrays with indices into lon_grid and lat_grid
+        dt_dict = {int(re.search(r'\d+', key).group()): value
+                   for key,value in npzfile.items() if key.startswith("key_")}
+
+        # n_ra x n_dec x n_detectors x 2 array with f_+/x for phi = 0
+        responses = npzfile['responses']
+
+        # Samples of mu (cos inclination) and psis
+        mus = npzfile['mus']
+        psis = npzfile['psis']
+
+        return cls(lon_grid, lat_grid, dt_dict, responses, detector_names, mus,
+                   psis, dt_sinc)
+
     @classmethod
-    def from_new_samples(
-            cls, nlon, nlat, detector_names,
-            dt_sinc=DEFAULT_DT, nsamples_mupsi=NSAMPLES_MUPSI):
+    def from_new_samples(cls, nlon, nlat, detector_names,
+                         dt_sinc=DEFAULT_DT,
+                         nsamples_mupsi=NSAMPLES_MUPSI):
         """
-        Function to create a new class instance with a dictionary from scratch
-        :param nlon: Number of points in the longitude direction
-        :param nlat: Number of points in the lattitude direction
-        :param detector_names: iterable to detector names
-        :param dt_sinc: Time resolution of samples in ms for the dictionary
+        Function to create a new class instance with a dictionary from
+        scratch.
+        :param nlon: Number of points in the longitude direction.
+        :param nlat: Number of points in the latitude direction.
+        :param detector_names: iterable to detector names.
+        :param dt_sinc: Time resolution of samples in ms for the
+                        dictionary.
         :param nsamples_mupsi:
-            Number of random samples of the inclination and the polarization
-        :return: Instance of CoherentScore
+            Number of random samples of the inclination and the
+            polarization.
+        :return: Instance of CoherentScore.
         """
-        
         # Create structures to deal with the mapping of the sphere to delays
-        dt_dict, lon_grid, lat_grid, responses  = \
-            create_time_dict(
-                nlon, nlat, detector_names, dt_sinc=dt_sinc)
+        dt_dict, lon_grid, lat_grid, responses  = create_time_dict(
+            nlon, nlat, detector_names, dt_sinc=dt_sinc)
 
         # Create random samples of the cosine of the inclination, and the
         # polarization
         psis = np.random.uniform(0, 2 * np.pi, size=nsamples_mupsi)
         mus = np.random.uniform(-1, 1, size=nsamples_mupsi)  # cos(inclination)
-        instance = cls(lon_grid, lat_grid, dt_dict, responses, detector_names, 
+        instance = cls(lon_grid, lat_grid, dt_dict, responses, detector_names,
                        mus, psis, dt_sinc)
         # Save the extrinsic grid
         instance.save_samples()
-        
         return instance
-    
+
     @staticmethod
     def get_filename(detector_names, nlon, nlat, dt_sinc):
-        filename = Path(__file__).parent / "data" / f"extrinsic_samples_{''.join(detector_names)}_{nlon}_{nlat}_{int(1000/dt_sinc)}.npz"
-        return filename
-          
-    def save_samples(self):
-        filename = self.get_filename(self.detector_names, len(self.lon_grid), len(self.lat_grid), self.dt_sinc)
-        filename.parent.mkdir(exist_ok=True)
-        dt_dict = dict(zip([f"key_{key}" for key in self.dt_dict_keys], self.dt_dict_values))
-        np.savez(filename,
-                 **dt_dict, lon_grid=self.lon_grid,
-                 lat_grid=self.lat_grid, responses=self.responses,
-                 psis=self.psis, mus=self.mus,
-                 dt_sinc=self.dt_sinc)
+        return (Path(__file__).parent/"data"
+                /f"extrinsic_samples_{''.join(detector_names)}_{nlon}_{nlat}_"
+                 f"{int(1000/dt_sinc)}.npz")
 
-        
+    def save_samples(self):
+        filename = self.get_filename(self.detector_names, len(self.lon_grid),
+                                     len(self.lat_grid), self.dt_sinc)
+        filename.parent.mkdir(exist_ok=True)
+
+        dt_dict = dict(zip([f"key_{key}" for key in self.dt_dict_keys],
+                           self.dt_dict_values))
+        np.savez(filename, **dt_dict, lon_grid=self.lon_grid,
+                 lat_grid=self.lat_grid, responses=self.responses,
+                 psis=self.psis, mus=self.mus, dt_sinc=self.dt_sinc)
+
     def dt_dict(self, keyval):
         """Convenience function to simulate a dictionary"""
         ind = np.searchsorted(self.dt_dict_keys, keyval)
@@ -687,15 +688,16 @@ class CoherentScore:
         return self.dt_dict_values[ind]
 
     def get_all_prior_terms_with_samp(
-            self, events, timeshifts, timeseries, ref_normfac=1, **score_kwargs):
+            self, events, timeshifts, timeseries, ref_normfac=1,
+            **score_kwargs):
         """
         :param events:
             n_detector x processedclist
             array with coincidence/background candidates (peaks of the
             timeseries)
         :param timeshifts: Array of times for timeseries
-        :param timeseries: 2D array of shape n_len(timeshifts) x n_detector 
-                    array with z
+        :param timeseries: 2D array of shape n_len(timeshifts) x n_detector
+                           array with z
         :param ref_normfac: Reference normfac to scale the values relative to
         :param score_kwargs: Extra arguments to comblist2cs
         :return:
@@ -714,29 +716,29 @@ class CoherentScore:
         params = self.get_params(events)[0] #TODO
 
         # Some useful parameters
-        rhosq = incoherent_score(events)
         nfacs = params[:, 3] / ref_normfac
 
-        f_sampling = 1000/(self.dt_sinc) # ms to s
+        f_sampling = 1000 / self.dt_sinc  # ms to s
         if (fs_ratio := f_sampling * (timeshifts[1]-timeshifts[0])) != 1:
             timeseries, timeshifts = scipy.signal.resample(
-                timeseries, int(len(timeshifts) * fs_ratio), timeshifts, axis=0)
+                timeseries, int(len(timeshifts)*fs_ratio), timeshifts, axis=0)
         if not np.isclose(1/f_sampling, timeshifts[1] - timeshifts[0]):
-            raise ValueError('`timeshifts` is incommensurate with `f_sampling`.') 
+            raise ValueError('`timeshifts` incommensurate with `f_sampling`.')
 
         timeseries_ev = []
         for ind_det in range(timeseries.shape[1]):
-            timeseries_ev.append(np.c_[timeshifts, timeseries[:,ind_det].real, timeseries[:,ind_det].imag ])
+            timeseries_ev.append(np.c_[timeshifts,
+                                       timeseries[:,ind_det].real,
+                                       timeseries[:,ind_det].imag ])
         timeseries_ev = tuple(timeseries_ev)
-        
+
         prior_terms, samples, UT2samples = self.comblist2cs(
             timeseries_ev, nfacs, **score_kwargs)
-        
+
         return prior_terms, samples,  UT2samples
 
-    def comblist2cs(
-            self, timeseries, nfacs, gtype=1, nsamples=10000,
-            **kwargs):
+    def comblist2cs(self, timeseries, nfacs, gtype=1, nsamples=10000,
+                    **kwargs):
         """
         Takes the return value of trigger2comblist and returns the coherent
         score by calling the jitted function
@@ -769,10 +771,10 @@ class CoherentScore:
         """
         # if timeseries is empty, return -10^5
         # (see coherent_score_montecarlo_sky()) and continue
-        if any([len(x) == 0 for x in timeseries]):
-            return -100000, np.zeros((nsamples, 6)), \
-                np.zeros((2, 0), dtype=np.complex128)
-
+        if any(len(x) == 0 for x in timeseries):
+            return (-1e5,
+                    np.zeros((nsamples, 6)),
+                    np.zeros((2, 0), dtype=np.complex128))
 
         return coherent_score_montecarlo_sky(
             timeseries, nfacs, self.dt_dict_keys, self.dt_dict_values,
@@ -793,8 +795,6 @@ class CoherentScore:
         if events.ndim == 2:
             # We're dealing with a single event
             events = events[None, :]
-
-        dt_shift = self.dt_sinc / 1000  # in s
 
         # Add shifts to each detector to get to zero lag
         # n_cand x n_det

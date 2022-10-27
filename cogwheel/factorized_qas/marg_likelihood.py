@@ -1,13 +1,14 @@
 """Compute likelihood of GW events."""
 import numpy as np
-
 from scipy.special import i0e
-import scipy.signal
 
-from cogwheel import gw_utils, utils, skyloc_angles
+import lal
+
+from cogwheel import gw_utils
+from cogwheel import utils
+from cogwheel import skyloc_angles
 from cogwheel.likelihood import RelativeBinningLikelihood
 from . import extrinsic_integration as cs
-import lal
 
 class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
     """
@@ -49,10 +50,11 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         # Treat arguments to cs.CoherentScore.from_new_samples
         # Added this attribute so that get_init_dict() succeeds
         self.cs_kwargs = cs_kwargs.copy()
-        self.cs_obj = cs.CoherentScore.from_detectors(event_data.detector_names, **cs_kwargs)
-        
+        self.cs_obj = cs.CoherentScore.from_detectors(event_data.detector_names,
+                                                      **cs_kwargs)
+
         # From milisecond to seconds
-        self.dt = 1/(2*event_data.frequencies[-1]) 
+        self.dt = 1 / (2*event_data.frequencies[-1])
         self.timeshifts = np.arange(*t_rng, self.dt)
 
         self.ref_pardict = {'d_luminosity': self.dist_ref,
@@ -185,13 +187,13 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         event_phys[:, 6] = [np.imag(z_timeseries[tind, i])
                             for i, tind in enumerate(t_indices)]
 
-        
+
         # Fix the number of samples
         nsamples = kwargs.get("nsamples", self.nsamples)
         prior_terms, samples, UT2samples = \
             self.cs_obj.get_all_prior_terms_with_samp(
-                event_phys, timeshifts=self.timeshifts, timeseries=z_timeseries, nsamples=nsamples,
-                fixed_pars=fixed_pars, fixed_vals=fixed_vals)
+                event_phys, timeshifts=self.timeshifts, timeseries=z_timeseries,
+                nsamples=nsamples, fixed_pars=fixed_pars, fixed_vals=fixed_vals)
 
         coherent_score = prior_terms / 2
 
@@ -238,10 +240,9 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         U = np.dot(zs, np.conj(ts))
         T2 = utils.abs_sq(ts).sum()
 
-        Y_pick = \
-            (self.dist_ref / par_dic['d_luminosity']) * \
-            np.exp(2 * 1j * par_dic['phi_ref'])
-        lnl = 0.5 * (np.abs(U) ** 2 / T2 - T2 * np.abs(Y_pick - U / T2) ** 2)
+        Y_pick = (self.dist_ref / par_dic['d_luminosity']
+                  * np.exp(2j * par_dic['phi_ref']))
+        lnl = 0.5 * (np.abs(U)**2 / T2 - T2 * np.abs(Y_pick - U / T2) ** 2)
 
         return lnl
 
@@ -336,9 +337,10 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         psi = samples[idx_rand, 1]
         # Note: This loses a bit of sky resolution due to discreteness
         lon = self.cs_obj.lon_grid[samples[idx_rand, 2].astype(int)]
-        ra = skyloc_angles.lon_to_ra(lon,lal.GreenwichMeanSiderealTime(self.event_data.tgps)) 
+        ra = skyloc_angles.lon_to_ra(lon,lal.GreenwichMeanSiderealTime(
+            self.event_data.tgps))
         dec = self.cs_obj.lat_grid[samples[idx_rand, 3].astype(int)]
-        
+
         # Convert time at the first detector to geocentric time
         time_det0 = samples[idx_rand, 5]
         dt_1, = gw_utils.time_delay_from_geocenter(
