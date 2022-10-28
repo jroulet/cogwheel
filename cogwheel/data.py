@@ -2,6 +2,7 @@
 
 import pathlib
 from scipy import signal
+from scipy import interpolate
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -19,6 +20,20 @@ gwpy.plot.axes.register_projection(gwpy.plot.axes._Axes)
 
 DATADIR = pathlib.Path(__file__).parent/'data'
 GWOSC_FILES_DIR = DATADIR/'gwosc_files'
+
+ASD_DIR = DATADIR/'example_asds'
+ASDS = {path.name.removesuffix('.npy'): path
+        for path in ASD_DIR.glob('*.npy')}
+
+
+def make_asd_func(frequencies, asd):
+    """
+    Return function that interpolates the given amplitude spectral
+    density as a function of frequency. Frequencies outside the range
+    are assigned a large but finite ASD.
+    """
+    return interpolate.interp1d(frequencies, asd, bounds_error=False,
+                                fill_value=1)
 
 
 class DataError(Exception):
@@ -334,9 +349,11 @@ class EventData(utils.JSONMixin):
             Detectors' initials, e.g. ``'HLV'`` for Hanford-Livingston-
             Virgo.
 
-        asd_funcs: sequence of callables
+        asd_funcs: sequence of callables or strings
             Functions that return the noise amplitude spectral density
             (1/Hz), of the same length as `detector_names`.
+            Alternatively, a string that is a key in ``ASDS`` can be
+            passed to use a predefined ASD (e.g. 'asd_H_O3a').
 
         tgps: float
             GPS time of event.
@@ -369,6 +386,13 @@ class EventData(utils.JSONMixin):
         if len(detector_names) != len(asd_funcs):
             raise ValueError(
                 'Lengths of `detector_names` and `asd_funcs` should match.')
+
+        for i, asd_func in enumerate(asd_funcs):
+            if isinstance(asd_func, str):
+                if not asd_func in ASDS:
+                    raise ValueError(f'Unknown asd_func {asd_func!r}. '
+                                     f'Allowed values are {list(ASDS)}')
+                asd_funcs[i] = make_asd_func(*np.load(ASDS[asd_func]))
 
         tcoarse = duration / 2 if tcoarse is None else tcoarse
         dt = 1 / (2*fmax)
