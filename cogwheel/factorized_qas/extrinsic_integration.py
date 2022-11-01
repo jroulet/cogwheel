@@ -184,10 +184,11 @@ def create_time_dict(
     for i in range(len(lon_grid)):
         for j in range(len(lat_grid)):
             key = dt2key(deltats[i, j][:, None], dt_sinc=dt_sinc, dt_max=dt_max)
-            if len(key)==0:
+            if len(key) == 0:
                 key = 0
             else:
                 key = key[0]
+
             if key in dt_dict:
                 dt_dict[key].append((i, j))
             else:
@@ -380,7 +381,7 @@ def coherent_score_montecarlo_sky(
         Can be 'tn' (time of the n^th detector), 'mu', 'psi', 'radec_ind'
     :param fixed_vals: Tuple with the values of the parameters we fix
     :returns:
-        1. Montecarlo evaluation of 2 * log(complete coherent score)
+        1. Monte Carlo evaluation of 2 * log(complete coherent score)
            (including the incoherent part)
         2. nsamples x 6 array with each row having
            mu,
@@ -460,8 +461,7 @@ def coherent_score_montecarlo_sky(
     # Generate keys into the RA-Dec dictionary from the delays, do them
     # at once to save some time
     # Delays in ms ((ndet - 1) x nsamples)
-    dts = tz_samples[1:, 0, :] - tz_samples[0, 0, :]
-    dts *= 1000
+    dts = (tz_samples[1:, 0, :] - tz_samples[0, 0, :]) * 1000
     keys = dt2key(dt=dts, dt_sinc=dt_sinc, dt_max=DEFAULT_DT_MAX)
 
     # Populate the structures to evaluate the marginalized likelihood
@@ -600,7 +600,9 @@ class CoherentScore:
         """
         samples_fname = cls.get_filename(detector_names, nlon, nlat, dt_sinc)
 
-        if not samples_fname.exists():
+        # if not samples_fname.exists(): # TODO find a faster way of reading
+                                         # the npz file. Meanwhile, disable.
+        if True:
             return cls.from_new_samples(nlon, nlat, detector_names, dt_sinc)
 
         # Read the contents of the sample file
@@ -617,7 +619,7 @@ class CoherentScore:
         # Dictionary indexed by keys for delta_ts, containing
         # n_skypos x 2 arrays with indices into lon_grid and lat_grid
         dt_dict = {int(re.search(r'\d+', key).group()): value
-                   for key,value in npzfile.items() if key.startswith("key_")}
+                   for key, value in npzfile.items() if key.startswith("key_")}
 
         # n_ra x n_dec x n_detectors x 2 array with f_+/x for phi = 0
         responses = npzfile['responses']
@@ -656,8 +658,11 @@ class CoherentScore:
         mus = np.random.uniform(-1, 1, size=nsamples_mupsi)  # cos(inclination)
         instance = cls(lon_grid, lat_grid, dt_dict, responses, detector_names,
                        mus, psis, dt_sinc)
+
         # Save the extrinsic grid
-        instance.save_samples()
+        # instance.save_samples()  # TODO find a faster way of saving
+                                   # and loading. Meanwhile, disable.
+
         return instance
 
     @staticmethod
