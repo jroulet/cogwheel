@@ -7,7 +7,7 @@ It interfaces with third-party routines for downloading public data (GWOSC, `GWp
 
 The coordinate system and folding algorithm are described in an accompanying article https://arxiv.org/abs/2207.03508
 
-The marginalization over all extrinsic parameters describing mergers is described in https://arxiv.org/abs/2210.16278
+The marginalization over all extrinsic parameters for mergers is described in https://arxiv.org/abs/2210.16278
 
 ## Installation
 ```bash
