@@ -2,10 +2,12 @@
 
 `cogwheel` is a code for parameter estimation of gravitational wave sources.
 It implements a convenient system of coordinates for sampling, a "folding" algorithm to reduce the multimodality of posteriors, and the relative binning algorithm for fast likelihood evaluation (generalized to waveforms with higher modes).
-It supports likelihood marginalization over distance, as  well as over all extrinsic parameters  describing a merger (the latter restricted to quadrupole-only waveform models with aligned spins).
+It supports likelihood marginalization over distance, as well as over all extrinsic parameters describing a merger (the latter restricted to quadrupole-only waveform models with aligned spins).
 It interfaces with third-party routines for downloading public data (GWOSC, `GWpy`), generating waveforms (`lalsuite`) and sampling distributions (`PyMultiNest`, `dynesty`).
 
 The coordinate system and folding algorithm are described in an accompanying article https://arxiv.org/abs/2207.03508
+
+The marginalization over all extrinsic parameters for mergers is described in https://arxiv.org/abs/2210.16278
 
 ## Installation
 ```bash
