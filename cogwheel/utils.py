@@ -168,7 +168,7 @@ def rand_choice_nb(arr, cprob, nvals):
 @vectorize(nopython=True)
 def abs_sq(x):
     """x.real^2 + x.imag^2"""
-    return (x.real ** 2) + (x.imag ** 2)
+    return x.real**2 + x.imag**2
 
 
 def merge_dictionaries_safely(*dics):
@@ -199,11 +199,9 @@ def checkempty(array, verbose=False):
                 print("Object has `len' attribute that can't be queried")
             return True
     nparray = np.asarray(array)
-    if (((nparray is None) or
-         (nparray.dtype == np.dtype('O'))) or (nparray.size == 0)):
-        return True
-    else:
-        return False
+    return (nparray is None
+            or nparray.dtype == np.dtype('O')
+            or nparray.size == 0)
 
 
 def rm_suffix(string, suffix='.json', new_suffix=None):

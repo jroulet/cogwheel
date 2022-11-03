@@ -8,13 +8,16 @@ Each may consume some arguments in the __init__(), but should forward
 as ``**kwargs`` any arguments that other priors may need.
 """
 
-import numpy as np
-from cogwheel import utils
 from cogwheel import prior
+
 
 class UniformTidalDeformabilitiesBNSPrior(prior.UniformPriorMixin,
                                           prior.IdentityTransformMixin,
                                           prior.Prior):
+    """
+    Uniform prior for tidal deformability, independent for the two
+    compact objects.
+    """
     range_dic = {'l1': NotImplemented,
                  'l2': NotImplemented}
 

@@ -235,7 +235,7 @@ class Prior(ABC, utils.JSONMixin):
             return cls.sampled_params
         return []
 
-    def unfold_apply(self, func, otypes=[float]):
+    def unfold_apply(self, func, otypes=(float,)):
         """
         Return a function that unfolds its parameters and applies `func`
         to each unfolding. The returned function returns a list of

@@ -481,8 +481,8 @@ class EventData(utils.JSONMixin):
         plt.figtext(0., .5, 'Frequency (Hz)', rotation=90,
                     ha='left', va='center', fontsize='large')
 
-        colorbar = fig.colorbar(plt.cm.ScalarMappable(norm=norm), pad=.03,
-                                ax=axes.tolist(), label=r'Power ($\sigma^2$)')
+        fig.colorbar(plt.cm.ScalarMappable(norm=norm), pad=.03,
+                     ax=axes.tolist(), label=r'Power ($\sigma^2$)')
 
     def to_npz(self, *, filename=None, overwrite=False,
                permissions=0o644):

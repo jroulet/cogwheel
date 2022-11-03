@@ -12,13 +12,19 @@ useful to sample from the full (unmarginalized) posterior.
 import re
 from pathlib import Path
 import numpy as np
+
 from numba.typed import List
 from numba import float64, complex128
 from numba import njit, vectorize
+
 from scipy.special import i0e, i1e
-from cogwheel import utils, gw_utils, skyloc_angles
 import scipy.signal
+
 import lal
+
+from cogwheel import gw_utils
+from cogwheel import utils
+from cogwheel import skyloc_angles
 
 # Useful default variables
 # Loose upper bound to travel time between any detectors in ms
