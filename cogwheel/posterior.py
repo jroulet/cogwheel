@@ -308,7 +308,8 @@ def main(eventname, mchirp_guess, approximant, prior_name, parentdir,
         ``Posterior.from_event()``.
 
     refine: bool
-        Whether to apply an expensive
+        Whether to apply an expensive likelihood maximization over all
+        parameters.
     """
     kwargs = {}
     if kwargs_filename:
