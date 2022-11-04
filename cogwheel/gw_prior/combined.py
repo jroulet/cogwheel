@@ -19,6 +19,8 @@ from .extrinsic import (UniformPhasePrior,
 
 from .mass import UniformDetectorFrameMassesPrior
 
+from .tides import UniformTidalDeformabilitiesBNSPrior
+
 from .miscellaneous import (ZeroTidalDeformabilityPrior,
                             FixedIntrinsicParametersPrior,
                             FixedReferenceFrequencyPrior)
@@ -115,6 +117,19 @@ class AlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
                      ZeroTidalDeformabilityPrior,
                      FixedReferenceFrequencyPrior]
 
+class TidalIASPrior(RegisteredPriorMixin, CombinedPrior):
+    """Aligned spin, flat in tidal parameters, flat in chieff, uniform luminosity volume"""
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     IsotropicInclinationPrior,
+                     IsotropicSkyLocationPrior,
+                     UniformTimePrior,
+                     UniformPolarizationPrior,
+                     UniformPhasePrior,
+                     UniformLuminosityVolumePrior,
+                     UniformEffectiveSpinPrior,
+                     ZeroInplaneSpinsPrior,
+                     UniformTidalDeformabilitiesBNSPrior,
+                     FixedReferenceFrequencyPrior]
 
 class LVCPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, isotropic spins, uniform luminosity volume."""

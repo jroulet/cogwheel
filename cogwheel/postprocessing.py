@@ -91,7 +91,7 @@ class PostProcessor:
         """Return names of auxiliary log likelihood columns."""
         return [f'lnl_aux_{det}' for det in detector_names]
 
-    def process_samples(self):
+    def process_samples(self, force_update=False):
         """
         Call the various methods of the class sequentially, then save
         the results. This computes:
@@ -108,10 +108,12 @@ class PostProcessor:
         print(f'Processing {self.rundir}')
 
         print(' * Adding standard parameters...')
-        self.posterior.prior.transform_samples(self.samples)
-        self.posterior.likelihood.postprocess_samples(self.samples)
+        self.posterior.prior.transform_samples(
+            self.samples, force_update=force_update)
+        self.posterior.likelihood.postprocess_samples(
+            self.samples, force_update=force_update)
         print(' * Computing relative-binning likelihood...')
-        self.compute_lnl()
+        self.compute_lnl(force_update=force_update)
         print(' * Computing auxiliary likelihood products...')
         self.compute_lnl_aux()
         print(' * Testing ASD-drift correction...')
@@ -120,13 +122,18 @@ class PostProcessor:
         self.test_relative_binning()
         self.save_tests_and_samples()
 
-    def compute_lnl(self):
+    def compute_lnl(self, force_update=True):
         """
         Add column to `self.samples` with log likelihood computed
         at original relative binning resolution
         """
-        self.samples[self.LNL_COL] = list(
-            map(self.posterior.likelihood.lnlike, self._standard_samples()))
+        if force_update or (self.LNL_COL not in self.samples.columns):
+            lnlike = getattr(
+                self.posterior.likelihood,
+                'lnlike_no_marginalization',
+                self.posterior.likelihood.lnlike)
+            self.samples[self.LNL_COL] = list(
+                map(lnlike, self._standard_samples()))
         self.tests['lnl_max'] = max(self.samples[self.LNL_COL])
 
     def compute_lnl_aux(self):
@@ -441,7 +448,7 @@ class Diagnostics:
                                    **settings})
 
         run_kwargs = pd.DataFrame(run_kwargs)
-        const_cols = [col for col, (first, *others) in run_kwargs.iteritems()
+        const_cols = [col for col, (first, *others) in run_kwargs.items()
                       if all(first == other for other in others)]
         drop_cols = const_cols + ['outputfiles_basename', 'wrapped_params']
         return run_kwargs.drop(columns=drop_cols, errors='ignore')

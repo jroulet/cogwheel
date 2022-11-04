@@ -11,8 +11,8 @@ import numpy as np
 
 from cogwheel import gw_prior
 from cogwheel import utils
-from cogwheel.likelihood import RelativeBinningLikelihood, \
-    ReferenceWaveformFinder
+from cogwheel.likelihood import (RelativeBinningLikelihood,
+                                 ReferenceWaveformFinder)
 
 
 class PosteriorError(Exception):

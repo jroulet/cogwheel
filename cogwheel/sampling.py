@@ -93,16 +93,21 @@ class Sampler(abc.ABC, utils.JSONMixin):
         pandas.DataFrame with columns per
         `self.posterior.prior.sampled_params`.
         """
-        choice = np.random.default_rng(seed=seed).choice
         prior = self.posterior.prior
 
-        resampled = []
-        for _, sample in samples.iterrows():
-            unfolded = prior.unfold(sample[prior.sampled_params].to_numpy())
-            probabilities = self._exp_normalize(sample[self._lnprob_cols])
-            resampled.append(choice(unfolded, p=probabilities))
+        unfold = np.vectorize(prior.unfold, signature='(n)->(m,n)')
+        unfolded = unfold(samples[prior.sampled_params].to_numpy())
 
-        return pd.DataFrame(resampled, columns=prior.sampled_params)
+        probabilities = self._exp_normalize(
+            samples[self._lnprob_cols].to_numpy())
+        cumprobs = np.cumsum(probabilities, axis=-1)
+
+        searchsorted = np.vectorize(np.searchsorted, signature='(n),()->()')
+        rng = np.random.default_rng(seed)
+        inds = searchsorted(cumprobs, rng.uniform(size=len(samples)))
+
+        return pd.DataFrame(unfolded[np.arange(len(inds)), inds],
+                            columns=prior.sampled_params)
 
     @staticmethod
     def _exp_normalize(lnprobs):
@@ -110,8 +115,8 @@ class Sampler(abc.ABC, utils.JSONMixin):
         Return normalized probabilities from unnormalized log
         probabilities, safe to overflow.
         """
-        probs = np.exp(lnprobs - np.max(lnprobs))
-        return probs / probs.sum()
+        probs = np.exp(lnprobs - np.max(lnprobs, axis=-1, keepdims=True))
+        return probs / probs.sum(axis=-1, keepdims=True)
 
     def get_rundir(self, parentdir):
         """
@@ -238,7 +243,11 @@ class Sampler(abc.ABC, utils.JSONMixin):
                 fobj.write(f'{exit_code}\n{datetime.datetime.now()}')
         profiler.dump_stats(rundir/self.PROFILING_FILENAME)
 
-        self.load_samples().to_feather(rundir/SAMPLES_FILENAME)
+        samples = self.load_samples()
+        self.posterior.prior.transform_samples(samples)
+        self.posterior.likelihood.postprocess_samples(samples)
+
+        samples.to_feather(rundir/SAMPLES_FILENAME)
 
         for path in rundir.iterdir():
             path.chmod(self.file_permissions)
