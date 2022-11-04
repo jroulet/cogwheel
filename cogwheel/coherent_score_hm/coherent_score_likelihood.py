@@ -147,6 +147,7 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
                             h_mpb.conj()[mprime_inds])
         return dh_mptd, hh_mppd
 
+    @likelihood.check_bounds
     def lnlike(self, par_dic):
         return self.coherent_score.marginalize(
             *self._get_dh_hh(par_dic), self._times)
