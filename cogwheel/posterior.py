@@ -143,6 +143,8 @@ class Posterior(utils.JSONMixin):
             Which parameters to maximize over. If provided, must be
             keys from ``self.prior.sampled_params``.
         """
+        print(f'Old lnl = {self.likelihood.lnlike(self.likelihood.par_dic_0)}')
+
         params = params or self.prior.sampled_params
         inds = [self.prior.sampled_params.index(par) for par in params]
 
@@ -161,7 +163,10 @@ class Posterior(utils.JSONMixin):
             likelihood over unfolds .
             """
             folded_par_vals[inds] = pars
-            return -max(lnlike_unfolds(*folded_par_vals))
+            try:
+                return -max(lnlike_unfolds(*folded_par_vals))
+            except RuntimeError:
+                return np.inf
 
         result = utils.differential_evolution_with_guesses(
             func=loss_function,
@@ -172,20 +177,10 @@ class Posterior(utils.JSONMixin):
         folded_par_vals[inds] = result
         i_fold = np.argmax(lnlike_unfolds(*folded_par_vals))
 
-        # Maximize distance analytically, also serves to add 'd_luminosity'
-        # entry to the dictionary in case it doesn't already have it.
         par_dic_0 = self.prior.transform(
             *self.prior.unfold(folded_par_vals)[i_fold])
 
-        d_h, h_h = self.likelihood._get_dh_hh_no_asd_drift(
-            par_dic_0 | {'d_luminosity': 1.}) @ self.likelihood.asd_drift**-2
-        par_dic_0['d_luminosity'] = h_h / d_h
-
-        self.likelihood.par_dic_0 = par_dic_0
-
-        lnlike = getattr(self.likelihood, 'lnlike_no_marginalization',
-                         self.likelihood.lnlike)
-        print(f'Found solution with lnl = {lnlike(self.likelihood.par_dic_0)}')
+        self.likelihood.par_dic_0 = self.likelihood.par_dic_0 | par_dic_0
 
     def get_eventdir(self, parentdir):
         """
@@ -260,8 +255,7 @@ def submit_likelihood_maximization(
     stdout_path = (eventdir/'posterior_from_event.out').resolve()
     stderr_path = (eventdir/'posterior_from_event.err').resolve()
 
-    args = ' '.join([eventname, mchirp_guess, approximant, prior_name,
-                     parentdir])
+    args = f'{eventname} {mchirp_guess} {approximant} {prior_name} {parentdir}'
 
     if kwargs:
         with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
