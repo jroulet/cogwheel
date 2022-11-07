@@ -67,10 +67,9 @@ class CoherentScoreHM(utils.JSONMixin):
                                     endpoint=False, retstep=True)
         self._nphi = nphi
         self._dh_phasor = np.exp(-1j * np.outer(self.m_arr, phi_ref))  # mo
-        self._hh_phasor = np.exp(
-            1j * np.outer(self.m_arr[self.m_inds,]
-                          - self.m_arr[self.mprime_inds,],
-                          phi_ref))  # mo
+        self._hh_phasor = np.exp(1j * np.outer(
+            self.m_arr[self.m_inds,] - self.m_arr[self.mprime_inds,],
+            phi_ref))  # mo
         self._phi_ref = phi_ref
         self._dphi = dphi
 
@@ -82,7 +81,7 @@ class CoherentScoreHM(utils.JSONMixin):
         Return the sequence of arrival time cumulatives (n_det, n_qmc)
         and the polarization rotation matrices (2, 2, n_qmc).
         """
-        ndim = len(self.sky_dict.detector_names) + len(['psi', 't_fine'])
+        ndim = len(self.sky_dict.detector_names) + len(['t_fine', 'psi'])
         sequence = Sobol(ndim, seed=self._rng).random_base2(self.log2n_qmc).T
         self._u_tdet = sequence[:-2]
 
@@ -210,16 +209,20 @@ class CoherentScoreHM(utils.JSONMixin):
 
         d_h = dh_qo[q_ids, o_ids]
         h_h = hh_qo[q_ids, o_ids]
+        d_luminosity = self._sample_distance(d_h, h_h)
 
         samples = {
             'd_luminosity': self._sample_distance(d_h, h_h),
             'dec': self.sky_dict.sky_samples['lat'][sky_ids],
             'lon': self.sky_dict.sky_samples['lon'][sky_ids],
             'phi_ref': self._phi_ref[o_ids],
-            'psi': self._psi[q_ids],
+            'psi': self._psi[physical_mask][q_ids],
             't_geocenter': (t_first_det[q_ids]
                             - self.sky_dict.geocenter_delay_first_det[sky_ids]),
-            'lnl_marginalized': lnl
+            'lnl_marginalized': lnl,
+            'lnl': (d_h * self.lookup_table.REFERENCE_DISTANCE / d_luminosity
+                    - h_h * self.lookup_table.REFERENCE_DISTANCE**2
+                    / d_luminosity**2 / 2)
             }
 
         return samples
