@@ -76,51 +76,6 @@ LG_FAST_YP = np.asarray(
      -10.75766078, -10.81269406, -10.86708726, -10.92085616])
 
 
-# ############## Functions to create library of saved samples ##########
-def get_geocenter_delays(detector_names, lat, lon):
-    """
-    Return array of shape (n_detectors, ...) time delays from geocenter
-    [s]. Vectorized over lat, lon.
-    """
-    locations = np.array([gw_utils.DETECTORS[detector_name].location
-                          for detector_name in detector_names])  # (ndet, 3)
-
-    direction = skyloc_angles.latlon_to_cart3d(lat, lon)
-    return -np.einsum('di,i...->d...', locations, direction) / lal.C_SI
-
-
-def get_fplus_fcross_0(detector_names, lat, lon):
-    """
-    Return array with antenna response functions fplus, fcross with
-    polarization psi=0.
-    Vectorized over lat, lon. Return shape is (..., n_det, 2)
-    where `...` is the shape of broadcasting (lat, lon).
-    """
-    responses = np.array([gw_utils.DETECTORS[detector_name].response
-                          for detector_name in detector_names]
-                        )  # (n_det, 3, 3)
-
-    lat, lon = np.broadcast_arrays(lat, lon)
-    coslon = np.cos(lon)
-    sinlon = np.sin(lon)
-    coslat = np.cos(lat)
-    sinlat = np.sin(lat)
-
-    x = np.array([sinlon, -coslon, np.zeros_like(sinlon)])  # (3, ...)
-    dx = np.einsum('dij,j...->di...', responses, x)  # (n_det, 3, ...)
-
-    y = np.array([-coslon * sinlat,
-                  -sinlon * sinlat,
-                  coslat])  # (3, ...)
-    dy = np.einsum('dij,j...->di...', responses, y)
-
-    fplus0 = (np.einsum('i...,di...->d...', x, dx)
-              - np.einsum('i...,di...->d...', y, dy))
-    fcross0 = (np.einsum('i...,di...->d...', x, dy)
-               + np.einsum('i...,di...->d...', y, dx))
-
-    return np.moveaxis([fplus0, fcross0], (0, 1), (-1, -2))
-
 @njit
 def dt2key(dt, dt_sinc=DEFAULT_DT, dt_max=DEFAULT_DT_MAX):
     """
@@ -176,14 +131,15 @@ def create_time_dict(
     lon_grid_2d, lat_grid_2d = np.meshgrid(lon_grid, lat_grid,
                                            indexing='ij') # n_lon x n_lat
     # returns n_det x n_ra x n_dec
-    delays_from_geocen = get_geocenter_delays(detector_names, lat_grid_2d,
-                                              lon_grid_2d)
+    delays_from_geocen = gw_utils.get_geocenter_delays(
+        detector_names, lat_grid_2d, lon_grid_2d)
     # Time delays in milliseconds :  n_ra x n_dec x (n_det-1)
     deltats = np.moveaxis(1000 * (delays_from_geocen[1:,...]
                                   - delays_from_geocen[0,...]),
                           0, -1)
     # Detector responses for psi = zero : n_ra x n_dec x n_det x 2
-    responses = get_fplus_fcross_0(detector_names, lat_grid_2d, lon_grid_2d)
+    responses = gw_utils.get_fplus_fcross_0(
+        detector_names, lat_grid_2d, lon_grid_2d)
 
     # Make `contour maps' of delta t, with entries = index of ra, index of dec
     dt_dict = {}
