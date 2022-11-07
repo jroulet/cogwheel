@@ -136,7 +136,11 @@ class PostProcessor:
         resolution, with no ASD-drift correction applied.
         """
         # Increase the relative-binning frequency resolution:
-        likelihood = copy.deepcopy(self.posterior.likelihood)
+        try:  # few seconds faster...
+            likelihood = copy.deepcopy(self.posterior.likelihood)
+        except TypeError:  # ...but likelihood might be un-pickleable
+            likelihood = self.posterior.likelihood.reinstantiate()
+
         if likelihood.pn_phase_tol:
             likelihood.pn_phase_tol /= self.relative_binning_boost
         else:
@@ -227,7 +231,7 @@ class PostProcessor:
     def _standard_samples(self, samples=None):
         """Iterator over standard parameter samples."""
         samples = samples if samples is not None else self.samples
-        return (sample for _, sample in samples[
+        return (dict(sample) for _, sample in samples[
             self.posterior.likelihood.waveform_generator.params].iterrows())
 
 
