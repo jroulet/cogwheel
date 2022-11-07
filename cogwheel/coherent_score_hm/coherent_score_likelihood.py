@@ -55,6 +55,9 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
         self.t_range = t_range
         self._times = (np.arange(*t_range, 1 / (2*event_data.fbounds[1]))
                        + par_dic_0.get('t_geocenter', 0))
+        self.ref_dic = {
+            'd_luminosity': self.coherent_score.lookup_table.REFERENCE_DISTANCE,
+            'phi_ref': 0.}
 
         super().__init__(event_data, waveform_generator, par_dic_0,
                          fbin, pn_phase_tol, spline_degree)
@@ -134,11 +137,8 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
         self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
 
     def _get_dh_hh(self, par_dic):
-        ref = {'d_luminosity':
-                   self.coherent_score.lookup_table.REFERENCE_DISTANCE,
-               'phi_ref': 0.}
         h_mpb = self.waveform_generator.get_hplus_hcross(
-            self.fbin, par_dic | ref, by_m=True)  # mpb
+            self.fbin, dict(par_dic) | self.ref_dic, by_m=True)  # mpb
         dh_mptd = np.einsum('mptdb,mpb->mptd', self._d_h_weights, h_mpb.conj())
         m_inds, mprime_inds = self._get_m_mprime_inds()
         hh_mppd = np.einsum('mpPdb,mpb,mPb->mpPd',
@@ -177,11 +177,8 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
         Faster than a for loop over `_get_dh_hh` thanks to Strassen
         matrix multiplication to get (d|h) timeseries.
         """
-        ref = {'d_luminosity':
-                   self.coherent_score.lookup_table.REFERENCE_DISTANCE,
-               'phi_ref': 0.}
         h_mpbn = np.moveaxis([self.waveform_generator.get_hplus_hcross(
-                                  self.fbin, dict(sample) | ref, by_m=True)
+                                  self.fbin, dict(sample) | self.ref_dic, by_m=True)
                               for _, sample in samples[self.params].iterrows()],
                              0, -1)  # mpbn
 
