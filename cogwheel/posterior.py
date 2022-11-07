@@ -11,8 +11,8 @@ import numpy as np
 
 from cogwheel import gw_prior
 from cogwheel import utils
-from cogwheel.likelihood import RelativeBinningLikelihood, \
-    ReferenceWaveformFinder
+from cogwheel.likelihood import (RelativeBinningLikelihood,
+                                 ReferenceWaveformFinder)
 
 
 class PosteriorError(Exception):
@@ -302,7 +302,8 @@ def main(eventname, mchirp_guess, approximant, prior_name, parentdir,
         ``Posterior.from_event()``.
 
     refine: bool
-        Whether to apply an expensive
+        Whether to apply an expensive likelihood maximization over all
+        parameters.
     """
     kwargs = {}
     if kwargs_filename:

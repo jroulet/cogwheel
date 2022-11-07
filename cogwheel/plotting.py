@@ -298,7 +298,7 @@ class CornerPlot:
         self.pdfs_1d = {}
         self.pdfs_2d = {}
 
-        for par, values in samples.iteritems():
+        for par, values in samples.items():
             self.pdfs_1d[par], bin_edges[par] = np.histogram(
                 values, bins=bins, density=density, weights=weights)
             self.arrs_1d[par] = get_midpoints(bin_edges[par])

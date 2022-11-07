@@ -33,7 +33,7 @@ class RelativeBinningLikelihood(CBCLikelihood):
                                'phi_ref': 0.}
 
     def __init__(self, event_data, waveform_generator, par_dic_0,
-                 fbin=None, pn_phase_tol=None, spline_degree=3):
+                 fbin=None, pn_phase_tol=None, spline_degree=3, **kwargs):
         """
         Parameters
         ----------
@@ -57,12 +57,19 @@ class RelativeBinningLikelihood(CBCLikelihood):
         spline_degree: int
             Degree of the spline used to interpolate the ratio between
             waveform and reference waveform for relative binning.
+
+        kwargs: Dummy argument, added so that from_reference_waveform_finder
+            doesn't throw an error if someone passes kwargs
         """
         if (fbin is None) == (pn_phase_tol is None):
             raise ValueError('Pass exactly one of `fbin` or `pn_phase_tol`.')
 
         super().__init__(event_data, waveform_generator)
 
+        # Added this attribute so that get_init_dict() succeeds
+        self.kwargs = kwargs.copy()
+        # Assuming the user isn't evil and passing 'kwargs' inside kwargs
+        self.__dict__.update(kwargs)
         self._spline_degree = spline_degree
 
         # Backward compatibility fix, shouldn't happen in new code:
@@ -418,8 +425,10 @@ class RelativeBinningLikelihood(CBCLikelihood):
         Return dictionary with keyword arguments to reproduce the class
         instance.
         """
-        return super().get_init_dict() | ({'fbin': None} if self.pn_phase_tol
-                                          else {})
+        init_dict = super().get_init_dict() | \
+            ({'fbin': None} if self.pn_phase_tol else {})
+        init_dict.pop('kwargs', None)
+        return init_dict
 
     @classmethod
     def from_reference_waveform_finder(

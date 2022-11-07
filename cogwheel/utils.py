@@ -12,6 +12,7 @@ import tempfile
 import textwrap
 import numpy as np
 from scipy.optimize import _differentialevolution
+from numba import njit, vectorize
 
 
 DIR_PERMISSIONS = 0o755
@@ -141,6 +142,36 @@ def resample_equal(samples, weights_col=WEIGHTS_NAME, num=None):
     return samples_equal
 
 
+@njit
+def rand_choice_nb(arr, cprob, nvals):
+    """
+    Sample randomly from a list of probabilities
+
+    Parameters
+    ----------
+    arr: np.ndarray
+        A nD numpy array of values to sample from
+
+    cprob: np.arrray
+        A 1D numpy array of cumulative probabilities for the given samples
+
+    nvals: int
+        Number of samples desired
+
+    Return
+    ------
+    nvals random samples from the given array with the given probabilities
+    """
+    rsamps = np.random.random(size=nvals)
+    return arr[np.searchsorted(cprob, rsamps, side="right")]
+
+
+@vectorize(nopython=True)
+def abs_sq(x):
+    """x.real^2 + x.imag^2"""
+    return x.real**2 + x.imag**2
+
+
 def merge_dictionaries_safely(*dics):
     """
     Merge multiple dictionaries into one.
@@ -156,6 +187,44 @@ def merge_dictionaries_safely(*dics):
     return merged
 
 
+def checkempty(array, verbose=False):
+    # First deal with irritating case when we can't make a numpy array
+    if hasattr(array, "__len__"):
+        # Deal with even more irritating edge case when the attribute exists,
+        # but throws an error when queried
+        try:
+            if len(array) > 0:
+                return False
+        except TypeError:
+            if verbose:
+                print("Object has `len' attribute that can't be queried")
+            return True
+    nparray = np.asarray(array)
+    return (nparray is None
+            or nparray.dtype == np.dtype('O')
+            or nparray.size == 0)
+
+
+def rm_suffix(string, suffix='.json', new_suffix=None):
+    """
+    Removes suffix from string if present, and appends a new suffix if
+    requested.
+
+    Parameters
+    ----------
+    string: Input string to modify.
+    suffix: Suffix to remove if present.
+    new_suffix: Suffix to add.
+    """
+    if string.endswith(suffix):
+        outstr = string[:-len(suffix)]
+    else:
+        outstr = string
+    if new_suffix is not None:
+        outstr += new_suffix
+    return outstr
+
+
 def update_dataframe(df1, df2):
     """
     Modify `df1` in-place by adding the columns from `df2`, where `df1`
@@ -163,7 +232,7 @@ def update_dataframe(df1, df2):
     Caution: if (some of) the columns of `df1` are also in `df2` they
     get silently overwritten without checking for consistency.
     """
-    for col, values in df2.iteritems():
+    for col, values in df2.items():
         df1[col] = values
 
 
