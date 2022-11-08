@@ -1,7 +1,6 @@
 """Utility functions specific to gravitational waves."""
 import scipy.interpolate
 import numpy as np
-
 import lal
 
 from cogwheel import utils
@@ -70,10 +69,15 @@ def get_geocenter_delays(detector_names, lat, lon):
     Return array of shape (n_detectors, ...) time delays from geocenter
     [s]. Vectorized over lat, lon.
     """
-    locations = np.array([gw_utils.DETECTORS[detector_name].location
+    locations = np.array([DETECTORS[detector_name].location
                           for detector_name in detector_names])  # (ndet, 3)
+    #JM 08/11/22 prevert cyclic reference of gw_utils.py and skyloc_angles.py
+    # direction = skyloc_angles.latlon_to_cart3d(lat, lon) #
 
-    direction = skyloc_angles.latlon_to_cart3d(lat, lon)
+    direction = np.array([np.cos(lon) * np.cos(lat),
+                     np.sin(lon) * np.cos(lat),
+                     np.sin(lat)])
+
     return -np.einsum('di,i...->d...', locations, direction) / lal.C_SI
 
 
