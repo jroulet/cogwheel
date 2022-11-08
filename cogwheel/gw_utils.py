@@ -84,7 +84,7 @@ def get_fplus_fcross_0(detector_names, lat, lon):
     Vectorized over lat, lon. Return shape is (..., n_det, 2)
     where `...` is the shape of broadcasting (lat, lon).
     """
-    responses = np.array([gw_utils.DETECTORS[detector_name].response
+    responses = np.array([DETECTORS[detector_name].response
                           for detector_name in detector_names]
                         )  # (n_det, 3, 3)
 
