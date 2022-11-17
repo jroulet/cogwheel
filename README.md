@@ -131,7 +131,7 @@ Instance of `cogwheel.waveform.WaveformGenerator`.
 * Can toggle harmonic modes (edit the attribute `harmonic_modes`).
 * Can change approximant (edit the attribute `approximant`). Implemented approximants and their allowed harmonic modes are in `waveform.APPROXIMANTS`.
 
-### Acknowledgment
+## Acknowledgment
 
 This package is based upon work supported by the National Science Foundation under PHY-2012086, and PHY-1748958.
 
