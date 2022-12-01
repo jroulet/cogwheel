@@ -66,29 +66,33 @@ def chieff_from_mtot_fmerger(mtot, f_merger):
     return 1 - ((1 - 2 * np.pi * f_merger * mtot * lal.MTSUN_SI) / .63)**(1/.3)
 
 
-class TruncCauchy(scipy.stats.rv_continuous):
-    """Truncated Cauchy (Lorentz) distribution."""
-    def _cdf_cauchy(self, x):
-        return np.arctan(x) / np.pi + .5
+class TruncatedDistribution(scipy.stats.rv_continuous):
+    """Truncate a distribution."""
+    def __init__(self, non_truncated_distribution, **kwargs):
+        super().__init__(**kwargs)
+        self.non_truncated_distribution = non_truncated_distribution
 
     def _cdf(self, x, a, b):
-        u_a, u_b, u_x = self._cdf_cauchy((a, b, x))
+        u_a, u_b, u_x = self.non_truncated_distribution.cdf((a, b, x))
         return (u_x - u_a) / (u_b - u_a)
 
     def _ppf(self, q, a, b):
-        u_a, u_b = self._cdf_cauchy((a, b))
+        u_a, u_b = self.non_truncated_distribution.cdf((a, b))
         u_q = u_a + (u_b - u_a) * q
-        return np.tan(np.pi * (u_q - .5))
+        return self.non_truncated_distribution.ppf(u_q)
 
     def _pdf(self, x, a, b):
-        u_a, u_b = self._cdf_cauchy((a, b))
-        return 1 / (np.pi * (1 + x**2) * (u_b - u_a))
+        u_a, u_b = self.non_truncated_distribution.cdf((a, b))
+        return np.where((x > a) & (x < b),
+                        self.non_truncated_distribution.pdf(x) / (u_b - u_a),
+                        0.)
 
     def _argcheck(self, a, b):
         return a < b
 
 
-trunccauchy = TruncCauchy()
+trunccauchy = TruncatedDistribution(scipy.stats.cauchy)
+trunclaplace = TruncatedDistribution(scipy.stats.laplace)
 
 
 def inverse_cdf_and_jacobian(cdf_val, points, pdf_points):
@@ -146,11 +150,10 @@ class PNCoordinates:
         """
         Parameters
         ----------
-        frequencies: 1d float array or None
-            Frequencies in Hz. If `None`, `whitened_amplitude` also must
-            be `None`.
+        frequencies: 1d float array
+            Frequencies in Hz.
 
-        whitened_amplitude: array like frequencies or None
+        whitened_amplitude: array like frequencies
             |h| / sqrt(PSD), with arbitrary normalization, evaluated at
             `frequencies`. If there are multiple detectors, pass the
             root mean square over detectors.
@@ -202,9 +205,10 @@ class PNCoordinates:
         fslice = likelihood.event_data.fslice
         frequencies = likelihood.event_data.frequencies[fslice]
 
-        h_f = likelihood._get_h_f_interpolated(likelihood.par_dic_0)
+        h_f = likelihood.waveform_generator.get_strain_at_detectors(
+            frequencies, likelihood.par_dic_0)
         whitened_amplitude = np.linalg.norm(
-            h_f * likelihood.event_data.wht_filter, axis=0)[fslice]
+            h_f * likelihood.event_data.wht_filter[:, fslice], axis=0)
         return cls(frequencies, whitened_amplitude)
 
     def transform(self, mchirp, eta, chieff):
@@ -314,7 +318,7 @@ class PNMap:
         posterior.likelihood.waveform_generator.harmonic_modes = [(2, 2)]
 
         par_dic_0 = posterior.likelihood.par_dic_0
-        snr = np.sqrt(2 * posterior.likelihood.lnlike(par_dic_0))
+        snr = np.sqrt(2 * posterior.likelihood.lnlike_fft(par_dic_0))
         pn_coordinates = PNCoordinates.from_likelihood(posterior.likelihood)
         init_dict = posterior.prior.get_init_dict()
         mchirp_range = init_dict['mchirp_range']
@@ -391,12 +395,14 @@ class PNMap:
             mchirp, lnq)
         chieff_min = -1
         chieff_max = 1
+        parameter_min = (chieff_min - chieff_loc) / chieff_scale
+        parameter_max = (chieff_max - chieff_loc) / chieff_scale
+        evidence_chieff = weight * (
+            (self._likelihood_chieff_given_mchirp_lnq.cdf(parameter_max)
+             - self._likelihood_chieff_given_mchirp_lnq.cdf(parameter_min))
+            / (parameter_max - parameter_min))
 
-        return weight * (
-            self._likelihood_chieff_given_mchirp_lnq.cdf(
-                chieff_max, loc=chieff_loc, scale=chieff_scale)
-            - self._likelihood_chieff_given_mchirp_lnq.cdf(
-                chieff_min, loc=chieff_loc, scale=chieff_scale))
+        return evidence_chieff
 
     def _chieff_loc_and_scale_due_to_fmerger(self, mchirp, lnq):
         """
@@ -416,22 +422,21 @@ class PNMap:
         fmerger_min = get_f_merger(mtot, -1)
         fmerger_max = get_f_merger(mtot, 1)
 
-        # TODO maybe change trunccauchy to trunclaplace
         kwargs = dict(
             a=(fmerger_min - self._fmerger_0) / self._fmerger_scale_0,
             b=(fmerger_max - self._fmerger_0) / self._fmerger_scale_0,
             loc=self._fmerger_0,
             scale=self._fmerger_scale_0)
-        fmerger5 = trunccauchy.ppf(.05, **kwargs)
-        fmerger95 = trunccauchy.ppf(.95, **kwargs)
+        fmerger2 = trunclaplace.ppf(.2, **kwargs)
+        fmerger8 = trunclaplace.ppf(.8, **kwargs)
 
         # Linear approximation to chieff(fmerger) near region with support
-        chieff5 = chieff_from_mtot_fmerger(mtot, fmerger5)
-        chieff95 = chieff_from_mtot_fmerger(mtot, fmerger95)
+        chieff2 = chieff_from_mtot_fmerger(mtot, fmerger2)
+        chieff8 = chieff_from_mtot_fmerger(mtot, fmerger8)
 
-        dchieff_dfmerger = (chieff95 - chieff5) / (fmerger95 - fmerger5)
+        dchieff_dfmerger = (chieff8 - chieff2) / (fmerger8 - fmerger2)
 
-        chieff_loc = chieff5 + (self._fmerger_0-fmerger5) * dchieff_dfmerger
+        chieff_loc = chieff2 + (self._fmerger_0-fmerger2) * dchieff_dfmerger
         chieff_scale = self._fmerger_scale_0 * dchieff_dfmerger
 
         return chieff_loc, chieff_scale
@@ -490,9 +495,9 @@ class PNMap:
         loc2, scale2, weight \
             = self._chieff_loc_scale_and_weight_due_to_inspiral(mchirp, lnq)
 
-        weights = scale1**-2, scale2**-2
-        chieff_loc = np.average((loc1, loc2), weights=weights, axis=0)
-        chieff_scale = sum(weights)**-.5 / self.beta_temperature
+        inv_variances = np.array((scale1, scale2))**-2
+        chieff_loc = np.average((loc1, loc2), weights=inv_variances, axis=0)
+        chieff_scale = sum(inv_variances * self.beta_temperature)**-.5
 
         # Penalize if chieff prediction from merger frequency is
         # inconsistent with chieff prediction from inspiral:
@@ -555,6 +560,7 @@ class PNMap:
         lnq_post = (self._lnq_prior(self._lnq_grid)
                     * self._evidence_chieff_given_mchirp_lnq(mchirp,
                                                              self._lnq_grid))
+#         lnq_post = np.ones_like(self._lnq_grid)  # Force flat in lnq (experimental)
 
         lnq, du_dlnq = inverse_cdf_and_jacobian(u_lnq, self._lnq_grid,
                                                 lnq_post)
