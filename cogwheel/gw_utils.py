@@ -1,10 +1,13 @@
 """Utility functions specific to gravitational waves."""
 import scipy.interpolate
 import numpy as np
-
 import lal
 
 from cogwheel import utils
+
+
+# ----------------------------------------------------------------------
+# Detector locations and responses:
 
 DETECTORS = {'H': lal.CachedDetectors[lal.LHO_4K_DETECTOR],
              'L': lal.CachedDetectors[lal.LLO_4K_DETECTOR],
@@ -57,6 +60,58 @@ def time_delay_from_geocenter(detector_names, ra, dec, tgps):
     return np.array([
         lal.TimeDelayFromEarthCenter(DETECTORS[det].location, ra, dec, tgps)
         for det in detector_names])
+
+
+# ----------------------------------------------------------------------
+# Similar to the above, but in Earth-fixed coordinates and vectorized:
+def get_geocenter_delays(detector_names, lat, lon):
+    """
+    Return array of shape (n_detectors, ...) time delays from geocenter
+    [s]. Vectorized over lat, lon.
+    """
+    locations = np.array([DETECTORS[detector_name].location
+                          for detector_name in detector_names])  # (ndet, 3)
+    #JM 08/11/22 prevert cyclic reference of gw_utils.py and skyloc_angles.py
+    # direction = skyloc_angles.latlon_to_cart3d(lat, lon) #
+
+    direction = np.array([np.cos(lon) * np.cos(lat),
+                     np.sin(lon) * np.cos(lat),
+                     np.sin(lat)])
+
+    return -np.einsum('di,i...->d...', locations, direction) / lal.C_SI
+
+
+def get_fplus_fcross_0(detector_names, lat, lon):
+    """
+    Return array with antenna response functions fplus, fcross with
+    polarization psi=0.
+    Vectorized over lat, lon. Return shape is (..., n_det, 2)
+    where `...` is the shape of broadcasting (lat, lon).
+    """
+    responses = np.array([DETECTORS[detector_name].response
+                          for detector_name in detector_names]
+                        )  # (n_det, 3, 3)
+
+    lat, lon = np.broadcast_arrays(lat, lon)
+    coslon = np.cos(lon)
+    sinlon = np.sin(lon)
+    coslat = np.cos(lat)
+    sinlat = np.sin(lat)
+
+    x = np.array([sinlon, -coslon, np.zeros_like(sinlon)])  # (3, ...)
+    dx = np.einsum('dij,j...->di...', responses, x)  # (n_det, 3, ...)
+
+    y = np.array([-coslon * sinlat,
+                  -sinlon * sinlat,
+                  coslat])  # (3, ...)
+    dy = np.einsum('dij,j...->di...', responses, y)
+
+    fplus0 = (np.einsum('i...,di...->d...', x, dx)
+              - np.einsum('i...,di...->d...', y, dy))
+    fcross0 = (np.einsum('i...,di...->d...', x, dy)
+               + np.einsum('i...,di...->d...', y, dx))
+
+    return np.moveaxis([fplus0, fcross0], (0, 1), (-1, -2))
 
 
 #-----------------------------------------------------------------------
