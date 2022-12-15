@@ -15,9 +15,12 @@ from .extrinsic import (UniformPhasePrior,
                         UniformTimePrior,
                         UniformPolarizationPrior,
                         UniformLuminosityVolumePrior,
-                        UniformComovingVolumePrior)
+                        UniformComovingVolumePrior,
+                        UniformComovingVolumePriorSampleEffectiveDistance)
 
-from .mass import UniformDetectorFrameMassesPrior
+from .mass import (UniformDetectorFrameMassesPrior,
+                   UniformDetectorFrameTotalMassInverseMassRatioPrior,
+                   UniformSourceFrameTotalMassInverseMassRatioPrior)
 
 from .tides import UniformTidalDeformabilitiesBNSPrior
 
@@ -226,3 +229,91 @@ class MarginalizedDistanceLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
     prior_classes = LVCPrior.prior_classes.copy()
     prior_classes.pop(prior_classes.index(UniformLuminosityVolumePrior))
+
+class IASPrior(RegisteredPriorMixin, CombinedPrior):
+    """Precessing, flat in chieff, uniform luminosity volume."""
+    prior_classes = [
+        FixedReferenceFrequencyPrior,
+        UniformDetectorFrameMassesPrior,
+        UniformEffectiveSpinPrior,
+        UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior,
+        UniformPolarizationPrior,
+        UniformTimePrior,
+        UniformPhasePrior,
+        UniformLuminosityVolumePrior,
+        ZeroTidalDeformabilityPrior]
+
+class NitzMassIASSpinPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Priors are uniform in source-frame total mass, inverse mass ratio,
+    effective spin, and comoving VT.
+    Sampling is in mtot_source, lnq, d_effective, and the rest of the
+    IAS spin and extrinsic parameters.
+    """
+    prior_classes = [
+        FixedReferenceFrequencyPrior,
+        UniformPolarizationPrior,
+        UniformTimePrior,
+        UniformPhasePrior,
+        UniformComovingVolumePriorSampleEffectiveDistance,
+        UniformSourceFrameTotalMassInverseMassRatioPrior,
+        UniformEffectiveSpinPrior,
+        UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior,
+        ZeroTidalDeformabilityPrior]
+
+
+class NitzMassLVCSpinPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Priors have isotropic spins and are uniform in source-frame total
+    mass, inverse mass ratio, and comoving VT.
+    Sampling is in mtot_source, lnq, d_effective, and the rest of the
+    LVC spin and extrinsic parameters.
+    """
+    prior_classes = [
+        FixedReferenceFrequencyPrior,
+        IsotropicSpinsAlignedComponentsPrior,
+        UniformPolarizationPrior,
+        IsotropicSpinsInplaneComponentsIsotropicInclinationSkyLocationPrior,
+        UniformTimePrior,
+        UniformPhasePrior,
+        UniformComovingVolumePriorSampleEffectiveDistance,
+        UniformSourceFrameTotalMassInverseMassRatioPrior,
+        ZeroTidalDeformabilityPrior]
+
+
+class NitzDetectorFrameMassIASSpinPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Priors are uniform in detector-frame total mass, inverse mass ratio,
+    effective spin, and comoving VT.
+    Sampling is in mtot_source, lnq, d_hat, and the rest of the
+    IAS spin and extrinsic parameters.
+    """
+    prior_classes = [
+        FixedReferenceFrequencyPrior,
+        UniformDetectorFrameTotalMassInverseMassRatioPrior,
+        UniformEffectiveSpinPrior,
+        UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior,
+        UniformPolarizationPrior,
+        UniformTimePrior,
+        UniformPhasePrior,
+        UniformComovingVolumePrior,
+        ZeroTidalDeformabilityPrior]
+
+
+class NitzDetectorFrameMassLVCSpinPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Priors have isotropic spins and are uniform in detector-frame total
+    mass, inverse mass ratio, and comoving VT.
+    Sampling is in mtot_source, lnq, d_hat, and the rest of the
+    LVC spin and extrinsic parameters.
+    """
+    prior_classes = [
+        FixedReferenceFrequencyPrior,
+        UniformDetectorFrameTotalMassInverseMassRatioPrior,
+        IsotropicSpinsAlignedComponentsPrior,
+        UniformPolarizationPrior,
+        IsotropicSpinsInplaneComponentsIsotropicInclinationSkyLocationPrior,
+        UniformTimePrior,
+        UniformPhasePrior,
+        UniformComovingVolumePrior,
+        ZeroTidalDeformabilityPrior]
