@@ -11,7 +11,8 @@ import numpy as np
 
 import lal
 
-from cogwheel.cosmology import comoving_to_luminosity_diff_vt_ratio
+from cogwheel.cosmology import (comoving_to_luminosity_diff_vt_ratio,
+                                z_of_d_luminosity)
 from cogwheel import gw_utils
 from cogwheel import skyloc_angles
 from cogwheel import utils
@@ -340,3 +341,56 @@ class UniformComovingVolumePrior(UniformLuminosityVolumePrior):
             return -np.inf
         return np.log(d_luminosity**3 / d_hat
                       * comoving_to_luminosity_diff_vt_ratio(d_luminosity))
+
+
+class UniformComovingVolumePriorSampleEffectiveDistance(
+        ReferenceDetectorMixin, Prior):
+    """
+    Distance prior uniform in luminosity volume and detector-frame time.
+    The sampled parameter is:
+      d_effective = d_luminosity
+                    / |self.geometric_factor_refdet(ra, dec, psi, iota)|
+    where the effective distance is defined in one "reference" detector
+    (see parent class ReferenceDetectorMixin).
+    """
+    standard_params = ['d_luminosity']
+    range_dic = {'d_effective': NotImplemented}
+    conditioned_on = ['ra', 'dec', 'psi', 'iota']
+
+    def __init__(self, *, tgps, ref_det_name, d_effective_max=50000,
+                 **kwargs):
+        self.range_dic = {'d_effective': (0.001, d_effective_max)}
+        super().__init__(tgps=tgps, ref_det_name=ref_det_name, **kwargs)
+        self.tgps = tgps
+        self.ref_det_name = ref_det_name
+
+    def transform(self, d_effective, ra, dec, psi, iota):
+        """d_effective to d_luminosity"""
+        return {'d_luminosity': d_effective * np.abs(
+            self.geometric_factor_refdet(ra, dec, psi, iota))}
+
+    def inverse_transform(self, d_luminosity, ra, dec, psi, iota):
+        """d_luminosity to d_effective"""
+        return {'d_effective': d_luminosity / np.abs(
+            self.geometric_factor_refdet(ra, dec, psi, iota))}
+
+    def lnprior(self, d_effective, ra, dec, psi, iota):
+        """
+        Natural log of the prior probability density for d_effective.
+        """
+        d_luminosity = d_effective * np.abs(
+            self.geometric_factor_refdet(ra, dec, psi, iota))
+        z = z_of_d_luminosity(d_luminosity)
+        cosmo_weight = (
+            (1 - d_luminosity * z_of_d_luminosity(d_luminosity) / (1+z))
+            / (1 + z)**4)
+        return np.log(cosmo_weight * d_luminosity**3 / d_effective)
+
+    def get_init_dict(self):
+        """
+        Return dictionary with keyword arguments to reproduce the class
+        instance.
+        """
+        return {'tgps': self.tgps,
+                'ref_det_name': self.ref_det_name,
+                'd_effective_max': self.range_dic['d_effective'][1]}
