@@ -20,11 +20,35 @@ class CoherentScoreHM(utils.JSONMixin):
     # log-likelihood from the peak bigger than ``DLNL_THRESHOLD``:
     DLNL_THRESHOLD = 12.
 
-    def __init__(self, sky_dict, m_arr,
-                 lookup_table=None,
+    def __init__(self, sky_dict, m_arr, lookup_table=None,
                  log2n_qmc: int = 11, nphi=128, seed=0,
                  beta_temperature=.1):
         """
+        Parameters
+        ----------
+        sky_dict:
+            Instance of cogwheel.coherent_score_hm.skydict.SkyDictionary
+
+        m_arr: int array
+            m number of the harmonic modes considered.
+
+        lookup_table:
+            Instance of cogwheel.likelihood.marginalized_distance.LookupTable
+
+        log2n_qmc: int
+            Base-2 logarithm of the number of requested extrinsic
+            parameter samples.
+
+        nphi: int
+            Number of orbital phases over which to perform
+            marginalization with trapezoid quadrature rule.
+
+        seed: {int, None, np.random.RandomState}
+            For reproducibility of the extrinsic parameter samples.
+
+        beta_temperature: float
+            Inverse temperature, tempers the arrival time probability at
+            each detector.
         """
         self.seed = seed
         self._rng = np.random.default_rng(seed)
@@ -75,11 +99,13 @@ class CoherentScoreHM(utils.JSONMixin):
 
     def _create_qmc_sequence(self):
         """
-        Generate QMC sequence of (n_det+1, n_qmc) points.
+        Generate QMC sequence of (n_det+2, n_qmc) points.
         The sequence explores the cumulatives of the single-detector
-        (incoherent) likelihood of arrival times, and polarization.
-        Return the sequence of arrival time cumulatives (n_det, n_qmc)
-        and the polarization rotation matrices (2, 2, n_qmc).
+        (incoherent) likelihood of arrival times, the polarization, and
+        the fine (subpixel) time of arrival.
+        Set as attributes the sequence of arrival time cumulatives
+        (n_det, n_qmc), fine timeshifts (n_qmc), polariations (n_qmc)
+        and their rotation matrices (2, 2, n_qmc).
         """
         ndim = len(self.sky_dict.detector_names) + len(['t_fine', 'psi'])
         sequence = Sobol(ndim, seed=self._rng).random_base2(self.log2n_qmc).T
@@ -101,6 +127,32 @@ class CoherentScoreHM(utils.JSONMixin):
         Evaluate inner products (d|h) and (h|h) at QMC integration
         points over extrinsic parameters, given timeseries of (d|h) and
         value of (h|h) by mode `m`, polarization `p` and detector `d`.
+
+        Parameters
+        ----------
+        dh_mptd: (n_m, 2, n_t, n_d) complex array
+            Timeseries of complex (d|h), inner product of data against a
+            waveform at reference distance and phase.
+            Decomposed by mode, polarization, time, detector.
+
+        hh_mppd: (n_mm, 2, 2, n_d) complex array
+            Complex (h|h) inner product of a waveform with itself,
+            decomposed by mode, polarization and detector.
+
+        times: (n_t,) float array
+            Timestamps of the timeseries (s)
+
+        return_samples: bool or int
+            False: return marginalized log likelihood (default)
+            True: return a dictionary whose keys are extrinsic parameter
+                  names, 'lnl' and 'lnl_marginalized', and whose values
+                  correspond to one sample.
+            int: similar to `True` except the values are arrays
+                 corresponding to many samples.
+
+        Return
+        ------
+        lnl (float) or samples (dict) depending on `return_samples`.
         """
         # Resample to match sky_dict's dt:
         if (fs_ratio := self.sky_dict.f_sampling * (times[1]-times[0])) != 1:
