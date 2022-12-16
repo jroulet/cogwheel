@@ -144,11 +144,11 @@ class CoherentScoreHM(utils.JSONMixin):
 
         return_samples: bool or int
             False: return marginalized log likelihood (default)
-            True: return a dictionary whose keys are extrinsic parameter
-                  names, 'lnl' and 'lnl_marginalized', and whose values
-                  correspond to one sample.
+            True: return a dictionary whose keys are extrinsic
+                parameter names, 'lnl' and 'lnl_marginalized', and whose
+                values correspond to one sample.
             int: similar to `True` except the values are arrays
-                 corresponding to many samples.
+                corresponding to many samples.
 
         Return
         ------

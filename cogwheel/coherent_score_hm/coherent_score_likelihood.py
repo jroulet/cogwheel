@@ -152,25 +152,47 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
         return self.coherent_score.marginalize(
             *self._get_dh_hh(par_dic), self._times)
 
-    def postprocess_samples(self, samples: pd.DataFrame):
+    def postprocess_samples(self, samples: pd.DataFrame, num=None):
         """
         Add columns for marginalized parameters to a DataFrame of
         intrinsic parameter samples, with values taken randomly from the
         conditional posterior.
-        `samples` needs to have columns for all `self.params`.
+
+        Parameters
+        ----------
+        samples: pd.DataFrame
+            Dataframe of intrinsic parameter samples, needs to have
+            columns for all `self.params`.
+
+        num: int or None
+            How many extrinsic parameters to draw for every intrinsic.
+            If None, columns for extrinsic parameters are added to
+            `samples` in-place.
+            If an int, a new DataFrame of length `num * len(samples)` is
+            returned. Each intrinsic parameter value will be repeated
+            `num` times.
         """
         dh_nmptd, hh_nmppd = self._get_many_dh_hh(samples)
 
-        extrinsic = pd.DataFrame.from_records(
-            self.coherent_score.marginalize(dh_mptd, hh_mppd, self._times,
-                                            return_samples=True)
-            for dh_mptd, hh_mppd in zip(dh_nmptd, hh_nmppd))
+        return_samples = True if num is None else num
+        extrinsic = [self.coherent_score.marginalize(dh_mptd, hh_mppd,
+                                                     self._times,
+                                                     return_samples)
+                     for dh_mptd, hh_mppd in zip(dh_nmptd, hh_nmppd)]
 
-        extrinsic['ra'] = skyloc_angles.lon_to_ra(
-            extrinsic['lon'],
-            lal.GreenwichMeanSiderealTime(self.event_data.tgps))
+        for ext in extrinsic:
+            ext['ra'] = skyloc_angles.lon_to_ra(
+                ext['lon'], lal.GreenwichMeanSiderealTime(self.event_data.tgps))
 
-        utils.update_dataframe(samples, extrinsic)
+        if isinstance(num, int):
+            fullsamples = samples.loc[samples.index.repeat(num)].reset_index(
+                drop=True)
+            extrinsic_df = pd.concat((pd.DataFrame(ext) for ext in extrinsic),
+                                     ignore_index=True)
+            utils.update_dataframe(fullsamples, extrinsic_df)
+            return fullsamples
+
+        utils.update_dataframe(samples, pd.DataFrame.from_records(extrinsic))
 
     def _get_many_dh_hh(self, samples: pd.DataFrame):
         """
@@ -178,7 +200,8 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
         matrix multiplication to get (d|h) timeseries.
         """
         h_mpbn = np.moveaxis([self.waveform_generator.get_hplus_hcross(
-                                  self.fbin, dict(sample) | self.ref_dic, by_m=True)
+                                  self.fbin, dict(sample) | self.ref_dic,
+                                  by_m=True)
                               for _, sample in samples[self.params].iterrows()],
                              0, -1)  # mpbn
 
