@@ -214,7 +214,7 @@ class MarginalizedDistanceIASPrior(RegisteredPriorMixin, CombinedPrior):
     Uniform in effective spin and detector-frame component masses.
     """
     prior_classes = IASPrior.prior_classes.copy()
-    prior_classes.pop(prior_classes.index(UniformLuminosityVolumePrior))
+    prior_classes.remove(UniformLuminosityVolumePrior)
 
 
 class MarginalizedDistanceLVCPrior(RegisteredPriorMixin, CombinedPrior):
@@ -225,4 +225,4 @@ class MarginalizedDistanceLVCPrior(RegisteredPriorMixin, CombinedPrior):
     and detector-frame component masses.
     """
     prior_classes = LVCPrior.prior_classes.copy()
-    prior_classes.pop(prior_classes.index(UniformLuminosityVolumePrior))
+    prior_classes.remove(UniformLuminosityVolumePrior)
