@@ -7,14 +7,49 @@ from pathlib import Path
 from scipy.integrate import quad
 from scipy.interpolate import (RectBivariateSpline,
                                InterpolatedUnivariateSpline)
+import textwrap
+import warnings
 import numpy as np
 
 from cogwheel.likelihood import RelativeBinningLikelihood
 from cogwheel import utils
 
 
-LOOKUP_TABLES_FNAME = Path(__file__).parent / 'lookup_tables.npz'
+LOOKUP_TABLES_FNAME = Path(__file__).parent/'lookup_tables.npz'
 D_LUMINOSITY_MAX = 1.5e4  # Default distance integration limit (Mpc)
+
+
+_VERSION = 1
+_VERSION_KEY = 'version'
+_VERSION_WARNING = textwrap.dedent(f"""
+    Clearing cache to switch to new version {_VERSION} of marginalized
+    likelihood over distance. New values might not reproduce old results.
+
+    Changelog
+    ---------
+    version 1:
+        Due to a bug and a change in convention, log marginalized likelihoods
+        previously computed had a constant offset with respect to the new
+        behavior.
+        This is not a problem for sampling the posterior. Unless you are using
+        the absolute value of the marginalized log likelihood (as opposed to
+        log-likelihood differences) it is safe to ignore this.
+        Concretely, the euclidean_distance_prior was d**2/3 and it should have
+        been 4*pi*d**2. Also, now the table returns the dimensionless evidence
+        relative to Gaussian noise, while previously it returned this number
+        times the volume up to `D_LUMINOSITY_MAX` in Mpc^3.
+    """)
+
+
+def clear_cache_if_outdated():
+    if LOOKUP_TABLES_FNAME.exists():
+        cache = np.load(LOOKUP_TABLES_FNAME)
+        if cache.get(_VERSION_KEY, 0) != _VERSION:
+            warnings.warn(_VERSION_WARNING)
+            LOOKUP_TABLES_FNAME.unlink()
+
+
+clear_cache_if_outdated()
 
 
 def euclidean_distance_prior(d_luminosity):
@@ -23,7 +58,7 @@ def euclidean_distance_prior(d_luminosity):
     its integral is the luminosity volume in Mpc^3.
     Note: no maximum is enforced here.
     """
-    return d_luminosity**2 / 3
+    return 4 * np.pi * d_luminosity**2
 
 
 # Dictionary of luminosity distance priors. Its values are functions of
@@ -41,7 +76,6 @@ class LookupTable(utils.JSONMixin):
     The interpolation is done in some coordinates `x`, `y` in which the
     function is smooth (see ``_get_x_y``, ``get_dh_hh``).
     """
-
     REFERENCE_DISTANCE = 1.  # Luminosity distance at which h is defined (Mpc).
     _Z0 = 10.  # Typical SNR of events.
     _SIGMAS = 10.  # How far out the tail of the distribution to tabulate.
@@ -66,10 +100,12 @@ class LookupTable(utils.JSONMixin):
             Number of interpolating points in x and y.
         """
         self.d_luminosity_prior_name = d_luminosity_prior_name
-        self.d_luminosity_prior = d_luminosity_priors[
-            d_luminosity_prior_name]
+        self.d_luminosity_prior = d_luminosity_priors[d_luminosity_prior_name]
         self.d_luminosity_max = d_luminosity_max
         self.shape = shape
+
+        self._inverse_volume = 1 / quad(self.d_luminosity_prior,
+                                        0, self.d_luminosity_max)[0]
 
         x_arr = np.linspace(-self._SIGMAS, 0, shape[0])
         y_arr = np.linspace(self._compactify(- self._SIGMAS / self._Z0),
@@ -98,12 +134,12 @@ class LookupTable(utils.JSONMixin):
         lookup_tables = np.load(LOOKUP_TABLES_FNAME) if load else {}
 
         key = repr(self.get_init_dict())
-
         if key in lookup_tables:
             table = lookup_tables.get(key)
         else:
             table = np.vectorize(self._function)(dh_grid, hh_grid)
-            np.savez(LOOKUP_TABLES_FNAME, **lookup_tables, **{key: table})
+            np.savez(LOOKUP_TABLES_FNAME, **lookup_tables,
+                     **{key: table, _VERSION_KEY: _VERSION})
 
         return table
 
@@ -196,7 +232,7 @@ class LookupTable(utils.JSONMixin):
         of this function is stored in the lookup table.
         """
         norm_h = np.sqrt(h_h)
-        return (self.d_luminosity_prior(d_luminosity)
+        return (self.d_luminosity_prior(d_luminosity) * self._inverse_volume
                 * np.exp(-(norm_h * self.REFERENCE_DISTANCE / d_luminosity
                            - d_h / norm_h)**2 / 2))
 
