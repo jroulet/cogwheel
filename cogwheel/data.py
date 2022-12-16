@@ -176,8 +176,7 @@ class EventData(utils.JSONMixin):
                 'Length of `filenames` and `detector_names` are mismatched.')
 
         f_strain_whtfilter_tcoarses = []
-        for filename, fmin_ in np.transpose(np.broadcast_arrays(filenames,
-                                                                fmin)):
+        for filename, fmin_ in zip(*np.broadcast_arrays(filenames, fmin)):
             timeseries = cls._read_timeseries(filename, tgps)
             f_strain_whtfilter_tcoarses.append(
                 cls._get_f_strain_whtfilter_from_timeseries(

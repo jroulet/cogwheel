@@ -383,11 +383,11 @@ class CBCLikelihood(utils.JSONMixin):
         wf_t_wht = self._get_whitened_td(self._get_h_f(par_dic, by_m=by_m))
 
         # Plot
-        data_plot_kwargs = wf_plot_kwargs.pop('data_plot_kwargs', {})
+        data_plot_kwargs = ({'c': 'C0', 'lw': .2, 'label': 'Data'}
+                            | wf_plot_kwargs.pop('data_plot_kwargs', {}))
         for ax, data_det, wf_det in zip(axes, data_t_wht, wf_t_wht):
             if plot_data:
-                ax.plot(time, data_det, 'C0', lw=.2, label='Data',
-                        **data_plot_kwargs)
+                ax.plot(time, data_det, **data_plot_kwargs)
             ax.plot(time, wf_det, **wf_plot_kwargs)
 
         plt.xlim(trng)
