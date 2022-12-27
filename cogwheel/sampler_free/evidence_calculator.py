@@ -60,18 +60,21 @@ class Evidence:
         # TODO: figure ahead of time what is the optimal method, and pass it as
         # an argument, instead of using optimize=True
         dh_iem = np.einsum('dmpb, impb, dpe, dbe, d -> iem',
-                           dh_weights_dmpb, h_impb, response_dpe, timeshift_dbe, asd_drift_d,
+                           dh_weights_dmpb, h_impb, response_dpe, timeshift_dbe, asd_drift_d**-2,
                            optimize=True)
         return dh_iem
 
     @staticmethod
     def get_hh_by_mode(h_impb, response_dpe, hh_weights_dmppb, asd_drift_d, m_inds, mprime_inds):
         # modes here means all unique modes combinations, ((2,2), (2,0), ..., (3,3))
-        hh = np.einsum('impb, impb -> imp', h_impb[:, m_inds, ...], h_impb.conj()[:, mprime_inds, ...],
-                       optimize=True)  # imp
-        ff = np.einsum('dpe, dPe, d -> dpPe', response_dpe, response_dpe, asd_drift_d,
-                       optimize=True)  # dppe
-        hh_iem = np.einsum('dmpPb, imp, dpPe -> iem', hh_weights_dmppb, hh, ff, optimize=True)  # iem
+        hh_idmpP = np.einsum('dmpPb, impb, imPb -> idmpP',
+                             hh_weights_dmppb,
+                             h_impb[:, m_inds, ...],
+                             h_impb.conj()[:, mprime_inds, ...],
+                             optimize=True)  # idmpp
+        ff_dppe = np.einsum('dpe, dPe, d -> dpPe', response_dpe, response_dpe, asd_drift_d**-2,
+                            optimize=True)  # dppe
+        hh_iem = np.einsum('idmpP, dpPe -> iem', hh_idmpP, ff_dppe, optimize=True)  # iem
         return hh_iem
 
     def get_dh_hh_phi_grid(self, dh_iem, hh_iem):
@@ -84,8 +87,8 @@ class Evidence:
         hh_phasor = np.exp(1j * np.outer(
             self.m_arr[self.m_inds, ] - self.m_arr[self.mprime_inds, ],
             phi_grid))  # mo
-        dh_ieo = (dh_iem[..., np.newaxis] * dh_phasor).real.sum(axis=2)  # ieo
-        hh_ieo = (hh_iem[..., np.newaxis] * hh_phasor).real.sum(axis=2)  # ieo
+        dh_ieo = np.einsum('iem, mo -> ieo', dh_iem, dh_phasor, optimize=True).real  # ieo
+        hh_ieo = np.einsum('iem, mo -> ieo', hh_iem, hh_phasor, optimize=True).real  # ieo
 
         return dh_ieo, hh_ieo
 
@@ -128,37 +131,17 @@ class Evidence:
         :return:
         """
 
-        event_log = []
-        t_list = []
-        t_list.append(time.time())
 
         dh_iem = self.get_dh_by_mode(dh_weights_dmpb, h_impb, response_dpe,
                                      timeshift_dbe, asd_drift_d)
-        t_list.append(time.time())
-        event_log.append(
-            f'calculated dh_iem in {t_list[-1] - t_list[-2]:.2E} seconds')
-
         hh_iem = self.get_hh_by_mode(h_impb, response_dpe, hh_weights_dmppb,
                                      asd_drift_d, self.m_inds, self.mprime_inds)
-        t_list.append(time.time())
-        event_log.append(
-            f'calculated hh_iem in {t_list[-1] - t_list[-2]:.2E} seconds')
 
         dh_ieo, hh_ieo = self.get_dh_hh_phi_grid(dh_iem, hh_iem)
         n_samples = dh_ieo.size
-        t_list.append(time.time())
-        event_log.append(
-            f'applied phase in {t_list[-1] - t_list[-2]:.2E} seconds')
-
         inds_i, inds_e, inds_o \
             = self.select_ieo_by_approx_lnlike_dist_marginalized(
                 dh_ieo, hh_ieo, weights_i, weights_e, cut_threshold)
-
-        t_list.append(time.time())
-        event_log.append('pre-selected high lnlike combinations in '
-                         f'{t_list[-1] - t_list[-2]:.2E} seconds')
-        event_log.append(f'{len(inds_i)} selected out of {dh_ieo.size} '
-                         f'(frac. of {len(inds_i) / n_samples:.2E})')
 
         lnlike_distance_marginalized = (
             self.lookup_table(dh_ieo[inds_i, inds_e, inds_o],
@@ -166,20 +149,13 @@ class Evidence:
             + dh_ieo[inds_i, inds_e, inds_o] ** 2
             / hh_ieo[inds_i, inds_e, inds_o] / 2)
 
-        t_list.append(time.time())
-        event_log.append(
-            f'lnlike evaluated in {t_list[-1] - t_list[-2]:.2E} seconds')
-
         ln_evidence = self.evaluate_evidence(
             lnlike_distance_marginalized,
             weights_i[inds_i] * weights_e[inds_e],
             n_samples)
 
-        t_list.append(time.time())
-        event_log.append('evidence integral evaluated in '
-                         f'{t_list[-1] - t_list[-2]:.2E} seconds')
-
         return lnlike_distance_marginalized, ln_evidence, inds_i, inds_e, inds_o
+
 
 class SampleProcessing:
     """
@@ -199,7 +175,7 @@ class SampleProcessing:
         self.m_arr = np.fromiter(likelihood.waveform_generator._harmonic_modes_by_m, int)
         self.m_inds, self.mprime_inds = zip(
             *itertools.combinations_with_replacement(range(len(self.m_arr)), 2))
-
+        self.lal_dic = create_lal_dict()
     @property
     def n_intrinsic(self):
         shape = getattr(getattr(self, 'intrinsic_samples', None), 'shape', None)
@@ -233,8 +209,9 @@ class SampleProcessing:
     @staticmethod
     def compute_detector_responses(detector_names, lat, lon, psi):
         """ Compute detector response at specific lat, lon and psi """
-        fplus_fcross_0 = get_fplus_fcross_0(detector_names, lat, lon) # edP
-        psi_rot = np.array([[np.cos(2*psi), np.sin(2*psi)],[-np.sin(2*psi), np.cos(2*psi)]]) # pPe
+        fplus_fcross_0 = get_fplus_fcross_0(detector_names, lat, lon)  # edP
+        psi_rot = np.array([[np.cos(2*psi), np.sin(2*psi)],
+                            [-np.sin(2*psi), np.cos(2*psi)]])  # pPe
         return np.einsum('edP, pPe-> edp', fplus_fcross_0, psi_rot, optimize=True)  # edp
 
     def get_hplus_hcross_0(self, par_dic, f=None, force_fslice=False, fslice=None):
@@ -253,7 +230,7 @@ class SampleProcessing:
         slow_par_vals = np.array([par_dic[par]
                                   for par in self.likelihood.waveform_generator.slow_params])
         # Compute the waveform mode by mode
-        lal_dic = create_lal_dict()
+
         # force d_luminosity=1, phi_ref=0
         waveform_par_dic_0 = dict(zip(self.likelihood.waveform_generator.slow_params, slow_par_vals),
                                   d_luminosity=1., phi_ref=0.)
@@ -266,22 +243,25 @@ class SampleProcessing:
         hplus_hcross_0_mpf = np.zeros(shape, np.complex_)
         hplus_hcross_0_mpf[..., fslice] = np.array(
             [compute_hplus_hcross(f[fslice], waveform_par_dic_0, self.likelihood.waveform_generator.approximant,
-                                  modes, lal_dic)
+                                  modes, self.lal_dic)
              for modes in self.likelihood.waveform_generator._harmonic_modes_by_m.values()])
         # tcoarse_time_shift
         shift = get_shift(f, self.likelihood.event_data.tcoarse)
         return hplus_hcross_0_mpf * shift
 
-    def get_intrinsic_linfree_time_shift_exp(self, par_dic):
+
+    def get_intrinsic_linfree_time_shift_exp(self, par_dic, f=None):
         """
         return the timeshift to convert from linear free to reference_detector times
         since t_refdet  = t_linear_free -  linear_free_time_shift,
         the return exponent argument  "+2j*pi*f* delta_t" instead of "-2j*pi..."
 
         :param par_dic: parameter dictionary
+        :param f: frequencies array
         :return: linfree_timeshift_exp
         """
-        f = self.likelihood.fbin
+        if f is None:
+            f = self.likelihood.fbin
         linfree_phase_shifts, linfree_time_shifts = \
             self.linear_free_prior._get_linfree_phase_time_shift(
                 **{k: par_dic.get(k, self.likelihood.par_dic_0[k])
@@ -290,10 +270,10 @@ class SampleProcessing:
                                        (linfree_time_shifts - self.linear_free_prior._ref['t_linfree']) * f)
         return linfree_timeshift_exp
 
-    def compute_intrinsic_array(self, intrinsic_samples):
+    def compute_intrinsic_arrays(self, intrinsic_samples):
         """
         compute the intrinsic ndim array needed for computing inner products
-        waveform are timeshifted to according to the linear free convention.
+        waveform can be timeshifted to according to the linear free convention with timeshift_intrinsic_ib.
 
         :params intrinsc_samples: pandas DataFrame with intrinsic samples in rows
 
@@ -301,15 +281,17 @@ class SampleProcessing:
 
         h_impb = np.zeros((self.n_intrinsic, self.n_modes, self.n_polarizations, self.n_fbin), np.complex_)
         timeshift_intrinsic_ib = np.zeros((self.n_intrinsic, self.n_fbin), np.complex_)
-        for i, sampler in intrinsic_samples.iterrows():
-            par_dic = {k: sampler.get(k, self.likelihood.par_dic_0[k])
+        for i, sample in intrinsic_samples.iterrows():
+            par_dic = {k: sample.get(k, self.likelihood.par_dic_0[k])
                        for k in self.likelihood.waveform_generator.slow_params}
             h_impb[i] = self.get_hplus_hcross_0(par_dic)
             timeshift_intrinsic_ib[i] = self.get_intrinsic_linfree_time_shift_exp(par_dic)
 
         return h_impb, timeshift_intrinsic_ib
 
-    def compute_extrinsic_timeshift(self, extrinsic_samples):
+    def compute_extrinsic_timeshift(self, extrinsic_samples, f=None):
+        if f is None:
+            f = self.likelihood.fbin
 
         geocentric_delays = get_geocenter_delays(self.detector_names, extrinsic_samples['lat'].values,
                                                  extrinsic_samples['lon'].values).T  # ed
@@ -317,7 +299,7 @@ class SampleProcessing:
         total_delays = (geocentric_delays + extrinsic_samples['t_geocenter'].values[:, np.newaxis])  # ed
 
         timeshift_extrinsic = np.exp(-2j * np.pi * total_delays[..., np.newaxis] *
-                                     self.likelihood.fbin[np.newaxis, np.newaxis, :])  # edb
+                                     f[np.newaxis, np.newaxis, :])  # edb
 
         return timeshift_extrinsic
 
@@ -328,13 +310,14 @@ class SampleProcessing:
         # impose zero orbital phase and distance 1Mpc
         par_dic = self.likelihood.par_dic_0 | self.likelihood._FIDUCIAL_CONFIGURATION
 
-        h0_mpf = self.get_hplus_hcross_0(par_dic, f=self.likelihood.event_data.frequencies, force_fslice=True)
+        h0_mpf = self.get_hplus_hcross_0(par_dic, f=self.likelihood.event_data.frequencies,
+                                         force_fslice=True)
         h0_mpb = self.get_hplus_hcross_0(par_dic, f=self.likelihood.fbin)
 
-        d_h0_dmpf = (self.likelihood.event_data.blued_strain[:, np.newaxis, np.newaxis, :]
-                     * h0_mpf.conj())
+        d_h0_dmpf = (self.likelihood.event_data.blued_strain[:, np.newaxis, np.newaxis, :].conj()
+                     * h0_mpf)
 
-        dh_weights_dmpb = self.likelihood._get_summary_weights(d_h0_dmpf) / h0_mpb.conj()
+        dh_weights_dmpb = self.likelihood._get_summary_weights(d_h0_dmpf) / h0_mpb
 
         whitened_h0_dmpf = (h0_mpf[np.newaxis, ...]
                             * self.likelihood.event_data.wht_filter[:, np.newaxis, np.newaxis, :])
@@ -349,5 +332,6 @@ class SampleProcessing:
                                      hh_weights_dmppb, optimize=True)
 
         hh_weights_dmppb[:, ~np.equal(self.m_inds, self.mprime_inds)] *= 2
-        return dh_weights_dmpb, hh_weights_dmppb
 
+
+        return dh_weights_dmpb, hh_weights_dmppb
