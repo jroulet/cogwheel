@@ -246,7 +246,8 @@ def replace(sequence, old, new):
 
 
 def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
-                 args='', sbatch_cmds=(), batch_path=None):
+                 args='', sbatch_cmds=(), batch_path=None,
+                 multithreading=False):
     """
     Generic function to submit a job using slurm.
     This function is intended to be called from other modules rather
@@ -277,12 +278,21 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
     batch_path: str, os.PathLike, optional
         File name where to save the batch script. If not provided, a
         temporary file will be used.
+
+    multithreading: bool
+        Whether to enable automatic OMP multithreading. Defaults to
+        ``False`` because multithreading is found to be slower
+        despite using more resources.
     """
     cogwheel_dir = pathlib.Path(__file__).parents[1].resolve()
     module = inspect.getmodule(inspect.stack()[1].frame).__name__
 
-    sbatch_lines = '\n        '.join(
-        f'#SBATCH {cmd}' for cmd in sbatch_cmds)
+    sbatch_lines = """
+        """.join(f'#SBATCH {cmd}' for cmd in sbatch_cmds)
+
+    omp_line = ''
+    if not multithreading:
+        omp_line = 'export OMP_NUM_THREADS=1'
 
     batch_text = textwrap.dedent(
         f"""\
@@ -296,6 +306,8 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
 
         eval "$(conda shell.bash hook)"
         conda activate {os.environ['CONDA_DEFAULT_ENV']}
+
+        {omp_line}
 
         cd {cogwheel_dir}
         srun {sys.executable} -m {module} {args}
@@ -316,7 +328,8 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
 
 
 def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
-               args='', bsub_cmds=(), batch_path=None):
+               args='', bsub_cmds=(), batch_path=None,
+               multithreading=False):
     """
     Generic function to submit a job using IBM Spectrum LSF.
     This function is intended to be called from other modules rather
@@ -325,37 +338,61 @@ def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
 
     Parameters
     ----------
-    job_name: string, name of LSF job
-    n_hours_limit: int, number of hours to allocate for the job.
-    stdout_path: file name, where to direct stdout.
-    stderr_path: file name, where to direct stderr.
-    args: string, command line arguments for the calling module's
-          `main()` to parse.
-    bsub_cmds: sequence of strings with BSUB commands, e.g.
-               `('-M 8GB',)`
-    batch_path: file name where to save the batch script. If not
-                provided, a temporary file will be used.
+    job_name: str
+        Name of LSF job.
+
+    n_hours_limit: int
+        Number of hours to allocate for the job.
+
+    stdout_path: str, os.PathLike
+        File name, where to direct stdout.
+
+    stderr_path: str, os.PathLike
+        File name, where to direct stderr.
+
+    args: str
+        Command line arguments for the calling module's ``main()`` to
+        parse.
+
+    bsub_cmds: sequence of str
+        BSUB commands, e.g. ``('-M 8GB',)``
+
+    batch_path: str, os.PathLike, optional
+        File name where to save the batch script. If not provided, a
+        temporary file will be used.
+
+    multithreading: bool
+        Whether to enable automatic OMP multithreading. Defaults to
+        ``False`` because multithreading is found to be slower
+        despite using more resources.
     """
     cogwheel_dir = pathlib.Path(__file__).parents[1].resolve()
     module = inspect.getmodule(inspect.stack()[1].frame).__name__
 
-    bsub_lines = '\n'.join(f'#BSUB {cmd}' for cmd in bsub_cmds)
+    bsub_lines = """
+        """.join(f'#BSUB {cmd}' for cmd in bsub_cmds)
+
+    omp_line = ''
+    if not multithreading:
+        omp_line = 'export OMP_NUM_THREADS=1'
 
     batch_text = textwrap.dedent(
         f"""\
-            #!/bin/bash
-            #BSUB -J {job_name}
-            #BSUB -o {stdout_path}
-            #BSUB -e {stderr_path}
-            #BSUB -W {n_hours_limit:02}:00
-            {bsub_lines}
+        #!/bin/bash
+        #BSUB -J {job_name}
+        #BSUB -o {stdout_path}
+        #BSUB -e {stderr_path}
+        #BSUB -W {n_hours_limit:02}:00
+        {bsub_lines}
 
-            eval "$(conda shell.bash hook)"
-            conda activate {os.environ['CONDA_DEFAULT_ENV']}
+        eval "$(conda shell.bash hook)"
+        conda activate {os.environ['CONDA_DEFAULT_ENV']}
 
-            cd {cogwheel_dir}
-            {sys.executable} -m {module} {args}
-            """)
+        {omp_line}
+
+        cd {cogwheel_dir}
+        {sys.executable} -m {module} {args}
+        """)
 
     if batch_path:
         getfile = lambda: open(batch_path, 'w+')
