@@ -35,26 +35,29 @@ class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
     def _get_s1z(chieff, q, s2z):
         return (1+q)*chieff - q*s2z
 
-    def _s1z_lim(self, chieff, q):
-        s1z_min = np.maximum(self._get_s1z(chieff, q, s2z=1), -1)
-        s1z_max = np.minimum(self._get_s1z(chieff, q, s2z=-1), 1)
+    @classmethod
+    def _s1z_lim(cls, chieff, q):
+        s1z_min = np.maximum(cls._get_s1z(chieff, q, s2z=1), -1)
+        s1z_max = np.minimum(cls._get_s1z(chieff, q, s2z=-1), 1)
         return s1z_min, s1z_max
 
-    @utils.lru_cache()
-    def transform(self, chieff, cumchidiff, m1, m2):
+    # @utils.lru_cache()
+    @classmethod
+    def transform(cls, chieff, cumchidiff, m1, m2):
         """(chieff, cumchidiff) to (s1z, s2z)."""
         q = m2 / m1
-        s1z_min, s1z_max = self._s1z_lim(chieff, q)
+        s1z_min, s1z_max = cls._s1z_lim(chieff, q)
         s1z = s1z_min + cumchidiff * (s1z_max - s1z_min)
         s2z = ((1+q)*chieff - s1z) / q
         return {'s1z': s1z,
                 's2z': s2z}
 
-    def inverse_transform(self, s1z, s2z, m1, m2):
+    @classmethod
+    def inverse_transform(cls, s1z, s2z, m1, m2):
         """(s1z, s2z) to (chieff, cumchidiff)."""
         q = m2 / m1
         chieff = (s1z + q*s2z) / (1 + q)
-        s1z_min, s1z_max = self._s1z_lim(chieff, q)
+        s1z_min, s1z_max = cls._s1z_lim(chieff, q)
         cumchidiff = (s1z - s1z_min) / (s1z_max - s1z_min)
         return {'chieff': chieff,
                 'cumchidiff': cumchidiff}

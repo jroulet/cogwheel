@@ -29,6 +29,7 @@ import lal
 
 from cogwheel import gw_utils
 from cogwheel import utils
+from cogwheel.gw_prior.spin import UniformEffectiveSpinPrior
 
 
 def unique_qr(mat):
@@ -211,58 +212,64 @@ class PNCoordinates:
             h_f * likelihood.event_data.wht_filter[:, fslice], axis=0)
         return cls(frequencies, whitened_amplitude)
 
-    def transform(self, mchirp, eta, chieff):
+    def transform(self, mchirp, eta, chieff, cumchidiff):
         """
         Return array of coordinates whose Euclidean distance is the
         mismatch distance for PN waveforms.
         """
-        pn_coeffs = self._get_pn_coeffs(mchirp, eta, chieff)
-        # phase = pn_funcs @ pn_coeffs
-        #       = qmat @ rmat @ pn_coeffs
-        #       = qmat @ coords
+        pn_coeffs = self._get_pn_coeffs(mchirp, eta, chieff, cumchidiff)
+        """
+            phase = pn_funcs @ pn_coeffs
+                  = qmat @ rmat @ pn_coeffs
+                  = qmat @ coords
+        """
         return np.einsum('ij,...j->...i', self._rmat, pn_coeffs)
 
-    def inverse_transform(self, coords):
-        """
-        Inverse of ``transform``: return (mchirp, eta, chieff) given
-        metric coordinates.
-        """
-        pn_coeffs = np.einsum('ij,...j->...i', self._inv_rmat, coords)
-        return self._invert_pn_coeffs(pn_coeffs)
+    ## `inverse_transform` commented out because adding cumchidiff broke it
+    # def inverse_transform(self, coords):
+    #     """
+    #     Inverse of ``transform``: return (mchirp, eta, chieff) given
+    #     metric coordinates.
+    #     """
+    #     pn_coeffs = np.einsum('ij,...j->...i', self._inv_rmat, coords)
+    #     return self._invert_pn_coeffs(pn_coeffs)
 
     @staticmethod
-    def _get_pn_coeffs(mchirp, eta, chieff):
+    def _get_pn_coeffs(mchirp, eta, chieff, cumchidiff):
         """
         Return PN coefficients such that the waveform phase is
             phase = pn_funcs @ pn_coeffs.
         This makes the approximation chieff = chis, strictly valid for
         equal mass. The maximum error is ~5% in the 2.5PN coefficient.
         """
-        mchirp, eta, chieff = np.broadcast_arrays(mchirp, eta, chieff)
-        mtot = gw_utils.mchirpeta_to_mtot(mchirp, eta)
-        # Approximation here so we can use chieff instead of beta.
-        chis_approx = chieff
-        beta_approx = 113/12*(chieff - 76/113 * eta * chis_approx)
-        return np.moveaxis([(4*beta_approx - 16*np.pi) / eta * mtot**(-2/3),
+        mchirp, eta, chieff, cumchidiff = np.broadcast_arrays(
+            mchirp, eta, chieff, cumchidiff)
+        m1, m2 = gw_utils.mchirpeta_to_m1m2(mchirp, eta)
+        mtot = m1 + m2
+        dic = UniformEffectiveSpinPrior.transform(chieff, cumchidiff, m1, m2)
+        chis = (dic['s1z'] + dic['s2z']) / 2
+
+        beta = 113/12*(chieff - 76/113 * eta * chis)
+        return np.moveaxis([(4*beta - 16*np.pi) / eta * mtot**(-2/3),
                             (55/9 + 3715/756/eta) / mtot,
                             mchirp**(-5/3)],
                            0, -1)
 
-    def _invert_pn_coeffs(self, pn_coeffs):
-        """
-        Given the first 3 PN coefficients, return mchirp, eta, chieff.
-        This makes the approximation chieff = chis, strictly valid for
-        equal mass. It is the same approximation we make in
-        _get_pn_coeffs so these functions are exact inverses.
-        It is assumed that the *last* axis of pn_coeffs has length 3 and
-        corresponds to the 2.5PN, 2PN and 1PN coefficients.
-        """
-        pn2, pn1, pn0 = np.moveaxis(pn_coeffs, -1, 0)
-        mchirp = pn0 ** -.6
-        eta = self._eta_of_x(pn0**1.5 * pn1**-2.5)
-        beta = .25 * pn2 * eta**.6 * mchirp**(2/3) + 4*np.pi
-        chieff_approx = 12 * beta / (113 - 76*eta)  # Use chis ~ chieff
-        return mchirp, eta, chieff_approx
+    # def _invert_pn_coeffs(self, pn_coeffs, cumchidiff):
+    #     """
+    #     Given the first 3 PN coefficients, return mchirp, eta, chieff.
+    #     This makes the approximation chieff = chis, strictly valid for
+    #     equal mass. It is the same approximation we make in
+    #     _get_pn_coeffs so these functions are exact inverses.
+    #     It is assumed that the *last* axis of pn_coeffs has length 3 and
+    #     corresponds to the 2.5PN, 2PN and 1PN coefficients.
+    #     """
+    #     pn2, pn1, pn0 = np.moveaxis(pn_coeffs, -1, 0)
+    #     mchirp = pn0 ** -.6
+    #     eta = self._eta_of_x(pn0**1.5 * pn1**-2.5)
+    #     beta = .25 * pn2 * eta**.6 * mchirp**(2/3) + 4*np.pi
+    #     chieff_approx = 12 * beta / (113 - 76*eta)  # Use chis ~ chieff
+    #     return mchirp, eta, chieff_approx
 
 
 class PNMap:
@@ -338,10 +345,12 @@ class PNMap:
         self._resolution = resolution
         self._mchirp_grid = np.linspace(*self.mchirp_range, resolution)
         self._lnq_grid = np.linspace(np.log(self.q_min), 0, resolution)
+        # Use cumchidiff=.5 so we don't have to recompute this for each sample.
+        # Hopefully it doesn't affect the mchirp posterior.
         self._mchirp_pdf =(
             self._mchirp_prior(self._mchirp_grid)
             * np.vectorize(self._evidence_lnq_chieff_given_mchirp)(
-                self._mchirp_grid))
+                self._mchirp_grid, cumchidiff=.5))
 
     @property
     def par_dic_0(self):
@@ -353,13 +362,17 @@ class PNMap:
         mchirp0 = gw_utils.m1m2_to_mchirp(par_dic_0['m1'],
                                           par_dic_0['m2'])
         eta0 = gw_utils.q_to_eta(par_dic_0['m2'] / par_dic_0['m1'])
-        chieff0 = gw_utils.chieff(par_dic_0['m1'],
-                                  par_dic_0['m2'],
-                                  par_dic_0['s1z'],
-                                  par_dic_0['s2z'])
+        dic = UniformEffectiveSpinPrior.inverse_transform(par_dic_0['s1z'],
+                                                          par_dic_0['s2z'],
+                                                          par_dic_0['m1'],
+                                                          par_dic_0['m2'])
+
+        chieff0 = dic['chieff']
+        cumchidiff_0 = dic['cumchidiff']
         mtot0 = gw_utils.mchirpeta_to_mtot(mchirp0, eta0)
 
-        self._coords_0 = self.pn_coordinates.transform(mchirp0, eta0, chieff0)
+        self._coords_0 = self.pn_coordinates.transform(mchirp0, eta0, chieff0,
+                                                       cumchidiff_0)
         self._fmerger_0 = get_f_merger(mtot0, chieff0)
         self._fmerger_scale_0 = 2 * (
             self.snr
@@ -374,13 +387,14 @@ class PNMap:
     def _mchirp_prior(mchirp):
         return mchirp
 
-    def _evidence_lnq_chieff_given_mchirp(self, mchirp):
+    def _evidence_lnq_chieff_given_mchirp(self, mchirp, cumchidiff):
         return scipy.integrate.trapezoid(
             self._lnq_prior(self._lnq_grid)
-            * self._evidence_chieff_given_mchirp_lnq(mchirp, self._lnq_grid),
+            * self._evidence_chieff_given_mchirp_lnq(
+                mchirp, self._lnq_grid, cumchidiff),
             self._lnq_grid)
 
-    def _evidence_chieff_given_mchirp_lnq(self, mchirp, lnq):
+    def _evidence_chieff_given_mchirp_lnq(self, mchirp, lnq, cumchidiff):
         """
         Return
             int_{-1}^1 dchieff (prior(chieff)
@@ -392,7 +406,7 @@ class PNMap:
                          and an estimate of the merger frequency.
         """
         chieff_loc, chieff_scale, weight = self._chieff_loc_scale_and_weight(
-            mchirp, lnq)
+            mchirp, lnq, cumchidiff)
         chieff_min = -1
         chieff_max = 1
         parameter_min = (chieff_min - chieff_loc) / chieff_scale
@@ -441,7 +455,8 @@ class PNMap:
 
         return chieff_loc, chieff_scale
 
-    def _chieff_loc_scale_and_weight_due_to_inspiral(self, mchirp, lnq):
+    def _chieff_loc_scale_and_weight_due_to_inspiral(
+            self, mchirp, lnq, cumchidiff):
         """
         Return estimate of chieff and its uncertainty, conditioned on
         (mchirp, lnq), just accounting for the inspiral.
@@ -462,9 +477,11 @@ class PNMap:
         chieff_max = 1
         eta = gw_utils.q_to_eta(np.exp(lnq))
 
-        coords_start = self.pn_coordinates.transform(mchirp, eta, chieff_min)
+        coords_start = self.pn_coordinates.transform(mchirp, eta, chieff_min,
+                                                     cumchidiff)
         c0_min = coords_start[..., 0]
-        c0_max = self.pn_coordinates.transform(mchirp, eta, chieff_max)[..., 0]
+        c0_max = self.pn_coordinates.transform(mchirp, eta, chieff_max,
+                                               cumchidiff)[..., 0]
 
         dchieff_dc0 = (chieff_max - chieff_min) / (c0_max - c0_min)
         chieff_loc = chieff_min + (self._coords_0[0] - c0_min) * dchieff_dc0
@@ -479,7 +496,7 @@ class PNMap:
 
         return chieff_loc, chieff_scale, weight
 
-    def _chieff_loc_scale_and_weight(self, mchirp, lnq):
+    def _chieff_loc_scale_and_weight(self, mchirp, lnq, cumchidiff):
         """
         Return
         ------
@@ -493,7 +510,8 @@ class PNMap:
         """
         loc1, scale1 = self._chieff_loc_and_scale_due_to_fmerger(mchirp, lnq)
         loc2, scale2, weight \
-            = self._chieff_loc_scale_and_weight_due_to_inspiral(mchirp, lnq)
+            = self._chieff_loc_scale_and_weight_due_to_inspiral(mchirp, lnq,
+                                                                cumchidiff)
 
         inv_variances = np.array((scale1, scale2))**-2
         chieff_loc = np.average((loc1, loc2), weights=inv_variances, axis=0)
@@ -507,7 +525,7 @@ class PNMap:
                        (loc2 - chieff_loc) / chieff_scale))
         return chieff_loc, chieff_scale, weight
 
-    def _draw_chieff_given_mchirp_lnq(self, u_chieff, mchirp, lnq):
+    def _draw_chieff_given_mchirp_lnq(self, u_chieff, mchirp, lnq, cumchidiff):
         """
         Draw a value of chieff from its conditional distribution given
         mchirp, lnq.
@@ -532,8 +550,8 @@ class PNMap:
         du_dchieff: float > 0
             P(chieff | mchirp, lnq), i.e., the Jacobian of the CDF.
         """
-        chieff_loc, chieff_scale, _ = self._chieff_loc_scale_and_weight(mchirp,
-                                                                        lnq)
+        chieff_loc, chieff_scale, _ = self._chieff_loc_scale_and_weight(
+            mchirp, lnq, cumchidiff)
         chieff_min = -1
         chieff_max = 1
         kwargs = dict(a=(chieff_min - chieff_loc) / chieff_scale,
@@ -545,7 +563,7 @@ class PNMap:
         du_dchieff = self._p_chieff_given_mchirp_lnq.pdf(chieff, **kwargs)
         return chieff, du_dchieff
 
-    def _transform_and_weights(self, u_mchirp, u_lnq, u_chieff):
+    def _transform_and_weights(self, u_mchirp, u_lnq, u_chieff, cumchidiff):
         """
         Return mchirp, lnq, chieff from their cumulatives.
             u_mchirp := C(mchirp)
@@ -557,16 +575,16 @@ class PNMap:
         mchirp, du_dmchirp = inverse_cdf_and_jacobian(
             u_mchirp, self._mchirp_grid, self._mchirp_pdf)
 
-        lnq_post = (self._lnq_prior(self._lnq_grid)
-                    * self._evidence_chieff_given_mchirp_lnq(mchirp,
-                                                             self._lnq_grid))
-#         lnq_post = np.ones_like(self._lnq_grid)  # Force flat in lnq (experimental)
+        # lnq_post = (self._lnq_prior(self._lnq_grid)
+        #             * self._evidence_chieff_given_mchirp_lnq(
+        #                 mchirp, self._lnq_grid, cumchidiff))
+        lnq_post = np.ones_like(self._lnq_grid)  # Force flat in lnq (experimental)
 
         lnq, du_dlnq = inverse_cdf_and_jacobian(u_lnq, self._lnq_grid,
                                                 lnq_post)
 
-        chieff, du_dchieff = self._draw_chieff_given_mchirp_lnq(u_chieff,
-                                                                mchirp, lnq)
+        chieff, du_dchieff = self._draw_chieff_given_mchirp_lnq(
+            u_chieff, mchirp, lnq, cumchidiff)
         self.status = locals()
         return {'mchirp': mchirp,
                 'lnq': lnq,
@@ -600,11 +618,14 @@ class IntrinsicMap:
             scipy.stats.qmc.Sobol(len(self.params)).random_base2(log2n_qmc),
             columns=[f'u_{par}' for par in self.params])
 
-        samples = pd.DataFrame.from_records(
-            self.pn_map.transform_and_weights(
-                **qmc_sequence[['u_mchirp', 'u_lnq', 'u_chieff']]))
+        samples = pd.DataFrame({'cumchidiff': qmc_sequence['u_cumchidiff']})
 
-        samples['cumchidiff'] = qmc_sequence['u_cumchidiff']
+        utils.update_dataframe(
+            samples,
+            pd.DataFrame.from_records(self.pn_map.transform_and_weights(
+                **qmc_sequence[['u_mchirp', 'u_lnq', 'u_chieff']],
+                **samples[['cumchidiff']])))
+
         samples['cums1r_s1z'] = qmc_sequence['u_cums1r_s1z']
         samples['cums2r_s2z'] = qmc_sequence['u_cums2r_s2z']
         samples['phi_jl_hat'] = qmc_sequence['u_phi_jl_hat'] * 2 * np.pi
