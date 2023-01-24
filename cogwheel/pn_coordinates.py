@@ -1,20 +1,19 @@
 """
 Module to generate intrinsic parameter samples with Quasi Monte Carlo
 from an approximation of the posterior.
-This uses an approximation of the likelihood in terms of (mchirp, lnq,
-chieff) that accounts for the post-Newtonian inspiral and the cutoff
-frequency.
+This uses an approximation of the likelihood that accounts for the
+post-Newtonian inspiral and the cutoff frequency.
 
-Classes ``PNCoordinates``, ``PNMap`` and ``IntrinsicMap`` are defined.
-``IntrinsicMap`` is the top-level class that most users would use.
+Classes ``IntrinsicParameterProposal``, ``_InspiralAnalysis`` and
+``_MergerAnalysis`` are defined. ``IntrinsicParameterProposal`` is the
+top-level class that most users would use.
 
 Example usage:
 ```
 # ``post`` is an instance of ``posterior.Posterior``
-pn_map = PNMap.from_posterior(post)
-imap = IntrinsicMap(pn_map)
-qmc_samples = imap.generate_intrinsic_samples(14)
-```
+intrinsic_proposal = IntrinsicParameterProposal.from_posterior(post)
+qmc_samples = intrinsic_proposal.generate_intrinsic_samples(14)
+
 """
 import scipy.interpolate
 import scipy.linalg
@@ -28,8 +27,6 @@ import pandas as pd
 import lal
 
 from cogwheel import gw_utils
-from cogwheel import utils
-from cogwheel.gw_prior.spin import UniformEffectiveSpinPrior
 
 
 def unique_qr(mat):
@@ -92,11 +89,10 @@ class TruncatedDistribution(scipy.stats.rv_continuous):
         return a < b
 
 
-trunccauchy = TruncatedDistribution(scipy.stats.cauchy)
 trunclaplace = TruncatedDistribution(scipy.stats.laplace)
 
 
-def inverse_cdf_and_jacobian(cdf_val, points, pdf_points):
+def _inverse_cdf_and_jacobian(cdf_val, points, pdf_points):
     """
     Find the value of x such that
         int_{-inf}^x P(x') dx' = cdf
@@ -130,24 +126,195 @@ def inverse_cdf_and_jacobian(cdf_val, points, pdf_points):
     return x_val, dc_dx
 
 
-class PNCoordinates:
-    """
-    Provide an analytic transform from (mchirp, eta, chieff) to a system
-    of coordinates where the Euclidean distance is the mismatch distance
-    for PN waveforms.
-    In other words, the log likelihood (inspiral only) is
-        lnl = - (SNR * |c - c_peak|)^2 / 2
-    near the peak.
+inverse_cdf_and_jacobian = np.vectorize(_inverse_cdf_and_jacobian,
+                                        otypes=[float, float],
+                                        excluded=[1, 2])
 
-    Note: the third PN term is approximate since in reality it depends
-    on beta, not eta and chieff.
-    """
-    # phase, time, 2.5PN, 2PN, 1PN. Ordered this way we ensure that
-    # intrinsic parameters are orthogonalized to phase and time and
-    # chi_eff only changes one of the coordinates, moreover, linearly.
-    _PN_EXPONENTS = 0, 1, -2/3, -1, -5/3
 
-    def __init__(self, frequencies, whitened_amplitude, smooth=True):
+class _InspiralAnalysis:
+    """
+    Provide a method `s1z_loc_scale_and_weight_due_to_inspiral` that
+    estimates the best fit value and 1-sigma errorbar of s1z given other
+    intrinsic parameters. The estimate uses the phase evolution to
+    2.5 post-Newtonian order plus the leading correction from precession
+    in the phase of the zeroth precession harmonic.
+
+    """
+    def __init__(self, frequencies, whitened_amplitude, par_dic_0, snr):
+        """
+        Parameters
+        ----------
+        frequencies: 1d float array
+            Frequencies in Hz, must be regularly spaced.
+
+        whitened_amplitude: 1d float array
+            Whitened amplitude of the best-fit template evaluated at
+            `frequencies`: A(f) / sqrt(PSD(f)). If there are multiple
+            detectors, use the root-mean-square over detectors. The
+            overall normalization is unimportant.
+
+        par_dic_0: dict
+            Parameters of the best fit solution, must contain keys for
+            m1, m2, s1z, s2z, s1x_n, s1y_n, s2x_n, s2y_n.
+
+        snr: float
+            Signal-to-noise ratio of the best-fit template.
+        """
+        if not np.allclose(np.diff(frequencies, 2), 0):
+            raise ValueError('`frequencies` must be regularly spaced.')
+
+        # (phase, time, 2.5PN, 1PN, 2PN, precession). Ordered this way
+        # we ensure that intrinsic parameters are orthogonalized to
+        # phase and time and s1z only changes one of the coordinates,
+        # moreover, linearly.
+        pn_exponents = 0, 1, -5/3, -3/3, -2/3, -1/3
+        pn_functions = np.power.outer(lal.MTSUN_SI * np.pi * frequencies,
+                                      pn_exponents)
+        weights = whitened_amplitude / np.linalg.norm(whitened_amplitude)
+        _, fullrmat = unique_qr(pn_functions * weights[:, np.newaxis])
+
+        # Ignore phase & time:
+        self._rmat = fullrmat[2:, 2:]  # Transformation matrix
+
+        self._coords_0 = None  # Set by par_dic_0.setter
+        self.par_dic_0 = par_dic_0
+
+        self.snr = snr
+
+    @classmethod
+    def from_likelihood(cls, likelihood):
+        """
+        Instantiate from a RelativeBinningLikelihood object, used to
+        estimate the whitened_amplitude from the whitening filter and
+        reference waveform.
+        """
+        mtot = likelihood.par_dic_0['m1'] + likelihood.par_dic_0['m2']
+        chieff = gw_utils.chieff(**{par: likelihood.par_dic_0[par]
+                                    for par in ['m1', 'm2', 's1z', 's2z']})
+        fmin = likelihood.event_data.fbounds[0]
+        fmax = get_f_merger(mtot, chieff)
+        fslice = slice(*np.searchsorted(likelihood.event_data.frequencies,
+                                        (fmin, fmax)))
+        frequencies = likelihood.event_data.frequencies[fslice]
+
+        h_f = likelihood._get_h_f(likelihood.par_dic_0)
+        whitened_amplitude = np.linalg.norm(
+            h_f * likelihood.event_data.wht_filter, axis=0)[fslice]
+        d_h = likelihood._compute_d_h(h_f)
+        h_h = likelihood._compute_h_h(h_f)
+        snr = np.sqrt(np.sum(np.abs(d_h)**2 / h_h))
+        return cls(frequencies, whitened_amplitude, likelihood.par_dic_0, snr)
+
+    @property
+    def par_dic_0(self):
+        """Dictionary of best-fit parameters."""
+        return self._par_dic_0
+
+    @par_dic_0.setter
+    def par_dic_0(self, par_dic_0):
+        self._coords_0 = self._get_coordinates(
+            **{par: par_dic_0[par]
+               for par in ['m1', 'm2', 's1z', 's2z', 's1x_n', 's1y_n', 's2x_n',
+                           's2y_n']})
+        self._par_dic_0 = par_dic_0
+
+    @staticmethod
+    def _get_pn_coefficients(m1, m2, s1z, s2z, s1x_n, s1y_n, s2x_n,
+                             s2y_n):
+        """
+        Return PN coefficients such that the frequency-domain waveform
+        phase is
+            phase = pn_functions @ pn_coefficients.
+        """
+        m1, m2, s1z, s2z, s1x_n, s1y_n, s2x_n, s2y_n = np.broadcast_arrays(
+            m1, m2, s1z, s2z, s1x_n, s1y_n, s2x_n, s2y_n)
+
+        mtot = m1 + m2
+        eta = m1 * m2 / mtot**2
+        q = m2 / m1
+        chis = (s1z + s2z) / 2
+        chia = (s1z - s2z) / 2
+        delta = (m1 - m2) / mtot
+        beta = 113/12 * (chis + delta*chia - 76/113*eta*chis)
+        sx = m1**2 * s1x_n + m2**2 * s2x_n
+        sy = m1**2 * s1y_n + m2**2 * s2y_n
+
+        pn_coefficients = (
+            3/128 / eta * mtot**(-5/3),
+            3/128 * (55/9 + 3715/756/eta) / mtot,
+            3/128 * (4*beta - 16*np.pi) / eta * mtot**(-2/3),
+            15/128 * (1+q)**4*(4/3+q)*(sx**2+sy**2)/mtot**4/q**2 * mtot**(-1/3)
+            )
+
+        return np.moveaxis(pn_coefficients, 0, -1)  # Last axis is PN order
+
+    def _get_coordinates(self, m1, m2, s1z, s2z, s1x_n, s1y_n, s2x_n,
+                         s2y_n):
+        """
+        Return array of coordinates whose Euclidean distance is the
+        mismatch distance for PN waveforms.
+        """
+        pn_coefficients = self._get_pn_coefficients(
+            m1, m2, s1z, s2z, s1x_n, s1y_n, s2x_n, s2y_n)
+
+        #     weights * phase = (weights * pn_funcs) @ pn_coefficients
+        #                     = qmat @ rmat @ pn_coefficients
+        #                     = qmat @ coords
+        # I.e., coords = rmat @ pn_coefficients
+        return np.einsum('ij,...j->...i', self._rmat, pn_coefficients)
+
+    def s1z_loc_scale_and_weight_due_to_inspiral(
+            self, m1, m2, s2z, s1x_n, s1y_n, s2x_n, s2y_n):
+        """
+        Return estimate of s1z and its uncertainty, conditioned on
+        (m1, m2, s2z, s1x_n, s1y_n, s2x_n, s2y_n), just accounting
+        for the inspiral.
+
+        Return
+        ------
+        s1z_loc: float
+            Expected peak of the likelihood. Need not be in (-1, 1).
+
+        s1z_scale: float > 0
+            Expected width of the likelihood.
+
+        weight: float between 0 and 1
+            Penalty in case the mismatch-metric-coordinates orthogonal
+            to s1z are inconsistent with the reference solution.
+        """
+        # Use the fact that coordinates depend linearly on s1z:
+        coords_s1z_0 = self._get_coordinates(m1, m2, 0, s2z, s1x_n, s1y_n,
+                                             s2x_n, s2y_n)
+        coords_s1z_1 = self._get_coordinates(m1, m2, 1, s2z, s1x_n, s1y_n,
+                                             s2x_n, s2y_n)
+        dcoords = coords_s1z_1 - coords_s1z_0
+        direction = dcoords / np.linalg.norm(dcoords, axis=-1, keepdims=True)
+        dcoords_projection = np.einsum('...i,...i->...',
+                                       self._coords_0 - coords_s1z_0,
+                                       direction)
+        ds1z_dcoords = 1 / np.linalg.norm(dcoords, axis=-1)
+
+        s1z_loc = ds1z_dcoords * dcoords_projection
+        s1z_scale = ds1z_dcoords / self.snr
+
+        # Penalize if the coordinates orthogonal to s1z are inconsistent
+        # with reference solution:
+        perpendicular_distance = np.linalg.norm(
+            self._coords_0 - coords_s1z_0
+            - dcoords_projection[..., np.newaxis] * direction, axis=-1)
+        weight = np.exp(-self.snr**2 * perpendicular_distance**2 / 2)
+
+        return s1z_loc, s1z_scale, weight
+
+
+class _MergerAnalysis:
+    """
+    Class that allows to estimate a best-fit value and standard
+    deviation of s1z given other intrinsic parameters and knowledge of
+    the best-fit merger frequency.
+    """
+    def __init__(self, frequencies, whitened_amplitude, par_dic_0, snr,
+                 smooth=True):
         """
         Parameters
         ----------
@@ -164,264 +331,46 @@ class PNCoordinates:
             frequency so it can be interpolated meaningfully (useful for
             estimating the amplitude at merger frequency).
         """
-        delta_f = frequencies[1] - frequencies[0]
-        if not np.allclose(delta_f, np.diff(frequencies)):
-            raise ValueError('`frequencies` must be regularly spaced.')
-
-        self.frequencies = frequencies
-
         if smooth:
             whitened_amplitude = scipy.signal.savgol_filter(
                 whitened_amplitude, len(whitened_amplitude) // 100, 1)
 
-        whitened_amplitude /= np.sqrt((whitened_amplitude**2).sum() * delta_f)
+        whitened_amplitude /= np.sqrt(
+            scipy.integrate.trapezoid(whitened_amplitude**2, frequencies))
 
-        self.interp_wht_amplitude = scipy.interpolate.interp1d(
-            self.frequencies, whitened_amplitude,
-            assume_sorted=True, bounds_error=False, fill_value=0)
+        mtot0 = par_dic_0['m1'] + par_dic_0['m2']
+        chieff0 = gw_utils.chieff(par_dic_0['m1'],  par_dic_0['m2'],
+                                   par_dic_0['s1z'],  par_dic_0['s2z'])
 
-        pn_funcs = 3 / 128 * np.power.outer(lal.MTSUN_SI * np.pi * frequencies,
-                                            self._PN_EXPONENTS)
-        weights = whitened_amplitude / np.linalg.norm(whitened_amplitude)
-        _, fullrmat = unique_qr(pn_funcs * weights[:, np.newaxis])
+        self._fmerger_0 = get_f_merger(mtot0, chieff0)
+        wht_amp_f_merger = np.interp(self._fmerger_0, frequencies,
+                                     whitened_amplitude)
 
-        # Ignore phase & time:
-        self._rmat = fullrmat[2:, 2:]  # Transformation matrix
-        self._inv_rmat = np.linalg.inv(self._rmat)
-
-
-        # x := 1PN^(3/2) / 2PN^(5/2)
-        eta_pts = np.linspace(0, .25, 512)
-        x_pts = eta_pts * (3715/756 + 55/9*eta_pts)**-2.5
-        self._eta_of_x = utils.handle_scalars(
-            scipy.interpolate.interp1d(x_pts, eta_pts))
+        self._fmerger_scale_0 = 2 * (snr * wht_amp_f_merger)**-2
 
     @classmethod
     def from_likelihood(cls, likelihood):
         """
         Instantiate from a RelativeBinningLikelihood object, used to
-        estimate the whitened_amplitude from the whitening filter and reference
-        waveform.
+        estimate the whitened_amplitude from the whitening filter and
+        reference waveform.
         """
         fslice = likelihood.event_data.fslice
         frequencies = likelihood.event_data.frequencies[fslice]
 
-        h_f = likelihood.waveform_generator.get_strain_at_detectors(
-            frequencies, likelihood.par_dic_0)
+        h_f = likelihood._get_h_f(likelihood.par_dic_0)
+        d_h = likelihood._compute_d_h(h_f)
+        h_h = likelihood._compute_h_h(h_f)
+        snr = np.sqrt(np.sum(np.abs(d_h)**2 / h_h))
         whitened_amplitude = np.linalg.norm(
-            h_f * likelihood.event_data.wht_filter[:, fslice], axis=0)
-        return cls(frequencies, whitened_amplitude)
+            h_f * likelihood.event_data.wht_filter, axis=0)[fslice]
 
-    def transform(self, mchirp, eta, chieff, cumchidiff):
-        """
-        Return array of coordinates whose Euclidean distance is the
-        mismatch distance for PN waveforms.
-        """
-        pn_coeffs = self._get_pn_coeffs(mchirp, eta, chieff, cumchidiff)
-        """
-            phase = pn_funcs @ pn_coeffs
-                  = qmat @ rmat @ pn_coeffs
-                  = qmat @ coords
-        """
-        return np.einsum('ij,...j->...i', self._rmat, pn_coeffs)
+        return cls(frequencies, whitened_amplitude, likelihood.par_dic_0, snr)
 
-    ## `inverse_transform` commented out because adding cumchidiff broke it
-    # def inverse_transform(self, coords):
-    #     """
-    #     Inverse of ``transform``: return (mchirp, eta, chieff) given
-    #     metric coordinates.
-    #     """
-    #     pn_coeffs = np.einsum('ij,...j->...i', self._inv_rmat, coords)
-    #     return self._invert_pn_coeffs(pn_coeffs)
-
-    @staticmethod
-    def _get_pn_coeffs(mchirp, eta, chieff, cumchidiff):
-        """
-        Return PN coefficients such that the waveform phase is
-            phase = pn_funcs @ pn_coeffs.
-        This makes the approximation chieff = chis, strictly valid for
-        equal mass. The maximum error is ~5% in the 2.5PN coefficient.
-        """
-        mchirp, eta, chieff, cumchidiff = np.broadcast_arrays(
-            mchirp, eta, chieff, cumchidiff)
-        m1, m2 = gw_utils.mchirpeta_to_m1m2(mchirp, eta)
-        mtot = m1 + m2
-        dic = UniformEffectiveSpinPrior.transform(chieff, cumchidiff, m1, m2)
-        chis = (dic['s1z'] + dic['s2z']) / 2
-
-        beta = 113/12*(chieff - 76/113 * eta * chis)
-        return np.moveaxis([(4*beta - 16*np.pi) / eta * mtot**(-2/3),
-                            (55/9 + 3715/756/eta) / mtot,
-                            mchirp**(-5/3)],
-                           0, -1)
-
-    # def _invert_pn_coeffs(self, pn_coeffs, cumchidiff):
-    #     """
-    #     Given the first 3 PN coefficients, return mchirp, eta, chieff.
-    #     This makes the approximation chieff = chis, strictly valid for
-    #     equal mass. It is the same approximation we make in
-    #     _get_pn_coeffs so these functions are exact inverses.
-    #     It is assumed that the *last* axis of pn_coeffs has length 3 and
-    #     corresponds to the 2.5PN, 2PN and 1PN coefficients.
-    #     """
-    #     pn2, pn1, pn0 = np.moveaxis(pn_coeffs, -1, 0)
-    #     mchirp = pn0 ** -.6
-    #     eta = self._eta_of_x(pn0**1.5 * pn1**-2.5)
-    #     beta = .25 * pn2 * eta**.6 * mchirp**(2/3) + 4*np.pi
-    #     chieff_approx = 12 * beta / (113 - 76*eta)  # Use chis ~ chieff
-    #     return mchirp, eta, chieff_approx
-
-
-class PNMap:
-    """
-    Construct cumulatives of a fiducial posterior distribution for
-    mchirp, eta, chieff.
-    These cumulatives can be used as coordinates where the posterior
-    should look uniform in the unit cube, desirable for quasi Monte
-    Carlo integration.
-    The fiducial posterior is based on the prior (flat in component
-    masses and effective spin) times a Gaussian likelihood in the
-    space of PN coefficients with a covariance matrix given by
-    Fisher analysis from `par_dic_0` and `snr`.
-    To increase robustness, the log posterior is scaled by
-    `beta_temperature`.
-
-    Provides a constructor `from_posterior`, it is the recommended
-    instantiation method for simple cases.
-
-    Provides a method `transform_and_weights` to draw (mchirp, lnq,
-    chieff) samples following the approximate posterior along with their
-    importance-sampling weights from uniform values in the unit cube.
-    """
-    def __init__(self, par_dic_0, snr, pn_coordinates, mchirp_range,
-                 q_min=.05, resolution=128, beta_temperature=.1):
-        self.pn_coordinates = pn_coordinates
-
-        self.snr = snr
-        self._coords_0 = None  # Set by par_dic_0.setter
-        self._fmerger_0 = None  # Set by par_dic_0.setter
-        self.par_dic_0 = par_dic_0
-
-        self.beta_temperature = beta_temperature
-
-        self.mchirp_range = np.asarray(mchirp_range)
-        self.q_min = q_min
-
-        self._likelihood_chieff_given_mchirp_lnq = scipy.stats.cauchy
-        self._p_chieff_given_mchirp_lnq = trunccauchy
-
-        self._mchirp_grid = None  # Set by resolution.setter
-        self._mchirp_pdf = None  # Set by resolution.setter
-        self._lnq_grid = None  # Set by resolution.setter
-        self.resolution = resolution
-
-        self.transform_and_weights = np.vectorize(self._transform_and_weights,
-                                                  otypes=[object])
-
-    @classmethod
-    def from_posterior(cls, posterior, resolution=128,
-                       beta_temperature=.1):
-        harmonic_modes = posterior.likelihood.waveform_generator.harmonic_modes
-        posterior.likelihood.waveform_generator.harmonic_modes = [(2, 2)]
-
-        par_dic_0 = posterior.likelihood.par_dic_0
-        snr = np.sqrt(2 * posterior.likelihood.lnlike_fft(par_dic_0))
-        pn_coordinates = PNCoordinates.from_likelihood(posterior.likelihood)
-        init_dict = posterior.prior.get_init_dict()
-        mchirp_range = init_dict['mchirp_range']
-        q_min = init_dict['q_min']
-
-        posterior.likelihood.waveform_generator.harmonic_modes = harmonic_modes
-        return cls(par_dic_0, snr, pn_coordinates, mchirp_range,
-                   q_min=q_min, resolution=resolution,
-                   beta_temperature=beta_temperature)
-
-    @property
-    def resolution(self):
-        return self._resolution
-
-    @resolution.setter
-    def resolution(self, resolution):
-        self._resolution = resolution
-        self._mchirp_grid = np.linspace(*self.mchirp_range, resolution)
-        self._lnq_grid = np.linspace(np.log(self.q_min), 0, resolution)
-        # Use cumchidiff=.5 so we don't have to recompute this for each sample.
-        # Hopefully it doesn't affect the mchirp posterior.
-        self._mchirp_pdf =(
-            self._mchirp_prior(self._mchirp_grid)
-            * np.vectorize(self._evidence_lnq_chieff_given_mchirp)(
-                self._mchirp_grid, cumchidiff=.5))
-
-    @property
-    def par_dic_0(self):
-        return self._par_dic_0
-
-    @par_dic_0.setter
-    def par_dic_0(self, par_dic_0):
-        self._par_dic_0 = par_dic_0
-        mchirp0 = gw_utils.m1m2_to_mchirp(par_dic_0['m1'],
-                                          par_dic_0['m2'])
-        eta0 = gw_utils.q_to_eta(par_dic_0['m2'] / par_dic_0['m1'])
-        dic = UniformEffectiveSpinPrior.inverse_transform(par_dic_0['s1z'],
-                                                          par_dic_0['s2z'],
-                                                          par_dic_0['m1'],
-                                                          par_dic_0['m2'])
-
-        chieff0 = dic['chieff']
-        cumchidiff_0 = dic['cumchidiff']
-        mtot0 = gw_utils.mchirpeta_to_mtot(mchirp0, eta0)
-
-        self._coords_0 = self.pn_coordinates.transform(mchirp0, eta0, chieff0,
-                                                       cumchidiff_0)
-        self._fmerger_0 = get_f_merger(mtot0, chieff0)
-        self._fmerger_scale_0 = 2 * (
-            self.snr
-            * self.pn_coordinates.interp_wht_amplitude(self._fmerger_0))**-2
-
-    @staticmethod
-    def _lnq_prior(lnq):
-        # return np.cosh(lnq/2)**.4
-        return 1
-
-    @staticmethod
-    def _mchirp_prior(mchirp):
-        return mchirp
-
-    def _evidence_lnq_chieff_given_mchirp(self, mchirp, cumchidiff):
-        return scipy.integrate.trapezoid(
-            self._lnq_prior(self._lnq_grid)
-            * self._evidence_chieff_given_mchirp_lnq(
-                mchirp, self._lnq_grid, cumchidiff),
-            self._lnq_grid)
-
-    def _evidence_chieff_given_mchirp_lnq(self, mchirp, lnq, cumchidiff):
-        """
-        Return
-            int_{-1}^1 dchieff (prior(chieff)
-                                * likelihood(mchirp, lnq, chieff))
-        with
-            prior(chieff) = uniform
-            likelihood = an analytical approximation to the likelihood
-                         that accounts for the inspiral phase at 2.5PN
-                         and an estimate of the merger frequency.
-        """
-        chieff_loc, chieff_scale, weight = self._chieff_loc_scale_and_weight(
-            mchirp, lnq, cumchidiff)
-        chieff_min = -1
-        chieff_max = 1
-        parameter_min = (chieff_min - chieff_loc) / chieff_scale
-        parameter_max = (chieff_max - chieff_loc) / chieff_scale
-        evidence_chieff = weight * (
-            (self._likelihood_chieff_given_mchirp_lnq.cdf(parameter_max)
-             - self._likelihood_chieff_given_mchirp_lnq.cdf(parameter_min))
-            / (parameter_max - parameter_min))
-
-        return evidence_chieff
-
-    def _chieff_loc_and_scale_due_to_fmerger(self, mchirp, lnq):
+    def s1z_loc_and_scale_due_to_fmerger(self, m1, m2, s2z):
         """
         Return estimate of chieff and its uncertainty, conditioned on
-        (mchirp, lnq), just accounting for the cutoff frequency.
+        (m1, m2, s2z), just accounting for the cutoff frequency.
 
         Return
         ------
@@ -431,10 +380,8 @@ class PNMap:
         chieff_scale: float > 0
             Expected width of the likelihood.
         """
-        mtot = gw_utils.mchirpeta_to_mtot(mchirp,
-                                          gw_utils.q_to_eta(np.exp(lnq)))
-        fmerger_min = get_f_merger(mtot, -1)
-        fmerger_max = get_f_merger(mtot, 1)
+        fmerger_min = self._get_fmerger(m1, m2, -1, s2z)
+        fmerger_max = self._get_fmerger(m1, m2, 1, s2z)
 
         kwargs = dict(
             a=(fmerger_min - self._fmerger_0) / self._fmerger_scale_0,
@@ -444,170 +391,87 @@ class PNMap:
         fmerger2 = trunclaplace.ppf(.2, **kwargs)
         fmerger8 = trunclaplace.ppf(.8, **kwargs)
 
-        # Linear approximation to chieff(fmerger) near region with support
-        chieff2 = chieff_from_mtot_fmerger(mtot, fmerger2)
-        chieff8 = chieff_from_mtot_fmerger(mtot, fmerger8)
+        # Linear approximation to s1z(fmerger) near region with support
+        s1z2 = self._get_s1z(fmerger2, m1, m2, s2z)
+        s1z8 = self._get_s1z(fmerger8, m1, m2, s2z)
 
-        dchieff_dfmerger = (chieff8 - chieff2) / (fmerger8 - fmerger2)
+        ds1z_dfmerger = (s1z8 - s1z2) / (fmerger8 - fmerger2)
 
-        chieff_loc = chieff2 + (self._fmerger_0-fmerger2) * dchieff_dfmerger
-        chieff_scale = self._fmerger_scale_0 * dchieff_dfmerger
+        s1z_loc = s1z2 + (self._fmerger_0 - fmerger2) * ds1z_dfmerger
+        s1z_scale = self._fmerger_scale_0 * ds1z_dfmerger
 
-        return chieff_loc, chieff_scale
+        return s1z_loc, s1z_scale
 
-    def _chieff_loc_scale_and_weight_due_to_inspiral(
-            self, mchirp, lnq, cumchidiff):
+    @staticmethod
+    def _get_s1z(fmerger, m1, m2, s2z):
+        chieff = chieff_from_mtot_fmerger(m1 + m2, fmerger)
+        return ((m1 + m2) * chieff - m2 * s2z) / m1
+
+    @staticmethod
+    def _get_fmerger(m1, m2, s1z, s2z):
+        chieff = gw_utils.chieff(m1, m2, s1z, s2z)
+        return get_f_merger(m1 + m2, chieff)
+
+
+class IntrinsicParameterProposal:
+    """
+    Provide a method `generate_intrinsic_samples` that generates samples
+    of intrinsic parameters (per `.params`) from an importance-sampling
+    proposal using Quasi Monte Carlo. The importance-sampling proposal
+    is informed by the inspiral and the merger frequency via Fisher
+    analysis using post-Newtonian models.
+    Provide a constructor `from_posterior`.
+    """
+    params = ['m1', 'm2', 's1z', 's2z', 's1x_n', 's1y_n', 's2x_n', 's2y_n',
+              'iota']
+    _likelihood_s1z = scipy.stats.cauchy
+    _p_s1z = TruncatedDistribution(_likelihood_s1z)
+
+    _cosiota_grid = np.linspace(-1, 1, 256)
+    _cosiota_prior = (
+        ((1 + _cosiota_grid**2) / 2)**2 + _cosiota_grid**2) ** (3/2)
+
+    def __init__(self, inspiral_analysis, merger_analysis, mchirp_range,
+                 q_min=.05, resolution=128, beta_temperature=.1):
+        self.inspiral_analysis = inspiral_analysis
+        self.merger_analysis = merger_analysis
+        self.beta_temperature = beta_temperature
+
+        # Choice: sample mchirp and lnq independently. Revise as needed.
+        self._mchirp_grid = np.linspace(*mchirp_range, resolution)
+        self._lnq_grid = np.linspace(np.log(q_min), 0, resolution)
+        mchirp, lnq = np.meshgrid(self._mchirp_grid, self._lnq_grid,
+                                  indexing='ij')
+        m1, m2 = gw_utils.mchirpeta_to_m1m2(mchirp,
+                                            gw_utils.q_to_eta(np.exp(lnq)))
+        evidence_s1z = self._evidence_s1z(m1, m2, s2z=0, s1x_n=0, s1y_n=0,
+                                          s2x_n=0, s2y_n=0)
+        self._mchirp_pdf = evidence_s1z.sum(axis=1)
+        self._lnq_pdf = evidence_s1z.sum(axis=0)
+
+    @classmethod
+    def from_posterior(cls, posterior, **kwargs):
         """
-        Return estimate of chieff and its uncertainty, conditioned on
-        (mchirp, lnq), just accounting for the inspiral.
-
-        Return
-        ------
-        chieff_loc: float
-            Expected peak of the likelihood. Need not be in (-1, 1).
-
-        chieff_scale: float > 0
-            Expected width of the likelihood.
-
-        weight: float between 0 and 1
-            Penalty in case the mismatch-metric-coordinates orthogonal
-            to chieff are inconsistent with the reference solution.
-        """
-        chieff_min = -1
-        chieff_max = 1
-        eta = gw_utils.q_to_eta(np.exp(lnq))
-
-        coords_start = self.pn_coordinates.transform(mchirp, eta, chieff_min,
-                                                     cumchidiff)
-        c0_min = coords_start[..., 0]
-        c0_max = self.pn_coordinates.transform(mchirp, eta, chieff_max,
-                                               cumchidiff)[..., 0]
-
-        dchieff_dc0 = (chieff_max - chieff_min) / (c0_max - c0_min)
-        chieff_loc = chieff_min + (self._coords_0[0] - c0_min) * dchieff_dc0
-        chieff_scale = dchieff_dc0 / self.snr
-
-        # Penalize if the coordinates orthogonal to chieff are
-        # inconsistent with reference solution:
-        perpendicular_distance = np.linalg.norm(
-            coords_start[..., 1:] - self._coords_0[1:], axis=-1)
-        weight = np.exp(- self.beta_temperature * self.snr**2
-                        * perpendicular_distance**2 / 2)
-
-        return chieff_loc, chieff_scale, weight
-
-    def _chieff_loc_scale_and_weight(self, mchirp, lnq, cumchidiff):
-        """
-        Return
-        ------
-        chieff_loc, chieff_scale: float
-            Estimates of the location and width of the likelihood as a
-            function of chieff. Note, `loc` needs not be in (-1, 1).
-
-        weight: float between 0 and 1
-            Multiplicative normalization of the likelihood, due to the
-            mismatch distance orthogonal to the chieff direction.
-        """
-        loc1, scale1 = self._chieff_loc_and_scale_due_to_fmerger(mchirp, lnq)
-        loc2, scale2, weight \
-            = self._chieff_loc_scale_and_weight_due_to_inspiral(mchirp, lnq,
-                                                                cumchidiff)
-
-        inv_variances = np.array((scale1, scale2))**-2
-        chieff_loc = np.average((loc1, loc2), weights=inv_variances, axis=0)
-        chieff_scale = sum(inv_variances * self.beta_temperature)**-.5
-
-        # Penalize if chieff prediction from merger frequency is
-        # inconsistent with chieff prediction from inspiral:
-        weight *= (self._likelihood_chieff_given_mchirp_lnq.pdf(
-                       (loc1 - chieff_loc) / chieff_scale)
-                   * self._likelihood_chieff_given_mchirp_lnq.pdf(
-                       (loc2 - chieff_loc) / chieff_scale))
-        return chieff_loc, chieff_scale, weight
-
-    def _draw_chieff_given_mchirp_lnq(self, u_chieff, mchirp, lnq, cumchidiff):
-        """
-        Draw a value of chieff from its conditional distribution given
-        mchirp, lnq.
-
         Parameters
         ----------
-        u_chieff: float
-            Quantile of P(chieff | mchirp, lnq) to draw.
-
-        mchirp: float
-            Detector-frame chirp mass (Msun).
-
-        lnq: float
-            Natural logarithm of mass ratio.
-
-        Return
-        ------
-        chieff: float
-            Value of chieff corresponding to the requested quantile of
-            the conditional distribution.
-
-        du_dchieff: float > 0
-            P(chieff | mchirp, lnq), i.e., the Jacobian of the CDF.
+        posterior: cogwheel.posterior.Posterior
+            Posterior instance from which to take best-fit parameters,
+            parameter ranges, and detector PSDs.
+        **kwargs
         """
-        chieff_loc, chieff_scale, _ = self._chieff_loc_scale_and_weight(
-            mchirp, lnq, cumchidiff)
-        chieff_min = -1
-        chieff_max = 1
-        kwargs = dict(a=(chieff_min - chieff_loc) / chieff_scale,
-                      b=(chieff_max - chieff_loc) / chieff_scale,
-                      loc=chieff_loc,
-                      scale=chieff_scale)
+        inspiral_analysis = _InspiralAnalysis.from_likelihood(
+            posterior.likelihood)
+        merger_analysis = _MergerAnalysis.from_likelihood(
+            posterior.likelihood)
 
-        chieff = self._p_chieff_given_mchirp_lnq.ppf(u_chieff, **kwargs)
-        du_dchieff = self._p_chieff_given_mchirp_lnq.pdf(chieff, **kwargs)
-        return chieff, du_dchieff
+        dic = posterior.prior.get_init_dict()
+        if 'q_min' not in kwargs:
+            kwargs['q_min'] = dic['q_min']
 
-    def _transform_and_weights(self, u_mchirp, u_lnq, u_chieff, cumchidiff):
-        """
-        Return mchirp, lnq, chieff from their cumulatives.
-            u_mchirp := C(mchirp)
-            u_lnq := C(lnq|mchirp)
-            u_chieff := C(chieff|mchirp, lnq)
-        where C denotes the cumulative of the fiducial posterior.
-        Also return weights.
-        """
-        mchirp, du_dmchirp = inverse_cdf_and_jacobian(
-            u_mchirp, self._mchirp_grid, self._mchirp_pdf)
+        if 'mchirp_range' not in kwargs:
+            kwargs['mchirp_range'] = dic['mchirp_range']
 
-        # lnq_post = (self._lnq_prior(self._lnq_grid)
-        #             * self._evidence_chieff_given_mchirp_lnq(
-        #                 mchirp, self._lnq_grid, cumchidiff))
-        lnq_post = np.ones_like(self._lnq_grid)  # Force flat in lnq (experimental)
-
-        lnq, du_dlnq = inverse_cdf_and_jacobian(u_lnq, self._lnq_grid,
-                                                lnq_post)
-
-        chieff, du_dchieff = self._draw_chieff_given_mchirp_lnq(
-            u_chieff, mchirp, lnq, cumchidiff)
-        self.status = locals()
-        return {'mchirp': mchirp,
-                'lnq': lnq,
-                'chieff': chieff,
-                'weights': 1 / (du_dmchirp * du_dlnq * du_dchieff)}
-
-
-class IntrinsicMap:
-    """
-    Use the cumulative of the prior on theta_jn as inclination
-    coordinate.
-    The formula for (2, 2) aligned spin is used.
-    """
-    _costheta_jn_grid = np.linspace(-1, 1, 256)
-    _costheta_jn_prior = (((1+_costheta_jn_grid**2)/2)**2
-                          + _costheta_jn_grid**2) ** 1.5
-
-    params = ['mchirp', 'lnq', 'chieff', 'cumchidiff', 'cums1r_s1z',
-              'cums2r_s2z', 'phi_jl_hat', 'phi12', 'costheta_jn']
-
-    def __init__(self, pn_map: PNMap):
-        super().__init__()
-        self.pn_map = pn_map
+        return cls(inspiral_analysis, merger_analysis, **kwargs)
 
     def generate_intrinsic_samples(self, log2n_qmc: int):
         """
@@ -616,30 +480,127 @@ class IntrinsicMap:
         """
         qmc_sequence = pd.DataFrame(
             scipy.stats.qmc.Sobol(len(self.params)).random_base2(log2n_qmc),
-            columns=[f'u_{par}' for par in self.params])
+            columns=['cdf_mchirp', 'cdf_lnq', 'cdf_s1r', 'cdf_s1z_conditioned',
+                     'cdf_phi1', 'cdf_s2r', 'cdf_s2z_s2r', 'cdf_phi2',
+                     'cdf_cosiota'])
 
-        samples = pd.DataFrame({'cumchidiff': qmc_sequence['u_cumchidiff']})
+        samples = pd.DataFrame()
 
-        utils.update_dataframe(
-            samples,
-            pd.DataFrame.from_records(self.pn_map.transform_and_weights(
-                **qmc_sequence[['u_mchirp', 'u_lnq', 'u_chieff']],
-                **samples[['cumchidiff']])))
+        samples['s1x_n'], samples['s1y_n'] = self._get_inplane_spins(
+            qmc_sequence['cdf_s1r'], qmc_sequence['cdf_phi1'])
 
-        samples['cums1r_s1z'] = qmc_sequence['u_cums1r_s1z']
-        samples['cums2r_s2z'] = qmc_sequence['u_cums2r_s2z']
-        samples['phi_jl_hat'] = qmc_sequence['u_phi_jl_hat'] * 2 * np.pi
-        samples['phi12'] = qmc_sequence['u_phi12'] * 2 * np.pi
+        samples['s2x_n'], samples['s2y_n'] = self._get_inplane_spins(
+            qmc_sequence['cdf_s2r'], qmc_sequence['cdf_phi2'])
 
+        s2z_max = np.sqrt(1 - samples['s2x_n']**2 - samples['s2y_n']**2)
+        samples['s2z'] = 2 * (qmc_sequence['cdf_s2z_s2r'] - .5) * s2z_max
 
-        vec_inverse_cdf_and_jacobian = np.vectorize(inverse_cdf_and_jacobian,
-                                                    otypes=[float, float],
-                                                    excluded=[1, 2])
+        mchirp, pdf_mchirp = inverse_cdf_and_jacobian(
+            qmc_sequence['cdf_mchirp'], self._mchirp_grid, self._mchirp_pdf)
+        lnq, pdf_lnq = inverse_cdf_and_jacobian(
+            qmc_sequence['cdf_lnq'], self._lnq_grid, self._lnq_pdf)
+        samples['m1'], samples['m2'] = gw_utils.mchirpeta_to_m1m2(
+            mchirp, gw_utils.q_to_eta(np.exp(lnq)))
 
-        samples['costheta_jn'], du_dcostheta_jn = vec_inverse_cdf_and_jacobian(
-            qmc_sequence['u_costheta_jn'],
-            self._costheta_jn_grid,
-            self._costheta_jn_prior)
+        samples['s1z'], weight_s1z = self._get_s1z_and_weight(
+            **qmc_sequence[['cdf_s1z_conditioned']], **samples)
 
-        samples['weights'] /= du_dcostheta_jn
+        cosiota, pdf_cosiota = inverse_cdf_and_jacobian(
+            qmc_sequence['cdf_cosiota'],
+            self._cosiota_grid,
+            self._cosiota_prior)
+        samples['iota'] = np.arccos(cosiota)
+        samples['weights'] = weight_s1z / pdf_cosiota / pdf_mchirp / pdf_lnq
+
         return samples
+
+    def _evidence_s1z(self, m1, m2, s2z, s1x_n, s1y_n, s2x_n, s2y_n):
+        """
+        Return
+            int_{s1z_min}^{s1z_max} ds1z (prior(s1z | m1, ...)
+                                          * likelihood)
+        with
+            prior(s1z) = uniform (within Kerr bound given inplane s1).
+            likelihood = an analytical approximation to the likelihood
+                         that accounts for the inspiral phase at 2.5PN,
+                         a precession correction and an estimate of the
+                         merger frequency.
+        """
+        s1z_loc, s1z_scale, weight = self._s1z_loc_scale_and_weight(
+            m1, m2, s2z, s1x_n, s1y_n, s2x_n, s2y_n)
+        s1z_max = np.sqrt(1 - s1x_n**2 - s1y_n**2)
+        s1z_min = -s1z_max
+        parameter_min = (s1z_min - s1z_loc) / s1z_scale
+        parameter_max = (s1z_max - s1z_loc) / s1z_scale
+        evidence_s1z = weight * (self._likelihood_s1z.cdf(parameter_max)
+                                 - self._likelihood_s1z.cdf(parameter_min)
+                                ) / (parameter_max - parameter_min)
+        return evidence_s1z
+
+    def _s1z_loc_scale_and_weight(self, m1, m2, s2z, s1x_n, s1y_n,
+                                  s2x_n, s2y_n):
+        """
+        Return
+        ------
+        s1z_loc, s1z_scale: float
+            Estimates of the location and width of the likelihood as a
+            function of s1z. Note, `loc` needs not be in (-1, 1).
+
+        weight: float between 0 and 1
+            Multiplicative normalization of the likelihood, penalizes
+            mismatch distance orthogonal to the s1z direction, and
+            inconsistency between s1z predictions from inspiral and
+            merger.
+        """
+        loc1, scale1, inspiral_weight \
+            = self.inspiral_analysis.s1z_loc_scale_and_weight_due_to_inspiral(
+                m1, m2, s2z, s1x_n, s1y_n, s2x_n, s2y_n)
+
+        loc2, scale2 = self.merger_analysis.s1z_loc_and_scale_due_to_fmerger(
+            m1, m2, s2z)
+
+        inv_variances = np.array((scale1, scale2))**-2
+        s1z_loc = np.average((loc1, loc2), weights=inv_variances, axis=0)
+        s1z_scale = sum(inv_variances * self.beta_temperature)**-.5
+
+        # Penalize if s1z prediction from merger frequency is
+        # inconsistent with s1z prediction from inspiral:
+        weight = inspiral_weight ** self.beta_temperature * (
+            self._likelihood_s1z.pdf((loc1 - s1z_loc) / scale1)
+            * self._likelihood_s1z.pdf((loc2 - s1z_loc) / scale2))
+        return s1z_loc, s1z_scale, weight
+
+    def _get_s1z_and_weight(self, cdf_s1z_conditioned, m1, m2, s2z,
+                            s1x_n, s1y_n, s2x_n, s2y_n):
+        """
+        Return the value of s1z from its CDF, given other intrinsic
+        parameters. Also return the importance sampling weight w.r.t.
+        a conditional prior uniform in s1z within the Kerr bound.
+        """
+        s1z_loc, s1z_scale, _ = self._s1z_loc_scale_and_weight(
+            m1, m2, s2z, s1x_n, s1y_n, s2x_n, s2y_n)
+
+        s1z_max = np.sqrt(1 - s1x_n**2 - s1y_n**2)
+        s1z_min = -s1z_max
+        kwargs = dict(a=(s1z_min - s1z_loc) / s1z_scale,
+                      b=(s1z_max - s1z_loc) / s1z_scale,
+                      loc=s1z_loc,
+                      scale=s1z_scale)
+
+        s1z = self._p_s1z.ppf(cdf_s1z_conditioned, **kwargs)
+        pdf_s1z = self._p_s1z.pdf(s1z, **kwargs)
+        prior_s1z = 1 / (s1z_max - s1z_min)
+        return s1z, prior_s1z / pdf_s1z
+
+    @staticmethod
+    def _get_inplane_spins(cdf_sr, cdf_phi):
+        """
+        Inverse of the cumulative distribution of the inplane spin
+        magnitude and azimuth under a "volumetric" prior (i.e. density
+        uniform in the ball |s| < 1).
+        """
+        sr = np.sqrt(1 - (1 - cdf_sr)**(2/3))
+        phi = 2*np.pi * cdf_phi
+        sx = sr * np.cos(phi)
+        sy = sr * np.sin(phi)
+        return sx, sy
