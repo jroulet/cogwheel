@@ -138,8 +138,8 @@ class LookupTable(utils.JSONMixin):
             table = lookup_tables.get(key)
         else:
             table = np.vectorize(self._function)(dh_grid, hh_grid)
-            np.savez(LOOKUP_TABLES_FNAME, **lookup_tables,
-                     **{key: table, _VERSION_KEY: _VERSION})
+            np.savez(LOOKUP_TABLES_FNAME,
+                     **{**lookup_tables, key: table, _VERSION_KEY: _VERSION})
 
         return table
 
