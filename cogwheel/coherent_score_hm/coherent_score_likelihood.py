@@ -149,14 +149,28 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
 
     @likelihood.check_bounds
     def lnlike(self, par_dic):
-        return self.coherent_score.marginalize(
-            *self._get_dh_hh(par_dic), self._times)
+        """
+        Natural log of the likelihood marginalized over extrinsic
+        parameters (sky location, time of arrival, polarization,
+        distance and orbital phase).
+
+        Parameters
+        ----------
+        par_dic: dict
+            Must contain keys for all ``.params``.
+
+        Return
+        ------
+        lnlike: float
+            Log of the marginalized likelihood.
+        """
+        return self.coherent_score.get_marginalization_info(
+            *self._get_dh_hh(par_dic), self._times).lnl_marginalized
 
     def postprocess_samples(self, samples: pd.DataFrame, num=None):
         """
-        Add columns for marginalized parameters to a DataFrame of
-        intrinsic parameter samples, with values taken randomly from the
-        conditional posterior.
+        Generate extrinsic parameter samples given intrinsic parameters,
+        with values taken randomly from the conditional posterior.
 
         Parameters
         ----------
@@ -174,10 +188,8 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
         """
         dh_nmptd, hh_nmppd = self._get_many_dh_hh(samples)
 
-        return_samples = True if num is None else num
-        extrinsic = [self.coherent_score.marginalize(dh_mptd, hh_mppd,
-                                                     self._times,
-                                                     return_samples)
+        extrinsic = [self.coherent_score.gen_samples(dh_mptd, hh_mppd,
+                                                     self._times, num)
                      for dh_mptd, hh_mppd in zip(dh_nmptd, hh_nmppd)]
 
         for ext in extrinsic:
