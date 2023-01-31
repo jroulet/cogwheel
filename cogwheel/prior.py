@@ -110,6 +110,7 @@ class Prior(ABC, utils.JSONMixin):
     folded_shifted_params = []
 
     def __init__(self, **kwargs):
+        del kwargs
         super().__init__()
         self._check_range_dic()
 

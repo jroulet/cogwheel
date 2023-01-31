@@ -4,12 +4,12 @@ to sample using a likelihood marginalized over distance.
 """
 
 from pathlib import Path
-from scipy.integrate import quad
-from scipy.interpolate import (RectBivariateSpline,
-                               InterpolatedUnivariateSpline)
 import textwrap
 import warnings
 import numpy as np
+from scipy.integrate import quad
+from scipy.interpolate import (RectBivariateSpline,
+                               InterpolatedUnivariateSpline)
 
 from cogwheel.likelihood import RelativeBinningLikelihood
 from cogwheel import utils
@@ -42,6 +42,11 @@ _VERSION_WARNING = textwrap.dedent(f"""
 
 
 def clear_cache_if_outdated():
+    """
+    If this file's ``_VERSION`` value is different than it was when the
+    lookup tables were cached, then delete the file with the cache, this
+    will force recomputing future ``LookupTable``s.
+    """
     if LOOKUP_TABLES_FNAME.exists():
         cache = np.load(LOOKUP_TABLES_FNAME)
         if cache.get(_VERSION_KEY, 0) != _VERSION:
@@ -223,8 +228,8 @@ class LookupTable(utils.JSONMixin):
         broad_grid = np.linspace(0, self.d_luminosity_max, resolution)[1:]
         distances = np.sort(np.concatenate([broad_grid, focused_grid]))
         posterior = self._function_integrand(distances, d_h, h_h)
-        cumulative = InterpolatedUnivariateSpline(distances, posterior, k=1
-                                                 ).antiderivative()(distances)
+        cumulative = InterpolatedUnivariateSpline(
+            distances, posterior, k=1).antiderivative()(distances)[()]
         return np.interp(np.random.uniform(0, cumulative[-1], num),
                          cumulative, distances)
 
@@ -286,7 +291,8 @@ class LookupTable(utils.JSONMixin):
     @staticmethod
     def _uncompactify(value):
         """
-        Inverse of _compactify. Monotonic function from (-1, 1) to (-inf, inf).
+        Inverse of _compactify. Monotonic function from (-1, 1) to
+        (-inf, inf).
         """
         return value / (1 - np.abs(value))
 
@@ -353,8 +359,8 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
 
     def postprocess_samples(self, samples, force_update=True):
         """
-        Add a column 'd_luminosity' to a DataFrame of samples, with values taken
-        randomly from the conditional posterior.
+        Add a column 'd_luminosity' to a DataFrame of samples, with
+        values taken randomly from the conditional posterior.
         `samples` needs to have columns for all `self.params`.
 
         Parameters
@@ -369,7 +375,8 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         @np.vectorize
         def sample_distance(**par_dic):
             dh_hh = self._get_dh_hh_no_asd_drift(
-                par_dic | {'d_luminosity': self.lookup_table.REFERENCE_DISTANCE})
+                par_dic
+                | {'d_luminosity': self.lookup_table.REFERENCE_DISTANCE})
 
             d_h, h_h = np.matmul(dh_hh, self.asd_drift**-2)
             return self.lookup_table.sample_distance(d_h, h_h)

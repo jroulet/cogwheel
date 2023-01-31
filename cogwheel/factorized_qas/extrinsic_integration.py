@@ -746,7 +746,7 @@ class CoherentScore:
         prior_terms, samples, UT2samples = self.comblist2cs(
             timeseries_ev, nfacs, **score_kwargs)
 
-        return prior_terms, samples,  UT2samples
+        return prior_terms, samples, UT2samples
 
     def comblist2cs(self, timeseries, nfacs, gtype=1, nsamples=10000,
                     **kwargs):
