@@ -126,9 +126,8 @@ class CoherentScoreHM(BaseCoherentScore):
                                              lnl_marginalized=-np.inf,
                                              important=[(), ()])
 
-        sky_inds, sky_prior = zip(
-            *(next(self.sky_dict.delays2genind_map[delays_key])
-              for delays_key in zip(*delays)))  # q, q
+        sky_inds, sky_prior = self.sky_dict.get_sky_inds_and_prior(
+            delays)  # q, q
 
         dh_qo, hh_qo = self._get_dh_hh_qo(sky_inds, physical_mask, t_first_det,
                                           times, dh_mptd, hh_mppd)  # qo, qo

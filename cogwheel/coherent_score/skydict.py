@@ -77,6 +77,25 @@ class SkyDictionary(utils.JSONMixin):
 
         return timeseries, times
 
+    def get_sky_inds_and_prior(self, delays):
+        """
+        Parameters
+        ----------
+        delays: int array of shape (n_det-1, n_samples)
+            Time-of-arrival delays in units of 1 / self.f_sampling
+
+        Return
+        ------
+        sky_inds: tuple of ints of length n_samples
+            Indices of self.sky_samples with the correct time delays.
+
+        sky_prior: tuple of floats of length n_samples
+            Prior probability density for the time-delays, in units of
+            s^-(n_det-1).
+        """
+        return zip(*(next(self.delays2genind_map[delays_key])
+                     for delays_key in zip(*delays)))
+
     def _create_sky_samples(self):
         """
         Return a dictionary of samples in terms of 'lat' and 'lon' drawn
