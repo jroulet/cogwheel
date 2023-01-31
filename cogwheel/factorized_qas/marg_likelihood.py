@@ -10,6 +10,7 @@ from cogwheel import skyloc_angles
 from cogwheel.likelihood import RelativeBinningLikelihood
 from . import extrinsic_integration as cs
 
+
 class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
     """
     Generalization of 'RelativeBinningLikelihood' that implements the
