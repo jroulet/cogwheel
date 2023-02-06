@@ -83,9 +83,12 @@ class LookupTable(utils.JSONMixin):
     The interpolation is done in some coordinates `x`, `y` in which the
     function is smooth (see ``_get_x_y``, ``get_dh_hh``).
     """
+    marginalized_params = {'d_luminosity'}
+
     REFERENCE_DISTANCE = 1.  # Luminosity distance at which h is defined (Mpc).
     _Z0 = 10.  # Typical SNR of events.
     _SIGMAS = 10.  # How far out the tail of the distribution to tabulate.
+    _rng = np.random.default_rng()
 
     def __init__(self, d_luminosity_prior_name: str = 'euclidean',
                  d_luminosity_max=D_LUMINOSITY_MAX, shape=(256, 128)):
@@ -140,7 +143,7 @@ class LookupTable(utils.JSONMixin):
         load = LOOKUP_TABLES_FNAME.exists()
         lookup_tables = np.load(LOOKUP_TABLES_FNAME) if load else {}
 
-        key = repr(self.get_init_dict())
+        key = repr(self)
         if key in lookup_tables:
             table = lookup_tables.get(key)
         else:
@@ -185,17 +188,14 @@ class LookupTable(utils.JSONMixin):
         return np.array([self.REFERENCE_DISTANCE / (u_peak + delta_u),
                          self.REFERENCE_DISTANCE / (u_peak - delta_u)])
 
-    def lnlike_marginalized_over_distance(self, d_h, h_h):
+    def lnlike_marginalized(self, d_h, h_h):
         """
         Parameters
         ----------
         d_h, h_h: float
             Inner products (d|h), (h|h) where `d` is data and `h` is the
             model strain at a fiducial distance REFERENCE_DISTANCE.
-            These are scalars (detectors are summed over). A real part
-            is taken in (d|h), not an absolute value (phase is not
-            marginalized over so the computation is robust to higher
-            modes).
+            These are scalars (detectors are summed over).
         """
         return self(d_h, h_h) + d_h**2 / h_h / 2
 
@@ -232,7 +232,7 @@ class LookupTable(utils.JSONMixin):
         posterior = self._function_integrand(distances, d_h, h_h)
         cumulative = InterpolatedUnivariateSpline(
             distances, posterior, k=1).antiderivative()(distances)[()]
-        return np.interp(np.random.uniform(0, cumulative[-1], num),
+        return np.interp(self._rng.uniform(0, cumulative[-1], num),
                          cumulative, distances)
 
     def _function(self, d_h, h_h):
@@ -298,6 +298,61 @@ class LookupTable(utils.JSONMixin):
         """
         return value / (1 - np.abs(value))
 
+    def __repr__(self):
+        """
+        Return a string of the form `LookupTable(key1=val1, ...)`
+        """
+        kwargs_str = ", ".join(f'{key}={val!r}'
+                               for key, val in self.get_init_dict().items())
+        return f'{self.__class__.__name__}({kwargs_str})'
+
+
+class LookupTableMarginalizedPhase22(LookupTable):
+    """
+    Similar to ``LookupTable`` except the likelihood is marginalized
+    over both distance and phase, assuming quadrupolar radiation.
+
+    ``d_h`` is now assumed to be the absolute value of the complex (d|h)
+    throughout, except in ``sample_phase`` it is the complex (d|h).
+    """
+    marginalized_params = {'d_luminosity', 'phi_ref'}
+
+    def _function_integrand(self, d_luminosity, d_h, h_h):
+        """
+        Proportional to the distance posterior. The log of the integral
+        of this function is stored in the lookup table.
+        """
+        return (super()._function_integrand(d_luminosity, d_h, h_h)
+                * scipy.special.i0e(d_h * self.REFERENCE_DISTANCE
+                                    / d_luminosity))
+
+    def sample_phase(self, d_luminosity, d_h, num=None):
+        """
+        Return a random value for the orbital phase according to the posterior
+        conditioned on all other parameters.
+
+        Parameters
+        ----------
+        d_luminosity: float
+            Luminosity distance of the sample (Mpc).
+
+        d_h: complex
+            Complex inner product (d|h) between data and waveform at
+            ``self.REFERENCE_DISTANCE``.
+
+        num: int, optional
+            How many samples to return, defaults to one.
+        """
+        if np.isrealobj(d_h):
+            raise ValueError('`d_h` expects the complex inner product.')
+
+        waveform_phase = self._rng.vonmises(
+            np.angle(d_h),
+            np.abs(d_h) * self.REFERENCE_DISTANCE / d_luminosity,
+            size=num)
+        phi_ref = waveform_phase / 2 + self._rng.choice((0, np.pi), size=num)
+        return phi_ref % (2*np.pi)
+
 
 class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
     """
@@ -326,6 +381,8 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         lookup_table: Instance of ``LookupTable`` to compute the
                       marginalized likelihood.
         """
+        if lookup_table.marginalized_params != {'d_luminosity'}:
+            raise ValueError('Use ``LookupTable`` class.')
 
         super().__init__(event_data, waveform_generator, par_dic_0, fbin,
                          pn_phase_tol, spline_degree)
@@ -350,7 +407,7 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
 
         d_h, h_h = np.matmul(dh_hh, self.asd_drift**-2)
 
-        return self.lookup_table.lnlike_marginalized_over_distance(d_h, h_h)
+        return self.lookup_table.lnlike_marginalized(d_h, h_h)
 
     def lnlike_no_marginalization(self, par_dic):
         """
