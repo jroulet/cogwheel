@@ -73,7 +73,8 @@ class SkyDictionary(utils.JSONMixin):
             timeseries, times = scipy.signal.resample(
                 timeseries, int(len(times) * fs_ratio), times, axis=axis)
             if not np.isclose(1 / self.f_sampling, times[1] - times[0]):
-                raise ValueError('`times` is incommensurate with `f_sampling`.')
+                raise ValueError(
+                    '`times` is incommensurate with `f_sampling`.')
 
         return timeseries, times
 

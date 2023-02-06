@@ -7,12 +7,14 @@ from pathlib import Path
 import textwrap
 import warnings
 import numpy as np
+import scipy.special
+import scipy.stats
 from scipy.integrate import quad
 from scipy.interpolate import (RectBivariateSpline,
                                InterpolatedUnivariateSpline)
 
-from cogwheel.likelihood import RelativeBinningLikelihood
 from cogwheel import utils
+from .relative_binning import RelativeBinningLikelihood
 
 
 LOOKUP_TABLES_FNAME = Path(__file__).parent/'lookup_tables.npz'

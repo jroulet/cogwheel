@@ -171,7 +171,8 @@ class Posterior(utils.JSONMixin):
         result = utils.differential_evolution_with_guesses(
             func=loss_function,
             bounds=list(zip(self.prior.cubemin[inds],
-                            (self.prior.cubemin + self.prior.folded_cubesize)[inds])),
+                            (self.prior.cubemin
+                             + self.prior.folded_cubesize)[inds])),
             guesses=folded_par_vals_0[inds], seed=seed, init='sobol').x
 
         folded_par_vals[inds] = result

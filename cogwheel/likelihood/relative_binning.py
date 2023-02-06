@@ -16,9 +16,9 @@ import numpy as np
 import scipy.interpolate
 import scipy.sparse
 
-from cogwheel import waveform
 from cogwheel import gw_utils
 from cogwheel import utils
+from cogwheel import waveform
 from .likelihood import CBCLikelihood, check_bounds
 
 
