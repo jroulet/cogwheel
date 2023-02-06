@@ -214,7 +214,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         d_h_timeseries = (self._d_h_timeseries_weights * h_fbin.conj()
                           ).sum(axis=(-3, -1))
 
-        m_inds, mprime_inds = self._get_m_mprime_inds()
+        m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
         h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
                ).real.sum(axis=(0, -1)))
 
@@ -250,7 +250,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         det_slice = np.s_[:, det_inds, :]
         d_h = (self._d_h_weights * h_fbin.conj())[det_slice].sum()
 
-        m_inds, mprime_inds = self._get_m_mprime_inds()
+        m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
         h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
                ).real[det_slice].sum())
 

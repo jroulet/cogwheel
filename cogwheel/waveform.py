@@ -1,5 +1,5 @@
 """Generate strain waveforms and project them onto detectors."""
-
+import itertools
 from collections import defaultdict, namedtuple
 import numpy as np
 
@@ -308,6 +308,14 @@ class WaveformGenerator(utils.JSONMixin):
                        'lalsimulation_commands': ()}
                       for _ in range(n_cached_waveforms)]
         self._n_cached_waveforms = n_cached_waveforms
+
+    def get_m_mprime_inds(self):
+        """
+        Return two lists of integers, these zipped are pairs (i, j) of
+        indices with j >= i that run through the number of m modes.
+        """
+        return map(list, zip(*itertools.combinations_with_replacement(
+            range(len(self._harmonic_modes_by_m)), 2)))
 
     def get_strain_at_detectors(self, f, par_dic, by_m=False):
         """
