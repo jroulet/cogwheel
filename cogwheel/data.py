@@ -5,6 +5,7 @@ from scipy import signal
 from scipy import interpolate
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 import gwpy.timeseries
 import gwosc
@@ -24,6 +25,8 @@ GWOSC_FILES_DIR = DATADIR/'gwosc_files'
 ASD_DIR = DATADIR/'example_asds'
 ASDS = {path.name.removesuffix('.npy'): path
         for path in ASD_DIR.glob('*.npy')}
+
+EVENTS_METADATA = pd.read_csv(DATADIR/'events_metadata.csv', index_col=0)
 
 
 def make_asd_func(frequencies, asd):
