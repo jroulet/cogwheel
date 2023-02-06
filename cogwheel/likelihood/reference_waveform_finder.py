@@ -5,7 +5,6 @@ A class ``ReferenceWaveformFinder`` is defined with methods to find
 parameters with good likelihood, these can be chosen as a reference
 solution for the relative-binning method.
 """
-
 import warnings
 
 import numpy as np
@@ -64,6 +63,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         time_range: (float, float)
             Minimum and maximum times to search relative to tgps (s).
         """
+        self._times = None  # Set by ``.set_summary()``
+        self._d_h_timeseries_weights = None  # Set by ``.set_summary()``
+
         self._time_range = time_range
         self._mchirp_range = mchirp_range
         super().__init__(event_data, waveform_generator, par_dic_0,
@@ -188,8 +190,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         # Optimize intrinsic parameters, update relative binning summary:
         self._optimize_m1m2s1zs2z_incoherently(seed)
 
-        # Use waveform to define reference detector, detector pair
-        # and reference frequency:
+        # Use waveform to define reference detector, detector pair and
+        # reference frequency:
         kwargs = self.get_coordinate_system_kwargs()
         self.par_dic_0['f_ref'] = kwargs['f_avg']
 
