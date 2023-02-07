@@ -1,11 +1,14 @@
 """
-Define class ``BaseCoherentScore`` to marginalize the likelihood over
-extrinsic parameters from matched-filtering timeseries.
+Define classes ``BaseCoherentScore`` and ``BaseCoherentScoreHM`` to
+marginalize the likelihood over extrinsic parameters from
+matched-filtering timeseries.
 
 ``BaseCoherentScore`` is meant for subclassing differently depending on
 the waveform physics included (precession and/or higher modes).
+``BaseCoherentScoreHM`` is an abstract subclass that implements phase
+marginalization for waveforms with higher modes.
 """
-
+from abc import abstractmethod, ABC
 import itertools
 from scipy.stats import qmc
 import numba
@@ -15,7 +18,7 @@ from cogwheel import likelihood
 from cogwheel import utils
 
 
-class BaseCoherentScore(utils.JSONMixin):
+class BaseCoherentScore(utils.JSONMixin, ABC):
     """
     Base class for computing coherent scores (i.e., marginalized
     likelihoods over extrinsic parameters) from matched-filtering
@@ -26,21 +29,13 @@ class BaseCoherentScore(utils.JSONMixin):
     This class provides methods to initialize and perform some of the
     generic steps that the coherent score computation normally requires.
     """
-    # Remove from the orbital phase integral any sample with a drop in
-    # log-likelihood from the peak bigger than ``DLNL_THRESHOLD``:
-    DLNL_THRESHOLD = 12.
-
-    def __init__(self, sky_dict, m_arr, lookup_table=None,
-                 log2n_qmc: int = 11, nphi=128, seed=0,
-                 beta_temperature=.1):
+    def __init__(self, sky_dict, lookup_table=None, log2n_qmc: int = 11,
+                 seed=0, beta_temperature=.1):
         """
         Parameters
         ----------
         sky_dict:
             Instance of cogwheel.coherent_score_hm.skydict.SkyDictionary
-
-        m_arr: int array
-            m number of the harmonic modes considered.
 
         lookup_table:
             Instance of cogwheel.likelihood.marginalized_distance.LookupTable
@@ -48,10 +43,6 @@ class BaseCoherentScore(utils.JSONMixin):
         log2n_qmc: int
             Base-2 logarithm of the number of requested extrinsic
             parameter samples.
-
-        nphi: int
-            Number of orbital phases over which to perform
-            marginalization with trapezoid quadrature rule.
 
         seed: {int, None, np.random.RandomState}
             For reproducibility of the extrinsic parameter samples.
@@ -63,49 +54,37 @@ class BaseCoherentScore(utils.JSONMixin):
         self.seed = seed
         self._rng = np.random.default_rng(seed)
 
+        # Set up and check lookup_table with correct marginalized_params:
         if lookup_table is None:
-            lookup_table = likelihood.LookupTable()
+            if self._lookup_table_marginalized_params == {'d_luminosity'}:
+                lookup_table = likelihood.LookupTable()
+            elif self._lookup_table_marginalized_params == {'d_luminosity',
+                                                            'phi_ref'}:
+                lookup_table = likelihood.LookupTableMarginalizedPhase22()
+            else:
+                raise ValueError('Unable to initialize `lookup_table`.')
+        if (lookup_table.marginalized_params
+                != self._lookup_table_marginalized_params):
+            raise ValueError('Incompatible lookup_table.marginalized_params')
         self.lookup_table = lookup_table
 
         self.log2n_qmc = log2n_qmc
         self.sky_dict = sky_dict
-
-        self.m_arr = np.asarray(m_arr)
-        self.m_inds, self.mprime_inds = (
-            zip(*itertools.combinations_with_replacement(
-                range(len(self.m_arr)), 2)))
-
-        self._dh_phasor = None  # Set by nphi.setter
-        self._hh_phasor = None  # Set by nphi.setter
-        self._dphi = None  # Set by nphi.setter
-        self.nphi = nphi
-
         self.beta_temperature = beta_temperature
-
         self._qmc_sequence = self._create_qmc_sequence()
 
         self._sample_distance = utils.handle_scalars(
             np.vectorize(self.lookup_table.sample_distance, otypes=[float]))
 
+    @staticmethod
     @property
-    def nphi(self):
+    @abstractmethod
+    def _lookup_table_marginalized_params():
         """
-        Number of orbital phases to integrate over with the trapezoid
-        rule.
+        ``{'d_luminosity'}`` or ``{'d_luminosity', 'phi_ref'}``,
+        allows to verify that the ``LookupTable`` is of the correct
+        type.
         """
-        return self._nphi
-
-    @nphi.setter
-    def nphi(self, nphi):
-        phi_ref, dphi = np.linspace(0, 2*np.pi, nphi,
-                                    endpoint=False, retstep=True)
-        self._nphi = nphi
-        self._dh_phasor = np.exp(-1j * np.outer(self.m_arr, phi_ref))  # mo
-        self._hh_phasor = np.exp(1j * np.outer(
-            self.m_arr[self.m_inds,] - self.m_arr[self.mprime_inds,],
-            phi_ref))  # mo
-        self._phi_ref = phi_ref
-        self._dphi = dphi
 
     def _create_qmc_sequence(self):
         """
@@ -146,23 +125,6 @@ class BaseCoherentScore(utils.JSONMixin):
         return dict.fromkeys(self.sky_dict.detector_names, (0, 1)
                             ) | {'t_fine': (-dt/2, dt/2),
                                  'psi': (0, np.pi)}
-
-    def _get_lnl_marginalized_and_weights(self, dh_qo, hh_qo,
-                                          prior_weights_q):
-        max_over_distance_lnl = dh_qo * np.abs(dh_qo) / hh_qo / 2  # qo
-        important = np.where(
-            max_over_distance_lnl
-            > np.max(max_over_distance_lnl) - self.DLNL_THRESHOLD)
-        lnl_marg_dist = self._lnlike_marginalized_over_distance(
-            dh_qo[important], hh_qo[important])  # i
-
-        lnl_max = lnl_marg_dist.max()
-        like_marg_dist = np.exp(lnl_marg_dist - lnl_max)  # i
-
-        full_weights_i = like_marg_dist * prior_weights_q[important[0]]  # i
-        lnl_marginalized = lnl_max + np.log(full_weights_i.sum() * self._dphi
-                                            / 2**self.log2n_qmc)
-        return lnl_marginalized, full_weights_i, important
 
     def _get_fplus_fcross(self, sky_inds, physical_mask):
         """
@@ -237,22 +199,114 @@ class BaseCoherentScore(utils.JSONMixin):
 
         return t_first_det, delays, physical_mask, importance_sampling_weight
 
-    def _lnlike_marginalized_over_distance(self, d_h, h_h):
-        """
-        Return log of the distance-marginalized likelihood.
-        Note, d_h and h_h are real numbers (already summed over modes,
-        polarizations, detectors). The strain must correspond to the
-        reference distance ``self.lookup_table.REFERENCE_DISTANCE``.
 
+class BaseCoherentScoreHM(BaseCoherentScore):
+    """
+    With higher order modes it is not possible to marginalize the
+    orbital phase analytically so we use trapezoid quadrature.
+    ``BaseCoherentScoreHM`` provides attributes and methods for doing
+    that.
+
+    Attributes
+    ----------
+    m_arr
+    m_inds
+    mprime_inds
+    nphi
+    """
+    # Remove from the orbital phase integral any sample with a drop in
+    # log-likelihood from the peak bigger than ``DLNL_THRESHOLD``:
+    DLNL_THRESHOLD = 12.
+
+    _lookup_table_marginalized_params = {'d_luminosity'}
+
+    def __init__(self, sky_dict, m_arr, lookup_table=None,
+                 log2n_qmc: int = 11, nphi=128, seed=0,
+                 beta_temperature=.1):
+        """
         Parameters
         ----------
-        d_h: float
-            Inner product of data and model strain.
+        sky_dict:
+            Instance of cogwheel.coherent_score_hm.skydict.SkyDictionary
 
-        h_h: float
-            Inner product of strain with itself.
+        m_arr: int array
+            m number of the harmonic modes considered.
+
+        lookup_table:
+            Instance of cogwheel.likelihood.marginalized_distance.LookupTable
+
+        log2n_qmc: int
+            Base-2 logarithm of the number of requested extrinsic
+            parameter samples.
+
+        nphi: int
+            Number of orbital phases over which to perform
+            marginalization with trapezoid quadrature rule.
+
+        seed: {int, None, np.random.RandomState}
+            For reproducibility of the extrinsic parameter samples.
+
+        beta_temperature: float
+            Inverse temperature, tempers the arrival time probability at
+            each detector.
         """
-        return self.lookup_table(d_h, h_h) + d_h**2 / h_h / 2
+        super().__init__(sky_dict=sky_dict,
+                         lookup_table=lookup_table,
+                         log2n_qmc=log2n_qmc,
+                         seed=seed,
+                         beta_temperature=beta_temperature)
+
+        self.m_arr = np.asarray(m_arr)
+        self.m_inds, self.mprime_inds = (
+            zip(*itertools.combinations_with_replacement(
+                range(len(self.m_arr)), 2)))
+
+        self._dh_phasor = None  # Set by nphi.setter
+        self._hh_phasor = None  # Set by nphi.setter
+        self._dphi = None  # Set by nphi.setter
+        self.nphi = nphi
+
+    @property
+    def nphi(self):
+        """
+        Number of orbital phase values to integrate over using the
+        trapezoid rule. Setting this attribute also defines:
+            ._dh_phasor
+            ._hh_phasor
+            ._phi_ref
+            ._dphi
+        """
+        return self._nphi
+
+    @nphi.setter
+    def nphi(self, nphi):
+        phi_ref, dphi = np.linspace(0, 2*np.pi, nphi,
+                                    endpoint=False, retstep=True)
+        self._nphi = nphi
+        self._dh_phasor = np.exp(-1j * np.outer(self.m_arr, phi_ref))  # mo
+        self._hh_phasor = np.exp(1j * np.outer(
+            self.m_arr[self.m_inds,] - self.m_arr[self.mprime_inds,],
+            phi_ref))  # mo
+        self._phi_ref = phi_ref
+        self._dphi = dphi
+
+    def _get_lnl_marginalized_and_weights(self, dh_qo, hh_qo,
+                                          prior_weights_q):
+        max_over_distance_lnl = dh_qo * np.abs(dh_qo) / hh_qo / 2  # qo
+        important = np.where(
+            max_over_distance_lnl
+            > np.max(max_over_distance_lnl) - self.DLNL_THRESHOLD)
+        lnl_marg_dist = self.lookup_table.lnlike_marginalized(
+            dh_qo[important], hh_qo[important])  # i
+
+        lnl_max = lnl_marg_dist.max()
+        like_marg_dist = np.exp(lnl_marg_dist - lnl_max)  # i
+
+        full_weights_i = like_marg_dist * prior_weights_q[important[0]]  # i
+        lnl_marginalized = lnl_max + np.log(full_weights_i.sum() * self._dphi
+                                            / 2**self.log2n_qmc)
+        return lnl_marginalized, full_weights_i, important
+
 
 
 @numba.guvectorize([(numba.float64[:], numba.float64[:],

@@ -1,3 +1,7 @@
+"""
+Define class ``CoherentScoreLikelihood``, to use with
+``IntrinsicIASPrior``.
+"""
 import numpy as np
 import pandas as pd
 
@@ -7,11 +11,11 @@ from cogwheel import likelihood
 from cogwheel import skyloc_angles
 from cogwheel import utils
 
-from .coherent_score_hm import CoherentScoreHM
-from .skydict import SkyDictionary
+from cogwheel.coherent_score import CoherentScoreHM
+from cogwheel.coherent_score import SkyDictionary
 
 
-class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
+class CoherentScoreLikelihood(likelihood.BaseRelativeBinning):
     """
     Class to evaluate the likelihood marginalized over sky location,
     time of arrival, polarization, distance and orbital phase for
@@ -35,29 +39,57 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
 
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None, spline_degree=3,
-                 t_range=(-.07, .07), coherent_score=None,
-                 sky_dict=None):
+                 t_range=(-.07, .07), coherent_score=None):
         """
-        `t_range` is relative to `event_data.tgps + par_dic_0['t_geocenter']`
-        """
-        if not isinstance(sky_dict, SkyDictionary):
-            sky_dict = SkyDictionary(event_data.detector_names,
-                                     **sky_dict or {})
-        self.sky_dict = sky_dict
+        Parameters
+        ----------
+        event_data: Instance of `data.EventData`
 
-        if not isinstance(coherent_score, CoherentScoreHM):
+        waveform_generator: Instance of `waveform.WaveformGenerator`.
+
+        par_dic_0: dict
+            Parameters of the reference waveform, should be close to the
+            maximum likelihood waveform.
+            Keys should match ``self.waveform_generator.params``.
+
+        fbin: 1-d array or None
+            Array with edges of the frequency bins used for relative
+            binning [Hz]. Alternatively, pass `pn_phase_tol`.
+
+        pn_phase_tol: float or None
+            Tolerance in the post-Newtonian phase [rad] used for
+            defining frequency bins. Alternatively, pass `fbin`.
+
+        spline_degree: int
+            Degree of the spline used to interpolate the ratio between
+            waveform and reference waveform for relative binning.
+
+        t_range: 2-tuple of floats
+            Bounds of a time range (s) over which to compute
+            matched-filtering series, relative to
+            ``event_data.tgps + par_dic_0['t_geocenter']``.
+
+        coherent_score: cogwheel.coherent_score.CoherentScoreHM
+            Instance of coherent score, optional. One with default
+            settings will be created by default.
+        """
+        if coherent_score is None:
             coherent_score = CoherentScoreHM(
-                sky_dict=self.sky_dict,
-                m_arr=list(waveform_generator._harmonic_modes_by_m),
-                **coherent_score or {})
+                sky_dict=SkyDictionary(event_data.detector_names),
+                m_arr=list(waveform_generator._harmonic_modes_by_m))
         self.coherent_score = coherent_score
 
         self.t_range = t_range
         self._times = (np.arange(*t_range, 1 / (2*event_data.fbounds[1]))
                        + par_dic_0.get('t_geocenter', 0))
-        self.ref_dic = {
-            'd_luminosity': self.coherent_score.lookup_table.REFERENCE_DISTANCE,
-            'phi_ref': 0.}
+        self.ref_dic = dict(
+            d_luminosity=self.coherent_score.lookup_table.REFERENCE_DISTANCE,
+            phi_ref=0.)
+
+        self._h0_f = None  # Set by ``._set_summary()``
+        self._h0_fbin = None  # Set by ``._set_summary()``
+        self._d_h_weights = None  # Set by ``._set_summary()``
+        self._h_h_weights = None  # Set by ``._set_summary()``
 
         super().__init__(event_data, waveform_generator, par_dic_0,
                          fbin, pn_phase_tol, spline_degree)
@@ -121,7 +153,7 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
             1 / self.asd_drift**2)  # mptdb
 
     def _set_h_h_weights(self):
-        m_inds, mprime_inds = self._get_m_mprime_inds()
+        m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
         h0_h0 = np.einsum('mpr,mPr,dr,d->mpPdr',
                           self._h0_f[m_inds],
                           self._h0_f[mprime_inds].conj(),
@@ -140,7 +172,7 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
         h_mpb = self.waveform_generator.get_hplus_hcross(
             self.fbin, dict(par_dic) | self.ref_dic, by_m=True)  # mpb
         dh_mptd = np.einsum('mptdb,mpb->mptd', self._d_h_weights, h_mpb.conj())
-        m_inds, mprime_inds = self._get_m_mprime_inds()
+        m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
         hh_mppd = np.einsum('mpPdb,mpb,mPb->mpPd',
                             self._h_h_weights,
                             h_mpb[m_inds],
@@ -194,7 +226,8 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
 
         for ext in extrinsic:
             ext['ra'] = skyloc_angles.lon_to_ra(
-                ext['lon'], lal.GreenwichMeanSiderealTime(self.event_data.tgps))
+                ext['lon'],
+                lal.GreenwichMeanSiderealTime(self.event_data.tgps))
 
         if isinstance(num, int):
             fullsamples = samples.loc[samples.index.repeat(num)].reset_index(
@@ -211,11 +244,12 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
         Faster than a for loop over `_get_dh_hh` thanks to Strassen
         matrix multiplication to get (d|h) timeseries.
         """
-        h_mpbn = np.moveaxis([self.waveform_generator.get_hplus_hcross(
-                                  self.fbin, dict(sample) | self.ref_dic,
-                                  by_m=True)
-                              for _, sample in samples[self.params].iterrows()],
-                             0, -1)  # mpbn
+        h_mpbn = np.moveaxis(
+            [self.waveform_generator.get_hplus_hcross(
+                self.fbin, dict(sample) | self.ref_dic,
+                by_m=True)
+             for _, sample in samples[self.params].iterrows()],
+            0, -1)  # mpbn
 
         n_m, n_p, n_t, n_d, n_b = self._d_h_weights.shape
         n_n  = len(samples)
@@ -224,12 +258,13 @@ class CoherentScoreLikelihood(likelihood.RelativeBinningLikelihood):
 
         # Loop instead of broadcasting, to save memory:
         dh_mptdn = np.zeros((n_m, n_p, n_t*n_d, n_n), np.csingle)
-        for i_m, i_p in np.ndindex(n_m, n_p):
-            dh_mptdn[i_m, i_p] = d_h_weights[i_m, i_p] @ h_mpbn[i_m, i_p].conj()
+        for i_mp in np.ndindex(n_m, n_p):
+            dh_mptdn[i_mp] = d_h_weights[i_mp] @ h_mpbn[i_mp].conj()
 
-        dh_nmptd = np.moveaxis(dh_mptdn, -1, 0).reshape(n_n, n_m, n_p, n_t, n_d)
+        dh_nmptd = np.moveaxis(dh_mptdn, -1, 0).reshape(
+            n_n, n_m, n_p, n_t, n_d)
 
-        m_inds, mprime_inds = self._get_m_mprime_inds()
+        m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
         hh_nmppd = np.einsum('mpPdb,mpbn,mPbn->nmpPd',
                              self._h_h_weights,
                              h_mpbn[m_inds],

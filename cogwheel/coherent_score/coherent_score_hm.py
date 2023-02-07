@@ -6,14 +6,14 @@ likelihood over extrinsic parameters from matched-filtering timeseries.
 and higher modes. The inclination can't be marginalized over and is
 treated as an intrinsic parameter.
 """
-
 from collections import namedtuple
 import numpy as np
-import scipy.signal
+import scipy.interpolate
 
-from cogwheel.coherent_score.base import BaseCoherentScore
+from cogwheel.coherent_score.base import BaseCoherentScoreHM
 
-class CoherentScoreHM(BaseCoherentScore):
+
+class CoherentScoreHM(BaseCoherentScoreHM):
     """
     Class that, given a matched-filtering timeseries, computes the
     likelihood marginalized over extrinsic parameters
@@ -23,7 +23,7 @@ class CoherentScoreHM(BaseCoherentScore):
     Works for quasi-circular waveforms with generic spins and higher
     modes.
 
-    Inherits from ``BaseCoherentScore``.
+    Inherits from ``BaseCoherentScoreHM``.
     """
     _MarginalizationInfo = namedtuple('_MarginalizationInfo',
                                       ['physical_mask',
@@ -132,29 +132,16 @@ class CoherentScoreHM(BaseCoherentScore):
         dh_qo, hh_qo = self._get_dh_hh_qo(sky_inds, physical_mask, t_first_det,
                                           times, dh_mptd, hh_mppd)  # qo, qo
 
-        max_over_distance_lnl = dh_qo * np.abs(dh_qo) / hh_qo / 2  # qo
-        important = np.where(
-            max_over_distance_lnl
-            > np.max(max_over_distance_lnl) - self.DLNL_THRESHOLD)
-        lnl_marg_dist = self._lnlike_marginalized_over_distance(
-            dh_qo[important], hh_qo[important])  # i
-
-        lnl_max = lnl_marg_dist.max()
-        like_marg_dist = np.exp(lnl_marg_dist - lnl_max)  # i
-
-        weights_i = (np.array(sky_prior)[important[0]]
-                     * importance_sampling_weight[important[0]])  # i
-
-        full_weights = like_marg_dist * weights_i
-        lnl_marginalized = lnl_max + np.log(full_weights.sum() * self._dphi
-                                            / 2**self.log2n_qmc)
+        lnl_marginalized, weights, important \
+            = self._get_lnl_marginalized_and_weights(
+                dh_qo, hh_qo, importance_sampling_weight * sky_prior)
 
         return self._MarginalizationInfo(physical_mask=physical_mask,
                                          t_first_det=t_first_det,
                                          dh_qo=dh_qo,
                                          hh_qo=hh_qo,
                                          sky_inds=sky_inds,
-                                         weights=full_weights,
+                                         weights=weights,
                                          lnl_marginalized=lnl_marginalized,
                                          important=important)
 
@@ -188,8 +175,7 @@ class CoherentScoreHM(BaseCoherentScore):
             detectors incompatible with a real signal) the values will
             be NaN.
         """
-        marg_info = self.get_marginalization_info(
-            dh_mptd, hh_mppd, times)
+        marg_info = self.get_marginalization_info(dh_mptd, hh_mppd, times)
         return self._gen_samples_from_marg_info(marg_info, num)
 
     def _gen_samples_from_marg_info(self, marg_info, num):
@@ -220,7 +206,7 @@ class CoherentScoreHM(BaseCoherentScore):
                  'lnl_marginalized', 'lnl'],
                 unphysical_value)
 
-        i_ids = np.random.choice(len(marg_info.weights),
+        i_ids = self._rng.choice(len(marg_info.weights),
                                  p=marg_info.weights / marg_info.weights.sum(),
                                  size=num)
 
@@ -234,14 +220,15 @@ class CoherentScoreHM(BaseCoherentScore):
         h_h = marg_info.hh_qo[q_ids, o_ids]
         d_luminosity = self._sample_distance(d_h, h_h)
         distance_ratio = d_luminosity / self.lookup_table.REFERENCE_DISTANCE
-        return {'d_luminosity': d_luminosity,
-                'dec': self.sky_dict.sky_samples['lat'][sky_ids],
-                'lon': self.sky_dict.sky_samples['lon'][sky_ids],
-                'phi_ref': self._phi_ref[o_ids],
-                'psi': self._qmc_sequence['psi'][marg_info.physical_mask][q_ids],
-                't_geocenter': t_geocenter,
-                'lnl_marginalized': marg_info.lnl_marginalized,
-                'lnl': d_h / distance_ratio - h_h / distance_ratio**2 / 2}
+        return {
+            'd_luminosity': d_luminosity,
+            'dec': self.sky_dict.sky_samples['lat'][sky_ids],
+            'lon': self.sky_dict.sky_samples['lon'][sky_ids],
+            'phi_ref': self._phi_ref[o_ids],
+            'psi': self._qmc_sequence['psi'][marg_info.physical_mask][q_ids],
+            't_geocenter': t_geocenter,
+            'lnl_marginalized': marg_info.lnl_marginalized,
+            'lnl': d_h / distance_ratio - h_h / distance_ratio**2 / 2}
 
     def _get_dh_hh_qo(self, sky_inds, physical_mask, t_first_det, times,
                       dh_mptd, hh_mppd):
@@ -250,9 +237,7 @@ class CoherentScoreHM(BaseCoherentScore):
         obtain (d|h) and (h|h) by extrinsic sample 'q' and orbital phase
         'o'.
         """
-        fplus_fcross_0 = self.sky_dict.fplus_fcross_0[sky_inds,]  # qdp
-        rot_psi = self._qmc_sequence['rot_psi'][physical_mask]  # qpp'
-        fplus_fcross = np.einsum('qpP,qdP->qdp', rot_psi, fplus_fcross_0)
+        fplus_fcross = self._get_fplus_fcross(sky_inds, physical_mask)
 
         # # (d|h):
         # select = (...,  # mp stay the same
