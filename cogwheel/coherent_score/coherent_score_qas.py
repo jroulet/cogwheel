@@ -199,7 +199,7 @@ class CoherentScoreQAS(BaseCoherentScore):
                                 self._qmc_sequence['response'][physical_mask],
                                 self.sky_dict.fplus_fcross_0[sky_inds,])  # qd
 
-        dh_q = np.einsum('dq,qd->q', dh_dq, response_qd)
+        dh_q = np.einsum('dq,qd->q', dh_dq, response_qd.conj())
         hh_q = utils.abs_sq(response_qd) @ hh_d
 
         return dh_q, hh_q
