@@ -318,12 +318,14 @@ class CoherentScoreQAS(BaseCoherentScore):
         phi_ref = self._sample_phase(d_luminosity, d_h)
         real_dh = np.real(d_h * np.exp(-2j*phi_ref))
         distance_ratio = d_luminosity / self.lookup_table.REFERENCE_DISTANCE
+        cosiota = self._qmc_sequence['cosiota'][marg_info.physical_mask][q_ids]
         return {
             'd_luminosity': d_luminosity,
             'dec': self.sky_dict.sky_samples['lat'][sky_ids],
             'lon': self.sky_dict.sky_samples['lon'][sky_ids],
             'phi_ref': phi_ref,
             'psi': self._qmc_sequence['psi'][marg_info.physical_mask][q_ids],
+            'iota': np.arccos(cosiota),
             't_geocenter': t_geocenter,
             'lnl_marginalized': marg_info.lnl_marginalized,
             'lnl': real_dh / distance_ratio - h_h / distance_ratio**2 / 2}
