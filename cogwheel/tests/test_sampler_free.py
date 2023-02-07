@@ -28,7 +28,7 @@ def test_components(par_dic, lk=None):
 
         mchirp = np.prod(x := [par_dic.get(k) for k in ['m1', 'm2']]) ** 0.6 / np.sum(x) ** 0.2
 
-        likelihood_kwargs = {'lookup_table': likelihood.marginalized_distance.LookupTable()}
+        likelihood_kwargs = {'lookup_table': likelihood.LookupTable()}
         ref_wf_finder_kwargs = {'time_range': (-.1, .1)}
 
         post = posterior.Posterior.from_event(event=event_data, mchirp_guess=mchirp,

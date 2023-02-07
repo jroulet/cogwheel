@@ -10,7 +10,7 @@ from collections import namedtuple
 import numpy as np
 import scipy.interpolate
 
-from cogwheel.coherent_score.base import BaseCoherentScoreHM
+from .base import BaseCoherentScoreHM
 
 
 class CoherentScoreHM(BaseCoherentScoreHM):

@@ -3,7 +3,7 @@ Compute likelihood of GW events.
 
 A class ``CBCLikelihood`` is defined. This can be used to compute
 likelihoods without resorting to the relative binning algorithm (slow)
-and is subclassed by ``RelativeBinningLikelihood``.
+and is subclassed by ``BaseRelativeBinning``.
 """
 import inspect
 from functools import wraps

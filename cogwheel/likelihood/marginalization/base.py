@@ -14,8 +14,8 @@ from scipy.stats import qmc
 import numba
 import numpy as np
 
-from cogwheel import likelihood
 from cogwheel import utils
+from .lookup_table import LookupTable, LookupTableMarginalizedPhase22
 
 
 class BaseCoherentScore(utils.JSONMixin, ABC):
@@ -35,10 +35,10 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         Parameters
         ----------
         sky_dict:
-            Instance of cogwheel.coherent_score_hm.skydict.SkyDictionary
+            Instance of .skydict.SkyDictionary
 
         lookup_table:
-            Instance of cogwheel.likelihood.marginalized_distance.LookupTable
+            Instance of .lookup_table.LookupTable
 
         log2n_qmc: int
             Base-2 logarithm of the number of requested extrinsic
@@ -57,10 +57,10 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         # Set up and check lookup_table with correct marginalized_params:
         if lookup_table is None:
             if self._lookup_table_marginalized_params == {'d_luminosity'}:
-                lookup_table = likelihood.LookupTable()
+                lookup_table = LookupTable()
             elif self._lookup_table_marginalized_params == {'d_luminosity',
                                                             'phi_ref'}:
-                lookup_table = likelihood.LookupTableMarginalizedPhase22()
+                lookup_table = LookupTableMarginalizedPhase22()
             else:
                 raise ValueError('Unable to initialize `lookup_table`.')
         if (lookup_table.marginalized_params
@@ -227,13 +227,13 @@ class BaseCoherentScoreHM(BaseCoherentScore):
         Parameters
         ----------
         sky_dict:
-            Instance of cogwheel.coherent_score_hm.skydict.SkyDictionary
+            Instance of .skydict.SkyDictionary
 
         m_arr: int array
             m number of the harmonic modes considered.
 
         lookup_table:
-            Instance of cogwheel.likelihood.marginalized_distance.LookupTable
+            Instance of lookup_table.LookupTable
 
         log2n_qmc: int
             Base-2 logarithm of the number of requested extrinsic

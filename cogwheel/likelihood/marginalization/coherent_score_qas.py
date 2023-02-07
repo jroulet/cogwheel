@@ -9,9 +9,8 @@ import numpy as np
 import scipy.interpolate
 
 from cogwheel import utils
-from cogwheel.likelihood.marginalized_distance import (
-    LookupTableMarginalizedPhase22)
-from cogwheel.coherent_score.base import BaseCoherentScore
+from .base import BaseCoherentScore
+from .lookup_table import LookupTableMarginalizedPhase22
 
 
 class CoherentScoreQAS(BaseCoherentScore):
@@ -82,11 +81,10 @@ class CoherentScoreQAS(BaseCoherentScore):
         Parameters
         ----------
         sky_dict:
-            Instance of cogwheel.coherent_score_hm.skydict.SkyDictionary
+            Instance of .skydict.SkyDictionary
 
         lookup_table:
-            Instance of cogwheel.likelihood.marginalized_distance\
-            .LookupTableMarginalizedPhase22
+            Instance of .lookup_table.LookupTableMarginalizedPhase22
 
         log2n_qmc: int
             Base-2 logarithm of the number of requested extrinsic
