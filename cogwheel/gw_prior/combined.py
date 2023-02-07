@@ -226,3 +226,15 @@ class MarginalizedDistanceLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
     prior_classes = LVCPrior.prior_classes.copy()
     prior_classes.remove(UniformLuminosityVolumePrior)
+
+
+class IntrinsicAlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Prior for usage with ``CoherentScoreLikelihoodQAS``.
+    Intrinsic parameters only, aligned spins, uniform in effective spin
+    and component masses, no tides.
+    """
+    prior_classes =  [UniformDetectorFrameMassesPrior,
+                      UniformEffectiveSpinPrior,
+                      ZeroTidalDeformabilityPrior,
+                      FixedReferenceFrequencyPrior]
