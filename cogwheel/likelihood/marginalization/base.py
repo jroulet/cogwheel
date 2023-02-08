@@ -292,6 +292,39 @@ class BaseCoherentScoreHM(BaseCoherentScore):
 
     def _get_lnl_marginalized_and_weights(self, dh_qo, hh_qo,
                                           prior_weights_q):
+        """
+        Parameters
+        ----------
+        dh_qo: (n_qmc, n_phi) float array
+            ⟨d|h⟩ real inner product between data and waveform at
+            ``self.lookup_table.REFERENCE_DISTANCE``.
+
+        hh_qo: (n_qmc, n_phi) float array
+            ⟨h|h⟩ real inner product of a waveform at
+            ``self.lookup_table.REFERENCE_DISTANCE``  with itself.
+
+        prior_weights_q: (n_qmc) float array
+            Positive importance-sampling weights of the QMC sequence.
+
+        Return
+        ------
+        lnl_marginalized: float
+            log of the marginalized likelihood over extrinsic parameters
+            excluding inclination (i.e.: time of arrival, sky location,
+            polarization, distance, orbital phase).
+
+        weights: float array of length n_important
+            Positive weights of the QMC samples, including the
+            likelihood and the importance-sampling correction.
+
+        important: (tuple of ints, tuple of ints) of lengths n_important
+            The first tuple contains indices between 0 and n_physical-1
+            corresponding to (physical) QMC samples.
+            The second tuple contains indices between 0 and n_phi-1
+            corresponding to orbital phases.
+            They correspond to samples with sufficiently high maximum
+            likelihood over distance to be included in the integral.
+        """
         max_over_distance_lnl = dh_qo * np.abs(dh_qo) / hh_qo / 2  # qo
         important = np.where(
             max_over_distance_lnl
@@ -302,10 +335,10 @@ class BaseCoherentScoreHM(BaseCoherentScore):
         lnl_max = lnl_marg_dist.max()
         like_marg_dist = np.exp(lnl_marg_dist - lnl_max)  # i
 
-        full_weights_i = like_marg_dist * prior_weights_q[important[0]]  # i
-        lnl_marginalized = lnl_max + np.log(full_weights_i.sum() * self._dphi
+        weights = like_marg_dist * prior_weights_q[important[0]]  # i
+        lnl_marginalized = lnl_max + np.log(weights.sum() * self._dphi
                                             / 2**self.log2n_qmc)
-        return lnl_marginalized, full_weights_i, important
+        return lnl_marginalized, weights, important
 
 
 
