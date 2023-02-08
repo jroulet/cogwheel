@@ -74,41 +74,6 @@ class CoherentScoreQAS(BaseCoherentScore):
             (i.e.: time of arrival, sky location, polarization, distance,
             orbital phase, inclination).
         """
-
-    def __init__(self, sky_dict, lookup_table=None,
-                 log2n_qmc: int = 11, seed=0, beta_temperature=.5):
-        """
-        Parameters
-        ----------
-        sky_dict:
-            Instance of .skydict.SkyDictionary
-
-        lookup_table:
-            Instance of .lookup_table.LookupTableMarginalizedPhase22
-
-        log2n_qmc: int
-            Base-2 logarithm of the number of requested extrinsic
-            parameter samples.
-
-        seed: {int, None, np.random.RandomState}
-            For reproducibility of the extrinsic parameter samples.
-
-        beta_temperature: float
-            Inverse temperature, tempers the arrival time probability at
-            each detector.
-        """
-        if lookup_table is None:
-            lookup_table = LookupTableMarginalizedPhase22()
-
-        super().__init__(sky_dict=sky_dict,
-                         lookup_table=lookup_table,
-                         log2n_qmc=log2n_qmc,
-                         seed=seed,
-                         beta_temperature=beta_temperature)
-
-        self._sample_phase = utils.handle_scalars(
-            np.vectorize(self.lookup_table.sample_phase, otypes=[float]))
-
     def get_marginalization_info(self, dh_td, hh_d, times):
         """
         Evaluate inner products (d|h) and ⟨h|h⟩ at QMC integration
@@ -135,6 +100,8 @@ class CoherentScoreQAS(BaseCoherentScore):
         (physical_mask, t_first_det, dh_q, hh_q, sky_inds, weights,
         lnl_marginalized), see its documentation.
         """
+        self._switch_qmc_sequence()
+
         # Resample to match sky_dict's dt:
         dh_td, times = self.sky_dict.resample_timeseries(dh_td, times,
                                                          axis=0)
@@ -280,7 +247,7 @@ class CoherentScoreQAS(BaseCoherentScore):
 
         Parameters
         ----------
-        marg_info: CoherentScoreHM._MarginalizationInfo
+        marg_info: CoherentScoreQAS._MarginalizationInfo
             Output of ``.get_marginalization_info``.
 
         num: int, optional
@@ -290,7 +257,7 @@ class CoherentScoreQAS(BaseCoherentScore):
         ------
         samples: dict
             Values are scalar if `num` is ``None``, else numpy arrays.
-            If ``marg_info`` correspond to an unphysical sample (i.e.,
+            If ``marg_info`` corresponds to an unphysical sample (i.e.,
             a realization of matched-filtering timeseries in the
             detectors incompatible with a real signal) the values will
             be NaN.
@@ -313,7 +280,7 @@ class CoherentScoreQAS(BaseCoherentScore):
         d_h = marg_info.dh_q[q_ids]
         h_h = marg_info.hh_q[q_ids]
         d_luminosity = self._sample_distance(np.abs(d_h), h_h)
-        phi_ref = self._sample_phase(d_luminosity, d_h)
+        phi_ref = self.lookup_table.sample_phase(d_luminosity, d_h)
         real_dh = np.real(d_h * np.exp(-2j*phi_ref))
         distance_ratio = d_luminosity / self.lookup_table.REFERENCE_DISTANCE
         cosiota = self._qmc_sequence['cosiota'][marg_info.physical_mask][q_ids]

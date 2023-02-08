@@ -4,6 +4,7 @@ distance; and ``LookupTableMarginalizedPhase22`` to marginalize the
 likelihood over both distance and phase for (l, |m|) = (2, 2) waveforms.
 """
 from pathlib import Path
+from functools import wraps
 import textwrap
 import warnings
 import numpy as np
@@ -320,6 +321,13 @@ class LookupTableMarginalizedPhase22(LookupTable):
     """
     marginalized_params = {'d_luminosity', 'phi_ref'}
 
+    @wraps(LookupTable.__init__)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.sample_phase = utils.handle_scalars(
+            np.vectorize(self._sample_phase, otypes=[float]))
+
     def _function_integrand(self, d_luminosity, d_h, h_h):
         """
         Proportional to the distance posterior. The log of the integral
@@ -329,7 +337,7 @@ class LookupTableMarginalizedPhase22(LookupTable):
                 * scipy.special.i0e(d_h * self.REFERENCE_DISTANCE
                                     / d_luminosity))
 
-    def sample_phase(self, d_luminosity, d_h, num=None):
+    def _sample_phase(self, d_luminosity, d_h, num=None):
         """
         Return a random value for the orbital phase according to the posterior
         conditioned on all other parameters.
