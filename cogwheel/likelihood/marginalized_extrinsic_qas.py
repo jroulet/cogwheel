@@ -9,6 +9,7 @@ from cogwheel import utils
 from .marginalization import SkyDictionary, CoherentScoreQAS
 from .relative_binning import BaseRelativeBinning
 
+
 class MarginalizedExtrinsicLikelihoodQAS(BaseRelativeBinning):
     """
     Class to evaluate the likelihood marginalized over sky location,

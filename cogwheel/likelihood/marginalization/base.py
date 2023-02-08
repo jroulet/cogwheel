@@ -30,7 +30,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     generic steps that the coherent score computation normally requires.
     """
     def __init__(self, sky_dict, lookup_table=None, log2n_qmc: int = 11,
-                 seed=0, beta_temperature=.1):
+                 seed=0, beta_temperature=.5, n_qmc_sequences=128):
         """
         Parameters
         ----------
@@ -50,6 +50,14 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         beta_temperature: float
             Inverse temperature, tempers the arrival time probability at
             each detector.
+
+        n_qmc_sequences: int
+            The coherent score instance will generate `n_qmc_sequences`
+            QMC sequences and cycle through them in subsequent calls.
+            This alleviates the problem of repeated extrinsic parameter
+            samples, without increasing the computational cost. It can
+            also be used to estimate the uncertainty of the marginalized
+            likelihood computation.
         """
         self.seed = seed
         self._rng = np.random.default_rng(seed)
@@ -71,7 +79,10 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         self.log2n_qmc = log2n_qmc
         self.sky_dict = sky_dict
         self.beta_temperature = beta_temperature
-        self._qmc_sequence = self._create_qmc_sequence()
+
+        self._current_qmc_sequence_id = 0
+        self._qmc_sequences = [self._create_qmc_sequence()
+                               for _ in range(n_qmc_sequences)]
 
         self._sample_distance = utils.handle_scalars(
             np.vectorize(self.lookup_table.sample_distance, otypes=[float]))
@@ -85,6 +96,21 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         allows to verify that the ``LookupTable`` is of the correct
         type.
         """
+
+    def _switch_qmc_sequence(self, qmc_sequence_id=None):
+        if qmc_sequence_id is None:
+            qmc_sequence_id = ((self._current_qmc_sequence_id + 1)
+                               % self.n_qmc_sequences)
+        self._current_qmc_sequence_id = qmc_sequence_id
+
+    @property
+    def _qmc_sequence(self):
+        return self._qmc_sequences[self._current_qmc_sequence_id]
+
+    @property
+    def n_qmc_sequences(self):
+        """Number of QMC sequences to alternate between."""
+        return len(self._qmc_sequences)
 
     def _create_qmc_sequence(self):
         """
@@ -222,7 +248,7 @@ class BaseCoherentScoreHM(BaseCoherentScore):
 
     def __init__(self, sky_dict, m_arr, lookup_table=None,
                  log2n_qmc: int = 11, nphi=128, seed=0,
-                 beta_temperature=.1):
+                 beta_temperature=.5, n_qmc_sequences=128):
         """
         Parameters
         ----------
@@ -249,12 +275,21 @@ class BaseCoherentScoreHM(BaseCoherentScore):
         beta_temperature: float
             Inverse temperature, tempers the arrival time probability at
             each detector.
+
+        n_qmc_sequences: int
+            The coherent score instance will generate `n_qmc_sequences`
+            QMC sequences and cycle through them in subsequent calls.
+            This alleviates the problem of repeated extrinsic parameter
+            samples, without increasing the computational cost. It can
+            also be used to estimate the uncertainty of the marginalized
+            likelihood computation.
         """
         super().__init__(sky_dict=sky_dict,
                          lookup_table=lookup_table,
                          log2n_qmc=log2n_qmc,
                          seed=seed,
-                         beta_temperature=beta_temperature)
+                         beta_temperature=beta_temperature,
+                         n_qmc_sequences=n_qmc_sequences)
 
         self.m_arr = np.asarray(m_arr)
         self.m_inds, self.mprime_inds = (

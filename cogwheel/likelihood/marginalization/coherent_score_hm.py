@@ -107,6 +107,8 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         (physical_mask, t_first_det, dh_qo, hh_qo, sky_inds, weights,
         lnl_marginalized, important), see its documentation.
         """
+        self._switch_qmc_sequence()
+
         # Resample to match sky_dict's dt:
         dh_mptd, times = self.sky_dict.resample_timeseries(dh_mptd, times,
                                                            axis=2)
@@ -170,7 +172,7 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         ------
         samples: dict
             Values are scalar if `num` is ``None``, else numpy arrays.
-            If ``marg_info`` correspond to an unphysical sample (i.e.,
+            If ``marg_info`` corresponds to an unphysical sample (i.e.,
             a realization of matched-filtering timeseries in the
             detectors incompatible with a real signal) the values will
             be NaN.
