@@ -230,7 +230,8 @@ class CoherentScoreHM(BaseCoherentScoreHM):
             'psi': self._qmc_sequence['psi'][marg_info.physical_mask][q_ids],
             't_geocenter': t_geocenter,
             'lnl_marginalized': marg_info.lnl_marginalized,
-            'lnl': d_h / distance_ratio - h_h / distance_ratio**2 / 2}
+            'lnl': d_h / distance_ratio - h_h / distance_ratio**2 / 2,
+            'h_h': h_h / distance_ratio**2}
 
     def _get_dh_hh_qo(self, sky_inds, physical_mask, t_first_det, times,
                       dh_mptd, hh_mppd):

@@ -82,6 +82,8 @@ _LABELS = {
     'lnl_H': r'$\ln \mathcal{L}_H$',
     'lnl_L': r'$\ln \mathcal{L}_L$',
     'lnl_V': r'$\ln \mathcal{L}_V$',
+    'lnl_marginalized': r'$\ln \overline{\mathcal{L}}$',
+    'h_h': r'$\langle h | h \rangle$',
     # Cumulatives
     'u_t_linfree': r'$u_t$',
     'u_psi': r'$u_\psi$',
@@ -99,8 +101,10 @@ _UNITS = (dict.fromkeys(['mchirp', 'm1', 'm2', 'mtot', 'mtot_source',
 
 
 class CornerPlot(plotting.CornerPlot):
+    """Has default latex labels for gravitational wave parameters."""
     DEFAULT_LATEX_LABELS = plotting.LatexLabels(_LABELS, _UNITS)
 
 
 class MultiCornerPlot(plotting.MultiCornerPlot):
+    """Has default latex labels for gravitational wave parameters."""
     corner_plot_cls = CornerPlot

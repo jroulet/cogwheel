@@ -293,4 +293,5 @@ class CoherentScoreQAS(BaseCoherentScore):
             'iota': np.arccos(cosiota),
             't_geocenter': t_geocenter,
             'lnl_marginalized': marg_info.lnl_marginalized,
-            'lnl': real_dh / distance_ratio - h_h / distance_ratio**2 / 2}
+            'lnl': real_dh / distance_ratio - h_h / distance_ratio**2 / 2,
+            'h_h': h_h / distance_ratio**2}
