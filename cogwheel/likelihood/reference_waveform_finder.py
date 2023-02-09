@@ -107,9 +107,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         Parameters
         ----------
-        event_data: Instance of `data.EventData`, or string with event
-                    name (must correspond to a file in `data.DATADIR`),
-                    or path to ``npz`` file with `EventData` instance.
+        event: Instance of `data.EventData`, or string with event name
+               (must correspond to a file in `data.DATADIR`), or path to
+               ``npz`` file with `EventData` instance.
 
         mchirp_guess: float
             Estimate of the detector-frame chirp mass of the signal.
