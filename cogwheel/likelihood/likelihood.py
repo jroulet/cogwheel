@@ -3,7 +3,7 @@ Compute likelihood of GW events.
 
 A class ``CBCLikelihood`` is defined. This can be used to compute
 likelihoods without resorting to the relative binning algorithm (slow)
-and is subclassed by ``RelativeBinningLikelihood``.
+and is subclassed by ``BaseRelativeBinning``.
 """
 import inspect
 from functools import wraps
@@ -291,7 +291,6 @@ class CBCLikelihood(utils.JSONMixin):
         Array of shape (n_m?, n_detectors, n_frequencies) with strain at
         detector. `n_m` is there only if `by_m=True`.
         """
-
         shape = ((len(self.waveform_generator._harmonic_modes_by_m),) if by_m
                  else ()) + self.event_data.strain.shape
         h_f = np.zeros(shape, dtype=np.complex_)

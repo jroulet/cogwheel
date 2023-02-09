@@ -54,7 +54,6 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
         self.cs_obj = cs.CoherentScore.from_detectors(event_data.detector_names,
                                                       **cs_kwargs)
 
-        # From milisecond to seconds
         self.dt = 1 / (2*event_data.frequencies[-1])
         self.timeshifts = np.arange(*t_rng, self.dt)
 
@@ -104,7 +103,7 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
                              / (h0_fbin * h0_fbin.conj()))  # (ndet, nbin)
 
         self.asd_drift = self.compute_asd_drift(self.par_dic_0)
-        self._lnl_0 = self.lnlike(self.par_dic_0, bypass_tests=True)
+        self._lnl_0 = self.lnlike(self.par_dic_0)
 
     def get_z_timeseries(self, par_dic):
         """

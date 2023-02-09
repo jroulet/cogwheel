@@ -5,7 +5,6 @@ A class ``ReferenceWaveformFinder`` is defined with methods to find
 parameters with good likelihood, these can be chosen as a reference
 solution for the relative-binning method.
 """
-
 import warnings
 
 import numpy as np
@@ -64,6 +63,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         time_range: (float, float)
             Minimum and maximum times to search relative to tgps (s).
         """
+        self._times = None  # Set by ``.set_summary()``
+        self._d_h_timeseries_weights = None  # Set by ``.set_summary()``
+
         self._time_range = time_range
         self._mchirp_range = mchirp_range
         super().__init__(event_data, waveform_generator, par_dic_0,
@@ -199,8 +201,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         # Optimize intrinsic parameters, update relative binning summary:
         self._optimize_m1m2s1zs2z_incoherently(seed)
 
-        # Use waveform to define reference detector, detector pair
-        # and reference frequency:
+        # Use waveform to define reference detector, detector pair and
+        # reference frequency:
         kwargs = self.get_coordinate_system_kwargs()
         self.par_dic_0['f_ref'] = kwargs['f_avg']
 
@@ -225,7 +227,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         d_h_timeseries = (self._d_h_timeseries_weights * h_fbin.conj()
                           ).sum(axis=(-3, -1))
 
-        m_inds, mprime_inds = self._get_m_mprime_inds()
+        m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
         h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
                ).real.sum(axis=(0, -1)))
 
@@ -261,7 +263,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         det_slice = np.s_[:, det_inds, :]
         d_h = (self._d_h_weights * h_fbin.conj())[det_slice].sum()
 
-        m_inds, mprime_inds = self._get_m_mprime_inds()
+        m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
         h_h = ((self._h_h_weights * h_fbin[m_inds] * h_fbin[mprime_inds].conj()
                ).real[det_slice].sum())
 
@@ -479,6 +481,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             * detector_pair
             * t0_refdet
             * mchirp_range
+            * event_data
+            * approximant
         """
         lnl_by_detectors = self.lnlike_max_amp_phase_time(
             self.par_dic_0, return_by_detectors=True)
@@ -502,4 +506,6 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                 'ref_det_name': ref_det_name,
                 'detector_pair': detector_pair,
                 't0_refdet': t0_refdet,
-                'mchirp_range': self.mchirp_range}
+                'mchirp_range': self.mchirp_range,
+                'event_data': self.event_data,
+                'approximant': self.waveform_generator.approximant}

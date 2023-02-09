@@ -1,10 +1,13 @@
 """Utility functions specific to gravitational waves."""
 import scipy.interpolate
 import numpy as np
-
 import lal
 
 from cogwheel import utils
+
+
+# ----------------------------------------------------------------------
+# Detector locations and responses:
 
 DETECTORS = {'H': lal.CachedDetectors[lal.LHO_4K_DETECTOR],
              'L': lal.CachedDetectors[lal.LLO_4K_DETECTOR],
@@ -33,6 +36,7 @@ DETECTOR_ARMS = {
 
 EARTH_CROSSING_TIME = 2 * 0.02128  # 2 R_Earth / c (seconds)
 
+
 @utils.lru_cache()
 def fplus_fcross(detector_names, ra, dec, psi, tgps):
     """
@@ -46,21 +50,6 @@ def fplus_fcross(detector_names, ra, dec, psi, tgps):
         for det in detector_names])
 
 
-def fplus_fcross_detector(detector_name, ra, dec, psi, tgps):
-    """
-    Return a (2 x n_angles) array with F+, Fx for many angles at one detector.
-    ra, dec, psi, tgps can be scalars or arrays, and any with length > 1 must
-     share the same length.all have length n_angles, tgps can be scalar or array
-    """
-    if hasattr(tgps, '__len__'):
-        gmst = [lal.GreenwichMeanSiderealTime(t) for t in tgps]
-    else:
-        gmst = lal.GreenwichMeanSiderealTime(tgps)
-    return np.transpose([
-        lal.ComputeDetAMResponse(DETECTORS[detector_name].response, r, d, p, g)
-        for r, d, p, g in np.broadcast(ra, dec, psi, gmst)])
-
-
 @utils.lru_cache()
 def time_delay_from_geocenter(detector_names, ra, dec, tgps):
     """
@@ -71,6 +60,58 @@ def time_delay_from_geocenter(detector_names, ra, dec, tgps):
     return np.array([
         lal.TimeDelayFromEarthCenter(DETECTORS[det].location, ra, dec, tgps)
         for det in detector_names])
+
+
+# ----------------------------------------------------------------------
+# Similar to the above, but in Earth-fixed coordinates and vectorized:
+def get_geocenter_delays(detector_names, lat, lon):
+    """
+    Return array of shape (n_detectors, ...) time delays from geocenter
+    [s]. Vectorized over lat, lon.
+    """
+    locations = np.array([DETECTORS[detector_name].location
+                          for detector_name in detector_names])  # (ndet, 3)
+    #JM 08/11/22 prevert cyclic reference of gw_utils.py and skyloc_angles.py
+    # direction = skyloc_angles.latlon_to_cart3d(lat, lon) #
+
+    direction = np.array([np.cos(lon) * np.cos(lat),
+                     np.sin(lon) * np.cos(lat),
+                     np.sin(lat)])
+
+    return -np.einsum('di,i...->d...', locations, direction) / lal.C_SI
+
+
+def get_fplus_fcross_0(detector_names, lat, lon):
+    """
+    Return array with antenna response functions fplus, fcross with
+    polarization psi=0.
+    Vectorized over lat, lon. Return shape is (..., n_det, 2)
+    where `...` is the shape of broadcasting (lat, lon).
+    """
+    responses = np.array([DETECTORS[detector_name].response
+                          for detector_name in detector_names]
+                        )  # (n_det, 3, 3)
+
+    lat, lon = np.broadcast_arrays(lat, lon)
+    coslon = np.cos(lon)
+    sinlon = np.sin(lon)
+    coslat = np.cos(lat)
+    sinlat = np.sin(lat)
+
+    x = np.array([sinlon, -coslon, np.zeros_like(sinlon)])  # (3, ...)
+    dx = np.einsum('dij,j...->di...', responses, x)  # (n_det, 3, ...)
+
+    y = np.array([-coslon * sinlat,
+                  -sinlon * sinlat,
+                  coslat])  # (3, ...)
+    dy = np.einsum('dij,j...->di...', responses, y)
+
+    fplus0 = (np.einsum('i...,di...->d...', x, dx)
+              - np.einsum('i...,di...->d...', y, dy))
+    fcross0 = (np.einsum('i...,di...->d...', x, dy)
+               + np.einsum('i...,di...->d...', y, dx))
+
+    return np.moveaxis([fplus0, fcross0], (0, 1), (-1, -2))
 
 
 #-----------------------------------------------------------------------
@@ -94,9 +135,18 @@ def mchirpeta_to_m1m2(mchirp, eta):
     return m1, m2
 
 
+def mchirpeta_to_mtot(mchirp, eta):
+    """Return `mtot` given `mchirp, eta`."""
+    return mchirp * eta**-.6
+
+
 def m1m2_to_mchirp(m1, m2):
     """Return chirp mass given component masses."""
     return (m1*m2)**.6 / (m1+m2)**.2
+
+
+def chieff(m1, m2, s1z, s2z):
+    return (m1*s1z + m2*s2z) / (m1+m2)
 
 
 class _ChirpMassRangeEstimator:

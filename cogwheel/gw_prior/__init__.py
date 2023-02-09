@@ -4,3 +4,5 @@ of gravitational wave sources.
 """
 
 from .combined import *
+
+from . import linear_free
