@@ -236,7 +236,8 @@ class MarginalizedRelativeBinningLikelihood(RelativeBinningLikelihood):
                         0.0,
                         self.event_data.tgps).T[0],
                     np.cos(par_dic['iota']),
-                    par_dic['psi'])
+                    np.cos(2*par_dic['psi']),
+                    np.sin(2*par_dic['psi']))
 
         U = np.dot(zs, np.conj(ts))
         T2 = utils.abs_sq(ts).sum()
