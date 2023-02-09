@@ -330,8 +330,7 @@ class EventData(utils.JSONMixin):
     @classmethod
     def gaussian_noise(
             cls, eventname, duration, detector_names, asd_funcs, tgps,
-            tcoarse=None, fmin=15., df_taper=1., fmax=1024., seed=None,
-            zero_noise=False):
+            tcoarse=None, fmin=15., df_taper=1., fmax=1024., seed=None):
         """
         Constructor that generates data with random stationary colored
         Gaussian noise. Note: the data will be periodic.
@@ -374,10 +373,6 @@ class EventData(utils.JSONMixin):
         seed: int, optional
             Use some fixed value for reproducibility.
 
-        zero_noise: bool
-            If True, strain data will be zeros as if that was the noise
-            realization.
-
         Return
         ------
         Instance of ``EventData``.
@@ -402,9 +397,6 @@ class EventData(utils.JSONMixin):
             scale=np.sqrt(duration) / 2 * asd, size=(2,) + asd.shape)
         strain = real + 1j * imag
         strain[:, [0, -1]] = strain[:, [0, -1]].real  # Real at f = 0 & Nyquist
-
-        if zero_noise:
-            strain *= 0
 
         wht_filter = highpass_filter(frequencies, fmin, df_taper) / asd
         return cls(eventname, frequencies, strain, wht_filter, detector_names,
