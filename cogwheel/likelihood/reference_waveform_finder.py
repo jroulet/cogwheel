@@ -146,6 +146,17 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         waveform_generator = waveform.WaveformGenerator.from_event_data(
             event_data, approximant, harmonic_modes=[(2, 2)])
 
+        if event_data.injection:
+            par_dic_0 = event_data.injection[0]
+            ref_wf_finder = cls(event_data, waveform_generator,
+                                par_dic_0, pn_phase_tol=pn_phase_tol,
+                                spline_degree=spline_degree,
+                                time_range=time_range,
+                                mchirp_range=mchirp_range)
+            print('Setting injected waveform as reference, lnL =',
+                  ref_wf_finder.lnlike_fft(par_dic_0))
+            return ref_wf_finder
+
         # Set initial parameter dictionary. Will get improved by
         # `find_bestfit_pars()`. Serves dual purpose as maximum
         # likelihood result and relative binning reference.
