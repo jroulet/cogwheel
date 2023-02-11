@@ -192,19 +192,14 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
         Return
         ------
-        t_first_det: float array of length n_physical
-            Time of arrival at the first detector.
+        t_first_det: float array of length n_qmc
+            Time of arrival at the first detector (s) relative to tgps.
 
-        delays: int array of shape (n_det-1, n_physical)
+        delays: int array of shape (n_det-1, n_qmc)
             Time delay between the first detector and the other
             detectors, in units of 1/.skydict.f_sampling
 
-        physical_mask: boolean array of length n_qmc
-            Some choices of time of arrival at detectors may not
-            correspond to any physical sky location, these are flagged
-            ``False`` in this array. Unphysical samples are discarded.
-
-        importance_sampling_weight: array
+        importance_sampling_weight: float array of length n_qmc
             Density ratio between the astrophysical prior and the
             proposal distribution of arrival times.
         """
@@ -212,18 +207,12 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             t_arrival_lnprob.T, self._qmc_sequence['u_tdet'])  # dq, dq
 
         delays = tdet_inds[1:] - tdet_inds[0]  # dq  # In units of dt
-        physical_mask = np.array([delays_key in self.sky_dict.delays2genind_map
-                                  for delays_key in zip(*delays)])
-        delays = delays[:, physical_mask]
+        importance_sampling_weight = np.prod(
+            tdet_weights / self.sky_dict.f_sampling, axis=0)  # q
 
-        importance_sampling_weight = np.prod(tdet_weights[:, physical_mask]
-                                             / self.sky_dict.f_sampling,
-                                             axis=0)  # q
+        t_first_det = times[tdet_inds[0]] + self._qmc_sequence['t_fine']  # q
 
-        t_first_det = (times[tdet_inds[0, physical_mask]]
-                       + self._qmc_sequence['t_fine'][physical_mask])  # q
-
-        return t_first_det, delays, physical_mask, importance_sampling_weight
+        return t_first_det, delays, importance_sampling_weight
 
 
 class BaseCoherentScoreHM(BaseCoherentScore):

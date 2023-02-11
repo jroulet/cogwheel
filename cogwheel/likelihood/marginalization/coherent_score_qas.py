@@ -107,10 +107,12 @@ class CoherentScoreQAS(BaseCoherentScore):
         dh_td, times = self.sky_dict.resample_timeseries(dh_td, times,
                                                          axis=0)
 
-        t_arrival_lnprob = self._incoherent_t_arrival_lnprob(dh_td,
-                                                             hh_d)  # td
-        t_first_det, delays, physical_mask, importance_sampling_weight \
+        t_arrival_lnprob = self._incoherent_t_arrival_lnprob(dh_td, hh_d)  # td
+        t_first_det, delays, importance_sampling_weight \
             = self._draw_single_det_times(t_arrival_lnprob, times)
+
+        sky_inds, sky_prior, physical_mask \
+            = self.sky_dict.get_sky_inds_and_prior(delays)  # q, q, q
 
         if not any(physical_mask):
             return self._MarginalizationInfo(physical_mask=physical_mask,
@@ -121,8 +123,8 @@ class CoherentScoreQAS(BaseCoherentScore):
                                              weights=np.array([]),
                                              lnl_marginalized=-np.inf)
 
-        sky_inds, sky_prior = self.sky_dict.get_sky_inds_and_prior(
-            delays)  # q, q
+        t_first_det = t_first_det[physical_mask]
+        importance_sampling_weight = importance_sampling_weight[physical_mask]
 
         dh_q, hh_q = self._get_dh_hh_q(sky_inds, physical_mask, t_first_det,
                                        times, dh_td, hh_d)  # q, q

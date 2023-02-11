@@ -2,8 +2,8 @@
 Implement class ``SkyDictionary``, useful for marginalizing over sky
 location.
 """
-
 import collections
+import itertools
 import numpy as np
 import scipy.signal
 from scipy.stats import qmc
@@ -23,6 +23,8 @@ class SkyDictionary(utils.JSONMixin):
     Antenna coefficients F+, Fx (psi=0) and detector time delays from
     geocenter are computed and stored for all samples.
     """
+    _UNPHYSICAL_GENIND = itertools.repeat((-1, 0., False))
+
     def __init__(self, detector_names, *, f_sampling: int = 2**13,
                  nsky: int = 10**6, seed=0):
         self.detector_names = tuple(detector_names)
@@ -87,15 +89,28 @@ class SkyDictionary(utils.JSONMixin):
 
         Return
         ------
-        sky_inds: tuple of ints of length n_samples
+        sky_inds: tuple of ints of length n_physical
             Indices of self.sky_samples with the correct time delays.
 
-        sky_prior: tuple of floats of length n_samples
+        sky_prior: float array of length n_physical
             Prior probability density for the time-delays, in units of
             s^-(n_det-1).
+
+        physical_mask: boolean array of length n_samples
+            Some choices of time of arrival at detectors may not
+            correspond to any physical sky location, these are flagged
+            ``False`` in this array. Unphysical samples are discarded.
         """
-        return zip(*(next(self.delays2genind_map[delays_key])
-                     for delays_key in zip(*delays)))
+        delays2genind_map = self.delays2genind_map
+        sky_inds, sky_prior, physical_mask = zip(
+            *[next(delays2genind_map.get(delays_key, self._UNPHYSICAL_GENIND))
+              for delays_key in zip(*delays)])
+
+        # Reject unphysical samples:
+        physical_mask = np.array(physical_mask, bool)
+        sky_prior = np.array(sky_prior, float)[physical_mask]
+        sky_inds = tuple(np.array(sky_inds, int)[physical_mask])
+        return sky_inds, sky_prior, physical_mask
 
     def _create_sky_samples(self):
         """
@@ -129,8 +144,8 @@ class SkyDictionary(utils.JSONMixin):
 
     def _create_index_generator(self, inds):
         """
-        Infinite generator that yields pairs of
-        (i_sample, delays_key_prior).
+        Infinite generator that yields tuples of
+        (i_sample, delays_key_prior, is_physical).
 
         Parameters
         ----------
@@ -145,9 +160,9 @@ class SkyDictionary(utils.JSONMixin):
         delays_key_prior: float
             Always the same constant, prior probability density for the
             particular time-delays bins, in units of s^-(n_det-1).
+
+        is_physical: True
         """
-        delays_key_prior = (self.f_sampling**(len(self.detector_names) - 1)
+        delays_key_prior = (self.f_sampling ** (len(self.detector_names) - 1)
                             * len(inds) / self.nsky)
-        while True:
-            for i_sample in inds:
-                yield i_sample, delays_key_prior
+        return itertools.cycle([(ind, delays_key_prior, True) for ind in inds])

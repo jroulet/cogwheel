@@ -115,21 +115,24 @@ class CoherentScoreHM(BaseCoherentScoreHM):
 
         t_arrival_lnprob = self._incoherent_t_arrival_lnprob(dh_mptd,
                                                              hh_mppd)  # td
-        t_first_det, delays, physical_mask, importance_sampling_weight \
+        t_first_det, delays, importance_sampling_weight \
             = self._draw_single_det_times(t_arrival_lnprob, times)
+
+        sky_inds, sky_prior, physical_mask \
+            = self.sky_dict.get_sky_inds_and_prior(delays)  # q, q, q
 
         if not any(physical_mask):
             return self._MarginalizationInfo(physical_mask=physical_mask,
                                              t_first_det=np.array([]),
-                                             dh_qo=np.empty((0, self.nphi)),
-                                             hh_qo=np.empty((0, self.nphi)),
+                                             dh_q=np.array([]),
+                                             hh_q=np.array([]),
                                              sky_inds=(),
                                              weights=np.array([]),
-                                             lnl_marginalized=-np.inf,
-                                             important=[(), ()])
+                                             lnl_marginalized=-np.inf)
 
-        sky_inds, sky_prior = self.sky_dict.get_sky_inds_and_prior(
-            delays)  # q, q
+        t_first_det = t_first_det[physical_mask]
+        importance_sampling_weight = importance_sampling_weight[physical_mask]
+
 
         dh_qo, hh_qo = self._get_dh_hh_qo(sky_inds, physical_mask, t_first_det,
                                           times, dh_mptd, hh_mppd)  # qo, qo
