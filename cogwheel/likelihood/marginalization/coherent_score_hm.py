@@ -8,7 +8,7 @@ treated as an intrinsic parameter.
 """
 from collections import namedtuple
 import numpy as np
-import scipy.interpolate
+from scipy.interpolate import make_interp_spline
 
 from .base import BaseCoherentScoreHM
 
@@ -242,22 +242,12 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         """
         fplus_fcross = self._get_fplus_fcross(sky_inds, physical_mask)
 
-        # # (d|h):
-        # select = (...,  # mp stay the same
-        #           tdet_inds.T[physical_mask],  # t -> q depending on d
-        #           np.arange(len(self.sky_dict.detector_names))  # d
-        #           )
-        # dh_mpqd = dh_mptd[select]  # mpqd
-        # dh_dmpq = np.moveaxis(dh_mpqd, -1, 0)
-
-        # Alternative computation of dh_dmpq above, more accurate
+        # (d|h):
         t_det = np.vstack((t_first_det,
                            t_first_det + self.sky_dict.delays[:, sky_inds]))
         dh_dmpq = np.array(
-            [scipy.interpolate.interp1d(times, dh_mptd[..., i_det], kind=3,
-                                        copy=False, assume_sorted=True,
-                                        fill_value=0., bounds_error=False
-                                        )(t_det[i_det])
+            [make_interp_spline(times, dh_mptd[..., i_det], k=3,
+                                check_finite=False, axis=-1)(t_det[i_det])
              for i_det in range(len(self.sky_dict.detector_names))])
 
         dh_qm = np.einsum('dmpq,qdp->qm', dh_dmpq, fplus_fcross)  # qm

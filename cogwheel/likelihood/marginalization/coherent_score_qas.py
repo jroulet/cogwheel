@@ -6,7 +6,7 @@ and aligned spins.
 """
 from collections import namedtuple
 import numpy as np
-import scipy.interpolate
+from scipy.interpolate import make_interp_spline
 
 from cogwheel import utils
 from .base import BaseCoherentScore
@@ -74,6 +74,7 @@ class CoherentScoreQAS(BaseCoherentScore):
             (i.e.: time of arrival, sky location, polarization, distance,
             orbital phase, inclination).
         """
+
     def get_marginalization_info(self, dh_td, hh_d, times):
         """
         Evaluate inner products (d|h) and ⟨h|h⟩ at QMC integration
@@ -154,10 +155,8 @@ class CoherentScoreQAS(BaseCoherentScore):
         t_det = np.vstack((t_first_det,
                            t_first_det + self.sky_dict.delays[:, sky_inds]))
         dh_dq = np.array(
-            [scipy.interpolate.interp1d(times, dh_td[:, i_det], kind=3,
-                                        copy=False, assume_sorted=True,
-                                        fill_value=0., bounds_error=False
-                                        )(t_det[i_det])
+            [make_interp_spline(times, dh_td[:, i_det], k=3, check_finite=False
+                               )(t_det[i_det])
              for i_det in range(len(self.sky_dict.detector_names))])
 
         response_qd = np.einsum('qp,qdp->qd',
