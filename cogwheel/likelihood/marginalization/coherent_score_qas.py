@@ -10,7 +10,6 @@ from scipy.interpolate import make_interp_spline
 
 from cogwheel import utils
 from .base import BaseCoherentScore
-from .lookup_table import LookupTableMarginalizedPhase22
 
 
 class CoherentScoreQAS(BaseCoherentScore):
