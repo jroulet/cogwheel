@@ -6,7 +6,6 @@ and aligned spins.
 """
 from collections import namedtuple
 import numpy as np
-from scipy.interpolate import make_interp_spline
 
 from cogwheel import utils
 from .base import BaseCoherentScore
@@ -156,8 +155,7 @@ class CoherentScoreQAS(BaseCoherentScore):
         t_det = np.vstack((t_first_det,
                            t_first_det + self.sky_dict.delays[:, sky_inds]))
         dh_dq = np.array(
-            [make_interp_spline(times, dh_td[:, i_det], k=3, check_finite=False
-                               )(t_det[i_det])
+            [self._interp_locally(times, dh_td[:, i_det], t_det[i_det])
              for i_det in range(len(self.sky_dict.detector_names))])
 
         response_qd = np.einsum('qp,qdp->qd',

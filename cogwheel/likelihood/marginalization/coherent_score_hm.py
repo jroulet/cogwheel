@@ -8,7 +8,6 @@ treated as an intrinsic parameter.
 """
 from collections import namedtuple
 import numpy as np
-from scipy.interpolate import make_interp_spline
 
 from .base import BaseCoherentScoreHM
 
@@ -251,8 +250,7 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         t_det = np.vstack((t_first_det,
                            t_first_det + self.sky_dict.delays[:, sky_inds]))
         dh_dmpq = np.array(
-            [make_interp_spline(times, dh_mptd[..., i_det], k=3,
-                                check_finite=False, axis=-1)(t_det[i_det])
+            [self._interp_locally(times, dh_mptd[..., i_det], t_det[i_det])
              for i_det in range(len(self.sky_dict.detector_names))])
 
         dh_qm = np.einsum('dmpq,qdp->qm', dh_dmpq, fplus_fcross)  # qm

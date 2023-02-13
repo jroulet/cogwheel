@@ -10,9 +10,10 @@ marginalization for waveforms with higher modes.
 """
 from abc import abstractmethod, ABC
 import itertools
-from scipy.stats import qmc
 import numba
 import numpy as np
+from scipy.stats import qmc
+from scipy.interpolate import krogh_interpolate, make_interp_spline
 
 from cogwheel import utils
 from .lookup_table import LookupTable, LookupTableMarginalizedPhase22
@@ -212,6 +213,28 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         t_first_det = times[tdet_inds[0]] + self._qmc_sequence['t_fine']  # q
 
         return t_first_det, delays, importance_sampling_weight
+
+    @staticmethod
+    def _interp_locally(times, timeseries, new_times, spline_degree=3):
+        """
+        Spline interpolation along last axis of ``timeseries`` excluding
+        data outside the range spanned by `new_times`. If there is too
+        little data inside to make a spline, use an interpolating
+        polynomial.
+        """
+        i_min, i_max = np.searchsorted(times,
+                                       (new_times.min(), new_times.max()))
+        i_min = max(0, i_min - 1)
+        i_max = min(i_max, len(times) - 1)
+
+        if i_max - i_min > spline_degree:  # If possible make a spline
+            return make_interp_spline(
+                times[i_min : i_max], timeseries[..., i_min : i_max],
+                k=spline_degree, check_finite=False, axis=-1)(new_times)
+
+        return krogh_interpolate(times[i_min : i_max],
+                                 timeseries[..., i_min : i_max], new_times,
+                                 axis=-1)
 
 
 class BaseCoherentScoreHM(BaseCoherentScore):
