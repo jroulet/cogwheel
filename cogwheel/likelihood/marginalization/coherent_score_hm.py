@@ -72,10 +72,10 @@ class CoherentScoreHM(BaseCoherentScoreHM):
             excluding inclination (i.e.: time of arrival, sky location,
             polarization, distance, orbital phase).
 
-        important: (tuple of ints, tuple of ints) of lengths n_important
-            The first tuple contains indices between 0 and n_physical-1
+        important: (array of ints, array of ints) of lengths n_important
+            The first array contains indices between 0 and n_physical-1
             corresponding to (physical) QMC samples.
-            The second tuple contains indices between 0 and n_phi-1
+            The second array contains indices between 0 and n_phi-1
             corresponding to orbital phases.
             They correspond to samples with sufficiently high maximum
             likelihood over distance to be included in the integral.
@@ -124,11 +124,13 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         if not any(physical_mask):
             return self._MarginalizationInfo(physical_mask=physical_mask,
                                              t_first_det=np.array([]),
-                                             dh_q=np.array([]),
-                                             hh_q=np.array([]),
+                                             dh_qo=np.array([]),
+                                             hh_qo=np.array([]),
                                              sky_inds=(),
                                              weights=np.array([]),
-                                             lnl_marginalized=-np.inf)
+                                             lnl_marginalized=-np.inf,
+                                             important=[np.array([], int),
+                                                        np.array([], int)])
 
         t_first_det = t_first_det[physical_mask]
         importance_sampling_weight = importance_sampling_weight[physical_mask]

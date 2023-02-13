@@ -93,8 +93,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     def _lookup_table_marginalized_params():
         """
         ``{'d_luminosity'}`` or ``{'d_luminosity', 'phi_ref'}``,
-        allows to verify that the ``LookupTable`` is of the correct
-        type.
+        allows to verify that the lookup table is of the correct type.
         """
 
     def _switch_qmc_sequence(self, qmc_sequence_id=None):
@@ -341,10 +340,10 @@ class BaseCoherentScoreHM(BaseCoherentScore):
             Positive weights of the QMC samples, including the
             likelihood and the importance-sampling correction.
 
-        important: (tuple of ints, tuple of ints) of lengths n_important
-            The first tuple contains indices between 0 and n_physical-1
+        important: (array of ints, array of ints) of lengths n_important
+            The first array contains indices between 0 and n_physical-1
             corresponding to (physical) QMC samples.
-            The second tuple contains indices between 0 and n_phi-1
+            The second array contains indices between 0 and n_phi-1
             corresponding to orbital phases.
             They correspond to samples with sufficiently high maximum
             likelihood over distance to be included in the integral.
