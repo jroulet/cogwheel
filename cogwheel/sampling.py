@@ -428,7 +428,7 @@ class Dynesty(Sampler):
 #     def __init__(self, posterior, run_kwargs):
 #         super().__init__(posterior, run_kwargs)
 #         self.sampler = None
-#         print("Warning: I couldn't produce reasonable results with this class")
+        # print("Warning: couldn't produce reasonable results with this class")
 
 #     def instantiate_sampler(self, run=False, *, sample_prior=False,
 #                             n_fast_steps=8, **kwargs):

@@ -118,7 +118,10 @@ class AlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
                      FixedReferenceFrequencyPrior]
 
 class TidalIASPrior(RegisteredPriorMixin, CombinedPrior):
-    """Aligned spin, flat in tidal parameters, flat in chieff, uniform luminosity volume"""
+    """
+    Aligned spin, flat in tidal parameters, flat in chieff, uniform
+    luminosity volume.
+    """
     prior_classes = [UniformDetectorFrameMassesPrior,
                      IsotropicInclinationPrior,
                      IsotropicSkyLocationPrior,

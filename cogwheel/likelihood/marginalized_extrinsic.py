@@ -82,7 +82,7 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         self.t_range = t_range
         self._times = (np.arange(*t_range, 1 / (2*event_data.fbounds[1]))
                        + par_dic_0.get('t_geocenter', 0))
-        self.ref_dic = dict(
+        self._ref_dic = dict(
             d_luminosity=self.coherent_score.lookup_table.REFERENCE_DISTANCE,
             phi_ref=0.)
 
@@ -170,7 +170,7 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
 
     def _get_dh_hh(self, par_dic):
         h_mpb = self.waveform_generator.get_hplus_hcross(
-            self.fbin, dict(par_dic) | self.ref_dic, by_m=True)  # mpb
+            self.fbin, dict(par_dic) | self._ref_dic, by_m=True)  # mpb
         dh_mptd = np.einsum('mptdb,mpb->mptd', self._d_h_weights, h_mpb.conj())
         m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
         hh_mppd = np.einsum('mpPdb,mpb,mPb->mpPd',
@@ -246,7 +246,7 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         """
         h_mpbn = np.moveaxis(
             [self.waveform_generator.get_hplus_hcross(
-                self.fbin, dict(sample) | self.ref_dic,
+                self.fbin, dict(sample) | self._ref_dic,
                 by_m=True)
              for _, sample in samples[self.params].iterrows()],
             0, -1)  # mpbn
