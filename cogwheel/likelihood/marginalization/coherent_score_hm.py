@@ -254,7 +254,13 @@ class CoherentScoreHM(BaseCoherentScoreHM):
             [self._interp_locally(times, dh_mptd[..., i_det], t_det[i_det])
              for i_det in range(len(self.sky_dict.detector_names))])
 
-        dh_qm = np.einsum('dmpq,qdp->qm', dh_dmpq, fplus_fcross)  # qm
+        # Same but faster:
+        # dh_qm = np.einsum('dmpq,qdp->qm', dh_dmpq, fplus_fcross)  # qm
+        n_d, n_m, n_p, n_q = dh_dmpq.shape
+        dh_qm = (np.moveaxis(dh_dmpq, (3, 1), (0, 1)
+                            ).reshape(n_q, n_m, n_d*n_p)  # qm(dp)
+                 @ fplus_fcross.reshape(n_q, n_d*n_p, 1)  # q(dp)_
+                ).reshape(n_q, n_m)  # qm
 
         # (h|h):
         f_f = np.einsum('qdp,qdP->qpPd', fplus_fcross, fplus_fcross)

@@ -137,13 +137,11 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         shifts = np.exp(2j*np.pi * np.outer(self.event_data.frequencies,
                                             self.waveform_generator.tcoarse
                                             + self._times))  # rt
-
+        d_h_no_shift = np.einsum('dr,mpr->mpdr',
+                                 self.event_data.blued_strain,
+                                 self._h0_f.conj())  # mpdr
         d_h_summary = np.array(
-            [self._get_summary_weights(
-                np.einsum('dr,mpr,r->mpdr',
-                          self.event_data.blued_strain,
-                          self._h0_f.conj(),
-                          shift))  # mpdb
+            [self._get_summary_weights(d_h_no_shift * shift)  # mpdb
              for shift in shifts.T])  # tmpdb  # Comprehension saves memory
 
         self._d_h_weights = np.einsum(
@@ -171,7 +169,13 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
     def _get_dh_hh(self, par_dic):
         h_mpb = self.waveform_generator.get_hplus_hcross(
             self.fbin, dict(par_dic) | self._ref_dic, by_m=True)  # mpb
-        dh_mptd = np.einsum('mptdb,mpb->mptd', self._d_h_weights, h_mpb.conj())
+
+        # Same but faster:
+        # dh_mptd = np.einsum('mptdb,mpb->mptd',
+        #                     self._d_h_weights, h_mpb.conj())
+        dh_mptd = (self._d_h_weights
+                   @ h_mpb.conj()[:, :, np.newaxis, :, np.newaxis])[..., 0]
+
         m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
         hh_mppd = np.einsum('mpPdb,mpb,mPb->mpPd',
                             self._h_h_weights,

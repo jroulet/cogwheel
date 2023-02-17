@@ -172,7 +172,12 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         """
         fplus_fcross_0 = self.sky_dict.fplus_fcross_0[sky_inds,]  # qdp
         rot_psi = self._qmc_sequence['rot_psi'][physical_mask]  # qpp'
-        fplus_fcross = np.einsum('qpP,qdP->qdp', rot_psi, fplus_fcross_0)
+
+        # Same but faster:
+        # fplus_fcross = np.einsum('qpP,qdP->qdp', rot_psi, fplus_fcross_0)
+        fplus_fcross = (rot_psi[:, np.newaxis]
+                        @ fplus_fcross_0[..., np.newaxis]
+                        )[..., 0]
         return fplus_fcross  # qdp
 
     def _draw_single_det_times(self, t_arrival_lnprob, times):
