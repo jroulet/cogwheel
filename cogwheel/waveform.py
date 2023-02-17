@@ -309,6 +309,20 @@ class WaveformGenerator(utils.JSONMixin):
                       for _ in range(n_cached_waveforms)]
         self._n_cached_waveforms = n_cached_waveforms
 
+    @property
+    def lalsimulation_commands(self):
+        """
+        Tuple of `(key, value)` where `key` is the name of a
+        `lalsimulation` function and `value` is its second argument,\
+        after `lal_dic`.
+        """
+        return self._lalsimulation_commands
+
+    @lalsimulation_commands.setter
+    def lalsimulation_commands(self, lalsimulation_commands):
+        self._lalsimulation_commands = lalsimulation_commands
+        utils.clear_caches()
+
     def get_m_mprime_inds(self):
         """
         Return two lists of integers, these zipped are pairs (i, j) of
