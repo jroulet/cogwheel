@@ -172,6 +172,20 @@ def abs_sq(x):
     return x.real**2 + x.imag**2
 
 
+def real_matmul(a, b):
+    """
+    Return real part of complex matrix multiplication.
+
+    Same as `(a @ b).real` but ~2 times faster.
+    Note, `b` is not conjugated by this function.
+    """
+    a_real = a.real.copy()
+    a_imag = a.imag.copy()
+    b_real = b.real.copy()
+    b_imag = b.imag.copy()
+    return a_real @ b_real - a_imag @ b_imag
+
+
 def merge_dictionaries_safely(*dics):
     """
     Merge multiple dictionaries into one.

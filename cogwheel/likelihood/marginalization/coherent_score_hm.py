@@ -9,6 +9,7 @@ treated as an intrinsic parameter.
 from collections import namedtuple
 import numpy as np
 
+from cogwheel import utils
 from .base import BaseCoherentScoreHM
 
 
@@ -260,8 +261,8 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         hh_qm = (f_f.reshape(f_f.shape[0], -1)
                  @ hh_mppd.reshape(hh_mppd.shape[0], -1).T)  # qm
 
-        dh_qo = (dh_qm @ self._dh_phasor).real  # qo
-        hh_qo = (hh_qm @ self._hh_phasor).real  # qo
+        dh_qo = utils.real_matmul(dh_qm, self._dh_phasor)  # qo
+        hh_qo = utils.real_matmul(hh_qm, self._hh_phasor)  # qo
         return dh_qo, hh_qo
 
     def _incoherent_t_arrival_lnprob(self, dh_mptd, hh_mppd):
