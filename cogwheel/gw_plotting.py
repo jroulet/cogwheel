@@ -75,7 +75,7 @@ _LABELS = {
     # Time
     't_refdet': r'$t_{\rm ref\,det}$',
     'tc': r'$t_c$',
-    't_geocenter': r'$t_{\rm geocenter}$',
+    't_geocenter': r'$t_{\rm ⴲ}$',
     't_linfree': r'$t_{\rm LF}$',
     # Likelihood
     'lnl': r'$\ln \mathcal{L}$',
