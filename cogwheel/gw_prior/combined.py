@@ -28,6 +28,8 @@ from .miscellaneous import (ZeroTidalDeformabilityPrior,
 from .spin import (
     UniformEffectiveSpinPrior,
     IsotropicSpinsAlignedComponentsPrior,
+    UniformDiskInplaneSpinsIsotropicInclinationPrior,
+    IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
     UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior,
     IsotropicSpinsInplaneComponentsIsotropicInclinationSkyLocationPrior,
     ZeroInplaneSpinsPrior)
@@ -117,6 +119,7 @@ class AlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
                      ZeroTidalDeformabilityPrior,
                      FixedReferenceFrequencyPrior]
 
+
 class TidalIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Aligned spin, flat in tidal parameters, flat in chieff, uniform
@@ -133,6 +136,7 @@ class TidalIASPrior(RegisteredPriorMixin, CombinedPrior):
                      ZeroInplaneSpinsPrior,
                      UniformTidalDeformabilitiesBNSPrior,
                      FixedReferenceFrequencyPrior]
+
 
 class LVCPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, isotropic spins, uniform luminosity volume."""
@@ -235,9 +239,49 @@ class IntrinsicAlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Prior for usage with ``CoherentScoreLikelihoodQAS``.
     Intrinsic parameters only, aligned spins, uniform in effective spin
-    and component masses, no tides.
+    and detector frame component masses, no tides.
     """
     prior_classes =  [UniformDetectorFrameMassesPrior,
                       UniformEffectiveSpinPrior,
                       ZeroTidalDeformabilityPrior,
                       FixedReferenceFrequencyPrior]
+
+
+class IntrinsicAlignedSpinLVCPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Prior for usage with ``CoherentScoreLikelihoodQAS``.
+    Intrinsic parameters only, aligned spins, uniform in effective spin
+    and detector frame component masses, no tides.
+    """
+    prior_classes =  [UniformDetectorFrameMassesPrior,
+                      IsotropicSpinsAlignedComponentsPrior,
+                      ZeroTidalDeformabilityPrior,
+                      FixedReferenceFrequencyPrior]
+
+
+class IntrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Prior for usage with ``CoherentScoreLikelihood``.
+    Intrinsic parameters only, precessing, uniform in effective spin
+    and detector frame component masses, no tides.
+    """
+    prior_classes = [
+        FixedReferenceFrequencyPrior,
+        UniformDetectorFrameMassesPrior,
+        UniformEffectiveSpinPrior,
+        UniformDiskInplaneSpinsIsotropicInclinationPrior,
+        ZeroTidalDeformabilityPrior]
+
+
+class IntrinsicLVCPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Prior for usage with ``CoherentScoreLikelihood``.
+    Intrinsic parameters only, precessing, isotropic spins, uniform in
+    component spin magnitudes and detector frame masses, no tides.
+    """
+    prior_classes = [
+        FixedReferenceFrequencyPrior,
+        UniformDetectorFrameMassesPrior,
+        IsotropicSpinsAlignedComponentsPrior,
+        IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
+        ZeroTidalDeformabilityPrior]

@@ -7,8 +7,9 @@ attribute `prior_classes` that is a list of such priors (see
 Each may consume some arguments in the __init__(), but should forward
 as ``**kwargs`` any arguments that other priors may need.
 """
-import numpy as np
+from abc import abstractmethod
 from scipy.interpolate import interp1d
+import numpy as np
 
 import lal
 import lalsimulation
@@ -17,6 +18,9 @@ from cogwheel import skyloc_angles
 from cogwheel import utils
 from cogwheel.prior import Prior, FixedPrior, UniformPriorMixin
 
+
+# ----------------------------------------------------------------------
+# Aligned spin components
 
 class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
     """
@@ -63,127 +67,6 @@ class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
                 'cumchidiff': cumchidiff}
 
 
-class UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior(
-        UniformPriorMixin, Prior):
-    """
-    Prior for in-plane spins and inclination that is uniform in the disk
-        sx^2 + sy^2 < 1 - sz^2
-    for each of the component spins and isotropic in the inclination.
-    It corresponds to the IAS spin prior when combined with
-    `UniformEffectiveSpinPrior`.
-    """
-    standard_params = ['iota', 's1x_n', 's1y_n', 's2x_n', 's2y_n', 'ra',
-                       'dec']
-    range_dic = {'costheta_jn': (-1, 1),
-                 'phi_jl_hat': (0, 2*np.pi),
-                 'phi12': (0, 2*np.pi),
-                 'cums1r_s1z': (0, 1),
-                 'cums2r_s2z': (0, 1),
-                 'costhetanet': (-1, 1),
-                 'phinet_hat': (0, 2*np.pi)}
-    periodic_params = ['phi_jl_hat', 'phi12']
-    folded_reflected_params = ['costheta_jn', 'phinet_hat']
-    conditioned_on = ['s1z', 's2z', 'm1', 'm2', 'f_ref']
-
-    def __init__(self, *, detector_pair, tgps, **kwargs):
-        super().__init__(detector_pair=detector_pair, tgps=tgps,
-                         **kwargs)
-        self.skyloc = skyloc_angles.SkyLocAngles(detector_pair, tgps)
-
-    def get_init_dict(self):
-        """
-        Return dictionary with keyword arguments to reproduce the class
-        instance.
-        """
-        init_dict = self.skyloc.get_init_dict()
-        return utils.merge_dictionaries_safely(super().get_init_dict(),
-                                               init_dict)
-
-    @staticmethod
-    def _spin_transform(cumsr_sz, sz):
-        """
-        The in-plane spin prior is flat in the disk.
-        Subclasses can override to change the spin prior.
-        """
-        sr = np.sqrt(cumsr_sz * (1 - sz ** 2))
-        chi = np.sqrt(sr**2 + sz**2)
-        tilt = np.arctan2(sr, sz)
-        return chi, tilt
-
-    @staticmethod
-    def _inverse_spin_transform(chi, tilt, sz):
-        """
-        Return value of `cumsr_sz`, the cumulative of the prior on
-        in-plane spin magnitude given the aligned spin magnitude `sz`,
-        for either companion.
-        The in-plane spin prior is flat in the disk. Subclasses can
-        override to change the spin prior.
-        """
-        cumsr_sz = (chi*np.sin(tilt))**2 / (1-sz**2)
-        return cumsr_sz
-
-    @utils.lru_cache()
-    def transform(self, costheta_jn, phi_jl_hat, phi12,
-                  cums1r_s1z, cums2r_s2z, costhetanet, phinet_hat,
-                  s1z, s2z, m1, m2, f_ref):
-        """
-        Return dictionary with inclination, inplane spins, right
-        ascension and declination. Spin components are defined in a
-        coordinate system where `z` is parallel to the orbital angular
-        momentum `L` and the direction of propagation `N` lies in the
-        `y-z` plane.
-        """
-        chi1, tilt1 = self._spin_transform(cums1r_s1z, s1z)
-        chi2, tilt2 = self._spin_transform(cums2r_s2z, s2z)
-        theta_jn = np.arccos(costheta_jn)
-        phi_jl = (phi_jl_hat + np.pi * (costheta_jn < 0)) % (2*np.pi)
-
-        # Use `phi_ref=0` as a trick to define azimuths based on the
-        # line of sight rather than orbital separation.
-        iota, s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z \
-            = lalsimulation.SimInspiralTransformPrecessingNewInitialConditions(
-                theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2,
-                m1*lal.MSUN_SI, m2*lal.MSUN_SI, f_ref, phiRef=0.)
-
-        thetanet = np.arccos(costhetanet)
-        phinet = (phinet_hat - np.pi*(costheta_jn > 0)) % (2*np.pi)
-        ra, dec = self.skyloc.thetaphinet_to_radec(thetanet, phinet)
-
-        return {'iota': iota,
-                's1x_n': s1x_n,
-                's1y_n': s1y_n,
-                's2x_n': s2x_n,
-                's2y_n': s2y_n,
-                'ra': ra,
-                'dec': dec}
-
-    def inverse_transform(self, iota, s1x_n, s1y_n, s2x_n, s2y_n,
-                          ra, dec, s1z, s2z, m1, m2, f_ref):
-        """`standard_params` to `sampled_params`."""
-        theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2 \
-            = lalsimulation.SimInspiralTransformPrecessingWvf2PE(
-                iota, s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z, m1, m2, f_ref,
-                phiRef=0.)
-
-        cums1r_s1z = self._inverse_spin_transform(chi1, tilt1, s1z)
-        cums2r_s2z = self._inverse_spin_transform(chi2, tilt2, s2z)
-
-        costheta_jn = np.cos(theta_jn)
-        phi_jl_hat = (phi_jl + np.pi * (costheta_jn < 0)) % (2*np.pi)
-
-        thetanet, phinet = self.skyloc.radec_to_thetaphinet(ra, dec)
-        costhetanet = np.cos(thetanet)
-        phinet_hat = (phinet + np.pi*(costheta_jn > 0)) % (2*np.pi)
-
-        return {'costheta_jn': costheta_jn,
-                'phi_jl_hat': phi_jl_hat,
-                'phi12': phi12,
-                'cums1r_s1z': cums1r_s1z,
-                'cums2r_s2z': cums2r_s2z,
-                'costhetanet': costhetanet,
-                'phinet_hat': phinet_hat}
-
-
 class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
     """
     Spin prior for aligned spin components that can be combined with
@@ -204,6 +87,7 @@ class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
     def _spin_transform(cls, cumsz):
         return cls.sz_interp(cumsz)[()]
 
+    @utils.lru_cache()
     def transform(self, cums1z, cums2z):
         """(cums1z, cums2z) to (s1z, s2z)."""
         return {'s1z': self._spin_transform(cums1z),
@@ -219,13 +103,158 @@ class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
                 'cums2z': self._inverse_spin_transform(s2z)}
 
 
-class IsotropicSpinsInplaneComponentsIsotropicInclinationSkyLocationPrior(
-        UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior):
+# ----------------------------------------------------------------------
+# Inplane spin components + inclination (+ sky location)
+
+class _BaseInplaneSpinsInclinationPrior(UniformPriorMixin, Prior):
     """
-    Like `UniformDiskInplaneSpinsIsotropicInclinationPrior`
-    except it gives a spin prior uniform in magnitude and solid angle
-    (isotropic) for each of the constituent spins independently when
-    combined with `IsotropicSpinsAlignedComponentsPrior`.
+    Abstract base class for defining a prior on inplane spins and
+    inclination, conditioned on masses, aligned spins and reference
+    frequency.
+
+    Subclasses
+    ----------
+    UniformDiskInplaneSpinsIsotropicInclinationPrior
+    IsotropicSpinsInplaneComponentsIsotropicInclinationPrior
+    """
+    standard_params = ['iota', 's1x_n', 's1y_n', 's2x_n', 's2y_n']
+    range_dic = {'costheta_jn': (-1, 1),
+                 'phi_jl_hat': (0, 2*np.pi),
+                 'phi12': (0, 2*np.pi),
+                 'cums1r_s1z': (0, 1),
+                 'cums2r_s2z': (0, 1)}
+    periodic_params = ['phi_jl_hat', 'phi12']
+    folded_reflected_params = ['costheta_jn']
+    conditioned_on = ['s1z', 's2z', 'm1', 'm2', 'f_ref']
+
+    @staticmethod
+    @abstractmethod
+    def _spin_transform(cumsr_sz, sz):
+        """
+        Subclasses must override to set the spin prior.
+
+        Parameters
+        ----------
+        cumsr_sz: float
+            Cumulative of the prior on in-plane spin magnitude given the
+            aligned spin magnitude `sz`, for either companion.
+
+        sz: float
+            Aligned spin magnitude for either companion.
+
+        Return
+        ------
+        chi: float
+            Dimensionless spin magnitude between 0 and 1.
+
+        tilt: float
+            Zenithal angle between spin and orbital angular momentum
+            between 0 and pi.
+        """
+
+    @staticmethod
+    @abstractmethod
+    def _inverse_spin_transform(chi, tilt, sz):
+        """
+        Inverse of `._spin_transform`. Subclasses must override to set
+        the spin prior.
+
+        Parameters
+        ----------
+        chi: float
+            Dimensionless spin magnitude between 0 and 1.
+
+        tilt: float
+            Zenithal angle between spin and orbital angular momentum
+            between 0 and pi.
+
+        sz: float
+            Aligned spin magnitude for either companion.
+
+        Return
+        ------
+        cumsr_sz: float
+            Cumulative of the prior on in-plane spin magnitude given the
+            aligned spin magnitude `sz`, for either companion.
+        """
+
+    @utils.lru_cache()
+    def transform(self, costheta_jn, phi_jl_hat, phi12, cums1r_s1z,
+                  cums2r_s2z, s1z, s2z, m1, m2, f_ref) -> dict:
+        """
+        Return dictionary with inclination and inplane spins.
+        Spin components are defined in a coordinate system where `z` is
+        parallel to the orbital angular momentum `L` and the direction
+        of propagation `N` lies in the `y-z` plane.
+        """
+        chi1, tilt1 = self._spin_transform(cums1r_s1z, s1z)
+        chi2, tilt2 = self._spin_transform(cums2r_s2z, s2z)
+        theta_jn = np.arccos(costheta_jn)
+        phi_jl = (phi_jl_hat + np.pi * (costheta_jn < 0)) % (2*np.pi)
+
+        # Use `phi_ref=0` as a trick to define azimuths based on the
+        # line of sight rather than orbital separation.
+        iota, s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z \
+            = lalsimulation.SimInspiralTransformPrecessingNewInitialConditions(
+                theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2,
+                m1*lal.MSUN_SI, m2*lal.MSUN_SI, f_ref, phiRef=0.)
+
+        return {'iota': iota,
+                's1x_n': s1x_n,
+                's1y_n': s1y_n,
+                's2x_n': s2x_n,
+                's2y_n': s2y_n}
+
+    def inverse_transform(self, iota, s1x_n, s1y_n, s2x_n, s2y_n,
+                          s1z, s2z, m1, m2, f_ref) -> dict:
+        """`standard_params` to `sampled_params`."""
+        theta_jn, phi_jl, tilt1, tilt2, phi12, chi1, chi2 \
+            = lalsimulation.SimInspiralTransformPrecessingWvf2PE(
+                iota, s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z, m1, m2, f_ref,
+                phiRef=0.)
+
+        cums1r_s1z = self._inverse_spin_transform(chi1, tilt1, s1z)
+        cums2r_s2z = self._inverse_spin_transform(chi2, tilt2, s2z)
+
+        costheta_jn = np.cos(theta_jn)
+        phi_jl_hat = (phi_jl + np.pi * (costheta_jn < 0)) % (2*np.pi)
+
+        return {'costheta_jn': costheta_jn,
+                'phi_jl_hat': phi_jl_hat,
+                'phi12': phi12,
+                'cums1r_s1z': cums1r_s1z,
+                'cums2r_s2z': cums2r_s2z}
+
+
+class UniformDiskInplaneSpinsIsotropicInclinationPrior(
+        _BaseInplaneSpinsInclinationPrior):
+    """
+    Prior for in-plane spins and inclination that is uniform in the disk
+        sx^2 + sy^2 < 1 - sz^2
+    for each of the component spins and isotropic in the inclination.
+    It corresponds to the IAS spin prior when combined with
+    `UniformEffectiveSpinPrior`.
+    """
+    @staticmethod
+    def _spin_transform(cumsr_sz, sz):
+        sr = np.sqrt(cumsr_sz * (1 - sz ** 2))
+        chi = np.sqrt(sr**2 + sz**2)
+        tilt = np.arctan2(sr, sz)
+        return chi, tilt
+
+    @staticmethod
+    def _inverse_spin_transform(chi, tilt, sz):
+        cumsr_sz = (chi*np.sin(tilt))**2 / (1-sz**2)
+        return cumsr_sz
+
+
+class IsotropicSpinsInplaneComponentsIsotropicInclinationPrior(
+        _BaseInplaneSpinsInclinationPrior):
+    """
+    Prior for in-plane spins and inclination that is uniform in
+    magnitude and solid angle (isotropic) for each of the constituent
+    spins independently when combined with
+    `IsotropicSpinsAlignedComponentsPrior`.
     """
     @staticmethod
     def _spin_transform(cumsr_sz, sz):
@@ -236,10 +265,126 @@ class IsotropicSpinsInplaneComponentsIsotropicInclinationSkyLocationPrior(
 
     @staticmethod
     def _inverse_spin_transform(chi, tilt, sz):
-        sz_sq = sz**2
+        sz_square = sz ** 2
         sr = np.tan(tilt) * sz
-        cumsr_sz = np.log(sz_sq / (sr**2 + sz_sq)) / np.log(sz_sq)
+        cumsr_sz = np.log(sz_square / (sr**2 + sz_square)) / np.log(sz_square)
         return cumsr_sz
+
+
+class _BaseSkyLocationPrior(UniformPriorMixin, Prior):
+    """
+    Abstract base class for adding sky location parameters to a prior
+    that already describes inplane spins and inclination.
+    The need for this class arises because the coordinates we use for
+    sky location depend on the sign of cos(theta_jn).
+    Subclasses must override the class attribute
+    ``._inplane_spin_inclination_prior_class``.
+
+    Subclasses
+    ----------
+    UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior
+    IsotropicSpinsInplaneComponentsIsotropicInclinationSkyLocationPrior
+    """
+    standard_params = ['iota', 's1x_n', 's1y_n', 's2x_n', 's2y_n', 'ra', 'dec']
+    range_dic = {'costheta_jn': (-1, 1),
+                 'phi_jl_hat': (0, 2*np.pi),
+                 'phi12': (0, 2*np.pi),
+                 'cums1r_s1z': (0, 1),
+                 'cums2r_s2z': (0, 1),
+                 'costhetanet': (-1, 1),
+                 'phinet_hat': (0, 2*np.pi)}
+    periodic_params = ['phi_jl_hat', 'phi12']
+    folded_reflected_params = ['costheta_jn', 'phinet_hat']
+    conditioned_on = ['s1z', 's2z', 'm1', 'm2', 'f_ref']
+
+    @staticmethod
+    @utils.ClassProperty
+    @abstractmethod
+    def _inplane_spin_inclination_prior_class():
+        """
+        ``UniformDiskInplaneSpinsIsotropicInclinationPrior`` or
+        ``IsotropicSpinsInplaneComponentsIsotropicInclinationPrior``.
+        """
+
+    def __init__(self, *, detector_pair, tgps, **kwargs):
+        super().__init__(detector_pair=detector_pair, tgps=tgps,
+                         **kwargs)
+        self._inplane_spin_inclination_prior \
+            = self._inplane_spin_inclination_prior_class()
+
+        self.skyloc = skyloc_angles.SkyLocAngles(detector_pair, tgps)
+
+    def get_init_dict(self):
+        """
+        Return dictionary with keyword arguments to reproduce the class
+        instance.
+        """
+        return self.skyloc.get_init_dict()
+
+    @utils.lru_cache()
+    def transform(self, costheta_jn, phi_jl_hat, phi12,
+                  cums1r_s1z, cums2r_s2z, costhetanet, phinet_hat,
+                  s1z, s2z, m1, m2, f_ref):
+        """
+        Return dictionary with inclination, inplane spins, right
+        ascension and declination. Spin components are defined in a
+        coordinate system where `z` is parallel to the orbital angular
+        momentum `L` and the direction of propagation `N` lies in the
+        `y-z` plane.
+        """
+        iota_inplane_spins = self._inplane_spin_inclination_prior.transform(
+            costheta_jn, phi_jl_hat, phi12, cums1r_s1z, cums2r_s2z, s1z, s2z,
+            m1, m2, f_ref)
+
+        thetanet = np.arccos(costhetanet)
+        phinet = (phinet_hat - np.pi*(costheta_jn > 0)) % (2*np.pi)
+        ra, dec = self.skyloc.thetaphinet_to_radec(thetanet, phinet)
+
+        return iota_inplane_spins | {'ra': ra, 'dec': dec}
+
+    def inverse_transform(self, iota, s1x_n, s1y_n, s2x_n, s2y_n,
+                          ra, dec, s1z, s2z, m1, m2, f_ref):
+        """`standard_params` to `sampled_params`."""
+        costheta_jn_sampled_inplane_spins \
+            = self._inplane_spin_inclination_prior.inverse_transform(
+                iota, s1x_n, s1y_n, s2x_n, s2y_n, s1z, s2z, m1, m2, f_ref)
+
+        costheta_jn = costheta_jn_sampled_inplane_spins['costheta_jn']
+
+        thetanet, phinet = self.skyloc.radec_to_thetaphinet(ra, dec)
+        costhetanet = np.cos(thetanet)
+        phinet_hat = (phinet + np.pi*(costheta_jn > 0)) % (2*np.pi)
+
+        return costheta_jn_sampled_inplane_spins | {'costhetanet': costhetanet,
+                                                    'phinet_hat': phinet_hat}
+
+
+class UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior(
+        _BaseSkyLocationPrior):
+    """
+    Prior for in-plane spins, inclination and sky location.
+    It is uniform in the disk
+        sx^2 + sy^2 < 1 - sz^2
+    for each of the component spins and isotropic in the inclination
+    and sky location.
+    It corresponds to the IAS spin prior when combined with
+    `UniformEffectiveSpinPrior`.
+    """
+    _inplane_spin_inclination_prior_class \
+         = UniformDiskInplaneSpinsIsotropicInclinationPrior
+
+
+class IsotropicSpinsInplaneComponentsIsotropicInclinationSkyLocationPrior(
+        _BaseSkyLocationPrior):
+    """
+    Prior for in-plane spins, inclination and sky location that is
+    uniform in magnitude and solid angle (isotropic) for each of the
+    constituent spins independently when combined with
+    `IsotropicSpinsAlignedComponentsPrior`. It is isotropic in
+    inclination and sky location.
+    """
+    _inplane_spin_inclination_prior_class \
+         = IsotropicSpinsInplaneComponentsIsotropicInclinationPrior
 
 
 class ZeroInplaneSpinsPrior(FixedPrior):
