@@ -143,7 +143,11 @@ class PostProcessor:
         resolution, with no ASD-drift correction applied.
         """
         # Increase the relative-binning frequency resolution:
-        likelihood = copy.deepcopy(self.posterior.likelihood)
+        try:  # few seconds faster...
+            likelihood = copy.deepcopy(self.posterior.likelihood)
+        except TypeError:  # ...but likelihood might be un-pickleable
+            likelihood = self.posterior.likelihood.reinstantiate()
+
         if likelihood.pn_phase_tol:
             likelihood.pn_phase_tol /= self.relative_binning_boost
         else:
@@ -169,7 +173,7 @@ class PostProcessor:
             # Difference in log likelihood from changing asd_drift:
             dlnl = lnl - lnl.mean() - (ref_lnl - ref_lnl.mean())
             weights = self.samples.get(utils.WEIGHTS_NAME)
-            dlnl_std = utils.weighted_std(dlnl, weights=weights)
+            _, dlnl_std = utils.weighted_avg_and_std(dlnl, weights=weights)
             self.tests['asd_drift'].append({'asd_drift': asd_drift,
                                             'dlnl_std': dlnl_std,
                                             'dlnl_max': np.max(np.abs(dlnl))})
@@ -184,7 +188,7 @@ class PostProcessor:
         dlnl = (self.samples[self.LNL_COL]
                 - self._apply_asd_drift(self.posterior.likelihood.asd_drift))
         weights = self.samples.get(utils.WEIGHTS_NAME)
-        dlnl_std = utils.weighted_std(dlnl, weights=weights)
+        _, dlnl_std = utils.weighted_avg_and_std(dlnl, weights=weights)
         self.tests['relative_binning'] = {'dlnl_std': dlnl_std,
                                           'dlnl_max': np.max(np.abs(dlnl))}
 
@@ -234,7 +238,7 @@ class PostProcessor:
     def _standard_samples(self, samples=None):
         """Iterator over standard parameter samples."""
         samples = samples if samples is not None else self.samples
-        return (sample for _, sample in samples[
+        return (dict(sample) for _, sample in samples[
             self.posterior.likelihood.waveform_generator.params].iterrows())
 
 

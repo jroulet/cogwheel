@@ -55,6 +55,8 @@ class ReferenceDetectorMixin:
 class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
                         Prior):
     """
+    Deprecated, `LinearFreeTimePhasePrior` is better.
+
     Uniform prior for the orbital phase.
     The sampled variable `phi_ref_hat` differs from the standard
     coalescence phase `phi_ref` an additive function of
@@ -195,7 +197,11 @@ class IsotropicSkyLocationPrior(UniformPriorMixin, Prior):
 
 class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin,
                        Prior):
-    """Prior for the time of arrival at a reference detector."""
+    """
+    Deprecated, `LinearFreeTimePhasePrior` is better.
+
+    Prior for the time of arrival at a reference detector.
+    """
     standard_params = ['t_geocenter']
     range_dic = {'t_refdet': NotImplemented}
     conditioned_on = ['ra', 'dec']

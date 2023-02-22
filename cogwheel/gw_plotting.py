@@ -53,6 +53,7 @@ _LABELS = {
     'd_luminosity': r'$d_L$',
     'z': r'$z$',
     # Orientation
+    'phi_linfree': r'$\phi_{\rm LF}$',
     'phi_ref': r'$\phi_{\rm ref}$',
     'phi_ref_hat': r'$\hat{\phi}_{\rm ref}$',
     'psi_hat': r'$\hat{\psi}$',
@@ -74,26 +75,36 @@ _LABELS = {
     # Time
     't_refdet': r'$t_{\rm ref\,det}$',
     'tc': r'$t_c$',
-    't_geocenter': r'$t_{\rm geocenter}$',
+    't_geocenter': r'$t_{\rm ⴲ}$',
+    't_linfree': r'$t_{\rm LF}$',
     # Likelihood
     'lnl': r'$\ln \mathcal{L}$',
     'lnl_H': r'$\ln \mathcal{L}_H$',
     'lnl_L': r'$\ln \mathcal{L}_L$',
     'lnl_V': r'$\ln \mathcal{L}_V$',
+    'lnl_marginalized': r'$\ln \overline{\mathcal{L}}$',
+    'h_h': r'$\langle h | h \rangle$',
+    # Cumulatives
+    'u_t_linfree': r'$u_t$',
+    'u_psi': r'$u_\psi$',
+    'u_costhetanet': r'$u_{\theta_{\rm net}}$',
+    'u_phinet_hat': r'$u_{\hat\phi_{\rm net}}$',
     }
 
 _UNITS = (dict.fromkeys(['mchirp', 'm1', 'm2', 'mtot', 'mtot_source',
                          'm1_source', 'm2_source', 'mchirp_source'],
                         r'M$_\odot$')
-          | dict.fromkeys(['t_refdet', 'tc', 't_geocenter'], 's')
+          | dict.fromkeys(['t_refdet', 'tc', 't_geocenter', 't_linfree'], 's')
           | {'d_hat': r'$\frac{\rm{Mpc}}{M_{\odot}^{5/6}}$',
              'd_luminosity': 'Mpc',}
          )
 
 
 class CornerPlot(plotting.CornerPlot):
+    """Has default latex labels for gravitational wave parameters."""
     DEFAULT_LATEX_LABELS = plotting.LatexLabels(_LABELS, _UNITS)
 
 
 class MultiCornerPlot(plotting.MultiCornerPlot):
+    """Has default latex labels for gravitational wave parameters."""
     corner_plot_cls = CornerPlot
