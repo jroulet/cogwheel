@@ -702,14 +702,14 @@ class MultiCornerPlot:
 
         return lims
 
-    def set_lims(self, **lims: dict):
+    def set_lims(self, **lims):
         """
         Set x and y limits of the plots.
 
         Parameters
         ----------
-        lims: dict
-            Dictionary of the form ``{par: (vmin, vmax)}`` for those
+        **lims:
+            Keyword arguments of the form ``par=(vmin, vmax)`` for those
             parameters whose limits that are to be adjusted.
         """
         self.corner_plots[0].set_lims(**lims)
