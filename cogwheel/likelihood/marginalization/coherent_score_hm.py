@@ -273,12 +273,13 @@ class CoherentScoreHM(BaseCoherentScoreHM):
 
     def _incoherent_t_arrival_lnprob(self, dh_mptd, hh_mppd):
         """
-        Simple chi-squared approximating that different modes and
-        polarizations are all orthogonal.
+        Log likelihood maximized over distance and phase, approximating
+        that different modes and polarizations are all orthogonal and
+        have independent phases.
         """
         hh_mpdiagonal = hh_mppd[np.equal(self.m_inds, self.mprime_inds)
                                ][:, (0, 1), (0, 1)].real  # mpd
-        chi_squared = np.einsum('mptd,mpd->td',
-                                np.abs(dh_mptd)**2,
-                                1 / hh_mpdiagonal)  # td
-        return self.beta_temperature * chi_squared / 2 # td
+        chi_squared = (np.einsum('mptd->td', np.abs(dh_mptd))**2
+                       / np.einsum('mpd->d', hh_mpdiagonal))
+
+        return self.beta_temperature * chi_squared / 2  # td
