@@ -8,6 +8,10 @@ are registered in a dictionary ``prior_registry``.
 
 from cogwheel import utils
 from cogwheel.prior import CombinedPrior, Prior, check_inheritance_order
+from cogwheel.likelihood import (RelativeBinningLikelihood,
+                                 MarginalizedDistanceLikelihood,
+                                 MarginalizedExtrinsicLikelihood,
+                                 MarginalizedExtrinsicLikelihoodQAS)
 
 from .extrinsic import (UniformPhasePrior,
                         IsotropicInclinationPrior,
@@ -93,6 +97,8 @@ class RegisteredPriorMixin(ReferenceWaveformFinderMixin):
 
 class IASPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, flat in chieff, uniform luminosity volume."""
+    default_likelihood_class = RelativeBinningLikelihood
+
     prior_classes = [
         FixedReferenceFrequencyPrior,
         UniformDetectorFrameMassesPrior,
@@ -107,6 +113,8 @@ class IASPrior(RegisteredPriorMixin, CombinedPrior):
 
 class AlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
     """Aligned spin, flat in chieff, uniform luminosity volume."""
+    default_likelihood_class = RelativeBinningLikelihood
+
     prior_classes = [UniformDetectorFrameMassesPrior,
                      IsotropicInclinationPrior,
                      IsotropicSkyLocationPrior,
@@ -125,6 +133,8 @@ class TidalIASPrior(RegisteredPriorMixin, CombinedPrior):
     Aligned spin, flat in tidal parameters, flat in chieff, uniform
     luminosity volume.
     """
+    default_likelihood_class = RelativeBinningLikelihood
+
     prior_classes = [UniformDetectorFrameMassesPrior,
                      IsotropicInclinationPrior,
                      IsotropicSkyLocationPrior,
@@ -140,6 +150,8 @@ class TidalIASPrior(RegisteredPriorMixin, CombinedPrior):
 
 class LVCPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, isotropic spins, uniform luminosity volume."""
+    default_likelihood_class = RelativeBinningLikelihood
+
     prior_classes = [
         FixedReferenceFrequencyPrior,
         UniformDetectorFrameMassesPrior,
@@ -157,6 +169,8 @@ class AlignedSpinLVCPrior(RegisteredPriorMixin, CombinedPrior):
     Aligned spin components from isotropic distribution, uniform
     luminosity volume.
     """
+    default_likelihood_class = RelativeBinningLikelihood
+
     prior_classes = [UniformDetectorFrameMassesPrior,
                      IsotropicInclinationPrior,
                      IsotropicSkyLocationPrior,
@@ -172,6 +186,8 @@ class AlignedSpinLVCPrior(RegisteredPriorMixin, CombinedPrior):
 
 class IASPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
     """Precessing, flat in chieff, uniform comoving VT."""
+    default_likelihood_class = RelativeBinningLikelihood
+
     prior_classes = utils.replace(IASPrior.prior_classes,
                                   UniformLuminosityVolumePrior,
                                   UniformComovingVolumePrior)
@@ -180,6 +196,8 @@ class IASPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
 class AlignedSpinIASPriorComovingVT(RegisteredPriorMixin,
                                     CombinedPrior):
     """Aligned spin, flat in chieff, uniform comoving VT."""
+    default_likelihood_class = RelativeBinningLikelihood
+
     prior_classes = utils.replace(AlignedSpinIASPrior.prior_classes,
                                   UniformLuminosityVolumePrior,
                                   UniformComovingVolumePrior)
@@ -187,6 +205,8 @@ class AlignedSpinIASPriorComovingVT(RegisteredPriorMixin,
 
 class LVCPriorComovingVT(RegisteredPriorMixin, CombinedPrior):
     """Precessing, isotropic spins, uniform comoving VT."""
+    default_likelihood_class = RelativeBinningLikelihood
+
     prior_classes = utils.replace(LVCPrior.prior_classes,
                                   UniformLuminosityVolumePrior,
                                   UniformComovingVolumePrior)
@@ -197,6 +217,8 @@ class AlignedSpinLVCPriorComovingVT(RegisteredPriorMixin,
     """
     Aligned spins from isotropic distribution, uniform comoving VT.
     """
+    default_likelihood_class = RelativeBinningLikelihood
+
     prior_classes = utils.replace(AlignedSpinLVCPrior.prior_classes,
                                   UniformLuminosityVolumePrior,
                                   UniformComovingVolumePrior)
@@ -204,6 +226,8 @@ class AlignedSpinLVCPriorComovingVT(RegisteredPriorMixin,
 
 class ExtrinsicParametersPrior(RegisteredPriorMixin, CombinedPrior):
     """Uniform luminosity volume, fixed intrinsic parameters."""
+    default_likelihood_class = RelativeBinningLikelihood
+
     prior_classes = [FixedIntrinsicParametersPrior,
                      IsotropicInclinationPrior,
                      IsotropicSkyLocationPrior,
@@ -220,6 +244,8 @@ class MarginalizedDistanceIASPrior(RegisteredPriorMixin, CombinedPrior):
     Similar to ``IASPrior`` except it does not include distance.
     Uniform in effective spin and detector-frame component masses.
     """
+    default_likelihood_class = MarginalizedDistanceLikelihood
+
     prior_classes = IASPrior.prior_classes.copy()
     prior_classes.remove(UniformLuminosityVolumePrior)
 
@@ -231,40 +257,48 @@ class MarginalizedDistanceLVCPrior(RegisteredPriorMixin, CombinedPrior):
     Isotropic spin orientations, uniform in component spin magnitudes
     and detector-frame component masses.
     """
+    default_likelihood_class = MarginalizedDistanceLikelihood
+
     prior_classes = LVCPrior.prior_classes.copy()
     prior_classes.remove(UniformLuminosityVolumePrior)
 
 
 class IntrinsicAlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
-    Prior for usage with ``CoherentScoreLikelihoodQAS``.
+    Prior for usage with ``MarginalizedExtrinsicLikelihoodQAS``.
     Intrinsic parameters only, aligned spins, uniform in effective spin
     and detector frame component masses, no tides.
     """
-    prior_classes =  [UniformDetectorFrameMassesPrior,
-                      UniformEffectiveSpinPrior,
-                      ZeroTidalDeformabilityPrior,
-                      FixedReferenceFrequencyPrior]
+    default_likelihood_class = MarginalizedExtrinsicLikelihoodQAS
+
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     UniformEffectiveSpinPrior,
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 class IntrinsicAlignedSpinLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
-    Prior for usage with ``CoherentScoreLikelihoodQAS``.
+    Prior for usage with ``MarginalizedExtrinsicLikelihoodQAS``.
     Intrinsic parameters only, aligned spins, uniform in effective spin
     and detector frame component masses, no tides.
     """
-    prior_classes =  [UniformDetectorFrameMassesPrior,
-                      IsotropicSpinsAlignedComponentsPrior,
-                      ZeroTidalDeformabilityPrior,
-                      FixedReferenceFrequencyPrior]
+    default_likelihood_class = MarginalizedExtrinsicLikelihoodQAS
+
+    prior_classes = [UniformDetectorFrameMassesPrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     ZeroTidalDeformabilityPrior,
+                     FixedReferenceFrequencyPrior]
 
 
 class IntrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
-    Prior for usage with ``CoherentScoreLikelihood``.
+    Prior for usage with ``MarginalizedExtrinsicLikelihood``.
     Intrinsic parameters only, precessing, uniform in effective spin
     and detector frame component masses, no tides.
     """
+    default_likelihood_class = MarginalizedExtrinsicLikelihood
+
     prior_classes = [
         FixedReferenceFrequencyPrior,
         UniformDetectorFrameMassesPrior,
@@ -275,10 +309,12 @@ class IntrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
 
 class IntrinsicLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
-    Prior for usage with ``CoherentScoreLikelihood``.
+    Prior for usage with ``MarginalizedExtrinsicLikelihood``.
     Intrinsic parameters only, precessing, isotropic spins, uniform in
     component spin magnitudes and detector frame masses, no tides.
     """
+    default_likelihood_class = MarginalizedExtrinsicLikelihood
+
     prior_classes = [
         FixedReferenceFrequencyPrior,
         UniformDetectorFrameMassesPrior,

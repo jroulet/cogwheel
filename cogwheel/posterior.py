@@ -74,9 +74,8 @@ class Posterior(utils.JSONMixin):
     @classmethod
     def from_event(
             cls, event, mchirp_guess, approximant, prior_class,
-            likelihood_class=RelativeBinningLikelihood,
-            prior_kwargs=None, likelihood_kwargs=None,
-            ref_wf_finder_kwargs=None):
+            likelihood_class=None, prior_kwargs=None,
+            likelihood_kwargs=None, ref_wf_finder_kwargs=None):
         """
         Instantiate a `Posterior` class from the strain data.
         Automatically find a good fit solution for relative binning.
@@ -111,8 +110,14 @@ class Posterior(utils.JSONMixin):
         prior_kwargs = prior_kwargs or {}
         likelihood_kwargs = likelihood_kwargs or {}
         ref_wf_finder_kwargs = ref_wf_finder_kwargs or {}
+
         if isinstance(prior_class, str):
             prior_class = gw_prior.prior_registry[prior_class]
+
+        if likelihood_class is None:
+            likelihood_class = getattr(prior_class,
+                                       'default_likelihood_class',
+                                       RelativeBinningLikelihood)
 
         ref_wf_finder = ReferenceWaveformFinder.from_event(
             event, mchirp_guess, approximant=approximant,

@@ -13,7 +13,7 @@ from scipy.optimize import differential_evolution, minimize, minimize_scalar
 from cogwheel import data
 from cogwheel import gw_utils
 from cogwheel import waveform
-from cogwheel.gw_prior import UniformTimePrior
+from cogwheel.gw_prior.extrinsic import UniformTimePrior
 from cogwheel.skyloc_angles import SkyLocAngles
 from .likelihood import check_bounds
 from .relative_binning import RelativeBinningLikelihood
