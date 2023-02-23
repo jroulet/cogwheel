@@ -307,6 +307,9 @@ class CornerPlot:
             histogram_2d, _, _ = np.histogram2d(
                 samples[xpar], samples[ypar],
                 bins=(bin_edges[xpar], bin_edges[ypar]), weights=weights)
+            # Jitter to break contour degeneracy if we have few samples:
+            histogram_2d += np.random.normal(scale=1e-10,
+                                             size=histogram_2d.shape)
             self.pdfs_2d[xpar, ypar] = histogram_2d.T  # Cartesian convention
 
         self.fig = None
