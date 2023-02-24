@@ -285,8 +285,11 @@ class WaveformGenerator(utils.JSONMixin):
         keys are `m` and whose values are a list of `(l, m)` tuples with
         that `m`.
         """
-        self._harmonic_modes \
-            = harmonic_modes or APPROXIMANTS[self.approximant].harmonic_modes
+        if harmonic_modes is None:
+            harmonic_modes = APPROXIMANTS[self.approximant].harmonic_modes
+        else:
+            harmonic_modes = [tuple(mode) for modes in harmonic_modes]
+        self._harmonic_modes = harmonic_modes
 
         self._harmonic_modes_by_m = defaultdict(list)
         for l, m in self._harmonic_modes:
