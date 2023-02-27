@@ -288,7 +288,7 @@ class WaveformGenerator(utils.JSONMixin):
         if harmonic_modes is None:
             harmonic_modes = APPROXIMANTS[self.approximant].harmonic_modes
         else:
-            harmonic_modes = [tuple(mode) for modes in harmonic_modes]
+            harmonic_modes = [tuple(mode) for mode in harmonic_modes]
         self._harmonic_modes = harmonic_modes
 
         self._harmonic_modes_by_m = defaultdict(list)
