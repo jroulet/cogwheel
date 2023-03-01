@@ -116,9 +116,12 @@ class SkyDictionary(utils.JSONMixin):
             correspond to any physical sky location, these are flagged
             ``False`` in this array. Unphysical samples are discarded.
         """
-        delays2genind_map = self.delays2genind_map
+        # A bit faster:
+        get_ind_generator = self.delays2genind_map.get
+        unphysical_genind = self._UNPHYSICAL_GENIND
+
         sky_inds, sky_prior, physical_mask = zip(
-            *[next(delays2genind_map.get(delays_key, self._UNPHYSICAL_GENIND))
+            *[next(get_ind_generator(delays_key, unphysical_genind))
               for delays_key in zip(*delays)])
 
         # Reject unphysical samples:
@@ -132,9 +135,9 @@ class SkyDictionary(utils.JSONMixin):
         Return a dictionary of samples in terms of 'lat' and 'lon' drawn
         isotropically by means of a Quasi Monte Carlo (Halton) sequence.
         """
-        samples = {}
         u_lat, u_lon = qmc.Halton(2, seed=self._rng).random(self.nsky).T
 
+        samples = {}
         samples['lat'] = np.arcsin(2*u_lat - 1)
         samples['lon'] = 2 * np.pi * u_lon
         return samples
