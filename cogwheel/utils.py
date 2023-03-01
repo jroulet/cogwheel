@@ -105,6 +105,8 @@ def weighted_avg_and_std(values, weights=None):
 
 def n_effective(weights):
     """Return effective sample size."""
+    if weights.size == 0:
+        return 0.
     return np.sum(weights)**2 / np.sum(weights**2)
 
 
