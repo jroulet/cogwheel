@@ -203,24 +203,6 @@ def merge_dictionaries_safely(*dics):
     return merged
 
 
-def checkempty(array, verbose=False):
-    # First deal with irritating case when we can't make a numpy array
-    if hasattr(array, "__len__"):
-        # Deal with even more irritating edge case when the attribute exists,
-        # but throws an error when queried
-        try:
-            if len(array) > 0:
-                return False
-        except TypeError:
-            if verbose:
-                print("Object has `len' attribute that can't be queried")
-            return True
-    nparray = np.asarray(array)
-    return (nparray is None
-            or nparray.dtype == np.dtype('O')
-            or nparray.size == 0)
-
-
 def rm_suffix(string, suffix='.json', new_suffix=None):
     """
     Removes suffix from string if present, and appends a new suffix if
