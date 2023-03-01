@@ -46,7 +46,8 @@ class SkyDictionary(utils.JSONMixin):
             delays_key: self._create_index_generator(inds)
             for delays_key, inds in self.delays2inds_map.items()}
 
-    def resample_timeseries(self, timeseries, times, axis=-1):
+    def resample_timeseries(self, timeseries, times, axis=-1,
+                            window=('tukey', .1)):
         """
         Resample a timeseries to match the SkyDict's sampling frequency.
         The sampling frequencies of the SkyDict and ``timeseries`` must
@@ -64,12 +65,26 @@ class SkyDictionary(utils.JSONMixin):
         axis: int
             The axis of timeseries that is resampled. Default is -1.
 
+        window: string, float, tuple or None
+            Time domain window to apply to the timeseries. If not None,
+            it is passed to ``scipy.signal.get_window``, see its
+            documentation. By default a Tukey window with alpha=0.1 is
+            applied, to mitigate ringing near the edges
+            (scipy.signal.resample uses FFT methods that assume that the
+            signal is periodic).
+
         Return
         ------
         resampled_timeseries, resampled_times
             A tuple containing the resampled array and the corresponding
             resampled positions.
         """
+        if window:
+            shape = [1 for _ in timeseries.shape]
+            shape[axis] = timeseries.shape[axis]
+            timeseries *= scipy.signal.get_window(window, shape[axis]
+                                                 ).reshape(shape)
+
         fs_ratio = self.f_sampling * (times[1] - times[0])
         if fs_ratio != 1:
             timeseries, times = scipy.signal.resample(
