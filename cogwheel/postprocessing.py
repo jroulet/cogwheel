@@ -72,7 +72,7 @@ class PostProcessor:
         self.samples = pd.read_feather(self.samples_path)
 
         try:
-            with open(self.rundir/TESTS_FILENAME) as file:
+            with open(self.rundir/TESTS_FILENAME, encoding='utf-8') as file:
                 self.tests = json.load(file)
         except FileNotFoundError:
             self.tests = {'asd_drift': [],
@@ -194,7 +194,7 @@ class PostProcessor:
 
     def save_tests_and_samples(self):
         """Save `self.tests` and `self.samples` in `self.rundir`."""
-        with open(self.rundir/TESTS_FILENAME, 'w') as file:
+        with open(self.rundir/TESTS_FILENAME, 'w', encoding='utf-8') as file:
             json.dump(self.tests, file, cls=utils.NumpyEncoder)
 
         self.samples.to_feather(self.rundir/sampling.SAMPLES_FILENAME)
@@ -440,7 +440,8 @@ class Diagnostics:
         """
         run_kwargs = []
         for rundir in rundirs:
-            with open(rundir/sampling.Sampler.JSON_FILENAME) as sampler_file:
+            with open(rundir/sampling.Sampler.JSON_FILENAME,
+                      encoding='utf-8') as sampler_file:
                 dic = json.load(sampler_file)
                 sampler_cls = utils.class_registry[dic['__cogwheel_class__']]
                 init_kwargs = dic['init_kwargs']
@@ -462,7 +463,7 @@ class Diagnostics:
         """Return a DataFrame aggregating postprocessing tests."""
         tests = []
         for rundir in rundirs:
-            with open(rundir/TESTS_FILENAME) as tests_file:
+            with open(rundir/TESTS_FILENAME, encoding='utf-8') as tests_file:
                 dic = json.load(tests_file)
 
                 asd_drift_dlnl_std = np.sqrt(np.mean(

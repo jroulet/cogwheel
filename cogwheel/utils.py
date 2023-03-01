@@ -351,9 +351,9 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
         """)
 
     if batch_path:
-        getfile = lambda: open(batch_path, 'w+')
+        getfile = lambda: open(batch_path, 'w+', encoding='utf-8')
     else:
-        getfile = lambda: tempfile.NamedTemporaryFile('w+')
+        getfile = lambda: tempfile.NamedTemporaryFile('w+', encoding='utf-8')
 
     with getfile() as batchfile:
         batchfile.write(batch_text)
@@ -432,9 +432,9 @@ def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
         """)
 
     if batch_path:
-        getfile = lambda: open(batch_path, 'w+')
+        getfile = lambda: open(batch_path, 'w+', encoding='utf-8')
     else:
-        getfile = lambda: tempfile.NamedTemporaryFile('w+')
+        getfile = lambda: tempfile.NamedTemporaryFile('w+', encoding='utf-8')
 
     with getfile() as batchfile:
         batchfile.write(batch_text)
@@ -540,7 +540,7 @@ def read_json(json_path):
 
         json_path = jsons[0]
 
-    with open(json_path) as json_file:
+    with open(json_path, encoding='utf-8') as json_file:
         return json.load(json_file, cls=CogwheelDecoder,
                          dirname=json_path.parent)
 
@@ -573,7 +573,7 @@ class JSONMixin:
 
         mkdirs(dirname, dir_permissions)
 
-        with open(filepath, 'w') as outfile:
+        with open(filepath, 'w', encoding='utf-8') as outfile:
             json.dump(self, outfile, cls=CogwheelEncoder, dirname=dirname,
                       file_permissions=file_permissions, overwrite=overwrite,
                       indent=2)
