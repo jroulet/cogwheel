@@ -4,11 +4,10 @@ likelihood over extrinsic parameters from matched-filtering timeseries,
 for quasi-circular waveforms with quadrupole radiation (l, |m|) = (2, 2)
 and aligned spins.
 """
-from collections import namedtuple
 import numpy as np
 
 from cogwheel import utils
-from .base import BaseCoherentScore
+from .base import BaseCoherentScore, MarginalizationInfo
 
 
 class CoherentScoreQAS(BaseCoherentScore):
@@ -25,53 +24,6 @@ class CoherentScoreQAS(BaseCoherentScore):
     Inherits from ``BaseCoherentScore``.
     """
     _lookup_table_marginalized_params = {'d_luminosity', 'phi_ref'}
-
-    _MarginalizationInfo = namedtuple('_MarginalizationInfo',
-                                      ['physical_mask',
-                                       't_first_det',
-                                       'dh_q',
-                                       'hh_q',
-                                       'sky_inds',
-                                       'weights',
-                                       'lnl_marginalized'])
-    _MarginalizationInfo.__doc__ = """
-        Contains likelihood marginalized over extrinsic parameters, and
-        intermediate products that can be used to generate extrinsic
-        parameter samples or compute other auxiliary quantities like
-        partial marginalizations.
-
-        Fields
-        ------
-        physical_mask: boolean array of length n_qmc
-            Some choices of time of arrival at detectors may not
-            correspond to any physical sky location, these are flagged
-            ``False`` in this array. Unphysical samples are discarded.
-            ``n_physical`` below means ``count_nonzero(physical_mask)``.
-
-        t_first_det: float array of length n_physical
-            Time of arrival at the first detector.
-
-        dh_q: complex array of length n_physical
-            Complex inner product (d|h), indexed by (physical) QMC
-            sample `q`.
-
-        hh_q: float array of length n_physical
-            Real inner product ⟨h|h⟩, indexed by (physical) QMC sample
-            `q`.
-
-        sky_inds: tuple of ints, of length n_physical
-            Indices to sky_dict.sky_samples corresponding to the
-            (physical) QMC samples.
-
-        weights: float array of length n_important
-            Positive weights of the QMC samples, including the
-            likelihood and the importance-sampling correction.
-
-        lnl_marginalized: float
-            log of the marginalized likelihood over extrinsic parameters
-            (i.e.: time of arrival, sky location, polarization, distance,
-            orbital phase, inclination).
-        """
 
     def get_marginalization_info(self, dh_td, hh_d, times):
         """
@@ -95,11 +47,23 @@ class CoherentScoreQAS(BaseCoherentScore):
 
         Return
         ------
-        Instance of ``._MarginalizationInfo`` with several fields
-        (physical_mask, t_first_det, dh_q, hh_q, sky_inds, weights,
-        lnl_marginalized), see its documentation.
+        Instance of ``MarginalizationInfo`` with several fields, see its
+        documentation.
         """
-        self._switch_qmc_sequence()
+        return super()._get_marginalization_info(dh_td, hh_d, times)
+
+    def _get_marginalization_info_chunk(self, dh_td, hh_d, times,
+                                        i_chunk):
+        """
+        Like ``.get_marginalization_info`` but integrates over a
+        specific chunk of the QMC sequence (without checking
+        convergence).
+
+        i_chunk: int
+            Index to ``._qmc_ind_chunks``.
+        """
+        q_inds = self._qmc_ind_chunks[i_chunk]  # Will update along the way
+        n_qmc = len(q_inds)
 
         # Resample to match sky_dict's dt:
         dh_td, times = self.sky_dict.resample_timeseries(dh_td, times,
@@ -107,44 +71,39 @@ class CoherentScoreQAS(BaseCoherentScore):
 
         t_arrival_lnprob = self._incoherent_t_arrival_lnprob(dh_td, hh_d)  # td
         t_first_det, delays, importance_sampling_weight \
-            = self._draw_single_det_times(t_arrival_lnprob, times)
+            = self._draw_single_det_times(t_arrival_lnprob, times, q_inds)
 
         sky_inds, sky_prior, physical_mask \
             = self.sky_dict.get_sky_inds_and_prior(delays)  # q, q, q
 
         if not any(physical_mask):
-            return self._MarginalizationInfo(physical_mask=physical_mask,
-                                             t_first_det=np.array([]),
-                                             dh_q=np.array([]),
-                                             hh_q=np.array([]),
-                                             sky_inds=(),
-                                             weights=np.array([]),
-                                             lnl_marginalized=-np.inf)
+            return MarginalizationInfo(ln_weights=np.array([]),
+                                       n_qmc=n_qmc,
+                                       q_inds=np.array([], int),
+                                       sky_inds=np.array([], int),
+                                       t_first_det=np.array([]),
+                                       d_h=np.array([]),
+                                       h_h=np.array([]))
 
+        # Apply physical mask (sensible time delays):
+        q_inds = q_inds[physical_mask]
         t_first_det = t_first_det[physical_mask]
         importance_sampling_weight = importance_sampling_weight[physical_mask]
 
-        dh_q, hh_q = self._get_dh_hh_q(sky_inds, physical_mask, t_first_det,
+        dh_q, hh_q = self._get_dh_hh_q(sky_inds, q_inds, t_first_det,
                                        times, dh_td, hh_d)  # q, q
 
-        lnl_marg_dist_phase = self.lookup_table.lnlike_marginalized(
-            np.abs(dh_q), hh_q)  # q
+        ln_weights = (
+            self.lookup_table.lnlike_marginalized(np.abs(dh_q), hh_q)
+            + np.log(importance_sampling_weight * sky_prior))  # q
 
-        lnl_max = lnl_marg_dist_phase.max()
-        like_marg_dist_phase = np.exp(lnl_marg_dist_phase - lnl_max)  # q
-
-        weights = (importance_sampling_weight * sky_prior
-                   * like_marg_dist_phase)  # q
-
-        lnl_marginalized = lnl_max + np.log(weights.sum() / 2**self.log2n_qmc)
-
-        return self._MarginalizationInfo(physical_mask=physical_mask,
-                                         t_first_det=t_first_det,
-                                         dh_q=dh_q,
-                                         hh_q=hh_q,
-                                         sky_inds=sky_inds,
-                                         weights=weights,
-                                         lnl_marginalized=lnl_marginalized)
+        return MarginalizationInfo(ln_weights=ln_weights,
+                                   n_qmc=n_qmc,
+                                   q_inds=q_inds,
+                                   sky_inds=sky_inds,
+                                   t_first_det=t_first_det,
+                                   d_h=dh_q,
+                                   h_h=hh_q)
 
     def _get_dh_hh_q(self, sky_inds, physical_mask, t_first_det, times,
                      dh_td, hh_d):
@@ -260,34 +219,33 @@ class CoherentScoreQAS(BaseCoherentScore):
             detectors incompatible with a real signal) the values will
             be NaN.
         """
-        if not any(marg_info.physical_mask):
-            unphysical_value = np.nan if num is None else np.full(num, np.nan)
-            return dict.fromkeys(
-                ['d_luminosity', 'dec', 'lon', 'phi_ref', 'psi', 't_geocenter',
-                 'lnl_marginalized', 'lnl'],
-                unphysical_value)
+        if marg_info.q_inds.size == 0:
+            return dict.fromkeys(['d_luminosity', 'dec', 'lon', 'phi_ref',
+                                  'psi', 'iota', 't_geocenter',
+                                  'lnl_marginalized', 'lnl'],
+                np.full(num, np.nan)[()])
 
-        q_ids = self._rng.choice(len(marg_info.weights),
-                                 p=marg_info.weights / marg_info.weights.sum(),
-                                 size=num)
+        random_ids = self._rng.choice(len(marg_info.q_inds), size=num,
+                                      p=marg_info.weights)
 
-        sky_ids = np.array(marg_info.sky_inds)[q_ids]
-        t_geocenter = (marg_info.t_first_det[q_ids]
+        q_ids = marg_info.q_inds[random_ids]
+        sky_ids = marg_info.sky_inds[random_ids]
+        t_geocenter = (marg_info.t_first_det[random_ids]
                        - self.sky_dict.geocenter_delay_first_det[sky_ids])
+        d_h = marg_info.d_h[random_ids]
+        h_h = marg_info.h_h[random_ids]
 
-        d_h = marg_info.dh_q[q_ids]
-        h_h = marg_info.hh_q[q_ids]
         d_luminosity = self._sample_distance(np.abs(d_h), h_h)
         phi_ref = self.lookup_table.sample_phase(d_luminosity, d_h)
         real_dh = np.real(d_h * np.exp(-2j*phi_ref))
         distance_ratio = d_luminosity / self.lookup_table.REFERENCE_DISTANCE
-        cosiota = self._qmc_sequence['cosiota'][marg_info.physical_mask][q_ids]
+        cosiota = self._qmc_sequence['cosiota'][q_ids]
         return {
             'd_luminosity': d_luminosity,
             'dec': self.sky_dict.sky_samples['lat'][sky_ids],
             'lon': self.sky_dict.sky_samples['lon'][sky_ids],
             'phi_ref': phi_ref,
-            'psi': self._qmc_sequence['psi'][marg_info.physical_mask][q_ids],
+            'psi': self._qmc_sequence['psi'][q_ids],
             'iota': np.arccos(cosiota),
             't_geocenter': t_geocenter,
             'lnl_marginalized': marg_info.lnl_marginalized,

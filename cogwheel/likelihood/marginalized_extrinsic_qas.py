@@ -1,3 +1,7 @@
+"""
+Define class ``MarginalizedExtrinsicLikelihoodQAS``, to use with
+``IntrinsicAlignedSpinIASPrior`` (or similar).
+"""
 import numpy as np
 import pandas as pd
 

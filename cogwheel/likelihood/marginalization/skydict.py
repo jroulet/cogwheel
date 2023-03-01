@@ -127,7 +127,7 @@ class SkyDictionary(utils.JSONMixin):
         # Reject unphysical samples:
         physical_mask = np.array(physical_mask, bool)
         sky_prior = np.array(sky_prior, float)[physical_mask]
-        sky_inds = tuple(np.array(sky_inds, int)[physical_mask])
+        sky_inds = np.array(sky_inds, int)[physical_mask]
         return sky_inds, sky_prior, physical_mask
 
     def _create_sky_samples(self):

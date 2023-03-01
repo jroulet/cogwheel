@@ -200,8 +200,16 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         lnlike: float
             Log of the marginalized likelihood.
         """
-        return self.coherent_score.get_marginalization_info(
-            *self._get_dh_hh(par_dic), self._times).lnl_marginalized
+        marg_info = self.coherent_score.get_marginalization_info(
+            *self._get_dh_hh(par_dic), self._times)
+
+        # Reject samples with large variance to avoid artifacts. If they
+        # should contribute to the posterior, by now we are in trouble
+        # anyways.
+        if marg_info.n_effective < self.coherent_score.min_n_effective:
+            return -np.inf
+
+        return marg_info.lnl_marginalized
 
     def postprocess_samples(self, samples: pd.DataFrame, num=None):
         """
