@@ -22,7 +22,7 @@ def d_luminosity_of_z(z, cosmology=Planck18):
 
 def _construct_z_of_d_luminosity(cosmology=Planck18, z_max=10.):
     """Return the function inverse to d_luminosity_of_z."""
-    z_arr = np.linspace(0, z_max, 10000)
+    z_arr = np.linspace(0, z_max, 1000)
     d_luminosity_arr = d_luminosity_of_z(z_arr, cosmology)
     interp_z_of_d = InterpolatedUnivariateSpline(d_luminosity_arr, z_arr)
 
