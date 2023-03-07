@@ -149,7 +149,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             event_data, approximant, harmonic_modes=[(2, 2)])
 
         if event_data.injection:
-            par_dic_0 = event_data.injection[0]
+            par_dic_0 = event_data.injection['par_dic']
             ref_wf_finder = cls(event_data, waveform_generator,
                                 par_dic_0, pn_phase_tol=pn_phase_tol,
                                 spline_degree=spline_degree,
