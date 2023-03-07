@@ -21,6 +21,7 @@ from scipy.interpolate import krogh_interpolate, make_interp_spline
 from scipy.special import logsumexp
 from scipy import sparse
 
+from cogwheel import gw_utils
 from cogwheel import utils
 from .lookup_table import LookupTable, LookupTableMarginalizedPhase22
 
@@ -227,6 +228,9 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             raise ValueError('Incompatible lookup_table.marginalized_params')
         self.lookup_table = lookup_table
 
+        if max_log2n_qmc < log2n_qmc:
+            raise ValueError('max_log2n_qmc < log2n_qmc')
+
         self.log2n_qmc = log2n_qmc
         self.sky_dict = sky_dict
         self.beta_temperature = beta_temperature
@@ -254,8 +258,12 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     def _get_marginalization_info(self, *args, **kwargs):
         """
         Return a MarginalizationInfo object with extrinsic parameter
-        integration results, ensuring that a sufficient effective sample
-        size (or a maximum sample size) is reached.
+        integration results, ensuring that one of three conditions
+        regarding the effective sample size holds:
+            * n_effective >= .min_n_effective; or
+            * n_qmc == 2 ** .max_log2n_qmc; or
+            * n_effective is so low that even after extending the QMC
+              sequence it is not expected to reach .min_n_effective
 
         The inputs are the same as ``._get_marginalization_info_chunks``
         except they do not include ``i_chunk``. Subclasses can override
@@ -267,18 +275,32 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         marginalization_info = self._get_marginalization_info_chunk(
             *args, **kwargs, i_chunk=i_chunk)
 
-        while 0 < marginalization_info.n_effective < self.min_n_effective:
+        while self._worth_refining(marginalization_info):
             i_chunk += 1
 
             if i_chunk == len(self._qmc_ind_chunks):
                 warnings.warn('Maximum QMC resolution reached.')
                 break
 
-            marginalization_info.update(
-                self._get_marginalization_info_chunk(
-                    *args, **kwargs, i_chunk=i_chunk))
+            marginalization_info.update(self._get_marginalization_info_chunk(
+                *args, **kwargs, i_chunk=i_chunk))
 
         return marginalization_info
+
+    def _worth_refining(self, marginalization_info) -> bool:
+        """
+        Return ``True`` if the ``n_effective`` is lower than the minimum
+        required, but high enough that extending the QMC sequence up to
+        the maximum length would likely make it higher than that.
+        """
+        n_effective = marginalization_info.n_effective
+
+        if n_effective >= self.min_n_effective:  # Has converged
+            return True
+
+        # Is there hope to achieve the desired n_effective?
+        expected_increase = 2**self.max_log2n_qmc / marginalization_info.n_qmc
+        return n_effective * expected_increase >= self.min_n_effective
 
     @abstractmethod
     def _get_marginalization_info_chunk(self, *args, **kwargs):
@@ -389,6 +411,9 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         times: (n_t,) float array
             Timestamps of the timeseries (s).
 
+        q_inds: (n_qmc,) int array
+            Indices to the QMC sequence.
+
         Return
         ------
         t_first_det: float array of length n_qmc
@@ -402,9 +427,35 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             Density ratio between the astrophysical prior and the
             proposal distribution of arrival times.
         """
-        tdet_inds, tdet_weights = _draw_indices(
-            t_arrival_lnprob.T,
-            self._qmc_sequence['u_tdet'][:, q_inds])  # dq, dq
+        _, n_det = t_arrival_lnprob.shape
+        n_qmc, = q_inds.shape
+
+        # Sort detectors by SNR
+        det_order = np.argsort(t_arrival_lnprob.max(axis=0))[::-1]
+
+        tdet_inds = np.empty((n_det, n_qmc), int)  # dq
+        tdet_weights = np.empty((n_det, n_qmc), float)  # dq
+        dt = times[1] - times[0]
+
+        for i, det_id in enumerate(det_order):
+            # Rule out arrival times at current detector that are
+            # already unphysical given arrival times at previous
+            # detectors:
+            for previous_det_id in det_order[:i]:
+                max_delay = gw_utils.detector_travel_times(
+                    self.sky_dict.detector_names[det_id],
+                    self.sky_dict.detector_names[previous_det_id])
+
+                t_previous_det = times[tdet_inds[previous_det_id]]
+                unphysical = (
+                    (times < t_previous_det.min() - max_delay - 2*dt)
+                    | (times > t_previous_det.max() + max_delay + 2*dt))
+
+                t_arrival_lnprob[unphysical, det_id] = -np.inf
+
+            tdet_inds[det_id], tdet_weights[det_id] = _draw_indices(
+                t_arrival_lnprob[:, det_id],
+                self._qmc_sequence['u_tdet'][det_id, q_inds])
 
         delays = tdet_inds[1:] - tdet_inds[0]  # dq  # In units of dt
         importance_sampling_weight = np.prod(
@@ -459,7 +510,8 @@ class BaseCoherentScoreHM(BaseCoherentScore):
 
     def __init__(self, sky_dict, m_arr, lookup_table=None,
                  log2n_qmc: int = 11, nphi=128, seed=0,
-                 beta_temperature=.5, n_qmc_sequences=128):
+                 beta_temperature=.5, n_qmc_sequences=128,
+                 min_n_effective=50, max_log2n_qmc: int = 15):
         """
         Parameters
         ----------
@@ -494,13 +546,29 @@ class BaseCoherentScoreHM(BaseCoherentScore):
             samples, without increasing the computational cost. It can
             also be used to estimate the uncertainty of the marginalized
             likelihood computation.
+
+        min_n_effective: int
+            Minimum effective sample size to use as convergence
+            criterion. The program will try doubling the number of
+            samples from `log2n_qmc` until a the effective sample size
+            reaches `min_n_effective` or the number of extrinsic samples
+            reaches ``2**max_log2n_qmc``.
+
+        max_log2n_qmc: int
+            Base-2 logarithm of the maximum number of extrinsic
+            parameter samples to request. The program will try doubling
+            the number of samples from `log2n_qmc` until a the effective
+            sample size reaches `min_n_effective` or the number of
+            extrinsic samples reaches ``2**max_log2n_qmc``.
         """
         super().__init__(sky_dict=sky_dict,
                          lookup_table=lookup_table,
                          log2n_qmc=log2n_qmc,
                          seed=seed,
                          beta_temperature=beta_temperature,
-                         n_qmc_sequences=n_qmc_sequences)
+                         n_qmc_sequences=n_qmc_sequences,
+                         min_n_effective=min_n_effective,
+                         max_log2n_qmc=max_log2n_qmc)
 
         self.m_arr = np.asarray(m_arr)
         self.m_inds, self.mprime_inds = (

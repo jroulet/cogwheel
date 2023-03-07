@@ -62,6 +62,13 @@ def time_delay_from_geocenter(detector_names, ra, dec, tgps):
         for det in detector_names])
 
 
+@utils.lru_cache()
+def detector_travel_times(detector_name_1, detector_name_2):
+    """Return light travel time between two detectors [seconds]."""
+    return np.linalg.norm(DETECTORS[detector_name_1].location
+                          - DETECTORS[detector_name_2].location) / lal.C_SI
+
+
 # ----------------------------------------------------------------------
 # Similar to the above, but in Earth-fixed coordinates and vectorized:
 def get_geocenter_delays(detector_names, lat, lon):
