@@ -228,6 +228,9 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             raise ValueError('Incompatible lookup_table.marginalized_params')
         self.lookup_table = lookup_table
 
+        if max_log2n_qmc < log2n_qmc:
+            raise ValueError('max_log2n_qmc < log2n_qmc')
+
         self.log2n_qmc = log2n_qmc
         self.sky_dict = sky_dict
         self.beta_temperature = beta_temperature
@@ -255,8 +258,12 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     def _get_marginalization_info(self, *args, **kwargs):
         """
         Return a MarginalizationInfo object with extrinsic parameter
-        integration results, ensuring that a sufficient effective sample
-        size (or a maximum sample size) is reached.
+        integration results, ensuring that one of three conditions
+        regarding the effective sample size holds:
+            * n_effective >= .min_n_effective; or
+            * n_qmc == 2 ** .max_log2n_qmc; or
+            * n_effective is so low that even after extending the QMC
+              sequence it is not expected to reach .min_n_effective
 
         The inputs are the same as ``._get_marginalization_info_chunks``
         except they do not include ``i_chunk``. Subclasses can override
@@ -268,20 +275,32 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         marginalization_info = self._get_marginalization_info_chunk(
             *args, **kwargs, i_chunk=i_chunk)
 
-        # while (1 < needed_improvement < expected_improvement): improve()
-        while (1 < self.min_n_effective / marginalization_info.n_effective
-               < 2**(len(self._qmc_ind_chunks) - (i_chunk+1))):
+        while self._worth_refining(marginalization_info):
             i_chunk += 1
 
             if i_chunk == len(self._qmc_ind_chunks):
                 warnings.warn('Maximum QMC resolution reached.')
                 break
 
-            marginalization_info.update(
-                self._get_marginalization_info_chunk(
-                    *args, **kwargs, i_chunk=i_chunk))
+            marginalization_info.update(self._get_marginalization_info_chunk(
+                *args, **kwargs, i_chunk=i_chunk))
 
         return marginalization_info
+
+    def _worth_refining(self, marginalization_info) -> bool:
+        """
+        Return ``True`` if the ``n_effective`` is lower than the minimum
+        required, but high enough that extending the QMC sequence up to
+        the maximum length would likely make it higher than that.
+        """
+        n_effective = marginalization_info.n_effective
+
+        if n_effective >= self.min_n_effective:  # Has converged
+            return True
+
+        # Is there hope to achieve the desired n_effective?
+        expected_increase = 2**self.max_log2n_qmc / marginalization_info.n_qmc
+        return n_effective * expected_increase >= self.min_n_effective
 
     @abstractmethod
     def _get_marginalization_info_chunk(self, *args, **kwargs):
