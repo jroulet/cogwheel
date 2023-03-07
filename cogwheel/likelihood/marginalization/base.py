@@ -21,6 +21,7 @@ from scipy.interpolate import krogh_interpolate, make_interp_spline
 from scipy.special import logsumexp
 from scipy import sparse
 
+from cogwheel import gw_utils
 from cogwheel import utils
 from .lookup_table import LookupTable, LookupTableMarginalizedPhase22
 
@@ -407,9 +408,35 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             Density ratio between the astrophysical prior and the
             proposal distribution of arrival times.
         """
-        tdet_inds, tdet_weights = _draw_indices(
-            t_arrival_lnprob.T,
-            self._qmc_sequence['u_tdet'][:, q_inds])  # dq, dq
+        _, n_det = t_arrival_lnprob.shape
+        n_qmc, = q_inds.shape
+
+        # Sort detectors by SNR
+        det_order = np.argsort(t_arrival_lnprob.max(axis=0))[::-1]
+
+        tdet_inds = np.empty((n_det, n_qmc), int)  # dq
+        tdet_weights = np.empty((n_det, n_qmc), float)  # dq
+        dt = times[1] - times[0]
+
+        for i, det_id in enumerate(det_order):
+            # Rule out arrival times at current detector that are
+            # already unphysical given arrival times at previous
+            # detectors:
+            for previous_det_id in det_order[:i]:
+                max_delay = gw_utils.detector_travel_times(
+                    self.sky_dict.detector_names[det_id],
+                    self.sky_dict.detector_names[previous_det_id])
+
+                t_previous_det = times[tdet_inds[previous_det_id]]
+                unphysical = (
+                    (times < t_previous_det.min() - max_delay - 2*dt)
+                    | (times > t_previous_det.max() + max_delay + 2*dt))
+
+                t_arrival_lnprob[unphysical, det_id] = -np.inf
+
+            tdet_inds[det_id], tdet_weights[det_id] = _draw_indices(
+                t_arrival_lnprob[:, det_id],
+                self._qmc_sequence['u_tdet'][det_id, q_inds])
 
         delays = tdet_inds[1:] - tdet_inds[0]  # dq  # In units of dt
         importance_sampling_weight = np.prod(

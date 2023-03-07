@@ -80,8 +80,8 @@ class SkyDictionary(utils.JSONMixin):
         if window:
             shape = [1 for _ in timeseries.shape]
             shape[axis] = timeseries.shape[axis]
-            timeseries *= scipy.signal.get_window(window, shape[axis]
-                                                 ).reshape(shape)
+            timeseries = timeseries * scipy.signal.get_window(
+                window, shape[axis]).reshape(shape)
 
         fs_ratio = self.f_sampling * (times[1] - times[0])
         if fs_ratio != 1:
