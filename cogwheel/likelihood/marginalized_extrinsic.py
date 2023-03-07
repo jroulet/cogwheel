@@ -229,6 +229,11 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
             If an int, a new DataFrame of length `num * len(samples)` is
             returned. Each intrinsic parameter value will be repeated
             `num` times.
+
+        Return
+        ------
+        ``pd.DataFrame`` with postprocessed samples (if `num` is an
+        integer) or ``None`` (if `num` is ``None``).
         """
         dh_nmptd, hh_nmppd = self._get_many_dh_hh(samples)
 
@@ -250,6 +255,7 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
             return fullsamples
 
         utils.update_dataframe(samples, pd.DataFrame.from_records(extrinsic))
+        return None
 
     def _get_many_dh_hh(self, samples: pd.DataFrame):
         """
