@@ -86,8 +86,6 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
             d_luminosity=self.coherent_score.lookup_table.REFERENCE_DISTANCE,
             phi_ref=0.)
 
-        self._h0_f = None  # Set by ``._set_summary()``
-        self._h0_fbin = None  # Set by ``._set_summary()``
         self._d_h_weights = None  # Set by ``._set_summary()``
         self._h_h_weights = None  # Set by ``._set_summary()``
 
@@ -115,53 +113,52 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         self.waveform_generator.disable_precession = False
 
         shape = (len(self.waveform_generator._harmonic_modes_by_m),
-                 2, len(self.event_data.frequencies))
-        self._h0_f = np.zeros(shape, dtype=np.complex_)
-        self._h0_f[..., self.event_data.fslice] \
-            = self.waveform_generator.get_hplus_hcross(
+                 len(self.event_data.frequencies))
+
+        h0_f = np.zeros(shape, dtype=np.complex_)
+        h0_f[:, self.event_data.fslice] \
+            = (1, 1j) @ self.waveform_generator.get_hplus_hcross(
                 self.event_data.frequencies[self.event_data.fslice],
                 self.par_dic_0, by_m=True)  # mpr
 
-        self._h0_fbin = self.waveform_generator.get_hplus_hcross(
+        h0_fbin = (1, 1j) @ self.waveform_generator.get_hplus_hcross(
             self.fbin, self.par_dic_0, by_m=True)  # mpb
 
         self.asd_drift = self.compute_asd_drift(self.par_dic_0)
 
-        self._set_d_h_weights()
-        self._set_h_h_weights()
+        self._set_d_h_weights(h0_f, h0_fbin)
+        self._set_h_h_weights(h0_f, h0_fbin)
 
         # Reset
         self.waveform_generator.disable_precession = disable_precession
 
-    def _set_d_h_weights(self):
+    def _set_d_h_weights(self, h0_f, h0_fbin):
         shifts = np.exp(2j*np.pi * np.outer(self.event_data.frequencies,
                                             self.waveform_generator.tcoarse
                                             + self._times))  # rt
-        d_h_no_shift = np.einsum('dr,mpr->mpdr',
+        d_h_no_shift = np.einsum('dr,mr->mdr',
                                  self.event_data.blued_strain,
-                                 self._h0_f.conj())  # mpdr
+                                 h0_f.conj())  # mpdr
         d_h_summary = np.array(
-            [self._get_summary_weights(d_h_no_shift * shift)  # mpdb
-             for shift in shifts.T])  # tmpdb  # Comprehension saves memory
+            [self._get_summary_weights(d_h_no_shift * shift)  # mdb
+             for shift in shifts.T])  # tmdb  # Comprehension saves memory
 
-        self._d_h_weights = np.einsum(
-            'tmpdb,mpb,d->mptdb',
-            d_h_summary,
-            1 / self._h0_fbin.conj(),
-            1 / self.asd_drift**2)  # mptdb
+        self._d_h_weights = np.einsum('tmdb,mb,d->mtdb',
+                                      d_h_summary,
+                                      1 / h0_fbin.conj(),
+                                      1 / self.asd_drift**2)  # mtdb
 
-    def _set_h_h_weights(self):
+    def _set_h_h_weights(self, h0_f, h0_fbin):
         m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
-        h0_h0 = np.einsum('mpr,mPr,dr,d->mpPdr',
-                          self._h0_f[m_inds],
-                          self._h0_f[mprime_inds].conj(),
+        h0_h0 = np.einsum('mr,mr,dr,d->mdr',
+                          h0_f[m_inds],
+                          h0_f[mprime_inds].conj(),
                           self.event_data.wht_filter ** 2,
                           self.asd_drift ** -2)  # mpPdr
-        self._h_h_weights = np.einsum(
-            'mpPdb,mpb,mPb->mpPdb',
-            self._get_summary_weights(h0_h0),
-            1 / self._h0_fbin[m_inds],
-            1 / self._h0_fbin[mprime_inds].conj())  # mpPdb
+        self._h_h_weights = np.einsum('mdb,mb,mb->mdb',
+                                      self._get_summary_weights(h0_h0),
+                                      1 / h0_fbin[m_inds],
+                                      1 / h0_fbin[mprime_inds].conj())  # mdb
 
         # Count off-diagonal terms twice:
         self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
@@ -171,13 +168,13 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
             self.fbin, dict(par_dic) | self._ref_dic, by_m=True)  # mpb
 
         # Same but faster:
-        # dh_mptd = np.einsum('mptdb,mpb->mptd',
+        # dh_mptd = np.einsum('mtdb,mpb->mptd',
         #                     self._d_h_weights, h_mpb.conj())
-        dh_mptd = (self._d_h_weights
+        dh_mptd = (self._d_h_weights[:, np.newaxis]
                    @ h_mpb.conj()[:, :, np.newaxis, :, np.newaxis])[..., 0]
 
         m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
-        hh_mppd = np.einsum('mpPdb,mpb,mPb->mpPd',
+        hh_mppd = np.einsum('mdb,mpb,mPb->mpPd',
                             self._h_h_weights,
                             h_mpb[m_inds],
                             h_mpb.conj()[mprime_inds])
@@ -269,21 +266,22 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
              for _, sample in samples[self.params].iterrows()],
             0, -1)  # mpbn
 
-        n_m, n_p, n_t, n_d, n_b = self._d_h_weights.shape
+        n_m, n_t, n_d, n_b = self._d_h_weights.shape
         n_n  = len(samples)
+        n_p = 2
         d_h_weights = self._d_h_weights.reshape(
-            n_m, n_p, n_t*n_d, n_b)  # mp(td)b
+            n_m, n_t*n_d, n_b)  # m(td)b
 
         # Loop instead of broadcasting, to save memory:
-        dh_mptdn = np.zeros((n_m, n_p, n_t*n_d, n_n), np.csingle)
-        for i_mp in np.ndindex(n_m, n_p):
-            dh_mptdn[i_mp] = d_h_weights[i_mp] @ h_mpbn[i_mp].conj()
+        dh_mptdn = np.zeros((n_m, n_p, n_t*n_d, n_n), np.complex_)
+        for i_m, i_p in np.ndindex(n_m, n_p):
+            dh_mptdn[i_m, i_p] = d_h_weights[i_m] @ h_mpbn[i_m, i_p].conj()
 
         dh_nmptd = np.moveaxis(dh_mptdn, -1, 0).reshape(
             n_n, n_m, n_p, n_t, n_d)
 
         m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
-        hh_nmppd = np.einsum('mpPdb,mpbn,mPbn->nmpPd',
+        hh_nmppd = np.einsum('mdb,mpbn,mPbn->nmpPd',
                              self._h_h_weights,
                              h_mpbn[m_inds],
                              h_mpbn.conj()[mprime_inds])
