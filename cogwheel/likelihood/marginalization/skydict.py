@@ -40,9 +40,23 @@ class SkyDictionary(utils.JSONMixin):
         self.delays = geocenter_delays[1:] - geocenter_delays[0]
 
         self.delays2inds_map = self._create_delays2inds_map()
-        self.delays2genind_map = {
-            delays_key: self._create_index_generator(inds)
-            for delays_key, inds in self.delays2inds_map.items()}
+
+        discrete_delays = np.array(list(self.delays2inds_map))
+        self._min_delay = np.min(discrete_delays, axis=0)
+        self._max_delay = np.max(discrete_delays, axis=0)
+
+        # (n_det-1,) float array: _sky_prior := d(Omega) / (4pi d(delays))
+        self._sky_prior = np.zeros(self._max_delay - self._min_delay + 1)
+        for key, inds in self.delays2inds_map.items():
+            self._sky_prior[key] = (
+                self.f_sampling ** (len(self.detector_names) - 1)
+                * len(inds) / self.nsky)
+
+        # (n_det-1) array of generators that yield sky-indices
+        self.ind_generators = np.full(self._max_delay - self._min_delay + 1,
+                                      iter(()))
+        for key, inds in self.delays2inds_map.items():
+            self.ind_generators[key] = itertools.cycle(inds)
 
     def resample_timeseries(self, timeseries, times, axis=-1,
                             window=('tukey', .1)):
@@ -114,17 +128,22 @@ class SkyDictionary(utils.JSONMixin):
             correspond to any physical sky location, these are flagged
             ``False`` in this array. Unphysical samples are discarded.
         """
-        get_ind_generator = self.delays2genind_map.get
-        unphysical_genind = itertools.repeat((-1, 0., False))
+        # First mask: are individual delays plausible? This is necessary
+        # in order to interpret the delays as indices to self._sky_prior
+        physical_mask = np.all((delays.T >= self._min_delay)
+                               & (delays.T <= self._max_delay), axis=1)
 
-        sky_inds, sky_prior, physical_mask = zip(
-            *[next(get_ind_generator(delays_key, unphysical_genind))
-              for delays_key in zip(*delays)])
+        # Submask: for the delays that survive the first mask, are there
+        # any sky samples with the correct delays at all detector pairs?
+        sky_prior = self._sky_prior[tuple(delays[:, physical_mask])]
+        submask = sky_prior > 0
 
-        # Reject unphysical samples:
-        physical_mask = np.array(physical_mask, bool)
-        sky_prior = np.array(sky_prior, float)[physical_mask]
-        sky_inds = np.array(sky_inds, int)[physical_mask]
+        physical_mask[physical_mask] *= submask
+        sky_prior = sky_prior[submask]
+
+        # Generate sky samples for the physical delays
+        generators = self.ind_generators[tuple(delays[:, physical_mask])]
+        sky_inds = np.fromiter(map(next, generators), int)
         return sky_inds, sky_prior, physical_mask
 
     def _create_sky_samples(self):
@@ -156,28 +175,3 @@ class SkyDictionary(utils.JSONMixin):
             delays2inds_map[delays_key].append(i_sample)
 
         return delays2inds_map
-
-    def _create_index_generator(self, inds):
-        """
-        Infinite generator that yields tuples of
-        (i_sample, delays_key_prior, is_physical).
-
-        Parameters
-        ----------
-        inds: list of int
-            Indices of samples in a single time-delays bin.
-
-        Yield
-        -----
-        i_sample: int
-            Loops infinitely over ``inds``.
-
-        delays_key_prior: float
-            Always the same constant, prior probability density for the
-            particular time-delays bins, in units of s^-(n_det-1).
-
-        is_physical: True
-        """
-        delays_key_prior = (self.f_sampling ** (len(self.detector_names) - 1)
-                            * len(inds) / self.nsky)
-        return itertools.cycle([(ind, delays_key_prior, True) for ind in inds])
