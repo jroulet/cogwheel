@@ -23,8 +23,6 @@ class SkyDictionary(utils.JSONMixin):
     Antenna coefficients F+, Fx (psi=0) and detector time delays from
     geocenter are computed and stored for all samples.
     """
-    _UNPHYSICAL_GENIND = itertools.repeat((-1, 0., False))
-
     def __init__(self, detector_names, *, f_sampling: int = 2**13,
                  nsky: int = 10**6, seed=0):
         self.detector_names = tuple(detector_names)
@@ -116,9 +114,8 @@ class SkyDictionary(utils.JSONMixin):
             correspond to any physical sky location, these are flagged
             ``False`` in this array. Unphysical samples are discarded.
         """
-        # A bit faster:
         get_ind_generator = self.delays2genind_map.get
-        unphysical_genind = self._UNPHYSICAL_GENIND
+        unphysical_genind = itertools.repeat((-1, 0., False))
 
         sky_inds, sky_prior, physical_mask = zip(
             *[next(get_ind_generator(delays_key, unphysical_genind))
