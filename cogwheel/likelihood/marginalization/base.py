@@ -267,7 +267,9 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         marginalization_info = self._get_marginalization_info_chunk(
             *args, **kwargs, i_chunk=i_chunk)
 
-        while 0 < marginalization_info.n_effective < self.min_n_effective:
+        # while (1 < needed_improvement < expected_improvement): improve()
+        while (1 < self.min_n_effective / marginalization_info.n_effective
+               < 2**(len(self._qmc_ind_chunks) - (i_chunk+1))):
             i_chunk += 1
 
             if i_chunk == len(self._qmc_ind_chunks):

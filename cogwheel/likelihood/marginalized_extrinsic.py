@@ -80,7 +80,7 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         self.coherent_score = coherent_score
 
         self.t_range = t_range
-        self._times = (np.arange(*t_range, 1 / (2*event_data.fbounds[1]))
+        self._times = (np.arange(*t_range, 1 / (2*event_data.frequencies[-1]))
                        + par_dic_0.get('t_geocenter', 0))
         self._ref_dic = dict(
             d_luminosity=self.coherent_score.lookup_table.REFERENCE_DISTANCE,
