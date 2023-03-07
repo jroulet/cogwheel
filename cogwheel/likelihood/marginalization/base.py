@@ -391,6 +391,9 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         times: (n_t,) float array
             Timestamps of the timeseries (s).
 
+        q_inds: (n_qmc,) int array
+            Indices to the QMC sequence.
+
         Return
         ------
         t_first_det: float array of length n_qmc
@@ -461,7 +464,8 @@ class BaseCoherentScoreHM(BaseCoherentScore):
 
     def __init__(self, sky_dict, m_arr, lookup_table=None,
                  log2n_qmc: int = 11, nphi=128, seed=0,
-                 beta_temperature=.5, n_qmc_sequences=128):
+                 beta_temperature=.5, n_qmc_sequences=128,
+                 min_n_effective=50, max_log2n_qmc: int = 15):
         """
         Parameters
         ----------
@@ -496,13 +500,29 @@ class BaseCoherentScoreHM(BaseCoherentScore):
             samples, without increasing the computational cost. It can
             also be used to estimate the uncertainty of the marginalized
             likelihood computation.
+
+        min_n_effective: int
+            Minimum effective sample size to use as convergence
+            criterion. The program will try doubling the number of
+            samples from `log2n_qmc` until a the effective sample size
+            reaches `min_n_effective` or the number of extrinsic samples
+            reaches ``2**max_log2n_qmc``.
+
+        max_log2n_qmc: int
+            Base-2 logarithm of the maximum number of extrinsic
+            parameter samples to request. The program will try doubling
+            the number of samples from `log2n_qmc` until a the effective
+            sample size reaches `min_n_effective` or the number of
+            extrinsic samples reaches ``2**max_log2n_qmc``.
         """
         super().__init__(sky_dict=sky_dict,
                          lookup_table=lookup_table,
                          log2n_qmc=log2n_qmc,
                          seed=seed,
                          beta_temperature=beta_temperature,
-                         n_qmc_sequences=n_qmc_sequences)
+                         n_qmc_sequences=n_qmc_sequences,
+                         min_n_effective=min_n_effective,
+                         max_log2n_qmc=max_log2n_qmc)
 
         self.m_arr = np.asarray(m_arr)
         self.m_inds, self.mprime_inds = (
