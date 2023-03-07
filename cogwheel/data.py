@@ -407,8 +407,9 @@ class EventData(utils.JSONMixin):
 
     def inject_signal(self, par_dic, approximant):
         """
-        Add a signal to the data. Injection parameters will be stored in
-        the ``injection`` attribute.
+        Add a signal to the data. Injection parameters will be stored as
+        a dictionary in the ``injection`` attribute. The inner product
+        ⟨h|h⟩ at each detector (ignoring ASD-drift correction) is also stored.
 
         Parameters
         ----------
@@ -424,7 +425,11 @@ class EventData(utils.JSONMixin):
         h_f = waveform_generator.get_strain_at_detectors(self.frequencies,
                                                          par_dic)
         self._set_strain(self.strain + h_f)
-        self.injection = (par_dic, approximant)
+
+        h_h = 4 * self.df * np.linalg.norm(h_f * self.wht_filter, axis=-1)**2
+        self.injection = dict(par_dic=par_dic,
+                              approximant=approximant,
+                              h_h=h_h)
 
     def specgram(self, xlim=None, nfft=64, noverlap=None, vmax=25.):
         """
