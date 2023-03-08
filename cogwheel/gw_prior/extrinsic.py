@@ -203,7 +203,7 @@ class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin,
     Prior for the time of arrival at a reference detector.
     """
     standard_params = ['t_geocenter']
-    range_dic = {'t_refdet': NotImplemented}
+    range_dic = {'t_refdet': None}
     conditioned_on = ['ra', 'dec']
 
     def __init__(self, *, tgps, ref_det_name, t0_refdet=0, dt0=.07,
@@ -253,7 +253,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
     where the effective distance is defined in one "reference" detector.
     """
     standard_params = ['d_luminosity']
-    range_dic = {'d_hat': NotImplemented}
+    range_dic = {'d_hat': None}
     conditioned_on = ['ra', 'dec', 'psi', 'iota', 'm1', 'm2']
 
     def __init__(self, *, tgps, ref_det_name, d_hat_max=500,
