@@ -661,8 +661,7 @@ def _draw_indices(unnormalized_lnprob, quantiles, indices, weights):
     indices, weights
     """
     prob = np.exp(unnormalized_lnprob - unnormalized_lnprob.max())
+    prob /= prob.sum()
     cumprob = np.cumsum(prob)
-    prob /= cumprob[-1]  # Unit sum
-    cumprob /= cumprob[-1]
     indices[:] = np.searchsorted(cumprob, quantiles)
     weights[:] = 1 / prob[indices]
