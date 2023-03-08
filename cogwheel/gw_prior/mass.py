@@ -20,8 +20,8 @@ class UniformDetectorFrameMassesPrior(Prior):
     Sampled variables are mchirp, lnq. These are transformed to m1, m2.
     """
     standard_params = ['m1', 'm2']
-    range_dic = {'mchirp': NotImplemented,
-                 'lnq': NotImplemented}
+    range_dic = {'mchirp': None,
+                 'lnq': None}
     reflective_params = ['lnq']
 
     def __init__(self, *, mchirp_range, q_min=.05, symmetrize_lnq=False,
