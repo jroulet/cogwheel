@@ -58,6 +58,24 @@ class SkyDictionary(utils.JSONMixin):
         for key, inds in self.delays2inds_map.items():
             self.ind_generators[key] = itertools.cycle(inds)
 
+        # Dictionary where keys are orderings of >= 2 detectors, and values
+        # are ndarrays with histograms of (weighted) discrete delays to the
+        # first detector.
+        self.delays_prior = {}
+        weights = np.linalg.norm(self.fplus_fcross_0, axis=(1, 2))**3
+        for n_detectors in range(2, len(self.detector_names) + 1):
+            for order in itertools.permutations(
+                    range(len(self.detector_names)), n_detectors):
+
+                pairwise_delays = np.rint(
+                    (geocenter_delays[order[1:],] - geocenter_delays[order[0]])
+                    * self.f_sampling).astype(int)
+                bins = [np.arange(*bounds) + .5
+                        for bounds in zip(pairwise_delays.min(axis=1) - 1,
+                                          pairwise_delays.max(axis=1) + 1)]
+                self.delays_prior[order] = np.histogramdd(
+                    pairwise_delays.T, weights=weights, bins=bins)[0]
+
     def resample_timeseries(self, timeseries, times, axis=-1,
                             window=('tukey', .1)):
         """

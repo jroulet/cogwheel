@@ -20,6 +20,7 @@ from scipy.stats import qmc
 from scipy.interpolate import krogh_interpolate, make_interp_spline
 from scipy.special import logsumexp
 from scipy import sparse
+from scipy import signal
 
 from cogwheel import gw_utils
 from cogwheel import utils
@@ -431,31 +432,38 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         n_qmc, = q_inds.shape
 
         # Sort detectors by SNR
-        det_order = np.argsort(t_arrival_lnprob.max(axis=0))[::-1]
+        det_order = tuple(np.argsort(t_arrival_lnprob.max(axis=0)))[::-1]
 
         tdet_inds = np.empty((n_det, n_qmc), int)  # dq
         tdet_weights = np.empty((n_det, n_qmc), float)  # dq
-        dt = times[1] - times[0]
 
-        for i, det_id in enumerate(det_order):
-            # Rule out arrival times at current detector that are
-            # already unphysical given arrival times at previous
-            # detectors:
-            for previous_det_id in det_order[:i]:
-                max_delay = gw_utils.detector_travel_times(
-                    self.sky_dict.detector_names[det_id],
-                    self.sky_dict.detector_names[previous_det_id])
+        # TODO not always there would be 3 detectors
 
-                t_previous_det = times[tdet_inds[previous_det_id]]
-                unphysical = (
-                    (times < t_previous_det.min() - max_delay - 2*dt)
-                    | (times > t_previous_det.max() + max_delay + 2*dt))
+        prob_t0 = np.exp(t_arrival_lnprob[:, det_order[0]]
+                         - logsumexp(t_arrival_lnprob[:, det_order[0]]))
 
-                t_arrival_lnprob[unphysical, det_id] = -np.inf
+        # Probability at second detector
+        prior_t1 = signal.convolve(
+            prob_t0, self.sky_dict.delays_prior[det_order[:2]], 'same')
+        prior_t1 /= prior_t1.sum()
 
-            tdet_inds[det_id], tdet_weights[det_id] = _draw_indices(
-                t_arrival_lnprob[:, det_id],
-                self._qmc_sequence['u_tdet'][det_id, q_inds])
+        lnprob_t1 = np.log(prior_t1) + t_arrival_lnprob[:, det_order[1]]
+        prob_t1 = np.exp(lnprob_t1 - logsumexp(lnprob_t1))
+
+        # Probability at third detector
+        prob_dt_01 = signal.correlate(prob_t1, prob_t0)
+        dt_01 = signal.correlation_lags(len(prob_t1), len(prob_t0))
+        mask = ((dt_01 >= self.sky_dict._min_delay[det_order[0]])
+                & (dt_01 <= self.sky_dict._max_delay[det_order[0]]))
+        prior_dt02 = (prob_dt_01[mask]
+                      @ self.sky_dict.delays_prior[det_order[:3]])
+        prior_t2 = signal.convolve(prob_t0, prior_dt02, 'same')
+
+        t_arrival_lnprob[:, det_order[1]] += np.log(prior_t1)
+        t_arrival_lnprob[:, det_order[2]] += np.log(prior_t2)
+
+        tdet_inds, tdet_weights = _draw_indices(
+            t_arrival_lnprob.T, self._qmc_sequence['u_tdet'][:, q_inds])
 
         delays = tdet_inds[1:] - tdet_inds[0]  # dq  # In units of dt
         importance_sampling_weight = np.prod(
