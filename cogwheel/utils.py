@@ -12,6 +12,7 @@ import tempfile
 import textwrap
 import numpy as np
 from scipy.optimize import _differentialevolution
+from scipy.special import logsumexp
 from numba import njit, vectorize
 
 
@@ -142,6 +143,22 @@ def resample_equal(samples, weights_col=WEIGHTS_NAME, num=None):
     samples_equal = samples.iloc[inds].reset_index()
     del samples_equal[weights_col]
     return samples_equal
+
+
+def exp_normalize(lnprob, axis=-1):
+    """
+    Return normalized probabilities from unnormalized log
+    probabilities, safe to overflow.
+
+    Parameters
+    ----------
+    lnprob: float array
+        Natural log of the unnormalized probability.
+
+    axis: int
+        Axis of `lnprob` along which probabilities sum to 1.
+    """
+    return np.exp(lnprob - logsumexp(lnprob, axis=axis, keepdims=True))
 
 
 @njit
