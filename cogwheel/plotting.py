@@ -264,7 +264,7 @@ class CornerPlot:
     DEFAULT_LATEX_LABELS = LatexLabels()
     MARGIN_INCHES = .8
 
-    def __init__(self, samples: pd.DataFrame, plotstyle=None, bins=40,
+    def __init__(self, samples: pd.DataFrame, plotstyle=None, bins=None,
                  density=True, weights=None, latex_labels=None):
         """
         Parameters
@@ -297,6 +297,12 @@ class CornerPlot:
         self.arrs_1d = {}
         self.pdfs_1d = {}
         self.pdfs_2d = {}
+
+        if bins is None:
+            if weights is None:
+                bins = 'sturges'
+            else:
+                bins = 40
 
         for par, values in samples.items():
             self.pdfs_1d[par], bin_edges[par] = np.histogram(
