@@ -299,12 +299,11 @@ class IntrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     default_likelihood_class = MarginalizedExtrinsicLikelihood
 
-    prior_classes = [
-        FixedReferenceFrequencyPrior,
-        UniformDetectorFrameMassesPrior,
-        UniformEffectiveSpinPrior,
-        UniformDiskInplaneSpinsIsotropicInclinationPrior,
-        ZeroTidalDeformabilityPrior]
+    prior_classes = [FixedReferenceFrequencyPrior,
+                     UniformDetectorFrameMassesPrior,
+                     UniformEffectiveSpinPrior,
+                     UniformDiskInplaneSpinsIsotropicInclinationPrior,
+                     ZeroTidalDeformabilityPrior]
 
 
 class IntrinsicLVCPrior(RegisteredPriorMixin, CombinedPrior):
@@ -315,9 +314,8 @@ class IntrinsicLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
     default_likelihood_class = MarginalizedExtrinsicLikelihood
 
-    prior_classes = [
-        FixedReferenceFrequencyPrior,
-        UniformDetectorFrameMassesPrior,
-        IsotropicSpinsAlignedComponentsPrior,
-        IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
-        ZeroTidalDeformabilityPrior]
+    prior_classes = [FixedReferenceFrequencyPrior,
+                     UniformDetectorFrameMassesPrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
+                     ZeroTidalDeformabilityPrior]

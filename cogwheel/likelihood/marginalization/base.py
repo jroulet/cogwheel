@@ -296,7 +296,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         n_effective = marginalization_info.n_effective
 
         if n_effective >= self.min_n_effective:  # Has converged
-            return True
+            return False
 
         # Is there hope to achieve the desired n_effective?
         expected_increase = 2**self.max_log2n_qmc / marginalization_info.n_qmc
@@ -661,8 +661,7 @@ def _draw_indices(unnormalized_lnprob, quantiles, indices, weights):
     indices, weights
     """
     prob = np.exp(unnormalized_lnprob - unnormalized_lnprob.max())
+    prob /= prob.sum()
     cumprob = np.cumsum(prob)
-    prob /= cumprob[-1]  # Unit sum
-    cumprob /= cumprob[-1]
     indices[:] = np.searchsorted(cumprob, quantiles)
     weights[:] = 1 / prob[indices]

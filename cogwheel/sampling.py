@@ -25,6 +25,7 @@ from cogwheel import utils
 SAMPLES_FILENAME = 'samples.feather'
 FINISHED_FILENAME = 'FINISHED.out'
 
+
 class Sampler(abc.ABC, utils.JSONMixin):
     """
     Generic base class for sampling distributions.
@@ -98,7 +99,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         unfold = np.vectorize(prior.unfold, signature='(n)->(m,n)')
         unfolded = unfold(samples[prior.sampled_params].to_numpy())
 
-        probabilities = self._exp_normalize(
+        probabilities = utils.exp_normalize(
             samples[self._lnprob_cols].to_numpy())
         cumprobs = np.cumsum(probabilities, axis=-1)
 
@@ -108,15 +109,6 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         return pd.DataFrame(unfolded[np.arange(len(inds)), inds],
                             columns=prior.sampled_params)
-
-    @staticmethod
-    def _exp_normalize(lnprobs):
-        """
-        Return normalized probabilities from unnormalized log
-        probabilities, safe to overflow.
-        """
-        probs = np.exp(lnprobs - np.max(lnprobs, axis=-1, keepdims=True))
-        return probs / probs.sum(axis=-1, keepdims=True)
 
     def get_rundir(self, parentdir):
         """
