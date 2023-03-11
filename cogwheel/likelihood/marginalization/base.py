@@ -337,7 +337,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         """
         sequence_values = qmc.scale(
             qmc.Sobol(len(self._qmc_range_dic), seed=self._rng
-                     ).random_base2(self.max_log2n_qmc),
+                     ).random_base2(self.max_log2n_qmc) % 1,  # %1 sends 1→0
             *zip(*self._qmc_range_dic.values())).T
 
         n_det = len(self.sky_dict.detector_names)
@@ -670,6 +670,5 @@ def _draw_indices(unnormalized_lnprob, quantiles, indices, weights):
     """
     prob = np.exp(unnormalized_lnprob - unnormalized_lnprob.max())
     prob /= prob.sum()
-    cumprob = np.cumsum(prob)
-    indices[:] = np.searchsorted(cumprob, quantiles)
+    indices[:] = np.searchsorted(np.cumsum(prob), quantiles)
     weights[:] = 1 / prob[indices]
