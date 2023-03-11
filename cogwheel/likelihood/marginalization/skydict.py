@@ -68,6 +68,11 @@ class SkyDictionary(utils.JSONMixin):
         time of arrival at each detector based on the time of arrival
         probability at other detectors.
 
+    delays_bounds: dict
+        Keys are 2-tuples of ints corresponding to detector indices of
+        a pair, values are 2-tuples of floats with the range of time
+        delays (s) encountered.
+
     Public methods
     --------------
     resample_timeseries
@@ -94,9 +99,8 @@ class SkyDictionary(utils.JSONMixin):
         discrete_delays = np.array(list(self.delays2inds_map))
         self._min_delay = np.min(discrete_delays, axis=0)
         self._max_delay = np.max(discrete_delays, axis=0)
-        self._delays_bounds = {}
 
-        self._delays_bounds = {}
+        self.delays_bounds = {}
         self.delays_prior = {}
         weights = np.linalg.norm(self.fplus_fcross_0, axis=(1, 2)) ** 3
         for n_detectors in range(2, len(detector_names) + 1):
@@ -112,8 +116,8 @@ class SkyDictionary(utils.JSONMixin):
                     pairwise_delays.T, weights=weights, bins=bins)[0].copy('F')
 
                 if n_detectors == 2:
-                    self._delays_bounds[order] = (pairwise_delays.min(),
-                                                  pairwise_delays.max())
+                    self.delays_bounds[order] = (pairwise_delays.min(),
+                                                 pairwise_delays.max())
 
         # (n_det-1)-dimensional array of generators yielding sky-indices
         self._ind_generators = np.full(self._max_delay - self._min_delay + 1,
