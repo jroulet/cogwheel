@@ -451,10 +451,10 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         prob_t1 = np.exp(lnprob_t1 - logsumexp(lnprob_t1))
 
         # Probability at third detector
-        prob_dt_01 = signal.correlate(prob_t1, prob_t0)
-        dt_01 = signal.correlation_lags(len(prob_t1), len(prob_t0))
-        mask = ((dt_01 >= self.sky_dict._min_delay[det_order[0]])
-                & (dt_01 <= self.sky_dict._max_delay[det_order[0]]))
+        prob_dt_01 = signal.correlate(prob_t1, prob_t0, 'same')
+        dt_01 = signal.correlation_lags(len(prob_t1), len(prob_t0), 'same')
+        min_delay, max_delay = self.sky_dict._delays_bounds[det_order[:2]]
+        mask = (dt_01 >= min_delay) & (dt_01 <= max_delay)
         prior_dt02 = (prob_dt_01[mask]
                       @ self.sky_dict.delays_prior[det_order[:3]])
         prior_t2 = signal.convolve(prob_t0, prior_dt02, 'same')

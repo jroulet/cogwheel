@@ -22,6 +22,56 @@ class SkyDictionary(utils.JSONMixin):
     ``delays2inds_map``, ``delays2genind_map``.
     Antenna coefficients F+, Fx (psi=0) and detector time delays from
     geocenter are computed and stored for all samples.
+
+    Public attributes
+    -----------------
+    detector_names: tuple
+        E.g. ``('H', 'L', 'V')``.
+
+    nsky: int
+        Number of sky-location samples.
+
+    f_sampling: float
+        Inverse of the time bin size at each detector (Hz).
+
+    seed:
+        Sets the initial random state.
+
+    sky_samples: dict
+        Contains entries for 'lat' and 'lon' (rad) of the sky samples.
+
+    fplus_fcross_0: (nsky, n_det, 2) float array
+        Antenna coefficients at the sky samples for psi=0.
+
+    geocenter_delay_first_det: (nsky,) float array
+        Time delay (s) from geocenter to the first detector (per
+        ``.detector_names``) for each sky sample.
+
+    delays: (n_det - 1, nsky) float array
+        Time delay (s) from the first detector (per ``.detector_names``)
+        to the remaining detectors, for each sky sample.
+
+    delays2inds_map: dict
+        Each key is a tuple of (n_det-1) ints, corresponding to
+        discretized delays from the first detector to the remaining
+        detectors.
+        Each value is a list of ints, corresponding to indices of
+        sky-samples that have the correct delay (to the resolution given
+        by ``f_sampling``).
+
+    delays_prior: dict
+        Keys are tuples of ints corresponding to all possible orderings
+        of >= 2 detectors, and values are ``(len(key) - 1)``-dimensional
+        ndarrays with histograms of discrete delays to the first
+        detector (per that ordering), weighted by the antenna response
+        cubed. This is useful for assigning a semi-coherent prior to the
+        time of arrival at each detector based on the time of arrival
+        probability at other detectors.
+
+    Public methods
+    --------------
+    resample_timeseries
+    get_sky_inds_and_prior
     """
     def __init__(self, detector_names, *, f_sampling: int = 2**13,
                  nsky: int = 10**6, seed=0):
@@ -44,37 +94,39 @@ class SkyDictionary(utils.JSONMixin):
         discrete_delays = np.array(list(self.delays2inds_map))
         self._min_delay = np.min(discrete_delays, axis=0)
         self._max_delay = np.max(discrete_delays, axis=0)
+        self._delays_bounds = {}
 
-        # (n_det-1,) float array: _sky_prior := d(Omega) / (4pi d(delays))
+        self._delays_bounds = {}
+        self.delays_prior = {}
+        weights = np.linalg.norm(self.fplus_fcross_0, axis=(1, 2)) ** 3
+        for n_detectors in range(2, len(detector_names) + 1):
+            for order in itertools.permutations(range(len(detector_names)),
+                                                n_detectors):
+                pairwise_delays = self._discretize(
+                    geocenter_delays[order[1:],] - geocenter_delays[order[0]])
+
+                bins = [np.arange(*bounds) + .5
+                        for bounds in zip(pairwise_delays.min(axis=1) - 1,
+                                          pairwise_delays.max(axis=1) + 1)]
+                self.delays_prior[order] = np.histogramdd(
+                    pairwise_delays.T, weights=weights, bins=bins)[0].copy('F')
+
+                if n_detectors == 2:
+                    self._delays_bounds[order] = (pairwise_delays.min(),
+                                                  pairwise_delays.max())
+
+        # (n_det-1)-dimensional array of generators yielding sky-indices
+        self._ind_generators = np.full(self._max_delay - self._min_delay + 1,
+                                       iter(()))
+        for key, inds in self.delays2inds_map.items():
+            self._ind_generators[key] = itertools.cycle(inds)
+
+        # (n_det-1)-dimensional float array with d(Omega) / (4pi d(delays))
         self._sky_prior = np.zeros(self._max_delay - self._min_delay + 1)
         for key, inds in self.delays2inds_map.items():
             self._sky_prior[key] = (
                 self.f_sampling ** (len(self.detector_names) - 1)
                 * len(inds) / self.nsky)
-
-        # (n_det-1) array of generators that yield sky-indices
-        self.ind_generators = np.full(self._max_delay - self._min_delay + 1,
-                                      iter(()))
-        for key, inds in self.delays2inds_map.items():
-            self.ind_generators[key] = itertools.cycle(inds)
-
-        # Dictionary where keys are orderings of >= 2 detectors, and values
-        # are ndarrays with histograms of (weighted) discrete delays to the
-        # first detector.
-        self.delays_prior = {}
-        weights = np.linalg.norm(self.fplus_fcross_0, axis=(1, 2))**3
-        for n_detectors in range(2, len(self.detector_names) + 1):
-            for order in itertools.permutations(
-                    range(len(self.detector_names)), n_detectors):
-
-                pairwise_delays = np.rint(
-                    (geocenter_delays[order[1:],] - geocenter_delays[order[0]])
-                    * self.f_sampling).astype(int)
-                bins = [np.arange(*bounds) + .5
-                        for bounds in zip(pairwise_delays.min(axis=1) - 1,
-                                          pairwise_delays.max(axis=1) + 1)]
-                self.delays_prior[order] = np.histogramdd(
-                    pairwise_delays.T, weights=weights, bins=bins)[0]
 
     def resample_timeseries(self, timeseries, times, axis=-1,
                             window=('tukey', .1)):
@@ -160,7 +212,7 @@ class SkyDictionary(utils.JSONMixin):
         sky_prior = sky_prior[submask]
 
         # Generate sky samples for the physical delays
-        generators = self.ind_generators[tuple(delays[:, physical_mask])]
+        generators = self._ind_generators[tuple(delays[:, physical_mask])]
         sky_inds = np.fromiter(map(next, generators), int)
         return sky_inds, sky_prior, physical_mask
 
@@ -171,10 +223,8 @@ class SkyDictionary(utils.JSONMixin):
         """
         u_lat, u_lon = qmc.Halton(2, seed=self._rng).random(self.nsky).T
 
-        samples = {}
-        samples['lat'] = np.arcsin(2*u_lat - 1)
-        samples['lon'] = 2 * np.pi * u_lon
-        return samples
+        return {'lat': np.arcsin(2*u_lat - 1),
+                'lon': 2 * np.pi * u_lon}
 
     def _create_delays2inds_map(self):
         """
@@ -186,10 +236,14 @@ class SkyDictionary(utils.JSONMixin):
         samples that have the corresponding (discretized) time delays.
         """
         # (ndet-1, nsky)
-        delays_keys = zip(*np.rint(self.delays * self.f_sampling).astype(int))
+        delays_keys = zip(*self._discretize(self.delays))
 
         delays2inds_map = collections.defaultdict(list)
         for i_sample, delays_key in enumerate(delays_keys):
             delays2inds_map[delays_key].append(i_sample)
 
         return delays2inds_map
+
+    def _discretize(self, delays: float) -> int:
+        """Return discretized delay in units of 1/self.f_sampling."""
+        return np.rint(delays * self.f_sampling).astype(int)
