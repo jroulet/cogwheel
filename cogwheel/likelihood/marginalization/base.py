@@ -296,8 +296,8 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         """
         n_effective = marginalization_info.n_effective
 
-        if n_effective >= self.min_n_effective:  # Has converged
-            return True
+        if n_effective >= self.min_n_effective:  # Already converged
+            return False
 
         # Is there hope to achieve the desired n_effective?
         expected_increase = 2**self.max_log2n_qmc / marginalization_info.n_qmc
