@@ -231,15 +231,15 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         with Profile() as profiler:
             exit_code = self._run()
-            with open(rundir/FINISHED_FILENAME, 'w', encoding='utf-8') as fobj:
-                fobj.write(f'{exit_code}\n{datetime.datetime.now()}')
+            with open(rundir/FINISHED_FILENAME, 'w', encoding='utf-8') as file:
+                file.write(f'{exit_code}\n{datetime.datetime.now()}')
+
+            samples = self.load_samples()
+            self.posterior.prior.transform_samples(samples)
+            self.posterior.likelihood.postprocess_samples(samples)
+            samples.to_feather(rundir/SAMPLES_FILENAME)
+
         profiler.dump_stats(rundir/self.PROFILING_FILENAME)
-
-        samples = self.load_samples()
-        self.posterior.prior.transform_samples(samples)
-        self.posterior.likelihood.postprocess_samples(samples)
-
-        samples.to_feather(rundir/SAMPLES_FILENAME)
 
         for path in rundir.iterdir():
             path.chmod(self.file_permissions)

@@ -1,7 +1,5 @@
 """
 Post-process parameter estimation samples:
-    * Compute derived parameters
-    * Compute likelihood
     * Diagnostics for sampler convergence
     * Diagnostics for robustness against ASD-drift choice
     * Diagnostics for relative-binning accuracy
@@ -45,10 +43,10 @@ def postprocess_rundir(rundir, relative_binning_boost=4):
         * Tests for log likelihood differences arising from
           relative binning accuracy.
     """
-    PostProcessor(rundir, relative_binning_boost).process_samples()
+    RundirPostprocessor(rundir, relative_binning_boost).process_samples()
 
 
-class PostProcessor:
+class RundirPostprocessor:
     """
     Postprocess posterior samples from a single run.
 
@@ -91,7 +89,7 @@ class PostProcessor:
         """Return names of auxiliary log likelihood columns."""
         return [f'lnl_aux_{det}' for det in detector_names]
 
-    def process_samples(self, force_update=False):
+    def process_samples(self):
         """
         Call the various methods of the class sequentially, then save
         the results. This computes:
@@ -107,13 +105,7 @@ class PostProcessor:
         """
         print(f'Processing {self.rundir}')
 
-        print(' * Adding standard parameters...')
-        self.posterior.prior.transform_samples(
-            self.samples, force_update=force_update)
-        self.posterior.likelihood.postprocess_samples(
-            self.samples, force_update=force_update)
-        print(' * Computing relative-binning likelihood...')
-        self.compute_lnl(force_update=force_update)
+        self.tests['lnl_max'] = max(self.samples['lnl'])
         print(' * Computing auxiliary likelihood products...')
         self.compute_lnl_aux()
         print(' * Testing ASD-drift correction...')
@@ -121,20 +113,6 @@ class PostProcessor:
         print(' * Testing relative binning...')
         self.test_relative_binning()
         self.save_tests_and_samples()
-
-    def compute_lnl(self, force_update=True):
-        """
-        Add column to `self.samples` with log likelihood computed
-        at original relative binning resolution
-        """
-        if force_update or (self.LNL_COL not in self.samples.columns):
-            lnlike = getattr(
-                self.posterior.likelihood,
-                'lnlike_no_marginalization',
-                self.posterior.likelihood.lnlike)
-            self.samples[self.LNL_COL] = list(
-                map(lnlike, self._standard_samples()))
-        self.tests['lnl_max'] = max(self.samples[self.LNL_COL])
 
     def compute_lnl_aux(self):
         """
@@ -243,7 +221,7 @@ class PostProcessor:
             self.posterior.likelihood.waveform_generator.params].iterrows())
 
 
-def diagnostics(eventdir, reference_rundir=None, outfile=None):
+def postprocess_eventdir(eventdir, reference_rundir=None, outfile=None):
     """
     Make diagnostics plots aggregating multiple runs of an event and
     save them to pdf format.
@@ -253,23 +231,25 @@ def diagnostics(eventdir, reference_rundir=None, outfile=None):
 
     Parameters
     ----------
-    reference_rundir: path to rundir used as reference against which to
-                      overplot samples. Defaults to the first rundir by
-                      name.
-    outfile: path to save output as pdf. Defaults to
-             `eventdir/Diagnostics.DIAGNOSTICS_FILENAME`.
+    reference_rundir: os.PathLike
+        Path to rundir used as reference against which to overplot
+        samples. Defaults to the first rundir by name.
+    outfile: os.PathLike
+        Path to save output as pdf. Defaults to
+        `{eventdir}/{EventdirPostprocessor.DIAGNOSTICS_FILENAME}`.
     """
-    Diagnostics(eventdir, reference_rundir).diagnostics(outfile)
+    EventdirPostprocessor(eventdir, reference_rundir
+                         ).postprocess_eventdir(outfile)
 
 
-class Diagnostics:
+class EventdirPostprocessor:
     """
     Class to gather information from multiple runs of an event and
     exporting summary to pdf file.
 
-    The method `diagnostics` executes all the functionality of the
-    class. It is suggested to use the top-level function `diagnostics`
-    for simple usage.
+    The method `postprocess_eventdir` executes all the functionality of the
+    class. It is suggested to use the top-level function
+    `postprocess_eventdir` for simple usage.
     """
     DIAGNOSTICS_FILENAME = 'diagnostics.pdf'
     DEFAULT_TOLERANCE_PARAMS = {'asd_drift_dlnl_std': .1,
@@ -344,7 +324,7 @@ class Diagnostics:
         self.tolerance_params = (self.DEFAULT_TOLERANCE_PARAMS
                                  | tolerance_params)
 
-    def diagnostics(self, outfile=None):
+    def postprocess_eventdir(self, outfile=None):
         """
         Make diagnostics plots aggregating multiple runs of an event and
         save them to pdf format in `{eventdir}/{DIAGNOSTICS_FILENAME}`.
@@ -566,7 +546,7 @@ def submit_postprocess_rundir_slurm(
                        sbatch_cmds, batch_path)
 
 
-def submit_diagnostics_eventdir_slurm(
+def submit_postprocess_eventdir_slurm(
         eventdir, job_name=None, n_hours_limit=2, stdout_path=None,
         stderr_path=None, sbatch_cmds=(), batch_path=None):
     """
@@ -608,7 +588,7 @@ def main(*, rundir=None, eventdir=None):
     if rundir:
         postprocess_rundir(rundir)
     else:
-        diagnostics(eventdir)
+        postprocess_eventdir(eventdir)
 
 
 if __name__ == '__main__':

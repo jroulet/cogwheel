@@ -69,7 +69,7 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         """
         return super().lnlike(par_dic)
 
-    def postprocess_samples(self, samples, force_update=True):
+    def postprocess_samples(self, samples):
         """
         Add a column 'd_luminosity' to a DataFrame of samples, with
         values taken randomly from the conditional posterior.
@@ -78,12 +78,7 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         Parameters
         ----------
         samples: Dataframe with sampled params
-        force_update: bool, whether to force an update if the luminosity
-                      distance samples already exist
         """
-        if (not force_update) and ('d_luminosity' in samples.columns):
-            return
-
         @np.vectorize
         def sample_distance(**par_dic):
             dh_hh = self._get_dh_hh_no_asd_drift(
