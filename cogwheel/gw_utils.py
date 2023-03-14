@@ -153,6 +153,7 @@ def m1m2_to_mchirp(m1, m2):
 
 
 def chieff(m1, m2, s1z, s2z):
+    """Effective spin."""
     return (m1*s1z + m2*s2z) / (m1+m2)
 
 

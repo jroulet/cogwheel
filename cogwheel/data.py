@@ -216,11 +216,11 @@ class EventData(utils.JSONMixin):
             raise DataError(f'{filename} has no data at event time.')
 
         i_start = 0
-        if np.any(before := (i_nan < i_event)):
+        if np.any(before := i_nan < i_event):
             i_start = np.max(i_nan[before]) + 1
 
         i_end = len(timeseries)
-        if np.any(after := (i_nan > i_event)):
+        if np.any(after := i_nan > i_event):
             i_end = np.min(i_nan[after]) - 1
 
         t_start = timeseries.times[i_start]

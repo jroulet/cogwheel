@@ -314,7 +314,8 @@ class LookupTable(utils.JSONMixin):
 class LookupTableMarginalizedPhase22(LookupTable):
     """
     Similar to ``LookupTable`` except the likelihood is marginalized
-    over both distance and phase, assuming quadrupolar radiation.
+    over both distance and phase, assuming quadrupolar radiation
+    (actually, just |m|=2 is required, no restriction on l).
 
     ``d_h`` is now assumed to be the absolute value of the complex (d|h)
     throughout, except in ``sample_phase`` it is the complex (d|h).

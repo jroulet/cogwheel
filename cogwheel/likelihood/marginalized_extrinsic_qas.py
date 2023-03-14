@@ -226,6 +226,7 @@ class MarginalizedExtrinsicLikelihoodQAS(BaseRelativeBinning):
             return fullsamples
 
         utils.update_dataframe(samples, pd.DataFrame.from_records(extrinsic))
+        return None
 
     def _get_many_dh_hh(self, samples: pd.DataFrame):
         """

@@ -152,9 +152,10 @@ class PostProcessor:
             likelihood.pn_phase_tol /= self.relative_binning_boost
         else:
             num = self.relative_binning_boost * (len(likelihood.fbin) - 1) + 1
-            likelihood.fbin = np.interp(np.linspace(0, 1, num),
-                                        np.linspace(0, 1, len(likelihood.fbin)),
-                                        likelihood.fbin)
+            likelihood.fbin = np.interp(
+                np.linspace(0, 1, num),
+                np.linspace(0, 1, len(likelihood.fbin)),
+                likelihood.fbin)
 
         lnl_aux = pd.DataFrame(map(likelihood.lnlike_detectors_no_asd_drift,
                                    self._standard_samples()),
@@ -292,13 +293,18 @@ class Diagnostics:
         """
         Parameters
         ----------
-        eventdir: path to directory containing rundirs.
-        reference_rundir: path to reference run directory. Defaults to
-                          the first (by name) rundir in `eventdir`.
-        tolerance_params: dict with items to update the defaults from
-                          `DEFAULT_TOLERANCE_PARAMS`. Values higher than
-                          their tolerance are highlighted in the table.
-                          Keys include:
+        eventdir: os.PathLike
+            Path to directory containing rundirs.
+
+        reference_rundir: os.PathLike, optional
+            Path to reference run directory. Defaults to the first (by
+            name) rundir in `eventdir`.
+
+        tolerance_params: dict
+            Items to update defaults from `DEFAULT_TOLERANCE_PARAMS`.
+            Values higher than their tolerance are highlighted in the
+            table. Keys include:
+
             * 'asd_drift_dlnl_std'
                 Tolerable standard deviation of log likelihood
                 fluctuations due to choice of reference waveform for
@@ -408,8 +414,8 @@ class Diagnostics:
 
         Parameters
         ----------
-        rundirs: sequence of `pathlib.Path`s pointing to run
-                 directories.
+        rundirs: sequence of `pathlib.Path`s
+            Run directories.
         """
         rundirs = rundirs or self.rundirs
 
@@ -592,6 +598,7 @@ def main(*, rundir=None, eventdir=None):
     ----------
     rundir: path to a run directory to postprocess, can't be set
             simultaneously with `eventdir` or a `ValueError` is raised.
+
     eventdir: path to an event directory to postprocess, can't be set
               simultaneously with `rundir` or a `ValueError` is raised.
     """

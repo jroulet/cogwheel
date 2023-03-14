@@ -271,11 +271,9 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
     @wraps(utils.JSONMixin.to_json)
     def to_json(self, dirname, basename=None, **kwargs):
-        """
-        Make `basename` default to 'Sampler.json' even for subclasses.
-        That way it is easier to locate the file if we don't know the
-        sampler subclass.
-        """
+        # Make `basename` default to 'Sampler.json' even for subclasses.
+        # That way it is easier to locate the file if we don't know the
+        # sampler subclass.
         super().to_json(dirname, basename or self.JSON_FILENAME, **kwargs)
 
 
