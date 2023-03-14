@@ -134,7 +134,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
     def submit_slurm(
             self, rundir, n_hours_limit=48, memory_per_task='32G',
-            resuming=False, sbatch_cmds=()):
+            resuming=False, sbatch_cmds=(), postprocess=True):
         """
         Parameters
         ----------
@@ -153,6 +153,10 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         sbatch_cmds: tuple of str
             Strings with SBATCH commands.
+
+        postprocess: bool
+            Whether to perform convergence tests to the run after
+            sampling. See ``postprocessing.postprocess_rundir``.
         """
         rundir = pathlib.Path(rundir)
         job_name = '_'.join([rundir.name,
@@ -167,6 +171,10 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         sbatch_cmds += (f'--mem-per-cpu={memory_per_task}',)
         args = rundir.resolve()
+
+        if not postprocess:
+            args += ' --no-postprocessing'
+
         utils.submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
                            args, sbatch_cmds, batch_path)
 
