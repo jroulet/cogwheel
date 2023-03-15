@@ -76,9 +76,8 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         if coherent_score is None:
             # Ensure sky_dict's and event_data's sampling frequencies
             # are commensurate:
-            fmax = 2 * event_data.frequencies[-1]
-            f_sampling = int(
-                fmax * np.round(SkyDictionary.DEFAULT_F_SAMPLING / fmax))
+            f_sampling = SkyDictionary.choose_f_sampling(
+                event_data.frequencies[-1])
             coherent_score = CoherentScoreHM(
                 sky_dict=SkyDictionary(event_data.detector_names,
                                        f_sampling=f_sampling),
