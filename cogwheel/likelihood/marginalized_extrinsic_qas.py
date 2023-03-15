@@ -76,8 +76,13 @@ class MarginalizedExtrinsicLikelihoodQAS(BaseRelativeBinning):
                              'quadrupolar waveform models.')
 
         if coherent_score is None:
+            # Ensure sky_dict's and event_data's sampling frequencies
+            # are commensurate:
+            f_sampling = SkyDictionary.choose_f_sampling(
+                event_data.frequencies[-1])
             coherent_score = CoherentScoreQAS(
-                SkyDictionary(event_data.detector_names))
+                SkyDictionary(event_data.detector_names,
+                              f_sampling=f_sampling))
         self.coherent_score = coherent_score
 
         self.t_range = t_range
@@ -212,10 +217,9 @@ class MarginalizedExtrinsicLikelihoodQAS(BaseRelativeBinning):
                                                      num)
                      for dh_td, hh_d in zip(dh_ntd, hh_nd)]
 
+        gmst = lal.GreenwichMeanSiderealTime(self.event_data.tgps)
         for ext in extrinsic:
-            ext['ra'] = skyloc_angles.lon_to_ra(
-                ext['lon'],
-                lal.GreenwichMeanSiderealTime(self.event_data.tgps))
+            ext['ra'] = skyloc_angles.lon_to_ra(ext['lon'], gmst)
 
         if isinstance(num, int):
             fullsamples = samples.loc[samples.index.repeat(num)].reset_index(

@@ -77,8 +77,12 @@ class SkyDictionary(utils.JSONMixin):
     --------------
     resample_timeseries
     get_sky_inds_and_prior
+    choose_f_sampling
     """
-    def __init__(self, detector_names, *, f_sampling: int = 2**13,
+    DEFAULT_F_SAMPLING = 2**13
+
+    def __init__(self, detector_names, *,
+                 f_sampling: int = DEFAULT_F_SAMPLING,
                  nsky: int = 10**6, seed=0):
         self.detector_names = tuple(detector_names)
         self.nsky = nsky
@@ -219,6 +223,17 @@ class SkyDictionary(utils.JSONMixin):
         generators = self._ind_generators[tuple(delays[:, physical_mask])]
         sky_inds = np.fromiter(map(next, generators), int)
         return sky_inds, sky_prior, physical_mask
+
+    @classmethod
+    def choose_f_sampling(cls, f_nyquist: int) -> int:
+        """
+        Return closest frequency to the default f_sampling that still
+        makes it an integer multiple of the sampling frequency
+        corresponding to `f_nyquist` (Hz). The output of this function
+        can be used as ``f_sampling`` parameter in ``__init__``.
+        """
+        fmax = 2 * f_nyquist
+        return int(fmax * np.round(cls.DEFAULT_F_SAMPLING / fmax))
 
     def _create_sky_samples(self):
         """
