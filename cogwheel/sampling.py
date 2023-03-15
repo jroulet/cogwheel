@@ -170,7 +170,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         self.to_json(rundir, overwrite=resuming)
 
         sbatch_cmds += (f'--mem-per-cpu={memory_per_task}',)
-        args = rundir.resolve()
+        args = str(rundir.resolve())
 
         if not postprocess:
             args += ' --no-postprocessing'
