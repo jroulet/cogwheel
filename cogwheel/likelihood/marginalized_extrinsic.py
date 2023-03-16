@@ -129,6 +129,8 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         h0_fbin = (1, 1j) @ self.waveform_generator.get_hplus_hcross(
             self.fbin, self.par_dic_0, by_m=True)  # mb
 
+        self._stall_ringdown(h0_f, h0_fbin)
+
         self.asd_drift = self.compute_asd_drift(self.par_dic_0)
 
         self._set_d_h_weights(h0_f, h0_fbin)

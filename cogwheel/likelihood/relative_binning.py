@@ -256,6 +256,34 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         return (4 * self.event_data.df
                 * projected_integrand.dot(self._coefficients.T))
 
+    def _stall_ringdown(self, h0_f, h0_fbin):
+        """
+        Identify a cutoff frequency and set `h0_f` and `h0_fbin` to a
+        nonzero constant above that frequency, inplace.
+        Useful for preventing the denominator from going to zero in
+        relative binning.
+
+        `h0_f` and `h0_fbin` must have frequencies in their last axis,
+        and their shape must match in the remaining dimensions.
+        """
+        assert h0_f.shape[:-1] == h0_fbin.shape[:-1]
+        assert h0_f.shape[-1] == len(self.event_data.frequencies)
+        assert h0_fbin.shape[-1] == len(self.fbin)
+
+        wht_filter = np.linalg.norm(self.event_data.wht_filter, axis=0)
+
+        h0_f = np.atleast_2d(h0_f)
+        h0_fbin = np.atleast_2d(h0_fbin)
+        for i in np.ndindex(h0_f.shape[:-1]):  # Work with 1-d arrays
+            cumsnr2 = np.cumsum((np.abs(h0_f[i]) * wht_filter)**2)
+            cumsnr2 /= cumsnr2[-1]
+            i_99 = np.searchsorted(cumsnr2, .99)
+            f_99 = self.event_data.frequencies[i_99]
+            h0_const = h0_f[i][i_99]
+
+            h0_f[i][self.event_data.frequencies > f_99] = h0_const
+            h0_fbin[i][self.fbin > f_99] = h0_const
+
     def get_init_dict(self):
         """
         Return dictionary with keyword arguments to reproduce the class
@@ -462,6 +490,8 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         self._h0_f = self._get_h_f(self.par_dic_0, by_m=True)
         self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, self.par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
+
+        self._stall_ringdown(self._h0_f, self._h0_fbin)
 
         d_h0 = self.event_data.blued_strain * self._h0_f.conj()
         self._d_h_weights = (self._get_summary_weights(d_h0)
