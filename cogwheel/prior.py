@@ -355,8 +355,8 @@ class Prior(ABC, utils.JSONMixin):
         include_optional: bool, whether to include parameters with
                           defaults in the returned list.
         """
-        signature = inspect.signature(cls.__init__)
-        all_parameters = list(signature.parameters.values())[1:]
+        signature = inspect.signature(cls)
+        all_parameters = list(signature.parameters.values())
         sorted_unique_parameters = sorted(
             dict.fromkeys(all_parameters),
             key=lambda par: (par.kind, par.default is not par.empty))
