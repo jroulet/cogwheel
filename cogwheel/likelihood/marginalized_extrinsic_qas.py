@@ -97,8 +97,6 @@ class MarginalizedExtrinsicLikelihoodQAS(BaseRelativeBinning):
             s2x_n=0.,
             s2y_n=0.)
 
-        self._h0_f = None  # Set by ``._set_summary()``
-        self._h0_fbin = None  # Set by ``._set_summary()``
         self._d_h_weights = None  # Set by ``._set_summary()``
         self._h_h_weights = None  # Set by ``._set_summary()``
 
@@ -127,44 +125,46 @@ class MarginalizedExtrinsicLikelihoodQAS(BaseRelativeBinning):
         disable_precession = self.waveform_generator.disable_precession
         self.waveform_generator.disable_precession = False
 
-        self._h0_f = np.zeros(len(self.event_data.frequencies),
-                              dtype=np.complex_)
-        self._h0_f[..., self.event_data.fslice] \
+        h0_f = np.zeros(len(self.event_data.frequencies),
+                        dtype=np.complex_)
+        h0_f[..., self.event_data.fslice] \
             = self.waveform_generator.get_hplus_hcross(
                 self.event_data.frequencies[self.event_data.fslice],
                 self.par_dic_0)[0]  # r
 
-        self._h0_fbin = self.waveform_generator.get_hplus_hcross(
+        h0_fbin = self.waveform_generator.get_hplus_hcross(
             self.fbin, self.par_dic_0)[0]  # b
 
-        self._set_d_h_weights()
-        self._set_h_h_weights()
+        self._stall_ringdown(h0_f, h0_fbin)
+
+        self._set_d_h_weights(h0_f, h0_fbin)
+        self._set_h_h_weights(h0_f, h0_fbin)
 
         # Reset
         self.waveform_generator.disable_precession = disable_precession
 
-    def _set_d_h_weights(self):
+    def _set_d_h_weights(self, h0_f, h0_fbin):
         shifts = np.exp(2j*np.pi * np.outer(self.event_data.frequencies,
                                             self.waveform_generator.tcoarse
                                             + self._times))  # rt
 
-        d_h_no_shift = self.event_data.blued_strain * self._h0_f.conj()  # dr
+        d_h_no_shift = self.event_data.blued_strain * h0_f.conj()  # dr
         d_h_summary = np.array(
             [self._get_summary_weights(d_h_no_shift * shift)  # db
              for shift in shifts.T])  # tdb  # Comprehension saves memory
 
         self._d_h_weights = np.einsum('tdb,b,d->tdb',
                                       d_h_summary,
-                                      1 / self._h0_fbin.conj(),
+                                      1 / h0_fbin.conj(),
                                       1 / self.asd_drift**2)  # mptdb
 
-    def _set_h_h_weights(self):
+    def _set_h_h_weights(self, h0_f, h0_fbin):
         h0_h0 = np.einsum('r,dr,d->dr',
-                          utils.abs_sq(self._h0_f),
+                          utils.abs_sq(h0_f),
                           self.event_data.wht_filter ** 2,
                           self.asd_drift ** -2)  # dr
         self._h_h_weights = (self._get_summary_weights(h0_h0).real
-                             / utils.abs_sq(self._h0_fbin))  # db
+                             / utils.abs_sq(h0_fbin))  # db
 
     def _get_dh_hh(self, par_dic):
         h_b = self.waveform_generator.get_hplus_hcross(

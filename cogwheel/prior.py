@@ -141,7 +141,7 @@ class Prior(ABC, utils.JSONMixin):
         whose values are pairs of floats defining their ranges.
         Needs to be defined by the subclass.
         If the ranges are not known before class instantiation,
-        define a class attribute as {'<par_name>': NotImplemented, ...}
+        define a class attribute as {'<par_name>': None, ...}
         and populate the values at the subclass' `__init__()` before
         calling `Prior.__init__()`.
         """
@@ -150,13 +150,11 @@ class Prior(ABC, utils.JSONMixin):
     @utils.ClassProperty
     @abstractmethod
     def standard_params(self):
-        """
-        List of standard parameter names.
-        """
+        """List of standard parameter names."""
         return []
 
     @abstractmethod
-    def lnprior(self, *par_vals, **par_dic):
+    def lnprior(self, *par_vals, **par_dic) -> float:
         """
         Natural logarithm of the prior probability density.
         Take `self.sampled_params + self.conditioned_on` parameters and
@@ -164,7 +162,7 @@ class Prior(ABC, utils.JSONMixin):
         """
 
     @abstractmethod
-    def transform(self, *par_vals, **par_dic):
+    def transform(self, *par_vals, **par_dic) -> dict:
         """
         Transform sampled parameter values to standard parameter values.
         Take `self.sampled_params + self.conditioned_on` parameters and
@@ -172,7 +170,7 @@ class Prior(ABC, utils.JSONMixin):
         """
 
     @abstractmethod
-    def inverse_transform(self, *par_vals, **par_dic):
+    def inverse_transform(self, *par_vals, **par_dic) -> dict:
         """
         Transform standard parameter values to sampled parameter values.
         Take `self.standard_params + self.conditioned_on` parameters and
@@ -357,8 +355,8 @@ class Prior(ABC, utils.JSONMixin):
         include_optional: bool, whether to include parameters with
                           defaults in the returned list.
         """
-        signature = inspect.signature(cls.__init__)
-        all_parameters = list(signature.parameters.values())[1:]
+        signature = inspect.signature(cls)
+        all_parameters = list(signature.parameters.values())
         sorted_unique_parameters = sorted(
             dict.fromkeys(all_parameters),
             key=lambda par: (par.kind, par.default is not par.empty))
@@ -557,7 +555,6 @@ class CombinedPrior(Prior):
             and return a float.
             """
             return self.lnprior_and_transform(*par_vals, **par_dic)[0]
-
 
         # Witchcraft to fix the functions' signatures:
         self_parameter = inspect.Parameter('self',

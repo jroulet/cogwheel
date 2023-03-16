@@ -10,6 +10,7 @@ single parameter estimation run.
 
 import argparse
 import copy
+import inspect
 import json
 import pathlib
 from pstats import Stats
@@ -21,6 +22,7 @@ import matplotlib as mpl
 import pandas as pd
 
 from cogwheel import gw_plotting
+from cogwheel.likelihood import RelativeBinningLikelihood
 from cogwheel import utils
 from cogwheel import sampling
 from cogwheel import prior
@@ -62,11 +64,17 @@ class RundirPostprocessor:
         self.rundir = pathlib.Path(rundir)
         self.relative_binning_boost = relative_binning_boost
 
-        sampler = utils.read_json(self.rundir/sampling.Sampler.JSON_FILENAME)
-        self.posterior = sampler.posterior
+        likelihood = utils.read_json(
+            self.rundir/sampling.Sampler.JSON_FILENAME).posterior.likelihood
+
+        if not isinstance(likelihood, RelativeBinningLikelihood):
+            init_dict = likelihood.get_init_dict()
+            keys = inspect.signature(RelativeBinningLikelihood).parameters
+            likelihood = RelativeBinningLikelihood(
+                **{key: init_dict[key] for key in keys})
+
+        self.likelihood = likelihood
         self.samples_path = self.rundir/sampling.SAMPLES_FILENAME
-        if not self.samples_path.exists():
-            sampler.load_samples().to_feather(self.samples_path)
         self.samples = pd.read_feather(self.samples_path)
 
         try:
@@ -76,11 +84,11 @@ class RundirPostprocessor:
             self.tests = {'asd_drift': [],
                           'relative_binning': {},
                           'lnl_max': None,
-                          'lnl_0': self.posterior.likelihood.lnlike(
-                              self.posterior.likelihood.par_dic_0)}
+                          'lnl_0': self.likelihood.lnlike(
+                              self.likelihood.par_dic_0)}
 
         self._lnl_aux_cols = self.get_lnl_aux_cols(
-            self.posterior.likelihood.event_data.detector_names)
+            self.likelihood.event_data.detector_names)
 
         self._asd_drifts_subset = None
 
@@ -122,9 +130,9 @@ class RundirPostprocessor:
         """
         # Increase the relative-binning frequency resolution:
         try:  # few seconds faster...
-            likelihood = copy.deepcopy(self.posterior.likelihood)
+            likelihood = copy.deepcopy(self.likelihood)
         except TypeError:  # ...but likelihood might be un-pickleable
-            likelihood = self.posterior.likelihood.reinstantiate()
+            likelihood = self.likelihood.reinstantiate()
 
         if likelihood.pn_phase_tol:
             likelihood.pn_phase_tol /= self.relative_binning_boost
@@ -146,7 +154,7 @@ class RundirPostprocessor:
         arising from the choice of somewhat-parameter-dependent
         asd_drift correction. Store in `self.tests['asd_drift']`.
         """
-        ref_lnl = self._apply_asd_drift(self.posterior.likelihood.asd_drift)
+        ref_lnl = self._apply_asd_drift(self.likelihood.asd_drift)
         for asd_drift in self._get_representative_asd_drifts():
             lnl = self._apply_asd_drift(asd_drift)
             # Difference in log likelihood from changing asd_drift:
@@ -165,7 +173,7 @@ class RundirPostprocessor:
         standard deviation of the errors but ignored in the maximum.
         """
         dlnl = (self.samples[self.LNL_COL]
-                - self._apply_asd_drift(self.posterior.likelihood.asd_drift))
+                - self._apply_asd_drift(self.likelihood.asd_drift))
         weights = self.samples.get(utils.WEIGHTS_NAME)
         _, dlnl_std = utils.weighted_avg_and_std(dlnl, weights=weights)
         self.tests['relative_binning'] = {'dlnl_std': dlnl_std,
@@ -211,14 +219,14 @@ class RundirPostprocessor:
         subset = self.samples.sample(
             n_subset, weights=self.samples.get(utils.WEIGHTS_NAME))
         self._asd_drifts_subset = [
-            self.posterior.likelihood.compute_asd_drift(sample)
+            self.likelihood.compute_asd_drift(sample)
             for sample in self._standard_samples(subset)]
 
     def _standard_samples(self, samples=None):
         """Iterator over standard parameter samples."""
         samples = samples if samples is not None else self.samples
         return (dict(sample) for _, sample in samples[
-            self.posterior.likelihood.waveform_generator.params].iterrows())
+            self.likelihood.waveform_generator.params].iterrows())
 
 
 def postprocess_eventdir(eventdir, reference_rundir=None, outfile=None):
