@@ -124,10 +124,10 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         h0_f[:, self.event_data.fslice] \
             = (1, 1j) @ self.waveform_generator.get_hplus_hcross(
                 self.event_data.frequencies[self.event_data.fslice],
-                self.par_dic_0, by_m=True)  # mpr
+                self.par_dic_0, by_m=True)  # mr
 
         h0_fbin = (1, 1j) @ self.waveform_generator.get_hplus_hcross(
-            self.fbin, self.par_dic_0, by_m=True)  # mpb
+            self.fbin, self.par_dic_0, by_m=True)  # mb
 
         self.asd_drift = self.compute_asd_drift(self.par_dic_0)
 
@@ -143,7 +143,7 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
                                             + self._times))  # rt
         d_h_no_shift = np.einsum('dr,mr->mdr',
                                  self.event_data.blued_strain,
-                                 h0_f.conj())  # mpdr
+                                 h0_f.conj())  # mdr
         d_h_summary = np.array(
             [self._get_summary_weights(d_h_no_shift * shift)  # mdb
              for shift in shifts.T])  # tmdb  # Comprehension saves memory
@@ -159,7 +159,7 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
                           h0_f[m_inds],
                           h0_f[mprime_inds].conj(),
                           self.event_data.wht_filter ** 2,
-                          self.asd_drift ** -2)  # mpPdr
+                          self.asd_drift ** -2)  # mdr
         self._h_h_weights = np.einsum('mdb,mb,mb->mdb',
                                       self._get_summary_weights(h0_h0),
                                       1 / h0_fbin[m_inds],
