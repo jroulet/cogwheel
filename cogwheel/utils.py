@@ -24,7 +24,7 @@ WEIGHTS_NAME = 'weights'
 
 class ClassProperty:
     """
-    Can be used like `@property` but for class attributes instead of
+    Can be used like ``@property`` but for class attributes instead of
     instance attributes.
     """
     def __init__(self, func):
@@ -37,8 +37,8 @@ class ClassProperty:
 def differential_evolution_with_guesses(
         func, bounds, guesses, **kwargs):
     """
-    Augmented differential_evolution solver that incorporates
-    initial guesses passed by the user.
+    Augmented differential_evolution solver that incorporates initial
+    guesses passed by the user.
 
     Parameters
     ----------
@@ -55,9 +55,7 @@ def differential_evolution_with_guesses(
 
 class _DifferentialEvolutionSolverWithGuesses(
         _differentialevolution.DifferentialEvolutionSolver):
-    """
-    Class that implements `differential_evolution_with_guesses()`.
-    """
+    """Class that implements `differential_evolution_with_guesses()`."""
     def __init__(self, func, bounds, guesses, **kwargs):
         super().__init__(func, bounds, **kwargs)
         initial_pop = self._scale_parameters(self.population)
@@ -70,7 +68,7 @@ cached_functions_registry = []
 
 def lru_cache(*args, **kwargs):
     """
-    Decorator like `functools.lru_cache` that also registers the
+    Decorator like ``functools.lru_cache`` that also registers the
     decorated function in ``cached_functions_registry`` so all caches
     can easily be cleared with ``clear_caches()``.
     """
@@ -82,9 +80,7 @@ def lru_cache(*args, **kwargs):
 
 
 def clear_caches():
-    """
-    Clear caches of functions decorated with ``lru_cache``.
-    """
+    """Clear caches of functions decorated with ``lru_cache``."""
     for function in cached_functions_registry:
         function.cache_clear()
 
@@ -164,22 +160,24 @@ def exp_normalize(lnprob, axis=-1):
 @njit
 def rand_choice_nb(arr, cprob, nvals):
     """
-    Sample randomly from a list of probabilities
+    Sample randomly from a list of probabilities.
 
     Parameters
     ----------
     arr: np.ndarray
-        A nD numpy array of values to sample from
+        A nD numpy array of values to sample from.
 
     cprob: np.arrray
-        A 1D numpy array of cumulative probabilities for the given samples
+        A 1D numpy array of cumulative probabilities for the given
+        samples.
 
     nvals: int
-        Number of samples desired
+        Number of samples desired.
 
     Return
     ------
-    nvals random samples from the given array with the given probabilities
+    `nvals` random samples from the given array with the given
+    probabilities.
     """
     rsamps = np.random.random(size=nvals)
     return arr[np.searchsorted(cprob, rsamps, side="right")]
@@ -209,7 +207,7 @@ def merge_dictionaries_safely(*dics):
     """
     Merge multiple dictionaries into one.
     Accept repeated keys if values are consistent, otherwise raise
-    `ValueError`.
+    ``ValueError``.
     """
     merged = {}
     for dic in dics:
@@ -218,26 +216,6 @@ def merge_dictionaries_safely(*dics):
                 raise ValueError(f'Found incompatible values for {key}')
         merged |= dic
     return merged
-
-
-def rm_suffix(string, suffix='.json', new_suffix=None):
-    """
-    Removes suffix from string if present, and appends a new suffix if
-    requested.
-
-    Parameters
-    ----------
-    string: Input string to modify.
-    suffix: Suffix to remove if present.
-    new_suffix: Suffix to add.
-    """
-    if string.endswith(suffix):
-        outstr = string[:-len(suffix)]
-    else:
-        outstr = string
-    if new_suffix is not None:
-        outstr += new_suffix
-    return outstr
 
 
 def update_dataframe(df1, df2):
@@ -280,7 +258,6 @@ def handle_scalars(function):
     def new_function(*args, **kwargs):
         return function(*args, **kwargs)[()]
     return new_function
-
 
 
 def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
@@ -526,9 +503,7 @@ class_registry = {}
 
 
 def read_json(json_path):
-    """
-    Return a class instance that was saved to json.
-    """
+    """Return a class instance that was saved to json."""
     # Accept a directory that contains a single json file
     json_path = pathlib.Path(json_path)
     if json_path.is_dir():
@@ -615,9 +590,7 @@ class JSONMixin:
 
 
 class NumpyEncoder(json.JSONEncoder):
-    """
-    Encoder for numpy data types.
-    """
+    """Encoder for numpy data types."""
     def default(self, o):
         if isinstance(o, (np.int_, np.intc, np.intp, np.int8,
                           np.int16, np.int32, np.int64, np.uint8,
