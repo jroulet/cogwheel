@@ -279,10 +279,20 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
             cumsnr2 /= cumsnr2[-1]
             i_99 = np.searchsorted(cumsnr2, .99)
             f_99 = self.event_data.frequencies[i_99]
-            h0_const = h0_f[i][i_99]
 
-            h0_f[i][self.event_data.frequencies > f_99] = h0_const
-            h0_fbin[i][self.fbin > f_99] = h0_const
+            ratio = h0_f[i][i_99] / h0_f[i][i_99-1]
+            alpha = (np.abs(ratio) - 1) / self.event_data.df * f_99
+            beta = np.angle(ratio) / self.event_data.df
+
+            def smoothed_h0(f):
+                """Replacement for the high frequencies f > f_99."""
+                return h0_f[i][i_99] * (f/f_99)**alpha * np.exp(1j*beta*(f-f_99))
+
+            mask = self.event_data.frequencies > f_99
+            h0_f[i][mask] = smoothed_h0(self.event_data.frequencies[mask])
+
+            mask = self.fbin > f_99
+            h0_fbin[i][mask] = smoothed_h0(self.fbin[mask])
 
     def get_init_dict(self):
         """
@@ -491,7 +501,19 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, self.par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
 
+        # Temporarily undo big time shift so waveform is smooth at
+        # high frequencies:
+        shift_f = np.exp(-2j*np.pi*self.event_data.frequencies
+                         * self.event_data.tcoarse)
+        shift_fbin = np.exp(-2j*np.pi*self.fbin
+                            * self.event_data.tcoarse)
+        self._h0_f *= shift_f.conj()
+        self._h0_fbin *= shift_fbin.conj()
+        # Ensure reference waveform is smooth and !=0 at high frequency:
         self._stall_ringdown(self._h0_f, self._h0_fbin)
+        # Reapply big time shift:
+        self._h0_f *= shift_f
+        self._h0_fbin *= shift_fbin
 
         d_h0 = self.event_data.blued_strain * self._h0_f.conj()
         self._d_h_weights = (self._get_summary_weights(d_h0)
