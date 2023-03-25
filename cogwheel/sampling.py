@@ -170,7 +170,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         self.to_json(rundir, overwrite=resuming)
 
         sbatch_cmds += (f'--mem-per-cpu={memory_per_task}',)
-        args = rundir.resolve()
+        args = str(rundir.resolve())
 
         if not postprocess:
             args += ' --no-postprocessing'
@@ -489,7 +489,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Sample a distribution.')
     parser.add_argument('sampler_path', help='''path to a json file from a
                                                 `sampling.Sampler` object.''')
-    parser.add_argument('--no_postprocessing', action='store_true',
+    parser.add_argument('--no-postprocessing', action='store_true',
                         help='''Not postprocess the samples.''')
     parser_args = parser.parse_args()
     main(parser_args.sampler_path, not parser_args.no_postprocessing)

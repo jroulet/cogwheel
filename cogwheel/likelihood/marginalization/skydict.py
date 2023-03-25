@@ -175,7 +175,9 @@ class SkyDictionary(utils.JSONMixin):
             timeseries = timeseries * scipy.signal.get_window(
                 window, shape[axis]).reshape(shape)
 
-        fs_ratio = self.f_sampling * (times[1] - times[0])
+        fs_ratio = np.round(
+            self.f_sampling * (times[1] - times[0]),
+            decimals=10)  # Prevent machine precision problems
         if fs_ratio != 1:
             timeseries, times = scipy.signal.resample(
                 timeseries, int(len(times) * fs_ratio), times, axis=axis)

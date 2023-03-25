@@ -327,7 +327,7 @@ class CornerPlot:
         return list(self.arrs_1d)
 
     def plot(self, fig=None, title=None, max_figsize=10., max_n_ticks=4,
-             tightness=None, label=None):
+             tightness=None, label=None, legend_title=None):
         """
         Make a corner plot of the distribution.
 
@@ -355,6 +355,9 @@ class CornerPlot:
 
         label: str, optional
             Legend label.
+
+        legend_title: str, optional
+            Legend title.
         """
         self._setup_fig(fig, max_figsize, max_n_ticks=max_n_ticks)
 
@@ -373,7 +376,8 @@ class CornerPlot:
         self.axes[0][-1].legend(
             *self.axes[0][0].get_legend_handles_labels(),
             bbox_to_anchor=(1, 1), frameon=False,
-            loc='upper right', borderaxespad=0, borderpad=0)
+            loc='upper right', borderaxespad=0, borderpad=0,
+            title=legend_title)
 
     def scatter_points(self, scatter_points, colors=None,
                        adjust_lims=False, **kwargs):
@@ -615,7 +619,7 @@ class MultiCornerPlot:
     """
     corner_plot_cls = CornerPlot  # Can be overriden by subclasses
 
-    def __init__(self, dataframes, labels=None, bins=40, params=None,
+    def __init__(self, dataframes, labels=None, bins=None, params=None,
                  density=True, weights_col='weights',
                  **plotstyle_kwargs):
         """
@@ -664,7 +668,7 @@ class MultiCornerPlot:
             for samples in dataframes]
 
     def plot(self, max_figsize=10., max_n_ticks=4, tightness=None,
-             title=None):
+             title=None, legend_title=None):
         """
         Make a corner plot with all distributions overlaid.
 
@@ -680,11 +684,18 @@ class MultiCornerPlot:
             Fraction of the 1-d marginal posterior to enclose. Useful
             to zoom-in around the areas with non-negligible probability
             density.
+
+        title: str, optional
+            Figure title.
+
+        legend_title: str, optional
+            Legend title.
         """
         fig = None
         for corner_plot, label in zip(self.corner_plots, self.labels):
             corner_plot.plot(fig=fig, max_figsize=max_figsize,
-                             max_n_ticks=max_n_ticks, label=label, title=title)
+                             max_n_ticks=max_n_ticks, label=label, title=title,
+                             legend_title=legend_title)
             fig = corner_plot.fig
 
         if tightness:
