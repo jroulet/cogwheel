@@ -619,7 +619,7 @@ class MultiCornerPlot:
     """
     corner_plot_cls = CornerPlot  # Can be overriden by subclasses
 
-    def __init__(self, dataframes, labels=None, bins=40, params=None,
+    def __init__(self, dataframes, labels=None, bins=None, params=None,
                  density=True, weights_col='weights',
                  **plotstyle_kwargs):
         """
