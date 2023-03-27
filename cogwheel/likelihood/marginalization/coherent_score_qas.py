@@ -222,7 +222,8 @@ class CoherentScoreQAS(BaseCoherentScore):
         if marg_info.q_inds.size == 0:
             return dict.fromkeys(['d_luminosity', 'dec', 'lon', 'phi_ref',
                                   'psi', 'iota', 't_geocenter',
-                                  'lnl_marginalized', 'lnl'],
+                                  'lnl_marginalized', 'lnl', 'h_h',
+                                  'n_effective', 'n_qmc'],
                 np.full(num, np.nan)[()])
 
         random_ids = self._rng.choice(len(marg_info.q_inds), size=num,
@@ -248,6 +249,8 @@ class CoherentScoreQAS(BaseCoherentScore):
             'psi': self._qmc_sequence['psi'][q_ids],
             'iota': np.arccos(cosiota),
             't_geocenter': t_geocenter,
-            'lnl_marginalized': marg_info.lnl_marginalized,
+            'lnl_marginalized': np.full(num, marg_info.lnl_marginalized)[()],
             'lnl': real_dh / distance_ratio - h_h / distance_ratio**2 / 2,
-            'h_h': h_h / distance_ratio**2}
+            'h_h': h_h / distance_ratio**2,
+            'n_effective': np.full(num, marg_info.n_effective)[()],
+            'n_qmc': np.full(num, marg_info.n_qmc)[()]}

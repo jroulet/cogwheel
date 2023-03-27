@@ -168,7 +168,7 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         if marg_info.q_inds.size == 0:
             return dict.fromkeys(['d_luminosity', 'dec', 'lon', 'phi_ref',
                                   'psi', 't_geocenter', 'lnl_marginalized',
-                                  'lnl'],
+                                  'lnl', 'h_h', 'n_effective', 'n_qmc'],
                                  np.full(num, np.nan)[()])
 
         random_ids = self._rng.choice(len(marg_info.q_inds), size=num,
@@ -184,15 +184,18 @@ class CoherentScoreHM(BaseCoherentScoreHM):
 
         d_luminosity = self._sample_distance(d_h, h_h)
         distance_ratio = d_luminosity / self.lookup_table.REFERENCE_DISTANCE
-        return {'d_luminosity': d_luminosity,
-                'dec': self.sky_dict.sky_samples['lat'][sky_ids],
-                'lon': self.sky_dict.sky_samples['lon'][sky_ids],
-                'phi_ref': self._phi_ref[o_ids],
-                'psi': self._qmc_sequence['psi'][q_ids],
-                't_geocenter': t_geocenter,
-                'lnl_marginalized': marg_info.lnl_marginalized,
-                'lnl': d_h / distance_ratio - h_h / distance_ratio**2 / 2,
-                'h_h': h_h / distance_ratio**2}
+        return {
+            'd_luminosity': d_luminosity,
+            'dec': self.sky_dict.sky_samples['lat'][sky_ids],
+            'lon': self.sky_dict.sky_samples['lon'][sky_ids],
+            'phi_ref': self._phi_ref[o_ids],
+            'psi': self._qmc_sequence['psi'][q_ids],
+            't_geocenter': t_geocenter,
+            'lnl_marginalized': np.full(num, marg_info.lnl_marginalized)[()],
+            'lnl': d_h / distance_ratio - h_h / distance_ratio**2 / 2,
+            'h_h': h_h / distance_ratio**2,
+            'n_effective': np.full(num, marg_info.n_effective)[()],
+            'n_qmc': np.full(num, marg_info.n_qmc)[()]}
 
     def _get_dh_hh_qo(self, sky_inds, q_inds, t_first_det, times,
                       dh_mptd, hh_mppd):
