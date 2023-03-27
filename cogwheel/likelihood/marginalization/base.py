@@ -13,6 +13,7 @@ marginalization for waveforms with higher modes.
 from abc import abstractmethod, ABC
 import itertools
 from dataclasses import dataclass
+from functools import wraps
 import warnings
 import numba
 import numpy as np
@@ -94,9 +95,11 @@ class MarginalizationInfo:
         include information from another instance. The intended use is
         to extend the QMC sequence if it has too low ``.n_effective``.
 
+        Parameters
+        ----------
         other: MarginalizationInfo
-            Typically ``self`` will be the first half of the extended QMC
-            sequence and ``other`` would be the second half.
+            Typically ``self`` will be the first half of the extended
+            QMC sequence and ``other`` would be the second half.
         """
         self.n_qmc += other.n_qmc
 
@@ -107,7 +110,7 @@ class MarginalizationInfo:
             setattr(self, attr, updated)
 
     @property
-    def n_effective(self):
+    def n_effective(self) -> float:
         """
         A proxy of the effective number of samples contributing to the
         QMC integral. Note that the variance decreases faster than
@@ -124,12 +127,12 @@ class MarginalizationInfo:
         return utils.n_effective(weights_q)
 
     @property
-    def weights(self):
+    def weights(self) -> np.ndarray:
         """Weights of the QMC samples normalized to have unit sum."""
         return utils.exp_normalize(self.ln_weights)
 
     @property
-    def lnl_marginalized(self):
+    def lnl_marginalized(self) -> float:
         """Log likelihood marginalized over extrinsic parameters."""
         if self.q_inds.size == 0:
             return -np.inf
@@ -151,6 +154,7 @@ class MarginalizationInfoHM(MarginalizationInfo):
     """
     o_inds: np.ndarray
 
+    @wraps(MarginalizationInfo.update)
     def update(self, other):
         super().update(other)
         self.o_inds = np.concatenate([self.o_inds, other.o_inds])
