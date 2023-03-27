@@ -97,6 +97,8 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         super().__init__(event_data, waveform_generator, par_dic_0,
                          fbin, pn_phase_tol, spline_degree)
 
+        self._log = []
+
     def _set_summary(self):
         """
         Compute summary data for the fiducial waveform at all detectors.
@@ -206,6 +208,10 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         """
         marg_info = self.coherent_score.get_marginalization_info(
             *self._get_dh_hh(par_dic), self._times)
+
+        self._log.append({'lnl_marginalized': marg_info.lnl_marginalized,
+                          'n_effective': marg_info.n_effective,
+                          'n_qmc': marg_info.n_qmc})
 
         # Reject samples with large variance to avoid artifacts. If they
         # should contribute to the posterior, by now we are in trouble
