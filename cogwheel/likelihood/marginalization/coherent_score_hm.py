@@ -61,6 +61,9 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         i_chunk: int
             Index to ``._qmc_ind_chunks``.
         """
+        if dh_mptd.shape[0] != self.m_arr.size:
+            raise ValueError('Incorrect number of harmonic modes.')
+
         q_inds = self._qmc_ind_chunks[i_chunk]  # Will update along the way
         n_qmc = len(q_inds)
 
