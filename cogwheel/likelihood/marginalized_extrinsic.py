@@ -2,6 +2,7 @@
 Define class ``MarginalizedExtrinsicLikelihood``, to use with
 ``IntrinsicIASPrior`` (or similar).
 """
+from abc import abstractmethod
 import numpy as np
 import pandas as pd
 
@@ -10,32 +11,32 @@ import lal
 from cogwheel import skyloc_angles
 from cogwheel import utils
 
-from .likelihood import check_bounds
 from .relative_binning import BaseRelativeBinning
 from .marginalization import SkyDictionary, CoherentScoreHM
 
 
-class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
+class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
     """
-    Class to evaluate the likelihood marginalized over sky location,
-    time of arrival, polarization, distance and orbital phase for
-    quasicircular waveforms with generic harmonic modes and spins, and
-    to resample these parameters from the conditional posterior for
-    demarginalization in postprocessing.
+    Base class for computation of marginalized likelihood over extrinsic
+    parameters.
 
-    Note: comments throughout the code refer to array indices per:
-        q: QMC sample id
-        m: harmonic m number id
-        p: polarization (+ or x) id
-        d: detector id
-        b: frequency bin id
-        r: rfft frequency id
-        t: detector time id
-        o: orbital phase id
-        i: important (i.e. with high enough likelihood) sample id
+    Subclassed by MarginalizedExtrinsicLikelihood and
+    MarginalizedExtrinsicLikelihoodQAS.
     """
-    params = ['f_ref', 'iota', 'l1', 'l2', 'm1', 'm2', 's1x_n', 's1y_n', 's1z',
-              's2x_n', 's2y_n', 's2z']
+    @abstractmethod
+    def _create_coherent_score(self, sky_dict, m_arr):
+        """Return a coherent score instance of the appropriate type."""
+
+    @abstractmethod
+    def _get_dh_hh(self, par_dic):
+        """
+        Return (d|h) and (h|h) as required by
+        ``self._coherent_score_cls.get_marginalization_info()``.
+        """
+
+    @abstractmethod
+    def _get_many_dh_hh(self, samples):
+        """Similar to `_get_dh_hh` except for an input dataframe."""
 
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None, spline_degree=3,
@@ -69,7 +70,7 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
             matched-filtering series, relative to
             ``event_data.tgps + par_dic_0['t_geocenter']``.
 
-        coherent_score: cogwheel.likelihood.CoherentScoreHM
+        coherent_score: CoherentScoreHM, CoherentScoreQAS as appropriate
             Instance of coherent score, optional. One with default
             settings will be created by default.
         """
@@ -78,7 +79,8 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
             # are commensurate:
             f_sampling = SkyDictionary.choose_f_sampling(
                 event_data.frequencies[-1])
-            coherent_score = CoherentScoreHM(
+
+            coherent_score = self._create_coherent_score(
                 sky_dict=SkyDictionary(event_data.detector_names,
                                        f_sampling=f_sampling),
                 m_arr=list(waveform_generator._harmonic_modes_by_m))
@@ -87,9 +89,6 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         self.t_range = t_range
         self._times = (np.arange(*t_range, 1 / (2*event_data.frequencies[-1]))
                        + par_dic_0.get('t_geocenter', 0))
-        self._ref_dic = dict(
-            d_luminosity=self.coherent_score.lookup_table.REFERENCE_DISTANCE,
-            phi_ref=0.)
 
         self._d_h_weights = None  # Set by ``._set_summary()``
         self._h_h_weights = None  # Set by ``._set_summary()``
@@ -97,7 +96,114 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         super().__init__(event_data, waveform_generator, par_dic_0,
                          fbin, pn_phase_tol, spline_degree)
 
+        self._ref_dic = {
+            'd_luminosity':
+                self.coherent_score.lookup_table.REFERENCE_DISTANCE,
+            'phi_ref':0.}
+
         self._log = []
+
+    def lnlike(self, par_dic):
+        """
+        Natural log of the likelihood marginalized over extrinsic
+        parameters (sky location, time of arrival, polarization,
+        distance and orbital phase). This quantity is estimated via
+        Quasi Monte Carlo integration so it is not deterministic
+        (calling the method twice with the same parameters does not
+        produce the same answer).
+
+        Parameters
+        ----------
+        par_dic: dict
+            Must contain keys for all ``.params``.
+
+        Return
+        ------
+        lnlike: float
+            Log of the marginalized likelihood.
+        """
+        marg_info = self.coherent_score.get_marginalization_info(
+            *self._get_dh_hh(par_dic), self._times)
+
+        self._log.append({'lnl_marginalized': marg_info.lnl_marginalized,
+                          'n_effective': marg_info.n_effective,
+                          'n_qmc': marg_info.n_qmc})
+
+        # Reject samples with large variance to avoid artifacts. If they
+        # should contribute to the posterior, by now we are in trouble
+        # anyways.
+        if marg_info.n_effective < self.coherent_score.min_n_effective:
+            return -np.inf
+
+        return marg_info.lnl_marginalized
+
+    def postprocess_samples(self, samples: pd.DataFrame, num=None):
+        """
+        Add extrinsic parameter samples to given intrinsic parameters,
+        with values taken randomly from the conditional posterior.
+        `samples` is edited in-place.
+
+        Parameters
+        ----------
+        samples: pd.DataFrame
+            Dataframe of intrinsic parameter samples, needs to have
+            columns for all `self.params`.
+
+        num: None (default) or int
+            How many extrinsic parameters to draw for every intrinsic.
+            If None, columns for extrinsic parameters are added to
+            `samples`.
+            If an int, rows are added so that the total is
+            `num * len(samples)`. Each intrinsic parameter value will be
+            repeated `num` times. The index will not be preserved.
+        """
+        all_dh, all_hh = self._get_many_dh_hh(samples)
+        extrinsic = [self.coherent_score.gen_samples(*dh_hh, self._times, num)
+                     for dh_hh in zip(all_dh, all_hh)]
+
+        gmst = lal.GreenwichMeanSiderealTime(self.event_data.tgps)
+        for ext in extrinsic:
+            ext['ra'] = skyloc_angles.lon_to_ra(ext['lon'], gmst)
+
+        if isinstance(num, int):
+            samples.reset_index(drop=True, inplace=True)
+            fullsamples = samples.loc[samples.index.repeat(num)].reset_index(
+                drop=True)
+            for i, sample in fullsamples.iterrows():
+                samples.loc[i] = sample
+
+            extrinsic_df = pd.concat((pd.DataFrame(ext) for ext in extrinsic),
+                                     ignore_index=True)
+        else:
+            extrinsic_df = pd.DataFrame.from_records(extrinsic)
+        utils.update_dataframe(samples, extrinsic_df)
+
+
+class MarginalizedExtrinsicLikelihood(
+        BaseMarginalizedExtrinsicLikelihood):
+    """
+    Class to evaluate the likelihood marginalized over sky location,
+    time of arrival, polarization, distance and orbital phase for
+    quasicircular waveforms with generic harmonic modes and spins, and
+    to resample these parameters from the conditional posterior for
+    demarginalization in postprocessing.
+
+    Note: comments throughout the code refer to array indices per:
+        q: QMC sample id
+        m: harmonic m number id
+        p: polarization (+ or x) id
+        d: detector id
+        b: frequency bin id
+        r: rfft frequency id
+        t: detector time id
+        o: orbital phase id
+        i: important (i.e. with high enough likelihood) sample id
+    """
+    params = ['f_ref', 'iota', 'l1', 'l2', 'm1', 'm2', 's1x_n', 's1y_n', 's1z',
+              's2x_n', 's2y_n', 's2z']
+
+    def _create_coherent_score(self, sky_dict, m_arr):
+        return CoherentScoreHM(sky_dict, m_arr=m_arr)
 
     def _set_summary(self):
         """
@@ -188,84 +294,6 @@ class MarginalizedExtrinsicLikelihood(BaseRelativeBinning):
                             h_mpb[m_inds],
                             h_mpb.conj()[mprime_inds])
         return dh_mptd, hh_mppd
-
-    @check_bounds
-    def lnlike(self, par_dic):
-        """
-        Natural log of the likelihood marginalized over extrinsic
-        parameters (sky location, time of arrival, polarization,
-        distance and orbital phase).
-
-        Parameters
-        ----------
-        par_dic: dict
-            Must contain keys for all ``.params``.
-
-        Return
-        ------
-        lnlike: float
-            Log of the marginalized likelihood.
-        """
-        marg_info = self.coherent_score.get_marginalization_info(
-            *self._get_dh_hh(par_dic), self._times)
-
-        self._log.append({'lnl_marginalized': marg_info.lnl_marginalized,
-                          'n_effective': marg_info.n_effective,
-                          'n_qmc': marg_info.n_qmc})
-
-        # Reject samples with large variance to avoid artifacts. If they
-        # should contribute to the posterior, by now we are in trouble
-        # anyways.
-        if marg_info.n_effective < self.coherent_score.min_n_effective:
-            return -np.inf
-
-        return marg_info.lnl_marginalized
-
-    def postprocess_samples(self, samples: pd.DataFrame, num=None):
-        """
-        Generate extrinsic parameter samples given intrinsic parameters,
-        with values taken randomly from the conditional posterior.
-
-        Parameters
-        ----------
-        samples: pd.DataFrame
-            Dataframe of intrinsic parameter samples, needs to have
-            columns for all `self.params`.
-
-        num: int or None
-            How many extrinsic parameters to draw for every intrinsic.
-            If None, columns for extrinsic parameters are added to
-            `samples` in-place.
-            If an int, a new DataFrame of length `num * len(samples)` is
-            returned. Each intrinsic parameter value will be repeated
-            `num` times.
-
-        Return
-        ------
-        ``pd.DataFrame`` with postprocessed samples (if `num` is an
-        integer) or ``None`` (if `num` is ``None``).
-        """
-        dh_nmptd, hh_nmppd = self._get_many_dh_hh(samples)
-
-        extrinsic = [self.coherent_score.gen_samples(dh_mptd, hh_mppd,
-                                                     self._times, num)
-                     for dh_mptd, hh_mppd in zip(dh_nmptd, hh_nmppd)]
-
-        for ext in extrinsic:
-            ext['ra'] = skyloc_angles.lon_to_ra(
-                ext['lon'],
-                lal.GreenwichMeanSiderealTime(self.event_data.tgps))
-
-        if isinstance(num, int):
-            fullsamples = samples.loc[samples.index.repeat(num)].reset_index(
-                drop=True)
-            extrinsic_df = pd.concat((pd.DataFrame(ext) for ext in extrinsic),
-                                     ignore_index=True)
-            utils.update_dataframe(fullsamples, extrinsic_df)
-            return fullsamples
-
-        utils.update_dataframe(samples, pd.DataFrame.from_records(extrinsic))
-        return None
 
     def _get_many_dh_hh(self, samples: pd.DataFrame):
         """
