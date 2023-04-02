@@ -329,11 +329,11 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
         """)
 
     if batch_path:
-        getfile = lambda: open(batch_path, 'w+', encoding='utf-8')
+        getfile = functools.partial(open, batch_path)
     else:
-        getfile = lambda: tempfile.NamedTemporaryFile('w+', encoding='utf-8')
+        getfile = tempfile.NamedTemporaryFile
 
-    with getfile() as batchfile:
+    with getfile('w+', encoding='utf-8') as batchfile:
         batchfile.write(batch_text)
         batchfile.seek(0)
         os.chmod(batchfile.name, 0o777)
@@ -410,11 +410,11 @@ def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
         """)
 
     if batch_path:
-        getfile = lambda: open(batch_path, 'w+', encoding='utf-8')
+        getfile = functools.partial(open, batch_path)
     else:
-        getfile = lambda: tempfile.NamedTemporaryFile('w+', encoding='utf-8')
+        getfile = tempfile.NamedTemporaryFile
 
-    with getfile() as batchfile:
+    with getfile('w+', encoding='utf-8') as batchfile:
         batchfile.write(batch_text)
         batchfile.seek(0)
         os.chmod(batchfile.name, 0o777)

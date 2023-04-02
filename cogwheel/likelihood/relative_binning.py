@@ -284,9 +284,11 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
             alpha = (np.abs(ratio) - 1) / self.event_data.df * f_99
             beta = np.angle(ratio) / self.event_data.df
 
-            def smoothed_h0(f):
+            def smoothed_h0(f, i=i, i_99=i_99, f_99=f_99,
+                            alpha=alpha, beta=beta):
                 """Replacement for the high frequencies f > f_99."""
-                return h0_f[i][i_99] * (f/f_99)**alpha * np.exp(1j*beta*(f-f_99))
+                return h0_f[i][i_99] * (f/f_99)**alpha * np.exp(
+                    1j*beta*(f-f_99))
 
             mask = self.event_data.frequencies > f_99
             h0_f[i][mask] = smoothed_h0(self.event_data.frequencies[mask])

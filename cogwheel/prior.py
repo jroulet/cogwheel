@@ -392,8 +392,7 @@ class Prior(ABC, utils.JSONMixin):
         rep += f') → [{", ".join(self.standard_params)}]'
         return rep
 
-    @staticmethod
-    def get_init_dict():
+    def get_init_dict(self):
         """
         Return dictionary with keyword arguments to reproduce the class
         instance. Subclasses should override this method if they require

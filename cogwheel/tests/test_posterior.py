@@ -43,8 +43,8 @@ class PosteriorTestCase(TestCase):
         for likelihood_class in (get_subclasses(likelihood.BaseRelativeBinning)
                                  - {BaseMarginalizedExtrinsicLikelihood}):
             kwargs = {}
-            if 'lookup_table' in inspect.signature(
-                    likelihood_class.__init__).parameters:
+            if 'lookup_table' in inspect.signature(likelihood_class
+                                                  ).parameters:
                 kwargs['lookup_table'] = lookup_table
 
             cls.likelihoods.append(

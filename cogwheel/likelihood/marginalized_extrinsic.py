@@ -311,7 +311,7 @@ class MarginalizedExtrinsicLikelihood(
         n_n  = len(samples)
         n_p = 2
         d_h_weights = self._d_h_weights.reshape(
-            n_m, n_t*n_d, n_b)  # m(td)b
+            (n_m, n_t*n_d, n_b))  # m(td)b
 
         # Loop instead of broadcasting, to save memory:
         dh_mptdn = np.zeros((n_m, n_p, n_t*n_d, n_n), np.complex_)
