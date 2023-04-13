@@ -456,9 +456,9 @@ class CombinedPrior(Prior):
                                args)))
 
         # Check for all required arguments at once:
-        required = [
-            par.name for par in self.init_parameters(include_optional=False)]
-        if missing := [par for par in required if par not in kwargs]:
+        required = {par.name
+                    for par in self.init_parameters(include_optional=False)}
+        if missing := required - kwargs.keys():
             raise TypeError(f'Missing {len(missing)} required arguments: '
                             f'{", ".join(missing)}')
 

@@ -1,7 +1,7 @@
 """Make likelihood objects (with injections) and test them."""
 
 from unittest import TestCase, main
-import inspect
+from inspect import signature
 
 from cogwheel import data
 from cogwheel import gw_prior
@@ -43,8 +43,7 @@ class PosteriorTestCase(TestCase):
         for likelihood_class in (get_subclasses(likelihood.BaseRelativeBinning)
                                  - {BaseMarginalizedExtrinsicLikelihood}):
             kwargs = {}
-            if 'lookup_table' in inspect.signature(likelihood_class
-                                                  ).parameters:
+            if 'lookup_table' in signature(likelihood_class).parameters:
                 kwargs['lookup_table'] = lookup_table
 
             cls.likelihoods.append(
@@ -93,6 +92,7 @@ class PosteriorTestCase(TestCase):
                         post = Posterior(prior, like)
                         self.assertIsInstance(post.lnposterior(**sampled_dic),
                                               float)
+
 
 if __name__ == '__main__':
     main()
