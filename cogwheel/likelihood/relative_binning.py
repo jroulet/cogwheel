@@ -478,6 +478,22 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
                         hplus_hcross_at_detectors.conj()[mprime_inds])
         return d_h, h_h
 
+    def postprocess_samples(self, samples):
+        """
+        Add column 'lnl' with log-likelihood to a dataframe of samples.
+
+        This method will be called after sampling and may be overriden
+        by subclasses. (E.g. marginalized likelihoods un-marginalize
+        the distribution in postprocessing.)
+
+        Parameters
+        ----------
+        samples: pandas.DataFrame
+            Rows are samples, columns must contain `.params`.
+        """
+        samples['lnl'] = [self.lnlike(dict(sample))
+                          for _, sample in samples[self.params].iterrows()]
+
     def _set_summary(self):
         """
         Compute summary data for the fiducial waveform at all detectors.

@@ -420,19 +420,16 @@ class CBCLikelihood(utils.JSONMixin):
 
     def postprocess_samples(self, samples):
         """
-        Add column 'lnl' with log-likelihood to a dataframe of samples.
-
-        This method will be called after sampling and may be overriden
-        by subclasses. (E.g. marginalized likelihoods un-marginalize
-        the distribution in postprocessing.)
+        Placeholder method that will be called after sampling and may be
+        overriden by subclasses. (E.g. marginalized likelihoods
+        demarginalize the distribution in postprocessing.)
 
         Parameters
         ----------
         samples: pandas.DataFrame
             Rows are samples, columns must contain `.params`.
         """
-        samples['lnl'] = [self.lnlike(dict(sample))
-                          for _, sample in samples[self.params].iterrows()]
+        del samples
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self.event_data.eventname})'
