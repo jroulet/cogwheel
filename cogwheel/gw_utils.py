@@ -174,8 +174,8 @@ class _ChirpMassRangeEstimator:
 
     def _x_of_mchirp(self, mchirp):
         """
-        Chirp-mass reparametrization in which the uncertainty
-        is approximately homogeneous.
+        Chirp-mass reparametrization in which the uncertainty is
+        approximately homogeneous.
         """
         if mchirp > self.mchirp_0:
             return mchirp
@@ -184,18 +184,23 @@ class _ChirpMassRangeEstimator:
 
     def __call__(self, mchirp, sigmas=5, snr=8):
         """
-        Return an array with the minimum and maximum estimated
-        values of mchirp with posterior support.
+        Return an array with the minimum and maximum estimated values of
+        mchirp with posterior support.
         Intended for setting ranges for sampling or maximization.
         Keep in mind this is very approximate, check your results
         responsibly.
 
         Parameters
         ----------
-        mchirp: Estimate of the center of the mchirp distribution.
-        sigmas: How big (conservative) to make the range compared
-                to the expected width of the distribution.
-        snr: Signal-to-noise ratio, lower values give bigger ranges.
+        mchirp: float
+            Estimate of the center of the mchirp distribution (Msun).
+
+        sigmas: float
+            How big (conservative) to make the range compared to the
+            expected width of the distribution.
+
+        snr: float
+            Signal-to-noise ratio, lower values give bigger ranges.
         """
         x = self._x_of_mchirp(mchirp)
         dx = 200. * sigmas / snr
