@@ -84,6 +84,10 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
                 sky_dict=SkyDictionary(event_data.detector_names,
                                        f_sampling=f_sampling),
                 m_arr=list(waveform_generator._harmonic_modes_by_m))
+        elif (list(coherent_score.m_arr)
+              != list(waveform_generator._harmonic_modes_by_m)):
+            raise ValueError('`coherent_score` and `waveform_generator` use '
+                             'different harmonic modes.')
         self.coherent_score = coherent_score
 
         self.t_range = t_range
