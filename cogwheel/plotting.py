@@ -416,12 +416,18 @@ class CornerPlot:
 
         for color, (_, point) in zip(colors, scatter_points.iterrows()):
             for ax, par in zip(np.diagonal(self.axes), self.params):
-                ax.axvline(point[par], color=color)
+                try:
+                    ax.axvline(point[par], color=color)
+                except KeyError:  # `scatter_points` may lack params
+                    pass
 
             for row, col in zip(*np.tril_indices_from(self.axes, -1)):
-                self.axes[row][col].scatter(point[self.params[col]],
-                                            point[self.params[row]],
-                                            color=color, **kwargs)
+                try:
+                    self.axes[row][col].scatter(point[self.params[col]],
+                                                point[self.params[row]],
+                                                color=color, **kwargs)
+                except KeyError:  # `scatter_points` may lack params
+                    pass
 
         if not adjust_lims:
             self.set_lims(**lims)
