@@ -49,7 +49,7 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         Instance of ``MarginalizationInfoHM`` with several fields, see
         its documentation.
         """
-        return super()._get_marginalization_info(dh_mptd, hh_mppd, times)
+        return self._get_marginalization_info(dh_mptd, hh_mppd, times)
 
     def _get_marginalization_info_chunk(self, dh_mptd, hh_mppd, times,
                                         i_chunk):

@@ -50,7 +50,7 @@ class CoherentScoreQAS(BaseCoherentScore):
         Instance of ``MarginalizationInfo`` with several fields, see its
         documentation.
         """
-        return super()._get_marginalization_info(dh_td, hh_d, times)
+        return self._get_marginalization_info(dh_td, hh_d, times)
 
     def _get_marginalization_info_chunk(self, dh_td, hh_d, times,
                                         i_chunk):
