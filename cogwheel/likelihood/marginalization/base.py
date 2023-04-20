@@ -471,7 +471,8 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         """
         prior_t1 = signal.convolve(
             prob_t0, self.sky_dict.delays_prior[det_order[:2]], 'same')
-        return np.log(prior_t1)
+        with np.errstate(divide='ignore'):
+            return np.log(prior_t1)
 
     def _third_detector_lnprior(self, det_order, prob_t0, prob_t1):
         """
@@ -486,7 +487,8 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         prior_dt02 = (prob_dt_01[mask]
                       @ self.sky_dict.delays_prior[det_order[:3]])
         prior_t2 = signal.convolve(prob_t0, prior_dt02, 'same')
-        return np.log(prior_t2)
+        with np.errstate(divide='ignore'):
+            return np.log(prior_t2)
 
     @staticmethod
     def _interp_locally(times, timeseries, new_times, spline_degree=3):
