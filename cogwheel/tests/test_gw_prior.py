@@ -19,27 +19,26 @@ def get_random_init_parameters():
         key: value for key, value in test_waveform.get_random_par_dic().items()
         if key in
         gw_prior.miscellaneous.FixedIntrinsicParametersPrior.standard_par_dic}
-    return dict(
-        mchirp_range=np.sort(np.random.uniform(2, 40, 2)),
-        mtot_range=np.sort(np.random.uniform(2, 40, 2)),
-        mtot_source_range=np.sort(np.random.uniform(2, 40, 2)),
-        q_min=np.random.uniform(.01, .9),
-        detector_pair=np.random.choice(DETECTOR_PAIRS),
-        tgps=np.random.uniform(0, 1e9),
-        t_range=np.sort(np.random.uniform(-.1, .1, 2)),
-        ref_det_name=np.random.choice(list(DETECTORS)),
-        f_ref=np.random.uniform(20, 100),
-        d_hat_max=np.random.uniform(1e2, 1e4),
-        symmetrize_lnq=False,  # Note `symmetrize_lnq=True` is not invertible
-        standard_par_dic=standard_par_dic,
-        f_avg=np.random.uniform(10, 200)
-        )
+    return {'mchirp_range': np.sort(np.random.uniform(2, 40, 2)),
+            'mtot_range': np.sort(np.random.uniform(2, 40, 2)),
+            'mtot_source_range': np.sort(np.random.uniform(2, 40, 2)),
+            'q_min': np.random.uniform(.01, .9),
+            'detector_pair': np.random.choice(DETECTOR_PAIRS),
+            'tgps': np.random.uniform(0, 1e9),
+            't_range': np.sort(np.random.uniform(-.1, .1, 2)),
+            'ref_det_name': np.random.choice(list(DETECTORS)),
+            'f_ref': np.random.uniform(20, 100),
+            'd_hat_max': np.random.uniform(1e2, 1e4),
+            'symmetrize_lnq': False,  # `symmetrize_lnq=True` is not invertible
+            'standard_par_dic': standard_par_dic,
+            'f_avg': np.random.uniform(10, 200)}
 
 
 def gen_random_par_dic(prior):
     """Return dictionary of sampled parameter values."""
-    r = np.random.uniform(size=len(prior.sampled_params))
-    return dict(zip(prior.sampled_params, prior.cubemin + r * prior.cubesize))
+    rand = np.random.uniform(size=len(prior.sampled_params))
+    return dict(zip(prior.sampled_params,
+                    prior.cubemin + rand * prior.cubesize))
 
 
 class PriorTestCase(TestCase):

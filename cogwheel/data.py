@@ -427,9 +427,9 @@ class EventData(utils.JSONMixin):
         self._set_strain(self.strain + h_f)
 
         h_h = 4 * self.df * np.linalg.norm(h_f * self.wht_filter, axis=-1)**2
-        self.injection = dict(par_dic=par_dic,
-                              approximant=approximant,
-                              h_h=h_h)
+        self.injection = {'par_dic': par_dic,
+                          'approximant': approximant,
+                          'h_h': h_h}
 
     def specgram(self, xlim=None, nfft=64, noverlap=None, vmax=25.):
         """

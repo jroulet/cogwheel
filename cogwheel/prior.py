@@ -754,6 +754,7 @@ class UniformPriorMixin:
         Take `self.sampled_params + self.conditioned_on` parameters and
         return a float.
         """
+        del par_vals, par_dic
         return - np.log(np.prod(self.cubesize))
 
     def __init_subclass__(cls):

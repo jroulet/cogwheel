@@ -131,7 +131,7 @@ class MarginalizedExtrinsicLikelihoodQAS(
              for _, sample in samples[self.params].iterrows()])  # bn
 
         n_t, n_d, n_b = self._d_h_weights.shape
-        n_n  = len(samples)
+        n_n = len(samples)
         d_h_weights = self._d_h_weights.reshape(n_t*n_d, n_b)  # (td)b
         dh_tdn = d_h_weights @ h_bn.conj()
         dh_ntd = np.moveaxis(dh_tdn, -1, 0).reshape(n_n, n_t, n_d)

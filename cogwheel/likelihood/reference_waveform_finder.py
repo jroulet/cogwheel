@@ -289,7 +289,10 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
     def _updated_intrinsic(self, mchirp, eta, chieff):
         """Return `self.par_dic_0` with updated m1, m2, s1z, s2z."""
         m1, m2 = gw_utils.mchirpeta_to_m1m2(mchirp, eta)
-        intrinsic = dict(m1=m1, m2=m2, s1z=chieff, s2z=chieff)
+        intrinsic = {'m1': m1,
+                     'm2': m2,
+                     's1z': chieff,
+                     's2z': chieff}
         return self.par_dic_0 | intrinsic
 
     def _lnlike_incoherent(self, mchirp, eta, chieff):

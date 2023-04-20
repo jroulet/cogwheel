@@ -383,11 +383,11 @@ class _MergerAnalysis:
         fmerger_min = self._get_fmerger(m1, m2, -1, s2z)
         fmerger_max = self._get_fmerger(m1, m2, 1, s2z)
 
-        kwargs = dict(
-            a=(fmerger_min - self._fmerger_0) / self._fmerger_scale_0,
-            b=(fmerger_max - self._fmerger_0) / self._fmerger_scale_0,
-            loc=self._fmerger_0,
-            scale=self._fmerger_scale_0)
+        kwargs = {
+            'a': (fmerger_min - self._fmerger_0) / self._fmerger_scale_0,
+            'b': (fmerger_max - self._fmerger_0) / self._fmerger_scale_0,
+            'loc': self._fmerger_0,
+            'scale': self._fmerger_scale_0}
         fmerger2 = trunclaplace.ppf(.2, **kwargs)
         fmerger8 = trunclaplace.ppf(.8, **kwargs)
 

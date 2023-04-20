@@ -14,10 +14,9 @@ def get_random_init_parameters():
     """
     Return a dictionary with kwargs for `waveform.WaveformGenerator`.
     """
-    return dict(
-        detector_names=np.random.choice(DETECTOR_PAIRS),
-        tgps=np.random.uniform(0, 1e9),
-        tcoarse=np.random.uniform(0, 128))
+    return {'detector_names': np.random.choice(DETECTOR_PAIRS),
+            'tgps': np.random.uniform(0, 1e9),
+            'tcoarse': np.random.uniform(0, 128)}
 
 
 def get_random_par_dic(aligned_spins=False, tides=False):

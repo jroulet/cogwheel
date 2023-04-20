@@ -83,9 +83,9 @@ class PlotStyle:
     for a corner plot of a distribution.
     """
     # Defaults:
-    KWARGS_1D = dict(color='C0')
-    VLINE_KWARGS = dict(alpha=.5, linewidth=1)
-    VFILL_KWARGS = dict(alpha=.1)
+    KWARGS_1D = {'color': 'C0'}
+    VLINE_KWARGS = {'alpha': .5, 'linewidth': 1}
+    VFILL_KWARGS = {'alpha': .1}
 
     def __init__(self, confidence_level=.9, contour_fractions=(.5, .9),
                  color_2d='k', contour_kwargs=None, vline_kwargs=None,
@@ -175,7 +175,7 @@ class PlotStyle:
         """
         linestyles = gen_linestyles(number)
         colors = gen_colors(number)
-        kwargs = dict(fill='flat') | kwargs
+        kwargs = {'fill': 'flat', **kwargs}
         for color, linestyle in zip(colors, linestyles):
             yield cls(contour_kwargs={'linestyles': [linestyle]},
                       color_2d=color,
@@ -570,11 +570,12 @@ class CornerPlot:
         margin_fraction = self.MARGIN_INCHES / side
 
         return {'figsize': (side, side),
-                'gridspec_kw': dict(wspace=space, hspace=space,
-                                    bottom=margin_fraction,
-                                    top=1 - margin_fraction,
-                                    left=margin_fraction,
-                                    right=1 - margin_fraction)}
+                'gridspec_kw': {'wspace': space,
+                                'hspace': space,
+                                'bottom': margin_fraction,
+                                'top': 1 - margin_fraction,
+                                'left': margin_fraction,
+                                'right': 1 - margin_fraction}}
 
     def get_lims(self, tightness=1.):
         """
