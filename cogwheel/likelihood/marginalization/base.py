@@ -238,7 +238,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
         self.log2n_qmc = log2n_qmc
         self.sky_dict = sky_dict
-        self.beta_temperature = beta_temperature
+        self.beta_temperature = np.asarray(beta_temperature)
         self.min_n_effective = min_n_effective
         self.max_log2n_qmc = max_log2n_qmc
 
@@ -510,6 +510,37 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         return krogh_interpolate(times[i_min : i_max],
                                  timeseries[..., i_min : i_max], new_times,
                                  axis=-1)
+
+    def get_optimal_beta_temperature(self, dh_timeseries, h_h, times,
+                                     beta_rng=(.1, 1)):
+        """
+        Return array of shape (n_det,) with per-detector inverse-
+        temperature values (used to temper the proposal distribution)
+        tuned so as to maximize the efficiency of importance sampling.
+        """
+        beta_temperature = np.copy(np.broadcast_to(
+            self.beta_temperature, len(self.sky_dict.detector_names)))
+
+        betas = np.geomspace(*beta_rng, 100)
+
+        for _ in range(2):  # Cycle twice over detectors for convergence
+            for i_det in range(len(self.sky_dict.detector_names)):
+                cost = []  # sample_size / effective_sample_size, to minimize
+                for beta in betas:
+                    beta_temperature[i_det] = beta
+                    with utils.temporarily_change_attributes(
+                            self,
+                            beta_temperature=beta_temperature,
+                            min_n_effective=0):
+                        marg_info = self.get_marginalization_info(
+                            dh_timeseries, h_h, times)
+                        cost.append(marg_info.n_qmc / marg_info.n_effective)
+
+                cost_smooth = signal.savgol_filter(
+                    cost, len(cost) // 10, 1, mode='nearest')
+                beta_temperature[i_det] = betas[np.argmin(cost_smooth)]
+
+        return beta_temperature
 
 
 class BaseCoherentScoreHM(BaseCoherentScore):

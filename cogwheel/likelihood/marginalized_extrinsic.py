@@ -107,6 +107,8 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
 
         self._log = []
 
+        self.optimize_beta_temperature(self.par_dic_0)
+
     def lnlike(self, par_dic):
         """
         Natural log of the likelihood marginalized over extrinsic
@@ -181,6 +183,16 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         else:
             extrinsic_df = pd.DataFrame.from_records(extrinsic)
         utils.update_dataframe(samples, extrinsic_df)
+
+    def optimize_beta_temperature(self, par_dic):
+        """
+        Set `.coherent_score.beta_temperature` to a value that optimizes
+        the importance sampling efficiency (for the intrinsic parameter
+        values in `par_dic`).
+        """
+        optimal_beta = self.coherent_score.get_optimal_beta_temperature(
+            *self._get_dh_hh(par_dic), self._times)
+        self.coherent_score.beta_temperature = optimal_beta
 
 
 class MarginalizedExtrinsicLikelihood(

@@ -163,7 +163,7 @@ class CoherentScoreQAS(BaseCoherentScore):
 
     def _incoherent_t_arrival_lnprob(self, dh_td, hh_d):
         """Return tempered chi-squared timeseries at each detector."""
-        return self.beta_temperature * utils.abs_sq(dh_td) / hh_d / 2 # td
+        return self.beta_temperature * utils.abs_sq(dh_td) / hh_d / 2  # td
 
     def gen_samples(self, dh_td, hh_d, times, num=None):
         """

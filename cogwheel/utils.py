@@ -11,6 +11,7 @@ import sys
 import tempfile
 import textwrap
 import numpy as np
+from contextlib import contextmanager
 from scipy.optimize import _differentialevolution
 from scipy.special import logsumexp
 from numba import njit, vectorize
@@ -258,6 +259,32 @@ def handle_scalars(function):
     def new_function(*args, **kwargs):
         return function(*args, **kwargs)[()]
     return new_function
+
+
+@contextmanager
+def temporarily_change_attributes(obj, /, **kwargs):
+    """
+    Example
+    -------
+    >>> class A:
+    ...     x = 0
+    >>> a = A()
+    >>> a.x
+    0
+    >>> with temporarily_change_attributes(a, x=1):
+    ...     print(a.x)
+    1
+    >>> a.x
+    0
+    """
+    previous_values = {key: getattr(obj, key) for key in kwargs}
+    for key, val in kwargs.items():
+        setattr(obj, key, val)
+    try:
+        yield
+    finally:
+        for key, val in previous_values.items():
+            setattr(obj, key, val)
 
 
 def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
