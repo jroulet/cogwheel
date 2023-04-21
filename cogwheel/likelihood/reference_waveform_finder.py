@@ -9,6 +9,7 @@ import warnings
 
 import numpy as np
 from scipy.optimize import differential_evolution, minimize, minimize_scalar
+from scipy.stats import qmc
 
 from cogwheel import data
 from cogwheel import gw_utils
@@ -68,6 +69,9 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         self._time_range = time_range
         self._mchirp_range = mchirp_range
+
+        waveform_generator.n_cached_waveforms = max(
+            2, waveform_generator.n_cached_waveforms)  # Will need to flip iota
         super().__init__(event_data, waveform_generator, par_dic_0,
                          fbin, pn_phase_tol, spline_degree)
 
@@ -208,7 +212,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         # Optimize time, sky location, orbital phase and distance
         self._optimize_t_refdet(kwargs['ref_det_name'])
-        self._optimize_skyloc(kwargs['detector_pair'])
+        self._optimize_skyloc_and_inclination(kwargs['detector_pair'])
         self._optimize_phase_and_distance()
 
         if not self._mchirp_range:
@@ -351,10 +355,11 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self.par_dic_0['t_geocenter'] = result.x
         print(f'Set time, lnL({ref_det_name}) = {-result.fun}')
 
-    def _optimize_skyloc(self, detector_pair):
+    def _optimize_skyloc_and_inclination(self, detector_pair):
         """
         Find right ascension and declination that optimize likelihood
-        maximized over amplitude and phase.
+        maximized over amplitude and phase, and choose between
+        iota={1, pi-1}.
         t_geocenter is readjusted so as to leave t_refdet unchanged.
         Update 't_geocenter', ra', 'dec' entries of `self.par_dic_0`
         in-place.
@@ -367,6 +372,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             **{key: self.par_dic_0[key]
                for key in ['t_geocenter', 'ra', 'dec']}
             )['t_refdet']  # Will hold t_refdet fixed
+        flipped_iota = {'iota': np.pi - self.par_dic_0['iota']}
 
         def get_updated_par_dic(thetanet, phinet):
             """Return `self.par_dic_0` with updated ra, dec, t_geocenter."""
@@ -378,20 +384,26 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         @np.vectorize
         def lnlike_skyloc(thetanet, phinet):
             par_dic = get_updated_par_dic(thetanet, phinet)
-            return self.lnlike_max_amp_phase(par_dic)
+            return max(self.lnlike_max_amp_phase(par_dic),
+                       self.lnlike_max_amp_phase(par_dic | flipped_iota))
 
-        # Maximize on a grid, then refine
-        thetanets = np.linspace(0, np.pi, 40)
-        phinets = np.linspace(0, 2*np.pi, 40)
-        thetaphinets = np.meshgrid(thetanets, phinets, indexing='ij')
-        lnl = lnlike_skyloc(*thetaphinets)
-        i_theta, i_phi = np.unravel_index(np.argmax(lnl), lnl.shape)
+        # Maximize on a Halton sequence, then refine
+        u_theta, u_phi = qmc.Halton(2).random(1500).T
+        thetanets = np.arccos(2*u_theta - 1)
+        phinets = 2 * np.pi * u_phi
+        i_max = np.argmax(lnlike_skyloc(thetanets, phinets))
 
         result = minimize(lambda thetaphinet: -lnlike_skyloc(*thetaphinet),
-                          x0=(thetanets[i_theta], phinets[i_phi]),
+                          x0=(thetanets[i_max], phinets[i_max]),
                           bounds=[(0, np.pi), (0, 2*np.pi)])
 
-        self._par_dic_0 = get_updated_par_dic(*result.x)
+        # Fix sky location and decide whether to flip inclination:
+        par_dic = get_updated_par_dic(*result.x)
+        if (self.lnlike_max_amp_phase(par_dic)
+                < self.lnlike_max_amp_phase(par_dic | flipped_iota)):
+            par_dic.update(flipped_iota)
+
+        self._par_dic_0 = par_dic
         print(f'Set sky location, lnL = {-result.fun}')
 
     def _optimize_phase_and_distance(self):
