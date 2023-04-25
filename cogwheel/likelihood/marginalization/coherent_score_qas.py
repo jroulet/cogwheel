@@ -105,7 +105,7 @@ class CoherentScoreQAS(BaseCoherentScore):
                                    d_h=dh_q,
                                    h_h=hh_q)
 
-    def _get_dh_hh_q(self, sky_inds, physical_mask, t_first_det, times,
+    def _get_dh_hh_q(self, sky_inds, q_inds, t_first_det, times,
                      dh_td, hh_d):
         """
         Apply antenna factors to the waveform, to obtain (d|h) and ⟨h|h⟩
@@ -118,7 +118,7 @@ class CoherentScoreQAS(BaseCoherentScore):
              for i_det in range(len(self.sky_dict.detector_names))])
 
         response_qd = np.einsum('qp,qdp->qd',
-                                self._qmc_sequence['response'][physical_mask],
+                                self._qmc_sequence['response'][q_inds],
                                 self.sky_dict.fplus_fcross_0[sky_inds,])  # qd
 
         dh_q = np.einsum('dq,qd->q', dh_dq, response_qd.conj())
