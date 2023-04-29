@@ -404,7 +404,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         # Pass fiducial configuration to hit cache often:
         d_h, h_h = self._get_dh_hh_complex_no_asd_drift(par_dic) # mpd, mpPd
         return np.sum(d_h.real,axis=(0,1)), np.sum(h_h.real, axis=(0,1,2))
-    
+
     def _get_dh_hh_complex_no_asd_drift(self, par_dic):
         """
         Return two arrays complex with the values of
@@ -443,10 +443,10 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         d_h = amp_ratio * np.einsum('mpd, pd, m -> mpd',
                                     d_h_mpd, fplus_fcross, dh_phasor)
         h_h = amp_ratio**2 * np.einsum('mpPd, pd, Pd, m -> mpPd',
-                                       h_h_mpd, fplus_fcross, 
+                                       h_h_mpd, fplus_fcross,
                                        fplus_fcross, hh_phasor)
         return d_h, h_h
-    
+
     @utils.lru_cache(maxsize=16)
     def _get_dh_hh_by_m_polarization_detector(self, par_dic_items):
         """
