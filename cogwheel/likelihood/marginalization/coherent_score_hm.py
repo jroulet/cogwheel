@@ -24,95 +24,94 @@ class CoherentScoreHM(BaseCoherentScoreHM):
 
     Inherits from ``BaseCoherentScoreHM``.
     """
-    def get_marginalization_info(self, dh_mptd, hh_mppd, times):
+    def _get_marginalization_info_chunk(self, d_h_timeseries, h_h,
+                                        times, t_arrival_prob, i_chunk):
         """
-        Evaluate inner products (d|h) and (h|h) at QMC integration
-        points over extrinsic parameters, given timeseries of (d|h) and
-        value of (h|h) by mode `m`, polarization `p` and detector `d`.
+        Evaluate inner products (d|h) and (h|h) at integration points
+        over a chunk of a QMC sequence of extrinsic parameters, given
+        timeseries of (d|h) and value of (h|h) by mode `m`, polarization
+        `p` and detector `d`.
 
         Parameters
         ----------
-        dh_mptd: (n_m, 2, n_t, n_d) complex array
+        d_h_timeseries: (n_m, 2, n_t, n_d) complex array
             Timeseries of complex (d|h), inner product of data against a
             waveform at reference distance and phase.
             Decomposed by mode, polarization, time, detector.
 
-        hh_mppd: (n_mm, 2, 2, n_d) complex array
+        h_h: (n_mm, 2, 2, n_d) complex array
             Complex (h|h) inner product of a waveform with itself,
             decomposed by mode, polarization and detector.
 
         times: (n_t,) float array
             Timestamps of the timeseries (s).
 
-        Return
-        ------
-        Instance of ``MarginalizationInfoHM`` with several fields, see
-        its documentation.
-        """
-        return self._get_marginalization_info(dh_mptd, hh_mppd, times)
-
-    def _get_marginalization_info_chunk(self, dh_mptd, hh_mppd, times,
-                                        i_chunk):
-        """
-        Like ``.get_marginalization_info`` but integrates over a
-        specific chunk of the QMC sequence (without checking
-        convergence).
+        t_arrival_prob: (n_t, n_d) float array
+            Proposal probability of time of arrival at each detector,
+            normalized to sum to 1 along the time axis.
 
         i_chunk: int
             Index to ``._qmc_ind_chunks``.
+
+        Return
+        ------
+        Instance of ``MarginalizationInfohm`` with several fields, see
+        its documentation.
         """
-        if dh_mptd.shape[0] != self.m_arr.size:
+        if d_h_timeseries.shape[0] != self.m_arr.size:
             raise ValueError('Incorrect number of harmonic modes.')
 
         q_inds = self._qmc_ind_chunks[i_chunk]  # Will update along the way
         n_qmc = len(q_inds)
-
-        # Resample to match sky_dict's dt:
-        dh_mptd, times = self.sky_dict.resample_timeseries(dh_mptd, times,
-                                                           axis=2)
-
-        t_arrival_lnprob = self._incoherent_t_arrival_lnprob(dh_mptd,
-                                                             hh_mppd)  # td
-        t_first_det, delays, importance_sampling_weight \
-            = self._draw_single_det_times(t_arrival_lnprob, times, q_inds)
+        tdet_inds = self._get_tdet_inds(t_arrival_prob, q_inds)
 
         sky_inds, sky_prior, physical_mask \
-            = self.sky_dict.get_sky_inds_and_prior(delays)  # q, q, q
+            = self.sky_dict.get_sky_inds_and_prior(
+                tdet_inds[1:] - tdet_inds[0])  # q, q, q
 
         if not any(physical_mask):
-            return MarginalizationInfoHM(ln_weights=np.array([]),
-                                         n_qmc=n_qmc,
+            return MarginalizationInfoHM(ln_numerators=np.array([]),
                                          q_inds=np.array([], int),
                                          o_inds=np.array([], int),
                                          sky_inds=np.array([], int),
                                          t_first_det=np.array([]),
                                          d_h=np.array([]),
-                                         h_h=np.array([]))
+                                         h_h=np.array([]),
+                                         tdet_inds=tdet_inds,
+                                         proposals_n_qmc=[n_qmc],
+                                         proposals=[t_arrival_prob],
+                                         )
 
         # Apply physical mask (sensible time delays):
         q_inds = q_inds[physical_mask]
-        t_first_det = t_first_det[physical_mask]
-        importance_sampling_weight = importance_sampling_weight[physical_mask]
+        tdet_inds = tdet_inds[:, physical_mask]
+
+        t_first_det = (times[tdet_inds[0]]
+                       + self._qmc_sequence['t_fine'][q_inds])
 
         dh_qo, hh_qo = self._get_dh_hh_qo(sky_inds, q_inds, t_first_det,
-                                          times, dh_mptd, hh_mppd)  # qo, qo
+                                          times, d_h_timeseries, h_h)  # qo, qo
 
-        ln_weights, important = self._get_lnweights_important(
-            dh_qo, hh_qo, importance_sampling_weight * sky_prior)
+        ln_numerators, important = self._get_lnnumerators_important(
+            dh_qo, hh_qo, sky_prior)
 
         # Keep important samples (lnl above threshold):
         q_inds = q_inds[important[0]]
         sky_inds = sky_inds[important[0]]
         t_first_det = t_first_det[important[0]]
+        tdet_inds = tdet_inds[:, important[0]]
 
-        return MarginalizationInfoHM(ln_weights=ln_weights,
-                                     n_qmc=n_qmc,
+        return MarginalizationInfoHM(ln_numerators=ln_numerators,
                                      q_inds=q_inds,
                                      o_inds=important[1],
                                      sky_inds=sky_inds,
                                      t_first_det=t_first_det,
                                      d_h=dh_qo[important],
-                                     h_h=hh_qo[important])
+                                     h_h=hh_qo[important],
+                                     tdet_inds=tdet_inds,
+                                     proposals_n_qmc=[n_qmc],
+                                     proposals=[t_arrival_prob],
+                                     )
 
     def gen_samples(self, dh_mptd, hh_mppd, times, num=None):
         """
@@ -233,15 +232,15 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         hh_qo = utils.real_matmul(hh_qm, self._hh_phasor)  # qo
         return dh_qo, hh_qo
 
-    def _incoherent_t_arrival_lnprob(self, dh_mptd, hh_mppd):
+    def _incoherent_t_arrival_lnprob(self, d_h_timeseries, h_h):
         """
         Log likelihood maximized over distance and phase, approximating
         that different modes and polarizations are all orthogonal and
         have independent phases.
         """
-        hh_mpdiagonal = hh_mppd[np.equal(self.m_inds, self.mprime_inds)
-                               ][:, (0, 1), (0, 1)].real  # mpd
-        chi_squared = (np.einsum('mptd->td', np.abs(dh_mptd))**2
+        hh_mpdiagonal = h_h[np.equal(self.m_inds, self.mprime_inds)
+                           ][:, (0, 1), (0, 1)].real  # mpd
+        chi_squared = (np.einsum('mptd->td', np.abs(d_h_timeseries))**2
                        / np.einsum('mpd->d', hh_mpdiagonal))
 
-        return self.beta_temperature * chi_squared / 2  # td
+        return (self.beta_temperature / 2 * chi_squared).T  # dt

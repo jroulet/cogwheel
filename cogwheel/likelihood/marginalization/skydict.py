@@ -59,20 +59,6 @@ class SkyDictionary(utils.JSONMixin):
         sky-samples that have the correct delay (to the resolution given
         by ``f_sampling``).
 
-    delays_prior: dict
-        Keys are tuples of ints corresponding to all possible orderings
-        of >= 2 detectors, and values are ``(len(key) - 1)``-dimensional
-        ndarrays with histograms of discrete delays to the first
-        detector (per that ordering), weighted by the antenna response
-        cubed. This is useful for assigning a semi-coherent prior to the
-        time of arrival at each detector based on the time of arrival
-        probability at other detectors.
-
-    delays_bounds: dict
-        Keys are 2-tuples of ints corresponding to detector indices of
-        a pair, values are 2-tuples of floats with the range of time
-        delays (s) encountered.
-
     Public methods
     --------------
     resample_timeseries
@@ -104,8 +90,8 @@ class SkyDictionary(utils.JSONMixin):
         self._min_delay = np.min(discrete_delays, axis=0)
         self._max_delay = np.max(discrete_delays, axis=0)
 
-        self.delays_bounds = {}
-        self.delays_prior = {}
+        self._delays_bounds = {}
+        self._delays_prior = {}
         weights = np.linalg.norm(self.fplus_fcross_0, axis=(1, 2)) ** 3
         for n_detectors in range(2, len(detector_names) + 1):
             for order in itertools.permutations(range(len(detector_names)),
@@ -116,11 +102,11 @@ class SkyDictionary(utils.JSONMixin):
                 bins = [np.arange(*bounds) + .5
                         for bounds in zip(pairwise_delays.min(axis=1) - 1,
                                           pairwise_delays.max(axis=1) + 1)]
-                self.delays_prior[order] = np.histogramdd(
+                self._delays_prior[order] = np.histogramdd(
                     pairwise_delays.T, weights=weights, bins=bins)[0].copy('F')
 
                 if n_detectors == 2:
-                    self.delays_bounds[order] = (pairwise_delays.min(),
+                    self._delays_bounds[order] = (pairwise_delays.min(),
                                                  pairwise_delays.max())
 
         # (n_det-1)-dimensional array of generators yielding sky-indices
@@ -129,12 +115,10 @@ class SkyDictionary(utils.JSONMixin):
         for key, inds in self.delays2inds_map.items():
             self._ind_generators[key] = itertools.cycle(inds)
 
-        # (n_det-1)-dimensional float array with d(Omega) / (4pi d(delays))
+        # (n_det-1)-dimensional float array with dt * d(Omega / 4pi)
         self._sky_prior = np.zeros(self._max_delay - self._min_delay + 1)
         for key, inds in self.delays2inds_map.items():
-            self._sky_prior[key] = (
-                self.f_sampling ** (len(self.detector_names) - 1)
-                * len(inds) / self.nsky)
+            self._sky_prior[key] = len(inds) / self.nsky / self.f_sampling
 
     def resample_timeseries(self, timeseries, times, axis=-1,
                             window=('tukey', .1)):
@@ -268,3 +252,61 @@ class SkyDictionary(utils.JSONMixin):
     def _discretize(self, delays: float) -> int:
         """Return discretized delay in units of 1/self.f_sampling."""
         return np.rint(delays * self.f_sampling).astype(int)
+
+    def apply_tdet_prior(self, t_arrival_lnprob):
+        """
+        Change `t_arrival_lnprob` inplace to account for the
+        astrophysical prior for time delays.
+
+        Parameters
+        ----------
+        t_arrival_lnprob: (n_det, n_times) float array
+            Incoherent proposal for log probability of arrival times at
+            each detector.
+        """
+        # Sort detectors by SNR
+        det_order = tuple(np.argsort(t_arrival_lnprob.max(axis=1)))[::-1]
+
+        if len(det_order) > 1:
+            # Apply prior at 2nd detector
+            prob_t0 = utils.exp_normalize(t_arrival_lnprob[det_order[0]])
+            t_arrival_lnprob[det_order[1]] += self._second_detector_lnprior(
+                det_order, prob_t0)
+
+        if len(det_order) > 2:
+            # Apply prior at 3rd detector
+            prob_t1 = utils.exp_normalize(t_arrival_lnprob[det_order[1]])
+            t_arrival_lnprob[det_order[2]] += self._third_detector_lnprior(
+                det_order, prob_t0, prob_t1)
+
+        # Note: update code when there are > 3 detectors, as it is now
+        # it will work but may be inefficient if the 4th detector has
+        # low SNR.
+
+    def _second_detector_lnprior(self, det_order, prob_t0):
+        """
+        Log of prior probability of time of arrival at the second
+        detector (by `det_order`) given the probability of arrival at
+        the first detector.
+        """
+        prior_t1 = scipy.signal.convolve(
+            prob_t0, self._delays_prior[det_order[:2]], 'same')
+        with np.errstate(divide='ignore'):
+            return np.log(prior_t1)
+
+    def _third_detector_lnprior(self, det_order, prob_t0, prob_t1):
+        """
+        Log of prior probability of time of arrival at the third
+        detector (by `det_order`) given the probability of arrival at
+        the first two detectors.
+        """
+        prob_dt_01 = scipy.signal.correlate(prob_t1, prob_t0, 'same')
+        dt_01 = scipy.signal.correlation_lags(len(prob_t1), len(prob_t0),
+                                              'same')
+        min_delay, max_delay = self._delays_bounds[det_order[:2]]
+        mask = (dt_01 >= min_delay) & (dt_01 <= max_delay)
+        prior_dt02 = (prob_dt_01[mask]
+                      @ self._delays_prior[det_order[:3]])
+        prior_t2 = scipy.signal.convolve(prob_t0, prior_dt02, 'same')
+        with np.errstate(divide='ignore'):
+            return np.log(prior_t2)

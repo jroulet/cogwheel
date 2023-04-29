@@ -25,85 +25,83 @@ class CoherentScoreQAS(BaseCoherentScore):
     """
     _lookup_table_marginalized_params = {'d_luminosity', 'phi_ref'}
 
-    def get_marginalization_info(self, dh_td, hh_d, times):
+    def _get_marginalization_info_chunk(self, d_h_timeseries, h_h,
+                                        times, t_arrival_prob, i_chunk):
         """
-        Evaluate inner products (d|h) and ⟨h|h⟩ at QMC integration
-        points over extrinsic parameters, given timeseries of (d|h) and
-        value of ⟨h|h⟩ by detector `d`.
+        Evaluate inner products (d|h) and (h|h) at integration points
+        over a chunk of a QMC sequence of extrinsic parameters, given
+        timeseries of (d|h) and value of (h|h) by detector `d`.
 
         Parameters
         ----------
-        dh_td: (n_t, n_d) complex array
+        d_h_timeseries: (n_t, n_d) complex array
             Timeseries of complex (d|h), inner product of data against a
             waveform at reference distance and phase.
             Decomposed by time, detector.
 
-        hh_d: (n_d,) float array
+        h_h: (n_d,) float array
             Positive ⟨h|h⟩ inner product of a waveform with itself,
             decomposed by detector.
 
         times: (n_t,) float array
             Timestamps of the timeseries (s).
 
+        t_arrival_prob: (n_t, n_d) float array
+            Proposal probability of time of arrival at each detector,
+            normalized to sum to 1 along the time axis.
+
+        i_chunk: int
+            Index to ``._qmc_ind_chunks``.
+
         Return
         ------
         Instance of ``MarginalizationInfo`` with several fields, see its
         documentation.
         """
-        return self._get_marginalization_info(dh_td, hh_d, times)
-
-    def _get_marginalization_info_chunk(self, dh_td, hh_d, times,
-                                        i_chunk):
-        """
-        Like ``.get_marginalization_info`` but integrates over a
-        specific chunk of the QMC sequence (without checking
-        convergence).
-
-        i_chunk: int
-            Index to ``._qmc_ind_chunks``.
-        """
         q_inds = self._qmc_ind_chunks[i_chunk]  # Will update along the way
         n_qmc = len(q_inds)
-
-        # Resample to match sky_dict's dt:
-        dh_td, times = self.sky_dict.resample_timeseries(dh_td, times,
-                                                         axis=0)
-
-        t_arrival_lnprob = self._incoherent_t_arrival_lnprob(dh_td, hh_d)  # td
-        t_first_det, delays, importance_sampling_weight \
-            = self._draw_single_det_times(t_arrival_lnprob, times, q_inds)
+        tdet_inds = self._get_tdet_inds(t_arrival_prob, q_inds)
 
         sky_inds, sky_prior, physical_mask \
-            = self.sky_dict.get_sky_inds_and_prior(delays)  # q, q, q
+            = self.sky_dict.get_sky_inds_and_prior(
+                tdet_inds[1:] - tdet_inds[0])  # q, q, q
 
         if not any(physical_mask):
-            return MarginalizationInfo(ln_weights=np.array([]),
-                                       n_qmc=n_qmc,
+            return MarginalizationInfo(ln_numerators=np.array([]),
                                        q_inds=np.array([], int),
                                        sky_inds=np.array([], int),
                                        t_first_det=np.array([]),
                                        d_h=np.array([]),
-                                       h_h=np.array([]))
+                                       h_h=np.array([]),
+                                       tdet_inds=tdet_inds,
+                                       proposals_n_qmc=[n_qmc],
+                                       proposals=[t_arrival_prob],
+                                       )
 
         # Apply physical mask (sensible time delays):
         q_inds = q_inds[physical_mask]
-        t_first_det = t_first_det[physical_mask]
-        importance_sampling_weight = importance_sampling_weight[physical_mask]
+        tdet_inds = tdet_inds[:, physical_mask]
+
+        t_first_det = (times[tdet_inds[0]]
+                       + self._qmc_sequence['t_fine'][q_inds])
 
         dh_q, hh_q = self._get_dh_hh_q(sky_inds, q_inds, t_first_det,
-                                       times, dh_td, hh_d)  # q, q
+                                       times, d_h_timeseries, h_h)  # q, q
 
-        ln_weights = (
+        ln_numerators = (
             self.lookup_table.lnlike_marginalized(np.abs(dh_q), hh_q)
-            + np.log(importance_sampling_weight * sky_prior))  # q
+            + np.log(sky_prior))  # q
 
-        return MarginalizationInfo(ln_weights=ln_weights,
-                                   n_qmc=n_qmc,
+        return MarginalizationInfo(ln_numerators=ln_numerators,
                                    q_inds=q_inds,
                                    sky_inds=sky_inds,
                                    t_first_det=t_first_det,
                                    d_h=dh_q,
-                                   h_h=hh_q)
+                                   h_h=hh_q,
+                                   tdet_inds=tdet_inds,
+                                   proposals_n_qmc=[n_qmc],
+                                   proposals=[t_arrival_prob],
+                                   )
 
     def _get_dh_hh_q(self, sky_inds, q_inds, t_first_det, times,
                      dh_td, hh_d):
@@ -161,9 +159,27 @@ class CoherentScoreQAS(BaseCoherentScore):
             qmc_sequence['rot_psi'])  # qp
         return qmc_sequence
 
-    def _incoherent_t_arrival_lnprob(self, dh_td, hh_d):
-        """Return tempered chi-squared timeseries at each detector."""
-        return self.beta_temperature * utils.abs_sq(dh_td) / hh_d / 2  # td
+    def _incoherent_t_arrival_lnprob(self, d_h_timeseries, h_h):
+        """
+        Return tempered chi-squared timeseries at each detector.
+
+        Parameters
+        ----------
+        d_h_timeseries: (n_d, n_t) complex array
+            Timeseries of complex (d|h), inner product of data against a
+            waveform at reference distance and phase.
+            Decomposed by time, detector.
+
+        h_h: (n_d,) float array
+            Positive ⟨h|h⟩ inner product of a waveform with itself,
+            decomposed by detector.
+
+        Return
+        ------
+        t_arrival_lnprob: (n_d, n_t) float array
+        """
+        return np.transpose(self.beta_temperature / 2
+                            * utils.abs_sq(d_h_timeseries) / h_h)  # dt
 
     def gen_samples(self, dh_td, hh_d, times, num=None):
         """

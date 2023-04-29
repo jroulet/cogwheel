@@ -12,16 +12,15 @@ marginalization for waveforms with higher modes.
 """
 from abc import abstractmethod, ABC
 import itertools
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import wraps
 import warnings
-import numba
 import numpy as np
-from scipy.stats import qmc
 from scipy.interpolate import krogh_interpolate, make_interp_spline
 from scipy.special import logsumexp
-from scipy import sparse
 from scipy import signal
+from scipy import sparse
+from scipy import stats
 
 from cogwheel import utils
 from .lookup_table import LookupTable, LookupTableMarginalizedPhase22
@@ -81,13 +80,45 @@ class MarginalizationInfo:
         excluding inclination (i.e.: time of arrival, sky location,
         polarization, distance, orbital phase).
     """
-    ln_weights: np.ndarray
-    n_qmc: int
+    ln_numerators: np.ndarray
     q_inds: np.ndarray
     sky_inds: np.ndarray
     t_first_det: np.ndarray
     d_h: np.ndarray
     h_h: np.ndarray
+    tdet_inds: np.ndarray
+    proposals_n_qmc: list
+    proposals: list
+
+    weights: np.ndarray = field(init=False)
+    weights_q: np.ndarray = field(init=False)
+    n_qmc: int = field(init=False)
+    n_effective: float = field(init=False)
+    lnl_marginalized: float = field(init=False)
+
+    def __post_init__(self):
+        """Set derived attributes."""
+        denominators = np.ones(len(self.q_inds))
+        for n_qmc, proposal in zip(self.proposals_n_qmc, self.proposals):
+            denominators += n_qmc * np.prod(
+                np.take_along_axis(proposal, self.tdet_inds, axis=1),
+                axis=0)  # q
+
+        ln_weights = self.ln_numerators - np.log(denominators)
+        self.weights = utils.exp_normalize(ln_weights)
+
+        weights_q = sparse.coo_array(
+            (self.weights, (np.zeros_like(self.q_inds), self.q_inds))
+            ).toarray()[0]  # Repeated q_inds get summed
+        self.weights_q = weights_q[weights_q > 0]
+        self.n_effective = utils.n_effective(self.weights_q)
+
+        self.n_qmc = sum(self.proposals_n_qmc)
+
+        if self.q_inds.size == 0:
+            self.lnl_marginalized = -np.inf
+        else:
+            self.lnl_marginalized = logsumexp(ln_weights)
 
     def update(self, other):
         """
@@ -101,42 +132,16 @@ class MarginalizationInfo:
             Typically ``self`` will be the first half of the extended
             QMC sequence and ``other`` would be the second half.
         """
-        self.n_qmc += other.n_qmc
+        self.proposals_n_qmc += other.proposals_n_qmc
+        self.proposals += other.proposals
 
-        for attr in ('ln_weights', 'q_inds', 'sky_inds', 't_first_det', 'd_h',
-                     'h_h'):
+        for attr in ('ln_numerators', 'q_inds', 'sky_inds', 't_first_det',
+                     'd_h', 'h_h', 'tdet_inds'):
             updated = np.concatenate([getattr(self, attr),
-                                      getattr(other, attr)])
+                                      getattr(other, attr)], axis=-1)
             setattr(self, attr, updated)
 
-    @property
-    def n_effective(self) -> float:
-        """
-        A proxy of the effective number of samples contributing to the
-        QMC integral. Note that the variance decreases faster than
-        1 / n_effective because the QMC samples are not independent.
-        This function uses the formula for independent samples, which
-        may not be well justified.
-        """
-        if self.q_inds.size == 0:
-            return 0.
-
-        weights_q = sparse.coo_array(
-            (self.weights, (np.zeros_like(self.q_inds), self.q_inds))
-            ).toarray()[0]  # Repeated q_inds get summed
-        return utils.n_effective(weights_q)
-
-    @property
-    def weights(self) -> np.ndarray:
-        """Weights of the QMC samples normalized to have unit sum."""
-        return utils.exp_normalize(self.ln_weights)
-
-    @property
-    def lnl_marginalized(self) -> float:
-        """Log likelihood marginalized over extrinsic parameters."""
-        if self.q_inds.size == 0:
-            return -np.inf
-        return logsumexp(self.ln_weights) - np.log(self.n_qmc)
+        self.__post_init__()
 
 
 @dataclass
@@ -156,8 +161,8 @@ class MarginalizationInfoHM(MarginalizationInfo):
 
     @wraps(MarginalizationInfo.update)
     def update(self, other):
-        super().update(other)
         self.o_inds = np.concatenate([self.o_inds, other.o_inds])
+        super().update(other)
 
 
 class BaseCoherentScore(utils.JSONMixin, ABC):
@@ -171,6 +176,8 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     This class provides methods to initialize and perform some of the
     generic steps that the coherent score computation normally requires.
     """
+    _searchsorted = np.vectorize(np.searchsorted, signature='(n),(m)->(m)')
+
     def __init__(self, sky_dict, lookup_table=None, log2n_qmc: int = 11,
                  seed=0, beta_temperature=.5, n_qmc_sequences=128,
                  min_n_effective=50, max_log2n_qmc: int = 15):
@@ -216,8 +223,6 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             sample size reaches `min_n_effective` or the number of
             extrinsic samples reaches ``2**max_log2n_qmc``.
         """
-        self.seed = seed
-        self._rng = np.random.default_rng(seed)
 
         # Set up and check lookup_table with correct marginalized_params:
         if lookup_table is None:
@@ -236,10 +241,12 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         if max_log2n_qmc < log2n_qmc:
             raise ValueError('max_log2n_qmc < log2n_qmc')
 
-        self.log2n_qmc = log2n_qmc
+        self.seed = seed
+        self._rng = np.random.default_rng(seed)
         self.sky_dict = sky_dict
         self.beta_temperature = np.asarray(beta_temperature)
         self.min_n_effective = min_n_effective
+        self.log2n_qmc = log2n_qmc
         self.max_log2n_qmc = max_log2n_qmc
 
         self._current_qmc_sequence_id = 0
@@ -260,58 +267,90 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         allows to verify that the lookup table is of the correct type.
         """
 
-    def _get_marginalization_info(self, *args, **kwargs):
+    def get_marginalization_info(self, d_h_timeseries, h_h, /, times):
         """
         Return a MarginalizationInfo object with extrinsic parameter
         integration results, ensuring that one of three conditions
         regarding the effective sample size holds:
             * n_effective >= .min_n_effective; or
             * n_qmc == 2 ** .max_log2n_qmc; or
-            * n_effective is so low that even after extending the QMC
-              sequence it is not expected to reach .min_n_effective
-
-        The inputs are the same as ``._get_marginalization_info_chunks``
-        except they do not include ``i_chunk``. Subclasses can override
-        signature and docstring.
+            * n_effective = 0 (if the first proposal only gave
+                               unphysical samples)
         """
         self._switch_qmc_sequence()
 
+        # Resample to match sky_dict's dt:
+        d_h_timeseries, times = self.sky_dict.resample_timeseries(
+            d_h_timeseries, times, axis=-2)
+
+        t_arrival_lnprob = self._incoherent_t_arrival_lnprob(d_h_timeseries,
+                                                             h_h)  # dt
+        self.sky_dict.apply_tdet_prior(t_arrival_lnprob)
+        t_arrival_prob = utils.exp_normalize(t_arrival_lnprob, axis=1)
+
         i_chunk = 0
         marginalization_info = self._get_marginalization_info_chunk(
-            *args, **kwargs, i_chunk=i_chunk)
+            d_h_timeseries, h_h, times, t_arrival_prob, i_chunk)
 
-        while self._worth_refining(marginalization_info):
+        while 0 < marginalization_info.n_effective < self.min_n_effective:
+            # Perform adaptive mixture importance sampling:
             i_chunk += 1
-
             if i_chunk == len(self._qmc_ind_chunks):
                 warnings.warn('Maximum QMC resolution reached.')
                 break
 
+            t_arrival_prob = self._kde_t_arrival_prob(marginalization_info,
+                                                      times)
             marginalization_info.update(self._get_marginalization_info_chunk(
-                *args, **kwargs, i_chunk=i_chunk))
+                d_h_timeseries, h_h, times, t_arrival_prob, i_chunk))
 
         return marginalization_info
 
-    def _worth_refining(self, marginalization_info) -> bool:
+    def _kde_t_arrival_prob(self, marginalization_info, times):
         """
-        Return ``True`` if the ``n_effective`` is lower than the minimum
-        required, but high enough that extending the QMC sequence up to
-        the maximum length would likely make it higher than that.
+        Return array of shape (n_det, n_times) with a time-of-arrival
+        proposal probability that is based on a kernel density
+        estimation of the previous iterations of importance sampling.
+        Intended for adaptive multiple importance sampling.
         """
-        n_effective = marginalization_info.n_effective
+        delays = self.sky_dict.delays[:, marginalization_info.sky_inds]
+        t_det = np.vstack((marginalization_info.t_first_det,
+                           marginalization_info.t_first_det + delays))  # dt
 
-        if n_effective >= self.min_n_effective:  # Already converged
-            return False
+        scotts_factor = marginalization_info.n_effective ** -.2
+        dt = times[1] - times[0]
+        bins = np.concatenate([[times[0] - dt/2], times + dt/2])
 
-        # Is there hope to achieve the desired n_effective?
-        expected_increase = 2**self.max_log2n_qmc / marginalization_info.n_qmc
-        return n_effective * expected_increase >= self.min_n_effective
+        prob = []
+        for t_samples in t_det:  # Loop over detectors
+            hist = np.histogram(t_samples, weights=marginalization_info.weights,
+                                bins=bins)[0]
+
+            scale = scotts_factor * utils.weighted_avg_and_std(
+                t_samples, marginalization_info.weights)[1]
+            kernel = stats.cauchy.pdf(times, loc=times[len(times)//2 - 1],
+                                      scale=scale)
+            prob.append(signal.convolve(hist, kernel, mode='same'))
+        prob = np.array(prob)
+        prob /= prob.sum(axis=1, keepdims=True)
+
+        return prob
 
     @abstractmethod
-    def _get_marginalization_info_chunk(self, *args, **kwargs):
+    def _get_marginalization_info_chunk(self, d_h_timeseries, h_h,
+                                        times, t_arrival_prob, i_chunk):
         """
         Return a MarginalizationInfo object using a specific chunk of
         the QMC sequence (without checking convergence).
+        Provided by the subclass.
+        """
+
+    @abstractmethod
+    def _incoherent_t_arrival_lnprob(self, d_h_timeseries, h_h):
+        """
+        Return array of shape (n_det, n_times) with detector time-of-
+        arrival proposal probability based on the (d|h) timeseries and
+        (h|h) covariance.
         Provided by the subclass.
         """
 
@@ -339,8 +378,8 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         'u_tdet'. An entry 'rot_psi' has the rotation matrices to
         transform the antenna factors between psi=0 and psi=psi_qmc.
         """
-        sequence_values = qmc.scale(
-            qmc.Sobol(len(self._qmc_range_dic), seed=self._rng
+        sequence_values = stats.qmc.scale(
+            stats.qmc.Sobol(len(self._qmc_range_dic), seed=self._rng
                      ).random_base2(self.max_log2n_qmc) % 1,  # %1 sends 1→0
             *zip(*self._qmc_range_dic.values())).T
 
@@ -401,94 +440,11 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                         )[..., 0]
         return fplus_fcross  # qdp
 
-    def _draw_single_det_times(self, t_arrival_lnprob, times, q_inds):
-        """
-        Choose time of arrivals independently at each detector according
-        to the QMC sequence, according to a proposal distribution based
-        on the matched-filtering timeseries.
-
-        Parameters
-        ----------
-        t_arrival_lnprob: (n_times, n_det) float array
-            Incoherent proposal for log probability of arrival times at
-            each detector.
-
-        times: (n_t,) float array
-            Timestamps of the timeseries (s).
-
-        q_inds: (n_qmc,) int array
-            Indices to the QMC sequence.
-
-        Return
-        ------
-        t_first_det: float array of length n_qmc
-            Time of arrival at the first detector (s) relative to tgps.
-
-        delays: int array of shape (n_det-1, n_qmc)
-            Time delay between the first detector and the other
-            detectors, in units of 1/.skydict.f_sampling
-
-        importance_sampling_weight: float array of length n_qmc
-            Density ratio between the astrophysical prior and the
-            proposal distribution of arrival times.
-        """
-        # Sort detectors by SNR
-        det_order = tuple(np.argsort(t_arrival_lnprob.max(axis=0)))[::-1]
-
-        if len(det_order) > 1:
-            # Apply prior at 2nd detector
-            prob_t0 = utils.exp_normalize(t_arrival_lnprob[:, det_order[0]])
-            t_arrival_lnprob[:, det_order[1]] += self._second_detector_lnprior(
-                det_order, prob_t0)
-
-        if len(det_order) > 2:
-            # Apply prior at 3rd detector
-            prob_t1 = utils.exp_normalize(t_arrival_lnprob[:, det_order[1]])
-            t_arrival_lnprob[:, det_order[2]] += self._third_detector_lnprior(
-                det_order, prob_t0, prob_t1)
-
-        # Note: update code when there are > 3 detectors, as it is now
-        # it will work but may be inefficient if the 4th detector has
-        # low SNR.
-
-        tdet_inds, tdet_weights = _draw_indices(
-            t_arrival_lnprob.T, self._qmc_sequence['u_tdet'][:, q_inds])
-
-        delays = tdet_inds[1:] - tdet_inds[0]  # dq  # In units of dt
-        importance_sampling_weight = np.prod(
-            tdet_weights / self.sky_dict.f_sampling, axis=0)  # q
-
-        t_first_det = (times[tdet_inds[0]]
-                       + self._qmc_sequence['t_fine'][q_inds])  # q
-
-        return t_first_det, delays, importance_sampling_weight
-
-    def _second_detector_lnprior(self, det_order, prob_t0):
-        """
-        Log of prior probability of time of arrival at the second
-        detector (by `det_order`) given the probability of arrival at
-        the first detector.
-        """
-        prior_t1 = signal.convolve(
-            prob_t0, self.sky_dict.delays_prior[det_order[:2]], 'same')
-        with np.errstate(divide='ignore'):
-            return np.log(prior_t1)
-
-    def _third_detector_lnprior(self, det_order, prob_t0, prob_t1):
-        """
-        Log of prior probability of time of arrival at the third
-        detector (by `det_order`) given the probability of arrival at
-        the first two detectors.
-        """
-        prob_dt_01 = signal.correlate(prob_t1, prob_t0, 'same')
-        dt_01 = signal.correlation_lags(len(prob_t1), len(prob_t0), 'same')
-        min_delay, max_delay = self.sky_dict.delays_bounds[det_order[:2]]
-        mask = (dt_01 >= min_delay) & (dt_01 <= max_delay)
-        prior_dt02 = (prob_dt_01[mask]
-                      @ self.sky_dict.delays_prior[det_order[:3]])
-        prior_t2 = signal.convolve(prob_t0, prior_dt02, 'same')
-        with np.errstate(divide='ignore'):
-            return np.log(prior_t2)
+    def _get_tdet_inds(self, t_arrival_prob, q_inds):
+        cumprob = np.cumsum(t_arrival_prob, axis=1)
+        np.testing.assert_allclose(cumprob[:, -1], 1)
+        return self._searchsorted(cumprob,
+                                  self._qmc_sequence['u_tdet'][:, q_inds])
 
     @staticmethod
     def _interp_locally(times, timeseries, new_times, spline_degree=3):
@@ -508,8 +464,8 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                 k=spline_degree, check_finite=False, axis=-1)(new_times)
 
         return krogh_interpolate(times[i_min : i_max],
-                                 timeseries[..., i_min : i_max], new_times,
-                                 axis=-1)
+                                 timeseries[..., i_min : i_max],
+                                 new_times, axis=-1)
 
     def get_optimal_beta_temperature(self, dh_timeseries, h_h, times,
                                      beta_rng=(.1, 1)):
@@ -655,7 +611,7 @@ class BaseCoherentScoreHM(BaseCoherentScore):
             phi_ref))  # mo
         self._phi_ref = phi_ref
 
-    def _get_lnweights_important(self, dh_qo, hh_qo, prior_weights_q):
+    def _get_lnnumerators_important(self, dh_qo, hh_qo, sky_prior):
         """
         Parameters
         ----------
@@ -667,17 +623,15 @@ class BaseCoherentScoreHM(BaseCoherentScore):
             ⟨h|h⟩ real inner product of a waveform at
             ``self.lookup_table.REFERENCE_DISTANCE`` with itself.
 
-        prior_weights_q: (n_physical,) float array
-            Positive importance-sampling weights of the QMC sequence.
+        sky_prior: (n_physical,) float array
+            Prior weights of the QMC sequence.
 
         Return
         ------
-        ln_weights: float array of length n_important
+        ln_numerators: float array of length n_important
             Natural log of the weights of the QMC samples, including the
-            likelihood and the importance-sampling correction.
-            Normalized so that the expectation value of all
-            ``exp(ln_weights)`` (i.e. not just the important ones kept
-            here) is ``lnl_marginalized``.
+            likelihood and prior but excluding the importance sampling
+            weights.
 
         important: (array of ints, array of ints) of lengths n_important
             The first array contains indices between 0 and n_physical-1
@@ -691,31 +645,10 @@ class BaseCoherentScoreHM(BaseCoherentScore):
         threshold = np.max(max_over_distance_lnl) - self.DLNL_THRESHOLD
         important = np.where(max_over_distance_lnl > threshold)
 
-        ln_weights = (self.lookup_table.lnlike_marginalized(dh_qo[important],
-                                                            hh_qo[important])
-                      + np.log(prior_weights_q)[important[0]]
-                      - np.log(self._nphi))  # i
+        ln_numerators = (
+            self.lookup_table.lnlike_marginalized(dh_qo[important],
+                                                  hh_qo[important])
+            + np.log(sky_prior)[important[0]]
+            - np.log(self._nphi))  # i
 
-        return ln_weights, important
-
-
-@numba.guvectorize([(numba.float64[:], numba.float64[:],
-                     numba.int64[:], numba.float64[:])],
-                   '(n),(m)->(m),(m)')
-def _draw_indices(unnormalized_lnprob, quantiles, indices, weights):
-    """
-    Sample desired quantiles from a distribution using the inverse of
-    its cumulative.
-
-    Parameters
-    ----------
-    unnormalized_lnprob, quantiles
-
-    Return
-    ------
-    indices, weights
-    """
-    prob = np.exp(unnormalized_lnprob - unnormalized_lnprob.max())
-    prob /= prob.sum()
-    indices[:] = np.searchsorted(np.cumsum(prob), quantiles)
-    weights[:] = 1 / prob[indices]
+        return ln_numerators, important
