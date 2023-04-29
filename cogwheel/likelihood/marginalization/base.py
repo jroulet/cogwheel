@@ -267,7 +267,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         allows to verify that the lookup table is of the correct type.
         """
 
-    def get_marginalization_info(self, d_h_timeseries, h_h, /, times):
+    def get_marginalization_info(self, d_h_timeseries, h_h, times):
         """
         Return a MarginalizationInfo object with extrinsic parameter
         integration results, ensuring that one of three conditions
@@ -342,15 +342,6 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         """
         Return a MarginalizationInfo object using a specific chunk of
         the QMC sequence (without checking convergence).
-        Provided by the subclass.
-        """
-
-    @abstractmethod
-    def _incoherent_t_arrival_lnprob(self, d_h_timeseries, h_h):
-        """
-        Return array of shape (n_det, n_times) with detector time-of-
-        arrival proposal probability based on the (d|h) timeseries and
-        (h|h) covariance.
         Provided by the subclass.
         """
 

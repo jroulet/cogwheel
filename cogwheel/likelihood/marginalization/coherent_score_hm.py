@@ -237,6 +237,17 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         Log likelihood maximized over distance and phase, approximating
         that different modes and polarizations are all orthogonal and
         have independent phases.
+
+        Parameters
+        ----------
+        d_h_timeseries: (n_m, 2, n_t, n_d) complex array
+            Timeseries of complex (d|h), inner product of data against a
+            waveform at reference distance and phase.
+            Decomposed by mode, polarization, time, detector.
+
+        h_h: (n_mm, 2, 2, n_d) complex array
+            Complex (h|h) inner product of a waveform with itself,
+            decomposed by mode, polarization and detector.
         """
         hh_mpdiagonal = h_h[np.equal(self.m_inds, self.mprime_inds)
                            ][:, (0, 1), (0, 1)].real  # mpd
