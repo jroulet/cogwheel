@@ -48,14 +48,9 @@ import pandas as pd
 from cogwheel import gw_plotting
 
 samples = pd.read_feather(rundir/sampling.SAMPLES_FILENAME)
-gw_plotting.CornerPlot(samples).plot()
+gw_plotting.CornerPlot(samples[post.prior.sampled_params]).plot()
 ```
-Transform the samples to a standard system of coordinates:
-```python
-post.prior.transform_samples(samples)
 
-gw_plotting.CornerPlot(samples[['ra', 'dec']]).plot()
-```
 
 ## Overview
 
