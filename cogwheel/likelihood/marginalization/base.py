@@ -306,7 +306,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                     marginalization_info, times)
             else:
                 # Increase temperature as next proposal:
-                t_arrival_prob **= 1 / self._temperature_factor
+                t_arrival_prob = t_arrival_prob**(1 / self._temperature_factor)
                 t_arrival_prob /= t_arrival_prob.sum(axis=1, keepdims=True)
 
             marginalization_info.update(self._get_marginalization_info_chunk(
