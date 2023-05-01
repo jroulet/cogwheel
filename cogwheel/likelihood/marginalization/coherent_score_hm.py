@@ -46,7 +46,7 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         times: (n_t,) float array
             Timestamps of the timeseries (s).
 
-        t_arrival_prob: (n_t, n_d) float array
+        t_arrival_prob: (n_d, n_t) float array
             Proposal probability of time of arrival at each detector,
             normalized to sum to 1 along the time axis.
 
