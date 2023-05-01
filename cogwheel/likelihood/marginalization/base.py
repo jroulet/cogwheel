@@ -98,7 +98,7 @@ class MarginalizationInfo:
 
     def __post_init__(self):
         """Set derived attributes."""
-        denominators = np.ones(len(self.q_inds))
+        denominators = np.zeros(len(self.q_inds))
         for n_qmc, proposal in zip(self.proposals_n_qmc, self.proposals):
             denominators += n_qmc * np.prod(
                 np.take_along_axis(proposal, self.tdet_inds, axis=1),
