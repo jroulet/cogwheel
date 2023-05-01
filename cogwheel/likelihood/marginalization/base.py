@@ -177,6 +177,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     generic steps that the coherent score computation normally requires.
     """
     _searchsorted = np.vectorize(np.searchsorted, signature='(n),(m)->(m)')
+    _temperature_factor = 2
 
     def __init__(self, sky_dict, lookup_table=None, log2n_qmc: int = 11,
                  seed=0, beta_temperature=.5, n_qmc_sequences=128,
@@ -292,15 +293,22 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         marginalization_info = self._get_marginalization_info_chunk(
             d_h_timeseries, h_h, times, t_arrival_prob, i_chunk)
 
-        while 0 < marginalization_info.n_effective < self.min_n_effective:
+        while marginalization_info.n_effective < self.min_n_effective:
             # Perform adaptive mixture importance sampling:
             i_chunk += 1
             if i_chunk == len(self._qmc_ind_chunks):
                 warnings.warn('Maximum QMC resolution reached.')
                 break
 
-            t_arrival_prob = self._kde_t_arrival_prob(marginalization_info,
-                                                      times)
+            if marginalization_info.n_effective > 5:
+                # Use a KDE of the weighted samples as next proposal:
+                t_arrival_prob = self._kde_t_arrival_prob(
+                    marginalization_info, times)
+            else:
+                # Increase temperature as next proposal:
+                t_arrival_prob **= 1 / self._temperature_factor
+                t_arrival_prob /= t_arrival_prob.sum(axis=1, keepdims=True)
+
             marginalization_info.update(self._get_marginalization_info_chunk(
                 d_h_timeseries, h_h, times, t_arrival_prob, i_chunk))
 
