@@ -300,7 +300,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                 warnings.warn('Maximum QMC resolution reached.')
                 break
 
-            if marginalization_info.n_effective > 5:
+            if marginalization_info.n_effective > 1:
                 # Use a KDE of the weighted samples as next proposal:
                 t_arrival_prob = self._kde_t_arrival_prob(
                     marginalization_info, times)
