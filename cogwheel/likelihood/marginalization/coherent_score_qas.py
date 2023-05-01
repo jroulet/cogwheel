@@ -66,6 +66,10 @@ class CoherentScoreQAS(BaseCoherentScore):
             = self.sky_dict.get_sky_inds_and_prior(
                 tdet_inds[1:] - tdet_inds[0])  # q, q, q
 
+        # Apply physical mask (sensible time delays):
+        q_inds = q_inds[physical_mask]
+        tdet_inds = tdet_inds[:, physical_mask]
+
         if not any(physical_mask):
             return MarginalizationInfo(ln_numerators=np.array([]),
                                        q_inds=np.array([], int),
@@ -77,10 +81,6 @@ class CoherentScoreQAS(BaseCoherentScore):
                                        proposals_n_qmc=[n_qmc],
                                        proposals=[t_arrival_prob],
                                        )
-
-        # Apply physical mask (sensible time delays):
-        q_inds = q_inds[physical_mask]
-        tdet_inds = tdet_inds[:, physical_mask]
 
         t_first_det = (times[tdet_inds[0]]
                        + self._qmc_sequence['t_fine'][q_inds])
