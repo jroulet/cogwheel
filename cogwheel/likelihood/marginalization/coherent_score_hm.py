@@ -55,7 +55,7 @@ class CoherentScoreHM(BaseCoherentScoreHM):
 
         Return
         ------
-        Instance of ``MarginalizationInfohm`` with several fields, see
+        Instance of ``MarginalizationInfoHM`` with several fields, see
         its documentation.
         """
         if d_h_timeseries.shape[0] != self.m_arr.size:

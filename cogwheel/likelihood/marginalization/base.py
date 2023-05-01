@@ -198,7 +198,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         seed: {int, None, np.random.RandomState}
             For reproducibility of the extrinsic parameter samples.
 
-        beta_temperature: float
+        beta_temperature: float or float array of shape (n_detectors,)
             Inverse temperature, tempers the arrival time probability at
             each detector.
 

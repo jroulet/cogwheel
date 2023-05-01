@@ -159,9 +159,8 @@ class SkyDictionary(utils.JSONMixin):
             timeseries = timeseries * scipy.signal.get_window(
                 window, shape[axis]).reshape(shape)
 
-        fs_ratio = np.round(
-            self.f_sampling * (times[1] - times[0]),
-            decimals=10)  # Prevent machine precision problems
+        fs_ratio = np.round(self.f_sampling * (times[1] - times[0]),
+                            decimals=10)  # Prevent machine precision problems
         if fs_ratio != 1:
             timeseries, times = scipy.signal.resample(
                 timeseries, int(len(times) * fs_ratio), times, axis=axis)
@@ -184,8 +183,7 @@ class SkyDictionary(utils.JSONMixin):
             Indices of self.sky_samples with the correct time delays.
 
         sky_prior: float array of length n_physical
-            Prior probability density for the time-delays, in units of
-            s^-(n_det-1).
+            Prior probability density for the time-delays (s).
 
         physical_mask: boolean array of length n_samples
             Some choices of time of arrival at detectors may not
