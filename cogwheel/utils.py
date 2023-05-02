@@ -154,9 +154,6 @@ def exp_normalize(lnprob, axis=-1):
     axis: int
         Axis of `lnprob` along which probabilities sum to 1.
     """
-    if lnprob.size == 0:
-        return lnprob.copy()
-
     prob = np.exp(lnprob - np.max(lnprob, axis=axis, keepdims=True))
     prob /= np.sum(prob, axis=axis, keepdims=True)
     return prob

@@ -98,6 +98,15 @@ class MarginalizationInfo:
 
     def __post_init__(self):
         """Set derived attributes."""
+        self.n_qmc = sum(self.proposals_n_qmc)
+
+        if self.q_inds.size == 0:
+            self.weights_q = np.array([])
+            self.weights = np.array([])
+            self.n_effective = 0.
+            self.lnl_marginalized = -np.inf
+            return
+
         denominators = np.zeros(len(self.q_inds))
         for n_qmc, proposal in zip(self.proposals_n_qmc, self.proposals):
             denominators += n_qmc * np.prod(
@@ -112,13 +121,7 @@ class MarginalizationInfo:
             ).toarray()[0]  # Repeated q_inds get summed
         self.weights_q = weights_q[weights_q > 0]
         self.n_effective = utils.n_effective(self.weights_q)
-
-        self.n_qmc = sum(self.proposals_n_qmc)
-
-        if self.q_inds.size == 0:
-            self.lnl_marginalized = -np.inf
-        else:
-            self.lnl_marginalized = logsumexp(ln_weights)
+        self.lnl_marginalized = logsumexp(ln_weights)
 
     def update(self, other):
         """
