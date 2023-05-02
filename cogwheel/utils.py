@@ -13,7 +13,6 @@ import textwrap
 import numpy as np
 from contextlib import contextmanager
 from scipy.optimize import _differentialevolution
-from scipy.special import logsumexp
 from numba import njit, vectorize
 
 
@@ -155,7 +154,12 @@ def exp_normalize(lnprob, axis=-1):
     axis: int
         Axis of `lnprob` along which probabilities sum to 1.
     """
-    return np.exp(lnprob - logsumexp(lnprob, axis=axis, keepdims=True))
+    if lnprob.size == 0:
+        return lnprob.copy()
+
+    prob = np.exp(lnprob - np.max(lnprob, axis=axis, keepdims=True))
+    prob /= np.sum(prob, axis=axis, keepdims=True)
+    return prob
 
 
 @njit
