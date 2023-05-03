@@ -37,7 +37,7 @@ class MarginalizationInfo:
     over distance to be included in the integral as "important" samples.
 
     Attributes
-    ------
+    ----------
     ln_numerators: float array of length n_important
         Natural log of the numerator of the weights of the QMC samples,
         including the likelihood and and prior and excluding the
@@ -65,6 +65,21 @@ class MarginalizationInfo:
 
     h_h: float array of length n_important
         Real inner product ⟨h|h⟩.
+
+    tdet_inds: int array of shape (n_det, n_important)
+        The i-th row contains indices to ``times`` (used by the coherent
+        score instance) that correspond to the discretized time of
+        arrival at the i-th detector.
+
+    proposals_n_qmc: list of length n_proposals containing ints
+        Lengths of the QMC sequences used in multiple importance
+        sampling.
+
+    proposals: list of length n_proposals containing float arrays of
+               shape (n_det, n_times).
+        Proposal distributions for detector times of arrival, normalized
+        to sum to 1 along the time axis. These are combined using
+        multiple importance sampling.
 
     Derived attributes
     ------------------
@@ -154,7 +169,7 @@ class MarginalizationInfo:
                                       getattr(other, attr)], axis=-1)
             setattr(self, attr, updated)
 
-        self.__post_init__()
+        self.__post_init__()  # Update derived attributes
 
 
 @dataclass
