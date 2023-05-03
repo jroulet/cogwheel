@@ -391,8 +391,8 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         transform the antenna factors between psi=0 and psi=psi_qmc.
         """
         sequence_values = stats.qmc.scale(
-            stats.qmc.Sobol(len(self._qmc_range_dic), seed=self._rng
-                     ).random_base2(self.max_log2n_qmc) % 1,  # %1 sends 1→0
+            stats.qmc.Halton(len(self._qmc_range_dic), seed=self._rng
+                     ).random(2**self.max_log2n_qmc) % 1,  # %1 sends 1→0
             *zip(*self._qmc_range_dic.values())).T
 
         n_det = len(self.sky_dict.detector_names)
@@ -410,7 +410,9 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
     def _create_qmc_ind_chunks(self):
         qmc_inds = np.arange(2 ** self.max_log2n_qmc)
-        breaks = 2 ** np.arange(self.log2n_qmc, self.max_log2n_qmc)
+        breaks = np.arange(2 ** self.log2n_qmc,
+                           2 ** self.max_log2n_qmc,
+                           2 ** self.log2n_qmc)
         return np.split(qmc_inds, breaks)
 
     @property
