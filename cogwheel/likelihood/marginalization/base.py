@@ -338,7 +338,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         t_det = np.vstack((marginalization_info.t_first_det,
                            marginalization_info.t_first_det + delays))  # dt
 
-        scotts_factor = marginalization_info.n_effective ** -.2
+        silverman_factor = (3/4 * marginalization_info.n_effective) ** -.2
         dt = times[1] - times[0]
         bins = np.concatenate([[times[0] - dt/2], times + dt/2])
 
@@ -347,7 +347,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             hist = np.histogram(t_samples, weights=marginalization_info.weights,
                                 bins=bins)[0]
 
-            scale = scotts_factor * utils.weighted_avg_and_std(
+            scale = silverman_factor * utils.weighted_avg_and_std(
                 t_samples, marginalization_info.weights)[1]
             kernel = stats.cauchy.pdf(times, loc=times[len(times)//2 - 1],
                                       scale=scale)
