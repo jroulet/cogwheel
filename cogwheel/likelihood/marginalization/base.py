@@ -38,15 +38,17 @@ class MarginalizationInfo:
 
     Attributes
     ------
-    ln_weights: float array of length n_important
-        Natural log of the weights of the QMC samples, including the
-        likelihood and the importance-sampling correction. Normalized so
-        that the expectation value of all ``exp(ln_weights)`` (i.e.
-        before selecting the important ones) is ``lnl_marginalized``.
-
-    n_qmc: int
-        Total number of QMC samples used in the integral, including
-        unphysical and unimportant ones. Should be a power of 2.
+    ln_numerators: float array of length n_important
+        Natural log of the numerator of the weights of the QMC samples,
+        including the likelihood and and prior and excluding the
+        importance-sampling correction.
+        The multiple importance sampling formula with the balance
+        heuristic is:
+            ∫ f(x) p(x) dx ≈ Σ_x [p(x) f(x) / (Σ_j n_j q_j(x))]
+        where {x} is a mixture of n_j samples from each proposal
+        distribution q_j; this attribute contains the (log) numerators.
+        In the present case x represents the times of arrival at each
+        detector.
 
     q_inds: int array of length n_important
         Indices to the QMC sequence.
@@ -64,12 +66,20 @@ class MarginalizationInfo:
     h_h: float array of length n_important
         Real inner product ⟨h|h⟩.
 
-    Properties
-    ----------
+    Derived attributes
+    ------------------
     weights: float array of length n_important
         Weights of the QMC samples normalized to have unit sum.
-        Proportional to ``exp(ln_weights)`` but with a different
-        normalization.
+
+    weights_q: float array of the same length as ``unique(q_inds)``
+        Weights of the QMC samples, normalized to have unit sum,
+        differs from ``weights`` for higher-mode waveforms, that perform
+        a quadrature over orbital phase (thus, many samples can have the
+        same q_ind). Used for computing ``n_effective``.
+
+    n_qmc: int
+        Total number of QMC samples used in the integral, including
+        unphysical and unimportant ones.
 
     n_effective: float
         Effective number of samples achieved for the marginalization
@@ -309,7 +319,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                     marginalization_info, times)
             else:
                 # Increase temperature as next proposal:
-                t_arrival_prob = t_arrival_prob**(1 / self._temperature_factor)
+                t_arrival_prob = t_arrival_prob ** (1/self._temperature_factor)
                 t_arrival_prob /= t_arrival_prob.sum(axis=1, keepdims=True)
 
             marginalization_info.update(self._get_marginalization_info_chunk(
