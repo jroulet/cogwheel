@@ -77,8 +77,8 @@ class SkyDictionary(utils.JSONMixin):
         self._rng = np.random.default_rng(seed)
 
         self.sky_samples = self._create_sky_samples()
-        self.fplus_fcross_0 = gw_utils.get_fplus_fcross_0(self.detector_names,
-                                                          **self.sky_samples)
+        self.fplus_fcross_0 = gw_utils.get_fplus_fcross_0(
+            self.detector_names, **self.sky_samples).astype(np.float32)
         geocenter_delays = gw_utils.get_geocenter_delays(
             self.detector_names, **self.sky_samples)
         self.geocenter_delay_first_det = geocenter_delays[0]

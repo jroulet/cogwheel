@@ -420,7 +420,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         costwopsi = np.cos(2 * qmc_sequence['psi'])
         qmc_sequence['rot_psi'] = np.moveaxis([[costwopsi, sintwopsi],
                                                [-sintwopsi, costwopsi]],
-                                              -1, 0)  # qpp'
+                                              -1, 0).astype(np.float32)  # qpp'
         return qmc_sequence
 
     def _create_qmc_ind_chunks(self):
@@ -634,10 +634,11 @@ class BaseCoherentScoreHM(BaseCoherentScore):
     def nphi(self, nphi):
         phi_ref = np.linspace(0, 2*np.pi, nphi, endpoint=False)
         self._nphi = nphi
-        self._dh_phasor = np.exp(-1j * np.outer(self.m_arr, phi_ref))  # mo
+        self._dh_phasor = np.exp(-1j * np.outer(self.m_arr, phi_ref)
+                                ).astype(np.complex64)  # mo
         self._hh_phasor = np.exp(1j * np.outer(
             self.m_arr[self.m_inds,] - self.m_arr[self.mprime_inds,],
-            phi_ref))  # mo
+            phi_ref)).astype(np.complex64)  # mo
         self._phi_ref = phi_ref
 
     def _get_lnnumerators_important(self, dh_qo, hh_qo, sky_prior):

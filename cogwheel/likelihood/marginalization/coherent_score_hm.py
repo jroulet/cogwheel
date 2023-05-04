@@ -213,7 +213,8 @@ class CoherentScoreHM(BaseCoherentScoreHM):
                            t_first_det + self.sky_dict.delays[:, sky_inds]))
         dh_dmpq = np.array(
             [self._interp_locally(times, dh_mptd[..., i_det], t_det[i_det])
-             for i_det in range(len(self.sky_dict.detector_names))])
+             for i_det in range(len(self.sky_dict.detector_names))],
+            dtype=np.complex64)
 
         # Same but faster:
         # dh_qm = np.einsum('dmpq,qdp->qm', dh_dmpq, fplus_fcross)  # qm

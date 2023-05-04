@@ -277,7 +277,8 @@ class MarginalizedExtrinsicLikelihood(
         self._d_h_weights = np.einsum('tmdb,mb,d->mtdb',
                                       d_h_summary,
                                       1 / h0_fbin.conj(),
-                                      1 / self.asd_drift**2)  # mtdb
+                                      1 / self.asd_drift**2
+                                     ).astype(np.complex64)  # mtdb
 
     def _set_h_h_weights(self, h0_f, h0_fbin):
         m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
@@ -289,14 +290,16 @@ class MarginalizedExtrinsicLikelihood(
         self._h_h_weights = np.einsum('mdb,mb,mb->mdb',
                                       self._get_summary_weights(h0_h0),
                                       1 / h0_fbin[m_inds],
-                                      1 / h0_fbin[mprime_inds].conj())  # mdb
+                                      1 / h0_fbin[mprime_inds].conj()
+                                     )  # mdb
 
         # Count off-diagonal terms twice:
         self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
 
     def _get_dh_hh(self, par_dic):
         h_mpb = self.waveform_generator.get_hplus_hcross(
-            self.fbin, dict(par_dic) | self._ref_dic, by_m=True)  # mpb
+            self.fbin, dict(par_dic) | self._ref_dic, by_m=True
+            ).astype(np.complex64)  # mpb
 
         # Same but faster:
         # dh_mptd = np.einsum('mtdb,mpb->mptd',
@@ -308,7 +311,7 @@ class MarginalizedExtrinsicLikelihood(
         hh_mppd = np.einsum('mdb,mpb,mPb->mpPd',
                             self._h_h_weights,
                             h_mpb[m_inds],
-                            h_mpb.conj()[mprime_inds])
+                            h_mpb.conj()[mprime_inds]).astype(np.complex64)
         return dh_mptd, hh_mppd
 
     def _get_many_dh_hh(self, samples: pd.DataFrame):
@@ -321,7 +324,7 @@ class MarginalizedExtrinsicLikelihood(
                 self.fbin, dict(sample) | self._ref_dic,
                 by_m=True)
              for _, sample in samples[self.params].iterrows()],
-            0, -1)  # mpbn
+            0, -1).astype(np.complex64)  # mpbn
 
         n_m, n_t, n_d, n_b = self._d_h_weights.shape
         n_n  = len(samples)
@@ -330,7 +333,7 @@ class MarginalizedExtrinsicLikelihood(
             (n_m, n_t*n_d, n_b))  # m(td)b
 
         # Loop instead of broadcasting, to save memory:
-        dh_mptdn = np.zeros((n_m, n_p, n_t*n_d, n_n), np.complex_)
+        dh_mptdn = np.zeros((n_m, n_p, n_t*n_d, n_n), np.complex64)
         for i_m, i_p in np.ndindex(n_m, n_p):
             dh_mptdn[i_m, i_p] = d_h_weights[i_m] @ h_mpbn[i_m, i_p].conj()
 
