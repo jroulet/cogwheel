@@ -291,8 +291,8 @@ class CBCLikelihood(utils.JSONMixin):
         Array of shape (n_m?, n_detectors, n_frequencies) with strain at
         detector. `n_m` is there only if `by_m=True`.
         """
-        shape = ((len(self.waveform_generator._harmonic_modes_by_m),) if by_m
-                 else ()) + self.event_data.strain.shape
+        shape = (self.waveform_generator.m_arr.shape if by_m else ()
+                ) + self.event_data.strain.shape
         h_f = np.zeros(shape, dtype=np.complex_)
         h_f[..., self.event_data.fslice] \
             = self.waveform_generator.get_strain_at_detectors(

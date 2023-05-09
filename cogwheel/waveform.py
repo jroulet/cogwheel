@@ -297,6 +297,11 @@ class WaveformGenerator(utils.JSONMixin):
         utils.clear_caches()
 
     @property
+    def m_arr(self):
+        """Int array of m harmonic mode numbers."""
+        return np.fromiter(self._harmonic_modes_by_m, int)
+
+    @property
     def n_cached_waveforms(self):
         """Nonnegative integer, number of cached waveforms."""
         return self._n_cached_waveforms
@@ -463,7 +468,7 @@ class WaveformGenerator(utils.JSONMixin):
             self.n_slow_evaluations += 1
 
         # hplus_hcross is a (n_m x 2 x n_frequencies) array.
-        m_arr = np.fromiter(self._harmonic_modes_by_m, int).reshape(-1, 1, 1)
+        m_arr = self.m_arr.reshape(-1, 1, 1)
         hplus_hcross = (np.exp(1j * waveform_par_dic['phi_ref'] * m_arr)
                         / waveform_par_dic['d_luminosity'] * hplus_hcross_0)
         if by_m:

@@ -10,10 +10,10 @@ import re
 import sys
 import tempfile
 import textwrap
-import numpy as np
 from contextlib import contextmanager
 from scipy.optimize import _differentialevolution
 from numba import njit, vectorize
+import numpy as np
 
 
 DIR_PERMISSIONS = 0o755

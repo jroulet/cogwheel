@@ -59,7 +59,7 @@ def gen_linestyles(number):
     """
     if number <= len(few_linestyles := ['-', '--', '-.', ':']):
         return few_linestyles[:number]
-    return ['-'] + [(0, tuple([2, 2]*i + [7, 2])) for i in range(number-1)]
+    return ['-'] + [(0, (2, 2)*i + (7, 2)) for i in range(number-1)]
 
 
 def gen_colors(number):

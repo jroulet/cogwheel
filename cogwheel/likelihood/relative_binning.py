@@ -428,8 +428,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         d_h_mpd, h_h_mpd = self._get_dh_hh_by_m_polarization_detector(
             tuple(par_dic_fiducial.items()))
 
-        m_arr = np.fromiter(
-            self.waveform_generator._harmonic_modes_by_m, int)
+        m_arr = self.waveform_generator.m_arr
         m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
         dh_phasor = np.exp(-1j * dphi * m_arr)
         hh_phasor = np.exp(1j * dphi * (m_arr[m_inds] - m_arr[mprime_inds]))
@@ -538,10 +537,9 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
 
         # Temporarily undo big time shift so waveform is smooth at
         # high frequencies:
-        shift_f = np.exp(-2j*np.pi*self.event_data.frequencies
-                         * self.event_data.tcoarse)
-        shift_fbin = np.exp(-2j*np.pi*self.fbin
-                            * self.event_data.tcoarse)
+        shift_f = np.exp(
+            -2j*np.pi * self.event_data.frequencies * self.event_data.tcoarse)
+        shift_fbin = np.exp(-2j*np.pi * self.fbin * self.event_data.tcoarse)
         self._h0_f *= shift_f.conj()
         self._h0_fbin *= shift_fbin.conj()
         # Ensure reference waveform is smooth and !=0 at high frequency:

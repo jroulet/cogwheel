@@ -83,9 +83,9 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
             coherent_score = self._create_coherent_score(
                 sky_dict=SkyDictionary(event_data.detector_names,
                                        f_sampling=f_sampling),
-                m_arr=list(waveform_generator._harmonic_modes_by_m))
-        elif (list(coherent_score.m_arr)
-              != list(waveform_generator._harmonic_modes_by_m)):
+                m_arr=waveform_generator.m_arr)
+        elif not np.array_equal(coherent_score.m_arr,
+                                waveform_generator.m_arr):
             raise ValueError('`coherent_score` and `waveform_generator` use '
                              'different harmonic modes.')
         self.coherent_score = coherent_score
@@ -241,8 +241,8 @@ class MarginalizedExtrinsicLikelihood(
         disable_precession = self.waveform_generator.disable_precession
         self.waveform_generator.disable_precession = False
 
-        shape = (len(self.waveform_generator._harmonic_modes_by_m),
-                 len(self.event_data.frequencies))
+        shape = (self.waveform_generator.m_arr.shape
+                 + self.event_data.frequencies.shape)
 
         h0_f = np.zeros(shape, dtype=np.complex_)
         h0_f[:, self.event_data.fslice] \

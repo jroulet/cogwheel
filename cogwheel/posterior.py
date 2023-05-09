@@ -114,9 +114,10 @@ class Posterior(utils.JSONMixin):
         if isinstance(prior_class, str):
             try:
                 prior_class = gw_prior.prior_registry[prior_class]
-            except KeyError as e:
+            except KeyError as err:
                 raise KeyError('Avaliable priors are: '
-                               f'{", ".join(gw_prior.prior_registry)}.') from e
+                               f'{", ".join(gw_prior.prior_registry)}.'
+                              ) from err
 
         if likelihood_class is None:
             likelihood_class = getattr(prior_class,

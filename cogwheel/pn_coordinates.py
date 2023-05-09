@@ -582,10 +582,10 @@ class IntrinsicParameterProposal:
 
         s1z_max = np.sqrt(1 - s1x_n**2 - s1y_n**2)
         s1z_min = -s1z_max
-        kwargs = dict(a=(s1z_min - s1z_loc) / s1z_scale,
-                      b=(s1z_max - s1z_loc) / s1z_scale,
-                      loc=s1z_loc,
-                      scale=s1z_scale)
+        kwargs = {'a': (s1z_min - s1z_loc) / s1z_scale,
+                  'b': (s1z_max - s1z_loc) / s1z_scale,
+                  'loc': s1z_loc,
+                  'scale': s1z_scale}
 
         s1z = self._p_s1z.ppf(cdf_s1z_conditioned, **kwargs)
         pdf_s1z = self._p_s1z.pdf(s1z, **kwargs)
