@@ -112,13 +112,21 @@ class SkyDictionary(utils.JSONMixin):
         # (n_det-1)-dimensional array of generators yielding sky-indices
         self._ind_generators = np.full(self._max_delay - self._min_delay + 1,
                                        iter(()))
-        for key, inds in self.delays2inds_map.items():
-            self._ind_generators[key] = itertools.cycle(inds)
+        self.set_generators()
 
         # (n_det-1)-dimensional float array with dt * d(Omega / 4pi)
         self._sky_prior = np.zeros(self._max_delay - self._min_delay + 1)
         for key, inds in self.delays2inds_map.items():
             self._sky_prior[key] = len(inds) / self.nsky / self.f_sampling
+
+    def set_generators(self):
+        """
+        Set attribute ``self._ind_generators``, this method can be
+        called after instantiation to make the method
+        ``.get_sky_inds_and_prior`` have reproducible output.
+        """
+        for key, inds in self.delays2inds_map.items():
+            self._ind_generators[key] = itertools.cycle(inds)
 
     def resample_timeseries(self, timeseries, times, axis=-1,
                             window=('tukey', .1)):

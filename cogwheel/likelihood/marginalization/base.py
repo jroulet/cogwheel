@@ -252,7 +252,6 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             sample size reaches `min_n_effective` or the number of
             extrinsic samples reaches ``2**max_log2n_qmc``.
         """
-
         # Set up and check lookup_table with correct marginalized_params:
         if lookup_table is None:
             if self._lookup_table_marginalized_params == {'d_luminosity'}:
