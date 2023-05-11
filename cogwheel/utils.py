@@ -667,9 +667,12 @@ class CogwheelEncoder(NumpyEncoder):
     @staticmethod
     def _get_commit_hash():
         cogwheel_dir = pathlib.Path(__file__).parents[1].resolve()
-        return subprocess.check_output(
-            ['git', 'rev-parse', 'HEAD'], cwd=cogwheel_dir
-            ).decode('utf-8').strip()
+        try:
+            return subprocess.check_output(
+                ['git', 'rev-parse', 'HEAD'], cwd=cogwheel_dir
+                ).decode('utf-8').strip()
+        except FileNotFoundError:
+            return None
 
     def default(self, o):
         """Encoding for registered cogwheel classes. """
