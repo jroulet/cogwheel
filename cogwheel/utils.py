@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -663,21 +664,29 @@ class CogwheelEncoder(NumpyEncoder):
             module = spec.name
         return module
 
+    @staticmethod
+    def _get_commit_hash():
+        cogwheel_dir = pathlib.Path(__file__).parents[1].resolve()
+        return subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], cwd=cogwheel_dir
+            ).decode('utf-8').strip()
+
     def default(self, o):
+        """Encoding for registered cogwheel classes. """
+        if o.__class__.__name__ not in class_registry:
+            return super().default(o)
+
+        dic = {'__cogwheel_class__': o.__class__.__name__,
+               '__module__': self._get_module_name(o),
+               'commit_hash': self._get_commit_hash()}
+
         if o.__class__.__name__ == 'EventData':
             filename = os.path.join(self.dirname, f'{o.eventname}.npz')
             o.to_npz(filename=filename, overwrite=self.overwrite,
                      permissions=self.file_permissions)
-            return {'__cogwheel_class__': o.__class__.__name__,
-                    '__module__': self._get_module_name(o),
-                    'filename': os.path.basename(filename)}
+            return dic | {'filename': os.path.basename(filename)}
 
-        if o.__class__.__name__ in class_registry:
-            return {'__cogwheel_class__': o.__class__.__name__,
-                    '__module__': self._get_module_name(o),
-                    'init_kwargs': o.get_init_dict()}
-
-        return super().default(o)
+        return dic | {'init_kwargs': o.get_init_dict()}
 
 
 class CogwheelDecoder(json.JSONDecoder):
