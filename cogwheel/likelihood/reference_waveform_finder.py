@@ -339,6 +339,13 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         # Maximize over time on the timeshifts grid
         ind = np.argmax(np.abs(
             self._matched_filter_timeseries_rb(self.par_dic_0)[:, i_refdet]))
+
+        if ind in {0, len(self._times) - 1}:
+            raise RuntimeError(
+                'Maximum likelihood achieved at edge of timeseries, consider '
+                'extending ``time_range`` or providing a more accurate '
+                '``event_data.tgps``.')
+
         self.par_dic_0['t_geocenter'] = self._times[ind]
 
         super()._set_summary()  # Recompute summary for non-timeshift
@@ -351,7 +358,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         result = minimize_scalar(lambda tgeo: -lnlike_refdet(tgeo),
                                  bracket=self._times[ind-1 : ind+2],
-                                 bounds=self.time_range)
+                                 bounds=self._times[[ind-1, ind+1]])
         self.par_dic_0['t_geocenter'] = result.x
         print(f'Set time, lnL({ref_det_name}) = {-result.fun}')
 
