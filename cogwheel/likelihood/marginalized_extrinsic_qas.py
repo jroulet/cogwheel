@@ -69,26 +69,22 @@ class MarginalizedExtrinsicLikelihoodQAS(
         super()._set_summary()
 
         # Don't zero the in-plane spins for the reference waveform
-        disable_precession = self.waveform_generator.disable_precession
-        self.waveform_generator.disable_precession = False
+        with utils.temporarily_change_attributes(self.waveform_generator,
+                                                 disable_precession=False):
+            h0_f = np.zeros(len(self.event_data.frequencies),
+                            dtype=np.complex_)
+            h0_f[..., self.event_data.fslice] \
+                = self.waveform_generator.get_hplus_hcross(
+                    self.event_data.frequencies[self.event_data.fslice],
+                    self.par_dic_0)[0]  # r
 
-        h0_f = np.zeros(len(self.event_data.frequencies),
-                        dtype=np.complex_)
-        h0_f[..., self.event_data.fslice] \
-            = self.waveform_generator.get_hplus_hcross(
-                self.event_data.frequencies[self.event_data.fslice],
-                self.par_dic_0)[0]  # r
+            h0_fbin = self.waveform_generator.get_hplus_hcross(
+                self.fbin, self.par_dic_0)[0]  # b
 
-        h0_fbin = self.waveform_generator.get_hplus_hcross(
-            self.fbin, self.par_dic_0)[0]  # b
+            self._stall_ringdown(h0_f, h0_fbin)
 
-        self._stall_ringdown(h0_f, h0_fbin)
-
-        self._set_d_h_weights(h0_f, h0_fbin)
-        self._set_h_h_weights(h0_f, h0_fbin)
-
-        # Reset
-        self.waveform_generator.disable_precession = disable_precession
+            self._set_d_h_weights(h0_f, h0_fbin)
+            self._set_h_h_weights(h0_f, h0_fbin)
 
     def _set_d_h_weights(self, h0_f, h0_fbin):
         shifts = np.exp(2j*np.pi * np.outer(self.event_data.frequencies,
