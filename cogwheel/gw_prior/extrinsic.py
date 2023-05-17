@@ -105,7 +105,7 @@ class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
                    - (phase_refdet - self._phase_refdet_0) / 2) % (2*np.pi)
         return {'phi_ref': phi_ref}
 
-    def inverse_transform(self, psi, iota, ra, dec, phi_ref, t_geocenter):
+    def inverse_transform(self, phi_ref, iota, ra, dec, psi, t_geocenter):
         """phi_ref to phi_ref_hat"""
         phase_refdet = self._phase_refdet(iota, ra, dec, psi, t_geocenter,
                                           phi_ref=0)
