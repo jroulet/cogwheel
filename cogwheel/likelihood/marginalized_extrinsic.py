@@ -237,6 +237,8 @@ class MarginalizedExtrinsicLikelihood(
         This is so that the reference waveform remains the same when
         toggling `disable_precession`.
         """
+        super()._set_summary()
+
         # Don't zero the in-plane spins for the reference waveform
         with utils.temporarily_change_attributes(self.waveform_generator,
                                                  disable_precession=False):
@@ -253,8 +255,6 @@ class MarginalizedExtrinsicLikelihood(
                 self.fbin, self.par_dic_0, by_m=True)  # mb
 
             self._stall_ringdown(h0_f, h0_fbin)
-
-            self.asd_drift = self.compute_asd_drift(self.par_dic_0)
 
             self._set_d_h_weights(h0_f, h0_fbin)
             self._set_h_h_weights(h0_f, h0_fbin)
