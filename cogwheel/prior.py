@@ -472,6 +472,47 @@ class Prior(ABC, utils.JSONMixin):
             np.vectorize(self.inverse_transform)(**inverse)))
         utils.update_dataframe(samples, sampled)
 
+    def generate_random_samples(self, n_samples):
+        """
+        Sample the prior using rejection sampling.
+
+        This is more efficient for more uniform priors.
+
+        Parameters
+        ----------
+        n_samples: int
+            How many samples to generate.
+
+        Return
+        ------
+        pd.DataFrame with columns per ``.sampled_params``, with samples
+        distributed according to the prior.
+        """
+        chunksize = (n_samples, len(self.sampled_params))
+        lnprior = np.vectorize(self.lnprior, otypes=[float])
+
+        max_lnprior = -np.inf
+        samples = pd.DataFrame(columns=self.sampled_params)
+        while len(samples) < n_samples:
+            candidates = pd.DataFrame(
+                self.cubemin + np.random.uniform(0, self.cubesize, chunksize),
+                columns=self.sampled_params)
+
+            candidates_lnprior = lnprior(**candidates)
+
+            if (new_max := candidates_lnprior.max()) > max_lnprior:
+                # Upper bound had been underestimated, correct for that
+                accept_prob = np.exp(max_lnprior - new_max)
+                accept = np.random.uniform(size=len(samples)) < accept_prob
+                samples = samples[accept]
+                max_lnprior = new_max
+
+            accept_prob = np.exp(candidates_lnprior - max_lnprior)
+            accept = np.random.uniform(size=len(candidates)) < accept_prob
+            samples = pd.concat((samples, candidates[accept]))
+
+        return samples[:n_samples]
+
 
 class CombinedPrior(Prior):
     """
