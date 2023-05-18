@@ -26,6 +26,37 @@ class PriorError(Exception):
     """Base class for all exceptions in this module"""
 
 
+def has_compatible_signature(func, params) -> bool:
+    """
+    Return whether the signature of `func` is compatible with passing
+    `params`.
+    The signature is considered compatible if it takes `params`
+    explicitly in the correct order, or takes variable arguments in a
+    compatible way. This function ignores a leading 'self' parameter if
+    present in the signature of `func`.
+
+    Parameters
+    ----------
+    func: callable
+        Function or method to test.
+
+    params: sequence of str
+        Parameter names.
+    """
+    parameters = dict(inspect.signature(func).parameters)
+    if parameters and next(iter(parameters)) == 'self':
+        del parameters['self']
+
+    i_first_vararg = next(
+        (i for i, parameter in enumerate(parameters.values())
+         if parameter.kind in {inspect.Parameter.VAR_POSITIONAL,
+                               inspect.Parameter.VAR_KEYWORD}),
+        None)
+
+    positional = list(parameters)[:i_first_vararg]
+    return list(params[:i_first_vararg]) == positional
+
+
 class Prior(ABC, utils.JSONMixin):
     """"
     Abstract base class to define priors for Bayesian parameter
@@ -372,8 +403,12 @@ class Prior(ABC, utils.JSONMixin):
 
     def __init_subclass__(cls):
         """
-        Check that subclasses that change the `__init__` signature also
-        define their own `get_init_dict` method.
+        Check that:
+        * Subclasses that change the `__init__` signature also define
+          their own `get_init_dict` method.
+        * Methods `.transform`, `.inverse_transform`, `.lnprior`,
+          `.lnprior_and_transform` have signatures compatible with the
+          correct ones.
         """
         super().__init_subclass__()
 
@@ -382,6 +417,17 @@ class Prior(ABC, utils.JSONMixin):
                 and cls.get_init_dict is Prior.get_init_dict):
             raise PriorError(
                 f'{cls.__name__} must override `get_init_dict` method.')
+
+        direct_params = cls.sampled_params + cls.conditioned_on
+        inverse_params = cls.standard_params + cls.conditioned_on
+        for func, params in [(cls.transform, direct_params),
+                             (cls.lnprior, direct_params),
+                             (cls.lnprior_and_transform, direct_params),
+                             (cls.inverse_transform, inverse_params)]:
+            if not has_compatible_signature(func, params):
+                raise PriorError(
+                    f'Expected signature of `{func.__qualname__}` to accept '
+                    f'{params}, got {inspect.signature(func)}.')
 
     def __repr__(self):
         """
