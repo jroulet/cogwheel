@@ -129,13 +129,14 @@ class Prior(ABC, utils.JSONMixin):
         self._setup_folding_transforms()
 
     @utils.ClassProperty
-    def sampled_params(self):
+    def sampled_params(cls):
         """List of sampled parameter names."""
-        return list(self.range_dic)
+        return list(cls.range_dic)
 
-    @utils.ClassProperty
+    @classmethod
+    @property
     @abstractmethod
-    def range_dic(self):
+    def range_dic(cls):
         """
         Dictionary whose keys are sampled parameter names and
         whose values are pairs of floats defining their ranges.
@@ -147,14 +148,15 @@ class Prior(ABC, utils.JSONMixin):
         """
         return {}
 
-    @utils.ClassProperty
+    @classmethod
+    @property
     @abstractmethod
-    def standard_params(self):
+    def standard_params(cls):
         """List of standard parameter names."""
         return []
 
     @abstractmethod
-    def lnprior(self, *par_vals, **par_dic) -> float:
+    def lnprior(self) -> float:
         """
         Natural logarithm of the prior probability density.
         Take `self.sampled_params + self.conditioned_on` parameters and
@@ -162,7 +164,7 @@ class Prior(ABC, utils.JSONMixin):
         """
 
     @abstractmethod
-    def transform(self, *par_vals, **par_dic) -> dict:
+    def transform(self) -> dict:
         """
         Transform sampled parameter values to standard parameter values.
         Take `self.sampled_params + self.conditioned_on` parameters and
@@ -170,7 +172,7 @@ class Prior(ABC, utils.JSONMixin):
         """
 
     @abstractmethod
-    def inverse_transform(self, *par_vals, **par_dic) -> dict:
+    def inverse_transform(self) -> dict:
         """
         Transform standard parameter values to sampled parameter values.
         Take `self.standard_params + self.conditioned_on` parameters and
@@ -703,20 +705,19 @@ class FixedPrior(Prior):
                      - self.__class__.standard_par_dic.keys()):
             raise ValueError(f'`standard_par_dic` has extra keys: {extra}')
 
-    @property
-    @staticmethod
+    @utils.ClassProperty
     @abstractmethod
-    def standard_par_dic():
+    def standard_par_dic(cls):
         """Dictionary with fixed parameter names and values."""
+        return {}
 
     @utils.ClassProperty
-    def standard_params(self):
-        return list(self.standard_par_dic)
+    def standard_params(cls):
+        return list(cls.standard_par_dic)
 
     range_dic = {}
 
-    @staticmethod
-    def lnprior():
+    def lnprior(self):
         """Natural logarithm of the prior probability density."""
         return 0
 
@@ -724,13 +725,14 @@ class FixedPrior(Prior):
         """Return a fixed dictionary of standard parameters."""
         return self.standard_par_dic
 
-    def inverse_transform(self, **standard_par_dic):
+    def inverse_transform(self, *standard_par_vals, **standard_par_dic):
         """
         Return an empty dictionary of sampled parameters.
-        If `require_consistency` is set to `True`, verify that the
-        `standard_par_dic` passed matches the one stored and raise
-        `PriorError` if it does not.
+        Raise `PriorError` if the arguments passed do not match the
+        `standard_par_dic` stored.
         """
+        standard_par_dic.update(dict(zip(self.standard_params,
+                                         standard_par_vals)))
         if mismatched := [par for par, value in self.standard_par_dic.items()
                           if value != standard_par_dic[par]]:
             raise PriorError(
