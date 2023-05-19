@@ -31,6 +31,7 @@ samples = pd.read_feather(rundir/sampling.SAMPLES_FILENAME)
 gw_plotting.CornerPlot(samples[post.prior.sampled_params]).plot()
 ```
 """
+import numpy as np
 from cogwheel import prior
 from cogwheel import waveform
 from cogwheel.likelihood import MarginalizedExtrinsicLikelihoodQAS
@@ -38,8 +39,10 @@ from cogwheel.gw_prior import (UniformDetectorFrameMassesPrior,
                                UniformEffectiveSpinPrior,
                                ZeroTidalDeformabilityPrior,
                                FixedReferenceFrequencyPrior,
+                               UniformTidalDeformabilitiesBNSPrior,
                                CombinedPrior,
                                RegisteredPriorMixin)
+from pe_waveform_cogwheel_dissipation import gen_taylorF2_dissipation_polar
 
 
 DEFAULT_PARS = waveform.DEFAULT_PARS | {'h1': 1., 'h2': 1.}
@@ -87,12 +90,25 @@ def compute_hplus_hcross_tidal_dissipation(
         raise ValueError('`harmonic_modes` can only be [(2, 2)]')
 
     par_dic = DEFAULT_PARS | par_dic
-
-    # TODO
-    # hplus_hcross = ...
-    # return hplus_hcross
-    raise NotImplementedError
-
+    
+    eta = par_dic['m1']*par_dic['m2'] / (par_dic['m1']+par_dic['m2'])**2
+    Mc = (par_dic['m1']+par_dic['m2'])*eta**(3/5)
+    
+    wf_params = np.array([Mc, eta, par_dic['s1z'], par_dic['s2z'], par_dic['h1'], par_dic['h2'], 
+                          par_dic['l1'], par_dic['l2'],
+                          par_dic['d_luminosity'], 0, par_dic['phi_ref'], par_dic['iota']]) # tc in gen_taylorF2_dissipation_polar set to zero
+    f_ref = par_dic['f_ref'] 
+    
+    # Avoid divergence in amplitude at f=0
+    f0_is_0 = f[0] == 0 
+    if f0_is_0:
+        f[0] = 0.0001 # Prevent divergence in amplitude
+    
+    hplus, hcross = gen_taylorF2_dissipation_polar(f, wf_params, f_ref)
+    hplus, hcross = np.array(hplus), np.array(hcross)
+    hplus_hcross = np.stack([hplus, hcross])    
+    return hplus_hcross
+    
 
 waveform.APPROXIMANTS['tidal_dissipation'] = waveform.Approximant(
     hplus_hcross_func=compute_hplus_hcross_tidal_dissipation)
@@ -201,5 +217,6 @@ class IntrinsicTidalDissipationsPrior(RegisteredPriorMixin,
     prior_classes = [UniformDetectorFrameMassesPrior,
                      UniformEffectiveSpinPrior,
                      UniformTidalDissipationsPrior,
-                     ZeroTidalDeformabilityPrior,
+                     # ZeroTidalDeformabilityPrior,
+                     UniformTidalDeformabilitiesBNSPrior,
                      FixedReferenceFrequencyPrior]
