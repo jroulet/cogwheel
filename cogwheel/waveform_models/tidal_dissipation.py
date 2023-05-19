@@ -164,8 +164,8 @@ class TidalDissipationMarginalizedExtrinsicLikelihoodQAS(
 
 
 class UniformTidalDissipationsPrior(prior.UniformPriorMixin,
-                                prior.IdentityTransformMixin,
-                                prior.Prior):
+                                    prior.IdentityTransformMixin,
+                                    prior.Prior):
     """Uniform prior for tidal dissipations h1, h2."""
     range_dic = {'h1': None,
                  'h2': None}
