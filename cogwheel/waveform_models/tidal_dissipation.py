@@ -42,6 +42,9 @@ from cogwheel.gw_prior import (UniformDetectorFrameMassesPrior,
                                RegisteredPriorMixin)
 
 
+DEFAULT_PARS = waveform.DEFAULT_PARS | {'h1': 1., 'h2': 1.}
+
+
 def compute_hplus_hcross_tidal_dissipation(
         f, par_dic, approximant='tidal_dissipation',
         harmonic_modes=None, lal_dic=None):
@@ -62,8 +65,8 @@ def compute_hplus_hcross_tidal_dissipation(
             * iota: inclination (rad)
             * phi_ref: phase at reference frequency (rad)
             * f_ref: reference frequency (Hz)
-            * h1, h2: component dissipation numbers
         plus, optionally:
+            * h1, h2: component dissipation numbers
             * s1z, s2z: dimensionless spins
 
     approximant: 'tidal_dissipation'
@@ -82,6 +85,8 @@ def compute_hplus_hcross_tidal_dissipation(
 
     if harmonic_modes not in ([(2, 2)], None):
         raise ValueError('`harmonic_modes` can only be [(2, 2)]')
+
+    par_dic = DEFAULT_PARS | par_dic
 
     # TODO
     # hplus_hcross = ...
