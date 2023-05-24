@@ -295,6 +295,12 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         allows to verify that the lookup table is of the correct type.
         """
 
+    # @staticmethod
+    # @property
+    # @abstractmethod
+    # def m_arr():
+    #     """int array with harmonic mode `m` numbers."""
+
     def get_marginalization_info(self, d_h_timeseries, h_h, times):
         """
         Return a MarginalizationInfo object with extrinsic parameter

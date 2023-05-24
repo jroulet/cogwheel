@@ -23,6 +23,7 @@ class CoherentScoreQAS(BaseCoherentScore):
 
     Inherits from ``BaseCoherentScore``.
     """
+    m_arr = np.array([2])
     _lookup_table_marginalized_params = {'d_luminosity', 'phi_ref'}
 
     def _get_marginalization_info_chunk(self, d_h_timeseries, h_h,
