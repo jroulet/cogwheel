@@ -509,9 +509,10 @@ class Prior(ABC, utils.JSONMixin):
 
             accept_prob = np.exp(candidates_lnprior - max_lnprior)
             accept = np.random.uniform(size=len(candidates)) < accept_prob
-            samples = pd.concat((samples, candidates[accept]))
+            samples = pd.concat((samples, candidates[accept]))[:n_samples]
 
-        return samples[:n_samples]
+        self.transform_samples(samples)
+        return samples
 
 
 class CombinedPrior(Prior):
