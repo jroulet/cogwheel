@@ -295,6 +295,12 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         allows to verify that the lookup table is of the correct type.
         """
 
+    # @staticmethod
+    # @property
+    # @abstractmethod
+    # def m_arr():
+    #     """int array with harmonic mode `m` numbers."""
+
     def get_marginalization_info(self, d_h_timeseries, h_h, times):
         """
         Return a MarginalizationInfo object with extrinsic parameter
@@ -328,9 +334,10 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                 break
 
             if marginalization_info.n_effective > 1:
-                # Use a KDE of the weighted samples as next proposal:
-                t_arrival_prob = self._kde_t_arrival_prob(
-                    marginalization_info, times)
+                # Hybridize with KDE of the weighted samples as next proposal:
+                t_arrival_prob = .5 * (
+                    self._kde_t_arrival_prob(marginalization_info, times)
+                    + t_arrival_prob)
             else:
                 # Increase temperature as next proposal:
                 t_arrival_prob = t_arrival_prob ** (1/self._temperature_factor)

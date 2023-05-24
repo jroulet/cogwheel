@@ -212,7 +212,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         # Optimize time, sky location, orbital phase and distance
         self._optimize_t_refdet(kwargs['ref_det_name'])
-        self._optimize_skyloc_and_inclination(kwargs['detector_pair'])
+        self._optimize_skyloc_and_inclination(kwargs['detector_pair'], seed)
         self._optimize_phase_and_distance()
 
         if not self._mchirp_range:
@@ -362,7 +362,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self.par_dic_0['t_geocenter'] = result.x
         print(f'Set time, lnL({ref_det_name}) = {-result.fun}')
 
-    def _optimize_skyloc_and_inclination(self, detector_pair):
+    def _optimize_skyloc_and_inclination(self, detector_pair, seed):
         """
         Find right ascension and declination that optimize likelihood
         maximized over amplitude and phase, and choose between
@@ -395,7 +395,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                        self.lnlike_max_amp_phase(par_dic | flipped_iota))
 
         # Maximize on a Halton sequence, then refine
-        u_theta, u_phi = qmc.Halton(2).random(1500).T
+        u_theta, u_phi = qmc.Halton(2, seed=seed).random(1500).T
         thetanets = np.arccos(2*u_theta - 1)
         phinets = 2 * np.pi * u_phi
         i_max = np.argmax(lnlike_skyloc(thetanets, phinets))

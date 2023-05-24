@@ -207,14 +207,18 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
 
         nrfft = len(self.event_data.frequencies)
         basis_splines = scipy.sparse.lil_matrix((nbin, nrfft))
+
+        frequencies = self.event_data.frequencies.copy()
+        frequencies[-1] -= 1e-10  # Or last basis_element evaluates to 0
+
         for i_bin in range(nbin):
             element_knots = knots[i_bin : i_bin + self.spline_degree + 2]
             basis_element = scipy.interpolate.BSpline.basis_element(
                 element_knots)
-            i_start, i_end = np.searchsorted(self.event_data.frequencies,
-                                             element_knots[[0, -1]])
+            i_start, i_end = np.searchsorted(frequencies,
+                                             element_knots[[0, -1]], 'right')
             basis_splines[i_bin, i_start : i_end] = basis_element(
-                self.event_data.frequencies[i_start : i_end])
+                frequencies[i_start : i_end])
 
         self._basis_splines = basis_splines.tocsr()
 
@@ -277,7 +281,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
             f_99 = self.event_data.frequencies[i_99]
 
             ratio = h0_f[i][i_99] / h0_f[i][i_99-1]
-            alpha = (np.abs(ratio) - 1) / self.event_data.df * f_99
+            alpha = min(0, (np.abs(ratio) - 1) / self.event_data.df * f_99)
             beta = np.angle(ratio) / self.event_data.df
 
             def smoothed_h0(f, i=i, i_99=i_99, f_99=f_99,
