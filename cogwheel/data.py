@@ -384,6 +384,7 @@ class EventData(utils.JSONMixin):
             raise ValueError(
                 'Lengths of `detector_names` and `asd_funcs` should match.')
 
+        asd_funcs = list(asd_funcs)  # Ensure it is mutable
         for i, asd_func in enumerate(asd_funcs):
             if isinstance(asd_func, str):
                 if not asd_func in ASDS:
