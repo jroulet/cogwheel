@@ -451,10 +451,9 @@ class WaveformGenerator(utils.JSONMixin):
 
             # hplus_hcross_0 is a (n_m x 2 x n_frequencies) array with
             # sum_l (hlm+, hlmx), at phi_ref=0, d_luminosity=1Mpc.
-            hplus_hcross_func = APPROXIMANTS[self.approximant].hplus_hcross_func
             hplus_hcross_0 = np.array(
-                [hplus_hcross_func(f, waveform_par_dic_0, self.approximant,
-                                   modes, lal_dic)
+                [APPROXIMANTS[self.approximant].hplus_hcross_func(
+                    f, waveform_par_dic_0, self.approximant, modes, lal_dic)
                  for modes in self._harmonic_modes_by_m.values()])
 
             cache_dic = {'approximant': self.approximant,
