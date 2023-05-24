@@ -328,9 +328,10 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                 break
 
             if marginalization_info.n_effective > 1:
-                # Use a KDE of the weighted samples as next proposal:
-                t_arrival_prob = self._kde_t_arrival_prob(
-                    marginalization_info, times)
+                # Hybridize with KDE of the weighted samples as next proposal:
+                t_arrival_prob = .5 * (
+                    self._kde_t_arrival_prob(marginalization_info, times)
+                    + t_arrival_prob)
             else:
                 # Increase temperature as next proposal:
                 t_arrival_prob = t_arrival_prob ** (1/self._temperature_factor)
