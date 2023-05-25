@@ -530,12 +530,19 @@ class CornerPlot:
             return
 
         self.fig, self.axes = plt.subplots(
-            n_params, n_params, squeeze=False, sharex='col', sharey='row',
+            n_params, n_params, squeeze=False, sharex='col',
             **self._get_subplot_kwargs(max_figsize, max_subplot_size))
+
+        # Share y-axes in the lower triangle
+        for i_row in range(n_params):
+            for i_col in range(1, i_row):
+                self.axes[i_row, i_col].sharey(self.axes[i_row, 0])
+
+        for ax in self.axes.flat:
+            ax.label_outer()
 
         # Diagonal:
         for ax in np.diagonal(self.axes):
-            ax._shared_axes['y'].remove(ax)
             ax.tick_params(axis='x', direction='in', top=True, rotation=45)
             ax.tick_params(axis='y', left=False, right=False, labelleft=False)
 
