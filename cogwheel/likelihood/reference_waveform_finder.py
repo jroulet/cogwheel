@@ -153,13 +153,14 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             event_data, approximant, harmonic_modes=[(2, 2)])
 
         if event_data.injection:
-            par_dic_0 = event_data.injection['par_dic']
+            par_dic_0 = cls._get_safe_par_dic(event_data.injection['par_dic'])
+
             ref_wf_finder = cls(event_data, waveform_generator,
                                 par_dic_0, pn_phase_tol=pn_phase_tol,
                                 spline_degree=spline_degree,
                                 time_range=time_range,
                                 mchirp_range=mchirp_range)
-            print('Setting injected waveform as reference, lnL =',
+            print('Setting reference from injection, lnL =',
                   ref_wf_finder.lnlike_fft(par_dic_0))
             return ref_wf_finder
 
@@ -180,6 +181,28 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                             mchirp_range=mchirp_range)
         ref_wf_finder.find_bestfit_pars()
         return ref_wf_finder
+
+    @staticmethod
+    def _get_safe_par_dic(par_dic, eta_max=.24):
+        """
+        Return copy of `par_dic`, modified to prevent problematic
+        behavior if it is used as relative-binning reference waveform
+        (e.g. zeros in some modes or frequencies).
+        Inplane spins are set to zero, iota is set to 1 or pi-1 and eta
+        is capped at `eta_max` at constant mchirp.
+        """
+        par_dic = par_dic | waveform.ZERO_INPLANE_SPINS
+
+        m1, m2, iota = par_dic['m1'], par_dic['m2'], par_dic['iota']
+
+        par_dic['iota'] = 1 if iota < np.pi / 2 else np.pi - 1
+
+        if gw_utils.q_to_eta(m2 / m1) > eta_max:
+            mchirp = gw_utils.m1m2_to_mchirp(m1, m2)
+            par_dic['m1'], par_dic['m2'] = gw_utils.mchirpeta_to_m1m2(
+                mchirp, eta_max)
+
+        return par_dic
 
     def find_bestfit_pars(self, seed=0):
         """
