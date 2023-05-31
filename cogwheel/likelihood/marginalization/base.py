@@ -525,7 +525,8 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                             min_n_effective=0):
                         marg_info = self.get_marginalization_info(
                             dh_timeseries, h_h, times)
-                        cost.append(marg_info.n_qmc / marg_info.n_effective)
+                        cost.append(marg_info.n_qmc
+                                    / (marg_info.n_effective + 1e-3))
 
                 cost_smooth = signal.savgol_filter(
                     cost, len(cost) // 10, 1, mode='nearest')
