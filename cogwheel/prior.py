@@ -472,7 +472,7 @@ class Prior(ABC, utils.JSONMixin):
             np.vectorize(self.inverse_transform)(**inverse)))
         utils.update_dataframe(samples, sampled)
 
-    def generate_random_samples(self, n_samples):
+    def generate_random_samples(self, n_samples, seed=None):
         """
         Sample the prior using rejection sampling.
 
@@ -483,11 +483,15 @@ class Prior(ABC, utils.JSONMixin):
         n_samples: int
             How many samples to generate.
 
+        seed:
+            Passed to ``numpy.default_rng``, for reproducibility.
+
         Return
         ------
         pd.DataFrame with columns per ``.sampled_params``, with samples
         distributed according to the prior.
         """
+        rng = np.random.default_rng(seed=seed)
         chunksize = (n_samples, len(self.sampled_params))
         lnprior = np.vectorize(self.lnprior, otypes=[float])
 
@@ -495,7 +499,7 @@ class Prior(ABC, utils.JSONMixin):
         samples = pd.DataFrame(columns=self.sampled_params)
         while len(samples) < n_samples:
             candidates = pd.DataFrame(
-                self.cubemin + np.random.uniform(0, self.cubesize, chunksize),
+                self.cubemin + rng.uniform(0, self.cubesize, chunksize),
                 columns=self.sampled_params)
 
             candidates_lnprior = lnprior(**candidates)
@@ -503,12 +507,12 @@ class Prior(ABC, utils.JSONMixin):
             if (new_max := candidates_lnprior.max()) > max_lnprior:
                 # Upper bound had been underestimated, correct for that
                 accept_prob = np.exp(max_lnprior - new_max)
-                accept = np.random.uniform(size=len(samples)) < accept_prob
+                accept = rng.uniform(size=len(samples)) < accept_prob
                 samples = samples[accept]
                 max_lnprior = new_max
 
             accept_prob = np.exp(candidates_lnprior - max_lnprior)
-            accept = np.random.uniform(size=len(candidates)) < accept_prob
+            accept = rng.uniform(size=len(candidates)) < accept_prob
             samples = pd.concat((samples, candidates[accept]))[:n_samples]
 
         self.transform_samples(samples)
