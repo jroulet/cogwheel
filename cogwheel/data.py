@@ -475,7 +475,8 @@ class EventData(utils.JSONMixin):
                     transform=ax.transAxes, c='w')
 
         axes[0].set_title(self.eventname)
-        axes[-1].set_xlabel(rf'$t_{{\rm GPS}} - {self.tgps}$ (s)')
+        minus_tgps = f' - {self.tgps}' if self.tgps != 0 else ''
+        axes[-1].set_xlabel(rf'$t_{{\rm GPS}}{minus_tgps}$ (s)')
         axes[-1].set_xlim(xlim)
 
         plt.figtext(0., .5, 'Frequency (Hz)', rotation=90,
