@@ -97,10 +97,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         This template computes ``.asd_drift``, subclasses should expand
         it to compute the summary data.
         """
-        # Don't zero the in-plane spins for the reference waveform
-        with utils.temporarily_change_attributes(self.waveform_generator,
-                                                 disable_precession=False):
-            self.asd_drift = self.compute_asd_drift(self.par_dic_0)
+        self.asd_drift = self.compute_asd_drift(self.par_dic_0)
 
     @property
     def pn_phase_tol(self):
