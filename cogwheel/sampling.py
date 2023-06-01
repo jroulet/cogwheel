@@ -115,22 +115,14 @@ class Sampler(abc.ABC, utils.JSONMixin):
         Return a `pathlib.Path` object with a new run directory,
         following a standardized naming scheme for output directories.
         Directory will be of the form
-        {parentdir}/{prior_name}/{eventname}/{RUNDIR_PREFIX}{i_run}
+        {parentdir}/{prior_name}/{eventname}/{RUNDIR_PREFIX}{run_id}
 
         Parameters
         ----------
         parentdir: str, path to a directory where to store parameter
                    estimation data.
         """
-        run_id = 0
-        eventdir = self.posterior.get_eventdir(parentdir)
-        if eventdir.exists():
-            old_rundirs = [path for path in eventdir.iterdir() if path.is_dir()
-                           and path.match(f'{utils.RUNDIR_PREFIX}*')]
-            if old_rundirs:
-                run_id = 1 + max(utils.rundir_number(rundir)
-                                 for rundir in old_rundirs)
-        return eventdir.joinpath(f'{utils.RUNDIR_PREFIX}{run_id}')
+        return utils.get_rundir(self.posterior.get_eventdir(parentdir))
 
     def submit_slurm(
             self, rundir, n_hours_limit=48, memory_per_task='32G',
