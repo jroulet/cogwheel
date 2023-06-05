@@ -23,11 +23,12 @@ waveform_generator = waveform.WaveformGenerator.from_event_data(
 def generate_injections_above_threshold(mchirp_range):
     """
     Return a DataFrame with injections from the prior guaranteeing that
-    ⟨ℎ∣ℎ⟩ is above ``config.H_H_MIN``.
+    ⟨ℎ∣ℎ⟩ is above ``config.H_H_MIN``, and that d_luminosity is below
+    ``config.D_LUMINOSITY_MAX``.
     The number of injections is ``config.N_INJECTIONS_ABOVE_THRESHOLD``.
     """
     injs_above_threshold = pd.DataFrame()
-    batch_size = 10 * config.MIN_N_INJECTIONS_ABOVE_THRESHOLD
+    batch_size = 10 * config.N_INJECTIONS_ABOVE_THRESHOLD
 
     while len(injs_above_threshold) < config.N_INJECTIONS_ABOVE_THRESHOLD:
         injs_above_threshold = pd.concat(
@@ -41,9 +42,10 @@ def generate_injections_above_threshold(mchirp_range):
 def _generate_injections_above_threshold(mchirp_range,
                                          n_total_injections):
     """
-    Generate a batch of injections that pass the ⟨ℎ∣ℎ⟩ threshold.
-    The number of injections that will pass the threshold is unknown in
-    advance.
+    Generate a batch of injections that pass the ⟨ℎ∣ℎ⟩ threshold and
+    are within the maximum luminosity distance.
+    The number of injections that will pass the thresholds is unknown
+    in advance.
 
     Parameters
     ----------
@@ -56,7 +58,7 @@ def _generate_injections_above_threshold(mchirp_range,
     injection_prior = InjectionPrior(mchirp_range=mchirp_range,
                                      detector_pair='H',
                                      tgps=0.,
-                                     f_ref=50)
+                                     f_ref=config.F_REF)
     injections = injection_prior.generate_random_samples(n_total_injections)
     h_h_1mpc = _compute_h_h_1mpc(injections)
 
@@ -69,8 +71,10 @@ def _generate_injections_above_threshold(mchirp_range,
     del injections['dimensionless_distance']
 
     injections['h_h'] = h_h_1mpc / injections['d_luminosity']**2
-    injections_above_threshold = injections[injections['h_h'] > config.H_H_MIN
-                                           ].reset_index(drop=True)
+    injections_above_threshold = injections[
+        (injections['h_h'] > config.H_H_MIN)
+        & (injections['d_luminosity'] < config.D_LUMINOSITY_MAX)
+        ].reset_index(drop=True)
     return injections_above_threshold
 
 
@@ -106,12 +110,12 @@ def _compute_h_h_1mpc_rb(injections, pn_phase_tol, n_cores=None):
     """Compute ⟨ℎ∣ℎ⟩ at 1 Mpc using relative binning."""
     n_cores = n_cores or N_CORES
 
-    par_dic_0 = {**injections.median(), 'd_luminosity': 1, 't_geocenter': 0}
+    par_dic_0 = {**injections.median(), 'd_luminosity': 1}
 
     like = likelihood.RelativeBinningLikelihood(
         event_data, waveform_generator, par_dic_0, pn_phase_tol=pn_phase_tol)
 
-    par_dics = ({**row, 'd_luminosity': 1, 't_geocenter': 0}
+    par_dics = ({**row, 'd_luminosity': 1}
                 for _, row in injections.iterrows())
 
     with multiprocessing.Pool(n_cores) as pool:
@@ -131,7 +135,7 @@ def _compute_h_h_1mpc_fft(injections, n_cores=None):
     like = likelihood.CBCLikelihood(event_data, waveform_generator)
     like.asd_drift = None  # Sets it to 1
 
-    par_dics = ({**row, 'd_luminosity': 1, 't_geocenter': 0}
+    par_dics = ({**row, 'd_luminosity': 1}
                 for _, row in injections.iterrows())
 
     with multiprocessing.Pool(n_cores) as pool:

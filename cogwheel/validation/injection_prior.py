@@ -32,10 +32,15 @@ class _SimplePhasePrior(prior.UniformPriorMixin,
     range_dic = {'phi_ref': (0, 2*np.pi)}
 
 
+class _ZeroTimePrior(prior.FixedPrior):
+    """Set t_geocenter = 0."""
+    standard_par_dic = {'t_geocenter': 0.}
+
+
 class InjectionPrior(prior.CombinedPrior):
     """
     Prior for making injections. Its density is similar to the IAS
-    prior, except that it does not include time, and the distance
+    prior, except that t_geocenter is fixed to 0, and the distance
     standard parameter is dimensionless (between 0 and 1).
 
     This does not include any cut in ⟨ℎ∣ℎ⟩, it must be applied a
@@ -49,4 +54,5 @@ class InjectionPrior(prior.CombinedPrior):
         gw_prior.UniformPolarizationPrior,
         _SimplePhasePrior,
         _UniformDimensionlessVolumePrior,
-        gw_prior.ZeroTidalDeformabilityPrior]
+        gw_prior.ZeroTidalDeformabilityPrior,
+        _ZeroTimePrior]

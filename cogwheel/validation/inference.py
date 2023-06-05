@@ -9,11 +9,17 @@ This module can run as a script and it also provides a function
 ``submit_slurm`` to submit the equivalent job to a SLURM scheduler.
 """
 import argparse
+import json
 import pathlib
+import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from cogwheel import data
+from cogwheel import gw_prior
 from cogwheel import posterior
+from cogwheel import sampling
+from cogwheel import gw_plotting
 from cogwheel import utils
 
 from . import config
@@ -41,7 +47,7 @@ def _get_event_data(i_inj_set, i_sample):
         seed=(i_inj_set, i_sample),
         **config.EVENT_DATA_KWARGS)
 
-    event_data.inject_signal({**sample, 't_geocenter': 0}, config.APPROXIMANT)
+    event_data.inject_signal(dict(sample), config.APPROXIMANT)
     return event_data
 
 
@@ -62,11 +68,51 @@ def _get_inj_id(eventdir):
     if not eventdir.match(_get_eventname('*', '*')):
         raise ValueError(f'Could not parse `eventdir` {eventdir}.')
 
-    i_inj_set, i_sample = eventdir.name.remove_prefix('INJ_').split('_')
+    i_inj_set, i_sample = map(int,
+                              eventdir.name.removeprefix('INJ_').split('_'))
 
     assert eventdir.resolve() == _get_eventdir(i_inj_set, i_sample).resolve()
 
-    return int(i_inj_set), int(i_sample)
+    return i_inj_set, i_sample
+
+
+# Instantiate a dummy prior to use its inverse transform
+# for plotting well-measured parameters
+_ias_prior = gw_prior.IASPrior(
+    mchirp_range=(1, 2),  # Doesn't matter for this purpose
+    detector_pair='HL',
+    tgps=config.EVENT_DATA_KWARGS['tgps'],
+    f_ref=config.F_REF,
+    f_avg=config.F_REF,
+    ref_det_name='L')
+
+INJECTION_DICT_FILENAME = 'injection.json'
+CORNER_PLOT_FILENAME = 'corner_plot.pdf'
+
+
+def make_corner_plot(rundir):
+    """
+    Make a corner plot of the parameter estimation results and save it
+    to ``rundir/CORNER_PLOT_FILENAME``.
+
+    Coordinate transformations are applied to emphasize well-measured
+    parameters. The injected parameters are marked.
+    """
+    rundir = pathlib.Path(rundir)
+    with open(rundir/INJECTION_DICT_FILENAME, encoding='utf-8') as file:
+        injection = json.load(file)['par_dic']
+    injection.update(_ias_prior.inverse_transform(
+        **{par: injection[par] for par in _ias_prior.standard_params}))
+
+    pe_samples = pd.read_feather(rundir/sampling.SAMPLES_FILENAME)
+    _ias_prior.inverse_transform_samples(pe_samples)
+
+    plot_params = _ias_prior.sampled_params + ['lnl', 'h_h']
+    corner_plot = gw_plotting.CornerPlot(pe_samples[plot_params])
+    corner_plot.plot(title=rundir.parent.name, max_n_ticks=3)
+    corner_plot.scatter_points(injection, adjust_lims=True,
+                               colors=['C3'], marker='+', zorder=2, s=50)
+    plt.savefig(rundir/'corner_plot.pdf', bbox_inches='tight')
 
 
 def submit_slurm(i_inj_set, i_sample, n_hours_limit=12,
@@ -93,14 +139,14 @@ def submit_slurm(i_inj_set, i_sample, n_hours_limit=12,
         Strings with SBATCH commands.
     """
     rundir = _get_rundir(i_inj_set, i_sample)
-    job_name = '-'.join(rundir.parts[:-2])
+    job_name = '-'.join(rundir.parts[-2:])
     batch_path = rundir/'batchfile'
     stdout_path = rundir.joinpath('output.out').resolve()
     stderr_path = rundir.joinpath('errors.err').resolve()
     sbatch_cmds += (f'--mem-per-cpu={memory_per_task}',)
     args = rundir.resolve().as_posix()
 
-    rundir.mkdir()
+    rundir.mkdir(parents=True)
     utils.submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
                        args, sbatch_cmds, batch_path)
 
@@ -118,19 +164,33 @@ def main(rundir):
     rundir = pathlib.Path(rundir)
     i_inj_set, i_sample = _get_inj_id(rundir.parent)
     event_data = _get_event_data(i_inj_set, i_sample)
-    post = posterior.Posterior.from_event(event_data=event_data,
+    post = posterior.Posterior.from_event(event_data,
                                           mchirp_guess=None,
                                           approximant=config.APPROXIMANT,
                                           prior_class=config.PRIOR_NAME)
+
+    # Ensure the mchirp prior range is contained in the injection range:
+    mchirp_range = np.clip(post.prior.range_dic['mchirp'],
+                           *config.MCHIRP_RANGES[i_inj_set])
+    post.prior = post.prior.reinstantiate(mchirp_range=mchirp_range)
+
     post.likelihood.asd_drift = None  # Set to 1
     sampler = config.SAMPLER_CLS(post, run_kwargs=config.RUN_KWARGS)
     sampler.run(rundir)
 
+    # Save the injection parameters in rundir for extra safety
+    event_data.injection['par_dic']['lnl'] = post.likelihood.lnlike_fft(
+        event_data.injection['par_dic'])
+    with open(rundir/INJECTION_DICT_FILENAME, 'w', encoding='utf-8') as file:
+        json.dump(event_data.injection, file, cls=utils.NumpyEncoder, indent=2)
+
+    make_corner_plot(rundir)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=main.__doc__)
-    parser.add_argument('i_inj_set', help='''Index to the injection set''')
-    parser.add_argument('i_sample',
-                        help='''Sample index within the injection set.''')
+    parser.add_argument('rundir', help='''
+        Run directory. Must be of the correct form, e.g. output of
+        ``_get_rundir``.''')
     parser_args = parser.parse_args()
     main(**vars(parser.parse_args()))
