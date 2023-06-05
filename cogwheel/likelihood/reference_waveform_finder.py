@@ -20,6 +20,16 @@ from .likelihood import check_bounds
 from .relative_binning import RelativeBinningLikelihood
 
 
+class ReferenceWaveformError(Exception):
+    """
+    Raised if we can't get an accurate relative binning reference
+    for an injection where we know the true parameters.
+    (Simply setting the injection as reference can be problematic
+    if there is fast precession or a fine-tuned configuration that
+    suppresses some higher modes.)
+    """
+
+
 class ReferenceWaveformFinder(RelativeBinningLikelihood):
     """
     Find parameters of a high-likelihood solution.
@@ -160,9 +170,17 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                                 spline_degree=spline_degree,
                                 time_range=time_range,
                                 mchirp_range=mchirp_range)
-            print('Setting reference from injection, lnL =',
-                  ref_wf_finder.lnlike_fft(par_dic_0))
-            return ref_wf_finder
+
+            # Check that the relative binning is accurate at the injection.
+            # If not, will go on to attempt the usual maximization.
+            if np.abs(ref_wf_finder.lnlike_fft(event_data.injection['par_dic'])
+                      - ref_wf_finder.lnlike(event_data.injection['par_dic'])
+                     ) < .5:
+                print('Setting reference from injection.')
+                return ref_wf_finder
+
+            if mchirp_guess is None:
+                mchirp_guess = gw_utils.mchirp(par_dic_0['m1'], par_dic_0['m2'])
 
         # Set initial parameter dictionary. Will get improved by
         # `find_bestfit_pars()`. Serves dual purpose as maximum
@@ -180,6 +198,16 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                             time_range=time_range,
                             mchirp_range=mchirp_range)
         ref_wf_finder.find_bestfit_pars()
+
+        # If this is an injection, we can "cheat" and check that relative
+        # binning is working at the injection (to fail early if not):
+        if event_data.injection and np.abs(
+                ref_wf_finder.lnlike_fft(event_data.injection['par_dic'])
+                - ref_wf_finder.lnlike(event_data.injection['par_dic'])) > .5:
+            raise ReferenceWaveformError(
+                'Unable to find an aligned-spin waveform similar to the '
+                'injected waveform.')
+
         return ref_wf_finder
 
     @staticmethod
