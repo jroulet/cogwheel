@@ -453,11 +453,15 @@ class Prior(ABC, utils.JSONMixin):
         Add columns in-place for `self.standard_params` to `samples`.
         `samples` must include columns for `self.sampled_params` and
         `self.conditioned_on`.
+        Raise ``ValueError`` if `samples.index` is not a simple range.
 
         Parameters
         ----------
         samples: Dataframe with sampled params
         """
+        if not np.array_equal(samples.index, np.arange(len(samples))):
+            raise ValueError('Non-default index unsupported.')
+
         direct = samples[self.sampled_params + self.conditioned_on]
         standard = pd.DataFrame(list(np.vectorize(self.transform)(**direct)))
         utils.update_dataframe(samples, standard)
@@ -466,7 +470,15 @@ class Prior(ABC, utils.JSONMixin):
         """
         Add columns in-place for `self.sampled_params` to `samples`.
         `samples` must include columns for `self.standard_params`.
+        Raise ``ValueError`` if `samples.index` is not a simple range.
+
+        Parameters
+        ----------
+        samples: Dataframe with standard params
         """
+        if not np.array_equal(samples.index, np.arange(len(samples))):
+            raise ValueError('Non-default index unsupported.')
+
         inverse = samples[self.standard_params + self.conditioned_on]
         sampled = pd.DataFrame(list(
             np.vectorize(self.inverse_transform)(**inverse)))
@@ -513,7 +525,8 @@ class Prior(ABC, utils.JSONMixin):
 
             accept_prob = np.exp(candidates_lnprior - max_lnprior)
             accept = rng.uniform(size=len(candidates)) < accept_prob
-            samples = pd.concat((samples, candidates[accept]))[:n_samples]
+            samples = pd.concat((samples, candidates[accept]),
+                                ignore_index=True)[:n_samples]
 
         self.transform_samples(samples)
         return samples
