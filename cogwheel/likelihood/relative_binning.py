@@ -392,7 +392,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         """
         Return two arrays of length n_detectors with the values of
         ``(d|h)``, ``(h|h)``, no ASD-drift correction applied, using
-        relative binning. 
+        relative binning.
 
         Parameters
         ----------
@@ -407,7 +407,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         """
         Return two arrays complex with the values of
         ``(d|h)`` (modes, polarizations, detectors), and
-        ``(h|h)`` (mode pairs, polarizations, polarizations, detecotrs), 
+        ``(h|h)`` (mode pairs, polarizations, polarizations, detectors),
         no ASD-drift correction applied, using relative binning.
 
         Parameters
