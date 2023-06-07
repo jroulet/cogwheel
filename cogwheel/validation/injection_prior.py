@@ -1,5 +1,4 @@
 """Define the class ``InjectionPrior``."""
-import sys
 import numpy as np
 
 from cogwheel import gw_prior
