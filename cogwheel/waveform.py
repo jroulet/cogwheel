@@ -219,7 +219,7 @@ class WaveformGenerator(utils.JSONMixin):
                  lalsimulation_commands=FORCE_NNLO_ANGLES):
         super().__init__()
 
-        self.detector_names = detector_names
+        self.detector_names = tuple(detector_names)
         self.tgps = tgps
         self.tcoarse = tcoarse
         self._approximant = approximant

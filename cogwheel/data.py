@@ -91,7 +91,7 @@ class EventData(utils.JSONMixin):
                                 err_msg='Frequency grid must start at 0')
 
         self.eventname = eventname
-        self.detector_names = detector_names
+        self.detector_names = tuple(detector_names)
         self.tgps = tgps
         self.tcoarse = tcoarse
         self.wht_filter = wht_filter
