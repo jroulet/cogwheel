@@ -167,7 +167,8 @@ def main(rundir):
     post = posterior.Posterior.from_event(event_data,
                                           mchirp_guess=None,
                                           approximant=config.APPROXIMANT,
-                                          prior_class=config.PRIOR_NAME)
+                                          prior_class=config.PRIOR_NAME,
+                                          prior_kwargs={'f_ref': config.F_REF})
 
     # Ensure the mchirp prior range is contained in the injection range:
     mchirp_range = np.clip(post.prior.range_dic['mchirp'],

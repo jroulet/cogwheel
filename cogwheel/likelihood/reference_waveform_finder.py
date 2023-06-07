@@ -121,6 +121,11 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         Constructor that finds a reference waveform solution
         automatically by maximizing the likelihood.
 
+        For injections with aligned spin, it will skip the maximization
+        and simply use the injected waveform (except that equal-mass and
+        face-on configurations are avoided, as they do not have all
+        harmonics).
+
         Parameters
         ----------
         event: Instance of `data.EventData`, or string with event name
@@ -164,24 +169,29 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             lalsimulation_commands=waveform.FORCE_NNLO_ANGLES)
 
         if event_data.injection:
-            par_dic_0 = cls._get_safe_par_dic(event_data.injection['par_dic'])
+            if (waveform.ZERO_INPLANE_SPINS.items()
+                    < event_data.injection['par_dic'].items()):
+                # Injection has aligned spins, use it as reference
+                par_dic_0 = cls._get_safe_par_dic(event_data.injection['par_dic'])
 
-            ref_wf_finder = cls(event_data, waveform_generator,
-                                par_dic_0, pn_phase_tol=pn_phase_tol,
-                                spline_degree=spline_degree,
-                                time_range=time_range,
-                                mchirp_range=mchirp_range)
+                ref_wf_finder = cls(event_data, waveform_generator,
+                                    par_dic_0, pn_phase_tol=pn_phase_tol,
+                                    spline_degree=spline_degree,
+                                    time_range=time_range,
+                                    mchirp_range=mchirp_range)
 
-            # Check that the relative binning is accurate at the injection.
-            # If not, will go on to attempt the usual maximization.
-            if np.abs(ref_wf_finder.lnlike_fft(event_data.injection['par_dic'])
-                      - ref_wf_finder.lnlike(event_data.injection['par_dic'])
-                     ) < .5:
-                print('Setting reference from injection.')
-                return ref_wf_finder
+                # Check that the relative binning is accurate at the injection.
+                # If not, will go on to attempt the usual maximization.
+                if np.abs(ref_wf_finder.lnlike_fft(event_data.injection['par_dic'])
+                          - ref_wf_finder.lnlike(event_data.injection['par_dic'])
+                         ) < .1:
+                    print('Setting reference from injection.')
+                    return ref_wf_finder
 
             if mchirp_guess is None:
-                mchirp_guess = gw_utils.mchirp(par_dic_0['m1'], par_dic_0['m2'])
+                mchirp_guess = gw_utils.m1m2_to_mchirp(
+                    event_data.injection['par_dic']['m1'],
+                    event_data.injection['par_dic']['m2'])
 
         # Set initial parameter dictionary. Will get improved by
         # `find_bestfit_pars()`. Serves dual purpose as maximum
@@ -204,7 +214,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         # binning is working at the injection (to fail early if not):
         if event_data.injection and np.abs(
                 ref_wf_finder.lnlike_fft(event_data.injection['par_dic'])
-                - ref_wf_finder.lnlike(event_data.injection['par_dic'])) > .5:
+                - ref_wf_finder.lnlike(event_data.injection['par_dic'])) > .1:
             raise ReferenceWaveformError(
                 'Unable to find an aligned-spin waveform similar to the '
                 'injected waveform.')
