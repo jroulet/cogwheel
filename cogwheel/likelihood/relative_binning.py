@@ -338,7 +338,8 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         Instance of ``cls``.
         """
         waveform_generator = reference_waveform_finder.waveform_generator \
-            .reinstantiate(approximant=approximant, harmonic_modes=None)
+            .reinstantiate(approximant=approximant, harmonic_modes=None,
+                           lalsimulation_commands=())
 
         return cls(event_data=reference_waveform_finder.event_data,
                    waveform_generator=waveform_generator,

@@ -160,7 +160,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                 event_data = data.EventData.from_npz(filename=event)
 
         waveform_generator = waveform.WaveformGenerator.from_event_data(
-            event_data, approximant, harmonic_modes=[(2, 2)])
+            event_data, approximant, harmonic_modes=[(2, 2)],
+            lalsimulation_commands=waveform.FORCE_NNLO_ANGLES)
 
         if event_data.injection:
             par_dic_0 = cls._get_safe_par_dic(event_data.injection['par_dic'])
