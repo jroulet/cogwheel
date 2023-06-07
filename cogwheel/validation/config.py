@@ -2,7 +2,7 @@ from pathlib import Path
 
 from cogwheel import sampling
 
-F_REF = 50
+F_REF = 50.
 Q_MIN = 1 / 20
 MCHIRP_RANGES = [(1, 5),
                  (5, 25),
@@ -17,7 +17,7 @@ H_H_MIN = 60  # Threshold imposed on ⟨ℎ∣ℎ⟩
 D_LUMINOSITY_MAX = 1.5e4  # Mpc
 
 # Number of injections after applying the `H_H_MIN` cut:
-N_INJECTIONS_ABOVE_THRESHOLD = 1024
+N_INJECTIONS_ABOVE_THRESHOLD = 128 # 1024
 
 
 # Event data settings

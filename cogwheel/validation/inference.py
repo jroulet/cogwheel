@@ -27,7 +27,7 @@ from . import config
 
 def _get_eventname(i_inj_set, i_sample):
     """Return a standardized event name to identify the injection."""
-    return f'INJ_{i_inj_set}_{i_sample}'
+    return f'INJ{i_inj_set}.{i_sample:0>4}'
 
 
 def _get_event_data(i_inj_set, i_sample):
@@ -65,11 +65,11 @@ def _get_rundir(i_inj_set, i_sample):
 def _get_inj_id(eventdir):
     """Return ``i_inj_set, i_sample``, inverse of ``_get_eventdir``."""
     eventdir = pathlib.Path(eventdir)
-    if not eventdir.match(_get_eventname('*', '*')):
+    if not eventdir.match(_get_eventname('*', '****')):
         raise ValueError(f'Could not parse `eventdir` {eventdir}.')
 
     i_inj_set, i_sample = map(int,
-                              eventdir.name.removeprefix('INJ_').split('_'))
+                              eventdir.name.removeprefix('INJ').split('.'))
 
     assert eventdir.resolve() == _get_eventdir(i_inj_set, i_sample).resolve()
 
