@@ -217,11 +217,10 @@ class WaveformGenerator(utils.JSONMixin):
 
     def __init__(self, detector_names, tgps, tcoarse, approximant,
                  harmonic_modes=None, disable_precession=False,
-                 n_cached_waveforms=1,
-                 lalsimulation_commands=FORCE_NNLO_ANGLES):
+                 n_cached_waveforms=1, lalsimulation_commands=()):
         super().__init__()
 
-        self.detector_names = detector_names
+        self.detector_names = tuple(detector_names)
         self.tgps = tgps
         self.tcoarse = tcoarse
         self._approximant = approximant
@@ -238,7 +237,7 @@ class WaveformGenerator(utils.JSONMixin):
     @classmethod
     def from_event_data(cls, event_data, approximant,
                         harmonic_modes=None, disable_precession=False,
-                        n_cached_waveforms=1):
+                        n_cached_waveforms=1, lalsimulation_commands=()):
         """
         Constructor that takes `detector_names`, `tgps` and `tcoarse`
         from an instance of `data.EventData`.

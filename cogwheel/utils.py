@@ -455,6 +455,30 @@ def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
 RUNDIR_PREFIX = 'run_'
 
 
+def get_rundir(eventdir):
+    """
+    Return a `pathlib.Path` object with a new run directory, following a
+    standardized naming scheme for output directories.
+    Directory will be of the form '{eventdir}/{RUNDIR_PREFIX}{run_id}'.
+
+    Parameters
+    ----------
+    eventdir: str, os.PathLike
+        Path to a directory where to store parameter estimation data
+        for a specific prior and event, e.g. output of ``get_eventdir``.
+    """
+    eventdir = pathlib.Path(eventdir)
+
+    run_id = 0
+    if eventdir.exists():
+        old_rundirs = [path for path in eventdir.iterdir()
+                       if path.is_dir() and path.match(f'{RUNDIR_PREFIX}*')]
+        if old_rundirs:
+            run_id = 1 + max(rundir_number(rundir) for rundir in old_rundirs)
+
+    return eventdir/f'{RUNDIR_PREFIX}{run_id}'
+
+
 def get_eventdir(parentdir, prior_name, eventname):
     """
     Return `pathlib.Path` object for a directory of the form
@@ -467,7 +491,7 @@ def get_eventdir(parentdir, prior_name, eventname):
         <parentdir>
         └── <priordir>
             └── <eventdir>
-                ├── Posterior.json
+                ├── Posterior.json (optional)
                 └── <rundir>
                     ├── Sampler.json
                     └── <sampler_output_files>
@@ -486,7 +510,7 @@ def get_priordir(parentdir, prior_name):
         <parentdir>
         └── <priordir>
             └── <eventdir>
-                ├── Posterior.json
+                ├── Posterior.json (optional)
                 └── <rundir>
                     ├── Sampler.json
                     └── <sampler_output_files>

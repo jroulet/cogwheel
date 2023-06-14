@@ -111,6 +111,11 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         Constructor that finds a reference waveform solution
         automatically by maximizing the likelihood.
 
+        For injections with aligned spin, it will skip the maximization
+        and simply use the injected waveform (except that equal-mass and
+        face-on configurations are avoided, as they do not have all
+        harmonics).
+
         Parameters
         ----------
         event: Instance of `data.EventData`, or string with event name
@@ -150,18 +155,33 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                 event_data = data.EventData.from_npz(filename=event)
 
         waveform_generator = waveform.WaveformGenerator.from_event_data(
-            event_data, approximant, harmonic_modes=[(2, 2)])
+            event_data, approximant, harmonic_modes=[(2, 2)],
+            lalsimulation_commands=waveform.FORCE_NNLO_ANGLES)
 
         if event_data.injection:
-            par_dic_0 = event_data.injection['par_dic']
-            ref_wf_finder = cls(event_data, waveform_generator,
-                                par_dic_0, pn_phase_tol=pn_phase_tol,
-                                spline_degree=spline_degree,
-                                time_range=time_range,
-                                mchirp_range=mchirp_range)
-            print('Setting injected waveform as reference, lnL =',
-                  ref_wf_finder.lnlike_fft(par_dic_0))
-            return ref_wf_finder
+            if (waveform.ZERO_INPLANE_SPINS.items()
+                    < event_data.injection['par_dic'].items()):
+                # Injection has aligned spins, use it as reference
+                par_dic_0 = cls._get_safe_par_dic(event_data.injection['par_dic'])
+
+                ref_wf_finder = cls(event_data, waveform_generator,
+                                    par_dic_0, pn_phase_tol=pn_phase_tol,
+                                    spline_degree=spline_degree,
+                                    time_range=time_range,
+                                    mchirp_range=mchirp_range)
+
+                # Check that the relative binning is accurate at the injection.
+                # If not, will go on to attempt the usual maximization.
+                if np.abs(ref_wf_finder.lnlike_fft(event_data.injection['par_dic'])
+                          - ref_wf_finder.lnlike(event_data.injection['par_dic'])
+                         ) < .1:
+                    print('Setting reference from injection.')
+                    return ref_wf_finder
+
+            if mchirp_guess is None:
+                mchirp_guess = gw_utils.m1m2_to_mchirp(
+                    event_data.injection['par_dic']['m1'],
+                    event_data.injection['par_dic']['m2'])
 
         # Set initial parameter dictionary. Will get improved by
         # `find_bestfit_pars()`. Serves dual purpose as maximum
@@ -179,7 +199,42 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                             time_range=time_range,
                             mchirp_range=mchirp_range)
         ref_wf_finder.find_bestfit_pars()
+
+        # If this is an injection, we can "cheat" and check that relative
+        # binning is working at the injection, otherwise raise warning:
+        if event_data.injection:
+            lnl_fft = ref_wf_finder.lnlike_fft(event_data.injection['par_dic'])
+            lnl_rb = ref_wf_finder.lnlike(event_data.injection['par_dic'])
+
+            if np.abs(lnl_fft - lnl_rb) > .1:
+                warnings.warn(
+                    'Could not find a good aligned-spin reference waveform:\n'
+                    f'Exact (2, 2) mode ln L = {lnl_fft}\n'
+                    f'Relative-binning: ln L = {lnl_rb}')
+
         return ref_wf_finder
+
+    @staticmethod
+    def _get_safe_par_dic(par_dic, eta_max=.24):
+        """
+        Return copy of `par_dic`, modified to prevent problematic
+        behavior if it is used as relative-binning reference waveform
+        (e.g. zeros in some modes or frequencies).
+        Inplane spins are set to zero, iota is set to 1 or pi-1 and eta
+        is capped at `eta_max` at constant mchirp.
+        """
+        par_dic = par_dic | waveform.ZERO_INPLANE_SPINS
+
+        m1, m2, iota = par_dic['m1'], par_dic['m2'], par_dic['iota']
+
+        par_dic['iota'] = 1 if iota < np.pi / 2 else np.pi - 1
+
+        if gw_utils.q_to_eta(m2 / m1) > eta_max:
+            mchirp = gw_utils.m1m2_to_mchirp(m1, m2)
+            par_dic['m1'], par_dic['m2'] = gw_utils.mchirpeta_to_m1m2(
+                mchirp, eta_max)
+
+        return par_dic
 
     def find_bestfit_pars(self, seed=0):
         """
@@ -212,7 +267,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         # Optimize time, sky location, orbital phase and distance
         self._optimize_t_refdet(kwargs['ref_det_name'])
-        self._optimize_skyloc_and_inclination(kwargs['detector_pair'])
+        self._optimize_skyloc_and_inclination(kwargs['detector_pair'], seed)
         self._optimize_phase_and_distance()
 
         if not self._mchirp_range:
@@ -362,7 +417,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self.par_dic_0['t_geocenter'] = result.x
         print(f'Set time, lnL({ref_det_name}) = {-result.fun}')
 
-    def _optimize_skyloc_and_inclination(self, detector_pair):
+    def _optimize_skyloc_and_inclination(self, detector_pair, seed):
         """
         Find right ascension and declination that optimize likelihood
         maximized over amplitude and phase, and choose between
@@ -395,7 +450,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                        self.lnlike_max_amp_phase(par_dic | flipped_iota))
 
         # Maximize on a Halton sequence, then refine
-        u_theta, u_phi = qmc.Halton(2).random(1500).T
+        u_theta, u_phi = qmc.Halton(2, seed=seed).random(1500).T
         thetanets = np.arccos(2*u_theta - 1)
         phinets = 2 * np.pi * u_phi
         i_max = np.argmax(lnlike_skyloc(thetanets, phinets))

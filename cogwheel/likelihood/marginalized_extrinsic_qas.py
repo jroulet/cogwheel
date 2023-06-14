@@ -96,16 +96,14 @@ class MarginalizedExtrinsicLikelihoodQAS(
             [self._get_summary_weights(d_h_no_shift * shift)  # db
              for shift in shifts.T])  # tdb  # Comprehension saves memory
 
-        self._d_h_weights = np.einsum('tdb,b,d->tdb',
+        self._d_h_weights = np.einsum('tdb,b->tdb',
                                       d_h_summary,
-                                      1 / h0_fbin.conj(),
-                                      1 / self.asd_drift**2)  # mptdb
+                                      1 / h0_fbin.conj())  # mptdb
 
     def _set_h_h_weights(self, h0_f, h0_fbin):
-        h0_h0 = np.einsum('r,dr,d->dr',
+        h0_h0 = np.einsum('r,dr->dr',
                           utils.abs_sq(h0_f),
-                          self.event_data.wht_filter ** 2,
-                          self.asd_drift ** -2)  # dr
+                          self.event_data.wht_filter ** 2)  # dr
         self._h_h_weights = (self._get_summary_weights(h0_h0).real
                              / utils.abs_sq(h0_fbin))  # db
 
@@ -114,7 +112,8 @@ class MarginalizedExtrinsicLikelihoodQAS(
             self.fbin, dict(par_dic) | self._ref_dic)[0]  # b
         dh_td = self._d_h_weights @ h_b.conj()  # td
         hh_d = self._h_h_weights @ utils.abs_sq(h_b)  # d
-        return dh_td, hh_d
+        asd_drift_correction = self.asd_drift ** -2  # d
+        return dh_td * asd_drift_correction, hh_d * asd_drift_correction
 
     def _get_many_dh_hh(self, samples: pd.DataFrame):
         """

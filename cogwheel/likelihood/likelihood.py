@@ -141,13 +141,13 @@ class CBCLikelihood(utils.JSONMixin):
             Passed to `safe_std`, keys include:
                 `expected_high`, `reject_nearby`.
         """
-        # Use all available modes to get a waveform, then reset
-        harmonic_modes = self.waveform_generator.harmonic_modes
-        self.waveform_generator.harmonic_modes = None
-        # Undo previous asd_drift so result is independent of it
-        normalized_h_f = (self._get_h_f(par_dic, normalize=True)
-                          / self.asd_drift[:, np.newaxis])
-        self.waveform_generator.harmonic_modes = harmonic_modes
+        # Use all available modes and spin components to get a waveform
+        with utils.temporarily_change_attributes(self.waveform_generator,
+                                                 disable_precession=False,
+                                                 harmonic_modes=None):
+            # Undo previous asd_drift so result is independent of it
+            normalized_h_f = (self._get_h_f(par_dic, normalize=True)
+                              / self.asd_drift[:, np.newaxis])
 
         z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
         whitened_h_f = (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
