@@ -20,16 +20,6 @@ from .likelihood import check_bounds
 from .relative_binning import RelativeBinningLikelihood
 
 
-class ReferenceWaveformError(Exception):
-    """
-    Raised if we can't get an accurate relative binning reference
-    for an injection where we know the true parameters.
-    (Simply setting the injection as reference can be problematic
-    if there is fast precession or a fine-tuned configuration that
-    suppresses some higher modes.)
-    """
-
-
 class ReferenceWaveformFinder(RelativeBinningLikelihood):
     """
     Find parameters of a high-likelihood solution.
@@ -211,13 +201,16 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         ref_wf_finder.find_bestfit_pars()
 
         # If this is an injection, we can "cheat" and check that relative
-        # binning is working at the injection (to fail early if not):
-        if event_data.injection and np.abs(
-                ref_wf_finder.lnlike_fft(event_data.injection['par_dic'])
-                - ref_wf_finder.lnlike(event_data.injection['par_dic'])) > .1:
-            raise ReferenceWaveformError(
-                'Unable to find an aligned-spin waveform similar to the '
-                'injected waveform.')
+        # binning is working at the injection, otherwise raise warning:
+        if event_data.injection:
+            lnl_fft = ref_wf_finder.lnlike_fft(event_data.injection['par_dic'])
+            lnl_rb = ref_wf_finder.lnlike(event_data.injection['par_dic'])
+
+            if np.abs(lnl_fft - lnl_rb) > .1:
+                warnings.warn(
+                    'Could not find a good aligned-spin reference waveform:\n'
+                    f'Exact (2, 2) mode ln L = {lnl_fft}\n'
+                    f'Relative-binning: ln L = {lnl_rb}')
 
         return ref_wf_finder
 
