@@ -1,3 +1,10 @@
+"""
+Generate injection samples drawn from a user-prescribed distribution.
+
+Usage:
+    1. Make a config file (see `cogwheel/validation/example/config.py`)
+    2. Call ``generate_injections_from_config``
+"""
 import multiprocessing
 from scipy import stats
 import numpy as np
@@ -5,65 +12,94 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from cogwheel import data
-from cogwheel import likelihood
 from cogwheel import waveform
-
-from . import config
-from .injection_prior import InjectionPrior
+import cogwheel.likelihood
 
 
-N_CORES = multiprocessing.cpu_count()  # How many cores to use, edit if desired
+def generate_injections_from_config(config,
+                                    n_cores=multiprocessing.cpu_count(),
+                                    overwrite=False):
+    """
+    Create a pandas DataFrame with injection samples and save it in
+    ``config.INJECTION_DIR/config.INJECTIONS_FILENAME``.
 
-event_data = data.EventData.gaussian_noise('', **config.EVENT_DATA_KWARGS)
+    Parameters
+    ----------
+    config: module
+        Output of ``cogwheel.validation.load_config``, contains
+        configuration parameters.
 
-waveform_generator = waveform.WaveformGenerator.from_event_data(
-    event_data, config.APPROXIMANT)
+    n_cores: int
+        Number of computing cores to use.
+
+    overwrite: bool
+        Whether to overwrite the injections file if it already exists.
+    """
+    injections_path = config.INJECTION_DIR/config.INJECTIONS_FILENAME
+    if not overwrite and injections_path.exists():
+        raise FileExistsError(f'{injections_path.as_posix()} exists, '
+                              'pass `overwrite=True` to overwrite')
+
+    print(f'Generating injections in {injections_path.as_posix()}...')
+    injections_above_threshold = _generate_injections_above_threshold(config,
+                                                                      n_cores)
+    injections_above_threshold.to_feather(injections_path)
 
 
-def generate_injections_above_threshold(mchirp_range):
+def _generate_injections_above_threshold(config, n_cores):
     """
     Return a DataFrame with injections from the prior guaranteeing that
     ⟨ℎ∣ℎ⟩ is above ``config.H_H_MIN``, and that d_luminosity is below
     ``config.D_LUMINOSITY_MAX``.
-    The number of injections is ``config.N_INJECTIONS_ABOVE_THRESHOLD``.
+    The number of injections is ``config.N_INJECTIONS``.
     """
     injs_above_threshold = pd.DataFrame()
-    batch_size = 10 * config.N_INJECTIONS_ABOVE_THRESHOLD
+    batch_size = 10 * config.N_INJECTIONS
 
-    while len(injs_above_threshold) < config.N_INJECTIONS_ABOVE_THRESHOLD:
-        injs_above_threshold = pd.concat(
-            (injs_above_threshold,
-             _generate_injections_above_threshold(mchirp_range, batch_size)),
-            ignore_index=True)
+    event_data = data.EventData.gaussian_noise('', **config.EVENT_DATA_KWARGS)
+    waveform_generator = waveform.WaveformGenerator.from_event_data(
+        event_data, config.APPROXIMANT)
+    likelihood = cogwheel.likelihood.CBCLikelihood(event_data,
+                                                   waveform_generator)
+    likelihood.asd_drift = None  # Sets it to 1
 
-    return injs_above_threshold[:config.N_INJECTIONS_ABOVE_THRESHOLD]
+    while len(injs_above_threshold) < config.N_INJECTIONS:
+        batch = _batch_of_injections_above_threshold(config, batch_size,
+                                                     likelihood, n_cores)
+        injs_above_threshold = pd.concat((injs_above_threshold, batch),
+                                         ignore_index=True)
+
+    return injs_above_threshold[:config.N_INJECTIONS]
 
 
-def _generate_injections_above_threshold(mchirp_range,
-                                         n_total_injections):
+def _batch_of_injections_above_threshold(config, batch_size, likelihood,
+                                         n_cores):
     """
-    Generate a batch of injections that pass the ⟨ℎ∣ℎ⟩ threshold and
-    are within the maximum luminosity distance.
-    The number of injections that will pass the thresholds is unknown
-    in advance.
+    Generate a batch of injections that pass the ⟨ℎ∣ℎ⟩ threshold and are
+    within the maximum luminosity distance.
+    The number of injections that will pass the thresholds is unknown in
+    advance.
 
     Parameters
     ----------
-    mchirp_range: (float, float)
-        Minimum and maximum detector-frame chirp masses (Msun).
+    config: module
+        Contains configuration parameters.
 
-    n_total_injections: int
+    batch_size: int
         Number of injections generated (before applying the ⟨ℎ∣ℎ⟩ cut).
-    """
-    injection_prior = InjectionPrior(mchirp_range=mchirp_range,
-                                     detector_pair='H',
-                                     tgps=0.,
-                                     f_ref=config.F_REF)
-    injections = injection_prior.generate_random_samples(n_total_injections)
-    h_h_1mpc = _compute_h_h_1mpc(injections)
 
-    # Choose physical units for distance, so that the loudest signal
-    # placed at d_ref barely makes the threshold
+    likelihood: cogwheel.likelihood.CBCLikelihood
+        Use its waveform generator and PSD for computing ⟨ℎ∣ℎ⟩.
+
+    n_cores: int
+        Number of computing cores to use.
+    """
+    injection_prior = config.INJECTION_PRIOR_CLS(**config.PRIOR_KWARGS)
+    injections = injection_prior.generate_random_samples(batch_size)
+    h_h_1mpc = _compute_h_h_1mpc(injections, likelihood, n_cores)
+
+    # Choose physical units for distance, so that the if the loudest
+    # signal was placed at d_ref it would barely make the threshold
     d_ref = np.sqrt(np.max(h_h_1mpc) / config.H_H_MIN)
 
     injections['d_luminosity'] = injections['dimensionless_distance'] * d_ref
@@ -78,7 +114,7 @@ def _generate_injections_above_threshold(mchirp_range,
     return injections_above_threshold
 
 
-def _compute_h_h_1mpc(injections, rtol=1e-3, n_cores=None):
+def _compute_h_h_1mpc(injections, likelihood, n_cores, rtol=1e-3):
     """
     Compute ⟨ℎ∣ℎ⟩ at 1 Mpc, ensuring a relative accuracy of `rtol`.
 
@@ -87,76 +123,85 @@ def _compute_h_h_1mpc(injections, rtol=1e-3, n_cores=None):
     injections: pd.DataFrame
         Samples including all parameters except for time and distance.
 
+    likelihood: cogwheel.likelihood.CBCLikelihood
+        Use its waveform generator and PSD for computing ⟨ℎ∣ℎ⟩.
+
+    n_cores: int
+        Number of computing cores to use.
+
     rtol: float
         Relative tolerance in ⟨ℎ∣ℎ⟩ computation.
 
     Return
     ------
-    h_h_1mpc, relative_error: float arrays, same length as `injections`.
+    h_h_1mpc: float array, same length as `injections`.
     """
     # Attempt relative binning and estimate accuracy
     pn_phase_tol = .01
-    h_h_1mpc = _compute_h_h_1mpc_rb(injections, pn_phase_tol, n_cores)
-    h_h_1mpc_lowres = _compute_h_h_1mpc_rb(injections, pn_phase_tol*2, n_cores)
+    h_h_1mpc = _compute_h_h_1mpc_rb(injections, pn_phase_tol, likelihood,
+                                    n_cores)
+    h_h_1mpc_lowres = _compute_h_h_1mpc_rb(injections, pn_phase_tol*2,
+                                           likelihood, n_cores)
 
     # Recompute inaccurate ones exactly
     recompute = np.abs(h_h_1mpc / h_h_1mpc_lowres - 1) > rtol
-    h_h_1mpc[recompute] = _compute_h_h_1mpc_fft(injections[recompute], n_cores)
+    h_h_1mpc[recompute] = _compute_h_h_1mpc_fft(injections[recompute],
+                                                likelihood, n_cores)
 
     return h_h_1mpc
 
 
-def _compute_h_h_1mpc_rb(injections, pn_phase_tol, n_cores=None):
+def _compute_h_h_1mpc_rb(injections, pn_phase_tol, likelihood, n_cores):
     """Compute ⟨ℎ∣ℎ⟩ at 1 Mpc using relative binning."""
-    n_cores = n_cores or N_CORES
-
     par_dic_0 = {**injections.median(), 'd_luminosity': 1}
 
-    like = likelihood.RelativeBinningLikelihood(
-        event_data, waveform_generator, par_dic_0, pn_phase_tol=pn_phase_tol)
+    likelihood_rb = cogwheel.likelihood.RelativeBinningLikelihood(
+        **likelihood.get_init_dict(),
+        par_dic_0=par_dic_0, pn_phase_tol=pn_phase_tol)
+    likelihood_rb.asd_drift = None  # Sets it to 1
 
-    par_dics = ({**row, 'd_luminosity': 1}
-                for _, row in injections.iterrows())
+    par_dics = ({**row, 'd_luminosity': 1} for _, row in injections.iterrows())
+    args = ((likelihood_rb, par_dic) for par_dic in par_dics)
 
     with multiprocessing.Pool(n_cores) as pool:
-        h_h_1mpc = pool.starmap(_get_h_h_rb,
-                                ((like, par_dic) for par_dic in par_dics))
+        h_h_1mpc = pool.starmap(_get_h_h_rb, args)
     return np.array(h_h_1mpc)
 
 
-def _get_h_h_rb(like, par_dic):
-    return np.sum(like._get_dh_hh_no_asd_drift(par_dic)[1])
+def _get_h_h_rb(likelihood, par_dic):
+    return np.sum(likelihood._get_dh_hh_no_asd_drift(par_dic)[1])
 
 
-def _compute_h_h_1mpc_fft(injections, n_cores=None):
+def _compute_h_h_1mpc_fft(injections, likelihood, n_cores):
     """Compute ⟨ℎ∣ℎ⟩ at 1 Mpc without using relative binning."""
-    n_cores = n_cores or N_CORES
-
-    like = likelihood.CBCLikelihood(event_data, waveform_generator)
-    like.asd_drift = None  # Sets it to 1
-
-    par_dics = ({**row, 'd_luminosity': 1}
-                for _, row in injections.iterrows())
+    par_dics = ({**row, 'd_luminosity': 1} for _, row in injections.iterrows())
+    args = ((likelihood, par_dic) for par_dic in par_dics)
 
     with multiprocessing.Pool(n_cores) as pool:
-        h_h_1mpc = pool.starmap(_get_h_h_fft,
-                                ((like, par_dic) for par_dic in par_dics))
+        h_h_1mpc = pool.starmap(_get_h_h_fft, args)
     return np.array(h_h_1mpc)
 
 
-def _get_h_h_fft(like, par_dic):
-    return np.sum(like._compute_h_h(like._get_h_f(par_dic)))
+def _get_h_h_fft(likelihood, par_dic):
+    h_f = likelihood._get_h_f(par_dic)
+    h_h = likelihood._compute_h_h(h_f)
+    return h_h.sum()
 
 
-def test_h_h_distribution(injections_above_threshold):
+def test_h_h_distribution(config):
     """
     Plot test that distribution of ⟨ℎ∣ℎ⟩ is as expected.
+    It is assumed that injections have already been generated (see
+    ``generate_injections_from_config``).
 
     Parameters
     ----------
-    injections_above_threshold: pandas.DataFrame
-        Output of ``generate_injections_above_threshold()``.
+    config: module
+        Output of ``cogwheel.validation.load_config()``, contains
+        configuration parameters.
     """
+    injections_above_threshold = pd.read_feather(
+        config.INJECTION_DIR/config.INJECTIONS_FILENAME)
     h_h_distribution = stats.pareto(b=1.5, scale=config.H_H_MIN)
 
     plt.figure()
