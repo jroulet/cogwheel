@@ -270,19 +270,17 @@ class MarginalizedExtrinsicLikelihood(
             [self._get_summary_weights(d_h_no_shift * shift)  # mdb
              for shift in shifts.T])  # tmdb  # Comprehension saves memory
 
-        self._d_h_weights = np.einsum('tmdb,mb,d->mtdb',
+        self._d_h_weights = np.einsum('tmdb,mb->mtdb',
                                       d_h_summary,
                                       1 / h0_fbin.conj(),
-                                      1 / self.asd_drift**2
                                      ).astype(np.complex64)  # mtdb
 
     def _set_h_h_weights(self, h0_f, h0_fbin):
         m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
-        h0_h0 = np.einsum('mr,mr,dr,d->mdr',
+        h0_h0 = np.einsum('mr,mr,dr->mdr',
                           h0_f[m_inds],
                           h0_f[mprime_inds].conj(),
-                          self.event_data.wht_filter ** 2,
-                          self.asd_drift ** -2)  # mdr
+                          self.event_data.wht_filter ** 2)  # mdr
         self._h_h_weights = np.einsum('mdb,mb,mb->mdb',
                                       self._get_summary_weights(h0_h0),
                                       1 / h0_fbin[m_inds],
@@ -308,7 +306,9 @@ class MarginalizedExtrinsicLikelihood(
                             self._h_h_weights,
                             h_mpb[m_inds],
                             h_mpb.conj()[mprime_inds]).astype(np.complex64)
-        return dh_mptd, hh_mppd
+
+        asd_drift_correction = self.asd_drift.astype(np.float32) ** -2  # d
+        return dh_mptd * asd_drift_correction, hh_mppd * asd_drift_correction
 
     def _get_many_dh_hh(self, samples: pd.DataFrame):
         """
