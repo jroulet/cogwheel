@@ -138,7 +138,7 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         # Reject samples with large variance to avoid artifacts. If they
         # should contribute to the posterior, by now we are in trouble
         # anyways.
-        if marg_info.n_effective < self.coherent_score.min_n_effective:
+        if marg_info.n_effective < 0.1 * self.coherent_score.min_n_effective:
             return -np.inf
 
         return marg_info.lnl_marginalized
