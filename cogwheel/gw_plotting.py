@@ -89,6 +89,14 @@ _LABELS = {
     'u_psi': r'$u_\psi$',
     'u_costhetanet': r'$u_{\theta_{\rm net}}$',
     'u_phinet_hat': r'$u_{\hat\phi_{\rm net}}$',
+    # Dissipations
+    'h1s1': r'$H_{1\hat{s}^1}$',
+    'h2s1': r'$H_{2\hat{s}^1}$',
+    'h1s0': r'$H_{1\hat{s}^0}$',
+    'h2s0': r'$H_{2\hat{s}^0}$',
+    'hs': r'$\mathcal{H}_{s}$',
+    'ha': r'$\mathcal{H}_{a}$',
+    'h0': r'$\mathcal{H}_0$',
     }
 
 _UNITS = (dict.fromkeys(['mchirp', 'm1', 'm2', 'mtot', 'mtot_source',
