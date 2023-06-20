@@ -38,6 +38,7 @@ from cogwheel import waveform
 from cogwheel.likelihood import MarginalizedExtrinsicLikelihoodQAS
 from cogwheel.gw_prior import (UniformDetectorFrameMassesPrior,
                                UniformEffectiveSpinPrior,
+                               IsotropicSpinsAlignedComponentsPrior,
                                ZeroTidalDeformabilityPrior,
                                FixedReferenceFrequencyPrior,
                                UniformTidalDeformabilitiesBNSPrior,
@@ -46,7 +47,7 @@ from cogwheel.gw_prior import (UniformDetectorFrameMassesPrior,
 from cogwheel.waveform_models.pe_waveform_cogwheel_qdol import gen_taylorF2_qdol_polar
 
 
-DEFAULT_PARS = waveform.DEFAULT_PARS | {'kappa1': 1., 'kappa2': 1.} | {'h1': 1., 'h2': 1.}  | {'lambda1': 1., 'lambda2': 1.}
+DEFAULT_PARS = waveform.DEFAULT_PARS | {'kappa1': 1., 'kappa2': 1.} | {'h1s1': - 8.0 / 45.0, 'h2s1': - 8.0 / 45.0}  | {'lambda1': 1., 'lambda2': 1.} | {'h1s3': 2.0 / 3.0, 'h2s3': 2.0 / 3.0} | {'h1s0': 16.0 / 45.0, 'h2s0': 16.0 / 45.0}
 
 
 def compute_hplus_hcross_quadrupole_dissipation_octupole_love(
@@ -72,8 +73,10 @@ def compute_hplus_hcross_quadrupole_dissipation_octupole_love(
         plus, optionally:
             * s1z, s2z: dimensionless spins
             * kappa1, kappa2: component spin-induced quadrupoles
-            * h1, h2: component dissipation numbers
+            * h1s1, h2s1: component spin-linear dissipation numbers
             * lambda1, lambda2: component spin-induced octupoles
+            * h1s3, h2s3: component spin-cubic dissipation numbers
+            * h1s0, h2s0: component spin-independent dissipation numbers
             * l1, l2: component Love numbers
             
 
@@ -98,8 +101,12 @@ def compute_hplus_hcross_quadrupole_dissipation_octupole_love(
     
     # Waveform generator code must follow this ordering:
     wf_params = np.array([Mc, eta, par_dic['s1z'], par_dic['s2z'], par_dic['kappa1'], par_dic['kappa2'], 
-                          par_dic['h1'], par_dic['h2'],  par_dic['lambda1'], par_dic['lambda2'], par_dic['l1'], par_dic['l2'],
+                          par_dic['h1s1'], par_dic['h2s1'],  par_dic['lambda1'], par_dic['lambda2'], par_dic['h1s3'],
+                          par_dic['h2s3'],par_dic['h1s0'], par_dic['h2s0'], par_dic['l1'], par_dic['l2'],
                           par_dic['d_luminosity'], 0, par_dic['phi_ref'], par_dic['iota']]) # tc in gen_taylorF2_qdol_polar set to zero
+    
+    #print("wf_params:", wf_params)
+    
     f_ref = par_dic['f_ref'] 
     
     # Avoid divergence in amplitude at f=0
@@ -121,7 +128,13 @@ class QuadrupoleDissipationOctupoleLoveWaveformGenerator(waveform.WaveformGenera
     """
     Similar to WaveformGenerator but expects additional finite-size effect parameters.
     """
-    params = sorted(waveform.WaveformGenerator.params + ['kappa1', 'kappa2', 'h1', 'h2', 'lambda1', 'lambda2'])
+    params = sorted(waveform.WaveformGenerator.params + ['kappa1', 'kappa2', 'h1s1', 'h2s1', 'lambda1',
+                                                         'lambda2','h1s3','h2s3','h1s0','h2s0'])
+    
+    _waveform_params = sorted(set(params) - set(waveform.WaveformGenerator._projection_params))
+    
+    slow_params = sorted(set(params) - set(waveform.WaveformGenerator.fast_params))
+    
 
 
 class QuadrupoleDissipationOctupoleLoveMarginalizedExtrinsicLikelihoodQAS(
@@ -130,7 +143,8 @@ class QuadrupoleDissipationOctupoleLoveMarginalizedExtrinsicLikelihoodQAS(
     Similar to MarginalizedExtrinsicLikelihoodQAS but expects additional
     finite-size effect parameters.
     """
-    params = sorted(MarginalizedExtrinsicLikelihoodQAS.params + ['kappa1', 'kappa2', 'h1', 'h2', 'lambda1', 'lambda2'])
+    params = sorted(MarginalizedExtrinsicLikelihoodQAS.params + ['kappa1', 'kappa2', 'h1s1', 'h2s1', 'lambda1', 'lambda2',
+                                                                'h1s3','h2s3','h1s0','h2s0'])
 
     @classmethod
     def from_reference_waveform_finder(
@@ -182,29 +196,79 @@ class QuadrupoleDissipationOctupoleLoveMarginalizedExtrinsicLikelihoodQAS(
 
     
 ################## Prior Classes for Various Finite Size Effects ##################
+    
+    
 
-
-class UniformTidalDissipationsPrior(prior.UniformPriorMixin,
+class UniformSpin0DissipationPrior(prior.UniformPriorMixin,
                                     prior.IdentityTransformMixin,
                                     prior.Prior):
-    """Uniform prior for tidal dissipations h1, h2."""
-    range_dic = {'h1': None,
-                 'h2': None}
+    """Uniform prior for Schwarzschild dissipations h1s0,h2s0"""
+    range_dic = {'h1s0': None,
+                 'h2s0': None}
+    
 
-    def __init__(self, *, tidal_dissipation_rng, **kwargs):
+    def __init__(self, *, schw_dissipation_rng, **kwargs):
         """
         Parameters
         ----------
         tidal_dissipation_rng: (float, float)
-            Range of tidal dissipation parameters h1, h2.
+            Range of Schwarzschild dissipation parameters h1s0,h2s0.
         """
-        self.range_dic = {'h1': tidal_dissipation_rng,
-                          'h2': tidal_dissipation_rng}
+        self.range_dic = {'h1s0': schw_dissipation_rng,
+                          'h2s0': schw_dissipation_rng}
         super().__init__(**kwargs)
 
     def get_init_dict(self):
         """Dictionary with arguments to reproduce class instance."""
-        return {'tidal_dissipation_rng': self.range_dic['h1']}
+        return {'schw_dissipation_rng': self.range_dic['h1s0']}
+    
+    
+class UniformSpin1DissipationPrior(prior.UniformPriorMixin,
+                                    prior.IdentityTransformMixin,
+                                    prior.Prior):
+    """Uniform prior for linear spin dissipations h1s1,h2s1"""
+    range_dic = {'h1s1': None,
+                 'h2s1': None}
+    
+
+    def __init__(self, *, spin1_dissipation_rng, **kwargs):
+        """
+        Parameters
+        ----------
+        tidal_dissipation_rng: (float, float)
+            Range of linear spin dissipation parameters h1s1,h2s1.
+        """
+        self.range_dic = {'h1s1': spin1_dissipation_rng,
+                          'h2s1': spin1_dissipation_rng}
+        super().__init__(**kwargs)
+
+    def get_init_dict(self):
+        """Dictionary with arguments to reproduce class instance."""
+        return {'spin1_dissipation_rng': self.range_dic['h1s1']}
+    
+class UniformSpin3DissipationPrior(prior.UniformPriorMixin,
+                                    prior.IdentityTransformMixin,
+                                    prior.Prior):
+    """Uniform prior for cubic spin dissipations h1s3,h2s3"""
+    range_dic = {'h1s3': None,
+                 'h2s3': None}
+    
+
+    def __init__(self, *, spin3_dissipation_rng, **kwargs):
+        """
+        Parameters
+        ----------
+        tidal_dissipation_rng: (float, float)
+            Range of linear cubic dissipation parameters h1s3,h2s3.
+        """
+        self.range_dic = {'h1s3': spin3_dissipation_rng,
+                          'h2s3': spin3_dissipation_rng}
+        super().__init__(**kwargs)
+
+    def get_init_dict(self):
+        """Dictionary with arguments to reproduce class instance."""
+        return {'spin3_dissipation_rng': self.range_dic['h1s3']}
+   
     
     
 class UniformSpinQuadrupolePrior(prior.UniformPriorMixin,
@@ -255,8 +319,29 @@ class UniformSpinOctupolePrior(prior.UniformPriorMixin,
 
 class BHTidalDissipationsPrior(FixedPrior):
     """Set tidal dissipation parameters to BH value."""
-    standard_par_dic = {'h1': 1,
-                        'h2': 1} # TODO
+    standard_par_dic = {'h1s1':  - 8.0 / 45.0,
+                        'h2s1':  - 8.0 / 45.0,
+                        'h1s3': 2.0 / 3.0,
+                        'h2s3': 2.0 / 3.0,
+                        'h1s0': 16.0 / 45.0,
+                        'h2s0': 16.0 / 45.0} # TODO
+    
+class BHSpin0DissipationPrior(FixedPrior):
+    """Set tidal spin-cubic dissipation parameters to BH value."""
+    standard_par_dic = {'h1s0': 16.0 / 45.0,
+                        'h2s0': 16.0 / 45.0}
+    
+class BHSpin1DissipationPrior(FixedPrior):
+    """Set tidal spin-cubic dissipation parameters to BH value."""
+    standard_par_dic = {'h1s1': - 8.0 / 45.0,
+                        'h2s1': - 8.0 / 45.0}
+    
+    
+class BHSpin3DissipationPrior(FixedPrior):
+    """Set tidal spin-cubic dissipation parameters to BH value."""
+    standard_par_dic = {'h1s3': 2.0 / 3.0,
+                        'h2s3': 2.0 / 3.0}
+
     
     
 class BHSpinQuadrupolePrior(FixedPrior):
@@ -265,10 +350,10 @@ class BHSpinQuadrupolePrior(FixedPrior):
                         'kappa2': 1} 
 
     
-class BHSpinOctupolePriorPrior(FixedPrior):
+class BHSpinOctupolePrior(FixedPrior):
     """Set spin-induced octupole parameters to BH value."""
-    standard_par_dic = {'lambda': 1,
-                        'lambda': 1} 
+    standard_par_dic = {'lambda1': 1,
+                        'lambda2': 1} 
 
     
 class IntrinsicQDOLPrior(RegisteredPriorMixin,
@@ -284,11 +369,20 @@ class IntrinsicQDOLPrior(RegisteredPriorMixin,
         = QuadrupoleDissipationOctupoleLoveMarginalizedExtrinsicLikelihoodQAS
 
     prior_classes = [UniformDetectorFrameMassesPrior,
-                     UniformEffectiveSpinPrior,
-                     UniformSpinQuadrupolePrior,
-                     UniformSpinOctupolePrior,
-                     # BHSpinOctupolePriorPrior,
-                     UniformTidalDissipationsPrior,
-                     # ZeroTidalDeformabilityPrior,
-                     UniformTidalDeformabilitiesBNSPrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     #UniformEffectiveSpinPrior,
+                     BHSpinQuadrupolePrior,
+                     #UniformSpinQuadrupolePrior,
+                     BHSpinOctupolePrior,
+                     #UniformSpinOctupolePrior,
+                     #UniformSpin0DissipationPrior,
+                     BHSpin0DissipationPrior,
+                     UniformSpin1DissipationPrior,
+                     #BHSpin1DissipationPrior,
+                     #UniformSpin3DissipationPrior,
+                     #BHSpin1DissipationPrior,
+                     BHSpin3DissipationPrior,
+                     #BHTidalDissipationsPrior,
+                     ZeroTidalDeformabilityPrior,
+                     #UniformTidalDeformabilitiesBNSPrior,
                      FixedReferenceFrequencyPrior]

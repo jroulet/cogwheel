@@ -50,7 +50,7 @@ m_per_Mpc = 3.085677581491367278913937957796471611e22
 Meters per Mpc.
 """
 
-# theta ordering: Mc, eta, chi_1, chi_2, kappa1, kappa2, h1, h2, l1, l2, dL, tc, phic, iota
+# theta ordering: Mc, eta, chi_1, chi_2, kappa1, kappa2, h1s1, h2s2, lambda1, lambda2, h1s3, h2s3, h1s0,h2s0, l1, l2, dL, tc, phic, iota
 
 ###################################################################################
 
@@ -69,9 +69,14 @@ def Phif3hPN_TLN(f, theta):
     Returns:
     phase (array): Phase of the GW as a function of frequency
     """
-    Mc, eta, chi_1, chi_2, kappa1, kappa2, h1, h2, lambda1, lambda2, l1, l2 = theta
+    Mc, eta, chi_1, chi_2, kappa1, kappa2, h1s1, h2s1, lambda1, lambda2, \
+    h1s3,h2s3, h1s0,h2s0, l1, l2 = theta
+    
+    #print('phase theta:', theta)
+    
     M = Mc / (eta ** (3 / 5))
     vlso = 1.0 / np.sqrt(6.0)
+    
     
     # # These are black hole values
     # kappa1 = 1.0
@@ -99,6 +104,7 @@ def Phif3hPN_TLN(f, theta):
     v5 = v4 * v
     v6 = v3 * v3
     v7 = v3 * v4
+    v8 = v4 * v4
     v10 = v5 * v5
     v12 = v10 * v2
     eta2 = eta**2
@@ -131,6 +137,23 @@ def Phif3hPN_TLN(f, theta):
         * (77096675.0 / 254016.0 + 378515.0 * eta / 1512.0 - 74045.0 * eta2 / 756.0)
         * v7
     )
+        
+    
+    psi_NS_4PN = (
+        - 90490.0 * PI**2 / 567.0 - 36812.0 * EulerGamma / 189.0 + 2550713843998885153.0 / 830425530654720.0 
+        - 26325.0 / 196.0 * np.log(3) - 1011020.0 / 3969.0 * np.log(2) 
+        + ( - 680712846248317.0 / 126743823360.0 - 72892664.0 * EulerGamma / 72009.0 + 109295.0 * PI**2 / 672.0 
+            - 9964112.0 / 3969.0 * np.log(2) + 26325.0 / 49.0 * np.log(3)
+        ) * eta
+        + (7510073635.0 / 9144576.0 - 11275.0 / 432.0 * PI**2) * eta**2 
+        + 1292395.0 / 36288.0 * eta**3 
+        - 5975.0 * eta**4 / 288.0
+    ) * v8 * (1.0 - 3.0 * np.log(v / vlso))
+    
+    psi_NS_4PN_log2 = (
+        1955944.0 / 1323.0 * eta + 18406.0 / 63.0   
+    ) * v8 * np.log(v / vlso) **2 
+    
 
     ## ------------------------- Tidal Love Numbers
     Lambda_t = (
@@ -143,13 +166,26 @@ def Phif3hPN_TLN(f, theta):
     # psi_TLN_6PN = (-3115.0 * Lambda_t / 64.0 + 6595.0 * delta_Lambda_t / 364.0) * v12
     
     
+    ## ------------------------- Schwarzschild Tidal Dissipation Numbers
+    
+    ##TODO: change it back
+    #ht0 = (h1s0 * m1 ** 4 + h2s0 * m2 ** 4) / M**4
+    ht0 = (-2.0 * h1s1 * m1 ** 4 - 2.0 * h2s1 * m2 ** 4) / M**4
+    
+    
+    psi_NS_4PN += 25.0 / 2.0 * ht0 * v8 * (1.0 - 3.0 * np.log(v / vlso))
+    
+    
         
 
     ## ------------------------- Spining part of the waveform (aligned spins)
+    
+    # 1.5 PN SO
     psi_S_15PN = (
         (113.0 / 3.0 - 76.0 * eta / 3.0) * chi_s + 113.0 * delta * chi_a / 3.0
     ) * v3
 
+    # 2 PN SS
     psi_S_2PN = (
         -(5.0 / 8.0)
         * (1.0 + 156.0 * eta + 80.0 * delta * k_a + 80.0 * (1.0 - 2.0 * eta) * k_s)
@@ -167,7 +203,9 @@ def Phif3hPN_TLN(f, theta):
         * chi_a
     )
     psi_S_2PN *= v4
-
+    
+    
+    # 2.5 PN SO
     psi_S_25PN = (
         -(732985.0 / 2268.0 - 24260.0 * eta / 81.0 - 340.0 * eta2 / 9.0) * chi_s
         - (732985.0 / 2268.0 + 140.0 * eta / 9.0) * delta * chi_a
@@ -175,17 +213,20 @@ def Phif3hPN_TLN(f, theta):
     
     
     # Leading order 2.5PN tidal dissipation
-    hs = (h1*m1**3 + h2*m2**3)/M**3
-    ha = (h1*m1**3 - h2*m2**3)/M**3
-    psi_S_25PN += (-10.0*hs*chi_s/9.0 - 10.0*ha* chi_a/9.0) * v5
+    hs = (h1s1*m1**3 + h2s1*m2**3)/M**3
+    ha = (h1s1*m1**3 - h2s1*m2**3)/M**3
+    psi_S_25PN += (25.0*hs*chi_s/4.0 + 25.0*ha* chi_a/4.0) * v5
     
     
     # 2.5PN log term
     psi_S_25PN_log = 3.0 * psi_S_25PN * np.log(v / vlso)
-
+    
+    # 3 PN SO
     psi_S_3PN = (2270.0 / 3.0 - 520.0 * eta) * PI * chi_s + (
         2270.0 * PI / 3.0
     ) * delta * chi_a
+    
+    # 3PN SS
     psi_S_3PN += (
         (
             (26015.0 / 14.0 - 88510.0 * eta / 21.0 - 480.0 * eta2) * k_a
@@ -214,7 +255,9 @@ def Phif3hPN_TLN(f, theta):
         + delta * (26015.0 / 28.0 - 1495.0 * eta / 6.0) * k_a
     ) * (chi_a) ** 2
     psi_S_3PN *= v6
-
+    
+    
+    ## 3.5 PN SO
     psi_S_35PN = (
         -25150083775.0 / 3048192.0
         + 10566655595.0 * eta / 762048.0
@@ -226,6 +269,8 @@ def Phif3hPN_TLN(f, theta):
         * delta
         * chi_a
     )
+    
+    # 3.5PN SSS
     psi_S_35PN += (
         265.0 / 24.0
         + 4035.0 * eta / 2.0
@@ -266,8 +311,44 @@ def Phif3hPN_TLN(f, theta):
         + delta
         * ((3110.0 - 8530.0 * eta / 3.0) * k_a - 1320.0 * (1.0 - eta) * lambda_a)
     ) * (chi_a**2 * chi_s)
+    
+    # 3.5PN SS
+    psi_S_35PN +=(
+       - 15.0 * PI / 2.0 - 400.0 * PI * delta * k_a - 400.0 * PI * k_s
+       + eta * (800.0 * PI + 800.0 * PI * k_s)
+    ) * (chi_a) ** 2
+    psi_S_35PN +=(
+        -15.0 * PI * delta - 800.0 * PI * k_a + 1600.0 * PI * eta * k_a - 800.0 * PI * delta * k_s
+    ) * (chi_a * chi_s)
+    psi_S_35PN +=(
+        - 15.0 * PI / 2.0 - 400.0 * PI * delta * k_a - 400.0 * PI * k_s
+        + eta * (- 770.0 * PI + 800.0 * PI * k_s)
+    ) * (chi_s) ** 2
+    
     psi_S_35PN *= v7
-
+    
+    # 3.5PN Dissipation
+    hs3 = (h1s3*m1**3 + h2s3*m2**3)/M**3
+    ha3 = (h1s3*m1**3 - h2s3*m2**3)/M**3
+    hts = (h1s1*m1**4 + h2s1*m2**4)/M**4
+    hta = (h1s1*m1**4 - h2s1*m2**4)/M**4
+    hps = (h1s1*m1**3 * m2**2 + h2s1*m2**3 * m1**2)/M**5
+    hpa = (h1s1*m1**3 * m2**2 - h2s1*m2**3 * m1**2)/M**5
+    
+    psi_S_35PN += (
+        112425.0 / 448.0 * ha - 225.0 / 16.0 * hpa + 225.0 / 8.0 * hta + 75 * ha * eta
+    ) * (chi_a) * v7
+    psi_S_35PN += (
+        225.0 / 8.0 * ha3
+    ) * (chi_a) ** 3 * v7
+    psi_S_35PN += (
+        112425.0 / 448.0 * hs - 225.0 / 16.0 * hps + 225.0 / 8.0 * hts + 75 * hs * eta   
+    ) * (chi_s) * v7
+    psi_S_35PN += (
+        225.0 / 8.0 * hs3   
+    ) * (chi_s) ** 3 * v7
+    
+    
     psi_NS = (
         psi_NS_0PN
         + psi_NS_1PN
@@ -276,8 +357,12 @@ def Phif3hPN_TLN(f, theta):
         + psi_NS_25PN
         + psi_NS_3PN
         + psi_NS_35PN
+        + psi_NS_4PN
+        + psi_NS_4PN_log2
     )
     psi_TLN = psi_TLN_5PN  # + psi_TLN_6PN
+    
+    
     psi_S = (
         psi_S_15PN + psi_S_2PN + psi_S_25PN + psi_S_25PN_log + psi_S_3PN + psi_S_35PN
     )
@@ -313,7 +398,9 @@ def gen_h0(f, theta, f_ref):
     Returns:
     Strain (array):
     """
-    Mc, eta, _, _, _, _, _, _, _, _, _, _, Deff, tc, phic = theta # kappa1, kappa2, h1, h2, lambda1, lambda2, l1, l2
+    
+    
+    Mc, eta, _, _, _, _, _, _, _, _, _, _, _, _, _, _, Deff, tc, phic = theta #chi_1, chi_2, kappa1, kappa2, h1s1, h2s1, lambda1,     lambda2, h1s3, h2s3, h1s0, h2s0, l1, l2
     M = Mc / (eta ** (3 / 5))
     pre = 3.6686934875530996e-19  # (GN*Msun/c^3)^(5/6)/Hz^(7/6)*c/Mpc/sec
     Mchirp = M * eta**0.6
@@ -387,7 +474,8 @@ def gen_taylorF2_qdol_polar(f, params, f_ref):
 
 
 
-###################################################################################
+##
+################################################################################
 ######################## Function to be called by cogwheel ########################
 ###################################################################################
 
@@ -420,13 +508,14 @@ def custom_compute_hplus_hcross(f, par_dic, *_):
     """
 
     # input_params ordering (lal convention): ['m1', 'm2', 's1z', 's2z', 'l1', 'l2', 'd_luminosity', 'phi_ref', 'iota', 'f_ref']
-    # wf_params ordering: ['Mc', 'eta', 'chi_1', 'chi_2', 'kappa1', 'kappa2', 'h1', 'h2', 'lambda1', 'lambda2', l1', 'l2', 'Deff', 'tc', 'phic', 'iota', 'f_ref']
+    # wf_params ordering: ['Mc', 'eta', 'chi_1', 'chi_2', 'kappa1', 'kappa2', 'h1s1', 'h2s1', 'lambda1', 'lambda2', 'h1s3','h2s3', 'h1s0', 'h2s0', 'l1', 'l2', 'Deff', 'tc', 'phic', 'iota', 'f_ref']
     
     eta = par_dic['m1']*par_dic['m2'] / (par_dic['m1']+par_dic['m2'])**2
     Mc = (par_dic['m1']+par_dic['m2'])*eta**(3/5)
     
     wf_params = np.array([Mc, eta, par_dic['s1z'], par_dic['s2z'], par_dic['kappa1'], par_dic['kappa2'], 
-                          par_dic['h1'], par_dic['h2'], par_dic['lambda1'], par_dic['lambda2'], par_dic['l1'], par_dic['l2'],
+                          par_dic['h1s1'], par_dic['h2s1'], par_dic['lambda1'], par_dic['lambda2'],
+                          par_dic['h1s3'], par_dic['h2s3'], par_dic['h1s0'], par_dic['h2s0'],par_dic['l1'], par_dic['l2'],
                           par_dic['d_luminosity'], 0, par_dic['phi_ref'], par_dic['iota']]) # tc in gen_taylorF2_qdol_polar set to zero
     f_ref = par_dic['f_ref'] 
     
