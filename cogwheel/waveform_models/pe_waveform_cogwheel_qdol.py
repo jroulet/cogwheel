@@ -22,33 +22,13 @@ import numpy as np
 
 ###### Wf model params, copied from ripple.constants.py and ripple.typing.py ######
 
-"""
-Various constants, all in SI units.
-"""
-
 EulerGamma = 0.577215664901532860606512090082402431
-
-MSUN = 1.988409902147041637325262574352366540e30  # kg
-"""Solar mass"""
-
-G = 6.67430e-11  # m^3 / kg / s^2
-"""Newton's gravitational constant"""
-
-C = 299792458.0  # m / s
-"""Speed of light"""
-
-"""Pi"""
+MSUN = 1.988409902147041637325262574352366540e30  # solar mass in kg
+G = 6.67430e-11  # m^3 / kg / s^2 # Newton's gravitational constant
+C = 299792458.0  # m / s # speed of light
 PI = 3.141592653589793238462643383279502884
-
-gt = G * MSUN / (C ** 3.0)
-"""
-G MSUN / C^3 in seconds
-"""
-
-m_per_Mpc = 3.085677581491367278913937957796471611e22
-"""
-Meters per Mpc.
-"""
+gt = G * MSUN / (C ** 3.0) # G MSUN / C^3 in seconds
+m_per_Mpc = 3.085677581491367278913937957796471611e22 # meters per Mpc
 
 # theta ordering: Mc, eta, chi_1, chi_2, kappa1, kappa2, h1s1, h2s2, lambda1, lambda2, h1s3, h2s3, h1s0,h2s0, l1, l2, dL, tc, phic, iota
 
@@ -113,14 +93,14 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     # # Black hole finite-size values
     # kappa1 = 1.0
     # kappa2 = 1.0
-    # h1s1 = 1 + 3*chi_1**2 ## TODO_HS: -8/45 Factor?
-    # h2s2 = 1 + 3*chi_2**2 ## TODO_HS: -8/45 Factor?
+    # h1s1 = -8.0 / 45.0 * (1 + 3*chi_1**2)
+    # h2s2 = -8.0 / 45.0 * (1 + 3*chi_2**2)
     # lambda1 = 1.0
     # lambda2 = 1.0
-    # h1s3 = 2/3
-    # h2s3 = 2/3
-    # h1s0 = TODO_HS: Add
-    # h2s0 = TODO_HS: Add
+    # h1s3 = 2.0 / 3.0
+    # h2s3 = 2.0 / 3.0
+    # h1s0 = 16.0 / 45.0 # small spin limit
+    # h2s0 = 16.0 / 45.0 # small spin limit
     # l1 = 0
     # l2 = 0
 
@@ -145,29 +125,19 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     hs3 = (h1s3*m1**3 + h2s3*m2**3) / M**3
     ha3 = (h1s3*m1**3 - h2s3*m2**3) / M**3
     
-    # Intermediate 3.5PN Dissipation Terms (not independent variables)
-    hts = (h1s1*m1**4 + h2s1*m2**4) / M**4
-    hta = (h1s1*m1**4 - h2s1*m2**4) / M**4
-    hps = (h1s1*m1**3 * m2**2 + h2s1*m2**3 * m1**2) / M**5
-    hpa = (h1s1*m1**3 * m2**2 - h2s1*m2**3 * m1**2) / M**5
-    
     # 4PN Dissipation (LO non-spinning) 
     # Here one could impose the superradiance condition (m Omega_H - omega), which is valid at LO in spin. 
     # Good approximation if the component spins are small.
     if fix_bh_superradiance:
         # factor of -2 strictly only applies for Schw black holes
-        ht0 = (-2.0 * h1s1 * m1 ** 4 - 2.0 * h2s1 * m2 ** 4) / M**4 
+        h0 = (-2.0 * h1s1 * m1 ** 4 - 2.0 * h2s1 * m2 ** 4) / M**4 
     else:
-        ht0 = (h1s0 * m1 ** 4 + h2s0 * m2 ** 4) / M**4
-    
-    
-    
-    
+        h0 = (h1s0 * m1 ** 4 + h2s0 * m2 ** 4) / M**4
     
     
     ######################### ----- Non spinning part of the waveform ----- #########################
     
-    ############ ---- Background GR point particle ---- ############
+    ############ Background GR point particle ############
     
     psi_NS_0PN = 1.0
     psi_NS_1PN = (3715.0 / 756.0 + 55.0 * eta / 9.0) * v2
@@ -204,20 +174,18 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     
     psi_NS_4PN_log2 = (18406.0 / 63.0  + 1955944.0 / 1323.0 * eta) * v8 * np.log(v / vlso)**2
 
-    ############ ---- Tidal Love Numbers (Schwarzschild) ---- ############
+    ############ Tidal Love Numbers (Schwarzschild) ############
     
     psi_TLN_5PN = - (39.0 * l_tilde / 2.0) * v10
     
-    ############ ---- Tidal Dissipation Numbers (Schwarzschild) ---- ############
+    ############ Tidal Dissipation Numbers (Schwarzschild) ############
     
-    ## TODO_HS: Double check
-    psi_TDN_NS_4PN = 25.0 / 2.0 * ht0 * v8 * (1.0 - 3.0 * np.log(v / vlso))
-    
+    psi_TDN_NS_4PN = 25.0 / 2.0 * h0 * v8 * (1.0 - 3.0 * np.log(v / vlso))
     
     
     ######################### ----- (Aligned) Spin part of the waveform ----- #########################        
 
-    ############ ---- Background GR point particle ---- ############ 
+    ############ Background GR point particle ############ 
     
     # 1.5PN SO
     psi_S_15PN = ((113.0 / 3.0 - 76.0 * eta / 3.0) * chi_s + 113.0 * delta * chi_a / 3.0) * v3
@@ -315,9 +283,8 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
                    ) * (chi_a**2 * chi_s)
     psi_S_35PN *= v7
     
-    
-    
-    ############ ---- Tidal Dissipation Numbers (Kerr) ---- ############
+    ############ Tidal Dissipation Numbers (Kerr) ############
+    # The following assumes E/B duality for Kerr
 
     # 2.5PN linear-in-spin dissipation
     psi_TDN_S_25PN = (25.0*hs*chi_s/4.0 + 25.0*ha* chi_a/4.0) * v5 * (1 + 3.0 * np.log(v / vlso))
@@ -333,22 +300,23 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     psi_TDN_S_35PN += (675.0 / 8.0 * hs3) * chi_a**2 * chi_s 
     psi_TDN_S_35PN *= v7
     
-    
     ######################### ----- Summing up all phases ----- #########################   
     
     # Point particle + spin-induced moments
     psi_NS = (psi_NS_0PN + psi_NS_1PN + psi_NS_15PN + psi_NS_2PN + psi_NS_25PN + psi_NS_3PN
               + psi_NS_35PN + psi_NS_4PN + psi_NS_4PN_log2)
-    # psi_S_25PN_log removed from original code as it's now included in psi_S_25PN 
     psi_S = psi_S_15PN + psi_S_2PN + psi_S_25PN + psi_S_3PN + psi_S_35PN
     
     # Tidal effects
     psi_TDN = psi_TDN_S_25PN + psi_TDN_S_35PN + psi_TDN_NS_4PN
     psi_TLN = psi_TLN_5PN
 
-    # TODO_HS: Note that when called with hf3hPN_TLN, we need to include - sign for correct time domain direction
-    return 3.0 / 128.0 / eta / v5 * (psi_NS + psi_S + psi_TDN + psi_TLN )
-      
+    return 3.0 / 128.0 / eta / v5 * (psi_NS + psi_S + psi_TDN + psi_TLN)
+
+
+## TODO_HS: Cleaned up up to here
+    
+    
 
 
     
@@ -382,7 +350,7 @@ def gen_h0(f, theta, f_ref):
     """
     
     
-    Mc, eta, _, _, _, _, _, _, _, _, _, _, _, _, _, _, Deff, tc, phic = theta #chi_1, chi_2, kappa1, kappa2, h1s1, h2s1, lambda1,     lambda2, h1s3, h2s3, h1s0, h2s0, l1, l2
+    Mc, eta, _, _, _, _, _, _, _, _, _, _, _, _, _, _, Deff, tc, phic = theta #chi_1, chi_2, kappa1, kappa2, h1s1, h2s1, lambda1, lambda2, h1s3, h2s3, h1s0, h2s0, l1, l2
     M = Mc / (eta ** (3 / 5))
     pre = 3.6686934875530996e-19  # (GN*Msun/c^3)^(5/6)/Hz^(7/6)*c/Mpc/sec
     Mchirp = M * eta**0.6
@@ -421,7 +389,9 @@ def gen_h0(f, theta, f_ref):
         f - f_cutoff, 0.5
     )
     
-    return Amp * pre * np.exp(-1.0j * Phi) + 1e-30 # Add tiny value to avoid zero division in finding reference wf
+    # Add tiny value to avoid zero division in finding reference wf
+    # -ve sign before phase needed for correct time domain orientation
+    return Amp * pre * np.exp(-1.0j * Phi) + 1e-30 
 
 def gen_taylorF2_qdol_polar(f, params, f_ref):
     """
