@@ -53,8 +53,9 @@ Meters per Mpc.
 # theta ordering: Mc, eta, chi_1, chi_2, kappa1, kappa2, h1s1, h2s2, lambda1, lambda2, h1s3, h2s3, h1s0,h2s0, l1, l2, dL, tc, phic, iota
 
 ###################################################################################
+###################################################################################
 
-def Phif3hPN_TLN(f, theta):
+def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     """
     
     Computes the phase of the TaylorF2 waveform + finite-size effect parameters. 
@@ -89,37 +90,9 @@ def Phif3hPN_TLN(f, theta):
     m1 = (M + np.sqrt(M**2 - 4 * (eta * M**2))) / 2
     m2 = (M - np.sqrt(M**2 - 4 * (eta * M**2))) / 2
     delta = np.sqrt(1.0 - 4.0 * eta)
-   
-    # # These are black hole values
-    # kappa1 = 1.0
-    # kappa2 = 1.0
-    # h1s1 = 1 + 3*chi_1**2 ## TODO_HS: -8/45 Factor?
-    # h2s2 = 1 + 3*chi_2**2 ## TODO_HS: -8/45 Factor?
-    # lambda1 = 1.0
-    # lambda2 = 1.0
-    # h1s3 = 2/3
-    # h2s3 = 2/3
-    # h1s0 = TODO_HS: Add
-    # h2s0 = TODO_HS: Add
-    # l1 = 0
-    # l2 = 0
 
-    # Symmetric/antisymmetric spins and spin-induced multipoles
-    chi_s = 0.5 * (chi_1 + chi_2)
-    chi_a = 0.5 * (chi_1 - chi_2)
-    k_s = 0.5 * (kappa1 + kappa2)
-    k_a = 0.5 * (kappa1 - kappa2)
-    lambda_s = 0.5 * (lambda1 + lambda2)
-    lambda_a = 0.5 * (lambda1 - lambda2)
-    
-    # TODO_HS: Add effective tidal dissipation numbers here
-    
-    # LO effective Love parameter
-    l_tilde = 16.0 * ((m1 + 12 * m2) * m1**4 * l1 + (m2 + 12 * m1) * m2**4 * l2) / (13.0 * M**5.0)
-    # TODO_HS: Add delta_l_tilde definition
-    
     # Convenient variables
-    vlso = 1.0 / np.sqrt(6.0) ## TODO_HS: Does value of vlso matter for 4PN log(v/vlso)**2 term??
+    vlso = 1.0 # Doesn't matter for 2.5PN and 4PN constant log(v/vlso) terms, but matters for 4PN log(v/vlso)**2
     v = (PI * M * (f + 1e-100) * gt) ** (1.0 / 3.0)
     v2 = v * v
     v3 = v2 * v
@@ -135,6 +108,56 @@ def Phif3hPN_TLN(f, theta):
     eta3 = eta**3
     eta4 = eta**4
 
+    # # These are black hole finite-size values
+    # kappa1 = 1.0
+    # kappa2 = 1.0
+    # h1s1 = 1 + 3*chi_1**2 ## TODO_HS: -8/45 Factor?
+    # h2s2 = 1 + 3*chi_2**2 ## TODO_HS: -8/45 Factor?
+    # lambda1 = 1.0
+    # lambda2 = 1.0
+    # h1s3 = 2/3
+    # h2s3 = 2/3
+    # h1s0 = TODO_HS: Add
+    # h2s0 = TODO_HS: Add
+    # l1 = 0
+    # l2 = 0
+
+    ######## Symmetric/antisymmetric spins and spin-induced multipoles ########
+    chi_s = 0.5 * (chi_1 + chi_2)
+    chi_a = 0.5 * (chi_1 - chi_2)
+    k_s = 0.5 * (kappa1 + kappa2)
+    k_a = 0.5 * (kappa1 - kappa2)
+    lambda_s = 0.5 * (lambda1 + lambda2)
+    lambda_a = 0.5 * (lambda1 - lambda2)
+        
+    ######## Effective dissipation number parameters ########
+    # 2.5PN Dissipation (Linear spin)
+    hs = (h1s1*m1**3 + h2s1*m2**3) / M**3
+    ha = (h1s1*m1**3 - h2s1*m2**3) / M**3
+    
+    # 3.5PN Dissipation (Cubic spin)
+    hs3 = (h1s3*m1**3 + h2s3*m2**3) / M**3
+    ha3 = (h1s3*m1**3 - h2s3*m2**3) / M**3
+    
+    # Intermediate 3.5PN Dissipation Terms (not independent variables)
+    hts = (h1s1*m1**4 + h2s1*m2**4) / M**4
+    hta = (h1s1*m1**4 - h2s1*m2**4) / M**4
+    hps = (h1s1*m1**3 * m2**2 + h2s1*m2**3 * m1**2) / M**5
+    hpa = (h1s1*m1**3 * m2**2 - h2s1*m2**3 * m1**2) / M**5
+    
+    # 4PN Dissipation (LO non-spinning) 
+    # Here one could impose the superradiance condition (m Omega_H - omega), which is valid at LO in spin. 
+    # Good approximation if the component spins are small.
+    if fix_bh_superradiance:
+        # factor of -2 strictly only applies for Schw black holes
+        ht0 = (-2.0 * h1s1 * m1 ** 4 - 2.0 * h2s1 * m2 ** 4) / M**4 
+    else:
+        ht0 = (h1s0 * m1 ** 4 + h2s0 * m2 ** 4) / M**4
+    
+    ######## Effective Love number parameters ########
+    l_tilde = 16.0 * ((m1 + 12 * m2) * m1**4 * l1 + (m2 + 12 * m1) * m2**4 * l2) / (13.0 * M**5.0)
+    # TODO_HS: Add delta_l_tilde definition
+    
     
     
     ######################### ----- Non spinning part of the waveform ----- #########################
@@ -172,9 +195,9 @@ def Phif3hPN_TLN(f, theta):
                   + (7510073635.0 / 9144576.0 - 11275.0 / 432.0 * PI**2) * eta2
                   + 1292395.0 / 36288.0 * eta3 
                   - 5975.0 / 288.0 * eta4 
-                ) * v8 * (1.0 - 3.0 * np.log(v / vlso))
+                  ) * v8 * (1.0 - 3.0 * np.log(v / vlso))
     
-    psi_NS_4PN_log2 = (18406.0 / 63.0  + 1955944.0 / 1323.0 * eta) * v8 * np.log(v / vlso)**2 ## TODO_HS: Does value of vlso matter here?
+    psi_NS_4PN_log2 = (18406.0 / 63.0  + 1955944.0 / 1323.0 * eta) * v8 * np.log(v / vlso)**2
 
     ############ ---- Tidal Love Numbers (Schwarzschild) ---- ############
     
@@ -183,152 +206,64 @@ def Phif3hPN_TLN(f, theta):
     
     ############ ---- Tidal Dissipation Numbers (Schwarzschild) ---- ############
     
-    ##TODO: change it back
     ## TODO_HS: Double check
-    #ht0 = (h1s0 * m1 ** 4 + h2s0 * m2 ** 4) / M**4
-    ht0 = (-2.0 * h1s1 * m1 ** 4 - 2.0 * h2s1 * m2 ** 4) / M**4
-    
-    psi_NS_4PN += 25.0 / 2.0 * ht0 * v8 * (1.0 - 3.0 * np.log(v / vlso))
+    psi_diss_NS_4PN = 25.0 / 2.0 * ht0 * v8 * (1.0 - 3.0 * np.log(v / vlso))
     
     
     
     ######################### ----- (Aligned) Spin part of the waveform ----- #########################        
 
-    ###### -- Background GR point particle -- ######
+    ############ ---- Background GR point particle ---- ############ 
     
-    ## TODO_HS: Up to here
-    
-    # 1.5 PN SO
+    # 1.5PN SO
     psi_S_15PN = ((113.0 / 3.0 - 76.0 * eta / 3.0) * chi_s + 113.0 * delta * chi_a / 3.0) * v3
 
-    # 2 PN SS
-    psi_S_2PN = (
-        -(5.0 / 8.0)
-        * (1.0 + 156.0 * eta + 80.0 * delta * k_a + 80.0 * (1.0 - 2.0 * eta) * k_s)
-        * (chi_s**2)
-    )
-    psi_S_2PN -= (
-        (5.0 / 8.0)
-        * (1.0 - 160.0 * eta + 80.0 * delta * k_a + 80.0 * (1.0 - 2.0 * eta) * k_s)
-        * (chi_a**2)
-    )
-    psi_S_2PN -= (
-        (5.0 / 4.0)
-        * (delta + 80.0 * delta * k_s + 80.0 * (1.0 - 2.0 * eta) * k_a)
-        * chi_s
-        * chi_a
-    )
+    # 2PN SS
+    psi_S_2PN = (-(5.0 / 8.0)
+                 * (1.0 + 156.0 * eta + 80.0 * delta * k_a + 80.0 * (1.0 - 2.0 * eta) * k_s)
+                 * (chi_s**2))
+    psi_S_2PN -= ((5.0 / 8.0)
+                  * (1.0 - 160.0 * eta + 80.0 * delta * k_a + 80.0 * (1.0 - 2.0 * eta) * k_s)
+                  * (chi_a**2))
+    psi_S_2PN -= ((5.0 / 4.0)
+                   * (delta + 80.0 * delta * k_s + 80.0 * (1.0 - 2.0 * eta) * k_a)
+                   * chi_s * chi_a)
     psi_S_2PN *= v4
     
+    # 2.5PN SO
+    psi_S_25PN = (-(732985.0 / 2268.0 - 24260.0 * eta / 81.0 - 340.0 * eta2 / 9.0) * chi_s
+                  - (732985.0 / 2268.0 + 140.0 * eta / 9.0) * delta * chi_a
+                  ) * v5 * (1 + 3.0 * np.log(v / vlso))
     
-    # 2.5 PN SO
-    psi_S_25PN = (
-        -(732985.0 / 2268.0 - 24260.0 * eta / 81.0 - 340.0 * eta2 / 9.0) * chi_s
-        - (732985.0 / 2268.0 + 140.0 * eta / 9.0) * delta * chi_a
-    ) * v5
-    
-    
-    # Leading order 2.5PN tidal dissipation
-    hs = (h1s1*m1**3 + h2s1*m2**3)/M**3
-    ha = (h1s1*m1**3 - h2s1*m2**3)/M**3
-    psi_S_25PN += (25.0*hs*chi_s/4.0 + 25.0*ha* chi_a/4.0) * v5
-    
-    
-    # 2.5PN log term
-    psi_S_25PN_log = 3.0 * psi_S_25PN * np.log(v / vlso)
-    
-    # 3 PN SO
-    psi_S_3PN = (2270.0 / 3.0 - 520.0 * eta) * PI * chi_s + (
-        2270.0 * PI / 3.0
-    ) * delta * chi_a
-    
-    # 3PN SS
-    psi_S_3PN += (
-        (
-            (26015.0 / 14.0 - 88510.0 * eta / 21.0 - 480.0 * eta2) * k_a
-            + delta
-            * (
-                -1344475.0 / 1008.0
-                + 745.0 * eta / 18.0
-                + (26015.0 / 14.0 - 1495.0 * eta / 3.0) * k_s
-            )
-        )
-        * chi_s
-        * chi_a
-    )
-    psi_S_3PN += (
-        -1344475.0 / 2016.0
-        + 829705.0 * eta / 504.0
-        + 3415.0 * eta2 / 9.0
-        + (26015.0 / 28.0 - 44255.0 * eta / 21.0 - 240.0 * eta2) * k_s
-        + delta * (26015.0 / 28.0 - 1495.0 * eta / 6.0) * k_a
-    ) * (chi_s) ** 2
-    psi_S_3PN += (
-        -1344475.0 / 2016.0
-        + 267815.0 * eta / 252.0
-        - 240.0 * eta2
-        + (26015.0 / 28.0 - 44255.0 * eta / 21.0 - 240.0 * eta2) * k_s
-        + delta * (26015.0 / 28.0 - 1495.0 * eta / 6.0) * k_a
-    ) * (chi_a) ** 2
+    # 3PN SO + SS
+    psi_S_3PN = (2270.0 / 3.0 - 520.0 * eta) * PI * chi_s + (2270.0 * PI / 3.0) * delta * chi_a
+    psi_S_3PN += ((26015.0 / 14.0 - 88510.0 * eta / 21.0 - 480.0 * eta2) * k_a
+                  + delta * (-1344475.0 / 1008.0 + 745.0 * eta / 18.0 + (26015.0 / 14.0 - 1495.0 * eta / 3.0) * k_s)
+                  ) * chi_s * chi_a
+    psi_S_3PN += (-1344475.0 / 2016.0
+                  + 829705.0 * eta / 504.0
+                  + 3415.0 * eta2 / 9.0
+                  + (26015.0 / 28.0 - 44255.0 * eta / 21.0 - 240.0 * eta2) * k_s
+                  + delta * (26015.0 / 28.0 - 1495.0 * eta / 6.0) * k_a
+                  ) * chi_s ** 2
+    psi_S_3PN += (-1344475.0 / 2016.0
+                  + 267815.0 * eta / 252.0
+                  - 240.0 * eta2
+                  + (26015.0 / 28.0 - 44255.0 * eta / 21.0 - 240.0 * eta2) * k_s
+                  + delta * (26015.0 / 28.0 - 1495.0 * eta / 6.0) * k_a
+                  ) * chi_a ** 2
     psi_S_3PN *= v6
     
+    # 3.5PN SO
+    psi_S_35PN = (- 25150083775.0 / 3048192.0
+                  + 10566655595.0 * eta / 762048.0
+                  - 1042165 * eta2 / 3024.0
+                  + 5345.0 * eta3 / 36.0
+                  ) * chi_s
+    psi_S_35PN += ((-25150083775.0 / 3048192.0 + 26804935.0 * eta / 6048.0 - 1985.0 * eta2 / 48.0)
+                    * delta * chi_a)
     
-    ## 3.5 PN SO
-    psi_S_35PN = (
-        -25150083775.0 / 3048192.0
-        + 10566655595.0 * eta / 762048.0
-        - 1042165 * eta2 / 3024.0
-        + 5345.0 * eta3 / 36.0
-    ) * chi_s
-    psi_S_35PN += (
-        (-25150083775.0 / 3048192.0 + 26804935.0 * eta / 6048.0 - 1985.0 * eta2 / 48.0)
-        * delta
-        * chi_a
-    )
-    
-    # 3.5PN SSS
-    psi_S_35PN += (
-        265.0 / 24.0
-        + 4035.0 * eta / 2.0
-        - 20.0 * eta2 / 3.0
-        + (3110.0 / 3.0 - 10250.0 * eta / 3.0 + 40.0 * eta2) * k_s
-        - 440.0 * (1.0 - 3.0 * eta) * lambda_s
-        + delta
-        * ((3110.0 / 3.0 - 4030.0 * eta / 3.0) * k_a - 440.0 * (1.0 - eta) * lambda_a)
-    ) * (chi_s) ** 3
-    psi_S_35PN += (
-        (3110.0 / 3.0 - 8470.0 * eta / 3.0) * k_a
-        - 440.0 * (1.0 - 3.0 * eta) * lambda_a
-        + delta
-        * (
-            265.0 / 24.0
-            - 2070.0 * eta
-            + (3110.0 / 3.0 - 750.0 * eta) * k_s
-            - 440.0 * (1 - eta) * lambda_s
-        )
-    ) * (chi_a) ** 3
-    psi_S_35PN += (
-        (3110.0 - 28970.0 * eta / 3.0 + 80.0 * eta2) * k_a
-        - 1320.0 * (1.0 - 3.0 * eta) * lambda_a
-        + delta
-        * (
-            265.0 / 8.0
-            + 12055.0 * eta / 6.0
-            + (3110.0 - 10310.0 * eta / 3.0) * k_s
-            - 1320.0 * (1.0 - eta) * lambda_s
-        )
-    ) * (chi_s**2 * chi_a)
-    psi_S_35PN += (
-        265.0 / 8.0
-        - 6500.0 * eta / 3.0
-        + 40.0 * eta2
-        + (3110.0 - 27190.0 * eta / 3.0 + 40.0 * eta2) * k_s
-        - 1320.0 * (1.0 - 3 * eta) * lambda_s
-        + delta
-        * ((3110.0 - 8530.0 * eta / 3.0) * k_a - 1320.0 * (1.0 - eta) * lambda_a)
-    ) * (chi_a**2 * chi_s)
-    
-    # 3.5PN SS
+    # 3.5PN SS ## TODO_HS: Check
     psi_S_35PN +=(
        - 15.0 * PI / 2.0 - 400.0 * PI * delta * k_a - 400.0 * PI * k_s
        + eta * (800.0 * PI + 800.0 * PI * k_s)
@@ -341,55 +276,84 @@ def Phif3hPN_TLN(f, theta):
         + eta * (- 770.0 * PI + 800.0 * PI * k_s)
     ) * (chi_s) ** 2
     
+    
+    # 3.5PN SSS
+    psi_S_35PN += (265.0 / 24.0
+                   + 4035.0 * eta / 2.0
+                   - 20.0 * eta2 / 3.0
+                   + (3110.0 / 3.0 - 10250.0 * eta / 3.0 + 40.0 * eta2) * k_s
+                   - 440.0 * (1.0 - 3.0 * eta) * lambda_s
+                   + delta
+                   * ((3110.0 / 3.0 - 4030.0 * eta / 3.0) * k_a - 440.0 * (1.0 - eta) * lambda_a)
+                   ) * chi_s ** 3
+    psi_S_35PN += ((3110.0 / 3.0 - 8470.0 * eta / 3.0) * k_a
+                   - 440.0 * (1.0 - 3.0 * eta) * lambda_a
+                   + delta
+                   * (265.0 / 24.0
+                       - 2070.0 * eta
+                       + (3110.0 / 3.0 - 750.0 * eta) * k_s
+                       - 440.0 * (1 - eta) * lambda_s)
+                    ) * chi_a ** 3
+    psi_S_35PN += ((3110.0 - 28970.0 * eta / 3.0 + 80.0 * eta2) * k_a
+                    - 1320.0 * (1.0 - 3.0 * eta) * lambda_a
+                    + delta
+                    * (265.0 / 8.0
+                        + 12055.0 * eta / 6.0
+                        + (3110.0 - 10310.0 * eta / 3.0) * k_s
+                        - 1320.0 * (1.0 - eta) * lambda_s)
+                   ) * (chi_s**2 * chi_a)
+    psi_S_35PN += (265.0 / 8.0
+                   - 6500.0 * eta / 3.0
+                   + 40.0 * eta2
+                   + (3110.0 - 27190.0 * eta / 3.0 + 40.0 * eta2) * k_s
+                   - 1320.0 * (1.0 - 3 * eta) * lambda_s
+                   + delta
+                   * ((3110.0 - 8530.0 * eta / 3.0) * k_a - 1320.0 * (1.0 - eta) * lambda_a)
+                   ) * (chi_a**2 * chi_s)
     psi_S_35PN *= v7
     
-    # 3.5PN Dissipation
-    hs3 = (h1s3*m1**3 + h2s3*m2**3)/M**3
-    ha3 = (h1s3*m1**3 - h2s3*m2**3)/M**3
-    hts = (h1s1*m1**4 + h2s1*m2**4)/M**4
-    hta = (h1s1*m1**4 - h2s1*m2**4)/M**4
-    hps = (h1s1*m1**3 * m2**2 + h2s1*m2**3 * m1**2)/M**5
-    hpa = (h1s1*m1**3 * m2**2 - h2s1*m2**3 * m1**2)/M**5
-    
-    psi_S_35PN += (
-        112425.0 / 448.0 * ha - 225.0 / 16.0 * hpa + 225.0 / 8.0 * hta + 75 * ha * eta
-    ) * (chi_a) * v7
-    psi_S_35PN += (
-        225.0 / 8.0 * ha3
-    ) * (chi_a) ** 3 * v7
-    psi_S_35PN += (
-        112425.0 / 448.0 * hs - 225.0 / 16.0 * hps + 225.0 / 8.0 * hts + 75 * hs * eta   
-    ) * (chi_s) * v7
-    psi_S_35PN += (
-        225.0 / 8.0 * hs3   
-    ) * (chi_s) ** 3 * v7
     
     
-    
-    ##################### ---- Summing up all phases ---- #####################   
-    
-    psi_NS = (
-        psi_NS_0PN
-        + psi_NS_1PN
-        + psi_NS_15PN
-        + psi_NS_2PN
-        + psi_NS_25PN
-        + psi_NS_3PN
-        + psi_NS_35PN
-        + psi_NS_4PN
-        + psi_NS_4PN_log2
-    )
-    
-    psi_TLN = psi_TLN_5PN  # + psi_TLN_6PN
-    
-    
-    psi_S = (
-        psi_S_15PN + psi_S_2PN + psi_S_25PN + psi_S_25PN_log + psi_S_3PN + psi_S_35PN
-    )
 
-    return (
-        3.0 / 128.0 / eta / v5 * (psi_NS + psi_TLN + psi_S)
-    )  # Note that when called with hf3hPN_TLN, we need to include - sign for correct time domain direction
+    ############ ---- Tidal Dissipation Numbers (Kerr) ---- ############
+
+    # 2.5PN linear-in-spin dissipation
+    # TODO_HS: Check
+    psi_diss_S_25PN = (25.0*hs*chi_s/4.0 + 25.0*ha* chi_a/4.0) * v5 * (1 + 3.0 * np.log(v / vlso))
+    
+    # 3.5PN linear- and cubic-in-spin dissipation
+    # TODO_HS: Check
+    psi_diss_S_35PN = (
+        112425.0 / 448.0 * ha - 225.0 / 16.0 * hpa + 225.0 / 8.0 * hta + 75 * ha * eta
+    ) * (chi_a)
+    psi_diss_S_35PN += (
+        225.0 / 8.0 * ha3
+    ) * (chi_a) ** 3 
+    psi_diss_S_35PN += (
+        112425.0 / 448.0 * hs - 225.0 / 16.0 * hps + 225.0 / 8.0 * hts + 75 * hs * eta   
+    ) * (chi_s) 
+    psi_diss_S_35PN += (
+        225.0 / 8.0 * hs3   
+    ) * (chi_s) ** 3
+    psi_diss_S_35PN *= v7
+    
+    
+    
+    ######################### ----- Summing up all phases ----- #########################   
+    
+    # Point particle + spin-induced moments
+    psi_NS = (psi_NS_0PN + psi_NS_1PN + psi_NS_15PN + psi_NS_2PN + psi_NS_25PN + psi_NS_3PN
+              + psi_NS_35PN + psi_NS_4PN + psi_NS_4PN_log2)
+    # psi_S_25PN_log removed from original code as it's now included in psi_S_25PN 
+    psi_S = psi_S_15PN + psi_S_2PN + psi_S_25PN + psi_S_3PN + psi_S_35PN
+    
+    # Tidal effects
+    psi_diss = psi_diss_S_25PN + psi_diss_S_35PN + psi_diss_NS_4PN
+    psi_TLN = psi_TLN_5PN  # + psi_TLN_6PN
+
+    # TODO_HS: Note that when called with hf3hPN_TLN, we need to include - sign for correct time domain direction
+    return 3.0 / 128.0 / eta / v5 * (psi_NS + psi_S + psi_diss + psi_TLN )
+      
 
 
 def Amp_merger(f, f_cutoff, Amp_Ins_end):
