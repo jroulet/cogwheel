@@ -92,7 +92,9 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     delta = np.sqrt(1.0 - 4.0 * eta)
 
     # Convenient variables
-    vlso = 1.0 # Doesn't matter for 2.5PN and 4PN constant log(v/vlso) terms, but matters for 4PN log(v/vlso)**2
+    # vlso doesn't matter for 2.5PN and 4PN constant log(v/vlso) terms (absorbed into overall phase and time)
+    # but can in principle matter for log(v/vlso)**2 terms starting at 4PN
+    vlso = 1.0 
     v = (PI * M * (f + 1e-100) * gt) ** (1.0 / 3.0)
     v2 = v * v
     v3 = v2 * v
@@ -108,7 +110,7 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     eta3 = eta**3
     eta4 = eta**4
 
-    # # These are black hole finite-size values
+    # # Black hole finite-size values
     # kappa1 = 1.0
     # kappa2 = 1.0
     # h1s1 = 1 + 3*chi_1**2 ## TODO_HS: -8/45 Factor?
@@ -122,14 +124,18 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     # l1 = 0
     # l2 = 0
 
-    ######## Symmetric/antisymmetric spins and spin-induced multipoles ########
+    # Symmetric/antisymmetric spins and spin-induced multipoles
     chi_s = 0.5 * (chi_1 + chi_2)
     chi_a = 0.5 * (chi_1 - chi_2)
     k_s = 0.5 * (kappa1 + kappa2)
     k_a = 0.5 * (kappa1 - kappa2)
     lambda_s = 0.5 * (lambda1 + lambda2)
     lambda_a = 0.5 * (lambda1 - lambda2)
-        
+    
+    # Effective Love number parameters
+    l_tilde = 16.0 * ((m1 + 12 * m2) * m1**4 * l1 + (m2 + 12 * m1) * m2**4 * l2) / (13.0 * M**5.0)
+    
+    
     ######## Effective dissipation number parameters ########
     # 2.5PN Dissipation (Linear spin)
     hs = (h1s1*m1**3 + h2s1*m2**3) / M**3
@@ -154,9 +160,8 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     else:
         ht0 = (h1s0 * m1 ** 4 + h2s0 * m2 ** 4) / M**4
     
-    ######## Effective Love number parameters ########
-    l_tilde = 16.0 * ((m1 + 12 * m2) * m1**4 * l1 + (m2 + 12 * m1) * m2**4 * l2) / (13.0 * M**5.0)
-    # TODO_HS: Add delta_l_tilde definition
+    
+    
     
     
     
@@ -202,12 +207,11 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     ############ ---- Tidal Love Numbers (Schwarzschild) ---- ############
     
     psi_TLN_5PN = - (39.0 * l_tilde / 2.0) * v10
-    # psi_TLN_6PN = (-3115.0 * l_tilde / 64.0 + 6595.0 * delta_l_tilde / 364.0) * v12
     
     ############ ---- Tidal Dissipation Numbers (Schwarzschild) ---- ############
     
     ## TODO_HS: Double check
-    psi_diss_NS_4PN = 25.0 / 2.0 * ht0 * v8 * (1.0 - 3.0 * np.log(v / vlso))
+    psi_TDN_NS_4PN = 25.0 / 2.0 * ht0 * v8 * (1.0 - 3.0 * np.log(v / vlso))
     
     
     
@@ -263,7 +267,7 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     psi_S_35PN += ((-25150083775.0 / 3048192.0 + 26804935.0 * eta / 6048.0 - 1985.0 * eta2 / 48.0)
                     * delta * chi_a)
     
-    # 3.5PN SS ## TODO_HS: Check
+    # 3.5PN SS
     psi_S_35PN +=(
        - 15.0 * PI / 2.0 - 400.0 * PI * delta * k_a - 400.0 * PI * k_s
        + eta * (800.0 * PI + 800.0 * PI * k_s)
@@ -275,7 +279,6 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
         - 15.0 * PI / 2.0 - 400.0 * PI * delta * k_a - 400.0 * PI * k_s
         + eta * (- 770.0 * PI + 800.0 * PI * k_s)
     ) * (chi_s) ** 2
-    
     
     # 3.5PN SSS
     psi_S_35PN += (265.0 / 24.0
@@ -314,29 +317,21 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     
     
     
-
     ############ ---- Tidal Dissipation Numbers (Kerr) ---- ############
 
     # 2.5PN linear-in-spin dissipation
-    # TODO_HS: Check
-    psi_diss_S_25PN = (25.0*hs*chi_s/4.0 + 25.0*ha* chi_a/4.0) * v5 * (1 + 3.0 * np.log(v / vlso))
+    psi_TDN_S_25PN = (25.0*hs*chi_s/4.0 + 25.0*ha* chi_a/4.0) * v5 * (1 + 3.0 * np.log(v / vlso))
     
-    # 3.5PN linear- and cubic-in-spin dissipation
-    # TODO_HS: Check
-    psi_diss_S_35PN = (
-        112425.0 / 448.0 * ha - 225.0 / 16.0 * hpa + 225.0 / 8.0 * hta + 75 * ha * eta
-    ) * (chi_a)
-    psi_diss_S_35PN += (
-        225.0 / 8.0 * ha3
-    ) * (chi_a) ** 3 
-    psi_diss_S_35PN += (
-        112425.0 / 448.0 * hs - 225.0 / 16.0 * hps + 225.0 / 8.0 * hts + 75 * hs * eta   
-    ) * (chi_s) 
-    psi_diss_S_35PN += (
-        225.0 / 8.0 * hs3   
-    ) * (chi_s) ** 3
-    psi_diss_S_35PN *= v7
-    
+    # 3.5PN linear- and cubic-in-spin dissipation 
+    psi_TDN_S_35PN = (115575.0 / 448.0 * ha + 1425.0 / 16 * eta * ha + 675.0 / 32.0 * delta * hs
+                      ) * chi_a
+    psi_TDN_S_35PN += (115575.0 / 448.0 * hs + 1425.0 / 16 * eta * hs + 675.0 / 32.0 * delta * ha
+                       ) * chi_s 
+    psi_TDN_S_35PN += (225.0 / 8.0 * ha3) * chi_a**3 
+    psi_TDN_S_35PN += (225.0 / 8.0 * hs3) * chi_s**3
+    psi_TDN_S_35PN += (675.0 / 8.0 * ha3) * chi_a * chi_s**2 
+    psi_TDN_S_35PN += (675.0 / 8.0 * hs3) * chi_a**2 * chi_s 
+    psi_TDN_S_35PN *= v7
     
     
     ######################### ----- Summing up all phases ----- #########################   
@@ -348,14 +343,15 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     psi_S = psi_S_15PN + psi_S_2PN + psi_S_25PN + psi_S_3PN + psi_S_35PN
     
     # Tidal effects
-    psi_diss = psi_diss_S_25PN + psi_diss_S_35PN + psi_diss_NS_4PN
-    psi_TLN = psi_TLN_5PN  # + psi_TLN_6PN
+    psi_TDN = psi_TDN_S_25PN + psi_TDN_S_35PN + psi_TDN_NS_4PN
+    psi_TLN = psi_TLN_5PN
 
     # TODO_HS: Note that when called with hf3hPN_TLN, we need to include - sign for correct time domain direction
-    return 3.0 / 128.0 / eta / v5 * (psi_NS + psi_S + psi_diss + psi_TLN )
+    return 3.0 / 128.0 / eta / v5 * (psi_NS + psi_S + psi_TDN + psi_TLN )
       
 
 
+    
 def Amp_merger(f, f_cutoff, Amp_Ins_end):
         
     # Amp_m = Amp_Ins_end * (1 - (1 / (1 + np.exp(-(f - 1.2 * f_cutoff)))))
