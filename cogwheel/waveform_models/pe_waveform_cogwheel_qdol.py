@@ -10,15 +10,9 @@ from cogwheel import waveform
 from cogwheel.waveform import Approximant
 import numpy as np
 
-# waveform.APPROXIMANTS['TaylorF2Love'] = Approximant(tides=True)
-# waveform.APPROXIMANTS['TaylorF2Heat'] = Approximant(tides=False) # TODO: tides=True?
-
-# TODO: Interface this script with loveNum_waveform_merger (and Ripple's JAX version?)
-
 ###################################################################################
 #################### Tidal waveform model params and functions ####################
 ###################################################################################
-
 
 ###### Wf model params, copied from ripple.constants.py and ripple.typing.py ######
 
@@ -30,15 +24,16 @@ PI = 3.141592653589793238462643383279502884
 gt = G * MSUN / (C ** 3.0) # G MSUN / C^3 in seconds
 m_per_Mpc = 3.085677581491367278913937957796471611e22 # meters per Mpc
 
-# theta ordering: Mc, eta, chi_1, chi_2, kappa1, kappa2, h1s1, h2s2, lambda1, lambda2, h1s3, h2s3, h1s0,h2s0, l1, l2, dL, tc, phic, iota
-
 ###################################################################################
 ###################################################################################
 
-def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
+def phase_qdol(f, theta, fix_bh_superradiance=True):
     """
     
     Computes the phase of the TaylorF2 waveform + finite-size effect parameters. 
+    Spin-induced moments and spin-dependent dissipation up to 3.5PN;
+    Spin-independent dissipation at 4PN;
+    Love number at 5PN.
     Sets time and phase of coealence to be zero.
     
     Parameters
@@ -314,12 +309,6 @@ def Phif3hPN_TLN(f, theta, fix_bh_superradiance=True):
     return 3.0 / 128.0 / eta / v5 * (psi_NS + psi_S + psi_TDN + psi_TLN)
 
 
-## TODO_HS: Cleaned up up to here
-    
-    
-
-
-    
 def Amp_merger(f, f_cutoff, Amp_Ins_end):
         
     # Amp_m = Amp_Ins_end * (1 - (1 / (1 + np.exp(-(f - 1.2 * f_cutoff)))))
@@ -332,51 +321,49 @@ def Amp_merger(f, f_cutoff, Amp_Ins_end):
     return Amp_m
 
 
-def gen_h0(f, theta, f_ref):
+def gen_h0(f, theta_more, f_ref):
     """
-    Computes the Taylor F2 Frequency domain strain waveform with non-standard spin induced quadrupole moment/tidal deformability for object two
-    Note that this waveform assumes object 1 is a BH therefore uses the chi*M relation to find C
-    Note that this waveform also assumes that object one is the more massive. Therefore the more massive object is always considered a BH
-    Parameters:
+    
+    Computes the TaylorF2 waveform + finite-size effects. 
+    
+    Parameters
+    -----------
     f (array): Frequency at which to output the phase [Hz]
-    Mc (float): Chirp Mass [Msun]
-    eta (float): m1*m2/(m1+m2)**2
-    s1z (float): Spin of object 1 in z direction
-    s2z (float): Spin of object 2 in z direction
-    Deff (float): Distance [Mpc]
+    theta_more: Intrinsic and extrinsic parameters (excluding inclination, iota). 
+                Intrinsic parameters are the same as theta in phase_qdol
+    f_ref: Reference frequency
+                
+    Deff: Effective luminosity distance [Mpc]
+    tc: coalescence time
+    phic: coalescence phase
 
-    Returns:
-    Strain (array):
+    Returns
+    -------
+    Strain (array): GW frequency-domain strain as a function of frequency
+    
     """
     
-    
-    Mc, eta, _, _, _, _, _, _, _, _, _, _, _, _, _, _, Deff, tc, phic = theta #chi_1, chi_2, kappa1, kappa2, h1s1, h2s1, lambda1, lambda2, h1s3, h2s3, h1s0, h2s0, l1, l2
+    # theta_more ordering: Mc, eta, chi_1, chi_2, kappa1, kappa2, h1s1, h2s2, 
+    # lambda1, lambda2, h1s3, h2s3, h1s0, h2s0, l1, l2, Deff, tc, phic
+    Mc, eta, _, _, _, _, _, _, _, _, _, _, _, _, _, _, Deff, tc, phic = theta_more
     M = Mc / (eta ** (3 / 5))
     pre = 3.6686934875530996e-19  # (GN*Msun/c^3)^(5/6)/Hz^(7/6)*c/Mpc/sec
-    Mchirp = M * eta**0.6
-
-    A0 = (
-        Mchirp ** (5.0 / 6.0)
-        / (f + 1e-30) ** (7.0 / 6.0)
-        / Deff
-        / PI ** (2.0 / 3.0)
-        * np.sqrt(5.0 / 24.0)
-    )
     
-    Phi = Phif3hPN_TLN(f, theta[:-3])
+    # sqrt(5/24) factor used given our antenna functions' normalization in gen_taylorF2_qdol_polar
+    # More common in the literature to use sqrt(5/48), e.g. (0.1) of 1701.06318 (though the eta factor is wrong there)
+    # due to an overall sqrt(2) difference in the C's used in Appendix D of 0810.5336
+    A0 = Mc**(5.0/6.0) * np.sqrt(5.0/24.0) / PI**(2.0/3.0) / (f+1e-30)**(7.0/6.0) / Deff
+    
+    Phi = phase_qdol(f, theta_more[:-3])
     grad_phase = np.gradient(Phi, f)
     f_phasecutoff = f[np.argmax(grad_phase)]
     f_ISCO = 4.4e3 * (1 / M)  # Hz
     f_cutoff = np.min(np.array([f_ISCO, f_phasecutoff]))
-
     
-    # TODO: Might have a tiny bug here. Need to double check and merge with loveNum_waveform_merger
     fc_ind = np.argmin(np.absolute(f-f_cutoff))
     t0 = grad_phase[fc_ind]
     
-    
-    # Lets call the amplitude and phase now
-    Phi_ref = Phif3hPN_TLN(f_ref, theta[:-3])
+    Phi_ref = phase_qdol(f_ref, theta_more[:-3])
     Phi -= t0 * (f - f_ref) + Phi_ref
 
     ext_phase_contrib = 2.0 * PI * f * tc - 2 * phic
@@ -393,29 +380,32 @@ def gen_h0(f, theta, f_ref):
     # -ve sign before phase needed for correct time domain orientation
     return Amp * pre * np.exp(-1.0j * Phi) + 1e-30 
 
+    
 def gen_taylorF2_qdol_polar(f, params, f_ref):
     """
-    Generate PhenomD frequency domain waveform following 1508.07253.
-    vars array contains both intrinsic and extrinsic variables
-    theta = [Mchirp, eta, chi1, chi2, D, tc, phic]
-    Mchirp: Chirp mass of the system [solar masses]
-    eta: Symmetric mass ratio [between 0.0 and 0.25]
-    chi1: Dimensionless aligned spin of the primary object [between -1 and 1]
-    chi2: Dimensionless aligned spin of the secondary object [between -1 and 1]
-    L1:
-    L2:
-    D: Luminosity distance to source [Mpc]
-    tc: Time of coalesence. This only appears as an overall linear in f contribution to the phase
-    phic: Phase of coalesence
-    inclination: Inclination angle of the binary [between 0 and PI]
-
-    f_ref: Reference frequency for the waveform
+    
+    Computes the plus and cross polarizations for the TaylorF2 waveform
+    + finite-size effects. Assumes (2,2) mode.
+    
+    Parameters
+    -----------
+    f (array): Frequency at which to output the phase [Hz]
+    params: Intrinsic and extrinsic parameters. Same as excluding inclination, iota). 
+            Same as theta_more in gen_h0 but now including inclination angle, iota
+    
+    iota: Inclination angle of the binary [between 0 and PI]
+    f_ref: Reference frequency
 
     Returns:
     --------
       hp (array): Strain of the plus polarization
       hc (array): Strain of the cross polarization
+      
     """
+    
+    # params ordering: Mc, eta, chi_1, chi_2, kappa1, kappa2, h1s1, h2s2, 
+    # lambda1, lambda2, h1s3, h2s3, h1s0, h2s0, l1, l2, Deff, tc, phic, iota
+
     iota = params[-1]
     h0 = gen_h0(f, params[:-1], f_ref)
 
@@ -426,15 +416,14 @@ def gen_taylorF2_qdol_polar(f, params, f_ref):
 
 
 
-##
-################################################################################
-######################## Function to be called by cogwheel ########################
-###################################################################################
+##################################################################################
+######################## Function to be called by cogwheel #######################
+##################################################################################
 
 def custom_compute_hplus_hcross(f, par_dic, *_):
     """
 	Function to replace ``waveform.compute_hplus_hcross`` with,
-	use with caution.
+	use with caution. 
 
     Return hplus, hcross evaluated at f.
 
@@ -457,17 +446,16 @@ def custom_compute_hplus_hcross(f, par_dic, *_):
     Return
     ------
     hplus_hcross: complex array of shape ``(2, len(f))``.
+    
     """
-
-    # input_params ordering (lal convention): ['m1', 'm2', 's1z', 's2z', 'l1', 'l2', 'd_luminosity', 'phi_ref', 'iota', 'f_ref']
-    # wf_params ordering: ['Mc', 'eta', 'chi_1', 'chi_2', 'kappa1', 'kappa2', 'h1s1', 'h2s1', 'lambda1', 'lambda2', 'h1s3','h2s3', 'h1s0', 'h2s0', 'l1', 'l2', 'Deff', 'tc', 'phic', 'iota', 'f_ref']
     
     eta = par_dic['m1']*par_dic['m2'] / (par_dic['m1']+par_dic['m2'])**2
     Mc = (par_dic['m1']+par_dic['m2'])*eta**(3/5)
     
+    # Same ordering as params in gen_taylorF2_qdol_polar
     wf_params = np.array([Mc, eta, par_dic['s1z'], par_dic['s2z'], par_dic['kappa1'], par_dic['kappa2'], 
                           par_dic['h1s1'], par_dic['h2s1'], par_dic['lambda1'], par_dic['lambda2'],
-                          par_dic['h1s3'], par_dic['h2s3'], par_dic['h1s0'], par_dic['h2s0'],par_dic['l1'], par_dic['l2'],
+                          par_dic['h1s3'], par_dic['h2s3'], par_dic['h1s0'], par_dic['h2s0'], par_dic['l1'], par_dic['l2'],
                           par_dic['d_luminosity'], 0, par_dic['phi_ref'], par_dic['iota']]) # tc in gen_taylorF2_qdol_polar set to zero
     f_ref = par_dic['f_ref'] 
     
