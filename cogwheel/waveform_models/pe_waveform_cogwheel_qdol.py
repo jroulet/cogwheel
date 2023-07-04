@@ -321,7 +321,153 @@ def Amp_merger(f, f_cutoff, Amp_Ins_end):
     return Amp_m
 
 
-def gen_h0(f, theta_more, f_ref):
+
+def Amp_inspiral(f, theta):
+    
+    Mc, eta, chi_1, chi_2, kappa1, kappa2, h1s1, h2s1, lambda1, lambda2, \
+    h1s3,h2s3, h1s0,h2s0, l1, l2, Deff = theta
+    
+    #print('phase theta:', theta)
+    
+    M = Mc / (eta ** (3 / 5))
+    vlso = 1.0 / np.sqrt(6.0)
+    
+    
+
+    chi_s = 0.5 * (chi_1 + chi_2)
+    chi_a = 0.5 * (chi_1 - chi_2)
+    k_s = 0.5 * (kappa1 + kappa2)
+    k_a = 0.5 * (kappa1 - kappa2)
+    lambda_s = 0.5 * (lambda1 + lambda2)
+    lambda_a = 0.5 * (lambda1 - lambda2)
+    delta = np.sqrt(1.0 - 4.0 * eta)
+
+    m1 = (M + np.sqrt(M**2 - 4 * (eta * M**2))) / 2
+    m2 = (M - np.sqrt(M**2 - 4 * (eta * M**2))) / 2
+
+    v = (PI * M * (f + 1e-100) * gt) ** (1.0 / 3.0)
+    v2 = v * v
+    v3 = v2 * v
+    v4 = v2 * v2
+    v5 = v4 * v
+    v6 = v3 * v3
+    v7 = v3 * v4
+    v8 = v4 * v4
+    v10 = v5 * v5
+    v12 = v10 * v2
+    eta2 = eta**2
+    eta3 = eta**3
+    
+    ## -------------------------  point particle part of the waveform amplitude
+    ## Background GR
+    A_0PN = 1.0
+    
+    A_1PN = (
+        11.0 / 8.0 *eta + 743.0 / 672.0
+    ) * v2
+    
+    A_15PN = (
+        - 2.0 * PI + 113.0 / 24.0 * delta * (chi_a) 
+        + 113.0 / 24.0 * (chi_s) - 19.0 / 6.0 * eta * (chi_s)
+    ) * v3
+
+    A_2PN = (
+        7266251.0 / 8128512.0 + 18913.0 / 16128.0 * eta + 1379.0 / 1152.0 * eta2 
+        - (81.0 / 32.0 - 10.0 * eta) * (chi_a) ** 2 
+        - 81.0 / 16.0 * delta * (chi_a) * (chi_s) 
+        - (81.0 / 32.0 - eta / 8.0) * (chi_s)**2
+    ) * v4
+    
+    A_25PN = (
+        - 4757.0 * PI / 1344.0 + 57.0 * PI * eta / 16.0 
+        + (502429.0 * delta / 16128.0 - 907.0 * delta * eta / 192.0) * chi_a 
+        + (502429.0 / 16128.0 - 73921.0 * eta / 2016.0 + 5.0 * eta2 / 48.0) * chi_s
+    ) * v5
+    
+    A_3PN = (
+        - 29342493702821.0 / 500716339200.0 + 856.0 * EulerGamma / 105.0 + 10.0 * PI**2 / 3.0 
+        + (3526813753.0 / 27869184.0 - 451.0 * PI**2 / 96.0) * eta - 1041557.0 * eta2 / 258048.0 
+        + 67999.0 / 82944.0 * eta3 
+        - 19.0 / 2.0 * PI * delta * (chi_a) 
+        + (- 319133.0 / 21504.0 + 48289.0 * eta / 768.0 - 7.0 * eta2 / 4.0) * (chi_a) **2 
+        + (- 19.0 * PI / 2.0 + 20.0 * PI * eta / 3.0 
+           - (319133.0 * delta / 10752.0 - 12785.0 * delta * eta / 384.0) * chi_a) * chi_s 
+        + (- 319133.0 / 21504.0 + 40025.0 / 1344.0 * eta - 555.0 / 64.0 * eta2) * (chi_s) ** 2 
+        + 1712.0 / 105.0 * np.log(2)
+    ) * v6
+    
+    A_3PN_log = 856.0 / 105.0 * v6 * np.log(v / vlso)
+    
+    A_35PN = (
+        - 5111593.0 * PI / 2709504.0 - 72221.0 * PI * eta / 24192.0 - 1349.0 * PI * eta2 / 24192.0 
+        + (1557122011.0 * delta / 9289728.0 - 2206797.0 * delta * eta / 14336.0 + 52343.0 * delta * eta2 / 27648.0) * (chi_a) 
+        + (41.0 * PI / 8.0 - 20.0 * PI * eta) * (chi_a) **2 + (- 2515.0 / 768.0 + 149.0 / 12.0 * delta * eta) * (chi_a)**3 
+        + (
+           1557122011.0 / 9289728.0 - 1905526039.0 * eta / 5419008.0 + 11030651.0 * eta2 / 193536.0 - 445.0 * eta3 / 6912.0 
+          + 41.0 * PI * delta / 4.0 * (chi_a) + (-2515.0 / 256.0 + 6011.0 * eta / 192.0 + 89.0 / 3.0 * eta2) * (chi_a)**2
+          ) * (chi_s) 
+        + (
+            41.0 * PI / 8.0 - PI * eta / 2 + (- 2515.0 * delta / 256.0 - 2675.0 * delta * eta / 192.0) * (chi_a)
+          ) * (chi_s)**2
+        - (2515.0 / 768.0 + 53.0 * eta / 8.0 + 7.0 * eta2 / 16.0) * (chi_s)**3
+    ) * v7
+    
+    A_4PN = (
+        - 246427872050556151.0 / 899847347503104.0 + 56881.0 * EulerGamma / 4410.0 + 14495.0 * PI**2 / 2016.0 
+        + (- 2469217975055.0 / 9364045824.0 + 451.0 * PI**2 / 48.0) * eta2 
+        - 42749765.0 * eta **3 / 55738368.0 + 144587.0 * eta **4 / 294912.0 + 10417.0 * np.log(2) / 980.0 
+        + (
+           997052025430343.0 / 1716741734400.0 + 219776.0 * EulerGamma / 2205.0 - 681325.0 * PI **2 / 64512.0 
+           + 573323.0 * np.log(2) / 2205.0 - 47385.0 * np.log(3) / 784.0
+          ) * eta 
+        + 47385.0 * np.log(3) / 3136.0
+    ) * v8
+    
+    A_4PN_log = (
+        56881.0 / 4410.0 + 219776.0 / 2205.0 * eta   
+    ) * v8 * np.log(v / vlso)
+    
+    
+    ## -------------------------  tidal dissipation number part of the waveform amplitude
+    ## tidal dissipation numbers 
+    hs = (h1s1*m1**3 + h2s1*m2**3)/M**3
+    ha = (h1s1*m1**3 - h2s1*m2**3)/M**3
+    hs3 = (h1s3*m1**3 + h2s3*m2**3)/M**3
+    ha3 = (h1s3*m1**3 - h2s3*m2**3)/M**3
+    h0 = (-2.0 * h1s1 * m1 ** 4 - 2.0 * h2s1 * m2 ** 4) / M**4
+    
+    A_25_TDN = (
+        - 45.0 / 64.0 * hs * chi_s - 45.0 / 64.0 * ha * chi_a
+    ) * v5
+    
+    A_35_TDN = (
+      - (
+        45.0 / 64.0 * ha + 73755.0 / 14336.0 * ha + 45.0 / 128.0 * hs * delta + 465.0 / 512.0 * ha * eta
+    ) * chi_a 
+      + (
+        - 45.0 / 64.0 * hs - 73755.0 / 14336.0 * hs - 45.0 / 128.0 * ha * delta - 465.0 / 512.0 * hs * eta   
+    ) * chi_s 
+      - 135.0 / 64.0 * ha3 * (chi_a) * (chi_s)**2 - 45.0 * hs3 * (chi_s)**3 / 64.0 
+      - 135.0 / 64.0 * hs3 * (chi_a)**2 * (chi_s) - 45.0 * ha3 * (chi_a)**3 / 64.0
+    ) * v7
+    
+    A_4_TDN = (- 45.0 / 32.0 * h0) * v8
+    
+    ## ------------------------- Compute Waveform Amplitude
+    
+    A_f = (
+        Mc ** (5.0 / 6.0)
+        / (f + 1e-30) ** (7.0 / 6.0)
+        / Deff
+        / PI ** (2.0 / 3.0)
+        * np.sqrt(5.0 / 24.0)
+    ) * (A_0PN + A_1PN + A_15PN + A_2PN + A_25PN + A_3PN + A_3PN_log + A_35PN + A_4PN + A_4PN_log 
+         + A_25_TDN + A_35_TDN + A_4_TDN)
+    
+    return A_f
+
+
+def gen_h0(f, theta, f_ref):
     """
     
     Computes the TaylorF2 waveform + finite-size effects. 
@@ -348,11 +494,24 @@ def gen_h0(f, theta_more, f_ref):
     Mc, eta, _, _, _, _, _, _, _, _, _, _, _, _, _, _, Deff, tc, phic = theta_more
     M = Mc / (eta ** (3 / 5))
     pre = 3.6686934875530996e-19  # (GN*Msun/c^3)^(5/6)/Hz^(7/6)*c/Mpc/sec
+
+    
+    Mchirp = M * eta**0.6
+
+    #A0 = (
+    #    Mchirp ** (5.0 / 6.0)
+    #   / (f + 1e-30) ** (7.0 / 6.0)
+    #    / Deff
+    #    / PI ** (2.0 / 3.0)
+    #    * np.sqrt(5.0 / 24.0)
+    #)
+    
+    A0 = Amp_inspiral(f, theta[:-2])
     
     # sqrt(5/24) factor used given our antenna functions' normalization in gen_taylorF2_qdol_polar
     # More common in the literature to use sqrt(5/48), e.g. (0.1) of 1701.06318 (though the eta factor is wrong there)
     # due to an overall sqrt(2) difference in the C's used in Appendix D of 0810.5336
-    A0 = Mc**(5.0/6.0) * np.sqrt(5.0/24.0) / PI**(2.0/3.0) / (f+1e-30)**(7.0/6.0) / Deff
+    #A0 = Mc**(5.0/6.0) * np.sqrt(5.0/24.0) / PI**(2.0/3.0) / (f+1e-30)**(7.0/6.0) / Deff
     
     Phi = phase_qdol(f, theta_more[:-3])
     grad_phase = np.gradient(Phi, f)
