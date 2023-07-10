@@ -467,7 +467,7 @@ def Amp_inspiral(f, theta):
     return A_f
 
 
-def gen_h0(f, theta, f_ref):
+def gen_h0(f, theta_more, f_ref):
     """
     
     Computes the TaylorF2 waveform + finite-size effects. 
@@ -506,7 +506,7 @@ def gen_h0(f, theta, f_ref):
     #    * np.sqrt(5.0 / 24.0)
     #)
     
-    A0 = Amp_inspiral(f, theta[:-2])
+    A0 = Amp_inspiral(f, theta_more[:-2])
     
     # sqrt(5/24) factor used given our antenna functions' normalization in gen_taylorF2_qdol_polar
     # More common in the literature to use sqrt(5/48), e.g. (0.1) of 1701.06318 (though the eta factor is wrong there)
