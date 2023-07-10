@@ -520,14 +520,26 @@ def gen_h0(f, theta_more, f_ref):
     f_cutoff = np.min(np.array([f_ISCO, f_phasecutoff]))
     
     fc_ind = np.argmin(np.absolute(f-f_cutoff))
-    t0 = grad_phase[fc_ind]
     
-    Phi_ref = phase_qdol(f_ref, theta_more[:-3])
-    Phi -= t0 * (f - f_ref) + Phi_ref
-
-    ext_phase_contrib = 2.0 * PI * f * tc - 2 * phic
-    Phi += ext_phase_contrib
-    Phi = Phi * np.heaviside(f_cutoff - f, 1.0)
+    # # Original PE code (TODO)
+    # t0 = grad_phase[fc_ind]
+    # Phi_ref = phase_qdol(f_ref, theta_more[:-3])
+    # Phi -= t0 * (f - f_ref) + Phi_ref
+    # ext_phase_contrib = 2.0 * PI * f * tc - 2 * phic
+    # Phi += ext_phase_contrib
+    # Phi = Phi * np.heaviside(f_cutoff - f, 1.0)
+    
+    # Copied from search code
+    beta1_correction = grad_phase[fc_ind]
+    beta0 = (
+        Phi[fc_ind] - beta1_correction * f_cutoff
+    )
+    Phi_m = beta1_correction * f + beta0
+    
+    # Stitch C1 continuous phase
+    Phi = Phi * np.heaviside(f_cutoff - f, 0.5) + Phi_m * np.heaviside(f-f_cutoff, 0.5)    
+    
+    
     
     
     Amp_m = Amp_merger(f, f_cutoff, A0[fc_ind])  
