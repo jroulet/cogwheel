@@ -564,18 +564,60 @@ def download_timeseries(eventname, outdir=None, tgps=None,
 
     utils.mkdirs(outdir)
 
-    for det in gw_utils.DETECTORS:
-        path = outdir/f'{det}_{eventname}.hdf5'
+    for detector_name in gw_utils.DETECTORS:
+        path = outdir/f'{detector_name}_{eventname}.hdf5'
         if path.exists() and not overwrite:
             print(f'Skipping existing file {path.resolve()}')
             continue
 
         try:
-            timeseries = gwpy.timeseries.TimeSeries.fetch_open_data(
-                f'{det}1', *np.add(tgps, interval).astype(int))
+            timeseries = _fetch_open_data(detector_name, tgps, interval)
         except ValueError:  # That detector has no data
             pass
         else:
             if not np.isnan(timeseries[np.searchsorted(timeseries.times.value,
                                                        tgps)]):
                 timeseries.write(path)
+
+def _fetch_open_data(detector_name, tgps, interval, **kwargs):
+    """
+    Similar to ``gwpy.timeseries.TimeSeries.fetch_open_data`` except
+    that if it fails to find files for the whole requested time range,
+    it will make an attempt to download a reduced range by restricting
+    to the file containing the event. If that also fails, ValueError is
+    raised.
+
+    Parameters
+    ----------
+    detector_name: str
+        Detector initial, e.g. 'H' for Hanford.
+
+    tgps: float
+        GPS time of event.
+
+    interval: (float, float)
+        Start and end time relative to tgps (s).
+
+    **kwargs:
+        Passed to ``gwpy.timeseries.TimeSeries.fetch_open_data``.
+
+    Return
+    ------
+        gwpy.timeseries.TimeSeries
+    """
+    start, end = np.add(tgps, interval).astype(int)
+    ifo = detector_name.removesuffix('1') + '1'
+    try:
+        timeseries = gwpy.timeseries.TimeSeries.fetch_open_data(
+            ifo, start, end, **kwargs)
+    except ValueError:
+        # This detector has no data for the whole range.
+        # Attempt downloading only the file that contains ``tgps``.
+        # Assume file boundaries ocurr at multiples of 4096 s GPS time.
+        t_lower = int(tgps) // 4096 * 4096
+        t_upper = t_lower + 4096
+        start, end = np.clip((start, end), t_lower, t_upper)
+        timeseries = gwpy.timeseries.TimeSeries.fetch_open_data(
+            ifo, start, end, **kwargs)
+
+    return timeseries
