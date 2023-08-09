@@ -163,8 +163,7 @@ def _compute_h_h_1mpc_rb(injections, pn_phase_tol, likelihood, n_cores):
     par_dics = ({**row, 'd_luminosity': 1} for _, row in injections.iterrows())
     args = ((likelihood_rb, par_dic) for par_dic in par_dics)
 
-    with multiprocessing.Pool(n_cores) as pool:
-        h_h_1mpc = pool.starmap(_get_h_h_rb, args)
+    h_h_1mpc = _starmap(_get_h_h_rb, args, n_cores)
     return np.array(h_h_1mpc)
 
 
@@ -176,9 +175,7 @@ def _compute_h_h_1mpc_fft(injections, likelihood, n_cores):
     """Compute ⟨ℎ∣ℎ⟩ at 1 Mpc without using relative binning."""
     par_dics = ({**row, 'd_luminosity': 1} for _, row in injections.iterrows())
     args = ((likelihood, par_dic) for par_dic in par_dics)
-
-    with multiprocessing.Pool(n_cores) as pool:
-        h_h_1mpc = pool.starmap(_get_h_h_fft, args)
+    h_h_1mpc = _starmap(_get_h_h_fft, args, n_cores)
     return np.array(h_h_1mpc)
 
 
@@ -186,6 +183,18 @@ def _get_h_h_fft(likelihood, par_dic):
     h_f = likelihood._get_h_f(par_dic)
     h_h = likelihood._compute_h_h(h_f)
     return h_h.sum()
+
+
+def _starmap(func, iterable, n_cores):
+    """
+    Similar to ``multiprocessing.Pool.starmap`` but if n_cores == 1 it
+    just does a for loop. Useful hack if ``multiprocessing`` misbehaves.
+    """
+    if n_cores != 1:
+        with multiprocessing.Pool(n_cores) as pool:
+            return pool.starmap(func, args)
+    else:
+        return [func(*args) for args in iterable]
 
 
 def test_h_h_distribution(config):
@@ -212,7 +221,7 @@ def test_h_h_distribution(config):
     # Predicted distribution
     plt.plot(x, h_h_distribution.pdf(x), c='C1', label='Prediction')
 
-    # Monte Carlo of what distribution should look like with these many samples
+    # Monte Carlo of how distribution should look like with these many samples
     for i in range(20):
         plt.hist(h_h_distribution.rvs(size=len(injections_above_threshold)),
                  bins=x, density=True, histtype='step', alpha=.3,
