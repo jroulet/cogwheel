@@ -5,6 +5,8 @@ Usage:
     1. Make a config file (see `cogwheel/validation/example/config.py`)
     2. Call ``generate_injections_from_config``
 """
+
+import argparse
 import multiprocessing
 from scipy import stats
 import numpy as np
@@ -14,6 +16,7 @@ import matplotlib.pyplot as plt
 from cogwheel import data
 from cogwheel import waveform
 import cogwheel.likelihood
+from cogwheel.validation import load_config
 
 
 def generate_injections_from_config(config,
@@ -237,3 +240,34 @@ def test_h_h_distribution(config):
     plt.xlabel(rf'$\langle h \mid h \rangle_{{>{config.H_H_MIN}}}$')
     plt.ylabel('PDF')
     plt.title(rf'$N_{{\rm samples}} = {len(injections_above_threshold)}$')
+
+
+def main(config_filename, n_cores=0, overwrite=False):
+    """
+    Create a pandas DataFrame with injection samples and save it in
+    ``config.INJECTION_DIR/config.INJECTIONS_FILENAME``.
+    Also plot tests of the distribution of ⟨ℎ∣ℎ⟩.
+    """
+    if n_cores <= 0:
+        n_cores += multiprocessing.cpu_count()
+
+    config = load_config(config_filename)
+
+    generate_injections_from_config(config, n_cores, overwrite)
+    test_h_h_distribution(config)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="""
+        Generate injection samples drawn from a user-prescribed distribution.
+        """)
+
+    parser.add_argument('config_filename', help='Path to a config file.')
+    parser.add_argument('n_cores',
+                        help='Number of computing cores for parallelization.',
+                        default=0, type=int)
+
+    parser.add_argument('--overwrite', action='store_true',
+                        help='pass to overwrite existing injections file')
+
+    main(**vars(parser.parse_args()))
