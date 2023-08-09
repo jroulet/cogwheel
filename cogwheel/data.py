@@ -415,6 +415,8 @@ class EventData(utils.JSONMixin):
         Add a signal to the data. Injection parameters will be stored as
         a dictionary in the ``injection`` attribute. The inner product
         ⟨h|h⟩ at each detector (ignoring ASD-drift correction) is also stored.
+        The signal is computed only at frequencies where the whitening filter
+        has support.
 
         Parameters
         ----------
@@ -427,8 +429,9 @@ class EventData(utils.JSONMixin):
         """
         waveform_generator = waveform.WaveformGenerator.from_event_data(
             self, approximant)
-        h_f = waveform_generator.get_strain_at_detectors(self.frequencies,
-                                                         par_dic)
+        h_f = np.zeros_like(self.strain)
+        h_f[:, self.fslice] = waveform_generator.get_strain_at_detectors(
+            self.frequencies[self.fslice], par_dic)
         self._set_strain(self.strain + h_f)
 
         h_h = 4 * self.df * np.linalg.norm(h_f * self.wht_filter, axis=-1)**2
