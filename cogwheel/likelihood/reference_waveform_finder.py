@@ -545,6 +545,15 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self._mchirp_range = tuple(mchirp_range)
         print(f'Set mchirp_range = {self.mchirp_range}')
 
+        # Issue a warning if the automatically-found range excludes the injection
+        if self.event_data.injection:
+            true_mchirp = gw_utils.m1m2_to_mchirp(
+                self.event_data.injection['par_dic']['m1'],
+                self.event_data.injection['par_dic']['m2'])
+            if (self.mchirp_range[0] > true_mchirp
+                    or self.mchirp_range[1] < true_mchirp):
+                warnings.warn('Proposed `mchirp_range` excludes the injection!')
+
     def get_coordinate_system_kwargs(self):
         """
         Return dictionary with parameters commonly required to set up
