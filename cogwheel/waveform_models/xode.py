@@ -2,12 +2,12 @@
 Interface cogwheel with IMRPhenomXODE.
 
 For this module to run, you need to install IMRPhenomXODE as follows:
-1. Clone the repo (https://github.com/hangyu45/BBH_spin_precession)
+1. Clone the repo (https://github.com/hangyu45/IMRPhenomXODE)
    anywhere in your system.
-2. Make a symbolic link to the BBH_spin_precession repository:
+2. Make a symbolic link to the IMRPhenomXODE repository:
 ```bash
 cd <path_to_cogwheel>/cogwheel/waveform_models
-ln -s <path_to_BBH_spin_precession> BBH_spin_precession
+ln -s <path_to_IMRPhenomXODE>/src/ IMRPhenomXODE
 ```
 Note, IMRPhenomXODE requires a `lalsimulation` version >= 5.1.0
 
@@ -41,7 +41,7 @@ gw_plotting.CornerPlot(samples[post.prior.sampled_params]).plot()
 import numpy as np
 
 from cogwheel import waveform
-from .BBH_spin_precession.myWaveLib import get_hp_hc_f_sequence
+from .IMRPhenomXODE.waveLib import get_hp_hc_f_sequence
 
 
 CONFIG = {'use_N4LO_prec': True,
