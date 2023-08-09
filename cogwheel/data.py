@@ -511,7 +511,8 @@ class EventData(utils.JSONMixin):
             filename = cls.get_filename(eventname)
         dic = {key: val[()] for key, val in np.load(filename).items()}
 
-        dic['injection'] = json.loads(dic['injection'])
+        if 'injection' in dic:
+            dic['injection'] = json.loads(dic['injection'])
 
         # Backward compatibility:
         if 'psd' in dic:
