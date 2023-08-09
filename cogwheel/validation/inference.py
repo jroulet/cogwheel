@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 
 from cogwheel import data
 from cogwheel import gw_prior
+from cogwheel import gw_utils
 from cogwheel import posterior
 from cogwheel import sampling
 from cogwheel import gw_plotting
@@ -183,11 +184,23 @@ def main(config_filename, rundir):
     event_data = _get_event_data(config, i_sample)
     prior_kwargs = {par: config.PRIOR_KWARGS[par]
                     for par in config.PRIOR_KWARGS.keys() - {'mchirp_range'}}
-    post = posterior.Posterior.from_event(event_data,
-                                          mchirp_guess=None,
-                                          approximant=config.APPROXIMANT,
-                                          prior_class=config.PE_PRIOR_CLS,
-                                          prior_kwargs=prior_kwargs)
+    post = posterior.Posterior.from_event(
+        event_data,
+        mchirp_guess=None,
+        approximant=config.APPROXIMANT,
+        prior_class=config.PE_PRIOR_CLS,
+        prior_kwargs=prior_kwargs,
+        ref_wf_finder_kwargs={'time_range': (-.15, .15)})
+
+    print('', flush=True)  # Flush maximization log before starting the sampler
+
+    # Declare failure if the mchirp range doesn't include the truth:
+    injected_mchirp = gw_utils.m1m2_to_mchirp(
+        event_data.injection['par_dic']['m1'],
+        event_data.injection['par_dic']['m2'])
+    if (injected_mchirp < post.prior.range_dic['mchirp'][0]
+            or injected_mchirp > post.prior.range_dic['mchirp'][1]):
+        raise RuntimeError('Failed to find a good mchirp range')
 
     # Ensure the mchirp prior range is contained in the injection range:
     mchirp_range = np.clip(post.prior.range_dic['mchirp'],
