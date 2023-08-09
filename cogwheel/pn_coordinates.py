@@ -163,10 +163,9 @@ class _InspiralAnalysis:
         if not np.allclose(np.diff(frequencies, 2), 0):
             raise ValueError('`frequencies` must be regularly spaced.')
 
-        # (phase, time, 2.5PN, 1PN, 2PN, precession). Ordered this way
+        # (phase, time, 1PN, 2PN, 2.5PN, precession). Ordered this way
         # we ensure that intrinsic parameters are orthogonalized to
-        # phase and time and s1z only changes one of the coordinates,
-        # moreover, linearly.
+        # phase and time.
         pn_exponents = 0, 1, -5/3, -3/3, -2/3, -1/3
         pn_functions = np.power.outer(lal.MTSUN_SI * np.pi * frequencies,
                                       pn_exponents)
