@@ -106,7 +106,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
     @classmethod
     def from_event(cls, event, mchirp_guess, approximant='IMRPhenomXAS',
                    pn_phase_tol=.02, spline_degree=3,
-                   time_range=(-.1, .1), mchirp_range=None):
+                   time_range=(-.1, .1), mchirp_range=None, f_ref=None):
         """
         Constructor that finds a reference waveform solution
         automatically by maximizing the likelihood.
@@ -190,7 +190,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         par_dic_0 = dict.fromkeys(waveform_generator.params, 0.)
         par_dic_0['d_luminosity'] = 1.
         par_dic_0['iota'] = 1.  # So waveform has higher modes
-        par_dic_0['f_ref'] = 100.
+        par_dic_0['f_ref'] = f_ref or 100.
         par_dic_0['m1'], par_dic_0['m2'] = gw_utils.mchirpeta_to_m1m2(
             mchirp_guess, eta=.2)
 
@@ -199,7 +199,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                             spline_degree=spline_degree,
                             time_range=time_range,
                             mchirp_range=mchirp_range)
-        ref_wf_finder.find_bestfit_pars()
+        ref_wf_finder.find_bestfit_pars(freeze_f_ref=f_ref is not None)
 
         # If this is an injection, we can "cheat" and check that relative
         # binning is working at the injection, and raise a warning if not:
@@ -237,7 +237,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         return par_dic
 
-    def find_bestfit_pars(self, seed=0):
+    def find_bestfit_pars(self, seed=0, freeze_f_ref=False):
         """
         Find a good fit solution with restricted parameters (face-on,
         equal aligned spins). Additionally, use that to set
@@ -264,7 +264,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         # Use waveform to define reference detector, detector pair and
         # reference frequency:
         kwargs = self.get_coordinate_system_kwargs()
-        self.par_dic_0['f_ref'] = kwargs['f_avg']
+        if not freeze_f_ref:
+            self.par_dic_0['f_ref'] = kwargs['f_avg']
 
         # Optimize time, sky location, orbital phase and distance
         self._optimize_t_refdet(kwargs['ref_det_name'])
