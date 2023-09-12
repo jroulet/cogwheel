@@ -213,7 +213,7 @@ class SkyDictionary(utils.JSONMixin):
 
         # Generate sky samples for the physical delays
         generators = self._ind_generators[tuple(delays[:, physical_mask])]
-        sky_inds = np.fromiter(map(next, generators), int)
+        sky_inds = np.fromiter(map(next, generators), int, len(generators))
         return sky_inds, sky_prior, physical_mask
 
     @classmethod
