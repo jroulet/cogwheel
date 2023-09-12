@@ -244,7 +244,8 @@ class WaveformGenerator(utils.JSONMixin):
         """
         return cls(event_data.detector_names, event_data.tgps,
                    event_data.tcoarse, approximant, harmonic_modes,
-                   disable_precession, n_cached_waveforms)
+                   disable_precession, n_cached_waveforms,
+                   lalsimulation_commands)
 
     @property
     def approximant(self):
