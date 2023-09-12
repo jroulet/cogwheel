@@ -22,6 +22,7 @@ from cogwheel import posterior
 from cogwheel import sampling
 from cogwheel import gw_plotting
 from cogwheel import utils
+from cogwheel import waveform
 from . import load_config
 
 
@@ -95,7 +96,10 @@ def make_corner_plot(config, rundir):
 
     # Instantiate a dummy prior to use its inverse transform
     # (for plotting well-measured parameters)
-    _ias_prior = gw_prior.IASPrior(
+    plotting_prior_cls = getattr(config, 'PLOTTING_PRIOR_CLS', gw_prior.IASPrior)
+    if isinstance(plotting_prior_cls, str):
+        plotting_prior_cls = gw_prior.prior_registry[plotting_prior_cls]
+    plotting_prior = plotting_prior_cls(
         mchirp_range=(1, 2),  # Doesn't matter for this purpose
         detector_pair='HL',
         tgps=config.EVENT_DATA_KWARGS['tgps'],
@@ -105,10 +109,11 @@ def make_corner_plot(config, rundir):
 
     # Inverse-transform and save injection:
     with open(rundir/INJECTION_DICT_FILENAME, encoding='utf-8') as file:
-        injection = json.load(file)['par_dic']
+        injection = json.load(file)
 
-    injection.update(_ias_prior.inverse_transform(
-        **{par: injection[par] for par in _ias_prior.standard_params}))
+    par_dic = injection['par_dic']
+    par_dic.update(plotting_prior.inverse_transform(
+        **{par: par_dic[par] for par in plotting_prior.standard_params}))
 
     with open(rundir/INJECTION_DICT_FILENAME, 'w', encoding='utf-8') as file:
         json.dump(injection, file)
@@ -116,14 +121,19 @@ def make_corner_plot(config, rundir):
     # Inverse-transform and save paremeter estimation samples:
     samples_filename = rundir/sampling.SAMPLES_FILENAME
     pe_samples = pd.read_feather(samples_filename)
-    _ias_prior.inverse_transform_samples(pe_samples)
+    for par, val in waveform.DEFAULT_PARS.items():
+        if par not in pe_samples:
+            pe_samples[par] = val
+    plotting_prior.inverse_transform_samples(pe_samples)
     pe_samples.to_feather(samples_filename)
 
     # Plot and save:
-    plot_params = _ias_prior.sampled_params + ['lnl', 'h_h']
-    corner_plot = gw_plotting.CornerPlot(pe_samples[plot_params])
+    plot_params = [par for par in plotting_prior.sampled_params + ['lnl', 'h_h']
+                   if par in pe_samples]
+    weights = pe_samples.get(utils.WEIGHTS_NAME)
+    corner_plot = gw_plotting.CornerPlot(pe_samples[plot_params], weights=weights)
     corner_plot.plot(title=rundir.parent.name, max_n_ticks=3)
-    corner_plot.scatter_points(injection, adjust_lims=True,
+    corner_plot.scatter_points(par_dic, adjust_lims=True,
                                colors=['C3'], marker='+', zorder=2, s=50)
     plt.savefig(rundir/'corner_plot.pdf', bbox_inches='tight')
 
@@ -190,22 +200,25 @@ def main(config_filename, rundir):
         approximant=config.APPROXIMANT,
         prior_class=config.PE_PRIOR_CLS,
         prior_kwargs=prior_kwargs,
-        ref_wf_finder_kwargs={'time_range': (-.15, .15)})
+        likelihood_kwargs=getattr(config, 'LIKELIHOOD_KWARGS', None),
+        ref_wf_finder_kwargs={'time_range': (-.15, .15),
+                              'f_ref': config.PRIOR_KWARGS['f_ref']})
 
     print('', flush=True)  # Flush maximization log before starting the sampler
 
     # Declare failure if the mchirp range doesn't include the truth:
-    injected_mchirp = gw_utils.m1m2_to_mchirp(
-        event_data.injection['par_dic']['m1'],
-        event_data.injection['par_dic']['m2'])
-    if (injected_mchirp < post.prior.range_dic['mchirp'][0]
-            or injected_mchirp > post.prior.range_dic['mchirp'][1]):
-        raise RuntimeError('Failed to find a good mchirp range')
+    if 'mchirp' in post.prior.range_dic:
+        mchirp_range = post.prior.range_dic['mchirp']
+        injected_mchirp = gw_utils.m1m2_to_mchirp(
+            event_data.injection['par_dic']['m1'],
+            event_data.injection['par_dic']['m2'])
+        if (injected_mchirp < mchirp_range[0]
+                or injected_mchirp > mchirp_range[1]):
+            raise RuntimeError('Failed to find a good mchirp range')
 
-    # Ensure the mchirp prior range is contained in the injection range:
-    mchirp_range = np.clip(post.prior.range_dic['mchirp'],
-                           *config.PRIOR_KWARGS['mchirp_range'])
-    post.prior = post.prior.reinstantiate(mchirp_range=mchirp_range)
+        # Ensure the mchirp prior range is contained in the injection range:
+        mchirp_range = np.clip(mchirp_range, *config.PRIOR_KWARGS['mchirp_range'])
+        post.prior = post.prior.reinstantiate(mchirp_range=mchirp_range)
 
     post.likelihood.asd_drift = None  # Set to 1
 

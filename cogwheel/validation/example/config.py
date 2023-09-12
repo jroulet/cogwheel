@@ -38,8 +38,11 @@ EVENT_DATA_KWARGS = {'detector_names': 'HLV',
 APPROXIMANT = 'IMRPhenomXPHM'
 INJECTION_PRIOR_CLS = IASInjectionPrior
 PE_PRIOR_CLS = 'IntrinsicIASPrior'
+PLOTTING_PRIOR_CLS = 'AlignedSpinIASPrior'
+
 PRIOR_KWARGS = {'mchirp_range': (1, 5),
                 'q_min': .05,
                 'f_ref': 50.}
+LIKELIHOOD_KWARGS  = {}
 SAMPLER_CLS = sampling.PyMultiNest
 RUN_KWARGS = {'n_live_points': 512}
