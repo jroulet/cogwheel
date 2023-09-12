@@ -216,8 +216,10 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         sky_dict:
             Instance of .skydict.SkyDictionary
 
-        lookup_table:
-            Instance of .lookup_table.LookupTable
+        lookup_table: lookup_table.LookupTable, dict or None
+            Interpolation table for distance marginalization. If a dict
+            is passed, it is interpreted as keyword arguments to create a
+            new lookup table. ``None`` creates one with default arguments.
 
         log2n_qmc: int
             Base-2 logarithm of the number of requested extrinsic
@@ -253,12 +255,13 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             of extrinsic samples reaches ``2**max_log2n_qmc``.
         """
         # Set up and check lookup_table with correct marginalized_params:
-        if lookup_table is None:
+        lookup_table = lookup_table or {}
+        if isinstance(lookup_table, dict):
             if self._lookup_table_marginalized_params == {'d_luminosity'}:
-                lookup_table = LookupTable()
+                lookup_table = LookupTable(**lookup_table)
             elif self._lookup_table_marginalized_params == {'d_luminosity',
                                                             'phi_ref'}:
-                lookup_table = LookupTableMarginalizedPhase22()
+                lookup_table = LookupTableMarginalizedPhase22(**lookup_table)
             else:
                 raise ValueError('Unable to initialize `lookup_table`.')
         if (lookup_table.marginalized_params

@@ -24,7 +24,7 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
     MarginalizedExtrinsicLikelihoodQAS.
     """
     @abstractmethod
-    def _create_coherent_score(self, sky_dict, m_arr):
+    def _create_coherent_score(self, sky_dict, m_arr, **kwargs):
         """Return a coherent score instance of the appropriate type."""
 
     @abstractmethod
@@ -70,11 +70,14 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
             matched-filtering series, relative to
             ``event_data.tgps + par_dic_0['t_geocenter']``.
 
-        coherent_score: CoherentScoreHM, CoherentScoreQAS as appropriate
-            Instance of coherent score, optional. One with default
-            settings will be created by default.
+        coherent_score: CoherentScoreHM, CoherentScoreQAS as appropriate,
+                        or dict or None
+            Instance of coherent score, optional. If a dict is passed, it
+            is interpreted as keyword arguments to create one automatically.
+            None (default) will create one with default settings.
         """
-        if coherent_score is None:
+        coherent_score = coherent_score or {}
+        if isinstance(coherent_score, dict):  # Interpret as kwargs
             # Ensure sky_dict's and event_data's sampling frequencies
             # are commensurate:
             f_sampling = SkyDictionary.choose_f_sampling(
@@ -83,7 +86,8 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
             coherent_score = self._create_coherent_score(
                 sky_dict=SkyDictionary(event_data.detector_names,
                                        f_sampling=f_sampling),
-                m_arr=waveform_generator.m_arr)
+                m_arr=waveform_generator.m_arr,
+                **coherent_score)
         elif not np.array_equal(coherent_score.m_arr,
                                 waveform_generator.m_arr):
             raise ValueError('`coherent_score` and `waveform_generator` use '
@@ -218,8 +222,8 @@ class MarginalizedExtrinsicLikelihood(
     params = ['f_ref', 'iota', 'l1', 'l2', 'm1', 'm2', 's1x_n', 's1y_n', 's1z',
               's2x_n', 's2y_n', 's2z']
 
-    def _create_coherent_score(self, sky_dict, m_arr):
-        return CoherentScoreHM(sky_dict, m_arr=m_arr)
+    def _create_coherent_score(self, sky_dict, m_arr, **kwargs):
+        return CoherentScoreHM(sky_dict, m_arr=m_arr, **kwargs)
 
     def _set_summary(self):
         """

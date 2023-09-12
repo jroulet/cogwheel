@@ -11,6 +11,7 @@ from cogwheel import utils
 from .marginalization import CoherentScoreQAS
 from .marginalized_extrinsic import BaseMarginalizedExtrinsicLikelihood
 
+
 class MarginalizedExtrinsicLikelihoodQAS(
         BaseMarginalizedExtrinsicLikelihood):
     """
@@ -44,11 +45,11 @@ class MarginalizedExtrinsicLikelihoodQAS(
                              s2x_n=0.,
                              s2y_n=0.)
 
-    def _create_coherent_score(self, sky_dict, m_arr):
+    def _create_coherent_score(self, sky_dict, m_arr, **kwargs):
         if list(m_arr) != [2]:
             raise ValueError(f'{self.__class__.__name__} only works with '
                              '(l, |m|) = (2, 2) waveforms.')
-        return CoherentScoreQAS(sky_dict)
+        return CoherentScoreQAS(sky_dict, **kwargs)
 
     def _set_summary(self):
         """
