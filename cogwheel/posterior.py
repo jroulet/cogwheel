@@ -69,6 +69,9 @@ class Posterior(utils.JSONMixin):
         """
         lnprior, standard_par_dic = self.prior.lnprior_and_transform(
             *args, **kwargs)
+
+        if np.isneginf(lnprior):
+            return -np.inf
         return lnprior + self.likelihood.lnlike(standard_par_dic)
 
     @classmethod

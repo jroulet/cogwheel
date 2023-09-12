@@ -23,7 +23,7 @@ from cogwheel import utils
 
 
 class PriorError(Exception):
-    """Base class for all exceptions in this module"""
+    """Base class for all exceptions in this module."""
 
 
 def has_compatible_signature(func, params) -> bool:
@@ -616,7 +616,11 @@ class CombinedPrior(Prior):
                 input_dic = {par: par_dic[par]
                              for par in (subprior.sampled_params
                                          + subprior.conditioned_on)}
-                par_dic.update(subprior.transform(**input_dic))
+                output_dic = subprior.transform(**input_dic)
+                if any(np.isnan(value) for value in output_dic.values()):
+                    return dict.fromkeys(self.standard_params,
+                                         np.nan) | par_dic
+                par_dic.update(output_dic)
             return {par: par_dic[par] for par in self.standard_params}
 
         def inverse_transform(self, *par_vals, **par_dic):
@@ -646,12 +650,15 @@ class CombinedPrior(Prior):
             standard_par_dic = self.transform(**par_dic)
             par_dic.update(standard_par_dic)
 
-            lnp = 0
-            for subprior in self.subpriors:
-                input_dic = {par: par_dic[par]
-                             for par in (subprior.sampled_params
-                                         + subprior.conditioned_on)}
-                lnp += subprior.lnprior(**input_dic)
+            if any(np.isnan(value) for value in standard_par_dic.values()):
+                lnp = -np.inf
+            else:
+                lnp = 0
+                for subprior in self.subpriors:
+                    input_dic = {par: par_dic[par]
+                                 for par in (subprior.sampled_params
+                                             + subprior.conditioned_on)}
+                    lnp += subprior.lnprior(**input_dic)
             return lnp, standard_par_dic
 
         def lnprior(self, *par_vals, **par_dic):
