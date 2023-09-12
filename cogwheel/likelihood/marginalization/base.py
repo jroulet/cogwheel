@@ -240,17 +240,17 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
         min_n_effective: int
             Minimum effective sample size to use as convergence
-            criterion. The program will try doubling the number of
-            samples from `log2n_qmc` until a the effective sample size
-            reaches `min_n_effective` or the number of extrinsic samples
-            reaches ``2**max_log2n_qmc``.
+            criterion. The program will try adapting the proposal
+            distribution, increasing the number of samples until the
+            effective sample size reaches `min_n_effective` or the number
+            of extrinsic samples reaches ``2**max_log2n_qmc``.
 
         max_log2n_qmc: int
             Base-2 logarithm of the maximum number of extrinsic
-            parameter samples to request. The program will try doubling
-            the number of samples from `log2n_qmc` until a the effective
-            sample size reaches `min_n_effective` or the number of
-            extrinsic samples reaches ``2**max_log2n_qmc``.
+            parameter samples to request. The program will try adapting the
+            proposal distribution, increasing the number of samples until the
+            effective sample size reaches `min_n_effective` or the number
+            of extrinsic samples reaches ``2**max_log2n_qmc``.
         """
         # Set up and check lookup_table with correct marginalized_params:
         if lookup_table is None:

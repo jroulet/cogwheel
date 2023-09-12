@@ -256,6 +256,7 @@ class _InspiralAnalysis:
         pn_coefficients = self._get_pn_coefficients(
             m1, m2, s1z, s2z, s1x_n, s1y_n, s2x_n, s2y_n)
 
+        # Note:
         #     weights * phase = (weights * pn_funcs) @ pn_coefficients
         #                     = qmat @ rmat @ pn_coefficients
         #                     = qmat @ coords

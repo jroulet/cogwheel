@@ -156,7 +156,7 @@ class CoherentScoreHM(BaseCoherentScoreHM):
             Output of ``.get_marginalization_info``.
 
         num: int, optional
-            Number of samples to generate, defaults to a single sample.
+            Number of samples to generate, ``None`` makes a single sample.
 
         Return
         ------

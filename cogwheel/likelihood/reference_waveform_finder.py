@@ -178,6 +178,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                     print('Setting reference from injection.')
                     return ref_wf_finder
 
+            # Allow passing ``mchirp_guess=None`` for injections:
             if mchirp_guess is None:
                 mchirp_guess = gw_utils.m1m2_to_mchirp(
                     event_data.injection['par_dic']['m1'],
@@ -201,7 +202,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         ref_wf_finder.find_bestfit_pars()
 
         # If this is an injection, we can "cheat" and check that relative
-        # binning is working at the injection, otherwise raise warning:
+        # binning is working at the injection, and raise a warning if not:
         if event_data.injection:
             lnl_fft = ref_wf_finder.lnlike_fft(event_data.injection['par_dic'])
             lnl_rb = ref_wf_finder.lnlike(event_data.injection['par_dic'])
@@ -366,7 +367,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         """
         Optimize mchirp, eta and chieff by likelihood maximized over
         amplitude, phase and time incoherently across detectors.
-        Modify the entries of `self.par_dic_0` correspondig to
+        Modify the entries of `self.par_dic_0` corresponding to
         `m1, m2, s1z, s2z` with the new solution (this will update the
         relative-binning summary data).
         """
