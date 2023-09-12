@@ -36,6 +36,7 @@ from .spin import (
     IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
     UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior,
     IsotropicSpinsInplaneComponentsIsotropicInclinationSkyLocationPrior,
+    CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior,
     ZeroInplaneSpinsPrior)
 
 prior_registry = {}
@@ -248,6 +249,8 @@ class MarginalizedDistanceIASPrior(RegisteredPriorMixin, CombinedPrior):
 
     prior_classes = IASPrior.prior_classes.copy()
     prior_classes.remove(UniformLuminosityVolumePrior)
+
+
 class MarginalizedDistanceAndPhaseIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Prior for usage with ``MarginalizedDistanceLikelihood``.
@@ -259,6 +262,7 @@ class MarginalizedDistanceAndPhaseIASPrior(RegisteredPriorMixin, CombinedPrior):
     prior_classes = IASPrior.prior_classes.copy()
     prior_classes.remove(UniformLuminosityVolumePrior)
     prior_classes.remove(UniformPhasePrior)
+
 
 class MarginalizedDistanceLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
@@ -328,4 +332,19 @@ class IntrinsicLVCPrior(RegisteredPriorMixin, CombinedPrior):
                      UniformDetectorFrameMassesPrior,
                      IsotropicSpinsAlignedComponentsPrior,
                      IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
+                     ZeroTidalDeformabilityPrior]
+
+
+class CartesianIntrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Prior for usage with ``MarginalizedExtrinsicLikelihood``.
+    Intrinsic parameters only, precessing, uniform in effective spin
+    and detector frame component masses, no tides.
+    """
+    default_likelihood_class = MarginalizedExtrinsicLikelihood
+
+    prior_classes = [FixedReferenceFrequencyPrior,
+                     UniformDetectorFrameMassesPrior,
+                     UniformEffectiveSpinPrior,
+                     CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior,
                      ZeroTidalDeformabilityPrior]

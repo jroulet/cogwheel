@@ -17,6 +17,7 @@ import lalsimulation
 from cogwheel import skyloc_angles
 from cogwheel import utils
 from cogwheel.prior import Prior, FixedPrior, UniformPriorMixin
+from .twosquircle import TwoSquircularMapping
 
 
 # ----------------------------------------------------------------------
@@ -385,6 +386,78 @@ class IsotropicSpinsInplaneComponentsIsotropicInclinationSkyLocationPrior(
     """
     _inplane_spin_inclination_prior_class \
          = IsotropicSpinsInplaneComponentsIsotropicInclinationPrior
+
+
+class CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior(Prior):
+    """
+    Similar to UniformDiskInplaneSpinsIsotropicInclinationPrior except
+    it uses Cartesian rather than polar coordinates.
+    It might behave better near the origin (i.e. aligned spins) as it
+    naturally enforces the density to be azimuth-independent there.
+
+    The variables are defined with the following meaning:
+        (u1, v1) cartesian ≡ (sqrt(cums1r_s1z), phi_jl_hat) polar
+        (u2, v2) cartesian ≡ (sqrt(cums2r_s2z), phi12) polar
+    u, v pairs live in the disk u^2+v^2 < 1.
+    These are in turn mapped to squares (x1, y1) and (x2, y2) via
+    2-squircular mappings.
+    """
+    standard_params = ['iota', 's1x_n', 's1y_n', 's2x_n', 's2y_n']
+    range_dic = {'costheta_jn': (-1, 1),
+                 'x1': (-1, 1),
+                 'y1': (-1, 1),
+                 'x2': (-1, 1),
+                 'y2': (-1, 1)}
+    folded_reflected_params = ['costheta_jn']
+    conditioned_on = ['s1z', 's2z', 'm1', 'm2', 'f_ref']
+
+    _polar_prior = UniformDiskInplaneSpinsIsotropicInclinationPrior()
+    _mapping = TwoSquircularMapping()
+
+    def transform(self, costheta_jn, x1, y1, x2, y2,
+                  s1z, s2z, m1, m2, f_ref):
+        """`sampled_params` to `standard_params`."""
+        cums1r_s1z, phi_jl_hat = self._cartesian_to_polar(x1, y1)
+        cums2r_s2z, phi12 = self._cartesian_to_polar(x2, y2)
+
+        return self._polar_prior.transform(costheta_jn, phi_jl_hat, phi12,
+                                           cums1r_s1z, cums2r_s2z,
+                                           s1z, s2z, m1, m2, f_ref)
+
+    def inverse_transform(self, iota, s1x_n, s1y_n, s2x_n, s2y_n,
+                          s1z, s2z, m1, m2, f_ref):
+        """`standard_params` to `sampled_params`."""
+        polar_dic = self._polar_prior.inverse_transform(
+            iota, s1x_n, s1y_n, s2x_n, s2y_n, s1z, s2z, m1, m2, f_ref)
+        x1, y1 = self._polar_to_cartesian(polar_dic['cums1r_s1z'],
+                                          polar_dic['phi_jl_hat'])
+        x2, y2 = self._polar_to_cartesian(polar_dic['cums2r_s2z'],
+                                          polar_dic['phi12'])
+        return {'costheta_jn': polar_dic['costheta_jn'],
+                'x1': x1,
+                'y1': y1,
+                'x2': x2,
+                'y2': y2}
+
+    def lnprior(self, costheta_jn, x1, y1, x2, y2,
+                s1z, s2z, m1, m2, f_ref):
+        """Log prior density in the space of sampled parameters."""
+        del costheta_jn, s1z, s2z, m1, m2, f_ref
+        return np.log(0.5
+                      * self._mapping.jacobian_determinant(x1, y1)
+                      * self._mapping.jacobian_determinant(x2, y2))
+
+    def _cartesian_to_polar(self, x, y):
+        u, v = self._mapping.square_to_disk(x, y)
+        cumr = u**2 + v**2
+        phi = np.arctan2(v, u)
+        return cumr, phi
+
+    def _polar_to_cartesian(self, cumr, phi):
+        r = np.sqrt(cumr)
+        u = r * np.cos(phi)
+        v = r * np.sin(phi)
+        return self._mapping.disk_to_square(u, v)
 
 
 class ZeroInplaneSpinsPrior(FixedPrior):
