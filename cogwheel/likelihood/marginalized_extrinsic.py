@@ -3,6 +3,7 @@ Define class ``MarginalizedExtrinsicLikelihood``, to use with
 ``IntrinsicIASPrior`` (or similar).
 """
 from abc import abstractmethod
+import warnings
 import numpy as np
 import pandas as pd
 
