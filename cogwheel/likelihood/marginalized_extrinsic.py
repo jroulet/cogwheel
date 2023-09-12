@@ -40,7 +40,8 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
 
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None, spline_degree=3,
-                 t_range=(-.07, .07), coherent_score=None):
+                 t_range=(-.07, .07), coherent_score=None,
+                 dlnl_marginalized_threshold=30.):
         """
         Parameters
         ----------
@@ -75,6 +76,14 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
             Instance of coherent score, optional. If a dict is passed, it
             is interpreted as keyword arguments to create one automatically.
             None (default) will create one with default settings.
+
+        dlnl_marginalized_threshold: float
+            The extrinsic marginalization will not be refined further if
+            at some point the estimate is lower than the maximum previously
+            observed lnl_marginalized by more than this amount (so as not
+            to waste computation on low likelihood points). Use
+            conservatively since the estimate of lnl_marginalized may be
+            noisy.
         """
         coherent_score = coherent_score or {}
         if isinstance(coherent_score, dict):  # Interpret as kwargs
@@ -109,9 +118,13 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
                 self.coherent_score.lookup_table.REFERENCE_DISTANCE,
             'phi_ref':0.}
 
+        self.dlnl_marginalized_threshold = dlnl_marginalized_threshold
+        self._max_lnl_marginalized = -np.inf
         self._log = []
 
         self.optimize_beta_temperature(self.par_dic_0)
+
+        _ = self.lnlike(self.par_dic_0)  # Initializes self._max_lnl_marginalized
 
     def lnlike(self, par_dic):
         """
@@ -132,8 +145,10 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         lnlike: float
             Log of the marginalized likelihood.
         """
+        lnl_marginalized_threshold = (self._max_lnl_marginalized
+                                      - self.dlnl_marginalized_threshold)
         marg_info = self.coherent_score.get_marginalization_info(
-            *self._get_dh_hh(par_dic), self._times)
+            *self._get_dh_hh(par_dic), self._times, lnl_marginalized_threshold)
 
         self._log.append({'lnl_marginalized': marg_info.lnl_marginalized,
                           'n_effective': marg_info.n_effective,
@@ -143,8 +158,13 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         # should contribute to the posterior, by now we are in trouble
         # anyways.
         if marg_info.n_effective < 0.1 * self.coherent_score.min_n_effective:
+            warnings.warn('Rejecting sample with lnl_marginalized ~ '
+                          f'{marg_info.lnl_marginalized} due to low '
+                          f'n_effective = {marg_info.n_effective}')
             return -np.inf
 
+        self._max_lnl_marginalized = max(self._max_lnl_marginalized,
+                                         marg_info.lnl_marginalized)
         return marg_info.lnl_marginalized
 
     def postprocess_samples(self, samples: pd.DataFrame, num=None):
@@ -168,7 +188,10 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
             repeated `num` times. The index will not be preserved.
         """
         all_dh, all_hh = self._get_many_dh_hh(samples)
-        extrinsic = [self.coherent_score.gen_samples(*dh_hh, self._times, num)
+        lnl_marginalized_threshold = (self._max_lnl_marginalized
+                                      - self.dlnl_marginalized_threshold)
+        extrinsic = [self.coherent_score.gen_samples(*dh_hh, self._times, num,
+                                                     lnl_marginalized_threshold)
                      for dh_hh in zip(all_dh, all_hh)]
 
         gmst = lal.GreenwichMeanSiderealTime(self.event_data.tgps)

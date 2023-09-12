@@ -304,15 +304,15 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     # def m_arr():
     #     """int array with harmonic mode `m` numbers."""
 
-    def get_marginalization_info(self, d_h_timeseries, h_h, times):
+    def get_marginalization_info(self, d_h_timeseries, h_h, times,
+                                 lnl_marginalized_threshold=-np.inf):
         """
         Return a MarginalizationInfo object with extrinsic parameter
         integration results, ensuring that one of three conditions
         regarding the effective sample size holds:
             * n_effective >= .min_n_effective; or
             * n_qmc == 2 ** .max_log2n_qmc; or
-            * n_effective = 0 (if the first proposal only gave
-                               unphysical samples)
+            * lnl_marginalized < lnl_marginalized_threshold
         """
         self._switch_qmc_sequence()
 
@@ -337,6 +337,9 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                 break
 
             if marginalization_info.n_effective > 2:
+                if (marginalization_info.lnl_marginalized
+                        < lnl_marginalized_threshold):  # Worthless point
+                    break
                 # Hybridize with KDE of the weighted samples as next proposal:
                 t_arrival_prob = .5 * (
                     self._kde_t_arrival_prob(marginalization_info, times)

@@ -113,7 +113,8 @@ class CoherentScoreHM(BaseCoherentScoreHM):
                                      proposals=[t_arrival_prob],
                                      )
 
-    def gen_samples(self, dh_mptd, hh_mppd, times, num=None):
+    def gen_samples(self, dh_mptd, hh_mppd, times, num=None,
+                    lnl_marginalized_threshold=-np.inf):
         """
         Generate requested number of extrinsic parameter samples.
 
@@ -134,6 +135,10 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         num: int, optional
             Number of samples to generate, defaults to a single sample.
 
+        lnl_marginalized_threshold: float
+            Do not refine the extrinsic integration if the estimated
+            lnl_marginalized is less than this.
+
         Return
         ------
         samples: dict
@@ -143,7 +148,8 @@ class CoherentScoreHM(BaseCoherentScoreHM):
             detectors incompatible with a real signal) the values will
             be NaN.
         """
-        marg_info = self.get_marginalization_info(dh_mptd, hh_mppd, times)
+        marg_info = self.get_marginalization_info(dh_mptd, hh_mppd, times,
+                                                  lnl_marginalized_threshold)
         return self._gen_samples_from_marg_info(marg_info, num)
 
     def _gen_samples_from_marg_info(self, marg_info, num):

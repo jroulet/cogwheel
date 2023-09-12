@@ -182,7 +182,8 @@ class CoherentScoreQAS(BaseCoherentScore):
         return np.transpose(self.beta_temperature / 2
                             * utils.abs_sq(d_h_timeseries) / h_h)  # dt
 
-    def gen_samples(self, dh_td, hh_d, times, num=None):
+    def gen_samples(self, dh_td, hh_d, times, num=None,
+                    lnl_marginalized_threshold=-np.inf):
         """
         Generate requested number of extrinsic parameter samples.
 
@@ -212,7 +213,8 @@ class CoherentScoreQAS(BaseCoherentScore):
             detectors incompatible with a real signal) the values will
             be NaN.
         """
-        marg_info = self.get_marginalization_info(dh_td, hh_d, times)
+        marg_info = self.get_marginalization_info(dh_td, hh_d, times,
+                                                  lnl_marginalized_threshold)
         return self._gen_samples_from_marg_info(marg_info, num)
 
     def _gen_samples_from_marg_info(self, marg_info, num):
