@@ -107,10 +107,46 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
     return hplus_hcross
 
 
+def compute_hplus_hcross_by_mode(f, par_dic, approximant: str,
+                                 harmonic_modes, lal_dic=None):
+    """
+    Return dictionary of the form {(l, m): h_lm} with the contribution
+    of each harmonic mode to hplus, hcross.
+
+    Parameters
+    ----------
+    f: 1d array of type float
+        Frequency array in Hz
+
+    par_dic: dict
+        Source parameters. Needs to have these keys:
+            * m1, m2: component masses (Msun)
+            * d_luminosity: luminosity distance (Mpc)
+            * iota: inclination (rad)
+            * phi_ref: phase at reference frequency (rad)
+            * f_ref: reference frequency (Hz)
+        plus, optionally:
+            * s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z: dimensionless spins
+            * l1, l2: dimensionless tidal deformabilities
+
+    approximant: str
+        Approximant name.
+
+    harmonic_modes: list of 2-tuples with (l, m) pairs
+        Which (co-precessing frame) higher-order modes to include.
+
+    lal_dic: LALDict, optional
+        Contains special approximant settings.
+    """
+    return {mode: compute_hplus_hcross(f, par_dic, approximant,
+                                       harmonic_modes=[mode], lal_dic=lal_dic)
+            for mode in harmonic_modes}
+
+
 Approximant = namedtuple(
     'Approximant',
-    ('harmonic_modes', 'aligned_spins', 'tides', 'hplus_hcross_func'),
-    defaults=([(2, 2)], True, False, compute_hplus_hcross))
+    ('harmonic_modes', 'aligned_spins', 'tides', 'hplus_hcross_by_mode_func'),
+    defaults=([(2, 2)], True, False, compute_hplus_hcross_by_mode))
 
 APPROXIMANTS = {
     'IMRPhenomD_NRTidalv2': Approximant(tides=True),
@@ -451,10 +487,12 @@ class WaveformGenerator(utils.JSONMixin):
 
             # hplus_hcross_0 is a (n_m x 2 x n_frequencies) array with
             # sum_l (hlm+, hlmx), at phi_ref=0, d_luminosity=1Mpc.
+            hplus_hcross_modes = APPROXIMANTS[self.approximant].hplus_hcross_by_mode_func(
+                f, waveform_par_dic_0, self.approximant, self.harmonic_modes, lal_dic)
+
             hplus_hcross_0 = np.array(
-                [APPROXIMANTS[self.approximant].hplus_hcross_func(
-                    f, waveform_par_dic_0, self.approximant, modes, lal_dic)
-                 for modes in self._harmonic_modes_by_m.values()])
+                [np.sum([hplus_hcross_modes[mode] for mode in m_modes], axis=0)
+                 for m_modes in self._harmonic_modes_by_m.values()])
 
             cache_dic = {'approximant': self.approximant,
                          'f': f,

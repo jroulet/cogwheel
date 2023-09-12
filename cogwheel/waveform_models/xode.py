@@ -41,7 +41,7 @@ gw_plotting.CornerPlot(samples[post.prior.sampled_params]).plot()
 import numpy as np
 
 from cogwheel import waveform
-from .IMRPhenomXODE.waveLib import get_hp_hc_f_sequence
+from .IMRPhenomXODE.waveLib import get_hp_hc_each_prec_mode_f_sequence
 
 
 CONFIG = {'use_N4LO_prec': True,
@@ -51,8 +51,8 @@ CONFIG = {'use_N4LO_prec': True,
           'rtol': 1e-3}
 
 
-def compute_hplus_hcross_xode(f, par_dic, approximant='IMRPhenomXODE',
-                              harmonic_modes=None, lal_dic=None):
+def compute_hplus_hcross_by_mode_xode(f, par_dic, approximant='IMRPhenomXODE',
+                                      harmonic_modes=None, lal_dic=None):
     """
     Generate frequency domain waveform with IMRPhenomXODE.
     Return hplus, hcross evaluated at f.
@@ -118,14 +118,14 @@ def compute_hplus_hcross_xode(f, par_dic, approximant='IMRPhenomXODE',
                    }
 
     try:
-        hplus_hcross = np.stack(get_hp_hc_f_sequence(**kwargs_xode))
+        h_pmf = get_hp_hc_each_prec_mode_f_sequence(**kwargs_xode)
     except Exception:
         print('Error while calling XODE at these parameters:', kwargs_xode)
         raise
-    return hplus_hcross
+    return dict(zip(harmonic_modes, np.moveaxis(h_pmf, 1, 0)))
 
 
 waveform.APPROXIMANTS['IMRPhenomXODE'] = waveform.Approximant(
     harmonic_modes= [(2, 2), (2, 1), (3, 3), (3, 2), (4, 4)],
     aligned_spins=False,
-    hplus_hcross_func=compute_hplus_hcross_xode)
+    hplus_hcross_by_mode_func=compute_hplus_hcross_by_mode_xode)
