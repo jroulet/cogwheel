@@ -195,7 +195,7 @@ def _starmap(func, iterable, n_cores):
     """
     if n_cores != 1:
         with multiprocessing.Pool(n_cores) as pool:
-            return pool.starmap(func, args)
+            return pool.starmap(func, iterable)
     else:
         return [func(*args) for args in iterable]
 
