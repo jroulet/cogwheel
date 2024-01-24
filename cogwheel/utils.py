@@ -690,13 +690,14 @@ class CogwheelEncoder(NumpyEncoder):
 
     @staticmethod
     def _get_commit_hash():
+        """
+        Return current git commit hash, or raise ``FileNotFoundError``
+        if git is not found.
+        """
         cogwheel_dir = pathlib.Path(__file__).parents[1].resolve()
-        try:
-            return subprocess.check_output(
-                ['git', 'rev-parse', 'HEAD'], cwd=cogwheel_dir
-                ).decode('utf-8').strip()
-        except FileNotFoundError:
-            return None
+        return subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], cwd=cogwheel_dir
+            ).decode('utf-8').strip()
 
     def default(self, o):
         """Encoding for registered cogwheel classes. """
@@ -704,8 +705,11 @@ class CogwheelEncoder(NumpyEncoder):
             return super().default(o)
 
         dic = {'__cogwheel_class__': o.__class__.__name__,
-               '__module__': self._get_module_name(o),
-               'commit_hash': self._get_commit_hash()}
+               '__module__': self._get_module_name(o)}
+        try:
+            dic['commit_hash'] = self._get_commit_hash()
+        except FileNotFoundError:
+            pass
 
         if o.__class__.__name__ == 'EventData':
             filename = os.path.join(self.dirname, f'{o.eventname}.npz')
