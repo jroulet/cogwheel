@@ -256,7 +256,10 @@ def handle_scalars(function):
     """
     @functools.wraps(function)
     def new_function(*args, **kwargs):
-        return function(*args, **kwargs)[()]
+        result = function(*args, **kwargs)
+        if isinstance(result, tuple):
+            return tuple(res[()] for res in result)
+        return result[()]
     return new_function
 
 
@@ -601,8 +604,8 @@ class JSONMixin:
 
         with open(filepath, 'w', encoding='utf-8') as outfile:
             json.dump(self, outfile, cls=CogwheelEncoder, dirname=dirname,
-                      file_permissions=file_permissions, overwrite=overwrite,
-                      indent=2)
+                      file_permissions=file_permissions,
+                      overwrite=overwrite, indent=2)
         filepath.chmod(file_permissions)
 
     def __init_subclass__(cls):
