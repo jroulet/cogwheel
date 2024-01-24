@@ -157,6 +157,15 @@ def chieff(m1, m2, s1z, s2z):
     return (m1*s1z + m2*s2z) / (m1+m2)
 
 
+def isco_frequency(m_tot):
+    """
+    Return approximate gravitational-wave frequency (Hz) of the
+    innermost stable circular orbit of a binary of total mass `m_tot`
+    (Msun): f_ISCO = 1 / (6^(3/2) pi m_tot) c^3 / G.
+    """
+    return 4400 / m_tot
+
+
 class _ChirpMassRangeEstimator:
     """
     Class that implements a rough estimation of the chirp mass posterior
