@@ -1,3 +1,8 @@
+"""
+Define class ``TwoSquircularMapping`` to map a disk to a square
+without resorting to polar coordinates.
+Useful for samplers that do not support periodic parameters.
+"""
 import numpy as np
 
 
@@ -17,7 +22,7 @@ class TwoSquircularMapping:
     def disk_to_square(u, v):
         """Return (x, y) on the square."""
         if u == 0 or v == 0:
-            return {'x': u, 'y': v}
+            return u, v
 
         inverse_factor = np.sqrt((0.5 - np.sqrt(0.25-(u*v)**2))) / np.abs(u*v)
         return inverse_factor * u, inverse_factor * v
