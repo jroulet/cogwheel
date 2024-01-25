@@ -2,11 +2,16 @@
 
 import itertools
 from collections import defaultdict
+from dataclasses import dataclass, field
+import scipy.interpolate
+import scipy.ndimage
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import ListedColormap
 import matplotlib as mpl
 import pandas as pd
+
+from cogwheel import utils
 
 
 class LatexLabels(dict):
@@ -59,7 +64,7 @@ def gen_linestyles(number):
     """
     if number <= len(few_linestyles := ['-', '--', '-.', ':']):
         return few_linestyles[:number]
-    return ['-'] + [(0, (2, 2)*i + (7, 2)) for i in range(number-1)]
+    return ['-'] * number
 
 
 def gen_colors(number):
@@ -77,80 +82,95 @@ def gen_colors(number):
     return [colors[i] for i in np.arange(number) % len(colors)]
 
 
+@dataclass
 class PlotStyle:
     """
     Class that encapsulates plotting choices (colors, linestyles, etc.)
     for a corner plot of a distribution.
+
+    Attributes
+    ----------
+    confidence_level: float between 0 and 1, or ``None``
+        Determines the reported confidence interval around the
+        median (highlighted band in 1-d marginal probability and
+        numeric values in the subplot titles). If ``None``, both
+        the numerical values and highlighted bands are removed.
+
+    contour_fractions: sequence of floats
+        Fractions of the distribution to enclose by 2-d contours.
+
+    bins: int | {'rice', 'sturges', 'sqrt'}
+        How many histogram bins to use, the same for all parameters.
+
+    color_2d: str, RGB tuple, etc.
+        Color used for the 2-d marginal distributions.
+
+    contour_kwargs: dict
+        Keyword arguments to `plt.contour` and `plt.contourf`
+
+    vline_kwargs: dict
+        Keyword arguments to `plt.plot` for the vertical lines
+        signaling medians and 1-d confidence intervals.
+
+    vfill_kwargs: dict
+        Keyword arguments to `plt.fill_between` for 1-d plots.
+
+    kwargs_1d: dict
+        Keyword arguments to `plt.plot` for 1-d plots.
+
+    clabel_kwargs: dict, optional
+        Keyword arguments for contour labels. Pass an empty `dict`
+        to use defaults. ``None`` draws no contour labels.
+
+    fill: {'gradient', 'flat', 'none'}
+        How to display 2-d marginal distributions:
+        'gradient' displays the 2-d pdf with a transparency gradient
+        'flat' fills the contours with a flat transparent color
+        'none' shows just the contours
+
+    smooth: float
+        Smooth the 2d histograms by convolving them with a Gaussian
+        kernel with this standard deviation in pixel units.
+        0 (default) does no smoothing.
+
+    density: bool
+        Whether to normalize the 1-d histograms to integrate to 1.
+
+    tail_probability: float between 0 and 1
+        Disregard `tail_probability / 2` of the distribution to
+        either side in the plots. Used as an automatic way of
+        zooming in on the interesting part of the distribution if
+        there are a few outlier samples.
+        0 (default) includes all samples.
     """
     # Defaults:
     KWARGS_1D = {'color': 'C0'}
     VLINE_KWARGS = {'alpha': .5, 'linewidth': 1}
     VFILL_KWARGS = {'alpha': .1}
 
-    def __init__(self, confidence_level=.9, contour_fractions=(.5, .9),
-                 color_2d='k', contour_kwargs=None, vline_kwargs=None,
-                 vfill_kwargs=None, kwargs_1d=None, clabel_kwargs=None,
-                 fill='gradient'):
-        """
-        Parameters
-        ----------
-        confidence_level: float between 0 and 1, or ``None``
-            Determines the reported confidence interval around the
-            median (highlighted band in 1-d marginal probability and
-            numeric values in the subplot titles). If ``None``, both
-            the numerical values and highlighted bands are removed.
-
-        contour_fractions: sequence of floats
-            Fractions of the distribution to enclose by 2-d contours.
-
-        color_2d: str, RGB tuple, etc.
-            Color used for the 2-d marginal distributions.
-
-        contour_kwargs: dict
-            Keyword arguments to `plt.contour` and `plt.contourf`
-
-        vline_kwargs: dict
-            Keyword arguments to `plt.plot` for the vertical lines
-            signaling medians and 1-d confidence intervals.
-
-        vfill_kwargs: dict
-            Keyword arguments to `plt.fill_between` for 1-d plots.
-
-        kwargs_1d: dict
-            Keyword arguments to `plt.plot` for 1-d plots.
-
-        clabel_kwargs: dict, optional
-            Keyword arguments for contour labels. Pass an empty `dict`
-            to use defaults. ``None`` draws no contour labels.
-
-        fill: {'gradient', 'flat', 'none'}
-            How to display 2-d marginal distributions:
-            'gradient' displays the 2-d pdf with a transparency gradient
-            'flat' fills the contours with a flat transparent color
-            'none' shows just the contours
-        """
-        self.confidence_level = confidence_level
-        self.contour_fractions = contour_fractions
-        self.color_2d = color_2d
-        self.contour_kwargs = contour_kwargs or {}
-        self.vline_kwargs = self.VLINE_KWARGS | (vline_kwargs or {})
-        self.clabel_kwargs = clabel_kwargs
-        self.kwargs_1d = self.KWARGS_1D | (kwargs_1d or {})
-        self.fill = fill
-        self.vfill_kwargs = self.VFILL_KWARGS | (vfill_kwargs or {})
+    confidence_level: float = 0.9
+    contour_fractions: tuple[float] = (0.5, 0.9)
+    bins: int | str = 'rice'
+    color_2d: str = 'k'
+    contour_kwargs: dict = field(default_factory=dict)
+    vline_kwargs: dict = field(default_factory=dict)
+    vfill_kwargs: dict = field(default_factory=dict)
+    kwargs_1d: dict = field(default_factory=dict)
+    clabel_kwargs: dict = None
+    fill: str = 'gradient'
+    smooth: float = 0.0
+    density: bool = True
+    tail_probability: float = 0.0
 
     @property
-    def contour_fractions(self):
-        """List of fraction of the pdf to enclose by the contours."""
-        return self._contour_fractions
+    def decreasing_contour_fractions(self):
+        """In decreasing order so that levels are increasing."""
+        return np.sort(np.atleast_1d(self.contour_fractions))[::-1]
 
-    @contour_fractions.setter
-    def contour_fractions(self, contour_fractions):
-        """
-        Store `contour_fractions` in decreasing order, so contour levels
-        are increasing.
-        """
-        self._contour_fractions = sorted(contour_fractions, reverse=True)
+    def __post_init__(self):
+        self.vline_kwargs = self.VLINE_KWARGS | self.vline_kwargs
+        self.kwargs_1d = self.KWARGS_1D | self.kwargs_1d
+        self.vfill_kwargs = self.VFILL_KWARGS | self.vfill_kwargs
 
     def get_contour_kwargs(self):
         """Keyword arguments to `plt.contour` and `plt.contourf`."""
@@ -170,18 +190,21 @@ class PlotStyle:
     @classmethod
     def get_many(cls, number, **kwargs):
         """
-        Return generator of plostyles with different colors and
+        Return list of plostyles with different colors and
         linestyles.
         """
         linestyles = gen_linestyles(number)
         colors = gen_colors(number)
-        kwargs = {'fill': 'flat', **kwargs}
-        for color, linestyle in zip(colors, linestyles):
-            yield cls(contour_kwargs={'linestyles': [linestyle]},
-                      color_2d=color,
-                      kwargs_1d={'color': color, 'linestyle': linestyle},
-                      confidence_level=None, **kwargs)
 
+        # This logic lets user `kwargs` override automatic choices:
+        contour_kwargs = kwargs.pop('contour_kwargs', {})
+        kwargs_1d = kwargs.pop('kwargs_1d', {})
+        kwargs = {'fill': 'flat', 'confidence_level': None} | kwargs
+        for color, linestyle in zip(colors, linestyles):
+            yield cls(
+                contour_kwargs={'linestyles': [linestyle]} | contour_kwargs,
+                kwargs_1d={'color': color, 'linestyle': linestyle} | kwargs_1d,
+                **{'color_2d': color} | kwargs)
 
 
 def get_transparency_colormap(color):
@@ -194,18 +217,35 @@ def get_transparency_colormap(color):
 # ----------------------------------------------------------------------
 # Functions related to pdfs:
 
-def get_levels(pdf, contour_fractions):
+def quantile(values, q, weights=None):
     """
-    Return the values of P for which the
-        sum(pdf[pdf > P]) == f
-    for f in contour_fractions.
-    `contour_fractions` can be array or scalar.
+    Compute the q-th quantile of the data.
+
+    Parameters
+    ----------
+    values: array
+        Input data.
+
+    q: array_like of float
+        Quantile rank, 0 <= q <= 1.
+
+    weights: array
+        Of the same shape as `values`.
+
+    Return
+    ------
+    quantiles: array_like of float, of the same shape as `q`.
     """
-    sorted_pdf = [0.] + sorted(pdf.ravel())
-    cdf = np.cumsum(sorted_pdf)
-    cdf /= cdf[-1]
-    ccdf = 1 - cdf
-    return np.interp(contour_fractions, ccdf[::-1], sorted_pdf[::-1])
+    if weights is None:
+        weights = np.ones_like(values)
+    values = np.asarray(values)
+    weights = np.asarray(weights)
+
+    order = np.argsort(values)
+    values = values[order]
+    weights = weights[order]
+    cdf = (np.cumsum(weights) - weights) / (np.sum(weights) - weights)
+    return np.interp(q, cdf, values)
 
 
 def latex_val_err(value, error):
@@ -247,10 +287,11 @@ def get_midpoints(arr):
     return (arr[1:] + arr[:-1]) / 2
 
 
-def get_edges(arr):
-    """Get bin edges from midpoints."""
-    half_dx = (arr[1] - arr[0]) / 2
-    return np.concatenate(([arr[0] - half_dx], arr + half_dx))
+def get_contour_fractions(sigmas):
+    """
+    Enclosed probability within a number of sigmas for a 2d Gaussian.
+    """
+    return 1 - np.exp(-np.square(sigmas) / 2)
 
 
 # ----------------------------------------------------------------------
@@ -260,74 +301,57 @@ class CornerPlot:
     """
     Class for making a corner plot of a multivariate distribution if you
     have samples from the distribution.
+
+    Public methods
+    --------------
+    plot: Make a corner plot.
+    scatter_points: Plot points on a corner plot (e.g. "truths").
+    set_lims: Edit the limits of a corner plot.
+    plot_2d: Make one panel of a corner plot.
     """
     DEFAULT_LATEX_LABELS = LatexLabels()
     MARGIN_INCHES = .8
 
-    def __init__(self, samples: pd.DataFrame, plotstyle=None, bins=None,
-                 density=True, weights=None, latex_labels=None):
+    def __init__(self, samples: pd.DataFrame, params=None,
+                 plotstyle=None, weights_col='weights',
+                 latex_labels=None, **plotstyle_kwargs):
         """
         Parameters
         ----------
-        samples: pandas DataFrame
-            Columns determine the parameters to plot and rows correspond
+        samples: pandas.DataFrame
+            Columns correspond to parameters to plot and rows correspond
             to samples.
 
-        plotstyle: PlotStyle instance, optional
+        params: list of str, optional
+            Subset of columns present in all dataframes, to plot a
+            reduced number of parameters.
+
+        plotstyle: PlotStyle
             Determines the colors, linestyles, etc.
 
-        bins: int
-            How many histogram bins to use, the same for all parameters.
+        weights_col: str, optional
+            If existing, use a column with this name to set weights for
+            the samples. Pass `None` to ignore, if you have a column
+            named 'weights' that is not to be interpreted as weights.
 
-        density: bool
-            Whether to normalize the 1-d histograms to integrate to 1.
-
-        weights: sequence of floats, optional
-            An array of weights, of the same length as `samples`.
-            Each value in a only contributes its associated weight
-            towards the bin count (instead of 1).
-
-        latex_labels: `LatexLabels` instance, optional.
+        latex_labels: LatexLabels
             Maps column names to latex strings and assigns units.
+
+        **plotstyle_kwargs
+            Passed to ``PlotStyle`` constructor, ignored if `plotstyle`
+            is passed.
         """
+        self.samples = samples.dropna()
         self.latex_labels = latex_labels or self.DEFAULT_LATEX_LABELS
-        self.plotstyle = plotstyle or PlotStyle()
-
-        bin_edges = {}
-        self.arrs_1d = {}
-        self.pdfs_1d = {}
-        self.pdfs_2d = {}
-
-        if bins is None:
-            if weights is None:
-                bins = 'sturges'
-            else:
-                bins = 40
-
-        for par, values in samples.items():
-            self.pdfs_1d[par], bin_edges[par] = np.histogram(
-                values, bins=bins, density=density, weights=weights)
-            self.arrs_1d[par] = get_midpoints(bin_edges[par])
-
-        for xpar, ypar in itertools.combinations(samples, 2):
-            histogram_2d, _, _ = np.histogram2d(
-                samples[xpar], samples[ypar],
-                bins=(bin_edges[xpar], bin_edges[ypar]), weights=weights)
-            # Jitter to break contour degeneracy if we have few samples:
-            histogram_2d += np.random.normal(scale=1e-10,
-                                             size=histogram_2d.shape)
-            self.pdfs_2d[xpar, ypar] = histogram_2d.T  # Cartesian convention
+        self.plotstyle = plotstyle or PlotStyle(**plotstyle_kwargs)
+        self.weights_col = weights_col
+        self.params = params or [col for col in samples if col != weights_col]
 
         self.fig = None
         self.axes = None
 
-    @property
-    def params(self):
-        """List of parameter values."""
-        return list(self.arrs_1d)
-
     def plot(self, fig=None, title=None, max_figsize=10., max_n_ticks=4,
-             tightness=None, label=None, legend_title=None):
+             label=None, legend_title=None):
         """
         Make a corner plot of the distribution.
 
@@ -348,11 +372,6 @@ class CornerPlot:
             Determines the number of ticks in each subplot. Ignored if
             `fig` is passed.
 
-        tightness: float between 0 and 1
-            Fraction of the 1-d marginal posterior to enclose. Useful
-            to zoom-in around the areas with non-negligible probability
-            density.
-
         label: str, optional
             Legend label.
 
@@ -365,19 +384,16 @@ class CornerPlot:
             self._plot_1d(par, label)
 
         for xpar, ypar in itertools.combinations(self.params, 2):
-            self._plot_2d(xpar, ypar)
-
-        if tightness:
-            self.set_lims(**self.get_lims(tightness))
+            self.plot_2d(xpar, ypar, ax=self.axes[self.params.index(ypar),
+                                                  self.params.index(xpar)])
 
         y_title = 1 - .9 * self.MARGIN_INCHES / self.fig.get_figheight()
         self.fig.suptitle(title, y=y_title, verticalalignment='bottom')
 
         self.axes[0][-1].legend(
             *self.axes[0][0].get_legend_handles_labels(),
-            bbox_to_anchor=(1, 1), frameon=False,
-            loc='upper right', borderaxespad=0, borderpad=0,
-            title=legend_title)
+            bbox_to_anchor=(1, 1), frameon=False, loc='upper right',
+            borderaxespad=0, borderpad=0, title=legend_title)
 
     def scatter_points(self, scatter_points, colors=None,
                        adjust_lims=False, **kwargs):
@@ -432,53 +448,97 @@ class CornerPlot:
         if not adjust_lims:
             self.set_lims(**lims)
 
-    def _plot_2d(self, xpar, ypar):
-        ax = self.axes[self.params.index(ypar), self.params.index(xpar)]
-        xarr = self.arrs_1d[xpar]
-        yarr = self.arrs_1d[ypar]
-        pdf = self.pdfs_2d[xpar, ypar]
+    def plot_2d(self, xpar, ypar, ax=None):
+        """
+        Plot just one panel of the corner plot.
 
-        levels = get_levels(pdf, self.plotstyle.contour_fractions)
-        contour = ax.contour(xarr, yarr, pdf, levels=levels,
+        Parameters
+        ----------
+        xpar, ypar: str
+            Parameters in ``self.params`` to plot in the x and y axes.
+
+        ax: matplotlib.axes.Axes or None
+            Axes on which to draw the figure. ``None`` makes new axes.
+
+        label: str
+            Add a legend element with this label.
+        """
+        if ax is None:
+            _, ax = plt.subplots()
+            ax.set_xlabel(self.latex_labels.with_units(xpar))
+            ax.set_ylabel(self.latex_labels.with_units(ypar))
+
+        pdf, extent = self._get_pdf_2d(xpar, ypar)
+        levels = self._get_levels(pdf)
+        contour = ax.contour(pdf, extent=extent, levels=levels,
                              **self.plotstyle.get_contour_kwargs())
 
         if self.plotstyle.clabel_kwargs is not None:
-            clabels = [fr'{100 * fraction :.0f}%'
-                       for fraction in self.plotstyle.contour_fractions]
+            clabels = [
+                f'{fraction:.0%}'
+                for fraction in self.plotstyle.decreasing_contour_fractions]
             plt.clabel(contour, fmt=dict(zip(levels, clabels)),
                        **self.plotstyle.clabel_kwargs)
 
         if self.plotstyle.fill == 'gradient':
             cmap = get_transparency_colormap(self.plotstyle.color_2d)
-            ax.imshow(pdf, origin='lower', aspect='auto',
-                      extent=(xarr.min(), xarr.max(), yarr.min(), yarr.max()),
+            ax.imshow(pdf, origin='lower', aspect='auto', extent=extent,
                       cmap=cmap, interpolation='bicubic', vmin=0)
 
         elif self.plotstyle.fill == 'flat':
-            alphas = np.subtract(1, self.plotstyle.contour_fractions)
-            next_levels = list(levels[1:]) + [np.inf]
+            alphas = 1 - self.plotstyle.decreasing_contour_fractions
+            next_levels = *levels[1:], np.inf
             for *level_edges, alpha in zip(levels, next_levels, alphas):
-                ax.contourf(xarr, yarr, pdf, levels=level_edges, alpha=alpha,
-                            **self.plotstyle.get_contour_kwargs())
+                ax.contourf(pdf, extent=extent, levels=level_edges,
+                            alpha=alpha, **self.plotstyle.get_contour_kwargs())
+
+    def _get_pdf_2d(self, xpar, ypar):
+        mask = (self._get_tail_probability_mask(xpar)
+                & self._get_tail_probability_mask(ypar))
+        samples = self.samples[mask]
+        hist2d, xedges, yedges = np.histogram2d(
+            samples[xpar], samples[ypar], bins=self._get_bins(),
+            weights=samples.get(self.weights_col))
+
+        hist2d = scipy.ndimage.gaussian_filter(hist2d, self.plotstyle.smooth)
+
+        # We want the pdf at edges, not midpoints:
+        pdf = scipy.interpolate.RectBivariateSpline(
+            get_midpoints(xedges), get_midpoints(yedges), hist2d
+            )(xedges, yedges).T
+
+        extent = (samples[xpar].min(), samples[xpar].max(),
+                  samples[ypar].min(), samples[ypar].max())
+        return pdf, extent
 
     def _plot_1d(self, par, label):
         ax = np.diagonal(self.axes)[self.params.index(par)]
+        mask = self._get_tail_probability_mask(par)
+        samples = self.samples[par][mask]
+        weights = self.samples[mask].get(self.weights_col)
+
+        hist, edges = np.histogram(samples, bins=self._get_bins(),
+                                   weights=weights,
+                                   density=self.plotstyle.density)
+
+        hist = scipy.ndimage.gaussian_filter(hist, self.plotstyle.smooth)
+
+        # We want the pdf at edges, not midpoints:
+        pdf = np.array([hist[0], *(hist[1:] + hist[:-1]) / 2, hist[-1]])
 
         # Plot pdf
-        ax.plot(self.arrs_1d[par], self.pdfs_1d[par], label=label,
-                **self.plotstyle.kwargs_1d)
+        ax.plot(edges, pdf, label=label, **self.plotstyle.kwargs_1d)
 
         if self.plotstyle.confidence_level is not None:
             # Plot vlines
-            median, *span = self.get_median_and_central_interval(par)
+            median, *span = self._get_median_and_central_interval(par)
             for val in (median, *span):
-                ax.plot([val]*2, [0, np.interp(val, self.arrs_1d[par],
-                                               self.pdfs_1d[par])],
+                ax.plot([val] * 2, [0, np.interp(val, edges, pdf)],
                         **self.plotstyle.get_vline_kwargs())
 
             # Plot vfill
             xvalues = np.linspace(*span, 100)
-            yvalues = np.interp(xvalues, self.arrs_1d[par], self.pdfs_1d[par])
+            yvalues = np.interp(xvalues, edges, pdf)
             ax.fill_between(xvalues, 0, yvalues,
                             **self.plotstyle.get_vfill_kwargs())
 
@@ -493,35 +553,66 @@ class CornerPlot:
         ax.autoscale(axis='y')
         ax.set_ylim(0, None)
 
-    def get_median_and_central_interval(self, par, confidence_level=None):
+    def _get_bins(self):
+        """Implement rules for choosing bins for weighted samples."""
+        if isinstance(self.plotstyle.bins, str):
+            weights = self.samples.get(self.weights_col)
+            if weights is None:
+                n_effective = len(self.samples)
+            else:
+                n_effective = utils.n_effective(weights)
+
+            if self.plotstyle.bins == 'sturges':
+                return int(np.ceil(np.log2(n_effective))) + 1
+            if self.plotstyle.bins == 'rice':
+                return int(np.ceil(2*np.cbrt(n_effective)))
+            if self.plotstyle.bins == 'sqrt':
+                return int(np.ceil(np.sqrt(n_effective)))
+
+        return self.plotstyle.bins
+
+    def _get_tail_probability_mask(self, par):
+        probabilities = (self.plotstyle.tail_probability / 2,
+                         1 - self.plotstyle.tail_probability / 2)
+
+        qmin, qmax = quantile(self.samples[par], probabilities,
+                              self.samples.get(self.weights_col))
+        return (self.samples[par] >= qmin) & (self.samples[par] <= qmax)
+
+    def _get_levels(self, pdf):
         """
-        Given a 1 dimensional pdf, find median and interval enclosing
-        the central given fraction of the population.
+        Return the values of P for which
+            sum(pdf[pdf > P]) == f
+        for f in decreasing_contour_fractions.
+        """
+        sorted_pdf = [0.] + sorted(pdf.ravel())
+        cdf = np.cumsum(sorted_pdf)
+        cdf /= cdf[-1]
+        ccdf = 1 - cdf
+        return np.interp(self.plotstyle.decreasing_contour_fractions,
+                         ccdf[::-1], sorted_pdf[::-1])
+
+    def _get_median_and_central_interval(self, par):
+        """
+        Find median and interval enclosing the central fraction of the
+        distribution given by ``.plotstyle.confidence_level``.
 
         Parameters
         ----------
         par: str
             Parameter name from ``self.params``.
 
-        confidence_level: float between 0 and 1, optional
-            Determines the reported confidence interval around the
-            median (highlighted band in 1-d marginal probability and
-            numeric values in the subplot titles). If ``None``, both
-            the numerical values and highlighted bands are removed.
-
         Returns
-        -------
+        ------
         (median, a, b): median and bounds of the variable.
         """
-        confidence_level = confidence_level or self.plotstyle.confidence_level
-        edges = get_edges(self.arrs_1d[par])
-        cum_prob = np.concatenate(([0.], np.cumsum(self.pdfs_1d[par])))
-        cum_prob /= cum_prob[-1]
-        tail_prob = (1 - confidence_level) / 2
-        return np.interp((.5, tail_prob, 1 - tail_prob), cum_prob, edges)
+        tail_prob = (1 - self.plotstyle.confidence_level) / 2
+        return quantile(self.samples[par], (.5, tail_prob, 1 - tail_prob),
+                        self.samples.get(self.weights_col))
 
     def _setup_fig(self, fig=None, max_figsize=10.,
                    max_subplot_size=1.5, max_n_ticks=4):
+        """Setup attributes ``.fig`` and ``.axes``."""
         n_params = len(self.params)
 
         if fig is not None:
@@ -556,7 +647,7 @@ class CornerPlot:
                            rotation=45)
 
         # Left column and bottom row
-        for ax in np.r_[self.axes[-1, :], self.axes[:, 0]]:
+        for ax in (*self.axes[-1, :], *self.axes[:, 0]):
             for axis in ax.xaxis, ax.yaxis:
                 axis.set_major_locator(mpl.ticker.MaxNLocator(max_n_ticks))
 
@@ -583,21 +674,6 @@ class CornerPlot:
                                 'top': 1 - margin_fraction,
                                 'left': margin_fraction,
                                 'right': 1 - margin_fraction}}
-
-    def get_lims(self, tightness=1.):
-        """
-        Return dictionary of the form ``{par: (vmin, vmax)}`` with
-        limits for plotting for all parameters in ``self.params``.
-
-        Parameters
-        ----------
-        tightness: float between 0 and 1
-            Fraction of the 1-d marginal posterior to enclose. Useful
-            to zoom-in around the areas with non-negligible probability
-            density.
-        """
-        return {par: self.get_median_and_central_interval(par, tightness)[1:]
-                for par in self.params}
 
     def get_current_lims(self):
         """
@@ -629,12 +705,19 @@ class CornerPlot:
 class MultiCornerPlot:
     """
     Class for overlaying multiple distributions on the same corner plot
-    if you have samples from each of the distributions.
+    given samples from each of the distributions.
+
+    Public methods
+    --------------
+    plot: Make a corner plot.
+    scatter_points: Plot points on a corner plot (e.g. "truths").
+    set_lims: Edit the limits of a corner plot.
+    plot_2d: Make one panel of a corner plot.
     """
     corner_plot_cls = CornerPlot  # Can be overriden by subclasses
 
-    def __init__(self, dataframes, labels=None, bins=None, params=None,
-                 density=True, weights_col='weights',
+    def __init__(self, dataframes, params=None, plotstyles=None,
+                 weights_col='weights', labels=None,
                  **plotstyle_kwargs):
         """
         Parameters
@@ -642,47 +725,57 @@ class MultiCornerPlot:
         dataframes: sequence of ``pandas.DataFrame`` instances
             Samples from the distributions to be plotted.
 
-        labels: sequence of strings, optional
-            Legend labels corresponding to the different distributions.
-
-        bins: int
-            How many histogram bins to use, the same for all parameters
-            and all distributions.
-
         params: list of str, optional
             Subset of columns present in all dataframes, to plot a
             reduced number of parameters.
 
-        density: bool
-            Whether to normalize the 1-d histograms to integrate to 1.
+        plotstyles: sequence of ``PlotStyle`` instances
+            Determines the colors, linestyles, etc. Must have the same
+            length as `dataframes`. ``None`` (default) makes automatic
+            choices.
 
         weights_col: str, optional
             If existing, use a column with this name to set weights for
             the samples. Pass `None` to ignore, if you have a column
             named 'weights' that is not to be interpreted as weights.
 
+        labels: sequence of strings, optional
+            Legend labels corresponding to the different distributions.
+
         **plotstyle_kwargs:
             Passed to ``PlotStyle`` constructor to override defaults.
+            Ignored if `plotstyles` is passed.
         """
         if labels is None:
-            labels = [None for _ in dataframes]
-
+            labels = [None] * len(dataframes)
         if len(labels) != len(dataframes):
             raise ValueError(
                 '`dataframes` and `labels` have different lengths.')
 
+        if plotstyles is None:
+            plotstyles = PlotStyle.get_many(len(dataframes),
+                                            **plotstyle_kwargs)
+        elif len(plotstyles) != len(dataframes):
+            raise ValueError(
+                '`dataframes` and `plotstyles` have different lengths.')
+
         self.labels = labels
 
-        params = params or slice(None)
-        plotstyles = PlotStyle.get_many(len(dataframes),
-                                        **plotstyle_kwargs)
-        self.corner_plots = [
-            self.corner_plot_cls(samples[params], next(plotstyles), bins,
-                                 density, weights=samples.get(weights_col))
-            for samples in dataframes]
+        if params is None:
+            params = [par for par in dataframes[0]
+                      if par in set.intersection(*map(set, dataframes))]
 
-    def plot(self, max_figsize=10., max_n_ticks=4, tightness=None,
-             title=None, legend_title=None):
+        self.corner_plots = [
+            self.corner_plot_cls(samples, plotstyle=plotstyle, params=params,
+                                 weights_col=weights_col)
+            for samples, plotstyle in zip(dataframes, plotstyles)]
+
+        # Delegate these methods
+        self.set_lims = self.corner_plots[0].set_lims
+        self.scatter_points = self.corner_plots[0].scatter_points
+
+    def plot(self, max_figsize=10., max_n_ticks=4, title=None,
+             legend_title=None):
         """
         Make a corner plot with all distributions overlaid.
 
@@ -693,11 +786,6 @@ class MultiCornerPlot:
 
         max_n_ticks: int
             Determines the number of ticks in each subplot.
-
-        tightness: float between 0 and 1
-            Fraction of the 1-d marginal posterior to enclose. Useful
-            to zoom-in around the areas with non-negligible probability
-            density.
 
         title: str, optional
             Figure title.
@@ -712,65 +800,23 @@ class MultiCornerPlot:
                              legend_title=legend_title)
             fig = corner_plot.fig
 
-        if tightness:
-            self.set_lims(**self.get_lims(tightness))
-
-    def get_lims(self, tightness=1.):
+    def plot_2d(self, xpar, ypar, ax=None):
         """
-        Return dictionary of the form ``{par: (vmin, vmax)}`` with
-        limits for plotting for all parameters in ``self.params``.
+        Plot just one panel of the corner plot.
 
         Parameters
         ----------
-        tightness: float between 0 and 1
-            Fraction of the 1-d marginal posterior to enclose. Useful
-            to zoom-in around the areas with non-negligible probability
-            density.
+        xpar, ypar: str
+            Parameters in ``self.params`` to plot in the x and y axes.
+
+        ax: matplotlib.axes.Axes or None
+            Axes on which to draw the figure. ``None`` makes new axes.
         """
-        all_lims = [corner_plot.get_lims(tightness)
-                    for corner_plot in self.corner_plots]
-        lims = {}
-        for par in self.corner_plots[0].params:
-            values = [value for lim in all_lims for value in lim[par]]
-            lims[par] = (min(values), max(values))
+        if ax is None:
+            _, ax = plt.subplots()
+            get_label = self.corner_plots[0].latex_labels.with_units
+            ax.set_xlabel(get_label(xpar))
+            ax.set_ylabel(get_label(ypar))
 
-        return lims
-
-    def set_lims(self, **lims):
-        """
-        Set x and y limits of the plots.
-
-        Parameters
-        ----------
-        **lims:
-            Keyword arguments of the form ``par=(vmin, vmax)`` for those
-            parameters whose limits that are to be adjusted.
-        """
-        self.corner_plots[0].set_lims(**lims)
-
-    def scatter_points(self, scatter_points, colors=None,
-                       adjust_lims=False, **kwargs):
-        """
-        Add scatter points to an existing corner plot.
-        For every point passed, one vertical line in the diagonal panels
-        and one dot in each off-diagonal panel will be plotted.
-
-        Parameters
-        ----------
-        scatter_points: pandas.DataFrame or dict
-            Columns are parameter names, must contain ``self.params``.
-            Rows correspond to parameter values. A dict is acceptable to
-            plot a single point.
-
-        colors: iterable, optional
-            Colors corresponding to each scatter point passed.
-
-        adjust_lims: bool
-            Whether to adjust x and y limits in the case that the
-            scatter points lie outside or very near the current limits.
-
-        **kwargs:
-            Passed to ``matplotlib.axes.Axes.scatter``.
-        """
-        self.corner_plots[0].scatter_points(scatter_points, colors,
-                                            adjust_lims, **kwargs)
+        for corner_plot in self.corner_plots:
+            corner_plot.plot_2d(xpar, ypar, ax)
