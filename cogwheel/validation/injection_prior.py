@@ -6,6 +6,7 @@ import numpy as np
 
 from cogwheel import gw_prior
 from cogwheel import prior
+from cogwheel import utils
 
 
 class _UniformDimensionlessVolumePrior(prior.UniformPriorMixin,
@@ -78,4 +79,38 @@ class IASInjectionPrior(prior.CombinedPrior):
         _SimplePhasePrior,
         _UniformDimensionlessVolumePrior,
         gw_prior.ZeroTidalDeformabilityPrior,
+        _ZeroTimePrior]
+
+
+class VolumetricInjectionPrior(prior.CombinedPrior):
+    """
+    Prior for making injections. Similar to ``IASInjectionPrior`` above
+    but volumetric in component spins rather than uniform in effective
+    spin.
+    """
+    prior_classes = utils.replace(IASInjectionPrior.prior_classes,
+                                  gw_prior.UniformEffectiveSpinPrior,
+                                  gw_prior.VolumetricSpinsAlignedComponentsPrior)
+
+
+class AlignedSpinIASInjectionPrior(prior.CombinedPrior):
+    """
+    Prior for making injections. Its density is similar to the IAS
+    prior, except that t_geocenter is fixed to 0, and the distance
+    standard parameter is dimensionless (between 0 and 1).
+
+    This does not include any cut in ⟨ℎ∣ℎ⟩, it must be applied a
+    posteriori if desired.
+    """
+    prior_classes = [
+        gw_prior.FixedReferenceFrequencyPrior,
+        gw_prior.UniformDetectorFrameMassesPrior,
+        gw_prior.UniformEffectiveSpinPrior,
+        _SimpleSkyLocationPrior,
+        gw_prior.IsotropicInclinationPrior,
+        gw_prior.UniformPolarizationPrior,
+        _SimplePhasePrior,
+        _UniformDimensionlessVolumePrior,
+        gw_prior.ZeroTidalDeformabilityPrior,
+        gw_prior.ZeroInplaneSpinsPrior,
         _ZeroTimePrior]
