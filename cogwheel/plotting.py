@@ -3,6 +3,7 @@
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import Union
 import scipy.interpolate
 import scipy.ndimage
 import matplotlib.pyplot as plt
@@ -150,7 +151,7 @@ class PlotStyle:
 
     confidence_level: float = 0.9
     contour_fractions: tuple[float] = (0.5, 0.9)
-    bins: int | str = 'rice'
+    bins: Union[int, str] = 'rice'
     color_2d: str = 'k'
     contour_kwargs: dict = field(default_factory=dict)
     vline_kwargs: dict = field(default_factory=dict)
