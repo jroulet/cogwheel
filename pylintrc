@@ -71,7 +71,7 @@ ignored-modules=scipy.special,
                 lalsimulation,
                 gwosc,
                 gwpy,
-                dynesty
+                dynesty,
 
 # Python code to execute, usually for sys.path manipulation such as
 # pygtk.require().
