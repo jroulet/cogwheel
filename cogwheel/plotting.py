@@ -347,6 +347,8 @@ class CornerPlot:
         self.plotstyle = plotstyle or PlotStyle(**plotstyle_kwargs)
         self.weights_col = weights_col
         self.params = params or [col for col in samples if col != weights_col]
+        if missing := (set(self.params) - set(self.samples)):
+            raise ValueError(f'`samples` missing key(s) {missing}')
 
         self.fig = None
         self.axes = None
