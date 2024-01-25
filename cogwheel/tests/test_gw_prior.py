@@ -15,8 +15,9 @@ DETECTOR_PAIRS = [''.join(pair)
 
 def get_random_init_parameters():
     """Return dictionary of keyword arguments to initialize priors."""
+    par_dic_0 = test_waveform.get_random_par_dic()
     standard_par_dic = {
-        key: value for key, value in test_waveform.get_random_par_dic().items()
+        key: value for key, value in par_dic_0.items()
         if key in
         gw_prior.miscellaneous.FixedIntrinsicParametersPrior.standard_par_dic}
     return {'mchirp_range': np.sort(np.random.uniform(2, 40, 2)),
@@ -31,7 +32,11 @@ def get_random_init_parameters():
             'd_hat_max': np.random.uniform(1e2, 1e4),
             'symmetrize_lnq': False,  # `symmetrize_lnq=True` is not invertible
             'standard_par_dic': standard_par_dic,
-            'f_avg': np.random.uniform(10, 200)}
+            'f_avg': np.random.uniform(10, 200),
+            'par_dic_0': par_dic_0,
+            'eigvecs': np.array([[1.24880323, 0.01576206],
+                                 [0.3499357 , -0.04291714],
+                                 [0.15682589, -0.02974939]])}
 
 
 def gen_random_par_dic(prior):

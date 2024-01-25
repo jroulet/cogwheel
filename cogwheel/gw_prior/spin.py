@@ -46,7 +46,6 @@ class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
         s1z_max = np.minimum(cls._get_s1z(chieff, q, s2z=-1), 1)
         return s1z_min, s1z_max
 
-    # @utils.lru_cache()
     @classmethod
     def transform(cls, chieff, cumchidiff, m1, m2):
         """(chieff, cumchidiff) to (s1z, s2z)."""
@@ -84,24 +83,59 @@ class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
     cumsz_grid = (1 + sz_grid - sz_grid * np.log(np.abs(sz_grid))) / 2
     sz_interp = interp1d(cumsz_grid, sz_grid, bounds_error=True)
 
-    @classmethod
-    def _spin_transform(cls, cumsz):
-        return cls.sz_interp(cumsz)[()]
-
     @utils.lru_cache()
     def transform(self, cums1z, cums2z):
         """(cums1z, cums2z) to (s1z, s2z)."""
         return {'s1z': self._spin_transform(cums1z),
                 's2z': self._spin_transform(cums2z)}
 
-    @staticmethod
-    def _inverse_spin_transform(sz):
-        return (1 + sz - sz * np.log(np.abs(sz))) / 2
-
     def inverse_transform(self, s1z, s2z):
         """(s1z, s2z) to (cums1z, cums2z)."""
         return {'cums1z': self._inverse_spin_transform(s1z),
                 'cums2z': self._inverse_spin_transform(s2z)}
+
+    @classmethod
+    def _spin_transform(cls, cumsz):
+        return cls.sz_interp(cumsz)[()]
+
+    @staticmethod
+    def _inverse_spin_transform(sz):
+        return (1 + sz - sz * np.log(np.abs(sz))) / 2
+
+
+class VolumetricSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
+    """
+    Prior for aligned spin components corresponding to a density uniform
+    in the ball |s1,2| < 1. I.e.:
+        p(s1z) = p(s2z) = 3/4 * (1 - sz**2), |sz| < 1.
+    """
+    standard_params = ['s1z', 's2z']
+    range_dic = {'cums1z': (0, 1),
+                 'cums2z': (0, 1)}
+
+    def transform(self, cums1z, cums2z):
+        """Sampled parameters to standard parameters."""
+        return {'s1z': self._spin_transform(cums1z),
+                's2z': self._spin_transform(cums2z)}
+
+    def inverse_transform(self, s1z, s2z):
+        """Standard parameters to sampled parameters."""
+        return {'cums1z': self._inverse_spin_transform(s1z),
+                'cums2z': self._inverse_spin_transform(s2z)}
+
+    @staticmethod
+    def _spin_transform(cumsz):
+        cumsz = np.complex_(cumsz)
+        return np.real(
+            (-1 + np.sqrt(3)*1j
+             - (1 + np.sqrt(3)*1j)
+             * (1-2*cumsz+2*((-1+cumsz)*cumsz)**.5)**(2/3))
+            / (2 * (1 - 2*cumsz
+                    + 2 * ((-1 + cumsz) * cumsz)**.5)**(1/3)))
+
+    @staticmethod
+    def _inverse_spin_transform(sz):
+        return 1/4 * (2 + 3*sz - sz**3)
 
 
 # ----------------------------------------------------------------------
@@ -462,7 +496,7 @@ class CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior(Prior):
 
 class ZeroInplaneSpinsPrior(FixedPrior):
     """Set inplane spins to zero."""
-    standard_par_dic = {'s1x_n': 0,
-                        's1y_n': 0,
-                        's2x_n': 0,
-                        's2y_n': 0}
+    standard_par_dic = {'s1x_n': 0.,
+                        's1y_n': 0.,
+                        's2x_n': 0.,
+                        's2y_n': 0.}

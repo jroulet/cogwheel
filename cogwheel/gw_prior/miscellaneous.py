@@ -15,8 +15,8 @@ from cogwheel.prior import Prior, FixedPrior, UniformPriorMixin
 
 class ZeroTidalDeformabilityPrior(FixedPrior):
     """Set tidal deformability parameters to zero."""
-    standard_par_dic = {'l1': 0,
-                        'l2': 0}
+    standard_par_dic = {'l1': 0.,
+                        'l2': 0.}
 
 
 class FixedIntrinsicParametersPrior(FixedPrior):
