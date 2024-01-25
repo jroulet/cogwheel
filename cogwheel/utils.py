@@ -13,7 +13,7 @@ import tempfile
 import textwrap
 from contextlib import contextmanager
 from scipy.optimize import _differentialevolution
-from numba import njit, vectorize
+from numba import vectorize
 import numpy as np
 
 
@@ -155,32 +155,6 @@ def exp_normalize(lnprob, axis=-1):
     prob = np.exp(lnprob - np.max(lnprob, axis=axis, keepdims=True))
     prob /= np.sum(prob, axis=axis, keepdims=True)
     return prob
-
-
-@njit
-def rand_choice_nb(arr, cprob, nvals):
-    """
-    Sample randomly from a list of probabilities.
-
-    Parameters
-    ----------
-    arr: np.ndarray
-        A nD numpy array of values to sample from.
-
-    cprob: np.arrray
-        A 1D numpy array of cumulative probabilities for the given
-        samples.
-
-    nvals: int
-        Number of samples desired.
-
-    Return
-    ------
-    `nvals` random samples from the given array with the given
-    probabilities.
-    """
-    rsamps = np.random.random(size=nvals)
-    return arr[np.searchsorted(cprob, rsamps, side="right")]
 
 
 @vectorize(nopython=True)
