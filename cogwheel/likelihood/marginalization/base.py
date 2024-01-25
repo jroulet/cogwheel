@@ -380,10 +380,11 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         for t_samples in t_det:  # Loop over detectors
             hist = np.histogram(t_samples, weights=marginalization_info.weights,
                                 bins=bins)[0]
+            std = utils.weighted_avg_and_std(t_samples,
+                                             marginalization_info.weights)[1]
+            scale = max(dt, silverman_factor * std)
 
-            scale = silverman_factor * utils.weighted_avg_and_std(
-                t_samples, marginalization_info.weights)[1]
-            kernel = stats.cauchy.pdf(times, loc=times[len(times)//2 - 1],
+            kernel = stats.cauchy.pdf(times, loc=times[(len(times) - 1) // 2],
                                       scale=scale)
             prob.append(signal.convolve(hist, kernel, mode='same'))
         prob = np.array(prob)
