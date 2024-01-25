@@ -618,10 +618,10 @@ class CombinedPrior(Prior):
                                          + subprior.conditioned_on)}
                 output_dic = subprior.transform(**input_dic)
                 if any(np.isnan(value) for value in output_dic.values()):
-                    return dict.fromkeys(self.standard_params,
-                                         np.nan) | par_dic
+                    break
                 par_dic.update(output_dic)
-            return {par: par_dic[par] for par in self.standard_params}
+            return {par: par_dic.get(par, np.nan)
+                    for par in self.standard_params}
 
         def inverse_transform(self, *par_vals, **par_dic):
             """
@@ -831,7 +831,7 @@ class FixedPrior(Prior):
 
     def lnprior(self):
         """Natural logarithm of the prior probability density."""
-        return 0
+        return 0.
 
     def transform(self):
         """Return a fixed dictionary of standard parameters."""
@@ -845,12 +845,14 @@ class FixedPrior(Prior):
         """
         standard_par_dic.update(dict(zip(self.standard_params,
                                          standard_par_vals)))
-        if mismatched := [par for par, value in self.standard_par_dic.items()
-                          if value != standard_par_dic[par]]:
+        if mismatched := [(par, standard_par_dic[par], fixed_val)
+                          for par, fixed_val in self.standard_par_dic.items()
+                          if fixed_val != standard_par_dic[par]]:
             raise PriorError(
                 'Cannot invert `standard_par_dic` because it does not '
-                f'match the entries for {", ".join(mismatched)} in the '
-                'fixed prior.')
+                'match the following entries in the fixed prior:' +
+                ''.join(f"\n  {par}: {val} ≠ {fixed_val}"
+                        for par, val, fixed_val in mismatched))
 
         return {}
 
