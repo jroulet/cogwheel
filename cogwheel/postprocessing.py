@@ -239,9 +239,13 @@ def postprocess_eventdir(eventdir, reference_rundir=None, outfile=None):
 
     Parameters
     ----------
+    eventdir: os.PathLike
+        Path to eventdir where all the rundirs to compare are located.
+
     reference_rundir: os.PathLike
         Path to rundir used as reference against which to overplot
         samples. Defaults to the first rundir by name.
+
     outfile: os.PathLike
         Path to save output as pdf. Defaults to
         `{eventdir}/{EventdirPostprocessor.DIAGNOSTICS_FILENAME}`.
@@ -449,7 +453,8 @@ class EventdirPostprocessor:
         run_kwargs = pd.DataFrame(run_kwargs)
         const_cols = [col for col, (first, *others) in run_kwargs.items()
                       if all(first == other for other in others)]
-        drop_cols = const_cols + ['outputfiles_basename', 'wrapped_params']
+        drop_cols = const_cols + ['outputfiles_basename', 'wrapped_params',
+                                  'filepath']
         return run_kwargs.drop(columns=drop_cols, errors='ignore')
 
     @staticmethod
