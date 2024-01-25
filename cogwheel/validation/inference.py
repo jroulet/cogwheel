@@ -17,7 +17,6 @@ import matplotlib.pyplot as plt
 
 from cogwheel import data
 from cogwheel import gw_prior
-from cogwheel import gw_utils
 from cogwheel import posterior
 from cogwheel import sampling
 from cogwheel import gw_plotting
@@ -110,11 +109,9 @@ def make_corner_plot(config, rundir):
     # Inverse-transform and save injection:
     with open(rundir/INJECTION_DICT_FILENAME, encoding='utf-8') as file:
         injection = json.load(file)
-
     par_dic = injection['par_dic']
     par_dic.update(plotting_prior.inverse_transform(
         **{par: par_dic[par] for par in plotting_prior.standard_params}))
-
     with open(rundir/INJECTION_DICT_FILENAME, 'w', encoding='utf-8') as file:
         json.dump(injection, file)
 
@@ -206,17 +203,20 @@ def main(config_filename, rundir):
 
     print('', flush=True)  # Flush maximization log before starting the sampler
 
-    # Declare failure if the mchirp range doesn't include the truth:
-    if 'mchirp' in post.prior.range_dic:
-        mchirp_range = post.prior.range_dic['mchirp']
-        injected_mchirp = gw_utils.m1m2_to_mchirp(
-            event_data.injection['par_dic']['m1'],
-            event_data.injection['par_dic']['m2'])
-        if (injected_mchirp < mchirp_range[0]
-                or injected_mchirp > mchirp_range[1]):
-            raise RuntimeError('Failed to find a good mchirp range')
+    # Declare failure if the range_dic, prior or likelihood don't include the truth:
+    sampled_inj = post.prior.inverse_transform(**event_data.injection['par_dic'])
+    for par, val in sampled_inj.items():
+        left, right = post.prior.range_dic[par]
+        if val < left or val > right:
+            raise RuntimeError(f'{par}={val} outside range {(left, right)}')
+    if np.isneginf(post.prior.lnprior(**sampled_inj)):
+        raise RuntimeError('prior = 0 at the injection.')
+    if np.isneginf(post.likelihood.lnlike(event_data.injection['par_dic'])):
+        raise RuntimeError('likelihood = 0 at the injection.')
 
-        # Ensure the mchirp prior range is contained in the injection range:
+    # Ensure the mchirp prior range is contained in the injection range:
+    mchirp_range = post.prior.get_init_dict().get('mchirp_range')
+    if mchirp_range is not None:
         mchirp_range = np.clip(mchirp_range, *config.PRIOR_KWARGS['mchirp_range'])
         post.prior = post.prior.reinstantiate(mchirp_range=mchirp_range)
 
@@ -240,5 +240,4 @@ if __name__ == '__main__':
     parser.add_argument('rundir', help='''
         Run directory. Must be of the correct form, e.g. output of
         ``get_rundir``.''')
-    parser_args = parser.parse_args()
     main(**vars(parser.parse_args()))
