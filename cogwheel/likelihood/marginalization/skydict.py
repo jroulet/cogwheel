@@ -297,8 +297,7 @@ class SkyDictionary(utils.JSONMixin):
         """
         prior_t1 = scipy.signal.convolve(
             prob_t0, self._delays_prior[det_order[:2]], 'same')
-        with np.errstate(divide='ignore'):
-            return np.log(prior_t1)
+        return np.log(prior_t1 + 1e-10)
 
     def _third_detector_lnprior(self, det_order, prob_t0, prob_t1):
         """
@@ -314,5 +313,4 @@ class SkyDictionary(utils.JSONMixin):
         prior_dt02 = (prob_dt_01[mask]
                       @ self._delays_prior[det_order[:3]])
         prior_t2 = scipy.signal.convolve(prob_t0, prior_dt02, 'same')
-        with np.errstate(divide='ignore'):
-            return np.log(prior_t2)
+        return np.log(prior_t2 + 1e-10)
