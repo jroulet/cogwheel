@@ -38,6 +38,9 @@ class MarginalizationInfo:
 
     Attributes
     ----------
+    qmc_sequence_id: int
+        Index to ``coherent_score._qmc_sequences``
+
     ln_numerators: float array of length n_important
         Natural log of the numerator of the weights of the QMC samples,
         including the likelihood and and prior and excluding the
@@ -105,6 +108,7 @@ class MarginalizationInfo:
         excluding inclination (i.e.: time of arrival, sky location,
         polarization, distance, orbital phase).
     """
+    qmc_sequence_id: int
     ln_numerators: np.ndarray
     q_inds: np.ndarray
     sky_inds: np.ndarray
@@ -160,6 +164,9 @@ class MarginalizationInfo:
             Typically ``self`` will be the first half of the extended
             QMC sequence and ``other`` would be the second half.
         """
+        if self.qmc_sequence_id != other.qmc_sequence_id:
+            raise ValueError('Cannot use different QMC sequences.')
+
         self.proposals_n_qmc += other.proposals_n_qmc
         self.proposals += other.proposals
 

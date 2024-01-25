@@ -6,6 +6,7 @@ likelihood over extrinsic parameters from matched-filtering timeseries.
 and higher modes. The inclination can't be marginalized over and is
 treated as an intrinsic parameter.
 """
+import warnings
 import numpy as np
 
 from cogwheel import utils
@@ -74,7 +75,8 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         tdet_inds = tdet_inds[:, physical_mask]
 
         if not any(physical_mask):
-            return MarginalizationInfoHM(ln_numerators=np.array([]),
+            return MarginalizationInfoHM(qmc_sequence_id=self._current_qmc_sequence_id,
+                                         ln_numerators=np.array([]),
                                          q_inds=np.array([], int),
                                          o_inds=np.array([], int),
                                          sky_inds=np.array([], int),
@@ -101,7 +103,8 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         t_first_det = t_first_det[important[0]]
         tdet_inds = tdet_inds[:, important[0]]
 
-        return MarginalizationInfoHM(ln_numerators=ln_numerators,
+        return MarginalizationInfoHM(qmc_sequence_id=self._current_qmc_sequence_id,
+                                     ln_numerators=ln_numerators,
                                      q_inds=q_inds,
                                      o_inds=important[1],
                                      sky_inds=sky_inds,
@@ -111,55 +114,27 @@ class CoherentScoreHM(BaseCoherentScoreHM):
                                      tdet_inds=tdet_inds,
                                      proposals_n_qmc=[n_qmc],
                                      proposals=[t_arrival_prob],
+                                     flip_psi=flip_psi,
                                      )
 
     def gen_samples(self, dh_mptd, hh_mppd, times, num=None,
                     lnl_marginalized_threshold=-np.inf):
-        """
-        Generate requested number of extrinsic parameter samples.
-
-        Parameters
-        ----------
-        dh_mptd: (n_m, 2, n_t, n_d) complex array
-            Timeseries of complex (d|h), inner product of data against a
-            waveform at reference distance and phase.
-            Decomposed by mode, polarization, time, detector.
-
-        hh_mppd: (n_mm, 2, 2, n_d) complex array
-            Complex (h|h) inner product of a waveform with itself,
-            decomposed by mode, polarization and detector.
-
-        times: (n_t,) float array
-            Timestamps of the timeseries (s).
-
-        num: int, optional
-            Number of samples to generate, defaults to a single sample.
-
-        lnl_marginalized_threshold: float
-            Do not refine the extrinsic integration if the estimated
-            lnl_marginalized is less than this.
-
-        Return
-        ------
-        samples: dict
-            Values are scalar if `num` is ``None``, else numpy arrays.
-            If ``marg_info`` corresponds to an unphysical sample (i.e.,
-            a realization of matched-filtering timeseries in the
-            detectors incompatible with a real signal) the values will
-            be NaN.
-        """
+        """Deprecated, use ``.gen_samples_from_marg_info``"""
+        warnings.warn('Use ``gen_samples_from_marg_info``', DeprecationWarning)
         marg_info = self.get_marginalization_info(dh_mptd, hh_mppd, times,
                                                   lnl_marginalized_threshold)
-        return self._gen_samples_from_marg_info(marg_info, num)
+        return self.gen_samples_from_marg_info(marg_info, num)
 
-    def _gen_samples_from_marg_info(self, marg_info, num):
+    def gen_samples_from_marg_info(self, marg_info, num=None):
         """
         Generate requested number of extrinsic parameter samples.
 
         Parameters
         ----------
-        marg_info: MarginalizationInfoHM
-            Output of ``.get_marginalization_info``.
+        marg_info: MarginalizationInfoHM or None
+            Normally, output of ``.get_marginalization_info``.
+            If ``None``, assume that the sampled parameters were unphysical
+            and return samples full of nans.
 
         num: int, optional
             Number of samples to generate, ``None`` makes a single sample.
@@ -173,12 +148,21 @@ class CoherentScoreHM(BaseCoherentScoreHM):
             detectors incompatible with a real signal) the values will
             be NaN.
         """
-        if marg_info.q_inds.size == 0:
-            return dict.fromkeys(['d_luminosity', 'dec', 'lon', 'phi_ref',
-                                  'psi', 't_geocenter', 'lnl_marginalized',
-                                  'lnl', 'h_h', 'n_effective', 'n_qmc'],
-                                 np.full(num, np.nan)[()])
+        if marg_info is None or marg_info.q_inds.size == 0:
+            # Order and dtype must match that of regular output
+            out = dict.fromkeys(['d_luminosity', 'dec', 'lon', 'phi_ref',
+                                 'psi', 't_geocenter', 'lnl_marginalized',
+                                 'lnl', 'h_h', 'n_effective', 'n_qmc'],
+                                np.full(num, np.nan)[()])
+            if marg_info is None:
+                out['n_qmc'] = np.full(num, 0)[()]
+            else:
+                out['lnl_marginalized'] = np.full(num, marg_info.lnl_marginalized)[()]
+                out['n_effective'] = np.full(num, marg_info.n_effective)[()]
+                out['n_qmc'] = np.full(num, marg_info.n_qmc)[()]
+            return out
 
+        self._switch_qmc_sequence(marg_info.qmc_sequence_id)
         random_ids = self._rng.choice(len(marg_info.q_inds), size=num,
                                       p=marg_info.weights)
 

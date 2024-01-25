@@ -4,6 +4,7 @@ likelihood over extrinsic parameters from matched-filtering timeseries,
 for quasi-circular waveforms with quadrupole radiation (l, |m|) = (2, 2)
 and aligned spins.
 """
+import warnings
 import numpy as np
 
 from cogwheel import utils
@@ -72,7 +73,8 @@ class CoherentScoreQAS(BaseCoherentScore):
         tdet_inds = tdet_inds[:, physical_mask]
 
         if not any(physical_mask):
-            return MarginalizationInfo(ln_numerators=np.array([]),
+            return MarginalizationInfo(qmc_sequence_id=self._current_qmc_sequence_id,
+                                       ln_numerators=np.array([]),
                                        q_inds=np.array([], int),
                                        sky_inds=np.array([], int),
                                        t_first_det=np.array([]),
@@ -93,7 +95,8 @@ class CoherentScoreQAS(BaseCoherentScore):
             self.lookup_table.lnlike_marginalized(np.abs(dh_q), hh_q)
             + np.log(sky_prior))  # q
 
-        return MarginalizationInfo(ln_numerators=ln_numerators,
+        return MarginalizationInfo(qmc_sequence_id=self._current_qmc_sequence_id,
+                                   ln_numerators=ln_numerators,
                                    q_inds=q_inds,
                                    sky_inds=sky_inds,
                                    t_first_det=t_first_det,
@@ -184,40 +187,13 @@ class CoherentScoreQAS(BaseCoherentScore):
 
     def gen_samples(self, dh_td, hh_d, times, num=None,
                     lnl_marginalized_threshold=-np.inf):
-        """
-        Generate requested number of extrinsic parameter samples.
-
-        Parameters
-        ----------
-        dh_td: (n_t, n_d) complex array
-            Timeseries of complex (d|h), inner product of data against a
-            waveform at reference distance and phase.
-            Decomposed by time, detector.
-
-        hh_d: (n_d,) float array
-            Positive ⟨h|h⟩ inner product of a waveform with itself,
-            decomposed by detector.
-
-        times: (n_t,) float array
-            Timestamps of the timeseries (s).
-
-        num: int, optional
-            Number of samples to generate, defaults to a single sample.
-
-        Return
-        ------
-        samples: dict
-            Values are scalar if `num` is ``None``, else numpy arrays.
-            If ``marg_info`` correspond to an unphysical sample (i.e.,
-            a realization of matched-filtering timeseries in the
-            detectors incompatible with a real signal) the values will
-            be NaN.
-        """
+        """Deprecated, use ``.gen_samples_from_marg_info``"""
+        warnings.warn('Use ``gen_samples_from_marg_info``', DeprecationWarning)
         marg_info = self.get_marginalization_info(dh_td, hh_d, times,
                                                   lnl_marginalized_threshold)
-        return self._gen_samples_from_marg_info(marg_info, num)
+        return self.gen_samples_from_marg_info(marg_info, num)
 
-    def _gen_samples_from_marg_info(self, marg_info, num):
+    def gen_samples_from_marg_info(self, marg_info, num=None):
         """
         Generate requested number of extrinsic parameter samples.
 
@@ -238,6 +214,8 @@ class CoherentScoreQAS(BaseCoherentScore):
             detectors incompatible with a real signal) the values will
             be NaN.
         """
+        self._switch_qmc_sequence(marg_info.qmc_sequence_id)
+
         if marg_info.q_inds.size == 0:
             return dict.fromkeys(['d_luminosity', 'dec', 'lon', 'phi_ref',
                                   'psi', 'iota', 't_geocenter',
