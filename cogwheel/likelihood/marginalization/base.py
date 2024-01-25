@@ -10,17 +10,17 @@ the waveform physics included (precession and/or higher modes).
 ``BaseCoherentScoreHM`` is an abstract subclass that implements phase
 marginalization for waveforms with higher modes.
 """
-from abc import abstractmethod, ABC
 import itertools
+import logging
+from abc import abstractmethod, ABC
 from dataclasses import dataclass, field
 from functools import wraps
-import warnings
-import numpy as np
 from scipy.interpolate import krogh_interpolate, make_interp_spline
 from scipy.special import logsumexp
 from scipy import signal
 from scipy import sparse
 from scipy import stats
+import numpy as np
 
 from cogwheel import utils
 from .lookup_table import LookupTable, LookupTableMarginalizedPhase22
@@ -212,7 +212,6 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     generic steps that the coherent score computation normally requires.
     """
     _searchsorted = np.vectorize(np.searchsorted, signature='(n),(m)->(m)')
-    _temperature_factor = 2
 
     def __init__(self, sky_dict, lookup_table=None, log2n_qmc: int = 11,
                  seed=0, beta_temperature=.5, n_qmc_sequences=128,
@@ -340,21 +339,21 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             # Perform adaptive mixture importance sampling:
             i_chunk += 1
             if i_chunk == len(self._qmc_ind_chunks):
-                warnings.warn('Maximum QMC resolution reached.')
+                logging.warning('Maximum QMC resolution reached.')
                 break
 
-            if marginalization_info.n_effective > 2:
-                if (marginalization_info.lnl_marginalized
-                        < lnl_marginalized_threshold):  # Worthless point
-                    break
-                # Hybridize with KDE of the weighted samples as next proposal:
-                t_arrival_prob = .5 * (
-                    self._kde_t_arrival_prob(marginalization_info, times)
-                    + t_arrival_prob)
-            else:
-                # Increase temperature as next proposal:
-                t_arrival_prob = t_arrival_prob ** (1/self._temperature_factor)
-                t_arrival_prob /= t_arrival_prob.sum(axis=1, keepdims=True)
+            if marginalization_info.n_effective == 0:  # Unphysical point
+                break
+
+            if (marginalization_info.n_effective > 2
+                    and (marginalization_info.lnl_marginalized
+                         < lnl_marginalized_threshold)):  # Worthless point
+                break
+
+            # Hybridize with KDE of the weighted samples as next proposal:
+            t_arrival_prob = .5 * (
+                self._kde_t_arrival_prob(marginalization_info, times)
+                + t_arrival_prob)
 
             marginalization_info.update(self._get_marginalization_info_chunk(
                 d_h_timeseries, h_h, times, t_arrival_prob, i_chunk))
