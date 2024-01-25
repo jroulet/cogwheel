@@ -3,7 +3,7 @@ Define class ``MarginalizedExtrinsicLikelihood``, to use with
 ``IntrinsicIASPrior`` (or similar).
 """
 from abc import abstractmethod
-import warnings
+import logging
 import numpy as np
 import pandas as pd
 
@@ -117,7 +117,7 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         self._ref_dic = {
             'd_luminosity':
                 self.coherent_score.lookup_table.REFERENCE_DISTANCE,
-            'phi_ref':0.}
+            'phi_ref': 0.}
 
         self.dlnl_marginalized_threshold = dlnl_marginalized_threshold
         self._max_lnl_marginalized = -np.inf
@@ -127,7 +127,7 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
 
         _ = self.lnlike(self.par_dic_0)  # Initializes self._max_lnl_marginalized
 
-    def lnlike(self, par_dic):
+    def lnlike_and_metadata(self, par_dic):
         """
         Natural log of the likelihood marginalized over extrinsic
         parameters (sky location, time of arrival, polarization,
@@ -158,15 +158,35 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         # Reject samples with large variance to avoid artifacts. If they
         # should contribute to the posterior, by now we are in trouble
         # anyways.
-        if marg_info.n_effective < 0.1 * self.coherent_score.min_n_effective:
-            warnings.warn('Rejecting sample with lnl_marginalized ~ '
-                          f'{marg_info.lnl_marginalized} due to low '
-                          f'n_effective = {marg_info.n_effective}')
-            return -np.inf
+        if marg_info.n_effective < 2:
+            logging.warning('Rejecting sample with lnl_marginalized ~ '
+                            f'{marg_info.lnl_marginalized:.2f} due to low '
+                            f'n_effective = {marg_info.n_effective:.2f}')
+            return -np.inf, marg_info
 
         self._max_lnl_marginalized = max(self._max_lnl_marginalized,
                                          marg_info.lnl_marginalized)
-        return marg_info.lnl_marginalized
+        return marg_info.lnl_marginalized, marg_info
+
+    def get_blob(self, metadata):
+        """
+        Draw a sample of extrinsic parameters from the conditional posterior.
+
+        Parameters
+        ----------
+        metadata: MarginalizationInfo
+            Second output of ``.lnlike_and_metadata``
+
+        Return
+        ------
+        dict with extrinsic parameters.
+        """
+        marg_info = metadata
+        extrinsic = self.coherent_score.gen_samples_from_marg_info(marg_info)
+
+        gmst = lal.GreenwichMeanSiderealTime(self.event_data.tgps)
+        extrinsic['ra'] = skyloc_angles.lon_to_ra(extrinsic['lon'], gmst)
+        return extrinsic
 
     def postprocess_samples(self, samples: pd.DataFrame, num=None):
         """

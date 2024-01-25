@@ -189,9 +189,9 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         row are the B-spline coefficients for a spline that interpolates
         an array of zeros with a one in the i-th place, on `fbin`.
         In other words, `_coefficients @ _basis_splines` is an array of
-        shape `(nbin, nrfft)` whose i-th row is a spline that interpolates
-        on `fbin` an array of zeros with a one in the i-th place; this
-        spline is evaluated on the RFFT grid.
+        shape `(nbin, nrfft)` whose i-th row is a spline that
+        interpolates on `fbin` an array of zeros with a one in the i-th
+        place; this spline is evaluated on the RFFT grid.
         """
         nbin = len(self.fbin)
         coefficients = np.empty((nbin, nbin))
@@ -349,6 +349,39 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
                    spline_degree=spline_degree,
                    **kwargs)
 
+    def lnlike(self, par_dic):
+        """
+        Return log-likelihood (float).
+        Mainly for backwards compatibility.
+        """
+        return self.lnlike_and_metadata(par_dic)[0]
+
+    @abstractmethod
+    def lnlike_and_metadata(self, par_dic) -> tuple[float, object]:
+        """
+        Return
+        ------
+        lnl: float
+            Log likelihood.
+
+        metadata: object
+            Arbitrary object that stores information to postprocess the
+            posterior samples. See ``.get_blob``.
+        """
+
+    def get_blob(self, metadata) -> dict:
+        """
+        Return dictionary of ancillary information ("blob").
+        The sampler will use this to create extra columns for the
+        posterior samples.
+
+        metadata: object
+            Arbitrary object that stores information to postprocess the
+            posterior samples. Second output of ``lnlike_and_metadata``.
+        """
+        del metadata
+        return {}
+
 
 class RelativeBinningLikelihood(BaseRelativeBinning):
     """
@@ -370,9 +403,17 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         super().__init__(*args, **kwargs)
 
     @check_bounds
-    def lnlike(self, par_dic):
+    def lnlike_and_metadata(self, par_dic):
         """Return log likelihood using relative binning."""
-        return self.lnlike_detectors_no_asd_drift(par_dic) @ self.asd_drift**-2
+        lnl = self.lnlike_detectors_no_asd_drift(par_dic) @ self.asd_drift**-2
+        return lnl, {'lnl': lnl}
+
+    def get_blob(self, metadata):
+        """
+        Return dictionary of ancillary information ("blob"). This will
+        be appended to the posterior samples as extra columns.
+        """
+        return metadata
 
     def lnlike_detectors_no_asd_drift(self, par_dic):
         """
@@ -491,22 +532,6 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
                         hplus_hcross_at_detectors[m_inds],
                         hplus_hcross_at_detectors.conj()[mprime_inds])
         return d_h, h_h
-
-    def postprocess_samples(self, samples):
-        """
-        Add column 'lnl' with log-likelihood to a dataframe of samples.
-
-        This method will be called after sampling and may be overriden
-        by subclasses. (E.g. marginalized likelihoods un-marginalize
-        the distribution in postprocessing.)
-
-        Parameters
-        ----------
-        samples: pandas.DataFrame
-            Rows are samples, columns must contain `.params`.
-        """
-        samples['lnl'] = [self.lnlike(dict(sample))
-                          for _, sample in samples[self.params].iterrows()]
 
     def _set_summary(self):
         """

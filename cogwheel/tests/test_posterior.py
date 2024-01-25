@@ -61,8 +61,8 @@ class PosteriorTestCase(TestCase):
 
     def test_prior(self):
         """
-        Test that the ``.lnprior()`` method of all registered priors returns a
-        float.
+        Test that the ``.lnprior()`` method of all registered priors
+        returns a float.
         """
         for prior in self.priors:
             with self.subTest(prior):
@@ -78,11 +78,11 @@ class PosteriorTestCase(TestCase):
             with self.subTest(like):
                 self.assertIsInstance(like.lnlike(self.par_dic_0), float)
 
-
     def test_posterior(self):
         """
-        Test that the ``.lnposterior()`` method of posteriors from all
-        combinations of priors and likelihoods returns a float.
+        Test that the ``.lnposterior_pardic_and_metadata()`` method of
+        posteriors from all combinations of priors and likelihoods
+        returns the correct types.
         """
         for prior in self.priors:
             sampled_dic = prior.inverse_transform(**self.par_dic_0)
@@ -90,8 +90,13 @@ class PosteriorTestCase(TestCase):
                 if set(prior.standard_params) == set(like.params):
                     with self.subTest((prior, like)):
                         post = Posterior(prior, like)
-                        self.assertIsInstance(post.lnposterior(**sampled_dic),
-                                              float)
+                        lnposterior, par_dic, metadata \
+                            = post.lnposterior_pardic_and_metadata(**sampled_dic)
+                        blob = post.likelihood.get_blob(metadata)
+
+                        self.assertIsInstance(lnposterior, float)
+                        self.assertIsInstance(par_dic, dict)
+                        self.assertIsInstance(blob, dict)
 
 
 if __name__ == '__main__':

@@ -1,9 +1,8 @@
-"""Sample posterior or prior distributions."""
+"""Sample posterior distributions."""
 
 import abc
 import argparse
 import copy
-import datetime
 import inspect
 import multiprocessing
 import pathlib
@@ -18,16 +17,15 @@ import pandas as pd
 import scipy.special
 
 import dynesty
-import pymultinest
-import zeus
-import ultranest
 import nautilus
+import pymultinest
+# import ultranest
+import zeus
 
 from cogwheel import postprocessing
 from cogwheel import utils
 
 SAMPLES_FILENAME = 'samples.feather'
-FINISHED_FILENAME = 'FINISHED.out'
 
 
 class Sampler(abc.ABC, utils.JSONMixin):
@@ -47,19 +45,22 @@ class Sampler(abc.ABC, utils.JSONMixin):
     PROFILING_FILENAME = 'profiling'
     JSON_FILENAME = 'Sampler.json'
 
-    def __init__(self, posterior, run_kwargs=None, sample_prior=False,
+    @property
+    @staticmethod
+    @abc.abstractmethod
+    def _SAMPLER_CLS():
+        """E.g. ``dynesty.DynamicNestedSampler``."""
+
+    _RUN_METHOD_NAME = 'run'  # Method of ``._SAMPLER_CLS``
+
+    def __init__(self, posterior, run_kwargs=None,
                  dir_permissions=utils.DIR_PERMISSIONS,
                  file_permissions=utils.FILE_PERMISSIONS):
         super().__init__()
 
         self.posterior = posterior
-        nfolds = 2**len(self.posterior.prior.folded_params)
 
-        self._lnprob_cols = [f'lnprob{i}' for i in range(nfolds)]
-        self.params = (self.posterior.prior.sampled_params
-                       + self._lnprob_cols)
         self._ndim = len(self.posterior.prior.sampled_params)
-        self._nparams = len(self.params)
 
         self.run_kwargs = (copy.deepcopy(self.DEFAULT_RUN_KWARGS)
                            | (run_kwargs or {}))
@@ -67,53 +68,15 @@ class Sampler(abc.ABC, utils.JSONMixin):
         self.dir_permissions = dir_permissions
         self.file_permissions = file_permissions
 
-        self._get_lnprobs = None  # Set by sample_prior
-        self.sample_prior = sample_prior
+        self._get_lnprobs_pardics_metadatas \
+            = self.posterior.prior.unfold_apply(
+                self.posterior.lnposterior_pardic_and_metadata,
+                otypes=[float, dict, object])
 
-    @property
-    def sample_prior(self):
-        """Whether to sample the prior instead of the posterior."""
-        return self._sample_prior
+        self.sampler = None
+        self._rng = np.random.default_rng()
 
-    @sample_prior.setter
-    def sample_prior(self, sample_prior):
-        self._sample_prior = sample_prior
-        func = (self.posterior.prior.lnprior if sample_prior
-                else self.posterior.lnposterior)
-        self._get_lnprobs = self.posterior.prior.unfold_apply(func)
-
-    def resample(self, samples: pd.DataFrame, seed=0):
-        """
-        Take a pandas DataFrame of folded samples and return another one
-        with samples from the full phase space, drawn with the
-        appropriate probabilities.
-
-        Parameters
-        ----------
-        samples: pandas.DataFrame whose columns match `self.params`
-        seed: Seed for the random number generator, determines to which
-              unfolding the samples are assigned.
-
-        Return
-        ------
-        pandas.DataFrame with columns per
-        `self.posterior.prior.sampled_params`.
-        """
-        prior = self.posterior.prior
-
-        unfold = np.vectorize(prior.unfold, signature='(n)->(m,n)')
-        unfolded = unfold(samples[prior.sampled_params].to_numpy())
-
-        probabilities = utils.exp_normalize(
-            samples[self._lnprob_cols].to_numpy())
-        cumprobs = np.cumsum(probabilities, axis=-1)
-
-        searchsorted = np.vectorize(np.searchsorted, signature='(n),()->()')
-        rng = np.random.default_rng(seed)
-        inds = searchsorted(cumprobs, rng.uniform(size=len(samples)))
-
-        return pd.DataFrame(unfolded[np.arange(len(inds)), inds],
-                            columns=prior.sampled_params)
+        self._blobs_dtype = self._get_blobs_dtype()
 
     def get_rundir(self, parentdir):
         """
@@ -218,10 +181,6 @@ class Sampler(abc.ABC, utils.JSONMixin):
         os.system(f'bsub < {batch_path.resolve()}')
         print(f'Submitted job {job_name!r}.')
 
-    @abc.abstractmethod
-    def _run(self):
-        """Sample the distribution."""
-
     def run(self, rundir):
         """
         Make a directory to save results and run sampler.
@@ -235,13 +194,8 @@ class Sampler(abc.ABC, utils.JSONMixin):
                      file_permissions=self.file_permissions, overwrite=True)
 
         with Profile() as profiler:
-            exit_code = self._run()
-            with open(rundir/FINISHED_FILENAME, 'w', encoding='utf-8') as file:
-                file.write(f'{exit_code}\n{datetime.datetime.now()}')
-
+            self._run()
             samples = self.load_samples()
-            self.posterior.prior.transform_samples(samples)
-            self.posterior.likelihood.postprocess_samples(samples)
             samples.to_feather(rundir/SAMPLES_FILENAME)
 
         profiler.dump_stats(rundir/self.PROFILING_FILENAME)
@@ -250,10 +204,10 @@ class Sampler(abc.ABC, utils.JSONMixin):
             path.chmod(self.file_permissions)
 
     @abc.abstractmethod
-    def load_samples(self):
+    def _get_points_weights_blobs(self):
         """
-        Collect samples, resample from them to undo the parameter
-        folding. Return a pandas.DataFrame with the samples.
+        Collect samples, return arrays of posterior points, weights (if
+        applicable, else None) and blobs (struct).
         """
 
     def load_evidence(self) -> dict:
@@ -281,6 +235,78 @@ class Sampler(abc.ABC, utils.JSONMixin):
         # sampler subclass.
         super().to_json(dirname, basename or self.JSON_FILENAME, **kwargs)
 
+    def _lnfoldedprob_and_blob(self, folded_par_vals, as_dict=False):
+        """
+        Return log of the folded probability and a blob with extra
+        information. The blob is provided by the likelihood class
+        (self.posterior.likelihood.get_blob), and additionally this
+        method chooses a random unfolding based on the probabilities and
+        appends the unfolded parameter values to the blob.
+        """
+        lnprobs, par_dics, metadatas = self._get_lnprobs_pardics_metadatas(
+            *folded_par_vals)
+
+        ln_folded_prob = scipy.special.logsumexp(lnprobs)
+
+        if np.isneginf(ln_folded_prob):
+            i_unfold = 0
+        else:
+            probabilities = np.exp(lnprobs - ln_folded_prob)
+            i_unfold = self._rng.choice(len(probabilities), p=probabilities)
+
+        blob = (par_dics[i_unfold]
+                | self.posterior.likelihood.get_blob(metadatas[i_unfold]))
+
+        if as_dict:
+            return ln_folded_prob, blob
+
+        return ln_folded_prob, *blob.values()
+
+    def _get_blobs_dtype(self):
+        """Return list of 2-tuples with name and type of blob items."""
+        folded_par_vals = (
+            self.posterior.prior.cubemin
+            + self._rng.uniform(0, self.posterior.prior.folded_cubesize))
+        _, blob = self._lnfoldedprob_and_blob(folded_par_vals, as_dict=True)
+        return [(key, type(val)) for key, val in blob.items()]
+
+    def _get_sampler_kwargs(self):
+        sampler_keys = (set(inspect.signature(self._SAMPLER_CLS).parameters)
+                        & self.run_kwargs.keys())
+        return {par: self.run_kwargs[par] for par in sampler_keys}
+
+    def _get_run_kwargs(self):
+        run_method = getattr(self._SAMPLER_CLS, self._RUN_METHOD_NAME)
+        run_keys = (set(inspect.signature(run_method).parameters)
+                    & self.run_kwargs.keys())
+        return {par: self.run_kwargs[par] for par in run_keys}
+
+    def _run(self):
+        sampler_kwargs = self._get_sampler_kwargs()
+        run_kwargs = self._get_run_kwargs()
+
+        self.sampler = self._SAMPLER_CLS(**sampler_kwargs)
+        run = getattr(self.sampler, self._RUN_METHOD_NAME)
+        run(**run_kwargs)
+
+    def load_samples(self):
+        """Return a pandas.DataFrame with the posterior samples."""
+        points, weights, blobs = self._get_points_weights_blobs()
+
+        sampled_params = list(self.posterior.prior.sampled_params)
+
+        for par in self.posterior.prior.folded_params:
+            sampled_params[sampled_params.index(par)] = f'folded_{par}'
+
+        samples = pd.DataFrame(points, columns=sampled_params)
+
+        if weights is not None:
+            samples[utils.WEIGHTS_NAME] = weights
+
+        utils.update_dataframe(samples, pd.DataFrame(blobs))
+
+        return samples.dropna(ignore_index=True)
+
 
 class PyMultiNest(Sampler):
     """Sample a posterior or prior using PyMultiNest."""
@@ -288,29 +314,39 @@ class PyMultiNest(Sampler):
                           'n_live_points': 2048,
                           'evidence_tolerance': 1/4}
 
-    @wraps(Sampler.__init__)
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.run_kwargs['wrapped_params'] = [
+    class _SAMPLER_CLS:
+        run = staticmethod(pymultinest.run)
+
+    def _get_run_kwargs(self):
+        run_kwargs = super()._get_run_kwargs()
+
+        run_kwargs['wrapped_params'] = [
             par in self.posterior.prior.periodic_params
             for par in self.posterior.prior.sampled_params]
 
-    def _run(self):
-        pymultinest.run(self._lnprob_pymultinest, self._cubetransform,
-                        self._ndim, self._nparams, **self.run_kwargs)
+        run_kwargs['LogLikelihood'] = self._lnprob_pymultinest
+        run_kwargs['Prior'] = self._cubetransform
+        run_kwargs['n_dims'] = self._ndim
+        run_kwargs['n_params'] = self._ndim + len(self._blobs_dtype)
 
-    def load_samples(self):
+        return run_kwargs
+
+    def _get_points_weights_blobs(self):
         """
-        Collect pymultinest samples, resample from them to undo the
-        parameter folding. Return a pandas.DataFrame with the samples.
+        Collect samples, return arrays of posterior points, weights (if
+        applicable, else None) and blobs (struct).
         """
         fname = os.path.join(self.run_kwargs['outputfiles_basename'],
                              'post_equal_weights.dat')
         if not os.path.exists(fname):
             fname = fname[:100]  # Weird PyMultinest filename length limit
 
-        folded = pd.DataFrame(np.loadtxt(fname)[:, :-1], columns=self.params)
-        return self.resample(folded)
+        points = np.loadtxt(fname, usecols=range(self._ndim))
+
+        blob_cols = range(self._ndim, self._ndim + len(self._blobs_dtype))
+        blobs = np.loadtxt(fname, usecols=blob_cols, dtype=self._blobs_dtype)
+
+        return points, None, blobs
 
     def load_evidence(self):
         evdic = {}
@@ -326,16 +362,18 @@ class PyMultiNest(Sampler):
                 evdic['log_ev_std_NIS'] = float(line.strip().split()[7])
         return evdic
 
-    def _lnprob_pymultinest(self, par_vals, *_):
+    def _lnprob_pymultinest(self, folded_par_vals, *_):
         """
-        Update the extra entries `par_vals[n_dim : n_params+1]` with the
-        log posterior evaluated at each unfold. Return the logarithm of
-        the folded posterior.
+        Update the extra entries `folded_par_vals[n_dim : n_params+1]`
+        with the blob. Return the logarithm of the folded posterior.
         """
-        lnprobs = self._get_lnprobs(*[par_vals[i] for i in range(self._ndim)])
-        for i, lnprob in enumerate(lnprobs):
-            par_vals[self._ndim + i] = lnprob
-        return scipy.special.logsumexp(lnprobs)
+        lnfoldedprob, *blob = self._lnfoldedprob_and_blob(
+            [folded_par_vals[i] for i in range(self._ndim)])
+
+        for i, blob_value in enumerate(blob):
+            folded_par_vals[self._ndim + i] = blob_value
+
+        return lnfoldedprob
 
     def _cubetransform(self, cube, *_):
         for i in range(self._ndim):
@@ -354,65 +392,42 @@ class PyMultiNest(Sampler):
 
 class Dynesty(Sampler):
     """Sample a posterior or prior using ``dynesty``."""
-    DEFAULT_RUN_KWARGS = {}
+    _SAMPLER_CLS = dynesty.DynamicNestedSampler
+    _RUN_METHOD_NAME = 'run_nested'
+    DEFAULT_RUN_KWARGS = {'sample': 'rwalk'}
 
-    @wraps(Sampler.__init__)
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.sampler = None
+    def _get_sampler_kwargs(self):
+        sampler_kwargs = super()._get_sampler_kwargs()
 
-    def _run(self):
-        periodic = [self.posterior.prior.sampled_params.index(par)
-                    for par in self.posterior.prior.periodic_params]
-        reflective = [self.posterior.prior.sampled_params.index(par)
-                      for par in self.posterior.prior.reflective_params]
+        sampler_kwargs['periodic'] = [
+            self.posterior.prior.sampled_params.index(par)
+            for par in self.posterior.prior.periodic_params] or None
 
-        sampler_keys = (
-            set(inspect.signature(dynesty.DynamicNestedSampler).parameters)
-            & self.run_kwargs.keys())
-        sampler_kwargs = {par: self.run_kwargs[par] for par in sampler_keys}
+        sampler_kwargs['reflective'] = [
+            self.posterior.prior.sampled_params.index(par)
+            for par in self.posterior.prior.reflective_params] or None
 
-        run_keys = self.run_kwargs.keys() - sampler_keys
-        run_kwargs = {par: self.run_kwargs[par] for par in run_keys}
+        sampler_kwargs['loglikelihood'] = self._lnprob_dynesty
+        sampler_kwargs['prior_transform'] = self._cubetransform
+        sampler_kwargs['ndim'] = self._ndim
+        sampler_kwargs['blob'] = True
 
-        self.sampler = dynesty.DynamicNestedSampler(
-            self._lnprob_dynesty,
-            self._cubetransform,
-            len(self.posterior.prior.sampled_params),
-            rstate=np.random.default_rng(0),
-            periodic=periodic or None,
-            reflective=reflective or None,
-            sample='rwalk',
-            **sampler_kwargs)
-        self.sampler.run_nested(**run_kwargs)
+        return sampler_kwargs
 
-    def load_samples(self):
-        """
-        Collect dynesty samples, resample from them to undo the
-        parameter folding. Return a ``pandas.DataFrame`` with samples.
-        """
-        folded = pd.DataFrame(self.sampler.results.samples,
-                              columns=self.posterior.prior.sampled_params)
-
-        # ``dynesty`` doesn't allow to save samples' metadata, so we
-        # have to recompute ``lnprobs``:
-        lnprobs = pd.DataFrame(
-            [self._get_lnprobs(**row) for _, row in folded.iterrows()],
-            columns=self._lnprob_cols)
-        utils.update_dataframe(folded, lnprobs)
-
-        samples = self.resample(folded)
-        samples[utils.WEIGHTS_NAME] = np.exp(
-            self.sampler.results.logwt - self.sampler.results.logwt.max())
-        return samples
-
-    def _lnprob_dynesty(self, par_vals):
+    def _lnprob_dynesty(self, folded_par_vals):
         """Return the logarithm of the folded probability density."""
-        return scipy.special.logsumexp(self._get_lnprobs(*par_vals))
+        lnfoldedprob, *blob = self._lnfoldedprob_and_blob(folded_par_vals)
+        blob_rec = np.rec.array(blob, dtype=self._blobs_dtype)
+        return lnfoldedprob, blob_rec
 
     def _cubetransform(self, cube):
         return (self.posterior.prior.cubemin
                 + cube * self.posterior.prior.folded_cubesize)
+
+    def _get_points_weights_blobs(self):
+        """Collect dynesty samples."""
+        results = self.sampler.results
+        return results.samples, results.importance_weights(), results.blob
 
 
 class Zeus(Sampler):
@@ -443,9 +458,11 @@ class Zeus(Sampler):
             # ('SplitRCallback', {}),
             # ('AutocorrelationCallback', {}),
             # ('MinIterCallback', {'nmin': 100}),
-            ('SaveProgressCallback', {'filename': '{rundir}/chain.h5'})],
-        'use_injection_value': False,  # "Cheat" and initialize walkers near injection
+            ('SaveProgressCallback', {'filename': '{rundir}/chain.h5'})]
         }
+
+    _SAMPLER_CLS = zeus.EnsembleSampler
+    _RUN_METHOD_NAME = 'run_mcmc'
 
     @wraps(Sampler.__init__)
     def __init__(self, *args, **kwargs):
@@ -453,13 +470,21 @@ class Zeus(Sampler):
 
         self.sampler = None
         self._rundir = None
+        self._folded_cubemax = (self.posterior.prior.cubemin
+                                + self.posterior.prior.folded_cubesize)
 
-        with warnings.catch_warnings():
-            warnings.filterwarnings('ignore',
-                                    'invalid value encountered in add')
-            self._folded_cubemax = (self.posterior.prior.cubemin
-                                   + self.posterior.prior.folded_cubesize)
-        self._folded_cubemax[np.isnan(self._folded_cubemax)] = np.inf
+        # Zeus won't stop at boundaries so we must intercept out-of-bound
+        # proposals. Implement a blob of `nan`s to return in this case.
+        # These moves are always rejected so this blob should never appear.
+        self._nan_blob = []
+        for _, dtype in self._blobs_dtype:
+            try:
+                self._nan_blob.append(dtype(np.nan))
+            except (ValueError, TypeError):
+                try:
+                    self._nan_blob.append(dtype(None))
+                except (ValueError, TypeError):
+                    self._nan_blob.append(dtype(-1))
 
     @wraps(Sampler.run)
     def run(self, rundir):
@@ -468,12 +493,12 @@ class Zeus(Sampler):
 
     def _run(self):
         sampler_kwargs = self._get_sampler_kwargs()
-        run_mcmc_kwargs = self._get_run_mcmc_kwargs()
+        run_kwargs = self._get_run_kwargs()
 
         processes = self.run_kwargs.get('processes', 1)
         if processes == 1:  # Serial
             self.sampler = zeus.EnsembleSampler(**sampler_kwargs)
-            self.sampler.run_mcmc(**run_mcmc_kwargs)
+            self.sampler.run_mcmc(**run_kwargs)
         else:  # Parallel
             if processes > sampler_kwargs['nwalkers'] / 2:
                 warnings.warn('Some processes will likely be idle, consider '
@@ -482,13 +507,10 @@ class Zeus(Sampler):
             with multiprocessing.Pool(processes) as pool:
                 self.sampler = zeus.EnsembleSampler(pool=pool,
                                                     **sampler_kwargs)
-                self.sampler.run_mcmc(**run_mcmc_kwargs)
+                self.sampler.run_mcmc(**run_kwargs)
 
     def _get_sampler_kwargs(self):
-        sampler_keys = (
-            set(inspect.signature(zeus.EnsembleSampler).parameters)
-            & self.run_kwargs.keys())
-        sampler_kwargs = {par: self.run_kwargs[par] for par in sampler_keys}
+        sampler_kwargs = super()._get_sampler_kwargs()
 
         global _lnprob_zeus  # Hack for multiprocessing to work
         def  _lnprob_zeus(*args, **kwargs):
@@ -497,17 +519,14 @@ class Zeus(Sampler):
         sampler_kwargs.update(
             ndim=self._ndim,
             logprob_fn=_lnprob_zeus,
-            blobs_dtype=[(col, float) for col in self._lnprob_cols])
+            blobs_dtype=self._blobs_dtype)
         return sampler_kwargs
 
-    def _get_run_mcmc_kwargs(self):
-        run_mcmc_keys = (
-            set(inspect.signature(zeus.EnsembleSampler.run_mcmc).parameters)
-            & self.run_kwargs.keys())
-        run_mcmc_kwargs = {par: self.run_kwargs[par] for par in run_mcmc_keys}
+    def _get_run_kwargs(self):
+        run_kwargs = super()._get_run_kwargs()
 
-        if 'start' not in run_mcmc_kwargs:
-            run_mcmc_kwargs['start'] = self._get_start()  # Initialize walkers
+        if 'start' not in run_kwargs:
+            run_kwargs['start'] = self._get_start()  # Initialize walkers
 
         # Instantiate callbacks from the JSON-serializable input:
         callbacks = self.run_kwargs.get('callbacks', [])
@@ -516,35 +535,27 @@ class Zeus(Sampler):
             # Dynamically interpolate ``rundir`` to filename:
             save_progress_kwargs['filename'] = filename.format(
                 rundir=self._rundir)
-        run_mcmc_kwargs['callbacks'] = [getattr(zeus.callbacks, name)(**kwargs)
-                                        for name, kwargs in callbacks]
-        return run_mcmc_kwargs
+        run_kwargs['callbacks'] = [getattr(zeus.callbacks, name)(**kwargs)
+                                   for name, kwargs in callbacks]
+        return run_kwargs
 
-    def load_samples(self):
-        """
-        Collect zeus samples, resample from them to undo the parameter
-        folding. Return a pandas.DataFrame with the samples.
-        """
+    def _get_points_weights_blobs(self):
         kwargs = {par: self.run_kwargs[par]
                   for par in self.run_kwargs.keys() & {'discard', 'thin'}}
-        folded = pd.DataFrame(self.sampler.get_chain(flat=True, **kwargs),
-                              columns=self.posterior.prior.sampled_params)
-
-        lnprobs = pd.DataFrame(self.sampler.get_blobs(flat=True, **kwargs))
-        utils.update_dataframe(folded, lnprobs)
-        return self.resample(folded)
+        points = self.sampler.get_chain(flat=True, **kwargs)
+        blobs = self.sampler.get_blobs(flat=True, **kwargs)
+        return points, None, blobs
 
     def _lnprob_zeus(self, par_vals):
         """
-        Return the logarithm of the folded probability density and
-        the individual log probabilities at each fold.
+        Return the logarithm of the folded probability density and blob.
         """
+        # Intercept out-of-bound proposals:
         if (np.any(par_vals < self.posterior.prior.cubemin)
                 or np.any(par_vals > self._folded_cubemax)):
-            return (-np.inf,) * (1+2**len(self.posterior.prior.folded_params))
+            return -np.inf, *self._nan_blob
 
-        lnprobs = self._get_lnprobs(*par_vals)
-        return max(-1e100, scipy.special.logsumexp(lnprobs)), *lnprobs
+        return self._lnfoldedprob_and_blob(par_vals)
 
     def _get_start(self, rscale=1e-2, max_lnprob_drop=10.):
         """
@@ -561,24 +572,16 @@ class Zeus(Sampler):
             Keep redrawing samples if their log probability is below
             that of other samples by more than this.
         """
-        if (self.run_kwargs.get('use_injection_value', False)
-                and self.posterior.likelihood.event_data.injection):
-            par_dic_0 = self.posterior.likelihood.event_data.injection['par_dic']
-        else:
-            par_dic_0 = self.posterior.likelihood.par_dic_0
-
+        par_dic_0 = self.posterior.likelihood.par_dic_0
         sampled_par_dic = self.posterior.prior.inverse_transform(**par_dic_0)
 
         loc = self.posterior.prior.fold(**sampled_par_dic)
         scale = rscale * self.posterior.prior.folded_cubesize
-        scale[np.isinf(scale)] = rscale  # Interpret scale as absolute
-                                         # if range is inf
         a = (self.posterior.prior.cubemin - loc) / scale
         b = (self._folded_cubemax - loc) / scale
 
-        nparams = len(self.posterior.prior.sampled_params)
         mask = np.full(self.run_kwargs['nwalkers'], True)
-        start = np.empty((self.run_kwargs['nwalkers'], nparams))
+        start = np.empty((self.run_kwargs['nwalkers'], self._ndim))
         log_prob = np.empty(self.run_kwargs['nwalkers'])
 
         while any(mask):  # Draw positions for these walkers
@@ -587,146 +590,129 @@ class Zeus(Sampler):
                 scale=scale,
                 a=a,
                 b=b,
-                size=(np.count_nonzero(mask), nparams))
+                size=(np.count_nonzero(mask), self._ndim))
             log_prob[mask] = [self._lnprob_zeus(x)[0] for x in start[mask]]
             mask = log_prob < log_prob.max() - max_lnprob_drop
 
         return start
 
 
-class UltraNest(Sampler):
-    """Sample a posterior or prior using UltraNest."""
-    DEFAULT_RUN_KWARGS = {'Lepsilon': 0.5,
-                          'frac_remain': 1e-2,
-                          'min_ess': 1000}
 
-    def _cubetransform(self, cube):
-        return (self.posterior.prior.cubemin
-                + cube * self.posterior.prior.folded_cubesize)
+# class UltraNest(Sampler):
+#     """Sample a posterior or prior using UltraNest."""
+#     DEFAULT_RUN_KWARGS = {'Lepsilon': 0.5,
+#                           'frac_remain': 1e-2,
+#                           'min_ess': 1000}
 
-    def _run(self):
-        sampler_kwargs = self._get_sampler_kwargs()
-        run_kwargs = self._get_run_kwargs()
+#     def _cubetransform(self, cube):
+#         return (self.posterior.prior.cubemin
+#                 + cube * self.posterior.prior.folded_cubesize)
 
-        self.sampler = ultranest.ReactiveNestedSampler(**sampler_kwargs)
-        self.sampler.run(**run_kwargs)
+#     def _run(self):
+#         sampler_kwargs = self._get_sampler_kwargs()
+#         run_kwargs = self._get_run_kwargs()
 
-    def _get_sampler_kwargs(self):
-        sampler_keys = (
-            set(inspect.signature(ultranest.ReactiveNestedSampler).parameters)
-            & self.run_kwargs.keys())
-        sampler_kwargs = {par: self.run_kwargs[par] for par in sampler_keys}
+#         self.sampler = ultranest.ReactiveNestedSampler(**sampler_kwargs)
+#         self.sampler.run(**run_kwargs)
 
-        wrapped_params = [par in self.posterior.prior.periodic_params
-                          for par in self.posterior.prior.sampled_params]
+#     def _get_sampler_kwargs(self):
+#         sampler_keys = (
+#             set(inspect.signature(ultranest.ReactiveNestedSampler).parameters)
+#             & self.run_kwargs.keys())
+#         sampler_kwargs = {par: self.run_kwargs[par] for par in sampler_keys}
 
-        sampler_kwargs.update(
-            param_names=self.posterior.prior.sampled_params,
-            wrapped_params=wrapped_params,
-            transform=self._cubetransform,
-            loglike=self._lnprob_ultranest)
-        return sampler_kwargs
+#         wrapped_params = [par in self.posterior.prior.periodic_params
+#                           for par in self.posterior.prior.sampled_params]
 
-    def _get_run_kwargs(self):
-        run_keys = (
-            set(inspect.signature(ultranest.ReactiveNestedSampler.run).parameters)
-            & self.run_kwargs.keys())
-        run_kwargs = {par: self.run_kwargs[par] for par in run_keys}
-        return run_kwargs
+#         sampler_kwargs.update(
+#             param_names=self.posterior.prior.sampled_params,
+#             wrapped_params=wrapped_params,
+#             transform=self._cubetransform,
+#             loglike=self._lnprob_ultranest)
+#         return sampler_kwargs
 
-    def _lnprob_ultranest(self, par_vals):
-        """Return the logarithm of the folded probability density."""
-        lnprobs = self._get_lnprobs(*par_vals)
-        return max(-1e100, scipy.special.logsumexp(lnprobs))
+#     def _get_run_kwargs(self):
+#         run_keys = (
+#             set(inspect.signature(ultranest.ReactiveNestedSampler.run).parameters)
+#             & self.run_kwargs.keys())
+#         run_kwargs = {par: self.run_kwargs[par] for par in run_keys}
+#         return run_kwargs
 
-    def load_samples(self):
-        """
-        Collect ultranest samples, resample from them to undo the
-        parameter folding. Return a ``pandas.DataFrame`` with samples.
-        """
-        log_dir = pathlib.Path(self.run_kwargs['log_dir'])
-        resume = self.run_kwargs.get(
-            'resume', inspect.signature(
-                ultranest.ReactiveNestedSampler).parameters['resume'].default)
-        if resume == 'subfolder':
-            path = sorted(log_dir.glob('run*/chains/weighted_post.txt')
-                          )[-1]
-        else:
-            path = log_dir.joinpath('chains', 'weighted_post.txt')
+#     def _lnprob_ultranest(self, par_vals):
+#         """Return the logarithm of the folded probability density."""
+#         lnprobs = self._get_lnprobs(*par_vals)
+#         return max(-1e100, scipy.special.logsumexp(lnprobs))
 
-        result = pd.read_csv(path, sep='\s+')
-        folded = result[self.posterior.prior.sampled_params]
+#     def load_samples(self):
+#         """
+#         Collect ultranest samples, resample from them to undo the
+#         parameter folding. Return a ``pandas.DataFrame`` with samples.
+#         """
+#         log_dir = pathlib.Path(self.run_kwargs['log_dir'])
+#         resume = self.run_kwargs.get(
+#             'resume', inspect.signature(
+#                 ultranest.ReactiveNestedSampler).parameters['resume'].default)
+#         if resume == 'subfolder':
+#             path = sorted(log_dir.glob('run*/chains/weighted_post.txt')
+#                           )[-1]
+#         else:
+#             path = log_dir.joinpath('chains', 'weighted_post.txt')
 
-        # ``ultranest`` doesn't allow to save samples' metadata, so we
-        # have to recompute ``lnprobs``:
-        lnprobs = pd.DataFrame(
-            [self._get_lnprobs(**row) for _, row in folded.iterrows()],
-            columns=self._lnprob_cols)
-        utils.update_dataframe(folded, lnprobs)
+#         result = pd.read_csv(path, sep='\s+')
+#         folded = result[self.posterior.prior.sampled_params]
 
-        samples = self.resample(folded)
-        samples[utils.WEIGHTS_NAME] = result['weight']
-        return samples
+#         # ``ultranest`` doesn't allow to save samples' metadata, so we
+#         # have to recompute ``lnprobs``:
+#         lnprobs = pd.DataFrame(
+#             [self._get_lnprobs(**row) for _, row in folded.iterrows()],
+#             columns=self._lnprob_cols)
+#         utils.update_dataframe(folded, lnprobs)
 
-    @wraps(utils.JSONMixin.to_json)
-    def to_json(self, dirname, *args, **kwargs):
-        """Update run_kwargs['log_dir'] before saving."""
-        self.run_kwargs['log_dir'] = str(dirname)
-        super().to_json(dirname, *args, **kwargs)
+#         samples = self.resample(folded)
+#         samples[utils.WEIGHTS_NAME] = result['weight']
+#         return samples
+
+#     @wraps(utils.JSONMixin.to_json)
+#     def to_json(self, dirname, *args, **kwargs):
+#         """Update run_kwargs['log_dir'] before saving."""
+#         self.run_kwargs['log_dir'] = str(dirname)
+#         super().to_json(dirname, *args, **kwargs)
 
 
 class Nautilus(Sampler):
     """Sample a posterior or prior using Nautilus."""
+    _SAMPLER_CLS = nautilus.Sampler
     DEFAULT_RUN_KWARGS = {'verbose': True}
 
-    def _run(self):
-        sampler_kwargs = self._get_sampler_kwargs()
-        run_kwargs = self._get_run_kwargs()
-
-        self.sampler = nautilus.Sampler(**sampler_kwargs)
-        self.sampler.run(**run_kwargs)
-
     def _get_sampler_kwargs(self):
-        sampler_keys = (
-            set(inspect.signature(nautilus.Sampler).parameters)
-            & self.run_kwargs.keys())
-        sampler_kwargs = {par: self.run_kwargs[par] for par in sampler_keys}
+        sampler_kwargs = super()._get_sampler_kwargs()
 
         prior = nautilus.Prior()
-        for par, rng in self.posterior.prior.range_dic.items():
-            prior.add_parameter(par, tuple(rng))
+        ranges = zip(self.posterior.prior.cubemin,
+                     self.posterior.prior.cubemin
+                     + self.posterior.prior.folded_cubesize)
+        for par, rng in zip(self.posterior.prior.sampled_params, ranges):
+            prior.add_parameter(par, rng)
 
-        blobs_dtype=[(col, float) for col in self._lnprob_cols]
+        sampler_kwargs['prior'] = prior
+        sampler_kwargs['likelihood'] = self._lnfoldedprob_and_blob
+        sampler_kwargs['blobs_dtype'] = self._blobs_dtype
+        sampler_kwargs['pass_dict'] = False
+        return sampler_kwargs
 
-        return sampler_kwargs | {'prior': prior,
-                                 'likelihood': self._lnprob_nautilus,
-                                 'blobs_dtype': blobs_dtype}
+    def _get_points_weights_blobs(self):
+        """Collect Nautilus samples."""
+        points, log_w, _, blobs = self.sampler.posterior(return_blobs=True)
+        return points, np.exp(log_w), blobs
 
-    def _get_run_kwargs(self):
-        run_keys = (
-            set(inspect.signature(nautilus.Sampler.run).parameters)
-            & self.run_kwargs.keys())
-        run_kwargs = {par: self.run_kwargs[par] for par in run_keys}
-        return run_kwargs
-
-    def _lnprob_nautilus(self, par_dic):
-        """Return the logarithm of the folded probability density."""
-        lnprobs = self._get_lnprobs(**par_dic)
-        return scipy.special.logsumexp(lnprobs), *lnprobs
-
-    def load_samples(self):
+    @wraps(utils.JSONMixin.to_json)
+    def to_json(self, dirname, *args, **kwargs):
         """
-        Collect Nautilus samples, resample from them to undo the
-        parameter folding. Return a ``pandas.DataFrame`` with samples.
+        Update run_kwargs['filepath'] before saving.
+        Parameters are as in `utils.JSONMixin.to_json()`
         """
-        points, log_w, log_l, blobs = self.sampler.posterior(return_blobs=True)
-        lnprobs = pd.DataFrame(blobs)
-        folded = pd.DataFrame(points, columns=self.posterior.prior.sampled_params)
-        utils.update_dataframe(folded, lnprobs)
-
-        samples = self.resample(folded)
-        samples[utils.WEIGHTS_NAME] = np.exp(log_w)
-        return samples
+        self.run_kwargs['filepath'] = os.path.join(dirname, 'checkpoint.hdf5')
+        super().to_json(dirname, *args, **kwargs)
 
 
 def main(sampler_path, postprocess=True):

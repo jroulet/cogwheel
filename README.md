@@ -73,7 +73,6 @@ Instance of the abstract class `cogwheel.sampling.Sampler` (e.g. `cogwheel.sampl
 
 * Interfaces with third-party stochastic samplers.
 * Constructs the [folded distribution](https://arxiv.org/pdf/2207.03508.pdf#section*.15) (to mitigate multimodality).
-* The distribution to sample can be either the posterior or the prior.
 * Reconstructs the original distribution from samples in the folded space.
 * Can run live or submit a job to a scheduler (SLURM, LSF).
 

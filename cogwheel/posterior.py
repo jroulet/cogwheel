@@ -59,20 +59,44 @@ class Posterior(utils.JSONMixin):
             = 2 ** n_slow_folded
 
         # Match lnposterior signature to that of transform
-        self.lnposterior.__func__.__signature__ = inspect.signature(
-            self.prior.__class__.transform)
+        signature = inspect.signature(self.prior.__class__.transform)
+        self.lnposterior.__func__.__signature__ = signature
+        self.lnposterior_pardic_and_metadata.__func__.__signature__ = signature
 
     def lnposterior(self, *args, **kwargs):
         """
         Natural logarithm of the posterior probability density in
         the space of sampled parameters (does not apply folding).
         """
+        return self.lnposterior_pardic_and_metadata(*args, **kwargs)[0]
+
+    def lnposterior_pardic_and_metadata(self, *args, **kwargs):
+        """
+        Parameters
+        ----------
+        *args, **kwargs: Sampled parameters.
+
+        Return
+        ------
+        lnposterior: float
+            Natural logarithm of the posterior probability density in
+            the space of sampled parameters (does not apply folding).
+
+        standard_par_dic: dict
+            Standard parameters.
+
+        metadata: object
+            Used to compute ancillary information about samples. This
+            will vary depending on the likelihood implementation.
+        """
         lnprior, standard_par_dic = self.prior.lnprior_and_transform(
             *args, **kwargs)
 
         if np.isneginf(lnprior):
-            return -np.inf
-        return lnprior + self.likelihood.lnlike(standard_par_dic)
+            return -np.inf, standard_par_dic, None
+
+        lnl, metadata = self.likelihood.lnlike_and_metadata(standard_par_dic)
+        return lnprior + lnl, standard_par_dic, metadata
 
     @classmethod
     def from_event(
@@ -199,7 +223,7 @@ class Posterior(utils.JSONMixin):
     def get_eventdir(self, parentdir):
         """
         Return directory name in which the Posterior instance should be
-        saved, of the form '{parentdir}/{prior_name}/{eventname}/'
+        saved, of the form '{parentdir}/{prior_name}/{eventname}/'.
         """
         return utils.get_eventdir(parentdir, self.prior.__class__.__name__,
                                   self.likelihood.event_data.eventname)
