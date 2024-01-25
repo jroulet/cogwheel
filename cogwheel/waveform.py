@@ -222,7 +222,7 @@ def within_bounds(par_dic: dict) -> bool:
                 [(par_dic['s1x_n'], par_dic['s1y_n'], par_dic['s1z']),
                  (par_dic['s2x_n'], par_dic['s2y_n'], par_dic['s2z'])],
                 axis=1) <= 1)
-            and par_dic['iota'] <= np.pi
+            and par_dic.get('iota', 0) <= np.pi
             and np.abs(par_dic.get('dec', 0)) <= np.pi/2
            )
 
