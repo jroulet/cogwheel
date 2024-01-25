@@ -256,6 +256,9 @@ class WaveformGenerator(utils.JSONMixin):
                  n_cached_waveforms=1, lalsimulation_commands=()):
         super().__init__()
 
+        if approximant == 'IMRPhenomXODE':
+            from cogwheel.waveform_models import xode as _  # TODO more elegant
+
         self.detector_names = tuple(detector_names)
         self.tgps = tgps
         self.tcoarse = tcoarse
