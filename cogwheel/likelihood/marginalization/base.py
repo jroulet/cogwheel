@@ -191,12 +191,17 @@ class MarginalizationInfoHM(MarginalizationInfo):
 
     d_h: float array of length n_important
         Real inner product ⟨d|h⟩.
+
+    flip_psi: int array of length n_important
+        Whether to add pi/2 to psi.
     """
     o_inds: np.ndarray
+    flip_psi: np.ndarray
 
     @wraps(MarginalizationInfo.update)
     def update(self, other):
         self.o_inds = np.concatenate([self.o_inds, other.o_inds])
+        self.flip_psi = np.concatenate([self.flip_psi, other.flip_psi])
         super().update(other)
 
 
@@ -661,7 +666,7 @@ class BaseCoherentScoreHM(BaseCoherentScore):
             phi_ref)).astype(np.complex64)  # mo
         self._phi_ref = phi_ref
 
-    def _get_lnnumerators_important(self, dh_qo, hh_qo, sky_prior):
+    def _get_lnnumerators_important_flippsi(self, dh_qo, hh_qo, sky_prior):
         """
         Parameters
         ----------
@@ -690,8 +695,13 @@ class BaseCoherentScoreHM(BaseCoherentScore):
             corresponding to orbital phases.
             They correspond to samples with sufficiently high maximum
             likelihood over distance to be included in the integral.
+
+        flip_psi: bool array of length n_important
+            Whether to add pi/2 to psi (which inverts the sign of ⟨d|h⟩
+            and preserves ⟨h|h⟩).
         """
-        max_over_distance_lnl = dh_qo * np.abs(dh_qo) / hh_qo / 2  # qo
+        flip_psi = np.signbit(dh_qo)  # qo
+        max_over_distance_lnl = 0.5 * dh_qo**2 / hh_qo  # qo
         threshold = np.max(max_over_distance_lnl) - self.DLNL_THRESHOLD
         important = np.where(max_over_distance_lnl > threshold)
 
@@ -701,4 +711,4 @@ class BaseCoherentScoreHM(BaseCoherentScore):
             + np.log(sky_prior)[important[0]]
             - np.log(self._nphi))  # i
 
-        return ln_numerators, important
+        return ln_numerators, important, flip_psi[important]

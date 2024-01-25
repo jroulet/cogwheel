@@ -13,6 +13,15 @@ from cogwheel import utils
 from .base import BaseCoherentScoreHM, MarginalizationInfoHM
 
 
+def _flip_psi(psi, d_h, flip_psi):
+    if flip_psi:
+        return (psi + np.pi/2) % np.pi, -d_h
+    return psi, d_h
+
+
+_flip_psi = utils.handle_scalars(np.vectorize(_flip_psi, otypes=[float, float]))
+
+
 class CoherentScoreHM(BaseCoherentScoreHM):
     """
     Class that, given a matched-filtering timeseries, computes the
@@ -86,6 +95,7 @@ class CoherentScoreHM(BaseCoherentScoreHM):
                                          tdet_inds=tdet_inds,
                                          proposals_n_qmc=[n_qmc],
                                          proposals=[t_arrival_prob],
+                                         flip_psi=np.array([], bool)
                                          )
 
         t_first_det = (times[tdet_inds[0]]
@@ -94,8 +104,8 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         dh_qo, hh_qo = self._get_dh_hh_qo(sky_inds, q_inds, t_first_det,
                                           times, d_h_timeseries, h_h)  # qo, qo
 
-        ln_numerators, important = self._get_lnnumerators_important(
-            dh_qo, hh_qo, sky_prior)
+        ln_numerators, important, flip_psi \
+            = self._get_lnnumerators_important_flippsi(dh_qo, hh_qo, sky_prior)
 
         # Keep important samples (lnl above threshold):
         q_inds = q_inds[important[0]]
@@ -171,17 +181,22 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         sky_ids = marg_info.sky_inds[random_ids]
         t_geocenter = (marg_info.t_first_det[random_ids]
                        - self.sky_dict.geocenter_delay_first_det[sky_ids])
-        d_h = marg_info.d_h[random_ids]
         h_h = marg_info.h_h[random_ids]
+
+        psi, d_h = _flip_psi(self._qmc_sequence['psi'][q_ids],
+                             marg_info.d_h[random_ids],
+                             marg_info.flip_psi[random_ids])
+
 
         d_luminosity = self._sample_distance(d_h, h_h)
         distance_ratio = d_luminosity / self.lookup_table.REFERENCE_DISTANCE
+
         return {
             'd_luminosity': d_luminosity,
             'dec': self.sky_dict.sky_samples['lat'][sky_ids],
             'lon': self.sky_dict.sky_samples['lon'][sky_ids],
             'phi_ref': self._phi_ref[o_ids],
-            'psi': self._qmc_sequence['psi'][q_ids],
+            'psi': psi,
             't_geocenter': t_geocenter,
             'lnl_marginalized': np.full(num, marg_info.lnl_marginalized)[()],
             'lnl': d_h / distance_ratio - h_h / distance_ratio**2 / 2,
