@@ -500,21 +500,25 @@ class Prior(ABC, utils.JSONMixin):
 
         Return
         ------
-        pd.DataFrame with columns per ``.sampled_params``, with samples
-        distributed according to the prior.
+        pd.DataFrame with columns per
+        ``.sampled_params + .standard_params``, with samples distributed
+        according to the prior.
         """
         rng = np.random.default_rng(seed=seed)
         chunksize = (n_samples, len(self.sampled_params))
         lnprior = np.vectorize(self.lnprior, otypes=[float])
 
         max_lnprior = -np.inf
-        samples = pd.DataFrame(columns=self.sampled_params)
+        samples = pd.DataFrame()
         while len(samples) < n_samples:
             candidates = pd.DataFrame(
                 self.cubemin + rng.uniform(0, self.cubesize, chunksize),
                 columns=self.sampled_params)
 
             candidates_lnprior = lnprior(**candidates)
+
+            if np.all(np.isneginf(candidates_lnprior)):
+                continue
 
             if (new_max := candidates_lnprior.max()) > max_lnprior:
                 # Upper bound had been underestimated, correct for that
