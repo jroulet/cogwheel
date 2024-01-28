@@ -121,7 +121,6 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
 
         self.dlnl_marginalized_threshold = dlnl_marginalized_threshold
         self._max_lnl_marginalized = -np.inf
-        self._log = []
 
         self.optimize_beta_temperature(self.par_dic_0)
 
@@ -150,10 +149,6 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
                                       - self.dlnl_marginalized_threshold)
         marg_info = self.coherent_score.get_marginalization_info(
             *self._get_dh_hh(par_dic), self._times, lnl_marginalized_threshold)
-
-        self._log.append({'lnl_marginalized': marg_info.lnl_marginalized,
-                          'n_effective': marg_info.n_effective,
-                          'n_qmc': marg_info.n_qmc})
 
         # Reject samples with large variance to avoid artifacts. If they
         # should contribute to the posterior, by now we are in trouble
@@ -389,4 +384,5 @@ class MarginalizedExtrinsicLikelihood(
                              self._h_h_weights,
                              h_mpbn[m_inds],
                              h_mpbn.conj()[mprime_inds])
-        return dh_nmptd, hh_nmppd
+        asd_drift_correction = self.asd_drift.astype(np.float32) ** -2  # d
+        return dh_nmptd * asd_drift_correction, hh_nmppd * asd_drift_correction
