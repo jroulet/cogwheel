@@ -53,10 +53,33 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
     _RUN_METHOD_NAME = 'run'  # Method of ``._SAMPLER_CLS``
 
-    def __init__(self, posterior, run_kwargs=None,
+    def __init__(self, posterior, run_kwargs=None, sample_prior=False,
                  dir_permissions=utils.DIR_PERMISSIONS,
                  file_permissions=utils.FILE_PERMISSIONS):
+        """
+        Parameters
+        ----------
+        posterior: cogwheel.posterior.Posterior
+            Implements the prior and likelihood.
+
+        run_kwargs: dict
+            Keyword arguments for the sampler or its `run` method.
+            Allowed keys depend on the particular sampler used.
+
+        sample_prior: False
+            Deprecated, will raise ValueError if it is not False.
+
+        dir_permissions, file_permissions: octal
+            Directory and file permissions.
+        """
         super().__init__()
+
+        if sample_prior:
+            raise ValueError(
+                'The functionality to sample the prior has been removed from '
+                '``Sampler``. Use '
+                '``cogwheel.prior.Prior.generate_random_samples`` instead.')
+        self.sample_prior = False
 
         self.posterior = posterior
 
@@ -307,6 +330,11 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         return samples.dropna(ignore_index=True)
 
+    def get_init_dict(self):
+        """Remove 'sample_prior' from the keys."""
+        init_dict = super().get_init_dict()
+        assert not init_dict.pop('sample_prior', False)
+        return init_dict
 
 class PyMultiNest(Sampler):
     """Sample a posterior or prior using PyMultiNest."""
