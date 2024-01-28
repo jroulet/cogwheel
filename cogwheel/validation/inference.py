@@ -127,8 +127,8 @@ def make_corner_plot(config, rundir):
     # Plot and save:
     plot_params = [par for par in plotting_prior.sampled_params + ['lnl', 'h_h']
                    if par in pe_samples]
-    weights = pe_samples.get(utils.WEIGHTS_NAME)
-    corner_plot = gw_plotting.CornerPlot(pe_samples[plot_params], weights=weights)
+    corner_plot = gw_plotting.CornerPlot(pe_samples, params=plot_params,
+                                         tail_probability=1e-4)
     corner_plot.plot(title=rundir.parent.name, max_n_ticks=3)
     corner_plot.scatter_points(par_dic, adjust_lims=True,
                                colors=['C3'], marker='+', zorder=2, s=50)
