@@ -276,22 +276,23 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
             cumsnr2 /= cumsnr2[-1]
             i_99 = np.searchsorted(cumsnr2, .99)
             f_99 = self.event_data.frequencies[i_99]
+            ibin_99 = np.searchsorted(self.fbin, f_99)
 
-            ratio = h0_f[i][i_99] / h0_f[i][i_99-1]
-            alpha = min(0, (np.abs(ratio) - 1) / self.event_data.df * f_99)
-            beta = np.angle(ratio) / self.event_data.df
+            f_start = self.fbin[ibin_99 - self.spline_degree]  # Start fade
+            f_end = self.fbin[ibin_99]  # End fade
 
-            def smoothed_h0(f, i=i, i_99=i_99, f_99=f_99,
-                            alpha=alpha, beta=beta):
-                """Replacement for the high frequencies f > f_99."""
-                return h0_f[i][i_99] * (f/f_99)**alpha * np.exp(
-                    1j*beta*(f-f_99))
+            def fadeout(f, f_start=f_start, f_end=f_end):
+                return np.cos(np.clip((f-f_start) / (f_end-f_start), 0, 1)
+                              * np.pi / 2) ** 2
 
-            mask = self.event_data.frequencies > f_99
-            h0_f[i][mask] = smoothed_h0(self.event_data.frequencies[mask])
+            # Replace h by a constant above fbin_99
+            fadeout_f = fadeout(self.event_data.frequencies)
+            fadeout_fbin = fadeout(self.fbin)
 
-            mask = self.fbin > f_99
-            h0_fbin[i][mask] = smoothed_h0(self.fbin[mask])
+            h0_f[i][:] = (h0_f[i] * fadeout_f
+                          + h0_fbin[i][ibin_99] * (1-fadeout_f))
+            h0_fbin[i][:] = (h0_fbin[i] * fadeout_fbin
+                             + h0_fbin[i][ibin_99] * (1-fadeout_fbin))
 
     def get_init_dict(self):
         """
