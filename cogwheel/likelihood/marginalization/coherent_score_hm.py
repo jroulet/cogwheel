@@ -19,7 +19,8 @@ def _flip_psi(psi, d_h, flip_psi):
     return psi, d_h
 
 
-_flip_psi = utils.handle_scalars(np.vectorize(_flip_psi, otypes=[float, float]))
+_flip_psi = utils.handle_scalars(np.vectorize(_flip_psi,
+                                              otypes=[float, float]))
 
 
 class CoherentScoreHM(BaseCoherentScoreHM):
@@ -84,19 +85,20 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         tdet_inds = tdet_inds[:, physical_mask]
 
         if not any(physical_mask):
-            return MarginalizationInfoHM(qmc_sequence_id=self._current_qmc_sequence_id,
-                                         ln_numerators=np.array([]),
-                                         q_inds=np.array([], int),
-                                         o_inds=np.array([], int),
-                                         sky_inds=np.array([], int),
-                                         t_first_det=np.array([]),
-                                         d_h=np.array([]),
-                                         h_h=np.array([]),
-                                         tdet_inds=tdet_inds,
-                                         proposals_n_qmc=[n_qmc],
-                                         proposals=[t_arrival_prob],
-                                         flip_psi=np.array([], bool)
-                                         )
+            return MarginalizationInfoHM(
+                qmc_sequence_id=self._current_qmc_sequence_id,
+                ln_numerators=np.array([]),
+                q_inds=np.array([], int),
+                o_inds=np.array([], int),
+                sky_inds=np.array([], int),
+                t_first_det=np.array([]),
+                d_h=np.array([]),
+                h_h=np.array([]),
+                tdet_inds=tdet_inds,
+                proposals_n_qmc=[n_qmc],
+                proposals=[t_arrival_prob],
+                flip_psi=np.array([], bool)
+                )
 
         t_first_det = (times[tdet_inds[0]]
                        + self._qmc_sequence['t_fine'][q_inds])
@@ -113,19 +115,20 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         t_first_det = t_first_det[important[0]]
         tdet_inds = tdet_inds[:, important[0]]
 
-        return MarginalizationInfoHM(qmc_sequence_id=self._current_qmc_sequence_id,
-                                     ln_numerators=ln_numerators,
-                                     q_inds=q_inds,
-                                     o_inds=important[1],
-                                     sky_inds=sky_inds,
-                                     t_first_det=t_first_det,
-                                     d_h=dh_qo[important],
-                                     h_h=hh_qo[important],
-                                     tdet_inds=tdet_inds,
-                                     proposals_n_qmc=[n_qmc],
-                                     proposals=[t_arrival_prob],
-                                     flip_psi=flip_psi,
-                                     )
+        return MarginalizationInfoHM(
+            qmc_sequence_id=self._current_qmc_sequence_id,
+            ln_numerators=ln_numerators,
+            q_inds=q_inds,
+            o_inds=important[1],
+            sky_inds=sky_inds,
+            t_first_det=t_first_det,
+            d_h=dh_qo[important],
+            h_h=hh_qo[important],
+            tdet_inds=tdet_inds,
+            proposals_n_qmc=[n_qmc],
+            proposals=[t_arrival_prob],
+            flip_psi=flip_psi,
+            )
 
     def gen_samples(self, dh_mptd, hh_mppd, times, num=None,
                     lnl_marginalized_threshold=-np.inf):
@@ -167,7 +170,8 @@ class CoherentScoreHM(BaseCoherentScoreHM):
             if marg_info is None:
                 out['n_qmc'] = np.full(num, 0)[()]
             else:
-                out['lnl_marginalized'] = np.full(num, marg_info.lnl_marginalized)[()]
+                out['lnl_marginalized'] = np.full(
+                    num, marg_info.lnl_marginalized)[()]
                 out['n_effective'] = np.full(num, marg_info.n_effective)[()]
                 out['n_qmc'] = np.full(num, marg_info.n_qmc)[()]
             return out
@@ -186,7 +190,6 @@ class CoherentScoreHM(BaseCoherentScoreHM):
         psi, d_h = _flip_psi(self._qmc_sequence['psi'][q_ids],
                              marg_info.d_h[random_ids],
                              marg_info.flip_psi[random_ids])
-
 
         d_luminosity = self._sample_distance(d_h, h_h)
         distance_ratio = d_luminosity / self.lookup_table.REFERENCE_DISTANCE
