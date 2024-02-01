@@ -281,11 +281,11 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
             f_start = self.fbin[ibin_99 - self.spline_degree]  # Start fade
             f_end = self.fbin[ibin_99]  # End fade
 
-            def fadeout(f, f_start=f_start, f_end=f_end):
+            def fadeout(f):
                 return np.cos(np.clip((f-f_start) / (f_end-f_start), 0, 1)
                               * np.pi / 2) ** 2
 
-            # Replace h by a constant above fbin_99
+            # Replace h by a constant above f_end
             fadeout_f = fadeout(self.event_data.frequencies)
             fadeout_fbin = fadeout(self.fbin)
 
