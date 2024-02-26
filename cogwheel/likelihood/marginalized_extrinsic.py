@@ -12,11 +12,11 @@ import lal
 from cogwheel import skyloc_angles
 from cogwheel import utils
 
-from .relative_binning import BaseRelativeBinning
+from .relative_binning import BaseLinearFree
 from .marginalization import SkyDictionary, CoherentScoreHM
 
 
-class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
+class BaseMarginalizedExtrinsicLikelihood(BaseLinearFree):
     """
     Base class for computation of marginalized likelihood over extrinsic
     parameters.
@@ -29,15 +29,11 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         """Return a coherent score instance of the appropriate type."""
 
     @abstractmethod
-    def _get_dh_hh(self, par_dic):
+    def _get_dh_hh_timeshift(self, par_dic):
         """
         Return (d|h) and (h|h) as required by
         ``self._coherent_score_cls.get_marginalization_info()``.
         """
-
-    @abstractmethod
-    def _get_many_dh_hh(self, samples):
-        """Similar to `_get_dh_hh` except for an input dataframe."""
 
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  fbin=None, pn_phase_tol=None, spline_degree=3,
@@ -123,8 +119,7 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         self._max_lnl_marginalized = -np.inf
 
         self.optimize_beta_temperature(self.par_dic_0)
-
-        _ = self.lnlike(self.par_dic_0)  # Initializes self._max_lnl_marginalized
+        _ = self.lnlike(self.par_dic_0)  # Sets self._max_lnl_marginalized
 
     def lnlike_and_metadata(self, par_dic):
         """
@@ -134,6 +129,9 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         Quasi Monte Carlo integration so it is not deterministic
         (calling the method twice with the same parameters does not
         produce the same answer).
+
+        Side effects:
+        Updates ``._max_lnl_marginalized`` and ``._t_arrival_prob``.
 
         Parameters
         ----------
@@ -147,8 +145,10 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         """
         lnl_marginalized_threshold = (self._max_lnl_marginalized
                                       - self.dlnl_marginalized_threshold)
+        d_h_timeseries, h_h, timeshift = self._get_dh_hh_timeshift(par_dic)
         marg_info = self.coherent_score.get_marginalization_info(
-            *self._get_dh_hh(par_dic), self._times, lnl_marginalized_threshold)
+            d_h_timeseries, h_h, self._times - timeshift,
+            lnl_marginalized_threshold)
 
         # Reject samples with large variance to avoid artifacts. If they
         # should contribute to the posterior, by now we are in trouble
@@ -159,8 +159,10 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
                             f'n_effective = {marg_info.n_effective:.2f}')
             return -np.inf, marg_info
 
+        # Update likelihood threshold for requiring accurate evaluation
         self._max_lnl_marginalized = max(self._max_lnl_marginalized,
                                          marg_info.lnl_marginalized)
+
         return marg_info.lnl_marginalized, marg_info
 
     def get_blob(self, metadata):
@@ -203,12 +205,16 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
             `num * len(samples)`. Each intrinsic parameter value will be
             repeated `num` times. The index will not be preserved.
         """
-        all_dh, all_hh = self._get_many_dh_hh(samples)
         lnl_marginalized_threshold = (self._max_lnl_marginalized
                                       - self.dlnl_marginalized_threshold)
-        extrinsic = [self.coherent_score.gen_samples(*dh_hh, self._times, num,
-                                                     lnl_marginalized_threshold)
-                     for dh_hh in zip(all_dh, all_hh)]
+        extrinsic = []
+        for _, sample in samples.iterrows():
+            d_h_timeseries, h_h, timeshift = self._get_dh_hh_timeshift(sample)
+            marg_info = self.coherent_score.get_marginalization_info(
+                d_h_timeseries, h_h, self._times - timeshift,
+                lnl_marginalized_threshold)
+            extrinsic.append(
+                self.coherent_score.gen_samples_from_marg_info(marg_info, num))
 
         gmst = lal.GreenwichMeanSiderealTime(self.event_data.tgps)
         for ext in extrinsic:
@@ -233,9 +239,9 @@ class BaseMarginalizedExtrinsicLikelihood(BaseRelativeBinning):
         the importance sampling efficiency (for the intrinsic parameter
         values in `par_dic`).
         """
-        optimal_beta = self.coherent_score.get_optimal_beta_temperature(
-            *self._get_dh_hh(par_dic), self._times)
-        self.coherent_score.beta_temperature = optimal_beta
+        d_h, h_h, timeshift = self._get_dh_hh_timeshift(par_dic)
+        self.coherent_score.optimize_beta_temperature(
+            d_h, h_h, self._times - timeshift)
 
 
 class MarginalizedExtrinsicLikelihood(
@@ -297,10 +303,9 @@ class MarginalizedExtrinsicLikelihood(
             h0_fbin = (1, 1j) @ self.waveform_generator.get_hplus_hcross(
                 self.fbin, self.par_dic_0, by_m=True)  # mb
 
-            self._stall_ringdown(h0_f, h0_fbin)
-
-            self._set_d_h_weights(h0_f, h0_fbin)
-            self._set_h_h_weights(h0_f, h0_fbin)
+        self._stall_ringdown(h0_f, h0_fbin)
+        self._set_d_h_weights(h0_f, h0_fbin)
+        self._set_h_h_weights(h0_f, h0_fbin)
 
     def _set_d_h_weights(self, h0_f, h0_fbin):
         shifts = np.exp(2j*np.pi * np.outer(self.event_data.frequencies,
@@ -333,10 +338,10 @@ class MarginalizedExtrinsicLikelihood(
         # Count off-diagonal terms twice:
         self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
 
-    def _get_dh_hh(self, par_dic):
-        h_mpb = self.waveform_generator.get_hplus_hcross(
-            self.fbin, dict(par_dic) | self._ref_dic, by_m=True
-            ).astype(np.complex64)  # mpb
+    def _get_dh_hh_timeshift(self, par_dic):
+        h_mpb, timeshift = self._get_linearfree_hplus_hcross_dt(
+            dict(par_dic) | self._ref_dic, by_m=True)
+        h_mpb = h_mpb.astype(np.complex64)  # mpb
 
         # Same but faster:
         # dh_mptd = np.einsum('mtdb,mpb->mptd',
@@ -351,38 +356,6 @@ class MarginalizedExtrinsicLikelihood(
                             h_mpb.conj()[mprime_inds]).astype(np.complex64)
 
         asd_drift_correction = self.asd_drift.astype(np.float32) ** -2  # d
-        return dh_mptd * asd_drift_correction, hh_mppd * asd_drift_correction
-
-    def _get_many_dh_hh(self, samples: pd.DataFrame):
-        """
-        Faster than a for loop over `_get_dh_hh` thanks to Strassen
-        matrix multiplication to get (d|h) timeseries.
-        """
-        h_mpbn = np.moveaxis(
-            [self.waveform_generator.get_hplus_hcross(
-                self.fbin, dict(sample) | self._ref_dic,
-                by_m=True)
-             for _, sample in samples[self.params].iterrows()],
-            0, -1).astype(np.complex64)  # mpbn
-
-        n_m, n_t, n_d, n_b = self._d_h_weights.shape
-        n_n  = len(samples)
-        n_p = 2
-        d_h_weights = self._d_h_weights.reshape(
-            (n_m, n_t*n_d, n_b))  # m(td)b
-
-        # Loop instead of broadcasting, to save memory:
-        dh_mptdn = np.zeros((n_m, n_p, n_t*n_d, n_n), np.complex64)
-        for i_m, i_p in np.ndindex(n_m, n_p):
-            dh_mptdn[i_m, i_p] = d_h_weights[i_m] @ h_mpbn[i_m, i_p].conj()
-
-        dh_nmptd = np.moveaxis(dh_mptdn, -1, 0).reshape(
-            n_n, n_m, n_p, n_t, n_d)
-
-        m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
-        hh_nmppd = np.einsum('mdb,mpbn,mPbn->nmpPd',
-                             self._h_h_weights,
-                             h_mpbn[m_inds],
-                             h_mpbn.conj()[mprime_inds])
-        asd_drift_correction = self.asd_drift.astype(np.float32) ** -2  # d
-        return dh_nmptd * asd_drift_correction, hh_nmppd * asd_drift_correction
+        dh_mptd *= asd_drift_correction
+        hh_mppd *= asd_drift_correction
+        return dh_mptd, hh_mppd, timeshift

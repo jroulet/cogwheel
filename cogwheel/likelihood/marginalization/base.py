@@ -10,6 +10,7 @@ the waveform physics included (precession and/or higher modes).
 ``BaseCoherentScoreHM`` is an abstract subclass that implements phase
 marginalization for waveforms with higher modes.
 """
+import inspect
 import itertools
 import logging
 from abc import abstractmethod, ABC
@@ -218,9 +219,9 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     """
     _searchsorted = np.vectorize(np.searchsorted, signature='(n),(m)->(m)')
 
-    def __init__(self, sky_dict, lookup_table=None, log2n_qmc: int = 11,
-                 seed=0, beta_temperature=.5, n_qmc_sequences=128,
-                 min_n_effective=50, max_log2n_qmc: int = 15):
+    def __init__(self, *, sky_dict, lookup_table=None, log2n_qmc: int = 11,
+                 seed=0, n_qmc_sequences=128, min_n_effective=50,
+                 max_log2n_qmc: int = 15, **kwargs):
         """
         Parameters
         ----------
@@ -229,8 +230,9 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
         lookup_table: lookup_table.LookupTable, dict or None
             Interpolation table for distance marginalization. If a dict
-            is passed, it is interpreted as keyword arguments to create a
-            new lookup table. ``None`` creates one with default arguments.
+            is passed, it is interpreted as keyword arguments to create
+            a new lookup table. ``None`` creates one with default
+            arguments.
 
         log2n_qmc: int
             Base-2 logarithm of the number of requested extrinsic
@@ -238,10 +240,6 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
         seed: {int, None, np.random.RandomState}
             For reproducibility of the extrinsic parameter samples.
-
-        beta_temperature: float or float array of shape (n_detectors,)
-            Inverse temperature, tempers the arrival time probability at
-            each detector.
 
         n_qmc_sequences: int
             The coherent score instance will generate `n_qmc_sequences`
@@ -260,11 +258,13 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
         max_log2n_qmc: int
             Base-2 logarithm of the maximum number of extrinsic
-            parameter samples to request. The program will try adapting the
-            proposal distribution, increasing the number of samples until the
-            effective sample size reaches `min_n_effective` or the number
-            of extrinsic samples reaches ``2**max_log2n_qmc``.
+            parameter samples to request. The program will try adapting
+            the proposal distribution, increasing the number of samples
+            until the effective sample size reaches `min_n_effective` or
+            the number of extrinsic samples reaches ``2^max_log2n_qmc``.
         """
+        del kwargs
+
         # Set up and check lookup_table with correct marginalized_params:
         lookup_table = lookup_table or {}
         if isinstance(lookup_table, dict):
@@ -286,7 +286,6 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         self.seed = seed
         self._rng = np.random.default_rng(seed)
         self.sky_dict = sky_dict
-        self.beta_temperature = np.asarray(beta_temperature)
         self.min_n_effective = min_n_effective
         self.log2n_qmc = log2n_qmc
         self.max_log2n_qmc = max_log2n_qmc
@@ -308,15 +307,10 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         ``{'d_luminosity'}`` or ``{'d_luminosity', 'phi_ref'}``,
         allows to verify that the lookup table is of the correct type.
         """
-
-    # @staticmethod
-    # @property
-    # @abstractmethod
-    # def m_arr():
-    #     """int array with harmonic mode `m` numbers."""
-
-    def get_marginalization_info(self, d_h_timeseries, h_h, times,
-                                 lnl_marginalized_threshold=-np.inf):
+    def _get_marginalization_info(self, d_h_timeseries, h_h, times,
+                                  t_arrival_prob,
+                                  lnl_marginalized_threshold=-np.inf,
+                                  **kwargs):
         """
         Return a MarginalizationInfo object with extrinsic parameter
         integration results, ensuring that one of three conditions
@@ -326,19 +320,10 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             * lnl_marginalized < lnl_marginalized_threshold
         """
         self._switch_qmc_sequence()
-
-        # Resample to match sky_dict's dt:
-        d_h_timeseries, times = self.sky_dict.resample_timeseries(
-            d_h_timeseries, times, axis=-2)
-
-        t_arrival_lnprob = self._incoherent_t_arrival_lnprob(d_h_timeseries,
-                                                             h_h)  # dt
-        self.sky_dict.apply_tdet_prior(t_arrival_lnprob)
-        t_arrival_prob = utils.exp_normalize(t_arrival_lnprob, axis=1)
-
         i_chunk = 0
+
         marginalization_info = self._get_marginalization_info_chunk(
-            d_h_timeseries, h_h, times, t_arrival_prob, i_chunk)
+            d_h_timeseries, h_h, times, t_arrival_prob, i_chunk, **kwargs)
 
         while marginalization_info.n_effective < self.min_n_effective:
             # Perform adaptive mixture importance sampling:
@@ -361,7 +346,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                 + t_arrival_prob)
 
             marginalization_info.update(self._get_marginalization_info_chunk(
-                d_h_timeseries, h_h, times, t_arrival_prob, i_chunk))
+                d_h_timeseries, h_h, times, t_arrival_prob, i_chunk, **kwargs))
 
         return marginalization_info
 
@@ -520,12 +505,110 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                                  timeseries[..., i_min : i_max],
                                  new_times, axis=-1)
 
-    def get_optimal_beta_temperature(self, dh_timeseries, h_h, times,
-                                     beta_rng=(.1, 1)):
+    def get_init_dict(self):
+        """Keyword arguments to instantiate this class."""
+        pars = set(inspect.signature(self.__class__).parameters) - {'kwargs'}
+        return {par: getattr(self, par) for par in pars}
+
+
+class ProposingCoherentScore(BaseCoherentScore):
+    """
+    Extends ``BaseCoherentScore`` by providing logic to come up with a
+    proposal distribution for the times of arrival at each detector.
+    """
+    def __init__(self, *, sky_dict, lookup_table=None, log2n_qmc: int = 11,
+                 seed=0, n_qmc_sequences=128,
+                 min_n_effective=50, max_log2n_qmc: int = 15,
+                 beta_temperature=0.5, learning_rate=1e-2, **kwargs):
         """
-        Return array of shape (n_det,) with per-detector inverse-
-        temperature values (used to temper the proposal distribution)
-        tuned so as to maximize the efficiency of importance sampling.
+        beta_temperature: float or float array of shape (n_detectors,)
+            Inverse temperature, tempers the arrival time probability at
+            each detector.
+
+        learning_rate: float
+            How aggressively to update the following guess for the time-
+            of-arrival proposal.
+        """
+        super().__init__(sky_dict=sky_dict,
+                         lookup_table=lookup_table,
+                         log2n_qmc=log2n_qmc,
+                         seed=seed,
+                         n_qmc_sequences=n_qmc_sequences,
+                         min_n_effective=min_n_effective,
+                         max_log2n_qmc=max_log2n_qmc,
+                         **kwargs)
+
+        self.beta_temperature = np.asarray(beta_temperature)
+        self.learning_rate = learning_rate
+        self._t_arrival_prob = None
+
+    @abstractmethod
+    def _incoherent_t_arrival_lnprob(self, d_h_timeseries, h_h):
+        """
+        Log likelihood maximized over distance and phase, approximating
+        that different modes and polarizations are all orthogonal and
+        have independent phases.
+
+        Parameters
+        ----------
+        d_h_timeseries: (..., n_t, n_d) complex array
+            Timeseries of complex (d|h), inner product of data against a
+            waveform at reference distance and phase.
+
+        h_h: (..., n_d) array
+            (h|h) inner product of a waveform with itself.
+        """
+
+    def get_marginalization_info(self, d_h_timeseries, h_h, times,
+                                 lnl_marginalized_threshold=-np.inf):
+        """
+        Return a ``MarginalizationInfo`` object with extrinsic parameter
+        integration results. Adaptive importance sampling is performed,
+        which requires an initial proposal. This method comes up with a
+        proposal, half based on the d_h timeseries and half based on the
+        adaptions from previous calls to this function. Thus, as a side
+        effect ``._t_arrival_prob`` is updated (if
+        ``.learning_rate != 0``).
+        """
+        # Resample to match sky_dict's dt:
+        d_h_timeseries, times = self.sky_dict.resample_timeseries(
+            d_h_timeseries, times, axis=-2)
+        incoherent_t_arrival_lnprob = self._incoherent_t_arrival_lnprob(
+                d_h_timeseries, h_h)  # dt
+        self.sky_dict.apply_tdet_prior(incoherent_t_arrival_lnprob)
+        t_arrival_prob = utils.exp_normalize(incoherent_t_arrival_lnprob)
+
+        if self._t_arrival_prob is not None:
+            if self._t_arrival_prob.shape == t_arrival_prob.shape:
+                t_arrival_prob = 0.5 * (t_arrival_prob + self._t_arrival_prob)
+            else:
+                logging.warning(
+                    '`d_h_timeseries` length changed, resetting proposal.')
+                self._t_arrival_prob = None
+
+        marg_info = self._get_marginalization_info(d_h_timeseries, h_h, times,
+                                                   t_arrival_prob,
+                                                   lnl_marginalized_threshold)
+
+        # Update time-of-arrival guess based on the latest proposal
+        if self.learning_rate:
+            if self._t_arrival_prob is None:
+                self._t_arrival_prob = marg_info.proposals[-1]
+            else:
+                self._t_arrival_prob += (self.learning_rate
+                                         * marg_info.proposals[-1])
+                self._t_arrival_prob /= self._t_arrival_prob.sum(axis=1,
+                                                                 keepdims=True)
+
+        return marg_info
+
+    def optimize_beta_temperature(self, dh_timeseries, h_h, times,
+                                  beta_rng=(.1, 1)):
+        """
+        Set ``.beta_temperature``, an array of shape (n_det,) with per-
+        detector inverse-temperature values (used to temper the proposal
+        distribution) tuned so as to maximize the efficiency of
+        importance sampling.
         """
         beta_temperature = np.copy(np.broadcast_to(
             self.beta_temperature, len(self.sky_dict.detector_names)))
@@ -550,7 +633,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                     cost, len(cost) // 10, 1, mode='nearest')
                 beta_temperature[i_det] = betas[np.argmin(cost_smooth)]
 
-        return beta_temperature
+        self.beta_temperature = beta_temperature
 
 
 class BaseCoherentScoreHM(BaseCoherentScore):
@@ -573,10 +656,10 @@ class BaseCoherentScoreHM(BaseCoherentScore):
 
     _lookup_table_marginalized_params = {'d_luminosity'}
 
-    def __init__(self, sky_dict, m_arr, lookup_table=None,
+    def __init__(self, *, sky_dict, m_arr, lookup_table=None,
                  log2n_qmc: int = 11, nphi=128, seed=0,
-                 beta_temperature=.5, n_qmc_sequences=128,
-                 min_n_effective=50, max_log2n_qmc: int = 15):
+                 n_qmc_sequences=128, min_n_effective=50,
+                 max_log2n_qmc: int = 15, **kwargs):
         """
         Parameters
         ----------
@@ -599,10 +682,6 @@ class BaseCoherentScoreHM(BaseCoherentScore):
 
         seed: {int, None, np.random.RandomState}
             For reproducibility of the extrinsic parameter samples.
-
-        beta_temperature: float
-            Inverse temperature, tempers the arrival time probability at
-            each detector.
 
         n_qmc_sequences: int
             The coherent score instance will generate `n_qmc_sequences`
@@ -630,10 +709,10 @@ class BaseCoherentScoreHM(BaseCoherentScore):
                          lookup_table=lookup_table,
                          log2n_qmc=log2n_qmc,
                          seed=seed,
-                         beta_temperature=beta_temperature,
                          n_qmc_sequences=n_qmc_sequences,
                          min_n_effective=min_n_effective,
-                         max_log2n_qmc=max_log2n_qmc)
+                         max_log2n_qmc=max_log2n_qmc,
+                         **kwargs)
 
         self.m_arr = np.asarray(m_arr)
         self.m_inds, self.mprime_inds = (

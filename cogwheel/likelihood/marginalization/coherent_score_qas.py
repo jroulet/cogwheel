@@ -8,10 +8,10 @@ import warnings
 import numpy as np
 
 from cogwheel import utils
-from .base import BaseCoherentScore, MarginalizationInfo
+from .base import ProposingCoherentScore, MarginalizationInfo
 
 
-class CoherentScoreQAS(BaseCoherentScore):
+class CoherentScoreQAS(ProposingCoherentScore):
     """
     Coherent score for quadrupole, aligned-spin waveforms.
 
@@ -22,9 +22,8 @@ class CoherentScoreQAS(BaseCoherentScore):
     Works for quasi-circular waveforms with quadrupole radiation, i.e.
     (l,|m|) = (2, 2), and aligned spins.
 
-    Inherits from ``BaseCoherentScore``.
+    Inherits from ``ProposingCoherentScore``.
     """
-    m_arr = np.array([2])
     _lookup_table_marginalized_params = {'d_luminosity', 'phi_ref'}
 
     def _get_marginalization_info_chunk(self, d_h_timeseries, h_h,

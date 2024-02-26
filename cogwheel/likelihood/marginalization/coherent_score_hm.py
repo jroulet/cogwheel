@@ -10,7 +10,9 @@ import warnings
 import numpy as np
 
 from cogwheel import utils
-from .base import BaseCoherentScoreHM, MarginalizationInfoHM
+from .base import (BaseCoherentScoreHM,
+                   MarginalizationInfoHM,
+                   ProposingCoherentScore)
 
 
 def _flip_psi(psi, d_h, flip_psi):
@@ -23,7 +25,7 @@ _flip_psi = utils.handle_scalars(np.vectorize(_flip_psi,
                                               otypes=[float, float]))
 
 
-class CoherentScoreHM(BaseCoherentScoreHM):
+class CoherentScoreHM(ProposingCoherentScore, BaseCoherentScoreHM):
     """
     Class that, given a matched-filtering timeseries, computes the
     likelihood marginalized over extrinsic parameters
@@ -35,6 +37,23 @@ class CoherentScoreHM(BaseCoherentScoreHM):
 
     Inherits from ``BaseCoherentScoreHM``.
     """
+    def __init__(self, sky_dict, m_arr, lookup_table=None,
+                 log2n_qmc: int = 11, nphi=128, seed=0,
+                 n_qmc_sequences=128, min_n_effective=50,
+                 max_log2n_qmc: int = 15,
+                 beta_temperature=.5, learning_rate=1e-2):
+        super().__init__(sky_dict=sky_dict,
+                         m_arr=m_arr,
+                         lookup_table=lookup_table,
+                         log2n_qmc=log2n_qmc,
+                         nphi=nphi,
+                         seed=seed,
+                         n_qmc_sequences=n_qmc_sequences,
+                         min_n_effective=min_n_effective,
+                         max_log2n_qmc=max_log2n_qmc,
+                         beta_temperature=beta_temperature,
+                         learning_rate=learning_rate)
+
     def _get_marginalization_info_chunk(self, d_h_timeseries, h_h,
                                         times, t_arrival_prob, i_chunk):
         """

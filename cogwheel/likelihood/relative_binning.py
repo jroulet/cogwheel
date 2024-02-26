@@ -281,7 +281,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
             f_start = self.fbin[ibin_99 - self.spline_degree]  # Start fade
             f_end = self.fbin[ibin_99]  # End fade
 
-            def fadeout(f):
+            def fadeout(f, f_start=f_start, f_end=f_end):
                 return np.cos(np.clip((f-f_start) / (f_end-f_start), 0, 1)
                               * np.pi / 2) ** 2
 
@@ -382,6 +382,91 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         """
         del metadata
         return {}
+
+
+class BaseLinearFree(BaseRelativeBinning):
+    """
+    Define a method ``._get_linearfree_hplus_hcross_dt`` to
+    compute linear-free waveforms and the timeshift required
+    to go back to the approximant's convention.
+    Experimental class. For now the convention is that only
+    a timeshift is applied, no phase shift, but perhaps this
+    might change.
+    """
+    def __init__(self, event_data, waveform_generator, par_dic_0,
+                 fbin=None, pn_phase_tol=None, spline_degree=3):
+        self._h2plus0_fbin = None  # Set by ._set_summary
+        self._polyfit_weights = None  # Set by ._set_summary
+        super().__init__(event_data, waveform_generator, par_dic_0,
+                         fbin, pn_phase_tol, spline_degree)
+
+    def _set_summary(self):
+        super()._set_summary()
+
+        with utils.temporarily_change_attributes(self.waveform_generator,
+                                                 disable_precession=False):
+            m2_index = list(self.waveform_generator.m_arr).index(2)
+
+            h2plus0_f = np.zeros(len(self.event_data.frequencies),
+                                 dtype=np.complex_)
+            h2plus0_f[self.event_data.fslice] \
+                = self.waveform_generator.get_hplus_hcross(
+                    self.event_data.frequencies[self.event_data.fslice],
+                    self.par_dic_0, by_m=True)[m2_index, 0]
+
+            h2plus0_fbin = self.waveform_generator.get_hplus_hcross(
+                self.fbin, self.par_dic_0, by_m=True)[m2_index, 0]
+        self._h2plus0_fbin = h2plus0_fbin.copy()
+
+        self._stall_ringdown(h2plus0_f, self._h2plus0_fbin)
+
+        weights_f = (np.abs(h2plus0_f) * self.event_data.wht_filter)**2
+        self._polyfit_weights = np.sqrt(np.clip(
+            self._get_summary_weights(weights_f.sum(0)).real, 0, None))
+
+    def _get_linearfree_hplus_hcross_dt(self, waveform_par_dic, by_m=False):
+        """
+        Return a linear-free waveform at relative-binning (coarse)
+        frequency resolution, and the timeshift to go back to the
+        original convention.
+        Linear-free here means that the (2, 2) hplus has been time-
+        aligned to the reference waveform.
+
+        Parameters
+        ----------
+        waveform_par_dic: dict
+            Parameters per ``.waveform_generator.waveform_params``.
+            Any extra keys would be silently ignored.
+
+        by_m: bool
+            Wheter to return the waveform mode-by-mode.
+
+        Return
+        ------
+        h_mpb: array of shape (m?, 2, len(.fbin))
+            + and x polarizations at the relative-binning frequencies,
+            with a timeshift applied so that waveforms with different
+            parameters would be aligned in time (Hz^-1).
+
+        dt_linearfree: float
+            Time shift to go back to the approximant's convention (s).
+        """
+        h_mpb = self.waveform_generator.get_hplus_hcross(
+            self.fbin, waveform_par_dic, by_m=True)
+        m2_index = list(self.waveform_generator.m_arr).index(2)
+        h2plus_fbin = h_mpb[m2_index, 0]
+        hplus_ratio = h2plus_fbin / self._h2plus0_fbin
+        dphase = np.unwrap(np.angle(hplus_ratio))
+        fit = np.polynomial.Polynomial.fit(
+            self.fbin, dphase, deg=1,
+            w=self._polyfit_weights * np.sqrt(np.abs(hplus_ratio)))
+
+        timeshift = - fit.deriv()(0) / (2*np.pi)
+        h_mpb *= np.exp(2j*np.pi * timeshift * self.fbin)
+
+        if by_m:
+            return h_mpb, timeshift
+        return h_mpb.sum(axis=0), timeshift
 
 
 class RelativeBinningLikelihood(BaseRelativeBinning):

@@ -7,7 +7,7 @@ from cogwheel import data
 from cogwheel import gw_prior
 from cogwheel import likelihood
 from cogwheel.likelihood.marginalized_extrinsic import (
-    BaseMarginalizedExtrinsicLikelihood)
+    BaseMarginalizedExtrinsicLikelihood, BaseLinearFree)
 from cogwheel import waveform
 from cogwheel.posterior import Posterior
 
@@ -41,7 +41,8 @@ class PosteriorTestCase(TestCase):
 
         cls.likelihoods = []
         for likelihood_class in (get_subclasses(likelihood.BaseRelativeBinning)
-                                 - {BaseMarginalizedExtrinsicLikelihood}):
+                                 - {BaseMarginalizedExtrinsicLikelihood,
+                                    BaseLinearFree}):
             kwargs = {}
             if 'lookup_table' in signature(likelihood_class).parameters:
                 kwargs['lookup_table'] = lookup_table
@@ -58,6 +59,7 @@ class PosteriorTestCase(TestCase):
         cls.priors = [prior_class.from_reference_waveform_finder(rwf)
                       for prior_class in gw_prior.prior_registry.values()
                       if prior_class is not gw_prior.ExtrinsicParametersPrior]
+
 
     def test_prior(self):
         """

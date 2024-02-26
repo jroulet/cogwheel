@@ -4,7 +4,6 @@ Define class ``MarginalizedExtrinsicLikelihoodQAS``, to use with
 """
 import functools
 import numpy as np
-import pandas as pd
 
 from cogwheel import utils
 
@@ -49,7 +48,7 @@ class MarginalizedExtrinsicLikelihoodQAS(
         if list(m_arr) != [2]:
             raise ValueError(f'{self.__class__.__name__} only works with '
                              '(l, |m|) = (2, 2) waveforms.')
-        return CoherentScoreQAS(sky_dict, **kwargs)
+        return CoherentScoreQAS(sky_dict=sky_dict, **kwargs)
 
     def _set_summary(self):
         """
@@ -108,29 +107,10 @@ class MarginalizedExtrinsicLikelihoodQAS(
         self._h_h_weights = (self._get_summary_weights(h0_h0).real
                              / utils.abs_sq(h0_fbin))  # db
 
-    def _get_dh_hh(self, par_dic):
-        h_b = self.waveform_generator.get_hplus_hcross(
-            self.fbin, dict(par_dic) | self._ref_dic)[0]  # b
-        dh_td = self._d_h_weights @ h_b.conj()  # td
-        hh_d = self._h_h_weights @ utils.abs_sq(h_b)  # d
+    def _get_dh_hh_timeshift(self, par_dic):
+        (h_b, _), timeshift = self._get_linearfree_hplus_hcross_dt(
+            dict(par_dic) | self._ref_dic)
         asd_drift_correction = self.asd_drift ** -2  # d
-        return dh_td * asd_drift_correction, hh_d * asd_drift_correction
-
-    def _get_many_dh_hh(self, samples: pd.DataFrame):
-        """
-        Faster than a for loop over `_get_dh_hh` thanks to Strassen
-        matrix multiplication to get (d|h) timeseries.
-        """
-        h_bn = np.transpose(
-            [self.waveform_generator.get_hplus_hcross(
-                self.fbin, dict(sample) | self._ref_dic)[0]
-             for _, sample in samples[self.params].iterrows()])  # bn
-
-        n_t, n_d, n_b = self._d_h_weights.shape
-        n_n = len(samples)
-        d_h_weights = self._d_h_weights.reshape(n_t*n_d, n_b)  # (td)b
-        dh_tdn = d_h_weights @ h_bn.conj()
-        dh_ntd = np.moveaxis(dh_tdn, -1, 0).reshape(n_n, n_t, n_d)
-
-        hh_nd = np.transpose(self._h_h_weights @ utils.abs_sq(h_bn))  # nd
-        return dh_ntd, hh_nd
+        dh_td = self._d_h_weights @ h_b.conj() * asd_drift_correction  # td
+        hh_d = self._h_h_weights @ utils.abs_sq(h_b) * asd_drift_correction  # d
+        return dh_td, hh_d, timeshift
