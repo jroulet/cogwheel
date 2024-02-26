@@ -128,12 +128,12 @@ class SkyDictionary(utils.JSONMixin):
         for key, inds in self.delays2inds_map.items():
             self._ind_generators[key] = itertools.cycle(inds)
 
-    def resample_timeseries(self, timeseries, times, axis=-1,
-                            window=('tukey', .1)):
+    def resample_timeseries(self, timeseries, times, axis=-1):
         """
         Resample a timeseries to match the SkyDict's sampling frequency.
         The sampling frequencies of the SkyDict and ``timeseries`` must
         be multiples (or ``ValueError`` is raised).
+        The data is smoothed at the edges to make it periodic.
 
         Parameters
         ----------
@@ -147,25 +147,18 @@ class SkyDictionary(utils.JSONMixin):
         axis: int
             The axis of timeseries that is resampled. Default is -1.
 
-        window: string, float, tuple or None
-            Time domain window to apply to the timeseries. If not None,
-            it is passed to ``scipy.signal.get_window``, see its
-            documentation. By default a Tukey window with alpha=0.1 is
-            applied, to mitigate ringing near the edges
-            (scipy.signal.resample uses FFT methods that assume that the
-            signal is periodic).
-
         Return
         ------
         resampled_timeseries, resampled_times
             A tuple containing the resampled array and the corresponding
             resampled positions.
         """
-        if window:
-            shape = [1 for _ in timeseries.shape]
-            shape[axis] = timeseries.shape[axis]
-            timeseries = timeseries * scipy.signal.get_window(
-                window, shape[axis]).reshape(shape)
+        shape = [1 for _ in timeseries.shape]
+        shape[axis] = timeseries.shape[axis]
+        window = np.sqrt(
+            scipy.signal.windows.tukey(shape[axis], .1)).reshape(shape)
+        endpoint = np.mean(timeseries.take([0, -1], axis))
+        timeseries = (timeseries - endpoint) * window + endpoint
 
         fs_ratio = np.round(self.f_sampling * (times[1] - times[0]),
                             decimals=10)  # Prevent machine precision problems
