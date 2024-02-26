@@ -218,37 +218,6 @@ def get_transparency_colormap(color):
 # ----------------------------------------------------------------------
 # Functions related to pdfs:
 
-def quantile(values, q, weights=None):
-    """
-    Compute the q-th quantile of the data.
-
-    Parameters
-    ----------
-    values: array
-        Input data.
-
-    q: array_like of float
-        Quantile rank, 0 <= q <= 1.
-
-    weights: array
-        Of the same shape as `values`.
-
-    Return
-    ------
-    quantiles: array_like of float, of the same shape as `q`.
-    """
-    if weights is None:
-        weights = np.ones_like(values)
-    values = np.asarray(values)
-    weights = np.asarray(weights)
-
-    order = np.argsort(values)
-    values = values[order]
-    weights = weights[order]
-    cdf = (np.cumsum(weights) - weights) / (np.sum(weights) - weights)
-    return np.interp(q, cdf, values)
-
-
 def latex_val_err(value, error):
     """
     Pass a value and its uncertainty, return a latex string
@@ -578,8 +547,8 @@ class CornerPlot:
         probabilities = (self.plotstyle.tail_probability / 2,
                          1 - self.plotstyle.tail_probability / 2)
 
-        qmin, qmax = quantile(self.samples[par], probabilities,
-                              self.samples.get(self.weights_col))
+        qmin, qmax = utils.quantile(self.samples[par], probabilities,
+                                    self.samples.get(self.weights_col))
         return (self.samples[par] >= qmin) & (self.samples[par] <= qmax)
 
     def _get_levels(self, pdf):
@@ -610,8 +579,9 @@ class CornerPlot:
         (median, a, b): median and bounds of the variable.
         """
         tail_prob = (1 - self.plotstyle.confidence_level) / 2
-        return quantile(self.samples[par], (.5, tail_prob, 1 - tail_prob),
-                        self.samples.get(self.weights_col))
+        return utils.quantile(self.samples[par],
+                              (.5, tail_prob, 1 - tail_prob),
+                              self.samples.get(self.weights_col))
 
     def _setup_fig(self, fig=None, max_figsize=10.,
                    max_subplot_size=1.5, max_n_ticks=4):

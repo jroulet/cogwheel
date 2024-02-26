@@ -91,6 +91,37 @@ def mod(value, start=0, period=2*np.pi):
     return (value - start) % period + start
 
 
+def quantile(values, q, weights=None):
+    """
+    Compute the q-th quantile of the data.
+
+    Parameters
+    ----------
+    values: array
+        Input data.
+
+    q: array_like of float
+        Quantile rank, 0 <= q <= 1.
+
+    weights: array
+        Of the same shape as `values`.
+
+    Return
+    ------
+    quantiles: array_like of float, of the same shape as `q`.
+    """
+    if weights is None:
+        weights = np.ones_like(values)
+    values = np.asarray(values)
+    weights = np.asarray(weights)
+
+    order = np.argsort(values)
+    values = values[order]
+    weights = weights[order]
+    cdf = (np.cumsum(weights) - weights) / (np.sum(weights) - weights)
+    return np.interp(q, cdf, values)
+
+
 def weighted_avg_and_std(values, weights=None):
     """Return average and standard deviation of values with weights."""
     avg = np.average(values, weights=weights)
