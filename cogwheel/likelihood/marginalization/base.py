@@ -495,6 +495,8 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         t_rng = new_times.min(), new_times.max()
         i_min, i_max = np.clip(np.searchsorted(times, t_rng) + (-1, 1),
                                0, len(times) - 1)
+        if i_min == i_max:
+            return timeseries[..., (i_min,)*len(new_times)]
 
         if i_max - i_min > spline_degree:  # If possible make a spline
             return make_interp_spline(
