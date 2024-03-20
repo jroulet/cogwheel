@@ -200,8 +200,15 @@ def main(config_filename, rundir):
         likelihood_kwargs=getattr(config, 'LIKELIHOOD_KWARGS', None),
         ref_wf_finder_kwargs={**getattr(config, 'REF_WF_FINDER_KWARGS', {}),
                               'f_ref': config.PRIOR_KWARGS['f_ref']})
+    post.likelihood.asd_drift = None  # Set to 1
 
     print('', flush=True)  # Flush maximization log before starting the sampler
+
+    # Save the injection parameters in rundir for extra safety
+    event_data.injection['par_dic']['lnl'] = post.likelihood.lnlike_fft(
+        event_data.injection['par_dic'])
+    with open(rundir/INJECTION_DICT_FILENAME, 'w', encoding='utf-8') as file:
+        json.dump(event_data.injection, file, cls=utils.NumpyEncoder, indent=2)
 
     # Declare failure if the range_dic, prior or likelihood don't include the truth:
     sampled_inj = post.prior.inverse_transform(**event_data.injection['par_dic'])
@@ -220,13 +227,6 @@ def main(config_filename, rundir):
         mchirp_range = np.clip(mchirp_range, *config.PRIOR_KWARGS['mchirp_range'])
         post.prior = post.prior.reinstantiate(mchirp_range=mchirp_range)
 
-    post.likelihood.asd_drift = None  # Set to 1
-
-    # Save the injection parameters in rundir for extra safety
-    event_data.injection['par_dic']['lnl'] = post.likelihood.lnlike_fft(
-        event_data.injection['par_dic'])
-    with open(rundir/INJECTION_DICT_FILENAME, 'w', encoding='utf-8') as file:
-        json.dump(event_data.injection, file, cls=utils.NumpyEncoder, indent=2)
 
     sampler = config.SAMPLER_CLS(post, run_kwargs=config.RUN_KWARGS)
     sampler.run(rundir)
