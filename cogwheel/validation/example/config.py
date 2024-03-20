@@ -21,7 +21,7 @@ SEED = 0
 INJECTION_DIR = Path(__file__).parent
 INJECTIONS_FILENAME = 'injections.feather'
 
-H_H_MIN = 60  # Threshold imposed on ⟨ℎ∣ℎ⟩
+H_H_MIN = 70  # Threshold imposed on ⟨ℎ∣ℎ⟩
 D_LUMINOSITY_MAX = 1.5e4  # Mpc
 
 # Number of injections after applying the `H_H_MIN` cut:
@@ -44,5 +44,6 @@ PRIOR_KWARGS = {'mchirp_range': (1, 5),
                 'q_min': .05,
                 'f_ref': 50.}
 LIKELIHOOD_KWARGS  = {}
+REF_WF_FINDER_KWARGS = {}
 SAMPLER_CLS = sampling.PyMultiNest
 RUN_KWARGS = {'n_live_points': 512}

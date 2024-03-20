@@ -198,7 +198,7 @@ def main(config_filename, rundir):
         prior_class=config.PE_PRIOR_CLS,
         prior_kwargs=prior_kwargs,
         likelihood_kwargs=getattr(config, 'LIKELIHOOD_KWARGS', None),
-        ref_wf_finder_kwargs={'time_range': (-.15, .15),
+        ref_wf_finder_kwargs={**getattr(config, 'REF_WF_FINDER_KWARGS', {}),
                               'f_ref': config.PRIOR_KWARGS['f_ref']})
 
     print('', flush=True)  # Flush maximization log before starting the sampler
