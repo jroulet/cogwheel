@@ -60,7 +60,7 @@ def _get_event_data(config, i_sample):
 def _get_eventdir(config, i_sample):
     """Return ``pathlib.Path`` object with injection event directory."""
     eventname = _get_eventname(config, i_sample)
-    return config.INJECTION_DIR/eventname
+    return config.INJECTION_DIR/'runs'/eventname
 
 
 def get_rundir(config, i_sample):
