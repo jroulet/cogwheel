@@ -591,7 +591,7 @@ class ProposingCoherentScore(BaseCoherentScore):
                                                    lnl_marginalized_threshold)
 
         # Update time-of-arrival guess based on the latest proposal
-        if self.learning_rate:
+        if self.learning_rate and marg_info.n_effective > self.min_n_effective:
             if self._t_arrival_prob is None:
                 self._t_arrival_prob = marg_info.proposals[-1]
             else:
