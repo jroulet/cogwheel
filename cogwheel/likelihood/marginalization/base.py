@@ -363,7 +363,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
         silverman_factor = (3/4 * marginalization_info.n_effective) ** -.2
         dt = times[1] - times[0]
-        bins = np.concatenate([[times[0] - dt/2], times + dt/2])
+        bins = np.concatenate([[-np.inf], times[:-1] + dt/2, [np.inf]])
 
         prob = []
         for t_samples in t_det:  # Loop over detectors
