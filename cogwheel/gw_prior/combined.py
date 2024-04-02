@@ -152,6 +152,27 @@ class TidalIASPrior(RegisteredPriorMixin, CombinedPrior):
                      FixedReferenceFrequencyPrior]
 
 
+class CartesianIASPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Precessing, flat in chieff, uniform luminosity volume.
+    Physically equivalent to ``IntrinsicIASPrior`` but does not require
+    periodic parameters, which some samplers cannot deal with.
+    """
+    default_likelihood_class = RelativeBinningLikelihood
+
+    prior_classes = [
+        FixedReferenceFrequencyPrior,
+        UniformDetectorFrameMassesPrior,
+        UniformEffectiveSpinPrior,
+        CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior,
+        IsotropicSkyLocationPrior,
+        UniformPolarizationPrior,
+        UniformTimePrior,
+        UniformPhasePrior,
+        UniformLuminosityVolumePrior,
+        ZeroTidalDeformabilityPrior]
+
+
 class LVCPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, isotropic spins, uniform luminosity volume."""
     default_likelihood_class = RelativeBinningLikelihood
@@ -341,6 +362,8 @@ class IntrinsicLVCPrior(RegisteredPriorMixin, CombinedPrior):
 class CartesianIntrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Prior for usage with ``MarginalizedExtrinsicLikelihood``.
+    Physically equivalent to ``IntrinsicIASPrior`` but does not require
+    periodic parameters, which some samplers cannot deal with.
     Intrinsic parameters only, precessing, uniform in effective spin
     and detector frame component masses, no tides.
     """
