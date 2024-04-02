@@ -528,7 +528,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         """
         # Pass fiducial configuration to hit cache often:
         d_h, h_h = self._get_dh_hh_complex_no_asd_drift(par_dic) # mpd, mpPd
-        return np.sum(d_h.real,axis=(0,1)), np.sum(h_h.real, axis=(0,1,2))
+        return np.sum(d_h.real, axis=(0, 1)), np.sum(h_h.real, axis=(0, 1, 2))
 
     def _get_dh_hh_complex_no_asd_drift(self, par_dic):
         """
