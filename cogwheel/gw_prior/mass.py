@@ -18,6 +18,7 @@ class UniformDetectorFrameMassesPrior(Prior):
     """
     Uniform prior for detector frame masses.
     Sampled variables are mchirp, lnq. These are transformed to m1, m2.
+    The prior integrates to 1 over mchirp and lnq ranges.
     """
     standard_params = ['m1', 'm2']
     range_dic = {'mchirp': None,

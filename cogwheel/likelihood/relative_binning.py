@@ -97,14 +97,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         This template computes ``.asd_drift``, subclasses should expand
         it to compute the summary data.
         """
-        # Don't zero the in-plane spins for the reference waveform
-        disable_precession = self.waveform_generator.disable_precession
-        self.waveform_generator.disable_precession = False
-
         self.asd_drift = self.compute_asd_drift(self.par_dic_0)
-
-        # Reset
-        self.waveform_generator.disable_precession = disable_precession
 
     @property
     def pn_phase_tol(self):
@@ -196,9 +189,9 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         row are the B-spline coefficients for a spline that interpolates
         an array of zeros with a one in the i-th place, on `fbin`.
         In other words, `_coefficients @ _basis_splines` is an array of
-        shape `(nbin, nrfft)` whose i-th row is a spline that interpolates
-        on `fbin` an array of zeros with a one in the i-th place; this
-        spline is evaluated on the RFFT grid.
+        shape `(nbin, nrfft)` whose i-th row is a spline that
+        interpolates on `fbin` an array of zeros with a one in the i-th
+        place; this spline is evaluated on the RFFT grid.
         """
         nbin = len(self.fbin)
         coefficients = np.empty((nbin, nbin))
@@ -211,14 +204,18 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
 
         nrfft = len(self.event_data.frequencies)
         basis_splines = scipy.sparse.lil_matrix((nbin, nrfft))
+
+        frequencies = self.event_data.frequencies.copy()
+        frequencies[-1] -= 1e-10  # Or last basis_element evaluates to 0
+
         for i_bin in range(nbin):
             element_knots = knots[i_bin : i_bin + self.spline_degree + 2]
             basis_element = scipy.interpolate.BSpline.basis_element(
                 element_knots)
-            i_start, i_end = np.searchsorted(self.event_data.frequencies,
-                                             element_knots[[0, -1]])
+            i_start, i_end = np.searchsorted(frequencies,
+                                             element_knots[[0, -1]], 'right')
             basis_splines[i_bin, i_start : i_end] = basis_element(
-                self.event_data.frequencies[i_start : i_end])
+                frequencies[i_start : i_end])
 
         self._basis_splines = basis_splines.tocsr()
 
@@ -255,6 +252,47 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
 
         return (4 * self.event_data.df
                 * projected_integrand.dot(self._coefficients.T))
+
+    def _stall_ringdown(self, h0_f, h0_fbin):
+        """
+        Identify a cutoff frequency and set `h0_f` and `h0_fbin` to a
+        nonzero constant above that frequency, inplace.
+        Useful for preventing the denominator from going to zero in
+        relative binning.
+
+        `h0_f` and `h0_fbin` must have frequencies in their last axis,
+        and their shape must match in the remaining dimensions.
+        """
+        assert h0_f.shape[:-1] == h0_fbin.shape[:-1]
+        assert h0_f.shape[-1] == len(self.event_data.frequencies)
+        assert h0_fbin.shape[-1] == len(self.fbin)
+
+        wht_filter = np.linalg.norm(self.event_data.wht_filter, axis=0)
+
+        h0_f = np.atleast_2d(h0_f)
+        h0_fbin = np.atleast_2d(h0_fbin)
+        for i in np.ndindex(h0_f.shape[:-1]):  # Work with 1-d arrays
+            cumsnr2 = np.cumsum((np.abs(h0_f[i]) * wht_filter)**2)
+            cumsnr2 /= cumsnr2[-1]
+            i_99 = np.searchsorted(cumsnr2, .99)
+            f_99 = self.event_data.frequencies[i_99]
+            ibin_99 = np.searchsorted(self.fbin, f_99)
+
+            f_start = self.fbin[ibin_99 - self.spline_degree]  # Start fade
+            f_end = self.fbin[ibin_99]  # End fade
+
+            def fadeout(f, f_start=f_start, f_end=f_end):
+                return np.cos(np.clip((f-f_start) / (f_end-f_start), 0, 1)
+                              * np.pi / 2) ** 2
+
+            # Replace h by a constant above f_end
+            fadeout_f = fadeout(self.event_data.frequencies)
+            fadeout_fbin = fadeout(self.fbin)
+
+            h0_f[i][:] = (h0_f[i] * fadeout_f
+                          + h0_fbin[i][ibin_99] * (1-fadeout_f))
+            h0_fbin[i][:] = (h0_fbin[i] * fadeout_fbin
+                             + h0_fbin[i][ibin_99] * (1-fadeout_fbin))
 
     def get_init_dict(self):
         """
@@ -301,7 +339,8 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         Instance of ``cls``.
         """
         waveform_generator = reference_waveform_finder.waveform_generator \
-            .reinstantiate(approximant=approximant, harmonic_modes=None)
+            .reinstantiate(approximant=approximant, harmonic_modes=None,
+                           lalsimulation_commands=())
 
         return cls(event_data=reference_waveform_finder.event_data,
                    waveform_generator=waveform_generator,
@@ -310,6 +349,124 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
                    pn_phase_tol=pn_phase_tol,
                    spline_degree=spline_degree,
                    **kwargs)
+
+    def lnlike(self, par_dic):
+        """
+        Return log-likelihood (float).
+        Mainly for backwards compatibility.
+        """
+        return self.lnlike_and_metadata(par_dic)[0]
+
+    @abstractmethod
+    def lnlike_and_metadata(self, par_dic) -> tuple[float, object]:
+        """
+        Return
+        ------
+        lnl: float
+            Log likelihood.
+
+        metadata: object
+            Arbitrary object that stores information to postprocess the
+            posterior samples. See ``.get_blob``.
+        """
+
+    def get_blob(self, metadata) -> dict:
+        """
+        Return dictionary of ancillary information ("blob").
+        The sampler will use this to create extra columns for the
+        posterior samples.
+
+        metadata: object
+            Arbitrary object that stores information to postprocess the
+            posterior samples. Second output of ``lnlike_and_metadata``.
+        """
+        del metadata
+        return {}
+
+
+class BaseLinearFree(BaseRelativeBinning):
+    """
+    Define a method ``._get_linearfree_hplus_hcross_dt`` to
+    compute linear-free waveforms and the timeshift required
+    to go back to the approximant's convention.
+    Experimental class. For now the convention is that only
+    a timeshift is applied, no phase shift, but perhaps this
+    might change.
+    """
+    def __init__(self, event_data, waveform_generator, par_dic_0,
+                 fbin=None, pn_phase_tol=None, spline_degree=3):
+        self._h2plus0_fbin = None  # Set by ._set_summary
+        self._polyfit_weights = None  # Set by ._set_summary
+        super().__init__(event_data, waveform_generator, par_dic_0,
+                         fbin, pn_phase_tol, spline_degree)
+
+    def _set_summary(self):
+        super()._set_summary()
+
+        with utils.temporarily_change_attributes(self.waveform_generator,
+                                                 disable_precession=False):
+            m2_index = list(self.waveform_generator.m_arr).index(2)
+
+            h2plus0_f = np.zeros(len(self.event_data.frequencies),
+                                 dtype=np.complex_)
+            h2plus0_f[self.event_data.fslice] \
+                = self.waveform_generator.get_hplus_hcross(
+                    self.event_data.frequencies[self.event_data.fslice],
+                    self.par_dic_0, by_m=True)[m2_index, 0]
+
+            h2plus0_fbin = self.waveform_generator.get_hplus_hcross(
+                self.fbin, self.par_dic_0, by_m=True)[m2_index, 0]
+        self._h2plus0_fbin = h2plus0_fbin.copy()
+
+        self._stall_ringdown(h2plus0_f, self._h2plus0_fbin)
+
+        weights_f = (np.abs(h2plus0_f) * self.event_data.wht_filter)**2
+        self._polyfit_weights = np.sqrt(np.clip(
+            self._get_summary_weights(weights_f.sum(0)).real, 0, None))
+
+    def _get_linearfree_hplus_hcross_dt(self, waveform_par_dic, by_m=False):
+        """
+        Return a linear-free waveform at relative-binning (coarse)
+        frequency resolution, and the timeshift to go back to the
+        original convention.
+        Linear-free here means that the (2, 2) hplus has been time-
+        aligned to the reference waveform.
+
+        Parameters
+        ----------
+        waveform_par_dic: dict
+            Parameters per ``.waveform_generator.waveform_params``.
+            Any extra keys would be silently ignored.
+
+        by_m: bool
+            Wheter to return the waveform mode-by-mode.
+
+        Return
+        ------
+        h_mpb: array of shape (m?, 2, len(.fbin))
+            + and x polarizations at the relative-binning frequencies,
+            with a timeshift applied so that waveforms with different
+            parameters would be aligned in time (Hz^-1).
+
+        dt_linearfree: float
+            Time shift to go back to the approximant's convention (s).
+        """
+        h_mpb = self.waveform_generator.get_hplus_hcross(
+            self.fbin, waveform_par_dic, by_m=True)
+        m2_index = list(self.waveform_generator.m_arr).index(2)
+        h2plus_fbin = h_mpb[m2_index, 0]
+        hplus_ratio = h2plus_fbin / self._h2plus0_fbin
+        dphase = np.unwrap(np.angle(hplus_ratio))
+        fit = np.polynomial.Polynomial.fit(
+            self.fbin, dphase, deg=1,
+            w=self._polyfit_weights * np.sqrt(np.abs(hplus_ratio)))
+
+        timeshift = - fit.deriv()(0) / (2*np.pi)
+        h_mpb *= np.exp(2j*np.pi * timeshift * self.fbin)
+
+        if by_m:
+            return h_mpb, timeshift
+        return h_mpb.sum(axis=0), timeshift
 
 
 class RelativeBinningLikelihood(BaseRelativeBinning):
@@ -332,9 +489,17 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         super().__init__(*args, **kwargs)
 
     @check_bounds
-    def lnlike(self, par_dic):
+    def lnlike_and_metadata(self, par_dic):
         """Return log likelihood using relative binning."""
-        return self.lnlike_detectors_no_asd_drift(par_dic) @ self.asd_drift**-2
+        lnl = self.lnlike_detectors_no_asd_drift(par_dic) @ self.asd_drift**-2
+        return lnl, {'lnl': lnl}
+
+    def get_blob(self, metadata):
+        """
+        Return dictionary of ancillary information ("blob"). This will
+        be appended to the posterior samples as extra columns.
+        """
+        return metadata
 
     def lnlike_detectors_no_asd_drift(self, par_dic):
         """
@@ -354,7 +519,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         """
         Return two arrays of length n_detectors with the values of
         ``(d|h)``, ``(h|h)``, no ASD-drift correction applied, using
-        relative binning. 
+        relative binning.
 
         Parameters
         ----------
@@ -363,13 +528,13 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         """
         # Pass fiducial configuration to hit cache often:
         d_h, h_h = self._get_dh_hh_complex_no_asd_drift(par_dic) # mpd, mpPd
-        return np.sum(d_h.real,axis=(0,1)), np.sum(h_h.real, axis=(0,1,2))
-    
+        return np.sum(d_h.real, axis=(0, 1)), np.sum(h_h.real, axis=(0, 1, 2))
+
     def _get_dh_hh_complex_no_asd_drift(self, par_dic):
         """
         Return two arrays complex with the values of
         ``(d|h)`` (modes, polarizations, detectors), and
-        ``(h|h)`` (mode pairs, polarizations, polarizations, detecotrs), 
+        ``(h|h)`` (mode pairs, polarizations, polarizations, detectors),
         no ASD-drift correction applied, using relative binning.
 
         Parameters
@@ -388,8 +553,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         d_h_mpd, h_h_mpd = self._get_dh_hh_by_m_polarization_detector(
             tuple(par_dic_fiducial.items()))
 
-        m_arr = np.fromiter(
-            self.waveform_generator._harmonic_modes_by_m, int)
+        m_arr = self.waveform_generator.m_arr
         m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
         dh_phasor = np.exp(-1j * dphi * m_arr)
         hh_phasor = np.exp(1j * dphi * (m_arr[m_inds] - m_arr[mprime_inds]))
@@ -403,10 +567,10 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         d_h = amp_ratio * np.einsum('mpd, pd, m -> mpd',
                                     d_h_mpd, fplus_fcross, dh_phasor)
         h_h = amp_ratio**2 * np.einsum('mpPd, pd, Pd, m -> mpPd',
-                                       h_h_mpd, fplus_fcross, 
+                                       h_h_mpd, fplus_fcross,
                                        fplus_fcross, hh_phasor)
         return d_h, h_h
-    
+
     @utils.lru_cache(maxsize=16)
     def _get_dh_hh_by_m_polarization_detector(self, par_dic_items):
         """
@@ -473,28 +637,39 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         """
         super()._set_summary()
         # Don't zero the in-plane spins for the reference waveform
-        disable_precession = self.waveform_generator.disable_precession
-        self.waveform_generator.disable_precession = False
+        with utils.temporarily_change_attributes(self.waveform_generator,
+                                                 disable_precession=False):
 
-        self._h0_f = self._get_h_f(self.par_dic_0, by_m=True)
-        self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
-            self.fbin, self.par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
+            self._h0_f = self._get_h_f(self.par_dic_0, by_m=True)
+            self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
+                self.fbin, self.par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
 
-        d_h0 = self.event_data.blued_strain * self._h0_f.conj()
-        self._d_h_weights = (self._get_summary_weights(d_h0)
-                             / np.conj(self._h0_fbin))
+            # Temporarily undo big time shift so waveform is smooth at
+            # high frequencies:
+            shift_f = np.exp(-2j*np.pi * self.event_data.frequencies
+                             * self.event_data.tcoarse)
+            shift_fbin = np.exp(-2j*np.pi * self.fbin
+                                * self.event_data.tcoarse)
+            self._h0_f *= shift_f.conj()
+            self._h0_fbin *= shift_fbin.conj()
+            # Ensure reference waveform is smooth and !=0 at high frequency:
+            self._stall_ringdown(self._h0_f, self._h0_fbin)
+            # Reapply big time shift:
+            self._h0_f *= shift_f
+            self._h0_fbin *= shift_fbin
 
-        m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
-        h0m_h0mprime = (self._h0_f[m_inds] * self._h0_f[mprime_inds].conj()
-                        * self.event_data.wht_filter ** 2)
-        self._h_h_weights = (self._get_summary_weights(h0m_h0mprime)
-                             / (self._h0_fbin[m_inds]
-                                * self._h0_fbin[mprime_inds].conj()))
-        # Count off-diagonal terms twice:
-        self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
+            d_h0 = self.event_data.blued_strain * self._h0_f.conj()
+            self._d_h_weights = (self._get_summary_weights(d_h0)
+                                 / np.conj(self._h0_fbin))
 
-        # Reset
-        self.waveform_generator.disable_precession = disable_precession
+            m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
+            h0m_h0mprime = (self._h0_f[m_inds] * self._h0_f[mprime_inds].conj()
+                            * self.event_data.wht_filter ** 2)
+            self._h_h_weights = (self._get_summary_weights(h0m_h0mprime)
+                                 / (self._h0_fbin[m_inds]
+                                    * self._h0_fbin[mprime_inds].conj()))
+            # Count off-diagonal terms twice:
+            self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
 
     def _get_h_f_interpolated(self, par_dic, *, normalize=False,
                               by_m=False):

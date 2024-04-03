@@ -1,11 +1,13 @@
 """Make likelihood objects (with injections) and test them."""
 
 from unittest import TestCase, main
-import inspect
+from inspect import signature
 
 from cogwheel import data
 from cogwheel import gw_prior
 from cogwheel import likelihood
+from cogwheel.likelihood.marginalized_extrinsic import (
+    BaseMarginalizedExtrinsicLikelihood, BaseLinearFree)
 from cogwheel import waveform
 from cogwheel.posterior import Posterior
 
@@ -38,10 +40,11 @@ class PosteriorTestCase(TestCase):
         lookup_table = likelihood.LookupTable()
 
         cls.likelihoods = []
-        for likelihood_class in get_subclasses(likelihood.BaseRelativeBinning):
+        for likelihood_class in (get_subclasses(likelihood.BaseRelativeBinning)
+                                 - {BaseMarginalizedExtrinsicLikelihood,
+                                    BaseLinearFree}):
             kwargs = {}
-            if 'lookup_table' in inspect.signature(
-                    likelihood_class.__init__).parameters:
+            if 'lookup_table' in signature(likelihood_class).parameters:
                 kwargs['lookup_table'] = lookup_table
 
             cls.likelihoods.append(
@@ -57,10 +60,11 @@ class PosteriorTestCase(TestCase):
                       for prior_class in gw_prior.prior_registry.values()
                       if prior_class is not gw_prior.ExtrinsicParametersPrior]
 
+
     def test_prior(self):
         """
-        Test that the ``.lnprior()`` method of all registered priors returns a
-        float.
+        Test that the ``.lnprior()`` method of all registered priors
+        returns a float.
         """
         for prior in self.priors:
             with self.subTest(prior):
@@ -76,11 +80,11 @@ class PosteriorTestCase(TestCase):
             with self.subTest(like):
                 self.assertIsInstance(like.lnlike(self.par_dic_0), float)
 
-
     def test_posterior(self):
         """
-        Test that the ``.lnposterior()`` method of posteriors from all
-        combinations of priors and likelihoods returns a float.
+        Test that the ``.lnposterior_pardic_and_metadata()`` method of
+        posteriors from all combinations of priors and likelihoods
+        returns the correct types.
         """
         for prior in self.priors:
             sampled_dic = prior.inverse_transform(**self.par_dic_0)
@@ -88,8 +92,14 @@ class PosteriorTestCase(TestCase):
                 if set(prior.standard_params) == set(like.params):
                     with self.subTest((prior, like)):
                         post = Posterior(prior, like)
-                        self.assertIsInstance(post.lnposterior(**sampled_dic),
-                                              float)
+                        lnposterior, par_dic, metadata \
+                            = post.lnposterior_pardic_and_metadata(**sampled_dic)
+                        blob = post.likelihood.get_blob(metadata)
+
+                        self.assertIsInstance(lnposterior, float)
+                        self.assertIsInstance(par_dic, dict)
+                        self.assertIsInstance(blob, dict)
+
 
 if __name__ == '__main__':
     main()

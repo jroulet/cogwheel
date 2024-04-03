@@ -23,88 +23,6 @@ DEFAULT_PARS = {**ZERO_INPLANE_SPINS,
 FORCE_NNLO_ANGLES = (
     ('SimInspiralWaveformParamsInsertPhenomXPrecVersion', 102),)
 
-Approximant = namedtuple('Approximant',
-                         ('harmonic_modes', 'aligned_spins', 'tides'),
-                         defaults=([(2, 2)], True, False))
-
-APPROXIMANTS = {
-    'IMRPhenomD_NRTidalv2': Approximant(tides=True),
-    'IMRPhenomD': Approximant(),
-    'IMRPhenomXPHM': Approximant(harmonic_modes=[(2, 2), (2, 1), (3, 3),
-                                                 (3, 2), (4, 4)],
-                                 aligned_spins=False),
-    'IMRPhenomXAS': Approximant(),
-    'IMRPhenomXP': Approximant(aligned_spins=False),
-    }
-
-
-def inplane_spins_xy_n_to_xy(par_dic):
-    """
-    Rotate inplane spins (s1x_n, s1y_n) and (s2x_n, s2y_n) by an angle
-    `-phi_ref` to get (s1x, s1y), (s2x, s2y).
-    `par_dic` needs to have keys 's1x_n', 's1y_n', 's2x_n', 's2y_n'.
-    Entries for 's1x', 's1y', 's2x', 's2y' will be added.
-
-    `x_n`, `y_n` are axes perpendicular to the orbital angular momentum
-    `L`, so that the line of sight `N` lies in the y-z plane, i.e.
-        N = (0, sin(iota), cos(iota))
-    in the (x_n, y_n, z) system.
-    `x`, `y` are axes perpendicular to the orbital angular momentum `L`,
-    so that the orbital separation is the x direction.
-    The two systems coincide when `phi_ref=0`.
-    """
-    sin_phi_ref = np.sin(par_dic['phi_ref'])
-    cos_phi_ref = np.cos(par_dic['phi_ref'])
-    rotation = np.array([[cos_phi_ref, sin_phi_ref],
-                         [-sin_phi_ref, cos_phi_ref]])
-
-    ((par_dic['s1x'], par_dic['s2x']),
-     (par_dic['s1y'], par_dic['s2y'])
-        ) = rotation.dot(((par_dic['s1x_n'], par_dic['s2x_n']),
-                          (par_dic['s1y_n'], par_dic['s2y_n'])))
-
-
-def inplane_spins_xy_to_xy_n(par_dic):
-    """
-    Rotate inplane spins (s1x, s1y) and (s2x, s2y) by an angle
-    `phi_ref` to get (s1x_n, s1y_n), (s2x_n, s2y_n).
-    `par_dic` needs to have keys 's1x', 's1y', 's2x', 's2y'.
-    Entries for 's1x_n', 's1y_n', 's2x_n', 's2y_n' will be added.
-
-    `x_n`, `y_n` are axes perpendicular to the orbital angular momentum
-    `L`, so that the line of sight `N` lies in the y-z plane, i.e.
-        N = (0, sin(iota), cos(iota))
-    in the (x_n, y_n, z) system.
-    `x`, `y` are axes perpendicular to the orbital angular momentum `L`,
-    so that the orbital separation is the x direction.
-    The two systems coincide when `phi_ref=0`.
-    """
-    sin_phi_ref = np.sin(par_dic['phi_ref'])
-    cos_phi_ref = np.cos(par_dic['phi_ref'])
-    rotation = np.array([[cos_phi_ref, -sin_phi_ref],
-                         [sin_phi_ref, cos_phi_ref]])
-
-    ((par_dic['s1x_n'], par_dic['s2x_n']),
-     (par_dic['s1y_n'], par_dic['s2y_n'])
-        ) = rotation.dot(((par_dic['s1x'], par_dic['s2x']),
-                          (par_dic['s1y'], par_dic['s2y'])))
-
-
-def within_bounds(par_dic: dict) -> bool:
-    """
-    Return whether parameters in `par_dic` are within physical bounds.
-    """
-    return (all(par_dic[positive] >= 0
-                for positive in {'m1', 'm2', 'd_luminosity', 'l1', 'l2', 'iota'
-                                }.intersection(par_dic))
-            and np.all(np.linalg.norm(
-                [(par_dic['s1x_n'], par_dic['s1y_n'], par_dic['s1z']),
-                 (par_dic['s2x_n'], par_dic['s2y_n'], par_dic['s2z'])],
-                axis=1) <= 1)
-            and par_dic['iota'] <= np.pi
-            and np.abs(par_dic.get('dec', 0)) <= np.pi/2
-           )
-
 
 def compute_hplus_hcross(f, par_dic, approximant: str,
                          harmonic_modes=None, lal_dic=None):
@@ -189,6 +107,126 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
     return hplus_hcross
 
 
+def compute_hplus_hcross_by_mode(f, par_dic, approximant: str,
+                                 harmonic_modes, lal_dic=None):
+    """
+    Return dictionary of the form {(l, m): h_lm} with the contribution
+    of each harmonic mode to hplus, hcross.
+
+    Parameters
+    ----------
+    f: 1d array of type float
+        Frequency array in Hz
+
+    par_dic: dict
+        Source parameters. Needs to have these keys:
+            * m1, m2: component masses (Msun)
+            * d_luminosity: luminosity distance (Mpc)
+            * iota: inclination (rad)
+            * phi_ref: phase at reference frequency (rad)
+            * f_ref: reference frequency (Hz)
+        plus, optionally:
+            * s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z: dimensionless spins
+            * l1, l2: dimensionless tidal deformabilities
+
+    approximant: str
+        Approximant name.
+
+    harmonic_modes: list of 2-tuples with (l, m) pairs
+        Which (co-precessing frame) higher-order modes to include.
+
+    lal_dic: LALDict, optional
+        Contains special approximant settings.
+    """
+    return {mode: compute_hplus_hcross(f, par_dic, approximant,
+                                       harmonic_modes=[mode], lal_dic=lal_dic)
+            for mode in harmonic_modes}
+
+
+Approximant = namedtuple(
+    'Approximant',
+    ('harmonic_modes', 'aligned_spins', 'tides', 'hplus_hcross_by_mode_func'),
+    defaults=([(2, 2)], True, False, compute_hplus_hcross_by_mode))
+
+APPROXIMANTS = {
+    'IMRPhenomD_NRTidalv2': Approximant(tides=True),
+    'IMRPhenomD': Approximant(),
+    'IMRPhenomXPHM': Approximant(harmonic_modes=[(2, 2), (2, 1), (3, 3),
+                                                 (3, 2), (4, 4)],
+                                 aligned_spins=False),
+    'IMRPhenomXAS': Approximant(),
+    # 'IMRPhenomXP': Approximant(aligned_spins=False),  # Fails tests.test_waveform
+    }
+
+
+def inplane_spins_xy_n_to_xy(par_dic):
+    """
+    Rotate inplane spins (s1x_n, s1y_n) and (s2x_n, s2y_n) by an angle
+    `-phi_ref` to get (s1x, s1y), (s2x, s2y).
+    `par_dic` needs to have keys 's1x_n', 's1y_n', 's2x_n', 's2y_n'.
+    Entries for 's1x', 's1y', 's2x', 's2y' will be added.
+
+    `x_n`, `y_n` are axes perpendicular to the orbital angular momentum
+    `L`, so that the line of sight `N` lies in the y-z plane, i.e.
+        N = (0, sin(iota), cos(iota))
+    in the (x_n, y_n, z) system.
+    `x`, `y` are axes perpendicular to the orbital angular momentum `L`,
+    so that the orbital separation is the x direction.
+    The two systems coincide when `phi_ref=0`.
+    """
+    sin_phi_ref = np.sin(par_dic['phi_ref'])
+    cos_phi_ref = np.cos(par_dic['phi_ref'])
+    rotation = np.array([[cos_phi_ref, sin_phi_ref],
+                         [-sin_phi_ref, cos_phi_ref]])
+
+    ((par_dic['s1x'], par_dic['s2x']),
+     (par_dic['s1y'], par_dic['s2y'])
+        ) = rotation.dot(((par_dic['s1x_n'], par_dic['s2x_n']),
+                          (par_dic['s1y_n'], par_dic['s2y_n'])))
+
+
+def inplane_spins_xy_to_xy_n(par_dic):
+    """
+    Rotate inplane spins (s1x, s1y) and (s2x, s2y) by an angle
+    `phi_ref` to get (s1x_n, s1y_n), (s2x_n, s2y_n).
+    `par_dic` needs to have keys 's1x', 's1y', 's2x', 's2y'.
+    Entries for 's1x_n', 's1y_n', 's2x_n', 's2y_n' will be added.
+
+    `x_n`, `y_n` are axes perpendicular to the orbital angular momentum
+    `L`, so that the line of sight `N` lies in the y-z plane, i.e.
+        N = (0, sin(iota), cos(iota))
+    in the (x_n, y_n, z) system.
+    `x`, `y` are axes perpendicular to the orbital angular momentum `L`,
+    so that the orbital separation is the x direction.
+    The two systems coincide when `phi_ref=0`.
+    """
+    sin_phi_ref = np.sin(par_dic['phi_ref'])
+    cos_phi_ref = np.cos(par_dic['phi_ref'])
+    rotation = np.array([[cos_phi_ref, -sin_phi_ref],
+                         [sin_phi_ref, cos_phi_ref]])
+
+    ((par_dic['s1x_n'], par_dic['s2x_n']),
+     (par_dic['s1y_n'], par_dic['s2y_n'])
+        ) = rotation.dot(((par_dic['s1x'], par_dic['s2x']),
+                          (par_dic['s1y'], par_dic['s2y'])))
+
+
+def within_bounds(par_dic: dict) -> bool:
+    """
+    Return whether parameters in `par_dic` are within physical bounds.
+    """
+    return (all(par_dic[positive] >= 0
+                for positive in {'m1', 'm2', 'd_luminosity', 'l1', 'l2', 'iota'
+                                }.intersection(par_dic))
+            and np.all(np.linalg.norm(
+                [(par_dic['s1x_n'], par_dic['s1y_n'], par_dic['s1z']),
+                 (par_dic['s2x_n'], par_dic['s2y_n'], par_dic['s2z'])],
+                axis=1) <= 1)
+            and par_dic.get('iota', 0) <= np.pi
+            and np.abs(par_dic.get('dec', 0)) <= np.pi/2
+           )
+
+
 class WaveformGenerator(utils.JSONMixin):
     """
     Class that provides methods for generating frequency domain
@@ -215,11 +253,13 @@ class WaveformGenerator(utils.JSONMixin):
 
     def __init__(self, detector_names, tgps, tcoarse, approximant,
                  harmonic_modes=None, disable_precession=False,
-                 n_cached_waveforms=1,
-                 lalsimulation_commands=FORCE_NNLO_ANGLES):
+                 n_cached_waveforms=1, lalsimulation_commands=()):
         super().__init__()
 
-        self.detector_names = detector_names
+        if approximant == 'IMRPhenomXODE':
+            from cogwheel.waveform_models import xode as _  # TODO more elegant
+
+        self.detector_names = tuple(detector_names)
         self.tgps = tgps
         self.tcoarse = tcoarse
         self._approximant = approximant
@@ -236,14 +276,15 @@ class WaveformGenerator(utils.JSONMixin):
     @classmethod
     def from_event_data(cls, event_data, approximant,
                         harmonic_modes=None, disable_precession=False,
-                        n_cached_waveforms=1):
+                        n_cached_waveforms=1, lalsimulation_commands=()):
         """
         Constructor that takes `detector_names`, `tgps` and `tcoarse`
         from an instance of `data.EventData`.
         """
         return cls(event_data.detector_names, event_data.tgps,
                    event_data.tcoarse, approximant, harmonic_modes,
-                   disable_precession, n_cached_waveforms)
+                   disable_precession, n_cached_waveforms,
+                   lalsimulation_commands)
 
     @property
     def approximant(self):
@@ -295,6 +336,11 @@ class WaveformGenerator(utils.JSONMixin):
         for l, m in self._harmonic_modes:
             self._harmonic_modes_by_m[m].append((l, m))
         utils.clear_caches()
+
+    @property
+    def m_arr(self):
+        """Int array of m harmonic mode numbers."""
+        return np.fromiter(self._harmonic_modes_by_m, int)
 
     @property
     def n_cached_waveforms(self):
@@ -444,10 +490,12 @@ class WaveformGenerator(utils.JSONMixin):
 
             # hplus_hcross_0 is a (n_m x 2 x n_frequencies) array with
             # sum_l (hlm+, hlmx), at phi_ref=0, d_luminosity=1Mpc.
+            hplus_hcross_modes = APPROXIMANTS[self.approximant].hplus_hcross_by_mode_func(
+                f, waveform_par_dic_0, self.approximant, self.harmonic_modes, lal_dic)
+
             hplus_hcross_0 = np.array(
-                [compute_hplus_hcross(f, waveform_par_dic_0, self.approximant,
-                                      modes, lal_dic)
-                 for modes in self._harmonic_modes_by_m.values()])
+                [np.sum([hplus_hcross_modes[mode] for mode in m_modes], axis=0)
+                 for m_modes in self._harmonic_modes_by_m.values()])
 
             cache_dic = {'approximant': self.approximant,
                          'f': f,
@@ -463,7 +511,7 @@ class WaveformGenerator(utils.JSONMixin):
             self.n_slow_evaluations += 1
 
         # hplus_hcross is a (n_m x 2 x n_frequencies) array.
-        m_arr = np.fromiter(self._harmonic_modes_by_m, int).reshape(-1, 1, 1)
+        m_arr = self.m_arr.reshape(-1, 1, 1)
         hplus_hcross = (np.exp(1j * waveform_par_dic['phi_ref'] * m_arr)
                         / waveform_par_dic['d_luminosity'] * hplus_hcross_0)
         if by_m:

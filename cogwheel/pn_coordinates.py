@@ -163,10 +163,9 @@ class _InspiralAnalysis:
         if not np.allclose(np.diff(frequencies, 2), 0):
             raise ValueError('`frequencies` must be regularly spaced.')
 
-        # (phase, time, 2.5PN, 1PN, 2PN, precession). Ordered this way
+        # (phase, time, 1PN, 2PN, 2.5PN, precession). Ordered this way
         # we ensure that intrinsic parameters are orthogonalized to
-        # phase and time and s1z only changes one of the coordinates,
-        # moreover, linearly.
+        # phase and time.
         pn_exponents = 0, 1, -5/3, -3/3, -2/3, -1/3
         pn_functions = np.power.outer(lal.MTSUN_SI * np.pi * frequencies,
                                       pn_exponents)
@@ -257,6 +256,7 @@ class _InspiralAnalysis:
         pn_coefficients = self._get_pn_coefficients(
             m1, m2, s1z, s2z, s1x_n, s1y_n, s2x_n, s2y_n)
 
+        # Note:
         #     weights * phase = (weights * pn_funcs) @ pn_coefficients
         #                     = qmat @ rmat @ pn_coefficients
         #                     = qmat @ coords
@@ -383,11 +383,11 @@ class _MergerAnalysis:
         fmerger_min = self._get_fmerger(m1, m2, -1, s2z)
         fmerger_max = self._get_fmerger(m1, m2, 1, s2z)
 
-        kwargs = dict(
-            a=(fmerger_min - self._fmerger_0) / self._fmerger_scale_0,
-            b=(fmerger_max - self._fmerger_0) / self._fmerger_scale_0,
-            loc=self._fmerger_0,
-            scale=self._fmerger_scale_0)
+        kwargs = {
+            'a': (fmerger_min - self._fmerger_0) / self._fmerger_scale_0,
+            'b': (fmerger_max - self._fmerger_0) / self._fmerger_scale_0,
+            'loc': self._fmerger_0,
+            'scale': self._fmerger_scale_0}
         fmerger2 = trunclaplace.ppf(.2, **kwargs)
         fmerger8 = trunclaplace.ppf(.8, **kwargs)
 
@@ -582,10 +582,10 @@ class IntrinsicParameterProposal:
 
         s1z_max = np.sqrt(1 - s1x_n**2 - s1y_n**2)
         s1z_min = -s1z_max
-        kwargs = dict(a=(s1z_min - s1z_loc) / s1z_scale,
-                      b=(s1z_max - s1z_loc) / s1z_scale,
-                      loc=s1z_loc,
-                      scale=s1z_scale)
+        kwargs = {'a': (s1z_min - s1z_loc) / s1z_scale,
+                  'b': (s1z_max - s1z_loc) / s1z_scale,
+                  'loc': s1z_loc,
+                  'scale': s1z_scale}
 
         s1z = self._p_s1z.ppf(cdf_s1z_conditioned, **kwargs)
         pdf_s1z = self._p_s1z.pdf(s1z, **kwargs)

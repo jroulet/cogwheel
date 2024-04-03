@@ -1,7 +1,5 @@
 """
 Post-process parameter estimation samples:
-    * Compute derived parameters
-    * Compute likelihood
     * Diagnostics for sampler convergence
     * Diagnostics for robustness against ASD-drift choice
     * Diagnostics for relative-binning accuracy
@@ -12,6 +10,7 @@ single parameter estimation run.
 
 import argparse
 import copy
+import inspect
 import json
 import pathlib
 from pstats import Stats
@@ -23,6 +22,7 @@ import matplotlib as mpl
 import pandas as pd
 
 from cogwheel import gw_plotting
+from cogwheel.likelihood import RelativeBinningLikelihood
 from cogwheel import utils
 from cogwheel import sampling
 from cogwheel import prior
@@ -45,10 +45,10 @@ def postprocess_rundir(rundir, relative_binning_boost=4):
         * Tests for log likelihood differences arising from
           relative binning accuracy.
     """
-    PostProcessor(rundir, relative_binning_boost).process_samples()
+    RundirPostprocessor(rundir, relative_binning_boost).process_samples()
 
 
-class PostProcessor:
+class RundirPostprocessor:
     """
     Postprocess posterior samples from a single run.
 
@@ -64,11 +64,17 @@ class PostProcessor:
         self.rundir = pathlib.Path(rundir)
         self.relative_binning_boost = relative_binning_boost
 
-        sampler = utils.read_json(self.rundir/sampling.Sampler.JSON_FILENAME)
-        self.posterior = sampler.posterior
+        likelihood = utils.read_json(
+            self.rundir/sampling.Sampler.JSON_FILENAME).posterior.likelihood
+
+        if not isinstance(likelihood, RelativeBinningLikelihood):
+            init_dict = likelihood.get_init_dict()
+            keys = inspect.signature(RelativeBinningLikelihood).parameters
+            likelihood = RelativeBinningLikelihood(
+                **{key: init_dict[key] for key in keys})
+
+        self.likelihood = likelihood
         self.samples_path = self.rundir/sampling.SAMPLES_FILENAME
-        if not self.samples_path.exists():
-            sampler.load_samples().to_feather(self.samples_path)
         self.samples = pd.read_feather(self.samples_path)
 
         try:
@@ -78,11 +84,11 @@ class PostProcessor:
             self.tests = {'asd_drift': [],
                           'relative_binning': {},
                           'lnl_max': None,
-                          'lnl_0': self.posterior.likelihood.lnlike(
-                              self.posterior.likelihood.par_dic_0)}
+                          'lnl_0': self.likelihood.lnlike(
+                              self.likelihood.par_dic_0)}
 
         self._lnl_aux_cols = self.get_lnl_aux_cols(
-            self.posterior.likelihood.event_data.detector_names)
+            self.likelihood.event_data.detector_names)
 
         self._asd_drifts_subset = None
 
@@ -91,7 +97,7 @@ class PostProcessor:
         """Return names of auxiliary log likelihood columns."""
         return [f'lnl_aux_{det}' for det in detector_names]
 
-    def process_samples(self, force_update=False):
+    def process_samples(self):
         """
         Call the various methods of the class sequentially, then save
         the results. This computes:
@@ -107,13 +113,7 @@ class PostProcessor:
         """
         print(f'Processing {self.rundir}')
 
-        print(' * Adding standard parameters...')
-        self.posterior.prior.transform_samples(
-            self.samples, force_update=force_update)
-        self.posterior.likelihood.postprocess_samples(
-            self.samples, force_update=force_update)
-        print(' * Computing relative-binning likelihood...')
-        self.compute_lnl(force_update=force_update)
+        self.tests['lnl_max'] = max(self.samples['lnl'])
         print(' * Computing auxiliary likelihood products...')
         self.compute_lnl_aux()
         print(' * Testing ASD-drift correction...')
@@ -121,20 +121,6 @@ class PostProcessor:
         print(' * Testing relative binning...')
         self.test_relative_binning()
         self.save_tests_and_samples()
-
-    def compute_lnl(self, force_update=True):
-        """
-        Add column to `self.samples` with log likelihood computed
-        at original relative binning resolution
-        """
-        if force_update or (self.LNL_COL not in self.samples.columns):
-            lnlike = getattr(
-                self.posterior.likelihood,
-                'lnlike_no_marginalization',
-                self.posterior.likelihood.lnlike)
-            self.samples[self.LNL_COL] = list(
-                map(lnlike, self._standard_samples()))
-        self.tests['lnl_max'] = max(self.samples[self.LNL_COL])
 
     def compute_lnl_aux(self):
         """
@@ -144,17 +130,18 @@ class PostProcessor:
         """
         # Increase the relative-binning frequency resolution:
         try:  # few seconds faster...
-            likelihood = copy.deepcopy(self.posterior.likelihood)
+            likelihood = copy.deepcopy(self.likelihood)
         except TypeError:  # ...but likelihood might be un-pickleable
-            likelihood = self.posterior.likelihood.reinstantiate()
+            likelihood = self.likelihood.reinstantiate()
 
         if likelihood.pn_phase_tol:
             likelihood.pn_phase_tol /= self.relative_binning_boost
         else:
             num = self.relative_binning_boost * (len(likelihood.fbin) - 1) + 1
-            likelihood.fbin = np.interp(np.linspace(0, 1, num),
-                                        np.linspace(0, 1, len(likelihood.fbin)),
-                                        likelihood.fbin)
+            likelihood.fbin = np.interp(
+                np.linspace(0, 1, num),
+                np.linspace(0, 1, len(likelihood.fbin)),
+                likelihood.fbin)
 
         lnl_aux = pd.DataFrame(map(likelihood.lnlike_detectors_no_asd_drift,
                                    self._standard_samples()),
@@ -167,7 +154,7 @@ class PostProcessor:
         arising from the choice of somewhat-parameter-dependent
         asd_drift correction. Store in `self.tests['asd_drift']`.
         """
-        ref_lnl = self._apply_asd_drift(self.posterior.likelihood.asd_drift)
+        ref_lnl = self._apply_asd_drift(self.likelihood.asd_drift)
         for asd_drift in self._get_representative_asd_drifts():
             lnl = self._apply_asd_drift(asd_drift)
             # Difference in log likelihood from changing asd_drift:
@@ -186,7 +173,7 @@ class PostProcessor:
         standard deviation of the errors but ignored in the maximum.
         """
         dlnl = (self.samples[self.LNL_COL]
-                - self._apply_asd_drift(self.posterior.likelihood.asd_drift))
+                - self._apply_asd_drift(self.likelihood.asd_drift))
         weights = self.samples.get(utils.WEIGHTS_NAME)
         _, dlnl_std = utils.weighted_avg_and_std(dlnl, weights=weights)
         self.tests['relative_binning'] = {'dlnl_std': dlnl_std,
@@ -232,17 +219,17 @@ class PostProcessor:
         subset = self.samples.sample(
             n_subset, weights=self.samples.get(utils.WEIGHTS_NAME))
         self._asd_drifts_subset = [
-            self.posterior.likelihood.compute_asd_drift(sample)
+            self.likelihood.compute_asd_drift(sample)
             for sample in self._standard_samples(subset)]
 
     def _standard_samples(self, samples=None):
         """Iterator over standard parameter samples."""
         samples = samples if samples is not None else self.samples
         return (dict(sample) for _, sample in samples[
-            self.posterior.likelihood.waveform_generator.params].iterrows())
+            self.likelihood.waveform_generator.params].iterrows())
 
 
-def diagnostics(eventdir, reference_rundir=None, outfile=None):
+def postprocess_eventdir(eventdir, reference_rundir=None, outfile=None):
     """
     Make diagnostics plots aggregating multiple runs of an event and
     save them to pdf format.
@@ -252,23 +239,29 @@ def diagnostics(eventdir, reference_rundir=None, outfile=None):
 
     Parameters
     ----------
-    reference_rundir: path to rundir used as reference against which to
-                      overplot samples. Defaults to the first rundir by
-                      name.
-    outfile: path to save output as pdf. Defaults to
-             `eventdir/Diagnostics.DIAGNOSTICS_FILENAME`.
+    eventdir: os.PathLike
+        Path to eventdir where all the rundirs to compare are located.
+
+    reference_rundir: os.PathLike
+        Path to rundir used as reference against which to overplot
+        samples. Defaults to the first rundir by name.
+
+    outfile: os.PathLike
+        Path to save output as pdf. Defaults to
+        `{eventdir}/{EventdirPostprocessor.DIAGNOSTICS_FILENAME}`.
     """
-    Diagnostics(eventdir, reference_rundir).diagnostics(outfile)
+    EventdirPostprocessor(eventdir, reference_rundir
+                         ).postprocess_eventdir(outfile)
 
 
-class Diagnostics:
+class EventdirPostprocessor:
     """
     Class to gather information from multiple runs of an event and
     exporting summary to pdf file.
 
-    The method `diagnostics` executes all the functionality of the
-    class. It is suggested to use the top-level function `diagnostics`
-    for simple usage.
+    The method `postprocess_eventdir` executes all the functionality of the
+    class. It is suggested to use the top-level function
+    `postprocess_eventdir` for simple usage.
     """
     DIAGNOSTICS_FILENAME = 'diagnostics.pdf'
     DEFAULT_TOLERANCE_PARAMS = {'asd_drift_dlnl_std': .1,
@@ -292,13 +285,18 @@ class Diagnostics:
         """
         Parameters
         ----------
-        eventdir: path to directory containing rundirs.
-        reference_rundir: path to reference run directory. Defaults to
-                          the first (by name) rundir in `eventdir`.
-        tolerance_params: dict with items to update the defaults from
-                          `DEFAULT_TOLERANCE_PARAMS`. Values higher than
-                          their tolerance are highlighted in the table.
-                          Keys include:
+        eventdir: os.PathLike
+            Path to directory containing rundirs.
+
+        reference_rundir: os.PathLike, optional
+            Path to reference run directory. Defaults to the first (by
+            name) rundir in `eventdir`.
+
+        tolerance_params: dict
+            Items to update defaults from `DEFAULT_TOLERANCE_PARAMS`.
+            Values higher than their tolerance are highlighted in the
+            table. Keys include:
+
             * 'asd_drift_dlnl_std'
                 Tolerable standard deviation of log likelihood
                 fluctuations due to choice of reference waveform for
@@ -338,7 +336,7 @@ class Diagnostics:
         self.tolerance_params = (self.DEFAULT_TOLERANCE_PARAMS
                                  | tolerance_params)
 
-    def diagnostics(self, outfile=None):
+    def postprocess_eventdir(self, outfile=None):
         """
         Make diagnostics plots aggregating multiple runs of an event and
         save them to pdf format in `{eventdir}/{DIAGNOSTICS_FILENAME}`.
@@ -408,8 +406,8 @@ class Diagnostics:
 
         Parameters
         ----------
-        rundirs: sequence of `pathlib.Path`s pointing to run
-                 directories.
+        rundirs: sequence of `pathlib.Path`s
+            Run directories.
         """
         rundirs = rundirs or self.rundirs
 
@@ -455,7 +453,8 @@ class Diagnostics:
         run_kwargs = pd.DataFrame(run_kwargs)
         const_cols = [col for col, (first, *others) in run_kwargs.items()
                       if all(first == other for other in others)]
-        drop_cols = const_cols + ['outputfiles_basename', 'wrapped_params']
+        drop_cols = const_cols + ['outputfiles_basename', 'wrapped_params',
+                                  'filepath']
         return run_kwargs.drop(columns=drop_cols, errors='ignore')
 
     @staticmethod
@@ -560,7 +559,7 @@ def submit_postprocess_rundir_slurm(
                        sbatch_cmds, batch_path)
 
 
-def submit_diagnostics_eventdir_slurm(
+def submit_postprocess_eventdir_slurm(
         eventdir, job_name=None, n_hours_limit=2, stdout_path=None,
         stderr_path=None, sbatch_cmds=(), batch_path=None):
     """
@@ -592,6 +591,7 @@ def main(*, rundir=None, eventdir=None):
     ----------
     rundir: path to a run directory to postprocess, can't be set
             simultaneously with `eventdir` or a `ValueError` is raised.
+
     eventdir: path to an event directory to postprocess, can't be set
               simultaneously with `rundir` or a `ValueError` is raised.
     """
@@ -601,7 +601,7 @@ def main(*, rundir=None, eventdir=None):
     if rundir:
         postprocess_rundir(rundir)
     else:
-        diagnostics(eventdir)
+        postprocess_eventdir(eventdir)
 
 
 if __name__ == '__main__':

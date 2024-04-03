@@ -141,13 +141,13 @@ class CBCLikelihood(utils.JSONMixin):
             Passed to `safe_std`, keys include:
                 `expected_high`, `reject_nearby`.
         """
-        # Use all available modes to get a waveform, then reset
-        harmonic_modes = self.waveform_generator.harmonic_modes
-        self.waveform_generator.harmonic_modes = None
-        # Undo previous asd_drift so result is independent of it
-        normalized_h_f = (self._get_h_f(par_dic, normalize=True)
-                          / self.asd_drift[:, np.newaxis])
-        self.waveform_generator.harmonic_modes = harmonic_modes
+        # Use all available modes and spin components to get a waveform
+        with utils.temporarily_change_attributes(self.waveform_generator,
+                                                 disable_precession=False,
+                                                 harmonic_modes=None):
+            # Undo previous asd_drift so result is independent of it
+            normalized_h_f = (self._get_h_f(par_dic, normalize=True)
+                              / self.asd_drift[:, np.newaxis])
 
         z_cos, z_sin = self._matched_filter_timeseries(normalized_h_f)
         whitened_h_f = (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
@@ -291,8 +291,8 @@ class CBCLikelihood(utils.JSONMixin):
         Array of shape (n_m?, n_detectors, n_frequencies) with strain at
         detector. `n_m` is there only if `by_m=True`.
         """
-        shape = ((len(self.waveform_generator._harmonic_modes_by_m),) if by_m
-                 else ()) + self.event_data.strain.shape
+        shape = (self.waveform_generator.m_arr.shape if by_m else ()
+                ) + self.event_data.strain.shape
         h_f = np.zeros(shape, dtype=np.complex_)
         h_f[..., self.event_data.fslice] \
             = self.waveform_generator.get_strain_at_detectors(
@@ -418,13 +418,18 @@ class CBCLikelihood(utils.JSONMixin):
         plt.xlabel('Time (s)', size=12)
         return fig
 
-    def postprocess_samples(self, samples, force_update=True):
+    def postprocess_samples(self, samples):
         """
-        Placeholder method that can be overriden by subclasses.
-        This method will be called after sampling (e.g. marginalized
-        likelihoods un-marginalize the distribution in postprocessing).
+        Placeholder method that will be called after sampling and may be
+        overriden by subclasses. (E.g. marginalized likelihoods
+        demarginalize the distribution in postprocessing.)
+
+        Parameters
+        ----------
+        samples: pandas.DataFrame
+            Rows are samples, columns must contain `.params`.
         """
-        del self, samples, force_update
+        del samples
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self.event_data.eventname})'

@@ -9,6 +9,7 @@ import lal
 from cogwheel import utils
 from cogwheel import gw_utils
 
+
 class SkyLocAngles(utils.JSONMixin):
     """
     Class that defines a coordinate system for sky localization.
@@ -79,7 +80,7 @@ class SkyLocAngles(utils.JSONMixin):
             j_axis = np.cross(k_axis, i_axis)
             return i_axis, j_axis
 
-        elif len(self.detector_pair) == 1:
+        if len(self.detector_pair) == 1:
             x_arm, y_arm = gw_utils.DETECTOR_ARMS[self.detector_pair[0]]
 
             # Arms are normalized but not perfectly orthogonal, fix:

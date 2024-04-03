@@ -23,20 +23,24 @@ from .extrinsic import (UniformPhasePrior,
 
 from .mass import UniformDetectorFrameMassesPrior
 
-from .tides import UniformTidalDeformabilitiesBNSPrior
-
 from .miscellaneous import (ZeroTidalDeformabilityPrior,
                             FixedIntrinsicParametersPrior,
                             FixedReferenceFrequencyPrior)
 
+from .pn import PNCoordinatesPrior
+
 from .spin import (
     UniformEffectiveSpinPrior,
     IsotropicSpinsAlignedComponentsPrior,
+    VolumetricSpinsAlignedComponentsPrior,
     UniformDiskInplaneSpinsIsotropicInclinationPrior,
     IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
     UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior,
     IsotropicSpinsInplaneComponentsIsotropicInclinationSkyLocationPrior,
+    CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior,
     ZeroInplaneSpinsPrior)
+
+from .tides import UniformTidalDeformabilitiesBNSPrior
 
 prior_registry = {}
 
@@ -148,6 +152,27 @@ class TidalIASPrior(RegisteredPriorMixin, CombinedPrior):
                      FixedReferenceFrequencyPrior]
 
 
+class CartesianIASPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Precessing, flat in chieff, uniform luminosity volume.
+    Physically equivalent to ``IntrinsicIASPrior`` but does not require
+    periodic parameters, which some samplers cannot deal with.
+    """
+    default_likelihood_class = RelativeBinningLikelihood
+
+    prior_classes = [
+        FixedReferenceFrequencyPrior,
+        UniformDetectorFrameMassesPrior,
+        UniformEffectiveSpinPrior,
+        CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior,
+        IsotropicSkyLocationPrior,
+        UniformPolarizationPrior,
+        UniformTimePrior,
+        UniformPhasePrior,
+        UniformLuminosityVolumePrior,
+        ZeroTidalDeformabilityPrior]
+
+
 class LVCPrior(RegisteredPriorMixin, CombinedPrior):
     """Precessing, isotropic spins, uniform luminosity volume."""
     default_likelihood_class = RelativeBinningLikelihood
@@ -248,6 +273,8 @@ class MarginalizedDistanceIASPrior(RegisteredPriorMixin, CombinedPrior):
 
     prior_classes = IASPrior.prior_classes.copy()
     prior_classes.remove(UniformLuminosityVolumePrior)
+
+
 class MarginalizedDistanceAndPhaseIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Prior for usage with ``MarginalizedDistanceLikelihood``.
@@ -259,6 +286,7 @@ class MarginalizedDistanceAndPhaseIASPrior(RegisteredPriorMixin, CombinedPrior):
     prior_classes = IASPrior.prior_classes.copy()
     prior_classes.remove(UniformLuminosityVolumePrior)
     prior_classes.remove(UniformPhasePrior)
+
 
 class MarginalizedDistanceLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
@@ -329,3 +357,62 @@ class IntrinsicLVCPrior(RegisteredPriorMixin, CombinedPrior):
                      IsotropicSpinsAlignedComponentsPrior,
                      IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
                      ZeroTidalDeformabilityPrior]
+
+
+class CartesianIntrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Prior for usage with ``MarginalizedExtrinsicLikelihood``.
+    Physically equivalent to ``IntrinsicIASPrior`` but does not require
+    periodic parameters, which some samplers cannot deal with.
+    Intrinsic parameters only, precessing, uniform in effective spin
+    and detector frame component masses, no tides.
+    """
+    default_likelihood_class = MarginalizedExtrinsicLikelihood
+
+    prior_classes = [FixedReferenceFrequencyPrior,
+                     UniformDetectorFrameMassesPrior,
+                     UniformEffectiveSpinPrior,
+                     CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior,
+                     ZeroTidalDeformabilityPrior]
+
+
+class IntrinsicVolumetricSpinPrior(RegisteredPriorMixin,
+                                   CombinedPrior):
+    """
+    Prior for usage with ``MarginalizedExtrinsicLikelihood``.
+    Intrinsic parameters only, precessing, uniform in detector frame
+    component masses, volumetric spin prior (spin components uniform in
+    the ball |s| < 1), no tides.
+    For low mass systems, consider ``PNIntrinsicVolumetricSpinPrior``
+    instead.
+    """
+    default_likelihood_class = MarginalizedExtrinsicLikelihood
+
+    prior_classes = utils.replace(IntrinsicIASPrior.prior_classes,
+                                  UniformEffectiveSpinPrior,
+                                  VolumetricSpinsAlignedComponentsPrior)
+
+
+class PNIntrinsicVolumetricSpinPrior(RegisteredPriorMixin,
+                                     CombinedPrior):
+    """
+    Prior for usage with ``MarginalizedExtrinsicLikelihood``.
+    Intrinsic parameters only, precessing, uniform in detector frame
+    component masses, volumetric spin prior (spin components uniform in
+    the ball |s| < 1), no tides.
+    Best suited for low masses where PN expansion is better justified.
+    """
+    default_likelihood_class = MarginalizedExtrinsicLikelihood
+
+    prior_classes = [FixedReferenceFrequencyPrior,
+                     PNCoordinatesPrior,
+                     CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior,
+                     ZeroTidalDeformabilityPrior]
+
+    @classmethod
+    def from_reference_waveform_finder(
+            cls, reference_waveform_finder, **kwargs):
+        eigvecs = PNCoordinatesPrior.eigvecs_from_reference_waveform_finder(
+            reference_waveform_finder)
+        return cls(**reference_waveform_finder.get_coordinate_system_kwargs()
+                   | {'eigvecs': eigvecs} | kwargs)

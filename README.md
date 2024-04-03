@@ -48,14 +48,9 @@ import pandas as pd
 from cogwheel import gw_plotting
 
 samples = pd.read_feather(rundir/sampling.SAMPLES_FILENAME)
-gw_plotting.CornerPlot(samples).plot()
+gw_plotting.CornerPlot(samples[post.prior.sampled_params]).plot()
 ```
-Transform the samples to a standard system of coordinates:
-```python
-post.prior.transform_samples(samples)
 
-gw_plotting.CornerPlot(samples[['ra', 'dec']]).plot()
-```
 
 ## Overview
 
@@ -78,7 +73,6 @@ Instance of the abstract class `cogwheel.sampling.Sampler` (e.g. `cogwheel.sampl
 
 * Interfaces with third-party stochastic samplers.
 * Constructs the [folded distribution](https://arxiv.org/pdf/2207.03508.pdf#section*.15) (to mitigate multimodality).
-* The distribution to sample can be either the posterior or the prior.
 * Reconstructs the original distribution from samples in the folded space.
 * Can run live or submit a job to a scheduler (SLURM, LSF).
 
