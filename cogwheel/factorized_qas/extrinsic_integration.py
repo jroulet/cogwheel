@@ -73,6 +73,24 @@ LG_FAST_YP = np.asarray(
      -10.75766078, -10.81269406, -10.86708726, -10.92085616])
 
 
+def checkempty(array, verbose=False):
+    # First deal with irritating case when we can't make a numpy array
+    if hasattr(array, "__len__"):
+        # Deal with even more irritating edge case when the attribute exists,
+        # but throws an error when queried
+        try:
+            if len(array) > 0:
+                return False
+        except TypeError:
+            if verbose:
+                print("Object has `len' attribute that can't be queried")
+            return True
+    nparray = np.asarray(array)
+    return (nparray is None
+            or nparray.dtype == np.dtype('O')
+            or nparray.size == 0)
+
+
 @njit
 def dt2key(dt, dt_sinc=DEFAULT_DT, dt_max=DEFAULT_DT_MAX):
     """
@@ -672,7 +690,7 @@ class CoherentScore:
                (implicit summation over detectors), useful for reconstructing the
                distance and phase samples
         """
-        if utils.checkempty(timeseries):
+        if checkempty(timeseries):
             raise ValueError(
                 "Need input timeseries to compute the coherent score")
 

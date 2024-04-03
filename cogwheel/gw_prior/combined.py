@@ -248,7 +248,17 @@ class MarginalizedDistanceIASPrior(RegisteredPriorMixin, CombinedPrior):
 
     prior_classes = IASPrior.prior_classes.copy()
     prior_classes.remove(UniformLuminosityVolumePrior)
+class MarginalizedDistanceAndPhaseIASPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Prior for usage with ``MarginalizedDistanceLikelihood``.
+    Similar to ``IASPrior`` except it does not include distance or phase.
+    Uniform in effective spin and detector-frame component masses.
+    """
+    default_likelihood_class = MarginalizedDistanceLikelihood
 
+    prior_classes = IASPrior.prior_classes.copy()
+    prior_classes.remove(UniformLuminosityVolumePrior)
+    prior_classes.remove(UniformPhasePrior)
 
 class MarginalizedDistanceLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
@@ -299,12 +309,11 @@ class IntrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     default_likelihood_class = MarginalizedExtrinsicLikelihood
 
-    prior_classes = [
-        FixedReferenceFrequencyPrior,
-        UniformDetectorFrameMassesPrior,
-        UniformEffectiveSpinPrior,
-        UniformDiskInplaneSpinsIsotropicInclinationPrior,
-        ZeroTidalDeformabilityPrior]
+    prior_classes = [FixedReferenceFrequencyPrior,
+                     UniformDetectorFrameMassesPrior,
+                     UniformEffectiveSpinPrior,
+                     UniformDiskInplaneSpinsIsotropicInclinationPrior,
+                     ZeroTidalDeformabilityPrior]
 
 
 class IntrinsicLVCPrior(RegisteredPriorMixin, CombinedPrior):
@@ -315,9 +324,8 @@ class IntrinsicLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
     default_likelihood_class = MarginalizedExtrinsicLikelihood
 
-    prior_classes = [
-        FixedReferenceFrequencyPrior,
-        UniformDetectorFrameMassesPrior,
-        IsotropicSpinsAlignedComponentsPrior,
-        IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
-        ZeroTidalDeformabilityPrior]
+    prior_classes = [FixedReferenceFrequencyPrior,
+                     UniformDetectorFrameMassesPrior,
+                     IsotropicSpinsAlignedComponentsPrior,
+                     IsotropicSpinsInplaneComponentsIsotropicInclinationPrior,
+                     ZeroTidalDeformabilityPrior]

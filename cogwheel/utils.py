@@ -105,6 +105,8 @@ def weighted_avg_and_std(values, weights=None):
 
 def n_effective(weights):
     """Return effective sample size."""
+    if weights.size == 0:
+        return 0.
     return np.sum(weights)**2 / np.sum(weights**2)
 
 
@@ -199,24 +201,6 @@ def merge_dictionaries_safely(*dics):
                 raise ValueError(f'Found incompatible values for {key}')
         merged |= dic
     return merged
-
-
-def checkempty(array, verbose=False):
-    # First deal with irritating case when we can't make a numpy array
-    if hasattr(array, "__len__"):
-        # Deal with even more irritating edge case when the attribute exists,
-        # but throws an error when queried
-        try:
-            if len(array) > 0:
-                return False
-        except TypeError:
-            if verbose:
-                print("Object has `len' attribute that can't be queried")
-            return True
-    nparray = np.asarray(array)
-    return (nparray is None
-            or nparray.dtype == np.dtype('O')
-            or nparray.size == 0)
 
 
 def rm_suffix(string, suffix='.json', new_suffix=None):
@@ -351,9 +335,9 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
         """)
 
     if batch_path:
-        getfile = lambda: open(batch_path, 'w+')
+        getfile = lambda: open(batch_path, 'w+', encoding='utf-8')
     else:
-        getfile = lambda: tempfile.NamedTemporaryFile('w+')
+        getfile = lambda: tempfile.NamedTemporaryFile('w+', encoding='utf-8')
 
     with getfile() as batchfile:
         batchfile.write(batch_text)
@@ -432,9 +416,9 @@ def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
         """)
 
     if batch_path:
-        getfile = lambda: open(batch_path, 'w+')
+        getfile = lambda: open(batch_path, 'w+', encoding='utf-8')
     else:
-        getfile = lambda: tempfile.NamedTemporaryFile('w+')
+        getfile = lambda: tempfile.NamedTemporaryFile('w+', encoding='utf-8')
 
     with getfile() as batchfile:
         batchfile.write(batch_text)
@@ -540,7 +524,7 @@ def read_json(json_path):
 
         json_path = jsons[0]
 
-    with open(json_path) as json_file:
+    with open(json_path, encoding='utf-8') as json_file:
         return json.load(json_file, cls=CogwheelDecoder,
                          dirname=json_path.parent)
 
@@ -573,7 +557,7 @@ class JSONMixin:
 
         mkdirs(dirname, dir_permissions)
 
-        with open(filepath, 'w') as outfile:
+        with open(filepath, 'w', encoding='utf-8') as outfile:
             json.dump(self, outfile, cls=CogwheelEncoder, dirname=dirname,
                       file_permissions=file_permissions, overwrite=overwrite,
                       indent=2)

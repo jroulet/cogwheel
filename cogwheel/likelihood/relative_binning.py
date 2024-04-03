@@ -354,7 +354,23 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         """
         Return two arrays of length n_detectors with the values of
         ``(d|h)``, ``(h|h)``, no ASD-drift correction applied, using
-        relative binning.
+        relative binning. 
+
+        Parameters
+        ----------
+        par_dic: dict
+            Waveform parameters, keys should match ``self.params``.
+        """
+        # Pass fiducial configuration to hit cache often:
+        d_h, h_h = self._get_dh_hh_complex_no_asd_drift(par_dic) # mpd, mpPd
+        return np.sum(d_h.real,axis=(0,1)), np.sum(h_h.real, axis=(0,1,2))
+    
+    def _get_dh_hh_complex_no_asd_drift(self, par_dic):
+        """
+        Return two arrays complex with the values of
+        ``(d|h)`` (modes, polarizations, detectors), and
+        ``(h|h)`` (mode pairs, polarizations, polarizations, detecotrs), 
+        no ASD-drift correction applied, using relative binning.
 
         Parameters
         ----------
@@ -372,7 +388,8 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         d_h_mpd, h_h_mpd = self._get_dh_hh_by_m_polarization_detector(
             tuple(par_dic_fiducial.items()))
 
-        m_arr = np.fromiter(self.waveform_generator._harmonic_modes_by_m, int)
+        m_arr = np.fromiter(
+            self.waveform_generator._harmonic_modes_by_m, int)
         m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
         dh_phasor = np.exp(-1j * dphi * m_arr)
         hh_phasor = np.exp(1j * dphi * (m_arr[m_inds] - m_arr[mprime_inds]))
@@ -383,13 +400,13 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
             par_dic['ra'], par_dic['dec'], par_dic['psi'],
             self.waveform_generator.tgps)
 
-        d_h = amp_ratio * np.einsum('mpd, pd, m -> d',
-                                    d_h_mpd, fplus_fcross, dh_phasor).real
-        h_h = amp_ratio**2 * np.einsum(
-            'mpPd, pd, Pd, m -> d',
-            h_h_mpd, fplus_fcross, fplus_fcross, hh_phasor).real
+        d_h = amp_ratio * np.einsum('mpd, pd, m -> mpd',
+                                    d_h_mpd, fplus_fcross, dh_phasor)
+        h_h = amp_ratio**2 * np.einsum('mpPd, pd, Pd, m -> mpPd',
+                                       h_h_mpd, fplus_fcross, 
+                                       fplus_fcross, hh_phasor)
         return d_h, h_h
-
+    
     @utils.lru_cache(maxsize=16)
     def _get_dh_hh_by_m_polarization_detector(self, par_dic_items):
         """

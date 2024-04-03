@@ -264,7 +264,8 @@ def submit_likelihood_maximization(
     args = f'{eventname} {mchirp_guess} {approximant} {prior_name} {parentdir}'
 
     if kwargs:
-        with open(eventdir/_KWARGS_FILENAME, 'w+') as kwargs_file:
+        with open(eventdir/_KWARGS_FILENAME, 'w+', encoding='utf-8'
+                 ) as kwargs_file:
             json.dump(kwargs, kwargs_file)
             args += f' {kwargs_file.name}'
 
@@ -313,7 +314,7 @@ def main(eventname, mchirp_guess, approximant, prior_name, parentdir,
     """
     kwargs = {}
     if kwargs_filename:
-        with open(kwargs_filename) as kwargs_file:
+        with open(kwargs_filename, encoding='utf-8') as kwargs_file:
             kwargs = json.load(kwargs_file)
 
     post = Posterior.from_event(eventname, mchirp_guess, approximant,

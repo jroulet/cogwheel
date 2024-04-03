@@ -21,16 +21,16 @@ class ZeroTidalDeformabilityPrior(FixedPrior):
 
 class FixedIntrinsicParametersPrior(FixedPrior):
     """Fix masses, spins and tidal deformabilities."""
-    standard_par_dic = {'m1': NotImplemented,
-                        'm2': NotImplemented,
-                        's1x_n': NotImplemented,
-                        's1y_n': NotImplemented,
-                        's1z': NotImplemented,
-                        's2x_n': NotImplemented,
-                        's2y_n': NotImplemented,
-                        's2z': NotImplemented,
-                        'l1': NotImplemented,
-                        'l2': NotImplemented}
+    standard_par_dic = {'m1': None,
+                        'm2': None,
+                        's1x_n': None,
+                        's1y_n': None,
+                        's1z': None,
+                        's2x_n': None,
+                        's2y_n': None,
+                        's2z': None,
+                        'l1': None,
+                        'l2': None}
 
     def __init__(self, *, standard_par_dic, **kwargs):
         """
@@ -57,7 +57,7 @@ class FixedIntrinsicParametersPrior(FixedPrior):
 
 class FixedReferenceFrequencyPrior(FixedPrior):
     """Fix reference frequency `f_ref`."""
-    standard_par_dic = {'f_ref': NotImplemented}
+    standard_par_dic = {'f_ref': None}
 
     def __init__(self, *, f_ref, **kwargs):
         super().__init__(**kwargs)
@@ -74,7 +74,7 @@ class LogarithmicReferenceFrequencyPrior(UniformPriorMixin, Prior):
     Not intended for actual parameter estimation.
     """
     standard_params = ['f_ref']
-    range_dic = {'ln_f_ref': NotImplemented}
+    range_dic = {'ln_f_ref': None}
 
     def __init__(self, f_ref_rng=(15, 300), **kwargs):
         """

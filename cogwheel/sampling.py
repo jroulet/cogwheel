@@ -203,7 +203,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         module = f'cogwheel.{os.path.basename(__file__)}'.removesuffix('.py')
 
         batch_path = rundir/'batchfile'
-        with open(batch_path, 'w+') as batchfile:
+        with open(batch_path, 'w+', encoding='utf-8') as batchfile:
             batchfile.write(textwrap.dedent(f"""\
                 #BSUB -J {job_name}
                 #BSUB -o {stdout_path}
@@ -239,7 +239,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         with Profile() as profiler:
             exit_code = self._run()
-            with open(rundir/FINISHED_FILENAME, 'w') as fobj:
+            with open(rundir/FINISHED_FILENAME, 'w', encoding='utf-8') as fobj:
                 fobj.write(f'{exit_code}\n{datetime.datetime.now()}')
         profiler.dump_stats(rundir/self.PROFILING_FILENAME)
 
@@ -320,7 +320,7 @@ class PyMultiNest(Sampler):
     def load_evidence(self):
         evdic = {}
         with open(os.path.join(self.run_kwargs['outputfiles_basename'],
-                               'stats.dat')) as stats_file:
+                               'stats.dat'), encoding='utf-8') as stats_file:
             line = stats_file.readline()
             if 'Nested Sampling Global Log-Evidence' in line:
                 evdic['log_ev'] = float(line.strip().split()[5])
