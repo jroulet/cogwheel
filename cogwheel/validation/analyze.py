@@ -128,7 +128,7 @@ def _get_credible_intervals(config, rundir, params=None,
         return {}
 
     if (n_loud := len(samples)) < min_required_samples:
-        print(f'Skipping {rundir} with only {n_loud} samples within '
+        print(f'Skipping {rundir} with only {n_loud} samples with '
               f'⟨ℎ∣ℎ⟩ above {config.H_H_MIN}.')
         return {}
 
@@ -178,11 +178,12 @@ def _get_samples(config, rundir):
     # mchirp and q should be within injection prior, verify:
     if 'mchirp_range' in config.PRIOR_KWARGS:
         samples['mchirp'] = gw_utils.m1m2_to_mchirp(**samples[['m1', 'm2']])
+        # +/- 1e-4 because we uploaded the samples to zenodo in single precision
         np.testing.assert_array_compare(np.greater_equal,
-                                        samples['mchirp'],
+                                        samples['mchirp'] + 1e-4,
                                         config.PRIOR_KWARGS['mchirp_range'][0])
         np.testing.assert_array_compare(np.less_equal,
-                                        samples['mchirp'],
+                                        samples['mchirp'] - 1e-4,
                                         config.PRIOR_KWARGS['mchirp_range'][1])
     if 'q_min' in config.PRIOR_KWARGS:
         np.testing.assert_array_compare(np.greater_equal,
