@@ -87,8 +87,14 @@ class SkyDictionary(utils.JSONMixin):
         self.delays2inds_map = self._create_delays2inds_map()
 
         discrete_delays = np.array(list(self.delays2inds_map))
-        self._min_delay = np.min(discrete_delays, axis=0)
-        self._max_delay = np.max(discrete_delays, axis=0)
+
+        if len(self.detector_names) == 1:
+            self._min_delay = np.array([])
+            self._max_delay = np.array([])
+        else:
+            discrete_delays = np.array(list(self.delays2inds_map))
+            self._min_delay = np.min(discrete_delays, axis=0)
+            self._max_delay = np.max(discrete_delays, axis=0)
 
         self._delays_bounds = {}
         self._delays_prior = {}
@@ -107,7 +113,7 @@ class SkyDictionary(utils.JSONMixin):
 
                 if n_detectors == 2:
                     self._delays_bounds[order] = (pairwise_delays.min(),
-                                                 pairwise_delays.max())
+                                                  pairwise_delays.max())
 
         # (n_det-1)-dimensional array of generators yielding sky-indices
         self._ind_generators = np.full(self._max_delay - self._min_delay + 1,
@@ -191,6 +197,17 @@ class SkyDictionary(utils.JSONMixin):
             correspond to any physical sky location, these are flagged
             ``False`` in this array. Unphysical samples are discarded.
         """
+        assert len(delays) == len(self.detector_names) - 1
+
+        if len(self.detector_names) == 1:  # Single-detector case
+            n_samples = delays.shape[1]
+            physical_mask = np.full(n_samples, True)
+            sky_inds = np.fromiter(
+                itertools.islice(self._ind_generators[()], n_samples),
+                int, n_samples)
+            sky_prior = np.full(n_samples, self._sky_prior)
+            return sky_inds, sky_prior, physical_mask
+
         # First mask: are individual delays plausible? This is necessary
         # in order to interpret the delays as indices to self._sky_prior
         physical_mask = np.all((delays.T >= self._min_delay)
@@ -239,6 +256,9 @@ class SkyDictionary(utils.JSONMixin):
         Its values are list of indices to ``self.sky_samples`` of
         samples that have the corresponding (discretized) time delays.
         """
+        if len(self.detector_names) == 1:
+            return {(): list(range(self.nsky))}
+
         # (ndet-1, nsky)
         delays_keys = zip(*self._discretize(self.delays))
 
