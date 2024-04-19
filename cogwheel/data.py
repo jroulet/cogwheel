@@ -1,5 +1,6 @@
 """Download, process and store data about GW events."""
 
+import json
 import pathlib
 from scipy import signal
 from scipy import interpolate
@@ -49,7 +50,7 @@ class EventData(utils.JSONMixin):
     filter for multiple detectors.
     """
     def __init__(self, eventname, frequencies, strain, wht_filter,
-                 detector_names, tgps, tcoarse):
+                 detector_names, tgps, tcoarse, injection=None):
         """
         Parameters
         ----------
@@ -77,6 +78,9 @@ class EventData(utils.JSONMixin):
 
         tcoarse: float
             Time of event relative to beginning of data.
+
+        injection: dict, optional
+            For bookkeeping, not actually used.
         """
         super().__init__()
         assert strain.shape[0] == len(detector_names)
@@ -91,7 +95,7 @@ class EventData(utils.JSONMixin):
                                 err_msg='Frequency grid must start at 0')
 
         self.eventname = eventname
-        self.detector_names = detector_names
+        self.detector_names = tuple(detector_names)
         self.tgps = tgps
         self.tcoarse = tcoarse
         self.wht_filter = wht_filter
@@ -102,7 +106,7 @@ class EventData(utils.JSONMixin):
         nonzero = np.nonzero(np.sum(self.wht_filter, axis=0))[0]
         self.fslice = slice(nonzero[0], nonzero[-1] + 1)
         self.fbounds = self.frequencies[nonzero[[0, -1]]]
-        self.injection = None
+        self.injection = injection
 
     def _set_strain(self, strain):
         self.strain = strain
@@ -216,11 +220,11 @@ class EventData(utils.JSONMixin):
             raise DataError(f'{filename} has no data at event time.')
 
         i_start = 0
-        if np.any(before := (i_nan < i_event)):
+        if np.any(before := i_nan < i_event):
             i_start = np.max(i_nan[before]) + 1
 
         i_end = len(timeseries)
-        if np.any(after := (i_nan > i_event)):
+        if np.any(after := i_nan > i_event):
             i_end = np.min(i_nan[after]) - 1
 
         t_start = timeseries.times[i_start]
@@ -384,6 +388,7 @@ class EventData(utils.JSONMixin):
             raise ValueError(
                 'Lengths of `detector_names` and `asd_funcs` should match.')
 
+        asd_funcs = list(asd_funcs)  # Ensure it is mutable
         for i, asd_func in enumerate(asd_funcs):
             if isinstance(asd_func, str):
                 if not asd_func in ASDS:
@@ -410,6 +415,8 @@ class EventData(utils.JSONMixin):
         Add a signal to the data. Injection parameters will be stored as
         a dictionary in the ``injection`` attribute. The inner product
         ⟨h|h⟩ at each detector (ignoring ASD-drift correction) is also stored.
+        The signal is computed only at frequencies where the whitening filter
+        has support.
 
         Parameters
         ----------
@@ -422,14 +429,15 @@ class EventData(utils.JSONMixin):
         """
         waveform_generator = waveform.WaveformGenerator.from_event_data(
             self, approximant)
-        h_f = waveform_generator.get_strain_at_detectors(self.frequencies,
-                                                         par_dic)
+        h_f = np.zeros_like(self.strain)
+        h_f[:, self.fslice] = waveform_generator.get_strain_at_detectors(
+            self.frequencies[self.fslice], par_dic)
         self._set_strain(self.strain + h_f)
 
         h_h = 4 * self.df * np.linalg.norm(h_f * self.wht_filter, axis=-1)**2
-        self.injection = dict(par_dic=par_dic,
-                              approximant=approximant,
-                              h_h=h_h)
+        self.injection = {'par_dic': par_dic,
+                          'approximant': approximant,
+                          'h_h': h_h}
 
     def specgram(self, xlim=None, nfft=64, noverlap=None, vmax=25.):
         """
@@ -474,7 +482,8 @@ class EventData(utils.JSONMixin):
                     transform=ax.transAxes, c='w')
 
         axes[0].set_title(self.eventname)
-        axes[-1].set_xlabel(rf'$t_{{\rm GPS}} - {self.tgps}$ (s)')
+        minus_tgps = f' - {self.tgps}' if self.tgps != 0 else ''
+        axes[-1].set_xlabel(rf'$t_{{\rm GPS}}{minus_tgps}$ (s)')
         axes[-1].set_xlim(xlim)
 
         plt.figtext(0., .5, 'Frequency (Hz)', rotation=90,
@@ -490,7 +499,10 @@ class EventData(utils.JSONMixin):
         if not overwrite and filename.exists():
             raise FileExistsError(f'{filename} already exists. '
                                   'Pass `overwrite=True` to overwrite.')
-        np.savez(filename, **self.get_init_dict())
+
+        dic = self.get_init_dict()
+        dic['injection'] = json.dumps(dic['injection'], cls=utils.NumpyEncoder)
+        np.savez(filename, **dic)
         filename.chmod(permissions)
 
     @classmethod
@@ -501,6 +513,9 @@ class EventData(utils.JSONMixin):
                 raise ValueError('Pass exactly one of `eventname`, `filename`')
             filename = cls.get_filename(eventname)
         dic = {key: val[()] for key, val in np.load(filename).items()}
+
+        if 'injection' in dic:
+            dic['injection'] = json.loads(dic['injection'])
 
         # Backward compatibility:
         if 'psd' in dic:

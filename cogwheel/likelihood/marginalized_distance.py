@@ -54,13 +54,40 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         Return log likelihood, marginalized over distance, using
         relative binning.
         """
+        return self.lnlike_and_metadata(par_dic)[0]
+
+    def lnlike_and_metadata(self, par_dic):
+        """
+        Parameters
+        ----------
+        par_dic: dict
+            Keys must include ``.params``.
+
+        Return
+        ------
+        lnl_marginalized: float
+            Log likelihood, marginalized over distance, using relative
+            binning.
+
+        metadata: dict
+            Contains the marginalized lnl, as well as a distance draw
+            and its corresponding (non-marginalized) log-likelihood.
+        """
         dh_hh = self._get_dh_hh_no_asd_drift(
             dict(par_dic)
             | {'d_luminosity': self.lookup_table.REFERENCE_DISTANCE})
 
         d_h, h_h = np.matmul(dh_hh, self.asd_drift**-2)
 
-        return self.lookup_table.lnlike_marginalized(d_h, h_h)
+        lnl_marginalized = self.lookup_table.lnlike_marginalized(d_h, h_h)
+
+        # Generate a sample of d_luminosity
+        d_luminosity = self.lookup_table.sample_distance(d_h, h_h)
+        lnl = d_h / d_luminosity - h_h / d_luminosity**2 / 2
+
+        return lnl_marginalized, {'d_luminosity': d_luminosity,
+                                  'lnl': lnl,
+                                  'lnl_marginalized': lnl_marginalized}
 
     def lnlike_no_marginalization(self, par_dic):
         """
@@ -69,7 +96,7 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         """
         return super().lnlike(par_dic)
 
-    def postprocess_samples(self, samples, force_update=True):
+    def postprocess_samples(self, samples):
         """
         Add a column 'd_luminosity' to a DataFrame of samples, with
         values taken randomly from the conditional posterior.
@@ -78,12 +105,7 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         Parameters
         ----------
         samples: Dataframe with sampled params
-        force_update: bool, whether to force an update if the luminosity
-                      distance samples already exist
         """
-        if (not force_update) and ('d_luminosity' in samples.columns):
-            return
-
         @np.vectorize
         def sample_distance(**par_dic):
             dh_hh = self._get_dh_hh_no_asd_drift(

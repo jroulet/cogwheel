@@ -18,8 +18,8 @@ class UniformTidalDeformabilitiesBNSPrior(prior.UniformPriorMixin,
     Uniform prior for tidal deformability, independent for the two
     compact objects.
     """
-    range_dic = {'l1': NotImplemented,
-                 'l2': NotImplemented}
+    range_dic = {'l1': None,
+                 'l2': None}
 
     def __init__(self, *, max_tidal_deformability=5e3, **kwargs):
         """

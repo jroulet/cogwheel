@@ -33,7 +33,7 @@ class LinearFreePhaseTimePrior(UniformPriorMixin, Prior):
     """
     standard_params = ['phi_ref', 't_geocenter']
     range_dic = {'phi_linfree': (-np.pi/2, 3*np.pi/2),  # 0, pi away from edges
-                 't_linfree': NotImplemented}
+                 't_linfree': None}
     _intrinsic = ['f_ref', 'l1', 'l2', 'm1', 'm2', 's1x_n', 's1y_n', 's1z',
                   's2x_n', 's2y_n', 's2z']
     conditioned_on = ['iota', 'ra', 'dec', 'psi'] + _intrinsic

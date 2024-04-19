@@ -15,6 +15,7 @@ from scipy.interpolate import (RectBivariateSpline,
                                InterpolatedUnivariateSpline)
 
 from cogwheel import utils
+from cogwheel import cosmology
 
 LOOKUP_TABLES_FNAME = Path(__file__).parent/'lookup_tables.npz'
 D_LUMINOSITY_MAX = 1.5e4  # Default distance integration limit (Mpc)
@@ -72,10 +73,22 @@ def euclidean_distance_prior(d_luminosity):
     return 4 * np.pi * d_luminosity**2
 
 
+def comoving_distance_prior(d_luminosity):
+    """
+    Distance prior uniform in comoving volume-time, normalized so that
+    its integral is the comoving volume-time per unit time, in comoving
+    Mpc^3.
+    Note: no maximum is enforced here.
+    """
+    return (euclidean_distance_prior(d_luminosity)
+            * cosmology.comoving_to_luminosity_diff_vt_ratio(d_luminosity))
+
+
 # Dictionary of luminosity distance priors. Its values are functions of
 # the luminosity distance in Mpc. Its keys are strings that can be
 # passed to `LookupTable` instances.
-d_luminosity_priors = {'euclidean': euclidean_distance_prior}
+d_luminosity_priors = {'euclidean': euclidean_distance_prior,
+                       'comoving': comoving_distance_prior,}
 
 
 class LookupTable(utils.JSONMixin):
@@ -314,7 +327,8 @@ class LookupTable(utils.JSONMixin):
 class LookupTableMarginalizedPhase22(LookupTable):
     """
     Similar to ``LookupTable`` except the likelihood is marginalized
-    over both distance and phase, assuming quadrupolar radiation.
+    over both distance and phase, assuming quadrupolar radiation
+    (actually, just |m|=2 is required, no restriction on l).
 
     ``d_h`` is now assumed to be the absolute value of the complex (d|h)
     throughout, except in ``sample_phase`` it is the complex (d|h).

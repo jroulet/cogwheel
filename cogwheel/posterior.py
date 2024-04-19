@@ -59,17 +59,44 @@ class Posterior(utils.JSONMixin):
             = 2 ** n_slow_folded
 
         # Match lnposterior signature to that of transform
-        self.lnposterior.__func__.__signature__ = inspect.signature(
-            self.prior.__class__.transform)
+        signature = inspect.signature(self.prior.__class__.transform)
+        self.lnposterior.__func__.__signature__ = signature
+        self.lnposterior_pardic_and_metadata.__func__.__signature__ = signature
 
     def lnposterior(self, *args, **kwargs):
         """
         Natural logarithm of the posterior probability density in
         the space of sampled parameters (does not apply folding).
         """
+        return self.lnposterior_pardic_and_metadata(*args, **kwargs)[0]
+
+    def lnposterior_pardic_and_metadata(self, *args, **kwargs):
+        """
+        Parameters
+        ----------
+        *args, **kwargs: Sampled parameters.
+
+        Return
+        ------
+        lnposterior: float
+            Natural logarithm of the posterior probability density in
+            the space of sampled parameters (does not apply folding).
+
+        standard_par_dic: dict
+            Standard parameters.
+
+        metadata: object
+            Used to compute ancillary information about samples. This
+            will vary depending on the likelihood implementation.
+        """
         lnprior, standard_par_dic = self.prior.lnprior_and_transform(
             *args, **kwargs)
-        return lnprior + self.likelihood.lnlike(standard_par_dic)
+
+        if np.isneginf(lnprior):
+            return -np.inf, standard_par_dic, None
+
+        lnl, metadata = self.likelihood.lnlike_and_metadata(standard_par_dic)
+        return lnprior + lnl, standard_par_dic, metadata
 
     @classmethod
     def from_event(
@@ -112,7 +139,12 @@ class Posterior(utils.JSONMixin):
         ref_wf_finder_kwargs = ref_wf_finder_kwargs or {}
 
         if isinstance(prior_class, str):
-            prior_class = gw_prior.prior_registry[prior_class]
+            try:
+                prior_class = gw_prior.prior_registry[prior_class]
+            except KeyError as err:
+                raise KeyError('Avaliable priors are: '
+                               f'{", ".join(gw_prior.prior_registry)}.'
+                              ) from err
 
         if likelihood_class is None:
             likelihood_class = getattr(prior_class,
@@ -191,7 +223,7 @@ class Posterior(utils.JSONMixin):
     def get_eventdir(self, parentdir):
         """
         Return directory name in which the Posterior instance should be
-        saved, of the form '{parentdir}/{prior_name}/{eventname}/'
+        saved, of the form '{parentdir}/{prior_name}/{eventname}/'.
         """
         return utils.get_eventdir(parentdir, self.prior.__class__.__name__,
                                   self.likelihood.event_data.eventname)

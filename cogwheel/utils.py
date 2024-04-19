@@ -7,12 +7,14 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 import textwrap
-import numpy as np
+from contextlib import contextmanager
 from scipy.optimize import _differentialevolution
-from numba import njit, vectorize
+from numba import vectorize
+import numpy as np
 
 
 DIR_PERMISSIONS = 0o755
@@ -21,23 +23,20 @@ FILE_PERMISSIONS = 0o644
 WEIGHTS_NAME = 'weights'
 
 
-class ClassProperty:
+class ClassProperty(property):
     """
-    Can be used like `@property` but for class attributes instead of
+    Can be used like ``@property`` but for class attributes instead of
     instance attributes.
     """
-    def __init__(self, func):
-        self.func = func
-
-    def __get__(self, inst, cls):
-        return self.func(cls)
+    def __get__(self, instance, instance_type):
+        return self.fget(instance_type)
 
 
-def differential_evolution_with_guesses(
-        func, bounds, guesses, **kwargs):
+def differential_evolution_with_guesses(func, bounds, guesses,
+                                        **kwargs):
     """
-    Augmented differential_evolution solver that incorporates
-    initial guesses passed by the user.
+    Augmented differential_evolution solver that incorporates initial
+    guesses passed by the user.
 
     Parameters
     ----------
@@ -54,9 +53,7 @@ def differential_evolution_with_guesses(
 
 class _DifferentialEvolutionSolverWithGuesses(
         _differentialevolution.DifferentialEvolutionSolver):
-    """
-    Class that implements `differential_evolution_with_guesses()`.
-    """
+    """Class that implements `differential_evolution_with_guesses()`."""
     def __init__(self, func, bounds, guesses, **kwargs):
         super().__init__(func, bounds, **kwargs)
         initial_pop = self._scale_parameters(self.population)
@@ -69,7 +66,7 @@ cached_functions_registry = []
 
 def lru_cache(*args, **kwargs):
     """
-    Decorator like `functools.lru_cache` that also registers the
+    Decorator like ``functools.lru_cache`` that also registers the
     decorated function in ``cached_functions_registry`` so all caches
     can easily be cleared with ``clear_caches()``.
     """
@@ -81,9 +78,7 @@ def lru_cache(*args, **kwargs):
 
 
 def clear_caches():
-    """
-    Clear caches of functions decorated with ``lru_cache``.
-    """
+    """Clear caches of functions decorated with ``lru_cache``."""
     for function in cached_functions_registry:
         function.cache_clear()
 
@@ -94,6 +89,37 @@ def mod(value, start=0, period=2*np.pi):
     be specified.
     """
     return (value - start) % period + start
+
+
+def quantile(values, q, weights=None):
+    """
+    Compute the q-th quantile of the data.
+
+    Parameters
+    ----------
+    values: array
+        Input data.
+
+    q: array_like of float
+        Quantile rank, 0 <= q <= 1.
+
+    weights: array
+        Of the same shape as `values`.
+
+    Return
+    ------
+    quantiles: array_like of float, of the same shape as `q`.
+    """
+    if weights is None:
+        weights = np.ones_like(values)
+    values = np.asarray(values)
+    weights = np.asarray(weights)
+
+    order = np.argsort(values)
+    values = values[order]
+    weights = weights[order]
+    cdf = (np.cumsum(weights) - weights) / (np.sum(weights) - weights)
+    return np.interp(q, cdf, values)
 
 
 def weighted_avg_and_std(values, weights=None):
@@ -144,28 +170,22 @@ def resample_equal(samples, weights_col=WEIGHTS_NAME, num=None):
     return samples_equal
 
 
-@njit
-def rand_choice_nb(arr, cprob, nvals):
+def exp_normalize(lnprob, axis=-1):
     """
-    Sample randomly from a list of probabilities
+    Return normalized probabilities from unnormalized log
+    probabilities, safe to overflow.
 
     Parameters
     ----------
-    arr: np.ndarray
-        A nD numpy array of values to sample from
+    lnprob: float array
+        Natural log of the unnormalized probability.
 
-    cprob: np.arrray
-        A 1D numpy array of cumulative probabilities for the given samples
-
-    nvals: int
-        Number of samples desired
-
-    Return
-    ------
-    nvals random samples from the given array with the given probabilities
+    axis: int
+        Axis of `lnprob` along which probabilities sum to 1.
     """
-    rsamps = np.random.random(size=nvals)
-    return arr[np.searchsorted(cprob, rsamps, side="right")]
+    prob = np.exp(lnprob - np.max(lnprob, axis=axis, keepdims=True))
+    prob /= np.sum(prob, axis=axis, keepdims=True)
+    return prob
 
 
 @vectorize(nopython=True)
@@ -192,7 +212,7 @@ def merge_dictionaries_safely(*dics):
     """
     Merge multiple dictionaries into one.
     Accept repeated keys if values are consistent, otherwise raise
-    `ValueError`.
+    ``ValueError``.
     """
     merged = {}
     for dic in dics:
@@ -201,26 +221,6 @@ def merge_dictionaries_safely(*dics):
                 raise ValueError(f'Found incompatible values for {key}')
         merged |= dic
     return merged
-
-
-def rm_suffix(string, suffix='.json', new_suffix=None):
-    """
-    Removes suffix from string if present, and appends a new suffix if
-    requested.
-
-    Parameters
-    ----------
-    string: Input string to modify.
-    suffix: Suffix to remove if present.
-    new_suffix: Suffix to add.
-    """
-    if string.endswith(suffix):
-        outstr = string[:-len(suffix)]
-    else:
-        outstr = string
-    if new_suffix is not None:
-        outstr += new_suffix
-    return outstr
 
 
 def update_dataframe(df1, df2):
@@ -261,9 +261,37 @@ def handle_scalars(function):
     """
     @functools.wraps(function)
     def new_function(*args, **kwargs):
-        return function(*args, **kwargs)[()]
+        result = function(*args, **kwargs)
+        if isinstance(result, tuple):
+            return tuple(res[()] for res in result)
+        return result[()]
     return new_function
 
+
+@contextmanager
+def temporarily_change_attributes(obj, /, **kwargs):
+    """
+    Example
+    -------
+    >>> class A:
+    ...     x = 0
+    >>> a = A()
+    >>> a.x
+    0
+    >>> with temporarily_change_attributes(a, x=1):
+    ...     print(a.x)
+    1
+    >>> a.x
+    0
+    """
+    previous_values = {key: getattr(obj, key) for key in kwargs}
+    for key, val in kwargs.items():
+        setattr(obj, key, val)
+    try:
+        yield
+    finally:
+        for key, val in previous_values.items():
+            setattr(obj, key, val)
 
 
 def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
@@ -335,11 +363,11 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
         """)
 
     if batch_path:
-        getfile = lambda: open(batch_path, 'w+', encoding='utf-8')
+        getfile = functools.partial(open, batch_path)
     else:
-        getfile = lambda: tempfile.NamedTemporaryFile('w+', encoding='utf-8')
+        getfile = tempfile.NamedTemporaryFile
 
-    with getfile() as batchfile:
+    with getfile('w+', encoding='utf-8') as batchfile:
         batchfile.write(batch_text)
         batchfile.seek(0)
         os.chmod(batchfile.name, 0o777)
@@ -416,11 +444,11 @@ def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
         """)
 
     if batch_path:
-        getfile = lambda: open(batch_path, 'w+', encoding='utf-8')
+        getfile = functools.partial(open, batch_path)
     else:
-        getfile = lambda: tempfile.NamedTemporaryFile('w+', encoding='utf-8')
+        getfile = tempfile.NamedTemporaryFile
 
-    with getfile() as batchfile:
+    with getfile('w+', encoding='utf-8') as batchfile:
         batchfile.write(batch_text)
         batchfile.seek(0)
         os.chmod(batchfile.name, 0o777)
@@ -435,6 +463,30 @@ def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
 RUNDIR_PREFIX = 'run_'
 
 
+def get_rundir(eventdir):
+    """
+    Return a `pathlib.Path` object with a new run directory, following a
+    standardized naming scheme for output directories.
+    Directory will be of the form '{eventdir}/{RUNDIR_PREFIX}{run_id}'.
+
+    Parameters
+    ----------
+    eventdir: str, os.PathLike
+        Path to a directory where to store parameter estimation data
+        for a specific prior and event, e.g. output of ``get_eventdir``.
+    """
+    eventdir = pathlib.Path(eventdir)
+
+    run_id = 0
+    if eventdir.exists():
+        old_rundirs = [path for path in eventdir.iterdir()
+                       if path.is_dir() and path.match(f'{RUNDIR_PREFIX}*')]
+        if old_rundirs:
+            run_id = 1 + max(rundir_number(rundir) for rundir in old_rundirs)
+
+    return eventdir/f'{RUNDIR_PREFIX}{run_id}'
+
+
 def get_eventdir(parentdir, prior_name, eventname):
     """
     Return `pathlib.Path` object for a directory of the form
@@ -447,7 +499,7 @@ def get_eventdir(parentdir, prior_name, eventname):
         <parentdir>
         └── <priordir>
             └── <eventdir>
-                ├── Posterior.json
+                ├── Posterior.json (optional)
                 └── <rundir>
                     ├── Sampler.json
                     └── <sampler_output_files>
@@ -466,7 +518,7 @@ def get_priordir(parentdir, prior_name):
         <parentdir>
         └── <priordir>
             └── <eventdir>
-                ├── Posterior.json
+                ├── Posterior.json (optional)
                 └── <rundir>
                     ├── Sampler.json
                     └── <sampler_output_files>
@@ -509,9 +561,7 @@ class_registry = {}
 
 
 def read_json(json_path):
-    """
-    Return a class instance that was saved to json.
-    """
+    """Return a class instance that was saved to json."""
     # Accept a directory that contains a single json file
     json_path = pathlib.Path(json_path)
     if json_path.is_dir():
@@ -559,8 +609,8 @@ class JSONMixin:
 
         with open(filepath, 'w', encoding='utf-8') as outfile:
             json.dump(self, outfile, cls=CogwheelEncoder, dirname=dirname,
-                      file_permissions=file_permissions, overwrite=overwrite,
-                      indent=2)
+                      file_permissions=file_permissions,
+                      overwrite=overwrite, indent=2)
         filepath.chmod(file_permissions)
 
     def __init_subclass__(cls):
@@ -598,9 +648,7 @@ class JSONMixin:
 
 
 class NumpyEncoder(json.JSONEncoder):
-    """
-    Encoder for numpy data types.
-    """
+    """Encoder for numpy data types."""
     def default(self, o):
         if isinstance(o, (np.int_, np.intc, np.intp, np.int8,
                           np.int16, np.int32, np.int64, np.uint8,
@@ -645,21 +693,36 @@ class CogwheelEncoder(NumpyEncoder):
             module = spec.name
         return module
 
+    @staticmethod
+    def _get_commit_hash():
+        """
+        Return current git commit hash, or raise ``FileNotFoundError``
+        if git is not found.
+        """
+        cogwheel_dir = pathlib.Path(__file__).parents[1].resolve()
+        return subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], cwd=cogwheel_dir
+            ).decode('utf-8').strip()
+
     def default(self, o):
+        """Encoding for registered cogwheel classes. """
+        if o.__class__.__name__ not in class_registry:
+            return super().default(o)
+
+        dic = {'__cogwheel_class__': o.__class__.__name__,
+               '__module__': self._get_module_name(o)}
+        try:
+            dic['commit_hash'] = self._get_commit_hash()
+        except FileNotFoundError:
+            pass
+
         if o.__class__.__name__ == 'EventData':
             filename = os.path.join(self.dirname, f'{o.eventname}.npz')
             o.to_npz(filename=filename, overwrite=self.overwrite,
                      permissions=self.file_permissions)
-            return {'__cogwheel_class__': o.__class__.__name__,
-                    '__module__': self._get_module_name(o),
-                    'filename': os.path.basename(filename)}
+            return dic | {'filename': os.path.basename(filename)}
 
-        if o.__class__.__name__ in class_registry:
-            return {'__cogwheel_class__': o.__class__.__name__,
-                    '__module__': self._get_module_name(o),
-                    'init_kwargs': o.get_init_dict()}
-
-        return super().default(o)
+        return dic | {'init_kwargs': o.get_init_dict()}
 
 
 class CogwheelDecoder(json.JSONDecoder):
