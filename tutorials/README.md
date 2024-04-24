@@ -6,7 +6,7 @@
 
 1.  **Make your own prior** Define a prior and a coordinate system of your own.
 
-1. **Factorized QAS** How to run [factorized parameter estimation](https://arxiv.org/abs/2210.16278) with quadrupolar, aligned-spin waveform models.
+1. **Factorized QAS** How to run [factorized parameter estimation](https://arxiv.org/abs/2210.16278) (i.e., marginalizing over extrinsic parameters) with quadrupolar, aligned-spin waveform models.
 
 1. **Factorized PHM** Analogous for precessing, higher modes waveform models.
 

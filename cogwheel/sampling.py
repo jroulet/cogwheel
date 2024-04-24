@@ -336,6 +336,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         assert not init_dict.pop('sample_prior', False)
         return init_dict
 
+
 class PyMultiNest(Sampler):
     """Sample a posterior or prior using PyMultiNest."""
     DEFAULT_RUN_KWARGS = {'n_iter_before_update': 1000,
