@@ -230,11 +230,13 @@ def latex_val_err(value, error):
     error: (err_minus, err_plus)
     """
     error = np.abs(error)
-    if np.min(error) == 0:
+    min_error = np.min(error)
+
+    if min_error == 0:
         return f'${value:.2g}$'
 
-    n_decimals = max(*np.ceil(-np.log10(error)).astype(int))
-    if f'{np.min(error):e}'[0] == '1':
+    n_decimals = np.ceil(-np.log10(min_error)).astype(int)
+    if f'{min_error:e}'.startswith('1'):
         n_decimals += 1
 
     def truncate(val):
