@@ -1,6 +1,7 @@
 """Download, process and store data about GW events."""
 
 import json
+import logging
 import pathlib
 from scipy import signal
 from scipy import interpolate
@@ -100,12 +101,15 @@ class EventData(utils.JSONMixin):
         self.tcoarse = tcoarse
         self.wht_filter = wht_filter
 
-        self.blued_strain = None  # Set by ``set_strain()``
+        self.blued_strain = None  # Set by ``._set_strain()``
         self._set_strain(strain)
 
         nonzero = np.nonzero(np.sum(self.wht_filter, axis=0))[0]
         self.fslice = slice(nonzero[0], nonzero[-1] + 1)
         self.fbounds = self.frequencies[nonzero[[0, -1]]]
+
+        self._check_wht_filter_validity()
+
         self.injection = injection
 
     def _set_strain(self, strain):
@@ -531,6 +535,34 @@ class EventData(utils.JSONMixin):
         """Return npz filename to save/load class instance."""
         return DATADIR/f'{eventname}.npz'
 
+    def _check_wht_filter_validity(self):
+        """
+        GWOSC data at 4096 Hz sampling rate has a downsampling artifact
+        that manifests as an overly low PSD, i.e. high whitening filter,
+        above 1620 Hz (see https://gwosc.org/yellow_box/).
+        This method checks if the whitening filter looks suspicious, and
+        issues a warning if yes.
+        """
+        if self.fbounds[1] < 1620:
+            return
+
+        ind_split = np.searchsorted(self.frequencies, 1620)
+        wht_filter_pre, wht_filter_post = np.split(self.wht_filter,
+                                                   [ind_split], axis=1)
+
+        if np.linalg.norm(wht_filter_pre) < np.linalg.norm(wht_filter_post):
+            logging.warning(
+                'The whitening filter has most power at high frequencies. '
+                'This is likely a downsampling artifact in the GWOSC data. '
+                'Make sure the whitening filter is correct! '
+                'If it is not, try downloading their 16384 Hz data, or using '
+                'fmax <= 1620 Hz. See https://gwosc.org/yellow_box/ .'
+                'To plot the whitening filter do:\n\t'
+                'plt.plot(event_data.frequencies, event_data.wht_filter.T)\n'
+                'To download 16384 Hz data do:\n\t'
+                'cogwheel.data.download_timeseries('
+                f'{self.eventname!r}, overwrite=True, sample_rate=2**14)')
+
     def __repr__(self):
         return f'{self.__class__.__name__}({self.eventname})'
 
@@ -549,7 +581,8 @@ def highpass_filter(frequencies, fmin=15., df_taper=1.):
 
 
 def download_timeseries(eventname, outdir=None, tgps=None,
-                        interval=(-2048, 2048), overwrite=False):
+                        interval=(-2048, 2048), overwrite=False,
+                        **kwargs):
     """
     Download data from gwosc, save as hdf5 format that can be read by
     `gwpy.timeseries.Timeseries.read()`.
@@ -586,12 +619,15 @@ def download_timeseries(eventname, outdir=None, tgps=None,
             continue
 
         try:
-            timeseries = _fetch_open_data(detector_name, tgps, interval)
+            timeseries = _fetch_open_data(detector_name, tgps, interval,
+                                          **kwargs)
         except ValueError:  # That detector has no data
             pass
         else:
             if not np.isnan(timeseries[np.searchsorted(timeseries.times.value,
                                                        tgps)]):
+                if path.exists():
+                    path.unlink()
                 timeseries.write(path)
 
 def _fetch_open_data(detector_name, tgps, interval, **kwargs):
