@@ -106,7 +106,7 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
     @classmethod
     def from_event(cls, event, mchirp_guess, approximant='IMRPhenomXAS',
                    pn_phase_tol=.02, spline_degree=3,
-                   time_range=(-.1, .1), mchirp_range=None, f_ref=None):
+                   time_range=(-.25, .25), mchirp_range=None, f_ref=None):
         """
         Constructor that finds a reference waveform solution
         automatically by maximizing the likelihood.
