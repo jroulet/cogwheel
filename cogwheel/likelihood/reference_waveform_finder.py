@@ -34,75 +34,6 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
     eta_range = (.05, .24)
     chieff_range = (-.999, .999)
 
-    def __init__(self, event_data, waveform_generator, par_dic_0,
-                 fbin=None, pn_phase_tol=None, spline_degree=3,
-                 time_range=(-.1, .1), mchirp_range=None):
-        """
-        Parameters
-        ----------
-        event_data: Instance of `data.EventData`
-
-        waveform_generator: Instance of `waveform.WaveformGenerator`.
-
-        par_dic_0: dict
-            Parameters of the reference waveform, should be close to the
-            maximum likelihood waveform.
-            Keys should match ``self.waveform_generator.params``.
-
-        fbin: 1-d array or None
-            Array with edges of the frequency bins used for relative
-            binning [Hz]. Alternatively, pass `pn_phase_tol`.
-
-        pn_phase_tol: float or None
-            Tolerance in the post-Newtonian phase [rad] used for
-            defining frequency bins. Alternatively, pass `fbin`.
-
-        spline_degree: int
-            Degree of the spline used to interpolate the ratio between
-            waveform and reference waveform for relative binning.
-
-        time_range: (float, float)
-            Minimum and maximum times to search relative to tgps (s).
-        """
-        self._times = None  # Set by ``.set_summary()``
-        self._d_h_timeseries_weights = None  # Set by ``.set_summary()``
-
-        self._time_range = time_range
-        self._mchirp_range = mchirp_range
-
-        waveform_generator.n_cached_waveforms = max(
-            2, waveform_generator.n_cached_waveforms)  # Will need to flip iota
-        super().__init__(event_data, waveform_generator, par_dic_0,
-                         fbin, pn_phase_tol, spline_degree)
-
-    @property
-    def time_range(self):
-        """Minimum and maximum times to search relative to tgps (s)."""
-        return self._time_range
-
-    @time_range.setter
-    def time_range(self, time_range):
-        if time_range[1] - time_range[0] < gw_utils.EARTH_CROSSING_TIME:
-            raise ValueError('`time_range` must be broader than the Earth-'
-                             f'crossing time {gw_utils.EARTH_CROSSING_TIME} s')
-
-        self._time_range = time_range
-        self._set_summary()
-
-    @property
-    def mchirp_range(self):
-        """
-        If `self._mchirp_range` is set return that, otherwise return a
-        crude estimate based on the reference waveform's chirp mass.
-        See also: `set_mchirp_range`.
-        """
-        if self._mchirp_range:
-            return self._mchirp_range
-
-        mchirp = gw_utils.m1m2_to_mchirp(self.par_dic_0['m1'],
-                                         self.par_dic_0['m2'])
-        return gw_utils.estimate_mchirp_range(mchirp)
-
     @classmethod
     def from_event(cls, event, mchirp_guess, approximant='IMRPhenomXAS',
                    pn_phase_tol=.02, spline_degree=3,
@@ -214,6 +145,75 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                     f'Relative-binning: ln L = {lnl_rb}')
 
         return ref_wf_finder
+
+    def __init__(self, event_data, waveform_generator, par_dic_0,
+                 fbin=None, pn_phase_tol=None, spline_degree=3,
+                 time_range=(-.25, .25), mchirp_range=None):
+        """
+        Parameters
+        ----------
+        event_data: Instance of `data.EventData`
+
+        waveform_generator: Instance of `waveform.WaveformGenerator`.
+
+        par_dic_0: dict
+            Parameters of the reference waveform, should be close to the
+            maximum likelihood waveform.
+            Keys should match ``self.waveform_generator.params``.
+
+        fbin: 1-d array or None
+            Array with edges of the frequency bins used for relative
+            binning [Hz]. Alternatively, pass `pn_phase_tol`.
+
+        pn_phase_tol: float or None
+            Tolerance in the post-Newtonian phase [rad] used for
+            defining frequency bins. Alternatively, pass `fbin`.
+
+        spline_degree: int
+            Degree of the spline used to interpolate the ratio between
+            waveform and reference waveform for relative binning.
+
+        time_range: (float, float)
+            Minimum and maximum times to search relative to tgps (s).
+        """
+        self._times = None  # Set by ``.set_summary()``
+        self._d_h_timeseries_weights = None  # Set by ``.set_summary()``
+
+        self._time_range = time_range
+        self._mchirp_range = mchirp_range
+
+        waveform_generator.n_cached_waveforms = max(
+            2, waveform_generator.n_cached_waveforms)  # Will need to flip iota
+        super().__init__(event_data, waveform_generator, par_dic_0,
+                         fbin, pn_phase_tol, spline_degree)
+
+    @property
+    def time_range(self):
+        """Minimum and maximum times to search relative to tgps (s)."""
+        return self._time_range
+
+    @time_range.setter
+    def time_range(self, time_range):
+        if time_range[1] - time_range[0] < gw_utils.EARTH_CROSSING_TIME:
+            raise ValueError('`time_range` must be broader than the Earth-'
+                             f'crossing time {gw_utils.EARTH_CROSSING_TIME} s')
+
+        self._time_range = time_range
+        self._set_summary()
+
+    @property
+    def mchirp_range(self):
+        """
+        If `self._mchirp_range` is set return that, otherwise return a
+        crude estimate based on the reference waveform's chirp mass.
+        See also: `set_mchirp_range`.
+        """
+        if self._mchirp_range:
+            return self._mchirp_range
+
+        mchirp = gw_utils.m1m2_to_mchirp(self.par_dic_0['m1'],
+                                         self.par_dic_0['m2'])
+        return gw_utils.estimate_mchirp_range(mchirp)
 
     @staticmethod
     def _get_safe_par_dic(par_dic, eta_max=.24):
