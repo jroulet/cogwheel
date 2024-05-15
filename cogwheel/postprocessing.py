@@ -364,6 +364,9 @@ class EventdirPostprocessor:
 
             sampler = utils.read_json(refdir/sampling.Sampler.JSON_FILENAME)
             sampled_params = sampler.posterior.prior.sampled_params
+            for par in sampler.posterior.prior.folded_params:
+                sampled_params[sampled_params.index(par)] = f'folded_{par}'
+
             try:
                 sampled_par_dic_0 = sampler.posterior.prior.inverse_transform(
                     **sampler.posterior.likelihood.par_dic_0)
@@ -377,10 +380,11 @@ class EventdirPostprocessor:
                     [ref_samples, other_samples],
                     labels=[refdir.name, otherdir.name],
                     params=sampled_params,
-                    weights_col=utils.WEIGHTS_NAME)
+                    weights_col=utils.WEIGHTS_NAME,
+                    tail_probability=1e-4)
                 cornerplot.plot(max_n_ticks=3)
                 if sampled_par_dic_0:
-                    cornerplot.scatter_points(sampled_par_dic_0)
+                    cornerplot.scatter_points(sampled_par_dic_0, adjust_lims=True)
                 pdf.savefig(bbox_inches='tight')
 
     def get_rundirs(self):
@@ -447,7 +451,6 @@ class EventdirPostprocessor:
                             for key, val in init_kwargs['run_kwargs'].items()
                             if val != sampler_cls.DEFAULT_RUN_KWARGS.get(key)}
                 run_kwargs.append({'sampler': sampler_cls.__name__,
-                                   'sample_prior': init_kwargs['sample_prior'],
                                    **settings})
 
         run_kwargs = pd.DataFrame(run_kwargs)
@@ -483,7 +486,7 @@ class EventdirPostprocessor:
 
     def _display_table(self, cell_size=(1., .3)):
         """Make a matplotlib figure and display the table in it."""
-        cell_colors = self.table.copy()
+        cell_colors = self.table.astype(str)
         cell_colors[::2] = 'whitesmoke'
         cell_colors[1::2] = 'w'
         for key in ['asd_drift_dlnl_std',
