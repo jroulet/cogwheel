@@ -16,6 +16,7 @@ uniform priors.
 from abc import ABC, abstractmethod
 import inspect
 import itertools
+from scipy import optimize
 import pandas as pd
 import numpy as np
 
@@ -158,6 +159,8 @@ class Prior(ABC, utils.JSONMixin):
         self.fold = None  # Set by ``self._setup_folding_transforms()``
         self.unfold = None  # Set by ``self._setup_folding_transforms()``
         self._setup_folding_transforms()
+
+        self._max_lnprior = None  # Lazy attribute
 
     @utils.ClassProperty
     def sampled_params(cls):
@@ -516,24 +519,42 @@ class Prior(ABC, utils.JSONMixin):
                 columns=self.sampled_params)
 
             candidates_lnprior = lnprior(**candidates)
-
-            if np.all(np.isneginf(candidates_lnprior)):
-                continue
-
-            if (new_max := candidates_lnprior.max()) > max_lnprior:
+            if (new_max := candidates_lnprior.max()) > self.max_lnprior:
                 # Upper bound had been underestimated, correct for that
-                accept_prob = np.exp(max_lnprior - new_max)
+                accept_prob = np.exp(self.max_lnprior - new_max)
                 accept = rng.uniform(size=len(samples)) < accept_prob
                 samples = samples[accept]
-                max_lnprior = new_max
+                self.max_lnprior = new_max
 
-            accept_prob = np.exp(candidates_lnprior - max_lnprior)
+            accept_prob = np.exp(candidates_lnprior - self.max_lnprior)
             accept = rng.uniform(size=len(candidates)) < accept_prob
             samples = pd.concat((samples, candidates[accept]),
                                 ignore_index=True)[:n_samples]
 
         self.transform_samples(samples)
         return samples
+
+    @property
+    def max_lnprior(self):
+        """Useful for rejection sampling."""
+        if self._max_lnprior is None:
+            self.max_lnprior = self._get_maximum_lnprior()
+        return self._max_lnprior
+
+    @max_lnprior.setter
+    def max_lnprior(self, max_lnprior):
+        if self._max_lnprior is not None and self._max_lnprior > max_lnprior:
+            raise PriorError(
+                'The provided `max_lnprior` does not maximize lnprior.')
+
+        self._max_lnprior = max_lnprior
+
+    def _get_maximum_lnprior(self):
+        minimize_result = optimize.minimize(
+            lambda par_vals: -self.lnprior(*par_vals),
+            x0=self.cubemin + self.cubesize/2,
+            bounds=self.range_dic.values())
+        return -minimize_result.fun
 
 
 class CombinedPrior(Prior):
@@ -621,7 +642,9 @@ class CombinedPrior(Prior):
                              for par in (subprior.sampled_params
                                          + subprior.conditioned_on)}
                 output_dic = subprior.transform(**input_dic)
-                if any(np.isnan(value) for value in output_dic.values()):
+
+                values = np.fromiter(output_dic.values(), float, len(output_dic))
+                if np.isnan(values).any():
                     break
                 par_dic.update(output_dic)
             return {par: par_dic.get(par, np.nan)
@@ -654,7 +677,9 @@ class CombinedPrior(Prior):
             standard_par_dic = self.transform(**par_dic)
             par_dic.update(standard_par_dic)
 
-            if any(np.isnan(value) for value in standard_par_dic.values()):
+            standard_par_vals = np.fromiter(
+                standard_par_dic.values(), float, len(standard_par_dic))
+            if np.isnan(standard_par_vals).any():
                 lnp = -np.inf
             else:
                 lnp = 0
@@ -860,6 +885,9 @@ class FixedPrior(Prior):
 
         return {}
 
+    def _get_maximum_lnprior(self):
+        return 0.0
+
 
 class UniformPriorMixin:
     """
@@ -867,7 +895,6 @@ class UniformPriorMixin:
     It must be inherited before `Prior` (otherwise a `PriorError` is
     raised) so that abstract methods get overriden.
     """
-    @utils.lru_cache()
     def lnprior(self, *par_vals, **par_dic):
         """
         Natural logarithm of the prior probability density.
@@ -875,7 +902,7 @@ class UniformPriorMixin:
         return a float.
         """
         del par_vals, par_dic
-        return - np.log(np.prod(self.cubesize))
+        return self.max_lnprior
 
     def __init_subclass__(cls):
         """
@@ -883,6 +910,9 @@ class UniformPriorMixin:
         """
         super().__init_subclass__()
         check_inheritance_order(cls, UniformPriorMixin, Prior)
+
+    def _get_maximum_lnprior(self):
+        return - np.log(np.prod(self.cubesize))
 
 
 class IdentityTransformMixin:
