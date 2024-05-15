@@ -99,10 +99,17 @@ _UNITS = (dict.fromkeys(['mchirp', 'm1', 'm2', 'mtot', 'mtot_source',
              'd_luminosity': 'Mpc',}
          )
 
+class LatexLabels(plotting.LatexLabels):
+    def __missing__(self, par):
+        if isinstance(par, str) and par.startswith('folded_'):
+            label = self[par.removeprefix('folded_')]
+            return rf'{label}$^{{\rm folded}}$'.replace('$$', '')
+        return par
+
 
 class CornerPlot(plotting.CornerPlot):
     """Has default latex labels for gravitational wave parameters."""
-    DEFAULT_LATEX_LABELS = plotting.LatexLabels(_LABELS, _UNITS)
+    DEFAULT_LATEX_LABELS = LatexLabels(_LABELS, _UNITS)
 
 
 class MultiCornerPlot(plotting.MultiCornerPlot):
