@@ -626,7 +626,6 @@ class Zeus(Sampler):
         return start
 
 
-
 # class UltraNest(Sampler):
 #     """Sample a posterior or prior using UltraNest."""
 #     DEFAULT_RUN_KWARGS = {'Lepsilon': 0.5,
@@ -743,6 +742,36 @@ class Nautilus(Sampler):
         self.run_kwargs['filepath'] = os.path.join(dirname, 'checkpoint.hdf5')
         super().to_json(dirname, *args, **kwargs)
 
+    @wraps(Sampler.load_evidence)
+    def load_evidence(self):
+        if self.sampler is None:
+            log_z = self.read_log_z(self.run_kwargs['filepath'])
+        else:
+            try:
+                log_z = self.sampler.log_z()
+            except AttributeError:  # Old nautilus version
+                log_z = self.sampler.evidence()
+
+        return {'log_ev': log_z}
+
+    @staticmethod
+    def read_log_z(filepath):
+        """
+        Read log of Bayesian evidence from the nautilus checkpoint file.
+
+        Parameters
+        ----------
+        filepath: os.PathLike
+            Typically, should be ``rundir/'checkpoint.hdf5'``.
+        """
+        dummy_kwargs = {'prior': lambda _: 0,
+                        'likelihood': lambda _: 0,
+                        'n_dim': 2}
+        nautilus_sampler = nautilus.Sampler(**dummy_kwargs, filepath=filepath)
+        try:
+            return nautilus_sampler.log_z()
+        except AttributeError:  # Old nautilus version
+            return nautilus_sampler.evidence()
 
 def main(sampler_path, postprocess=True):
     """Load sampler and run it."""
