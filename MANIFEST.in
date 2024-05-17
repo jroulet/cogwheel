@@ -1,0 +1,3 @@
+include cogwheel/data/events_metadata.csv
+include cogwheel/data/*.npz
+include cogwheel/data/example_asds/*.npy

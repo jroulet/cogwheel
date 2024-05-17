@@ -3,7 +3,6 @@ python>=3.9
 ipykernel
 ipympl
 ipywidgets
-multiprocessing
 notebook
 numba
 pandas

@@ -18,6 +18,7 @@ It interfaces with third-party routines for downloading public data (GWOSC, `GWp
 git clone git@github.com:jroulet/cogwheel.git
 cd cogwheel
 conda create --name <environment_name> --file requirements.txt --channel conda-forge
+pip install -e .
 ```
 (replace `<environment_name>` by a name of your choice).
 
@@ -26,11 +27,6 @@ conda create --name <environment_name> --file requirements.txt --channel conda-f
 
 Example: how to sample a gravitational wave source posterior using `PyMultiNest`:
 ```python
-path_to_cogwheel = ''  # Edit as appropriate
-
-import sys
-sys.path.append(path_to_cogwheel)
-
 from cogwheel.posterior import Posterior
 from cogwheel import sampling
 
