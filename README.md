@@ -18,6 +18,7 @@ It interfaces with third-party routines for downloading public data (GWOSC, `GWp
 git clone git@github.com:jroulet/cogwheel.git
 cd cogwheel
 conda create --name <environment_name> --file requirements.txt --channel conda-forge
+conda activate <environment_name>
 pip install -e .
 ```
 (replace `<environment_name>` by a name of your choice).
