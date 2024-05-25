@@ -487,7 +487,8 @@ class Prior(ABC, utils.JSONMixin):
             np.vectorize(self.inverse_transform)(**inverse)))
         utils.update_dataframe(samples, sampled)
 
-    def generate_random_samples(self, n_samples, seed=None):
+    def generate_random_samples(self, n_samples, seed=None,
+                                return_lnz=False):
         """
         Sample the prior using rejection sampling.
 
@@ -506,17 +507,32 @@ class Prior(ABC, utils.JSONMixin):
         pd.DataFrame with columns per
         ``.sampled_params + .standard_params``, with samples distributed
         according to the prior.
+
+        lnz, dnlz: float, float
+            Log of the integral of the prior over the bounds and an
+            estimate of its 1-sigma uncertainty.
+            Useful for estimating the normalization constant of the
+            prior.
+            Only returned if `return_lnz` is set to ``True``.
+            Note: This differs from the lnz that nested samplers (e.g.
+            PyMultiNest or Nautilus) would compute, in that it has the
+            phase-space volume differential applied.
+            I.e. if `lnprior := 0`, `lnz == log(prod(self.cubesize))`
+            while nested samplers would return `lnz == 0`.
         """
         rng = np.random.default_rng(seed=seed)
         chunksize = (n_samples, len(self.sampled_params))
         lnprior = np.vectorize(self.lnprior, otypes=[float])
 
+        n_proposed = 0
+        n_accepted = 0
         max_lnprior = -np.inf
         samples = pd.DataFrame()
         while len(samples) < n_samples:
             candidates = pd.DataFrame(
                 self.cubemin + rng.uniform(0, self.cubesize, chunksize),
                 columns=self.sampled_params)
+            n_proposed += n_samples
 
             candidates_lnprior = lnprior(**candidates)
             if (new_max := candidates_lnprior.max()) > self.max_lnprior:
@@ -525,14 +541,22 @@ class Prior(ABC, utils.JSONMixin):
                 accept = rng.uniform(size=len(samples)) < accept_prob
                 samples = samples[accept]
                 self.max_lnprior = new_max
+                n_accepted -= np.count_nonzero(~accept)
 
             accept_prob = np.exp(candidates_lnprior - self.max_lnprior)
             accept = rng.uniform(size=len(candidates)) < accept_prob
             samples = pd.concat((samples, candidates[accept]),
                                 ignore_index=True)[:n_samples]
+            n_accepted += np.count_nonzero(accept)
 
         self.transform_samples(samples)
-        return samples
+        if not return_lnz:
+            return samples
+
+        lnz = self.max_lnprior + np.log(
+            np.prod(self.cubesize) * n_accepted / n_proposed)
+        dlnz = n_accepted ** -0.5
+        return samples, lnz, dlnz
 
     @property
     def max_lnprior(self):
