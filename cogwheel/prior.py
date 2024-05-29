@@ -226,13 +226,13 @@ class Prior(ABC, utils.JSONMixin):
         return (self.lnprior(*par_vals, **par_dic),
                 self.transform(*par_vals, **par_dic))
 
-    @property
-    def folded_params(self):
+    @utils.ClassProperty
+    def folded_params(cls):
         """
         Names of folded parameters that are either reflected or shifted,
         in that order.
         """
-        return self.folded_reflected_params + self.folded_shifted_params
+        return cls.folded_reflected_params + cls.folded_shifted_params
 
     def _check_range_dic(self):
         """
