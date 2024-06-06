@@ -133,9 +133,9 @@ class EventData(utils.JSONMixin):
 
     @classmethod
     def from_timeseries(
-            cls, filenames, eventname, detector_names, tgps,
+            cls, filenames, eventname, detector_names, tgps, *args, 
             t_before=16., t_after=16., wht_filter_duration=32., fmin=15.,
-            df_taper=1., fmax=1024.):
+            df_taper=1., fmax=1024., **kwargs):
         """
         Parameters
         ----------
@@ -178,6 +178,8 @@ class EventData(utils.JSONMixin):
         fmax: float
             Desired Nyquist frequency (Hz), half the sampling frequency.
 
+        args, kwargs: Extra arguments to read_timeseries
+
         Return
         ------
             ``EventData`` instance.
@@ -188,7 +190,7 @@ class EventData(utils.JSONMixin):
 
         f_strain_whtfilter_tcoarses = []
         for filename, fmin_ in zip(*np.broadcast_arrays(filenames, fmin)):
-            timeseries = cls._read_timeseries(filename, tgps)
+            timeseries = cls._read_timeseries(filename, tgps, *args, **kwargs)
             f_strain_whtfilter_tcoarses.append(
                 cls._get_f_strain_whtfilter_from_timeseries(
                     timeseries, tgps, t_before, t_after, wht_filter_duration,
@@ -206,16 +208,18 @@ class EventData(utils.JSONMixin):
                    detector_names, tgps, tcoarse)
 
     @staticmethod
-    def _read_timeseries(filename, tgps):
+    def _read_timeseries(filename, tgps, *args, **kwargs):
         """
         Return a ``gwpy.timeseries.TimeSeries``, cropped around
         the event to exclude any nans.
         """
         try:
-            timeseries = gwpy.timeseries.TimeSeries.read(filename)
+            timeseries = gwpy.timeseries.TimeSeries.read(
+                filename, *args, **kwargs)
         except ValueError:
-            timeseries = gwpy.timeseries.TimeSeries.read(filename,
-                                                         format='hdf5.gwosc')
+            kwargs['format'] = 'hdf5.gwosc'
+            timeseries = gwpy.timeseries.TimeSeries.read(
+                filename, *args, **kwargs)
 
         i_event = np.searchsorted(timeseries.times.value, tgps)
         i_nan = np.where(np.isnan(timeseries.value))[0]
@@ -305,7 +309,8 @@ class EventData(utils.JSONMixin):
         highpass = highpass_filter(rfftfreq_down, fmin, df_taper)
         raw_wht_filter_td = np.fft.irfft(highpass / asd)
 
-        window_fir = signal.tukey(int(wht_filter_duration * 2 * fmax), .1)
+        window_fir = signal.windows.tukey(
+            int(wht_filter_duration * 2 * fmax), .1)
         window_fir_padded_shifted = np.fft.fftshift(
             np.pad(window_fir, (len(raw_wht_filter_td)-len(window_fir)) // 2))
 
