@@ -10,6 +10,7 @@ from cogwheel import utils
 from cogwheel.prior import CombinedPrior, Prior, check_inheritance_order
 from cogwheel.likelihood import (RelativeBinningLikelihood,
                                  MarginalizedDistanceLikelihood,
+                                 MarginalizedDistancePhaseLikelihood,
                                  MarginalizedExtrinsicLikelihood,
                                  MarginalizedExtrinsicLikelihoodQAS)
 
@@ -275,13 +276,14 @@ class MarginalizedDistanceIASPrior(RegisteredPriorMixin, CombinedPrior):
     prior_classes.remove(UniformLuminosityVolumePrior)
 
 
-class MarginalizedDistanceAndPhaseIASPrior(RegisteredPriorMixin, CombinedPrior):
+class MarginalizedDistanceAndPhaseIASPrior(RegisteredPriorMixin,
+                                           CombinedPrior):
     """
     Prior for usage with ``MarginalizedDistanceLikelihood``.
     Similar to ``IASPrior`` except it does not include distance or phase.
     Uniform in effective spin and detector-frame component masses.
     """
-    default_likelihood_class = MarginalizedDistanceLikelihood
+    default_likelihood_class = MarginalizedDistancePhaseLikelihood
 
     prior_classes = IASPrior.prior_classes.copy()
     prior_classes.remove(UniformLuminosityVolumePrior)
