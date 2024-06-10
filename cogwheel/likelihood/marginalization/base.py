@@ -501,6 +501,9 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                 times[i_min : i_max], timeseries[..., i_min : i_max],
                 k=spline_degree, check_finite=False, axis=-1)(new_times)
 
+        if i_min == i_max:
+            return timeseries[..., (i_min,)*len(new_times)]
+
         return krogh_interpolate(times[i_min : i_max],
                                  timeseries[..., i_min : i_max],
                                  new_times, axis=-1)
