@@ -70,21 +70,29 @@ class SkyLocAngles(utils.JSONMixin):
             j = zenith
         Otherwise a `ValueError` is raised.
         """
+        det1_location = None
+        det2_location = None
         if len(self.detector_pair) == 2:
             det1_location = gw_utils.DETECTORS[self.detector_pair[0]].location
             det2_location = gw_utils.DETECTORS[self.detector_pair[1]].location
-            midpoint_location = (det1_location + det2_location) / 2
 
-            k_axis = normalize(det1_location - det2_location)
-            i_axis = normalize(np.cross(midpoint_location, k_axis))
-            j_axis = np.cross(k_axis, i_axis)
-            return i_axis, j_axis
+            # Check if det1_location and det2_location are close
+            if not np.allclose(det1_location, det2_location):
+                midpoint_location = (det1_location + det2_location) / 2
 
-        if len(self.detector_pair) == 1:
+                k_axis = normalize(det1_location - det2_location)
+                i_axis = normalize(np.cross(midpoint_location, k_axis))
+                j_axis = np.cross(k_axis, i_axis)
+                return i_axis, j_axis
+
+        if len(self.detector_pair) == 1 or \
+                np.allclose(det1_location, det2_location):
+            # Handle single-detector case, or when the detectors are coincident
+            # (like ET)
             x_arm, y_arm = gw_utils.DETECTOR_ARMS[self.detector_pair[0]]
 
-            # Arms are normalized but not perfectly orthogonal, fix:
-            y_arm = np.cross(np.cross(x_arm, y_arm), x_arm)
+            # # Arms are normalized but not perfectly orthogonal, fix:
+            # y_arm = np.cross(np.cross(x_arm, y_arm), x_arm)
 
             k_axis = normalize(x_arm + y_arm)
             i_axis = normalize(y_arm - x_arm)

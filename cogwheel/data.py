@@ -70,9 +70,9 @@ class EventData(utils.JSONMixin):
             entries are 0 below some minimum frequency so waveforms
             don't need to be queried at arbitrarily low frequency.
 
-        detector_names: string
-            Detectors' initials, e.g. ``'HLV'`` for Hanford-Livingston-
-            Virgo.
+        detector_names: string or tuple
+            Detectors' initials, e.g. ``'HLV'`` or ``('H', 'L', 'V')`` for
+            Hanford-Livingston-Virgo.
 
         tgps: float
             GPS time of the event (s).
@@ -146,9 +146,9 @@ class EventData(utils.JSONMixin):
         eventname: str
             Name of the event, e.g. ``'GW150914'``.
 
-        detector_names: string
-            Detectors' initials, e.g. ``'HLV'`` for Hanford-Livingston-
-            Virgo.
+        detector_names: string or tuple
+            Detectors' initials, e.g. ``'HLV'`` or ``('H', 'L', 'V')`` for
+            Hanford-Livingston-Virgo.
 
         tgps: float
             GPS time of the event (s).

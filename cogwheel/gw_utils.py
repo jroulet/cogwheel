@@ -2,13 +2,15 @@
 import scipy.interpolate
 import numpy as np
 import lal
+import pandas as pd
+import os
 
 from cogwheel import utils
 
 
 # ----------------------------------------------------------------------
 # Detector locations and responses:
-
+# Add H1, L1, V1 detectors
 DETECTORS = {'H': lal.CachedDetectors[lal.LHO_4K_DETECTOR],
              'L': lal.CachedDetectors[lal.LLO_4K_DETECTOR],
              'V': lal.CachedDetectors[lal.VIRGO_DETECTOR]}
@@ -33,8 +35,112 @@ DETECTOR_ARMS = {
                     lal.VIRGO_ARM_Y_DIRECTION_Y,
                     lal.VIRGO_ARM_Y_DIRECTION_Z]))}
 
-
 EARTH_CROSSING_TIME = 2 * 0.02128  # 2 R_Earth / c (seconds)
+
+FUTURE_DETECTOR_FNAME = 'Future-detectors.csv'
+if not os.path.isabs(FUTURE_DETECTOR_FNAME):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    FUTURE_DETECTOR_FNAME = os.path.join(current_dir,
+                                         FUTURE_DETECTOR_FNAME)
+
+
+def create_detector(
+        name, vertexLongitudeRadians, vertexLatitudeRadians, xArmAzimuthRadians,
+        yArmAzimuthRadians, xArmMidpoint, yArmMidpoint, vertexElevation=0,
+        xArmAltitudeRadians=0, yArmAltitudeRadians=0, prefix=None):
+    """Create a detector object with the given parameters, uses LAL conventions
+    :param name: Detector name
+    :param vertexLongitudeRadians:
+        The geodetic longitude of the vertex in radians
+    :param vertexLatitudeRadians: The geodetic latitude of the vertex in radians
+    :param xArmAzimuthRadians:
+        The angle clockwise from North to the projection of the X arm into the
+        local tangent plane of the reference ellipsoid in radians
+    :param yArmAzimuthRadians:
+        The angle clockwise from North to the projection of the Y arm into the
+        local tangent plane of the reference ellipsoid in radians
+    :param xArmMidpoint: The distance to the midpoint of the X arm in meters
+    :param yArmMidpoint: The distance to the midpoint of the Y arm in meters
+    :param vertexElevation:
+        The height of the vertex above the reference ellipsoid in meters
+    :param xArmAltitudeRadians:
+        The angle up from the local tangent plane of the reference ellipsoid
+        to the X arm in radians
+    :param yArmAltitudeRadians:
+        The angle up from the local tangent plane of the reference ellipsoid
+        to the Y arm in radians
+    :param prefix: Two-letter prefix for detector's channel names (not needed)
+    :return: LAL detector object and unit vectors for X and Y arms
+    """
+    # Create frDetector struct
+    det = lal._lal.FrDetector()
+
+    # Access and set fields
+    det.name = name
+    det.prefix = prefix
+    det.vertexLongitudeRadians = vertexLongitudeRadians
+    det.vertexLatitudeRadians = vertexLatitudeRadians
+    det.vertexElevation = vertexElevation
+    det.xArmAltitudeRadians = xArmAltitudeRadians
+    det.xArmAzimuthRadians = xArmAzimuthRadians
+    det.yArmAltitudeRadians = yArmAltitudeRadians
+    det.yArmAzimuthRadians = yArmAzimuthRadians
+    det.xArmMidpoint = xArmMidpoint
+    det.yArmMidpoint = yArmMidpoint
+
+    det_struct = lal.Detector()
+    _ = lal.CreateDetector(det_struct, det, 1)
+
+    x_arm = getCartesianComponents(xArmAltitudeRadians,
+                                   xArmAzimuthRadians,
+                                   vertexLatitudeRadians,
+                                   vertexLongitudeRadians)
+
+    y_arm = getCartesianComponents(yArmAltitudeRadians,
+                                   yArmAzimuthRadians,
+                                   vertexLatitudeRadians,
+                                   vertexLongitudeRadians)
+
+    return det_struct, (x_arm, y_arm)
+
+
+def getCartesianComponents(alt, az, lat, lon):
+    """
+    Return the cartesian components of the unit vector pointing along a
+    detector arm (exposing the LAL function that seems inaccessible).
+    """
+    cosAlt, sinAlt = np.cos(alt), np.sin(alt)
+    cosAz, sinAz = np.cos(az), np.sin(az)
+    cosLat, sinLat = np.cos(lat), np.sin(lat)
+    cosLon, sinLon = np.cos(lon), np.sin(lon)
+    uNorth = cosAlt * cosAz
+    uEast = cosAlt * sinAz
+    uRho = - sinLat * uNorth + cosLat * sinAlt
+
+    u = np.zeros(3)
+
+    u[0] = cosLon * uRho - sinLon * uEast
+    u[1] = sinLon * uRho + cosLon * uEast
+    u[2] = cosLat * uNorth + sinLat * sinAlt
+
+    return u
+
+
+# Load future detectors from file if it exists
+if os.path.exists(FUTURE_DETECTOR_FNAME):
+    future_detectors = pd.read_csv(FUTURE_DETECTOR_FNAME, sep='\s+')
+    for i, row in future_detectors.iterrows():
+        prefix = row.get('PREFIX', None)
+        det, arms = create_detector(
+            row['NAME'], row['LONGITUDE'], row['LATITUDE'],
+            row['XAZIMUTH'], row['YAZIMUTH'],
+            row['XLENGTH']/2, row['YLENGTH']/2,
+            vertexElevation=row.get('ELEVATION', 0),
+            xArmAltitudeRadians=row.get('XALTITUDE', 0),
+            yArmAltitudeRadians=row.get('YALTITUDE', 0),
+            prefix=None if pd.isna(prefix) else prefix)
+        DETECTORS[row['NAME']] = det
+        DETECTOR_ARMS[row['NAME']] = arms
 
 
 @utils.lru_cache()

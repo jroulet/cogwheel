@@ -44,7 +44,7 @@ class MarginalizationInfo:
 
     ln_numerators: float array of length n_important
         Natural log of the numerator of the weights of the QMC samples,
-        including the likelihood and and prior and excluding the
+        including the likelihood and prior and excluding the
         importance-sampling correction.
         The multiple importance sampling formula with the balance
         heuristic is:
