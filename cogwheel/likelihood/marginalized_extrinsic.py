@@ -86,12 +86,16 @@ class BaseMarginalizedExtrinsicLikelihood(BaseLinearFree):
         if isinstance(coherent_score, dict):  # Interpret as kwargs
             # Ensure sky_dict's and event_data's sampling frequencies
             # are commensurate:
-            f_sampling = SkyDictionary.choose_f_sampling(
-                event_data.frequencies[-1])
+            sky_dict_kwargs = coherent_score.get('sky_dict_kwargs', {})
+            if 'f_sampling' not in sky_dict_kwargs:
+                sky_dict_kwargs['f_sampling'] = SkyDictionary.choose_f_sampling(
+                    event_data.frequencies[-1])
+            # f_sampling = SkyDictionary.choose_f_sampling(
+            #     event_data.frequencies[-1])
 
             coherent_score = self._create_coherent_score(
-                sky_dict=SkyDictionary(event_data.detector_names,
-                                       f_sampling=f_sampling),
+                sky_dict=SkyDictionary(
+                    event_data.detector_names, **sky_dict_kwargs),
                 m_arr=waveform_generator.m_arr,
                 **coherent_score)
         elif not np.array_equal(coherent_score.m_arr,
