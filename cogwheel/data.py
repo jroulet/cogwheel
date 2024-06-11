@@ -189,8 +189,8 @@ class EventData(utils.JSONMixin):
                 'Length of `filenames` and `detector_names` are mismatched.')
 
         f_strain_whtfilter_tcoarses = []
-        for filename, fmin_ in zip(*np.broadcast_arrays(filenames, fmin)):
-            timeseries = cls._read_timeseries(filename, tgps, *args, **kwargs)
+        for filename, fmin_, *args_ in zip(*np.broadcast_arrays(filenames, fmin, *args)):
+            timeseries = cls._read_timeseries(filename, tgps, *args_, **kwargs)
             f_strain_whtfilter_tcoarses.append(
                 cls._get_f_strain_whtfilter_from_timeseries(
                     timeseries, tgps, t_before, t_after, wht_filter_duration,
@@ -361,7 +361,7 @@ class EventData(utils.JSONMixin):
 
         detector_names: string
             Detectors' initials, e.g. ``'HLV'`` for Hanford-Livingston-
-            Virgo.
+            Virgo, or tuples like ('H', 'L', 'V')
 
         asd_funcs: sequence of callables or strings
             Functions that return the noise amplitude spectral density

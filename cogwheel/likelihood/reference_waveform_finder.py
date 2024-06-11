@@ -583,12 +583,13 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         sorted_dets = [det for _, det in sorted(zip(
             lnl_by_detectors, self.waveform_generator.detector_names))][::-1]
         ref_det_name = sorted_dets[0]
-        detector_pair = ''.join(sorted_dets)[:2]
+        # detector_pair = ''.join(sorted_dets)[:2]
+        detector_pair = tuple(sorted_dets[:2])
 
         f_avg = self.get_average_frequency(self.par_dic_0, ref_det_name)
 
         delay = gw_utils.time_delay_from_geocenter(
-            ref_det_name, self.par_dic_0['ra'], self.par_dic_0['dec'],
+            (ref_det_name,), self.par_dic_0['ra'], self.par_dic_0['dec'],
             self.event_data.tgps)[0]
         t0_refdet = self.par_dic_0['t_geocenter'] + delay
 

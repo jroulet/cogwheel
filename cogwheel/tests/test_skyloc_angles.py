@@ -8,8 +8,9 @@ from cogwheel import skyloc_angles
 from cogwheel import gw_utils
 
 
-DETECTOR_PAIRS = [''.join(pair)
-                  for pair in itertools.combinations(gw_utils.DETECTORS, 2)]
+# DETECTOR_PAIRS = [''.join(pair)
+#                   for pair in itertools.combinations(gw_utils.DETECTORS, 2)]
+DETECTOR_PAIRS = [tuple(pair) for pair in itertools.combinations(gw_utils.DETECTORS, 2)]
 
 
 def instantiate_skyloc(detector_pair=None, tgps=None):

@@ -35,7 +35,7 @@ class ReferenceDetectorMixin:
 
     def fplus_fcross_refdet(self, ra, dec, psi):
         """Antenna coefficients (F+, Fx) at the reference detector."""
-        return gw_utils.fplus_fcross(self.ref_det_name, ra, dec, psi,
+        return gw_utils.fplus_fcross((self.ref_det_name,), ra, dec, psi,
                                      self.tgps)[:, 0]
 
     @utils.lru_cache()

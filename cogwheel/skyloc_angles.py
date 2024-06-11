@@ -26,7 +26,8 @@ class SkyLocAngles(utils.JSONMixin):
         ----------
         detector_pair: Length-2 string with names of the detectors
                        used to define the coordinate system, e.g. "HL",
-                       or length-1 string, e.g. "H".
+                       or length-1 string, e.g. "H",
+                       or can be a tuple ('H', 'L').
         tgps: GPS time used to define the coordinate system.
         """
         self.detector_pair = detector_pair
