@@ -511,7 +511,6 @@ class Prior(ABC, utils.JSONMixin):
         chunksize = (n_samples, len(self.sampled_params))
         lnprior = np.vectorize(self.lnprior, otypes=[float])
 
-        max_lnprior = -np.inf
         samples = pd.DataFrame()
         while len(samples) < n_samples:
             candidates = pd.DataFrame(
