@@ -9,7 +9,8 @@ import numpy as np
 from .marginalized_distance import MarginalizedDistanceLikelihood
 
 
-class MarginalizedDistancePhaseLikelihood(MarginalizedDistanceLikelihood):
+class MarginalizedDistancePhaseLikelihood(
+        MarginalizedDistanceLikelihood):
     """
     Modified `MarginalizedDistanceLikelihood` marginalize with a
     grid over phases. Thus, it removes two dimension from the parameter
@@ -22,21 +23,30 @@ class MarginalizedDistancePhaseLikelihood(MarginalizedDistanceLikelihood):
         Parameters
         ----------
         event_data: Instance of `data.EventData`
+
         waveform_generator: Instance of `waveform.WaveformGenerator`.
-        par_dic_0: dictionary with parameters of the reference waveform,
-                   should be close to the maximum likelihood waveform.
+
+        par_dic_0: dict
+            Parameters of the reference waveform, should be close to the
+            maximum likelihood waveform.
+
         fbin: Array with edges of the frequency bins used for relative
               binning [Hz]. Alternatively, pass `pn_phase_tol`.
-        pn_phase_tol: Tolerance in the post-Newtonian phase [rad] used
-                      for defining frequency bins. Alternatively, pass
-                      `fbin`.
-        spline_degree: int, degree of the spline used to interpolate the
-                        ratio between waveform and reference waveform for
-                       relative binning.
+
+        pn_phase_tol: float
+            Tolerance in the post-Newtonian phase [rad] used for
+            defining frequency bins. Alternatively, pass `fbin`.
+
+        spline_degree: int
+            Degree of the spline used to interpolate the ratio between
+            waveform and reference waveform for relative binning.
+
         lookup_table: Instance of ``likelihood.LookupTable`` to compute
                       the marginalized likelihood.
-        n_phi : number of equally spaced phi_ref grid points, in the
-                (0, 2*pi) interval.
+
+        n_phi: int
+            Number of equally spaced phi_ref grid points, in the
+            (0, 2*pi) interval.
         """
         super().__init__(lookup_table, event_data, waveform_generator,
                  par_dic_0, fbin, pn_phase_tol, spline_degree)
@@ -64,9 +74,9 @@ class MarginalizedDistancePhaseLikelihood(MarginalizedDistanceLikelihood):
     def _get_dh_hh_on_phi_grid(self, par_dic):
         dh_mpd, hh_mppd = self._get_dh_hh_complex_no_asd_drift(
             par_dic | {'phi_ref': 0.0})
-        dh_o = np.einsum('mpd, mo, d -> o',
+        dh_o = np.einsum('mpd,mo,d->o',
                          dh_mpd, self._dh_phasor, self.asd_drift**-2).real
-        hh_o = np.einsum('mpPd, mo, d-> o',
+        hh_o = np.einsum('mpPd,mo,d->o',
                          hh_mppd, self._hh_phasor, self.asd_drift**-2).real
         return dh_o, hh_o
 
@@ -75,12 +85,55 @@ class MarginalizedDistancePhaseLikelihood(MarginalizedDistanceLikelihood):
         Return log likelihood, marginalized over distance and phase,
         using relative binning.
         """
-        dh_o, hh_o = \
-            self._get_dh_hh_on_phi_grid(
-            par_dic | {'phi_ref': 0.0,
-                       'd_luminosity': self.lookup_table.REFERENCE_DISTANCE})
+        dh_o, hh_o = self._get_dh_hh_on_phi_grid(
+            par_dic | {'d_luminosity': self.lookup_table.REFERENCE_DISTANCE})
 
         return self.lookup_table.lnlike_marginalized(dh_o, hh_o)
+
+    def lnlike_and_metadata(self, par_dic):
+        """
+        Parameters
+        ----------
+        par_dic: dict
+            Keys must include ``.params``.
+
+        Return
+        ------
+        lnl_marginalized: float
+            Log likelihood, marginalized over orbital phase and
+            distance, using relative binning.
+
+        metadata: dict
+            Contains the marginalized lnl, as well as an orbital phase
+            and distance draw and its corresponding (non-marginalized)
+            log-likelihood.
+        """
+        lnl_o = self._lnlike_dist_marg_on_phi_grid(par_dic)
+
+        # Compute marginalized likelihood
+        lnl_marginalized = (
+            logsumexp(self._lnlike_dist_marg_on_phi_grid(par_dic))
+            - np.log(self.n_phi))
+
+        # Sample phase
+        prob_o = np.exp(lnl_o - lnl_o.max())
+        phase_cumulative = np.cumsum(prob_o) / np.sum(prob_o)
+        u_phi = np.random.uniform(0, 1)
+        phi_ref = np.interp(u_phi, phase_cumulative, self.phi)
+
+        # Sample distance
+        dh_hh = self._get_dh_hh_no_asd_drift(
+            par_dic | {'phi_ref': phi_ref,
+                       'd_luminosity': self.lookup_table.REFERENCE_DISTANCE})
+        d_h, h_h = np.matmul(dh_hh, self.asd_drift**-2)
+        d_luminosity = self.lookup_table.sample_distance(d_h, h_h)
+
+        amp_ratio = self.lookup_table.REFERENCE_DISTANCE / d_luminosity
+        lnl = d_h * amp_ratio - h_h * amp_ratio**2 / 2
+        return lnl_marginalized, {'phi_ref': phi_ref,
+                                  'd_luminosity': d_luminosity,
+                                  'lnl': lnl,
+                                  'lnl_marginalized': lnl_marginalized}
 
     def lnlike(self, par_dic):
         return (logsumexp(self._lnlike_dist_marg_on_phi_grid(par_dic))
@@ -108,8 +161,8 @@ class MarginalizedDistancePhaseLikelihood(MarginalizedDistanceLikelihood):
         def sample_phase(**par_dic):
             lnl_o = self._lnlike_dist_marg_on_phi_grid(par_dic)
             p_o = np.exp(lnl_o - lnl_o.max())
-            phase_cumulative = np.cumsum(p_o)/np.sum(p_o)
-            u_phi= np.random.uniform(0, 1)
+            phase_cumulative = np.cumsum(p_o) / np.sum(p_o)
+            u_phi = np.random.uniform(0, 1)
             phi_ref = np.interp(u_phi, phase_cumulative, self.phi)
             return phi_ref
 
