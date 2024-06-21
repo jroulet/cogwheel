@@ -367,7 +367,8 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
         prob = []
         for t_samples in t_det:  # Loop over detectors
-            hist = np.histogram(t_samples, weights=marginalization_info.weights,
+            hist = np.histogram(t_samples,
+                                weights=marginalization_info.weights,
                                 bins=bins)[0]
             std = utils.weighted_avg_and_std(t_samples,
                                              marginalization_info.weights)[1]

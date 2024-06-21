@@ -88,9 +88,10 @@ class VolumetricInjectionPrior(prior.CombinedPrior):
     but volumetric in component spins rather than uniform in effective
     spin.
     """
-    prior_classes = utils.replace(IASInjectionPrior.prior_classes,
-                                  gw_prior.UniformEffectiveSpinPrior,
-                                  gw_prior.VolumetricSpinsAlignedComponentsPrior)
+    prior_classes = utils.replace(
+        IASInjectionPrior.prior_classes,
+        gw_prior.UniformEffectiveSpinPrior,
+        gw_prior.VolumetricSpinsAlignedComponentsPrior)
 
 
 class AlignedSpinIASInjectionPrior(prior.CombinedPrior):

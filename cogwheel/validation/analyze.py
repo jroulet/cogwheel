@@ -178,7 +178,7 @@ def _get_samples(config, rundir):
     # mchirp and q should be within injection prior, verify:
     if 'mchirp_range' in config.PRIOR_KWARGS:
         samples['mchirp'] = gw_utils.m1m2_to_mchirp(**samples[['m1', 'm2']])
-        # +/- 1e-4 because we uploaded the samples to zenodo in single precision
+        # +/- 1e-4 because we uploaded samples to zenodo in single precision
         np.testing.assert_array_compare(np.greater_equal,
                                         samples['mchirp'] + 1e-4,
                                         config.PRIOR_KWARGS['mchirp_range'][0])
@@ -211,8 +211,10 @@ def get_n_effectives(config):
     Return array of effective sample size of the posteriors.
     There is one entry for each posterior.
     """
-    feathers = sorted(config.INJECTION_DIR.glob('runs/INJ*/run_*/samples.feather'))
-    n_effectives = [_n_effective(pd.read_feather(feather)) for feather in feathers]
+    feathers = sorted(
+        config.INJECTION_DIR.glob('runs/INJ*/run_*/samples.feather'))
+    n_effectives = [_n_effective(pd.read_feather(feather))
+                    for feather in feathers]
     return np.array(n_effectives)
 
 

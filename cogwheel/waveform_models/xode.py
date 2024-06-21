@@ -51,8 +51,10 @@ CONFIG = {'use_N4LO_prec': True,
           'rtol': 1e-3}
 
 
-def compute_hplus_hcross_by_mode_xode(f, par_dic, approximant='IMRPhenomXODE',
-                                      harmonic_modes=None, lal_dic=None):
+def compute_hplus_hcross_by_mode_xode(f, par_dic,
+                                      approximant='IMRPhenomXODE',
+                                      harmonic_modes=None,
+                                      lal_dic=None):
     """
     Generate frequency domain waveform with IMRPhenomXODE.
     Return hplus, hcross evaluated at f.

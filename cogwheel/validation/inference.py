@@ -95,7 +95,8 @@ def make_corner_plot(config, rundir):
 
     # Instantiate a dummy prior to use its inverse transform
     # (for plotting well-measured parameters)
-    plotting_prior_cls = getattr(config, 'PLOTTING_PRIOR_CLS', gw_prior.IASPrior)
+    plotting_prior_cls = getattr(config, 'PLOTTING_PRIOR_CLS',
+                                 gw_prior.IASPrior)
     if isinstance(plotting_prior_cls, str):
         plotting_prior_cls = gw_prior.prior_registry[plotting_prior_cls]
     plotting_prior = plotting_prior_cls(
@@ -125,8 +126,9 @@ def make_corner_plot(config, rundir):
     pe_samples.to_feather(samples_filename)
 
     # Plot and save:
-    plot_params = [par for par in plotting_prior.sampled_params + ['lnl', 'h_h']
-                   if par in pe_samples]
+    plot_params = [
+        par for par in plotting_prior.sampled_params + ['lnl', 'h_h']
+        if par in pe_samples]
     corner_plot = gw_plotting.CornerPlot(pe_samples, params=plot_params,
                                          tail_probability=1e-4)
     corner_plot.plot(title=rundir.parent.name, max_n_ticks=3)
@@ -210,21 +212,27 @@ def main(config_filename, rundir):
     with open(rundir/INJECTION_DICT_FILENAME, 'w', encoding='utf-8') as file:
         json.dump(event_data.injection, file, cls=utils.NumpyEncoder, indent=2)
 
-    # Declare failure if the range_dic, prior or likelihood don't include the truth:
-    sampled_inj = post.prior.inverse_transform(**event_data.injection['par_dic'])
+    # Declare failure if the range_dic, prior or likelihood don't
+    # include the truth:
+    sampled_inj = post.prior.inverse_transform(
+        **event_data.injection['par_dic'])
+
     for par, val in sampled_inj.items():
         left, right = post.prior.range_dic[par]
         if val < left or val > right:
             raise RuntimeError(f'{par}={val} outside range {(left, right)}')
+
     if np.isneginf(post.prior.lnprior(**sampled_inj)):
         raise RuntimeError('prior = 0 at the injection.')
+
     if np.isneginf(post.likelihood.lnlike(event_data.injection['par_dic'])):
         raise RuntimeError('likelihood = 0 at the injection.')
 
     # Ensure the mchirp prior range is contained in the injection range:
     mchirp_range = post.prior.get_init_dict().get('mchirp_range')
     if mchirp_range is not None:
-        mchirp_range = np.clip(mchirp_range, *config.PRIOR_KWARGS['mchirp_range'])
+        mchirp_range = np.clip(mchirp_range,
+                               *config.PRIOR_KWARGS['mchirp_range'])
         post.prior = post.prior.reinstantiate(mchirp_range=mchirp_range)
 
 

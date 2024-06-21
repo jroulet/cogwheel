@@ -19,7 +19,6 @@ import scipy.special
 import dynesty
 import nautilus
 import pymultinest
-# import ultranest
 import zeus
 
 from cogwheel import postprocessing
@@ -626,87 +625,6 @@ class Zeus(Sampler):
         return start
 
 
-# class UltraNest(Sampler):
-#     """Sample a posterior or prior using UltraNest."""
-#     DEFAULT_RUN_KWARGS = {'Lepsilon': 0.5,
-#                           'frac_remain': 1e-2,
-#                           'min_ess': 1000}
-
-#     def _cubetransform(self, cube):
-#         return (self.posterior.prior.cubemin
-#                 + cube * self.posterior.prior.folded_cubesize)
-
-#     def _run(self):
-#         sampler_kwargs = self._get_sampler_kwargs()
-#         run_kwargs = self._get_run_kwargs()
-
-#         self.sampler = ultranest.ReactiveNestedSampler(**sampler_kwargs)
-#         self.sampler.run(**run_kwargs)
-
-#     def _get_sampler_kwargs(self):
-#         sampler_keys = (
-#             set(inspect.signature(ultranest.ReactiveNestedSampler).parameters)
-#             & self.run_kwargs.keys())
-#         sampler_kwargs = {par: self.run_kwargs[par] for par in sampler_keys}
-
-#         wrapped_params = [par in self.posterior.prior.periodic_params
-#                           for par in self.posterior.prior.sampled_params]
-
-#         sampler_kwargs.update(
-#             param_names=self.posterior.prior.sampled_params,
-#             wrapped_params=wrapped_params,
-#             transform=self._cubetransform,
-#             loglike=self._lnprob_ultranest)
-#         return sampler_kwargs
-
-#     def _get_run_kwargs(self):
-#         run_keys = (
-#             set(inspect.signature(ultranest.ReactiveNestedSampler.run).parameters)
-#             & self.run_kwargs.keys())
-#         run_kwargs = {par: self.run_kwargs[par] for par in run_keys}
-#         return run_kwargs
-
-#     def _lnprob_ultranest(self, par_vals):
-#         """Return the logarithm of the folded probability density."""
-#         lnprobs = self._get_lnprobs(*par_vals)
-#         return max(-1e100, scipy.special.logsumexp(lnprobs))
-
-#     def load_samples(self):
-#         """
-#         Collect ultranest samples, resample from them to undo the
-#         parameter folding. Return a ``pandas.DataFrame`` with samples.
-#         """
-#         log_dir = pathlib.Path(self.run_kwargs['log_dir'])
-#         resume = self.run_kwargs.get(
-#             'resume', inspect.signature(
-#                 ultranest.ReactiveNestedSampler).parameters['resume'].default)
-#         if resume == 'subfolder':
-#             path = sorted(log_dir.glob('run*/chains/weighted_post.txt')
-#                           )[-1]
-#         else:
-#             path = log_dir.joinpath('chains', 'weighted_post.txt')
-
-#         result = pd.read_csv(path, sep='\s+')
-#         folded = result[self.posterior.prior.sampled_params]
-
-#         # ``ultranest`` doesn't allow to save samples' metadata, so we
-#         # have to recompute ``lnprobs``:
-#         lnprobs = pd.DataFrame(
-#             [self._get_lnprobs(**row) for _, row in folded.iterrows()],
-#             columns=self._lnprob_cols)
-#         utils.update_dataframe(folded, lnprobs)
-
-#         samples = self.resample(folded)
-#         samples[utils.WEIGHTS_NAME] = result['weight']
-#         return samples
-
-#     @wraps(utils.JSONMixin.to_json)
-#     def to_json(self, dirname, *args, **kwargs):
-#         """Update run_kwargs['log_dir'] before saving."""
-#         self.run_kwargs['log_dir'] = str(dirname)
-#         super().to_json(dirname, *args, **kwargs)
-
-
 class Nautilus(Sampler):
     """Sample a posterior or prior using Nautilus."""
     _SAMPLER_CLS = nautilus.Sampler
@@ -769,9 +687,10 @@ class Nautilus(Sampler):
                         'n_dim': 2}
         nautilus_sampler = nautilus.Sampler(**dummy_kwargs, filepath=filepath)
         try:
-            return nautilus_sampler.log_z()
+            return nautilus_sampler.log_z
         except AttributeError:  # Old nautilus version
             return nautilus_sampler.evidence()
+
 
 def main(sampler_path, postprocess=True):
     """Load sampler and run it."""

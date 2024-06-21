@@ -72,17 +72,17 @@ class CoherentScoreQAS(ProposingCoherentScore):
         tdet_inds = tdet_inds[:, physical_mask]
 
         if not any(physical_mask):
-            return MarginalizationInfo(qmc_sequence_id=self._current_qmc_sequence_id,
-                                       ln_numerators=np.array([]),
-                                       q_inds=np.array([], int),
-                                       sky_inds=np.array([], int),
-                                       t_first_det=np.array([]),
-                                       d_h=np.array([]),
-                                       h_h=np.array([]),
-                                       tdet_inds=tdet_inds,
-                                       proposals_n_qmc=[n_qmc],
-                                       proposals=[t_arrival_prob],
-                                       )
+            return MarginalizationInfo(
+                qmc_sequence_id=self._current_qmc_sequence_id,
+                ln_numerators=np.array([]),
+                q_inds=np.array([], int),
+                sky_inds=np.array([], int),
+                t_first_det=np.array([]),
+                d_h=np.array([]),
+                h_h=np.array([]),
+                tdet_inds=tdet_inds,
+                proposals_n_qmc=[n_qmc],
+                proposals=[t_arrival_prob])
 
         t_first_det = (times[tdet_inds[0]]
                        + self._qmc_sequence['t_fine'][q_inds])
@@ -94,17 +94,17 @@ class CoherentScoreQAS(ProposingCoherentScore):
             self.lookup_table.lnlike_marginalized(np.abs(dh_q), hh_q)
             + np.log(sky_prior))  # q
 
-        return MarginalizationInfo(qmc_sequence_id=self._current_qmc_sequence_id,
-                                   ln_numerators=ln_numerators,
-                                   q_inds=q_inds,
-                                   sky_inds=sky_inds,
-                                   t_first_det=t_first_det,
-                                   d_h=dh_q,
-                                   h_h=hh_q,
-                                   tdet_inds=tdet_inds,
-                                   proposals_n_qmc=[n_qmc],
-                                   proposals=[t_arrival_prob],
-                                   )
+        return MarginalizationInfo(
+            qmc_sequence_id=self._current_qmc_sequence_id,
+            ln_numerators=ln_numerators,
+            q_inds=q_inds,
+            sky_inds=sky_inds,
+            t_first_det=t_first_det,
+            d_h=dh_q,
+            h_h=hh_q,
+            tdet_inds=tdet_inds,
+            proposals_n_qmc=[n_qmc],
+            proposals=[t_arrival_prob])
 
     def _get_dh_hh_q(self, sky_inds, q_inds, t_first_det, times,
                      dh_td, hh_d):

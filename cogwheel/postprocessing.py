@@ -384,7 +384,8 @@ class EventdirPostprocessor:
                     tail_probability=1e-4)
                 cornerplot.plot(max_n_ticks=3)
                 if sampled_par_dic_0:
-                    cornerplot.scatter_points(sampled_par_dic_0, adjust_lims=True)
+                    cornerplot.scatter_points(sampled_par_dic_0,
+                                              adjust_lims=True)
                 pdf.savefig(bbox_inches='tight')
 
     def get_rundirs(self):
