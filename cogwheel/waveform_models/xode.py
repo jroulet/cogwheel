@@ -41,8 +41,14 @@ gw_plotting.CornerPlot(samples[post.prior.sampled_params]).plot()
 import numpy as np
 
 from cogwheel import waveform
-from .IMRPhenomXODE.waveLib import get_hp_hc_each_prec_mode_f_sequence
 
+try:
+    from .IMRPhenomXODE.waveLib import get_hp_hc_each_prec_mode_f_sequence
+except ImportError as err:
+    raise ImportError(
+        'It seems that you are trying to use IMRPhenomXODE but did not '
+        f'install it. Follow the instructions in {__file__} (reproduced'
+        f' below)\n\n{__doc__}') from err
 
 CONFIG = {'use_N4LO_prec': True,
           'SEOB_22_cal': True,
