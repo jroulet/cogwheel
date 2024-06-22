@@ -666,7 +666,7 @@ class Nautilus(Sampler):
             log_z = self.read_log_z(self.run_kwargs['filepath'])
         else:
             try:
-                log_z = self.sampler.log_z()
+                log_z = self.sampler.log_z
             except AttributeError:  # Old nautilus version
                 log_z = self.sampler.evidence()
 
