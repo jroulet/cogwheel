@@ -22,6 +22,7 @@ dependencies = [
   "numba",
   "pandas",
   "pyarrow",
+  "setuptools_scm",
   "gwpy",
   "dynesty",
   "nautilus-sampler",
@@ -51,8 +52,6 @@ packages = ["cogwheel"]
 "cogwheel.data" = ["events_metadata.csv",
                    "example_asds/*.npy"]
 
-[tool.setuptools.exclude-package-data]
-"cogwheel" = ["data/GW*.npz"]
-
 [tool.setuptools_scm]
 local_scheme = "no-local-version"
+version_file = "cogwheel/_version.py"

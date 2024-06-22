@@ -6,6 +6,7 @@ cogwheel/data/gwosc_files
 cogwheel/data/gwosc_files/*
 cogwheel/likelihood/marginalization/lookup_tables.npz
 cogwheel/factorized_qas/data/extrinsic_samples_*.npz
+cogwheel/_version.py
 
 *.egg-info/
 

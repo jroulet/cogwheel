@@ -7,7 +7,6 @@ import json
 import os
 import pathlib
 import re
-import subprocess
 import sys
 import tempfile
 import textwrap
@@ -15,6 +14,8 @@ from contextlib import contextmanager
 from scipy.optimize import _differentialevolution
 from numba import vectorize
 import numpy as np
+
+from . import __version__
 
 
 DIR_PERMISSIONS = 0o755
@@ -693,28 +694,14 @@ class CogwheelEncoder(NumpyEncoder):
             module = spec.name
         return module
 
-    @staticmethod
-    def _get_commit_hash():
-        """
-        Return current git commit hash, or raise ``FileNotFoundError``
-        if git is not found.
-        """
-        cogwheel_dir = pathlib.Path(__file__).parents[1].resolve()
-        return subprocess.check_output(
-            ['git', 'rev-parse', 'HEAD'], cwd=cogwheel_dir
-            ).decode('utf-8').strip()
-
     def default(self, o):
         """Encoding for registered cogwheel classes. """
         if o.__class__.__name__ not in class_registry:
             return super().default(o)
 
         dic = {'__cogwheel_class__': o.__class__.__name__,
-               '__module__': self._get_module_name(o)}
-        try:
-            dic['commit_hash'] = self._get_commit_hash()
-        except FileNotFoundError:
-            pass
+               '__module__': self._get_module_name(o),
+               '__version__': __version__}
 
         if o.__class__.__name__ == 'EventData':
             filename = os.path.join(self.dirname, f'{o.eventname}.npz')
