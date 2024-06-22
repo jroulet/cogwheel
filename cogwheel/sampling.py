@@ -7,8 +7,6 @@ import inspect
 import multiprocessing
 import pathlib
 import os
-import sys
-import textwrap
 import warnings
 from cProfile import Profile
 from functools import wraps
@@ -140,6 +138,48 @@ class Sampler(abc.ABC, utils.JSONMixin):
             Whether to perform convergence tests to the run after
             sampling. See ``postprocessing.postprocess_rundir``.
         """
+        self._submit('slurm', rundir, n_hours_limit, memory_per_task,
+                     resuming, sbatch_cmds, postprocess)
+
+    def submit_lsf(
+            self, rundir, n_hours_limit=48, memory_per_task='32G',
+            resuming=False, bsub_cmds=(), postprocess=True):
+        """
+        Parameters
+        ----------
+        rundir: str, os.PathLike
+            Run directory, e.g. from `self.get_rundir`
+
+        n_hours_limit: int
+            Number of hours to allocate for the job.
+
+        memory_per_task: str
+            Determines the memory and number of cpus.
+
+        resuming: bool
+            Whether to attempt resuming a previous run if rundir already
+            exists.
+
+        bsub_cmds: tuple of str
+            Strings with BSUB commands.
+
+        postprocess: bool
+            Whether to perform convergence tests to the run after
+            sampling. See ``postprocessing.postprocess_rundir``.
+        """
+        self._submit('lsf', rundir, n_hours_limit, memory_per_task,
+                     resuming, bsub_cmds, postprocess)
+
+    def _submit(self, scheduler, rundir, n_hours_limit=48,
+                memory_per_task='32G', resuming=False, cmds=(),
+                postprocess=True):
+        """
+        Implement `.submit_lsf` and `.submit_slurm`.
+
+        Parameters
+        ----------
+        scheduler: {'slurm', 'lsf'}
+        """
         rundir = pathlib.Path(rundir)
         job_name = '_'.join([rundir.name,
                              self.posterior.likelihood.event_data.eventname,
@@ -151,57 +191,20 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         self.to_json(rundir, overwrite=resuming)
 
-        sbatch_cmds += (f'--mem-per-cpu={memory_per_task}',)
+        cmds += (f'--mem-per-cpu={memory_per_task}',)
         args = str(rundir.resolve())
 
         if not postprocess:
             args += ' --no-postprocessing'
 
-        utils.submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
-                           args, sbatch_cmds, batch_path)
-
-    def submit_lsf(self, rundir, n_hours_limit=48,
-                   memory_per_task='32G', resuming=False):
-        """
-        Parameters
-        ----------
-        rundir: path of run directory, e.g. from `self.get_rundir`
-        n_hours_limit: Number of hours to allocate for the job
-        memory_per_task: Determines the memory and number of cpus
-        resuming: bool, whether to attempt resuming a previous run if
-                  rundir already exists.
-        """
-        rundir = pathlib.Path(rundir)
-        job_name = '_'.join([self.__class__.__name__,
-                             self.posterior.prior.__class__.__name__,
-                             self.posterior.likelihood.event_data.eventname,
-                             rundir.name])
-        stdout_path = rundir.joinpath('output.out').resolve()
-        stderr_path = rundir.joinpath('errors.err').resolve()
-
-        self.to_json(rundir, overwrite=resuming)
-
-        package = pathlib.Path(__file__).parents[1].resolve()
-        module = f'cogwheel.{os.path.basename(__file__)}'.removesuffix('.py')
-
-        batch_path = rundir/'batchfile'
-        with open(batch_path, 'w+', encoding='utf-8') as batchfile:
-            batchfile.write(textwrap.dedent(f"""\
-                #BSUB -J {job_name}
-                #BSUB -o {stdout_path}
-                #BSUB -e {stderr_path}
-                #BSUB -M {memory_per_task}
-                #BSUB -W {n_hours_limit:02}:00
-
-                eval "$(conda shell.bash hook)"
-                conda activate {os.environ['CONDA_DEFAULT_ENV']}
-
-                cd {package}
-                srun {sys.executable} -m {module} {rundir.resolve()}
-                """))
-        batch_path.chmod(0o777)
-        os.system(f'bsub < {batch_path.resolve()}')
-        print(f'Submitted job {job_name!r}.')
+        if scheduler == 'slurm':
+            utils.submit_slurm(job_name, n_hours_limit, stdout_path,
+                               stderr_path, args, cmds, batch_path)
+        elif scheduler == 'lsf':
+            utils.submit_lsf(job_name, n_hours_limit, stdout_path,
+                             stderr_path, args, cmds, batch_path)
+        else:
+            raise ValueError('`scheduler` must be "slurm" or "lsf".')
 
     def run(self, rundir):
         """

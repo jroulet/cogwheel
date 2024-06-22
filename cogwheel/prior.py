@@ -642,7 +642,8 @@ class CombinedPrior(Prior):
                                          + subprior.conditioned_on)}
                 output_dic = subprior.transform(**input_dic)
 
-                values = np.fromiter(output_dic.values(), float, len(output_dic))
+                values = np.fromiter(output_dic.values(), float,
+                                     len(output_dic))
                 if np.isnan(values).any():
                     break
                 par_dic.update(output_dic)
@@ -651,9 +652,11 @@ class CombinedPrior(Prior):
 
         def inverse_transform(self, *par_vals, **par_dic):
             """
-            Transform standard parameter values to sampled parameter values.
-            Take `self.standard_params + self.conditioned_on` parameters and
-            return a dictionary with `self.sampled_params` parameters.
+            Transform standard parameter values to sampled parameter
+            values.
+            Take `self.standard_params + self.conditioned_on` parameters
+            and return a dictionary with `self.sampled_params`
+            parameters.
             """
             par_dic.update(dict(zip(inverse_params, par_vals)))
             for subprior in self.subpriors:

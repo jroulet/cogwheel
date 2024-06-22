@@ -12,6 +12,8 @@ import lal
 from cogwheel import gw_utils
 from cogwheel.prior import Prior
 
+# pylint: disable=arguments-differ
+
 
 class PNCoordinatesPrior(Prior):
     """
@@ -71,8 +73,10 @@ class PNCoordinatesPrior(Prior):
         corners['m1'], corners['m2'] = gw_utils.mchirpeta_to_m1m2(
             **corners[['mchirp', 'eta']])
         self.inverse_transform_samples(corners)
-        mu1_range = np.clip(mu1_range, corners['mu1'].min(), corners['mu1'].max())
-        mu2_range = np.clip(mu2_range, corners['mu2'].min(), corners['mu2'].max())
+        mu1_range = np.clip(
+            mu1_range, corners['mu1'].min(), corners['mu1'].max())
+        mu2_range = np.clip(
+            mu2_range, corners['mu2'].min(), corners['mu2'].max())
 
         self.range_dic = self.range_dic | {'mu1': mu1_range,
                                            'mu2': mu2_range,

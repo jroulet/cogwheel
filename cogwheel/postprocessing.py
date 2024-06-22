@@ -38,12 +38,12 @@ def postprocess_rundir(rundir, relative_binning_boost=4):
         * Columns for standard parameters
         * Column for log likelihood
         * Auxiliary columns for log likelihood (by detector, at high
-          relative binning resolution and with no ASD-drift
-          correction applied)
-        * Tests for log likelihood differences arising from
-          reference waveform choice for setting ASD-drift
-        * Tests for log likelihood differences arising from
-          relative binning accuracy.
+          relative binning resolution and with no ASD-drift correction
+          applied)
+        * Tests for log likelihood differences arising from reference
+          waveform choice for setting ASD-drift
+        * Tests for log likelihood differences arising from relative-
+          binning accuracy.
     """
     RundirPostprocessor(rundir, relative_binning_boost).process_samples()
 
