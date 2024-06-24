@@ -16,7 +16,7 @@ from cogwheel import gw_utils
 from cogwheel import utils
 from cogwheel import waveform
 
-# gwpy fiddles with matplotlib, undo:
+# gwpy meddles with matplotlib, undo:
 plt.rcdefaults()
 gwpy.plot.axes.register_projection(gwpy.plot.axes._Axes)
 
