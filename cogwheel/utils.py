@@ -458,6 +458,91 @@ def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
     print(f'Submitted job {job_name!r}.')
 
 
+def submit_condor(submit_path,
+                  executable,
+                  overwrite=False,
+                  args='',
+                  multithreading=False,
+                  **submit_kwargs):
+    """
+    Generic function to submit a job using HTCondor.
+    This function is intended to be called from other modules rather
+    than used interactively. The job will run the calling module as
+    script.
+
+    Parameters
+    ----------
+    submit_path: str, os.PathLike
+        File name where to save the submission script.
+
+    executable: str, os.PathLike
+        File name where to save the executable script.
+
+    overwrite: bool = False
+        Whether to raise an error if `submit_path` or `executable`
+        exist. If True, existing files will be silently overwritten.
+
+    args: str
+        Command line arguments for the calling module's ``main()`` to
+        parse.
+
+    multithreading: bool
+        Whether to enable automatic OMP multithreading. Defaults to
+        ``False`` because multithreading is found to be slower
+        despite using more resources.
+
+    **submit_kwargs: dict
+        Specify information in the submit file other than the
+        `executable` and `queue` lines.
+        E.g. ``request_memory='1G'``.
+    """
+    submit_path = pathlib.Path(submit_path)
+    executable = pathlib.Path(executable).resolve()
+
+    for path in executable, submit_path:
+        if not overwrite and path.exists():
+            raise FileExistsError(f'{path} already exists.')
+
+    submit_lines = """
+        """.join(f'{key} = {value}' for key, value in submit_kwargs.items())
+
+    module = inspect.getmodule(inspect.stack()[1].frame).__name__
+
+    omp_line = ''
+    if not multithreading:
+        omp_line = 'export OMP_NUM_THREADS=1'
+
+    submit_text = textwrap.dedent(
+        f"""\
+        executable = {executable.as_posix()}
+        {submit_lines}
+
+        queue
+        """)
+
+    executable_text = textwrap.dedent(
+        f"""\
+        #!/bin/bash
+
+        eval "$(conda shell.bash hook)"
+        conda activate {os.environ['CONDA_DEFAULT_ENV']}
+
+        {omp_line}
+
+        {sys.executable} -m {module} {args}
+        """)
+
+    for path, text in [(executable, executable_text),
+                       (submit_path, submit_text)]:
+        with open(path, 'w+', encoding='utf-8') as file:
+            file.write(text)
+            file.seek(0)
+            os.chmod(file.name, 0o777)
+
+    os.system(f'condor_submit {submit_path.as_posix()}')
+    print(f'Submitted {submit_path}.')
+
+
 # ----------------------------------------------------------------------
 # Directory I/O:
 

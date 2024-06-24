@@ -206,6 +206,66 @@ class Sampler(abc.ABC, utils.JSONMixin):
         else:
             raise ValueError('`scheduler` must be "slurm" or "lsf".')
 
+    def submit_condor(self,
+                      rundir,
+                      request_cpus=1,
+                      request_memory='8G',
+                      request_disk='1G',
+                      resuming=False,
+                      postprocess=True,
+                      **submit_kwargs):
+        """
+        Submit a parameter estimation run using the HTCondor scheduler.
+
+        This method generates 'submit.sub' and 'executable.sh' files,
+        the user should provide any instructions for the submit file as
+        `**submit_kwargs`.
+
+        Parameters
+        ----------
+        rundir: str, os.PathLike
+            Run directory, e.g. from `self.get_rundir`
+
+        request_cpus, request_memory, request_disk: int or str
+            Specifications in the HTCondor submit file.
+
+        resuming: bool
+            Whether to attempt resuming a previous run if rundir already
+            exists.
+
+        postprocess: bool
+            Whether to perform convergence tests to the run after
+            sampling. See ``postprocessing.postprocess_rundir``.
+
+        **submit_kwargs
+            Further options to include in the HTCondor submit file. Do
+            not pass `executable`, `output`, `error`, `log`, `queue`,
+            which will be dealt with automatically.
+        """
+        rundir = pathlib.Path(rundir).resolve()
+
+        submit_path = rundir/'submit.sub'
+
+        submit_kwargs = {
+            'executable': rundir/'executable.sh',
+            'output': rundir/'output.out',
+            'error': rundir/'errors.err',
+            'log': rundir/'sampling.log',
+            'request_cpus': request_cpus,
+            'request_memory': request_memory,
+            'request_disk': request_disk,
+            } | submit_kwargs
+
+        self.to_json(rundir, overwrite=resuming)
+
+        args = rundir.as_posix()
+
+        if not postprocess:
+            args += ' --no-postprocessing'
+
+        utils.submit_condor(submit_path, overwrite=resuming, args=args,
+                            **submit_kwargs)
+
     def run(self, rundir):
         """
         Make a directory to save results and run sampler.

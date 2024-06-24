@@ -99,7 +99,7 @@ def _get_credible_intervals(config, rundir, params=None,
     """
     Compute credible interval for multiple parameters for a single
     injection.
-    
+
     Parameters
     ----------
     config: module
@@ -162,7 +162,7 @@ def credible_interval(arr, value, weights=None):
     Return
     ------
     credible_interval: float between 0 and 1.
-        (Weighted) fraction of `arr` whose values are below `value`. 
+        (Weighted) fraction of `arr` whose values are below `value`.
     """
     if weights is None:
         weights = np.ones_like(arr)
@@ -199,7 +199,7 @@ def get_runtimes(config):
     Return array of parameter estimation runtimes in hours.
 
     Note: excludes time spent in setting up each posterior object,
-    which should be ~a couple minutes. 
+    which should be ~a couple minutes.
     """
     profilings = sorted(config.INJECTION_DIR.glob('runs/INJ*/run_*/profiling'))
     runtimes = [Stats(path.as_posix()).total_tt / 3600 for path in profilings]
