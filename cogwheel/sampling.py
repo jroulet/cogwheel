@@ -405,12 +405,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         """Return a pandas.DataFrame with the posterior samples."""
         points, weights, blobs = self._get_points_weights_blobs()
 
-        sampled_params = list(self.posterior.prior.sampled_params)
-
-        for par in self.posterior.prior.folded_params:
-            sampled_params[sampled_params.index(par)] = f'folded_{par}'
-
-        samples = pd.DataFrame(points, columns=sampled_params)
+        samples = pd.DataFrame(points, columns=self.sampled_params)
 
         if weights is not None:
             samples[utils.WEIGHTS_NAME] = weights
@@ -419,9 +414,26 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         return samples.dropna(ignore_index=True)
 
+    @property
+    def sampled_params(self):
+        """
+        Like ``.posterior.prior.sampled_params`` but the folded
+        parameters have 'folded_' prepended.
+
+        Return
+        ------
+        list of str
+        """
+        sampled_params = list(self.posterior.prior.sampled_params)
+
+        for par in self.posterior.prior.folded_params:
+            sampled_params[sampled_params.index(par)] = f'folded_{par}'
+        return sampled_params
+
     def get_init_dict(self):
-        """Remove 'sample_prior' from the keys."""
+        """Keyword arguments to instantiate the class."""
         init_dict = super().get_init_dict()
+        # Remove 'sample_prior' from the keys.
         assert not init_dict.pop('sample_prior', False)
         return init_dict
 

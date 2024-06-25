@@ -15,33 +15,37 @@ It interfaces with third-party routines for downloading public data (GWOSC, `GWp
 
 ## Installation
 ```bash
-git clone git@github.com:jroulet/cogwheel.git
-cd cogwheel
-conda create --name <environment_name> --file requirements.txt --channel conda-forge
+conda create --name <environment_name> python-lalsimulation --channel conda-forge
 conda activate <environment_name>
-pip install -e .
+pip install cogwheel-pe
 ```
 (replace `<environment_name>` by a name of your choice).
 
 
 ## Crash course
 
-Example: how to sample a gravitational wave source posterior using `PyMultiNest`:
+Example: how to sample a gravitational wave source posterior using `Nautilus`:
 ```python
-from cogwheel.posterior import Posterior
+from cogwheel import data
 from cogwheel import sampling
+from cogwheel.posterior import Posterior
 
 parentdir = 'example'  # Directory that will contain parameter estimation runs
 
 eventname, mchirp_guess = 'GW150914', 30
 approximant = 'IMRPhenomXPHM'
-prior_class = 'IASPrior'
+prior_class = 'IntrinsicIASPrior'
+
+filenames, detector_names, tgps = data.download_timeseries(eventname)
+event_data = data.EventData.from_timeseries(
+    filenames, eventname, detector_names, tgps)
+
 post = Posterior.from_event(eventname, mchirp_guess, approximant, prior_class)
 
-pym = sampling.PyMultiNest(post, run_kwargs=dict(n_live_points=512))
+sampler = sampling.Nautilus(post, run_kwargs=dict(n_live=1000))
 
-rundir = pym.get_rundir(parentdir)
-pym.run(rundir)  # Will take a while
+rundir = sampler.get_rundir(parentdir)
+sampler.run(rundir)  # Will take a while
 ```
 Load and plot the samples:
 ```python
@@ -49,7 +53,10 @@ import pandas as pd
 from cogwheel import gw_plotting
 
 samples = pd.read_feather(rundir/sampling.SAMPLES_FILENAME)
-gw_plotting.CornerPlot(samples[post.prior.sampled_params]).plot()
+gw_plotting.CornerPlot(samples,
+                       params=sampler.sampled_params,
+                       tail_probability=1e-4).plot()
+plt.savefig(rundir/f'{eventname}.pdf', bbox_inches='tight')
 ```
 
 
@@ -75,7 +82,7 @@ Instance of the abstract class `cogwheel.sampling.Sampler` (e.g. `cogwheel.sampl
 * Interfaces with third-party stochastic samplers.
 * Constructs the [folded distribution](https://arxiv.org/pdf/2207.03508.pdf#section*.15) (to mitigate multimodality).
 * Reconstructs the original distribution from samples in the folded space.
-* Can run live or submit a job to a scheduler (SLURM, LSF).
+* Can run live or submit a job to a scheduler (SLURM, LSF, HTCondor).
 
 ### Posterior
 
