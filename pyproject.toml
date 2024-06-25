@@ -47,8 +47,8 @@ classifiers = [
 [project.urls]
 "Source" = "https://github.com/jroulet/cogwheel"
 
-[tool.setuptools]
-packages = ["cogwheel"]
+[tool.setuptools.packages]
+find = {}
 
 [tool.setuptools.package-data]
 "cogwheel.data" = ["events_metadata.csv",
