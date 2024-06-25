@@ -288,6 +288,33 @@ class Sampler(abc.ABC, utils.JSONMixin):
         for path in rundir.iterdir():
             path.chmod(self.file_permissions)
 
+    def run_kwargs_options(self):
+        """
+        Return list of possible parameters to configure sampler, along
+        with their default values.
+
+        Refer to each sampler's documentation for details.
+        Sampler parameters not listed here are handled automatically by
+        ``cogwheel``.
+
+        Return
+        ------
+        list of inspect.Parameter
+        """
+        with utils.temporarily_change_attributes(self, run_kwargs={}):
+            automatic_kw = self._get_run_kwargs() | self._get_sampler_kwargs()
+
+        run_method = getattr(self._SAMPLER_CLS, self._RUN_METHOD_NAME)
+        all_kwargs = (inspect.signature(run_method).parameters
+                      | inspect.signature(self._SAMPLER_CLS).parameters)
+
+        # Override defaults with any `run_kwargs` currently set:
+        for key, value in self.run_kwargs.items():
+            all_kwargs[key] = all_kwargs[key].replace(default=value)
+
+        return [value for key, value in all_kwargs.items()
+                if key not in automatic_kw]
+
     @abc.abstractmethod
     def _get_points_weights_blobs(self):
         """
