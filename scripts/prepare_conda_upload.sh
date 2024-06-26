@@ -1,8 +1,6 @@
 # Download latest version from pypi and create cogwheel-pe/meta.yaml
-grayskull pypi cogwheel-pe --maintainers jroulet
+scripts_dir=$(dirname "$0")
+grayskull pypi cogwheel-pe --maintainers jroulet --strict-conda-forge --output "${scripts_dir}/.."
 
 # The default meta.yaml has a couple problems, fix them:
-python scripts/finalize_meta_yaml.py
-
-# Make .tar.bz2 file to upload to conda-forge
-conda build cogwheel_pe
+python "${scripts_dir}/finalize_meta_yaml.py"
