@@ -5,7 +5,6 @@
 * Add `cogwheel.sampling` to import tests.
 * The home item is missing in the about section.
 * The license identifier GPL-3.0 is deprecated.
-* Don't support Windows (due to `pymultinest` and `python-lalsimulation`).
 """
 from pathlib import Path
 
@@ -54,28 +53,6 @@ new = """
 """
 text = text.replace(target, new)
 
-
-# Drop windows compatibility
-# (`pymultinest` and `python-lalsimulation` conflict)
-target = """
-build:
-  noarch: python
-"""
-new = """
-build:
-  skip: true  # [win]
-  skip: true  # [py<39]
-"""
-text = text.replace(target, new)
-
-
-# Remove python version
-# (Non noarch packages should have python requirement without any version constraints.)
-target = """python >=3.9
-"""
-new = """python
-"""
-text = text.replace(target, new)
 
 # Overwrite meta.yaml
 with open(recipe_filename, 'w') as file:
