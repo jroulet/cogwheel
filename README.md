@@ -15,12 +15,8 @@ It interfaces with third-party routines for downloading public data (GWOSC, `GWp
 
 ## Installation
 ```bash
-conda create --name <environment_name> python-lalsimulation --channel conda-forge
-conda activate <environment_name>
-pip install cogwheel-pe
+conda install -c conda-forge cogwheel-pe
 ```
-(replace `<environment_name>` by a name of your choice).
-
 
 ## Crash course
 
