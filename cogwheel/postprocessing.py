@@ -38,12 +38,12 @@ def postprocess_rundir(rundir, relative_binning_boost=4):
         * Columns for standard parameters
         * Column for log likelihood
         * Auxiliary columns for log likelihood (by detector, at high
-          relative binning resolution and with no ASD-drift
-          correction applied)
-        * Tests for log likelihood differences arising from
-          reference waveform choice for setting ASD-drift
-        * Tests for log likelihood differences arising from
-          relative binning accuracy.
+          relative binning resolution and with no ASD-drift correction
+          applied)
+        * Tests for log likelihood differences arising from reference
+          waveform choice for setting ASD-drift
+        * Tests for log likelihood differences arising from relative-
+          binning accuracy.
     """
     RundirPostprocessor(rundir, relative_binning_boost).process_samples()
 
@@ -384,7 +384,8 @@ class EventdirPostprocessor:
                     tail_probability=1e-4)
                 cornerplot.plot(max_n_ticks=3)
                 if sampled_par_dic_0:
-                    cornerplot.scatter_points(sampled_par_dic_0, adjust_lims=True)
+                    cornerplot.scatter_points(sampled_par_dic_0,
+                                              adjust_lims=True)
                 pdf.savefig(bbox_inches='tight')
 
     def get_rundirs(self):

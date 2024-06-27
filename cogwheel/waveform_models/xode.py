@@ -41,8 +41,14 @@ gw_plotting.CornerPlot(samples[post.prior.sampled_params]).plot()
 import numpy as np
 
 from cogwheel import waveform
-from .IMRPhenomXODE.waveLib import get_hp_hc_each_prec_mode_f_sequence
 
+try:
+    from .IMRPhenomXODE.waveLib import get_hp_hc_each_prec_mode_f_sequence
+except ImportError as err:
+    raise ImportError(
+        'It seems that you are trying to use IMRPhenomXODE but did not '
+        f'install it. Follow the instructions in {__file__} (reproduced'
+        f' below)\n\n{__doc__}') from err
 
 CONFIG = {'use_N4LO_prec': True,
           'SEOB_22_cal': True,
@@ -51,8 +57,10 @@ CONFIG = {'use_N4LO_prec': True,
           'rtol': 1e-3}
 
 
-def compute_hplus_hcross_by_mode_xode(f, par_dic, approximant='IMRPhenomXODE',
-                                      harmonic_modes=None, lal_dic=None):
+def compute_hplus_hcross_by_mode_xode(f, par_dic,
+                                      approximant='IMRPhenomXODE',
+                                      harmonic_modes=None,
+                                      lal_dic=None):
     """
     Generate frequency domain waveform with IMRPhenomXODE.
     Return hplus, hcross evaluated at f.

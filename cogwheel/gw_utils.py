@@ -78,12 +78,10 @@ def get_geocenter_delays(detector_names, lat, lon):
     """
     locations = np.array([DETECTORS[detector_name].location
                           for detector_name in detector_names])  # (ndet, 3)
-    #JM 08/11/22 prevert cyclic reference of gw_utils.py and skyloc_angles.py
-    # direction = skyloc_angles.latlon_to_cart3d(lat, lon) #
 
     direction = np.array([np.cos(lon) * np.cos(lat),
-                     np.sin(lon) * np.cos(lat),
-                     np.sin(lat)])
+                          np.sin(lon) * np.cos(lat),
+                          np.sin(lat)])
 
     return -np.einsum('di,i...->d...', locations, direction) / lal.C_SI
 

@@ -13,6 +13,8 @@ from scipy.integrate import dblquad
 from cogwheel import utils
 from cogwheel.prior import Prior
 
+# pylint: disable=arguments-differ
+
 
 class UniformDetectorFrameMassesPrior(Prior):
     """

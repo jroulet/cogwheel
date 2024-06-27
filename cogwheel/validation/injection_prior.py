@@ -8,6 +8,8 @@ from cogwheel import gw_prior
 from cogwheel import prior
 from cogwheel import utils
 
+# pylint: disable=arguments-differ
+
 
 class _UniformDimensionlessVolumePrior(prior.UniformPriorMixin,
                                        prior.Prior):
@@ -20,12 +22,10 @@ class _UniformDimensionlessVolumePrior(prior.UniformPriorMixin,
     range_dic = {'dimensionless_volume': (0, 1)}
     standard_params = ['dimensionless_distance']
 
-    @staticmethod
-    def transform(dimensionless_volume):
+    def transform(self, dimensionless_volume):
         return {'dimensionless_distance': dimensionless_volume ** (1/3)}
 
-    @staticmethod
-    def inverse_transform(dimensionless_distance):
+    def inverse_transform(self, dimensionless_distance):
         return {'dimensionless_volume': dimensionless_distance ** 3}
 
 
@@ -38,13 +38,11 @@ class _SimpleSkyLocationPrior(prior.UniformPriorMixin, prior.Prior):
                  'sindec': (-1, 1)}
     standard_params = ['ra', 'dec']
 
-    @staticmethod
-    def transform(ra, sindec):
+    def transform(self, ra, sindec):
         return {'ra': ra,
                 'dec': np.arcsin(sindec)}
 
-    @staticmethod
-    def inverse_transform(ra, dec):
+    def inverse_transform(self, ra, dec):
         return {'ra': ra,
                 'sindec': np.sin(dec)}
 
@@ -88,9 +86,10 @@ class VolumetricInjectionPrior(prior.CombinedPrior):
     but volumetric in component spins rather than uniform in effective
     spin.
     """
-    prior_classes = utils.replace(IASInjectionPrior.prior_classes,
-                                  gw_prior.UniformEffectiveSpinPrior,
-                                  gw_prior.VolumetricSpinsAlignedComponentsPrior)
+    prior_classes = utils.replace(
+        IASInjectionPrior.prior_classes,
+        gw_prior.UniformEffectiveSpinPrior,
+        gw_prior.VolumetricSpinsAlignedComponentsPrior)
 
 
 class AlignedSpinIASInjectionPrior(prior.CombinedPrior):

@@ -16,7 +16,7 @@ from cogwheel import gw_utils
 from cogwheel import utils
 from cogwheel import waveform
 
-# gwpy fiddles with matplotlib, undo:
+# gwpy meddles with matplotlib, undo:
 plt.rcdefaults()
 gwpy.plot.axes.register_projection(gwpy.plot.axes._Axes)
 
@@ -50,6 +50,168 @@ class EventData(utils.JSONMixin):
     Class to save an event's frequency-domain strain data and whitening
     filter for multiple detectors.
     """
+
+    @classmethod
+    def from_timeseries(
+            cls, filenames, eventname, detector_names, tgps,
+            t_before=16., t_after=16., wht_filter_duration=32., fmin=15.,
+            df_taper=1., fmax=1024., **kwargs):
+        """
+        Parameters
+        ----------
+        filenames: list of paths
+            Paths pointing to ``gwpy.timeseries.Timeseries`` objects,
+            containing data for each detector.
+
+        eventname: str
+            Name of the event, e.g. ``'GW150914'``.
+
+        detector_names: sequence of str
+            E.g. ``'HLV'`` or ``('H', 'L', 'V')`` for
+            Hanford-Livingston-Virgo.
+
+        tgps: float
+            GPS time of the event (s).
+
+        t_before, t_after: float
+            Number of seconds of valid data (i.e. without edge effects)
+            to keep before/after `tgps`. The total segment of data will
+            have extra duration of ``wht_filter_duration / 2`` seconds
+            to either side.
+
+        wht_filter_duration: float
+            Desired impulse response length of the whitening filter (s),
+            will be ``wht_filter_duration / 2`` seconds to either side.
+            Note: the whitening filter will only be approximately FIR.
+            This is also the duration of each chunk in which the
+            individual PSDs are measured for Welch, and the extent of
+            the tapering in time-domain (s).
+
+        fmin: float or sequence of floats
+            Minimum frequency at which the whitening filter will have
+            support (Hz). Multiple values can be passed, one for each
+            detector.
+
+        df_taper: float
+            Whitening filter is highpassed. See ``highpass_filter``.
+
+        fmax: float
+            Desired Nyquist frequency (Hz), half the sampling frequency.
+
+        **kwargs:
+            Keyword arguments to ``gwpy.timeseries.TimeSeries.read``.
+
+        Return
+        ------
+            ``EventData`` instance.
+
+        See Also
+        --------
+        download_timeseries
+        """
+        if len(filenames) != len(detector_names):
+            raise ValueError(
+                'Length of `filenames` and `detector_names` are mismatched.')
+
+        f_strain_whtfilter_tcoarses = []
+        for filename, fmin_ in zip(*np.broadcast_arrays(filenames, fmin)):
+            timeseries = cls._read_timeseries(filename, tgps, **kwargs)
+            f_strain_whtfilter_tcoarses.append(
+                cls._get_f_strain_whtfilter_from_timeseries(
+                    timeseries, tgps, t_before, t_after, wht_filter_duration,
+                    fmin_, df_taper, fmax))
+        (frequencies, *f_copies), strain, wht_filter, (tcoarse, *t_copies) = (
+            np.array(arr) for arr in zip(*f_strain_whtfilter_tcoarses))
+
+        for f_copy in f_copies:
+            np.testing.assert_array_equal(frequencies, f_copy)
+
+        for t_copy in t_copies:
+            np.testing.assert_equal(tcoarse, t_copy)
+
+        return cls(eventname, frequencies, strain, wht_filter,
+                   detector_names, tgps, tcoarse)
+
+    @classmethod
+    def gaussian_noise(
+            cls, eventname, duration, detector_names, asd_funcs, tgps,
+            tcoarse=None, fmin=15., df_taper=1., fmax=1024., seed=None):
+        """
+        Constructor that generates data with random stationary colored
+        Gaussian noise. Note: the data will be periodic.
+
+        Parameters
+        ----------
+        eventname: str
+            Name of event.
+
+        duration: float
+            Number of seconds of data.
+
+        detector_names: sequence of str
+            E.g. ``'HLV'`` or ``('H', 'L', 'V')`` for
+            Hanford-Livingston-Virgo.
+
+        asd_funcs: sequence of callables or strings
+            Functions that return the noise amplitude spectral density
+            (1/Hz), of the same length as `detector_names`.
+            Alternatively, a string that is a key in ``ASDS`` can be
+            passed to use a predefined ASD (e.g. 'asd_H_O3a').
+
+        tgps: float
+            GPS time of event.
+
+        tcoarse: float
+            Time of event relative to beginning of data. Defaults to
+            ``duration / 2``, the center of the segment.
+
+        fmin: float
+            Minimum frequency at which the whitening filter will have
+            support (Hz). It is important for performance.
+
+        df_taper: float
+            Whitening filter is highpassed. See ``highpass_filter``.
+
+        fmax: float
+            Desired Nyquist frequency (Hz), half the sampling frequency.
+
+        seed: int, optional
+            Use some fixed value for reproducibility.
+
+        Return
+        ------
+        Instance of ``EventData``.
+
+        See Also
+        --------
+        EventData.inject_signal
+        """
+        if len(detector_names) != len(asd_funcs):
+            raise ValueError(
+                'Lengths of `detector_names` and `asd_funcs` should match.')
+
+        asd_funcs = list(asd_funcs)  # Ensure it is mutable
+        for i, asd_func in enumerate(asd_funcs):
+            if isinstance(asd_func, str):
+                if not asd_func in ASDS:
+                    raise ValueError(f'Unknown asd_func {asd_func!r}. '
+                                     f'Allowed values are {list(ASDS)}')
+                asd_funcs[i] = make_asd_func(*np.load(ASDS[asd_func]))
+
+        tcoarse = duration / 2 if tcoarse is None else tcoarse
+        dt = 1 / (2*fmax)
+        frequencies = np.fft.rfftfreq(n=int(duration / dt), d=dt)
+        asd = np.array([asd_func(frequencies) for asd_func in asd_funcs])
+
+        real, imag = np.random.default_rng(seed).normal(
+            scale=np.sqrt(duration) / 2 * asd, size=(2,) + asd.shape)
+        strain = real + 1j * imag
+        strain[:, [0, -1]] = strain[:, [0, -1]].real  # Real at f = 0 & Nyquist
+
+        wht_filter = highpass_filter(frequencies, fmin, df_taper) / asd
+        return cls(eventname, frequencies, strain, wht_filter, detector_names,
+                   tgps, tcoarse)
+
     def __init__(self, eventname, frequencies, strain, wht_filter,
                  detector_names, tgps, tcoarse, injection=None):
         """
@@ -70,9 +232,9 @@ class EventData(utils.JSONMixin):
             entries are 0 below some minimum frequency so waveforms
             don't need to be queried at arbitrarily low frequency.
 
-        detector_names: string
-            Detectors' initials, e.g. ``'HLV'`` for Hanford-Livingston-
-            Virgo.
+        detector_names: sequence of str
+            E.g. ``'HLV'`` or ``('H', 'L', 'V')`` for
+            Hanford-Livingston-Virgo.
 
         tgps: float
             GPS time of the event (s).
@@ -128,98 +290,22 @@ class EventData(utils.JSONMixin):
 
     @property
     def times(self):
-        """Times of the data, starting at 0 (s) (event is at ``tcoarse``)."""
+        """
+        Times of the data, starting at 0 (s) (event is at ``tcoarse``).
+        """
         return np.linspace(0, 1/self.df, self.nfft, endpoint=False)
 
-    @classmethod
-    def from_timeseries(
-            cls, filenames, eventname, detector_names, tgps, *args, 
-            t_before=16., t_after=16., wht_filter_duration=32., fmin=15.,
-            df_taper=1., fmax=1024., **kwargs):
-        """
-        Parameters
-        ----------
-        filenames: list of paths
-            Paths pointing to ``gwpy.timeseries.Timeseries`` objects,
-            containing data for each detector.
-
-        eventname: str
-            Name of the event, e.g. ``'GW150914'``.
-
-        detector_names: string
-            Detectors' initials, e.g. ``'HLV'`` for Hanford-Livingston-
-            Virgo.
-
-        tgps: float
-            GPS time of the event (s).
-
-        t_before, t_after: float
-            Number of seconds of valid data (i.e. without edge effects)
-            to keep before/after `tgps`. The total segment of data will
-            have extra duration of ``wht_filter_duration / 2`` seconds
-            to either side.
-
-        wht_filter_duration: float
-            Desired impulse response length of the whitening filter (s),
-            will be ``wht_filter_duration / 2`` seconds to either side.
-            Note: the whitening filter will only be approximately FIR.
-            This is also the duration of each chunk in which the
-            individual PSDs are measured for Welch, and the extent of
-            the tapering in time-domain (s).
-
-        fmin: float or sequence of floats
-            Minimum frequency at which the whitening filter will have
-            support (Hz). Multiple values can be passed, one for each
-            detector.
-
-        df_taper: float
-            Whitening filter is highpassed. See ``highpass_filter``.
-
-        fmax: float
-            Desired Nyquist frequency (Hz), half the sampling frequency.
-
-        args, kwargs: Extra arguments to read_timeseries
-
-        Return
-        ------
-            ``EventData`` instance.
-        """
-        if len(filenames) != len(detector_names):
-            raise ValueError(
-                'Length of `filenames` and `detector_names` are mismatched.')
-
-        f_strain_whtfilter_tcoarses = []
-        for filename, fmin_ in zip(*np.broadcast_arrays(filenames, fmin)):
-            timeseries = cls._read_timeseries(filename, tgps, *args, **kwargs)
-            f_strain_whtfilter_tcoarses.append(
-                cls._get_f_strain_whtfilter_from_timeseries(
-                    timeseries, tgps, t_before, t_after, wht_filter_duration,
-                    fmin_, df_taper, fmax))
-        (frequencies, *f_copies), strain, wht_filter, (tcoarse, *t_copies) = (
-            np.array(arr) for arr in zip(*f_strain_whtfilter_tcoarses))
-
-        for f_copy in f_copies:
-            np.testing.assert_array_equal(frequencies, f_copy)
-
-        for t_copy in t_copies:
-            np.testing.assert_equal(tcoarse, t_copy)
-
-        return cls(eventname, frequencies, strain, wht_filter,
-                   detector_names, tgps, tcoarse)
-
     @staticmethod
-    def _read_timeseries(filename, tgps, *args, **kwargs):
+    def _read_timeseries(filename, tgps, **kwargs):
         """
         Return a ``gwpy.timeseries.TimeSeries``, cropped around
         the event to exclude any nans.
         """
         try:
-            timeseries = gwpy.timeseries.TimeSeries.read(
-                filename, *args, **kwargs)
+            timeseries = gwpy.timeseries.TimeSeries.read(filename, **kwargs)
         except ValueError:
             kwargs['format'] = 'hdf5.gwosc'
-            timeseries = gwpy.timeseries.TimeSeries.read(
-                filename, *args, **kwargs)
+            timeseries = gwpy.timeseries.TimeSeries.read(filename, **kwargs)
 
         i_event = np.searchsorted(timeseries.times.value, tgps)
         i_nan = np.where(np.isnan(timeseries.value))[0]
@@ -343,89 +429,15 @@ class EventData(utils.JSONMixin):
 
         return rfftfreq_down, data_fd_down, wht_filter, tcoarse
 
-    @classmethod
-    def gaussian_noise(
-            cls, eventname, duration, detector_names, asd_funcs, tgps,
-            tcoarse=None, fmin=15., df_taper=1., fmax=1024., seed=None):
-        """
-        Constructor that generates data with random stationary colored
-        Gaussian noise. Note: the data will be periodic.
-
-        Parameters
-        ----------
-        eventname: str
-            Name of event.
-
-        duration: float
-            Number of seconds of data.
-
-        detector_names: string
-            Detectors' initials, e.g. ``'HLV'`` for Hanford-Livingston-
-            Virgo.
-
-        asd_funcs: sequence of callables or strings
-            Functions that return the noise amplitude spectral density
-            (1/Hz), of the same length as `detector_names`.
-            Alternatively, a string that is a key in ``ASDS`` can be
-            passed to use a predefined ASD (e.g. 'asd_H_O3a').
-
-        tgps: float
-            GPS time of event.
-
-        tcoarse: float
-            Time of event relative to beginning of data. Defaults to
-            ``duration / 2``, the center of the segment.
-
-        fmin: float
-            Minimum frequency at which the whitening filter will have
-            support (Hz). It is important for performance.
-
-        df_taper: float
-            Whitening filter is highpassed. See ``highpass_filter``.
-
-        fmax: float
-            Desired Nyquist frequency (Hz), half the sampling frequency.
-
-        seed: int, optional
-            Use some fixed value for reproducibility.
-
-        Return
-        ------
-        Instance of ``EventData``.
-        """
-        if len(detector_names) != len(asd_funcs):
-            raise ValueError(
-                'Lengths of `detector_names` and `asd_funcs` should match.')
-
-        asd_funcs = list(asd_funcs)  # Ensure it is mutable
-        for i, asd_func in enumerate(asd_funcs):
-            if isinstance(asd_func, str):
-                if not asd_func in ASDS:
-                    raise ValueError(f'Unknown asd_func {asd_func!r}. '
-                                     f'Allowed values are {list(ASDS)}')
-                asd_funcs[i] = make_asd_func(*np.load(ASDS[asd_func]))
-
-        tcoarse = duration / 2 if tcoarse is None else tcoarse
-        dt = 1 / (2*fmax)
-        frequencies = np.fft.rfftfreq(n=int(duration / dt), d=dt)
-        asd = np.array([asd_func(frequencies) for asd_func in asd_funcs])
-
-        real, imag = np.random.default_rng(seed).normal(
-            scale=np.sqrt(duration) / 2 * asd, size=(2,) + asd.shape)
-        strain = real + 1j * imag
-        strain[:, [0, -1]] = strain[:, [0, -1]].real  # Real at f = 0 & Nyquist
-
-        wht_filter = highpass_filter(frequencies, fmin, df_taper) / asd
-        return cls(eventname, frequencies, strain, wht_filter, detector_names,
-                   tgps, tcoarse)
-
     def inject_signal(self, par_dic, approximant):
         """
-        Add a signal to the data. Injection parameters will be stored as
-        a dictionary in the ``injection`` attribute. The inner product
-        ⟨h|h⟩ at each detector (ignoring ASD-drift correction) is also stored.
-        The signal is computed only at frequencies where the whitening filter
-        has support.
+        Add a signal to the data.
+
+        Injection parameters will be stored as a dictionary in the
+        ``injection`` attribute. The inner product ⟨h|h⟩ at each
+        detector (ignoring ASD-drift correction) is also stored.
+        The signal is computed only at frequencies where the whitening
+        filter has support.
 
         Parameters
         ----------
@@ -589,10 +601,12 @@ def download_timeseries(eventname, outdir=None, tgps=None,
                         interval=(-2048, 2048), overwrite=False,
                         **kwargs):
     """
-    Download data from gwosc, save as hdf5 format that can be read by
+    Download data from GWOSC, save as hdf5 format that can be read by
     `gwpy.timeseries.Timeseries.read()`.
     Files are saved as ``'{det}_{eventname}.hdf5'``, e.g.
     ``'H_GW150914.hdf5'``.
+    Return the paths to the files, the detector names and the GPS time;
+    these are useful inputs to ``EventData.from_timeseries``.
 
     Parameters
     ----------
@@ -601,26 +615,43 @@ def download_timeseries(eventname, outdir=None, tgps=None,
 
     outdir: path
         Directory into which to save the files. Defaults to
-        GWOSC_FILES_DIR/eventname
+        ``GWOSC_FILES_DIR/eventname``.
 
-    tgps: float
-        GPS time of event.
+    tgps: float, optional
+        GPS time of event. Can be ``None`` if `eventname` is known to
+        GWOSC.
 
     interval: (float, float)
         Start and end time relative to tgps (s).
 
     overwrite: bool
         If ``False``, will skip the download when a file already exists.
+
+    **kwargs:
+        Passed to ``gwpy.timeseries.TimeSeries.fetch_open_data``.
+
+    Return
+    ------
+    filenames: list of pathlib.Path
+        Paths to the hdf5 files with the downloaded data.
+
+    detector_names: tuple of str
+        E.g. ``('H', 'L', 'V')``.
+
+    tgps: float
+        GPS time of the event.
     """
     tgps = tgps or gwosc.datasets.event_gps(eventname)
     outdir = pathlib.Path(outdir or GWOSC_FILES_DIR/eventname)
 
     utils.mkdirs(outdir)
 
+    filenames = []
     for detector_name in gw_utils.DETECTORS:
         path = outdir/f'{detector_name}_{eventname}.hdf5'
         if path.exists() and not overwrite:
             print(f'Skipping existing file {path.resolve()}')
+            filenames.append(path)
             continue
 
         try:
@@ -634,6 +665,11 @@ def download_timeseries(eventname, outdir=None, tgps=None,
                 if path.exists():
                     path.unlink()
                 timeseries.write(path)
+                filenames.append(path)
+
+    detector_names = tuple(path.name[0] for path in filenames)
+    return filenames, detector_names, tgps
+
 
 def _fetch_open_data(detector_name, tgps, interval, **kwargs):
     """

@@ -7,8 +7,6 @@ import inspect
 import multiprocessing
 import pathlib
 import os
-import sys
-import textwrap
 import warnings
 from cProfile import Profile
 from functools import wraps
@@ -19,7 +17,6 @@ import scipy.special
 import dynesty
 import nautilus
 import pymultinest
-# import ultranest
 import zeus
 
 from cogwheel import postprocessing
@@ -141,6 +138,48 @@ class Sampler(abc.ABC, utils.JSONMixin):
             Whether to perform convergence tests to the run after
             sampling. See ``postprocessing.postprocess_rundir``.
         """
+        self._submit('slurm', rundir, n_hours_limit, memory_per_task,
+                     resuming, sbatch_cmds, postprocess)
+
+    def submit_lsf(
+            self, rundir, n_hours_limit=48, memory_per_task='32G',
+            resuming=False, bsub_cmds=(), postprocess=True):
+        """
+        Parameters
+        ----------
+        rundir: str, os.PathLike
+            Run directory, e.g. from `self.get_rundir`
+
+        n_hours_limit: int
+            Number of hours to allocate for the job.
+
+        memory_per_task: str
+            Determines the memory and number of cpus.
+
+        resuming: bool
+            Whether to attempt resuming a previous run if rundir already
+            exists.
+
+        bsub_cmds: tuple of str
+            Strings with BSUB commands.
+
+        postprocess: bool
+            Whether to perform convergence tests to the run after
+            sampling. See ``postprocessing.postprocess_rundir``.
+        """
+        self._submit('lsf', rundir, n_hours_limit, memory_per_task,
+                     resuming, bsub_cmds, postprocess)
+
+    def _submit(self, scheduler, rundir, n_hours_limit=48,
+                memory_per_task='32G', resuming=False, cmds=(),
+                postprocess=True):
+        """
+        Implement `.submit_lsf` and `.submit_slurm`.
+
+        Parameters
+        ----------
+        scheduler: {'slurm', 'lsf'}
+        """
         rundir = pathlib.Path(rundir)
         job_name = '_'.join([rundir.name,
                              self.posterior.likelihood.event_data.eventname,
@@ -152,57 +191,80 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         self.to_json(rundir, overwrite=resuming)
 
-        sbatch_cmds += (f'--mem-per-cpu={memory_per_task}',)
+        cmds += (f'--mem-per-cpu={memory_per_task}',)
         args = str(rundir.resolve())
 
         if not postprocess:
             args += ' --no-postprocessing'
 
-        utils.submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
-                           args, sbatch_cmds, batch_path)
+        if scheduler == 'slurm':
+            utils.submit_slurm(job_name, n_hours_limit, stdout_path,
+                               stderr_path, args, cmds, batch_path)
+        elif scheduler == 'lsf':
+            utils.submit_lsf(job_name, n_hours_limit, stdout_path,
+                             stderr_path, args, cmds, batch_path)
+        else:
+            raise ValueError('`scheduler` must be "slurm" or "lsf".')
 
-    def submit_lsf(self, rundir, n_hours_limit=48,
-                   memory_per_task='32G', resuming=False):
+    def submit_condor(self,
+                      rundir,
+                      request_cpus=1,
+                      request_memory='8G',
+                      request_disk='1G',
+                      resuming=False,
+                      postprocess=True,
+                      **submit_kwargs):
         """
+        Submit a parameter estimation run using the HTCondor scheduler.
+
+        This method generates 'submit.sub' and 'executable.sh' files,
+        the user should provide any instructions for the submit file as
+        `**submit_kwargs`.
+
         Parameters
         ----------
-        rundir: path of run directory, e.g. from `self.get_rundir`
-        n_hours_limit: Number of hours to allocate for the job
-        memory_per_task: Determines the memory and number of cpus
-        resuming: bool, whether to attempt resuming a previous run if
-                  rundir already exists.
+        rundir: str, os.PathLike
+            Run directory, e.g. from `self.get_rundir`
+
+        request_cpus, request_memory, request_disk: int or str
+            Specifications in the HTCondor submit file.
+
+        resuming: bool
+            Whether to attempt resuming a previous run if rundir already
+            exists.
+
+        postprocess: bool
+            Whether to perform convergence tests to the run after
+            sampling. See ``postprocessing.postprocess_rundir``.
+
+        **submit_kwargs
+            Further options to include in the HTCondor submit file. Do
+            not pass `executable`, `output`, `error`, `log`, `queue`,
+            which will be dealt with automatically.
         """
-        rundir = pathlib.Path(rundir)
-        job_name = '_'.join([self.__class__.__name__,
-                             self.posterior.prior.__class__.__name__,
-                             self.posterior.likelihood.event_data.eventname,
-                             rundir.name])
-        stdout_path = rundir.joinpath('output.out').resolve()
-        stderr_path = rundir.joinpath('errors.err').resolve()
+        rundir = pathlib.Path(rundir).resolve()
+
+        submit_path = rundir/'submit.sub'
+
+        submit_kwargs = {
+            'executable': rundir/'executable.sh',
+            'output': rundir/'output.out',
+            'error': rundir/'errors.err',
+            'log': rundir/'sampling.log',
+            'request_cpus': request_cpus,
+            'request_memory': request_memory,
+            'request_disk': request_disk,
+            } | submit_kwargs
 
         self.to_json(rundir, overwrite=resuming)
 
-        package = pathlib.Path(__file__).parents[1].resolve()
-        module = f'cogwheel.{os.path.basename(__file__)}'.removesuffix('.py')
+        args = rundir.as_posix()
 
-        batch_path = rundir/'batchfile'
-        with open(batch_path, 'w+', encoding='utf-8') as batchfile:
-            batchfile.write(textwrap.dedent(f"""\
-                #BSUB -J {job_name}
-                #BSUB -o {stdout_path}
-                #BSUB -e {stderr_path}
-                #BSUB -M {memory_per_task}
-                #BSUB -W {n_hours_limit:02}:00
+        if not postprocess:
+            args += ' --no-postprocessing'
 
-                eval "$(conda shell.bash hook)"
-                conda activate {os.environ['CONDA_DEFAULT_ENV']}
-
-                cd {package}
-                srun {sys.executable} -m {module} {rundir.resolve()}
-                """))
-        batch_path.chmod(0o777)
-        os.system(f'bsub < {batch_path.resolve()}')
-        print(f'Submitted job {job_name!r}.')
+        utils.submit_condor(submit_path, overwrite=resuming, args=args,
+                            **submit_kwargs)
 
     def run(self, rundir):
         """
@@ -225,6 +287,33 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         for path in rundir.iterdir():
             path.chmod(self.file_permissions)
+
+    def run_kwargs_options(self):
+        """
+        Return list of possible parameters to configure sampler, along
+        with their default values.
+
+        Refer to each sampler's documentation for details.
+        Sampler parameters not listed here are handled automatically by
+        ``cogwheel``.
+
+        Return
+        ------
+        list of inspect.Parameter
+        """
+        with utils.temporarily_change_attributes(self, run_kwargs={}):
+            automatic_kw = self._get_run_kwargs() | self._get_sampler_kwargs()
+
+        run_method = getattr(self._SAMPLER_CLS, self._RUN_METHOD_NAME)
+        all_kwargs = (inspect.signature(run_method).parameters
+                      | inspect.signature(self._SAMPLER_CLS).parameters)
+
+        # Override defaults with any `run_kwargs` currently set:
+        for key, value in self.run_kwargs.items():
+            all_kwargs[key] = all_kwargs[key].replace(default=value)
+
+        return [value for key, value in all_kwargs.items()
+                if key not in automatic_kw]
 
     @abc.abstractmethod
     def _get_points_weights_blobs(self):
@@ -316,12 +405,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         """Return a pandas.DataFrame with the posterior samples."""
         points, weights, blobs = self._get_points_weights_blobs()
 
-        sampled_params = list(self.posterior.prior.sampled_params)
-
-        for par in self.posterior.prior.folded_params:
-            sampled_params[sampled_params.index(par)] = f'folded_{par}'
-
-        samples = pd.DataFrame(points, columns=sampled_params)
+        samples = pd.DataFrame(points, columns=self.sampled_params)
 
         if weights is not None:
             samples[utils.WEIGHTS_NAME] = weights
@@ -330,9 +414,26 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         return samples.dropna(ignore_index=True)
 
+    @property
+    def sampled_params(self):
+        """
+        Like ``.posterior.prior.sampled_params`` but the folded
+        parameters have 'folded_' prepended.
+
+        Return
+        ------
+        list of str
+        """
+        sampled_params = list(self.posterior.prior.sampled_params)
+
+        for par in self.posterior.prior.folded_params:
+            sampled_params[sampled_params.index(par)] = f'folded_{par}'
+        return sampled_params
+
     def get_init_dict(self):
-        """Remove 'sample_prior' from the keys."""
+        """Keyword arguments to instantiate the class."""
         init_dict = super().get_init_dict()
+        # Remove 'sample_prior' from the keys.
         assert not init_dict.pop('sample_prior', False)
         return init_dict
 
@@ -626,87 +727,6 @@ class Zeus(Sampler):
         return start
 
 
-# class UltraNest(Sampler):
-#     """Sample a posterior or prior using UltraNest."""
-#     DEFAULT_RUN_KWARGS = {'Lepsilon': 0.5,
-#                           'frac_remain': 1e-2,
-#                           'min_ess': 1000}
-
-#     def _cubetransform(self, cube):
-#         return (self.posterior.prior.cubemin
-#                 + cube * self.posterior.prior.folded_cubesize)
-
-#     def _run(self):
-#         sampler_kwargs = self._get_sampler_kwargs()
-#         run_kwargs = self._get_run_kwargs()
-
-#         self.sampler = ultranest.ReactiveNestedSampler(**sampler_kwargs)
-#         self.sampler.run(**run_kwargs)
-
-#     def _get_sampler_kwargs(self):
-#         sampler_keys = (
-#             set(inspect.signature(ultranest.ReactiveNestedSampler).parameters)
-#             & self.run_kwargs.keys())
-#         sampler_kwargs = {par: self.run_kwargs[par] for par in sampler_keys}
-
-#         wrapped_params = [par in self.posterior.prior.periodic_params
-#                           for par in self.posterior.prior.sampled_params]
-
-#         sampler_kwargs.update(
-#             param_names=self.posterior.prior.sampled_params,
-#             wrapped_params=wrapped_params,
-#             transform=self._cubetransform,
-#             loglike=self._lnprob_ultranest)
-#         return sampler_kwargs
-
-#     def _get_run_kwargs(self):
-#         run_keys = (
-#             set(inspect.signature(ultranest.ReactiveNestedSampler.run).parameters)
-#             & self.run_kwargs.keys())
-#         run_kwargs = {par: self.run_kwargs[par] for par in run_keys}
-#         return run_kwargs
-
-#     def _lnprob_ultranest(self, par_vals):
-#         """Return the logarithm of the folded probability density."""
-#         lnprobs = self._get_lnprobs(*par_vals)
-#         return max(-1e100, scipy.special.logsumexp(lnprobs))
-
-#     def load_samples(self):
-#         """
-#         Collect ultranest samples, resample from them to undo the
-#         parameter folding. Return a ``pandas.DataFrame`` with samples.
-#         """
-#         log_dir = pathlib.Path(self.run_kwargs['log_dir'])
-#         resume = self.run_kwargs.get(
-#             'resume', inspect.signature(
-#                 ultranest.ReactiveNestedSampler).parameters['resume'].default)
-#         if resume == 'subfolder':
-#             path = sorted(log_dir.glob('run*/chains/weighted_post.txt')
-#                           )[-1]
-#         else:
-#             path = log_dir.joinpath('chains', 'weighted_post.txt')
-
-#         result = pd.read_csv(path, sep='\s+')
-#         folded = result[self.posterior.prior.sampled_params]
-
-#         # ``ultranest`` doesn't allow to save samples' metadata, so we
-#         # have to recompute ``lnprobs``:
-#         lnprobs = pd.DataFrame(
-#             [self._get_lnprobs(**row) for _, row in folded.iterrows()],
-#             columns=self._lnprob_cols)
-#         utils.update_dataframe(folded, lnprobs)
-
-#         samples = self.resample(folded)
-#         samples[utils.WEIGHTS_NAME] = result['weight']
-#         return samples
-
-#     @wraps(utils.JSONMixin.to_json)
-#     def to_json(self, dirname, *args, **kwargs):
-#         """Update run_kwargs['log_dir'] before saving."""
-#         self.run_kwargs['log_dir'] = str(dirname)
-#         super().to_json(dirname, *args, **kwargs)
-
-
 class Nautilus(Sampler):
     """Sample a posterior or prior using Nautilus."""
     _SAMPLER_CLS = nautilus.Sampler
@@ -748,7 +768,7 @@ class Nautilus(Sampler):
             log_z = self.read_log_z(self.run_kwargs['filepath'])
         else:
             try:
-                log_z = self.sampler.log_z()
+                log_z = self.sampler.log_z
             except AttributeError:  # Old nautilus version
                 log_z = self.sampler.evidence()
 
@@ -769,9 +789,10 @@ class Nautilus(Sampler):
                         'n_dim': 2}
         nautilus_sampler = nautilus.Sampler(**dummy_kwargs, filepath=filepath)
         try:
-            return nautilus_sampler.log_z()
+            return nautilus_sampler.log_z
         except AttributeError:  # Old nautilus version
             return nautilus_sampler.evidence()
+
 
 def main(sampler_path, postprocess=True):
     """Load sampler and run it."""

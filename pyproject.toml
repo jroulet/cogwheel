@@ -1,0 +1,91 @@
+[build-system]
+requires = ["setuptools>=61.0", "setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cogwheel-pe"
+dynamic = ["version"]
+requires-python = ">= 3.9"
+authors = [
+  {name = "Javier Roulet"},
+  {name = "Tejaswi Venumadhav"},
+  {name = "Jonathan Mushkin"},
+  {name = "Tousif Islam"},
+  {name = "Seth Olsen"},
+  {name = "Jay Wadekar"},
+]
+dependencies = [
+  "ipykernel",
+  "ipympl",
+  "ipywidgets",
+  "matplotlib",
+  "notebook",
+  "numba",
+  "pandas",
+  "pyarrow",
+  "scipy",
+  "setuptools_scm",
+  "gwpy",
+  "dynesty",
+  "nautilus-sampler",
+  "pymultinest",
+  "zeus-mcmc",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build",
+  "grayskull",
+]
+
+maintainers = [
+  {name = "Javier Roulet", email = "jroulet@caltech.edu"}
+]
+description = "Parameter estimation of gravitational wave sources"
+readme = "README.md"
+classifiers = [
+  "License :: OSI Approved :: GNU General Public License (GPL)",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+[project.urls]
+"Source" = "https://github.com/jroulet/cogwheel"
+
+[tool.setuptools.packages]
+find = {}
+
+[tool.setuptools.package-data]
+"cogwheel.data" = ["events_metadata.csv",
+                   "example_asds/*.npy"]
+
+[tool.setuptools_scm]
+local_scheme = "no-local-version"
+version_file = "cogwheel/_version.py"
+
+[tool.pylint.main]
+ignore = ["CVS", "factorized_qas", "_version.py"]
+
+ignored-modules = [
+  "scipy.special",
+  "scipy.stats",
+  "scipy.sparse",
+  "astropy",
+  "lal",
+  "lalsimulation",
+  "gwosc",
+  "gwpy",
+  "dynesty"
+]
+
+[tool.pylint.basic]
+good-names = ["i", "j", "k", "ex", "Run", "_",
+              "ra", "m1", "m2", "q", "dt", "ax"]
+
+[tool.pylint.format]
+max-line-length = 79
+
+[tool.pylint.imports]
+allow-any-import-level = ["cogwheel.waveform_models.xode"]

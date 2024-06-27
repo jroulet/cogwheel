@@ -112,5 +112,6 @@ class MarginalizedExtrinsicLikelihoodQAS(
             dict(par_dic) | self._ref_dic)
         asd_drift_correction = self.asd_drift ** -2  # d
         dh_td = self._d_h_weights @ h_b.conj() * asd_drift_correction  # td
-        hh_d = self._h_h_weights @ utils.abs_sq(h_b) * asd_drift_correction  # d
+        hh_d = (self._h_h_weights @ utils.abs_sq(h_b)
+                * asd_drift_correction)  # d
         return dh_td, hh_d, timeshift

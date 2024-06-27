@@ -12,6 +12,8 @@ import numpy as np
 from cogwheel import waveform
 from cogwheel.prior import Prior, FixedPrior, UniformPriorMixin
 
+# pylint: disable=arguments-differ
+
 
 class ZeroTidalDeformabilityPrior(FixedPrior):
     """Set tidal deformability parameters to zero."""

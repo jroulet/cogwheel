@@ -17,6 +17,8 @@ from cogwheel import skyloc_angles
 from cogwheel import utils
 from cogwheel.prior import Prior, UniformPriorMixin, IdentityTransformMixin
 
+# pylint: disable=arguments-differ
+
 
 class ReferenceDetectorMixin:
     """
@@ -134,14 +136,11 @@ class IsotropicInclinationPrior(UniformPriorMixin, Prior):
     range_dic = {'cosiota': (-1, 1)}
     folded_reflected_params = ['cosiota']
 
-    @staticmethod
-    @utils.lru_cache()
-    def transform(cosiota):
+    def transform(self, cosiota):
         """cos(inclination) to inclination."""
         return {'iota': np.arccos(cosiota)}
 
-    @staticmethod
-    def inverse_transform(iota):
+    def inverse_transform(self, iota):
         """Inclination to cos(inclination)."""
         return {'cosiota': np.cos(iota)}
 

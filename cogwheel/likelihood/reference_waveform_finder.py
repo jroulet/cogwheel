@@ -90,10 +90,10 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
             lalsimulation_commands=waveform.FORCE_NNLO_ANGLES)
 
         if event_data.injection:
-            if (waveform.ZERO_INPLANE_SPINS.items()
-                    < event_data.injection['par_dic'].items()):
+            par_dic = event_data.injection['par_dic']
+            if waveform.ZERO_INPLANE_SPINS.items() < par_dic.items():
                 # Injection has aligned spins, use it as reference
-                par_dic_0 = cls._get_safe_par_dic(event_data.injection['par_dic'])
+                par_dic_0 = cls._get_safe_par_dic(par_dic)
 
                 ref_wf_finder = cls(event_data, waveform_generator,
                                     par_dic_0, pn_phase_tol=pn_phase_tol,
@@ -103,17 +103,15 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
                 # Check that the relative binning is accurate at the injection.
                 # If not, will go on to attempt the usual maximization.
-                if np.abs(ref_wf_finder.lnlike_fft(event_data.injection['par_dic'])
-                          - ref_wf_finder.lnlike(event_data.injection['par_dic'])
-                         ) < .1:
+                if np.abs(ref_wf_finder.lnlike_fft(par_dic)
+                          - ref_wf_finder.lnlike(par_dic)) < 0.1:
                     print('Setting reference from injection.')
                     return ref_wf_finder
 
             # Allow passing ``mchirp_guess=None`` for injections:
             if mchirp_guess is None:
-                mchirp_guess = gw_utils.m1m2_to_mchirp(
-                    event_data.injection['par_dic']['m1'],
-                    event_data.injection['par_dic']['m2'])
+                mchirp_guess = gw_utils.m1m2_to_mchirp(par_dic['m1'],
+                                                       par_dic['m2'])
 
         # Set initial parameter dictionary. Will get improved by
         # `find_bestfit_pars()`. Serves dual purpose as maximum
@@ -135,8 +133,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         # If this is an injection, we can "cheat" and check that relative
         # binning is working at the injection, and raise a warning if not:
         if event_data.injection:
-            lnl_fft = ref_wf_finder.lnlike_fft(event_data.injection['par_dic'])
-            lnl_rb = ref_wf_finder.lnlike(event_data.injection['par_dic'])
+            lnl_fft = ref_wf_finder.lnlike_fft(par_dic)
+            lnl_rb = ref_wf_finder.lnlike(par_dic)
 
             if np.abs(lnl_fft - lnl_rb) > .1:
                 warnings.warn(
@@ -547,14 +545,14 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         self._mchirp_range = tuple(mchirp_range)
         print(f'Set mchirp_range = {self.mchirp_range}')
 
-        # Issue a warning if the automatically-found range excludes the injection
+        # Issue a warning if the automatic range excludes the injection
         if self.event_data.injection:
             true_mchirp = gw_utils.m1m2_to_mchirp(
                 self.event_data.injection['par_dic']['m1'],
                 self.event_data.injection['par_dic']['m2'])
             if (self.mchirp_range[0] > true_mchirp
                     or self.mchirp_range[1] < true_mchirp):
-                warnings.warn('Proposed `mchirp_range` excludes the injection!')
+                warnings.warn('Proposed `mchirp_range` excludes the injection')
 
     def get_coordinate_system_kwargs(self):
         """

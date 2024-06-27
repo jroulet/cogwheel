@@ -19,6 +19,8 @@ from cogwheel import utils
 from cogwheel.prior import Prior, FixedPrior, UniformPriorMixin
 from .twosquircle import TwoSquircularMapping
 
+# pylint: disable=arguments-differ
+
 
 # ----------------------------------------------------------------------
 # Aligned spin components

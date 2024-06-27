@@ -93,7 +93,8 @@ class PosteriorTestCase(TestCase):
                     with self.subTest((prior, like)):
                         post = Posterior(prior, like)
                         lnposterior, par_dic, metadata \
-                            = post.lnposterior_pardic_and_metadata(**sampled_dic)
+                            = post.lnposterior_pardic_and_metadata(
+                                **sampled_dic)
                         blob = post.likelihood.get_blob(metadata)
 
                         self.assertIsInstance(lnposterior, float)

@@ -99,7 +99,7 @@ def _get_credible_intervals(config, rundir, params=None,
     """
     Compute credible interval for multiple parameters for a single
     injection.
-    
+
     Parameters
     ----------
     config: module
@@ -162,7 +162,7 @@ def credible_interval(arr, value, weights=None):
     Return
     ------
     credible_interval: float between 0 and 1.
-        (Weighted) fraction of `arr` whose values are below `value`. 
+        (Weighted) fraction of `arr` whose values are below `value`.
     """
     if weights is None:
         weights = np.ones_like(arr)
@@ -178,7 +178,7 @@ def _get_samples(config, rundir):
     # mchirp and q should be within injection prior, verify:
     if 'mchirp_range' in config.PRIOR_KWARGS:
         samples['mchirp'] = gw_utils.m1m2_to_mchirp(**samples[['m1', 'm2']])
-        # +/- 1e-4 because we uploaded the samples to zenodo in single precision
+        # +/- 1e-4 because we uploaded samples to zenodo in single precision
         np.testing.assert_array_compare(np.greater_equal,
                                         samples['mchirp'] + 1e-4,
                                         config.PRIOR_KWARGS['mchirp_range'][0])
@@ -199,7 +199,7 @@ def get_runtimes(config):
     Return array of parameter estimation runtimes in hours.
 
     Note: excludes time spent in setting up each posterior object,
-    which should be ~a couple minutes. 
+    which should be ~a couple minutes.
     """
     profilings = sorted(config.INJECTION_DIR.glob('runs/INJ*/run_*/profiling'))
     runtimes = [Stats(path.as_posix()).total_tt / 3600 for path in profilings]
@@ -211,8 +211,10 @@ def get_n_effectives(config):
     Return array of effective sample size of the posteriors.
     There is one entry for each posterior.
     """
-    feathers = sorted(config.INJECTION_DIR.glob('runs/INJ*/run_*/samples.feather'))
-    n_effectives = [_n_effective(pd.read_feather(feather)) for feather in feathers]
+    feathers = sorted(
+        config.INJECTION_DIR.glob('runs/INJ*/run_*/samples.feather'))
+    n_effectives = [_n_effective(pd.read_feather(feather))
+                    for feather in feathers]
     return np.array(n_effectives)
 
 

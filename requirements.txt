@@ -1,18 +1,3 @@
 python>=3.9
 
-ipykernel
-ipympl
-ipywidgets
-notebook
-numba
-pandas
-pyarrow
-
-gwpy
-python-lal
 python-lalsimulation
-
-dynesty
-nautilus-sampler
-pymultinest
-zeus-mcmc

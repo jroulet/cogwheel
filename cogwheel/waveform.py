@@ -155,7 +155,6 @@ APPROXIMANTS = {
                                                  (3, 2), (4, 4)],
                                  aligned_spins=False),
     'IMRPhenomXAS': Approximant(),
-    # 'IMRPhenomXP': Approximant(aligned_spins=False),  # Fails tests.test_waveform
     }
 
 
@@ -490,8 +489,13 @@ class WaveformGenerator(utils.JSONMixin):
 
             # hplus_hcross_0 is a (n_m x 2 x n_frequencies) array with
             # sum_l (hlm+, hlmx), at phi_ref=0, d_luminosity=1Mpc.
-            hplus_hcross_modes = APPROXIMANTS[self.approximant].hplus_hcross_by_mode_func(
-                f, waveform_par_dic_0, self.approximant, self.harmonic_modes, lal_dic)
+            hplus_hcross_modes \
+                = APPROXIMANTS[self.approximant].hplus_hcross_by_mode_func(
+                    f,
+                    waveform_par_dic_0,
+                    self.approximant,
+                    self.harmonic_modes,
+                    lal_dic)
 
             hplus_hcross_0 = np.array(
                 [np.sum([hplus_hcross_modes[mode] for mode in m_modes], axis=0)
