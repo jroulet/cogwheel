@@ -28,16 +28,8 @@ dependencies = [
   "gwpy",
   "dynesty",
   "nautilus-sampler",
-  "pymultinest",
   "zeus-mcmc",
 ]
-
-[project.optional-dependencies]
-dev = [
-  "build",
-  "grayskull",
-]
-
 maintainers = [
   {name = "Javier Roulet", email = "jroulet@caltech.edu"}
 ]
@@ -49,6 +41,15 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build",
+  "grayskull",
+]
+full = [
+  "pymultinest",
 ]
 
 [project.urls]
@@ -77,7 +78,7 @@ ignored-modules = [
   "lalsimulation",
   "gwosc",
   "gwpy",
-  "dynesty"
+  "dynesty",
 ]
 
 [tool.pylint.basic]
@@ -88,4 +89,7 @@ good-names = ["i", "j", "k", "ex", "Run", "_",
 max-line-length = 79
 
 [tool.pylint.imports]
-allow-any-import-level = ["cogwheel.waveform_models.xode"]
+allow-any-import-level = [
+  "cogwheel.waveform_models.xode",
+  "pymultinest",
+]
