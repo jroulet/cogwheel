@@ -28,7 +28,6 @@ dependencies = [
   "gwpy",
   "dynesty",
   "nautilus-sampler",
-  "pymultinest",
   "zeus-mcmc",
 ]
 maintainers = [
@@ -48,6 +47,9 @@ classifiers = [
 dev = [
   "build",
   "grayskull",
+]
+full = [
+  "pymultinest",
 ]
 
 [project.urls]
@@ -76,7 +78,7 @@ ignored-modules = [
   "lalsimulation",
   "gwosc",
   "gwpy",
-  "dynesty"
+  "dynesty",
 ]
 
 [tool.pylint.basic]
@@ -87,4 +89,7 @@ good-names = ["i", "j", "k", "ex", "Run", "_",
 max-line-length = 79
 
 [tool.pylint.imports]
-allow-any-import-level = ["cogwheel.waveform_models.xode"]
+allow-any-import-level = [
+  "cogwheel.waveform_models.xode",
+  "pymultinest",
+]
