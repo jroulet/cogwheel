@@ -30,7 +30,7 @@ parentdir = 'example'  # Directory that will contain parameter estimation runs
 
 eventname, mchirp_guess = 'GW150914', 30
 approximant = 'IMRPhenomXPHM'
-prior_class = 'IntrinsicIASPrior'
+prior_class = 'CartesianIntrinsicIASPrior'
 
 filenames, detector_names, tgps = data.download_timeseries(eventname)
 event_data = data.EventData.from_timeseries(
