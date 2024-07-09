@@ -30,13 +30,13 @@ parentdir = 'example'  # Directory that will contain parameter estimation runs
 
 eventname, mchirp_guess = 'GW150914', 30
 approximant = 'IMRPhenomXPHM'
-prior_class = 'IntrinsicIASPrior'
+prior_class = 'CartesianIntrinsicIASPrior'
 
 filenames, detector_names, tgps = data.download_timeseries(eventname)
 event_data = data.EventData.from_timeseries(
     filenames, eventname, detector_names, tgps)
 
-post = Posterior.from_event(eventname, mchirp_guess, approximant, prior_class)
+post = Posterior.from_event(event_data, mchirp_guess, approximant, prior_class)
 
 sampler = sampling.Nautilus(post, run_kwargs=dict(n_live=1000))
 
@@ -45,6 +45,7 @@ sampler.run(rundir)  # Will take a while
 ```
 Load and plot the samples:
 ```python
+import matplotlib.pyplot as plt
 import pandas as pd
 from cogwheel import gw_plotting
 
