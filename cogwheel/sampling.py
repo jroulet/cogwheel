@@ -16,7 +16,6 @@ import scipy.special
 
 import dynesty
 import nautilus
-import pymultinest
 import zeus
 
 from cogwheel import postprocessing
@@ -445,7 +444,24 @@ class PyMultiNest(Sampler):
                           'evidence_tolerance': 1/4}
 
     class _SAMPLER_CLS:
-        run = staticmethod(pymultinest.run)
+        # Dummy sampler class for pymultinest (which doesn't have one).
+        # A ``.run()`` method is implemented by ``PyMultiNest.__init__``
+        # because we haven't imported ``pymultinest`` yet.
+        run = None
+
+    @wraps(Sampler.__init__)
+    def __init__(self, *args, **kwargs):
+        # Import optional dependency `pymultinest` on the fly
+        try:
+            import pymultinest
+        except ImportError as err:
+            raise ImportError('Missing optional dependency `pymultinest`, '
+                              'install with `conda install pymultinest`.'
+                              ) from err
+
+        self._SAMPLER_CLS.run = staticmethod(pymultinest.run)
+
+        super().__init__(*args, **kwargs)
 
     def _get_run_kwargs(self):
         run_kwargs = super()._get_run_kwargs()
