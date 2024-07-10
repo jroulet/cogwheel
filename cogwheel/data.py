@@ -26,7 +26,7 @@ GWOSC_FILES_DIR = DATADIR/'gwosc_files'
 
 ASD_DIR = DATADIR/'example_asds'
 ASDS = {path.name.removesuffix('.npy'): path
-        for path in ASD_DIR.glob('*.npy')}
+        for path in sorted(ASD_DIR.glob('*.npy'))}
 
 EVENTS_METADATA = pd.read_csv(DATADIR/'events_metadata.csv', index_col=0)
 
@@ -154,9 +154,10 @@ class EventData(utils.JSONMixin):
 
         asd_funcs: sequence of callables or strings
             Functions that return the noise amplitude spectral density
-            (1/Hz), of the same length as `detector_names`.
+            (1/Hz), of the same length as `detector_names`. See
+            ``make_asd_func`` to construct an interpolator.
             Alternatively, a string that is a key in ``ASDS`` can be
-            passed to use a predefined ASD (e.g. 'asd_H_O3a').
+            passed to use a predefined ASD (e.g. 'asd_H_O3').
 
         tgps: float
             GPS time of event.
@@ -184,6 +185,7 @@ class EventData(utils.JSONMixin):
 
         See Also
         --------
+        make_asd_func
         EventData.inject_signal
         """
         if len(detector_names) != len(asd_funcs):
