@@ -55,8 +55,8 @@ full = [
 [project.urls]
 "Source" = "https://github.com/jroulet/cogwheel"
 
-[tool.setuptools.packages]
-find = {}
+[tool.setuptools.packages.find]
+namespaces = false
 
 [tool.setuptools.package-data]
 "cogwheel.data" = ["events_metadata.csv",
