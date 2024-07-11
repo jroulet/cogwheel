@@ -450,6 +450,12 @@ class EventData(utils.JSONMixin):
         approximant: str
             Name of approximant.
         """
+        if self.injection:
+            logging.warning(
+                'Injecting another signal in addition to a previous injection.'
+                ' Injection metadata will be overwritten. '
+                'Strain data will contain all the injected events.')
+
         waveform_generator = waveform.WaveformGenerator.from_event_data(
             self, approximant)
         h_f = np.zeros_like(self.strain)
