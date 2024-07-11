@@ -26,7 +26,7 @@ GWOSC_FILES_DIR = DATADIR/'gwosc_files'
 
 ASD_DIR = DATADIR/'example_asds'
 ASDS = {path.name.removesuffix('.npy'): path
-        for path in ASD_DIR.glob('*.npy')}
+        for path in sorted(ASD_DIR.glob('*.npy'))}
 
 EVENTS_METADATA = pd.read_csv(DATADIR/'events_metadata.csv', index_col=0)
 
@@ -154,9 +154,10 @@ class EventData(utils.JSONMixin):
 
         asd_funcs: sequence of callables or strings
             Functions that return the noise amplitude spectral density
-            (1/Hz), of the same length as `detector_names`.
+            (1/Hz), of the same length as `detector_names`. See
+            ``make_asd_func`` to construct an interpolator.
             Alternatively, a string that is a key in ``ASDS`` can be
-            passed to use a predefined ASD (e.g. 'asd_H_O3a').
+            passed to use a predefined ASD (e.g. 'asd_H_O3').
 
         tgps: float
             GPS time of event.
@@ -184,6 +185,7 @@ class EventData(utils.JSONMixin):
 
         See Also
         --------
+        make_asd_func
         EventData.inject_signal
         """
         if len(detector_names) != len(asd_funcs):
@@ -272,6 +274,9 @@ class EventData(utils.JSONMixin):
 
         self._check_wht_filter_validity()
 
+        if injection:
+            for key in {'d_h', 'h_h'} & injection.keys():
+                injection[key] = np.asarray(injection[key])
         self.injection = injection
 
     def _set_strain(self, strain):
@@ -448,6 +453,12 @@ class EventData(utils.JSONMixin):
         approximant: str
             Name of approximant.
         """
+        if self.injection:
+            logging.warning(
+                'Injecting another signal in addition to a previous injection.'
+                ' Injection metadata will be overwritten. '
+                'Strain data will contain all the injected events.')
+
         waveform_generator = waveform.WaveformGenerator.from_event_data(
             self, approximant)
         h_f = np.zeros_like(self.strain)
@@ -456,8 +467,10 @@ class EventData(utils.JSONMixin):
         self._set_strain(self.strain + h_f)
 
         h_h = 4 * self.df * np.linalg.norm(h_f * self.wht_filter, axis=-1)**2
+        d_h = 4 * self.df * (self.blued_strain * h_f.conj()).real.sum(axis=-1)
         self.injection = {'par_dic': par_dic,
                           'approximant': approximant,
+                          'd_h': d_h,
                           'h_h': h_h}
 
     def specgram(self, xlim=None, nfft=64, noverlap=None, vmax=25.):
