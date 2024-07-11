@@ -274,6 +274,9 @@ class EventData(utils.JSONMixin):
 
         self._check_wht_filter_validity()
 
+        if injection:
+            for key in {'d_h', 'h_h'} & injection.keys():
+                injection[key] = np.asarray(injection[key])
         self.injection = injection
 
     def _set_strain(self, strain):
@@ -464,8 +467,10 @@ class EventData(utils.JSONMixin):
         self._set_strain(self.strain + h_f)
 
         h_h = 4 * self.df * np.linalg.norm(h_f * self.wht_filter, axis=-1)**2
+        d_h = 4 * self.df * (self.blued_strain * h_f.conj()).real.sum(axis=-1)
         self.injection = {'par_dic': par_dic,
                           'approximant': approximant,
+                          'd_h': d_h,
                           'h_h': h_h}
 
     def specgram(self, xlim=None, nfft=64, noverlap=None, vmax=25.):
