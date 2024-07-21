@@ -127,7 +127,7 @@ class VolumetricSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
 
     @staticmethod
     def _spin_transform(cumsz):
-        cumsz = np.complex_(cumsz)
+        cumsz = np.complex128(cumsz)
         return np.real(
             (-1 + np.sqrt(3)*1j
              - (1 + np.sqrt(3)*1j)

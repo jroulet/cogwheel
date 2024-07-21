@@ -294,7 +294,7 @@ class MarginalizedExtrinsicLikelihood(
             shape = (self.waveform_generator.m_arr.shape
                      + self.event_data.frequencies.shape)
 
-            h0_f = np.zeros(shape, dtype=np.complex_)
+            h0_f = np.zeros(shape, dtype=np.complex128)
             h0_f[:, self.event_data.fslice] \
                 = (1, 1j) @ self.waveform_generator.get_hplus_hcross(
                     self.event_data.frequencies[self.event_data.fslice],
