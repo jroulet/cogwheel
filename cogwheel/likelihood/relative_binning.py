@@ -245,7 +245,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         # Broadcast manually
         *pre_shape, nrfft = integrand.shape
         shape = pre_shape + [len(self.fbin)]
-        projected_integrand = np.zeros(shape, dtype=np.complex_)
+        projected_integrand = np.zeros(shape, dtype=np.complex128)
         for i, arr_f in enumerate(integrand.reshape(-1, nrfft)):
             projected_integrand[np.unravel_index(i, pre_shape)] \
                 = self._basis_splines @ arr_f
@@ -408,7 +408,7 @@ class BaseLinearFree(BaseRelativeBinning):
             m2_index = list(self.waveform_generator.m_arr).index(2)
 
             h2plus0_f = np.zeros(len(self.event_data.frequencies),
-                                 dtype=np.complex_)
+                                 dtype=np.complex128)
             h2plus0_f[self.event_data.fslice] \
                 = self.waveform_generator.get_hplus_hcross(
                     self.event_data.frequencies[self.event_data.fslice],

@@ -185,7 +185,7 @@ class CoherentScoreQAS(ProposingCoherentScore):
         return np.transpose(self.beta_temperature / 2
                             * utils.abs_sq(d_h_timeseries) / h_h)  # dt
 
-    def gen_samples(self, dh_td, hh_d, times, num=None,
+    def gen_samples(self, dh_td, hh_d, times, num=(),
                     lnl_marginalized_threshold=-np.inf):
         """Deprecated, use ``.gen_samples_from_marg_info``"""
         warnings.warn('Use ``gen_samples_from_marg_info``', DeprecationWarning)
@@ -193,7 +193,7 @@ class CoherentScoreQAS(ProposingCoherentScore):
                                                   lnl_marginalized_threshold)
         return self.gen_samples_from_marg_info(marg_info, num)
 
-    def gen_samples_from_marg_info(self, marg_info, num=None):
+    def gen_samples_from_marg_info(self, marg_info, num=()):
         """
         Generate requested number of extrinsic parameter samples.
 
@@ -224,7 +224,7 @@ class CoherentScoreQAS(ProposingCoherentScore):
                 np.full(num, np.nan)[()])
 
         random_ids = self._rng.choice(len(marg_info.q_inds), size=num,
-                                      p=marg_info.weights)
+                                      p=marg_info.weights)[()]
 
         q_ids = marg_info.q_inds[random_ids]
         sky_ids = marg_info.sky_inds[random_ids]

@@ -256,7 +256,7 @@ class Prior(ABC, utils.JSONMixin):
             if not hasattr(value, '__len__') or len(value) != 2:
                 raise PriorError(f'`range_dic` {self.range_dic} must have '
                                  'ranges defined as pair of floats.')
-            self.range_dic[key] = np.asarray(value, dtype=np.float_)
+            self.range_dic[key] = np.asarray(value, dtype=np.float64)
 
     @classmethod
     def get_fast_sampled_params(cls, fast_standard_params):

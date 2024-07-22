@@ -149,7 +149,7 @@ class CoherentScoreHM(ProposingCoherentScore, BaseCoherentScoreHM):
             flip_psi=flip_psi,
             )
 
-    def gen_samples(self, dh_mptd, hh_mppd, times, num=None,
+    def gen_samples(self, dh_mptd, hh_mppd, times, num=(),
                     lnl_marginalized_threshold=-np.inf):
         """Deprecated, use ``.gen_samples_from_marg_info``"""
         warnings.warn('Use ``gen_samples_from_marg_info``', DeprecationWarning)
@@ -157,7 +157,7 @@ class CoherentScoreHM(ProposingCoherentScore, BaseCoherentScoreHM):
                                                   lnl_marginalized_threshold)
         return self.gen_samples_from_marg_info(marg_info, num)
 
-    def gen_samples_from_marg_info(self, marg_info, num=None):
+    def gen_samples_from_marg_info(self, marg_info, num=()):
         """
         Generate requested number of extrinsic parameter samples.
 
@@ -197,7 +197,7 @@ class CoherentScoreHM(ProposingCoherentScore, BaseCoherentScoreHM):
 
         self._switch_qmc_sequence(marg_info.qmc_sequence_id)
         random_ids = self._rng.choice(len(marg_info.q_inds), size=num,
-                                      p=marg_info.weights)
+                                      p=marg_info.weights)[()]
 
         q_ids = marg_info.q_inds[random_ids]
         o_ids = marg_info.o_inds[random_ids]

@@ -60,7 +60,6 @@ class PosteriorTestCase(TestCase):
                       for prior_class in gw_prior.prior_registry.values()
                       if prior_class is not gw_prior.ExtrinsicParametersPrior]
 
-
     def test_prior(self):
         """
         Test that the ``.lnprior()`` method of all registered priors

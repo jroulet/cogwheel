@@ -741,10 +741,10 @@ class NumpyEncoder(json.JSONEncoder):
                           np.uint16, np.uint32, np.uint64)):
             return int(o)
 
-        if isinstance(o, (np.float_, np.float16, np.float32, np.float64)):
+        if isinstance(o, (np.float16, np.float32, np.float64)):
             return float(o)
 
-        if isinstance(o, (np.complex_, np.complex64, np.complex128, complex)):
+        if isinstance(o, (np.complex64, np.complex128, complex)):
             return {'real': o.real, 'imag': o.imag}
 
         if isinstance(o, np.ndarray):

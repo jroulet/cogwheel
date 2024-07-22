@@ -72,7 +72,7 @@ class MarginalizedExtrinsicLikelihoodQAS(
         with utils.temporarily_change_attributes(self.waveform_generator,
                                                  disable_precession=False):
             h0_f = np.zeros(len(self.event_data.frequencies),
-                            dtype=np.complex_)
+                            dtype=np.complex128)
             h0_f[..., self.event_data.fslice] \
                 = self.waveform_generator.get_hplus_hcross(
                     self.event_data.frequencies[self.event_data.fslice],

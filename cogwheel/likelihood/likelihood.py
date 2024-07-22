@@ -108,7 +108,7 @@ class CBCLikelihood(utils.JSONMixin):
         elif len(value) != len(self.event_data.detector_names):
             raise ValueError('ASD-drift must match number of detectors.')
 
-        self._asd_drift = np.asarray(value, dtype=np.float_)
+        self._asd_drift = np.asarray(value, dtype=np.float64)
 
     def compute_asd_drift(self, par_dic, tol=.02,
                           max_tcorr_contiguous_low=16., **kwargs):
@@ -293,7 +293,7 @@ class CBCLikelihood(utils.JSONMixin):
         """
         shape = (self.waveform_generator.m_arr.shape if by_m else ()
                 ) + self.event_data.strain.shape
-        h_f = np.zeros(shape, dtype=np.complex_)
+        h_f = np.zeros(shape, dtype=np.complex128)
         h_f[..., self.event_data.fslice] \
             = self.waveform_generator.get_strain_at_detectors(
                 self.event_data.frequencies[self.event_data.fslice], par_dic,
