@@ -175,13 +175,22 @@ def inplane_spins_xy_n_to_xy(par_dic):
     """
     sin_phi_ref = np.sin(par_dic['phi_ref'])
     cos_phi_ref = np.cos(par_dic['phi_ref'])
-    rotation = np.array([[cos_phi_ref, sin_phi_ref],
-                         [-sin_phi_ref, cos_phi_ref]])
+
+    first2 = (0, 1)
+    last2 = (-2, -1)
+
+    rotation = np.moveaxis([[cos_phi_ref, sin_phi_ref],
+                            [-sin_phi_ref, cos_phi_ref]],
+                           first2, last2)
+
+    spins_n = np.moveaxis([[par_dic['s1x_n'], par_dic['s2x_n']],
+                           [par_dic['s1y_n'], par_dic['s2y_n']]],
+                          first2, last2)
+
+    spins = rotation @ spins_n
 
     ((par_dic['s1x'], par_dic['s2x']),
-     (par_dic['s1y'], par_dic['s2y'])
-        ) = rotation.dot(((par_dic['s1x_n'], par_dic['s2x_n']),
-                          (par_dic['s1y_n'], par_dic['s2y_n'])))
+     (par_dic['s1y'], par_dic['s2y'])) = np.moveaxis(spins, last2, first2)
 
 
 def inplane_spins_xy_to_xy_n(par_dic):
@@ -201,13 +210,23 @@ def inplane_spins_xy_to_xy_n(par_dic):
     """
     sin_phi_ref = np.sin(par_dic['phi_ref'])
     cos_phi_ref = np.cos(par_dic['phi_ref'])
-    rotation = np.array([[cos_phi_ref, -sin_phi_ref],
-                         [sin_phi_ref, cos_phi_ref]])
+
+    first2 = (0, 1)
+    last2 = (-2, -1)
+
+    rotation = np.moveaxis([[cos_phi_ref, -sin_phi_ref],
+                            [sin_phi_ref, cos_phi_ref]],
+                           first2, last2)
+
+    spins = np.moveaxis([[par_dic['s1x'], par_dic['s2x']],
+                         [par_dic['s1y'], par_dic['s2y']]],
+                        first2, last2)
+
+    spins_n = rotation @ spins
 
     ((par_dic['s1x_n'], par_dic['s2x_n']),
-     (par_dic['s1y_n'], par_dic['s2y_n'])
-        ) = rotation.dot(((par_dic['s1x'], par_dic['s2x']),
-                          (par_dic['s1y'], par_dic['s2y'])))
+     (par_dic['s1y_n'], par_dic['s2y_n'])) = np.moveaxis(spins_n,
+                                                         last2, first2)
 
 
 def within_bounds(par_dic: dict) -> bool:
