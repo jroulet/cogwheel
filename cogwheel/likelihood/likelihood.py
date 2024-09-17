@@ -19,8 +19,8 @@ def hole_edges(mask):
     """
     Return nholes x 2 array with edges of holes (holes extend from
     [left_edge : right_edge]).
-    Appends ones at left and right to catch end holes if present.
     """
+    # Append ones at left and right to catch end holes if present.
     edges = np.diff(np.r_[1, mask, 1])
     left_edges = np.where(edges == -1)[0].astype(np.uint32)
     right_edges = np.where(edges == 1)[0].astype(np.uint32)

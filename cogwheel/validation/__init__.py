@@ -2,6 +2,9 @@
 Package to validate the cogwheel code by doing inference on injections.
 """
 import importlib
+import sys
+
+from cogwheel import utils
 
 
 def load_config(config_filename):
@@ -21,5 +24,7 @@ def load_config(config_filename):
     """
     spec = importlib.util.spec_from_file_location('config', config_filename)
     config = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(config)
+    with utils.temporarily_change_attributes(sys, dont_write_bytecode=True):
+        spec.loader.exec_module(config)
+
     return config
