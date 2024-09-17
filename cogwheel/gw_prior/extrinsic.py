@@ -59,7 +59,7 @@ class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
     """
     Uniform prior for the orbital phase.
     The sampled variable `phi_ref_hat` differs from the standard
-    coalescence phase `phi_ref` an additive function of
+    coalescence phase `phi_ref` by an additive function of
     `psi, iota, ra, dec, time`, such that it describes the well-measured
     phase of the waveform at a reference detector.
     Note: for waveforms with higher modes the posterior will have a
