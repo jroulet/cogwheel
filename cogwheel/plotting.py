@@ -80,8 +80,7 @@ def gen_colors(number):
     number: int
         How many colors are desired.
     """
-    colors = (mpl.cm.get_cmap('tab20').colors
-              + mpl.cm.get_cmap('tab20b').colors)
+    colors = plt.get_cmap('tab20').colors + plt.get_cmap('tab20b').colors
     colors = colors[::2] + colors[1::2]
     return [colors[i] for i in np.arange(number) % len(colors)]
 
