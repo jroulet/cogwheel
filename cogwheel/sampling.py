@@ -363,6 +363,10 @@ class Sampler(abc.ABC, utils.JSONMixin):
             i_unfold = 0
         else:
             probabilities = np.exp(lnprobs - ln_folded_prob)
+
+            # In rare cases precision loss may affect normalization:
+            probabilities /= probabilities.sum()
+
             i_unfold = self._rng.choice(len(probabilities), p=probabilities)
 
         blob = (par_dics[i_unfold]
