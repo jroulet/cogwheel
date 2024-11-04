@@ -532,7 +532,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
 
     def _get_dh_hh_complex_no_asd_drift(self, par_dic):
         """
-        Return two arrays complex with the values of
+        Return two complex arrays with the values of
         ``(d|h)`` (modes, polarizations, detectors), and
         ``(h|h)`` (mode pairs, polarizations, polarizations, detectors),
         no ASD-drift correction applied, using relative binning.
@@ -639,37 +639,36 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         # Don't zero the in-plane spins for the reference waveform
         with utils.temporarily_change_attributes(self.waveform_generator,
                                                  disable_precession=False):
-
             self._h0_f = self._get_h_f(self.par_dic_0, by_m=True)
             self._h0_fbin = self.waveform_generator.get_strain_at_detectors(
                 self.fbin, self.par_dic_0, by_m=True)  # n_m x ndet x len(fbin)
 
-            # Temporarily undo big time shift so waveform is smooth at
-            # high frequencies:
-            shift_f = np.exp(-2j*np.pi * self.event_data.frequencies
-                             * self.event_data.tcoarse)
-            shift_fbin = np.exp(-2j*np.pi * self.fbin
-                                * self.event_data.tcoarse)
-            self._h0_f *= shift_f.conj()
-            self._h0_fbin *= shift_fbin.conj()
-            # Ensure reference waveform is smooth and !=0 at high frequency:
-            self._stall_ringdown(self._h0_f, self._h0_fbin)
-            # Reapply big time shift:
-            self._h0_f *= shift_f
-            self._h0_fbin *= shift_fbin
+        # Temporarily undo big time shift so waveform is smooth at
+        # high frequencies:
+        shift_f = np.exp(-2j*np.pi * self.event_data.frequencies
+                         * self.event_data.tcoarse)
+        shift_fbin = np.exp(-2j*np.pi * self.fbin
+                            * self.event_data.tcoarse)
+        self._h0_f *= shift_f.conj()
+        self._h0_fbin *= shift_fbin.conj()
+        # Ensure reference waveform is smooth and !=0 at high frequency:
+        self._stall_ringdown(self._h0_f, self._h0_fbin)
+        # Reapply big time shift:
+        self._h0_f *= shift_f
+        self._h0_fbin *= shift_fbin
 
-            d_h0 = self.event_data.blued_strain * self._h0_f.conj()
-            self._d_h_weights = (self._get_summary_weights(d_h0)
-                                 / np.conj(self._h0_fbin))
+        d_h0 = self.event_data.blued_strain * self._h0_f.conj()
+        self._d_h_weights = (self._get_summary_weights(d_h0)
+                             / np.conj(self._h0_fbin))
 
-            m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
-            h0m_h0mprime = (self._h0_f[m_inds] * self._h0_f[mprime_inds].conj()
-                            * self.event_data.wht_filter ** 2)
-            self._h_h_weights = (self._get_summary_weights(h0m_h0mprime)
-                                 / (self._h0_fbin[m_inds]
-                                    * self._h0_fbin[mprime_inds].conj()))
-            # Count off-diagonal terms twice:
-            self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
+        m_inds, mprime_inds = self.waveform_generator.get_m_mprime_inds()
+        h0m_h0mprime = (self._h0_f[m_inds] * self._h0_f[mprime_inds].conj()
+                        * self.event_data.wht_filter ** 2)
+        self._h_h_weights = (
+            self._get_summary_weights(h0m_h0mprime)
+            / (self._h0_fbin[m_inds] * self._h0_fbin[mprime_inds].conj()))
+        # Count off-diagonal terms twice:
+        self._h_h_weights[~np.equal(m_inds, mprime_inds)] *= 2
 
     def _get_h_f_interpolated(self, par_dic, *, normalize=False,
                               by_m=False):
