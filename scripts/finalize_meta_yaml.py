@@ -11,7 +11,7 @@ from pathlib import Path
 cogwheel_dir = Path(__file__).parents[1]
 recipe_filename = cogwheel_dir/'cogwheel-pe'/'meta.yaml'
 with open(recipe_filename) as file:
-	text = file.read()
+    text = file.read()
 
 # Add python-lalsimulation to conda requirements
 target = """
@@ -56,4 +56,4 @@ text = text.replace(target, new)
 
 # Overwrite meta.yaml
 with open(recipe_filename, 'w') as file:
-	file.write(text)
+    file.write(text)

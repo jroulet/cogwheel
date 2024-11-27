@@ -68,19 +68,20 @@ class BaseMarginalizedExtrinsicLikelihood(BaseLinearFree):
             matched-filtering series, relative to
             ``event_data.tgps + par_dic_0['t_geocenter']``.
 
-        coherent_score: CoherentScoreHM, CoherentScoreQAS as appropriate,
-                        or dict or None
-            Instance of coherent score, optional. If a dict is passed, it
-            is interpreted as keyword arguments to create one automatically.
-            None (default) will create one with default settings.
+        coherent_score: CoherentScoreHM or CoherentScoreQAS as
+                        appropriate, or dict or None
+            Instance of coherent score, optional. If a dict is passed,
+            it is interpreted as keyword arguments to create one
+            automatically. None (default) will create one with default
+            settings.
 
         dlnl_marginalized_threshold: float
             The extrinsic marginalization will not be refined further if
-            at some point the estimate is lower than the maximum previously
-            observed lnl_marginalized by more than this amount (so as not
-            to waste computation on low likelihood points). Use
-            conservatively since the estimate of lnl_marginalized may be
-            noisy.
+            at some point the estimate is lower than the maximum
+            previously observed lnl_marginalized by more than this
+            amount (so as not to waste computation on low likelihood
+            points). Use conservatively since the estimate of
+            lnl_marginalized may be noisy.
         """
         coherent_score = coherent_score or {}
         if isinstance(coherent_score, dict):  # Interpret as kwargs
@@ -167,7 +168,8 @@ class BaseMarginalizedExtrinsicLikelihood(BaseLinearFree):
 
     def get_blob(self, metadata):
         """
-        Draw a sample of extrinsic parameters from the conditional posterior.
+        Draw a sample of extrinsic parameters from the conditional
+        posterior.
 
         Parameters
         ----------
@@ -355,7 +357,7 @@ class MarginalizedExtrinsicLikelihood(
                             h_mpb[m_inds],
                             h_mpb.conj()[mprime_inds]).astype(np.complex64)
 
-        asd_drift_correction = self.asd_drift.astype(np.float32) ** -2  # d
-        dh_mptd *= asd_drift_correction
-        hh_mppd *= asd_drift_correction
+        psd_drift_correction = self.asd_drift.astype(np.float32) ** -2  # d
+        dh_mptd *= psd_drift_correction
+        hh_mppd *= psd_drift_correction
         return dh_mptd, hh_mppd, timeshift
