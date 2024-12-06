@@ -526,7 +526,6 @@ class Prior(ABC, utils.JSONMixin):
 
         n_proposed = 0
         n_accepted = 0
-        max_lnprior = -np.inf
         samples = pd.DataFrame()
         while len(samples) < n_samples:
             candidates = pd.DataFrame(
