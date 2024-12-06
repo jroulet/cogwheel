@@ -18,7 +18,7 @@ from cogwheel import waveform
 def hole_edges(mask):
     """
     Return nholes x 2 array with edges of holes (holes extend from
-    [left_edge : right_edge]).
+    ``[left_edge : right_edge]``).
     """
     # Append ones at left and right to catch end holes if present.
     edges = np.diff(np.r_[1, mask, 1])
@@ -62,19 +62,21 @@ def check_bounds(lnlike_func):
 
 class CBCLikelihood(utils.JSONMixin):
     """
-    Class that accesses the event data and waveform generator; provides
-    methods for computing likelihood as a function of compact binary
-    coalescence parameters without using relative binning, and also the
-    asd-drift correction.
+    Class that accesses the event data and waveform generator.
+
+    Provides methods for computing likelihood as a function of compact
+    binary coalescence parameters without using relative binning, and
+    also the asd-drift correction.
+
     Subclassed by ``RelativeBinningLikelihood``.
     """
     def __init__(self, event_data, waveform_generator):
         """
         Parameters
         ----------
-        event_data: Instance of `data.EventData`.
+        event_data : data.EventData
 
-        waveform_generator: Instance of `waveform.WaveformGenerator`.
+        waveform_generator : waveform.WaveformGenerator
         """
         # Check consistency between `event_data` and `waveform_generator`:
         for attr in ['detector_names', 'tgps', 'tcoarse']:
@@ -89,13 +91,16 @@ class CBCLikelihood(utils.JSONMixin):
 
     @property
     def params(self):
-        """Parameters expected in `par_dic` for likelihood evaluation."""
+        """
+        Parameters expected in `par_dic` for likelihood evaluation.
+        """
         return self.waveform_generator.params
 
     @property
     def asd_drift(self):
         """
-        Array of len ndetectors with ASD drift-correction.
+        Array of length ndetectors with ASD drift-correction.
+
         Values > 1 mean local noise variance is higher than average.
         """
         return self._asd_drift
@@ -124,22 +129,22 @@ class CBCLikelihood(utils.JSONMixin):
 
         Parameters
         ----------
-        par_dic: dict
+        par_dic : dict
             Waveform parameters, keys should match
             ``self.waveform_generator.params``.
 
-        tol: float
+        tol : float
             Stochastic measurement error tolerance, used to decide the
             number of samples.
 
-        max_tcorr_contiguous_low: float
+        max_tcorr_contiguous_low : float
             Maximum number of contiguous correlation times with values
             below the average noise level to allow (these are classified
             as a hole and disregarded in the average).
 
-        **kwargs:
+        **kwargs
             Passed to `safe_std`, keys include:
-                `expected_high`, `reject_nearby`.
+            ``expected_high``, ``reject_nearby``.
         """
         # Use all available modes and spin components to get a waveform
         with utils.temporarily_change_attributes(self.waveform_generator,
@@ -175,23 +180,26 @@ class CBCLikelihood(utils.JSONMixin):
         """
         Compute the standard deviation of a real array rejecting
         outliers.
+
         Outliers may be:
+
           * Values too high to likely come from white Gaussian noise.
           * A contiguous array of values too low to come from white
             Gaussian noise (likely from a hole).
+
         Once outliers are identified, an extra amount of nearby samples
         is rejected for safety.
 
         Parameters
         ----------
-        max_contiguous_low: int
+        max_contiguous_low : int
             How many contiguous samples below 1 sigma to allow.
 
-        expected_high: float
+        expected_high : float
             Number of times we expect to trigger in white Gaussian noise
             (used to set the clipping threshold).
 
-        reject_nearby: float
+        reject_nearby : float
             By how many seconds to expand holes for safety.
         """
         good = np.ones(len(arr), dtype=bool)
@@ -220,25 +228,27 @@ class CBCLikelihood(utils.JSONMixin):
     def get_average_frequency(self, par_dic, ref_det_name=None,
                               moment=1.):
         """
-        Return average frequency in Hz, defined as
+        Return average frequency in Hz.
+
+        The average frequency is defined as
         ``(avg(f^moment))^(1/moment)``
         where ``avg`` is the frequency-domain average with weight
-        ~ |h(f)|^2 / PSD(f).
+        ``~ |h(f)|^2 / PSD(f)``.
 
         The answer is rounded to nearest Hz to ease reporting.
 
         Parameters
         ----------
-        par_dic: dict
+        par_dic : dict
             Waveform parameters, keys should match
             ``self.waveform_generator.params``.
 
-        ref_det_name: str or None
+        ref_det_name : str or None
             Name of the detector from which to get the PSD, e.g. 'H' for
             Hanford, or `None` (default) to combine the PSDs of all
             detectors.
 
-        moment: nonzero float
+        moment : nonzero float
             Controls the frequency weights in the average.
         """
         det_ind = ...
@@ -261,7 +271,7 @@ class CBCLikelihood(utils.JSONMixin):
 
         Parameters
         ----------
-        par_dic: dict
+        par_dic : dict
             Waveform parameters, keys should match
             ``self.waveform_generator.params``.
         """
@@ -278,16 +288,16 @@ class CBCLikelihood(utils.JSONMixin):
 
         Parameters
         ----------
-        par_dic: dict
+        par_dic : dict
             Waveform parameters, keys should match
             ``self.waveform_generator.params``.
 
-        normalize: bool
+        normalize : bool
             Whether to normalize the waveform by sqrt(h|h) at each
             detector.
 
-        Return
-        ------
+        Returns
+        -------
         Array of shape (n_m?, n_detectors, n_frequencies) with strain at
         detector. `n_m` is there only if `by_m=True`.
         """
@@ -304,7 +314,8 @@ class CBCLikelihood(utils.JSONMixin):
 
     def _compute_h_h(self, h_f):
         """
-        Return array of len ndetectors with inner product (h|h).
+        Return array of length n_detectors with inner product (h|h).
+
         ASD drift correction is applied. Relative binning is not used.
         """
         return (4 * self.event_data.df * self.asd_drift**-2
@@ -313,6 +324,7 @@ class CBCLikelihood(utils.JSONMixin):
     def _compute_d_h(self, h_f):
         """
         Return array of len ndetectors with complex inner product (d|h).
+
         ASD drift correction is applied. Relative binning is not used.
         """
         return (4 * self.event_data.df * self.asd_drift**-2
@@ -322,16 +334,18 @@ class CBCLikelihood(utils.JSONMixin):
         """
         Return (z_cos, z_sin), the matched filter output of a normalized
         template and its Hilbert transform.
+
         No ASD drift correction is applied.
 
         Parameters
         ----------
-        h_f: (ndet, nrfft) array
+        h_f : (ndet, nrfft) array
             Normalized frequency domain waveform.
 
-        Return
-        ------
-        z_cos, z_sin: each is a (ndet, nfft) time series.
+        Returns
+        -------
+        z_cos, z_sin : (ndet, nfft) arrays
+            Matched filter time series.
         """
         factor = 2 * self.event_data.nfft * self.event_data.df
         z_cos = factor * np.fft.irfft(self.event_data.blued_strain
@@ -347,32 +361,32 @@ class CBCLikelihood(utils.JSONMixin):
         Plot the whitened strain and waveform model in the time domain
         in all detectors.
 
-        Parameters:
-        -----------
-        par_dic: dict
+        Parameters
+        ----------
+        par_dic : dict
             Waveform parameters, keys should match
             ``self.waveform_generator.params``.
 
-        trng: (float, float)
+        trng : (float, float)
             Range of time to plot relative to `self.tgps` (s).
 
-        plot_data: bool
+        plot_data : bool
             Whether to include detector data in plot.
 
-        fig: `plt.Figure`, optional
+        fig : `plt.Figure`, optional
             `None` (default) creates a new figure.
 
-        figsize: (float, float)
+        figsize : (float, float)
             Figure width and height in inches, used if `fig=None`.
 
-        **wf_plot_kwargs:
+        **wf_plot_kwargs :
             Keyword arguments passed to ``plt.plot()`` for waveform.
             Additionally, keyword arguments for the data plot can be
             passed as a dict ``data_plot_kwargs``.
 
-        Return:
+        Returns
         -------
-        fig: Figure with plots.
+        matplotlib.figure.Figure : Figure with plots.
         """
         if fig is None:
             fig = self._setup_data_figure(figsize)
@@ -426,7 +440,7 @@ class CBCLikelihood(utils.JSONMixin):
 
         Parameters
         ----------
-        samples: pandas.DataFrame
+        samples : pandas.DataFrame
             Rows are samples, columns must contain `.params`.
         """
         del samples

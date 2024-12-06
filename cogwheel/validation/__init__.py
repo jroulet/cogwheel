@@ -18,8 +18,8 @@ def load_config(config_filename):
         Full path to a file containing configuration parameters for the
         injections.
 
-    Return
-    ------
+    Returns
+    -------
     module
     """
     spec = importlib.util.spec_from_file_location('config', config_filename)

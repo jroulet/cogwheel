@@ -33,9 +33,24 @@ EVENTS_METADATA = pd.read_csv(DATADIR/'events_metadata.csv', index_col=0)
 
 def make_asd_func(frequencies, asd):
     """
-    Return function that interpolates the given amplitude spectral
-    density as a function of frequency. Frequencies outside the range
-    are assigned a large but finite ASD.
+    Interpolate amplitude spectral density as a function of frequency.
+
+    Frequencies outside the given range are assigned a large but finite
+    ASD.
+
+    Parameters
+    ----------
+    frequencies : numpy.ndarray
+        Array of frequency values for the ASD.
+
+    asd : numpy.ndarray
+        Array of amplitude spectral density values corresponding to the
+        frequencies.
+
+    Returns
+    -------
+    function
+        A function that interpolates the ASD based on input frequency.
     """
     return interpolate.interp1d(frequencies, asd, bounds_error=False,
                                 fill_value=1)
@@ -101,8 +116,8 @@ class EventData(utils.JSONMixin):
         **kwargs:
             Keyword arguments to ``gwpy.timeseries.TimeSeries.read``.
 
-        Return
-        ------
+        Returns
+        -------
             ``EventData`` instance.
 
         See Also
@@ -137,8 +152,9 @@ class EventData(utils.JSONMixin):
             cls, eventname, duration, detector_names, asd_funcs, tgps,
             tcoarse=None, fmin=15., df_taper=1., fmax=1024., seed=None):
         """
-        Constructor that generates data with random stationary colored
-        Gaussian noise. Note: the data will be periodic.
+        Constructor that generates stationary colored Gaussian noise.
+
+        Note: the data will be periodic.
 
         Parameters
         ----------
@@ -179,8 +195,8 @@ class EventData(utils.JSONMixin):
         seed: int, optional
             Use some fixed value for reproducibility.
 
-        Return
-        ------
+        Returns
+        -------
         Instance of ``EventData``.
 
         See Also
@@ -475,8 +491,10 @@ class EventData(utils.JSONMixin):
 
     def specgram(self, xlim=None, nfft=64, noverlap=None, vmax=25.):
         """
-        Plot a spectrogram of the whitened data in units of the expected
-        power from Gaussian noise.
+        Plot a spectrogram of the whitened data.
+
+        The colorbar is in units of the expected power from Gaussian
+        noise.
 
         Parameters
         ----------
@@ -643,8 +661,8 @@ def download_timeseries(eventname, outdir=None, tgps=None,
     **kwargs:
         Passed to ``gwpy.timeseries.TimeSeries.fetch_open_data``.
 
-    Return
-    ------
+    Returns
+    -------
     filenames: list of pathlib.Path
         Paths to the hdf5 files with the downloaded data.
 
@@ -706,8 +724,8 @@ def _fetch_open_data(detector_name, tgps, interval, **kwargs):
     **kwargs:
         Passed to ``gwpy.timeseries.TimeSeries.fetch_open_data``.
 
-    Return
-    ------
+    Returns
+    -------
         gwpy.timeseries.TimeSeries
     """
     start, end = np.add(tgps, interval).astype(int)

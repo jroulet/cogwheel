@@ -44,10 +44,14 @@ class ReferenceDetectorMixin:
     def geometric_factor_refdet(self, ra, dec, psi, iota):
         """
         Return the complex geometric factor
-            R = (1+cos^2(iota)) Fp / 2 - i cos(iota) Fc
+
+        .. math::
+            R = \\frac{1+\\cos^2 \\iota}{2} F_{+}
+            - i \\cos \\iota \\ F_{\\times}
+
         that relates a waveform with generic orientation to an overhead
         face-on one for quadrupolar waveforms.
-        Note that the amplitude |R| is between 0 and 1.
+        Note that the amplitude ``|R|`` is between 0 and 1.
         """
         fplus, fcross = self.fplus_fcross_refdet(ra, dec, psi)
         cosiota = np.cos(iota)

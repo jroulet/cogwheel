@@ -1,8 +1,8 @@
 """
 Define class ``CoherentScoreQAS`` to marginalize and demarginalize the
 likelihood over extrinsic parameters from matched-filtering timeseries,
-for quasi-circular waveforms with quadrupole radiation (l, |m|) = (2, 2)
-and aligned spins.
+for quasi-circular waveforms with quadrupole radiation
+:math:`(l, |m|) = (2, 2)` and aligned spins.
 """
 import warnings
 import numpy as np
@@ -55,8 +55,8 @@ class CoherentScoreQAS(ProposingCoherentScore):
         i_chunk: int
             Index to ``._qmc_ind_chunks``.
 
-        Return
-        ------
+        Returns
+        -------
         Instance of ``MarginalizationInfo`` with several fields, see its
         documentation.
         """
@@ -178,8 +178,8 @@ class CoherentScoreQAS(ProposingCoherentScore):
             Positive ⟨h|h⟩ inner product of a waveform with itself,
             decomposed by detector.
 
-        Return
-        ------
+        Returns
+        -------
         t_arrival_lnprob: (n_d, n_t) float array
         """
         return np.transpose(self.beta_temperature / 2
@@ -205,8 +205,8 @@ class CoherentScoreQAS(ProposingCoherentScore):
         num: int, optional
             Number of samples to generate, defaults to a single sample.
 
-        Return
-        ------
+        Returns
+        -------
         samples: dict
             Values are scalar if `num` is ``None``, else numpy arrays.
             If ``marg_info`` corresponds to an unphysical sample (i.e.,

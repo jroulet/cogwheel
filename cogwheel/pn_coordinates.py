@@ -8,11 +8,14 @@ Classes ``IntrinsicParameterProposal``, ``_InspiralAnalysis`` and
 ``_MergerAnalysis`` are defined. ``IntrinsicParameterProposal`` is the
 top-level class that most users would use.
 
-Example usage:
-```
-# ``post`` is an instance of ``posterior.Posterior``
-intrinsic_proposal = IntrinsicParameterProposal.from_posterior(post)
-qmc_samples = intrinsic_proposal.generate_intrinsic_samples(14)
+Example usage
+-------------
+
+.. code-block:: python
+
+    # ``post`` is an instance of ``posterior.Posterior``
+    intrinsic_proposal = IntrinsicParameterProposal.from_posterior(post)
+    qmc_samples = intrinsic_proposal.generate_intrinsic_samples(14)
 
 """
 import scipy.interpolate
@@ -270,8 +273,8 @@ class _InspiralAnalysis:
         (m1, m2, s2z, s1x_n, s1y_n, s2x_n, s2y_n), just accounting
         for the inspiral.
 
-        Return
-        ------
+        Returns
+        -------
         s1z_loc: float
             Expected peak of the likelihood. Need not be in (-1, 1).
 
@@ -372,8 +375,8 @@ class _MergerAnalysis:
         Return estimate of chieff and its uncertainty, conditioned on
         (m1, m2, s2z), just accounting for the cutoff frequency.
 
-        Return
-        ------
+        Returns
+        -------
         chieff_loc: float
             Expected peak of the likelihood. Need not be in (-1, 1).
 
@@ -540,8 +543,8 @@ class IntrinsicParameterProposal:
     def _s1z_loc_scale_and_weight(self, m1, m2, s2z, s1x_n, s1y_n,
                                   s2x_n, s2y_n):
         """
-        Return
-        ------
+        Returns
+        -------
         s1z_loc, s1z_scale: float
             Estimates of the location and width of the likelihood as a
             function of s1z. Note, `loc` needs not be in (-1, 1).

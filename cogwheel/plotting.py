@@ -19,8 +19,8 @@ class LatexLabels(dict):
     """
     Helper class for plotting parameter labels.
 
-    Example
-    -------
+    Examples
+    --------
     >>> labels = LatexLabels(labels={'m': '$m$', 'theta': r'$\theta$'},
     ...                      units={'m': 'kg'})
     >>> labels['m']

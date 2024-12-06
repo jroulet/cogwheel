@@ -83,8 +83,8 @@ class CoherentScoreHM(ProposingCoherentScore, BaseCoherentScoreHM):
         i_chunk: int
             Index to ``._qmc_ind_chunks``.
 
-        Return
-        ------
+        Returns
+        -------
         Instance of ``MarginalizationInfoHM`` with several fields, see
         its documentation.
         """
@@ -171,8 +171,8 @@ class CoherentScoreHM(ProposingCoherentScore, BaseCoherentScoreHM):
         num: int, optional
             Number of samples to generate, ``None`` makes a single sample.
 
-        Return
-        ------
+        Returns
+        -------
         samples: dict
             Values are scalar if `num` is ``None``, else numpy arrays.
             If ``marg_info`` correspond to an unphysical sample (i.e.,

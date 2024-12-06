@@ -63,8 +63,8 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         par_dic: dict
             Keys must include ``.params``.
 
-        Return
-        ------
+        Returns
+        -------
         lnl_marginalized: float
             Log likelihood, marginalized over distance, using relative
             binning.

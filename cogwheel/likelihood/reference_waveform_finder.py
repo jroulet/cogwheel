@@ -494,8 +494,10 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
     def set_mchirp_range(self, lnl_drop=5., max_doublings=2, seed=0):
         """
+        Set ``._mchirp_range`` automatically.
+
         Set self._mchirp_range as `(mchirp_min, mchirp_max)`, bounds for
-        the chirp mass that are deemed safe for parameter esimation
+        the chirp mass that are deemed safe for parameter estimation
         bounds.
         The criterion is that the incoherent likelihood maximized over
         ``(eta, chieff)`` drops by at least `lnl_drop` of its value for
@@ -561,19 +563,20 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         Can be used to instantiate some classes defined in
         ``cogwheel.gw_prior``.
 
-        Return
-        ------
+        Returns
+        -------
         dictionary with entries for:
-            * tgps
-            * par_dic_0
-            * f_avg
-            * f_ref
-            * ref_det_name
-            * detector_pair
-            * t0_refdet
-            * mchirp_range
-            * event_data
-            * approximant
+
+        * ``tgps``
+        * ``par_dic_0``
+        * ``f_avg``
+        * ``f_ref``
+        * ``ref_det_name``
+        * ``detector_pair``
+        * ``t0_refdet``
+        * ``mchirp_range``
+        * ``event_data``
+        * ``approximant``
         """
         lnl_by_detectors = self.lnlike_max_amp_phase_time(
             self.par_dic_0, return_by_detectors=True)

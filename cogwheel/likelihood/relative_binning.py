@@ -7,16 +7,25 @@ these must be given in the coprecessing frame.
 Splines of arbitrary degree are used to interpolate the ratio between an
 arbitrary waveform and a reference waveform.
 
-Two classes are provided: ``BaseRelativeBinningLikelihood`` and
-``RelativeBinningLikelihood``:
+Three classes are provided: ``BaseRelativeBinningLikelihood``,
+``BaseLinearFree`` and ``RelativeBinningLikelihood``:
+
 ``BaseRelativeBinningLikelihood`` is an abstract class, intended for
 subclassing. It provides the infrastructure to set up the
 relative-binning frequency bins and basis splines but does not make
 assumptions about which waveform is used to heterodyne the data or how.
 This is done by the method ``_set_summary`` which the subclass must
 provide.
+
 ``RelativeBinningLikelihood`` is one such concrete subclass. Its method
 ``lnlike`` computes the log likelihood using relative binning.
+
+``BaseLinearFree`` is another base classs that extends
+``BaseRelativeBinningLikelihood`` with functionality for computing the
+time shift that best aligns an arbitrary waveform with the reference
+waveform, to remove correlations between time and intrinsic parameters
+(we call this convention "linear-free" because the phase difference as a
+function of frequency has no linear correlation).
 """
 import warnings
 from functools import wraps
@@ -42,24 +51,24 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         """
         Parameters
         ----------
-        event_data: Instance of `data.EventData`
+        event_data : Instance of `data.EventData`
 
-        waveform_generator: Instance of `waveform.WaveformGenerator`.
+        waveform_generator : Instance of `waveform.WaveformGenerator`.
 
-        par_dic_0: dict
+        par_dic_0 : dict
             Parameters of the reference waveform, should be close to the
             maximum likelihood waveform.
             Keys should match ``self.waveform_generator.params``.
 
-        fbin: 1-d array or None
+        fbin : 1-d array or None
             Array with edges of the frequency bins used for relative
             binning [Hz]. Alternatively, pass `pn_phase_tol`.
 
-        pn_phase_tol: float or None
+        pn_phase_tol : float or None
             Tolerance in the post-Newtonian phase [rad] used for
             defining frequency bins. Alternatively, pass `fbin`.
 
-        spline_degree: int
+        spline_degree : int
             Degree of the spline used to interpolate the ratio between
             waveform and reference waveform for relative binning.
         """
@@ -181,17 +190,17 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
 
     def _set_splines(self):
         """
-        Set attributes `_basis_splines` and `_coefficients`.
-        `_basis_splines` is a sparse array of shape `(nbin, nrfft)`
+        Set attributes `._basis_splines` and `._coefficients`.
+        `._basis_splines` is a sparse array of shape ``(nbin, nrfft)``
         whose rows are the B-spline basis elements for `fbin` evaluated
         on the FFT grid.
-        `_coefficients` is an array of shape `(nbin, nbin)` whose i-th
+        `._coefficients` is an array of shape ``(nbin, nbin)``, its i-th
         row are the B-spline coefficients for a spline that interpolates
         an array of zeros with a one in the i-th place, on `fbin`.
         In other words, `_coefficients @ _basis_splines` is an array of
-        shape `(nbin, nrfft)` whose i-th row is a spline that
-        interpolates on `fbin` an array of zeros with a one in the i-th
-        place; this spline is evaluated on the RFFT grid.
+        shape ``(nbin, nrfft)`` whose i-th row is a spline that
+        interpolates on ``fbin`` an array of zeros with a one in the
+        i-th place; this spline is evaluated on the RFFT grid.
         """
         nbin = len(self.fbin)
         coefficients = np.empty((nbin, nbin))
@@ -231,14 +240,14 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
 
         Parameters
         ----------
-        integrand: array of shape (..., nrfft)
+        integrand : array of shape (..., nrfft)
             g(f) in the above notation (the oscillatory part of the
             integrand), array whose last axis corresponds to the FFT
             frequency grid.
 
-        Return
-        ------
-        summary_weights: array of shape (..., nbin)
+        Returns
+        -------
+        summary_weights : array of shape (..., nbin)
             array shaped like `integrand` except the last axis now
             correponds to the frequency bins.
         """
@@ -313,29 +322,29 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
 
         Parameters
         ----------
-        reference_waveform_finder: Instance of
+        reference_waveform_finder : Instance of
                 ``cogwheel.likelihood.ReferenceWaveformFinder``.
 
-        approximant: str
+        approximant : str
             Approximant name.
 
-        fbin: 1-d array or None
+        fbin : 1-d array or None
             Array with edges of the frequency bins used for relative
             binning [Hz]. Alternatively, pass `pn_phase_tol`.
 
-        pn_phase_tol: float or None
+        pn_phase_tol : float or None
             Tolerance in the post-Newtonian phase [rad] used for
             defining frequency bins. Alternatively, pass `fbin`.
 
-        spline_degree: int
+        spline_degree : int
             Degree of the spline used to interpolate the ratio between
             waveform and reference waveform for relative binning.
 
-        **kwargs:
+        **kwargs
             Keyword arguments, in case a subclass needs them.
 
-        Return
-        ------
+        Returns
+        -------
         Instance of ``cls``.
         """
         waveform_generator = reference_waveform_finder.waveform_generator \
@@ -360,12 +369,12 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
     @abstractmethod
     def lnlike_and_metadata(self, par_dic) -> tuple[float, object]:
         """
-        Return
-        ------
-        lnl: float
+        Returns
+        -------
+        lnl : float
             Log likelihood.
 
-        metadata: object
+        metadata : object
             Arbitrary object that stores information to postprocess the
             posterior samples. See ``.get_blob``.
         """
@@ -424,7 +433,8 @@ class BaseLinearFree(BaseRelativeBinning):
         self._polyfit_weights = np.sqrt(np.clip(
             self._get_summary_weights(weights_f.sum(0)).real, 0, None))
 
-    def _get_linearfree_hplus_hcross_dt(self, waveform_par_dic, by_m=False):
+    def _get_linearfree_hplus_hcross_dt(self, waveform_par_dic,
+                                        by_m=False):
         """
         Return a linear-free waveform at relative-binning (coarse)
         frequency resolution, and the timeshift to go back to the
@@ -434,21 +444,21 @@ class BaseLinearFree(BaseRelativeBinning):
 
         Parameters
         ----------
-        waveform_par_dic: dict
+        waveform_par_dic : dict
             Parameters per ``.waveform_generator.waveform_params``.
             Any extra keys would be silently ignored.
 
-        by_m: bool
+        by_m : bool
             Wheter to return the waveform mode-by-mode.
 
-        Return
-        ------
-        h_mpb: array of shape (m?, 2, len(.fbin))
+        Returns
+        -------
+        h_mpb : array of shape (m?, 2, len(.fbin))
             + and x polarizations at the relative-binning frequencies,
             with a timeshift applied so that waveforms with different
             parameters would be aligned in time (Hz^-1).
 
-        dt_linearfree: float
+        dt_linearfree : float
             Time shift to go back to the approximant's convention (s).
         """
         h_mpb = self.waveform_generator.get_hplus_hcross(
@@ -471,7 +481,7 @@ class BaseLinearFree(BaseRelativeBinning):
 
 class RelativeBinningLikelihood(BaseRelativeBinning):
     """
-    Generalization of ``CBCLikelihood`` that implements computation of
+    Generalization of `CBCLikelihood` that implements computation of
     likelihood with the relative binning method (fast).
 
     Subclassed by ``ReferenceWaveformFinder``.
@@ -509,7 +519,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
 
         Parameters
         ----------
-        par_dic: dict
+        par_dic : dict
             Waveform parameters, keys should match ``self.params``.
         """
         d_h, h_h = self._get_dh_hh_no_asd_drift(par_dic)
@@ -539,7 +549,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
 
         Parameters
         ----------
-        par_dic: dict
+        par_dic : dict
             Waveform parameters, keys should match ``self.params``.
         """
         # Pass fiducial configuration to hit cache often:
@@ -583,17 +593,17 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
 
         Parameters
         ----------
-        par_dic_items: tuple of (key, value) tuples
+        par_dic_items : tuple of (key, value) tuples
             Contents of ``par_dic``, in tuple format so it's hashable.
 
-        Return
-        ------
-        d_h: (n_m, 2) array
+        Returns
+        -------
+        d_h : (n_m, 2) array
             ``(d|h_mp)`` complex inner product, where ``d`` is data and
             ``h_mp`` is the waveform with co-precessing azimuthal mode
             ``m`` and polarization ``p`` (plus or cross).
 
-        h_h: (n_m*(n_m+1)/2, 2, 2, n_detectors) array
+        h_h : (n_m*(n_m+1)/2, 2, 2, n_detectors) array
             ``(h_mp|h_m'p')`` complex inner product.
 
         """
@@ -627,6 +637,7 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
         Update `asd_drift` using the reference waveform.
         The summary data `self._d_h_weights` and `self._d_h_weights` are
         such that:
+
             (d|h) ~= sum(_d_h_weights * conj(h_fbin)) / asd_drift^2
             (h|h) ~= sum(_h_h_weights * abs(h_fbin)^2) / asd_drift^2
 
@@ -673,7 +684,8 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
     def _get_h_f_interpolated(self, par_dic, *, normalize=False,
                               by_m=False):
         """
-        Fast approximation to `_get_h_f`.
+        Fast approximation to `._get_h_f`.
+
         Return (ndet, nfreq) array with waveform strain at detectors
         evaluated on the FFT frequency grid and zeroized outside
         `(fmin, fmax)`, computed using relative binning from a low

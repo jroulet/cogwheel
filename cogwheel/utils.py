@@ -67,9 +67,11 @@ cached_functions_registry = []
 
 def lru_cache(*args, **kwargs):
     """
-    Decorator like ``functools.lru_cache`` that also registers the
-    decorated function in ``cached_functions_registry`` so all caches
-    can easily be cleared with ``clear_caches()``.
+    Cache function results and register it for easy cache clearing.
+
+    This decorator behaves like ``functools.lru_cache`` but also adds
+    the decorated function to ``cached_functions_registry`` so that
+    all caches can be cleared with ``clear_caches()``.
     """
     def decorator(function):
         function = functools.lru_cache(*args, **kwargs)(function)
@@ -107,8 +109,8 @@ def quantile(values, q, weights=None):
     weights: array
         Of the same shape as `values`.
 
-    Return
-    ------
+    Returns
+    -------
     quantiles: array_like of float, of the same shape as `q`.
     """
     if weights is None:
@@ -131,7 +133,22 @@ def weighted_avg_and_std(values, weights=None):
 
 
 def n_effective(weights):
-    """Return effective sample size."""
+    """
+    Calculate the effective sample size from a set of weights.
+
+    This function computes the effective sample size using the formula
+    (sum(weights))^2 / sum(weights^2).
+
+    Parameters
+    ----------
+    weights : numpy.ndarray
+        An array of sample weights.
+
+    Returns
+    -------
+    float
+        The effective sample size.
+    """
     if weights.size == 0:
         return 0.
     return np.sum(weights)**2 / np.sum(weights**2)
@@ -139,27 +156,29 @@ def n_effective(weights):
 
 def resample_equal(samples, weights_col=WEIGHTS_NAME, num=None):
     """
+    Resample a weighted DataFrame to produce equal-weight samples.
+
     Draw `num` samples from a DataFrame of weighted samples, so that the
-    resulting samples have equal weights.
-    Note: in general this does not produce independent samples, they may
-    be repeated.
+    resulting samples have equal weights. Note: this does not generally
+    produce independent samples, and samples may be repeated.
 
     Parameters
     ----------
-    samples: pandas.DataFrame
+    samples : pandas.DataFrame
         Rows correspond to samples from a distribution.
 
-    weights_col: str
+    weights_col : str
         Name of a column in `samples` to interpret as weights.
 
-    num: int
-        Length of the returned DataFrame, defaults to ``len(samples)``.
+    num : int, optional
+        Length of the returned DataFrame. Defaults to ``len(samples)``.
 
-    Return
-    ------
-    equal_samples: pandas.DataFrame
-        Contains `num` rows with equal-weight samples. The columns match
-        those of `samples` except that `weights_col` is deleted.
+    Returns
+    -------
+    pandas.DataFrame
+        A DataFrame containing `num` rows with equal-weight samples. The
+        columns match those of `samples`, except that `weights_col` is
+        removed.
     """
     if num is None:
         num = len(samples)
@@ -237,10 +256,31 @@ def update_dataframe(df1, df2):
 
 def replace(sequence, *args):
     """
+    Replace specified elements in a sequence with new values.
+
     Return a list like `sequence` with the first occurrence of `old0`
     replaced by `new0`, the first occurrence of `old1` replaced by
     `new1`, and so on, where ``old0, new0, old1, new1, ... = args``.
     Accepts an even number of arguments.
+
+    Parameters
+    ----------
+    sequence : list or iterable
+        The input sequence to modify.
+
+    *args : list
+        Pairs of old and new elements to replace in the sequence.
+
+    Returns
+    -------
+    list
+        A copy of `sequence` with the specified replacements.
+
+    Raises
+    ------
+    ValueError
+        If an odd number of `args` is provided or if any `old` value
+        is not found in the sequence.
     """
     if len(args) % 2:
         raise ValueError('Pass an even number of args: '
@@ -272,8 +312,8 @@ def handle_scalars(function):
 @contextmanager
 def temporarily_change_attributes(obj, /, **kwargs):
     """
-    Example
-    -------
+    Examples
+    --------
     >>> class A:
     ...     x = 0
     >>> a = A()
@@ -580,7 +620,7 @@ def get_eventdir(parentdir, prior_name, eventname):
     This directory is intended to contain a `Posterior` instance,
     and multiple rundir directories with parameter estimation
     output for different sampler settings.
-    I.e. the file structure is as follows:
+    I.e. the file structure is as follows::
 
         <parentdir>
         └── <priordir>
@@ -599,7 +639,7 @@ def get_priordir(parentdir, prior_name):
     {parentdir}/{prior_name}
     This directory is intended to contain multiple eventdir
     directories, one for each event.
-    I.e. the file structure is as follows:
+    I.e. the file structure is as follows::
 
         <parentdir>
         └── <priordir>

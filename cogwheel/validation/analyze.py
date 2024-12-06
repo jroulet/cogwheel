@@ -82,8 +82,8 @@ def get_credible_intervals(config, params=None,
         Minimum number of samples with ⟨ℎ∣ℎ⟩ > config.H_H_MIN to
         tolerate.
 
-    Return
-    ------
+    Returns
+    -------
     credible_intervals: pandas.DataFrame
         Columns correspond to different source parameters and rows to
         different injections.
@@ -116,8 +116,8 @@ def _get_credible_intervals(config, rundir, params=None,
         Minimum number of samples with ⟨ℎ∣ℎ⟩ > config.H_H_MIN to
         tolerate.
 
-    Return
-    ------
+    Returns
+    -------
     dict of the form {par: credible_interval}, or empty dict if
     something fails.
     """
@@ -159,8 +159,8 @@ def credible_interval(arr, value, weights=None):
     weights: float array, optional
         Sample weights, has same shape as `arr`.
 
-    Return
-    ------
+    Returns
+    -------
     credible_interval: float between 0 and 1.
         (Weighted) fraction of `arr` whose values are below `value`.
     """

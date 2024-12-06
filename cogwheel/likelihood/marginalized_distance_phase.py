@@ -12,9 +12,10 @@ from .marginalized_distance import MarginalizedDistanceLikelihood
 class MarginalizedDistancePhaseLikelihood(
         MarginalizedDistanceLikelihood):
     """
-    Modified `MarginalizedDistanceLikelihood` marginalize with a
-    grid over phases. Thus, it removes two dimension from the parameter
-    space.
+    Modified `MarginalizedDistanceLikelihood` that marginalizes with a
+    grid over phases.
+
+    Thus, it removes two dimensions from the parameter space.
     """
     def __init__(self, lookup_table, event_data, waveform_generator,
                  par_dic_0, fbin=None, pn_phase_tol=None,
@@ -97,8 +98,8 @@ class MarginalizedDistancePhaseLikelihood(
         par_dic: dict
             Keys must include ``.params``.
 
-        Return
-        ------
+        Returns
+        -------
         lnl_marginalized: float
             Log likelihood, marginalized over orbital phase and
             distance, using relative binning.

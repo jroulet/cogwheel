@@ -1,7 +1,8 @@
 """
 Provide class ``LookupTable`` to marginalize the likelihood over
 distance; and ``LookupTableMarginalizedPhase22`` to marginalize the
-likelihood over both distance and phase for (l, |m|) = (2, 2) waveforms.
+likelihood over both distance and phase for `(l, |m|) = (2, 2)`
+waveforms.
 """
 from pathlib import Path
 from functools import wraps
@@ -52,7 +53,7 @@ def clear_cache_if_outdated():
     """
     If this file's ``_VERSION`` value is different than it was when the
     lookup tables were cached, then delete the file with the cache, this
-    will force recomputing future ``LookupTable``s.
+    will force recomputing future ``LookupTable`` objects.
     """
     if LOOKUP_TABLES_FNAME.exists():
         cache = np.load(LOOKUP_TABLES_FNAME)
@@ -66,8 +67,9 @@ clear_cache_if_outdated()
 
 def euclidean_distance_prior(d_luminosity):
     """
-    Distance prior uniform in luminosity volume, normalized so that
-    its integral is the luminosity volume in Mpc^3.
+    Distance prior uniform in luminosity volume.
+
+    Normalized so that its integral is the luminosity volume in Mpc^3.
     Note: no maximum is enforced here.
     """
     return 4 * np.pi * d_luminosity**2
@@ -75,9 +77,10 @@ def euclidean_distance_prior(d_luminosity):
 
 def comoving_distance_prior(d_luminosity):
     """
-    Distance prior uniform in comoving volume-time, normalized so that
-    its integral is the comoving volume-time per unit time, in comoving
-    Mpc^3.
+    Distance prior uniform in comoving volume-time.
+
+    Normalized so that its integral is the comoving volume-time per unit
+    time, in comoving Mpc^3.
     Note: no maximum is enforced here.
     """
     return (euclidean_distance_prior(d_luminosity)
@@ -94,9 +97,10 @@ d_luminosity_priors = {'euclidean': euclidean_distance_prior,
 class LookupTable(utils.JSONMixin):
     """
     Auxiliary class to marginalize the likelihood over distance.
+
     The instances are callable, and use interpolation to compute
-    ``log(evidence) - d_h**2 / h_h / 2``, where``evidence`` is the value
-    of the likelihood marginalized over distance.
+    ``log(evidence) - d_h**2 / h_h / 2``, where ``evidence`` is the
+    value of the likelihood marginalized over distance.
     The interpolation is done in some coordinates `x`, `y` in which the
     function is smooth (see ``_get_x_y``, ``get_dh_hh``).
     """
@@ -111,19 +115,20 @@ class LookupTable(utils.JSONMixin):
                  d_luminosity_max=D_LUMINOSITY_MAX, shape=(256, 128)):
         """
         Construct the interpolation table.
+
         If a table with the same settings is found in the file in
         ``LOOKUP_TABLES_FNAME``, it will be loaded for faster
         instantiation. If not, the table will be computed and saved.
 
         Parameters
         ----------
-        d_luminosity_prior: string
+        d_luminosity_prior : string
             Key in `d_luminosity_priors`.
 
-        d_luminosity_max: float
+        d_luminosity_max : float
             Maximum luminosity distance (Mpc).
 
-        shape: (int, int)
+        shape : (int, int)
             Number of interpolating points in x and y.
         """
         self.d_luminosity_prior_name = d_luminosity_prior_name
@@ -152,8 +157,10 @@ class LookupTable(utils.JSONMixin):
     def _get_table(self, dh_grid, hh_grid):
         """
         Attempt to load a previously computed table with the requested
-        settings. If this is not possible, compute the table and save it
-        for faster access in the future.
+        settings.
+
+        If this is not possible, compute the table and save it for
+        faster access in the future.
         Note: if at some point the ``LOOKUP_TABLES_FNAME`` file gets too
         large you are free to delete it.
         """
@@ -174,11 +181,12 @@ class LookupTable(utils.JSONMixin):
         """
         Return ``log(evidence) - d_h**2 / h_h / 2``, where``evidence``
         is the value of the likelihood marginalized over distance.
+
         This uses interpolation from a precomputed table.
 
         Parameters
         ----------
-        d_h, h_h: float
+        d_h, h_h : float
             Inner products (d|h), (h|h) where `d` is data and `h` is the
             model strain at a fiducial distance REFERENCE_DISTANCE.
             These are scalars (detectors are summed over). A real part
@@ -193,6 +201,7 @@ class LookupTable(utils.JSONMixin):
         """
         Return ``(d_min, d_max)`` pair of luminosity distance bounds to
         the distribution at the ``sigmas`` level.
+
         Let ``u = REFERENCE_DISTANCE / d_luminosity``, the likelihood is
         Gaussian in ``u``. This function returns the luminosity
         distances corresponding to ``u`` +/- `sigmas` deviations away
@@ -209,9 +218,10 @@ class LookupTable(utils.JSONMixin):
         """
         Parameters
         ----------
-        d_h, h_h: float
-            Inner products (d|h), (h|h) where `d` is data and `h` is the
-            model strain at a fiducial distance REFERENCE_DISTANCE.
+        d_h, h_h : float
+            Inner products (d|h), (h|h) where ``d`` is data and ``h`` is
+            the model strain at a fiducial distance
+            `.REFERENCE_DISTANCE`.
             These are scalars (detectors are summed over).
         """
         return self(d_h, h_h) + d_h**2 / h_h / 2
@@ -220,7 +230,7 @@ class LookupTable(utils.JSONMixin):
         """
         Return samples from the luminosity distance distribution given
         the inner products (d|h), (h|h) of a waveform at distance
-        ``REFERENCE_DISTANCE``.
+        ``.REFERENCE_DISTANCE``.
 
         Parameters
         ----------
@@ -255,6 +265,7 @@ class LookupTable(utils.JSONMixin):
     def _function(self, d_h, h_h):
         """
         Function to interpolate with the aid of a lookup table.
+
         Return ``log(evidence) - overlap**2 / 2``, where ``evidence``
         is the value of the likelihood marginalized over distance.
         """
@@ -266,8 +277,10 @@ class LookupTable(utils.JSONMixin):
 
     def _function_integrand(self, d_luminosity, d_h, h_h):
         """
-        Proportional to the distance posterior. The log of the integral
-        of this function is stored in the lookup table.
+        Proportional to the distance posterior.
+
+        The log of the integral of this function is stored in the lookup
+        table.
         """
         norm_h = np.sqrt(h_h)
         return (self.d_luminosity_prior(d_luminosity) * self._inverse_volume
@@ -279,7 +292,8 @@ class LookupTable(utils.JSONMixin):
         Interpolation coordinates (x, y) in which the function to
         interpolate is smooth, as a function of the inner products
         (d|h), (h|h).
-        Inverse of ``_get_dh_hh``.
+
+        Inverse of `._get_dh_hh`.
         """
         norm_h = np.sqrt(h_h)
         overlap = d_h / norm_h
@@ -293,7 +307,8 @@ class LookupTable(utils.JSONMixin):
         Inner products (d|h), (h|h), as a function of the interpolation
         coordinates (x, y) in which the function to interpolate is
         smooth.
-        Inverse of ``_get_x_y``.
+
+        Inverse of `._get_x_y`.
         """
         overlap = self._uncompactify(y) * self._Z0
         norm_h = (np.exp(x) * self.d_luminosity_max
@@ -317,7 +332,7 @@ class LookupTable(utils.JSONMixin):
 
     def __repr__(self):
         """
-        Return a string of the form `LookupTable(key1=val1, ...)`
+        Return a string of the form ``LookupTable(key1=val1, ...)``.
         """
         kwargs_str = ", ".join(f'{key}={val!r}'
                                for key, val in self.get_init_dict().items())
@@ -328,7 +343,7 @@ class LookupTableMarginalizedPhase22(LookupTable):
     """
     Similar to ``LookupTable`` except the likelihood is marginalized
     over both distance and phase, assuming quadrupolar radiation
-    (actually, just |m|=2 is required, no restriction on l).
+    (actually, just `|m|=2` is required, no restriction on l).
 
     ``d_h`` is now assumed to be the absolute value of the complex (d|h)
     throughout, except in ``sample_phase`` it is the complex (d|h).
@@ -344,8 +359,10 @@ class LookupTableMarginalizedPhase22(LookupTable):
 
     def _function_integrand(self, d_luminosity, d_h, h_h):
         """
-        Proportional to the distance posterior. The log of the integral
-        of this function is stored in the lookup table.
+        Proportional to the distance posterior.
+
+        The log of the integral of this function is stored in the lookup
+        table.
         """
         return (super()._function_integrand(d_luminosity, d_h, h_h)
                 * scipy.special.i0e(d_h * self.REFERENCE_DISTANCE
@@ -353,19 +370,19 @@ class LookupTableMarginalizedPhase22(LookupTable):
 
     def _sample_phase(self, d_luminosity, d_h, num=None):
         """
-        Return a random value for the orbital phase according to the posterior
-        conditioned on all other parameters.
+        Return a random value for the orbital phase according to the
+        posterior conditioned on all other parameters.
 
         Parameters
         ----------
-        d_luminosity: float
+        d_luminosity : float
             Luminosity distance of the sample (Mpc).
 
-        d_h: complex
+        d_h : complex
             Complex inner product (d|h) between data and waveform at
             ``self.REFERENCE_DISTANCE``.
 
-        num: int, optional
+        num : int, optional
             How many samples to return, defaults to one.
         """
         if np.isrealobj(d_h):
