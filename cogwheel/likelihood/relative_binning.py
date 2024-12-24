@@ -58,7 +58,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
         par_dic_0 : dict
             Parameters of the reference waveform, should be close to the
             maximum likelihood waveform.
-            Keys should match ``self.waveform_generator.params``.
+            Keys should match `waveform_generator.params`.
 
         fbin : 1-d array or None
             Array with edges of the frequency bins used for relative
@@ -322,8 +322,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
 
         Parameters
         ----------
-        reference_waveform_finder : Instance of
-                ``cogwheel.likelihood.ReferenceWaveformFinder``.
+        reference_waveform_finder : likelihood.ReferenceWaveformFinder
 
         approximant : str
             Approximant name.

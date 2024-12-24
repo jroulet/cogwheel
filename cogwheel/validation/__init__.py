@@ -1,6 +1,4 @@
-"""
-Package to validate the cogwheel code by doing inference on injections.
-"""
+"""Validate the cogwheel code by doing inference on injections."""
 import importlib
 import sys
 
@@ -14,7 +12,7 @@ def load_config(config_filename):
 
     Parameters
     ----------
-    config_filename: PathLike
+    config_filename : PathLike
         Full path to a file containing configuration parameters for the
         injections.
 

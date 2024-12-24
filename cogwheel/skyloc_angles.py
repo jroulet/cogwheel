@@ -1,6 +1,5 @@
 """
-Implementation of `SkyLocAngles` class to handle coordinate
-transformations to and from right ascension and declination.
+Coordinate transformations to and from right ascension and declination.
 """
 import numpy as np
 
@@ -29,7 +28,7 @@ class SkyLocAngles(utils.JSONMixin):
             Names of the detectors used to define the coordinate system,
             e.g. "HL" or "H".
 
-        tgps: float
+        tgps : float
             GPS time used to define the coordinate system.
         """
         self.detector_pair = detector_pair
@@ -158,10 +157,10 @@ def ra_to_lon(ra, gmst):
 
     Parameters
     ----------
-    ra: float
+    ra : float
         Right ascension in radians.
 
-    gmst: float
+    gmst : float
         Greenwich meridian standard time in radians.
 
     Returns
@@ -178,8 +177,8 @@ def lon_to_ra(lon, gmst):
 
     Parameters
     ----------
-    lon: longitude in radians.
-    gmst: Greenwich meridian standard time in radians.
+    lon : longitude in radians.
+    gmst : Greenwich meridian standard time in radians.
 
     Returns
     -------

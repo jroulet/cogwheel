@@ -43,10 +43,10 @@ def has_compatible_signature(func, params) -> bool:
 
     Parameters
     ----------
-    func: callable
+    func : callable
         Function or method to test.
 
-    params: sequence of str
+    params : sequence of str
         Parameter names.
     """
     parameters = dict(inspect.signature(func).parameters)
@@ -89,60 +89,39 @@ class Prior(ABC, utils.JSONMixin):
 
     Attributes
     ----------
-    range_dic: dict
+    range_dic : dict
         Dictionary whose keys are sampled parameter names and whose
         values are pairs of floats defining their ranges.
         Needs to be defined by the subclass (either as a class attribute
         or instance attribute) before calling `Prior.__init__()`.
 
-    sampled_params: list of str
+    sampled_params : list of str
         Names of sampled parameters (keys of `range_dic`).
 
-    standard_params: list of str
+    standard_params : list of str
         Names of standard parameters.
 
-    conditioned_on: list of str
+    conditioned_on : list of str
         Names of parameters on which this prior is conditioned on. To
         combine priors, conditioned-on parameters need to be among the
         standard parameters of another prior.
 
-    periodic_params: list of str
+    periodic_params : list of str
         Names of sampled parameters that are periodic.
 
-    reflective_params: list of str
+    reflective_params : list of str
         Names of sampled parameters that are reflective.
 
-    folded_reflected_params: list of str
+    folded_reflected_params : list of str
         Names of sampled parameters that are folded using reflection
         about the center.
 
-    folded_shifted_params: list of str
+    folded_shifted_params : list of str
         Names of sampled parameters that are folded using
         translation.
 
-    folded_params: list of str
+    folded_params : list of str
         ``folded_reflected_params + folded_shifted_params``.
-
-    Methods
-    -------
-    lnprior
-        Take sampled and conditioned-on parameters and return a float
-        with the natural logarithm of the prior probability density in
-        the space of sampled parameters. Provided by the subclass.
-
-    transform
-        Coordinate transformation, take sampled parameters and
-        conditioned-on parameters and return a dict of standard
-        parameters. Provided by the subclass.
-
-    lnprior_and_transform
-        Take sampled parameters and return a tuple with the result of
-        (lnprior, transform).
-
-    inverse_transform
-        Inverse coordinate transformation, take standard parameters and
-        conditioned-on parameters and return a dict of sampled
-        parameters. Provided by the subclass.
     """
 
     conditioned_on = []
@@ -556,10 +535,10 @@ class Prior(ABC, utils.JSONMixin):
 
         Parameters
         ----------
-        n_samples: int
+        n_samples : int
             How many samples to generate.
 
-        seed:
+        seed
             Passed to ``numpy.default_rng``, for reproducibility.
 
         Returns
@@ -661,10 +640,11 @@ class CombinedPrior(Prior):
 
     def __init__(self, *args, **kwargs):
         """
-        Instantiate prior classes and define `range_dic`.
-
-        The list of parameters to pass to a subclass `cls` can be found
-        using `cls.init_parameters()`.
+        Parameters
+        ----------
+        *args, **kwargs
+            The list of parameters to pass to a subclass `cls` of
+            `CombinedPrior` can be found using `cls.init_parameters()`.
         """
         kwargs.update(dict(zip([par.name for par in self.init_parameters()],
                                args)))
@@ -689,17 +669,17 @@ class CombinedPrior(Prior):
         Define the following attributes and methods from the combination
         of priors in `cls.prior_classes`:
 
-            * ``range_dic``
-            * ``standard_params``
-            * ``conditioned_on``
-            * ``periodic_params``
-            * ``reflective_params``
-            * ``folded_reflected_params``
-            * ``folded_shifted_params``
-            * ``transform``
-            * ``inverse_transform``
-            * ``lnprior_and_transform``
-            * ``lnprior``
+        * ``range_dic``
+        * ``standard_params``
+        * ``conditioned_on``
+        * ``periodic_params``
+        * ``reflective_params``
+        * ``folded_reflected_params``
+        * ``folded_shifted_params``
+        * ``transform``
+        * ``inverse_transform``
+        * ``lnprior_and_transform``
+        * ``lnprior``
 
         which are used to override the corresponding attributes and
         methods of the new `CombinedPrior` subclass.
@@ -714,6 +694,7 @@ class CombinedPrior(Prior):
             """
             Transform sampled parameter values to standard parameter
             values.
+
             Take `self.sampled_params + self.conditioned_on` parameters
             and return a dictionary with `self.standard_params`
             parameters.
@@ -866,7 +847,7 @@ class CombinedPrior(Prior):
 
         Parameters
         ----------
-        include_optional: bool
+        include_optional : bool
             Whether to include parameters with defaults in the returned
             list.
 
@@ -897,10 +878,10 @@ class CombinedPrior(Prior):
 
         Parameters
         ----------
-        func: function
+        func : function
             Function whose signature we want to change.
 
-        parameters: sequence of `inspect.Parameter` objects
+        parameters : sequence of `inspect.Parameter` objects
             The parameters of the function's new signature.
         """
         func.__signature__ = inspect.signature(func).replace(
@@ -971,8 +952,12 @@ class FixedPrior(Prior):
     def inverse_transform(self, *standard_par_vals, **standard_par_dic):
         """
         Return an empty dictionary of sampled parameters.
-        Raise `PriorError` if the arguments passed do not match the
-        `standard_par_dic` stored.
+
+        Raises
+        ------
+        PriorError
+            If the arguments passed do not match the `standard_par_dic`
+            stored.
         """
         standard_par_dic.update(dict(zip(self.standard_params,
                                          standard_par_vals)))
@@ -993,7 +978,7 @@ class FixedPrior(Prior):
 
 class UniformPriorMixin:
     """
-    Define `lnprior` for uniform priors.
+    Define ``.lnprior`` for uniform priors.
 
     It must be inherited before `Prior` (otherwise a `PriorError` is
     raised) so that abstract methods get overriden.
@@ -1002,8 +987,8 @@ class UniformPriorMixin:
         """
         Natural logarithm of the prior probability density.
 
-        Take `.sampled_params + .conditioned_on` parameters and return a
-        float.
+        Take ``.sampled_params + .conditioned_on`` parameters and return
+        a float.
         """
         del par_vals, par_dic
         return self.max_lnprior
@@ -1042,6 +1027,7 @@ class IdentityTransformMixin:
     def transform(self, *par_vals, **par_dic):
         """
         Transform sampled parameter values to standard parameter values.
+
         Take `self.sampled_params + self.conditioned_on` parameters and
         return a dictionary with `self.standard_params` parameters.
         """

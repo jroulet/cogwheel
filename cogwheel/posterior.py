@@ -72,6 +72,8 @@ class Posterior(utils.JSONMixin):
 
     def lnposterior_pardic_and_metadata(self, *args, **kwargs):
         """
+        Return log posterior, standard parameters and extra metadata.
+
         Parameters
         ----------
         *args, **kwargs

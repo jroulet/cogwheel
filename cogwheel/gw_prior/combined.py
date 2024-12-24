@@ -4,6 +4,19 @@ convenience.
 
 Prior classes defined here can be used for parameter estimation and
 are registered in a dictionary ``prior_registry``.
+
+    Note on registered prior class names:
+
+    * ``LVC*``, ``IAS*`` and ``Volumetric*``  priors differ on the
+      distribution of component spins: ``LVC`` is isotropic and uniform
+      in magnitude, ``IAS`` is uniform in the effective spin, and
+      ``Volumetric`` is isotropic and uniform in the magnitude cubed.
+    * ``Intrinsic*`` priors are for the intrinsic parameters only, these
+      priors may be paired with a likelihood that marginalizes over
+      extrinsic parameters.
+    * ``Cartesian*`` priors try avoid polar coordinates for the inplane
+      spin components, these are better suited for samplers that don't
+      implement periodic parameters.
 """
 
 from cogwheel import utils
@@ -398,7 +411,7 @@ class IntrinsicVolumetricSpinPrior(RegisteredPriorMixin,
 
     Intrinsic parameters only, precessing, uniform in detector frame
     component masses, volumetric spin prior (spin components uniform in
-    the ball |s| < 1), no tides.
+    the ball ``|s| < 1``), no tides.
     For low mass systems, consider ``PNIntrinsicVolumetricSpinPrior``
     instead.
     """
@@ -416,7 +429,7 @@ class PNIntrinsicVolumetricSpinPrior(RegisteredPriorMixin,
 
     Intrinsic parameters only, precessing, uniform in detector frame
     component masses, volumetric spin prior (spin components uniform in
-    the ball |s| < 1), no tides.
+    the ball ``|s| < 1``), no tides.
     Best suited for low masses where PN expansion is better justified.
     """
     default_likelihood_class = MarginalizedExtrinsicLikelihood

@@ -74,27 +74,27 @@ class EventData(utils.JSONMixin):
         """
         Parameters
         ----------
-        filenames: list of paths
+        filenames : list of paths
             Paths pointing to ``gwpy.timeseries.Timeseries`` objects,
             containing data for each detector.
 
-        eventname: str
+        eventname : str
             Name of the event, e.g. ``'GW150914'``.
 
-        detector_names: sequence of str
+        detector_names : sequence of str
             E.g. ``'HLV'`` or ``('H', 'L', 'V')`` for
             Hanford-Livingston-Virgo.
 
-        tgps: float
+        tgps : float
             GPS time of the event (s).
 
-        t_before, t_after: float
+        t_before, t_after : float
             Number of seconds of valid data (i.e. without edge effects)
             to keep before/after `tgps`. The total segment of data will
             have extra duration of ``wht_filter_duration / 2`` seconds
             to either side.
 
-        wht_filter_duration: float
+        wht_filter_duration : float
             Desired impulse response length of the whitening filter (s),
             will be ``wht_filter_duration / 2`` seconds to either side.
             Note: the whitening filter will only be approximately FIR.
@@ -102,18 +102,18 @@ class EventData(utils.JSONMixin):
             individual PSDs are measured for Welch, and the extent of
             the tapering in time-domain (s).
 
-        fmin: float or sequence of floats
+        fmin : float or sequence of floats
             Minimum frequency at which the whitening filter will have
             support (Hz). Multiple values can be passed, one for each
             detector.
 
-        df_taper: float
+        df_taper : float
             Whitening filter is highpassed. See ``highpass_filter``.
 
-        fmax: float
+        fmax : float
             Desired Nyquist frequency (Hz), half the sampling frequency.
 
-        **kwargs:
+        **kwargs
             Keyword arguments to ``gwpy.timeseries.TimeSeries.read``.
 
         Returns
@@ -158,41 +158,41 @@ class EventData(utils.JSONMixin):
 
         Parameters
         ----------
-        eventname: str
+        eventname : str
             Name of event.
 
-        duration: float
+        duration : float
             Number of seconds of data.
 
-        detector_names: sequence of str
+        detector_names : sequence of str
             E.g. ``'HLV'`` or ``('H', 'L', 'V')`` for
             Hanford-Livingston-Virgo.
 
-        asd_funcs: sequence of callables or strings
+        asd_funcs : sequence of callables or strings
             Functions that return the noise amplitude spectral density
             (1/Hz), of the same length as `detector_names`. See
             ``make_asd_func`` to construct an interpolator.
             Alternatively, a string that is a key in ``ASDS`` can be
             passed to use a predefined ASD (e.g. 'asd_H_O3').
 
-        tgps: float
+        tgps : float
             GPS time of event.
 
-        tcoarse: float
+        tcoarse : float
             Time of event relative to beginning of data. Defaults to
             ``duration / 2``, the center of the segment.
 
-        fmin: float
+        fmin : float
             Minimum frequency at which the whitening filter will have
             support (Hz). It is important for performance.
 
-        df_taper: float
+        df_taper : float
             Whitening filter is highpassed. See ``highpass_filter``.
 
-        fmax: float
+        fmax : float
             Desired Nyquist frequency (Hz), half the sampling frequency.
 
-        seed: int, optional
+        seed : int, optional
             Use some fixed value for reproducibility.
 
         Returns
@@ -235,32 +235,32 @@ class EventData(utils.JSONMixin):
         """
         Parameters
         ----------
-        eventname: str
-            Event name, e.g. ``'GW151914'``.
+        eventname : str
+            Event name, e.g. ``'GW150914'``.
 
-        frequencies: 1-d array
-            Frequencies (Hz), as in np.fft.rfftfreq(), uniform and
-            starting at 0.
+        frequencies : 1-d array
+            Frequencies (Hz), as in ``numpy.fft.rfftfreq()``, uniform
+            and starting at 0.
 
-        strain: array of shape (ndet, nfreq)
+        strain : array of shape (ndet, nfreq)
             Frequency-domain strain data (1/Hz).
 
-        wht_filter: array of shape (ndet, nfreq)
+        wht_filter : array of shape (ndet, nfreq)
             Frequency-domain whitening filter. It is important that
             entries are 0 below some minimum frequency so waveforms
             don't need to be queried at arbitrarily low frequency.
 
-        detector_names: sequence of str
+        detector_names : sequence of str
             E.g. ``'HLV'`` or ``('H', 'L', 'V')`` for
             Hanford-Livingston-Virgo.
 
-        tgps: float
+        tgps : float
             GPS time of the event (s).
 
-        tcoarse: float
+        tcoarse : float
             Time of event relative to beginning of data.
 
-        injection: dict, optional
+        injection : dict, optional
             For bookkeeping, not actually used.
         """
         super().__init__()
@@ -361,34 +361,34 @@ class EventData(utils.JSONMixin):
         """
         Parameters
         ----------
-        timeseries: `gwpy.timeseries.TimeSeries`
+        timeseries : `gwpy.timeseries.TimeSeries`
             Object containing single-detector data. Needs to be long
             enough to measure the PSD with the Welch method.
 
-        tgps: float
+        tgps : float
             GPS time of event.
 
-        t_before, t_after: float
+        t_before, t_after : float
             Number of seconds of valid data (i.e. without edge effects)
             to keep before/after `tgps`. The total segment of data will
             have extra duration of ``wht_filter_duration / 2`` seconds
             to either side.
 
-        wht_filter_duration: float
+        wht_filter_duration : float
             Desired impulse response length of the whitening filter (s).
             Note: the whitening filter will only be approximately FIR.
             This is also the duration of each chunk in which the
             individual PSDs are measured for Welch, and the extent of
             the tapering in time-domain (s).
 
-        fmin: float
+        fmin : float
             Minimum frequency at which the whitening filter will have
             support (Hz). It is important for performance.
 
-        df_taper: float
+        df_taper : float
             Whitening filter is highpassed. See ``highpass_filter``.
 
-        fmax: float
+        fmax : float
             Desired Nyquist frequency (Hz), half the sampling frequency.
         """
         if (wht_filter_duration / timeseries.dt.value) % 2 != 0:
@@ -462,11 +462,11 @@ class EventData(utils.JSONMixin):
 
         Parameters
         ----------
-        par_dic: dict
+        par_dic : dict
             Parameter values, keys should match
             ``waveform.WaveformGenerator.params``
 
-        approximant: str
+        approximant : str
             Name of approximant.
         """
         if self.injection:
@@ -498,18 +498,18 @@ class EventData(utils.JSONMixin):
 
         Parameters
         ----------
-        xlim: (float, float)
+        xlim : (float, float)
             Optional, time range to plot relative to time of the event.
 
-        nfft: int
+        nfft : int
             Number of samples to use in each spectrum computation. Sets
             the frequency resolution.
 
-        noverlap: int
+        noverlap : int
             How many samples to overlap between adjacent spectra.
             Defaults to ``nfft / 2``.
 
-        vmax: float
+        vmax : float
             Upper limit for the color scale.
         """
         noverlap = noverlap or nfft / 2
@@ -617,8 +617,24 @@ class EventData(utils.JSONMixin):
 
 def highpass_filter(frequencies, fmin=15., df_taper=1.):
     """
-    High-pass frequency domain filter with a sin^2 tapering between
-    `fmin` and `fmin + df_taper` [Hz].
+    High-pass frequency domain filter with a sin^2 tapering.
+
+    Parameters
+    ----------
+    frequencies : float 1d array
+        Sorted, regularly spaced frequencies.
+
+    fmin : float
+        Minimum frequency, filter will be 0 below this.
+
+    df_taper : float
+        Width of the frequency band over which the filter goes to 1.
+
+    Returns
+    -------
+    float array
+        Same shape as `frequencies`, is 0 below `fmin` and 1 above
+        `fmin + df_taper`.
     """
     fd_filter = np.ones(len(frequencies))
     i_1 = np.searchsorted(frequencies, fmin) - 1
@@ -634,6 +650,7 @@ def download_timeseries(eventname, outdir=None, tgps=None,
     """
     Download data from GWOSC, save as hdf5 format that can be read by
     `gwpy.timeseries.Timeseries.read()`.
+
     Files are saved as ``'{det}_{eventname}.hdf5'``, e.g.
     ``'H_GW150914.hdf5'``.
     Return the paths to the files, the detector names and the GPS time;
@@ -641,35 +658,35 @@ def download_timeseries(eventname, outdir=None, tgps=None,
 
     Parameters
     ----------
-    eventname: str
+    eventname : str
         Name of event.
 
-    outdir: path
+    outdir : path
         Directory into which to save the files. Defaults to
         ``GWOSC_FILES_DIR/eventname``.
 
-    tgps: float, optional
+    tgps : float, optional
         GPS time of event. Can be ``None`` if `eventname` is known to
         GWOSC.
 
-    interval: (float, float)
+    interval : (float, float)
         Start and end time relative to tgps (s).
 
-    overwrite: bool
+    overwrite : bool
         If ``False``, will skip the download when a file already exists.
 
-    **kwargs:
+    **kwargs
         Passed to ``gwpy.timeseries.TimeSeries.fetch_open_data``.
 
     Returns
     -------
-    filenames: list of pathlib.Path
+    filenames : list of pathlib.Path
         Paths to the hdf5 files with the downloaded data.
 
-    detector_names: tuple of str
+    detector_names : tuple of str
         E.g. ``('H', 'L', 'V')``.
 
-    tgps: float
+    tgps : float
         GPS time of the event.
     """
     tgps = tgps or gwosc.datasets.event_gps(eventname)
@@ -712,16 +729,16 @@ def _fetch_open_data(detector_name, tgps, interval, **kwargs):
 
     Parameters
     ----------
-    detector_name: str
+    detector_name : str
         Detector initial, e.g. 'H' for Hanford.
 
-    tgps: float
+    tgps : float
         GPS time of event.
 
-    interval: (float, float)
+    interval : (float, float)
         Start and end time relative to tgps (s).
 
-    **kwargs:
+    **kwargs
         Passed to ``gwpy.timeseries.TimeSeries.fetch_open_data``.
 
     Returns

@@ -15,9 +15,10 @@ release = '1.2'
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-	'numpydoc', ]
+	'numpydoc',
+]
 numpydoc_show_class_members = False
-autoclass_content = 'init'
+autoclass_content = 'both'
 
 templates_path = ['_templates']
 exclude_patterns = []

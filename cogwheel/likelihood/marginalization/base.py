@@ -1,4 +1,6 @@
 """
+Base classes to marginalize the likelihood over extrinsic parameters.
+
 Define classes ``BaseCoherentScore`` and ``BaseCoherentScoreHM`` to
 marginalize the likelihood over extrinsic parameters from
 matched-filtering timeseries.
@@ -184,10 +186,10 @@ class MarginalizationInfo:
 @dataclass
 class MarginalizationInfoHM(MarginalizationInfo):
     """
-    Like ``MarginalizationInfo`` except:
+    Like `MarginalizationInfo` except:
 
-    * it additionally contains ``o_inds``
-    * ``d_h`` has dtype float, not complex.
+    * it additionally contains ``.o_inds``
+    * ``.d_h`` has dtype float, not complex.
 
     Attributes
     ----------
@@ -215,6 +217,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     Base class for computing coherent scores (i.e., marginalized
     likelihoods over extrinsic parameters) from matched-filtering
     timeseries.
+
     Meant to be subclassed differently depending on the waveform physics
     (precession and/or higher modes) that may require different
     algorithms.
@@ -535,6 +538,8 @@ class ProposingCoherentScore(BaseCoherentScore):
                  min_n_effective=50, max_log2n_qmc: int = 15,
                  beta_temperature=0.5, learning_rate=1e-2, **kwargs):
         """
+        Parameters
+        ----------
         beta_temperature : float or float array of shape (n_detectors,)
             Inverse temperature, tempers the arrival time probability at
             each detector.
@@ -577,12 +582,13 @@ class ProposingCoherentScore(BaseCoherentScore):
                                  lnl_marginalized_threshold=-np.inf):
         """
         Return a ``MarginalizationInfo`` object with extrinsic parameter
-        integration results. Adaptive importance sampling is performed,
-        which requires an initial proposal. This method comes up with a
-        proposal, half based on the d_h timeseries and half based on the
-        adaptions from previous calls to this function. Thus, as a side
-        effect ``._t_arrival_prob`` is updated (if
-        ``.learning_rate != 0``).
+        integration results.
+
+        Adaptive importance sampling is performed, which requires an
+        initial proposal. This method comes up with a proposal, half
+        based on the d_h timeseries and half based on the adaptions from
+        previous calls to this function. Thus, as a side effect
+        ``._t_arrival_prob`` is updated (if ``.learning_rate != 0``).
         """
         # Resample to match sky_dict's dt:
         d_h_timeseries, times = self.sky_dict.resample_timeseries(

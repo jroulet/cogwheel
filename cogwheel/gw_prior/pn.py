@@ -18,9 +18,11 @@ from cogwheel.prior import Prior
 class PNCoordinatesPrior(Prior):
     """
     Implement the coordinates for intrinsic parameters of [Lee, Morisaki
-    & Tagoshi 2203.05216]. These are quite similar except we normalize
-    the eigenvectors of the Fisher matrix by the square root of their
-    eigenvalue, so the Fisher errorbars in (mu1, mu2) are 1/snr.
+    & Tagoshi 2203.05216].
+
+    These are quite similar except we normalize the eigenvectors of the
+    Fisher matrix by the square root of their eigenvalue, so the Fisher
+    errorbars in (mu1, mu2) are 1/snr.
     """
     standard_params = ['m1', 'm2', 's1z', 's2z']
     range_dic = {'mu1': None,
@@ -33,17 +35,18 @@ class PNCoordinatesPrior(Prior):
         """
         Parameters
         ----------
-        eigvecs: float array of shape (3, 2)
+        eigvecs : float array of shape (3, 2)
             Fisher matrix eigenvectors, see
             ``.eigvecs_from_reference_waveform_finder()``.
 
-        f_ref: float
+        f_ref : float
             Reference frequency (Hz).
 
-        q_min: float
+        q_min : float
             Minimum mass ratio
 
-        **kwargs: Passed to super().__init__()
+        **kwargs
+            Passed to super().__init__()
         """
         eigvecs = np.asarray(eigvecs)
         if eigvecs.shape != (3, 2):
@@ -92,6 +95,7 @@ class PNCoordinatesPrior(Prior):
         Return a float array of shape (3, 2) with the two main
         eigenvectors of the Fisher matrix in the space of the first 3
         coefficients of the post-Newtonian expansion.
+
         These are the first 2 columns of ``U.T`` in the notation of
         [2203.05216], except that we normalize each eigenvector to have
         norm ``sqrt(eigenvalue)``.

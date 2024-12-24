@@ -234,19 +234,19 @@ class LookupTable(utils.JSONMixin):
 
         Parameters
         ----------
-        d_h: float
+        d_h : float
             Inner product (summed over detectors) between data and
             waveform at ``self.REFERENCE_DISTANCE``.
 
-        h_h: float
+        h_h : float
             Inner product (summed over detectors) of waveform at
             ``self.REFERENCE_DISTANCE`` with itself.
 
-        num: int or None
+        num : int or None
             How many samples to generate. ``None`` (default) generates a
             single (scalar) sample.
 
-        resolution: int
+        resolution : int
             How finely to interpolate the distance distribution when
             generating samples.
         """

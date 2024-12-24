@@ -17,6 +17,7 @@ class SkyDictionary(utils.JSONMixin):
     Given a network of detectors, this class generates a set of
     samples covering the sky location isotropically in Earth-fixed
     coordinates (lat, lon).
+
     The samples are assigned to bins based on the arrival-time delays
     between detectors. This information is accessible as dictionaries
     ``delays2inds_map``, ``delays2genind_map``.
@@ -58,12 +59,6 @@ class SkyDictionary(utils.JSONMixin):
         Each value is a list of ints, corresponding to indices of
         sky-samples that have the correct delay (to the resolution given
         by ``f_sampling``).
-
-    Methods
-    -------
-    resample_timeseries
-    get_sky_inds_and_prior
-    choose_f_sampling
     """
     DEFAULT_F_SAMPLING = 2**13
 
@@ -283,7 +278,7 @@ class SkyDictionary(utils.JSONMixin):
 
         Parameters
         ----------
-        t_arrival_lnprob: (n_det, n_times) float array
+        t_arrival_lnprob : (n_det, n_times) float array
             Incoherent proposal for log probability of arrival times at
             each detector.
         """

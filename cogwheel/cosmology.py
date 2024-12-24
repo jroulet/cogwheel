@@ -1,8 +1,9 @@
 """
-Provide functions to transform between d_luminosity and redshift
-as well as computing ratios of comoving volume-time to Euclidean
-universe (i.e., luminosity volume and present-day observer time)
-volume-time.
+Cosmological corrections to an Euclidean universe.
+
+Provide functions to transform between d_luminosity and redshift as well
+as computing ratios of comoving volume-time to Euclidean universe (i.e.,
+luminosity volume and present-day observer time) volume-time.
 """
 
 import astropy

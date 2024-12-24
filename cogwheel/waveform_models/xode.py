@@ -17,6 +17,9 @@ in your system.
 
 Note, IMRPhenomXODE requires a `lalsimulation` version >= 5.1.0
 
+Importing this module will, as a side effect, add an entry
+'IMRPhenomXODE' to ``waveform.APPROXIMANTS``, thereby enabling it.
+
 Example usage
 -------------
 .. code-block:: python
@@ -74,10 +77,10 @@ def compute_hplus_hcross_by_mode_xode(f, par_dic,
 
     Parameters
     ----------
-    f: 1d array of type float
+    f : 1d array of type float
         Frequency array in Hz
 
-    par_dic: dict
+    par_dic : dict
         Source parameters. Needs to have these keys:
             * m1, m2: component masses (Msun)
             * d_luminosity: luminosity distance (Mpc)
@@ -88,14 +91,14 @@ def compute_hplus_hcross_by_mode_xode(f, par_dic,
             * h1, h2: component dissipation numbers
             * s1z, s2z: dimensionless spins
 
-    approximant: 'IMRPhenomXODE'
+    approximant : 'IMRPhenomXODE'
         ``ValueError`` is raised if it is not 'IMRPhenomXODE'.
 
-    harmonic_modes: list of (int, int) pairs
+    harmonic_modes : list of (int, int) pairs
         (l, m) numbers of the harmonic modes to include, must be
         from the ones accepted by IMRPhenomXPHM. Note: l >= m >= 0.
 
-    lal_dic: LALDict, optional
+    lal_dic : LALDict, optional
         Contains special approximant settings.
     """
     if approximant != 'IMRPhenomXODE':

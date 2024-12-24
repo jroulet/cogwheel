@@ -62,6 +62,7 @@ class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
                         Prior):
     """
     Uniform prior for the orbital phase.
+
     The sampled variable `phi_ref_hat` differs from the standard
     coalescence phase `phi_ref` by an additive function of
     `psi, iota, ra, dec, time`, such that it describes the well-measured
@@ -152,6 +153,7 @@ class IsotropicInclinationPrior(UniformPriorMixin, Prior):
 class IsotropicSkyLocationPrior(UniformPriorMixin, Prior):
     """
     Isotropic prior for the sky localization angles.
+
     The angles sampled are fixed to Earth and defined with respect to a
     pair of detectors: the polar angle `thetanet` is with respect to the
     line connecting the two detectors, and the azimuthal angle `phinet`
@@ -245,8 +247,11 @@ class UniformPolarizationPrior(UniformPriorMixin,
 class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
     """
     Distance prior uniform in luminosity volume and detector-frame time.
+
     The sampled parameter is
+
         d_hat := d_effective / mchirp^(5/6)
+
     where the effective distance is defined in one "reference" detector.
     """
     standard_params = ['d_luminosity']
@@ -258,16 +263,16 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
         """
         Parameters
         ----------
-        tgps: float
+        tgps : float
             GPS time of the event, sets Earth orientation.
 
-        ref_det_name: str
+        ref_det_name : str
             Reference detector name, e.g. 'H' for Hanford.
 
-        d_hat_max: float
+        d_hat_max : float
             Upper bound for sampling `d_hat` (Mpc Msun^(-5/6)).
 
-        d_luminosity_max: float
+        d_luminosity_max : float
             Maximum luminosity distance allowed by the prior (Msun).
         """
         self.range_dic = {'d_hat': (0, d_hat_max)}
@@ -301,6 +306,7 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
     def lnprior(self, d_hat, ra, dec, psi, iota, m1, m2):
         """
         Natural log of the prior probability density for d_hat.
+
         This prior is not normalized, as that would need to know
         the masses' integration region.
         """
@@ -325,8 +331,11 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
 class UniformComovingVolumePrior(UniformLuminosityVolumePrior):
     """
     Distance prior uniform in comoving volume-time.
+
     The sampled parameter is
+
         d_hat := d_effective / mchirp^(5/6)
+
     where the effective distance is defined in one "reference" detector.
     """
     @utils.lru_cache()

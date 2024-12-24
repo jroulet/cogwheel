@@ -19,20 +19,28 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         """
         Parameters
         ----------
-        event_data: Instance of `data.EventData`
-        waveform_generator: Instance of `waveform.WaveformGenerator`.
-        par_dic_0: dictionary with parameters of the reference waveform,
-                   should be close to the maximum likelihood waveform.
-        fbin: Array with edges of the frequency bins used for relative
-              binning [Hz]. Alternatively, pass `pn_phase_tol`.
-        pn_phase_tol: Tolerance in the post-Newtonian phase [rad] used
-                      for defining frequency bins. Alternatively, pass
-                      `fbin`.
-        spline_degree: int, degree of the spline used to interpolate the
-                       ratio between waveform and reference waveform for
-                       relative binning.
-        lookup_table: Instance of ``likelihood.LookupTable`` to compute
-                      the marginalized likelihood.
+        event_data : data.EventData
+
+        waveform_generator : waveform.WaveformGenerator
+
+        par_dic_0 : dict
+            Parameters of the reference waveform, should be close to the
+            maximum likelihood waveform.
+
+        fbin : float array
+            Array with edges of the frequency bins used for relative
+            binning [Hz]. Alternatively, pass `pn_phase_tol`.
+
+        pn_phase_tol : float
+            Tolerance in the post-Newtonian phase [rad] used for
+            defining frequency bins. Alternatively, pass `fbin`.
+
+        spline_degree : int
+            Degree of the spline used to interpolate the ratio between
+            waveform and reference waveform for relative binning.
+
+        lookup_table : likelihood.LookupTable
+            To compute the marginalized likelihood.
         """
         if lookup_table.marginalized_params != {'d_luminosity'}:
             raise ValueError('Use ``LookupTable`` class.')
@@ -60,16 +68,16 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         """
         Parameters
         ----------
-        par_dic: dict
+        par_dic : dict
             Keys must include ``.params``.
 
         Returns
         -------
-        lnl_marginalized: float
+        lnl_marginalized : float
             Log likelihood, marginalized over distance, using relative
             binning.
 
-        metadata: dict
+        metadata : dict
             Contains the marginalized lnl, as well as a distance draw
             and its corresponding (non-marginalized) log-likelihood.
         """
@@ -104,7 +112,8 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
 
         Parameters
         ----------
-        samples: Dataframe with sampled params
+        samples : pandas.Dataframe
+            Sampled params.
         """
         @np.vectorize
         def sample_distance(**par_dic):

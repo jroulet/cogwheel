@@ -169,18 +169,18 @@ class CoherentScoreQAS(ProposingCoherentScore):
 
         Parameters
         ----------
-        d_h_timeseries: (n_d, n_t) complex array
+        d_h_timeseries : (n_d, n_t) complex array
             Timeseries of complex (d|h), inner product of data against a
             waveform at reference distance and phase.
             Decomposed by time, detector.
 
-        h_h: (n_d,) float array
+        h_h : (n_d,) float array
             Positive ⟨h|h⟩ inner product of a waveform with itself,
             decomposed by detector.
 
         Returns
         -------
-        t_arrival_lnprob: (n_d, n_t) float array
+        t_arrival_lnprob : (n_d, n_t) float array
         """
         return np.transpose(self.beta_temperature / 2
                             * utils.abs_sq(d_h_timeseries) / h_h)  # dt
@@ -199,15 +199,15 @@ class CoherentScoreQAS(ProposingCoherentScore):
 
         Parameters
         ----------
-        marg_info: CoherentScoreQAS._MarginalizationInfo
+        marg_info : CoherentScoreQAS._MarginalizationInfo
             Output of ``.get_marginalization_info``.
 
-        num: int, optional
+        num : int, optional
             Number of samples to generate, defaults to a single sample.
 
         Returns
         -------
-        samples: dict
+        samples : dict
             Values are scalar if `num` is ``None``, else numpy arrays.
             If ``marg_info`` corresponds to an unphysical sample (i.e.,
             a realization of matched-filtering timeseries in the

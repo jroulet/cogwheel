@@ -73,6 +73,7 @@ class FixedReferenceFrequencyPrior(FixedPrior):
 class LogarithmicReferenceFrequencyPrior(UniformPriorMixin, Prior):
     """
     Promote `f_ref` to a sampled parameter to explore its effect.
+
     Not intended for actual parameter estimation.
     """
     standard_params = ['f_ref']
@@ -82,7 +83,8 @@ class LogarithmicReferenceFrequencyPrior(UniformPriorMixin, Prior):
         """
         Parameters
         ----------
-        `f_ref_rng`: minimum and maximum reference frequencies in Hz.
+        f_ref_rng : sequence
+            Minimum and maximum reference frequencies (Hz).
         """
         self.range_dic = {'ln_f_ref': np.log(f_ref_rng)}
         super().__init__(**kwargs)

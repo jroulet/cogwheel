@@ -28,7 +28,6 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
                          harmonic_modes=None, lal_dic=None):
     """
     Generate frequency domain waveform using LAL.
-    Return hplus, hcross evaluated at f.
 
     Parameters
     ----------
@@ -57,8 +56,12 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
 
     lal_dic : LALDict, optional
         Contains special approximant settings.
-    """
 
+    Returns
+    -------
+    hplus, hcross : float arrays
+        Waveform polarizations evaluated at `f`.
+    """
     # Parameters ordered for lalsimulation.SimInspiralChooseFDWaveformSequence
     lal_params = [
         'phi_ref', 'm1_kg', 'm2_kg', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z',
@@ -113,8 +116,7 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
 def compute_hplus_hcross_by_mode(f, par_dic, approximant: str,
                                  harmonic_modes, lal_dic=None):
     """
-    Return dictionary of the form {(l, m): h_lm} with the contribution
-    of each harmonic mode to hplus, hcross.
+    Compute the contribution of each harmonic mode to hplus, hcross.
 
     Parameters
     ----------
@@ -143,6 +145,12 @@ def compute_hplus_hcross_by_mode(f, par_dic, approximant: str,
 
     lal_dic : LALDict, optional
         Contains special approximant settings.
+
+    Returns
+    -------
+    dict
+        Dictionary of the form {(l, m): h_lm} with the contribution of
+        each harmonic mode to hplus, hcross.
     """
     return {mode: compute_hplus_hcross(f, par_dic, approximant,
                                        harmonic_modes=[mode], lal_dic=lal_dic)
@@ -206,7 +214,7 @@ def inplane_spins_xy_n_to_xy(par_dic):
 def inplane_spins_xy_to_xy_n(par_dic):
     """
     Rotate inplane spins (s1x, s1y) and (s2x, s2y) by an angle
-    `phi_ref` to get (s1x_n, s1y_n), (s2x_n, s2y_n).
+    ``phi_ref`` to get (s1x_n, s1y_n), (s2x_n, s2y_n).
 
     `par_dic` needs to have keys 's1x', 's1y', 's2x', 's2y'.
     Entries for 's1x_n', 's1y_n', 's2x_n', 's2y_n' will be added.

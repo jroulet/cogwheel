@@ -373,8 +373,8 @@ class CBCLikelihood(utils.JSONMixin):
         plot_data : bool
             Whether to include detector data in plot.
 
-        fig : `plt.Figure`, optional
-            `None` (default) creates a new figure.
+        fig : matplotlib.figure.Figure, optional
+            ``None`` (default) creates a new figure.
 
         figsize : (float, float)
             Figure width and height in inches, used if `fig=None`.
@@ -386,7 +386,8 @@ class CBCLikelihood(utils.JSONMixin):
 
         Returns
         -------
-        matplotlib.figure.Figure : Figure with plots.
+        matplotlib.figure.Figure
+            Figure with plots.
         """
         if fig is None:
             fig = self._setup_data_figure(figsize)
