@@ -24,7 +24,7 @@ templates_path = ['_templates']
 exclude_patterns = []
 
 # Mock imports for unavailable dependencies
-autodoc_mock_imports = ["lal", "lalsimulation"]
+# autodoc_mock_imports = ["lal", "lalsimulation"]
 
 
 # -- Options for HTML output -------------------------------------------------

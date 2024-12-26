@@ -18,6 +18,7 @@ dependencies = [
   "ipykernel",
   "ipympl",
   "ipywidgets",
+  "lalsuite",
   "matplotlib",
   "notebook",
   "numba",
