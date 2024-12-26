@@ -1,7 +1,0 @@
-name: readthedocs
-channels:
-  - conda-forge
-dependencies:
-  - python-lalsimulation
-  - numpydoc
-  - furo
