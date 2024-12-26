@@ -19,9 +19,10 @@ sphinx:
 # Optionally, but recommended,
 # declare the Python requirements required to build your documentation
 # See https://docs.readthedocs.io/en/stable/guides/reproducible-builds.html
+conda:
+  environment: docs/environment.yaml
+
 python:
   install:
-    - method: conda
-      environment: docs/environment.yaml
     - method: pip
       path: .
