@@ -4,9 +4,10 @@ Installation
 Via ``conda``
 -------------
 
-The easiest way of installing ``cogwheel`` is using ``conda``. Inside a virtual environment, do:
+The easiest way of installing ``cogwheel`` is using ``conda``:
 
 .. code-block:: sh
+
 
     # Create and activate conda environment
     conda create --name <environment_name>
@@ -20,15 +21,17 @@ The easiest way of installing ``cogwheel`` is using ``conda``. Inside a virtual 
 From source
 -----------
 
-If you would like to modify the source code or try the latest development version, you should instead install from source. Note that you still have to install ``lalsimulation`` in the environment, which ``pip`` won't download automatically.
+If you would like to modify the source code or try the latest development version, you should instead install from source. In a virtual environment, do:
 
 .. code-block:: sh
 
-    # Create environment, install lalsimulation
-    conda create --name <environment_name> python-lalsimulation --channel conda-forge
-    conda activate <environment_name>
-
-    # Download source and install
+    # Clone repository
     git clone git@github.com:jroulet/cogwheel.git
     cd cogwheel
+
+    # Create and activate virtual environment
+    conda env create -f environment.yaml
+    conda activate cogwheel-env
+
+    # Install cogwheel
     pip install -e .
