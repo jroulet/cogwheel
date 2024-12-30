@@ -17,12 +17,12 @@ class CoherentScoreQAS(ProposingCoherentScore):
 
     Class that, given a matched-filtering timeseries, computes the
     likelihood marginalized over extrinsic parameters
-    (``.get_marginalization_info()``). Extrinsic parameters samples can
-    be generated as well (``.gen_samples()``).
+    (:py:meth:`get_marginalization_info`).
+
+    Extrinsic parameters samples can be generated as well
+    (:py:meth:`gen_samples_from_marg_info`).
     Works for quasi-circular waveforms with quadrupole radiation, i.e.
     (l,|m|) = (2, 2), and aligned spins.
-
-    Inherits from ``ProposingCoherentScore``.
     """
     m_arr = np.array([2])
     _lookup_table_marginalized_params = {'d_luminosity', 'phi_ref'}

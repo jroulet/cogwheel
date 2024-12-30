@@ -581,8 +581,8 @@ class ProposingCoherentScore(BaseCoherentScore):
     def get_marginalization_info(self, d_h_timeseries, h_h, times,
                                  lnl_marginalized_threshold=-np.inf):
         """
-        Return a ``MarginalizationInfo`` object with extrinsic parameter
-        integration results.
+        Return a :py:class:`MarginalizationInfo` object with extrinsic
+        parameter integration results.
 
         Adaptive importance sampling is performed, which requires an
         initial proposal. This method comes up with a proposal, half

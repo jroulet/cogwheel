@@ -1,6 +1,7 @@
 """
-Define class ``CoherentScoreHM`` to marginalize and demarginalize the
-likelihood over extrinsic parameters from matched-filtering timeseries.
+Define class :py:class:`CoherentScoreHM` to marginalize and demarginalize
+the likelihood over extrinsic parameters from matched-filtering
+timeseries.
 
 ``CoherentScoreHM`` works for quasi-circular waveforms with precession
 and higher modes. The inclination can't be marginalized over and is
@@ -29,15 +30,13 @@ class CoherentScoreHM(ProposingCoherentScore, BaseCoherentScoreHM):
     """
     Class that, given a matched-filtering timeseries, computes the
     likelihood marginalized over extrinsic parameters
-    (``.get_marginalization_info()``).
+    (:py:meth:`get_marginalization_info`).
 
     Extrinsic parameters samples can be generated as well
-    (``.gen_samples()``).
+    (:py:meth:`gen_samples_from_marg_info`).
 
     Works for quasi-circular waveforms with generic spins and higher
     modes.
-
-    Inherits from ``BaseCoherentScoreHM``.
     """
     def __init__(self, sky_dict, m_arr, lookup_table=None,
                  log2n_qmc: int = 11, nphi=128, seed=0,

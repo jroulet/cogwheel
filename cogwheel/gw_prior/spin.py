@@ -1,9 +1,10 @@
 """
 Default modular priors for spin parameters, for convenience.
 
-They can be combined just by subclassing `CombinedPrior` and defining an
-attribute `prior_classes` that is a list of such priors (see
-``gw_prior.combined``).
+They can be combined just by subclassing
+:py:class:`cogwheel.prior.CombinedPrior` and defining an attribute
+`prior_classes` that is a list of priors (see
+:py:mod:`cogwheel.gw_prior.combined`).
 
 Each may consume some arguments in the __init__(), but should forward
 as ``**kwargs`` any arguments that other priors may need.

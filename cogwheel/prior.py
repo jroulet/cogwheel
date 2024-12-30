@@ -1,20 +1,25 @@
 """
-Implement the `Prior` and `CombinedPrior` classes.
+Abstract prior classes.
 
-These define Bayesian priors together with coordinate transformations.
+:py:class:`Prior` is the base class used to define Bayesian priors
+together with coordinate transformations.
 There are two sets of coordinates: "sampled" parameters and "standard"
 parameters. Standard parameters are physically interesting, sampled
 parameters are chosen to minimize correlations or have convenient
 priors.
 
 It is possible to define multiple simple priors, each for a small subset
-of the variables, and combine them with `CombinedPrior`.
+of the variables, and combine them with :py:class:`CombinedPrior`.
 
 If separate coordinate systems are not desired, a mix-in class
-`IdentityTransformMixin` is provided to short-circuit these transforms.
+:py:class:`IdentityTransformMixin` is provided to short-circuit these
+transforms.
 
-Another mix-in `UniformPriorMixin` is provided to automatically define
-uniform priors.
+Another mix-in :py:class:`UniformPriorMixin` is provided to
+automatically define uniform priors.
+
+Finally, :py:class:`FixedPrior` can be used to fix some parameters to a
+specific value.
 """
 
 from abc import ABC, abstractmethod
@@ -918,9 +923,9 @@ class FixedPrior(Prior):
     attribute.
     """
     def __init__(self, **kwargs):
-        """Check that `self.standard_par_dic` has the correct keys."""
         super().__init__(**kwargs)
 
+        # Check that `.standard_par_dic` has the correct keys.
         if missing := (self.__class__.standard_par_dic.keys()
                        - self.standard_par_dic.keys()):
             raise ValueError(f'`standard_par_dic` is missing keys: {missing}')
@@ -987,8 +992,16 @@ class UniformPriorMixin:
         """
         Natural logarithm of the prior probability density.
 
-        Take ``.sampled_params + .conditioned_on`` parameters and return
-        a float.
+        Parameters
+        ----------
+        *par_vals, **par_dic
+            ``.sampled_params + .conditioned_on`` parameters
+
+        Returns
+        -------
+        float
+            Natural logarithm of the prior probability density in the
+            space of sampled parameters.
         """
         del par_vals, par_dic
         return self.max_lnprior
@@ -1043,7 +1056,10 @@ def check_inheritance_order(subclass, base1, base2):
     Check that class `subclass` subclasses `base1` and `base2`, in that
     order.
 
-    If it doesn't, raise `PriorError`.
+    Raises
+    ------
+    PriorError
+        If the above doesn't hold.
     """
     for base in base1, base2:
         if not issubclass(subclass, base):

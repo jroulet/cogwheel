@@ -14,11 +14,10 @@ are registered in a dictionary ``prior_registry``.
     * ``Intrinsic*`` priors are for the intrinsic parameters only, these
       priors may be paired with a likelihood that marginalizes over
       extrinsic parameters.
-    * ``Cartesian*`` priors try avoid polar coordinates for the inplane
-      spin components, these are better suited for samplers that don't
-      implement periodic parameters.
+    * ``Cartesian*`` priors try to avoid polar coordinates for the
+      inplane spin components, these are better suited for samplers that
+      don't implement periodic parameters.
 """
-
 from cogwheel import utils
 from cogwheel.prior import CombinedPrior, Prior, check_inheritance_order
 from cogwheel.likelihood import (RelativeBinningLikelihood,
@@ -68,6 +67,7 @@ class ReferenceWaveformFinderMixin:
     Provide a constructor based on a `likelihood.ReferenceWaveformFinder`
     instance to provide initialization arguments.
     """
+
     @classmethod
     def from_reference_waveform_finder(
             cls, reference_waveform_finder, **kwargs):
@@ -103,6 +103,7 @@ class RegisteredPriorMixin(ReferenceWaveformFinderMixin):
     `PriorError` is raised) in order to test for conditioned-on
     parameters.
     """
+
     def __init_subclass__(cls):
         """Validate subclass and register it in prior_registry."""
         super().__init_subclass__()
