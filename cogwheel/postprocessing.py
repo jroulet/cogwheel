@@ -1,8 +1,9 @@
 """
 Post-process parameter estimation samples:
-    * Diagnostics for sampler convergence
-    * Diagnostics for robustness against ASD-drift choice
-    * Diagnostics for relative-binning accuracy
+
+* Diagnostics for sampler convergence
+* Diagnostics for robustness against ASD-drift choice
+* Diagnostics for relative-binning accuracy
 
 The function `postprocess_rundir` is used to process samples from a
 single parameter estimation run.
@@ -35,15 +36,17 @@ def postprocess_rundir(rundir, relative_binning_boost=4):
     Postprocess posterior samples from a single run.
 
     This computes:
-        * Columns for standard parameters
-        * Column for log likelihood
-        * Auxiliary columns for log likelihood (by detector, at high
-          relative binning resolution and with no ASD-drift correction
-          applied)
-        * Tests for log likelihood differences arising from reference
-          waveform choice for setting ASD-drift
-        * Tests for log likelihood differences arising from relative-
-          binning accuracy.
+
+    * Columns for standard parameters
+    * Column for log likelihood
+    * Auxiliary columns for log likelihood (by detector, at high
+      relative binning resolution and with no ASD-drift correction
+      applied)
+    * Tests for log likelihood differences arising from reference
+      waveform choice for setting ASD-drift
+    * Tests for log likelihood differences arising from relative-
+      binning accuracy.
+
     """
     RundirPostprocessor(rundir, relative_binning_boost).process_samples()
 
@@ -101,15 +104,17 @@ class RundirPostprocessor:
         """
         Call the various methods of the class sequentially, then save
         the results. This computes:
-            * Columns for standard parameters
-            * Column for log likelihood
-            * Auxiliary columns for log likelihood (by detector, at high
-              relative binning resolution and with no ASD-drift
-              correction applied)
-            * Tests for log likelihood differences arising from
-              reference waveform choice for setting ASD-drift
-            * Tests for log likelihood differences arising from
-              relative binning accuracy.
+
+        * Columns for standard parameters
+        * Column for log likelihood
+        * Auxiliary columns for log likelihood (by detector, at high
+          relative binning resolution and with no ASD-drift
+          correction applied)
+        * Tests for log likelihood differences arising from
+          reference waveform choice for setting ASD-drift
+        * Tests for log likelihood differences arising from
+          relative binning accuracy.
+
         """
         print(f'Processing {self.rundir}')
 
@@ -152,7 +157,9 @@ class RundirPostprocessor:
         """
         Compute typical and worse-case log likelihood differences
         arising from the choice of somewhat-parameter-dependent
-        asd_drift correction. Store in `self.tests['asd_drift']`.
+        asd_drift correction.
+
+        Store in ``.tests['asd_drift']``.
         """
         ref_lnl = self._apply_asd_drift(self.likelihood.asd_drift)
         for asd_drift in self._get_representative_asd_drifts():
@@ -168,7 +175,9 @@ class RundirPostprocessor:
     def test_relative_binning(self):
         """
         Compute typical and worst-case errors in log likelihood due to
-        relative binning. Store in `self.tests['relative_binning']`.
+        relative binning.
+
+        Store in ``.tests['relative_binning']``.
         If the samples are weighted, the weights are considered in the
         standard deviation of the errors but ignored in the maximum.
         """
@@ -180,7 +189,7 @@ class RundirPostprocessor:
                                           'dlnl_max': np.max(np.abs(dlnl))}
 
     def save_tests_and_samples(self):
-        """Save `self.tests` and `self.samples` in `self.rundir`."""
+        """Save ``.tests`` and ``.samples`` in ``.rundir``."""
         with open(self.rundir/TESTS_FILENAME, 'w', encoding='utf-8') as file:
             json.dump(self.tests, file, cls=utils.NumpyEncoder)
 
@@ -191,6 +200,7 @@ class RundirPostprocessor:
         """
         Return `n_kmeans` sets of `asd_drift` generated with via k-means
         from the asd_drift of `n_subset` random samples.
+
         Each asd_drift is a float array of length n_detectors.
         asd_drifts are rounded to `decimals` places.
         """
@@ -233,22 +243,23 @@ def postprocess_eventdir(eventdir, reference_rundir=None, outfile=None):
     """
     Make diagnostics plots aggregating multiple runs of an event and
     save them to pdf format.
+
     These include a summary table of the parameters of the runs,
     number of samples vs time to completion, and corner plots comparing
     each run to a reference one.
 
     Parameters
     ----------
-    eventdir: os.PathLike
+    eventdir : os.PathLike
         Path to eventdir where all the rundirs to compare are located.
 
-    reference_rundir: os.PathLike
+    reference_rundir : os.PathLike
         Path to rundir used as reference against which to overplot
         samples. Defaults to the first rundir by name.
 
-    outfile: os.PathLike
+    outfile : os.PathLike
         Path to save output as pdf. Defaults to
-        `{eventdir}/{EventdirPostprocessor.DIAGNOSTICS_FILENAME}`.
+        ``{eventdir}/{EventdirPostprocessor.DIAGNOSTICS_FILENAME}``.
     """
     EventdirPostprocessor(eventdir, reference_rundir
                          ).postprocess_eventdir(outfile)
@@ -259,8 +270,8 @@ class EventdirPostprocessor:
     Class to gather information from multiple runs of an event and
     exporting summary to pdf file.
 
-    The method `postprocess_eventdir` executes all the functionality of the
-    class. It is suggested to use the top-level function
+    The method `.postprocess_eventdir` executes all the functionality of
+    the class. It is suggested to use the top-level function
     `postprocess_eventdir` for simple usage.
     """
     DIAGNOSTICS_FILENAME = 'diagnostics.pdf'
@@ -285,14 +296,14 @@ class EventdirPostprocessor:
         """
         Parameters
         ----------
-        eventdir: os.PathLike
+        eventdir : os.PathLike
             Path to directory containing rundirs.
 
-        reference_rundir: os.PathLike, optional
+        reference_rundir : os.PathLike, optional
             Path to reference run directory. Defaults to the first (by
             name) rundir in `eventdir`.
 
-        tolerance_params: dict
+        tolerance_params : dict
             Items to update defaults from `DEFAULT_TOLERANCE_PARAMS`.
             Values higher than their tolerance are highlighted in the
             table. Keys include:
@@ -411,7 +422,7 @@ class EventdirPostprocessor:
 
         Parameters
         ----------
-        rundirs: sequence of `pathlib.Path`s
+        rundirs : sequence of pathlib.Path
             Run directories.
         """
         rundirs = rundirs or self.rundirs
@@ -551,8 +562,9 @@ def submit_postprocess_rundir_slurm(
     """
     Submit a slurm job to postprocess a run directory where a
     `sampling.Sampler` has been run.
+
     Note this may not be necessary if the parameter estimation run was
-    done through `sampling.main` with `postprocess=True`.
+    done through `sampling.main` with ``postprocess=True``.
     """
     rundir = pathlib.Path(rundir)
     job_name = job_name or f'{rundir.name}_postprocessing'
@@ -569,6 +581,7 @@ def submit_postprocess_eventdir_slurm(
     """
     Submit a slurm job to postprocess an event directory containing
     postprocessed rundirs.
+
     This will generate a pdf file in `eventdir` with diagnostic plots.
     """
     eventdir = pathlib.Path(eventdir)
@@ -593,10 +606,10 @@ def main(*, rundir=None, eventdir=None):
 
     Parameters
     ----------
-    rundir: path to a run directory to postprocess, can't be set
+    rundir : path to a run directory to postprocess, can't be set
             simultaneously with `eventdir` or a `ValueError` is raised.
 
-    eventdir: path to an event directory to postprocess, can't be set
+    eventdir : path to an event directory to postprocess, can't be set
               simultaneously with `rundir` or a `ValueError` is raised.
     """
     if (rundir is None) == (eventdir is None):

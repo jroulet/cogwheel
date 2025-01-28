@@ -19,8 +19,8 @@ class LatexLabels(dict):
     """
     Helper class for plotting parameter labels.
 
-    Example
-    -------
+    Examples
+    --------
     >>> labels = LatexLabels(labels={'m': '$m$', 'theta': r'$\theta$'},
     ...                      units={'m': 'kg'})
     >>> labels['m']
@@ -63,7 +63,7 @@ def gen_linestyles(number):
 
     Parameters
     ----------
-    number: int
+    number : int
         How many linestyles are desired.
     """
     if number <= len(few_linestyles := ['-', '--', '-.', ':']):
@@ -77,7 +77,7 @@ def gen_colors(number):
 
     Parameters
     ----------
-    number: int
+    number : int
         How many colors are desired.
     """
     colors = plt.get_cmap('tab20').colors + plt.get_cmap('tab20b').colors
@@ -93,58 +93,58 @@ class PlotStyle:
 
     Attributes
     ----------
-    confidence_level: float between 0 and 1, or ``None``
+    confidence_level : float between 0 and 1, or ``None``
         Determines the reported confidence interval around the
         median (highlighted band in 1-d marginal probability and
         numeric values in the subplot titles). If ``None``, both
         the numerical values and highlighted bands are removed.
 
-    contour_fractions: sequence of floats
+    contour_fractions : sequence of floats
         Fractions of the distribution to enclose by 2-d contours.
 
-    bins: int | {'rice', 'sturges', 'sqrt'}
+    bins : int | {'rice', 'sturges', 'sqrt'}
         How many histogram bins to use, the same for all parameters.
 
-    color_2d: str, RGB tuple, etc.
+    color_2d : str, RGB tuple, etc.
         Color used for the 2-d marginal distributions.
 
-    contour_kwargs: dict
+    contour_kwargs : dict
         Keyword arguments to `plt.contour` and `plt.contourf`
 
-    vline_kwargs: dict
+    vline_kwargs : dict
         Keyword arguments to `plt.plot` for the vertical lines
         signaling medians and 1-d confidence intervals.
 
-    vfill_kwargs: dict
+    vfill_kwargs : dict
         Keyword arguments to `plt.fill_between` for 1-d plots.
 
-    kwargs_1d: dict
+    kwargs_1d : dict
         Keyword arguments to `plt.plot` for 1-d plots.
 
-    clabel_kwargs: dict, optional
+    clabel_kwargs : dict, optional
         Keyword arguments for contour labels. Pass an empty `dict`
         to use defaults. ``None`` draws no contour labels.
 
-    fill: {'gradient', 'flat', 'none'}
+    fill : {'gradient', 'flat', 'none'}
         How to display 2-d marginal distributions:
-        'gradient' displays the 2-d pdf with a transparency gradient
-        'flat' fills the contours with a flat transparent color
-        'none' shows just the contours
 
-    smooth: float
+        * 'gradient' displays the 2-d pdf with a transparency gradient
+        * 'flat' fills the contours with a flat transparent color
+        * 'none' shows just the contours
+
+    smooth : float
         Smooth the 2d histograms by convolving them with a Gaussian
         kernel with this standard deviation in pixel units.
         0 (default) does no smoothing.
 
-    density: bool
+    density : bool
         Whether to normalize the 1-d histograms to integrate to 1.
 
-    tail_probability: float between 0 and 1
-        Disregard `tail_probability / 2` of the distribution to
-        either side in the plots. Used as an automatic way of
-        zooming in on the interesting part of the distribution if
-        there are a few outlier samples.
-        0 (default) includes all samples.
+    tail_probability : float between 0 and 1
+        Disregard `tail_probability / 2` of the distribution to either
+        side in the plots. Used as an automatic way of zooming in on the
+        interesting part of the distribution if there are a few outlier
+        samples. 0 (default) includes all samples.
 
     See Also
     --------
@@ -232,8 +232,9 @@ def latex_val_err(value, error):
 
     Parameters
     ----------
-    value: float
-    error: (err_minus, err_plus)
+    value : float
+    error : sequence with two floats
+        (err_minus, err_plus)
     """
     error = np.abs(error)
     min_error = np.min(error)
@@ -277,15 +278,11 @@ def get_contour_fractions(sigmas):
 
 class CornerPlot:
     """
-    Class for making a corner plot of a multivariate distribution if you
-    have samples from the distribution.
+    Making a corner plot of a multivariate distribution from samples.
 
-    Methods
-    -------
-    plot: Make a corner plot.
-    scatter_points: Plot points on a corner plot (e.g. "truths").
-    set_lims: Edit the limits of a corner plot.
-    plot_2d: Make one panel of a corner plot.
+    See Also
+    --------
+    MultiCornerPlot
     """
     DEFAULT_LATEX_LABELS = LatexLabels()
     MARGIN_INCHES = .8
@@ -296,23 +293,23 @@ class CornerPlot:
         """
         Parameters
         ----------
-        samples: pandas.DataFrame
+        samples : pandas.DataFrame
             Columns correspond to parameters to plot and rows correspond
             to samples.
 
-        params: list of str, optional
+        params : list of str, optional
             Subset of columns present in all dataframes, to plot a
             reduced number of parameters.
 
-        plotstyle: PlotStyle
+        plotstyle : PlotStyle
             Determines the colors, linestyles, etc.
 
-        weights_col: str, optional
+        weights_col : str, optional
             If existing, use a column with this name to set weights for
             the samples. Pass `None` to ignore, if you have a column
             named 'weights' that is not to be interpreted as weights.
 
-        latex_labels: LatexLabels
+        latex_labels : LatexLabels
             Maps column names to latex strings and assigns units.
 
         **plotstyle_kwargs
@@ -321,62 +318,59 @@ class CornerPlot:
 
         Other parameters
         ----------------
-        confidence_level: float between 0 and 1, or ``None``
+        confidence_level : float between 0 and 1, or ``None``
             Determines the reported confidence interval around the
             median (highlighted band in 1-d marginal probability and
-            numeric values in the subplot titles). If ``None``, both
-            the numerical values and highlighted bands are removed.
+            numeric values in the subplot titles). If ``None``, both the
+            numerical values and highlighted bands are removed.
 
-        contour_fractions: sequence of floats
+        contour_fractions : sequence of floats
             Fractions of the distribution to enclose by 2-d contours.
 
-        bins: int | {'rice', 'sturges', 'sqrt'}
+        bins : int | {'rice', 'sturges', 'sqrt'}
             How many histogram bins to use, the same for all parameters.
 
-        color_2d: str, RGB tuple, etc.
+        color_2d : str, RGB tuple, etc.
             Color used for the 2-d marginal distributions.
 
-        contour_kwargs: dict
+        contour_kwargs : dict
             Keyword arguments to `plt.contour` and `plt.contourf`
 
-        vline_kwargs: dict
+        vline_kwargs : dict
             Keyword arguments to `plt.plot` for the vertical lines
             signaling medians and 1-d confidence intervals.
 
-        vfill_kwargs: dict
+        vfill_kwargs : dict
             Keyword arguments to `plt.fill_between` for 1-d plots.
 
-        kwargs_1d: dict
+        kwargs_1d : dict
             Keyword arguments to `plt.plot` for 1-d plots.
 
-        clabel_kwargs: dict, optional
-            Keyword arguments for contour labels. Pass an empty `dict`
+        clabel_kwargs : dict, optional
+            Keyword arguments for contour labels. Pass an empty ``dict``
             to use defaults. ``None`` draws no contour labels.
 
-        fill: {'gradient', 'flat', 'none'}
+        fill : {'gradient', 'flat', 'none'}
             How to display 2-d marginal distributions:
-            'gradient' displays the 2-d pdf with a transparency gradient
-            'flat' fills the contours with a flat transparent color
-            'none' shows just the contours
 
-        smooth: float
+            * 'gradient' shows the 2d pdf with a transparency gradient
+            * 'flat' fills the contours with a flat transparent color
+            * 'none' shows just the contours
+
+        smooth : float
             Smooth the 2d histograms by convolving them with a Gaussian
             kernel with this standard deviation in pixel units.
             0 (default) does no smoothing.
 
-        density: bool
+        density : bool
             Whether to normalize the 1-d histograms to integrate to 1.
 
-        tail_probability: float between 0 and 1
+        tail_probability : float between 0 and 1
             Disregard `tail_probability / 2` of the distribution to
             either side in the plots. Used as an automatic way of
             zooming in on the interesting part of the distribution if
             there are a few outlier samples.
             0 (default) includes all samples.
-
-        See Also
-        --------
-        MultiCornerPlot
         """
         self.samples = samples.dropna()
         self.latex_labels = latex_labels or self.DEFAULT_LATEX_LABELS
@@ -396,25 +390,25 @@ class CornerPlot:
 
         Parameters
         ----------
-        fig: ``matplotlib.Figure``, optional
+        fig : ``matplotlib.Figure``, optional
             If provided, will reuse this figure to make the plot. Must
             have axes matching the number of parameters.
 
-        title: str, optional
+        title : str, optional
             Figure title.
 
-        max_figsize: float
+        max_figsize : float
             Maximum size in inches of a side of the square figure.
             Ignored if `fig` is passed.
 
-        max_n_ticks: int
+        max_n_ticks : int
             Determines the number of ticks in each subplot. Ignored if
             `fig` is passed.
 
-        label: str, optional
+        label : str, optional
             Legend label.
 
-        legend_title: str, optional
+        legend_title : str, optional
             Legend title.
         """
         self._setup_fig(fig, max_figsize, max_n_ticks=max_n_ticks)
@@ -443,19 +437,19 @@ class CornerPlot:
 
         Parameters
         ----------
-        scatter_points: pandas.DataFrame or dict
+        scatter_points : pandas.DataFrame or dict
             Columns are parameter names, must contain ``self.params``.
             Rows correspond to parameter values. A dict is acceptable to
             plot a single point.
 
-        colors: iterable, optional
+        colors : iterable, optional
             Colors corresponding to each scatter point passed.
 
-        adjust_lims: bool
+        adjust_lims : bool
             Whether to adjust x and y limits in the case that the
             scatter points lie outside or very near the current limits.
 
-        **kwargs:
+        **kwargs
             Passed to ``matplotlib.axes.Axes.scatter``.
         """
         if self.axes is None:
@@ -493,13 +487,13 @@ class CornerPlot:
 
         Parameters
         ----------
-        xpar, ypar: str
+        xpar, ypar : str
             Parameters in ``self.params`` to plot in the x and y axes.
 
-        ax: matplotlib.axes.Axes or None
+        ax : matplotlib.axes.Axes or None
             Axes on which to draw the figure. ``None`` makes new axes.
 
-        label: str
+        label : str
             Add a legend element with this label.
         """
         if ax is None:
@@ -638,7 +632,7 @@ class CornerPlot:
 
         Parameters
         ----------
-        par: str
+        par : str
             Parameter name from ``self.params``.
 
         Returns
@@ -743,17 +737,7 @@ class CornerPlot:
 
 
 class MultiCornerPlot:
-    """
-    Class for overlaying multiple distributions on the same corner plot
-    given samples from each of the distributions.
-
-    Methods
-    -------
-    plot: Make a corner plot.
-    scatter_points: Plot points on a corner plot (e.g. "truths").
-    set_lims: Edit the limits of a corner plot.
-    plot_2d: Make one panel of a corner plot.
-    """
+    """Overlay multiple distributions on the same corner plot."""
     corner_plot_cls = CornerPlot  # Can be overriden by subclasses
 
     def __init__(self, dataframes, params=None, plotstyles=None,
@@ -762,79 +746,80 @@ class MultiCornerPlot:
         """
         Parameters
         ----------
-        dataframes: sequence of ``pandas.DataFrame`` instances
+        dataframes : sequence of ``pandas.DataFrame`` instances
             Samples from the distributions to be plotted.
 
-        params: list of str, optional
+        params : list of str, optional
             Subset of columns present in all dataframes, to plot a
             reduced number of parameters.
 
-        plotstyles: sequence of ``PlotStyle`` instances
+        plotstyles : sequence of ``PlotStyle`` instances
             Determines the colors, linestyles, etc. Must have the same
             length as `dataframes`. ``None`` (default) makes automatic
             choices.
 
-        weights_col: str, optional
+        weights_col : str, optional
             If existing, use a column with this name to set weights for
             the samples. Pass `None` to ignore, if you have a column
             named 'weights' that is not to be interpreted as weights.
 
-        labels: sequence of strings, optional
+        labels : sequence of strings, optional
             Legend labels corresponding to the different distributions.
 
-        **plotstyle_kwargs:
-            Passed to ``PlotStyle`` constructor to override defaults.
+        **plotstyle_kwargs
+            Passed to `PlotStyle` constructor to override defaults.
             Ignored if `plotstyles` is passed.
 
         Other parameters
         ----------------
-        confidence_level: float between 0 and 1, or ``None``
+        confidence_level : float between 0 and 1, or ``None``
             Determines the reported confidence interval around the
             median (highlighted band in 1-d marginal probability and
-            numeric values in the subplot titles). If ``None``, both
-            the numerical values and highlighted bands are removed.
+            numeric values in the subplot titles). If ``None``, both the
+            numerical values and highlighted bands are removed.
 
-        contour_fractions: sequence of floats
+        contour_fractions : sequence of floats
             Fractions of the distribution to enclose by 2-d contours.
 
-        bins: int | {'rice', 'sturges', 'sqrt'}
+        bins : int | {'rice', 'sturges', 'sqrt'}
             How many histogram bins to use, the same for all parameters.
 
-        color_2d: str, RGB tuple, etc.
+        color_2d : str, RGB tuple, etc.
             Color used for the 2-d marginal distributions.
 
-        contour_kwargs: dict
+        contour_kwargs : dict
             Keyword arguments to `plt.contour` and `plt.contourf`
 
-        vline_kwargs: dict
+        vline_kwargs : dict
             Keyword arguments to `plt.plot` for the vertical lines
             signaling medians and 1-d confidence intervals.
 
-        vfill_kwargs: dict
+        vfill_kwargs : dict
             Keyword arguments to `plt.fill_between` for 1-d plots.
 
-        kwargs_1d: dict
+        kwargs_1d : dict
             Keyword arguments to `plt.plot` for 1-d plots.
 
-        clabel_kwargs: dict, optional
-            Keyword arguments for contour labels. Pass an empty `dict`
+        clabel_kwargs : dict, optional
+            Keyword arguments for contour labels. Pass an empty ``dict``
             to use defaults. ``None`` draws no contour labels.
 
-        fill: {'gradient', 'flat', 'none'}
+        fill : {'gradient', 'flat', 'none'}
             How to display 2-d marginal distributions:
-            'gradient' displays the 2-d pdf with a transparency gradient
-            'flat' fills the contours with a flat transparent color
-            'none' shows just the contours
 
-        smooth: float
+            * 'gradient' shows the 2-d pdf with a transparency gradient
+            * 'flat' fills the contours with a flat transparent color
+            * 'none' shows just the contours
+
+        smooth : float
             Smooth the 2d histograms by convolving them with a Gaussian
             kernel with this standard deviation in pixel units.
             0 (default) does no smoothing.
 
-        density: bool
+        density : bool
             Whether to normalize the 1-d histograms to integrate to 1.
 
-        tail_probability: float between 0 and 1
+        tail_probability : float between 0 and 1
             Disregard `tail_probability / 2` of the distribution to
             either side in the plots. Used as an automatic way of
             zooming in on the interesting part of the distribution if
@@ -876,16 +861,16 @@ class MultiCornerPlot:
 
         Parameters
         ----------
-        max_figsize: float
+        max_figsize : float
             Maximum size in inches of a side of the square figure.
 
-        max_n_ticks: int
+        max_n_ticks : int
             Determines the number of ticks in each subplot.
 
-        title: str, optional
+        title : str, optional
             Figure title.
 
-        legend_title: str, optional
+        legend_title : str, optional
             Legend title.
         """
         fig = None
@@ -901,10 +886,10 @@ class MultiCornerPlot:
 
         Parameters
         ----------
-        xpar, ypar: str
+        xpar, ypar : str
             Parameters in ``self.params`` to plot in the x and y axes.
 
-        ax: matplotlib.axes.Axes or None
+        ax : matplotlib.axes.Axes or None
             Axes on which to draw the figure. ``None`` makes new axes.
         """
         if ax is None:

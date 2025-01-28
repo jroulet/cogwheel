@@ -26,8 +26,8 @@ WEIGHTS_NAME = 'weights'
 
 class ClassProperty(property):
     """
-    Can be used like ``@property`` but for class attributes instead of
-    instance attributes.
+    Like ``@property`` but for class attributes instead of instance
+    attributes.
     """
     def __get__(self, instance, instance_type):
         return self.fget(instance_type)
@@ -41,11 +41,15 @@ def differential_evolution_with_guesses(func, bounds, guesses,
 
     Parameters
     ----------
-    func, bounds: See `scipy.optimize.differential_evolution()` docs.
-    guesses: nguesses x nparameters array with initial guesses.
-             They will be appended to the initial population of
-             differential evolution. Can be a 1d array for one guess.
-    **kwargs: Passed to `scipy.optimize.differential_evolution()`.
+    func, bounds
+        See `scipy.optimize.differential_evolution()` docs.
+
+    guesses : nguesses x nparameters array with initial guesses.
+        They will be appended to the initial population of differential
+        evolution. Can be a 1d array for one guess.
+
+    **kwargs
+        Passed to `scipy.optimize.differential_evolution()`.
     """
     with _DifferentialEvolutionSolverWithGuesses(func, bounds, guesses,
                                                  **kwargs) as solver:
@@ -62,32 +66,33 @@ class _DifferentialEvolutionSolverWithGuesses(
         self.init_population_array(population)
 
 
-cached_functions_registry = []
+_cached_functions_registry = []
 
 
 def lru_cache(*args, **kwargs):
     """
-    Decorator like ``functools.lru_cache`` that also registers the
-    decorated function in ``cached_functions_registry`` so all caches
-    can easily be cleared with ``clear_caches()``.
+    Cache function results and register it for easy cache clearing.
+
+    This decorator behaves like ``functools.lru_cache`` but also adds
+    the decorated function to ``_cached_functions_registry`` so that
+    all caches can be cleared with ``clear_caches()``.
     """
     def decorator(function):
         function = functools.lru_cache(*args, **kwargs)(function)
-        cached_functions_registry.append(function)
+        _cached_functions_registry.append(function)
         return function
     return decorator
 
 
 def clear_caches():
     """Clear caches of functions decorated with ``lru_cache``."""
-    for function in cached_functions_registry:
+    for function in _cached_functions_registry:
         function.cache_clear()
 
 
 def mod(value, start=0, period=2*np.pi):
     """
-    Modulus operation, generalized so that the domain of the output can
-    be specified.
+    Modulus operation, but allows to specify the domain of the output.
     """
     return (value - start) % period + start
 
@@ -98,18 +103,18 @@ def quantile(values, q, weights=None):
 
     Parameters
     ----------
-    values: array
+    values : array
         Input data.
 
-    q: array_like of float
+    q : array_like of float
         Quantile rank, 0 <= q <= 1.
 
-    weights: array
+    weights : array
         Of the same shape as `values`.
 
-    Return
-    ------
-    quantiles: array_like of float, of the same shape as `q`.
+    Returns
+    -------
+    quantiles : array_like of float, of the same shape as `q`.
     """
     if weights is None:
         weights = np.ones_like(values)
@@ -131,7 +136,22 @@ def weighted_avg_and_std(values, weights=None):
 
 
 def n_effective(weights):
-    """Return effective sample size."""
+    """
+    Calculate the effective sample size from a set of weights.
+
+    This function computes the effective sample size using the formula
+    (sum(weights))^2 / sum(weights^2).
+
+    Parameters
+    ----------
+    weights : numpy.ndarray
+        An array of sample weights.
+
+    Returns
+    -------
+    float
+        The effective sample size.
+    """
     if weights.size == 0:
         return 0.
     return np.sum(weights)**2 / np.sum(weights**2)
@@ -139,27 +159,29 @@ def n_effective(weights):
 
 def resample_equal(samples, weights_col=WEIGHTS_NAME, num=None):
     """
+    Resample a weighted DataFrame to produce equal-weight samples.
+
     Draw `num` samples from a DataFrame of weighted samples, so that the
-    resulting samples have equal weights.
-    Note: in general this does not produce independent samples, they may
-    be repeated.
+    resulting samples have equal weights. Note: this does not generally
+    produce independent samples, and samples may be repeated.
 
     Parameters
     ----------
-    samples: pandas.DataFrame
+    samples : pandas.DataFrame
         Rows correspond to samples from a distribution.
 
-    weights_col: str
+    weights_col : str
         Name of a column in `samples` to interpret as weights.
 
-    num: int
-        Length of the returned DataFrame, defaults to ``len(samples)``.
+    num : int, optional
+        Length of the returned DataFrame. Defaults to ``len(samples)``.
 
-    Return
-    ------
-    equal_samples: pandas.DataFrame
-        Contains `num` rows with equal-weight samples. The columns match
-        those of `samples` except that `weights_col` is deleted.
+    Returns
+    -------
+    pandas.DataFrame
+        A DataFrame containing `num` rows with equal-weight samples. The
+        columns match those of `samples`, except that `weights_col` is
+        removed.
     """
     if num is None:
         num = len(samples)
@@ -173,15 +195,14 @@ def resample_equal(samples, weights_col=WEIGHTS_NAME, num=None):
 
 def exp_normalize(lnprob, axis=-1):
     """
-    Return normalized probabilities from unnormalized log
-    probabilities, safe to overflow.
+    Return normalized probabilities from unnormalized log probabilities.
 
     Parameters
     ----------
-    lnprob: float array
+    lnprob : float array
         Natural log of the unnormalized probability.
 
-    axis: int
+    axis : int
         Axis of `lnprob` along which probabilities sum to 1.
     """
     prob = np.exp(lnprob - np.max(lnprob, axis=axis, keepdims=True))
@@ -212,8 +233,18 @@ def real_matmul(a, b):
 def merge_dictionaries_safely(*dics):
     """
     Merge multiple dictionaries into one.
-    Accept repeated keys if values are consistent, otherwise raise
-    ``ValueError``.
+
+    Accept repeated keys if values are consistent.
+
+    Parameters
+    ----------
+    *dics
+        Dictionaries to merge
+
+    Raises
+    ------
+    ValueError
+        If there are repeated keys with inconsistent values.
     """
     merged = {}
     for dic in dics:
@@ -226,10 +257,15 @@ def merge_dictionaries_safely(*dics):
 
 def update_dataframe(df1, df2):
     """
-    Modify `df1` in-place by adding the columns from `df2`, where `df1`
-    and `df2` are pandas `DataFrame` objects.
+    Modify a dataframe in-place by adding the columns from another.
+
     Caution: if (some of) the columns of `df1` are also in `df2` they
     get silently overwritten without checking for consistency.
+
+    Parameters
+    ----------
+    df1, df2 : pandas.DataFrame
+        Update `df1` in-place with columns from `df2`.
     """
     for col, values in df2.items():
         df1[col] = values
@@ -237,10 +273,31 @@ def update_dataframe(df1, df2):
 
 def replace(sequence, *args):
     """
+    Replace specified elements in a sequence with new values.
+
     Return a list like `sequence` with the first occurrence of `old0`
     replaced by `new0`, the first occurrence of `old1` replaced by
     `new1`, and so on, where ``old0, new0, old1, new1, ... = args``.
     Accepts an even number of arguments.
+
+    Parameters
+    ----------
+    sequence : list or iterable
+        The input sequence to modify.
+
+    *args : list
+        Pairs of old and new elements to replace in the sequence.
+
+    Returns
+    -------
+    list
+        A copy of `sequence` with the specified replacements.
+
+    Raises
+    ------
+    ValueError
+        If an odd number of `args` is provided or if any `old` value
+        is not found in the sequence.
     """
     if len(args) % 2:
         raise ValueError('Pass an even number of args: '
@@ -254,6 +311,8 @@ def replace(sequence, *args):
 
 def handle_scalars(function):
     """
+    Return a function that outputs a scalar instead of 0-d array.
+
     Decorator to change the behavior of functions that always return
     numpy arrays even if the input is scalar (e.g.
     ``scipy.interpolate.InterpolatedUnivariateSpline``).
@@ -272,8 +331,10 @@ def handle_scalars(function):
 @contextmanager
 def temporarily_change_attributes(obj, /, **kwargs):
     """
-    Example
-    -------
+    Change attributes of an object temporarily in a context manager.
+
+    Examples
+    --------
     >>> class A:
     ...     x = 0
     >>> a = A()
@@ -300,36 +361,37 @@ def submit_slurm(job_name, n_hours_limit, stdout_path, stderr_path,
                  multithreading=False):
     """
     Generic function to submit a job using slurm.
+
     This function is intended to be called from other modules rather
     than used interactively. The job will run the calling module as
     script.
 
     Parameters
     ----------
-    job_name: str
+    job_name : str
         Name of slurm job.
 
-    n_hours_limit: int
+    n_hours_limit : int
         Number of hours to allocate for the job.
 
-    stdout_path: str, os.PathLike
+    stdout_path : str, os.PathLike
         File name, where to direct stdout.
 
-    stderr_path: str, os.PathLike
+    stderr_path : str, os.PathLike
         File name, where to direct stderr.
 
-    args: str
+    args : str
         Command line arguments for the calling module's ``main()`` to
         parse.
 
-    sbatch_cmds: sequence of str
+    sbatch_cmds : sequence of str
         SBATCH commands, e.g. ``('--mem-per-cpu=8G',)``.
 
-    batch_path: str, os.PathLike, optional
+    batch_path : str, os.PathLike, optional
         File name where to save the batch script. If not provided, a
         temporary file will be used.
 
-    multithreading: bool
+    multithreading : bool
         Whether to enable automatic OMP multithreading. Defaults to
         ``False`` because multithreading is found to be slower
         despite using more resources.
@@ -382,36 +444,37 @@ def submit_lsf(job_name, n_hours_limit, stdout_path, stderr_path,
                multithreading=False):
     """
     Generic function to submit a job using IBM Spectrum LSF.
+
     This function is intended to be called from other modules rather
     than used interactively. The job will run the calling module as
     script.
 
     Parameters
     ----------
-    job_name: str
+    job_name : str
         Name of LSF job.
 
-    n_hours_limit: int
+    n_hours_limit : int
         Number of hours to allocate for the job.
 
-    stdout_path: str, os.PathLike
+    stdout_path : str, os.PathLike
         File name, where to direct stdout.
 
-    stderr_path: str, os.PathLike
+    stderr_path : str, os.PathLike
         File name, where to direct stderr.
 
-    args: str
+    args : str
         Command line arguments for the calling module's ``main()`` to
         parse.
 
-    bsub_cmds: sequence of str
+    bsub_cmds : sequence of str
         BSUB commands, e.g. ``('-M 8GB',)``
 
-    batch_path: str, os.PathLike, optional
+    batch_path : str, os.PathLike, optional
         File name where to save the batch script. If not provided, a
         temporary file will be used.
 
-    multithreading: bool
+    multithreading : bool
         Whether to enable automatic OMP multithreading. Defaults to
         ``False`` because multithreading is found to be slower
         despite using more resources.
@@ -466,32 +529,34 @@ def submit_condor(submit_path,
                   **submit_kwargs):
     """
     Generic function to submit a job using HTCondor.
+
     This function is intended to be called from other modules rather
     than used interactively. The job will run the calling module as
     script.
 
     Parameters
     ----------
-    submit_path: str, os.PathLike
+    submit_path : str, os.PathLike
         File name where to save the submission script.
 
-    executable: str, os.PathLike
+    executable : str, os.PathLike
         File name where to save the executable script.
 
-    overwrite: bool = False
+    overwrite : bool
         Whether to raise an error if `submit_path` or `executable`
         exist. If True, existing files will be silently overwritten.
+        Default is False.
 
-    args: str
+    args : str
         Command line arguments for the calling module's ``main()`` to
         parse.
 
-    multithreading: bool
+    multithreading : bool
         Whether to enable automatic OMP multithreading. Defaults to
         ``False`` because multithreading is found to be slower
         despite using more resources.
 
-    **submit_kwargs: dict
+    **submit_kwargs
         Specify information in the submit file other than the
         `executable` and `queue` lines.
         E.g. ``request_memory='1G'``.
@@ -551,15 +616,22 @@ RUNDIR_PREFIX = 'run_'
 
 def get_rundir(eventdir):
     """
-    Return a `pathlib.Path` object with a new run directory, following a
-    standardized naming scheme for output directories.
-    Directory will be of the form '{eventdir}/{RUNDIR_PREFIX}{run_id}'.
+    Return path to a directory where a new inference run can take place.
+
+    This follows a standardized naming scheme for output directories,
+    the path will be of the form '{eventdir}/{RUNDIR_PREFIX}{run_id}'.
 
     Parameters
     ----------
-    eventdir: str, os.PathLike
+    eventdir : str, os.PathLike
         Path to a directory where to store parameter estimation data
         for a specific prior and event, e.g. output of ``get_eventdir``.
+
+    Returns
+    -------
+    pathlib.Path
+        Path to a new (nonexistent) run directory. The directory is not
+        created.
     """
     eventdir = pathlib.Path(eventdir)
 
@@ -576,11 +648,12 @@ def get_rundir(eventdir):
 def get_eventdir(parentdir, prior_name, eventname):
     """
     Return `pathlib.Path` object for a directory of the form
-    {parentdir}/{prior_name}/{eventname}/
+    `parentdir/prior_name/eventname/`.
+
     This directory is intended to contain a `Posterior` instance,
     and multiple rundir directories with parameter estimation
     output for different sampler settings.
-    I.e. the file structure is as follows:
+    I.e. the file structure is as follows::
 
         <parentdir>
         └── <priordir>
@@ -596,10 +669,11 @@ def get_eventdir(parentdir, prior_name, eventname):
 def get_priordir(parentdir, prior_name):
     """
     Return `pathlib.Path` object for a directory of the form
-    {parentdir}/{prior_name}
-    This directory is intended to contain multiple eventdir
-    directories, one for each event.
-    I.e. the file structure is as follows:
+    ``parentdir/prior_name``.
+
+    This directory is intended to contain multiple eventdir directories,
+    one for each event.
+    I.e. the file structure is as follows::
 
         <parentdir>
         └── <priordir>
@@ -614,14 +688,17 @@ def get_priordir(parentdir, prior_name):
 
 def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):
     """
-    Create directory and its parents if needed, ensuring the
-    whole tree has the same permissions. Existing directories
-    are left unchanged.
+    Create directory and its parents if needed.
+
+    Existing directories are left unchanged.
 
     Parameters
     ----------
-    dirname: path of directory to make.
-    dir_permissions: octal with permissions.
+    dirname : os.PathLike
+        Path of directory to make.
+
+    dir_permissions : octal
+        Permissions for the directory tree.
     """
     dirname = pathlib.Path(dirname)
     for path in list(dirname.parents)[::-1] + [dirname]:
@@ -629,7 +706,7 @@ def mkdirs(dirname, dir_permissions=DIR_PERMISSIONS):
 
 
 def rundir_number(rundir) -> int:
-    """Return first strech of numbers in `rundir` as `int`."""
+    """Return first strech of numbers in `rundir` as ``int``."""
     return int(re.search(r'\d+', os.path.basename(rundir)).group())
 
 
@@ -707,6 +784,7 @@ class JSONMixin:
     def get_init_dict(self):
         """
         Return dictionary with keyword arguments to `__init__`.
+
         Only works if the class stores its init parameters as attributes
         with the same names. Otherwise, the subclass should override
         this method.
@@ -720,9 +798,10 @@ class JSONMixin:
 
     def reinstantiate(self, **new_init_kwargs):
         """
-        Return an new instance of the current instance's class, with an
-        option to update `init_kwargs`. Values not passed will be taken
-        from the current instance.
+        Return a new instance of the class, possibly updating
+        `init_kwargs`.
+
+        Values not passed will be taken from the current instance.
         """
         init_kwargs = self.get_init_dict()
 
@@ -760,10 +839,7 @@ class NumpyEncoder(json.JSONEncoder):
 
 
 class CogwheelEncoder(NumpyEncoder):
-    """
-    Encoder for classes in the `cogwheel` package that subclass
-    `JSONMixin`.
-    """
+    """Encoder for subclasses of `JSONMixin`."""
     def __init__(self, dirname=None, file_permissions=FILE_PERMISSIONS,
                  overwrite=False, **kwargs):
         super().__init__(**kwargs)
@@ -798,10 +874,7 @@ class CogwheelEncoder(NumpyEncoder):
 
 
 class CogwheelDecoder(json.JSONDecoder):
-    """
-    Decoder for classes in the `cogwheel` package that subclass
-    `JSONMixin`.
-    """
+    """Decoder for subclasses of `JSONMixin`."""
     def __init__(self, dirname, **kwargs):
         self.dirname = dirname
         super().__init__(object_hook=self._object_hook, **kwargs)

@@ -1,5 +1,5 @@
 """
-Implement class ``SkyDictionary``, useful for marginalizing over sky
+Implement class `SkyDictionary`, useful for marginalizing over sky
 location.
 """
 import collections
@@ -17,53 +17,48 @@ class SkyDictionary(utils.JSONMixin):
     Given a network of detectors, this class generates a set of
     samples covering the sky location isotropically in Earth-fixed
     coordinates (lat, lon).
+
     The samples are assigned to bins based on the arrival-time delays
     between detectors. This information is accessible as dictionaries
     ``delays2inds_map``, ``delays2genind_map``.
     Antenna coefficients F+, Fx (psi=0) and detector time delays from
     geocenter are computed and stored for all samples.
 
-    Public attributes
-    -----------------
-    detector_names: tuple
+    Attributes
+    ----------
+    detector_names : tuple
         E.g. ``('H', 'L', 'V')``.
 
-    nsky: int
+    nsky : int
         Number of sky-location samples.
 
-    f_sampling: float
+    f_sampling : float
         Inverse of the time bin size at each detector (Hz).
 
-    seed:
+    seed :
         Sets the initial random state.
 
-    sky_samples: dict
+    sky_samples : dict
         Contains entries for 'lat' and 'lon' (rad) of the sky samples.
 
-    fplus_fcross_0: (nsky, n_det, 2) float array
+    fplus_fcross_0 : (nsky, n_det, 2) float array
         Antenna coefficients at the sky samples for psi=0.
 
-    geocenter_delay_first_det: (nsky,) float array
+    geocenter_delay_first_det : (nsky,) float array
         Time delay (s) from geocenter to the first detector (per
         ``.detector_names``) for each sky sample.
 
-    delays: (n_det - 1, nsky) float array
+    delays : (n_det - 1, nsky) float array
         Time delay (s) from the first detector (per ``.detector_names``)
         to the remaining detectors, for each sky sample.
 
-    delays2inds_map: dict
+    delays2inds_map : dict
         Each key is a tuple of (n_det-1) ints, corresponding to
         discretized delays from the first detector to the remaining
         detectors.
         Each value is a list of ints, corresponding to indices of
         sky-samples that have the correct delay (to the resolution given
         by ``f_sampling``).
-
-    Public methods
-    --------------
-    resample_timeseries
-    get_sky_inds_and_prior
-    choose_f_sampling
     """
     DEFAULT_F_SAMPLING = 2**13
 
@@ -137,24 +132,25 @@ class SkyDictionary(utils.JSONMixin):
     def resample_timeseries(self, timeseries, times, axis=-1):
         """
         Resample a timeseries to match the SkyDict's sampling frequency.
-        The sampling frequencies of the SkyDict and ``timeseries`` must
+
+        The sampling frequencies of the `SkyDict` and `timeseries` must
         be multiples (or ``ValueError`` is raised).
         The data is smoothed at the edges to make it periodic.
 
         Parameters
         ----------
-        timeseries: array_like
+        timeseries : array_like
             The data to resample.
 
-        times: array_like
+        times : array_like
              Equally-spaced sample positions associated with the signal
              data in `timeseries`.
 
-        axis: int
+        axis : int
             The axis of timeseries that is resampled. Default is -1.
 
-        Return
-        ------
+        Returns
+        -------
         resampled_timeseries, resampled_times
             A tuple containing the resampled array and the corresponding
             resampled positions.
@@ -181,18 +177,18 @@ class SkyDictionary(utils.JSONMixin):
         """
         Parameters
         ----------
-        delays: int array of shape (n_det-1, n_samples)
+        delays : int array of shape (n_det-1, n_samples)
             Time-of-arrival delays in units of 1 / self.f_sampling
 
-        Return
-        ------
-        sky_inds: tuple of ints of length n_physical
+        Returns
+        -------
+        sky_inds : tuple of ints of length n_physical
             Indices of self.sky_samples with the correct time delays.
 
-        sky_prior: float array of length n_physical
+        sky_prior : float array of length n_physical
             Prior probability density for the time-delays (s).
 
-        physical_mask: boolean array of length n_samples
+        physical_mask : boolean array of length n_samples
             Some choices of time of arrival at detectors may not
             correspond to any physical sky location, these are flagged
             ``False`` in this array. Unphysical samples are discarded.
@@ -231,8 +227,10 @@ class SkyDictionary(utils.JSONMixin):
         """
         Return closest frequency to the default f_sampling that still
         makes it an integer multiple of the sampling frequency
-        corresponding to `f_nyquist` (Hz). The output of this function
-        can be used as ``f_sampling`` parameter in ``__init__``.
+        corresponding to `f_nyquist` (Hz).
+
+        The output of this function can be used as ``f_sampling``
+        parameter in ``__init__``.
         """
         fmax = 2 * f_nyquist
         return int(fmax * np.round(cls.DEFAULT_F_SAMPLING / fmax))
@@ -251,6 +249,7 @@ class SkyDictionary(utils.JSONMixin):
         """
         Return a dictionary mapping arrival time delays to sky-sample
         indices.
+
         Its keys are tuples of ints of length (n_det - 1), with time
         delays to the first detector in units of 1/self.f_sampling.
         Its values are list of indices to ``self.sky_samples`` of
@@ -279,7 +278,7 @@ class SkyDictionary(utils.JSONMixin):
 
         Parameters
         ----------
-        t_arrival_lnprob: (n_det, n_times) float array
+        t_arrival_lnprob : (n_det, n_times) float array
             Incoherent proposal for log probability of arrival times at
             each detector.
         """

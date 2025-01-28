@@ -122,14 +122,14 @@ class WaveformGeneratorTestCase(TestCase):
                 m_tot = waveform_par_dic['m1'] + waveform_par_dic['m2']
                 ind_isco = np.searchsorted(f, gw_utils.isco_frequency(m_tot))
                 h_isco = np.linalg.norm(hplus_hcross_[:, ind_isco])
-                np.testing.assert_allclose(hplus_hcross, hplus_hcross_,
-                                   atol=1e-3*h_isco, rtol=1e-3, err_msg=(
-                    '`get_hplus_hcross()` gives a different answer than '
-                    '`get_hplus_hcross_explicit()` for:\n'
-                    f'{waveform_par_dic=}\n\n{f=}\n{approximant=}\n'
-                    f'Number of waveforms tried before failure={i}.\n'
-                    'The maximum relative difference is '
-                    f'{max_relative_difference}.'))
+                np.testing.assert_allclose(
+                    hplus_hcross, hplus_hcross_, atol=1e-3*h_isco, rtol=1e-3,
+                    err_msg=('`get_hplus_hcross()` gives a different answer '
+                             'than `get_hplus_hcross_explicit()` for:\n'
+                             f'{waveform_par_dic=}\n\n{f=}\n{approximant=}\n'
+                             f'Number of waveforms tried before failure={i}.\n'
+                             'The maximum relative difference is '
+                             f'{max_relative_difference}.'))
 
 
 if __name__ == '__main__':

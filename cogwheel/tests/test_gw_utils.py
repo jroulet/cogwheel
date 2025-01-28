@@ -22,9 +22,11 @@ class AntennaCoefficientsTestCase(TestCase):
     def test_psi(self):
         """
         Test sign convention for the sign of the polarization.
-        We define psi such that
+        We define psi such that ::
+
             (F+, Fx) = ((c, s), (-s, c)) @ (F+(psi=0), Fx(psi=0))
-        where c = cos(2 psi), s = sin(2 psi).
+
+        where ``c = cos(2 psi), s = sin(2 psi)``.
         We compute antenna coefficients for a random location and
         polarization and verify that it is the same as if we apply the
         polarization manually.

@@ -2,8 +2,10 @@
 Generate injection samples drawn from a user-prescribed distribution.
 
 Usage:
+
     1. Make a config file (see `cogwheel/validation/example/config.py`)
     2. Call ``generate_injections_from_config``
+
 """
 
 import argparse
@@ -28,14 +30,14 @@ def generate_injections_from_config(config,
 
     Parameters
     ----------
-    config: module
+    config : module
         Output of ``cogwheel.validation.load_config``, contains
         configuration parameters.
 
-    n_cores: int
+    n_cores : int
         Number of computing cores to use.
 
-    overwrite: bool
+    overwrite : bool
         Whether to overwrite the injections file if it already exists.
     """
     injections_path = config.INJECTION_DIR/config.INJECTIONS_FILENAME
@@ -54,6 +56,7 @@ def _generate_injections_above_threshold(config, n_cores):
     Return a DataFrame with injections from the prior guaranteeing that
     ⟨ℎ∣ℎ⟩ is above ``config.H_H_MIN``, and that d_luminosity is below
     ``config.D_LUMINOSITY_MAX``.
+
     The number of injections is ``config.N_INJECTIONS``.
     """
     injs_above_threshold = pd.DataFrame()
@@ -80,21 +83,22 @@ def _batch_of_injections_above_threshold(config, batch_size, likelihood,
     """
     Generate a batch of injections that pass the ⟨ℎ∣ℎ⟩ threshold and are
     within the maximum luminosity distance.
+
     The number of injections that will pass the thresholds is unknown in
     advance.
 
     Parameters
     ----------
-    config: module
+    config : module
         Contains configuration parameters.
 
-    batch_size: int
+    batch_size : int
         Number of injections generated (before applying the ⟨ℎ∣ℎ⟩ cut).
 
-    likelihood: cogwheel.likelihood.CBCLikelihood
+    likelihood : cogwheel.likelihood.CBCLikelihood
         Use its waveform generator and PSD for computing ⟨ℎ∣ℎ⟩.
 
-    n_cores: int
+    n_cores : int
         Number of computing cores to use.
     """
     injection_prior = config.INJECTION_PRIOR_CLS(**config.PRIOR_KWARGS)
@@ -123,21 +127,21 @@ def _compute_h_h_1mpc(injections, likelihood, n_cores, rtol=1e-3):
 
     Parameters
     ----------
-    injections: pd.DataFrame
+    injections : pd.DataFrame
         Samples including all parameters except for time and distance.
 
-    likelihood: cogwheel.likelihood.CBCLikelihood
+    likelihood : cogwheel.likelihood.CBCLikelihood
         Use its waveform generator and PSD for computing ⟨ℎ∣ℎ⟩.
 
-    n_cores: int
+    n_cores : int
         Number of computing cores to use.
 
-    rtol: float
+    rtol : float
         Relative tolerance in ⟨ℎ∣ℎ⟩ computation.
 
     Return
     ------
-    h_h_1mpc: float array, same length as `injections`.
+    h_h_1mpc : float array, same length as `injections`.
     """
     # Attempt relative binning and estimate accuracy
     pn_phase_tol = .01
@@ -203,12 +207,13 @@ def _starmap(func, iterable, n_cores):
 def test_h_h_distribution(config):
     """
     Plot test that distribution of ⟨ℎ∣ℎ⟩ is as expected.
+
     It is assumed that injections have already been generated (see
     ``generate_injections_from_config``).
 
     Parameters
     ----------
-    config: module
+    config : module
         Output of ``cogwheel.validation.load_config()``, contains
         configuration parameters.
     """
@@ -246,6 +251,7 @@ def main(config_filename, n_cores=0, overwrite=False):
     """
     Create a pandas DataFrame with injection samples and save it in
     ``config.INJECTION_DIR/config.INJECTIONS_FILENAME``.
+
     Also plot tests of the distribution of ⟨ℎ∣ℎ⟩.
     """
     if n_cores <= 0:

@@ -37,11 +37,11 @@ def _get_event_data(config, i_sample):
 
     Parameters
     ----------
-    config: module
+    config : module
         Output of ``cogwheel.validation.load_config()``, contains
         configuration parameters.
 
-    i_sample: int
+    i_sample : int
         Used to seed the random Gaussian noise. In this way, the
         event data objects don't need to be uploaded in the release.
     """
@@ -145,19 +145,19 @@ def submit_slurm(config_filename, i_sample, n_hours_limit=12,
 
     Parameters
     ----------
-    config_filename: str, os.PathLike
+    config_filename : str, os.PathLike
         Path to a config file.
 
-    i_sample: int
+    i_sample : int
         Index of the sample within the injection set.
 
-    n_hours_limit: int
+    n_hours_limit : int
         Number of hours to allocate for the job.
 
-    memory_per_task: str
+    memory_per_task : str
         Determines the memory and number of CPUs.
 
-    sbatch_cmds: tuple of str
+    sbatch_cmds : tuple of str
         Strings with SBATCH commands.
     """
     config = load_config(config_filename)
@@ -181,10 +181,10 @@ def main(config_filename, rundir):
 
     Parameters
     ----------
-    config_filename: str, os.PathLike
+    config_filename : str, os.PathLike
         Path to a config file.
 
-    rundir: str, os.PathLike
+    rundir : str, os.PathLike
         Run directory, output of ``get_rundir``.
     """
     rundir = pathlib.Path(rundir)
