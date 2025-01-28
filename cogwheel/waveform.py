@@ -28,34 +28,40 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
                          harmonic_modes=None, lal_dic=None):
     """
     Generate frequency domain waveform using LAL.
-    Return hplus, hcross evaluated at f.
 
     Parameters
     ----------
-    f: 1d array of type float
+    f : 1d float array
         Frequency array in Hz
 
-    par_dic: dict
+    par_dic : dict
         Source parameters. Needs to have these keys:
-            * m1, m2: component masses (Msun)
-            * d_luminosity: luminosity distance (Mpc)
-            * iota: inclination (rad)
-            * phi_ref: phase at reference frequency (rad)
-            * f_ref: reference frequency (Hz)
-        plus, optionally:
-            * s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z: dimensionless spins
-            * l1, l2: dimensionless tidal deformabilities
 
-    approximant: str
+        * m1, m2: component masses (Msun)
+        * d_luminosity: luminosity distance (Mpc)
+        * iota: inclination (rad)
+        * phi_ref: phase at reference frequency (rad)
+        * f_ref: reference frequency (Hz)
+
+        plus, optionally:
+
+        * s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z: dimensionless spins
+        * l1, l2: dimensionless tidal deformabilities
+
+    approximant : str
         Approximant name.
 
-    harmonic_modes: list of 2-tuples with (l, m) pairs, optional
+    harmonic_modes : list of 2-tuples with (l, m) pairs, optional
         Which (co-precessing frame) higher-order modes to include.
 
-    lal_dic: LALDict, optional
+    lal_dic : LALDict, optional
         Contains special approximant settings.
-    """
 
+    Returns
+    -------
+    hplus, hcross : float arrays
+        Waveform polarizations evaluated at `f`.
+    """
     # Parameters ordered for lalsimulation.SimInspiralChooseFDWaveformSequence
     lal_params = [
         'phi_ref', 'm1_kg', 'm2_kg', 's1x', 's1y', 's1z', 's2x', 's2y', 's2z',
@@ -110,33 +116,41 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
 def compute_hplus_hcross_by_mode(f, par_dic, approximant: str,
                                  harmonic_modes, lal_dic=None):
     """
-    Return dictionary of the form {(l, m): h_lm} with the contribution
-    of each harmonic mode to hplus, hcross.
+    Compute the contribution of each harmonic mode to hplus, hcross.
 
     Parameters
     ----------
-    f: 1d array of type float
+    f : 1d array of type float
         Frequency array in Hz
 
-    par_dic: dict
+    par_dic : dict
         Source parameters. Needs to have these keys:
-            * m1, m2: component masses (Msun)
-            * d_luminosity: luminosity distance (Mpc)
-            * iota: inclination (rad)
-            * phi_ref: phase at reference frequency (rad)
-            * f_ref: reference frequency (Hz)
-        plus, optionally:
-            * s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z: dimensionless spins
-            * l1, l2: dimensionless tidal deformabilities
 
-    approximant: str
+        * m1, m2: component masses (Msun)
+        * d_luminosity: luminosity distance (Mpc)
+        * iota: inclination (rad)
+        * phi_ref: phase at reference frequency (rad)
+        * f_ref: reference frequency (Hz)
+
+        plus, optionally:
+
+        * s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z: dimensionless spins
+        * l1, l2: dimensionless tidal deformabilities
+
+    approximant : str
         Approximant name.
 
-    harmonic_modes: list of 2-tuples with (l, m) pairs
+    harmonic_modes : list of 2-tuples with (l, m) pairs
         Which (co-precessing frame) higher-order modes to include.
 
-    lal_dic: LALDict, optional
+    lal_dic : LALDict, optional
         Contains special approximant settings.
+
+    Returns
+    -------
+    dict
+        Dictionary of the form {(l, m): h_lm} with the contribution of
+        each harmonic mode to hplus, hcross.
     """
     return {mode: compute_hplus_hcross(f, par_dic, approximant,
                                        harmonic_modes=[mode], lal_dic=lal_dic)
@@ -162,52 +176,79 @@ def inplane_spins_xy_n_to_xy(par_dic):
     """
     Rotate inplane spins (s1x_n, s1y_n) and (s2x_n, s2y_n) by an angle
     `-phi_ref` to get (s1x, s1y), (s2x, s2y).
+
     `par_dic` needs to have keys 's1x_n', 's1y_n', 's2x_n', 's2y_n'.
     Entries for 's1x', 's1y', 's2x', 's2y' will be added.
 
-    `x_n`, `y_n` are axes perpendicular to the orbital angular momentum
-    `L`, so that the line of sight `N` lies in the y-z plane, i.e.
+    ``x_n``, ``y_n`` are axes perpendicular to the orbital angular
+    momentum ``L``, so that the line of sight ``N`` lies in the y-z
+    plane, i.e.::
+
         N = (0, sin(iota), cos(iota))
+
     in the (x_n, y_n, z) system.
-    `x`, `y` are axes perpendicular to the orbital angular momentum `L`,
-    so that the orbital separation is the x direction.
+    ``x``, ``y`` are axes perpendicular to the orbital angular momentum
+    ``L``, so that the orbital separation is the x direction.
     The two systems coincide when `phi_ref=0`.
     """
     sin_phi_ref = np.sin(par_dic['phi_ref'])
     cos_phi_ref = np.cos(par_dic['phi_ref'])
-    rotation = np.array([[cos_phi_ref, sin_phi_ref],
-                         [-sin_phi_ref, cos_phi_ref]])
+
+    first2 = (0, 1)
+    last2 = (-2, -1)
+
+    rotation = np.moveaxis([[cos_phi_ref, sin_phi_ref],
+                            [-sin_phi_ref, cos_phi_ref]],
+                           first2, last2)
+
+    spins_n = np.moveaxis([[par_dic['s1x_n'], par_dic['s2x_n']],
+                           [par_dic['s1y_n'], par_dic['s2y_n']]],
+                          first2, last2)
+
+    spins = rotation @ spins_n
 
     ((par_dic['s1x'], par_dic['s2x']),
-     (par_dic['s1y'], par_dic['s2y'])
-        ) = rotation.dot(((par_dic['s1x_n'], par_dic['s2x_n']),
-                          (par_dic['s1y_n'], par_dic['s2y_n'])))
+     (par_dic['s1y'], par_dic['s2y'])) = np.moveaxis(spins, last2, first2)
 
 
 def inplane_spins_xy_to_xy_n(par_dic):
     """
     Rotate inplane spins (s1x, s1y) and (s2x, s2y) by an angle
-    `phi_ref` to get (s1x_n, s1y_n), (s2x_n, s2y_n).
+    ``phi_ref`` to get (s1x_n, s1y_n), (s2x_n, s2y_n).
+
     `par_dic` needs to have keys 's1x', 's1y', 's2x', 's2y'.
     Entries for 's1x_n', 's1y_n', 's2x_n', 's2y_n' will be added.
 
-    `x_n`, `y_n` are axes perpendicular to the orbital angular momentum
-    `L`, so that the line of sight `N` lies in the y-z plane, i.e.
+    ``x_n``, ``y_n`` are axes perpendicular to the orbital angular
+    momentum ``L``, so that the line of sight ``N`` lies in the y-z
+    plane, i.e.::
+
         N = (0, sin(iota), cos(iota))
+
     in the (x_n, y_n, z) system.
-    `x`, `y` are axes perpendicular to the orbital angular momentum `L`,
-    so that the orbital separation is the x direction.
+    ``x``, ``y`` are axes perpendicular to the orbital angular momentum
+    ``L``, so that the orbital separation is the x direction.
     The two systems coincide when `phi_ref=0`.
     """
     sin_phi_ref = np.sin(par_dic['phi_ref'])
     cos_phi_ref = np.cos(par_dic['phi_ref'])
-    rotation = np.array([[cos_phi_ref, -sin_phi_ref],
-                         [sin_phi_ref, cos_phi_ref]])
+
+    first2 = (0, 1)
+    last2 = (-2, -1)
+
+    rotation = np.moveaxis([[cos_phi_ref, -sin_phi_ref],
+                            [sin_phi_ref, cos_phi_ref]],
+                           first2, last2)
+
+    spins = np.moveaxis([[par_dic['s1x'], par_dic['s2x']],
+                         [par_dic['s1y'], par_dic['s2y']]],
+                        first2, last2)
+
+    spins_n = rotation @ spins
 
     ((par_dic['s1x_n'], par_dic['s2x_n']),
-     (par_dic['s1y_n'], par_dic['s2y_n'])
-        ) = rotation.dot(((par_dic['s1x'], par_dic['s2x']),
-                          (par_dic['s1y'], par_dic['s2y'])))
+     (par_dic['s1y_n'], par_dic['s2y_n'])) = np.moveaxis(spins_n,
+                                                         last2, first2)
 
 
 def within_bounds(par_dic: dict) -> bool:
@@ -229,13 +270,14 @@ def within_bounds(par_dic: dict) -> bool:
 class WaveformGenerator(utils.JSONMixin):
     """
     Class that provides methods for generating frequency domain
-    waveforms, in terms of `hplus, hcross` or projected onto detectors.
+    waveforms, in terms of (hplus, hcross) or projected onto detectors.
+
     "Fast" and "slow" parameters are distinguished: the last waveform
     calls are cached and can be computed fast when only fast parameters
     are changed.
-    The attribute `n_cached_waveforms` can be used to control how many
+    The attribute `.n_cached_waveforms` can be used to control how many
     waveform calls to save in the cache.
-    The boolean attribute `disable_precession` can be set to ignore
+    The boolean attribute `.disable_precession` can be set to ignore
     inplane spins.
     """
     params = sorted(['d_luminosity', 'dec', 'f_ref', 'iota', 'l1', 'l2',
@@ -277,8 +319,8 @@ class WaveformGenerator(utils.JSONMixin):
                         harmonic_modes=None, disable_precession=False,
                         n_cached_waveforms=1, lalsimulation_commands=()):
         """
-        Constructor that takes `detector_names`, `tgps` and `tcoarse`
-        from an instance of `data.EventData`.
+        Constructor that takes ``detector_names``, ``tgps`` and
+        ``tcoarse`` from an instance of `data.EventData`.
         """
         return cls(event_data.detector_names, event_data.tgps,
                    event_data.tcoarse, approximant, harmonic_modes,
@@ -293,11 +335,14 @@ class WaveformGenerator(utils.JSONMixin):
     @approximant.setter
     def approximant(self, approximant: str):
         """
-        Set `approximant` and reset `harmonic_modes` per
+        Set `.approximant` and reset `.harmonic_modes` per
         `APPROXIMANTS[approximant].harmonic_modes`; print a warning that
         this was done.
-        Raise `ValueError` if `APPROXIMANTS` does not contain the
-        requested approximant.
+
+        Raises
+        ------
+        ValueError
+            If `APPROXIMANTS` does not contain `approximant`.
         """
         if approximant not in APPROXIMANTS:
             raise ValueError(f'Add {approximant} to `waveform.APPROXIMANTS`.')
@@ -319,9 +364,11 @@ class WaveformGenerator(utils.JSONMixin):
     def harmonic_modes(self, harmonic_modes):
         """
         Set `self._harmonic_modes` implementing defaults based on the
-        approximant, this requires hardcoding which modes are
-        implemented by each approximant.
-        Also set `self._harmonic_modes_by_m` with a dictionary whose
+        approximant.
+
+        This requires hardcoding which modes are implemented by each
+        approximant.
+        Also, set `self._harmonic_modes_by_m` with a dictionary whose
         keys are `m` and whose values are a list of `(l, m)` tuples with
         that `m`.
         """
@@ -390,8 +437,8 @@ class WaveformGenerator(utils.JSONMixin):
         by_m: bool, whether to return waveform separated by `m`
               harmonic mode (summed over `l`), or already summed.
 
-        Return
-        ------
+        Returns
+        -------
         Array of shape (n_m?, n_detectors, n_frequencies) with strain at
         detector, `n_m` is there only if `by_m=True`.
         """
@@ -420,8 +467,8 @@ class WaveformGenerator(utils.JSONMixin):
         by_m: bool, whether to return waveform separated by `m`
               harmonic mode (summed over `l`), or already summed.
 
-        Return
-        ------
+        Returns
+        -------
         Array of shape (n_m?, 2, n_detectors, n_frequencies) with hplus,
         hcross at detector, `n_m` is there only if `by_m=True`.
         """
@@ -453,22 +500,25 @@ class WaveformGenerator(utils.JSONMixin):
     def get_hplus_hcross(self, f, waveform_par_dic, by_m=False):
         """
         Return hplus, hcross waveform strain.
+
         Note: inplane spins will be zeroized if `self.disable_precession`
               is `True`.
 
         Parameters
         ----------
-        f: 1d array of frequencies [Hz]
-        waveform_par_dic: dictionary per
+        f : 1d array of frequencies [Hz]
+        waveform_par_dic : dictionary per
                           `WaveformGenerator._waveform_params`.
-        by_m: bool, whether to return harmonic modes separately by m (l
+        by_m : bool, whether to return harmonic modes separately by m (l
               summed over) or all modes already summed over.
 
-        Return
-        ------
-        array with (hplus, hcross), of shape `(2, len(f))` if `by_m` is
-        `False`, or `(n_m, 2, len(f))` if `by_m` is `True`, where `n_m`
-        is the number of harmonic modes with different `m`.
+        Returns
+        -------
+        numpy.ndarray
+            (hplus, hcross), of shape ``(2, len(f))`` if `by_m` is
+            ``False``, or ``(n_m, 2, len(f))`` if `by_m` is ``True``,
+            where ``n_m`` is the number of harmonic modes with different
+            ``|m|``.
         """
         if self.disable_precession:
             waveform_par_dic.update(ZERO_INPLANE_SPINS)
@@ -531,8 +581,9 @@ class WaveformGenerator(utils.JSONMixin):
 
     def _matching_cache(self, slow_par_vals, f, eps=1e-6):
         """
-        Return entry of the cache that matches the requested waveform, or
-        `False` if none of the cached waveforms matches that requested.
+        Return entry of the cache that matches the requested waveform,
+        or ``False`` if none of the cached waveforms matches that
+        requested.
         """
         for cache_dic in self.cache[ : : -1]:
             if (np.linalg.norm(slow_par_vals-cache_dic['slow_par_vals']) < eps

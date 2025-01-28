@@ -8,11 +8,14 @@ Classes ``IntrinsicParameterProposal``, ``_InspiralAnalysis`` and
 ``_MergerAnalysis`` are defined. ``IntrinsicParameterProposal`` is the
 top-level class that most users would use.
 
-Example usage:
-```
-# ``post`` is an instance of ``posterior.Posterior``
-intrinsic_proposal = IntrinsicParameterProposal.from_posterior(post)
-qmc_samples = intrinsic_proposal.generate_intrinsic_samples(14)
+Example usage
+-------------
+
+.. code-block:: python
+
+    # ``post`` is an instance of ``posterior.Posterior``
+    intrinsic_proposal = IntrinsicParameterProposal.from_posterior(post)
+    qmc_samples = intrinsic_proposal.generate_intrinsic_samples(14)
 
 """
 import scipy.interpolate
@@ -41,6 +44,7 @@ def unique_qr(mat):
 class UnphysicalMtotFmerger(ValueError):
     """
     Raise when no solution with -1 < chieff < 1 satisfies
+
         f_merger = get_f_merger(mtot, chieff).
     """
 
@@ -144,20 +148,20 @@ class _InspiralAnalysis:
         """
         Parameters
         ----------
-        frequencies: 1d float array
+        frequencies : 1d float array
             Frequencies in Hz, must be regularly spaced.
 
-        whitened_amplitude: 1d float array
+        whitened_amplitude : 1d float array
             Whitened amplitude of the best-fit template evaluated at
             `frequencies`: A(f) / sqrt(PSD(f)). If there are multiple
             detectors, use the root-mean-square over detectors. The
             overall normalization is unimportant.
 
-        par_dic_0: dict
+        par_dic_0 : dict
             Parameters of the best fit solution, must contain keys for
             m1, m2, s1z, s2z, s1x_n, s1y_n, s2x_n, s2y_n.
 
-        snr: float
+        snr : float
             Signal-to-noise ratio of the best-fit template.
         """
         if not np.allclose(np.diff(frequencies, 2), 0):
@@ -270,15 +274,15 @@ class _InspiralAnalysis:
         (m1, m2, s2z, s1x_n, s1y_n, s2x_n, s2y_n), just accounting
         for the inspiral.
 
-        Return
-        ------
-        s1z_loc: float
+        Returns
+        -------
+        s1z_loc : float
             Expected peak of the likelihood. Need not be in (-1, 1).
 
-        s1z_scale: float > 0
+        s1z_scale : float > 0
             Expected width of the likelihood.
 
-        weight: float between 0 and 1
+        weight : float between 0 and 1
             Penalty in case the mismatch-metric-coordinates orthogonal
             to s1z are inconsistent with the reference solution.
         """
@@ -318,15 +322,15 @@ class _MergerAnalysis:
         """
         Parameters
         ----------
-        frequencies: 1d float array
+        frequencies : 1d float array
             Frequencies in Hz.
 
-        whitened_amplitude: array like frequencies
+        whitened_amplitude : array like frequencies
             |h| / sqrt(PSD), with arbitrary normalization, evaluated at
             `frequencies`. If there are multiple detectors, pass the
             root mean square over detectors.
 
-        smooth: bool
+        smooth : bool
             If True, will smooth the whitened amplitude as a function of
             frequency so it can be interpolated meaningfully (useful for
             estimating the amplitude at merger frequency).
@@ -372,12 +376,12 @@ class _MergerAnalysis:
         Return estimate of chieff and its uncertainty, conditioned on
         (m1, m2, s2z), just accounting for the cutoff frequency.
 
-        Return
-        ------
-        chieff_loc: float
+        Returns
+        -------
+        chieff_loc : float
             Expected peak of the likelihood. Need not be in (-1, 1).
 
-        chieff_scale: float > 0
+        chieff_scale : float > 0
             Expected width of the likelihood.
         """
         fmerger_min = self._get_fmerger(m1, m2, -1, s2z)
@@ -417,9 +421,10 @@ class IntrinsicParameterProposal:
     """
     Provide a method `generate_intrinsic_samples` that generates samples
     of intrinsic parameters (per `.params`) from an importance-sampling
-    proposal using Quasi Monte Carlo. The importance-sampling proposal
-    is informed by the inspiral and the merger frequency via Fisher
-    analysis using post-Newtonian models.
+    proposal using Quasi Monte Carlo.
+
+    The importance-sampling proposal is informed by the inspiral and the
+    merger frequency via Fisher analysis using post-Newtonian models.
     Provide a constructor `from_posterior`.
     """
     params = ['m1', 'm2', 's1z', 's2z', 's1x_n', 's1y_n', 's2x_n', 's2y_n',
@@ -457,6 +462,7 @@ class IntrinsicParameterProposal:
         posterior: cogwheel.posterior.Posterior
             Posterior instance from which to take best-fit parameters,
             parameter ranges, and detector PSDs.
+
         **kwargs
         """
         inspiral_analysis = _InspiralAnalysis.from_likelihood(
@@ -540,8 +546,8 @@ class IntrinsicParameterProposal:
     def _s1z_loc_scale_and_weight(self, m1, m2, s2z, s1x_n, s1y_n,
                                   s2x_n, s2y_n):
         """
-        Return
-        ------
+        Returns
+        -------
         s1z_loc, s1z_scale: float
             Estimates of the location and width of the likelihood as a
             function of s1z. Note, `loc` needs not be in (-1, 1).

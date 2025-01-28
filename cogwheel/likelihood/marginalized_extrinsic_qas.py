@@ -1,5 +1,5 @@
 """
-Define class ``MarginalizedExtrinsicLikelihoodQAS``, to use with
+Define class `MarginalizedExtrinsicLikelihoodQAS`, to use with
 ``IntrinsicAlignedSpinIASPrior`` (or similar).
 """
 import functools
@@ -19,18 +19,18 @@ class MarginalizedExtrinsicLikelihoodQAS(
     quasicircular waveforms with generic harmonic modes and spins, and
     to resample these parameters from the conditional posterior for
     demarginalization in postprocessing.
-
-    Note: comments throughout the code refer to array indices per:
-        q: QMC sample id
-        m: harmonic m number id
-        p: polarization (+ or x) id
-        d: detector id
-        b: frequency bin id
-        r: rfft frequency id
-        t: detector time id
-        o: orbital phase id
-        i: important (i.e. with high enough likelihood) sample id
     """
+    # Note: comments throughout the code refer to array indices per:
+    #     q: QMC sample id
+    #     m: harmonic m number id
+    #     p: polarization (+ or x) id
+    #     d: detector id
+    #     b: frequency bin id
+    #     r: rfft frequency id
+    #     t: detector time id
+    #     o: orbital phase id
+    #     i: important (i.e. with high enough likelihood) sample id
+
     _coherent_score_cls = CoherentScoreQAS
     params = ['f_ref', 'l1', 'l2', 'm1', 'm2', 's1z', 's2z']
 
@@ -53,18 +53,22 @@ class MarginalizedExtrinsicLikelihoodQAS(
     def _set_summary(self):
         """
         Compute summary data for the fiducial waveform at all detectors.
-        `asd_drift` is not applied to the summary data, to not have to
-        keep track of it.
+
+        ``.asd_drift`` is not applied to the summary data, so as to not
+        have to keep track of it.
+
         Update `asd_drift` using the reference waveform.
-        The summary data `self._d_h_weights` and `self._d_h_weights` are
-        such that:
+
+        The summary data `._d_h_weights` and `._d_h_weights` are
+        such that::
+
             (d|h) ~= sum(_d_h_weights * conj(h_fbin)) / asd_drift^2
             (h|h) ~= sum(_h_h_weights * abs(h_fbin)^2) / asd_drift^2
 
-        Note: all spin components in `self.par_dic_0` are used, even if
-        `self.waveform_generator.disable_precession` is set to `True`.
+        Note: all spin components in `.par_dic_0` are used, even if
+        `.waveform_generator.disable_precession` is set to ``True``.
         This is so that the reference waveform remains the same when
-        toggling `disable_precession`.
+        toggling `.waveform_generator.disable_precession`.
         """
         super()._set_summary()
 

@@ -12,9 +12,10 @@ from .marginalized_distance import MarginalizedDistanceLikelihood
 class MarginalizedDistancePhaseLikelihood(
         MarginalizedDistanceLikelihood):
     """
-    Modified `MarginalizedDistanceLikelihood` marginalize with a
-    grid over phases. Thus, it removes two dimension from the parameter
-    space.
+    Modified `MarginalizedDistanceLikelihood` that marginalizes with a
+    grid over phases.
+
+    Thus, it removes two dimensions from the parameter space.
     """
     def __init__(self, lookup_table, event_data, waveform_generator,
                  par_dic_0, fbin=None, pn_phase_tol=None,
@@ -22,29 +23,30 @@ class MarginalizedDistancePhaseLikelihood(
         """
         Parameters
         ----------
-        event_data: Instance of `data.EventData`
+        event_data : data.EventData
 
-        waveform_generator: Instance of `waveform.WaveformGenerator`.
+        waveform_generator : waveform.WaveformGenerator
 
-        par_dic_0: dict
+        par_dic_0 : dict
             Parameters of the reference waveform, should be close to the
             maximum likelihood waveform.
 
-        fbin: Array with edges of the frequency bins used for relative
-              binning [Hz]. Alternatively, pass `pn_phase_tol`.
+        fbin : float array
+            Edges of the frequency bins used for relative binning [Hz].
+            Alternatively, pass `pn_phase_tol`.
 
-        pn_phase_tol: float
+        pn_phase_tol : float
             Tolerance in the post-Newtonian phase [rad] used for
             defining frequency bins. Alternatively, pass `fbin`.
 
-        spline_degree: int
+        spline_degree : int
             Degree of the spline used to interpolate the ratio between
             waveform and reference waveform for relative binning.
 
-        lookup_table: Instance of ``likelihood.LookupTable`` to compute
+        lookup_table : Instance of ``likelihood.LookupTable`` to compute
                       the marginalized likelihood.
 
-        n_phi: int
+        n_phi : int
             Number of equally spaced phi_ref grid points, in the
             (0, 2*pi) interval.
         """
@@ -94,16 +96,16 @@ class MarginalizedDistancePhaseLikelihood(
         """
         Parameters
         ----------
-        par_dic: dict
+        par_dic : dict
             Keys must include ``.params``.
 
-        Return
-        ------
-        lnl_marginalized: float
+        Returns
+        -------
+        lnl_marginalized : float
             Log likelihood, marginalized over orbital phase and
             distance, using relative binning.
 
-        metadata: dict
+        metadata : dict
             Contains the marginalized lnl, as well as an orbital phase
             and distance draw and its corresponding (non-marginalized)
             log-likelihood.
@@ -155,7 +157,8 @@ class MarginalizedDistancePhaseLikelihood(
 
         Parameters
         ----------
-        samples: Dataframe with sampled params
+        samples : pandas.Dataframe
+            Sampled params.
         """
         @np.vectorize
         def sample_phase(**par_dic):

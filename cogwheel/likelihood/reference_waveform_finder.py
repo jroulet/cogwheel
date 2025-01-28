@@ -49,30 +49,31 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         Parameters
         ----------
-        event: Instance of `data.EventData`, or string with event name
-               (must correspond to a file in `data.DATADIR`), or path to
-               ``npz`` file with `EventData` instance.
+        event : data.EventData or str
+            String may be an event name (must correspond to a file in
+            ``data.DATADIR``), or a path to a ``.npz`` file with an
+            ``EventData`` instance.
 
-        mchirp_guess: float
+        mchirp_guess : float
             Estimate of the detector-frame chirp mass of the signal.
 
-        approximant: str
+        approximant : str
             Approximant name.
 
-        pn_phase_tol: float
+        pn_phase_tol : float
             Tolerance in the post-Newtonian phase [rad] used for
             defining frequency bins.
 
-        spline_degree: int
+        spline_degree : int
             Degree of the spline used to interpolate the ratio between
             waveform and reference waveform for relative binning.
 
-        time_range: (float, float)
+        time_range : (float, float)
             Range of arrival times relative to ``tgps`` to explore (s).
             (``tgps`` is given by the ``data.EventData`` instance
             created from `event`.)
 
-        mchirp_range: (float, float), optional.
+        mchirp_range : (float, float), optional.
             Range of chirp mass to explore (Msun). If not provided, an
             automatic choice will be made (see method
             ``set_mchirp_range``).
@@ -150,28 +151,28 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         """
         Parameters
         ----------
-        event_data: Instance of `data.EventData`
+        event_data : data.EventData
 
-        waveform_generator: Instance of `waveform.WaveformGenerator`.
+        waveform_generator : waveform.WaveformGenerator
 
-        par_dic_0: dict
+        par_dic_0 : dict
             Parameters of the reference waveform, should be close to the
             maximum likelihood waveform.
             Keys should match ``self.waveform_generator.params``.
 
-        fbin: 1-d array or None
+        fbin : 1-d array or None
             Array with edges of the frequency bins used for relative
             binning [Hz]. Alternatively, pass `pn_phase_tol`.
 
-        pn_phase_tol: float or None
+        pn_phase_tol : float or None
             Tolerance in the post-Newtonian phase [rad] used for
             defining frequency bins. Alternatively, pass `fbin`.
 
-        spline_degree: int
+        spline_degree : int
             Degree of the spline used to interpolate the ratio between
             waveform and reference waveform for relative binning.
 
-        time_range: (float, float)
+        time_range : (float, float)
             Minimum and maximum times to search relative to tgps (s).
         """
         self._times = None  # Set by ``.set_summary()``
@@ -204,7 +205,10 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         """
         If `self._mchirp_range` is set return that, otherwise return a
         crude estimate based on the reference waveform's chirp mass.
-        See also: `set_mchirp_range`.
+
+        See Also
+        --------
+        .set_mchirp_range
         """
         if self._mchirp_range:
             return self._mchirp_range
@@ -254,7 +258,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         Parameters
         ----------
-        seed: To initialize the random state of stochastic maximizers.
+        seed
+            To initialize the random state of stochastic maximizers.
         """
         # Optimize intrinsic parameters, update relative binning summary:
         self._optimize_m1m2s1zs2z_incoherently(seed)
@@ -313,8 +318,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
                              det_inds=...):
         """
         Return log likelihood maximized over amplitude and phase
-        coherently across detectors (the same amplitude rescaling
-        and phase is applied to all detectors).
+        coherently across detectors (the same amplitude rescaling and
+        phase are applied to all detectors).
         """
         h_fbin = self.waveform_generator.get_strain_at_detectors(
             self.fbin, par_dic, by_m=True)
@@ -494,8 +499,10 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
     def set_mchirp_range(self, lnl_drop=5., max_doublings=2, seed=0):
         """
+        Set ``._mchirp_range`` automatically.
+
         Set self._mchirp_range as `(mchirp_min, mchirp_max)`, bounds for
-        the chirp mass that are deemed safe for parameter esimation
+        the chirp mass that are deemed safe for parameter estimation
         bounds.
         The criterion is that the incoherent likelihood maximized over
         ``(eta, chieff)`` drops by at least `lnl_drop` of its value for
@@ -561,19 +568,20 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         Can be used to instantiate some classes defined in
         ``cogwheel.gw_prior``.
 
-        Return
-        ------
+        Returns
+        -------
         dictionary with entries for:
-            * tgps
-            * par_dic_0
-            * f_avg
-            * f_ref
-            * ref_det_name
-            * detector_pair
-            * t0_refdet
-            * mchirp_range
-            * event_data
-            * approximant
+
+        * ``tgps``
+        * ``par_dic_0``
+        * ``f_avg``
+        * ``f_ref``
+        * ``ref_det_name``
+        * ``detector_pair``
+        * ``t0_refdet``
+        * ``mchirp_range``
+        * ``event_data``
+        * ``approximant``
         """
         lnl_by_detectors = self.lnlike_max_amp_phase_time(
             self.par_dic_0, return_by_detectors=True)

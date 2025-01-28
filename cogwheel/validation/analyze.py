@@ -19,13 +19,15 @@ def pp_plot(credible_intervals, params=None, ax=None,
     """
     Make a probability-probability plot.
 
-    credible_intervals: pandas.DataFrame
+    Parameters
+    ----------
+    credible_intervals : pandas.DataFrame
         Output of ``get_credible_intervals``.
 
-    params: sequence of str, optional
+    params : sequence of str, optional
         Subset of parameters to plot.
 
-    ax: matplotlib.axes.Axes, optional
+    ax : matplotlib.axes.Axes, optional
         Where to draw the plot.
     """
     if ax is None:
@@ -71,20 +73,20 @@ def get_credible_intervals(config, params=None,
 
     Parameters
     ----------
-    config: module
+    config : module
         Output of ``load_config``.
 
-    params: sequence of str, optional
+    params : sequence of str, optional
         Parameters for which to compute credible intervals. Defaults to
         all parameters available in both the injection json and samples.
 
-    min_required_samples: int
+    min_required_samples : int
         Minimum number of samples with ⟨ℎ∣ℎ⟩ > config.H_H_MIN to
         tolerate.
 
-    Return
-    ------
-    credible_intervals: pandas.DataFrame
+    Returns
+    -------
+    credible_intervals : pandas.DataFrame
         Columns correspond to different source parameters and rows to
         different injections.
     """
@@ -102,24 +104,25 @@ def _get_credible_intervals(config, rundir, params=None,
 
     Parameters
     ----------
-    config: module
+    config : module
         Output of ``load_config``.
 
-    rundir: os.PathLike
+    rundir : os.PathLike
         Path to run directory containing samples and injection json.
 
-    params: sequence of str, optional
+    params : sequence of str, optional
         Parameters for which to compute credible intervals. Defaults to
         all parameters available in both the injection json and samples.
 
-    min_required_samples: int
+    min_required_samples : int
         Minimum number of samples with ⟨ℎ∣ℎ⟩ > config.H_H_MIN to
         tolerate.
 
-    Return
-    ------
-    dict of the form {par: credible_interval}, or empty dict if
-    something fails.
+    Returns
+    -------
+    dict
+        Of the form {par: credible_interval}, or empty dict if something
+        fails.
     """
     try:
         samples = _get_samples(config, rundir)
@@ -150,18 +153,18 @@ def credible_interval(arr, value, weights=None):
     """
     Parameters
     ----------
-    arr: float array
+    arr : float array
         Posterior samples.
 
-    value: float
+    value : float
         Truth.
 
-    weights: float array, optional
+    weights : float array, optional
         Sample weights, has same shape as `arr`.
 
-    Return
-    ------
-    credible_interval: float between 0 and 1.
+    Returns
+    -------
+    credible_interval : float between 0 and 1.
         (Weighted) fraction of `arr` whose values are below `value`.
     """
     if weights is None:

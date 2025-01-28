@@ -1,6 +1,7 @@
 """
-Define class ``CoherentScoreHM`` to marginalize and demarginalize the
-likelihood over extrinsic parameters from matched-filtering timeseries.
+Define class :py:class:`CoherentScoreHM` to marginalize and demarginalize
+the likelihood over extrinsic parameters from matched-filtering
+timeseries.
 
 ``CoherentScoreHM`` works for quasi-circular waveforms with precession
 and higher modes. The inclination can't be marginalized over and is
@@ -29,13 +30,13 @@ class CoherentScoreHM(ProposingCoherentScore, BaseCoherentScoreHM):
     """
     Class that, given a matched-filtering timeseries, computes the
     likelihood marginalized over extrinsic parameters
-    (``.get_marginalization_info()``). Extrinsic parameters samples can
-    be generated as well (``.gen_samples()``).
+    (:py:meth:`get_marginalization_info`).
+
+    Extrinsic parameters samples can be generated as well
+    (:py:meth:`gen_samples_from_marg_info`).
 
     Works for quasi-circular waveforms with generic spins and higher
     modes.
-
-    Inherits from ``BaseCoherentScoreHM``.
     """
     def __init__(self, sky_dict, m_arr, lookup_table=None,
                  log2n_qmc: int = 11, nphi=128, seed=0,
@@ -64,27 +65,27 @@ class CoherentScoreHM(ProposingCoherentScore, BaseCoherentScoreHM):
 
         Parameters
         ----------
-        d_h_timeseries: (n_m, 2, n_t, n_d) complex array
+        d_h_timeseries : (n_m, 2, n_t, n_d) complex array
             Timeseries of complex (d|h), inner product of data against a
             waveform at reference distance and phase.
             Decomposed by mode, polarization, time, detector.
 
-        h_h: (n_mm, 2, 2, n_d) complex array
+        h_h : (n_mm, 2, 2, n_d) complex array
             Complex (h|h) inner product of a waveform with itself,
             decomposed by mode, polarization and detector.
 
-        times: (n_t,) float array
+        times : (n_t,) float array
             Timestamps of the timeseries (s).
 
-        t_arrival_prob: (n_d, n_t) float array
+        t_arrival_prob : (n_d, n_t) float array
             Proposal probability of time of arrival at each detector,
             normalized to sum to 1 along the time axis.
 
-        i_chunk: int
+        i_chunk : int
             Index to ``._qmc_ind_chunks``.
 
-        Return
-        ------
+        Returns
+        -------
         Instance of ``MarginalizationInfoHM`` with several fields, see
         its documentation.
         """
@@ -163,17 +164,17 @@ class CoherentScoreHM(ProposingCoherentScore, BaseCoherentScoreHM):
 
         Parameters
         ----------
-        marg_info: MarginalizationInfoHM or None
+        marg_info : MarginalizationInfoHM or None
             Normally, output of ``.get_marginalization_info``.
             If ``None``, assume that the sampled parameters were unphysical
             and return samples full of nans.
 
-        num: int, optional
+        num : int, optional
             Number of samples to generate, ``None`` makes a single sample.
 
-        Return
-        ------
-        samples: dict
+        Returns
+        -------
+        samples : dict
             Values are scalar if `num` is ``None``, else numpy arrays.
             If ``marg_info`` correspond to an unphysical sample (i.e.,
             a realization of matched-filtering timeseries in the
@@ -268,12 +269,12 @@ class CoherentScoreHM(ProposingCoherentScore, BaseCoherentScoreHM):
 
         Parameters
         ----------
-        d_h_timeseries: (n_m, 2, n_t, n_d) complex array
+        d_h_timeseries : (n_m, 2, n_t, n_d) complex array
             Timeseries of complex (d|h), inner product of data against a
             waveform at reference distance and phase.
             Decomposed by mode, polarization, time, detector.
 
-        h_h: (n_mm, 2, 2, n_d) complex array
+        h_h : (n_mm, 2, 2, n_d) complex array
             Complex (h|h) inner product of a waveform with itself,
             decomposed by mode, polarization and detector.
         """

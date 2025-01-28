@@ -12,6 +12,8 @@ tutorials/example/
 *.egg-info/
 dist/
 build/
+docs/build/
+docs/source/generated/
 
 *.pyc
 __pycache__

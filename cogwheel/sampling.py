@@ -27,13 +27,14 @@ SAMPLES_FILENAME = 'samples.feather'
 class Sampler(abc.ABC, utils.JSONMixin):
     """
     Generic base class for sampling distributions.
+
     Subclasses implement the interface with specific sampling codes.
 
-    Parameter space folding is used; this means that some ("folded")
+    Parameter space folding is used; this means that the some ("folded")
     dimensions are sampled over half their original range, and a map to
     the other half of the range is defined by reflecting or shifting
     about the midpoint. The folded posterior distribution is defined as
-    the sum of the original posterior over all `2**n_folds` mapped
+    the sum of the original posterior over all ``2**n_folds`` mapped
     points. This is intended to reduce the number of modes in the
     posterior.
     """
@@ -55,17 +56,17 @@ class Sampler(abc.ABC, utils.JSONMixin):
         """
         Parameters
         ----------
-        posterior: cogwheel.posterior.Posterior
+        posterior : cogwheel.posterior.Posterior
             Implements the prior and likelihood.
 
-        run_kwargs: dict
+        run_kwargs : dict
             Keyword arguments for the sampler or its `run` method.
             Allowed keys depend on the particular sampler used.
 
-        sample_prior: False
+        sample_prior : False
             Deprecated, will raise ValueError if it is not False.
 
-        dir_permissions, file_permissions: octal
+        dir_permissions, file_permissions : octal
             Directory and file permissions.
         """
         super().__init__()
@@ -106,8 +107,8 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         Parameters
         ----------
-        parentdir: str, path to a directory where to store parameter
-                   estimation data.
+        parentdir : os.PathLike
+            Path to a directory where to store parameter estimation data.
         """
         return utils.get_rundir(self.posterior.get_eventdir(parentdir))
 
@@ -117,23 +118,23 @@ class Sampler(abc.ABC, utils.JSONMixin):
         """
         Parameters
         ----------
-        rundir: str, os.PathLike
+        rundir : str, os.PathLike
             Run directory, e.g. from `self.get_rundir`
 
-        n_hours_limit: int
+        n_hours_limit : int
             Number of hours to allocate for the job.
 
-        memory_per_task: str
+        memory_per_task : str
             Determines the memory and number of cpus.
 
-        resuming: bool
+        resuming : bool
             Whether to attempt resuming a previous run if rundir already
             exists.
 
-        sbatch_cmds: tuple of str
+        sbatch_cmds : tuple of str
             Strings with SBATCH commands.
 
-        postprocess: bool
+        postprocess : bool
             Whether to perform convergence tests to the run after
             sampling. See ``postprocessing.postprocess_rundir``.
         """
@@ -146,23 +147,23 @@ class Sampler(abc.ABC, utils.JSONMixin):
         """
         Parameters
         ----------
-        rundir: str, os.PathLike
+        rundir : str, os.PathLike
             Run directory, e.g. from `self.get_rundir`
 
-        n_hours_limit: int
+        n_hours_limit : int
             Number of hours to allocate for the job.
 
-        memory_per_task: str
+        memory_per_task : str
             Determines the memory and number of cpus.
 
-        resuming: bool
+        resuming : bool
             Whether to attempt resuming a previous run if rundir already
             exists.
 
-        bsub_cmds: tuple of str
+        bsub_cmds : tuple of str
             Strings with BSUB commands.
 
-        postprocess: bool
+        postprocess : bool
             Whether to perform convergence tests to the run after
             sampling. See ``postprocessing.postprocess_rundir``.
         """
@@ -177,7 +178,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         Parameters
         ----------
-        scheduler: {'slurm', 'lsf'}
+        scheduler : {'slurm', 'lsf'}
         """
         rundir = pathlib.Path(rundir)
         job_name = '_'.join([rundir.name,
@@ -222,17 +223,17 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         Parameters
         ----------
-        rundir: str, os.PathLike
+        rundir : str, os.PathLike
             Run directory, e.g. from `self.get_rundir`
 
-        request_cpus, request_memory, request_disk: int or str
+        request_cpus, request_memory, request_disk : int or str
             Specifications in the HTCondor submit file.
 
-        resuming: bool
+        resuming : bool
             Whether to attempt resuming a previous run if rundir already
             exists.
 
-        postprocess: bool
+        postprocess : bool
             Whether to perform convergence tests to the run after
             sampling. See ``postprocessing.postprocess_rundir``.
 
@@ -271,7 +272,8 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         Parameters
         ----------
-        rundir: directory where to save output, will create if needed.
+        rundir : os.PathLike
+            Directory where to save output, will create if needed.
         """
         rundir = pathlib.Path(rundir)
         self.to_json(rundir, dir_permissions=self.dir_permissions,
@@ -296,8 +298,8 @@ class Sampler(abc.ABC, utils.JSONMixin):
         Sampler parameters not listed here are handled automatically by
         ``cogwheel``.
 
-        Return
-        ------
+        Returns
+        -------
         list of inspect.Parameter
         """
         with utils.temporarily_change_attributes(self, run_kwargs={}):
@@ -324,12 +326,16 @@ class Sampler(abc.ABC, utils.JSONMixin):
     def load_evidence(self) -> dict:
         """
         Define for sampling classes which compute evidence.
+
         Return a dict with the following items:
-          'log_ev' = log evidence from sampling
-          'log_ev_std' = log standard deviation of evidence
+
+        * 'log_ev' = log evidence from sampling
+        * 'log_ev_std' = log standard deviation of evidence
+
         If using nested importance sampling (NIS), should also have:
-          'log_ev_NIS' = log evidence from nested importance sampling
-          'log_ev_std_NIS' = log standard deviation of NIS evidence
+
+        * 'log_ev_NIS' = log evidence from nested importance sampling
+        * 'log_ev_std_NIS' = log standard deviation of NIS evidence
         """
         raise NotImplementedError(
             'Implement in subclass (if sampler computes evidence).')
@@ -363,6 +369,10 @@ class Sampler(abc.ABC, utils.JSONMixin):
             i_unfold = 0
         else:
             probabilities = np.exp(lnprobs - ln_folded_prob)
+
+            # In rare cases precision loss may affect normalization:
+            probabilities /= probabilities.sum()
+
             i_unfold = self._rng.choice(len(probabilities), p=probabilities)
 
         blob = (par_dics[i_unfold]
@@ -417,10 +427,10 @@ class Sampler(abc.ABC, utils.JSONMixin):
     def sampled_params(self):
         """
         Like ``.posterior.prior.sampled_params`` but the folded
-        parameters have 'folded_' prepended.
+        parameters have `'folded_'` prepended.
 
-        Return
-        ------
+        Returns
+        -------
         list of str
         """
         sampled_params = list(self.posterior.prior.sampled_params)
@@ -511,7 +521,9 @@ class PyMultiNest(Sampler):
     def _lnprob_pymultinest(self, folded_par_vals, *_):
         """
         Update the extra entries `folded_par_vals[n_dim : n_params+1]`
-        with the blob. Return the logarithm of the folded posterior.
+        with the blob.
+
+        Return the logarithm of the folded posterior.
         """
         lnfoldedprob, *blob = self._lnfoldedprob_and_blob(
             [folded_par_vals[i] for i in range(self._ndim)])
@@ -530,6 +542,7 @@ class PyMultiNest(Sampler):
     def to_json(self, dirname, *args, **kwargs):
         """
         Update run_kwargs['outputfiles_basename'] before saving.
+
         Parameters are as in `utils.JSONMixin.to_json()`
         """
         self.run_kwargs['outputfiles_basename'] = os.path.join(dirname, '')
@@ -579,12 +592,15 @@ class Dynesty(Sampler):
 class Zeus(Sampler):
     """
     Sample a posterior or prior using ``zeus``.
+
     https://zeus-mcmc.readthedocs.io/en/latest/index.html.
 
     ``run_kwargs`` can take kwargs to
-        * ``zeus.EnsembleSampler``
-        * ``zeus.EnsembleSampler.run_mcmc``
-        * ``zeus.EnsembleSampler.get_chain`` (discard, thin)
+
+    * ``zeus.EnsembleSampler``
+    * ``zeus.EnsembleSampler.run_mcmc``
+    * ``zeus.EnsembleSampler.get_chain`` (discard, thin)
+
     with the caveat that they must be JSON-serializable. Therefore:
     To use ``callbacks``, pass a list of the form
     ``[(callback_name, kwargs), ...]``.
@@ -710,11 +726,11 @@ class Zeus(Sampler):
 
         Parameters
         ----------
-        rscale: float
+        rscale : float
             Standard deviation of the cloud of walkers in units of each
             parameter's range.
 
-        max_lnprob_drop: float
+        max_lnprob_drop : float
             Keep redrawing samples if their log probability is below
             that of other samples by more than this.
         """
@@ -797,7 +813,7 @@ class Nautilus(Sampler):
 
         Parameters
         ----------
-        filepath: os.PathLike
+        filepath : os.PathLike
             Typically, should be ``rundir/'checkpoint.hdf5'``.
         """
         dummy_kwargs = {'prior': lambda _: 0,
