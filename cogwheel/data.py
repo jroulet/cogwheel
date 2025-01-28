@@ -464,7 +464,9 @@ class EventData(utils.JSONMixin):
         ----------
         par_dic : dict
             Parameter values, keys should match
-            ``waveform.WaveformGenerator.params``
+            ``waveform.WaveformGenerator.params``.
+            Note: ``par_dic['t_geocenter']`` is relative to `self.tgps`,
+            and should be << 1 in practice.
 
         approximant : str
             Name of approximant.

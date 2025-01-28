@@ -128,7 +128,6 @@ class Prior(ABC, utils.JSONMixin):
     folded_params : list of str
         ``folded_reflected_params + folded_shifted_params``.
     """
-
     conditioned_on = []
     periodic_params = []
     reflective_params = []
@@ -553,14 +552,15 @@ class Prior(ABC, utils.JSONMixin):
             are samples distributed according to the prior.
 
         lnz, dlnz : float, float
-            Log of the integral of the prior over the bounds.
-            Useful for estimating the normalization constant of the
-            prior, and estimate of the 1-sigma uncertainty.
+            Log of the integral of the prior over the bounds, and
+            estimate of the 1-sigma uncertainty.
             Only returned if `return_lnz` is set to ``True``.
+            Useful for estimating the normalization constant of the
+            prior.
             Note: This differs from the lnz that nested samplers (e.g.
             PyMultiNest or Nautilus) would compute, in that it has the
             phase-space volume differential applied.
-            I.e. if `lnprior := 0`, `lnz == log(prod(self.cubesize))`
+            I.e. if `lnprior == 0`, `lnz == log(prod(self.cubesize))`
             while nested samplers would return `lnz == 0`.
         """
         rng = np.random.default_rng(seed=seed)
@@ -602,7 +602,7 @@ class Prior(ABC, utils.JSONMixin):
 
     @property
     def max_lnprior(self):
-        """Useful for rejection sampling."""
+        """Maximum log prior density, useful for rejection sampling."""
         if self._max_lnprior is None:
             self.max_lnprior = self._get_maximum_lnprior()
         return self._max_lnprior
