@@ -41,7 +41,8 @@ EARTH_CROSSING_TIME = 2 * 0.02128  # 2 R_Earth / c (seconds)
 def fplus_fcross(detector_names, ra, dec, psi, tgps):
     """
     Return a (2 x n_detectors) array with F+, Fx antenna coefficients.
-    Note: For caching, ``detector_names`` has to be hashable, e.g. a
+
+    Note: For caching, `detector_names` has to be hashable, e.g. a
     string like ``'HLV'`` or a tuple ``('H', 'L', 'V')`` but not a list.
     """
     gmst = lal.GreenwichMeanSiderealTime(tgps)  # [radians]
@@ -54,7 +55,8 @@ def fplus_fcross(detector_names, ra, dec, psi, tgps):
 def time_delay_from_geocenter(detector_names, ra, dec, tgps):
     """
     Return an array with delay times from Earth center [seconds].
-    Note: For caching, ``detector_names`` has to be hashable, e.g. a
+
+    Note: For caching, `detector_names` has to be hashable, e.g. a
     string like ``'HLV'`` or a tuple ``('H', 'L', 'V')`` but not a list.
     """
     return np.array([
@@ -90,7 +92,8 @@ def get_fplus_fcross_0(detector_names, lat, lon):
     """
     Return array with antenna response functions fplus, fcross with
     polarization psi=0.
-    Vectorized over lat, lon. Return shape is (..., n_det, 2)
+
+    Vectorized over `lat`, `lon`. Return shape is (..., n_det, 2)
     where `...` is the shape of broadcasting (lat, lon).
     """
     responses = np.array([DETECTORS[detector_name].response
@@ -157,9 +160,20 @@ def chieff(m1, m2, s1z, s2z):
 
 def isco_frequency(m_tot):
     """
-    Return approximate gravitational-wave frequency (Hz) of the
-    innermost stable circular orbit of a binary of total mass `m_tot`
-    (Msun): f_ISCO = 1 / (6^(3/2) pi m_tot) c^3 / G.
+    Gravitational-wave frequency of the innermost stable circular orbit.
+
+        f_ISCO = 1 / (6^(3/2) pi m_tot) c^3 / G.
+
+    Parameters
+    ----------
+    m_tot: float
+        Total mass of the binary (Msun).
+
+    Returns
+    -------
+    float
+        Approximate gravitational-wave frequency (Hz) of the innermost
+        stable circular orbit.
     """
     return 4400 / m_tot
 
@@ -219,6 +233,7 @@ class _ChirpMassRangeEstimator:
         """
         Auxiliary function to adjust one of the edges of the chirp mass
         range.
+
         Return a new value for the edge of the mchirp interval that is
         expanded by `factor` (in terms of a reparametrization of chirp
         mass in which the uncertainty is approximately homogeneous).

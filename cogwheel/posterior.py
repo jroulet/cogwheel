@@ -36,11 +36,11 @@ class Posterior(utils.JSONMixin):
         """
         Parameters
         ----------
-        prior: Instance of `prior.Prior`
+        prior : prior.Prior
             Provides coordinate transformations, prior, and foldable
             parameters.
 
-        likelihood: Instance of `likelihood.RelativeBinningLikelihood`
+        likelihood : likelihood.RelativeBinningLikelihood
             Provides likelihood computation.
         """
         if set(prior.standard_params) != set(likelihood.params):
@@ -72,20 +72,23 @@ class Posterior(utils.JSONMixin):
 
     def lnposterior_pardic_and_metadata(self, *args, **kwargs):
         """
+        Return log posterior, standard parameters and extra metadata.
+
         Parameters
         ----------
-        *args, **kwargs: Sampled parameters.
+        *args, **kwargs
+            Sampled parameters.
 
-        Return
-        ------
-        lnposterior: float
+        Returns
+        -------
+        lnposterior : float
             Natural logarithm of the posterior probability density in
             the space of sampled parameters (does not apply folding).
 
-        standard_par_dic: dict
+        standard_par_dic : dict
             Standard parameters.
 
-        metadata: object
+        metadata : object
             Used to compute ancillary information about samples. This
             will vary depending on the likelihood implementation.
         """
@@ -109,29 +112,31 @@ class Posterior(utils.JSONMixin):
 
         Parameters
         ----------
-        event: Instance of `data.EventData` or string with event name,
-               or path to npz file with `EventData` instance.
+        event : data.EventData, str
+            EventData, or string with event name, or path to npz file
+            with ``EventData`` instance.
 
-        mchirp_guess: float
+        mchirp_guess : float
             Approximate chirp mass (Msun).
 
-        approximant: str
+        approximant : str
             Approximant name.
 
-        prior_class: string with key from `gw_prior.prior_registry`,
-                     or subclass of `prior.Prior`.
+        prior_class : str, class
+            Key from `gw_prior.prior_registry`, or subclass of
+            `prior.Prior`.
 
-        likelihood_class:
+        likelihood_class :
             subclass of likelihood.RelativeBinningLikelihood
 
-        prior_kwargs: dict,
+        prior_kwargs : dict,
             Keyword arguments for `prior_class` constructor.
 
-        likelihood_kwargs: dict
+        likelihood_kwargs : dict
             Keyword arguments for `likelihood_class` constructor.
 
-        Return
-        ------
+        Returns
+        -------
             Instance of `Posterior`.
         """
         prior_kwargs = prior_kwargs or {}
@@ -172,11 +177,10 @@ class Posterior(utils.JSONMixin):
 
         Parameters
         ----------
-        seed: {None, int, numpy.random.Generator,
-               numpy.random.RandomState}, optional
+        seed : {int, numpy.random.Generator, numpy.random.RandomState}
             Passed to ``scipy.optimize.differential_evolution``
 
-        params: list of str, optional
+        params : list of str, optional
             Which parameters to maximize over. If provided, must be
             keys from ``self.prior.sampled_params``.
         """
@@ -249,35 +253,35 @@ def submit_likelihood_maximization(
 
     Parameters
     ----------
-    eventname: str
+    eventname : str
         Event name, e.g. 'GW150914'.
 
-    mchirp_guess: float
+    mchirp_guess : float
         Approximate chirp mass (Msun).
 
-    approximant: str
+    approximant : str
         Approximant name.
 
-    prior_name: str
+    prior_name : str
         Key in `gw_prior.prior_registry`.
 
-    parentdir: os.PathLike
+    parentdir : os.PathLike
         Path to top directory where to save output.
 
-    scheduler: {'slurm', 'lsf'}
+    scheduler : {'slurm', 'lsf'}
 
-    n_hours_limit: int
+    n_hours_limit : int
         Hours until jobs are terminated.
 
-    sbatch_cmds: sequence of strings
+    sbatch_cmds : sequence of strings
         Commands for the scheduler. E.g., `('--mem-per-cpu=4G',)` for
         slurm, or `('-R "span[hosts=1] rusage[mem=4096]"')` for lsf.
 
-    overwrite: bool
+    overwrite : bool
         Whether to overwrite preexisting files. `False` (default) raises
         an error if the file exists.
 
-    **kwargs:
+    **kwargs
         Optional keyword arguments to `Posterior.from_event()`, must be
         JSON-serializable.
     """
@@ -317,30 +321,30 @@ def main(eventname, mchirp_guess, approximant, prior_name, parentdir,
 
     Parameters
     ----------
-    eventname: str
+    eventname : str
         Event name, e.g. 'GW150914'.
 
-    mchirp_guess: float
+    mchirp_guess : float
         Approximate chirp mass (Msun).
 
-    approximant: str
+    approximant : str
         Approximant name.
 
-    prior_name: str
+    prior_name : str
         Key in `gw_prior.prior_registry`.
 
-    parentdir: os.PathLike
+    parentdir : os.PathLike
         Path to top directory where to save output.
 
-    overwrite: bool
+    overwrite : bool
         Whether to overwrite preexisting files. `False` (default) raises
         an error if the file exists.
 
-    kwargs_filename: PathLike or None
+    kwargs_filename : PathLike or None
         Path to JSON file from which to load kwargs to
         ``Posterior.from_event()``.
 
-    refine: bool
+    refine : bool
         Whether to apply an expensive likelihood maximization over all
         parameters.
     """

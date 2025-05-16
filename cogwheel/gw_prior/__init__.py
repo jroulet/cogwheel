@@ -1,6 +1,3 @@
-"""
-Specify some priors commonly used in parameter estimation of
-gravitational wave sources.
-"""
+"""Define common gravitational-wave priors."""
 
 from .combined import *

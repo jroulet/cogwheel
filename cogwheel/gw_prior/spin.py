@@ -1,9 +1,11 @@
 """
 Default modular priors for spin parameters, for convenience.
 
-They can be combined just by subclassing `CombinedPrior` and defining an
-attribute `prior_classes` that is a list of such priors (see
-``gw_prior.combined``).
+They can be combined just by subclassing
+:py:class:`cogwheel.prior.CombinedPrior` and defining an attribute
+`prior_classes` that is a list of priors (see
+:py:mod:`cogwheel.gw_prior.combined`).
+
 Each may consume some arguments in the __init__(), but should forward
 as ``**kwargs`` any arguments that other priors may need.
 """
@@ -28,6 +30,7 @@ from .twosquircle import TwoSquircularMapping
 class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
     """
     Spin prior for aligned spins that is flat in effective spin chieff.
+
     The sampled parameters are `chieff` and `cumchidiff`.
     `cumchidiff` ranges from 0 to 1 and is typically poorly measured.
     `cumchidiff` is the cumulative of a prior on the spin difference
@@ -68,12 +71,34 @@ class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
         return {'chieff': chieff,
                 'cumchidiff': cumchidiff}
 
+    @classmethod
+    def ln_jacobian_determinant(cls, s1z, s2z, m1, m2):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{chieff, cumchieff} / ∂{s1z, s2z}|
+        """
+        assert m1 >= m2
+
+        q = m2 / m1
+        abs_chieff = np.abs((s1z + q*s2z) / (1 + q))
+
+        if abs_chieff > (1-q) / (1+q):
+            return np.log(q / ((1+q)**2 * (1-abs_chieff)))
+
+        return -np.log(2 * (1+q))
+
 
 class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
     """
-    Spin prior for aligned spin components that can be combined with
-    IsotropicSpinsInplaneComponentsPrior to give constituent spin priors
-    that are independently uniform in magnitude and solid angle.
+    Prior for aligned spin components of an isotropic distribution.
+
+    It can be combined with `IsotropicSpinsInplaneComponentsPrior` to
+    give constituent spin priors that are independently uniform in
+    magnitude and solid angle.
+
     The sampled parameters are `cums1z` and `cums2z`, both from U(0, 1).
     """
     standard_params = ['s1z', 's2z']
@@ -96,6 +121,18 @@ class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
         return {'cums1z': self._inverse_spin_transform(s1z),
                 'cums2z': self._inverse_spin_transform(s2z)}
 
+    def ln_jacobian_determinant(self, s1z, s2z):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{cums1z, cums2z} / ∂{s1z, s2z}|
+        """
+        jac1 = -np.log(s1z) / 2
+        jac2 = -np.log(s2z) / 2
+        return np.log(jac1 * jac2)
+
     @classmethod
     def _spin_transform(cls, cumsz):
         return cls.sz_interp(cumsz)[()]
@@ -108,8 +145,10 @@ class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
 class VolumetricSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
     """
     Prior for aligned spin components corresponding to a density uniform
-    in the ball |s1,2| < 1. I.e.:
-        p(s1z) = p(s2z) = 3/4 * (1 - sz**2), |sz| < 1.
+    in the ball `|s1,2| < 1`. I.e.:
+
+    .. math::
+        p(s_{1z}) = p(s_{2z}) = 3/4 (1 - s_z^2), |s_z| < 1.
     """
     standard_params = ['s1z', 's2z']
     range_dic = {'cums1z': (0, 1),
@@ -124,6 +163,18 @@ class VolumetricSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
         """Standard parameters to sampled parameters."""
         return {'cums1z': self._inverse_spin_transform(s1z),
                 'cums2z': self._inverse_spin_transform(s2z)}
+
+    def ln_jacobian_determinant(self, s1z, s2z):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{cums1z, cums2z} / ∂{s1z, s2z}|
+        """
+        jac1 = 3/4 * (1 - s1z**2)
+        jac2 = 3/4 * (1 - s2z**2)
+        return np.log(jac1 * jac2)
 
     @staticmethod
     def _spin_transform(cumsz):
@@ -179,8 +230,8 @@ class _BaseInplaneSpinsInclinationPrior(UniformPriorMixin, Prior):
         sz: float
             Aligned spin magnitude for either companion.
 
-        Return
-        ------
+        Returns
+        -------
         chi: float
             Dimensionless spin magnitude between 0 and 1.
 
@@ -193,8 +244,9 @@ class _BaseInplaneSpinsInclinationPrior(UniformPriorMixin, Prior):
     @abstractmethod
     def _inverse_spin_transform(chi, tilt, sz):
         """
-        Inverse of `._spin_transform`. Subclasses must override to set
-        the spin prior.
+        Inverse of `._spin_transform`.
+
+        Subclasses must override to set the spin prior.
 
         Parameters
         ----------
@@ -208,8 +260,8 @@ class _BaseInplaneSpinsInclinationPrior(UniformPriorMixin, Prior):
         sz: float
             Aligned spin magnitude for either companion.
 
-        Return
-        ------
+        Returns
+        -------
         cumsr_sz: float
             Cumulative of the prior on in-plane spin magnitude given the
             aligned spin magnitude `sz`, for either companion.
@@ -267,8 +319,9 @@ class UniformDiskInplaneSpinsIsotropicInclinationPrior(
         _BaseInplaneSpinsInclinationPrior):
     """
     Prior for in-plane spins and inclination that is uniform in the disk
-        sx^2 + sy^2 < 1 - sz^2
-    for each of the component spins and isotropic in the inclination.
+    :math:`s_x^2 + s_y^2 < 1 - s_z^2` for each of the component spins,
+    and isotropic in the inclination.
+
     It corresponds to the IAS spin prior when combined with
     `UniformEffectiveSpinPrior`.
     """
@@ -312,6 +365,7 @@ class _BaseSkyLocationPrior(UniformPriorMixin, Prior):
     """
     Abstract base class for adding sky location parameters to a prior
     that already describes inplane spins and inclination.
+
     The need for this class arises because the coordinates we use for
     sky location depend on the sign of cos(theta_jn).
     Subclasses must override the class attribute
@@ -364,10 +418,11 @@ class _BaseSkyLocationPrior(UniformPriorMixin, Prior):
                   s1z, s2z, m1, m2, f_ref):
         """
         Return dictionary with inclination, inplane spins, right
-        ascension and declination. Spin components are defined in a
-        coordinate system where `z` is parallel to the orbital angular
-        momentum `L` and the direction of propagation `N` lies in the
-        `y-z` plane.
+        ascension and declination.
+
+        Spin components are defined in a coordinate system where `z` is
+        parallel to the orbital angular momentum `L` and the direction
+        of propagation `N` lies in the `y-z` plane.
         """
         iota_inplane_spins = self._inplane_spin_inclination_prior.transform(
             costheta_jn, phi_jl_hat, phi12, cums1r_s1z, cums2r_s2z, s1z, s2z,
@@ -400,8 +455,8 @@ class UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior(
         _BaseSkyLocationPrior):
     """
     Prior for in-plane spins, inclination and sky location.
-    It is uniform in the disk
-        sx^2 + sy^2 < 1 - sz^2
+
+    It is uniform in the disk :math:`s_x^2 + s_y^2 < 1 - s_z^2`
     for each of the component spins and isotropic in the inclination
     and sky location.
     It corresponds to the IAS spin prior when combined with
@@ -432,8 +487,10 @@ class CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior(Prior):
     naturally enforces the density to be azimuth-independent there.
 
     The variables are defined with the following meaning:
-        (u1, v1) cartesian ≡ (sqrt(cums1r_s1z), phi_jl_hat) polar
-        (u2, v2) cartesian ≡ (sqrt(cums2r_s2z), phi12) polar
+
+    * (u1, v1) cartesian ≡ (sqrt(cums1r_s1z), phi_jl_hat) polar
+    * (u2, v2) cartesian ≡ (sqrt(cums2r_s2z), phi12) polar
+
     u, v pairs live in the disk u^2+v^2 < 1.
     These are in turn mapped to squares (x1, y1) and (x2, y2) via
     2-squircular mappings.

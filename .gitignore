@@ -12,7 +12,10 @@ tutorials/example/
 *.egg-info/
 dist/
 build/
+docs/build/
+docs/source/generated/
 
 *.pyc
 __pycache__
 .ipynb_checkpoints
+.DS_Store

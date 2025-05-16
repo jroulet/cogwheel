@@ -4,8 +4,20 @@ convenience.
 
 Prior classes defined here can be used for parameter estimation and
 are registered in a dictionary ``prior_registry``.
-"""
 
+    Note on registered prior class names:
+
+    * ``LVC*``, ``IAS*`` and ``Volumetric*``  priors differ on the
+      distribution of component spins: ``LVC`` is isotropic and uniform
+      in magnitude, ``IAS`` is uniform in the effective spin, and
+      ``Volumetric`` is isotropic and uniform in the magnitude cubed.
+    * ``Intrinsic*`` priors are for the intrinsic parameters only, these
+      priors may be paired with a likelihood that marginalizes over
+      extrinsic parameters.
+    * ``Cartesian*`` priors try to avoid polar coordinates for the
+      inplane spin components, these are better suited for samplers that
+      don't implement periodic parameters.
+"""
 from cogwheel import utils
 from cogwheel.prior import CombinedPrior, Prior, check_inheritance_order
 from cogwheel.likelihood import (RelativeBinningLikelihood,
@@ -55,21 +67,25 @@ class ReferenceWaveformFinderMixin:
     Provide a constructor based on a `likelihood.ReferenceWaveformFinder`
     instance to provide initialization arguments.
     """
+
     @classmethod
     def from_reference_waveform_finder(
             cls, reference_waveform_finder, **kwargs):
         """
         Instantiate `prior.Prior` subclass with help from a
         `likelihood.ReferenceWaveformFinder` instance.
+
         This will generate kwargs for:
-            * tgps
-            * par_dic_0
-            * f_avg
-            * f_ref
-            * ref_det_name
-            * detector_pair
-            * t0_refdet
-            * mchirp_range
+
+        * ``tgps``
+        * ``par_dic_0``
+        * ``f_avg``
+        * ``f_ref``
+        * ``ref_det_name``
+        * ``detector_pair``
+        * ``t0_refdet``
+        * ``mchirp_range``
+
         Additional `**kwargs` can be passed to complete missing entries
         or override these.
         """
@@ -80,12 +96,14 @@ class ReferenceWaveformFinderMixin:
 class RegisteredPriorMixin(ReferenceWaveformFinderMixin):
     """
     Register existence of a `Prior` subclass in `prior_registry`.
+
     Intended usage is to only register the final priors (i.e., for the
     full set of GW parameters).
     `RegisteredPriorMixin` should be inherited before `Prior` (otherwise
     `PriorError` is raised) in order to test for conditioned-on
     parameters.
     """
+
     def __init_subclass__(cls):
         """Validate subclass and register it in prior_registry."""
         super().__init_subclass__()
@@ -156,6 +174,7 @@ class TidalIASPrior(RegisteredPriorMixin, CombinedPrior):
 class CartesianIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Precessing, flat in chieff, uniform luminosity volume.
+
     Physically equivalent to ``IntrinsicIASPrior`` but does not require
     periodic parameters, which some samplers cannot deal with.
     """
@@ -267,6 +286,7 @@ class ExtrinsicParametersPrior(RegisteredPriorMixin, CombinedPrior):
 class MarginalizedDistanceIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Prior for usage with ``MarginalizedDistanceLikelihood``.
+
     Similar to ``IASPrior`` except it does not include distance.
     Uniform in effective spin and detector-frame component masses.
     """
@@ -280,6 +300,7 @@ class MarginalizedDistanceAndPhaseIASPrior(RegisteredPriorMixin,
                                            CombinedPrior):
     """
     Prior for usage with ``MarginalizedDistanceLikelihood``.
+
     Similar to ``IASPrior`` except it does not include distance or phase.
     Uniform in effective spin and detector-frame component masses.
     """
@@ -293,6 +314,7 @@ class MarginalizedDistanceAndPhaseIASPrior(RegisteredPriorMixin,
 class MarginalizedDistanceLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Prior for usage with ``MarginalizedDistanceLikelihood``.
+
     Similar to ``LVCPrior`` except it does not include distance.
     Isotropic spin orientations, uniform in component spin magnitudes
     and detector-frame component masses.
@@ -306,6 +328,7 @@ class MarginalizedDistanceLVCPrior(RegisteredPriorMixin, CombinedPrior):
 class IntrinsicAlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Prior for usage with ``MarginalizedExtrinsicLikelihoodQAS``.
+
     Intrinsic parameters only, aligned spins, uniform in effective spin
     and detector frame component masses, no tides.
     """
@@ -320,6 +343,7 @@ class IntrinsicAlignedSpinIASPrior(RegisteredPriorMixin, CombinedPrior):
 class IntrinsicAlignedSpinLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Prior for usage with ``MarginalizedExtrinsicLikelihoodQAS``.
+
     Intrinsic parameters only, aligned spins, uniform in effective spin
     and detector frame component masses, no tides.
     """
@@ -334,6 +358,7 @@ class IntrinsicAlignedSpinLVCPrior(RegisteredPriorMixin, CombinedPrior):
 class IntrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Prior for usage with ``MarginalizedExtrinsicLikelihood``.
+
     Intrinsic parameters only, precessing, uniform in effective spin
     and detector frame component masses, no tides.
     """
@@ -349,6 +374,7 @@ class IntrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
 class IntrinsicLVCPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Prior for usage with ``MarginalizedExtrinsicLikelihood``.
+
     Intrinsic parameters only, precessing, isotropic spins, uniform in
     component spin magnitudes and detector frame masses, no tides.
     """
@@ -364,6 +390,7 @@ class IntrinsicLVCPrior(RegisteredPriorMixin, CombinedPrior):
 class CartesianIntrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
     """
     Prior for usage with ``MarginalizedExtrinsicLikelihood``.
+
     Physically equivalent to ``IntrinsicIASPrior`` but does not require
     periodic parameters, which some samplers cannot deal with.
     Intrinsic parameters only, precessing, uniform in effective spin
@@ -382,9 +409,10 @@ class IntrinsicVolumetricSpinPrior(RegisteredPriorMixin,
                                    CombinedPrior):
     """
     Prior for usage with ``MarginalizedExtrinsicLikelihood``.
+
     Intrinsic parameters only, precessing, uniform in detector frame
     component masses, volumetric spin prior (spin components uniform in
-    the ball |s| < 1), no tides.
+    the ball ``|s| < 1``), no tides.
     For low mass systems, consider ``PNIntrinsicVolumetricSpinPrior``
     instead.
     """
@@ -399,9 +427,10 @@ class PNIntrinsicVolumetricSpinPrior(RegisteredPriorMixin,
                                      CombinedPrior):
     """
     Prior for usage with ``MarginalizedExtrinsicLikelihood``.
+
     Intrinsic parameters only, precessing, uniform in detector frame
     component masses, volumetric spin prior (spin components uniform in
-    the ball |s| < 1), no tides.
+    the ball ``|s| < 1``), no tides.
     Best suited for low masses where PN expansion is better justified.
     """
     default_likelihood_class = MarginalizedExtrinsicLikelihood

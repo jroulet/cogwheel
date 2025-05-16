@@ -1,8 +1,8 @@
 """
 Define class ``CoherentScoreQAS`` to marginalize and demarginalize the
 likelihood over extrinsic parameters from matched-filtering timeseries,
-for quasi-circular waveforms with quadrupole radiation (l, |m|) = (2, 2)
-and aligned spins.
+for quasi-circular waveforms with quadrupole radiation
+:math:`(l, |m|) = (2, 2)` and aligned spins.
 """
 import warnings
 import numpy as np
@@ -17,12 +17,12 @@ class CoherentScoreQAS(ProposingCoherentScore):
 
     Class that, given a matched-filtering timeseries, computes the
     likelihood marginalized over extrinsic parameters
-    (``.get_marginalization_info()``). Extrinsic parameters samples can
-    be generated as well (``.gen_samples()``).
+    (:py:meth:`get_marginalization_info`).
+
+    Extrinsic parameters samples can be generated as well
+    (:py:meth:`gen_samples_from_marg_info`).
     Works for quasi-circular waveforms with quadrupole radiation, i.e.
     (l,|m|) = (2, 2), and aligned spins.
-
-    Inherits from ``ProposingCoherentScore``.
     """
     m_arr = np.array([2])
     _lookup_table_marginalized_params = {'d_luminosity', 'phi_ref'}
@@ -55,8 +55,8 @@ class CoherentScoreQAS(ProposingCoherentScore):
         i_chunk: int
             Index to ``._qmc_ind_chunks``.
 
-        Return
-        ------
+        Returns
+        -------
         Instance of ``MarginalizationInfo`` with several fields, see its
         documentation.
         """
@@ -169,18 +169,18 @@ class CoherentScoreQAS(ProposingCoherentScore):
 
         Parameters
         ----------
-        d_h_timeseries: (n_d, n_t) complex array
+        d_h_timeseries : (n_d, n_t) complex array
             Timeseries of complex (d|h), inner product of data against a
             waveform at reference distance and phase.
             Decomposed by time, detector.
 
-        h_h: (n_d,) float array
+        h_h : (n_d,) float array
             Positive ⟨h|h⟩ inner product of a waveform with itself,
             decomposed by detector.
 
-        Return
-        ------
-        t_arrival_lnprob: (n_d, n_t) float array
+        Returns
+        -------
+        t_arrival_lnprob : (n_d, n_t) float array
         """
         return np.transpose(self.beta_temperature / 2
                             * utils.abs_sq(d_h_timeseries) / h_h)  # dt
@@ -199,15 +199,15 @@ class CoherentScoreQAS(ProposingCoherentScore):
 
         Parameters
         ----------
-        marg_info: CoherentScoreQAS._MarginalizationInfo
+        marg_info : CoherentScoreQAS._MarginalizationInfo
             Output of ``.get_marginalization_info``.
 
-        num: int, optional
+        num : int, optional
             Number of samples to generate, defaults to a single sample.
 
-        Return
-        ------
-        samples: dict
+        Returns
+        -------
+        samples : dict
             Values are scalar if `num` is ``None``, else numpy arrays.
             If ``marg_info`` corresponds to an unphysical sample (i.e.,
             a realization of matched-filtering timeseries in the

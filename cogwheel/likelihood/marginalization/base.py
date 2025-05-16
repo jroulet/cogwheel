@@ -1,4 +1,6 @@
 """
+Base classes to marginalize the likelihood over extrinsic parameters.
+
 Define classes ``BaseCoherentScore`` and ``BaseCoherentScoreHM`` to
 marginalize the likelihood over extrinsic parameters from
 matched-filtering timeseries.
@@ -34,77 +36,78 @@ class MarginalizationInfo:
     intermediate products that can be used to generate extrinsic
     parameter samples or compute other auxiliary quantities like
     partial marginalizations.
+
     Below we refer to samples with sufficiently high maximum likelihood
     over distance to be included in the integral as "important" samples.
 
     Attributes
     ----------
-    qmc_sequence_id: int
+    qmc_sequence_id : int
         Index to ``coherent_score._qmc_sequences``
 
-    ln_numerators: float array of length n_important
+    ln_numerators : float array of length n_important
         Natural log of the numerator of the weights of the QMC samples,
         including the likelihood and and prior and excluding the
         importance-sampling correction.
         The multiple importance sampling formula with the balance
-        heuristic is:
+        heuristic is::
+
             ∫ f(x) p(x) dx ≈ Σ_x [p(x) f(x) / (Σ_j n_j q_j(x))]
+
         where {x} is a mixture of n_j samples from each proposal
         distribution q_j; this attribute contains the (log) numerators.
         In the present case x represents the times of arrival at each
         detector.
 
-    q_inds: int array of length n_important
+    q_inds : int array of length n_important
         Indices to the QMC sequence.
 
-    sky_inds: int array of length n_important
+    sky_inds : int array of length n_important
         Indices to sky_dict.sky_samples.
 
-    t_first_det: float array of length n_important
+    t_first_det : float array of length n_important
         Time of arrival at the first detector.
 
-    d_h: complex array of length n_important
+    d_h : complex array of length n_important
         Inner product ⟨d|h⟩, where `h` is the waveform at a reference
         distance.
 
-    h_h: float array of length n_important
+    h_h : float array of length n_important
         Real inner product ⟨h|h⟩.
 
-    tdet_inds: int array of shape (n_det, n_important)
+    tdet_inds : int array of shape (n_det, n_important)
         The i-th row contains indices to ``times`` (used by the coherent
         score instance) that correspond to the discretized time of
         arrival at the i-th detector.
 
-    proposals_n_qmc: list of length n_proposals containing ints
+    proposals_n_qmc : list of length n_proposals containing ints
         Lengths of the QMC sequences used in multiple importance
         sampling.
 
-    proposals: list of length n_proposals containing float arrays of
-               shape (n_det, n_times).
-        Proposal distributions for detector times of arrival, normalized
-        to sum to 1 along the time axis. These are combined using
-        multiple importance sampling.
+    proposals : list
+        List of length n_proposals containing float arrays of shape
+        (n_det, n_times), the proposal distributions for detector times
+        of arrival, normalized to sum to 1 along the time axis.
+        These are combined using multiple importance sampling.
 
-    Derived attributes
-    ------------------
-    weights: float array of length n_important
+    weights : float array of length n_important
         Weights of the QMC samples normalized to have unit sum.
 
-    weights_q: float array of the same length as ``unique(q_inds)``
+    weights_q : float array of the same length as ``unique(q_inds)``
         Weights of the QMC samples, normalized to have unit sum,
         differs from ``weights`` for higher-mode waveforms, that perform
         a quadrature over orbital phase (thus, many samples can have the
         same q_ind). Used for computing ``n_effective``.
 
-    n_qmc: int
+    n_qmc : int
         Total number of QMC samples used in the integral, including
         unphysical and unimportant ones.
 
-    n_effective: float
+    n_effective : float
         Effective number of samples achieved for the marginalization
         integral.
 
-    lnl_marginalized: float
+    lnl_marginalized : float
         log of the marginalized likelihood over extrinsic parameters
         excluding inclination (i.e.: time of arrival, sky location,
         polarization, distance, orbital phase).
@@ -161,9 +164,9 @@ class MarginalizationInfo:
 
         Parameters
         ----------
-        other: MarginalizationInfo
-            Typically ``self`` will be the first half of the extended
-            QMC sequence and ``other`` would be the second half.
+        other : MarginalizationInfo
+            Typically `self` will be the first half of the extended
+            QMC sequence and `other` would be the second half.
         """
         if self.qmc_sequence_id != other.qmc_sequence_id:
             raise ValueError('Cannot use different QMC sequences.')
@@ -183,17 +186,20 @@ class MarginalizationInfo:
 @dataclass
 class MarginalizationInfoHM(MarginalizationInfo):
     """
-    Like ``MarginalizationInfo`` except:
-      * it additionally contains ``o_inds``
-      * ``d_h`` has dtype float, not complex.
+    Like `MarginalizationInfo` except:
 
-    o_inds: int array of length n_important
+    * it additionally contains ``.o_inds``
+    * ``.d_h`` has dtype float, not complex.
+
+    Attributes
+    ----------
+    o_inds : int array of length n_important
         Indices to the orbital phase.
 
-    d_h: float array of length n_important
+    d_h : float array of length n_important
         Real inner product ⟨d|h⟩.
 
-    flip_psi: int array of length n_important
+    flip_psi : int array of length n_important
         Whether to add pi/2 to psi.
     """
     o_inds: np.ndarray
@@ -211,6 +217,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     Base class for computing coherent scores (i.e., marginalized
     likelihoods over extrinsic parameters) from matched-filtering
     timeseries.
+
     Meant to be subclassed differently depending on the waveform physics
     (precession and/or higher modes) that may require different
     algorithms.
@@ -225,23 +232,22 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         """
         Parameters
         ----------
-        sky_dict:
-            Instance of .skydict.SkyDictionary
+        sky_dict : .skydict.SkyDictionary
 
-        lookup_table: lookup_table.LookupTable, dict or None
+        lookup_table : lookup_table.LookupTable, dict or None
             Interpolation table for distance marginalization. If a dict
             is passed, it is interpreted as keyword arguments to create
             a new lookup table. ``None`` creates one with default
             arguments.
 
-        log2n_qmc: int
+        log2n_qmc : int
             Base-2 logarithm of the number of requested extrinsic
             parameter samples.
 
-        seed: {int, None, np.random.RandomState}
+        seed : {int, None, np.random.RandomState}
             For reproducibility of the extrinsic parameter samples.
 
-        n_qmc_sequences: int
+        n_qmc_sequences : int
             The coherent score instance will generate `n_qmc_sequences`
             QMC sequences and cycle through them in subsequent calls.
             This alleviates the problem of repeated extrinsic parameter
@@ -249,14 +255,14 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             also be used to estimate the uncertainty of the marginalized
             likelihood computation.
 
-        min_n_effective: int
+        min_n_effective : int
             Minimum effective sample size to use as convergence
             criterion. The program will try adapting the proposal
             distribution, increasing the number of samples until the
             effective sample size reaches `min_n_effective` or the number
             of extrinsic samples reaches ``2**max_log2n_qmc``.
 
-        max_log2n_qmc: int
+        max_log2n_qmc : int
             Base-2 logarithm of the maximum number of extrinsic
             parameter samples to request. The program will try adapting
             the proposal distribution, increasing the number of samples
@@ -315,9 +321,11 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         Return a MarginalizationInfo object with extrinsic parameter
         integration results, ensuring that one of three conditions
         regarding the effective sample size holds:
-            * n_effective >= .min_n_effective; or
-            * n_qmc == 2 ** .max_log2n_qmc; or
-            * lnl_marginalized < lnl_marginalized_threshold
+
+        * n_effective >= .min_n_effective; or
+        * n_qmc == 2 ** .max_log2n_qmc; or
+        * lnl_marginalized < lnl_marginalized_threshold
+
         """
         self._switch_qmc_sequence()
         i_chunk = 0
@@ -355,6 +363,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         Return array of shape (n_det, n_times) with a time-of-arrival
         proposal probability that is based on a kernel density
         estimation of the previous iterations of importance sampling.
+
         Intended for adaptive multiple importance sampling.
         """
         delays = self.sky_dict.delays[:, marginalization_info.sky_inds]
@@ -388,6 +397,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         """
         Return a MarginalizationInfo object using a specific chunk of
         the QMC sequence (without checking convergence).
+
         Provided by the subclass.
         """
 
@@ -411,6 +421,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         Return a dictionary whose values are arrays corresponding to a
         Quasi Monte Carlo sequence that explores parameters per
         ``._qmc_range_dic``.
+
         The arrival time cumulatives are packed in a single entry
         'u_tdet'. An entry 'rot_psi' has the rotation matrices to
         transform the antenna factors between psi=0 and psi=psi_qmc.
@@ -444,6 +455,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     def _qmc_range_dic(self):
         """
         Parameter ranges for the QMC sequence.
+
         The sequence explores the cumulatives of the single-detector
         (incoherent) likelihood of arrival times, the polarization, and
         the fine (subpixel) time of arrival.
@@ -457,16 +469,16 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         """
         Parameters
         ----------
-        sky_inds: tuple of ints, of length n_physical
+        sky_inds : tuple of ints, of length n_physical
             Indices to sky_dict.sky_samples corresponding to the
             (physical) QMC samples.
 
-        q_inds: int array of length n_physical
+        q_inds : int array of length n_physical
             Indices to the QMC sequence.
 
         Return
         ------
-        fplus_fcross: float array of shape (n_physical, n_detectors, 2)
+        fplus_fcross : float array of shape (n_physical, n_detectors, 2)
             Antenna factors.
         """
         fplus_fcross_0 = self.sky_dict.fplus_fcross_0[sky_inds,]  # qdp
@@ -489,9 +501,10 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
     def _interp_locally(times, timeseries, new_times, spline_degree=3):
         """
         Spline interpolation along last axis of ``timeseries`` excluding
-        data outside the range spanned by `new_times`. If there is too
-        little data inside to make a spline, use an interpolating
-        polynomial.
+        data outside the range spanned by `new_times`.
+
+        If there is too little data inside to make a spline, use an
+        interpolating polynomial.
         """
         t_rng = new_times.min(), new_times.max()
         i_min, i_max = np.clip(np.searchsorted(times, t_rng) + (-1, 1),
@@ -525,11 +538,13 @@ class ProposingCoherentScore(BaseCoherentScore):
                  min_n_effective=50, max_log2n_qmc: int = 15,
                  beta_temperature=0.5, learning_rate=1e-2, **kwargs):
         """
-        beta_temperature: float or float array of shape (n_detectors,)
+        Parameters
+        ----------
+        beta_temperature : float or float array of shape (n_detectors,)
             Inverse temperature, tempers the arrival time probability at
             each detector.
 
-        learning_rate: float
+        learning_rate : float
             How aggressively to update the following guess for the time-
             of-arrival proposal.
         """
@@ -555,24 +570,25 @@ class ProposingCoherentScore(BaseCoherentScore):
 
         Parameters
         ----------
-        d_h_timeseries: (..., n_t, n_d) complex array
+        d_h_timeseries : (..., n_t, n_d) complex array
             Timeseries of complex (d|h), inner product of data against a
             waveform at reference distance and phase.
 
-        h_h: (..., n_d) array
+        h_h : (..., n_d) array
             (h|h) inner product of a waveform with itself.
         """
 
     def get_marginalization_info(self, d_h_timeseries, h_h, times,
                                  lnl_marginalized_threshold=-np.inf):
         """
-        Return a ``MarginalizationInfo`` object with extrinsic parameter
-        integration results. Adaptive importance sampling is performed,
-        which requires an initial proposal. This method comes up with a
-        proposal, half based on the d_h timeseries and half based on the
-        adaptions from previous calls to this function. Thus, as a side
-        effect ``._t_arrival_prob`` is updated (if
-        ``.learning_rate != 0``).
+        Return a :py:class:`MarginalizationInfo` object with extrinsic
+        parameter integration results.
+
+        Adaptive importance sampling is performed, which requires an
+        initial proposal. This method comes up with a proposal, half
+        based on the d_h timeseries and half based on the adaptions from
+        previous calls to this function. Thus, as a side effect
+        ``._t_arrival_prob`` is updated (if ``.learning_rate != 0``).
         """
         # Resample to match sky_dict's dt:
         d_h_timeseries, times = self.sky_dict.resample_timeseries(
@@ -644,6 +660,7 @@ class BaseCoherentScoreHM(BaseCoherentScore):
     """
     With higher order modes it is not possible to marginalize the
     orbital phase analytically so we use trapezoid quadrature.
+
     ``BaseCoherentScoreHM`` provides attributes and methods for doing
     that.
 
@@ -667,27 +684,26 @@ class BaseCoherentScoreHM(BaseCoherentScore):
         """
         Parameters
         ----------
-        sky_dict:
-            Instance of .skydict.SkyDictionary
+        sky_dict : .skydict.SkyDictionary
 
-        m_arr: int array
+        m_arr : int array
             m number of the harmonic modes considered.
 
-        lookup_table:
+        lookup_table :
             Instance of lookup_table.LookupTable
 
-        log2n_qmc: int
+        log2n_qmc : int
             Base-2 logarithm of the number of requested extrinsic
             parameter samples.
 
-        nphi: int
+        nphi : int
             Number of orbital phases over which to perform
             marginalization with trapezoid quadrature rule.
 
-        seed: {int, None, np.random.RandomState}
+        seed : {int, None, np.random.RandomState}
             For reproducibility of the extrinsic parameter samples.
 
-        n_qmc_sequences: int
+        n_qmc_sequences : int
             The coherent score instance will generate `n_qmc_sequences`
             QMC sequences and cycle through them in subsequent calls.
             This alleviates the problem of repeated extrinsic parameter
@@ -695,14 +711,14 @@ class BaseCoherentScoreHM(BaseCoherentScore):
             also be used to estimate the uncertainty of the marginalized
             likelihood computation.
 
-        min_n_effective: int
+        min_n_effective : int
             Minimum effective sample size to use as convergence
             criterion. The program will try doubling the number of
             samples from `log2n_qmc` until a the effective sample size
             reaches `min_n_effective` or the number of extrinsic samples
             reaches ``2**max_log2n_qmc``.
 
-        max_log2n_qmc: int
+        max_log2n_qmc : int
             Base-2 logarithm of the maximum number of extrinsic
             parameter samples to request. The program will try doubling
             the number of samples from `log2n_qmc` until a the effective
@@ -732,9 +748,10 @@ class BaseCoherentScoreHM(BaseCoherentScore):
         """
         Number of orbital phase values to integrate over using the
         trapezoid rule. Setting this attribute also defines:
-            ._dh_phasor
-            ._hh_phasor
-            ._phi_ref
+
+        * ``._dh_phasor``
+        * ``._hh_phasor``
+        * ``._phi_ref``
         """
         return self._nphi
 
@@ -753,25 +770,25 @@ class BaseCoherentScoreHM(BaseCoherentScore):
         """
         Parameters
         ----------
-        dh_qo: (n_physical, n_phi) float array
+        dh_qo : (n_physical, n_phi) float array
             ⟨d|h⟩ real inner product between data and waveform at
             ``self.lookup_table.REFERENCE_DISTANCE``.
 
-        hh_qo: (n_physical, n_phi) float array
+        hh_qo : (n_physical, n_phi) float array
             ⟨h|h⟩ real inner product of a waveform at
             ``self.lookup_table.REFERENCE_DISTANCE`` with itself.
 
-        sky_prior: (n_physical,) float array
+        sky_prior : (n_physical,) float array
             Prior weights of the QMC sequence.
 
         Return
         ------
-        ln_numerators: float array of length n_important
+        ln_numerators : float array of length n_important
             Natural log of the weights of the QMC samples, including the
             likelihood and prior but excluding the importance sampling
             weights.
 
-        important: (array of ints, array of ints) of lengths n_important
+        important : (array of ints, array of ints) of lengths n_important
             The first array contains indices between 0 and n_physical-1
             corresponding to (physical) QMC samples.
             The second array contains indices between 0 and n_phi-1
@@ -779,7 +796,7 @@ class BaseCoherentScoreHM(BaseCoherentScore):
             They correspond to samples with sufficiently high maximum
             likelihood over distance to be included in the integral.
 
-        flip_psi: bool array of length n_important
+        flip_psi : bool array of length n_important
             Whether to add pi/2 to psi (which inverts the sign of ⟨d|h⟩
             and preserves ⟨h|h⟩).
         """

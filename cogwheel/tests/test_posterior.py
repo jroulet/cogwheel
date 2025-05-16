@@ -10,6 +10,8 @@ from cogwheel.likelihood.marginalized_extrinsic import (
     BaseMarginalizedExtrinsicLikelihood, BaseLinearFree)
 from cogwheel import waveform
 from cogwheel.posterior import Posterior
+from cogwheel.prior import PriorError
+from cogwheel.prior_ratio import PriorRatio
 
 from .test_waveform import get_random_par_dic
 
@@ -69,6 +71,24 @@ class PosteriorTestCase(TestCase):
             with self.subTest(prior):
                 sampled_dic = prior.inverse_transform(**self.par_dic_0)
                 self.assertIsInstance(prior.lnprior(**sampled_dic), float)
+
+    def test_prior_ratio(self):
+        for numerator in self.priors:
+            for denominator in self.priors:
+                with self.subTest((numerator, denominator)):
+                    if (set(numerator.standard_params)
+                            == set(denominator.standard_params)):
+                        prior_ratio = PriorRatio(numerator, denominator)
+                        try:
+                            lnpr = prior_ratio.ln_prior_ratio(**self.par_dic_0)
+                        except (NotImplementedError, PriorError):
+                            pass
+                        else:
+                            self.assertIsInstance(lnpr, float)
+                    else:
+                        with self.assertRaises(ValueError):
+                            prior_ratio = PriorRatio(numerator, denominator)
+
 
     def test_likelihood(self):
         """

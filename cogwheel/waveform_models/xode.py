@@ -1,42 +1,52 @@
 """
 Interface cogwheel with IMRPhenomXODE.
 
-For this module to run, you need to install IMRPhenomXODE as follows:
-1. Clone the repo (https://github.com/hangyu45/IMRPhenomXODE)
-   anywhere in your system.
+For this module to run, you need to install IMRPhenomXODE. If you have
+installed ``coghweel`` using ``conda`` or ``pip``, IMRPhenomXODE should
+work out of the box. Otherwise, you can install it as follows:
+
+1. Clone the repo (https://github.com/hangyu45/IMRPhenomXODE) anywhere
+in your system.
+
 2. Make a symbolic link to the IMRPhenomXODE repository:
-```bash
-cd <path_to_cogwheel>/cogwheel/waveform_models
-ln -s <path_to_IMRPhenomXODE>/src/ IMRPhenomXODE
-```
+
+.. code-block:: bash
+
+    cd <path_to_cogwheel>/cogwheel/waveform_models
+    ln -s <path_to_IMRPhenomXODE>/src/ IMRPhenomXODE
+
 Note, IMRPhenomXODE requires a `lalsimulation` version >= 5.1.0
+
+Importing this module will, as a side effect, add an entry
+'IMRPhenomXODE' to ``waveform.APPROXIMANTS``, thereby enabling it.
 
 Example usage
 -------------
-```python
-import pandas as pd
+.. code-block:: python
 
-from cogwheel import data
-from cogwheel import gw_plotting
-from cogwheel import posterior
-from cogwheel import sampling
-import cogwheel.waveform_models.xode
+    import pandas as pd
 
-parentdir = 'example'  # Parameter estimation runs will be saved here
-eventname = 'GW151226'
-mchirp_guess = data.EVENTS_METADATA['mchirp'][eventname]
-post = posterior.Posterior.from_event(eventname,
-                                      mchirp_guess,
-                                      approximant='IMRPhenomXODE',
-                                      prior_class='IntrinsicIASPrior')
+    from cogwheel import data
+    from cogwheel import gw_plotting
+    from cogwheel import posterior
+    from cogwheel import sampling
+    import cogwheel.waveform_models.xode
 
-pym = sampling.PyMultiNest(post, run_kwargs={'n_live_points': 256})
-rundir = pym.get_rundir(parentdir)
-pym.run(rundir)  # Will take a bit
+    parentdir = 'example'  # Parameter estimation runs will be saved here
+    eventname = 'GW151226'
+    mchirp_guess = data.EVENTS_METADATA['mchirp'][eventname]
+    post = posterior.Posterior.from_event(eventname,
+                                          mchirp_guess,
+                                          approximant='IMRPhenomXODE',
+                                          prior_class='IntrinsicIASPrior')
 
-samples = pd.read_feather(rundir/sampling.SAMPLES_FILENAME)
-gw_plotting.CornerPlot(samples[post.prior.sampled_params]).plot()
-```
+    pym = sampling.PyMultiNest(post, run_kwargs={'n_live_points': 256})
+    rundir = pym.get_rundir(parentdir)
+    pym.run(rundir)  # Will take a bit
+
+    samples = pd.read_feather(rundir/sampling.SAMPLES_FILENAME)
+    gw_plotting.CornerPlot(samples[post.prior.sampled_params]).plot()
+
 """
 import numpy as np
 
@@ -67,10 +77,10 @@ def compute_hplus_hcross_by_mode_xode(f, par_dic,
 
     Parameters
     ----------
-    f: 1d array of type float
+    f : 1d array of type float
         Frequency array in Hz
 
-    par_dic: dict
+    par_dic : dict
         Source parameters. Needs to have these keys:
             * m1, m2: component masses (Msun)
             * d_luminosity: luminosity distance (Mpc)
@@ -81,14 +91,14 @@ def compute_hplus_hcross_by_mode_xode(f, par_dic,
             * h1, h2: component dissipation numbers
             * s1z, s2z: dimensionless spins
 
-    approximant: 'IMRPhenomXODE'
+    approximant : 'IMRPhenomXODE'
         ``ValueError`` is raised if it is not 'IMRPhenomXODE'.
 
-    harmonic_modes: list of (int, int) pairs
+    harmonic_modes : list of (int, int) pairs
         (l, m) numbers of the harmonic modes to include, must be
         from the ones accepted by IMRPhenomXPHM. Note: l >= m >= 0.
 
-    lal_dic: LALDict, optional
+    lal_dic : LALDict, optional
         Contains special approximant settings.
     """
     if approximant != 'IMRPhenomXODE':

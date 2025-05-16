@@ -1,3 +1,4 @@
+"""Classes for computing the likelihood of gravitational wave events."""
 from .likelihood import CBCLikelihood, check_bounds
 from .relative_binning import BaseRelativeBinning, RelativeBinningLikelihood
 from .marginalized_distance import MarginalizedDistanceLikelihood

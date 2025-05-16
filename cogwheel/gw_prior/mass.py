@@ -58,6 +58,17 @@ class UniformDetectorFrameMassesPrior(Prior):
         return {'mchirp': m1 * q**.6 / (1 + q)**.2,
                 'lnq': np.log(q)}
 
+    @staticmethod
+    def ln_jacobian_determinant(m1, m2):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{mchirp, lnq} / ∂{m1, m2}|
+        """
+        return -np.log((m1*m2)**2 * (m1 + m2)) / 5
+
     @utils.lru_cache()
     def lnprior(self, mchirp, lnq):
         """

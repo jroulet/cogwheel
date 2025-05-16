@@ -17,13 +17,14 @@ DETECTOR_PAIRS = [''.join(pair)
 def get_random_init_parameters():
     """Return dictionary of keyword arguments to initialize priors."""
     par_dic_0 = test_waveform.get_random_par_dic()
-    standard_par_dic = {
-        key: value for key, value in par_dic_0.items()
-        if key in
-        gw_prior.miscellaneous.FixedIntrinsicParametersPrior.standard_par_dic}
+    intrinsic_params = (gw_prior.miscellaneous.FixedIntrinsicParametersPrior
+                        .standard_par_dic.keys())
+    standard_par_dic = {key: value for key, value in par_dic_0.items()
+                        if key in intrinsic_params}
     mchirp = gw_utils.m1m2_to_mchirp(par_dic_0['m1'], par_dic_0['m2'])
+    q = par_dic_0['m2'] / par_dic_0['m1']
     return {'mchirp_range': gw_utils.estimate_mchirp_range(mchirp),
-            'q_min': np.random.uniform(.01, par_dic_0['m2'] / par_dic_0['m1']),
+            'q_min': np.random.uniform(q, 0.5 * q),
             'detector_pair': np.random.choice(DETECTOR_PAIRS),
             'tgps': np.random.uniform(0, 1e9),
             't_range': np.sort(np.random.uniform(-.1, .1, 2)),

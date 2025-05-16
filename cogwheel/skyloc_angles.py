@@ -1,6 +1,5 @@
 """
-Implementation of SkyLocAngles class to handle coordinate
-transformations to and from right ascension and declination.
+Coordinate transformations to and from right ascension and declination.
 """
 import numpy as np
 
@@ -13,6 +12,7 @@ from cogwheel import gw_utils
 class SkyLocAngles(utils.JSONMixin):
     """
     Class that defines a coordinate system for sky localization.
+
     Converts back and forth between (ra, dec) and (thetanet,
     phinet). The latter are spherical angles associated to a
     Cartesian system (i, j, k) where k is the line connecting two
@@ -24,10 +24,12 @@ class SkyLocAngles(utils.JSONMixin):
         """
         Parameters
         ----------
-        detector_pair: Length-2 string with names of the detectors
-                       used to define the coordinate system, e.g. "HL",
-                       or length-1 string, e.g. "H".
-        tgps: GPS time used to define the coordinate system.
+        detector_pair : Sequence of one or two str
+            Names of the detectors used to define the coordinate system,
+            e.g. "HL" or "H".
+
+        tgps : float
+            GPS time used to define the coordinate system.
         """
         self.detector_pair = detector_pair
         self.tgps = tgps
@@ -60,15 +62,20 @@ class SkyLocAngles(utils.JSONMixin):
         """
         First two cartesian axes of the new coordinate system, fixed to
         Earth (the third axis is their cross product).
-        If `self.detector_pair` has 2 detectors the system is:
-            i = horizon
-            j = zenith
-            k = line connecting 2 detectors.
+
+        If `.detector_pair` has 2 detectors the system is:
+
+        * i = horizon
+        * j = zenith
+        * k = line connecting 2 detectors.
+
         If it has 1 detector the system is:
-            k = x_arm + y_arm
-            i = y_arm - x_arm
-            j = zenith
-        Otherwise a `ValueError` is raised.
+
+        * k = x_arm + y_arm
+        * i = y_arm - x_arm
+        * j = zenith
+
+        Otherwise a ``ValueError`` is raised.
         """
         if len(self.detector_pair) == 2:
             det1_location = gw_utils.DETECTORS[self.detector_pair[0]].location
@@ -102,7 +109,8 @@ def latlon_to_cart3d(lat, lon):
     """
     Return a unit vector (x, y, z) from a latitude and longitude in
     radians.
-    Axes directions are: x = Greenwich & Equator, z = North pole
+
+    Axes directions are: x = Greenwich & Equator, z = North pole.
     """
     return np.array([np.cos(lon) * np.cos(lat),
                      np.sin(lon) * np.cos(lat),
@@ -149,12 +157,16 @@ def ra_to_lon(ra, gmst):
 
     Parameters
     ----------
-    ra: right ascension in radians.
-    gmst: Greenwich meridian standard time in radians.
+    ra : float
+        Right ascension in radians.
 
-    Return
-    ------
-    Longitude in radians.
+    gmst : float
+        Greenwich meridian standard time in radians.
+
+    Returns
+    -------
+    float
+        Longitude in radians.
     """
     return (ra - gmst) % (2*np.pi)
 
@@ -165,11 +177,11 @@ def lon_to_ra(lon, gmst):
 
     Parameters
     ----------
-    lon: longitude in radians.
-    gmst: Greenwich meridian standard time in radians.
+    lon : longitude in radians.
+    gmst : Greenwich meridian standard time in radians.
 
-    Return
-    ------
+    Returns
+    -------
     Right ascension in radians.
     """
     return (lon + gmst) % (2*np.pi)
@@ -195,16 +207,18 @@ def z_rotation_matrix(angle):
 
 def get_rotation_matrix(x_3d, y_3d):
     """
-    Return a rotation matrix R such that
-        R @ r = r',
-    where r' are the coordinates in the new frame
-    (@ is matrix multiplication).
-    The new frame's axis are the unit vectors
-    x_3d, y_3d, z_3d (each a normalized size 3 numpy array).
-    Equivalently,
+    Return a rotation matrix R such that ``R @ r = r'``, where ``r'``
+    are the coordinates in the new frame (@ is matrix multiplication).
+
+    The new frame's axis are the unit vectors ``x_3d, y_3d, z_3d``
+    (each a normalized size 3 numpy array).
+
+    Equivalently::
+
         R @ x_3d = (1, 0, 0)
         R @ y_3d = (0, 1, 0)
         R @ z_3d = (0, 0, 1).
+
     """
     if not np.allclose(np.matmul((x_3d, y_3d), np.transpose((x_3d, y_3d))),
                        np.eye(2)):

@@ -1,7 +1,9 @@
 """
-Provide classes ``CornerPlot`` and ``MultiCornerPlot``
-similar to those in the ``cogwheel.plotting`` module but
-with gravitational-wave-specific defaults for LaTeX labels.
+Corner plots with default gravitational-wave related labels.
+
+Provide classes ``CornerPlot`` and ``MultiCornerPlot`` similar to those
+in the ``cogwheel.plotting`` module except they have gravitational-wave-
+specific defaults for LaTeX labels.
 """
 from cogwheel import plotting
 

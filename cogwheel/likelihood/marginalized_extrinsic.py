@@ -42,40 +42,39 @@ class BaseMarginalizedExtrinsicLikelihood(BaseLinearFree):
         """
         Parameters
         ----------
-        event_data: Instance of `data.EventData`
+        event_data : data.EventData
 
-        waveform_generator: Instance of `waveform.WaveformGenerator`.
+        waveform_generator : waveform.WaveformGenerator
 
-        par_dic_0: dict
+        par_dic_0 : dict
             Parameters of the reference waveform, should be close to the
             maximum likelihood waveform.
             Keys should match ``self.waveform_generator.params``.
 
-        fbin: 1-d array or None
+        fbin : 1-d array or None
             Array with edges of the frequency bins used for relative
             binning [Hz]. Alternatively, pass `pn_phase_tol`.
 
-        pn_phase_tol: float or None
+        pn_phase_tol : float or None
             Tolerance in the post-Newtonian phase [rad] used for
             defining frequency bins. Alternatively, pass `fbin`.
 
-        spline_degree: int
+        spline_degree : int
             Degree of the spline used to interpolate the ratio between
             waveform and reference waveform for relative binning.
 
-        t_range: 2-tuple of floats
+        t_range : 2-tuple of floats
             Bounds of a time range (s) over which to compute
             matched-filtering series, relative to
             ``event_data.tgps + par_dic_0['t_geocenter']``.
 
-        coherent_score: CoherentScoreHM or CoherentScoreQAS as
-                        appropriate, or dict or None
+        coherent_score : CoherentScoreHM or CoherentScoreQAS, or dict
             Instance of coherent score, optional. If a dict is passed,
             it is interpreted as keyword arguments to create one
             automatically. None (default) will create one with default
             settings.
 
-        dlnl_marginalized_threshold: float
+        dlnl_marginalized_threshold : float
             The extrinsic marginalization will not be refined further if
             at some point the estimate is lower than the maximum
             previously observed lnl_marginalized by more than this
@@ -105,8 +104,8 @@ class BaseMarginalizedExtrinsicLikelihood(BaseLinearFree):
         self._times = (np.arange(*t_range, 1 / (2*event_data.frequencies[-1]))
                        + par_dic_0.get('t_geocenter', 0))
 
-        self._d_h_weights = None  # Set by ``._set_summary()``
-        self._h_h_weights = None  # Set by ``._set_summary()``
+        self._d_h_weights = None  # Set by `._set_summary()`
+        self._h_h_weights = None  # Set by `._set_summary()`
 
         super().__init__(event_data, waveform_generator, par_dic_0,
                          fbin, pn_phase_tol, spline_degree)
@@ -126,22 +125,23 @@ class BaseMarginalizedExtrinsicLikelihood(BaseLinearFree):
         """
         Natural log of the likelihood marginalized over extrinsic
         parameters (sky location, time of arrival, polarization,
-        distance and orbital phase). This quantity is estimated via
-        Quasi Monte Carlo integration so it is not deterministic
-        (calling the method twice with the same parameters does not
-        produce the same answer).
+        distance and orbital phase).
+
+        This quantity is estimated via Quasi Monte Carlo integration so
+        it is not deterministic (calling the method twice with the same
+        parameters does not produce the same answer).
 
         Side effects:
         Updates ``._max_lnl_marginalized`` and ``._t_arrival_prob``.
 
         Parameters
         ----------
-        par_dic: dict
+        par_dic : dict
             Must contain keys for all ``.params``.
 
-        Return
-        ------
-        lnlike: float
+        Returns
+        -------
+        lnlike : float
             Log of the marginalized likelihood.
         """
         lnl_marginalized_threshold = (self._max_lnl_marginalized
@@ -173,11 +173,11 @@ class BaseMarginalizedExtrinsicLikelihood(BaseLinearFree):
 
         Parameters
         ----------
-        metadata: MarginalizationInfo
+        metadata : MarginalizationInfo
             Second output of ``.lnlike_and_metadata``
 
-        Return
-        ------
+        Returns
+        -------
         dict with extrinsic parameters.
         """
         marg_info = metadata
@@ -195,11 +195,11 @@ class BaseMarginalizedExtrinsicLikelihood(BaseLinearFree):
 
         Parameters
         ----------
-        samples: pd.DataFrame
+        samples : pd.DataFrame
             Dataframe of intrinsic parameter samples, needs to have
             columns for all `self.params`.
 
-        num: None (default) or int
+        num : None (default) or int
             How many extrinsic parameters to draw for every intrinsic.
             If None, columns for extrinsic parameters are added to
             `samples`.
@@ -254,18 +254,18 @@ class MarginalizedExtrinsicLikelihood(
     quasicircular waveforms with generic harmonic modes and spins, and
     to resample these parameters from the conditional posterior for
     demarginalization in postprocessing.
-
-    Note: comments throughout the code refer to array indices per:
-        q: QMC sample id
-        m: harmonic m number id
-        p: polarization (+ or x) id
-        d: detector id
-        b: frequency bin id
-        r: rfft frequency id
-        t: detector time id
-        o: orbital phase id
-        i: important (i.e. with high enough likelihood) sample id
     """
+    # Note: comments throughout the code refer to array indices per:
+    #     q: QMC sample id
+    #     m: harmonic m number id
+    #     p: polarization (+ or x) id
+    #     d: detector id
+    #     b: frequency bin id
+    #     r: rfft frequency id
+    #     t: detector time id
+    #     o: orbital phase id
+    #     i: important (i.e. with high enough likelihood) sample id
+
     params = ['f_ref', 'iota', 'l1', 'l2', 'm1', 'm2', 's1x_n', 's1y_n', 's1z',
               's2x_n', 's2y_n', 's2z']
 
@@ -279,7 +279,8 @@ class MarginalizedExtrinsicLikelihood(
         keep track of it.
         Update `asd_drift` using the reference waveform.
         The summary data `self._d_h_weights` and `self._d_h_weights` are
-        such that:
+        such that::
+
             (d|h) ~= sum(_d_h_weights * conj(h_fbin)) / asd_drift^2
             (h|h) ~= sum(_h_h_weights * abs(h_fbin)^2) / asd_drift^2
 
