@@ -318,8 +318,8 @@ class EventData(utils.JSONMixin):
     @staticmethod
     def _read_timeseries(filename, tgps, **kwargs):
         """
-        Return a ``gwpy.timeseries.TimeSeries``, cropped around
-        the event to exclude any nans.
+        Return a ``gwpy.timeseries.TimeSeries``, cropped around the
+        event to exclude any nans.
         """
         try:
             timeseries = gwpy.timeseries.TimeSeries.read(filename, **kwargs)
@@ -616,16 +616,16 @@ class EventData(utils.JSONMixin):
         """
         Parameters
         ----------
-        inpaint_times_by_det: dict
-            Dictionary with times to inpaint by detector.
-            Keys are detector names, values are lists of tuples,
-            each with a pair (t_start, t_end), e.g.:
+        inpaint_times_by_det : dict
+            Dictionary with times to inpaint by detector. Keys are
+            detector names, values are lists of tuples, each with a pair
+            (t_start, t_end), e.g.:
             {'H': [(t_start_0, t_end_0), (t_start_1, t_end_1)]}
             Times are expressed in seconds from ``.tgps``.
 
         Returns
         -------
-        EventData: Instance containing the inpainted data.
+        EventData : Instance containing the inpainted data.
         """
         for pairs in inpaint_times_by_det.values():
             for left, right in pairs:
@@ -808,21 +808,27 @@ def _fetch_open_data(detector_name, tgps, interval, **kwargs):
 
 def fill_holes_bruteforce(data, qmask, wt_filter_fd):
     """
+    Inpaint time-domain data at arbitrary times.
+
     Parameters
     ----------
-    data: float array
+    data : float array
         Time-domain strain data.
 
-    qmask: Boolean array
+    qmask : Boolean array
         Mask with zeros at holes in unwhitened data.
 
-    wt_filter_fd: float array
+    wt_filter_fd : float array
         Frequency domain whitening filter. Lives in the space of
         rfft(len(data), dt).
 
     Returns
     -------
     float array of size len(data) with time-domain filled data.
+
+    See Also
+    --------
+    fill_hole_consecutive
     """
     filleddata = data.copy()
     hole_inds = np.where(~qmask)[0]
@@ -838,8 +844,8 @@ def fill_holes_bruteforce(data, qmask, wt_filter_fd):
     ii, jj = np.meshgrid(hole_inds, hole_inds, indexing='ij')
     mat = c_inv_td[np.abs(ii - jj)]
 
-    # Solve for filled values, note that at size of the matrix 10**5 x 10**5,
-    # solve becomes numerically unstable
+    # Solve for filled values, note that at size of the matrix
+    # 10^5 x 10^5, solve becomes numerically unstable
     filleddata[hole_inds] = -np.linalg.solve(mat, c_inv_dat[hole_inds])
 
     return filleddata
@@ -847,24 +853,30 @@ def fill_holes_bruteforce(data, qmask, wt_filter_fd):
 
 def fill_hole_consecutive(data, leftind, rightind, wt_filter_fd):
     """
-    More efficient than ``fill_hole_bruteforce`` if there is only
-    one hole to fill.
+    Inpaint time-domain data on a consecutive stretch of time.
+
+    More efficient than ``fill_hole_bruteforce``, but restricted to only
+    one hole.
 
     Parameters
     ----------
-    data: float array
+    data : float array
         Time-domain strain data.
 
-    leftind, rightind: int
+    leftind, rightind : int
         Left and right index of hole.
 
-    wt_filter_fd: float array
+    wt_filter_fd : float array
         Frequency domain whitening filter. Lives in the space of
         rfft(len(data), dt).
 
     Returns
     -------
     float array of size len(data) with time-domain filled data.
+
+    See Also
+    --------
+    fill_holes_bruteforce
     """
     # Copy the data and zero inside the hole
     filleddata = data.copy()
