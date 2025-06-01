@@ -138,11 +138,15 @@ class Sampler(abc.ABC, utils.JSONMixin):
             Whether to perform convergence tests to the run after
             sampling. See ``postprocessing.postprocess_rundir``.
         """
-        self._submit('slurm', rundir, n_hours_limit, memory_per_task,
-                     resuming, sbatch_cmds, postprocess)
+        job_name, stdout_path, stderr_path, args, batch_path \
+            = self._setup_submission(rundir, resuming, postprocess)
+        sbatch_cmds += (f'--mem-per-cpu={memory_per_task}',)
+
+        utils.submit_slurm(job_name, n_hours_limit, stdout_path,
+                           stderr_path, args, sbatch_cmds, batch_path)
 
     def submit_lsf(
-            self, rundir, n_hours_limit=48, memory_per_task='32G',
+            self, rundir, n_hours_limit=48, memory_per_task='32GB',
             resuming=False, bsub_cmds=(), postprocess=True):
         """
         Parameters
@@ -167,44 +171,42 @@ class Sampler(abc.ABC, utils.JSONMixin):
             Whether to perform convergence tests to the run after
             sampling. See ``postprocessing.postprocess_rundir``.
         """
-        self._submit('lsf', rundir, n_hours_limit, memory_per_task,
-                     resuming, bsub_cmds, postprocess)
+        job_name, stdout_path, stderr_path, args, batch_path \
+            = self._setup_submission(rundir, resuming, postprocess)
+        bsub_cmds += (f'-M {memory_per_task}',)
+        utils.submit_lsf(job_name, n_hours_limit, stdout_path,
+                         stderr_path, args, bsub_cmds, batch_path)
 
-    def _submit(self, scheduler, rundir, n_hours_limit=48,
-                memory_per_task='32G', resuming=False, cmds=(),
-                postprocess=True):
+    def _setup_submission(self, rundir, resuming=False, postprocess=True):
         """
-        Implement `.submit_lsf` and `.submit_slurm`.
+        Write Sampler.json and return submit arguments.
 
-        Parameters
-        ----------
-        scheduler : {'slurm', 'lsf'}
+        Returns
+        -------
+        job_name, stdout_path, stderr_path, args, batch_path
         """
-        rundir = pathlib.Path(rundir)
+        rundir = pathlib.Path(rundir).resolve()
         job_name = '_'.join([rundir.name,
                              self.posterior.likelihood.event_data.eventname,
                              self.posterior.prior.__class__.__name__,
                              self.__class__.__name__])
         batch_path = rundir/'batchfile'
-        stdout_path = rundir.joinpath('output.out').resolve()
-        stderr_path = rundir.joinpath('errors.err').resolve()
+        stdout_path = rundir/'output.out'
+        stderr_path = rundir/'errors.err'
 
-        self.to_json(rundir, overwrite=resuming)
+        try:
+            self.to_json(rundir, overwrite=resuming)
+        except FileExistsError as err:
+            raise FileExistsError(
+                f'{rundir/self.JSON_FILENAME} exists. If you would like to '
+                'resume a previous run pass `resuming=True`, otherwise pass a '
+                'fresh `rundir`.') from err
 
-        cmds += (f'--mem-per-cpu={memory_per_task}',)
-        args = str(rundir.resolve())
-
+        args = str(rundir)
         if not postprocess:
             args += ' --no-postprocessing'
 
-        if scheduler == 'slurm':
-            utils.submit_slurm(job_name, n_hours_limit, stdout_path,
-                               stderr_path, args, cmds, batch_path)
-        elif scheduler == 'lsf':
-            utils.submit_lsf(job_name, n_hours_limit, stdout_path,
-                             stderr_path, args, cmds, batch_path)
-        else:
-            raise ValueError('`scheduler` must be "slurm" or "lsf".')
+        return job_name, stdout_path, stderr_path, args, batch_path
 
     def submit_condor(self,
                       rundir,
@@ -244,24 +246,20 @@ class Sampler(abc.ABC, utils.JSONMixin):
         """
         rundir = pathlib.Path(rundir).resolve()
 
+        _, stdout_path, stderr_path, args, _ = self._setup_submission(
+            rundir, resuming, postprocess)
+
         submit_path = rundir/'submit.sub'
 
         submit_kwargs = {
             'executable': rundir/'executable.sh',
-            'output': rundir/'output.out',
-            'error': rundir/'errors.err',
+            'output': stdout_path,
+            'error': stderr_path,
             'log': rundir/'sampling.log',
             'request_cpus': request_cpus,
             'request_memory': request_memory,
             'request_disk': request_disk,
             } | submit_kwargs
-
-        self.to_json(rundir, overwrite=resuming)
-
-        args = rundir.as_posix()
-
-        if not postprocess:
-            args += ' --no-postprocessing'
 
         utils.submit_condor(submit_path, overwrite=resuming, args=args,
                             **submit_kwargs)
