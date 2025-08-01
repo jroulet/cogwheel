@@ -358,6 +358,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
                    spline_degree=spline_degree,
                    **kwargs)
 
+    @check_bounds
     def lnlike(self, par_dic):
         """
         Return log-likelihood (float).
@@ -497,7 +498,6 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
 
         super().__init__(*args, **kwargs)
 
-    @check_bounds
     def lnlike_and_metadata(self, par_dic):
         """Return log likelihood using relative binning."""
         lnl = self.lnlike_detectors_no_asd_drift(par_dic) @ self.asd_drift**-2

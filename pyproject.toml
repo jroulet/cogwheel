@@ -22,7 +22,7 @@ dependencies = [
   "matplotlib",
   "notebook",
   "numba",
-  "pandas",
+  "pandas >=2.0",
   "pyarrow",
   "scipy",
   "setuptools_scm",
