@@ -28,7 +28,7 @@ dependencies = [
   "setuptools_scm",
   "gwpy",
   "dynesty",
-  "nautilus-sampler @ git+https://github.com/johannesulf/nautilus.git@main",
+  "nautilus-sampler",
   "zeus-mcmc",
 ]
 maintainers = [

@@ -9,7 +9,7 @@
 project = 'cogwheel'
 copyright = '2024, Javier Roulet'
 author = 'Javier Roulet'
-release = '1.2'
+release = '1.4.1'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
