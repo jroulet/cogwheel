@@ -28,7 +28,7 @@ dependencies = [
   "setuptools_scm",
   "gwpy",
   "dynesty",
-  "nautilus-sampler",
+  "nautilus-sampler @ git+https://github.com/johannesulf/nautilus.git@main",
   "zeus-mcmc",
 ]
 maintainers = [
@@ -42,6 +42,7 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
 ]
 
 [project.optional-dependencies]

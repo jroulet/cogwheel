@@ -9,12 +9,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-import gwpy.timeseries
 import gwosc
 
 from cogwheel import gw_utils
 from cogwheel import utils
 from cogwheel import waveform
+
+utils.import_lal()
+
+import gwpy.timeseries
 
 # gwpy meddles with matplotlib, undo:
 plt.rcdefaults()
@@ -545,6 +548,30 @@ class EventData(utils.JSONMixin):
 
         fig.colorbar(plt.cm.ScalarMappable(norm=norm), pad=.03,
                      ax=axes.tolist(), label=r'Power ($\sigma^2$)')
+
+    def get_whitened_td(self, strain_f=None):
+        """
+        Whiten and convert to time-domain.
+
+        Take a frequency-domain strain defined on the FFT grid
+        ``self.frequencies`` and return a whitened time domain strain
+        defined on ``self.times``.
+
+        Parameters
+        ----------
+        strain_f : (n_det, n_rfftfreq) complex array
+            A strain signal in the frequency domain. Defaults to the
+            data.
+
+        Returns
+        -------
+        (n_det, n_times) real array : Whitened time-domain signal.
+        """
+        if strain_f is None:
+            strain_f = self.strain
+
+        return (np.sqrt(2 * self.nfft * self.df)
+                * np.fft.irfft(strain_f * self.wht_filter))
 
     def to_npz(self, *, filename=None, overwrite=False,
                permissions=0o644):

@@ -700,7 +700,7 @@ class Prior(ABC, utils.JSONMixin):
         return -minimize_result.fun
 
     @staticmethod
-    def _trim_bound(a, b, eps=1e-9):
+    def _trim_bound(a, b, eps=1e-7):
         mean = (a + b) / 2
         trimmed_half_diff = (b - a) / 2 * (1-eps)
         return mean - trimmed_half_diff, mean + trimmed_half_diff

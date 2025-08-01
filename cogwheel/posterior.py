@@ -147,6 +147,14 @@ class Posterior(utils.JSONMixin):
         likelihood_kwargs : dict
             Keyword arguments for `likelihood_class` constructor.
 
+        ref_wf_finder_kwargs : dict
+            Keyword arguments for ``ReferenceWaveformFinder.from_event``
+            constructor, including:
+
+            * time_range
+            * mchirp_range
+            * f_ref
+
         Returns
         -------
             Instance of `Posterior`.

@@ -394,11 +394,12 @@ class CBCLikelihood(utils.JSONMixin):
         axes = fig.get_axes()
 
         time = self.event_data.times - self.event_data.tcoarse
-        data_t_wht = self._get_whitened_td(self.event_data.strain)
-        wf_t_wht = self._get_whitened_td(self._get_h_f(par_dic, by_m=by_m))
+        data_t_wht = self.event_data.get_whitened_td(self.event_data.strain)
+        wf_t_wht = self.event_data.get_whitened_td(self._get_h_f(par_dic,
+                                                                 by_m=by_m))
 
         # Plot
-        data_plot_kwargs = ({'c': 'C0', 'lw': .2, 'label': 'Data'}
+        data_plot_kwargs = ({'c': 'C0', 'lw': 0.2, 'label': 'Data'}
                             | wf_plot_kwargs.pop('data_plot_kwargs', {}))
         for ax, data_det, wf_det in zip(axes, data_t_wht, wf_t_wht):
             if plot_data:
@@ -410,12 +411,9 @@ class CBCLikelihood(utils.JSONMixin):
 
     def _get_whitened_td(self, strain_f):
         """
-        Take a frequency-domain strain defined on the FFT grid
-        ``self.event_data.frequencies`` and return a whitened time
-        domain strain defined on `self.event_data.times`.
+        Deprecated, use `EventData.get_whitened_td()`.
         """
-        return (np.sqrt(2 * self.event_data.nfft * self.event_data.df)
-                * np.fft.irfft(strain_f * self.event_data.wht_filter))
+        return self.event_data.get_whitened_td(strain_f)
 
     def _setup_data_figure(self, figsize=None):
         """Return a new ``Figure`` with subplots for each detector."""

@@ -775,6 +775,9 @@ class Nautilus(Sampler):
             prior.add_parameter(par, rng)
 
         sampler_kwargs['prior'] = prior
+        sampler_kwargs['periodic'] = [
+            self.posterior.prior.sampled_params.index(par)
+            for par in self.posterior.prior.periodic_params] or None
         sampler_kwargs['likelihood'] = self._lnfoldedprob_and_blob
         sampler_kwargs['blobs_dtype'] = self._blobs_dtype
         sampler_kwargs['pass_dict'] = False

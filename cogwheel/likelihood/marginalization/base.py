@@ -337,7 +337,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             # Perform adaptive mixture importance sampling:
             i_chunk += 1
             if i_chunk == len(self._qmc_ind_chunks):
-                logging.warning('Maximum QMC resolution reached.')
+                logging.info('Maximum QMC resolution reached.')
                 break
 
             if marginalization_info.n_effective == 0:  # Unphysical point
