@@ -5,8 +5,7 @@ import textwrap
 from unittest import TestCase, main
 import numpy as np
 
-from cogwheel import gw_prior
-from cogwheel import gw_utils
+from cogwheel import gw_prior, gw_utils
 from cogwheel.tests import test_waveform
 
 

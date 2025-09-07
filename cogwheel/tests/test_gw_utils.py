@@ -3,8 +3,7 @@
 from unittest import TestCase, main
 import numpy as np
 
-from cogwheel import gw_utils, utils
-from cogwheel import skyloc_angles
+from cogwheel import gw_utils, skyloc_angles, utils
 
 lal = utils.import_lal()
 

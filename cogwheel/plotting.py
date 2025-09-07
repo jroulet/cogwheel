@@ -589,17 +589,23 @@ class CornerPlot:
         """Implement rules for choosing bins for weighted samples."""
         if isinstance(self.plotstyle.bins, str):
             weights = self.samples.get(self.weights_col)
-            if weights is None:
-                n_effective = len(self.samples)
-            else:
+            if weights is not None:
                 n_effective = utils.n_effective(weights)
+            else:
+                n_effective = len(self.samples)
 
             if self.plotstyle.bins == 'sturges':
-                return int(np.ceil(np.log2(n_effective))) + 1
-            if self.plotstyle.bins == 'rice':
-                return int(np.ceil(2*np.cbrt(n_effective)))
-            if self.plotstyle.bins == 'sqrt':
-                return int(np.ceil(np.sqrt(n_effective)))
+                n_bins = int(np.ceil(np.log2(n_effective))) + 1
+            elif self.plotstyle.bins == 'rice':
+                n_bins = int(np.ceil(2*np.cbrt(n_effective)))
+            elif self.plotstyle.bins == 'sqrt':
+                n_bins = int(np.ceil(np.sqrt(n_effective)))
+            else:
+                raise NotImplementedError(
+                    f'Cannot handle bins={self.plotstyle.bins!r} with weights.'
+                )
+            # Fewer than 4 bins causes problems with RectBivariateSpline
+            return max(4, n_bins)
 
         return self.plotstyle.bins
 
@@ -832,8 +838,7 @@ class MultiCornerPlot:
             if labels is not None:
                 raise ValueError(
                     "Don't pass `labels` if `dataframes` is a dict.")
-            labels = dataframes.keys()
-            dataframes = dataframes.values()
+            labels, dataframes = zip(*dataframes.items())
 
         if labels is None:
             labels = [None] * len(dataframes)

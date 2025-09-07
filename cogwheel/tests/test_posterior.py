@@ -3,12 +3,9 @@
 from unittest import TestCase, main
 from inspect import signature
 
-from cogwheel import data
-from cogwheel import gw_prior
-from cogwheel import likelihood
+from cogwheel import data, gw_prior, likelihood, waveform
 from cogwheel.likelihood.marginalized_extrinsic import (
     BaseMarginalizedExtrinsicLikelihood, BaseLinearFree)
-from cogwheel import waveform
 from cogwheel.posterior import Posterior
 from cogwheel.prior import PriorError
 from cogwheel.prior_ratio import PriorRatio
