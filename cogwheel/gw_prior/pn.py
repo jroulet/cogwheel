@@ -276,7 +276,4 @@ class PNCoordinatesPrior(Prior):
         """Return keyword arguments to reproduce the class instance."""
         return {'eigvecs': self.eigvecs,
                 'f_ref': self.f_ref,
-                'par_dic_0': self.par_dic_0,
-                'mchirp_range': self.mchirp_range,
-                'dmu': self.dmu,
                 'q_min': np.exp(self.range_dic['lnq'][0])}

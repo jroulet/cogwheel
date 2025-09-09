@@ -87,9 +87,7 @@ def compute_hplus_hcross_by_mode_xode(f, par_dic,
             * iota: inclination (rad)
             * phi_ref: phase at reference frequency (rad)
             * f_ref: reference frequency (Hz)
-        plus, optionally:
-            * h1, h2: component dissipation numbers
-            * s1z, s2z: dimensionless spins
+            * s1x, s1y, s1z, s2x, s2y, s2z: dimensionless spins
 
     approximant : 'IMRPhenomXODE'
         ``ValueError`` is raised if it is not 'IMRPhenomXODE'.
