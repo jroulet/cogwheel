@@ -272,8 +272,7 @@ class PNCoordinatesPrior(Prior):
         """1.5 PN term of the phase."""
         return 3/32 * (beta - 4*np.pi) / eta * v**-2
 
-    def get_init_dict(self):
+    def get_init_dict(self, **kwargs):
         """Return keyword arguments to reproduce the class instance."""
-        return {'eigvecs': self.eigvecs,
-                'f_ref': self.f_ref,
-                'q_min': np.exp(self.range_dic['lnq'][0])}
+        q_min = np.exp(self.range_dic['lnq'][0])
+        return super().get_init_dict(q_min=q_min, **kwargs)

@@ -522,11 +522,6 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
                                  timeseries[..., i_min : i_max],
                                  new_times, axis=-1)
 
-    def get_init_dict(self):
-        """Keyword arguments to instantiate this class."""
-        pars = set(inspect.signature(self.__class__).parameters) - {'kwargs'}
-        return {par: getattr(self, par) for par in pars}
-
 
 class ProposingCoherentScore(BaseCoherentScore):
     """

@@ -303,13 +303,11 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
             h0_fbin[i][:] = (h0_fbin[i] * fadeout_fbin
                              + h0_fbin[i][ibin_99] * (1-fadeout_fbin))
 
-    def get_init_dict(self):
-        """
-        Return dictionary with keyword arguments to reproduce the class
-        instance.
-        """
-        return super().get_init_dict() | ({'fbin': None} if self.pn_phase_tol
-                                          else {})
+    def get_init_dict(self, **kwargs):
+        """Return keyword arguments to reproduce the class instance."""
+        if self.pn_phase_tol:
+            kwargs['fbin'] = None
+        return super().get_init_dict(**kwargs)
 
     @classmethod
     def from_reference_waveform_finder(

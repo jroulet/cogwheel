@@ -18,8 +18,7 @@ import dynesty
 import nautilus
 import zeus
 
-from cogwheel import postprocessing
-from cogwheel import utils
+from cogwheel import postprocessing, utils
 
 SAMPLES_FILENAME = 'samples.feather'
 
@@ -439,10 +438,10 @@ class Sampler(abc.ABC, utils.JSONMixin):
             sampled_params[sampled_params.index(par)] = f'folded_{par}'
         return sampled_params
 
-    def get_init_dict(self):
+    def get_init_dict(self, **kwargs):
         """Keyword arguments to instantiate the class."""
-        init_dict = super().get_init_dict()
-        # Remove 'sample_prior' from the keys.
+        init_dict = super().get_init_dict(**kwargs)
+        # Remove 'sample_prior' from the keys ensuring it's False:
         assert not init_dict.pop('sample_prior', False)
         return init_dict
 
