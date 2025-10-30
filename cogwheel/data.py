@@ -570,6 +570,26 @@ class EventData(utils.JSONMixin):
         return (np.sqrt(2 * self.nfft * self.df)
                 * np.fft.irfft(strain_f * self.wht_filter))
 
+    def heterodyne(self, ref_phase):
+        """
+        Return data heterodyned against with a reference phase.
+
+        Useful e.g. for visualizing long faint signals and for assessing
+        by eye the quality of a fit.
+
+        Parameters
+        ----------
+        ref_phase : (n_det?, n_freq_slice) float array
+            Phase (rad) evaluated on ``self.frequencies[self.fslice]``.
+
+        Returns
+        -------
+        EventData
+        """
+        phasor = np.ones_like(self.strain)
+        phasor[:, self.fslice] = np.exp(1j*ref_phase)
+        return self.reinstantiate(strain=self.strain * phasor.conj())
+
     def to_npz(self, *, filename=None, overwrite=False,
                permissions=0o644):
         """Save class as ``.npz`` file (by default in `DATADIR`)."""
