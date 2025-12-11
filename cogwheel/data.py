@@ -1,5 +1,6 @@
 """Download, process and store data about GW events."""
 
+import collections
 import json
 import logging
 import pathlib
@@ -11,6 +12,7 @@ import pandas as pd
 import gwosc
 
 from cogwheel import gw_utils, utils, waveform
+from cogwheel.likelihood.likelihood import hole_edges
 
 utils.import_lal()
 
@@ -639,6 +641,8 @@ class EventData(utils.JSONMixin):
 
     def inpaint(self, inpaint_times_by_det: dict):
         """
+        Inpaint segments of data, useful to mitigate glitches.
+
         Parameters
         ----------
         inpaint_times_by_det : dict
@@ -647,10 +651,16 @@ class EventData(utils.JSONMixin):
             (t_start, t_end), e.g.:
             {'H': [(t_start_0, t_end_0), (t_start_1, t_end_1)]}
             Times are expressed in seconds from ``.tgps``.
+            See ``EventData.suggest_inpaint_times`` to generate
+            automatically.
 
         Returns
         -------
         EventData : Instance containing the inpainted data.
+
+        See Also
+        --------
+        EventData.suggest_inpaint_times
         """
         for pairs in inpaint_times_by_det.values():
             for left, right in pairs:
@@ -678,6 +688,109 @@ class EventData(utils.JSONMixin):
             filled_strain[i_det] = np.fft.rfft(data_filled)
 
         return self.reinstantiate(strain=filled_strain)
+
+    def suggest_inpaint_times(self, nfft=64, noverlap=None, vmax=20.,
+                              exclude=(-0.5, 0.1), power_drop=10.0,
+                              plot=True):
+        """
+        Identify time intervals to inpaint in each detector.
+
+        Inpaint times are identified based on excess power in a
+        spectrogram of whitened data. The parameters to this function
+        control the spectrogram. Note that different glitches may be
+        better captured by different spectrogram configurations.
+        The first output `inpaint_times` can be (edited and) passed to
+        :py:meth:`~EventData.inpaint`.
+
+        Parameters
+        ----------
+        nfft : int, optional
+            Number of samples per FFT segment. Defines the STFT
+            frequency resolution. Default is 64.
+
+        noverlap : int or None, optional
+            Number of samples to overlap between consecutive FFT
+            windows. Defaults to ``nfft // 2``.
+
+        vmax : float, optional
+            Maximum allowed peak power in the whitened spectrogram, in
+            units of variance.
+
+        exclude : tuple of float
+            Two-element tuple ``(t_min, t_max)`` specifying a time
+            interval relative to ``self.tcoarse`` that is not to be
+            inpainted (to preserve the actual GW signal).
+
+        power_drop : float
+            We seek outliers iteratively, to prevent the whitening
+            filter from corrupting a lot of data if there is a very loud
+            glitch. At each iteration only data with power within a
+            factor ``1/power_drop`` of the global maximum are flagged
+            and inpainted.
+
+        plot : bool
+            If True (default), display diagnostic spectrograms before
+            and after suggested inpainting, with segments to inpaint
+            marked.
+
+        Returns
+        -------
+        inpaint_times_by_det : dict
+            Dictionary mapping detector names to lists of time segments
+            ``[t_start, t_end]`` (relative to ``tgps``) that can be
+            passed to :py:meth:`~EventData.inpaint`.
+
+        event_data : EventData
+            Data with the suggested inpainting applied.
+
+        See Also
+        --------
+        EventData.inpaint
+        EventData.specgram
+        """
+        noverlap = noverlap or nfft // 2
+
+        stfft = signal.ShortTimeFFT(
+            win=np.hanning(nfft),
+            hop=nfft - noverlap,
+            fs=2 * self.fbounds[1],
+            scale_to='psd',
+            fft_mode='onesided2X'
+        )
+
+        event_data = self
+        inpaint_times_by_det = collections.defaultdict(list)
+        for i, det_name in enumerate(self.detector_names):
+            threshold = np.inf
+            while threshold > vmax:
+                wht_data_td = np.sqrt(2 * stfft.fs) * np.fft.irfft(
+                    event_data.strain[i] * event_data.wht_filter[i])
+                spectrum = stfft.spectrogram(wht_data_td * np.sqrt(stfft.fs))
+                t = stfft.t(len(wht_data_td)) - event_data.tcoarse
+
+                peak_power = spectrum.max(axis=0)  # timeseries
+                threshold = max(peak_power.max() / power_drop, vmax)
+                clean = ((peak_power < threshold)
+                         | ((exclude[0] < t) & (t < exclude[1])))
+                segments = t[hole_edges(clean)]
+                inpaint_times_by_det[det_name].extend(segments.tolist())
+                event_data = event_data.inpaint(
+                    {det_name: inpaint_times_by_det[det_name]})
+
+        if plot:
+            # Show original:
+            self.specgram(nfft=nfft, noverlap=noverlap, vmax=vmax)
+            axes = plt.gcf().axes
+            axes[0].set_title('Original')
+            for ax, det_name in zip(axes, self.detector_names):
+                for segment in inpaint_times_by_det[det_name]:
+                    ax.axvspan(*segment, color='r', ymax=.025)
+
+            # Show suggested:
+            event_data.specgram()
+            plt.gcf().axes[0].set_title('Inpainted')
+
+        return inpaint_times_by_det, event_data
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self.eventname})'
