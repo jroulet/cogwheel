@@ -1,6 +1,6 @@
 """Bayesian parameter estimation of gravitational wave sources."""
 __author__ = 'Javier Roulet'
-__email__ = 'jroulet@caltech.edu'
+__email__ = 'jroulet@uchicago.edu'
 
 # Note: The __version__ will not get updated automatically if cogwheel
 # was installed in editable mode (i.e. as ``pip install -e .``). In that

@@ -803,7 +803,7 @@ class BaseCoherentScoreHM(BaseCoherentScore):
         ln_numerators = (
             self.lookup_table.lnlike_marginalized(dh_qo[important],
                                                   hh_qo[important])
-            + np.log(sky_prior)[important[0]]
+            + np.log(sky_prior[important[0]])
             - np.log(self._nphi))  # i
 
         return ln_numerators, important, flip_psi[important]
