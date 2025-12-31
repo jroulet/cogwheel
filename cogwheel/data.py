@@ -530,7 +530,7 @@ class EventData(utils.JSONMixin):
             wht_data_td = (np.fft.irfft(self.strain[i] * self.wht_filter[i])
                            * np.sqrt(2 * f_sampling))
             ax.specgram(wht_data_td * np.sqrt(f_sampling),
-                        NFFT=nfft, noverlap=48, Fs=f_sampling,
+                        NFFT=nfft, noverlap=noverlap, Fs=f_sampling,
                         xextent=(self.times[[0, -1]] - self.tcoarse),
                         scale='linear', norm=norm)
             ax.grid()
