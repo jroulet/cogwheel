@@ -514,7 +514,7 @@ class EventData(utils.JSONMixin):
         vmax : float
             Upper limit for the color scale.
         """
-        noverlap = noverlap or nfft / 2
+        noverlap = noverlap or nfft // 2
 
         f_sampling = 2 * self.fbounds[1]
 
@@ -528,7 +528,7 @@ class EventData(utils.JSONMixin):
             wht_data_td = (np.fft.irfft(self.strain[i] * self.wht_filter[i])
                            * np.sqrt(2 * f_sampling))
             ax.specgram(wht_data_td * np.sqrt(f_sampling),
-                        NFFT=nfft, noverlap=48, Fs=f_sampling,
+                        NFFT=nfft, noverlap=noverlap, Fs=f_sampling,
                         xextent=(self.times[[0, -1]] - self.tcoarse),
                         scale='linear', norm=norm)
             ax.grid()
