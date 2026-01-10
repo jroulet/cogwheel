@@ -7,6 +7,7 @@ the maximum likelihood solution on the full parameter space.
 import argparse
 import inspect
 import json
+from scipy import optimize
 import numpy as np
 
 from cogwheel import gw_prior
@@ -187,7 +188,7 @@ class Posterior(utils.JSONMixin):
                                                            **prior_kwargs)
         return cls(prior, likelihood)
 
-    def refine_reference_waveform(self, seed=None, params=None):
+    def refine_reference_waveform(self, rng=None, params=None):
         """
         Reset relative-binning reference waveform, using differential
         evolution to find a good fit.
@@ -197,7 +198,7 @@ class Posterior(utils.JSONMixin):
 
         Parameters
         ----------
-        seed : {int, numpy.random.Generator, numpy.random.RandomState}
+        rng : {int, numpy.random.Generator, numpy.random.RandomState}
             Passed to ``scipy.optimize.differential_evolution``
 
         params : list of str, optional
@@ -229,12 +230,12 @@ class Posterior(utils.JSONMixin):
             except RuntimeError:
                 return np.inf
 
-        result = utils.differential_evolution_with_guesses(
+        result = optimize.differential_evolution(
             func=loss_function,
             bounds=list(zip(self.prior.cubemin[inds],
                             (self.prior.cubemin
                              + self.prior.folded_cubesize)[inds])),
-            guesses=folded_par_vals_0[inds], seed=seed, init='sobol').x
+            x0=folded_par_vals_0[inds], rng=rng, init='sobol').x
 
         folded_par_vals[inds] = result
         i_fold = np.argmax(lnlike_unfolds(*folded_par_vals))

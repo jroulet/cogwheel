@@ -12,7 +12,6 @@ the waveform physics included (precession and/or higher modes).
 ``BaseCoherentScoreHM`` is an abstract subclass that implements phase
 marginalization for waveforms with higher modes.
 """
-import inspect
 import itertools
 import logging
 from abc import abstractmethod, ABC
