@@ -12,7 +12,6 @@ import tempfile
 import textwrap
 import warnings
 from contextlib import contextmanager
-from scipy.optimize import _differentialevolution
 from numba import vectorize
 from IPython import get_ipython
 import numpy as np
@@ -36,39 +35,6 @@ class ClassProperty:
 
     def __get__(self, instance, owner=None):
         return self.fget(owner)
-
-
-def differential_evolution_with_guesses(func, bounds, guesses,
-                                        **kwargs):
-    """
-    Augmented differential_evolution solver that incorporates initial
-    guesses passed by the user.
-
-    Parameters
-    ----------
-    func, bounds
-        See `scipy.optimize.differential_evolution()` docs.
-
-    guesses : nguesses x nparameters array with initial guesses.
-        They will be appended to the initial population of differential
-        evolution. Can be a 1d array for one guess.
-
-    **kwargs
-        Passed to `scipy.optimize.differential_evolution()`.
-    """
-    with _DifferentialEvolutionSolverWithGuesses(func, bounds, guesses,
-                                                 **kwargs) as solver:
-        return solver.solve()
-
-
-class _DifferentialEvolutionSolverWithGuesses(
-        _differentialevolution.DifferentialEvolutionSolver):
-    """Class that implements `differential_evolution_with_guesses()`."""
-    def __init__(self, func, bounds, guesses, **kwargs):
-        super().__init__(func, bounds, **kwargs)
-        initial_pop = self._scale_parameters(self.population)
-        population = np.vstack((initial_pop, guesses))
-        self.init_population_array(population)
 
 
 def import_lal():
@@ -742,8 +708,6 @@ def sorted_rundirs(rundirs):
 # ----------------------------------------------------------------------
 # JSON I/O:
 
-class_registry = {}
-
 
 def read_json(json_path):
     """Return a class instance that was saved to json."""
@@ -764,10 +728,88 @@ def read_json(json_path):
                          dirname=json_path.parent)
 
 
-class JSONMixin:
+class InitDictMixin:
+    """Provide methods ``get_init_dict`` and ``reinstantiate``."""
+    def __init_subclass__(cls):
+        """
+        Check that __init__ does not have variable positional arguments.
+        """
+        super().__init_subclass__()
+
+        # Only check if the class defines its own __init__
+        if '__init__' not in cls.__dict__:
+            return
+
+        for name, par in inspect.signature(cls.__init__).parameters.items():
+            if par.kind == inspect.Parameter.VAR_POSITIONAL:
+                raise TypeError(
+                    f'{cls.__name__}.__init__ takes variable positional '
+                    f'arguments *{name}, which is not supported by '
+                    'InitDictMixin.')
+
+    def get_init_dict(self, **kwargs):
+        """
+        Return dictionary with keyword arguments to `__init__`.
+
+        Only works if the class stores its init parameters as attributes
+        with the same names. Otherwise, the subclass should override
+        this method.
+
+        Parameters
+        ----------
+        **kwargs
+            Allows to manually override some keys. The remaining
+            ones will be read from the instance's attributes. All
+            keywords must be in the __init__ signature. It's mostly
+            here to facilitate overriding by subclasses.
+        """
+        parameters = inspect.signature(self.__init__).parameters
+
+        keys = {name for name, parameter in parameters.items()
+                if parameter.kind != inspect.Parameter.VAR_KEYWORD}
+        no_kwargs = len(keys) == len(parameters)
+
+        if no_kwargs and (extra_keys := kwargs.keys() - keys):
+            raise ValueError(f'Extraneous keys {extra_keys}')
+
+        try:
+            init_dict = {key: getattr(self, key)
+                         for key in keys - kwargs.keys()}
+        except KeyError as err:
+            raise KeyError(
+                f'`{self.__class__.__name__}` must override `get_init_dict` '
+                '(or store its init parameters with the same names).'
+            ) from err
+
+        return kwargs | init_dict
+
+    def reinstantiate(self, **new_init_kwargs):
+        """
+        Return a new instance of the class, possibly updating
+        `init_kwargs`.
+
+        Values not passed will be taken from the current instance.
+        """
+        init_kwargs = self.get_init_dict()
+
+        if not new_init_kwargs.keys() <= init_kwargs.keys():
+            raise ValueError(
+                f'`new_init_kwargs` must be from ({", ".join(init_kwargs)})')
+
+        return self.__class__(**init_kwargs | new_init_kwargs)
+
+    def get_module_name(self):
+        """Name of the module that defines the instance's class."""
+        module = self.__class__.__module__
+        if module == '__main__' and (spec := inspect.getmodule(self).__spec__):
+            module = spec.name
+        return module
+
+
+class JSONMixin(InitDictMixin):
     """
     Provide JSON output to subclasses.
-    Register subclasses in `class_registry`.
+    Register subclasses in `JSONMixin.subclass_registry`.
 
     Define a method `get_init_dict` which works for classes that store
     their init parameters as attributes with the same names. If this is
@@ -776,11 +818,19 @@ class JSONMixin:
     Define a method `reinstantiate` that allows to safely modify
     attributes defined at init.
     """
+    subclass_registry = {}
+
+    def __init_subclass__(cls):
+        """Register subclasses."""
+        super().__init_subclass__()
+        JSONMixin.subclass_registry[cls.__name__] = cls
+
     def to_json(self, dirname, basename=None, *,
                 dir_permissions=DIR_PERMISSIONS,
                 file_permissions=FILE_PERMISSIONS, overwrite=False):
         """
         Write class instance to json file.
+
         It can then be loaded with `read_json`.
         """
         basename = basename or f'{self.__class__.__name__}.json'
@@ -797,41 +847,6 @@ class JSONMixin:
                       file_permissions=file_permissions,
                       overwrite=overwrite, indent=2)
         filepath.chmod(file_permissions)
-
-    def __init_subclass__(cls):
-        """Register subclasses."""
-        super().__init_subclass__()
-        class_registry[cls.__name__] = cls
-
-    def get_init_dict(self):
-        """
-        Return dictionary with keyword arguments to `__init__`.
-
-        Only works if the class stores its init parameters as attributes
-        with the same names. Otherwise, the subclass should override
-        this method.
-        """
-        keys = list(inspect.signature(self.__init__).parameters)
-        if any(not hasattr(self, key) for key in keys):
-            raise KeyError(
-                f'`{self.__class__.__name__}` must override `get_init_dict` '
-                '(or store its init parameters with the same names).')
-        return {key: getattr(self, key) for key in keys}
-
-    def reinstantiate(self, **new_init_kwargs):
-        """
-        Return a new instance of the class, possibly updating
-        `init_kwargs`.
-
-        Values not passed will be taken from the current instance.
-        """
-        init_kwargs = self.get_init_dict()
-
-        if not new_init_kwargs.keys() <= init_kwargs.keys():
-            raise ValueError(
-                f'`new_init_kwargs` must be from ({", ".join(init_kwargs)})')
-
-        return self.__class__(**init_kwargs | new_init_kwargs)
 
 
 class NumpyEncoder(json.JSONEncoder):
@@ -870,20 +885,13 @@ class CogwheelEncoder(NumpyEncoder):
         self.file_permissions = file_permissions
         self.overwrite = overwrite
 
-    @staticmethod
-    def _get_module_name(obj):
-        module = obj.__class__.__module__
-        if module == '__main__' and (spec := inspect.getmodule(obj).__spec__):
-            module = spec.name
-        return module
-
     def default(self, o):
         """Encoding for registered cogwheel classes. """
-        if o.__class__.__name__ not in class_registry:
+        if o.__class__.__name__ not in JSONMixin.subclass_registry:
             return super().default(o)
 
         dic = {'__cogwheel_class__': o.__class__.__name__,
-               '__module__': self._get_module_name(o),
+               '__module__': o.get_module_name(),
                '__version__': __version__}
 
         if o.__class__.__name__ == 'EventData':
@@ -904,7 +912,7 @@ class CogwheelDecoder(json.JSONDecoder):
     def _object_hook(self, obj):
         if isinstance(obj, dict) and '__cogwheel_class__' in obj:
             importlib.import_module(obj['__module__'])
-            cls = class_registry[obj['__cogwheel_class__']]
+            cls = JSONMixin.subclass_registry[obj['__cogwheel_class__']]
             if cls.__name__ == 'EventData':
                 return cls.from_npz(filename=os.path.join(self.dirname,
                                                           obj['filename']))

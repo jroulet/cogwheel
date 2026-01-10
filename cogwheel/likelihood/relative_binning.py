@@ -303,13 +303,11 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
             h0_fbin[i][:] = (h0_fbin[i] * fadeout_fbin
                              + h0_fbin[i][ibin_99] * (1-fadeout_fbin))
 
-    def get_init_dict(self):
-        """
-        Return dictionary with keyword arguments to reproduce the class
-        instance.
-        """
-        return super().get_init_dict() | ({'fbin': None} if self.pn_phase_tol
-                                          else {})
+    def get_init_dict(self, **kwargs):
+        """Return keyword arguments to reproduce the class instance."""
+        if self.pn_phase_tol:
+            kwargs['fbin'] = None
+        return super().get_init_dict(**kwargs)
 
     @classmethod
     def from_reference_waveform_finder(
@@ -358,6 +356,7 @@ class BaseRelativeBinning(CBCLikelihood, ABC):
                    spline_degree=spline_degree,
                    **kwargs)
 
+    @check_bounds
     def lnlike(self, par_dic):
         """
         Return log-likelihood (float).
@@ -448,7 +447,7 @@ class BaseLinearFree(BaseRelativeBinning):
             Any extra keys would be silently ignored.
 
         by_m : bool
-            Wheter to return the waveform mode-by-mode.
+            Whether to return the waveform mode-by-mode.
 
         Returns
         -------
@@ -497,7 +496,6 @@ class RelativeBinningLikelihood(BaseRelativeBinning):
 
         super().__init__(*args, **kwargs)
 
-    @check_bounds
     def lnlike_and_metadata(self, par_dic):
         """Return log likelihood using relative binning."""
         lnl = self.lnlike_detectors_no_asd_drift(par_dic) @ self.asd_drift**-2

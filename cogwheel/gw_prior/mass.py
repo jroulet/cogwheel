@@ -77,11 +77,10 @@ class UniformDetectorFrameMassesPrior(Prior):
         """
         return np.log(mchirp * np.cosh(lnq/2)**.4 / self.prior_norm)
 
-    def get_init_dict(self):
-        """
-        Return dictionary with keyword arguments to reproduce the class
-        instance.
-        """
-        return {'mchirp_range': self.range_dic['mchirp'],
-                'q_min': np.exp(self.range_dic['lnq'][0]),
-                'symmetrize_lnq': self.range_dic['lnq'][1] != 0}
+    def get_init_dict(self, **kwargs):
+        """Return keyword arguments to reproduce the class instance."""
+        return super().get_init_dict(
+            mchirp_range=self.range_dic['mchirp'],
+            q_min=np.exp(self.range_dic['lnq'][0]),
+            symmetrize_lnq=self.range_dic['lnq'][1] != 0,
+            **kwargs)

@@ -13,8 +13,7 @@ from abc import abstractmethod
 from scipy.interpolate import interp1d
 import numpy as np
 
-from cogwheel import skyloc_angles
-from cogwheel import utils
+from cogwheel import skyloc_angles, utils
 from cogwheel.prior import Prior, FixedPrior, UniformPriorMixin
 from .twosquircle import TwoSquircularMapping
 lal = utils.import_lal()
@@ -79,7 +78,7 @@ class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
         -------
         float : log|∂{chieff, cumchieff} / ∂{s1z, s2z}|
         """
-        assert not (m1 < m2)
+        assert not m1 < m2
 
         q = m2 / m1
         abs_chieff = np.abs((s1z + q*s2z) / (1 + q))
@@ -404,12 +403,9 @@ class _BaseSkyLocationPrior(UniformPriorMixin, Prior):
 
         self.skyloc = skyloc_angles.SkyLocAngles(detector_pair, tgps)
 
-    def get_init_dict(self):
-        """
-        Return dictionary with keyword arguments to reproduce the class
-        instance.
-        """
-        return self.skyloc.get_init_dict()
+    def get_init_dict(self, **kwargs):
+        """Return keyword arguments to reproduce the class instance."""
+        return self.skyloc.get_init_dict(**kwargs)
 
     @utils.lru_cache()
     def transform(self, costheta_jn, phi_jl_hat, phi12,

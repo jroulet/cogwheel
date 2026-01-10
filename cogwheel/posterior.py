@@ -7,6 +7,7 @@ the maximum likelihood solution on the full parameter space.
 import argparse
 import inspect
 import json
+from scipy import optimize
 import numpy as np
 
 from cogwheel import gw_prior
@@ -229,12 +230,12 @@ class Posterior(utils.JSONMixin):
             except RuntimeError:
                 return np.inf
 
-        result = utils.differential_evolution_with_guesses(
+        result = optimize.differential_evolution(
             func=loss_function,
             bounds=list(zip(self.prior.cubemin[inds],
                             (self.prior.cubemin
                              + self.prior.folded_cubesize)[inds])),
-            guesses=folded_par_vals_0[inds], rng=rng, init='sobol').x
+            x0=folded_par_vals_0[inds], rng=rng, init='sobol').x
 
         folded_par_vals[inds] = result
         i_fold = np.argmax(lnlike_unfolds(*folded_par_vals))

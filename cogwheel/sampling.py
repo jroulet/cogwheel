@@ -18,8 +18,7 @@ import dynesty
 import nautilus
 import zeus
 
-from cogwheel import postprocessing
-from cogwheel import utils
+from cogwheel import postprocessing, utils
 
 SAMPLES_FILENAME = 'samples.feather'
 
@@ -98,6 +97,18 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         self._blobs_dtype = self._get_blobs_dtype()
 
+        # Blob of nans, to be used whenever the prior is zero.
+        # If sampler rejects these proposals it should never appear.
+        self._nan_blob = {}
+        for key, dtype in self._blobs_dtype:
+            try:
+                self._nan_blob[key] = dtype(np.nan)
+            except (ValueError, TypeError):
+                try:
+                    self._nan_blob[key] = dtype(None)
+                except (ValueError, TypeError):
+                    self._nan_blob[key] = dtype(-1)
+
     def get_rundir(self, parentdir):
         """
         Return a `pathlib.Path` object with a new run directory,
@@ -138,11 +149,15 @@ class Sampler(abc.ABC, utils.JSONMixin):
             Whether to perform convergence tests to the run after
             sampling. See ``postprocessing.postprocess_rundir``.
         """
-        self._submit('slurm', rundir, n_hours_limit, memory_per_task,
-                     resuming, sbatch_cmds, postprocess)
+        job_name, stdout_path, stderr_path, args, batch_path \
+            = self._setup_submission(rundir, resuming, postprocess)
+        sbatch_cmds += (f'--mem-per-cpu={memory_per_task}',)
+
+        utils.submit_slurm(job_name, n_hours_limit, stdout_path,
+                           stderr_path, args, sbatch_cmds, batch_path)
 
     def submit_lsf(
-            self, rundir, n_hours_limit=48, memory_per_task='32G',
+            self, rundir, n_hours_limit=48, memory_per_task='32GB',
             resuming=False, bsub_cmds=(), postprocess=True):
         """
         Parameters
@@ -167,44 +182,42 @@ class Sampler(abc.ABC, utils.JSONMixin):
             Whether to perform convergence tests to the run after
             sampling. See ``postprocessing.postprocess_rundir``.
         """
-        self._submit('lsf', rundir, n_hours_limit, memory_per_task,
-                     resuming, bsub_cmds, postprocess)
+        job_name, stdout_path, stderr_path, args, batch_path \
+            = self._setup_submission(rundir, resuming, postprocess)
+        bsub_cmds += (f'-M {memory_per_task}',)
+        utils.submit_lsf(job_name, n_hours_limit, stdout_path,
+                         stderr_path, args, bsub_cmds, batch_path)
 
-    def _submit(self, scheduler, rundir, n_hours_limit=48,
-                memory_per_task='32G', resuming=False, cmds=(),
-                postprocess=True):
+    def _setup_submission(self, rundir, resuming=False, postprocess=True):
         """
-        Implement `.submit_lsf` and `.submit_slurm`.
+        Write Sampler.json and return submit arguments.
 
-        Parameters
-        ----------
-        scheduler : {'slurm', 'lsf'}
+        Returns
+        -------
+        job_name, stdout_path, stderr_path, args, batch_path
         """
-        rundir = pathlib.Path(rundir)
+        rundir = pathlib.Path(rundir).resolve()
         job_name = '_'.join([rundir.name,
                              self.posterior.likelihood.event_data.eventname,
                              self.posterior.prior.__class__.__name__,
                              self.__class__.__name__])
         batch_path = rundir/'batchfile'
-        stdout_path = rundir.joinpath('output.out').resolve()
-        stderr_path = rundir.joinpath('errors.err').resolve()
+        stdout_path = rundir/'output.out'
+        stderr_path = rundir/'errors.err'
 
-        self.to_json(rundir, overwrite=resuming)
+        try:
+            self.to_json(rundir, overwrite=resuming)
+        except FileExistsError as err:
+            raise FileExistsError(
+                f'{rundir/self.JSON_FILENAME} exists. If you would like to '
+                'resume a previous run pass `resuming=True`, otherwise pass a '
+                'fresh `rundir`.') from err
 
-        cmds += (f'--mem-per-cpu={memory_per_task}',)
-        args = str(rundir.resolve())
-
+        args = str(rundir)
         if not postprocess:
             args += ' --no-postprocessing'
 
-        if scheduler == 'slurm':
-            utils.submit_slurm(job_name, n_hours_limit, stdout_path,
-                               stderr_path, args, cmds, batch_path)
-        elif scheduler == 'lsf':
-            utils.submit_lsf(job_name, n_hours_limit, stdout_path,
-                             stderr_path, args, cmds, batch_path)
-        else:
-            raise ValueError('`scheduler` must be "slurm" or "lsf".')
+        return job_name, stdout_path, stderr_path, args, batch_path
 
     def submit_condor(self,
                       rundir,
@@ -244,24 +257,20 @@ class Sampler(abc.ABC, utils.JSONMixin):
         """
         rundir = pathlib.Path(rundir).resolve()
 
+        _, stdout_path, stderr_path, args, _ = self._setup_submission(
+            rundir, resuming, postprocess)
+
         submit_path = rundir/'submit.sub'
 
         submit_kwargs = {
             'executable': rundir/'executable.sh',
-            'output': rundir/'output.out',
-            'error': rundir/'errors.err',
+            'output': stdout_path,
+            'error': stderr_path,
             'log': rundir/'sampling.log',
             'request_cpus': request_cpus,
             'request_memory': request_memory,
             'request_disk': request_disk,
             } | submit_kwargs
-
-        self.to_json(rundir, overwrite=resuming)
-
-        args = rundir.as_posix()
-
-        if not postprocess:
-            args += ' --no-postprocessing'
 
         utils.submit_condor(submit_path, overwrite=resuming, args=args,
                             **submit_kwargs)
@@ -375,8 +384,12 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
             i_unfold = self._rng.choice(len(probabilities), p=probabilities)
 
-        blob = (par_dics[i_unfold]
-                | self.posterior.likelihood.get_blob(metadatas[i_unfold]))
+        like_blob = self.posterior.likelihood.get_blob(metadatas[i_unfold])
+        if like_blob is None:
+            like_blob = self._nan_blob
+
+        blob = par_dics[i_unfold] | like_blob
+
 
         if as_dict:
             return ln_folded_prob, blob
@@ -385,9 +398,10 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
     def _get_blobs_dtype(self):
         """Return list of 2-tuples with name and type of blob items."""
-        folded_par_vals = (
-            self.posterior.prior.cubemin
-            + self._rng.uniform(0, self.posterior.prior.folded_cubesize))
+        sample = self.posterior.prior.generate_random_samples(1).iloc[0]
+        folded_par_vals = self.posterior.prior.fold(
+            **sample[self.posterior.prior.sampled_params])
+
         _, blob = self._lnfoldedprob_and_blob(folded_par_vals, as_dict=True)
         return [(key, type(val)) for key, val in blob.items()]
 
@@ -439,10 +453,10 @@ class Sampler(abc.ABC, utils.JSONMixin):
             sampled_params[sampled_params.index(par)] = f'folded_{par}'
         return sampled_params
 
-    def get_init_dict(self):
+    def get_init_dict(self, **kwargs):
         """Keyword arguments to instantiate the class."""
-        init_dict = super().get_init_dict()
-        # Remove 'sample_prior' from the keys.
+        init_dict = super().get_init_dict(**kwargs)
+        # Remove 'sample_prior' from the keys ensuring it's False:
         assert not init_dict.pop('sample_prior', False)
         return init_dict
 
@@ -635,19 +649,6 @@ class Zeus(Sampler):
         self._folded_cubemax = (self.posterior.prior.cubemin
                                 + self.posterior.prior.folded_cubesize)
 
-        # Zeus won't stop at boundaries so we must intercept out-of-bound
-        # proposals. Implement a blob of `nan`s to return in this case.
-        # These moves are always rejected so this blob should never appear.
-        self._nan_blob = []
-        for _, dtype in self._blobs_dtype:
-            try:
-                self._nan_blob.append(dtype(np.nan))
-            except (ValueError, TypeError):
-                try:
-                    self._nan_blob.append(dtype(None))
-                except (ValueError, TypeError):
-                    self._nan_blob.append(dtype(-1))
-
     @wraps(Sampler.run)
     def run(self, rundir):
         self._rundir = rundir
@@ -715,7 +716,7 @@ class Zeus(Sampler):
         # Intercept out-of-bound proposals:
         if (np.any(par_vals < self.posterior.prior.cubemin)
                 or np.any(par_vals > self._folded_cubemax)):
-            return -np.inf, *self._nan_blob
+            return -np.inf, *self._nan_blob.values()
 
         return self._lnfoldedprob_and_blob(par_vals)
 

@@ -86,11 +86,7 @@ _LABELS = {
     'lnl_V': r'$\ln \mathcal{L}_V$',
     'lnl_marginalized': r'$\ln \overline{\mathcal{L}}$',
     'h_h': r'$\langle h | h \rangle$',
-    # Cumulatives
-    'u_t_linfree': r'$u_t$',
-    'u_psi': r'$u_\psi$',
-    'u_costhetanet': r'$u_{\theta_{\rm net}}$',
-    'u_phinet_hat': r'$u_{\hat\phi_{\rm net}}$',
+    'n_effective': r'$n_{\rm eff}$'
     }
 
 _UNITS = (dict.fromkeys(['mchirp', 'm1', 'm2', 'mtot', 'mtot_source',

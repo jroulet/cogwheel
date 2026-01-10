@@ -38,7 +38,7 @@ class FixedIntrinsicParametersPrior(FixedPrior):
         """
         Parameters
         ----------
-        standard_par_dic:
+        standard_par_dic
             dictionary containing entries for
             `m1, m2, s1x_n, s1y_n, s1z, s2x_n, s2y_n, s2z, l1, l2`.
             Spins and tidal deformabilities would default to `0.` if not
@@ -52,9 +52,10 @@ class FixedIntrinsicParametersPrior(FixedPrior):
         self.standard_par_dic = waveform.DEFAULT_PARS | relevant_dic
         super().__init__(standard_par_dic=standard_par_dic, **kwargs)
 
-    def get_init_dict(self):
+    def get_init_dict(self, **kwargs):
         """Dictionary with arguments to reproduce class instance."""
-        return {'standard_par_dic': self._original_par_dic}
+        return super().get_init_dict(
+            standard_par_dic=self._original_par_dic, **kwargs)
 
 
 class FixedReferenceFrequencyPrior(FixedPrior):
@@ -65,9 +66,9 @@ class FixedReferenceFrequencyPrior(FixedPrior):
         super().__init__(**kwargs)
         self.standard_par_dic = {'f_ref': f_ref}
 
-    def get_init_dict(self):
+    def get_init_dict(self, **kwargs):
         """Dictionary with arguments to reproduce class instance."""
-        return self.standard_par_dic
+        return super().get_init_dict(**self.standard_par_dic | kwargs)
 
 
 class LogarithmicReferenceFrequencyPrior(UniformPriorMixin, Prior):
@@ -97,6 +98,7 @@ class LogarithmicReferenceFrequencyPrior(UniformPriorMixin, Prior):
         """`f_ref` to `ln_f_ref`."""
         return {'ln_f_ref': np.log(f_ref)}
 
-    def get_init_dict(self):
+    def get_init_dict(self, **kwargs):
         """Dictionary with arguments to reproduce class instance."""
-        return {'f_ref_rng': np.exp(self.range_dic['ln_f_ref'])}
+        return super().get_init_dict(
+            f_ref_rng=np.exp(self.range_dic['ln_f_ref']), **kwargs)

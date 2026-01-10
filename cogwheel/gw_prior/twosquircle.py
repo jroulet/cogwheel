@@ -34,7 +34,7 @@ class TwoSquircularMapping:
     @staticmethod
     def jacobian_determinant(x, y):
         """
-        Return :math:`|\\partial(u,v) / \\partial(x,y)|`.
+        Return |∂(u,v) / ∂(x,y)|.
 
         Prior on the square (x, y) that yields uniform on the disk
         (u, v).

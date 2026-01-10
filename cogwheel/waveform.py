@@ -59,8 +59,8 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
 
     Returns
     -------
-    hplus, hcross : float arrays
-        Waveform polarizations evaluated at `f`.
+    hplus_hcross : (2, n_freq) float array
+        Waveform polarizations + and x evaluated at `f`.
     """
     # Parameters ordered for lalsimulation.SimInspiralChooseFDWaveformSequence
     lal_params = [
