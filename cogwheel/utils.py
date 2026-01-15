@@ -12,7 +12,6 @@ import tempfile
 import textwrap
 import warnings
 from contextlib import contextmanager
-from scipy.optimize import _differentialevolution
 from numba import vectorize
 from IPython import get_ipython
 import numpy as np
@@ -36,39 +35,6 @@ class ClassProperty:
 
     def __get__(self, instance, owner=None):
         return self.fget(owner)
-
-
-def differential_evolution_with_guesses(func, bounds, guesses,
-                                        **kwargs):
-    """
-    Augmented differential_evolution solver that incorporates initial
-    guesses passed by the user.
-
-    Parameters
-    ----------
-    func, bounds
-        See `scipy.optimize.differential_evolution()` docs.
-
-    guesses : nguesses x nparameters array with initial guesses.
-        They will be appended to the initial population of differential
-        evolution. Can be a 1d array for one guess.
-
-    **kwargs
-        Passed to `scipy.optimize.differential_evolution()`.
-    """
-    with _DifferentialEvolutionSolverWithGuesses(func, bounds, guesses,
-                                                 **kwargs) as solver:
-        return solver.solve()
-
-
-class _DifferentialEvolutionSolverWithGuesses(
-        _differentialevolution.DifferentialEvolutionSolver):
-    """Class that implements `differential_evolution_with_guesses()`."""
-    def __init__(self, func, bounds, guesses, **kwargs):
-        super().__init__(func, bounds, **kwargs)
-        initial_pop = self._scale_parameters(self.population)
-        population = np.vstack((initial_pop, guesses))
-        self.init_population_array(population)
 
 
 def import_lal():

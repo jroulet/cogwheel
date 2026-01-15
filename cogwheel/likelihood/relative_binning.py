@@ -447,7 +447,7 @@ class BaseLinearFree(BaseRelativeBinning):
             Any extra keys would be silently ignored.
 
         by_m : bool
-            Wheter to return the waveform mode-by-mode.
+            Whether to return the waveform mode-by-mode.
 
         Returns
         -------
