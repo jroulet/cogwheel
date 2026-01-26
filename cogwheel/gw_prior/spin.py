@@ -127,8 +127,8 @@ class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
         -------
         float : log|∂{cums1z, cums2z} / ∂{s1z, s2z}|
         """
-        jac1 = -np.log(s1z) / 2
-        jac2 = -np.log(s2z) / 2
+        jac1 = -np.log(np.abs(s1z)) / 2
+        jac2 = -np.log(np.abs(s2z)) / 2
         return np.log(jac1 * jac2)
 
     @classmethod
@@ -460,6 +460,35 @@ class UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior(
     _inplane_spin_inclination_prior_class \
          = UniformDiskInplaneSpinsIsotropicInclinationPrior
 
+    def ln_jacobian_determinant(self, iota, s1x_n, s1y_n, s2x_n, s2y_n,
+                                ra, dec, s1z, s2z, m1, m2, f_ref):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        The Jacobian factors into in-plane spin/inclination and sky location
+        parts. For uniform disk in-plane spins, the in-plane spin Jacobian
+        for each component is ln(2) - ln(max(1 - s_z^2, s_perp^2, eps)).
+        The sky location Jacobian is ln(cos(dec)).
+
+        Returns
+        -------
+        float : log|∂{sampled_params} / ∂{standard_params}|
+        """
+        eps = 1e-300
+
+        s1_perp2 = s1x_n * s1x_n + s1y_n * s1y_n
+        denom1 = max(1.0 - s1z * s1z, s1_perp2, eps)
+        ln_jac1 = np.log(2.0) - np.log(denom1)
+
+        s2_perp2 = s2x_n * s2x_n + s2y_n * s2y_n
+        denom2 = max(1.0 - s2z * s2z, s2_perp2, eps)
+        ln_jac2 = np.log(2.0) - np.log(denom2)
+
+        ln_jac_inplane = ln_jac1 + ln_jac2
+        ln_jac_sky = np.log(np.cos(dec))
+
+        return ln_jac_inplane + ln_jac_sky
+
 
 class IsotropicSpinsInplaneComponentsIsotropicInclinationSkyLocationPrior(
         _BaseSkyLocationPrior):
@@ -472,6 +501,54 @@ class IsotropicSpinsInplaneComponentsIsotropicInclinationSkyLocationPrior(
     """
     _inplane_spin_inclination_prior_class \
          = IsotropicSpinsInplaneComponentsIsotropicInclinationPrior
+
+    def ln_jacobian_determinant(self, iota, s1x_n, s1y_n, s2x_n, s2y_n,
+                                ra, dec, s1z, s2z, m1, m2, f_ref):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        The Jacobian factors into in-plane spin/inclination and sky location
+        parts. For isotropic in-plane spins, the in-plane spin Jacobian for
+        each component is -ln(denom) - ln(s), where:
+        - s_perp^2 = s_x^2 + s_y^2
+        - s_abs = |s_z|
+        - s^2 = s_perp^2 + s_z^2
+        - s = sqrt(max(s^2, eps))
+        - denom = max(1 - s_abs, s_perp^2 / max(1 + s_abs, eps), eps)
+        The sky location Jacobian is ln(cos(dec)).
+
+        Returns
+        -------
+        float : log|∂{sampled_params} / ∂{standard_params}|
+        """
+        eps = 1e-300
+
+        s1_perp2 = s1x_n * s1x_n + s1y_n * s1y_n
+        s1_abs = abs(s1z)
+        s1_2 = s1_perp2 + s1z * s1z
+        s1 = np.sqrt(max(s1_2, eps))
+        denom1 = max(
+            1.0 - s1_abs,
+            s1_perp2 / max(1.0 + s1_abs, eps),
+            eps
+        )
+        ln_jac1 = -np.log(denom1) - np.log(s1)
+
+        s2_perp2 = s2x_n * s2x_n + s2y_n * s2y_n
+        s2_abs = abs(s2z)
+        s2_2 = s2_perp2 + s2z * s2z
+        s2 = np.sqrt(max(s2_2, eps))
+        denom2 = max(
+            1.0 - s2_abs,
+            s2_perp2 / max(1.0 + s2_abs, eps),
+            eps
+        )
+        ln_jac2 = -np.log(denom2) - np.log(s2)
+
+        ln_jac_inplane = ln_jac1 + ln_jac2
+        ln_jac_sky = np.log(np.cos(dec))
+
+        return ln_jac_inplane + ln_jac_sky
 
 
 class CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior(Prior):
