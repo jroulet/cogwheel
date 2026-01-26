@@ -7,6 +7,7 @@ import numpy as np
 
 from cogwheel import gw_prior, gw_utils
 from cogwheel.tests import test_waveform
+from cogwheel.prior_ratio import PriorRatio
 
 
 DETECTOR_PAIRS = [''.join(pair)
@@ -107,6 +108,23 @@ class PriorTestCase(TestCase):
                         list(standard_par_dic.values()),
                         list(standard_par_dic_shifted.values()),
                         err_msg=err_msg)
+
+    def test_prior_ratio_ias_lvc(self):
+        """
+        Test that PriorRatio can be computed between IASPrior and LVCPrior.
+        """
+        init_params = get_random_init_parameters()
+        ias_prior = gw_prior.combined.IASPrior(**init_params)
+        lvc_prior = gw_prior.combined.LVCPrior(**init_params)
+
+        prior_ratio = PriorRatio(numerator=ias_prior, denominator=lvc_prior)
+
+        ias_par_dic = gen_random_par_dic(ias_prior)
+        standard_par_dic = ias_prior.transform(**ias_par_dic)
+
+        ln_prior_ratio = prior_ratio.ln_prior_ratio(**standard_par_dic)
+        self.assertTrue(np.isfinite(ln_prior_ratio),
+                        f"ln_prior_ratio should be finite, got {ln_prior_ratio}")
 
 
 if __name__ == '__main__':
