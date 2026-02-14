@@ -4,8 +4,7 @@ import itertools
 from unittest import TestCase, main
 import numpy as np
 
-from cogwheel import skyloc_angles
-from cogwheel import gw_utils
+from cogwheel import gw_utils, skyloc_angles
 
 
 DETECTOR_PAIRS = [''.join(pair)

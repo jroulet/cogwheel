@@ -25,7 +25,7 @@ The source code is available on `GitHub <https://github.com/jroulet/cogwheel>`_.
 References
 ----------
 
-* Coordinate system and folding algorithm: https://arxiv.org/abs/2207.03508
+* Coordinate system and folding algorithm: https://arxiv.org/abs/2207.03508 (`poster (PDF) <_static/cogwheel_poster.pdf>`_)
 * Marginalization over extrinsic parameters for quadrupolar, aligned-spin signals: https://arxiv.org/abs/2210.16278
 * Marginalization over extrinsic parameters for signals with precession and higher modes: https://arxiv.org/abs/2404.02435
 * ``IMRPhenomXODE`` waveform approximant: https://arxiv.org/abs/2306.08774

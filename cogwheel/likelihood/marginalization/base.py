@@ -12,7 +12,6 @@ the waveform physics included (precession and/or higher modes).
 ``BaseCoherentScoreHM`` is an abstract subclass that implements phase
 marginalization for waveforms with higher modes.
 """
-import inspect
 import itertools
 import logging
 from abc import abstractmethod, ABC
@@ -337,7 +336,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
             # Perform adaptive mixture importance sampling:
             i_chunk += 1
             if i_chunk == len(self._qmc_ind_chunks):
-                logging.warning('Maximum QMC resolution reached.')
+                logging.info('Maximum QMC resolution reached.')
                 break
 
             if marginalization_info.n_effective == 0:  # Unphysical point
@@ -521,11 +520,6 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         return krogh_interpolate(times[i_min : i_max],
                                  timeseries[..., i_min : i_max],
                                  new_times, axis=-1)
-
-    def get_init_dict(self):
-        """Keyword arguments to instantiate this class."""
-        pars = set(inspect.signature(self.__class__).parameters) - {'kwargs'}
-        return {par: getattr(self, par) for par in pars}
 
 
 class ProposingCoherentScore(BaseCoherentScore):
@@ -808,7 +802,7 @@ class BaseCoherentScoreHM(BaseCoherentScore):
         ln_numerators = (
             self.lookup_table.lnlike_marginalized(dh_qo[important],
                                                   hh_qo[important])
-            + np.log(sky_prior)[important[0]]
+            + np.log(sky_prior[important[0]])
             - np.log(self._nphi))  # i
 
         return ln_numerators, important, flip_psi[important]

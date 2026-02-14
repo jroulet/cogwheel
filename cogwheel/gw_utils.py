@@ -1,9 +1,9 @@
 """Utility functions specific to gravitational waves."""
 import scipy.interpolate
 import numpy as np
-import lal
 
 from cogwheel import utils
+lal = utils.import_lal()
 
 
 # ----------------------------------------------------------------------

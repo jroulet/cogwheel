@@ -3,11 +3,11 @@ import itertools
 from collections import defaultdict, namedtuple
 import numpy as np
 
-import lal
+from cogwheel import gw_utils, utils
+
+lal = utils.import_lal()
 import lalsimulation
 
-from cogwheel import gw_utils
-from cogwheel import utils
 
 ZERO_INPLANE_SPINS = {'s1x_n': 0.,
                       's1y_n': 0.,
@@ -59,8 +59,8 @@ def compute_hplus_hcross(f, par_dic, approximant: str,
 
     Returns
     -------
-    hplus, hcross : float arrays
-        Waveform polarizations evaluated at `f`.
+    hplus_hcross : (2, n_freq) float array
+        Waveform polarizations + and x evaluated at `f`.
     """
     # Parameters ordered for lalsimulation.SimInspiralChooseFDWaveformSequence
     lal_params = [

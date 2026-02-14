@@ -3,8 +3,8 @@ Generate injection samples drawn from a user-prescribed distribution.
 
 Usage:
 
-    1. Make a config file (see `cogwheel/validation/example/config.py`)
-    2. Call ``generate_injections_from_config``
+1. Make a config file (see `cogwheel/validation/example/config.py`)
+2. Call ``generate_injections_from_config``
 
 """
 

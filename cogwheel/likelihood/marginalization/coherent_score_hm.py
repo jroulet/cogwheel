@@ -1,5 +1,5 @@
 """
-Define class :py:class:`CoherentScoreHM` to marginalize and demarginalize
+Define class :py:class:`CoherentScoreHM` to marginalize/demarginalize
 the likelihood over extrinsic parameters from matched-filtering
 timeseries.
 

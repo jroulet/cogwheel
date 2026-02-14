@@ -7,13 +7,12 @@ import logging
 import numpy as np
 import pandas as pd
 
-import lal
-
-from cogwheel import skyloc_angles
-from cogwheel import utils
+from cogwheel import skyloc_angles, utils
 
 from .relative_binning import BaseLinearFree
 from .marginalization import SkyDictionary, CoherentScoreHM
+
+lal = utils.import_lal()
 
 
 class BaseMarginalizedExtrinsicLikelihood(BaseLinearFree):
@@ -153,8 +152,12 @@ class BaseMarginalizedExtrinsicLikelihood(BaseLinearFree):
 
         # Reject samples with large variance to avoid artifacts. If they
         # should contribute to the posterior, by now we are in trouble
-        # anyways.
-        if marg_info.n_effective < 2:
+        # anyways. Be more conservative if the result is the new maximum
+        # since that can ruin the whole run.
+        reject = (marg_info.n_effective < 2
+                  or (marg_info.lnl_marginalized > self._max_lnl_marginalized
+                      and marg_info.n_effective < 10))
+        if reject:
             logging.warning('Rejecting sample with lnl_marginalized ~ '
                             f'{marg_info.lnl_marginalized:.2f} due to low '
                             f'n_effective = {marg_info.n_effective:.2f}')

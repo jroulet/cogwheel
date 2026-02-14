@@ -7,7 +7,8 @@ It interfaces with third-party routines for downloading public data (GWOSC, `GWp
 
 ## References
 
-* Coordinate system and folding algorithm: https://arxiv.org/abs/2207.03508
+* Coordinate system and folding algorithm: https://arxiv.org/abs/2207.03508 ([Poster (PDF)](https://raw.githubusercontent.com/jroulet/cogwheel/main/docs/source/_static/cogwheel_poster.pdf)
+)
 
 * Marginalization over extrinsic parameters for quadrupolar, aligned-spin signals: https://arxiv.org/abs/2210.16278
 

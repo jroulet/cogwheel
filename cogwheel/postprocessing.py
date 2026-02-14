@@ -19,14 +19,10 @@ from scipy.cluster.vq import kmeans
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.pyplot as plt
-import matplotlib as mpl
 import pandas as pd
 
-from cogwheel import gw_plotting
+from cogwheel import gw_plotting, prior, sampling, utils
 from cogwheel.likelihood import RelativeBinningLikelihood
-from cogwheel import utils
-from cogwheel import sampling
-from cogwheel import prior
 
 TESTS_FILENAME = 'postprocessing_tests.json'
 
@@ -457,7 +453,8 @@ class EventdirPostprocessor:
             with open(rundir/sampling.Sampler.JSON_FILENAME,
                       encoding='utf-8') as sampler_file:
                 dic = json.load(sampler_file)
-                sampler_cls = utils.class_registry[dic['__cogwheel_class__']]
+                sampler_cls = utils.JSONMixin.subclass_registry[
+                    dic['__cogwheel_class__']]
                 init_kwargs = dic['init_kwargs']
                 settings = {key: val
                             for key, val in init_kwargs['run_kwargs'].items()
@@ -537,8 +534,8 @@ class EventdirPostprocessor:
         Return a list of colors depending on the value/tolerance ratio.
         green = 0, yellow = tolerance, red = 2x tolerance.
         """
-        return list(mpl.cm.RdYlGn_r(values / self.tolerance_params[key] / 2,
-                                    alpha=.3))
+        cmap = plt.get_cmap('RdYlGn_r')
+        return list(cmap(values / self.tolerance_params[key] / 2, alpha=.3))
 
     def _scatter_nsamples_vs_runtime(self):
         """Scatter plot number of samples vs runtime from `table`."""

@@ -7,10 +7,10 @@ import scipy.optimize
 import numpy as np
 import pandas as pd
 
-import lal
-
-from cogwheel import gw_utils
+from cogwheel import gw_utils, utils
 from cogwheel.prior import Prior
+
+lal = utils.import_lal()
 
 # pylint: disable=arguments-differ
 
@@ -132,30 +132,6 @@ class PNCoordinatesPrior(Prior):
         inds = np.argsort(-eigvals)[:2]  # Keep 2 main eigenvectors
         return eigvecs[:, inds] * np.sqrt(eigvals[inds])
 
-    def _mchirp_lnq_s1z_s2z_lnprior(self, mchirp, lnq, s1z, s2z):
-        """
-        Return ``ln(prior(mchirp, lnq, s1z, s2z))`` corresponding to
-        uniform density in detector-frame component masses and the
-        aligned component of a "volumetric" spin prior, i.e. where the
-        spin components are independent, isotropic and p(|s|) ~ |s|^2,
-        with s being the dimensionless spin.
-        """
-        return np.log(mchirp
-                      * np.cosh(lnq/2)**.4
-                      * .75 * (1 - s1z**2)
-                      * .75 * (1 - s2z**2))
-
-    def inverse_transform(self, m1, m2, s1z, s2z):
-        """Standard parameters to sampled parameters."""
-        eta, beta, v_ref = self._eta_beta_vref(m1, m2, s1z, s2z)
-        mu1, mu2 = self.eigvecs.T @ (self._pn1(v_ref, eta),
-                                     self._pn2(v_ref, eta),
-                                     self._pn2_5(v_ref, eta, beta))
-        return {'mu1': mu1,
-                'mu2': mu2,
-                'lnq': np.log(m2/m1),
-                's2z': s2z}
-
     def transform(self, mu1, mu2, lnq, s2z):
         """Sampled parameters to standard parameters."""
         q = np.exp(lnq)
@@ -170,7 +146,7 @@ class PNCoordinatesPrior(Prior):
         def objective(v):
             """Function whose root is `v_ref`."""
             # v**3 smoothens the function without changing the root.
-            return coeffs @ (self._pn1(v, eta), self._pn2(v, eta), 1) * v**3
+            return coeffs @ (self._0pn(v, eta), self._1pn(v, eta), 1) * v**3
 
         try:
             v_ref = scipy.optimize.brentq(objective, 1e-3, 1)
@@ -181,11 +157,11 @@ class PNCoordinatesPrior(Prior):
         m1 = mtot / (1+q)
 
         # Now solve for beta:
-        pn_2_5 = (mu1 - self.eigvecs[(0, 1), 0] @ (self._pn1(v_ref, eta),
-                                                   self._pn2(v_ref, eta))
+        pn_1_5 = (mu1 - self.eigvecs[(0, 1), 0] @ (self._0pn(v_ref, eta),
+                                                   self._1pn(v_ref, eta))
                   ) / self.eigvecs[2, 0]
 
-        beta = 32/3 * eta * v_ref**2 * pn_2_5 + 4*np.pi
+        beta = 32/3 * eta * v_ref**2 * pn_1_5 + 4*np.pi
         s1z = ((24/113*beta - (1 - delta - 76/113*eta)*s2z)
                / (1 + delta - 76/113*eta))
 
@@ -196,6 +172,48 @@ class PNCoordinatesPrior(Prior):
                 'm2': q * m1,
                 's1z': s1z,
                 's2z': s2z}
+
+    def inverse_transform(self, m1, m2, s1z, s2z):
+        """Standard parameters to sampled parameters."""
+        eta, beta, v_ref = self._eta_beta_vref(m1, m2, s1z, s2z)
+        mu1, mu2 = self.eigvecs.T @ (self._0pn(v_ref, eta),
+                                     self._1pn(v_ref, eta),
+                                     self._1_5pn(v_ref, eta, beta))
+        return {'mu1': mu1,
+                'mu2': mu2,
+                'lnq': np.log(m2/m1),
+                's2z': s2z}
+
+    def ln_jacobian_determinant(self, m1, m2, s1z, s2z):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{mu1, mu2, lnq, s2z} / ∂{m1, m2, s1z, s2z}|
+        """
+        del s2z
+        mchirp = gw_utils.m1m2_to_mchirp(m1, m2)
+        eta, beta0, v_ref = self._eta_beta_vref(m1, m2, s1z, s2z=0.)
+
+        dbeta_ds1z = beta0 / s1z  # Note s2z=0
+        d0pn_dmchirp = -5/3 * self._0pn(v_ref, eta) / mchirp
+        d1pn_dmchirp = - self._1pn(v_ref, eta) / mchirp
+        d1_5pn_ds1z = 3/32 * v_ref**-2 / eta * dbeta_ds1z
+
+        # We want |∂{mu1, mu2, lnq, s2z} / ∂{m1, m2, s1z, s2z}|
+        # = [1] * [2]
+
+        # [1] = |∂{mu1, mu2} / ∂{mchirp, s1z}|
+        jacobian_determinant_1 = np.abs(
+            (np.linalg.det(self.eigvecs[(0, 2),]) * d0pn_dmchirp
+             + np.linalg.det(self.eigvecs[(1, 2),]) * d1pn_dmchirp)
+            * d1_5pn_ds1z)
+
+        # [2] = |∂{mchirp, lnq} / ∂{m1, m2}|
+        jacobian_determinant_2 = ((m1*m2)**2 * (m1 + m2)) ** -0.2
+
+        return np.log(jacobian_determinant_1 * jacobian_determinant_2)
 
     def lnprior(self, mu1, mu2, lnq, s2z):
         """
@@ -213,23 +231,20 @@ class PNCoordinatesPrior(Prior):
         if mchirp < self.mchirp_range[0] or mchirp > self.mchirp_range[1]:
             return -np.inf
 
-        eta, beta0, v_ref = self._eta_beta_vref(
-            **standard_par_dic | {'s2z': 0})
+        return (self._standard_lnprior(**standard_par_dic)
+                - self.ln_jacobian_determinant(**standard_par_dic))
 
-        dbeta_ds1z = beta0 / standard_par_dic['s1z']  # Note s2z=0
-        dpn1_dmchirp = -5/3 * self._pn1(v_ref, eta) / mchirp
-        dpn2_dmchirp = - self._pn2(v_ref, eta) / mchirp
-        dpn3_ds1z = 3/32 * v_ref**-2 / eta * dbeta_ds1z
-
-        jacobian_determinant = np.abs(
-            (np.linalg.det(self.eigvecs[(0, 2),]) * dpn1_dmchirp
-             + np.linalg.det(self.eigvecs[(1, 2),]) * dpn2_dmchirp)
-            * dpn3_ds1z)  # |d(mu1, mu2) / d(mchirp, s1z)|
-
-        return (self._mchirp_lnq_s1z_s2z_lnprior(mchirp, lnq,
-                                                 standard_par_dic['s1z'],
-                                                 standard_par_dic['s2z'])
-                - np.log(jacobian_determinant))
+    def _standard_lnprior(self, m1, m2, s1z, s2z):
+        """
+        Return ``ln(prior(m1, m2, s1z, s2z))`` corresponding to uniform
+        density in detector-frame component masses and the aligned
+        component of a "volumetric" spin prior, i.e. where the spin
+        components are independent, isotropic and p(|s|) ~ |s|^2, with s
+        being the dimensionless spin.
+        """
+        del m1, m2
+        return np.log(.75 * (1 - s1z**2)
+                      * .75 * (1 - s2z**2))
 
     def _eta_beta_vref(self, m1, m2, s1z, s2z):
         """Return auxiliary PN quantities eta, beta and v(f_ref)."""
@@ -243,25 +258,21 @@ class PNCoordinatesPrior(Prior):
         return eta, beta, v_ref
 
     @staticmethod
-    def _pn1(v, eta):
-        """1PN term of the phase"""
+    def _0pn(v, eta):
+        """0PN term of the phase"""
         return 3/128 / eta * v**-5
 
     @staticmethod
-    def _pn2(v, eta):
-        """2PN term of the phase."""
+    def _1pn(v, eta):
+        """1PN term of the phase."""
         return 3/128 * (55/9 + 3715/756/eta) * v**-3
 
     @staticmethod
-    def _pn2_5(v, eta, beta):
-        """2.5 PN term of the phase."""
-        return 3/128 * (4*beta - 16*np.pi) / eta * v**-2
+    def _1_5pn(v, eta, beta):
+        """1.5 PN term of the phase."""
+        return 3/32 * (beta - 4*np.pi) / eta * v**-2
 
-    def get_init_dict(self):
+    def get_init_dict(self, **kwargs):
         """Return keyword arguments to reproduce the class instance."""
-        return {'eigvecs': self.eigvecs,
-                'f_ref': self.f_ref,
-                'par_dic_0': self.par_dic_0,
-                'mchirp_range': self.mchirp_range,
-                'dmu': self.dmu,
-                'q_min': np.exp(self.range_dic['lnq'][0])}
+        q_min = np.exp(self.range_dic['lnq'][0])
+        return super().get_init_dict(q_min=q_min, **kwargs)

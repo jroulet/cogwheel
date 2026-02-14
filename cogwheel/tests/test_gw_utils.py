@@ -3,10 +3,9 @@
 from unittest import TestCase, main
 import numpy as np
 
-import lal
+from cogwheel import gw_utils, skyloc_angles, utils
 
-from cogwheel import gw_utils
-from cogwheel import skyloc_angles
+lal = utils.import_lal()
 
 
 class AntennaCoefficientsTestCase(TestCase):

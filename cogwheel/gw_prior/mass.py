@@ -58,6 +58,17 @@ class UniformDetectorFrameMassesPrior(Prior):
         return {'mchirp': m1 * q**.6 / (1 + q)**.2,
                 'lnq': np.log(q)}
 
+    @staticmethod
+    def ln_jacobian_determinant(m1, m2):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{mchirp, lnq} / ∂{m1, m2}|
+        """
+        return -np.log((m1*m2)**2 * (m1 + m2)) / 5
+
     @utils.lru_cache()
     def lnprior(self, mchirp, lnq):
         """
@@ -66,11 +77,10 @@ class UniformDetectorFrameMassesPrior(Prior):
         """
         return np.log(mchirp * np.cosh(lnq/2)**.4 / self.prior_norm)
 
-    def get_init_dict(self):
-        """
-        Return dictionary with keyword arguments to reproduce the class
-        instance.
-        """
-        return {'mchirp_range': self.range_dic['mchirp'],
-                'q_min': np.exp(self.range_dic['lnq'][0]),
-                'symmetrize_lnq': self.range_dic['lnq'][1] != 0}
+    def get_init_dict(self, **kwargs):
+        """Return keyword arguments to reproduce the class instance."""
+        return super().get_init_dict(
+            mchirp_range=self.range_dic['mchirp'],
+            q_min=np.exp(self.range_dic['lnq'][0]),
+            symmetrize_lnq=self.range_dic['lnq'][1] != 0,
+            **kwargs)

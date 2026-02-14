@@ -133,7 +133,8 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
 
         # If this is an injection, we can "cheat" and check that relative
         # binning is working at the injection, and raise a warning if not:
-        if event_data.injection:
+        if (event_data.injection
+                and (waveform.ZERO_INPLANE_SPINS.items() < par_dic.items())):
             lnl_fft = ref_wf_finder.lnlike_fft(par_dic)
             lnl_rb = ref_wf_finder.lnlike(par_dic)
 

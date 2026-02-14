@@ -8,7 +8,7 @@ luminosity volume and present-day observer time) volume-time.
 
 import astropy
 from astropy.cosmology import Planck18
-from scipy.interpolate import InterpolatedUnivariateSpline
+from scipy.interpolate import make_interp_spline
 import numpy as np
 
 
@@ -22,7 +22,8 @@ def _construct_z_of_d_luminosity(cosmology=Planck18, z_max=10.):
     """Return the function inverse to ``d_luminosity_of_z``."""
     z_arr = np.linspace(0, z_max, 1000)
     d_luminosity_arr = d_luminosity_of_z(z_arr, cosmology)
-    interp_z_of_d = InterpolatedUnivariateSpline(d_luminosity_arr, z_arr)
+    interp_z_of_d = make_interp_spline(d_luminosity_arr, z_arr)
+    interp_z_of_d.extrapolate = False
 
     def _z_of_d_luminosity(d_luminosity):
         """

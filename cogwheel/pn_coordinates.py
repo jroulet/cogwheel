@@ -27,9 +27,8 @@ import scipy.signal
 import numpy as np
 import pandas as pd
 
-import lal
-
-from cogwheel import gw_utils
+from cogwheel import gw_utils, utils
+lal = utils.import_lal()
 
 
 def unique_qr(mat):

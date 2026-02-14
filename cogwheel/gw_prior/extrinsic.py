@@ -9,13 +9,11 @@ as ``**kwargs`` any arguments that other priors may need.
 """
 import numpy as np
 
-import lal
-
+from cogwheel import gw_utils, skyloc_angles, utils
 from cogwheel.cosmology import comoving_to_luminosity_diff_vt_ratio
-from cogwheel import gw_utils
-from cogwheel import skyloc_angles
-from cogwheel import utils
-from cogwheel.prior import Prior, UniformPriorMixin, IdentityTransformMixin
+from cogwheel.prior import (Prior, UniformPriorMixin, IdentityTransformMixin,
+                            UnitJacobianMixin)
+lal = utils.import_lal()
 
 # pylint: disable=arguments-differ
 
@@ -59,7 +57,7 @@ class ReferenceDetectorMixin:
 
 
 class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
-                        Prior):
+                        UnitJacobianMixin, Prior):
     """
     Uniform prior for the orbital phase.
 
@@ -85,7 +83,7 @@ class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
         self.f_avg = f_avg
         self.par_dic_0 = par_dic_0
 
-        self._phase_refdet_0 = 0.
+        self._phase_refdet_0 = 0.0
         if par_dic_0:
             par_dic_0 = {par: par_dic_0[par]
                          for par in ('phi_ref', 'iota', 'ra', 'dec',
@@ -121,19 +119,6 @@ class UniformPhasePrior(ReferenceDetectorMixin, UniformPriorMixin,
             start=self.range_dic['phi_ref_hat'][0])
         return {'phi_ref_hat': phi_ref_hat}
 
-    def get_init_dict(self):
-        """
-        Return dictionary with keyword arguments to reproduce the class
-        instance.
-        """
-        init_dict = {'tgps': self.tgps,
-                     'ref_det_name': self.ref_det_name,
-                     'f_avg': self.f_avg,
-                     'par_dic_0': self.par_dic_0}
-
-        return utils.merge_dictionaries_safely(super().get_init_dict(),
-                                               init_dict)
-
 
 class IsotropicInclinationPrior(UniformPriorMixin, Prior):
     """Uniform-in-cosine prior for the binary's inclination."""
@@ -148,6 +133,16 @@ class IsotropicInclinationPrior(UniformPriorMixin, Prior):
     def inverse_transform(self, iota):
         """Inclination to cos(inclination)."""
         return {'cosiota': np.cos(iota)}
+
+    def ln_jacobian_determinant(self, iota):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{cosiota} / ∂{iota}|
+        """
+        return np.log(np.sin(iota))
 
 
 class IsotropicSkyLocationPrior(UniformPriorMixin, Prior):
@@ -188,18 +183,23 @@ class IsotropicSkyLocationPrior(UniformPriorMixin, Prior):
         return {'costhetanet': costhetanet,
                 'phinet_hat': phinet_hat}
 
-    def get_init_dict(self):
+    def ln_jacobian_determinant(self, ra, dec, iota):
         """
-        Return dictionary with keyword arguments to reproduce the class
-        instance.
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{costhetanet, phinet_hat} / ∂{ra, dec}|
         """
-        init_dict = self.skyloc.get_init_dict()
-        return utils.merge_dictionaries_safely(super().get_init_dict(),
-                                               init_dict)
+        return np.log(np.cos(dec))
+
+    def get_init_dict(self, **kwargs):
+        """Return keyword arguments to reproduce the class instance."""
+        return super().get_init_dict(**self.skyloc.get_init_dict(), **kwargs)
 
 
 class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin,
-                       Prior):
+                       UnitJacobianMixin, Prior):
     """Prior for the time of arrival at a reference detector."""
     standard_params = ['t_geocenter']
     range_dic = {'t_refdet': None}
@@ -222,18 +222,12 @@ class UniformTimePrior(ReferenceDetectorMixin, UniformPriorMixin,
         """`t_geocenter` to `t_refdet`"""
         return {'t_refdet': t_geocenter + self.time_delay_refdet(ra, dec)}
 
-    def get_init_dict(self):
-        """
-        Return dictionary with keyword arguments to reproduce the class
-        instance.
-        """
+    def get_init_dict(self, **kwargs):
+        """Return keyword arguments to reproduce the class instance."""
         init_dict = {'t0_refdet': np.mean(self.range_dic['t_refdet']),
-                     'dt0': np.diff(self.range_dic['t_refdet'])[0] / 2,
-                     'tgps': self.tgps,
-                     'ref_det_name': self.ref_det_name}
+                     'dt0': np.diff(self.range_dic['t_refdet'])[0] / 2}
 
-        return utils.merge_dictionaries_safely(super().get_init_dict(),
-                                               init_dict)
+        return super().get_init_dict(**init_dict, **kwargs)
 
 
 class UniformPolarizationPrior(UniformPriorMixin,
@@ -302,6 +296,19 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
         return {'d_hat': d_luminosity / self._conversion_factor(ra, dec, psi,
                                                                 iota, m1, m2)}
 
+    def ln_jacobian_determinant(self, d_luminosity, ra, dec, psi, iota,
+                                m1, m2):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{d_hat} / ∂{d_luminosity}|
+        """
+        d_hat = self.inverse_transform(
+            d_luminosity, ra, dec, psi, iota, m1, m2)['d_hat']
+        return np.log(d_hat / d_luminosity)
+
     @utils.lru_cache()
     def lnprior(self, d_hat, ra, dec, psi, iota, m1, m2):
         """
@@ -317,15 +324,10 @@ class UniformLuminosityVolumePrior(ReferenceDetectorMixin, Prior):
             return -np.inf
         return np.log(d_luminosity**3 / d_hat)
 
-    def get_init_dict(self):
-        """
-        Return dictionary with keyword arguments to reproduce the class
-        instance.
-        """
-        return {'tgps': self.tgps,
-                'ref_det_name': self.ref_det_name,
-                'd_hat_max': self.range_dic['d_hat'][1],
-                'd_luminosity_max': self.d_luminosity_max}
+    def get_init_dict(self, **kwargs):
+        """Return keyword arguments to reproduce the class instance."""
+        return super().get_init_dict(
+            d_hat_max=self.range_dic['d_hat'][1], **kwargs)
 
 
 class UniformComovingVolumePrior(UniformLuminosityVolumePrior):

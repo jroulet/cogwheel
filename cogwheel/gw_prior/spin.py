@@ -13,13 +13,11 @@ from abc import abstractmethod
 from scipy.interpolate import interp1d
 import numpy as np
 
-import lal
-import lalsimulation
-
-from cogwheel import skyloc_angles
-from cogwheel import utils
+from cogwheel import skyloc_angles, utils
 from cogwheel.prior import Prior, FixedPrior, UniformPriorMixin
 from .twosquircle import TwoSquircularMapping
+lal = utils.import_lal()
+import lalsimulation
 
 # pylint: disable=arguments-differ
 
@@ -71,6 +69,25 @@ class UniformEffectiveSpinPrior(UniformPriorMixin, Prior):
         return {'chieff': chieff,
                 'cumchidiff': cumchidiff}
 
+    @classmethod
+    def ln_jacobian_determinant(cls, s1z, s2z, m1, m2):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{chieff, cumchieff} / ∂{s1z, s2z}|
+        """
+        assert not m1 < m2
+
+        q = m2 / m1
+        abs_chieff = np.abs((s1z + q*s2z) / (1 + q))
+
+        if abs_chieff > (1-q) / (1+q):
+            return np.log(q / ((1+q)**2 * (1-abs_chieff)))
+
+        return -np.log(2 * (1+q))
+
 
 class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
     """
@@ -102,6 +119,18 @@ class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
         return {'cums1z': self._inverse_spin_transform(s1z),
                 'cums2z': self._inverse_spin_transform(s2z)}
 
+    def ln_jacobian_determinant(self, s1z, s2z):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{cums1z, cums2z} / ∂{s1z, s2z}|
+        """
+        jac1 = -np.log(s1z) / 2
+        jac2 = -np.log(s2z) / 2
+        return np.log(jac1 * jac2)
+
     @classmethod
     def _spin_transform(cls, cumsz):
         return cls.sz_interp(cumsz)[()]
@@ -132,6 +161,18 @@ class VolumetricSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
         """Standard parameters to sampled parameters."""
         return {'cums1z': self._inverse_spin_transform(s1z),
                 'cums2z': self._inverse_spin_transform(s2z)}
+
+    def ln_jacobian_determinant(self, s1z, s2z):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{cums1z, cums2z} / ∂{s1z, s2z}|
+        """
+        jac1 = 3/4 * (1 - s1z**2)
+        jac2 = 3/4 * (1 - s2z**2)
+        return np.log(jac1 * jac2)
 
     @staticmethod
     def _spin_transform(cumsz):
@@ -362,12 +403,9 @@ class _BaseSkyLocationPrior(UniformPriorMixin, Prior):
 
         self.skyloc = skyloc_angles.SkyLocAngles(detector_pair, tgps)
 
-    def get_init_dict(self):
-        """
-        Return dictionary with keyword arguments to reproduce the class
-        instance.
-        """
-        return self.skyloc.get_init_dict()
+    def get_init_dict(self, **kwargs):
+        """Return keyword arguments to reproduce the class instance."""
+        return self.skyloc.get_init_dict(**kwargs)
 
     @utils.lru_cache()
     def transform(self, costheta_jn, phi_jl_hat, phi12,

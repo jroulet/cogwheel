@@ -1,15 +1,13 @@
 """Make likelihood objects (with injections) and test them."""
 
 from unittest import TestCase, main
-from inspect import signature
+from inspect import isabstract, signature
+import tempfile
 
-from cogwheel import data
-from cogwheel import gw_prior
-from cogwheel import likelihood
-from cogwheel.likelihood.marginalized_extrinsic import (
-    BaseMarginalizedExtrinsicLikelihood, BaseLinearFree)
-from cogwheel import waveform
+from cogwheel import data, gw_prior, likelihood, utils, waveform
 from cogwheel.posterior import Posterior
+from cogwheel.prior import PriorError
+from cogwheel.prior_ratio import PriorRatio
 
 from .test_waveform import get_random_par_dic
 
@@ -40,9 +38,9 @@ class PosteriorTestCase(TestCase):
         lookup_table = likelihood.LookupTable()
 
         cls.likelihoods = []
-        for likelihood_class in (get_subclasses(likelihood.BaseRelativeBinning)
-                                 - {BaseMarginalizedExtrinsicLikelihood,
-                                    BaseLinearFree}):
+        for likelihood_class in (
+                sub for sub in get_subclasses(likelihood.BaseRelativeBinning)
+                if not isabstract(sub)):
             kwargs = {}
             if 'lookup_table' in signature(likelihood_class).parameters:
                 kwargs['lookup_table'] = lookup_table
@@ -69,6 +67,27 @@ class PosteriorTestCase(TestCase):
             with self.subTest(prior):
                 sampled_dic = prior.inverse_transform(**self.par_dic_0)
                 self.assertIsInstance(prior.lnprior(**sampled_dic), float)
+
+    def test_prior_ratio(self):
+        """
+        Test that a ratio between compatible priors returns a float, and
+        incompatible priors raise an error.
+        """
+        for numerator in self.priors:
+            for denominator in self.priors:
+                with self.subTest((numerator, denominator)):
+                    if (set(numerator.standard_params)
+                            == set(denominator.standard_params)):
+                        prior_ratio = PriorRatio(numerator, denominator)
+                        try:
+                            lnpr = prior_ratio.ln_prior_ratio(**self.par_dic_0)
+                        except (NotImplementedError, PriorError):
+                            pass
+                        else:
+                            self.assertIsInstance(lnpr, float)
+                    else:
+                        with self.assertRaises(ValueError):
+                            prior_ratio = PriorRatio(numerator, denominator)
 
     def test_likelihood(self):
         """
@@ -99,6 +118,14 @@ class PosteriorTestCase(TestCase):
                         self.assertIsInstance(lnposterior, float)
                         self.assertIsInstance(par_dic, dict)
                         self.assertIsInstance(blob, dict)
+
+    def test_json_io(self):
+        """Save and load every prior and likelihood to JSON."""
+        for obj in self.priors + self.likelihoods:
+            with self.subTest(obj):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    obj.to_json(tmpdir)
+                    utils.read_json(tmpdir)
 
 
 if __name__ == '__main__':

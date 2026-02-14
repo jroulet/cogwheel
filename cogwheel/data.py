@@ -3,18 +3,18 @@
 import json
 import logging
 import pathlib
-from scipy import signal
-from scipy import interpolate
+from scipy import signal, interpolate, linalg
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-import gwpy.timeseries
 import gwosc
 
-from cogwheel import gw_utils
-from cogwheel import utils
-from cogwheel import waveform
+from cogwheel import gw_utils, utils, waveform
+
+utils.import_lal()
+
+import gwpy.timeseries
 
 # gwpy meddles with matplotlib, undo:
 plt.rcdefaults()
@@ -211,7 +211,7 @@ class EventData(utils.JSONMixin):
         asd_funcs = list(asd_funcs)  # Ensure it is mutable
         for i, asd_func in enumerate(asd_funcs):
             if isinstance(asd_func, str):
-                if not asd_func in ASDS:
+                if asd_func not in ASDS:
                     raise ValueError(f'Unknown asd_func {asd_func!r}. '
                                      f'Allowed values are {list(ASDS)}')
                 asd_funcs[i] = make_asd_func(*np.load(ASDS[asd_func]))
@@ -319,8 +319,8 @@ class EventData(utils.JSONMixin):
     @staticmethod
     def _read_timeseries(filename, tgps, **kwargs):
         """
-        Return a ``gwpy.timeseries.TimeSeries``, cropped around
-        the event to exclude any nans.
+        Return a ``gwpy.timeseries.TimeSeries``, cropped around the
+        event to exclude any nans.
         """
         try:
             timeseries = gwpy.timeseries.TimeSeries.read(filename, **kwargs)
@@ -514,7 +514,7 @@ class EventData(utils.JSONMixin):
         vmax : float
             Upper limit for the color scale.
         """
-        noverlap = noverlap or nfft / 2
+        noverlap = noverlap or nfft // 2
 
         f_sampling = 2 * self.fbounds[1]
 
@@ -528,7 +528,7 @@ class EventData(utils.JSONMixin):
             wht_data_td = (np.fft.irfft(self.strain[i] * self.wht_filter[i])
                            * np.sqrt(2 * f_sampling))
             ax.specgram(wht_data_td * np.sqrt(f_sampling),
-                        NFFT=nfft, noverlap=48, Fs=f_sampling,
+                        NFFT=nfft, noverlap=noverlap, Fs=f_sampling,
                         xextent=(self.times[[0, -1]] - self.tcoarse),
                         scale='linear', norm=norm)
             ax.grid()
@@ -545,6 +545,30 @@ class EventData(utils.JSONMixin):
 
         fig.colorbar(plt.cm.ScalarMappable(norm=norm), pad=.03,
                      ax=axes.tolist(), label=r'Power ($\sigma^2$)')
+
+    def get_whitened_td(self, strain_f=None):
+        """
+        Whiten and convert to time-domain.
+
+        Take a frequency-domain strain defined on the FFT grid
+        ``self.frequencies`` and return a whitened time domain strain
+        defined on ``self.times``.
+
+        Parameters
+        ----------
+        strain_f : (n_det, n_rfftfreq) complex array
+            A strain signal in the frequency domain. Defaults to the
+            data.
+
+        Returns
+        -------
+        (n_det, n_times) real array : Whitened time-domain signal.
+        """
+        if strain_f is None:
+            strain_f = self.strain
+
+        return (np.sqrt(2 * self.nfft * self.df)
+                * np.fft.irfft(strain_f * self.wht_filter))
 
     def to_npz(self, *, filename=None, overwrite=False,
                permissions=0o644):
@@ -612,6 +636,48 @@ class EventData(utils.JSONMixin):
                 'To download 16384 Hz data do:\n\t'
                 'cogwheel.data.download_timeseries('
                 f'{self.eventname!r}, overwrite=True, sample_rate=2**14)')
+
+    def inpaint(self, inpaint_times_by_det: dict):
+        """
+        Parameters
+        ----------
+        inpaint_times_by_det : dict
+            Dictionary with times to inpaint by detector. Keys are
+            detector names, values are lists of tuples, each with a pair
+            (t_start, t_end), e.g.:
+            {'H': [(t_start_0, t_end_0), (t_start_1, t_end_1)]}
+            Times are expressed in seconds from ``.tgps``.
+
+        Returns
+        -------
+        EventData : Instance containing the inpainted data.
+        """
+        for pairs in inpaint_times_by_det.values():
+            for left, right in pairs:
+                if left >= right:
+                    raise ValueError('Provide sorted pairs')
+
+        filled_strain = self.strain.copy()
+        times = self.times - self.tcoarse
+
+        for detector_name, inpaint_times in inpaint_times_by_det.items():
+            i_det = self.detector_names.index(detector_name)
+            strain_td = np.fft.irfft(self.strain[i_det], n=len(times))
+
+            if len(inpaint_times) == 1:
+                leftind, rightind = np.searchsorted(times, inpaint_times[0])
+                data_filled = fill_hole_consecutive(
+                    strain_td, leftind, rightind, self.wht_filter[i_det])
+            else:
+                mask = np.full(len(self.times), True)
+                for t_start, t_end in inpaint_times:
+                    mask[(times > t_start) & (times < t_end)] = False
+                data_filled = fill_holes_bruteforce(
+                    strain_td, mask, self.wht_filter[i_det])
+
+            filled_strain[i_det] = np.fft.rfft(data_filled)
+
+        return self.reinstantiate(strain=filled_strain)
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self.eventname})'
@@ -763,3 +829,93 @@ def _fetch_open_data(detector_name, tgps, interval, **kwargs):
             ifo, start, end, **kwargs)
 
     return timeseries
+
+
+def fill_holes_bruteforce(data, qmask, wt_filter_fd):
+    """
+    Inpaint time-domain data at arbitrary times.
+
+    Parameters
+    ----------
+    data : float array
+        Time-domain strain data.
+
+    qmask : Boolean array
+        Mask with zeros at holes in unwhitened data.
+
+    wt_filter_fd : float array
+        Frequency domain whitening filter. Lives in the space of
+        rfft(len(data), dt).
+
+    Returns
+    -------
+    float array of size len(data) with time-domain filled data.
+
+    See Also
+    --------
+    fill_hole_consecutive
+    """
+    filleddata = data.copy()
+    hole_inds = np.where(~qmask)[0]
+
+    filleddata[hole_inds] = 0
+
+    # First, run the square of the whitening filter on the data
+    bluing_filter = np.abs(wt_filter_fd) ** 2
+    c_inv_td = np.fft.irfft(bluing_filter, n=len(data))
+    c_inv_dat = np.fft.irfft(
+        np.fft.rfft(filleddata) * bluing_filter, n=len(data))
+
+    ii, jj = np.meshgrid(hole_inds, hole_inds, indexing='ij')
+    mat = c_inv_td[np.abs(ii - jj)]
+
+    # Solve for filled values, note that at size of the matrix
+    # 10^5 x 10^5, solve becomes numerically unstable
+    filleddata[hole_inds] = -np.linalg.solve(mat, c_inv_dat[hole_inds])
+
+    return filleddata
+
+
+def fill_hole_consecutive(data, leftind, rightind, wt_filter_fd):
+    """
+    Inpaint time-domain data on a consecutive stretch of time.
+
+    More efficient than ``fill_hole_bruteforce``, but restricted to only
+    one hole.
+
+    Parameters
+    ----------
+    data : float array
+        Time-domain strain data.
+
+    leftind, rightind : int
+        Left and right index of hole.
+
+    wt_filter_fd : float array
+        Frequency domain whitening filter. Lives in the space of
+        rfft(len(data), dt).
+
+    Returns
+    -------
+    float array of size len(data) with time-domain filled data.
+
+    See Also
+    --------
+    fill_holes_bruteforce
+    """
+    # Copy the data and zero inside the hole
+    filleddata = data.copy()
+    hole = slice(leftind, rightind)
+    filleddata[hole] = 0
+
+    # Run the square of the whitening filter on the data
+    bluing_filter = np.abs(wt_filter_fd) ** 2
+    c_inv_td = np.fft.irfft(bluing_filter, n=len(data))
+    c_inv_dat = np.fft.irfft(
+        np.fft.rfft(filleddata) * bluing_filter, n=len(data))
+
+    # Shuffle the data inside the hole
+    filleddata[hole] = -linalg.solve_toeplitz(
+        c_inv_td[: rightind-leftind], c_inv_dat[hole])
+
+    return filleddata

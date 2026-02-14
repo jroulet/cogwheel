@@ -32,6 +32,8 @@ class UniformTidalDeformabilitiesBNSPrior(prior.UniformPriorMixin,
                           'l2': (0, max_tidal_deformability)}
         super().__init__(**kwargs)
 
-    def get_init_dict(self):
+    def get_init_dict(self, **kwargs):
         """Dictionary with arguments to reproduce class instance."""
-        return {'max_tidal_deformability': self.range_dic['l1'][1]}
+        return super().get_init_dict(
+            max_tidal_deformability=self.range_dic['l1'][1],
+            **kwargs)

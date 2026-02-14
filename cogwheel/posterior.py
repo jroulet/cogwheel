@@ -7,6 +7,7 @@ the maximum likelihood solution on the full parameter space.
 import argparse
 import inspect
 import json
+from scipy import optimize
 import numpy as np
 
 from cogwheel import gw_prior
@@ -101,6 +102,18 @@ class Posterior(utils.JSONMixin):
         lnl, metadata = self.likelihood.lnlike_and_metadata(standard_par_dic)
         return lnprior + lnl, standard_par_dic, metadata
 
+    def standard_lnposterior(self, *standard_parameters_,
+                             **standard_parameters):
+        """
+        Natural logarithm of the posterior probability density in
+        the space of standard parameters.
+        """
+        standard_parameters.update(zip(self.prior.standard_params,
+                                       standard_parameters_))
+        lnp = self.prior.standard_lnprior(**standard_parameters)
+        lnl = self.likelihood.lnlike(standard_parameters)
+        return lnp + lnl
+
     @classmethod
     def from_event(
             cls, event, mchirp_guess, approximant, prior_class,
@@ -135,6 +148,14 @@ class Posterior(utils.JSONMixin):
         likelihood_kwargs : dict
             Keyword arguments for `likelihood_class` constructor.
 
+        ref_wf_finder_kwargs : dict
+            Keyword arguments for ``ReferenceWaveformFinder.from_event``
+            constructor, including:
+
+            * time_range
+            * mchirp_range
+            * f_ref
+
         Returns
         -------
             Instance of `Posterior`.
@@ -167,7 +188,7 @@ class Posterior(utils.JSONMixin):
                                                            **prior_kwargs)
         return cls(prior, likelihood)
 
-    def refine_reference_waveform(self, seed=None, params=None):
+    def refine_reference_waveform(self, rng=None, params=None):
         """
         Reset relative-binning reference waveform, using differential
         evolution to find a good fit.
@@ -177,7 +198,7 @@ class Posterior(utils.JSONMixin):
 
         Parameters
         ----------
-        seed : {int, numpy.random.Generator, numpy.random.RandomState}
+        rng : {int, numpy.random.Generator, numpy.random.RandomState}
             Passed to ``scipy.optimize.differential_evolution``
 
         params : list of str, optional
@@ -209,12 +230,12 @@ class Posterior(utils.JSONMixin):
             except RuntimeError:
                 return np.inf
 
-        result = utils.differential_evolution_with_guesses(
+        result = optimize.differential_evolution(
             func=loss_function,
             bounds=list(zip(self.prior.cubemin[inds],
                             (self.prior.cubemin
                              + self.prior.folded_cubesize)[inds])),
-            guesses=folded_par_vals_0[inds], seed=seed, init='sobol').x
+            x0=folded_par_vals_0[inds], rng=rng, init='sobol').x
 
         folded_par_vals[inds] = result
         i_fold = np.argmax(lnlike_unfolds(*folded_par_vals))

@@ -3,10 +3,9 @@ Coordinate transformations to and from right ascension and declination.
 """
 import numpy as np
 
-import lal
+from cogwheel import gw_utils, utils
 
-from cogwheel import utils
-from cogwheel import gw_utils
+lal = utils.import_lal()
 
 
 class SkyLocAngles(utils.JSONMixin):
