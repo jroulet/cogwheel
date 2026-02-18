@@ -135,7 +135,7 @@ class SkyDictionary(utils.JSONMixin):
 
         The sampling frequencies of the `SkyDict` and `timeseries` must
         be multiples (or ``ValueError`` is raised).
-        The data is smoothed at the edges to make it periodic.
+        The data are smoothed at the edges to make them periodic.
 
         Parameters
         ----------
@@ -159,7 +159,7 @@ class SkyDictionary(utils.JSONMixin):
         shape[axis] = timeseries.shape[axis]
         window = np.sqrt(
             scipy.signal.windows.tukey(shape[axis], .1)).reshape(shape)
-        endpoint = np.mean(timeseries.take([0, -1], axis))
+        endpoint = np.mean(timeseries.take([0, -1], axis), axis, keepdims=True)
         timeseries = (timeseries - endpoint) * window + endpoint
 
         fs_ratio = np.round(self.f_sampling * (times[1] - times[0]),
