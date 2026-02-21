@@ -165,6 +165,7 @@ Approximant = namedtuple(
 APPROXIMANTS = {
     'IMRPhenomD_NRTidalv2': Approximant(tides=True),
     'IMRPhenomD': Approximant(),
+    'IMRPhenomPv2': Approximant(aligned_spins=False),
     'IMRPhenomXPHM': Approximant(harmonic_modes=[(2, 2), (2, 1), (3, 3),
                                                  (3, 2), (4, 4)],
                                  aligned_spins=False),
