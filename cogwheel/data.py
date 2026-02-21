@@ -787,12 +787,16 @@ class EventData(utils.JSONMixin):
                     event_data.strain[i] * event_data.wht_filter[i])
                 spectrum = stfft.spectrogram(wht_data_td * np.sqrt(stfft.fs))
                 t = stfft.t(len(wht_data_td)) - event_data.tcoarse
+                excluded = (exclude[0] < t) & (t < exclude[1])
 
                 peak_power = spectrum.max(axis=0)  # timeseries
-                threshold = max(peak_power.max() / power_drop, vmax)
-                clean = ((peak_power < threshold)
-                         | ((exclude[0] < t) & (t < exclude[1])))
-                segments = t[hole_edges(clean)]
+                old_threshold = threshold
+                threshold = max(peak_power[~excluded].max() / power_drop, vmax)
+                assert old_threshold > threshold
+                clean = (peak_power < threshold) | excluded
+                edges = np.clip(hole_edges(clean) - np.array([1, 0]),
+                                0, None)  # Expand left for time convention
+                segments = t[edges]
                 inpaint_times_by_det[det_name].extend(segments.tolist())
                 event_data = event_data.inpaint(
                     {det_name: inpaint_times_by_det[det_name]})
