@@ -265,6 +265,15 @@ class _BaseInplaneSpinsInclinationPrior(UniformPriorMixin, Prior):
             aligned spin magnitude `sz`, for either companion.
         """
 
+    @staticmethod
+    def _dcumsrsz_dsr(sr, sz):
+        """
+        ∂{cumsr_sz} / ∂{sr} = p(sr|sz)
+
+        Needed to compute the Jacobian determinant of the transform.
+        """
+        raise NotImplementedError
+
     @utils.lru_cache()
     def transform(self, costheta_jn, phi_jl_hat, phi12, cums1r_s1z,
                   cums2r_s2z, s1z, s2z, m1, m2, f_ref) -> dict:
@@ -312,6 +321,27 @@ class _BaseInplaneSpinsInclinationPrior(UniformPriorMixin, Prior):
                 'cums1r_s1z': cums1r_s1z,
                 'cums2r_s2z': cums2r_s2z}
 
+    def ln_jacobian_determinant(self, iota, s1x_n, s1y_n, s2x_n, s2y_n,
+                                s1z, s2z, m1, m2, f_ref):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float
+            log|∂{costheta_jn, phi_jl_hat, phi12, cums1r_s1z, cums2r_s2z} /
+                ∂{iota, s1x_n, s1y_n, s2x_n, s2y_n}|
+        """
+        s1r = np.sqrt(s1x_n**2 + s1y_n**2)
+        s2r = np.sqrt(s2x_n**2 + s2y_n**2)
+
+        dc1r_ds1r = self._dcumsrsz_dsr(s1r, s1z)
+        dc2r_ds2r = self._dcumsrsz_dsr(s2r, s2z)
+
+        return np.log(np.sin(iota)
+                      * dc1r_ds1r / s1r
+                      * dc2r_ds2r / s2r)
+
 
 class UniformDiskInplaneSpinsIsotropicInclinationPrior(
         _BaseInplaneSpinsInclinationPrior):
@@ -335,6 +365,10 @@ class UniformDiskInplaneSpinsIsotropicInclinationPrior(
         cumsr_sz = (chi*np.sin(tilt))**2 / (1-sz**2)
         return cumsr_sz
 
+    @staticmethod
+    def _dcumsrsz_dsr(sr, sz):
+        return 2 * sr / (1 - sz**2)
+
 
 class IsotropicSpinsInplaneComponentsIsotropicInclinationPrior(
         _BaseInplaneSpinsInclinationPrior):
@@ -357,6 +391,10 @@ class IsotropicSpinsInplaneComponentsIsotropicInclinationPrior(
         sr = np.tan(tilt) * sz
         cumsr_sz = np.log(sz_square / (sr**2 + sz_square)) / np.log(sz_square)
         return cumsr_sz
+
+    @staticmethod
+    def _dcumsrsz_dsr(sr, sz):
+        return -2*sr / (np.log(sz**2) * (sr**2 + sz**2))
 
 
 class _BaseSkyLocationPrior(UniformPriorMixin, Prior):
@@ -445,6 +483,19 @@ class _BaseSkyLocationPrior(UniformPriorMixin, Prior):
         return costheta_jn_sampled_inplane_spins | {'costhetanet': costhetanet,
                                                     'phinet_hat': phinet_hat}
 
+    def ln_jacobian_determinant(self, iota, s1x_n, s1y_n, s2x_n, s2y_n,
+                                ra, dec, s1z, s2z, m1, m2, f_ref):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{sampled_params} / ∂{standard_params}|
+        """
+        return self._inplane_spin_inclination_prior.ln_jacobian_determinant(
+            iota, s1x_n, s1y_n, s2x_n, s2y_n, s1z, s2z, m1, m2, f_ref
+        ) + np.log(np.cos(dec))
+
 
 class UniformDiskInplaneSpinsIsotropicInclinationSkyLocationPrior(
         _BaseSkyLocationPrior):
@@ -532,8 +583,8 @@ class CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior(Prior):
         """Log prior density in the space of sampled parameters."""
         del costheta_jn, s1z, s2z, m1, m2, f_ref
         return np.log(0.5
-                      * self._mapping.jacobian_determinant(x1, y1)
-                      * self._mapping.jacobian_determinant(x2, y2))
+                      * self._mapping.jacobian_determinant(x1, y1) / np.pi
+                      * self._mapping.jacobian_determinant(x2, y2) / np.pi)
 
     def _cartesian_to_polar(self, x, y):
         u, v = self._mapping.square_to_disk(x, y)
@@ -546,6 +597,28 @@ class CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior(Prior):
         u = r * np.cos(phi)
         v = r * np.sin(phi)
         return self._mapping.disk_to_square(u, v)
+
+    def ln_jacobian_determinant(self, iota, s1x_n, s1y_n, s2x_n, s2y_n,
+                                s1z, s2z, m1, m2, f_ref):
+        """
+        Natural log Jacobian determinant of the inverse transform.
+
+        Returns
+        -------
+        float : log|∂{sampled_params} / ∂{standard_params}|
+        """
+        s1r = np.sqrt(s1x_n**2 + s1y_n**2)
+        s2r = np.sqrt(s2x_n**2 + s2y_n**2)
+        lnp_standard = np.log(np.sin(iota) / 2
+                              / (np.pi * (1 - s1z**2))
+                              / (np.pi * (1 - s2z**2)))
+
+        lnp_sampled = self.lnprior(
+            **self.inverse_transform(
+                iota, s1x_n, s1y_n, s2x_n, s2y_n, s1z, s2z, m1, m2, f_ref),
+            s1z=s1z, s2z=s2z, m1=m1, m2=m2, f_ref=f_ref)
+
+        return lnp_standard - lnp_sampled
 
 
 class ZeroInplaneSpinsPrior(FixedPrior):
