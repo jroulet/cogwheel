@@ -36,8 +36,8 @@ maintainers = [
 ]
 description = "Parameter estimation of gravitational wave sources"
 readme = "README.md"
+license = "GPL-3.0-or-later"
 classifiers = [
-  "License :: OSI Approved :: GNU General Public License (GPL)",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -53,6 +53,11 @@ dev = [
 ]
 full = [
   "pymultinest",
+]
+docs = [
+  "sphinx",
+  "numpydoc",
+  "furo",
 ]
 
 [project.urls]
