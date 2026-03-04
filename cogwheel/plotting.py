@@ -180,8 +180,14 @@ class PlotStyle:
         self.vfill_kwargs = self.VFILL_KWARGS | self.vfill_kwargs
 
     def get_contour_kwargs(self):
-        """Keyword arguments to `plt.contour` and `plt.contourf`."""
+        """Keyword arguments to `plt.contour`."""
         return {'colors': [self.color_2d]} | self.contour_kwargs
+
+    def get_contourf_kwargs(self):
+        """Keyword arguments to `plt.contourf`."""
+        kwargs = self.get_contour_kwargs()
+        return {key: kwargs[key]
+                for key in kwargs.keys() - {'linewidths', 'linestyles'}}
 
     def get_vline_kwargs(self):
         """
@@ -522,7 +528,8 @@ class CornerPlot:
             next_levels = *levels[1:], np.inf
             for *level_edges, alpha in zip(levels, next_levels, alphas):
                 ax.contourf(pdf, extent=extent, levels=level_edges,
-                            alpha=alpha, **self.plotstyle.get_contour_kwargs())
+                            alpha=alpha,
+                            **self.plotstyle.get_contourf_kwargs())
 
     def _get_pdf_2d(self, xpar, ypar):
         mask = (self._get_tail_probability_mask(xpar)

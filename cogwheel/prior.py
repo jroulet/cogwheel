@@ -551,12 +551,14 @@ class Prior(ABC, utils.JSONMixin):
             standard = self.transform(**direct)
             return np.array([standard[k] for k in self.standard_params])
 
+        direct_params = self.sampled_params + self.conditioned_on
+
         transform_v = np.vectorize(
             transform_as_arr,
-            signature=','.join('()' for _ in self.sampled_params) + '->(n)'
+            signature=','.join('()' for _ in direct_params) + '->(n)'
         )
 
-        direct = samples[self.sampled_params + self.conditioned_on]
+        direct = samples[direct_params]
         standard = pd.DataFrame(transform_v(**direct),
                                 columns=self.standard_params)
         utils.update_dataframe(samples, standard)
