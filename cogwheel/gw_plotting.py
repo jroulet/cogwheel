@@ -22,6 +22,8 @@ _LABELS = {
     'mchirp_source': r'$\mathcal{M}^{\rm src}$',
     'l1': r'$\Lambda_1$',
     'l2': r'$\Lambda_2$',
+    'mu1': r'$\mu_1$',
+    'mu2': r'$\mu_2$',
     # Spin
     'chieff': r'$\chi_{\rm eff}$',
     'cumchidiff': r'$C_{\rm diff}$',
