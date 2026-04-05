@@ -127,8 +127,8 @@ class IsotropicSpinsAlignedComponentsPrior(UniformPriorMixin, Prior):
         -------
         float : log|∂{cums1z, cums2z} / ∂{s1z, s2z}|
         """
-        jac1 = -np.log(s1z) / 2
-        jac2 = -np.log(s2z) / 2
+        jac1 = -np.log(np.abs(s1z)) / 2
+        jac2 = -np.log(np.abs(s2z)) / 2
         return np.log(jac1 * jac2)
 
     @classmethod
