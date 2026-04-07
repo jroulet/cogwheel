@@ -332,6 +332,7 @@ class _BaseInplaneSpinsInclinationPrior(UniformPriorMixin, Prior):
             log|∂{costheta_jn, phi_jl_hat, phi12, cums1r_s1z, cums2r_s2z} /
                 ∂{iota, s1x_n, s1y_n, s2x_n, s2y_n}|
         """
+        del m1, m2, f_ref
         s1r = np.sqrt(s1x_n**2 + s1y_n**2)
         s2r = np.sqrt(s2x_n**2 + s2y_n**2)
 
@@ -492,6 +493,7 @@ class _BaseSkyLocationPrior(UniformPriorMixin, Prior):
         -------
         float : log|∂{sampled_params} / ∂{standard_params}|
         """
+        del ra
         return self._inplane_spin_inclination_prior.ln_jacobian_determinant(
             iota, s1x_n, s1y_n, s2x_n, s2y_n, s1z, s2z, m1, m2, f_ref
         ) + np.log(np.cos(dec))
@@ -607,8 +609,6 @@ class CartesianUniformDiskInplaneSpinsIsotropicInclinationPrior(Prior):
         -------
         float : log|∂{sampled_params} / ∂{standard_params}|
         """
-        s1r = np.sqrt(s1x_n**2 + s1y_n**2)
-        s2r = np.sqrt(s2x_n**2 + s2y_n**2)
         lnp_standard = np.log(np.sin(iota) / 2
                               / (np.pi * (1 - s1z**2))
                               / (np.pi * (1 - s2z**2)))
