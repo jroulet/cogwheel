@@ -1,0 +1,613 @@
+"""Agent factory — creates SDK agents with the right model, prompt, tools,
+and MCP configuration for each crew role.
+
+Each agent is created on demand (not upfront) and gets only the instruction
+sections and memories relevant to its role.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Optional
+from urllib.parse import urlparse
+
+from claude_agent_sdk import (  # pyright: ignore[reportMissingImports]  # install-time dep; this is a template repo
+    AgentDefinition,
+    ClaudeAgentOptions,
+    HookJSONOutput,
+    HookMatcher,
+    PermissionMode,
+    SandboxSettings,
+)
+
+logger = logging.getLogger(__name__)
+
+from .memory import get_memory_names_for_agent, load_memories_text
+from .prompts.sections import get_sections_for_agent
+
+
+# ── SDK hooks (injected programmatically since setting_sources=['user']) ──────
+#
+# These are thin wrappers that call the actual shell scripts in .claude/hooks/,
+# keeping those scripts as the single source of truth.
+
+
+async def _run_hook_script(script_name: str, hook_input, _tool_use_id, _context) -> HookJSONOutput:
+    """Run a .claude/hooks/ shell script as if it were a settings.json hook.
+
+    Pipes the hook input JSON on stdin, parses the JSON output.
+    Returns {} (allow) if the script produces no output.
+
+    Stderr is captured and non-zero exits / parse errors are appended to
+    `.claude/sdk/logs/hook_failures.log` so silent hook failures become
+    diagnosable. Every invocation is also logged to `hook_trace.log` —
+    the trace file is the primary diagnostic for "are hooks firing at
+    all?" questions.
+    """
+    import json as _json
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(project_root, ".claude", "hooks", script_name)
+    if not os.path.isfile(script):
+        return {}
+    # hook_input is a TypedDict (plain dict at runtime), despite the static
+    # type hint suggesting attribute access. Using `hook_input.tool_name`
+    # raises AttributeError which the SDK silently swallows — every hook
+    # would then fire but crash immediately, tool would run unblocked,
+    # no warning surfaces. Use subscript access.
+    tool_name = hook_input["tool_name"] if isinstance(hook_input, dict) else getattr(hook_input, "tool_name", "")
+    tool_input = hook_input.get("tool_input") if isinstance(hook_input, dict) else getattr(hook_input, "tool_input", None)
+    input_json = _json.dumps({
+        "tool_name": tool_name,
+        "tool_input": tool_input or {},
+    })
+
+    def _log(filename: str, message: str) -> None:
+        """Append a line to a log under .claude/sdk/logs/ — best-effort."""
+        try:
+            log_dir = os.path.join(project_root, ".claude", "sdk", "logs")
+            os.makedirs(log_dir, exist_ok=True)
+            with open(os.path.join(log_dir, filename), "a") as f:
+                f.write(message.rstrip() + "\n")
+        except Exception:
+            pass
+
+    # Trace every invocation — primary diagnostic for "hooks not firing"
+    _log(
+        "hook_trace.log",
+        f"{script_name} tool={tool_name} "
+        f"input={input_json[:200]}",
+    )
+
+    proc = await asyncio.create_subprocess_exec(
+        "bash", script,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate(input_json.encode())
+
+    if proc.returncode != 0:
+        _log(
+            "hook_failures.log",
+            f"{script_name} tool={tool_name} "
+            f"exit={proc.returncode} stderr={stderr.decode(errors='replace').strip()[:200]}",
+        )
+        # Fail open: return allow rather than block on a broken hook.
+        return {}
+
+    if not stdout.strip():
+        _log("hook_trace.log", f"  -> no stdout (allow)")
+        return {}
+    try:
+        result = _json.loads(stdout)
+        specific = result.get("hookSpecificOutput", {})
+        if specific.get("permissionDecision") == "deny":
+            _log(
+                "hook_trace.log",
+                f"  -> DENY ({specific.get('permissionDecisionReason', '')[:100]!r})",
+            )
+            return {
+                "decision": "block",
+                "reason": specific.get("permissionDecisionReason", "Blocked by hook."),
+            }
+        _log("hook_trace.log", f"  -> pass-through (allow)")
+        return result
+    except _json.JSONDecodeError:
+        _log(
+            "hook_failures.log",
+            f"{script_name} tool={tool_name} "
+            f"invalid JSON: {stdout.decode(errors='replace')[:200]}",
+        )
+        return {}
+
+
+async def _serena_symbolic_hook(hook_input, tool_use_id, context) -> HookJSONOutput:
+    """Delegate to .claude/hooks/use-serena.sh — block shell-as-grep."""
+    return await _run_hook_script("use-serena.sh", hook_input, tool_use_id, context)
+
+
+async def _use_serena_hook(hook_input, tool_use_id, context) -> HookJSONOutput:
+    """Delegate to .claude/hooks/use-serena.sh — teach Serena best practices.
+
+    Blocks native Read/Edit/Write/Grep/Glob and redirects to Serena
+    equivalents. Safe for SDK agents because _build_sdk_hooks() is only
+    used when use_serena=True; when Serena crashes and the retry uses
+    use_serena=False, hooks=None and native tools pass through.
+    """
+    return await _run_hook_script("use-serena.sh", hook_input, tool_use_id, context)
+
+
+def _build_sdk_hooks() -> dict:
+    """Build hooks dict for ClaudeAgentOptions.
+
+    Mirrors the hooks in .claude/settings.json but injected programmatically
+    since SDK agents use setting_sources=['user'] (skipping project settings).
+    The shell scripts in .claude/hooks/ are the single source of truth.
+
+    Only used when use_serena=True. When Serena crashes and the orchestrator
+    retries with use_serena=False, hooks=None — no hooks fire at all and
+    native Read/Edit/Write/Bash all pass through as the fallback path.
+    """
+    return {
+        "PreToolUse": [
+            HookMatcher(
+                matcher="mcp__serena__execute_shell_command",
+                hooks=[_serena_symbolic_hook],
+            ),
+            HookMatcher(
+                matcher="Read|Grep|Glob|Edit|Write|Bash",
+                hooks=[_use_serena_hook],
+            ),
+        ],
+    }
+
+
+# ── Environment builder ────────────────────────────────────────────────────
+
+
+def _build_env() -> dict[str, str]:
+    """Build the environment dict for SDK subprocesses.
+
+    Ensures the Python that launched the orchestrator is first on PATH
+    so that bare ``python`` resolves correctly.
+    """
+    python_bin_dir = os.path.dirname(sys.executable)
+
+    env = {
+        "PATH": f"{python_bin_dir}:{os.environ.get('PATH', '')}",
+        "HOME": os.environ.get("HOME", ""),
+        "USER": os.environ.get("USER", ""),
+        "CLAUDECODE": "",
+    }
+    return env
+
+
+# ── Shared Serena SSE manager ────────────────────────────────────────────────
+
+
+class SerenaManager:
+    """Manages a single shared Serena SSE server for all agents/skills."""
+
+    def __init__(self, project_root: str, port: int = 8322,
+                 external_url: str | None = None):
+        self.project_root = project_root
+        self.external_url = external_url
+        if external_url:
+            self.url = external_url
+            self.port = 0
+        else:
+            self.port = port
+            self.url = f"http://localhost:{port}/sse"
+        self.process: subprocess.Popen | None = None
+
+    async def start(self) -> str:
+        """Start Serena SSE server, return SSE URL.
+
+        If external_url is set, probe the URL first. If unreachable, fall
+        back to spawning our own Serena on the default port. Makes the
+        skill template idempotent: callers can pass --serena-url to reuse
+        an external Serena if one's warm; absence doesn't wedge the build.
+        """
+        if self.external_url:
+            if await self._url_reachable(self.external_url):
+                return self.url
+            logger.warning(
+                "Serena SSE at %s unreachable; spawning own Serena on :%d",
+                self.external_url, 8322,
+            )
+            self.external_url = None
+            self.port = 8322
+            self.url = f"http://localhost:{self.port}/sse"
+        python_bin_dir = os.path.dirname(sys.executable)
+        self.process = subprocess.Popen(
+            [
+                "uvx", "--from", "git+https://github.com/oraios/serena",
+                "--with", "pyright[nodejs]",
+                "serena", "start-mcp-server",
+                "--transport", "sse",
+                "--port", str(self.port),
+                "--project", self.project_root,
+                "--context", "claude-code",
+            ],
+            env={
+                **os.environ,
+                "PATH": f"{python_bin_dir}:{os.environ.get('PATH', '')}",
+            },
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            await self._wait_for_ready()
+        except Exception:
+            await self.stop()
+            raise
+        return self.url
+
+    @staticmethod
+    async def _url_reachable(url: str, timeout: float = 1.0) -> bool:
+        """Return True if a TCP connection to the URL's host:port succeeds."""
+        parsed = urlparse(url)
+        if not parsed.hostname or not parsed.port:
+            return False
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(parsed.hostname, parsed.port),
+                timeout=timeout,
+            )
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return True
+        except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+            return False
+
+    async def _wait_for_ready(self, startup_delay: float = 8.0):
+        """Wait for Serena SSE server to start.
+
+        IMPORTANT: do NOT connect to the SSE endpoint before the agent does.
+        SSE resets project activation on each new client connection.
+        A fixed delay is the simplest approach that preserves activation.
+        """
+        await asyncio.sleep(startup_delay)
+        if self.process and self.process.poll() is not None:
+            raise RuntimeError(
+                f"Serena SSE server exited during startup (rc={self.process.returncode})"
+            )
+
+    def get_mcp_config(self) -> dict:
+        """MCP server config dict for ClaudeAgentOptions."""
+        return {"type": "sse", "url": self.url}
+
+    async def stop(self):
+        if self.external_url:
+            return
+        if self.process:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+            self.process = None
+
+
+# ── Model assignments ────────────────────────────────────────────────────────
+
+AGENT_MODELS: dict[str, str] = {
+    "architect":    "claude-opus-4-8",
+    "simplifier":   "claude-sonnet-4-6",
+    "foreman_lite": "claude-sonnet-4-6",
+    "coder":        "claude-opus-4-8",
+    "tidier":       "claude-sonnet-4-6",
+    "test_dev":     "claude-sonnet-4-6",    # upgraded to opus if domain tests
+    "inspector":    "claude-opus-4-8",
+    "librarian":    "claude-sonnet-4-6",
+    "dreamer":      "claude-sonnet-4-6",
+}
+
+
+# ── Tool sets per role ───────────────────────────────────────────────────────
+
+_READ_TOOLS = ["Read", "Glob", "Grep"]
+_EDIT_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
+
+_SERENA_READ = [
+    "mcp__serena__read_file",
+    "mcp__serena__find_file",
+    "mcp__serena__list_dir",
+    "mcp__serena__get_symbols_overview",
+    "mcp__serena__find_symbol",
+    "mcp__serena__find_referencing_symbols",
+    "mcp__serena__search_for_pattern",
+    "mcp__serena__read_memory",
+    "mcp__serena__list_memories",
+    "mcp__serena__write_memory",
+    "mcp__serena__edit_memory",
+]
+
+_SERENA_CODE_EDIT = [
+    "mcp__serena__replace_content",
+    "mcp__serena__replace_symbol_body",
+    "mcp__serena__insert_at_line",
+    "mcp__serena__insert_after_symbol",
+    "mcp__serena__insert_before_symbol",
+    "mcp__serena__delete_lines",
+    "mcp__serena__replace_lines",
+    "mcp__serena__rename_symbol",
+    "mcp__serena__create_text_file",
+    "mcp__serena__restart_language_server",
+]
+
+_SERENA_EDIT = _SERENA_READ + _SERENA_CODE_EDIT + [
+    "mcp__serena__execute_shell_command",
+]
+
+AGENT_TOOLS: dict[str, dict[str, list[str]]] = {
+    "architect": {
+        "serena": _SERENA_READ,
+        "fallback": _READ_TOOLS + ["Agent"],
+    },
+    "simplifier": {
+        "serena": _SERENA_READ,
+        "fallback": _READ_TOOLS,
+    },
+    "coder": {
+        "serena": _SERENA_EDIT,
+        "fallback": _EDIT_TOOLS,
+    },
+    "foreman_lite": {
+        "serena": _SERENA_EDIT,
+        "fallback": _EDIT_TOOLS,
+    },
+    "tidier": {
+        "serena": _SERENA_EDIT,
+        "fallback": _EDIT_TOOLS,
+    },
+    "test_dev": {
+        "serena": _SERENA_EDIT,
+        "fallback": _EDIT_TOOLS,
+    },
+    "inspector": {
+        "serena": _SERENA_READ + ["mcp__serena__execute_shell_command"],
+        "fallback": _READ_TOOLS + ["Bash"],
+    },
+    "librarian": {
+        "serena": _SERENA_EDIT,
+        "fallback": _EDIT_TOOLS,
+    },
+    "dreamer": {
+        "serena": _SERENA_READ + [
+            "mcp__serena__write_memory",
+            "mcp__serena__edit_memory",
+            "mcp__serena__execute_shell_command",
+        ],
+        "fallback": _READ_TOOLS + ["Bash"],
+    },
+}
+
+AGENT_PERMISSION_MODES: dict[str, PermissionMode] = {
+    "architect":    "plan",
+    "simplifier":   "plan",
+    "coder":        "bypassPermissions",
+    "foreman_lite": "bypassPermissions",
+    "tidier":       "bypassPermissions",
+    "test_dev":     "bypassPermissions",
+    "inspector":    "bypassPermissions",
+    "librarian":    "bypassPermissions",
+    "dreamer":      "bypassPermissions",
+}
+
+
+# ── Skill tool sets ──────────────────────────────────────────────────────────
+
+SKILL_TOOLS: dict[str, dict[str, list[str]]] = {
+    "tidier": {
+        "serena": _SERENA_EDIT,
+        "fallback": _EDIT_TOOLS,
+    },
+    "librarian": {
+        "serena": _SERENA_EDIT,
+        "fallback": _EDIT_TOOLS,
+    },
+    "simplifier": {
+        "serena": [],
+        "fallback": [],
+    },
+    "dreamer": {
+        "serena": _SERENA_READ + [
+            "mcp__serena__write_memory",
+            "mcp__serena__edit_memory",
+            "mcp__serena__execute_shell_command",
+        ],
+        "fallback": _READ_TOOLS + ["Bash"],
+    },
+}
+
+
+# ── Crew prompt loading ─────────────────────────────────────────────────────
+
+_CREW_FILE_MAP: dict[str, str] = {
+    "architect":    "architect.md",
+    "simplifier":   "simplifier.md",
+    "foreman_lite": "foreman_lite.md",
+    "coder":        "coder.md",
+    "tidier":       "tidy.md",
+    "test_dev":     "test_dev.md",
+    "inspector":    "inspector.md",
+    "librarian":    "librarian.md",
+    "dreamer":      "dreamer.md",
+}
+
+
+def load_crew_prompt(agent_name: str, project_root: str) -> str:
+    """Load the crew .md file for the given agent role."""
+    crew_file = _CREW_FILE_MAP.get(agent_name)
+    if not crew_file:
+        return ""
+
+    crew_path = Path(project_root) / ".claude" / "crew" / crew_file
+    if not crew_path.exists():
+        return f"(crew prompt for {agent_name} not found at {crew_path})"
+
+    return crew_path.read_text(encoding="utf-8")
+
+
+# ── System prompt assembly ───────────────────────────────────────────────────
+
+
+async def build_system_prompt(
+    agent_name: str,
+    project_root: str,
+    task_context: str = "",
+    extra_instructions: str = "",
+) -> str:
+    """Assemble the full system prompt for an agent."""
+    parts: list[str] = []
+
+    crew = load_crew_prompt(agent_name, project_root)
+    if crew:
+        parts.append(crew)
+
+    sections = get_sections_for_agent(agent_name)
+    if sections:
+        parts.append("# Project Instructions\n" + sections)
+
+    memory_names = get_memory_names_for_agent(agent_name)
+    if memory_names:
+        memories_text = await load_memories_text(memory_names, project_root)
+        parts.append("# Memories\n" + memories_text)
+
+    if task_context:
+        parts.append("# Task Context\n" + task_context)
+
+    if extra_instructions:
+        parts.append(extra_instructions)
+
+    return "\n\n---\n\n".join(parts)
+
+
+async def build_agent_options(
+    agent_name: str,
+    project_root: str,
+    task_context: str = "",
+    extra_instructions: str = "",
+    use_serena: bool = True,
+    mcp_config: Optional[dict] = None,
+    max_turns: int = 75,
+    model_override: Optional[str] = None,
+    permission_override: Optional[PermissionMode] = None,
+) -> ClaudeAgentOptions:
+    """Build ClaudeAgentOptions for a given agent role."""
+    model = model_override or AGENT_MODELS[agent_name]
+    tool_config = AGENT_TOOLS[agent_name]
+    permission_mode = permission_override or AGENT_PERMISSION_MODES[agent_name]
+
+    system_prompt = await build_system_prompt(
+        agent_name, project_root, task_context, extra_instructions,
+    )
+
+    _SERENA_REPLACEABLE = {"Read", "Glob", "Grep"}
+
+    mcp_servers: dict = {}
+    disallowed_tools: list[str] = [
+        "ToolSearch", "ExitPlanMode", "EnterPlanMode",
+        "AskUserQuestion",
+        "mcp__serena__activate_project",
+        "mcp__serena__initial_instructions",
+        "mcp__serena__check_onboarding_performed",
+        "mcp__serena__onboarding",
+        "mcp__serena__get_current_config",
+        "mcp__serena__switch_modes",
+        "mcp__serena__prepare_for_new_conversation",
+    ]
+    if use_serena and mcp_config is not None:
+        mcp_servers["serena"] = mcp_config
+        allowed_tools = tool_config["serena"] + tool_config["fallback"]
+        disallowed_tools += [t for t in tool_config["fallback"] if t in _SERENA_REPLACEABLE]
+        if permission_mode == "plan":
+            disallowed_tools += _SERENA_CODE_EDIT
+            disallowed_tools.append("mcp__serena__execute_shell_command")
+    else:
+        allowed_tools = tool_config["fallback"]
+
+    if permission_mode == "plan":
+        for t in ("Edit", "Write", "Bash"):
+            if t not in disallowed_tools:
+                disallowed_tools.append(t)
+
+    env = _build_env()
+
+    sandbox: SandboxSettings = {
+        "enabled": True,
+        "autoAllowBashIfSandboxed": True,
+        "excludedCommands": ["git", "ssh", "scp", "rsync"],
+        "allowUnsandboxedCommands": True,
+        "network": {
+            "allowLocalBinding": True,
+            "allowAllUnixSockets": True,
+        },
+    }
+
+    disallowed_set = set(disallowed_tools)
+    allowed_tools = [t for t in allowed_tools if t not in disallowed_set]
+
+    return ClaudeAgentOptions(
+        model=model,
+        system_prompt=system_prompt,
+        allowed_tools=allowed_tools,
+        disallowed_tools=disallowed_tools,
+        permission_mode=permission_mode,
+        max_turns=max_turns,
+        mcp_servers=mcp_servers,
+        setting_sources=["user"],
+        hooks=_build_sdk_hooks() if use_serena else None,
+        cwd=project_root,
+        env=env,
+        sandbox=sandbox,
+    )
+
+
+async def build_phase1_subagents(
+    project_root: str,
+    use_serena: bool = True,
+) -> dict[str, AgentDefinition]:
+    """Build AgentDefinition entries for the Phase 1 consultation subagents."""
+    agents: dict[str, AgentDefinition] = {}
+
+    for name, model, description in [
+        (
+            "simplifier",
+            "sonnet",
+            "Complexity auditor — check if your proposed approach is "
+            "over-engineered or if a simpler alternative exists.  Returns "
+            "per-item verdicts: lean (fine) / watch (justified) / trim "
+            "(too complex).",
+        ),
+    ]:
+        parts: list[str] = []
+        crew = load_crew_prompt(name, project_root)
+        if crew:
+            parts.append(crew)
+        sections = get_sections_for_agent(name)
+        if sections:
+            parts.append("# Project Instructions\n" + sections)
+        prompt = "\n\n---\n\n".join(parts)
+
+        tool_config_entry = AGENT_TOOLS[name]
+        tools = tool_config_entry["serena"] if use_serena else tool_config_entry["fallback"]
+
+        agents[name] = AgentDefinition(
+            description=description,
+            prompt=prompt,
+            tools=list(tools),
+            model=model,
+        )
+
+    return agents

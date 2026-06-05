@@ -1,0 +1,234 @@
+"""Decomposed instruction sections from project standards.
+
+Each agent gets only the sections relevant to its role, instead of loading
+the full instruction set.
+
+PLACEHOLDER sections are customized during TejaForce installation based on
+the project's language, package structure, and spec files.
+"""
+
+from __future__ import annotations
+
+# ── Sections ─────────────────────────────────────────────────────────────────
+
+# PLACEHOLDER: Updated during installation with project-specific spec files.
+KNOWLEDGE_ANCHORING = """\
+## Knowledge Anchoring
+The following spec files are **pre-loaded in your system prompt** above.
+Do NOT re-read them — refer to the pre-loaded content directly.
+- `.claude/spec/SPEC.md` — canonical project aims, architecture, constraints
+- `.claude/spec/TODO.md` — tracked work items and phasing
+- `.claude/spec/FINDINGS.md` — empirical discoveries
+- `.claude/spec/DATA_CONTRACTS.yaml` — data-product producer/consumer contracts and physics conventions
+
+If you need to check whether a spec file has been modified during this build,
+use `git diff` on the file instead of re-reading it.
+"""
+
+SPEC_TODO_AWARENESS = """\
+## Spec/TODO Awareness
+- The pipeline uses tags to track documentation impact: `[→ spec]`, `[→ docs]`,
+  `[housekeeping]`, `[research]`.
+- Work items live in `.claude/spec/TODO.md` (generated from `todo.d/` fragments).
+- **Ownership split**: Inspector owns the accuracy of `SPEC.md` and
+  `DATA_CONTRACTS.yaml` as checkable invariants — if the spec claims
+  something the code doesn't honour (or vice versa), Inspector flags it as a
+  finding. Librarian owns sync — propagating the spec's story to downstream
+  doc surfaces (Sphinx/RST, READMEs, toctree). Do NOT adjudicate spec accuracy or
+  edit canonical surfaces yourself.
+- When your work completes a TODO item or introduces spec-code divergence,
+  note it in your output so Inspector and Librarian can pick it up.
+- Do NOT write to TODO.md, COMPLETED.md, SPEC.md, or CHANGELOG.md yourself.
+  Write fragments (see SPEC_TODO_WORKFLOW) when your role is Librarian.
+"""
+
+# PLACEHOLDER: Updated during installation with project-specific layer paths.
+SPEC_TODO_WORKFLOW = """\
+## Spec/TODO Workflow (fragment-based)
+- Before edits that modify behavior in the source package, identify affected layer(s).
+- Key layers: cogwheel/data.py (event strain + ASDs), cogwheel/waveform.py + cogwheel/waveform_models/ (waveform generation), cogwheel/likelihood/ (CBC + relative-binning + marginalized likelihoods), cogwheel/likelihood/marginalization/ (coherent-score extrinsic marginalization, numba), cogwheel/prior.py + cogwheel/gw_prior/ (priors + sampled<->standard coordinate transforms), cogwheel/posterior.py (Prior+Likelihood+folding), cogwheel/sampling.py (dynesty/nautilus/zeus/PyMultiNest), cogwheel/postprocessing.py (diagnostics)
+- Full workflow (spec bump, changelog, doc updates) required for:
+  new source modules, new pipeline steps, changed public interfaces,
+  new core logic.
+- Track work: create/edit fragments in `.claude/spec/todo.d/`.
+- Tags: `[→ spec]`, `[→ docs]`, `[housekeeping]`.
+- On completion: delete the `todo.d/` fragment, create a fragment in
+  `.claude/spec/completed.d/<date>_<slug>.md` (frontmatter: date, section).
+  Update tagged docs. For `[→ spec]`: create a fragment in
+  `.claude/spec/spec_changelog.d/<date>_<slug>.md` with
+  `bump: patch|minor|major` in frontmatter. Do NOT edit `spec_version`
+  in SPEC.md directly — the render script derives it.
+- DATA_CONTRACTS.yaml changes: create a fragment in
+  `.claude/spec/contracts_changelog.d/<date>_<slug>.md` with `bump:` in
+  frontmatter. Do NOT edit `schema_version` directly.
+- CHANGELOG.md entries: create a fragment in `changelog.d/<date>_<slug>.md`
+  with `date:` in frontmatter.
+- After writing any fragments: run `python scripts/render_fragments.py`.
+"""
+
+# PLACEHOLDER: Updated during installation with project-specific import examples.
+IMPORT_CONVENTION = """\
+## Import Convention
+Use explicit layer paths:
+  from cogwheel import data, waveform, posterior, sampling, gw_utils, utils
+  from cogwheel.likelihood import RelativeBinningLikelihood, MarginalizedExtrinsicLikelihood
+  from cogwheel.gw_prior import IASPrior, LVCPrior
+  from cogwheel.prior import Prior, CombinedPrior
+No cross-layer imports except through each layer's public interface.
+"""
+
+DOCS_REBUILD_RULE = """\
+## Docs Rebuild Rule
+cogwheel uses Sphinx (sources under `docs/source/`, config `docs/source/conf.py`,
+built on Read the Docs). Whenever any file under `docs/source/` is edited — or a
+docstring that the API docs surface changes — rebuild the docs to confirm they
+still build cleanly before finishing:
+  `/Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python -m sphinx -b html docs/source docs/build`
+(run from the repo root; `docs/build/` is gitignored).
+"""
+
+CHANGELOG_INVARIANT = """\
+## CHANGELOG.md Invariant (fragment-based)
+- CHANGELOG.md is generated by `scripts/render_fragments.py` — do not edit directly.
+- To add an entry: create `changelog.d/<date>_<slug>.md` with frontmatter
+  `date: YYYY-MM-DD`. Body is the entry content (### heading + prose).
+  Run `python scripts/render_fragments.py` to regenerate CHANGELOG.md.
+- Advisory block ("When something breaks after a git pull, look here first")
+  and date grouping are enforced by the render script.
+"""
+
+SERENA_TOOLING = """\
+## Serena Tooling Preference
+
+**Primary tools** — use Serena MCP tools for all code operations:
+- Reading a file: `mcp__serena__read_file` instead of `Read`.
+- Reading a function/class body: `mcp__serena__find_symbol(..., include_body=True)`.
+- Whole-symbol edits: `mcp__serena__replace_symbol_body`.
+- Sub-symbol edits: `mcp__serena__replace_content`.
+- Cross-codebase renames: `mcp__serena__rename_symbol`.
+- Finding callers: `mcp__serena__find_referencing_symbols` + cross-check with \
+`mcp__serena__search_for_pattern`.
+- File orientation: `mcp__serena__get_symbols_overview` before `read_file`.
+- Pattern search: `mcp__serena__search_for_pattern`.
+- Shell commands: `mcp__serena__execute_shell_command` instead of `Bash`.
+- Creating files: `mcp__serena__create_text_file` instead of `Write`.
+
+## Sequential Serena Calls (Hard Requirement)
+All Serena MCP tool calls must be made one at a time, never in parallel.
+Built-in tool calls (Read, Grep, Glob, Bash) may still be parallelised.
+
+**Fallback rule** — if a Serena tool call fails:
+1. Switch immediately to the equivalent built-in tool and continue.
+2. Note the fallback in your change report.
+"""
+
+INSERTION_SAFETY = """\
+## Insertion Safety
+`find_symbol(...).end_line` is unreliable (LSP truncates at early returns).
+1. Before every `insert_at_line`: read ~5 lines before AND after the target.
+2. After every mid-file insertion: search for displaced/duplicate fragments.
+3. Line numbers: `insert_at_line`, `delete_lines`, `replace_lines` all use
+   **0-based** line numbers matching `find_symbol` body_location.
+"""
+
+EXECUTABLE_ARTIFACT_VERIFICATION = """\
+## Executable Artifact Verification
+- Any new executable artifact (notebook, script, test file) MUST be smoke-tested.
+  - Test files: run with the project's test framework
+  - Scripts: `--help` or minimal invocation
+- API calls MUST be verified against actual function signatures using
+  `find_symbol(include_body=True)` before writing the call.
+"""
+
+
+def _get_python_path_section() -> str:
+    """Generate the PYTHON_PATH section with the current interpreter path."""
+    import sys
+    python_path = sys.executable
+    return (
+        f"## Python Path\n"
+        f"Always use the full Python path for shell commands:\n"
+        f"  `{python_path} <script>`\n"
+        f"The Serena MCP server's `uv` may prepend its own Python to PATH.\n"
+        f"Using the full path avoids this.\n"
+    )
+
+
+PYTHON_PATH = _get_python_path_section()
+
+
+# ── Per-agent section mapping ────────────────────────────────────────────────
+
+AGENT_SECTIONS: dict[str, list[str]] = {
+    "architect": [
+        "KNOWLEDGE_ANCHORING",
+        "SERENA_TOOLING",
+        "IMPORT_CONVENTION",
+    ],
+    "simplifier": [
+        "SERENA_TOOLING",
+    ],
+    "coder": [
+        "KNOWLEDGE_ANCHORING",
+        "SPEC_TODO_AWARENESS",
+        "IMPORT_CONVENTION",
+        "SERENA_TOOLING",
+        "INSERTION_SAFETY",
+        "PYTHON_PATH",
+        "EXECUTABLE_ARTIFACT_VERIFICATION",
+    ],
+    "foreman_lite": [
+        "SPEC_TODO_AWARENESS",
+        "IMPORT_CONVENTION",
+        "SERENA_TOOLING",
+        "PYTHON_PATH",
+        "EXECUTABLE_ARTIFACT_VERIFICATION",
+    ],
+    "tidier": [
+        "SERENA_TOOLING",
+        "INSERTION_SAFETY",
+        "IMPORT_CONVENTION",
+    ],
+    "test_dev": [
+        "SERENA_TOOLING",
+        "PYTHON_PATH",
+        "EXECUTABLE_ARTIFACT_VERIFICATION",
+    ],
+    "inspector": [
+        "KNOWLEDGE_ANCHORING",
+        "SPEC_TODO_AWARENESS",
+        "IMPORT_CONVENTION",
+        "SERENA_TOOLING",
+        "PYTHON_PATH",
+    ],
+    "librarian": [
+        "KNOWLEDGE_ANCHORING",
+        "SPEC_TODO_WORKFLOW",
+        "SERENA_TOOLING",
+        "DOCS_REBUILD_RULE",
+        "CHANGELOG_INVARIANT",
+    ],
+    "dreamer": [
+        "SERENA_TOOLING",
+    ],
+}
+
+ALL_SECTIONS: dict[str, str] = {
+    "KNOWLEDGE_ANCHORING": KNOWLEDGE_ANCHORING,
+    "SPEC_TODO_AWARENESS": SPEC_TODO_AWARENESS,
+    "SPEC_TODO_WORKFLOW": SPEC_TODO_WORKFLOW,
+    "IMPORT_CONVENTION": IMPORT_CONVENTION,
+    "DOCS_REBUILD_RULE": DOCS_REBUILD_RULE,
+    "CHANGELOG_INVARIANT": CHANGELOG_INVARIANT,
+    "SERENA_TOOLING": SERENA_TOOLING,
+    "INSERTION_SAFETY": INSERTION_SAFETY,
+    "PYTHON_PATH": PYTHON_PATH,
+    "EXECUTABLE_ARTIFACT_VERIFICATION": EXECUTABLE_ARTIFACT_VERIFICATION,
+}
+
+
+def get_sections_for_agent(agent_name: str) -> str:
+    """Return the concatenated instruction sections for a given agent."""
+    section_names = AGENT_SECTIONS.get(agent_name, [])
+    parts = [ALL_SECTIONS[name] for name in section_names if name in ALL_SECTIONS]
+    return "\n".join(parts)

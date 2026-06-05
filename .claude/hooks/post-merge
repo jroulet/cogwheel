@@ -1,0 +1,124 @@
+#!/bin/sh
+# Post-merge hook: render fragment directories into canonical files and
+# refresh derived docs after every `git merge` (including `git pull`).
+#
+# This ensures fragments from both branches are assembled deterministically
+# and that canonical files reflect the merged fragment state.
+#
+# Adapted from gw_detection_ias .claude/hooks/post-merge (06686ff, 2b8327b)
+# with skill-generic generalizations:
+#   - .agent/spec/ -> .claude/spec/
+#   - GW-specific regen scripts replaced by optional sync_derived_docs.py
+#   - Python resolution follows the same PLACEHOLDER pattern as post-commit
+
+# Skip non-fast-forward merges with conflicts in progress.
+# (The hook only fires on successful merges, but be defensive.)
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# PLACEHOLDER: resolve Python interpreter for your project.
+# For conda: PYTHON="$(conda info --base)/envs/cogwheel_310/bin/python"
+# For venv: PYTHON="$REPO_ROOT/.venv/bin/python"
+# Fallback:
+PYTHON="/Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python"
+if ! command -v "$PYTHON" >/dev/null 2>&1; then
+    PYTHON="python3"
+fi
+
+# Use the worktree-aware git dir.
+GIT_DIR_REAL="$(git rev-parse --git-dir)"
+case "$GIT_DIR_REAL" in
+    /*) ;;
+    *) GIT_DIR_REAL="$REPO_ROOT/$GIT_DIR_REAL" ;;
+esac
+
+# -----------------------------------------------------------------------
+# Task 0: Memory sharing filter — revert blacklisted paths to local version
+# -----------------------------------------------------------------------
+# Reads .claude/memory-blacklist.txt. Only fires on three-way merges
+# (fast-forward pulls on the same branch pass through untouched).
+# Soft blacklist is skipped when MIND_MELD=1 is set (opt-in mind-meld merge);
+# hard blacklist (per-machine state like sync_issues.json) is always enforced.
+FILTER_SCRIPT="$REPO_ROOT/scripts/apply_memory_filter.sh"
+if [ -f "$FILTER_SCRIPT" ]; then
+    bash "$FILTER_SCRIPT" || true
+fi
+
+# -----------------------------------------------------------------------
+# Task 0b: LLM-assisted semantic merge for agent memories (mind-meld)
+# -----------------------------------------------------------------------
+# Fires only when MIND_MELD=1 (set by `git mind-meld <branch>` wrapper).
+# The triage mode of mind_meld.sh scans soft-blacklisted memories that
+# were auto-merged and semantically re-merges flagged ones via the
+# /merge-memory skill. Amends the merge commit with the merged output.
+# Opt out by setting MIND_MELD_LLM=0 (defaults on).
+MIND_MELD_SCRIPT="$REPO_ROOT/scripts/mind_meld.sh"
+if [ -f "$MIND_MELD_SCRIPT" ] \
+   && [ "${MIND_MELD:-0}" = "1" ] \
+   && [ "${MIND_MELD_LLM:-1}" = "1" ]; then
+    bash "$MIND_MELD_SCRIPT" triage || true
+fi
+
+# -----------------------------------------------------------------------
+# Task 1: Render canonical files from fragment directories
+# -----------------------------------------------------------------------
+# Foreground — fast (typically <1s), and the user expects the post-merge
+# working tree to reflect up-to-date canonical files. Auto-stages the
+# rendered files so the next commit (including any commit amending this
+# merge) picks them up without manual `git add`.
+RENDER_SCRIPT="$REPO_ROOT/scripts/render_fragments.py"
+if [ -f "$RENDER_SCRIPT" ] && command -v "$PYTHON" >/dev/null 2>&1; then
+    "$PYTHON" "$RENDER_SCRIPT" 2>/dev/null || true
+    # Only auto-stage files that actually changed AND already exist in
+    # the worktree (avoids `git add`ing paths the render script didn't
+    # create — e.g. skill installs with only a subset of surfaces enabled).
+    for f in \
+        CHANGELOG.md \
+        .claude/spec/SPEC_CHANGELOG.md \
+        .claude/spec/DATA_CONTRACTS_CHANGELOG.md \
+        .claude/spec/COMPLETED.md \
+        .claude/spec/TODO.md \
+        .claude/spec/SPEC.md \
+        .claude/spec/DATA_CONTRACTS.yaml \
+    ; do
+        if [ -f "$REPO_ROOT/$f" ]; then
+            git add "$f" 2>/dev/null || true
+        fi
+    done
+fi
+
+# -----------------------------------------------------------------------
+# Task 2: Deterministic doc sync (if sync script exists)
+# -----------------------------------------------------------------------
+# Background + PID lock + double-fork detach: this script can be slow
+# (~5-15s); backgrounding prevents `git pull` from waiting on inherited
+# stdout/stderr FDs (which caused "press enter to get a prompt" before
+# the double-fork pattern was introduced in gw_detection_ias 97218db).
+SYNC_SCRIPT="$REPO_ROOT/scripts/sync_derived_docs.py"
+if [ -f "$SYNC_SCRIPT" ] && command -v "$PYTHON" >/dev/null 2>&1; then
+    SYNC_LOCK="$GIT_DIR_REAL/.doc-sync-regen.lock"
+    SYNC_LOG="$GIT_DIR_REAL/.doc-sync-regen.log"
+
+    _SKIP_SYNC=0
+    if [ -f "$SYNC_LOCK" ]; then
+        OLD_PID=$(cat "$SYNC_LOCK" 2>/dev/null)
+        if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+            _SKIP_SYNC=1
+        else
+            rm -f "$SYNC_LOCK"
+        fi
+    fi
+
+    if [ "$_SKIP_SYNC" -eq 0 ]; then
+        (
+            (
+                echo $$ > "$SYNC_LOCK"
+                trap 'rm -f "$SYNC_LOCK"' EXIT INT TERM
+                cd "$REPO_ROOT" || exit 1
+                "$PYTHON" "$SYNC_SCRIPT" > "$SYNC_LOG" 2>&1
+            ) </dev/null >/dev/null 2>&1 &
+        ) </dev/null >/dev/null 2>&1
+    fi
+fi
+
+exit 0

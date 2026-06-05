@@ -1,0 +1,52 @@
+# Memory sharing blacklist.
+# Lists paths whose changes are NOT propagated across collaborators by default.
+# Used by:
+#   - scripts/apply_memory_filter.sh (post-merge hook): reverts these paths to
+#     the local version after a merge unless MIND_MELD=1 is set.
+#   - scripts/mind_meld.sh: drives LLM semantic merge on [soft] paths when
+#     the user invokes `git mind-meld`.
+#
+# Two tiers:
+#   [soft]  — blacklisted by default; MIND_MELD=1 allows them to merge normally
+#   [hard]  — always filtered, regardless of MIND_MELD (per-machine state that
+#             has no shared meaning)
+#
+# Paths are git-relative. Trailing / indicates a directory (all contents).
+# Lines starting with # are comments. Blank lines ignored.
+#
+# Customize this file for your project: add/remove memory paths to match
+# which Serena memories your agent set uses.
+
+[soft]
+# Per-agent accumulated knowledge + session observations.
+# Each collaborator's agent workflow diverges; sharing is the exception.
+# A colleague invoking `git mind-meld <branch>` opts in to LLM-driven
+# semantic merge of these; plain `git pull`/`git merge` reverts them.
+.serena/memories/architect_knowledge.md
+.serena/memories/architect_short_term.md
+.serena/memories/coder_knowledge.md
+.serena/memories/coder_short_term.md
+.serena/memories/foreman_knowledge.md
+.serena/memories/foreman_short_term.md
+.serena/memories/inspector_knowledge.md
+.serena/memories/inspector_short_term.md
+.serena/memories/librarian_knowledge.md
+.serena/memories/librarian_short_term.md
+.serena/memories/tidy_knowledge.md
+.serena/memories/tidy_short_term.md
+.serena/memories/test_dev_knowledge.md
+.serena/memories/test_dev_short_term.md
+
+# Claude Code per-project auto-memories (personal feedback/project notes).
+.serena/memories/claude_memory/
+
+[hard]
+# Per-commit Librarian trigger file (machine-specific accumulation of pending
+# syncs). Never shared across machines.
+.claude/sync_issues.json
+
+# Agent state files — record last commit where each agent was invoked locally.
+# These track local workflow state only. --with-agentic bootstrap wipes this
+# on first clone so collaborators start fresh. The filter catches any
+# cross-branch merges that would otherwise drag someone else's state in.
+.claude/agent_state/

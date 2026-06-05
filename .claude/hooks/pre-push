@@ -1,0 +1,40 @@
+#!/bin/sh
+# Local safety guard: block pushes that update main/master.
+# Override: set ALLOW_MAIN=1 in the environment to bypass,
+# or use: ALLOW_MAIN=1 git push
+
+remote_name="$1"
+remote_url="$2"
+
+if [ "${ALLOW_MAIN:-0}" = "1" ]; then
+    exit 0
+fi
+
+current_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+case "$current_branch" in
+  main|master)
+    echo "ERROR: Push blocked -- you are on local branch '$current_branch'."
+    echo "  This guard prevents accidental agent pushes to main/master."
+    echo "  Options:"
+    echo "    ALLOW_MAIN=1 git push  # one-off bypass"
+    echo "    git push --no-verify   # skip all hooks"
+    exit 1
+    ;;
+esac
+
+# Read lines: <local-ref> <local-sha> <remote-ref> <remote-sha>
+while read local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      target_branch="${remote_ref#refs/heads/}"
+      echo "ERROR: Push blocked -- target is '$target_branch' on $remote_name ($remote_url)."
+      echo "  This guard prevents accidental agent pushes to main/master."
+      echo "  Options:"
+      echo "    ALLOW_MAIN=1 git push  # one-off bypass"
+      echo "    git push --no-verify   # skip all hooks"
+      exit 1
+      ;;
+  esac
+done
+
+exit 0

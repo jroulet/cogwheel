@@ -1,0 +1,169 @@
+#!/bin/sh
+# Post-commit hook: background maintenance after each commit.
+#
+# Two independent background tasks:
+#   1. Deterministic doc sync (if sync_derived_docs.py exists, ~5-15s)
+#   2. Librarian doc-sync agent (async, via Claude Code CLI)
+#
+# Neither blocks the user — both detach into the background.
+#
+# Lifecycle (Librarian):
+#   commit N (doc-relevant)   →  post-commit writes .claude/sync_issues.json
+#                              →  launches `claude -p "/doc-sync"` in bg
+#                              →  Librarian reads issues, fixes docs, commits
+#                              →  follow-up commit: "docs(librarian): sync after <sha>"
+#                              →  that commit's post-commit is a no-op (lockfile guard)
+#
+# Concurrency:
+#   Each task has its own PID lockfile preventing concurrent runs.
+
+# Skip merge commits (merged commits triggered their own post-commit).
+PARENT_COUNT=$(git rev-list --parents -n 1 HEAD 2>/dev/null | wc -w)
+if [ "$PARENT_COUNT" -gt 2 ]; then
+    exit 0
+fi
+
+# --- Shared setup ---
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# PLACEHOLDER: resolve Python interpreter for your project.
+# For conda: PYTHON="$(conda info --base)/envs/cogwheel_310/bin/python"
+# For venv: PYTHON="$REPO_ROOT/.venv/bin/python"
+# Fallback:
+PYTHON="/Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python"
+if ! command -v "$PYTHON" >/dev/null 2>&1; then
+    PYTHON="python3"
+fi
+
+# Use the worktree-aware git dir.
+GIT_DIR_REAL="$(git rev-parse --git-dir)"
+case "$GIT_DIR_REAL" in
+    /*) ;;
+    *) GIT_DIR_REAL="$REPO_ROOT/$GIT_DIR_REAL" ;;
+esac
+
+# Collect changed files once (used by all tasks below).
+LAST_COMMIT_FILES=$(git show --name-only --format= HEAD 2>/dev/null || true)
+
+# Note: fragment rendering (render_fragments.py) moved to pre-commit so
+# the fragment and its rendered canonical update land in the same commit
+# ("one commit = one unit of change"). See .claude/hooks/pre-commit.
+
+# -----------------------------------------------------------------------
+# Task 1: Deterministic doc sync (if sync script exists)
+# -----------------------------------------------------------------------
+SYNC_SCRIPT="scripts/sync_derived_docs.py"
+if [ -f "$SYNC_SCRIPT" ] && command -v "$PYTHON" >/dev/null 2>&1; then
+    SYNC_LOCK="$GIT_DIR_REAL/.doc-sync-regen.lock"
+    SYNC_LOG="$GIT_DIR_REAL/.doc-sync-regen.log"
+
+    _SKIP_SYNC=0
+    if [ -f "$SYNC_LOCK" ]; then
+        OLD_PID=$(cat "$SYNC_LOCK" 2>/dev/null)
+        if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+            _SKIP_SYNC=1
+        else
+            rm -f "$SYNC_LOCK"
+        fi
+    fi
+
+    if [ "$_SKIP_SYNC" -eq 0 ]; then
+        # Double-fork detach: outer subshell starts and exits immediately;
+        # inner `&` orphans the Python to init. Prevents `git commit` /
+        # `git pull` from waiting on inherited stdout/stderr FDs (which
+        # caused the "press enter to get a prompt" UX bug even with `disown`).
+        (
+            (
+                echo $$ > "$SYNC_LOCK"
+                trap 'rm -f "$SYNC_LOCK"' EXIT INT TERM
+                cd "$REPO_ROOT" || exit 1
+                "$PYTHON" "$SYNC_SCRIPT" > "$SYNC_LOG" 2>&1
+            ) </dev/null >/dev/null 2>&1 &
+        ) </dev/null >/dev/null 2>&1
+    fi
+fi
+
+# -----------------------------------------------------------------------
+# Task 2: Librarian auto-sync (async doc maintenance after code commits)
+# -----------------------------------------------------------------------
+
+# Guard 1: Skip during full-pipeline SDK builds (orchestrator runs its own
+# Librarian). Fast-path builds (SDK_FAST_PATH=1) do NOT run a Librarian
+# step, so the post-commit hook should fire for those.
+if [ -n "${SDK_BUILD_ACTIVE:-}" ] && [ -z "${SDK_FAST_PATH:-}" ]; then
+    exit 0
+fi
+
+# Guard 2: Only trigger if doc-relevant files changed in this commit.
+# PLACEHOLDER: update the pattern to match your project's doc-relevant paths.
+# Default: any .py file, docs/, .claude/spec/, CHANGELOG.md, README.md
+DOC_RELEVANT=$(echo "$LAST_COMMIT_FILES" | grep -E \
+    '\.py$|^docs/|^\.claude/spec/|^CHANGELOG\.md|README\.md$' \
+    || true)
+if [ -z "$DOC_RELEVANT" ]; then
+    exit 0
+fi
+
+# Guard 3: PID lockfile (prevent concurrent/recursive Librarian runs).
+LIBRARIAN_LOCK="$GIT_DIR_REAL/.librarian-sync.lock"
+LIBRARIAN_LOG="$GIT_DIR_REAL/.librarian-sync.log"
+if [ -f "$LIBRARIAN_LOCK" ]; then
+    OLD_PID=$(cat "$LIBRARIAN_LOCK" 2>/dev/null)
+    if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+        exit 0  # previous Librarian still running
+    fi
+    rm -f "$LIBRARIAN_LOCK"
+fi
+
+# Accumulate pending commits for the Librarian.
+# Each post-commit APPENDS to the pending list (not overwrites) so SHAs
+# aren't lost if the Librarian doesn't run between commits. The Librarian
+# clears the file after processing.
+COMMIT_SHA=$(git rev-parse HEAD)
+ISSUES_FILE="$REPO_ROOT/.claude/sync_issues.json"
+
+# Build this commit's entry as a JSON object
+THIS_ENTRY=$(jq -n \
+    --arg sha "$COMMIT_SHA" \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson files "$(echo "$LAST_COMMIT_FILES" | grep -v '^$' | jq -R . | jq -s .)" \
+    '{commit: $sha, timestamp: $ts, changed_files: $files}')
+
+# Append to existing pending list, or create new
+if [ -f "$ISSUES_FILE" ] && jq -e '.pending_commits' "$ISSUES_FILE" >/dev/null 2>&1; then
+    jq --argjson entry "$THIS_ENTRY" '.pending_commits += [$entry]' "$ISSUES_FILE" > "$ISSUES_FILE.tmp" \
+        && mv "$ISSUES_FILE.tmp" "$ISSUES_FILE"
+else
+    jq -n --argjson entry "$THIS_ENTRY" \
+        '{trigger: "post-commit", pending_commits: [$entry]}' > "$ISSUES_FILE"
+fi
+
+# If inside a Claude Code session, DON'T launch a new claude process
+# (nesting crashes). Instead, print a message for the session agent —
+# the commit output IS visible to the agent. The pre-commit hook's
+# backlog guard blocks at >5 pending commits so this message can be
+# ignored for a handful of commits without silently dropping work.
+#
+# If outside Claude Code, launch the Librarian via CLI in the background.
+PENDING_COUNT=$(jq '.pending_commits | length' "$ISSUES_FILE" 2>/dev/null || echo 1)
+if [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]; then
+    echo ""
+    echo "==> Librarian sync pending ($PENDING_COUNT commit(s) queued)"
+    echo "==> Run: /doc-sync --post-commit"
+elif command -v claude >/dev/null 2>&1; then
+    # Double-fork detach — see Task 1 comment above.
+    (
+        (
+            echo $$ > "$LIBRARIAN_LOCK"
+            trap 'rm -f "$LIBRARIAN_LOCK"' EXIT INT TERM
+            cd "$REPO_ROOT" || exit 1
+            claude -p "/doc-sync --post-commit" \
+                --model claude-sonnet-4-6 \
+                --print \
+                > "$LIBRARIAN_LOG" 2>&1
+        ) </dev/null >/dev/null 2>&1 &
+    ) </dev/null >/dev/null 2>&1
+fi
+
+exit 0

@@ -1,0 +1,92 @@
+---
+spec_version: 0.1.0
+last_updated: 2026-06-05
+---
+
+# cogwheel — Project Specification
+
+## Mission
+
+cogwheel (PyPI/conda package `cogwheel-pe`, import name `cogwheel`) is a scientific
+Python library for **Bayesian parameter estimation of gravitational-wave sources**
+from compact binary coalescences (black-hole / neutron-star mergers). Given
+conditioned detector strain data, it infers a posterior over source parameters
+(component masses, spins, tidal deformabilities, sky location, distance,
+orientation, coalescence time/phase).
+
+Three signature contributions:
+1. **Sampled vs standard coordinates** — a custom sampling coordinate system that
+   separates reparameterized "sampled" parameters from physical "standard"
+   parameters to reduce correlations.
+2. **Folding** — an algorithm that reduces posterior multimodality by sampling
+   folded dimensions over half their range and summing reflected images.
+3. **Relative binning (heterodyning) + marginalization** — a fast likelihood that
+   interpolates the ratio of a trial waveform to a reference over coarse frequency
+   bins (generalized to higher modes), plus analytic/semi-analytic marginalization
+   over distance and over all extrinsic parameters (the "coherent score").
+
+## Architecture
+
+cogwheel is a layered scientific package. `cogwheel/__init__.py` sets version
+metadata only; functionality lives in submodules.
+
+### Data flow
+
+```
+EventData (strain + ASD)  ->  WaveformGenerator  ->  Likelihood
+                                                        |
+                  Prior (sampled<->standard) ----------> Posterior (folding) -> Sampler -> samples.feather -> postprocessing
+```
+
+### Layers / modules
+
+| Layer | Purpose | Key modules |
+|-------|---------|-------------|
+| Data acquisition & conditioning | Download public GW strain (GWOSC/GWpy), condition it, store ASDs and event metadata, build `EventData` (incl. Gaussian-noise and injected-signal events). | `cogwheel/data.py`, `cogwheel/data/events_metadata.csv`, `cogwheel/data/example_asds/` |
+| Waveform generation | Frequency-domain waveforms via LALSimulation; project onto detectors; register approximants. | `cogwheel/waveform.py`, `cogwheel/waveform_models/__init__.py`, `cogwheel/waveform_models/xode.py` |
+| Likelihood | CBC likelihood, fast relative-binning likelihood (with higher modes), marginalized variants. | `cogwheel/likelihood/likelihood.py`, `relative_binning.py`, `marginalized_distance.py`, `marginalized_distance_phase.py`, `marginalized_extrinsic.py`, `marginalized_extrinsic_qas.py`, `reference_waveform_finder.py` |
+| Extrinsic marginalization (coherent score) | Marginalize over extrinsic params from matched-filter timeseries; sky dictionary + lookup tables; numba-accelerated. | `cogwheel/likelihood/marginalization/base.py`, `coherent_score_hm.py`, `coherent_score_qas.py`, `skydict.py`, `lookup_table.py` |
+| Priors & coordinates | Abstract `Prior` base with sampled<->standard transforms; composable subpriors; concrete GW priors; PN-inspired QMC proposals. | `cogwheel/prior.py`, `cogwheel/prior_ratio.py`, `cogwheel/pn_coordinates.py`, `cogwheel/gw_prior/combined.py`, `mass.py`, `spin.py`, `extrinsic.py`, `tides.py`, `pn.py`, `twosquircle.py`, `miscellaneous.py` |
+| Posterior & sampling | Combine prior + likelihood into `Posterior` (with folding); find reference solution; sample via dynesty/nautilus/zeus/PyMultiNest. | `cogwheel/posterior.py`, `cogwheel/sampling.py`, `cogwheel/postprocessing.py` |
+| Utilities & physics | JSON (de)serialization mixin, caching, detector geometry/response, sky-loc angles, cosmology. | `cogwheel/utils.py`, `cogwheel/gw_utils.py`, `cogwheel/skyloc_angles.py`, `cogwheel/cosmology.py` |
+| Plotting | Corner plots with GW-specific LaTeX labels. | `cogwheel/plotting.py`, `cogwheel/gw_plotting.py` |
+| Validation | End-to-end injection-recovery pipeline (PP-plots / coverage). | `cogwheel/validation/generate_injections.py`, `inference.py`, `analyze.py`, `injection_prior.py`, `example/config.py` |
+
+### Key abstractions
+
+- **`EventData`** (`data.py`) — strain + ASD for an event.
+- **`WaveformGenerator`** (`waveform.py`) — wraps LALSimulation approximants
+  (IMRPhenomXPHM / XAS / XODE). Note: uses IMRPhenomXP, *not* Pv2, due to
+  phase-convention differences (LIGO-T1500602).
+- **`Likelihood`** classes (`likelihood/`) — `CBCLikelihood`,
+  `RelativeBinningLikelihood`, `Marginalized*`.
+- **`Prior`** classes (`prior.py`, `gw_prior/`) — composable subpriors with
+  sampled<->standard transforms, registered in a `prior_registry`.
+- **`Posterior`** (`posterior.py`) — pairs a prior + likelihood, supports folding.
+- **`Sampler`** subclasses (`sampling.py`) — wrap dynesty/nautilus/zeus/PyMultiNest;
+  write `samples.feather` to run directories.
+- Most stateful objects subclass `utils.JSONMixin` for JSON (de)serialization.
+
+### External interfaces & dependencies
+
+numpy, scipy, pandas (>=2.0), numba, lalsuite (lal, lalsimulation), gwpy, gwosc,
+astropy, matplotlib, pyarrow; samplers dynesty, nautilus-sampler, zeus-mcmc,
+pymultinest (optional). Docs: Sphinx + numpydoc + furo (`docs/source/`, Read the
+Docs). Packaging: setuptools + setuptools_scm, GPL-3.0-or-later, Python >=3.9.
+
+### Conventions
+
+- Units: frequencies Hz, times GPS seconds, masses solar masses, distances Mpc,
+  angles radians.
+- Tests live in `cogwheel/tests/` (stdlib `unittest`), not a top-level `tests/`.
+- `largedata/` (top-level) holds large run outputs, injection HDF5, and detector
+  `.gwf` frame files used by tutorials — not part of the installed package.
+- Numerically hot paths (relative binning, coherent-score marginalization) use
+  numba and lookup tables and must remain numerically accurate.
+
+## Constraints
+
+- Numerical accuracy is paramount: relative-binning and marginalized likelihoods
+  must agree with exact/brute-force references within tolerance.
+- Phase/spin conventions must be respected across waveform and coordinate code.
+- numba-accelerated code must stay numba-compatible.

@@ -1,0 +1,59 @@
+# data_registry.yaml — Inventory of data files and their locations.
+#
+# Unlike DATA_CONTRACTS.yaml (which describes the *schema* of data products —
+# who produces/consumes them in code), this file describes *actual data files
+# on disk* — where they live, what format, who created them.
+#
+# IMPORTANT: This file is only useful if the code actually uses it.
+# The companion utility `scripts/data_registry.py` provides path resolution:
+#
+#   from data_registry import get_path
+#   path = get_path("training_data", split="train", format="parquet")
+#
+# Do NOT maintain this file if the code hardcodes paths instead. Either
+# migrate hardcoded paths to use the registry, or don't install this.
+#
+# Version format: MAJOR.MINOR.PATCH
+#   MAJOR: path convention restructuring
+#   MINOR: new data entries or storage locations
+#   PATCH: path corrections, metadata fixes
+
+schema_version: "1.0.0"
+
+# ── Storage roots ────────────────────────────────────────────────────────
+# Define named storage locations. Code references roots by name, not path.
+# Different machines override roots via environment variables or .env files.
+
+storage_roots:
+  # Example:
+  # local:
+  #   path: "./data"
+  #   description: "Local development data"
+  #   env_override: "PROJECT_DATA_ROOT"  # if set, overrides path
+  #
+  # cluster:
+  #   path: "/data/shared/project"
+  #   description: "Cluster shared storage"
+  #   env_override: "CLUSTER_DATA_ROOT"
+
+# ── Data entries ─────────────────────────────────────────────────────────
+# Each entry describes a data file or directory.
+
+entries: {}
+  # Example:
+  # training_data:
+  #   description: "Preprocessed training dataset"
+  #   storage_root: "local"
+  #   relative_path: "processed/train.parquet"
+  #   format: "parquet"
+  #   created_by: "scripts/preprocess.py"
+  #   schema_ref: "processed_data"  # references DATA_CONTRACTS.yaml artifact
+  #   notes: "Regenerate with: python scripts/preprocess.py --split train"
+  #
+  # model_weights:
+  #   description: "Trained model checkpoint"
+  #   storage_root: "local"
+  #   relative_path: "models/best_checkpoint.pt"
+  #   format: "pytorch"
+  #   created_by: "scripts/train.py"
+  #   notes: "~500MB; not checked into git"

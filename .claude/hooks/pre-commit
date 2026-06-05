@@ -1,0 +1,275 @@
+#!/bin/sh
+# TejaForce pre-commit hook: branch safety + spec/doc discipline.
+# Catches common mechanical misses — semantic checks stay in CLAUDE.md.
+#
+# Generalized from the mature GW pipeline hook. PLACEHOLDERs:
+#   cogwheel  — your source package directory (e.g., src/, lib/)
+#   /Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python  — full path to conda/venv Python interpreter
+
+# -----------------------------------------------------------------------
+# Branch safety: block commits on main/master
+# Override: ALLOW_MAIN=1 git commit ... (or git commit --no-verify)
+# -----------------------------------------------------------------------
+if [ "${ALLOW_MAIN:-0}" = "1" ]; then
+    : # skip branch check but still run spec discipline below
+else
+    current_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    case "$current_branch" in
+      main|master)
+        echo "ERROR: Commit blocked -- you are on '$current_branch'."
+        echo "  This guard prevents accidental agent commits on main/master."
+        echo "  Options:"
+        echo "    ALLOW_MAIN=1 git commit ...  # one-off inline bypass"
+        echo "    git commit --no-verify       # skip all hooks"
+        exit 1
+        ;;
+    esac
+fi
+
+# -----------------------------------------------------------------------
+# Librarian sync backlog guard
+# -----------------------------------------------------------------------
+# If too many commits have accumulated without a Librarian sync, block.
+# This prevents the agent from ignoring nag messages indefinitely.
+# PostToolUse nag notifications don't reliably surface in the agent's
+# context, so we enforce at pre-commit time where `echo` output IS visible.
+# Threshold: >5 pending commits = hard block, >2 = advisory.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SYNC_FILE="$REPO_ROOT/.claude/sync_issues.json"
+if [ -f "$SYNC_FILE" ] && command -v jq >/dev/null 2>&1; then
+    PENDING_N=$(jq '.pending_commits | length // 0' "$SYNC_FILE" 2>/dev/null || echo 0)
+    if [ "$PENDING_N" -gt 5 ]; then
+        echo "===== PRE-COMMIT: Librarian sync backlog too large ====="
+        echo "  $PENDING_N commits pending Librarian sync."
+        echo "  Run: /doc-sync --post-commit"
+        echo "  Or bypass with: git commit --no-verify"
+        echo "========================================================"
+        exit 1
+    elif [ "$PENDING_N" -gt 2 ]; then
+        echo "  [advisory] $PENDING_N commits pending Librarian sync -- consider running /doc-sync"
+    fi
+fi
+
+# -----------------------------------------------------------------------
+# Resolve Python interpreter (needed for render + sync_derived_docs below).
+# -----------------------------------------------------------------------
+PYTHON="/Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python"
+if ! command -v "$PYTHON" >/dev/null 2>&1; then
+    PYTHON="python3"
+fi
+
+# -----------------------------------------------------------------------
+# Render fragment directories into canonical files + auto-stage.
+# -----------------------------------------------------------------------
+# Rendering at pre-commit (not post-commit) keeps "one commit = one unit
+# of change": the fragment AND its rendered canonical update land in the
+# same commit instead of bleeding across two. Render is idempotent and
+# silent-skips any surface whose fragment directory doesn't exist, so
+# this is a no-op for installs that don't use fragments.
+RENDER_SCRIPT="scripts/render_fragments.py"
+if [ -f "$RENDER_SCRIPT" ] && command -v "$PYTHON" >/dev/null 2>&1; then
+    if ! "$PYTHON" "$RENDER_SCRIPT" >/dev/null 2>&1; then
+        echo "===== PRE-COMMIT: Fragment render failed ====="
+        echo "Fragments in *.d/ directories could not be assembled."
+        echo "Run manually: $PYTHON $RENDER_SCRIPT"
+        echo "Or bypass with: git commit --no-verify"
+        echo "=============================================="
+        exit 1
+    fi
+    # Stage the rendered canonical files so they ride with this commit.
+    # git add of an unchanged file is a no-op; safe to run every time.
+    # Missing files (surfaces not in use) produce a warning suppressed via 2>/dev/null.
+    git add CHANGELOG.md \
+            .claude/spec/SPEC_CHANGELOG.md \
+            .claude/spec/DATA_CONTRACTS_CHANGELOG.md \
+            .claude/spec/COMPLETED.md \
+            .claude/spec/TODO.md \
+            .claude/spec/SPEC.md \
+            .claude/spec/DATA_CONTRACTS.yaml \
+            2>/dev/null || true
+fi
+
+# -----------------------------------------------------------------------
+# Spec/doc discipline checks
+# -----------------------------------------------------------------------
+
+# STAGED is computed AFTER render+stage so rendered canonicals are included.
+STAGED=$(git diff --cached --name-only)
+STAGED_DIFF=$(git diff --cached)
+
+errors=""
+
+# Helper: _ver_bumped NEW OLD — true if NEW > OLD in semver order.
+# Strips quotes, handles missing values gracefully.
+_ver_bumped() {
+    # POSIX sh has no `local`; use prefixed plain variables instead.
+    _new=$(echo "$1" | tr -d '"' | tr -d "'")
+    _old=$(echo "$2" | tr -d '"' | tr -d "'")
+    [ -z "$_new" ] && return 1
+    [ -z "$_old" ] && return 0  # no old version -> any new version is a bump
+    [ "$_new" = "$_old" ] && return 1
+    [ "$(printf '%s\n' "$_new" "$_old" | sort -V | tail -1)" = "$_new" ]
+}
+
+# 1. TODO.md must never contain [x] items — they should be moved to COMPLETED.md
+if echo "$STAGED" | grep -q "TODO.md"; then
+    stale_done=$(git show :".claude/spec/TODO.md" 2>/dev/null | grep "\[x\] \*\*" || true)
+    if [ -n "$stale_done" ]; then
+        errors="$errors
+  * TODO.md contains [x] items. Remove them and move to COMPLETED.md."
+    fi
+fi
+
+# 2. If SPEC.md modified, require a spec changelog fragment.
+#    Version bumps are derived by render_fragments.py from fragment
+#    bump: fields — do NOT check spec_version directly.
+if echo "$STAGED" | grep -q "SPEC.md"; then
+    has_spec_frag=$(echo "$STAGED" | grep -c "spec_changelog.d/" || true)
+    has_spec_cl=$(echo "$STAGED" | grep -c "SPEC_CHANGELOG.md" || true)
+    if [ "$has_spec_frag" -eq 0 ] && [ "$has_spec_cl" -eq 0 ]; then
+        errors="$errors
+  * SPEC.md modified but no changelog evidence staged. Either:
+    - stage an edit to .claude/spec/SPEC_CHANGELOG.md (monolithic mode), OR
+    - create .claude/spec/spec_changelog.d/<date>_<slug>.md with bump: in frontmatter (fragment mode)."
+    fi
+fi
+
+# 3. If new source files added to the package dir, SPEC.md should also change
+new_pkg_files=$(echo "$STAGED" | grep '^cogwheel/.*\.py$' || true)
+if [ -n "$new_pkg_files" ]; then
+    for f in $new_pkg_files; do
+        if ! git cat-file -e HEAD:"$f" 2>/dev/null; then
+            if ! echo "$STAGED" | grep -q "SPEC.md"; then
+                errors="$errors
+  * New module $f added but SPEC.md not updated. Add it to the spec."
+                break
+            fi
+        fi
+    done
+fi
+
+# 4. If DATA_CONTRACTS.yaml modified, require a contracts changelog fragment.
+#    (only fires if the project has data contracts installed)
+if echo "$STAGED" | grep -q "DATA_CONTRACTS.yaml"; then
+    has_dc_frag=$(echo "$STAGED" | grep -c "contracts_changelog.d/" || true)
+    has_dc_cl=$(echo "$STAGED" | grep -c "DATA_CONTRACTS_CHANGELOG.md" || true)
+    if [ "$has_dc_frag" -eq 0 ] && [ "$has_dc_cl" -eq 0 ]; then
+        errors="$errors
+  * DATA_CONTRACTS.yaml modified but no changelog evidence staged. Either:
+    - stage an edit to .claude/spec/DATA_CONTRACTS_CHANGELOG.md (monolithic mode), OR
+    - create .claude/spec/contracts_changelog.d/<date>_<slug>.md with bump: in frontmatter (fragment mode)."
+    fi
+fi
+
+# 4b. If data_registry.yaml modified, require a schema_version bump in the diff.
+#     (registry has no changelog dir, so the version line itself is the evidence)
+if echo "$STAGED" | grep -q "data_registry.yaml"; then
+    bumped=$(git diff --cached -- .claude/spec/data_registry.yaml | grep -c '^+schema_version:' || true)
+    if [ "$bumped" -eq 0 ]; then
+        errors="$errors
+  * data_registry.yaml modified but schema_version not bumped. Update the
+    schema_version line (MAJOR.MINOR.PATCH) in .claude/spec/data_registry.yaml."
+    fi
+fi
+
+# 5. If docs/ files modified, check that site was rebuilt (if docs framework exists)
+if echo "$STAGED" | grep -q "^docs/"; then
+    # Look for common built-site indicators
+    for site_index in docs/site/index.html docs/mkdocs/site/index.html docs/_build/index.html; do
+        if [ -f "$site_index" ]; then
+            newest_docs_mtime=$(find "$(dirname "$(dirname "$site_index")")" -name "*.md" -newer "$site_index" 2>/dev/null | head -1)
+            if [ -n "$newest_docs_mtime" ]; then
+                errors="$errors
+  * docs/ modified but site is stale (newer source files detected). Rebuild docs."
+            fi
+            break
+        fi
+    done
+fi
+
+# 6. If CHANGELOG.md modified, verify advisory block is still near top
+# (the advisory block must always be near the top — see CLAUDE.md invariant)
+if echo "$STAGED" | grep -q "CHANGELOG.md"; then
+    staged_changelog=$(git show :CHANGELOG.md 2>/dev/null || true)
+    if [ -n "$staged_changelog" ]; then
+        if ! echo "$staged_changelog" | head -10 | grep -q "When something breaks"; then
+            errors="$errors
+  * CHANGELOG.md advisory block missing or displaced from top."
+        fi
+    fi
+fi
+
+# 6b. Warn about stale design docs (DESIGN_*.md that should be archived)
+stale_designs=$(find .claude/spec -maxdepth 1 -name 'DESIGN_*.md' -type f 2>/dev/null)
+if [ -n "$stale_designs" ]; then
+    for df in $stale_designs; do
+        dfname=$(basename "$df")
+        if head -10 "$df" | grep -qi "delete\|archive\|completed\|obsolete"; then
+            errors="$errors
+  * .claude/spec/$dfname has a self-delete/archive instruction but is still present. Move to archive/ or delete."
+        fi
+    done
+fi
+
+# 6c. TODO tag propagation: if TODO.md or COMPLETED.md modified with
+# tagged items, the tagged doc should also be staged.
+if echo "$STAGED" | grep -q "TODO.md\|COMPLETED.md"; then
+    todo_diff=$(echo "$STAGED_DIFF" | grep "^\+" | grep -o '\[→ [^]]*\]' || true)
+    if echo "$todo_diff" | grep -q "→ spec" && ! echo "$STAGED" | grep -q "SPEC.md"; then
+        : # Advisory — completing a [→ spec] item SHOULD update the spec,
+          # but the spec check (check 2) already enforces version bumps
+          # if SPEC.md is staged. Don't double-enforce.
+    fi
+    if echo "$todo_diff" | grep -q "→ docs" && ! echo "$STAGED" | grep -q "^docs/"; then
+        : # Advisory — completing a [→ docs] item SHOULD update docs.
+          # The docs rebuild check (check 5) catches stale sites.
+    fi
+fi
+
+# Report errors
+if [ -n "$errors" ]; then
+    echo "===== PRE-COMMIT: Spec/doc discipline check failed ====="
+    echo "$errors"
+    echo ""
+    echo "Fix these issues, or bypass with: git commit --no-verify"
+    echo "========================================================="
+    exit 1
+fi
+
+# 7. Auto-stage the consumer graph cache if a background regen left it dirty.
+# (Only fires if the project has a consumer graph — conditional on file existence.)
+GRAPH_FILE=".claude/spec/CONSUMER_GRAPH.json"
+if [ -f "$GRAPH_FILE" ] && ! git diff --quiet "$GRAPH_FILE" 2>/dev/null; then
+    git add "$GRAPH_FILE"
+fi
+
+# 8. Auto-sync derived docs (servo pattern: auto-fix + auto-stage if stale)
+# If --check fails, run without --check to auto-fix, then auto-stage
+# derived files. Only fail if auto-fix itself fails.
+# ($PYTHON resolved near the top of this hook.)
+SYNC_SCRIPT="scripts/sync_derived_docs.py"
+if [ -f "$SYNC_SCRIPT" ]; then
+    if [ -x "$PYTHON" ] || command -v "$PYTHON" >/dev/null 2>&1; then
+        sync_output=$("$PYTHON" "$SYNC_SCRIPT" --check 2>&1)
+        sync_rc=$?
+        if [ $sync_rc -ne 0 ]; then
+            # Attempt auto-fix
+            "$PYTHON" "$SYNC_SCRIPT" 2>&1
+            auto_rc=$?
+            # Auto-stage known derived files (safe — these are all generated)
+            git add docs/ .claude/spec/ README.md 2>/dev/null || true
+            if [ $auto_rc -ne 0 ]; then
+                echo "===== PRE-COMMIT: Spec/doc validation failed ====="
+                echo "Auto-fix ran but could not resolve all issues."
+                echo "Run: $PYTHON $SYNC_SCRIPT --check"
+                echo ""
+                echo "Fix these issues, or bypass with: git commit --no-verify"
+                echo "========================================================="
+                exit 1
+            fi
+            echo "Pre-commit: auto-synced derived docs."
+        fi
+    fi
+fi
+
+exit 0

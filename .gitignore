@@ -20,3 +20,9 @@ docs/source/generated/
 __pycache__
 .ipynb_checkpoints
 .DS_Store
+.worktrees/
+.serena/cache/
+.serena/project.local.yml
+.claude/sdk/logs/
+.claude/sdk/build_costs.jsonl
+.claude/sync_issues.json

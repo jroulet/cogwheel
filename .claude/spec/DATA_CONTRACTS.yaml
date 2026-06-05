@@ -1,0 +1,86 @@
+# DATA_CONTRACTS.yaml — Machine-readable schema for project data products.
+#
+# Each artifact describes a data product: who produces it, who consumes it,
+# what fields it contains, and what conventions govern its format.
+#
+# The SDK pipeline uses this for:
+#   - Inspector: verify that code changes honor producer/consumer contracts
+#   - Librarian: keep documentation in sync with actual data flow
+#   - Pre-commit hook: check_contract_lock verifies greppable field names
+#
+# Version format: MAJOR.MINOR.PATCH
+#   MAJOR: incompatible schema restructuring
+#   MINOR: new artifacts, conventions, or consumer/producer entries
+#   PATCH: field list corrections, wording fixes
+
+schema_version: "1.0.0"
+
+# ── Conventions ──────────────────────────────────────────────────────────
+# Define project-wide data conventions here. These are referenced by
+# individual artifacts below.
+
+conventions:
+  units:
+    description: "Physical units used across cogwheel data products."
+    rule: >-
+      Frequencies in Hz; times in GPS seconds; component masses in solar masses;
+      distances in Mpc; angles in radians. Strain is dimensionless; ASDs are in
+      units of 1/sqrt(Hz).
+  waveform_phase_convention:
+    description: "Waveform phase/spin convention."
+    rule: >-
+      cogwheel uses IMRPhenomXP (not IMRPhenomPv2) because Pv2 uses a different
+      phase convention that throws off cogwheel's coordinates (see LIGO-T1500602).
+  sampled_vs_standard:
+    description: "Coordinate-system convention for parameters."
+    rule: >-
+      'standard' parameters are physically meaningful; 'sampled' parameters are
+      reparameterizations chosen to reduce correlations. Each Prior defines the
+      bijection and the Jacobian relating the two.
+  array_axes:
+    description: "Axis ordering for likelihood/marginalization arrays."
+    rule: >-
+      Frequency-domain quantities broadcast over (detector, frequency[, mode])
+      axes; relative-binning summaries and coherent-score lookup tables follow
+      this ordering.
+
+# ── Artifacts ────────────────────────────────────────────────────────────
+
+artifacts: {}
+  # GW-tailored skeleton — uncomment and fill in `fields` only after confirming
+  # the exact column/attribute names in code (the Inspector and the pre-commit
+  # contract check grep source for each listed field, so a wrong name becomes a
+  # spurious finding). Candidate cogwheel data products to document here:
+  #
+  # posterior_samples:
+  #   description: "Posterior samples written by a Sampler run."
+  #   format: "feather"          # cogwheel.utils / sampling SAMPLES_FILENAME
+  #   producer:
+  #     module: "cogwheel/sampling.py"
+  #     function: "Sampler.run"
+  #   consumers:
+  #     - module: "cogwheel/postprocessing.py"
+  #     - module: "cogwheel/gw_plotting.py"
+  #   conventions_applied:
+  #     - units
+  #     - sampled_vs_standard
+  #
+  # event_asd:
+  #   description: "Amplitude spectral density of detector noise for an event."
+  #   format: "npz"              # cogwheel/data/*.npz, cogwheel/data/example_asds/*.npy
+  #   producer:
+  #     module: "cogwheel/data.py"
+  #   consumers:
+  #     - module: "cogwheel/likelihood/likelihood.py"
+  #   conventions_applied:
+  #     - units
+  #
+  # coherent_score_lookup_tables:
+  #   description: "Precomputed lookup tables for coherent-score marginalization."
+  #   format: "npz"              # cogwheel/likelihood/marginalization/lookup_tables.npz
+  #   producer:
+  #     module: "cogwheel/likelihood/marginalization/lookup_table.py"
+  #   consumers:
+  #     - module: "cogwheel/likelihood/marginalization/base.py"
+  #   conventions_applied:
+  #     - array_axes

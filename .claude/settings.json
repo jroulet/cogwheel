@@ -1,0 +1,36 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__serena__activate_project",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -n '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"updatedInput\":{\"project\":\"cogwheel\"}}}'",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|mcp__serena__execute_shell_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -e 'select(.tool_input.command | test(\"(^|\\\\s)(python3?|pip3?)\\\\b\")) | select(.tool_input.command | test(\"^conda |conda run\") | not) | .tool_input.command as $cmd | {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"updatedInput\":{\"command\":(\"conda run -n cogwheel_310 \" + $cmd)}}}' || true",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Grep|Glob|Edit|Write|Bash|mcp__serena__execute_shell_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'exec \"$(git rev-parse --show-toplevel)/.claude/hooks/use-serena.sh\"'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
