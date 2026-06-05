@@ -88,7 +88,25 @@ excluded_tools: []
 # list of tools to include that would otherwise be disabled (particularly optional tools that are disabled by default).
 # This extends the existing inclusions (e.g. from the global configuration).
 # Find the list of tools here: https://oraios.github.io/serena/01-about/035_tools.html
-included_optional_tools: []
+included_optional_tools:
+- delete_lines
+- insert_at_line
+- replace_lines
+- restart_language_server
+- get_diagnostics_for_symbol
+- serena_info
+- open_dashboard
+- remove_project
+- list_queryable_projects
+- query_project
+# re-enabled because the claude-code context disables these, but use-serena.sh
+# redirects native Read/Write/Grep/Glob/Bash to them (else project file access dead-ends):
+- read_file
+- create_text_file
+- search_for_pattern
+- find_file
+- list_dir
+- execute_shell_command
 
 # fixed set of tools to use as the base tool set (if non-empty), replacing Serena's default set of tools.
 # This cannot be combined with non-empty excluded_tools or included_optional_tools.
