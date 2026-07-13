@@ -80,6 +80,8 @@ class Sampler(abc.ABC, utils.JSONMixin):
         self.posterior = posterior
 
         self._ndim = len(self.posterior.prior.sampled_params)
+        self._ln_folded_volume = np.log(np.prod(
+            self.posterior.prior.folded_cubesize))
 
         self.run_kwargs = (copy.deepcopy(self.DEFAULT_RUN_KWARGS)
                            | (run_kwargs or {}))
@@ -361,13 +363,17 @@ class Sampler(abc.ABC, utils.JSONMixin):
         # sampler subclass.
         super().to_json(dirname, basename or self.JSON_FILENAME, **kwargs)
 
-    def _lnfoldedprob_and_blob(self, folded_par_vals, as_dict=False):
+    def _lnfoldedlike_and_blob(self, folded_par_vals, as_dict=False):
         """
-        Return log of the folded probability and a blob with extra
-        information. The blob is provided by the likelihood class
-        (self.posterior.likelihood.get_blob), and additionally this
-        method chooses a random unfolding based on the probabilities and
-        appends the unfolded parameter values to the blob.
+        Return log of the folded probability times the folded prior
+        volume, and a blob with extra information. The blob is provided
+        by the likelihood class (self.posterior.likelihood.get_blob),
+        and additionally this method chooses a random unfolding based on
+        the probabilities and appends the unfolded parameter values to
+        the blob.
+        We multiply the probability density by the volume because nested
+        samplers give as evidence the average of what they call the
+        "likelihood", not the integral.
         """
         lnprobs, par_dics, metadatas = self._get_lnprobs_pardics_metadatas(
             *folded_par_vals)
@@ -390,11 +396,12 @@ class Sampler(abc.ABC, utils.JSONMixin):
 
         blob = par_dics[i_unfold] | like_blob
 
+        ln_folded_like = ln_folded_prob + self._ln_folded_volume
 
         if as_dict:
-            return ln_folded_prob, blob
+            return ln_folded_like, blob
 
-        return ln_folded_prob, *blob.values()
+        return ln_folded_like, *blob.values()
 
     def _get_blobs_dtype(self):
         """Return list of 2-tuples with name and type of blob items."""
@@ -402,7 +409,7 @@ class Sampler(abc.ABC, utils.JSONMixin):
         folded_par_vals = self.posterior.prior.fold(
             **sample[self.posterior.prior.sampled_params])
 
-        _, blob = self._lnfoldedprob_and_blob(folded_par_vals, as_dict=True)
+        _, blob = self._lnfoldedlike_and_blob(folded_par_vals, as_dict=True)
         return [(key, type(val)) for key, val in blob.items()]
 
     def _get_sampler_kwargs(self):
@@ -539,7 +546,7 @@ class PyMultiNest(Sampler):
 
         Return the logarithm of the folded posterior.
         """
-        lnfoldedprob, *blob = self._lnfoldedprob_and_blob(
+        lnfoldedprob, *blob = self._lnfoldedlike_and_blob(
             [folded_par_vals[i] for i in range(self._ndim)])
 
         for i, blob_value in enumerate(blob):
@@ -589,7 +596,7 @@ class Dynesty(Sampler):
 
     def _lnprob_dynesty(self, folded_par_vals):
         """Return the logarithm of the folded probability density."""
-        lnfoldedprob, *blob = self._lnfoldedprob_and_blob(folded_par_vals)
+        lnfoldedprob, *blob = self._lnfoldedlike_and_blob(folded_par_vals)
         blob_rec = np.rec.array(blob, dtype=self._blobs_dtype)
         return lnfoldedprob, blob_rec
 
@@ -718,7 +725,7 @@ class Zeus(Sampler):
                 or np.any(par_vals > self._folded_cubemax)):
             return -np.inf, *self._nan_blob.values()
 
-        return self._lnfoldedprob_and_blob(par_vals)
+        return self._lnfoldedlike_and_blob(par_vals)
 
     def _get_start(self, rscale=1e-2, max_lnprob_drop=10.):
         """
@@ -769,21 +776,21 @@ class Nautilus(Sampler):
         sampler_kwargs = super()._get_sampler_kwargs()
 
         prior = nautilus.Prior()
-        ranges = zip(self.posterior.prior.cubemin,
-                     self.posterior.prior.cubemin
-                     + self.posterior.prior.folded_cubesize)
+        ranges = zip(
+            self.posterior.prior.cubemin,
+            self.posterior.prior.cubemin + self.posterior.prior.folded_cubesize
+        )
         for par, rng in zip(self.posterior.prior.sampled_params, ranges):
             prior.add_parameter(par, rng)
 
         sampler_kwargs['prior'] = prior
 
-        if 'periodic' in inspect.signature(self._SAMPLER_CLS).parameters:
-            # Unreleased feature as of Jul 2025
-            sampler_kwargs['periodic'] = [
-                self.posterior.prior.sampled_params.index(par)
-                for par in self.posterior.prior.periodic_params] or None
+        sampler_kwargs['periodic'] = [
+            self.posterior.prior.sampled_params.index(par)
+            for par in self.posterior.prior.periodic_params
+        ] or None
 
-        sampler_kwargs['likelihood'] = self._lnfoldedprob_and_blob
+        sampler_kwargs['likelihood'] = self._lnfoldedlike_and_blob
         sampler_kwargs['blobs_dtype'] = self._blobs_dtype
         sampler_kwargs['pass_dict'] = False
         return sampler_kwargs

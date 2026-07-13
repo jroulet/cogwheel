@@ -51,7 +51,7 @@ _LABELS = {
     's2r': r'$s_2^\perp$',
     's1phi': r'$\phi_{s1}$',
     's2phi': r'$\phi_{s2}$',
-    'chip': r'$\chi_p$',
+    'chip': r'$\chi_\mathrm{p}$',
     # Distance
     'd_hat': r'$\hat{d}$',
     'd_luminosity': r'$d_L$',
