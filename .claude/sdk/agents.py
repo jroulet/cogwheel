@@ -311,6 +311,7 @@ AGENT_MODELS: dict[str, str] = {
     "inspector":    "claude-opus-4-8",
     "librarian":    "claude-sonnet-4-6",
     "dreamer":      "claude-sonnet-4-6",
+    "prof_review":  "claude-opus-4-8",   # Phase 2: post-build inference review
 }
 
 
@@ -358,6 +359,11 @@ AGENT_TOOLS: dict[str, dict[str, list[str]]] = {
     "professor": {
         "serena": _SERENA_READ,
         "fallback": _READ_TOOLS,
+    },
+    "prof_review": {
+        # Phase 2: runs the domain tests, so it needs shell access.
+        "serena": _SERENA_READ + ["mcp__serena__execute_shell_command"],
+        "fallback": _READ_TOOLS + ["Bash"],
     },
     "simplifier": {
         "serena": _SERENA_READ,
@@ -408,6 +414,7 @@ AGENT_PERMISSION_MODES: dict[str, PermissionMode] = {
     "inspector":    "bypassPermissions",
     "librarian":    "bypassPermissions",
     "dreamer":      "bypassPermissions",
+    "prof_review":  "bypassPermissions",  # Phase 2: runs pytest
 }
 
 

@@ -50,6 +50,20 @@ class SimplifierVerdict(Enum):
     TRIM = "trim"
 
 
+class ProfReviewVerdict(Enum):
+    PASS = "pass"
+    CONCERN = "concern"
+    FAIL = "fail"
+
+
+@dataclass
+class ProfReviewResult:
+    """What the Professor reports after post-build inference review."""
+    verdict: ProfReviewVerdict
+    concerns: list[str] = field(default_factory=list)
+    summary: str = ""
+
+
 # ── Phase 1: Planning ────────────────────────────────────────────────────────
 
 
@@ -195,6 +209,7 @@ class BuildReport:
     test_dev_result: Optional[TestDevResult] = None
     inspector_result: Optional[InspectorResult] = None
     librarian_result: Optional[LibrarianResult] = None
+    prof_review_result: Optional["ProfReviewResult"] = None
     revision_loops: int = 0
     escalations: list[str] = field(default_factory=list)
     commits: list[str] = field(default_factory=list)  # "sha message"

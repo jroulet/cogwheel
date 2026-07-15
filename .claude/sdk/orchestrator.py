@@ -82,6 +82,8 @@ from .schemas import (
     InspectorVerdict,
     Phase,
     Plan,
+    ProfReviewResult,
+    ProfReviewVerdict,
     TriageEntry,
     TriageResult,
     TriageVerdict,
@@ -831,7 +833,27 @@ class BuildOrchestrator:
         dag = self._build_phase2a_dag(report)
         await self._run_dag(dag)
 
-        # Commit (Inspector gate passed)
+        # Step 5: Professor inference review (after the Inspector gate passes,
+        # before the commit). Only when the build has domain-specific tests for
+        # the Professor to run; a FAIL blocks the commit.
+        if self.plan.has_domain_tests:
+            self._log("Step 5: Professor inference review")
+            prof_result = await self._run_prof_review()
+            report.prof_review_result = prof_result
+            if prof_result.verdict == ProfReviewVerdict.FAIL:
+                raise GateFailure(
+                    f"Professor inference review FAILED: {prof_result.summary}\n"
+                    f"Concerns: {prof_result.concerns}"
+                )
+            elif prof_result.verdict == ProfReviewVerdict.CONCERN:
+                self._log(f"  Professor: CONCERN — {prof_result.summary}")
+                self._log("  (proceeding with commit — concerns noted in report)")
+            else:
+                self._log("  Professor: PASS")
+        else:
+            self._log("Step 5: Professor inference review skipped (no domain tests)")
+
+        # Commit (Inspector + inference-review gates passed)
         build_changed_files = self._git_changed_files()
         check_commit_allowed(self._inspector_result, BuildMode.FULL)
         self._log("Committing changes")
@@ -1736,6 +1758,74 @@ class BuildOrchestrator:
                 )
                 raise
             yield message
+
+    async def _run_prof_review(self) -> ProfReviewResult:
+        """Run the Professor's post-build inference review.
+
+        The Professor runs the domain tests written by the Test Developer,
+        inspects any diagnostic plots, and delivers a verdict (PASS / CONCERN /
+        FAIL); a FAIL blocks the commit. Uses the prof_review crew prompt and
+        runs with bypassPermissions (from AGENT_PERMISSION_MODES) so it can
+        execute the tests.
+        """
+        assert self.plan is not None
+        specs = "\n".join(f"- {d}" for d in self.plan.domain_test_descriptions)
+        task = (
+            "You are reviewing the domain correctness of the recent build.\n\n"
+            "## Test specifications\n"
+            f"{specs or '(no specific test specs provided)'}\n\n"
+            "## What to do\n"
+            "1. Run the project's fast domain tests (e.g. "
+            "`python -m pytest cogwheel/tests/ -v`). Run ONLY fast tests — "
+            "never a long sampling / real-data run.\n"
+            "2. Inspect any diagnostic plots the tests produce.\n"
+            "3. Verify results match first-principles / stated-tolerance "
+            "expectations.\n\n"
+            "## Verdict\n"
+            "Report your verdict as a JSON block:\n"
+            "```json\n"
+            '{\n'
+            '  "verdict": "PASS" or "CONCERN" or "FAIL",\n'
+            '  "concerns": ["list of concerns if any"],\n'
+            '  "summary": "brief explanation"\n'
+            '}\n'
+            "```\n"
+        )
+        result_text, _ = await self._run_agent("prof_review", task)
+        return self._parse_prof_review_result(result_text)
+
+    def _parse_prof_review_result(self, result_text: str) -> ProfReviewResult:
+        """Parse the inference-review verdict (JSON first, then text fallback)."""
+        json_str = self._extract_json_block(result_text)
+        if json_str:
+            try:
+                data = json.loads(json_str)
+                verdict_str = data.get("verdict", "").upper()
+                if verdict_str == "FAIL":
+                    verdict = ProfReviewVerdict.FAIL
+                elif verdict_str == "CONCERN":
+                    verdict = ProfReviewVerdict.CONCERN
+                else:
+                    verdict = ProfReviewVerdict.PASS
+                return ProfReviewResult(
+                    verdict=verdict,
+                    concerns=data.get("concerns", []),
+                    summary=data.get("summary", result_text),
+                )
+            except (json.JSONDecodeError, KeyError, TypeError):
+                pass
+        # Fallback: text match, default PASS (fail-open — the Inspector gate is
+        # the hard correctness gate; this is an advisory domain check).
+        verdict = ProfReviewVerdict.PASS
+        for line in result_text.splitlines():
+            s = line.strip().upper()
+            if s in ("FAIL", "**FAIL**", "VERDICT: FAIL"):
+                verdict = ProfReviewVerdict.FAIL
+                break
+            if s in ("CONCERN", "**CONCERN**", "VERDICT: CONCERN"):
+                verdict = ProfReviewVerdict.CONCERN
+                break
+        return ProfReviewResult(verdict=verdict, summary=result_text)
 
     async def _run_agent(
         self,
