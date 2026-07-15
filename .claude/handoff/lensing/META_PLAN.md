@@ -37,7 +37,24 @@ approve/reject plans via the file gate, give feedback, no further user input.
    regressions fail tests.
 
 ## Build sequence and status
-- [RUNNING — PLAN APPROVED 2026-07-16] Build 1 — lens engine:
+- INFRA INCIDENT (2026-07-16, resolved): first Build-1 run died 84s into
+  Phase 2 — concurrent WP1∥WP2 query() streams + anyio cancel-scope teardown
+  in claude_agent_sdk 0.1.48 ("exit cancel scope in a different task").
+  FIX (committed): orchestrator now runs DAG nodes and WP batches
+  SEQUENTIALLY; cancel-scope RuntimeErrors retry with a fresh stream instead
+  of propagating. PROPAGATE this SDK fix to the teja-force skill at program
+  end. Approved plan preserved at build1_plan_approved.json — diff the
+  relaunch's plan against it at the gate (expect substantively identical;
+  re-review only deltas).
+- INFRA INCIDENT 2 (2026-07-16 03:40, root-caused): cancel-scope error
+  recurred on a SINGLE stream (coder-2) — trigger is per-message
+  asyncio.wait_for task-hopping, not concurrency. Retry net held (coder
+  degraded to built-in tools, build survived). ROOT FIX committed:
+  _iter_query_with_timeout now queue-drains the SDK stream in one
+  dedicated task (18 SDK tests). Effective from the NEXT launch — the
+  running Build 1 rides the retry net. Propagate BOTH stream fixes to
+  the teja-force skill at program end.
+- [RELAUNCHED 03:22] Build 1 — lens engine:
   cogwheel/lensing/chang_refsdal/ (geometry, operator, channels).
   Log: /tmp/lensing_build1_20260716_024350.log. 7 WPs, ~515 turns budget.
   Plan deviations ACCEPTED at the gate (all argued, all improvements):

@@ -1954,8 +1954,10 @@ class BuildOrchestrator:
             if max_turns_override is not None:
                 _retry_kwargs["max_turns"] = max_turns_override
             options = await build_agent_options(**_retry_kwargs)
-            if resume_session:
-                options.resume = resume_session
+            # Resume the agent's own session if one was established before
+            # the stream died — continue the work, don't restart the WP.
+            if session_id or resume_session:
+                options.resume = session_id or resume_session
             async for message in self._iter_query_with_timeout(
                     query(prompt=task_context, options=options), agent_id):
                 result_text, session_id = self._handle_message(
@@ -1977,8 +1979,10 @@ class BuildOrchestrator:
                 if max_turns_override is not None:
                     _retry_kwargs["max_turns"] = max_turns_override
                 options = await build_agent_options(**_retry_kwargs)
-                if resume_session:
-                    options.resume = resume_session
+                # Resume the agent's own session if one was established
+                # before the stream died — continue, don't restart the WP.
+                if session_id or resume_session:
+                    options.resume = session_id or resume_session
                 async for message in self._iter_query_with_timeout(
                         query(prompt=task_context, options=options), agent_id):
                     result_text, session_id = self._handle_message(
