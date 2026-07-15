@@ -1012,11 +1012,20 @@ class BuildOrchestrator:
                     to_run.append(node)
 
             if to_run:
+                # SEQUENTIAL by design: claude_agent_sdk 0.1.48's query()
+                # holds anyio cancel scopes across yields, and our per-message
+                # asyncio.wait_for resumes the stream in fresh tasks. With
+                # CONCURRENT streams, one stream's failure cancels its sibling
+                # mid-yield and the SDK's teardown exits a cancel scope in a
+                # different task ("Attempted to exit cancel scope in a
+                # different task") — a build-killing RuntimeError observed
+                # 2026-07-16 (lensing Build 1, WP1 ∥ WP2). Single-stream is
+                # the verified-good path; builds run detached, so wall-clock
+                # cost is accepted.
                 if len(to_run) > 1:
-                    self._log(f"  DAG: running in parallel — {[n.name for n in to_run]}")
-                results = await asyncio.gather(*[n.run() for n in to_run])
-                for node, result in zip(to_run, results):
-                    completed[node.name] = result
+                    self._log(f"  DAG: running sequentially — {[n.name for n in to_run]}")
+                for node in to_run:
+                    completed[node.name] = await node.run()
 
             for node in to_skip:
                 completed[node.name] = ""
@@ -1035,12 +1044,12 @@ class BuildOrchestrator:
 
         for i, batch in enumerate(batches):
             self._log(f"  Batch {i + 1}/{len(batches)}: {[wp.id for wp in batch]}")
-            if len(batch) == 1:
-                await self._run_coder(batch[0])
+            # Sequential within a batch — same concurrent-stream cancel-scope
+            # hazard as _run_dag (see comment there). Batches still encode the
+            # dependency order; only the intra-batch parallelism is dropped.
+            for wp in batch:
+                await self._run_coder(wp)
                 report.work_packages_completed += 1
-            else:
-                await asyncio.gather(*[self._run_coder(wp) for wp in batch])
-                report.work_packages_completed += len(batch)
 
         return ""
 
@@ -1880,8 +1889,43 @@ class BuildOrchestrator:
                 result_text, session_id = self._handle_message(
                     agent_id, message, result_text, session_id,
                 )
-        except RuntimeError:
-            raise
+        except RuntimeError as e:
+            # Deliberate RuntimeErrors (raised by _handle_message for fatal
+            # agent states) must propagate. But the SDK's anyio teardown can
+            # surface "Attempted to exit cancel scope in a different task" —
+            # a transient transport failure, not an agent verdict; let it fall
+            # through to the retry below (fresh query stream).
+            if "cancel scope" not in str(e):
+                raise
+            self._log(f"[{agent_id}] SDK stream teardown raced "
+                      f"(cancel-scope RuntimeError); retrying with a "
+                      f"fresh stream")
+            e_for_retry = e
+            if not self.use_serena:
+                raise
+            # Reuse the generic retry path by handling it here directly.
+            self._log(f"[{agent_id}] MCP failed ({type(e_for_retry).__name__}: "
+                      f"{e_for_retry}), retrying with built-in tools")
+            _retry_kwargs: dict = dict(
+                agent_name=agent_name,
+                project_root=self.project_root,
+                task_context=task_context,
+                extra_instructions=extra,
+                use_serena=False,
+                mcp_config=None,
+                model_override=model_override,
+                permission_override=permission_override,
+            )
+            if max_turns_override is not None:
+                _retry_kwargs["max_turns"] = max_turns_override
+            options = await build_agent_options(**_retry_kwargs)
+            if resume_session:
+                options.resume = resume_session
+            async for message in self._iter_query_with_timeout(
+                    query(prompt=task_context, options=options), agent_id):
+                result_text, session_id = self._handle_message(
+                    agent_id, message, result_text, session_id,
+                )
         except Exception as e:
             if self.use_serena:
                 self._log(f"[{agent_id}] MCP failed ({type(e).__name__}: {e}), retrying with built-in tools")
