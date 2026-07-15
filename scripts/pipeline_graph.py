@@ -30,6 +30,7 @@ except ImportError:
 
 DEFAULT_CONTRACTS = ".claude/spec/DATA_CONTRACTS.yaml"
 DEFAULT_REGISTRY = ".claude/spec/data_registry.yaml"
+DEFAULT_GRAPH = ".claude/spec/CONSUMER_GRAPH.json"
 
 
 def load_contracts(path: str = DEFAULT_CONTRACTS) -> dict:
@@ -51,10 +52,13 @@ class PipelineGraph:
     """
 
     def __init__(self, contracts_path: str = DEFAULT_CONTRACTS,
-                 registry_path: str = DEFAULT_REGISTRY):
+                 registry_path: str = DEFAULT_REGISTRY,
+                 graph_path: str = DEFAULT_GRAPH):
         self.contracts_path = Path(contracts_path)
         self.registry_path_file = Path(registry_path)
+        self.graph_path = Path(graph_path)
         self._contracts = None
+        self._graph = None
 
     @property
     def contracts(self) -> dict:
@@ -67,6 +71,32 @@ class PipelineGraph:
         return self._contracts
 
     @property
+    def graph(self) -> dict:
+        """Cached actual-caller graph from CONSUMER_GRAPH.json (regen tool)."""
+        if self._graph is None:
+            import json as _json
+            if self.graph_path.exists():
+                try:
+                    self._graph = _json.loads(
+                        self.graph_path.read_text(encoding="utf-8"))
+                except ValueError:
+                    self._graph = {}
+            else:
+                self._graph = {}
+        return self._graph
+
+    def _actual_callers(self, artifact: str) -> list:
+        """Actual callers for an artifact, from CONSUMER_GRAPH.json (may be empty)."""
+        out = []
+        for loader, entry in (self.graph.get("loaders", {}) or {}).items():
+            if entry.get("artifact") != artifact:
+                continue
+            for c in entry.get("callers", []) or []:
+                out.append({"module": c.get("file", ""),
+                            "function": c.get("name", ""), "via": loader})
+        return out
+
+    @property
     def artifacts(self) -> dict:
         return self.contracts.get("artifacts", {}) or {}
 
@@ -75,11 +105,34 @@ class PipelineGraph:
         return self.artifacts.get(artifact)
 
     def consumers_of(self, artifact: str) -> list:
-        """Declared consumers of an artifact (list of {module, function})."""
+        """Consumers of an artifact — declared (YAML) unioned with actual
+        (CONSUMER_GRAPH.json). Each entry is {module, function, source} where
+        source is 'contracts', 'graph', or 'both'.
+        """
         info = self.artifacts.get(artifact)
-        if not info:
+        if info is None and not self._actual_callers(artifact):
             return []
-        return info.get("consumers", []) or []
+        by_key = {}
+        for c in (info or {}).get("consumers", []) or []:
+            key = (c.get("module", ""), c.get("function", ""))
+            by_key[key] = {"module": key[0], "function": key[1], "source": "contracts"}
+        for c in self._actual_callers(artifact):
+            key = (c["module"], c["function"])
+            if key in by_key:
+                by_key[key]["source"] = "both"
+            else:
+                # module may differ (graph gives the caller's file); also try to
+                # merge on function name alone before adding as graph-only.
+                merged = next((v for k, v in by_key.items()
+                               if k[1] == c["function"]), None)
+                if merged:
+                    merged["source"] = "both"
+                    if not merged["module"]:
+                        merged["module"] = c["module"]
+                else:
+                    by_key[key] = {"module": c["module"], "function": c["function"],
+                                   "source": "graph", "via": c.get("via", "")}
+        return sorted(by_key.values(), key=lambda d: (d["function"], d["module"]))
 
     def resolve(self, artifact: str):
         """Producer + format + disk path for an artifact, or None if unknown."""
@@ -177,7 +230,9 @@ def cmd_consumers_of(pg: PipelineGraph, artifact: str):
         return
     print(f"Consumers of {artifact}:")
     for c in pg.consumers_of(artifact):
-        print(f"  {c.get('module', '?')}::{c.get('function', '?')}")
+        src = c.get("source", "contracts")
+        tag = {"contracts": "declared", "graph": "ACTUAL-undeclared", "both": "declared+actual"}.get(src, src)
+        print(f"  {c.get('module', '?')}::{c.get('function', '?')}  [{tag}]")
 
 
 def cmd_inputs_for(pg: PipelineGraph, module: str):

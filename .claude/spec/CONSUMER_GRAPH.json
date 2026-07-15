@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "generated_by": "scripts/regenerate_consumer_graph.py (jedi.goto + ripgrep)",
+  "generated_at": "2026-07-16",
+  "loaders": {
+    "EventData.from_npz": {
+      "artifact": "event_data_npz",
+      "defined_in": [
+        "cogwheel/data.py"
+      ],
+      "callers": [
+        {
+          "name": "ReferenceWaveformFinder.from_event",
+          "file": "cogwheel/likelihood/reference_waveform_finder.py"
+        }
+      ]
+    },
+    "PostProcessor": {
+      "artifact": "posterior_samples",
+      "defined_in": [
+        "cogwheel/postprocessing.py"
+      ],
+      "callers": []
+    },
+    "LookupTable": {
+      "artifact": "coherent_score_lookup_tables",
+      "defined_in": [
+        "cogwheel/likelihood/marginalization/lookup_table.py"
+      ],
+      "callers": [
+        {
+          "name": "BaseCoherentScore.__init__",
+          "file": "cogwheel/likelihood/marginalization/base.py"
+        },
+        {
+          "name": "lookup_table",
+          "file": "cogwheel/likelihood/marginalization/lookup_table.py"
+        }
+      ]
+    }
+  }
+}

@@ -43,7 +43,8 @@ class PipelineGraphTest(unittest.TestCase):
         self.tmp.write(FIXTURE)
         self.tmp.close()
         self.pg = PipelineGraph(contracts_path=self.tmp.name,
-                                registry_path="/nonexistent/registry.yaml")
+                                registry_path="/nonexistent/registry.yaml",
+                                graph_path="/nonexistent/CONSUMER_GRAPH.json")
 
     def tearDown(self):
         os.unlink(self.tmp.name)

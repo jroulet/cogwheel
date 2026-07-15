@@ -102,7 +102,7 @@ artifacts:
       - module: "cogwheel/postprocessing.py"
         function: "PostProcessor.__init__"
       - module: "cogwheel/postprocessing.py"
-        function: "EventResultsDataFrame"
+        function: "PostProcessor.make_table"
 
   profiling_stats:
     description: "cProfile stats for a Sampler run, written to the 'profiling' file in the rundir."
@@ -112,7 +112,7 @@ artifacts:
       function: "Sampler.run"
     consumers:
       - module: "cogwheel/postprocessing.py"
-        function: "EventResultsDataFrame"
+        function: "PostProcessor.make_table"
 
   event_data_npz:
     description: "Serialized EventData (frequency-domain strain, whitening filter, detector names, GPS time, injection metadata). Shipped set lives at cogwheel/data/*.npz."
@@ -124,7 +124,7 @@ artifacts:
       - module: "cogwheel/data.py"
         function: "EventData.from_npz"
       - module: "cogwheel/likelihood/reference_waveform_finder.py"
-        function: "(EventData.from_npz)"
+        function: "ReferenceWaveformFinder.from_event"
       - module: "cogwheel/utils.py"
         function: "CogwheelEncoder.default"
     conventions_applied:
@@ -157,12 +157,12 @@ artifacts:
     format: "npz"
     producer:
       module: "cogwheel/likelihood/marginalization/lookup_table.py"
-      function: "LookupTable._instantiate_table"
+      function: "LookupTable._get_table"
     consumers:
       - module: "cogwheel/likelihood/marginalization/lookup_table.py"
-        function: "LookupTable._instantiate_table"
+        function: "LookupTable._get_table"
       - module: "cogwheel/likelihood/marginalization/base.py"
-        function: "MarginalizedLikelihood.__init__"
+        function: "BaseCoherentScore.__init__"
     conventions_applied:
       - array_axes
 
