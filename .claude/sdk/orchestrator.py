@@ -1925,6 +1925,22 @@ class BuildOrchestrator:
                             break
         return None
 
+    @staticmethod
+    def _as_str_list(value) -> list[str]:
+        """Coerce a plan field to list[str].
+
+        The schema declares ``where`` (and similar) as ``list[str]``, but the
+        Architect occasionally emits a bare string. Passing that through makes
+        ``", ".join(where)`` iterate characters (the plan then renders
+        ``c, o, g, w, ...``). Normalize here so the renderer and every
+        downstream consumer of ``wp.where`` get a real list.
+        """
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value] if value else []
+        return [str(v) for v in value]
+
     def _parse_plan_from_dict(self, data: dict) -> Plan:
         """Convert a plan dict to a Plan."""
         work_packages = [
@@ -1932,7 +1948,7 @@ class BuildOrchestrator:
                 id=wp["id"],
                 title=wp["title"],
                 what=wp["what"],
-                where=wp.get("where", []),
+                where=self._as_str_list(wp.get("where", [])),
                 how=wp["how"],
                 who=wp["who"],
                 dependencies=wp.get("depends_on", wp.get("dependencies", [])),
