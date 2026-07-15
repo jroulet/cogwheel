@@ -302,6 +302,7 @@ class SerenaManager:
 
 AGENT_MODELS: dict[str, str] = {
     "architect":    "claude-opus-4-8",
+    "professor":    "claude-opus-4-8",
     "simplifier":   "claude-sonnet-4-6",
     "foreman_lite": "claude-sonnet-4-6",
     "coder":        "claude-opus-4-8",
@@ -354,6 +355,10 @@ AGENT_TOOLS: dict[str, dict[str, list[str]]] = {
         "serena": _SERENA_READ,
         "fallback": _READ_TOOLS + ["Agent"],
     },
+    "professor": {
+        "serena": _SERENA_READ,
+        "fallback": _READ_TOOLS,
+    },
     "simplifier": {
         "serena": _SERENA_READ,
         "fallback": _READ_TOOLS,
@@ -394,6 +399,7 @@ AGENT_TOOLS: dict[str, dict[str, list[str]]] = {
 
 AGENT_PERMISSION_MODES: dict[str, PermissionMode] = {
     "architect":    "plan",
+    "professor":    "plan",               # Phase 1 subagent: read-only
     "simplifier":   "plan",
     "coder":        "bypassPermissions",
     "foreman_lite": "bypassPermissions",
@@ -435,6 +441,7 @@ SKILL_TOOLS: dict[str, dict[str, list[str]]] = {
 
 _CREW_FILE_MAP: dict[str, str] = {
     "architect":    "architect.md",
+    "professor":    "professor.md",
     "simplifier":   "simplifier.md",
     "foreman_lite": "foreman_lite.md",
     "coder":        "coder.md",
@@ -443,6 +450,7 @@ _CREW_FILE_MAP: dict[str, str] = {
     "inspector":    "inspector.md",
     "librarian":    "librarian.md",
     "dreamer":      "dreamer.md",
+    "prof_review":  "prof_review.md",
 }
 
 
@@ -582,6 +590,15 @@ async def build_phase1_subagents(
     agents: dict[str, AgentDefinition] = {}
 
     for name, model, description in [
+        (
+            "professor",
+            "opus",
+            "GW parameter-estimation expert — ask about likelihood / prior / "
+            "sampler / marginalization physics and statistics, numerical-"
+            "accuracy risks, convention pitfalls (IMRPhenomX, units), or test "
+            "specifications. Multi-round: call multiple times for deep "
+            "back-and-forth.",
+        ),
         (
             "simplifier",
             "sonnet",

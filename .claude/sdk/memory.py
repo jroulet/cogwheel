@@ -16,6 +16,21 @@ AGENT_MEMORIES: dict[str, dict] = {
         "cross_reads": ["coder_knowledge", "inspector_knowledge"],
         "writes": "architect_short_term",
     },
+    "professor": {
+        # Only small, always-relevant memories are eager-read into the system
+        # prompt. Topic memories under professor/ are NOT eager-read: a system
+        # prompt is one argv entry to the claude CLI, and Linux caps a single
+        # argument at 128 KiB (OSError E2BIG), so injecting large topic
+        # memories crashes subprocess spawn. The Professor reads 1-3 topic
+        # memories on demand via Serena read_memory (see professor.md);
+        # professor_knowledge is the small topic index.
+        "reads": [
+            "professor_short_term", "professor_knowledge",
+            "professor_code_observations",
+        ],
+        "cross_reads": [],
+        "writes": "professor_short_term",
+    },
     "simplifier": {
         "reads": [],
         "cross_reads": [],
@@ -60,6 +75,7 @@ AGENT_MEMORIES: dict[str, dict] = {
             "tidy_short_term", "tidy_knowledge",
             "test_dev_short_term", "test_dev_knowledge",
             "librarian_short_term", "librarian_knowledge",
+            "professor_short_term", "professor_knowledge",
         ],
         "cross_reads": [],
         "writes": None,  # writes to many memories programmatically
@@ -75,7 +91,19 @@ CONSOLIDATION_MAP: dict[str, dict[str, str]] = {
     "tidier":       {"short_term": "tidy_short_term",       "long_term": "tidy_knowledge"},
     "test_dev":     {"short_term": "test_dev_short_term",   "long_term": "test_dev_knowledge"},
     "librarian":    {"short_term": "librarian_short_term",  "long_term": "librarian_knowledge"},
+    "professor":    {"short_term": "professor_short_term",  "long_term": "professor_knowledge"},
 }
+
+# Professor topic memories (manually curated, never touched by the Dreamer)
+PROFESSOR_TOPIC_MEMORIES: list[str] = [
+    "professor/likelihood_and_inference",
+    "professor/priors_and_coordinates",
+    "professor/samplers_and_convergence",
+    "professor/marginalization",
+    "professor/waveform_conventions",
+    "professor/validation",
+    "professor/open_problems",
+]
 
 # Serena memories directory (fallback path for direct file I/O)
 SERENA_MEMORIES_DIR = Path(".serena/memories")
