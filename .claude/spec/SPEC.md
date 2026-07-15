@@ -51,6 +51,7 @@ EventData (strain + ASD)  ->  WaveformGenerator  ->  Likelihood
 | Utilities & physics | JSON (de)serialization mixin, caching, detector geometry/response, sky-loc angles, cosmology. | `cogwheel/utils.py`, `cogwheel/gw_utils.py`, `cogwheel/skyloc_angles.py`, `cogwheel/cosmology.py` |
 | Plotting | Corner plots with GW-specific LaTeX labels. | `cogwheel/plotting.py`, `cogwheel/gw_plotting.py` |
 | Validation | End-to-end injection-recovery pipeline (PP-plots / coverage). | `cogwheel/validation/generate_injections.py`, `inference.py`, `analyze.py`, `injection_prior.py`, `example/config.py` |
+| Microlensing engine (IN PROGRESS — foundation only) | Chang–Refsdal wave-optics amplification for microlensed-PE: double-double arithmetic substrate, exact gauge/cluster-split channel algebra, image geometry (quartic solver, delays, magnifications, stationary-phase kernels). Pending: fast complex-1F1 kernel, contour-free operator `F_op`, topology-stable `ChangRefsdalChannels`, geometry tests. Positive-parity macro images only (`1-kappa > \|gamma\|`); macro saddles out of scope. | `cogwheel/lensing/chang_refsdal/_dd.py`, `_gauge.py`, `geometry.py` |
 
 ### Key abstractions
 

@@ -54,7 +54,21 @@ approve/reject plans via the file gate, give feedback, no further user input.
   dedicated task (18 SDK tests). Effective from the NEXT launch — the
   running Build 1 rides the retry net. Propagate BOTH stream fixes to
   the teja-force skill at program end.
-- [RELAUNCHED 03:22] Build 1 — lens engine:
+- BUILD 1 OUTCOME (2026-07-16 05:07): PARTIAL. Third launch ran the full
+  pipeline on the hardened orchestrator; coders under-delivered (transient
+  stream deaths mid-build; suspiciously fast WP completions). Inspector
+  PASSED the partial diff; the PROFESSOR'S INFERENCE REVIEW (first live
+  firing) correctly returned CONCERN — "~13 of 15 review specs describe
+  code not yet written"; commit then blocked by the SPEC-module pre-commit
+  check (WP6 never updated SPEC.md). DRIVER ACTION: salvaged the tested
+  foundation (_dd.py 37 tests, _gauge.py 34 tests, geometry.py untested)
+  with honest SPEC "IN PROGRESS" row + spec_changelog fragment; corrective
+  Build 1b launched with the exact gap list (build1b_brief.md): _hyp1f1,
+  operator, channels, geometry tests, domain-test suite, SPEC closeout.
+  WATCH ITEM: session-resume retries may cause premature WP completion
+  (resumed agent concludes instead of continuing) — Build 1b brief pins
+  "complete = named tests pass under cogwheel/tests/".
+- [SUPERSEDED — see 1b] Build 1 — lens engine:
   cogwheel/lensing/chang_refsdal/ (geometry, operator, channels).
   Log: /tmp/lensing_build1_20260716_024350.log. 7 WPs, ~515 turns budget.
   Plan deviations ACCEPTED at the gate (all argued, all improvements):

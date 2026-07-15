@@ -1,0 +1,872 @@
+"""
+Image geometry and stationary-phase kernels for the Chang--Refsdal lens.
+
+WHAT
+----
+A point mass embedded in the locally constant convergence ``kappa`` and
+shear ``gamma`` (oriented at ``beta``) of a macro image.  This module
+provides the geometrical optics layer of that model: the macro matrix,
+the exact quartic image solver, Fermat delays, Hessians, signed
+magnifications, Morse indices, the stationary-phase (saddle) kernels
+through relative order ``w**-2``, and the critical-curve utilities used
+to place unoccupied image labels.
+
+WHY
+---
+The wave-optics amplification of the lens is written as
+
+    F(w) = sum_a exp(1j * w * tau_a) * K_a(w),
+
+with the image delays ``tau_a`` carried analytically so that only the
+slowly varying kernels ``K_a`` need interpolation.  Everything that
+decomposition needs about the lens plane -- where the images are, how
+long they take, how bright they are, and what their high-frequency
+kernels asymptote to -- is computed here, with no dependence on the
+wave-optics evaluation.  The stationary-phase kernels this module
+returns are the ``w -> inf`` targets that the exact channel kernels
+approach.
+
+Conventions
+-----------
+Angles (image positions ``x`` and source positions ``y``) are in units
+of the point mass's Einstein radius.  Delays ``tau`` are dimensionless
+Fermat delays; the dimensionless frequency conjugate to them is
+
+    w = 8 * pi * G * M_L * (1 + z_L) * f / c**3,
+
+which is exactly *linear* in the observed frequency ``f``.  A
+dimensionless delay ``tau`` therefore corresponds to the constant time
+shift ``dt = 4 * G * M_L * (1 + z_L) * tau / c**3``, independent of
+frequency.
+
+Limitations
+-----------
+Only positive-parity macro images are supported: ``macro_matrix``
+requires ``1 - kappa > abs(gamma)`` and raises `LensDomainError`
+otherwise.  Macro saddles (Type II images), which are common in
+strong-lensing image pairs, are out of scope of the formalism this
+module implements.
+
+Accuracy
+--------
+Near a fold caustic the image quartic acquires a double root, so image
+*positions* there are accurate only to ``sqrt(eps) ~ 1.5e-8``.  Delays
+are quadratically insensitive to that error because images are
+stationary points of the Fermat potential, so ``delay`` retains full
+``eps`` accuracy even where positions do not.  Magnifications, by
+contrast, are ``1 / det(H)`` and are genuinely ill conditioned near a
+critical point, where ``det(H) -> 0``: both `magnification` and
+`image_kernel` diverge there, and callers that need finite answers
+across a caustic must blend individual images into a cluster kernel
+rather than using the single-image expressions of this module.
+"""
+from __future__ import annotations
+
+from typing import NamedTuple
+
+import numpy as np
+from scipy.optimize import minimize_scalar
+
+#: Smallest ``|x|**2`` treated as nonzero; below it the point mass's
+#: logarithmic potential is singular.
+_MIN_RADIUS_SQUARED = 1e-30
+
+#: Newton polish is stopped once the lens residual falls below this.
+_POLISH_RESIDUAL = 2e-13
+
+
+class LensDomainError(ValueError):
+    """Lens parameters fall outside the supported model domain."""
+
+
+class CriticalPoint(NamedTuple):
+    """A point on the critical curve and its local frame.
+
+    Attributes
+    ----------
+    image : np.ndarray
+        Shape (2,), the critical point in the lens plane.
+    source : np.ndarray
+        Shape (2,), the corresponding caustic point in the source
+        plane.
+    hard_axis : np.ndarray
+        Shape (2,), unit Hessian eigenvector with the larger absolute
+        eigenvalue (the direction transverse to the fold).
+    soft_axis : np.ndarray
+        Shape (2,), unit Hessian eigenvector with the vanishing
+        eigenvalue (the direction along which images merge).  Oriented
+        so that ``(hard_axis, soft_axis)`` is right handed.
+    hard_eigenvalue : float
+        The Hessian eigenvalue along ``hard_axis``.
+    """
+
+    image: np.ndarray
+    source: np.ndarray
+    hard_axis: np.ndarray
+    soft_axis: np.ndarray
+    hard_eigenvalue: float
+
+
+class NearestCausticPoint(NamedTuple):
+    """Closest caustic point to a source, and its local frame.
+
+    Attributes
+    ----------
+    theta : float
+        Polar angle in ``[0, 2*pi)`` parametrizing the critical curve
+        at the closest point.
+    image, source, hard_axis, soft_axis, hard_eigenvalue
+        As in `CriticalPoint`, evaluated at ``theta``.
+    distance : float
+        Euclidean distance in the source plane from the source to the
+        caustic.  Unsigned: it does not say which side of the caustic
+        the source is on.
+    """
+
+    theta: float
+    image: np.ndarray
+    source: np.ndarray
+    hard_axis: np.ndarray
+    soft_axis: np.ndarray
+    hard_eigenvalue: float
+    distance: float
+
+
+def macro_matrix(gamma: float, beta: float = 0.0,
+                 kappa: float = 0.0) -> np.ndarray:
+    """
+    Quadratic part of the Fermat Hessian: convergence plus shear.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    beta : float
+        External shear orientation, radians.
+    kappa : float
+        External convergence.
+
+    Returns
+    -------
+    np.ndarray
+        Shape (2, 2) symmetric matrix
+        ``(1 - kappa) * I - gamma * Q(beta)``.
+
+    Raises
+    ------
+    LensDomainError
+        If ``1 - kappa <= abs(gamma)``, i.e. outside the
+        positive-parity macro-image regime.
+    """
+    gamma = float(gamma)
+    kappa = float(kappa)
+    if not 1.0 - kappa > abs(gamma):
+        raise LensDomainError(
+            f'Cannot build a macro matrix for (kappa, gamma) = '
+            f'({kappa}, {gamma}): the positive-parity condition '
+            f'1 - kappa > |gamma| requires |gamma| < {1.0 - kappa}. '
+            f'Macro saddles (Type II images) are out of scope of this '
+            f'formalism; restrict kappa and gamma to the '
+            f'positive-parity regime.')
+    cos2b, sin2b = np.cos(2.0 * beta), np.sin(2.0 * beta)
+    shear = np.array([[cos2b, sin2b], [sin2b, -cos2b]])
+    return (1.0 - kappa) * np.eye(2) - gamma * shear
+
+
+def hessian(image: np.ndarray, matrix: np.ndarray) -> np.ndarray:
+    """
+    Hessian of the Fermat delay at an image position.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Shape (2,), position in the lens plane.
+    matrix : np.ndarray
+        Shape (2, 2), the macro matrix (see `macro_matrix`).
+
+    Returns
+    -------
+    np.ndarray
+        Shape (2, 2) symmetric Hessian.
+
+    Raises
+    ------
+    LensDomainError
+        If ``image`` is at the point mass, where the Hessian is
+        singular.
+    """
+    image = np.asarray(image, dtype=float)
+    radius_squared = float(image @ image)
+    if radius_squared <= 0.0:
+        raise LensDomainError(
+            'Cannot evaluate the Fermat Hessian at the point mass '
+            '(|x| = 0), where the lens potential is singular; pass an '
+            'image position away from the origin.')
+    return (matrix - np.eye(2) / radius_squared
+            + 2.0 * np.outer(image, image) / radius_squared**2)
+
+
+def lens_residual(image: np.ndarray, source: np.ndarray,
+                  matrix: np.ndarray) -> np.ndarray:
+    """
+    Residual of the lens equation, zero at an image.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Shape (2,), trial position in the lens plane.
+    source : np.ndarray
+        Shape (2,), source position.
+    matrix : np.ndarray
+        Shape (2, 2), the macro matrix.
+
+    Returns
+    -------
+    np.ndarray
+        Shape (2,), ``matrix @ x - x / |x|**2 - y``.  Infinite at the
+        point mass rather than raising, so that root polishing can
+        reject a step onto the singularity.
+    """
+    image = np.asarray(image, dtype=float)
+    source = np.asarray(source, dtype=float)
+    radius_squared = float(image @ image)
+    if radius_squared <= _MIN_RADIUS_SQUARED:
+        return np.array([np.inf, np.inf])
+    return matrix @ image - image / radius_squared - source
+
+
+def delay(image: np.ndarray, source: np.ndarray,
+          matrix: np.ndarray) -> float:
+    """
+    Dimensionless Fermat delay of a lens-plane position.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Shape (2,), position in the lens plane.
+    source : np.ndarray
+        Shape (2,), source position.
+    matrix : np.ndarray
+        Shape (2, 2), the macro matrix.
+
+    Returns
+    -------
+    float
+        ``x @ A @ x / 2 - y @ x + y @ y / 2 - ln|x|``.  At an image
+        this is stationary, hence accurate to full machine precision
+        even where the image position itself is not (see the module
+        docstring).
+    """
+    image = np.asarray(image, dtype=float)
+    source = np.asarray(source, dtype=float)
+    return float(0.5 * image @ matrix @ image - source @ image
+                 + 0.5 * source @ source
+                 - np.log(np.linalg.norm(image)))
+
+
+def magnification(image: np.ndarray, matrix: np.ndarray) -> float:
+    """
+    Signed magnification of an image.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Shape (2,), image position.
+    matrix : np.ndarray
+        Shape (2, 2), the macro matrix.
+
+    Returns
+    -------
+    float
+        ``1 / det(H)``.  Positive for minima and maxima, negative for
+        saddles.  Ill conditioned near a critical point, where
+        ``det(H) -> 0`` and the magnification diverges.
+    """
+    return 1.0 / float(np.linalg.det(hessian(image, matrix)))
+
+
+def morse_index(image: np.ndarray, matrix: np.ndarray) -> int:
+    """
+    Morse index of an image: the number of negative Hessian
+    eigenvalues.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Shape (2,), image position.
+    matrix : np.ndarray
+        Shape (2, 2), the macro matrix.
+
+    Returns
+    -------
+    int
+        0 for a minimum, 1 for a saddle, 2 for a maximum.  It enters
+        the kernel as the phase ``exp(-0.5j * pi * n_a)``.
+    """
+    eigenvalues = np.linalg.eigvalsh(hessian(image, matrix))
+    return int(np.sum(eigenvalues < 0.0))
+
+
+def _source_frame(source: np.ndarray) -> tuple[float, np.ndarray]:
+    """Return source radius and orthogonal matrix whose first axis is
+    the source direction."""
+    source = np.asarray(source, dtype=float)
+    if source.shape != (2,):
+        raise ValueError(
+            f'Cannot build a source frame from an array of shape '
+            f'{source.shape}: the source must be a two-vector.')
+    radius = float(np.linalg.norm(source))
+    if radius == 0.0:
+        return 0.0, np.eye(2)
+    axis1 = source / radius
+    axis2 = np.array([-axis1[1], axis1[0]])
+    return radius, np.column_stack([axis1, axis2])
+
+
+def image_quartic_coefficients(source_radius: float,
+                               rotated_matrix: np.ndarray) -> np.ndarray:
+    r"""
+    Quartic coefficients for ``u = 1 / |x|**2``, descending order.
+
+    In the source-aligned frame put ``A = [[a11, a12], [a12, a22]]``
+    and ``y = (Y, 0)``.  The lens equation gives
+
+        ``x1 = Y * (a22 - u) / D``, ``x2 = -Y * a12 / D``,
+        ``D = (a11 - u) * (a22 - u) - a12**2``,
+
+    and the radial constraint ``|x|**2 = 1 / u`` becomes
+
+        ``D**2 - Y**2 * u * [(a22 - u)**2 + a12**2] = 0``.
+
+    Parameters
+    ----------
+    source_radius : float
+        ``Y = |y| >= 0``.
+    rotated_matrix : np.ndarray
+        Shape (2, 2), the macro matrix expressed in the source-aligned
+        frame.
+
+    Returns
+    -------
+    np.ndarray
+        Shape (5,), coefficients of ``u**4 ... u**0``.
+
+    Raises
+    ------
+    ValueError
+        If ``source_radius`` is negative or ``rotated_matrix`` is not
+        2 by 2.
+    """
+    source_radius = float(source_radius)
+    if source_radius < 0.0:
+        raise ValueError(
+            f'Cannot build quartic coefficients for source_radius = '
+            f'{source_radius}: it must be nonnegative.')
+    rotated_matrix = np.asarray(rotated_matrix, dtype=float)
+    if rotated_matrix.shape != (2, 2):
+        raise ValueError(
+            f'Cannot build quartic coefficients from an array of '
+            f'shape {rotated_matrix.shape}: rotated_matrix must be '
+            f'2 by 2.')
+    a11 = float(rotated_matrix[0, 0])
+    a12 = float(rotated_matrix[0, 1])
+    a22 = float(rotated_matrix[1, 1])
+    determinant = a11 * a22 - a12 * a12
+    radius_squared = source_radius * source_radius
+    return np.array(
+        [1.0,
+         -2.0 * (a11 + a22) - radius_squared,
+         (a11 * a11 + 4.0 * a11 * a22 + a22 * a22 - 2.0 * a12 * a12
+          + 2.0 * a22 * radius_squared),
+         (-2.0 * (a11 + a22) * determinant
+          - radius_squared * (a22 * a22 + a12 * a12)),
+         determinant * determinant],
+        dtype=float)
+
+
+def _newton_polish(image: np.ndarray, source: np.ndarray,
+                   matrix: np.ndarray, *,
+                   max_steps: int = 8) -> np.ndarray:
+    """Deterministically polish one algebraic candidate with the lens
+    Jacobian."""
+    trial = np.asarray(image, dtype=float).copy()
+    for _ in range(max_steps):
+        residual = lens_residual(trial, source, matrix)
+        if (not np.all(np.isfinite(residual))
+                or np.linalg.norm(residual) < _POLISH_RESIDUAL):
+            break
+        jacobian = hessian(trial, matrix)
+        try:
+            step = np.linalg.solve(jacobian, residual)
+        except np.linalg.LinAlgError:
+            step = np.linalg.lstsq(jacobian, residual, rcond=None)[0]
+        # A large Newton step near a multiple root is less useful than
+        # the original algebraic candidate.  Backtrack until the
+        # residual falls.
+        old_norm = float(np.linalg.norm(residual))
+        accepted = False
+        scale = 1.0
+        for _ in range(8):
+            stepped = trial - scale * step
+            if np.linalg.norm(stepped) < 1e-12:
+                scale *= 0.5
+                continue
+            new_norm = float(np.linalg.norm(
+                lens_residual(stepped, source, matrix)))
+            if np.isfinite(new_norm) and new_norm < old_norm:
+                trial = stepped
+                accepted = True
+                break
+            scale *= 0.5
+        if not accepted:
+            break
+    return trial
+
+
+def _centered_source_images(matrix: np.ndarray, *,
+                            degeneracy_tolerance: float
+                            ) -> list[np.ndarray]:
+    """Images for y = 0; the gamma = 0 Einstein ring is intentionally
+    rejected."""
+    values, vectors = np.linalg.eigh(matrix)
+    if np.any(values <= 0.0):
+        raise LensDomainError(
+            f'Cannot solve for images of a centered source with macro '
+            f'matrix eigenvalues {values}: the centered-source solver '
+            f'assumes a positive-parity macro image (both eigenvalues '
+            f'positive). Macro saddles are out of scope.')
+    if (abs(values[1] - values[0])
+            <= degeneracy_tolerance * max(abs(values[0]),
+                                          abs(values[1]), 1.0)):
+        raise LensDomainError(
+            'Cannot enumerate discrete images at zero source and zero '
+            'shear: the macro matrix is degenerate and the image is a '
+            'continuous Einstein ring. Use a nonzero shear or a '
+            'nonzero source position.')
+    images: list[np.ndarray] = []
+    for value, vector in zip(values, vectors.T):
+        image = vector / np.sqrt(value)
+        images.extend([image, -image])
+    return images
+
+
+def _axial_candidates(source_radius: float, a11: float, a22: float, *,
+                      root_tolerance: float) -> list[np.ndarray]:
+    """Candidates in the source frame when the rotated macro matrix is
+    diagonal, where the generic reconstruction formula is removably
+    singular."""
+    candidates: list[np.ndarray] = []
+    # Axial images satisfy a11 * x1**2 - Y * x1 - 1 = 0.
+    discriminant = source_radius * source_radius + 4.0 * a11
+    if discriminant >= -root_tolerance and abs(a11) > 1e-14:
+        root = np.sqrt(max(discriminant, 0.0))
+        candidates.extend(
+            [np.array([(source_radius + root) / (2.0 * a11), 0.0]),
+             np.array([(source_radius - root) / (2.0 * a11), 0.0])])
+
+    # A symmetric off-axis pair can occur at u = a22.
+    if a22 > 0.0 and abs(a11 - a22) > 1e-14:
+        x1_axial = source_radius / (a11 - a22)
+        x2_squared = 1.0 / a22 - x1_axial * x1_axial
+        if x2_squared >= -root_tolerance:
+            x2_axial = np.sqrt(max(x2_squared, 0.0))
+            candidates.extend([np.array([x1_axial, x2_axial]),
+                               np.array([x1_axial, -x2_axial])])
+    return candidates
+
+
+def _generic_candidates(source_radius: float, rotated: np.ndarray, *,
+                        root_tolerance: float) -> list[np.ndarray]:
+    """Candidates in the source frame from the roots of the quartic in
+    ``u = 1 / |x|**2``."""
+    a11 = float(rotated[0, 0])
+    a12 = float(rotated[0, 1])
+    a22 = float(rotated[1, 1])
+    candidates: list[np.ndarray] = []
+    for raw_root in np.roots(image_quartic_coefficients(source_radius,
+                                                        rotated)):
+        if raw_root.real <= 0.0:
+            continue
+        if abs(raw_root.imag) > root_tolerance * (1.0 + abs(raw_root.real)):
+            continue
+        root = float(raw_root.real)
+        denominator = (a11 - root) * (a22 - root) - a12 * a12
+        if abs(denominator) <= 1e-12 * (1.0 + abs(a11 * a22) + root**2):
+            continue
+        candidates.append(
+            np.array([source_radius * (a22 - root) / denominator,
+                      -source_radius * a12 / denominator], dtype=float))
+    return candidates
+
+
+def find_images_quartic(source: np.ndarray, matrix: np.ndarray, *,
+                        root_tolerance: float = 3e-7,
+                        residual_tolerance: float = 3e-8,
+                        duplicate_tolerance: float = 3e-7,
+                        axis_tolerance: float = 5e-11
+                        ) -> list[np.ndarray]:
+    """
+    All distinct finite real images, from the exact quartic reduction.
+
+    The quartic is solved in a frame aligned with the source, so that
+    the general source vector needs no multistart search.  Axis-aligned
+    shear is handled separately because the off-axis pair then lies at
+    a removable singularity of the generic reconstruction formula.  A
+    short deterministic Newton polish removes floating-point error from
+    the algebraic roots; it is not an image search.
+
+    Parameters
+    ----------
+    source : np.ndarray
+        Shape (2,), source position.
+    matrix : np.ndarray
+        Shape (2, 2), symmetric macro matrix (see `macro_matrix`).
+    root_tolerance : float
+        Relative imaginary part below which a quartic root counts as
+        real, and the negative slack allowed on a squared quantity
+        before its square root is clipped to zero.
+    residual_tolerance : float
+        Largest ``|lens_residual|`` accepted for an image.
+    duplicate_tolerance : float
+        Relative separation below which two images are the same image.
+    axis_tolerance : float
+        Relative size of the off-diagonal element below which the
+        rotated macro matrix counts as diagonal, and the relative
+        eigenvalue splitting below which a centered-source macro
+        matrix counts as degenerate.
+
+    Returns
+    -------
+    list of np.ndarray
+        Image positions, each of shape (2,), sorted by increasing
+        Fermat delay.  Two images for a source outside the astroid
+        caustic, four inside.
+
+    Raises
+    ------
+    ValueError
+        If the shapes are wrong or ``matrix`` is not symmetric.
+    LensDomainError
+        If the geometry is outside the supported domain (macro saddle,
+        or an Einstein ring at zero source and zero shear).
+
+    Notes
+    -----
+    Near a fold the quartic has a double root, so the returned
+    positions carry only ``sqrt(eps) ~ 1.5e-8`` there; the
+    corresponding `delay` values are unaffected.  The default
+    tolerances are the values the reference implementation was
+    validated with.
+    """
+    source = np.asarray(source, dtype=float)
+    matrix = np.asarray(matrix, dtype=float)
+    if source.shape != (2,) or matrix.shape != (2, 2):
+        raise ValueError(
+            f'Cannot find images for source of shape {source.shape} '
+            f'and matrix of shape {matrix.shape}: they must have '
+            f'shapes (2,) and (2, 2).')
+    if not np.allclose(matrix, matrix.T, atol=1e-13, rtol=0.0):
+        raise ValueError(
+            f'Cannot find images with a non-symmetric macro matrix '
+            f'{matrix.tolist()}: the Fermat Hessian is symmetric by '
+            f'construction.')
+
+    source_radius, basis = _source_frame(source)
+    if source_radius <= 1e-14:
+        candidates = _centered_source_images(
+            matrix, degeneracy_tolerance=axis_tolerance)
+    else:
+        rotated = basis.T @ matrix @ basis
+        off_diagonal_scale = max(abs(rotated[0, 0]), abs(rotated[1, 1]),
+                                 1.0)
+        if abs(rotated[0, 1]) <= axis_tolerance * off_diagonal_scale:
+            rotated_candidates = _axial_candidates(
+                source_radius, float(rotated[0, 0]), float(rotated[1, 1]),
+                root_tolerance=root_tolerance)
+        else:
+            rotated_candidates = _generic_candidates(
+                source_radius, rotated, root_tolerance=root_tolerance)
+        candidates = [basis @ candidate
+                      for candidate in rotated_candidates]
+
+    images: list[np.ndarray] = []
+    for candidate in candidates:
+        image = _accept_candidate(candidate, source, matrix,
+                                  residual_tolerance=residual_tolerance)
+        if image is None:
+            continue
+        scale = 1.0 + float(np.linalg.norm(image))
+        if all(np.linalg.norm(image - old) > duplicate_tolerance * scale
+               for old in images):
+            images.append(image)
+
+    images.sort(key=lambda image: delay(image, source, matrix))
+    return images
+
+
+def _accept_candidate(candidate: np.ndarray, source: np.ndarray,
+                      matrix: np.ndarray, *, residual_tolerance: float
+                      ) -> np.ndarray | None:
+    """Polish one algebraic candidate; return None if it is not an
+    image."""
+    if (not np.all(np.isfinite(candidate))
+            or np.linalg.norm(candidate) < 1e-11):
+        return None
+    polished = _newton_polish(candidate, source, matrix)
+    residual = float(np.linalg.norm(
+        lens_residual(polished, source, matrix)))
+    if residual > residual_tolerance:
+        # Near a multiple root the unpolished algebraic position can be
+        # superior to a poorly conditioned Newton correction.
+        raw_residual = float(np.linalg.norm(
+            lens_residual(candidate, source, matrix)))
+        if raw_residual < residual:
+            polished, residual = candidate, raw_residual
+    if residual > residual_tolerance:
+        return None
+    return polished
+
+
+def find_images(source: np.ndarray,
+                matrix: np.ndarray) -> list[np.ndarray]:
+    """
+    Production image finder: exact quartic reduction plus polishing.
+
+    Parameters
+    ----------
+    source : np.ndarray
+        Shape (2,), source position.
+    matrix : np.ndarray
+        Shape (2, 2), symmetric macro matrix (see `macro_matrix`).
+
+    Returns
+    -------
+    list of np.ndarray
+        Image positions sorted by increasing Fermat delay.  See
+        `find_images_quartic`, of which this is the fixed-tolerance
+        alias.
+    """
+    return find_images_quartic(source, matrix)
+
+
+def _saddle_metric(image: np.ndarray,
+                   matrix: np.ndarray) -> tuple[float, float, float]:
+    """Inverse Hessian in the local radial/tangential frame, scaled by
+    ``u = 1 / |x|**2``."""
+    radius = float(np.linalg.norm(image))
+    radial = np.asarray(image, dtype=float) / radius
+    tangential = np.array([-radial[1], radial[0]])
+    basis = np.column_stack([radial, tangential])
+    inverse = np.linalg.inv(basis.T @ hessian(image, matrix) @ basis)
+    scale = 1.0 / radius**2
+    return (scale * float(inverse[0, 0]), scale * float(inverse[0, 1]),
+            scale * float(inverse[1, 1]))
+
+
+def _c1_polynomial(prr: float, prt: float, ptt: float) -> float:
+    """First subleading saddle coefficient."""
+    return (10*prr**3 - 12*prr*prr*ptt - 9*prr*prr - 48*prr*prt*prt
+            + 18*prr*ptt*ptt + 18*prr*ptt + 72*prt*prt*ptt
+            + 36*prt*prt - 9*ptt*ptt) / 12.0
+
+
+def _c2_polynomial(prr: float, prt: float, ptt: float) -> float:
+    """Second subleading saddle coefficient."""
+    poly = (
+        1540*prr**6 - 1680*prr**5*ptt - 3780*prr**5
+        - 16800*prr**4*prt**2 + 2520*prr**4*ptt**2
+        + 5040*prr**4*ptt + 2961*prr**4
+        + 40320*prr**3*prt**2*ptt + 40320*prr**3*prt**2
+        - 3600*prr**3*ptt**3 - 8280*prr**3*ptt**2
+        - 5364*prr**3*ptt - 720*prr**3
+        + 40320*prr**2*prt**4 - 64800*prr**2*prt**2*ptt**2
+        - 99360*prr**2*prt**2*ptt - 32184*prr**2*prt**2
+        + 3780*prr**2*ptt**4 + 10800*prr**2*ptt**3
+        + 9126*prr**2*ptt**2 + 2160*prr**2*ptt
+        - 86400*prr*prt**4*ptt - 66240*prr*prt**4
+        + 60480*prr*prt**2*ptt**3 + 129600*prr*prt**2*ptt**2
+        + 73008*prr*prt**2*ptt + 8640*prr*prt**2
+        - 3780*prr*ptt**4 - 5940*prr*ptt**3 - 2160*prr*ptt**2
+        - 11520*prt**6 + 60480*prt**4*ptt**2 + 86400*prt**4*ptt
+        + 24336*prt**4 - 30240*prt**2*ptt**3 - 35640*prt**2*ptt**2
+        - 8640*prt**2*ptt + 945*ptt**4 + 720*ptt**3)
+    return -poly / 288.0
+
+
+def saddle_coefficients(image: np.ndarray,
+                        matrix: np.ndarray) -> tuple[float, float]:
+    """
+    Analytic ``C1``, ``C2`` coefficients of the image expansion.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Shape (2,), image position.
+    matrix : np.ndarray
+        Shape (2, 2), the macro matrix.
+
+    Returns
+    -------
+    c1, c2 : float
+        Coefficients of the stationary-phase expansion
+        ``1 + 1j * C1 / w + C2 / w**2`` (see `image_kernel`).  They are
+        built from the inverse Hessian in the frame aligned with the
+        image's radius vector, and diverge at a critical point along
+        with the magnification.
+    """
+    metric = _saddle_metric(image, matrix)
+    return _c1_polynomial(*metric), _c2_polynomial(*metric)
+
+
+def image_kernel(w_dimensionless, image: np.ndarray,
+                 matrix: np.ndarray) -> np.ndarray:
+    """
+    Carrier-free image kernel through relative order ``w**-2``.
+
+    Parameters
+    ----------
+    w_dimensionless : float or np.ndarray
+        Dimensionless frequency ``w`` (see the module docstring); the
+        carrier ``exp(1j * w * tau)`` is *not* included.
+    image : np.ndarray
+        Shape (2,), image position.
+    matrix : np.ndarray
+        Shape (2, 2), the macro matrix.
+
+    Returns
+    -------
+    np.ndarray
+        ``sqrt|mu| * exp(-0.5j * pi * n) * (1 + 1j * C1 / w + C2 / w**2)``
+        broadcast over ``w_dimensionless``.  This is the ``w -> inf``
+        asymptote of the exact channel kernel; it diverges at a
+        critical point (see the module docstring) and is not valid for
+        an image that is part of an unresolved cluster.
+    """
+    w_dimensionless = np.asarray(w_dimensionless, dtype=float)
+    c1_coefficient, c2_coefficient = saddle_coefficients(image, matrix)
+    return (np.sqrt(abs(magnification(image, matrix)))
+            * np.exp(-0.5j * np.pi * morse_index(image, matrix))
+            * (1.0 + 1j * c1_coefficient / w_dimensionless
+               + c2_coefficient / w_dimensionless**2))
+
+
+def critical_point(gamma: float, theta: float, beta: float = 0.0,
+                   kappa: float = 0.0) -> CriticalPoint:
+    """
+    Critical point at a given polar angle, and its local frame.
+
+    The result follows from the exact mass-sheet rescaling
+    ``x' = sqrt(lam) * x``, ``y' = y / sqrt(lam)``, with
+    ``lam = 1 - kappa`` and effective shear ``gamma / lam``.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    theta : float
+        Polar angle in the lens plane, radians.
+    beta : float
+        External shear orientation, radians.
+    kappa : float
+        External convergence.
+
+    Returns
+    -------
+    CriticalPoint
+        The lens-plane critical point at ``theta``, the caustic point
+        it maps to, the local Hessian eigenframe, and the nonzero
+        Hessian eigenvalue.
+
+    Raises
+    ------
+    LensDomainError
+        If ``1 - kappa <= abs(gamma)``.
+    """
+    lam = 1.0 - float(kappa)
+    if lam <= 0.0 or abs(gamma) >= lam:
+        raise LensDomainError(
+            f'Cannot locate a critical point for (kappa, gamma) = '
+            f'({kappa}, {gamma}): this requires the positive-parity '
+            f'condition 1 - kappa > |gamma| >= 0. Macro saddles '
+            f'(Type II images) are out of scope of this formalism.')
+    effective_gamma = gamma / lam
+    phase = theta - beta
+    effective_u = (effective_gamma * np.cos(2.0 * phase)
+                   + np.sqrt(1.0 - effective_gamma**2
+                             * np.sin(2.0 * phase)**2))
+    # x' has radius 1 / sqrt(effective_u); physical x = x' / sqrt(lam).
+    radius = 1.0 / np.sqrt(lam * effective_u)
+    image = radius * np.array([np.cos(theta), np.sin(theta)])
+    matrix = macro_matrix(gamma, beta, kappa)
+    source = matrix @ image - image / radius**2
+    values, vectors = np.linalg.eigh(hessian(image, matrix))
+    soft_index = int(np.argmin(np.abs(values)))
+    hard_index = 1 - soft_index
+    hard_axis = vectors[:, hard_index]
+    soft_axis = vectors[:, soft_index]
+    if np.linalg.det(np.column_stack([hard_axis, soft_axis])) < 0.0:
+        soft_axis = -soft_axis
+    return CriticalPoint(image, source, hard_axis, soft_axis,
+                         float(values[hard_index]))
+
+
+def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
+                          *, kappa: float = 0.0, n_grid: int = 256
+                          ) -> NearestCausticPoint:
+    """
+    Caustic point closest to a source, by search along the critical
+    curve.
+
+    A coarse scan over ``n_grid`` polar angles is refined with a
+    bounded one-dimensional minimization from each of the four best
+    grid cells, so that all four cusps of the astroid remain reachable.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    beta : float
+        External shear orientation, radians.
+    source : np.ndarray
+        Shape (2,), source position.
+    kappa : float
+        External convergence.
+    n_grid : int
+        Number of polar angles in the coarse scan.
+
+    Returns
+    -------
+    NearestCausticPoint
+        The closest caustic point, its local frame, and the (unsigned)
+        source-plane distance to it.  Unoccupied image labels are
+        placed at its lens-plane critical point.
+
+    Raises
+    ------
+    LensDomainError
+        If ``1 - kappa <= abs(gamma)``.
+    """
+    source = np.asarray(source, dtype=float)
+    grid = np.linspace(0.0, 2.0 * np.pi, n_grid, endpoint=False)
+    step = 2.0 * np.pi / n_grid
+
+    def squared_distance(theta) -> float:
+        caustic = critical_point(gamma, float(theta) % (2.0 * np.pi),
+                                 beta, kappa).source
+        return float(np.sum((caustic - source)**2))
+
+    coarse = [squared_distance(theta) for theta in grid]
+    best = None
+    for index in np.argsort(coarse)[:4]:
+        center = grid[index]
+        refined = minimize_scalar(squared_distance,
+                                  bounds=(center - step, center + step),
+                                  method='bounded',
+                                  options={'xatol': 1e-12})
+        if best is None or refined.fun < best.fun:
+            best = refined
+
+    theta = float(best.x % (2.0 * np.pi))
+    return NearestCausticPoint(theta,
+                               *critical_point(gamma, theta, beta, kappa),
+                               distance=float(np.sqrt(best.fun)))
