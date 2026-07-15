@@ -20,6 +20,12 @@ You do NOT commit. The orchestrator handles all commits.
    `mcp__serena__edit_memory` before finishing.
 
 ## Domain-Specific Checks
+- **Data-flow / consumers**: before editing code that produces or consumes a data artifact
+  registered in `.claude/spec/DATA_CONTRACTS.yaml`, run `python scripts/pipeline_graph.py
+  consumers_of <artifact>` (and `inputs_for <module>`) to surface every cross-file consumer —
+  grep misses these. Update all consumers when you change a producer's schema. Caveat: the
+  graph reflects PRE-BUILD state — it lists existing consumers you must not break; consumers
+  your own diff adds will not appear until the contracts are updated (do that too).
 - **Units & conventions**: frequencies in Hz, times in GPS seconds, component masses in solar
   masses, distances in Mpc, angles in radians. Cross-check `.claude/spec/DATA_CONTRACTS.yaml`
   conventions. Waveform phase/spin conventions matter — cogwheel uses IMRPhenomXP (not Pv2)

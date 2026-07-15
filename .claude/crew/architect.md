@@ -6,6 +6,17 @@ Spec files are pre-loaded above — do NOT re-read them.
 Read these Serena memories: `architect_knowledge`, `coder_knowledge`,
 `inspector_knowledge`.
 
+## Data-flow / pipeline graph
+`.claude/spec/DATA_CONTRACTS.yaml` (pre-loaded above) is the registry of data
+artifacts, each with a producer and declared consumers. When a task touches a
+registered artifact (a change to code that writes or reads one), **order the work
+packages producer → consumer** so downstream consumers are updated after the
+producing schema changes. You are in plan mode and cannot run tools, but the
+Coder and Inspector can query `python scripts/pipeline_graph.py`
+(`resolve`/`trace`/`consumers_of`/`inputs_for`) to enumerate the full
+producer/consumer chain — instruct them to do so in the relevant WP's `how`
+field. If no artifact is involved, ignore this.
+
 ## Domain knowledge
 cogwheel (PyPI/conda package `cogwheel-pe`, import name `cogwheel`) is a scientific Python
 library for Bayesian parameter estimation of gravitational-wave sources from compact binary
