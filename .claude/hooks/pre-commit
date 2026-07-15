@@ -36,7 +36,14 @@ fi
 # Threshold: >5 pending commits = hard block, >2 = advisory.
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SYNC_FILE="$REPO_ROOT/.claude/sync_issues.json"
-if [ -f "$SYNC_FILE" ] && command -v jq >/dev/null 2>&1; then
+# Exemption: the Librarian's own sync commit must not be blocked by the
+# backlog it is clearing. Pre-commit can't see the commit message, so we
+# fingerprint the staging: a librarian sync stages its institutional-memory
+# write (.serena/memories/librarian_*.md) and/or the sync trigger file.
+STAGED_EARLY=$(git diff --cached --name-only)
+if echo "$STAGED_EARLY" | grep -qE '^\.serena/memories/librarian_(short_term|knowledge)\.md$|^\.claude/sync_issues\.json$'; then
+    : # librarian sync commit — clearing the backlog, skip the guard
+elif [ -f "$SYNC_FILE" ] && command -v jq >/dev/null 2>&1; then
     PENDING_N=$(jq '.pending_commits | length // 0' "$SYNC_FILE" 2>/dev/null || echo 0)
     if [ "$PENDING_N" -gt 5 ]; then
         echo "===== PRE-COMMIT: Librarian sync backlog too large ====="

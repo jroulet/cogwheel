@@ -160,10 +160,18 @@ echo "Bootstrapping Claude Code workflow..."
 CLAUDE_SRC=".claude/CLAUDE.md"
 CLAUDE_DST="CLAUDE.md"
 if [ -f "$CLAUDE_SRC" ]; then
-    # Strip content between <!-- BEGIN SERENA SECTION --> and <!-- END SERENA SECTION -->
-    sed '/<!-- BEGIN SERENA SECTION -->/,/<!-- END SERENA SECTION -->/d' \
-        "$CLAUDE_SRC" > "$CLAUDE_DST"
-    echo "  Created $CLAUDE_DST (Serena sections stripped)"
+    if [ "$WITH_AGENTIC" -eq 1 ]; then
+        # Agentic tier installs Serena + the agent infra, so KEEP the
+        # sentinel-gated sections that document those capabilities.
+        cp "$CLAUDE_SRC" "$CLAUDE_DST"
+        echo "  Created $CLAUDE_DST (agentic tier: gated sections kept)"
+    else
+        # Non-agentic collaborators can't use Serena / agent-infra tools —
+        # strip BOTH sentinel-gated sections (SERENA and AGENT INFRA).
+        sed '/<!-- BEGIN SERENA SECTION/,/<!-- END SERENA SECTION -->/d;/<!-- BEGIN AGENT INFRA SECTION/,/<!-- END AGENT INFRA SECTION -->/d' \
+            "$CLAUDE_SRC" > "$CLAUDE_DST"
+        echo "  Created $CLAUDE_DST (gated sections stripped)"
+    fi
 elif [ -f "CLAUDE.md" ]; then
     echo "  CLAUDE.md already exists, skipping"
 else
