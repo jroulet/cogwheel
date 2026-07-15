@@ -13,7 +13,7 @@
 #   MINOR: new artifacts, conventions, or consumer/producer entries
 #   PATCH: field list corrections, wording fixes
 
-schema_version: "1.0.0"
+schema_version: "0.1.0"
 
 # ── Conventions ──────────────────────────────────────────────────────────
 # Define project-wide data conventions here. These are referenced by
@@ -46,41 +46,151 @@ conventions:
 
 # ── Artifacts ────────────────────────────────────────────────────────────
 
-artifacts: {}
-  # GW-tailored skeleton — uncomment and fill in `fields` only after confirming
-  # the exact column/attribute names in code (the Inspector and the pre-commit
-  # contract check grep source for each listed field, so a wrong name becomes a
-  # spurious finding). Candidate cogwheel data products to document here:
-  #
-  # posterior_samples:
-  #   description: "Posterior samples written by a Sampler run."
-  #   format: "feather"          # cogwheel.utils / sampling SAMPLES_FILENAME
-  #   producer:
-  #     module: "cogwheel/sampling.py"
-  #     function: "Sampler.run"
-  #   consumers:
-  #     - module: "cogwheel/postprocessing.py"
-  #     - module: "cogwheel/gw_plotting.py"
-  #   conventions_applied:
-  #     - units
-  #     - sampled_vs_standard
-  #
-  # event_asd:
-  #   description: "Amplitude spectral density of detector noise for an event."
-  #   format: "npz"              # cogwheel/data/*.npz, cogwheel/data/example_asds/*.npy
-  #   producer:
-  #     module: "cogwheel/data.py"
-  #   consumers:
-  #     - module: "cogwheel/likelihood/likelihood.py"
-  #   conventions_applied:
-  #     - units
-  #
-  # coherent_score_lookup_tables:
-  #   description: "Precomputed lookup tables for coherent-score marginalization."
-  #   format: "npz"              # cogwheel/likelihood/marginalization/lookup_tables.npz
-  #   producer:
-  #     module: "cogwheel/likelihood/marginalization/lookup_table.py"
-  #   consumers:
-  #     - module: "cogwheel/likelihood/marginalization/base.py"
-  #   conventions_applied:
-  #     - array_axes
+artifacts:
+
+  posterior_samples:
+    description: "Posterior parameter samples written by a Sampler run (samples.feather in the rundir)."
+    format: "feather"
+    producer:
+      module: "cogwheel/sampling.py"
+      function: "Sampler.run"
+    consumers:
+      - module: "cogwheel/postprocessing.py"
+        function: "PostProcessor.__init__"
+      - module: "cogwheel/validation/analyze.py"
+        function: "_get_samples"
+      - module: "cogwheel/validation/inference.py"
+        function: "make_corner_plot"
+    conventions_applied:
+      - units
+      - sampled_vs_standard
+
+  sampler_config_json:
+    description: "Serialized Sampler instance (sampler settings + embedded Posterior) written to Sampler.json in the rundir."
+    format: "json"
+    producer:
+      module: "cogwheel/sampling.py"
+      function: "Sampler.run"
+    consumers:
+      - module: "cogwheel/postprocessing.py"
+        function: "PostProcessor.__init__"
+      - module: "cogwheel/sampling.py"
+        function: "main"
+    conventions_applied:
+      - sampled_vs_standard
+
+  posterior_config_json:
+    description: "Serialized Posterior (Prior + relative-binning Likelihood, reference solution) written to Posterior.json in the eventdir."
+    format: "json"
+    producer:
+      module: "cogwheel/posterior.py"
+      function: "Posterior.from_event"
+    consumers:
+      - module: "cogwheel/utils.py"
+        function: "read_json"
+    conventions_applied:
+      - sampled_vs_standard
+      - waveform_phase_convention
+
+  postprocessing_tests_json:
+    description: "Post-inference QA test results (ASD drift, relative-binning accuracy, etc.) written to postprocessing_tests.json in the rundir."
+    format: "json"
+    producer:
+      module: "cogwheel/postprocessing.py"
+      function: "PostProcessor.save"
+    consumers:
+      - module: "cogwheel/postprocessing.py"
+        function: "PostProcessor.__init__"
+      - module: "cogwheel/postprocessing.py"
+        function: "EventResultsDataFrame"
+
+  profiling_stats:
+    description: "cProfile stats for a Sampler run, written to the 'profiling' file in the rundir."
+    format: "cprofile"
+    producer:
+      module: "cogwheel/sampling.py"
+      function: "Sampler.run"
+    consumers:
+      - module: "cogwheel/postprocessing.py"
+        function: "EventResultsDataFrame"
+
+  event_data_npz:
+    description: "Serialized EventData (frequency-domain strain, whitening filter, detector names, GPS time, injection metadata). Shipped set lives at cogwheel/data/*.npz."
+    format: "npz"
+    producer:
+      module: "cogwheel/data.py"
+      function: "EventData.to_npz"
+    consumers:
+      - module: "cogwheel/data.py"
+        function: "EventData.from_npz"
+      - module: "cogwheel/likelihood/reference_waveform_finder.py"
+        function: "(EventData.from_npz)"
+      - module: "cogwheel/utils.py"
+        function: "CogwheelEncoder.default"
+    conventions_applied:
+      - units
+
+  example_asd_npy:
+    description: "Amplitude spectral densities used for synthetic Gaussian-noise events. Shipped set at cogwheel/data/example_asds/asd_*.npy."
+    format: "npy"
+    producer:
+      module: "(shipped with package)"
+      function: "(prebuilt dataset)"
+    consumers:
+      - module: "cogwheel/data.py"
+        function: "EventData.gaussian_noise"
+    conventions_applied:
+      - units
+
+  events_metadata_csv:
+    description: "Metadata for the shipped GW event dataset, loaded at cogwheel.data import time."
+    format: "csv"
+    producer:
+      module: "(shipped with package)"
+      function: "(prebuilt dataset)"
+    consumers:
+      - module: "cogwheel/data.py"
+        function: "(module init: EVENTS_METADATA)"
+
+  coherent_score_lookup_tables:
+    description: "Cached interpolation tables for distance/phase (coherent-score) marginalization; lazily generated on first use, invalidated on version mismatch."
+    format: "npz"
+    producer:
+      module: "cogwheel/likelihood/marginalization/lookup_table.py"
+      function: "LookupTable._instantiate_table"
+    consumers:
+      - module: "cogwheel/likelihood/marginalization/lookup_table.py"
+        function: "LookupTable._instantiate_table"
+      - module: "cogwheel/likelihood/marginalization/base.py"
+        function: "MarginalizedLikelihood.__init__"
+    conventions_applied:
+      - array_axes
+
+  injection_set_feather:
+    description: "DataFrame of injection parameters (drawn from prior, filtered by an h|h threshold) for validation studies."
+    format: "feather"
+    producer:
+      module: "cogwheel/validation/generate_injections.py"
+      function: "generate_injections"
+    consumers:
+      - module: "cogwheel/validation/inference.py"
+        function: "_get_event_data"
+      - module: "cogwheel/validation/generate_injections.py"
+        function: "test_h_h_distribution"
+    conventions_applied:
+      - units
+      - sampled_vs_standard
+
+  injection_json:
+    description: "Per-injection bookkeeping (injected par_dic, approximant, SNRs) written to injection.json in each validation rundir."
+    format: "json"
+    producer:
+      module: "cogwheel/validation/inference.py"
+      function: "main"
+    consumers:
+      - module: "cogwheel/validation/analyze.py"
+        function: "_get_credible_intervals"
+      - module: "cogwheel/validation/inference.py"
+        function: "make_corner_plot"
+    conventions_applied:
+      - units
