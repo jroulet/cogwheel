@@ -1746,27 +1746,62 @@ class BuildOrchestrator:
         """Wrap an async iterable with a per-message timeout.
 
         Converts transport wedges into catchable TimeoutErrors.
+
+        The stream is drained by a SINGLE dedicated task and relayed
+        through a queue; the timeout applies to ``queue.get()``. WHY:
+        claude_agent_sdk's query() holds anyio cancel scopes across
+        yields. Resuming its generator from a different task on every
+        message (which per-``__anext__`` ``asyncio.wait_for`` does)
+        makes any mid-stream error or cancellation exit a cancel scope
+        in a foreign task — ``RuntimeError("Attempted to exit cancel
+        scope in a different task")``, observed 2026-07-16 on both
+        concurrent AND single streams. One drain task means the SDK's
+        scopes enter and exit in the same task, always.
         """
-        iterator = async_iter.__aiter__()
-        while True:
+        queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+        sentinel = object()
+
+        async def _drain():
             try:
-                if INTER_MESSAGE_TIMEOUT_SECONDS is None:
-                    message = await iterator.__anext__()
-                else:
-                    message = await asyncio.wait_for(
-                        iterator.__anext__(),
-                        timeout=INTER_MESSAGE_TIMEOUT_SECONDS,
-                    )
-            except StopAsyncIteration:
+                async for message in async_iter:
+                    await queue.put(message)
+            except BaseException as exc:  # relay, don't lose
+                try:
+                    queue.put_nowait(exc)
+                except asyncio.QueueFull:
+                    pass  # caller stopped consuming; timeout backstops
                 return
-            except asyncio.TimeoutError:
-                self._log(
-                    f"  [{agent_id}] no message for "
-                    f"{INTER_MESSAGE_TIMEOUT_SECONDS}s — treating as "
-                    f"transport wedge"
-                )
-                raise
-            yield message
+            await queue.put(sentinel)
+
+        drain_task = asyncio.create_task(_drain())
+        try:
+            while True:
+                try:
+                    if INTER_MESSAGE_TIMEOUT_SECONDS is None:
+                        item = await queue.get()
+                    else:
+                        item = await asyncio.wait_for(
+                            queue.get(),
+                            timeout=INTER_MESSAGE_TIMEOUT_SECONDS,
+                        )
+                except asyncio.TimeoutError:
+                    self._log(
+                        f"  [{agent_id}] no message for "
+                        f"{INTER_MESSAGE_TIMEOUT_SECONDS}s — treating as "
+                        f"transport wedge"
+                    )
+                    raise
+                if item is sentinel:
+                    return
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+        finally:
+            drain_task.cancel()
+            try:
+                await drain_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
     async def _run_prof_review(self) -> ProfReviewResult:
         """Run the Professor's post-build inference review.
