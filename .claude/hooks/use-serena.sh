@@ -177,7 +177,10 @@ All use relative paths from project root."
 Exception: git, gh, conda, brew, and common read-only system commands
 (ls, stat, wc, pwd, date, env, df, du, file, ps, pgrep, diff, kill, pkill)
 and project scripts under .claude/sdk/ or .claude/hooks/ may use Bash directly.
-Leading VAR=value env assignments are stripped before matching."
+Leading VAR=value env assignments are stripped before matching.
+SDK builds: do NOT hand-roll the launch — use
+  .claude/sdk/launch_build.sh <task_slug> <prompt_file> [stale_seconds]
+then arm the Monitor printed in the log header (health = log mtime, not pgrep)."
     ;;
 
   # ── Within-Serena shell command hygiene ──────────────────────────────

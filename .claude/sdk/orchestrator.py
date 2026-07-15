@@ -239,11 +239,26 @@ class BuildOrchestrator:
             options.resume = self._architect_session
 
         result = ""
-        async for message in query(prompt=prompt, options=options):
-            if isinstance(message, ResultMessage):
-                result = (message.result or "").strip()
-                if message.total_cost_usd:
-                    self._total_cost += message.total_cost_usd
+        # Best-effort: max_turns is only a budget, and there is a deterministic
+        # len(where)*8+10 fallback below. This is a RAW query() (resume of the
+        # Architect session) with none of _run_agent's timeout/retry handling,
+        # and it has aborted whole builds on transient SDK subprocess failures
+        # ("Fatal error in message reader: Command failed with exit code 1").
+        # Wrap it so ANY query failure degrades to the fallback formula instead
+        # of killing Phase 2.
+        try:
+            async for message in query(prompt=prompt, options=options):
+                if isinstance(message, ResultMessage):
+                    result = (message.result or "").strip()
+                    if message.total_cost_usd:
+                        self._total_cost += message.total_cost_usd
+        except Exception as _e:
+            self._log(
+                f"  max_turns estimation query failed "
+                f"({type(_e).__name__}: {_e}); falling back to the "
+                f"len(where)*8+10 formula for all missing WPs"
+            )
+            result = ""
 
         try:
             estimates = json.loads(result)
@@ -998,7 +1013,23 @@ class BuildOrchestrator:
             f"Files to check: {py_files or '(no Python files changed)'}"
             + CHANGE_REPORT_INSTRUCTION
         )
-        result = await self._run_skill("tidier", tidier_task, max_turns=75)
+        # The Tidier is cosmetic cleanup (spacing, import ordering). A failure
+        # here — notably error_max_turns when it grinds on a large changed file
+        # — must NOT abort a build whose Coder + Test-Developer work is already
+        # done and verified. Degrade gracefully: log and proceed to the
+        # Inspector. Partial tidy edits are kept (they parse; the Inspector
+        # reviews them); we do NOT roll back, because test_dev runs in parallel
+        # on the same tree and that would discard the newly written tests.
+        try:
+            result = await self._run_skill("tidier", tidier_task, max_turns=75)
+        except Exception as _e:
+            self._log(
+                f"  Tidier failed ({type(_e).__name__}: {_e}); cosmetic "
+                f"cleanup is non-fatal — proceeding to Inspector with the "
+                f"current (possibly partially-tidied) tree"
+            )
+            write_state(self.project_root, "tidy", status="failed")
+            return ""
         self._collect_change_report(result)
         write_state(self.project_root, "tidy", status="completed")
         return result
@@ -1091,6 +1122,11 @@ class BuildOrchestrator:
 
             if not trivial_findings and not impl_findings and not design_findings and not open_findings:
                 self._log("  Inspector: no actionable findings — treating as PASS.")
+                # Flip the stored verdict so the post-loop assignment to
+                # self._inspector_result carries PASS — otherwise the commit
+                # gate (check_commit_allowed) rejects an ISSUES verdict even
+                # though there is nothing actionable to fix.
+                inspector_result.verdict = InspectorVerdict.PASS
                 break
 
             # Architect triages DESIGN findings directly
@@ -2087,6 +2123,11 @@ class BuildOrchestrator:
         if staged.returncode == 0:
             return None
 
+        # Spec/doc discipline preflight: run the pre-commit hook NOW and
+        # auto-remediate missing changelog fragments before the real commit,
+        # so a completed build doesn't die opaquely at `git commit`.
+        self._ensure_spec_doc_fragments(message)
+
         full_message = message + "\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
         subprocess.run(
             ["git", "commit", "-m", full_message],
@@ -2098,6 +2139,12 @@ class BuildOrchestrator:
             capture_output=True, text=True, cwd=self.project_root,
         )
         return result.stdout.strip() if result.returncode == 0 else None
+
+    def _ensure_spec_doc_fragments(self, message: str) -> None:
+        """Preflight the spec/doc discipline hook; auto-stub missing
+        changelog fragments (see sdk/commit_preflight.py)."""
+        from .commit_preflight import ensure_spec_doc_fragments
+        ensure_spec_doc_fragments(self.project_root, message, log=self._log)
 
     def _append_cost_ledger(self) -> None:
         """Append build cost entry to .claude/sdk/build_costs.jsonl."""

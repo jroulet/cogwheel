@@ -19,7 +19,7 @@
 set -u
 
 LOG_PATH="${1:?usage: watchdog.sh <log_path> [stale_seconds]}"
-STALE_SECONDS="${2:-600}"
+STALE_SECONDS="${2:-1200}"  # 600 killed a healthy Opus planning turn (2026-07-10)
 POLL_INTERVAL=30
 STARTUP_GRACE=60
 

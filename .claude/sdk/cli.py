@@ -188,6 +188,28 @@ def _run_build(args):
 
     print(f"Log: {log_path}")
     print(f"Monitor: tail -f {latest_link}")
+    # The build runs detached, so whoever launched it (a Claude Code agent)
+    # must arm an EVENT-DRIVEN Monitor on the log rather than timer-polling.
+    # Markers must cover EVERY terminal state, not just milestones: a
+    # case-sensitive filter once missed the watchdog's uppercase "KILLED"
+    # line and a build died silently. grep -i + phase markers make both
+    # progress and death produce events, so long silence is itself a signal.
+    _mon_markers = (
+        "Inspector: (PASS|found issues)|Professor: (PASS|CONCERN|FAIL)|"
+        "GATE FAILURE|Build (failed|complete)|Coder checkpoint|"
+        "Phase [0-9]:|Traceback|TimeoutError|transport wedge|"
+        "committed|KILLED|watchdog|Exit code"
+    )
+    print(
+        "AGENT: arm an event-driven Monitor now "
+        "(do NOT timer-poll the log):\n"
+        f"  Monitor(persistent=true, timeout_ms=3600000, "
+        f"command='tail -f {log_path} | grep -iE --line-buffered "
+        f"\"{_mon_markers}\"')\n"
+        "  TaskStop the Monitor when the build ends.\n"
+        "  Health check = log mtime advancing, NOT pgrep (the conda\n"
+        "  wrapper survives a subtree kill and reads as alive)."
+    )
 
     orchestrator = BuildOrchestrator(
         task=task,
