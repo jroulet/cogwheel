@@ -85,6 +85,40 @@ if [ -f "$SYNC_SCRIPT" ] && command -v "$PYTHON" >/dev/null 2>&1; then
 fi
 
 # -----------------------------------------------------------------------
+# Task 1b: Consumer-graph regen (keep CONSUMER_GRAPH.json fresh so the
+# drift check in sync_derived_docs sees new/removed data consumers). Async;
+# only when the commit touched a .py file and jedi is importable (degrades
+# gracefully — skips where jedi is unavailable). The refreshed graph lands
+# uncommitted and rides the next commit.
+# -----------------------------------------------------------------------
+CG_SCRIPT="scripts/regenerate_consumer_graph.py"
+if [ -f "$CG_SCRIPT" ] && command -v "$PYTHON" >/dev/null 2>&1 \
+   && echo "$LAST_COMMIT_FILES" | grep -qE '\.py$' \
+   && "$PYTHON" -c 'import jedi' >/dev/null 2>&1; then
+    CG_LOCK="$GIT_DIR_REAL/.consumer-graph-regen.lock"
+    CG_LOG="$GIT_DIR_REAL/.consumer-graph-regen.log"
+    _SKIP_CG=0
+    if [ -f "$CG_LOCK" ]; then
+        OLD_PID=$(cat "$CG_LOCK" 2>/dev/null)
+        if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+            _SKIP_CG=1
+        else
+            rm -f "$CG_LOCK"
+        fi
+    fi
+    if [ "$_SKIP_CG" -eq 0 ]; then
+        (
+            (
+                echo $$ > "$CG_LOCK"
+                trap 'rm -f "$CG_LOCK"' EXIT INT TERM
+                cd "$REPO_ROOT" || exit 1
+                "$PYTHON" "$CG_SCRIPT" > "$CG_LOG" 2>&1
+            ) </dev/null >/dev/null 2>&1 &
+        ) </dev/null >/dev/null 2>&1
+    fi
+fi
+
+# -----------------------------------------------------------------------
 # Task 2: Librarian auto-sync (async doc maintenance after code commits)
 # -----------------------------------------------------------------------
 
