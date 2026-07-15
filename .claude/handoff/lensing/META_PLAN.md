@@ -37,9 +37,25 @@ approve/reject plans via the file gate, give feedback, no further user input.
    regressions fail tests.
 
 ## Build sequence and status
-- [LAUNCHED] Build 1 — lens engine: cogwheel/lensing/chang_refsdal/
-  (geometry, operator, channels) + oracle/reconstruction/continuity tests.
-  Brief: build1_brief.md. No likelihood integration.
+- [RUNNING — PLAN APPROVED 2026-07-16] Build 1 — lens engine:
+  cogwheel/lensing/chang_refsdal/ (geometry, operator, channels).
+  Log: /tmp/lensing_build1_20260716_024350.log. 7 WPs, ~515 turns budget.
+  Plan deviations ACCEPTED at the gate (all argued, all improvements):
+  (1) double-double internal accumulation (_dd.py) — Professor-calibrated
+  cancellation law rel_err ~ eps*e^L, L = w(|y'|+gamma'/2); plain float64
+  tops out ~L<=15 but the paper's headline config is L=29.6; dd certified
+  to L<=48, must-fail primitive test T0. (2) My brief's reconstruction +
+  mass-sheet tolerances were tautologies (F_op on both sides) — reframed
+  as internal-consistency; accuracy gated by mpmath oracle (T3) + NEW
+  geometric-optics w^-3 slope test (T4, couples all components, no shared
+  code). (3) Explicit branch gate {wave, geometric} — my brief was wrong
+  that the switch avoids F_op at high w; one event spans w ~50x in band.
+  (4) ~450 lines of superseded/unused prototype surface dropped, with a
+  mandatory re-expression check on the 4 builder tests. (5) No k-recurrence
+  (unstable direction analysis) — shared-numerator ladder; no large-|z|
+  asymptotic branch (physically unreachable regime); Kummer reparam makes
+  prefactor overflow-free in closed form. Build-2 consequence to carry:
+  channels expose `branch` flag; K-accuracy domain stated as L<=48, not a box.
 - [PENDING] Build 2 — LensedWaveformGenerator + multi-component RB likelihood
   (decisions 2-4 above) + brute-force lnL agreement tests. Brief written after
   Build-1 review (API of channels feeds in).
