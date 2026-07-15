@@ -192,6 +192,16 @@ class BuildOrchestrator:
         options = ClaudeAgentOptions(
             model="claude-sonnet-4-6",
             max_turns=1,
+            # No tools: a tool call under max_turns=1 cannot complete and
+            # crashes the subprocess (exit 1). This call is text-only; an
+            # @file brief could otherwise coax a tool call. Empty the
+            # allowlist and hard-block built-ins.
+            allowed_tools=[],
+            disallowed_tools=[
+                "Bash", "Read", "Edit", "Write", "Glob", "Grep", "Task",
+                "WebFetch", "WebSearch", "ToolSearch", "NotebookEdit",
+                "TodoWrite",
+            ],
             system_prompt=(
                 "You are a task complexity classifier. "
                 "Respond with exactly one word: trivial, standard, or complex."
@@ -230,6 +240,16 @@ class BuildOrchestrator:
         options = ClaudeAgentOptions(
             model="claude-sonnet-4-6",
             max_turns=1,
+            # No tools: a tool call under max_turns=1 cannot complete and
+            # crashes the subprocess (exit 1). Turn-budget estimation is pure
+            # arithmetic; resuming the plan-mode Architect could otherwise
+            # re-grant tools, so empty the allowlist and hard-block built-ins.
+            allowed_tools=[],
+            disallowed_tools=[
+                "Bash", "Read", "Edit", "Write", "Glob", "Grep", "Task",
+                "WebFetch", "WebSearch", "ToolSearch", "NotebookEdit",
+                "TodoWrite",
+            ],
             system_prompt="You are a turn-budget estimator. Respond with only JSON.",
             permission_mode="bypassPermissions",
             cwd=self.project_root,
