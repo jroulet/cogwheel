@@ -1,0 +1,7 @@
+fixed topology: both points outside the same generic fold
+fiducial eta_s=-0.040
+candidate eta_s=-0.010
+frequency range=5.0..40.0 with 141 validation points
+separated-ratio nodes at 1e-3=11
+direct nodes at 1e-3=135
+max exact reconstruction error=4.742875e-16

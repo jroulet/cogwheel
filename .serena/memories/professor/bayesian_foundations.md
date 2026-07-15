@@ -20,7 +20,7 @@ record the credible level at which each true value falls. If well-calibrated, th
 recovered within the X% credible interval equals X for all X — the cumulative percentile
 plot lies on the diagonal within the binomial band. One does NOT expect the posterior to
 peak at theta_true, only correct interval coverage. This is exactly what cogwheel's
-validation/ injection-recovery module implements (see `mem:professor/validation` when written).
+validation/ injection-recovery module implements.
 
 ## Community standards
 LALInference (1409.7215): the LSC C+Python toolkit — LAL data/PSD/waveforms, coherent-network
@@ -34,10 +34,48 @@ interface to emcee/dynesty/PyMultiNest/etc., optional phase/time/distance margin
 
 ## Where cogwheel diverges
 Both standards sample near-physical coordinates with generic samplers. cogwheel instead:
-(i) bespoke SAMPLED-vs-STANDARD coordinates to reduce correlations/multimodality;
+(i) bespoke SAMPLED-vs-STANDARD coordinates to reduce correlations/multimodality
+(see `mem:professor/priors_and_coordinates`);
 (ii) FOLDING to collapse degenerate/symmetric modes and shrink the sampled volume;
 (iii) RELATIVE BINNING for order-of-magnitude speedup (must agree with exact L within
 tolerance); (iv) COHERENT-SCORE marginalization over extrinsic parameters.
+
+## The authors' own frame (2402.11439, Roulet & Venumadhav review)
+The canonical statement of cogwheel's design philosophy:
+- **What is actually measured**: the data constrain OBSERVABLE COMBINATIONS, not the
+  physical parametrization. Inspiral phase measures leading PN coefficients — first
+  Mchirp^(-5/3) (exquisite at low mass), then corrections mixing q and aligned spins
+  with similar slowly-varying powers of v across the band — hence the q–chi_eff
+  degeneracy (the 1.5PN coefficient itself mixes both). High-mass events instead
+  constrain a total-mass/aligned-spin combination through the merger frequency.
+  Even for favorable sources only ~4-5 combinations of the 8 intrinsic parameters
+  are meaningfully constrained; extrinsics contribute <=3 numbers per detector
+  (amplitude, phase, arrival time), fewer in practice (near-coaligned LIGOs).
+- **In-plane spins** appear only through the amplitude/phase of the subleading
+  precession harmonic — precession is a power series in tan(beta/2), usually well
+  approximated by the first two precession harmonics; natural frame z = J_hat,
+  x toward observer. **Distance–inclination** degeneracy broken by higher modes
+  (relative amplitude depends on q and iota; GW190412 the showcase).
+- **Fisher-based principal components work only for the top ~2 combinations** —
+  beyond that the prior dominates and Fisher fails. (Caution for lens-parameter
+  coordinate design: use Fisher for the leading combos only.)
+- **Discrete degeneracies**: phi -> phi+pi (quadrupole); simultaneous (phi, psi)
+  pi/2 shifts; cos-iota flips and sky reflections for the near-aligned network —
+  handled by folding (exact, general-sampler-compatible, postprocessing unfold).
+- **Pipeline economics**: cost = (per-likelihood cost) x (number of evaluations);
+  attack both. Relative binning by co-precessing m (same-m modes share phase
+  evolution Phi_m ~ m Phi_orb(f/m)); ~few hundred coarse frequencies; ~1 ms per
+  IMRPhenomXPHM call; PE needs ~1e5-1e7 waveform evaluations per event.
+  Alternatives ranked: ROQ (no reference waveform, lower efficiency), multibanding
+  (cost grows with duration), likelihood interpolation (RIFT).
+- **Marginalization wisdom**: phase analytically (I_0, quadrupolar; undo by sampling
+  2phi from von Mises); distance via 2D interpolation table in <d|h1>, <h1|h1>
+  (tabulate log-ratio to an analytic approximation for dynamic range); time by
+  quadrature/pruned FFT; draw marginalized params back from conditionals.
+  Importance sampling: proposal must have HEAVIER tails than the target; monitor
+  n_eff = (sum w)^2/sum w^2; reweight cheap-model posteriors (22-only -> HM,
+  quasicircular -> eccentric).
+- Odds ratios are NOT goodness-of-fit tests.
 
 ## Pitfalls
 Prior choice carries a Jacobian (mass parametrization); distance/inclination and tidal
@@ -45,4 +83,4 @@ parameters are strongly covariant; prior-boundary pileup (prefer HPDI near edges
 label switching / mode degeneracy (folding targets this); MCMC autocorrelation and burn-in;
 under-coverage is the primary failure mode P-P tests surface.
 
-Sources: 1809.02293, 1409.7215, 1811.02042.
+Sources: 1809.02293, 1409.7215, 1811.02042, 2402.11439.

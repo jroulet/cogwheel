@@ -1,0 +1,1189 @@
+\documentclass[aps,prd,twocolumn,nofootinbib,superscriptaddress,floatfix]{revtex4-2}
+
+\usepackage{amsmath,amssymb,amsfonts,mathtools}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{bm}
+\usepackage{microtype}
+\usepackage{placeins}
+\usepackage[colorlinks=true,citecolor=blue,linkcolor=blue,urlcolor=blue]{hyperref}
+\pdfstringdefDisableCommands{\def\\{ }}
+
+\newcommand{\ii}{\mathrm{i}}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\bx}{\bm{x}}
+\newcommand{\by}{\bm{y}}
+\newcommand{\bA}{\bm{A}}
+\newcommand{\bG}{\bm{\Gamma}}
+\newcommand{\bH}{\bm{H}}
+\newcommand{\cG}{\mathcal{G}}
+\newcommand{\cZ}{\mathcal{Z}}
+\newcommand{\inner}[2]{\left\langle #1\middle|#2\right\rangle}
+
+\begin{document}
+
+\title{Relative binning for gravitational-wave microlensing\\
+in the Chang--Refsdal model}
+
+\author{Tejaswi Venumadhav}
+\affiliation{Department of Physics, University of California, Santa Barbara, California 93106, USA}
+\date{July 15, 2026}
+
+\begin{abstract}
+Stars in a lensing galaxy can microlens a strongly lensed gravitational wave
+and imprint diffraction and interference fringes across the detector band.
+Relative binning accelerates gravitational-wave parameter estimation by
+representing nearby waveforms through smoothly varying ratios that need to be
+evaluated at only a sparse set of frequencies.  Applied directly to a
+microlensed waveform, this method loses its advantage because small changes in
+the lens parameters shift the fringes and make the ratio rapidly varying.  We
+reorganize the Chang--Refsdal amplification factor as a coherent sum in which
+the image-delay phases are kept explicit and the remaining complex amplitudes
+vary slowly with frequency.  Away from caustics these amplitudes reduce to the
+individual image contributions.  At moderate frequencies and through folds
+and cusps, we use the full wave-optics result to correct the separated
+contributions while preserving their sum exactly.  We evaluate the total
+amplification from the analytic point-mass solution through source derivatives
+and include external convergence by an exact rescaling, without numerical
+integration over the lens plane.  In the examples studied here, interpolating
+the separated amplitudes while treating the delay phases analytically reduces
+the required frequency sampling by more than an order of magnitude compared
+with direct interpolation of the full amplification ratio.
+\end{abstract}
+
+\maketitle
+
+\section{Introduction}
+\label{sec:introduction}
+
+Gravitational waves retain phase coherence over the frequency band of an
+interferometric detector.  A gravitational lens can therefore produce
+observable diffraction and interference when the delay between competing
+propagation paths is comparable to the inverse wave frequency
+\cite{NakamuraDeguchi1999,TakahashiNakamura2003}.  Stellar-mass objects lie in
+this regime for ground-based detectors.  Their influence is enhanced when the
+source is also strongly lensed by a galaxy, since the stellar population in
+the lens galaxy perturbs each macro image and can imprint frequency-dependent
+modulations on the signal
+\cite{ChristianVitaleLoeb2018,MeenaBagla2020,MishraEtAl2021}.  On the scale of
+a single microlens Einstein radius, the smooth galaxy potential is described by
+a constant convergence and shear.  A point mass in this local field is the
+Chang--Refsdal lens \cite{ChangRefsdal1979,ChangRefsdal1984,AnEvans2006}.
+
+Bayesian parameter estimation requires repeated evaluations of the
+gravitational-wave likelihood.  Relative binning accelerates this calculation
+by choosing a waveform near the high-likelihood region as a fiducial model,
+expressing each candidate as a frequency-dependent ratio to that model, and
+evaluating the likelihood from precomputed sums on a sparse frequency grid
+\cite{ZackayDaiVenumadhav2018,DaiVenumadhavZackay2018,KrishnaEtAl2023,NarolaEtAl2024}.
+For nearby compact-binary waveforms, the amplitude and phase of this ratio vary
+slowly with frequency, so only a modest number of frequency samples is needed.
+
+A wave-optics amplification factor does not share this property when it is
+treated as a single function.  The signal is a coherent sum of contributions
+with different image delays.  Changing the lens parameters moves the
+interference fringes, and the candidate-to-fiducial ratio can develop rapid
+oscillations and sharp features near the zeros of the fiducial amplification.
+This occurs even when the candidate and fiducial sources remain within the
+same two-image or four-image region.  A change in image topology creates a
+second difficulty, but it is not the origin of the failure of ordinary
+relative binning.
+
+The stationary-phase expansion suggests how to reorganize the calculation.
+Each geometrical image contributes a phase fixed by its time delay, multiplied
+by a factor that changes much more slowly with frequency.  We keep the delay
+phases separate and interpolate the accompanying factors.  The isolated-image
+expansion alone is not accurate at moderate frequency or near a caustic, so we
+use it only to define the resolved-image limit.  At finite frequency we assign
+the difference between its coherent sum and the full wave-optics result to the
+same separated contributions.  Their sum then reproduces the full
+amplification exactly, while each contribution approaches the corresponding
+image in the high-frequency limit.
+
+A decomposition tied directly to the physical images cannot be continued
+through a fold or cusp.  To obtain a representation that is valid throughout
+the positive-parity Chang--Refsdal caustic network, we keep four labels at all
+parameter values.  Labels without a real image are placed at the nearest
+critical point.  When images are created, they inherit these labels
+continuously.  An algebraic projection enforces the exact total amplification
+for any mixture of real and virtual labels.
+
+The paper develops the representation in the order in which its physical
+motivation arises.  Section~\ref{sec:waveoptics} introduces the amplification
+factor and the analytic source-plane operator used to evaluate it.
+Section~\ref{sec:stationary} relates the observed fringes to interference
+between geometrical images.  Section~\ref{sec:rbfailure} shows why direct
+relative binning fails.  Section~\ref{sec:localchannels} constructs separated
+image contributions within a region of fixed topology.  Folds, cusps, and the
+global four-label extension are discussed in
+Secs.~\ref{sec:topology} and~\ref{sec:globalchannels}.  The corresponding
+multi-component relative-binning likelihood is derived in
+Sec.~\ref{sec:multichannel-rb}.  Numerical tests are presented in
+Sec.~\ref{sec:numerics}.
+
+\section{Wave optics in the Chang--Refsdal lens}
+\label{sec:waveoptics}
+
+\subsection{Fermat potential and amplification factor}
+
+The Fermat potential gives the dimensionless propagation time for a ray that
+crosses the lens plane at $\bx$ when the unlensed source position is $\by$.
+Its stationary points are the geometrical images.  The wave-optics amplitude is
+obtained by coherently summing over the complete lens plane
+\cite{SchneiderEhlersFalco1992,NakamuraDeguchi1999}.
+
+We measure angles in the Einstein-radius units of the point mass and write
+\begin{equation}
+ \tau(\bx;\by)
+ =\frac12\bx^{\mathsf T}\bA\bx-\by\mathbin{\cdot}\bx
+  +\frac12|\by|^2-\ln|\bx|,
+ \label{eq:fermat}
+\end{equation}
+where
+\begin{equation}
+ \bA=(1-\kappa)\bm{1}-\bG,
+ \label{eq:macro-matrix}
+\end{equation}
+and
+\begin{equation}
+ \bG=\gamma
+ \begin{pmatrix}
+  \cos 2\beta & \sin 2\beta\\
+  \sin 2\beta & -\cos 2\beta
+ \end{pmatrix}.
+ \label{eq:shear-matrix}
+\end{equation}
+The parameters $\kappa$, $\gamma$, and $\beta$ are the external convergence,
+shear magnitude, and shear orientation.  We consider a positive-parity macro
+image,
+\begin{equation}
+ 1-\kappa>|\gamma|.
+ \label{eq:positive-parity}
+\end{equation}
+Macro saddle images require a different treatment of the large-scale
+oscillatory integral and are outside the present scope.
+
+With the standard Fresnel normalization, the amplification factor is
+\begin{equation}
+ F(w,\by)=\frac{w}{2\pi\ii}
+ \int_{\mathbb R^2}\dd^2x\,
+ \exp\!\left[\ii w\tau(\bx;\by)\right].
+ \label{eq:diffraction-integral}
+\end{equation}
+The normalization includes the magnification of the local macro field.  The
+dimensionless frequency is
+\begin{equation}
+ w=\frac{8\pi G M_{\rm L}(1+z_{\rm L})}{c^3}f,
+ \label{eq:dimensionless-frequency}
+\end{equation}
+for a point mass $M_{\rm L}$ at redshift $z_{\rm L}$.  A lensed
+frequency-domain waveform is
+\begin{equation}
+ \widetilde h_{\rm L}(f)=F[w(f),\by]\,\widetilde h_{\rm U}(f).
+ \label{eq:lensed-waveform}
+\end{equation}
+A constant added to $\tau$ changes only the overall arrival time.  We subtract
+the minimum image delay in the figures and numerical comparisons.
+
+Figure~\ref{fig:amplification} shows representative amplification curves in
+the two-image and four-image regions and near a fold and cusp.  The low-
+frequency portion is plotted on a logarithmic frequency axis.  The
+high-frequency portion is sampled and displayed linearly because the
+geometrical-optics fringes are approximately periodic in $w$.  Sampling those
+fringes uniformly in $\log w$ produces visual aliasing.
+
+\begin{figure*}[t]
+ \centering
+ \includegraphics[width=0.96\textwidth]{figures/amplification_mixed.pdf}
+ \caption{Magnitude of the Chang--Refsdal amplification factor for
+ representative source positions at $\kappa=\gamma=0.2$ and $\beta=0$.
+ The low-frequency segment of each panel uses a logarithmic horizontal axis;
+ the high-frequency segment uses a linear axis.  The source positions are $\by=(0.55,0)$, $(0.10,0.10)$,
+ $(-0.1389,0.1793)$, and $(-0.395,0)$ for the two-image, four-image,
+ near-fold, and near-cusp panels, respectively.  The curves are evaluated with
+ the source-plane operator representation of
+ Sec.~\ref{sec:operator-total}.}
+ \label{fig:amplification}
+\end{figure*}
+
+At low frequency the Fresnel scale samples a broad part of the Fermat surface,
+and the response changes slowly.  At larger $w$, localized stationary regions
+interfere.  The fringe spacing is governed by image-delay differences, while
+the contrast is governed by the relative magnifications.  Several delay
+differences contribute inside the four-image region.
+
+\subsection{Evaluation from the point-mass solution}
+\label{sec:operator-total}
+
+Equation~\eqref{eq:diffraction-integral} is the definition of the
+amplification, but the calculations in this paper do not evaluate it by
+lens-plane quadrature.  The external shear is quadratic in the lens-plane
+coordinates and can be represented by derivatives with respect to the source
+position.
+
+First set $\kappa=0$ and remove the source phase,
+\begin{equation}
+ F_{0,\gamma}(w,\by;\beta)
+ =e^{\ii w|\by|^2/2}\cG_{\gamma}(w,\by;\beta).
+ \label{eq:G-definition}
+\end{equation}
+The exact operator identity is
+\begin{equation}
+ \cG_{\gamma}(w,\by;\beta)
+ =\exp\!\left[\frac{\ii\gamma}{2w}D_\beta\right]
+  \cG_{\rm PM}(w,\by),
+ \label{eq:operator-identity}
+\end{equation}
+where
+\begin{equation}
+ D_\beta=
+ \cos 2\beta\,(\partial_1^2-\partial_2^2)
+ +2\sin 2\beta\,\partial_1\partial_2.
+ \label{eq:D-beta}
+\end{equation}
+Writing $s=|\by|^2$, the point-mass seed is
+\begin{align}
+ \cG_{\rm PM}(w,s)
+ ={}&C(w)\,{}_1F_1\!\left(1-\frac{\ii w}{2};1;
+                  -\frac{\ii ws}{2}\right),
+ \label{eq:point-mass-seed}\\
+ C(w)={}&
+ \exp\!\left[\frac{\pi w}{4}
+ +\frac{\ii w}{2}\ln\!\left(\frac{w}{2}\right)\right]
+ \Gamma\!\left(1-\frac{\ii w}{2}\right).
+ \label{eq:point-mass-prefactor}
+\end{align}
+Every source derivative generated by $D_\beta$ is another confluent
+hypergeometric function.  The operator exponential can therefore be evaluated
+as an adaptively truncated series.  Appendix~\ref{app:operator} gives the
+derivation and the radial-derivative formula used in the calculation.
+
+External convergence is included by an exact rescaling.  Define
+\begin{equation}
+ \lambda=1-\kappa,
+ \qquad
+ \by'=\frac{\by}{\sqrt{\lambda}},
+ \qquad
+ \gamma'=\frac{\gamma}{\lambda}.
+ \label{eq:mass-sheet-vars}
+\end{equation}
+Changing variables to $\bx'=\sqrt{\lambda}\,\bx$ in
+Eq.~\eqref{eq:diffraction-integral} gives
+\begin{equation}
+ F_{\kappa,\gamma}(w,\by;\beta)
+ =\frac{1}{\lambda}
+ \exp\!\left[
+  \frac{\ii w}{2}\ln\lambda
+  -\frac{\ii w\kappa}{2\lambda}|\by|^2
+ \right]
+ F_{0,\gamma'}(w,\by';\beta).
+ \label{eq:mass-sheet-map}
+\end{equation}
+The dependence on $\kappa$ is therefore algebraic once the pure-shear series
+has been evaluated.  No numerical contour integral appears in the final
+procedure.
+
+\section{Stationary phase and the origin of the fringes}
+\label{sec:stationary}
+
+The image positions satisfy
+\begin{equation}
+ \nabla_{\bx}\tau=0,
+ \qquad
+ \by=\bA\bx-\frac{\bx}{|\bx|^2}.
+ \label{eq:lens-equation}
+\end{equation}
+Let $\bx_j$ be a nondegenerate solution, $\tau_j=\tau(\bx_j;\by)$, and
+\begin{equation}
+ \bH_j=\left.\nabla_{\bx}\nabla_{\bx}\tau\right|_{\bx_j}
+ \label{eq:fermat-hessian}
+\end{equation}
+its Hessian.  The signed magnification is $\mu_j=(\det\bH_j)^{-1}$, and the
+Morse index $n_j$ is the number of negative eigenvalues of $\bH_j$.  Applying
+stationary phase gives
+\begin{equation}
+ F(w,\by)\sim\sum_j e^{\ii w\tau_j}H_j(w),
+ \label{eq:image-sum}
+\end{equation}
+with
+\begin{equation}
+ H_j(w)=\sqrt{|\mu_j|}\,e^{-\ii\pi n_j/2}
+ \left[1+\frac{\ii C_{1j}}{w}
+       +\frac{C_{2j}}{w^2}+O(w^{-3})\right].
+ \label{eq:image-kernel}
+\end{equation}
+The derivation and the explicit coefficients $C_{1j}$ and $C_{2j}$ are given
+in Appendix~\ref{app:stationary-coefficients}.  The higher-order terms improve
+the resolved-image approximation after the asymptotic ordering has set in.
+
+Figure~\ref{fig:stationary-phase} compares the operator result with the leading
+image sum and the expansion through $w^{-2}$ in regular two-image and
+four-image regions.  The four-image source was chosen so that none of the
+images is close to a fold.  A separate example in
+Sec.~\ref{sec:localchannels} shows that the isolated-image expansion can remain
+poor at moderate frequency even when the source is formally inside a
+four-image region.
+
+\begin{figure*}[t]
+ \centering
+ \includegraphics[width=0.94\textwidth]{figures/stationary_phase_comparison.pdf}
+ \caption{Stationary-phase approximation in regular two-image and four-image
+ regions for $\kappa=\gamma=0.2$ and $\beta=0$.  The source positions are
+ $\by=(0.90,0)$ and $(0.03,0.10)$, respectively.  The plotted interval begins at
+ $w=12$, where the isolated-image expansion is asymptotically ordered for the
+ selected sources.  The $w^{-2}$ result closely follows the operator total.}
+ \label{fig:stationary-phase}
+\end{figure*}
+
+For two images, Eq.~\eqref{eq:image-sum} gives
+\begin{align}
+ |F|^2\simeq{}&|H_1|^2+|H_2|^2
+ +2\,\mathrm{Re}\!\left[
+ H_1H_2^*e^{\ii w(\tau_1-\tau_2)}\right].
+ \label{eq:two-image-interference}
+\end{align}
+If the kernels vary slowly over a fringe, the period is
+\begin{equation}
+ \Delta w\simeq\frac{2\pi}{|\tau_1-\tau_2|}.
+ \label{eq:fringe-period}
+\end{equation}
+The same interpretation applies to every image pair in a multi-image region.
+The delay phases carry the rapid frequency dependence that must be separated
+before interpolation.
+
+\section{Why ordinary relative binning fails}
+\label{sec:rbfailure}
+
+For stationary Gaussian detector noise, define the complex overlap
+\begin{equation}
+ \cZ[a,b]=4\sum_f\frac{a(f)b^*(f)}{S_n(f)}\,\Delta f.
+ \label{eq:complex-overlap}
+\end{equation}
+The log likelihood is
+\begin{equation}
+ \ln\mathcal L=\mathrm{Re}\,\cZ[d,h]
+ -\frac12\cZ[h,h]+\mathrm{const}.
+ \label{eq:likelihood}
+\end{equation}
+Relative binning chooses a fiducial waveform $h_0$ and writes
+\begin{equation}
+ h(f;\vartheta)=r(f;\vartheta)h_0(f).
+ \label{eq:rb-ratio}
+\end{equation}
+When $r$ is smooth, it can be represented by a piecewise low-order polynomial,
+while the sums involving $d$ and $h_0$ are precomputed
+\cite{ZackayDaiVenumadhav2018}.
+
+For a lensed waveform,
+\begin{equation}
+ r(f)=
+ \frac{\widetilde h_{\rm U}(f;\lambda)}
+      {\widetilde h_{\rm U}(f;\lambda_0)}
+ \frac{F[w(f);\vartheta_{\rm L}]}
+      {F[w_0(f);\vartheta_{{\rm L},0}]},
+ \label{eq:lensed-ratio}
+\end{equation}
+where $\lambda$ denotes binary parameters and $\vartheta_{\rm L}$ denotes lens
+parameters.  The second factor need not be smooth.  For two images,
+\begin{equation}
+ F=e^{\ii w\tau_1}
+ \left[H_1+H_2e^{\ii w\Delta\tau}\right],
+ \qquad
+ \Delta\tau=\tau_2-\tau_1,
+ \label{eq:two-image-factorization}
+\end{equation}
+so the lens ratio contains interference patterns with different delays in the
+candidate and fiducial models.  Near a minimum of the fiducial amplification,
+the ratio can also acquire a sharp amplitude peak and a rapid phase excursion.
+
+The loss of smoothness therefore occurs within a region of fixed image
+topology.  It follows from the coherent addition of contributions with
+different parameter-dependent delays, and does not require the creation or
+destruction of images.  A numerical comparison of this direct ratio with the
+separated representation is given after the latter has been constructed in
+Sec.~\ref{sec:numerics}.
+
+\section{Projected image contributions at fixed topology}
+\label{sec:localchannels}
+
+The stationary-phase form suggests retaining the image delays as explicit
+phases.  Within a region where the images can be labeled continuously, write
+\begin{equation}
+ F(w;\vartheta_{\rm L})
+ =\sum_{a=1}^{N_{\rm img}}
+ e^{\ii w\tau_a(\vartheta_{\rm L})}
+ K_a(w;\vartheta_{\rm L}).
+ \label{eq:local-channel-decomposition}
+\end{equation}
+The functions $K_a$ will be called image contributions in this section.  They
+approach the stationary-phase kernels $H_a$ when the images are well resolved.
+
+At finite frequency, using $K_a=H_a$ would impose the error of the
+stationary-phase expansion on the total.  Instead, let $\widehat K_a$ be any
+set of trial contributions and define
+\begin{equation}
+ R(w)=F_{\rm op}(w)-\sum_b e^{\ii w\tau_b}\widehat K_b(w),
+ \label{eq:local-residual}
+\end{equation}
+where $F_{\rm op}$ is the converged operator result.  Choose smooth weights
+$\alpha_a$ with $\sum_a\alpha_a=1$ and set
+\begin{equation}
+ \boxed{
+ K_a(w)=\widehat K_a(w)+
+ \alpha_a e^{-\ii w\tau_a}R(w).}
+ \label{eq:local-projection}
+\end{equation}
+Substitution into Eq.~\eqref{eq:local-channel-decomposition} gives
+$F=F_{\rm op}$ at every frequency.  In a resolved region one may take
+$\widehat K_a=H_a$.  The residual then contains the finite-frequency part that
+is not described by the isolated saddles.  Equation~\eqref{eq:local-projection}
+is useful even when the image topology never changes.
+
+Figure~\ref{fig:projected-residual} uses a four-image source for which the
+isolated-image expansion is poorly ordered at moderate $w$.  The projected sum
+agrees with the operator total to floating-point accuracy.  The stationary-
+phase terms still determine the physical high-frequency limit, while the
+projection supplies the missing finite-frequency contribution.
+
+\begin{figure*}[t]
+ \centering
+ \includegraphics[width=0.91\textwidth]{figures/projected_residual_comparison.pdf}
+ \caption{A four-image example at $\by=(0.10,0.10)$,
+ $\kappa=\gamma=0.2$.  The isolated-image expansion through $w^{-2}$ is
+ inaccurate at moderate frequency because two of the saddles have small
+ Hessian eigenvalues.  The projected image sum uses the same saddle terms as
+ targets and adds the residual in Eq.~\eqref{eq:local-projection}; its
+ reconstruction error is below $9\times10^{-16}$ in this calculation.}
+ \label{fig:projected-residual}
+\end{figure*}
+
+Within a region of fixed topology, the candidate and fiducial waveforms can
+therefore be compared image by image.  The difference between their image
+delays is retained analytically, while only the ratio of the projected
+amplitudes is interpolated.  This construction addresses the interference
+fringes without relying on the accuracy of the isolated-image expansion at
+moderate frequency.  Its remaining limitation is geometric: a physical image
+label cannot be followed through a caustic at which that image is created or
+destroyed.
+
+\section{Changes in image multiplicity}
+\label{sec:topology}
+
+For the positive-parity Chang--Refsdal lens, a source outside the astroid
+caustic has two nondegenerate images and a source inside has four
+\cite{AnEvans2006}.  Crossing a fold creates or destroys a pair.  At a cusp,
+three images meet at a single critical point.  The Hessian determinant of the
+participating images vanishes at the caustic, so the individual saddle kernels
+diverge even though the wave-optics amplification remains finite.
+
+The left panel of Fig.~\ref{fig:topology-geometry} shows the fold and cusp
+trajectories used in the numerical tests.  The signed path coordinate $\eta$
+is negative outside the caustic and positive inside for the conventions used
+here.
+
+A fixed representation requires labels that exist before the real images do.
+For each unoccupied label, we use the nearest point on the critical curve as a
+geometric marker and assign the delay at that point.  When images are created,
+their positions emerge from the marker and inherit its labels.  The delay
+assigned to a label is kept at the critical-point delay while the cluster is
+unresolved.  It approaches the physical image delay only after the delay
+separation can be resolved within the analysis band.
+
+For a cluster with physical delays $\tau_j^{\rm img}$ and critical delay
+$\tau_c$, define the delay spread
+$\Delta\tau_{\rm cl}=\max_j\tau_j^{\rm img}-\min_j\tau_j^{\rm img}$ and
+\begin{equation}
+ B_c=S_c(w_{\max}\Delta\tau_{\rm cl}),
+ \qquad
+ \tau_j^{\rm tr}=(1-B_c)\tau_c+B_c\tau_j^{\rm img}.
+ \label{eq:tracked-delays}
+\end{equation}
+Here $S_c$ is a smooth transition function.  Outside the caustic all labels in
+the cluster have $\tau_j^{\rm tr}=\tau_c$.  The right panels of
+Fig.~\ref{fig:topology-geometry} show the resulting delays for the selected
+paths.  The tracked delays remain coincident through the unresolved
+neighborhood and then separate continuously toward the physical delays.
+
+\begin{figure*}[t]
+ \centering
+ \begin{minipage}[c]{0.30\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/caustic_paths.pdf}
+ \end{minipage}\hfill
+ \begin{minipage}[c]{0.66\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/topology_stable_delays.pdf}
+ \end{minipage}
+ \caption{Source trajectories and delay continuation across the
+ Chang--Refsdal caustic.  The left panel shows the astroid caustic at
+ $\gamma=0.2$ and the fold and cusp paths used in the numerical tests.  The
+ right panels show the physical image delays and the continuously tracked
+ delays along those paths, measured relative to the critical-point delay.  The
+ vertical lines mark the caustic.  The tracked delays remain coincident while
+ the cluster is unresolved and approach the physical image delays farther
+ inside the caustic.}
+ \label{fig:topology-geometry}
+\end{figure*}
+\FloatBarrier
+
+\section{Topology-stable four-component representation}
+\label{sec:globalchannels}
+
+The Chang--Refsdal lens has at most four nondegenerate images in the domain
+considered here.  We retain four labels at every parameter point and continue
+them using their lens-plane positions.  Labels without real images are placed
+at the critical point associated with the caustic cluster from which those
+images are created.  The continuation procedure is described in
+Appendix~\ref{app:tracking}.
+
+The exact projection is most useful when it is applied to the image cluster
+that is poorly described by isolated stationary points.  Let $C$ denote the
+active cluster and let $P$ denote the remaining, persistent images.  A generic
+fold has two labels in $C$, while a cusp has three.  The persistent images are
+assigned their stationary-phase factors $H_p$.  Their coherent sum is removed
+from the operator result, leaving the exact contribution associated with the
+cluster,
+\begin{equation}
+ G_C(w)=F_{\rm op}(w)-\sum_{p\in P}e^{\ii w\tau_p}H_p(w).
+ \label{eq:exact-cluster-total}
+\end{equation}
+Any finite-frequency error in the persistent-image expansion is included in
+$G_C$ by construction.  This choice is preferable to distributing the same
+residual uniformly among all four labels, since it leaves the well-resolved
+image factors close to their physical stationary-phase limits.
+
+For each cluster label $j\in C$, choose smooth weights $\alpha_j$ satisfying
+$\sum_{j\in C}\alpha_j=1$.  Equal weights are used in the calculations below.
+When the cluster is unresolved, define
+\begin{equation}
+ L_j(w)=\alpha_j e^{-\ii w\tau_j}G_C(w).
+ \label{eq:unresolved-cluster-split}
+\end{equation}
+The coherent sum of the $L_j$ is exactly $G_C$ for any assigned delays.  If a
+cluster label corresponds to a real image, let $H_j$ be its stationary-phase
+factor; for a virtual label set $H_j=0$.  For a real cluster image define
+\begin{equation}
+ \delta_j=\min_{k\in C,\,k\ne j}|\tau_j-\tau_k|
+ \label{eq:delay-separation}
+\end{equation}
+and use the smooth switch
+\begin{align}
+ S_j(w)&=
+ \begin{cases}
+ 0, & w\delta_j\leq\rho_0,\\[1mm]
+ 10u_j^3-15u_j^4+6u_j^5,
+ & \rho_0<w\delta_j<\rho_1,\\[1mm]
+ 1, & w\delta_j\geq\rho_1,
+ \end{cases}
+ \label{eq:switch}\\
+ u_j&=\frac{w\delta_j-\rho_0}{\rho_1-\rho_0}.
+ \label{eq:switch-coordinate}
+\end{align}
+For a virtual label, $S_j=0$.  We use
+$(\rho_0,\rho_1)=(0.5,4)$ in the calculations below.  The trial cluster
+factors are
+\begin{equation}
+ \widehat K_j=(1-S_j)L_j+S_jH_j.
+ \label{eq:trial-cluster}
+\end{equation}
+Their coherent sum need not equal $G_C$.  The discrepancy is projected back
+onto the same cluster labels,
+\begin{equation}
+ \boxed{
+ K_j=\widehat K_j+\alpha_j e^{-\ii w\tau_j}
+ \left[G_C-\sum_{k\in C}e^{\ii w\tau_k}\widehat K_k\right],
+ \qquad j\in C .}
+ \label{eq:global-projection}
+\end{equation}
+For the persistent labels we set
+\begin{equation}
+ K_p=H_p,\qquad p\in P.
+ \label{eq:persistent-factors}
+\end{equation}
+Equations~\eqref{eq:exact-cluster-total}--\eqref{eq:persistent-factors}
+therefore give
+\begin{equation}
+ F_{\rm op}(w)=\sum_{a=1}^{4}e^{\ii w\tau_a}K_a(w)
+ \label{eq:exact-reconstruction}
+\end{equation}
+at every frequency.
+
+The individual cluster factors can be written without the intermediate trial
+terms.  Define
+\begin{equation}
+ \overline S_C=\sum_{k\in C}\alpha_kS_k,
+ \qquad
+ Q_C=\sum_{k\in C}S_k e^{\ii w\tau_k}H_k.
+ \label{eq:Sbar-Q}
+\end{equation}
+Then
+\begin{equation}
+ \boxed{\begin{aligned}
+ K_j={}&S_jH_j+\alpha_j e^{-\ii w\tau_j}\\
+ &\times\left[(1-S_j+\overline S_C)G_C-Q_C\right],
+ \qquad j\in C .
+ \end{aligned}}
+ \label{eq:explicit-K}
+\end{equation}
+When the cluster is unresolved, $S_j=0$ and the exact residual is divided
+among the coincident cluster labels.  Once the images are resolved and the
+stationary-phase expansion becomes accurate, the correction in
+Eq.~\eqref{eq:global-projection} decreases and $K_j$ approaches $H_j$.
+
+The labels and the active cluster are continued along a path in lens-parameter
+space.  At a fold, the two cluster labels remain present on both sides of the
+caustic, although they correspond to real images only on the four-image side.
+Near a cusp, three labels are associated with the coalescing triplet.  The
+construction retains a fixed total of four components while localizing the
+finite-frequency residual in the part of the image configuration for which
+the isolated-saddle description is least reliable.
+
+External convergence requires no change to this projection.  The operator
+total is obtained from Eq.~\eqref{eq:mass-sheet-map}; the delays, Hessians, and
+image positions are computed with the full matrix $\bA$.
+
+\section{Multi-component relative binning}
+\label{sec:multichannel-rb}
+
+The global decomposition turns the lensed waveform into a sum of four
+fiducial components.  Define
+\begin{equation}
+ h_{a0}(f)=\widetilde h_{\rm U}(f;\lambda_0)
+ e^{\ii w_0(f)\tau_{a0}}
+ K_{a0}[w_0(f)].
+ \label{eq:fiducial-component}
+\end{equation}
+For a candidate lens and binary waveform,
+\begin{equation}
+ \widetilde h_{\rm L}(f)=\sum_a r_a(f)h_{a0}(f),
+ \label{eq:rb-component-sum}
+\end{equation}
+where
+\begin{align}
+ r_a(f)={}&
+ \frac{\widetilde h_{\rm U}(f;\lambda)}
+      {\widetilde h_{\rm U}(f;\lambda_0)}
+ \exp\!\left\{\ii\left[w(f)\tau_a-w_0(f)\tau_{a0}\right]\right\}
+ \nonumber\\
+ &\times\frac{K_a[w(f)]}{K_{a0}[w_0(f)]}.
+ \label{eq:component-ratio}
+\end{align}
+This expression allows the point-mass redshifted mass to vary, in which case
+$w(f)$ differs between the candidate and fiducial models.  The projected
+residual in Eq.~\eqref{eq:global-projection} is already contained in $K_a$.
+There is no separate residual term in the likelihood.
+
+Divide the frequency range into bins centered at $f_b$, and approximate each
+component ratio within a bin by
+\begin{equation}
+ r_a(f)\simeq r_{a,b}^{(0)}+r_{a,b}^{(1)}(f-f_b).
+ \label{eq:linear-ratio}
+\end{equation}
+The data-component summaries are
+\begin{equation}
+ A_{a,b}^{(p)}=
+ 4\sum_{f\in b}\frac{d(f)h_{a0}^*(f)}{S_n(f)}(f-f_b)^p\Delta f,
+ \qquad p=0,1.
+ \label{eq:A-summary}
+\end{equation}
+They give
+\begin{equation}
+ \cZ[d,h]\simeq
+ \sum_{a,b}\left[A_{a,b}^{(0)}r_{a,b}^{(0)*}
+                  +A_{a,b}^{(1)}r_{a,b}^{(1)*}\right].
+ \label{eq:data-term-rb}
+\end{equation}
+
+The waveform norm contains pairs of components.  Define
+\begin{equation}
+ B_{ac,b}^{(p)}=
+ 4\sum_{f\in b}\frac{h_{a0}(f)h_{c0}^*(f)}{S_n(f)}
+ (f-f_b)^p\Delta f,
+ \qquad p=0,1,2.
+ \label{eq:B-summary}
+\end{equation}
+Multiplying the two linear expansions gives
+\begin{align}
+ \cZ[h,h]\simeq\sum_{a,c,b}\bigg\{&
+ B_{ac,b}^{(0)}r_{a,b}^{(0)}r_{c,b}^{(0)*}\nonumber\\
+ &+B_{ac,b}^{(1)}\left[
+ r_{a,b}^{(1)}r_{c,b}^{(0)*}
+ +r_{a,b}^{(0)}r_{c,b}^{(1)*}\right]\nonumber\\
+ &+B_{ac,b}^{(2)}r_{a,b}^{(1)}r_{c,b}^{(1)*}\bigg\}.
+ \label{eq:norm-term-rb}
+\end{align}
+The Hermitian relation $B_{ca,b}^{(p)}=B_{ac,b}^{(p)*}$ reduces the number of
+independent component pairs.  For four labels, ten pair summaries are required
+per moment.  The factor-of-several increase in precomputed summaries is small
+compared with the reduction in frequency nodes when the complete amplification
+ratio is strongly oscillatory.
+
+Equation~\eqref{eq:component-ratio} separates two kinds of frequency
+dependence.  The ratio $K_a/K_{a0}$ contains the finite-frequency response,
+including the projected residual.  The exponential contains the known
+difference between the candidate and fiducial image delays.  We retain this
+exponential analytically and interpolate only the unlensed-waveform ratio and
+$K_a/K_{a0}$.  Since $w$ is proportional to frequency, write
+\begin{equation}
+ w(f)\tau_a-w_0(f)\tau_{a0}=2\pi f\,\delta t_a
+ \label{eq:channel-time-shift}
+\end{equation}
+with a frequency-independent relative delay $\delta t_a$, and define
+\begin{equation}
+ q_a(f)=
+ \frac{\widetilde h_{\rm U}(f;\lambda)}
+      {\widetilde h_{\rm U}(f;\lambda_0)}
+ \frac{K_a[w(f)]}{K_{a0}[w_0(f)]}.
+ \label{eq:slow-component-ratio}
+\end{equation}
+Then $r_a=e^{2\pi\ii f\delta t_a}q_a$.  Approximating only $q_a$ within each
+bin replaces the summaries in Eqs.~\eqref{eq:A-summary} and
+\eqref{eq:B-summary} by the same sums evaluated at the time shifts
+$\delta t_a$ and $\delta t_a-\delta t_c$, respectively.  These shifted sums
+are short discrete Fourier transforms and can be tabulated on a delay grid or
+evaluated with FFTs.  This phase-aware form is useful when the candidate and
+fiducial delays differ enough for the exponential to accumulate several cycles
+across the detector band.  The numerical benchmarks below retain this delay phase exactly and
+interpolate only $q_a$.
+
+\section{Numerical results}
+\label{sec:numerics}
+
+The tests use $\gamma=0.2$ and $5\leq w\leq40$ unless stated otherwise.  The
+operator series is truncated after four successive terms fall below
+$2\times10^{-12}$ times the partial sum, with a maximum order chosen high
+enough that every evaluation in the reported local tests satisfies this
+criterion.  The image geometry is obtained from the quartic reduction in
+Appendix~\ref{app:quartic}.  The numerical interpolation diagnostic is
+\begin{equation}
+ \epsilon(w)=\frac{|F_{\rm int}(w)-F_{\rm op}(w)|}
+ {\max\left[|F_{\rm op}(w)|,
+ 0.15\max_{w'}|F_{\rm op}(w')|\right]}.
+ \label{eq:error-profile}
+\end{equation}
+The floor prevents a zero of the exact amplification from dominating the
+reported maximum.  It does not enter the channel construction.
+
+\subsection{Fixed-topology comparison}
+
+Figure~\ref{fig:projected-ratios} compares the two representations for
+sources that remain outside the same generic fold.  Both models have two real
+images, yet the ratio of their complete amplification factors develops a
+sequence of narrow peaks and phase excursions because the interference minima
+occur at different frequencies.  Once the four contributions are separated,
+the ratios of their complex amplitudes vary slowly across the same interval.  The known delay differences are treated
+analytically and are therefore absent from the lower panels.
+
+\begin{figure*}[t]
+ \centering
+ \includegraphics[width=0.92\textwidth]{figures/projected_kernel_ratios.pdf}
+ \caption{Direct and separated candidate-to-fiducial ratios within a fixed
+ two-image topology.  The two sources lie outside the same generic fold at
+ signed normal displacements $\eta_s=-0.040$ and $\eta_s=-0.010$, with
+ $\gamma=0.2$.  The complete amplification ratio in the upper panels develops a sequence of
+ sharp peaks and phase excursions as the interference minima shift.  The
+ lower panels show the corresponding ratios of the two persistent image
+ amplitudes and the two virtual fold-cluster amplitudes.  Their phases are
+ measured relative to the lowest plotted frequency.  The known differences
+ between the candidate and fiducial delays are omitted from the lower panels
+ and retained analytically when the four contributions are recombined.}
+ \label{fig:projected-ratios}
+\end{figure*}
+
+A greedy interpolation test starts with the two endpoints and repeatedly adds
+the frequency with the largest value of Eq.~\eqref{eq:error-profile}.  The
+differences between the candidate and fiducial delays are retained exactly;
+only the slowly varying factor ratios shown in the lower panels of
+Fig.~\ref{fig:projected-ratios} are interpolated.  The separated
+representation reaches $\max_w\epsilon<10^{-3}$ with 11 frequency nodes.
+Direct interpolation of $F/F_0$ requires 135 of the 141 validation
+frequencies for the same criterion.
+
+\subsection{Fold and cusp crossings}
+
+For the local crossing tests, two persistent contributions and a two-term
+cluster are used at a fold; one persistent contribution and a three-term
+cluster are used at a cusp.  These use the cluster-local projection in
+Eqs.~\eqref{eq:exact-cluster-total}--\eqref{eq:global-projection}.  Figure~\ref{fig:crossing-ratios}
+shows the candidate-to-fiducial ratios for complete outside-to-inside
+crossings.  Several cluster curves coincide because equal weights are used while the
+corresponding delays are unresolved.
+
+\begin{figure*}[t]
+ \centering
+ \includegraphics[width=0.92\textwidth]{figures/channel_ratios.pdf}
+ \caption{Amplitude and unwrapped phase of the separated ratios for a fold
+ crossing and a cusp crossing from $\eta=-0.01$ to $\eta=+0.01$.  The ratios
+ remain smooth even though the number of real images changes.}
+ \label{fig:crossing-ratios}
+\end{figure*}
+
+Table~\ref{tab:nodes} gives the number of adaptively selected frequency nodes
+needed to reach $\max_w\epsilon<10^{-3}$.  The separated representation needs
+7--10 nodes for the four representative crossings.  Direct interpolation of
+the complete ratio requires 70 or 71 of the 71 validation frequencies.
+Across all crossing pairs in the scan $-0.02\leq\eta\leq0.02$, the separated
+representation uses 6--10 nodes.
+
+\begin{table}[t]
+\caption{Frequency nodes required for a maximum normalized interpolation error
+of $10^{-3}$ over $5\leq w\leq40$.}
+\label{tab:nodes}
+\centering
+\begin{tabular}{lcc}
+\toprule
+Crossing & separated ratios & complete ratio\\
+\midrule
+Fold, outside to inside & 9 & 70\\
+Fold, inside to outside & 10 & 70\\
+Cusp, outside to inside & 7 & 71\\
+Cusp, inside to outside & 7 & 71\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Figure~\ref{fig:adaptive-nodes} shows the error as the node budget is
+increased.  The direct-ratio curves remain above the target on the displayed
+node scale because they must resolve the moving fringes.
+
+\begin{figure}[t]
+ \centering
+ \includegraphics[width=0.98\columnwidth]{figures/adaptive_nodes.pdf}
+ \caption{Maximum interpolation error versus frequency-node budget for a full
+ fold crossing and a full cusp crossing.  The dashed line marks the
+ $10^{-3}$ target.}
+ \label{fig:adaptive-nodes}
+\end{figure}
+
+The coherent component sum reproduces the operator total to between
+$4.4\times10^{-16}$ and $6.7\times10^{-16}$ in the four local crossing
+calculations.  The smallest component magnitudes remain above 0.47 in the cusp
+tests and 0.59 in the fold tests, so the candidate-to-fiducial ratios are not
+made ill conditioned by a vanishing denominator.
+
+\subsection{Geometry, convergence, and global tracking}
+
+The quartic image solver was compared with a deterministic two-dimensional
+multistart solver on 168 configurations, including general source-shear
+orientations and points within $10^{-5}$ of selected folds and cusps.  The
+image count agreed in every case.  The maximum matched position difference was
+$2.1\times10^{-12}$, and the maximum lens-equation residual of a quartic image
+was $1.8\times10^{-13}$.  In this scan the quartic calculation was about 190
+times faster than the multistart calculation.  The timing indicates that image
+finding is negligible compared with the special-function evaluation in the
+current prototype.
+
+The external-convergence mapping was tested for six values between
+$\kappa=0.2$ and $0.3$, while keeping the reduced shear and scaled source
+position fixed.  The four-term reconstruction errors ranged from
+$2.0\times10^{-15}$ to $6.3\times10^{-15}$.
+
+A separate continuation path varied the source position, shear magnitude, and
+shear orientation through two-image and four-image regions.  The path contains
+four changes in image count.  All four labels remained defined.  The largest
+absolute reconstruction error over the 49 path points was
+$9.4\times10^{-11}$; this occurred where large intermediate terms produced
+strong floating-point cancellation.  Away from those points the errors were
+near $10^{-15}$.  The continuation algorithm is designed for nearby parameter
+points.  A distant independent proposal should be initialized from a fixed
+convention or connected to the fiducial point by a short path.
+
+\FloatBarrier
+\section{Discussion}
+\label{sec:discussion}
+
+The failure of ordinary relative binning in wave-optics lensing is caused by
+the coexistence of several parameter-dependent image phases.  It does not
+require a caustic crossing.  Separating those phases produces functions whose
+candidate-to-fiducial ratios are much smoother.  The residual projection in
+Eq.~\eqref{eq:local-projection} makes this statement useful at finite
+frequency, where the isolated-image expansion may be inaccurate.  The
+stationary-phase approximation supplies the physical resolved-image limit,
+while the operator result fixes the coherent sum at every frequency.
+
+The topology-stable extension addresses a distinct issue.  Physical images
+cannot be labeled globally because pairs are created at folds and triplets
+meet at cusps.  Four continuously tracked labels are sufficient for a
+positive-parity Chang--Refsdal lens.  Virtual labels are placed at a critical
+point, and the representation remains finite while their physical images are
+absent.  Once the images are resolved, the corresponding terms approach the
+usual geometrical contributions.
+
+The numerical tests are intended to establish the representation and its
+interpolation behavior over a controlled domain.  They do not yet constitute
+a full parameter-estimation study.  The source positions, convergence, and
+shear were varied, while the interpolation tables in
+Table~\ref{tab:nodes} keep the redshifted microlens mass fixed.  Equation
+\eqref{eq:component-ratio} includes mass variation and ordinary binary
+parameters, so these can be incorporated in the same relative-binning
+summaries.  Their joint effect on bin placement should be tested with detector
+noise curves and complete compact-binary waveform models.
+
+The present operator implementation is restricted to positive-parity macro
+images with $1-\kappa>|\gamma|$.  Macro saddles are important for strongly
+lensed events and require a separate treatment.  The source-derivative series
+also becomes more demanding as the reduced shear approaches unity or as the
+frequency is extended far beyond the range studied here.  Stable recurrences
+or a reduced representation of the operator total would be useful in that
+regime.
+
+The decomposition is not specific to relative binning.  It provides a set of
+frequency functions with explicit rapidly varying phases and smooth parameter
+dependence.  The same representation may be useful for surrogate models,
+reduced-order quadrature, and interpolation of microlensing amplification
+factors.  For the application considered here, its immediate consequence is a
+multi-component relative-binning likelihood that remains well defined across
+the Chang--Refsdal caustic network and contains no numerical lens-plane
+integral.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have constructed a decomposition of the positive-parity Chang--Refsdal
+amplification factor in which the image-delay phases are retained explicitly.
+Within a region of fixed topology, an exact residual projection supplements
+the isolated-image stationary-phase terms and reproduces the complete
+wave-optics result.  Four continuously tracked labels extend the decomposition
+through folds and cusps.  External convergence is included by an exact
+mass-sheet rescaling, and the all-frequency amplification is evaluated from
+the point-mass solution through a source-derivative expansion.
+
+The separated candidate-to-fiducial ratios are smooth in the fixed-topology
+and caustic-crossing examples studied here.  Complete fold and cusp crossings
+reach a maximum interpolation error of $10^{-3}$ with 6--10 frequency nodes,
+whereas direct interpolation of the total amplification ratio requires nearly
+the full validation grid.  The likelihood formulas in
+Eqs.~\eqref{eq:data-term-rb} and~\eqref{eq:norm-term-rb} show how these ratios
+enter relative binning without a separate treatment of the projected
+finite-frequency residual.
+
+\section*{Data and code availability}
+
+The scripts, numerical data, and contour-free implementation used to produce
+the figures and tables accompany this manuscript.  The numerical lens-plane
+integral is not used by the code path described in the paper.
+
+\appendix
+
+\section{Quartic image geometry}
+\label{app:quartic}
+
+The image equation can be reduced to a quartic polynomial.  This appendix
+gives the reduction for a general symmetric matrix $\bA$, so convergence and
+an arbitrarily oriented shear are included.
+
+Let $Y=|\by|$ and rotate to the source-aligned basis
+$\bm B=(\widehat\by,\widehat\by_\perp)$.  In this basis,
+\begin{equation}
+ \by'=(Y,0),
+ \qquad
+ \bA'=\bm B^{\mathsf T}\bA\bm B
+ =\begin{pmatrix}a&b\\b&d\end{pmatrix}.
+ \label{eq:A-prime}
+\end{equation}
+Set $u=1/|\bx'|^2$.  The lens equation becomes
+\begin{equation}
+ (\bA'-u\bm{1})\bx'=(Y,0).
+ \label{eq:lens-u}
+\end{equation}
+With
+\begin{equation}
+ D(u)=(a-u)(d-u)-b^2,
+\end{equation}
+the generic solution for a fixed $u$ is
+\begin{equation}
+ x'_1=\frac{Y(d-u)}{D(u)},
+ \qquad
+ x'_2=-\frac{Yb}{D(u)}.
+ \label{eq:quartic-reconstruction}
+\end{equation}
+Imposing $|\bx'|^2=u^{-1}$ gives
+\begin{equation}
+ D(u)^2-Y^2u\left[(d-u)^2+b^2\right]=0.
+ \label{eq:quartic-compact}
+\end{equation}
+Expanding,
+\begin{align}
+0={}&u^4+[-2(a+d)-Y^2]u^3\nonumber\\
+&+[a^2+4ad+d^2-2b^2+2dY^2]u^2\nonumber\\
+&+[-2(a+d)(ad-b^2)-Y^2(d^2+b^2)]u
+ +(ad-b^2)^2.
+ \label{eq:quartic-expanded}
+\end{align}
+Positive real roots are reconstructed with
+Eq.~\eqref{eq:quartic-reconstruction}, rotated back to the original frame, and
+polished with deterministic Newton iterations.  The polishing corrects
+floating-point error in the algebraic roots; it is not an image search.
+
+When $b=0$, Eq.~\eqref{eq:quartic-reconstruction} has a removable singularity
+for the symmetric off-axis pair.  The axial images solve
+\begin{equation}
+ a{x'_1}^2-Yx'_1-1=0,
+\end{equation}
+and an off-axis pair, when present, satisfies
+\begin{equation}
+ u=d,
+ \qquad
+ x'_1=\frac{Y}{a-d},
+ \qquad
+ {x'_2}^2=\frac1d-{x'_1}^2.
+\end{equation}
+At $Y=0$ and nonzero shear, the images lie along the eigenvectors of $\bA$ at
+radii equal to the inverse square roots of its eigenvalues.  The exactly
+unsheared and aligned case is an Einstein ring and is treated as a degeneracy.
+
+\section{Stationary-phase coefficients}
+\label{app:stationary-coefficients}
+
+Write $\bx=\bx_j+\bm\xi$ near a nondegenerate image and expand
+\begin{equation}
+ \tau=\tau_j+\frac12H_{ab}\xi_a\xi_b
+ +\frac1{3!}T_{abc}\xi_a\xi_b\xi_c
+ +\frac1{4!}Q_{abcd}\xi_a\xi_b\xi_c\xi_d+\cdots.
+ \label{eq:local-taylor}
+\end{equation}
+After the scaling $\bm\xi=w^{-1/2}\bm z$, the quadratic term is independent of
+$w$ and the higher derivatives generate an expansion in powers of $w^{-1}$.
+The oscillatory Gaussian moments are evaluated with covariance
+$\ii\bH^{-1}$.  At first order, Wick contractions give
+\begin{align}
+ C_1={}&-\frac18 Q_{abcd}G_{ab}G_{cd}
+ +\frac1{12}T_{abc}T_{def}G_{ad}G_{be}G_{cf}\nonumber\\
+ &+\frac18T_{abc}T_{def}G_{ab}G_{de}G_{cf},
+ \qquad G=\bH^{-1}.
+ \label{eq:C1-contraction}
+\end{align}
+The second coefficient receives terms from derivatives through sixth order and
+from products of the lower-order vertices.  For the Chang--Refsdal potential,
+all third and higher derivatives arise from $-\ln|\bx|$.  This allows the
+contractions to be reduced to a polynomial in three scaled inverse-Hessian
+entries.
+
+Let $\bm e_r=\bx_j/|\bx_j|$ and let $\bm e_t$ be the positively oriented
+orthogonal vector.  Define
+\begin{align}
+ \bm M&=
+ \begin{pmatrix}\bm e_r^{\mathsf T}\\\bm e_t^{\mathsf T}\end{pmatrix}
+ \bH_j^{-1}
+ \begin{pmatrix}\bm e_r&\bm e_t\end{pmatrix},
+ \label{eq:M-def}\\
+ u&=|\bx_j|^{-2},
+ \qquad
+ p=uM_{rr},\quad q=uM_{rt},\quad s=uM_{tt}.
+ \label{eq:pqs}
+\end{align}
+Then
+\begin{align}
+C_1=\frac{1}{12}\big(&10p^3-12p^2s-9p^2-48pq^2+18ps^2+18ps\nonumber\\
+&+72q^2s+36q^2-9s^2\big).
+ \label{eq:C1-explicit}
+\end{align}
+The second coefficient is $C_2=-P_2/288$, with the polynomial below.
+
+\begin{widetext}
+\begin{align}
+P_2={}&1540p^6-1680p^5s-3780p^5-16800p^4q^2
++2520p^4s^2+5040p^4s+2961p^4\nonumber\\
+&+40320p^3q^2s+40320p^3q^2-3600p^3s^3-8280p^3s^2
+-5364p^3s-720p^3\nonumber\\
+&+40320p^2q^4-64800p^2q^2s^2-99360p^2q^2s-32184p^2q^2
++3780p^2s^4+10800p^2s^3\nonumber\\
+&+9126p^2s^2+2160p^2s-86400pq^4s-66240pq^4
++60480pq^2s^3+129600pq^2s^2\nonumber\\
+&+73008pq^2s+8640pq^2-3780ps^4-5940ps^3-2160ps^2
+-11520q^6+60480q^4s^2\nonumber\\
+&+86400q^4s+24336q^4-30240q^2s^3-35640q^2s^2
+-8640q^2s+945s^4+720s^3.
+ \label{eq:C2-poly}
+\end{align}
+\end{widetext}
+
+Substitution of Eqs.~\eqref{eq:C1-explicit} and~\eqref{eq:C2-poly} into
+Eq.~\eqref{eq:image-kernel} gives the resolved-image targets used in the main
+text.
+
+\section{Source-plane operator representation}
+\label{app:operator}
+
+For $\kappa=0$, write the shear contribution to the Fermat potential as
+$-(\gamma/2)x_iQ_{ij}x_j$, where $Q$ is the traceless matrix in
+Eq.~\eqref{eq:shear-matrix} divided by $\gamma$.  After removing the source
+phase, the remaining lens-plane integral contains
+$\exp(-\ii w\by\cdot\bx)$.  Acting on this Fourier kernel,
+\begin{equation}
+ \partial_{y_i}\partial_{y_j}e^{-\ii w\by\cdot\bx}
+ =-w^2x_ix_j e^{-\ii w\by\cdot\bx}.
+\end{equation}
+Multiplication by the quadratic shear phase is therefore equivalent to the
+source-space operator in Eq.~\eqref{eq:operator-identity}.  Expanding its
+exponential gives
+\begin{equation}
+ \cG_{\gamma}=
+ \sum_{n=0}^{\infty}\frac1{n!}
+ \left(\frac{\ii\gamma}{2w}\right)^nD_\beta^n\cG_{\rm PM}.
+ \label{eq:operator-series}
+\end{equation}
+
+The point-mass seed depends only on $s=|\by|^2$.  Its radial derivatives are
+\begin{align}
+\frac{\dd^k\cG_{\rm PM}}{\dd s^k}={}&
+C(w)\left(-\frac{\ii w}{2}\right)^k
+\frac{(1-\ii w/2)_k}{k!}\nonumber\\
+&\times{}_1F_1\!\left(1-\frac{\ii w}{2}+k;1+k;
+-\frac{\ii ws}{2}\right).
+ \label{eq:radial-derivatives}
+\end{align}
+Repeated application of $D_\beta$ is represented as a finite sum of monomials
+in $z=y_1+\ii y_2$, $\bar z$, and the derivatives in
+Eq.~\eqref{eq:radial-derivatives}.  The series is stopped after a prescribed
+number of consecutive terms fall below the requested fraction of the current
+partial sum.  The order used and the last-term estimate are retained as
+convergence diagnostics.
+
+For completeness, the convergence rescaling follows by substituting
+$\bx'=\sqrt{\lambda}\bx$ into Eq.~\eqref{eq:fermat}:
+\begin{align}
+ \tau_{\kappa,\gamma}(\bx;\by)={}&
+ \tau_{0,\gamma/\lambda}
+ \left(\bx';\frac{\by}{\sqrt\lambda}\right)
+ +\frac12\ln\lambda
+ -\frac{\kappa}{2\lambda}|\by|^2.
+\end{align}
+The Jacobian $\dd^2x=\lambda^{-1}\dd^2x'$ then gives
+Eq.~\eqref{eq:mass-sheet-map}.
+
+\section{Global label continuation}
+\label{app:tracking}
+
+At a given source position, the real images are found from
+Eq.~\eqref{eq:quartic-expanded}.  The nearest caustic point is obtained by a
+one-dimensional minimization along the critical curve.  Unoccupied labels are
+placed at the corresponding critical point in the lens plane.
+
+Suppose the previous parameter point has marker positions $\bm m_a$, one for
+each of the four labels, and the current point has $N$ real images
+$\bx_j$.  The assignment is chosen by minimizing
+\begin{equation}
+ \sum_{j=1}^{N}\frac{|\bx_j-\bm m_{\pi(j)}|^2}{\ell^2}
+ \label{eq:assignment-cost}
+\end{equation}
+over injections $\pi$ from the images to the four labels.  The scale $\ell$ is
+taken from the median marker radius and only makes the cost dimensionless.
+Since there are at most four images, every assignment can be checked directly.
+The markers of occupied labels are updated to the image positions; the others
+are set to the nearest critical point.
+
+At the first point on a path, the real images are ordered by polar angle and
+then by radius.  This convention is sufficient to initialize a continuous
+trajectory.  It does not define a globally path-independent permutation around
+all possible loops in parameter space.  For likelihood proposals that are far
+from the fiducial point, one may reset the labels with the initialization rule
+or evaluate the model along a short interpolation path from the fiducial
+parameters.  The coherent sum in Eq.~\eqref{eq:exact-reconstruction} is
+independent of the label permutation; only the smoothness of individual ratios
+depends on consistent continuation.
+
+\bibliographystyle{apsrev4-2}
+\bibliography{refs}
+
+\end{document}

@@ -23,3 +23,5 @@ gw_detection_ias library; add more with the Professor's paper-reading workflow.
 | 2105.03468 | Karamanis et al.: zeus (ensemble slice sampling) | [2105.03468.pdf](./2105.03468.pdf) | `cogwheel/sampling.py` | Sampler cogwheel wraps; MCMC convergence. |
 | 0809.3437 | Feroz et al.: MultiNest | [0809.3437.pdf](./0809.3437.pdf) | `cogwheel/sampling.py` | Sampler cogwheel wraps (PyMultiNest). |
 | 2004.06503 | Pratten et al.: IMRPhenomXPHM | [2004.06503.pdf](./2004.06503.pdf) | `cogwheel/waveform.py` | Default precessing higher-mode waveform model; professor/waveform_conventions. |
+| 2207.03508 | Roulet et al.: Removing degeneracy and multimodality in GW source parameters | [2207.03508.pdf](./2207.03508.pdf) | `cogwheel/gw_prior/, cogwheel/prior.py` | THE cogwheel coordinate-system paper: sampled/standard coordinates + folding. Foundational for prior design. |
+| 2402.11439 | Roulet & Venumadhav: Inferring Binary Properties from Gravitational Wave Signals | [2402.11439.pdf](./2402.11439.pdf) | `(foundations)` | PE review by the cogwheel authors — the library's own conceptual frame. |
