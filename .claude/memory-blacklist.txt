@@ -36,6 +36,9 @@
 .serena/memories/tidy_short_term.md
 .serena/memories/test_dev_knowledge.md
 .serena/memories/test_dev_short_term.md
+.serena/memories/professor_knowledge.md
+.serena/memories/professor_short_term.md
+.serena/memories/professor_code_observations.md
 
 # Claude Code per-project auto-memories (personal feedback/project notes).
 .serena/memories/claude_memory/

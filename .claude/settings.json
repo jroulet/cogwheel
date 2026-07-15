@@ -31,6 +31,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__serena__write_memory",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'exec \"$(git rev-parse --show-toplevel)/.claude/hooks/professor-auto-mark-read.sh\"'",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
