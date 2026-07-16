@@ -80,25 +80,17 @@ conflicts with this brief, THIS BRIEF WINS.
 
 ## Tests — put ALL of these in `domain_test_descriptions`
 The Test Developer authors every test; no work package may deliver a test file.
-That prohibition is about a WP's DELIVERABLE — the specs themselves should say
-where the tests go, because `domain_test_descriptions` is the only channel the
-Test Developer sees (it receives the WP ids/titles and these specs, nothing else).
+Location, framework, the house idiom (anti-vacuity tearDown, self-falsification
+class), the independent-oracle rule and the sole-author rule all live in
+`.claude/crew/test_dev.md` — do NOT restate them here.
 
-RECOMMEND this layout in the specs — four new suites under `cogwheel/tests/`, one
-per module, mirroring the two that exist:
+Build-specific only: four new suites, one per module —
 `test_lensing_geometry.py`, `test_lensing_hyp1f1.py`, `test_lensing_operator.py`,
-`test_lensing_channels.py` (the fold/cusp crossing fixture builders live as
-test-local helpers in the channels suite, or a clearly-named test-support module
-under `cogwheel/tests/` — never inside the package). Do not collapse them into one
-file, and do not name a suite after a module that does not exist.
+`test_lensing_channels.py`. The fold/cusp crossing fixture builders are
+test-local helpers in the channels suite (or a clearly-named test-support module
+under `cogwheel/tests/`) — never inside the package.
 
-Give each spec a setup / operation / expected / diagnostic. Follow the house idiom
-in `cogwheel/tests/test_lensing_dd.py`: stdlib unittest under `cogwheel/tests/`, a
-helper base TestCase with a domain assertion, an ANTI-VACUITY tearDown that fails
-if zero comparisons ran, `<Thing>TestCase` names, itertools.product + subTest,
-ALL-CAPS module constants with `#:` comments, and a SELF-FALSIFICATION class
-proving the suite can go red. mpmath is ORACLE-ONLY — it must never be importable
-from a production path (`grep -r mpmath cogwheel/lensing/` returns nothing).
+Give each spec a setup / operation / expected / diagnostic.
 - geometry retro-tests: quartic CSV regression over all 168 rows (image count ==
   row.n_multistart — a frozen oracle from a deleted multistart solver, independent
   and non-drifting; n_quartic == n_multistart as a fixture-integrity check; fresh
