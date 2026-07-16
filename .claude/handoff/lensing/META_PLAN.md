@@ -195,3 +195,35 @@ approve/reject plans via the file gate, give feedback, no further user input.
   Empirical facts a WP depends on must be PRE-ANSWERED in the brief (already
   measured: all 168 rows clear 1e-12, max 1.93e-13, no exception needed;
   census (0,0,1,1)/(0,1); CSV 120/24/24), so the coder has no reason to probe.
+
+- CORRECTION — THE SANDBOX WAS NEVER PROVEN TO BE THE CAUSE (2026-07-16, later
+  the same day). Read this BEFORE trusting the two entries above about the
+  sandbox; they overstate the evidence and I have since falsified them.
+  What I claimed: ignoreViolations {"file": ["/tmp/**", "/private/tmp/**"]}
+  fixed the "STOP and wait" denial, "verified against the exact failing
+  command". That verification was worth nothing — my probe did ONE write, and
+  a single success cannot distinguish a fix from a flaky denier.
+  What the evidence actually shows, tested after the fact:
+    * NOT positional: a coder doing FOUR sequential /tmp heredoc writes had all
+      four succeed (A/B/C/D all wrote and ran).
+    * NOT content: the byte-for-byte command that was denied at 09:11 (1996
+      chars, the caustic winding cross-check) replays clean 3/3.
+    * NOT hooks (trace shows only instructive serena redirects, all retried),
+      NOT user deny-rules (~/.claude/settings.json has none), NOT the path.
+  => The denial is TRANSIENT and EXTERNAL — "The user doesn't want to take this
+  action right now" is the harness's text for a refused permission REQUEST, not
+  a sandbox violation. It struck different coders at different call indices,
+  which is the signature of something non-deterministic outside the SDK (a
+  model-based auto-mode classifier judging tool calls, or a prompt that cannot
+  be answered from a headless subprocess). NOT REPRODUCIBLE ON DEMAND.
+  ACTION TAKEN: the ignoreViolations change was REVERTED in cogwheel, gw and
+  the teja-force template. It loosened the sandbox for no demonstrated benefit,
+  and I had pushed the user to apply a security-relevant change on one
+  observation. Do not reinstate it without a measured denial rate with and
+  without it, over many trials.
+  LESSON (the real one): a non-deterministic failure cannot be confirmed fixed
+  by a single passing run. If a fix cannot be shown to change a RATE, it has
+  not been shown to do anything.
+  WHY THIS NO LONGER MATTERS IN PRACTICE: coders should never be writing /tmp
+  probes at all — see the role mis-scoping entry. The landmine, if it exists,
+  is only reachable via an anti-pattern that architect.md now forbids.

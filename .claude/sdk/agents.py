@@ -61,8 +61,9 @@ async def _run_hook_script(script_name: str, hook_input, _tool_use_id, _context)
     # Read/Grep/Glob/Edit/Write/Bash, which is the intended design — the deny
     # messages are instructive ("USE SERENA ... pick the right tool") and agents
     # retry with the Serena equivalent. Note this was NOT the cause of the
-    # 2026-07-16 zero-write builds; that was the sandbox denying out-of-
-    # workspace /tmp writes (see META_PLAN).
+    # 2026-07-16 zero-write builds; that was a role-scoping error in the plans
+    # (Coder WPs must not author tests or run measurement campaigns — see
+    # .claude/crew/architect.md and META_PLAN).
     project_root = os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     script = os.path.join(project_root, ".claude", "hooks", script_name)
@@ -580,20 +581,6 @@ async def build_agent_options(
         "network": {
             "allowLocalBinding": True,
             "allowAllUnixSockets": True,
-        },
-        # Coders on this numerically-heavy library routinely write a scratch
-        # measurement script to /tmp and run it — the plans explicitly demand
-        # "measure, don't guess" for empirical gates (residual tolerances, the
-        # Morse census). The sandbox denies that out-of-workspace write, and the
-        # denial surfaces as "The user doesn't want to take this action right
-        # now. STOP what you are doing and wait" — which a coder correctly
-        # refuses to route around, so it ends BLOCKED having written nothing.
-        # That silently killed every WP of Build 1b on 2026-07-16 (root cause:
-        # c233fae). Reads and `python -c` were never affected; only the write.
-        # Scoped to the tmp roots ONLY — the workspace is deliberately NOT
-        # listed, so real edits still go through the normal tool path.
-        "ignoreViolations": {
-            "file": ["/tmp/**", "/private/tmp/**"],
         },
     }
 
