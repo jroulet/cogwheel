@@ -145,3 +145,12 @@ approve/reject plans via the file gate, give feedback, no further user input.
   serena edit suite, Bash(python/conda/...). IF A FUTURE BUILD stalls with
   "STOP and wait" no-op WPs again, FIRST verify this file still has Write/Edit grants
   before diagnosing anything else. Relaunched build1b after this.
+
+- INCIDENT (2026-07-16): build1b 5th launch died at startup with
+  "Serena SSE server exited during startup (rc=3)". Cause: a leftover
+  build-spawned Serena SSE (uvx ... --transport sse --port 8322) from the
+  prior aborted attempt still held port 8322 (35 min old orphan). Fix: kill
+  the SSE orphan by PID (parent+child) — identify it as the process whose
+  cmdline has `--transport sse --port 8322`; do NOT kill the session's own
+  `--project-from-cwd --context claude-code` stdio MCP servers. Then relaunch.
+  DIAGNOSTIC: on any "SSE exited during startup", first `lsof -tiTCP:8322`.
