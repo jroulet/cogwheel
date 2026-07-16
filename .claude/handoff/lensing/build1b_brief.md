@@ -79,18 +79,10 @@ conflicts with this brief, THIS BRIEF WINS.
    pending) — do NOT write a completed.d fragment for the program.
 
 ## Tests — put ALL of these in `domain_test_descriptions`
-The Test Developer authors every test; no work package may deliver a test file.
-Location, framework, the house idiom (anti-vacuity tearDown, self-falsification
-class), the independent-oracle rule and the sole-author rule all live in
-`.claude/crew/test_dev.md` — do NOT restate them here.
-
-Build-specific only: four new suites, one per module —
-`test_lensing_geometry.py`, `test_lensing_hyp1f1.py`, `test_lensing_operator.py`,
-`test_lensing_channels.py`. The fold/cusp crossing fixture builders are
-test-local helpers in the channels suite (or a clearly-named test-support module
-under `cogwheel/tests/`) — never inside the package.
-
-Give each spec a setup / operation / expected / diagnostic.
+Four new suites, one per module: `test_lensing_geometry.py`,
+`test_lensing_hyp1f1.py`, `test_lensing_operator.py`, `test_lensing_channels.py`.
+The fold/cusp crossing fixture builders are test-local helpers in the channels
+suite. Give each spec a setup / operation / expected / diagnostic.
 - geometry retro-tests: quartic CSV regression over all 168 rows (image count ==
   row.n_multistart — a frozen oracle from a deleted multistart solver, independent
   and non-drifting; n_quartic == n_multistart as a fixture-integrity check; fresh
