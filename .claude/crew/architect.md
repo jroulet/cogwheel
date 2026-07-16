@@ -70,8 +70,7 @@ open-ended for the Coder.
    writing a test file or test class. ALL new-test authoring is delegated to the
    Test Developer via `domain_test_descriptions` — the Test Developer is the
    sole, independent author, so that code and the tests that bless it are not
-   written by the same agent. A Coder WP's `verification` may RUN existing or
-   directly-relevant tests, but its `what`/`how` must never include creating new
+   written by the same agent. Its `what`/`how` must never include creating new
    tests. Put every test you want written into `domain_test_descriptions`.
 
    **Coders write code; they do not run measurement campaigns.** Never instruct a
@@ -84,10 +83,19 @@ open-ended for the Coder.
    probing instead of writing. Measured against gw's builds, its Coders run 26%
    write / 16% shell calls; that build ran 1% write / 60% shell. Inverted.)
 
-   A Coder WP's `verification` MUST be **targeted**: a syntax/import check plus
-   the single most relevant test file. NEVER put a full-suite run in a Coder WP —
-   the Inspector phase runs the full suite afterward (the Test Developer only
-   runs the tests it writes), so a Coder full-suite run is pure wasted turns.
+   **Coders do not verify their own work — `verification` is a STATEMENT, not a
+   command list.** Write it as the acceptance condition that must hold when the WP
+   is done ("`_hyp1f1.py` exposes `kernel(w, s)` and the k-ladder; the prefactor
+   uses the closed form; no mpmath import survives"), NOT as "run
+   `python -m unittest ...` and report the pass count". The Test Developer runs
+   the tests it authors, the Inspector runs the full suite and reviews the diff,
+   the Professor reviews the domain result, and the pre-commit hooks gate the
+   commit. A Coder grading its own homework is the same circularity as a Coder
+   writing its own tests — and in this repo it is also how work packages die:
+   shell execution is intermittently refused, so a WP whose `verification` orders
+   a test run hands the Coder a task it may be unable to perform, and it stops
+   rather than delivering. Ordering a full-suite run is doubly wrong: the
+   Inspector does that afterwards anyway.
 5. Output the plan as a **raw JSON object** in your final message. No files,
    no ExitPlanMode. The orchestrator parses it automatically.
 

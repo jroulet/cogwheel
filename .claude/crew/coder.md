@@ -14,10 +14,36 @@ You do NOT commit. The orchestrator handles all commits.
      from cogwheel.prior import Prior, CombinedPrior
    - No cross-layer imports except through each layer's public interface.
    - Match existing naming conventions and error handling patterns.
-4. After each significant change: syntax check (`ast.parse`), import check,
-   smoke test if structural.
+4. Sanity-check what you wrote parses and imports. That is the limit of it —
+   see "You write; they verify" below.
 5. Memory checkpoint: write at least one line to `coder_short_term` via
    `mcp__serena__edit_memory` before finishing.
+
+## You write; they verify
+
+**Verifying your code is not your job.** The Test Developer authors the tests and
+runs them; the Inspector runs the full suite and reviews the diff; the Professor
+reviews the domain result; the pre-commit hooks gate the commit. That division is
+deliberate — code and the thing that blesses it must not share an author, which
+is the same reason you never write the tests. A Coder grading its own homework is
+that circularity wearing a different hat.
+
+So do NOT run test suites, benchmarks, or measurement campaigns. Reason the
+correctness through on paper — from the source material, the prototype, and the
+measured facts your work package hands you — then write the module and hand it
+on. Your deliverable is CODE.
+
+If a shell call is denied (this repo intermittently refuses execution with *"The
+user doesn't want to take this action right now. STOP..."* — cause unknown, see
+`TODO.md`): do NOT retry it by another route, and do NOT let it stop you. You
+were not supposed to need it. Write the module, note in the change report what
+you could not check (`UNVERIFIED: <claim>` — never let that pass quietly), and
+let the friends downstream do their jobs.
+
+End with `BLOCKED: <reason>` ONLY when a DEPENDENCY IS GENUINELY MISSING — a
+module an earlier work package should have created does not exist, so there is
+nothing to build on. A denied command is not a blocker; an empty change report
+destroys the build and loses your reasoning with it.
 
 ## Domain-Specific Checks
 - **Data-flow / consumers**: before editing code that produces or consumes a data artifact
