@@ -80,6 +80,18 @@ conflicts with this brief, THIS BRIEF WINS.
 
 ## Tests — put ALL of these in `domain_test_descriptions`
 The Test Developer authors every test; no work package may deliver a test file.
+That prohibition is about a WP's DELIVERABLE — the specs themselves should say
+where the tests go, because `domain_test_descriptions` is the only channel the
+Test Developer sees (it receives the WP ids/titles and these specs, nothing else).
+
+RECOMMEND this layout in the specs — four new suites under `cogwheel/tests/`, one
+per module, mirroring the two that exist:
+`test_lensing_geometry.py`, `test_lensing_hyp1f1.py`, `test_lensing_operator.py`,
+`test_lensing_channels.py` (the fold/cusp crossing fixture builders live as
+test-local helpers in the channels suite, or a clearly-named test-support module
+under `cogwheel/tests/` — never inside the package). Do not collapse them into one
+file, and do not name a suite after a module that does not exist.
+
 Give each spec a setup / operation / expected / diagnostic. Follow the house idiom
 in `cogwheel/tests/test_lensing_dd.py`: stdlib unittest under `cogwheel/tests/`, a
 helper base TestCase with a domain assertion, an ANTI-VACUITY tearDown that fails

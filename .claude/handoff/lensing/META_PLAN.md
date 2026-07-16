@@ -113,6 +113,14 @@ against. Circular tests pass.
 - A WP's deliverable is PRODUCTION CODE. Never "write test X" — that is the Test
   Developer's job via `domain_test_descriptions`, and it is deliberate: code and
   the tests that bless it must not share an author.
+  BUT DO NOT OVER-CORRECT: the prohibition is on a WP's DELIVERABLE, not on
+  naming test files at all. The plan SHOULD recommend the suite layout — inside
+  `domain_test_descriptions`, which is the ONLY channel the Test Developer sees
+  (`_run_test_dev_agent` hands it the WP ids/titles plus these specs, and nothing
+  else). Say which suites should exist and where, or it will guess: collapse four
+  suites into one file, or invent names that collide with the AST import guard
+  the committed test_lensing_gauge.py already enforces. Recommend the layout;
+  just never make a test file a WP's deliverable.
 - Never tell a coder to MEASURE and then decide. Pre-answer the fact, or make it
   a test. Ground truth in a discarded scratch file is unverifiable by construction.
 - Coder verification is TARGETED (syntax/import + the one relevant test file).
