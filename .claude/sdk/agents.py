@@ -607,6 +607,19 @@ async def build_agent_options(
         permission_mode=permission_mode,
         max_turns=max_turns,
         mcp_servers=mcp_servers,
+        # Agents-only permission allowlist (root-caused 2026-07-16):
+        # setting_sources=["user"] is deliberate (keeps project settings.json
+        # hooks out so the serena-crash fallback can run hook-free), but the
+        # user scope carries no permissions block, so every shell call was
+        # adjudicated by the auto-mode classifier, which FAILS CLOSED on its
+        # own transient errors -- the intermittent bare "STOP" denial that
+        # killed builds (106 denials / 59 sessions, depth-correlated because
+        # the classifier prompt embeds the agent transcript). The explicit
+        # settings file below carries ONLY portable allow rules -- no hooks,
+        # no MCP keys (it can never spawn extra serenas) -- and allowlisted
+        # tools take the classifier fast-path, never reaching it.
+        settings=(lambda _p: _p if os.path.isfile(_p) else None)(
+            os.path.join(project_root, ".claude", "settings.agents.json")),
         setting_sources=["user"],
         hooks=_build_sdk_hooks() if use_serena else None,
         cwd=project_root,
