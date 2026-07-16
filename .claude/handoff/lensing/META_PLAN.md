@@ -280,3 +280,56 @@ prefactor tautology. The agents' judgement has been better than my briefs.
   So the rule is NOT "coders must not probe". Probing is correct engineering
   when the math is subtle. The rule is: pre-answer what you can, and make sure
   the probe PATH WORKS.
+
+- DENIAL — MEASURED ELIMINATIONS (2026-07-16, detached = real build context,
+  N=5/arm unless noted). Add to this table rather than re-deriving it:
+      sandbox ignoreViolations /tmp allowlist ON .... 0/5 denied
+      sandbox ignoreViolations OFF ................. 0/5 denied   (no effect)
+      4 sequential /tmp heredoc writes, one session . 4/4 ok       (not positional)
+      exact denied command, replayed ............... 3/3 ok       (not content)
+      8 serena reads THEN a shell call ............. 0/5 denied   (not call depth)
+      real build coders ............................ ~5 denied in ~7
+  Also ruled out earlier: hooks (trace shows only instructive serena redirects,
+  all retried), user-scope deny rules (none exist), coder memory (the denial is
+  a harness tool_result; the denied coder made zero memory calls).
+  KEY REFRAME (2026-07-16 12:29, from coder-2's own account): it is NOT about
+  /tmp and NOT about writes. Its `create_text_file` write SUCCEEDED (in-workspace
+  `_scratch_probe.py` landed); what was denied was RUNNING it — first via
+  `mcp__serena__execute_shell_command`, then via the native `Bash` fallback. Two
+  independent shell paths, same denial. So the target is SHELL EXECUTION.
+  WHAT STILL DIFFERS between a probe (never denied, 0/20 across all arms) and a
+  real coder (denied repeatedly): the SYSTEM PROMPT SIZE. A real coder carries
+  crew prompt + pre-read SPEC/TODO/FINDINGS/DATA_CONTRACTS + the full WP text —
+  order 10-20k tokens — and max_turns=90. Every probe used task_context="" and a
+  small max_turns. NEXT: vary system-prompt size alone (pass a large
+  task_context / extra_instructions), detached, N>=5, and compare rates.
+  DO NOT re-test the sandbox; that arm is settled.
+
+- FEEDBACK LOOP I CREATED, then closed (2026-07-16): `.claude/spec/TODO.md` is in
+  SPEC_FILES, so it is pre-read into EVERY coder's context. The 50-line
+  coder-tool-denial fragment I wrote therefore landed in the prompt of coders who
+  only need to write a numerical module — and coder-2 quoted my own sentence
+  ("a well-behaved Coder refuses to route around a denial") back as its
+  justification for stopping. Its behaviour was correct; teaching it that in a
+  work-package prompt was not. Fragment shrunk to 14 lines + a pointer here.
+  GENERAL RULE: infra/driver detail belongs in META_PLAN (agent-only, NOT
+  pre-read). A todo.d fragment is pre-read — keep it to what a coder needs.
+
+- THE BLOCKED CODERS PAID FOR THEMSELVES (2026-07-16). Two consecutive coders,
+  each blocked before writing a line, each found a real error in my brief that
+  would otherwise have shipped into _hyp1f1.py — the module Build 2's likelihood
+  rests on. Both verified numerically before adoption:
+  (1) The prefactor phase cancellation is ASYMPTOTIC (Stirling), not algebraic.
+      Its polar route |C|*exp(i*theta), |C|^2 = -pi*w/expm1(-pi*w), never needs
+      loggamma's real part and kills both overflow traps: 3.4e-13 at w=700,
+      ~300x inside the 1e-10 gate. (Its own "~0.75 digits" estimate was
+      optimistic — actually ~3 — so check even a correct-sounding claim.)
+  (2) "ONE numerator shared across all k" invited sharing t_n = (a')_n*zz^n/n!
+      and dividing by (1+k)_n: |t_n| ~ e^{(w*Y)^2/4} = 1e391 OVERFLOWS float64
+      (dd extends mantissa, not exponent — my own brief says so), and
+      1/(1+k)_n ~ 1e-449 UNDERFLOWS. The shared object is P_n =
+      (a')_n*zz^n/(n!)^2, max ~ e^{w*Y} ~ 1e26 — which is exactly the "same max
+      term e^{w*Y}" the brief already claimed, i.e. the brief contradicted
+      itself and the coder spotted it.
+  Do not read the zero-write builds as the agents failing. They were right and
+  the brief was wrong, twice.
