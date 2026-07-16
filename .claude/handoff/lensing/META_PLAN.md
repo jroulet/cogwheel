@@ -515,3 +515,30 @@ RESUME CHECKLIST for a fresh driver session:
 3. If alive: watch for escalation_ready / Professor / commit; disposition via
    the approval-dir files. If dead: salvage per Build 1b protocol above.
 4. gw + skill ports (task #6) remain GATED on a green build.
+
+## BUILD 2B DIED 23:48 — service-side, work SAFE, resume from here
+
+Death: inspector-6 wedged 300s on serena, auto-fell-back to built-in tools
+(correct), then wedged 300s AGAIN with NO serena in the loop — the CLI's own
+API stream stalled. Service-side (consistent with the classifier stage-2
+transient errors all evening). Second wedge propagated TimeoutError; the
+fallback has no second retry by design. Processes killed, port 8322 freed,
+monitors stopped. NOTHING LOST — all deliverables uncommitted in the tree:
+  M cogwheel/lensing/chang_refsdal/operator.py   (reviewed refusal semantics)
+  M cogwheel/tests/test_lensing_operator.py      (reconciled, 21+69 green)
+  ?? cogwheel/lensing/{likelihood,waveform}.py   (Build 2 WPs)
+  ?? cogwheel/tests/test_lensing_{likelihood,waveform}.py
+  M .claude/spec/FINDINGS.md, docs/source/overview.rst, changelog fragments
+  (+ WP1's near-cusp fix in likelihood.py, mtime 23:03 — UNVERIFIED: the
+   crown suite was never amended/seeded/re-run; test_dev-5 lost to a denial.)
+
+RESUME (fresh session, ideally better service weather):
+1. Read this file. Kill nothing — already clean.
+2. EITHER relaunch: .claude/sdk/launch_build.sh lensing_build2b
+   .claude/handoff/lensing/build2b_brief.md 1800   (the new SDK improvements
+   — denial retry, TODO-out-of-preread, per-suite split — are now LIVE for
+   this launch; the brief is unchanged and its facts still hold)
+   OR salvage by hand per the Build 1b protocol (above) if service stays bad.
+3. The crown verdict is the ONLY open question: does WP1's fix cure near-cusp
+   6.43e8? Run test_lensing_likelihood.py (46 min) or let the pipeline do it.
+4. After a green build: gw + skill ports (task #6) unlock.
