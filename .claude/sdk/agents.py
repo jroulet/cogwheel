@@ -581,6 +581,20 @@ async def build_agent_options(
             "allowLocalBinding": True,
             "allowAllUnixSockets": True,
         },
+        # Coders on this numerically-heavy library routinely write a scratch
+        # measurement script to /tmp and run it — the plans explicitly demand
+        # "measure, don't guess" for empirical gates (residual tolerances, the
+        # Morse census). The sandbox denies that out-of-workspace write, and the
+        # denial surfaces as "The user doesn't want to take this action right
+        # now. STOP what you are doing and wait" — which a coder correctly
+        # refuses to route around, so it ends BLOCKED having written nothing.
+        # That silently killed every WP of Build 1b on 2026-07-16 (root cause:
+        # c233fae). Reads and `python -c` were never affected; only the write.
+        # Scoped to the tmp roots ONLY — the workspace is deliberately NOT
+        # listed, so real edits still go through the normal tool path.
+        "ignoreViolations": {
+            "file": ["/tmp/**", "/private/tmp/**"],
+        },
     }
 
     disallowed_set = set(disallowed_tools)
