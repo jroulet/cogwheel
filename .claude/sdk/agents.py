@@ -51,19 +51,20 @@ async def _run_hook_script(script_name: str, hook_input, _tool_use_id, _context)
     all?" questions.
     """
     import json as _json
-    # KNOWN LATENT BUG (do not "fix" casually — see below): agents.py lives at
-    # <repo>/.claude/sdk/agents.py, so two dirnames land on <repo>/.claude and
-    # the join below yields <repo>/.claude/.claude/hooks/... which never exists.
-    # The isfile() check then returns {} (fail-open), so these SDK hooks have
-    # NEVER fired in either repo — no hook_trace.log has ever been written.
-    # gw_detection_ias carries the identical two-dirname form and its builds are
-    # green, i.e. the whole pipeline is validated with these hooks INERT. Adding
-    # the third dirname switches serena-redirection on for every native
-    # Read/Edit/Write/Bash and changes coder behaviour repo-wide — do that as a
-    # deliberate, separately-tested change, not as a drive-by. It was NOT the
-    # cause of the 2026-07-16 zero-write builds (that was the sandbox denying
-    # out-of-workspace /tmp writes; see META_PLAN).
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # agents.py lives at <repo>/.claude/sdk/agents.py, so THREE dirnames reach
+    # the repo root. It previously used two, landing on <repo>/.claude, and the
+    # join below then yielded <repo>/.claude/.claude/hooks/... — a path that
+    # never exists. isfile() failed, _run_hook_script returned {} (fail-open),
+    # and so these SDK hooks NEVER fired and no hook_trace.log was ever written
+    # (verified: true in gw_detection_ias too, which carries the same form).
+    # Fixed 2026-07-16. This turns serena-redirection on for native
+    # Read/Grep/Glob/Edit/Write/Bash, which is the intended design — the deny
+    # messages are instructive ("USE SERENA ... pick the right tool") and agents
+    # retry with the Serena equivalent. Note this was NOT the cause of the
+    # 2026-07-16 zero-write builds; that was the sandbox denying out-of-
+    # workspace /tmp writes (see META_PLAN).
+    project_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     script = os.path.join(project_root, ".claude", "hooks", script_name)
     if not os.path.isfile(script):
         return {}

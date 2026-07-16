@@ -37,6 +37,18 @@ COMMITTED and TESTED (do not rewrite; consume):
    `.claude/spec/lensing_paper/data/quartic_geometry_validation.csv`;
    count == n_multistart per row; fresh residual gate <= 1e-12) + Morse-index
    census + near-caustic assertions on DELAYS/RESIDUALS not positions.
+   PRE-ANSWERED — MORSE CENSUS, get this right: the 4-image census is
+   **n_a = 0,0,1,1** (TWO minima + TWO saddles, NO maximum); the 2-image census
+   is n_a = 0,1. Earlier plan documents said "0,1,1,2" (one min / two saddles /
+   one max) — that is WRONG; ignore it wherever you meet it. A point mass has
+   -ln|x| -> +inf at the origin, so the Fermat potential has no local maximum
+   and n_max = 0 in every regime. This was MEASURED against the committed
+   geometry.py (y=0 and general y inside the astroid, gamma 0.05..0.4): the
+   census is [0,0,1,1] everywhere, [0,1] outside. CAUTION: the invariant
+   n_min - n_saddle + n_max = 0 is satisfied by BOTH 0,0,1,1 and 0,1,1,2, so it
+   cannot discriminate — the test must MEASURE the census, never assert it from
+   prose. (Found by a coder that correctly refused to write an assertion it
+   believed false; it was right.)
 5. `cogwheel/tests/test_lensing_hyp1f1.py`, `test_lensing_operator.py`,
    `test_lensing_channels.py` — the approved plan's domain tests: exact
    prefactor identity (rtol 1e-14, flat in w); k-ladder vs mpmath oracle +
