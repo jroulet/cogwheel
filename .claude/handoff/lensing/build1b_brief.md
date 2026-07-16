@@ -75,5 +75,36 @@ COMMITTED and TESTED (do not rewrite; consume):
   `chang_refsdal_operator.py` is the reference for the operator series;
   its mpmath usage is what `_hyp1f1.py` replaces).
 
+## HEADLESS DISCIPLINE (program-scoped — copy this block VERBATIM into every WP's `how`)
+This build runs unattended: no human reads or answers questions mid-task. The
+previous run failed exactly this way — coders did excellent read-only analysis,
+raised good questions, ended with "let me know how to proceed", and the
+pipeline moved on recording zero changes. Therefore, for THIS program's builds:
+never end a work package waiting for direction. Resolve ambiguities and task-
+text errors yourself with the most defensible choice, record each under a
+DECISIONS line in the change report, and complete the files. A coder WP that
+changes no files is a FAILED WP unless it ends with 'BLOCKED: <reason>'.
+
+## PRE-ANSWERED QUESTIONS (from the previous run's coders — adopt these resolutions)
+1. Prefactor test tautology (WP2): correct catch — do NOT assert the closed
+   form against itself. Gate the production |C(w)|^2 against an independent
+   mpmath evaluation of the DEFINITION |e^{pi w/4 + (iw/2)ln(w/2)} Gamma(1-iw/2)|^2
+   at >= 60 dps.
+2. CSV fixture errata (WP1): the plan's claim "all 168 rows kind='general'" is
+   WRONG — actual distribution is 120 general / 24 fold / 24 cusp. Use the
+   fold/cusp rows as genuine near-caustic fixtures (assert on residuals and
+   delays there, not positions).
+3. Residual gate vs solver default (WP1): find_images_quartic's
+   residual_tolerance=3e-8 default vs the 1e-12 test gate is an empirical
+   question — measure on all 168 rows; gate at 1e-12 where it holds and
+   document (FINDINGS-worthy) any principled exceptions near caustics rather
+   than silently loosening the gate.
+4. Ladder complexity assertion (WP2): assert (a) shared-numerator evaluations
+   independent of max_order and (b) total dd-multiply count linear (reject
+   quadratic) — do not assert an unsubstantiated O() claim.
+5. pylint is not installed in this env: substitute programmatic 79-col +
+   ast.parse checks; do not block on pylint.
+
 You (the Architect) own the plan — structure WPs as you see fit, but the gap
-list above is the deliverable and the process requirements are non-negotiable.
+list above is the deliverable and the process requirements (including the
+headless-discipline block) are non-negotiable.
