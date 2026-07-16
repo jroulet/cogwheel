@@ -391,3 +391,53 @@ prefactor tautology. The agents' judgement has been better than my briefs.
   ESCALATION, not engineering: this needs the user (whose account it is) to
   check their auto-mode configuration, or Anthropic. It is not an SDK bug and
   every SDK-side knob is eliminated (see the table above).
+
+## BUILD 1B — COMPLETE (2026-07-16, gates run by hand)
+
+Engine landed at fdcbad0; test battery + F_op fixes at fb335c1. All six suites
+green: 126 passed + 129 subtests (dd 37, gauge 34, geometry 11, hyp1f1 13,
+operator 17, channels 14).
+
+HOW IT FINISHED: the SDK build wrote the engine and the geometry suite, the
+Inspector correctly flagged the three missing suites, then the run died on the
+interactive escalation gate (EOFError in a headless build — gate now file-based,
+f199885). Rather than revert ~$18 of correct coder work, the remaining pipeline
+was hand-orchestrated from the crashed state (user's call, and the right one):
+  - THREE Test Developer subagents, ONE PER SUITE (the split the monolithic
+    120-turn test_dev could not fit). All three delivered green suites.
+  - They found TWO real production bugs in operator.py: a fatal IndexError on
+    every F_op call with max_order >= 1 (dense fancy-index off the ladder at
+    zero-coefficient corners; clamped), and _series_length sized from
+    |zz| = w*s/2 instead of L = w*sqrt(s) (F_op silently ~1e-4 inside the
+    certified domain; now 5.65e-12). Independent double-discovery of bug 1 by
+    two agents from different directions.
+  - Inspector: PASS, zero findings — re-derived both fixes from first
+    principles, verified F005 honesty, oracle independence, the AST guard.
+  - Professor physics review: PASS — prefactor algebra + limits, w^-1/w^-3
+    asymptotic orders, n_max=0 census, astroid-exact 4<->2 transition, delay
+    stability at caustics, exact mass-sheet invariants. Probed the F005 band
+    directly (8 configs).
+  - Librarian + Dreamer: run post-commit.
+
+BINDING ON BUILD 2 (Professor's concerns, do not lose):
+  1. F005 must be CLOSED before the likelihood trusts the high-magnification
+     near-caustic band (L = w|y'| in [~30,48]): at minimum a named refusal, or
+     promote the wave contraction to dd. That band is astrophysically the most
+     interesting (large-mass microlens, small impact parameter). Put this WP
+     FIRST in the Build 2 brief, gated by extending the operator oracle tests
+     from L <= 25 up through 48.
+  2. Build 2 must NOT silently accept macro-saddle (Type II) configurations —
+     positive-parity only is a stated scope limit; enforce it at the API
+     boundary, do not just document it.
+
+VALIDATED BY THIS FINISH (evidence for the sister-repo ports):
+  - The per-suite test_dev split (3 agents vs 1 exhausted): fit the budget AND
+    multiplied scrutiny — the two production bugs were found by suite authors
+    going deep, which the monolithic agent never reached.
+  - "Coders write, downstream verifies" (dcf5a3c): coders delivered 1669 lines
+    with zero denials once verification orders left their prompts.
+  - The file-based escalation gate (f199885): verified end-to-end by test.
+  - Stream fixes, model IDs, crew prompts: exercised throughout.
+ORCHESTRATOR CHANGE STILL TO MAKE (cogwheel first, then port): split
+_run_test_dev_agent into one run per suite named in domain_test_descriptions,
+each budgeted by spec count (base + k*n_specs), mirroring per-WP coder budgets.
