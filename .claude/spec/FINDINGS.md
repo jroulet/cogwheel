@@ -73,3 +73,25 @@ inside the domain and correctly does not raise — a test asserting it must rais
 fails against correct code. Use powers-of-two endpoints (`0.5/0.5`, `0.75/0.25`)
 where `1 - kappa` equals `|gamma|` exactly. Caught in the first delivered
 lens-engine test suite; the code was right, the test's boundary point was not.
+
+## F005 — wave-branch contraction loses certification above L ~ 30 (2026-07-16, OPEN)
+
+The float64 operator contraction in `F_op` (`z_powers @ (table*radial) @
+zbar_powers`, complex128 — deliberately NOT double-double, per the two-channel
+error model) drifts below the 1e-10 target for cancellation exponents
+`L = w*sqrt(s)` above roughly 30 at high `w`, and near `L ~ 40` the
+intermediate products overflow to a SILENT `nan` — no `CancellationError`, no
+named refusal — violating the module's "named error, never a silently wrong
+number" contract inside the nominally certified `L <= 48` band. Note
+`estimated_relative_tail` does NOT bound this error: it tracks the kernel
+series tail, not contraction round-off/overflow.
+
+Consequence: the wave branch is oracle-certified at 1e-10 only to `L ~ 25-30`;
+the band `L in [~30, 48]` (below the geometric branch's `L > 48` onset) is an
+OPEN GAP. The operator test suite deliberately scopes its mpmath-oracle
+assertions to `L <= 25` for this reason.
+
+Fix direction (architectural, not surgical): an overflow-safe / rescaled
+contraction (e.g. factoring the max magnitude out of `derivs` before the
+matmuls), plus a named refusal when the contraction magnitude ratio breaches a
+threshold. Belongs to a dedicated WP; do not "fix" it by widening tolerances.

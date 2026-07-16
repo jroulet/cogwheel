@@ -276,15 +276,22 @@ def _mass_sheet_map(y: np.ndarray, gamma: float, kappa: float
 
 
 def _series_length(w: float, s: float) -> int:
-    """Adaptive kernel series length ``ceil(zeta + 5*sqrt(zeta) + 10)``.
+    """Adaptive kernel series length from the cancellation exponent.
 
-    ``zeta = |z| = w*s/2`` is the magnitude of the confluent argument.
-    This is a HEURISTIC: it is handed to the kernel, whose MEASURED tail
-    is what the diagnostics report, so correctness never rests on the
-    formula being tight.
+    The shared-numerator terms ``P_n = (a')_n * zz**n / (n!)**2`` peak
+    near ``n ~ w*sqrt(s)/2`` and reach magnitude ``e**(w*sqrt(s))``, so
+    the length that resolves them scales with the CANCELLATION EXPONENT
+    ``L = w*sqrt(s)`` -- NOT with ``|zz| = w*s/2``, which is smaller by a
+    factor ``sqrt(s)`` and under-sizes the series whenever ``|y'| < 1``
+    (the common case), leaving the whole derivative ladder truncated far
+    short of the 1e-10 target well inside the certified domain.  This is
+    a HEURISTIC: the kernel's MEASURED tail is what the diagnostics
+    report, so correctness never rests on the formula being tight, only
+    on its being long enough.
     """
-    zeta = 0.5 * w * s
-    return int(np.ceil(zeta + 5.0 * np.sqrt(zeta) + 10.0))
+    cancellation = float(w) * np.sqrt(float(s))
+    return int(np.ceil(cancellation + 8.0 * np.sqrt(cancellation)
+                       + 20.0))
 
 
 def F_op(w: float, y: np.ndarray, gamma: float, *,
@@ -357,7 +364,12 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
     for order in range(max_order + 1):
         if order:
             coeff *= 1j * gamma_scaled / (2.0 * w * order)
-        radial = derivs[half_sum + order]
+        # Clamp indices past the ladder end.  A nonzero monomial at this
+        # order obeys half_sum + order <= 2*max_order = dim - 1, so those
+        # out-of-range cells carry a zero table coefficient and the
+        # clamped lookup is multiplied away -- but the dense fancy-index
+        # must not run off the end of ``derivs`` (size dim) to reach it.
+        radial = derivs[np.minimum(half_sum + order, dim - 1)]
         contribution = z_powers @ (table[order] * radial) @ zbar_powers
         term = coeff * contribution
         total += term

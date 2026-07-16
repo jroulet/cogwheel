@@ -19,6 +19,12 @@ contour-free operator, topology-stable channels) as not yet delivered — those
 land in Build 1b. Positive-parity macro images only; macro saddles are a
 documented limitation.
 
+- `0.0.2` (): Microlensing engine limitations corrected: the wave-branch contraction is
+oracle-certified at 1e-10 only to `L ~ 25-30`; the band `L in [~30, 48]` is an
+open accuracy/overflow gap (silent `nan`, no named refusal) recorded as
+FINDINGS F005. Previous wording implied certification across the full wave
+branch up to the `L > 48` geometric onset.
+
 - `0.0.1` (): 
 ### Microlensing engine complete (Build 1b)
 
