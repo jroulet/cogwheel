@@ -1207,6 +1207,7 @@ class BuildOrchestrator:
                     decision, feedback = prompt_escalation_decision(
                         user_findings,
                         architect_rationale="\n".join(arch_rationale_parts),
+                        approval_dir=self.approval_dir,
                     )
                     if decision == "accept":
                         for f in user_findings:

@@ -6,6 +6,7 @@ prompts.  Now they're if/else in Python.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import time
 from pathlib import Path
@@ -258,14 +259,25 @@ def _file_based_approval(plan_summary: str, dir_path: Path) -> tuple[bool, str]:
 def prompt_escalation_decision(
     findings: list[Finding],
     architect_rationale: str = "",
+    approval_dir: str | None = None,
 ) -> tuple[str, str]:
-    """Interactive prompt when Architect escalates to user.
+    """Ask the user to disposition escalated Inspector findings.
 
     Returns (decision, feedback) where decision is one of:
     - "accept": proceed with commit despite findings
     - "fix": user provides feedback for another Coder revision
     - "abort": kill the build
+
+    When ``approval_dir`` is set (a detached / file-gated build, same as the
+    plan gate), this is FILE-BASED: findings are written to a file and the gate
+    polls for a decision file. The interactive ``input()`` path only runs when
+    there is a real terminal — calling it in a detached build raises EOFError
+    (there is no stdin) and kills the whole run, which is exactly what happened
+    on 2026-07-16 when the Inspector escalated the missing test suites.
     """
+    if approval_dir:
+        return _file_based_escalation(findings, architect_rationale,
+                                      Path(approval_dir))
     print("\n" + "=" * 70)
     print("ESCALATION — Inspector findings require your decision")
     print("=" * 70)
@@ -293,6 +305,66 @@ def prompt_escalation_decision(
         if response in ("q", "quit", "abort"):
             return "abort", ""
         print("Please enter 'a' to accept, 'f' to fix, or 'q' to quit.")
+
+
+def _file_based_escalation(
+    findings: list[Finding],
+    architect_rationale: str,
+    dir_path: Path,
+) -> tuple[str, str]:
+    """Write escalated findings and poll for a decision file.
+
+    Mirrors ``_file_based_approval`` (the plan gate). The driver dispositions by
+    creating one of:
+      - ``escalation_accept``  -> ("accept", "")  commit despite the findings
+      - ``escalation_fix``     -> ("fix", <file contents>)  another revision
+      - ``escalation_abort``   -> ("abort", "")   stop the build
+    """
+    dir_path.mkdir(parents=True, exist_ok=True)
+    findings_file = dir_path / "escalation.json"
+    ready_file = dir_path / "escalation_ready"
+    accept_file = dir_path / "escalation_accept"
+    fix_file = dir_path / "escalation_fix"
+    abort_file = dir_path / "escalation_abort"
+
+    payload = {
+        "architect_rationale": architect_rationale,
+        "findings": [
+            {
+                "finding_id": f.finding_id,
+                "severity": f.severity.value,
+                "file": f.file,
+                "description": f.description,
+                "suggested_fix": f.suggested_fix,
+            }
+            for f in findings
+        ],
+    }
+    findings_file.write_text(json.dumps(payload, indent=2))
+    ready_file.touch()
+    print(f"\n[file-based] ESCALATION written to {findings_file}")
+    print(f"[file-based] Waiting for a decision file in {dir_path} "
+          f"(escalation_accept / escalation_fix / escalation_abort) ...")
+
+    while True:
+        if accept_file.exists():
+            accept_file.unlink()
+            ready_file.unlink(missing_ok=True)
+            print("[file-based] Escalation accepted — proceeding.")
+            return "accept", ""
+        if fix_file.exists():
+            feedback = fix_file.read_text().strip()
+            fix_file.unlink()
+            ready_file.unlink(missing_ok=True)
+            print(f"[file-based] Escalation -> fix. Instructions: "
+                  f"{feedback or '(none)'}")
+            return "fix", feedback
+        if abort_file.exists():
+            abort_file.unlink()
+            ready_file.unlink(missing_ok=True)
+            print("[file-based] Escalation aborted.")
+            return "abort", ""
+        time.sleep(5)
 
 
 # ── Outside Inspector merge ─────────────────────────────────────────────────
