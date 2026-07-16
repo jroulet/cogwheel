@@ -27,11 +27,31 @@ conflicts with this brief, THIS BRIEF WINS.
    dd is MANDATORY for the Maclaurin series terms AND their summation (Kahan does
    not rescue it: the bound carries sum|term_i|, exponentially larger than the
    result). Prefactor C(w) is float64 — it is a common multiplicative factor, so
-   its relative error factors out. TWO TRAPS: exp(pi*w/4) overflows at w~900 while
-   Gamma(1-i*w/2) underflows — combine exponents analytically via complex loggamma,
-   never evaluate exp(...)*gamma(...) as written; use the closed form
-   |C(w)|^2 = pi*w/(1-e^{-pi*w}) with expm1 for small w. The (w/2)ln(w/2) phase
-   cancels against Im loggamma(1-i*w/2) — cancel it analytically. Ladder length
+   its relative error factors out. BUILD IT IN POLAR FORM, magnitude and phase
+   separately; never evaluate exp(pi*w/4)*Gamma(1-i*w/2) as written (that route
+   forms a 5.8e238 magnitude at w=700 against an underflowing Gamma, and
+   overflows outright near w~905):
+     - MAGNITUDE, exact and closed-form: |C(w)|^2 = -pi*w/expm1(-pi*w)
+       (equivalently pi*w/(1-e^{-pi*w}); expm1 keeps the small-w limb). This is
+       an EXACT identity from Gamma(1+ix)Gamma(1-ix) = pi*x/sinh(pi*x) —
+       MEASURED against a 60-dps mpmath evaluation of the definition: rel err
+       <= 2.2e-16 flat over w in [1e-3, 700]. Because the magnitude comes from
+       here, loggamma's REAL part is never needed at all, which is what removes
+       both traps.
+     - PHASE: theta = (w/2)*ln(w/2) + Im loggamma(1 - i*w/2), formed directly.
+       Do NOT build Stirling machinery to cancel the (w/2)ln(w/2) term
+       analytically. That cancellation is ASYMPTOTIC, not an algebraic identity
+       (it is Stirling's series), so "cancel it analytically" would mean a
+       Bernoulli tail plus its own small-x convergence switch — real correctness
+       risk for no measurable gain. MEASURED: the direct sum costs ~3 digits at
+       w=700 (theta stays O(1) while (w/2)ln(w/2) reaches 2050), and the
+       resulting C is accurate to 3.4e-13 vs the 60-dps oracle — ~300x inside
+       the 1e-10 gate. exp(i*theta) is 2pi-periodic, so the phase-wrap in the
+       unwrapped sum is irrelevant; do not "fix" it.
+   (This supersedes an earlier instruction in this brief to cancel the phase
+   analytically. A coder flagged that as asymptotic-not-exact and proposed the
+   polar route; the numbers above are from checking it, and it was right.)
+   Ladder length
    max_derivative = 2*max_order (84 at max_order=42; the operator's `_apply_rotated_D`
    raises the radial index by up to 2 per application). dd extends the MANTISSA,
    not the exponent: |G^(k)| ~ 1e92 at w=40,k=84 and overflows near w~700 — gate w

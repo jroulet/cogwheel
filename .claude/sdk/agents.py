@@ -573,6 +573,18 @@ async def build_agent_options(
 
     env = _build_env()
 
+    # Do NOT add an ignoreViolations /tmp allowlist here to chase the
+    # intermittent "The user doesn't want to take this action right now. STOP"
+    # denial on coder /tmp writes. MEASURED 2026-07-16, detached (build
+    # context), N=5 per arm, only the allowlist varied:
+    #     with ignoreViolations {"file": ["/tmp/**", "/private/tmp/**"]}: 0/5 denied
+    #     without it:                                                     0/5 denied
+    # It makes no difference. The denial is real and does kill builds, but it is
+    # NOT this: a minimal probe never reproduces it (0/10) while real build
+    # coders hit it repeatedly, so the trigger is something the probe lacks —
+    # a large system prompt (crew prompt + pre-read spec files + full WP text),
+    # max_turns=90, and 7-10 prior tool calls. Suspect session depth/size, not
+    # the sandbox. See META_PLAN; scratchpad/denial_rate.py is the harness.
     sandbox: SandboxSettings = {
         "enabled": True,
         "autoAllowBashIfSandboxed": True,

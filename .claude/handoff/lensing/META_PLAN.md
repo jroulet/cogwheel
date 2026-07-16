@@ -232,3 +232,51 @@ false, and ended BLOCKED rather than encode it. It was right (`0,0,1,1`), and
 that refusal is the only reason a wrong physics gate did not get baked into the
 foundation and gate every downstream WP. Another coder caught the |C(w)|^2
 prefactor tautology. The agents' judgement has been better than my briefs.
+
+- CORRECTION TO THE CORRECTION (2026-07-16, later still). The entry above titled
+  "THE SANDBOX WAS NEVER PROVEN TO BE THE CAUSE" is itself wrong, and the way it
+  is wrong matters more than the conclusion.
+  I "falsified" the sandbox fix with a bisect (4/4 /tmp writes OK) and a replay
+  (3/3 OK) and concluded it did nothing. Timeline says otherwise:
+      08:46:01  ignoreViolations APPLIED   (d5e55a4)
+      ~09:5x    bisect 4/4 OK              <- ran WITH the fix applied
+      ~10:0x    replay 3/3 OK              <- ran WITH the fix applied
+      10:19:15  REVERTED on my advice      (8aa96c2)
+      11:38     build: DENIED on the FIRST /tmp write
+  I tested whether the treatment was necessary BY RUNNING WITH THE TREATMENT
+  APPLIED. A control error, not a subtle one.
+  Worse, the conditions were doubly confounded: every passing probe was BOTH
+  with-fix AND attached (foreground, via the session's shell); every denial came
+  from a DETACHED process (a real build, or probe_wp1.py launched with
+  run_in_background). There is no attached-without-fix datum anywhere, so "fix
+  vs no-fix" and "attached vs detached" cannot be separated from what I had.
+  What the two clean observations actually say (n=1 each, so weak):
+      with fix    (08:55 build): 1st /tmp write OK, 2nd DENIED
+      without fix (11:38 build): 1st /tmp write DENIED
+  Caveat against over-reading it the other way: a path glob that admits
+  /tmp/probe.py and refuses /tmp/probe2.py in the SAME directory makes no
+  mechanical sense, so this may still be noise.
+  METHOD FOR ANYONE PICKING THIS UP: hold the context at DETACHED (that is what
+  a build is), vary ONLY the allowlist, N trials per arm, compare DENIAL RATES.
+  scratchpad/denial_rate.py does exactly that. Never judge this by a single
+  passing run — that is the mistake that cost the whole afternoon, twice.
+
+- "CODERS SHOULD NOT PROBE" WAS ALSO WRONG (2026-07-16). The brief was rewritten
+  to remove every MEASURE order, and coder-2 wrote a /tmp probe anyway — for an
+  excellent reason, and it was RIGHT to. It was checking a claim in my brief
+  before building on it, and the claim was FALSE: I had asserted the
+  (w/2)ln(w/2) phase "CANCELS against Im loggamma(1-iw/2)" and must be cancelled
+  analytically. That cancellation is ASYMPTOTIC (Stirling), not an algebraic
+  identity; "cancel it analytically" would mean a Bernoulli tail plus a small-x
+  convergence switch, i.e. real correctness risk for nothing. The coder proposed
+  the polar route instead — |C|*exp(i*theta) with |C|^2 = -pi*w/expm1(-pi*w) —
+  which never needs loggamma's real part and so removes both overflow traps.
+  VERIFIED against a 60-dps mpmath oracle before adopting: |C|^2 closed form is
+  exact to 2.2e-16 flat over w in [1e-3,700]; the polar route lands at 3.4e-13
+  at w=700, ~300x inside the 1e-10 gate. The coder's own "~0.75 digits lost"
+  estimate was optimistic (it is ~3 digits), so verify even a correct-sounding
+  agent claim — but its DIRECTION was right and my brief was the thing that was
+  wrong. Brief corrected.
+  So the rule is NOT "coders must not probe". Probing is correct engineering
+  when the math is subtle. The rule is: pre-answer what you can, and make sure
+  the probe PATH WORKS.
