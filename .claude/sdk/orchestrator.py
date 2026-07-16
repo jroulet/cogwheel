@@ -115,9 +115,14 @@ CHANGE_REPORT_INSTRUCTION = (
     "describe WHAT changed, not the task you were given."
 )
 
+# Pre-read into every Coder/Inspector prompt (SDK agents never see CLAUDE.md,
+# so this is their knowledge anchor). Deliberately EXCLUDES TODO.md
+# (2026-07-16, user call): the backlog is not a description of the task at
+# hand, and every pre-read byte fattens the prompts that make the auto-mode
+# classifier flakier. Agents can still read .claude/spec/TODO.md on demand —
+# the path is stable and named here.
 SPEC_FILES = [
     ".claude/spec/SPEC.md",
-    ".claude/spec/TODO.md",
     ".claude/spec/FINDINGS.md",
     ".claude/spec/DATA_CONTRACTS.yaml",
 ]
