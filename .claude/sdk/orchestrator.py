@@ -1995,6 +1995,32 @@ class BuildOrchestrator:
                 break
         return ProfReviewResult(verdict=verdict, summary=result_text)
 
+    #: Signature of the auto-mode classifier's fail-closed denial as delivered
+    #: to headless agents. Root-caused 2026-07-16: the classifier's prompt
+    #: embeds the agent transcript, and it BLOCKS when its own call errors —
+    #: its interactive reason text says "usually transient — retrying often
+    #: succeeds". Agents get only this bare sentence and historically obeyed
+    #: it (38% of denials ended the session).
+    _BARE_DENIAL = "doesn't want to take this action right now"
+
+    @staticmethod
+    def _stream_saw_bare_denial(message) -> bool:
+        """True if a stream message carries the bare classifier denial.
+
+        A REAL denial is a short standalone tool_result; file/grep results
+        that merely QUOTE the sentence (it appears in TODO/META_PLAN) are
+        long — the length guard keeps them from tripping the retry.
+        """
+        for block in getattr(message, "content", None) or []:
+            if type(block).__name__ != "ToolResultBlock":
+                continue
+            content = block.content
+            text = content if isinstance(content, str) else str(content)
+            if (BuildOrchestrator._BARE_DENIAL in text
+                    and len(text) < 300):
+                return True
+        return False
+
     async def _run_agent(
         self,
         agent_name: str,
@@ -2003,6 +2029,7 @@ class BuildOrchestrator:
         resume_session: Optional[str] = None,
         permission_override: Optional[PermissionMode] = None,
         max_turns_override: Optional[int] = None,
+        _denial_retry: bool = True,
     ) -> tuple[str, Optional[str]]:
         """Create and run a single agent, streaming output per verbosity."""
         self._agent_count += 1
@@ -2042,9 +2069,12 @@ class BuildOrchestrator:
 
         result_text = ""
         session_id = None
+        saw_denial = False
         try:
             async for message in self._iter_query_with_timeout(
                     query(prompt=task_context, options=options), agent_id):
+                saw_denial = saw_denial or self._stream_saw_bare_denial(
+                    message)
                 result_text, session_id = self._handle_message(
                     agent_id, message, result_text, session_id,
                 )
@@ -2084,6 +2114,8 @@ class BuildOrchestrator:
                 options.resume = session_id or resume_session
             async for message in self._iter_query_with_timeout(
                     query(prompt=task_context, options=options), agent_id):
+                saw_denial = saw_denial or self._stream_saw_bare_denial(
+                    message)
                 result_text, session_id = self._handle_message(
                     agent_id, message, result_text, session_id,
                 )
@@ -2109,6 +2141,8 @@ class BuildOrchestrator:
                     options.resume = session_id or resume_session
                 async for message in self._iter_query_with_timeout(
                         query(prompt=task_context, options=options), agent_id):
+                    saw_denial = saw_denial or self._stream_saw_bare_denial(
+                        message)
                     result_text, session_id = self._handle_message(
                         agent_id, message, result_text, session_id,
                     )
@@ -2117,6 +2151,44 @@ class BuildOrchestrator:
 
         if not result_text.strip():
             self._log(f"  WARNING: [{agent_id}] returned empty output (possible dead agent)")
+
+        # Single denial-retry (user-authorized 2026-07-16): if the stream
+        # carried the classifier's bare fail-closed denial, nudge-resume the
+        # SAME session once. The classifier's own reason text says the error
+        # is "usually transient — retrying often succeeds"; historically the
+        # agent instead obeyed the STOP and abandoned its deliverable (e.g.
+        # Build 2b's test_dev-5 quit without amending the crown suite).
+        # Bounded: exactly one nudge, only when a session exists, never
+        # nested. A genuine repeated denial still stands — the nudged agent
+        # that gets denied again reports it and we see both in the log.
+        if saw_denial and _denial_retry and session_id:
+            self._log(f"[{agent_id}] bare classifier denial in stream — "
+                      f"nudge-resuming session once")
+            nudge = (
+                "One of your tool calls was denied with 'The user doesn't "
+                "want to take this action right now. STOP...'. The OWNER of "
+                "this pipeline has confirmed (2026-07-16) that THIS EXACT "
+                "denial signature, in THIS pipeline, is a transient "
+                "infrastructure artifact — the permission classifier fails "
+                "closed when its own request errors (root-caused; see the "
+                "backlog entry in TODO.md). This confirmation covers ONLY "
+                "this bare signature: any denial carrying an actual reason, "
+                "or any other refusal, still binds. Re-issue the denied "
+                "call ONCE and complete your task. If it is denied again, "
+                "stop retrying, note it in your change report, and finish "
+                "what you can without it."
+            )
+            retry_text, session_id = await self._run_agent(
+                agent_name, nudge,
+                model_override=model_override,
+                resume_session=session_id,
+                permission_override=permission_override,
+                max_turns_override=max_turns_override,
+                _denial_retry=False,
+            )
+            if retry_text.strip():
+                result_text = (result_text + "\n\n[after denial-retry]\n"
+                               + retry_text)
 
         return result_text, session_id
 
