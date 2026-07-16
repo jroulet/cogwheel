@@ -68,6 +68,36 @@ approve/reject plans via the file gate, give feedback, no further user input.
   WATCH ITEM: session-resume retries may cause premature WP completion
   (resumed agent concludes instead of continuing) — Build 1b brief pins
   "complete = named tests pass under cogwheel/tests/".
+- ROOT CAUSE OF NO-OP WPS (2026-07-16 05:35, from coder transcripts): coders
+  did strong read-only analysis, raised CORRECT clarifying questions (caught
+  a prefactor-test tautology + a factual CSV error in the plan), then ended
+  with "let me know how to proceed" — interactive etiquette deadlocking a
+  headless pipeline; the orchestrator recorded clean no-op results and moved
+  on. FIX (program-scoped): headless-discipline block in the brief that the
+  Architect copies into every WP + the coders' questions PRE-ANSWERED in the
+  brief. NOTE FOR THE USER: an SDK-level fix (headless clause in
+  CHANGE_REPORT_INSTRUCTION + a no-op-detector resume nudge in _run_coder)
+  was drafted but DENIED by the auto-mode classifier as an unauthorized
+  harness-wide weakening of ask-behavior — if you want it baked into the SDK
+  permanently, say so and I'll apply it with your authorization on record.
+- [1b RELAUNCHED 05:39] log /tmp/lensing_build1b_20260716_053912.log.
+- **HARD BLOCKER FOUND (2026-07-16 ~07:06) — builds cannot write files.**
+  The real cause of every "no-op WP" tonight: the build agents' file-write /
+  shell tool calls are being DENIED by a session/account permission layer with
+  the message "The user doesn't want to take this action right now. STOP what
+  you are doing and wait for the user to tell you how to proceed." Confirmed
+  across ALL SIX coders of the 4th 1b launch: 0 successful writes, 6 STOP-
+  denials. Same layer that denied the driver's pkill (~05:30) and the SDK
+  self-edit (~05:37) — its posture tightened mid-session; the FIRST full run
+  (~03:22-04:52) wrote _dd/_gauge/geometry fine, later runs cannot write at
+  all. This is NOT the SDK stream bug (that's fixed) and NOT headless etiquette
+  (that's fixed in-brief) — it's a permission control I cannot disable from
+  inside, and should not try to. Build loop HALTED to stop burning cost.
+  REQUIRES USER: relax the permission mode for the detached builds (e.g. the
+  bypass/allow setting the launch runs under), or run the build from a context
+  not governed by the tightened auto-mode classifier. Foundation on disk
+  (_dd 37t, _gauge 34t, geometry untested) is intact and committed. Resume =
+  relaunch build1b with the SAME brief once writes are permitted.
 - [SUPERSEDED — see 1b] Build 1 — lens engine:
   cogwheel/lensing/chang_refsdal/ (geometry, operator, channels).
   Log: /tmp/lensing_build1_20260716_024350.log. 7 WPs, ~515 turns budget.
@@ -106,3 +136,12 @@ approve/reject plans via the file gate, give feedback, no further user input.
 4. If a build FAILS: diagnose from log; fix forward via a follow-up brief (or
    direct fix for infra-level issues only — physics/code goes through builds).
 5. Between builds: /doc-sync if librarian backlog nears the hard block (>5).
+
+- BLOCKER CLEARED (2026-07-16, user-applied): cogwheel .claude/settings.local.json
+  had only 'Bash(git config *)' — no Write/Edit/serena-edit grant, so build agents'
+  writes were denied. User ran the mirror-gw-grants command via '!' (the auto-mode
+  classifier requires permission changes be USER-made, not agent-applied — it denied
+  me even after "yes, apply it"). Now 55 allow rules incl Write/Edit(repo/**), full
+  serena edit suite, Bash(python/conda/...). IF A FUTURE BUILD stalls with
+  "STOP and wait" no-op WPs again, FIRST verify this file still has Write/Edit grants
+  before diagnosing anything else. Relaunched build1b after this.
