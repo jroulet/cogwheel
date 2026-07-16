@@ -121,6 +121,25 @@ against. Circular tests pass.
   `stats_tests` / `has_stats_tests` / `stats_test_descriptions` are DEAD — the
   parser drops them silently and the Test Developer receives nothing.
 
+- **STANDING RULES GO IN THE CREW PROMPT, ONCE. The brief carries only what is
+  specific to THIS build.** The crew is a faithful servant: it does not need the
+  same instruction repeated on every errand. If a rule is true for every build,
+  it belongs in `.claude/crew/*.md`; if it is true for every WP of one build, it
+  belongs in the brief's preamble, NOT stamped into each WP.
+  Worked example, and the reason this rule exists: the 2026-07-16 brief mandated
+  a ~90-word HEADLESS DISCIPLINE block be copied VERBATIM into every WP's `how`.
+  It appeared 6x per plan, bloated every WP, and did not work. It was treating a
+  symptom — coders ending with "let me know how to proceed" — whose actual cause
+  was the role error (test-authoring WPs + "measure, don't guess"). gw has NO
+  headless clause anywhere, in coder.md or its briefs, and never had the problem,
+  because its coders are never put in a position to stop: the role contract keeps
+  them writing code from pre-answered guidance.
+  The block is RETIRED. Do not reintroduce it. Fixing the cause removed the need
+  for the workaround — the correct prompt here is SHORTER, not longer. If a build
+  ever does deadlock on etiquette again, fix it in `coder.md` once, or fix the
+  brief that put the coder in that position; do not stamp a paragraph into
+  every WP.
+
 ### Diagnostics that actually work
 - A coder that reads/analyses then exits cheaply with no writes is NOT "the model
   choosing to stop". The build log records tool NAMES only — `tool_result`
