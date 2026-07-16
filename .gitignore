@@ -26,3 +26,4 @@ __pycache__
 .claude/sdk/logs/
 .claude/sdk/build_costs.jsonl
 .claude/sync_issues.json
+cogwheel/tests/output/

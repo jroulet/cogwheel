@@ -3,24 +3,39 @@ Double-double (two-double) real and complex arithmetic primitives.
 
 WHY THIS EXISTS
 ---------------
-The Chang-Refsdal amplification operator evaluates an alternating series
-whose intermediate terms are exponentially larger than the result. The
-loss is roughly ``0.434 * L`` decimal digits, where
+The Chang-Refsdal amplification evaluates alternating series whose
+intermediate terms are exponentially larger than the result, losing
+roughly ``0.434 * L`` decimal digits to cancellation. There are TWO
+such cancellation channels; they are INDEPENDENT, live at SEPARATE
+code sites, and do NOT compound into a single summed exponent:
 
-    L = w * (|y'| + gamma'/2)
+    L_1F1 = w * |y'|        (the 1F1 kernel series, in _hyp1f1.py)
+    L_op  = w * gamma'/2    (the operator series, in operator.py)
 
-is the operator's cancellation exponent. Plain float64 (eps = 2.2e-16)
-carries ~15.95 decimal digits, so it can only absorb ``L ~ 12-15``. At
-the paper's headline configuration ``L = 29.6``, which overruns float64
-by ~13 digits and returns the operator with ~2e-4 relative error --
-useless for a likelihood.
+Double-double is required for the FORMER only. The 1F1 partial terms
+reach ``e**(w*|y'|)`` while the sum is O(1), so the series' relative
+error follows ``~ eps * e**(w*|y'|)``; Kahan summation does not rescue
+it (its bound also carries ``sum|term_i|``), only a smaller eps does,
+so the terms AND their accumulation go through this module. The
+operator channel is handled elsewhere and differently: `operator.py`
+MEASURES its own cancellation ratio ``max_partial_term / |total|`` and
+REFUSES (raising ``CancellationError``) past ~1e13 rather than leaning
+on dd, so ``L_op`` never demands extended precision here.
 
-A double-double number represents a value as an unevaluated sum
+Plain float64 (eps = 2.2e-16, ~15.95 digits) absorbs only
+``w*|y'| ~ 22``. A double-double number is an unevaluated sum
 ``hi + lo`` of two non-overlapping float64s, giving eps ~ 1.2e-32
-(~31.9 digits) and lifting the ceiling to ``L ~ 48-52``, which covers
-the whole intended domain with margin. The obvious alternative, mpmath,
-is ~1e6 times too slow to sit inside a likelihood loop; it is retained
-as a test-time oracle only.
+(~31.9 digits) and holding the 1e-10 target out to ``w*|y'| ~ 50``,
+degrading to ~1e-6 at the ceiling ``w*|y'| = 60`` (with
+``Y = sqrt(s) = |y'|``). That 60 is chosen deliberately: it overlaps
+the geometric branch's ``w*|y'| >= 50`` onset, closing a gap that
+float64's 22 cannot bridge. Double-double extends the MANTISSA, not
+the exponent, so it cannot rescue an overflow -- which is why the
+``w <= 500`` frequency ceiling is a hard gate rather than a precision
+knob (the kernel ladder magnitude reaches the float64 overflow rail
+near ``w ~ 700``). The obvious alternative, mpmath, is ~1e6 times too
+slow to sit inside a likelihood loop; it is retained as a test-time
+oracle only.
 
 ARITHMETIC
 ----------

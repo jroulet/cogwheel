@@ -82,3 +82,8 @@ Instance of :py:class:`cogwheel.waveform.WaveformGenerator`.
 * Can generate a waveform in terms of (+, ×) polarizations, or strain at detectors.
 * Can toggle harmonic modes (edit the attribute :py:attr:`~cogwheel.waveform.WaveformGenerator.harmonic_modes`).
 * Can change approximant (edit the attribute :py:attr:`~cogwheel.waveform.WaveformGenerator.approximant`). Implemented approximants and their allowed harmonic modes are in :py:data:`waveform.APPROXIMANTS`.
+
+Microlensing engine
+-------------------
+
+An experimental layer, :py:mod:`cogwheel.lensing.chang_refsdal`, provides wave-optics amplification for microlensed gravitational-wave signals under a Chang–Refsdal lens (a point mass embedded in external convergence and shear). It couples a double-double arithmetic substrate and image geometry (quartic image solver, Fermat delays, magnifications, stationary-phase kernels) to a contour-free amplification operator and a topology-stable channel tracker (:py:class:`~cogwheel.lensing.chang_refsdal.ChangRefsdalChannels`, the public entry point) that decomposes the amplification into delay-labelled channels. The engine is certified for positive-parity macro images (``1 - kappa > |gamma|``) up to dimensionless frequency ``w <= 500``.
