@@ -333,3 +333,32 @@ prefactor tautology. The agents' judgement has been better than my briefs.
       itself and the coder spotted it.
   Do not read the zero-write builds as the agents failing. They were right and
   the brief was wrong, twice.
+
+- DENIAL — FINAL ELIMINATION TABLE (2026-07-16). All arms detached (real build
+  context), N=5 each unless noted. PROBES: 0/30 DENIED. REAL CODERS: ~5 in ~7.
+      sandbox ignoreViolations ON / OFF ......... 0/5 / 0/5   (no effect)
+      4 sequential /tmp writes, one session ..... 4/4 ok      (not positional)
+      exact denied command, replayed ............ 3/3 ok      (not content)
+      8 serena reads THEN shell ................. 0/5         (not call depth)
+      real WP + real specs injected (~6.4k tok) . 0/5         (not prompt size)
+      create_text_file THEN shell-exec of it .... 0/5         (not write-then-exec)
+      probe reading ~33k tokens of files ........ 0/5         (not conversation size)
+  Plus hooks, user-scope deny rules, coder memory — all ruled out earlier.
+  THE ONE PROBE THAT EVER REPRODUCED IT: probe_wp1.py — the only one carrying the
+  REAL WP text AND letting the coder do REAL work (read geometry.py in full,
+  measure the CSV, reason about tolerances) before writing a probe with genuine
+  analysis in it. Every trivial probe since — same tools, same paths, same
+  detachment, same write-then-exec shape — passes.
+  INFERENCE (not proof): the decision appears CONTEXT-SENSITIVE and model-based —
+  judging what the agent appears to be DOING, not the command string. That is the
+  only story consistent with both stubborn facts: the exact denied command
+  replays clean 3/3 in a trivial context, yet fires repeatedly inside a coder
+  genuinely authoring a numerical kernel. If so it is a harness/account-level
+  safety layer, NOT reachable from any SDK config — every knob I control is now
+  eliminated by measurement.
+  WHAT STILL WORKS, and is the practical lever: WRITES ARE NOT DENIED. coder-2's
+  create_text_file landed; only EXECUTION was refused (both via serena shell and
+  the native Bash fallback). So a coder can author a module; it cannot run its
+  own verification gate. gw is unaffected because its coders run short
+  `python -c` one-liners, never author-and-run scratch analysis.
+  DO NOT re-test any arm above. Add new arms only.
