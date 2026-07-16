@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.1.0` (): 
+- `0.2.0` (): 
 ### Microlensing engine foundation (partial — Build 1 salvage)
 
 New layer `cogwheel/lensing/chang_refsdal/` (IN PROGRESS): double-double
@@ -19,13 +19,13 @@ contour-free operator, topology-stable channels) as not yet delivered — those
 land in Build 1b. Positive-parity macro images only; macro saddles are a
 documented limitation.
 
-- `0.0.2` (): Microlensing engine limitations corrected: the wave-branch contraction is
+- `0.1.2` (): Microlensing engine limitations corrected: the wave-branch contraction is
 oracle-certified at 1e-10 only to `L ~ 25-30`; the band `L in [~30, 48]` is an
 open accuracy/overflow gap (silent `nan`, no named refusal) recorded as
 FINDINGS F005. Previous wording implied certification across the full wave
 branch up to the `L > 48` geometric onset.
 
-- `0.0.1` (): 
+- `0.1.1` (): 
 ### Microlensing engine complete (Build 1b)
 
 The `cogwheel/lensing/chang_refsdal/` layer is now complete. Build 1b adds
@@ -43,3 +43,23 @@ with cancellation exponent `L > 48` the operator hands off to the
 geometric-optics branch. Builds 2 (lensed waveform generator + multi-component
 relative binning) and 3 (sampled lens coordinates + injection-recovery
 validation) remain pending.
+
+- `0.1.0` (): 
+### Microlensed waveform generator + relative-binning likelihood (Build 2)
+
+New architecture-layer row for the two Build-2 production modules that sit on
+the completed `chang_refsdal` engine. `cogwheel/lensing/waveform.py` adds
+`LensedWaveformGenerator`, which composes an ordinary `WaveformGenerator` and
+multiplies every harmonic mode by the shared Chang--Refsdal factor `F(w(f))`
+(`w = 8*pi*G*M_L*(1+z_L)*f/c**3`, dimensionless and linear in `f`), exposing
+the per-image `(tau_a, K_a)` decomposition alongside the collapsed total.
+`cogwheel/lensing/likelihood.py` adds `LensedRelativeBinningLikelihood`, a
+`BaseLinearFree` subclass that heterodynes against an unlensed reference and
+reconstructs the lensed `(d|h)`/`(h|h)` from delay-continuous frequency-moment
+summaries contracted mode-then-image (additive `M^2 + n_img^2`, FFT-free hot
+path), with analytic image-delay phases, interpolated kernels, and a lens-aware
+bin guard (`LensedBinningError`). Positive-parity macro images only
+(`1-kappa > |gamma|`, enforced by raising `geometry.LensDomainError` at the API
+boundary). Both are in-memory `JSONMixin` objects — no new on-disk data
+product. Build 3 (sampled lens coordinates, astroid folding,
+injection-recovery validation) remains pending.

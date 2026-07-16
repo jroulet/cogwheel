@@ -1249,7 +1249,40 @@ class BuildOrchestrator:
             classified = classify_findings(inspector_result.findings)
 
             if should_escalate(inspector_result.findings, revision_loops):
-                raise EscalationNeeded(inspector_result.findings, revision_loops)
+                # Route through the SAME decision gate as Architect
+                # escalations (user-authorized 2026-07-16). Raising directly
+                # here killed a detached build: EscalationNeeded propagated
+                # as a crash after 3 revision loops even though the
+                # remaining findings were test-coverage gaps a human could
+                # disposition in seconds. With approval_dir set this writes
+                # escalation.json and polls for escalation_accept /
+                # escalation_fix / escalation_abort; interactively it falls
+                # back to the terminal prompt. "accept" is a HUMAN override,
+                # recorded in the log — never a silent bypass.
+                decision, feedback = prompt_escalation_decision(
+                    inspector_result.findings,
+                    architect_rationale=(
+                        f"Revision loops exhausted "
+                        f"({revision_loops}/{MAX_REVISION_LOOPS}); "
+                        f"{len(inspector_result.findings)} finding(s) remain."
+                    ),
+                    approval_dir=self.approval_dir,
+                )
+                if decision == "accept":
+                    self._log("  User: accepted remaining findings — "
+                              "proceeding past the Inspector gate")
+                    break
+                if decision == "fix":
+                    self._log(f"  User: one more revision with "
+                              f"instructions: {feedback[:80]}")
+                    revision_loops -= 1  # grant the loop back
+                    for f in inspector_result.findings:
+                        f.severity = EscalationLevel.IMPLEMENTATION
+                        if feedback:
+                            f.suggested_fix = feedback
+                else:
+                    raise EscalationNeeded(
+                        inspector_result.findings, revision_loops)
 
             trivial_findings = classified[EscalationLevel.TRIVIAL]
             impl_findings = classified[EscalationLevel.IMPLEMENTATION]
