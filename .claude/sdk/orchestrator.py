@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -1085,32 +1086,121 @@ class BuildOrchestrator:
         write_state(self.project_root, "tidy", status="completed")
         return result
 
+    @staticmethod
+    def _group_test_specs(specs: list[str]) -> tuple[dict[str, list[str]], list[str]]:
+        """Group domain-test specs by the suite file each one names.
+
+        Returns (groups, cross_suite). A spec naming ``test_<x>.py`` joins that
+        suite's group; specs naming no suite (e.g. a style guard phrased "ALL
+        SUITES") become cross-suite requirements appended to EVERY group's task
+        rather than getting their own agent.
+
+        WHY per-suite grouping exists (2026-07-16): a single Test Developer was
+        handed 20 dense specs across 4 numerical suites with a flat 120-turn
+        budget. It planned all four, delivered one, and exhausted its turns —
+        the Inspector then correctly failed the build for missing coverage.
+        Run one agent per suite instead, each with a budget scaled to its spec
+        count (mirroring per-WP coder budgets). Field-tested by hand before
+        being wired in: three parallel per-suite agents delivered three green
+        suites and found two real production bugs a single exhausted agent
+        never reached.
+        """
+        groups: dict[str, list[str]] = {}
+        cross_suite: list[str] = []
+        for spec in specs:
+            match = re.search(r"\b(test_\w+\.py)\b", spec)
+            if match:
+                groups.setdefault(match.group(1), []).append(spec)
+            else:
+                cross_suite.append(spec)
+        if not groups and cross_suite:
+            # Nothing names a suite — degrade to one run with everything.
+            groups["(unscoped)"] = list(cross_suite)
+            cross_suite = []
+        return groups, cross_suite
+
+    @staticmethod
+    def _test_dev_budget(n_specs: int) -> int:
+        """Turn budget for one per-suite Test Developer run.
+
+        Empirics from 2026-07-16: ~120 turns bought roughly one dense
+        numerical suite (~6 specs) including its run-and-iterate loop, so
+        budget ``60 + 20*n_specs`` clears that with headroom; capped at 250
+        (a suite needing more should be split by the Architect instead).
+        """
+        return min(60 + 20 * n_specs, 250)
+
     async def _run_test_dev_agent(self) -> str:
-        """Run Test Developer to write tests."""
+        """Run the Test Developer — one agent per target suite.
+
+        Sequential across suites (same cancel-scope hazard as _run_dag).
+        Falls back to the single-run behavior when the plan has no
+        domain-test specs.
+        """
         assert self.plan is not None
-        self._log("Step 3: Test Developer writing tests")
+        wp_summary = [wp.id + ": " + wp.title for wp in self.plan.work_packages]
         model = "claude-opus-4-8" if self.plan.has_domain_tests else None
-        test_specs = "\n".join(
-            f"- {desc}" for desc in self.plan.domain_test_descriptions
+
+        if not self.plan.domain_test_descriptions:
+            self._log("Step 3: Test Developer writing tests")
+            test_task = (
+                f"Write tests for the recent code changes.\n\n"
+                f"Work packages: {wp_summary}\n\n"
+                f"Run all tests after writing them.\n\n"
+                + CHANGE_REPORT_INSTRUCTION
+            )
+            result_text, _ = await self._run_agent(
+                "test_dev", test_task,
+                model_override=model,
+                max_turns_override=75,
+            )
+            self._collect_change_report(result_text)
+            write_state(self.project_root, "test_dev", status="completed")
+            return result_text
+
+        groups, cross_suite = self._group_test_specs(
+            self.plan.domain_test_descriptions)
+        self._log(
+            f"Step 3: Test Developer writing tests — "
+            f"{len(groups)} suite(s): {sorted(groups)}"
         )
-        test_task = (
-            f"Write tests for the recent code changes.\n\n"
-            f"Work packages: {[wp.id + ': ' + wp.title for wp in self.plan.work_packages]}\n\n"
-            + (f"Domain test specifications from Architect:\n{test_specs}\n\n"
-               if test_specs else "")
-            + f"Run all tests after writing them.\n\n"
-            + CHANGE_REPORT_INSTRUCTION
+        cross_text = (
+            "\n\nCross-suite requirements (apply to your suite too):\n"
+            + "\n".join(f"- {s}" for s in cross_suite)
+            if cross_suite else ""
         )
-        # Dynamic max_turns: domain tests get more budget
-        max_turns = 120 if self.plan.has_domain_tests else 75
-        result_text, _ = await self._run_agent(
-            "test_dev", test_task,
-            model_override=model,
-            max_turns_override=max_turns,
-        )
-        self._collect_change_report(result_text)
+        results: list[str] = []
+        for suite_name in sorted(groups):
+            suite_specs = groups[suite_name]
+            budget = self._test_dev_budget(len(suite_specs))
+            self._log(
+                f"  Suite {suite_name}: {len(suite_specs)} spec(s), "
+                f"max_turns={budget}"
+            )
+            spec_text = "\n".join(f"- {s}" for s in suite_specs)
+            test_task = (
+                f"Write ONE test suite: {suite_name}. Author it independently "
+                f"and run it until green.\n\n"
+                f"Work packages this build implemented: {wp_summary}\n\n"
+                f"Your suite's specifications from the Architect:\n"
+                f"{spec_text}"
+                f"{cross_text}\n\n"
+                f"Scope discipline: write ONLY {suite_name}. Other suites are "
+                f"owned by other Test Developer runs — do not create or edit "
+                f"them. Run your own suite after writing it; also run any "
+                f"suites that already exist for modules yours imports, to "
+                f"confirm no regression.\n\n"
+                + CHANGE_REPORT_INSTRUCTION
+            )
+            result_text, _ = await self._run_agent(
+                "test_dev", test_task,
+                model_override=model,
+                max_turns_override=budget,
+            )
+            self._collect_change_report(result_text)
+            results.append(f"[{suite_name}]\n{result_text}")
         write_state(self.project_root, "test_dev", status="completed")
-        return result_text
+        return "\n\n".join(results)
 
     async def _run_inspector_with_loop(self, report: BuildReport) -> None:
         """Run Inspector with revision loop."""
