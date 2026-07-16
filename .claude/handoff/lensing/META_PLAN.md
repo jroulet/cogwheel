@@ -465,3 +465,53 @@ CROWN GATE (test_lensing_likelihood.py) — 5F/8P on a quiet box, two runs:
     call baseline is 64us — validate the gate's construction, then optimize).
 DENIAL FIX LIVE: next build runs with .claude/settings.agents.json (4a6e310)
 — it doubles as the allowlist verification build (baseline: 106/59 sessions).
+
+## LIVE STATE CHECKPOINT — 2026-07-16 ~23:45 (written at low driver context)
+
+BUILD 2B IS RUNNING. Log: /tmp/lensing_build2b_20260716_222130.log
+Approval dir: /tmp/lensing_build2b_approval (plan approved 22:37; escalation
+gate is FILE-BASED: on escalation_ready, read escalation.json, decide via
+touch escalation_accept | write escalation_fix | touch escalation_abort).
+State when checkpointed: WP1 (near-cusp likelihood fix, coder-2 $10.33) and
+WP2 (closeout) delivered; test_dev-5 UNDER-DELIVERED (crown suite NOT amended
+— classifier denial, mtime still 18:34); inspector-6 mid-review, hit a 300s
+serena wedge at 23:42, auto-recovered onto built-in tools (resumed session).
+EXPECTED NEXT: inspector verdict -> revision loop (its findings should include
+the unamended crown suite) -> possibly file-gated escalation -> prof_review ->
+commit (backlog is CLEAR, f43c734) -> librarian -> dreamer.
+
+IF THE BUILD DIES: everything of value is in the working tree, uncommitted:
+cogwheel/lensing/{likelihood,waveform}.py, cogwheel/lensing/chang_refsdal/
+operator.py (+reviewed refusal semantics), cogwheel/tests/test_lensing_
+{likelihood,waveform,operator}.py, FINDINGS/changelog edits. Salvage protocol
+= Build 1b's finish: run the full battery yourself, spawn independent
+test-dev/inspector/professor subagents, commit gated. CROWN SUITE still needs:
+seeding (nondeterminism), the near-cusp regression pin, timing-gate
+validation — test_dev never did them; WP1's fix is IN but UNVERIFIED by the
+amended suite.
+
+TONIGHT'S SDK CHANGES (all committed, take effect NEXT build): denial
+nudge-retry (2508ba3, owner-confirmed); TODO.md out of pre-read (b284ad8);
+settings.agents.json proven-consulted (4a6e310 + deny-probe); exhaustion
+escalation file-gated (e786b05); per-suite test_dev split (5909173, grouping
+is convention-dependent — Architect specs must embed test_<x>.py filenames,
+else '(unscoped)' fallback).
+
+SERENA WEDGE CONTEXT (user asked): the build's SSE serena (port 8322, up
+since 22:21) wedging under long heavy sessions is the KNOWN failure mode the
+300s timeout + built-in-tools fallback exists for; the fallback engaged
+correctly at 23:42. The driver session's own stdio serena disconnected hours
+earlier (separate instance). Neither is novel; both are why the recovery
+paths were built. Classifier stage-2 transient errors are service-side.
+
+DENIAL LEDGER (for the rate comparison): baseline 106/59 sessions; Build 2b
+so far ~4 real denials, 1 lost deliverable (test_dev-5), 0 crashes. Retry
+lands next build; expect denials to stop costing deliverables.
+
+RESUME CHECKLIST for a fresh driver session:
+1. Read this file top to bottom; tasks in the task tracker mirror it.
+2. Check the build: pgrep -f "sdk/build.py build --approval-dir
+   /tmp/lensing_build2b"; log mtime = health. Monitor pattern in log header.
+3. If alive: watch for escalation_ready / Professor / commit; disposition via
+   the approval-dir files. If dead: salvage per Build 1b protocol above.
+4. gw + skill ports (task #6) remain GATED on a green build.
