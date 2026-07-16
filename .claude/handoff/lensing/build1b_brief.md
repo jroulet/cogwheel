@@ -24,6 +24,25 @@ conflicts with this brief, THIS BRIEF WINS.
    imaginary, |e^z| = 1, both forms have the same max term e^{w*Y}. NO
    k-recurrence (forward recurrence for 1F1(a+k;1+k;z) is unstable — the shared
    numerator sidesteps it). NO large-|z| branch (physically unreachable here).
+   WHAT "ONE NUMERATOR SHARED ACROSS ALL k" MEANS — get this right, the obvious
+   reading is numerically UNUSABLE. Do NOT share t_n = (a')_n*zz^n/n! and then
+   divide by (1+k)_n: |t_n| peaks at e^{(w*Y)^2/4} = e^900 ~ 1e391 at w*Y=60,
+   which OVERFLOWS float64 (dd extends the mantissa, not the exponent, so dd
+   cannot rescue it), while 1/(1+k)_n = k!/(k+n)! ~ 1e-449 at k=84, n=200
+   UNDERFLOWS to zero. Both factors blow up while their product is perfectly
+   tame — the classic way to destroy a well-conditioned quantity.
+   The shared object is the k=0 TERM:
+       P_n     = (a')_n * zz^n / (n!)^2        max|P_n| ~ e^{w*Y} ~ 1e26 at w*Y=60
+       u_{k,n} = P_n / C(n+k, n)               reciprocal binomial, always in (0,1]
+       beta_n  = beta_{n-1} * n/(n+k),  beta_0 = 1
+   `max|P_n| ~ e^{w*Y}` is exactly the "same max term e^{w*Y}" this brief already
+   claims — that is the tell that P_n is the intended object. Identity check:
+   P_n * n!k!/(k+n)! = (a')_n*zz^n / (n!(1+k)_n). The structural win survives
+   honestly: N dd_complex_mul for P_n (k-INDEPENDENT) plus (K+1)*N REAL dd
+   scalings — which is what makes the two substantiated complexity claims true
+   (shared-numerator evaluations independent of max_order; dd-multiplies linear
+   in max_order). (Found by a coder reading the earlier phrasing and reporting
+   that it invites a 1e391 overflow; verified before adopting.)
    dd is MANDATORY for the Maclaurin series terms AND their summation (Kahan does
    not rescue it: the bound carries sum|term_i|, exponentially larger than the
    result). Prefactor C(w) is float64 — it is a common multiplicative factor, so
