@@ -154,3 +154,44 @@ approve/reject plans via the file gate, give feedback, no further user input.
   cmdline has `--transport sse --port 8322`; do NOT kill the session's own
   `--project-from-cwd --context claude-code` stdio MCP servers. Then relaunch.
   DIAGNOSTIC: on any "SSE exited during startup", first `lsof -tiTCP:8322`.
+
+- OPEN BUG — DO NOT LOSE (2026-07-16): the sandbox "STOP and wait" denial is
+  only PARTIALLY fixed. With ignoreViolations {"file": ["/tmp/**",
+  "/private/tmp/**"]} the FIRST /tmp write from a coder succeeds
+  (/tmp/probe.py landed, 1734 bytes) but a SECOND /tmp write in the same
+  session is still DENIED:
+      DENIED: mcp__serena__execute_shell_command
+              cat > /tmp/probe2.py << 'EOF'   (benign winding-number check)
+           -> "The user doesn't want to take this action right now. STOP ..."
+  My verification was insufficient and I called it fixed prematurely: the
+  probe (scratchpad/probe_sandbox.py) did exactly ONE write, so it could not
+  see this. Ruled out so far: command content (benign), user-scope deny rules
+  (~/.claude/settings.json has none), workspace paths, hook decisions
+  (hook_trace shows only instructive serena redirects, all retried fine).
+  NEXT: minimal bisect — one coder session doing TWO sequential /tmp heredoc
+  writes; confirm the 2nd is deterministically denied, then vary (same file
+  vs new file, heredoc vs printf, /tmp vs /private/tmp vs in-project) to find
+  the discriminator. Read the denial from the SESSION TRANSCRIPT at
+  ~/.claude/projects/<slug>/<session_id>.jsonl (tool_result blocks) — the
+  build log records tool NAMES only and can never show it.
+  NOT on the lensing critical path: coders should not be running measurement
+  campaigns at all (see role-scoping entry below), so this landmine is only
+  reachable via an anti-pattern. Still a real bug in the shared SDK.
+
+- ROLE MIS-SCOPING — MY ERROR, the actual cause of the zero-write builds
+  (2026-07-16): I wrote briefs/plans ordering the CODER to "MEASURE, don't
+  guess" (residual gate, Morse census). That turns the Coder into an
+  experimentalist: it writes /tmp probe scripts, trips the sandbox denial,
+  and correctly refuses to route around a denial -> BLOCKED, zero files.
+  MEASURED against gw's 24 build logs (149 coder tool calls):
+      gw:       WRITE 26% (39 replace_content), SHELL 16%, /tmp probes: ZERO
+      cogwheel: WRITE  1% (1 call),             SHELL 60%, /tmp probes: 4
+  The profile is INVERTED. gw's coders write code; its shell use is `python -c`
+  inline one-liners and `git diff` — never a scratch file, which is why gw has
+  never touched this landmine in 24 builds.
+  THE RULE: the Coder WRITES CODE. Verification belongs to the Test Developer
+  (Step 3) and the Inspector (Step 4), which run the tests. Measurement belongs
+  in the TEST — permanent and re-run every build — not in a throwaway probe.
+  Empirical facts a WP depends on must be PRE-ANSWERED in the brief (already
+  measured: all 168 rows clear 1e-12, max 1.93e-13, no exception needed;
+  census (0,0,1,1)/(0,1); CSV 120/24/24), so the coder has no reason to probe.

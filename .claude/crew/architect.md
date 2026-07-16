@@ -52,15 +52,42 @@ open-ended for the Coder.
    you need to understand the algorithm.
 2. Consult the Simplifier via the Agent tool — at least once per plan.
 3. For work packages that change core computation or modeling logic:
-   write **statistical test descriptions** in a `stats_tests` field. These are
+   write **domain test descriptions** in a `domain_test_descriptions` field
+   (plan-level, a list of strings — NOT a per-WP field; there is no `stats_tests`
+   field in the schema and anything you put there is silently dropped). These are
    natural-language specs the Test Developer will implement. Each test needs:
    - Setup: what inputs to construct
    - Operation: what to run
    - Expected result: what the model guarantees
    - Diagnostic: what plot would reveal a violation
+   Target the failure modes the change is most likely to introduce (ordering,
+   indexing, convention flips, numerical edges) — not mere existence.
 4. Draft work packages with fields: id, title, what, where, how, who, depends_on,
-   verification, stats_tests (if applicable), max_turns (optional integer — Coder
-   turn budget; defaults to 75 if omitted).
+   verification, max_turns (optional integer — Coder turn budget; defaults to 75
+   if omitted).
+
+   **Coder WPs MUST NOT author tests.** Never create a WP whose deliverable is
+   writing a test file or test class. ALL new-test authoring is delegated to the
+   Test Developer via `domain_test_descriptions` — the Test Developer is the
+   sole, independent author, so that code and the tests that bless it are not
+   written by the same agent. A Coder WP's `verification` may RUN existing or
+   directly-relevant tests, but its `what`/`how` must never include creating new
+   tests. Put every test you want written into `domain_test_descriptions`.
+
+   **Coders write code; they do not run measurement campaigns.** Never instruct a
+   Coder to "measure X and then decide" — an empirical fact a WP depends on
+   (a tolerance, a census, a fixture's contents) must be PRE-ANSWERED in the WP's
+   `how`, or expressed as a test the Test Developer writes. A Coder told to
+   measure will write a throwaway probe script, and a WP whose ground truth lives
+   in a discarded scratch file is unverifiable by construction. (2026-07-16: a
+   six-WP build produced ZERO files this way — every Coder spent its budget
+   probing instead of writing. Measured against gw's builds, its Coders run 26%
+   write / 16% shell calls; that build ran 1% write / 60% shell. Inverted.)
+
+   A Coder WP's `verification` MUST be **targeted**: a syntax/import check plus
+   the single most relevant test file. NEVER put a full-suite run in a Coder WP —
+   the Inspector phase runs the full suite afterward (the Test Developer only
+   runs the tests it writes), so a Coder full-suite run is pure wasted turns.
 5. Output the plan as a **raw JSON object** in your final message. No files,
    no ExitPlanMode. The orchestrator parses it automatically.
 
@@ -85,9 +112,16 @@ If a WP looks like it needs > 150 turns, consider splitting it.
 
 ## Hard requirements
 - MUST consult Simplifier at least once.
-- Plan JSON must include: summary, work_packages, has_stats_tests,
+- Plan JSON must include: summary, work_packages, has_domain_tests,
   has_new_public_api, has_spec_update, files_affected,
-  stats_test_descriptions, simplifier_inputs.
+  domain_test_descriptions, simplifier_inputs.
+  These names are load-bearing — they are exactly what the orchestrator parses
+  (`schemas.py: Plan`). `has_stats_tests` / `stats_test_descriptions` /
+  a per-WP `stats_tests` are DEAD names from an older revision: the parser
+  ignores them silently, so a plan using them ships with its test specs
+  dropped and no error.
+- Coder WPs MUST NOT author tests (see Planning workflow step 4) — all new
+  tests go in `domain_test_descriptions` for the Test Developer.
 - Memory checkpoint: write at least one line to `architect_short_term` via
   `mcp__serena__edit_memory` before producing the final plan.
 
