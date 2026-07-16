@@ -317,14 +317,14 @@ class SerenaManager:
 AGENT_MODELS: dict[str, str] = {
     "architect":    "claude-opus-4-8",
     "professor":    "claude-opus-4-8",
-    "simplifier":   "claude-sonnet-4-6",
-    "foreman_lite": "claude-sonnet-4-6",
+    "simplifier":   "claude-sonnet-5",
+    "foreman_lite": "claude-sonnet-5",
     "coder":        "claude-opus-4-8",
-    "tidier":       "claude-sonnet-4-6",
-    "test_dev":     "claude-sonnet-4-6",    # upgraded to opus if domain tests
+    "tidier":       "claude-sonnet-5",
+    "test_dev":     "claude-sonnet-5",    # upgraded to opus if domain tests
     "inspector":    "claude-opus-4-8",
-    "librarian":    "claude-sonnet-4-6",
-    "dreamer":      "claude-sonnet-4-6",
+    "librarian":    "claude-sonnet-5",
+    "dreamer":      "claude-sonnet-5",
     "prof_review":  "claude-opus-4-8",   # Phase 2: post-build inference review
 }
 

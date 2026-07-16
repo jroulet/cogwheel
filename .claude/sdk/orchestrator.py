@@ -192,7 +192,7 @@ class BuildOrchestrator:
         )
 
         options = ClaudeAgentOptions(
-            model="claude-sonnet-4-6",
+            model="claude-sonnet-5",
             max_turns=1,
             # No tools: a tool call under max_turns=1 cannot complete and
             # crashes the subprocess (exit 1). This call is text-only; an
@@ -240,7 +240,7 @@ class BuildOrchestrator:
         )
 
         options = ClaudeAgentOptions(
-            model="claude-sonnet-4-6",
+            model="claude-sonnet-5",
             max_turns=1,
             # No tools: a tool call under max_turns=1 cannot complete and
             # crashes the subprocess (exit 1). Turn-budget estimation is pure
@@ -1574,7 +1574,7 @@ class BuildOrchestrator:
         )
         result_text, _ = await self._run_agent(
             "architect", task,
-            model_override="claude-sonnet-4-6",
+            model_override="claude-sonnet-5",
         )
         return self._parse_triage_result(result_text)
 
@@ -1676,7 +1676,7 @@ class BuildOrchestrator:
 
     async def _run_skill(
         self, name: str, task_prompt: str,
-        model: str = "claude-sonnet-4-6", max_turns: int = 5,
+        model: str = "claude-sonnet-5", max_turns: int = 5,
     ) -> str:
         """Run a constrained skill (few turns, focused prompt, shared Serena)."""
         self._agent_count += 1
