@@ -441,3 +441,27 @@ VALIDATED BY THIS FINISH (evidence for the sister-repo ports):
 ORCHESTRATOR CHANGE STILL TO MAKE (cogwheel first, then port): split
 _run_test_dev_agent into one run per suite named in domain_test_descriptions,
 each budgeted by spec count (base + k*n_specs), mirroring per-WP coder budgets.
+
+## BUILD 2 STATUS (2026-07-16 late) — engine side DONE, likelihood needs a corrective round
+
+DONE and verified: WP1 F005 closure (amended by independent review: truncation
+cut kept, guard retightened 1e-8 -> 2e-9 into a measured 2.7x gap; operator
+suite 21+69 green; FINDINGS F005 rewritten to the measured L~45 ceiling).
+waveform.py + suite green. Driver's patch history: part (a) correct, part (b)
+WRONG and fixed by the reviewer — my calibration had conflated max_order=42
+artifacts with max_order=70 truth. Verify everything; even the driver.
+
+CROWN GATE (test_lensing_likelihood.py) — 5F/8P on a quiet box, two runs:
+  - near-cusp |dlnL| = 6.43e8, BIT-STABLE across both runs => real
+    deterministic likelihood bug (suspect: fiducial-vs-candidate image
+    count/label mismatch near the caustic, or K interpolation across a
+    topology change).
+  - two-image 10.9 and unlensed floors 0.33/0.28: values DRIFT between runs
+    (run 1: pass and 0.106) => the suite has NONDETERMINISM (unseeded noise?)
+    — itself a violation of the determinism convention; fix the test AND
+    whatever real residual remains once seeded.
+  - contraction timing 23x over the subdominance budget ON A QUIET BOX =>
+    real performance defect (or a mis-specified gate; the coarse waveform
+    call baseline is 64us — validate the gate's construction, then optimize).
+DENIAL FIX LIVE: next build runs with .claude/settings.agents.json (4a6e310)
+— it doubles as the allowlist verification build (baseline: 106/59 sessions).
