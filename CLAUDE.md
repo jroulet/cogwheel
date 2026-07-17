@@ -53,6 +53,24 @@ Applies to **behavior changes** in `cogwheel/` (new functions, signature/logic/c
 - **DATA_CONTRACTS.yaml edits**: include a `.claude/spec/contracts_changelog.d/<date>_<slug>.md` fragment with `bump:`. Never edit `schema_version` directly.
 - After writing any fragment: `python scripts/render_fragments.py`.
 
+## SDK Build Briefs (driver discipline)
+Transcript depth is a reliability constraint: the auto-mode permission
+classifier fails closed more often as agent transcripts deepen (measured
+2026-07: 0/106 bare denials in the first two tool calls of a session; median
+at call 14; see claude-code issue #74351 — no upstream fix). Keep builds
+shallow:
+- A brief contains: mission, in/out scope fences, measured facts the agents
+  cannot obtain themselves (inline, ~15 lines), build-level acceptance, and
+  constraints. It does NOT contain WP decompositions (the Architect owns
+  decomposition), history/narrative (reference files instead), or pointers
+  to `.claude/handoff/**/META_PLAN.md` (driver journal, never agent
+  context).
+- Prefer several small sequential builds over one wide one. If an honest
+  decomposition needs more than ~3 WPs, split into sequential builds; reject
+  over-wide plans at the plan gate.
+- Style calibration: single-focus briefs of 5-9 KB (the gw pipeline's
+  37-build precedent — median ~9 agents/build, no classifier denials).
+
 ## Testing
 - Tests live in `cogwheel/tests/` (stdlib `unittest`), **not** a top-level `tests/`.
 - Run: `python -m pytest cogwheel/tests/ -v` (or `python -m unittest discover -s cogwheel/tests`).
