@@ -27,9 +27,15 @@ model must track real structure; its residual binning error IS the
 8.96e-3 floor. If reference and candidate were constructed alike, r
 would be identically 1 there and the floor would vanish — the stall buys
 a smooth interpolable reference at the cost of a nontrivial fiducial
-ratio. Fix directions to weigh: apply the stall consistently in ratio
-space (so it cancels), or confine the stall to the interpolation grid
-while ratioing against the unstalled reference.
+ratio.
+
+HARD CONSTRAINT (owner, 2026-07-17): the stall-ringdown is NOT to be
+removed or weakened — it is load-bearing (smooth interpolable
+reference). The fix must make its effect CANCEL, i.e. arrange the
+algebra so the stalled reference appears consistently on both sides of
+the ratio/summary contraction (r == 1 at fiducial by construction),
+while the stall itself stays exactly as designed. Any plan that deletes
+or bypasses the stall is out of bounds.
 
 Acceptance: standard-RB zero-noise self-floor driven to <=1e-4 (or the
 mechanism documented in FINDINGS with a physical bound if irreducible);
