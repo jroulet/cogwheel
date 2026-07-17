@@ -128,7 +128,7 @@ from matplotlib import pyplot as plt
 
 from cogwheel import data, waveform
 from cogwheel.likelihood.relative_binning import RelativeBinningLikelihood
-from cogwheel.lensing.chang_refsdal import channels, geometry
+from cogwheel.lensing.chang_refsdal import _gauge, channels, geometry, operator
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, LensedBinningError,
     _data_term, _norm_term)
@@ -291,8 +291,11 @@ def _real_only_channel_switch(w, delays, real_mask):
         if others.size == 0:
             continue
         separation = float(np.min(np.abs(delays[channel] - delays[others])))
-        switch[:, channel] = channels.smootherstep(
-            w * separation, channels.RHO_START, channels.RHO_END)
+        # Shared primitives from _gauge/operator, never channels' own
+        # switch — the module whose defect this reproduces (FINDINGS
+        # F002; matches the channels-suite reproduction's discipline).
+        switch[:, channel] = _gauge.smootherstep(
+            w * separation, operator.RHO_START, operator.RHO_END)
     return switch
 
 
