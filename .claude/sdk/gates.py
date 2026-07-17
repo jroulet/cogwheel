@@ -44,8 +44,19 @@ class EscalationNeeded(Exception):
 # ── Plan verification gate ───────────────────────────────────────────────────
 
 
-def verify_plan(plan: Plan) -> tuple[list[str], list[str]]:
+def verify_plan(
+        plan: Plan, require_professor: bool = False,
+) -> tuple[list[str], list[str]]:
     """Check the plan against the verification checklist.
+
+    Parameters
+    ----------
+    require_professor:
+        Pass True when triage classified the task as complex and the
+        Professor consultation was offered — the plan must then cite
+        Professor inputs. Leave False for standard tasks (the Professor
+        was skipped by design; requiring citations would reject every
+        standard-task plan for not citing a consultant never spawned).
 
     Returns
     -------
@@ -55,6 +66,9 @@ def verify_plan(plan: Plan) -> tuple[list[str], list[str]]:
     """
     failures: list[str] = []
     missing_turns: list[str] = []
+
+    if require_professor and not plan.professor_inputs:
+        failures.append("Plan does not cite any Professor inputs.")
 
     if not plan.simplifier_inputs:
         failures.append("Plan does not cite any Simplifier inputs.")

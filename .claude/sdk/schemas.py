@@ -107,6 +107,7 @@ class Plan:
     domain_test_descriptions: list[str] = field(default_factory=list)
     # Traceability: which Simplifier inputs shaped the plan
     simplifier_inputs: list[str] = field(default_factory=list)
+    professor_inputs: list[str] = field(default_factory=list)
 
     def save(self, path: Path) -> None:
         """Serialize plan to JSON file for crash recovery / session agent context."""

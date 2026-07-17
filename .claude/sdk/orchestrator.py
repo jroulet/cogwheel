@@ -426,15 +426,20 @@ class BuildOrchestrator:
             if not self.fast_path:
                 self.phase = Phase.PLANNING
                 self._log_phase("Phase 1: Planning")
+                skip_professor = (self._triage_result == "standard")
+                if skip_professor:
+                    self._log("  (standard task — Professor consult skipped)")
 
                 max_plan_attempts = 3
                 user_feedback = ""
                 for attempt in range(1, max_plan_attempts + 1):
                     self.plan = await self._run_phase_1(
                         revision_feedback=user_feedback,
+                        skip_professor=skip_professor,
                     )
 
-                    failures, missing_turns = verify_plan(self.plan)
+                    failures, missing_turns = verify_plan(
+                        self.plan, require_professor=not skip_professor)
                     if failures:
                         self._log("Plan verification failed:")
                         for f in failures:
@@ -532,13 +537,28 @@ class BuildOrchestrator:
 
     # ── Phase 1: Planning ────────────────────────────────────────────────
 
-    async def _run_phase_1(self, revision_feedback: str = "") -> Plan:
-        """Architect-driven planning with Simplifier subagent.
+    async def _run_phase_1(
+        self,
+        revision_feedback: str = "",
+        skip_professor: bool = False,
+    ) -> Plan:
+        """Architect-driven planning with Professor/Simplifier subagents.
+
+        The Architect drives the conversation dynamics: for routine tasks it
+        calls each subagent once; for domain-heavy tasks it can do multiple
+        rounds with the Professor before drafting work packages (each call
+        to the same subagent preserves its full context).
 
         If `revision_feedback` is non-empty AND `self._architect_session` is
         set, resumes the architect's existing session so the prior plan is
         in its context and only edits are produced. Otherwise falls back to
         the fresh-planning path.
+
+        Parameters
+        ----------
+        skip_professor : bool
+            If True, the Professor subagent is not made available (set from
+            triage: standard tasks have no domain-critical implications).
         """
         # Revision path: resume the architect's session so the prior plan is
         # in its context. The architect produces an EDIT rather than a
@@ -551,11 +571,15 @@ class BuildOrchestrator:
             project_root=self.project_root,
             use_serena=self.use_serena,
         )
+        if skip_professor:
+            subagents.pop("professor", None)
 
         if revision_feedback:
             self._log("Architect revising plan with user feedback (no session to resume — fresh replan)")
+        elif skip_professor:
+            self._log("Architect planning (Simplifier only — no Professor)")
         else:
-            self._log("Architect planning (with Simplifier subagent)")
+            self._log("Architect planning (with Professor + Simplifier subagents)")
 
         revision_section = ""
         if revision_feedback:
@@ -573,15 +597,35 @@ class BuildOrchestrator:
             f"them in the plan summary.\n\n"
             f"## Task\n{self.task}\n\n"
             f"{revision_section}"
-            f"## Your subagents\n"
-            f"You have one subagent available via the **Agent** tool:\n\n"
-            f"- **simplifier**: Complexity auditor (Sonnet).  Check if your "
-            f"approach is over-engineered or if simpler alternatives exist.  "
-            f"Returns per-item verdicts: lean / watch / trim.\n\n"
-            f"**You MUST consult the Simplifier** at least once.\n\n"
+            + (
+                "## Your subagents\n"
+                "You have one subagent available via the **Agent** tool:\n\n"
+                "- **simplifier**: Complexity auditor (Sonnet).  Check if your "
+                "approach is over-engineered or if simpler alternatives exist.  "
+                "Returns per-item verdicts: lean / watch / trim.\n\n"
+                "No domain-expert consultation is needed for this task.\n"
+                "**You MUST consult the Simplifier** at least once.\n\n"
+                if skip_professor else
+                "## Your subagents\n"
+                "You have two subagents available via the **Agent** tool:\n\n"
+                "- **professor**: Domain expert — GW parameter estimation "
+                "(Opus).  Ask about likelihood / prior / sampler / "
+                "marginalization physics and statistics, numerical-accuracy "
+                "risks, convention pitfalls (units, IMRPhenomX), tolerance "
+                "choices, or test specifications.  You can call this multiple "
+                "times — each call preserves the Professor's full context "
+                "from previous rounds.\n\n"
+                "- **simplifier**: Complexity auditor (Sonnet).  Check if your "
+                "approach is over-engineered or if simpler alternatives exist.  "
+                "Returns per-item verdicts: lean / watch / trim.\n\n"
+                "**You MUST consult both** at least once before producing your "
+                "final plan.  For domain-heavy tasks, consult the Professor "
+                "multiple times — test specifications and tolerances should "
+                "carry the Professor's authority, not guesses.\n\n"
+            ) +
             f"## Workflow\n"
             f"1. Orient on the codebase (read specs, navigate symbols).\n"
-            f"2. Consult the Simplifier — depth should match task complexity.\n"
+            f"2. Consult subagents — depth should match task complexity.\n"
             f"3. For work packages that require domain-specific tests: "
             f"write test descriptions in a `domain_test_descriptions` field.\n"
             f"4. Draft work packages informed by consultation feedback.\n"
@@ -599,9 +643,16 @@ class BuildOrchestrator:
             f"- has_spec_update (bool) — true if SPEC.md needs updating\n"
             f"- files_affected (list of str)\n"
             f"- domain_test_descriptions (list of str — natural-language "
-            f"test specs: setup, operation, expected result)\n"
+            f"test specs: setup, operation, expected result"
+            + ("" if skip_professor else
+               "; these should carry the Professor's input where the tests "
+               "are domain-critical")
+            + ")\n"
             f"- simplifier_inputs (list of str — key points from the "
             f"Simplifier that shaped the plan)\n"
+            + ("" if skip_professor else
+               "- professor_inputs (list of str — key points from the "
+               "Professor that shaped the plan, for traceability)\n")
         )
 
         mcp_config = (
@@ -648,6 +699,8 @@ class BuildOrchestrator:
 
         if not plan.simplifier_inputs:
             self._log("  WARNING: Architect did not consult Simplifier")
+        if not skip_professor and not plan.professor_inputs:
+            self._log("  WARNING: Architect did not cite Professor inputs")
 
         self._log(f"  Plan received: {len(plan.work_packages)} WPs")
         return plan
@@ -2340,6 +2393,7 @@ class BuildOrchestrator:
             files_affected=data.get("files_affected", []),
             domain_test_descriptions=data.get("domain_test_descriptions", []),
             simplifier_inputs=data.get("simplifier_inputs", []),
+            professor_inputs=data.get("professor_inputs", []),
         )
 
     def _try_parse_json_plan(self, text: str) -> Plan | None:
@@ -2392,6 +2446,12 @@ class BuildOrchestrator:
             lines.append(f"  Verification: {wp.verification}")
             if wp.max_turns:
                 lines.append(f"  Max turns: {wp.max_turns}")
+            lines.append("")
+
+        if plan.professor_inputs:
+            lines.append("### Professor Inputs")
+            for item in plan.professor_inputs:
+                lines.append(f"  - {item}")
             lines.append("")
 
         if plan.domain_test_descriptions:
