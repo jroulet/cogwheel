@@ -74,24 +74,240 @@ fails against correct code. Use powers-of-two endpoints (`0.5/0.5`, `0.75/0.25`)
 where `1 - kappa` equals `|gamma|` exactly. Caught in the first delivered
 lens-engine test suite; the code was right, the test's boundary point was not.
 
-## F005 — wave-branch contraction loses certification above L ~ 30 (2026-07-16, OPEN)
+## F005 — wave-branch contraction: silent-nan closed, gap NARROWED to a named refusal (2026-07-16, NARROWED)
 
-The float64 operator contraction in `F_op` (`z_powers @ (table*radial) @
-zbar_powers`, complex128 — deliberately NOT double-double, per the two-channel
-error model) drifts below the 1e-10 target for cancellation exponents
-`L = w*sqrt(s)` above roughly 30 at high `w`, and near `L ~ 40` the
-intermediate products overflow to a SILENT `nan` — no `CancellationError`, no
-named refusal — violating the module's "named error, never a silently wrong
-number" contract inside the nominally certified `L <= 48` band. Note
-`estimated_relative_tail` does NOT bound this error: it tracks the kernel
-series tail, not contraction round-off/overflow.
+Original defect (OPEN): the float64 operator contraction in `F_op`
+(`z_powers @ (table*radial) @ zbar_powers`, complex128 — deliberately NOT
+double-double, per the two-channel error model F001) drifted below the 1e-10
+target for cancellation exponents `L = w*sqrt(s)` above roughly 30 at high `w`,
+and near `L ~ 40` the intermediate products overflowed to a SILENT `nan` — no
+`CancellationError`, no named refusal — violating the module's "named error,
+never a silently wrong number" contract inside the nominally certified
+`L <= 48` band. `estimated_relative_tail` does NOT bound this error (it tracks
+the kernel series tail, not contraction round-off/overflow).
 
-Consequence: the wave branch is oracle-certified at 1e-10 only to `L ~ 25-30`;
-the band `L in [~30, 48]` (below the geometric branch's `L > 48` onset) is an
-OPEN GAP. The operator test suite deliberately scopes its mpmath-oracle
-assertions to `L <= 25` for this reason.
+Resolution shipped (WP1). `F_op` now does two things, WITHOUT adding
+double-double to the contraction (F001's two-channel model is preserved — dd
+stays in the 1F1 kernel only):
 
-Fix direction (architectural, not surgical): an overflow-safe / rescaled
-contraction (e.g. factoring the max magnitude out of `derivs` before the
-matmuls), plus a named refusal when the contraction magnitude ratio breaches a
-threshold. Belongs to a dedicated WP; do not "fix" it by widening tolerances.
+1. Overflow-safe contraction. Before the matmuls it factors the peak radial
+   magnitude `max|derivs|` out as an EXACT power of two (`np.frexp` picks the
+   exponent, `np.ldexp` rescales with no rounding). Every scaled entry is then
+   O(1), so no intermediate overflows; the whole summation runs in units of
+   `2**scale_exp` and the total is scaled back exactly. For the previously
+   certified region this is bit-for-bit identical (the power-of-two factor
+   commutes through multiply/add without rounding, and `scale_exp` is small
+   enough there that no meaningful entry underflows), so the `L <= 25`
+   oracle behaviour is unchanged.
+2. Named certification refusal, via TWO independent cuts for two independent
+   error sources (revised 2026-07-16 after direct 70-dps-oracle calibration;
+   see below). (a) TRUNCATION cut: `estimated_relative_tail`
+   (max of the operator-series last-term ratio and the kernel per-order tail)
+   `> _CONTRACTION_TARGET = 1e-10` — binding at small `max_order`, where the
+   shear series has not converged (this closed a pre-existing SEPARATE silent
+   hole: `large-shear` w=40 at the default `max_order=42` returned 1.26e-4 with
+   `converged=False` and no refusal). (b) CONTRACTION round-off cut: the
+   first-order float64 round-off `eps * (sum|term| / |total|)`
+   (`positive_total / |total|`, an all-positive companion contraction)
+   `> _CONTRACTION_GUARD = 2e-9` — binding once the series has converged and the
+   float64 derivative-ladder cancellation dominates near `L ~ 45`, the regime
+   the truncation cut goes BLIND to (its tail collapses to ~1e-14). Both name
+   `w, y, gamma, kappa`. A non-finite-total backstop (and a non-finite
+   reconstructed-value backstop) catch any residual overflow, since
+   `nan > threshold` is False and would otherwise slip past the ratio gates. The
+   gamma-channel refusal (`max_partial_term / |total| > _CANCELLATION_REFUSAL =
+   1e13`, F001) is unchanged and still fires first.
+
+Net status — NARROWED, not RESOLVED. WP1's overflow-safe rescaling did MORE
+than remove the nan: direct 70-dps-oracle measurement (2026-07-16) shows the
+returned-and-accurate ceiling is now near `L ~ 45` (true relative error stays
+below 1e-10 out to `L ~ 44` on the `y=(0.9,0)`, gamma=0.2 sweep, crossing 1e-10
+near `L ~ 45-46`), NOT the pre-WP1 `L ~ 30`. The accuracy of the wave branch
+WAS extended by the rescaling (no dd added; F001 preserved). What the refusal
+adds on top is the CONTRACT: the residual band `L in [~45, 48]` (below the
+geometric branch's `L > 48` onset) now exits through a named
+`CancellationError` — never a silent `nan`, never a finite-but-wrong number.
+
+Calibration caveat (why the guard is 2e-9, not the 1e-10 target). The
+round-off bound `eps * (sum|term| / |total|)` is a WORST-CASE upper bound, loose
+by ~20-30x and NOT a rigorous 1e-10 proof: across shear it can INVERT (an
+accurate `y=(0.9,0)` L=45 config reads bound 5e-9 while an accurate
+`large-shear` w=40 config, true 2.7e-11, reads 7.4e-10; a low-shear gamma=0.1
+config at `L ~ 50` is inaccurate at 3e-10 yet reads bound 4e-13 — that last is
+kernel degradation past `L ~ 48`, out of the wave band and handed to the
+geometric branch). So the round-off cut is a MEASURED COARSE NET, not a proof;
+`_CONTRACTION_GUARD = 2e-9` is pinned to the clean 2.7x gap between the largest
+must-return bound (CERT L=43.5 at 1.12e-9; large-shear at 7.4e-10) and the
+smallest must-refuse bound (CERT L=45 at ~3-5e-9) on the tested configs. An
+interim driver value of 1e-8 was too loose and let `L ~ 45-48` leak as
+finite-but-wrong returns (rel err ~1.3-1.5e-10) — retightened to 2e-9.
+
+Consequence for callers and tests. `channels.py` reaches the wave branch only
+when `select_branch` returns `'wave'` (i.e. NOT both resolved and `L > 48`), so
+an unresolved config with `L in [~45, 48]` now propagates a named
+`CancellationError` instead of a silent nan — the intended "certified or
+named-refusal everywhere" contract the Build-2 likelihood relies on.
+`ContractionCertificationTestCase` asserts the certify-XOR-refuse contract
+across `L in [24, 48]`; `GeometricOpticsSlopeTestCase` keeps `L <= 24.3` (w to
+27 at `|y'| = 0.9`) so it exercises only certified returns. Do NOT reopen the
+gap by widening tolerances.
+
+## F006 — near-cusp (h|h) blow-up: edge-secant kernel coefficients alias the caustic-sharpened amplification (2026-07-16)
+
+Symptom (Build 2b crown gate): `LensedRelativeBinningLikelihood` disagreed
+with its brute-force oracle by `|RB lnL - brute lnL| = 6.43e8` (tolerance 1.5)
+on the `near-cusp` config, BIT-STABLE across runs — a deterministic defect, not
+sampling noise. The RB `(d|h)`/`(h|h)` summaries and their mode→image
+contraction algebra (`_data_term`/`_norm_term`) were verified CORRECT term by
+term against the truncated linear-kernel × linear-ratio × linear-phase model;
+the fault was upstream, in how the per-bin amplification kernel `K_a(f)` was
+reduced to coefficients.
+
+Confirmed mechanism. Near a cusp the merged-image regime is *unresolved*: in
+`channels.exact_transition_channels` the smootherstep switch
+`smootherstep(w*delay_sep, 0.5, 4)` goes to 0, so each channel kernel collapses
+to the artificial single-image split `K_a = alpha_a * exp(-i w tau_a) * F(w)`,
+which carries the FULL amplification oscillation `F(w)` — a rapidly varying,
+caustic-sharpened function of `f` within one relative-binning bin. The old hot
+path (`_edge_linear_coefficients`) built the per-bin `(k0, k1)` from the TWO bin
+EDGES only (a secant). When the two edges happen to straddle a phase alias of
+that oscillation, the secant midpoint value `k0` collapses toward zero while the
+secant slope `k1` blows up; `_norm_term` then SQUARES `k1`, manufacturing the
+~6.43e8 spurious `(h|h)`. This is an aliasing/undersampling failure of the
+edge-secant reduction, NOT an error in the contraction, the moments, the
+delay-phase model, or the normalization.
+
+Fix (WP1, `cogwheel/lensing/likelihood.py`). New hot-path method
+`_amplification_coefficients` evaluates `ChangRefsdalChannels` on a per-bin
+sub-sample grid (`kernel_subsamples = 8` interior midpoints per bin, strictly
+increasing and positive in `w`) and reduces each channel kernel to `(k0, k1)`
+by a per-bin least-squares line — offsets symmetric about `f_center`, so
+`k0 = mean` and `k1 = <offset, K>/sum(offset^2)`. Densely sampling within the
+bin resolves the caustic-sharpened `F(w)` that the edge secant aliased, so the
+fitted slope is bounded and the squared-slope blow-up disappears. The
+contraction, frequency moments, ratio path, image-delay guard
+(`LensedBinningError`), and all three design decisions are UNCHANGED — only the
+kernel-coefficient reduction improved. `_edge_linear_coefficients` is
+retained (the ratio path uses it); `_amplification_at_bins` was removed as
+dead code (INS-3-002: nothing in the hot path, `lnlike_bruteforce`, or the
+test suite referenced it). Engine refusals stay symmetric across the RB and brute-force
+paths: `geometry.LensDomainError` (macro saddle) and `operator.CancellationError`
+(uncertifiable contraction) propagate unswallowed on both.
+
+F→1 normalization: AUDITED, NO code change. The unlensed-limit floor readings
+(0.10–0.33 across runs in the failing report) were traced to an unseeded
+`EventData` noise draw (nondeterminism, seeded in the test suite), NOT a
+normalization bug. The moment prefactor `4*df`, blued strain, `wht_filter**2`,
+and `asd_drift**-2` match `CBCLikelihood._compute_d_h`/`_h_h` and
+`RelativeBinningLikelihood`; at `F→1` the `p=0` moments sum over bins to the
+exact integral, so `(d|h)`/`(h|h)` are exact to ~1e-8. Because WP1 changed no
+normalization code, this finding records the audit outcome only — the F005
+overflow-safe contraction and its refusal contract are untouched.
+
+> Correction (F007, 2026-07-16): the "exact to ~1e-8" bound above holds only
+> for the `p=0` moment with an exactly-constant per-bin ratio and kernel and
+> matched fiducial/candidate frequency sets. The full `F→1` evaluation path is
+> NOT exact to 1e-8: `_set_summary` builds `_h0_edges` with precession forced on
+> and `_stall_ringdown` applied, while `_candidate_bin_ratios` builds the
+> candidate `h_edges` with neither, so at `r ~ 1` the ratio is not identically
+> `1` in the in-band ringdown of the fixture and a template-construction
+> asymmetry `delta-h/h ~ 1e-3` survives. See F007 for the mechanism and the
+> zero-noise anchor that gates it test-side.
+
+## F007 — the timing gate was mis-specified, and the F→1 floor is a template-construction asymmetry, not a normalization bug (2026-07-16)
+
+Two Build-2b diagnoses that are NOT defects in the shipped
+`LensedRelativeBinningLikelihood` math, recorded so neither is re-opened as a
+correctness bug. Both concern `cogwheel/lensing/likelihood.py`; cited by symbol
+name. F006 (near-cusp secant-aliasing) is the separate, real correctness fix and
+is unchanged by this entry.
+
+### Timing gate — the baseline was RB's co-cost, not its competitor
+
+`ContractionTimingTestCase` originally asserted `t_contract < t_coarse_waveform`,
+where `t_coarse_waveform` is the cost of the coarse `get_strain_at_detectors`
+call on the relative-binning `fbin` grid. That baseline is WRONG: the coarse
+strain call is a per-eval CO-COST that relative binning itself incurs, not the
+thing RB competes against. RB exists to eliminate the FULL-GRID matched filter —
+that full-grid evaluation is exactly what `lnlike_bruteforce` does. So the coarse
+call is not a meaningful ceiling for the contraction, and the measured `23x`
+overshoot (`1.47e-3 s` contraction vs `6.4e-5 s` coarse call) is the additive
+`M^2 + n_img^2` design behaving AS DESIGNED, not a regression: with IMRPhenomXPHM
+(`n_m` up to 4) the contraction runs `~n_m^2` mode-pair einsums plus an
+`(n_img, n_img, n_det, n_bins)` image reduction — roughly an order of magnitude
+more numpy-dispatch work than a single cached coarse higher-mode strain call.
+Beating one cached strain call was never the design's subdominance requirement.
+
+The gate additionally EXCLUDED the F006 `_amplification_coefficients` cost from
+measurement entirely, so it left the genuinely new per-eval work (the
+Chang–Refsdal / 1F1 special-function engine, now evaluated at
+`n_bins * kernel_subsamples` points every eval) completely unguarded.
+
+The two correct gates:
+1. `lnlike` faster than `lnlike_bruteforce` by a conservative margin — the
+   actual RB speedup claim, stated against the PUBLIC entry points so it
+   survives internal refactors.
+2. `t_contract < t_amplification` — the pure `_data_term` + `_norm_term`
+   contraction must be subdominant to the `_amplification_coefficients` call.
+   The special-function engine at `n_bins * kernel_subsamples` points is the
+   unavoidable per-eval cost of microlensed evaluation; a likelihood whose
+   contraction is dwarfed by its own special-function evaluation is the correct
+   shape for a special-function-dominated microlensing runtime. Baseline (2)
+   also closes the hole the old gate left by excluding
+   `_amplification_coefficients` from measurement.
+
+### F→1 floor — a template-construction asymmetry, left in place for Build 2b
+
+The unlensed-limit floor readings (`0.10`–`0.33` across runs) are NOT a
+normalization error. `_compute_d_h` / `_compute_h_h` apply `asd_drift**-2` once
+per detector and BOTH oracles route through them; the `4*df` prefactor, blued
+strain, and `wht_filter**2` match `CBCLikelihood` / `RelativeBinningLikelihood`.
+The residual is a template-construction asymmetry: `_set_summary` builds
+`_h0_edges` with `disable_precession=False` forced and `_stall_ringdown`
+applied, while `_candidate_bin_ratios` builds the candidate `h_edges` with
+NEITHER. So at `r ~ 1` the per-bin ratio is not identically `1` in the in-band
+ringdown of the 60+45 M_sun fixture (`delta-h/h ~ 1e-3`), and beaten against the
+(previously unseeded) noise this reads as `~ rho * (delta-h/h) ~ 0.05`–`0.3`.
+For scale, the physically expected lensing residual at `w ~ 1e-7` is `~1e-4` —
+about four orders of magnitude BELOW the observed floor, confirming the floor is
+construction noise, not lensing signal or a normalization slip.
+
+This construction asymmetry is a KNOWN residual mechanism left in place for
+Build 2b: aligning the two template builders risks the currently-green
+brute-force suite and is out of scope here. The crown gate handles it test-side
+with a ZERO-NOISE `F→1` anchor (the deterministic unlensed-limit check that
+removes the noise projection so the `delta-h` term cannot be amplified into a
+spurious floor). This entry also corrects F006's "at `F→1` … exact to ~1e-8"
+line: that bound holds only for the `p=0` moment with exactly-constant
+ratio/kernel and matched frequency sets; the full `F→1` path carries the
+construction-asymmetry `delta-h`.
+
+### Static verification of the crown-gate deliverables (WP1 re-dispatch, 2026-07-16)
+
+Recorded to resolve INS-3-001, which was an Inspector-SESSION access failure
+(Bash false-denial, Serena/Read timeouts) — not a code or test defect. A
+session with working file access statically confirmed that the shipped
+artifacts exist and encode exactly what F006/F007 document:
+
+- `cogwheel/lensing/likelihood.py`: `_amplification_coefficients` (the F006
+  dense per-bin sub-sample + least-squares kernel reduction) is present as a
+  `LensedRelativeBinningLikelihood` method, alongside its subsampling machinery
+  (`_build_kernel_subsampling`, `_kernel_dense_f`, `_kernel_fit_value`,
+  `_kernel_fit_slope`), the contraction (`_data_term`, `_norm_term`), and the
+  retained `_edge_linear_coefficients` (`_amplification_at_bins` was later
+  removed as dead code, INS-3-002).
+- `cogwheel/tests/test_lensing_likelihood.py`: `ContractionTimingTestCase`
+  asserts the two F007 baselines — (a) `lnlike` faster than `lnlike_bruteforce`
+  by `SPEEDUP_MIN`, and (b) the `_data_term`+`_norm_term` contraction
+  subdominant to the `_amplification_coefficients` engine call — and its
+  docstring explicitly declines the old coarse-strain baseline as a per-eval
+  co-cost. `NearCuspRegressionPinTestCase`, `NormalizationFloorZeroNoiseTestCase`
+  (the zero-noise `F→1` anchor), and `DeterminismTestCase` are all present.
+
+UNVERIFIED (handed to a runtime-capable reviewer, NOT the Coder — code and the
+suite that blesses it must not share an author): the actual pass/fail state of
+`python -m pytest cogwheel/tests/test_lensing_likelihood.py
+cogwheel/tests/test_lensing_operator.py` at the stated tolerances. The static
+read establishes the deliverables are real and structurally consistent with the
+documentation; runtime green-ness must still be confirmed before Build 2b is
+committed, and no tolerance may be widened to achieve it.

@@ -11,3 +11,16 @@ recon + self-falsification). VERDICT PASS. Open concern: F005 gap L=w|y'| in [~3
 uncertified finite F_op with NO named refusal (confirmed 8 gap configs return finite, not nan) --
 acceptable at engine stage but reachable in high-mag near-caustic regime; must be gated/closed
 before Build 2 likelihood is trusted there.
+
+## Consult 2026-07-17 — Build 2 crown-gate red (driver-commissioned)
+
+Near-cusp RB blow-up ROOT CAUSE = ill-conditioned channel gauge |K_a|~5e5 vs
+|F|~3 (recon machine-exact), NOT F006 edge-secant/k1-squaring (sign disproven:
+h_h goes NEGATIVE -9e8, lnl=-h_h/2=+6.43e8). Dense subsampling can't fix a
+1e5:1 conditioning problem. Two-image +9.77 is entirely a norm-term p+s<=3
+truncation bias (~1.3% under-estimate of h|h; d_h exact). Brute healthy at
+all configs. Timing 2.14x because per-bin dense engine eval (2024 nodes)
+defeats RB's purpose; paper wants ~6-11 GLOBAL nodes. Failures 4/6 are test
+bugs, 5 is an engine small-w (gamma/2w) singularity. Dreamer: fold into
+professor/microlensing_chang_refsdal (RB valid only in resolved regime;
+validity guard + sparse global nodes for 2c).

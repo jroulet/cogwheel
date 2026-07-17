@@ -542,3 +542,87 @@ RESUME (fresh session, ideally better service weather):
 3. The crown verdict is the ONLY open question: does WP1's fix cure near-cusp
    6.43e8? Run test_lensing_likelihood.py (46 min) or let the pipeline do it.
 4. After a green build: gw + skill ports (task #6) unlock.
+
+### BUILD 2B DEATH RECORD #2 + HAND-FINISH (2026-07-17 ~02:40)
+
+Relaunched build (log `/tmp/lensing_build2b_20260716_235055.log`) died at
+02:26 in revision 2/2: foreman_lite-11 hit a serena wedge (02:17), fell back
+to built-in tools, made its edit, then the fallback session ALSO went silent
+300s (service-side stall, same signature as death #1) -> TimeoutError, clean
+shutdown, Phase 3 skipped.
+
+Hardening scoreboard this run: bare-denial nudge-retry fired 3x (test_dev-4,
+inspector-6, inspector-9) and rescued the deliverable each time. Wedge
+fallback fired 1x and recovered (the fatal stall was AFTER recovery, a second
+independent stall).
+
+Pipeline state at death:
+- Inspector pass 2 (inspector-10): all prior findings RESOLVED; algebra of
+  likelihood.py verified correct by hand; crown suite reviewed as
+  well-designed. Only open item INS-3-002 (TRIVIAL dead code) + "numerical
+  green UNVERIFIED" (pytest denied in inspector sessions).
+- INS-3-002 CLOSED by hand-finish: foreman_lite-11 removed
+  `_amplification_at_bins` (likelihood.py now 773 lines, compiles); driver
+  corrected the two stale "retained" claims in FINDINGS.md.
+- Full suite (minus 3 pre-existing XODE-import-gap modules
+  test_waveform/test_gw_prior/test_posterior, uninstallable optional dep in
+  cogwheel_310) launched by driver ~02:45, result pending.
+
+Remaining to green: suite green -> Professor physics review -> commit ->
+Librarian -> Dreamer. Working tree holds the full uncommitted deliverable
+(waveform.py, likelihood.py, 2 test suites, FINDINGS/changelog/spec
+fragments, operator.py amendments).
+
+### BUILD 2B SUITE RESULT (driver-run, 2026-07-17 05:05) — RED, ESCALATION
+
+Full suite (minus 3 XODE-gap modules): 161 passed + 178 subtests, 9 FAILED,
+2h00m wall. Log: ~/.claude/jobs/a4cb0e27/tmp/suite_final.log.
+
+MEASURED failures (crown gate legitimately red, three independent axes):
+1. ACCURACY near-cusp: RB lnl 6.42997e8 vs brute 40.6596 (same ~6.43e8
+   magnitude as Build 2 pre-"fix") — the dense-subsample kernel fit (F006)
+   does NOT cure the production near-cusp config. Hot path verified to use
+   `_amplification_coefficients` (dense fit), so the blow-up enters
+   elsewhere; F006's mechanism attribution incomplete/wrong. Canary only
+   proves subsamples=2 is bad (>=1e3), never that 8 is good.
+2. ACCURACY two-image: RB 117.794 vs brute 108.027 (delta 9.77 > 1.5) in the
+   mildest regime — systematic, not caustic-specific.
+3. PERFORMANCE: RB lnlike 78.0 s/eval vs brute 167.1 s (2.14x < 3x gate).
+   The dense grid (n_bins*kernel_subsamples engine evals) consumed the RB
+   advantage; engine call dominates both paths.
+4. TEST BUG zero-noise floors (x2): lnlike_fft itself NaN under the
+   zero-noise fixture (0/0 in whitening/drift with zeroed noise).
+5. ENGINE small-mass floor: max|F|-1 = 0.0206 above roundoff gate at
+   smallest M_L (series behavior at tiny w).
+6. ENGINE/TEST macro-saddle control: positive-parity control (0.5, 0.25)
+   refused via CancellationError; refusal envelope broader than the plan
+   assumed.
+
+Revision loops were already exhausted (2/2) before the run. Disposition is
+design-level (F006 attribution falsified; RB speed advantage lost) ->
+ESCALATION to owner per protocol. Professor physics consult commissioned by
+driver to make the escalation decision-ready; INS-3-002 closed; nothing
+committed.
+
+### PROFESSOR CONSULT VERDICT (2026-07-17 ~05:30) — decision-ready
+
+Measured (2 probes on the exact fixture): near-cusp blow-up is a CHANNEL
+GAUGE CONDITIONING failure (|K_a|~5e5 cancelling to |F|~3; truncated pairwise
+contraction loses positivity, h_h -> -9e8) — F006's mechanism attribution
+SIGN-DISPROVEN; no sampling density fixes it. Two-image +9.77 = norm-term
+p+s<=3 truncation bias (~1.3% h|h underestimate), clears with p+s<=4 or finer
+bins. Timing loss = per-bin dense nodes (2024) vs the paper's ~6-11 global
+nodes. F4 zero-noise NaN = test fixture (drift over zeroed noise); F5 =
+engine small-w gamma/2w singularity (ticket); F6 = engine refusal CORRECT,
+test control mis-specified (gamma_eff=0.5, tail 1.168e-10 vs 1e-10).
+
+RECOMMENDED BUILD 2c (awaiting OWNER disposition — changes the deliverable's
+scope): validity guard (REFUSE ill-conditioned/near-caustic configs) + sparse
+global kernel nodes (restore >3x) + norm moment p+s<=4 + test/spec fixes.
+EXPLICITLY OUT: fast near-caustic likelihood (research build; brute fallback
+for now), small-w short-circuit, adaptive strong-shear MAX_ORDER.
+
+DRIVER STATE: escalation sent to owner; NO Build 2c launch without owner
+approval (scope of the paper's method changes: RB refuses near-caustic
+instead of covering it). Working tree still holds full uncommitted
+deliverable + INS-3-002 closure.

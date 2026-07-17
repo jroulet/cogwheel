@@ -50,6 +50,25 @@ Above ``w = _hyp1f1.W_MAX_CERTIFIED`` the kernel raises
 `_hyp1f1.HypergeometricDomainError`; that is allowed to propagate here
 rather than being caught and re-wrapped.
 
+The kernel is accurate, but the float64 OPERATOR CONTRACTION that sums
+its derivatives has its own cancellation limit.  The radial derivatives
+span a huge dynamic range, so `F_op` first factors their peak magnitude
+out as an exact power of two before the matmuls (otherwise the products
+overflow to a silent ``nan`` near ``L ~ 40``), which pushes the usable
+contraction out to ``L ~ 45``.  `F_op` then refuses an uncertifiable
+input through EITHER of two measured cuts, for two INDEPENDENT error
+sources: a TRUNCATION cut on ``estimated_relative_tail`` (the operator-
+series last-term ratio and the kernel's per-order tail), binding when
+``max_order`` is too small for the shear series to converge; and a
+CONTRACTION round-off cut on ``eps * (sum|term| / |total|)`` past
+``_CONTRACTION_GUARD``, binding once the series has converged and the
+float64 derivative-ladder cancellation dominates near ``L ~ 45``.
+Neither cut alone suffices: at the high ``max_order`` the deep-band
+sweeps use, the truncation tail goes blind (the series converges) while
+the contraction round-off is the live limit.  Every uncertifiable input
+in the wave branch therefore exits through a named exception -- never a
+``nan`` and never a finite-but-wrong number (FINDINGS F005).
+
 The geometric branch is legitimate only once two INDEPENDENT conditions
 hold, and `select_branch` requires BOTH:
 
@@ -124,6 +143,36 @@ MAX_ORDER = 42
 #: cancellation ratio ``max_partial_term / |total|`` exceeds this: past
 #: ~13 digits the double-double substrate no longer protects the sum.
 _CANCELLATION_REFUSAL = 1e13
+
+#: First-order float64 round-off unit for the operator CONTRACTION
+#: (machine epsilon).  The contraction stays in complex128 -- the
+#: double-double substrate lives only in the 1F1 kernel, never here
+#: (FINDINGS F001) -- so its accuracy is bounded by this epsilon times
+#: the measured cancellation condition ``sum|term| / |total|``.
+_CONTRACTION_UNIT_ROUNDOFF = float(np.finfo(np.float64).eps)
+
+#: Relative-accuracy target the wave-branch contraction must certify
+#: (FINDINGS F005).  When the measured round-off estimate
+#: ``_CONTRACTION_UNIT_ROUNDOFF * (sum|term| / |total|)`` exceeds this,
+#: `F_op` raises `CancellationError` rather than returning a
+#: finite-but-uncertified amplification.  This is the certification cut
+#: that replaces the former silent-``nan`` overflow near ``L ~ 40``.
+_CONTRACTION_TARGET = 1e-10
+
+#: Round-off certification cut for the CONTRACTION error source, applied
+#: to the measured bound ``eps * (sum|term| / |total|)``.  Set at 2e-9
+#: from direct 70-dps-oracle calibration on the wave band: every config
+#: the suite must return sits at or below ~1.1e-9 on this bound (largest:
+#: CERT y=(0.9,0) L=43.5 at 1.12e-9; large-shear w=40 at 7.4e-10), while
+#: every config whose TRUE error breaches 1e-10 sits at or above ~3e-9
+#: (CERT L>=45).  The bound is a WORST-CASE upper bound, loose by
+#: ~20-30x and NOT a rigorous 1e-10 proof (it can invert across shear);
+#: it is a measured coarse net for the CONTRACTION blow-up the truncation
+#: cut cannot see, sound inside the wave band ``L <= L_MAX`` where the
+#: kernel is itself certified.  (The former 1e-8 was calibrated on
+#: conflated max_order=42 measurements and let L~45-48 leak as finite-
+#: but-wrong; see the refusal site.)
+_CONTRACTION_GUARD = 2e-9
 
 # Operator-series convergence policy (not per-call knobs).
 _MIN_ORDER = 6
@@ -294,6 +343,22 @@ def _series_length(w: float, s: float) -> int:
                        + 20.0))
 
 
+def _refusal_message(w: float, y: np.ndarray, gamma: float,
+                     kappa: float, reason: str) -> str:
+    """Uniform `CancellationError` message naming the configuration.
+
+    Every wave-branch refusal -- cancellation-ratio, contraction
+    magnitude spread, or a non-finite (overflow) result -- reports the
+    same ``(w, y, gamma, kappa)`` context and the same remedy, so a
+    caller can always tell which configuration was refused and why.
+    """
+    return (
+        f'Refusing F_op at w = {w}, y = {np.asarray(y).tolist()}, '
+        f'gamma = {gamma}, kappa = {kappa}: {reason}. The result cannot '
+        f'be trusted; use the geometric branch or a coherent '
+        f'multi-image sum.')
+
+
 def F_op(w: float, y: np.ndarray, gamma: float, *,
          beta: float = 0.0, kappa: float = 0.0,
          max_order: int = MAX_ORDER
@@ -329,8 +394,23 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
     geometry.LensDomainError
         If ``1 - kappa <= abs(gamma)``.
     CancellationError
-        If the measured operator-series cancellation ratio exceeds
-        ``_CANCELLATION_REFUSAL``.
+        If the wave-branch contraction cannot be certified to the
+        ``1e-10`` target.  This covers four refusals, all raised as
+        named errors rather than returning a ``nan`` or a
+        finite-but-uncertified amplification (FINDINGS F005):
+
+        * the scaled contraction still overflows to a non-finite total;
+        * the measured operator-series cancellation ratio
+          ``max_partial_term / |total|`` exceeds ``_CANCELLATION_REFUSAL``
+          (the gamma-channel refusal, FINDINGS F001);
+        * the measured truncation tail ``estimated_relative_tail``
+          exceeds ``_CONTRACTION_TARGET`` (the operator-series / kernel
+          truncation cut, binding at small ``max_order``);
+        * the measured contraction round-off bound
+          ``_CONTRACTION_UNIT_ROUNDOFF * (sum|term| / |total|)`` exceeds
+          ``_CONTRACTION_GUARD`` (the float64 derivative-ladder
+          cancellation cut that replaces the former silent-``nan``
+          overflow near ``L ~ 45``).
     _hyp1f1.HypergeometricDomainError
         Propagated from the kernel above its certified ``w`` ceiling or
         cancellation-exponent ceiling.
@@ -345,6 +425,25 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
     derivs, relative_tail = point_mass_g_derivatives(
         w, s, 2 * max_order, n_terms)
 
+    # Overflow-safe contraction (FINDINGS F005).  At high cancellation
+    # exponent ``L = w*|y'|`` the radial derivatives span a huge dynamic
+    # range, so the raw products ``table[order] * derivs`` overflow
+    # float64 near ``L ~ 40`` -- poisoning the matmul with a SILENT
+    # ``nan`` -- even though the physical per-order contribution is O(1).
+    # Factor the dominant magnitude out as an EXACT power of two before
+    # the matmuls (``np.frexp`` / ``np.ldexp`` introduce no rounding), so
+    # every scaled entry is O(1) and no intermediate overflows.  The
+    # whole summation then runs in units of ``2**scale_exp`` and the
+    # final total is scaled back exactly.  This is NOT extended
+    # precision: the contraction stays complex128, honouring the
+    # two-channel error model that places double-double only in the 1F1
+    # kernel (FINDINGS F001).
+    max_abs = float(np.max(np.abs(derivs)))
+    _, scale_exp = np.frexp(max_abs)  # max_abs == frac * 2**scale_exp
+    scale_exp = int(scale_exp)
+    derivs_scaled = (np.ldexp(derivs.real, -scale_exp)
+                     + 1j * np.ldexp(derivs.imag, -scale_exp))
+
     # Evaluate the beta=0 table at the eigenframe-rotated source; the
     # exp(-1j*beta) rotation reproduces the full shear-orientation
     # dependence (see module docstring).
@@ -352,11 +451,13 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
     powers = np.arange(dim)
     z_powers = z_eig ** powers
     zbar_powers = np.conjugate(z_eig) ** powers
+    abs_powers = np.abs(z_powers)
     half_sum = (np.add.outer(powers, powers) // 2)
 
-    total = 0.0 + 0.0j
+    total = 0.0 + 0.0j          # in units of 2**scale_exp
     coeff = 1.0 + 0.0j
     max_term = 0.0
+    positive_total = 0.0        # sum of |summand| magnitudes, same units
     small_count = 0
     converged = False
     order_used = 0
@@ -369,10 +470,20 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
         # out-of-range cells carry a zero table coefficient and the
         # clamped lookup is multiplied away -- but the dense fancy-index
         # must not run off the end of ``derivs`` (size dim) to reach it.
-        radial = derivs[np.minimum(half_sum + order, dim - 1)]
+        radial = derivs_scaled[np.minimum(half_sum + order, dim - 1)]
         contribution = z_powers @ (table[order] * radial) @ zbar_powers
         term = coeff * contribution
         total += term
+        # All-positive contraction: the magnitude actually summed in
+        # float64 for this order.  Accumulated over orders it is the
+        # honest condition number ``sum|term| / |total|`` of the
+        # cancellation that limits the contraction's accuracy, which
+        # ``estimated_relative_tail`` (a kernel-series quantity) does not
+        # bound (FINDINGS F005).
+        abs_contribution = (abs_powers
+                            @ (np.abs(table[order]) * np.abs(radial))
+                            @ abs_powers)
+        positive_total += abs(coeff) * abs_contribution
         order_used = order
         term_abs = abs(term)
         max_term = max(max_term, term_abs)
@@ -386,30 +497,97 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
         else:
             small_count = 0
 
+    # A non-finite running total means the scaled contraction still
+    # overflowed; refuse instead of letting a ``nan`` slip past the ratio
+    # gates below (``nan > threshold`` is False, so those gates would NOT
+    # fire on it).  This is the primary closure of the silent-nan bug.
+    if not (np.isfinite(total.real) and np.isfinite(total.imag)):
+        raise CancellationError(_refusal_message(
+            w, y, gamma, kappa,
+            'the scaled operator contraction is non-finite (overflow)'))
+
     total_abs = max(abs(total), 1e-300)
     cancellation_ratio = max_term / total_abs
     if cancellation_ratio > _CANCELLATION_REFUSAL:
-        raise CancellationError(
-            f'Refusing F_op at w = {w}, y = {np.asarray(y).tolist()}, '
-            f'gamma = {gamma}, kappa = {kappa}: the two channels cancel '
-            f'to a measured ratio max_partial_term / |total| = '
-            f'{cancellation_ratio:.3e}, past the certified '
-            f'{_CANCELLATION_REFUSAL:.0e}. The result cannot be trusted; '
-            f'use the geometric branch or a coherent multi-image sum.')
+        raise CancellationError(_refusal_message(
+            w, y, gamma, kappa,
+            f'the two channels cancel to a measured ratio '
+            f'max_partial_term / |total| = {cancellation_ratio:.3e}, '
+            f'past the certified {_CANCELLATION_REFUSAL:.0e}'))
 
+    # TRUNCATION certification (FINDINGS F005).  ``estimated_relative_
+    # tail`` is the max of the operator series' last-term ratio and the
+    # kernel's worst per-order relative tail; it bounds the error from
+    # stopping the shear series early (small ``max_order``) or an under-
+    # resolved kernel ladder.  It is the ONLY cut that sees the
+    # truncation source, and it is the BINDING one at the default cap
+    # where the shear series has not converged.  Measured 2026-07-16 vs
+    # the 70-dps oracle at the default cap ``max_order = MAX_ORDER = 42``,
+    # where HEAD silently returned a truncated value:
+    #     large-shear (w=40): tail 1.27e-4 vs true 1.26e-4, converged=
+    #                         False -- the pre-existing silent hole, now
+    #                         refused here.
+    # At the high ``max_order`` the suite's deep-band sweeps use, this
+    # tail collapses to ~1e-14 (the series converges) and goes BLIND to
+    # the float64 contraction cancellation; the round-off GUARD below is
+    # what certifies that regime.  The two cuts cover two independent
+    # error sources and neither alone is sufficient.
     estimated_tail = max(last_ratio, float(np.max(relative_tail)))
+    if estimated_tail > _CONTRACTION_TARGET:
+        raise CancellationError(_refusal_message(
+            w, y, gamma, kappa,
+            f'the series truncation cannot certify the '
+            f'{_CONTRACTION_TARGET:.0e} target: estimated relative tail '
+            f'= {estimated_tail:.3e} at max_order = {max_order} '
+            f'(converged = {converged})'))
+
+    # Round-off CERTIFICATION for the CONTRACTION source.  The first-
+    # order float64 round-off of the cancelling summation is
+    # ``eps * (sum|term| / |total|)``.  This is the ONLY cut that sees the
+    # contraction blow-up: at the tested ``max_order`` the shear series
+    # converges, so ``estimated_relative_tail`` above goes blind (flat
+    # ~3e-14) while the TRUE error climbs past 1e-10 near ``L ~ 45`` on
+    # the deep-cancellation configs, driven by the float64 derivative-
+    # ladder cancellation this bound measures.  Calibrated 2026-07-16 vs
+    # the suite's 70-dps oracle (guard = _CONTRACTION_GUARD = 2e-9):
+    #     CERT L=43.5:      bound 1.12e-9, true 3.1e-11  -> return
+    #     large-shear w=40: bound 7.4e-10, true 2.7e-11  -> return
+    #     CERT L=45:        bound 5.1e-9,  true 1.3e-10  -> refuse
+    #     CERT L=48:        bound 2.1e-8,  true 7.7e-10  -> refuse
+    # The bound is a WORST-CASE upper bound (loose ~20-30x, and it can
+    # invert across shear), so this is a measured coarse net, not a
+    # rigorous 1e-10 proof; it is sound inside the wave band L <= L_MAX,
+    # where the kernel is itself certified.  The scale-invariant ratio is
+    # unperturbed by the power-of-two rescaling above.
+    contraction_condition = positive_total / total_abs
+    contraction_error = _CONTRACTION_UNIT_ROUNDOFF * contraction_condition
+    if contraction_error > _CONTRACTION_GUARD:
+        raise CancellationError(_refusal_message(
+            w, y, gamma, kappa,
+            f'the wave-branch contraction round-off guard tripped: '
+            f'eps * (sum|term| / |total|) = {contraction_error:.3e} '
+            f'(guard {_CONTRACTION_GUARD:.0e}) from a magnitude spread '
+            f'sum|term| / |total| = {contraction_condition:.3e}'))
     diagnostics = OperatorDiagnostics(
         order_used=order_used,
         converged=converged,
         estimated_relative_tail=estimated_tail,
         cancellation_ratio=cancellation_ratio)
 
-    # Reconstruct F from G and undo the mass-sheet rescaling.  Because
-    # y_scaled = y / sqrt(lam), the physical |y|**2 / lam is exactly s.
+    # Undo the power-of-two rescaling EXACTLY (``ldexp`` by the same
+    # exponent), then reconstruct F from G and undo the mass-sheet
+    # rescaling.  Because y_scaled = y / sqrt(lam), the physical
+    # |y|**2 / lam is exactly s.
+    total = complex(np.ldexp(total.real, scale_exp),
+                    np.ldexp(total.imag, scale_exp))
     phase_scaled = np.exp(0.5j * w * s)
     mass_sheet_phase = np.exp(
         0.5j * w * np.log(lam) - 0.5j * w * float(kappa) * s)
     value = complex(mass_sheet_phase * phase_scaled * total / lam)
+    if not (np.isfinite(value.real) and np.isfinite(value.imag)):
+        raise CancellationError(_refusal_message(
+            w, y, gamma, kappa,
+            'the reconstructed amplification is non-finite (overflow)'))
     return value, diagnostics
 
 

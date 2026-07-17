@@ -37,11 +37,15 @@ The oracle is exact to far beyond float64, so ``RTOL_GATE = 1e-10`` is a
 property of ``F_op``, not the oracle.  The compared configurations keep
 the cancellation exponent ``L = w*|y'|`` at or below ~25, where the
 shipped wave branch delivers ~5e-12 or better (measured worst case
-5.65e-12, ~180x inside the gate).  The ``L <= 48`` certified ceiling is
-DRAWN on the diagnostic but not asserted at its upper edge: above
-``L ~ 30`` the float64 operator contraction loses accuracy and
-eventually overflows, which is a known limitation of the committed
-module recorded in the build notes, not something these tests certify.
+5.65e-12, ~180x inside the gate).  Above ``L ~ 45`` the float64 operator
+contraction can no longer certify the 1e-10 target (WP1's overflow-safe
+rescaling pushed that boundary up from the former ``L ~ 30``); per
+FINDINGS F005 ``F_op`` then raises a named `CancellationError` rather
+than returning a silent ``nan`` or a finite-but-wrong value.
+`ContractionCertificationTestCase` asserts that certified-or-refuse
+contract across the band ``L in [24, 48]`` (each call is accurate to
+`RTOL_GATE` XOR a named refusal, never nan); the ``L <= 25`` oracle
+gates here are the accuracy half of the same guarantee.
 
 `OperatorTestCase.tearDown` fails a test that made zero comparisons, and
 `SelfFalsificationTestCase` proves every gate above can actually go red.
@@ -468,7 +472,16 @@ class GeometricOpticsSlopeTestCase(OperatorTestCase):
     #: outside the caustic, so the asymptotics are clean.
     SLOPE_Y = np.array([0.90, 0.0])
     SLOPE_GAMMA = 0.20
-    SLOPE_W = np.linspace(12.0, 45.0, 84)
+    #: Frequency sweep.  The top is capped so the cancellation exponent
+    #: ``L = w*|y'| = 0.9*w`` stays <= ~24.3 -- inside the region the
+    #: oracle gates certify as accurate and below the ~30 contraction
+    #: certification boundary.  Above it ``F_op`` now correctly raises a
+    #: named `CancellationError` (FINDINGS F005, closed by WP1), which
+    #: would ERROR this asymptotic sweep; that refusal contract is
+    #: exercised instead by `ContractionCertificationTestCase`.  The
+    #: retained 12 -> 27 span still gives the binned slope fit enough
+    #: leverage to separate ``w**-1`` from ``w**-3``.
+    SLOPE_W = np.linspace(12.0, 27.0, 84)
     SLOPE_BINS = 8
 
     def _residuals(self, with_corrections):
@@ -549,6 +562,159 @@ class GeometricOpticsSlopeTestCase(OperatorTestCase):
         ax.set_ylabel('RMS |F_op - stationary-phase sum|')
         ax.legend()
         _savefig(fig, 'operator_geometric_slope.png')
+
+
+class ContractionCertificationTestCase(OperatorTestCase):
+    """
+    FINDINGS F005 closure gate: across the cancellation band
+    ``L in [24, 48]`` every ``F_op`` call is EITHER finite and
+    oracle-accurate to `RTOL_GATE` OR a NAMED
+    `operator.CancellationError` -- never a silent ``nan`` and never a
+    finite-but-wrong value.
+
+    This is the contract WP1 added (the overflow-safe frexp/ldexp
+    contraction plus the ``_CONTRACTION_TARGET`` certification refusal),
+    which neither the ``L <= 25`` oracle gates nor the gamma-channel
+    `CancellationError` (``max_partial_term/|total|`` vs
+    ``_CANCELLATION_REFUSAL``) exercise: the refusal probed here fires on
+    the CONTRACTION magnitude spread ``sum|term|/|total|`` measured over
+    the derivative ladder, the quantity that formerly overflowed to a
+    silent ``nan`` near ``L ~ 40``.
+
+    The oracle is the same independent mpmath amplification used by
+    `OperatorOracleTestCase`; it is exact far beyond float64 at every
+    ``L`` here, so whenever ``F_op`` returns it is genuinely certified,
+    not merely self-consistent.
+    """
+
+    #: Certified-band probe: ``y=(0.9,0)``, ``kappa=0`` so ``L=w*0.9``
+    #: and ``w*sqrt(s)=L<=48`` stays inside the kernel's dd product
+    #: ceiling of 60 (no `HypergeometricDomainError` intrudes); the only
+    #: two outcomes are a certified return or a contraction
+    #: `CancellationError`.
+    CERT_Y = np.array([0.90, 0.0])
+    CERT_GAMMA = 0.20
+    CERT_KAPPA = 0.0
+    CERT_LS = np.linspace(24.0, 48.0, 17)
+
+    def _w_for(self, cexp):
+        """Frequency giving cancellation exponent ``cexp`` (``|y'|=0.9``)."""
+        return float(cexp / 0.9)
+
+    def test_certified_or_named_refusal_across_band(self):
+        """
+        Sweeping ``L in [24, 48]``, each ``F_op`` call either matches the
+        mpmath oracle within `RTOL_GATE` or raises
+        `operator.CancellationError`.  A non-finite return without a
+        raise, or a finite value disagreeing with the oracle, is the
+        F005 bug and fails.  Both outcomes must occur across the band
+        (certified returns near ``L=24``; refusals near ``L=48``), so the
+        XOR contract is tested on both sides.
+        """
+        returned, refused = 0, 0
+        outcome_by_l = []
+        for cexp in self.CERT_LS:
+            w = self._w_for(cexp)
+            with self.subTest(L=cexp, w=w):
+                try:
+                    value, _ = operator.F_op(
+                        w, self.CERT_Y, self.CERT_GAMMA,
+                        kappa=self.CERT_KAPPA, max_order=FOP_MAX_ORDER)
+                except operator.CancellationError:
+                    refused += 1
+                    outcome_by_l.append((cexp, None))
+                    self.n_checks += 1
+                    continue
+                # Returned: it MUST be finite and oracle-accurate. A
+                # silent nan or a finite-but-wrong value is the F005 bug.
+                self.assertTrue(
+                    np.isfinite(value),
+                    f'L={cexp:.1f}: F_op returned non-finite {value} '
+                    'without raising CancellationError (silent nan is '
+                    'the F005 bug)')
+                reference = _oracle_amplification(
+                    w, self.CERT_Y, self.CERT_GAMMA, kappa=self.CERT_KAPPA)
+                rel = abs(value - reference) / abs(reference)
+                self.assertLessEqual(
+                    rel, RTOL_GATE,
+                    f'L={cexp:.1f}: F_op returned a finite but wrong '
+                    f'value (rel {rel:.3e} > {RTOL_GATE}) instead of '
+                    'raising CancellationError')
+                returned += 1
+                outcome_by_l.append((cexp, rel))
+                self.n_checks += 1
+        self.assertGreater(
+            returned, 0,
+            'no configuration certified a return in [24, 48]; the lower '
+            'band should still be accurate')
+        self.assertGreater(
+            refused, 0,
+            'no configuration refused in [24, 48]; the upper band should '
+            'breach the contraction target and raise CancellationError')
+        self._plot(outcome_by_l)
+
+    def test_former_silent_nan_config_now_refuses(self):
+        """
+        A configuration past the contraction-certification boundary
+        (``L ~ 48``, top of the wave band -- WP1 pushed the former
+        silent-``nan`` boundary up from ``L ~ 40`` to ``L ~ 45``, so the
+        old ``L ~ 40`` probe now certifies a return; the uncertifiable
+        band starts above it) raises a NAMED `operator.CancellationError`
+        whose message identifies the offending ``(w, y, gamma, kappa)``
+        -- instead of the pre-F005 silent overflow to ``nan``.
+        """
+        w = self._w_for(48.0)  # top of the band, past the L~45 boundary
+        with self.assertRaises(operator.CancellationError) as ctx:
+            operator.F_op(w, self.CERT_Y, self.CERT_GAMMA,
+                          kappa=self.CERT_KAPPA, max_order=FOP_MAX_ORDER)
+        message = str(ctx.exception)
+        for token in ('w =', 'y =', 'gamma', 'kappa'):
+            self.assertIn(
+                token, message,
+                f'refusal message does not name {token!r}: {message}')
+        self.n_checks += 1
+
+    def test_returned_branch_is_never_nan(self):
+        """
+        Stark finiteness guard on the returned branch: wherever ``F_op``
+        does NOT raise across the band, the value is finite.  Complements
+        the oracle-accuracy assertion with a check that would catch a
+        returned ``nan`` even if the oracle comparison were skipped.
+        """
+        for cexp in self.CERT_LS:
+            w = self._w_for(cexp)
+            with self.subTest(L=cexp):
+                try:
+                    value, _ = operator.F_op(
+                        w, self.CERT_Y, self.CERT_GAMMA,
+                        kappa=self.CERT_KAPPA, max_order=FOP_MAX_ORDER)
+                except operator.CancellationError:
+                    self.n_checks += 1
+                    continue
+                self.assertTrue(
+                    np.isfinite(value),
+                    f'L={cexp:.1f}: returned a non-finite value')
+                self.n_checks += 1
+
+    def _plot(self, outcome_by_l):
+        if not _HAVE_MPL or not outcome_by_l:
+            return
+        returned = [(l, r) for l, r in outcome_by_l if r is not None]
+        refused = [l for l, r in outcome_by_l if r is None]
+        fig, ax = plt.subplots(figsize=(6, 4))
+        if returned:
+            ax.scatter([l for l, _ in returned],
+                       [max(r, 1e-18) for _, r in returned],
+                       s=18, c='C0', label='certified return')
+        for edge in refused:
+            ax.axvline(edge, color='C3', ls=':', alpha=0.5)
+        ax.axhline(RTOL_GATE, color='k', ls='--', label='1e-10 gate')
+        ax.set_yscale('log')
+        ax.set_xlabel("cancellation exponent L = w|y'|")
+        ax.set_ylabel('|F_op - oracle| / |oracle|  (returns only)')
+        ax.set_title('certified return (dot) or named refusal (line)')
+        ax.legend()
+        _savefig(fig, 'operator_contraction_certification.png')
 
 
 class MassSheetInvarianceTestCase(OperatorTestCase):
@@ -858,6 +1024,27 @@ class SelfFalsificationTestCase(OperatorTestCase):
             drift, 1e-6,
             'the broken rescaling left the observable invariant, so the '
             'mass-sheet gate would not detect it')
+
+    def test_certification_band_gate_can_go_red(self):
+        """
+        The F005 certification gate is non-vacuous: at a returning in-band
+        config a 1% perturbation of ``F_op``'s value breaches
+        `RTOL_GATE`, so a finite-but-wrong return could not slip through
+        `ContractionCertificationTestCase`'s accuracy half.
+        """
+        y = ContractionCertificationTestCase.CERT_Y
+        gamma = ContractionCertificationTestCase.CERT_GAMMA
+        w = 24.0 / 0.9  # L ~ 24: a config that certifies a return
+        value, _ = operator.F_op(w, y, gamma, kappa=0.0,
+                                 max_order=FOP_MAX_ORDER)
+        reference = _oracle_amplification(w, y, gamma, kappa=0.0)
+        good = abs(value - reference) / abs(reference)
+        bad = abs(value * 1.01 - reference) / abs(reference)
+        self.assertLessEqual(good, RTOL_GATE)
+        self.assertGreater(
+            bad, RTOL_GATE,
+            'a 1% error slips the certification gate at L~24; its '
+            'accuracy half would assert nothing')
 
     def test_gate_rejects_geometric_when_one_condition_holds(self):
         """
