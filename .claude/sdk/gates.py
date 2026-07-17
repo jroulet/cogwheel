@@ -99,11 +99,14 @@ def is_fast_path_eligible(plan: Plan) -> bool:
     - Affects <= 2 files
     - No new public API
     - No domain-specific tests needed
+    - No domain-sensitive changes (a physics/numerics change must not skip
+      the Coder + Inspector loop, even when it writes no new tests)
     """
     return (
         len(plan.files_affected) <= 2
         and not plan.has_new_public_api
         and not plan.has_domain_tests
+        and not plan.has_domain_changes
     )
 
 

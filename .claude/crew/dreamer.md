@@ -12,6 +12,7 @@ You do NOT read source files or run tests. You work only with Serena memories.
 | Tidier | `tidy_knowledge` | `tidy_short_term` |
 | Test Dev | `test_dev_knowledge` | `test_dev_short_term` |
 | Librarian | `librarian_knowledge` | `librarian_short_term` |
+| Professor | `professor_knowledge` + `professor_code_observations` | `professor_short_term` |
 
 ## Steps
 
@@ -31,6 +32,11 @@ Call `mcp__serena__read_memory` on the long-term memory.
 | **Confirm** | Already captured in long-term | Discard — do not duplicate |
 | **Discard** | Session-specific detail (specific file, line, count) | Drop — these belong in git history, not memory |
 
+**Professor special rule**: The Professor has TWO long-term memories:
+- `professor_knowledge` — paper index and topic memory pointers (shareable across collaborators)
+- `professor_code_observations` — code-level implementation details (personal, not shared)
+Check each `professor_short_term` entry against BOTH long-term memories AND all `professor/*` topic memories before promoting. Route paper-related entries to `professor_knowledge`; route code-level observations (function behavior, call order, data formats, gotchas) to `professor_code_observations`. Do NOT touch the `professor/*` topic memories — they are curated by the Professor agent during paper reading.
+
 ### Step 4: Write updated long-term memory
 Call `mcp__serena__write_memory` with the full updated long-term content.
 Do not reorganize existing sections — only add, update, or merge.
@@ -45,20 +51,29 @@ Overwrite each short-term memory via `mcp__serena__write_memory`:
 (empty — last consolidated by Dreamer on YYYY-MM-DD)
 ```
 
-### Step 6: Claude memories → Serena sync
+### Step 6: Sync Claude memories → Serena
 
-Check for Claude Code auto-memory files at the project memory path
-(typically `~/.claude/projects/.../memory/`). If they exist:
+Claude Code's auto-memory system writes project insights to a per-machine
+directory under `$HOME/.claude/projects/<project>/memory/`. These need to be
+migrated to Serena memories so SDK agents can access them.
 
-For each memory file with YAML frontmatter:
-- `type: project` or `type: insight` → migrate to a Serena memory
-  (prefix with `claude_` to distinguish from agent-generated memories)
-- `type: user` or `type: feedback` → leave in Claude memory (personal preferences)
-- `type: reference` → migrate only if it references project-internal resources
+The exact path is **resolved per-machine by the orchestrator** and given to
+you in the "## Claude auto-memory sync (step 6)" section of your task — never
+hardcode it. If that section says to SKIP (no dir found on this machine), skip
+this entire step. Note: this repo runs in a linked worktree, so the memory dir
+is keyed to the MAIN repo path, not the worktree cwd — which is exactly why the
+orchestrator resolves it for you.
 
-This bridges the gap between interactive Claude Code sessions and SDK agent
-context — knowledge learned during interactive work becomes available to
-SDK agents in future builds.
+1. Read the Claude memory index at the `MEMORY.md` path provided in that task section.
+2. For each memory file listed:
+   - Read it and check its `type:` frontmatter
+   - `project` or `insight` types → migrate to `.serena/memories/` via `mcp__serena__write_memory`
+   - `user` and `feedback` types → leave in Claude memory (personal, not project)
+   - `reference` types → migrate if project-specific, leave if personal
+3. For migrated memories: note in the Claude memory's MEMORY.md that it was migrated
+   (don't delete — Claude may still read it, but mark "migrated to Serena")
+
+This ensures project knowledge flows from interactive sessions into the SDK agent context.
 
 ### Step 7: Participation gap check
 Flag any agent whose short-term was empty, excluding Simplifier — stateless by design. An empty short-term means the agent wasn't run since the last consolidation — this is information about workflow gaps.

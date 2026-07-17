@@ -639,6 +639,10 @@ class BuildOrchestrator:
             f"how, who ['Coder' or 'Foreman-Lite'], depends_on, verification, "
             f"max_turns [int — estimated turn budget for this WP])\n"
             f"- has_domain_tests (bool) — true if new domain-specific tests\n"
+            f"- has_domain_changes (bool) — true if ANY domain-sensitive change "
+            f"is made (likelihood, prior, sampler, marginalization, coordinates, "
+            f"waveform conventions, numerical tolerances / formula fixes — even "
+            f"without new tests). Gates the Professor inference review.\n"
             f"- has_new_public_api (bool)\n"
             f"- has_spec_update (bool) — true if SPEC.md needs updating\n"
             f"- files_affected (list of str)\n"
@@ -893,9 +897,11 @@ class BuildOrchestrator:
         await self._run_dag(dag)
 
         # Step 5: Professor inference review (after the Inspector gate passes,
-        # before the commit). Only when the build has domain-specific tests for
-        # the Professor to run; a FAIL blocks the commit.
-        if self.plan.has_domain_tests:
+        # before the commit). Fires whenever the build makes a domain-sensitive
+        # change OR writes new domain tests — a domain-sensitive change with no
+        # new tests still gets reviewed (the review reruns the fast suite). A
+        # FAIL blocks the commit.
+        if self.plan.has_domain_changes or self.plan.has_domain_tests:
             self._log("Step 5: Professor inference review")
             prof_result = await self._run_prof_review()
             report.prof_review_result = prof_result
@@ -910,7 +916,8 @@ class BuildOrchestrator:
             else:
                 self._log("  Professor: PASS")
         else:
-            self._log("Step 5: Professor inference review skipped (no domain tests)")
+            self._log("Step 5: Professor inference review skipped "
+                      "(no domain-sensitive changes or tests)")
 
         # Commit (Inspector + inference-review gates passed)
         build_changed_files = self._git_changed_files()
@@ -1002,7 +1009,14 @@ class BuildOrchestrator:
         """Build the pre-commit Phase 2a DAG."""
 
         async def run_coders() -> str:
-            return await self._run_coders(report)
+            result = await self._run_coders(report)
+            # Snapshot the working tree the moment the Coder finishes, before
+            # any downstream agent (Tidier/TestDev) can touch files.  The SDK
+            # makes no intermediate commits, so without this the build's only
+            # copy of its work lives in the uncommitted working tree — a single
+            # stray `git checkout/reset` downstream destroys it irreversibly.
+            self._create_coder_checkpoint()
+            return result
 
         async def run_tidier() -> str:
             return await self._run_tidier_skill()
@@ -1787,6 +1801,40 @@ class BuildOrchestrator:
 
     # ── Phase 3: Dreaming ────────────────────────────────────────────────
 
+    def _resolve_claude_memory_dir(self) -> Optional[str]:
+        """Resolve this repo's Claude Code auto-memory dir, portably.
+
+        Claude Code stores per-project auto-memories under
+        ``$HOME/.claude/projects/<mangled-project-path>/memory/`` where the
+        mangled name is the project path with every non-alphanumeric char
+        replaced by '-'.  In a linked worktree the key is the MAIN repo path
+        (parent of the common git dir), NOT the worktree cwd — so we try that
+        first, then the cwd.  Never hardcode this path: it is per-user and
+        per-machine.  Returns the memory dir, or None if not found.
+        """
+        projects = os.path.join(os.path.expanduser("~"), ".claude", "projects")
+        if not os.path.isdir(projects):
+            return None
+
+        def _mangle(p: str) -> str:
+            return "".join(c if c.isalnum() else "-" for c in os.path.abspath(p))
+
+        candidates = []
+        common = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=self.project_root, capture_output=True, text=True)
+        if common.returncode == 0 and common.stdout.strip():
+            main_repo = os.path.dirname(
+                os.path.abspath(os.path.join(
+                    self.project_root, common.stdout.strip())))
+            candidates.append(os.path.join(projects, _mangle(main_repo), "memory"))
+        candidates.append(os.path.join(projects, _mangle(self.project_root), "memory"))
+
+        for c in candidates:
+            if os.path.isfile(os.path.join(c, "MEMORY.md")):
+                return c
+        return None
+
     async def _run_phase_3(self) -> DreamerResult:
         """Run Dreamer for memory consolidation, or skip if nothing to consolidate."""
         agents = sorted(set(self._agents_that_ran))
@@ -1820,6 +1868,24 @@ class BuildOrchestrator:
             f"Commit memory changes.\n"
             f"Ensure working tree is clean."
         )
+        # Resolve this machine's Claude auto-memory dir and inject it, so the
+        # Dreamer's step-6 sync never relies on a hardcoded per-user path. In a
+        # linked worktree the dir is keyed to the MAIN repo path, not the cwd.
+        claude_mem = self._resolve_claude_memory_dir()
+        if claude_mem:
+            task += (
+                f"\n\n## Claude auto-memory sync (step 6)\n"
+                f"This machine's Claude auto-memory index is at:\n"
+                f"  {os.path.join(claude_mem, 'MEMORY.md')}\n"
+                f"Migrate `project`/`insight` memories to Serena; leave "
+                f"`user`/`feedback` personal; annotate migrated index lines "
+                f"'(migrated to Serena)'."
+            )
+        else:
+            task += (
+                "\n\n## Claude auto-memory sync (step 6)\n"
+                "No Claude auto-memory dir found on this machine — SKIP step 6."
+            )
         write_state(self.project_root, "dreamer", status="consolidating")
         await self._run_skill("dreamer", task, max_turns=75)
         write_state(self.project_root, "dreamer", status="consolidated")
@@ -2388,6 +2454,7 @@ class BuildOrchestrator:
             summary=data.get("summary", ""),
             work_packages=work_packages,
             has_domain_tests=data.get("has_domain_tests", False),
+            has_domain_changes=data.get("has_domain_changes", False),
             has_new_public_api=data.get("has_new_public_api", False),
             has_spec_update=data.get("has_spec_update", False),
             files_affected=data.get("files_affected", []),
@@ -2461,6 +2528,7 @@ class BuildOrchestrator:
             lines.append("")
 
         lines.append(f"Domain tests: {'yes' if plan.has_domain_tests else 'no'}")
+        lines.append(f"Domain changes: {'yes' if plan.has_domain_changes else 'no'}")
         lines.append(f"New public API: {'yes' if plan.has_new_public_api else 'no'}")
         lines.append(f"Spec update: {'yes' if plan.has_spec_update else 'no'}")
         lines.append(f"Files affected: {len(plan.files_affected)}")
@@ -2535,6 +2603,75 @@ class BuildOrchestrator:
                 task_summary = task_summary[:63] + "..."
             return f"feat: {task_summary}"
 
+    def _create_coder_checkpoint(self) -> Optional[str]:
+        """Snapshot the post-Coder working tree as a recoverable git object.
+
+        Creates a dangling commit (parented on HEAD) capturing tracked changes
+        plus new files in safe dirs, anchored under ``refs/sdk/coder_checkpoint``
+        so gc won't prune it.  Does NOT move HEAD, alter the index, or touch the
+        working tree — it stages into an isolated temp index via GIT_INDEX_FILE.
+
+        On a downstream catastrophe (e.g. a stray ``git checkout``), recover with
+        ``git checkout refs/sdk/coder_checkpoint -- <path>``.  Best-effort: any
+        failure is logged and swallowed so it never blocks the build.
+        """
+        try:
+            env = {**os.environ}
+            # Resolve the real git dir via --git-path so this works in linked
+            # worktrees too (where <root>/.git is a file, not a directory).
+            gp = subprocess.run(
+                ["git", "rev-parse", "--git-path", "sdk_ckpt_index"],
+                cwd=self.project_root, capture_output=True, text=True)
+            tmp_index = gp.stdout.strip() or os.path.join(
+                self.project_root, ".git", "sdk_ckpt_index")
+            if not os.path.isabs(tmp_index):
+                tmp_index = os.path.join(self.project_root, tmp_index)
+            env["GIT_INDEX_FILE"] = tmp_index
+
+            def _git(args, **kw):
+                return subprocess.run(
+                    ["git", *args], cwd=self.project_root, env=env,
+                    capture_output=True, text=True, **kw)
+
+            # Seed isolated index from HEAD, then stage tracked + safe-new files.
+            _git(["read-tree", "HEAD"], check=True)
+            _git(["add", "-u"], check=True)
+            safe_dirs = (
+                "cogwheel/", "docs/", "scripts/", "changelog.d/",
+                ".claude/spec/", ".claude/agent_state/", ".serena/memories/",
+            )
+            others = _git(["ls-files", "--others", "--exclude-standard"])
+            if others.returncode == 0 and others.stdout.strip():
+                for f in others.stdout.strip().splitlines():
+                    if any(f.startswith(d) for d in safe_dirs):
+                        _git(["add", f], check=True)
+
+            tree = _git(["write-tree"], check=True).stdout.strip()
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=self.project_root,
+                capture_output=True, text=True).stdout.strip()
+            ckpt = _git(
+                ["commit-tree", tree, "-p", head, "-m",
+                 "SDK coder checkpoint (recovery point)"],
+                check=True).stdout.strip()
+            subprocess.run(
+                ["git", "update-ref", "refs/sdk/coder_checkpoint", ckpt],
+                cwd=self.project_root, check=True)
+
+            try:
+                os.remove(tmp_index)
+            except OSError:
+                pass
+
+            self._log(
+                f"Coder checkpoint {ckpt[:12]} → refs/sdk/coder_checkpoint "
+                f"(recover: git checkout refs/sdk/coder_checkpoint -- <path>)")
+            return ckpt
+        except Exception as exc:  # never block the build on checkpoint failure
+            self._log(f"WARNING: coder checkpoint failed ({exc}); "
+                      f"continuing without a recovery point")
+            return None
+
     def _git_changed_files(self) -> list[str]:
         """Get files with uncommitted changes."""
         result = subprocess.run(
@@ -2598,7 +2735,7 @@ class BuildOrchestrator:
         # so a completed build doesn't die opaquely at `git commit`.
         self._ensure_spec_doc_fragments(message)
 
-        full_message = message + "\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+        full_message = message + "\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
         subprocess.run(
             ["git", "commit", "-m", full_message],
             cwd=self.project_root, check=True,

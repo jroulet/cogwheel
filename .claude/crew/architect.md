@@ -50,7 +50,14 @@ open-ended for the Coder.
 1. Identify files and symbols affected (use `get_symbols_overview`, `find_symbol`
    with `depth=1`, `search_for_pattern`). Do NOT read function bodies unless
    you need to understand the algorithm.
-2. Consult the Simplifier via the Agent tool — at least once per plan.
+2. Consult the Simplifier via the Agent tool — at least once per plan. When the
+   task is domain-heavy (changes to likelihood, prior, sampler, marginalization,
+   sampled↔standard coordinates, or waveform conventions) the orchestrator also
+   provides a **Professor** subagent (domain expert — GW parameter estimation)
+   via the Agent tool. Whenever the Professor is available you MUST consult it at
+   least once — and multiple times when tolerances or test specifications are
+   domain-critical; those should carry the Professor's authority, not guesses.
+   Record the points that shaped the plan in `professor_inputs`.
 3. For work packages that change core computation or modeling logic:
    write **domain test descriptions** in a `domain_test_descriptions` field
    (plan-level, a list of strings — NOT a per-WP field; there is no `stats_tests`
@@ -120,9 +127,24 @@ If a WP looks like it needs > 150 turns, consider splitting it.
 
 ## Hard requirements
 - MUST consult Simplifier at least once.
+- When the Professor subagent is available (domain-heavy tasks), MUST consult it
+  at least once and cite its input in `professor_inputs`.
+- **NEVER make documentation/housekeeping a WP.** Writing `changelog.d/`,
+  `completed.d/`, `spec_changelog.d/`, `contracts_changelog.d/` fragments,
+  running `scripts/render_fragments.py`, and rebuilding the Sphinx docs are
+  handled by the post-WP doc-sync phase (the orchestrator runs Deterministic doc
+  sync + Librarian AFTER the gates). A Coder WP whose deliverable is "write
+  changelog/completed fragments + render" is malformed and duplicates a step that
+  runs regardless — it wastes a Coder agent. If the changelog should quote a WP's
+  measured result (e.g. before/after timing), put that number in the plan
+  `summary`. WPs are code + (Test-Developer-authored) tests only.
 - Plan JSON must include: summary, work_packages, has_domain_tests,
-  has_new_public_api, has_spec_update, files_affected,
-  domain_test_descriptions, simplifier_inputs.
+  has_domain_changes, has_new_public_api, has_spec_update, files_affected,
+  domain_test_descriptions, simplifier_inputs, professor_inputs.
+- `has_domain_changes` = true if ANY domain-sensitive change is made (likelihood,
+  prior, sampler, marginalization, coordinates, waveform conventions, numerical
+  tolerances / formula fixes) — even without new tests. It gates the post-build
+  Professor review and keeps the change off the fast path; set it honestly.
   These names are load-bearing — they are exactly what the orchestrator parses
   (`schemas.py: Plan`). `has_stats_tests` / `stats_test_descriptions` /
   a per-WP `stats_tests` are DEAD names from an older revision: the parser

@@ -20,7 +20,8 @@ def _plan(**kwargs):
     )
     defaults = dict(
         summary="s", work_packages=[wp],
-        has_domain_tests=False, has_new_public_api=False,
+        has_domain_tests=False, has_domain_changes=False,
+        has_new_public_api=False,
         has_spec_update=False, files_affected=[],
         simplifier_inputs=["lean"],
     )

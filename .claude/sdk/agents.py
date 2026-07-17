@@ -334,6 +334,13 @@ AGENT_MODELS: dict[str, str] = {
 _READ_TOOLS = ["Read", "Glob", "Grep"]
 _EDIT_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
 
+# Editing tools for an agent that must NOT have any shell access.  The Tidier
+# uses this: it is a pure style editor and has no business running git or any
+# other shell command.  (gw 2026-06-16 incident: a Tidier ran
+# `git checkout HEAD -- <file>`, wiping uncommitted Coder work, because it had
+# Bash + Serena execute_shell_command.  A style pass needs neither.)
+_EDIT_TOOLS_NO_SHELL = ["Read", "Glob", "Grep", "Edit", "Write"]
+
 _SERENA_READ = [
     "mcp__serena__read_file",
     "mcp__serena__find_file",
@@ -365,6 +372,13 @@ _SERENA_EDIT = _SERENA_READ + _SERENA_CODE_EDIT + [
     "mcp__serena__execute_shell_command",
 ]
 
+# Serena editing tools WITHOUT shell access (no execute_shell_command).  The
+# Tidier uses this so it cannot run git/shell at all.  Syntax verification is
+# done via the language server (get_diagnostics_for_file) instead of a shell.
+_SERENA_EDIT_NO_SHELL = _SERENA_READ + _SERENA_CODE_EDIT + [
+    "mcp__serena__get_diagnostics_for_file",
+]
+
 AGENT_TOOLS: dict[str, dict[str, list[str]]] = {
     "architect": {
         "serena": _SERENA_READ,
@@ -392,8 +406,8 @@ AGENT_TOOLS: dict[str, dict[str, list[str]]] = {
         "fallback": _EDIT_TOOLS,
     },
     "tidier": {
-        "serena": _SERENA_EDIT,
-        "fallback": _EDIT_TOOLS,
+        "serena": _SERENA_EDIT_NO_SHELL,
+        "fallback": _EDIT_TOOLS_NO_SHELL,
     },
     "test_dev": {
         "serena": _SERENA_EDIT,
@@ -436,8 +450,8 @@ AGENT_PERMISSION_MODES: dict[str, PermissionMode] = {
 
 SKILL_TOOLS: dict[str, dict[str, list[str]]] = {
     "tidier": {
-        "serena": _SERENA_EDIT,
-        "fallback": _EDIT_TOOLS,
+        "serena": _SERENA_EDIT_NO_SHELL,
+        "fallback": _EDIT_TOOLS_NO_SHELL,
     },
     "librarian": {
         "serena": _SERENA_EDIT,

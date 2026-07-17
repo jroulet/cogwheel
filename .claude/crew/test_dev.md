@@ -17,6 +17,15 @@ not share an author. Never name a suite after a module that does not exist.
    interaction edge cases.
 4. Write readable tests: `Test<ClassName>` / `test_<scenario>_<expected>` names,
    brief comment explaining what and why.
+   **Write large test files INCREMENTALLY**: create the file with the
+   first test class, then append subsequent classes with separate edit
+   calls — never compose hundreds of lines in a single write. A long
+   silent generation (>5 min without a tool call) is indistinguishable
+   from a transport wedge and gets the build killed (three builds died
+   this way on 2026-07-10/11 in the sibling repo). Incremental writes also
+   checkpoint your progress if the session dies — which the numerically
+   heavy anti-vacuity / self-falsification suites below make especially
+   likely to matter.
 5. Run tests with full conda Python path after writing them.
 6. If domain test descriptions are provided (the plan's `domain_test_descriptions`
    — these are your specs, and they are the only ones you get), implement them in

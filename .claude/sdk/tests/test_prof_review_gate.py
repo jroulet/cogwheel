@@ -19,11 +19,12 @@ from sdk.schemas import Plan, ProfReviewVerdict
 from sdk.gates import GateFailure
 
 
-def _orchestrator_with_plan(has_domain_tests=True):
+def _orchestrator_with_plan(has_domain_tests=True, has_domain_changes=False):
     o = BuildOrchestrator.__new__(BuildOrchestrator)
     o._log = lambda *a, **k: None
     o.plan = Plan(
         summary="t", work_packages=[], has_domain_tests=has_domain_tests,
+        has_domain_changes=has_domain_changes,
         has_new_public_api=False, has_spec_update=False, files_affected=[],
         domain_test_descriptions=["inverse consistency to 1e-6"],
     )
@@ -67,6 +68,32 @@ class ProfReviewGateTest(unittest.TestCase):
         with self.assertRaises(GateFailure):
             if r.verdict == ProfReviewVerdict.FAIL:
                 raise GateFailure(f"Professor inference review FAILED: {r.summary}")
+
+
+class ReviewGatePredicateTest(unittest.TestCase):
+    """Step-5 fires on `has_domain_changes OR has_domain_tests`.
+
+    Guards the semantics of the gate in ``_run_full_pipeline``: a
+    domain-sensitive change with NO new tests must still trigger the review
+    (the regression that dropping A's ``has_physics_changes`` introduced).
+    """
+
+    @staticmethod
+    def _fires(has_domain_tests, has_domain_changes):
+        plan = _orchestrator_with_plan(
+            has_domain_tests=has_domain_tests,
+            has_domain_changes=has_domain_changes,
+        ).plan
+        return plan.has_domain_changes or plan.has_domain_tests
+
+    def test_fires_on_domain_changes_without_tests(self):
+        self.assertTrue(self._fires(has_domain_tests=False, has_domain_changes=True))
+
+    def test_fires_on_domain_tests_without_changes(self):
+        self.assertTrue(self._fires(has_domain_tests=True, has_domain_changes=False))
+
+    def test_skipped_when_neither(self):
+        self.assertFalse(self._fires(has_domain_tests=False, has_domain_changes=False))
 
 
 if __name__ == "__main__":

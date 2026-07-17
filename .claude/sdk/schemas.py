@@ -98,7 +98,8 @@ class Plan:
     """
     summary: str
     work_packages: list[WorkPackage]
-    has_domain_tests: bool    # TestDev writes new domain-specific tests
+    has_domain_tests: bool    # TestDev writes new domain-specific tests; upgrades to Opus
+    has_domain_changes: bool  # any domain-sensitive change; gates the Professor review
     has_new_public_api: bool
     has_spec_update: bool     # requires SPEC.md + CHANGELOG.md update
     files_affected: list[str]
