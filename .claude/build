@@ -2,14 +2,17 @@
 # Launch the SDK build pipeline.
 # Usage: .claude/build "task description" [--fast] [--plan-only] [-v] [-q]
 #
-# PLACEHOLDER: update ENV_NAME with the project's environment name.
+# Conda env resolves from SDK_CONDA_ENV / .env (copy .env.example), default cogwheel_310.
 
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
-# PLACEHOLDER: update environment resolution for your project.
-# For conda: ENV_NAME="myenv"
-# For venv: source "$REPO_ROOT/.venv/bin/activate"
-ENV_NAME="cogwheel_310"
+# Conda env routing via the durable .env idiom: shell SDK_CONDA_ENV wins,
+# then .env at the repo root, then the default. Copy .env.example to .env
+# to set it per machine.
+if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${SDK_CONDA_ENV:-}" ]]; then
+  SDK_CONDA_ENV="$(grep -E '^SDK_CONDA_ENV=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+fi
+ENV_NAME="${SDK_CONDA_ENV:-cogwheel_310}"
 
 if command -v conda >/dev/null 2>&1; then
     exec conda run --no-capture-output -n "$ENV_NAME" \

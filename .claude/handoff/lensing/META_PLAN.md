@@ -691,6 +691,14 @@ unblocked per the owner's cogwheel-proves-first rule.
 
 ### SERVER HANDOFF — START HERE (2026-07-17, owner-directed renumbering)
 
+ENV SETUP (do this first): the conda env is routed through the durable
+`.env` idiom (mirrors gw_detection_ias). Copy `.env.example` to `.env` at
+the repo root and set `SDK_CONDA_ENV` to the server's env name (the laptop
+uses `cogwheel_310`). Precedence is shell env > `.env` > default
+`cogwheel_310`; `launch_build.sh` and `.claude/build` both source it. This
+replaces the old per-machine `CLAUDE.local.md` conda note — the server's
+`CLAUDE.local.md` env lines should be migrated into its `.env`.
+
 BUILD RENUMBERING (owner): performance FIRST, sampling after.
 - **Build 3 (NEW) = few-millisecond lnlike.** Seed material:
   `.claude/spec/todo.d/engine_hyp1f1-surrogate.md` (two levers: (1) 1F1

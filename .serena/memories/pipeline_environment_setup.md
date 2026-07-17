@@ -7,9 +7,13 @@ without depending on the per-machine `~/.claude/projects/.../memory/` path.
 - MACHINE-NEUTRAL NOTE (2026-07-18): this pipeline now runs on more than
   one machine (laptop `/Users/tejaswi/Work/cogwheel-claude-dev`, IAS server
   `/home/tejaswi/Work/cogwheel-claude-dev`). Resolve the worktree from cwd
-  and the interpreter as `$(conda info --base)/envs/cogwheel_310/bin/python`
-  (or `$SDK_CONDA_ENV` if set) — do NOT hard-code either machine's absolute
-  paths. Machine-specific detail belongs in that machine's CLAUDE.local.md.
+  and the interpreter as `$(conda info --base)/envs/$SDK_CONDA_ENV/bin/python`
+  — do NOT hard-code either machine's absolute paths. The conda env name is
+  routed through the durable `.env` idiom (mirrors gw_detection_ias): set
+  `SDK_CONDA_ENV` in an untracked `.env` at the repo root (copy the tracked
+  `.env.example`); precedence is shell env > `.env` > default `cogwheel_310`.
+  `.claude/sdk/launch_build.sh` and `.claude/build` source it; the launcher
+  then resolves the env python absolutely and fails loudly if missing.
 - The TejaForce agent build pipeline lives in a git worktree named
   `cogwheel-claude-dev` (sibling of the main repo) on
   branch `claude-dev` — `main` stays clean. The worktree has a scoped

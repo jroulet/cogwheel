@@ -14,7 +14,8 @@
 #
 # Exists because every ad-hoc launch rediscovered the same hook denials
 # (.claude/build blocked as a leading command; leading LOG=... assignment
-# blocked). Override the conda env with SDK_CONDA_ENV if needed.
+# blocked). Override the conda env via SDK_CONDA_ENV or a repo-root .env
+# (copy .env.example to .env); shell env wins, then .env, then cogwheel_310.
 set -u
 
 USAGE="usage: launch_build.sh <task_slug> <prompt_file> [stale_seconds] [--auto]"
@@ -42,6 +43,13 @@ if grep -q "META_PLAN" "$PROMPT"; then
        "context) — inline the distilled facts instead" >&2
 fi
 
+# Conda env routing via the durable .env idiom (mirrors gw_detection_ias):
+# shell SDK_CONDA_ENV wins, then .env at the repo root, then the default —
+# same precedence as python-dotenv's load_dotenv(override=False). Copy
+# .env.example to .env to set it per machine.
+if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${SDK_CONDA_ENV:-}" ]]; then
+  SDK_CONDA_ENV="$(grep -E '^SDK_CONDA_ENV=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+fi
 ENV_NAME="${SDK_CONDA_ENV:-cogwheel_310}"
 
 LOG="/tmp/${SLUG}_$(date +%Y%m%d_%H%M%S).log"

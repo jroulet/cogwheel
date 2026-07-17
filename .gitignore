@@ -28,3 +28,7 @@ __pycache__
 .claude/sync_issues.json
 cogwheel/tests/output/
 CLAUDE.local.md
+
+# Machine-specific environment (SDK_CONDA_ENV etc.); .env.example is tracked
+.env
+.envrc
