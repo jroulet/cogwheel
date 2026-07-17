@@ -4,8 +4,14 @@ Source: Claude Code auto-memory `teja-force-pipeline-setup` (originally written
 2026-06-05; `type: project`), migrated here so SDK agents can access it directly
 without depending on the per-machine `~/.claude/projects/.../memory/` path.
 
-- The TejaForce agent build pipeline lives in a git worktree at
-  `/Users/tejaswi/Work/cogwheel-claude-dev` (sibling of the main repo) on
+- MACHINE-NEUTRAL NOTE (2026-07-18): this pipeline now runs on more than
+  one machine (laptop `/Users/tejaswi/Work/cogwheel-claude-dev`, IAS server
+  `/home/tejaswi/Work/cogwheel-claude-dev`). Resolve the worktree from cwd
+  and the interpreter as `$(conda info --base)/envs/cogwheel_310/bin/python`
+  (or `$SDK_CONDA_ENV` if set) — do NOT hard-code either machine's absolute
+  paths. Machine-specific detail belongs in that machine's CLAUDE.local.md.
+- The TejaForce agent build pipeline lives in a git worktree named
+  `cogwheel-claude-dev` (sibling of the main repo) on
   branch `claude-dev` — `main` stays clean. The worktree has a scoped
   `core.hooksPath=.claude/hooks` and `ALLOWED_BRANCHES=["claude-dev"]` in
   `.claude/sdk/gates.py`; a pre-push guard blocks pushes to main/master.
