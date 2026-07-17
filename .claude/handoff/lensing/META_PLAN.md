@@ -688,3 +688,47 @@ not assume it for XPHM higher modes.
 
 SDK ports now PROVEN on green builds -> task #6 (gw + skill propagation)
 unblocked per the owner's cogwheel-proves-first rule.
+
+### SERVER HANDOFF — START HERE (2026-07-17, owner-directed renumbering)
+
+BUILD RENUMBERING (owner): performance FIRST, sampling after.
+- **Build 3 (NEW) = few-millisecond lnlike.** Seed material:
+  `.claude/spec/todo.d/engine_hyp1f1-surrogate.md` (two levers: (1) 1F1
+  tabulation/surrogate, DD ladder as oracle + refusal; (2) coarse kernel
+  node grid via h_L = F*h_UL — F is smoother than h_UL, decouple from the
+  253 waveform bins). Measured split at HEAD: engine 19.36 s (99.3%),
+  contraction 0.142 s, ratio 1 ms; after both levers the contraction is
+  the next target. Acceptance: few-ms lnlike at UNCHANGED accuracy gates
+  (crown RB-vs-brute, closed-form macro gate, certification battery),
+  surrogate-vs-oracle error explicitly gated (F002-safe).
+- **Build 4 = sampled lens coordinates, folding, injection-recovery**
+  (was Build 3). MUST honor the Professor constraints recorded above
+  (d_app = d_L/sqrt(mu_macro), never sample kappa; refusals -> lnL=-inf
+  or positive-parity prior; 22-only phase degeneracy).
+
+DRIVER PROTOCOL for the server session (continue autonomously, as this
+machine's driver did): (1) Read CLAUDE.md fully — especially "SDK Build
+Briefs" (shallow briefs: mission/fences/measured-facts/acceptance; NO WP
+decomposition — the Architect owns it; never point agents at META_PLAN;
+two-tier verification: fast in-build gates, heavy sweeps are YOUR
+post-build detached runs). (2) Write the Build 3 brief to
+`.claude/handoff/lensing/build3_brief.md`, launch via
+`.claude/sdk/launch_build.sh lensing_build3 <brief>`, review the plan at
+the approval dir against the brief (depth banner should say <=3 WPs;
+plans must cite Professor inputs unless triage said standard), approve/
+reject with feedback. (3) On completion: run the FULL suite detached
+(minus the 3 XODE-gap modules), then Librarian/Dreamer close. (4) Then
+Build 4 the same way. Escalate to the owner ONLY design-level reds or
+scope changes. (5) SDK notes: bare-denial nudge-retry and the
+double-stall session-resume (4f3af27, not yet exercised live) are
+armed; launch_build.sh resolves the env python absolutely (uv-shim
+fix); pytest-xdist must be pip-installed on the server for parallel
+suite runs; timing tests prefer quiet/serial conditions but passed
+under -n3 load. (6) Meta-lesson not in any tracked file: an audit
+agent's "identical / no issues" is scoped to its mandate — commission
+comparisons as bidirectional enumerations.
+
+State at handoff: Build 1b + Build 2 COMPLETE GREEN (HEAD 4e27ddc +
+Dreamer's consolidation commit on top). Task #6 (gw + teja-force skill
+ports of the SDK hardening) is UNBLOCKED and owner-gated; the ledger of
+port-worthy commits is in this file's earlier sections.
