@@ -737,6 +737,12 @@ agent's "identical / no issues" is scoped to its mandate — commission
 comparisons as bidirectional enumerations.
 
 State at handoff: Build 1b + Build 2 COMPLETE GREEN (HEAD 4e27ddc +
-Dreamer's consolidation commit on top). Task #6 (gw + teja-force skill
-ports of the SDK hardening) is UNBLOCKED and owner-gated; the ledger of
+Dreamer's consolidation commit on top).
+
+PORTS GATING (owner, 2026-07-18): the gw + teja-force skill ports of the
+SDK hardening are gated on SUCCESSFUL BUILDS ON THE IAS SERVER — the
+hardening must prove itself cross-machine first. The server session's
+job is to EXECUTE Builds 3/4 and thereby generate that evidence; it must
+NOT port anything to gw or the skill. The ports will be done on the
+laptop by its driver when the owner gives the word. The ledger of
 port-worthy commits is in this file's earlier sections.
