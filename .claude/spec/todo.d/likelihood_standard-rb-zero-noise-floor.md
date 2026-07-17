@@ -20,6 +20,17 @@ candidate/fiducial ratio should be exactly 1) rather than "symmetrizing"
 the construction (measured in probe8: forcing the stall onto the
 candidate explodes the floor to ~127 — the asymmetry is intentional).
 
+Mechanism (owner, 2026-07-17): the ratio is r = h/h_0 where ONLY h_0
+carries the stall-ringdown — so even at exactly fiducial parameters and
+zero noise, r != 1 in the ringdown band and the per-bin LINEAR ratio
+model must track real structure; its residual binning error IS the
+8.96e-3 floor. If reference and candidate were constructed alike, r
+would be identically 1 there and the floor would vanish — the stall buys
+a smooth interpolable reference at the cost of a nontrivial fiducial
+ratio. Fix directions to weigh: apply the stall consistently in ratio
+space (so it cancels), or confine the stall to the interpolation grid
+while ratioing against the unstalled reference.
+
 Acceptance: standard-RB zero-noise self-floor driven to <=1e-4 (or the
 mechanism documented in FINDINGS with a physical bound if irreducible);
 the lensing suite's regression pin (1.164e-2 decomposed) then tightens
