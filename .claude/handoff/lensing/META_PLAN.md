@@ -664,3 +664,27 @@ crown cause); (6) FINDINGS: F006 mechanism superseded (new finding: switch
 bug). OUT: sparse global nodes (optimization only), persistent-image split
 alignment (benign), small-w short-circuit + strong-shear MAX_ORDER (engine
 tickets). Driver writing build2c brief; pipeline launch next.
+
+
+### BUILD 2 COMPLETE (2026-07-17 ~18:20) — GREEN
+
+Suite 187/187 at ORIGINAL tolerances (185 parallel + 2 xdist-serialization
+artifacts re-run serially green, 52 min at -n3). Inspector PASS (trivial
+finding fixed, 398a57a). Professor review PASS (F009 physics ratified;
+fast gates independently re-run green). lnlike measured ~20 s/eval (~8x
+brute; sparse-global-nodes optimization deferred to Build 3 for
+sampling-ready speed). Story: F008 switch fix closed near-cusp/two-image;
+F009 certified the w->0 macro limit (misdiagnosis falsified by the
+Architect's closed form, gated at 7.85e-9); zero-noise anchor decomposed
+(8.962e-3 inherited standard-RB floor -> upstream todo; 2.676e-3 lensing
+increment gated 5e-3).
+
+BUILD 3 MUST HONOR (Professor review notes, 2026-07-17): (1) sample
+d_app = d_L/sqrt(mu_macro), NEVER kappa (mass-sheet degeneracy); (2)
+bound priors to positive parity or map LensDomainError/CancellationError
+to lnL=-inf (no unswallowed exceptions under sampler proposals); (3) the
+constant-lens-phase ~ orbital-phase degeneracy is 22-only — folding must
+not assume it for XPHM higher modes.
+
+SDK ports now PROVEN on green builds -> task #6 (gw + skill propagation)
+unblocked per the owner's cogwheel-proves-first rule.
