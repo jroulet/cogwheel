@@ -7,6 +7,7 @@ prompts.  Now they're if/else in Python.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -185,6 +186,33 @@ def check_commit_allowed(
 
 # ── User approval gate ──────────────────────────────────────────────────────
 
+_WP_HEADER_RE = re.compile(r"^#{2,3} WP\d+", re.MULTILINE)
+
+# Bare-denial rate grows with transcript depth (0/106 in the first two tool
+# calls, median at call 14; claude-code #74351, no upstream fix). Wide plans
+# fan the whole context out to every coder, so depth is gated here.
+MAX_WPS_BEFORE_WARNING = 3
+
+
+def plan_depth_banner(plan_summary: str) -> str:
+    """One-line depth report for the approval banner.
+
+    Flags plans whose WP fan-out exceeds ``MAX_WPS_BEFORE_WARNING`` so the
+    reviewer must consciously accept the transcript-depth risk (see
+    CLAUDE.md, "SDK Build Briefs").
+    """
+    n_wps = len(_WP_HEADER_RE.findall(plan_summary))
+    size_kb = len(plan_summary.encode()) / 1024
+    line = f"Depth: {n_wps} WP(s), plan {size_kb:.1f} KB."
+    if n_wps > MAX_WPS_BEFORE_WARNING:
+        line += (
+            f" WARNING: >{MAX_WPS_BEFORE_WARNING} WPs — transcript-depth"
+            " risk (bare-denial rate grows with depth). Prefer splitting"
+            " into sequential builds; approve only if the width is truly"
+            " irreducible."
+        )
+    return line
+
 
 def prompt_user_approval(
     plan_summary: str,
@@ -205,6 +233,7 @@ def prompt_user_approval(
     print("=" * 70)
     print(plan_summary)
     print("=" * 70)
+    print(plan_depth_banner(plan_summary))
 
     if auto_approve:
         print("\n[--yes] Plan auto-approved.")

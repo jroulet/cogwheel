@@ -30,6 +30,18 @@ if [[ ! -f "$PROMPT" ]]; then
   exit 1
 fi
 
+# Depth guards (CLAUDE.md "SDK Build Briefs"): non-fatal warnings only —
+# bare-denial rate grows with transcript depth (claude-code #74351).
+PROMPT_KB=$(( $(wc -c < "$PROMPT") / 1024 ))
+if (( PROMPT_KB > 12 )); then
+  echo "WARNING: brief is ${PROMPT_KB} KB (>12 KB) — transcript-depth risk;" \
+       "trim to mission/fences/facts/acceptance (CLAUDE.md 'SDK Build Briefs')" >&2
+fi
+if grep -q "META_PLAN" "$PROMPT"; then
+  echo "WARNING: brief references META_PLAN (driver journal, not agent" \
+       "context) — inline the distilled facts instead" >&2
+fi
+
 ENV_NAME="${SDK_CONDA_ENV:-cogwheel_310}"
 
 LOG="/tmp/${SLUG}_$(date +%Y%m%d_%H%M%S).log"
