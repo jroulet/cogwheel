@@ -31,11 +31,19 @@ ratio.
 
 HARD CONSTRAINT (owner, 2026-07-17): the stall-ringdown is NOT to be
 removed or weakened — it is load-bearing (smooth interpolable
-reference). The fix must make its effect CANCEL, i.e. arrange the
-algebra so the stalled reference appears consistently on both sides of
-the ratio/summary contraction (r == 1 at fiducial by construction),
-while the stall itself stays exactly as designed. Any plan that deletes
-or bypasses the stall is out of bounds.
+reference). Any plan that deletes or bypasses the stall is out of
+bounds.
+
+THE REQUIREMENT (owner, 2026-07-17): likelihood accuracy, nothing else.
+r != 1 at fiducial is acceptable — the stall exists to make r SMOOTH,
+not trivial — as long as the per-bin model captures it to the lnL
+tolerance. The 8.96e-3 zero-noise ΔlnL says the current bins/linear
+model capture it imperfectly. Candidate levers (engineering choice for
+the build, not prescribed here): finer/adaptive binning through the
+ringdown band, a higher-order in-bin ratio model there, or arranging
+the stalled reference to cancel through the contraction. Judge any of
+them purely by the measured zero-noise ΔlnL and the standard accuracy
+gates.
 
 Acceptance: standard-RB zero-noise self-floor driven to <=1e-4 (or the
 mechanism documented in FINDINGS with a physical bound if irreducible);
