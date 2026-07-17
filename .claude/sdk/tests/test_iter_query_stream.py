@@ -14,6 +14,7 @@ Run: conda run -n cogwheel_310 python -m unittest \
 import asyncio
 import os
 import sys
+import types
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -144,6 +145,91 @@ class IterQueryStreamTest(unittest.TestCase):
                 gen(), "t", timeout=5)]
 
         self.assertEqual(asyncio.run(main()), [1, 2])
+
+
+class RunAgentTimeoutPropagationTest(unittest.TestCase):
+    """`_run_agent` must forward `inter_message_timeout_override` to
+    `_iter_query_with_timeout` on EVERY leg — the main stream and the
+    generic MCP-failure retry leg — so a heavy phase (prof_review's pytest
+    run, override=1800) never false-wedges at the global 300s ceiling on a
+    retry. Guards the retry-leg propagation fix.
+    """
+
+    def setUp(self):
+        self._saved_query = orchestrator_module.query
+        self._saved_build = orchestrator_module.build_agent_options
+
+    def tearDown(self):
+        orchestrator_module.query = self._saved_query
+        orchestrator_module.build_agent_options = self._saved_build
+
+    def _make_orch(self):
+        o = _orch()
+        o.verbosity = orchestrator_module.Verbosity.QUIET
+        o.use_serena = True          # so the generic retry leg is reachable
+        o.project_root = "/tmp"
+        o._serena = None
+        o._specs_text = ""
+        o._agent_count = 0
+        o._agents_that_ran = []
+        o._handle_message = lambda *a, **k: ("", None)
+        return o
+
+    def test_override_forwarded_on_main_and_retry_legs(self):
+        seen_timeouts = []
+
+        async def fake_build_opts(**kw):
+            return types.SimpleNamespace(resume=None)
+
+        # query() is only evaluated as an argument to the (spied) iterator.
+        orchestrator_module.query = lambda **kw: None
+        orchestrator_module.build_agent_options = fake_build_opts
+
+        o = self._make_orch()
+
+        async def spy(async_iter, agent_id, timeout=None):
+            seen_timeouts.append(timeout)
+            if len(seen_timeouts) == 1:
+                # Force the main leg to fail so control reaches the generic
+                # MCP-failure retry leg (the one whose propagation regressed).
+                raise ValueError("simulated MCP failure")
+            return
+            yield  # noqa: unreachable — marks this an async generator
+
+        o._iter_query_with_timeout = spy
+
+        async def main():
+            return await o._run_agent(
+                "coder", "do the thing",
+                inter_message_timeout_override=1800,
+            )
+
+        asyncio.run(main())
+        self.assertEqual(seen_timeouts, [1800, 1800])
+
+    def test_default_none_forwarded_when_no_override(self):
+        seen_timeouts = []
+
+        async def fake_build_opts(**kw):
+            return types.SimpleNamespace(resume=None)
+
+        orchestrator_module.query = lambda **kw: None
+        orchestrator_module.build_agent_options = fake_build_opts
+
+        o = self._make_orch()
+
+        async def spy(async_iter, agent_id, timeout=None):
+            seen_timeouts.append(timeout)
+            return
+            yield  # noqa: unreachable — marks this an async generator
+
+        o._iter_query_with_timeout = spy
+
+        async def main():
+            return await o._run_agent("coder", "do the thing")
+
+        asyncio.run(main())
+        self.assertEqual(seen_timeouts, [None])
 
 
 if __name__ == "__main__":
