@@ -57,8 +57,16 @@ else
   APPROVE_ARGS=(--approval-dir "$APPROVAL_DIR")
 fi
 
-conda run --no-capture-output -n "$ENV_NAME" \
-  python "$REPO_ROOT/.claude/sdk/build.py" build "${APPROVE_ARGS[@]}" \
+# Resolve the env's python ABSOLUTELY: `conda run ... python` trusts PATH,
+# and under some shells (serena MCP) a uv shim shadows the env python,
+# yielding ModuleNotFoundError for claude_agent_sdk (build 2d, 2026-07-17).
+PYBIN="$(conda info --base 2>/dev/null)/envs/$ENV_NAME/bin/python"
+if [[ ! -x "$PYBIN" ]]; then
+  echo "ERROR: $PYBIN not found/executable; check SDK_CONDA_ENV" >&2
+  exit 1
+fi
+
+"$PYBIN" "$REPO_ROOT/.claude/sdk/build.py" build "${APPROVE_ARGS[@]}" \
   --log "$LOG" "@$PROMPT" > /dev/null 2>&1 &
 "$REPO_ROOT/.claude/sdk/watchdog.sh" "$LOG" "$STALE" > /dev/null 2>&1 &
 disown -a
