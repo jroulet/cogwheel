@@ -109,12 +109,18 @@ _DEFAULT_PN_PHASE_TOL = 0.02
 
 #: Default number of frequency sub-samples per coarse bin used to reduce
 #: the candidate channel kernels to their per-bin (value, slope)
-#: coefficients.  Reading only the two bin edges (a secant) aliases the
-#: rapid, large-amplitude kernel phase near a caustic and yields a
-#: spuriously large slope; a least-squares fit over several interior
-#: sub-samples is robust there.  Must be >= 2; the value 2 reproduces
-#: the plain edge secant.
-_DEFAULT_KERNEL_SUBSAMPLES = 8
+#: coefficients.  With bounded channel kernels the plain bin-edge secant
+#: (the value 2) is accurate for the gated configurations, so 2 is the
+#: default.  The earlier large-amplitude kernel "blow-up" was not an
+#: edge-secant aliasing failure but the channel-switch neighbourhood bug
+#: in the engine (fixed in the Chang--Refsdal channels; see FINDINGS on
+#: the switch-neighbourhood fix); once the kernels are O(1) the secant no
+#: longer aliases.
+#: A larger value fits a least-squares line over interior sub-samples and
+#: is retained as a robustness margin against pure geometric phase
+#: oscillation near a caustic, not as a correctness requirement.  Must be
+#: >= 2; the value 2 reproduces the plain edge secant.
+_DEFAULT_KERNEL_SUBSAMPLES = 2
 
 #: Lens parameters expected in ``par_dic`` (in addition to the waveform
 #: parameters) to evaluate the amplification decomposition.
@@ -342,10 +348,14 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
     kernel_subsamples : int
         Number of frequency sub-samples per coarse bin used to reduce the
         candidate channel kernels to their per-bin (value, slope)
-        coefficients by least squares.  Must be ``>= 2``; larger values
-        are more robust to rapid kernel variation near a caustic at the
-        cost of more amplification evaluations.  The reference summaries
-        and the mode-then-image contraction are unaffected.
+        coefficients by least squares.  Must be ``>= 2``; the default 2
+        is the plain bin-edge secant, which is accurate once the channel
+        kernels are bounded.  Larger values fit a line over interior
+        sub-samples and are a robustness margin against pure geometric
+        phase oscillation near a caustic (at the cost of more
+        amplification evaluations), not a correctness requirement.  The
+        reference summaries and the mode-then-image contraction are
+        unaffected.
 
     Raises
     ------
@@ -488,13 +498,16 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         The candidate channel kernels ``K_a(w)`` are reduced to their
         per-bin ``(value, slope)`` coefficients by fitting a line over
-        ``kernel_subsamples`` frequencies inside each bin, rather than by
-        the two bin edges alone.  Near a caustic the kernels are large
-        and rapidly varying (the engine hands them the full amplification
-        oscillation while the images stay unresolved); an edge-only
-        secant aliases that variation and produces a spuriously large
-        slope, which ``_norm_term`` squares.  A least-squares fit over
-        interior sub-samples is robust there.
+        ``kernel_subsamples`` frequencies inside each bin.  With the
+        default ``kernel_subsamples == 2`` this is the plain bin-edge
+        secant; larger values add interior sub-samples.  Once the channel
+        kernels are bounded (the near-caustic ``K_a`` "blow-up" was the
+        engine's channel-switch neighbourhood bug, since fixed in the
+        Chang--Refsdal channels, not an edge-secant aliasing failure) the
+        secant is accurate for the gated configurations, so the extra
+        interior sub-samples are a robustness margin against pure
+        geometric phase oscillation near a caustic, not a correctness
+        requirement.
 
         Only the candidate kernel coefficients are affected: the
         reference frequency-moment summaries and the mode-then-image
@@ -585,10 +598,12 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         sub-sample grid (``kernel_subsamples`` frequencies per bin) and
         reduces each channel kernel to its best-fit per-bin center value
         and slope by least squares, together with the frequency-
-        independent relative image delays.  This is the hot-path
-        replacement for reading the kernels at the bin edges only; it is
-        robust to the rapid kernel variation near a caustic that an
-        edge-only secant aliases.
+        independent relative image delays.  With the default
+        ``kernel_subsamples == 2`` this is the plain bin-edge secant,
+        which is accurate now that the channel kernels are bounded;
+        interior sub-samples are a robustness margin against pure
+        geometric phase oscillation near a caustic, not a correctness
+        requirement.
 
         Parameters
         ----------
@@ -683,10 +698,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         r0, r1, dt_linearfree = self._candidate_bin_ratios(par_dic)
         rho0, rho1 = r0.conj(), r1.conj()
 
-        # Sub-sample the candidate kernels inside each bin and reduce them
-        # to (value, slope) by least squares.  An edge-only secant aliases
-        # the rapid kernel variation near a caustic and blows up the slope
-        # that ``_norm_term`` squares; the fit is robust there.
+        # Reduce the candidate kernels inside each bin to (value, slope).
+        # At the default kernel_subsamples == 2 this is the plain bin-edge
+        # secant, which is accurate now that the channel kernels are
+        # bounded; interior sub-samples are only a robustness margin.
         delays, k0, k1, _ = self._amplification_coefficients(par_dic)
         self._check_candidate_delays(delays)
         kbar0, kbar1 = k0.conj(), k1.conj()

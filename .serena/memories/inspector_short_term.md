@@ -1,78 +1,80 @@
 # Inspector Short-Term Observations
 
-## Review 2026-07-17 (2nd pass, full access) — Lensing Build 2b crown gate
+## Review 2026-07-17 — Lensing Build 2c (switch-neighbourhood fix) — RE-REVIEW after test amendments
 
 Worktree: /Users/tejaswi/Work/cogwheel-claude-dev (branch claude-dev).
-First pass this date was blocked (Bash false-denial + serena timeout). After
-the owner-confirmed one-retry on the bare denial signature, `git diff
---no-index` and serena read_file/write recovered, so the crown-gate files WERE
-fully read this pass. pytest could NOT be run (execute_shell_command denied
-twice) — numerical green is UNVERIFIED, but full static review found no
-correctness defects.
+Reviewed uncommitted working tree. Several git reads hit the transient
+false-denial signature; per owner confirmation re-issued the WP3 diff ONCE and
+it succeeded, so WP3 is now directly verified. pytest NOT run this session
+(runtime green still UNVERIFIED), but every blocking finding is statically
+resolved.
 
-### Verdict: ISSUES (one TRIVIAL finding only). 3 prior findings RESOLVED.
+### Verdict: PASS. INS-4-001 and INS-4-002 both RESOLVED.
 
-### RESOLVED
-- INS-2-001 → GeometricOpticsSlopeTestCase SLOPE_W capped linspace(12,27,84),
-  L=0.9w <= 24.3, no longer errors in the refusing band.
-- INS-2-002 → ContractionCertificationTestCase asserts certify-XOR-refuse over
-  L in [24,48] vs independent mpmath oracle; SelfFalsification
-  test_certification_band_gate_can_go_red (1% perturb breaches RTOL_GATE).
-- INS-2-003 / INS-3-001 → test_lensing_likelihood.py now EXISTS and is a
-  thorough, correct crown gate (528 lines). Fully reviewed this pass.
+### WP1 (channels.py) — CORRECT
+- `_channel_switch` neighbour set = `np.delete(np.arange(_N_CHANNELS), channel)`
+  (min over ALL cluster labels incl. parked virtual). Docstring rewritten to
+  Eq.(delay-separation). No-op when all 4 labels real (old/new neighbour sets
+  identical) -> 4-image regions bit-unchanged.
+- `_min_delay_separation` kept REAL-only with justified docstring (branch gate
+  runs stationary phase over real saddles only). Correct.
 
-### likelihood.py (813 lines) — full read, algebra verified correct
-- Near-cusp fix (F006): `_amplification_coefficients` evaluates
-  ChangRefsdalChannels on a dense per-bin grid (kernel_subsamples=8 interior
-  midpoints, symmetric about f_center → LS intercept=mean=value@center,
-  slope=<offset,K>/sum(offset^2)). reshape(n_bins,n_sub,n_ch) matches the
-  C-order flatten of dense_f. Only kernel k0/k1 VALUES change; contraction
-  structure unchanged. Correct.
-- `_norm_term` verified by hand: m_s = sum_p mu_p B^(p+s), final =
-  sum_{ac} phase * sum_s nu_s m_s = sum_{ac} phase sum_{p,s} mu_p nu_s B^(p+s),
-  truncated consistently at p+s<=3 (B has moments 0..3). mu = mode-ratio poly
-  (deg2), nu = image poly incl. delay-phase linear expansion (deg3). The
-  dropped p+s>=4 terms are the documented cubic in-bin truncation, gated by
-  the bin-density criterion + RB-vs-brute tolerance. Correct.
-- `_data_term` coeff_k0/k1 with -2πi*tau in-bin delay expansion: consistent.
-- Refusal symmetry: both `_amplification_coefficients` (RB) and
-  `lnlike_bruteforce` (via LensedWaveformGenerator.amplification) let
-  geometry.LensDomainError / operator.CancellationError propagate unswallowed.
-  Note: refusal is grid-point-wise identical only if the same w is sampled;
-  RB samples dense sub-grid, brute samples full FFT grid — configs are chosen
-  deep in the wave branch to avoid the refusal band, tested by
-  MacroSaddleRejectionTestCase (both paths raise LensDomainError).
+### WP2 (likelihood.py) — CORRECT
+- `_DEFAULT_KERNEL_SUBSAMPLES = 2`; all 4 docstrings reframed (secant accurate
+  now kernels bounded; sub-samples = robustness margin). Verified.
 
-### test_lensing_likelihood.py — crown gate, well-designed
-- BruteForceAgreement over 2/4-image, near-cusp, kappa, rotated-shear,
-  waveform-offset, near-fold. NearCuspRegressionPin + kernel_subsamples=2
-  edge-secant canary (SECANT_ALIAS_MIN=1e3) proves the fix load-bearing.
-- Determinism: explicit seed=SEED (gaussian_noise uses default_rng(seed)),
-  bit-identical strain + assertEqual repeatability.
-- F→1: loose noisy factor gate (0.1) + TIGHT zero-noise floor (1e-2) that
-  zeroes strain then injects, removing the noise tail. Addresses the brittle
-  0.1-floor nondeterminism from the failing report.
-- Timing reframed per brief: (a) RB faster than brute (SPEEDUP_MIN=3),
-  (b) contraction subdominant to `_amplification_coefficients` (NOT the coarse
-  waveform call — a shared co-cost). Justified in docstring + FINDINGS F007.
+### INS-4-001 RESOLVED — crown suite amended (test_lensing_likelihood.py)
+- Canary re-based: `test_edge_secant_canary_reproduces_aliasing_pathology` ->
+  `test_real_only_switch_variant_blows_up_kernels`. New module-level helper
+  `_real_only_channel_switch(w,delays,real_mask)` independently re-implements
+  the BUGGY real-only rule (NOT imported from module-under-test -> non-circular,
+  satisfies F002). Test monkeypatches `channels._channel_switch` via
+  `mock.patch.object` and asserts on kernel magnitudes from
+  `_amplification_coefficients` (returns delays,k0,k1,partition — verified):
+    max_k_bug >= 1e3*|F|; max_k_prod < 1e3*|F|; max_k_bug >= 1e3*max_k_prod.
+  |F| = max|partition.exact_total| (switch-INDEPENDENT, computed separately at
+  channels.py:661 vs switch at :658). Brief table (buggy 5.22e5, prod 0.975,
+  |F|~3): all three asserts pass. Non-vacuous, pins WP1 load-bearing.
+  SECANT_ALIAS_MIN -> SWITCH_PATHOLOGY_FACTOR=1e3. `cls.like_secant` REMOVED.
+- Monkeypatch validity: engine `evaluate` calls bare global `_channel_switch`
+  (channels.py:658) -> patching module attr takes effect. Helper uses
+  channels.smootherstep/RHO_START/RHO_END/_N_CHANNELS — all module-level
+  (imported l.65-67, _N_CHANNELS=4 l.73).
+- Zero-noise NaN fix (NormalizationFloorZeroNoiseTestCase): construction wrapped
+  in warnings/errstate-ignore, then `cls.zero_like.asd_drift = np.ones(n_det)`.
+  VERIFIED sound: relative_binning.py:631-632 — asd_drift NOT baked into
+  summaries; applied at eval (l.500, weight identities /asd_drift^2). Plain
+  attribute. Reassignment overrides NaN for lnlike_fft/lnlike/lnlike_bruteforce
+  consistently. ZERO_NOISE_TOL=1e-2 unchanged.
 
-### FINDINGS F007 — present, spec↔code consistency verified
-Documents (1) timing-gate mis-spec, (2) F→1 floor = template-construction
-asymmetry (~1e-3), and corrects F006's overstated "exact to 1e-8". Verified vs
-code: `_set_summary` forces precession on + `_stall_ringdown` for `_h0_edges`;
-`_candidate_bin_ratios` does neither → the ratio != 1 in ringdown. Accurate.
+### INS-4-002 RESOLVED — stale docstrings fixed
+- NearCuspRegressionPin class docstring no longer says "default 8"; rewritten to
+  switch mechanism (F008 supersedes F006). test_production_lnlike... docstring
+  "(kernel_subsamples=8)" -> "at the near-cusp config". Serena scan: no residual
+  subsamples=8/default 8/SECANT_ALIAS/like_secant/kernel_subsamples=2 refs. Only
+  2 F006 mentions remain — both intentional "F008 supersedes F006" notes.
 
-### OPEN findings this pass
-- INS-3-002 (TRIVIAL): `_amplification_at_bins` in likelihood.py is dead code
-  — not called in the hot path, lnlike_bruteforce, or the test suite. The
-  module docstring + FINDINGS F006 claim it's "retained (the ratio path and the
-  timing test still use them)", but the ratio path uses
-  `_edge_linear_coefficients` and the timing test uses
-  `_amplification_coefficients`. Remove the method or correct the claim.
+### WP3 (spec/FINDINGS/changelog) — DIRECTLY VERIFIED this session. F006 header
+marked SUPERSEDED-by-F008, history kept + accurate right/wrong account
+(dense-sample null result correct; edge-secant slope-squaring sign-disproven:
+squaring real slope only ADDS to (h|h), cannot give the negative-huge
+excursion). F008 added: real cause (real-only _channel_switch vs Eq.
+delay-separation), measured table matches brief+code, _min_delay_separation
+sibling audit (correctly NOT fixed, justified), F005/F007 cross-refs unaffected.
+SPEC.md 0.2.1 -> 0.2.2; SPEC_CHANGELOG + CHANGELOG rendered/accurate. No
+spec-code divergence. CORRECT. Minor non-blocking (pre-existing render_fragments
+convention, NOT a finding): SPEC.md last_updated stays 2026-06-05, SPEC_CHANGELOG
+entry empty () date — same shape as the 0.2.1 entry.
 
-### Carried forward (unchanged, not this build's scope)
-- mpmath undeclared test dependency (F003).
-- pytest not runnable in Inspector sessions (shell denial) → numerical green of
-  both suites remains UNVERIFIED; re-run in a shell-capable session:
+### Not deep-reviewed (Test Dev domain, out of WP scope)
+- test_lensing_waveform.py amendments #4 (macro-saddle certified-band control +
+  CancellationError companion) and #6 (small-mass floor restricted to w>=1e-3,
+  ticket ref). Prior memory notes these handled by test_dev; not re-audited.
+
+### Carried forward (non-blocking)
+- pytest ungated re-run STILL OWED from WORKTREE root:
   `python -m pytest cogwheel/tests/test_lensing_likelihood.py
-  cogwheel/tests/test_lensing_operator.py`.
+  cogwheel/tests/test_lensing_waveform.py cogwheel/tests/test_lensing_operator.py`
+  Confirm crown suite green at RB_ATOL=1.5 (no tolerance widening). Static
+  analysis strongly predicts green.
+- mpmath undeclared test dependency (F003).

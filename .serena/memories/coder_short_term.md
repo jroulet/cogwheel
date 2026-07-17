@@ -1,5 +1,116 @@
 # Coder Short-Term Observations
 
+- FIX INS-4-001 (build2c crown-suite amendments; TEST-FILE authoring done by
+  Coder under re-dispatch — handoff-to-TestDev not honored; FLAGGED for
+  mandatory Inspector review of mutation/oracle independence since I also wrote
+  WP1/WP2 source). File: cogwheel/tests/test_lensing_likelihood.py. TWO
+  amendments. (A2) Re-based near-cusp canary onto the REAL cause: removed the
+  now-void edge-secant canary + like_secant fixture (WP2 made nsub=2 the default
+  so like_secant==like; nsub=2 no longer pathological, +0.316 PASS). New
+  test_real_only_switch_variant_blows_up_kernels monkeypatches
+  channels._channel_switch (module-global that ChangRefsdalChannels.evaluate
+  calls) to a mutation-reimplemented buggy real-only variant
+  (_real_only_channel_switch helper: others=real_ids[real_ids!=channel], guarded
+  others.size==0), then compares max|k0| from like._amplification_coefficients
+  (returns delays,k0,k1,partition) buggy-vs-production; |F| = max|
+  partition.exact_total| (switch-INDEPENDENT per F008). Asserts buggy
+  max|K|>=1e3*|F| AND production max|K|<1e3*|F| AND buggy>=1e3*production
+  (SWITCH_PATHOLOGY_FACTOR=1e3 replaces SECANT_ALIAS_MIN). Measured margins huge:
+  prod 0.975/|F|~3, buggy 5.22e5. Kept test_production_lnlike_pins_bruteforce.
+  (A3) Zero-noise floor NaN: NormalizationFloorZeroNoiseTestCase.setUpClass —
+  noiseless data makes compute_asd_drift's _safe_std take std of empty array
+  ("Degrees of freedom<=0" RuntimeWarning -> NaN, not an exception, construction
+  completes). Wrapped construction in warnings.catch_warnings()+np.errstate(all
+  ='ignore') and pinned cls.zero_like.asd_drift=np.ones(n_det) AFTER construction
+  — VALID because moment summaries (_a_moments/_b_moments/_h0_edges) are
+  asd_drift-INDEPENDENT (applied only at lnlike via **-2), and ones is applied
+  identically to lnlike_fft/lnlike/lnlike_bruteforce so the F->1 floor stays
+  exact. ZERO_NOISE_TOL=1e-2 UNCHANGED; no tolerance widened anywhere. Imports:
+  added warnings, unittest.mock, channels. Static: 0 lines>79; ast.parse OK
+  (bare-signature shell denial cleared on the owner-permitted re-issue).
+  UNVERIFIED: runtime green-ness of the crown suite — did NOT run pytest (I
+  authored the WP1/WP2 source these tests bless; self-greenlighting is the
+  circularity to avoid). Handed to Inspector to run
+  `pytest cogwheel/tests/test_lensing_likelihood.py` at RB_ATOL=1.5 and to review
+  oracle/mutation independence of the Coder-authored canary.
+
+- WP3 build2c (docs/spec only, NO source/test): FINDINGS F006 marked
+  SUPERSEDED-by-F008 (history preserved; added a blockquote banner stating what
+  it got RIGHT — dense subsampling nsub 2->8 changed physics <1e-4 => defect
+  lies ELSEWHERE than contraction/moments/normalization — and WRONG — edge-secant
+  slope-squaring is SIGN-DISPROVEN: norm went NEGATIVE-huge / RB-brute=+6.43e8,
+  and squaring a real slope k1 can only ADD to (h|h)). Added F008 recording the
+  real cause: _channel_switch real-only neighbour set vs paper Eq.(delay-
+  separation) (min over FULL cluster incl parked virtual labels); measured table
+  (two-image bug 40.9/+9.768 FAIL -> fixed 0.922/+0.080 PASS; near-cusp
+  5.22e5/+6.43e8 FAIL -> 0.975/+0.329 PASS; nsub=2 under fix +0.069/+0.316;
+  recon 2.5e-10->5e-16; one-directional, no-op where all labels real), sibling
+  _min_delay_separation NOT implicated (geometric branch = real saddles only),
+  F005/F007 cross-ref'd UNAFFECTED. Created changelog.d/2026-07-17_lensing-
+  build2c-switch-fix.md (date frontmatter, ### Fixed:) and .claude/spec/
+  spec_changelog.d/2026-07-17_lensing-build2c-switch-fix.md (bump: patch) — both
+  byte-match existing working-fragment frontmatter (crown-gate / near-cusp).
+  SPEC.md: git diff EMPTY (working tree == HEAD) and pre-loaded copy already has
+  BOTH Build-2 lensing rows -> NO hand-edit needed (switch fix is mechanism-
+  neutral; Simplifier scope honored). No _seed.md in spec_changelog.d, so
+  from_version defaults 0.0.0; my patch fragment sorts last (date 2026-07-17)
+  -> render bumps spec_version 0.2.1 -> 0.2.2, last_updated -> 2026-07-17
+  (writeback, NOT hand-edited). render_fragments.py was shell-refused once (bare
+  "user doesn't want..." signature) then RE-ISSUED per owner confirmation that
+  this exact bare signature is a transient classifier artifact -> SUCCEEDED:
+  CHANGELOG.md updated (## 2026-07-17 / ### Fixed: channel-switch...), SPEC_
+  CHANGELOG.md new top entry `0.2.2 ()`, SPEC.md spec_version 0.2.1 -> 0.2.2.
+  NOTE: last_updated stayed 2026-06-05 (spec fragments omit `date:` by
+  convention, so last_date is empty and writeback skips it — same as the 0.2.1
+  near-cusp fragment; not a regression).
+
+- WP1 build2c (cogwheel/lensing/chang_refsdal/channels.py, switch-neighbourhood
+  fix): `_channel_switch` line `others = real_ids[real_ids != channel]` ->
+  `others = np.delete(np.arange(_N_CHANNELS), channel)` (all cluster labels
+  except self, incl. parked virtual labels), matching paper Eq.
+  (delay-separation) `delta_j = min_{k in C, k!=j} |tau_j-tau_k|` (tex line 567,
+  min over cluster C not real-only). Loop still `for channel in real_ids` (only
+  real channels switch; virtual stay 0 = S_j=0). Dropped the now-dead
+  `others.size` guard (KISS; others always size 3). BIT-IDENTICAL on 4-image
+  (all-real) configs: there real_ids=all 4 so old/new `others` are the same 3
+  indices in the same order -> same separation. Rewrote docstring (removed
+  'nearest real neighbour'; cites Eq. delay-separation + Eq. switch).
+  SIBLING AUDIT `_min_delay_separation` (feeds delta_min for
+  operator.select_branch): NO CODE CHANGE — kept real-only. Justification
+  documented in its docstring: the geometric branch replaces F_op with the
+  stationary-phase sum over REAL images only (virtual labels carry H_j=0, no
+  saddle), so the resolution gate `w*delta_min>=RHO_END` must key on real-image
+  separation; paper defines NO branch-gate separation (uses exact projection
+  throughout, Eq. exact-reconstruction), the criterion is owned by
+  operator.select_branch (operator.py docstring: switch and gate thresholds
+  'must not leak into each other'). Did NOT touch select_branch, gate
+  thresholds, _gauge.py, contractions, moments, bins, refusal thresholds (HARD
+  BOUND). Static verify: 0 lines >79 (Serena ^.{80,}$ multiline=false -> {});
+  np.delete(np.intp index) valid; all names in scope. One Bash grep on the .tex
+  was false-denied ("user doesn't want...") — did NOT retry, used Serena grep +
+  read_file instead. UNVERIFIED: runtime/import/test-suite (Coder does not run
+  blessing suite; crown-gate agreement + canary re-base owned by TestDev/
+  Inspector per build2c brief). WP2 (kernel_subsamples default 8->2) and WP3
+  (FINDINGS F006 supersede + fragments + SPEC) are SEPARATE work packages, not
+  this dispatch.
+
+- WP2 build2c (cogwheel/lensing/likelihood.py): reverted
+  _DEFAULT_KERNEL_SUBSAMPLES 8 -> 2 (line 122). Constructor
+  `kernel_subsamples < 2` ValueError guard and ALL sub-sampling machinery
+  (_build_kernel_subsampling, _kernel_dense_f, _amplification_coefficients,
+  least-squares reduction) left intact. Rewrote 5 docstring/comment sites
+  (module constant ~L109, kernel_subsamples param ~L341, _build_kernel_
+  subsampling ~L486, _amplification_coefficients ~L583, hot-path inline
+  comment ~L699): dense sub-sampling is now a ROBUSTNESS MARGIN against pure
+  geometric phase oscillation near caustics, NOT a correctness requirement;
+  removed the edge-secant-aliasing attribution of the near-cusp blow-up and
+  re-attributed it to the engine channel-switch neighbourhood bug (WP1 fix).
+  Did NOT cite a specific new finding ID (F008 unassigned; WP3 owns FINDINGS)
+  -> referenced "the switch-neighbourhood fix" generically. No change to
+  contraction/moments/bin guard/normalization. UNVERIFIED: numerical safety
+  of nsub=2 default (established downstream by crown-gate suite at original
+  tol per domain tests 1 & 7, NOT this WP); no shell run this session.
+
 - INS-3-001 re-dispatch (docs only): finding was an INSPECTOR-SESSION access
   failure (Bash false-denial + Serena/Read timeouts in their session), NOT a
   code/test defect. My session HAS file access -> statically confirmed crown-gate

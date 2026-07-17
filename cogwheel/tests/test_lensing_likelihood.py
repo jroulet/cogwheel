@@ -39,15 +39,19 @@ check is not circular:
   is the guard.
 
 * A NEAR-CUSP regression PIN with a falsifying canary.  At the near-cusp
-  source the candidate channel kernels vary rapidly across a coarse bin.
-  The production hot path reduces each kernel to a per-bin (value, slope)
-  by a least-squares fit over ``kernel_subsamples`` sub-samples; a plain
-  bin-edge secant (``kernel_subsamples=2``) ALIASES that variation and
-  ``_norm_term`` squares the blown-up slope.  The pin holds ``lnlike`` to
-  ``lnlike_bruteforce`` at the corrected value AND demonstrates, on the
-  SAME event/generator/bins, that the ``kernel_subsamples=2`` path
-  reproduces the pathology (disagreement orders of magnitude larger) --
-  so the sub-sample reduction is load-bearing and the pin is non-vacuous.
+  source a real image's true cluster mate is a virtual label parked at
+  the critical point; the production ``_channel_switch`` measures delay
+  separation over the WHOLE cluster (paper Eq. delay-separation), keeping
+  a still-merged channel in the bounded artificial gauge.  The pre-WP1
+  rule measured it over REAL channels only and handed the channel to the
+  divergent stationary-phase kernel, so the per-bin kernels ``K_a`` blew
+  up and ``_norm_term`` squared them into a spurious ``(h|h)`` (FINDINGS
+  F008, superseding the F006 edge-secant attribution).  The pin holds
+  ``lnlike`` to ``lnlike_bruteforce`` at the corrected value AND
+  demonstrates, on the SAME event/generator/bins, that monkeypatching the
+  switch back to the real-only rule blows ``max|K_a|`` to ``>= 1e3 * |F|``
+  while the production switch stays O(|F|) -- so the WP1 switch fix is
+  load-bearing and the pin is non-vacuous.
 
 * The ``LensedBinningError`` guard is FALSIFIED, not just described: it
   must fire both at construction (bins too coarse for ``delta_t_max``)
@@ -100,12 +104,13 @@ tip over.
 from __future__ import annotations
 
 import time
-from unittest import TestCase, main
+import warnings
+from unittest import TestCase, main, mock
 
 import numpy as np
 
 from cogwheel import data, waveform
-from cogwheel.lensing.chang_refsdal import geometry
+from cogwheel.lensing.chang_refsdal import channels, geometry
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, LensedBinningError,
     _data_term, _norm_term)
@@ -156,12 +161,16 @@ NORM_TOL = 0.1
 #: ``delta-h``; 1e-2 is meaningful (not perched at a failure boundary).
 ZERO_NOISE_TOL = 1e-2
 
-#: Minimum ``|rb_secant - bf|`` the ``kernel_subsamples=2`` edge-secant
-#: canary must exceed at the near-cusp config.  The aliased slope, once
-#: squared by ``_norm_term``, blows the disagreement toward ~1e8; a
-#: threshold of 1e3 is far above both the true binning floor and any
-#: healthy value, so passing it certifies the pathology is reproduced.
-SECANT_ALIAS_MIN = 1e3
+#: Factor by which the pre-WP1 real-only ``_channel_switch`` blows the
+#: per-bin channel kernels ``|K_a|`` above the (switch-independent) total
+#: amplification ``|F|`` at the near-cusp config.  The buggy rule hands a
+#: still-merged channel to the divergent stationary-phase kernel, driving
+#: ``max|K_a|`` to ~5e5 while ``|F| ~ 3`` (measured); the production
+#: full-cluster switch keeps ``max|K_a|`` at O(|F|).  1e3 sits far above
+#: the healthy O(1) ratio and far below the pathological ~1e5, so it both
+#: confirms the blow-up and certifies the production switch stays bounded
+#: -- pinning the WP1 switch fix as load-bearing (FINDINGS F008).
+SWITCH_PATHOLOGY_FACTOR = 1e3
 
 #: Conservative lower bound on the RB speed-up over the full-grid brute
 #: force.  ``lnlike`` touches ``n_bins`` coarse nodes and
@@ -202,6 +211,30 @@ def _make_noisy_event():
         asd_funcs=['asd_H_O3', 'asd_L_O3', 'asd_V_O3'], tgps=0., seed=SEED)
     event_data.inject_signal(_reference_par_dic(), APPROXIMANT)
     return event_data
+
+
+def _real_only_channel_switch(w, delays, real_mask):
+    """
+    The pre-WP1 (buggy) ``_channel_switch``: measure each real channel's
+    delay separation against OTHER REAL channels only, excluding the
+    parked virtual labels that the paper's Eq. (delay-separation) includes.
+
+    This independently re-implements the WRONG rule (a mutation), used
+    ONLY by the near-cusp canary to show the retired neighbourhood blows
+    the channel kernels up where the production full-cluster switch keeps
+    them bounded.  It is deliberately NOT imported from the module under
+    test, so the pin is not circular.
+    """
+    switch = np.zeros((w.shape[0], channels._N_CHANNELS), dtype=float)
+    real_ids = np.flatnonzero(real_mask)
+    for channel in real_ids:
+        others = real_ids[real_ids != channel]
+        if others.size == 0:
+            continue
+        separation = float(np.min(np.abs(delays[channel] - delays[others])))
+        switch[:, channel] = channels.smootherstep(
+            w * separation, channels.RHO_START, channels.RHO_END)
+    return switch
 
 
 class LensedLikelihoodTestCase(TestCase):
@@ -345,38 +378,38 @@ class BruteForceAgreementTestCase(LensedLikelihoodTestCase):
 
 class NearCuspRegressionPinTestCase(LensedLikelihoodTestCase):
     """
-    Pin the F006 near-cusp fix and prove it is non-vacuous.
+    Pin the near-cusp correctness fix and prove it is load-bearing.
 
-    At the near-cusp source ``y = (-0.38, 0)`` the candidate channel
-    kernels vary rapidly within a coarse bin.  The production hot path
-    reduces each kernel to a per-bin (value, slope) by least squares over
-    ``kernel_subsamples`` (default 8) sub-samples; a plain bin-edge secant
-    (``kernel_subsamples=2``) aliases that variation and ``_norm_term``
-    squares the blown-up slope.  This test:
+    At the near-cusp source ``y = (-0.38, 0)`` a real image's true
+    cluster mate is a virtual label parked at the critical point.  The
+    production ``_channel_switch`` measures each channel's delay
+    separation over the WHOLE cluster (real AND parked virtual labels,
+    paper Eq. delay-separation), keeping a still-merged channel in the
+    bounded artificial gauge.  The pre-WP1 rule measured it over REAL
+    channels only, spuriously ramped the switch to one, and handed the
+    channel to the divergent stationary-phase kernel -- flooding every
+    per-bin channel kernel ``K_a``, which ``_norm_term`` then squares into
+    a spurious ``(h|h)`` (historically ~6.4e8; FINDINGS F008 supersedes
+    the earlier F006 edge-secant attribution).  This test:
 
     (a) pins the CORRECTED value: the production ``lnlike`` agrees with
         the exact ``lnlike_bruteforce`` within tolerance (and within 1
         nat absolutely), and
     (b) demonstrates the mechanism with a falsifying canary on the SAME
-        event/generator/bins: the ``kernel_subsamples=2`` likelihood's
-        disagreement with brute force is orders of magnitude larger.
+        event / generator / bins: monkeypatching the engine's
+        module-global ``_channel_switch`` back to the buggy real-only rule
+        blows the per-bin kernels ``max|K_a|`` to
+        ``>= SWITCH_PATHOLOGY_FACTOR * |F|`` while the production switch
+        keeps them O(|F|) -- so the WP1 switch fix, not a benign bin grid,
+        is what makes the pin hold.
     """
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        # Same event / generator / bins, but the retired plain edge secant
-        # (kernel_subsamples=2) instead of the production sub-sample fit.
-        cls.like_secant = LensedRelativeBinningLikelihood(
-            cls.event_data, cls.waveform_generator, cls.par_dic_0,
-            delta_t_max=DELTA_T_MAX, fbin=cls.fbin, kernel_subsamples=2)
 
     def _near_cusp_candidate(self):
         _, y1, y2, gamma, beta, kappa = _NEAR_CUSP
         return self._candidate(self._lens_dic(y1, y2, gamma, beta, kappa))
 
     def test_production_lnlike_pins_bruteforce_at_near_cusp(self):
-        """Production ``lnlike`` (kernel_subsamples=8) matches brute force."""
+        """Production ``lnlike`` matches brute force at the near-cusp config."""
         cand = self._near_cusp_candidate()
         rb = self.like.lnlike(cand)
         bf = self.like.lnlike_bruteforce(cand)
@@ -391,26 +424,54 @@ class NearCuspRegressionPinTestCase(LensedLikelihoodTestCase):
         self.assertLess(
             abs(rb - bf), 1.0,
             f'near-cusp: production lnl off brute force by '
-            f'{abs(rb - bf):.4g} nat (>1); the F006 fix regressed')
+            f'{abs(rb - bf):.4g} nat (>1); the near-cusp switch fix regressed')
 
-    def test_edge_secant_canary_reproduces_aliasing_pathology(self):
+    def test_real_only_switch_variant_blows_up_kernels(self):
         """
-        The ``kernel_subsamples=2`` edge secant blows up at the same config,
-        confirming the sub-sample least-squares reduction is load-bearing
-        (the pin above is non-vacuous, not a coincidence of a benign bin
-        grid).
+        The pre-WP1 real-only ``_channel_switch`` blows the per-bin channel
+        kernels up at the near-cusp config, while the production
+        full-cluster switch keeps them bounded -- on the SAME event /
+        generator / bins, so the near-cusp pin above is demonstrably
+        load-bearing on the WP1 switch fix, not a coincidence of a benign
+        bin grid.
         """
         cand = self._near_cusp_candidate()
-        bf = self.like.lnlike_bruteforce(cand)
-        rb_secant = self.like_secant.lnlike(cand)
+
+        # Production full-cluster switch: bounded kernels.  ``exact_total``
+        # is the switch-INDEPENDENT total amplification |F| (the brute-force
+        # oracle rides it), so it is the natural O(1) scale to compare to.
+        _, k0_prod, _, part = self.like._amplification_coefficients(cand)
+        max_k_prod = float(np.max(np.abs(k0_prod)))
+        f_scale = float(np.max(np.abs(part.exact_total)))
+
+        # Buggy real-only switch on the SAME inputs: unbounded kernels.
+        # Patch the engine's module-global switch that ``evaluate`` calls.
+        with mock.patch.object(channels, '_channel_switch',
+                               _real_only_channel_switch):
+            _, k0_bug, _, _ = self.like._amplification_coefficients(cand)
+        max_k_bug = float(np.max(np.abs(k0_bug)))
+
         self.n_checks += 1
-        self.assertTrue(np.isfinite(bf), f'near-cusp: non-finite bf={bf}')
-        self.assertGreater(
-            abs(rb_secant - bf), SECANT_ALIAS_MIN,
-            f'edge-secant lnl {rb_secant:.6g} is within '
-            f'{abs(rb_secant - bf):.4g} of brute force {bf:.6g}; the '
-            'aliasing pathology did not reproduce, so the near-cusp pin '
-            'is not demonstrably load-bearing')
+        self.assertGreater(f_scale, 0.0,
+                           f'near-cusp |F| should be positive, got {f_scale}')
+        # The buggy real-only switch drives the kernels far above |F| ...
+        self.assertGreaterEqual(
+            max_k_bug, SWITCH_PATHOLOGY_FACTOR * f_scale,
+            f'real-only switch max|K|={max_k_bug:.4g} did not blow up to '
+            f'>= {SWITCH_PATHOLOGY_FACTOR:g} * |F|={f_scale:.4g}; the WP1 '
+            'full-cluster switch fix is not demonstrably load-bearing')
+        # ... while the production full-cluster switch keeps them O(|F|) ...
+        self.assertLess(
+            max_k_prod, SWITCH_PATHOLOGY_FACTOR * f_scale,
+            f'production switch max|K|={max_k_prod:.4g} is not bounded '
+            f'below {SWITCH_PATHOLOGY_FACTOR:g} * |F|={f_scale:.4g}; the '
+            'production kernels are not O(|F|)')
+        # ... i.e. the switch fix changes the kernel scale by >= 1e3x.
+        self.assertGreaterEqual(
+            max_k_bug, SWITCH_PATHOLOGY_FACTOR * max_k_prod,
+            f'real-only switch max|K|={max_k_bug:.4g} is not >= '
+            f'{SWITCH_PATHOLOGY_FACTOR:g}x the production kernel scale '
+            f'{max_k_prod:.4g}; the fix is not demonstrably load-bearing')
 
 
 class ProductOfSummariesRegressionTestCase(LensedLikelihoodTestCase):
@@ -508,9 +569,20 @@ class NormalizationFloorZeroNoiseTestCase(LensedLikelihoodTestCase):
 
         zero_generator = waveform.WaveformGenerator.from_event_data(
             zero_event, APPROXIMANT)
-        cls.zero_like = LensedRelativeBinningLikelihood(
-            zero_event, zero_generator, cls.par_dic_0,
-            delta_t_max=DELTA_T_MAX, fbin=cls.fbin)
+        # On noiseless data the ASD-drift estimator takes the std of an
+        # (essentially) all-outlier matched-filter statistic, so its sample
+        # variance is empty (numpy "Degrees of freedom <= 0") and the drift
+        # comes back NaN.  Drift is a LOCAL-NOISE correction with no meaning
+        # on a zero-noise anchor, so pin it to unity: it is then applied
+        # identically to lnlike_fft, lnlike and lnlike_bruteforce, leaving
+        # the F->1 floor comparison exact and NaN-free.  This changes no
+        # tolerance -- ZERO_NOISE_TOL stays 1e-2.
+        with warnings.catch_warnings(), np.errstate(all='ignore'):
+            warnings.simplefilter('ignore')
+            cls.zero_like = LensedRelativeBinningLikelihood(
+                zero_event, zero_generator, cls.par_dic_0,
+                delta_t_max=DELTA_T_MAX, fbin=cls.fbin)
+        cls.zero_like.asd_drift = np.ones(len(zero_event.detector_names))
 
     def test_bruteforce_floor_is_physically_tight(self):
         exact_unlensed = self.zero_like.lnlike_fft(self.par_dic_0)

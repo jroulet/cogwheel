@@ -152,7 +152,31 @@ across `L in [24, 48]`; `GeometricOpticsSlopeTestCase` keeps `L <= 24.3` (w to
 27 at `|y'| = 0.9`) so it exercises only certified returns. Do NOT reopen the
 gap by widening tolerances.
 
-## F006 — near-cusp (h|h) blow-up: edge-secant kernel coefficients alias the caustic-sharpened amplification (2026-07-16)
+## F006 — near-cusp (h|h) blow-up: edge-secant kernel coefficients alias the caustic-sharpened amplification (2026-07-16, SUPERSEDED by F008 2026-07-17)
+
+> **SUPERSEDED — mechanism attribution sign-disproven (F008, 2026-07-17).**
+> History preserved below; do NOT act on the fix rationale in this entry.
+>
+> What F006 got RIGHT: densely sub-sampling each bin and reducing the kernel
+> by per-bin least squares (raising `kernel_subsamples` 2 → 8) changed the
+> physics not at all once the real cause was fixed — nsub=2 and nsub=8 agree
+> to `< 1e-4`. That null result was the correct diagnostic signal that the
+> defect lay ELSEWHERE than the contraction algebra, the frequency moments, or
+> the `F→1` normalization (all of which F006 correctly cleared and are still
+> correct). The symptom (`|RB lnL - brute lnL| = 6.43e8` on `near-cusp`,
+> bit-stable, deterministic) is also accurately recorded.
+>
+> What F006 got WRONG: the attribution to an edge-secant slope-squaring
+> aliasing failure. It is sign-disproven — the spurious `(h|h)` drove the norm
+> term NEGATIVE-huge (RB − brute = **+6.43e8**, i.e. brute ≫ RB after the sign
+> in `lnL = (d|h) - (h|h)/2`), and squaring a real per-bin slope `k1` can only
+> ADD a positive quantity to `(h|h)`; it cannot produce a negative-huge
+> excursion. The dense sub-sampling that F006 shipped was therefore
+> COMPENSATING for the true bug (an unbounded upstream kernel) at 8× the engine
+> cost, not correcting an aliasing artifact of the reduction. The real cause —
+> the `_channel_switch` real-only neighbourhood bug versus the paper's
+> Eq. (delay-separation) — is recorded in **F008**, and Build 2c reverts the
+> sub-sampling default to 2.
 
 Symptom (Build 2b crown gate): `LensedRelativeBinningLikelihood` disagreed
 with its brute-force oracle by `|RB lnL - brute lnL| = 6.43e8` (tolerance 1.5)
@@ -311,3 +335,71 @@ cogwheel/tests/test_lensing_operator.py` at the stated tolerances. The static
 read establishes the deliverables are real and structurally consistent with the
 documentation; runtime green-ness must still be confirmed before Build 2b is
 committed, and no tolerance may be widened to achieve it.
+
+## F008 — the real near-cusp cause: `_channel_switch` measures delay separation against real channels only, not the full cluster (2026-07-17)
+
+This is the actual mechanism behind the Build-2b crown-gate accuracy failures
+that F006 mis-attributed (F006 now SUPERSEDED). The defect is one line in the
+lens engine, not in the relative-binning likelihood.
+
+Root cause. `_channel_switch` (`cogwheel/lensing/chang_refsdal/channels.py`)
+ramps a real channel over to the divergent saddle-kernel branch based on that
+channel's delay separation from its neighbours. It computed the neighbour set
+as `others = real_ids[real_ids != channel]` — REAL channels only. The paper's
+Eq. (delay-separation) takes the minimum over ALL members of the image's
+cluster, INCLUDING the labels parked at the critical point (the "virtual"
+labels). On the 2-image side of a caustic a near-critical image's actual
+cluster-mates ARE those parked virtual labels: the measured gap to a virtual
+label was `5.5e-5` at the crown `near-cusp` config, versus `0.856` to the
+nearest persistent real image. Keying only on real neighbours, the switch saw
+the large `0.856` gap, spuriously ramped to 1, and handed the channel to the
+divergent saddle kernel `H` (`|H_0| ~ 1.8e8` there, growth `~ gap^-2` toward the
+cusp), which then flooded all four channels through the residual projection
+(`|K_a| ~ 5.2e5`, cancelling coherently to `|F| ~ 3`). Squaring that in the
+norm term is what produced the negative-huge `(h|h)` excursion — an UNBOUNDED
+upstream kernel, not an aliased reduction slope (which is why F006's
+slope-squaring story was sign-wrong).
+
+Fix (Build 2c, WP1). Replace the neighbour set with all cluster labels except
+self (`np.delete(np.arange(_N_CHANNELS), channel)`), so parked virtual labels
+count as the legitimate neighbours Eq. (delay-separation) intends. The fix is
+one-directional (it can only LOWER a switch value) and a no-op wherever all
+four labels are real (4-image regions, near-fold-inside): there `real_ids` is
+the full set, so old and new neighbour sets are identical and the result is
+bit-for-bit unchanged.
+
+Measured effect (two independent agents, scratch probes; repo untouched):
+
+| config    | switch        | max\|k0\| | RB − brute lnL | 1.5 gate |
+|-----------|---------------|-----------|----------------|----------|
+| two-image | current (bug) | 40.9      | +9.768         | FAIL     |
+| two-image | fixed         | 0.922     | +0.080         | PASS     |
+| near-cusp | current (bug) | 5.22e5    | +6.43e8        | FAIL     |
+| near-cusp | fixed         | 0.975     | +0.329         | PASS     |
+
+- `kernel_subsamples = 2` under the fixed switch: `+0.069` (two-image) /
+  `+0.316` (near-cusp) — both PASS. This is why F006's dense-subsampling
+  compensation is unnecessary and Build 2c reverts the default 8 → 2 (WP2).
+- Moment orders are irrelevant to the fix: `p+s ≤ 3 == p+s ≤ 4 == p+s ≤ 5` to
+  `< 1e-4` once the kernels are bounded — no norm-moment change is needed; the
+  contraction algebra is correct as shipped.
+- Brute force is switch-independent (it uses `exact_total`; reconstruction
+  `~1e-16` under either switch) — the oracle never moved, so the disagreement
+  was entirely the RB path riding the unbounded kernel.
+- Reconstruction error IMPROVES under the fix: `2.5e-10 → 5e-16`.
+
+Sibling audit — `_min_delay_separation` NOT implicated. The sibling
+`_min_delay_separation` (feeds the wave/geometric branch gate) carries the same
+real-only pattern but is deliberately kept real-only: the geometric branch
+replaces `F_op` with the stationary-phase sum over REAL images only (virtual
+labels carry no saddle), so its resolution gate must key on real-image
+separation. `exact_total` is unaffected by the switch bug, confirming this
+sibling is not implicated in the crown failures. Recorded here so the two
+real-only patterns are not "fixed" together by mistake.
+
+Cross-references. F005 (wave-branch contraction overflow/refusal, NARROWED)
+and F007 (timing-gate spec and the `F→1` template-construction asymmetry) are
+UNAFFECTED by this fix — the switch correction touches neither the operator
+contraction refusal thresholds nor the template builders. It does, however,
+retire F006's dense-subsampling rationale and lets the crown gate pass at the
+original tolerances (`RB_ATOL = 1.5`) with the sub-sampling default back at 2.

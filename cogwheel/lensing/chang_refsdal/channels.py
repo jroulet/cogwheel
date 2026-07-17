@@ -315,18 +315,31 @@ def _channel_switch(w: np.ndarray,
                     real_mask: np.ndarray) -> np.ndarray:
     """Per-channel smooth hand-over switch.
 
-    Each real channel switches on its OWN delay separation from its
-    nearest real neighbour, so a channel that is still merged with
-    another (small separation) stays in the artificial gauge while a
+    Each real channel switches on its OWN delay separation ``delta_j``
+    from the NEAREST cluster member of any kind -- a real image OR a
+    virtual label parked at the critical point -- per the paper's
+    delay-separation rule (Eq. delay-separation, ``eq:delay-separation``)
+
+        delta_j = min_{k in C, k != j} |tau_j - tau_k|,
+
+    where the minimum runs over ALL four cluster labels, not the real
+    ones alone.  On the two-image side of a caustic a near-critical real
+    image's true cluster mates are the parked virtual labels it is about
+    to spawn (or that have just annihilated); measuring the separation
+    against real channels only misses that coincidence and lets a
+    still-merged channel ramp its switch to one, handing it to the
+    divergent stationary-phase kernel.  Measuring against every other
+    label instead keeps a channel that is still merged with ANY cluster
+    member (small separation) in the artificial gauge, while a fully
     resolved channel is handed to its physical target.  Virtual channels
-    never switch.
+    never switch (``S_j = 0`` for a virtual label, Eq. switch).
 
     Parameters
     ----------
     w : np.ndarray
         Dimensionless frequency grid.
     delays : np.ndarray
-        Per-channel delays.
+        Per-channel delays, indexed by cluster label ``0 .. _N_CHANNELS - 1``.
     real_mask : np.ndarray
         Boolean mask of real channels.
 
@@ -338,12 +351,9 @@ def _channel_switch(w: np.ndarray,
     switch = np.zeros((w.shape[0], _N_CHANNELS), dtype=float)
     real_ids = np.flatnonzero(real_mask)
     for channel in real_ids:
-        others = real_ids[real_ids != channel]
-        if others.size:
-            separation = float(
-                np.min(np.abs(delays[channel] - delays[others])))
-        else:
-            separation = 0.0
+        others = np.delete(np.arange(_N_CHANNELS), channel)
+        separation = float(
+            np.min(np.abs(delays[channel] - delays[others])))
         switch[:, channel] = smootherstep(w * separation,
                                           RHO_START, RHO_END)
     return switch
@@ -353,9 +363,29 @@ def _min_delay_separation(delays: np.ndarray,
                           real_mask: np.ndarray) -> float:
     """Smallest pairwise Fermat-delay separation among real channels.
 
-    This is ``delta_min`` for `operator.select_branch`.  Fewer than two
-    real images means nothing is resolved, so zero is returned and the
-    resolution condition fails, keeping the wave branch.
+    This is ``delta_min`` for `operator.select_branch`, the wave vs.
+    geometric branch gate -- a DIFFERENT quantity from the per-channel
+    switch separation ``delta_j`` of `_channel_switch` (Eq.
+    delay-separation), and it is deliberately minimised over REAL images
+    ONLY.  The two must not be conflated: the switch chooses a channel
+    gauge, this gate chooses an evaluation method, and the operator
+    module docstring warns their thresholds must not leak into each
+    other.
+
+    Real-only is correct HERE because the geometric branch replaces the
+    wave operator ``F_op`` with the stationary-phase sum, which runs
+    over the real images alone (a virtual label parked at the critical
+    point carries ``H_j = 0`` and contributes no stationary point).  The
+    asymptote is therefore legitimate exactly when the actual stationary
+    points -- the real images -- are mutually resolved
+    (``w * delta_min >= RHO_END``); the proximity of a parked virtual
+    label neither adds nor removes a saddle and so must not enter this
+    gate.  The paper defines no branch-gate separation of its own (it
+    uses the exact projection throughout, Eq. exact-reconstruction);
+    the resolution criterion is owned by `operator.select_branch`, and
+    real-only matches it.  Fewer than two real images means nothing is
+    resolved, so zero is returned and the resolution condition fails,
+    keeping the wave branch.
 
     Parameters
     ----------
@@ -367,8 +397,8 @@ def _min_delay_separation(delays: np.ndarray,
     Returns
     -------
     float
-        The minimum pairwise separation, or ``0.0`` if fewer than two
-        real channels exist.
+        The minimum pairwise separation among real channels, or ``0.0``
+        if fewer than two real channels exist.
     """
     real_delays = delays[real_mask]
     if real_delays.size < 2:

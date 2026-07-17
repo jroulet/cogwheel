@@ -1,5 +1,16 @@
 # Tidy Short-Term Observations
 
+- 2026-07-17 (later pass): checked cogwheel/lensing/chang_refsdal/channels.py
+  (new file: ChangRefsdalPartition/ChangRefsdalChannels, topology-stable
+  4-channel decomposition) and cogwheel/lensing/likelihood.py against the
+  full rubric — both already compliant (2-blank top-level / 1-blank
+  in-class spacing incl. section-comment groups, no whitespace-only lines,
+  no 3+ blank runs, stdlib->third-party->local import layering, every
+  imported name verified used by hand via search_for_pattern). Zero edits
+  required. `execute_shell_command` (autoflake check) was denied by the
+  permission system this session; fell back to manual per-import usage
+  grep, per the documented fallback rule.
+
 - 2026-07-17: Re-checked cogwheel/lensing/chang_refsdal/operator.py
   (uncommitted diff added the overflow-safe contraction path,
   _refusal_message helper, and three new module constants),

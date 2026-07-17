@@ -626,3 +626,41 @@ DRIVER STATE: escalation sent to owner; NO Build 2c launch without owner
 approval (scope of the paper's method changes: RB refuses near-caustic
 instead of covering it). Working tree still holds full uncommitted
 deliverable + INS-3-002 closure.
+
+### INVESTIGATION CONVERGENCE (2026-07-17 ~06:55) — ROOT CAUSE IS ONE LINE
+
+Owner-directed investigations (derivation audit + Professor re-measurement)
+converged; the prior escalation's "re-scope RB to resolved regime" framing is
+WITHDRAWN (Professor issued explicit correction).
+
+ROOT CAUSE (proved from the paper + measured): `_channel_switch`
+(channels.py:313, bug at :342) computes delay separation over other REAL
+channels only; the paper's Eq. (delay-separation) takes min over ALL cluster
+members INCLUDING parked virtual labels. On the 2-image side of a caustic
+the near-critical image's true mate IS a parked virtual label (gap 5.5e-5 at
+the crown near-cusp config vs 0.856 to the persistent image), so the switch
+spuriously ramps to 1 and hands the channel to the divergent saddle kernel
+H_0 (~1.8e8), flooding all channels via the residual projection
+(|K_a| ~ 5.2e5, growth ~ gap^-2).
+
+MEASURED under the corrected all-neighbour switch (probe5.log; both
+independent agents agree; brute is switch-independent, recon ~1e-16 both
+ways):
+  two-image: max|k0| 40.9 -> 0.922; lnl offset +9.768 -> +0.080 (PASS)
+  near-cusp: max|k0| 5.22e5 -> 0.975; offset +6.43e8 -> +0.329 (PASS)
+  p+s<=3 == p+s<=4 == p+s<=5 to <1e-4 once kernels bounded (no moment change)
+  kernel_subsamples=2 under fix: +0.069 / +0.316 (PASS) -> revert 8->2
+  restores ~7x speed-up (engine points 2024 -> 506).
+  Bin-convergence (buggy switch): offset scales (Δf)^1.97 — was real
+  truncation OF INFLATED kernels; moot after fix.
+
+BUILD 2c (revised, simple): (1) one-line switch fix + docstring; (2) revert
+kernel_subsamples default 8->2; (3) rebase NearCuspRegressionPin canary on
+the switch (real-only variant blows up; production passes) — its
+subsamples=2 premise is void; (4) fixture fixes: zero-noise drift NaN,
+macro-saddle control config; (5) audit sibling _min_delay_separation
+(channels.py:352, same real-only pattern; exact_total unaffected — not the
+crown cause); (6) FINDINGS: F006 mechanism superseded (new finding: switch
+bug). OUT: sparse global nodes (optimization only), persistent-image split
+alignment (benign), small-w short-circuit + strong-shear MAX_ORDER (engine
+tickets). Driver writing build2c brief; pipeline launch next.
