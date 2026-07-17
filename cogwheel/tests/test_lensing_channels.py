@@ -32,20 +32,40 @@ scope, because the suite as a whole legitimately imports `channels` to
 test it, and `_imported_top_level_modules` collapses every subpackage
 module to the single top-level name `cogwheel`.
 
-TOLERANCES ARE SCALE-AWARE, DELIBERATELY -- NOT A FLAT 1e-12
------------------------------------------------------------
+BOUNDED ON-CAUSTIC KERNELS -- AND WHY THE BOUND IS SCALE-AWARE ANYWAY
+---------------------------------------------------------------------
 The residual projection in `_gauge` makes the four channel kernels sum
 to the operator total by an ALGEBRAIC identity, so the only
-reconstruction error is roundoff.  That roundoff scales with the largest
-INTERMEDIATE, sum_a |K_a|, which diverges like sqrt|mu_a| at a critical
-point where the stationary-phase targets blow up -- NOT with |F| ~ 1.
-`ScaleAwareReconstructionTestCase` drives sources onto the caustic,
-where sum_a |K_a| reaches ~1e89 and the reconstruction error reaches
-~1e73 in absolute terms, and asserts BOTH that the scale-aware bound
-100*eps*(|F| + sum_a |K_a|) still holds AND that a flat 1e-12 gate is
-violated by dozens of orders of magnitude there.  The choice of bound is
-therefore evidence, not convenience; this mirrors the committed
-`test_lensing_gauge.NearFoldScalingTestCase`.  See FINDINGS F003.
+reconstruction error is roundoff, and that roundoff scales with the
+largest INTERMEDIATE, sum_a |K_a| -- not with |F| ~ 1.  Which is why
+every reconstruction bound here is written as
+100*eps*(|F| + sum_a |K_a|) rather than as a flat constant.
+
+Under the SHIPPED gauge that intermediate no longer diverges.  Build 2c
+fixed `_channel_switch` (FINDINGS F008) to measure each channel's delay
+separation against ALL four cluster labels rather than the real ones
+alone.  On the caustic a real image is co-located with the parked
+virtual label it is about to spawn, so its separation is ~0, its switch
+is exactly 0, and the divergent stationary-phase target is multiplied
+away: the channel stays in the bounded artificial gauge and only a
+bounded cluster residual survives.  `BoundedKernelTestCase` measures
+this directly -- sum_a |K_a| peaks at ~4.3 across the whole config set,
+four orders under the 1e3 ceiling it is gated against.
+
+This suite therefore does NOT preserve the pre-2c assertion that
+on-caustic kernels diverge past 1e12.  That assertion pinned the BUG:
+it passed only because the real-only neighbour set let a still-merged
+channel ramp its switch to one and hand itself to a kernel diverging
+like sqrt|mu_a|.  Keeping it would have made the fix look like a
+regression.  It is replaced by its opposite -- a boundedness ceiling --
+plus `test_real_only_neighbours_blow_the_bounded_ceiling`, which
+re-injects the buggy neighbour rule and asserts the ceiling IS blown,
+so the new gate is falsifiable rather than merely satisfiable.  The
+scale-aware FORM of the bound is still the correct one, and that
+companion is now the evidence for it: the divergent regime it recreates
+is precisely where a flat gate would be unachievable.  See FINDINGS
+F008, F003, and `test_lensing_gauge.NearFoldScalingTestCase` for the
+`_gauge`-level fold scaling this suite no longer has to reproduce.
 
 Every `<Thing>TestCase` derives from `ChannelsTestCase`, whose
 `tearDown` FAILS if a test's sweep ran zero comparisons, and
@@ -61,12 +81,22 @@ import itertools
 import pathlib
 import sys
 import textwrap
-from unittest import TestCase, main
+from unittest import TestCase, main, mock
 
 import numpy as np
 
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    _HAVE_MPL = True
+except Exception:  # pragma: no cover - environment dependent
+    _HAVE_MPL = False
+
 from cogwheel.lensing.chang_refsdal import (
     channels, geometry, operator, _gauge)
+
+_OUTPUT_DIR = pathlib.Path(__file__).resolve().parent / 'output'
 
 
 #: Float64 machine epsilon; the roundoff unit of every bound here.
@@ -76,6 +106,42 @@ EPS = np.finfo(np.float64).eps
 #: bound, matching the committed `test_lensing_gauge` gate.  The worst
 #: measured margin near a fold is ~0.5*eps*scale, i.e. ~200x below this.
 RECONSTRUCTION_SLACK = 100.0
+
+#: The fixed label count.  Declared locally rather than imported from
+#: the module under test so the buggy switch variant is a genuinely
+#: independent reproduction.  The reproduced-contract test pins it back
+#: against ``channels._N_CHANNELS``, so the two cannot silently drift.
+N_CHANNELS = 4
+
+#: Ceiling on sum_a |K_a| under the shipped (F008-fixed) gauge, over the
+#: whole config set including the on-caustic rows.  The measured worst is
+#: ~4.3, so this sits ~2.4 orders above the data and is nowhere near
+#: perched on a boundary; `test_the_ceiling_is_not_perched` pins that
+#: margin so the ceiling cannot quietly become a rubber stamp.  It is a
+#: QUALITATIVE ceiling -- its job is to separate O(1) from the sqrt|mu|
+#: divergence (>=1e12) the buggy neighbour rule produces, and any value
+#: in the wide gap between those two scales would do.
+KERNEL_SUM_CEILING = 1e3
+
+#: Ceiling on the measured worst sum_a |K_a|, asserted so the headroom
+#: under `KERNEL_SUM_CEILING` is shown to be real rather than assumed.
+#: Measured worst ~4.3; this leaves an order of magnitude for benign
+#: drift while still failing long before the ceiling itself would.
+KERNEL_SUM_MARGIN_CEILING = 1e2
+
+#: Flat absolute gate on the reconstruction error under the fixed gauge.
+#: Legitimate ONLY because the kernels are bounded: with sum_a |K_a| ~ 4
+#: the scale-aware bound is ~1e-13, so this flat gate is ~25x TIGHTER and
+#: is the stronger claim.  Measured worst ~5e-16, i.e. one order of
+#: headroom.  It is asserted ALONGSIDE the scale-aware bound, never
+#: instead of it -- see the module docstring.
+RECONSTRUCTION_ABS_GATE = 5e-15
+
+#: Floor the buggy real-only neighbour rule must exceed on the
+#: on-caustic configs for the falsification to mean anything: the
+#: pre-2c suite measured sum_a |K_a| ~1e89 there, so clearing the 1e3
+#: ceiling is not a marginal call.
+BUGGY_BLOWUP_FLOOR = KERNEL_SUM_CEILING
 
 #: Multiple of the source-plane path step that bounds each label's
 #: per-step Fermat-delay change.  The measured ratio across a fold/cusp
@@ -112,7 +178,8 @@ SEED = 20260716
 #: module and its public surface.  A fixture that touched any of these
 #: would no longer be an independent ground truth.
 CHANNELS_FORBIDDEN = frozenset(
-    {'channels', 'ChangRefsdalChannels', 'ChangRefsdalPartition'})
+    {'channels', 'ChangRefsdalChannels', 'ChangRefsdalPartition',
+     '_channel_switch'})
 
 
 def _imported_top_level_modules(module):
@@ -286,6 +353,149 @@ def _path_step(sources) -> float:
                                        axis=1)))
 
 
+def _savefig(fig, name: str) -> None:
+    """Save a diagnostic figure, swallowing any backend error."""
+    if not _HAVE_MPL:
+        return
+    try:
+        _OUTPUT_DIR.mkdir(exist_ok=True)
+        fig.savefig(_OUTPUT_DIR / name, dpi=80, bbox_inches='tight')
+    except Exception:  # pragma: no cover - environment dependent
+        pass
+    finally:
+        plt.close(fig)
+
+
+def _real_only_channel_switch(w: np.ndarray,
+                              delays: np.ndarray,
+                              real_mask: np.ndarray) -> np.ndarray:
+    """The PRE-2c switch: neighbours are the other REAL channels only.
+
+    This is the bug FINDINGS F008 fixed, reproduced here so the fix has
+    something to be measured against.  The shipped rule takes each
+    channel's delay separation against every other cluster label; this
+    one takes it against ``real_ids[real_ids != channel]``, missing the
+    parked virtual label a near-critical image is co-located with.  On
+    the caustic that turns a ~0 separation into an O(1) one, ramps the
+    switch to one, and hands a still-merged channel to a
+    stationary-phase target diverging like sqrt|mu_a|.
+
+    Built from `_gauge.smootherstep` and the `operator` window
+    thresholds -- the shared primitives -- and NEVER from `channels`'
+    own switch, which is the thing under test (FINDINGS F002).  It is
+    injected by monkeypatching `channels._channel_switch`, so
+    `channels.py` itself (fenced out of this build) is untouched.
+
+    Parameters
+    ----------
+    w : np.ndarray
+        Dimensionless frequency grid.
+    delays : np.ndarray
+        Per-channel delays, indexed by cluster label.
+    real_mask : np.ndarray
+        Boolean mask of real channels.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(n_w, N_CHANNELS)`` switch in ``[0, 1]``.
+
+    Raises
+    ------
+    ValueError
+        If fewer than two real channels exist, leaving the buggy rule
+        with no neighbour to measure against.  The real lens always has
+        two or four real images, so this signals a broken fixture rather
+        than a physical configuration.
+    """
+    switch = np.zeros((w.shape[0], N_CHANNELS), dtype=float)
+    real_ids = np.flatnonzero(real_mask)
+    if real_ids.size < 2:
+        raise ValueError(
+            'Cannot reproduce the pre-2c real-only switch with '
+            f'{real_ids.size} real channel(s): the rule needs at least '
+            'one other real channel to measure a separation against. A '
+            'Chang-Refsdal lens always has two or four real images, so '
+            'check the fixture that produced this real_mask.')
+    for channel in real_ids:
+        others = real_ids[real_ids != channel]
+        separation = float(
+            np.min(np.abs(delays[channel] - delays[others])))
+        switch[:, channel] = _gauge.smootherstep(
+            w * separation, operator.RHO_START, operator.RHO_END)
+    return switch
+
+
+def _on_caustic_config(gamma: float, theta: float, beta: float = 0.0,
+                       kappa: float = 0.0) -> dict:
+    """An `evaluate` kwargs dict with the source placed ON the caustic.
+
+    Built from `geometry.critical_point` alone: the critical point's
+    source IS the caustic point, so this is the configuration where a
+    real image and the virtual label parked at that same critical point
+    coincide -- the exact coincidence the F008 rule depends on.
+    """
+    critical = geometry.critical_point(gamma, theta, beta, kappa)
+    return dict(gamma=gamma, y=np.asarray(critical.source, dtype=float),
+                beta=beta, kappa=kappa)
+
+
+def _measured_configs() -> list[tuple[str, str, dict]]:
+    """The measured config set: ``(kind, label, evaluate_kwargs)``.
+
+    Ten configurations in three kinds:
+
+    * ``generic`` -- two-image, four-image, sheared and convergent
+      sources, well away from any caustic, where the switch is on and
+      the physical targets are the kernels.
+    * ``on-caustic`` -- three sources on a FOLD of the caustic, at
+      generic (non-axis) critical angles.  These are the rows the
+      pre-2c real-only switch blew up on.
+    * ``cusp`` -- three sources on an axis CUSP.  For ``beta = 0`` the
+      astroid caustic's cusps lie on the axes, which is why
+      `_cusp_crossing` above takes ``theta = pi`` as its cusp; these
+      reuse that provenance at ``theta = 0, pi/2, pi``.
+    """
+    configs: list[tuple[str, str, dict]] = [
+        ('generic', 'two-image',
+         dict(gamma=0.2, y=np.array([0.12, 0.035]))),
+        ('generic', 'four-image',
+         dict(gamma=0.2, y=np.array([0.05, 0.02]))),
+        ('generic', 'sheared',
+         dict(gamma=0.2, y=np.array([0.3, 0.1]), beta=0.4)),
+        ('generic', 'convergent',
+         dict(gamma=0.2, y=np.array([0.05, 0.02]), beta=0.4,
+              kappa=0.1)),
+    ]
+    for gamma, theta in ((0.2, 4.0), (0.3, 2.5), (0.15, 0.7)):
+        configs.append(
+            ('on-caustic', f'fold g={gamma} th={theta}',
+             _on_caustic_config(gamma, theta)))
+    for gamma, theta in ((0.2, np.pi), (0.25, 0.0), (0.15, 0.5*np.pi)):
+        configs.append(
+            ('cusp', f'cusp g={gamma} th={theta:.3f}',
+             _on_caustic_config(gamma, theta)))
+    return configs
+
+
+#: The local reproductions whose independence from the tracker the AST
+#: guard pins.  `_real_only_channel_switch` is the load-bearing one: it
+#: is the pre-2c switch the boundedness gate is falsified against, so if
+#: it ever reached into `channels` for the switch it was meant to
+#: reproduce, the falsification would be comparing the module to itself
+#: and could not fail (FINDINGS F002).
+SWITCH_REPRODUCTIONS = (_real_only_channel_switch, _on_caustic_config)
+
+#: Every helper that must stay independent of the module under test.
+INDEPENDENT_HELPERS = FIXTURE_BUILDERS + SWITCH_REPRODUCTIONS
+
+
+def _kernel_sum(partition) -> np.ndarray:
+    """sum_a |K_a| per frequency: the largest intermediate the
+    reconstruction passes through, and the quantity the ceiling gates."""
+    return np.sum(np.abs(partition.kernels), axis=-1)
+
+
 class ChannelsTestCase(TestCase):
     """Base class: a scale-aware reconstruction check plus anti-vacuity.
 
@@ -337,9 +547,10 @@ class NonCircularFixtureGuardTestCase(TestCase):
     """
 
     def test_fixtures_never_reference_the_tracker(self):
-        """No crossing builder imports, names, or attributes channels."""
+        """No crossing builder or switch reproduction imports, names, or
+        attributes channels."""
         checked = 0
-        for builder in FIXTURE_BUILDERS:
+        for builder in INDEPENDENT_HELPERS:
             with self.subTest(builder=builder.__name__):
                 referenced = _referenced_names(builder)
                 offending = referenced & CHANNELS_FORBIDDEN
@@ -349,18 +560,18 @@ class NonCircularFixtureGuardTestCase(TestCase):
                     f'{sorted(offending)}; it must be built from '
                     'geometry/operator/_gauge alone.')
                 checked += 1
-        self.assertEqual(checked, len(FIXTURE_BUILDERS))
+        self.assertEqual(checked, len(INDEPENDENT_HELPERS))
 
     def test_fixtures_do_not_name_the_tracker_module(self):
-        """The subpackage name a builder may reference is never
+        """The subpackage name a helper may reference is never
         `channels` -- only the physics-layer modules."""
         checked = 0
-        for builder in FIXTURE_BUILDERS:
+        for builder in INDEPENDENT_HELPERS:
             with self.subTest(builder=builder.__name__):
                 referenced = _referenced_names(builder)
                 self.assertNotIn('channels', referenced)
                 checked += 1
-        self.assertEqual(checked, len(FIXTURE_BUILDERS))
+        self.assertEqual(checked, len(INDEPENDENT_HELPERS))
 
     def test_reuses_the_committed_import_idiom(self):
         """The suite declares numpy and the cogwheel package as deps.
@@ -378,32 +589,36 @@ class NonCircularFixtureGuardTestCase(TestCase):
 class ScaleAwareReconstructionTestCase(ChannelsTestCase):
     """The channels reconstruct the operator total, scale-aware.
 
-    Across generic and near-fold configurations the returned
+    Across generic and on-caustic configurations the returned
     ``(tau_a, K_a)`` must sum to the exact total to a bound that tracks
-    sum_a |K_a|, not to a flat constant.  The near-fold configurations
-    place the source ON the caustic, where the geometric-optics targets
-    diverge and the flat gate becomes unachievable for reasons that have
-    nothing to do with a bug.
+    sum_a |K_a| rather than a flat constant, because the residual
+    projection's roundoff scales with that intermediate.
+
+    Under the shipped F008 gauge the intermediate happens to stay O(1)
+    even on the caustic, so here the scale-aware bound and a flat one
+    are numerically close; `BoundedKernelTestCase` is what measures that
+    and gates the tighter flat number.  The scale-aware form is kept
+    because it is the correct model of the error, not because these rows
+    need the slack -- see the module docstring.
     """
 
     def _generic_configs(self):
-        return [
-            ('two-image', dict(gamma=0.2, y=np.array([0.12, 0.035]))),
-            ('four-image', dict(gamma=0.2, y=np.array([0.05, 0.02]))),
-            ('sheared', dict(gamma=0.2, y=np.array([0.3, 0.1]),
-                             beta=0.4)),
-            ('convergent', dict(gamma=0.2, y=np.array([0.05, 0.02]),
-                                beta=0.4, kappa=0.1)),
-        ]
+        """The off-caustic rows of the one measured config set."""
+        return [(label, config)
+                for kind, label, config in _measured_configs()
+                if kind == 'generic']
 
     def _near_fold_configs(self):
-        configs = []
-        for gamma, theta in ((0.2, 4.0), (0.3, 2.5), (0.15, 0.7)):
-            source = geometry.critical_point(gamma, theta).source
-            configs.append(
-                (f'on-caustic g={gamma} th={theta}',
-                 dict(gamma=gamma, y=np.asarray(source, dtype=float))))
-        return configs
+        """The on-caustic (fold) rows of the one measured config set.
+
+        Cusp rows are deliberately excluded here: this test additionally
+        demands `operator_converged`, which is a stronger precondition
+        than boundedness needs, so the cusp rows are gated by
+        `BoundedKernelTestCase` instead.
+        """
+        return [(label, config)
+                for kind, label, config in _measured_configs()
+                if kind == 'on-caustic']
 
     def test_reconstruction_is_scale_aware_exact(self):
         """Generic and near-fold decompositions reconstruct their
@@ -421,35 +636,6 @@ class ScaleAwareReconstructionTestCase(ChannelsTestCase):
                 self.assert_reconstructs(
                     W_GRID, partition.delays, partition.kernels,
                     partition.exact_total, label)
-
-    def test_flat_gate_fails_where_the_targets_diverge(self):
-        """The falsifiable half: a flat 1e-12 gate MUST fail near a fold.
-
-        If this ever passes, the near-fold kernels no longer diverge and
-        the scale-aware bound is over-engineering -- which would be worth
-        knowing.  Mirrors `test_lensing_gauge`'s falsifiable companion.
-        """
-        tracker = channels.ChangRefsdalChannels(W_GRID)
-        worst = 0.0
-        worst_scale = 0.0
-        for _, config in self._near_fold_configs():
-            tracker.reset()
-            partition = tracker.evaluate(**config)
-            got = _gauge.reconstructed_total(
-                W_GRID, partition.delays, partition.kernels)
-            error = float(np.max(np.abs(got - partition.exact_total)))
-            scale = float(np.max(np.sum(np.abs(partition.kernels),
-                                        axis=-1)))
-            worst = max(worst, error)
-            worst_scale = max(worst_scale, scale)
-        self._comparisons += 1
-        self.assertGreater(worst_scale, 1e12,
-                           'near-fold kernels did not diverge, so the '
-                           'diverging-target regime was never reached')
-        self.assertGreater(
-            worst, 1e-12,
-            'a flat 1e-12 reconstruction gate now passes on the '
-            'caustic; the scale-aware bound may no longer be needed')
 
     def test_exact_total_matches_the_independent_oracle(self):
         """The tracker's total is the operator total, not a relabelling
@@ -475,6 +661,269 @@ class ScaleAwareReconstructionTestCase(ChannelsTestCase):
                     np.all(error <= 1e-9 * scale),
                     f'{label}: tracker total departs from the '
                     f'independent operator oracle by {np.max(error):.3e}')
+
+
+class BoundedKernelTestCase(ChannelsTestCase):
+    """The F008 gauge keeps every channel kernel BOUNDED, on-caustic too.
+
+    This class replaces a pre-2c test that asserted the opposite -- that
+    on-caustic kernels diverge past 1e12.  That assertion pinned the bug
+    rather than the physics: it held only because the real-only
+    neighbour rule ramped a still-merged channel's switch to one and
+    handed it to a stationary-phase kernel diverging like sqrt|mu_a|.
+    With the switch measured against all four cluster labels, a
+    near-critical image is co-located with its parked virtual label, its
+    separation is ~0, its switch is exactly 0, and the divergent target
+    is multiplied away -- leaving a bounded cluster residual BY DESIGN.
+
+    WHAT IS AND IS NOT COVERED
+    --------------------------
+    Covered: the shipped `ChangRefsdalChannels` kernels are evaluated
+    end-to-end on the measured config set, so the ceiling gates the real
+    integration of switch, targets and residual projection.  The buggy
+    comparison is injected by monkeypatching `channels._channel_switch`
+    with `_real_only_channel_switch`, a local reproduction built from
+    `_gauge`/`operator` primitives only -- `channels.py` is fenced out of
+    this build and is not edited.
+
+    NOT covered: the injected variant reproduces the pre-2c NEIGHBOUR
+    RULE, not the pre-2c file.  If the historical bug also differed
+    elsewhere, this pins only the neighbour-set half of it.  The
+    monkeypatch also proves the switch is reached through a module-global
+    lookup; were `evaluate` ever to inline the switch, the injection
+    would silently no-op, which is why
+    `test_the_reproduced_variant_matches_the_shipped_contract` checks the
+    patch actually changes the answer.
+    """
+
+    def _evaluate(self, config: dict):
+        """Evaluate one config through the shipped tracker, from reset."""
+        tracker = channels.ChangRefsdalChannels(W_GRID)
+        tracker.reset()
+        return tracker.evaluate(**config)
+
+    def test_kernels_stay_bounded_on_every_config(self):
+        """sum_a |K_a| stays under the ceiling everywhere, including on
+        the caustic where the pre-2c gauge diverged."""
+        for kind, label, config in _measured_configs():
+            with self.subTest(kind=kind, config=label):
+                partition = self._evaluate(config)
+                sums = _kernel_sum(partition)
+                self._comparisons += int(np.size(sums))
+                self.assertTrue(
+                    np.all(np.isfinite(sums)),
+                    f'{label}: sum_a |K_a| is not finite, so the gauge '
+                    'produced inf/nan rather than a bounded residual')
+                self.assertLess(
+                    float(np.max(sums)), KERNEL_SUM_CEILING,
+                    f'{label}: sum_a |K_a| reached '
+                    f'{float(np.max(sums)):.3e}, above the '
+                    f'{KERNEL_SUM_CEILING:g} boundedness ceiling; the '
+                    'F008 switch is no longer parking merged channels '
+                    'in the artificial gauge')
+
+    def test_reconstruction_is_exact_to_a_flat_gate(self):
+        """The bounded kernels reconstruct the total to a FLAT 5e-15 --
+        a claim only the bounded gauge makes available."""
+        worst = 0.0
+        for kind, label, config in _measured_configs():
+            with self.subTest(kind=kind, config=label):
+                partition = self._evaluate(config)
+                self.assert_reconstructs(
+                    W_GRID, partition.delays, partition.kernels,
+                    partition.exact_total, label)
+                got = _gauge.reconstructed_total(
+                    W_GRID, partition.delays, partition.kernels)
+                error = float(np.max(np.abs(got - partition.exact_total)))
+                worst = max(worst, error)
+                self.assertLessEqual(
+                    error, RECONSTRUCTION_ABS_GATE,
+                    f'{label}: reconstruction error {error:.3e} exceeds '
+                    f'the flat {RECONSTRUCTION_ABS_GATE:g} gate')
+        self.assertGreater(
+            worst, 0.0,
+            'every reconstruction was bit-exact, which would mean the '
+            'residual projection is not being exercised at all')
+
+    def test_the_ceiling_is_not_perched(self):
+        """The measured worst sum_a |K_a| sits orders under the ceiling.
+
+        Without this, a ceiling could pass while sitting just above the
+        data and would degrade into a rubber stamp on the next drift.
+        """
+        worst = 0.0
+        for *_, config in _measured_configs():
+            sums = _kernel_sum(self._evaluate(config))
+            worst = max(worst, float(np.max(sums)))
+            self._comparisons += 1
+        self.assertLess(
+            worst, KERNEL_SUM_MARGIN_CEILING,
+            f'the worst sum_a |K_a| is {worst:.3e}, close enough to the '
+            f'{KERNEL_SUM_CEILING:g} ceiling that the ceiling is now '
+            'perched on the data rather than separating O(1) from a '
+            'sqrt|mu| divergence')
+        self.assertGreater(
+            worst, 0.0,
+            'sum_a |K_a| is identically zero, so the sweep measured '
+            'nothing')
+
+
+class RealOnlyNeighbourFalsificationTestCase(ChannelsTestCase):
+    """The boundedness ceiling MUST go red under the pre-2c switch.
+
+    A ceiling that nothing can breach tests nothing.  These checks
+    re-inject the real-only neighbour rule the 2c fix removed and assert
+    the on-caustic configs blow straight through the ceiling that the
+    fixed gauge clears by orders of magnitude -- which is what makes
+    `BoundedKernelTestCase` a measurement of the fix rather than a
+    restatement of it.
+    """
+
+    def _evaluate_buggy(self, config: dict):
+        with mock.patch.object(channels, '_channel_switch',
+                               _real_only_channel_switch):
+            tracker = channels.ChangRefsdalChannels(W_GRID)
+            tracker.reset()
+            return tracker.evaluate(**config)
+
+    def _evaluate_fixed(self, config: dict):
+        tracker = channels.ChangRefsdalChannels(W_GRID)
+        tracker.reset()
+        return tracker.evaluate(**config)
+
+    def test_real_only_neighbours_blow_the_bounded_ceiling(self):
+        """On-caustic, the buggy neighbour set drives sum_a |K_a| past
+        the ceiling the fixed gauge holds."""
+        for kind, label, config in _measured_configs():
+            if kind != 'on-caustic':
+                continue
+            with self.subTest(config=label):
+                sums = _kernel_sum(self._evaluate_buggy(config))
+                worst = float(np.max(sums))
+                self._comparisons += 1
+                self.assertFalse(
+                    np.any(np.isnan(sums)),
+                    f'{label}: the buggy variant produced NaN rather '
+                    'than a divergence; the comparison is inconclusive')
+                self.assertGreater(
+                    worst, BUGGY_BLOWUP_FLOOR,
+                    f'{label}: the pre-2c real-only switch kept '
+                    f'sum_a |K_a| at {worst:.3e}, under the '
+                    f'{BUGGY_BLOWUP_FLOOR:g} ceiling. The boundedness '
+                    'gate therefore cannot distinguish the fix from the '
+                    'bug and is not evidence of anything.')
+
+    def test_the_fix_and_the_bug_are_orders_apart_on_caustic(self):
+        """The two gauges are separated by many orders, not by a hair --
+        so the ceiling's placement is not a judgement call."""
+        for kind, label, config in _measured_configs():
+            if kind != 'on-caustic':
+                continue
+            with self.subTest(config=label):
+                fixed = float(np.max(_kernel_sum(
+                    self._evaluate_fixed(config))))
+                buggy = float(np.max(_kernel_sum(
+                    self._evaluate_buggy(config))))
+                self._comparisons += 1
+                self.assertGreater(
+                    buggy / max(fixed, EPS), 1e6,
+                    f'{label}: buggy/fixed sum_a |K_a| ratio is only '
+                    f'{buggy / max(fixed, EPS):.3e}; the ceiling sits in '
+                    'a narrow gap rather than a wide one')
+
+    def test_the_rules_agree_when_every_label_is_real(self):
+        """Where all four labels hold real images the two rules agree
+        bit-for-bit, which localizes the bug to what it is about.
+
+        The real-only rule is wrong only where a real image is
+        co-located with a PARKED VIRTUAL label.  Where no label is
+        virtual, ``real_ids[real_ids != j]`` and "all labels except j"
+        are the SAME set by construction, so the two switches are
+        identical to the bit.  If this failed, the injected variant
+        would be perturbing something unrelated to the neighbour set and
+        the on-caustic blow-up could not be attributed to it.
+        """
+        checked = 0
+        for _, label, config in _measured_configs():
+            fixed = self._evaluate_fixed(config)
+            if not bool(np.all(fixed.real_mask)):
+                continue  # a virtual label is parked: rules may differ
+            with self.subTest(config=label):
+                buggy = self._evaluate_buggy(config)
+                self._comparisons += 1
+                checked += 1
+                self.assertTrue(
+                    np.array_equal(fixed.kernels, buggy.kernels),
+                    f'{label}: all four labels are real, so the two '
+                    'neighbour sets are identical, yet the kernels '
+                    'differ; the injected variant is changing more than '
+                    'the neighbour rule')
+        self.assertGreater(
+            checked, 0,
+            'no config produced four real images, so the '
+            'identical-neighbour-set case was never exercised')
+
+    def test_the_reproduced_variant_matches_the_shipped_contract(self):
+        """The injection is real: same shape contract, different answer.
+
+        `_real_only_channel_switch` must satisfy the shape/range
+        contract the shipped switch does (otherwise the blow-up could be
+        a shape bug), the label count it assumes must match the module's,
+        and patching it must actually change an on-caustic result -- if
+        `evaluate` stopped looking the switch up as a module global, the
+        monkeypatch would silently no-op and every falsification above
+        would pass vacuously.
+        """
+        self.assertEqual(
+            N_CHANNELS, channels._N_CHANNELS,
+            'the locally declared label count no longer matches the '
+            'module under test, so the injected switch has the wrong '
+            'shape')
+        config = next(config for kind, _, config in _measured_configs()
+                      if kind == 'on-caustic')
+        delays = np.array([0.0, 0.5, 1.0, 1.5])
+        real_mask = np.array([True, True, False, False])
+        switch = _real_only_channel_switch(W_GRID, delays, real_mask)
+        self.assertEqual(switch.shape, (W_GRID.size, N_CHANNELS))
+        self.assertTrue(np.all((switch >= 0.0) & (switch <= 1.0)),
+                        'the reproduced switch left [0, 1]')
+        self.assertTrue(
+            np.all(switch[:, ~real_mask] == 0.0),
+            'virtual channels must never switch (S_j = 0)')
+        fixed = float(np.max(_kernel_sum(self._evaluate_fixed(config))))
+        buggy = float(np.max(_kernel_sum(self._evaluate_buggy(config))))
+        self._comparisons += 1
+        self.assertNotEqual(
+            fixed, buggy,
+            'patching channels._channel_switch did not change the '
+            'result, so the injection never took effect and the '
+            'falsification tests are vacuous')
+
+    def test_diagnostic_plot(self):
+        """Save sum_a |K_a| vs w, fixed vs buggy, with the ceiling."""
+        self._comparisons += 1
+        if not _HAVE_MPL:
+            self.skipTest('matplotlib unavailable')
+        fig, ax = plt.subplots(figsize=(7.5, 4.5))
+        for index, (kind, label, config) in enumerate(
+                _measured_configs()):
+            color = f'C{index % 10}'
+            ax.semilogy(W_GRID, _kernel_sum(self._evaluate_fixed(config)),
+                        color=color, marker='o', ms=3, lw=1.4,
+                        label=f'fixed: {label}')
+            if kind == 'on-caustic':
+                ax.semilogy(
+                    W_GRID, _kernel_sum(self._evaluate_buggy(config)),
+                    color=color, marker='x', ms=4, lw=1.2, ls='--',
+                    label=f'buggy: {label}')
+        ax.axhline(KERNEL_SUM_CEILING, color='k', lw=1.6, ls=':',
+                   label=f'ceiling {KERNEL_SUM_CEILING:g}')
+        ax.set_xlabel('dimensionless frequency w')
+        ax.set_ylabel(r'$\sum_a |K_a|$')
+        ax.set_title('F008 switch: fixed gauge stays O(1), pre-2c '
+                     'real-only gauge escapes on-caustic')
+        ax.legend(fontsize=5.5, ncol=2, loc='best')
+        _savefig(fig, 'channels_bounded_kernels_fixed_vs_buggy.png')
 
 
 class LabelContinuityTestCase(ChannelsTestCase):

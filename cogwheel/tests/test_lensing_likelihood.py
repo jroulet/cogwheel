@@ -31,6 +31,21 @@ check is not circular:
   so the ``<noise|delta-h>`` tail vanishes and only the ~1e-4 lensing
   residual plus a small template-construction ``delta-h`` remain).
 
+  The ``F -> 1`` limit requires a TRIVIAL MACRO SECTOR.  operator.py's
+  certified ``w -> 0`` limit is the macro constant ``1/sqrt(1 - gamma**2)``
+  (at ``kappa = 0``) -- NOT unity.  A tiny-mass candidate at
+  ``gamma = 0.20`` therefore tends to 1.0206207..., and the 0.1214 nat
+  offset it showed against an unlensed reference was correct physics
+  measured against the wrong oracle, not a normalization bug.  The
+  zero-noise floor pair consequently uses ``gamma = kappa = 0``, where the
+  unlensed limit genuinely holds.  Deleting the inconvenient
+  configuration would be a dodge, so `MacroSectorContrastTestCase` keeps
+  it: two tiny-mass candidates differing ONLY in shear, with the sheared
+  one's offset PREDICTED in closed form from
+  ``lnL(c*h0) - lnL(h0) = -0.5*(c - 1)**2*(h0|h0)`` at ``d == h0``.  That
+  anchor goes red if the macro magnification is ever normalized out of
+  the engine, or a small-``w`` short-circuit forcing ``F = 1`` returns.
+
 * A PRODUCT-OF-SUMMARIES structural regression: at a near-fold
   configuration two images have near-degenerate delays and the cross
   term dominates ``(h_L|h_L)``.  Summarizing ``F`` and ``h`` separately
@@ -103,13 +118,16 @@ tip over.
 """
 from __future__ import annotations
 
+import pathlib
 import time
 import warnings
 from unittest import TestCase, main, mock
 
 import numpy as np
+from matplotlib import pyplot as plt
 
 from cogwheel import data, waveform
+from cogwheel.likelihood.relative_binning import RelativeBinningLikelihood
 from cogwheel.lensing.chang_refsdal import channels, geometry
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, LensedBinningError,
@@ -179,8 +197,49 @@ SWITCH_PATHOLOGY_FACTOR = 1e3
 #: is structural, not marginal, at the fixture length.
 SPEEDUP_MIN = 3.0
 
-#: Tiny lens mass [Msun] driving ``F -> 1`` (``w ~ 1e-7`` in band).
+#: Tiny lens mass [Msun] driving the engine's ``w -> 0`` macro limit
+#: (``w ~ 1e-7`` in band).  NOTE this drives ``F -> 1`` ONLY when the
+#: macro sector is trivial: operator.py's certified ``w -> 0`` limit is
+#: the macro CONSTANT ``1/sqrt(1 - gamma**2)`` (at ``kappa = 0``), not
+#: unity.  See `MACRO_SHEAR` / `UNLENSED_LIMIT_LENS`.
 TINY_M_LENS = 1e-6
+
+#: Source position shared by every tiny-mass candidate, so the zero-noise
+#: floor pair and the macro-contrast anchor differ ONLY in the macro
+#: sector -- the contrast is attributable to shear, nothing else.
+TINY_Y = (0.12, 0.035)
+
+#: Shear of the tiny-mass contrast candidate B (and of the loose noisy
+#: factor gate's candidate).  At ``kappa = 0`` its certified ``w -> 0``
+#: macro limit is ``1/sqrt(1 - 0.04) = 1.0206207...`` -- a 2.06e-2 offset
+#: from unity, which is CORRECT PHYSICS, not an error.
+MACRO_SHEAR = 0.20
+
+#: ``(gamma, kappa)`` of the tiny-mass candidate whose macro sector is
+#: TRIVIAL, so the certified ``w -> 0`` limit is genuinely ``F -> 1`` and
+#: an unlensed reference is the right oracle.
+UNLENSED_LIMIT_LENS = (0.0, 0.0)
+
+#: Ceiling on ``max_f | |F(f)| - 1 |`` across the kernel sub-sample grid
+#: for the macro-trivial tiny candidate.  The residual there is the
+#: ``O(w)`` wave correction at ``w ~ 1e-7``, i.e. ~1e-7 and flat; 1e-5
+#: sits two decades above it and two decades BELOW the 2.06e-2 macro
+#: constant of the sheared candidate, so this gate distinguishes the two
+#: macro sectors unambiguously.
+FLAT_F_TOL = 1e-5
+
+#: Relative tolerance on the analytically PREDICTED macro offset of the
+#: sheared contrast candidate B.  The prediction is exact for a constant
+#: real ``F = c``; the ``O(w)`` wave correction and the template-
+#: construction ``delta-h`` leave a sub-percent residual.
+MACRO_OFFSET_RTOL = 1e-2
+
+#: Directory for diagnostic plots (created on demand).
+OUTPUT_DIR = pathlib.Path(__file__).parent / 'output'
+
+# Diagnostic plots are written to disk, never shown: a test must not open
+# a GUI window (or fail on a headless CI box for want of a display).
+plt.switch_backend('Agg')
 
 
 def _reference_par_dic():
@@ -300,10 +359,68 @@ class LensedLikelihoodTestCase(TestCase):
         return base
 
     def _tiny_candidate(self):
-        """A benign lens with negligible mass, so ``F ~ 1`` in band."""
+        """
+        A negligible-mass lens with a SHEARED macro sector.
+
+        As the mass vanishes ``F`` tends to the macro constant
+        ``1/sqrt(1 - MACRO_SHEAR**2) = 1.0206207...``, NOT to unity.  This
+        is the candidate for the LOOSE noisy factor gate, whose ``NORM_TOL
+        = 0.1`` comfortably absorbs that 2.06e-2 macro offset while still
+        catching a gross O(SNR^2) factor error.  It is deliberately NOT
+        used by the tight zero-noise floor -- see
+        `_unlensed_limit_candidate` -- and is reused as candidate B of
+        `MacroSectorContrastTestCase`, where the offset is not absorbed
+        but PREDICTED.
+        """
         return self._candidate(
-            self._lens_dic(0.12, 0.035, 0.20, 0.0, 0.0,
+            self._lens_dic(*TINY_Y, MACRO_SHEAR, 0.0, 0.0,
                            m_lens=TINY_M_LENS))
+
+    def _unlensed_limit_candidate(self):
+        """
+        A negligible-mass lens with a TRIVIAL macro sector: ``F -> 1``.
+
+        Identical to `_tiny_candidate` except ``gamma = kappa = 0``, so
+        the engine's certified ``w -> 0`` macro limit
+        ``1/sqrt(1 - gamma**2)`` collapses to unity and an UNLENSED
+        reference is the physically correct oracle.  Separate from the
+        shared `_tiny_candidate` so the noisy factor gate's configuration
+        is untouched.
+        """
+        gamma, kappa = UNLENSED_LIMIT_LENS
+        return self._candidate(
+            self._lens_dic(*TINY_Y, gamma, 0.0, kappa, m_lens=TINY_M_LENS))
+
+    def _amplification_profile(self, like, candidate):
+        """
+        ``(f, |F(f)| - 1)`` on the likelihood's kernel sub-sample grid.
+
+        The engine's switch-independent ``exact_total`` is the same |F|
+        the brute-force oracle rides, so this diagnostic reads the macro
+        sector the lnL comparison actually sees.
+
+        Parameters
+        ----------
+        like : LensedRelativeBinningLikelihood
+            The likelihood whose bin/sub-sample grid to evaluate on.
+        candidate : dict
+            Waveform + lens parameters.
+
+        Returns
+        -------
+        tuple of np.ndarray
+            Frequencies [Hz] and ``|F(f)| - 1`` at those frequencies.
+        """
+        *_, partition = like._amplification_coefficients(candidate)
+        return like._kernel_dense_f, np.abs(partition.exact_total) - 1.0
+
+    @staticmethod
+    def _save_figure(fig, name):
+        """Write ``fig`` to ``cogwheel/tests/output/<name>.png`` and close."""
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig.savefig(OUTPUT_DIR / f'{name}.png', dpi=120,
+                    bbox_inches='tight')
+        plt.close(fig)
 
 
 #: ``(label, y1, y2, gamma, beta, kappa)`` covering the required regimes.
@@ -533,24 +650,14 @@ class NormalizationFactorGateTestCase(LensedLikelihoodTestCase):
             'normalization factor error would show here')
 
 
-class NormalizationFloorZeroNoiseTestCase(LensedLikelihoodTestCase):
+class ZeroNoiseAnchorTestCase(LensedLikelihoodTestCase):
     """
-    TIGHT, physically meaningful ``F -> 1`` FLOOR on a ZERO-NOISE anchor.
+    Fixture-only base: the ZERO-NOISE anchor (``d == h0`` exactly).
 
-    The data vector is set to the pure fiducial signal (no noise), so
-    ``d == h0`` exactly and the ``<noise|delta-h>`` overlap term that
-    would otherwise scale with the noise draw VANISHES.  With a tiny-lens
-    candidate (``F ~ 1`` in band), both the lensed brute force and the
-    lensed RB must sit within ``ZERO_NOISE_TOL`` of the exact unlensed
-    ``lnlike_fft(par_dic_0)``.  What remains is the ~1e-4 lensing residual
-    plus a small deterministic template-construction ``delta-h`` -- whose
-    origin is the reference ``_h0_edges`` (stalled ringdown /
-    precession-forced) being assembled slightly differently from the
-    candidate ratio, NOT a normalization error.  On NOISY data this same
-    residual would instead scale with the noise draw (the original
-    symptom of the retired brittle 0.1 floor); the zero-noise construction
-    removes that tail and makes the tolerance meaningful (1e-2, not
-    perched at a failure boundary).
+    Carries no tests of its own; `NormalizationFloorZeroNoiseTestCase`
+    and `MacroSectorContrastTestCase` share this one deterministic
+    fixture, so the floor pair and the macro-contrast anchor are read off
+    the SAME data vector and the same bin grid.
     """
 
     @classmethod
@@ -584,26 +691,324 @@ class NormalizationFloorZeroNoiseTestCase(LensedLikelihoodTestCase):
                 delta_t_max=DELTA_T_MAX, fbin=cls.fbin)
         cls.zero_like.asd_drift = np.ones(len(zero_event.detector_names))
 
-    def test_bruteforce_floor_is_physically_tight(self):
-        exact_unlensed = self.zero_like.lnlike_fft(self.par_dic_0)
-        lensed_bf = self.zero_like.lnlike_bruteforce(self._tiny_candidate())
-        self.n_checks += 1
-        self.assertLessEqual(
-            abs(lensed_bf - exact_unlensed), ZERO_NOISE_TOL,
-            f'zero-noise lensed brute-force at F~1 ({lensed_bf:.6g}) != '
-            f'exact unlensed lnlike_fft ({exact_unlensed:.6g}) within '
-            f'{ZERO_NOISE_TOL}; an O(SNR^2) offset flags a factor error')
+    def _h0_norm(self):
+        """
+        The unlensed ``(h0|h0)`` read off the likelihood's OWN normalization.
 
-    def test_relative_binning_floor_is_physically_tight(self):
+        On the zero-noise anchor ``d == h0``, so
+        ``lnlike_fft(par_dic_0) = (d|h0) - (h0|h0)/2 = (h0|h0)/2``.
+        Taking the norm this way (rather than re-deriving an inner product
+        in the test) means the macro-offset prediction is expressed in the
+        engine's own units and cannot drift from them.
+
+        Returns
+        -------
+        float
+            ``(h0|h0)``, strictly positive.
+        """
+        return 2.0 * self.zero_like.lnlike_fft(self.par_dic_0)
+
+
+class NormalizationFloorZeroNoiseTestCase(ZeroNoiseAnchorTestCase):
+    """
+    TIGHT, physically meaningful ``F -> 1`` FLOOR on a ZERO-NOISE anchor.
+
+    The data vector is set to the pure fiducial signal (no noise), so
+    ``d == h0`` exactly and the ``<noise|delta-h>`` overlap term that
+    would otherwise scale with the noise draw VANISHES.  With a tiny-lens
+    candidate (``F ~ 1`` in band), both the lensed brute force and the
+    lensed RB must sit within ``ZERO_NOISE_TOL`` of the exact unlensed
+    ``lnlike_fft(par_dic_0)``.  What remains is the ~1e-4 lensing residual
+    plus a small deterministic template-construction ``delta-h`` -- whose
+    origin is the reference ``_h0_edges`` (stalled ringdown /
+    precession-forced) being assembled slightly differently from the
+    candidate ratio, NOT a normalization error.  On NOISY data this same
+    residual would instead scale with the noise draw (the original
+    symptom of the retired brittle 0.1 floor); the zero-noise construction
+    removes that tail and makes the tolerance meaningful (1e-2, not
+    perched at a failure boundary).
+
+    The candidate is `_unlensed_limit_candidate` (``gamma = kappa = 0``),
+    NOT the sheared `_tiny_candidate`: only a trivial macro sector makes
+    ``F -> 1`` -- and hence an unlensed reference -- correct.  See the
+    per-test docstrings.
+    """
+
+    def _assert_floor(self, label, lensed_lnl):
+        """Assert an ``F -> 1`` lnl sits within `ZERO_NOISE_TOL` of exact."""
         exact_unlensed = self.zero_like.lnlike_fft(self.par_dic_0)
-        lensed_rb = self.zero_like.lnlike(self._tiny_candidate())
+        residual = abs(lensed_lnl - exact_unlensed)
         self.n_checks += 1
         self.assertLessEqual(
-            abs(lensed_rb - exact_unlensed), ZERO_NOISE_TOL,
-            f'zero-noise lensed RB at F~1 ({lensed_rb:.6g}) != exact '
-            f'unlensed lnlike_fft ({exact_unlensed:.6g}) within '
-            f'{ZERO_NOISE_TOL}; the residual is template construction, '
-            'not normalization -- an O(SNR^2) offset flags a factor error')
+            residual, ZERO_NOISE_TOL,
+            f'zero-noise lensed {label} at the F->1 macro-trivial '
+            f'candidate ({lensed_lnl:.10g}) != exact unlensed lnlike_fft '
+            f'({exact_unlensed:.10g}); measured residual '
+            f'{residual:.4g} > {ZERO_NOISE_TOL}. An O(SNR^2) offset flags '
+            'a normalization factor error; an offset near '
+            '0.5*(1/sqrt(1-gamma**2) - 1)**2*(h0|h0) flags a macro sector '
+            'that is not trivial (see MacroSectorContrastTestCase)')
+
+    def test_amplification_is_flat_at_unity_for_macro_trivial_candidate(self):
+        """
+        DIAGNOSTIC + PREMISE CHECK for the floor pair below.
+
+        The two floor tests are only meaningful if their candidate's
+        ``F`` really does tend to unity in band.  Here we read the
+        engine's own ``|F(f)| - 1`` across the kernel sub-sample grid and
+        require it flat at ~1e-7 (the ``O(w)`` wave correction), i.e.
+        below `FLAT_F_TOL` -- two decades under the 2.06e-2 macro
+        constant that the SHEARED `_tiny_candidate` would show here.  If
+        this premise ever breaks, the floor failures below are physics,
+        not a bug.
+        """
+        freqs, f_minus_one = self._amplification_profile(
+            self.zero_like, self._unlensed_limit_candidate())
+        worst = float(np.max(np.abs(f_minus_one)))
+
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(freqs, f_minus_one, lw=1.0,
+                label=r'macro-trivial ($\gamma=\kappa=0$)')
+        ax.axhline(1.0 / np.sqrt(1.0 - MACRO_SHEAR ** 2) - 1.0,
+                   color='crimson', ls='--',
+                   label=r'sheared macro constant $1/\sqrt{1-\gamma^2}-1$')
+        ax.set_xlabel('frequency [Hz]')
+        ax.set_ylabel(r'$|F(f)| - 1$')
+        ax.set_yscale('symlog', linthresh=1e-12)
+        ax.set_title(f'zero-noise F->1 premise: max||F|-1| = {worst:.3g}')
+        ax.legend(fontsize=8)
+        self._save_figure(
+            fig, 'test_amplification_is_flat_at_unity_amplification_profile')
+
+        self.n_checks += 1
+        self.assertLess(
+            worst, FLAT_F_TOL,
+            f'macro-trivial tiny candidate has max||F|-1| = {worst:.4g} '
+            f'> {FLAT_F_TOL}; its F does NOT tend to unity in band, so the '
+            'unlensed reference is the wrong oracle for the floor tests')
+
+    def test_bruteforce_floor_is_physically_tight(self):
+        """
+        Zero-noise brute force at the MACRO-TRIVIAL tiny candidate matches
+        the exact unlensed ``lnlike_fft`` within `ZERO_NOISE_TOL`.
+
+        PREMISE REPAIR.  This test previously used the SHEARED
+        `_tiny_candidate` (``gamma = 0.20``) and failed by ~0.1214 nat.
+        That failure was CORRECT PHYSICS beaten against the wrong oracle:
+        operator.py's certified ``w -> 0`` limit is the macro constant
+        ``1/sqrt(1 - gamma**2) = 1.0206207...`` (at ``kappa = 0``), not
+        unity, so ``F ~ 1 in band`` was never true for that candidate and
+        the offset was the engine correctly reporting a 2.06e-2 macro
+        magnification.  The fix is to the CANDIDATE, not the tolerance:
+        with ``gamma = kappa = 0`` the unlensed limit is genuinely
+        ``F -> 1`` and the residual drops to the ~1e-11 numerical floor.
+        `ZERO_NOISE_TOL` is unchanged at 1e-2, and the offset that used to
+        fire here is now PREDICTED and pinned by
+        `MacroSectorContrastTestCase`.
+        """
+        self._assert_floor(
+            'brute force',
+            self.zero_like.lnlike_bruteforce(self._unlensed_limit_candidate()))
+
+    def _standard_unlensed_rb(self):
+        """
+        A STANDARD (unlensed) `RelativeBinningLikelihood` on the SAME
+        zero-noise event, base waveform generator, fiducial and bin grid
+        as the lensed fixture.
+
+        This is the mature-package machinery whose own binning/stall floor
+        the lensed engine INHERITS; building it here lets the RB test
+        isolate the lensing-layer contribution by differencing against it
+        (the shared inherited floor cancels).  ``asd_drift`` is pinned to
+        unity for the same reason it is on the lensed fixture: the drift
+        estimator is meaningless on noiseless data (it returns NaN), and
+        pinning it applies the identical correction to both likelihoods so
+        the difference is clean.
+
+        Returns
+        -------
+        RelativeBinningLikelihood
+            Unlensed RB on the zero-noise anchor, ``asd_drift = 1``.
+        """
+        with warnings.catch_warnings(), np.errstate(all='ignore'):
+            warnings.simplefilter('ignore')
+            std_like = RelativeBinningLikelihood(
+                self.zero_like.event_data,
+                self.zero_like.waveform_generator,
+                self.par_dic_0, fbin=self.fbin)
+        std_like.asd_drift = np.ones(
+            len(self.zero_like.event_data.detector_names))
+        return std_like
+
+    def test_relative_binning_isolates_lensing_layer_increment(self):
+        """
+        The lensed RB's departure from exact on this zero-noise anchor is
+        an INHERITED standard-RB binning floor plus a small lensing-layer
+        increment -- the increment is tight, and the total is a documented
+        regression pin, NOT a physical-tightness claim.
+
+        MECHANISM (measured 2026-07-17; do not re-derive).  The lensed RB
+        at the macro-trivial (``gamma = kappa = 0``, ``F -> 1``) candidate
+        reads 285.386763 while the exact unlensed ``lnlike_fft`` reads
+        285.398401, a 1.164e-2 offset.  On the SAME event/generator/
+        fiducial/bins the standard unlensed `RelativeBinningLikelihood`
+        reads 285.389439 -- an 8.96e-3 floor of its OWN (binning / stalled
+        ringdown-precession reference), inherited by the lensed engine and
+        out of the lensing program's scope.  The offset therefore
+        decomposes as 8.96e-3 inherited + 2.68e-3 lensing layer.
+
+        PRIMARY -- the lensing-layer increment.  Differencing the lensed RB
+        at the ``F -> 1`` candidate against the standard unlensed RB at the
+        fiducial CANCELS the shared inherited floor, leaving only the
+        lensing layer's own contribution.  Measured 2.676e-3; pinned
+        <= 5e-3 (~2x margin).
+
+        SECONDARY -- a documented regression PIN, explicitly NOT a
+        physical-tightness claim.  The full lensed-RB-vs-``lnlike_fft``
+        offset is held <= 1.5e-2 at its measured 1.164e-2 (8.96e-3
+        inherited standard-RB stall floor + 2.68e-3 lensing layer).  The
+        physical ``F -> 1`` tightness claim on this anchor is carried by
+        `test_bruteforce_floor_is_physically_tight`, whose brute-force path
+        has no binning floor (residual ~1e-11, well under `ZERO_NOISE_TOL`)
+        and so needs no pin.
+        """
+        lensed_rb_lnl = self.zero_like.lnlike(
+            self._unlensed_limit_candidate())
+        standard_rb_lnl = self._standard_unlensed_rb().lnlike(self.par_dic_0)
+        exact_fft = self.zero_like.lnlike_fft(self.par_dic_0)
+
+        increment = abs(lensed_rb_lnl - standard_rb_lnl)
+        self.n_checks += 1
+        self.assertLessEqual(
+            increment, 5e-3,
+            f'lensing-layer RB increment {increment:.4g} > 5e-3: the '
+            f'lensed RB ({lensed_rb_lnl:.10g}) at the F->1 candidate has '
+            f'drifted from the standard unlensed RB ({standard_rb_lnl:.10g}) '
+            'at the fiducial by more than the shared-inherited-floor-'
+            'cancelling difference (measured 2.676e-3)')
+
+        regression = abs(lensed_rb_lnl - exact_fft)
+        self.n_checks += 1
+        self.assertLessEqual(
+            regression, 1.5e-2,
+            f'lensed-RB-vs-lnlike_fft regression pin {regression:.4g} > '
+            f'1.5e-2 (measured 1.164e-2 = 8.96e-3 inherited standard-RB '
+            'stall floor + 2.68e-3 lensing layer). This is a REGRESSION '
+            'PIN, not a physical-tightness claim; the physical F->1 claim '
+            'is carried by test_bruteforce_floor_is_physically_tight')
+
+
+class MacroSectorContrastTestCase(ZeroNoiseAnchorTestCase):
+    """
+    Pin the repaired zero-noise floor to its TRUE cause: the macro sector.
+
+    `NormalizationFloorZeroNoiseTestCase` was repaired by swapping the
+    sheared tiny candidate for a macro-trivial one.  On its own that
+    repair is indistinguishable from a dodge -- deleting an inconvenient
+    configuration -- so this test keeps the sheared candidate and shows
+    its 0.1214 nat offset is not merely tolerated but PREDICTED.
+
+    Two tiny-mass candidates identical except for shear:
+
+    * A -- ``gamma = kappa = 0``: certified ``w -> 0`` limit ``F -> 1``,
+      so A sits within `ZERO_NOISE_TOL` of the unlensed reference.
+    * B -- ``gamma = MACRO_SHEAR``, ``kappa = 0``: certified limit is the
+      macro CONSTANT ``c = 1/sqrt(1 - gamma**2) = 1.0206207...``, so B is
+      offset from the reference by a computable amount.
+
+    The prediction is derived INDEPENDENTLY in the test, from closed form
+    rather than from any production path: for a constant real ``F = c``
+    the candidate strain is ``c*h0``, and on data ``d == h0``
+
+        lnL(c*h0) - lnL(h0) = [c*(h0|h0) - c**2*(h0|h0)/2]
+                              - [(h0|h0) - (h0|h0)/2]
+                            = -0.5*(c - 1)**2*(h0|h0),
+
+    i.e. a strictly NEGATIVE offset quadratic in the macro magnification
+    error.  Only ``(h0|h0)`` is taken from the likelihood (via
+    `_h0_norm`, the engine's own normalization); ``c`` and the algebra are
+    the test's.
+
+    This goes red if anyone 'normalizes' the macro magnification out of
+    the engine (B would collapse onto A) or reintroduces a small-``w``
+    short-circuit forcing ``F = 1`` (likewise) -- the two regressions the
+    premise repair would otherwise silently invite.
+    """
+
+    def test_macro_shear_offsets_lnlike_by_the_predicted_amount(self):
+        """A matches the unlensed reference; B is offset as predicted."""
+        reference = self.zero_like.lnlike_fft(self.par_dic_0)
+        lnl_a = self.zero_like.lnlike_bruteforce(
+            self._unlensed_limit_candidate())            # gamma = kappa = 0
+        lnl_b = self.zero_like.lnlike_bruteforce(
+            self._tiny_candidate())                      # gamma = MACRO_SHEAR
+
+        # Independent closed-form prediction (see class docstring).
+        macro_c = 1.0 / np.sqrt(1.0 - MACRO_SHEAR ** 2)
+        h0_norm = self._h0_norm()
+        predicted_offset = -0.5 * (macro_c - 1.0) ** 2 * h0_norm
+        observed_offset = lnl_b - reference
+
+        self._plot_contrast(reference, lnl_a, lnl_b, predicted_offset)
+
+        # (i) The macro-trivial candidate A really does sit at the
+        #     unlensed reference -- without this, an offset for B proves
+        #     nothing about shear.
+        self.n_checks += 1
+        self.assertLessEqual(
+            abs(lnl_a - reference), ZERO_NOISE_TOL,
+            f'macro-trivial candidate A ({lnl_a:.10g}) does not sit at the '
+            f'unlensed reference ({reference:.10g}); residual '
+            f'{abs(lnl_a - reference):.4g} > {ZERO_NOISE_TOL}')
+
+        # (ii) The sheared candidate B is offset by the PREDICTED macro
+        #      amount -- pinning the historical 0.1214 nat to its cause.
+        self.n_checks += 1
+        self.assertGreater(
+            abs(predicted_offset), 10.0 * ZERO_NOISE_TOL,
+            f'predicted macro offset {predicted_offset:.4g} is not '
+            'comfortably outside the floor tolerance; this test would not '
+            'distinguish candidate B from candidate A')
+        self.assertLessEqual(
+            abs(observed_offset - predicted_offset),
+            MACRO_OFFSET_RTOL * abs(predicted_offset),
+            f'sheared candidate B is offset from the unlensed reference by '
+            f'{observed_offset:.6g} nat, but the closed-form macro '
+            f'prediction -0.5*(c-1)**2*(h0|h0) with c = {macro_c:.7f} and '
+            f'(h0|h0) = {h0_norm:.6g} is {predicted_offset:.6g} nat '
+            f'(relative miss '
+            f'{abs(observed_offset / predicted_offset - 1.0):.3g} > '
+            f'{MACRO_OFFSET_RTOL}). Either the macro magnification has been '
+            'normalized out of the engine, a small-w short-circuit forces '
+            'F = 1, or the w->0 macro limit has changed')
+
+    def _plot_contrast(self, reference, lnl_a, lnl_b, predicted_offset):
+        """Annotated bar chart of the three lnL values and the prediction."""
+        labels = ['unlensed\nreference', r'A: $\gamma=\kappa=0$',
+                  rf'B: $\gamma={MACRO_SHEAR}$']
+        values = [reference, lnl_a, lnl_b]
+
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        ax.bar(labels, values, color=['0.6', 'tab:green', 'tab:red'],
+               width=0.55)
+        for idx, value in enumerate(values):
+            ax.annotate(f'{value:.4f}', (idx, value), ha='center',
+                        va='bottom', fontsize=8)
+        # Arrow from the reference down to the predicted position of B.
+        ax.annotate(
+            '', xy=(2, reference + predicted_offset), xytext=(2, reference),
+            arrowprops={'arrowstyle': '->', 'color': 'black', 'lw': 1.4})
+        ax.annotate(
+            rf'predicted $-\frac{{1}}{{2}}(c-1)^2 (h_0|h_0)$ = '
+            rf'{predicted_offset:.4f}',
+            xy=(2, reference + 0.5 * predicted_offset), xytext=(6, 0),
+            textcoords='offset points', va='center', fontsize=8)
+        ax.axhline(reference, color='0.4', ls=':', lw=1.0)
+        ax.set_ylabel(r'$\ln \mathcal{L}$ (zero-noise, $d = h_0$)')
+        ax.set_title('macro-sector contrast: shear offsets lnL as predicted')
+        span = max(abs(predicted_offset), 1e-3)
+        ax.set_ylim(reference - 3.0 * span, reference + 1.2 * span)
+        self._save_figure(fig, 'test_macro_shear_offsets_lnlike_contrast')
 
 
 class BinGuardTestCase(LensedLikelihoodTestCase):

@@ -963,6 +963,142 @@ class BranchGateTestCase(OperatorTestCase):
         _savefig(fig, 'operator_branch_gate.png')
 
 
+class MacroMagnificationLimitTestCase(OperatorTestCase):
+    """
+    DECISIVE closed-form ``w -> 0`` gate -- the Build 2d rediagnosis.
+
+    ``F_op`` normalizes the amplification to no lens at all (not to the
+    macro image), so the flat ``|F| - 1`` the engine reports at tiny
+    ``w`` is NOT a numerical singularity or a ``gamma/(2w)`` prefactor
+    blow-up: it is the EXACT geometric-optics macro magnification limit
+
+        F(w -> 0) -> sqrt(mu_macro) = 1/sqrt((1 - kappa)**2 - gamma**2),
+
+    a mass/frequency-INDEPENDENT constant.  The two signatures that this
+    is the physical limit and not a bug are that ``|F_op|`` (a) equals
+    the closed form to relative `LIMIT_RTOL` and (b) does not move across
+    three decades of tiny ``w`` (mass/frequency independence).  For
+    ``gamma = kappa = 0`` the closed form is exactly ``1`` (the unsheared
+    control).
+
+    The expected value is written LITERALLY as
+    ``1/sqrt((1 - kappa)**2 - gamma**2)`` -- never built from ``F_op``,
+    ``channels``, ``geometry``, or any engine path (FINDINGS F002
+    oracle-tautology trap).  A `operator.CancellationError` at these tiny
+    ``w`` is itself NEWS: it is recorded as a refusal and FAILS the test
+    with its message, never skipped.
+
+    If this test FAILS, it is not to be adjusted to pass -- the failure
+    is the finding, to be reported verbatim.
+    """
+
+    #: Positive-parity grid (``1 - kappa > |gamma|`` at every point),
+    #: crossing sheared/unsheared and converged/unconverged.
+    LIMIT_GAMMAS = (0.0, 0.1, 0.2, 0.3)
+    LIMIT_KAPPAS = (0.0, 0.3)
+    #: Shear orientation.  ``|F|`` is invariant under the eigenframe
+    #: rotation, so both values must land on the same closed form.
+    LIMIT_BETAS = (0.0, 0.7)
+    LIMIT_Y = np.array([0.30, 0.10])
+    #: Three decades of tiny frequency; the ``|F|`` plateau must not
+    #: move across them.
+    LIMIT_WS = (1e-8, 1e-10, 1e-12)
+    #: The limit is EXACT; this gate is a property of ``F_op``.  Loosen
+    #: only on a MEASURED need and never past ``1e-6`` -- anything looser
+    #: is a finding to report.
+    LIMIT_RTOL = 1e-8
+
+    def test_small_w_limit_is_macro_magnification(self):
+        """
+        Across the positive-parity grid and the three tiny frequencies,
+        ``|F_op|`` equals the literal closed form
+        ``1/sqrt((1 - kappa)**2 - gamma**2)`` to `LIMIT_RTOL` and is
+        independent of ``w`` to the same tolerance.  A refusal at tiny
+        ``w`` is recorded and FAILS the test rather than being skipped.
+        """
+        refusals: list[str] = []
+        max_rel = 0.0
+        sheared_control = None  # measured |F_op| at (gamma=0.2, kappa=0)
+        for gamma, kappa, beta in itertools.product(
+                self.LIMIT_GAMMAS, self.LIMIT_KAPPAS, self.LIMIT_BETAS):
+            # Closed-form macro magnification, written LITERALLY -- never
+            # via F_op/channels/geometry (FINDINGS F002).
+            closed = 1.0 / np.sqrt((1.0 - kappa) ** 2 - gamma ** 2)
+            if gamma == 0.0 and kappa == 0.0:
+                # Unsheared control: the closed form is exactly 1.
+                self.assertEqual(closed, 1.0)
+            magnitudes: list[float] = []
+            for w in self.LIMIT_WS:
+                with self.subTest(gamma=gamma, kappa=kappa, beta=beta,
+                                  w=w):
+                    try:
+                        value, _ = operator.F_op(
+                            w, self.LIMIT_Y, gamma, beta=beta,
+                            kappa=kappa)
+                    except operator.CancellationError as exc:
+                        # A refusal at w -> 0 is news, not a skip.
+                        refusals.append(
+                            f'gamma={gamma}, kappa={kappa}, beta={beta}, '
+                            f'w={w:g}: {exc}')
+                        continue
+                    mag = abs(value)
+                    magnitudes.append(mag)
+                    rel = abs(mag - closed) / abs(closed)
+                    max_rel = max(max_rel, rel)
+                    self.assertLessEqual(
+                        rel, self.LIMIT_RTOL,
+                        f'gamma={gamma}, kappa={kappa}, beta={beta}, '
+                        f'w={w:g}: |F_op| = {mag:.12f} != closed form '
+                        f'1/sqrt((1-kappa)^2 - gamma^2) = {closed:.12f} '
+                        f'(rel {rel:.3e} > {self.LIMIT_RTOL:.0e}); '
+                        'F(w->0) should equal sqrt(mu_macro)')
+                    if (gamma, kappa, beta, w) == (0.2, 0.0, 0.0, 1e-10):
+                        sheared_control = mag
+                    self.n_checks += 1
+            # Mass/frequency independence: the |F| plateau must not drift
+            # across the three decades of w.  This is the signature that
+            # distinguishes the exact macro limit from a 1/w singularity.
+            if len(magnitudes) >= 2:
+                spread = max(abs(m - magnitudes[0]) for m in magnitudes)
+                self.assertLessEqual(
+                    spread / abs(magnitudes[0]), self.LIMIT_RTOL,
+                    f'gamma={gamma}, kappa={kappa}, beta={beta}: |F_op| '
+                    f'drifts by relative '
+                    f'{spread / abs(magnitudes[0]):.3e} across '
+                    'w in {1e-8, 1e-10, 1e-12}; a true macro '
+                    'magnification limit is frequency-independent')
+                self.n_checks += 1
+
+        # A refusal at tiny w is a finding, not an expected skip: fail
+        # with the recorded messages rather than passing on absence.
+        self.assertEqual(
+            refusals, [],
+            'F_op refused at tiny w (a refusal at w -> 0 is itself news, '
+            'not an expected skip):\n' + '\n'.join(refusals))
+
+        # Self-falsification companion (the suite's anti-vacuity idiom):
+        # the MEASURED |F_op| at a real sheared point matches the true
+        # closed form but NOT one with the shear perturbed 1%, so the
+        # 1e-8 gate genuinely discriminates a wrong macro magnification
+        # rather than passing on any nearby constant.
+        self.assertIsNotNone(
+            sheared_control,
+            'the sheared control point (gamma=0.2, kappa=0, w=1e-10) did '
+            'not return, so the self-falsification companion cannot run')
+        true_closed = 1.0 / np.sqrt(1.0 ** 2 - 0.2 ** 2)
+        perturbed_closed = 1.0 / np.sqrt(1.0 ** 2 - (0.2 * 1.01) ** 2)
+        self.assertLessEqual(
+            abs(sheared_control - true_closed) / true_closed,
+            self.LIMIT_RTOL)
+        self.assertGreater(
+            abs(sheared_control - perturbed_closed) / perturbed_closed,
+            self.LIMIT_RTOL,
+            'a closed form with the shear perturbed 1% still matches '
+            '|F_op| within 1e-8; the gate would not catch a 1% error in '
+            'the macro magnification')
+        self.n_checks += 1
+
+
 class SelfFalsificationTestCase(OperatorTestCase):
     """
     Prove the gates above can actually go red.

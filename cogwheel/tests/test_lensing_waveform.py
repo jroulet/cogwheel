@@ -19,9 +19,12 @@ waveform layer:
   returns a finite, certified O(1) amplification at the engine's default
   order-42 budget, while a companion at the certification band edge
   refuses cleanly with `operator.CancellationError`;
-* SMALL-MASS UNLENSED FLOOR (Architect spec 2): as the lens mass shrinks
-  the amplification approaches the unlensed limit ``F -> 1`` monotonically
-  over the physically meaningful mass range.
+* SMALL-MASS FLOOR (Architect spec 2): as the lens mass shrinks the
+  amplification flattens onto the exact geometric-optics macro limit
+  ``F -> sqrt(mu_macro) = 1/sqrt((1 - kappa)**2 - gamma**2)`` (the
+  quadratic lens potential makes the ``w -> 0`` integral an exact
+  Gaussian); over larger masses it rises above that limit monotonically
+  in ``w`` as the point-mass diffraction switches on.
 
 WHY THE ORACLES ARE INDEPENDENT
 -------------------------------
@@ -43,25 +46,30 @@ Nothing here is judged against the engine's own derivation of ``F``:
   tail (~1.168e-10) sits just above the 1e-10 certification target: its
   refusal is a FEATURE and is asserted where it belongs, at the waveform
   layer that consumes it.
-* The unlensed floor is a self-oracling PHYSICAL limit: ``F -> 1`` as
-  ``w -> 0``.  Monotone approach to one needs no external reference, and
-  the two-case contrast (physical masses monotone; the singular tiny-w
-  point excluded) is the substance.
+* The small-mass floor is a self-oracling PHYSICAL limit: as ``w -> 0``
+  the point-mass diffraction switches off and ``F`` approaches the exact
+  macro magnification
+  ``sqrt(mu_macro) = 1/sqrt((1 - kappa)**2 - gamma**2)``, a closed form
+  built from no engine path.  The two-case contrast -- tiny masses flat
+  on that closed-form floor, larger masses rising above it monotonically
+  in ``w`` -- is the substance; the bare operator's ``w -> 0`` value is
+  gated in the operator suite (see the next section).
 
-DEFERRED SMALL-W ENGINE GAP
----------------------------
-The smallest mass in the floor sweep, ``M_L = 1e-12 Msun`` (``w ~ 1e-13``),
-is EXCLUDED from the floor assertion.  As ``w -> 0`` the operator series'
-shear prefactor ``gamma/(2*w)`` diverges, a KNOWN engine gap that is
-DEFERRED, not a regression: the ``w -> 0`` corner is simply outside the
-certified ``(w, gamma')`` band.  It is SAFE because the engine does not
-return a wrong number there -- under the F005 certified-or-refuse contract
-`operator.F_op` raises rather than certifying an untrustworthy value.
-`UnlensedFloorTestCase.test_singular_small_w_point_is_correctly_excluded`
-demonstrates the exclusion is warranted (the point raises or breaks the
-clean floor), so it is a documented boundary rather than an arbitrary
-drop.  Tracked as the deferred small-w unlensed-limit gap; see FINDINGS
-F005 for the containing certified-or-refuse contract.
+CLOSED-FORM SMALL-W LIMIT
+-------------------------
+There is NO small-w engine gap.  ``F_op`` normalizes the amplification
+to no lens at all, so as ``w -> 0`` at fixed shear the point-mass
+diffraction switches off and ``F`` approaches the EXACT macro
+magnification ``sqrt(mu_macro) = 1/sqrt((1 - kappa)**2 - gamma**2)`` --
+the quadratic lens potential makes the ``w -> 0`` integral an exact
+Gaussian.  This is why the floor sweep runs down to ``M_L = 1e-12 Msun``
+(``w ~ 1e-14``) with NO mass excluded: the tiny-w plateau is a physical
+limit, not a singularity, and the earlier ``gamma/(2*w)`` prefactor
+blow-up diagnosis has been FALSIFIED.  The bare operator's ``w -> 0``
+value is gated in the operator suite by the claim ``F_op(w -> 0) equals
+1/sqrt((1 - kappa)**2 - gamma**2)``
+(`test_lensing_operator.MacroMagnificationLimitTestCase`); this suite
+consumes that limit at the waveform layer.
 
 ANTI-VACUITY AND SELF-FALSIFICATION
 -----------------------------------
@@ -116,14 +124,15 @@ CERT_MAX_ORDER = operator.MAX_ORDER
 #: ``operator.L_MAX``; used only to keep probes on the wave branch.
 _L_MAX = operator.L_MAX
 
-#: Dimensionless-frequency floor below which the small-w engine gap makes
-#: the amplification untrustworthy; the floor assertion is restricted to
-#: masses whose probed ``w`` exceeds this.  See the module docstring.
-W_FLOOR_CUTOFF = 1e-3
-
-#: Upper bound on ``|F| - 1`` for a configuration to count as sitting in
-#: the clean unlensed neighbourhood (a weak lens at small ``w``).
-CLEAN_FLOOR_MAX = 0.5
+#: Analytic geometric-optics macro floor ``|F| - 1`` at ``w -> 0`` for
+#: FLOOR_CONFIG (``kappa = 0``, ``gamma = 0.10``), i.e.
+#: ``1/sqrt((1 - kappa)**2 - gamma**2) - 1``.  Equals ``5.0378e-3``,
+#: written literally in the floor test and never built from an engine
+#: path.  The bare operator's ``w -> 0`` value carrying this limit is
+#: gated in the operator suite by the claim ``F_op(w -> 0) equals
+#: 1/sqrt((1 - kappa)**2 - gamma**2)``
+#: (`test_lensing_operator.MacroMagnificationLimitTestCase`).
+MACRO_FLOOR = 1.0 / np.sqrt(1.0 - 0.10**2) - 1.0
 
 #: Lens mass / redshift used to turn target ``w`` values into a frequency
 #: grid for the control tests; the physics depends only on ``w``, so the
@@ -202,11 +211,19 @@ FLOOR_CONFIG = _LensConfig(
     name='unlensed-floor', y=(0.30, 0.10), gamma=0.10, beta=0.0,
     kappa=0.0, w_probes=())
 
-#: Lens masses (solar masses) for the floor sweep, decreasing.  The first
-#: is the DEFERRED small-w point (excluded from the floor assertion); the
-#: rest are physically meaningful masses whose probed ``w`` exceeds
-#: ``W_FLOOR_CUTOFF``.
-FLOOR_MASSES_MSUN = (1.0e-12, 0.1, 0.3, 1.0, 2.0, 4.0)
+#: Tiny lens masses (solar masses) whose probed ``w`` is ``<< 1`` (down to
+#: ``w ~ 1e-14`` at ``M_L = 1e-12 Msun``): the point-mass diffraction is
+#: switched off and ``|F|`` sits on the analytic macro floor.  NONE is
+#: excluded -- the ``w -> 0`` limit is a physical plateau, not a gap.
+FLOOR_TINY_MASSES_MSUN = (1.0e-12, 1.0e-9, 1.0e-6)
+
+#: Larger lens masses (solar masses) where the point-mass diffraction
+#: switches on, so the floor rises above the macro limit monotonically
+#: with ``w``.
+FLOOR_RISING_MASSES_MSUN = (0.1, 0.3, 1.0, 2.0, 4.0)
+
+#: Full small-mass floor sweep: tiny (plateau) through larger (rising).
+FLOOR_MASSES_MSUN = FLOOR_TINY_MASSES_MSUN + FLOOR_RISING_MASSES_MSUN
 
 
 class _StubWaveformGenerator:
@@ -563,12 +580,27 @@ class MacroSaddleControlTestCase(WaveformTestCase):
 
 class UnlensedFloorTestCase(WaveformTestCase):
     """
-    Architect spec 2: the amplification approaches ``F -> 1`` as the lens
-    mass shrinks, monotonically over the physically meaningful masses.
+    Architect spec 2 (reworked): the small-mass floor over the restored
+    range, ``M_L = 1e-12 .. 4 Msun``, with NO mass excluded.
 
-    The floor ``|F| - 1`` is asserted only for masses whose probed ``w``
-    exceeds ``W_FLOOR_CUTOFF``; the singular tiny-w point is excluded (see
-    the module docstring's deferred-gap note).
+    ``F_op`` normalizes the amplification to no lens at all, so as
+    ``w -> 0`` at fixed shear the point-mass diffraction switches off and
+    ``F`` approaches the EXACT geometric-optics macro magnification
+
+        sqrt(mu_macro) = 1/sqrt((1 - kappa)**2 - gamma**2)
+
+    (the quadratic lens potential makes the ``w -> 0`` integral an exact
+    Gaussian).  For FLOOR_CONFIG (``kappa = 0``, ``gamma = 0.10``) that is
+    ``MACRO_FLOOR = 5.0378e-3`` in ``|F| - 1``.  Two claims:
+
+    * tiny masses (``w << 1``) sit on that analytic floor to ~1e-3
+      relative -- no gap, no exclusion; and
+    * larger masses rise above it monotonically in ``w`` as the point-mass
+      diffraction switches on, with a nontrivial dynamic range.
+
+    The bare operator's ``w -> 0`` value is gated in the operator suite by
+    the claim ``F_op(w -> 0) equals 1/sqrt((1 - kappa)**2 - gamma**2)``
+    (`test_lensing_operator.MacroMagnificationLimitTestCase`).
     """
 
     def _floor_at_smallest_w(self, m_lens_msun: float
@@ -584,21 +616,41 @@ class UnlensedFloorTestCase(WaveformTestCase):
         factor = generator.amplification(f_hz)
         return w0, float(abs(factor[0]) - 1.0)
 
-    def test_floor_is_monotone_over_physical_masses(self):
+    def test_tiny_masses_flatten_onto_macro_limit(self):
         """
-        Over masses with ``w > W_FLOOR_CUTOFF`` the floor ``|F| - 1`` is
-        strictly increasing with ``w`` (equivalently, strictly decreasing
-        as the mass shrinks toward the unlensed limit), stays in the
-        clean unlensed neighbourhood, and is nontrivially bounded away
-        from zero at the top of the range.
+        At tiny masses (``w << 1``) the floor ``|F| - 1`` flattens onto
+        the analytic macro limit ``1/sqrt(1 - 0.10**2) - 1 = 5.0378e-3``
+        to ~1e-3 relative, with NO mass excluded.
         """
-        physical = [m for m in FLOOR_MASSES_MSUN if m > 1e-9]
-        ws, floors = [], []
-        for m_lens in physical:
+        # The literal number the spec pins, matched by the closed form.
+        self.assertLess(
+            abs(MACRO_FLOOR - 5.0378e-3) / MACRO_FLOOR, 1e-4,
+            f'macro floor {MACRO_FLOOR!r} disagrees with the literal '
+            f'5.0378e-3')
+
+        for m_lens in FLOOR_TINY_MASSES_MSUN:
             w0, floor = self._floor_at_smallest_w(m_lens)
-            self.assertGreater(
-                w0, W_FLOOR_CUTOFF,
-                f'mass {m_lens} probes w={w0:.2e} below the floor cutoff')
+            self.assertLess(
+                w0, 1e-5,
+                f'mass {m_lens} probes w={w0:.2e}, not w << 1; it is not '
+                f'a tiny-w plateau point')
+            self.assertLess(
+                abs(floor - MACRO_FLOOR) / MACRO_FLOOR, 1e-3,
+                f'floor at M_L={m_lens} (w={w0:.2e}) is {floor:.6e}, off '
+                f'the macro limit {MACRO_FLOOR:.6e} by more than 1e-3 '
+                f'relative')
+            self.n_checks += 1
+
+    def test_floor_rises_above_macro_limit_monotonically(self):
+        """
+        Over the FULL sweep the floor is strictly increasing with ``w``
+        (nothing raises, nothing excluded); over the larger masses it sits
+        above the macro limit, and across the sweep it spans a nontrivial
+        dynamic range as the point-mass diffraction switches on.
+        """
+        ws, floors = [], []
+        for m_lens in FLOOR_MASSES_MSUN:
+            w0, floor = self._floor_at_smallest_w(m_lens)  # (c) never raises
             ws.append(w0)
             floors.append(floor)
             self.n_checks += 1
@@ -608,78 +660,39 @@ class UnlensedFloorTestCase(WaveformTestCase):
 
         self.assertTrue(
             _is_strictly_increasing(ordered_floors),
-            f'floor |F|-1 not monotone in w: {ordered_floors}')
-        self.assertTrue(
-            np.all((ordered_floors > 0.0)
-                   & (ordered_floors < CLEAN_FLOOR_MAX)),
-            f'floor left the clean unlensed neighbourhood: '
+            f'floor |F|-1 not monotone in w across the sweep: '
             f'{ordered_floors}')
-        # Clean ~1e-3 near the cutoff; nontrivial approach to one across
-        # the range (the small-w floor is far below the large-w one).
-        self.assertLess(ordered_floors[0], 1e-2,
-                        'floor near the w~1e-3 cutoff is not clean')
-        self.assertGreater(ordered_floors[-1] / ordered_floors[0], 5.0,
-                           'floor is flat: no approach to the unlensed '
-                           'limit across the mass range')
-        self._plot(ws, floors)
 
-    def test_singular_small_w_point_is_correctly_excluded(self):
-        """
-        Justify the exclusion of ``M_L = 1e-12 Msun`` (``w ~ 1e-13``) as a
-        DOMAIN cutoff, not an arbitrary drop.
+        # The larger masses have switched the diffraction on: they sit
+        # strictly above the geometric-optics macro floor.
+        rising = [self._floor_at_smallest_w(m)[1]
+                  for m in FLOOR_RISING_MASSES_MSUN]
+        self.assertTrue(
+            np.all(np.asarray(rising) > MACRO_FLOOR),
+            f'a rising-mass floor dipped to or below the macro limit '
+            f'{MACRO_FLOOR:.6e}: {rising}')
 
-        The exclusion rule is exactly ``w > W_FLOOR_CUTOFF``: the tiny
-        mass probes a ``w`` far below the cutoff, into the deferred
-        small-w gap where the shear prefactor ``gamma/(2*w)`` is
-        uncertified (see the module docstring), so the mass filter used by
-        the floor assertion drops it.  This checks the MECHANISM of the
-        exclusion -- that the documented cutoff actually filters the point
-        out -- rather than asserting a particular (raise vs return)
-        failure mode there, which is exactly the uncertified behaviour we
-        decline to depend on.
-        """
-        tiny_mass = min(FLOOR_MASSES_MSUN)
-        generator = _make_generator(FLOOR_CONFIG, tiny_mass, _FLOOR_Z)
-        w0_tiny = float(generator.dimensionless_frequency(_FLOOR_F0_HZ))
-        self.assertLess(
-            w0_tiny, W_FLOOR_CUTOFF,
-            f'the tiny mass probes w={w0_tiny:.2e}, not below the '
-            f'{W_FLOOR_CUTOFF:.0e} cutoff; the sweep is mis-specified')
+        # Nontrivial dynamic range: the top of the sweep is well above the
+        # plateau (a flat sweep would read green vacuously).
+        self.assertGreater(
+            ordered_floors[-1] / ordered_floors[0], 5.0,
+            f'floor is flat across the sweep (max/min = '
+            f'{ordered_floors[-1] / ordered_floors[0]:.2f}); no approach '
+            f'to the macro limit at the small-mass end')
 
-        asserted_masses = [
-            m for m in FLOOR_MASSES_MSUN
-            if float(_make_generator(FLOOR_CONFIG, m, _FLOOR_Z)
-                     .dimensionless_frequency(_FLOOR_F0_HZ))
-            > W_FLOOR_CUTOFF]
-        self.assertNotIn(
-            tiny_mass, asserted_masses,
-            'the cutoff rule failed to exclude the deferred small-w '
-            'point from the floor assertion')
-        self.assertTrue(asserted_masses,
-                        'the cutoff excluded every mass; nothing would '
-                        'be asserted')
-        self.n_checks += 1
+        self._plot(np.asarray(ws)[order], ordered_floors)
 
     def _plot(self, ws, floors):
-        if not _HAVE_MPL or not ws:
+        if not _HAVE_MPL or not len(ws):
             return
-        # Include the excluded tiny-w point greyed out, if it evaluates.
-        tiny_mass = min(FLOOR_MASSES_MSUN)
-        excluded = None
-        try:
-            excluded = self._floor_at_smallest_w(tiny_mass)
-        except Exception:  # pragma: no cover - engine may refuse
-            excluded = None
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.loglog(ws, np.abs(floors), 'oC0', label='physical masses')
-        if excluded is not None and np.isfinite(excluded[1]):
-            ax.loglog([excluded[0]], [abs(excluded[1])], 'o',
-                      color='0.7', label='excluded small-w (deferred gap)')
-        ax.axvline(W_FLOOR_CUTOFF, color='C3', ls=':',
-                   label='w ~ 1e-3 cutoff')
+        ax.loglog(ws, np.abs(floors), 'oC0', label='floor |F| - 1')
+        ax.axhline(MACRO_FLOOR, color='C3', ls=':',
+                   label='macro limit 1/sqrt(1 - gamma^2) - 1')
         ax.set_xlabel('w (smallest grid frequency)')
         ax.set_ylabel('|F| - 1')
-        ax.set_title('unlensed-limit floor (restricted to physical masses)')
+        ax.set_title('small-mass floor: plateau at the macro limit, then '
+                     'rising')
         ax.legend()
         _savefig(fig, 'waveform_unlensed_floor.png')
 
@@ -801,13 +814,18 @@ class SelfFalsificationTestCase(WaveformTestCase):
                 f'the interior control refused at w={w}; the refusal gate '
                 'would fire for any configuration')
 
-    def test_clean_floor_bound_rejects_a_far_amplification(self):
+    def test_macro_floor_tolerance_rejects_perturbed_gamma(self):
         """
-        The clean-floor bound would catch an amplification far from one
-        (e.g. ``|F| = 2``), so it is not a vacuous ``< CLEAN_FLOOR_MAX``.
+        The tiny-mass floor's 1e-3 relative tolerance is not vacuous: the
+        macro limit rebuilt with the shear perturbed (``gamma = 0.101``
+        instead of ``0.10``) sits well outside it, so a wrong shear could
+        not pass the plateau gate.
         """
-        bad_floor = abs(2.0) - 1.0
-        self.assertGreaterEqual(bad_floor, CLEAN_FLOOR_MAX)
+        perturbed = 1.0 / np.sqrt(1.0 - 0.101**2) - 1.0
+        self.assertGreater(
+            abs(perturbed - MACRO_FLOOR) / MACRO_FLOOR, 1e-3,
+            'a 1% shear perturbation stayed within the plateau tolerance; '
+            'the macro-floor gate would be vacuous')
 
     def test_frequency_gate_rejects_a_wrong_constant(self):
         """

@@ -96,6 +96,31 @@ total.  It is NOT this gate: the switch chooses a gauge, the gate
 chooses an evaluation method, and the two thresholds must not leak into
 each other.
 
+NORMALIZATION AND THE w -> 0 MACRO LIMIT
+----------------------------------------
+``F`` is normalized to NO LENS AT ALL, not to the macro image.  Both
+branches agree: `F_op` reconstructs by dividing by ``lam = 1 - kappa``
+(a pure convergence gives ``F = 1/(1 - kappa)`` at EVERY ``w``), and
+`geometric_amplification` sums ``sqrt(|mu_a|)`` with ``mu_a`` from
+`geometry.macro_matrix`, which carries the macro magnification.
+
+As ``w -> 0`` at fixed ``y, gamma, kappa`` the point-mass diffraction
+switches off and only the smooth quadratic (shear plus convergence)
+part of the Fermat potential survives; a quadratic potential makes the
+diffraction integral an exact Gaussian, so
+
+    F -> 1 / sqrt((1 - kappa)**2 - gamma**2) = sqrt(mu_macro),
+
+a real, positive, FREQUENCY- and MASS-INDEPENDENT constant -- NOT 1.
+``|F| - 1`` vanishes as ``w -> 0`` only when ``gamma = kappa = 0``.
+So the flat, mass-independent ``|F| - 1`` at tiny ``w`` (2.06207e-2 at
+``gamma = 0.20``, ``kappa = 0``) IS that exact limit, not a numerical
+singularity of the prefactor ``gamma/(2*w)``, and must not be "fixed"
+by a small-``w`` short-circuit returning ``1 + O(w)`` -- that would
+inject a real 2% discontinuity at the crossover and destroy the exact
+pure-shear limit.  The operator suite pins this closed form as a direct
+``w -> 0`` gate.
+
 External convergence enters through the exact mass-sheet rescaling
 ``x' = sqrt(lam)*x``, ``y' = y/sqrt(lam)`` with ``lam = 1 - kappa`` and
 effective shear ``gamma/lam``, implemented ONCE in `_mass_sheet_map` and
@@ -414,6 +439,14 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
     _hyp1f1.HypergeometricDomainError
         Propagated from the kernel above its certified ``w`` ceiling or
         cancellation-exponent ceiling.
+
+    Notes
+    -----
+    ``F`` is normalized to no lens at all, not to the macro image, so
+    ``F(w -> 0) = 1/sqrt((1 - kappa)**2 - gamma**2) = sqrt(mu_macro)``,
+    not 1.  The flat ``|F| - 1`` at tiny ``w`` is that exact limit and
+    not a ``gamma/(2*w)`` prefactor singularity; see the module
+    docstring before "fixing" it.
     """
     w = float(w)
     lam, y_scaled, gamma_scaled = _mass_sheet_map(y, gamma, kappa)
