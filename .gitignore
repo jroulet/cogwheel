@@ -27,3 +27,4 @@ __pycache__
 .claude/sdk/build_costs.jsonl
 .claude/sync_issues.json
 cogwheel/tests/output/
+CLAUDE.local.md
