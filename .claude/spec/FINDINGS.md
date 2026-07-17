@@ -282,6 +282,13 @@ The two correct gates:
 
 ### F→1 floor — a template-construction asymmetry, left in place for Build 2b
 
+> Scope note (F009, 2026-07-17): this section is the UNLENSED limit
+> (`gamma = kappa = 0`), where `F -> 1` exactly and the residual floor is
+> construction noise. The SHEARED small-``w`` floor (`0.1214`/`0.1307`, similar
+> magnitude, different mechanism) is NOT construction noise — it is the exact
+> macro-magnification limit `F(w->0) = sqrt(mu_macro) != 1`. See F009; do not
+> conflate the two.
+
 The unlensed-limit floor readings (`0.10`–`0.33` across runs) are NOT a
 normalization error. `_compute_d_h` / `_compute_h_h` apply `asd_drift**-2` once
 per detector and BOTH oracles route through them; the `4*df` prefactor, blued
@@ -403,3 +410,81 @@ UNAFFECTED by this fix — the switch correction touches neither the operator
 contraction refusal thresholds nor the template builders. It does, however,
 retire F006's dense-subsampling rationale and lets the crown gate pass at the
 original tolerances (`RB_ATOL = 1.5`) with the sub-sampling default back at 2.
+
+## F009 — the small-``w`` floor is the exact macro-magnification limit, not a `gamma/(2w)` singularity (2026-07-17)
+
+The Build-2d episode. After Build 2c landed (F008), three tiny-``w``
+observations were read as a fresh engine defect; a consult misdiagnosed them
+as a series singularity and prescribed an engine short-circuit; the Architect
+rediagnosed them as an EXACT closed-form physical limit, and the test ratified
+that to 16 digits. No engine code changed. Recorded so the short-circuit is
+never re-proposed.
+
+### 1. Symptom (three post-2c "failures")
+
+* Zero-noise likelihood floors of `0.1214` and `0.1307` against a `0.01`
+  expectation, in the sheared small-``w`` regime.
+* A small-mass `|F| - 1` that sat FLAT at `2.062e-2` — refusing to vanish as
+  the mass (and hence ``w``) shrank, where a diffraction signal was expected
+  to switch off.
+* The channel-tracker "flat-gate" premise (that `|F| -> 1` as `w -> 0`) was
+  apparently void.
+
+### 2. Misdiagnosis (consult) — FALSIFIED
+
+A consult attributed the flat `|F| - 1` to a `gamma/(2*w)` small-``w`` series
+singularity in the operator power series (the prefactor `i*gamma/(2*w)` grows
+as `w -> 0`), and prescribed an ENGINE SHORT-CIRCUIT: detect tiny ``w`` and
+return `F -> 1 + O(w)`. This is sign- and scale-disproven below and must not be
+implemented. The operator series is summed in the shear eigenframe and its
+value is bounded as `w -> 0`; the growing prefactor does not make `F` diverge,
+it makes `F` approach a NON-UNIT constant.
+
+### 3. Actual physics (Architect rediagnosis, ratified by test)
+
+`F` is normalized to NO LENS AT ALL, not to the macro image. As `w -> 0` the
+point-mass diffraction switches off, but the smooth QUADRATIC macro potential
+(convergence + shear) integrates EXACTLY — a quadratic Fermat phase makes the
+diffraction integral a Gaussian — so
+
+    F(w -> 0) -> 1 / sqrt((1 - kappa)**2 - gamma**2) = sqrt(mu_macro),
+
+a real, positive, MASS- and FREQUENCY-INDEPENDENT constant, not `1`. The flat
+`|F| - 1 = 2.062e-2` at `gamma = 0.20`, `kappa = 0` is exactly
+`1/sqrt(0.96) - 1` to 16 digits — the closed form, not roundoff. The
+zero-noise floor is then the exact projection of that constant offset,
+`0.5 * <|F - 1|**2> * (h0|h0) = 0.1214`, not a defect. `|F| - 1` vanishes as
+`w -> 0` ONLY when `gamma = kappa = 0` (the unsheared control), which is why
+F007's `F -> 1` premise holds only there.
+
+Gate (source of truth, `operator.py` "NORMALIZATION AND THE w -> 0 MACRO LIMIT"
+docstring): `test_lensing_operator.py::MacroMagnificationLimitTestCase` pins
+`|F_op|` to the LITERAL closed form `1/sqrt((1-kappa)**2 - gamma**2)` — never
+built from `F_op`/`channels`/`geometry` (F002 oracle-tautology trap) — to
+relative `7.85e-9` across a 48-point positive-parity grid (4 shears x 2
+convergences x 2 shear orientations x 3 frequencies) spanning THREE DECADES of
+tiny ``w`` (`1e-8, 1e-10, 1e-12`); the plateau's frequency-independence is the
+signature that separates the exact limit from a `1/w` singularity. The
+prescribed short-circuit would inject a real 2% DISCONTINUITY at the crossover
+and DESTROY the exact pure-shear limit — never add one.
+
+### 4. Residual pin (what the RB anchor is, and is not)
+
+The RB zero-noise anchor decomposes as an INHERITED `8.962e-3` standard
+`RelativeBinningLikelihood` stall floor plus a `2.676e-3` lensing-layer
+increment (gated at `5e-3`); their sum is the `1.164e-2` fft-comparison
+regression PIN — a pin, not a physical claim. The `8.962e-3` term is upstream,
+not a lensing defect: the stall-ringdown is applied to the REFERENCE
+(`_h0_edges`) only, BY DESIGN, so at fiducial parameters and zero noise the
+per-bin ratio `r = h/h0 != 1` in the ringdown band and its linear-model
+residual IS that floor. The stall is LOAD-BEARING (it buys a smooth
+interpolable reference) and MUST NOT be removed or weakened; the requirement is
+lnL accuracy, driven upstream through the normal build workflow
+(`todo.d/likelihood_standard-rb-zero-noise-floor.md`), not by touching the
+stall.
+
+### 5. Lesson (verbatim, the Architect)
+
+> a "numerical artifact" that is FLAT across many decades of the
+> supposedly-singular parameter is almost never roundoff — match it against a
+> closed form before planning around it.
