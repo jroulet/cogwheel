@@ -9,21 +9,17 @@
 # with skill-generic generalizations:
 #   - .agent/spec/ -> .claude/spec/
 #   - GW-specific regen scripts replaced by optional sync_derived_docs.py
-#   - Python resolution follows the same PLACEHOLDER pattern as post-commit
+#   - Python resolves via the shared .claude/hooks/conda-python.sh, same as post-commit
 
 # Skip non-fast-forward merges with conflicts in progress.
 # (The hook only fires on successful merges, but be defensive.)
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
-# PLACEHOLDER: resolve Python interpreter for your project.
-# For conda: PYTHON="$(conda info --base)/envs/cogwheel_310/bin/python"
-# For venv: PYTHON="$REPO_ROOT/.venv/bin/python"
-# Fallback:
-PYTHON="/Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python"
-if ! command -v "$PYTHON" >/dev/null 2>&1; then
-    PYTHON="python3"
-fi
+# Resolve Python via the shared conda-Python resolver: shell SDK_CONDA_ENV
+# wins, then a repo-root .env, then the cogwheel_310 default (never hard-fails
+# on a missing .env). REPO_ROOT is resolved above.
+. "$REPO_ROOT/.claude/hooks/conda-python.sh"
 
 # Use the worktree-aware git dir.
 GIT_DIR_REAL="$(git rev-parse --git-dir)"

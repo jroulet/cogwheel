@@ -2,9 +2,10 @@
 # TejaForce pre-commit hook: branch safety + spec/doc discipline.
 # Catches common mechanical misses — semantic checks stay in CLAUDE.md.
 #
-# Generalized from the mature GW pipeline hook. PLACEHOLDERs:
-#   cogwheel  — your source package directory (e.g., src/, lib/)
-#   /Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python  — full path to conda/venv Python interpreter
+# Generalized from the mature GW pipeline hook.
+#   Source package directory: cogwheel
+#   Python interpreter: resolved via .claude/hooks/conda-python.sh (SDK_CONDA_ENV
+#   > repo-root .env > cogwheel_310 default), not a hardcoded path.
 
 # -----------------------------------------------------------------------
 # Branch safety: block commits on main/master
@@ -59,11 +60,11 @@ fi
 
 # -----------------------------------------------------------------------
 # Resolve Python interpreter (needed for render + sync_derived_docs below).
+# Delegates to the shared conda-Python resolver: shell SDK_CONDA_ENV wins,
+# then a repo-root .env, then the cogwheel_310 default (never hard-fails on a
+# missing .env). REPO_ROOT is resolved above.
 # -----------------------------------------------------------------------
-PYTHON="/Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python"
-if ! command -v "$PYTHON" >/dev/null 2>&1; then
-    PYTHON="python3"
-fi
+. "$REPO_ROOT/.claude/hooks/conda-python.sh"
 
 # -----------------------------------------------------------------------
 # Render fragment directories into canonical files + auto-stage.
