@@ -91,6 +91,60 @@ class IterQueryStreamTest(unittest.TestCase):
 
         self.assertTrue(asyncio.run(main()))
 
+    def test_per_call_override_applies_when_global_disabled(self):
+        # Global disabled (None), but a per-call override still enforces a wedge.
+        orchestrator_module.INTER_MESSAGE_TIMEOUT_SECONDS = None
+
+        async def gen():
+            yield 1
+            await asyncio.sleep(3600)
+            yield 2
+
+        async def main():
+            got = []
+            with self.assertRaises(asyncio.TimeoutError):
+                async for m in _orch()._iter_query_with_timeout(
+                        gen(), "t", timeout=1):
+                    got.append(m)
+            return got
+
+        self.assertEqual(asyncio.run(main()), [1])
+
+    def test_none_timeout_falls_back_to_global(self):
+        # timeout=None must use the module global (short wedge ceiling here).
+        orchestrator_module.INTER_MESSAGE_TIMEOUT_SECONDS = 1
+
+        async def gen():
+            yield 1
+            await asyncio.sleep(3600)
+            yield 2
+
+        async def main():
+            got = []
+            with self.assertRaises(asyncio.TimeoutError):
+                async for m in _orch()._iter_query_with_timeout(
+                        gen(), "t", timeout=None):
+                    got.append(m)
+            return got
+
+        self.assertEqual(asyncio.run(main()), [1])
+
+    def test_generous_override_suppresses_short_global_wedge(self):
+        # The prof_review case: a generous per-call override must NOT wedge on a
+        # gap the tiny global would have killed.
+        orchestrator_module.INTER_MESSAGE_TIMEOUT_SECONDS = 0.2  # tiny global
+
+        async def gen():
+            yield 1
+            await asyncio.sleep(0.5)   # > global, < override
+            yield 2
+
+        async def main():
+            return [m async for m in _orch()._iter_query_with_timeout(
+                gen(), "t", timeout=5)]
+
+        self.assertEqual(asyncio.run(main()), [1, 2])
+
 
 if __name__ == "__main__":
     unittest.main()

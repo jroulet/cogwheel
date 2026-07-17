@@ -140,6 +140,14 @@ _raw_inter_msg_timeout = int(
 INTER_MESSAGE_TIMEOUT_SECONDS: Optional[int] = (
     _raw_inter_msg_timeout if _raw_inter_msg_timeout > 0 else None)
 
+# The Professor's post-build review runs the domain test suite; a single
+# pytest call can legitimately run for minutes with NO intermediate messages,
+# which the per-message timeout above would misread as a transport wedge (this
+# class of false wedge crashed the build pre-commit in the sibling repo). Give
+# that phase a generous timeout; the 300s default still applies to every other
+# agent, where a multi-minute message gap really does indicate a wedge.
+PROFESSOR_INTER_MESSAGE_TIMEOUT = 1800
+
 
 @dataclass
 class BuildOrchestrator:
@@ -377,6 +385,198 @@ class BuildOrchestrator:
         self._log(f"Pre-read {len(read_files)} task-referenced files ({total // 1024}KB)")
         return "# Pre-loaded Task Files\n\n" + "\n\n".join(parts)
 
+    def _load_pipeline_graph(self):
+        """Import scripts/pipeline_graph.py and return a PipelineGraph, or None.
+
+        Never raises — a graph load failure must not abort a build; callers
+        degrade to no graph injection.
+        """
+        import importlib.util
+
+        try:
+            pg_path = Path(self.project_root) / "scripts" / "pipeline_graph.py"
+            if not pg_path.is_file():
+                return None
+            spec = importlib.util.spec_from_file_location(
+                "_pipeline_graph_preread", pg_path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            spec_dir = Path(self.project_root) / ".claude" / "spec"
+            # Absolute paths so the load is CWD-independent.
+            pg = mod.PipelineGraph(
+                contracts_path=str(spec_dir / "DATA_CONTRACTS.yaml"),
+                registry_path=str(spec_dir / "data_registry.yaml"),
+                graph_path=str(spec_dir / "CONSUMER_GRAPH.json"),
+            )
+            _ = pg.contracts  # force the lazy load so yaml errors surface here
+            return pg
+        except Exception as exc:
+            self._log(f"Pipeline-graph load skipped ({exc})")
+            return None
+
+    @staticmethod
+    def _registered_artifacts(pg) -> dict:
+        """Map registered artifact name -> short format string.
+
+        Registered artifacts are the entries under the contracts' ``artifacts:``
+        key (each carries a producer / format / fields).
+        """
+        out = {}
+        for name, body in pg.artifacts.items():
+            if isinstance(body, dict):
+                out[name] = str(body.get("format", "") or "")[:90]
+        return out
+
+    def _pre_read_pipeline_graph(self, artifacts=None) -> str:
+        """Build a compact ``# Pipeline graph`` block (producer -> consumers) for
+        the registered data artifacts this task touches, for injection into the
+        plan-mode Architect (which cannot run scripts/pipeline_graph.py itself:
+        Bash and serena execute_shell_command are both disallowed in plan mode).
+
+        ``artifacts`` is an optional explicit list; ``None`` (the default) falls
+        back to lexical matching of the task text (+ pre-read task files) against
+        registry keys and producer module names. Reflects current pre-build
+        state — correct at planning time. Returns "" when nothing matches or the
+        graph can't be loaded — never fatal. Output is capped at ~4 KB so it does
+        not re-bloat the Architect prompt.
+        """
+        import re
+
+        pg = self._load_pipeline_graph()
+        if pg is None:
+            return ""
+        try:
+            registered = self._registered_artifacts(pg)
+        except Exception as exc:  # never fail the build over a graph pre-read
+            self._log(f"Pipeline-graph pre-read skipped ({exc})")
+            return ""
+        if not registered:
+            return ""
+
+        def _module_tokens(mod: str) -> list[str]:
+            """Greppable tokens for a producer module, tolerating BOTH forms
+            B uses: a dotted module (``cogwheel.likelihood.relative_binning``)
+            and a file path (``cogwheel/sampling.py``)."""
+            if not mod:
+                return []
+            base = mod[:-3] if mod.endswith(".py") else mod  # strip trailing .py
+            last = base.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[-1]
+            toks = [
+                mod,                       # cogwheel/sampling.py
+                base,                      # cogwheel/sampling
+                base.replace("/", "."),    # cogwheel.sampling
+                base.replace(".", "/"),    # cogwheel/sampling
+            ]
+            if last:
+                toks.append(last)          # sampling
+                toks.append(last + ".py")  # sampling.py
+            return [t for t in dict.fromkeys(toks) if t]
+
+        haystack = f"{self.task}\n{getattr(self, '_task_files_text', '') or ''}"
+
+        if artifacts is None:
+            # Lexical fallback: match the free-form brief case-insensitively on
+            # the artifact key (separators relaxed) or any token of its producer
+            # module. B's triage stays complexity-only, so this is the standard
+            # path (no classifier-derived artifact list to consume).
+            def _matches(name: str, body: dict) -> bool:
+                patterns = [
+                    r"\b" + re.escape(name).replace("_", r"[\s_\-]+") + r"\b",
+                ]
+                prod_mod = (body.get("producer", {}) or {}).get("module", "") or ""
+                for tok in _module_tokens(prod_mod):
+                    patterns.append(r"\b" + re.escape(tok) + r"\b")
+                return any(
+                    re.search(p, haystack, re.IGNORECASE) for p in patterns)
+
+            matched = [
+                name for name, body in pg.artifacts.items()
+                if isinstance(body, dict) and _matches(name, body)
+            ]
+        else:
+            matched = list(dict.fromkeys(a for a in artifacts if a in registered))
+
+        # ── Shared-producer expansion ───────────────────────────────────
+        # Add unmatched artifacts whose producer module matches an already-
+        # matched artifact's producer (sibling artifacts from the same code
+        # path — cross-artifact coupling the lexical scan alone can miss).
+        # Skip when artifacts == [] (explicit empty = inject nothing).
+        if not (artifacts is not None and len(artifacts) == 0):
+            matched_mods = set()
+            for art in matched:
+                body = pg.artifacts.get(art)
+                if isinstance(body, dict):
+                    m = (body.get("producer", {}) or {}).get("module", "") or ""
+                    if m:
+                        matched_mods.add(m)
+            if matched_mods:
+                matched_set = set(matched)
+                new_arts = []
+                for name, body in pg.artifacts.items():
+                    if not isinstance(body, dict) or name in matched_set:
+                        continue
+                    m = (body.get("producer", {}) or {}).get("module", "") or ""
+                    if m and m in matched_mods:
+                        new_arts.append(name)
+                        matched_set.add(name)
+                if new_arts:
+                    matched.extend(new_arts)
+                    self._log(f"Shared-producer expansion added: {new_arts}")
+
+        if not matched:
+            return ""
+
+        parts = []
+        for art in matched:
+            info = pg.trace(art)
+            if not isinstance(info, dict):
+                continue
+            try:
+                consumers = pg.consumers_of(art)
+            except Exception:
+                consumers = []
+            prod = info.get("producer", {}) or {}
+            prod_str = f"{prod.get('function', '?')} ({prod.get('module', '?')})"
+            names = sorted({
+                f"{c.get('module', '')}::{c.get('function', '')}".strip(":")
+                for c in consumers
+                if c.get("function") or c.get("module")
+            })
+            fields = [str(f) for f in (info.get("fields") or [])][:14]
+            block = [
+                f"## {art}  ({info.get('format', 'unknown')})",
+                f"Producer: {prod_str}",
+                "Consumers: " + (", ".join(names) if names else "(none registered)"),
+            ]
+            if fields:
+                block.append("Fields: " + ", ".join(fields))
+            parts.append("\n".join(block))
+
+        if not parts:
+            return ""
+
+        header = (
+            "# Pipeline graph (producer -> consumers)\n\n"
+            "Auto-generated from scripts/pipeline_graph.py for the registered "
+            "data artifacts this task touches — the producer/consumer source of "
+            "truth (reflects current state, i.e. pre-build). Order work packages "
+            "so a change to a PRODUCER lands before the CONSUMER that reads the "
+            "new field. It models disk-artifact boundaries only; intra-process "
+            "detail still needs a code read."
+        )
+        body = header + "\n\n" + "\n\n".join(parts)
+
+        # Cap ~4 KB so the injected block doesn't re-bloat the Architect prompt.
+        _CAP = 4096
+        if len(body) > _CAP:
+            body = (body[:_CAP].rsplit("\n\n", 1)[0]
+                    + "\n\n(... pipeline graph truncated at ~4 KB ...)")
+
+        self._log(
+            f"Injected pipeline graph for {len(parts)} artifact(s): "
+            f"{', '.join(matched)}")
+        return body
+
     async def run(self) -> BuildReport:
         """Execute the full build pipeline."""
         # Signal to post-commit hook that an SDK build is active.
@@ -426,6 +626,14 @@ class BuildOrchestrator:
             if not self.fast_path:
                 self.phase = Phase.PLANNING
                 self._log_phase("Phase 1: Planning")
+                # Inject the producer→consumer map for the artifacts this task
+                # touches, so the plan-mode Architect (which cannot run
+                # scripts/pipeline_graph.py) plans WP ordering against it. Done
+                # here — after triage, inside the planning branch — so the
+                # triage classifier prompt stays lean; graceful + capped ~4 KB.
+                graph_text = self._pre_read_pipeline_graph()
+                if graph_text:
+                    self._specs_text += "\n\n" + graph_text
                 skip_professor = (self._triage_result == "standard")
                 if skip_professor:
                     self._log("  (standard task — Professor consult skipped)")
@@ -1990,10 +2198,16 @@ class BuildOrchestrator:
 
     # ── Agent runner ─────────────────────────────────────────────────────
 
-    async def _iter_query_with_timeout(self, async_iter, agent_id):
+    async def _iter_query_with_timeout(self, async_iter, agent_id, timeout=None):
         """Wrap an async iterable with a per-message timeout.
 
         Converts transport wedges into catchable TimeoutErrors.
+
+        ``timeout`` overrides the per-message ceiling for this call only;
+        ``None`` (the default) means fall back to the module-wide
+        ``INTER_MESSAGE_TIMEOUT_SECONDS``. A heavy phase (the Professor's
+        post-build pytest run) passes a generous value so a multi-minute
+        message gap is not misread as a wedge.
 
         The stream is drained by a SINGLE dedicated task and relayed
         through a queue; the timeout applies to ``queue.get()``. WHY:
@@ -2006,6 +2220,8 @@ class BuildOrchestrator:
         concurrent AND single streams. One drain task means the SDK's
         scopes enter and exit in the same task, always.
         """
+        effective_timeout = (
+            INTER_MESSAGE_TIMEOUT_SECONDS if timeout is None else timeout)
         queue: asyncio.Queue = asyncio.Queue(maxsize=64)
         sentinel = object()
 
@@ -2025,17 +2241,17 @@ class BuildOrchestrator:
         try:
             while True:
                 try:
-                    if INTER_MESSAGE_TIMEOUT_SECONDS is None:
+                    if effective_timeout is None:
                         item = await queue.get()
                     else:
                         item = await asyncio.wait_for(
                             queue.get(),
-                            timeout=INTER_MESSAGE_TIMEOUT_SECONDS,
+                            timeout=effective_timeout,
                         )
                 except asyncio.TimeoutError:
                     self._log(
                         f"  [{agent_id}] no message for "
-                        f"{INTER_MESSAGE_TIMEOUT_SECONDS}s — treating as "
+                        f"{effective_timeout}s — treating as "
                         f"transport wedge"
                     )
                     raise
@@ -2083,7 +2299,15 @@ class BuildOrchestrator:
             '}\n'
             "```\n"
         )
-        result_text, _ = await self._run_agent("prof_review", task)
+        # prof_review already defaults to bypassPermissions (it runs pytest),
+        # but pass it explicitly like the sibling repo. Generous inter-message
+        # timeout: a fast-suite pytest run can still go minutes between messages
+        # and must not be misread as a transport wedge.
+        result_text, _ = await self._run_agent(
+            "prof_review", task,
+            permission_override="bypassPermissions",
+            inter_message_timeout_override=PROFESSOR_INTER_MESSAGE_TIMEOUT,
+        )
         return self._parse_prof_review_result(result_text)
 
     def _parse_prof_review_result(self, result_text: str) -> ProfReviewResult:
@@ -2153,9 +2377,17 @@ class BuildOrchestrator:
         resume_session: Optional[str] = None,
         permission_override: Optional[PermissionMode] = None,
         max_turns_override: Optional[int] = None,
+        inter_message_timeout_override: Optional[int] = None,
         _denial_retry: bool = True,
     ) -> tuple[str, Optional[str]]:
-        """Create and run a single agent, streaming output per verbosity."""
+        """Create and run a single agent, streaming output per verbosity.
+
+        ``inter_message_timeout_override`` widens the per-message wedge timeout
+        for this agent's streams (default None = the global 300s). It applies
+        to the main stream, both MCP-failure retry legs, AND the denial
+        nudge-resume leg, so a heavy phase (the Professor's pytest run) never
+        false-wedges on any leg.
+        """
         self._agent_count += 1
         self._agents_that_ran.append(agent_name)
         agent_id = f"{agent_name}-{self._agent_count}"
@@ -2196,7 +2428,8 @@ class BuildOrchestrator:
         saw_denial = False
         try:
             async for message in self._iter_query_with_timeout(
-                    query(prompt=task_context, options=options), agent_id):
+                    query(prompt=task_context, options=options), agent_id,
+                    timeout=inter_message_timeout_override):
                 saw_denial = saw_denial or self._stream_saw_bare_denial(
                     message)
                 result_text, session_id = self._handle_message(
@@ -2237,7 +2470,8 @@ class BuildOrchestrator:
             if session_id or resume_session:
                 options.resume = session_id or resume_session
             async for message in self._iter_query_with_timeout(
-                    query(prompt=task_context, options=options), agent_id):
+                    query(prompt=task_context, options=options), agent_id,
+                    timeout=inter_message_timeout_override):
                 saw_denial = saw_denial or self._stream_saw_bare_denial(
                     message)
                 result_text, session_id = self._handle_message(
@@ -2264,7 +2498,8 @@ class BuildOrchestrator:
                 if session_id or resume_session:
                     options.resume = session_id or resume_session
                 async for message in self._iter_query_with_timeout(
-                        query(prompt=task_context, options=options), agent_id):
+                        query(prompt=task_context, options=options), agent_id,
+                        timeout=inter_message_timeout_override):
                     saw_denial = saw_denial or self._stream_saw_bare_denial(
                         message)
                     result_text, session_id = self._handle_message(
@@ -2308,6 +2543,7 @@ class BuildOrchestrator:
                 resume_session=session_id,
                 permission_override=permission_override,
                 max_turns_override=max_turns_override,
+                inter_message_timeout_override=inter_message_timeout_override,
                 _denial_retry=False,
             )
             if retry_text.strip():

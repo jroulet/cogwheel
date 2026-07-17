@@ -96,5 +96,29 @@ class ReviewGatePredicateTest(unittest.TestCase):
         self.assertFalse(self._fires(has_domain_tests=False, has_domain_changes=False))
 
 
+class ProfReviewInvocationTest(unittest.TestCase):
+    """_run_prof_review must pass bypassPermissions + the generous professor
+    inter-message timeout so a slow pytest run isn't misread as a wedge."""
+
+    def test_passes_generous_timeout_and_bypass(self):
+        from sdk.orchestrator import PROFESSOR_INTER_MESSAGE_TIMEOUT
+        o = _orchestrator_with_plan()
+        captured = {}
+
+        async def fake(agent_name, task, **kw):
+            captured["agent_name"] = agent_name
+            captured.update(kw)
+            return ('```json\n{"verdict":"PASS"}\n```', None)
+
+        o._run_agent = fake
+        asyncio.run(o._run_prof_review())
+        self.assertEqual(captured["agent_name"], "prof_review")
+        self.assertEqual(captured["permission_override"], "bypassPermissions")
+        self.assertEqual(
+            captured["inter_message_timeout_override"],
+            PROFESSOR_INTER_MESSAGE_TIMEOUT,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
