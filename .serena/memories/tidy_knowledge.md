@@ -14,3 +14,7 @@
   sibling packages' convention.
 - A newly-written module can legitimately require zero edits — verify
   the checklist per file rather than assuming something must be wrong.
+- If a file outside your lane (e.g. a test file) is named in the task's
+  file list, spot-check it read-only for whitespace issues but leave
+  edits to the owning agent (e.g. Test Dev) — respect the Tidier's scope
+  boundary of not touching test files even when explicitly listed.

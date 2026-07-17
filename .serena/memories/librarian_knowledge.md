@@ -23,3 +23,9 @@
   preserves the audit trail even when nothing needed changing.
 - Don't touch other agents' concurrent in-flight uncommitted changes or
   memory files outside the explicit commit range you were scoped to sync.
+- `SPEC_CHANGELOG.md` version numbers can read out of chronological/
+  logical order: `render_fragments.py` assigns bumps by alphabetical
+  filename order within `spec_changelog.d/`, not by fragment date or
+  build sequence. This is a known rendering quirk, not a doc error —
+  flag it rather than silently "fixing" it (renumbering or reordering is
+  a process/code change outside sync scope).

@@ -14,6 +14,19 @@ SCOPE of the current formalism — record as a limitation. Lensed waveform:
 h_L(f) = F[w(f), y] h_U(f), with dimensionless frequency w = 8 pi G M_L (1+z_L) f / c^3
 (:= xi f — exactly LINEAR in f). Source outside the astroid caustic: 2 images; inside: 4.
 
+## The w -> 0 macro limit (established 2026-07-17, F009; supersedes an earlier FALSIFIED
+## Professor ruling that called this a gamma/(2w) engine singularity — it is not)
+F(w) -> 1/sqrt((1-kappa)^2 - gamma^2) = sqrt(mu_macro) as w -> 0: the EXACT macro-image
+geometric-optics magnification (mu_macro = 1/det(A) = 1/[(1-kappa)^2-gamma^2]), NOT 1 and
+NOT a numerical artifact. Confirmed flat (frequency- and mass-independent) across many
+decades of w, matching the closed form to ~1e-8 relative. Consequence: any "unlensed
+limit" fixture/test that expects F->1 must use gamma=kappa=0 (genuinely trivial macro
+lens) — a sheared/converged lens's amplitude never relaxes to 1 no matter how small w
+gets. Do NOT "fix" the flat offset with a small-w short-circuit forcing F->1+O(w); that
+would inject a real discontinuity and destroy the exact macro limit. This value multiplies
+the whole waveform, so it composes with the apparent-distance sampling below (mu_macro
+folds into d_app, not into F itself, once F is defined against the true unlensed h_U).
+
 ## The decomposition (the paper's core)
 Direct RB fails because interference fringes move with lens parameters (ratio needs ~all
 frequencies: 70–135 nodes). Fix: F = sum_{a=1..4} e^{i w tau_a} K_a(w) — keep image-delay
@@ -27,6 +40,13 @@ phases ANALYTIC, interpolate only the slow K_a. Construction:
   nearest critical point; a smooth switch S_j(w delta_j) (smootherstep, rho0=0.5, rho1=4)
   blends unresolved-cluster split <-> stationary phase; cluster-local projection keeps
   the total exact. Ratios stay SMOOTH across crossings: 6–11 nodes at 1e-3 error.
+- CRITICAL correctness condition (F008, fixed at HEAD as of Build 2c): the switch's
+  neighbor-separation comparison MUST be taken over the FULL cluster of 4 labels
+  (real + virtual/parked), not real-only — filtering to real-only channels before the
+  min() misses cases where a virtual/parked label is nearest, causing the switch to miss
+  its zero and the kernel to inflate pathologically near cusps/two-image configs. With
+  the full-cluster fix in place, RB is valid through cusp/fold crossings; this is a
+  prerequisite for every downstream RB-vs-brute-force accuracy claim in this program.
 - Label continuation is path-based (assignment problem on lens-plane markers);
   far-away proposals need a reset convention or short path from fiducial. The SUM is
   label-permutation invariant; only ratio smoothness needs consistent labels.
@@ -65,7 +85,8 @@ summary FUNCTIONS of a continuous time shift; images never add a stored tensor i
   candidates.
 - Overall amplitude: sqrt(mu_macro)/d_L -> sample apparent distance d_app; existing
   distance marginalization applies (constant complex scale). Constant lens phase ~
-  orbital phase (exact for 22-only).
+  orbital phase (exact for 22-only; with higher modes — e.g. IMRPhenomXPHM — this
+  degeneracy must NOT be assumed, fold/marginalize per mode instead).
 - Overall time: min image delay degenerate with t_c (subtract-min convention).
 - Well-measured lens observables: fringe SPACING = dimensionful delay differences
   dt_ac (sample ~ln dt of dominant pair, NOT raw M_L), fringe CONTRAST = |K_a/K_c|
@@ -76,6 +97,13 @@ summary FUNCTIONS of a continuous time shift; images never add a stored tensor i
   h_L = sum_a c_a h_U(t − dt_a) — same structure the coherent score marginalizes
   (amplitudes + time shifts) -> lens-sector importance-sampling marginalization
   using the existing z(t) machinery is plausible.
+
+## Build-3/4 sampler requirement (flagged 2026-07-17, not yet implemented)
+Macro saddles (1-kappa <= |gamma|) raise `geometry.LensDomainError` at construction and
+symmetrically in both `lnlike`/`lnlike_bruteforce`; `F_op` raises `CancellationError` near
+the certified-domain edge (gamma_eff ~0.5). A sampler must bound the prior to the
+positive-parity/certified region, or map these refusals to lnL=-inf at the proposal level
+— an unswallowed exception from a bad proposal must not crash the run.
 
 ## Verification obligations (cogwheel value #1)
 (i) operator vs mpmath oracle; (ii) reconstruction identity to ~1e-13;
