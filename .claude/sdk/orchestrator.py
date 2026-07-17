@@ -2469,14 +2469,32 @@ class BuildOrchestrator:
             # the stream died — continue the work, don't restart the WP.
             if session_id or resume_session:
                 options.resume = session_id or resume_session
-            async for message in self._iter_query_with_timeout(
-                    query(prompt=task_context, options=options), agent_id,
-                    timeout=inter_message_timeout_override):
-                saw_denial = saw_denial or self._stream_saw_bare_denial(
-                    message)
-                result_text, session_id = self._handle_message(
-                    agent_id, message, result_text, session_id,
-                )
+            try:
+                async for message in self._iter_query_with_timeout(
+                        query(prompt=task_context, options=options), agent_id,
+                        timeout=inter_message_timeout_override):
+                    saw_denial = saw_denial or self._stream_saw_bare_denial(
+                        message)
+                    result_text, session_id = self._handle_message(
+                        agent_id, message, result_text, session_id,
+                    )
+            except asyncio.TimeoutError:
+                # Double-stall (killed builds 2b x2, 2d): the fallback leg
+                # ALSO went silent. A service-side stream death kills the
+                # REQUEST, not the session — one bounded stall-resume.
+                if not (session_id or resume_session):
+                    raise
+                self._log(f"[{agent_id}] fallback stream stalled too — "
+                          f"one bounded stall-resume of the session")
+                options.resume = session_id or resume_session
+                async for message in self._iter_query_with_timeout(
+                        query(prompt=task_context, options=options), agent_id,
+                        timeout=inter_message_timeout_override):
+                    saw_denial = saw_denial or self._stream_saw_bare_denial(
+                        message)
+                    result_text, session_id = self._handle_message(
+                        agent_id, message, result_text, session_id,
+                    )
         except Exception as e:
             if self.use_serena:
                 self._log(f"[{agent_id}] MCP failed ({type(e).__name__}: {e}), retrying with built-in tools")
@@ -2497,14 +2515,33 @@ class BuildOrchestrator:
                 # before the stream died — continue, don't restart the WP.
                 if session_id or resume_session:
                     options.resume = session_id or resume_session
-                async for message in self._iter_query_with_timeout(
-                        query(prompt=task_context, options=options), agent_id,
-                        timeout=inter_message_timeout_override):
-                    saw_denial = saw_denial or self._stream_saw_bare_denial(
-                        message)
-                    result_text, session_id = self._handle_message(
-                        agent_id, message, result_text, session_id,
-                    )
+                try:
+                    async for message in self._iter_query_with_timeout(
+                            query(prompt=task_context, options=options),
+                            agent_id,
+                            timeout=inter_message_timeout_override):
+                        saw_denial = (saw_denial
+                                      or self._stream_saw_bare_denial(message))
+                        result_text, session_id = self._handle_message(
+                            agent_id, message, result_text, session_id,
+                        )
+                except asyncio.TimeoutError:
+                    # Double-stall: same bounded stall-resume as the
+                    # cancel-scope branch above (see comment there).
+                    if not (session_id or resume_session):
+                        raise
+                    self._log(f"[{agent_id}] fallback stream stalled too — "
+                              f"one bounded stall-resume of the session")
+                    options.resume = session_id or resume_session
+                    async for message in self._iter_query_with_timeout(
+                            query(prompt=task_context, options=options),
+                            agent_id,
+                            timeout=inter_message_timeout_override):
+                        saw_denial = (saw_denial
+                                      or self._stream_saw_bare_denial(message))
+                        result_text, session_id = self._handle_message(
+                            agent_id, message, result_text, session_id,
+                        )
             else:
                 raise
 

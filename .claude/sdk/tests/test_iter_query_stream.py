@@ -147,6 +147,129 @@ class IterQueryStreamTest(unittest.TestCase):
         self.assertEqual(asyncio.run(main()), [1, 2])
 
 
+class StallResumeTest(unittest.TestCase):
+    """The double-stall killer (builds 2b x2, 2d): when the built-in-tools
+    fallback leg ALSO wedges (asyncio.TimeoutError), `_run_agent` must
+    attempt ONE bounded stall-resume of the agent's session before dying —
+    a service-side stream death kills the request, not the session.
+    """
+
+    def setUp(self):
+        self._saved_query = orchestrator_module.query
+        self._saved_build = orchestrator_module.build_agent_options
+
+    def tearDown(self):
+        orchestrator_module.query = self._saved_query
+        orchestrator_module.build_agent_options = self._saved_build
+
+    def _make_orch(self):
+        o = _orch()
+        o.verbosity = orchestrator_module.Verbosity.QUIET
+        o.use_serena = True
+        o.project_root = "/tmp"
+        o._serena = None
+        o._specs_text = ""
+        o._agent_count = 0
+        o._agents_that_ran = []
+        o._handle_message = lambda *a, **k: ("done", None)
+        return o
+
+    def test_fallback_stall_triggers_one_session_resume(self):
+        calls = []
+        opts = types.SimpleNamespace(resume=None)
+
+        async def fake_build_opts(**kw):
+            return opts
+
+        orchestrator_module.query = lambda **kw: None
+        orchestrator_module.build_agent_options = fake_build_opts
+        o = self._make_orch()
+
+        async def spy(async_iter, agent_id, timeout=None):
+            calls.append(opts.resume)
+            if len(calls) == 1:
+                raise ValueError("simulated MCP failure")   # -> fallback leg
+            if len(calls) == 2:
+                raise asyncio.TimeoutError()                 # -> stall-resume
+            return
+            yield  # noqa: unreachable — marks this an async generator
+
+        o._iter_query_with_timeout = spy
+
+        async def main():
+            return await o._run_agent(
+                "coder", "do the thing", resume_session="sess-123",
+                _denial_retry=False,
+            )
+
+        asyncio.run(main())
+        self.assertEqual(len(calls), 3)
+        # Legs 2 (fallback) and 3 (stall-resume) must resume the session.
+        self.assertEqual(calls[1], "sess-123")
+        self.assertEqual(calls[2], "sess-123")
+
+    def test_second_stall_is_fatal(self):
+        calls = []
+        opts = types.SimpleNamespace(resume=None)
+
+        async def fake_build_opts(**kw):
+            return opts
+
+        orchestrator_module.query = lambda **kw: None
+        orchestrator_module.build_agent_options = fake_build_opts
+        o = self._make_orch()
+
+        async def spy(async_iter, agent_id, timeout=None):
+            calls.append(1)
+            if len(calls) == 1:
+                raise ValueError("simulated MCP failure")
+            raise asyncio.TimeoutError()   # stalls on EVERY later leg
+            return
+            yield  # noqa: unreachable
+
+        o._iter_query_with_timeout = spy
+
+        async def main():
+            return await o._run_agent(
+                "coder", "do the thing", resume_session="sess-123",
+                _denial_retry=False,
+            )
+
+        with self.assertRaises(asyncio.TimeoutError):
+            asyncio.run(main())
+        self.assertEqual(len(calls), 3)   # main + fallback + ONE resume only
+
+    def test_no_session_stall_stays_fatal(self):
+        calls = []
+        opts = types.SimpleNamespace(resume=None)
+
+        async def fake_build_opts(**kw):
+            return opts
+
+        orchestrator_module.query = lambda **kw: None
+        orchestrator_module.build_agent_options = fake_build_opts
+        o = self._make_orch()
+
+        async def spy(async_iter, agent_id, timeout=None):
+            calls.append(1)
+            if len(calls) == 1:
+                raise ValueError("simulated MCP failure")
+            raise asyncio.TimeoutError()
+            return
+            yield  # noqa: unreachable
+
+        o._iter_query_with_timeout = spy
+
+        async def main():
+            return await o._run_agent(
+                "coder", "do the thing", _denial_retry=False,
+            )
+
+        with self.assertRaises(asyncio.TimeoutError):
+            asyncio.run(main())
+        self.assertEqual(len(calls), 2)   # nothing to resume -> no third leg
+
+
 class RunAgentTimeoutPropagationTest(unittest.TestCase):
     """`_run_agent` must forward `inter_message_timeout_override` to
     `_iter_query_with_timeout` on EVERY leg — the main stream and the
