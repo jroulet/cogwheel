@@ -1,5 +1,16 @@
 # Tidy Short-Term Observations
 
+- 2026-07-17 (task run, operator.py only): re-checked
+  cogwheel/lensing/chang_refsdal/operator.py against the full rubric
+  (import layering __future__->stdlib->third-party->local, 2-blank
+  top-level spacing verified via search_for_pattern for \n\n\n\n and
+  whitespace-only-line regexes, no unused imports by hand) — still
+  fully compliant, zero edits required. execute_shell_command
+  (ast.parse / autoflake) was denied by the permission system this
+  session; fell back to Serena search_for_pattern regex checks for
+  blank-line runs and trailing whitespace instead, per the documented
+  fallback rule.
+
 - 2026-07-17 (later pass): checked cogwheel/lensing/chang_refsdal/channels.py
   (new file: ChangRefsdalPartition/ChangRefsdalChannels, topology-stable
   4-channel decomposition) and cogwheel/lensing/likelihood.py against the

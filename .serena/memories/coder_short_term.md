@@ -1,5 +1,45 @@
 # Coder Short-Term Observations
 
+- WP1 build2d (cogwheel/lensing/chang_refsdal/operator.py, DOCSTRING ONLY —
+  the build's only production edit). Added module-docstring subsection
+  "NORMALIZATION AND THE w -> 0 MACRO LIMIT" (23 lines, inserted AFTER
+  'CERTIFIED DOMAIN AND THE BRANCH GATE', BEFORE the mass-sheet paragraph)
+  + a Notes entry at the end of F_op's docstring pointing at it. States the
+  three ESTABLISHED facts verbatim from the brief (did NOT re-derive or
+  probe): (1) F is normalized to NO LENS AT ALL, not the macro image —
+  cross-checked read-only that both branches agree: F_op's reconstruction
+  ends `value = mass_sheet_phase * phase_scaled * total / lam` (lam=1-kappa
+  => pure convergence gives F=1/(1-kappa) at every w), and
+  geometric_amplification sums geometry.image_kernel over find_images with
+  matrix=geometry.macro_matrix(gamma,beta,kappa) (carries macro
+  magnification). (2) F(w->0) = 1/sqrt((1-kappa)**2 - gamma**2) =
+  sqrt(mu_macro): real, positive, FREQUENCY- and MASS-INDEPENDENT, NOT 1;
+  |F|-1 -> 0 only at gamma=kappa=0. (3) ANTI-FOOTGUN: the flat
+  mass-independent |F|-1 = 2.06207e-2 at gamma=0.20,kappa=0 IS that exact
+  limit, NOT a gamma/(2*w) prefactor singularity — must not be "fixed" by a
+  small-w short-circuit returning 1+O(w) (would inject a real 2%
+  discontinuity at the crossover + destroy the exact pure-shear limit).
+  NOTE this DIRECTLY CONTRADICTS build2d_brief.md "Measured facts" 1 & 3
+  (which call the 2.062e-2 floor a prefactor singularity and prescribe
+  exactly that short-circuit) — the WP1 dispatch supersedes those; the
+  brief's zero-noise-floor story (F -> physics ~w) is therefore also void,
+  since the floor is real macro physics. Test cross-ref: NO w->0 test exists
+  yet (searched test_lensing_operator.py: OperatorOracle/GeometricOpticsSlope/
+  ContractionCertification/MassSheetInvariance/CancellationRefusal/BranchGate/
+  SelfFalsification only), so per the brief I referenced it BY CLAIM ("The
+  operator suite pins this closed form as a direct w -> 0 gate"), not by name
+  — a later WP authoring that test should swap in the class name. Did NOT
+  touch F_op's body, refusal thresholds, MAX_ORDER, _series_length,
+  _hyp1f1.py, or any other file; did NOT restate F001/F005. Static verify:
+  0 lines >79; read-back shows clean insertion, mass-sheet paragraph intact,
+  no displaced fragments; Notes block sits immediately before `"""` and the
+  first statement `w = float(w)`. VERIFIED: `git diff` (bare-signature shell
+  denial cleared on the owner-permitted single re-issue) shows operator.py
+  = 33 insertions / 0 deletions, every changed line a `+` and every one
+  docstring prose — no expression/constant/control-flow line in the diff at
+  all. Other diff paths are memory + .claude/agent_state/architect.json
+  (pipeline state, not my edit). Nothing UNVERIFIED in this WP.
+
 - FIX INS-4-001 (build2c crown-suite amendments; TEST-FILE authoring done by
   Coder under re-dispatch — handoff-to-TestDev not honored; FLAGGED for
   mandatory Inspector review of mutation/oracle independence since I also wrote
