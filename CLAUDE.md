@@ -70,6 +70,14 @@ shallow:
   over-wide plans at the plan gate.
 - Style calibration: single-focus briefs of 5-9 KB (the gw pipeline's
   37-build precedent — median ~9 agents/build, no classifier denials).
+- Two-tier verification (gw-proven): in-build tests must be FAST —
+  small/synthetic configurations, analytic or few-eval oracles — so every
+  claim has a falsifiable gate agents can actually run. Bulk-data sweeps
+  and hour-scale regressions are POST-BUILD driver steps, named in the
+  brief's acceptance ("full suite green, driver-verified post-build"),
+  never in-build test specs. A test spec that takes an hour to run is a
+  build-killer (deep transcripts) and an unverifiable gate (inspectors
+  cannot run it).
 
 ## Testing
 - Tests live in `cogwheel/tests/` (stdlib `unittest`), **not** a top-level `tests/`.
