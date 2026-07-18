@@ -1,38 +1,41 @@
 # Test Dev Long-Term Knowledge
 
-- Premise repair, not tolerance repair: if a test's fixture assumes an
-  incorrect physical premise (e.g. F->1 at w->0 for ANY shear/
-  convergence), fix the fixture/candidate to isolate a case where the
-  premise is actually true (e.g. gamma=kappa=0), not widen the tolerance
-  to paper over a real, nonzero physical offset.
-- Anti-dodge pairing: when repairing a premise, keep the inconvenient
-  original case too, as a companion test that PREDICTS its nonzero
-  offset via an independent closed form — this guards against the two
-  regressions the repair would otherwise invite (normalizing the real
-  effect out, or reintroducing the wrong short-circuit).
-- To falsification-test a buggy-vs-fixed code path without editing
-  source, `mock.patch.object` the MODULE GLOBAL a function looks up
-  internally (e.g. `evaluate` resolving a helper as a module attribute)
-  — this cleanly injects an old/buggy variant for the test.
-- Extend AST/name-forbidding guards whenever a new mutation-test
-  reproduction helper is added, so an automated check pins that it never
-  references the module-under-test's own names (oracle independence).
-- For a rule that only differs in edge cases (e.g. a restricted vs. full
-  candidate set), find and assert a sub-case where old and new logic
-  must agree bit-for-bit — a cheap, strong regression control alongside
-  the falsification test.
-- Fully revert any probe/mutation edit used only to surface a hidden
-  numeric value in an assertion message, and verify via read-back plus a
+- Premise repair, not tolerance repair: if a fixture assumes a wrong
+  physical premise (e.g. F->1 at w->0 under shear), fix the fixture to
+  a case where the premise holds (gamma=kappa=0); never widen tolerance.
+- Anti-dodge pairing: keep the inconvenient original case as a
+  companion test that PREDICTS its nonzero offset via an independent
+  closed form.
+- To inject a buggy/old variant without editing source,
+  mock.patch.object the MODULE GLOBAL the function resolves internally.
+- Extend AST/name-forbidding guards for every new mutation/oracle
+  helper (oracle independence, F002).
+- For rules differing only in edge cases, assert a sub-case where old
+  and new logic must agree bit-for-bit as a cheap regression control.
+- Fully revert probe/mutation edits; verify by read-back plus a
   pattern search for residue.
-- This environment's shell/tool-execution gate can be command-shape
-  sensitive: a bare `python -m pytest <file> -q` may succeed when
-  heredocs, `python -c`, or piped/filtered variants (`-k`, `| grep`,
-  `| tail`) are denied. Prefer the plainest working shape; don't burn
-  retries on inline-code probes.
-- A bare "user doesn't want to take this action" denial with no reason
-  is often a transient artifact — retry once. A denial WITH an explicit
-  reason (e.g. "use Serena for shell") binds and must be respected, not
-  retried.
-- In a linked-worktree repo, run test commands from the WORKTREE root,
-  not the original repo path — the latter fails with file-not-found even
-  though it looks like the same project.
+- Shell gate is command-shape sensitive: plain `python -m pytest <file>
+  -q` may pass while heredocs/`python -c`/pipes are denied — prefer the
+  plainest working shape.
+- A bare unexplained denial is often transient — retry once; a denial
+  WITH an explicit reason binds and must be respected.
+- In a linked-worktree repo, run test commands from the WORKTREE root.
+- Falsification under numba: patch through the FULL .py_func chain
+  (F010); assert .py_func bodies lack .signatures so removing @njit
+  can't make the test vacuous; define "gate RED" as (refusal raised) OR
+  (error > tol) — a perturbation may surface as a refusal, not a wrong
+  value.
+- Test refusals at the production default operating point (e.g. default
+  max_order), not at the accuracy-study setting where they converge.
+- When a plan-anticipated gate exposes a production shortfall, leave it
+  RED (no tolerance widening, no production edits); repoint the
+  positive control to a converged configuration so the falsification
+  stays non-vacuous and green.
+- Different pipeline paths have different numerical floors (e.g. RB
+  binning vs brute force) — gate each path at its own floor.
+- An aggregate downstream gate can pass while a component gate fails
+  (error budget dominated elsewhere) — keep both; the component gate
+  protects regimes the fixture doesn't reach.
+- Prefer machine-independent structural timing gates (speedup ratio,
+  component subdominance); absolute ms ceilings only as
+  arithmetic-derived secondary regression guards.

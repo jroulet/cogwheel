@@ -25,3 +25,10 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   order-42 shear-series tail crosses the 1e-10 refusal cut there) — this
   is the marginal certified-domain edge for macro-saddle-adjacent
   configs, not a bug; don't widen the refusal threshold to route around it.
+- Batched contraction (`F_op_grid`/`_grid_certified`, Build 3c): scalar
+  `F_op` delegates to the batched core, so scalar suites auto-exercise
+  it. Certified rel-err vs the mpmath oracle grows exponentially with
+  cancellation exponent L (~1e-16 at L~0 -> ~1e-10 at L~44), then the
+  F005 refusal cuts in — the 1e-10 accuracy ceiling coincides with the
+  refusal boundary; certify-XOR-refuse held with zero solo-vs-batch
+  decision flips (no cross-node convergence-state leakage).

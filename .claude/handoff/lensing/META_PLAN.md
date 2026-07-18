@@ -854,3 +854,34 @@ pinned single-thread. DRIVER WATCH-ITEM: surrogate tables (~250 MB)
 must go to a gitignored lazily-built cache (LookupTable idiom), NEVER
 git — check staging at commit; DATA_CONTRACTS may need a new artifact
 entry (plan says spec update yes).
+
+### BUILD 3C COMPLETE — COMMITTED 37c760f (2026-07-18 ~03:00)
+
+Launch 1 died 00:30 (double-stall, ~6 min in, no code lost). Relaunch
+replanned BETTER: Professor derived the WEIGHT-VECTOR reduction
+(per-order length-dim weights scatter-added once per eval; per node one
+dot product; ~190x on the contraction) — overturning launch-1's "radial
+is w-dependent so batching can't help" AND exposing that launch-1's
+"surrogate -> 5-6 ms" arithmetic ignored real costs. Step-wise plan per
+the owner's in-flight ruling: 2 WPs (F_op_grid single-path;
+_exact_total wiring), gate at the plan's own predicted floor (0.175 s),
+SPEEDUP_MIN 3->8, surrogate named as next lever.
+
+Run: Inspector PASS; Professor wedged twice (1800s thresholds) but the
+verdict LANDED — PASS — as the second wedge fired; commit blocked by the
+spec hook (same as Build 3); driver hand-finished SPEC 0.4.0 +
+fragments; committed 37c760f, hook passed clean.
+
+MEASURED: warm pinned lnlike 41.1 ms/eval (engine 38.6) — beats the
+108 ms predicted floor (the ~70 ms non-engine estimate was wrong;
+non-engine is ~2.5 ms). Cost is now ~85% the exact 1F1 derivative
+ladder (~35 ms over ~100 nodes). CONSEQUENCE: the 10 ms owner
+requirement is genuinely reachable next build — the 3D post-contraction
+surrogate (w, y' shear-frame, gamma') kills the ladder cost; residual
+arithmetic ~5-6 ms. Convention trap recorded by the plan for the table
+domain: w = xi(M_L)*f moves with the sampled lens mass.
+
+NEXT: full suite detached (result pending) -> Dreamer close (Phase 3
+skipped in all three builds — memory consolidation overdue) -> Build 3d
+brief (the surrogate; owner's 10 ms requirement) -> then Build 4
+(sampling, owner numbering preserved).
