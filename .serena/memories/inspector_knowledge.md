@@ -8,13 +8,11 @@
   the caller's original proxy variable.
 - When a spec discloses a certified sub-range narrower than the code's
   nominal domain, confirm the gap is honestly written up (SPEC +
-  FINDINGS); carry it as an open defect, never close by widening
-  tolerances.
-- Confirm test oracles are non-circular: they must independently
-  re-derive the expected value; look for (or add) an AST guard
-  forbidding the module-under-test's names.
-- Pre-existing environment-only collection errors are out of scope for
-  a focused review — note them, don't chase them.
+  FINDINGS); carry as an open defect, never close by widening tolerances.
+- Confirm test oracles are non-circular: independent re-derivation; look
+  for (or add) an AST guard forbidding the module-under-test's names.
+- Pre-existing environment-only collection errors are out of scope for a
+  focused review — note, don't chase.
 - Run the mandated mutation check yourself when reviewing new test
   suites (perturb the load-bearing constant/branch, confirm red).
 - When a "goes to X" test fails from legitimate physics at a nonzero
@@ -26,17 +24,28 @@
   .py_func and falsification tests must go RED through that chain (F010).
 - A scatter/weight-vector reduction replacing a bilinear form is a real
   accumulation-order change: require re-certification vs an independent
-  oracle at the ORIGINAL tolerance plus solo-vs-batch
-  certify-XOR-refuse decision identity.
+  oracle at the ORIGINAL tolerance plus solo-vs-batch certify-XOR-refuse
+  decision identity.
 - Single-path delegation (scalar wrapping batched core) means existing
   suites auto-exercise new code; a dedicated new test module instead of
   editing existing suites is a benign plan deviation.
 - A build that REMOVES named constants/mechanisms almost always leaves
-  stale the exact SPEC sentence naming them — check that paragraph, not
-  just that the row exists. Doc staleness is a flag-to-Librarian
-  finding (doc-sync phase), not a Coder defect.
+  stale the exact SPEC sentence naming them — check that paragraph. Doc
+  staleness is a flag-to-Librarian finding, not a Coder defect.
 - Re-reviewing a byte-identical diff: still re-run the suite + import
-  probes and re-derive the key identity by hand — don't trust the prior
-  session's memory.
+  probes and re-derive the key identity by hand.
 - DATA_CONTRACTS covers serialized artifacts only; new fields on an
-  in-memory dataclass need no contract change.
+  in-memory dataclass need no contract change (pickle __getstate__ still
+  deserves a direct round-trip probe).
+- Refusal-net reviews: trace EVERY dispatch route to the boundary —
+  scalar lnposterior AND the sampler's prior.unfold_apply wrap must both
+  route through the override; except must name specific refusal types,
+  never bare (Build 4).
+- Check the approved plan JSON before flagging a constraint deviation: an
+  explicitly documented/approved deviation (e.g. d_app deferral to Build
+  5) is not a finding.
+- A documented @expectedFailure efficiency aspiration (prior-width
+  refusal fraction) is a property, not a bug — but verify all non-finites
+  are exact -inf with zero NaN before accepting.
+- Builds run in the sibling worktree cogwheel-claude-dev; `cd` to the
+  main tree is hook-blocked — run Bash from the worktree cwd.

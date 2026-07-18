@@ -19,6 +19,10 @@
 - Don't normalize style patterns the rubric doesn't mandate (e.g. blank
   line between module docstring and __future__ import — the codebase is
   split); note the inconsistency for a dedicated pass, leave as-is.
+- Within the local-import group the codebase orders by dependency/layer,
+  NOT alphabetically (verified against cogwheel/posterior.py and
+  likelihood/__init__.py) — only the 4 broad groups are mandatory; don't
+  over-reorder within a group.
 - A newly-written module can legitimately require zero edits — verify
   the checklist per file rather than assuming something must be wrong.
 - If a file outside your lane (e.g. a test file) is named in the task's

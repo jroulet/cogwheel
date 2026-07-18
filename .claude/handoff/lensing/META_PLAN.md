@@ -1062,3 +1062,23 @@ works — triple-motivated (parity cut + gamma ceiling + C7 efficiency).
 Heavy PP/injection-recovery validation deliberately deferred to the
 marginalized posterior (Build 5) — running it on the plain path at
 ~1 day/run would validate a configuration we do not intend to ship.
+
+Dreamer (3f/3g/B4 cycle) consolidated ~15:00. CORRECTION to its foreman
+verdict: "third empty cycle => hardening failed" is WRONG — grep shows
+ZERO foreman_lite invocations in the 3g and 4 logs (full-pipeline
+routes never spawn it; driver hand-finishes replaced its closeout
+slots). The 0adcfb7 checkpoint hardening remains UNEXERCISED, not
+failed. Also noted (Dreamer operational finding): serena write_memory
+can client-timeout while succeeding server-side — read back before
+retrying. Librarian doc-sync backlog: two carried-forward SPEC items.
+
+OWNER RULING (2026-07-18, pre-sleep): long sampling/validation runs are
+DETACHED PARALLEL work, never sequence blockers — after Build 5 lands,
+launch the marginalized sampling run + injection-recovery detached and
+IMMEDIATELY proceed to the negative-parity builds; fold verdicts in as
+they arrive (they gate the ship claim, not the build cadence). Standing
+sequence: B5 -> (parallel: sampling+PP runs) -> negative-parity builds
+(measure Schwinger per-point cost; saddle d_app convention + branch-wise
+C5 gate) -> surrogate+micro-levers in its place (priority per measured
+Schwinger cost; target lensed/unlensed per-eval within ~2-4x). Full
+autonomy granted through the sequence.

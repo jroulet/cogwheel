@@ -51,10 +51,12 @@ from __future__ import annotations
 import numpy as np
 
 from cogwheel import utils
-from cogwheel.gw_prior import IASPrior, RegisteredPriorMixin
-from cogwheel.lensing.likelihood import LensedRelativeBinningLikelihood
+from cogwheel.gw_prior import IASPrior, IntrinsicIASPrior, RegisteredPriorMixin
 from cogwheel.prior import (CombinedPrior, FixedPrior, IdentityTransformMixin,
                             Prior, UniformPriorMixin)
+from cogwheel.lensing.likelihood import LensedRelativeBinningLikelihood
+from cogwheel.lensing.marginalized_likelihood import (
+    LensedMarginalizedExtrinsicLikelihood)
 
 # pylint: disable=arguments-differ
 
@@ -250,6 +252,48 @@ class LensedIASPrior(RegisteredPriorMixin, CombinedPrior):
     default_likelihood_class = LensedRelativeBinningLikelihood
 
     prior_classes = IASPrior.prior_classes + [
+        FixedLensGeometryPrior,
+        UniformLensMassPrior,
+        UniformReducedShearPrior,
+        UniformSourcePositionPrior]
+
+
+class LensedMarginalizedExtrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
+    """
+    Intrinsic IAS + reduced-lens prior for the marginalized lensed likelihood.
+
+    Microlensing counterpart of `gw_prior.IntrinsicIASPrior`: it composes the
+    INTRINSIC precessing IAS compact-binary subpriors (masses, effective spin,
+    in-plane spins with isotropic inclination, zero tides, reference frequency)
+    with the four reduced-coordinate Chang--Refsdal lens subpriors defined in
+    this module.  The extrinsic parameters (sky location, arrival time,
+    polarization, distance and orbital phase) are NOT sampled: they are
+    marginalized semi-analytically by the coherent score inside
+    `lensing.marginalized_likelihood.LensedMarginalizedExtrinsicLikelihood` and
+    resampled from the conditional posterior in postprocessing.
+
+    Unlike `LensedIASPrior` (which pairs the FULL IAS prior with the plain
+    `LensedRelativeBinningLikelihood`), this prior samples only the intrinsic
+    CBC + lens sector, so its ``standard_params`` match the marginalized
+    likelihood's ``params`` exactly and it pairs with it inside a
+    `lensing.posterior.LensedPosterior`.
+
+    The CBC subpriors are reused verbatim from `IntrinsicIASPrior.prior_classes`
+    (DRY: the intrinsic subprior list is defined once, in `gw_prior`).  The lens
+    subpriors are appended AFTER them, with ``UniformLensMassPrior`` preceding
+    ``UniformSourcePositionPrior`` because the latter is conditioned on
+    ``m_lens_msun`` (produced by the former); `prior.CombinedPrior` requires
+    every conditioned-on parameter to be supplied by an earlier subprior.
+
+    Distance convention: the coherent score marginalizes and draws
+    ``d_luminosity``, but for a lensed signal that column is the APPARENT
+    luminosity distance ``d_app = d_luminosity / sqrt(mu_macro)`` (F009); the
+    physical-distance conversion and apparent-vs-physical prior reweighting are
+    deferred to post-analysis (see the likelihood's distance-convention note).
+    """
+    default_likelihood_class = LensedMarginalizedExtrinsicLikelihood
+
+    prior_classes = IntrinsicIASPrior.prior_classes + [
         FixedLensGeometryPrior,
         UniformLensMassPrior,
         UniformReducedShearPrior,

@@ -1,24 +1,21 @@
 # Tidy Short-Term Observations
 
-- `cogwheel/lensing/likelihood.py` (2026-07-18 pass): already fully
-  rubric-compliant (import grouping/alignment, blank-line spacing,
-  no unused imports, valid syntax) — zero edits made. Confirmed via
-  manual mechanical checks (python line-length/indent/blank-run
-  scripts) since `autoflake` was not installed in the environment;
-  noting the fallback here per policy.
-
-- `cogwheel/lensing/{__init__.py,posterior.py,prior.py}` (2026-07-18
-  pass): also fully rubric-compliant already — zero edits made after
-  mechanical checks (blank-line runs, whitespace-only lines, 2/1
-  blank-line spacing, import-group boundaries, manual unused-import
-  cross-check; autoflake absent, same fallback). Tried reordering
-  `posterior.py`'s local imports (`cogwheel.posterior` vs
-  `cogwheel.lensing.chang_refsdal.*`) into alphabetical order but
-  reverted: cross-checked against `cogwheel/posterior.py`,
-  `cogwheel/likelihood/__init__.py`, and
-  `cogwheel/likelihood/marginalization/__init__.py` and found the
-  codebase does NOT enforce alphabetical sub-ordering within the
-  "local" import group — real files order by dependency/layer, not
-  alphabetically. Only the 4 broad groups (stdlib/third-party/
-  local/relative) and the explicit example lines in the rubric are
-  mandatory; don't over-reorder within a group.
+- cogwheel/lensing/prior.py: within-package sibling imports
+  (`cogwheel.lensing.likelihood`, `cogwheel.lensing.marginalized_likelihood`)
+  should sort AFTER the broader `cogwheel.gw_prior` / `cogwheel.prior`
+  layer imports, not interleaved between them — mirrors the pattern
+  already used in marginalized_likelihood.py (cogwheel.likelihood before
+  cogwheel.lensing.likelihood). Reordered accordingly.
+- cogwheel/lensing/__init__.py uses absolute imports
+  (`from cogwheel.lensing.prior import ...`) while every other
+  __init__.py in the repo (likelihood, gw_prior, lensing/chang_refsdal)
+  uses relative dot-imports (`from .module import ...`). Left as-is
+  since import ordering/spacing rubric doesn't mandate relative-vs-
+  absolute style changes; flagging for a dedicated normalization pass.
+- cogwheel/lensing/marginalized_likelihood.py required zero edits
+  (spacing, import order, and unused-import checks all already
+  rubric-compliant) — confirms "zero edits can be correct" per prior
+  long-term note.
+- autoflake unavailable in this environment (not on PATH); unused-import
+  check for these 3 files done manually by cross-referencing every
+  imported name against its usages in-file.

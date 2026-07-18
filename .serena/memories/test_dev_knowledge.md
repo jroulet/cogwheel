@@ -1,52 +1,55 @@
 # Test Dev Long-Term Knowledge
 
-- Premise repair, not tolerance repair: if a fixture assumes a wrong
-  physical premise (e.g. F->1 at w->0 under shear), fix the fixture to a
-  case where it holds; keep the inconvenient original as a companion
-  test PREDICTING its nonzero offset via an independent closed form.
-- If the WP under test never landed (blocked), write an honest contract
-  suite — never fabricate tests against a phantom method. Guard the
-  planned API with an @expectedFailure hasattr test: it flips to
-  unexpected-success (RED) the moment the API lands, forcing the update.
-- To inject a buggy/old variant without editing source, mock.patch the
-  MODULE GLOBAL the function resolves internally. Test-side
-  reproductions of production helpers break when production signatures
-  drift (e.g. a new 4th arg) — align arity. Neighbor-suite reds from
-  such drift belong to the owning run: report, don't touch.
-- Extend AST/name-forbidding guards for every new mutation/oracle
-  helper (oracle independence, F002); pure-mpmath oracles for phase
-  gates.
-- For rules differing only in edge cases, assert a sub-case where old
-  and new logic must agree bit-for-bit as a cheap regression control.
-- Fully revert probe/mutation edits; verify by read-back plus a pattern
-  search for residue.
-- Shell gate: prefer the plainest command shape (`python -m pytest
-  <file> -q`; heredocs/`python -c`/pipes may be denied); run from the
-  WORKTREE root; retry a bare unexplained denial once, but a denial
-  WITH a stated reason binds.
-- Falsification under numba: patch through the FULL .py_func chain
-  (F010); define "gate RED" as (refusal raised) OR (error > tol). Test
-  refusals at the production default operating point, not the
-  accuracy-study setting.
-- When a plan-anticipated gate exposes a production shortfall, leave it
-  RED/xfail (no tolerance widening, no production edits); pair with a
-  green converged positive control so the falsification is non-vacuous.
-- Gate each pipeline path and each component at its own numerical floor;
-  an aggregate downstream gate can pass while a component gate fails —
-  keep both.
-- Prefer machine-independent structural timing gates (speedup ratio,
-  component subdominance); absolute ms ceilings only as
-  arithmetic-derived secondary guards (expect machine-dependent xfail).
-- np.exp(1j*x) range-reduces large args ACCURATELY — float64 phase loss
-  lives in the w*tau MULTIPLICATION. Phase-loss demos need irrational-
-  scaled factors (e.g. pi*1e6, e*1e6) so the product carries >53 bits;
-  exact-power-of-ten products are exactly representable and show none.
-- If a gate's claimed band (e.g. thousands of radians of phase) is
-  unreachable from realistic fixtures, build SYNTHETIC inputs that
-  actually hit the band, checked against an independent oracle.
-- When probing an internal path exposed only through reduced outputs,
-  prove your reproduction reduces bit-identically to production first;
-  assemble the independent observable from shipped components via a
-  documented identity, not the function's own convenience return.
-- ChangRefsdalChannels requires a >=2-point strictly-increasing
-  positive w grid (np.unique/sort probes; no scalar fixtures).
+- Premise repair, not tolerance repair: fix fixtures to a case where the
+  physical premise holds; keep the original as a companion test PREDICTING
+  its nonzero offset via an independent closed form.
+- If the WP under test never landed, write an honest contract suite with
+  an @expectedFailure hasattr guard that goes RED when the API lands.
+- Inject buggy/old variants by mock.patching the MODULE GLOBAL the
+  function resolves; align test-side reproductions with drifted
+  production arity; neighbor-suite reds from drift: report, don't touch.
+- Extend AST/name-forbidding guards for every new mutation/oracle helper
+  (F002); pure-mpmath oracles for phase gates. For rules differing only
+  in edge cases, assert a sub-case where old and new agree bit-for-bit.
+- Fully revert probe/mutation edits; verify by read-back + pattern search.
+- Shell gate: plainest command shape (`python -m pytest <file> -q`), from
+  the WORKTREE root; retry a bare denial once; a reasoned denial binds.
+- Falsification under numba: patch the FULL .py_func chain (F010); "gate
+  RED" = refusal raised OR error > tol; test refusals at the production
+  operating point, not the accuracy-study setting.
+- A plan-anticipated gate exposing a production shortfall stays RED/xfail
+  (no tolerance widening) paired with a green converged positive control.
+- Gate each path/component at its own numerical floor; an aggregate gate
+  can pass while a component fails — keep both. Timing: structural gates
+  (speedup ratio, subdominance); absolute ms only arithmetic-derived.
+- np.exp(1j*x) range-reduces accurately — float64 phase loss lives in the
+  w*tau MULTIPLICATION; phase-loss demos need irrational-scaled factors.
+  If a gate's claimed band is unreachable from realistic fixtures, build
+  SYNTHETIC inputs checked against an independent oracle.
+- Probing internals exposed only through reduced outputs: prove your
+  reproduction reduces bit-identically to production first.
+- ChangRefsdalChannels needs a >=2-point strictly-increasing positive w
+  grid (no scalar fixtures); _lens_dic has beta as 4th positional — pass
+  lens params by keyword.
+- Lattice anchors from _snap are NOT bit-exact (round(x/dx)*dx): use
+  assertAlmostEqual + snapping-idempotence (key == key(snapped)), never
+  assertEqual; the 1-ULP offset floors ratio quantities ~1e-16.
+- Identity gates across DIFFERENT node grids floor at ~1e-11 (engine
+  reproducibility), not eps — set the gate orders below the LOO stop so
+  it still certifies "algebra, not interpolation".
+- Detect a silent fallback by wrapping the fast-path method (not-called
+  => fell back); assert fallback == direct bit-identically via float64
+  .tobytes(). Reach unreachable guard states with types.SimpleNamespace
+  fakes reusing real sub-objects so earlier guards still pass; refusal
+  fallbacks via mock.patch side_effect on the cache/fiducial builder.
+- @expectedFailure covers the test body, NOT tearDown — bump anti-vacuity
+  counters BEFORE the assertion.
+- Mutation for except-branches: patch the exception NAME in the consumer
+  module's globals to an unrelated type so the real refusal escapes
+  (gate RED); untriggerable branches via mock side_effect.
+- Mass-sheet twin lnL invariance needs a second time term from per-config
+  t_min referencing: t_geo_twin = t_c - dt_ms - xi*(t_min_B-t_min_A)/2pi;
+  read t_min from a throwaway ChangRefsdalChannels eval, don't bet on
+  dt_ref == -dt_ms.
+- Unlensed-injection near-truth reference: LIGHTEST lens with source OFF
+  the caustic centre — y=(0,0) is a caustic singularity -> -inf.

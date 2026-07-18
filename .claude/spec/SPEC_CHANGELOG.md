@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.7.0` (2026-07-18): SACR-C channel construction (Build 3f): switched-analytic saddle
+- `0.8.0` (2026-07-18): SACR-C channel construction (Build 3f): switched-analytic saddle
 kernels under criticality-separation smootherstep weights + ONE
 beat-free transition envelope demodulated at the parked critical
 carrier, LOO-adaptive coarse node grid (config-independent, ceiling
@@ -14,19 +14,27 @@ carrier, LOO-adaptive coarse node grid (config-independent, ceiling
 Supersedes the flat artificial-split construction and the F008
 full-cluster switch keying (see the F008 addendum).
 
-- `0.6.0` (2026-07-18): Candidate/fiducial ratio layer (Build 3g): lattice-snapped memoized
+- `0.7.0` (2026-07-18): Candidate/fiducial ratio layer (Build 3g): lattice-snapped memoized
 fiducial envelope, heterodyned ratio interpolation (~8 LOO nodes,
 config-independent), guard/refusal-symmetric fallback to the direct
 SACR-C path. Measured warm single-thread lnlike ~9.8 ms (~143x brute).
 New test module `cogwheel/tests/test_lensing_ratio_layer.py`.
 
-- `0.5.0` (2026-07-18): Microlensed sampling layer (Build 4): `LensedIASPrior` (sampled reduced
+- `0.6.0` (2026-07-18): Microlensed sampling layer (Build 4): `LensedIASPrior` (sampled reduced
 lens coordinates — redshifted ln lens mass, reduced shear, shear-frame
 source box; kappa/beta/z_lens eliminated; astroid quadrant folding; no
 phase-fold) and `LensedPosterior` (named engine refusals mapped to
 lnL = -inf at the posterior boundary only); fiducial cache dropped on
 pickle for fork-safe determinism. New row in the Layers table; new test
 module `cogwheel/tests/test_lensing_prior.py`.
+
+- `0.5.0` (2026-07-18): Marginalized lensed likelihood (Build 5): `LensedMarginalizedExtrinsicLikelihood`
++ registered `LensedMarginalizedExtrinsicIASPrior` — coherent-score
+(higher-mode) extrinsic marginalization for the microlensed model via
+exact per-image time shifts through the unchanged fiducial weights and
+`|F|^2`-scaled norms; refusals precede the integral; drawn distance is
+apparent distance d_app (F009 transform deferred to post-analysis).
+New test module `cogwheel/tests/test_lensing_marginalized_likelihood.py`.
 
 - `0.4.0` (2026-07-18): Batched engine fast path (Build 3c): new public `operator.F_op_grid`
 (per-order weight-vector contraction over the whole wave-branch node
