@@ -6,13 +6,19 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.5.0` (2026-07-18): SACR-C channel construction (Build 3f): switched-analytic saddle
+- `0.6.0` (2026-07-18): SACR-C channel construction (Build 3f): switched-analytic saddle
 kernels under criticality-separation smootherstep weights + ONE
 beat-free transition envelope demodulated at the parked critical
 carrier, LOO-adaptive coarse node grid (config-independent, ceiling
 48), closed-form dense reconstruction (`reconstruct_from_envelope`).
 Supersedes the flat artificial-split construction and the F008
 full-cluster switch keying (see the F008 addendum).
+
+- `0.5.0` (2026-07-18): Candidate/fiducial ratio layer (Build 3g): lattice-snapped memoized
+fiducial envelope, heterodyned ratio interpolation (~8 LOO nodes,
+config-independent), guard/refusal-symmetric fallback to the direct
+SACR-C path. Measured warm single-thread lnlike ~9.8 ms (~143x brute).
+New test module `cogwheel/tests/test_lensing_ratio_layer.py`.
 
 - `0.4.0` (2026-07-18): Batched engine fast path (Build 3c): new public `operator.F_op_grid`
 (per-order weight-vector contraction over the whole wave-branch node

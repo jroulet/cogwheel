@@ -77,6 +77,8 @@ Frequencies in Hz, times in GPS seconds, delays in seconds; lens mass
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import scipy.sparse
 from scipy.interpolate import CubicSpline
@@ -87,6 +89,8 @@ from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal.channels import (_channel_switch,
                                                      _physical_kernels,
                                                      reconstruct_from_envelope)
+from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
+from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
 
@@ -160,6 +164,23 @@ _LOO_MAX_NODES = 48
 #: this floor never binds in practice.
 _ENVELOPE_SCALE_FLOOR = 1e-12
 
+#: Fiducial-lattice spacings for the ratio-layer fiducial key
+#: (`_fiducial_key`).  The candidate lens parameters are snapped to this
+#: lattice so that lens configurations within one cell share a single
+#: fiducial envelope; the mass and redshift (which set ``w = xi*f``) are
+#: shared EXACTLY (unsnapped) so the candidate and fiducial ``w`` grids
+#: coincide.  Spacings are fixed physical properties of the ratio layer,
+#: NOT constructor arguments or configuration keys (Professor authority).
+_FID_GAMMA_SPACING = 0.03
+_FID_BETA_SPACING = np.pi / 16
+_FID_KAPPA_SPACING = 0.02
+_FID_Y_SPACING = 0.05
+
+#: Floor on the fiducial envelope magnitude below which the ratio layer
+#: treats the fiducial as unhealthy and rebuilds it.  Guards the ratio
+#: ``E_candidate / E_fiducial`` against division by a near-zero fiducial.
+_ENVELOPE_HEALTH_FLOOR = 0.01
+
 #: Maximum number of macro images a Chang--Refsdal lens produces (four
 #: inside the caustic, two outside).  Matches the engine's channel count
 #: ``channels._N_CHANNELS``: when fewer than this many real images exist
@@ -174,6 +195,144 @@ _LENS_PARAMS = ('m_lens_msun', 'z_lens', 'y1', 'y2', 'gamma', 'beta',
                 'kappa')
 
 _TWO_PI_I = 2j * np.pi
+
+
+def _snap(x, dx):
+    """
+    Snap ``x`` to the nearest multiple of the lattice spacing ``dx``.
+
+    Pure and deterministic: ``round(x / dx) * dx``.  Used to build the
+    ratio-layer fiducial key so that nearby lens parameters collapse onto
+    a shared fiducial cell.
+
+    Parameters
+    ----------
+    x : float
+        Value to snap.
+    dx : float
+        Lattice spacing (positive).
+
+    Returns
+    -------
+    float
+        The nearest lattice point ``round(x / dx) * dx``.
+    """
+    return round(x / dx) * dx
+
+
+def _fiducial_key(lens):
+    """
+    Ratio-layer fiducial cell key for a lens sub-dictionary.
+
+    Returns the 7-tuple identifying the fiducial cell that ``lens`` falls
+    into: the shear ``gamma``, orientation ``beta``, convergence
+    ``kappa`` and impact-parameter components ``y1``/``y2`` are snapped to
+    their respective lattices (`_snap`), while the lens mass
+    ``m_lens_msun`` and redshift ``z_lens`` are shared EXACTLY (unsnapped)
+    so that the candidate and fiducial dimensionless-frequency grids
+    ``w = xi*f`` coincide.
+
+    Parameters
+    ----------
+    lens : dict
+        Lens sub-dictionary with keys ``'m_lens_msun'``, ``'z_lens'``,
+        ``'y1'``, ``'y2'``, ``'gamma'``, ``'beta'``, ``'kappa'``.
+
+    Returns
+    -------
+    tuple
+        ``(snap(gamma), snap(beta), snap(kappa), snap(y1), snap(y2),
+        m_lens_msun, z_lens)``.
+    """
+    return (_snap(lens['gamma'], _FID_GAMMA_SPACING),
+            _snap(lens['beta'], _FID_BETA_SPACING),
+            _snap(lens['kappa'], _FID_KAPPA_SPACING),
+            _snap(lens['y1'], _FID_Y_SPACING),
+            _snap(lens['y2'], _FID_Y_SPACING),
+            lens['m_lens_msun'],
+            lens['z_lens'])
+
+
+def _lens_from_key(key):
+    """
+    Reconstruct the fiducial lens sub-dictionary from a `_fiducial_key`.
+
+    The inverse of `_fiducial_key`: a fiducial cell is fully described by
+    its (snapped) key, so the fiducial lens parameters are recovered from
+    the key alone -- never from the raw candidate parameters.  This keeps
+    the fiducial deterministic in the cell key and independent of which
+    candidate first populated the cell.
+
+    Parameters
+    ----------
+    key : tuple
+        A `_fiducial_key` 7-tuple ``(gamma, beta, kappa, y1, y2,
+        m_lens_msun, z_lens)`` (the first five already snapped).
+
+    Returns
+    -------
+    dict
+        Lens sub-dictionary with keys ``'m_lens_msun'``, ``'z_lens'``,
+        ``'y1'``, ``'y2'``, ``'gamma'``, ``'beta'``, ``'kappa'``.
+    """
+    gamma, beta, kappa, y1, y2, m_lens_msun, z_lens = key
+    return {'m_lens_msun': m_lens_msun, 'z_lens': z_lens,
+            'y1': y1, 'y2': y2, 'gamma': gamma, 'beta': beta, 'kappa': kappa}
+
+
+@dataclass(frozen=True)
+class _FiducialEnvelope:
+    """
+    Memoized fiducial SACR-C envelope for the ratio layer.
+
+    Built once per fiducial cell (`_fiducial_key`) and reused by every
+    candidate that snaps into the cell.  Carries the fiducial's
+    leave-one-out envelope nodes, the w-independent partition geometry
+    (delays, ``real_mask``, ``critical_delay``), and the Re/Im
+    cubic-in-``ln w`` spline of the envelope used to divide out the
+    fiducial from the candidate (`envelope`).
+
+    Attributes
+    ----------
+    partition : ChangRefsdalPartition
+        The fiducial seed engine evaluation, carrying ``real_mask`` (for
+        the image-count guard) and ``critical_delay`` ``tau_c_fid``.
+    coarse_w : np.ndarray
+        Fiducial envelope node grid (strictly increasing, positive).
+    envelope_nodes : np.ndarray
+        Fiducial envelope ``E_fid(w)`` at ``coarse_w`` (complex).
+    spline_real, spline_imag : CubicSpline
+        Real/imaginary cubic-in-``ln w`` not-a-knot splines of
+        ``envelope_nodes``.
+    """
+
+    partition: object
+    coarse_w: np.ndarray
+    envelope_nodes: np.ndarray
+    spline_real: CubicSpline
+    spline_imag: CubicSpline
+
+    def envelope(self, w):
+        """
+        Fiducial envelope ``E_fid`` at ``w`` (scalar or array).
+
+        Evaluates the Re/Im cubic-in-``ln w`` splines.  The candidate and
+        fiducial share ``m_lens``/``z_lens`` exactly, so the candidate
+        ``w`` grid lies inside the fiducial spline's ``ln w`` support --
+        no extrapolation.
+
+        Parameters
+        ----------
+        w : float or np.ndarray
+            Dimensionless frequency (positive).
+
+        Returns
+        -------
+        complex or np.ndarray
+            ``E_fid(w)`` with the shape of ``w``.
+        """
+        ln_w = np.log(w)
+        return self.spline_real(ln_w) + 1j * self.spline_imag(ln_w)
 
 
 class LensedBinningError(ValueError):
@@ -510,6 +669,15 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         self._kernel_dense_f = None
         self._kernel_fit_value = None
         self._kernel_fit_slope = None
+        # Ratio-layer fiducial-envelope cache, keyed by `_fiducial_key`.
+        # Transient in-memory runtime state: not a constructor argument,
+        # so `get_init_dict` (JSONMixin serialization) never captures it.
+        self._fid_cache = {}
+        # Testing-only seam: when True, `_amplification_coefficients`
+        # bypasses the ratio layer and always takes the direct SACR-C
+        # path, so a test can compare the two paths on one candidate.  Not
+        # a constructor argument and never set by the hot path.
+        self._force_direct = False
 
         if fbin is None and pn_phase_tol is None:
             pn_phase_tol = _DEFAULT_PN_PHASE_TOL
@@ -749,7 +917,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         keep = np.searchsorted(grid, new_w)
         return partition, partition.envelope[keep], partition.exact_total[keep]
 
-    def _envelope_loo_nodes(self, lens, dense_w):
+    def _envelope_loo_nodes(self, lens, dense_w, *, seed=None):
         """
         Leave-one-out-adaptive coarse ``w`` nodes for the SACR-C envelope.
 
@@ -787,6 +955,13 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         dense_w : np.ndarray
             Dense bin sub-sample dimensionless frequencies (positive,
             strictly increasing); only its min and max seed the grid.
+        seed : tuple or None
+            Optional precomputed seed evaluation
+            ``(partition, coarse_w, envelope_nodes, exact_total_nodes)``
+            reused by the dispatch so the candidate seed is engine-
+            evaluated once for the guard check and the direct path (no
+            double engine work).  When ``None`` the seed is evaluated
+            here, reproducing the standalone behaviour exactly.
 
         Returns
         -------
@@ -798,21 +973,70 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         envelope_nodes : np.ndarray
             Envelope ``E(w)`` at ``coarse_w`` (complex).
         """
-        w_min = float(dense_w.min())
-        w_max = float(dense_w.max())
+        if seed is None:
+            w_max = float(dense_w.max())
+            coarse_w = np.geomspace(
+                float(dense_w.min()), w_max, _LOO_SEED_NODES)
+            partition, env_nodes, ftot_nodes = self._evaluate_envelope(
+                lens, coarse_w, pad_w=w_max)
+        else:
+            partition, coarse_w, env_nodes, ftot_nodes = seed
 
-        coarse_w = np.geomspace(w_min, w_max, _LOO_SEED_NODES)
-        partition, env_nodes, ftot_nodes = self._evaluate_envelope(
-            lens, coarse_w, pad_w=w_max)
+        def node_error(node_w, node_env, node_ftot):
+            loo = _leave_one_out_errors(np.log(node_w), node_env)
+            scale = max(float(np.max(np.abs(node_ftot))),
+                        _ENVELOPE_SCALE_FLOOR)
+            return loo, scale
 
+        coarse_w, env_nodes, _ = self._refine_envelope_grid(
+            lens, coarse_w, env_nodes, ftot_nodes, node_error)
+        return partition, coarse_w, env_nodes
+
+    def _refine_envelope_grid(self, lens, coarse_w, env_nodes, ftot_nodes,
+                              node_error):
+        """
+        Adaptive leave-one-out refinement of an engine node grid.
+
+        The refinement loop shared by the direct envelope grid
+        (`_envelope_loo_nodes`) and the ratio grid (`_ratio_loo_nodes`):
+        repeatedly split the two intervals flanking the node of largest
+        held-out error (geometric midpoints in ``w``), re-evaluate the
+        SACR-C envelope there, and stop once the worst held-out error
+        (normalized to the ``max|F|`` reconstruction currency by
+        ``node_error``) drops below `_LOO_STOP` or the count reaches
+        `_LOO_MAX_NODES`.  Only the interpolated object and its error
+        currency differ between the two callers, so they are supplied via
+        ``node_error``; the placement, engine re-evaluation, and node
+        bookkeeping are identical and live here once.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters, keys ``gamma, beta, kappa, y1, y2``.
+        coarse_w : np.ndarray
+            Seed node grid (strictly increasing positive), at least the
+            `_LOO_SEED_NODES` seed points.
+        env_nodes : np.ndarray
+            Engine envelope ``E(w)`` at ``coarse_w`` (complex).
+        ftot_nodes : np.ndarray
+            Exact amplification total ``F(w)`` at ``coarse_w`` (complex),
+            used to normalize the held-out error.
+        node_error : callable
+            ``node_error(coarse_w, env_nodes, ftot_nodes) -> (errors,
+            scale)`` returning the per-node held-out error array (already
+            in ``max|F|`` currency) and the scalar normalizing magnitude.
+
+        Returns
+        -------
+        coarse_w, env_nodes, ftot_nodes : np.ndarray
+            The refined node grid and the engine envelope / exact-total
+            values on it (strictly increasing in ``coarse_w``).
+        """
         while True:
             n_nodes = coarse_w.size
-            ln_w = np.log(coarse_w)
-            loo_abs = _leave_one_out_errors(ln_w, env_nodes)
-            scale = max(float(np.max(np.abs(ftot_nodes))),
-                        _ENVELOPE_SCALE_FLOOR)
-            worst = int(np.argmax(loo_abs))
-            if loo_abs[worst] / scale < _LOO_STOP or n_nodes >= _LOO_MAX_NODES:
+            errors, scale = node_error(coarse_w, env_nodes, ftot_nodes)
+            worst = int(np.argmax(errors))
+            if errors[worst] / scale < _LOO_STOP or n_nodes >= _LOO_MAX_NODES:
                 break
 
             # Split the two intervals flanking the worst node (geometric
@@ -839,7 +1063,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             env_nodes = env_nodes[order]
             ftot_nodes = ftot_nodes[order]
 
-        return partition, coarse_w, env_nodes
+        return coarse_w, env_nodes, ftot_nodes
 
     def _reconstruct_kernels(self, dense_w, coarse_w, envelope_nodes,
                              partition):
@@ -888,7 +1112,44 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         spline_imag = CubicSpline(ln_coarse, envelope_nodes.imag,
                                   bc_type='not-a-knot')
         envelope_dense = spline_real(ln_dense) + 1j * spline_imag(ln_dense)
+        return self._kernels_from_dense_envelope(
+            dense_w, envelope_dense, partition)
 
+    def _kernels_from_dense_envelope(self, dense_w, envelope_dense, partition):
+        """
+        Rebuild the channel kernels from a dense envelope, in closed form.
+
+        The saddle/switch/`reconstruct_from_envelope` core of the SACR-C
+        reconstruction, extracted so it can be reused both from
+        `_reconstruct_kernels` (which supplies ``envelope_dense`` by cubic
+        spline of the coarse envelope nodes) and, later, from the ratio
+        layer (which supplies ``envelope_dense`` from the candidate ratio
+        times the fiducial envelope).  Evaluates the analytic switched
+        saddle kernels ``S_a(w) * H_a(w)`` at every dense frequency
+        (`geometry.image_kernel` via `_physical_kernels`; the switch
+        ``S_a`` via `_channel_switch`), then rebuilds
+
+            K_a(w) = S_a*H_a + u_a(w) * exp(-1j*w*(tau_a - tau_c)) * E,
+
+        via `reconstruct_from_envelope`.  Pure vectorized numpy -- no njit
+        is introduced on this path.
+
+        Parameters
+        ----------
+        dense_w : np.ndarray
+            Dense bin sub-sample dimensionless frequencies (positive,
+            strictly increasing).
+        envelope_dense : np.ndarray
+            Envelope ``E(w)`` evaluated at ``dense_w`` (complex).
+        partition : ChangRefsdalPartition
+            Carries the w-independent geometry (``delays``, ``assignment``,
+            ``images``, ``matrix``, ``real_mask``, ``critical_delay``).
+
+        Returns
+        -------
+        np.ndarray
+            Shape ``(n_dense, n_channels)`` complex channel kernels ``K_a``.
+        """
         saddle_dense = _physical_kernels(
             dense_w, partition.assignment, partition.images, partition.matrix)
         switch_dense = _channel_switch(
@@ -900,6 +1161,102 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         return kernels
 
     def _amplification_coefficients(self, par_dic):
+        """
+        Candidate amplification coefficients (ratio-layer dispatch).
+
+        Evaluates the candidate SACR-C seed partition once, then routes to
+        the fast ratio path or the direct path:
+
+        1. Engine-evaluate the candidate on the `_LOO_SEED_NODES` seed
+           grid (a single engine call; a candidate-side
+           `geometry.LensDomainError` or `operator.CancellationError`
+           propagates UNSWALLOWED, matching ``lnlike_bruteforce``).
+        2. Look up or build the fiducial envelope for the candidate's
+           fiducial cell (`_fiducial_key`).  ONLY the fiducial build is
+           wrapped in ``try/except (LensDomainError, CancellationError)``:
+           a candidate inside the certified domain must not be refused
+           because its snapped fiducial happens to fall outside, so a
+           refusing fiducial falls back to the direct path.
+        3. Two guards, either of which falls back to the direct path:
+           image-count mismatch (``real_mask.sum()`` differs between
+           candidate and fiducial), or an unhealthy fiducial envelope
+           (``min|E_fid| / max|E_fid| < _ENVELOPE_HEALTH_FLOOR`` on the
+           in-band dense grid, guarding the ratio's division).
+        4. Otherwise take the ratio path (`_ratio_coefficients`), which
+           interpolates only the ultra-smooth candidate/fiducial ratio.
+
+        The candidate seed evaluation is reused across the guard check and
+        both the ratio and direct paths, so the engine is hit once per
+        candidate for the seed regardless of route.
+
+        Setting the testing-only attribute ``self._force_direct`` bypasses
+        the ratio layer entirely (used to compare the two paths on one
+        candidate); the hot path never sets it.
+
+        Parameters
+        ----------
+        par_dic : dict
+            Waveform and lens parameters, keys per ``self.params``.
+
+        Returns
+        -------
+        delays : np.ndarray
+            Shape ``(n_channels,)`` relative image delays [s].
+        k0, k1 : np.ndarray
+            Shape ``(n_channels, n_bins)`` per-bin center value and slope
+            [1/Hz] of the candidate kernel ``K_a``.
+        partition : ChangRefsdalPartition
+            The candidate seed engine evaluation (w-independent geometry).
+        """
+        lens = self._lens_params(par_dic)
+        dense_w = dimensionless_frequency(
+            self._kernel_dense_f, lens['m_lens_msun'], lens['z_lens'])
+        if not np.all(dense_w > 0):
+            raise LensedBinningError(
+                'All kernel sub-sample frequencies must map to positive '
+                'dimensionless frequency w = xi*f; got a non-positive value.')
+
+        # Candidate seed engine evaluation (single call).  A candidate-side
+        # `geometry.LensDomainError` / `operator.CancellationError` from
+        # its own seed nodes propagates unswallowed here.
+        w_max = float(dense_w.max())
+        seed_w = np.geomspace(float(dense_w.min()), w_max, _LOO_SEED_NODES)
+        partition_cand, seed_env, seed_ftot = self._evaluate_envelope(
+            lens, seed_w, pad_w=w_max)
+        seed = (partition_cand, seed_w, seed_env, seed_ftot)
+
+        if self._force_direct:  # testing-only bypass
+            return self._amplification_coefficients_direct(par_dic, seed=seed)
+
+        key = _fiducial_key(lens)
+        try:
+            fiducial = self._get_or_build_fiducial(key, _lens_from_key(key))
+        except (LensDomainError, CancellationError):
+            # Refusal symmetry: a refusing SNAPPED fiducial must not veto a
+            # candidate that is itself inside the certified domain.
+            return self._amplification_coefficients_direct(par_dic, seed=seed)
+
+        # Guard 1: the candidate and fiducial must have the same number of
+        # real images, else the ratio's carriers do not correspond.
+        if (int(partition_cand.real_mask.sum())
+                != int(fiducial.partition.real_mask.sum())):
+            return self._amplification_coefficients_direct(par_dic, seed=seed)
+
+        # Guard 2: the fiducial envelope must stay away from zero across
+        # the in-band dense grid, else dividing by it is ill-conditioned.
+        e_fid_dense = fiducial.envelope(dense_w)
+        magnitude = np.abs(e_fid_dense)
+        max_magnitude = float(np.max(magnitude))
+        if (max_magnitude <= 0.0
+                or float(np.min(magnitude)) / max_magnitude
+                < _ENVELOPE_HEALTH_FLOOR):
+            return self._amplification_coefficients_direct(par_dic, seed=seed)
+
+        return self._ratio_coefficients(
+            lens, dense_w, partition_cand, fiducial, seed_w, seed_env,
+            seed_ftot)
+
+    def _amplification_coefficients_direct(self, par_dic, *, seed=None):
         """
         Candidate kernels: coarse-node envelope, closed-form reconstruct.
 
@@ -927,6 +1284,13 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         ----------
         par_dic : dict
             Waveform and lens parameters, keys per ``self.params``.
+        seed : tuple or None
+            Optional precomputed candidate seed evaluation
+            ``(partition, coarse_w, envelope_nodes, exact_total_nodes)``
+            forwarded to `_envelope_loo_nodes`, so the fallback path
+            reuses the seed engine evaluation the dispatch already made
+            for the guards (no double engine work).  When ``None`` the
+            seed is evaluated here (standalone direct call).
 
         Returns
         -------
@@ -961,11 +1325,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # raises `geometry.LensDomainError` on a macro-saddle, matching
         # the brute-force path.
         partition, coarse_w, envelope_nodes = self._envelope_loo_nodes(
-            lens, dense_w)
+            lens, dense_w, seed=seed)
 
-        xi = float(dimensionless_frequency(
-            1.0, lens['m_lens_msun'], lens['z_lens']))
-        delays = xi * partition.delays / (2.0 * np.pi)
+        delays = self._image_delays(lens, partition)
 
         # Closed-form dense reconstruction of the channel kernels, then the
         # same per-bin least-squares (value, slope) reduction as before --
@@ -973,12 +1335,238 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # kernels to the analytic saddles plus the smooth envelope).
         dense_kernels = self._reconstruct_kernels(
             dense_w, coarse_w, envelope_nodes, partition)
+        k0, k1 = self._reduce_dense_kernels(dense_kernels)
+        return delays, k0, k1, partition
+
+    def _image_delays(self, lens, partition):
+        """
+        Frequency-independent relative image delays [s] from a partition.
+
+        Converts the engine's dimensionless channel delays ``tau_a``
+        (minimum-relative convention) to detector-frame relative image
+        delays ``dt_a = xi * tau_a / (2*pi)``, with ``xi = w / f`` the
+        dimensionless-frequency slope set by the lens mass and redshift.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters (uses ``m_lens_msun`` and ``z_lens``).
+        partition : ChangRefsdalPartition
+            Carries the dimensionless channel delays ``partition.delays``.
+
+        Returns
+        -------
+        np.ndarray
+            Shape ``(n_channels,)`` relative image delays [s].
+        """
+        xi = float(dimensionless_frequency(
+            1.0, lens['m_lens_msun'], lens['z_lens']))
+        return xi * partition.delays / (2.0 * np.pi)
+
+    def _reduce_dense_kernels(self, dense_kernels):
+        """
+        Reduce dense channel kernels to per-bin (value, slope) coefficients.
+
+        Reshapes the dense ``n_bins * kernel_subsamples`` channel kernels
+        to ``(n_bins, kernel_subsamples, n_channels)`` and applies the
+        precomputed per-bin least-squares (value, slope) weights
+        (`_build_kernel_subsampling`) -- the reduction shared by the
+        direct and ratio paths.
+
+        Parameters
+        ----------
+        dense_kernels : np.ndarray
+            Shape ``(n_bins * kernel_subsamples, n_channels)`` complex
+            channel kernels at the dense bin sub-samples.
+
+        Returns
+        -------
+        k0, k1 : np.ndarray
+            Shape ``(n_channels, n_bins)`` per-bin center value and slope.
+        """
         n_channels = dense_kernels.shape[1]
         kernels = dense_kernels.reshape(
             self.n_bins, self.kernel_subsamples, n_channels)
         k0 = np.einsum('bj,bja->ab', self._kernel_fit_value, kernels)
         k1 = np.einsum('bj,bja->ab', self._kernel_fit_slope, kernels)
-        return delays, k0, k1, partition
+        return k0, k1
+
+    # -- Ratio layer (candidate/fiducial heterodyne) ---------------------
+
+    def _get_or_build_fiducial(self, key, lens_at_key):
+        """
+        Return the memoized fiducial envelope for a cell, building on miss.
+
+        The fiducial is keyed on `_fiducial_key` alone (never on the raw
+        candidate parameters), so the cache is deterministic in the cell
+        and the result is independent of which candidate first populated
+        it.  On a miss the fiducial envelope is engine-evaluated at the
+        SNAPPED lens parameters (`_envelope_loo_nodes`) and its Re/Im
+        cubic-in-``ln w`` splines are built; a `geometry.LensDomainError`
+        / `operator.CancellationError` from the snapped configuration
+        propagates to the caller, which falls back to the direct path.
+
+        Parameters
+        ----------
+        key : tuple
+            The `_fiducial_key` cell key.
+        lens_at_key : dict
+            The fiducial lens sub-dictionary reconstructed from ``key``
+            (`_lens_from_key`).
+
+        Returns
+        -------
+        _FiducialEnvelope
+            The (cached) fiducial envelope record.
+        """
+        cached = self._fid_cache.get(key)
+        if cached is not None:
+            return cached
+
+        dense_w = dimensionless_frequency(
+            self._kernel_dense_f, lens_at_key['m_lens_msun'],
+            lens_at_key['z_lens'])
+        partition, coarse_w, envelope_nodes = self._envelope_loo_nodes(
+            lens_at_key, dense_w)
+        ln_coarse = np.log(coarse_w)
+        spline_real = CubicSpline(ln_coarse, envelope_nodes.real,
+                                  bc_type='not-a-knot')
+        spline_imag = CubicSpline(ln_coarse, envelope_nodes.imag,
+                                  bc_type='not-a-knot')
+        fiducial = _FiducialEnvelope(
+            partition, coarse_w, envelope_nodes, spline_real, spline_imag)
+        self._fid_cache[key] = fiducial
+        return fiducial
+
+    def _ratio_loo_nodes(self, lens, fiducial, dtau_c, seed_w, seed_env,
+                         seed_ftot):
+        """
+        Leave-one-out-adaptive nodes for the candidate/fiducial ratio.
+
+        Forms the ultra-smooth bare ratio
+
+            rho_bare(w) = exp(1j*w*dtau_c) * E_cand(w) / E_fid(w),
+
+        with ``dtau_c = tau_c_cand - tau_c_fid`` the critical-carrier
+        delay difference (the residual carrier the candidate/fiducial
+        demodulation mismatch leaves, removed here so ``rho`` is
+        beat-free), and refines a node grid on ``rho`` with the shared
+        leave-one-out loop (`_refine_envelope_grid`).  Seeded with the
+        reused candidate seed evaluation, so the engine is not re-hit for
+        the seed.  The held-out error on ``rho`` is weighted by
+        ``|E_fid|`` to express it in the candidate-envelope (``max|F|``)
+        currency of the reconstruction gate.
+
+        Because the reconstruction multiplies ``rho`` back by the SAME
+        fiducial spline and undoes the ``dtau_c`` carrier, ``dtau_c`` and
+        ``E_fid`` cancel in the exact-``rho`` limit: they precondition the
+        interpolated object toward flatness (fewer nodes) without changing
+        the reconstructed candidate envelope.
+
+        Parameters
+        ----------
+        lens : dict
+            Candidate lens parameters (for engine re-evaluation of
+            ``E_cand`` at refinement nodes).
+        fiducial : _FiducialEnvelope
+            The fiducial envelope record (supplies ``E_fid``).
+        dtau_c : float
+            Critical-carrier delay difference ``tau_c_cand - tau_c_fid``.
+        seed_w, seed_env, seed_ftot : np.ndarray
+            The reused candidate seed grid, envelope ``E_cand``, and exact
+            total ``F_cand`` at the seed nodes.
+
+        Returns
+        -------
+        coarse_w : np.ndarray
+            Strictly increasing positive ratio node grid.
+        rho_nodes : np.ndarray
+            Bare ratio ``rho_bare(w)`` at ``coarse_w`` (complex).
+        """
+        def node_error(node_w, node_env, node_ftot):
+            e_fid = fiducial.envelope(node_w)
+            rho = np.exp(1j * node_w * dtau_c) * node_env / e_fid
+            loo = _leave_one_out_errors(np.log(node_w), rho)
+            scale = max(float(np.max(np.abs(node_ftot))),
+                        _ENVELOPE_SCALE_FLOOR)
+            return loo * np.abs(e_fid), scale
+
+        coarse_w, env_nodes, _ = self._refine_envelope_grid(
+            lens, np.asarray(seed_w, dtype=float),
+            np.asarray(seed_env, dtype=complex),
+            np.asarray(seed_ftot, dtype=complex), node_error)
+        e_fid = fiducial.envelope(coarse_w)
+        rho_nodes = np.exp(1j * coarse_w * dtau_c) * env_nodes / e_fid
+        return coarse_w, rho_nodes
+
+    def _ratio_coefficients(self, lens, dense_w, partition_cand, fiducial,
+                            seed_w, seed_env, seed_ftot):
+        """
+        Candidate kernels via the candidate/fiducial ratio path.
+
+        Interpolates only the ultra-smooth bare ratio ``rho_bare``
+        (`_ratio_loo_nodes`) with a Re/Im cubic-in-``ln w`` spline,
+        rebuilds the candidate envelope
+
+            E_cand(w) = exp(-1j*w*dtau_c) * rho(w) * E_fid(w),
+
+        and reconstructs the channel kernels from it in closed form
+        (`_kernels_from_dense_envelope`).
+
+        The reconstruction uses the CANDIDATE partition's geometry
+        (delays, saddle kernels, switch, and critical delay
+        ``tau_c_cand``), NOT the fiducial's -- the fiducial only supplies
+        the smooth divisor ``E_fid`` and the ``dtau_c`` carrier, which
+        cancel against themselves so the reconstructed candidate envelope
+        is exact in the exact-``rho`` limit.  Using the fiducial's
+        ``tau_c`` here would be a correctness error.
+
+        Parameters
+        ----------
+        lens : dict
+            Candidate lens parameters.
+        dense_w : np.ndarray
+            Dense bin sub-sample dimensionless frequencies (positive,
+            strictly increasing).
+        partition_cand : ChangRefsdalPartition
+            The candidate seed partition (supplies the reconstruction
+            geometry and ``tau_c_cand``).
+        fiducial : _FiducialEnvelope
+            The fiducial envelope record (supplies ``E_fid`` and
+            ``tau_c_fid``).
+        seed_w, seed_env, seed_ftot : np.ndarray
+            The reused candidate seed grid, envelope, and exact total.
+
+        Returns
+        -------
+        delays : np.ndarray
+            Shape ``(n_channels,)`` relative image delays [s].
+        k0, k1 : np.ndarray
+            Shape ``(n_channels, n_bins)`` per-bin center value and slope.
+        partition : ChangRefsdalPartition
+            The candidate seed partition (``partition_cand``).
+        """
+        dtau_c = float(partition_cand.critical_delay
+                       - fiducial.partition.critical_delay)
+        coarse_w, rho_nodes = self._ratio_loo_nodes(
+            lens, fiducial, dtau_c, seed_w, seed_env, seed_ftot)
+
+        ln_coarse = np.log(coarse_w)
+        ln_dense = np.log(dense_w)
+        rho_real = CubicSpline(ln_coarse, rho_nodes.real,
+                               bc_type='not-a-knot')
+        rho_imag = CubicSpline(ln_coarse, rho_nodes.imag,
+                               bc_type='not-a-knot')
+        rho_dense = rho_real(ln_dense) + 1j * rho_imag(ln_dense)
+
+        envelope_dense = (np.exp(-1j * dense_w * dtau_c) * rho_dense
+                          * fiducial.envelope(dense_w))
+        dense_kernels = self._kernels_from_dense_envelope(
+            dense_w, envelope_dense, partition_cand)
+
+        k0, k1 = self._reduce_dense_kernels(dense_kernels)
+        delays = self._image_delays(lens, partition_cand)
+        return delays, k0, k1, partition_cand
 
     def _check_candidate_delays(self, delays):
         """Raise if a candidate's relative delays exceed ``delta_t_max``."""

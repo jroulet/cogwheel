@@ -1023,3 +1023,23 @@ pattern. NOTE: its "INS-6-001 still open" flag is stale — the driver
 hand-finish in b2d80a0 closed it (SPEC 0.5.0 + F008 addendum). FOREMAN
 short-term empty for the SECOND consecutive cycle despite five builds —
 worth a foreman.md nudge in the next SDK housekeeping pass.
+
+### BUILD 3G COMPLETE — 10 MS MET: 9.809 ms warm (2026-07-18 ~12:00)
+
+Inspector PASS, Professor PASS, no escalations. MEASURED: warm best-of-5
+lnlike 9.809 ms (142.8x brute 1401 ms), ratio nodes 8 config-independent,
+deep-band macro <1e-6 through the ratio path, refusal symmetry verified
+on ratio/direct/brute with hand-checked parity boundaries; crown ~1-nat
+deltas confirmed INHERITED RB error (identical in direct path). Two
+Professor-accepted deviations (identity 1e-9 = cross-grid floor; absolute
+ceiling machine-calibrated with speedup+nodes as hard gates). Commit
+blocked by the spec hook as usual -> driver hand-finish (SPEC ratio-layer
+sentence, fragments). TIMING SERIES (driver harness, pinned): 14,790 ms
+-> 41 (3c) -> 29.5 (3f) -> ~9.8 ms (3g) = ~1500x, all gates original.
+THE OWNER'S 10 MS REQUIREMENT IS MET BY THE FACTORIZATION LEVER ALONE;
+the E_fid surrogate backstop is NOT needed. BUILD 4 (sampling) UNBLOCKED
+— its brief must honor the three Professor constraints at BUILD 2
+COMPLETE (d_app never kappa; refusals->lnL=-inf or positive-parity
+prior; 22-only phase degeneracy) plus per-eval determinism through the
+fiducial cache under sampler parallelism (fork/pickle semantics of
+_fid_cache worth one design question).
