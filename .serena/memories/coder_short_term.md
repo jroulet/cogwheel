@@ -1,5 +1,72 @@
 # Coder Short-Term Observations
 
+## BUILD 3e WP2 — BLOCKED (WP1 dependency `transition_envelopes` absent, 2026-07-18)
+
+WP2 ("rewire `_amplification_coefficients` to call
+`channels.transition_envelopes(w_coarse)`, interpolate per-image envelopes
+R_j, reconstruct dense K_a = S*R_a + (1-S)*(1/alpha_a)*sum_j
+alpha_j*R_j*exp(-i*phi_aj)") CANNOT be built: its step-(1) call target
+`ChangRefsdalChannels.transition_envelopes` DOES NOT EXIST. Verified this
+session: grep `transition_envelopes` across whole tree => hits ONLY in
+build3e_plan_approved.json and my own memory; `channels.py` class
+ChangRefsdalChannels public API = {__init__, w, reset, evaluate,
+evaluate_path} — no envelope method, no `envelope` symbol anywhere in
+cogwheel/lensing. WP1 (the method's producer) was BLOCKED (see prior
+checkpoint) and never landed. `_amplification_coefficients` in likelihood.py
+still holds the Build-3d GLOBAL-spline-over-K_a design (returns
+(delays,k0,k1,partition), splines partition.kernels directly) — unchanged.
+
+Root reason WP1/WP2 stall is the SAME unsolved design question, not a coding
+gap: the engine produces only the cluster TOTAL F(w) (operator.F_op/F_op_grid)
+plus GEOMETRIC per-image kernels (geometry.image_kernel, divergent at caustic,
+invalid inside an unresolved cluster). It never computes a per-image
+WAVE-OPTICS residual R_j. The plan's "code-pinned" claim that R_j is already
+produced by the _dd/_hyp1f1 path (~1us/image/node) is FALSE against the tree
+(same finding as WP1). A smooth R_j reproducing exact_total across the
+deep-unresolved near-cusp/near-fold band IS the envelope decomposition the
+Professor still owes; fabricating it in likelihood.py would be an invented,
+unverifiable oracle AND out of WP2 scope (Where: likelihood.py only). Did NOT
+touch any file. ESCALATED: WP1 must deliver a real, reviewed
+`transition_envelopes` (per-image wave residual) before WP2 can proceed.
+
+
+## BUILD 3e WP1 — BLOCKED (design premise not code-grounded, 2026-07-18)
+
+WP1 ("thin `transition_envelopes(w)` on ChangRefsdalChannels wrapping
+EXISTING `image_amplification_factor(w,j)` -> `_kernel_from_image_amplification`
+-> per-image R_j via numba _dd/_hyp1f1, ~1us/image/node") CANNOT be built as
+specified: those primitives DO NOT EXIST. Exhaustive search across
+cogwheel/lensing: `def image_amplification_factor`, `def _dd_image`,
+`def _kernel_from_image_amplification` => zero hits. The approved plan's
+"CODE-PINNED efficiency finding" (build3e_plan_approved.json line 21:
+`image_amplification_factor -> _dd_image -> _hyp1f1`) is FALSE against the tree.
+
+Architectural reason it's not a trivial add: the engine NEVER computes a
+per-image wave-optics amplification F_j. `operator.F_op(w,y,gamma,beta,kappa)`
+returns the single CLUSTER TOTAL F(w). Per-image structure exists ONLY as the
+GEOMETRIC stationary-phase target `geometry.image_kernel` = H_j = alpha_j*(1 +
+iC1/w + C2/w^2), which its own docstring says "is not valid for an image that
+is part of an unresolved cluster" (diverges at caustic). `_gauge.exact_cluster_
+kernel` is explicit: the cluster kernel = exp(-i w tau)*(total - persistent),
+"the divergent per-image asymptotics of the cluster members NEVER APPEAR" — the
+design DELIBERATELY avoids per-image cluster amplitudes because they diverge.
+`_hyp1f1` public API (point_mass_g_derivatives/_ladder_core/_shared_numerator)
+is the operator's derivative-ladder for the TOTAL, not per-image residuals.
+
+Consequence: smooth per-image R_j reproducing exact_total in the UNRESOLVED
+band = the unsolved envelope-decomposition (the build3e "design question,
+Professor-first"). The only existing per-image split is the artificial gauge
+`_member_split` (alpha-weighted demodulated TOTAL) which carries F's beats
+verbatim — build3d already showed that's not smooth. A geometric-only R_j =
+(1+iC1/w+C2/w^2) is a genuine thin wrapper but reproduces kernels ONLY when
+switch=1 (resolved); it FAILS reconstruction in the deep-unresolved near-cusp/
+near-fold sub-bands (the binding gate). Building a real per-image wave residual
+needs new physics in _hyp1f1.py/operator.py/_gauge.py — all FORBIDDEN by WP1
+scope. Did NOT fabricate it (would be an unverifiable invented oracle).
+ESCALATED: Professor must produce the ACTUAL decomposition (or the primitive as
+a properly-reviewed separate WP) before WP1/WP2 can proceed. No files changed.
+
+
 ## INS-2 ROUND (findings on the global-spline build)
 
 INS-2-003 (likelihood.py speed) — Inspector's suggested remedy (matched-C1

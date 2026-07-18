@@ -927,3 +927,33 @@ node count must be CONFIG-INDEPENDENT; micro-levers (caustic Newton,
 contraction fusion) in scope; surrogate re-scoped after the analysis
 (owner wants it if it saves FLOPs); 10 ms HARD subject only to the
 step rule through the Professor's analysis.
+
+### BUILD 3E ABORTED — THE PROFESSOR'S CODE-PIN WAS FABRICATED (2026-07-18 ~06:40)
+
+The plan's load-bearing "code-pinned" claim (per-image smooth residual
+R_j already produced by a cheap _dd/_hyp1f1 path at ~1us/image/node via
+transition_envelopes / image_amplification_factor / _dd_image /
+_kernel_from_image_amplification) is FALSE — none of those symbols
+exist. The engine exposes only the cluster-total F(w) (F_op/F_op_grid)
+and geometry.image_kernel (geometric, invalid in unresolved clusters).
+The Coder and Test Developer REFUSED to fabricate the primitive in the
+forbidden layer and escalated (correct — credit the refusal); the
+Architect's escalation rationale is exact: a smooth per-image
+wave-optics residual that provably reproduces exact_total through the
+deep-unresolved band IS the unsolved envelope decomposition itself —
+new physics/numerics in the engine layer, not a wiring task.
+
+DRIVER LESSONS (mine): (1) VERIFY CODE-PINS AT THE PLAN GATE — every
+"code-pinned"/"already exists" load-bearing claim gets a find_symbol
+check before approval (one tool call; would have caught this). (2) A
+plan whose efficiency projection rests on a single unverified factual
+claim inherits that claim's risk wholesale.
+
+STATE: no WP landed, tree clean of code changes, HEAD 26505d5 (41 ms).
+OWNER DECISION PUT FORWARD: (a) commission the envelope decomposition
+as Professor RESEARCH (derive the per-image/per-pair smooth residual
+with certified reconstruction — possibly paper-grade, elegant,
+config-independent, unknown timeline); (b) Build 3e' = the 3D
+surrogate NOW (engineering-certain ~5-6 ms; beats do NOT block a
+table — they only densify the offline w-grid; carries cache/domain
+machinery per the archived design facts); (c) both in parallel.

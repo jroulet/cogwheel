@@ -122,8 +122,15 @@ not alter it); the stall-ringdown/template builders; priors/sampling
 - F010: py_func-chain falsification for any new njit code.
 - Timing gates: structural-first (node count config-independence
   assertion across the five anchor configs; public-entry-point speedup
-  floor), then the 10 ms pinned warm best-of-5 ceiling (HARD, subject
-  only to the step rule via the Professor's analysis).
+  floor), then the 10 ms pinned warm best-of-5 ceiling. Owner
+  clarification (2026-07-18): 10 ms may honestly require the surrogate
+  on top of the envelopes — BOTH outcomes are acceptable: (a) <= 10 ms
+  this build (envelopes alone or envelopes + surrogate, if it fits an
+  honest <= 3-WP decomposition), or (b) the envelope build gated at its
+  own derived floor with CONFIG-INDEPENDENT nodes proven, and the
+  surrogate named as the immediate finisher build. What remains
+  unacceptable: a moved gate dressed as progress, or dropping the
+  surrogate from the program.
 - In-build tests FAST; full suite is the driver's post-build step.
 
 ## Environment facts
