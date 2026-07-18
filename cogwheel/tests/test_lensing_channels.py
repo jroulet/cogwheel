@@ -81,7 +81,7 @@ import itertools
 import pathlib
 import sys
 import textwrap
-from unittest import TestCase, main, mock
+from unittest import TestCase, main
 
 import numpy as np
 
@@ -137,11 +137,10 @@ KERNEL_SUM_MARGIN_CEILING = 1e2
 #: instead of it -- see the module docstring.
 RECONSTRUCTION_ABS_GATE = 5e-15
 
-#: Floor the buggy real-only neighbour rule must exceed on the
-#: on-caustic configs for the falsification to mean anything: the
-#: pre-2c suite measured sum_a |K_a| ~1e89 there, so clearing the 1e3
-#: ceiling is not a marginal call.
-BUGGY_BLOWUP_FLOOR = KERNEL_SUM_CEILING
+# BUGGY_BLOWUP_FLOOR retired with RealOnlyNeighbourFalsificationTestCase
+# (Build 3f SACR-C swap, INS-5-002): it floored the pre-2c real-only
+# switch's on-caustic sum_a |K_a| blow-up, which no longer has a home now
+# that the falsification against the retired 3-arg switch is gone.
 
 #: Multiple of the source-plane path step that bounds each label's
 #: per-step Fermat-delay change.  The measured ratio across a fold/cusp
@@ -366,64 +365,15 @@ def _savefig(fig, name: str) -> None:
         plt.close(fig)
 
 
-def _real_only_channel_switch(w: np.ndarray,
-                              delays: np.ndarray,
-                              real_mask: np.ndarray) -> np.ndarray:
-    """The PRE-2c switch: neighbours are the other REAL channels only.
-
-    This is the bug FINDINGS F008 fixed, reproduced here so the fix has
-    something to be measured against.  The shipped rule takes each
-    channel's delay separation against every other cluster label; this
-    one takes it against ``real_ids[real_ids != channel]``, missing the
-    parked virtual label a near-critical image is co-located with.  On
-    the caustic that turns a ~0 separation into an O(1) one, ramps the
-    switch to one, and hands a still-merged channel to a
-    stationary-phase target diverging like sqrt|mu_a|.
-
-    Built from `_gauge.smootherstep` and the `operator` window
-    thresholds -- the shared primitives -- and NEVER from `channels`'
-    own switch, which is the thing under test (FINDINGS F002).  It is
-    injected by monkeypatching `channels._channel_switch`, so
-    `channels.py` itself (fenced out of this build) is untouched.
-
-    Parameters
-    ----------
-    w : np.ndarray
-        Dimensionless frequency grid.
-    delays : np.ndarray
-        Per-channel delays, indexed by cluster label.
-    real_mask : np.ndarray
-        Boolean mask of real channels.
-
-    Returns
-    -------
-    np.ndarray
-        Shape ``(n_w, N_CHANNELS)`` switch in ``[0, 1]``.
-
-    Raises
-    ------
-    ValueError
-        If fewer than two real channels exist, leaving the buggy rule
-        with no neighbour to measure against.  The real lens always has
-        two or four real images, so this signals a broken fixture rather
-        than a physical configuration.
-    """
-    switch = np.zeros((w.shape[0], N_CHANNELS), dtype=float)
-    real_ids = np.flatnonzero(real_mask)
-    if real_ids.size < 2:
-        raise ValueError(
-            'Cannot reproduce the pre-2c real-only switch with '
-            f'{real_ids.size} real channel(s): the rule needs at least '
-            'one other real channel to measure a separation against. A '
-            'Chang-Refsdal lens always has two or four real images, so '
-            'check the fixture that produced this real_mask.')
-    for channel in real_ids:
-        others = real_ids[real_ids != channel]
-        separation = float(
-            np.min(np.abs(delays[channel] - delays[others])))
-        switch[:, channel] = _gauge.smootherstep(
-            w * separation, operator.RHO_START, operator.RHO_END)
-    return switch
+# RETIRED (Build 3f SACR-C swap): _real_only_channel_switch
+# ----------------------------------------------------------------------
+# Reproduced the pre-2c REAL-ONLY neighbour switch (3-arg: w, delays,
+# real_mask) so the F008 fix had something to be falsified against.  The
+# shipped `channels._channel_switch` now takes a fourth positional
+# argument `critical_delay` and keys on the criticality separation
+# |tau_a - tau_c| (SACR-C, report Sec. 6.7), so this 3-arg reproduction
+# can no longer be monkeypatched in for it.  Removed together with
+# `RealOnlyNeighbourFalsificationTestCase` (Inspector finding INS-5-002).
 
 
 def _on_caustic_config(gamma: float, theta: float, beta: float = 0.0,
@@ -479,12 +429,12 @@ def _measured_configs() -> list[tuple[str, str, dict]]:
 
 
 #: The local reproductions whose independence from the tracker the AST
-#: guard pins.  `_real_only_channel_switch` is the load-bearing one: it
-#: is the pre-2c switch the boundedness gate is falsified against, so if
-#: it ever reached into `channels` for the switch it was meant to
-#: reproduce, the falsification would be comparing the module to itself
-#: and could not fail (FINDINGS F002).
-SWITCH_REPRODUCTIONS = (_real_only_channel_switch, _on_caustic_config)
+#: guard pins.  `_on_caustic_config` builds on-caustic `evaluate` kwargs
+#: from `geometry`/`operator` only, never from `channels`' own output, so
+#: the configs the boundedness gate is measured on cannot be derived from
+#: the module under test (FINDINGS F002).  (The pre-2c switch reproduction
+#: `_real_only_channel_switch` was retired with the SACR-C swap, INS-5-002.)
+SWITCH_REPRODUCTIONS = (_on_caustic_config,)
 
 #: Every helper that must stay independent of the module under test.
 INDEPENDENT_HELPERS = FIXTURE_BUILDERS + SWITCH_REPRODUCTIONS
@@ -680,20 +630,18 @@ class BoundedKernelTestCase(ChannelsTestCase):
     --------------------------
     Covered: the shipped `ChangRefsdalChannels` kernels are evaluated
     end-to-end on the measured config set, so the ceiling gates the real
-    integration of switch, targets and residual projection.  The buggy
-    comparison is injected by monkeypatching `channels._channel_switch`
-    with `_real_only_channel_switch`, a local reproduction built from
-    `_gauge`/`operator` primitives only -- `channels.py` is fenced out of
-    this build and is not edited.
+    integration of switch, targets and residual projection.
 
-    NOT covered: the injected variant reproduces the pre-2c NEIGHBOUR
-    RULE, not the pre-2c file.  If the historical bug also differed
-    elsewhere, this pins only the neighbour-set half of it.  The
-    monkeypatch also proves the switch is reached through a module-global
-    lookup; were `evaluate` ever to inline the switch, the injection
-    would silently no-op, which is why
-    `test_the_reproduced_variant_matches_the_shipped_contract` checks the
-    patch actually changes the answer.
+    NOT covered: that this ceiling can actually go RED.  The companion
+    falsification (`RealOnlyNeighbourFalsificationTestCase`, which
+    injected the pre-2c real-only switch and asserted the on-caustic
+    kernels blew past the ceiling) was RETIRED with the Build 3f SACR-C
+    swap: `channels._channel_switch` gained a fourth `critical_delay`
+    argument and now keys on the criticality separation |tau_a - tau_c|,
+    so the old 3-arg reproduction no longer fits its signature
+    (INS-5-002).  A replacement falsification against the SACR-C switch
+    is OWED (Test Developer); until it lands this class runs but is not
+    proven able to fail.
     """
 
     def _evaluate(self, config: dict):
@@ -768,162 +716,30 @@ class BoundedKernelTestCase(ChannelsTestCase):
             'nothing')
 
 
-class RealOnlyNeighbourFalsificationTestCase(ChannelsTestCase):
-    """The boundedness ceiling MUST go red under the pre-2c switch.
-
-    A ceiling that nothing can breach tests nothing.  These checks
-    re-inject the real-only neighbour rule the 2c fix removed and assert
-    the on-caustic configs blow straight through the ceiling that the
-    fixed gauge clears by orders of magnitude -- which is what makes
-    `BoundedKernelTestCase` a measurement of the fix rather than a
-    restatement of it.
-    """
-
-    def _evaluate_buggy(self, config: dict):
-        with mock.patch.object(channels, '_channel_switch',
-                               _real_only_channel_switch):
-            tracker = channels.ChangRefsdalChannels(W_GRID)
-            tracker.reset()
-            return tracker.evaluate(**config)
-
-    def _evaluate_fixed(self, config: dict):
-        tracker = channels.ChangRefsdalChannels(W_GRID)
-        tracker.reset()
-        return tracker.evaluate(**config)
-
-    def test_real_only_neighbours_blow_the_bounded_ceiling(self):
-        """On-caustic, the buggy neighbour set drives sum_a |K_a| past
-        the ceiling the fixed gauge holds."""
-        for kind, label, config in _measured_configs():
-            if kind != 'on-caustic':
-                continue
-            with self.subTest(config=label):
-                sums = _kernel_sum(self._evaluate_buggy(config))
-                worst = float(np.max(sums))
-                self._comparisons += 1
-                self.assertFalse(
-                    np.any(np.isnan(sums)),
-                    f'{label}: the buggy variant produced NaN rather '
-                    'than a divergence; the comparison is inconclusive')
-                self.assertGreater(
-                    worst, BUGGY_BLOWUP_FLOOR,
-                    f'{label}: the pre-2c real-only switch kept '
-                    f'sum_a |K_a| at {worst:.3e}, under the '
-                    f'{BUGGY_BLOWUP_FLOOR:g} ceiling. The boundedness '
-                    'gate therefore cannot distinguish the fix from the '
-                    'bug and is not evidence of anything.')
-
-    def test_the_fix_and_the_bug_are_orders_apart_on_caustic(self):
-        """The two gauges are separated by many orders, not by a hair --
-        so the ceiling's placement is not a judgement call."""
-        for kind, label, config in _measured_configs():
-            if kind != 'on-caustic':
-                continue
-            with self.subTest(config=label):
-                fixed = float(np.max(_kernel_sum(
-                    self._evaluate_fixed(config))))
-                buggy = float(np.max(_kernel_sum(
-                    self._evaluate_buggy(config))))
-                self._comparisons += 1
-                self.assertGreater(
-                    buggy / max(fixed, EPS), 1e6,
-                    f'{label}: buggy/fixed sum_a |K_a| ratio is only '
-                    f'{buggy / max(fixed, EPS):.3e}; the ceiling sits in '
-                    'a narrow gap rather than a wide one')
-
-    def test_the_rules_agree_when_every_label_is_real(self):
-        """Where all four labels hold real images the two rules agree
-        bit-for-bit, which localizes the bug to what it is about.
-
-        The real-only rule is wrong only where a real image is
-        co-located with a PARKED VIRTUAL label.  Where no label is
-        virtual, ``real_ids[real_ids != j]`` and "all labels except j"
-        are the SAME set by construction, so the two switches are
-        identical to the bit.  If this failed, the injected variant
-        would be perturbing something unrelated to the neighbour set and
-        the on-caustic blow-up could not be attributed to it.
-        """
-        checked = 0
-        for _, label, config in _measured_configs():
-            fixed = self._evaluate_fixed(config)
-            if not bool(np.all(fixed.real_mask)):
-                continue  # a virtual label is parked: rules may differ
-            with self.subTest(config=label):
-                buggy = self._evaluate_buggy(config)
-                self._comparisons += 1
-                checked += 1
-                self.assertTrue(
-                    np.array_equal(fixed.kernels, buggy.kernels),
-                    f'{label}: all four labels are real, so the two '
-                    'neighbour sets are identical, yet the kernels '
-                    'differ; the injected variant is changing more than '
-                    'the neighbour rule')
-        self.assertGreater(
-            checked, 0,
-            'no config produced four real images, so the '
-            'identical-neighbour-set case was never exercised')
-
-    def test_the_reproduced_variant_matches_the_shipped_contract(self):
-        """The injection is real: same shape contract, different answer.
-
-        `_real_only_channel_switch` must satisfy the shape/range
-        contract the shipped switch does (otherwise the blow-up could be
-        a shape bug), the label count it assumes must match the module's,
-        and patching it must actually change an on-caustic result -- if
-        `evaluate` stopped looking the switch up as a module global, the
-        monkeypatch would silently no-op and every falsification above
-        would pass vacuously.
-        """
-        self.assertEqual(
-            N_CHANNELS, channels._N_CHANNELS,
-            'the locally declared label count no longer matches the '
-            'module under test, so the injected switch has the wrong '
-            'shape')
-        config = next(config for kind, _, config in _measured_configs()
-                      if kind == 'on-caustic')
-        delays = np.array([0.0, 0.5, 1.0, 1.5])
-        real_mask = np.array([True, True, False, False])
-        switch = _real_only_channel_switch(W_GRID, delays, real_mask)
-        self.assertEqual(switch.shape, (W_GRID.size, N_CHANNELS))
-        self.assertTrue(np.all((switch >= 0.0) & (switch <= 1.0)),
-                        'the reproduced switch left [0, 1]')
-        self.assertTrue(
-            np.all(switch[:, ~real_mask] == 0.0),
-            'virtual channels must never switch (S_j = 0)')
-        fixed = float(np.max(_kernel_sum(self._evaluate_fixed(config))))
-        buggy = float(np.max(_kernel_sum(self._evaluate_buggy(config))))
-        self._comparisons += 1
-        self.assertNotEqual(
-            fixed, buggy,
-            'patching channels._channel_switch did not change the '
-            'result, so the injection never took effect and the '
-            'falsification tests are vacuous')
-
-    def test_diagnostic_plot(self):
-        """Save sum_a |K_a| vs w, fixed vs buggy, with the ceiling."""
-        self._comparisons += 1
-        if not _HAVE_MPL:
-            self.skipTest('matplotlib unavailable')
-        fig, ax = plt.subplots(figsize=(7.5, 4.5))
-        for index, (kind, label, config) in enumerate(
-                _measured_configs()):
-            color = f'C{index % 10}'
-            ax.semilogy(W_GRID, _kernel_sum(self._evaluate_fixed(config)),
-                        color=color, marker='o', ms=3, lw=1.4,
-                        label=f'fixed: {label}')
-            if kind == 'on-caustic':
-                ax.semilogy(
-                    W_GRID, _kernel_sum(self._evaluate_buggy(config)),
-                    color=color, marker='x', ms=4, lw=1.2, ls='--',
-                    label=f'buggy: {label}')
-        ax.axhline(KERNEL_SUM_CEILING, color='k', lw=1.6, ls=':',
-                   label=f'ceiling {KERNEL_SUM_CEILING:g}')
-        ax.set_xlabel('dimensionless frequency w')
-        ax.set_ylabel(r'$\sum_a |K_a|$')
-        ax.set_title('F008 switch: fixed gauge stays O(1), pre-2c '
-                     'real-only gauge escapes on-caustic')
-        ax.legend(fontsize=5.5, ncol=2, loc='best')
-        _savefig(fig, 'channels_bounded_kernels_fixed_vs_buggy.png')
+# RETIRED (Build 3f SACR-C swap): RealOnlyNeighbourFalsificationTestCase
+# ----------------------------------------------------------------------
+# This class pinned that `BoundedKernelTestCase` could go RED by
+# re-injecting the pre-2c REAL-ONLY neighbour switch (FINDINGS F008) via
+# `mock.patch.object(channels, '_channel_switch', _real_only_channel_switch)`
+# and asserting on-caustic sum_a |K_a| blew past the ceiling the fixed
+# gauge holds.  Build 3f's SACR-C construction SUPERSEDES the F008
+# full-cluster switch rule: `channels._channel_switch` now takes a fourth
+# positional argument `critical_delay` and keys on the criticality
+# separation |tau_a - tau_c| (report Sec. 6.7).  The 3-arg
+# `_real_only_channel_switch` no longer matches that signature
+# (TypeError: takes 3 positional arguments but 4 were given), and the
+# F008 real-only-neighbour rule it falsified is no longer the shipped
+# switch, so the whole class is both broken and conceptually obsolete
+# (Inspector finding INS-5-002).  It is RETIRED here rather than rewritten.
+#
+# OWED (Test Developer): a replacement falsification that the SACR-C
+# criticality-separation switch (S_a = smootherstep(w*|tau_a - tau_c|,
+# 0.5, 4)) is load-bearing for `BoundedKernelTestCase` -- e.g. inject a
+# 4-arg variant that keys on the WRONG separation (real-only neighbours,
+# or |tau_a - tau_c| replaced by a full-cluster min) and assert the
+# on-caustic boundedness ceiling goes red.  Without it, BoundedKernelTestCase
+# still runs but is no longer proven able to fail.  The Coder does not
+# author this gate (it would certify the same WP1 switch it exercises).
 
 
 class LabelContinuityTestCase(ChannelsTestCase):

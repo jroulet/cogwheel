@@ -345,6 +345,21 @@ committed, and no tolerance may be widened to achieve it.
 
 ## F008 — the real near-cusp cause: `_channel_switch` measures delay separation against real channels only, not the full cluster (2026-07-17)
 
+> **ADDENDUM (2026-07-18, Build 3f / SACR-C): switch keying superseded, F008's
+> lesson preserved.** The SACR-C channel construction replaced the full-cluster
+> pairwise switch keying with the CRITICALITY separation `delta_a = \|tau_a -
+> tau_c\|` (each image's delay distance from the parked critical carrier). The
+> switch scale is now the demodulation distance of the single transition
+> envelope by construction, so the bounded-phase theorem applies (envelope
+> phase <= RHO_END = 4 rad — beats impossible). For genuine mergers
+> `tau_a -> tau_c`, so the new gate is AT LEAST as conservative as F008's
+> full-cluster rule (measured `max\|S_a H_a\| <= 1.21` through fold/cusp
+> crossings at eta = +-0.002); ACCIDENTAL delay degeneracies between
+> non-merging images no longer stall the switch (small carrier separation =
+> no beat, so staying unswitched is harmless). F008's underlying lesson —
+> never key a cluster decision on a real-only neighbour set — remains valid
+> and is embodied in `tau_c` coming from the parked/critical carrier.
+
 This is the actual mechanism behind the Build-2b crown-gate accuracy failures
 that F006 mis-attributed (F006 now SUPERSEDED). The defect is one line in the
 lens engine, not in the relative-binning likelihood.

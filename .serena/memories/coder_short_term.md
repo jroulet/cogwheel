@@ -1,5 +1,224 @@
 # Coder Short-Term Observations
 
+## BUILD 3f INS-5 findings fix — DELIVERED (test suites un-broken, 2026-07-18)
+
+Fixed both Inspector findings by RETIRING obsolete/superseded scaffolding
+(both findings explicitly sanction "or retire"). As Coder I did NOT author
+replacement certification gates for my own WP1/WP2 code — that circularity is
+forbidden. Two test files touched; NO source touched. Both suites now collect
+and run GREEN: `pytest test_lensing_channels.py test_lensing_fast_path.py` ->
+33 passed in 36 s.
+
+INS-5-001 (test_lensing_fast_path.py, was UNCOLLECTABLE - ImportError on removed
+_DEFAULT_KERNEL_NODES):
+- Dropped _DEFAULT_KERNEL_NODES from the likelihood import (kept _data_term,
+  _norm_term).
+- RETIRED CoarseNodeInterpolationTestCase (coarse-node cubic-spline interp gate)
+  + its SelfFalsificationTestCase companion method
+  test_interpolation_gate_rejects_an_underresolved_grid -> replaced with
+  retirement-note comments. KEPT the other 2 self-falsification methods
+  (test_kernel_accuracy_gate_rejects_a_perturbed_value,
+  test_crown_agreement_gate_rejects_a_shifted_lnl) — both still valid & green.
+- Removed orphaned constants (INTERP_NULLSAFE_CEIL, UNDERRESOLVED_NODES,
+  CONVERGED_NODES, INTERP_CONFIG_LABELS, INTERP_UNDERRESOLVED_LABELS) and
+  orphaned imports (CubicSpline, reconstructed_total). Updated module docstring
+  LEVER-2 / INTERPOLATION paragraphs to note the SACR-C retirement.
+- GOTCHA caught in this session: the lookahead regex retiring the interp
+  self-falsification method left the FOLLOWING method's `def` line at 8-space
+  indent (its body was already at 8) -> IndentationError at collection. Fixed
+  by re-indenting `def test_crown_agreement_gate_rejects_a_shifted_lnl` to 4
+  spaces. LESSON: after a lookahead-anchored method retirement, always re-parse
+  — `    def` (4sp) matches as a substring inside `        def` (8sp).
+
+INS-5-002 (test_lensing_channels.py, RealOnlyNeighbourFalsificationTestCase RED
+— TypeError: _channel_switch now 4-arg with critical_delay, monkeypatched 3-arg
+_real_only_channel_switch):
+- RETIRED RealOnlyNeighbourFalsificationTestCase (6 methods) + the 3-arg
+  _real_only_channel_switch helper -> retirement-note comments. The F008
+  real-only-neighbour rule it falsified is SUPERSEDED by SACR-C's
+  criticality-separation switch (report Sec. 6.7).
+- SWITCH_REPRODUCTIONS: dropped _real_only_channel_switch -> now
+  (_on_caustic_config,). INDEPENDENT_HELPERS shrinks accordingly;
+  NonCircularFixtureGuardTestCase iterates it dynamically (asserts
+  checked==len(INDEPENDENT_HELPERS)) so no hard reference broke.
+- Removed orphaned BUGGY_BLOWUP_FLOOR const + unused `mock` import
+  (from unittest import TestCase, main). EPS/_measured_configs still live.
+- Updated BoundedKernelTestCase docstring "WHAT IS AND IS NOT COVERED" to record
+  that its can-go-red companion was retired.
+
+OWED — TEST DEVELOPER (loud flag, I did NOT author these; they certify WP1/WP2):
+1. fast_path: a null-safe INTERPOLATION gate on the SACR-C path — an
+   under-seeded LOO-envelope grid must breach the ceiling the adaptive
+   _envelope_loo_nodes set clears (replaces the retired coarse-grid gate +
+   its self-falsification).
+2. channels: a falsification that the SACR-C switch S_a=smootherstep(
+   w*|tau_a - tau_c|, 0.5, 4) is load-bearing for BoundedKernelTestCase — e.g.
+   inject a 4-arg (w,delays,real_mask,critical_delay) variant keyed on the WRONG
+   separation and assert the on-caustic boundedness ceiling goes red. Until it
+   lands, BoundedKernelTestCase runs but is not proven able to fail.
+
+
+
+## BUILD 3f WP2 — DELIVERED (SACR-C LOO envelope hot path, likelihood.py, 2026-07-18)
+
+Rewired LensedRelativeBinningLikelihood._amplification_coefficients to consume
+WP1's SACR-C envelope (reconstruct_from_envelope/_physical_kernels/
+_channel_switch from channels.py) instead of the fixed 100-node
+_DEFAULT_KERNEL_NODES grid + cubic-spline-of-K_a. ONE file touched
+(cogwheel/lensing/likelihood.py); channels.py/_gauge.py byte-unchanged.
+
+Design shipped:
+- COARSE EVAL: only the SINGLE smooth envelope E(w) is interpolated; the
+  analytic switched saddles S_a*H_a are rebuilt in closed form at every dense
+  sub-sample. New _evaluate_envelope(lens, new_w, pad_w): fresh
+  ChangRefsdalChannels(grid).evaluate(...) -> (partition, E[keep], Ftot[keep])
+  via searchsorted; pads lone nodes to the engine's >=2-point minimum with an
+  already-evaluated pad_w (dropped from returns). Geometry fields are
+  w-independent (deterministic initial assignment) so disjoint node batches
+  stitch consistently.
+- LOO REFINEMENT: _envelope_loo_nodes seeds geomspace(w_min,w_max,
+  _LOO_SEED_NODES=8) spanning [dense_w.min,dense_w.max]; each iter computes
+  _leave_one_out_errors(ln w, E_nodes) (module fn: 4-nearest-OTHER-node cubic
+  Lagrange held-out estimate, endpoints=0, O(n), overestimates true global
+  spline err => conservative stop), normalizes by max|Ftot| (=max|F|, the
+  reconstruction-gate currency; floored at _ENVELOPE_SCALE_FLOOR=1e-12), stops
+  when worst/scale < _LOO_STOP=4e-3 (HARD-CODED, not a ctor arg/config key) or
+  n>=_LOO_MAX_NODES=48. Else splits the 2 intervals flanking the worst node
+  (geometric midpoints), filters near-dupes (isclose rtol 1e-9), clips to
+  ceiling room, batch-evals, concat+sort. Self-certifying, config-independent.
+- RECONSTRUCTION: _reconstruct_kernels splits E into Re/Im, not-a-knot
+  CubicSpline in ln w (REUSES existing complex spline path via real/imag split,
+  no new spline machinery), evaluates at ln(dense_w); _physical_kernels +
+  _channel_switch closed-form; reconstruct_from_envelope -> kernels(n_dense,4).
+  Pure vectorized numpy, NO new njit (so no F010 py_func falsification owed).
+  F001 mod-2pi carrier reduction inherited via reconstruct_from_envelope ->
+  _gauge._unit_carrier.
+- _amplification_coefficients: dense_w, LensedBinningError on non-positive w,
+  _envelope_loo_nodes -> (partition,coarse_w,E_nodes); delays = xi*
+  partition.delays/(2pi); _reconstruct_kernels; reshape (n_bins,
+  kernel_subsamples,4); k0/k1 = same einsum least-squares reduction as before
+  (UNCHANGED contraction). Returns (delays,k0,k1,partition); hot path
+  (_get_dh_hh_no_asd_drift) still does `delays,k0,k1,_ = ...` (partition
+  ignored, retained for API/diagnostics = seed eval, w-indep geometry valid).
+
+REMOVED: _DEFAULT_KERNEL_NODES(=100), _coarse_w_node_grid, _full_cluster_delays,
+the n_kernel_nodes ctor arg/attr/validation. (One benign docstring MENTION of
+"n_kernel_nodes" remains at ~L469 explaining WHY no such arg exists — not code.)
+FROZEN & untouched: _set_summary (stall-ringdown/template builders),
+LensedBinningError bin guard, moment contraction (_data_term/_norm_term,
+_bin_moments, _build_moment_operators), _build_kernel_subsampling/_kernel_fit_*,
+lnlike_bruteforce (exact_total oracle). No tolerance widened.
+
+REFUSAL SYMMETRY: seed grid always includes w_max (worst cancellation,
+monotonic in w) so the first engine call raises geometry.LensDomainError
+(macro-saddle) / operator.CancellationError (uncertifiable contraction)
+unswallowed, matching lnlike_bruteforce — same contract as the retired design.
+
+VERIFIED (read-only static, NOT a test run — Test Dev owns tests): ast.parse OK;
+import OK; retired symbols absent; 4 new methods + _leave_one_out_errors + LOO
+constants present; __init__ sig has no n_kernel_nodes; _LENS_PARAMS keys
+(m_lens_msun,z_lens,y1,y2,gamma,beta,kappa) match _evaluate_envelope/evaluate
+usage. UNVERIFIED (downstream, runtime-capable reviewer): RB-vs-brute at
+RB_ATOL=1.5 on every regime; near-cusp pin; zero-noise floors; build3f five
+gates (recon identity<=1e-13, greedy-oracle N<=26, LOO N<=48, |S_a H_a|<=2,
+deep-band F009 constant<1e-6); 18ms warm timing.
+
+FLAGS for Test Developer / Inspector:
+- Any test referencing _DEFAULT_KERNEL_NODES / n_kernel_nodes /
+  _coarse_w_node_grid / _full_cluster_delays BREAKS (all removed) — rewrite for
+  the LOO envelope path (_LOO_SEED_NODES/_LOO_STOP/_LOO_MAX_NODES/
+  _ENVELOPE_SCALE_FLOOR).
+- New coverage owed: _leave_one_out_errors (held-out estimator; mutation:
+  perturb a node, confirm its error rings), _evaluate_envelope (pad_w lone-node
+  path + searchsorted keep), _envelope_loo_nodes (stop@4e-3, ceiling clamp,
+  dup-filter), _reconstruct_kernels (real/imag spline + closed-form saddles).
+- Private imports _channel_switch/_physical_kernels from
+  chang_refsdal.channels submodule (package __init__ exports only
+  ChangRefsdalChannels/real_image_delays/RHO_START/RHO_END) — sanctioned by the
+  reconstruct_from_envelope docstring but a cross-module coupling to note.
+- SPEC.md fast-path row still says "_DEFAULT_KERNEL_NODES = 100 ... cubic-splined
+  ... K_a(w)"; now describes SACR-C single-envelope interpolation on LOO nodes
+  + closed-form saddle reconstruction — Inspector/Librarian sync.
+
+
+
+## BUILD 3f WP1 — DELIVERED (SACR-C channels + envelope accessor, 2026-07-18)
+
+Implemented the SACR-C decomposition (envelope_research.md design authority)
+in channels.py + _gauge.py. This SUPERSEDES the Build-3e BLOCKED state below:
+3f does NOT need the nonexistent per-image wave residual R_j — the residual is
+carried by ONE demodulated envelope E, projected onto the 4 physical labels
+via per-frequency weights (the telescoping gauge). Only 2 files touched;
+operator.py/_hyp1f1.py/geometry.py byte-unchanged (git diff --stat confirms).
+
+_gauge.py (ADDED, existing funcs preserved — tests depend on
+exact_transition_channels/unresolved_member_channels/exact_cluster_kernel/
+reconstructed_total/smootherstep):
+- switched_analytic_channels(w, total, member_delays, saddle_kernels, switch,
+  critical_delay, weights) -> (kernels, envelope) [PROJECTION]:
+  residual = F - sum_j carrier_j*S_j*H_j; K_j = S_j H_j + alpha_j conj(carrier_j)*
+  residual; E = conj(carrier_c)*residual.
+- channels_from_envelope(...envelope...) -> (kernels, total) [FORWARD/inverse]:
+  residual = carrier_c*E; K_j = trial + alpha_j conj(carrier_j)*residual;
+  F = sum_j carrier_j*trial_j + residual.
+- envelope_total(w, member_delays, saddle_kernels, switch, critical_delay,
+  envelope) -> F  [single authoritative exactness-check reconstruction].
+- helpers: _unit_carrier(phase)=exp(1j*(phase - 2pi*round(phase/2pi))) (F001
+  mod-2pi reduction, applied ONCE then conjugated so telescoping is machine-
+  precision regardless of w*tau); _per_frequency_weights (validate+normalize
+  along last axis); _switched_setup (shared validation + carrier/trial/alpha).
+
+channels.py:
+- import switched_analytic_channels/channels_from_envelope/envelope_total from
+  _gauge; __all__ += 'reconstruct_from_envelope'; const _ENVELOPE_WEIGHT_FLOOR=1e-2
+  (= SACR-C eta).
+- _channel_switch(w, delays, real_mask, critical_delay): S_a=smootherstep(
+  w*|tau_a - tau_c|, RHO_START, RHO_END). This is the F008-SUPERSEDING gate —
+  keys on criticality separation |tau_a - tau_c|, NOT full-cluster nearest-nbr.
+  Provably >= as conservative for genuine mergers (tau_a->tau_c); accidental
+  degeneracies no longer stall. VIRTUAL channels never switch (S=0).
+- _envelope_weights(switch)=1 - switch + eta (raw; _gauge normalizes). SINGLE
+  home of the weight policy; reconstruct_from_envelope reuses it (DRY).
+- evaluate(): critical_delay = virtual_delay - t_min; kernels,envelope =
+  switched_analytic_channels(w, exact_total, delays, physical=H_a, switch,
+  critical_delay, _envelope_weights(switch)). H_a from geometry.image_kernel
+  (CARRIER-FREE per its docstring — correct, carrier applied at reconstruction).
+- ChangRefsdalPartition: 7 NEW fields (envelope, saddle_kernels, switch,
+  critical_delay, matrix, images, assignment) + property envelope_reconstruction
+  (delegates envelope_total). Docstring Attributes updated.
+- NEW module fn reconstruct_from_envelope(w, envelope, delays, saddle_kernels,
+  switch, critical_delay) -> (K_a, F): the likelihood hot-path forward
+  reconstruction; applies _envelope_weights then channels_from_envelope.
+
+4-channel per-freq-weight form CHOSEN over 5th channel (task directive):
+keeps _N_CHANNELS=4 so F008 switch neighbour set + label-continuity/crossing
+tests unaffected. Documented in module docstring + evaluate() comment.
+
+VERIFIED (minimal smoke invocation, NOT a test campaign — Test Dev owns tests):
+gamma=0.2,y=(0.9,0.1),w=geomspace(1,20,40): coherent-sum rel 6.6e-16,
+envelope-id rel 1.0e-16, fwd round-trip kernels 6.2e-17 / total 1.0e-16 — all
+<< 1e-13 gate. Shapes kernels(40,4)/envelope(40,)/switch(40,4)/saddle(40,4).
+F009 deep-unresolved: y=(0.05,0),tiny w -> |F|=1.0206=1/sqrt(1-0.04) exactly,
+envelope-id rel 1.3e-23. CancellationError propagates UNSWALLOWED (observed at
+w~32, y=(0.9,0.1) — F005 refusal band, correct). Pyright w.ndim/.shape warnings
+are false positives matching pre-existing exact_transition_channels/
+reconstructed_total style (_as_frequency always returns ndarray).
+
+FLAGS for Test Developer / Inspector:
+- F008 switch FORMULA CHANGED (full-cluster -> |tau_a - tau_c|). Any test-side
+  reproduction of _channel_switch must align (F002: scenario builders must stay
+  channels.py-independent). Crossing/label-continuity behaviour intended
+  UNCHANGED (4 labels preserved) but VERIFY green.
+- New partition fields + envelope_reconstruction property + public
+  reconstruct_from_envelope need coverage (Executable Artifact Verification).
+- SPEC.md channel-construction paragraph + DATA_CONTRACTS (if it names channel
+  fields) now describe SACR-C — Inspector/Librarian to sync.
+
+---
+
+# (historical, superseded by 3f above)
+
+
 ## BUILD 3e WP2 — BLOCKED (WP1 dependency `transition_envelopes` absent, 2026-07-18)
 
 WP2 ("rewire `_amplification_coefficients` to call

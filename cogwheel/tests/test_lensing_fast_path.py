@@ -19,18 +19,18 @@ any answer:
   by ``assertEqual``, and the F005 ``CancellationError`` / domain refusals
   still firing on the same out-of-certification inputs (F005).
 
-* LEVER 2 -- ``_amplification_coefficients`` evaluates the engine ONCE on
-  a COARSE deterministic ``w`` node grid (WP2's ``_coarse_w_node_grid``,
-  a log-spaced base grid unioned with the FULL-CLUSTER gauge/branch
-  transition nodes) and cubic-splines each smooth channel kernel
-  ``K_a(w)`` to the dense bin sub-samples, instead of hitting the engine
-  at every sub-sample.  `CoarseNodeInterpolationTestCase` isolates the
-  interpolation error by comparing the spline-reconstructed
-  ``F(f) = sum_a exp(1j w tau_a) K_a`` -- built on the SHIPPED PRODUCTION
-  node grid -- against a DIRECT dense engine evaluation at the same
-  frequencies (the pre-lever-2 path), under the NULL-SAFE metric.  The
-  oracle is the direct dense engine, NEVER built from the spline under
-  test (F002).
+* LEVER 2 -- ``_amplification_coefficients`` evaluates the engine on a
+  SMALL leave-one-out-adaptive ``w`` node set for the single smooth SACR-C
+  envelope ``E(w)`` (``_envelope_loo_nodes``) and rebuilds each channel
+  kernel ``K_a(w)`` in CLOSED FORM at the dense bin sub-samples -- the
+  switched analytic saddles ``S_a * H_a`` evaluated directly plus the
+  interpolated envelope (``_reconstruct_kernels``) -- instead of hitting
+  the engine at every sub-sample.  (The former fixed coarse-node
+  cubic-spline-of-``K_a`` design and its `CoarseNodeInterpolationTestCase`
+  interpolation gate were RETIRED with the Build 3f SACR-C swap; a
+  replacement null-safe interpolation gate on the LOO-envelope path is
+  owed to the Test Developer -- see the retirement note near the removed
+  class.)
 
 WP1 accelerated ``geometry.nearest_caustic_point`` (the
 frequency-independent caustic search).  `CausticSearchPreservationTestCase`
@@ -65,35 +65,17 @@ TOLERANCES (and two deliberate, documented deviations from the brief)
   clear of the cancellation refusal (``L <= ~30`` at ``gamma = 0.20``);
   the refusal inputs are routed to the dedicated F005 refusal test.
 
-* INTERPOLATION (`INTERP_NULLSAFE_CEIL`, DEVIATION #1).  The brief's
-  ``< 1e-8`` POINTWISE-relative gate on ``|F_interp - F_dense| / |F_dense|``
-  is ill posed: at the interference nulls where ``|F_dense| -> 0`` the
-  pointwise ratio blows up regardless of the reconstruction quality.  We
-  gate the NULL-SAFE metric
-  ``epsilon = max_f |F_interp - F_dense| / max_f |F_dense| < 1e-3`` on the
-  SHIPPED PRODUCTION coarse node grid (``_coarse_w_node_grid`` at the
-  shipped ``n_kernel_nodes`` default, WP2's full-cluster transition
-  placement -- never a hand-refined 400-node proxy).  Provenance:
-  ``|delta_lnL| ~ rho**2 * epsilon``; at ``rho ~ 20`` this leaves ~0.4 nat,
-  a 3.7x margin to the 1.5-nat RB gate and subdominant to the RB binning
-  floor's ``lnlike`` contribution.  The oracle is the DIRECT dense engine
-  evaluation at the same sub-sample frequencies, NEVER the spline under
-  test (F002).
-
-  MEASURED SURFACING AND RESOLUTION (2026-07-17): the gate first surfaced
-  RED at base=40 (met only by crown four-image 6.7e-5; two-image 2.76e-2,
-  near-cusp 3.7e-3, kappa 3.5e-3, rotated-shear 1.8e-3) -- the plan's
-  designed acceptance signal, upheld by the Professor review.  WP2's
-  full-cluster transition placement was wired correctly; base=40
-  log-spacing was simply too sparse across the band.  The plan's
-  proven-safe fallback was then applied as a PRODUCTION change: a driver
-  sweep on the production grid measured (worst config = two-image)
-  base 40 -> 2.8e-2, 64 -> 3.3e-3, 85 -> 8.7e-4, 100 -> 4.2e-4,
-  128 -> 1.5e-4, and ``_DEFAULT_KERNEL_NODES`` was raised to 100 (~2.4x
-  margin; 85 is the bare threshold, rejected as too thin off-suite).  The
-  gate itself was never widened -- the conservative 1e-3 ceiling stays to
-  protect high-SNR production events where a percent-level leak would
-  bias ``lnlike``.
+* INTERPOLATION (RETIRED with the Build 3f SACR-C swap).  The former
+  null-safe interpolation gate (``epsilon = max_f |F_interp - F_dense| /
+  max_f |F_dense| < 1e-3`` on the fixed ``_DEFAULT_KERNEL_NODES``
+  coarse-node cubic-spline-of-``K_a`` grid) certified a design that no
+  longer exists: the SACR-C hot path interpolates only the single smooth
+  envelope ``E(w)`` on a LOO-adaptive node set and rebuilds the switched
+  analytic saddles in closed form.  Its replacement -- the same null-safe
+  metric applied to the LOO-envelope reconstruction, plus its paired
+  under-seeded-grid self-falsification -- is OWED to the Test Developer
+  (the report's build3f gates 2/3).  The Coder does not author it: it
+  certifies the WP2 code the Coder wrote (F002, no shared author).
 
 * TIMING (`SPEEDUP_MIN`, `MS_CEILING`, DEVIATION #2).  The brief's
   ``<= 10 ms`` warm ``lnlike`` ceiling is server-specific; on this box the
@@ -148,11 +130,9 @@ from unittest import TestCase, main
 import mpmath
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy.interpolate import CubicSpline
 
 from cogwheel import data, waveform
 from cogwheel.lensing.chang_refsdal import channels, geometry, operator
-from cogwheel.lensing.chang_refsdal._gauge import reconstructed_total
 from cogwheel.lensing.chang_refsdal._hyp1f1 import (
     DD_PRODUCT_CEILING, HypergeometricDomainError, W_MAX_CERTIFIED,
     point_mass_g_derivatives)
@@ -162,8 +142,7 @@ from cogwheel.lensing.chang_refsdal.operator import (
     CancellationError, F_op, L_MAX, RHO_END, RHO_START, select_branch)
 from cogwheel.lensing.waveform import dimensionless_frequency
 from cogwheel.lensing.likelihood import (
-    LensedRelativeBinningLikelihood, _DEFAULT_KERNEL_NODES, _data_term,
-    _norm_term)
+    LensedRelativeBinningLikelihood, _data_term, _norm_term)
 
 # ---------------------------------------------------------------------------
 # Fixture constants (shared with the crown likelihood suite so the anchors
@@ -313,55 +292,21 @@ FOP_REFUSALS = (
 )
 
 # ---------------------------------------------------------------------------
-# LEVER 2 -- interpolation constants.
+# LEVER 2 -- interpolation constants (RETIRED with the SACR-C swap).
 # ---------------------------------------------------------------------------
-
-#: NULL-SAFE interpolation ceiling on the PRODUCTION coarse node grid:
-#: ``epsilon = max_f |F_interp - F_dense| / max_f |F_dense| < 1e-3``.  The
-#: max-normalised metric is well posed at interference nulls (where
-#: ``|F_dense| -> 0`` makes the pointwise-relative metric blow up), so it
-#: measures the reconstruction error against the CHARACTERISTIC ``F`` scale.
-#: Provenance (Professor): ``|delta_lnL| ~ rho**2 * epsilon``; at ``rho ~ 20``,
-#: ``epsilon = 1e-3`` gives ~0.4 nat, a 3.7x margin to the 1.5-nat RB gate,
-#: and is subdominant to the RB binning floor's ``lnlike`` contribution yet
-#: reachable at the modest ``_DEFAULT_KERNEL_NODES`` budget with full-cluster
-#: transition placement (pure log-spacing needs ~100+ nodes).
-INTERP_NULLSAFE_CEIL = 1e-3
-
-#: Deliberately under-resolved node count for the self-falsification: a
-#: hand-built ``n = 4`` log-spaced grid with NO transition nodes.  The
-#: two-image config at ``n <= 12`` has null-safe ``epsilon ~ 0.5``, far above
-#: `INTERP_NULLSAFE_CEIL`, so it proves the interpolation gate CAN go red.
-UNDERRESOLVED_NODES = 4
-
-#: Positive-control node count for the self-falsification: the SHIPPED
-#: production default, per the plan spec ("as a paired positive control,
-#: the PRODUCTION default grid PASSES epsilon < 1e-3").  Driver-measured
-#: on the two-image config (the slowest to converge): base=100 +
-#: full-cluster placement reaches null-safe ``epsilon = 4.2e-4``
-#: (base=128 -> 1.5e-4, base=85 -> 8.7e-4), so the production grid
-#: demonstrably PASSES `INTERP_NULLSAFE_CEIL` while the n=4 grid fails --
-#: the gate can go both green and red.
-CONVERGED_NODES = _DEFAULT_KERNEL_NODES
-
-#: Configs exercised by the production interpolation gate (all five
-#: ``_LENS_CONFIGS`` regimes).
-INTERP_CONFIG_LABELS = (
-    'two-image', 'four-image', 'near-cusp', 'kappa', 'rotated-shear')
-
-#: HISTORY (driver, 2026-07-17): at the originally shipped
-#: ``_DEFAULT_KERNEL_NODES = 40`` the null-safe production gate was met
-#: ONLY by the crown four-image config; these four regimes sat above the
-#: ceiling (two-image 2.76e-2, near-cusp 3.7e-3, kappa 3.5e-3,
-#: rotated-shear 1.8e-3) -- the plan's DESIGNED surfacing of WP2's violated
-#: base=40 assumption, upheld by the Professor review.  Resolved by the
-#: plan's proven-safe fallback: the default was raised to 100 off a driver
-#: sweep of the production grid (see `_DEFAULT_KERNEL_NODES` provenance);
-#: all five regimes now clear the unchanged 1e-3 ceiling (worst: two-image
-#: 4.2e-4).  Kept as the roster of slow-converging regimes any future
-#: node-budget change must re-verify against.
-INTERP_UNDERRESOLVED_LABELS = (
-    'two-image', 'near-cusp', 'kappa', 'rotated-shear')
+#
+# The fixed coarse ``w`` node grid (``_coarse_w_node_grid`` /
+# ``_DEFAULT_KERNEL_NODES`` / ``n_kernel_nodes``) and the cubic-spline-of-``K_a``
+# reconstruction those constants gated were removed by the SACR-C rewrite of
+# ``_amplification_coefficients`` (Build 3f WP2).  The hot path now interpolates
+# ONLY the single smooth envelope ``E(w)`` on a LOO-adaptive node set
+# (``_envelope_loo_nodes``, hard-coded stop ``_LOO_STOP``, ceiling
+# ``_LOO_MAX_NODES``) and rebuilds the switched analytic saddles in closed form
+# (``_reconstruct_kernels``).  `CoarseNodeInterpolationTestCase` and the
+# interpolation self-falsification that consumed ``INTERP_NULLSAFE_CEIL`` /
+# ``CONVERGED_NODES`` / ``UNDERRESOLVED_NODES`` / ``INTERP_*_LABELS`` are retired
+# below.  A replacement null-safe interpolation gate on the LOO-envelope path is
+# OWED to the Test Developer (see the module note near `CoarseNodeInterpolationTestCase`).
 
 # ---------------------------------------------------------------------------
 # LEVER 1/2 -- timing constants.
@@ -931,185 +876,29 @@ class NumbaOperatorPreservationTestCase(FastPathTestCase):
                     F_op(w, y, gamma)
 
 
-class CoarseNodeInterpolationTestCase(FastPathTestCase):
-    """
-    LEVER 2: the PRODUCTION coarse-node cubic-spline kernel interpolation
-    reconstructs ``F(f) = sum_a exp(1j w tau_a) K_a`` to a NULL-SAFE error
-    below `INTERP_NULLSAFE_CEIL`, isolated from the RB binning floor above
-    and the DD kernel accuracy below.
-
-    The coarse grid is the SHIPPED production grid -- built by calling
-    ``self.like._coarse_w_node_grid`` at the shipped ``n_kernel_nodes``
-    default (never a hand-refined 400-node proxy), so this certifies the
-    production default that ships.  The oracle ``F_dense`` is the engine
-    evaluated DIRECTLY at the dense sub-sample frequencies (the pre-lever-2
-    path) and coherently summed via the partition's own ``reconstructed``;
-    it is NEVER built from the spline under test (F002).
-
-    The gate uses the NULL-SAFE metric
-    ``epsilon = max_f |F_interp - F_dense| / max_f |F_dense|``, which is
-    well posed at the interference nulls (``|F_dense| -> 0``) that make the
-    pointwise-relative ``max|dF/F|`` metric ill posed; the pointwise metric
-    is printed for information only (DEVIATION #1 -- see module docstring).
-    """
-
-    def _production_coarse_grid(self, config):
-        """Build the SHIPPED production coarse ``w`` node grid for a config.
-
-        Calls ``self.like._coarse_w_node_grid`` at the shipped
-        ``n_kernel_nodes`` with the full-cluster delays from
-        ``self.like._full_cluster_delays`` -- exactly the production path,
-        no hard-coded node count.
-        """
-        candidate = self._config_candidate(config)
-        lens = self.like._lens_params(candidate)
-        dense_w = dimensionless_frequency(
-            self.like._kernel_dense_f, M_LENS_MSUN, Z_LENS)
-        cluster_delays = self.like._full_cluster_delays(lens)
-        coarse_w = self.like._coarse_w_node_grid(dense_w, cluster_delays)
-        return dense_w, coarse_w
-
-    def _interp_and_dense(self, config):
-        """
-        Return ``(dense_w, F_interp, F_dense, coarse_part, dense_part)``
-        for a ``_LENS_CONFIGS`` row on the PRODUCTION coarse node grid.
-        """
-        _, y1, y2, gamma, beta, kappa = config
-        dense_w, coarse_w = self._production_coarse_grid(config)
-
-        coarse_part = ChangRefsdalChannels(coarse_w).evaluate(
-            gamma=gamma, y=(y1, y2), beta=beta, kappa=kappa)
-        spline_real = CubicSpline(coarse_w, coarse_part.kernels.real,
-                                  axis=0, bc_type='not-a-knot')
-        spline_imag = CubicSpline(coarse_w, coarse_part.kernels.imag,
-                                  axis=0, bc_type='not-a-knot')
-        dense_kernels = spline_real(dense_w) + 1j * spline_imag(dense_w)
-        f_interp = reconstructed_total(
-            dense_w, coarse_part.delays, dense_kernels)
-
-        # Oracle: DIRECT dense engine evaluation, coherently summed by the
-        # partition's own `reconstructed` (F002 -- never the spline).
-        dense_part = ChangRefsdalChannels(dense_w).evaluate(
-            gamma=gamma, y=(y1, y2), beta=beta, kappa=kappa)
-        f_dense = dense_part.reconstructed
-        return dense_w, f_interp, f_dense, coarse_part, dense_part
-
-    @staticmethod
-    def _nullsafe_epsilon(f_interp, f_dense):
-        """``max_f |F_interp - F_dense| / max_f |F_dense|`` (null-safe)."""
-        return float(np.max(np.abs(f_interp - f_dense))
-                     / np.max(np.abs(f_dense)))
-
-    def test_production_grid_reconstructs_below_nullsafe_ceiling(self):
-        """
-        On the SHIPPED production coarse node grid the null-safe error
-        ``max|dF| / max|F_dense| < INTERP_NULLSAFE_CEIL`` for every lens
-        regime -- the interpolation is subdominant to the RB binning floor
-        so it is invisible to ``lnlike``.  The ill-posed pointwise
-        ``max|dF/F|`` is printed for information only.
-        """
-        by_config = {}
-        for config in _LENS_CONFIGS:
-            label = config[0]
-            if label not in INTERP_CONFIG_LABELS:
-                continue
-            with self.subTest(config=label):
-                _, f_interp, f_dense, coarse_part, _ = self._interp_and_dense(
-                    config)
-                epsilon = self._nullsafe_epsilon(f_interp, f_dense)
-                pointwise = float(np.max(
-                    np.abs(f_interp - f_dense) / np.abs(f_dense)))
-                by_config[label] = epsilon
-                print(f'\n[CoarseNodeInterp] {label}: '
-                      f'n_nodes={coarse_part.w.size} '
-                      f'null-safe epsilon={epsilon:.3e} '
-                      f'(pointwise max|dF/F|={pointwise:.3e})')
-                self.n_checks += 1
-                self.assertLess(
-                    epsilon, INTERP_NULLSAFE_CEIL,
-                    f'{label}: production-grid null-safe interpolation error '
-                    f'{epsilon:.3e} exceeds the ceiling '
-                    f'{INTERP_NULLSAFE_CEIL} at the shipped '
-                    f'_DEFAULT_KERNEL_NODES={self.like.n_kernel_nodes}. The '
-                    'production node budget no longer resolves this regime '
-                    '(driver sweep 2026-07-17: base 100 -> worst 4.2e-4); '
-                    'raise _DEFAULT_KERNEL_NODES (a PRODUCTION change, not a '
-                    'tolerance change). See INTERP_UNDERRESOLVED_LABELS.')
-        self.assertTrue(by_config, 'no interpolation configs were exercised')
-        self._plot_epsilon_bar(by_config)
-
-    def _plot_epsilon_bar(self, by_config):
-        """Bar chart of the per-config null-safe epsilon with the ceiling."""
-        fig, ax = plt.subplots(figsize=(7, 4))
-        labels = list(by_config)
-        ax.bar(labels, [max(by_config[k], 1e-18) for k in labels],
-               color='steelblue')
-        ax.axhline(INTERP_NULLSAFE_CEIL, color='crimson', ls='--',
-                   label=f'{INTERP_NULLSAFE_CEIL:g} null-safe ceiling')
-        ax.set_yscale('log')
-        ax.set_ylabel(r'$\max_f|F_{interp}-F_{dense}|/\max_f|F_{dense}|$')
-        ax.set_title('production coarse-node interpolation error by config')
-        ax.legend(fontsize=8)
-        self._save_figure(fig, 'coarse_node_interp_epsilon_by_config')
-
-    def test_interpolation_diagnostic_overlay_crown(self):
-        """
-        DIAGNOSTIC: crown per-frequency ``|F_interp - F_dense|`` (absolute)
-        and the null-safe residual ``|dF| / max|F_dense|`` vs ``w`` with the
-        `INTERP_NULLSAFE_CEIL` line and the smootherstep transition
-        frequencies ``RHO_START/Delta_j`` / ``RHO_END/Delta_j`` and the
-        branch-switch node marked, to expose systematic ringing a scalar
-        gate could average away.
-        """
-        dense_w, f_interp, f_dense, coarse_part, _ = self._interp_and_dense(
-            _CROWN)
-
-        residual = np.abs(f_interp - f_dense)
-        max_dense = float(np.max(np.abs(f_dense)))
-
-        real_delays = real_image_delays(
-            _CROWN[3], (_CROWN[1], _CROWN[2]), beta=_CROWN[4], kappa=_CROWN[5])
-        pairwise = np.abs(real_delays[:, np.newaxis]
-                          - real_delays[np.newaxis, :])
-        seps = np.unique(pairwise[np.triu_indices(real_delays.size, k=1)])
-        seps = seps[seps > 0.0]
-
-        fig, axes = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
-        axes[0].plot(dense_w, residual + 1e-300, lw=0.9,
-                     label=r'$|F_{interp}-F_{dense}|$')
-        axes[1].plot(dense_w, residual / max_dense + 1e-300, lw=0.9,
-                     color='seagreen',
-                     label=r'$|F_{interp}-F_{dense}|/\max|F_{dense}|$')
-        axes[1].axhline(INTERP_NULLSAFE_CEIL, color='crimson', ls='--',
-                        label=f'{INTERP_NULLSAFE_CEIL:g} ceiling')
-        for sep in seps:
-            for thr, color in ((RHO_START, 'grey'), (RHO_END, 'orange')):
-                node = thr / sep
-                if dense_w.min() <= node <= dense_w.max():
-                    for axis in axes:
-                        axis.axvline(node, color=color, ls=':', lw=0.7)
-        if seps.size:
-            switch = RHO_END / seps.min()
-            if dense_w.min() <= switch <= dense_w.max():
-                axes[0].axvline(switch, color='crimson', ls='-.', lw=0.8,
-                                label='branch switch')
-        axes[0].set_yscale('log')
-        axes[0].set_ylabel('absolute residual')
-        axes[0].set_title('crown four-image: production coarse-node interp '
-                          'vs dense engine')
-        axes[0].legend(fontsize=7)
-        axes[1].set_yscale('log')
-        axes[1].set_ylabel('null-safe residual')
-        axes[1].set_xlabel('dimensionless frequency w')
-        axes[1].legend(fontsize=7)
-        self._save_figure(fig, 'coarse_node_interp_vs_dense_crown')
-
-        # The overlay is only meaningful if it reflects a passing gate.
-        epsilon = self._nullsafe_epsilon(f_interp, f_dense)
-        self.n_checks += 1
-        self.assertLess(epsilon, INTERP_NULLSAFE_CEIL,
-                        f'crown null-safe interp error {epsilon:.3e} exceeds '
-                        f'{INTERP_NULLSAFE_CEIL}')
+# ---------------------------------------------------------------------------
+# RETIRED: CoarseNodeInterpolationTestCase (the coarse-node cubic-spline
+# kernel interpolation gate).
+# ---------------------------------------------------------------------------
+#
+# This class certified the RETIRED fast-path design: the engine evaluated on a
+# fixed ``_DEFAULT_KERNEL_NODES`` log-spaced + full-cluster-transition coarse
+# grid (``_coarse_w_node_grid`` / ``_full_cluster_delays`` / ``n_kernel_nodes``)
+# with every smooth channel kernel ``K_a(w)`` cubic-splined to the bin
+# sub-samples.  Build 3f WP2 replaced that with the SACR-C decomposition: only
+# the single smooth envelope ``E(w)`` is interpolated (LOO-adaptive nodes,
+# ``_envelope_loo_nodes``), and the switched analytic saddles ``S_a * H_a`` are
+# rebuilt in closed form at every sub-sample (``_reconstruct_kernels``).  The
+# coarse-grid API this class drove no longer exists, so the class is retired
+# rather than migrated.
+#
+# OWED (Test Developer): a replacement null-safe interpolation gate on the
+# SACR-C path -- reconstruct ``F`` from the LOO-adaptive envelope nodes and
+# assert ``max_f |F_interp - F_dense| / max_f |F_dense| < 1e-3`` on every
+# ``_LENS_CONFIGS`` regime (the report's build3f gates 2/3), plus its paired
+# self-falsification (an under-seeded envelope grid must exceed the ceiling).
+# The Coder does not author this gate: it certifies the WP2 code the Coder
+# wrote, and code and its certifying oracle must not share an author.
 
 
 class FewMsTimingTestCase(FastPathTestCase):
@@ -1628,80 +1417,12 @@ class SelfFalsificationTestCase(FastPathTestCase):
             f'cancellation-law envelope {envelope:.3e}; the accuracy gate '
             'would not catch a wrong JIT value')
 
-    def test_interpolation_gate_rejects_an_underresolved_grid(self):
-        """
-        On a DELIBERATELY under-resolved grid (``n = UNDERRESOLVED_NODES``
-        log-spaced nodes, NO transition nodes) the two-image null-safe
-        reconstruction error exceeds `INTERP_NULLSAFE_CEIL`, so the
-        production interpolation gate is NOT vacuously passing -- it CAN go
-        red.  As a paired positive control a PROVEN-CONVERGED grid
-        (``base = CONVERGED_NODES`` + full-cluster placement) PASSES the same
-        ceiling on the same config, proving the metric can also go GREEN and
-        that it is the refinement/placement that buys convergence, not a
-        trivially loose threshold.
-
-        NOTE: the positive control is the SHIPPED production default
-        (``CONVERGED_NODES = _DEFAULT_KERNEL_NODES``), per the plan spec --
-        it proves the production grid itself, not a bespoke refined grid,
-        clears the ceiling (driver sweep 2026-07-17: base=100 -> 4.2e-4 on
-        two-image, the slowest regime; see `INTERP_UNDERRESOLVED_LABELS`).
-        """
-        config = ('two-image', 0.50, 0.00, 0.20, 0.0, 0.0)
-        _, y1, y2, gamma, beta, kappa = config
-        dense_w = dimensionless_frequency(
-            self.like._kernel_dense_f, M_LENS_MSUN, Z_LENS)
-        f_dense = ChangRefsdalChannels(dense_w).evaluate(
-            gamma=gamma, y=(y1, y2), beta=beta, kappa=kappa).reconstructed
-        max_dense = float(np.max(np.abs(f_dense)))
-
-        def nullsafe_epsilon(coarse_w):
-            coarse_part = ChangRefsdalChannels(coarse_w).evaluate(
-                gamma=gamma, y=(y1, y2), beta=beta, kappa=kappa)
-            spline_real = CubicSpline(coarse_w, coarse_part.kernels.real,
-                                      axis=0, bc_type='not-a-knot')
-            spline_imag = CubicSpline(coarse_w, coarse_part.kernels.imag,
-                                      axis=0, bc_type='not-a-knot')
-            dense_kernels = spline_real(dense_w) + 1j * spline_imag(dense_w)
-            f_interp = reconstructed_total(
-                dense_w, coarse_part.delays, dense_kernels)
-            return float(np.max(np.abs(f_interp - f_dense)) / max_dense)
-
-        # Deliberately under-resolved: n=4 log-spaced nodes, no transitions.
-        sparse_w = np.geomspace(dense_w.min(), dense_w.max(),
-                                UNDERRESOLVED_NODES)
-        epsilon_sparse = nullsafe_epsilon(sparse_w)
-        self.n_checks += 1
-        self.assertGreater(
-            epsilon_sparse, INTERP_NULLSAFE_CEIL,
-            f'the under-resolved n={UNDERRESOLVED_NODES} grid already '
-            f'reconstructs F to null-safe {epsilon_sparse:.3e} < '
-            f'{INTERP_NULLSAFE_CEIL}; the production gate would pass '
-            'vacuously')
-
-        # Positive control: the SHIPPED production default PASSES the same
-        # ceiling (`CONVERGED_NODES = _DEFAULT_KERNEL_NODES`), so the gate
-        # distinguishes converged from under-resolved grids, is not
-        # stuck-red, and certifies the grid production actually uses.  The
-        # full-cluster placement is exercised identically in both arms;
-        # only the base count differs.
-        lens = self.like._lens_params(self._config_candidate(config))
-        cluster_delays = self.like._full_cluster_delays(lens)
-        original_nodes = self.like.n_kernel_nodes
-        self.like.n_kernel_nodes = CONVERGED_NODES
-        try:
-            converged_w = self.like._coarse_w_node_grid(
-                dense_w, cluster_delays)
-        finally:
-            self.like.n_kernel_nodes = original_nodes
-        epsilon_converged = nullsafe_epsilon(converged_w)
-        self.n_checks += 1
-        self.assertLess(
-            epsilon_converged, INTERP_NULLSAFE_CEIL,
-            f'a proven-converged grid (base={CONVERGED_NODES}, '
-            f'n={converged_w.size}) fails the ceiling: null-safe '
-            f'{epsilon_converged:.3e} >= {INTERP_NULLSAFE_CEIL}; the '
-            'positive control is broken (full-cluster placement no longer '
-            'converges), so the interpolation gate would be vacuously red')
+    # RETIRED with `CoarseNodeInterpolationTestCase`: this was the
+    # self-falsification (an under-resolved coarse grid must exceed
+    # `INTERP_NULLSAFE_CEIL`) of the removed coarse-node cubic-spline kernel
+    # interpolation.  Its replacement -- an under-seeded LOO-envelope grid must
+    # breach the ceiling the adaptive `_envelope_loo_nodes` set clears -- is
+    # owed to the Test Developer alongside the SACR-C interpolation gate.
 
     def test_crown_agreement_gate_rejects_a_shifted_lnl(self):
         """

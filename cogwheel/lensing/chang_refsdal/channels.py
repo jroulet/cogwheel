@@ -30,27 +30,61 @@ every parameter point uses the same four computational channels:
   (`geometry.nearest_caustic_point`); they become the newly born images
   when the source crosses into the caustic, so a channel is always
   present to receive them.
-* A smooth switch hands each resolved channel from its artificial
-  cluster gauge to its physical stationary-phase target, each label
-  switching on ITS OWN delay separation.  The switch buys smoothness,
-  not accuracy.
-* A residual projection, reused verbatim from `_gauge`, makes the four
-  channel kernels sum to the exact operator total at every frequency,
-  including through the transition.  Because the total is symmetric in
-  the labels, relabelling (whether from a reset or from continuation)
-  can never change it -- only the smoothness of individual channels
-  depends on the labels being continued consistently.
+* A smooth switch ``S_a(w)`` hands each resolved channel over to its
+  physical stationary-phase kernel ``H_a`` (`geometry.image_kernel`),
+  each label switching on ITS OWN separation from the CRITICAL carrier,
+  ``S_a(w) = smootherstep(w * |tau_a - tau_c|, RHO_START, RHO_END)``.
+  The switch buys smoothness, not accuracy.
+
+THE SACR-C DECOMPOSITION
+------------------------
+This module builds the switched-analytic + single-envelope
+decomposition of the design report (Build 3f).  Rather than splitting
+the whole amplification total among the four channels through an
+artificial cluster gauge, it carries
+
+    F(w) = sum_a exp(1j*w*tau_a) * S_a(w) * H_a(w)
+           + exp(1j*w*tau_c) * E(w),
+
+where ``tau_c`` is the delay of the parked critical carrier (the
+`geometry.nearest_caustic_point` delay, relative to the minimum image),
+``H_a`` is the analytic saddle kernel of the resolved image, and
+
+    E(w) := exp(-1j*w*tau_c) * (F - sum_a exp(1j*w*tau_a) * S_a * H_a)
+
+is the SINGLE smooth transition envelope, demodulated at ``tau_c``.
+Because the demodulation distance and the switch scale are the same
+quantity ``w * |tau_a - tau_c|``, only channels with ``S_a < 1``
+contribute O(1) content to ``E``, and their phase against the ``tau_c``
+carrier is bounded by ``RHO_END`` -- so ``E`` is beat-free by
+construction and is the one object the likelihood interpolates
+(`switched_analytic_channels` in `_gauge`).
+
+To preserve the four physical labels the likelihood consumes, the
+kernels are returned in the equivalent per-frequency-weight (four
+channel) form
+
+    K_a(w) = S_a*H_a + u_a(w) * exp(-1j*w*(tau_a - tau_c)) * E,
+    u_a(w) = (1 - S_a + eta) / sum_b (1 - S_b + eta),
+
+so that ``F = sum_a exp(1j*w*tau_a) * K_a`` still holds identically for
+any weights summing to one (``eta = _ENVELOPE_WEIGHT_FLOOR``).  A fifth
+envelope channel was deliberately NOT introduced: it would change
+``_N_CHANNELS`` and the switch neighbour set and label-continuity
+behaviour that the crossing-scenario tests depend on.
 
 WHY IT DELEGATES
 ----------------
-The exact residual projection lives once in `_gauge`; this module
-calls it rather than carrying a second copy.  The wave/geometric
-evaluation gate and the smooth-switch window live once in `operator`;
-this module imports ``RHO_START``, ``RHO_END`` and `select_branch`
-rather than re-deriving the thresholds.  The exact total is evaluated
-with the contour-free operator `operator.F_op` where the wave branch is
-certified and with `operator.geometric_amplification` once
-`operator.select_branch` reports the stationary-phase branch is
+The exact residual projection (now carrying the ``tau_c`` critical
+carrier) lives once in `_gauge`; this module calls it rather than
+carrying a second copy, and the public `reconstruct_from_envelope`
+wraps the forward reconstruction for the likelihood.  The
+wave/geometric evaluation gate and the smooth-switch window live once
+in `operator`; this module imports ``RHO_START``, ``RHO_END`` and
+`select_branch` rather than re-deriving the thresholds.  The exact
+total is evaluated with the contour-free operator `operator.F_op` where
+the wave branch is certified and with `operator.geometric_amplification`
+once `operator.select_branch` reports the stationary-phase branch is
 legitimate.
 """
 from __future__ import annotations
@@ -63,16 +97,25 @@ import numpy as np
 
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal._gauge import (
-    exact_transition_channels, reconstructed_total, smootherstep)
+    channels_from_envelope, envelope_total, reconstructed_total,
+    smootherstep, switched_analytic_channels)
 from cogwheel.lensing.chang_refsdal.operator import (
     RHO_START, RHO_END, MAX_ORDER, F_op_grid, cancellation_exponent,
     geometric_amplification, select_branch)
 
 __all__ = ['ChangRefsdalChannels', 'ChangRefsdalPartition',
-           'real_image_delays']
+           'real_image_delays', 'reconstruct_from_envelope']
 
 #: The fixed number of topology-stable labels.
 _N_CHANNELS = 4
+
+#: Floor added to every channel's envelope weight ``1 - S_a`` so that a
+#: fully resolved channel (``S_a = 1``) still carries a small, non-zero
+#: share of the transition envelope and the per-frequency weights are
+#: always normalizable.  This is the SACR-C ``eta`` of the design report
+#: (Sec. 3): resolved channels keep an ``O(eta)`` envelope weight, while
+#: unresolved and virtual channels (``S_a -> 0``) carry the bulk.
+_ENVELOPE_WEIGHT_FLOOR = 1e-2
 
 #: Sentinel written into ``operator_orders`` for a frequency evaluated
 #: on the geometric (stationary-phase) branch, which has no operator
@@ -313,27 +356,31 @@ def _physical_kernels(w: np.ndarray,
 
 def _channel_switch(w: np.ndarray,
                     delays: np.ndarray,
-                    real_mask: np.ndarray) -> np.ndarray:
-    """Per-channel smooth hand-over switch.
+                    real_mask: np.ndarray,
+                    critical_delay: float) -> np.ndarray:
+    """Per-channel smooth hand-over switch on the criticality separation.
 
-    Each real channel switches on its OWN delay separation ``delta_j``
-    from the NEAREST cluster member of any kind -- a real image OR a
-    virtual label parked at the critical point -- per the paper's
-    delay-separation rule (Eq. delay-separation, ``eq:delay-separation``)
+    Each real channel switches on its OWN separation from the CRITICAL
+    (parked) carrier ``tau_c`` -- the SACR-C criticality-separation rule
+    of the design report (Sec. 3), which supersedes the F008
+    full-cluster nearest-neighbour rule where the report certifies it:
 
-        delta_j = min_{k in C, k != j} |tau_j - tau_k|,
+        delta_a = |tau_a - tau_c|,   S_a(w) = smootherstep(
+            w * delta_a, RHO_START, RHO_END).
 
-    where the minimum runs over ALL four cluster labels, not the real
-    ones alone.  On the two-image side of a caustic a near-critical real
-    image's true cluster mates are the parked virtual labels it is about
-    to spawn (or that have just annihilated); measuring the separation
-    against real channels only misses that coincidence and lets a
-    still-merged channel ramp its switch to one, handing it to the
-    divergent stationary-phase kernel.  Measuring against every other
-    label instead keeps a channel that is still merged with ANY cluster
-    member (small separation) in the artificial gauge, while a fully
-    resolved channel is handed to its physical target.  Virtual channels
-    never switch (``S_j = 0`` for a virtual label, Eq. switch).
+    The switch scale is then exactly the demodulation distance of the
+    transition envelope ``E`` against its ``tau_c`` carrier, so any
+    channel whose switch has not completed contributes only bounded-phase
+    (``<= RHO_END`` rad) content to ``E`` -- the beat-free guarantee the
+    old full-cluster rule lacked.  Images merging AT the critical point
+    have ``tau_a -> tau_c``, so ``delta_a`` shrinks and the switch stays
+    in the artificial gauge exactly as F008 intends (at least as
+    conservatively, since ``delta_a = |tau_a - tau_c| ~ delta_pair / 2``
+    for a genuine merger); ACCIDENTAL delay degeneracies between
+    non-merging images no longer stall the switch, because they only
+    matter when they also sit near ``tau_c``, where the demodulated phase
+    in ``E`` is equally tiny and harmless.  Virtual channels never switch
+    (``S_a = 0`` for a virtual label).
 
     Parameters
     ----------
@@ -343,6 +390,10 @@ def _channel_switch(w: np.ndarray,
         Per-channel delays, indexed by cluster label ``0 .. _N_CHANNELS - 1``.
     real_mask : np.ndarray
         Boolean mask of real channels.
+    critical_delay : float
+        Delay ``tau_c`` of the parked critical carrier (relative to the
+        minimum image delay), the separation reference every real
+        channel switches against.
 
     Returns
     -------
@@ -352,12 +403,38 @@ def _channel_switch(w: np.ndarray,
     switch = np.zeros((w.shape[0], _N_CHANNELS), dtype=float)
     real_ids = np.flatnonzero(real_mask)
     for channel in real_ids:
-        others = np.delete(np.arange(_N_CHANNELS), channel)
-        separation = float(
-            np.min(np.abs(delays[channel] - delays[others])))
+        separation = abs(float(delays[channel]) - float(critical_delay))
         switch[:, channel] = smootherstep(w * separation,
                                           RHO_START, RHO_END)
     return switch
+
+
+def _envelope_weights(switch: np.ndarray) -> np.ndarray:
+    """Raw per-frequency envelope-apportionment weights ``1 - S_a + eta``.
+
+    The SACR-C weight policy (design report Sec. 3): every channel's
+    unnormalized share of the transition envelope is ``1 - S_a + eta``,
+    so unresolved and virtual channels (``S_a -> 0``) carry the bulk
+    while a fully resolved channel (``S_a = 1``) keeps only the
+    ``eta = _ENVELOPE_WEIGHT_FLOOR`` floor.  The floor guarantees a
+    strictly positive, normalizable weight at every frequency; `_gauge`
+    normalizes these across channels so the reconstruction identity holds
+    exactly.  The single authoritative home of this policy -- the
+    likelihood reconstructs densely through `reconstruct_from_envelope`,
+    which reuses it rather than re-deriving the weights.
+
+    Parameters
+    ----------
+    switch : np.ndarray
+        Per-channel switch ``S_a`` in ``[0, 1]``, shape
+        ``(n_w, _N_CHANNELS)``.
+
+    Returns
+    -------
+    np.ndarray
+        Non-negative raw weights of the same shape.
+    """
+    return 1.0 - switch + _ENVELOPE_WEIGHT_FLOOR
 
 
 def _min_delay_separation(delays: np.ndarray,
@@ -544,6 +621,68 @@ def real_image_delays(gamma: float, y: Sequence[float], *,
     return np.sort(absolute_delays - absolute_delays.min())
 
 
+def reconstruct_from_envelope(w: np.ndarray | float,
+                              envelope: np.ndarray | complex,
+                              delays: np.ndarray,
+                              saddle_kernels: np.ndarray,
+                              switch: np.ndarray,
+                              critical_delay: float
+                              ) -> tuple[np.ndarray, np.ndarray]:
+    """Rebuild SACR-C channels and total from an interpolated envelope.
+
+    The forward SACR-C reconstruction the microlensed likelihood uses on
+    its hot path: having interpolated the single smooth envelope ``E(w)``
+    from coarse engine nodes onto a dense frequency grid and evaluated
+    the analytic saddle kernels ``H_a`` (`geometry.image_kernel`) and the
+    switch ``S_a`` (`_channel_switch`) at the same frequencies, rebuild
+
+        K_a(w) = S_a*H_a + u_a(w) * exp(-1j*w*(tau_a - tau_c)) * E,
+        F(w)   = sum_a exp(1j*w*tau_a) * S_a*H_a + exp(1j*w*tau_c) * E,
+
+    with the SACR-C per-frequency weights ``u_a`` derived HERE from
+    `_envelope_weights` -- the single authoritative home of the
+    ``1 - S_a + eta`` weight policy, so the likelihood never re-derives
+    the apportionment.  The reconstruction identity
+    ``F = sum_a exp(1j*w*tau_a) * K_a`` holds exactly for any envelope;
+    only ``E`` is approximated by interpolation, never the algebra
+    (`_gauge.channels_from_envelope`).
+
+    Parameters
+    ----------
+    w : float or np.ndarray
+        Dimensionless frequency, scalar or 1-D grid.
+    envelope : complex or np.ndarray
+        The transition envelope ``E(w)`` (typically interpolated), with
+        the shape of ``w``.
+    delays : np.ndarray
+        Shape ``(_N_CHANNELS,)`` channel delays ``tau_a``, in the
+        minimum-relative convention of `ChangRefsdalPartition.delays`.
+    saddle_kernels : np.ndarray
+        Analytic saddle kernels ``H_a`` (`geometry.image_kernel`),
+        shape ``(_N_CHANNELS,)`` for scalar ``w`` or
+        ``(n_w, _N_CHANNELS)`` for a grid; zero for virtual channels.
+    switch : np.ndarray
+        Per-channel switch ``S_a`` in ``[0, 1]``, same shape as
+        ``saddle_kernels``.
+    critical_delay : float
+        Delay ``tau_c`` of the parked critical carrier, in the same
+        minimum-relative convention as ``delays``.
+
+    Returns
+    -------
+    kernels : np.ndarray
+        Channel kernels ``K_a``, the per-image ``(tau_a, K_a)``
+        decomposition, shape matching ``saddle_kernels``.
+    total : np.ndarray
+        The reconstructed amplification total ``F``, with the shape of
+        ``w``.
+    """
+    weights = _envelope_weights(np.asarray(switch, dtype=float))
+    return channels_from_envelope(
+        w, envelope, delays, saddle_kernels, switch, critical_delay,
+        weights)
+
+
 @dataclass(frozen=True)
 class ChangRefsdalPartition:
     """One evaluated four-channel partition at a parameter point.
@@ -560,7 +699,30 @@ class ChangRefsdalPartition:
         Shape ``(4,)`` channel delays ``tau_a``, relative to the minimum
         image delay ``t_min``.
     kernels : np.ndarray
-        Shape ``(n_w, 4)`` channel kernels ``K_a(w)``.
+        Shape ``(n_w, 4)`` channel kernels ``K_a(w)``; the per-image
+        ``(tau_a, K_a)`` decomposition the likelihood consumes, with
+        ``F = sum_a exp(1j*w*tau_a) * K_a`` holding exactly.
+    envelope : np.ndarray
+        Shape ``(n_w,)`` transition envelope ``E(w)``, demodulated at
+        the critical carrier ``tau_c`` -- the SINGLE smooth object the
+        likelihood interpolates (beat-free by construction).
+    saddle_kernels : np.ndarray
+        Shape ``(n_w, 4)`` analytic saddle kernels ``H_a(w)``
+        (`geometry.image_kernel`), zero for virtual channels.
+    switch : np.ndarray
+        Shape ``(n_w, 4)`` per-channel switch ``S_a(w)`` in ``[0, 1]``,
+        keyed on the criticality separation ``|tau_a - tau_c|``.
+    critical_delay : float
+        Delay ``tau_c`` of the parked critical carrier, relative to the
+        minimum image delay ``t_min``.
+    matrix : np.ndarray
+        Shape ``(2, 2)`` macro matrix, exposed so the likelihood can
+        re-evaluate ``H_a`` at dense frequencies.
+    images : np.ndarray
+        Shape ``(n_images, 2)`` real image positions in the lens plane.
+    assignment : np.ndarray
+        Shape ``(4,)`` real-image index per channel (``-1`` for a
+        virtual channel), the map from channels to `images`.
     exact_total : np.ndarray
         Shape ``(n_w,)`` exact amplification total in the same
         relative-delay convention; the channels reconstruct it exactly.
@@ -594,6 +756,13 @@ class ChangRefsdalPartition:
     kappa: float
     delays: np.ndarray
     kernels: np.ndarray
+    envelope: np.ndarray
+    saddle_kernels: np.ndarray
+    switch: np.ndarray
+    critical_delay: float
+    matrix: np.ndarray
+    images: np.ndarray
+    assignment: np.ndarray
     exact_total: np.ndarray
     real_mask: np.ndarray
     markers: np.ndarray
@@ -629,6 +798,26 @@ class ChangRefsdalPartition:
             magnitude and is not a flat constant.
         """
         return float(np.max(np.abs(self.reconstructed - self.exact_total)))
+
+    @property
+    def envelope_reconstruction(self) -> np.ndarray:
+        """Total rebuilt from the smooth envelope and analytic saddles.
+
+        Reconstructs ``F`` through the SACR-C identity
+        ``F = sum_a S_a H_a exp(1j*w*tau_a) + exp(1j*w*tau_c) E(w)``
+        using the stored envelope, saddle kernels, and switch weights.
+        This is the object the likelihood rebuilds after interpolating
+        only the single smooth envelope ``E(w)`` onto a dense grid.
+
+        Returns
+        -------
+        np.ndarray
+            The reconstructed total, equal to `exact_total` to the
+            scale-aware floating-point tolerance of the projection.
+        """
+        return envelope_total(
+            self.w, self.delays, self.saddle_kernels, self.switch,
+            self.critical_delay, self.envelope)
 
 
 class ChangRefsdalChannels:
@@ -726,20 +915,30 @@ class ChangRefsdalChannels:
         self._markers = markers.copy()
 
         virtual_delay = geometry.delay(caustic.image, source, matrix)
+        critical_delay = virtual_delay - t_min
         delays, real_mask = _labeled_delays(
-            assignment, relative_delays, virtual_delay - t_min)
+            assignment, relative_delays, critical_delay)
 
         physical = _physical_kernels(self._w, assignment, images, matrix)
-        switch = _channel_switch(self._w, delays, real_mask)
+        switch = _channel_switch(self._w, delays, real_mask,
+                                 critical_delay)
         delta_min = _min_delay_separation(delays, real_mask)
 
         exact_total, orders, converged = _exact_total(
             self._w, source, gamma, beta, kappa, t_min, delta_min,
             self._max_order)
 
-        kernels = exact_transition_channels(
-            self._w, exact_total, float(np.mean(delays)), delays,
-            physical, switch)
+        # SACR-C decomposition: switched analytic saddle trials
+        # ``S_a * H_a`` plus one envelope ``E`` demodulated at the
+        # critical carrier ``tau_c = critical_delay``, projected exactly
+        # onto the four physical labels with per-frequency weights
+        # ``1 - S_a + eta`` (`_gauge.switched_analytic_channels`).  The
+        # four-channel per-frequency-weight form keeps ``_N_CHANNELS = 4``
+        # so the crossing-scenario / label-continuity tests are
+        # unaffected; a fifth envelope channel is deliberately avoided.
+        kernels, envelope = switched_analytic_channels(
+            self._w, exact_total, delays, physical, switch,
+            critical_delay, _envelope_weights(switch))
 
         return ChangRefsdalPartition(
             w=self._w,
@@ -749,6 +948,13 @@ class ChangRefsdalChannels:
             kappa=float(kappa),
             delays=delays,
             kernels=kernels,
+            envelope=envelope,
+            saddle_kernels=physical,
+            switch=switch,
+            critical_delay=float(critical_delay),
+            matrix=matrix,
+            images=np.asarray(images, dtype=float).reshape(-1, 2),
+            assignment=assignment,
             exact_total=exact_total,
             real_mask=real_mask,
             markers=markers,

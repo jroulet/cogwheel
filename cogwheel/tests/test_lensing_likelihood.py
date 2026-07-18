@@ -90,6 +90,54 @@ check is not circular:
   rejection (engine-refusal SYMMETRY: never one path returning a value
   while the other refuses).
 
+SACR-C ENVELOPE RECONSTRUCTION GATES (WP1/WP2, this build)
+----------------------------------------------------------
+The WP2 hot path replaced the retired fixed 100-node kernel spline with a
+leave-one-out-adaptive coarse ENVELOPE node grid (`_envelope_loo_nodes`)
+plus a closed-form SACR-C reconstruction (`_reconstruct_kernels`).  These
+gates exercise that path THROUGH the production likelihood methods on the
+five positive-parity anchors over their two-decade ``w`` window, against
+the untouched ``ChangRefsdalChannels.exact_total`` engine oracle (chosen so
+the check is not circular):
+
+* GATE 1 (production layer): reconstructing ``F`` AT the LOO nodes -- where
+  the envelope is engine-exact, so only the telescoping carrier algebra
+  runs, no interpolation -- reproduces ``exact_total`` to ``<= 1e-13``
+  (measured ~2e-16).  The tolerance sits ~three orders above the machine
+  floor and fails only on a broken carrier phase / mis-weighted saddle.
+  (The dense 1e-13 identity with the EXACT envelope at every point is a
+  reconstruction-primitive property owned by `test_lensing_gauge.py`.)
+
+* GATE 3: the production LOO-placed envelope reconstructs the exact total
+  to ``max|dF|/max|F| < 1e-3`` on a dense truth grid (measured 1.8e-4 --
+  8.9e-4) with ``N <= 48`` nodes (measured 26 -- 32).  The 1e-3 gate is the
+  reconstruction currency the shipped hard-coded ``_LOO_STOP = 4e-3``
+  (on a held-out estimate that OVERestimates the true error) drives well
+  inside; ``48`` matches the engine's own `_LOO_MAX_NODES` cap.
+
+* GATE 5 (production layer): the deep-band macro limit -- a sheared
+  ``kappa = 0`` config reconstructed at tiny ``w`` matches the LITERAL
+  Gaussian magnification ``1/sqrt((1-kappa)**2 - gamma**2)`` (written out
+  independently of the pipeline, per the F002 oracle-tautology trap) to
+  1e-6 relative AND flat across ~four decades; a slope would flag a ``1/w``
+  prefactor leak.
+
+* STRUCTURAL/TIMING: the LOO node count is config-independent (all anchors
+  within half the ceiling) and the public-entry ``lnlike`` beats
+  ``lnlike_bruteforce`` by a conservative margin (measured ~47x).  The
+  PROJECTED ``<= 18 ms`` warm ``lnlike`` ceiling is carried as a permitted
+  machine-dependent `expectedFailure`: the engine 1F1 ladder (out of the
+  likelihood's scope) dominates ~89% of ``lnlike`` and the warm best-of-5
+  measures ~29 ms here, so the ceiling stays RED (never widened) and flips
+  to an unexpected success only if the deferred surrogate lever lands.
+
+`EnvelopeGateSelfFalsificationTestCase` proves GATE 1 and GATE 3 can go
+red: a ``1e-2 * max|F|`` bump on an interior envelope node breaches both
+the 1e-3 reconstruction gate and the 1e-13 at-node identity gate.  GATE 2
+(greedy-oracle node count) and F001 (large-``w`` mpmath carrier) are pure
+reconstruction-primitive properties with no likelihood-path meaning and are
+owned exclusively by `test_lensing_gauge.py`.
+
 DETERMINISM
 -----------
 Every stochastic input is seeded.  ``data.EventData.gaussian_noise``
@@ -121,7 +169,7 @@ from __future__ import annotations
 import pathlib
 import time
 import warnings
-from unittest import TestCase, main, mock
+from unittest import TestCase, expectedFailure, main, mock
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -272,18 +320,27 @@ def _make_noisy_event():
     return event_data
 
 
-def _real_only_channel_switch(w, delays, real_mask):
+def _real_only_channel_switch(w, delays, real_mask, critical_delay):
     """
     The pre-WP1 (buggy) ``_channel_switch``: measure each real channel's
     delay separation against OTHER REAL channels only, excluding the
-    parked virtual labels that the paper's Eq. (delay-separation) includes.
+    parked virtual/critical labels that the paper's Eq. (delay-separation)
+    -- and the SACR-C criticality-separation rule -- include.
 
     This independently re-implements the WRONG rule (a mutation), used
     ONLY by the near-cusp canary to show the retired neighbourhood blows
     the channel kernels up where the production full-cluster switch keeps
     them bounded.  It is deliberately NOT imported from the module under
     test, so the pin is not circular.
+
+    ``critical_delay`` is accepted so the mutation is a drop-in for the
+    current WP1 ``_channel_switch(w, delays, real_mask, critical_delay)``
+    call signature, but the buggy rule DELIBERATELY ignores it: measuring
+    separation against ``tau_c`` is precisely the fix this mutation
+    undoes.  Referencing it (even inertly) keeps linters quiet without
+    changing the wrong behaviour under test.
     """
+    del critical_delay  # inert: the buggy rule ignores the critical carrier.
     switch = np.zeros((w.shape[0], channels._N_CHANNELS), dtype=float)
     real_ids = np.flatnonzero(real_mask)
     for channel in real_ids:
@@ -450,6 +507,137 @@ _LENS_CONFIGS = [
 
 #: The near-cusp entry of ``_LENS_CONFIGS`` singled out for the pin.
 _NEAR_CUSP = ('near-cusp', -0.38, 0.00, 0.20, 0.0, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# SACR-C envelope-reconstruction gates (WP1/WP2, this build)
+# ---------------------------------------------------------------------------
+# These exercise the likelihood-layer hot path introduced by WP2: the
+# leave-one-out-adaptive coarse envelope node grid (`_envelope_loo_nodes`)
+# and the closed-form SACR-C reconstruction (`_reconstruct_kernels`), which
+# together replaced the retired fixed 100-node kernel spline.  GATE 1 (the
+# machine-precision telescoping identity) and GATE 5 (the deep-band macro
+# limit) are also checked at the reconstruction primitive layer by
+# `test_lensing_gauge.py`; here they are re-checked THROUGH THE PRODUCTION
+# LIKELIHOOD METHODS, so a regression in `_reconstruct_kernels` /
+# `_envelope_loo_nodes` (not just in the gauge algebra) is caught.  GATE 2
+# (greedy-oracle node count) and F001 (large-``w`` mpmath carrier) are
+# purely reconstruction-layer properties with no likelihood-path meaning and
+# are owned exclusively by `test_lensing_gauge.py`.
+
+#: Two-decade production ``w`` window shared with the lens-engine / gauge
+#: suites.  Every anchor's operator branch converges here; ``w >= ~50``
+#: trips a `operator.CancellationError` for the two-image / near-cusp /
+#: rotated-shear anchors, so the window stops short of it.  Declared here
+#: rather than imported from a sibling suite, so this suite never reaches
+#: into another test module for its ground truth.
+W_DECADE_LO = 0.3
+W_DECADE_HI = 30.0
+
+#: Dense ``w`` grid for the GATE 3 reconstruction-error / GATE 1 identity
+#: measurement (also the dense ``exact_total`` TRUTH grid).  Its endpoints
+#: coincide with the LOO seed span, so the closed-form reconstruction never
+#: extrapolates.
+LOO_DENSE_POINTS = 506
+
+#: GATE 3 reconstruction-error ceiling ``max|dF|/max|F| < 1e-3`` for the
+#: production LOO-placed envelope, measured against the untouched
+#: ``exact_total`` engine oracle.  The shipped hard-coded LOO stop
+#: (``_LOO_STOP = 4e-3`` on a held-out estimate that OVERestimates the true
+#: global-spline error) drives the measured error to 1.8e-4 -- 8.9e-4 across
+#: the anchors, comfortably inside this gate.
+LOO_EPS_GATE = 1e-3
+
+#: GATE 3 / STRUCTURAL node ceiling.  The SACR-C envelope is beat-free by
+#: construction, so the LOO loop certifies a reconstruction with 26 -- 32
+#: nodes across the anchors (report cites production 30 -- 44); ``48``
+#: matches the engine's own hard cap `likelihood._LOO_MAX_NODES` and is
+#: never expected to bind on the gated configurations.
+LOO_NODE_CEILING = 48
+
+#: GATE 1 (production layer) telescoping-identity ceiling.  Reconstructing
+#: ``F`` AT the LOO nodes (where the envelope is engine-exact, so only the
+#: exact carrier algebra is exercised, no interpolation) reproduces
+#: ``exact_total`` to ~2e-16; ``1e-13`` sits ~three orders above that and
+#: fails only on a genuinely broken carrier phase or mis-weighted saddle.
+NODE_IDENTITY_GATE = 1e-13
+
+#: GATE 5 deep-band macro-magnification limit.  A sheared positive-parity
+#: config at ``kappa = 0`` whose certified ``w -> 0`` amplification is the
+#: pure-shear Gaussian magnification ``1/sqrt((1-kappa)**2 - gamma**2)``
+#: (computed INDEPENDENTLY of the pipeline, per the F002 oracle-tautology
+#: trap).  Probed across ~four decades of tiny ``w``; the reconstruction
+#: must match to `MACRO_LIMIT_REL_GATE` AND be flat (`MACRO_LIMIT_FLAT_GATE`)
+#: -- a slope would signal a spurious ``1/w`` prefactor leak.
+DEEP_BAND_GAMMA = 0.20
+DEEP_BAND_KAPPA = 0.0
+DEEP_BAND_SOURCE = (0.30, 0.10)
+DEEP_BAND_W = np.geomspace(1e-12, 1e-8, 40)
+MACRO_LIMIT_REL_GATE = 1e-6
+MACRO_LIMIT_FLAT_GATE = 1e-6
+
+#: STRUCTURAL/TIMING secondary guard: PROJECTED warm best-of-5 ``lnlike``
+#: ceiling [ms].  This is the report's projected upper bound, NOT a
+#: machine-calibrated ceiling: on this machine the engine 1F1 derivative
+#: ladder (out of the likelihood's scope) dominates ``lnlike`` at ~89% and
+#: the warm best-of-5 measures ~29 ms, so the guard is carried as a
+#: permitted machine-dependent `expectedFailure` (the 10 ms owner target is
+#: the deferred envelope-surrogate lever, not this gate).  It flips to an
+#: unexpected success -- a loud signal to promote it -- if that lever lands.
+WARM_LNLIKE_MS_CEILING = 18.0
+
+#: Best-of lower bound on the public-entry speed-up (``lnlike_bruteforce``
+#: over ``lnlike``).  Measured ~47x at the fixture length; ``3`` is a
+#: deliberately conservative structural floor.
+STRUCTURAL_SPEEDUP_MIN = 3.0
+
+
+def _loo_lens_dic(y1, y2, gamma, beta, kappa):
+    """
+    The five lens keys `_envelope_loo_nodes` / `_reconstruct_kernels`
+    consume (``gamma, beta, kappa, y1, y2``).
+
+    The coarse-node placement and closed-form reconstruction are functions
+    of the ``w`` grid and these dimensionless lens parameters ONLY -- the
+    lens mass / redshift enter `_amplification_coefficients` solely to map
+    ``f -> w = xi*f`` -- so a mass is deliberately omitted here and the
+    ``w`` window is supplied directly.
+    """
+    return {'gamma': gamma, 'beta': beta, 'kappa': kappa, 'y1': y1, 'y2': y2}
+
+
+def _reconstructed_total(like, dense_w, coarse_w, envelope_nodes, partition):
+    """
+    Assemble ``F(w) = sum_a exp(1j*w*tau_a) * K_a(w)`` from the PRODUCTION
+    reconstruction method `_reconstruct_kernels`.
+
+    The channel kernels are produced by the shipped
+    `_reconstruct_kernels` (closed-form switched saddles plus the
+    spline-interpolated envelope); the total is assembled here via the
+    documented channel-sum identity ``F = sum_a exp(1j*w*tau_a) * K_a``
+    (module docstring), so this assembly is INDEPENDENT of
+    `reconstruct_from_envelope`'s own ``total`` return -- the reconstruction
+    error measured against ``exact_total`` therefore isolates the kernels
+    the likelihood actually contracts, not a convenience by-product.
+    """
+    kernels = like._reconstruct_kernels(
+        dense_w, coarse_w, envelope_nodes, partition)
+    carrier = np.exp(1j * dense_w[:, None] * partition.delays[None, :])
+    return np.sum(carrier * kernels, axis=1)
+
+
+def _exact_total(w, gamma, y, beta, kappa):
+    """
+    Untouched-engine amplification total ``F(w)`` -- the reconstruction
+    oracle.
+
+    A fresh `ChangRefsdalChannels(w).evaluate(...)` computes the exact total
+    directly from the operator, independently of the SACR-C envelope /
+    coarse-node path under test, so gating the reconstruction against it is
+    not circular.
+    """
+    return channels.ChangRefsdalChannels(w).evaluate(
+        gamma=gamma, y=y, beta=beta, kappa=kappa).exact_total
 
 
 class BruteForceAgreementTestCase(LensedLikelihoodTestCase):
@@ -1283,6 +1471,390 @@ class SelfFalsificationTestCase(LensedLikelihoodTestCase):
             abs(perturbed - bf), tol,
             'a 10*RB_ATOL perturbation slips the agreement tolerance; the '
             'brute-force gate would assert nothing')
+
+
+class EnvelopeReconstructionGateTestCase(LensedLikelihoodTestCase):
+    """
+    The SACR-C envelope reconstruction (WP1/WP2), gated THROUGH the
+    production likelihood methods on the five positive-parity anchors.
+
+    ``setUpClass`` runs the shipped leave-one-out placement
+    (`_envelope_loo_nodes`) and closed-form reconstruction
+    (`_reconstruct_kernels`) once per anchor over the two-decade window,
+    caching, per anchor:
+
+    * ``n_nodes``  -- the LOO node count (GATE 3 / STRUCTURAL);
+    * ``eps``      -- ``max|F_recon - F_exact| / max|F_exact|`` on the
+                      dense TRUTH grid, the reconstruction error (GATE 3);
+    * ``identity`` -- the same ratio evaluated AT the LOO nodes, where the
+                      envelope is engine-exact so only the exact carrier
+                      algebra runs (GATE 1, production layer);
+    * ``coarse_w`` -- the node placements (diagnostic).
+
+    Each test asserts on the shared read-only cache and increments the
+    anti-vacuity tally.  A per-anchor node-count bar chart, an eps summary,
+    and the node placements are written to ``output/`` for triage.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.dense_w = np.geomspace(W_DECADE_LO, W_DECADE_HI, LOO_DENSE_POINTS)
+        cls.records = {}
+        for label, y1, y2, gamma, beta, kappa in _LENS_CONFIGS:
+            lens = _loo_lens_dic(y1, y2, gamma, beta, kappa)
+            partition, coarse_w, env_nodes = cls.like._envelope_loo_nodes(
+                lens, cls.dense_w)
+
+            f_recon = _reconstructed_total(
+                cls.like, cls.dense_w, coarse_w, env_nodes, partition)
+            f_exact = _exact_total(cls.dense_w, gamma, (y1, y2), beta, kappa)
+            scale = float(np.max(np.abs(f_exact)))
+            eps = float(np.max(np.abs(f_recon - f_exact)) / scale)
+
+            # GATE 1: reconstruct AT the nodes -- envelope is engine-exact
+            # there, so only the telescoping carrier algebra is exercised.
+            f_recon_nodes = _reconstructed_total(
+                cls.like, coarse_w, coarse_w, env_nodes, partition)
+            f_exact_nodes = _exact_total(
+                coarse_w, gamma, (y1, y2), beta, kappa)
+            identity = float(
+                np.max(np.abs(f_recon_nodes - f_exact_nodes))
+                / np.max(np.abs(f_exact_nodes)))
+
+            cls.records[label] = {
+                'n_nodes': int(coarse_w.size), 'eps': eps,
+                'identity': identity, 'coarse_w': coarse_w}
+
+    def test_node_reconstruction_identity_is_machine_precise(self):
+        """
+        GATE 1 (production layer): at the LOO nodes the production
+        reconstruction reproduces ``exact_total`` to ``<= 1e-13`` -- the
+        exact SACR-C telescoping carrier algebra, with no interpolation.
+        """
+        for label, rec in self.records.items():
+            with self.subTest(anchor=label):
+                self.n_checks += 1
+                self.assertLessEqual(
+                    rec['identity'], NODE_IDENTITY_GATE,
+                    f'{label}: at-node reconstruction identity '
+                    f'{rec["identity"]:.3e} exceeds {NODE_IDENTITY_GATE:.0e}; '
+                    'a carrier phase or saddle weight in the production '
+                    'reconstruction is broken')
+
+    def test_reconstruction_error_within_gate(self):
+        """
+        GATE 3: the production LOO-placed envelope reconstructs the exact
+        total to ``max|dF|/max|F| < 1e-3`` on the dense truth grid.
+        """
+        for label, rec in self.records.items():
+            with self.subTest(anchor=label):
+                self.n_checks += 1
+                self.assertLess(
+                    rec['eps'], LOO_EPS_GATE,
+                    f'{label}: reconstruction error {rec["eps"]:.3e} is not '
+                    f'below the {LOO_EPS_GATE:.0e} gate; the LOO envelope '
+                    'placement under-resolves the transition envelope')
+
+    def test_node_count_under_ceiling(self):
+        """GATE 3 / STRUCTURAL: every anchor certifies with ``N <= 48``."""
+        for label, rec in self.records.items():
+            with self.subTest(anchor=label):
+                self.n_checks += 1
+                self.assertLessEqual(
+                    rec['n_nodes'], LOO_NODE_CEILING,
+                    f'{label}: LOO node count {rec["n_nodes"]} exceeds the '
+                    f'{LOO_NODE_CEILING} ceiling; the envelope placement is '
+                    'not converging at the expected scale')
+
+    def test_node_count_is_config_independent(self):
+        """
+        STRUCTURAL: the LOO node count is config-independent -- it varies
+        only mildly across the anchors (no coarse-grid size to tune), and
+        never approaches the ceiling.  A per-anchor bar chart is saved.
+        """
+        counts = {label: rec['n_nodes'] for label, rec in self.records.items()}
+        self.n_checks += 1
+        spread = max(counts.values()) - min(counts.values())
+        # The five anchors span 2-image, 4-image, near-cusp, kappa!=0 and
+        # rotated-shear; a config-independent placement keeps the spread a
+        # small fraction of the ceiling (measured 26 -- 32, spread 6).
+        self.assertLessEqual(
+            spread, LOO_NODE_CEILING // 2,
+            f'LOO node counts {counts} span {spread} nodes, more than half '
+            f'the {LOO_NODE_CEILING} ceiling; the placement looks '
+            'config-dependent')
+        self.assertLessEqual(
+            max(counts.values()), LOO_NODE_CEILING,
+            f'LOO node counts {counts} reach the ceiling {LOO_NODE_CEILING}')
+
+        fig, axis = plt.subplots(figsize=(6, 4))
+        axis.bar(list(counts), list(counts.values()), color='steelblue')
+        axis.axhline(LOO_NODE_CEILING, color='crimson', linestyle='--',
+                     label=f'ceiling {LOO_NODE_CEILING}')
+        axis.set_ylabel('LOO envelope node count $N$')
+        axis.set_title('SACR-C LOO node count per anchor (config-independence)')
+        axis.tick_params(axis='x', rotation=30)
+        axis.legend()
+        self._save_figure(fig, 'loo_node_count_per_anchor')
+
+    def test_reconstruction_error_summary_plot(self):
+        """
+        Diagnostic: reconstruction error and node placements per anchor.
+        Asserts the summary is non-empty (anti-vacuity) and saves the plot.
+        """
+        self.n_checks += 1
+        self.assertEqual(
+            set(self.records), {label for label, *_ in _LENS_CONFIGS},
+            'the reconstruction records do not cover every anchor config')
+
+        fig, (ax_eps, ax_nodes) = plt.subplots(1, 2, figsize=(11, 4))
+        labels = list(self.records)
+        ax_eps.bar(labels, [self.records[k]['eps'] for k in labels],
+                   color='seagreen')
+        ax_eps.axhline(LOO_EPS_GATE, color='crimson', linestyle='--',
+                       label=f'gate {LOO_EPS_GATE:.0e}')
+        ax_eps.set_yscale('log')
+        ax_eps.set_ylabel(r'$\max|\Delta F| / \max|F|$')
+        ax_eps.set_title('GATE 3 reconstruction error')
+        ax_eps.tick_params(axis='x', rotation=30)
+        ax_eps.legend()
+        for label in labels:
+            coarse_w = self.records[label]['coarse_w']
+            ax_nodes.plot(coarse_w, np.full_like(coarse_w, labels.index(label)),
+                          'o', ms=3, label=label)
+        ax_nodes.set_xscale('log')
+        ax_nodes.set_xlabel('dimensionless frequency $w$')
+        ax_nodes.set_yticks(range(len(labels)))
+        ax_nodes.set_yticklabels(labels)
+        ax_nodes.set_title('LOO node placements')
+        self._save_figure(fig, 'loo_reconstruction_summary')
+
+
+class DeepBandMacroLimitTestCase(LensedLikelihoodTestCase):
+    """
+    GATE 5 (production layer): the deep-band macro-magnification limit.
+
+    A sheared positive-parity config at ``kappa = 0`` is reconstructed
+    through the production LOO / closed-form path at tiny ``w`` (~four
+    decades, ``1e-12 .. 1e-8``).  Its reconstructed ``|F|`` must equal the
+    Gaussian macro magnification ``1/sqrt((1-kappa)**2 - gamma**2)`` --
+    written out LITERALLY here, never built from the operator / channels /
+    geometry (the F002 oracle-tautology trap) -- to `MACRO_LIMIT_REL_GATE`,
+    AND be FLAT across the decades.  A slope instead of a plateau would
+    signal a spurious ``1/w`` prefactor leaking into the reconstruction.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        lens = _loo_lens_dic(*DEEP_BAND_SOURCE, DEEP_BAND_GAMMA, 0.0,
+                             DEEP_BAND_KAPPA)
+        partition, coarse_w, env_nodes = cls.like._envelope_loo_nodes(
+            lens, DEEP_BAND_W)
+        cls.abs_f_recon = np.abs(_reconstructed_total(
+            cls.like, DEEP_BAND_W, coarse_w, env_nodes, partition))
+        # LITERAL closed form, computed independently of the pipeline.
+        cls.closed_form = 1.0 / np.sqrt(
+            (1.0 - DEEP_BAND_KAPPA) ** 2 - DEEP_BAND_GAMMA ** 2)
+
+    def test_matches_independent_closed_form(self):
+        """Reconstructed ``|F|`` matches the literal Gaussian macro limit."""
+        self.n_checks += 1
+        rel = float(np.max(np.abs(self.abs_f_recon - self.closed_form))
+                    / self.closed_form)
+        self.assertLess(
+            rel, MACRO_LIMIT_REL_GATE,
+            f'deep-band |F| differs from the closed-form macro limit '
+            f'{self.closed_form:.6f} by {rel:.3e} > {MACRO_LIMIT_REL_GATE:.0e}')
+
+    def test_macro_limit_is_a_flat_plateau(self):
+        """
+        Reconstructed ``|F|`` is flat across the tiny-``w`` decades: a
+        ``1/w`` prefactor leak would show as a slope, not a plateau.
+        """
+        self.n_checks += 1
+        flat = float((self.abs_f_recon.max() - self.abs_f_recon.min())
+                     / self.abs_f_recon.mean())
+        self.assertLess(
+            flat, MACRO_LIMIT_FLAT_GATE,
+            f'deep-band |F| varies by {flat:.3e} across ~four decades of w; '
+            'a flat plateau is required, so a 1/w prefactor may be leaking')
+
+        fig, axis = plt.subplots(figsize=(6, 4))
+        axis.plot(DEEP_BAND_W, self.abs_f_recon, 'o-', ms=3,
+                  label='reconstructed $|F|$')
+        axis.axhline(self.closed_form, color='crimson', linestyle='--',
+                     label=f'$1/\\sqrt{{(1-\\kappa)^2-\\gamma^2}}$'
+                           f' = {self.closed_form:.6f}')
+        axis.set_xscale('log')
+        axis.set_xlabel('dimensionless frequency $w$')
+        axis.set_ylabel('$|F|$')
+        axis.set_title('GATE 5 deep-band macro-magnification plateau')
+        axis.legend()
+        self._save_figure(fig, 'deep_band_macro_limit_plateau')
+
+
+class EnvelopeWarmTimingGateTestCase(LensedLikelihoodTestCase):
+    """
+    STRUCTURAL/TIMING: public-entry speed-up (hard, machine-independent
+    lead) plus the PROJECTED warm ``lnlike`` ceiling (soft, machine
+    dependent).
+
+    The speed-up gate -- ``lnlike`` beats ``lnlike_bruteforce`` by a
+    conservative structural margin against the PUBLIC entry points -- is
+    the load-bearing timing claim and is asserted green.  The absolute
+    ``<= 18 ms`` warm ceiling is the report's PROJECTED bound; on this
+    machine the engine 1F1 ladder (out of the likelihood's scope) dominates
+    and the warm best-of-5 measures ~29 ms, so the ceiling is carried as a
+    permitted machine-dependent `expectedFailure` -- it flips to an
+    unexpected success (a signal to promote it) only if the deferred
+    envelope-surrogate lever lands.
+    """
+
+    _REPEATS = 5
+
+    def _best_time(self, thunk):
+        best = np.inf
+        for _ in range(self._REPEATS):
+            start = time.perf_counter()
+            thunk()
+            best = min(best, time.perf_counter() - start)
+        return best
+
+    def _crown_candidate(self):
+        return self._candidate(self._lens_dic(0.08, 0.06, 0.20, 0.0, 0.0))
+
+    def test_public_entry_speedup(self):
+        """``lnlike`` beats ``lnlike_bruteforce`` by a conservative margin."""
+        cand = self._crown_candidate()
+
+        def rb():
+            self.like.lnlike(cand)
+
+        def brute():
+            self.like.lnlike_bruteforce(cand)
+
+        rb()
+        brute()
+        t_rb = self._best_time(rb)
+        t_brute = self._best_time(brute)
+        self.n_checks += 1
+        self.assertGreater(
+            t_brute, STRUCTURAL_SPEEDUP_MIN * t_rb,
+            f'public-entry lnlike ({t_rb * 1e3:.3f} ms) is not at least '
+            f'{STRUCTURAL_SPEEDUP_MIN}x faster than lnlike_bruteforce '
+            f'({t_brute * 1e3:.3f} ms); the RB speed-up regressed')
+
+    @expectedFailure
+    def test_warm_lnlike_ms_ceiling_projected(self):
+        """
+        PROJECTED warm best-of-5 ``lnlike`` ceiling (machine-dependent
+        xfail): the engine 1F1 ladder dominates ~89% of ``lnlike`` and is
+        out of the likelihood's scope, so the ~29 ms measured here exceeds
+        the ~18 ms projection.  Kept RED (not widened) so it self-corrects
+        to an unexpected success if the deferred surrogate lever lands.
+        """
+        cand = self._crown_candidate()
+
+        def rb():
+            self.like.lnlike(cand)
+
+        rb()
+        self.n_checks += 1
+        best_ms = self._best_time(rb) * 1e3
+        self.assertLessEqual(
+            best_ms, WARM_LNLIKE_MS_CEILING,
+            f'warm best-of-{self._REPEATS} lnlike {best_ms:.2f} ms exceeds '
+            f'the projected {WARM_LNLIKE_MS_CEILING} ms ceiling (engine-1F1 '
+            'dominated; deferred to the envelope-surrogate lever)')
+
+
+class EnvelopeGateSelfFalsificationTestCase(LensedLikelihoodTestCase):
+    """
+    Prove the SACR-C reconstruction gates (GATE 1 identity, GATE 3
+    reconstruction error) can go red.
+
+    A green reconstruction gate is worth only as much as its ability to
+    fail: a perturbed envelope must breach both the 1e-3 reconstruction
+    error gate and, since the perturbation is applied at a node, the 1e-13
+    at-node identity gate.  Uses the two-image anchor over the two-decade
+    window.
+    """
+
+    _LABEL = 'two-image'
+    _SOURCE = (0.50, 0.00)
+    _GAMMA = 0.20
+
+    def _placement(self):
+        dense_w = np.geomspace(W_DECADE_LO, W_DECADE_HI, LOO_DENSE_POINTS)
+        lens = _loo_lens_dic(*self._SOURCE, self._GAMMA, 0.0, 0.0)
+        partition, coarse_w, env_nodes = self.like._envelope_loo_nodes(
+            lens, dense_w)
+        f_exact = _exact_total(dense_w, self._GAMMA, self._SOURCE, 0.0, 0.0)
+        scale = float(np.max(np.abs(f_exact)))
+        return dense_w, coarse_w, env_nodes, partition, f_exact, scale
+
+    def test_perturbed_envelope_breaches_reconstruction_gate(self):
+        """
+        A ``1e-2 * max|F|`` bump on an interior node blows the dense
+        reconstruction error past the 1e-3 gate -- so GATE 3 could not pass
+        a mis-reconstructed envelope.
+        """
+        dense_w, coarse_w, env_nodes, partition, f_exact, scale = \
+            self._placement()
+
+        f_true = _reconstructed_total(
+            self.like, dense_w, coarse_w, env_nodes, partition)
+        eps_true = float(np.max(np.abs(f_true - f_exact)) / scale)
+
+        perturbed = env_nodes.copy()
+        perturbed[perturbed.size // 2] += 1e-2 * scale
+        f_bad = _reconstructed_total(
+            self.like, dense_w, coarse_w, perturbed, partition)
+        eps_bad = float(np.max(np.abs(f_bad - f_exact)) / scale)
+
+        self.n_checks += 1
+        self.assertLess(eps_true, LOO_EPS_GATE,
+                        f'unperturbed eps {eps_true:.3e} already fails the '
+                        'gate; the falsification baseline is invalid')
+        self.assertGreater(
+            eps_bad, LOO_EPS_GATE,
+            f'a 1e-2*|F| envelope perturbation left the reconstruction error '
+            f'{eps_bad:.3e} within the {LOO_EPS_GATE:.0e} gate; GATE 3 '
+            'asserts nothing')
+
+    def test_perturbed_envelope_breaches_node_identity(self):
+        """
+        The same node perturbation blows the at-node telescoping identity
+        past the 1e-13 gate -- so GATE 1 could not pass a broken carrier.
+        """
+        _, coarse_w, env_nodes, partition, _, _ = self._placement()
+
+        f_exact_nodes = _exact_total(
+            coarse_w, self._GAMMA, self._SOURCE, 0.0, 0.0)
+        node_scale = float(np.max(np.abs(f_exact_nodes)))
+
+        f_true = _reconstructed_total(
+            self.like, coarse_w, coarse_w, env_nodes, partition)
+        ident_true = float(np.max(np.abs(f_true - f_exact_nodes)) / node_scale)
+
+        perturbed = env_nodes.copy()
+        perturbed[perturbed.size // 2] += 1e-2 * node_scale
+        f_bad = _reconstructed_total(
+            self.like, coarse_w, coarse_w, perturbed, partition)
+        ident_bad = float(np.max(np.abs(f_bad - f_exact_nodes)) / node_scale)
+
+        self.n_checks += 1
+        self.assertLessEqual(
+            ident_true, NODE_IDENTITY_GATE,
+            f'unperturbed identity {ident_true:.3e} already fails the gate; '
+            'the falsification baseline is invalid')
+        self.assertGreater(
+            ident_bad, NODE_IDENTITY_GATE,
+            f'a 1e-2*|F| envelope perturbation left the at-node identity '
+            f'{ident_bad:.3e} within the {NODE_IDENTITY_GATE:.0e} gate; '
+            'GATE 1 asserts nothing')
 
 
 if __name__ == '__main__':

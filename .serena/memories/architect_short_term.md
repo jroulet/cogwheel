@@ -34,3 +34,32 @@ w_branch=max(RHO_END/delta_min, L_MAX/|y'|); adaptive per-segment node budget
 (operator/_dd/geometry/_gauge) untouched. Step rule: gate at Professor floor
 15ms (structural gates lead), name residual levers. No lever B => no
 DATA_CONTRACTS artifact, no cache, no reduction-exactness test this build.
+
+## Build 3f triage (2026-07-18): INS-6-001
+Same pattern as INS-5-003, recurring on the actual Build 3f WP1/WP2 SACR-C
+swap (channels.py/_gauge.py envelope decomposition + likelihood.py
+LOO-adaptive coarse-node rewire). SPEC.md line 54 still narrates the removed
+_DEFAULT_KERNEL_NODES=100/F008-full-cluster/cubic-spline machinery.
+Inspector's own suggested fix already targets the Librarian, not a Coder —
+correctly scoped. Triaged override: doc/housekeeping is categorically
+excluded from Coder WPs (hard requirement) and is handled by the
+deterministic doc-sync + Librarian phase that runs after gates regardless.
+Attached full replacement text (SACR-C envelope description, LOO node
+budget _LOO_SEED_NODES=8/_LOO_STOP=4e-3/_LOO_MAX_NODES=48, criticality-
+separation switch S_a=smootherstep(w|tau_a-tau_c|,0.5,4) superseding F008,
+closed-form reconstruct_from_envelope) plus the F008-superseded FINDINGS
+addendum, so the content isn't lost even though no Coder WP is spawned.
+
+## Build 3f triage (2026-07-18): INS-5-003
+SPEC.md/FINDINGS.md divergence after the SACR-C swap (WP1/WP2 replaced
+_DEFAULT_KERNEL_NODES=100 full-cluster switch with the envelope+LOO
+construction) is real but is NOT a Coder-WP-worthy defect: per hard
+requirement, doc/housekeeping (changelog fragments, SPEC.md narrative sync,
+FINDINGS addenda) is handled by the deterministic doc-sync + Librarian phase
+that runs AFTER gates, not by a Coder WP. Listing SPEC.md under
+files_affected in the plan was informational (signals the doc-sync/Librarian
+pass should touch it), not an instruction to spawn a WP. Triaged as override
+with explicit Librarian guidance attached (SACR-C envelope description, LOO
+node budget 30-44/stop 4e-3/ceiling 48, criticality-separation switch
+|tau_a-tau_c|, F008-superseded FINDINGS addendum per report Sec 6.7) so the
+content isn't lost even though no Coder WP is created.

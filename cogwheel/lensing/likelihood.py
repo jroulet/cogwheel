@@ -83,9 +83,10 @@ from scipy.interpolate import CubicSpline
 
 from cogwheel import utils
 from cogwheel.likelihood.relative_binning import BaseLinearFree
-from cogwheel.lensing.chang_refsdal import (ChangRefsdalChannels, RHO_END,
-                                            RHO_START, geometry,
-                                            real_image_delays)
+from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
+from cogwheel.lensing.chang_refsdal.channels import (_channel_switch,
+                                                     _physical_kernels,
+                                                     reconstruct_from_envelope)
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
 
@@ -125,34 +126,39 @@ _DEFAULT_PN_PHASE_TOL = 0.02
 #: >= 2; the value 2 reproduces the plain edge secant.
 _DEFAULT_KERNEL_SUBSAMPLES = 2
 
-#: Default number of coarse ``w`` nodes for the base (log-spaced) grid on
-#: which the smooth channel kernels ``K_a(w)`` are evaluated by the
-#: engine, then cubic-splined to the dense bin sub-sample grid.  Because
-#: ``F = K * h_UL`` factors the amplification out of the rapidly varying
-#: unlensed strain, the kernels are far smoother than the waveform, so a
-#: modest node count decoupled from the waveform bin grid turns the
-#: per-eval engine cost from ``O(n_bins * kernel_subsamples)`` points into
-#: ``O(n_kernel_nodes)``.  This log-spaced base grid is unioned with the
-#: FULL-CLUSTER gauge-hand-over and branch-switch transition frequencies
-#: (see ``_coarse_w_node_grid``), which place extra nodes exactly at the
-#: real-to-virtual delay separations where the two-image kernels carry
-#: their binding structure (F008); that adaptive placement -- not brute
-#: log-spacing -- is what keeps the node budget small.  Provenance: on a
-#: pure log-spaced grid the two-image config needs ~80+ nodes to reach a
-#: null-safe ``max|dF|/max|F| < 1e-3`` (n=82 gives 1.1e-3), because it
-#: misses the full-cluster kernel structure; the full-cluster transition
-#: nodes add resolution exactly there, but the base grid must still
-#: resolve the kernels across the band.  Measured sweep (driver,
-#: 2026-07-17, worst config = two-image, null-safe ``max|dF|/max|F|`` on
-#: the production grid): base 40 -> 2.8e-2, 64 -> 3.3e-3, 85 -> 8.7e-4,
-#: 100 -> 4.2e-4, 128 -> 1.5e-4 against the 1e-3 target.  The default
-#: 100 clears every ``_LENS_CONFIGS`` row with ~2.4x margin
-#: (=> ``|delta lnL| ~ rho^2 * 4e-4`` at rho ~ 20, well inside
-#: ``RB_ATOL = 1.5``); 85 is the bare threshold and was rejected as too
-#: thin to trust off-suite.  Certified by the RB-vs-brute and
-#: interpolation gates, NOT by this comment.  Must be ``>= 4`` so the
-#: coarse grid always supports a not-a-knot cubic spline.
-_DEFAULT_KERNEL_NODES = 100
+#: Seed size of the coarse ``w`` node grid on which the engine evaluates
+#: the single smooth SACR-C transition envelope ``E(w)`` before
+#: leave-one-out refinement.  A small log-spaced base spanning the in-band
+#: ``w`` range; the adaptive loop (`_envelope_loo_nodes`) then adds nodes
+#: where the held-out interpolation error is largest.
+_LOO_SEED_NODES = 8
+
+#: Hard-coded leave-one-out stop tolerance for the envelope node grid.
+#: Refinement halts once the worst held-out node error (relative to the
+#: peak amplification magnitude ``max|F|``, the same currency as the
+#: reconstruction gate ``max|dF|/max|F|``) drops below this value.  The
+#: held-out estimate overestimates the true global-spline reconstruction
+#: error, so this stop is deliberately conservative and drives the true
+#: reconstruction error well inside the ``1e-3`` gate.  It is a fixed
+#: physical property of the certified interpolant, NOT a constructor
+#: argument or configuration key: the node count it produces is
+#: self-certifying and config-independent by construction.
+_LOO_STOP = 4e-3
+
+#: Hard ceiling on the number of coarse envelope nodes.  The SACR-C
+#: envelope is beat-free by construction, so a certified reconstruction
+#: needs far fewer nodes than the old kernel grid (report: greedy-oracle
+#: 19-26, production LOO 30-44); this ceiling bounds the per-eval engine
+#: cost and is never expected to bind on the gated configurations.  Must
+#: be ``>= 4`` so the node grid always supports a not-a-knot cubic spline.
+_LOO_MAX_NODES = 48
+
+#: Floor on the peak amplification magnitude ``max|F|`` used to normalize
+#: the leave-one-out node error.  Guards the ``|F| -> 1`` regime against a
+#: spuriously large relative error should ``max|F|`` momentarily read near
+#: zero; ``|F|`` is order unity or larger for a positive-parity lens, so
+#: this floor never binds in practice.
+_ENVELOPE_SCALE_FLOOR = 1e-12
 
 #: Maximum number of macro images a Chang--Refsdal lens produces (four
 #: inside the caustic, two outside).  Matches the engine's channel count
@@ -208,6 +214,57 @@ def _edge_linear_coefficients(values_at_edges, fbin):
     c0 = 0.5 * (lower + upper)
     c1 = (upper - lower) / widths
     return c0, c1
+
+
+def _leave_one_out_errors(abscissa, values):
+    """
+    Held-out (leave-one-out) interpolation error at each interior node.
+
+    For every interior node ``i`` the value ``values[i]`` is predicted
+    from the four nearest OTHER nodes by cubic Lagrange interpolation in
+    the given abscissa (``ln w``), and the error is the magnitude of the
+    difference from the true value.  This uses only node data -- never a
+    dense reference -- so it is a self-certifying, config-independent
+    estimate of the interpolation error, computed in O(n) with a
+    fixed four-point stencil.  Being local (it ignores the smoothing of
+    the more distant nodes the global spline also sees) it OVERestimates
+    the true global-spline reconstruction error, which is the safe
+    direction for a refinement stop criterion.
+
+    Endpoints have no leave-one-out prediction (removing them would force
+    extrapolation) and are assigned zero error, so they are never chosen
+    as a refinement target.
+
+    Parameters
+    ----------
+    abscissa : np.ndarray
+        Shape ``(n,)`` strictly increasing node abscissa (``ln w``).
+    values : np.ndarray
+        Shape ``(n,)`` complex node values ``E(w)``.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(n,)`` non-negative held-out errors; zero at the two
+        endpoints.
+    """
+    n_nodes = abscissa.size
+    errors = np.zeros(n_nodes)
+    indices = np.arange(n_nodes)
+    for node in range(1, n_nodes - 1):
+        others = indices[indices != node]
+        stencil = others[np.argsort(np.abs(others - node))[:4]]
+        stencil.sort()
+        xs = abscissa[stencil]
+        prediction = 0.0 + 0.0j
+        for k in range(xs.size):
+            basis = 1.0
+            for m in range(xs.size):
+                if m != k:
+                    basis *= (abscissa[node] - xs[m]) / (xs[k] - xs[m])
+            prediction += values[stencil[k]] * basis
+        errors[node] = abs(values[node] - prediction)
+    return errors
 
 
 def _data_term(a_moments, rho0, rho1, kbar0, kbar1, tau, f_center):
@@ -355,9 +412,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
     Subclasses `BaseLinearFree` to reuse the frequency-bin machinery, the
     ASD-drift correction, and the linear-free common-time-shift idiom.  The
     reference waveform ``par_dic_0`` is *unlensed*; the lensing enters only
-    at evaluation through the per-candidate channel decomposition, whose
-    smooth kernels are interpolated and whose image-delay phases are kept
-    analytic (see the module docstring).
+    at evaluation through the per-candidate channel decomposition: its
+    single smooth SACR-C envelope is interpolated, the analytic switched
+    saddle kernels are rebuilt in closed form, and the image-delay phases
+    are kept analytic (see the module docstring).
 
     Parameters
     ----------
@@ -387,48 +445,42 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         Tolerance [rad] in the lens-aware bin criterion.
     kernel_subsamples : int
         Number of frequency sub-samples per coarse bin at which the
-        (already interpolated) candidate channel kernels are reduced to
-        their per-bin (value, slope) coefficients by least squares.  Must
+        (closed-form reconstructed) candidate channel kernels are reduced
+        to their per-bin (value, slope) coefficients by least squares.  Must
         be ``>= 2``; the default 2 is the plain bin-edge secant, which is
         accurate once the channel kernels are bounded.  Larger values fit
         a line over interior sub-samples and are a robustness margin
         against pure geometric phase oscillation near a caustic, not a
         correctness requirement.  The reference summaries and the
         mode-then-image contraction are unaffected.  Note the engine is
-        NOT evaluated at these sub-samples -- the kernels are cubic-spline
-        interpolated to them from the coarse ``n_kernel_nodes`` grid.
-    n_kernel_nodes : int
-        Number of nodes in the coarse log-spaced ``w`` grid on which the
-        engine actually evaluates the smooth channel kernels ``K_a(w)``,
-        decoupled from the (much finer) waveform bin sub-sample grid.
-        The kernels are cubic-splined (real and imaginary parts
-        separately, not-a-knot) from these nodes to the
-        ``n_bins * kernel_subsamples`` bin sub-samples; the exact analytic
-        image-delay phases are kept, so only the smooth kernels are
-        interpolated.  The grid is the deterministic sorted union of the
-        log-spaced base grid and the mandatory FULL-CLUSTER
-        gauge-hand-over / branch-switch transition frequencies (never
-        error-adaptive).  Must be ``>= 4``; the shipped default (see
-        ``_DEFAULT_KERNEL_NODES``) targets a null-safe
-        ``max|dF|/max|F| < 1e-3`` on the production grid, certified by the
-        RB-vs-brute and interpolation gates.  This is the dominant
-        per-eval cost lever: the engine is evaluated at
-        ``~n_kernel_nodes`` points instead of at all
-        ``n_bins * kernel_subsamples``.
+        NOT evaluated at these sub-samples -- the candidate kernels are
+        reconstructed there in closed form from the single interpolated
+        SACR-C envelope (see ``_amplification_coefficients``).
+
+    Notes
+    -----
+    The engine evaluates only the single smooth SACR-C transition
+    envelope ``E(w)`` on a small leave-one-out-adaptive coarse ``w`` node
+    grid (seed ``_LOO_SEED_NODES``, stop ``_LOO_STOP``, ceiling
+    ``_LOO_MAX_NODES``); the candidate channel kernels ``K_a`` are then
+    reconstructed at the dense bin sub-samples in closed form (the
+    analytic switched saddle kernels ``S_a * H_a`` plus the interpolated
+    envelope, `reconstruct_from_envelope`).  The node budget is
+    self-certifying and config-independent -- there is no coarse-grid size
+    to tune -- which is why no ``n_kernel_nodes`` argument exists.
 
     Raises
     ------
     LensedBinningError
         If ``pi * max(Delta_f_bin) * delta_t_max >= bin_delay_tol``.
     ValueError
-        If ``kernel_subsamples < 2`` or ``n_kernel_nodes < 4``.
+        If ``kernel_subsamples < 2``.
     """
 
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  delta_t_max, *, fbin=None, pn_phase_tol=None,
                  spline_degree=3, bin_delay_tol=_DEFAULT_BIN_DELAY_TOL,
-                 kernel_subsamples=_DEFAULT_KERNEL_SUBSAMPLES,
-                 n_kernel_nodes=_DEFAULT_KERNEL_NODES):
+                 kernel_subsamples=_DEFAULT_KERNEL_SUBSAMPLES):
         if isinstance(waveform_generator, LensedWaveformGenerator):
             base_generator = waveform_generator.waveform_generator
         else:
@@ -440,16 +492,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             raise ValueError(
                 '`kernel_subsamples` must be >= 2 (2 reproduces the plain '
                 f'bin-edge secant); got {kernel_subsamples}.')
-        if n_kernel_nodes < 4:
-            raise ValueError(
-                '`n_kernel_nodes` must be >= 4 so the coarse `w` grid '
-                'always supports a not-a-knot cubic spline; got '
-                f'{n_kernel_nodes}.')
 
         self.delta_t_max = float(delta_t_max)
         self.bin_delay_tol = float(bin_delay_tol)
         self.kernel_subsamples = int(kernel_subsamples)
-        self.n_kernel_nodes = int(n_kernel_nodes)
 
         # Populated by ``_set_summary`` (triggered by the ``fbin`` setter
         # inside ``super().__init__``).
@@ -656,171 +702,226 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 f'{list(_LENS_PARAMS)}.')
         return {key: par_dic[key] for key in _LENS_PARAMS}
 
-    def _full_cluster_delays(self, lens):
+    def _evaluate_envelope(self, lens, new_w, pad_w):
         """
-        Full-cluster relative image delays for kernel-node placement.
+        Evaluate the SACR-C partition and envelope at ``new_w``.
 
-        Returns the frequency-independent relative Fermat delays of the
-        whole image cluster the engine tracks: the real macro images
-        (`real_image_delays`) TOGETHER WITH the parked virtual label at
-        the nearest critical point, whenever the source lies outside the
-        caustic so that the engine parks virtual labels there.  This
-        mirrors the full-cluster neighbour set of
-        `channels._channel_switch` (F008): a near-critical real image's
-        true cluster mate is the virtual label it is about to spawn, so
-        the kernel hand-over kink sits at the real-to-virtual delay
-        separation.  Downstream node placement must break the
-        interpolating spline there, which requires the virtual-label
-        delay.
+        A fresh `ChangRefsdalChannels` uses the deterministic initial
+        label assignment, so the geometry fields (delays, critical delay,
+        assignment, real mask) and the demodulated envelope ``E(w)`` are
+        identical whether a node is evaluated alone or in a larger grid;
+        this is what lets the leave-one-out loop grow the grid one small
+        batch at a time and stitch the envelope values together.
 
-        Geometry only -- no operator sweep (`F_op`) is run -- so this is
-        cheap enough to place spline nodes without paying an engine
-        evaluation.  A macro-saddle configuration (``1 - kappa <=
-        abs(gamma)``) raises `geometry.LensDomainError` here (via
-        `real_image_delays` / `geometry.macro_matrix` /
-        `geometry.nearest_caustic_point`), matching the brute-force strain
-        path so the two paths refuse symmetrically.
+        `ChangRefsdalChannels` requires a grid of at least two strictly
+        increasing points, so a lone new node is padded with ``pad_w``
+        (an already-evaluated node, re-evaluated harmlessly) and the
+        padding is dropped from the returned values.
 
         Parameters
         ----------
         lens : dict
             Lens parameters, keys ``gamma, beta, kappa, y1, y2``.
+        new_w : np.ndarray
+            Dimensionless frequencies to evaluate (positive), 1-D.
+        pad_w : float
+            An already-evaluated node used only to satisfy the engine's
+            two-point minimum when ``new_w`` has a single element.
 
         Returns
         -------
-        np.ndarray
-            Relative Fermat delays (dimensionless) of the real images and,
-            when the source lies outside the caustic, the parked virtual
-            label.  Only pairwise separations of these are used
-            downstream, so the common offset is immaterial.
+        partition : ChangRefsdalPartition
+            The engine output on the evaluated grid (its w-independent
+            geometry is the same at every call).
+        envelope : np.ndarray
+            Envelope ``E(w)`` at ``new_w`` (padding removed).
+        exact_total : np.ndarray
+            Exact amplification total at ``new_w`` (padding removed), used
+            to normalize the leave-one-out error by ``max|F|``.
         """
-        source = np.asarray((lens['y1'], lens['y2']), dtype=float)
-        real_delays = real_image_delays(
-            lens['gamma'], source, beta=lens['beta'], kappa=lens['kappa'])
-        if real_delays.size >= _MAX_LENS_IMAGES:
-            # Every cluster label holds a real image (inside-caustic,
-            # four-image region): no virtual labels are parked, so the
-            # neighbour set is real-only and this is a no-op relative to
-            # the pre-F008 grid.
-            return real_delays
+        new_w = np.atleast_1d(np.asarray(new_w, dtype=float))
+        grid = new_w
+        if grid.size < 2:
+            grid = np.unique(np.concatenate([grid, np.atleast_1d(pad_w)]))
+        partition = ChangRefsdalChannels(grid).evaluate(
+            gamma=lens['gamma'], y=(lens['y1'], lens['y2']),
+            beta=lens['beta'], kappa=lens['kappa'])
+        keep = np.searchsorted(grid, new_w)
+        return partition, partition.envelope[keep], partition.exact_total[keep]
 
-        # Two-image region: the remaining cluster labels are parked at the
-        # nearest critical point. Its Fermat delay, placed in the SAME
-        # relative frame as `real_delays` (both measured from the minimum
-        # real-image delay), is the virtual-label delay -- exactly the
-        # ``virtual_delay - t_min`` the engine assigns in
-        # ``channels._labeled_delays``.
-        matrix = geometry.macro_matrix(
-            lens['gamma'], lens['beta'], lens['kappa'])
-        t_min = min(geometry.delay(image, source, matrix)
-                    for image in geometry.find_images(source, matrix))
-        caustic = geometry.nearest_caustic_point(
-            lens['gamma'], lens['beta'], source, kappa=lens['kappa'])
-        virtual_delay = geometry.delay(caustic.image, source, matrix) - t_min
-        return np.append(real_delays, virtual_delay)
-
-    def _coarse_w_node_grid(self, dense_w, cluster_delays):
+    def _envelope_loo_nodes(self, lens, dense_w):
         """
-        Deterministic coarse ``w`` node grid for kernel interpolation.
+        Leave-one-out-adaptive coarse ``w`` nodes for the SACR-C envelope.
 
-        The smooth channel kernels are evaluated by the engine only at
-        this grid and cubic-splined to the dense sub-samples.  The grid is
-        the sorted, de-duplicated UNION of
+        Only the single smooth transition envelope ``E(w)`` is
+        interpolated (the analytic switched saddle kernels are rebuilt in
+        closed form), so the node grid is chosen to resolve ``E`` alone.
+        Seeded with `_LOO_SEED_NODES` log-spaced nodes spanning the
+        in-band range ``[dense_w.min(), dense_w.max()]`` (so the endpoints
+        coincide with the dense grid's -- no extrapolation downstream, and
+        the worst-cancellation node ``w_max`` is always evaluated), the
+        grid is refined by repeatedly splitting the two intervals flanking
+        the node of largest held-out (leave-one-out) error until that
+        error, measured relative to the peak amplification magnitude
+        ``max|F|`` (the reconstruction gate's currency), drops below the
+        hard-coded `_LOO_STOP`, or the count reaches `_LOO_MAX_NODES`.
 
-        * a log-spaced base grid of ``n_kernel_nodes`` points spanning the
-          in-band range ``[dense_w.min(), dense_w.max()]`` (so the coarse
-          grid endpoints coincide with the dense grid's -- no
-          extrapolation downstream), and
-        * the mandatory transition frequencies where the interpolated
-          kernels are only C2 (not C3): the smootherstep gauge hand-over
-          kinks ``w = RHO_START / Delta_j`` and ``w = RHO_END / Delta_j``
-          for each distinct pairwise FULL-CLUSTER delay separation
-          ``Delta_j``, plus the wave->geometric branch-switch node
-          ``w = RHO_END / Delta_min`` -- each retained only if it falls in
-          band.  Breaking the cubic spline exactly at these regularity
-          boundaries avoids ringing.
+        The held-out error is a local cubic estimate (`_leave_one_out_errors`)
+        that uses only node data -- no dense truth -- so the stop is
+        self-certifying per evaluation and the resulting node count is
+        config-independent by construction: there is no coarse-grid size
+        to tune.  Because the local estimate overestimates the true
+        global-spline reconstruction error, the stop is conservative and
+        drives the true error well inside the ``1e-3`` reconstruction gate.
 
-        The separations run over the FULL image cluster -- the real macro
-        images AND the virtual label parked at the nearest critical point
-        -- mirroring the full-cluster neighbour set of
-        `channels._channel_switch` (F008).  On the two-image side of a
-        caustic a near-critical real image's true cluster mate is the
-        parked virtual label it is about to spawn, so the kernel
-        hand-over kink sits at that real-to-virtual delay separation, not
-        a real-to-real one; keying only on real separations misses it and
-        under-resolves the interpolant exactly where the two-image kernels
-        carry their structure.  The real-only branch-switch separation of
-        `channels._min_delay_separation` is itself a full-cluster
-        separation (a real-to-real pair), so its ``RHO_END / Delta`` node
-        is already among the per-separation nodes; the extra
-        ``RHO_END / Delta_min`` term is a redundant safety break point.
+        A macro-saddle configuration (``1 - kappa <= abs(gamma)``) makes
+        the first engine evaluation raise `geometry.LensDomainError`, and
+        an uncertifiable wave-branch contraction raises
+        `operator.CancellationError`; both propagate unswallowed, matching
+        the brute-force path so the two refuse symmetrically.
 
-        Node placement is deterministic per parameter point (a function of
-        the geometry-only cluster delays and the fixed engine thresholds),
-        never error-adaptive.  ``np.unique`` returns a sorted
-        strictly-increasing array, and every value is ``>= dense_w.min() >
-        0``, so the grid satisfies `ChangRefsdalChannels`'s strictly
-        positive, strictly increasing requirement.
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters, keys ``gamma, beta, kappa, y1, y2``.
+        dense_w : np.ndarray
+            Dense bin sub-sample dimensionless frequencies (positive,
+            strictly increasing); only its min and max seed the grid.
+
+        Returns
+        -------
+        partition : ChangRefsdalPartition
+            The seed engine evaluation, carrying the w-independent
+            geometry the closed-form reconstruction needs.
+        coarse_w : np.ndarray
+            Strictly increasing positive envelope node grid.
+        envelope_nodes : np.ndarray
+            Envelope ``E(w)`` at ``coarse_w`` (complex).
+        """
+        w_min = float(dense_w.min())
+        w_max = float(dense_w.max())
+
+        coarse_w = np.geomspace(w_min, w_max, _LOO_SEED_NODES)
+        partition, env_nodes, ftot_nodes = self._evaluate_envelope(
+            lens, coarse_w, pad_w=w_max)
+
+        while True:
+            n_nodes = coarse_w.size
+            ln_w = np.log(coarse_w)
+            loo_abs = _leave_one_out_errors(ln_w, env_nodes)
+            scale = max(float(np.max(np.abs(ftot_nodes))),
+                        _ENVELOPE_SCALE_FLOOR)
+            worst = int(np.argmax(loo_abs))
+            if loo_abs[worst] / scale < _LOO_STOP or n_nodes >= _LOO_MAX_NODES:
+                break
+
+            # Split the two intervals flanking the worst node (geometric
+            # midpoints in ``w`` == arithmetic midpoints in ``ln w``).
+            flanks = []
+            if worst - 1 >= 0:
+                flanks.append(np.sqrt(coarse_w[worst - 1] * coarse_w[worst]))
+            if worst + 1 < n_nodes:
+                flanks.append(np.sqrt(coarse_w[worst] * coarse_w[worst + 1]))
+            new_w = np.array(
+                [w for w in flanks
+                 if not np.any(np.isclose(w, coarse_w, rtol=1e-9))])
+            if new_w.size == 0:
+                break  # placement already saturated around the worst node
+            new_w = new_w[:_LOO_MAX_NODES - n_nodes]
+
+            _, new_env, new_ftot = self._evaluate_envelope(
+                lens, new_w, pad_w=coarse_w[-1])
+            coarse_w = np.concatenate([coarse_w, new_w])
+            env_nodes = np.concatenate([env_nodes, new_env])
+            ftot_nodes = np.concatenate([ftot_nodes, new_ftot])
+            order = np.argsort(coarse_w)
+            coarse_w = coarse_w[order]
+            env_nodes = env_nodes[order]
+            ftot_nodes = ftot_nodes[order]
+
+        return partition, coarse_w, env_nodes
+
+    def _reconstruct_kernels(self, dense_w, coarse_w, envelope_nodes,
+                             partition):
+        """
+        Closed-form SACR-C reconstruction of the channel kernels.
+
+        Interpolates the single smooth envelope ``E(w)`` from the coarse
+        nodes onto the dense sub-samples with a not-a-knot cubic spline in
+        ``ln w`` (real and imaginary parts separately -- the certified
+        interpolant), evaluates the analytic switched saddle kernels
+        ``S_a(w) * H_a(w)`` in closed form at every dense frequency, and
+        rebuilds
+
+            K_a(w) = S_a*H_a + u_a(w) * exp(-1j*w*(tau_a - tau_c)) * E,
+
+        via `reconstruct_from_envelope`.  The saddle kernels ``H_a`` come
+        from `geometry.image_kernel` (`_physical_kernels`) and the switch
+        ``S_a`` from `_channel_switch`, both closed-form functions of ``w``
+        and the (w-independent) geometry; only ``E`` is interpolated, and
+        the carrier phases are reduced mod ``2*pi`` inside the gauge
+        algebra (F001).  The reconstruction is pure vectorized numpy -- no
+        njit is introduced on this path.
 
         Parameters
         ----------
         dense_w : np.ndarray
-            The dense bin sub-sample dimensionless frequencies (positive,
-            strictly increasing); only its min and max are used.
-        cluster_delays : np.ndarray
-            Relative Fermat delays (dimensionless) of the full image
-            cluster (real images plus the parked virtual label), from
-            `_full_cluster_delays`.  Only pairwise separations are used,
-            so the common offset is immaterial.
+            Dense bin sub-sample dimensionless frequencies (positive,
+            strictly increasing, within ``[coarse_w.min, coarse_w.max]``).
+        coarse_w : np.ndarray
+            Envelope node grid (strictly increasing positive).
+        envelope_nodes : np.ndarray
+            Envelope ``E(w)`` at ``coarse_w`` (complex).
+        partition : ChangRefsdalPartition
+            Carries the w-independent geometry (``delays``, ``assignment``,
+            ``images``, ``matrix``, ``real_mask``, ``critical_delay``).
 
         Returns
         -------
         np.ndarray
-            Strictly increasing positive coarse ``w`` node grid.
+            Shape ``(n_dense, n_channels)`` complex channel kernels ``K_a``.
         """
-        w_min = float(dense_w.min())
-        w_max = float(dense_w.max())
-        nodes = [np.geomspace(w_min, w_max, self.n_kernel_nodes)]
+        ln_coarse = np.log(coarse_w)
+        ln_dense = np.log(dense_w)
+        spline_real = CubicSpline(ln_coarse, envelope_nodes.real,
+                                  bc_type='not-a-knot')
+        spline_imag = CubicSpline(ln_coarse, envelope_nodes.imag,
+                                  bc_type='not-a-knot')
+        envelope_dense = spline_real(ln_dense) + 1j * spline_imag(ln_dense)
 
-        # Distinct positive pairwise separations of the FULL image cluster
-        # (real images plus the parked virtual label), so the transition
-        # nodes land at the real-to-virtual hand-over kinks too (F008).
-        if cluster_delays.size >= 2:
-            pairwise = np.abs(cluster_delays[:, np.newaxis]
-                              - cluster_delays[np.newaxis, :])
-            separations = pairwise[np.triu_indices(cluster_delays.size, k=1)]
-            separations = np.unique(separations[separations > 0.0])
-            if separations.size:
-                transitions = np.concatenate([
-                    RHO_START / separations,
-                    RHO_END / separations,
-                    [RHO_END / separations.min()]])
-                in_band = transitions[(transitions >= w_min)
-                                      & (transitions <= w_max)]
-                nodes.append(in_band)
-
-        return np.unique(np.concatenate(nodes))
+        saddle_dense = _physical_kernels(
+            dense_w, partition.assignment, partition.images, partition.matrix)
+        switch_dense = _channel_switch(
+            dense_w, partition.delays, partition.real_mask,
+            partition.critical_delay)
+        kernels, _total = reconstruct_from_envelope(
+            dense_w, envelope_dense, partition.delays, saddle_dense,
+            switch_dense, partition.critical_delay)
+        return kernels
 
     def _amplification_coefficients(self, par_dic):
         """
-        Candidate kernels: coarse engine grid, spline to per-bin coeffs.
+        Candidate kernels: coarse-node envelope, closed-form reconstruct.
 
-        Evaluates the Chang--Refsdal channel decomposition ONCE on a
-        coarse deterministic ``w`` node grid (``_coarse_w_node_grid``,
-        ``~n_kernel_nodes`` points), cubic-splines each smooth channel
-        kernel ``K_a(w)`` (real and imaginary parts separately, not-a-knot)
-        to the dense ``n_bins * kernel_subsamples`` bin sub-samples, then
-        reduces those to per-bin center value and slope by the same
-        least-squares fit as before.  The frequency-independent relative
-        image delays are read from the same single engine evaluation and
-        kept analytic; only the smooth kernels are interpolated.
+        Evaluates the Chang--Refsdal engine only for the single smooth
+        SACR-C transition envelope ``E(w)`` on a small
+        leave-one-out-adaptive coarse ``w`` node grid
+        (`_envelope_loo_nodes`, ``<= _LOO_MAX_NODES`` points), then
+        reconstructs each candidate channel kernel ``K_a(w)`` at the dense
+        ``n_bins * kernel_subsamples`` bin sub-samples in CLOSED FORM: the
+        analytic switched saddle kernels ``S_a * H_a`` evaluated directly
+        at every sub-sample plus the interpolated envelope
+        (`_reconstruct_kernels`).  Those dense kernels are reduced to
+        per-bin center value and slope by the same least-squares fit as
+        before.  The frequency-independent relative image delays are read
+        from the same engine evaluation and kept analytic.
 
-        This decouples the engine cost from the waveform bin grid: because
-        ``F = K * h_UL`` factors the amplification out of the rapidly
-        varying unlensed strain, the kernels are far smoother than the
-        waveform and a handful of nodes suffices, turning the per-eval
-        engine cost from ``O(n_bins * kernel_subsamples)`` into
-        ``O(n_kernel_nodes)``.
+        This decouples the engine cost from the waveform bin grid and from
+        any fixed coarse-grid size: because the SACR-C envelope is
+        beat-free by construction, far fewer nodes certify a
+        reconstruction than the old channel-kernel grid, and the node
+        count is chosen adaptively per evaluation (self-certifying,
+        config-independent) rather than fixed.
 
         Parameters
         ----------
@@ -835,14 +936,17 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             Shape ``(n_channels, n_bins)`` per-bin center value and slope
             [1/Hz] of the candidate kernel ``K_a``.
         partition : ChangRefsdalPartition
-            The full engine output at the coarse node grid.
+            The seed engine evaluation (carrying the w-independent
+            geometry); retained for API compatibility and diagnostics --
+            the hot path reconstructs ``K_a`` from the closed form, not
+            from ``partition.kernels``.
 
         Notes
         -----
-        `geometry.LensDomainError` (macro-saddle, raised here by
-        `_full_cluster_delays` before any engine sweep and by the engine
-        `evaluate`) and `operator.CancellationError` (uncertifiable
-        contraction) propagate unswallowed, exactly as in
+        `geometry.LensDomainError` (macro-saddle, raised by the first
+        engine evaluation) and `operator.CancellationError` (uncertifiable
+        contraction, raised at the worst-cancellation node ``w_max`` that
+        the seed always evaluates) propagate unswallowed, exactly as in
         ``lnlike_bruteforce``, so the two paths refuse symmetrically.
         """
         lens = self._lens_params(par_dic)
@@ -853,37 +957,25 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 'All kernel sub-sample frequencies must map to positive '
                 'dimensionless frequency w = xi*f; got a non-positive value.')
 
-        # Place the coarse nodes from the frequency-independent full-cluster
-        # image delays (real images plus the parked virtual label; geometry
-        # only, no engine sweep). A macro-saddle raises
-        # `geometry.LensDomainError` here, matching the brute-force path.
-        cluster_delays = self._full_cluster_delays(lens)
-        coarse_w = self._coarse_w_node_grid(dense_w, cluster_delays)
-
-        engine = ChangRefsdalChannels(coarse_w)
-        partition = engine.evaluate(
-            gamma=lens['gamma'], y=(lens['y1'], lens['y2']),
-            beta=lens['beta'], kappa=lens['kappa'])
+        # Coarse-node envelope (LOO-adaptive); the first engine call
+        # raises `geometry.LensDomainError` on a macro-saddle, matching
+        # the brute-force path.
+        partition, coarse_w, envelope_nodes = self._envelope_loo_nodes(
+            lens, dense_w)
 
         xi = float(dimensionless_frequency(
             1.0, lens['m_lens_msun'], lens['z_lens']))
         delays = xi * partition.delays / (2.0 * np.pi)
 
-        # Cubic-spline the coarse-node kernels to the dense sub-sample
-        # grid, real and imaginary parts separately (not-a-knot). The
-        # coarse grid spans [dense_w.min, dense_w.max] exactly, so this is
-        # interpolation, never extrapolation.
-        n_channels = partition.kernels.shape[1]
-        spline_real = CubicSpline(coarse_w, partition.kernels.real,
-                                  axis=0, bc_type='not-a-knot')
-        spline_imag = CubicSpline(coarse_w, partition.kernels.imag,
-                                  axis=0, bc_type='not-a-knot')
-        dense_kernels = spline_real(dense_w) + 1j * spline_imag(dense_w)
+        # Closed-form dense reconstruction of the channel kernels, then the
+        # same per-bin least-squares (value, slope) reduction as before --
+        # only the kernel source changed (from a spline of the beat-laden
+        # kernels to the analytic saddles plus the smooth envelope).
+        dense_kernels = self._reconstruct_kernels(
+            dense_w, coarse_w, envelope_nodes, partition)
+        n_channels = dense_kernels.shape[1]
         kernels = dense_kernels.reshape(
             self.n_bins, self.kernel_subsamples, n_channels)
-        # Least-squares line per bin: value (mean) and slope, mapped to
-        # ``(n_channels, n_bins)`` as the contraction expects. Byte-for-byte
-        # the same reduction as before -- only the kernel source changed.
         k0 = np.einsum('bj,bja->ab', self._kernel_fit_value, kernels)
         k1 = np.einsum('bj,bja->ab', self._kernel_fit_slope, kernels)
         return delays, k0, k1, partition

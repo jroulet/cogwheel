@@ -981,3 +981,15 @@ BUILD 3F launching (build3f_brief.md): implement SACR-C per the report
 (all seconds-fast), ceiling 18 ms arithmetic-derived; the 10 ms
 finisher = surrogate of the SINGLE smooth envelope (now trivial),
 queued after. Then Build 4.
+
+### OWNER (2026-07-18, mid-3f): the RATIO LAYER is back in play post-SACR-C
+
+With beats removed from the interpolated object, the paper's
+candidate/fiducial ratio layer (q_a, tex Eq. slow-component-ratio;
+flagged by the research report as the natural extension) becomes the
+factorization-native finisher: fiducial envelope built once, each
+proposal pays only the RATIO's nodes (~6-11 per the paper — the object
+its node count was actually measured on). Post-3f 10 ms menu:
+(a) ratio layer (cheap, per-event, no cache) — preferred if it
+suffices; (b) envelope surrogate (table) for any residual gap. Decide
+on 3f's measured timing.

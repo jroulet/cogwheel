@@ -1,0 +1,12 @@
+{
+  "architect_rationale": "Revision loops exhausted (3/2); 1 finding(s) remain.",
+  "findings": [
+    {
+      "finding_id": "INS-6-001",
+      "severity": "design",
+      "file": ".claude/spec/SPEC.md",
+      "description": "The Microlensed-PE row (line 55, 'Fast path (Builds 3/3b)' sentence) still describes the removed machinery: `_DEFAULT_KERNEL_NODES = 100`, the FULL-CLUSTER node-grid union, 'smooth channel kernels K_a(w) engine-evaluated ... then cubic-splined to bin sub-samples', and the F008 full-cluster switch rule. The code is now SACR-C: a single beat-free transition envelope E(w) evaluated on a leave-one-out-adaptive coarse grid (_LOO_SEED_NODES=8, _LOO_STOP=4e-3, _LOO_MAX_NODES=48), closed-form kernel reconstruction (reconstruct_from_envelope), and a criticality-separation switch |tau_a - tau_c| that supersedes F008. The diff left SPEC.md unmodified though the plan listed it as expected-to-change, breaking the spec->artifact invariant.",
+      "suggested_fix": "Librarian to rewrite the SPEC.md line-55 fast-path sentence to describe the SACR-C envelope decomposition (single interpolated envelope + closed-form switched-analytic saddle reconstruction + LOO-adaptive node grid + criticality-separation switch), and add an F008-superseded addendum to FINDINGS noting the switch rule changed from full-cluster nearest-neighbour to |tau_a - tau_c|. Inspector does not edit canonical surfaces."
+    }
+  ]
+}
