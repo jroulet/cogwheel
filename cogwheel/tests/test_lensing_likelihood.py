@@ -131,7 +131,7 @@ from cogwheel.likelihood.relative_binning import RelativeBinningLikelihood
 from cogwheel.lensing.chang_refsdal import _gauge, channels, geometry, operator
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, LensedBinningError,
-    _data_term, _norm_term)
+    _data_term, _norm_term, dimensionless_frequency)
 
 #: Higher-mode approximant so the mode-pair (``M^2``) contraction is
 #: genuinely exercised (|m| in {1, 2, 3, 4}), not the trivial 22-only
@@ -414,7 +414,18 @@ class LensedLikelihoodTestCase(TestCase):
         tuple of np.ndarray
             Frequencies [Hz] and ``|F(f)| - 1`` at those frequencies.
         """
-        *_, partition = like._amplification_coefficients(candidate)
+        # DIRECT dense engine evaluation: since the Build 3/3b fast path,
+        # `_amplification_coefficients` returns the COARSE-node partition
+        # (~n_kernel_nodes points), so the dense profile must be read from
+        # the engine itself at the dense sub-sample grid -- same
+        # switch-independent `exact_total` the brute-force oracle rides.
+        dense_w = dimensionless_frequency(
+            like._kernel_dense_f, candidate['m_lens_msun'],
+            candidate['z_lens'])
+        partition = channels.ChangRefsdalChannels(dense_w).evaluate(
+            gamma=candidate['gamma'],
+            y=(candidate['y1'], candidate['y2']),
+            beta=candidate['beta'], kappa=candidate['kappa'])
         return like._kernel_dense_f, np.abs(partition.exact_total) - 1.0
 
     @staticmethod

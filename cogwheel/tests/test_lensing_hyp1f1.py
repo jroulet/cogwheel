@@ -380,6 +380,20 @@ class LadderComplexityTestCase(Hyp1f1TestCase):
         """
         orig_mul = _hyp1f1.dd_mul
         orig_cmul = _hyp1f1.dd_complex_mul
+        # Run the ladder through its pure-Python bodies for the count:
+        # the njit dispatchers (`_shared_numerator`, `_ladder_sum`,
+        # `_ladder_core`) bind the dd primitives at compile time, so the
+        # counting wrappers below would otherwise never be entered and
+        # both complexity claims would read a vacuous zero.  The py_func
+        # bodies are the same algorithm (numba compiles them verbatim),
+        # so the counts measure the shipped design.
+        orig_shared = _hyp1f1._shared_numerator
+        orig_lsum = _hyp1f1._ladder_sum
+        orig_lcore = _hyp1f1._ladder_core
+        _hyp1f1._shared_numerator = getattr(
+            orig_shared, 'py_func', orig_shared)
+        _hyp1f1._ladder_sum = getattr(orig_lsum, 'py_func', orig_lsum)
+        _hyp1f1._ladder_core = getattr(orig_lcore, 'py_func', orig_lcore)
         orders, mul_counts, cmul_counts = [], [], []
         try:
             for order in COMPLEXITY_ORDERS:
@@ -404,6 +418,9 @@ class LadderComplexityTestCase(Hyp1f1TestCase):
         finally:
             _hyp1f1.dd_mul = orig_mul
             _hyp1f1.dd_complex_mul = orig_cmul
+            _hyp1f1._shared_numerator = orig_shared
+            _hyp1f1._ladder_sum = orig_lsum
+            _hyp1f1._ladder_core = orig_lcore
 
         # (a) shared-numerator work does not grow with max_derivative.
         self.assertEqual(

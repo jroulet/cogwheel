@@ -636,7 +636,13 @@ class SplitterSensitivityTestCase(TestCase):
         """
         values = _adversarial_significands()
         for splitter in self.BROKEN_SPLITTERS:
-            with mock.patch.object(_dd, '_SPLITTER', splitter):
+            # Patch `_split` to its pure-Python body too: `_two_prod`'s
+            # py_func resolves `_split` from module globals, and the njit
+            # dispatcher froze `_SPLITTER` at compile time -- without this
+            # the patched splitter never reaches the split and the
+            # falsification is vacuous.
+            with mock.patch.object(_dd, '_SPLITTER', splitter), \
+                    mock.patch.object(_dd, '_split', _py(_dd._split)):
                 two_prod = _py(_dd._two_prod)
                 inexact = [
                     (a, b)

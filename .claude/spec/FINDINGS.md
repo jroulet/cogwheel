@@ -488,3 +488,41 @@ stall.
 > a "numerical artifact" that is FLAT across many decades of the
 > supposedly-singular parameter is almost never roundoff — match it against a
 > closed form before planning around it.
+
+## F010 — numba compilation silently voids Python-level test instrumentation (2026-07-17)
+
+When the Build 3/3b fast path njit-compiled the dd primitives, the 1F1
+ladder, and the operator contraction, three previously-green tests in the
+OLD suites broke — none of them accuracy regressions, all of them
+Python-introspection assumptions that compilation invalidates. Recorded
+so the next numba migration re-checks this list instead of rediscovering
+it:
+
+1. **Module-global patching does not reach compiled code.** numba freezes
+   module globals at compile time, so `mock.patch.object(_dd, '_SPLITTER',
+   ...)` never reaches the njit `_split`. Worse, patching only the OUTER
+   function to its `py_func` is not enough when it calls another njit
+   function via module globals: `_two_prod.py_func` resolved `_dd._split`
+   to the frozen njit dispatcher, so the dd splitter falsification
+   (`test_broken_splitter_breaks_two_prod`) passed vacuously-green in
+   reverse — the broken splitter no longer broke anything. IDIOM: patch
+   the ENTIRE call chain to `py_func` bodies (`_split` AND `_two_prod`)
+   for the duration of the sensitivity check.
+2. **Call-counting wrappers count zero.** `LadderComplexityTestCase`
+   replaced `_hyp1f1.dd_mul`/`dd_complex_mul` with counting wrappers; the
+   njit ladder core binds them at compile time, so the counters read 0.
+   Same idiom: swap `_shared_numerator`/`_ladder_sum`/`_ladder_core` to
+   their `py_func` bodies while counting — the py bodies are the same
+   algorithm numba compiles, so the counts still measure the shipped
+   design.
+3. **Internal-shape assumptions break silently.** `_amplification_
+   coefficients` now returns the COARSE-node partition (~`n_kernel_nodes`
+   points), not the dense sub-sample partition; a diagnostic helper that
+   zipped it against `_kernel_dense_f` (506) crashed shape-wise. Tests
+   reading engine profiles must evaluate `ChangRefsdalChannels` directly
+   at the grid they want, not scrape likelihood internals.
+
+The falsifiability lesson generalizes: after ANY compilation/JIT change,
+re-run the self-falsification tests and confirm they can still go RED —
+a falsification test that cannot fail anymore is worse than no test, and
+nothing else in the suite will tell you.

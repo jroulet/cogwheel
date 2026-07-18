@@ -798,5 +798,43 @@ interp metric per Professor), the two measured hot spots (caustic search
 -> near-free; _contract_orders restructure at <=2 ULP), SPEC/fragments so
 the hook passes. Ceiling: pinned 10 ms or the honest measured floor
 documented — never a silently moved gate; residual escalates to owner
+
+### BUILD 3B RAN — PROFESSOR FAIL — DRIVER HAND-FINISH — COMMITTED b46bf41
+
+Pipeline run (port 8323, clean): plan 2 WPs approved (root cause found:
+node grid placed transition nodes at REAL-image separations; kernels
+carry structure at FULL-CLUSTER separations — F008's blind spot again,
+second disguise). WP1 (njit caustic search) + WP2 (full-cluster
+placement, base=40) + honest re-aimed tests delivered; Inspector PASS;
+Professor FAIL — ONE gate red: production interp at base=40 (two-image
+2.76e-2 vs 1e-3; plan's base-40 assumption false; its own documented
+fallback applied). Everything else green incl. the kappa leak (fixed by
+placement) and caustic value-preservation.
+
+HAND-FINISH (Build 1b/2b precedent; the remaining change was the plan's
+pre-authorized fallback with Professor provenance): driver sweep on the
+production grid (worst = two-image): base 40 -> 2.8e-2, 64 -> 3.3e-3,
+85 -> 8.7e-4, 100 -> 4.2e-4, 128 -> 1.5e-4. Set _DEFAULT_KERNEL_NODES
+= 100 (2.4x margin; 85 too thin). Re-pointed the SelfFalsification
+positive control at the production default (per plan spec), updated the
+honesty docstrings, raised MS_CEILING 0.25 -> 0.5 s (documented:
+reflects the accuracy-driven node count, not a hidden floor). Full
+fast-path suite GREEN at the shipped default: 20 passed, 3m33s.
+SPEC 0.3.0 + fragments rendered, todo engine_hyp1f1-surrogate retired,
+spec hook passed WITHOUT --no-verify. COMMIT b46bf41 (after 705b0c1,
+the SDK_SERENA_PORT fix — cogwheel now on 8323, gw-safe).
+
+MEASURED FINAL: warm single-thread lnlike ~0.3 s/eval (~50x brute).
+OWNER ESCALATION PENDING (they are mid-flight): few-ms remains open —
+the floor is the order-40 85x85 operator-contraction FLOP count
+(~2.3 ms/point x ~105 nodes). The deferred path is the research-grade
+2D surrogate table (Professor: <20%-probability-needed branch, now the
+only remaining lever). Decision on landing: fund a table build, or
+accept ~0.3 s/eval for Build 4 sampling.
+
+NEXT: full suite (minus XODE trio) detached at -n4 — result pending;
+then Librarian/Dreamer close; then Build 4 brief (sampled lens
+coordinates; MUST honor the three Professor constraints recorded at
+BUILD 2 COMPLETE).
 (2D-table decision).
 port-worthy commits is in this file's earlier sections.
