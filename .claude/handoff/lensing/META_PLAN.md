@@ -957,3 +957,27 @@ config-independent, unknown timeline); (b) Build 3e' = the 3D
 surrogate NOW (engineering-certain ~5-6 ms; beats do NOT block a
 table — they only densify the offline w-grid; carries cache/domain
 machinery per the archived design facts); (c) both in parallel.
+
+### FABLE PROFESSOR RESEARCH — SACR-C DECOMPOSITION CERTIFIED (2026-07-18 ~07:15)
+
+Owner commissioned the envelope research on the Fable tier ("a Fable
+professor might crack it") — IT DID, with numerics actually run
+(envelope_research.md; scratch scripts envelope_exp1..6.py). SACR-C:
+persistent images analytic (geometry.image_kernel) under smootherstep
+weights S_a(w*|tau_a - tau_c|); ONE smooth envelope E demodulated at
+the parked critical-carrier delay; beats impossible by construction
+(switch scale == demodulation distance => <= 4 rad). Certified:
+greedy N=19-26 config-independent (eps<1e-3, 25 configs), LOO
+production N=30-44 self-certifying; control confirms current kernels
+need 40-53 same-oracle. Projected 12-18 ms/eval (oracle bound 8-11).
+Lore corrected: paper's 6-11 nodes = greedy nodes on RATIOS over a
+0.9-decade band (~7-12/decade, consistent); prototype partition is
+block-structured — the flat 1/4-weighted full-F split is the verified
+beat root cause. R_j confirmed nonexistent AND unnecessary. Dead ends
+documented (parametric tail fits; node transplanting).
+
+BUILD 3F launching (build3f_brief.md): implement SACR-C per the report
+(design authority: envelope_research.md), gates 1-5 from the report
+(all seconds-fast), ceiling 18 ms arithmetic-derived; the 10 ms
+finisher = surrogate of the SINGLE smooth envelope (now trivial),
+queued after. Then Build 4.

@@ -36,20 +36,44 @@ phases ANALYTIC, interpolate only the slow K_a. Construction:
 - EXACT residual projection: K_a = K_hat_a + alpha_a e^{-i w tau_a} R(w) with
   R = F_op − sum_b e^{i w tau_b} K_hat_b. The coherent sum equals the full wave-optics
   F_op at EVERY frequency (machine precision ~1e-15); interpolation is the only error.
-- Topology stability through folds/cusps: always 4 labels; virtual labels sit at the
-  nearest critical point; a smooth switch S_j(w delta_j) (smootherstep, rho0=0.5, rho1=4)
-  blends unresolved-cluster split <-> stationary phase; cluster-local projection keeps
-  the total exact. Ratios stay SMOOTH across crossings: 6–11 nodes at 1e-3 error.
-- CRITICAL correctness condition (F008, fixed at HEAD as of Build 2c): the switch's
-  neighbor-separation comparison MUST be taken over the FULL cluster of 4 labels
-  (real + virtual/parked), not real-only — filtering to real-only channels before the
-  min() misses cases where a virtual/parked label is nearest, causing the switch to miss
-  its zero and the kernel to inflate pathologically near cusps/two-image configs. With
-  the full-cluster fix in place, RB is valid through cusp/fold crossings; this is a
-  prerequisite for every downstream RB-vs-brute-force accuracy claim in this program.
+- The prototype's partition is BLOCK-structured (chang_refsdal_topology_stable.py):
+  persistent images always carry analytic H under their own carriers; only the CLUSTER
+  residual, demodulated at the critical-point delay, is split cluster-locally. The
+  paper's 6–11-node claim = greedy-adaptive nodes interpolating candidate/fiducial
+  RATIOS q_a over w in [5,40] (0.9 decades), floor 0.15 max|F| — i.e. ~7–12 nodes per
+  decade, NOT a multi-decade raw-kernel claim.
 - Label continuation is path-based (assignment problem on lens-plane markers);
   far-away proposals need a reset convention or short path from fiducial. The SUM is
   label-permutation invariant; only ratio smoothness needs consistent labels.
+
+## Beat-free transition envelope (Professor research, 2026-07-18; full derivation +
+## certification in .claude/handoff/lensing/envelope_research.md)
+The engine's flat 4-label gauge (each unresolved channel = (1/4) e^{-iw tau_a} F, uniform
+residual weights) puts the FULL total, with all carriers, into every unswitched kernel —
+the root cause of the Build-3d beat disease (50–90 nodes). The F008 nearest-neighbour
+switch separation additionally stalls on ACCIDENTAL delay degeneracies (crown: two
+near-degenerate delay pairs from quasi-symmetry, images NOT merging in the lens plane).
+The certified fix (SACR-C):
+
+    F(w) = sum_a e^{iw tau_a} S_a(w) H_a(w) + e^{iw tau_c} E(w),
+    S_a = smootherstep(w |tau_a - tau_c|, 0.5, 4),  tau_c = critical/virtual delay,
+    E   = e^{-iw tau_c} (F - sum_a S_a H_a e^{iw tau_a})  — the ONE interpolated object.
+
+Bounded-phase theorem: the switch scale IS the demodulation distance, so any O(1)
+content in E carries demodulated phase <= rho_END = 4 rad; switched channels contribute
+only the O(w^-3) saddle-asymptote tail (bounded visible cycles). Merging images have
+tau_a -> tau_c, so the gate is MORE conservative than F008's full-cluster min (measured
+max|S_a H_a| <= 1.3 incl. eta=+-0.002 crossings); accidental degeneracies no longer
+stall (and when degenerate WITH tau_c they are harmless: small carrier separation = no
+beat). Deep-unresolved limit carries F009 verbatim. Certified: identity ~2e-16;
+2-decade windows: greedy N = 19–26 over 25 configs (config-independent, ~9–12/decade);
+full 2.7–4.6-decade bands N = 20–42; control (current kernels, same oracle) N = 40–53.
+Production node placement: position transplant across configs FAILS; use LOO adaptive
+refinement (stop max LOO < 4e-3): N = 30–44, self-certifying. Cost 0.41 ms/node batched.
+Dead ends: parametric 1/w^3 tail fits from coarse nodes (biased, blew up at near-cusp);
+per-image wave residual R_j (Build-3e premise) — nonexistent and NOT needed.
+If built: supersedes the F008 switch-separation rule in channel construction (branch-gate
+_min_delay_separation untouched) — FINDINGS addendum required.
 
 ## Evaluating F (contour-free)
 - Point-mass seed: G_PM = C(w) 1F1(1 − iw/2; 1; −iws/2), s=|y|^2, with
@@ -76,6 +100,8 @@ grid / FFT — mathematically identical to cogwheel's coherent-score z(t) timese
 machinery. With higher modes: components (a, m) with r_{am} = rho_a q_m (factored
 ratios — F multiplies the whole waveform); pair summaries collapse to mode-pair
 summary FUNCTIONS of a continuous time shift; images never add a stored tensor index.
+With the SACR-C envelope form, a 5th channel at carrier tau_c (15 pair summaries) is
+the clean shape: the four analytic channels are closed-form (no engine nodes at all).
 
 ## Degeneracies -> sampled coordinates (apply 2207.03508 recipe)
 - kappa: EXACTLY unmeasurable (mass-sheet identity above maps it into apparent

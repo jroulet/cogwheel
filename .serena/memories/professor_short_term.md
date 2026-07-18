@@ -1,41 +1,53 @@
-# Professor Short-Term — Session 2026-07-18 (Build 3d consultation)
+# Professor Short-Term — Session 2026-07-18 (envelope research commission)
 
-## Context
-Consulted on the h_L = F*h_UL factorization speedup for `LensedRelativeBinningLikelihood.lnlike`.
-Target: 41 ms -> <=10 ms by reducing engine node count from ~100 to ~10-12.
+## Mission and outcome
+RESEARCH mode: find a beat-free decomposition of the Chang-Refsdal
+transition-band kernels (Build-3d disease: kernels bind at 50-90 nodes).
+**SOLVED** — full deliverable in `.claude/handoff/lensing/envelope_research.md`.
 
-## Key Findings
+## The decomposition (SACR-C, certified)
+F(w) = sum_a e^{iw tau_a} S_a(w) H_a(w) + e^{iw tau_c} E(w).
+- H_a = geometry.image_kernel (closed form), tau_c = nearest_caustic_point
+  carrier delay (the engine's virtual_delay).
+- S_a = smootherstep(w * |tau_a - tau_c|, 0.5, 4.0) — criticality separation,
+  NOT the F008 nearest-neighbour min. Key theorem: switch scale ==
+  demodulation distance, so all O(1) content in E has phase <= 4 rad.
+- E = e^{-iw tau_c}(F - sum S_a H_a e^{iw tau_a}) is the ONLY interpolated
+  object (cubic spline in ln w, Re/Im).
 
-1. **The correct factorization is NOT "interpolate delay-removed per-channel
-   amplitudes"** — those (artificial_a) still oscillate at beat frequencies
-   tau_a - tau_cluster. The correct object to interpolate is `exact_total(w)` on
-   the WAVE SEGMENT ONLY, with the geometric segment evaluated analytically at
-   dense resolution (geometric_amplification is cheap: no 1F1).
+## Certified numbers (scripts envelope_exp1..6.py in session scratchpad)
+- Identity: recon == exact_total at 2e-16 .. 3e-16 rel.
+- 2-decade windows: greedy N = 19-26 over 25 configs (5 anchors + 8 fold/cusp
+  crossings eta=+-0.002/0.01 both sides + 12 random) — config-independent.
+  Full 2.7-4.6-decade bands: N = 20-42.
+- Control same-oracle: current engine kernels need N = 40-53.
+- Production placement: greedy transplant across configs FAILS; LOO adaptive
+  (seed 8 log, split worst flanks, stop LOO<4e-3) gives N = 30-44,
+  self-certifying, all eps < 1e-3 (calibrated: 8e-3 stop starts failing).
+- Cost: F_op_grid 0.41 ms/node batched → 12-18 ms/eval (LOO), 8-11 ms oracle
+  bound; vs 20-37 ms current. 10 ms gate needs ratio layer or tuned seeding.
+- max|S_a H_a| <= 1.30 incl. crossings (F008 intent preserved: merging images
+  have tau_a -> tau_c so the gate is MORE conservative; accidental
+  degeneracies no longer stall — crown fixed).
+- Floor sensitivity: N unchanged at floors 0.15/0.05/0.01 on anchor windows.
 
-2. **Node count is Nyquist-limited by delay-spread oscillations in exact_total.**
-   For 4-image crown: ~15-18 nodes on the wave segment. For 2-image well-separated:
-   ~6-10. For near-fold 2-image (tiny delta_min => wide wave band): 80-120 nodes —
-   lever A does NOT solve this regime.
+## Paper prototype clarification (important correction of lore)
+The 6-11 node claim = greedy nodes on candidate/fiducial RATIOS q_a over
+w in [5,40] (0.9 decades), floor 0.15 max|F|. Per decade (~7-12) it MATCHES
+our kernel-level result (~9-12/decade). The prototype's partition is
+block-structured (persistent analytic + cluster-local residual), never the
+engine's flat 1/4-weighted full-F split — that flat split + uniform residual
+weights is the root cause of the beat disease (verified in _gauge.py).
 
-3. **Branch transition at w_branch = max(4/delta_min, 48/|y'|)** is a hard C2 kink
-   in exact_total. Must segment there. The geometric segment above w_branch is FREE
-   (no engine nodes needed).
+## Dead ends (do not retry)
+- Parametric 1/w^3+1/w^4 tail fits from coarse nodes: unnecessary + biased
+  (near_cusp fit blew up to eps=1.0).
+- Node-position transplant across configs: fails at 1e-1.
+- Per-image wave residual R_j (Build 3e): still nonexistent, NOT needed.
 
-4. **Predicted performance with lever A:**
-   - Crown 4-image: ~9-11 ms (marginal on 10 ms gate, meets 12 ms relaxed gate)
-   - 2-image well-separated: ~6-8 ms (comfortable)
-   - Near-fold: ~30-45 ms (needs lever B in future build)
-
-5. **Lever B (3D surrogate table) deferred to Build 4.** Ship lever A alone.
-
-6. **The paper's 6-11 node claim** was measured in the fully-resolved regime where
-   w_min > w_branch for the test configs. In that regime K_a ~ target_a + O(1/w^3)
-   residual, which IS smooth. The transition band does not enjoy this.
-
-## Dreamer Consolidation Notes
-- Update `professor/microlensing_chang_refsdal` with the factorization analysis
-  (what is/isn't slowly varying, Nyquist constraint, branch segmentation).
-- The near-fold regime (delta_min < 0.1) is flagged as the residual hard case for
-  lever B scoping.
-- The claim "delay-removed amplitudes are smooth" in the existing memory is
-  imprecise — should be qualified: smooth only in the resolved regime.
+## Dreamer consolidation notes
+- professor/microlensing_chang_refsdal updated this session with the durable
+  decomposition + bounded-phase theorem.
+- If a build lands this: FINDINGS needs an addendum superseding the F008
+  switch-separation rule (full-cluster min -> |tau_a - tau_c|) in the
+  channel-construction context (branch gate _min_delay_separation untouched).
