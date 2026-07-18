@@ -1,5 +1,40 @@
 # Test Dev Short-Term Observations
 
+## 2026-07-18 — test_lensing_batched_operator.py (WP1 batched contraction + WP2 wiring)
+
+- NEW suite `cogwheel/tests/test_lensing_batched_operator.py`, 15 tests
+  all green (~28 s). Covers the 4 Architect specs for the weight-vector
+  batched `_weight_vectors`+`_contract_grid` behind single-path
+  `F_op_grid`, plus WP2 wiring exercised via the lensed likelihood.
+- Independent mpmath oracle (dps=50, hyp1f1 + integer (u,v) ladder)
+  reproduced verbatim from test_lensing_fast_path.py; AST import guard
+  (`OracleIndependenceTestCase`) pins F002 oracle-independence.
+- Certification: oracle accuracy FOP_RTOL=1e-10 over FOP_GRID union
+  CERT_LS boundary band; solo-[w] vs full-batch refusal-decision
+  identity (zero flips); single-vs-batch value agreement 1e-14; CERT_LS
+  shows both certify (low L) and refuse (high L) — XOR contract holds.
+- Falsification (F010) via numba py_func-chain patching, BOTH go RED:
+  (a) `_contract_grid.py_func` + `_SERIES_TOLERANCE`=1.0 -> raised=True
+  (refuses on truncation cut); (b) zeroed half_sum through
+  `_weight_vectors.py_func` -> rel_err=1.093. `.py_func` bodies asserted
+  to lack `.signatures` so a future @njit removal can't make it vacuous.
+  KEY: "gate RED" defined as (refuses CancellationError) OR
+  (rel_err>FOP_RTOL) — perturbation (a) manifests as a REFUSAL not a
+  wrong value, so both outcomes must count.
+- Timing (machine-INDEPENDENT lead gates): speedup 33.6x > SPEEDUP_MIN
+  =8.0; contraction 1.57 ms subdominant to engine 38.6 ms; warm lnlike
+  41.2 ms < MS_CEILING=0.175 s (arithmetic-derived, NOT the 10 ms brief
+  target). Reused crown `_CROWN` fixture + seeded HLV event.
+- Equivalence: `F_op` value == one-element `F_op_grid` value
+  BIT-IDENTICAL (assertEqual) at (w=20,y=(0.55,0),gamma=0.20) and across
+  the whole certified FOP grid — the single-path delegation is exact, so
+  sibling suites auto-exercise the batched path at original tolerances.
+- NO production edits. Neighbor regression: operator+channels 43 passed,
+  likelihood+fast_path 39 passed (fast_path now fully green on the
+  shipped build — the earlier base=40 designed-RED interp gate is no
+  longer failing here). Line-length clean (<=79), AST parses.
+
+
 ## 2026-07-17 (PM) — test_lensing_fast_path.py re-aim for Build 3b (WP1+WP2)
 
 - Re-aimed the 5 Architect specs onto the shipped defaults. FINAL:

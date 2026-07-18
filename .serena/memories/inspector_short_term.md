@@ -1,74 +1,75 @@
 # Inspector Short-Term Observations
 
-## 2026-07-17 — Review of Build 3b (close fast lensed lnlike) uncommitted worktree
+## 2026-07-18 — Review of Build 3c (weight-vector batched wave-branch contraction)
 
-Scope: full uncommitted tree in cogwheel-claude-dev. Build 3b was meant to
-(WP1) njit-accelerate geometry.nearest_caustic_point's caustic search and
-(WP2) fix the kernel node grid for accuracy + land one hook-clean commit.
-Reviewed on top of the still-uncommitted Build 3 (numba engine + spline grid).
+Scope: uncommitted tree in cogwheel-claude-dev. Build 3c = STEP toward
+few-ms lensed lnlike. WP1 replaces the per-node 85x85 bilinear
+`_contract_orders` with a w-INDEPENDENT per-order weight-vector reduction
+(`_weight_vectors` builds v[n,j] = scatter-add of
+z_powers[a]*table[n,a,b]*zbar_powers[b] over gather idx(a,b,n); each node's
+order becomes a length-dim dot v[n].derivs). New batched njit core
+`_contract_grid`, single certification path `_grid_certified`, lean public
+`F_op_grid`, and scalar `F_op` now DELEGATES to `_grid_certified([w])`.
+WP2 wires `channels._exact_total` to call `F_op_grid` ONCE on the
+wave-branch node subset. Source files changed: operator.py (big),
+channels.py (import+_exact_total). New test: test_lensing_batched_operator.py.
+likelihood.py correctly UNTOUCHED (plan said "expected none").
 
-### Verified GOOD
-- WP1 geometry.py: `_caustic_source` reproduces `critical_point`'s `.source`
-  arithmetic exactly (macro_matrix inlined correctly: m00=(1-k)-g*cos2b,
-  m01=-g*sin2b, m11=(1-k)+g*cos2b; caustic = M@image - image/radius^2). Early
-  LensDomainError guard added in nearest_caustic_point (needed because
-  `_caustic_source` no longer guards). Final winning-angle `critical_point`
-  call preserved, so NearestCausticPoint frame/eigenvalue fields identical.
-  `_coarse_squared_distances` njit sweep matches; argsort selection unchanged.
-  Value-preserving within ULP. OK.
-- WP2 likelihood.py: kernel spline path is legitimate — partition.kernels are
-  the SMOOTH K_a(w) with the exp(1j*w*tau_a) delay phase factored OUT
-  (reconstructed = sum_a exp(1j w tau_a) K_a), delays kept analytic. Spline
-  spans [dense_w.min,dense_w.max] exactly (interpolation, no extrapolation).
-  `_full_cluster_delays` virtual delay = delay(caustic.image)-t_min matches
-  engine `_labeled_delays` virtual_delay-t_min exactly; real frame matches
-  `real_image_delays`. Full-cluster separation placement mirrors F008
-  `_channel_switch`. n_kernel_nodes>=4 guard for not-a-knot spline. The
-  `[RHO_END/separations.min()]` extra term is redundant (already in
-  RHO_END/separations) but harmless. Reduction einsum byte-identical to before.
-- operator._contract_orders njit faithfully reproduces the Python order loop
-  (two-stage col/row reduction tracks numpy accumulation order; per-element
-  index clamp preserved; positive_total companion preserved). F005 refusals all
-  stay in Python F_op. (Same as Build-3 review.)
+### Verified GOOD (value/contract preserving)
+- Weight-vector regrouping is an exact reordering of the SAME (a,b) sum:
+  contribution = sum_j v[n,j]*derivs[j] = sum_{a,b} z[a]*table[n,a,b]*
+  zbar[b]*derivs[idx(a,b,n)]. Matches old two-stage col/row reduction term
+  for term; only accumulation order differs (re-certified vs mpmath).
+- Coeff recurrence coeff*= 1j*gamma_scaled/(2w*order) == (1j*g/2w)^n/n!.
+  positive_total, max_term, last_ratio, converged, _MIN_ORDER/
+  _SERIES_TOLERANCE/_CONSECUTIVE_SMALL small-term stop all identical to old
+  scalar path. All four F005 refusals (non-finite total, cancellation ratio,
+  truncation tail, contraction round-off guard) BYTE-unchanged in
+  `_grid_certified` per-node loop; overflow-safe frexp/ldexp power-of-two
+  rescaling preserved per node. Reconstruction (mass_sheet_phase*phase_scaled
+  *total/lam) unchanged.
+- Zero-coeff skip in `_weight_vectors` is bit-safe (0*finite=0); defensive
+  idx clamp treats clamp case identically to old code (spurious-contribution
+  parity), and the gather invariant (nonzero coeff => half_sum+n<=dim-1)
+  is the SAME pre-existing invariant.
+- channels WP2: branch decision stays per-node (cancellation_exponent +
+  select_branch), carrier exp(-1j*w*t_min) applied elementwise, geometric
+  nodes inline unchanged, CancellationError propagates unswallowed from the
+  batched call (refusal symmetry with brute path intact). No F_op consumers
+  left broken (scalar F_op only defined, not imported, outside tests).
+- New suite F002-clean: mpmath oracle built from mpmath.hyp1f1 + integer
+  (u,v) monomial ladder, AST guard forbids production names; F010 py_func
+  chain present on both `_contract_grid` and `_weight_vectors`
+  (.py_func has no .signatures).
 
-### FINDINGS (build-blocking)
-1. ACCURACY DEFECT NOT CLOSED. `_DEFAULT_KERNEL_NODES = 40` FAILS the
-   production-grid null-safe interpolation gate:
-   test_lensing_fast_path.py::CoarseNodeInterpolationTestCase::
-   test_production_grid_reconstructs_below_nullsafe_ceiling
-   → two-image null-safe epsilon = 2.758e-2 >> ceiling 1e-3 (n_nodes=44 after
-   union). The full-cluster transition placement did NOT rescue two-image (it's
-   the slowest-converging config; needs ~82+ nodes). The test's own message
-   names the proven-safe fix: raise _DEFAULT_KERNEL_NODES toward ~85 (base=85 →
-   8.67e-4 on two-image) — a PRODUCTION change, not a tolerance change. This is
-   the SAME class of defect the brief said to fix first (the old default=10).
-   RB-vs-brute lnL gate still passed (19 passed), but the interpolation gate is
-   part of acceptance and is RED. Suite: 1 failed, 19 passed in 199s.
-2. `_DEFAULT_KERNEL_NODES` provenance COMMENT is FALSE: it claims "a base count
-   of 40 clears that null-safe target on every _LENS_CONFIGS row" — directly
-   contradicted by the failing two-image gate. Same false-provenance pattern the
-   brief flagged for the old default=10 comment. Must be corrected together with
-   the default.
-3. Two Build-3 engine tests STILL RED (unchanged since Build-3 review; _dd.py /
-   _hyp1f1.py untouched by 3b):
-   - test_lensing_dd.py::SplitterSensitivityTestCase::
-     test_broken_splitter_breaks_two_prod — njit froze `_SPLITTER`; py_func
-     unwrap still calls compiled `_split`.
-   - test_lensing_hyp1f1.py::LadderComplexityTestCase::
-     test_shared_numerator_constant_dd_multiplies_linear — monkeypatch can't
-     intercept dd_mul/dd_complex_mul inlined into njit _shared_numerator/
-     _ladder_sum/_ladder_core (cmul count 0 != 59).
-   Brief requires engine suites green at original tolerances → blocks commit.
+### Tests RUN (all green at ORIGINAL tolerances)
+- test_lensing_batched_operator.py: 15 passed (28s)
+- test_lensing_operator.py + test_lensing_fast_path.py: 42 passed (59s)
+- test_lensing_likelihood.py + channels + gauge: 74 passed (45s)
+- test_lensing_dd.py + hyp1f1 + geometry: 61 passed (17s)
+Import clean; F_op_grid in __all__.
 
-### Process note
-- SPEC.md NOT in the changed set, so the new test module test_lensing_fast_path.py
-  is unreflected — the spec/doc pre-commit hook will block the commit
-  (build acceptance requires SPEC + fragments). Librarian/commit-step item.
+### FINDINGS: none (NOW-introduced). VERDICT PASS.
 
-### Bug pattern (carry forward)
-njit-inlined primitives break Python monkeypatch/sensitivity tests even with a
-`.py_func` outer-unwrap (numba freezes globals at compile & inlines callees).
-Recurs whenever a hot primitive gains @njit. Two such tests remain red.
-A "measured-safe" default node count taken from a proxy/headline config can
-still miss the SLOWEST config (two-image) — gate every config on the PRODUCTION
-grid, and set the default from the worst config, not the crown.
+### Notes / carry-forward
+- The two engine falsification tests my Build-3b memory flagged RED
+  (dd SplitterSensitivity, hyp1f1 LadderComplexity) are now GREEN — fixed &
+  committed in a prior build. F010 idiom held.
+- Benign plan deviation: plan expected edits to test_lensing_fast_path.py /
+  test_lensing_operator.py; test_dev instead ADDED a dedicated
+  test_lensing_batched_operator.py. Cleaner; existing suites still exercise
+  the batched path via scalar delegation (BatchedEquivalenceTestCase).
+- Timing gate MS_CEILING=0.175s is the plan's arithmetic-derived floor
+  (~108ms x1.6), NOT the 10ms target; SPEEDUP_MIN raised 3.0->8.0. Build is
+  a STEP; named next lever = Lever B (3D post-contraction surrogate, Build 4).
+- SPEC.md not in changed set; new test module unreflected -> spec/doc hook
+  will need a fragment before commit (Librarian/commit-step item).
+
+### Bug patterns (carry forward)
+- njit-inlined primitives break Python monkeypatch/sensitivity tests unless
+  patched through the FULL .py_func chain (F010). New njit cores here expose
+  .py_func and the falsification tests confirm they can go red.
+- A weight-vector scatter-reduction that replaces a bilinear form is a legit
+  accumulation-order change: re-certify vs an INDEPENDENT oracle at the
+  original tolerance + check the certified-XOR-refuse decision doesn't flip
+  solo-vs-batch (cross-node convergence-state leakage).

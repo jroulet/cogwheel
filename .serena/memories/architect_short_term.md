@@ -1,5 +1,36 @@
 # Architect Short-Term Observations
 
+2026-07-18 Build 3c (few-ms lensed lnlike, STEP build) — PLAN DONE.
+FACTS: ~100 coarse w-nodes/eval (NOT 1e5); per node 2.3ms = 1.9ms _contract_orders
+(order-40 x 85x85 bilinear) + 0.4ms kernel. Within one lnlike lens params FIXED,
+only w varies: z_powers/zbar_powers/table/half_sum/y_scaled/gamma_scaled/s/dim all
+w-INDEPENDENT. _exact_total loops F_op per node.
+DESIGN (Professor+Simplifier): WEIGHT-VECTOR REDUCTION — precompute per order
+v_order[j]=scatter-add(z[a]*table[order,a,b]*zbar[b]) over idx(a,b)==j (np.add.at),
+w-indep; per node order-n = length-85 dot v_order·derivs_scaled. 85x85→85 dot =
+~190x contraction (190ms→~1ms). NOT a (N,85,85) BLAS tensor (same FLOPs, only 5-10x).
+Accumulation-order change SAFE (blocked better than naive sequential; certified pts
+condition<9e6 → perturb <2e-8, 200x under 1e-10). WP1 operator.py: F_op_grid(w_array,...)
+computes shared quantities ONCE, batched njit core, applies 4 F005 refusals per node
+(thresholds BYTE-FROZEN), returns LEAN (values,orders,converged) only — refusals raise,
+not returned. Scalar F_op delegates to F_op_grid([w]) → ONE path, one certification.
+WP2 channels.py: _exact_total calls F_op_grid once on wave-branch subset, geometric
+unchanged, per-node phase exp(-1j w t_min) preserved. depends WP1.
+FLOOR: 108ms (contraction 2 + kernel 35 + overhead 1 + non-engine 70) x1.6 → MS_CEILING
+0.175s (replaces machine-cal 0.5). SPEEDUP_MIN 3.0→8.0 (measured ~139x, 8 is structural
+non-retuned). Structural gates LEAD (contraction<<engine, speedup); ms is secondary
+regression guard. ~3x step; kernel+non-engine now floor.
+NEXT LEVER = Lever B (3D post-contraction K_a surrogate over (w,y',gamma'); kappa via
+mass-sheet, beta via rotation; O(1) smooth output so NOT the rejected 2D ladder hazard)
+→ Build 4. Lever D (ODE march) rejected (170-dim, slower at 100 nodes). Lever C (fewer
+nodes) dropped (saves <0.5ms after WP1; touches 3b accuracy gate).
+TESTS (Test Developer): BatchedContractionCertification vs 70dps mpmath oracle
+FOP_RTOL=1e-10 on FOP_GRID+CERT_LS L[24,48]; refusal-decision identity single-vs-batch
+ZERO flips; single-vs-batch value 1e-14; F002 oracle from mpmath only. F010 falsification
+py_func-chain: perturb _SERIES_TOLERANCE→1.0 and half_sum→0, assert RED. Equivalence:
+all existing gates green UNCHANGED + assertEqual F_op==F_op_grid([w]).
+has_domain_changes=true, has_spec_update=true (doc-sync handles fragments/SPEC/FINDINGS).
+
 2026-07-17 Build 3b (close Build 3: accurate node grid + hot spots) — IN PROGRESS.
 Orientation done. Key code facts:
 - likelihood.py:_DEFAULT_KERNEL_NODES=10 (false comment claiming clears 1e-8 gate).

@@ -25,3 +25,16 @@
   `likelihood.py`. `likelihood.py` import block re-verified against
   the explicit-layer-path convention. Zero edits made this pass too —
   second consecutive genuine no-op pass on this file set.
+
+- 2026-07-18 (third pass, targeted): Re-verified
+  `chang_refsdal/channels.py` and `chang_refsdal/operator.py` alone
+  (task scoped to just these two). Both remain fully compliant:
+  `__future__` -> stdlib (dataclasses/itertools/typing or
+  dataclasses) -> third-party (numpy, numba) -> local
+  (`cogwheel.lensing.chang_refsdal` layer imports) ordering intact
+  with blank-line separators; regex sweep confirmed zero
+  whitespace-only lines and zero 3+ blank-line runs in both files;
+  every top-level def/class (including `@dataclass`- and
+  `@numba.njit`-decorated ones) has exactly 2 blank lines before it.
+  Third consecutive genuine no-op pass on this pair — no drift
+  introduced by intervening code work.

@@ -838,3 +838,19 @@ coordinates; MUST honor the three Professor constraints recorded at
 BUILD 2 COMPLETE).
 (2D-table decision).
 port-worthy commits is in this file's earlier sections.
+### BUILD 3C LAUNCHED (2026-07-18 00:00, port 8323) — plan approved 3 WPs
+
+Owner rulings mid-flight: (1) few-ms NON-NEGOTIABLE (competitive vs
+GLoW); (2) judge builds as STEPS — combined levers allowed, gate at the
+plan's predicted floor, reject only fake progress. Plan verdict:
+surrogate path ONLY route to <=10 ms (lean path floor 25-90 ms — radial
+is w-dependent, Professor trace overturned the Simplifier; ODE marching
+rejected: irregular singular point). WP1 batched exact engine + hoisted
+P_n (oracle + 1.3-1.5x); WP2 3D post-contraction surrogate (w, y',
+gamma'), per-regime boxed, refused-cell masks, engine-version
+provenance; WP3 dispatch with fallback-to-exact (correctness
+independent of coverage). Predicted lnlike ~5-6 ms; HARD gate 10 ms
+pinned single-thread. DRIVER WATCH-ITEM: surrogate tables (~250 MB)
+must go to a gitignored lazily-built cache (LookupTable idiom), NEVER
+git — check staging at commit; DATA_CONTRACTS may need a new artifact
+entry (plan says spec update yes).

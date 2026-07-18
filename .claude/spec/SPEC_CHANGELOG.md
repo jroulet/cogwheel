@@ -6,6 +6,12 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
+- `0.4.0` (2026-07-18): Batched engine fast path (Build 3c): new public `operator.F_op_grid`
+(per-order weight-vector contraction over the whole wave-branch node
+grid, refusal thresholds byte-unchanged, scalar `F_op` delegates);
+`channels._exact_total` wired to one batched call; certified by the new
+`cogwheel/tests/test_lensing_batched_operator.py`.
+
 - `0.3.0` (2026-07-17): Microlensed likelihood fast path (Builds 3/3b): coarse full-cluster
 kernel-node spline grid (`_DEFAULT_KERNEL_NODES = 100`), numba-njit
 dd/1F1 ladder + operator contraction (refusal contract untouched),

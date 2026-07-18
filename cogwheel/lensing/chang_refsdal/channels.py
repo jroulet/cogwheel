@@ -65,7 +65,7 @@ from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal._gauge import (
     exact_transition_channels, reconstructed_total, smootherstep)
 from cogwheel.lensing.chang_refsdal.operator import (
-    RHO_START, RHO_END, MAX_ORDER, F_op, cancellation_exponent,
+    RHO_START, RHO_END, MAX_ORDER, F_op_grid, cancellation_exponent,
     geometric_amplification, select_branch)
 
 __all__ = ['ChangRefsdalChannels', 'ChangRefsdalPartition',
@@ -416,8 +416,12 @@ def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
     """Evaluate the exact amplification total over the grid.
 
     Per frequency, `operator.select_branch` chooses between the
-    contour-free wave operator `operator.F_op` and the stationary-phase
-    `operator.geometric_amplification`.  The result is shifted by
+    contour-free wave operator and the stationary-phase
+    `operator.geometric_amplification`.  The wave-branch nodes are
+    evaluated together in a SINGLE `operator.F_op_grid` call (the
+    operator table and per-order weight vectors are ``w``-independent, so
+    they are built once and reused across the node set); the geometric
+    nodes are evaluated per node.  Every result is shifted by
     ``exp(-1j * w * t_min)`` so its carrier matches the channels'
     minimum-relative delays.
 
@@ -436,7 +440,7 @@ def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
         Smallest pairwise real-channel delay separation, for the branch
         gate.
     max_order : int
-        Operator-series order cap forwarded to `operator.F_op`.
+        Operator-series order cap forwarded to `operator.F_op_grid`.
 
     Returns
     -------
@@ -453,6 +457,14 @@ def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
     total = np.empty(n_w, dtype=complex)
     orders = np.empty(n_w, dtype=int)
     converged = np.empty(n_w, dtype=bool)
+
+    # The branch decision stays PER NODE (`cancellation_exponent` +
+    # `select_branch`).  Geometric nodes are evaluated inline, exactly as
+    # before; wave nodes are only collected here and evaluated together
+    # in one batched `F_op_grid` call below, since within one lens
+    # configuration only ``w`` varies and the operator table / weight
+    # vectors are ``w``-independent (see `operator.F_op_grid`).
+    wave_indices = []
     for index in range(n_w):
         frequency = float(w[index])
         exponent = cancellation_exponent(frequency, source, gamma, kappa)
@@ -461,13 +473,26 @@ def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
                 frequency, source, gamma, beta=beta, kappa=kappa))
             orders[index] = _GEOMETRIC_ORDER
             converged[index] = True
+            total[index] = value * np.exp(-1j * frequency * t_min)
         else:
-            value, diagnostics = F_op(
-                frequency, source, gamma, beta=beta, kappa=kappa,
-                max_order=max_order)
-            orders[index] = diagnostics.order_used
-            converged[index] = diagnostics.converged
-        total[index] = value * np.exp(-1j * frequency * t_min)
+            wave_indices.append(index)
+
+    if wave_indices:
+        wave_idx = np.asarray(wave_indices, dtype=int)
+        w_wave = w[wave_idx]
+        # A single batched wave-branch evaluation.  Any uncertifiable
+        # node raises `operator.CancellationError` from inside this call
+        # and propagates unswallowed -- identical to the former per-node
+        # `F_op` raise -- so the RB and brute paths refuse symmetrically.
+        values_wave, orders_wave, converged_wave = F_op_grid(
+            w_wave, source, gamma, beta=beta, kappa=kappa,
+            max_order=max_order)
+        # Same per-node relative-delay carrier as the geometric branch,
+        # applied elementwise over the wave subset.
+        total[wave_idx] = values_wave * np.exp(-1j * w_wave * t_min)
+        orders[wave_idx] = orders_wave
+        converged[wave_idx] = converged_wave
+
     return total, orders, converged
 
 

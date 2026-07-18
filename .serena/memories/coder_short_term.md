@@ -1,5 +1,92 @@
 # Coder Short-Term Observations
 
+## Build3c WP2: wire channels._exact_total to batched F_op_grid (2026-07-18)
+
+- channels.py `_exact_total`: replaced the per-node scalar `F_op` wave
+  loop with a partition. Per-node branch decision (cancellation_exponent
+  + select_branch) UNCHANGED; geometric nodes still evaluated inline via
+  geometric_amplification (orders=_GEOMETRIC_ORDER, converged=True,
+  carrier applied inline). Wave nodes only COLLECTED in the loop
+  (wave_indices), then ONE `F_op_grid(w[wave_idx], source, gamma,
+  beta=,kappa=,max_order=)` call outside the loop scatters
+  values/orders/converged back at their indices. Carrier
+  `exp(-1j*w*t_min)` applied to BOTH branches (geometric inline scalar;
+  wave elementwise over w_wave). `if wave_indices:` guards the empty
+  (all-geometric) case so no empty-array F_op_grid call.
+- Import: swapped `F_op` -> `F_op_grid` in the operator import (scalar
+  F_op no longer used in channels.py; only docstring mentions remain).
+  Updated `_exact_total` docstring (F_op -> F_op_grid, batched note).
+- VALUE IDENTITY is structural: scalar F_op and F_op_grid BOTH delegate
+  to operator._grid_certified, and _contract_grid processes each node
+  independently -> batching cannot change per-node arithmetic. Carrier
+  math elementwise-identical to scalar (`-1j*w_wave*t_min` == per-node
+  `-1j*float(w[i])*t_min`, same assoc). So byte-identical to pre-WP1
+  wave path; speed-only. Caller evaluate() unpacks (exact_total,orders,
+  converged) unchanged; operator_orders/operator_converged packaging,
+  _physical_kernels, _channel_switch, exact_transition_channels all
+  untouched.
+- REFUSAL SYMMETRY: a bad wave node raises CancellationError from inside
+  the single F_op_grid call (per-node _refusal_message, same threshold
+  path) BEFORE any scatter -> propagates unswallowed, identical to old
+  per-node raise. LensDomainError (config-level, const in kappa/gamma)
+  still raises via geometric_amplification or _grid_certified. No
+  catch-and-continue added.
+
+### VERIFIED (server, cogwheel-newlal)
+- py_compile OK; `from cogwheel.lensing.chang_refsdal import channels`
+  imports (F_op_grid resolves, in operator.__all__). No residual scalar
+  `F_op(` call in channels.py (regex F_op\((?!_grid) empty); only
+  F_op_grid( calls.
+
+### UNVERIFIED (no accuracy/timing campaign by me; Build3c driver)
+- Actual bit-identical lnlike / _amplification_coefficients vs pre-WP1
+  across _LENS_CONFIGS (RB-vs-brute <= max(1.5,1e-2|bf|)); reasoned from
+  shared _grid_certified path, not run.
+- Timing win (fewer numpy dispatches; table/weights built once vs
+  per-node) not measured by me.
+- Runtime confirmation that a wave-node CancellationError surfaces
+  identically on RB and brute paths.
+
+## Build3c WP1: weight-vector batched contraction, single F_op path (2026-07-18)
+
+- operator.py: replaced the per-node 85x85 bilinear `_contract_orders`
+  with TWO njit cores (cache=True, fastmath=False):
+  `_weight_vectors(...)->(v,v_abs)` scatter-adds the w-INDEPENDENT
+  per-order weight vectors v[n,j]=sum_{(a,b):idx==j}
+  z[a]*table[n,a,b]*zbar[b] (idx=min(half_sum+n,dim-1)); skips coeff==0
+  (== adding 0.0), so clamped (all zero-coeff by half_sum+n<=dim-1)
+  entries never scatter into v[dim-1]. `_contract_grid(...)` loops nodes
+  x orders x length-dim dot -> per-node (total,positive_total,max_term,
+  order_used,last_ratio,converged). ~32M->0.7M contraction flops @105 nodes.
+- ONE contraction path via private `_grid_certified(w_array,...)` ->
+  (values,orders,converged,estimated_tails,cancellation_ratios): weights
+  built ONCE, per-node kernel eval + per-node frexp/ldexp scale, ONE
+  `_contract_grid` call, then per-node ALL FOUR F005 refusals
+  (non-finite; ratio>1e13; est_tail>1e-10; eps*cond>2e-9) BYTE-UNCHANGED
+  + mass-sheet/phase reconstruction. `F_op_grid` = lean
+  (values,orders,converged); `F_op` = single-element wrapper rebuilding
+  full OperatorDiagnostics (tests read diag.cancellation_ratio/
+  estimated_relative_tail). F_op_grid added to __all__.
+- Shared internal (not literal "F_op calls F_op_grid") because F_op_grid
+  is lean by spec but OperatorDiagnostics needs 2 refusal intermediates
+  -> both delegate to _grid_certified. Still ONE contraction, ONE cert.
+
+### VERIFIED (server, cogwheel-newlal)
+- py_compile OK. F_op vs F_op_grid agree EXACTLY (diff 0.0) at w=5/8/12,
+  y=(0.55,0), kappa=0.05. Refusal intact: y=(0.9,0) gamma=0.2 w=60
+  refuses in BOTH grid (one bad node refuses whole grid) and scalar,
+  identical msg. No new pyright diags (numba/numpy unresolved pre-existing).
+
+### UNVERIFIED (no accuracy/timing campaign by me; Build3c re-cert job)
+- Accum-order change (blocked/dot vs column-then-row) safe in cert band
+  per Professor (cond<9e6->pert<2e-8, 200x under 1e-10); needs F005-style
+  70-dps mpmath re-cert across L in [24,48] + numba-vs-mpmath gate.
+  Reorder perturbs cancellation_ratio << test's 1e-3 vs-oracle tol.
+- F010: `_weight_vectors`/`_contract_grid` NEW njit -> self-falsification
+  must still go RED via .py_func chain (Test Dev).
+- Contraction-flop win not timed by me.
+
+
 ## Build3b WP2: full-cluster node placement + honest default (2026-07-17)
 
 - likelihood.py: fixed the under-resolution accuracy defect. New private

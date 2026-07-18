@@ -1,0 +1,1040 @@
+"""
+Tests for the WP1/WP2 BATCHED wave-branch operator path in
+`lensing.chang_refsdal.operator`: the weight-vector batched contraction
+(`_weight_vectors` + `_contract_grid`) behind the single-path
+`F_op_grid`, and its use by `channels._exact_total` through the lensed
+likelihood.
+
+WHAT THIS SUITE PINS
+--------------------
+WP1 replaced the former per-node ``dim x dim`` bilinear form with a
+precomputed per-order weight vector (built ONCE, since the operator
+table and monomial powers are ``w``-independent within one lens
+configuration) dotted against each node's rescaled radial derivatives,
+and routed BOTH the scalar `F_op` and the batched `F_op_grid` through
+ONE contraction path (`_grid_certified`).  The claim is that this
+changed the ACCUMULATION ORDER and the SPEED, not the answer or the
+certified-or-refuse contract.  This suite re-certifies that claim:
+
+* `BatchedContractionCertificationTestCase` re-runs the F005 oracle
+  certification against an INDEPENDENT mpmath reference over the union of
+  the in-domain ``F_op`` grid and the ``L in [24, 48]`` boundary band,
+  and adds the two batching-specific invariants the reorder could break:
+  the per-node return-vs-refuse DECISION is identical between a solo
+  ``[w]`` call and the full batch (no cross-node convergence-state
+  leakage), and the returned VALUE agrees to ``1e-14`` (identical code on
+  identical data).
+* `BatchedContractionFalsificationTestCase` proves that certification is
+  not vacuous for the new ``njit`` core: two perturbations injected
+  through the numba ``py_func`` chain (a corrupted convergence tolerance
+  and a corrupted radial-index gather) each drive the accuracy gate red.
+* `FewMsTimingTestCase` pins the machine-INDEPENDENT speed properties the
+  batching was for (RB beats brute by >= `SPEEDUP_MIN`; the pure
+  contraction is subdominant to the amplification engine) plus an
+  arithmetic-derived absolute regression guard `MS_CEILING`.
+* `BatchedEquivalenceTestCase` confirms the scalar entry point delegates
+  to the batched path BIT-IDENTICALLY, so the many existing RB-vs-brute,
+  determinism, crown-accuracy and interpolation gates in the sibling
+  suites automatically exercise the batched path at their ORIGINAL
+  tolerances.
+
+WHY THE ORACLE IS INDEPENDENT (F002)
+------------------------------------
+``F_op_grid`` is gated against `_oracle_fop`, an mpmath amplification
+built ENTIRELY from ``mpmath.hyp1f1`` (the textbook Kummer
+s-derivative ladder, NOT the production double-double kernel) and an
+INTEGER-coefficient ``(u, v)`` monomial ladder for the shear operator
+``exp(i*gamma*D_0/2w)`` (NOT the production complex shear-eigenframe
+weight vectors).  The two share no code and no numerical substrate; the
+top-level reconstruction is re-derived from the diffraction integral,
+not copied from ``F_op``.  `OracleIndependenceTestCase` (an AST guard)
+pins that the oracle helpers reference no production name.  mpmath is
+imported ONLY here and never becomes importable from a production path.
+
+TOLERANCES
+----------
+* `FOP_RTOL` = 1e-10 is a property of ``F_op_grid``, not the oracle
+  (exact far beyond float64); UNCHANGED from the scalar certification.
+* `SINGLE_BATCH_RTOL` = 1e-14: solo ``[w]`` and full-batch share the
+  identical per-node arithmetic, so a larger gap is cross-node
+  contamination, not round-off.
+* `SPEEDUP_MIN` = 8.0 (raised from the former 3.0): the measured warm
+  ``lnlike`` speed-up is tens-fold, so 8.0 is a structural, non-retuned
+  advance rather than a machine-calibrated knob.
+* `MS_CEILING` = 0.175 s is ARITHMETIC-DERIVED (see its doc-comment),
+  NOT the brief's 10 ms physical target; it is a secondary regression
+  guard behind the two machine-independent structural gates.
+
+ANTI-VACUITY AND SELF-FALSIFICATION
+-----------------------------------
+`BatchedOperatorTestCase.tearDown` fails a test that made zero
+comparisons.  `BatchedContractionFalsificationTestCase` and
+`SelfFalsificationTestCase` prove the accuracy gate and the anti-vacuity
+guard can each go red.
+"""
+from __future__ import annotations
+
+# Single-thread pinning for the timing gate (best-effort): production
+# runs under a parallel sampler with every core busy, so the honest
+# per-eval cost is the SINGLE-THREAD one.  These env vars are read by
+# OpenBLAS/MKL/numba at import time, so they are set BEFORE numpy/numba
+# are imported.  When another already-imported module initialised the
+# thread pool first (one shared pytest process) the pin is a no-op; the
+# HARD timing gates (speedup, contraction < engine) are robust to that.
+import os as _os
+
+for _thread_var in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS',
+                    'NUMBA_NUM_THREADS', 'OPENBLAS_NUM_THREADS'):
+    _os.environ.setdefault(_thread_var, '1')
+
+import ast
+import inspect
+import pathlib
+import textwrap
+import time
+import warnings
+from unittest import TestCase, main, mock
+
+import mpmath
+import numpy as np
+
+from cogwheel import data, waveform
+from cogwheel.lensing.chang_refsdal import geometry, operator
+from cogwheel.lensing.chang_refsdal.operator import (
+    CancellationError, F_op, F_op_grid)
+from cogwheel.lensing.likelihood import (
+    LensedRelativeBinningLikelihood, _data_term, _norm_term)
+
+try:  # Diagnostics only; never gate a test on plotting being present.
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    _HAVE_MPL = True
+except Exception:  # pragma: no cover - environment dependent
+    _HAVE_MPL = False
+
+
+# ---------------------------------------------------------------------------
+# Oracle / certification constants.
+# ---------------------------------------------------------------------------
+
+#: Working precision [decimal digits] of the mpmath amplification oracle.
+#: ~35 digits of margin over the 1e-10 gate; the oracle is the reference,
+#: so it must not be the thing under test.
+ORACLE_DPS = 50
+
+#: Operator-order cap for the mpmath oracle; exceeds ``F_op_grid``'s
+#: convergence order so the reference is fully summed.
+ORACLE_MAX_ORDER = 100
+
+#: Relative-error gate on ``F_op_grid`` against the oracle (UNCHANGED
+#: from the scalar certification): a property of the wave branch.
+FOP_RTOL = 1e-10
+
+#: Solo-``[w]``-vs-full-batch agreement gate: identical per-node
+#: arithmetic, so a larger gap is cross-node contamination.
+SINGLE_BATCH_RTOL = 1e-14
+
+#: Operator-order cap handed to ``F_op_grid`` for the oracle comparison
+#: (large enough that the highest-``w`` grid point converges).
+FOP_MAX_ORDER = 70
+
+#: In-domain grid axes: ``w``, physical ``sqrt(s) = |y|`` (kappa=0), and
+#: shear.  ``L = w*sqrt(s)`` runs from 0.3 to 45; some high-``L``,
+#: shear-on points refuse (routed to the certified-XOR-refuse contract).
+FOP_GRID_W = (1.0, 10.0, 20.0, 40.0, 50.0)
+FOP_GRID_SQRT_S = (0.3, 0.9)
+FOP_GRID_GAMMA = (0.0, 0.2)
+
+#: F005 boundary band: ``L in linspace(24, 48, 17)`` at ``y = (0.9, 0)``,
+#: ``gamma = 0.20``, ``kappa = 0`` (so ``w = L / 0.9``).  Both outcomes
+#: MUST occur across the band -- certified at low ``L``, refused at high
+#: ``L`` (the XOR contract, FINDINGS F005).
+CERT_SQRT_S = 0.9
+CERT_GAMMA = 0.20
+CERT_LS = np.linspace(24.0, 48.0, 17)
+
+#: Production names the independent oracle helpers must NOT reference
+#: (F002 oracle independence, enforced by the AST guard).
+ORACLE_FORBIDDEN_NAMES = frozenset({
+    'operator', 'F_op', 'F_op_grid', 'channels', 'geometry',
+    '_hyp1f1', 'point_mass_g_derivatives', '_grid_certified',
+    '_contract_grid', '_weight_vectors', 'LensedRelativeBinningLikelihood',
+})
+
+# ---------------------------------------------------------------------------
+# Falsification constants.
+# ---------------------------------------------------------------------------
+
+#: Certified in-domain config for the self-falsification (``L = 11``):
+#: the UNPATCHED ``F_op_grid`` is within `FOP_RTOL` of the oracle here, so
+#: the gate can go green before each perturbation drives it red.
+FALS_W = 20.0
+FALS_Y = (0.55, 0.0)
+FALS_GAMMA = 0.20
+
+#: Corrupted small-term convergence tolerance: at 1.0 the stopping rule
+#: fires as early as it is allowed and truncates the shear series, so the
+#: perturbed result no longer certifies to `FOP_RTOL`.
+PERTURBED_SERIES_TOLERANCE = 1.0
+
+# ---------------------------------------------------------------------------
+# Timing-fixture constants (crown four-image, shared with the crown
+# likelihood suite so the fixture is read off the SAME configuration).
+# ---------------------------------------------------------------------------
+
+#: Higher-mode approximant so the mode-pair contraction is genuinely
+#: exercised on the fast path.
+APPROXIMANT = 'IMRPhenomXPHM'
+
+#: Fixed seed for every stochastic input.
+SEED = 20260717
+
+#: Bin width [Hz] of the uniform relative-binning grid (crown value).
+DF_BIN = 4.0
+
+#: Largest relative image delay [s] the fixture's bins support.
+DELTA_T_MAX = 0.02
+
+#: Lens mass [Msun] / redshift of the crown (well-conditioned) fixture.
+M_LENS_MSUN = 90.0
+Z_LENS = 0.4
+
+#: The crown four-image config ``(label, y1, y2, gamma, beta, kappa)``.
+_CROWN = ('four-image', 0.08, 0.06, 0.20, 0.0, 0.0)
+
+#: Best-of-N repeats for warm timing (robust to scheduler jitter).
+TIMING_REPEATS = 5
+
+#: Lower bound on the warm RB speed-up over full-grid brute force, raised
+#: from the former machine-calibrated 3.0 to 8.0.  The batched engine's
+#: measured advantage is tens-fold (predicted lnlike ~139x over ~15 s
+#: brute), so 8.0 sits well below the floor: a structural, non-retuned
+#: advance, machine-INDEPENDENT.
+SPEEDUP_MIN = 8.0
+
+#: ARITHMETIC-DERIVED absolute regression ceiling [s] on warm best-of-N
+#: ``lnlike``.  Derivation (Professor): a ~108 ms predicted floor =
+#: contraction ~2 ms + 1F1 kernel ~35 ms + overhead ~1 ms + non-engine
+#: ~70 ms, times a 1.6x margin -> 0.173 s, rounded to 0.175 s.  This is
+#: NOT the brief's 10 ms physical target (which needs Lever B, the 2D
+#: surrogate table, deferred to Build 4); it is a secondary regression
+#: guard behind the two machine-independent structural gates, and the
+#: printed per-component breakdown pinpoints which lever slipped on a
+#: regression.
+MS_CEILING = 0.175
+
+#: Directory for diagnostic plots (created on demand).
+OUTPUT_DIR = pathlib.Path(__file__).resolve().parent / 'output'
+
+
+# ---------------------------------------------------------------------------
+# Independent mpmath amplification oracle (oracle-only; imports nothing
+# from the production operator/channels/geometry).
+# ---------------------------------------------------------------------------
+def _oracle_radial_ladder(w, s):
+    """Memoized ``k -> d^k/ds^k G_PM(w, s)`` at oracle precision.
+
+    ``G_PM(w, s) = C(w) * 1F1(1 - i w/2; 1; -i w s/2)`` and its ``k``-th
+    ``s``-derivative is ``C(w) * c**k * (a)_k / (1)_k * 1F1(a+k; 1+k;
+    c s)`` with ``a = 1 - i w/2``, ``c = -i w/2`` and ``C(w) = exp(pi w/4
+    + i (w/2) ln(w/2)) Gamma(1 - i w/2)`` (Abramowitz & Stegun ch. 13).
+    A fresh ``mpmath.hyp1f1`` per ``k`` -- the direct textbook
+    definition, no Kummer reparametrization and no shared numerator.
+    """
+    w = mpmath.mpf(w)
+    s = mpmath.mpf(s)
+    a = 1 - 1j * w / 2
+    c = -1j * w / 2
+    carrier = (mpmath.e ** (mpmath.pi * w / 4
+                            + 1j * (w / 2) * mpmath.log(w / 2))
+               * mpmath.gamma(1 - 1j * w / 2))
+    cache: dict[int, complex] = {}
+
+    def g(k):
+        if k not in cache:
+            cache[k] = (carrier * c ** k * mpmath.rf(a, k) / mpmath.rf(1, k)
+                        * mpmath.hyp1f1(a + k, 1 + k, c * s))
+        return cache[k]
+    return g
+
+
+def _oracle_operator_step(state):
+    """Apply the real shear operator ``D_0 = d_u**2 - d_v**2``.
+
+    ``state`` maps ``(a, b) -> int`` coefficient of ``u**a v**b G^(k)``,
+    with the radial index implied by ``k = (a + b)//2 + order``.  This is
+    the real ``(u, v)`` monomial ladder (``z = u + i v`` gives
+    ``2 d_z**2 + 2 d_zbar**2 = d_u**2 - d_v**2``) with EXACT Python-int
+    coefficients -- deliberately not the production's complex
+    shear-eigenframe weight vectors.  No mpmath is spent here.
+    """
+    new: dict[tuple[int, int], int] = {}
+
+    def add(key, value):
+        new[key] = new.get(key, 0) + value
+    for (a, b), coeff in state.items():
+        if a >= 2:
+            add((a - 2, b), coeff * a * (a - 1))
+        add((a, b), coeff * (4 * a + 2))
+        add((a + 2, b), coeff * 4)
+        if b >= 2:
+            add((a, b - 2), -coeff * b * (b - 1))
+        add((a, b), -coeff * (4 * b + 2))
+        add((a, b + 2), -coeff * 4)
+    return {key: value for key, value in new.items() if value}
+
+
+def _oracle_fop(w, y, gamma, beta=0.0, kappa=0.0,
+                max_order=ORACLE_MAX_ORDER):
+    """INDEPENDENT wave-optics amplification ``F(w)`` at oracle
+    precision.
+
+    Sums ``total = sum_n (i gamma'/(2w))**n / n! * D_0**n G_PM`` at the
+    eigenframe-rotated source and applies the mass-sheet prefactor
+    ``F = (1/lam) exp(0.5j w ln(lam) - 0.5j w kappa s + 0.5j w s) total``
+    with ``lam = 1 - kappa``, ``gamma' = gamma/lam``, ``s = |y'|**2``,
+    ``y' = y/sqrt(lam)``.  This carries the diffraction integral's
+    operator reduction independently of ``F_op``'s own reconstruction
+    (F002).
+    """
+    with mpmath.workdps(ORACLE_DPS):
+        w = mpmath.mpf(w)
+        lam = 1 - mpmath.mpf(kappa)
+        gamma_scaled = mpmath.mpf(gamma) / lam
+        root = mpmath.sqrt(lam)
+        yp = (mpmath.mpf(y[0]) / root, mpmath.mpf(y[1]) / root)
+        s = yp[0] ** 2 + yp[1] ** 2
+        z_eig = mpmath.e ** (-1j * mpmath.mpf(beta)) * mpmath.mpc(*yp)
+        u0, v0 = z_eig.real, z_eig.imag
+        g = _oracle_radial_ladder(w, s)
+        alpha = 1j * gamma_scaled / (2 * w)
+
+        n_powers = 2 * max_order + 3
+        u_pow = [mpmath.mpf(1)] * n_powers
+        v_pow = [mpmath.mpf(1)] * n_powers
+        for i in range(1, n_powers):
+            u_pow[i] = u_pow[i - 1] * u0
+            v_pow[i] = v_pow[i - 1] * v0
+
+        def evaluate(state, order):
+            acc = mpmath.mpc(0)
+            for (a, b), coeff in state.items():
+                acc += coeff * u_pow[a] * v_pow[b] * g((a + b) // 2 + order)
+            return acc
+
+        total = mpmath.mpc(0)
+        state = {(0, 0): 1}
+        factorial = mpmath.mpf(1)
+        small = 0
+        for n in range(max_order + 1):
+            if n:
+                factorial *= n
+                state = _oracle_operator_step(state)
+            term = alpha ** n / factorial * evaluate(state, n)
+            total += term
+            if n >= 4 and abs(term) <= mpmath.mpf('1e-24') * abs(total):
+                small += 1
+                if small >= 3:
+                    break
+            else:
+                small = 0
+
+        value = ((1 / lam)
+                 * mpmath.e ** (0.5j * w * mpmath.log(lam)
+                                - 0.5j * w * mpmath.mpf(kappa) * s
+                                + 0.5j * w * s)
+                 * total)
+        return complex(value)
+
+
+def _referenced_names(func):
+    """Return every name a function's own source references.
+
+    Walks ``ast.Import`` / ``ast.ImportFrom`` plus ``ast.Name`` ids and
+    ``ast.Attribute`` attribute names, so a production dependency that
+    entered a helper as ``operator.F_op`` or a bare ``F_op`` name -- not
+    only as an import statement -- is caught.  The idiom mirrors the
+    sibling lens suites' oracle-independence guard.
+    """
+    source = textwrap.dedent(inspect.getsource(func))
+    tree = ast.parse(source)
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name.split('.')[0])
+                if alias.asname:
+                    names.add(alias.asname)
+        elif isinstance(node, ast.ImportFrom):
+            names.add((node.module or '').split('.')[0])
+            for alias in node.names:
+                names.add(alias.name)
+                if alias.asname:
+                    names.add(alias.asname)
+        elif isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+    names.discard('')
+    return names
+
+
+class BatchedOperatorTestCase(TestCase):
+    """Shared relative-error assertion plus the anti-vacuity tally.
+
+    `tearDown` fails a test that asserted nothing, so a suite that
+    silently stops comparing cannot read green.
+    """
+
+    def setUp(self):
+        self.n_checks = 0
+
+    def tearDown(self):
+        if self.n_checks == 0:
+            self.fail('anti-vacuity: the test made zero comparisons')
+
+    def assert_relative(self, got, want, rtol, msg):
+        """Assert ``|got - want| <= rtol * |want|`` and tally a check."""
+        error = abs(complex(got) - complex(want)) / abs(complex(want))
+        self.n_checks += 1
+        self.assertLessEqual(error, rtol, f'{msg}: relative error '
+                             f'{error:.3e} exceeds {rtol:.0e}')
+        return error
+
+    @staticmethod
+    def _save_figure(fig, name):
+        """Write ``fig`` to ``output/<name>.png`` and close it."""
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig.savefig(OUTPUT_DIR / f'{name}.png', dpi=120,
+                    bbox_inches='tight')
+        plt.close(fig)
+
+
+class OracleIndependenceTestCase(BatchedOperatorTestCase):
+    """The mpmath oracle helpers reference no production name (F002).
+
+    A certification is only as trustworthy as the independence of its
+    oracle: if `_oracle_fop` reached into ``operator`` it would gate the
+    module against itself.  This AST guard walks each oracle helper's own
+    source and fails if any production name leaks in.
+    """
+
+    def test_oracle_helpers_reference_no_production_names(self):
+        """No oracle helper references a production module or symbol."""
+        for func in (_oracle_fop, _oracle_radial_ladder,
+                     _oracle_operator_step):
+            names = _referenced_names(func)
+            leaked = names & ORACLE_FORBIDDEN_NAMES
+            self.n_checks += 1
+            self.assertEqual(
+                leaked, set(),
+                f'oracle helper {func.__name__} references production '
+                f'names {sorted(leaked)}; the oracle is not independent')
+
+    def test_oracle_actually_uses_mpmath(self):
+        """The amplification oracle is built from mpmath, not float64.
+
+        A positive control on the guard above: an "independent" oracle
+        that silently dropped to float64 would share the production
+        substrate; assert mpmath is genuinely on the oracle path.
+        """
+        for func in (_oracle_fop, _oracle_radial_ladder):
+            self.n_checks += 1
+            self.assertIn(
+                'mpmath', _referenced_names(func),
+                f'{func.__name__} does not reference mpmath; the oracle '
+                'may have dropped to the float64 substrate under test')
+
+
+class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
+    """Re-certify the batched accumulation order against the mpmath
+    oracle.
+
+    The weight-vector reorder must not perturb the answer inside the
+    certified band, must not leak convergence state across nodes, and
+    must keep the F005 certified-XOR-refuse contract.  Three invariants:
+    (1) every returned node matches the independent oracle to `FOP_RTOL`;
+    (2) the solo-``[w]`` and full-batch return/refuse DECISION is
+    identical, with zero flips in either direction; (3) where both
+    return, the VALUE agrees to `SINGLE_BATCH_RTOL`.
+    """
+
+    def _configs(self):
+        """Yield ``(label, y, gamma, beta, kappa, w_array)`` grid rows.
+
+        The union of the in-domain ``F_op`` sweep (``L`` from 0.3 to 45)
+        and the F005 boundary band (``L in [24, 48]``).
+        """
+        for sqrt_s in FOP_GRID_SQRT_S:
+            for gamma in FOP_GRID_GAMMA:
+                yield (f'grid_s{sqrt_s:g}_g{gamma:g}',
+                       np.array([sqrt_s, 0.0]), gamma, 0.0, 0.0,
+                       np.array(FOP_GRID_W, dtype=float))
+        yield ('cert_band', np.array([CERT_SQRT_S, 0.0]), CERT_GAMMA,
+               0.0, 0.0, CERT_LS / CERT_SQRT_S)
+
+    def _solo(self, w, y, gamma, beta, kappa):
+        """Return ``(certified, value)`` for a single-``[w]`` batch call.
+
+        ``certified`` is False and ``value`` None when the node raises
+        `CancellationError`; otherwise ``value`` is the returned ``F``.
+        """
+        try:
+            values, _, _ = F_op_grid(
+                np.array([w], dtype=float), y, gamma, beta=beta,
+                kappa=kappa, max_order=FOP_MAX_ORDER)
+        except CancellationError:
+            return False, None
+        return True, complex(values[0])
+
+    def test_batched_matches_mpmath_oracle(self):
+        """Every returned node matches the independent oracle to
+        `FOP_RTOL`.
+
+        Runs each grid point through a solo ``F_op_grid([w])`` (the
+        single-path batched code) and, where it certifies, gates the
+        value against `_oracle_fop`.  Refused nodes carry no accuracy
+        claim and are skipped -- their contract is the XOR test below.
+        """
+        ls, errors, refused_ls = [], [], []
+        for label, y, gamma, beta, kappa, w_array in self._configs():
+            root_s = float(np.sqrt(y @ y))
+            for w in w_array:
+                certified, value = self._solo(w, y, gamma, beta, kappa)
+                cancellation_l = float(w) * root_s
+                if not certified:
+                    refused_ls.append(cancellation_l)
+                    continue
+                oracle = _oracle_fop(w, y, gamma, beta=beta, kappa=kappa)
+                error = self.assert_relative(
+                    value, oracle, FOP_RTOL,
+                    f'{label} w={w:g} L={cancellation_l:.2f}')
+                ls.append(cancellation_l)
+                errors.append(error)
+
+        self.assertGreater(
+            self.n_checks, 0,
+            'no in-domain grid point certified; the oracle gate ran on '
+            'nothing')
+        self._plot_accuracy(ls, errors, refused_ls)
+
+    def _plot_accuracy(self, ls, errors, refused_ls):
+        """Scatter ``log10(rel err)`` vs ``L`` under the `FOP_RTOL`
+        ceiling."""
+        if not _HAVE_MPL:
+            return
+        fig, ax = plt.subplots(figsize=(7.0, 4.5))
+        safe = [max(e, 1e-18) for e in errors]
+        ax.scatter(ls, safe, s=24, label='returned nodes')
+        for cancellation_l in refused_ls:
+            ax.axvline(cancellation_l, color='0.85', lw=0.8, zorder=0)
+        ax.axhline(FOP_RTOL, color='crimson', ls='--',
+                   label=f'FOP_RTOL = {FOP_RTOL:.0e}')
+        ax.set_yscale('log')
+        ax.set_xlabel('cancellation exponent L = w * |y\'|')
+        ax.set_ylabel('|F_batched - F_oracle| / |F_oracle|')
+        ax.set_title('Batched F_op_grid vs mpmath oracle')
+        ax.legend(loc='best', fontsize=8)
+        self._save_figure(fig, 'batched_operator_oracle_accuracy')
+
+    def test_single_and_batch_refusal_decisions_identical(self):
+        """The solo-vs-batch return/refuse decision has zero flips.
+
+        For each config, the subset of solo-certified nodes must ALSO
+        certify when evaluated together (no certify->refuse flip from
+        cross-node convergence-state leakage), and each solo-refused node
+        must STILL refuse when batched alongside a certified node (no
+        refuse->certify flip).  Both directions are checked.
+        """
+        for label, y, gamma, beta, kappa, w_array in self._configs():
+            solo = {float(w): self._solo(w, y, gamma, beta, kappa)[0]
+                    for w in w_array}
+            certified = [w for w, ok in solo.items() if ok]
+            refused = [w for w, ok in solo.items() if not ok]
+
+            if certified:
+                # No certified node may flip to a refusal in the batch.
+                values, _, _ = F_op_grid(
+                    np.array(certified, dtype=float), y, gamma, beta=beta,
+                    kappa=kappa, max_order=FOP_MAX_ORDER)
+                self.n_checks += 1
+                self.assertEqual(
+                    len(values), len(certified),
+                    f'{label}: batch over solo-certified nodes returned '
+                    f'{len(values)} of {len(certified)} values')
+
+            for w_refused in refused:
+                # A refused node must refuse even beside a certified one.
+                batch = ([certified[0]] if certified else []) + [w_refused]
+                self.n_checks += 1
+                with self.assertRaises(
+                        CancellationError,
+                        msg=f'{label}: solo-refused w={w_refused:g} did '
+                            'not refuse when batched'):
+                    F_op_grid(np.array(batch, dtype=float), y, gamma,
+                              beta=beta, kappa=kappa,
+                              max_order=FOP_MAX_ORDER)
+
+    def test_single_and_batch_values_agree(self):
+        """Where both return, solo and full-batch agree to
+        `SINGLE_BATCH_RTOL`.
+
+        Identical per-node arithmetic on identical data, so any gap above
+        `SINGLE_BATCH_RTOL` is cross-node contamination, not round-off.
+        """
+        for label, y, gamma, beta, kappa, w_array in self._configs():
+            certified = [float(w) for w in w_array
+                         if self._solo(w, y, gamma, beta, kappa)[0]]
+            if not certified:
+                continue
+            batch_values, _, _ = F_op_grid(
+                np.array(certified, dtype=float), y, gamma, beta=beta,
+                kappa=kappa, max_order=FOP_MAX_ORDER)
+            for w, batch_value in zip(certified, batch_values):
+                solo_value = self._solo(w, y, gamma, beta, kappa)[1]
+                self.assert_relative(
+                    batch_value, solo_value, SINGLE_BATCH_RTOL,
+                    f'{label} w={w:g} solo-vs-batch')
+
+    def test_cert_band_certifies_low_l_and_refuses_high_l(self):
+        """The F005 boundary band shows BOTH outcomes (the XOR contract).
+
+        Across ``L in [24, 48]`` at ``gamma = 0.20`` some nodes certify
+        (low ``L``) and some refuse (high ``L``); a band that only ever
+        returned, or only ever refused, would be a silent regression of
+        the certified-or-refuse guarantee.
+        """
+        y = np.array([CERT_SQRT_S, 0.0])
+        decisions = {
+            float(cancellation_l):
+                self._solo(cancellation_l / CERT_SQRT_S, y, CERT_GAMMA,
+                           0.0, 0.0)[0]
+            for cancellation_l in CERT_LS}
+        certified = [k for k, ok in decisions.items() if ok]
+        refused = [k for k, ok in decisions.items() if not ok]
+
+        self.n_checks += 1
+        self.assertTrue(
+            certified,
+            'no L in [24, 48] certified; the boundary band never returns')
+        self.n_checks += 1
+        self.assertTrue(
+            refused,
+            'no L in [24, 48] refused; the F005 refusal never fires')
+        self.n_checks += 1
+        self.assertTrue(
+            decisions[float(CERT_LS[0])],
+            f'the lowest band point L={CERT_LS[0]:.0f} did not certify')
+        self.n_checks += 1
+        self.assertLess(
+            max(certified), min(refused) + 1e-9,
+            'certified and refused Ls interleave; the refusal boundary '
+            'is not monotone in L as F005 expects')
+
+
+class BatchedContractionFalsificationTestCase(BatchedOperatorTestCase):
+    """Prove the batched-contraction accuracy gate is not vacuous (F010).
+
+    numba freezes module globals at compile time, so patching a
+    module-global never reaches the compiled ``njit`` core.  Each
+    perturbation is therefore injected through the ``py_func`` chain:
+    the batched core (and, for the gather perturbation, the weight-vector
+    builder) is replaced by its ``.py_func`` body, which re-reads the
+    module globals in the interpreter.  Two perturbations -- a corrupted
+    convergence tolerance that truncates the shear series, and a zeroed
+    radial-index gather that collapses the bilinear form -- must each
+    drive the `FOP_RTOL` gate red (refuse OR return past the tolerance).
+    A perturbation that left the gate green would mean the njit core is
+    dead code or the ``py_func`` chain is incomplete.
+    """
+
+    def _gate_outcome(self):
+        """Run the FALS point; return ``(raised, rel_err)``.
+
+        ``raised`` is True with ``rel_err = inf`` when the contraction
+        refuses (`CancellationError`); otherwise ``rel_err`` is the
+        relative error against the mpmath oracle.
+        """
+        try:
+            values, _, _ = F_op_grid(
+                np.array([FALS_W], dtype=float), np.array(FALS_Y),
+                FALS_GAMMA, max_order=FOP_MAX_ORDER)
+        except CancellationError:
+            return True, float('inf')
+        oracle = _oracle_fop(FALS_W, FALS_Y, FALS_GAMMA,
+                             max_order=ORACLE_MAX_ORDER)
+        rel = abs(complex(values[0]) - oracle) / abs(oracle)
+        return False, rel
+
+    def _assert_green_unpatched(self):
+        """The gate must be green before a patch, so RED is the patch's
+        doing."""
+        raised, rel = self._gate_outcome()
+        self.n_checks += 1
+        self.assertFalse(
+            raised, 'unpatched F_op_grid refused the certified FALS '
+            'config; the falsification precondition is broken')
+        self.n_checks += 1
+        self.assertLessEqual(
+            rel, FOP_RTOL,
+            f'unpatched F_op_grid rel error {rel:.3e} already exceeds '
+            f'{FOP_RTOL:.0e}; the gate is not green to begin with')
+
+    def test_series_tolerance_perturbation_drives_gate_red(self):
+        """A corrupted convergence tolerance truncates the shear series.
+
+        Patching `operator._SERIES_TOLERANCE` to 1.0 through the batched
+        core's ``py_func`` makes the small-term stop fire as early as it
+        is allowed, dropping the O(gamma) shear correction; the result no
+        longer certifies to `FOP_RTOL` (it refuses on the truncation cut
+        or returns past tolerance).
+        """
+        self._assert_green_unpatched()
+
+        core_pyfunc = operator._contract_grid.py_func
+        self.assertFalse(
+            hasattr(core_pyfunc, 'signatures'),
+            '_contract_grid.py_func carries .signatures; it is not a plain '
+            'py_func body, so the perturbation would not reach compiled '
+            'code (F010 vacuity)')
+        with mock.patch.object(operator, '_contract_grid', core_pyfunc), \
+                mock.patch.object(operator, '_SERIES_TOLERANCE',
+                                  PERTURBED_SERIES_TOLERANCE):
+            raised, rel = self._gate_outcome()
+        print(f'\n[Falsification] series-tolerance -> '
+              f'{PERTURBED_SERIES_TOLERANCE}: raised={raised} '
+              f'rel_err={rel:.3e}')
+
+        self.n_checks += 1
+        self.assertTrue(
+            raised or rel > FOP_RTOL,
+            f'the truncated shear series still certified (rel_err '
+            f'{rel:.3e} <= {FOP_RTOL:.0e}); the accuracy gate is vacuous '
+            'or the py_func chain is incomplete (F010)')
+
+    def test_gather_index_perturbation_drives_gate_red(self):
+        """A zeroed radial-index gather collapses the bilinear form.
+
+        Feeding an all-zero ``half_sum`` into the weight-vector builder's
+        ``py_func`` sends every ``(a, b)`` monomial to radial index
+        ``= order``, so the contraction reads a single wrong derivative
+        per order instead of the ``idx(a, b, n)`` gather; the amplitude
+        is wrong at any nontrivial source and the gate must go red.
+        """
+        self._assert_green_unpatched()
+
+        weight_pyfunc = operator._weight_vectors.py_func
+        self.assertFalse(
+            hasattr(weight_pyfunc, 'signatures'),
+            '_weight_vectors.py_func carries .signatures; it is not a '
+            'plain py_func body (F010 vacuity)')
+
+        def corrupt_weight_vectors(table, z_powers, zbar_powers,
+                                   abs_powers, half_sum, max_order, dim):
+            zeroed = np.zeros_like(half_sum)  # collapse the gather index
+            return weight_pyfunc(table, z_powers, zbar_powers, abs_powers,
+                                 zeroed, max_order, dim)
+
+        with mock.patch.object(operator, '_weight_vectors',
+                               corrupt_weight_vectors):
+            raised, rel = self._gate_outcome()
+        print(f'\n[Falsification] zeroed half_sum gather: raised={raised} '
+              f'rel_err={rel:.3e}')
+
+        self.n_checks += 1
+        self.assertTrue(
+            raised or rel > FOP_RTOL,
+            f'the collapsed bilinear form still certified (rel_err '
+            f'{rel:.3e} <= {FOP_RTOL:.0e}); the accuracy gate is vacuous '
+            'or the py_func chain is incomplete (F010)')
+
+
+# ---------------------------------------------------------------------------
+# Timing-fixture helpers (a seeded crown likelihood, built once).
+# ---------------------------------------------------------------------------
+
+def _reference_par_dic():
+    """A deterministic precessing reference ``par_dic`` for `APPROXIMANT`."""
+    return {
+        'm1': 60.0, 'm2': 45.0,
+        's1x_n': 0.20, 's1y_n': 0.10, 's1z': 0.30,
+        's2x_n': -0.10, 's2y_n': 0.15, 's2z': -0.20,
+        'l1': 0.0, 'l2': 0.0,
+        'iota': 1.0, 'phi_ref': 1.2,
+        'ra': 1.8, 'dec': -0.3, 'psi': 0.9,
+        't_geocenter': 0.0, 'd_luminosity': 600.0,
+        'f_ref': 50.0,
+    }
+
+
+def _make_noisy_event():
+    """Seeded Gaussian-noise HLV event with the fiducial signal injected."""
+    event_data = data.EventData.gaussian_noise(
+        eventname='test_batched', duration=4, detector_names='HLV',
+        asd_funcs=['asd_H_O3', 'asd_L_O3', 'asd_V_O3'], tgps=0., seed=SEED)
+    event_data.inject_signal(_reference_par_dic(), APPROXIMANT)
+    return event_data
+
+
+class FewMsTimingTestCase(BatchedOperatorTestCase):
+    """The batched wave branch is fast, and the speed-up is structural.
+
+    On the warm crown fixture the RB ``lnlike`` beats
+    ``lnlike_bruteforce`` by at least `SPEEDUP_MIN` (machine-INDEPENDENT,
+    HARD) and the pure ``_data_term`` + ``_norm_term`` contraction is
+    subdominant to the amplification-engine call that feeds it (HARD).
+    The absolute warm ``lnlike`` wall time is guarded by the
+    arithmetic-derived ceiling `MS_CEILING` -- a secondary regression
+    guard, NOT the brief's 10 ms physical target (that needs Lever B,
+    deferred to Build 4).  A per-component breakdown is printed so a
+    regression pinpoints the slipped lever.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Build the crown likelihood once for the whole class."""
+        cls.par_dic_0 = _reference_par_dic()
+        assert sorted(cls.par_dic_0) == waveform.WaveformGenerator.params, (
+            'reference par_dic keys drifted from WaveformGenerator.params')
+        cls.event_data = _make_noisy_event()
+        cls.waveform_generator = waveform.WaveformGenerator.from_event_data(
+            cls.event_data, APPROXIMANT)
+        band = cls.event_data.frequencies[cls.event_data.fslice]
+        f_lo, f_hi = float(band[0]), float(band[-1])
+        edges = np.arange(f_lo, f_hi, DF_BIN)
+        if edges[-1] < f_hi:
+            edges = np.append(edges, f_hi)
+        cls.fbin = edges
+        cls.like = LensedRelativeBinningLikelihood(
+            cls.event_data, cls.waveform_generator, cls.par_dic_0,
+            delta_t_max=DELTA_T_MAX, fbin=cls.fbin)
+
+    def _crown_candidate(self):
+        """Merge the crown lens row with the fiducial waveform params."""
+        _, y1, y2, gamma, beta, kappa = _CROWN
+        candidate = dict(self.par_dic_0)
+        candidate.update({'m_lens_msun': M_LENS_MSUN, 'z_lens': Z_LENS,
+                          'y1': y1, 'y2': y2, 'gamma': gamma,
+                          'beta': beta, 'kappa': kappa})
+        return candidate
+
+    @staticmethod
+    def _best_time(thunk):
+        """Best-of-`TIMING_REPEATS` wall time [s] for ``thunk``."""
+        best = np.inf
+        for _ in range(TIMING_REPEATS):
+            start = time.perf_counter()
+            thunk()
+            best = min(best, time.perf_counter() - start)
+        return best
+
+    def test_lnlike_warm_wall_time_and_speedup(self):
+        """Warm ``lnlike`` beats brute by >= `SPEEDUP_MIN` and sits under
+        `MS_CEILING`, with a component breakdown printed.
+
+        The speed-up gate is machine-independent (a structural property of
+        the additive contraction vs. the per-frequency brute integral);
+        the ceiling is the arithmetic-derived regression guard.
+        """
+        candidate = self._crown_candidate()
+
+        def run_rb():
+            self.like.lnlike(candidate)
+
+        def run_brute():
+            self.like.lnlike_bruteforce(candidate)
+
+        run_rb()  # warm caches (numba already compiled at import)
+        run_brute()
+        t_rb = self._best_time(run_rb)
+        t_brute = self._best_time(run_brute)
+
+        lens = self.like._lens_params(candidate)
+        source = np.asarray((lens['y1'], lens['y2']), dtype=float)
+
+        def run_caustic():
+            geometry.nearest_caustic_point(
+                lens['gamma'], lens['beta'], source, kappa=lens['kappa'])
+
+        def run_engine():
+            self.like._amplification_coefficients(candidate)
+
+        run_caustic()
+        run_engine()
+        t_caustic = self._best_time(run_caustic)
+        t_engine = self._best_time(run_engine)
+        _, _, _, partition = self.like._amplification_coefficients(candidate)
+        print(f'\n[FewMsTiming] breakdown (best-of-{TIMING_REPEATS}): '
+              f'caustic-search={t_caustic * 1e3:.3f} ms, '
+              f'amplification-engine={t_engine * 1e3:.2f} ms '
+              f'({partition.w.size} nodes), '
+              f'lnlike total={t_rb * 1e3:.2f} ms, '
+              f'brute={t_brute * 1e3:.1f} ms, '
+              f'speedup={t_brute / t_rb:.1f}x')
+
+        self.n_checks += 1
+        self.assertGreater(
+            t_brute, SPEEDUP_MIN * t_rb,
+            f'RB lnlike ({t_rb * 1e3:.2f} ms) is not at least '
+            f'{SPEEDUP_MIN}x faster than brute force '
+            f'({t_brute * 1e3:.1f} ms); the batched speed-up regressed')
+        self.n_checks += 1
+        self.assertLessEqual(
+            t_rb, MS_CEILING,
+            f'warm lnlike best-of-{TIMING_REPEATS} = {t_rb * 1e3:.2f} ms '
+            f'exceeds the arithmetic-derived ceiling '
+            f'{MS_CEILING * 1e3:.0f} ms; a lever regressed (see breakdown)')
+
+        if _HAVE_MPL:
+            self._plot_breakdown(t_caustic, t_engine, t_rb, t_brute)
+
+    def test_contraction_subdominant_to_amplification_engine(self):
+        """The pure contraction is faster than the amplification-engine
+        call that feeds it.
+
+        Inputs come from the LIVE hot path so the measured contraction
+        matches production; the additive ``M**2 + n_img**2`` design stays
+        below the 1F1 engine, with no FFT or per-frequency Python loop on
+        the hot path.
+        """
+        candidate = self._crown_candidate()
+
+        r0, r1, dt_lf = self.like._candidate_bin_ratios(candidate)
+        rho0, rho1 = r0.conj(), r1.conj()
+        delays, k0, k1, _ = self.like._amplification_coefficients(candidate)
+        kbar0, kbar1 = k0.conj(), k1.conj()
+        tau = delays - dt_lf
+        f_center = self.like._f_center
+
+        def run_contraction():
+            _data_term(self.like._a_moments, rho0, rho1, kbar0, kbar1, tau,
+                       f_center)
+            _norm_term(self.like._b_moments, r0, r1, rho0, rho1, k0, k1,
+                       kbar0, kbar1, delays, f_center)
+
+        def run_engine():
+            self.like._amplification_coefficients(candidate)
+
+        run_contraction()
+        run_engine()
+        t_contract = self._best_time(run_contraction)
+        t_engine = self._best_time(run_engine)
+        print(f'\n[FewMsTiming] contraction = {t_contract * 1e3:.3f} ms, '
+              f'amplification engine = {t_engine * 1e3:.2f} ms')
+
+        self.n_checks += 1
+        self.assertLess(
+            t_contract, t_engine,
+            f'contraction ({t_contract * 1e3:.3f} ms) is not subdominant '
+            f'to the amplification engine ({t_engine * 1e3:.2f} ms); an '
+            'FFT or per-frequency Python loop may have crept onto the '
+            'hot path')
+
+    def _plot_breakdown(self, t_caustic, t_engine, t_rb, t_brute):
+        """Bar chart of the warm per-component wall times [ms]."""
+        fig, axis = plt.subplots(figsize=(6.0, 4.0))
+        labels = ['caustic', 'engine', 'lnlike', 'brute']
+        times_ms = [t_caustic * 1e3, t_engine * 1e3, t_rb * 1e3,
+                    t_brute * 1e3]
+        axis.bar(labels, times_ms, color='steelblue')
+        axis.axhline(MS_CEILING * 1e3, color='crimson', linestyle='--',
+                     label=f'MS_CEILING = {MS_CEILING * 1e3:.0f} ms')
+        axis.set_yscale('log')
+        axis.set_ylabel('warm best-of-N wall time [ms]')
+        axis.set_title('Batched wave-branch timing breakdown (crown)')
+        axis.legend()
+        self._save_figure(fig, 'few_ms_timing_breakdown')
+
+
+class BatchedEquivalenceTestCase(BatchedOperatorTestCase):
+    """The scalar `F_op` delegates to the batched `F_op_grid` bit-for-bit.
+
+    The single-path design routes `F_op` through a one-element
+    `F_op_grid` call, so the scalar and batched values are the SAME bits,
+    not merely close.  This confirms that the many RB-vs-brute,
+    determinism, crown-accuracy and interpolation gates in the sibling
+    suites -- which call the scalar entry points -- automatically
+    exercise the batched contraction at their ORIGINAL tolerances.
+    """
+
+    def test_scalar_delegates_to_batch_bit_identically(self):
+        """`F_op` value equals the one-element `F_op_grid` value exactly.
+
+        The representative in-domain point (w=20, y=(0.55, 0),
+        gamma=0.20) certifies; the delegation must be an exact
+        pass-through (``assertEqual``), not an approximate match.
+        """
+        y = np.array(FALS_Y)
+        scalar_value, _ = F_op(FALS_W, y, FALS_GAMMA)
+        grid_values, _, _ = F_op_grid(
+            np.array([FALS_W], dtype=float), y, FALS_GAMMA)
+        self.n_checks += 1
+        self.assertEqual(
+            scalar_value, complex(grid_values[0]),
+            'scalar F_op is not bit-identical to the one-element '
+            'F_op_grid; the single-path delegation is broken')
+
+    def test_scalar_matches_batch_across_certified_grid(self):
+        """Every certified in-domain grid point delegates bit-identically.
+
+        Sweeping the ``F_op`` grid configs, each scalar `F_op` value must
+        equal the corresponding one-element `F_op_grid` value exactly, so
+        the delegation is exact across the domain, not just at one point.
+        """
+        for sqrt_s in FOP_GRID_SQRT_S:
+            for gamma in FOP_GRID_GAMMA:
+                for w in FOP_GRID_W:
+                    with self.subTest(sqrt_s=sqrt_s, gamma=gamma, w=w):
+                        y = np.array([sqrt_s, 0.0])
+                        try:
+                            scalar_value, _ = F_op(
+                                w, y, gamma, max_order=FOP_MAX_ORDER)
+                            grid_values, _, _ = F_op_grid(
+                                np.array([w], dtype=float), y, gamma,
+                                max_order=FOP_MAX_ORDER)
+                        except CancellationError:
+                            continue  # refused nodes carry no value to match
+                        self.n_checks += 1
+                        self.assertEqual(
+                            scalar_value, complex(grid_values[0]),
+                            f'scalar/batch mismatch at w={w}, '
+                            f'sqrt_s={sqrt_s}, gamma={gamma}')
+
+
+class SelfFalsificationTestCase(BatchedOperatorTestCase):
+    """Prove this suite's own guards can go red.
+
+    A suite whose accuracy assertion and anti-vacuity ``tearDown`` cannot
+    fail is not a test.  These positive controls confirm the relative-
+    error gate rejects a deliberately wrong value and the anti-vacuity
+    guard fails a test that made zero comparisons.
+    """
+
+    def test_relative_gate_rejects_wrong_value(self):
+        """`assert_relative` raises when the candidate is far from truth."""
+        probe = BatchedOperatorTestCase()
+        probe.n_checks = 0
+        self.n_checks += 1
+        with self.assertRaises(AssertionError):
+            probe.assert_relative(2.0 + 0j, 1.0 + 0j, FOP_RTOL,
+                                  'deliberately wrong value')
+
+    def test_anti_vacuity_teardown_fails_on_zero_checks(self):
+        """`tearDown` fails a test that made zero comparisons."""
+        probe = BatchedOperatorTestCase()
+        probe.n_checks = 0
+        self.n_checks += 1
+        with self.assertRaises(AssertionError):
+            probe.tearDown()
+
+    def test_anti_vacuity_teardown_passes_when_checks_ran(self):
+        """`tearDown` is silent once at least one comparison ran."""
+        probe = BatchedOperatorTestCase()
+        probe.n_checks = 1
+        self.n_checks += 1
+        probe.tearDown()  # must not raise
+
+
+if __name__ == '__main__':
+    main()
