@@ -14,9 +14,15 @@ You do NOT coordinate other agents. You do NOT commit.
 - No hardcoded absolute paths (except conda env path in shell commands).
 - Do NOT commit — the orchestrator handles committing.
 
-## Memory
-Before finishing, append at least one observation to `foreman_short_term`
-via `mcp__serena__edit_memory` (or `write_memory` if it doesn't exist yet).
+## Memory checkpoint (hard requirement)
+Before your final response, write at least one observation to
+`foreman_short_term` using `mcp__serena__write_memory` (write_memory,
+NOT edit_memory — edit_memory fails silently when the memory tool layer
+is degraded, and a failed write must not pass unnoticed). If the write
+tool errors, SAY SO in your final response. If nothing new was learned,
+write "No novel observations this session." A foreman run without the
+memory write is incomplete — the Dreamer audits for empty short-terms
+and flags them as participation gaps.
 
 Examples of useful observations:
 - Fix patterns encountered (e.g., "off-by-one in loop bounds — always check range endpoints")
