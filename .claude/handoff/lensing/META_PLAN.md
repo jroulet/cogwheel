@@ -993,3 +993,33 @@ its node count was actually measured on). Post-3f 10 ms menu:
 (a) ratio layer (cheap, per-event, no cache) — preferred if it
 suffices; (b) envelope surrogate (table) for any residual gap. Decide
 on 3f's measured timing.
+
+### BUILD 3F COMPLETE — SACR-C LANDED, COMMITTED b2d80a0 (2026-07-18 ~10:30)
+
+Pipeline: Inspector PASS (after ONE doc-only escalation, accepted;
+revision loops had fixed everything else), Professor PASS with measured
+gate numbers (recon identity 5e-15; greedy N worst 21; LOO <= 48
+config-independent; |S_a H_a| <= 1.21 at crossings; deep-band < 1e-6;
+carrier phase 5e-13; ALL regressions green at original tolerances).
+Commit blocked on the recorded ISSUES verdict -> driver hand-finish:
+SPEC 0.5.0 (SACR-C fast-path sentence), F008 ADDENDUM (switch keying
+superseded by criticality separation; lesson preserved), fragments
+rendered, committed b2d80a0 hook-clean.
+
+MEASURED: warm single-thread lnlike ~29 ms (pipeline harness), 1F1
+ladder ~89% of cost. The 18 ms projection is XFAIL by design
+(machine-dependent); speedup gate ~47x.
+
+NEXT (owner-preferred, recorded above): BUILD 3G = the candidate/
+fiducial RATIO LAYER (q_a, tex Eq. slow-component-ratio) — fiducial
+envelope once, per-proposal ratio on ~6-11 nodes -> projected ~6-8 ms,
+under the 10 ms requirement with no table. Surrogate remains backstop.
+Full suite verification detached (result pending); Dreamer after; then
+3g brief; Build 4 (sampling) after the 10 ms question closes.
+
+Dreamer consolidated the 3d/3e/3f cycle (2026-07-18 ~11:00): 20+
+promotions incl. the code-pin verification rule and the refusal
+pattern. NOTE: its "INS-6-001 still open" flag is stale — the driver
+hand-finish in b2d80a0 closed it (SPEC 0.5.0 + F008 addendum). FOREMAN
+short-term empty for the SECOND consecutive cycle despite five builds —
+worth a foreman.md nudge in the next SDK housekeeping pass.
