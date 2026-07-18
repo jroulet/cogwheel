@@ -20,6 +20,16 @@ constant are frozen; saddle configs route to the new evaluator;
 Build S2 (channels/likelihood/prior over the saddle domain) follows as
 Build 7 — do NOT pull its scope forward.
 
+TREE STATE AT (RE)LAUNCH: a prior run of this build died to service
+wedges AFTER its WP1 coder delivered substantial geometry.py work
+(uncommitted in the tree: parity-aware domain split, branch-parameter
+two-lobe extension of critical_point/_caustic_source with positive-
+parity-preserving defaults; call sites consistent per git diff; NOT
+yet test-verified). Fix FORWARD from this state: verify the existing
+geometry work against WP1's spec and continue — do not blindly restart
+it, and do not assume it is correct without running the gates.
+_schwinger.py was never created (WP2 untouched).
+
 ## Required measurement (owner sequencing input)
 
 Record the Schwinger evaluator's warm PER-POINT COST (ms/point over a
