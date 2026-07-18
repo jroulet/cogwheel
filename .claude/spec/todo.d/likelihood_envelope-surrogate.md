@@ -1,5 +1,5 @@
 ---
-section: likelihood
+section: Backlog
 ---
 # Envelope surrogate + micro-levers — close the lensed/unlensed per-eval gap [→ spec]
 

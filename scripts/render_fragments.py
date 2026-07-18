@@ -390,11 +390,22 @@ def render_todo(frag_dir):
         if stripped == "<!-- ITEMS -->":
             key = (current_section, current_subsection)
             if key in items_by_loc:
-                for _, body in items_by_loc[key]:
+                for _, body in items_by_loc.pop(key):
                     output.append(body.rstrip() + "\n\n")
             continue
 
         output.append(line)
+
+    # A fragment whose `section:` matches no template header would
+    # otherwise vanish silently from the rendered TODO (it bit three
+    # fragments before this warning existed, 2026-07-18).
+    for (section, subsection), items in sorted(items_by_loc.items()):
+        names = ", ".join(fname for fname, _ in items)
+        print(f"  WARNING: todo fragment(s) [{names}] declare "
+              f"section={section!r} subsection={subsection!r}, which "
+              "matches no header in todo.d/_seed.md — they were NOT "
+              "rendered. Use one of the template's '## ' sections "
+              "(e.g. 'Backlog', 'In progress').")
 
     return "".join(output).rstrip("\n") + "\n"
 

@@ -71,6 +71,114 @@ Tag conventions:
   stack — changing the SDK underneath an unproven pipeline would confound the
   two. Once cogwheel proves it, port to `~/Work/teja-force` (assets/sdk) and gw.
 
+# Envelope surrogate + micro-levers — close the lensed/unlensed per-eval gap [→ spec]
+
+Owner directive (2026-07-18): the lensed likelihood at ~9.8 ms/eval is
+still ~10-100x the unlensed RB cost, and the lensed posterior explores
+MORE dimensions (4 extra sampled lens params + lens-sector structure) —
+a double whammy on total sampling cost even after extrinsic
+marginalization. The surrogate is therefore a standing objective, not a
+one-time backstop; do not let it fall out of planning.
+
+Current cost structure (post-Build-3g, measured): per-proposal engine =
+~8 ratio nodes x ~0.4 ms + amortized fiducial builds (~30-44 nodes per
+new lattice cell); plus caustic search ~1.9 ms and data/norm contraction
+~2.5 ms. Levers, in rough order of value:
+
+1. **E_fid surrogate (per-lattice-cell)**: tabulate the fiducial
+   envelopes — ONE smooth beat-free 1D curve per lattice cell — killing
+   both the fiducial-build cost and most of the ratio-node engine cost.
+   Any GLOBAL table must respect the w = xi(M_L, z_L)*f moving-grid
+   constraint; the per-cell form sidesteps it.
+2. **Micro-levers** (fenced out of Builds 3d-3g, still on the shelf):
+   nearest-caustic Newton shortcut (~1.9 -> ~0.3 ms, geometry.py,
+   value-preserving + branch-invariant obligations) and weight-vector
+   contraction fusion (~2 -> ~1 ms, operator.py, refusal quantities
+   byte-unchanged, F005-style re-certification).
+3. **Schwinger-cost coupling**: the negative-parity builds replace the
+   shear series with the exact both-parity Schwinger representation
+   (see negative_parity_research.md). Its per-point cost is UNMEASURED;
+   if it lands slower than the current ladder path, the surrogate's
+   value rises accordingly (surrogate of the Schwinger-based envelope
+   over the enlarged domain). Measure per-point cost in those builds
+   and revisit this fragment's priority.
+
+Target: lensed per-eval within a small factor (~2-4x) of unlensed RB.
+Sequencing per owner: after Build 5 (extrinsic marginalization) and
+alongside/after the negative-parity builds. Oracles and gates follow
+the house rules (engine as F002-clean oracle; zero false accepts; no
+tolerance widening; fallback-to-exact preserves certified-or-refuse).
+
+# Standard RB zero-noise floor (8.96e-3) — fix upstream [→ docs]
+
+Owner directive (2026-07-17): the measured zero-noise floor of the
+PRE-EXISTING standard `RelativeBinningLikelihood` should be fixed in the
+upstream machinery, not merely pinned by the lensing suite.
+
+Measured (probe9, zero-noise fixture d=h0, asd_drift=1, HLV 4s
+IMRPhenomXPHM, 253 bins @4 Hz): lnlike_fft(par0)=285.398401; standard
+unlensed RB = 285.389439 → floor 8.962e-3; lensed RB adds only 2.676e-3
+on top (that increment is separately gated in the lensing suite).
+
+Design note from the owner: the stall-ringdown is applied to the
+REFERENCE (`_h0_edges`) and not the evaluated waveform — by design. The
+investigation should therefore look at the intrinsic cost of the
+reference-side stall + linear-free construction at zero noise (where the
+candidate/fiducial ratio should be exactly 1) rather than "symmetrizing"
+the construction (measured in probe8: forcing the stall onto the
+candidate explodes the floor to ~127 — the asymmetry is intentional).
+
+Mechanism (owner, 2026-07-17): the ratio is r = h/h_0 where ONLY h_0
+carries the stall-ringdown — so even at exactly fiducial parameters and
+zero noise, r != 1 in the ringdown band and the per-bin LINEAR ratio
+model must track real structure; its residual binning error IS the
+8.96e-3 floor. If reference and candidate were constructed alike, r
+would be identically 1 there and the floor would vanish — the stall buys
+a smooth interpolable reference at the cost of a nontrivial fiducial
+ratio.
+
+HARD CONSTRAINT (owner, 2026-07-17): the stall-ringdown is NOT to be
+removed or weakened — it is load-bearing (smooth interpolable
+reference). Any plan that deletes or bypasses the stall is out of
+bounds.
+
+THE REQUIREMENT (owner, 2026-07-17): likelihood accuracy, nothing else.
+r != 1 at fiducial is acceptable — the stall exists to make r SMOOTH,
+not trivial — as long as the per-bin model captures it to the lnL
+tolerance. The 8.96e-3 zero-noise ΔlnL says the current bins/linear
+model capture it imperfectly. Candidate levers (engineering choice for
+the build, not prescribed here): finer/adaptive binning through the
+ringdown band, a higher-order in-bin ratio model there, or arranging
+the stalled reference to cancel through the contraction. Judge any of
+them purely by the measured zero-noise ΔlnL and the standard accuracy
+gates.
+
+Acceptance: standard-RB zero-noise self-floor driven to <=1e-4 (or the
+mechanism documented in FINDINGS with a physical bound if irreducible);
+the lensing suite's regression pin (1.164e-2 decomposed) then tightens
+accordingly. Route through the normal build workflow — this touches
+mature package machinery (correctness-first; brute/fft oracles exist).
+
+# Brief/plan depth guards in the SDK launcher [housekeeping]
+
+Mechanical enforcement of the CLAUDE.md "SDK Build Briefs" discipline (the
+belt-and-suspenders layer beyond driver judgment):
+
+1. DONE (2026-07-17): `launch_build.sh` warns (stderr, non-fatal) on briefs
+   >12 KB or referencing META_PLAN.
+2. DONE (2026-07-17): plan gate prints `plan_depth_banner` (WP count + plan
+   size, WARNING above 3 WPs) — gates.py, tested.
+3. REMAINING: Orchestrator scopes context per agent — slice the approved
+   plan so each coder receives its own WP + shared preamble, not all WPs +
+   all test descriptions (largest single depth reduction available).
+   Agent-visible change: prove on the next live build (Build 3) before
+   porting.
+
+Rationale: bare-denial rate is transcript-depth-correlated (0/106 in first
+two calls, median call 14, issue #74351); gw's 37 shallow builds recorded
+zero denials on the identical harness. Prove in cogwheel, then port to
+teja-force skill + gw with the rest of the hardening.
+
 
 ## In progress
 
