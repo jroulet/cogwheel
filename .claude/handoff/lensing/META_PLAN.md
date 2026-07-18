@@ -1043,3 +1043,22 @@ COMPLETE (d_app never kappa; refusals->lnL=-inf or positive-parity
 prior; 22-only phase degeneracy) plus per-eval determinism through the
 fiducial cache under sampler parallelism (fork/pickle semantics of
 _fid_cache worth one design question).
+
+### BUILD 4 CLOSED — SMOKE VALIDATION DONE; MARGINALIZATION PROMOTED (2026-07-18 ~15:00)
+
+Post-commit (cf53ada) verification: full suite 281 passed + 2 designed
+xfails in 1:23. First end-to-end sampling run (Nautilus, crown unlensed
+injection, pool=4): STACK VALIDATED — reference lnpost 260.59 finite,
+1500+ evals zero exceptions, bounds building normally — but blind-draw
+throughput ~1-2 eval/s (NOT the warm 9.8 ms: samplers pay fresh XPHM
+coarse-waveform gen per proposal + cold fiducial-lattice cells + refusal
+exception overhead) => converged 15-D posterior ~1 day. Killed at 25 min
+as designed (validation-only). OWNER RULINGS RECORDED: (1) gamma [0,
+0.45] explained = certified-domain margin, not physics; the Schwinger
+rep (negative-parity research) lifts it; (2) extrinsic marginalization
+with conditional draws PROMOTED to the REQUIRED Build 5 path (surrogate
+squeeze deferred); (3) negative-parity builds locked after sampling
+works — triple-motivated (parity cut + gamma ceiling + C7 efficiency).
+Heavy PP/injection-recovery validation deliberately deferred to the
+marginalized posterior (Build 5) — running it on the plain path at
+~1 day/run would validate a configuration we do not intend to ship.
