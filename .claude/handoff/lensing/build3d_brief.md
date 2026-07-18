@@ -32,15 +32,23 @@ A. **Finish the factorization: kink-aware interpolation, ~10x fewer
    gate (null-safe 1e-3 on the production grid) must hold on whatever
    grid ships; the gate moves to the new interpolation scheme's
    production configuration, tolerance UNCHANGED.
-B. **The 3D post-contraction surrogate** (design below) — take it ONLY
-   for whatever gap A leaves, or if the Professor shows A cannot hold
-   the accuracy gate at a node count that reaches 10 ms. B carries the
-   research-grade burdens (global domain, cache, provenance) that A
-   avoids entirely.
+B. **The 3D post-contraction surrogate** (design below) — WANTED IN ITS
+   OWN RIGHT (owner, 2026-07-18): if it certifies and saves FLOPs,
+   build it — A's success is NOT a reason to drop B. Even at A's target
+   node count the exact ladder still costs ~4.5 ms that the surrogate
+   turns into microseconds; production MCMC wants every millisecond of
+   margin, and the fallback-to-exact contract keeps correctness
+   independent of coverage. A comes FIRST because it is cheap, per-event,
+   and shrinks what B must serve per eval; B carries the research-grade
+   burdens (global domain, cache, provenance) and must pay for itself in
+   measured FLOPs.
 
-If the honest combined arithmetic still cannot reach 10 ms, follow the
-step rule (gate at the plan's own predicted floor with the derivation,
-name the residual lever) — the burden of proof is on the arithmetic.
+Sequencing: if an honest decomposition of A + B exceeds ~3 WPs, ship A
+in this build and B as an immediately-following Build 3e with its own
+brief — deferred, never dropped. If the honest combined arithmetic
+still cannot reach 10 ms, follow the step rule (gate at the plan's own
+predicted floor with the derivation, name the residual lever) — the
+burden of proof is on the arithmetic.
 
 ## Settled facts (do not re-derive)
 

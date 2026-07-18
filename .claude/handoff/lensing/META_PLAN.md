@@ -885,3 +885,45 @@ NEXT: full suite detached (result pending) -> Dreamer close (Phase 3
 skipped in all three builds — memory consolidation overdue) -> Build 3d
 brief (the surrogate; owner's 10 ms requirement) -> then Build 4
 (sampling, owner numbering preserved).
+
+### OWNER DESIGN RULING (2026-07-18, mid-Build-3d): beats are a
+### decomposition artifact — do RB component by component
+
+The Professor's "~9 beat cycles set the node floor" (3d plan) is config
+arithmetic, not physics: the locked design (decisions #1/#3) carries
+ALL oscillatory content analytically (per-image delay phases; envelope
+interpolation at pair delays). Beats visible in the interpolated K_a
+mean the transition-region channel construction leaks oscillation into
+the nominally-smooth kernels (the F006-era artificial split parks F's
+oscillation in-channel; the smootherstep mixes it across the band).
+BUILD 3E FIRST-ORDER DESIGN QUESTION: re-expand transition-band kernels
+as smooth envelopes x analytic per-pair carriers; interpolate envelopes
+only; node count must come out CONFIG-INDEPENDENT (envelope scale). If
+envelopes are beat-free the 3D surrogate becomes trivial/optional —
+re-scope accordingly (owner still wants it if it saves FLOPs). 3d
+(segmented interpolation, 15 ms floor) lands as-is — a safe strict
+step; do NOT interrupt it.
+
+### BUILD 3D ABORTED AT THE ESCALATION GATE (2026-07-18 05:46) — evidence banked
+
+Revision loops exhausted; Inspector findings: suite uncollectable
+(imports of abandoned segmentation symbols), stale segmentation-era
+tests, PRIMARY OBJECTIVE REGRESSED — segmentation abandoned in-build
+for a global spline + beat overlay, grid GREW to 58-91 nodes (accuracy
+binds there), warm crown 27.4 ms vs prior 18.8 like-for-like. Driver
+ABORTED (escalation_abort), archived escalation.json to the handoff
+dir, reverted likelihood.py + test_lensing_fast_path.py to HEAD
+(verified: 20 tests collect, 41 ms driver-harness, value bit-matches).
+The coder's own concession ("oscillation removal is out of scope for
+this interpolation layer") independently confirms the owner's ruling.
+NOTE the harness discrepancy (Inspector 18.8 vs driver 41 ms pinned,
+same tree) — unresolved; future timing gates must be self-relative /
+arithmetic-derived, never cross-harness absolutes.
+
+BUILD 3E (brief build3e_brief.md, launching): Professor-first envelope
+analysis — re-expand transition-band kernels as smooth envelopes x
+analytic pair carriers (owner ruling; design decisions #1/#3 idiom);
+node count must be CONFIG-INDEPENDENT; micro-levers (caustic Newton,
+contraction fusion) in scope; surrogate re-scoped after the analysis
+(owner wants it if it saves FLOPs); 10 ms HARD subject only to the
+step rule through the Professor's analysis.

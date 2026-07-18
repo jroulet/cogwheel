@@ -1,0 +1,33 @@
+{
+  "architect_rationale": "Revision loops exhausted (3/2); 4 finding(s) remain.",
+  "findings": [
+    {
+      "finding_id": "INS-3-001",
+      "severity": "implementation",
+      "file": "cogwheel/tests/test_lensing_fast_path.py",
+      "description": "FATAL collection error (== INS-2-001, unresolved). Lines 122-123 import `_MAX_SEGMENT_NODES, _MIN_SEGMENT_NODES, _SMOOTH_BAND_NODES` from cogwheel.lensing.likelihood, but the shipped module defines `_LINEAR_NODES_PER_BEAT/_MIN_LINEAR_NODES/_MAX_LINEAR_NODES` and `_DEFAULT_KERNEL_NODES=32` instead. `pytest --co` raises ImportError and collects 0 tests; every claimed gate is un-run. Re-confirmed live this session.",
+      "suggested_fix": "Test Developer must rewrite the suite for the shipped global-spline design; the import must reference only symbols that exist. A symbol-only patch is insufficient (see INS-3-002)."
+    },
+    {
+      "finding_id": "INS-3-002",
+      "severity": "implementation",
+      "file": "cogwheel/tests/test_lensing_fast_path.py",
+      "description": "Stale segmentation-era suite (== INS-2-002, unresolved). The file still describes/tests a SEGMENTED per-segment grid (`_segmented_reconstruct`, 'SEGMENTED grid' docstring, `boundaries`-as-breakpoints, expectedFailure masks, inverted `_DEFAULT_KERNEL_NODES/ncoarse >= 4` node-reduction gates) while the shipped code uses ONE global not-a-knot spline (boundaries=[w_min,w_max]). Even with the import fixed: the three accuracy @expectedFailure tests now PASS their inner assertion in the shipped code (=> unittest UNEXPECTED SUCCESS = failure), and the node-reduction gates fail because the grid GREW (58-91 nodes).",
+      "suggested_fix": "Rewrite the suite to the global-spline design: drop segmentation helpers/constants, remove the stale @expectedFailure masks (assert the accuracy gates green \u2014 they genuinely pass at 1e-3), and replace the inverted node-reduction gates with the real shipped grid-vs-100-baseline metric. Do not paper over with tolerance changes."
+    },
+    {
+      "finding_id": "INS-3-003",
+      "severity": "design",
+      "file": "cogwheel/lensing/likelihood.py",
+      "description": "Primary objective unmet and REGRESSED (== INS-2-003, unresolved). Warm crown lnlike re-measured at 27.4 ms (best-of-7, threads pinned) \u2014 far above the 10 ms hard target / 15 ms ceiling and worse than the prior build's 18.8 ms. The coarse node grid grew to crown 62 / near-cusp 60 / well-sep 91 / near-fold 83 / sheared 58 (1.1-1.7x vs the 100-node baseline), so lever A (target ~10x fewer nodes) is inverted: accuracy was bought by ADDING nodes. The code's own `_coarse_w_node_grid` docstring concedes ~50-60 nodes are required and that removing the in-kernel oscillation upstream is 'out of scope for this interpolation layer'. No lever-B `_surrogate.py` module and no DATA_CONTRACTS artifact were created.",
+      "suggested_fix": "Escalate to the owner: with the accuracy gate binding at ~50-60 nodes, lever A alone cannot reach 10-15 ms \u2014 this is the brief's step-rule case. Report the measured 27.4 ms / grown-grid floor honestly (do not widen the timing ceiling), and take the residual gap via lever B (the post-contraction 3D surrogate table + DATA_CONTRACTS entry) in a follow-up build. Do not touch the engine layer."
+    },
+    {
+      "finding_id": "INS-3-004",
+      "severity": "design",
+      "file": ".claude/spec/SPEC.md",
+      "description": "Spec-code divergence (== INS-2-004, unresolved). `git diff HEAD .claude/spec/SPEC.md` is empty. The microlensed-likelihood row still states the fast path uses a log-spaced base of `_DEFAULT_KERNEL_NODES = 100` nodes unioned with full-cluster transition frequencies, cubic-splined, and 'warm lnlike ~0.3 s/eval'. The shipped code uses a 32-node log base + uniform beat-resolving overlay (24-56) + landmark nodes, one global not-a-knot spline, warm lnlike ~27 ms.",
+      "suggested_fix": "Librarian to sync SPEC.md's node-grid description (32 base + uniform overlay + landmark nodes, single global spline) and remove the stale 100-node / 0.3 s figures. Flagged as accuracy-of-invariant; Librarian owns the edit."
+    }
+  ]
+}
