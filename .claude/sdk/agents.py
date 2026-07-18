@@ -208,8 +208,14 @@ def _build_env() -> dict[str, str]:
 class SerenaManager:
     """Manages a single shared Serena SSE server for all agents/skills."""
 
-    def __init__(self, project_root: str, port: int = 8322,
+    def __init__(self, project_root: str, port: int | None = None,
                  external_url: str | None = None):
+        if port is None:
+            # Per-repo SSE port via the .env idiom (SDK_SERENA_PORT,
+            # exported by launch_build.sh / .claude/build). Sibling
+            # pipelines (gw) hardcode 8322 AND their watchdogs kill any
+            # 8322 listener, so this repo's port must be movable.
+            port = int(os.environ.get("SDK_SERENA_PORT", "8322"))
         self.project_root = project_root
         self.external_url = external_url
         if external_url:
@@ -231,12 +237,13 @@ class SerenaManager:
         if self.external_url:
             if await self._url_reachable(self.external_url):
                 return self.url
+            fallback_port = int(os.environ.get("SDK_SERENA_PORT", "8322"))
             logger.warning(
                 "Serena SSE at %s unreachable; spawning own Serena on :%d",
-                self.external_url, 8322,
+                self.external_url, fallback_port,
             )
             self.external_url = None
-            self.port = 8322
+            self.port = fallback_port
             self.url = f"http://localhost:{self.port}/sse"
         python_bin_dir = os.path.dirname(sys.executable)
         self.process = subprocess.Popen(

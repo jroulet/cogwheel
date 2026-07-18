@@ -14,6 +14,12 @@ if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${SDK_CONDA_ENV:-}" ]]; then
 fi
 ENV_NAME="${SDK_CONDA_ENV:-cogwheel_310}"
 
+# Per-repo Serena SSE port (see launch_build.sh): shell > .env > 8322.
+if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${SDK_SERENA_PORT:-}" ]]; then
+  SDK_SERENA_PORT="$(grep -E '^SDK_SERENA_PORT=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+fi
+export SDK_SERENA_PORT="${SDK_SERENA_PORT:-8322}"
+
 if command -v conda >/dev/null 2>&1; then
     exec conda run --no-capture-output -n "$ENV_NAME" \
       python "$REPO_ROOT/.claude/sdk/build.py" build "$@"

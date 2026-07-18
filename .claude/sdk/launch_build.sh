@@ -52,6 +52,15 @@ if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${SDK_CONDA_ENV:-}" ]]; then
 fi
 ENV_NAME="${SDK_CONDA_ENV:-cogwheel_310}"
 
+# Per-repo Serena SSE port, same .env precedence (shell > .env > 8322).
+# Sibling pipelines (gw) hardcode 8322 and their watchdogs kill any 8322
+# listener — set SDK_SERENA_PORT in .env to keep the repos disjoint.
+# Exported so build.py (SerenaManager) and watchdog.sh both see it.
+if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${SDK_SERENA_PORT:-}" ]]; then
+  SDK_SERENA_PORT="$(grep -E '^SDK_SERENA_PORT=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+fi
+export SDK_SERENA_PORT="${SDK_SERENA_PORT:-8322}"
+
 LOG="/tmp/${SLUG}_$(date +%Y%m%d_%H%M%S).log"
 
 # Detached build + detached watchdog + Monitor on the log, with PLAN
