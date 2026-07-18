@@ -1,35 +1,39 @@
-# Professor short-term: Build 3g ratio-layer inference review (2026-07-18)
+# Professor short-term checkpoint (2026-07-18, negative-parity commission)
 
-## Verdict: PASS
-Reviewed `cogwheel/tests/test_lensing_ratio_layer.py` (Build 3g ratio/heterodyne
-acceleration over SACR-C direct path). Env: `cogwheel-newlal` (py3.10) — note the
-IAS server has NO `cogwheel_310`; `.env` routes to `cogwheel-newlal`.
+Commission COMPLETE.  Deliverable written:
+`.claude/handoff/lensing/negative_parity_research.md` (verdict: the
+treatment exists; one precisely characterized obstruction inside it).
+Durable physics folded into `mem:professor/microlensing_chang_refsdal`
+(new saddle section).  Engine untouched (ec8a276); all numerics in
+session scratchpad `np_exp1..9*.py`, interpreter cogwheel-newlal.
 
-## Results
-- Ratio-layer suite: 18/18 PASS in 38s. Neighboring fast suites
-  (fast_path+likelihood+channels): 62 passed / 1 xfailed / 0 fail in 87s.
-- Spec3 ratio-vs-bruteforce (inherited RB tol max(1.5,1e-2|bf|)): all 6 within tol.
-  crown delta 1.077/tol 1.803 (hardest — 4 near-degenerate images), near_fold
-  0.917/1.5, sheared_sw 0.814/5.76, rotated(beta=0.7) 0.541/1.5. These ~1-nat
-  gaps are INHERITED RB-vs-bruteforce error (present in direct path too), NOT
-  introduced by the ratio layer — confirmed by the ratio-vs-direct identity
-  (1e-9) and perturbed (median<0.15) gates.
-- Spec7 timing: warm best-of-5 9.809 ms, bruteforce 1401 ms, speedup 142.8x,
-  ratio node count 8 (config-independent, <=20). Meets even the brief's 10 ms.
-- Spec8 deep-band macro limit: closed form sqrt(mu_macro)=1.49755 reproduced
-  through ratio path to <1e-6 (independently recomputed 1/sqrt((1-k)^2-g^2)).
-- Refusal symmetry: macro_saddle(g=0.5,k=0.6) -> 1-k=0.4<=|g| correctly
-  LensDomainError all 3 paths; cancellation(g=0.405,k=0.57) gamma_eff~0.94 >>
-  cert edge -> CancellationError all 3. Verified parity boundaries by hand.
+Headlines (all measured, details + tables in the handoff file):
+- Geometry layer parity-agnostic: quartic finds saddle-domain images
+  unmodified; census 2:(1,1), 4:(0,1,1,1) (index theorem, 4000-source
+  scan, 0 anomalies); critical curves = same v(theta) formula with +-
+  branch -> two lobes; caustics = two 3-cusp deltoids.
+- Operator shear series DIVERGES for gamma'>1 (radius = parity
+  boundary; best truncation error O(1) at all w) - hard obstruction.
+- Replacement: exact 1D Schwinger representation (derived; both
+  parities); validated vs independent 2D lens-plane mpmath oracle to
+  2.2e-15 on the saddle domain, vs F_op 4e-15 positive parity, vs
+  point-mass closed form exactly.  Single y-INDEPENDENT cancellation
+  channel L_S = pi*w/4 (measured e^{pi w/4}*1e-16 law); float64 ceiling
+  w~18-30, dd ceiling w~64 (matches engine's 60-band).
+- Deep band: F -> e^{-i pi/2}/sqrt(gamma^2-lam^2), |F| correction O(w),
+  phase drift w[tau_G + (1/2)ln(w/2) + c0] modeled to 1e-3.
+- SACR-C carries over (two-lobe nearest-caustic carrier): greedy
+  N = 20-25 over 15 saddle configs incl. fold/cusp crossings
+  eta=+-0.002 (positive-parity band 19-26).  max|S H| <= 1.46 on
+  crossings, <= 2.8 on random scan.
+- Scratch traps found: t_min/carrier demodulation mismatch fakes the
+  beat disease (N 72 vs 24); float64 Schwinger truth silently garbage
+  at w~69 (e^{pi w/4} law) - both recorded as build lessons.
+- Build shape proposed: two sequential builds (S1 engine geometry +
+  dd-quadrature wave branch; S2 channels/likelihood/prior), gates
+  listed in the handoff Sec. 11.  FINDINGS addenda list in Sec. 10.
 
-## Deviations judged ACCEPTABLE (both documented in test docstring)
-1. Envelope identity gate 1e-9 (not brief's 1e-13): candidate 8-node seed grid vs
-   fiducial LOO grid reproduce the engine envelope/critical_delay only to ~1e-11
-   cross-grid; 1e-9 is still 7 orders below _LOO_STOP=4e-3, and self-falsification
-   proves it still catches a 1e-6 spurious carrier. lnlike identity still meets 1e-9.
-   Physically sound — this is grid-reproducibility floor, not interpolation error.
-2. Absolute 10 ms ceiling -> machine-calibrated MS_CEILING=0.5s; HARD gates are
-   speedup + node count (machine-independent). Brief itself deferred the 10 ms to
-   Professor/operator. Measured floor reported. Fine.
-
-Heavy full-sampling/PP validation is operator-deferred (out of turn budget).
+Open/unclaimed: v-plane steepest-descent evaluator (saddles of the 1D
+integrand = image quartic roots v*=u) documented but not built;
+lam <= 0 (Type III) named refusal only; c0 constant in deep phase not
+derived in closed form.
