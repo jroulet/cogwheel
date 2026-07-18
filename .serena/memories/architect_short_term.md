@@ -1,5 +1,34 @@
 # Architect Short-Term Observations
 
+Build 4 (sampled lens coordinates + prior + folding + posterior) planned 2026-07-18:
+- Goal: make LensedRelativeBinningLikelihood SAMPLEABLE. New prior/coords
+  layer only; engine+likelihood frozen. likelihood.params = wf params ∪
+  {m_lens_msun,z_lens,y1,y2,gamma,beta,kappa}; Posterior requires
+  prior.standard_params == likelihood.params EXACTLY.
+- Professor rulings: kappa=0/beta=0/z_lens=0 FIXED (FixedPrior); at kappa=0
+  engine gamma==reduced gamma' (no rescale). Sample ln_m_lens_msun uniform
+  (log-uniform scale prior), range [ln10,ln3500] (w=1.237e-4*M_Lz*f, w<=500
+  w/ margin at f_max~1024). Reduced shear gamma_prime uniform [0,0.45]
+  (CancellationError near gamma_eff~0.5). Source pos mass-conditioned
+  (w*sqrt(s)<=60): triangular scaled map y=u*Y(m), Y~=55/(sqrt2*xi*f_max),
+  ceiling. Distance: REUSE UniformLuminosityVolumePrior (option B, physical
+  d_L; d_app option A deferred to Build5). Time: existing UniformTimePrior
+  (min-delay absorbed by linear-free). Folding: folded_reflected_params=
+  ['y1','y2'] EXACT (Fermat pot invariant under (x_i,y_i)->-; |F| bit-id);
+  y1<->y2 NOT symmetric. No lens phase param -> 22-only fold concern = don't
+  add lens phase fold; phi_ref fold absent for XPHM (existing behavior).
+- Refusal net REQUIRED (CancellationError can fire in-support): LensedPosterior
+  (Posterior) subclass in lensing layer catches (LensDomainError,
+  CancellationError)->-inf + n_refusals counter; raw likelihood raise-contract
+  untouched. Sampler does NOT catch exceptions.
+- Fiducial cache _fid_cache: add __getstate__ dropping it (no __getstate__ in
+  base likelihoods) so fork/pickle to workers clean+deterministic; get_init_dict
+  already excludes it.
+- 3 WPs: WP1 lens subpriors (coords/transforms/Jac/folding, cogwheel/lensing/
+  prior.py); WP2 combined prior+registry+LensedPosterior+wiring; WP3 pickle
+  plumbing. Tests via Test Dev only.
+
+--- prior build (3g) ---
 Build 3g (lensing ratio layer) planned 2026-07-18:
 - Goal: warm lnlike 29.5ms -> <=10ms by candidate/fiducial RB on the lens
   sector. Engine cost is entirely E(w) LOO nodes (~30-44 @0.41ms). Ratio

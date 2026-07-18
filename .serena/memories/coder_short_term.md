@@ -1,5 +1,111 @@
 # Coder Short-Term Observations
 
+- WP2 (Build 4 registered prior + posterior refusal net): added
+  LensedIASPrior to lensing/prior.py, NEW lensing/posterior.py
+  (LensedPosterior), exports in lensing/__init__.py. No engine/likelihood/
+  threshold edits.
+  * LensedIASPrior(RegisteredPriorMixin, CombinedPrior): prior_classes =
+    IASPrior.prior_classes + [FixedLensGeometryPrior, UniformLensMassPrior,
+    UniformReducedShearPrior, UniformSourcePositionPrior] (mass BEFORE
+    source-position: latter conditioned_on m_lens_msun). default_
+    likelihood_class = LensedRelativeBinningLikelihood. Distance stays
+    physical (reuses IAS UniformLuminosityVolumePrior; d_app deferred to
+    Build 5, documented). Verified: registered in prior_registry, no
+    leftover conditioned_on, standard_params == IAS.standard_params |
+    _LENS_PARAMS (7 lens params), sampled adds ln_m_lens_msun,gamma,u1,u2.
+  * IMPORT NOTE: prior.py now imports cogwheel.gw_prior (IASPrior,
+    RegisteredPriorMixin) + cogwheel.lensing.likelihood + CombinedPrior.
+    No cycle: likelihood.py imports waveform/chang_refsdal/relative_binning,
+    never prior; gw_prior never imports lensing. lensing/__init__ imports
+    prior then posterior (pulls heavy numba likelihood) -- intended public API.
+  * LensedPosterior(Posterior): ONLY overrides lnposterior_pardic_and_
+    metadata -> try super(); except (LensDomainError, CancellationError):
+    return (-inf, self.prior.transform(*args,**kw), None) matching base's
+    neginf-lnprior shape. transform is sampled->standard only (no engine),
+    can't itself refuse. NO n_refusals attr. from_event/from_ref_wf_finder
+    INHERITED (registry resolves LensedIASPrior + default_likelihood_class).
+    __init__'s __signature__ assignment binds to the OVERRIDE __func__ (works
+    since self.method.__func__ is subclass fn).
+  * GOTCHA: LensDomainError IS-A ValueError, CancellationError IS-A
+    RuntimeError. except tuple names both specifically so an UNRELATED
+    ValueError still propagates (probed: only the two named types swallowed;
+    zero-prior and normal paths pass through unchanged).
+  * Verified (parse+import+logic-probe via __new__ stubs): all 4 refusal/
+    passthrough cases + all 7 registration/param/ordering checks green.
+  * UNVERIFIED (downstream / Test Dev+Inspector): full-suite green; live
+    from_reference_waveform_finder construction on crown event (lens
+    subpriors take no extra kwargs, inherited like IASPrior); end-to-end
+    prior-draw sweep returns finite-or-exact-inf with no escaping exception;
+    fork/pickle cache determinism. Role limit: parse/import/logic-probe only.
+
+- WP1 (Build 4 prior layer, NEW cogwheel/lensing/prior.py): four lens
+  subpriors, no combined prior / registration / posterior / engine edits.
+  * VERIFIED CONVENTION (WP text guessed "+" signs, told me to check):
+    cogwheel `ln_jacobian_determinant` returns log|d{sampled}/d{standard}|
+    (INVERSE-transform Jacobian), args = standard_params+conditioned_on.
+    Confirmed from gw_prior/mass.py UniformDetectorFrameMassesPrior
+    (returns -log(...)/5, args m1,m2) and extrinsic.py
+    UniformLuminosityVolumePrior (returns log(d_hat/d_lum), args
+    d_luminosity+conditioned). => mass prior returns -log(m_lens_msun);
+    source prior returns -2*log(Y(m)) -- NEGATIVE, not the WP's tentative
+    "+ln_m" / "2 ln Y".
+  * (a) FixedLensGeometryPrior(FixedPrior): standard_par_dic=
+    {kappa:0,beta:0,z_lens:0}; range_dic={} inherited; no transform math.
+  * (b) UniformLensMassPrior(UniformPriorMixin,Prior): range_dic=
+    {ln_m_lens_msun:_LN_M_LENS_RANGE=(log10,log3500)}; standard
+    ['m_lens_msun']; transform exp, inverse log, jac -log(m). transform is
+    @staticmethod @utils.lru_cache() (mirrors mass template).
+  * (c) UniformReducedShearPrior(UniformPriorMixin,IdentityTransformMixin,
+    Prior): range_dic={gamma:(0,0.45)}. IdentityTransformMixin auto-sets
+    standard_params=sampled_params=['gamma'] via __init_subclass__ and
+    provides transform/inverse/unit-jac -> no gamma_prime indirection.
+    NOTE: didn't add UnitJacobianMixin explicitly since
+    IdentityTransformMixin already subclasses it.
+  * (d) UniformSourcePositionPrior(UniformPriorMixin,Prior): range_dic=
+    {u1:(-1,1),u2:(-1,1)}; standard ['y1','y2']; conditioned_on=
+    ['m_lens_msun']; folded_reflected_params=['u1','u2']; NO phase fold
+    (Prof constraint 3, XPHM). Y(m)=min(_Y_SCALE=307/m, _Y_SCALE_CAP=3.0)
+    via module fn _source_scale; transform y=u*Y, inverse u=y/Y, jac
+    -2*log(Y). 307 = 55/(sqrt2*1.2372e-4*1024) box-corner provenance in
+    comment.
+  * MRO: mixins must precede Prior (check_inheritance_order enforces);
+    UniformPriorMixin.lnprior returns max_lnprior from cubesize (uniform),
+    no override needed.
+  * Verified: AST parse OK; import OK; sampled union =={ln_m_lens_msun,
+    gamma,u1,u2}; standard union =={m_lens_msun,z_lens,y1,y2,gamma,beta,
+    kappa} (the 7 lens params waveform.py consumes); round-trips exact to
+    1e-12; jac signs match template; cap fires (307/50->3.0), 307/1000->
+    0.307; conditioned_on/folded_reflected as required; no phi/phase in any
+    fold list. Only new file created; no engine/likelihood/posterior touched.
+  * UNVERIFIED (downstream / Test Dev+Inspector): full-suite green; folding
+    unfold-sum consistency; positive-parity dense-sweep safety; end-to-end
+    Posterior smoke. Role limit: parse/import/logic-probe only, no combined
+    prior exists yet to exercise folding machinery.
+
+- WP3 (Build 4, fork/pickle safety, lensing/likelihood.py): added
+  `__getstate__`/`__setstate__` to LensedRelativeBinningLikelihood ONLY,
+  inserted right after `__init__`. No base __getstate__/__setstate__/
+  __reduce__ anywhere in repo (grep clean) -> default pickle used
+  self.__dict__ before; JSONMixin serializes via get_init_dict (JSON
+  path), untouched. `__getstate__` = self.__dict__.copy() then
+  state.pop('_fid_cache', None) -> drops ONLY the memoization cache;
+  `_force_direct` (testing seam, behavioral flag, NOT derived state) is
+  PRESERVED so a pickled instance evaluates identically. `__setstate__`
+  = self.__dict__.update(state); self._fid_cache = {} (empty rebuild).
+  Rationale docstring on __getstate__: cache is a pure deterministic
+  memoization on a fixed lattice, forked worker rebuilds bit-identical
+  on first eval (~one direct SACR-C eval per lattice cell per worker),
+  determinism preserved.
+  * Verified: AST parse OK; import OK; both methods in class __dict__;
+    direct state-logic test (getstate excludes _fid_cache, keeps
+    _force_direct/delta_t_max/n_bins, copy semantics leave original
+    untouched; setstate re-inits _fid_cache={} and restores rest; full
+    pickle.dumps/loads round-trip) all green via L.__new__ probe.
+  * UNVERIFIED (downstream / needs full event-data instance): pickled-
+    then-unpickled instance reproduces parent's lnlike bit-identically
+    after cache warm-up; full suite at original tolerances. Role limit:
+    parse/import/logic-probe only.
+
 - WP2 (Build 3g ratio layer, lensing/likelihood.py): implemented the
   candidate/fiducial heterodyne on top of WP1's seams. No new public API,
   no constructor param, no njit, no tolerance change. Verified: AST parse

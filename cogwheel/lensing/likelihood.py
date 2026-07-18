@@ -686,6 +686,28 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                          fbin=fbin, pn_phase_tol=pn_phase_tol,
                          spline_degree=spline_degree)
 
+    def __getstate__(self):
+        """
+        Pickle state, dropping the transient fiducial-envelope cache.
+
+        ``_fid_cache`` is a pure memoization of a deterministic function
+        of the candidate on a fixed lattice (see ``_fiducial_key``), so a
+        forked/unpickled worker rebuilds bit-identical values on first
+        evaluation -- roughly one direct SACR-C eval per lattice cell per
+        worker, which is acceptable -- and determinism is preserved.  The
+        behavioural testing seam ``_force_direct`` is NOT derived state
+        and is kept, so a pickled instance evaluates identically to its
+        parent.
+        """
+        state = self.__dict__.copy()
+        state.pop('_fid_cache', None)
+        return state
+
+    def __setstate__(self, state):
+        """Restore pickle state with an empty fiducial-envelope cache."""
+        self.__dict__.update(state)
+        self._fid_cache = {}
+
     # -- Parameters ------------------------------------------------------
 
     @property
