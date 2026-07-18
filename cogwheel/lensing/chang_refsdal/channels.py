@@ -68,7 +68,8 @@ from cogwheel.lensing.chang_refsdal.operator import (
     RHO_START, RHO_END, MAX_ORDER, F_op, cancellation_exponent,
     geometric_amplification, select_branch)
 
-__all__ = ['ChangRefsdalChannels', 'ChangRefsdalPartition']
+__all__ = ['ChangRefsdalChannels', 'ChangRefsdalPartition',
+           'real_image_delays']
 
 #: The fixed number of topology-stable labels.
 _N_CHANNELS = 4
@@ -468,6 +469,54 @@ def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
             converged[index] = diagnostics.converged
         total[index] = value * np.exp(-1j * frequency * t_min)
     return total, orders, converged
+
+
+def real_image_delays(gamma: float, y: Sequence[float], *,
+                      beta: float = 0.0,
+                      kappa: float = 0.0) -> np.ndarray:
+    """Sorted real-image relative Fermat delays at one parameter point.
+
+    Frequency-INDEPENDENT geometry only: the real macro images and their
+    Fermat delays via `geometry.macro_matrix`, `geometry.find_images` and
+    `geometry.delay`.  No operator sweep (`F_op`) is performed, so this is
+    cheap enough to place spline nodes without paying an engine
+    evaluation.  The returned delays are dimensionless (in the ``w``
+    convention, ``tau = w-frame Fermat delay``) and relative to the
+    minimum-delay image, matching `ChangRefsdalPartition.delays` on the
+    real channels.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    y : Sequence[float]
+        Shape ``(2,)`` source position.
+    beta : float, optional
+        External shear orientation, radians.
+    kappa : float, optional
+        External convergence.
+
+    Returns
+    -------
+    np.ndarray
+        Real-image relative Fermat delays ``tau_a`` (dimensionless),
+        sorted increasing; the smallest is ``0``.
+
+    Raises
+    ------
+    geometry.LensDomainError
+        If ``1 - kappa <= abs(gamma)`` (outside the positive-parity
+        regime), raised by `geometry.macro_matrix` exactly as in
+        `ChangRefsdalChannels.evaluate` and on the brute-force strain
+        path, so the two paths refuse symmetrically.
+    """
+    source = np.asarray(y, dtype=float)
+    matrix = geometry.macro_matrix(gamma, beta, kappa)
+    images = geometry.find_images(source, matrix)
+    absolute_delays = np.array(
+        [geometry.delay(image, source, matrix) for image in images],
+        dtype=float)
+    return np.sort(absolute_delays - absolute_delays.min())
 
 
 @dataclass(frozen=True)

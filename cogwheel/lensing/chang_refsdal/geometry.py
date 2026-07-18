@@ -64,6 +64,7 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
+import numba
 import numpy as np
 from scipy.optimize import minimize_scalar
 
@@ -810,6 +811,91 @@ def critical_point(gamma: float, theta: float, beta: float = 0.0,
                          float(values[hard_index]))
 
 
+@numba.njit(cache=True, fastmath=False)
+def _caustic_source(theta: float, gamma: float, beta: float,
+                    kappa: float) -> np.ndarray:
+    """
+    Caustic (source-plane) point of the critical curve at ``theta``.
+
+    Reproduces exactly the arithmetic of `critical_point` that yields
+    its ``source`` attribute, skipping the Hessian eigendecomposition
+    and eigenframe construction that the distance search does not need.
+    Compiled with ``fastmath=False`` so the elementary functions match
+    the numpy reference to within one unit in the last place.
+
+    Parameters
+    ----------
+    theta : float
+        Polar angle on the critical curve, radians.
+    gamma, beta, kappa : float
+        External shear magnitude, shear orientation (radians), and
+        convergence.  The positive-parity condition ``1 - kappa >
+        abs(gamma)`` must already hold; this helper does not guard it.
+
+    Returns
+    -------
+    np.ndarray
+        Shape (2,), the caustic point ``macro_matrix @ x - x / |x|**2``
+        at the critical point ``x`` for the given ``theta``.
+    """
+    lam = 1.0 - kappa
+    effective_gamma = gamma / lam
+    phase = theta - beta
+    effective_u = (effective_gamma * np.cos(2.0 * phase)
+                   + np.sqrt(1.0 - effective_gamma**2
+                             * np.sin(2.0 * phase)**2))
+    radius = 1.0 / np.sqrt(lam * effective_u)
+    image_x = radius * np.cos(theta)
+    image_y = radius * np.sin(theta)
+    cos2b = np.cos(2.0 * beta)
+    sin2b = np.sin(2.0 * beta)
+    # macro_matrix = (1 - kappa) * I - gamma * [[cos2b, sin2b],
+    #                                           [sin2b, -cos2b]].
+    m00 = (1.0 - kappa) - gamma * cos2b
+    m01 = -gamma * sin2b
+    m11 = (1.0 - kappa) + gamma * cos2b
+    caustic = np.empty(2)
+    caustic[0] = m00 * image_x + m01 * image_y - image_x / radius**2
+    caustic[1] = m01 * image_x + m11 * image_y - image_y / radius**2
+    return caustic
+
+
+@numba.njit(cache=True, fastmath=False)
+def _coarse_squared_distances(grid: np.ndarray, gamma: float, beta: float,
+                              kappa: float, source: np.ndarray
+                              ) -> np.ndarray:
+    """
+    Squared source-plane distance to the caustic at each grid angle.
+
+    A single compiled sweep replacing the per-angle Python-level
+    `critical_point` calls of the coarse scan.  Uses the same per-angle
+    arithmetic (`_caustic_source`) and the same reduction the bounded
+    refinement objective uses, so the ``argsort`` cell selection matches
+    the reference search.
+
+    Parameters
+    ----------
+    grid : np.ndarray
+        Shape (n_grid,), polar angles of the coarse scan.
+    gamma, beta, kappa : float
+        Lens parameters (see `_caustic_source`).
+    source : np.ndarray
+        Shape (2,), source position.
+
+    Returns
+    -------
+    np.ndarray
+        Shape (n_grid,), squared distances ``|caustic(theta) - source|**2``.
+    """
+    distances = np.empty(grid.shape[0])
+    for index in range(grid.shape[0]):
+        caustic = _caustic_source(grid[index], gamma, beta, kappa)
+        offset_x = caustic[0] - source[0]
+        offset_y = caustic[1] - source[1]
+        distances[index] = offset_x * offset_x + offset_y * offset_y
+    return distances
+
+
 def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
                           *, kappa: float = 0.0, n_grid: int = 256
                           ) -> NearestCausticPoint:
@@ -820,6 +906,12 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
     A coarse scan over ``n_grid`` polar angles is refined with a
     bounded one-dimensional minimization from each of the four best
     grid cells, so that all four cusps of the astroid remain reachable.
+    The frequency-independent distance search runs through the compiled
+    source-only helper `_caustic_source` (the eigenframe and eigenvalue
+    are not needed to locate the closest caustic); the returned local
+    frame and eigenvalue are then built from a single `critical_point`
+    call at the winning angle, so those fields are identical to a search
+    that used `critical_point` throughout.
 
     Parameters
     ----------
@@ -846,16 +938,24 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
     LensDomainError
         If ``1 - kappa <= abs(gamma)``.
     """
+    lam = 1.0 - float(kappa)
+    if lam <= 0.0 or abs(gamma) >= lam:
+        raise LensDomainError(
+            f'Cannot locate a critical point for (kappa, gamma) = '
+            f'({kappa}, {gamma}): this requires the positive-parity '
+            f'condition 1 - kappa > |gamma| >= 0. Macro saddles '
+            f'(Type II images) are out of scope of this formalism.')
+
     source = np.asarray(source, dtype=float)
     grid = np.linspace(0.0, 2.0 * np.pi, n_grid, endpoint=False)
     step = 2.0 * np.pi / n_grid
 
     def squared_distance(theta) -> float:
-        caustic = critical_point(gamma, float(theta) % (2.0 * np.pi),
-                                 beta, kappa).source
+        caustic = _caustic_source(float(theta) % (2.0 * np.pi),
+                                  gamma, beta, kappa)
         return float(np.sum((caustic - source)**2))
 
-    coarse = [squared_distance(theta) for theta in grid]
+    coarse = _coarse_squared_distances(grid, gamma, beta, kappa, source)
     best = None
     for index in np.argsort(coarse)[:4]:
         center = grid[index]

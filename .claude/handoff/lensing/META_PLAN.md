@@ -745,4 +745,58 @@ hardening must prove itself cross-machine first. The server session's
 job is to EXECUTE Builds 3/4 and thereby generate that evidence; it must
 NOT port anything to gw or the skill. The ports will be done on the
 laptop by its driver when the owner gives the word. The ledger of
+
+
+## SERVER SESSION LIVE (2026-07-17, nereid) — Build 3 driven, Build 3b corrective
+
+Server driver active per the handoff. Env: SDK_CONDA_ENV=cogwheel-newlal
+(.env), claude-agent-sdk 0.1.48, xdist/mpmath/numba present. BASELINE fully
+green at 905869b: engine+waveform 163/163 (3m50s), crown 19/19 (59m59s).
+Server timing (crown 4-image): lnlike 14.79 s/eval, engine ~100%,
+contraction 1.6 ms (many-core BLAS), brute 119.2 s (8.06x).
+
+### BUILD 3 (few-ms lnlike) — RAN, DIED AT COMMIT, DELIVERABLES IN TREE
+
+- Launch 1 (17:27) died at startup: Serena SSE rc=3, port 8322 FREE, manual
+  repro clean -> transient uvx failure (NOT the orphan-port mode).
+  SUSPECTED: collision with the gw repo's pipeline — BOTH repos hardcode
+  SSE 8322 AND both watchdog.sh kill ANY 8322 listener (cross-kill).
+  Owner asked to not run gw builds concurrently. TODO (post-build, ports
+  ledger): route SDK_SERENA_PORT through .env, cogwheel default 8323;
+  propagate to gw/skill with the validated batch only.
+- Relaunch (19:06) ran clean. Plan: 2 WPs (numba-JIT the DD ladder +
+  operator contraction; coarse cubic-spline w-node grid with smootherstep
+  transition nodes) — Professor+Simplifier REJECTED the 2D table (research-
+  grade certification risk, F002 exposure). Approved 19:47 (archived:
+  build3_plan_approved.json).
+- Inspector PASS (0 findings). Professor CONCERN (strong; see
+  .serena/memories/professor_short_term.md): (1) REAL DEFECT — default 10
+  kernel nodes under-resolved, O(1) F-interp error off-crown, kappa config
+  leaks 3.44 nats vs RB_ATOL=1.5; suite masked it (400-node proxy gate,
+  benign-config-only lnL gates, false inline comment); (2) timing 66-70 ms
+  not few-ms (MS_CEILING recalibrated to 0.25 s by test_dev = moved gate).
+- Pipeline elected to commit anyway; the SPEC/doc pre-commit hook BLOCKED
+  it (test_lensing_fast_path.py not in SPEC.md) -> RuntimeError, Phase 3
+  skipped. Fortunate: no defective default landed. ALL deliverables
+  uncommitted in tree (engine numba WP1 verified correct at original
+  tolerances; WP2 spline scheme sound).
+- Driver probes (scratchpad node_convergence.log): node-convergence table
+  per config (two-image slowest: needs n~82 for 3.5e-3; scheme converges,
+  no stall) + profile split: nearest_caustic_point ~29 ms/evaluate
+  (w-independent scipy search — half the engine cost!), _contract_orders
+  (already njit) 1.93 ms/call = the real per-point floor (FLOPs, not
+  missing JIT). Timing thread-insensitive (pinned == unpinned ~70 ms).
+  Owner ruling: production = parallel sampler, so timing gates must hold
+  SINGLE-THREADED (no "quiet box" framing).
+
+### BUILD 3B (corrective) — brief build3b_brief.md, launching
+
+Mission: fix forward from the dirty tree to ONE committable commit:
+production-accurate node grid (default/placement bounded by the measured
+convergence table, gates re-aimed at the PRODUCTION grid, null-safe
+interp metric per Professor), the two measured hot spots (caustic search
+-> near-free; _contract_orders restructure at <=2 ULP), SPEC/fragments so
+the hook passes. Ceiling: pinned 10 ms or the honest measured floor
+documented — never a silently moved gate; residual escalates to owner
+(2D-table decision).
 port-worthy commits is in this file's earlier sections.

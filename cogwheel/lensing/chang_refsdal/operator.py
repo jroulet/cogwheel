@@ -132,6 +132,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numba
 import numpy as np
 
 from cogwheel.lensing.chang_refsdal import geometry
@@ -384,6 +385,119 @@ def _refusal_message(w: float, y: np.ndarray, gamma: float,
         f'multi-image sum.')
 
 
+@numba.njit(cache=True, fastmath=False)
+def _contract_orders(table, derivs_scaled, z_powers, zbar_powers,
+                     abs_powers, half_sum, gamma_scaled, w, max_order,
+                     dim):
+    """Sum the operator power series ``sum_n coeff_n * <z|D_0^n|zbar>``.
+
+    The njit hot core of `F_op`: it accumulates the order-``n``
+    contraction ``z_powers @ (table[n] * radial) @ zbar_powers`` (with
+    ``radial`` the clamped radial-derivative lookup), its all-positive
+    companion (the honest ``sum|term|`` that measures the contraction's
+    cancellation condition), and the small-term convergence test.  The
+    (dim x dim) matmuls are written as explicit loops so the kernel
+    stays in nopython mode; the two-stage ``column then row`` reduction
+    mirrors ``z_powers @ M @ zbar_powers`` so the accumulation order
+    tracks numpy's.  It stays complex128 -- the double-double substrate
+    lives only in the 1F1 kernel (FINDINGS F001) -- and factors nothing
+    out itself; the caller does the exact power-of-two rescaling of
+    ``derivs_scaled`` and owns every threshold, refusal, and
+    reconstruction (FINDINGS F005).
+
+    Parameters
+    ----------
+    table : np.ndarray
+        Read-only ``(max_order + 1, dim, dim)`` operator table.
+    derivs_scaled : np.ndarray
+        ``(dim,)`` complex radial derivatives, already rescaled by an
+        exact power of two by the caller.
+    z_powers, zbar_powers : np.ndarray
+        ``(dim,)`` complex monomial powers of the eigenframe source and
+        its conjugate.
+    abs_powers : np.ndarray
+        ``(dim,)`` float magnitudes ``|z_powers|``.
+    half_sum : np.ndarray
+        ``(dim, dim)`` int table ``(a + b) // 2`` selecting the radial
+        derivative index (before the per-order offset and clamp).
+    gamma_scaled, w : float
+        Effective shear and dimensionless frequency.
+    max_order, dim : int
+        Series order cap and monomial dimension ``2*max_order + 1``.
+
+    Returns
+    -------
+    total : complex
+        The summed contraction, in the caller's ``2**scale_exp`` units.
+    positive_total : float
+        ``sum|term|`` over the summed orders, same units.
+    max_term : float
+        Largest per-order ``|term|`` seen.
+    order_used : int
+        Highest order actually summed.
+    last_ratio : float
+        Last per-order ``|term| / |total|``.
+    converged : bool
+        Whether the small-term stopping rule fired before ``max_order``.
+    """
+    total = 0.0 + 0.0j          # in units of 2**scale_exp
+    coeff = 1.0 + 0.0j
+    max_term = 0.0
+    positive_total = 0.0        # sum of |summand| magnitudes, same units
+    small_count = 0
+    converged = False
+    order_used = 0
+    last_ratio = np.inf
+    for order in range(max_order + 1):
+        if order:
+            coeff = coeff * (1j * gamma_scaled / (2.0 * w * order))
+        tbl = table[order]
+        # Two-stage contraction mirroring z_powers @ (tbl * radial) @
+        # zbar_powers: for each column b sum over rows a, then over b.
+        # A nonzero monomial at this order obeys half_sum + order <=
+        # 2*max_order = dim - 1, so out-of-range cells carry a zero table
+        # coefficient and the clamped lookup is multiplied away -- but
+        # the scalar index must not run off the end of ``derivs_scaled``.
+        contribution = 0.0 + 0.0j
+        abs_contribution = 0.0
+        for b in range(dim):
+            col = 0.0 + 0.0j
+            abs_col = 0.0
+            for a in range(dim):
+                idx = half_sum[a, b] + order
+                if idx > dim - 1:
+                    idx = dim - 1
+                rad = derivs_scaled[idx]
+                coefficient = tbl[a, b]
+                col += z_powers[a] * (coefficient * rad)
+                abs_col += abs_powers[a] * (abs(coefficient) * abs(rad))
+            contribution += col * zbar_powers[b]
+            abs_contribution += abs_col * abs_powers[b]
+        term = coeff * contribution
+        total += term
+        # All-positive contraction: the magnitude actually summed in
+        # float64 for this order.  Accumulated over orders it is the
+        # honest condition number ``sum|term| / |total|`` of the
+        # cancellation that limits the contraction's accuracy, which
+        # ``estimated_relative_tail`` (a kernel-series quantity) does not
+        # bound (FINDINGS F005).
+        positive_total += abs(coeff) * abs_contribution
+        order_used = order
+        term_abs = abs(term)
+        max_term = max(max_term, term_abs)
+        scale = max(abs(total), 1e-300)
+        last_ratio = term_abs / scale
+        if order >= _MIN_ORDER and term_abs <= _SERIES_TOLERANCE * scale:
+            small_count += 1
+            if small_count >= _CONSECUTIVE_SMALL:
+                converged = True
+                break
+        else:
+            small_count = 0
+    return (total, positive_total, max_term, order_used,
+            last_ratio, converged)
+
+
 def F_op(w: float, y: np.ndarray, gamma: float, *,
          beta: float = 0.0, kappa: float = 0.0,
          max_order: int = MAX_ORDER
@@ -487,48 +601,18 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
     abs_powers = np.abs(z_powers)
     half_sum = (np.add.outer(powers, powers) // 2)
 
-    total = 0.0 + 0.0j          # in units of 2**scale_exp
-    coeff = 1.0 + 0.0j
-    max_term = 0.0
-    positive_total = 0.0        # sum of |summand| magnitudes, same units
-    small_count = 0
-    converged = False
-    order_used = 0
-    last_ratio = np.inf
-    for order in range(max_order + 1):
-        if order:
-            coeff *= 1j * gamma_scaled / (2.0 * w * order)
-        # Clamp indices past the ladder end.  A nonzero monomial at this
-        # order obeys half_sum + order <= 2*max_order = dim - 1, so those
-        # out-of-range cells carry a zero table coefficient and the
-        # clamped lookup is multiplied away -- but the dense fancy-index
-        # must not run off the end of ``derivs`` (size dim) to reach it.
-        radial = derivs_scaled[np.minimum(half_sum + order, dim - 1)]
-        contribution = z_powers @ (table[order] * radial) @ zbar_powers
-        term = coeff * contribution
-        total += term
-        # All-positive contraction: the magnitude actually summed in
-        # float64 for this order.  Accumulated over orders it is the
-        # honest condition number ``sum|term| / |total|`` of the
-        # cancellation that limits the contraction's accuracy, which
-        # ``estimated_relative_tail`` (a kernel-series quantity) does not
-        # bound (FINDINGS F005).
-        abs_contribution = (abs_powers
-                            @ (np.abs(table[order]) * np.abs(radial))
-                            @ abs_powers)
-        positive_total += abs(coeff) * abs_contribution
-        order_used = order
-        term_abs = abs(term)
-        max_term = max(max_term, term_abs)
-        scale = max(abs(total), 1e-300)
-        last_ratio = term_abs / scale
-        if order >= _MIN_ORDER and term_abs <= _SERIES_TOLERANCE * scale:
-            small_count += 1
-            if small_count >= _CONSECUTIVE_SMALL:
-                converged = True
-                break
-        else:
-            small_count = 0
+    # The order-accumulation loop -- the (dim x dim) contraction, its
+    # all-positive companion, and the small-term convergence test -- runs
+    # in the njit kernel `_contract_orders`.  Everything that raises,
+    # thresholds, or reconstructs stays here in Python: the non-finite
+    # backstop, the cancellation-ratio refusal, both certification cuts,
+    # and the mass-sheet reconstruction below are unchanged (FINDINGS
+    # F005).  ``half_sum + order`` clamping now happens per-element inside
+    # the kernel.
+    (total, positive_total, max_term, order_used,
+     last_ratio, converged) = _contract_orders(
+         table, derivs_scaled, z_powers, zbar_powers, abs_powers,
+         half_sum, gamma_scaled, w, max_order, dim)
 
     # A non-finite running total means the scaled contraction still
     # overflowed; refuse instead of letting a ``nan`` slip past the ratio

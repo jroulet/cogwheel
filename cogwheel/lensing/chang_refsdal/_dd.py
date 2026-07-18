@@ -59,10 +59,15 @@ HOT PATH
 The intended consumers are the 1F1 k-ladder recurrence and the operator
 series accumulation, which call `dd_complex_mul` and `dd_complex_add`
 once per series term. Every function here is written ``@njit``-shaped
-(no closures, no containers, homogeneous scalar returns) but the
-decorator is DEFERRED per the build brief; adding
-``@numba.njit(cache=True)`` to each function should be a no-op for
-semantics.
+(no closures, no containers, homogeneous scalar returns) and is now
+decorated with ``@numba.njit(cache=True, fastmath=False)`` so it
+inlines into the njit kernels in `_hyp1f1` and `operator`. ``fastmath``
+is False deliberately: the two-sum / two-product error-free transforms
+depend on strict IEEE-754 semantics, which ``fastmath`` reassociation
+would destroy. Compilation happens once at first call (a warm cost, not
+a per-evaluation one) and is a no-op for semantics; the pure-Python
+bodies remain reachable through each function's ``py_func`` attribute
+for the sensitivity tests.
 
 Deliberately NOT provided: dd sqrt/exp/log/trig. Nothing in the hot
 path needs them -- the operator prefactor is evaluated once, in plain
@@ -76,6 +81,8 @@ Hida, Y., Li, X. S., Bailey, D. H. (2001), "Algorithms for quad-double
 precision floating point arithmetic" (the QD library).
 """
 from __future__ import annotations
+
+import numba
 
 # The four-scalar dd-complex representation is a numba-compatibility
 # requirement (see module docstring), so the binary complex operations
@@ -102,6 +109,7 @@ _SCALE_DOWN = 3.7252902984619140625e-09  # 2**-28
 _SCALE_UP = 268435456.0  # 2**28
 
 
+@numba.njit(cache=True, fastmath=False)
 def _two_sum(a: float, b: float) -> tuple[float, float]:
     """
     Return ``(s, e)`` with ``s = fl(a + b)`` and ``a + b == s + e``
@@ -113,6 +121,7 @@ def _two_sum(a: float, b: float) -> tuple[float, float]:
     return s, (a - a_virtual) + (b - b_virtual)
 
 
+@numba.njit(cache=True, fastmath=False)
 def _quick_two_sum(a: float, b: float) -> tuple[float, float]:
     """
     Return ``(s, e)`` with ``s = fl(a + b)`` and ``a + b == s + e``
@@ -123,6 +132,7 @@ def _quick_two_sum(a: float, b: float) -> tuple[float, float]:
     return s, b - (s - a)
 
 
+@numba.njit(cache=True, fastmath=False)
 def _split(a: float) -> tuple[float, float]:
     """
     Split ``a`` into non-overlapping halves ``(hi, lo)`` of at most 26
@@ -144,6 +154,7 @@ def _split(a: float) -> tuple[float, float]:
     return hi, a - hi
 
 
+@numba.njit(cache=True, fastmath=False)
 def _two_prod(a: float, b: float) -> tuple[float, float]:
     """
     Return ``(p, e)`` with ``p = fl(a * b)`` and ``a * b == p + e``
@@ -156,16 +167,19 @@ def _two_prod(a: float, b: float) -> tuple[float, float]:
     return p, err
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_from_float(a: float) -> tuple[float, float]:
     """Return the dd representation of a float64, exactly."""
     return a, 0.0
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_to_float(a_hi: float, a_lo: float) -> float:
     """Return the nearest float64 to the dd number ``a_hi + a_lo``."""
     return a_hi + a_lo
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_add(a_hi: float, a_lo: float,
            b_hi: float, b_lo: float) -> tuple[float, float]:
     """
@@ -183,17 +197,20 @@ def dd_add(a_hi: float, a_lo: float,
     return _quick_two_sum(s_hi, s_lo)
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_neg(a_hi: float, a_lo: float) -> tuple[float, float]:
     """Return the dd negation ``-(a_hi + a_lo)``, exactly."""
     return -a_hi, -a_lo
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_sub(a_hi: float, a_lo: float,
            b_hi: float, b_lo: float) -> tuple[float, float]:
     """Return the dd difference ``(a_hi + a_lo) - (b_hi + b_lo)``."""
     return dd_add(a_hi, a_lo, -b_hi, -b_lo)
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_mul(a_hi: float, a_lo: float,
            b_hi: float, b_lo: float) -> tuple[float, float]:
     """
@@ -207,6 +224,7 @@ def dd_mul(a_hi: float, a_lo: float,
     return _quick_two_sum(p_hi, p_lo)
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_div(a_hi: float, a_lo: float,
            b_hi: float, b_lo: float) -> tuple[float, float]:
     """
@@ -242,18 +260,21 @@ def dd_div(a_hi: float, a_lo: float,
     return dd_add(q_1, q_2, q_3, 0.0)
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_complex_from_complex128(
         z: complex) -> tuple[float, float, float, float]:
     """Return the dd-complex representation of a complex128, exactly."""
     return z.real, 0.0, z.imag, 0.0
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_complex_to_complex128(re_hi: float, re_lo: float,
                              im_hi: float, im_lo: float) -> complex:
     """Return the nearest complex128 to a dd-complex number."""
     return complex(re_hi + re_lo, im_hi + im_lo)
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_complex_add(
         a_re_hi: float, a_re_lo: float, a_im_hi: float, a_im_lo: float,
         b_re_hi: float, b_re_lo: float, b_im_hi: float, b_im_lo: float
@@ -264,6 +285,7 @@ def dd_complex_add(
     return re_hi, re_lo, im_hi, im_lo
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_complex_sub(
         a_re_hi: float, a_re_lo: float, a_im_hi: float, a_im_lo: float,
         b_re_hi: float, b_re_lo: float, b_im_hi: float, b_im_lo: float
@@ -274,6 +296,7 @@ def dd_complex_sub(
     return re_hi, re_lo, im_hi, im_lo
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_complex_mul(
         a_re_hi: float, a_re_lo: float, a_im_hi: float, a_im_lo: float,
         b_re_hi: float, b_re_lo: float, b_im_hi: float, b_im_lo: float
@@ -296,6 +319,7 @@ def dd_complex_mul(
     return re_hi, re_lo, im_hi, im_lo
 
 
+@numba.njit(cache=True, fastmath=False)
 def dd_complex_div(
         a_re_hi: float, a_re_lo: float, a_im_hi: float, a_im_lo: float,
         b_re_hi: float, b_re_lo: float, b_im_hi: float, b_im_lo: float

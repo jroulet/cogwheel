@@ -90,6 +90,7 @@ transformation is 13.1.27 and the reflection formula used by
 """
 from __future__ import annotations
 
+import numba
 import numpy as np
 from scipy.special import loggamma
 
@@ -279,6 +280,7 @@ def _carrier(w: float, z_hi: float, z_lo: float) -> complex:
     return prefactor_c(w) * complex(np.cos(phase), np.sin(phase))
 
 
+@numba.njit(cache=True, fastmath=False)
 def _shared_numerator(w: float, z_hi: float, z_lo: float,
                       n_terms: int) -> np.ndarray:
     """
@@ -332,6 +334,7 @@ def _shared_numerator(w: float, z_hi: float, z_lo: float,
     return table
 
 
+@numba.njit(cache=True, fastmath=False)
 def _ladder_sum(table: np.ndarray, k: int) -> tuple[complex, float]:
     """
     Return ``(1F1(a'; 1 + k; zz), relative_tail)`` for one ``k``.
@@ -384,6 +387,65 @@ def _ladder_sum(table: np.ndarray, k: int) -> tuple[complex, float]:
     if magnitude == 0.0:
         return total, np.inf
     return total, last_term / magnitude
+
+
+@numba.njit(cache=True, fastmath=False)
+def _ladder_core(table: np.ndarray, carrier: complex, w: float,
+                 max_derivative: int) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Run the ``k = 0, ..., max_derivative`` derivative ladder.
+
+    This is the njit hot core of `point_mass_g_derivatives`: given the
+    k-independent shared numerator ``table`` (from `_shared_numerator`)
+    and the k-independent carrier ``C(w) * e**z`` (from `_carrier`,
+    which is built in Python because it calls `prefactor_c`), it folds
+    the per-k reciprocal-binomial ladder sum against the per-k
+    prefactor ``Q_k = base**k * (a)_k / k!`` to produce ``values[k]``
+    and the measured per-k ``relative_tail``.
+
+    The prefactor ``Q_k`` is pure complex arithmetic (no special
+    functions), so it is recurred here rather than precomputed in
+    Python; plain float64 suffices because every step is a complex
+    multiply with no cancellation to amplify (~k*eps at k = 84).
+
+    Parameters
+    ----------
+    table : np.ndarray
+        Shape ``(4, n_terms)`` shared numerator, from
+        `_shared_numerator`.
+    carrier : complex
+        The k-independent factor ``C(w) * e**z``, from `_carrier`.
+    w : float
+        Dimensionless frequency.
+    max_derivative : int
+        Highest derivative order, ``>= 0``.
+
+    Returns
+    -------
+    values : np.ndarray
+        Shape ``(max_derivative + 1,)``, complex.
+    relative_tail : np.ndarray
+        Shape ``(max_derivative + 1,)``, float; the per-k measured
+        truncation estimate from `_ladder_sum`.
+    """
+    values = np.empty(max_derivative + 1, dtype=np.complex128)
+    relative_tail = np.empty(max_derivative + 1, dtype=np.float64)
+
+    # Q_k = base**k * (a)_k / k!.  Plain float64: every step is a
+    # complex multiply, so magnitudes multiply exactly and there is no
+    # cancellation to amplify -- the error grows only as ~k*eps ~ 2e-14
+    # at k = 84.  Like C(w), Q_k is a per-k common factor whose
+    # relative error factors out of the series it multiplies.
+    ladder = complex(1.0, 0.0)
+    base = complex(0.0, -0.5 * w)
+    a_parameter = complex(1.0, -0.5 * w)
+    for k in range(max_derivative + 1):
+        if k:
+            ladder = ladder * (base * (a_parameter + (k - 1)) / k)
+        total, tail = _ladder_sum(table, k)
+        values[k] = carrier * ladder * total
+        relative_tail[k] = tail
+    return values, relative_tail
 
 
 def point_mass_g_derivatives(w: float, s: float, max_derivative: int,
@@ -456,21 +518,9 @@ def point_mass_g_derivatives(w: float, s: float, max_derivative: int,
     table = _shared_numerator(w, z_hi, z_lo, n_terms)
     carrier = _carrier(w, z_hi, z_lo)
 
-    values = np.empty(max_derivative + 1, dtype=complex)
-    relative_tail = np.empty(max_derivative + 1, dtype=float)
-
-    # Q_k = base**k * (a)_k / k!.  Plain float64: every step is a
-    # complex multiply, so magnitudes multiply exactly and there is no
-    # cancellation to amplify -- the error grows only as ~k*eps ~ 2e-14
-    # at k = 84.  Like C(w), Q_k is a per-k common factor whose
-    # relative error factors out of the series it multiplies.
-    ladder = complex(1.0, 0.0)
-    base = complex(0.0, -0.5 * w)
-    a_parameter = complex(1.0, -0.5 * w)
-    for k in range(max_derivative + 1):
-        if k:
-            ladder *= base * (a_parameter + (k - 1)) / k
-        total, tail = _ladder_sum(table, k)
-        values[k] = carrier * ladder * total
-        relative_tail[k] = tail
-    return values, relative_tail
+    # The k-ladder itself -- the shared-numerator reuse, the per-k
+    # reciprocal-binomial ladder sum, and the per-k prefactor recurrence
+    # -- runs in the njit core `_ladder_core`.  Only the special-function
+    # setup (`prefactor_c`, the phase reduction inside `_carrier`) stays
+    # in Python; everything handed to the core is pure float64/complex128.
+    return _ladder_core(table, complex(carrier), w, max_derivative)
