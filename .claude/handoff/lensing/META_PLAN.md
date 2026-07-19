@@ -1082,3 +1082,83 @@ sequence: B5 -> (parallel: sampling+PP runs) -> negative-parity builds
 C5 gate) -> surrogate+micro-levers in its place (priority per measured
 Schwinger cost; target lensed/unlensed per-eval within ~2-4x). Full
 autonomy granted through the sequence.
+
+### BUILD 5 COMPLETE — COMMITTED 3b3ebdb (2026-07-18 ~17:20), SPEC 0.8.0
+
+Inspector PASS (doc-only escalation accepted), Professor PASS (21/21 in
+64 s; unlensed-limit fold identity at the physical O(w) floor 2.1e-7;
+exact-F reconstruction 1.2e-3 vs 3e-3; conditional draws consistent
+with the extrinsic Occam factor; refusal-precedes-integral verified by
+call-count with mutation check). Driver hand-finished the SPEC row +
+fragments. Post-commit: full suite 302 passed + 2 designed xfails in
+2:28. Parallel detached (owner ruling): absolute-lnL oracle probe +
+the headline 13-D marginalized sampling run; Build 6 launched without
+waiting. Oracle v1 (blind-prior IS) was METHODOLOGICALLY void
+(n_eff=1/20000, ~78 nats low — Spec 3's truth-centered proposal is
+load-bearing); v2 uses prior-form-on-subranges (weights = lnlike +
+exact volume ratios).
+
+DRIVER LESSON: detached validation probes MUST run from a
+committed-ref worktree (git worktree add <dir> HEAD), never the live
+working tree — probe v2 imported geometry.py mid-Build-6 edit (torn
+state: _caustic_source grew a 'branch' arg before its call site
+updated) and crashed on a phantom TypingError. Processes that imported
+BEFORE the build's edits are safe (module load is once-at-start): the
+headline sampling run is unaffected. v2b relaunched from the clean
+worktree. ALSO: serena execute_shell_command is degraded under heavy
+box load (wrapper TimeoutErrors; some commands never execute — VERIFY
+side effects landed, don't assume; native Edit on .claude/ paths is
+the reliable journal-append path).
+
+~18:50: the DRIVER SESSION'S serena stdio wedged terminally (reads,
+restart_language_server all hung); killed it; MCP did NOT respawn —
+serena tools gone for the rest of this session. Driver fallbacks:
+git show/diff for code reads; native Edit/Write on .claude/ + /tmp
+(approvals via Write of the plan_approved file); builds unaffected
+(own SSE on 8323). Build 6 relaunched 18:44 with a tree-state note
+(WP1 geometry work present and call-site-consistent per git diff —
+fix forward, verify with gates). Oracle v3 (conditional-draw-shaped
+proposal) running from the clean worktree; headline marg sampling run
+still going (~2 h in).
+
+~19:15: Build 6 relaunch ALSO double-stalled in early WP1 (second
+consecutive; plan had been approved — WP1 finalize-geometry, WP2
+Schwinger per research Sec 6.1 with N-vs-2N GL certification +
+SchwingerCertificationError, WP3 parity dispatch with the exp(-i*beta)
+sign trap pinned). DRIVER CALL: the parallel runs are now plausibly
+CAUSING build deaths (load) — shed them per the spirit of the owner's
+ruling (parallel-not-blocking): killed the marg sampling run (~2.7 h,
+no samples file yet — rerun after Build 6 lands, cheap to restart) and
+the oracle v3 had finished (|marg-oracle| = 1.11 nats at n_eff=6,
+INCONCLUSIVE but converging 78.6 -> 2.4 -> 1.1 toward agreement;
+absolute anchor at F=1 vs the trusted unlensed implementation already
+holds via spec-1). Oracle v4 (full 6-D KDE proposal) written but HELD
+until after Build 6. Build 6 attempt 3 launched 19:15 on the quiet box
+with stale=1800; approval will be re-issued at its plan gate.
+
+~19:42: attempt 3 died IDENTICALLY on the quiet box — LOAD HYPOTHESIS
+FALSIFIED. Real diagnosis: all three deaths are coder-2 (WP1) at the
+~6-minute mark, right after the big geometry.py reads — WP1 is
+analysis-heavy (verify 265 uncommitted lines against four guard
+sites), and a LONG DELIBERATION turn with no tool calls trips the
+coder's 300 s inter-message timeout (SDK_INTER_MESSAGE_TIMEOUT_SECONDS
+default, orchestrator.py:139): the wedge detector misclassifies deep
+thought as transport death, twice per run -> double-stall -> death.
+The Professor's threshold is 1800 s; coders got 300. FIX (env, no code
+edit): attempt 4 launched 19:41 with
+SDK_INTER_MESSAGE_TIMEOUT_SECONDS=1200 and watchdog 2400. SDK LEDGER
+ITEM: analysis-heavy WPs need the raised inter-message timeout — add
+to launch_build.sh defaults or per-brief guidance when the hardening
+batch is ported (cogwheel-proves-first).
+
+DRIVER LESSON (2026-07-18 ~18:20): detached validation probes MUST run
+from a committed-ref worktree (git worktree add <dir> HEAD), never the
+live working tree — oracle probe v2 imported geometry.py mid-Build-6-
+edit (torn state: _caustic_source grew a 'branch' arg before its call
+site updated) and crashed on a phantom TypingError. Long-running
+processes that imported BEFORE the build started editing are safe
+(module load is once-at-start): the headline marg sampling run is
+unaffected. Also: oracle v1's blind-prior importance sampling gave
+n_eff=1/20000 (useless, ~78 nats low) — Spec 3's truth-centered
+proposal requirement is load-bearing; v2 uses prior-form-on-subranges
+so weights = lnlike + exact volume-ratio constants.

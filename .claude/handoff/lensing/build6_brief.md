@@ -20,15 +20,25 @@ constant are frozen; saddle configs route to the new evaluator;
 Build S2 (channels/likelihood/prior over the saddle domain) follows as
 Build 7 — do NOT pull its scope forward.
 
-TREE STATE AT (RE)LAUNCH: a prior run of this build died to service
-wedges AFTER its WP1 coder delivered substantial geometry.py work
-(uncommitted in the tree: parity-aware domain split, branch-parameter
-two-lobe extension of critical_point/_caustic_source with positive-
-parity-preserving defaults; call sites consistent per git diff; NOT
-yet test-verified). Fix FORWARD from this state: verify the existing
-geometry work against WP1's spec and continue — do not blindly restart
-it, and do not assume it is correct without running the gates.
-_schwinger.py was never created (WP2 untouched).
+TREE STATE AT RELAUNCH (attempt 5, 2026-07-18 ~22:15): prior attempts
+delivered, uncommitted in the tree:
+- geometry.py: WP1 COMPLETE per attempt-4 (parity-aware domain split,
+  two-lobe branch-parameter critical utilities, centered-source saddle
+  case; finalized by a coder that verified the four guard sites).
+- _schwinger.py: 864 lines, NEAR-COMPLETE (attempt-4's WP2 coder ran
+  out of turns during final verification, NOT mid-implementation).
+  DRIVER-SMOKE-TESTED: imports clean; `f_schwinger(w, y_eig,
+  gamma_prime)` returns finite complex values (e.g. w=3, y=(0.4,0.3),
+  gp=1.3 -> 0.14470585550870085+0.4065122393352838j); the w>60 ceiling
+  raises SchwingerCertificationError correctly; full dd toolchain +
+  `_measure_warm_cost` present.
+Fix FORWARD: WP1 = verify-only unless a gate fails; WP2 = VERIFY AND
+COMPLETE the existing _schwinger.py (check the certification/paired-
+rule logic and the by-parts + tail decomposition against the research
+spec; run the dev-oracle comparison; complete whatever the turn
+exhaustion left unfinished) — do NOT rewrite from scratch; WP3
+(operator dispatch) is untouched and is the main remaining code work.
+Budget accordingly (WP2 completion should be small; WP3 normal).
 
 ## Required measurement (owner sequencing input)
 
