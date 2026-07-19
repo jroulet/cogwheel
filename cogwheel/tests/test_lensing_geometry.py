@@ -522,7 +522,11 @@ class DomainGuardsTestCase(GeometryTestCase):
     """
 
     def test_macro_matrix_rejects_non_positive_parity(self) -> None:
-        cases = [(0.9, 0.2), (0.5, 0.5), (0.0, 1.0)]
+        # Build 6 (negative parity): macro SADDLES (0 < 1-kappa < |gamma|,
+        # e.g. the former (0.9, 0.2) case) are now LEGITIMATELY accepted.
+        # The named refusals are the det A = 0 parity boundary (float64-
+        # exact, F004) and the over-critical lam <= 0 / Type III domain.
+        cases = [(1.0, 0.5), (0.5, 0.5), (0.0, 1.0)]
         for kappa, gamma in cases:
             with self.subTest(kappa=kappa, gamma=gamma):
                 with self.assertRaises(geometry.LensDomainError) as ctx:

@@ -41,11 +41,22 @@ frequency.
 
 Limitations
 -----------
-Only positive-parity macro images are supported: ``macro_matrix``
-requires ``1 - kappa > abs(gamma)`` and raises `LensDomainError`
-otherwise.  Macro saddles (Type II images), which are common in
-strong-lensing image pairs, are out of scope of the formalism this
-module implements.
+The geometry layer supports both parities of the macro image, provided
+the mass-sheet reduction stays real (``lam = 1 - kappa > 0``):
+
+* positive parity ``lam > abs(gamma)`` -- the classical astroid
+  (4-cusp) caustic and positive-definite Hessian;
+* macro saddle ``0 < lam < abs(gamma)`` -- the two 3-cusp deltoid
+  lobes and an indefinite Hessian (Type II images).
+
+``macro_matrix`` (and the critical-curve utilities) raise
+`LensDomainError` for the two named refusals: ``lam <= 0`` (over-
+critical / Type III, where ``sqrt(lam)`` is imaginary and the reduction
+dies) and the exact parity boundary ``abs(gamma) == lam`` (``det A = 0``,
+a degenerate fold branch point).  The wave-optics evaluator that turns
+this geometry into an amplification lives in the sibling ``operator``
+and Schwinger modules; this module is purely the geometrical-optics
+layer and is parity-agnostic wherever the algebra permits.
 
 Accuracy
 --------
@@ -138,6 +149,13 @@ def macro_matrix(gamma: float, beta: float = 0.0,
     """
     Quadratic part of the Fermat Hessian: convergence plus shear.
 
+    Both parities of the macro image are supported as long as the
+    mass-sheet reduction stays real (``lam = 1 - kappa > 0``): positive
+    parity ``lam > abs(gamma)`` and the macro saddle
+    ``0 < lam < abs(gamma)``.  The matrix itself is the same
+    ``(1 - kappa) * I - gamma * Q(beta)`` in either case; only the
+    signature of its eigenvalues (and hence the image topology) differs.
+
     Parameters
     ----------
     gamma : float
@@ -156,19 +174,30 @@ def macro_matrix(gamma: float, beta: float = 0.0,
     Raises
     ------
     LensDomainError
-        If ``1 - kappa <= abs(gamma)``, i.e. outside the
-        positive-parity macro-image regime.
+        If ``1 - kappa <= 0`` (over-critical / Type III, where the
+        mass-sheet reduction ``sqrt(1 - kappa)`` is not real), or if
+        ``abs(gamma) == 1 - kappa`` exactly (the parity boundary
+        ``det A = 0``, a degenerate fold branch point).  These are the
+        two named refusals; the positive-parity and macro-saddle
+        interiors both return normally.
     """
     gamma = float(gamma)
     kappa = float(kappa)
-    if not 1.0 - kappa > abs(gamma):
+    lam = 1.0 - kappa
+    if lam <= 0.0:
         raise LensDomainError(
             f'Cannot build a macro matrix for (kappa, gamma) = '
-            f'({kappa}, {gamma}): the positive-parity condition '
-            f'1 - kappa > |gamma| requires |gamma| < {1.0 - kappa}. '
-            f'Macro saddles (Type II images) are out of scope of this '
-            f'formalism; restrict kappa and gamma to the '
-            f'positive-parity regime.')
+            f'({kappa}, {gamma}): 1 - kappa = {lam} <= 0 (kappa >= 1). '
+            f'The mass-sheet reduction sqrt(1 - kappa) is not real and '
+            f'over-critical / Type III configurations are out of scope.')
+    if abs(gamma) == lam:
+        raise LensDomainError(
+            f'Cannot build a macro matrix for (kappa, gamma) = '
+            f'({kappa}, {gamma}): |gamma| == 1 - kappa = {lam} exactly, '
+            f'so det A = 0. The source sits on the parity boundary '
+            f'between the positive-parity (1 - kappa > |gamma|) and '
+            f'macro-saddle (1 - kappa < |gamma|) domains, a degenerate '
+            f'fold branch point; this boundary is a named refusal.')
     cos2b, sin2b = np.cos(2.0 * beta), np.sin(2.0 * beta)
     shear = np.array([[cos2b, sin2b], [sin2b, -cos2b]])
     return (1.0 - kappa) * np.eye(2) - gamma * shear
@@ -427,28 +456,50 @@ def _newton_polish(image: np.ndarray, source: np.ndarray,
 def _centered_source_images(matrix: np.ndarray, *,
                             degeneracy_tolerance: float
                             ) -> list[np.ndarray]:
-    """Images for y = 0; the gamma = 0 Einstein ring is intentionally
-    rejected."""
+    """Images for a source at ``y = 0``.
+
+    At the origin the lens equation ``A x = x / |x|**2`` has a real
+    solution on an eigenaxis only where the eigenvalue is positive
+    (``|x|**2 = 1 / lambda``).  Hence:
+
+    * positive parity (both eigenvalues positive): two images on each
+      eigenaxis (four total); the ``gamma = 0`` Einstein ring is
+      intentionally rejected;
+    * macro saddle (one negative, one positive eigenvalue): only the
+      positive-eigenvalue axis carries images ``+- e / sqrt(lambda_+)``
+      -- two saddle images, consistent with the ``(1, 1)`` centered
+      census;
+    * negative definite (both eigenvalues non-positive, i.e.
+      ``1 - kappa <= 0``): no real centered image, refused.
+    """
     values, vectors = np.linalg.eigh(matrix)
-    if np.any(values <= 0.0):
+    n_positive = int(np.sum(values > 0.0))
+    if n_positive == 0:
         raise LensDomainError(
             f'Cannot solve for images of a centered source with macro '
-            f'matrix eigenvalues {values}: the centered-source solver '
-            f'assumes a positive-parity macro image (both eigenvalues '
-            f'positive). Macro saddles are out of scope.')
-    if (abs(values[1] - values[0])
-            <= degeneracy_tolerance * max(abs(values[0]),
-                                          abs(values[1]), 1.0)):
-        raise LensDomainError(
-            'Cannot enumerate discrete images at zero source and zero '
-            'shear: the macro matrix is degenerate and the image is a '
-            'continuous Einstein ring. Use a nonzero shear or a '
-            'nonzero source position.')
-    images: list[np.ndarray] = []
-    for value, vector in zip(values, vectors.T):
-        image = vector / np.sqrt(value)
-        images.extend([image, -image])
-    return images
+            f'matrix eigenvalues {values}: neither eigenvalue is '
+            f'positive (1 - kappa <= 0), so no real image lies on '
+            f'either eigenaxis. Over-critical / Type III configurations '
+            f'are out of scope.')
+    if n_positive == 2:
+        # Positive-parity macro image: unchanged, byte-identical.
+        if (abs(values[1] - values[0])
+                <= degeneracy_tolerance * max(abs(values[0]),
+                                              abs(values[1]), 1.0)):
+            raise LensDomainError(
+                'Cannot enumerate discrete images at zero source and '
+                'zero shear: the macro matrix is degenerate and the '
+                'image is a continuous Einstein ring. Use a nonzero '
+                'shear or a nonzero source position.')
+        images: list[np.ndarray] = []
+        for value, vector in zip(values, vectors.T):
+            image = vector / np.sqrt(value)
+            images.extend([image, -image])
+        return images
+    # Macro saddle: only the positive-eigenvalue axis admits images.
+    axis = int(np.argmax(values))
+    image = vectors[:, axis] / np.sqrt(values[axis])
+    return [image, -image]
 
 
 def _axial_candidates(source_radius: float, a11: float, a22: float, *,
@@ -752,13 +803,26 @@ def image_kernel(w_dimensionless, image: np.ndarray,
 
 
 def critical_point(gamma: float, theta: float, beta: float = 0.0,
-                   kappa: float = 0.0) -> CriticalPoint:
+                   kappa: float = 0.0, branch: int = 1) -> CriticalPoint:
     """
     Critical point at a given polar angle, and its local frame.
 
-    The result follows from the exact mass-sheet rescaling
-    ``x' = sqrt(lam) * x``, ``y' = y / sqrt(lam)``, with
-    ``lam = 1 - kappa`` and effective shear ``gamma / lam``.
+    The critical radius follows from the zeros of the Fermat-Hessian
+    determinant in ``v = 1 / |x|**2`` (equivalently the mass-sheet
+    rescaling ``x' = sqrt(lam) * x`` with ``lam = 1 - kappa`` and
+    effective shear ``gamma / lam``):
+
+        v(theta') = gamma * cos(2 theta')
+                    +- sqrt(gamma**2 cos(2 theta')**2 + lam**2 - gamma**2),
+
+    ``theta' = theta - beta``.  For positive parity ``lam > abs(gamma)``
+    only the ``+`` branch is a positive radius, and it exists at every
+    angle -- the classical single 4-cusp astroid.  For a macro saddle
+    ``lam < abs(gamma)`` both ``+-`` branches are positive, but only
+    inside the two angular wedges ``|sin 2 theta'| <= lam / abs(gamma)``
+    about the negative-eigenvalue axis (``theta' ~ 0, pi``); the two
+    branches trace the two edges of each of the two 3-cusp deltoid
+    lobes.
 
     Parameters
     ----------
@@ -770,6 +834,11 @@ def critical_point(gamma: float, theta: float, beta: float = 0.0,
         External shear orientation, radians.
     kappa : float
         External convergence.
+    branch : int
+        Sign of the square-root branch of ``v(theta')``: ``+1`` (the
+        default, the only real branch at positive parity) or ``-1``.
+        Ignored at positive parity, where only ``+1`` is a valid
+        radius.
 
     Returns
     -------
@@ -781,20 +850,54 @@ def critical_point(gamma: float, theta: float, beta: float = 0.0,
     Raises
     ------
     LensDomainError
-        If ``1 - kappa <= abs(gamma)``.
+        If ``1 - kappa <= 0`` (over-critical / Type III) or
+        ``abs(gamma) == 1 - kappa`` (the parity boundary); or, for a
+        macro saddle, if ``theta`` lies outside the critical wedge or
+        the selected branch gives a non-positive radius.
     """
     lam = 1.0 - float(kappa)
-    if lam <= 0.0 or abs(gamma) >= lam:
+    if lam <= 0.0:
         raise LensDomainError(
             f'Cannot locate a critical point for (kappa, gamma) = '
-            f'({kappa}, {gamma}): this requires the positive-parity '
-            f'condition 1 - kappa > |gamma| >= 0. Macro saddles '
-            f'(Type II images) are out of scope of this formalism.')
+            f'({kappa}, {gamma}): 1 - kappa = {lam} <= 0 (over-critical '
+            f'/ Type III). The mass-sheet reduction is not real; such '
+            f'configurations are out of scope.')
+    if abs(gamma) == lam:
+        raise LensDomainError(
+            f'Cannot locate a critical point for (kappa, gamma) = '
+            f'({kappa}, {gamma}): |gamma| == 1 - kappa = {lam} exactly '
+            f'(det A = 0, the parity boundary between the positive-'
+            f'parity and macro-saddle domains); this boundary is a '
+            f'named refusal.')
     effective_gamma = gamma / lam
     phase = theta - beta
-    effective_u = (effective_gamma * np.cos(2.0 * phase)
-                   + np.sqrt(1.0 - effective_gamma**2
-                             * np.sin(2.0 * phase)**2))
+    if abs(gamma) < lam:
+        # Positive parity: single astroid, only the + branch is real.
+        # Byte-identical to the frozen positive-parity implementation.
+        effective_u = (effective_gamma * np.cos(2.0 * phase)
+                       + np.sqrt(1.0 - effective_gamma**2
+                                 * np.sin(2.0 * phase)**2))
+    else:
+        # Macro saddle: two 3-cusp lobes; both +- branches are real
+        # inside the critical wedge |sin 2 theta'| <= lam / |gamma|.
+        discriminant = (1.0 - effective_gamma**2
+                        * np.sin(2.0 * phase)**2)
+        if discriminant < -1e-12:
+            raise LensDomainError(
+                f'Cannot locate a macro-saddle critical point at theta '
+                f'= {theta} for (kappa, gamma) = ({kappa}, {gamma}): '
+                f'the polar angle lies outside the critical wedge '
+                f'|sin 2(theta - beta)| <= (1 - kappa) / |gamma|.')
+        discriminant = max(discriminant, 0.0)
+        effective_u = (effective_gamma * np.cos(2.0 * phase)
+                       + branch * np.sqrt(discriminant))
+        if effective_u <= 0.0:
+            raise LensDomainError(
+                f'Cannot locate a macro-saddle critical point at theta '
+                f'= {theta} for (kappa, gamma) = ({kappa}, {gamma}): '
+                f'branch {branch} gives a non-positive radial coordinate '
+                f'u = {effective_u}. The two critical lobes lie on the '
+                f'negative-eigenvalue axis (theta - beta near 0 or pi).')
     # x' has radius 1 / sqrt(effective_u); physical x = x' / sqrt(lam).
     radius = 1.0 / np.sqrt(lam * effective_u)
     image = radius * np.array([np.cos(theta), np.sin(theta)])
@@ -813,7 +916,7 @@ def critical_point(gamma: float, theta: float, beta: float = 0.0,
 
 @numba.njit(cache=True, fastmath=False)
 def _caustic_source(theta: float, gamma: float, beta: float,
-                    kappa: float) -> np.ndarray:
+                    kappa: float, branch: float) -> np.ndarray:
     """
     Caustic (source-plane) point of the critical curve at ``theta``.
 
@@ -829,21 +932,32 @@ def _caustic_source(theta: float, gamma: float, beta: float,
         Polar angle on the critical curve, radians.
     gamma, beta, kappa : float
         External shear magnitude, shear orientation (radians), and
-        convergence.  The positive-parity condition ``1 - kappa >
-        abs(gamma)`` must already hold; this helper does not guard it.
+        convergence.  The domain condition ``1 - kappa > 0`` must
+        already hold; this helper does not guard it.
+    branch : float
+        Sign (``+1.0`` or ``-1.0``) of the square-root branch of the
+        critical radius.  ``+1.0`` is the only real branch at positive
+        parity; a macro saddle uses both.  The discriminant is clamped
+        at zero so the wedge endpoints (where the two branches meet) do
+        not produce ``nan`` from float64 rounding; at positive parity
+        the discriminant is strictly positive so the clamp is inert and
+        the result is byte-identical to the frozen positive-parity
+        evaluation.
 
     Returns
     -------
     np.ndarray
         Shape (2,), the caustic point ``macro_matrix @ x - x / |x|**2``
-        at the critical point ``x`` for the given ``theta``.
+        at the critical point ``x`` for the given ``theta`` and branch.
     """
     lam = 1.0 - kappa
     effective_gamma = gamma / lam
     phase = theta - beta
+    discriminant = 1.0 - effective_gamma**2 * np.sin(2.0 * phase)**2
+    if discriminant < 0.0:
+        discriminant = 0.0
     effective_u = (effective_gamma * np.cos(2.0 * phase)
-                   + np.sqrt(1.0 - effective_gamma**2
-                             * np.sin(2.0 * phase)**2))
+                   + branch * np.sqrt(discriminant))
     radius = 1.0 / np.sqrt(lam * effective_u)
     image_x = radius * np.cos(theta)
     image_y = radius * np.sin(theta)
@@ -862,8 +976,8 @@ def _caustic_source(theta: float, gamma: float, beta: float,
 
 @numba.njit(cache=True, fastmath=False)
 def _coarse_squared_distances(grid: np.ndarray, gamma: float, beta: float,
-                              kappa: float, source: np.ndarray
-                              ) -> np.ndarray:
+                              kappa: float, source: np.ndarray,
+                              branch: float) -> np.ndarray:
     """
     Squared source-plane distance to the caustic at each grid angle.
 
@@ -881,6 +995,9 @@ def _coarse_squared_distances(grid: np.ndarray, gamma: float, beta: float,
         Lens parameters (see `_caustic_source`).
     source : np.ndarray
         Shape (2,), source position.
+    branch : float
+        Astroid sign branch (+1.0 or -1.0) selecting the caustic lobe;
+        +1.0 reproduces the positive-parity caustic byte-for-byte.
 
     Returns
     -------
@@ -889,7 +1006,7 @@ def _coarse_squared_distances(grid: np.ndarray, gamma: float, beta: float,
     """
     distances = np.empty(grid.shape[0])
     for index in range(grid.shape[0]):
-        caustic = _caustic_source(grid[index], gamma, beta, kappa)
+        caustic = _caustic_source(grid[index], gamma, beta, kappa, branch)
         offset_x = caustic[0] - source[0]
         offset_y = caustic[1] - source[1]
         distances[index] = offset_x * offset_x + offset_y * offset_y
@@ -903,15 +1020,27 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
     Caustic point closest to a source, by search along the critical
     curve.
 
-    A coarse scan over ``n_grid`` polar angles is refined with a
+    Positive parity (``abs(gamma) < 1 - kappa``): a coarse scan over
+    ``n_grid`` polar angles spanning the full circle is refined with a
     bounded one-dimensional minimization from each of the four best
-    grid cells, so that all four cusps of the astroid remain reachable.
+    grid cells, so that all four cusps of the single astroid remain
+    reachable.  This branch is byte-identical to the frozen
+    positive-parity implementation (the ``+`` square-root branch only).
+
+    Macro saddle (``0 < 1 - kappa < abs(gamma)``): the critical curve is
+    two 3-cusp deltoid lobes confined to the two angular wedges
+    ``|sin 2(theta - beta)| <= (1 - kappa) / abs(gamma)`` about the
+    negative-eigenvalue axis (``theta - beta`` near ``0`` and ``pi``).
+    Each wedge is scanned for both square-root branches (``+-``), and
+    the global minimum over the two lobes and two branches is returned,
+    so both deltoid lobes remain reachable.
+
     The frequency-independent distance search runs through the compiled
     source-only helper `_caustic_source` (the eigenframe and eigenvalue
     are not needed to locate the closest caustic); the returned local
     frame and eigenvalue are then built from a single `critical_point`
-    call at the winning angle, so those fields are identical to a search
-    that used `critical_point` throughout.
+    call at the winning angle and branch, so those fields are identical
+    to a search that used `critical_point` throughout.
 
     Parameters
     ----------
@@ -924,7 +1053,8 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
     kappa : float
         External convergence.
     n_grid : int
-        Number of polar angles in the coarse scan.
+        Number of polar angles in the coarse scan (per wedge and branch
+        for a macro saddle).
 
     Returns
     -------
@@ -936,37 +1066,86 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
     Raises
     ------
     LensDomainError
-        If ``1 - kappa <= abs(gamma)``.
+        If ``1 - kappa <= 0`` (over-critical / Type III) or
+        ``abs(gamma) == 1 - kappa`` (the parity boundary).
     """
     lam = 1.0 - float(kappa)
-    if lam <= 0.0 or abs(gamma) >= lam:
+    if lam <= 0.0:
         raise LensDomainError(
             f'Cannot locate a critical point for (kappa, gamma) = '
-            f'({kappa}, {gamma}): this requires the positive-parity '
-            f'condition 1 - kappa > |gamma| >= 0. Macro saddles '
-            f'(Type II images) are out of scope of this formalism.')
+            f'({kappa}, {gamma}): 1 - kappa = {lam} <= 0 (over-critical '
+            f'/ Type III). Such configurations are out of scope.')
+    if abs(gamma) == lam:
+        raise LensDomainError(
+            f'Cannot locate a critical point for (kappa, gamma) = '
+            f'({kappa}, {gamma}): |gamma| == 1 - kappa = {lam} exactly '
+            f'(det A = 0, the parity boundary); this boundary is a '
+            f'named refusal.')
 
     source = np.asarray(source, dtype=float)
-    grid = np.linspace(0.0, 2.0 * np.pi, n_grid, endpoint=False)
-    step = 2.0 * np.pi / n_grid
 
-    def squared_distance(theta) -> float:
-        caustic = _caustic_source(float(theta) % (2.0 * np.pi),
-                                  gamma, beta, kappa)
-        return float(np.sum((caustic - source)**2))
+    if abs(gamma) < lam:
+        # Positive parity: a single 4-cusp astroid over the full circle,
+        # the ``+`` branch only.  Byte-identical to the frozen path.
+        grid = np.linspace(0.0, 2.0 * np.pi, n_grid, endpoint=False)
+        step = 2.0 * np.pi / n_grid
 
-    coarse = _coarse_squared_distances(grid, gamma, beta, kappa, source)
-    best = None
-    for index in np.argsort(coarse)[:4]:
-        center = grid[index]
-        refined = minimize_scalar(squared_distance,
-                                  bounds=(center - step, center + step),
-                                  method='bounded',
-                                  options={'xatol': 1e-12})
-        if best is None or refined.fun < best.fun:
-            best = refined
+        def squared_distance(theta) -> float:
+            caustic = _caustic_source(float(theta) % (2.0 * np.pi),
+                                      gamma, beta, kappa, 1.0)
+            return float(np.sum((caustic - source)**2))
 
-    theta = float(best.x % (2.0 * np.pi))
-    return NearestCausticPoint(theta,
-                               *critical_point(gamma, theta, beta, kappa),
-                               distance=float(np.sqrt(best.fun)))
+        coarse = _coarse_squared_distances(grid, gamma, beta, kappa,
+                                           source, 1.0)
+        best = None
+        for index in np.argsort(coarse)[:4]:
+            center = grid[index]
+            refined = minimize_scalar(squared_distance,
+                                      bounds=(center - step, center + step),
+                                      method='bounded',
+                                      options={'xatol': 1e-12})
+            if best is None or refined.fun < best.fun:
+                best = refined
+        theta = float(best.x % (2.0 * np.pi))
+        return NearestCausticPoint(
+            theta,
+            *critical_point(gamma, theta, beta, kappa),
+            distance=float(np.sqrt(best.fun)))
+
+    # Macro saddle: two 3-cusp deltoid lobes, each confined to a wedge of
+    # half-width theta_max about the negative-eigenvalue axis, and each
+    # traced by both square-root branches.
+    theta_max = 0.5 * np.arcsin(lam / abs(gamma))
+    best_fun = np.inf
+    best_theta = 0.0
+    best_branch = 1
+    for center in (beta, beta + np.pi):
+        wedge = np.linspace(center - theta_max, center + theta_max, n_grid)
+        step = 2.0 * theta_max / (n_grid - 1)
+        for branch in (1.0, -1.0):
+
+            def squared_distance(theta, branch=branch) -> float:
+                caustic = _caustic_source(float(theta), gamma, beta,
+                                          kappa, branch)
+                return float(np.sum((caustic - source)**2))
+
+            coarse = _coarse_squared_distances(wedge, gamma, beta, kappa,
+                                               source, branch)
+            for index in np.argsort(coarse)[:4]:
+                lower = max(wedge[index] - step, center - theta_max)
+                upper = min(wedge[index] + step, center + theta_max)
+                refined = minimize_scalar(
+                    squared_distance,
+                    bounds=(lower, upper),
+                    method='bounded',
+                    options={'xatol': 1e-12})
+                if refined.fun < best_fun:
+                    best_fun = refined.fun
+                    best_theta = float(refined.x)
+                    best_branch = int(branch)
+
+    theta = best_theta % (2.0 * np.pi)
+    return NearestCausticPoint(
+        theta,
+        *critical_point(gamma, best_theta, beta, kappa, best_branch),
+        distance=float(np.sqrt(best_fun)))

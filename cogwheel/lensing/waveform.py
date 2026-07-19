@@ -213,8 +213,16 @@ class LensedWaveformGenerator(utils.JSONMixin):
                 f'The source position y must be a two-vector, got shape '
                 f'{source.shape}.')
 
-        # Positive-parity gate: raises LensDomainError at construction for
-        # macro saddles, matching the engine's own boundary check.
+        # Positive-parity gate at CONSTRUCTION. Since Build 6 the engine's
+        # macro_matrix legitimately accepts macro saddles, so the waveform/
+        # channel layer (positive-parity-only until Build 7) must enforce
+        # its own parity boundary explicitly.
+        if not 1.0 - kappa > abs(gamma):
+            raise geometry.LensDomainError(
+                f'LensedWaveformGenerator requires positive parity '
+                f'(1 - kappa > |gamma|): gamma={gamma}, kappa={kappa}. '
+                f'Saddle macro images are engine-supported but not yet '
+                f'available in the waveform/likelihood layer (Build 7).')
         geometry.macro_matrix(gamma, beta, kappa)
 
         self.waveform_generator = waveform_generator

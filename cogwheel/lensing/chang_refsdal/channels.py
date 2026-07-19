@@ -898,6 +898,17 @@ class ChangRefsdalChannels:
             If ``1 - kappa <= abs(gamma)`` (outside the positive-parity
             regime).
         """
+        if not 1.0 - kappa > abs(gamma):
+            # Build 6 extended geometry/operator to macro saddles, but the
+            # SACR-C channel construction (switches, envelope, virtual
+            # labels) is certified for POSITIVE PARITY ONLY until Build 7
+            # delivers the saddle-domain channel layer. Refuse by name so
+            # no saddle config flows through uncertified machinery.
+            raise geometry.LensDomainError(
+                f'channel layer requires positive parity '
+                f'(1 - kappa > |gamma|): gamma={gamma}, kappa={kappa}. '
+                f'Saddle macro images are engine-supported but not yet '
+                f'available in the channel/likelihood layer (Build 7).')
         source = np.asarray(y, dtype=float)
         matrix = geometry.macro_matrix(gamma, beta, kappa)
         caustic = geometry.nearest_caustic_point(

@@ -96,6 +96,38 @@ total.  It is NOT this gate: the switch chooses a gauge, the gate
 chooses an evaluation method, and the two thresholds must not leak into
 each other.
 
+MACRO-SADDLE (NEGATIVE-PARITY) DISPATCH
+---------------------------------------
+`F_op` and `F_op_grid` classify parity from ``lam = 1 - kappa`` versus
+``|gamma|``.  Positive parity ``lam > |gamma|`` takes the operator /
+1F1 wave branch above unchanged and BYTE-IDENTICAL (every F001/F005
+refusal constant is frozen).  A macro saddle ``0 < lam < |gamma|`` has
+NO convergent shear operator series (the series diverges past the
+parity branch point), so those configs route instead to the exact 1D
+Schwinger-parameter quadrature `_schwinger.f_schwinger`, evaluated in
+the shear eigenframe with the reduced shear ``gamma' = gamma/lam > 1``
+and reconstructed with the SAME mass-sheet identity as the operator
+path, ``F = (1/lam) * exp[i*w*(ln(lam)/2 - kappa*|y'|**2/2)] *
+F_{0,gamma'}(w, y_eig)``.  The saddle mass-sheet reduction lives in a
+SEPARATE `_saddle_mass_sheet_map` (opposite valid-domain assumption);
+the byte-frozen `_mass_sheet_map` is left untouched.  ``lam <= 0`` (Type
+III) and ``lam == |gamma|`` (the degenerate parity boundary) are named
+`geometry.LensDomainError` refusals -- never a silent ``nan``.
+
+The saddle geometric-vs-wave decision is made per node directly in the
+dispatch (not through `select_branch`, whose positive-parity call stays
+byte-identical): a saddle node takes the stationary-phase
+`geometric_amplification` (over the real images of the indefinite
+matrix) ONLY when it is BOTH resolved (``w * delta_min >= RHO_END``,
+``delta_min`` the real-image delay separation) AND above the wave
+ceiling ``w > _schwinger.W_CEILING_SCHWINGER`` (= 60); otherwise it
+takes the Schwinger wave branch.  Because `_schwinger.f_schwinger` also
+hard-refuses ``w > 60`` internally, an UNRESOLVED saddle above the
+ceiling propagates `_schwinger.SchwingerCertificationError` rather than
+returning a wrong value.  ``cancellation_exponent`` is untouched and
+still refuses saddles: the saddle wave path takes ``w`` directly and
+never computes ``L = w*|y'|``.
+
 NORMALIZATION AND THE w -> 0 MACRO LIMIT
 ----------------------------------------
 ``F`` is normalized to NO LENS AT ALL, not to the macro image.  Both
@@ -135,7 +167,7 @@ from dataclasses import dataclass
 import numba
 import numpy as np
 
-from cogwheel.lensing.chang_refsdal import geometry
+from cogwheel.lensing.chang_refsdal import geometry, _schwinger
 from cogwheel.lensing.chang_refsdal._hyp1f1 import (
     point_mass_g_derivatives)
 
@@ -348,6 +380,205 @@ def _mass_sheet_map(y: np.ndarray, gamma: float, kappa: float
         raise ValueError(
             f'Source position must have shape (2,), got {y.shape}.')
     return lam, y / np.sqrt(lam), gamma / lam
+
+
+def _saddle_mass_sheet_map(y: np.ndarray, gamma: float, kappa: float
+                           ) -> tuple[float, np.ndarray, float]:
+    """Exact mass-sheet rescaling for the macro-SADDLE (negative-parity).
+
+    Identical algebra to `_mass_sheet_map` -- ``y' = y/sqrt(lam)``,
+    ``gamma' = gamma/lam`` with ``lam = 1 - kappa`` -- but a SEPARATE
+    implementation with the OPPOSITE valid-domain assumption: the
+    positive-parity map requires ``lam > |gamma|`` (so ``gamma' < 1``),
+    whereas the saddle map requires ``0 < lam < |gamma|`` (so the reduced
+    shear ``gamma' > 1`` the Schwinger evaluator consumes).  The two are
+    deliberately kept apart; the byte-frozen `_mass_sheet_map` must not be
+    reshaped to straddle both parities.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        Shape ``(2,)`` source position (physical frame).
+    gamma : float
+        External shear magnitude.
+    kappa : float
+        External convergence.
+
+    Returns
+    -------
+    lam : float
+        ``1 - kappa`` (strictly positive, ``< |gamma|``).
+    y_scaled : np.ndarray
+        Rescaled source ``y / sqrt(lam)``.
+    gamma_prime : float
+        Reduced shear ``gamma / lam`` (``> 1`` for a genuine saddle).
+
+    Raises
+    ------
+    geometry.LensDomainError
+        If ``1 - kappa <= 0`` (over-critical / Type III, where the
+        mass-sheet reduction ``sqrt(lam)`` is not real), or if
+        ``|gamma| <= 1 - kappa`` (``lam == |gamma|`` is the degenerate
+        parity boundary ``det A = 0``; ``lam > |gamma|`` is positive
+        parity and belongs to the operator path).  Both are named
+        refusals -- never a silent ``nan``.
+    ValueError
+        If ``y`` does not have shape ``(2,)``.
+    """
+    gamma = float(gamma)
+    lam = 1.0 - float(kappa)
+    if lam <= 0.0:
+        raise geometry.LensDomainError(
+            f'Cannot rescale the mass sheet for (kappa, gamma) = '
+            f'({kappa}, {gamma}): 1 - kappa = {lam} <= 0 (kappa >= 1). '
+            f'The mass-sheet reduction sqrt(1 - kappa) is not real and '
+            f'over-critical / Type III configurations are out of scope.')
+    if not abs(gamma) > lam:
+        raise geometry.LensDomainError(
+            f'Cannot apply the macro-saddle mass-sheet map for '
+            f'(kappa, gamma) = ({kappa}, {gamma}): the saddle domain '
+            f'requires 1 - kappa < |gamma| (|gamma| > {lam}). '
+            f'|gamma| == 1 - kappa is the degenerate parity boundary '
+            f'(det A = 0) and |gamma| < 1 - kappa is positive parity '
+            f'(use the operator wave branch); both are named refusals.')
+    y = np.asarray(y, dtype=float)
+    if y.shape != (2,):
+        raise ValueError(
+            f'Source position must have shape (2,), got {y.shape}.')
+    return lam, y / np.sqrt(lam), gamma / lam
+
+
+def _real_delay_min_separation(source: np.ndarray, matrix: np.ndarray
+                               ) -> float:
+    """Smallest pairwise Fermat-delay separation among the real images.
+
+    The saddle resolution measure ``delta_min`` for the geometric-branch
+    gate ``w * delta_min >= RHO_END``.  Mirrors the channel tracker's
+    ``_min_delay_separation`` but keys directly on `geometry.find_images`
+    (which returns the real images only, so the real-only convention is
+    automatic).  Fewer than two real images means nothing is resolved, so
+    ``0.0`` is returned and the resolution condition fails -- keeping the
+    wave branch (where the Schwinger evaluator hard-refuses ``w > 60``).
+
+    Parameters
+    ----------
+    source : np.ndarray
+        Shape ``(2,)`` source position (physical frame).
+    matrix : np.ndarray
+        Shape ``(2, 2)`` macro matrix (the indefinite saddle matrix).
+
+    Returns
+    -------
+    float
+        Minimum pairwise real-image delay separation, or ``0.0`` if
+        fewer than two real images exist.
+    """
+    images = geometry.find_images(source, matrix)
+    if len(images) < 2:
+        return 0.0
+    delays = np.array([geometry.delay(image, source, matrix)
+                       for image in images])
+    differences = np.abs(delays[:, None] - delays[None, :])
+    upper = differences[np.triu_indices(delays.size, k=1)]
+    return float(np.min(upper))
+
+
+def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
+                 beta: float = 0.0, kappa: float = 0.0) -> np.ndarray:
+    """Macro-saddle amplification over a ``w`` grid, node by node.
+
+    The negative-parity counterpart of `_grid_certified`.  A saddle host
+    (``0 < 1 - kappa < |gamma|``) has no convergent operator power series
+    (the shear series diverges past the parity boundary), so each node is
+    evaluated by the exact 1D Schwinger-parameter quadrature
+    `_schwinger.f_schwinger` in the shear eigenframe and reconstructed
+    with the same mass-sheet identity the operator path uses.
+
+    Per node the geometric-vs-wave decision is ``(resolved AND
+    w > W_CEILING_SCHWINGER) -> geometric``, else the Schwinger wave
+    branch.  ``resolved`` uses the frequency-independent real-image
+    ``delta_min`` (computed once, only when some node exceeds the
+    ceiling).  Because `_schwinger.f_schwinger` ALSO hard-refuses
+    ``w > W_CEILING_SCHWINGER`` internally, an unresolved saddle above the
+    ceiling propagates `_schwinger.SchwingerCertificationError` from the
+    wave branch rather than returning a wrong value.
+
+    Parameters
+    ----------
+    w_array : np.ndarray
+        ``(n_nodes,)`` dimensionless frequencies, ``w > 0``.
+    y : np.ndarray
+        Shape ``(2,)`` source position (physical frame).
+    gamma : float
+        External shear magnitude.
+    beta : float, optional
+        External shear orientation, radians (rotated into the eigenframe).
+    kappa : float, optional
+        External convergence.
+
+    Returns
+    -------
+    np.ndarray
+        ``(n_nodes,)`` complex amplifications ``F``.
+
+    Raises
+    ------
+    geometry.LensDomainError
+        If ``1 - kappa <= 0`` (Type III) or the config is not a genuine
+        saddle (``|gamma| <= 1 - kappa``), via `geometry.macro_matrix`
+        and `_saddle_mass_sheet_map`.
+    _schwinger.SchwingerCertificationError
+        If any node cannot be certified by the paired Gauss-Legendre
+        rules, or an unresolved node exceeds ``W_CEILING_SCHWINGER``.
+    ValueError
+        If ``y`` does not have shape ``(2,)`` or ``w_array`` is not 1-D.
+    """
+    w_array = np.asarray(w_array, dtype=float)
+    if w_array.ndim != 1:
+        raise ValueError(
+            f'w_array must be one-dimensional, got shape {w_array.shape}.')
+
+    # `macro_matrix` is the parity classifier and the named Type III /
+    # parity-boundary refusal (never a silent nan); it also supplies the
+    # indefinite matrix the geometric branch and resolution need.
+    matrix = geometry.macro_matrix(gamma, beta, kappa)
+    lam, y_scaled, gamma_prime = _saddle_mass_sheet_map(y, gamma, kappa)
+    source = np.asarray(y, dtype=float)
+
+    # w-INDEPENDENT eigenframe reduction: rotate the rescaled source into
+    # the shear eigenframe (e1 = soft axis, e2 = hard axis), exactly as
+    # the operator path does; the exp(-1j*beta) rotation carries the full
+    # shear-orientation dependence and |y_eig|**2 == |y_scaled|**2 == s.
+    z_eig = np.exp(-1j * float(beta)) * complex(y_scaled[0], y_scaled[1])
+    y_eig = np.array([z_eig.real, z_eig.imag])
+    s = float(y_scaled @ y_scaled)
+
+    # Resolution is frequency-independent; compute delta_min once and only
+    # if any node could take the geometric branch (w > ceiling).
+    delta_min = 0.0
+    if np.any(w_array > _schwinger.W_CEILING_SCHWINGER):
+        delta_min = _real_delay_min_separation(source, matrix)
+
+    values = np.empty(w_array.shape[0], dtype=complex)
+    for node in range(w_array.shape[0]):
+        w_node = float(w_array[node])
+        # NOTE: `select_branch` is NOT the saddle authority in Build S1 --
+        # it stays byte-frozen for the positive-parity operator path; the
+        # saddle takeover is owned here (channels.py / Build 7 wires it).
+        if (w_node > _schwinger.W_CEILING_SCHWINGER
+                and w_node * delta_min >= RHO_END):
+            # Resolved and above the wave ceiling: stationary-phase sum
+            # over the real images of the indefinite matrix.
+            values[node] = complex(geometric_amplification(
+                w_node, y, gamma, beta=beta, kappa=kappa))
+            continue
+        # Wave branch.  An unresolved node with w > ceiling reaches here
+        # too and `f_schwinger` refuses it (SchwingerCertificationError).
+        f_pure = _schwinger.f_schwinger(w_node, y_eig, gamma_prime)
+        mass_sheet_phase = np.exp(
+            0.5j * w_node * np.log(lam) - 0.5j * w_node * float(kappa) * s)
+        values[node] = complex(mass_sheet_phase * f_pure / lam)
+    return values
 
 
 def _series_length(w: float, s: float) -> int:
@@ -825,6 +1056,17 @@ def F_op_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
         Propagated from the kernel above its certified ``w`` or
         cancellation-exponent ceiling.
     """
+    lam = 1.0 - float(kappa)
+    if not lam > abs(float(gamma)):
+        # Negative-parity (macro saddle), Type III, or the parity
+        # boundary: the operator power series does not converge, so route
+        # to the exact Schwinger wave branch (which raises the named Type
+        # III / parity-boundary / certification refusals).  Positive
+        # parity (lam > |gamma|) is untouched and byte-identical below.
+        values = _saddle_grid(w_array, y, gamma, beta=beta, kappa=kappa)
+        orders = np.zeros(values.shape[0], dtype=int)
+        converged = np.ones(values.shape[0], dtype=bool)
+        return values, orders, converged
     values, orders, converged, _, _ = _grid_certified(
         w_array, y, gamma, beta=beta, kappa=kappa, max_order=max_order)
     return values, orders, converged
@@ -836,11 +1078,18 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
          ) -> tuple[complex, OperatorDiagnostics]:
     """Contour-free Chang-Refsdal amplification at one frequency.
 
-    A thin scalar wrapper over `F_op_grid`'s shared contraction path
-    (`_grid_certified`, a single-element grid call), so the scalar and
-    batched entry points share exactly ONE contraction implementation and
-    ONE certification (FINDINGS F005): the value and the diagnostics can
-    never disagree.
+    Dispatches on parity.  For a positive-parity host
+    (``1 - kappa > |gamma|``) this is a thin scalar wrapper over
+    `F_op_grid`'s shared contraction path (`_grid_certified`, a
+    single-element grid call), so the scalar and batched entry points
+    share exactly ONE contraction implementation and ONE certification
+    (FINDINGS F005): the value and the diagnostics can never disagree.
+    For a macro saddle (``0 < 1 - kappa < |gamma|``) the operator series
+    does not converge and the value comes from the exact Schwinger wave
+    branch `_saddle_grid` instead; the operator-series diagnostics fields
+    are then not applicable and reported as zero / converged (the
+    Schwinger evaluator certifies-or-refuses internally, so a returned
+    value is certified).
 
     Parameters
     ----------
@@ -854,26 +1103,30 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
         External shear orientation, radians.  Rotated away into the
         eigenframe; the amplification is invariant.
     kappa : float, optional
-        External convergence; enters through `_mass_sheet_map`.
+        External convergence; enters through `_mass_sheet_map` (positive
+        parity) or `_saddle_mass_sheet_map` (macro saddle).
     max_order : int, optional
         Operator-series order cap; also fixes the kernel ladder length
-        ``2 * max_order``.
+        ``2 * max_order``.  Ignored on the saddle branch.
 
     Returns
     -------
     value : complex
         The amplification ``F``.
     diagnostics : OperatorDiagnostics
-        MEASURED convergence and cancellation report.
+        MEASURED convergence and cancellation report (positive parity).
+        On the saddle branch the operator-series fields do not apply and
+        are reported as zero with ``converged = True``.
 
     Raises
     ------
     geometry.LensDomainError
-        If ``1 - kappa <= abs(gamma)``.
+        If ``1 - kappa <= 0`` (Type III) or ``|gamma| == 1 - kappa`` (the
+        parity boundary).
     CancellationError
-        If the wave-branch contraction cannot be certified to the
-        ``1e-10`` target.  This covers four refusals, all raised as
-        named errors rather than returning a ``nan`` or a
+        Positive-parity wave branch only: if the contraction cannot be
+        certified to the ``1e-10`` target.  This covers four refusals,
+        all raised as named errors rather than returning a ``nan`` or a
         finite-but-uncertified amplification (FINDINGS F005):
 
         * the scaled contraction still overflows to a non-finite total;
@@ -888,9 +1141,13 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
           ``_CONTRACTION_GUARD`` (the float64 derivative-ladder
           cancellation cut that replaces the former silent-``nan``
           overflow near ``L ~ 45``).
+    _schwinger.SchwingerCertificationError
+        Saddle branch only: if the paired Gauss-Legendre rules cannot
+        certify the Schwinger quadrature, or an unresolved saddle exceeds
+        ``_schwinger.W_CEILING_SCHWINGER`` (``w > 60``).
     _hyp1f1.HypergeometricDomainError
-        Propagated from the kernel above its certified ``w`` ceiling or
-        cancellation-exponent ceiling.
+        Positive parity: propagated from the kernel above its certified
+        ``w`` ceiling or cancellation-exponent ceiling.
 
     Notes
     -----
@@ -900,6 +1157,21 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
     not a ``gamma/(2*w)`` prefactor singularity; see the module
     docstring before "fixing" it.
     """
+    lam = 1.0 - float(kappa)
+    if not lam > abs(float(gamma)):
+        # Macro saddle (or Type III / parity boundary): the operator
+        # series does not converge; the exact Schwinger wave branch
+        # returns the value or raises a named refusal.  The
+        # operator-series diagnostics do not apply here.
+        values = _saddle_grid(
+            np.asarray([float(w)], dtype=float), y, gamma,
+            beta=beta, kappa=kappa)
+        diagnostics = OperatorDiagnostics(
+            order_used=0,
+            converged=True,
+            estimated_relative_tail=0.0,
+            cancellation_ratio=0.0)
+        return complex(values[0]), diagnostics
     (values, orders, converged, estimated_tails,
      cancellation_ratios) = _grid_certified(
          np.asarray([float(w)], dtype=float), y, gamma,

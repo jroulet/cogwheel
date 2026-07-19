@@ -1,34 +1,37 @@
-# Professor short-term — Build 5 inference review (2026-07-18)
+# Professor short-term — 2026-07-18 (Build 6 verification gate review)
 
-## Reviewed: LensedMarginalizedExtrinsicLikelihood (Build 5, commit 598f074 brief / 9cb5983 HEAD)
-Env: cogwheel-newlal (py3.10, np1.26). Ran fast domain suite
-`cogwheel/tests/test_lensing_marginalized_likelihood.py`: **21/21 PASS in 64 s.**
+## Session task
+Reviewed and corrected 7 gate specs for the Build 6 negative-parity verification plan.
 
-## Measured margins (extracted directly, not just green/red):
-- **Spec 1 unlensed-limit identity (F=1 @ gamma=kappa=0, m_lens=1e-6):** rel dh=2.1e-7,
-  rel hh=7.0e-10 vs gate 1e-6. Exactly the O(w)~1e-7 wave residual + float32 floor
-  expected from F009 — NO spurious per-image shift, NO kernel-amplitude error. Correct.
-- **Spec 2/7 exact-F reconstruction (4-image MAIN_LENS, |F| in [0.78,3.25]):** rel
-  complexF=1.24e-3, rel |F|^2=1.02e-3 vs gate 3e-3. Physically the linear-in-bin K_a
-  kernel error on 4 Hz bins. NOTE: docstring advertises "~2e-4 on these configs" but
-  true value is ~1.2e-3 (~6x larger); still safely < gate but headroom is ~2.5x not
-  ~15x. Minor doc/test-dev nit, not a physics defect.
-- **Spec 6 conditional draws:** main lnL_marg=239.09, draws max=270.3/p10=264.6/min=260.1;
-  unlensed lnL_marg=245.28, draws max=278.2/min=271.2. ALL draws sit ~20-31 nats ABOVE
-  lnL_marg — exactly the 5-6D extrinsic Occam factor (~4-5 nats/dim for SNR~22). Lower-
-  bound gate satisfied by huge margin. Test correctly DROPS the raw spec's upper bound
-  ("no draw > lnL_marg+0.5") with documented justification: cogwheel's marg normalization
-  puts plain peak ABOVE marginal, so upper bound is unphysical. Sound.
-- Specs 5 (refusal precedes coherent score, call-count=0, exact -inf), 8 (registry,
-  param pairing, bit-repeatable deterministic layer, JSON round-trip), 9 (LensedBinningError
-  bin guard on marg path), all assertion-only: PASS. SelfFalsification proof-of-teeth PASS.
+## Observations
 
-## Operator-deferred (NOT in fast file, correctly): 
-Spec 3 (marg lnL vs importance-sampling brute-force oracle, C_two/C_cusp/C_macro,
-|median-oracle|<=0.3 nats) and Spec 4 (plain-vs-marg reweighting). These are the ONLY
-checks of the ABSOLUTE lnL_marg value; fast suite proves the FOLD is exact + conditional
-self-consistency, but absolute-normalization accuracy is the nightly/operator gate.
+1. **geometric_amplification docstring stale**: claims `LensDomainError` if
+   `1 - kappa <= abs(gamma)`, but the underlying `macro_matrix` now accepts BOTH
+   parities (only refuses lam<=0 and |gamma|==lam). The geometric branch works
+   correctly on saddle configs — the docstring just wasn't updated. NOT a code bug.
 
-## Verdict: PASS. Fold exact in unlensed limit + against independent engine; refusal
-semantics correct; conditional draws physically consistent. Flag absolute-lnL oracle
-(spec 3/4) as operator-deferred.
+2. **Eigenframe rotation convention**: `_saddle_grid` uses `exp(-1j*beta)` to rotate
+   the rescaled source y_scaled into the shear eigenframe. The positive-parity
+   `_mass_sheet_map` path (inside `_grid_certified`) does the SAME rotation — verified
+   consistent. The sign is correct: shear matrix Q(beta) has eigenvectors at angles
+   beta and beta+pi/2, so rotating by -beta aligns to principal axes.
+
+3. **Geometric takeover condition**: `w > W_CEILING_SCHWINGER AND w*delta_min >= RHO_END`
+   (= 4.0). This means takeover happens when the SMALLEST pairwise delay separation
+   times w exceeds 4. For a 2-image saddle config with typical delta_min ~ 0.5-2,
+   takeover is at w ~ 2-8 (well below the ceiling 60). For the geometric branch to be
+   actually INVOKED, w must ALSO exceed 60 — so the test must arrange w > 60
+   specifically. The resolution condition alone doesn't trigger geometric; both must hold.
+
+4. **Index sum physics**: For a Chang-Refsdal with indefinite macro matrix (saddle host),
+   the Euler characteristic of the potential gives sum(-1)^n_a = sign(det A) - 1 = -2
+   (not sign(det A) = -1). The 2-image case: both are saddles (n=1), so sum = (-1)^1 +
+   (-1)^1 = -2. The 4-image case: one minimum (n=0) + three saddles (n=1), so sum =
+   (+1) + (-1) + (-1) + (-1) = -2. Confirmed: -2 is the CORRECT signed Morse sum for
+   BOTH topology sets individually.
+
+5. **G6 at w=13 issue**: The geometric branch is NEVER invoked at w=13 in the delivered
+   code — the condition requires w > 60 AND resolved. So G6 must compare
+   `geometric_amplification(w=13,...)` (called DIRECTLY, bypassing `_saddle_grid`) vs
+   `f_schwinger` at the same point, to verify the asymptotic formula's accuracy at
+   that w*dtau. The _saddle_grid function itself would use Schwinger at w=13.

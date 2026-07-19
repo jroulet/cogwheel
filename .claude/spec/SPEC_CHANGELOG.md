@@ -6,6 +6,16 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
+- `0.9.0` (2026-07-19): Negative-parity (macro-saddle) engine branch (Build 6): saddle-capable
+geometry (two deltoid caustic lobes, census certified), the exact 1D
+Schwinger dd-quadrature wave evaluator (`_schwinger.py`, ceiling
+w <= 60, certify-or-refuse), parity dispatch with the positive-parity
+path bit-frozen, and interim named refusals at the channel/waveform
+layer until Build 7. FINDINGS F011 (certification-blind eps64 class,
+two instances fixed and proven extinct), F012 (near-axial quartic dead
+zone, Build-7 guard precondition), F013 (saddle-branch certification
+summary).
+
 - `0.8.0` (2026-07-18): SACR-C channel construction (Build 3f): switched-analytic saddle
 kernels under criticality-separation smootherstep weights + ONE
 beat-free transition envelope demodulated at the parked critical

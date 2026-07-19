@@ -1151,6 +1151,52 @@ ITEM: analysis-heavy WPs need the raised inter-message timeout — add
 to launch_build.sh defaults or per-brief guidance when the hardening
 batch is ported (cogwheel-proves-first).
 
+BUILD 6 ATTEMPTS 5-7 (~22:20-23:20): attempt 5 delivered/verified WP2
+and WP3 (+284-line operator dispatch; driver smoke: saddle F_op ==
+f_schwinger bit-identical, boundary refuses) then died to the TIDIER
+KILLER — an error_max_turns tidier's async-generator finalization
+raises the anyio cancel-scope RuntimeError OUTSIDE the graceful-
+degradation catch and cancels the DAG (reproduced 2/2, attempts 5-6).
+FIX: SDK_SKIP_TIDIER env knob (orchestrator.py, committed) — ledger
+item. Attempt 7 (tidier skipped): the Architect ran Professor+
+Simplifier verification subagents in-planning, judged ALL code work
+complete, emitted a 0-WP plan — which the plan gate REJECTS ("Plan has
+no work packages"): TESTS-ONLY BUILDS ARE STRUCTURALLY INEXPRESSIBLE
+in the pipeline (SDK ledger item #3). DRIVER DECISION: hand-orchestrate
+the finish per the Build 1b precedent — per-suite Test Developer
+subagents from the ratified gate specs, then Inspector + Professor
+review subagents, then hand-commit. Engine code is FROZEN as delivered.
+
+OWNER ARCHITECTURE RULING (2026-07-18 ~23:30): HOMOGENIZE the engine —
+Schwinger as THE wave-branch evaluator across the whole domain (both
+parities, all shears; no dispatch seams; gamma prior opens fully), the
+operator series INVERTED to oracle/cross-check duty (keeps its F005
+apparatus as the independent verifier on the overlap domain — and
+nothing is removed before its replacement is certified against it),
+the SURROGATE as the load-bearing speed layer over the unified domain
+(per-lattice-cell envelopes; the pending Schwinger per-point cost then
+prices nothing on the hot path), and the W-RANGE closed per the owner's correction
+(2026-07-18 ~23:45): NO new heavy evaluator — high-w RESOLVED configs
+are already owned by the geometric branch (per-image analytic kernels;
+SACR-C switches saturate, envelope vanishes, ZERO engine nodes; RB
+image-by-image is exact there), so the only true gap is the narrow
+unresolved-at-high-w corner (w > 60 AND w*dtau < 4, the near-caustic
+shell — non-negligible only via magnification bias), and its right
+tool is the standard FOLD/CUSP UNIFORM (Airy) ASYMPTOTICS for a
+merging pair — a closed-form patch gluing geometric to wave, error
+shrinking with w. The v-plane evaluator is DEMOTED to
+not-needed-unless-the-Airy-patch-measurably-falls-short.
+
+OWNER RULE (2026-07-19): Fable-tier subagents are for DEEP RESEARCH
+commissions only (unsolved derivations — SACR-C, negative parity);
+routine build reviews/consults run on the standard (Opus) tier like
+the pipeline's own agents. The driver over-spent by running the Build 6
+physics review on Fable. SEQUENCE: Build 6 lands -> Build 7 =
+saddle channels/likelihood/prior + CROSS-PARITY Schwinger dispatch for
+strong shear (immediate gamma-range win) -> Build 8 = homogenization +
+surrogate + v-plane w-lift, gated by byte-level regression against the
+operator-path oracle on the overlap domain.
+
 DRIVER LESSON (2026-07-18 ~18:20): detached validation probes MUST run
 from a committed-ref worktree (git worktree add <dir> HEAD), never the
 live working tree — oracle probe v2 imported geometry.py mid-Build-6-

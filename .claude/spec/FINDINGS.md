@@ -541,3 +541,66 @@ The falsifiability lesson generalizes: after ANY compilation/JIT change,
 re-run the self-falsification tests and confirm they can still go RED —
 a falsification test that cannot fail anymore is worse than no test, and
 nothing else in the suite will tell you.
+
+## F011 — the certification-blind eps64 class in paired-rule quadrature (2026-07-19, Build 6)
+
+A paired-rule (N-vs-2N) quadrature certificate is BLIND to any error
+that is bit-identical in both rules. In the Schwinger saddle evaluator
+two such errors shipped, each a single float64 operation amplified by
+the `e^{pi w/4}` prefactor into silent fabrication above `w ~ 20`
+(O(1) wrong by w=45, |F| ~ 8.5e3 at w=59.9 — returned WITH a green
+certificate):
+1. The IBP endpoint evaluated at `t_cap` while both rules split at
+   `e^{fl(log t_cap)}` — the identity is split-point-arbitrary but
+   demands ONE split point; fixed by deriving endpoint and domains from
+   the same `u_mid`.
+2. `1/s` computed in float64, entering the endpoint and A-pieces but
+   not B, so it can never cancel; fixed with a dd reciprocal.
+Extinction was PROVEN, not assumed: post-fix error vs the independent
+oracle is 6.6e-15 (w=30) and 1.6e-11 (w=59.9), while any surviving
+class member would measure ~3e+4 at the ceiling — fifteen orders
+excluded. Audit rule for any future paired-rule certificate: every
+float64 quantity that (a) enters the certified identity inconsistently
+or (b) multiplies the accumulated result, and is identical across both
+rules, is a candidate silent fabricator — carry it in dd or prove it
+benign (parameter roundings consumed self-consistently are benign; the
+domain-truncation margin is N/2N-invisible but analytically bounded).
+
+## F012 — near-axial quartic dead zone: silent wrong-finite wedge above the wave ceiling (2026-07-19, pre-existing, both parities)
+
+`find_images_quartic` silently drops the symmetric near-degenerate
+image pair for sources ~1e-10..1e-9 (rel. angle; wider on positive
+parity, to 1e-8) off a macro-matrix eigenaxis inside the 4-image
+region — the dead band between the axial-path threshold and the
+generic path's removable-singularity guard. Index-theorem violation
+(signed Morse sum wrong). Consequences: for `w <= 60` the wave branch
+is IMMUNE (it never consumes images); but above the ceiling,
+`_real_delay_min_separation` computed from the surviving images
+misreports a truly-unresolved config as resolved and the geometric
+branch returns an O(1)-wrong finite value — a certify-or-refuse
+violation confined to {dead zone} x {w > 60} (~1e-10 hit probability
+per proposal, but silent). Tracked by
+`NearAxialQuarticDefectTestCase` (@expectedFailure). REQUIRED Build-7
+precondition: a runtime index-theorem check (signed Morse sum ==
+sign(det A) - 1) in every image-consuming path, converting the dead
+zone into a named refusal on both parities.
+
+## F013 — the negative-parity (macro-saddle) branch: certified summary (2026-07-19, Build 6)
+
+Full story in `.claude/handoff/lensing/negative_parity_research.md`
+(design authority) and the two suites
+`test_lensing_saddle_geometry.py` / `test_lensing_schwinger.py`.
+Measured certification: census (index sum -2, multisets
+{1,1}/{0,1,1,1}) over 200+ sources incl. both deltoid lobes; Schwinger
+vs independent AST-guarded mpmath oracle 9.1e-14 (w=20) to 1.6e-11
+(w=59.9); deep band |F| -> 1/sqrt(gamma^2-(1-kappa)^2) at 4.4e-5
+(w=1e-4) with Morse intercept -pi/2 to 1.5e-7 (F009-S); mass-sheet on
+observables 1e-13-class, lam <= 0 refused (F004 float64-exact
+boundaries); positive parity pinned bit-for-bit to pre-extension HEAD.
+The single cancellation channel is `L_S = pi*w/4`, y-independent
+(F001-S); ceiling w <= 60 with certify-XOR-refuse (F005-S). Warm cost
+~30-125 ms/point (w-linear) — the surrogate is load-bearing for the
+homogenized architecture. INTERIM LAYER CONTRACT: the channel/waveform
+layer refuses saddles by name (guards in `channels.evaluate` and the
+`LensedWaveformGenerator` constructor) until Build 7 delivers the
+saddle-domain channel layer.
