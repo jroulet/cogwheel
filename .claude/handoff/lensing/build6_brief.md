@@ -32,13 +32,20 @@ delivered, uncommitted in the tree:
   gp=1.3 -> 0.14470585550870085+0.4065122393352838j); the w>60 ceiling
   raises SchwingerCertificationError correctly; full dd toolchain +
   `_measure_warm_cost` present.
-Fix FORWARD: WP1 = verify-only unless a gate fails; WP2 = VERIFY AND
-COMPLETE the existing _schwinger.py (check the certification/paired-
-rule logic and the by-parts + tail decomposition against the research
-spec; run the dev-oracle comparison; complete whatever the turn
-exhaustion left unfinished) — do NOT rewrite from scratch; WP3
-(operator dispatch) is untouched and is the main remaining code work.
-Budget accordingly (WP2 completion should be small; WP3 normal).
+Fix FORWARD (attempt 6, ~23:00): ALL THREE WPs ARE DELIVERED in the
+tree — geometry.py (WP1 finalized), _schwinger.py (WP2 verified and
+completed by attempt 5), operator.py +284 lines (WP3 parity dispatch).
+DRIVER SMOKE EVIDENCE: positive-parity F_op unchanged
+(-0.35753006967142426+1.1663724461262843j at w=5, y=(0.3,0.1),
+gamma=0.2); saddle F_op(w=3, y=(0.4,0.3), gamma=1.3) returns
+0.14470585550870085+0.4065122393352838j — BIT-IDENTICAL to the direct
+f_schwinger call (clean dispatch); the exact parity boundary
+(kappa=0.5, gamma=0.5) raises the named LensDomainError. Attempt 5
+died AFTER the WPs to the SDK anyio cancel-scope bug via a failed
+cosmetic Tidier (non-fatal by intent). THIS ATTEMPT'S JOB: light
+verification of the delivered code against the WP specs, then the
+FULL test battery per domain_test_descriptions, Inspector, Professor,
+commit. Code WPs should be verify-only unless a gate fails.
 
 ## Required measurement (owner sequencing input)
 
