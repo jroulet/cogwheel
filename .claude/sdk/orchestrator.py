@@ -1336,6 +1336,16 @@ class BuildOrchestrator:
 
     async def _run_tidier_skill(self) -> str:
         """Run Tidier skill on changed Python files."""
+        if os.environ.get("SDK_SKIP_TIDIER"):
+            # The graceful-degradation except below cannot contain an
+            # error_max_turns tidier: its async-generator finalization
+            # raises the anyio cancel-scope RuntimeError in a DIFFERENT
+            # task and kills the whole DAG group after the catch
+            # (observed twice, 2026-07-18, Build 6 attempts 5-6). Until
+            # the SDK 0.2.x migration removes the cancel-scope hazard,
+            # this env knob skips the cosmetic step entirely.
+            self._log("Step 2: Tidier SKIPPED (SDK_SKIP_TIDIER set)")
+            return "Tidier skipped by driver configuration."
         all_files_changed = self._git_changed_files()
         py_files = [f for f in all_files_changed if f.endswith(".py")]
         self._log("Step 2: Tidier cleanup")
