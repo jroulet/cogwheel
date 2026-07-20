@@ -3,8 +3,9 @@
 - Before trusting the caller's framing of what changed, verify
   independently: `git show --stat --name-only <hash>` per commit and
   `git diff --name-only <first>~1 <last>` should match the claimed
-  changed-files union. Catches drift between task description and
-  reality.
+  changed-files union. A Dreamer/Inspector-flagged "unconsumed" SPEC gap
+  may already have been HAND-FIXED in the feature commit itself — check
+  before editing; verify-only is the correct outcome, don't re-touch.
 - Plain `git diff`/`git show` work directly via Bash even when project
   convention nudges toward Serena-only tools — the "USE SERENA"
   redirect targets non-exempted shell commands, not git itself.
@@ -12,7 +13,7 @@
   a comma-separated list silently matches nothing.
 - If `docs/source/api.rst` uses `:recursive:` autosummary over the bare
   package name, new subpackages need no manual entry — verify this
-  still holds before adding one by hand.
+  still holds before adding one by hand (reconfirmed across many builds).
 - A TODO fragment framing work as a multi-part program stays open until
   every listed part finishes.
 - Record no-op sync runs as a commit rather than skipping silently —
@@ -28,3 +29,11 @@
   with no per-eval perf claim, there is usually nothing to propagate —
   don't manufacture a performance blurb. While there, verify the
   FINDINGS IDs cited by SPEC exist and remain consistent.
+- LAYERED capability claims: a doc sentence about the PUBLIC entry point
+  (e.g. overview.rst "ChangRefsdalChannels is positive-parity only") can
+  stay TRUE while a lower layer (geometry/operator) already supports the
+  new regime — before editing, re-read the actual PUBLIC-layer refusal
+  CODE (does channels.py still `raise LensDomainError`?), not SPEC's
+  engine-row prose (which may describe the lower layer). Flip the sentence
+  only once the public layer's raise is gone (channels saddle guard was
+  lifted at Build 7b — the positive-parity-only claim is now due to flip).

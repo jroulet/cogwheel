@@ -3,71 +3,66 @@
 - Premise repair, not tolerance repair: fix fixtures to a case where the
   physical premise holds; keep the original as a companion test PREDICTING
   its nonzero offset via an independent closed form.
-- If the WP under test never landed, write an honest contract suite with
-  an @expectedFailure hasattr guard that goes RED when the API lands.
-- Inject buggy/old variants by mock.patching the MODULE GLOBAL the
-  function resolves; align test-side reproductions with drifted
-  production arity; neighbor-suite reds from drift: report, don't touch.
-- Extend AST/name-forbidding guards for every new mutation/oracle helper
-  (F002); pure-mpmath oracles for phase gates. For rules differing only
-  in edge cases, assert a sub-case where old and new agree bit-for-bit.
-- AST name-forbidding guards MUST walk ast.Name.id / ast.Attribute.attr,
-  never a raw source-substring check — the production symbol can be a
-  substring of the oracle's own name (`_edge_amplification` is inside
-  `_exact_edge_amplification`), a false positive.
-- Fully revert probe/mutation edits; verify by read-back + pattern search.
-- Shell gate: plainest command shape (`python -m pytest <file> -q`), from
-  the WORKTREE root; retry a bare denial once; a reasoned denial binds.
-- Falsification under numba: patch the FULL .py_func chain (F010); "gate
-  RED" = refusal raised OR error > tol; test refusals at the production
-  operating point, not the accuracy-study setting.
-- A plan-anticipated gate exposing a production shortfall stays RED/xfail
-  (no tolerance widening) paired with a green converged positive control.
-- Gate each path/component at its own numerical floor; an aggregate gate
-  can pass while a component fails — keep both. Timing: structural gates
-  (speedup ratio, subdominance); absolute ms only arithmetic-derived.
-- np.exp(1j*x) range-reduces accurately — float64 phase loss lives in the
-  w*tau MULTIPLICATION; phase-loss demos need irrational-scaled factors.
-  If a gate's claimed band is unreachable from realistic fixtures, build
-  SYNTHETIC inputs checked against an independent oracle.
-- Stochastic outputs (QMC marginalized lnlike) are NOT bit-repeatable:
-  pin determinism / JSON round-trip at the deterministic SUB-layer
-  (`_get_dh_hh_timeshift`) with assert_array_equal, never at the
-  stochastic top-level lnlike. Hour-scale importance-sampling oracle specs
-  are infeasible as a minutes gate — implement the deterministic specs +
-  a conditional-draw round-trip instead.
-- Conditional-vs-marginalized round-trip: a single plain (one extrinsic
-  draw) lnlike sits ~25-30 nats ABOVE lnL_marg (extrinsic Occam factor),
-  so the consistency gate is a LOWER bound (max >= lnL_marg - delta),
-  NEVER an upper bound. To get in-support vectors under a Fixed*Prior
-  (fixes z_lens=0 etc.), sample the unit cube until lnposterior is finite;
-  don't hand-build par_dics that violate the fixed constraint.
-- Probing internals exposed only through reduced outputs: prove your
-  reproduction reduces bit-identically to production first.
-- ChangRefsdalChannels needs a >=2-point strictly-increasing positive w
-  grid (no scalar fixtures); _lens_dic has beta as 4th positional — pass
-  lens params by keyword.
-- Lattice anchors from _snap are NOT bit-exact (round(x/dx)*dx): use
-  assertAlmostEqual + snapping-idempotence (key == key(snapped)), never
-  assertEqual; the 1-ULP offset floors ratio quantities ~1e-16.
-- Identity gates across DIFFERENT node grids floor at ~1e-11 (engine
-  reproducibility), not eps — set the gate orders below the LOO stop so
-  it still certifies "algebra, not interpolation".
-- Detect a silent fallback by wrapping the fast-path method (not-called
-  => fell back); assert fallback == direct bit-identically via float64
-  .tobytes(). Reach unreachable guard states with types.SimpleNamespace
-  fakes reusing real sub-objects so earlier guards still pass; refusal
-  fallbacks via mock.patch side_effect on the cache/fiducial builder.
-  Assert a refusal short-circuits by spying the downstream method's
-  call_count==0 under assertRaises.
-- @expectedFailure covers the test body, NOT tearDown — bump anti-vacuity
+- If the WP under test never landed, write an honest contract suite with an
+  @expectedFailure hasattr guard that goes RED when the API lands.
+  @expectedFailure covers the test body NOT tearDown — bump anti-vacuity
   counters BEFORE the assertion.
-- Mutation for except-branches: patch the exception NAME in the consumer
-  module's globals to an unrelated type so the real refusal escapes
-  (gate RED); untriggerable branches via mock side_effect.
-- Mass-sheet twin lnL invariance needs a second time term from per-config
-  t_min referencing: t_geo_twin = t_c - dt_ms - xi*(t_min_B-t_min_A)/2pi;
-  read t_min from a throwaway ChangRefsdalChannels eval, don't bet on
-  dt_ref == -dt_ms.
-- Unlensed-injection near-truth reference: LIGHTEST lens with source OFF
-  the caustic centre — y=(0,0) is a caustic singularity -> -inf.
+- Oracle independence (F002): AST name-forbidding guards MUST walk
+  ast.Name.id / ast.Attribute.attr (never a source-substring — a production
+  symbol can be a substring of the oracle's own name); extend the guard for
+  every new oracle/mutation helper; add a positive control (a tainted oracle
+  calling the module-under-test flips it red). Pure-mpmath oracles for phase
+  gates; regularize singular integrands with a DIFFERENT scheme than the code.
+- Mocking/falsification kit: inject buggy/old variants by patching the MODULE
+  GLOBAL the fn resolves; patch an except-branch's exception NAME in consumer
+  globals so the real refusal escapes; reach untriggerable states via mock
+  side_effect / SimpleNamespace fakes reusing real sub-objects; under numba
+  patch the FULL .py_func chain (F010); a serve gate: patch its in_domain to
+  lie + feed a fake result to prove the gate has teeth. "Gate RED" = refusal
+  raised OR error>tol; test refusals at the production operating point.
+- Detect a silent fast-path fallback by spying the fast method (call_count==0
+  under assertRaises = short-circuited; not-called on a served config = fell
+  back); assert fallback==direct bit-identically via float64 .tobytes().
+  Byte-identity vs HEAD: exec `git show HEAD:file` into a module registered in
+  sys.modules FIRST, compare lnL + fiducial nodes max|diff|=0, red-check via
+  np.nextafter.
+- When a production-scale absolute tolerance (eps<1e-3, nat tiers) is
+  UNREACHABLE in a minutes-scale fixture, gate on a BUDGET-INDEPENDENT
+  relationship: for lnL-from-envelope error use dlnL <= AMP * eps_dense *
+  |lnL_exact| (dlnL~eps*SNR^2, |lnL|~SNR^2 => ratio O(1), measured peak ~0.84)
+  PAIRED with a monotone-refinement positive control witnessing eps->target as
+  nodes increase. A fixed nat budget is the WRONG currency (error scales with
+  SNR^2). Never widen a real production gate — keep it RED/xfail with a green
+  converged control. lru_cache trained surrogates (one train/process).
+- Gate each path at its OWN numerical floor (aggregate can pass while a
+  component fails). Identity gates across DIFFERENT node grids floor at engine
+  reproducibility ~1e-11 not eps — set gate orders below the LOO stop so it
+  still certifies "algebra, not interpolation". _snap lattice anchors are NOT
+  bit-exact (round(x/dx)*dx) — assertAlmostEqual + idempotence (key==key(snap)),
+  never assertEqual. Probing internals via reduced outputs: prove the
+  reproduction reduces bit-identically first.
+- Timing: structural gates (speedup ratio, subdominance); absolute ms only
+  arithmetic-derived. Stochastic QMC lnlike is NOT bit-repeatable — pin
+  determinism/JSON round-trip at the deterministic SUB-layer
+  (_get_dh_hh_timeshift) with assert_array_equal, never the stochastic top;
+  hour-scale importance-sampling oracles are infeasible as a minutes gate.
+- Conditional-vs-marginalized round-trip: a single plain draw sits ~25-30 nats
+  ABOVE lnL_marg (extrinsic Occam), so the consistency gate is a LOWER bound
+  (max >= lnL_marg - delta). Get in-support vectors under Fixed*Prior by
+  sampling the unit cube until lnposterior is finite.
+- Phase-loss: np.exp(1j*x) range-reduces accurately — float64 loss lives in
+  the w*tau MULTIPLICATION; demos need irrational-scaled factors or synthetic
+  inputs checked vs an independent oracle.
+- cogwheel lensing gotchas: ChangRefsdalChannels needs a >=2-pt strictly-
+  increasing positive w grid (no scalar fixtures); _lens_dic has beta as the
+  4th positional (pass lens params by keyword). Mass-sheet twin lnL invariance
+  needs a second time term t_geo_twin = t_c - dt_ms - xi*(t_min_B - t_min_A)/2pi
+  (read t_min from a throwaway eval; don't assume dt_ref==-dt_ms). Unlensed-
+  injection near-truth reference = LIGHTEST lens, source OFF the caustic centre
+  (y=(0,0) is a caustic singularity -> -inf). Census: saddle(det<0) signed=-2,
+  positive(det>0) signed=0.
+- Neighbor-suite reds from drift: report, don't touch. Fully revert probe/
+  mutation edits (verify by read-back + pattern search). Shell gate: plainest
+  command shape (`python -m pytest <file> -q`) from the WORKTREE root; retry a
+  bare denial once, a reasoned denial binds. Heavy lensing suites run together
+  -> MemoryError; run one file at a time.

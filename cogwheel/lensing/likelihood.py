@@ -1385,6 +1385,18 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             `_amplification_coefficients`, or ``None`` to fall through.
         """
         lens = self._lens_params(par_dic)
+
+        # The surrogate is a kappa = 0 surface BY CONSTRUCTION (the
+        # sampled space eliminates kappa; the emulator's axes are
+        # (log w, gamma, y1_eig, y2_eig) with no kappa dimension).  A
+        # general API candidate may carry kappa != 0, and serving it the
+        # kappa = 0 envelope would be finite-but-wrong — the exact
+        # never-serve-where-wrong violation the domain gate exists to
+        # prevent (Inspector latent finding INS-8a-001).  Fall through
+        # to the exact engine, which handles kappa fully.
+        if lens['kappa'] != 0.0:
+            return None
+
         dense_w = dimensionless_frequency(
             self._kernel_dense_f, lens['m_lens_msun'], lens['z_lens'])
         if not np.all(dense_w > 0):

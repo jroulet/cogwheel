@@ -998,6 +998,34 @@ class RefusalPreservationTestCase(SurrogateTestCase):
         self.assertTrue(np.isfinite(lnl) and not np.isnan(lnl),
                         f'served lnL is not clean-finite: {lnl!r}')
 
+    def test_nonzero_kappa_never_served(self):
+        """INS-8a-001: the surrogate is a ``kappa = 0`` surface by
+        construction (no kappa axis), so a valid POSITIVE-PARITY candidate
+        with ``kappa != 0`` must FALL THROUGH to the exact engine — served
+        by the kappa = 0 emulation it would be finite-but-wrong.  The
+        sampled space pins kappa = 0, so this guards the general API.
+        The spy proves the surrogate was never consulted; the lnL must
+        match the exact path bit-for-bit (identical fallback)."""
+        base = dict(CROWN_LENS)
+        base['kappa'] = 0.1  # positive parity (1 - 0.1 > gamma), in-band
+        candidate = _lens_candidate(**base)
+        with mock.patch.object(
+                self.like.amplification_surrogate, 'envelope',
+                wraps=self.like.amplification_surrogate.envelope) as spy:
+            lnl_fast_path = self.like.lnlike(candidate)
+        lnl_exact = self.exact.lnlike(candidate)
+        self.n_checks += 1
+        self.assertEqual(
+            spy.call_count, 0,
+            'the surrogate envelope was consulted for a kappa != 0 '
+            'candidate — the kappa = 0 surface would be finite-but-wrong')
+        self.n_checks += 1
+        self.assertEqual(
+            np.float64(lnl_fast_path).tobytes(),
+            np.float64(lnl_exact).tobytes(),
+            'kappa != 0 fall-through did not reproduce the exact path '
+            'bit-for-bit')
+
 
 # ==========================================================================
 # lnlike accuracy where the surrogate serves (Professor Q3b, budget-limited)

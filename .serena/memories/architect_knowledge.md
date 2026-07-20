@@ -6,48 +6,65 @@
 - Docs-only tasks: check whether the target already satisfies the goal;
   plan the minimal diff, not a rewrite.
 - Simplifier verdict pattern: leanest correct response; no no-op
-  verification WPs "just in case".
+  verification WPs "just in case". A verify-only Coder WP (confirm
+  invariants readable from bodies) is bureaucratic relay = Inspector's
+  job; trim it. Timing/warm-cost measurements are diagnostics, never gates.
 - Verify any "code-pinned"/"already exists" claim with fresh find_symbol/
-  grep BEFORE planning WPs on it (fabricated pin stalled Build 3e); agents
-  refusing to fabricate a missing primitive = plan failure, not agent failure.
+  grep BEFORE planning WPs on it; agents refusing to fabricate a missing
+  primitive = plan failure, not agent failure.
 - Doc-sync findings are never Coder WPs: route to post-gate Librarian with
-  exact replacement text attached; SPEC.md in files_affected is informational.
+  exact replacement text; SPEC.md in files_affected is informational.
 - Don't escalate a perf/accuracy floor measured on a defective build —
-  fix, retune, re-measure, then escalate.
+  fix, retune, re-measure, then escalate. Unreachable target: document the
+  measured floor honestly, escalate; never widen tolerances. Timing
+  acceptance = machine-independent structural gates first; absolute ms
+  ceilings arithmetic-derived, never machine-calibrated.
 - Interpolation node budgets scale with oscillation content (cycles in
-  band), not kink count; have the Professor sanity-check brief perf
-  arithmetic; ship the cheap structural lever before a surrogate table.
+  band), not kink count; ship the cheap structural lever before a surrogate
+  table; have the Professor sanity-check brief perf arithmetic.
 - Batching: hoist grid-independent quantities; any accumulation-order change
   needs re-certification vs an independent oracle + solo-vs-batch
-  certify-XOR-refuse identity. Scalar API = thin wrapper over batched core
-  (single certification path).
-- Timing acceptance: machine-independent structural gates first; absolute
-  ms ceilings must be arithmetic-derived, never machine-calibrated.
-- Unreachable perf target: document the measured floor honestly and
-  escalate; never widen tolerances — slower-but-correct.
-- Known FINDINGS bug patterns recur in sibling code paths — grep before
+  certify-XOR-refuse identity. Scalar API = thin wrapper over batched core.
+- Known FINDINGS bug patterns recur in sibling paths — grep before
   inventing a new mechanism.
 - Refusal boundary: thin Posterior-subclass override maps named domain/
   cancellation refusals -> -inf + metadata; raw likelihood keeps its raise
   contract; the sampler never catches (Build 4).
-- Posterior requires prior.standard_params == likelihood.params EXACTLY —
-  plan the prior layer against the likelihood's params; fix unmeasurable
-  params via FixedPrior rather than omitting them.
+- Posterior requires prior.standard_params == likelihood.params EXACTLY;
+  fix unmeasurable params via FixedPrior rather than omitting them. Reuse an
+  existing prior with a documented option-deferral rather than block a build
+  on the ideal coordinate (d_app deferred to Build 5).
 - Cache determinism: snap proposals to module-constant lattices so a
-  fiducial/cache entry is a pure function of the candidate (memoize on the
-  lattice key).
+  fiducial/cache entry is a pure function of the candidate.
 - Prefer one-line guards + fallback-to-certified-direct over topology-aware
-  partitioning (Simplifier trim, Build 3g).
-- Derived in-memory caches: plan a __getstate__ that drops them (bases
-  define none); JSONMixin/get_init_dict path is unaffected.
-- Reuse an existing prior with a documented option-deferral rather than
-  block a build on the ideal coordinate (d_app deferred to Build 5).
+  partitioning (Simplifier trim). Plan a __getstate__ dropping derived
+  caches (bases define none); JSONMixin/get_init_dict path unaffected.
 - Extending a byte-frozen validated path to a new regime/parity: add
   SEPARATE parallel functions behind a classification gate that mirrors the
-  frozen path's own gate; never refactor the frozen one (byte-identity holds
-  by construction). Give shared entry points an optional flag so the default
-  call stays byte-identical, and keep the regime-branch decision INSIDE the
-  new function, not threaded through the frozen dispatcher (Build 6 saddle).
-- A verify-only Coder WP (confirm invariants readable from function bodies)
-  is bureaucratic relay = Inspector's job; trim it. Timing/warm-cost
-  measurements are diagnostics (FINDINGS + surrogate todo), never gates.
+  frozen path's gate; never refactor the frozen one. Shared entry points get
+  an optional flag so the default call stays byte-identical; keep the
+  regime-branch decision INSIDE the new function (Build 6 saddle).
+- Surrogate/emulator design (Build 8a): emulate the SMOOTH symmetry-
+  invariant object (the beat-free envelope E(w)), NOT the oscillatory total;
+  build ONE interpolant PER topology region (parity/image-count) since the
+  decomposition changes topology at caustics; exact-engine fallback near
+  caustics + outside the box. Reduce out any EXACTLY symmetry-eliminable
+  parameter (beta via eigenframe rotation) BEFORE training — lower the
+  surrogate dimension, don't train over it.
+- Conservative-serve gate = axis-aligned box containment + exclusion balls
+  around refused points + per-sample refusal propagation; NEVER a learned
+  mask (a false negative is a correctness bug, not an efficiency miss).
+  Default surrogate=None -> exact path byte-identical; enable-by-default
+  deferred pending full-box artifact + census + PP-plot.
+- When a GLOBAL tolerance tightening blows the certified hot-path timing
+  gate (measured, at plan gate), reject it and re-key the constant on a PURE
+  fn of the candidate params (gamma'-keyed LOO stop): certified fast region
+  stays byte-identical and cache purity holds; tighten only the sub-region
+  that needs it.
+- One uniform prior can span two physical regimes when the regime is a
+  deterministic fn of a sampled coord (parity from gamma) — no discrete
+  label, no sub-prior; the boundary is a measure-zero named refusal -> -inf
+  at posterior, never prior special-casing.
+- Two-tier verify: in-build = small reduced-domain surrogate/fixture + fast
+  falsifiable gates; full-box training/census/PP-plots are POST-BUILD driver
+  steps named in acceptance, never in-build test specs.

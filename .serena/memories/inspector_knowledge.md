@@ -31,12 +31,21 @@
   editing existing suites is a benign plan deviation.
 - A build that REMOVES named constants/mechanisms almost always leaves
   stale the exact SPEC sentence naming them — check that paragraph. Doc
-  staleness is a flag-to-Librarian finding, not a Coder defect.
+  staleness is a flag-to-Librarian finding, not a Coder defect. A build
+  the plan expected to touch SPEC but didn't = flag to Librarian.
 - Re-reviewing a byte-identical diff: still re-run the suite + import
   probes and re-derive the key identity by hand.
-- DATA_CONTRACTS covers serialized artifacts only; new fields on an
-  in-memory dataclass need no contract change (pickle __getstate__ still
-  deserves a direct round-trip probe).
+- DATA_CONTRACTS covers serialized/shipped artifacts only; new fields on
+  an in-memory dataclass need no contract change (pickle __getstate__
+  still deserves a round-trip probe). An OFFLINE-ONLY artifact (surrogate
+  .npz, trained but not shipped/consumed by pipeline scripts) likewise
+  needs no entry yet — revisit if a file is actually shipped/consumed.
+- A serve/approximation gate must include EVERY parameter axis the
+  approximation was trained at. A missing axis (e.g. surrogate has no
+  kappa axis, trained kappa=0) that is harmless only because production
+  pins that axis is still a LATENT correctness violation of the
+  conservative-serve contract — flag it, don't wave it through on
+  "non-triggering in production".
 - Refusal-net reviews: trace EVERY dispatch route to the boundary —
   scalar lnposterior AND the sampler's prior.unfold_apply wrap must both
   route through the override; except must name specific refusal types,

@@ -10,13 +10,21 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   switch. The wave/geometric branch gate `_min_delay_separation` is
   UNTOUCHED and still uses the old-style separation — re-check against
   the paper's cluster-separation definition if issues surface there.
+- `channels.py` public entry (Build 7b): the interim positive-parity
+  guard at the top of `ChangRefsdalChannels.evaluate` was LIFTED — the
+  channel layer now serves BOTH parities; only `macro_matrix`'s two named
+  refusals (Type III lam<=0, det A=0 boundary) + census/fold guards raise.
 - `likelihood.py` post-3f: `_amplification_coefficients` interpolates
-  ONLY the envelope E(w) on a LOO-adaptive coarse grid (seed 8, stop
-  4e-3, ceiling 48; measured N=26-32), with closed-form switched-saddle
-  reconstruction. Post-3g a candidate/fiducial ratio layer (lattice-
-  snapped fiducials, `_fid_cache`, health/image-count guards, fallback
-  to certified direct) brings warm lnlike to 9.8 ms; the engine 1F1
-  ladder still dominates residual cost.
+  ONLY the envelope E(w) on a LOO-adaptive coarse grid (seed 8, ceiling
+  48; measured N=26-32), with closed-form switched-saddle reconstruction.
+  Post-3g a candidate/fiducial ratio layer (lattice-snapped fiducials,
+  `_fid_cache`, health/image-count guards, fallback to certified direct)
+  brings warm lnlike to 9.8 ms; the engine 1F1 ladder dominates residual
+  cost. Build 7b: the LOO stop is now gamma'-keyed — _LOO_STOP_FAST=4e-3
+  for gamma'<0.5 (incl. crown, byte-identical to old) tightening to
+  _LOO_STOP_STRONG=1e-3 for gamma'>=0.5 (macro-saddle rescue), via a pure
+  helper reading only lens gamma/kappa so fiducial-cache purity holds;
+  a global tighten to 1e-3 measured 1.44x crown wall time (rejected).
 - Zero-noise F->1 floor in `likelihood.py`: after anchoring on a
   gamma=kappa=0 candidate (genuinely F->1), the residual RB gap traces
   to a construction asymmetry — `_set_summary` builds `_h0_edges` with
@@ -42,39 +50,51 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   requirement" flagged in `professor/microlensing_chang_refsdal` — that
   topic memory's "not yet implemented" note is now STALE (research
   session to update; Dreamer does not edit topic memories).
-- Build 4 sampled coordinates (`lensing/prior.py`): ln_m_lens_msun
-  uniform (ln 10, ln 3500); reduced shear gamma in [0,0.45] identity-
-  transform; mass-conditioned source y = u*min(307/m, 3.0) with
+- Sampled coordinates (`lensing/prior.py`): ln_m_lens_msun uniform
+  (ln 10, ln 3500); mass-conditioned source y = u*min(307/m, 3.0) with
   folded_reflected u1,u2 (NO phase fold under XPHM); kappa=beta=z_lens
   fixed 0 via FixedPrior. prior.standard_params == likelihood.params.
+  Build 7b: reduced-shear gamma range WIDENED (0,0.45)->(0.0,1.6),
+  a SINGLE uniform range spanning positive parity (gamma<1) AND macro
+  saddle (gamma>1); identity transform, NO discrete parity label (parity
+  is a deterministic fn of gamma); gamma=1 (det A=0) is a measure-zero
+  named refusal -> -inf at posterior, no prior special-casing. The
+  ['u1','u2'] astroid quadrant fold stays valid on the deltoid caustic.
 - C7 measurement (Build 4 review, verdict CONCERN): only 41.2%
   (206/500) of prior draws finite — the gamma prior overlaps the
   gamma_eff~0.5 cancellation band; all non-finites are exact -inf
   (0 NaN); near-truth reference lnpost 260.6 dominates best random draw
-  18.1, so the peak sits at truth. Efficiency-only concern; operator to
-  decide whether to bound gamma away from the band before the heavy
-  sampling ship gate.
-- Cross-parity Schwinger (Build 7a consult): the `_schwinger` engine is
+  18.1, so the peak sits at truth. Efficiency-only concern.
+- Cross-parity Schwinger (Build 7a): the `_schwinger` engine is
   signature-AGNOSTIC. `_h_dd` takes da_im=-w*a/2, db_im=-w*b/2 as pure-
-  imaginary offsets (`_ddc_sqrt` via Newton from a float64 seed); the
-  real-t contour stays clean for both parities, so the `gamma_prime>1`
-  guard in `_validate_inputs` is POLICY, not a math necessity (relaxing
-  to >0 or !=1 changes NO arithmetic path). Cancellation law L_S=pi*w/4
-  holds on BOTH parities — it comes from the `t^{iw/2-1}` factor
-  (|1/Gamma(iw/2)| ~ e^{+pi w/4} cancelling the ~e^{-pi w/4} integral),
-  never references the signature; dd paired-rule certification catches
-  degradation either way. Positive-parity mass-sheet fallback formula =
-  (1/lam)*exp[0.5j*w*ln lam - 0.5j*w*kappa*s] * f_schwinger(w,y_eig,
-  gamma') with gamma'<1 — EXACTLY `_saddle_grid`'s formula (f_schwinger's
-  `_reconstruct` already carries e^{iw|y_eig|^2/2}; note `_grid_certified`
-  instead multiplies an EXTRA exp(0.5j*w*s) because its pure-shear G
-  kernel excludes that e^{iw|y|^2/2} factor — G is the operator-series
-  total, not F).
+  imaginary offsets; the real-t contour stays clean for both parities, so
+  the `gamma_prime>1` guard in `_validate_inputs` was POLICY, not a math
+  necessity (relaxed to >0). Cancellation law L_S=pi*w/4 holds on BOTH
+  parities (from the `t^{iw/2-1}` factor, never references signature).
+  Positive-parity mass-sheet fallback = (1/lam)*exp[0.5j*w*ln lam -
+  0.5j*w*kappa*s]*f_schwinger(w,y_eig,gamma') with gamma'<1 — EXACTLY
+  `_saddle_grid`'s formula (note `_grid_certified` multiplies an EXTRA
+  exp(0.5j*w*s) because its pure-shear G kernel excludes e^{iw|y|^2/2}).
 - Index-theorem guard (Build 7a): unified invariant sum_a sign(mu_a) ==
-  sign(det A) - 1 (positive parity -> 0, saddle -> -2). No maxima
-  possible since tr Hess = 2*lam > 0, so the image count {2,4} is
-  redundant given signed-sum + no-maxima (cheap to assert for debugging).
-  `morse_index` uses eigvalsh with strict `< 0.0`; a degenerate fold
-  image (one eigenvalue ~0) counts non-negative -> morse 0 or 1, signed
-  sum still holds; only breaks if BOTH eigenvalues are near zero at once
-  (a cusp, three-image merge).
+  sign(det A) - 1 (positive parity -> 0, saddle -> -2). No maxima since
+  tr Hess = 2*lam > 0. `morse_index` uses eigvalsh with strict `< 0.0`; a
+  degenerate fold image counts non-negative, signed sum still holds; only
+  breaks if BOTH eigenvalues near zero at once (a cusp / three-image merge).
+- Build 8a surrogate (`lensing/surrogate.py` LensAmplificationSurrogate):
+  emulates the SACR-C ENVELOPE E(w) (smooth/beat-free), NOT the oscillatory
+  F; tensor cubic spline over (ln w, gamma, y1_eig, y2_eig), real/imag
+  interpolated SEPARATELY, per-region (parity/image-count). beta eliminated
+  EXACTLY by eigenframe rotation R(-beta) (E invariant to <1e-12 — empirical
+  confirmation of the Q2 ruling). Off by default (amplification_surrogate=
+  None -> crown byte-identical, surrogate never touches a physics answer).
+  Serve gate = box containment + exclusion balls around refused points +
+  per-w refusal propagation, no learned mask. lnL-from-envelope error obeys
+  dlnL ~ eps_dense*SNR^2 with |lnL|~SNR^2 (ratio O(1), measured peak ~0.84)
+  — a fixed nat budget is the WRONG currency. RED FLAG: a near-caustic box-
+  edge config eps=0.16 gave a 12.8-nat lnL error; before ANY enable-by-
+  default the served region must carry a caustic/edge margin and re-gate at
+  production eps~1e-4 to the 0.01/0.1-nat tiers (Q5 deferral stands). Saddle
+  dlnL~0.66 is RB-binning-floored (F016), not envelope-limited. LATENT
+  (INS-8a-001): serve gate has NO kappa axis (trained kappa=0) — safe only
+  because production pins kappa=0; add a kappa!=0 -> None guard for the
+  conservative-serve contract.
