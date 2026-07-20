@@ -353,12 +353,20 @@ MACRO_LIMIT_Y = (0.3, 0.1)
 #: Macro-SADDLE ``(gamma, kappa)`` violating the positive-parity condition
 #: ``1 - kappa > |gamma|`` (here ``lam = 1 - 0.6 = 0.4 <= 0.5 = gamma``).  Both
 #: the fast-path RB and the brute-force strain path MUST raise
-#: `geometry.LensDomainError` on this input -- symmetric refusal (Type II
-#: macro saddles are out of scope of this formalism).
+#: `geometry.LensDomainError` on this input -- symmetric refusal.  Since
+#: Build 7b macro-saddle INTERIORS (0 < 1 - kappa < |gamma|) evaluate on
+#: both paths, so the symmetric-refusal contract is pinned at the
+#: OVER-CRITICAL domain (kappa >= 1, Type III), which stays a named
+#: refusal on every path.
+OVER_CRITICAL_GAMMA = 0.5
+OVER_CRITICAL_KAPPA = 1.5
+
+#: A macro-saddle INTERIOR config (gamma' = 0.5/0.4 = 1.25): since
+#: Build 7b this CONSTRUCTS and evaluates (the contract-flip witness).
 MACRO_SADDLE_GAMMA = 0.5
 MACRO_SADDLE_KAPPA = 0.6
 
-#: Source position of the macro-saddle refusal candidate (in band, arbitrary).
+#: Source position of the domain-refusal candidate (in band, arbitrary).
 MACRO_SADDLE_Y = (0.20, 0.05)
 
 # ---------------------------------------------------------------------------
@@ -1114,22 +1122,33 @@ class CrownAccuracyAnchorTestCase(FastPathTestCase):
         ax.legend(fontsize=8)
         self._save_figure(fig, 'rb_vs_bruteforce_by_config')
 
-    def test_paths_refuse_macro_saddle_symmetrically(self):
+    def test_paths_refuse_over_critical_symmetrically(self):
         """
-        On a macro-SADDLE input (``1 - kappa <= |gamma|``) BOTH the
-        fast-path RB ``lnlike`` and the exact ``lnlike_bruteforce`` raise
-        `geometry.LensDomainError` -- symmetric refusal, never a silent
-        finite value on one path.  Type II macro saddles are out of scope
-        of this formalism, and the two paths must agree on that boundary.
+        On an OVER-CRITICAL input (``1 - kappa <= 0``, Type III) BOTH
+        the fast-path RB ``lnlike`` and the exact ``lnlike_bruteforce``
+        raise `geometry.LensDomainError` -- symmetric refusal, never a
+        silent finite value on one path.  Since Build 7b macro-saddle
+        INTERIORS (``0 < 1 - kappa < |gamma|``) are IN scope on both
+        paths (full symmetric-agreement coverage lives in
+        ``test_lensing_ratio_layer`` and
+        ``test_lensing_saddle_likelihood``); the cheap contract-flip
+        witness here is that the former refusal config now passes the
+        macro-geometry domain gate.
         """
         candidate = self._candidate(self._lens_dic(
-            *MACRO_SADDLE_Y, MACRO_SADDLE_GAMMA, 0.0, MACRO_SADDLE_KAPPA))
+            *MACRO_SADDLE_Y, OVER_CRITICAL_GAMMA, 0.0,
+            OVER_CRITICAL_KAPPA))
         self.n_checks += 1
         with self.assertRaises(geometry.LensDomainError):
             self.like.lnlike(candidate)
         self.n_checks += 1
         with self.assertRaises(geometry.LensDomainError):
             self.like.lnlike_bruteforce(candidate)
+
+        # Contract-flip witness (cheap: geometry only, no engine eval):
+        # the saddle INTERIOR passes the domain gate since Build 7b.
+        geometry.macro_matrix(MACRO_SADDLE_GAMMA, 0.0, MACRO_SADDLE_KAPPA)
+        self.n_checks += 1
 
     def test_zero_noise_floor_at_trivial_macro_sector(self):
         """

@@ -1362,22 +1362,28 @@ class ContractionTimingTestCase(LensedLikelihoodTestCase):
             'loop may have crept onto the hot path')
 
 
-class MacroSaddleRejectionTestCase(LensedLikelihoodTestCase):
+class DomainRefusalSymmetryTestCase(LensedLikelihoodTestCase):
     """
-    Macro-saddle (non-positive-parity) candidates raise
-    `geometry.LensDomainError` from BOTH ``lnlike`` and
-    ``lnlike_bruteforce`` -- the likelihood-path analogue of the
-    generator-boundary rejection, propagated unswallowed.  Engine-refusal
-    SYMMETRY: never one path returning a value while the other refuses.
+    Out-of-domain candidates raise `geometry.LensDomainError` from BOTH
+    ``lnlike`` and ``lnlike_bruteforce`` -- the likelihood-path analogue
+    of the generator-boundary rejection, propagated unswallowed.
+    Engine-refusal SYMMETRY: never one path returning a value while the
+    other refuses.  Since Build 7b macro-saddle INTERIORS
+    (``0 < 1 - kappa < |gamma|``) are IN scope on both paths (symmetric
+    finite agreement lives in ``test_lensing_ratio_layer`` and
+    ``test_lensing_saddle_likelihood``); the surviving named refusals
+    are the exact ``det A = 0`` parity boundary (F004 float64-exact)
+    and the over-critical Type III domain (``1 - kappa <= 0``).
     """
 
-    #: ``1 - kappa <= |gamma|`` -- outside the positive-parity regime.
+    #: Out-of-domain configs: the F004-exact parity boundary and the
+    #: over-critical Type III region.
     BAD_CONFIGS = (
         ('boundary 0.5/0.5', dict(kappa=0.5, gamma=0.5)),
-        ('interior 0.5/0.6', dict(kappa=0.5, gamma=0.6)),
+        ('over-critical 1.5/0.6', dict(kappa=1.5, gamma=0.6)),
     )
 
-    def test_lnlike_paths_reject_macro_saddles(self):
+    def test_lnlike_paths_reject_out_of_domain(self):
         for label, bad in self.BAD_CONFIGS:
             with self.subTest(config=label):
                 candidate = self._candidate(
@@ -1388,6 +1394,12 @@ class MacroSaddleRejectionTestCase(LensedLikelihoodTestCase):
                     self.like.lnlike(candidate)
                 with self.assertRaises(geometry.LensDomainError):
                     self.like.lnlike_bruteforce(candidate)
+
+        # Contract-flip witness (cheap: geometry only, no engine eval):
+        # the former 'interior 0.5/0.6' refusal config passes the
+        # macro-geometry domain gate since Build 7b.
+        geometry.macro_matrix(0.6, 0.0, 0.5)
+        self.n_checks += 1
 
 
 class DeterminismTestCase(LensedLikelihoodTestCase):

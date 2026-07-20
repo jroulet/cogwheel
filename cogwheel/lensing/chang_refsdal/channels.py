@@ -541,9 +541,22 @@ def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
     # in one batched `F_op_grid` call below, since within one lens
     # configuration only ``w`` varies and the operator table / weight
     # vectors are ``w``-independent (see `operator.F_op_grid`).
+    # On a macro-saddle host the L = w*|y'| cancellation bookkeeping does
+    # not exist (`cancellation_exponent` is positive-parity-only by
+    # design; the Schwinger channel is L_S = pi*w/4, y-independent), and
+    # the operator's saddle arm owns the per-node geometric-vs-wave
+    # routing internally (resolved AND above the w <= 60 ceiling ->
+    # stationary phase; otherwise Schwinger).  Delegate every saddle
+    # node to the batched operator call; the positive-parity branch
+    # decision below is byte-identical to before.
+    saddle_host = not 1.0 - kappa > abs(gamma)
+
     wave_indices = []
     for index in range(n_w):
         frequency = float(w[index])
+        if saddle_host:
+            wave_indices.append(index)
+            continue
         exponent = cancellation_exponent(frequency, source, gamma, kappa)
         if select_branch(frequency, delta_min, exponent) == 'geometric':
             value = complex(geometric_amplification(
@@ -607,10 +620,12 @@ def real_image_delays(gamma: float, y: Sequence[float], *,
     Raises
     ------
     geometry.LensDomainError
-        If ``1 - kappa <= abs(gamma)`` (outside the positive-parity
-        regime), raised by `geometry.macro_matrix` exactly as in
-        `ChangRefsdalChannels.evaluate` and on the brute-force strain
-        path, so the two paths refuse symmetrically.
+        For the two `geometry.macro_matrix` refusals -- Type III
+        ``1 - kappa <= 0`` and the ``det A = 0`` parity boundary
+        ``abs(gamma) == 1 - kappa`` -- or the image census guard, exactly
+        as in `ChangRefsdalChannels.evaluate` and on the brute-force
+        strain path, so the paths refuse symmetrically.  Both parities
+        (positive parity and the macro saddle) return normally.
     """
     source = np.asarray(y, dtype=float)
     matrix = geometry.macro_matrix(gamma, beta, kappa)
@@ -895,20 +910,21 @@ class ChangRefsdalChannels:
         Raises
         ------
         geometry.LensDomainError
-            If ``1 - kappa <= abs(gamma)`` (outside the positive-parity
-            regime).
+            Raised by name for the two macro-matrix refusals -- Type III
+            ``1 - kappa <= 0`` and the ``det A = 0`` parity boundary
+            ``abs(gamma) == 1 - kappa`` -- and by the downstream image
+            census / fold-degenerate metric guards.  BOTH parities are
+            served: positive parity ``1 - kappa > abs(gamma)`` and the
+            macro saddle ``0 < 1 - kappa < abs(gamma)`` flow through the
+            same parity-blind SACR-C construction, the saddle wave branch
+            being routed to `f_schwinger` by the operator parity dispatch.
+        operator.CancellationError
+            If the operator-series contraction is uncertifiable (strong
+            shear / high ``w``; FINDINGS F005).
+        SchwingerCertificationError
+            If the saddle Schwinger evaluator fails its paired-rule
+            certification (above the ``w <= 60`` ceiling; FINDINGS F013).
         """
-        if not 1.0 - kappa > abs(gamma):
-            # Build 6 extended geometry/operator to macro saddles, but the
-            # SACR-C channel construction (switches, envelope, virtual
-            # labels) is certified for POSITIVE PARITY ONLY until Build 7
-            # delivers the saddle-domain channel layer. Refuse by name so
-            # no saddle config flows through uncertified machinery.
-            raise geometry.LensDomainError(
-                f'channel layer requires positive parity '
-                f'(1 - kappa > |gamma|): gamma={gamma}, kappa={kappa}. '
-                f'Saddle macro images are engine-supported but not yet '
-                f'available in the channel/likelihood layer (Build 7).')
         source = np.asarray(y, dtype=float)
         matrix = geometry.macro_matrix(gamma, beta, kappa)
         caustic = geometry.nearest_caustic_point(

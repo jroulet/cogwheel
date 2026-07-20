@@ -156,17 +156,32 @@ class UniformLensMassPrior(UniformPriorMixin, Prior):
 class UniformReducedShearPrior(UniformPriorMixin, IdentityTransformMixin,
                               Prior):
     """
-    Uniform prior on the reduced shear ``gamma``.
+    Uniform prior on the reduced shear ``gamma`` (both parities).
 
     ``gamma`` is dimensionless and is both the sampled and the standard
     coordinate: the reduced shear the engine consumes *is* the sampled
-    quantity, so the transform is the identity (no ``gamma_prime`` indirection).
-    The range ``[0, 0.45]`` leaves positive-parity margin (``1 - kappa = 1``
-    stays above ``gamma`` with headroom); the residual approach toward the
-    engine's ``operator.CancellationError`` band near ``gamma ~ 0.5`` is caught
-    by the posterior-boundary refusal net rather than excluded here.
+    quantity, so the transform is the identity (no ``gamma_prime`` indirection)
+    with unit Jacobian.  Parity is a deterministic function of ``gamma`` and is
+    *not* a discrete sampled dimension: ``gamma < 1`` is a positive-parity
+    macro image (``1 - kappa = 1 > gamma``) and ``gamma > 1`` is a macro saddle
+    (``1 - kappa < gamma``), so one uniform range spans both branches.
+
+    The range ``[0, 1.6]`` supersedes the obsolete ``0.45`` positive-parity
+    headroom.  Post-Build-7a the wave branch is certified-or-named-refuse across
+    the strong-shear band: a ``gamma`` approaching ``1`` from below no longer
+    needs to be excluded here because the engine either certifies the value or
+    raises ``operator.CancellationError`` (the strong-shear cross-parity
+    Schwinger fallback rescues certifiable strong-shear nodes; the rest refuse
+    by name).  For ``gamma > 1`` the geometry layer takes the macro-saddle
+    branch and the wave branch routes through the Schwinger evaluator; the upper
+    bound ``1.6`` gives working saddle headroom while staying inside the
+    engine's certified/refusable band (the ``w <= 60`` saddle ceiling is
+    enforced downstream as a named band-limit refusal).  The ``gamma = 1``
+    det-A = 0 boundary is a float64 measure-zero event refused by
+    ``geometry.macro_matrix`` at evaluation time and mapped to ``lnL = -inf`` by
+    the posterior-boundary refusal net -- there is no prior-side special-casing.
     """
-    range_dic = {'gamma': (0.0, 0.45)}
+    range_dic = {'gamma': (0.0, 1.6)}
 
 
 class UniformSourcePositionPrior(UniformPriorMixin, Prior):
@@ -183,7 +198,12 @@ class UniformSourcePositionPrior(UniformPriorMixin, Prior):
 
     The astroid caustic has an exact quadrant symmetry in the shear-frame
     source angle, so ``u1`` and ``u2`` are declared as folded-reflected
-    parameters for cogwheel's standard folding machinery.  No phase fold is
+    parameters for cogwheel's standard folding machinery.  This quadrant fold
+    stays valid on the macro-saddle (``gamma > 1``) deltoid caustic even though
+    the deltoid has three cusps rather than the astroid's four: the fold is a
+    reflection symmetry of the Fermat potential in the shear-frame axes, which
+    is parity-blind, so the ``['u1', 'u2']`` reflection maps physical source
+    positions to physical source positions on both caustics.  No phase fold is
     declared: the constant-lens-phase / orbital-phase degeneracy is a
     22-mode-only relation and must not be assumed for IMRPhenomXPHM higher
     modes.

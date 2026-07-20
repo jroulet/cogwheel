@@ -403,18 +403,49 @@ class ConstructionValidationTestCase(WaveformTestCase):
 
     def test_macro_saddle_raises_lens_domain_error(self):
         """
-        ``1 - kappa <= |gamma|`` (a macro saddle) raises
-        `geometry.LensDomainError` AT CONSTRUCTION, never a silent
-        downgrade to a warning or a later ``nan``.
+        The macro-matrix domain gate refuses ONLY its two named boundaries
+        and admits both interiors.
+
+        Build 7b lifted the saddle guard: ``macro_matrix`` (and hence
+        `LensedWaveformGenerator` construction) now serves the macro-saddle
+        interior ``0 < 1 - kappa < |gamma|`` and refuses by name only
+
+        * ``1 - kappa <= 0`` (``kappa >= 1``, over-critical / Type III,
+          where the mass-sheet reduction ``sqrt(1 - kappa)`` is imaginary),
+          and
+        * ``|gamma| == 1 - kappa`` EXACTLY (``det A = 0``, the parity
+          boundary between the positive-parity and macro-saddle domains).
+
+        Each case gets its own positive assertion (per the subTest style):
+        the refusals must raise `geometry.LensDomainError` AT CONSTRUCTION
+        (never a silent downgrade to a warning or a later ``nan``), and the
+        saddle interiors must construct a live generator.
         """
-        macro_cases = ((1.5, 0.0), (0.5, 0.6), (0.9, 0.1))
-        for gamma, kappa in macro_cases:
-            with self.subTest(gamma=gamma, kappa=kappa):
+        # Over-critical (kappa >= 1, 1 - kappa <= 0) -- surviving refusal.
+        overcritical_cases = ((0.2, 1.0), (0.5, 1.2))
+        # Exact parity boundary |gamma| == 1 - kappa (det A = 0) -- surviving
+        # refusal.  (0.9, 0.1): 1 - 0.1 == 0.9 holds bit-exactly in float64;
+        # (0.5, 0.5) and (1.0, 0.0) likewise.
+        boundary_cases = ((0.9, 0.1), (0.5, 0.5), (1.0, 0.0))
+        for gamma, kappa in overcritical_cases + boundary_cases:
+            with self.subTest(refusal=(gamma, kappa)):
                 with self.assertRaises(geometry.LensDomainError):
                     waveform.LensedWaveformGenerator(
                         _StubWaveformGenerator(), m_lens_msun=100.0,
                         z_lens=0.0, y=(0.3, 0.1), gamma=gamma,
                         kappa=kappa)
+                self.n_checks += 1
+
+        # Macro-saddle interiors (0 < 1 - kappa < |gamma|) now CONSTRUCT.
+        saddle_interior_cases = ((1.5, 0.0), (0.5, 0.6))
+        for gamma, kappa in saddle_interior_cases:
+            with self.subTest(constructs=(gamma, kappa)):
+                generator = waveform.LensedWaveformGenerator(
+                    _StubWaveformGenerator(), m_lens_msun=100.0,
+                    z_lens=0.0, y=(0.3, 0.1), gamma=gamma, kappa=kappa)
+                self.assertIsInstance(
+                    generator, waveform.LensedWaveformGenerator)
+                self.assertEqual(generator.gamma, gamma)
                 self.n_checks += 1
 
     def test_positive_parity_config_constructs(self):

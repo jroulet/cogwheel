@@ -169,11 +169,14 @@ UNLENSED_LIMIT_LENS = {'m_lens_msun': 1e-6, 'z_lens': Z_LENS,
                        'y1': 0.12, 'y2': 0.035, 'gamma': 0.0, 'beta': 0.0,
                        'kappa': 0.0}
 
-#: Macro-saddle (non-positive-parity, ``1 - kappa <= |gamma|``): both the
-#: engine and generator raise `geometry.LensDomainError`.
-MACRO_SADDLE_LENS = {'m_lens_msun': M_LENS_MSUN, 'z_lens': Z_LENS,
-                     'y1': 0.20, 'y2': 0.05, 'gamma': 0.50, 'beta': 0.0,
-                     'kappa': 0.60}
+#: Over-critical (Type III, ``1 - kappa <= 0``): both the engine and
+#: generator raise `geometry.LensDomainError`.  (The former macro-saddle
+#: pin at gamma=0.50/kappa=0.60 is a saddle INTERIOR that EVALUATES since
+#: Build 7b, so the refusal-precedence contract is pinned at the
+#: over-critical domain, which stays a named refusal.)
+OVER_CRITICAL_LENS = {'m_lens_msun': M_LENS_MSUN, 'z_lens': Z_LENS,
+                      'y1': 0.20, 'y2': 0.05, 'gamma': 0.50, 'beta': 0.0,
+                      'kappa': 1.50}
 
 #: Uncertifiable wave-branch config: the engine raises
 #: `operator.CancellationError` (matched to `test_lensing_ratio_layer`'s
@@ -617,7 +620,7 @@ class RefusalContractTestCase(_MarginalizedLensTestCase):
     """
 
     REFUSING_CONFIGS = (
-        ('macro_saddle', MACRO_SADDLE_LENS, LensDomainError),
+        ('over_critical', OVER_CRITICAL_LENS, LensDomainError),
         ('cancellation', CANCELLATION_LENS, CancellationError))
 
     @classmethod
@@ -693,7 +696,7 @@ class RefusalContractTestCase(_MarginalizedLensTestCase):
         finite = self.marg._get_dh_hh_timeshift(
             _intrinsic_lens_point(self.marg, UNLENSED_LIMIT_LENS))
         refusing_candidate = _intrinsic_lens_point(
-            self.marg, MACRO_SADDLE_LENS)
+            self.marg, OVER_CRITICAL_LENS)
 
         with mock.patch.object(self.marg, '_get_dh_hh_timeshift',
                                new=lambda par_dic: finite):

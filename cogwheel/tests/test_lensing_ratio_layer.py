@@ -217,8 +217,11 @@ ANCHORS = (
 #: A ``beta != 0`` rotated anchor exercising the ``macro_matrix`` rotation.
 ROTATED_ANCHOR = ('rotated', 0.30, 0.10, 0.20, 0.70, 0.0)
 
-#: Macro-SADDLE ``(gamma, kappa)`` violating positive parity
-#: (``1 - kappa <= |gamma|``): all paths must raise `LensDomainError`.
+#: Macro-SADDLE ``(gamma, kappa)`` INTERIOR ``0 < 1 - kappa < |gamma|``
+#: (``1 - kappa = 0.4 < |gamma| = 0.5``).  Pre-Build-7b the domain gate
+#: refused this with `LensDomainError`; Build 7b lifted the saddle guard
+#: end to end, so all three paths now EVALUATE it finitely and agree
+#: within RB tolerance (see `test_macro_saddle_evaluated_symmetrically`).
 MACRO_SADDLE = dict(gamma=0.5, beta=0.0, kappa=0.6, y1=0.20, y2=0.05)
 
 #: A config whose own wave-branch cannot certify: all paths must raise
@@ -691,10 +694,12 @@ class FiducialCacheDeterminismTestCase(RatioLayerTestCase):
 
 class RefusalSymmetryTestCase(RatioLayerTestCase):
     """
-    Spec 5: refusals are symmetric; a refusing fiducial does not veto.
+    Spec 5: paths agree symmetrically; a refusing fiducial does not veto.
 
-    (a) A macro-saddle candidate makes the ratio path, the direct path and
-    brute force ALL raise `LensDomainError`.
+    (a) A macro-saddle candidate is now EVALUATED (not refused)
+    symmetrically -- Build 7b lifted the saddle guard end to end, so the
+    ratio path, the direct path and brute force all return a finite
+    ``lnlike`` agreeing within the inherited RB tolerance.
     (b) A candidate whose own wave-branch cannot certify makes all three
     raise `CancellationError`.
     (c) A candidate INSIDE the certified domain whose SNAPPED fiducial
@@ -704,16 +709,46 @@ class RefusalSymmetryTestCase(RatioLayerTestCase):
     fiducial over a certified candidate is not reachable from the lattice.
     """
 
-    def test_macro_saddle_refused_symmetrically(self):
-        """All three paths raise `LensDomainError` on a macro-saddle."""
+    def test_macro_saddle_evaluated_symmetrically(self):
+        """
+        A macro-saddle candidate is EVALUATED symmetrically on all three
+        paths (Build 7b lifted the saddle guard end to end).
+
+        Reconciliation choice (documented per the build brief): the shipped
+        ``MACRO_SADDLE`` config ``gamma = 0.5, kappa = 0.6`` has
+        ``1 - kappa = 0.4 < |gamma| = 0.5`` -- a macro-saddle INTERIOR that
+        the pre-7b domain gate refused with `LensDomainError` but which now
+        flows through the parity-blind SACR-C construction (the saddle wave
+        branch routed to the Schwinger evaluator).  Rather than repoint the
+        config at a still-refusing boundary, this test PRESERVES its
+        original intent -- PATH SYMMETRY -- in the new regime: the ratio
+        path, the direct path and brute force must all return a FINITE
+        ``lnlike`` and agree within the inherited RB tolerance
+        ``max(RB_ATOL, RB_RTOL*|bf|)``.  The named-refusal symmetry that
+        used to live here is now carried, for the surviving boundaries, by
+        `test_uncertifiable_branch_refused_symmetrically` (the wave-branch
+        `CancellationError`) and by the waveform/marginalized suites (the
+        over-critical ``kappa >= 1`` and ``det A = 0`` `LensDomainError`).
+        """
         par_dic = self._candidate(self._lens_dic(**MACRO_SADDLE))
+        lnbf = self.like.lnlike_bruteforce(par_dic)
+        self.n_checks += 1
+        self.assertTrue(np.isfinite(lnbf),
+                        'macro-saddle bruteforce lnlike is not finite')
+        tol = max(RB_ATOL, RB_RTOL * abs(lnbf))
         for label, call in (('ratio', self._lnlike_ratio),
-                            ('direct', self._lnlike_direct),
-                            ('bruteforce', self.like.lnlike_bruteforce)):
+                            ('direct', self._lnlike_direct)):
             with self.subTest(path=label):
+                value = call(par_dic)
                 self.n_checks += 1
-                with self.assertRaises(LensDomainError):
-                    call(par_dic)
+                self.assertTrue(
+                    np.isfinite(value),
+                    f'{label}: macro-saddle lnlike is not finite')
+                self.assertLess(
+                    abs(value - lnbf), tol,
+                    f'{label}: |lnlike_{label} - lnlike_bruteforce| = '
+                    f'{abs(value - lnbf):.3e} exceeds max(RB_ATOL, '
+                    f'RB_RTOL*|bf|) = {tol:.3e} on the macro saddle')
 
     def test_uncertifiable_branch_refused_symmetrically(self):
         """All three paths raise `CancellationError` on an uncertifiable

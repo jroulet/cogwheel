@@ -38,11 +38,17 @@ strain, while `get_hplus_hcross` returns the collapsed total used for the
 
 SCOPE
 -----
-Only positive-parity macro images are supported.  A configuration with
-``1 - kappa <= abs(gamma)`` is out of scope: the engine raises
-`geometry.LensDomainError`, which is propagated unswallowed from both the
+Both macro-image parities are supported: positive parity
+(``1 - kappa > abs(gamma)``) and the macro saddle
+(``0 < 1 - kappa < abs(gamma)``), whose wave branch routes through the
+Schwinger evaluator inside `operator.F_op`.  The macro-geometry domain
+refusals -- over-critical / Type III (``1 - kappa <= 0``) and the exact
+``det A = 0`` parity boundary (``abs(gamma) == 1 - kappa``) -- raise
+`geometry.LensDomainError`, propagated unswallowed from both the
 constructor and every strain/decomposition call -- never downgraded to a
-warning or a ``nan``.
+warning or a ``nan``.  Beyond the certified Schwinger ceiling the operator
+raises `operator.CancellationError` / `SchwingerCertificationError` by
+name, likewise never swallowed.
 
 Conventions
 -----------
@@ -165,10 +171,14 @@ class LensedWaveformGenerator(utils.JSONMixin):
     Apply a Chang--Refsdal amplification to a wrapped `WaveformGenerator`.
 
     The wrapped generator supplies the unlensed per-mode strain; this
-    class multiplies each mode by the common factor ``F(w(f))``.  Lens
-    parameters are fixed at construction, so a macro-saddle configuration
-    (``1 - kappa <= abs(gamma)``) raises `geometry.LensDomainError`
-    immediately rather than at first use.
+    class multiplies each mode by the common factor ``F(w(f))``, which is
+    parity-blind: both positive-parity (``1 - kappa > abs(gamma)``) and
+    macro-saddle (``0 < 1 - kappa < abs(gamma)``) hosts are served, the
+    saddle wave branch routing through the Schwinger evaluator inside
+    `operator.F_op`.  Lens parameters are fixed at construction, so the
+    macro-geometry domain refusals (over-critical ``1 - kappa <= 0`` and
+    the exact ``det A = 0`` parity boundary ``abs(gamma) == 1 - kappa``)
+    raise `geometry.LensDomainError` immediately rather than at first use.
 
     Parameters
     ----------
@@ -191,8 +201,11 @@ class LensedWaveformGenerator(utils.JSONMixin):
     Raises
     ------
     geometry.LensDomainError
-        If ``1 - kappa <= abs(gamma)`` (outside the positive-parity
-        regime); raised here at construction and never swallowed.
+        If the macro geometry is over-critical (``1 - kappa <= 0``,
+        Type III) or sits exactly on the ``det A = 0`` parity boundary
+        (``abs(gamma) == 1 - kappa``); raised here at construction by
+        `geometry.macro_matrix` and never swallowed.  Both parity
+        interiors return normally.
     ValueError
         If ``y`` is not a two-vector or the wrapped object lacks the
         waveform-generator interface.
@@ -213,16 +226,11 @@ class LensedWaveformGenerator(utils.JSONMixin):
                 f'The source position y must be a two-vector, got shape '
                 f'{source.shape}.')
 
-        # Positive-parity gate at CONSTRUCTION. Since Build 6 the engine's
-        # macro_matrix legitimately accepts macro saddles, so the waveform/
-        # channel layer (positive-parity-only until Build 7) must enforce
-        # its own parity boundary explicitly.
-        if not 1.0 - kappa > abs(gamma):
-            raise geometry.LensDomainError(
-                f'LensedWaveformGenerator requires positive parity '
-                f'(1 - kappa > |gamma|): gamma={gamma}, kappa={kappa}. '
-                f'Saddle macro images are engine-supported but not yet '
-                f'available in the waveform/likelihood layer (Build 7).')
+        # Macro-geometry domain gate at CONSTRUCTION. Both parities are
+        # served (positive parity 1 - kappa > |gamma| and the macro saddle
+        # 0 < 1 - kappa < |gamma|); macro_matrix raises geometry.LensDomainError
+        # by name only for the over-critical / Type III case (1 - kappa <= 0)
+        # and the exact det-A = 0 parity boundary (|gamma| == 1 - kappa).
         geometry.macro_matrix(gamma, beta, kappa)
 
         self.waveform_generator = waveform_generator
@@ -258,8 +266,10 @@ class LensedWaveformGenerator(utils.JSONMixin):
 
         Returns ``(w, positive_mask, partition)``.  ``partition`` is
         ``None`` when no frequency maps to positive ``w`` (the fully
-        unlensed limit).  `geometry.LensDomainError` propagates unswallowed
-        for a macro-saddle configuration.
+        unlensed limit).  Named engine refusals -- `geometry.LensDomainError`
+        (Type III / parity boundary), `operator.CancellationError` and
+        `SchwingerCertificationError` (uncertifiable / above-ceiling
+        contraction) -- propagate unswallowed.
         """
         w = self.dimensionless_frequency(f_hz)
         positive = w > 0.0

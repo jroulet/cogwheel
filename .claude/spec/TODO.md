@@ -109,6 +109,13 @@ alongside/after the negative-parity builds. Oracles and gates follow
 the house rules (engine as F002-clean oracle; zero false accepts; no
 tolerance widening; fallback-to-exact preserves certified-or-refuse).
 
+  MEASURED (2026-07-20, 200-draw prior-box census): even the CERTIFIED
+  positive-parity path costs ~112 ms median on raw prior-box draws
+  (cold-fiducial ratio-layer misses + heavy-m_lens node counts) — the
+  9.8 ms figure is peak-region/warm-cache. Post-7a full-support box:
+  median 154 ms, p90 699 ms, p99 2.3 s. The surrogate is load-bearing
+  for the PRIOR BOX, not just the rescued strong-shear band.
+
 - [ ] **Homogenize the engine on the Schwinger evaluator (Build 8
   program)** `[→ spec]` — owner directive (2026-07-19): "make it
   homogeneous, use the surrogate to speed it up, and do what is needed

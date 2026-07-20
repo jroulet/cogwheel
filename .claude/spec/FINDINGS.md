@@ -660,6 +660,33 @@ Consequences:
   ln 8 to 1e-4 by pure coincidence — the T-scaling test is what
   discriminates, not constant-matching.
 
+## F016 — the rescued strong-shear lnlike gap is RB-binning/noise-limited, NOT envelope-limited (2026-07-20, Build 7b falsification)
+
+Build 7a's rescued-node measurement (ratio/direct paths agreeing with
+each other but ~0.9 nats from brute force at gamma' ~ 0.94) was
+root-caused during 7b planning as envelope under-resolution (the
+max|F| error-currency normalization under-weighting deep-cancellation
+troughs) and WP4 tightened the LOO stop to fix it. Test authorship
+FALSIFIED that mechanism: the gap is INSENSITIVE to the stop (1e-3 ->
+1e-5 moves 0.72 -> 0.75 nats) and SWINGS WITH THE NOISE SEED
+(gamma'=0.8: 0.004 vs 0.150 nats across two seeds; gamma'=0.94: 0.72
+vs 1.35). It is an RB-binning / data-noise effect of the same class
+the crown gate prices at RB_ATOL=1.5 — larger here because the
+strong-shear F(w) has more unresolved structure per bin. Consequences:
+- The gamma'-keyed two-tier LOO stop (_LOO_STOP_STRONG=1e-3 for
+  gamma' >= 0.5) is JUSTIFIED ONLY by the research's saddle-side
+  envelope gate (reconstruction eps < 1e-3, enforced in
+  test_lensing_saddle_channels), not by the nat-gap story.
+- Rescued/strong-shear likelihood accuracy is gated at the standard
+  RB tolerance; saddle-family configs (gamma' ~ 1.25-1.3) measure
+  ~0.04 nats and pass the tight 0.1-nat gate comfortably.
+- A principled strong-shear RB-binning audit (bin density vs F(w)
+  structure) belongs to the Build 8 program alongside the surrogate.
+- S2 node-count note: under the tightened saddle stop, genuine
+  2-decade saddle windows converge at N ~ 40-42 envelope nodes (below
+  the 48 cap; true reconstruction error 2-4e-4) — the research's
+  N <= 30 was calibrated on <=1-decade windows.
+
 ## F015 — fold-degenerate images crashed the geometric kernel with a raw LinAlgError (2026-07-19, surfaced in production, fixed Build 7a)
 
 The headline marginalized sampling run died mid-flight (bound 17+)

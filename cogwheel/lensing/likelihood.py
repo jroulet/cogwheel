@@ -62,12 +62,15 @@ common delay in the data term and cancels in the norm term.
 
 SCOPE / ERRORS THAT PROPAGATE
 -----------------------------
-Positive-parity macro images only: a macro-saddle configuration
-(``1 - kappa <= abs(gamma)``) makes the engine raise
-`geometry.LensDomainError`, propagated unswallowed.  Likewise a
-`operator.CancellationError` -- the engine's named refusal when the
-wave-branch contraction cannot certify its accuracy -- is *not* caught:
-the certified-or-refuse contract of the engine is preserved end to end.
+Both macro-image parities are served (positive parity and the macro
+saddle); the amplification is a parity-blind common factor ``F(w)``.  The
+engine's named refusals are *not* caught -- they propagate unswallowed so
+the certified-or-refuse contract is preserved end to end:
+`geometry.LensDomainError` (over-critical / Type III ``1 - kappa <= 0`` and
+the exact ``det A = 0`` parity boundary), `operator.CancellationError`
+(the wave-branch contraction cannot certify its accuracy), and
+`SchwingerCertificationError` (the saddle / strong-shear wave branch above
+its certified ceiling).
 
 Conventions
 -----------
@@ -137,7 +140,8 @@ _DEFAULT_KERNEL_SUBSAMPLES = 2
 #: where the held-out interpolation error is largest.
 _LOO_SEED_NODES = 8
 
-#: Hard-coded leave-one-out stop tolerance for the envelope node grid.
+#: Leave-one-out stop tolerance for the envelope node grid in the
+#: certified fast region (mass-sheet-reduced shear ``gamma' < 0.5``).
 #: Refinement halts once the worst held-out node error (relative to the
 #: peak amplification magnitude ``max|F|``, the same currency as the
 #: reconstruction gate ``max|dF|/max|F|``) drops below this value.  The
@@ -146,8 +150,35 @@ _LOO_SEED_NODES = 8
 #: reconstruction error well inside the ``1e-3`` gate.  It is a fixed
 #: physical property of the certified interpolant, NOT a constructor
 #: argument or configuration key: the node count it produces is
-#: self-certifying and config-independent by construction.
-_LOO_STOP = 4e-3
+#: self-certifying and config-independent by construction (and, being
+#: keyed only on the candidate's lens geometry, preserves the memoized-
+#: fiducial contract exactly).
+_LOO_STOP_FAST = 4e-3
+
+#: Tighter leave-one-out stop tolerance for the strong-shear/saddle region
+#: (``gamma' >= _STRONG_SHEAR_STOP_THRESHOLD``).  Its justification is the
+#: research's saddle-side SACR-C gate (envelope reconstruction error
+#: ``< 1e-3``, enforced by ``test_lensing_saddle_channels``): the fast
+#: stop cannot guarantee that on saddle windows.  It does NOT close the
+#: measured ~0.7-1.4-nat direct/ratio-vs-brute-force gap at rescued
+#: strong-shear configs (``gamma' ~ 0.94``): that gap is RB-binning /
+#: data-noise-limited, insensitive to the stop (1e-3 -> 1e-5 leaves it
+#: unchanged) and seed-dependent, so it is gated at the standard RB
+#: tolerance, not an envelope tolerance.  The certified fast region (and
+#: the crown fixture, ``gamma' = 0.20``) stays on `_LOO_STOP_FAST` --
+#: byte-identical node count and warm cost.  The `_LOO_MAX_NODES` ceiling
+#: still bounds worst-case cost.
+_LOO_STOP_STRONG = 1e-3
+
+#: Threshold on the mass-sheet-reduced shear ``gamma' = gamma / (1 - kappa)``
+#: separating the certified fast region (``gamma' < 0.5`` -> `_LOO_STOP_FAST`)
+#: from the strong-shear/saddle region (``gamma' >= 0.5`` -> `_LOO_STOP_STRONG`).
+#: The key is ``gamma'`` (NOT ``abs(gamma)``): the rescued cancellation
+#: family ``gamma = 0.405, kappa = 0.57`` has ``gamma' = 0.94`` -- an
+#: ``abs(gamma) >= 0.5`` key would wrongly leave it on the fast stop and
+#: fail the accuracy gate.  In the ``kappa = 0`` sampled space ``gamma' ==
+#: gamma``, so the crown fixture stays on the fast stop unchanged.
+_STRONG_SHEAR_STOP_THRESHOLD = 0.5
 
 #: Hard ceiling on the number of coarse envelope nodes.  The SACR-C
 #: envelope is beat-free by construction, so a certified reconstruction
@@ -426,6 +457,42 @@ def _leave_one_out_errors(abscissa, values):
     return errors
 
 
+def _loo_stop_for_lens(lens):
+    """
+    Leave-one-out stop tolerance for a candidate's lens geometry.
+
+    A pure function of the candidate's lens parameters and NOTHING else
+    (no data, no frequency grid, no fiducial state), so keying the
+    refinement stop on it preserves the memoized-fiducial contract
+    exactly.  Returns the tighter `_LOO_STOP_STRONG` in the strong-shear/
+    saddle region -- where the deep-cancellation troughs of ``F(w)`` live
+    and the ``max|F|`` error-currency normalization under-resolves them --
+    and the certified-fast `_LOO_STOP_FAST` elsewhere.
+
+    The key is the mass-sheet-reduced shear ``gamma' = gamma / (1 - kappa)``
+    (NOT ``abs(gamma)``): the rescued cancellation family ``gamma = 0.405,
+    kappa = 0.57`` has ``gamma' = 0.94``, which an ``abs(gamma)`` key would
+    wrongly leave on the fast stop.  In the ``kappa = 0`` sampled space
+    ``gamma' == gamma``, so the crown fixture (``gamma' = 0.20``) stays on
+    the fast stop and its node count / warm cost are byte-identical.
+
+    Parameters
+    ----------
+    lens : dict
+        Lens parameters; must carry keys ``gamma`` and ``kappa``.
+
+    Returns
+    -------
+    float
+        `_LOO_STOP_STRONG` if ``gamma' >= _STRONG_SHEAR_STOP_THRESHOLD``,
+        else `_LOO_STOP_FAST`.
+    """
+    gamma_prime = lens['gamma'] / (1.0 - lens['kappa'])
+    if gamma_prime >= _STRONG_SHEAR_STOP_THRESHOLD:
+        return _LOO_STOP_STRONG
+    return _LOO_STOP_FAST
+
+
 def _data_term(a_moments, rho0, rho1, kbar0, kbar1, tau, f_center):
     """
     Contract the data term ``(d|h_L)`` per detector, mode-then-image.
@@ -620,8 +687,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
     -----
     The engine evaluates only the single smooth SACR-C transition
     envelope ``E(w)`` on a small leave-one-out-adaptive coarse ``w`` node
-    grid (seed ``_LOO_SEED_NODES``, stop ``_LOO_STOP``, ceiling
-    ``_LOO_MAX_NODES``); the candidate channel kernels ``K_a`` are then
+    grid (seed ``_LOO_SEED_NODES``, gamma'-keyed stop -- `_LOO_STOP_FAST`
+    for ``gamma' < _STRONG_SHEAR_STOP_THRESHOLD``, else `_LOO_STOP_STRONG`
+    -- ceiling ``_LOO_MAX_NODES``); the candidate channel kernels ``K_a``
+    are then
     reconstructed at the dense bin sub-samples in closed form (the
     analytic switched saddle kernels ``S_a * H_a`` plus the interpolated
     envelope, `reconstruct_from_envelope`).  The node budget is
@@ -954,7 +1023,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         the node of largest held-out (leave-one-out) error until that
         error, measured relative to the peak amplification magnitude
         ``max|F|`` (the reconstruction gate's currency), drops below the
-        hard-coded `_LOO_STOP`, or the count reaches `_LOO_MAX_NODES`.
+        gamma'-keyed stop (`_loo_stop_for_lens`: `_LOO_STOP_FAST` in the
+        certified fast region ``gamma' < _STRONG_SHEAR_STOP_THRESHOLD``,
+        the tighter `_LOO_STOP_STRONG` in the strong-shear/saddle region),
+        or the count reaches `_LOO_MAX_NODES`.
 
         The held-out error is a local cubic estimate (`_leave_one_out_errors`)
         that uses only node data -- no dense truth -- so the stop is
@@ -964,11 +1036,13 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         global-spline reconstruction error, the stop is conservative and
         drives the true error well inside the ``1e-3`` reconstruction gate.
 
-        A macro-saddle configuration (``1 - kappa <= abs(gamma)``) makes
-        the first engine evaluation raise `geometry.LensDomainError`, and
-        an uncertifiable wave-branch contraction raises
-        `operator.CancellationError`; both propagate unswallowed, matching
-        the brute-force path so the two refuse symmetrically.
+        The macro-geometry domain refusals (over-critical / Type III and
+        the ``det A = 0`` parity boundary) make the first engine evaluation
+        raise `geometry.LensDomainError`, and an uncertifiable or
+        above-ceiling wave-branch contraction raises
+        `operator.CancellationError` / `SchwingerCertificationError`; all
+        propagate unswallowed, matching the brute-force path so the two
+        refuse symmetrically.
 
         Parameters
         ----------
@@ -1025,8 +1099,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         held-out error (geometric midpoints in ``w``), re-evaluate the
         SACR-C envelope there, and stop once the worst held-out error
         (normalized to the ``max|F|`` reconstruction currency by
-        ``node_error``) drops below `_LOO_STOP` or the count reaches
-        `_LOO_MAX_NODES`.  Only the interpolated object and its error
+        ``node_error``) drops below the gamma'-keyed stop
+        (`_loo_stop_for_lens`, a pure function of ``lens``) or the count
+        reaches `_LOO_MAX_NODES`.  Only the interpolated object and its error
         currency differ between the two callers, so they are supplied via
         ``node_error``; the placement, engine re-evaluation, and node
         bookkeeping are identical and live here once.
@@ -1054,11 +1129,16 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             The refined node grid and the engine envelope / exact-total
             values on it (strictly increasing in ``coarse_w``).
         """
+        # The stop is keyed on the candidate's mass-sheet-reduced shear
+        # ``gamma' = gamma/(1-kappa)`` (a pure function of ``lens``), so
+        # the strong-shear/saddle region gets deep-trough resolution while
+        # the certified fast region keeps its byte-identical node count.
+        loo_stop = _loo_stop_for_lens(lens)
         while True:
             n_nodes = coarse_w.size
             errors, scale = node_error(coarse_w, env_nodes, ftot_nodes)
             worst = int(np.argmax(errors))
-            if errors[worst] / scale < _LOO_STOP or n_nodes >= _LOO_MAX_NODES:
+            if errors[worst] / scale < loo_stop or n_nodes >= _LOO_MAX_NODES:
                 break
 
             # Split the two intervals flanking the worst node (geometric
@@ -1329,8 +1409,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         Notes
         -----
-        `geometry.LensDomainError` (macro-saddle, raised by the first
-        engine evaluation) and `operator.CancellationError` (uncertifiable
+        `geometry.LensDomainError` (Type III / parity boundary, raised by
+        the first engine evaluation) and `operator.CancellationError` /
+        `SchwingerCertificationError` (uncertifiable or above-ceiling
         contraction, raised at the worst-cancellation node ``w_max`` that
         the seed always evaluates) propagate unswallowed, exactly as in
         ``lnlike_bruteforce``, so the two paths refuse symmetrically.
@@ -1344,8 +1425,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 'dimensionless frequency w = xi*f; got a non-positive value.')
 
         # Coarse-node envelope (LOO-adaptive); the first engine call
-        # raises `geometry.LensDomainError` on a macro-saddle, matching
-        # the brute-force path.
+        # raises the engine's named refusals (`geometry.LensDomainError`
+        # for Type III / the parity boundary, `operator.CancellationError`
+        # / `SchwingerCertificationError` for an uncertifiable or
+        # above-ceiling contraction), matching the brute-force path.
         partition, coarse_w, envelope_nodes = self._envelope_loo_nodes(
             lens, dense_w, seed=seed)
 

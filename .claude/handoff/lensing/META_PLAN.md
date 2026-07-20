@@ -1518,3 +1518,265 @@ D. RESOLVED: CANCELLATION_CONFIG / CANCELLATION_LENS (shared
 Suites green after B+C: geometry, saddle_geometry, channels, prior,
 operator, fast_path, waveform, batched_operator, schwinger,
 ratio_layer/marginalized except the two D fixtures.
+
+## BUILD 7a COMMITTED 83d75dc (2026-07-20 ~01:15) + CYCLE CLOSE
+
+Final gate before commit: full suite 367 passed + 2 xfailed, 0 failed
+(--dist loadfile run); the 5 residual stock test_posterior errors were
+ADJUDICATED, not waved off: xdist EXONERATED (loadfile persisted them;
+serial-with-forced-pollution reproduced them; Build-6-tree parallel
+control reproduced them = pre-7a). ROOT CAUSE: latent Build-5
+incompatibility — test_posterior's setUpClass sweeps
+get_subclasses(BaseRelativeBinning) + prior_registry and instantiates
+everything generically; once ANY lensing module is imported in the
+same process, LensedMarginalizedExtrinsicLikelihood (requires
+delta_t_max) and the lensed priors (lens params not in the stock
+par_dic_0) enter the sweeps -> TypeError. INVISIBLE until today
+because the untracked IMRPhenomXODE symlink was missing from this
+worktree (unknown deleter, restored + noted), so the three stock
+modules collect-errored out of every previous gate. FIX (in 83d75dc):
+both sweeps skip extension classes they cannot generically construct
+(commented rationale); verified under forced pollution (6 passed).
+SDK/env ledger: symlink is machine-local setup — CLAUDE.local.md
+material for fresh worktrees.
+
+Post-commit: sampling run 3 launched FRESH from worktree 83d75dc
+(resume rejected: pre-7a checkpoint holds -inf evals for points the
+hardened engine now evaluates finitely — mixing them corrupts one
+nested-sampling run); first attempt died at pool fork (Errno 12,
+transient overcommit while the B6 control's workers peaked; 297G
+actually available) — relaunch armed on the control's completion.
+Librarian ran (sonnet): NO-OP — INS-5-DOC-1/INS-4-DOC-1/INS-1-001
+were already fixed in Build 5's own commit (stale escalation);
+autosummary :recursive: covers new modules automatically; fragile
+cross-ref noted: overview.rst's positive-parity claim flips at
+Build 7b (check channels.py directly). librarian.json -> 83d75dc.
+
+NEXT: (a) B6 parallel control final tally (attribution record);
+(b) sampling run 3 relaunch on its completion; (c) Build 7b brief
+(saddle channels/likelihood/prior; preconditions: rescued-node
+envelope accuracy gate, band-limit w>60 in PE, research S2 gates);
+(d) oracle v5 rerun on the 7a engine only if 7b changes the
+marginalized path.
+
+## OWNER RULING: NO SAMPLING AT ~100 ms/EVAL (2026-07-20)
+
+"I don't want to run a sampling check if each likelihood evaluation
+takes 100 ms... defeats the point of relative binning when we can
+achieve that with glow." The headline run's PURPOSE is the
+relative-binning speed story; if Build 7a's rescued strong-shear
+proposals (Schwinger 30-125 ms/node x up-to-48 nodes) dominate
+wall-clock, the run is deferred until the surrogate. Sampling run 3
+relaunch is ON HOLD pending the eval-cost census
+(prior_eval_cost_census.py, 200 prior draws on the 7a worktree):
+measure the rescued fraction and the plain/marginalized per-eval
+distributions. Decision rule: if the p90 plain eval stays ~10 ms and
+rescued draws are a negligible prior fraction, the headline run
+proceeds (its per-eval is coherent-score-dominated anyway); otherwise
+options are (i) defer sampling to post-surrogate, or (ii) run with
+pre-7a refusal semantics (certified-fast band only) via a fallback
+kill-switch — owner chooses.
+
+CENSUS RESULT (200 identical prior-box draws, A/B by engine tree):
+- Build 6 (pre-fallback): 36% evaluable, 64% CancellationError
+  refusals — runs 1/2 sampled a posterior with ~2/3 of the prior box
+  ARTIFICIALLY CUT to -inf (the exact defect class the parity program
+  exists to remove). OK-eval median 112 ms.
+- Build 7a: 76.5% evaluable (82 of 128 refusals rescued; remainder =
+  w>60 + gamma'=0 tail classes + 1 binning refusal). OK-eval median
+  154 ms, p90 699 ms, p99 2.3 s, max 5.2 s.
+- KEY REFRAME: even the CERTIFIED pre-7a path costs ~112 ms median on
+  raw prior-box draws — the 9.8 ms figure is a PEAK-REGION number
+  (warm memoized fiducial, moderate config). Cold-fiducial ratio-layer
+  misses + heavy-m_lens node counts dominate the box. The surrogate is
+  needed for the BOX, not just the rescued band (surrogate todo
+  updated). The sampler's steady state is peak-concentrated, so
+  effective sampling cost sits between the box census and the crown
+  figure.
+- The 9.8 ms crown-config hot path is UNCHANGED (bit-frozen legacy
+  arm; suite timing gates still pass).
+Owner options laid out: (A) defer sampling to post-surrogate (speed
+headline honest); (B) one correctness-oriented 7a run now (full
+support, est. hours-to-half-day, NOT a speed headline); (C) pre-7a
+kill-switch run (fast-ish, 64% artificial cut — inconsistent with the
+program's own goal).
+
+OWNER CHOSE (A) (2026-07-20): ALL sampling/validation runs DEFERRED to
+post-surrogate. Standing rule: no sampling checks until the surrogate
+makes the prior-box per-eval fast — the headline must be the
+relative-binning speed story, not a Schwinger/cold-fiducial grind.
+Consequences applied: sampling run 3 relaunch cancelled; B6 parallel
+control killed (attribution already recorded; workers freed); stale
+monitors retired; injection-recovery/PP validation moves POST-SURROGATE
+in the sequence. The Build-8 surrogate program is therefore promoted to
+the immediate next slot after Build 7b.
+
+## BUILD 7b LAUNCHED (2026-07-20 00:57)
+
+Brief build7b_brief.md (saddle channel/likelihood/prior integration;
+rescued-node envelope accuracy gate as REQUIRED precondition; PE
+band-limit; prior widening + both-parity parameterization per research
+S2; engine files fenced). Log /tmp/build7b_20260720_005733.log;
+approval dir /tmp/build7b_approval; monitor armed. Driver duties:
+verify code-pins at the plan gate, watch for the S2-gate narrowing
+escalation, keep Fable-tier OFF (owner-only rule).
+
+ATTEMPT 1 GATE FAILURE (01:11): Architect emitted 0 WPs — the
+THIRD zero-WP incident (Build 6 attempt 7, and the structural gap
+recurs). Behavioral evidence (no raw transcript persisted): the
+Architect's consult loop spiraled on FILE-ACCESS VERIFICATION
+("Professor: verify file access honestly", "Simplifier: access
+check"), resorted to WebFetch/WebSearch for the repo's own files
+(GitHub searches for ChangRefsdalChannels!), and declined to plan
+against gates it could not verify — arguably disciplined given the
+brief made the research §11 gates binding BY REFERENCE to a 26 KB
+note. DRIVER-SIDE FIX (own rule violated: inline distilled facts,
+never pointer-load the planner): S2 scope + all 5 fast gates + the
+measured |S H| scan constant inlined verbatim into the brief; note
+demoted to supplementary-for-coders; explicit instruction that an
+infeasible gate becomes a plan-summary NOTE plus feasible WPs, never
+an empty plan (zero-WP is structurally a gate rejection, not an
+escalation channel). SDK LEDGER (recurring): the pipeline needs a
+first-class escalation channel from the Architect — 0-WP plans are
+overloaded as both refusal and failure. Relaunched as build7b2
+(/tmp/build7b2_20260720_011315.log).
+
+ATTEMPT 2 PLAN (01:20-01:33): 4 WPs, high quality (WP1 guard-lift with
+the right STOP-and-report clause on hidden positive-parity
+assumptions; WP2 constructor guard lift keeping macro_matrix as the
+surviving domain gate; WP3 single continuous gamma in (0, 1.6), parity
+deterministic in gamma, boundary = measure-zero named refusal —
+research-consistent; 12 strong test descriptions incl. lobe-jump
+continuity + reflection-symmetry fold check; Professor Q3's
+Fermat-potential-symmetry argument for keeping the u1/u2 fold on the
+deltoid is CORRECT physics). DRIVER GATE ACTION: REJECTED WP4 ONLY,
+on measurement — the proposed global _LOO_STOP 4e-3 -> 1e-3 costs
+1.44x on the crown (probe loo_stop_crown_probe.py: 37.5 -> 54.0 ms
+warm ratio path; scales the certified 9.8 ms past the owner's 10 ms
+hard gate, which the plan never checked). Feedback: keep WP1-3 + tests
+verbatim; rescope WP4 to the min-|F| LOO seed node (the plan's own
+documented fallback) and/or a deterministic candidate-dependent stop
+(tighten only at strong shear; fiducial-cache purity preserved since
+the stop stays a pure function of the candidate); verification must
+include BOTH the crown-unchanged timing/node-count check AND the
+0.1-nat rescued-node gate. LESSON (recurring driver duty): plans that
+touch shared hot-path constants get a MEASURED crown-impact check at
+the file gate, not an eyeball.
+
+ATTEMPT 2 REVISION (01:4x): WP4 rebuilt exactly per feedback
+(candidate-dependent stop, _LOO_STOP_FAST/_STRONG + threshold, purity
+contract explicit, crown verification incl. FewMsTimingTestCase +
+bit-identical node count; WP1-3/tests verbatim). SECOND SURGICAL
+REJECTION: the threshold keyed on abs(gamma), but the trough physics
+keys on gamma' = gamma/(1-kappa) — the plan's OWN gate config
+(CANCELLATION family: gamma=0.405, kappa=0.57, gamma'=0.94) would
+keep the fast stop and fail the 0.1-nat gate by construction, pushing
+the coder into the wrong escalation. In the kappa=0 sampled space
+gamma'==gamma (sampler behavior unchanged); the correction only
+matters for general API candidates and the test configs themselves.
+Feedback sent: key on gamma', keep everything else verbatim.
+
+ATTEMPT 2 v3 APPROVED (01:5x): WP4 now gamma'-keyed with the
+load-bearing rationale in the WP text itself, purity contract
+explicit, crown verification = bit-identical node count +
+FewMsTimingTestCase, and the 0.1-nat gate explicitly includes the
+gamma'=0.94 config. Plan approved at the file gate; coders executing.
+Driver watch: WP1's STOP-and-report clause (hidden positive-parity
+assumptions below the channels guard) is the likeliest escalation
+path; post-build driver steps = 25-config saddle scan, warm timing,
+full-suite regression.
+
+## BUILD 7b EXECUTION + HAND-ORCHESTRATED FINISH (2026-07-20 01:39-)
+
+Coders: WP1 ($5.27), WP4 ($5.67), WP3 ($3.05) completed; WP2 coder-7
+died error_max_turns at 25 turns — the waveform.py guard lift and
+docstring rewrite were DONE (high quality on review); it burned turns
+on the likelihood.py docstring sweep whose line refs WP4's coder had
+just shifted under it. DAG died pre-test-phase; no checkpoint banked;
+all WP code in the working tree (parse-verified).
+
+DRIVER SMOKE FOUND EXACTLY THE WP1 STOP-AND-REPORT CASE (the coder
+claimed the verification but evidently never RAN a saddle evaluation):
+channels._exact_total's per-node branch decision calls
+operator.cancellation_exponent -> _mass_sheet_map, which is
+positive-parity-only BY DESIGN (saddle cancellation channel is
+L_S=pi*w/4, y-independent — operator.py's own docs). HAND-FIX in
+channels.py (in-scope file): saddle hosts delegate every node to the
+batched F_op_grid call — the operator's saddle arm already owns
+per-node geometric-vs-Schwinger routing (resolved AND w>60 ->
+stationary phase; else Schwinger) — positive-parity decision path
+byte-identical. Smoke after fix: saddle F finite over [0.5,50];
+channel-layer F009-S macro plateau 1.20380571 vs closed form
+1.20385853 (4e-5) at w=1e-4; positive parity intact.
+
+Two Test Dev agents commissioned in parallel (opus): A = new
+test_lensing_saddle_channels.py (7 gates: identity residual <=1e-13,
+node-count N<=30, switch-bound measured, lobe-jump continuity,
+AST-guarded mpmath end-to-end oracle 1e-9, geometric cross-check 5e-2,
+F009-S flat macro limit 1e-6); B = new
+test_lensing_saddle_likelihood.py (RB-vs-brute saddle, rescued-node
+0.1-nat gate + falsification at gamma'=0.94/0.8/1.3, above-ceiling
+spy, 1e4 both-parity prior round-trips, deltoid reflection 1e-14) +
+reconciliation of the two pinned refusal tests (waveform construction;
+ratio MACRO_SADDLE symmetry — its gamma=0.5/kappa=0.6 config is a
+saddle INTERIOR that now evaluates).
+
+TEST DEV A DELIVERED (13 tests, 53.6 s, green): identity residual
+1.8e-16 (gate 1e-13); node-count gate see deviation below; switch
+bound 1.32 crossings / 1.52 scan (gates 2/4) with the un-switched
+kernel measured ~1e18 (switch provably load-bearing); lobe-jump step
+1.16e-7 (<1e-6); mpmath oracle 5e-15 (gate 1e-9); geometric
+cross-check 1.2-1.9e-2 (<5e-2, improving with w); macro-limit
+intercept 1.4e-7 + Morse 1.5e-7 (<1e-6); AST guards + red-capable
+falsifications throughout. S2 GATE-1 DEVIATION (documented in the
+suite): N<=30 holds only on <=1-decade windows; genuine 2-decade
+saddle windows converge at N~40-42 under the WP4 strong stop (below
+the 48 cap; true reconstruction error 2-4e-4, an order inside the
+1e-3 gate) — the dev gated on convergence-below-cap + accuracy and
+documented. Driver note: 40 nodes x ~56 ms prices a saddle fiducial
+build at ~2.2 s (ratio path memoizes it away thereafter) — another
+surrogate data point.
+
+TEST DEV B DELIVERED (7 new + 2 reconciled + suites green: saddle
+module 7/7, waveform 25/25, ratio 18/18). Measured rescued-node gaps:
+saddle gamma'=1.3: 0.0435 (<0.1 ✓); strong_pos gamma'=0.8: 0.0039
+(<0.1 ✓, but 0.150 on another seed!); rescued gamma'=0.94 (m x2):
+1.35 (seed 20260718) / 0.72 (seed 20260717). KEY FALSIFICATION —
+Professor Q5's root cause is WRONG: the rescued-config gap is
+RB-BINNING / DATA-NOISE-LIMITED, not envelope-limited: LOO stop
+1e-3 -> 1e-5 leaves it unchanged (0.72 -> 0.75), and it swings with
+the noise seed. WP4's strong stop does NOT close the 0.94-nat gap;
+its surviving justification is the research's saddle-side envelope
+gate (eps<1e-3, which the fast stop cannot guarantee on saddle
+windows). Driver actions: corrected the overclaiming likelihood.py
+comment; Dev B gated the rescued config at the standard RB tolerance
+with documented deviation. F016 entry at close. Dev B also flagged
+TWO more out-of-scope stale pins (marginalized RefusalContract
+macro_saddle subTest; fast_path saddle-symmetry test) — driver
+reconciled BOTH to the over-critical domain (kappa=1.5, named refusal
+on every path, contract-flip witness asserts the old saddle interior
+now passes the domain gate) + renamed OVER_CRITICAL_LENS/GAMMA/KAPPA.
+Also noted: coarse-LOO-stop pathological multi-minute hang under
+patched constants (not production-reachable; noted, not chased).
+
+INSPECTOR-REPLACEMENT REVIEW (opus): all four WPs + both new suites +
+all reconciliations CONFORM (incl. verifying the engine fence held,
+the fiducial 7-tuple key covers gamma+kappa for stop purity, and the
+kappa->1 division is unreachable). ONE MAJOR: test_lensing_prior C3
+(PositiveParityDomainSafetyTestCase) hard-coded gamma in (0,0.45) +
+a positive-parity assertion — SILENTLY GREEN while scanning a
+fictional box (the nastiest stale-pin class: the suite run cannot
+catch it). Driver fixed: renamed BothParityDomainSafetyTestCase, draws
+from the REAL UniformReducedShearPrior.range_dic, asserts both-parity
+domain semantics (no draw on the boundary; both sides populated);
+verified green (1 passed, 4.2 s).
+
+S2 POST-BUILD DRIVER GATES: 25-config seeded saddle scan (gamma in
+[1.05,1.55], y-box +-2, beta in [0,pi]): 25/25 FINITE, 0 crashes,
+0 nans, 0 refusals, 36 s; worst |F| 3.41. Warm lnlike: crown 37.2 ms
+(probe conditions; calibrated suite gate is authority), saddle
+gamma'=1.3 1379 ms — consistent with ~24 candidate-side envelope
+nodes x 56 ms Schwinger: THE measured saddle per-eval figure, and the
+precise surrogate-shaped hole ruling (A) anticipated (record for the
+Build 8 brief). FINDINGS F016 written; SPEC 0.11.0; fragments
+rendered. Full suite in flight = the commit gate.

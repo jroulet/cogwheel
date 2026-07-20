@@ -109,10 +109,14 @@ from cogwheel import data, waveform
 from cogwheel.likelihood.reference_waveform_finder import ReferenceWaveformFinder
 from cogwheel.gw_prior import IASPrior
 from cogwheel.lensing import posterior as posterior_module
-from cogwheel.lensing.likelihood import LensedRelativeBinningLikelihood
+from cogwheel.lensing.likelihood import (LensedBinningError,
+                                         LensedRelativeBinningLikelihood)
+from cogwheel.lensing.chang_refsdal._schwinger import (
+    SchwingerCertificationError)
 from cogwheel.lensing.posterior import LensedPosterior
 from cogwheel.lensing.prior import (
-    LensedIASPrior, UniformLensMassPrior, UniformSourcePositionPrior,
+    LensedIASPrior, UniformLensMassPrior, UniformReducedShearPrior,
+    UniformSourcePositionPrior,
     _source_scale, _LN_M_LENS_RANGE, _Y_SCALE, _Y_SCALE_CAP)
 from cogwheel.lensing.waveform import (
     LensedWaveformGenerator, dimensionless_frequency, _EIGHT_PI_MTSUN_S)
@@ -492,25 +496,36 @@ class JacobianConsistencyTestCase(_LensSuiteTestCase):
         return float(logdet)
 
 
-class PositiveParityDomainSafetyTestCase(_LensSuiteTestCase):
-    """C3 -- the whole sampled box maps into the certified engine domain.
+class BothParityDomainSafetyTestCase(_LensSuiteTestCase):
+    """C3 -- the whole sampled box maps into the certified-or-named-refuse
+    engine domain.
 
     The standard lens params are recomputed here from the SAME production
     maps the subpriors use (``exp`` for the mass, `_source_scale` for the
-    source box) rather than routed through ``CombinedPrior.transform``, so
+    source box, the REAL ``UniformReducedShearPrior.range_dic`` for the
+    shear) rather than routed through ``CombinedPrior.transform``, so
     the sweep is a fast vectorized 10^4-point scan; correctness of those
     maps themselves is pinned by C1/C2.  The ceilings are written out from
     the physical constant ``_EIGHT_PI_MTSUN_S`` (via
     `dimensionless_frequency`), never read back from the engine.
+
+    Since Build 7b the gamma range spans BOTH parities (positive parity
+    ``gamma < 1`` and macro saddles ``gamma > 1``), so the old
+    positive-parity assertion is replaced by the both-parity domain
+    contract: every draw is either inside a parity interior (evaluable,
+    certified-or-named-refuse downstream) or on the measure-zero
+    ``gamma == 1`` boundary (named refusal) -- never in the over-critical
+    Type III region, which the ``kappa = 0`` sampled space cannot reach.
     """
 
     def test_full_box_stays_in_certified_domain(self):
-        """gamma < 1, w_max <= 450, and w*sqrt(s) <= 58 over 10^4 draws."""
+        """Both-parity gamma box, w_max <= 450, w*sqrt(s) <= 58, 10^4 draws."""
         rng = np.random.default_rng(SEED + 4)
         n_points = 10_000
         ln_lo, ln_hi = _LN_M_LENS_RANGE
         ln_m = rng.uniform(ln_lo, ln_hi, n_points)
-        gamma = rng.uniform(0.0, 0.45, n_points)
+        gamma_lo, gamma_hi = UniformReducedShearPrior.range_dic['gamma']
+        gamma = rng.uniform(gamma_lo, gamma_hi, n_points)
         u1 = rng.uniform(-1.0, 1.0, n_points)
         u2 = rng.uniform(-1.0, 1.0, n_points)
 
@@ -531,10 +546,19 @@ class PositiveParityDomainSafetyTestCase(_LensSuiteTestCase):
             rtol=1e-12, atol=0.0,
             err_msg='vectorized w_max diverged from dimensionless_frequency')
 
-        # (a) positive parity, kappa = 0 so 1 - kappa = 1.
-        with self.subTest(check='positive_parity'):
-            self.assertTrue(np.all(1.0 - 0.0 > np.abs(gamma)),
-                            'emitted gamma violated 1 - kappa > |gamma|')
+        # (a) both-parity domain: with kappa = 0 every draw is a parity
+        # INTERIOR (gamma != 1: positive parity below, macro saddle
+        # above -- both evaluable, certified-or-named-refuse downstream)
+        # and never over-critical (1 - kappa = 1 > 0 always).  The
+        # measure-zero gamma == 1 boundary is a named det-A = 0 refusal;
+        # a uniform draw hits it with probability 0, asserted exactly.
+        with self.subTest(check='both_parity_domain'):
+            self.assertTrue(np.all(gamma != 1.0),
+                            'a draw landed exactly on the det-A = 0 '
+                            'parity boundary')
+            self.assertTrue(np.any(gamma < 1.0) and np.any(gamma > 1.0),
+                            'the sampled box no longer spans both '
+                            'parities -- the range_dic drifted')
         # (b) frequency ceiling.
         with self.subTest(check='w_max_ceiling'):
             self.assertLessEqual(
@@ -963,8 +987,15 @@ class RefusalNetTestCase(_LensSuiteTestCase):
         """Seeded in-support draws that trip `operator.CancellationError`.
 
         Returns a list of ``(sampled_vec, standard_par_dic)`` whose raw
-        likelihood raises `operator.CancellationError` (never
-        `LensDomainError`, which is unreachable at ``kappa = 0``).
+        likelihood raises `operator.CancellationError`.  Since Build 7b
+        the both-parity gamma box makes OTHER members of the named
+        refusal vocabulary reachable in support (`LensedBinningError`
+        for wide-delay saddle images; `SchwingerCertificationError`
+        near the gamma' -> 1 pinch; `LensDomainError` only on the
+        measure-zero boundary): the scan skips those draws rather than
+        letting them kill the fixture -- this class pins the
+        CancellationError branch of the net specifically (the other
+        branches are pinned by the saddle-likelihood suite).
         """
         rng = np.random.default_rng(SEED + 6)
         found = []
@@ -977,7 +1008,8 @@ class RefusalNetTestCase(_LensSuiteTestCase):
                 found.append((sampled, standard))
                 if len(found) >= C6_N_REFUSALS:
                     break
-            except LensDomainError:  # pragma: no cover - unreachable at kappa=0
+            except (LensDomainError, SchwingerCertificationError,
+                    LensedBinningError):
                 pass
         return found
 
