@@ -44,6 +44,39 @@ class EscalationNeeded(Exception):
 # ── Plan verification gate ───────────────────────────────────────────────────
 
 
+_TEST_SUITE_RE = re.compile(r"\b(test_\w+\.py)\b")
+
+
+def _suite_write_conflicts(specs: list[str]) -> list[tuple[str, str]]:
+    """Domain-test specs that route the same test file to two shards.
+
+    The Test Developer phase shards ``domain_test_descriptions`` by the FIRST
+    ``test_*.py`` each spec names (its owning suite — mirror of
+    ``orchestrator._group_test_specs``). Write-ownership must be disjoint: a
+    conflict is a spec whose owning shard ALSO names another spec's owning
+    file, so two Test-Developer runs would both author that file. Returns
+    ``(owner, shared)`` pairs; empty when ownership is disjoint. Defensive:
+    any parse error yields ``[]`` (the check is skipped, never blocks a build).
+    """
+    try:
+        primary: dict[int, str] = {}
+        refs: dict[int, set[str]] = {}
+        for i, spec in enumerate(specs or []):
+            files = _TEST_SUITE_RE.findall(str(spec))
+            if files:
+                primary[i] = files[0]
+                refs[i] = set(files)
+        owners = set(primary.values())
+        conflicts: list[tuple[str, str]] = []
+        for i, owned in primary.items():
+            for f in refs[i]:
+                if f != owned and f in owners:
+                    conflicts.append((owned, f))
+        return conflicts
+    except Exception:
+        return []
+
+
 def verify_plan(
         plan: Plan, require_professor: bool = False,
 ) -> tuple[list[str], list[str]]:
@@ -75,6 +108,15 @@ def verify_plan(
 
     if not plan.work_packages:
         failures.append("Plan has no work packages.")
+
+    # Test-suite write-ownership must be disjoint: no test file may be routed
+    # to two Test-Developer shards (they would author it in parallel).
+    for owner, shared in _suite_write_conflicts(plan.domain_test_descriptions):
+        failures.append(
+            f"Test-suite write-ownership conflict: the shard owning {owner} "
+            f"also targets {shared}, which is another shard's suite. Each "
+            f"test file must be authored by exactly one Test Developer — split "
+            f"the spec so suites are disjoint.")
 
     for wp in plan.work_packages:
         if wp.who not in ("Coder", "Foreman-Lite"):

@@ -246,6 +246,30 @@ def cmd_inputs_for(pg: PipelineGraph, module: str):
         print(f"  {name} — {role}")
 
 
+def cmd_list(pg: PipelineGraph):
+    """Compact one-line-per-artifact summary of the registered data products.
+
+    Each line: ``<name>  producer=<module>  consumers=<n>  registry_path=<yes|no>``.
+    Prints ``(no registered data products)`` when the contracts declare none.
+    Intended for injection into planner context (see orchestrator's Architect
+    pipeline-summary step).
+    """
+    arts = pg.artifacts
+    if not arts:
+        print("(no registered data products)")
+        return
+    for name in sorted(arts):
+        info = arts[name] or {}
+        producer = (info.get("producer", {}) or {}).get("module", "?")
+        try:
+            n_consumers = len(pg.consumers_of(name))
+        except Exception:
+            n_consumers = 0
+        has_path = "yes" if pg.registry_path(name) else "no"
+        print(f"{name}  producer={producer}  consumers={n_consumers}  "
+              f"registry_path={has_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Trace data artifact dependencies from DATA_CONTRACTS.yaml",
@@ -268,6 +292,9 @@ def main():
     sub = subparsers.add_parser("inputs_for", help="What artifacts a module consumes")
     sub.add_argument("module")
 
+    subparsers.add_parser(
+        "list", help="One-line-per-artifact summary of registered data products")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -285,6 +312,8 @@ def main():
         cmd_consumers_of(pg, args.artifact)
     elif args.command == "inputs_for":
         cmd_inputs_for(pg, args.module)
+    elif args.command == "list":
+        cmd_list(pg)
 
 
 if __name__ == "__main__":

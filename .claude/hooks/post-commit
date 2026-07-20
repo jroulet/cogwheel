@@ -115,6 +115,41 @@ if [ -f "$CG_SCRIPT" ] && command -v "$PYTHON" >/dev/null 2>&1 \
 fi
 
 # -----------------------------------------------------------------------
+# Task 1c: Tidier post-commit advisory. The in-DAG tidier is opt-in
+# (SDK_RUN_TIDIER=1); by default style is applied post-commit. When a commit
+# touches cogwheel/**/*.py, record the touched files in
+# .claude/tidy_advisory.json for the session agent / driver to pick up (see
+# .claude/crew/tidy.md "Post-commit advisory mode"). Like the Librarian, the
+# hook NEVER launches a claude process itself (nesting crashes) — it only
+# writes the advisory file. The tidier's own follow-up commit uses a "style:"
+# subject and is skipped here so it does not re-advise in a loop.
+# -----------------------------------------------------------------------
+COMMIT_MSG_SUBJECT=$(git log -1 --format=%s HEAD 2>/dev/null || true)
+case "$COMMIT_MSG_SUBJECT" in
+    style:*) ;;  # tidier's own commit — do not re-advise
+    *)
+        COGWHEEL_PY=$(echo "$LAST_COMMIT_FILES" | grep -E '^cogwheel/.*\.py$' || true)
+        if [ -n "$COGWHEEL_PY" ] && command -v jq >/dev/null 2>&1; then
+            TIDY_ADVISORY="$REPO_ROOT/.claude/tidy_advisory.json"
+            NEW_FILES=$(echo "$COGWHEEL_PY" | grep -v '^$' | jq -R . | jq -s .)
+            ADV_SHA=$(git rev-parse HEAD)
+            ADV_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            if [ -f "$TIDY_ADVISORY" ] && jq -e '.touched_files' "$TIDY_ADVISORY" >/dev/null 2>&1; then
+                # Accumulate across commits so files aren't lost between tidier runs.
+                jq --argjson nf "$NEW_FILES" --arg sha "$ADV_SHA" --arg ts "$ADV_TS" \
+                    '.commit=$sha | .timestamp=$ts | .touched_files=((.touched_files + $nf) | unique)' \
+                    "$TIDY_ADVISORY" > "$TIDY_ADVISORY.tmp" \
+                    && mv "$TIDY_ADVISORY.tmp" "$TIDY_ADVISORY"
+            else
+                jq -n --argjson nf "$NEW_FILES" --arg sha "$ADV_SHA" --arg ts "$ADV_TS" \
+                    '{trigger: "post-commit", commit: $sha, timestamp: $ts, touched_files: $nf}' \
+                    > "$TIDY_ADVISORY"
+            fi
+        fi
+        ;;
+esac
+
+# -----------------------------------------------------------------------
 # Task 2: Librarian auto-sync (async doc maintenance after code commits)
 # -----------------------------------------------------------------------
 

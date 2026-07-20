@@ -128,6 +128,30 @@ SPEC_FILES = [
 ]
 
 
+# Repo-relative file paths under known top-level dirs (with an extension).
+# Used to best-effort parse a WP's free-form `where` list into a file set for
+# the stale-line warning (later coders) and the write-ownership overlap check.
+# Deliberately anchored to known dirs so prose ("the sampler module") is ignored.
+_WHERE_PATH_RE = re.compile(
+    r"(?:cogwheel|scripts|docs|tests|\.claude)/[\w./-]*\.\w+")
+
+
+def _where_files(where) -> set:
+    """Best-effort set of repo-relative file paths named in a WP `where` list.
+
+    ``where`` is a list of free-form strings (e.g. ``"cogwheel/sampling.py::Sampler"``).
+    Returns only paths under known top-level dirs that carry a file extension;
+    symbol suffixes and prose are ignored. Never raises.
+    """
+    files: set = set()
+    try:
+        for entry in where or []:
+            files.update(_WHERE_PATH_RE.findall(str(entry)))
+    except Exception:
+        return set()
+    return files
+
+
 # ── Inter-message timeout ────────────────────────────────────────────────────
 # When a Serena tool call wedges, the SDK's `query()` async generator stops
 # yielding messages but does not raise. This per-message timeout converts
@@ -147,6 +171,29 @@ INTER_MESSAGE_TIMEOUT_SECONDS: Optional[int] = (
 # that phase a generous timeout; the 300s default still applies to every other
 # agent, where a multi-minute message gap really does indicate a wedge.
 PROFESSOR_INTER_MESSAGE_TIMEOUT = 1800
+
+
+# ── Infrastructural agent-death retry ────────────────────────────────────────
+# When an agent dies for an INFRASTRUCTURAL reason (monthly spend cap hit, a
+# rate/usage limit, the underlying CLI exiting non-zero) the immediate
+# built-in-tools retry re-enters the same dead CLI and the DAG dies with it
+# (observed twice). These are transient: one DELAYED retry, spawned fresh after
+# a wait, usually clears them. error_max_turns is EXCLUDED — that is genuine
+# budget exhaustion, not transient infra, and must fail as before.
+_INFRA_DEATH_PATTERNS = ("spend", "limit", "exit code 1", "command failed")
+
+
+def _looks_infrastructural(exc: BaseException) -> bool:
+    """True if an agent-death exception looks like transient infrastructure.
+
+    Matches the module-level pattern list against the exception text, but never
+    for turn-budget exhaustion (``error_max_turns`` / ``max turns``), which is a
+    real budget failure and must not be retried.
+    """
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if "max_turns" in text or "max turns" in text:
+        return False
+    return any(p in text for p in _INFRA_DEATH_PATTERNS)
 
 
 @dataclass
@@ -182,6 +229,9 @@ class BuildOrchestrator:
     _architect_session: Optional[str] = field(default=None, init=False)
     _coder_sessions: dict = field(default_factory=dict, init=False)  # wp_id → session_id
     _triage_result: Optional[str] = field(default=None, init=False)
+    # Files declared in the `where` of WPs that have already run this build —
+    # unioned with the live git diff to warn later coders about stale line refs.
+    _completed_wp_files: set = field(default_factory=set, init=False)
 
     async def _triage(self) -> str:
         """Classify task complexity with a 1-turn Sonnet call.
@@ -577,6 +627,75 @@ class BuildOrchestrator:
             f"{', '.join(matched)}")
         return body
 
+    def _architect_pipeline_summary(self) -> str:
+        """Compact global artifact summary for the Architect's context.
+
+        Runs ``scripts/pipeline_graph.py list`` in a subprocess (the repo
+        python, isolated from the orchestrator env — safer than importing the
+        module here) and wraps its output under a stable heading. Complements
+        the task-scoped ``_pre_read_pipeline_graph`` block with a whole-repo
+        overview. Graceful: any error logs one line and returns ""; empty
+        contracts yield the heading + "(no registered data products)". Capped
+        at ~4 KB so it never re-bloats the plan prompt.
+        """
+        pg_path = Path(self.project_root) / "scripts" / "pipeline_graph.py"
+        if not pg_path.is_file():
+            return ""
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(pg_path), "list"],
+                cwd=self.project_root, capture_output=True, text=True,
+                timeout=30,
+            )
+        except Exception as exc:  # never block a build on graph generation
+            self._log(f"Pipeline-graph summary skipped ({exc})")
+            return ""
+        if proc.returncode != 0:
+            self._log(
+                f"Pipeline-graph summary skipped (list verb exited "
+                f"{proc.returncode})")
+            return ""
+        out = (proc.stdout or "").strip() or "(no registered data products)"
+        _CAP = 4096
+        if len(out) > _CAP:
+            out = (out[:_CAP].rsplit("\n", 1)[0]
+                   + "\n(... pipeline summary truncated at ~4 KB ...)")
+        return "## Pipeline data-product graph (auto-injected)\n\n" + out
+
+    def _check_write_ownership_overlap(self) -> None:
+        """Warn when WPs sharing a file could land in the same parallel batch.
+
+        Parses each WP's `where` into a file set (best-effort; prose ignored)
+        and, for every dependency batch with >1 WP, flags pairwise file
+        overlaps. Coders already run SEQUENTIALLY within a batch, so an overlap
+        is not fatal — the later WP gets the stale-line warning (see
+        _run_coder) — but a prominent warning lets the driver catch an
+        accidental parallel-write plan before execution. Defensive: any parse /
+        graph error logs one line and skips the check (never blocks a build).
+        """
+        if not self.plan or not self.plan.work_packages:
+            return
+        try:
+            batches = build_dependency_graph(self.plan.work_packages)
+        except Exception as exc:
+            self._log(f"Write-ownership overlap check skipped ({exc})")
+            return
+        for i, batch in enumerate(batches):
+            if len(batch) < 2:
+                continue
+            files = {wp.id: _where_files(wp.where) for wp in batch}
+            ids = [wp.id for wp in batch]
+            for a in range(len(ids)):
+                for b in range(a + 1, len(ids)):
+                    shared = files[ids[a]] & files[ids[b]]
+                    if shared:
+                        self._log(
+                            f"  WRITE-OVERLAP WARNING: WPs {ids[a]},{ids[b]} "
+                            f"share files {sorted(shared)} (batch {i + 1}) — "
+                            f"they run sequentially within the batch, so the "
+                            f"later WP gets the stale-line warning; confirm the "
+                            f"shared write is intended")
+
     async def run(self) -> BuildReport:
         """Execute the full build pipeline."""
         # Signal to post-commit hook that an SDK build is active.
@@ -634,6 +753,13 @@ class BuildOrchestrator:
                 graph_text = self._pre_read_pipeline_graph()
                 if graph_text:
                     self._specs_text += "\n\n" + graph_text
+                # Whole-repo artifact overview (name/producer/#consumers/registry
+                # path) via `pipeline_graph.py list` — always injected (even when
+                # nothing matches the task, or contracts are empty) so the
+                # Architect sees the data-product landscape it is planning into.
+                summary_text = self._architect_pipeline_summary()
+                if summary_text:
+                    self._specs_text += "\n\n" + summary_text
                 skip_professor = (self._triage_result == "standard")
                 if skip_professor:
                     self._log("  (standard task — Professor consult skipped)")
@@ -648,6 +774,28 @@ class BuildOrchestrator:
 
                     failures, missing_turns = verify_plan(
                         self.plan, require_professor=not skip_professor)
+                    # First-class Architect escalation: a 0-WP plan whose summary
+                    # opens with 'ESCALATION:' is a deliberate "I cannot honestly
+                    # decompose this" signal, NOT a bare gate failure. Surface the
+                    # WHY to the driver instead of the generic message.
+                    _summary = (self.plan.summary or "").strip()
+                    if (not self.plan.work_packages
+                            and _summary.startswith("ESCALATION:")):
+                        if self.approval_dir:
+                            esc_path = Path(self.approval_dir) / "escalation.txt"
+                            try:
+                                esc_path.parent.mkdir(parents=True, exist_ok=True)
+                                esc_path.write_text(_summary, encoding="utf-8")
+                                self._log(
+                                    f"Architect escalation written to {esc_path}")
+                            except OSError as _e:
+                                self._log(f"Could not write escalation.txt ({_e})")
+                        self._log(
+                            "ARCHITECT ESCALATION — driver action required: "
+                            f"{_summary[:200]}")
+                        raise GateFailure(
+                            "Architect escalation (0 work packages) — driver "
+                            "action required:\n" + _summary)
                     if failures:
                         self._log("Plan verification failed:")
                         for f in failures:
@@ -685,6 +833,10 @@ class BuildOrchestrator:
                 if self.dry_run:
                     self._log("Dry run — stopping after plan approval.")
                     return self._empty_report()
+
+                # Plan accepted: flag any intra-batch file-write overlaps before
+                # execution (write-ownership invariant for parallel shards).
+                self._check_write_ownership_overlap()
             else:
                 self._log("Fast-path mode — skipping Phase 1.")
 
@@ -1336,16 +1488,24 @@ class BuildOrchestrator:
 
     async def _run_tidier_skill(self) -> str:
         """Run Tidier skill on changed Python files."""
-        if os.environ.get("SDK_SKIP_TIDIER"):
-            # The graceful-degradation except below cannot contain an
-            # error_max_turns tidier: its async-generator finalization
-            # raises the anyio cancel-scope RuntimeError in a DIFFERENT
-            # task and kills the whole DAG group after the catch
-            # (observed twice, 2026-07-18, Build 6 attempts 5-6). Until
-            # the SDK 0.2.x migration removes the cancel-scope hazard,
-            # this env knob skips the cosmetic step entirely.
-            self._log("Step 2: Tidier SKIPPED (SDK_SKIP_TIDIER set)")
-            return "Tidier skipped by driver configuration."
+        # Tidier is a POST-COMMIT ADVISORY role by default (see
+        # .claude/crew/tidy.md + the post-commit hook's tidy_advisory entry).
+        # Its in-DAG run is now OPT-IN via SDK_RUN_TIDIER=1, inverting the old
+        # default: the tidier ran last over the WHOLE build diff (widest scope
+        # at the deepest transcript) and its error_max_turns finalization
+        # raised the anyio cancel-scope RuntimeError in a DIFFERENT task,
+        # killing the whole DAG group after the graceful catch (observed twice,
+        # 2026-07-18, Build 6 attempts 5-6). SDK_SKIP_TIDIER=1 remains honored
+        # as a hard override for backward compatibility.
+        skip_override = os.environ.get("SDK_SKIP_TIDIER")
+        run_in_dag = os.environ.get("SDK_RUN_TIDIER") == "1"
+        if skip_override or not run_in_dag:
+            reason = ("SDK_SKIP_TIDIER set" if skip_override
+                      else "in-DAG run is opt-in (set SDK_RUN_TIDIER=1); "
+                           "style handled by post-commit advisory mode")
+            self._log(f"Step 2: Tidier SKIPPED — {reason}")
+            return "Tidier skipped (post-commit advisory role by default)."
+        self._log("Step 2: Tidier running in-DAG (SDK_RUN_TIDIER=1 set)")
         all_files_changed = self._git_changed_files()
         py_files = [f for f in all_files_changed if f.endswith(".py")]
         self._log("Step 2: Tidier cleanup")
@@ -1701,10 +1861,38 @@ class BuildOrchestrator:
         report.revision_loops = revision_loops
         self._inspector_result = inspector_result
 
+    def _stale_where_files(self, wp: WorkPackage) -> set:
+        """Files in this WP's `where` that EARLIER WPs already touched.
+
+        Union of (a) files declared in already-run WPs' `where` and (b) files
+        actually modified so far this build (the live ``git diff`` against the
+        build's starting commit — the SDK makes no intermediate commits, so HEAD
+        is that commit throughout Phase 2). Their plan line numbers are stale.
+        """
+        wp_files = _where_files(wp.where)
+        if not wp_files:
+            return set()
+        touched = set(self._completed_wp_files)
+        touched.update(self._git_changed_files())
+        return wp_files & touched
+
     async def _run_coder(self, wp: WorkPackage) -> tuple[str, Optional[str]]:
         """Run a Coder agent for a single work package."""
+        stale = self._stale_where_files(wp)
+        stale_note = ""
+        if stale:
+            self._log(
+                f"  {wp.id}: stale-line warning for {sorted(stale)} "
+                f"(modified by earlier WPs)")
+            stale_note = (
+                "NOTE: the following files were modified by earlier work "
+                "packages AFTER the plan was written: "
+                f"{', '.join(sorted(stale))}. Plan line numbers for them are "
+                "stale — re-read current file state before editing.\n\n"
+            )
         task = (
-            f"## Work Package {wp.id}: {wp.title}\n\n"
+            stale_note
+            + f"## Work Package {wp.id}: {wp.title}\n\n"
             f"**What**: {wp.what}\n"
             f"**Where**: {', '.join(wp.where)}\n"
             f"**How**: {wp.how}\n"
@@ -1715,6 +1903,9 @@ class BuildOrchestrator:
             "coder", task,
             max_turns_override=wp.max_turns,
         )
+        # Record this WP's declared files so later coders in the build see them
+        # as potentially-stale even if the edit landed on an untracked file.
+        self._completed_wp_files.update(_where_files(wp.where))
         self._collect_change_report(result_text)
         write_state(self.project_root, "coder", status=f"completed_{wp.id}")
         if session_id:
@@ -2380,6 +2571,59 @@ class BuildOrchestrator:
         return False
 
     async def _run_agent(
+        self,
+        agent_name: str,
+        task_context: str,
+        model_override: Optional[str] = None,
+        resume_session: Optional[str] = None,
+        permission_override: Optional[PermissionMode] = None,
+        max_turns_override: Optional[int] = None,
+        inter_message_timeout_override: Optional[int] = None,
+        _denial_retry: bool = True,
+        _infra_retry: bool = True,
+    ) -> tuple[str, Optional[str]]:
+        """Run an agent, with ONE delayed retry on infrastructural death.
+
+        Thin wrapper over ``_run_agent_attempt``. If the attempt raises an
+        exception that ``_looks_infrastructural`` (spend cap / usage limit /
+        CLI exit — but NOT error_max_turns), wait
+        ``SDK_AGENT_RETRY_WAIT_SECONDS`` (default 300; 0 disables the delay)
+        and retry ONCE, spawned fresh (no session resume — the old CLI is
+        dead). If the retry also dies, the exception propagates as before.
+        """
+        try:
+            return await self._run_agent_attempt(
+                agent_name, task_context,
+                model_override=model_override,
+                resume_session=resume_session,
+                permission_override=permission_override,
+                max_turns_override=max_turns_override,
+                inter_message_timeout_override=inter_message_timeout_override,
+                _denial_retry=_denial_retry,
+            )
+        except Exception as exc:
+            if not (_infra_retry and _looks_infrastructural(exc)):
+                raise
+            wait = int(os.environ.get("SDK_AGENT_RETRY_WAIT_SECONDS", "300"))
+            self._log(
+                f"[{agent_name}] agent died ({type(exc).__name__}: "
+                f"{str(exc)[:120]}); waiting SDK_AGENT_RETRY_WAIT_SECONDS "
+                f"({wait}s) then retrying once")
+            if wait > 0:
+                await asyncio.sleep(wait)
+            # Fresh spawn (no resume): the previous CLI/session is dead. Disarm
+            # the infra retry so a second death raises instead of looping.
+            return await self._run_agent_attempt(
+                agent_name, task_context,
+                model_override=model_override,
+                resume_session=None,
+                permission_override=permission_override,
+                max_turns_override=max_turns_override,
+                inter_message_timeout_override=inter_message_timeout_override,
+                _denial_retry=_denial_retry,
+            )
+
+    async def _run_agent_attempt(
         self,
         agent_name: str,
         task_context: str,
