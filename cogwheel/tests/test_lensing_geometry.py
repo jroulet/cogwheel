@@ -561,6 +561,44 @@ class DomainGuardsTestCase(GeometryTestCase):
         self.n_checks += 1
 
 
+class FoldDegenerateKernelRefusalTestCase(GeometryTestCase):
+    """The saddle-metric fold guard refuses by name, never crashes.
+
+    Surfaced in production (2026-07-19): a nautilus proposal placed an
+    image on a fold, ``_saddle_metric``'s raw ``np.linalg.inv`` raised
+    a bare ``numpy.linalg.LinAlgError`` that escaped the posterior's
+    named-refusal net and killed the sampling run — a certify-or-refuse
+    violation (crash instead of a named refusal).
+    """
+
+    def test_critical_curve_image_refused_by_name(self):
+        """A point-lens image on the critical curve (``|x| = 1`` at
+        ``gamma = kappa = 0``) has an exactly singular projected Fermat
+        Hessian: the guard must raise `LensDomainError` naming the fold
+        degeneracy — not a raw ``LinAlgError``, and never a divergent
+        finite kernel."""
+        matrix = geometry.macro_matrix(0.0, 0.0, 0.0)
+        image = np.array([1.0, 0.0])
+        self.n_checks += 1
+        with self.assertRaises(geometry.LensDomainError) as ctx:
+            geometry.saddle_coefficients(image, matrix)
+        self.n_checks += 1
+        self.assertIn('Fold-degenerate', str(ctx.exception))
+
+    def test_regular_images_keep_finite_coefficients(self):
+        """Healthy off-critical images still yield finite ``C1, C2``
+        (the guard does not fire on regular geometry)."""
+        matrix = geometry.macro_matrix(0.2, 0.0, 0.0)
+        images = geometry.find_images(np.array([0.3, 0.11]), matrix)
+        self.assertTrue(images)
+        for image in images:
+            c1_coefficient, c2_coefficient = geometry.saddle_coefficients(
+                image, matrix)
+            self.n_checks += 1
+            self.assertTrue(np.isfinite(c1_coefficient)
+                            and np.isfinite(c2_coefficient))
+
+
 class SelfFalsificationTestCase(GeometryTestCase):
     """
     Prove the geometry gates can actually fail.

@@ -698,12 +698,15 @@ def _validate_inputs(w: float, y_eig: np.ndarray,
         raise ValueError(
             f'The dimensionless frequency must be strictly positive; '
             f'got w = {w}.')
-    if not gamma_prime > 1.0:
+    if not gamma_prime > 0.0:
         raise ValueError(
-            f'The Schwinger saddle branch requires reduced shear '
-            f'gamma_prime > 1 (macro saddle, negative parity); got '
-            f'gamma_prime = {gamma_prime}. Positive-parity hosts are '
-            f'handled by the operator branch.')
+            f'The Schwinger branch requires reduced shear '
+            f'gamma_prime > 0 (det A != 0); got gamma_prime = '
+            f'{gamma_prime}. Positive parity (gamma_prime < 1) and the '
+            f'macro saddle (gamma_prime > 1) are both valid; '
+            f'gamma_prime == 1 is the degenerate parity boundary '
+            f'(det A = 0), caught by the paired-rule certification '
+            f'pinch rather than here.')
     if y_eig.shape != (2,):
         raise ValueError(
             f'y_eig must be an eigenframe position of shape (2,); got '
@@ -757,7 +760,8 @@ def f_schwinger(w: float, y_eig, gamma_prime: float) -> complex:
         Source position in the SHEAR EIGENFRAME (``e1`` = soft axis,
         ``e2`` = hard axis), dimensionless.
     gamma_prime : float
-        Reduced external shear ``gamma' > 1`` (macro saddle).
+        Reduced external shear ``gamma' > 0`` (positive parity or macro
+        saddle).
 
     Returns
     -------
@@ -767,7 +771,7 @@ def f_schwinger(w: float, y_eig, gamma_prime: float) -> complex:
     Raises
     ------
     ValueError
-        If ``w <= 0``, ``gamma_prime <= 1``, or ``y_eig`` is not a finite
+        If ``w <= 0``, ``gamma_prime <= 0``, or ``y_eig`` is not a finite
         shape-``(2,)`` position.
     SchwingerCertificationError
         If ``w > W_CEILING_SCHWINGER``, or the paired ``N``/``2N``

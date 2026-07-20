@@ -1191,7 +1191,13 @@ OWNER RULE (2026-07-19): Fable-tier subagents are for DEEP RESEARCH
 commissions only (unsolved derivations — SACR-C, negative parity);
 routine build reviews/consults run on the standard (Opus) tier like
 the pipeline's own agents. The driver over-spent by running the Build 6
-physics review on Fable. SEQUENCE: Build 6 lands -> Build 7 =
+physics review on Fable.
+OWNER RULE STRENGTHENED (2026-07-19, verbatim intent): "you don't have
+authority to request Fable Tier professors or Fable Tier anything,
+only I do." The driver NEVER commissions Fable-tier agents on its own
+judgment — not even for deep research. If work looks like it needs a
+Fable-tier commission, the driver writes the case in the journal and
+ASKS THE OWNER; the default is standard tier for everything. SEQUENCE: Build 6 lands -> Build 7 =
 saddle channels/likelihood/prior + CROSS-PARITY Schwinger dispatch for
 strong shear (immediate gamma-range win) -> Build 8 = homogenization +
 surrogate + v-plane w-lift, gated by byte-level regression against the
@@ -1208,3 +1214,307 @@ unaffected. Also: oracle v1's blind-prior importance sampling gave
 n_eff=1/20000 (useless, ~78 nats low) — Spec 3's truth-centered
 proposal requirement is load-bearing; v2 uses prior-form-on-subranges
 so weights = lnlike + exact volume-ratio constants.
+
+## BUILD 6 CLOSED — COMMITTED 88e5386 (2026-07-19)
+
+Hand-orchestrated finish (pipeline attempt 8 was structurally
+inexpressible: 0-WP tests-only plan; Build 1b precedent applied).
+Delivered and committed in 88e5386 (21 files, +3522/-145):
+- geometry.py parity-aware saddle extension (two deltoid lobes,
+  branch-parameter critical utilities, centered-source saddle case).
+- _schwinger.py NEW: exact 1D Schwinger dd quadrature, both-parity
+  representation, paired N-vs-2N certification,
+  SchwingerCertificationError, ceiling w<=60. TWO certification-blind
+  eps64 defects found by Test Dev B (obs/pred 1.000±0.004 vs the
+  fabrication model) and fixed by a commissioned coder: IBP endpoint
+  vs split-point inconsistency + float64 1/s reciprocal. Post-fix
+  oracle error 6.6e-15 (w=30) .. 1.6e-11 (w=59.9). FINDINGS F011.
+- operator.py parity dispatch (positive arm bit-frozen); interim named
+  saddle refusals in channels.evaluate + LensedWaveformGenerator
+  constructor (Build 7 lifts them).
+- Suites: test_lensing_saddle_geometry 19+1xf (xfail = pre-existing
+  near-axial quartic dead zone, F012 — Build-7 index-theorem guard is
+  a REQUIRED precondition), test_lensing_schwinger 17 (AST-guarded
+  independent mpmath oracle; F010 falsifications; warm cost
+  30-125 ms/point measured -> surrogate is load-bearing, F013).
+- FULL SUITE final: 338 passed + 3 xfailed (214 s). An earlier log
+  (208 s, 1 failed) predates the constructor guard — the waveform
+  module was re-verified green on the committed tree post-commit.
+- Professor review PASS (standard tier, per owner rule). Inspector
+  died on the monthly spend cap mid-review (owner raised the cap);
+  closed on its substantively-complete partial + Professor + suite.
+- SPEC 0.9.0 (saddle-branch row), FINDINGS F011/F012/F013, changelog +
+  spec_changelog fragments rendered.
+
+## BUILD 7a LAUNCHED + PLAN APPROVED (2026-07-19 ~01:05)
+
+Split the recorded Build-7 scope: 7a = index-theorem guard +
+cross-parity strong-shear Schwinger dispatch (this build); 7b = saddle
+channels/likelihood/prior. Brief build7a_brief.md; log
+/tmp/build7a_20260719_004511.log. Launch knobs made durable:
+SDK_INTER_MESSAGE_TIMEOUT_SECONDS=1200 + SDK_SKIP_TIDIER=1 now in .env
+and pass-through added to launch_build.sh.
+
+Plan (2 WPs, approved at the file gate after pin verification):
+- WP1 guard: `_check_image_census` helper + call at END of
+  find_images_quartic (verified: find_images is a pure alias;
+  _centered_source_images only called inside quartic at line 627 —
+  single choke point covers all consumers). Invariant (Professor):
+  sum (-1)^{n_a} == sign(det A) - 1 (pos -> 0, saddle -> -2); no
+  tolerance band; a dropped mirror pair always shifts by even ±2.
+- WP2 dispatch: catch-CancellationError-only fallback helper in
+  operator.py; per-node retry -> Schwinger reconstruct with the
+  positive-parity lam=1-kappa map; w>60 re-raises. APPROVED DEVIATION
+  from the brief fence: one-line relax of _schwinger._validate_inputs
+  gamma'>1.0 -> gamma'>0.0 (verified pin at _schwinger.py:700).
+  Professor staked: no gamma'<1 <-> gamma''>1 duality exists, so the
+  guard relax is the minimal enabler; certified quadrature core
+  byte-identical, saddle bit-freeze pinned by literals in tests.
+- Tests include: doctored-pair guard falsification (F010 idiom), F012
+  reproducers flipped from xfail to assertRaises, strong-shear oracle
+  at uniform 1e-10 (test verifies legacy refusal first), ceiling
+  refusal at w>60, positive-parity + saddle bit-freeze literals.
+
+ORACLE PROBE LEDGER UPDATE: v4 (6-D KDE) returned n_eff=1, gap 3.634
+nats — POST-MORTEM: v4 bug, KDE density fit on the 27x circularly
+replicated cloud (uniform -ln 27 = 3.296 deflation) while samples came
+from the unreplicated base mixture -> oracle inflated by ln 27.
+Corrected residual 0.338 nats at n_eff=1 (suggestive, underpowered).
+v5 launched (bek169x5x): exactly-normalized moment-matched
+multivariate Student-t (nu=4, 1.3x scale), circular dims unwrapped
+about circular means and WINDOWED to one period around mu (tiles the
+circle once — no periodic-image double counting through t tails),
+n=40000. Marg sampling run resumed from its nautilus checkpoint at
+Bound 13 (safe: positive-parity path bit-frozen across 5/6).
+
+DREAMER CLOSE (5/6 cycle) DONE post-serena-reconnect (standard tier,
+model pinned to opus since the session model is Fable and subagents
+would inherit it — owner rule). Highlights: Professor short-term
+already carried a Build-7a consult (unified invariant, cross-parity
+signature-agnosticism); Librarian gap flagged — INS-5-DOC-1/
+INS-4-DOC-1/INS-1-001 SPEC/doc items for the marginalized lensed
+likelihood remain unconsumed; run the Librarian at the Build 7a
+commit. Test-dev long-term memory >40 lines — prune at next Dreamer.
+
+## ORACLE v5 RESULT — REAL 2.13-NAT SYSTEMATIC, UNDER INVESTIGATION (2026-07-19 ~01:30)
+
+v5 (Student-t proposal) landed decisively: n_eff=21497/40000,
+precision ~0.002 nats. oracle 241.1415 vs marginalized median-of-20
+239.0087 -> GAP 2.13 nats, marg LOW. ORACLE GATE: FAIL. This is the
+first statistically solid verdict (v3 n_eff=6 gap 1.11 and v4
+corrected 0.34 at n_eff=1 were noise-dominated).
+
+Eliminated so far:
+- NOT proposal/probe collapse (n_eff 21k, three proposal families
+  converge on the same construction).
+- NOT normalization constants: probe vs coherent-score conventions
+  match (d: (10,15000) vs lut d_max=15000 uniform-in-volume; t: both
+  ~0.14 s windows [marg_like._times spans (-0.070, +0.0696), 287
+  samples]; sky cos(dec)/4pi; phi 1/2pi; psi 1/pi). No ln-constant
+  (ln2, ln4, ln2pi, lnpi) matches 2.1328.
+- NOT QMC under-coverage: forcing min_n_effective 50 -> 5000 (with
+  max_log2n_qmc raised to 18) leaves marg pinned: means 239.054 /
+  239.064 / 239.046, std down to 0.044. Systematic, not MC bias.
+
+DISCRIMINATOR IN FLIGHT (b9sxfw759): v5u = identical oracle vs the
+STOCK unlensed MarginalizedExtrinsicLikelihood (h.unlensed_marg,
+shared coherent score) at the unlensed-limit point (m_lens=1e-6,
+F=1+O(1e-7)); exact side = lensed plain engine at the tiny-mass
+point. Gap ~2.1 there -> upstream coherent-score/probe-measure issue
+(not Build 5); gap ~0 -> the Build-5 lens fold owns it (candidate
+mechanism: per-image time-shift defect at strong lensing that the
+F->1 spec-1 identity tests are structurally blind to — one image, no
+shift). NOTE: injection-recovery/PP ship gate MUST NOT run until this
+is resolved.
+
+NEXT (recorded sequence): (a) Build 7 brief — saddle-domain
+channels/likelihood/prior (research §11 Build S2 gates), CROSS-PARITY
+strong-shear Schwinger dispatch (lifts the gamma∈[0,0.45] sampling
+bound), runtime index-theorem guard in every image-consuming path
+(F012 precondition), band-limit/refuse w>60 in PE. (b) Relaunch
+deferred detached runs from a fresh committed-ref worktree at 88e5386:
+marg_sampling_run1.py (headline wall-clock) + oracle v4
+(marg_oracle_probe4.py, 6-D KDE, n_eff>=500 target). (c) Dreamer/
+Librarian close for the 5/6 cycle after Build 7 launches.
+
+## ORACLE MYSTERY RESOLVED — CONVENTION, NOT DEFECT (2026-07-19 ~02:10)
+
+Chain of discriminators, each decisive:
+1. v5u (unlensed control, same shared coherent score): gap 2.0795 vs
+   lensed 2.1328 -> the systematic is UPSTREAM of the Build-5 fold.
+2. Distance lookup table vs direct quadrature (amplitude-variable,
+   peak-located): EXACT (0.0000 over 4 regimes; first attempt missed
+   the narrow d* peak — quad needs the substitution + peak hint).
+3. Code read: `sky_prior = (dOmega/4pi)*(1/f_sampling)` carries UNITS
+   OF SECONDS; no 1/T anywhere in the numerator; skydict internally
+   RESAMPLES the dh timeseries to f_sampling=8192 (Tukey-smoothed
+   edges), so there is no delay-reachability gap. Hypothesis: the t
+   prior is IMPROPER, density 1 per second.
+4. T-scaling test (pad 0.07 -> 0.28, T x3.906): oracle moved by
+   1.3611 vs predicted ln 3.906 = 1.3626 (1.5 mnat agreement); marg
+   unmoved. CONFIRMED. (The uncorrected gap's ln-8 match to 1e-4 was
+   PURE COINCIDENCE — recorded in F014 as a numerology warning.)
+
+Accounting after correction: residual = gap + ln(T_probe) =
++0.1451/+0.1466 (unlensed, two windows) and +0.193 (lensed). Both
+PASS the 0.3-nat oracle gate. Lensed-unlensed difference 0.05+-0.04:
+no evidence of a lens-fold defect. The ~0.15 upstream residual
+(candidate: sky-delay discretization) is documented in FINDINGS F014;
+pin it before using marginalized values as ABSOLUTE evidences; it is
+intrinsic-independent at our precision, so posterior sampling and PP
+validation are unaffected. The injection-recovery ship gate is
+UNBLOCKED. QMC insensitivity note: forcing min_n_effective 50->5000
+(max_log2n_qmc 18) left marg pinned (239.054/239.064/239.046, std
+down to 0.044) — the QMC is converged at default settings.
+
+OWNER CONTEXT (2026-07-19): the unit-density t prior is a DELIBERATE
+choice by Javier — it makes evidences comparable regardless of the
+analyzed window length (silent extra data contributes
+e^{-<h|h>/2} ~ 0, so integral(L dt) is window-invariant, which a
+proper 1/T prior would break). F014 updated to record the design
+intent; the practical rule (validation oracles add ln T_oracle) is
+unchanged.
+
+## BUILD 7a: INSPECTOR DIED ON SPEND CAP AGAIN — HAND-FINISH (2026-07-19 ~02:30)
+
+Pipeline ran clean through coding + tests: WP1 3 min ($4.13), WP2
+6 min ($7.15), checkpoint 8e1f59b banked, SDK_SKIP_TIDIER worked
+(tidier skipped, no cancel-scope kill), test_dev-4/-5 delivered both
+suites ($13.6 + $24.6, ran them green in-build). Then inspector-6
+died 32 s in ($1.35) with the opaque CLI "Command failed with exit
+code 1" — same signature as the Build 6 spend-cap death; the
+orchestrator's MCP-failure fallback ("retrying with built-in tools")
+died the same way and the DAG raised. Owner said "raised" (cap lifted
+again). SDK LEDGER: the inspector retry path re-enters the same dead
+CLI — a cap-outage needs a pause-and-resume, not an immediate retry;
+also phase-3 skip preserved the failure signal correctly.
+RECOVERY (Build 1b/6 precedent): tree holds the full build (footprint
+matches plan exactly: geometry +47, operator +134, _schwinger +18,
+suites +953/-24 net); driver reruns the four engine suites + full
+suite; commissioned ONE standard-tier (opus) Inspector-replacement
+review over the diff (conformance + F011-class + exception paths +
+census false-positives + diagnostics shapes + test tautologies);
+then hand-finish (FINDINGS F012 GUARDED addendum, fragments, commit).
+
+## BUILD 7a CLOSE-OUT LOG (2026-07-19 ~03:20)
+
+1. Four-suite verification found TWO STALE TESTS in
+   test_lensing_batched_operator.py — semantically expected casualties
+   of the dispatch (the in-build "full suite green" claim had not
+   covered this suite; driver re-verification catches it, again):
+   - XOR-band test: its refusing nodes (L in [24,48], w = L/0.9 <= 60)
+     are now all rescued -> no refusal observed. Reconciled with a new
+     XOR_BAND_LS = linspace(24, 59.4, 22): straddles the w=60 ceiling
+     (L=54) where the fallback re-raises, and stays BELOW the kernel's
+     own L<=60 dd product ceiling — first fix attempt used L_max=66 and
+     found the THIRD refusal tier the hard way
+     (HypergeometricDomainError from _validate_domain, uncaught by
+     _solo). Three refusal tiers now documented in the test.
+   - Series-tolerance falsification: perturbation-induced legacy
+     refusals were rescued by the fallback with CORRECT values (the
+     fallback does not consume the perturbed series) -> falsification
+     vacuous. Reconciled by targeting operator._grid_certified
+     directly (docstring explains why). Suite 15/15 green.
+2. Inspector-replacement (opus) died on the spend cap mid-review with
+   its prefactor-consistency check complete; owner refreshed limits
+   ("the limits were refreshed"); RESUMED via SendMessage (agent
+   transcript persistence — no re-spend on redone work). VERDICT:
+   all three WPs CONFORM (incl. byte-identical kappa prefactor across
+   certified/fallback nodes, sound AST guard, hard bit-freeze
+   literals); ONE MINOR finding: _reconstructed_dispatch_oracle not in
+   _ORACLE_PATH (mechanical independence guard didn't cover it;
+   independent by inspection). FIXED (one line). It also endorsed both
+   driver test reconciliations.
+3. PRODUCTION BUG surfaced mid-close by the relaunched headline
+   sampling run (died at bound 17+): fold-degenerate image ->
+   _saddle_metric raw np.linalg.inv -> bare LinAlgError past the
+   posterior refusal net -> sampler killed. FIXED in-build: det guard
+   (|det| > 1e-13*||P||_F^2) raising named LensDomainError; repo grep
+   confirmed the only other raw solve (_newton_polish) already has an
+   lstsq fallback. FINDINGS F015 (incl. the near-singular
+   silent-divergence note -> Airy program owns the principled bound).
+   New FoldDegenerateKernelRefusalTestCase (2 tests) in
+   test_lensing_geometry.py; geometry+schwinger 45/45 green.
+4. FINDINGS F012 GUARDED addendum + F015; SPEC 0.10.0 (engine
+   hardening sentence); spec_changelog + changelog fragments rendered.
+   Full suite running; commit on green, then relaunch the sampling run
+   from the NEW commit (the fix is required for it to survive) and run
+   the Librarian (doc-sync) for the stale INS-* doc items.
+
+## BUILD 7a FULL-SUITE RECONCILIATION CASCADE (2026-07-19 03:30-05:00)
+
+The first full-suite gate: 13 failed + 12 errors. Triage found FOUR
+distinct classes; every one individually adjudicated (no bulk flips):
+
+A. ENVIRONMENT (3 module collect-errors): the untracked machine-local
+   IMRPhenomXODE symlink was missing from this worktree
+   (test_gw_prior/test_posterior/test_waveform import xode). Restored
+   (os.symlink; gitignored). How earlier full-suite runs passed without
+   it is unresolved — likely they ran with the main-repo import path.
+
+B. REAL BUGS INTRODUCED BY 7a (all found by wider sweeps, all fixed):
+   1. Fallback gamma'=0 crash: a POINT-LENS (gamma=0) legacy tail
+      refusal was routed to f_schwinger -> raw ValueError replaced the
+      named CancellationError (killed the prior-box smoke fixture +
+      channel sweeps). Fix: re-raise the original refusal when the
+      mass-sheet-reduced gamma' <= 0 (no Schwinger arm exists there).
+   2. Census guard false positives — BOTH Professor-staked
+      no-false-positive claims fell to production configs:
+      (i) fold-merged pair (3 images, ODD discrepancy) at near-fold
+      sources dedup-merged by duplicate_tolerance -> rule refined to
+      refuse only EVEN nonzero discrepancies; (ii) on-CUSP triple
+      merge ((min,saddle,min) -> one near-critical survivor: count 2,
+      EVEN +2 discrepancy — same integer signature as F012!) in the
+      channel axis-cusp sweep -> resolved by the Morse-theory-correct
+      degeneracy exemption: even discrepancy passes IFF a returned
+      image is near-critical (|det H| <= 1e-6*||H||_F^2 witness; F012
+      dead-zone returns only regular images, so the defect class still
+      refuses). Both F012 reproducers still refuse (suite-verified).
+   3. Fold guard over-reach, TWO wrong thresholds: 1e-13*||P||^2
+      amputated det~40eps near-fold channel configs; even 4eps broke
+      the on-cusp rows (det ~ 2eps) — the SACR-C/F008 switch design
+      DELIBERATELY consumes huge near-singular metrics and multiplies
+      the divergent SPA target away. Final form: try/except around
+      np.linalg.inv re-raising LinAlgError as the named LensDomainError
+      — a crash-class guard scoped to the crash condition itself (F015
+      updated with the lesson).
+   4. Posterior refusal net: added SchwingerCertificationError +
+      LensedBinningError (both newly reachable from in-support
+      proposals via the fallback's widened evaluable set). The prior
+      suite's F010 mutation test then caught MY refactor hoisting the
+      except tuple to an import-time constant (unfalsifiable by
+      module-global patching) — reverted to a call-time inline tuple
+      with a comment forbidding the hoist.
+
+C. STALE OLD-CONTRACT PINS (reconciled, intent preserved):
+   batched_operator XOR band + series falsification (earlier); operator
+   suite band sweep -> L in [24,59.4], silent-nan probe -> L=59
+   (w=65.6), patched-threshold falsification -> targets _grid_certified
+   directly; fast_path FOP_REFUSALS -> two-outcome contract (rescued
+   nodes must carry order_used==0, i.e. the uncertifiable series was
+   never believed; +w=63 refusal arm); waveform BAND_EDGE probes ->
+   (30, 40, 60.5) with 60.5 just above the ceiling AND L=47.8<48
+   (wave-branch-owned, kernel-legal — three ceilings juggled).
+   test_on_caustic saddle rows -> 3-image pass-through with odd
+   discrepancy in {-1,-3} (merged root's Morse index is sign noise).
+
+D. RESOLVED: CANCELLATION_CONFIG / CANCELLATION_LENS (shared
+   gamma=0.405 kappa=0.57 fixture, ratio + marginalized suites)
+   reconciled by scaling m_lens x4 (probe: x2 certifies on all three
+   paths, x4/x8 refuse symmetrically with CancellationError on all
+   three — nodes above the w=60 ceiling).
+   TWO NOTES FOR BUILD 7b FROM THE PROBE:
+   1. Rescued strong-shear evals are SLOW (bruteforce grid x 30-125 ms
+      Schwinger nodes; the x1 all-paths row ran >20 min before being
+      killed) — the surrogate program's case grows again.
+   2. ACCURACY FLAG: at m_lens x2 (rescued, certifying) ratio/direct
+      agree (-12351.363 both) but BRUTEFORCE differs by 0.94 nats
+      (-12352.301) — the SACR-C envelope interpolation may
+      under-resolve rescued strong-shear nodes (gamma'~0.94). A
+      rescued-node envelope accuracy gate is REQUIRED before the
+      sampler explores the widened shear range (Build 7b precondition,
+      alongside the research S2 gates).
+
+Suites green after B+C: geometry, saddle_geometry, channels, prior,
+operator, fast_path, waveform, batched_operator, schwinger,
+ratio_layer/marginalized except the two D fixtures.

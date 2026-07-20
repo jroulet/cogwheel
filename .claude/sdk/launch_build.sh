@@ -61,6 +61,19 @@ if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${SDK_SERENA_PORT:-}" ]]; then
 fi
 export SDK_SERENA_PORT="${SDK_SERENA_PORT:-8322}"
 
+# Orchestrator reliability knobs, same .env precedence (shell > .env >
+# orchestrator default). INTER_MESSAGE_TIMEOUT: the 300s default
+# misclassifies long single-turn deliberation as a stall and killed
+# Build 6 coders twice (2026-07-18). SKIP_TIDIER: a tidier error_max_turns
+# escapes the graceful catch via the anyio cancel-scope bug and kills the
+# whole DAG (2/2 reproduced, Build 6 attempts 5-6).
+for KNOB in SDK_INTER_MESSAGE_TIMEOUT_SECONDS SDK_SKIP_TIDIER; do
+  if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "$(eval echo "\${$KNOB:-}")" ]]; then
+    VAL="$(grep -E "^$KNOB=" "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+    [[ -n "$VAL" ]] && export "$KNOB=$VAL"
+  fi
+done
+
 LOG="/tmp/${SLUG}_$(date +%Y%m%d_%H%M%S).log"
 
 # Detached build + detached watchdog + Monitor on the log, with PLAN

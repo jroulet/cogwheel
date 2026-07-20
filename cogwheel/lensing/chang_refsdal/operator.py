@@ -998,6 +998,115 @@ def _grid_certified(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
             cancellation_ratios)
 
 
+def _positive_parity_grid_with_fallback(
+        w_array: np.ndarray, y: np.ndarray, gamma: float, *,
+        beta: float = 0.0, kappa: float = 0.0,
+        max_order: int = MAX_ORDER
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+                   np.ndarray]:
+    """Positive-parity grid with a strong-shear Schwinger fallback.
+
+    The single positive-parity wave-branch entry point shared by
+    `F_op_grid` and `F_op`.  It FIRST evaluates the whole grid through
+    the byte-frozen operator contraction `_grid_certified`; if that
+    returns, its full five-tuple is handed back UNCHANGED, so the common
+    all-certified case incurs no per-node loop and stays bit-for-bit
+    identical to the legacy path.
+
+    ONLY when `_grid_certified` raises `CancellationError` (strong shear,
+    near the operator's cancellation band) does it fall to a per-node
+    loop.  Each node is retried on its own single-element grid; a node
+    that still refuses is routed, if ``w <= W_CEILING_SCHWINGER``, through
+    the exact 1D Schwinger evaluator in the positive-parity mass-sheet-
+    reduced eigenframe and reconstructed with the SAME mass-sheet
+    identity the operator path uses -- converting an uncertifiable
+    operator-series refusal into a certified answer without touching any
+    threshold.  A refusing node with ``w > W_CEILING_SCHWINGER`` re-raises
+    the original `CancellationError` (the named refusal stands), and a
+    `_schwinger.SchwingerCertificationError` from the fallback propagates.
+
+    The fallback nodes carry no operator-series diagnostics, so their
+    ``orders``/``estimated_tails``/``cancellation_ratios`` are reported as
+    zero and ``converged`` as ``True`` (mirroring the saddle-arm
+    convention); certified nodes keep their measured diagnostics.
+
+    Parameters and returns match `_grid_certified`.  The caller
+    guarantees positive parity (``1 - kappa > |gamma|``), so the
+    mass-sheet map never refuses here.
+
+    Raises
+    ------
+    CancellationError
+        For a refusing node with ``w > W_CEILING_SCHWINGER`` (the named
+        refusal above the Schwinger ceiling stands).
+    _schwinger.SchwingerCertificationError
+        If the Schwinger fallback cannot certify a sub-ceiling node.
+    geometry.LensDomainError, _hyp1f1.HypergeometricDomainError
+        Propagated from `_grid_certified` as before.
+    """
+    w_array = np.asarray(w_array, dtype=float)
+    try:
+        return _grid_certified(
+            w_array, y, gamma, beta=beta, kappa=kappa, max_order=max_order)
+    except CancellationError as exc:
+        original_refusal = exc
+
+    # At least one node's operator contraction refused.  Reduce ONCE
+    # (w-independent) to the positive-parity pure-shear eigenframe, then
+    # re-evaluate node by node, substituting the Schwinger value wherever
+    # the operator path still refuses below the ceiling.
+    lam, y_scaled, gamma_prime = _mass_sheet_map(y, gamma, kappa)
+    if not gamma_prime > 0.0:
+        # A shear-free (gamma' = 0, pure point-lens) refusal has no
+        # Schwinger arm: the 1D representation requires gamma' > 0, and
+        # calling it would replace the NAMED CancellationError with a
+        # raw ValueError (found in production by the channel-layer
+        # config sweep and the prior-box smoke: legacy tail refusals at
+        # gamma = 0 exist).  The original named refusal stands.
+        raise original_refusal
+    z_eig = np.exp(-1j * float(beta)) * complex(y_scaled[0], y_scaled[1])
+    y_eig = np.array([z_eig.real, z_eig.imag])
+    s = float(y_scaled @ y_scaled)
+
+    n_nodes = w_array.shape[0]
+    values = np.empty(n_nodes, dtype=complex)
+    orders = np.zeros(n_nodes, dtype=int)
+    converged = np.ones(n_nodes, dtype=bool)
+    estimated_tails = np.zeros(n_nodes, dtype=float)
+    cancellation_ratios = np.zeros(n_nodes, dtype=float)
+    for node in range(n_nodes):
+        w_node = float(w_array[node])
+        try:
+            (node_values, node_orders, node_converged, node_tails,
+             node_ratios) = _grid_certified(
+                 w_array[node:node + 1], y, gamma,
+                 beta=beta, kappa=kappa, max_order=max_order)
+        except CancellationError:
+            if w_node > _schwinger.W_CEILING_SCHWINGER:
+                # Above the Schwinger ceiling the named refusal stands.
+                raise
+            # Positive-parity strong-shear fallback: the exact Schwinger
+            # amplification, reconstructed with the mass-sheet identity.
+            # The prefactor is a single float64 exp/mul/div OUTSIDE the
+            # paired-rule certificate and bounded by inspection (FINDINGS
+            # F011); `f_schwinger` certifies-or-refuses its own quadrature.
+            f_pure = _schwinger.f_schwinger(w_node, y_eig, gamma_prime)
+            mass_sheet_phase = np.exp(
+                0.5j * w_node * np.log(lam)
+                - 0.5j * w_node * float(kappa) * s)
+            values[node] = complex(mass_sheet_phase * f_pure / lam)
+            continue
+        # Certified node: keep the operator path's value and diagnostics
+        # bit-for-bit.
+        values[node] = node_values[0]
+        orders[node] = int(node_orders[0])
+        converged[node] = bool(node_converged[0])
+        estimated_tails[node] = float(node_tails[0])
+        cancellation_ratios[node] = float(node_ratios[0])
+    return (values, orders, converged, estimated_tails,
+            cancellation_ratios)
+
+
 def F_op_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
               beta: float = 0.0, kappa: float = 0.0,
               max_order: int = MAX_ORDER
@@ -1050,8 +1159,16 @@ def F_op_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     geometry.LensDomainError
         If ``1 - kappa <= abs(gamma)``.
     CancellationError
-        If any node's wave-branch contraction cannot be certified to the
-        ``1e-10`` target (the four F005 refusals, per node).
+        If a node's operator contraction cannot be certified to the
+        ``1e-10`` target (the four F005 refusals, per node) AND its
+        strong-shear Schwinger fallback cannot rescue it -- i.e. the
+        node lies above ``_schwinger.W_CEILING_SCHWINGER`` (``w > 60``),
+        where the named refusal stands.  Sub-ceiling positive-parity
+        refusals are instead converted to certified answers by the exact
+        1D Schwinger evaluator (`_positive_parity_grid_with_fallback`).
+    _schwinger.SchwingerCertificationError
+        If a strong-shear Schwinger fallback node cannot certify its own
+        paired-rule quadrature.
     _hyp1f1.HypergeometricDomainError
         Propagated from the kernel above its certified ``w`` or
         cancellation-exponent ceiling.
@@ -1067,7 +1184,7 @@ def F_op_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
         orders = np.zeros(values.shape[0], dtype=int)
         converged = np.ones(values.shape[0], dtype=bool)
         return values, orders, converged
-    values, orders, converged, _, _ = _grid_certified(
+    values, orders, converged, _, _ = _positive_parity_grid_with_fallback(
         w_array, y, gamma, beta=beta, kappa=kappa, max_order=max_order)
     return values, orders, converged
 
@@ -1125,9 +1242,15 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
         parity boundary).
     CancellationError
         Positive-parity wave branch only: if the contraction cannot be
-        certified to the ``1e-10`` target.  This covers four refusals,
-        all raised as named errors rather than returning a ``nan`` or a
-        finite-but-uncertified amplification (FINDINGS F005):
+        certified to the ``1e-10`` target AND the strong-shear Schwinger
+        fallback cannot rescue it (``w > _schwinger.W_CEILING_SCHWINGER``,
+        i.e. ``w > 60``, where the named refusal stands).  A sub-ceiling
+        positive-parity refusal is instead converted to a certified
+        answer by the exact 1D Schwinger evaluator (see
+        `_positive_parity_grid_with_fallback`).  The underlying
+        contraction covers four refusals, all raised as named errors
+        rather than returning a ``nan`` or a finite-but-uncertified
+        amplification (FINDINGS F005):
 
         * the scaled contraction still overflows to a non-finite total;
         * the measured operator-series cancellation ratio
@@ -1142,8 +1265,9 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
           cancellation cut that replaces the former silent-``nan``
           overflow near ``L ~ 45``).
     _schwinger.SchwingerCertificationError
-        Saddle branch only: if the paired Gauss-Legendre rules cannot
-        certify the Schwinger quadrature, or an unresolved saddle exceeds
+        If the paired Gauss-Legendre rules cannot certify the Schwinger
+        quadrature -- on the saddle branch, or on a positive-parity
+        strong-shear fallback node -- or an unresolved saddle exceeds
         ``_schwinger.W_CEILING_SCHWINGER`` (``w > 60``).
     _hyp1f1.HypergeometricDomainError
         Positive parity: propagated from the kernel above its certified
@@ -1173,7 +1297,7 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
             cancellation_ratio=0.0)
         return complex(values[0]), diagnostics
     (values, orders, converged, estimated_tails,
-     cancellation_ratios) = _grid_certified(
+     cancellation_ratios) = _positive_parity_grid_with_fallback(
          np.asarray([float(w)], dtype=float), y, gamma,
          beta=beta, kappa=kappa, max_order=max_order)
     diagnostics = OperatorDiagnostics(

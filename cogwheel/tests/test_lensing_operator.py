@@ -603,17 +603,20 @@ class ContractionCertificationTestCase(OperatorTestCase):
 
     def test_certified_or_named_refusal_across_band(self):
         """
-        Sweeping ``L in [24, 48]``, each ``F_op`` call either matches the
-        mpmath oracle within `RTOL_GATE` or raises
+        Sweeping ``L in [24, 59.4]``, each ``F_op`` call either matches
+        the mpmath oracle within `RTOL_GATE` or raises
         `operator.CancellationError`.  A non-finite return without a
         raise, or a finite value disagreeing with the oracle, is the
-        F005 bug and fails.  Both outcomes must occur across the band
-        (certified returns near ``L=24``; refusals near ``L=48``), so the
-        XOR contract is tested on both sides.
+        F005 bug and fails.  Both outcomes must occur across the band:
+        since Build 7a the legacy refusals at ``w <= 60`` are rescued by
+        the cross-parity Schwinger fallback (and the rescued values must
+        ALSO match the oracle), so the refusal onset sits at the
+        Schwinger ceiling ``w = 60`` (``L = 54`` at ``|y'| = 0.9``); the
+        band stays below the kernel's own ``L <= 60`` product ceiling.
         """
         returned, refused = 0, 0
         outcome_by_l = []
-        for cexp in self.CERT_LS:
+        for cexp in np.linspace(24.0, 59.4, 17):
             w = self._w_for(cexp)
             with self.subTest(L=cexp, w=w):
                 try:
@@ -645,25 +648,26 @@ class ContractionCertificationTestCase(OperatorTestCase):
                 self.n_checks += 1
         self.assertGreater(
             returned, 0,
-            'no configuration certified a return in [24, 48]; the lower '
-            'band should still be accurate')
+            'no configuration certified a return in [24, 59.4]; the '
+            'lower band should still be accurate')
         self.assertGreater(
             refused, 0,
-            'no configuration refused in [24, 48]; the upper band should '
-            'breach the contraction target and raise CancellationError')
+            'no configuration refused in [24, 59.4]; above the Schwinger '
+            'ceiling (w > 60, L > 54) the named CancellationError must '
+            'still stand')
         self._plot(outcome_by_l)
 
     def test_former_silent_nan_config_now_refuses(self):
         """
-        A configuration past the contraction-certification boundary
-        (``L ~ 48``, top of the wave band -- WP1 pushed the former
-        silent-``nan`` boundary up from ``L ~ 40`` to ``L ~ 45``, so the
-        old ``L ~ 40`` probe now certifies a return; the uncertifiable
-        band starts above it) raises a NAMED `operator.CancellationError`
+        A configuration whose contraction is uncertifiable AND that sits
+        above the Schwinger ceiling (``L = 59``, ``w = 65.6 > 60`` --
+        since Build 7a the sub-ceiling uncertifiable band is rescued by
+        the cross-parity fallback, so the refusal contract now lives
+        above ``w = 60``) raises a NAMED `operator.CancellationError`
         whose message identifies the offending ``(w, y, gamma, kappa)``
         -- instead of the pre-F005 silent overflow to ``nan``.
         """
-        w = self._w_for(48.0)  # top of the band, past the L~45 boundary
+        w = self._w_for(59.0)  # w = 65.6 > 60: unrescuable, kernel-legal
         with self.assertRaises(operator.CancellationError) as ctx:
             operator.F_op(w, self.CERT_Y, self.CERT_GAMMA,
                           kappa=self.CERT_KAPPA, max_order=FOP_MAX_ORDER)
@@ -835,9 +839,15 @@ class CancellationRefusalTestCase(OperatorTestCase):
 
         with mock.patch.object(operator, '_CANCELLATION_REFUSAL',
                                threshold):
+            # Target the LEGACY certified path directly: since Build 7a
+            # the public `F_op` rescues a sub-ceiling CancellationError
+            # with a correct Schwinger-fallback value (which never sees
+            # the patched threshold), so the falsification would go
+            # vacuous through the public entry point.
             with self.assertRaises(operator.CancellationError) as ctx:
-                operator.F_op(high_w, high_y, high_g, beta=high_b,
-                              kappa=high_k, max_order=high_o)
+                operator._grid_certified(
+                    np.array([high_w]), high_y, high_g, beta=high_b,
+                    kappa=high_k, max_order=high_o)
             message = str(ctx.exception)
             # Reported ratio equals the independent recomputation.
             match = re.search(r'\|total\| = ([0-9.]+e[+\-][0-9]+)',

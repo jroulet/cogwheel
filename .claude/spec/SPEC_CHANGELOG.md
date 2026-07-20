@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.9.0` (2026-07-19): Negative-parity (macro-saddle) engine branch (Build 6): saddle-capable
+- `0.10.0` (2026-07-19): Negative-parity (macro-saddle) engine branch (Build 6): saddle-capable
 geometry (two deltoid caustic lobes, census certified), the exact 1D
 Schwinger dd-quadrature wave evaluator (`_schwinger.py`, ceiling
 w <= 60, certify-or-refuse), parity dispatch with the positive-parity
@@ -15,6 +15,18 @@ layer until Build 7. FINDINGS F011 (certification-blind eps64 class,
 two instances fixed and proven extinct), F012 (near-axial quartic dead
 zone, Build-7 guard precondition), F013 (saddle-branch certification
 summary).
+
+- `0.9.0` (2026-07-19): Build 7a engine hardening: runtime index-theorem census guard (F012
+dead zone now a named refusal, both parities, with Morse-theory-correct
+degenerate pass-throughs for fold-merged and on-cusp censuses),
+cross-parity strong-shear Schwinger fallback in `F_op`/`F_op_grid`
+(positive-parity `CancellationError` refusals at w <= 60 and gamma' > 0
+become certified answers; certified outputs byte-frozen; shear-free and
+above-ceiling refusals stand), an exactly-singular-Hessian named
+refusal in the stationary-phase kernel replacing a raw `LinAlgError`
+crash surfaced in production (F015), and the `LensedPosterior` refusal
+net extended to the full named vocabulary (adds
+`SchwingerCertificationError`, `LensedBinningError`).
 
 - `0.8.0` (2026-07-18): SACR-C channel construction (Build 3f): switched-analytic saddle
 kernels under criticality-separation smootherstep weights + ONE

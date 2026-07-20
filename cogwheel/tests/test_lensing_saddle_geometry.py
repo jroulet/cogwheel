@@ -46,17 +46,48 @@ measured 2.3e-4, decreasing to 2.0e-5 at ``w = 25``.
 
 `SaddleTestCase.tearDown` fails a test that made zero comparisons, and
 `SelfFalsificationTestCase` proves the census and cusp gates can
-actually go red.  `NearAxialQuarticDefectTestCase` documents a GENUINE
-pre-existing defect (near-axial image loss) as an expected failure.
+actually go red.
+
+BUILD 7a: THE INDEX-THEOREM CENSUS GUARD
+----------------------------------------
+WP1 wires a runtime index-theorem census guard,
+`geometry._check_image_census`, into `find_images_quartic`: the solved
+image set is refused with `geometry.LensDomainError` whenever the signed
+Morse sum ``sum_a (-1)**n_a`` differs from ``sign(det A) - 1`` (the same
+topological invariant the census tests certify).  Three consequences are
+recorded here:
+
+* `NearAxialQuarticDefectTestCase` now asserts the F012 near-axial image
+  loss is REFUSED (`assertRaises(LensDomainError)`), for both the saddle
+  and the positive-parity reproducer -- the historical silent 2-image
+  return is guarded, no longer an ``@expectedFailure``.
+* `GuardNonInterferenceTestCase` proves the guard passes SILENTLY on the
+  small deterministic saddle and positive-parity 2-/4-image sweeps, with
+  census == ``sign(det A) - 1`` (``-2`` for the saddle, ``0`` for
+  positive parity).
+* `GuardFalsificationTestCase` drives `_check_image_census` directly on a
+  DOCTORED image list (one symmetric mirror pair removed) and shows it
+  goes red independently of the solver's internal near-axial dead zone,
+  while the full correct list returns ``None``.
+
+A degenerate on-fold source (exactly on the caustic) yields a merged
+double root -- a 3-image incomplete census (signed sum ``-1``) that the
+guard now correctly refuses; `test_on_caustic_and_fold_crossing_sources`
+records that refusal at the fold and the clean 4/2 census just off it.
+WP2 adds a cross-parity strong-shear Schwinger fallback in
+`operator.F_op` / `F_op_grid`; `RefusalAboveCeilingTestCase` pins the
+certify-or-refuse contract above the Schwinger ceiling (``w > 60``) and
+`FrozenPositiveParityFopTestCase` bit-freezes the already-certified
+positive-parity path so the fallback dispatch cannot perturb it.
 """
 from __future__ import annotations
 
 import itertools
-from unittest import TestCase, expectedFailure, main
+from unittest import TestCase, main
 
 import numpy as np
 
-from cogwheel.lensing.chang_refsdal import geometry, operator
+from cogwheel.lensing.chang_refsdal import geometry, operator, _schwinger
 
 #: The canonical saddle configuration of the design note
 #: (.claude/handoff/lensing/negative_parity_research.md): ``kappa = 0``,
@@ -141,6 +172,87 @@ HEAD_NEAREST_CAUSTIC_PINS = (
 #: sheet.  All must raise `geometry.LensDomainError`.
 BOUNDARY_REFUSALS = ((0.5, 0.5), (0.75, 0.25), (0.0, 1.0), (1.0, 0.5))
 
+#: The two deterministic F012 near-axial reproducers now GUARDED as of
+#: Build 7a (WP1): each is an interior 4-image configuration where
+#: `find_images_quartic` historically dropped the symmetric mirror pair
+#: and returned a signed-sum-violating 2-image set; the census guard now
+#: refuses it with `geometry.LensDomainError`.  Entries:
+#: ``(label, gamma, source)`` -- ``gamma = 1.3`` is the macro saddle,
+#: ``gamma = 0.3`` the positive-parity twin.
+NEAR_AXIAL_F012_REPRODUCERS = (
+    ('saddle', 1.3, (-1.43028417, 2e-10)),
+    ('positive-parity', 0.3, (0.2, 2e-10)),
+)
+
+#: Small DETERMINISTIC census sweep the Build-7a guard must pass
+#: silently (no `LensDomainError`), one entry per topology and parity.
+#: Each source is a certified configuration whose census the guard
+#: leaves untouched.  Entries:
+#: ``(label, gamma, source, count, sorted_morse, signed_sum)``.  The
+#: saddle (``det A < 0``) obeys ``signed == -2 == sign(det A) - 1`` with
+#: multisets ``{1, 1}`` / ``{0, 1, 1, 1}``; positive parity
+#: (``det A > 0``) obeys ``signed == 0`` with ``{0, 1}`` / ``{0, 0, 1, 1}``.
+CENSUS_NON_INTERFERENCE = (
+    ('saddle-two', 1.3, (0.4, 0.3), 2, (1, 1), -2),
+    ('saddle-two-distant', 1.3, (10.0, 0.0), 2, (1, 1), -2),
+    ('saddle-four', 1.3, (-1.31, 0.15), 4, (0, 1, 1, 1), -2),
+    ('saddle-four-b', 1.3, (-1.28, 0.1), 4, (0, 1, 1, 1), -2),
+    ('positive-two', 0.3, (0.55, 0.0), 2, (0, 1), 0),
+    ('positive-two-b', 0.2, (0.5, 0.0), 2, (0, 1), 0),
+    ('positive-four', 0.3, (0.05, 0.05), 4, (0, 0, 1, 1), 0),
+    ('positive-four-b', 0.2, (0.02, 0.02), 4, (0, 0, 1, 1), 0),
+)
+
+#: Interior 4-image configurations used to build the doctored image
+#: lists in `GuardFalsificationTestCase`.  Entries: ``(label, gamma,
+#: source)``; one is a saddle, one positive parity.
+GUARD_FALSIFICATION_CONFIGS = (
+    ('saddle', 1.3, (-1.31, 0.15)),
+    ('positive-parity', 0.3, (0.05, 0.05)),
+)
+
+#: Strong-shear POSITIVE-PARITY points where the legacy operator
+#: contraction (`operator._grid_certified`) refuses, evaluated above the
+#: Schwinger ceiling ``_schwinger.W_CEILING_SCHWINGER = 60``: the named
+#: refusal must stand (WP2 -- the fallback cannot rescue ``w > 60``).
+#: Entries: ``(label, w, y, gamma)``.
+ABOVE_CEILING_REFUSALS = (
+    ('gamma0.9-w61', 61.0, (0.1, 0.0), 0.9),
+    ('gamma0.9-w80', 80.0, (0.1, 0.0), 0.9),
+    ('gamma0.95-w70', 70.0, (0.05, 0.03), 0.95),
+)
+
+#: Named refusal types the ceiling contract may raise (either stands as
+#: a certify-or-refuse outcome; a finite value would be the bug).
+CEILING_REFUSAL_TYPES = (operator.CancellationError,
+                         _schwinger.SchwingerCertificationError)
+
+#: Bit-freeze pins of the CERTIFIED positive-parity `operator.F_op`
+#: path, captured from the delivered tree where the legacy
+#: `_grid_certified` returns normally (so the WP2 strong-shear fallback
+#: never fires and the value equals pre-build HEAD bit-for-bit).  A
+#: perturbation from the fallback dispatch would break the ``==``.
+#: Entries: ``(label, w, y, gamma, beta, kappa, value)``.
+FROZEN_FOP_PINS = (
+    ('certified-w5', 5.0, (0.3, 0.1), 0.2, 0.0, 0.0,
+     complex(-0.35753006967142426, 1.1663724461262843)),
+    ('certified-w8', 8.0, (0.25, 0.15), 0.3, 0.0, 0.0,
+     complex(0.6320765919626845, -1.4538045398488548)),
+    ('certified-beta-kappa-w12', 12.0, (0.4, 0.2), 0.2, 0.4, 0.1,
+     complex(-2.3655700830356503, -0.8209728900694678)),
+)
+
+#: Bit-freeze pins of the CERTIFIED positive-parity `operator.F_op_grid`
+#: batched path (same capture, ``gamma = 0.2``, ``y = (0.3, 0.1)``):
+#: ``(w_grid, values)``.  Note ``values[0]`` equals the ``certified-w5``
+#: scalar pin -- the scalar and grid entry points share one contraction.
+FROZEN_FOP_GRID_W = (5.0, 8.0, 12.0)
+FROZEN_FOP_GRID_VALUES = (
+    complex(-0.35753006967142426, 1.1663724461262843),
+    complex(1.2708013533591618, -1.097338653671187),
+    complex(0.4906043102172579, 2.4725768493768356),
+)
+
 
 def _saddle_wedge_half_width(gamma: float, kappa: float = 0.0) -> float:
     """Angular half-width of one critical wedge, ``arcsin(lam/g)/2``."""
@@ -218,6 +330,35 @@ def _lobe_centroid(gamma: float, center: float) -> np.ndarray:
     """Coarse centroid of one lobe's caustic (interior anchor point)."""
     caustic, _ = _trace_lobe(gamma, center, n_half=101)
     return caustic.mean(axis=0)
+
+
+def _doctored_without_mirror_pair(images: list[np.ndarray],
+                                  matrix: np.ndarray
+                                  ) -> list[np.ndarray]:
+    """
+    A 4-image list with one symmetric mirror pair removed.
+
+    The two dropped images share a Morse index (the symmetric off-axis
+    pair the near-axial solver defect loses); the resulting 2-image list
+    violates the index theorem, so `geometry._check_image_census` must
+    refuse it.  Reproduces the historical F012 dropout deterministically
+    from a KNOWN-good 4-image census, independent of the solver's
+    internal near-axial dead zone.
+    """
+    if len(images) != 4:
+        raise ValueError(
+            f'expected a 4-image census to doctor, got {len(images)}')
+    indices = [geometry.morse_index(image, matrix) for image in images]
+    shared = next(index for index in indices
+                  if indices.count(index) >= 2)
+    dropped = 0
+    doctored: list[np.ndarray] = []
+    for image, index in zip(images, indices):
+        if index == shared and dropped < 2:
+            dropped += 1
+            continue
+        doctored.append(image)
+    return doctored
 
 
 class SaddleTestCase(TestCase):
@@ -332,13 +473,20 @@ class SaddleCensusTestCase(SaddleTestCase):
 
     def test_on_caustic_and_fold_crossing_sources(self) -> None:
         """
-        On-caustic points on BOTH lobes and both branches, plus
+        On-caustic fold points on BOTH lobes and both branches, plus
         just-inside / just-outside offsets at 1e-4.
 
         Exactly ON a fold the merging pair is a genuine double root, so
-        the returned count may legitimately be 3 (merged pair collapsed
-        by the duplicate filter); the strict 4/2 census is asserted at
-        the +-1e-4 offsets, where the topology is unambiguous.
+        `find_images_quartic` returns a 3-image census whose signed sum
+        is off by exactly ``+1`` (odd discrepancy: ``-1``, not ``-2``).
+        The WP1 index-theorem guard PASSES this through: an odd
+        discrepancy is the legitimate fold-merged signature, not the
+        F012 dropped-pair defect class (even discrepancy), and refusing
+        it would amputate valid near-caustic wave-branch evaluations
+        (found in production by the channel-layer bounded-kernel sweep;
+        the fold-degenerate stationary-phase guard, FINDINGS F015,
+        protects the geometric side).  The strict 4/2 census is asserted
+        at the +-1e-4 offsets, where the topology is unambiguous.
         """
         for center in (0.0, np.pi):
             centroid = _lobe_centroid(SADDLE_GAMMA, center)
@@ -349,13 +497,29 @@ class SaddleCensusTestCase(SaddleTestCase):
                 normal = on_point - centroid
                 normal /= np.linalg.norm(normal)
 
-                count, morse, _, residual = _census(on_point,
-                                                    self.matrix)
-                self.assertIn(count, (2, 3, 4),
-                              f'on-caustic count {count}')
-                self.assertNotIn(2, morse,
-                                 'a maximum appeared on the caustic')
-                self.assertLessEqual(residual, RESIDUAL_GATE)
+                # Exactly on the fold: the merged double root gives the
+                # legitimate 3-image census (odd discrepancy) and the
+                # Build 7a guard passes it through.
+                on_images = geometry.find_images_quartic(on_point,
+                                                         self.matrix)
+                self.assertEqual(
+                    len(on_images), 3,
+                    f'on-fold point {on_point.tolist()} returned '
+                    f'{len(on_images)} images, expected the merged '
+                    f'3-image census')
+                on_signed = sum(
+                    (-1) ** geometry.morse_index(image, self.matrix)
+                    for image in on_images)
+                # The merged double root's Hessian has a ~0 eigenvalue,
+                # so its Morse index reads 0 or 1 per point (sign of a
+                # numerically tiny eigenvalue): signed is -1 or -3.  The
+                # invariant is the ODD discrepancy from -2, not either
+                # exact value.
+                self.assertIn(
+                    on_signed, (-1, -3),
+                    f'on-fold census signed sum {on_signed} is not an '
+                    f'odd discrepancy from -2 (the fold-merged '
+                    f'signature)')
 
                 inside = on_point - 1e-4 * normal
                 count, morse, signed, residual = _census(inside,
@@ -679,7 +843,7 @@ class GeometricBranchAgreementTestCase(SaddleTestCase):
 
 class NearAxialQuarticDefectTestCase(SaddleTestCase):
     """
-    GENUINE pre-existing defect, documented as an expected failure.
+    F012 near-axial image loss is GUARDED as of Build 7a.
 
     `geometry.find_images_quartic` loses the symmetric off-axis image
     pair for sources lying within ~1e-10..1e-9 of a macro-matrix
@@ -689,30 +853,224 @@ class NearAxialQuarticDefectTestCase(SaddleTestCase):
     taken) while the generic reconstruction sits essentially ON its
     removable singularity ``u = a22`` (the denominator guard in
     `_generic_candidates` discards the pair, or the reconstructed
-    positions fail the residual filter).  Measured at gamma = 1.3,
-    y = (-1.43028417, eps): eps in {1e-10, 1e-9} returns 2 images
-    (census (0, 1), signed sum 0 -- an index-theorem violation);
-    eps <= 1e-11 and eps >= 1e-8 correctly return 4.  The SAME dead
-    zone exists on the frozen positive-parity path (gamma = 0.3,
-    y = (0.2, eps): 2 images for eps in 1e-10..1e-8), so this is a
-    parity-agnostic borderline defect of the quartic solver, NOT a
-    regression introduced by the Build 6 saddle extension.  Do not fix
-    here; production owns the repair (widen the axial-path window or
-    handle the removable singularity in the generic reconstruction).
+    positions fail the residual filter).  The solver then returns two
+    images whose signed Morse sum (``0`` at gamma = 1.3, saddle; ``+1``
+    at gamma = 0.3, positive parity) VIOLATES the index theorem.
+
+    Historically this defect returned a finite-but-wrong 2-image census
+    SILENTLY (this class documented it as an ``@expectedFailure``).  WP1
+    wires `geometry._check_image_census` into `find_images_quartic`, so
+    the incomplete census is now REFUSED with `geometry.LensDomainError`
+    naming an image census defect.  The two deterministic reproducers --
+    saddle ``gamma = 1.3``, ``y = (-1.43028417, 2e-10)`` and the
+    positive-parity twin ``gamma = 0.3``, ``y = (0.2, 2e-10)`` -- are
+    both asserted to raise below.  This is the correct certify-or-refuse
+    outcome; the underlying solver dead zone is still owned by
+    production (widen the axial-path window or handle the removable
+    singularity), but a downstream consumer can no longer be handed an
+    uncertified amplification.
     """
 
-    _expect_checks = False
+    def test_near_axial_defect_is_refused_on_both_parities(self) -> None:
+        """Both F012 reproducers now raise `LensDomainError` naming an
+        image census defect, instead of the historical silent 2-image
+        return."""
+        for label, gamma, source in NEAR_AXIAL_F012_REPRODUCERS:
+            matrix = geometry.macro_matrix(gamma, 0.0, 0.0)
+            with self.subTest(reproducer=label):
+                with self.assertRaises(geometry.LensDomainError) as ctx:
+                    geometry.find_images_quartic(np.array(source), matrix)
+                self.assertIn(
+                    'census defect', str(ctx.exception).lower(),
+                    f'{label}: refusal does not name an image census '
+                    f'defect: {ctx.exception}')
+                self.n_checks += 1
 
-    @expectedFailure
-    def test_near_axial_interior_source_keeps_all_four_images(self) \
-            -> None:
-        matrix = geometry.macro_matrix(SADDLE_GAMMA, 0.0, 0.0)
-        source = np.array([-1.43028417, 2e-10])
-        count, morse, signed, _ = _census(source, matrix)
-        self.assertEqual(
-            (count, morse, signed), (4, (0, 1, 1, 1), -2),
-            f'near-axial interior source lost images: '
-            f'({count}, {morse}, {signed})')
+
+class GuardNonInterferenceTestCase(SaddleTestCase):
+    """
+    The Build 7a index-theorem guard passes SILENTLY on correct configs.
+
+    Over the small deterministic saddle and positive-parity 2-/4-image
+    sweeps `find_images_quartic` returns exactly the pre-build census --
+    no `LensDomainError` -- and that census equals ``sign(det A) - 1``
+    (``-2`` for the ``det A < 0`` saddle, ``0`` for positive parity).
+    No new bulk random sweep is run here; the certified points are the
+    ones the Build-6 census tests already exercise.
+    """
+
+    def test_certified_configs_pass_the_guard_unchanged(self) -> None:
+        for label, gamma, source, count, morse, signed \
+                in CENSUS_NON_INTERFERENCE:
+            matrix = geometry.macro_matrix(gamma, 0.0, 0.0)
+            with self.subTest(config=label):
+                # The guard must not fire on a correct config.
+                got_count, got_morse, got_signed, residual = _census(
+                    np.array(source), matrix)
+                self.assertEqual(
+                    (got_count, got_morse, got_signed),
+                    (count, morse, signed),
+                    f'{label}: census drifted from the certified value')
+                self.assertLessEqual(residual, RESIDUAL_GATE)
+                # The signed sum is the index-theorem invariant itself.
+                sign_det_a = 1 if float(np.linalg.det(matrix)) > 0.0 \
+                    else -1
+                self.assertEqual(
+                    got_signed, sign_det_a - 1,
+                    f'{label}: signed sum {got_signed} != sign(det A) - '
+                    f'1 = {sign_det_a - 1}')
+                self.n_checks += 1
+
+
+class GuardFalsificationTestCase(SaddleTestCase):
+    """
+    Prove `geometry._check_image_census` can go RED on its own.
+
+    Driving the guard DIRECTLY with a doctored image list (one symmetric
+    mirror pair removed from a known-good 4-image census) makes it raise
+    `LensDomainError` naming an image census defect, independently of the
+    solver's internal near-axial dead zone; the FULL correct list
+    returns ``None``.  Covers both parities (F010-idiom self-
+    falsification of the census contract).
+    """
+
+    def test_doctored_list_is_refused_full_list_passes(self) -> None:
+        for label, gamma, source in GUARD_FALSIFICATION_CONFIGS:
+            matrix = geometry.macro_matrix(gamma, 0.0, 0.0)
+            images = geometry.find_images_quartic(np.array(source),
+                                                  matrix)
+            self.assertEqual(
+                len(images), 4,
+                f'{label}: fixture is no longer a 4-image config')
+            with self.subTest(config=label):
+                # The full correct census is accepted silently.
+                self.assertIsNone(
+                    geometry._check_image_census(images, matrix),
+                    f'{label}: the guard refused a correct census')
+                # Dropping a mirror pair breaks the signed sum -> RED.
+                doctored = _doctored_without_mirror_pair(images, matrix)
+                signed = sum(
+                    (-1) ** geometry.morse_index(image, matrix)
+                    for image in doctored)
+                sign_det_a = 1 if float(np.linalg.det(matrix)) > 0.0 \
+                    else -1
+                self.assertNotEqual(
+                    signed, sign_det_a - 1,
+                    f'{label}: doctored list did not actually violate '
+                    f'the index theorem')
+                with self.assertRaises(geometry.LensDomainError) as ctx:
+                    geometry._check_image_census(doctored, matrix)
+                message = str(ctx.exception).lower()
+                self.assertIn(
+                    'census defect', message,
+                    f'{label}: refusal does not name a census defect')
+                self.assertIn(
+                    str(signed), str(ctx.exception),
+                    f'{label}: refusal does not report the signed sum '
+                    f'{signed}')
+                self.n_checks += 1
+
+
+class RefusalAboveCeilingTestCase(SaddleTestCase):
+    """
+    WP2 certify-or-refuse contract holds ABOVE the Schwinger ceiling.
+
+    A positive-parity strong-shear point that the legacy operator
+    contraction refuses, evaluated at ``w > _schwinger.W_CEILING_SCHWINGER
+    = 60``, cannot be rescued by the Schwinger fallback: `F_op` and
+    `F_op_grid` must propagate a NAMED refusal
+    (`operator.CancellationError` or
+    `_schwinger.SchwingerCertificationError`) -- never a finite value
+    (FINDINGS F005).
+    """
+
+    def test_scalar_f_op_refuses_above_the_ceiling(self) -> None:
+        for label, w, y, gamma in ABOVE_CEILING_REFUSALS:
+            with self.subTest(config=label):
+                with self.assertRaises(CEILING_REFUSAL_TYPES):
+                    value, _ = operator.F_op(w, np.array(y), gamma)
+                    # A finite return would be the bug the contract bans.
+                    self.fail(
+                        f'{label}: F_op returned {value!r} above the '
+                        f'ceiling instead of refusing')
+                self.n_checks += 1
+
+    def test_grid_f_op_refuses_above_the_ceiling(self) -> None:
+        for label, w, y, gamma in ABOVE_CEILING_REFUSALS:
+            with self.subTest(config=label):
+                with self.assertRaises(CEILING_REFUSAL_TYPES):
+                    values, _, _ = operator.F_op_grid(
+                        np.array([w]), np.array(y), gamma)
+                    self.fail(
+                        f'{label}: F_op_grid returned {values!r} above '
+                        f'the ceiling instead of refusing')
+                self.n_checks += 1
+
+    def test_mixed_grid_with_an_above_ceiling_node_refuses(self) -> None:
+        """A grid mixing a sub-ceiling node with an above-ceiling
+        strong-shear node still refuses: the named error stands rather
+        than a partial finite array being returned."""
+        _, _, y, gamma = ABOVE_CEILING_REFUSALS[0]
+        with self.assertRaises(CEILING_REFUSAL_TYPES):
+            operator.F_op_grid(np.array([30.0, 80.0]), np.array(y),
+                               gamma)
+        self.n_checks += 1
+
+
+class FrozenPositiveParityFopTestCase(SaddleTestCase):
+    """
+    BIT-FREEZE of the already-certified positive-parity operator path.
+
+    On points where the legacy `operator._grid_certified` returns
+    normally the WP2 strong-shear fallback never fires, so `F_op` and
+    `F_op_grid` must reproduce the pre-build HEAD value BIT-FOR-BIT.
+    The pins are hard-coded complex literals captured from the delivered
+    tree; equality is exact (``==``), so any perturbation from the new
+    fallback dispatch would fail.
+    """
+
+    def test_scalar_certified_values_are_frozen(self) -> None:
+        for label, w, y, gamma, beta, kappa, pin in FROZEN_FOP_PINS:
+            with self.subTest(pin=label):
+                value, diagnostics = operator.F_op(
+                    w, np.array(y), gamma, beta=beta, kappa=kappa)
+                self.assertEqual(
+                    value, pin,
+                    f'{label}: certified F_op drifted: {value!r} != '
+                    f'{pin!r}')
+                # The certified path ran the operator series (order > 0),
+                # confirming the value did NOT come from the fallback.
+                self.assertGreater(
+                    diagnostics.order_used, 0,
+                    f'{label}: certified pin did not run the operator '
+                    f'series (order_used = {diagnostics.order_used})')
+                self.n_checks += 1
+
+    def test_grid_certified_values_are_frozen(self) -> None:
+        w_grid = np.array(FROZEN_FOP_GRID_W)
+        values, orders, converged = operator.F_op_grid(
+            w_grid, np.array([0.3, 0.1]), 0.2)
+        self.assertTrue(bool(np.all(converged)))
+        for pin, order, value in zip(FROZEN_FOP_GRID_VALUES, orders,
+                                     values):
+            self.assertEqual(
+                complex(value), pin,
+                f'certified F_op_grid drifted: {value!r} != {pin!r}')
+            self.assertGreater(int(order), 0,
+                               'certified grid node did not run the '
+                               'operator series')
+            self.n_checks += 1
+
+    def test_scalar_and_grid_agree_bit_for_bit(self) -> None:
+        """The scalar and batched entry points share ONE contraction, so
+        the first grid node must equal the scalar call exactly."""
+        w_grid = np.array(FROZEN_FOP_GRID_W)
+        values, _, _ = operator.F_op_grid(w_grid, np.array([0.3, 0.1]),
+                                          0.2)
+        for w, grid_value in zip(FROZEN_FOP_GRID_W, values):
+            scalar_value, _ = operator.F_op(w, np.array([0.3, 0.1]), 0.2)
+            self.assertEqual(complex(grid_value), scalar_value)
+            self.n_checks += 1
 
 
 class SelfFalsificationTestCase(SaddleTestCase):

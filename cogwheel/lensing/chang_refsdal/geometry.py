@@ -337,6 +337,84 @@ def morse_index(image: np.ndarray, matrix: np.ndarray) -> int:
     return int(np.sum(eigenvalues < 0.0))
 
 
+def _check_image_census(images: list[np.ndarray],
+                        matrix: np.ndarray) -> None:
+    """
+    Enforce the Morse index theorem on a solved image set.
+
+    For a point-mass perturbation of a smooth macro potential the
+    signed sum over images obeys ``sum_a (-1)**n_a == sign(det A) - 1``,
+    where ``n_a`` is the Morse index of image ``a`` and ``A`` is the
+    macro matrix — for a NON-DEGENERATE stationary set.  ANY nonzero
+    discrepancy over REGULAR images means the solver silently dropped
+    or duplicated images (the F012 dead-zone pair drop, or any
+    single-image loss), so the returned set is not a faithful census;
+    returning it would let a downstream consumer produce a
+    finite-but-wrong amplification.  A discrepancy is legitimate ONLY
+    when the census carries a NEAR-CRITICAL WITNESS (an image with
+    ``|det H| <= 1e-6 * ||H||_F^2``): a source on a fold merges its
+    (min, saddle) pair into one near-critical survivor (count 3, odd
+    discrepancy) and a source on a cusp collapses its (min, saddle,
+    min) triple likewise (count 2, even discrepancy) — Morse theory
+    does not constrain degenerate stationary sets, and a defective
+    drop leaves only regular images because the lost images were
+    elsewhere.  Degenerate censuses are safe downstream: the
+    resolvability gate routes them to the wave branch, and the
+    fold-degenerate stationary-phase guard (FINDINGS F015) refuses the
+    geometric kernel.  Counts outside ``[1, 4]`` are refused
+    unconditionally (the quartic admits at most 4 stationary points).
+
+    Parameters
+    ----------
+    images : list of np.ndarray
+        The final deduplicated image positions, each of shape (2,).
+    matrix : np.ndarray
+        Shape (2, 2), the macro matrix the images were solved for.
+
+    Raises
+    ------
+    LensDomainError
+        If the signed Morse sum violates the index theorem.
+    """
+    signed = sum((-1) ** morse_index(image, matrix) for image in images)
+    sign_det_a = 1 if float(np.linalg.det(matrix)) > 0.0 else -1
+    discrepancy = signed - (sign_det_a - 1)
+    if discrepancy != 0 and 1 <= len(images) <= 4:
+        # Any discrepancy is the defect signature -- UNLESS the census
+        # is visibly DEGENERATE.  Morse theory constrains only
+        # non-degenerate stationary sets: a source on a fold merges its
+        # (min, saddle) pair into one near-critical survivor (count 3,
+        # odd discrepancy), and a source on a cusp collapses its
+        # (min, saddle, min) triple likewise (count 2, even
+        # discrepancy, seen in the channel-layer axis-cusp sweep).  In
+        # BOTH legitimate cases a returned image sits essentially on
+        # the critical curve; a defective drop (the F012 dead zone, or
+        # any single-image loss) leaves only REGULAR images because the
+        # lost images were elsewhere.  The near-critical witness is the
+        # physical discriminator.
+        for image in images:
+            image_hessian = hessian(image, matrix)
+            degeneracy_scale = float(np.sum(image_hessian
+                                            * image_hessian))
+            if abs(float(np.linalg.det(image_hessian))) \
+                    <= 1e-6 * degeneracy_scale:
+                return
+    if discrepancy != 0 or not 1 <= len(images) <= 4:
+        raise LensDomainError(
+            f'Image census defect for macro matrix {matrix.tolist()}: '
+            f'the {len(images)} returned images give a signed Morse sum '
+            f'sum_a(-1)^(n_a) = {signed}, but the index theorem requires '
+            f'sum_a(-1)^(n_a) == sign(det A) - 1 = {sign_det_a - 1} '
+            f'(count, signed, sign_detA) = '
+            f'({len(images)}, {signed}, {sign_det_a}). A discrepancy '
+            f'over REGULAR images means the solver dropped or '
+            f'duplicated images (F012), so the returned set is an '
+            f'incomplete census and cannot be certified. (A degenerate '
+            f'census carrying a near-critical witness image — a '
+            f'fold-merged pair or cusp-merged triple — is legitimate '
+            f'and passes.)')
+
+
 def _source_frame(source: np.ndarray) -> tuple[float, np.ndarray]:
     """Return source radius and orthogonal matrix whose first axis is
     the source direction."""
@@ -600,7 +678,9 @@ def find_images_quartic(source: np.ndarray, matrix: np.ndarray, *,
         If the shapes are wrong or ``matrix`` is not symmetric.
     LensDomainError
         If the geometry is outside the supported domain (macro saddle,
-        or an Einstein ring at zero source and zero shear).
+        or an Einstein ring at zero source and zero shear), or if the
+        solved image set violates the Morse index theorem (an image
+        census defect; see `_check_image_census`).
 
     Notes
     -----
@@ -653,6 +733,7 @@ def find_images_quartic(source: np.ndarray, matrix: np.ndarray, *,
             images.append(image)
 
     images.sort(key=lambda image: delay(image, source, matrix))
+    _check_image_census(images, matrix)
     return images
 
 
@@ -709,7 +790,28 @@ def _saddle_metric(image: np.ndarray,
     radial = np.asarray(image, dtype=float) / radius
     tangential = np.array([-radial[1], radial[0]])
     basis = np.column_stack([radial, tangential])
-    inverse = np.linalg.inv(basis.T @ hessian(image, matrix) @ basis)
+    projected = basis.T @ hessian(image, matrix) @ basis
+    # Refuse EXACTLY the crash class, nothing more: the channel layer
+    # deliberately consumes huge near-singular metrics here (an on-cusp
+    # merged image at det ~ 2*eps in its sweep) and suppresses the
+    # divergent stationary-phase target with the F008/SACR-C switch, so
+    # ANY determinant threshold amputates that contract.  Only an
+    # exactly-singular projected Hessian -- which raised a raw
+    # ``numpy.linalg.LinAlgError`` in production and killed the sampler
+    # (FINDINGS F015) -- becomes the named refusal; the principled
+    # near-fold accuracy limit belongs to the fold/cusp Airy program.
+    try:
+        inverse = np.linalg.inv(projected)
+    except np.linalg.LinAlgError as exc:
+        raise LensDomainError(
+            'Fold-degenerate image: the projected Fermat Hessian at '
+            f'image ({image[0]!r}, {image[1]!r}) is exactly singular; '
+            'the stationary-phase kernel of the geometric branch is '
+            'invalid at a merged image pair, so this configuration is '
+            'refused by name rather than crashed on (raw numpy '
+            'LinAlgError). The unresolved near-caustic corner is owned '
+            'by the planned fold/cusp uniform (Airy) asymptotics.'
+            ) from exc
     scale = 1.0 / radius**2
     return (scale * float(inverse[0, 0]), scale * float(inverse[0, 1]),
             scale * float(inverse[1, 1]))

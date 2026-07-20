@@ -154,6 +154,18 @@ CERT_SQRT_S = 0.9
 CERT_GAMMA = 0.20
 CERT_LS = np.linspace(24.0, 48.0, 17)
 
+#: Band for the certify-XOR-refuse boundary test.  Build 7a moved the
+#: refusal onset for this configuration to the Schwinger ceiling
+#: (``w = 60``, i.e. ``L = 60 * CERT_SQRT_S = 54``): legacy
+#: `CancellationError` refusals at ``w <= 60`` are rescued by the
+#: cross-parity Schwinger fallback, so the band must straddle that
+#: ceiling to witness both outcomes.  It must also stay BELOW the
+#: kernel's own ``L = w * sqrt(s) <= 60`` double-double product
+#: ceiling: above it the point-mass kernel raises
+#: `HypergeometricDomainError` before any cancellation logic runs — a
+#: third, separate refusal tier outside this test's contract.
+XOR_BAND_LS = np.linspace(24.0, 59.4, 22)
+
 #: Production names the independent oracle helpers must NOT reference
 #: (F002 oracle independence, enforced by the AST guard).
 ORACLE_FORBIDDEN_NAMES = frozenset({
@@ -598,34 +610,42 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
                     f'{label} w={w:g} solo-vs-batch')
 
     def test_cert_band_certifies_low_l_and_refuses_high_l(self):
-        """The F005 boundary band shows BOTH outcomes (the XOR contract).
+        """The certify-XOR-refuse boundary shows BOTH outcomes.
 
-        Across ``L in [24, 48]`` at ``gamma = 0.20`` some nodes certify
-        (low ``L``) and some refuse (high ``L``); a band that only ever
-        returned, or only ever refused, would be a silent regression of
-        the certified-or-refuse guarantee.
+        Across ``L in [24, 59.4]`` at ``gamma = 0.20`` some nodes
+        certify and some refuse; a band that only ever returned, or only
+        ever refused, would be a silent regression of the
+        certified-or-refuse guarantee.  Since Build 7a the low-``L``
+        legacy certifications and the mid-band Schwinger fallback
+        rescues both certify, and the refusal onset sits at the
+        Schwinger ceiling ``w = 60`` (``L = 54`` at ``sqrt(s) = 0.9``),
+        where the fallback re-raises the legacy `CancellationError`.
+        (Above ``L = 60`` the kernel's own product ceiling raises
+        `HypergeometricDomainError` instead — outside this band.)
         """
         y = np.array([CERT_SQRT_S, 0.0])
         decisions = {
             float(cancellation_l):
                 self._solo(cancellation_l / CERT_SQRT_S, y, CERT_GAMMA,
                            0.0, 0.0)[0]
-            for cancellation_l in CERT_LS}
+            for cancellation_l in XOR_BAND_LS}
         certified = [k for k, ok in decisions.items() if ok]
         refused = [k for k, ok in decisions.items() if not ok]
 
         self.n_checks += 1
         self.assertTrue(
             certified,
-            'no L in [24, 48] certified; the boundary band never returns')
+            'no L in [24, 59.4] certified; the boundary band never '
+            'returns')
         self.n_checks += 1
         self.assertTrue(
             refused,
-            'no L in [24, 48] refused; the F005 refusal never fires')
+            'no L in [24, 59.4] refused; the ceiling refusal never '
+            'fires (w > 60 must re-raise the legacy CancellationError)')
         self.n_checks += 1
         self.assertTrue(
-            decisions[float(CERT_LS[0])],
-            f'the lowest band point L={CERT_LS[0]:.0f} did not certify')
+            decisions[float(XOR_BAND_LS[0])],
+            f'the lowest band point L={XOR_BAND_LS[0]:.0f} did not certify')
         self.n_checks += 1
         self.assertLess(
             max(certified), min(refused) + 1e-9,
@@ -655,9 +675,16 @@ class BatchedContractionFalsificationTestCase(BatchedOperatorTestCase):
         ``raised`` is True with ``rel_err = inf`` when the contraction
         refuses (`CancellationError`); otherwise ``rel_err`` is the
         relative error against the mpmath oracle.
+
+        Targets the LEGACY certified path `operator._grid_certified`
+        directly: since Build 7a the public `F_op_grid` rescues a
+        legacy refusal at ``w <= 60`` with a correct Schwinger-fallback
+        value (which does not consume the perturbed series), so a
+        perturbation-induced refusal would be masked and the
+        falsification would go vacuous through the public entry point.
         """
         try:
-            values, _, _ = F_op_grid(
+            values, *_ = operator._grid_certified(
                 np.array([FALS_W], dtype=float), np.array(FALS_Y),
                 FALS_GAMMA, max_order=FOP_MAX_ORDER)
         except CancellationError:

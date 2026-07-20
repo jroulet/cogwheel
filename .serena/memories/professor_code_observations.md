@@ -54,3 +54,27 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   18.1, so the peak sits at truth. Efficiency-only concern; operator to
   decide whether to bound gamma away from the band before the heavy
   sampling ship gate.
+- Cross-parity Schwinger (Build 7a consult): the `_schwinger` engine is
+  signature-AGNOSTIC. `_h_dd` takes da_im=-w*a/2, db_im=-w*b/2 as pure-
+  imaginary offsets (`_ddc_sqrt` via Newton from a float64 seed); the
+  real-t contour stays clean for both parities, so the `gamma_prime>1`
+  guard in `_validate_inputs` is POLICY, not a math necessity (relaxing
+  to >0 or !=1 changes NO arithmetic path). Cancellation law L_S=pi*w/4
+  holds on BOTH parities — it comes from the `t^{iw/2-1}` factor
+  (|1/Gamma(iw/2)| ~ e^{+pi w/4} cancelling the ~e^{-pi w/4} integral),
+  never references the signature; dd paired-rule certification catches
+  degradation either way. Positive-parity mass-sheet fallback formula =
+  (1/lam)*exp[0.5j*w*ln lam - 0.5j*w*kappa*s] * f_schwinger(w,y_eig,
+  gamma') with gamma'<1 — EXACTLY `_saddle_grid`'s formula (f_schwinger's
+  `_reconstruct` already carries e^{iw|y_eig|^2/2}; note `_grid_certified`
+  instead multiplies an EXTRA exp(0.5j*w*s) because its pure-shear G
+  kernel excludes that e^{iw|y|^2/2} factor — G is the operator-series
+  total, not F).
+- Index-theorem guard (Build 7a): unified invariant sum_a sign(mu_a) ==
+  sign(det A) - 1 (positive parity -> 0, saddle -> -2). No maxima
+  possible since tr Hess = 2*lam > 0, so the image count {2,4} is
+  redundant given signed-sum + no-maxima (cheap to assert for debugging).
+  `morse_index` uses eigvalsh with strict `< 0.0`; a degenerate fold
+  image (one eigenvalue ~0) counts non-negative -> morse 0 or 1, signed
+  sum still holds; only breaks if BOTH eigenvalues are near zero at once
+  (a cusp, three-image merge).

@@ -3,8 +3,12 @@ Tests for `lensing.chang_refsdal._schwinger`, the exact 1D
 Schwinger-parameter wave-branch EVALUATOR for the macro-saddle domain
 (``f_schwinger``, its certify-XOR-refuse contract, the deep-band F009-S
 pins, the dd-mandatory falsifications, and the warm per-point cost
-measurement).  The saddle census / dispatch / mass-sheet / geometric
-branch live in `test_lensing_saddle_geometry.py`, not here.
+measurement).  The mass-sheet / geometric branch lives in
+`test_lensing_saddle_geometry.py`; the WP1/WP2 build (2026-07-19)
+additionally exercises the OPERATOR-level positive-parity Schwinger
+fallback dispatch and the image-census guard here (WP1/WP2 constants
+block below and the classes at the foot of the file), since those are
+the surfaces that consume this evaluator.
 
 WHY THE ORACLE IS INDEPENDENT (F002)
 ------------------------------------
@@ -76,17 +80,28 @@ import ast
 import cmath
 import functools
 import inspect
+import itertools
 import math
+import pathlib
 import textwrap
 import time
 from unittest import TestCase, main, mock
 
+import matplotlib
+matplotlib.use('Agg')  # headless: the diagnostic plot is written, never shown
+import matplotlib.pyplot as plt
 import mpmath
 import numpy as np
 
-from cogwheel.lensing.chang_refsdal import _schwinger
+from cogwheel.lensing.chang_refsdal import _schwinger, geometry, operator
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError, W_CEILING_SCHWINGER, f_schwinger)
+from cogwheel.lensing.chang_refsdal.operator import (
+    CancellationError, F_op, F_op_grid, _grid_certified)
+
+#: Where the dispatch-accuracy diagnostic plot is written (the house
+#: convention: ``cogwheel/tests/output/<test>_<desc>.png``).
+_OUTPUT_DIR = pathlib.Path(__file__).parent / 'output'
 
 #: Base oracle precision; the working dps is ``30 + ceil(w)`` (the
 #: research-note scaling: mpmath's own quadrature under-resolves the
@@ -162,6 +177,118 @@ FORBIDDEN_ORACLE_NAMES = frozenset({
     '_g_dd', '_dd', 'dd_add', 'dd_mul', 'dd_sub', 'dd_div',
     'dd_complex_add', 'dd_complex_mul', 'dd_complex_sub',
     'dd_complex_div', 'np', 'numpy', 'numba'})
+
+# =====================================================================
+# WP1/WP2 build (2026-07-19): the OPERATOR-level dispatch, the
+# positive-parity guard relaxation, and the image-census guard.
+#
+# WP2 wired a strong-shear Schwinger FALLBACK into `operator.F_op` /
+# `operator.F_op_grid`: a positive-parity node whose operator-series
+# contraction refuses (`CancellationError`) is, below the Schwinger
+# ceiling, rerouted through the exact 1D evaluator `f_schwinger` and
+# reconstructed with the SAME mass-sheet identity the operator path
+# uses.  WP1 added `geometry._check_image_census`, a runtime
+# index-theorem guard on the solved image set.  The constants below
+# drive the dispatch-accuracy, guard-relaxation, bit-freeze,
+# above-ceiling-refusal, and census-falsification suites appended to
+# this file.  All oracle judgements reuse the SAME AST-guarded
+# `_oracle_saddle`; the pure-shear amplification ``F_{0, gamma'}`` it
+# evaluates is exactly what the fallback dispatch reconstructs.
+# =====================================================================
+
+#: Dispatch-accuracy fixtures: positive-parity strong-shear points the
+#: LEGACY operator path (`_grid_certified`) REFUSES with
+#: `CancellationError`, each rerouted to the Schwinger fallback.  Every
+#: tuple ``(gamma, beta, kappa, y, w)`` was confirmed (probe 2026-07-19)
+#: to (a) raise `CancellationError` from `_grid_certified` and (b) match
+#: the reconstructed mpmath oracle below 1e-10.  ``gamma`` sits just
+#: below the positive-parity limit (``0.47, 0.49`` with ``kappa = 0`` so
+#: ``lam = 1``); the on-axis ``y = (1, 0)`` points reach the low-``w``
+#: end of the [3, 60] span, and the two ``kappa != 0`` rows exercise the
+#: mass-sheet prefactor.  ``w = 59.9`` is the worst measured case
+#: (rel 1.7e-11, Professor-staked 1.6e-11).
+DISPATCH_POINTS = (
+    (0.47, 0.0, 0.0, (1.0, 0.0), 3.0),
+    (0.47, 0.0, 0.0, (1.0, 0.0), 5.0),
+    (0.47, 0.0, 0.0, (0.4, 0.3), 8.0),
+    (0.49, 0.0, 0.0, (0.4, 0.3), 12.0),
+    (0.47, 0.0, 0.0, (0.4, 0.3), 20.0),
+    (0.49, 0.0, 0.0, (0.4, 0.3), 30.0),
+    (0.47, 0.0, 0.0, (0.4, 0.3), 45.0),
+    (0.49, 0.0, 0.0, (0.4, 0.3), 55.0),
+    (0.47, 0.0, 0.0, (0.1, 0.1), 59.9),
+    (0.35, 0.0, 0.2, (0.4, 0.3), 20.0),
+    (0.40, 0.0, 0.15, (0.1, 0.1), 30.0),
+)
+#: The uniform dispatch tolerance the Professor staked over ``w`` in
+#: ``(0, 60]`` (worst measured 1.7e-11, > 5x headroom).
+DISPATCH_RTOL = 1e-10
+
+#: One (gamma, beta, kappa, y) fixture at which to sweep ``w`` for the
+#: rel-error-vs-``w`` diagnostic plot (all these ``w`` refuse the legacy
+#: path and land on the fallback).
+DISPATCH_PLOT_GAMMA = 0.47
+DISPATCH_PLOT_Y = (0.4, 0.3)
+DISPATCH_PLOT_WS = (8.0, 12.0, 20.0, 30.0, 40.0, 50.0, 55.0, 59.9)
+
+#: Guard-relaxation fixtures for `f_schwinger` (WP2 one-line relaxation
+#: from ``gamma_prime > 1`` to ``gamma_prime > 0``).  The saddle
+#: (``gamma_prime > 1``) values are BYTE-FROZEN from pre-build HEAD (the
+#: relaxation must not perturb any ``gamma_prime > 1`` result); positive
+#: parity (``0 < gamma_prime < 1``) is now ACCEPTED and judged against
+#: the oracle; ``gamma_prime <= 0`` still raises `ValueError`.
+SADDLE_BITFREEZE = {
+    (3.0, (0.4, 0.3), 1.3): complex(0.14470585550870085,
+                                    0.40651223933528396),
+    (5.0, (0.4, 0.3), 1.3): complex(-0.3166556108784056,
+                                    -0.09918956656584109),
+    (10.0, (1.0, 0.0), 2.0): complex(-0.36925782902015036,
+                                     0.25566036688060445),
+    (8.0, (0.2, 0.1), 1.05): complex(0.39738539361296416,
+                                     -0.43316960492592993),
+}
+#: Positive-parity ``(w, y, gamma_prime)`` now accepted by the relaxed
+#: guard; ``gamma_prime`` kept clear of the ``-> 1`` parity-boundary
+#: pinch (measured rel <= 5.6e-14 across these).
+POSITIVE_PARITY_ACCEPTED = tuple(
+    (w, (0.4, 0.3), gamma_prime)
+    for gamma_prime in (0.3, 0.5, 0.7)
+    for w in (3.0, 8.0, 20.0))
+#: ``gamma_prime <= 0`` (``det A == 0`` or wrong sign) is a DOMAIN error.
+NONPOSITIVE_GAMMA_PRIME = (0.0, -0.5, -1.3)
+
+#: Certified positive-parity operator-path points (moderate shear, so
+#: the LEGACY contraction certifies and the WP2 fallback never fires).
+#: The complex values are BYTE-FROZEN from pre-build HEAD; the fallback
+#: dispatch must not perturb an already-certified answer.
+CERTIFIED_BITFREEZE_GAMMA = 0.2
+CERTIFIED_BITFREEZE_Y = (0.4, 0.3)
+CERTIFIED_BITFREEZE = {
+    3.0: complex(1.0977672009048116, 0.8231261499570363),
+    5.0: complex(0.23148446460211186, -0.5479573270850447),
+    8.0: complex(1.610332649060306, -0.12532868210912573),
+    10.0: complex(0.36682227574231296, -0.2237083798939786),
+}
+
+#: Above-ceiling refusal fixtures: positive-parity strong-shear points
+#: the legacy path refuses, evaluated at ``w > W_CEILING_SCHWINGER`` so
+#: the Schwinger fallback cannot rescue them and the named
+#: `CancellationError` stands (F005).  ``y = (0.4, 0.3)`` / ``(0.1, 0.1)``
+#: keep the refusal on the contraction's `CancellationError` branch
+#: (the on-axis ``y = (1, 0)`` refuses via a different named kernel
+#: error and is excluded here).
+ABOVE_CEILING_GAMMAS = (0.47, 0.49)
+ABOVE_CEILING_YS = ((0.4, 0.3), (0.1, 0.1))
+ABOVE_CEILING_WS = (61.0, 80.0)
+
+#: Image-census (WP1) falsification fixtures.  A positive-parity macro
+#: matrix has an interior 4-image source; a saddle matrix is 2-image
+#: everywhere in this build (probed 2026-07-19), so its guard red-path
+#: is reached by a single-image drop rather than a mirror-pair drop.
+CENSUS_POSITIVE_MATRIX_ARGS = (0.3, 0.0, 0.0)
+CENSUS_POSITIVE_SOURCE = (0.05, 0.03)
+CENSUS_SADDLE_MATRIX_ARGS = (1.3, 0.0, 0.0)
+CENSUS_SADDLE_SOURCE = (0.1, 0.05)
 
 
 # ---------------------------------------------------------------------
@@ -257,6 +384,34 @@ def _oracle_point_mass(w, y1, y2):
     return result
 
 
+def _reconstructed_dispatch_oracle(w, y, gamma, beta, kappa):
+    """
+    The value `operator.F_op` MUST return on the WP2 positive-parity
+    strong-shear fallback, built INDEPENDENTLY of production.
+
+    The mass-sheet reduction (``lam = 1 - kappa``, ``y' = y/sqrt(lam)``,
+    ``gamma' = gamma/lam``, eigenframe rotation by ``beta``) is done here
+    in plain arithmetic -- NOT via `operator._mass_sheet_map` -- so the
+    only production-derived quantity anywhere near this oracle is nil.
+    The amplification itself is the AST-guarded pure-mpmath
+    ``F_{0, gamma'}(w, y_eig)`` (`_oracle_saddle`); the mass-sheet
+    prefactor ``(1/lam) e^{0.5i w ln lam - 0.5i w kappa s}`` is the exact
+    identity the operator path reconstructs with (the prefactor is a
+    common complex factor, so it cancels in the relative error and cannot
+    mask a discrepancy in the amplification itself).
+    """
+    lam = 1.0 - float(kappa)
+    root_lam = math.sqrt(lam)
+    y_scaled = (y[0] / root_lam, y[1] / root_lam)
+    gamma_prime = float(gamma) / lam
+    z_eig = cmath.exp(-1j * float(beta)) * complex(y_scaled[0], y_scaled[1])
+    s = y_scaled[0] ** 2 + y_scaled[1] ** 2
+    amplification = _oracle_saddle(w, z_eig.real, z_eig.imag, gamma_prime)
+    prefactor = cmath.exp(0.5j * w * math.log(lam)
+                          - 0.5j * w * float(kappa) * s) / lam
+    return mpmath.mpc(prefactor) * amplification
+
+
 def _referenced_names(func):
     """
     Return every name a function's own source references (the
@@ -323,7 +478,8 @@ class SchwingerTestCase(TestCase):
 class OracleImportGuardTestCase(SchwingerTestCase):
     """The oracle path must not touch production code (F002)."""
 
-    _ORACLE_PATH = (_oracle_1d, _oracle_saddle, _oracle_point_mass)
+    _ORACLE_PATH = (_oracle_1d, _oracle_saddle, _oracle_point_mass,
+                    _reconstructed_dispatch_oracle)
 
     def test_oracle_path_references_no_production_names(self):
         """
@@ -554,14 +710,21 @@ class CertifyXorRefuseTestCase(SchwingerTestCase):
 
     def test_error_type_contract(self):
         """`SchwingerCertificationError` is a RuntimeError (a refusal,
-        not an input error) and domain errors stay `ValueError`."""
+        not an input error) and domain errors stay `ValueError`.
+
+        The bad ``gamma_prime`` cases are ``gamma_prime <= 0`` ONLY
+        (``det A == 0`` or the wrong sign): after the WP2 guard
+        relaxation the positive-parity band ``0 < gamma_prime < 1`` is a
+        VALID domain that certifies (see `GuardRelaxationTestCase`), so
+        it must NOT be listed here as a domain error.
+        """
         self.n_checks += 1
         self.assertTrue(
             issubclass(SchwingerCertificationError, RuntimeError))
         for bad_args in ((0.0, XOR_Y, XOR_GAMMA),
                          (-1.0, XOR_Y, XOR_GAMMA),
-                         (3.0, XOR_Y, 1.0),
-                         (3.0, XOR_Y, 0.5)):
+                         (3.0, XOR_Y, 0.0),
+                         (3.0, XOR_Y, -0.5)):
             with self.assertRaises(ValueError) as ctx:
                 f_schwinger(bad_args[0], np.array(bad_args[1]),
                             bad_args[2])
@@ -729,6 +892,376 @@ class WarmCostMeasurementTestCase(SchwingerTestCase):
             lines.append(f'w={w:g}: {1e3 * best:.1f} ms/point')
         print('\n[test_lensing_schwinger] WARM PER-POINT COST '
               '(envelope-surrogate pricing) | ' + ' | '.join(lines))
+
+
+class DispatchFallbackOracleTestCase(SchwingerTestCase):
+    """
+    WP2 positive-parity strong-shear FALLBACK dispatch accuracy.
+
+    `operator.F_op` / `operator.F_op_grid` reroute a positive-parity node
+    whose operator-series contraction refuses (`CancellationError`, below
+    the Schwinger ceiling) through the exact 1D evaluator and reconstruct
+    it with the mass-sheet identity.  Each fixture is checked to actually
+    REFUSE the legacy path first (so the fallback is genuinely exercised,
+    not silently skipped), then the rerouted value is judged against the
+    INDEPENDENT reconstructed mpmath oracle at the Professor-staked 1e-10
+    (worst measured 1.7e-11 at ``w = 59.9``).
+    """
+
+    def _assert_legacy_refuses(self, w, y, gamma, beta, kappa):
+        """The precondition: `_grid_certified` refuses this node, so the
+        value can ONLY come from the WP2 fallback."""
+        self.n_checks += 1
+        with self.assertRaises(
+                CancellationError,
+                msg=f'legacy _grid_certified did NOT refuse at w={w}, '
+                    f'y={y}, gamma={gamma}, kappa={kappa}; this fixture '
+                    'no longer exercises the fallback'):
+            _grid_certified(np.asarray([float(w)]), np.asarray(y, float),
+                            gamma, beta=beta, kappa=kappa)
+
+    def test_legacy_refuses_then_fop_matches_oracle(self):
+        """
+        For every dispatch fixture: the legacy path refuses, then
+        `F_op` returns the reconstructed pure-shear oracle within 1e-10,
+        uniformly across ``w`` in [3, 59.9] and both ``kappa = 0`` and
+        ``kappa != 0``.
+        """
+        for gamma, beta, kappa, y, w in DISPATCH_POINTS:
+            with self.subTest(gamma=gamma, kappa=kappa, y=y, w=w):
+                self._assert_legacy_refuses(w, y, gamma, beta, kappa)
+                value, _ = F_op(w, np.asarray(y), gamma,
+                                beta=beta, kappa=kappa)
+                oracle = _reconstructed_dispatch_oracle(
+                    w, y, gamma, beta, kappa)
+                self.assert_close(
+                    value, oracle, DISPATCH_RTOL,
+                    f'F_op fallback vs reconstructed oracle at w={w}, '
+                    f'y={y}, gamma={gamma}, kappa={kappa}')
+
+    def test_grid_and_scalar_fallback_agree(self):
+        """
+        `F_op_grid` and `F_op` route the SAME fallback: a one-element
+        grid returns byte-identical to the scalar entry point (FINDINGS
+        F005: one contraction, one certification, one fallback).
+        """
+        for gamma, beta, kappa, y, w in DISPATCH_POINTS[:4]:
+            with self.subTest(gamma=gamma, kappa=kappa, y=y, w=w):
+                scalar, _ = F_op(w, np.asarray(y), gamma,
+                                 beta=beta, kappa=kappa)
+                grid, _, _ = F_op_grid(np.asarray([float(w)]),
+                                       np.asarray(y), gamma,
+                                       beta=beta, kappa=kappa)
+                self.n_checks += 1
+                self.assertEqual(
+                    complex(grid[0]), scalar,
+                    f'grid and scalar fallback disagree at w={w}')
+
+    def test_dispatch_accuracy_diagnostic_plot(self):
+        """
+        Sweep ``w`` at one fallback config and write the rel-error-vs-``w``
+        diagnostic (log axis, with the 1e-10 line) to
+        ``output/dispatch_fallback_oracle_accuracy.png``, revealing any
+        cancellation-driven degradation as ``w -> 60``.  The plot is a
+        MEASUREMENT; the accompanying assertion keeps it non-vacuous.
+        """
+        gamma, y = DISPATCH_PLOT_GAMMA, DISPATCH_PLOT_Y
+        rel_errors = []
+        for w in DISPATCH_PLOT_WS:
+            self._assert_legacy_refuses(w, y, gamma, 0.0, 0.0)
+            value, _ = F_op(w, np.asarray(y), gamma)
+            oracle = _reconstructed_dispatch_oracle(w, y, gamma, 0.0, 0.0)
+            rel_errors.append(self.assert_close(
+                value, oracle, DISPATCH_RTOL,
+                f'dispatch plot point w={w}'))
+
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        figure, axis = plt.subplots(figsize=(6.0, 4.0))
+        axis.semilogy(DISPATCH_PLOT_WS, rel_errors, 'o-', label='|F_op - oracle| / |oracle|')
+        axis.axhline(DISPATCH_RTOL, color='crimson', linestyle='--',
+                     label=f'{DISPATCH_RTOL:.0e} gate')
+        axis.set_xlabel('w (dimensionless frequency)')
+        axis.set_ylabel('relative error')
+        axis.set_title(f'WP2 fallback dispatch accuracy '
+                       f'(gamma={gamma}, y={y}, kappa=0)')
+        axis.legend()
+        axis.grid(True, which='both', alpha=0.3)
+        figure.tight_layout()
+        figure.savefig(_OUTPUT_DIR / 'dispatch_fallback_oracle_accuracy.png',
+                       dpi=110)
+        plt.close(figure)
+
+
+class DispatchSelfFalsificationTestCase(SchwingerTestCase):
+    """
+    Prove the 1e-10 dispatch gate is DISCRIMINATING: comparing the same
+    `F_op` fallback value against an oracle evaluated at a WRONG reduced
+    shear must blow the relative error far past the gate.  Without this,
+    a gate that always passed (e.g. an oracle that ignored ``gamma'``)
+    would read green vacuously.
+    """
+
+    def test_wrong_gamma_prime_oracle_fails_the_gate(self):
+        gamma, beta, kappa, y, w = 0.47, 0.0, 0.0, (0.4, 0.3), 20.0
+        # This fixture genuinely lands on the fallback.
+        with self.assertRaises(CancellationError):
+            _grid_certified(np.asarray([w]), np.asarray(y, float), gamma)
+        value, _ = F_op(w, np.asarray(y), gamma, beta=beta, kappa=kappa)
+        correct = _reconstructed_dispatch_oracle(w, y, gamma, beta, kappa)
+        # A deliberately mis-set reduced shear (gamma' shifted by 5%).
+        wrong = _reconstructed_dispatch_oracle(
+            w, y, gamma * 1.05, beta, kappa)
+        rel_correct = abs(mpmath.mpc(value) - correct) / abs(correct)
+        rel_wrong = abs(mpmath.mpc(value) - wrong) / abs(wrong)
+        self.n_checks += 1
+        self.assertLessEqual(float(rel_correct), DISPATCH_RTOL)
+        self.n_checks += 1
+        self.assertGreater(
+            float(rel_wrong), 1e-3,
+            'the dispatch gate is not discriminating: F_op agrees with a '
+            f'5%-wrong-gamma_prime oracle to {float(rel_wrong):.3e}, so a '
+            'green result would carry no information')
+
+
+class GuardRelaxationTestCase(SchwingerTestCase):
+    """
+    WP2 relaxed `_schwinger.f_schwinger`'s guard from ``gamma_prime > 1``
+    (saddle only) to ``gamma_prime > 0``, admitting positive parity.
+
+    The three arms confirm the one-line relaxation did EXACTLY that:
+    ``gamma_prime > 1`` values are byte-frozen (unchanged), ``0 <
+    gamma_prime < 1`` is now accepted and correct, and ``gamma_prime <=
+    0`` still refuses at the domain surface (`ValueError`, NOT the
+    certification refusal).
+    """
+
+    def test_saddle_values_are_byte_frozen(self):
+        """Every ``gamma_prime > 1`` value equals the pre-build literal
+        to full float64 precision (the relaxation must not perturb the
+        certified saddle numerics)."""
+        for (w, y, gamma_prime), frozen in SADDLE_BITFREEZE.items():
+            with self.subTest(w=w, y=y, gamma_prime=gamma_prime):
+                value = f_schwinger(w, np.asarray(y), gamma_prime)
+                self.n_checks += 1
+                self.assertEqual(
+                    value, frozen,
+                    f'saddle value at w={w}, y={y}, gamma_prime='
+                    f'{gamma_prime} drifted from the frozen literal '
+                    f'{frozen!r}; the guard relaxation perturbed the '
+                    'gamma_prime > 1 path')
+
+    def test_positive_parity_is_accepted_and_matches_oracle(self):
+        """``0 < gamma_prime < 1`` now returns a finite certified value
+        matching the AST-guarded pure-shear oracle to 1e-10."""
+        for w, y, gamma_prime in POSITIVE_PARITY_ACCEPTED:
+            with self.subTest(w=w, y=y, gamma_prime=gamma_prime):
+                value = f_schwinger(w, np.asarray(y), gamma_prime)
+                self.n_checks += 1
+                self.assertTrue(
+                    math.isfinite(value.real) and math.isfinite(value.imag),
+                    f'positive-parity gamma_prime={gamma_prime} returned '
+                    f'non-finite {value} at w={w}')
+                oracle = _oracle_saddle(w, y[0], y[1], gamma_prime)
+                self.assert_close(
+                    value, oracle, DISPATCH_RTOL,
+                    f'positive-parity f_schwinger vs oracle at w={w}, '
+                    f'y={y}, gamma_prime={gamma_prime}')
+
+    def test_nonpositive_gamma_prime_still_raises_valueerror(self):
+        """``gamma_prime <= 0`` (``det A == 0`` or wrong sign) is a
+        DOMAIN error, distinct from the certification refusal."""
+        for gamma_prime in NONPOSITIVE_GAMMA_PRIME:
+            with self.subTest(gamma_prime=gamma_prime):
+                with self.assertRaises(ValueError) as ctx:
+                    f_schwinger(3.0, np.asarray([0.4, 0.3]), gamma_prime)
+                self.n_checks += 1
+                self.assertNotIsInstance(
+                    ctx.exception, SchwingerCertificationError,
+                    'a gamma_prime <= 0 domain error leaked out as the '
+                    'certification refusal; the surfaces must stay '
+                    'distinct')
+
+
+class PositiveParityBitFreezeTestCase(SchwingerTestCase):
+    """
+    A moderate-shear positive-parity config the LEGACY operator path
+    certifies WITHOUT the WP2 fallback firing: the returned values must
+    equal the pre-build literals to full float64 precision, proving the
+    added fallback dispatch (a try/except around `_grid_certified`) did
+    not perturb an already-certified answer.
+    """
+
+    def test_scalar_fop_matches_frozen_literals(self):
+        for w, frozen in CERTIFIED_BITFREEZE.items():
+            with self.subTest(w=w):
+                value, diagnostics = F_op(
+                    w, np.asarray(CERTIFIED_BITFREEZE_Y),
+                    CERTIFIED_BITFREEZE_GAMMA)
+                self.n_checks += 1
+                self.assertEqual(
+                    value, frozen,
+                    f'certified F_op at w={w} drifted from the frozen '
+                    f'literal {frozen!r}; the fallback dispatch perturbed '
+                    'the certified path')
+                # order_used > 0 proves the CERTIFIED operator series ran,
+                # not the fallback (which reports order_used = 0).
+                self.n_checks += 1
+                self.assertGreater(
+                    diagnostics.order_used, 0,
+                    f'F_op at w={w} reports order_used=0, i.e. the WP2 '
+                    'fallback fired where the legacy path was expected to '
+                    'certify; the bit-freeze is not testing the certified '
+                    'path')
+
+    def test_grid_fop_matches_frozen_literals(self):
+        w_array = np.asarray(sorted(CERTIFIED_BITFREEZE))
+        values, orders, converged = F_op_grid(
+            w_array, np.asarray(CERTIFIED_BITFREEZE_Y),
+            CERTIFIED_BITFREEZE_GAMMA)
+        for index, w in enumerate(w_array):
+            with self.subTest(w=float(w)):
+                self.n_checks += 1
+                self.assertEqual(
+                    complex(values[index]), CERTIFIED_BITFREEZE[float(w)],
+                    f'certified F_op_grid at w={w} drifted from the '
+                    'frozen literal')
+                self.n_checks += 1
+                self.assertGreater(
+                    int(orders[index]), 0,
+                    f'F_op_grid node w={w} reports order 0 (fallback '
+                    'fired) where the certified path was expected')
+                self.n_checks += 1
+                self.assertTrue(bool(converged[index]))
+
+
+class RefusalAboveCeilingTestCase(SchwingerTestCase):
+    """
+    The certify-XOR-refuse contract at the ceiling (F005): a
+    positive-parity strong-shear node the legacy path refuses, evaluated
+    at ``w > W_CEILING_SCHWINGER``, cannot be rescued by the Schwinger
+    fallback -- so `F_op` / `F_op_grid` must PROPAGATE a named refusal
+    (`CancellationError` or `SchwingerCertificationError`) and never
+    return a finite value.
+    """
+
+    _REFUSALS = (CancellationError, SchwingerCertificationError)
+
+    def test_scalar_fop_refuses_above_ceiling(self):
+        for gamma, y, w in itertools.product(
+                ABOVE_CEILING_GAMMAS, ABOVE_CEILING_YS, ABOVE_CEILING_WS):
+            with self.subTest(gamma=gamma, y=y, w=w):
+                self.n_checks += 1
+                self.assertGreater(w, W_CEILING_SCHWINGER)
+                with self.assertRaises(self._REFUSALS):
+                    result = F_op(w, np.asarray(y), gamma)
+                    self.fail(
+                        f'F_op returned {result[0]!r} above the ceiling '
+                        f'at w={w}, y={y}, gamma={gamma} instead of '
+                        'refusing (F005 violation)')
+                self.n_checks += 1
+
+    def test_grid_fop_refuses_above_ceiling(self):
+        for gamma, y, w in itertools.product(
+                ABOVE_CEILING_GAMMAS, ABOVE_CEILING_YS, ABOVE_CEILING_WS):
+            with self.subTest(gamma=gamma, y=y, w=w):
+                with self.assertRaises(self._REFUSALS):
+                    result = F_op_grid(np.asarray([float(w)]),
+                                       np.asarray(y), gamma)
+                    self.fail(
+                        f'F_op_grid returned {result[0]!r} above the '
+                        f'ceiling at w={w}, y={y}, gamma={gamma} instead '
+                        'of refusing (F005 violation)')
+                self.n_checks += 1
+
+    def test_mixed_grid_refuses_whole_grid(self):
+        """A grid mixing a certifiable node with an above-ceiling node
+        refuses the WHOLE grid rather than returning a partial result
+        (per-node refusal fails the batch)."""
+        with self.assertRaises(self._REFUSALS):
+            F_op_grid(np.asarray([5.0, 61.0]), np.asarray([0.4, 0.3]), 0.47)
+        self.n_checks += 1
+
+
+class ImageCensusGuardFalsificationTestCase(SchwingerTestCase):
+    """
+    WP1 `geometry._check_image_census` (F010-idiom): the runtime
+    index-theorem guard raises on a doctored image set independently of
+    the solver's internal dead zone, and passes on the faithful census.
+
+    The signed Morse sum must equal ``sign(det A) - 1``.  Positive parity
+    (``det > 0``) admits an interior 4-image source, so the mirror-pair
+    drop of the brief is exercised directly.  The saddle
+    (``det < 0``) macro matrix ``macro_matrix(1.3, 0, 0)`` is 2-image
+    EVERYWHERE in this build (probed 2026-07-19: no 4-image region
+    exists), so its red-path is reached by dropping a single image --
+    honest premise repair, not a mirror-pair drop it cannot supply.
+    """
+
+    def _images_and_matrix(self, matrix_args, source):
+        matrix = geometry.macro_matrix(*matrix_args)
+        images = geometry.find_images_quartic(np.asarray(source), matrix)
+        return images, matrix
+
+    def test_positive_parity_mirror_pair_drop_raises(self):
+        """Drop the two images of equal Morse index (a symmetric mirror
+        pair) from the faithful 4-image set; the guard names the census
+        defect and reports the (now wrong) signed sum."""
+        images, matrix = self._images_and_matrix(
+            CENSUS_POSITIVE_MATRIX_ARGS, CENSUS_POSITIVE_SOURCE)
+        self.n_checks += 1
+        self.assertEqual(len(images), 4,
+                         'the positive-parity fixture is no longer a '
+                         '4-image source; pick another interior point')
+        indices = [geometry.morse_index(image, matrix) for image in images]
+        # The mirror pair: the first Morse index shared by two images.
+        shared = next(value for value in set(indices)
+                      if indices.count(value) >= 2)
+        drop = [position for position, value in enumerate(indices)
+                if value == shared][:2]
+        doctored = [image for position, image in enumerate(images)
+                    if position not in drop]
+        expected_signed = sum((-1) ** geometry.morse_index(image, matrix)
+                              for image in doctored)
+        with self.assertRaises(geometry.LensDomainError) as ctx:
+            geometry._check_image_census(doctored, matrix)
+        message = str(ctx.exception)
+        self.n_checks += 1
+        self.assertIn('census defect', message.lower(),
+                      f'refusal does not name the census defect: {message}')
+        self.n_checks += 1
+        self.assertIn(str(expected_signed), message,
+                      f'refusal does not report the signed sum '
+                      f'{expected_signed}: {message}')
+
+    def test_saddle_single_image_drop_raises(self):
+        """The saddle matrix is 2-image; dropping one image breaks the
+        signed sum (``-1 != -2``) and the guard refuses by name."""
+        images, matrix = self._images_and_matrix(
+            CENSUS_SADDLE_MATRIX_ARGS, CENSUS_SADDLE_SOURCE)
+        self.n_checks += 1
+        self.assertEqual(len(images), 2,
+                         'the saddle fixture unexpectedly changed image '
+                         'count; re-probe the caustic')
+        doctored = images[:-1]
+        with self.assertRaises(geometry.LensDomainError) as ctx:
+            geometry._check_image_census(doctored, matrix)
+        self.n_checks += 1
+        self.assertIn('census defect', str(ctx.exception).lower())
+
+    def test_faithful_census_passes_for_both_parities(self):
+        """The guard returns None (no raise) on the solver's faithful
+        image set for both parities -- so the red-path above is the
+        doctoring's doing, not a guard that always fires."""
+        for matrix_args, source in (
+                (CENSUS_POSITIVE_MATRIX_ARGS, CENSUS_POSITIVE_SOURCE),
+                (CENSUS_SADDLE_MATRIX_ARGS, CENSUS_SADDLE_SOURCE)):
+            with self.subTest(matrix_args=matrix_args):
+                images, matrix = self._images_and_matrix(matrix_args, source)
+                self.n_checks += 1
+                self.assertIsNone(
+                    geometry._check_image_census(images, matrix),
+                    f'the faithful census for {matrix_args} was refused; '
+                    'the guard is over-firing')
 
 
 if __name__ == '__main__':

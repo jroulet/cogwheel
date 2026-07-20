@@ -11,6 +11,10 @@
 - Extend AST/name-forbidding guards for every new mutation/oracle helper
   (F002); pure-mpmath oracles for phase gates. For rules differing only
   in edge cases, assert a sub-case where old and new agree bit-for-bit.
+- AST name-forbidding guards MUST walk ast.Name.id / ast.Attribute.attr,
+  never a raw source-substring check — the production symbol can be a
+  substring of the oracle's own name (`_edge_amplification` is inside
+  `_exact_edge_amplification`), a false positive.
 - Fully revert probe/mutation edits; verify by read-back + pattern search.
 - Shell gate: plainest command shape (`python -m pytest <file> -q`), from
   the WORKTREE root; retry a bare denial once; a reasoned denial binds.
@@ -26,6 +30,18 @@
   w*tau MULTIPLICATION; phase-loss demos need irrational-scaled factors.
   If a gate's claimed band is unreachable from realistic fixtures, build
   SYNTHETIC inputs checked against an independent oracle.
+- Stochastic outputs (QMC marginalized lnlike) are NOT bit-repeatable:
+  pin determinism / JSON round-trip at the deterministic SUB-layer
+  (`_get_dh_hh_timeshift`) with assert_array_equal, never at the
+  stochastic top-level lnlike. Hour-scale importance-sampling oracle specs
+  are infeasible as a minutes gate — implement the deterministic specs +
+  a conditional-draw round-trip instead.
+- Conditional-vs-marginalized round-trip: a single plain (one extrinsic
+  draw) lnlike sits ~25-30 nats ABOVE lnL_marg (extrinsic Occam factor),
+  so the consistency gate is a LOWER bound (max >= lnL_marg - delta),
+  NEVER an upper bound. To get in-support vectors under a Fixed*Prior
+  (fixes z_lens=0 etc.), sample the unit cube until lnposterior is finite;
+  don't hand-build par_dics that violate the fixed constraint.
 - Probing internals exposed only through reduced outputs: prove your
   reproduction reduces bit-identically to production first.
 - ChangRefsdalChannels needs a >=2-point strictly-increasing positive w
@@ -42,6 +58,8 @@
   .tobytes(). Reach unreachable guard states with types.SimpleNamespace
   fakes reusing real sub-objects so earlier guards still pass; refusal
   fallbacks via mock.patch side_effect on the cache/fiducial builder.
+  Assert a refusal short-circuits by spying the downstream method's
+  call_count==0 under assertRaises.
 - @expectedFailure covers the test body, NOT tearDown — bump anti-vacuity
   counters BEFORE the assertion.
 - Mutation for except-branches: patch the exception NAME in the consumer

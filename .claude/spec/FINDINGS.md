@@ -585,6 +585,17 @@ precondition: a runtime index-theorem check (signed Morse sum ==
 sign(det A) - 1) in every image-consuming path, converting the dead
 zone into a named refusal on both parities.
 
+GUARDED (Build 7a): `_check_image_census` now runs at the end of
+`find_images_quartic` (the single image producer — `find_images` is a
+pure alias and `_centered_source_images` is internal to the quartic
+path), enforcing the parity-agnostic invariant
+`sum (-1)^{n_a} == sign(det A) - 1` with no tolerance band (a dropped
+mirror pair shifts the sum by an even +-2; a fold-merging pair
+contributes 0 and cannot false-positive). The dead zone is now a
+named `LensDomainError` census refusal on BOTH parities;
+`NearAxialQuarticDefectTestCase` was flipped from @expectedFailure to
+a positive assertRaises with a positive-parity twin.
+
 ## F013 — the negative-parity (macro-saddle) branch: certified summary (2026-07-19, Build 6)
 
 Full story in `.claude/handoff/lensing/negative_parity_research.md`
@@ -604,3 +615,78 @@ homogenized architecture. INTERIM LAYER CONTRACT: the channel/waveform
 layer refuses saddles by name (guards in `channels.evaluate` and the
 `LensedWaveformGenerator` constructor) until Build 7 delivers the
 saddle-domain channel layer.
+
+## F014 — `lnl_marginalized` integrates arrival time with a unit-density (1 per second) prior — DELIBERATE convention (2026-07-19, stock cogwheel)
+
+The coherent-score marginalized likelihood
+(`MarginalizationInfo.lnl_marginalized`, consumed by
+`MarginalizedExtrinsicLikelihood.lnlike` and the lensed subclass) is
+not normalized over arrival time: the only time factor in the QMC
+numerator is `sky_prior = (dOmega/4pi) * (1/sky_dict.f_sampling)`,
+which carries units of SECONDS. Per the owner, this is a DELIBERATE
+design choice (Javier's): with the integrand exp(<d|h> - <h|h>/2), a
+silent stretch of window contributes e^{-<h|h>/2} ~ 0, so
+integral(L dt) is invariant to how much data the analyst happened to
+include — evidences stay comparable across analyses with different
+window lengths, which a proper 1/T prior would break. Sky
+(dOmega/4pi), orbital phase (1/2pi), polarization (1/pi), and
+distance (uniform-in-volume to `lookup_table.d_luminosity_max`;
+verified exact against direct quadrature) are all proper.
+Consequences:
+- `lnl_marginalized` = ln[ integral L dt <proper angles/distance> ] —
+  it is ln(seconds)-offset relative to any oracle that uses a proper
+  uniform t prior 1/T. A validation oracle must ADD ln(T_oracle) to
+  compare. The offset is intrinsic-independent and cancels in
+  posterior sampling; for model comparison, evidences computed under
+  this convention are mutually consistent (that is its purpose) but
+  differ from a proper-1/T-prior evidence by ln(T/1s). In particular
+  the program's headline lensed-vs-unlensed Bayes factor is safe by
+  construction: both hypotheses use the same coherent-score
+  machinery, so the convention cancels identically in the ratio —
+  only mixing in an evidence from a proper-1/T-prior code requires
+  the ln(T/1s) adjustment.
+- Verified empirically to 1.5 mnat: widening an importance-sampling
+  oracle's t window 3.906x moved the gap by ln 3.906 while the
+  marginalized value did not move (n_eff ~ 19-21k of 40k draws,
+  Student-t proposal; probes marg_oracle_probe5*.py, 2026-07-19).
+- After the convention correction a residual remains: marg LOW by
+  0.146 +- ~0.03 (unlensed control) and 0.193 +- ~0.03 (lensed
+  MAIN_LENS point) — both inside the 0.3-nat oracle gate, and their
+  difference (0.05 +- 0.04) shows no lensed-fold defect. The ~0.15
+  residual is an upstream stock-cogwheel effect (candidate: sky-delay
+  discretization at f_sampling); track before using marginalized
+  values as absolute evidences.
+- Beware numerology: the uncorrected unlensed gap (2.0795) matched
+  ln 8 to 1e-4 by pure coincidence — the T-scaling test is what
+  discriminates, not constant-matching.
+
+## F015 — fold-degenerate images crashed the geometric kernel with a raw LinAlgError (2026-07-19, surfaced in production, fixed Build 7a)
+
+The headline marginalized sampling run died mid-flight (bound 17+)
+when a nautilus proposal produced an image on a fold:
+`geometry._saddle_metric` inverted the projected Fermat Hessian with a
+bare `np.linalg.inv`, the exactly-singular matrix raised
+`numpy.linalg.LinAlgError`, and the unnamed exception sailed past
+`LensedPosterior`'s refusal net (which maps `LensDomainError` /
+`CancellationError` to -inf) and killed the whole sampler. This is
+the unresolved-near-caustic corner (the fold/cusp Airy-patch gap)
+manifesting as a CRASH class rather than the known accuracy class.
+Fix: `_saddle_metric` catches the `LinAlgError` itself and re-raises
+it as the named `LensDomainError` ('Fold-degenerate image') — refusing
+EXACTLY the crash class and nothing more. Two threshold attempts were
+wrong before this landed: `1e-13 * ||P||_F^2` amputated near-fold
+configs the channel sweep legitimately serves (det ~ 40*eps), and even
+`4*eps * ||P||_F^2` broke the channel layer's on-cusp rows (det ~
+2*eps), because the SACR-C/F008 switch design DELIBERATELY consumes
+huge near-singular metrics and multiplies the divergent
+stationary-phase target away. Lesson: a guard for a crash class must
+be scoped to the crash condition itself, not to a nearby-looking
+numerical neighborhood. Two open notes:
+1. NEAR-singular (not machine-singular) projected Hessians still
+   return finite, increasingly divergent SPA kernels — the principled
+   near-fold validity bound belongs to the fold/cusp uniform (Airy)
+   asymptotics program, not to an ad-hoc threshold.
+2. Audit rule: any raw `np.linalg.inv/solve/cholesky` on the physics
+   path is a latent member of this class (a repo grep found exactly
+   this one; `_newton_polish` already guards its solve with an lstsq
+   fallback).

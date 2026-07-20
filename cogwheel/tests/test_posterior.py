@@ -37,12 +37,27 @@ class PosteriorTestCase(TestCase):
 
         lookup_table = likelihood.LookupTable()
 
+        # Skip extension subclasses this generic harness cannot
+        # construct: e.g. the lensing likelihoods require lens-specific
+        # arguments (``delta_t_max``, lens parameters) and carry their
+        # own test suites.  They only appear in ``get_subclasses`` when
+        # another test module has imported ``cogwheel.lensing`` in the
+        # same process, which made this fixture's health depend on test
+        # execution order until the skip below.
+        supplied = {'event_data', 'waveform_generator', 'par_dic_0',
+                    'pn_phase_tol', 'lookup_table'}
         cls.likelihoods = []
         for likelihood_class in (
                 sub for sub in get_subclasses(likelihood.BaseRelativeBinning)
                 if not isabstract(sub)):
+            parameters = signature(likelihood_class).parameters
+            if any(par.default is par.empty
+                   and par.kind not in (par.VAR_POSITIONAL, par.VAR_KEYWORD)
+                   and name not in supplied
+                   for name, par in parameters.items()):
+                continue
             kwargs = {}
-            if 'lookup_table' in signature(likelihood_class).parameters:
+            if 'lookup_table' in parameters:
                 kwargs['lookup_table'] = lookup_table
 
             cls.likelihoods.append(
@@ -54,9 +69,15 @@ class PosteriorTestCase(TestCase):
 
         rwf = next(like for like in cls.likelihoods
                    if isinstance(like, likelihood.ReferenceWaveformFinder))
+        # Same execution-order robustness for the prior registry: skip
+        # priors whose standard parameters this harness's stock
+        # ``par_dic_0`` cannot feed (the lensing priors add lens
+        # parameters and are covered by their own suites).
         cls.priors = [prior_class.from_reference_waveform_finder(rwf)
                       for prior_class in gw_prior.prior_registry.values()
-                      if prior_class is not gw_prior.ExtrinsicParametersPrior]
+                      if prior_class is not gw_prior.ExtrinsicParametersPrior
+                      and set(prior_class.standard_params)
+                      <= set(cls.par_dic_0)]
 
     def test_prior(self):
         """

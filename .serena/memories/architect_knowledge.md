@@ -42,3 +42,12 @@
   define none); JSONMixin/get_init_dict path is unaffected.
 - Reuse an existing prior with a documented option-deferral rather than
   block a build on the ideal coordinate (d_app deferred to Build 5).
+- Extending a byte-frozen validated path to a new regime/parity: add
+  SEPARATE parallel functions behind a classification gate that mirrors the
+  frozen path's own gate; never refactor the frozen one (byte-identity holds
+  by construction). Give shared entry points an optional flag so the default
+  call stays byte-identical, and keep the regime-branch decision INSIDE the
+  new function, not threaded through the frozen dispatcher (Build 6 saddle).
+- A verify-only Coder WP (confirm invariants readable from function bodies)
+  is bureaucratic relay = Inspector's job; trim it. Timing/warm-cost
+  measurements are diagnostics (FINDINGS + surrogate todo), never gates.

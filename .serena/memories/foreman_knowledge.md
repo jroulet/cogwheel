@@ -9,3 +9,8 @@
   no reason given is often transient — retry once, then fall back to
   read-only verification (e.g. `read_file`) rather than repeatedly
   retrying.
+- A finding whose text says "Librarian-owned" / "-> Librarian:" (doc-sync,
+  SPEC row) is NOT Foreman-Lite work — Foreman-Lite must not write SPEC.md.
+  Decline immediately; do not re-verify the same no-op every pass (it
+  recurred 7x on INS-5-DOC-1). Escalate the mis-route as an orchestrator
+  routing bug rather than burning an agent turn repeating the decline.

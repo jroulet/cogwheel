@@ -52,3 +52,15 @@
   delegates to the batched core (gather/one call/scatter, guard empties).
 - Worktree: built-in Edit fails on main-tree absolute paths — use Serena
   replace_content with relative paths from the worktree.
+- Prove an untouched path stays byte-identical after additive edits: load
+  the HEAD module copy via importlib SIDE-BY-SIDE (register it in
+  sys.modules FIRST so @dataclass fields resolve) and assert max|diff|=0.0
+  over a config sweep + full refusal-decision match. Make the new-regime
+  classification gate EXACTLY mirror the frozen path's gate so the new
+  prefix returns before touching frozen internals (byte-identity by
+  construction).
+- Independent oracles for singular integrands must be regularized: a naive
+  Int_0^inf t^{s-1} h(t) form is ill-posed (|t^{s-1}|=t^-1 log-diverges at
+  0, only conditionally convergent) — use subtract-h(0) or IBP-with-h'.
+  A DIFFERENT regularization scheme from the code's is the point (F002
+  non-circular); phase agreement also confirms sign/conjugation convention.

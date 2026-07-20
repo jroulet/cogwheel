@@ -197,14 +197,18 @@ IN_BAND = _LensConfig(
 
 #: Band-edge companion: the previously mis-specified positive-parity
 #: control.  ``gamma_eff = 0.25 / (1 - 0.5) = 0.5`` sits at the edge of
-#: the certified band, and at order 42 the shear-series tail exceeds the
-#: 1e-10 target, so ``F_op`` correctly REFUSES.  ``L = w*|y'|`` with
-#: ``|y'| = |y|/sqrt(1 - kappa) ~ 0.79`` stays below 48 across the
-#: probes, keeping every probe on the wave branch where the refusal
-#: lives.
+#: the certified band; at order 42 the shear-series tail exceeds the
+#: 1e-10 target, so the LEGACY path refuses every probe.  Since Build 7a
+#: the ``w <= 60`` probes are rescued by the cross-parity Schwinger
+#: fallback; the ``w = 60.5`` probe sits just ABOVE the Schwinger
+#: ceiling, so its legacy `CancellationError` re-raises — that probe
+#: carries the refusal contract now.  ``L = w*|y'|`` with
+#: ``|y'| = |y|/sqrt(1 - kappa) ~ 0.79`` stays below 48 across ALL
+#: probes (60.5 * 0.79 = 47.8), keeping every probe on the wave branch
+#: where the refusal lives (the geometric branch requires ``L > 48``).
 BAND_EDGE = _LensConfig(
     name='band-edge', y=(0.50, 0.25), gamma=0.25, beta=0.0, kappa=0.5,
-    w_probes=(30.0, 40.0, 50.0))
+    w_probes=(30.0, 40.0, 60.5))
 
 #: Weak-lens configuration for the unlensed-limit floor sweep.
 FLOOR_CONFIG = _LensConfig(
@@ -500,9 +504,11 @@ class MacroSaddleControlTestCase(WaveformTestCase):
     def test_band_edge_companion_refuses_cleanly(self):
         """
         The band-edge companion raises `operator.CancellationError` at the
-        waveform layer: at least one probe refuses at the operator level,
-        and ``amplification`` over the probe grid propagates the refusal
-        unswallowed (never a ``nan`` or a finite-but-wrong factor).
+        waveform layer: the above-Schwinger-ceiling probe (``w = 60.5``)
+        refuses at the operator level (the sub-ceiling probes are rescued
+        by the Build 7a fallback), and ``amplification`` over the probe
+        grid propagates the refusal unswallowed (never a ``nan`` or a
+        finite-but-wrong factor).
         """
         refusals = [w for w in BAND_EDGE.w_probes
                     if not _f_op_returns(BAND_EDGE, w)]

@@ -177,8 +177,10 @@ MACRO_SADDLE_LENS = {'m_lens_msun': M_LENS_MSUN, 'z_lens': Z_LENS,
 
 #: Uncertifiable wave-branch config: the engine raises
 #: `operator.CancellationError` (matched to `test_lensing_ratio_layer`'s
-#: ``CANCELLATION_CONFIG`` at the same mass/redshift).
-CANCELLATION_LENS = {'m_lens_msun': M_LENS_MSUN, 'z_lens': Z_LENS,
+#: ``CANCELLATION_CONFIG``).  The ``m_lens_msun`` x4 scale (Build 7a)
+#: pushes the refusing nodes above the ``w = 60`` Schwinger ceiling,
+#: where the named refusal survives the cross-parity fallback.
+CANCELLATION_LENS = {'m_lens_msun': M_LENS_MSUN * 4, 'z_lens': Z_LENS,
                      'y1': 0.20, 'y2': 0.05, 'gamma': 0.405, 'beta': 0.0,
                      'kappa': 0.57}
 

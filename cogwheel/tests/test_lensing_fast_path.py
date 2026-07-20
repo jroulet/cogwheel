@@ -282,13 +282,17 @@ FOP_GRID_W = (1.0, 10.0, 20.0, 40.0, 50.0)
 FOP_GRID_SQRT_S = (0.3, 0.9)
 FOP_GRID_GAMMA = (0.0, 0.2)
 
-#: ``F_op`` refusals: ``(w, sqrt_s, gamma)`` whose contraction is
-#: uncertifiable; each MUST raise `operator.CancellationError` through the
-#: JIT path (F005), never a silent finite value.
+#: ``(w, sqrt_s, gamma)`` whose LEGACY contraction is uncertifiable.
+#: Since Build 7a the ``w <= 60`` members are rescued by the cross-parity
+#: Schwinger fallback (finite, certified, ``order_used == 0`` marks that
+#: the value did NOT come from the uncertifiable series); the ``w > 60``
+#: member must still raise `operator.CancellationError` through the JIT
+#: path (F005) — never a silent finite value from the legacy series.
 FOP_REFUSALS = (
     (40.0, 0.9, 0.2),
     (50.0, 0.9, 0.2),
     (50.0, 0.95, 0.2),
+    (63.0, 0.9, 0.2),
 )
 
 # ---------------------------------------------------------------------------
@@ -861,19 +865,39 @@ class NumbaOperatorPreservationTestCase(FastPathTestCase):
 
     def test_fop_refuses_uncertifiable_contractions(self):
         """
-        Every uncertifiable contraction still raises `CancellationError`
-        (F005) through the JIT path -- never a silent finite-but-wrong
-        value.  Checked at the PRODUCTION default ``max_order`` (the order
-        the crown likelihood path runs at): the certification is a
-        property of that operating order, and a larger cap would let some
-        of these series limp to convergence past the refusal boundary.
+        An uncertifiable LEGACY contraction never yields a legacy value
+        (F005) through the JIT path.  Since Build 7a there are two legal
+        outcomes at the PRODUCTION default ``max_order``: at ``w <= 60``
+        the cross-parity Schwinger fallback rescues the refusal with a
+        certified value whose diagnostics carry ``order_used == 0`` (the
+        uncertifiable series was never trusted); at ``w > 60`` the named
+        `CancellationError` must still propagate.  A finite value with
+        ``order_used > 0`` on any of these configs would mean the
+        uncertifiable series was silently believed -- the F005 bug.
         """
+        refused = 0
         for w, sqrt_s, gamma in FOP_REFUSALS:
             y = [sqrt_s, 0.0]
             with self.subTest(w=w, sqrt_s=sqrt_s, gamma=gamma):
                 self.n_checks += 1
-                with self.assertRaises(CancellationError):
-                    F_op(w, y, gamma)
+                try:
+                    value, diagnostics = F_op(w, y, gamma)
+                except CancellationError:
+                    refused += 1
+                    self.assertGreater(
+                        w, 60.0,
+                        f'w={w} <= 60 refused: the Schwinger fallback '
+                        'did not rescue a rescuable node')
+                    continue
+                self.assertTrue(np.isfinite(value))
+                self.assertEqual(
+                    diagnostics.order_used, 0,
+                    f'w={w}: finite value with order_used = '
+                    f'{diagnostics.order_used} > 0 -- the uncertifiable '
+                    'legacy series was silently believed (F005)')
+        self.assertGreater(refused, 0,
+                           'no config refused; the above-ceiling arm was '
+                           'not exercised')
 
 
 # ---------------------------------------------------------------------------

@@ -223,8 +223,13 @@ MACRO_SADDLE = dict(gamma=0.5, beta=0.0, kappa=0.6, y1=0.20, y2=0.05)
 
 #: A config whose own wave-branch cannot certify: all paths must raise
 #: `CancellationError` (measured: estimated tail ~4e-3 > 1e-10 target).
+#: Since Build 7a the strong-shear refusal at the base lens mass is
+#: rescued by the cross-parity Schwinger fallback, so ``m_lens`` is
+#: scaled x4 to push the refusing nodes above the ``w = 60`` Schwinger
+#: ceiling, where the named refusal stands on every path (measured:
+#: x2 certifies on all three paths, x4 refuses on all three).
 CANCELLATION_CONFIG = dict(gamma=0.405, beta=0.0, kappa=0.57,
-                           y1=0.20, y2=0.05)
+                           y1=0.20, y2=0.05, m_lens=M_LENS_MSUN * 4)
 
 #: Image-count-mismatch config: the candidate has two real images while
 #: its snapped-lattice fiducial has four (verified in the guard test).
