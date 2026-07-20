@@ -1580,6 +1580,31 @@ class BuildOrchestrator:
         """
         return min(60 + 20 * n_specs, 250)
 
+    @staticmethod
+    def _shard_specs(specs: list[str]) -> list[list[str]]:
+        """Split one suite's domain-test descriptions into shards of at most
+        ``SDK_TEST_DEV_MAX_SPECS`` (env, default 3) each.
+
+        A single Test Developer handed too many descriptions dies at
+        error_max_turns before finishing (7b, 8a near-miss, 8b-levers). Sharding
+        keeps every agent's task narrow; shards for the same suite run
+        sequentially, so there is no write conflict (fix-6 ownership rule).
+        """
+        try:
+            cap = int(os.environ.get("SDK_TEST_DEV_MAX_SPECS", "3"))
+        except ValueError:
+            cap = 3
+        if cap < 1:
+            cap = 1
+        return [specs[i:i + cap] for i in range(0, len(specs), cap)]
+
+    @staticmethod
+    def _spec_label(spec: str) -> str:
+        """Compact one-line label (~80 chars) for a domain-test description,
+        used in the 'earlier shards already implemented' hand-off list."""
+        line = " ".join(str(spec).split())
+        return line[:80] + ("…" if len(line) > 80 else "")
+
     async def _run_test_dev_agent(self) -> str:
         """Run the Test Developer — one agent per target suite.
 
@@ -1622,35 +1647,145 @@ class BuildOrchestrator:
         results: list[str] = []
         for suite_name in sorted(groups):
             suite_specs = groups[suite_name]
-            budget = self._test_dev_budget(len(suite_specs))
+            # Description sharding: cap specs-per-agent at SDK_TEST_DEV_MAX_SPECS
+            # (default 3). A wider suite becomes MULTIPLE test_dev agents run
+            # SEQUENTIALLY on the SAME file (sequential = no write conflict,
+            # consistent with the fix-6 write-ownership rule). This structurally
+            # prevents the error_max_turns deaths caused by handing one agent an
+            # over-wide task (7b / 8a near-miss / 8b-levers test_dev-4).
+            shards = self._shard_specs(suite_specs)
             self._log(
-                f"  Suite {suite_name}: {len(suite_specs)} spec(s), "
-                f"max_turns={budget}"
+                f"  Suite {suite_name}: {len(suite_specs)} spec(s) in "
+                f"{len(shards)} shard(s) "
+                f"(cap {os.environ.get('SDK_TEST_DEV_MAX_SPECS', '3')}/agent)"
             )
-            spec_text = "\n".join(f"- {s}" for s in suite_specs)
-            test_task = (
-                f"Write ONE test suite: {suite_name}. Author it independently "
-                f"and run it until green.\n\n"
-                f"Work packages this build implemented: {wp_summary}\n\n"
-                f"Your suite's specifications from the Architect:\n"
-                f"{spec_text}"
-                f"{cross_text}\n\n"
-                f"Scope discipline: write ONLY {suite_name}. Other suites are "
-                f"owned by other Test Developer runs — do not create or edit "
-                f"them. Run your own suite after writing it; also run any "
-                f"suites that already exist for modules yours imports, to "
-                f"confirm no regression.\n\n"
-                + CHANGE_REPORT_INSTRUCTION
-            )
-            result_text, _ = await self._run_agent(
-                "test_dev", test_task,
-                model_override=model,
-                max_turns_override=budget,
-            )
-            self._collect_change_report(result_text)
-            results.append(f"[{suite_name}]\n{result_text}")
+            implemented: list[str] = []  # labels of specs earlier shards did
+            for shard_idx, shard_specs in enumerate(shards):
+                budget = self._test_dev_budget(len(shard_specs))
+                spec_text = "\n".join(f"- {s}" for s in shard_specs)
+                extend_note = ""
+                if implemented:
+                    extend_note = (
+                        f"\n\nEarlier shards of THIS suite already implemented "
+                        f"these descriptions — EXTEND the existing "
+                        f"{suite_name}, do NOT rewrite or remove them:\n"
+                        + "\n".join(f"- {lbl}" for lbl in implemented)
+                        + "\n"
+                    )
+                self._log(
+                    f"    Shard {shard_idx + 1}/{len(shards)}: "
+                    f"{len(shard_specs)} spec(s), max_turns={budget}"
+                )
+                test_task = (
+                    f"Write/extend ONE test suite: {suite_name}. Author it "
+                    f"independently and run it until green.\n\n"
+                    f"Work packages this build implemented: {wp_summary}\n\n"
+                    f"Your assigned specifications from the Architect:\n"
+                    f"{spec_text}"
+                    f"{extend_note}"
+                    f"{cross_text}\n\n"
+                    f"Scope discipline: write ONLY {suite_name}. Other suites "
+                    f"are owned by other Test Developer runs — do not create or "
+                    f"edit them. Run your own suite after writing it; also run "
+                    f"any suites that already exist for modules yours imports, "
+                    f"to confirm no regression.\n\n"
+                    + CHANGE_REPORT_INSTRUCTION
+                )
+                result_text = await self._run_test_dev_shard(
+                    suite_name, test_task, budget, model)
+                self._collect_change_report(result_text)
+                results.append(
+                    f"[{suite_name} shard {shard_idx + 1}]\n{result_text}")
+                implemented.extend(self._spec_label(s) for s in shard_specs)
         write_state(self.project_root, "test_dev", status="completed")
         return "\n\n".join(results)
+
+    async def _run_test_dev_shard(
+        self, suite_name: str, task: str, budget: int,
+        model: Optional[str],
+    ) -> str:
+        """Run one Test Developer shard, with ONE bounded continuation on
+        error_max_turns instead of killing the DAG.
+
+        If the shard exhausts its turn budget mid-work, we do NOT abort: we
+        confirm the partial edits still parse (restoring any unparseable file
+        from the coder checkpoint) and spawn exactly ONE continuation with the
+        same descriptions and the same budget, told to keep what is sound and
+        finish the rest. If that continuation ALSO exhausts max_turns, the
+        RuntimeError propagates as before (bounded: one continuation per shard).
+        Non-max_turns RuntimeErrors always propagate.
+        """
+        try:
+            result_text, _ = await self._run_agent(
+                "test_dev", task, model_override=model,
+                max_turns_override=budget)
+            return result_text
+        except RuntimeError as exc:
+            if "error_max_turns" not in str(exc):
+                raise
+            self._log(
+                f"  Test Developer shard for {suite_name} exhausted max_turns "
+                f"mid-work — NOT killing the DAG; attempting ONE bounded "
+                f"continuation")
+            self._recover_partial_test_state()
+            cont_task = (
+                "A PREDECESSOR Test Developer working on this EXACT suite "
+                "exhausted its turn budget mid-work; its partial edits are "
+                "already in the file. Assess what exists for the descriptions "
+                "below, KEEP what is sound, and COMPLETE the rest — do not "
+                "restart from scratch.\n\n" + task
+            )
+            try:
+                result_text, _ = await self._run_agent(
+                    "test_dev", cont_task, model_override=model,
+                    max_turns_override=budget)
+                return result_text
+            except RuntimeError as exc2:
+                if "error_max_turns" not in str(exc2):
+                    raise
+                self._log(
+                    f"  Continuation for {suite_name} ALSO exhausted max_turns "
+                    f"— raising (bounded: one continuation per shard)")
+                raise
+
+    def _recover_partial_test_state(self) -> None:
+        """After a Test Developer max_turns death, ensure the files it touched
+        still parse; restore any that don't from ``refs/sdk/coder_checkpoint``
+        so the continuation starts from valid state.
+
+        Best-effort — logs and continues on any error; never raises (a recovery
+        failure must not turn a survivable exhaustion into a dead build).
+        """
+        import ast as _ast
+        try:
+            changed = [f for f in self._git_changed_files()
+                       if f.endswith(".py")]
+        except Exception as exc:
+            self._log(f"  partial-state parse-check skipped ({exc})")
+            return
+        for f in changed:
+            path = Path(self.project_root) / f
+            try:
+                src = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            try:
+                _ast.parse(src)
+                continue  # file is sound — leave it
+            except SyntaxError:
+                pass
+            self._log(
+                f"  {f} left unparseable by the exhausted test_dev — "
+                f"restoring from refs/sdk/coder_checkpoint")
+            restored = subprocess.run(
+                ["git", "checkout", "refs/sdk/coder_checkpoint", "--", f],
+                cwd=self.project_root, capture_output=True, text=True)
+            if restored.returncode == 0:
+                self._log(f"  restored {f} from coder checkpoint")
+            else:
+                self._log(
+                    f"  WARNING: could not restore {f} from checkpoint "
+                    f"({(restored.stderr or '').strip()[:120]}) — leaving as-is")
 
     async def _run_inspector_with_loop(self, report: BuildReport) -> None:
         """Run Inspector with revision loop."""
