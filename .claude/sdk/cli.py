@@ -198,7 +198,15 @@ def _run_build(args):
         "Inspector: (PASS|found issues)|Professor: (PASS|CONCERN|FAIL)|"
         "GATE FAILURE|Build (failed|complete)|Coder checkpoint|"
         "Phase [0-9]:|Traceback|TimeoutError|transport wedge|"
-        "committed|KILLED|watchdog|Exit code"
+        "committed|KILLED|watchdog|Exit code|"
+        # Decision-wait lines MUST be in the filter: a driver monitor
+        # without them let an ESCALATION sit unanswered for 15+ minutes
+        # while the watchdog staleness clock ran (2026-07-20, build8c_cont
+        # — the driver was only saved by the owner poking). Every state
+        # where the pipeline BLOCKS on a human/driver file decision has to
+        # emit a monitor event, or an unattended overnight run dies quietly.
+        "ESCALATION|escalation|plan_ready|Plan written|"
+        "Waiting for a decision"
     )
     print(
         "AGENT: arm an event-driven Monitor now "

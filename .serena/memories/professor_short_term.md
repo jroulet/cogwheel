@@ -1,42 +1,53 @@
-# Professor short-term — Build 8b-levers consultation (2026-07-20)
+# Professor short-term — Build 8c inference review (2026-07-20)
 
-## Session summary
-Detailed rulings on the two Build 8b engine micro-accelerations:
-- Lever 1: Newton nearest-caustic shortcut in `geometry.nearest_caustic_point`
-- Lever 2: weight-vector contraction fusion in `operator.py`
+## What I reviewed
+Domain correctness of the in-progress (UNCOMMITTED) Build-8c multi-chart lens
+amplification surrogate + census tool. Worktree cogwheel-claude-dev, env
+cogwheel-newlal (py3.10). Authoritative plan: build8c_plan_approved.json (11
+domain test descriptions).
 
-## Key observations
+## Fast tests run
+`pytest cogwheel/tests/test_lensing_surrogate.py` = **33 passed, 1 skipped**
+in 296s. Skip = TimingSmokeTestCase (opt-in COGWHEEL_RUN_TIMING_SMOKE, perf
+only, not physics). Slow part = dd-Schwinger saddle training fixture
+(lru_cached, front-loaded).
 
-### Lever 1 (nearest_caustic_point)
-- `theta` is NOT a physically certified output. Downstream consumers in
-  `channels.py` use only `.image` (for label assignment and delay computation)
-  and `.distance` (for the caustic_distance field). `.theta` is stored in the
-  partition's `critical_theta` field but is metadata/diagnostic — it does not
-  feed the likelihood or any gate.
-- The `.image` and `.source` fields ARE consumed: `.image` feeds `_assign_labels`
-  and `geometry.delay(caustic.image, ...)`, and `.source` is stored but not
-  re-consumed for any arithmetic.
-- The `critical_point()` call at the winning theta produces the frame fields via
-  `np.linalg.eigh(hessian(image, matrix))`, so a ~1e-11 theta perturbation
-  propagates SMOOTHLY to `.image` (via cos/sin at ~1e-11 * radius ~ 1e-11),
-  thence to all downstream fields. Distance is at a minimum, so the distance
-  perturbation is ~(g''/(2g)) * dtheta^2 ~ 1e-20, far below ULP.
-- The HEAD_NEAREST_CAUSTIC_PINS test uses assertEqual on BOTH theta and distance.
-  Theta will break under Newton. Distance will survive. My ruling: theta is an
-  internal coordinate; the bit-exact pin on theta is overly tight and should be
-  replaced by a 1e-10 value-preservation gate. This is a legitimate re-certification,
-  not a pin weakening, because the pin's purpose was to freeze the positive-parity
-  path against the saddle extension, and the Newton acceleration is a SANCTIONED
-  engine edit.
+## Physics verdicts (all CORRECT)
+- Census tier tolerances EXACTLY my ratified rulings: CROWN_LNL_TOL=0.05
+  (Professor override of unreachable 0.01; dlnL~eps*SNR^2 floors ~0.04),
+  STRONG_SADDLE=0.1, RESCUED=1.5==RB_ATOL. assign_tier uses only certified
+  (gamma,eta) axes (theta excluded per F017); near-caustic + strong-shear +
+  macro-saddle all -> strong_saddle. Verified by direct call.
+- classify_fallthrough is MECE, calls surrogate's OWN guard predicates (one
+  source of truth), Q7 arc-projection -> out-of-box (NOT cusp-window) is
+  explicitly coded + documented. 5 cats: gamma-guard/dropped-sliver/
+  cusp-window/refusal-ball/out-of-box.
+- lnL accuracy test uses the physically-right envelope-scaling gate
+  dlnL <= 1.5*eps_dense*|lnL_exact| (i.e. eps*SNR^2), + 0.5-nat fixture
+  budget ceiling; 0.01/0.05 recorded as asymptotic targets. Passed.
+- Mass-sheet INS-8a-001: nonzero_kappa_never_served PASSED. Refusal
+  preservation, oracle-independence (F002), crown byte-identity (default
+  None), F010 mutation, chart-selection determinism + neg-theta wedge
+  unwrap, single-npz serialization+provenance all PASSED.
+- Registration (plan TEST10): pipeline_graph resolves
+  lens_amplification_surrogate -> producer train_lens_surrogate.py::main,
+  registry_path=yes, consumers include LensedRelativeBinningLikelihood,
+  LensedMarginalizedExtrinsicLikelihood, surrogate_census.run. Verified via CLI.
 
-### Lever 2 (operator fusion)
-- The existing F010 py_func self-falsification patches `operator._contract_grid`
-  and `operator._weight_vectors` SEPARATELY. If these are fused into one njit
-  function, the py_func chain must still expose the SAME perturbation entry points
-  (the fused function's .py_func must re-read _SERIES_TOLERANCE and accept a
-  half_sum argument). If the signature changes, F010 tests need updating.
-- Bit-identity feasible fusion: merging the two njit calls into one (removing
-  intermediate array handoff) while keeping identical accumulation order is the
-  only safe fusion. The j-loop already runs identically for both v[n]·derivs and
-  v_abs[n]·|derivs| — merging these is also safe. Any reassociation of the (a,b)
-  scatter with the j-contraction would change bits.
+## CONCERN (coverage gap, not a physics error)
+- The two DESIGN-FALSIFIABLE tests are ABSENT from pytest: tube-beats-raw
+  >=3x eps_95 (plan TEST1/task TEST8) and fold-approach slope tube-flat vs
+  raw -1/2 (plan TEST2/task TEST9). These justify the sqrt(eta) tube
+  coordinate; the central design premise is unverified by automated test.
+- Census-tool correctness (plan TEST9: served-fraction/fall-through
+  breakdown vs hand-computed, per-chart held-out eps) has NO pytest — only
+  the CLI scripts/census_lens_surrogate.py. I verified tier+categorizer
+  logic by hand/direct call, but there's no regression guard.
+- Registration also has no dedicated pytest (verified manually).
+- Build is uncommitted WIP (WP2/WP3 may be unfinished). Heavy full-scale
+  training/sampling is operator-deferred.
+
+Verdict issued: CONCERN — everything built is domain-correct with ratified
+tolerances, but the design's falsifiable claim + census correctness lack
+automated tests. No image viewer available to me; relied on passing
+assertions (which encode the tolerances) + code review.

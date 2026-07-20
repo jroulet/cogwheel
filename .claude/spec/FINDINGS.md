@@ -718,6 +718,37 @@ Dispositions to reuse:
   fallbacks). The operator contraction fusion alongside it is 0-bit
   different across the certified sweep with refusal parity exact.
 
+## F018 — the tube chart's measured advantage is against the extrapolating far-field, not a fair same-band raw chart; design-claim currencies matter (2026-07-20, Build 8c census tests)
+
+The 8c design falsifiable was stated as "tube beats an equal-budget
+raw chart by >= 3x at eps_95; raw fold-approach slope ~ -1/2". The
+independent census test developer measured extensively: in the
+census's MAX-NORMALIZED error currency (max|dE|/max|E|, the
+F016-correct currency for lnL impact) a FAIR raw Cartesian chart
+trained ON the same narrow band TIES the tube at fixture scale
+(ratio ~0.8-1.1) and its fold-approach error IMPROVES inward
+(slope ~ +0.5) — because the fold divergence of |E| itself inflates
+the denominator and masks absolute-error growth. The tube's measured
+advantage appears against the EXTRAPOLATING far-field chart (trained
+outside the caustic, eta_overlap_min = 0.05) — which is the actual
+production alternative the tube replaces: p95 ratio 2.93, deep-
+caustic gap 3.01, raw slope saturating at ~ -0.19 (not -1/2; same
+denominator effect). Dispositions:
+- The Professor's 3x / -1/2 numbers came from derivative counting in
+  a POINTWISE currency; any design-advantage claim must name its
+  error currency, and gates must use the currency that tracks lnL.
+- The tube design still stands on (a) the curved-band tiling
+  argument (a fair raw band chart exists only on a short arc segment;
+  globally, axis-aligned boxes fight the curved caustic and straddle
+  image-count changes) and (b) the asymptotic convergence-rate gap
+  (h^4 in u vs h^{1/2}-limited in eta), which fixture-scale grids are
+  too coarse to expose.
+- In-build bars (binding, coarse-fixture): tube-vs-extrapolant >= 2x
+  at p95 / >= 1.5x at max; tube ray slope |s| < 0.15; raw-extrapolant
+  slope < -0.05; deep-ratio >= 2. The literal 3x figure moves to the
+  production-density training report (post-8e), measured in BOTH
+  currencies.
+
 ## F015 — fold-degenerate images crashed the geometric kernel with a raw LinAlgError (2026-07-19, surfaced in production, fixed Build 7a)
 
 The headline marginalized sampling run died mid-flight (bound 17+)

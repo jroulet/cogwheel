@@ -212,12 +212,6 @@ _FID_Y_SPACING = 0.05
 #: ``E_candidate / E_fiducial`` against division by a near-zero fiducial.
 _ENVELOPE_HEALTH_FLOOR = 0.01
 
-#: Minimum source-plane caustic distance for the amplification surrogate
-#: fast path.  Nearer the caustic the envelope surface sharpens and its
-#: image-count region can flip, so a candidate within this distance falls
-#: through to the exact engine instead of the interpolated surrogate.
-_SURROGATE_CAUSTIC_FLOOR = 0.05
-
 #: Maximum number of macro images a Chang--Refsdal lens produces (four
 #: inside the caustic, two outside).  Matches the engine's channel count
 #: ``channels._N_CHANNELS``: when fewer than this many real images exist
@@ -770,9 +764,6 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # path, so a test can compare the two paths on one candidate.  Not
         # a constructor argument and never set by the hot path.
         self._force_direct = False
-        # Lazily computed real-image count of the surrogate box's single
-        # region (derived cache; dropped on pickle and recomputed).
-        self._surrogate_region_nimg = None
 
         if fbin is None and pn_phase_tol is None:
             pn_phase_tol = _DEFAULT_PN_PHASE_TOL
@@ -790,8 +781,6 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         forked/unpickled worker rebuilds bit-identical values on first
         evaluation -- roughly one direct SACR-C eval per lattice cell per
         worker, which is acceptable -- and determinism is preserved.
-        ``_surrogate_region_nimg`` is likewise a deterministic cache
-        recomputed from the preserved surrogate, so it too is dropped.
         The behavioural testing seam ``_force_direct`` is NOT derived
         state and is kept, so a pickled instance evaluates identically to
         its parent.  The trained ``amplification_surrogate`` (small flat
@@ -800,14 +789,12 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         """
         state = self.__dict__.copy()
         state.pop('_fid_cache', None)
-        state.pop('_surrogate_region_nimg', None)
         return state
 
     def __setstate__(self, state):
         """Restore pickle state with the derived caches reset."""
         self.__dict__.update(state)
         self._fid_cache = {}
-        self._surrogate_region_nimg = None
 
     def get_init_dict(self, **kwargs):
         """
@@ -1316,37 +1303,6 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             switch_dense, partition.critical_delay)
         return kernels
 
-    def _surrogate_region_image_count(self):
-        """
-        Real-image count of the surrogate box's (single) region, cached.
-
-        A trained `LensAmplificationSurrogate` box lies wholly inside one
-        image-count region (its training contract), so the region's
-        real-image count is computed once -- from a cheap, ``w``-independent
-        `ChangRefsdalChannels.geometry_partition` at the box centre (no
-        exact total) -- and cached.  A candidate whose own image count
-        differs is in a different topological region and must not be served
-        the box's envelope.
-
-        Returns
-        -------
-        int
-            Number of real images in the surrogate box's region.
-        """
-        if self._surrogate_region_nimg is None:
-            surrogate = self.amplification_surrogate
-            gamma_c = 0.5 * float(surrogate.gamma_grid[0]
-                                  + surrogate.gamma_grid[-1])
-            y1_c = 0.5 * float(surrogate.y1_grid[0] + surrogate.y1_grid[-1])
-            y2_c = 0.5 * float(surrogate.y2_grid[0] + surrogate.y2_grid[-1])
-            # The box is trained at beta = 0, kappa = 0 with eigenframe
-            # (y1, y2) axes, so the centre is a genuine training point; the
-            # image count is w-independent, hence a two-point w grid.
-            geom = ChangRefsdalChannels(np.array([1.0, 2.0])).geometry_partition(
-                gamma=gamma_c, y=(y1_c, y2_c), beta=0.0, kappa=0.0)
-            self._surrogate_region_nimg = int(geom.real_mask.sum())
-        return self._surrogate_region_nimg
-
     def _surrogate_coefficients(self, par_dic):
         """
         Surrogate fast-path amplification coefficients, or ``None``.
@@ -1361,17 +1317,29 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         to the same per-bin ``(value, slope)`` coefficients as the exact
         path.
 
+        The partition's certified physical geometry is fed to the
+        surrogate query: the caustic distance (`caustic_distance`), the
+        caustic arc angle (`caustic_theta`, gauge -- used only for the
+        surrogate's cusp-window exclusion), and the real-image count
+        (`real_mask.sum()`).  The surrogate's multi-chart guard stack
+        (`LensAmplificationSurrogate.serve`) keys chart selection on those
+        physical quantities and returns ``served=False`` -- signalling the
+        caller to fall through to the exact path -- when no chart covers
+        the candidate (out of the trained ``w`` / ``gamma`` box, wrong
+        image-count region, inside a chart's caustic floor, or in a cusp
+        window).
+
         Returns ``None`` -- signalling the caller to fall through to the
-        exact path -- when the candidate is out of the surrogate's domain,
-        in a different image-count region, within `_SURROGATE_CAUSTIC_FLOOR`
-        of the caustic, or the surrogate declines to serve (out of the
-        trained ``w`` band).  A `geometry.LensDomainError` raised by the
-        geometry-only partition is NOT caught: it propagates exactly as the
-        exact path's seed evaluation would raise it, preserving the refusal
-        set.  (The surrogate is never queried where the engine would raise
-        an `operator.CancellationError` / `SchwingerCertificationError`:
-        the surrogate's in-domain gate excludes those points via its
-        training-refusal exclusion balls.)
+        exact path -- when the candidate carries ``kappa != 0`` (the
+        surrogate is a ``kappa = 0`` surface), the dense ``w`` grid is
+        non-positive, the cheap `may_serve` pre-check fails, or the
+        surrogate declines to serve.  A `geometry.LensDomainError` raised
+        by the geometry-only partition is NOT caught: it propagates
+        exactly as the exact path's seed evaluation would raise it,
+        preserving the refusal set.  (The surrogate is never queried where
+        the engine would raise an `operator.CancellationError` /
+        `SchwingerCertificationError`: each chart's domain gate excludes
+        those points via its training-refusal exclusion balls.)
 
         Parameters
         ----------
@@ -1387,13 +1355,12 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         lens = self._lens_params(par_dic)
 
         # The surrogate is a kappa = 0 surface BY CONSTRUCTION (the
-        # sampled space eliminates kappa; the emulator's axes are
-        # (log w, gamma, y1_eig, y2_eig) with no kappa dimension).  A
-        # general API candidate may carry kappa != 0, and serving it the
-        # kappa = 0 envelope would be finite-but-wrong — the exact
-        # never-serve-where-wrong violation the domain gate exists to
-        # prevent (Inspector latent finding INS-8a-001).  Fall through
-        # to the exact engine, which handles kappa fully.
+        # sampled space eliminates kappa; the emulator's axes carry no
+        # kappa dimension).  A general API candidate may carry kappa != 0,
+        # and serving it the kappa = 0 envelope would be finite-but-wrong —
+        # the exact never-serve-where-wrong violation the domain gate
+        # exists to prevent (Inspector latent finding INS-8a-001).  Fall
+        # through to the exact engine, which handles kappa fully.
         if lens['kappa'] != 0.0:
             return None
 
@@ -1404,8 +1371,13 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             return None
 
         surrogate = self.amplification_surrogate
-        if not surrogate.in_domain(lens['gamma'], lens['y1'], lens['y2'],
-                                   lens['beta']):
+
+        # Cheap pre-check on (gamma, w-band) BEFORE building the geometry
+        # partition: a candidate no chart's (gamma, log w) box can contain
+        # is unservable, so skip the partition work entirely.
+        log_w = np.log(dense_w)
+        if not surrogate.may_serve(
+                lens['gamma'], float(log_w.min()), float(log_w.max())):
             return None
 
         # Cheap geometry-only partition (no exact total).  A candidate-side
@@ -1414,15 +1386,14 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             gamma=lens['gamma'], y=(lens['y1'], lens['y2']),
             beta=lens['beta'], kappa=lens['kappa'])
 
-        # Topology / caustic guards: the candidate must sit in the box's
-        # image-count region and away from the caustic, else the emulated
-        # envelope is for the wrong (or a sharpening) surface.
-        if (int(geom.real_mask.sum()) != self._surrogate_region_image_count()
-                or geom.caustic_distance < _SURROGATE_CAUSTIC_FLOOR):
-            return None
-
-        envelope_dense, served = surrogate.envelope(
-            dense_w, lens['gamma'], lens['y1'], lens['y2'], lens['beta'])
+        # Full multi-chart guard stack: chart selection keys on the
+        # certified physical caustic distance + real-image count (theta is
+        # used only for cusp exclusion).  Recomputes NO geometry.
+        envelope_dense, served = surrogate.serve(
+            dense_w, gamma=lens['gamma'], y1=lens['y1'], y2=lens['y2'],
+            beta=lens['beta'], eta=geom.caustic_distance,
+            theta=geom.caustic_theta,
+            image_count=int(geom.real_mask.sum()))
         if not served:
             return None
 

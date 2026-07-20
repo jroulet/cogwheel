@@ -2096,3 +2096,230 @@ acceptable per owner ruling), commit, launch 8c.
 Build queue after 8c is therefore: homogenization → cusp fast-serving
 → [driver: full-box training + census] → owner decision; SDK sister-
 repo port proceeds in parallel after 8c proves the fixes.
+
+## 2026-07-20 — Build 8c plan gate (round 1: rejected on one pin)
+
+SDK INCIDENT (proving-run ledger): the Architect reported an
+ENVIRONMENT-WIDE tool failure — Serena, Read, Glob, and subagent file
+tools all 'No such tool available'; it planned blind from the
+pre-loaded SPEC/brief/memories + 2 Professor rounds + 1 Simplifier
+round, and pushed signature re-derivation to the coders. Plan quality
+was nonetheless high (Professor rounds substantive: u=sqrt(eta)
+carries the envelope's own fold branch; theta bounded non-periodic;
+cusp derivation via caustic-speed minima with topology cross-check
+4/6; gamma=1 guard band as the INS-8a-001 parity analog; Arnold/Thom
+completeness argument; retracted its own 'no caustics at gamma>1'
+error). WATCH ITEM: if coders hit the same tool failure, kill the
+build and diagnose the SDK harness (candidate suspects: fix-1 graph
+injection prompt size, fix-8 continuation plumbing, Serena SSE).
+
+Driver pin verification (Architect could not self-verify): all pins
+held EXCEPT WP1's "theta from the partition" —
+ChangRefsdalGeometryPartition drops caustic.theta (stores only
+distance); NearestCausticPoint.theta exists. Rejected with a surgical
+revision: additive caustic_theta field on the partition dataclass
+(brief carve-out), image_count = real_mask.sum(), no re-decomposition.
+RB_ATOL=1.5 / LOADERS / 8a intercept pins confirmed to the Architect
+so round 2 needs no re-verification.
+
+## 2026-07-20 — 8c plan round 2 APPROVED
+
+Revision surgical: additive caustic_theta on the partition dataclass
+(+constructor audit), image_count = real_mask.sum(), files_affected
+11->12; all WPs/Professor/tests otherwise byte-unchanged. Cosmetic
+slip tolerated (WP1 Where says cogwheel/lensing/channels.py; true path
+chang_refsdal/channels.py — find_symbol-first mandate makes it moot).
+Gate ledger: parallel full suite 414p+1xf in 15:50 + serial timing
+10p/1skip in 53s = 8b-levers commit FULLY verified (all downstream
+byte pins held — Newton rewrite propagated zero bytes downstream).
+Post-8b serving probes running (breakdown first, floor ledger next).
+
+## 2026-07-20 — POST-8B SERVING LEDGER (generic-proposal protocol, loaded box)
+
+Component budget (fixed saddle config, best-of-20): tracker 0.01 /
+geometry_partition 2.01 (was 5.6 — Newton delivered; residual =
+quartic images + kernels + switch) / surrogate envelope 0.35 /
+reconstruct 0.11 ms. Envelope scaling 1.2 us/pt at n=300.
+
+Floor ledger (40 perturbed proposals, warm, median):
+- unlensed RB generic floor: 1.56 ms (matches corrected 8a baseline)
+- served lensed: 6.37 ms -> FLOOR RATIO 4.1x (was 6.2x; owner target
+  2-4x: we are AT the band edge)
+- exact lensed saddle: 1.081 s (695x floor); served speedup 170x.
+- fixture lnl |served-exact| = 0.83 nats — SHIP_PARAM_NODES=6
+  budget-limited FIXTURE artifact, not production accuracy (8a
+  h^1.5 scaling; production grids target eps<1e-3 / tier gates).
+Remaining gap to ~2x: geometry_partition residual (~2 ms) +
+likelihood contraction overhead (~2.3 ms) — candidate micro-levers
+for a later pass, NOT scheduled; 8c/8d/8e take precedence.
+Build 8b-levers is now CLOSED on all deliverables.
+
+## 2026-07-20 — OWNER: micro-levers scheduled as Build 8f
+
+Owner: "let's make it 8f, or bundle it into 8d if it's small enough?"
+Driver recommendation delivered and encoded: 8f standalone (not
+bundled) — value-preserving levers need a standing-still baseline
+(8d's moves), 8d is already ~3 honest WPs, and the levers are
+orthogonal to 8d/8e so bundling saves nothing. Sequence: 8c -> 8d
+(homogenization) -> 8e (cusp fast-serving) -> 8f (micro-levers,
+may overlap the full-box training run) -> census -> owner enable
+decision. Todo: todo.d/likelihood_serving-microlevers.md (with the
+pre-brief profiling step for the 2.0 ms partition residual).
+
+## 2026-07-20 — 8c coder-4 (WP3) death + driver hand-finish
+
+coder-4 = WP3 (training driver), error_max_turns at 13:33 with empty
+final message — NOT the tool failure (84 productive tool calls, 1.1 MB
+transcript): a turn-budget death mid-debug. State at death: module +
+CLI written; astroid smoke build SUCCEEDS end to end (2 charts);
+saddle build crashed with LensDomainError (theta outside critical
+wedge) and the coder was probing arc bounds when turns ran out.
+SDK LESSON (port checklist candidate fix 9): extend fix-8
+continuation/sharding to CODERS — max_turns mid-iteration is the same
+class the test-dev continuation solved.
+
+WP1 (coder-3) verified COMPLETE from its transcript: multi-chart
+surrogate.py (frozen TubeChart/FarFieldChart, guard-stack
+select_chart keyed on eta+image_count, single-npz + JSON provenance,
+package-data + override load paths, 8a back-compat), channels.py
+additive caustic_theta (sole constructor), likelihood.py serve()
+rewire with INS-8a-001 kept, default None byte-identical.
+
+DRIVER ROOT-CAUSE of the WP3 bug (deeper than the coder got): train()
+detected arcs at the band CENTER gamma but builds a rectangular
+(gamma, theta) grid over the whole band — the saddle wedge
+|sin 2theta| <= 1/gamma NARROWS with gamma, so center-detected bounds
+are invalid at upper-band gamma nodes (astroid passed only because
+its cusp thetas are gamma-independent). FIX: band_caustic_structure()
+— detect at band edges + center, match arcs in deterministic order,
+INTERSECT theta bounds, UNION (merge) cusp windows, MAX reach;
+structural disagreement across the band raises CausticTopologyError
+("split the band"), never papered over. train() switched to it.
+Smoke rerun in flight. Next: continuation build for WP2 + WP4 + test
+phase (WP1/WP3 recorded as landed facts).
+
+## 2026-07-20 — WP3 hand-finish round 2: two measured root causes
+
+Smoke v2 ran end to end (8 charts, 146 KB) but exposed: (1) saddle
+band shed ~60% into min-width "metamorphosis" slivers; (2) tube
+held-out eps 0.52 astroid / NaN saddle (far-field eps sane 9e-4-7e-3).
+Driver probes pinned both:
+(1) NOT metamorphoses — arc-count flicker 6<->4 at isolated gammas
+    (1.245/1.265/1.305/1.315 in a 21-point sweep): the deltoid
+    branch -1 mid-lobe arcs vanish exactly when _make_arc's single
+    MIDPOINT side-probe (theta ~ 0/pi = near-axial F012 census dead
+    zone) refuses -> arc dropped -> band splitter correctly reports
+    instability. FIX: probe 5 interior thetas (0.5, 0.35, 0.65, 0.2,
+    0.8 of span) before declaring an arc side unknown.
+(2) The coder's _DEFAULT_ETA_MAX = 0.30 breaks the tube coordinate
+    map: (theta, eta) -> caustic(theta) + eta*normal is inverted at
+    query time by nearest-caustic projection ONLY within the local
+    curvature radius (foot-of-normal property); at 0.30 sources leave
+    the validity tube (astroid eps 0.52; saddle theta* lands on
+    foreign arcs -> image-count/arc guards never serve -> NaN).
+    FIX: 0.05 — the build plan's own design value. Constant now
+    carries the full rationale.
+Smoke v3 in flight. Continuation brief drafted
+(build8c_cont_brief.md) — will paste v3 report + these facts.
+
+## 2026-07-20 — WP3/WP1 hand-finish round 3: node-exact + theta wrap
+
+Node isolation: tube spline reproduces the engine at a training node
+to 2.4e-16 (constructed coords) / 2.8e-8 (measured coords) — the tube
+tensor/spline/coordinate machinery is CORRECT; astroid eps 0.43 is
+honest mid-cell coarseness (4 theta nodes over ~1.3 rad; sizing is
+the continuation test-dev's business). The projection round-trips
+(eta, theta) to 12 digits at eta <= 0.05, empirically confirming the
+foot-of-normal design.
+
+Saddle NaN root cause (reason-coded 10/10 held-out): THETA WRAP —
+nearest_caustic_point reports theta in [0, 2pi) while wedge-frame
+charts span negative theta ([-0.385, -0.094]): query 5.940 == -0.343
++ 2pi failed every range test, so saddle tubes never served (astroid
+arcs happen to sit inside [0, 2pi) — asymmetry explained). FIX in
+surrogate.py: _theta_into_frame unwraps queries into the chart frame
+for the range test AND the spline coordinate; cusp windows now use
+circular distance. Near-cusp foreign-arc projections (3/10 samples,
+eta* < eta_constructed, image_count flips) correctly fall through —
+refusal-conservative, matches design. Smoke v4 in flight.
+
+## 2026-07-20 — 8c-cont plan gate round 1: rejected with additions
+
+Architect (tools healthy this time) planned blind on the ORIGINAL
+plan file only — my brief pointed at /tmp (Serena-unreadable); file
+now in-repo at handoff/lensing/build8c_plan_approved.json. Plan
+quality high: WP-CS census + WP-REG registration with the dependency
+INVERTED (census first so the regenerated consumer graph discovers
+the census .load caller — good catch); guard predicates imported from
+surrogate.py as single source of truth; 5-way MECE fall-through
+taxonomy with arc-projection = out-of-box; eps currency
+max-normalized (F016 restated); tiers on certified axes only (F017).
+ACCEPTED: Professor crown-bar override 0.01 -> 0.05 nats (dlnL ~
+eps*SNR^2; 2.5e-5 eps needs ~46 nodes/axis — unreachable; report
+targets not gates; SURFACE TO OWNER at enable decision). REJECTED
+round 1 only to RESTORE two dropped load-bearing tests (serialization
+round-trip w/ provenance; selection determinism/no-overlap incl. a
+negative-theta wedge-frame chart exercising _theta_into_frame) and to
+re-point at the in-repo plan copy.
+
+## 2026-07-20 — OWNER APPROVED: census binning-floor line (driver increment)
+
+Owner approved adding a MEASURED RB-binning-floor line to the census
+report: exact-RB lnL at working delta vs exact-RB at delta/4 on the
+same configs, so the enable-by-default decision sees all three error
+floors side by side (binning-delta, spline-eps, QMC marginalization),
+each with its knob and cost slope. Established in the same exchange
+(recorded for the census designer): the surrogate artifact is
+delta-INDEPENDENT — bins only move the spline's w query abscissae;
+a delta change recomputes only the likelihood's per-event moment
+summaries (seconds), never the artifact. Implement as a DRIVER
+INCREMENT to surrogate_census.py AFTER WP-CS lands (do not perturb
+the in-flight coder); fold into the 8c-cont close-out tests if the
+test dev is still active, else certify with a driver smoke.
+
+## 2026-07-20 — SDK PORT CHECKLIST item 10 + driver dead-man's-switch
+
+INCIDENT (owner-caught): the 8c-cont ESCALATION sat unanswered ~15 min
+because the driver Monitor filter lacked ESCALATION/decision-wait
+markers — with an unattended night this risks watchdog death of a
+waiting build. TWO fixes, both port-checklist material:
+(10a) cli.py _mon_markers now includes ESCALATION|escalation|
+     plan_ready|Plan written|Waiting for a decision, with an incident
+     comment: EVERY state where the pipeline blocks on a human/driver
+     file decision must emit a monitor event. Port to gw sister repo's
+     cli.py monitor suggestion verbatim.
+(10b) Driver-side dead-man's-switch idiom (harness Monitor, not SDK):
+     poll /tmp/build*_approval for plan_ready-without-decision and
+     escalation.json-without-decision older than 180 s; emit once per
+     10-min bucket until answered. Log-pattern-independent — catches
+     decision-wait states nobody anticipated in the filter. Record in
+     the port package as driver operating procedure alongside the
+     "arm the Monitor from the log header" rule.
+
+ADDENDUM to item 10b: the file-presence heartbeat FALSE-POSITIVED —
+the orchestrator CONSUMES decision files (escalation_fix deleted on
+processing) but leaves escalation.json behind, so file presence
+cannot distinguish answered from pending. Correct signal = the build
+LOG'S LAST LINE ("[file-based] Waiting for a decision file ..." while
+blocked; moves past it once answered). Dead-man's-switch v2 polls
+log tails (age-gated, 10-min re-fire). Port note: if the sister-repo
+orchestrator's file lifecycle differs, re-derive the pending signal
+there — do not copy the file-presence check.
+
+## 2026-07-20 — 8c-cont escalation 2: ACCEPT + driver-commissioned test dev
+
+Second escalation was the SAME finding (census tests missing) after
+the fix round delivered only the coder-side items (sliver provenance
+persisted + census default read path; serialization round-trip now
+covers the real field). ROOT CAUSE, structural: revision loops route
+findings to coders/architect only — they CANNOT re-enter the
+test-development phase, so "missing test deliverable" findings
+dead-loop to escalation. SDK PORT CHECKLIST item 11: give revision
+loops a test-dev commissioning path (or auto-route that finding class
+to a fresh test dev). Decision: escalation_accept with the
+deliverable REASSIGNED to a driver-commissioned independent Test
+Developer (opus, 8b-completion pattern) — full brief with the ten
+descriptions, binding bars 0.05/0.1/1.5, both falsifiables, F010
+mutation, theta-wrap/arc-projection traps. HARD PRECONDITION of the
+driver commit gate: this suite green. Build proceeding past
+Inspector: PASS into close-out phases.

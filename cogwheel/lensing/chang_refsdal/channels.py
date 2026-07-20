@@ -872,6 +872,11 @@ class ChangRefsdalGeometryPartition:
     caustic_distance : float
         Source-plane distance from the source to the caustic; the
         in-domain proximity the likelihood reads.
+    caustic_theta : float
+        Polar angle in ``[0, 2*pi)`` parametrizing the critical curve at
+        the closest caustic point (`geometry.NearestCausticPoint.theta`).
+        A GAUGE coordinate carried for the surrogate's cusp-window
+        exclusion test (Build 8c); no engine logic consumes it.
     """
 
     w: np.ndarray
@@ -881,6 +886,7 @@ class ChangRefsdalGeometryPartition:
     critical_delay: float
     real_mask: np.ndarray
     caustic_distance: float
+    caustic_theta: float
 
 
 class ChangRefsdalChannels:
@@ -1129,7 +1135,8 @@ class ChangRefsdalChannels:
             switch=switch,
             critical_delay=float(critical_delay),
             real_mask=real_mask,
-            caustic_distance=float(caustic.distance))
+            caustic_distance=float(caustic.distance),
+            caustic_theta=float(caustic.theta))
 
     def evaluate_path(self, path: Iterable[dict]
                       ) -> list[ChangRefsdalPartition]:

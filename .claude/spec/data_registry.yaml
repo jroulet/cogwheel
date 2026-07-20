@@ -25,6 +25,9 @@ schema_version: "1.0.0"
 # Different machines override roots via environment variables or .env files.
 
 storage_roots:
+  package_data:
+    path: "cogwheel/data"
+    description: "Shipped package data directory (installed with cogwheel)."
   # Example:
   # local:
   #   path: "./data"
@@ -39,7 +42,15 @@ storage_roots:
 # ── Data entries ─────────────────────────────────────────────────────────
 # Each entry describes a data file or directory.
 
-entries: {}
+entries:
+  lens_amplification_surrogate:
+    description: "Trained multi-chart LensAmplificationSurrogate emulator of the microlensing amplification envelope."
+    storage_root: "package_data"
+    relative_path: "lens_amplification_surrogate.npz"
+    format: "npz"
+    created_by: "scripts/train_lens_surrogate.py"
+    schema_ref: "lens_amplification_surrogate"
+    notes: "Off by default; regenerate with: python scripts/train_lens_surrogate.py"
   # Example:
   # training_data:
   #   description: "Preprocessed training dataset"

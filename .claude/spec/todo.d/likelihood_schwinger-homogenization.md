@@ -11,8 +11,12 @@ section: Backlog
   surrogate (see `likelihood_envelope-surrogate.md`) as the production
   speed layer trained on Schwinger; resolved high-w served by geometric
   optics + per-image relative binning; the narrow unresolved-high-w
-  near-caustic corner served by the fold/cusp uniform (Airy) patch
-  (v-plane evaluator demoted to not-needed-unless-Airy-falls-short).
+  near-caustic corner left as a NAMED refusal / exact fallback in THIS
+  build — all fold/cusp uniform-asymptotics (Airy/Pearcey) serving
+  belongs to the subsequent cusp fast-serving build
+  ([[likelihood_cusp-fast-serving]]; scope fence set 2026-07-20 so the
+  two builds do not collide), with the v-plane evaluator demoted to
+  not-needed-unless-the-uniform-patch-falls-short.
   Interim state to be dissolved (Build 7a, deliberate): legacy
   bit-frozen wherever it certifies, Schwinger only for saddle parity
   and as the strong-shear refusal fallback (w <= 60, gamma' > 0).

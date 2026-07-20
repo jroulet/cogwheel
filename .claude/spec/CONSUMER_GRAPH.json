@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "generated_by": "scripts/regenerate_consumer_graph.py (jedi.goto + ripgrep)",
-  "generated_at": "2026-07-16",
+  "generated_at": "2026-07-20",
   "loaders": {
     "EventData.from_npz": {
       "artifact": "event_data_npz",
@@ -35,6 +35,38 @@
         {
           "name": "lookup_table",
           "file": "cogwheel/likelihood/marginalization/lookup_table.py"
+        }
+      ]
+    },
+    "LensAmplificationSurrogate.load": {
+      "artifact": "lens_amplification_surrogate",
+      "defined_in": [
+        "cogwheel/lensing/surrogate.py"
+      ],
+      "callers": [
+        {
+          "name": "SerializationMultiChartTestCase.test_round_trip_preserves_every_chart_field",
+          "file": "cogwheel/tests/test_lensing_surrogate.py"
+        },
+        {
+          "name": "SerializationMultiChartTestCase.test_round_trip_preserves_full_provenance",
+          "file": "cogwheel/tests/test_lensing_surrogate.py"
+        },
+        {
+          "name": "SerializationMultiChartTestCase.test_round_trip_served_values_are_bit_identical",
+          "file": "cogwheel/tests/test_lensing_surrogate.py"
+        },
+        {
+          "name": "SerializationTestCase.test_npz_round_trip_is_bit_identical",
+          "file": "cogwheel/tests/test_lensing_surrogate.py"
+        },
+        {
+          "name": "_load_or_build",
+          "file": "cogwheel/lensing/surrogate_training.py"
+        },
+        {
+          "name": "run",
+          "file": "cogwheel/lensing/surrogate_census.py"
         }
       ]
     }

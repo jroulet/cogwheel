@@ -67,6 +67,15 @@ LOADERS: dict[str, dict] = {
              "cogwheel.likelihood.marginalization.lookup_table.LookupTable"),
         ],
     },
+    "LensAmplificationSurrogate.load": {
+        "artifact": "lens_amplification_surrogate",
+        "method": "load",
+        "class_name": "LensAmplificationSurrogate",
+        "definitions": [
+            ("cogwheel/lensing/surrogate.py",
+             "cogwheel.lensing.surrogate.LensAmplificationSurrogate.load"),
+        ],
+    },
 }
 
 # ripgrep --glob exclusions. Keep in sync with EXCLUDED_PREFIXES in

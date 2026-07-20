@@ -81,6 +81,7 @@ comparisons and `tearDown` fails a test that asserted nothing.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import functools
 import inspect
 import json
@@ -270,15 +271,28 @@ def _train(box: tuple, n_param: int) -> LensAmplificationSurrogate:
 def _refusal_surrogate() -> LensAmplificationSurrogate:
     """A surrogate whose ``from_engine`` recorded real refusals.
 
-    The gamma axis ``linspace(0.8, 1.2, 5)`` lands a node EXACTLY on the
+    The gamma axis ``linspace(0.8, 1.3, 6)`` lands a node EXACTLY on the
     ``gamma = 1`` parity boundary (``det A = 0`` at ``kappa = 0``), so the
     whole ``gamma = 1`` column refuses (`LensDomainError`) while the other
     columns train cleanly -- a partial, deterministic refusal set for the
     domain-gate and F010 tests.
+
+    The box straddles ``gamma = 1`` (unavoidable: the refusal we exercise
+    IS the ``gamma = 1`` parity boundary), but its CENTRE must be a valid
+    config: the multi-chart `from_engine` reads the box-centre region
+    label via a `geometry_partition` that is NOT wrapped in the refusal
+    handler, so a box centred exactly on ``gamma = 1`` would raise there.
+    The 8a box ``(0.8, 1.2)`` centred on ``gamma = 1`` exactly; the
+    intent-preserving ``(0.8, 1.3)`` keeps the identical ``0.1`` spacing
+    and the same ``gamma = 1`` refusal column while nudging the centre to
+    the valid ``gamma = 1.05`` (a saddle-side config that trains cleanly,
+    as the passing saddle box ``SAD_BOX`` witnesses).  No assertion is
+    weakened: spacing, the refusal column, the served interior point and
+    the out-of-box probes are all unchanged.
     """
     return LensAmplificationSurrogate.from_engine(
-        gamma_range=(0.8, 1.2), y1_range=(0.2, 0.5), y2_range=(0.1, 0.4),
-        w_range=(0.5, 8.0), n_gamma=5, n_y1=4, n_y2=4,
+        gamma_range=(0.8, 1.3), y1_range=(0.2, 0.5), y2_range=(0.1, 0.4),
+        w_range=(0.5, 8.0), n_gamma=6, n_y1=4, n_y2=4,
         w_nodes_per_decade=6)
 
 
@@ -623,7 +637,10 @@ class DomainGateTestCase(SurrogateTestCase):
         False (the exclusion ball), and the refused point itself -> False."""
         refused = self.sur.refused_points[0]
         gamma_r, y1_r, y2_r = refused
-        spacing = self.sur._param_spacing
+        # 8a exposed the exclusion-ball spacing on the surrogate; the
+        # multi-chart layout carries it per-chart, so read it off the
+        # (single) far-field chart -- the same array, same intent.
+        spacing = self.sur.charts[0].param_spacing
         for frac in (0.0, 0.3):  # exactly on it, and just inside the ball
             with self.subTest(offset_frac=frac):
                 self.n_checks += 1
@@ -666,11 +683,21 @@ class DomainGateTestCase(SurrogateTestCase):
 
         GREEN: at every refused training point the surrogate declines
         (``served=False``) -- it never emulates a value the engine refused.
-        RED under mutation: patching ``in_domain`` to always claim
-        in-domain makes ``envelope`` serve a (fabricated, zero-filled)
-        value at that same refused point, so the ``served=False``
-        invariant the green test relies on FLIPS -- proving the gate is
-        load-bearing, not decorative."""
+        RED under mutation: patching the exclusion-ball helper
+        (`surrogate._in_exclusion_ball`, the module global both
+        ``envelope`` and ``in_domain`` resolve through
+        `_farfield_raw_chart`) to claim NO point is ever in a refusal ball
+        makes ``envelope`` serve a (fabricated) value -- and ``in_domain``
+        claim domain -- at that same refused point, so the
+        ``served=False`` invariant the green test relies on FLIPS,
+        proving the gate is load-bearing, not decorative.
+
+        NOTE (8a -> multi-chart re-target): the 8a suite mutated
+        ``in_domain`` directly because 8a's ``envelope`` consulted it; the
+        multi-chart ``envelope`` instead consults `_farfield_raw_chart`,
+        whose load-bearing guard IS the exclusion ball named in this
+        docstring.  Mutating that exact guard preserves the original
+        intent (and now flips BOTH ``envelope`` and ``in_domain`` red)."""
         gamma_r, y1_r, y2_r = self.sur.refused_points[0]
         w = np.array([1.0, 2.0, 4.0])
 
@@ -678,15 +705,26 @@ class DomainGateTestCase(SurrogateTestCase):
         self.n_checks += 1
         self.assertFalse(served,
                          'un-mutated gate served a refused training point')
+        self.n_checks += 1
+        self.assertFalse(
+            self.sur.in_domain(gamma_r, y1_r, y2_r, 0.0),
+            'un-mutated gate claimed a refused training point in-domain')
 
-        with mock.patch.object(self.sur, 'in_domain', return_value=True):
+        with mock.patch.object(surrogate_module, '_in_exclusion_ball',
+                               return_value=False):
             _env_mut, served_mut = self.sur.envelope(
                 w, gamma_r, y1_r, y2_r, 0.0)
+            in_domain_mut = self.sur.in_domain(gamma_r, y1_r, y2_r, 0.0)
         self.n_checks += 1
         self.assertTrue(
             served_mut,
-            'mutating in_domain did NOT flip the served flag -- the domain '
-            'gate is not what guards refused points (F010 has no teeth)')
+            'defeating the exclusion ball did NOT flip the served flag -- '
+            'the ball is not what guards refused points (F010 has no teeth)')
+        self.n_checks += 1
+        self.assertTrue(
+            in_domain_mut,
+            'defeating the exclusion ball did NOT flip in_domain -- the '
+            'ball is not the load-bearing domain guard (F010 has no teeth)')
 
     def _plot_served_slice(self):
         OUTPUT_DIR.mkdir(exist_ok=True)
@@ -1200,3 +1238,439 @@ class TimingSmokeTestCase(SurrogateTestCase):
         self.assertGreater(speedup, TIMING_SPEEDUP_MIN,
                            f'saddle speedup {speedup:.1f}x below '
                            f'{TIMING_SPEEDUP_MIN}x')
+
+
+# ==========================================================================
+# Multi-chart fixture (Build 8c WP1) -- a 4-chart surrogate assembled from
+# synthetic smooth value tensors (NO engine calls): a TubeChart AND a
+# FarFieldChart for BOTH parities (positive/astroid, saddle/deltoid).  Drives
+# the serialization round-trip (TEST 12) and chart-selection determinism /
+# no-overlap (TEST 13) gates on the new multi-chart public API.  The values
+# are irrelevant to those gates (which pin structure and bit-identity), only
+# that they are smooth and reproducible, so a closed-form analytic surface
+# stands in for the engine.
+# ==========================================================================
+
+#: Caustic-distance band served by the fixture TUBE charts,
+#: ``[MC_ETA_FLOOR, MC_ETA_MAX]``.  The far-field charts serve
+#: ``eta > MC_ETA_OVERLAP_MIN``, so ``eta in (MC_ETA_OVERLAP_MIN,
+#: MC_ETA_MAX]`` is a genuine tube/far-field OVERLAP band where tube
+#: priority (Professor Q7 step 7) must resolve the selection.
+MC_ETA_FLOOR = 0.005
+MC_ETA_MAX = 0.05
+MC_ETA_OVERLAP_MIN = 0.02
+
+#: Fixture ``ln w`` band shared by every chart (``w in [0.5, 20]``); every
+#: query below draws its frequencies from inside this band so
+#: `_log_w_band_inside` never gates the selection.
+MC_LOG_W_GRID = np.log(np.geomspace(0.5, 20.0, 5))
+
+#: Frequencies fed to every multi-chart query (interior to the fixture band).
+MC_W_ARRAY = np.geomspace(0.7, 15.0, 12)
+
+
+def _smooth_envelope_tensor(gamma_grid: np.ndarray, p1_grid: np.ndarray,
+                            p2_grid: np.ndarray, log_w_grid: np.ndarray,
+                            phase: float) -> tuple[np.ndarray, np.ndarray]:
+    """Deterministic smooth ``(n_w, n_gamma, n_p1, n_p2)`` real/imag tensors.
+
+    A closed-form analytic surface (products of low-frequency sinusoids and
+    exponentials) that the tensor-cubic spline fits stably.  ``phase``
+    decorrelates the four fixture charts so a chart mix-up in save/load or
+    selection would produce visibly different served values.  The absolute
+    values carry no physical meaning -- these gates pin structure, not
+    reconstruction accuracy (that is `EnvelopeReconstructionTestCase`).
+    """
+    grid_w, grid_g, grid_1, grid_2 = np.meshgrid(
+        log_w_grid, gamma_grid, p1_grid, p2_grid, indexing='ij')
+    real = (np.cos(0.5 * grid_w + phase) * (1.0 + 0.3 * grid_g)
+            * np.exp(-0.4 * grid_1) * (1.0 + 0.2 * grid_2))
+    imag = (np.sin(0.5 * grid_w + phase) * (1.0 - 0.2 * grid_g)
+            * (1.0 + 0.1 * grid_1) * np.cos(0.3 * grid_2))
+    return real, imag
+
+
+@functools.lru_cache(maxsize=1)
+def _multichart_fixture() -> LensAmplificationSurrogate:
+    """A 4-chart multi-chart surrogate built WITHOUT engine calls.
+
+    Charts (in list order -- the order `select_chart` scans): positive
+    ``TubeChart``, positive ``FarFieldChart``, saddle ``TubeChart``, saddle
+    ``FarFieldChart``.  The two parities occupy DISJOINT gamma bands
+    (``[0.2, 0.5]`` vs ``[1.1, 1.4]``) so no query is ever ambiguous across
+    parity; within a parity the tube/far-field OVERLAP band is the only
+    genuine double-match, resolved by tube priority.  The saddle tube arc is
+    a NEGATIVE wedge ``theta in [-0.39, -0.09]`` so a ``[0, 2*pi)`` caustic
+    angle must route through the `_theta_into_frame` unwrap to select it.
+    """
+    log_w = MC_LOG_W_GRID
+    u_grid = np.linspace(np.sqrt(MC_ETA_FLOOR), np.sqrt(MC_ETA_MAX), 4)
+
+    # Positive parity (astroid, image_count = 2).
+    pos_gamma = np.linspace(0.2, 0.5, 4)
+    pos_theta = np.linspace(0.2, 1.2, 4)
+    real, imag = _smooth_envelope_tensor(pos_gamma, u_grid, pos_theta,
+                                         log_w, 0.0)
+    pos_tube = surrogate_module.TubeChart.from_values(
+        gamma_grid=pos_gamma, u_grid=u_grid, theta_grid=pos_theta,
+        log_w_grid=log_w, envelope_real=real, envelope_imag=imag,
+        image_count=2, parity=1, eta_floor=MC_ETA_FLOOR, eta_max=MC_ETA_MAX,
+        cusp_windows=[(0.2, 0.1)])
+    pos_y1 = np.linspace(0.5, 0.85, 4)
+    pos_y2 = np.linspace(0.2, 0.45, 4)
+    real, imag = _smooth_envelope_tensor(pos_gamma, pos_y1, pos_y2,
+                                         log_w, 0.5)
+    pos_ff = surrogate_module.FarFieldChart.from_values(
+        gamma_grid=pos_gamma, y1_grid=pos_y1, y2_grid=pos_y2, log_w_grid=log_w,
+        envelope_real=real, envelope_imag=imag, image_count=2, parity=1,
+        eta_overlap_min=MC_ETA_OVERLAP_MIN)
+
+    # Saddle parity (deltoid, image_count = 4); NEGATIVE-wedge tube arc.
+    sad_gamma = np.linspace(1.1, 1.4, 4)
+    sad_theta = np.linspace(-0.39, -0.09, 4)
+    real, imag = _smooth_envelope_tensor(sad_gamma, u_grid, sad_theta,
+                                         log_w, 1.0)
+    sad_tube = surrogate_module.TubeChart.from_values(
+        gamma_grid=sad_gamma, u_grid=u_grid, theta_grid=sad_theta,
+        log_w_grid=log_w, envelope_real=real, envelope_imag=imag,
+        image_count=4, parity=-1, eta_floor=MC_ETA_FLOOR, eta_max=MC_ETA_MAX,
+        cusp_windows=[(-0.39, 0.05)])
+    sad_y1 = np.linspace(0.2, 0.5, 4)
+    sad_y2 = np.linspace(0.1, 0.3, 4)
+    real, imag = _smooth_envelope_tensor(sad_gamma, sad_y1, sad_y2,
+                                         log_w, 1.5)
+    sad_ff = surrogate_module.FarFieldChart.from_values(
+        gamma_grid=sad_gamma, y1_grid=sad_y1, y2_grid=sad_y2, log_w_grid=log_w,
+        envelope_real=real, envelope_imag=imag, image_count=4, parity=-1,
+        eta_overlap_min=MC_ETA_OVERLAP_MIN,
+        refused_points=np.array([[1.35, 0.25, 0.15]]))
+
+    # Provenance carries ONLY JSON-native containers (lists, not tuples) so a
+    # json.dumps/loads round trip is value-equal.
+    provenance = {
+        'training_grid': {'n_gamma': 4, 'n_u': 4, 'n_theta': 4,
+                          'n_w': int(log_w.size)},
+        'engine_version': '8c-fixture',
+        'engine_commit': 'deadbeefcafef00d',
+        'training_hash': 'fixturehash01234567',
+        'prior_box': {'gamma': [0.2, 1.4], 'w': [0.5, 20.0]},
+        'chart_count': 4,
+        'chart_types': ['tube', 'farfield', 'tube', 'farfield'],
+        'dropped_gamma_slivers': [[0.99, 1.01]]}
+    return LensAmplificationSurrogate(
+        [pos_tube, pos_ff, sad_tube, sad_ff], provenance)
+
+
+#: Multi-chart query set (TEST 13): each entry is
+#: ``(label, kwargs, expected_chart_index_or_None)``.  ``expected`` is the
+#: 0-based index into ``surrogate.charts`` the guard stack MUST select, or
+#: ``None`` for a deliberate fall-through.  Spans tube-only, far-field-only,
+#: the tube/far-field OVERLAP band, a cusp window, the gamma-guard band,
+#: out-of-box, and a NEGATIVE-theta saddle-wedge query (unwrap path).
+MC_QUERIES = (
+    ('pos_tube_only',
+     dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.0, eta=0.008, theta=0.70,
+          image_count=2), 0),
+    ('pos_farfield_only',
+     dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.0, eta=0.10, theta=0.70,
+          image_count=2), 1),
+    ('pos_overlap_tube_wins',
+     dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.0, eta=0.03, theta=0.70,
+          image_count=2), 0),
+    ('pos_cusp_fall_through',
+     dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.0, eta=0.01, theta=0.20,
+          image_count=2), None),
+    ('gamma_guard_fall_through',
+     dict(gamma=1.0, y1=0.30, y2=0.20, beta=0.0, eta=0.03, theta=0.70,
+          image_count=2), None),
+    ('out_of_box_fall_through',
+     dict(gamma=5.0, y1=0.30, y2=0.20, beta=0.0, eta=0.03, theta=0.70,
+          image_count=2), None),
+    ('sad_negtheta_tube_unwrap',
+     dict(gamma=1.25, y1=0.35, y2=0.20, beta=0.0, eta=0.01,
+          theta=2.0 * np.pi - 0.19, image_count=4), 2),
+    ('sad_farfield_only',
+     dict(gamma=1.25, y1=0.35, y2=0.20, beta=0.0, eta=0.10,
+          theta=2.0 * np.pi - 0.19, image_count=4), 3),
+)
+
+
+def _select_for_query(sur: LensAmplificationSurrogate, kwargs: dict):
+    """Run the guard stack for one query exactly as `serve` does internally.
+
+    Rotates the source into the shear eigenframe (as `serve`) and forwards
+    the certified physical ``(gamma, eta, image_count)`` plus the query
+    ``ln w`` band to `select_chart`; returns the selected chart or ``None``.
+    """
+    log_w = np.log(MC_W_ARRAY)
+    y1_eig, y2_eig = _rotate_to_eigenframe(kwargs['y1'], kwargs['y2'],
+                                           kwargs['beta'])
+    return surrogate_module.select_chart(
+        sur.charts, gamma=kwargs['gamma'], log_w_min=float(log_w.min()),
+        log_w_max=float(log_w.max()), eta=kwargs['eta'], theta=kwargs['theta'],
+        image_count=kwargs['image_count'], y1_eig=y1_eig, y2_eig=y2_eig)
+
+
+def _serve_for_query(sur: LensAmplificationSurrogate, kwargs: dict):
+    """``sur.serve(...)`` for a query dict (returns ``(E_array, served)``)."""
+    return sur.serve(MC_W_ARRAY, **kwargs)
+
+
+# ==========================================================================
+# TEST 13 -- chart-selection determinism + no-overlap (Build 8c WP1)
+# ==========================================================================
+
+class ChartSelectionTestCase(SurrogateTestCase):
+    """The multi-chart guard stack is DETERMINISTIC and its charts partition
+    the query space with tube priority in the overlap band.
+
+    Pins (Build-8c plan TEST 13): repeated queries return bit-identical chart
+    choices AND bit-identical served values; no query is served by two charts
+    (in the tube/far-field overlap band tube priority resolves selection
+    deterministically); a NEGATIVE-theta saddle query selects the correct
+    wedge chart via the `_theta_into_frame` unwrap (not a fall-through
+    artifact).  A self-falsification test shrinks the tube band so the
+    overlap selection flips to far-field, proving the priority decision is
+    load-bearing.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.sur = _multichart_fixture()
+
+    def test_expected_chart_selected_per_query(self):
+        """Every query selects the guard stack's documented chart (or falls
+        through), and the negative-theta saddle query rides the unwrap path
+        rather than falling through."""
+        table = {}
+        for label, kwargs, expected_index in MC_QUERIES:
+            with self.subTest(query=label):
+                chart = _select_for_query(self.sur, kwargs)
+                self.n_checks += 1
+                if expected_index is None:
+                    self.assertIsNone(
+                        chart, f'{label}: expected fall-through, got a chart')
+                    table[label] = None
+                else:
+                    self.assertIs(
+                        chart, self.sur.charts[expected_index],
+                        f'{label}: selected the wrong chart')
+                    table[label] = expected_index
+        # The negative-theta saddle query must be SERVED by the tube wedge
+        # (index 2), i.e. the unwrap path fired -- a raw range test on the
+        # [0, 2*pi) angle would have fall-through'd it.
+        self.n_checks += 1
+        self.assertEqual(table['sad_negtheta_tube_unwrap'], 2,
+                         'the negative-theta wedge unwrap did not fire')
+        print('\n[ChartSelection] query -> chart index:', table)
+
+    def test_selection_and_served_values_are_deterministic(self):
+        """Running the whole batch twice yields bit-identical chart choices
+        AND bit-identical served envelopes/flags."""
+        for label, kwargs, _expected in MC_QUERIES:
+            with self.subTest(query=label):
+                chart_a = _select_for_query(self.sur, kwargs)
+                chart_b = _select_for_query(self.sur, kwargs)
+                self.n_checks += 1
+                self.assertIs(chart_a, chart_b,
+                              f'{label}: chart choice not deterministic')
+                env_a, served_a = _serve_for_query(self.sur, kwargs)
+                env_b, served_b = _serve_for_query(self.sur, kwargs)
+                self.n_checks += 1
+                self.assertEqual(served_a, served_b,
+                                 f'{label}: served flag not deterministic')
+                np.testing.assert_array_equal(
+                    env_a, env_b,
+                    err_msg=f'{label}: served envelope not bit-identical')
+
+    def test_overlap_band_is_a_genuine_double_match_tube_wins(self):
+        """In the overlap band BOTH the positive tube and positive far-field
+        charts individually serve the query, yet `select_chart` returns the
+        tube -- so the partition is enforced by priority, not by disjoint
+        support."""
+        _label, kwargs, _expected = MC_QUERIES[2]  # pos_overlap_tube_wins
+        log_w = np.log(MC_W_ARRAY)
+        y1_eig, y2_eig = _rotate_to_eigenframe(kwargs['y1'], kwargs['y2'],
+                                               kwargs['beta'])
+        pos_tube, pos_ff = self.sur.charts[0], self.sur.charts[1]
+        tube_serves = surrogate_module._tube_serves(
+            pos_tube, kwargs['gamma'], float(log_w.min()), float(log_w.max()),
+            kwargs['eta'], kwargs['theta'], kwargs['image_count'])
+        ff_serves = surrogate_module._farfield_serves(
+            pos_ff, kwargs['gamma'], float(log_w.min()), float(log_w.max()),
+            kwargs['eta'], kwargs['image_count'], y1_eig, y2_eig)
+        self.n_checks += 1
+        self.assertTrue(tube_serves and ff_serves,
+                        'overlap band is not a genuine double match -- '
+                        're-tune eta bands')
+        selected = _select_for_query(self.sur, kwargs)
+        self.n_checks += 1
+        self.assertIs(selected, pos_tube,
+                      'tube priority did not win the overlap band')
+
+    def test_no_query_is_served_by_two_charts(self):
+        """Across the batch, at most one chart individually serves each query
+        (except the by-design overlap band, covered above): the served query
+        is matched by exactly one chart in the priority order."""
+        for label, kwargs, expected_index in MC_QUERIES:
+            if expected_index is None or label == 'pos_overlap_tube_wins':
+                continue
+            with self.subTest(query=label):
+                matches = [i for i, _c in enumerate(self.sur.charts)
+                           if _select_for_query(
+                               LensAmplificationSurrogate(
+                                   [_c], self.sur.provenance), kwargs)
+                           is not None]
+                self.n_checks += 1
+                self.assertEqual(
+                    matches, [expected_index],
+                    f'{label}: expected exactly chart {expected_index} to '
+                    f'match, got {matches}')
+
+    def test_shrinking_tube_band_flips_overlap_selection(self):
+        """Self-falsification: shrinking the positive tube ``eta_max`` below
+        the overlap query drops the tube out of the band, so `select_chart`
+        must flip from the tube (index 0) to the far-field (index 1).  A
+        selection that could never change would be untestable."""
+        _label, kwargs, _expected = MC_QUERIES[2]  # eta = 0.03
+        baseline = _select_for_query(self.sur, kwargs)
+        self.n_checks += 1
+        self.assertIs(baseline, self.sur.charts[0],
+                      'precondition: baseline overlap query must serve tube')
+        # Mutate a COPY of the tube chart (never the shared fixture).
+        shrunk_tube = dataclasses.replace(self.sur.charts[0], eta_max=0.025)
+        mutated = LensAmplificationSurrogate(
+            [shrunk_tube, self.sur.charts[1], self.sur.charts[2],
+             self.sur.charts[3]], self.sur.provenance)
+        flipped = _select_for_query(mutated, kwargs)
+        self.n_checks += 1
+        self.assertIs(flipped, mutated.charts[1],
+                      'shrinking the tube band did not flip selection to the '
+                      'far-field chart -- the priority decision has no teeth')
+
+
+# ==========================================================================
+# TEST 12 -- multi-chart serialization round-trip with provenance (WP1)
+# ==========================================================================
+
+class SerializationMultiChartTestCase(SurrogateTestCase):
+    """A multi-chart surrogate ``save``/``load`` round-trips through a SINGLE
+    self-contained ``.npz`` -- bit-for-bit, provenance and all.
+
+    Pins (Build-8c plan TEST 12): served values are bit-identical
+    (``max|delta| == 0``); every chart's grids, knots and real/imag
+    coefficients survive exactly; all exclusion data survives (``eta_floor``,
+    ``eta_max``, ``cusp_windows`` for tubes; ``eta_overlap_min`` and the
+    refusal balls for far-field charts); the ``dropped_gamma_slivers``
+    provenance and the full JSON provenance scalar survive; and NO separate
+    manifest/sidecar file is produced.
+    """
+
+    #: Round-trip probe set spanning tube, far-field and overlap regions of
+    #: BOTH parities (a subset of ``MC_QUERIES`` that is actually served).
+    PROBE_LABELS = ('pos_tube_only', 'pos_farfield_only',
+                    'pos_overlap_tube_wins', 'sad_negtheta_tube_unwrap',
+                    'sad_farfield_only')
+
+    def setUp(self):
+        super().setUp()
+        self.sur = _multichart_fixture()
+        self.probes = [kwargs for label, kwargs, _e in MC_QUERIES
+                       if label in self.PROBE_LABELS]
+
+    def _assert_chart_fields_identical(self, chart_a, chart_b,
+                                       tag: str) -> None:
+        """Every dataclass field of two charts is equal (arrays bit-for-bit,
+        tuples element-wise, scalars exactly)."""
+        self.assertIs(type(chart_a), type(chart_b),
+                      f'{tag}: chart kind changed on round trip')
+        for field in dataclasses.fields(chart_a):
+            value_a = getattr(chart_a, field.name)
+            value_b = getattr(chart_b, field.name)
+            self.n_checks += 1
+            with self.subTest(tag=tag, field=field.name):
+                if isinstance(value_a, np.ndarray):
+                    np.testing.assert_array_equal(
+                        value_a, value_b,
+                        err_msg=f'{tag}.{field.name} changed')
+                elif isinstance(value_a, tuple):
+                    self.assertEqual(len(value_a), len(value_b),
+                                     f'{tag}.{field.name} length changed')
+                    for elem_a, elem_b in zip(value_a, value_b):
+                        if isinstance(elem_a, np.ndarray):
+                            np.testing.assert_array_equal(
+                                elem_a, elem_b,
+                                err_msg=f'{tag}.{field.name} element changed')
+                        else:
+                            self.assertEqual(
+                                elem_a, elem_b,
+                                f'{tag}.{field.name} element changed')
+                else:
+                    self.assertEqual(value_a, value_b,
+                                     f'{tag}.{field.name} changed')
+
+    def test_save_produces_a_single_self_contained_npz(self):
+        """``save`` writes exactly one ``.npz`` and no manifest/sidecar."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.sur.save(pathlib.Path(tmp) / 'sur.npz')
+            written = sorted(os.listdir(tmp))
+        self.n_checks += 1
+        self.assertEqual(written, ['sur.npz'],
+                         f'expected a single self-contained npz, got {written}')
+
+    def test_round_trip_served_values_are_bit_identical(self):
+        """Reloaded served envelopes/flags match the original to the bit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'sur.npz'
+            self.sur.save(path)
+            reloaded = LensAmplificationSurrogate.load(path)
+        max_delta = 0.0
+        for kwargs in self.probes:
+            with self.subTest(config=kwargs):
+                env_a, served_a = _serve_for_query(self.sur, kwargs)
+                env_b, served_b = _serve_for_query(reloaded, kwargs)
+                self.n_checks += 1
+                self.assertTrue(served_a and served_b,
+                                'probe was not served -- retune probe set')
+                np.testing.assert_array_equal(
+                    env_a, env_b,
+                    err_msg=f'served envelope changed for {kwargs}')
+                max_delta = max(max_delta,
+                                float(np.max(np.abs(env_a - env_b))))
+        self.n_checks += 1
+        self.assertEqual(max_delta, 0.0,
+                         'served values not bit-identical after round trip')
+        print(f'\n[SerializationMultiChart] max|delta served| = {max_delta}')
+
+    def test_round_trip_preserves_every_chart_field(self):
+        """Grids, knots, coefficients and all exclusion data survive."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'sur.npz'
+            self.sur.save(path)
+            reloaded = LensAmplificationSurrogate.load(path)
+        self.n_checks += 1
+        self.assertEqual(len(self.sur.charts), len(reloaded.charts),
+                         'chart count changed on round trip')
+        for index, (chart_a, chart_b) in enumerate(
+                zip(self.sur.charts, reloaded.charts)):
+            self._assert_chart_fields_identical(chart_a, chart_b,
+                                                f'chart{index}')
+
+    def test_round_trip_preserves_full_provenance(self):
+        """The JSON provenance scalar -- training grid, engine
+        version/commit, training hash, prior box, chart count/types and the
+        ``dropped_gamma_slivers`` -- survives value-equal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'sur.npz'
+            self.sur.save(path)
+            reloaded = LensAmplificationSurrogate.load(path)
+        required = ('training_grid', 'engine_version', 'engine_commit',
+                    'training_hash', 'prior_box', 'chart_count',
+                    'chart_types', 'dropped_gamma_slivers')
+        for key in required:
+            self.n_checks += 1
+            self.assertIn(key, reloaded.provenance,
+                          f'provenance dropped {key!r} on round trip')
+        self.n_checks += 1
+        self.assertEqual(self.sur.provenance, reloaded.provenance,
+                         'provenance dict not value-equal after round trip')

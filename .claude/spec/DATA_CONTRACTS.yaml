@@ -194,3 +194,20 @@ artifacts:
         function: "make_corner_plot"
     conventions_applied:
       - units
+
+  lens_amplification_surrogate:
+    description: "Offline-trained multi-chart cubic-spline emulator of the microlensing SACR-C amplification envelope (LensAmplificationSurrogate). Single npz with per-chart coefficient/knot arrays and a JSON provenance scalar; loaded via LensAmplificationSurrogate.load. Off by default (opt-in via the lensed likelihoods)."
+    format: "npz"
+    producer:
+      module: "scripts/train_lens_surrogate.py"
+      function: "main"
+    consumers:
+      - module: "cogwheel/lensing/likelihood.py"
+        function: "LensedRelativeBinningLikelihood"
+      - module: "cogwheel/lensing/marginalized_likelihood.py"
+        function: "LensedMarginalizedExtrinsicLikelihood"
+      - module: "cogwheel/lensing/surrogate_census.py"
+        function: "run"
+    conventions_applied:
+      - units
+      - array_axes
