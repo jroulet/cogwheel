@@ -79,6 +79,7 @@ Run `git log --oneline` and `git diff --stat` against the commits since last aud
 | Dependencies / install changed (`pyproject.toml`, `environment.yaml`) | `docs/source/installation.rst` |
 | TODO items completed | COMPLETED.md |
 | `docs/source/index.rst` toctree changed | Verify ordering and that every referenced page exists |
+| New serialization in `cogwheel/**` (`save`/`load`/`np.savez`/`to_file`/feather/npz patterns in the diff) | **A new disk artifact likely exists.** Check `DATA_CONTRACTS.yaml` + `data_registry.yaml` for a matching entry; if absent, ADD it (producer, consumer, format, conventions) with a `contracts_changelog.d/` fragment — a shipped artifact with no contract is a finding, not a skip. |
 | Notebook or test-only changes | **Skip entirely** |
 
 **Do NOT read a file unless you plan to edit it.** Reading a file to conclude "not stale" wastes context.

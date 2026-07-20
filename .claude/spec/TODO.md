@@ -137,6 +137,20 @@ tolerance widening; fallback-to-exact preserves certified-or-refuse).
   interpolation discrepancy vs brute force (rescued-node envelope
   accuracy gate is a Build 7b precondition).
 
+  OWNER DESIGN SEED (2026-07-20, for the Build 8b full-box tiling):
+  fit the surrogate in CAUSTIC-ADAPTED coordinates so the non-smooth
+  locus sits at a fixed place — (gamma, eta, theta, log w) with
+  (eta, theta) from `nearest_caustic_point` puts every caustic at the
+  eta = 0 plane for all gamma; fitting in u = sqrt(eta) (the known
+  fold exponent) makes the interpolant smooth through the transition.
+  One near-caustic tube chart + far-field raw charts beats tiling
+  axis-aligned boxes around a curved surface. Cusp neighborhoods need
+  their own patches (2/3-power scaling; Airy -> Pearcey) — this is
+  where the surrogate and the fold/cusp uniform-asymptotics (Airy)
+  programs CONVERGE: the uniform form IS the known structure at the
+  fixed transition. Query-time remapping is nearly free
+  (geometry_partition already returns caustic_distance).
+
 # Standard RB zero-noise floor (8.96e-3) — fix upstream [→ docs]
 
 Owner directive (2026-07-17): the measured zero-noise floor of the

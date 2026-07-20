@@ -1780,3 +1780,105 @@ nodes x 56 ms Schwinger: THE measured saddle per-eval figure, and the
 precise surrogate-shaped hole ruling (A) anticipated (record for the
 Build 8 brief). FINDINGS F016 written; SPEC 0.11.0; fragments
 rendered. Full suite in flight = the commit gate.
+
+## BUILD 7b COMMITTED 2543b52 (2026-07-20 ~04:05) — PARITY PROGRAM COMPLETE
+
+Full-suite gate closed by composition: 386 passed + 2 xfailed with
+exactly the SIX stale saddle-refusal pins red; the last two (a FIFTH
+pin in test_lensing_likelihood — the 'interior 0.5/0.6' case of
+MacroSaddleRejectionTestCase, renamed DomainRefusalSymmetryTestCase
+with the F004-exact boundary case KEPT and over-critical replacing the
+interior + contract-flip witness — and the RefusalNet fixture whose
+refusal-scan except-tuple predated the widened vocabulary:
+LensedBinningError from a wide-box draw killed setUpClass) reconciled
+and both files fully re-verified (56 passed + 2 xfailed, 13:51).
+Committed 2543b52: 31 files, +2670/-144.
+
+THE NEGATIVE-PARITY PROGRAM IS COMPLETE (owner directive "don't skip
+the negative parity build" fulfilled): Fable research -> Build 6
+engine (Schwinger + two-lobe geometry) -> 7a hardening (census guard,
+cross-parity dispatch, crash-class refusals) -> 7b integration
+(channels/waveform/likelihood/prior). The posterior carries NO
+artificial parity cut: gamma in (0, 1.6) sampled continuously, the
+boundary a measure-zero named refusal, all six certified-or-refuse
+suites green.
+
+NEXT: Build 8 surrogate program brief (durable todo
+likelihood_schwinger-homogenization.md + likelihood_envelope-surrogate
+.md carry the design constraints and tonight's three price points:
+crown 9.8 ms certified / prior-box median ~150 ms / saddle warm
+~1.38 s). Then per ruling (A): sampling + injection-recovery return
+only after the surrogate lands.
+
+## BUILD 8a LAUNCHED + PLAN APPROVED (2026-07-20 04:03-04:2x)
+
+Brief build8a_brief.md (pre-answered the 5-D dimensionality insight:
+mass/redshift enter only through w; kappa eliminated -> surrogate
+space (w, gamma', beta, y1, y2), with beta possibly exactly
+removable). Architect's plan (3 WPs, approved after pin verification:
+reconstruct_from_envelope channels.py:638, ChangRefsdalPartition
+.envelope, _reduce_dense_kernels likelihood.py:1470):
+- WP1 surrogate.py: LensAmplificationSurrogate — tensor cubic splines
+  over 4-D (log-w, gamma, y1_eig, y2_eig); beta eliminated EXACTLY via
+  eigenframe rotation (Professor-confirmed; 1e-12 test); real/imag
+  separate (no mag/phase aliasing); refusal-aware domain gate =
+  certified-box containment + exclusion balls around refused training
+  points + per-w propagation, NO learned mask (F005 posture); npz
+  serialization with provenance.
+- WP2 channels.geometry_partition: additive geometry-only method
+  (evaluate byte-unchanged) feeding reconstruct_from_envelope.
+- WP3 likelihood dispatch: ONE intercept in
+  _amplification_coefficients; amplification_surrogate=None DEFAULT
+  (crown byte-identical); refusals never swallowed; marginalized
+  likelihood inherits via its RB engine; JSON of non-None surrogate
+  deferred.
+OWNER-SAFE POSTURE (why driver gated solo): default-None keeps every
+behavior identical; enabling-by-default + full-box artifact + census +
+PP validation are explicitly POST-BUILD owner-visible steps; sampling
+stays parked per ruling (A). MVP in-build = two reduced 2-image boxes
+(pos gamma [0.05,0.45]; saddle [1.1,1.5]; caustic_distance>=0.05);
+full caustic-tiled training is a post-build driver run. Three-tier
+lnlike gates per F016 (0.01 crown / 0.1 saddle-strong / RB-tol
+rescued). Tests incl. in_domain F010 mutation + F002 AST guard.
+
+## SDK PORT CHECKLIST (owner discussion 2026-07-20, pre-gw-port)
+
+1. TIDIER: two stacked defects, neither root-caused — (a) turn
+   exhaustion (runs LAST over the WHOLE build diff = widest scope at
+   deepest transcript, where bare-denial retry waste compounds); (b)
+   its error_max_turns escapes the graceful catch via the anyio
+   cancel-scope RuntimeError and kills the DAG (2/2 reproduced).
+   SDK_SKIP_TIDIER bypasses both. PORT RECOMMENDATION: demote the
+   tidier to a POST-COMMIT advisory pass (Librarian post-commit
+   pattern) — removes blast radius AND the cancel-scope path without
+   new machinery; three builds shipped fine without it. If kept
+   in-DAG: split PER-FILE (disjoint ownership, no races), and fix the
+   anyio containment independently.
+2. PARALLEL TEST-DEV INVARIANT (formalize what the hand-split did by
+   discipline): shards declare file-level WRITE ownership in the plan;
+   orchestrator REJECTS overlap; production modules read-only shared;
+   diagnostic artifacts uniquely named; timing-sensitive tests
+   machine-calibrated/CI-skippable (contention immunity).
+3. CODER FILE-OVERLAP DEPENDENCY (the race we actually hit): WP4
+   edited likelihood.py in batch 1, WP2's sweep in batch 2 chased
+   stale line refs through the same file -> error_max_turns. The DAG
+   scheduler should treat file overlap as an implicit dependency:
+   same-file WPs serialize, and the later coder is TOLD the file
+   changed since planning.
+4. Already-ledgered: SDK_SERENA_PORT, SDK_INTER_MESSAGE_TIMEOUT (300s
+   misclassifies deliberation), SDK_SKIP_TIDIER, zero-WP-plan
+   overload (needs a first-class Architect escalation channel),
+   spend-cap agent death (retry re-enters the dead CLI; needs
+   pause-resume), launch_build.sh .env knob pass-through.
+5. PIPELINE-GRAPH INJECTION (gw parity gap, owner-flagged 2026-07-20):
+   this repo's orchestrator does NOT inject pipeline_graph.py output
+   into the Architect prompt (gw does). Harmless to date ONLY because
+   DATA_CONTRACTS.yaml has zero lensing entries (all in-process, no
+   artifacts). Port the injection when adopting the gw idiom here.
+6. FIRST LENSING DATA PRODUCT (Build 8a consequence): the surrogate
+   npz artifact (producer: offline from_engine training run; consumer:
+   likelihood via load; conventions: box bounds, refused-point set,
+   provenance hash, eigenframe/kappa=0 axes) MUST be registered in
+   DATA_CONTRACTS.yaml + data_registry.yaml with a contracts_changelog
+   fragment AT THE POST-BUILD ARTIFACT-SHIPPING STEP (in-build MVP
+   surrogates are in-memory fixtures; nothing ships in 8a itself).
