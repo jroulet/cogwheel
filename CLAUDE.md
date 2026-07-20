@@ -85,6 +85,11 @@ shallow:
 - New tests go beside the suite in `cogwheel/tests/`. Cover numerical-accuracy paths with tolerance-based assertions.
 - (The conda env to run under is machine-specific — set `SDK_CONDA_ENV` in an untracked `.env` at the repo root; copy `.env.example` to start. Defaults to `cogwheel_310` when unset.)
 
+### Full-suite gate protocol (owner ruling 2026-07-20: parallel by default)
+- Run the full suite with `python -m pytest cogwheel/tests/ -q -n 8 --dist loadfile -k "not Timing and not timing"` (deselects the timing-guard tests by name — all timing classes/methods carry "Timing"/"timing"; loadfile keeps each file's session-scoped fixtures — e.g. trained surrogate fixtures — on one worker), then re-run the deselected timing guards in a short SERIAL pass. Never run the whole gate serially (~1 h vs ~10 min).
+- Before trusting any tally (serial or parallel): `--collect-only -q` and assert the collected count matches expectation — collect-errors (e.g. the missing IMRPhenomXODE symlink) silently shrink the suite.
+- Share the numba on-disk cache across workers (`NUMBA_CACHE_DIR`) so each worker doesn't re-JIT from scratch.
+
 ### Detached / parallel test-run health checks
 - Health of a detached pytest-xdist run = **worker CPU + log growth**, never the master process: an xdist master legitimately idles at 0% CPU for the whole run.
 - xdist workers are execnet children whose argv is `python -u -c import sys;exec(...)` — they do NOT contain "pytest". Match on that, or you will conclude "no workers" for a healthy run.
