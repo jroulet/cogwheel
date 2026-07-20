@@ -687,6 +687,37 @@ strong-shear F(w) has more unresolved structure per bin. Consequences:
   the 48 cap; true reconstruction error 2-4e-4) — the research's
   N <= 30 was calibrated on <=1-decade windows.
 
+## F017 — theta of the nearest caustic point is gauge, and the old Brent was the less accurate party (2026-07-20, Build 8b-levers)
+
+The Newton reimplementation of `nearest_caustic_point` (analytic
+g'/g'' on the stationarity condition; wedge-clamped per lobe/branch;
+bounded-Brent fallbacks at cusps/discriminant clamp) preserves the
+PHYSICAL observable to certification grade: distance within 9.3e-12
+relative over 5677 both-parity configs, the HEAD pins at ~1e-16, zero
+global-min basin misses, branch/lobe selection identical off
+degeneracies. Theta, however, drifts up to ~5e-9 at SHALLOW minima —
+and the evidence shows the drift is dominated by the OLD path's error
+(Brent at xatol=1e-12 on a near-flat objective under-converges; the
+Newton iterate sits closer to the independent dense oracle).
+Dispositions to reuse:
+- Theta is internal parametrization (gauge), not a certified
+  observable (Professor ruling): its bit-exact pin component was
+  re-certified at 1e-10 (well-conditioned) / 1e-8 (shallow-minimum)
+  vs the pinned values, distance kept at places=14.
+- The right theta gate currency is ARC LENGTH (theta_gap x
+  caustic_speed) against the independent oracle — cusp-safe (speed ->
+  0 tolerates the genuinely ambiguous angle) and immune to the
+  old-code-was-worse trap that a HEAD-referenced theta gate falls
+  into. Falsified by a forged non-global theta going red.
+- General lesson: when a reimplementation is MORE accurate than the
+  incumbent, value-preservation gates against the incumbent must be
+  scoped to the physically certified quantities; gauge quantities get
+  gated against an independent oracle, or the gate punishes the
+  improvement. Timing: caustic search 1.23 -> 0.095 ms (positive
+  parity), 4.54 -> 0.99 ms (saddle; the residual is 4 cusp-Brent
+  fallbacks). The operator contraction fusion alongside it is 0-bit
+  different across the certified sweep with refusal parity exact.
+
 ## F015 — fold-degenerate images crashed the geometric kernel with a raw LinAlgError (2026-07-19, surfaced in production, fixed Build 7a)
 
 The headline marginalized sampling run died mid-flight (bound 17+)

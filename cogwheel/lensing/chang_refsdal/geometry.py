@@ -1016,6 +1016,35 @@ def critical_point(gamma: float, theta: float, beta: float = 0.0,
                          float(values[hard_index]))
 
 
+#: Number of coarse-scan seed nodes per branch/lobe for the Newton polish in
+#: `nearest_caustic_point`.  Replaces the dense ``n_grid`` sweep as the Newton
+#: seed; ``n_grid`` still caps this from below for small requests, so its
+#: documented role (an upper bound on the coarse-scan density) is preserved.
+_NEAREST_CAUSTIC_SEED_NODES = 32
+
+#: Number of best seed cells promoted to Newton starts per branch/lobe.
+_NEAREST_CAUSTIC_NEWTON_STARTS = 2
+
+#: Maximum Newton iterations for the angular squared-distance polish.
+_NEAREST_CAUSTIC_NEWTON_MAXITER = 20
+
+#: Newton convergence: a full step ``|g'/g''|`` below this (radians) accepts
+#: the stationary point.
+_NEAREST_CAUSTIC_NEWTON_XTOL = 1e-13
+
+#: Newton convergence: ``|g'|`` below this tiny floor also accepts the root
+#: (guards the near-cusp regime where ``g''`` is large and the step is tiny
+#: even before ``g'`` is fully quenched).
+_NEAREST_CAUSTIC_GPRIME_FLOOR = 1e-15
+
+#: Discriminant floor.  Seeds (or Newton iterates) whose caustic discriminant
+#: ``1 - (gamma / lam)**2 sin(2 (theta - beta))**2`` falls below this are
+#: routed to the bounded-Brent fallback: at the clamp the analytic angular
+#: derivative is one-sided (the ``1 / sqrt(disc)`` factors diverge).  Inert at
+#: positive parity, where the discriminant is bounded away from zero.
+_NEAREST_CAUSTIC_DISC_FLOOR = 1e-9
+
+
 @numba.njit(cache=True, fastmath=False)
 def _caustic_source(theta: float, gamma: float, beta: float,
                     kappa: float, branch: float) -> np.ndarray:
@@ -1115,6 +1144,145 @@ def _coarse_squared_distances(grid: np.ndarray, gamma: float, beta: float,
     return distances
 
 
+@numba.njit(cache=True, fastmath=False)
+def _squared_distance_derivatives(theta: float, gamma: float, beta: float,
+                                  kappa: float, branch: float,
+                                  source: np.ndarray):
+    """
+    Value and first two theta-derivatives of the angular squared distance.
+
+    Returns ``(g, g', g'', discriminant)`` where ``g(theta) =
+    |caustic(theta) - source|**2`` for the caustic of `_caustic_source`
+    (same closed form, same branch, same discriminant clamp).  The
+    derivatives are analytic: differentiating
+
+        caustic = r * (M @ n) - (1 / r) * n,
+
+    with ``n = (cos theta, sin theta)``, ``M`` the macro matrix, and the
+    critical radius ``r = 1 / sqrt(lam * u)`` following the branch-selected
+    ``u = eff_gamma cos 2(theta - beta) + branch sqrt(disc)``.  Then
+    ``g' = 2 (caustic - source) . caustic'`` and
+    ``g'' = 2 (caustic' . caustic' + (caustic - source) . caustic'')``.
+
+    The returned discriminant is UNCLAMPED so a caller can gate on it: the
+    ``1 / sqrt(disc)`` factors in ``u'`` and ``u''`` diverge as the wedge
+    boundary (``disc -> 0``) is approached, where the analytic derivative is
+    one-sided and Newton must defer to the bounded-Brent fallback.  At
+    positive parity ``disc >= 1 - eff_gamma**2 > 0`` so the guarded branch is
+    inert.  Compiled ``fastmath=False`` to match the numpy reference.
+    """
+    lam = 1.0 - kappa
+    eff_gamma = gamma / lam
+    phase = theta - beta
+    two_phase = 2.0 * phase
+    cos_p = np.cos(two_phase)
+    sin_p = np.sin(two_phase)
+    disc = 1.0 - eff_gamma * eff_gamma * sin_p * sin_p
+    disc_clamped = disc if disc > 0.0 else 0.0
+    sqrt_disc = np.sqrt(disc_clamped)
+
+    eff_u = eff_gamma * cos_p + branch * sqrt_disc
+    if sqrt_disc > 0.0:
+        d_sqrt_disc = -2.0 * eff_gamma * eff_gamma * sin_p * cos_p / sqrt_disc
+        eff_u1 = -2.0 * eff_gamma * sin_p + branch * d_sqrt_disc
+        eff_u2 = (-4.0 * eff_gamma * cos_p
+                  - 4.0 * branch * eff_gamma * eff_gamma
+                  * (cos_p * cos_p - sin_p * sin_p) / sqrt_disc
+                  - 4.0 * branch * eff_gamma**4 * sin_p * sin_p * cos_p * cos_p
+                  / (sqrt_disc * sqrt_disc * sqrt_disc))
+    else:
+        # Clamp boundary: one-sided derivative; the caller routes here to the
+        # bounded-Brent fallback, but keep finite values to avoid nan/inf.
+        eff_u1 = -2.0 * eff_gamma * sin_p
+        eff_u2 = -4.0 * eff_gamma * cos_p
+
+    # s = lam * u, with r = s**-0.5 and q = 1 / r = s**0.5.
+    s0 = lam * eff_u
+    s1 = lam * eff_u1
+    s2 = lam * eff_u2
+    r = 1.0 / np.sqrt(s0)
+    r1 = -0.5 * s0**(-1.5) * s1
+    r2 = -0.5 * s0**(-1.5) * s2 + 0.75 * s0**(-2.5) * s1 * s1
+    q = np.sqrt(s0)
+    q1 = 0.5 * s1 / q
+    q2 = 0.5 * s2 / q - 0.25 * s1 * s1 * s0**(-1.5)
+
+    cos_t = np.cos(theta)
+    sin_t = np.sin(theta)
+    # n = (cos, sin); tangent t = n' = (-sin, cos); n'' = -n, t' = -n.
+    nx = cos_t
+    ny = sin_t
+    tx = -sin_t
+    ty = cos_t
+
+    cos2b = np.cos(2.0 * beta)
+    sin2b = np.sin(2.0 * beta)
+    m00 = lam - gamma * cos2b
+    m01 = -gamma * sin2b
+    m11 = lam + gamma * cos2b
+    mn_x = m00 * nx + m01 * ny
+    mn_y = m01 * nx + m11 * ny
+    mt_x = m00 * tx + m01 * ty
+    mt_y = m01 * tx + m11 * ty
+
+    # caustic = r * (M @ n) - q * n.
+    cx = r * mn_x - q * nx
+    cy = r * mn_y - q * ny
+    # caustic' = r' M@n + r M@t - q' n - q t.
+    c1x = r1 * mn_x + r * mt_x - q1 * nx - q * tx
+    c1y = r1 * mn_y + r * mt_y - q1 * ny - q * ty
+    # caustic'' = r'' M@n + 2 r' M@t - r M@n - q'' n - 2 q' t + q n.
+    c2x = (r2 * mn_x + 2.0 * r1 * mt_x - r * mn_x
+           - q2 * nx - 2.0 * q1 * tx + q * nx)
+    c2y = (r2 * mn_y + 2.0 * r1 * mt_y - r * mn_y
+           - q2 * ny - 2.0 * q1 * ty + q * ny)
+
+    dx = cx - source[0]
+    dy = cy - source[1]
+    g = dx * dx + dy * dy
+    g1 = 2.0 * (dx * c1x + dy * c1y)
+    g2 = 2.0 * (c1x * c1x + c1y * c1y + dx * c2x + dy * c2y)
+    return g, g1, g2, disc
+
+
+@numba.njit(cache=True, fastmath=False)
+def _newton_caustic_cell(theta0: float, gamma: float, beta: float,
+                         kappa: float, branch: float, source: np.ndarray,
+                         theta_lo: float, theta_hi: float, clamp: bool):
+    """
+    Newton polish of the stationarity condition ``g'(theta) = 0`` from a seed.
+
+    Returns ``(theta, g, ok)``.  ``ok`` is ``True`` only for an interior
+    minimum reached with ``g'' > 0`` and a converged step; it is ``False`` --
+    signalling the caller to fall back to bounded Brent on that one cell --
+    when the discriminant drops below `_NEAREST_CAUSTIC_DISC_FLOOR` (one-sided
+    derivative near the clamp), when ``g'' <= 0`` (not a local minimum), when a
+    step would leave the lobe wedge ``[theta_lo, theta_hi]`` (only enforced for
+    ``clamp``; the astroid path is periodic and unclamped), or when the
+    iteration cap is hit.  Newton therefore never migrates out of its wedge.
+    """
+    theta = theta0
+    g = 0.0
+    for _ in range(_NEAREST_CAUSTIC_NEWTON_MAXITER):
+        g, g1, g2, disc = _squared_distance_derivatives(
+            theta, gamma, beta, kappa, branch, source)
+        if disc < _NEAREST_CAUSTIC_DISC_FLOOR:
+            return theta, g, False
+        if not (g2 > 0.0):
+            return theta, g, False
+        step = g1 / g2
+        if abs(step) < _NEAREST_CAUSTIC_NEWTON_XTOL \
+                or abs(g1) < _NEAREST_CAUSTIC_GPRIME_FLOOR:
+            return theta, g, True
+        theta_new = theta - step
+        if clamp and (theta_new < theta_lo or theta_new > theta_hi):
+            # The step wants to leave the wedge (the minimum is at or beyond
+            # the boundary / a deltoid cusp); defer to the bounded fallback.
+            return theta, g, False
+        theta = theta_new
+    return theta, g, False
+
+
 def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
                           *, kappa: float = 0.0, n_grid: int = 256
                           ) -> NearestCausticPoint:
@@ -1122,27 +1290,35 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
     Caustic point closest to a source, by search along the critical
     curve.
 
-    Positive parity (``abs(gamma) < 1 - kappa``): a coarse scan over
-    ``n_grid`` polar angles spanning the full circle is refined with a
-    bounded one-dimensional minimization from each of the four best
-    grid cells, so that all four cusps of the single astroid remain
-    reachable.  This branch is byte-identical to the frozen
-    positive-parity implementation (the ``+`` square-root branch only).
+    A cheap coarse seed scan (`_NEAREST_CAUSTIC_SEED_NODES` polar angles,
+    capped from below by ``n_grid``) locates the best few cells, and each
+    is polished by a one-dimensional analytic-Newton iteration on the
+    stationarity condition ``g'(theta) = 0`` of the angular squared
+    distance ``g(theta) = |caustic(theta) - source|**2``, with ``g'`` and
+    ``g''`` from the closed form (`_squared_distance_derivatives`).  When
+    Newton cannot certify an interior minimum (``g'' <= 0``, a step
+    leaving the lobe wedge, the discriminant clamp, or the iteration cap)
+    that single cell falls back to a bounded `scipy.optimize.minimize_scalar`.
+
+    Positive parity (``abs(gamma) < 1 - kappa``): a single 4-cusp astroid;
+    the seed scan spans the full circle and the ``+`` square-root branch
+    only, and Newton is periodic (unclamped) so all four cusps remain
+    reachable.
 
     Macro saddle (``0 < 1 - kappa < abs(gamma)``): the critical curve is
     two 3-cusp deltoid lobes confined to the two angular wedges
     ``|sin 2(theta - beta)| <= (1 - kappa) / abs(gamma)`` about the
     negative-eigenvalue axis (``theta - beta`` near ``0`` and ``pi``).
-    Each wedge is scanned for both square-root branches (``+-``), and
-    the global minimum over the two lobes and two branches is returned,
-    so both deltoid lobes remain reachable.
+    Each wedge is scanned for both square-root branches (``+-``), Newton is
+    clamped to its wedge, and the global minimum over the two lobes and two
+    branches is returned, so both deltoid lobes remain reachable.
 
     The frequency-independent distance search runs through the compiled
-    source-only helper `_caustic_source` (the eigenframe and eigenvalue
-    are not needed to locate the closest caustic); the returned local
-    frame and eigenvalue are then built from a single `critical_point`
-    call at the winning angle and branch, so those fields are identical
-    to a search that used `critical_point` throughout.
+    source-only helper `_caustic_source` and its analytic derivatives (the
+    eigenframe and eigenvalue are not needed to locate the closest
+    caustic); the returned local frame and eigenvalue are then built from a
+    single `critical_point` call at the winning angle and branch, so those
+    fields are identical to a search that used `critical_point` throughout.
 
     Parameters
     ----------
@@ -1155,8 +1331,9 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
     kappa : float
         External convergence.
     n_grid : int
-        Number of polar angles in the coarse scan (per wedge and branch
-        for a macro saddle).
+        Upper bound on the number of polar angles in the coarse seed scan
+        (per wedge and branch for a macro saddle); the seed uses
+        ``min(n_grid, _NEAREST_CAUSTIC_SEED_NODES)`` nodes.
 
     Returns
     -------
@@ -1185,12 +1362,14 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
             f'named refusal.')
 
     source = np.asarray(source, dtype=float)
+    n_seed = min(int(n_grid), _NEAREST_CAUSTIC_SEED_NODES)
+    n_starts = min(_NEAREST_CAUSTIC_NEWTON_STARTS, n_seed)
 
     if abs(gamma) < lam:
         # Positive parity: a single 4-cusp astroid over the full circle,
-        # the ``+`` branch only.  Byte-identical to the frozen path.
-        grid = np.linspace(0.0, 2.0 * np.pi, n_grid, endpoint=False)
-        step = 2.0 * np.pi / n_grid
+        # the ``+`` branch only.  Newton is periodic (unclamped).
+        grid = np.linspace(0.0, 2.0 * np.pi, n_seed, endpoint=False)
+        step = 2.0 * np.pi / n_seed
 
         def squared_distance(theta) -> float:
             caustic = _caustic_source(float(theta) % (2.0 * np.pi),
@@ -1199,20 +1378,28 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
 
         coarse = _coarse_squared_distances(grid, gamma, beta, kappa,
                                            source, 1.0)
-        best = None
-        for index in np.argsort(coarse)[:4]:
+        best_fun = np.inf
+        best_theta = 0.0
+        for index in np.argsort(coarse)[:n_starts]:
             center = grid[index]
-            refined = minimize_scalar(squared_distance,
-                                      bounds=(center - step, center + step),
-                                      method='bounded',
-                                      options={'xatol': 1e-12})
-            if best is None or refined.fun < best.fun:
-                best = refined
-        theta = float(best.x % (2.0 * np.pi))
+            theta_c, fun_c, ok = _newton_caustic_cell(
+                center, gamma, beta, kappa, 1.0, source, 0.0, 0.0, False)
+            if not ok:
+                refined = minimize_scalar(
+                    squared_distance,
+                    bounds=(center - step, center + step),
+                    method='bounded',
+                    options={'xatol': 1e-12})
+                theta_c = float(refined.x)
+                fun_c = float(refined.fun)
+            if fun_c < best_fun:
+                best_fun = fun_c
+                best_theta = theta_c
+        theta = float(best_theta % (2.0 * np.pi))
         return NearestCausticPoint(
             theta,
             *critical_point(gamma, theta, beta, kappa),
-            distance=float(np.sqrt(best.fun)))
+            distance=float(np.sqrt(best_fun)))
 
     # Macro saddle: two 3-cusp deltoid lobes, each confined to a wedge of
     # half-width theta_max about the negative-eigenvalue axis, and each
@@ -1222,8 +1409,10 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
     best_theta = 0.0
     best_branch = 1
     for center in (beta, beta + np.pi):
-        wedge = np.linspace(center - theta_max, center + theta_max, n_grid)
-        step = 2.0 * theta_max / (n_grid - 1)
+        lower_wedge = center - theta_max
+        upper_wedge = center + theta_max
+        wedge = np.linspace(lower_wedge, upper_wedge, n_seed)
+        step = 2.0 * theta_max / (n_seed - 1)
         for branch in (1.0, -1.0):
 
             def squared_distance(theta, branch=branch) -> float:
@@ -1233,17 +1422,24 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
 
             coarse = _coarse_squared_distances(wedge, gamma, beta, kappa,
                                                source, branch)
-            for index in np.argsort(coarse)[:4]:
-                lower = max(wedge[index] - step, center - theta_max)
-                upper = min(wedge[index] + step, center + theta_max)
-                refined = minimize_scalar(
-                    squared_distance,
-                    bounds=(lower, upper),
-                    method='bounded',
-                    options={'xatol': 1e-12})
-                if refined.fun < best_fun:
-                    best_fun = refined.fun
-                    best_theta = float(refined.x)
+            for index in np.argsort(coarse)[:n_starts]:
+                seed = wedge[index]
+                theta_c, fun_c, ok = _newton_caustic_cell(
+                    seed, gamma, beta, kappa, branch, source,
+                    lower_wedge, upper_wedge, True)
+                if not ok:
+                    lower = max(wedge[index] - step, lower_wedge)
+                    upper = min(wedge[index] + step, upper_wedge)
+                    refined = minimize_scalar(
+                        squared_distance,
+                        bounds=(lower, upper),
+                        method='bounded',
+                        options={'xatol': 1e-12})
+                    theta_c = float(refined.x)
+                    fun_c = float(refined.fun)
+                if fun_c < best_fun:
+                    best_fun = fun_c
+                    best_theta = theta_c
                     best_branch = int(branch)
 
     theta = best_theta % (2.0 * np.pi)

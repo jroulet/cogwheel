@@ -1934,6 +1934,99 @@ served-vs-exact 0.84 nats at tiny-fixture eps 1.7e-2 is INSIDE its
 documented budget (bound ~12 nats at |lnL|~473); production target =
 surrogate error BELOW the RB-binning floor (F016), stated per-box in
 the artifact report before enable-by-default.
+
+## 8a COMMITTED 046317a; INS-8a-001 CLOSED b1d2ec8 (2026-07-20 ~08:50)
+
+Build 8a committed (23 files) after the driver gate ran the surrogate
+suite WITH the timing smoke un-skipped (24/24; smoke recalibrated to
+the measured loaded-box floor 15 ms with the Newton-shortcut path to
+2 ms documented in the constant). Dreamer close for the 7a/7b/8a
+cycle done (test_dev long-term pruned 22->12; two Professor code-obs
+corrections; foreman/tidier gaps expected). PROCESS NOTE worth
+porting: the Dreamer SURFACED a latent Inspector finding
+(INS-8a-001, kappa axis absent from the serve gate — non-actionable
+under the PASS verdict because production pins kappa=0) that would
+otherwise have evaporated; driver hardened the likelihood intercept
+(kappa != 0 falls through to exact; spy + bit-identity test) and
+committed b1d2ec8. The memory loop is a SAFETY mechanism, not just
+knowledge retention — consider a gw-port rule: latent/non-actionable
+Inspector findings get a driver review at cycle close.
+
+IN FLIGHT: Build 8b-levers (Newton caustic shortcut + contraction
+fusion; first sanctioned engine edits since 7a; bit-freeze pins
+declared certification instruments in the brief; the exact-equality
+HEAD_NEAREST_CAUSTIC_PINS vs Newton-reimplementation tension is
+pre-flagged for the plan gate). Owner rulings in force: no sampling
+(A), loaded-box timing, Fable owner-only.
+
+OWNER DIRECTIVE (2026-07-20 ~09:00): implement ALL queued SDK fixes
+(everything except the gw-side reverse-ports) BEFORE launching the 8c
+global-artifact build, so they prove themselves on that run. SEVEN
+fixes commissioned to one coder (validated-not-committed; driver
+reviews then commits): (1) pipeline-graph injection into the
+Architect context (compact, capped, never build-blocking); (2) tidier
+demoted out of the DAG by default (SDK_RUN_TIDIER=1 opt-in); (3)
+stale-file warning prepended to later coders whose Where-files were
+modified by earlier WPs; (4) Architect zero-WP ESCALATION channel
+(crew instruction + orchestrator surfacing of the reason); (5)
+spend-cap/transient-death delayed single retry
+(SDK_AGENT_RETRY_WAIT_SECONDS, default 300; NOT for error_max_turns);
+(6) write-ownership overlap check (WP Where-sets + test-suite shards;
+warn/serialize for coders, hard-fail for overlapping test shards;
+parser failures never block); (7) tidier post-commit advisory wiring
+(Librarian post-commit pattern: advisory file from the hook,
+tidy.md post-commit section, driver-invoked).
+SEQUENCE: SDK fixes land -> review -> commit -> 8c brief (global
+tube-chart artifact + contracts/LOADERS/census/nat-tiers) launches
+under the NEW SDK as its proving run. 8b-levers continues in
+parallel.
+
+SDK FIXES COMMITTED b46fd2b (~09:30; race window closed — driver
+holds any pipeline commit until the tree is clean of cross-workstream
+changes; the fixes prove themselves on the 8c launch).
+
+8b-LEVERS PLAN APPROVED (~09:50, after pin verification:
+nearest_caustic_point:1117 + Brent calls at 1204/1238;
+CausticSearchPreservationTestCase + _oracle_caustic_xy real). The
+pre-flagged pin tension resolved by Professor ruling the driver
+judged gate-able solo: THETA is internal parametrization (gauge) ->
+re-certified at <=1e-10 with reasoning in the docstring; DISTANCE is
+the physical observable -> exact-equality kept (places=14 fallback,
+STOP if unreachable). WP-A: analytic-Newton on the stationarity
+condition, g''>0 guard, per-(center,branch) wedge clamping (never
+lobe-jumps), discriminant-clamp proximity -> Brent fallback,
+single-cell bounded fallback, public signature unchanged. WP-B:
+dispatch-only fusion with an explicit forbidden-reassociation list,
+byte-identity incl. INTERNAL diagnostics vs HEAD side-by-side, F010
+preservation (half_sum stays an arg; _SERIES_TOLERANCE stays a module
+global; py_func chain reachable), STOP-if-not-bit-identical. Six
+domain test descriptions incl. an ULP-histogram diagnostic and a
+lobe-selection falsification.
+
+8b-LEVERS EXECUTION + RECOVERY (10:00-10:4x): coder-2 delivered WP-B
+(operator fusion; driver smoke: 20/20 byte-identical vs HEAD
+side-by-side, refusal-symmetric — numba needs the HEAD source written
+to a REAL file for its cache locator, spec_from_file_location).
+coder-3 (WP-A) read 14 files and STOPPED WITHOUT IMPLEMENTING (zero
+geometry.py edits; likely over-applied the plan's TEST-side pin
+STOP-clause as an implementation blocker; its report died with the
+DAG — the escalation-channel fix exists precisely for this, but 8b
+runs pre-fix code). test_dev-4 died error_max_turns after authoring
++602 lines in fast_path (4 WP-A gates + the _load_head_operator
+WP-B harness — salvageable). RECOVERY: WP-A re-commissioned to a
+hand coder WITH the paralysis-breaking clarification (pin disposition
+is the test dev's job; obligation is 1e-10 value preservation, not
+bit-identity) + mandatory HEAD-sweep self-validation; then ONE test
+dev completes (inherited 4 gates + WP-B byte-identity + F010
+preservation + pin disposition — single agent, overlapping files).
+
+OWNER-APPROVED SDK FIX 8 (commissioned to the SDK agent): the
+error_max_turns class cured structurally — (a) description SHARDING:
+cap SDK_TEST_DEV_MAX_SPECS (default 3) descriptions per test_dev
+shard, sequential same-file shards with prior-shard summaries; (b)
+BOUNDED CONTINUATION on exhaustion: parse-check/restore touched
+files, spawn ONE continuation with keep-what-is-sound instructions,
+raise only if the continuation also exhausts. Proving run: 8c.
 REMAINING FLOOR: geometry_partition 5.45 ms, dominated by the caustic
 search. PROMOTION INTO 8b SCOPE (owner asked; previously only a
 shelved micro-lever in likelihood_envelope-surrogate.md item 2): the
@@ -1957,3 +2050,49 @@ as its documented path to 2 ms.
    paths absent from data_registry -> warn); (c) 'new loader => add
    to LOADERS + contract' on coder/inspector checklists. gw's
    graph-injection into the Architect is a social mitigation only.
+
+## 2026-07-20 — Build 8b-levers CLOSE-OUT (driver)
+
+Completion test dev delivered: inherited caustic tests kept; pins
+re-dispositioned (distance places=14 physics; theta gauge, per-pin atol
+1e-10/1e-8 with the Professor ruling in docstrings);
+OperatorFusionByteIdentityTestCase (0-bit across sweep, refusal parity
+at w=63); OperatorFusionFalsificationTestCase (F010 re-homed through
+_fused_contraction.py_func + _SERIES_TOLERANCE global — reds
+correctly); arc-length theta gate (theta_gap*caustic_speed vs
+independent dense oracle — cusp-safe, BETTER than my raw-theta ruling)
++ forged-theta falsification; timing probe repaired (0.089 ms positive
+/ 0.939 ms saddle under load).
+
+Driver reconciliation: the two orphaned batched-suite F010
+falsifications (patched the fused-away _contract_grid/_weight_vectors
+py_funcs) RETIRED with a pointer comment per the file's RETIRED-block
+idiom; unused PERTURBED_SERIES_TOLERANCE removed; batched suite 13
+passed. FINDINGS F017 written (theta-is-gauge + old-Brent-was-worse +
+the general "gauge quantities gate against an independent oracle, not
+the incumbent" lesson). SPEC row appended (0.13.0), changelog +
+completed fragments rendered.
+
+Gate: full suite in flight. Post-gate: rerun
+served_vs_unlensed_floor.py + surrogate_timing_breakdown.py (same
+protocol as the 8a ledger: perturbed CBC params, warm, loaded-box
+acceptable per owner ruling), commit, launch 8c.
+
+## 2026-07-20 — OWNER RULINGS: cusp build promoted; full-box training re-sequenced
+
+1. "Serving exact near cusps" = the >100 ms quadrature path — owner
+   rejects leaving that hole: "I would absolutely have a build where it
+   is millisecond scale everywhere!" → NEW SCHEDULED BUILD (cusp
+   fast-serving, after homogenization): durable todo
+   `todo.d/likelihood_cusp-fast-serving.md`. Driver note: the cusp
+   exclusion balls are magnification peaks — samplers concentrate
+   there; small prior volume does NOT mean small proposal fraction.
+2. Full-box training run RE-SEQUENCED: NOT a post-8c step. Order is
+   8c (machinery, smoke-scale training + census-machinery validation
+   only) → homogenization → cusp fast-serving → THEN the one expensive
+   full-box training run on the final engine + final chart set →
+   census + price points → owner enable-by-default decision (+ parked
+   PP). Brief tier-2 acceptance amended accordingly.
+Build queue after 8c is therefore: homogenization → cusp fast-serving
+→ [driver: full-box training + census] → owner decision; SDK sister-
+repo port proceeds in parallel after 8c proves the fixes.

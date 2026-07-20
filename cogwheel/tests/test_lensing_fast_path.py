@@ -121,11 +121,15 @@ for _thread_var in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS',
                     'NUMBA_NUM_THREADS', 'OPENBLAS_NUM_THREADS'):
     _os.environ.setdefault(_thread_var, '1')
 
+import importlib.util
+import inspect
 import itertools
 import pathlib
+import subprocess
+import tempfile
 import time
 import warnings
-from unittest import TestCase, main
+from unittest import TestCase, main, mock
 
 import mpmath
 import numpy as np
@@ -397,6 +401,107 @@ CAUSTIC_SOURCES = ((0.02, 0.01), (0.15, 0.05), (0.60, 0.20))
 #: wave->geometric hand-over ``w*delta_min ~ RHO_END``).
 CAUSTIC_BRANCH_WS = (0.5, 5.0, 50.0, 500.0)
 
+# ---------------------------------------------------------------------------
+# WP-A caustic distance+theta+lobe preservation constants (both parities).
+# ---------------------------------------------------------------------------
+
+#: Raw absolute angular tolerance [rad] on the returned ``theta`` vs the
+#: dense brute-force oracle at POSITIVE parity, compared modulo ``2*pi``.
+#: Used as the gate ONLY away from cusps; near a cusp the caustic map is
+#: stationary (``|d point / d theta| -> 0``) so ``theta`` is genuinely
+#: under-determined and the raw angle can drift while the POINT stays
+#: exact.  There the physical gate is the ARC-LENGTH form below.
+CAUSTIC_THETA_ATOL = 1e-9
+
+#: Arc-length tolerance: the angular discrepancy WEIGHTED by the local
+#: caustic speed ``|d point / d theta|`` (evaluated independently at the
+#: oracle theta) is the tangential source-plane displacement between the
+#: two stationary points.  This is a budget-independent, cusp-safe
+#: currency -- at a cusp speed -> 0 so a stationary-map angle ambiguity is
+#: tolerated WITHOUT loosening the distance/point gates.  Both production
+#: (``minimize_scalar``) and the dense oracle locate the min by FUNCTION
+#: values, so ``theta`` cannot beat the floating-point localization floor
+#: ``delta_theta ~ sqrt(eps * dist**2 / curvature) ~ 1e-8`` near a smooth
+#: parabolic minimum; the empirical worst-case arc-length over the whole
+#: sweep is ~1.3e-7 (saddle).  This ceiling sits ~8x above that floor yet
+#: ~1e6 BELOW the O(1) arc-length a genuine lobe-jump / wrong-stationary-
+#: point produces -- a hugely discriminating gate, not a slack one.  (See
+#: the self-falsification class: a forged non-global theta lands at O(1)
+#: arc-length and goes RED.)
+CAUSTIC_ARCLEN_ATOL = 1e-6
+
+#: Absolute angular tolerance [rad] on the returned ``theta`` vs the dense
+#: oracle at a MACRO SADDLE.  The deltoid cusps are sharper and the oracle
+#: scans a narrow wedge, so the angular resolution is coarser than the
+#: astroid's; this saddle-appropriate value is set from the oracle's
+#: parabolic-refine floor on the wedge grid (empirically ~1e-8), not the
+#: distance tolerance (distance error ~ theta_err**2 near a parabolic
+#: minimum, so distance stays far tighter).  The arc-length gate above is
+#: the primary theta certification; this remains as a coarse guard.
+CAUSTIC_SADDLE_THETA_ATOL = 1e-6
+
+#: Absolute tolerance on the returned source-plane caustic POINT (x, y) vs
+#: the oracle's winning point.  Certifies branch + lobe + theta jointly:
+#: the caustic point is uniquely fixed by (theta, branch, lobe), so
+#: agreement here proves the SAME stationary point was selected.
+CAUSTIC_POINT_ATOL = 1e-9
+
+#: Macro-saddle ``(gamma, beta, kappa)`` axes: every row obeys
+#: ``0 < 1 - kappa < |gamma|`` (the two-deltoid-lobe regime).  gamma spans
+#: ``(~1.05, ~1.5)`` per the Professor's saddle specification.
+CAUSTIC_SADDLE_GAMMAS = (1.10, 1.30, 1.50)
+CAUSTIC_SADDLE_BETAS = (0.0, 0.6)
+CAUSTIC_SADDLE_KAPPAS = (0.0, 0.2)
+
+#: Saddle source positions: near the lobe axis (on-wedge, small offset),
+#: off-wedge (transverse), and near a deltoid cusp (competing lobes).
+CAUSTIC_SADDLE_SOURCES = ((0.03, 0.00), (0.00, 0.25), (0.80, 0.10))
+
+#: Near-symmetric saddle config for the branch-invariance falsification:
+#: at ``beta = 0`` the two lobes (centres ``0`` and ``pi``) are mirror
+#: images across ``y1 = 0``, so a source swept in ``y1`` through 0 crosses
+#: the symmetry line and the nearest lobe must flip exactly ONCE, tracking
+#: the independent oracle (no Newton-induced chatter).
+CAUSTIC_SYMMETRY_GAMMA = 1.30
+CAUSTIC_SYMMETRY_KAPPA = 0.0
+CAUSTIC_SYMMETRY_Y2 = 0.02
+CAUSTIC_SYMMETRY_Y1_SWEEP = (-0.20, -0.05, -0.01, 0.01, 0.05, 0.20)
+
+#: Warm-call timing probe (WP-A, SOFT).  The measured warm per-call cost
+#: of `nearest_caustic_point` is printed with its ratio to the ~0.3 ms
+#: target; the hard sub-ms assertion is only enforced when
+#: ``COGWHEEL_STRICT_TIMING`` is set (off on CI -- timing is machine
+#: dependent).  Otherwise only a generous non-flaky ceiling guards a
+#: catastrophic regression.
+CAUSTIC_TIMING_REPEATS = 200
+CAUSTIC_TIMING_TARGET_MS = 0.3
+CAUSTIC_TIMING_LOOSE_CEILING_MS = 25.0
+_STRICT_TIMING = bool(_os.environ.get('COGWHEEL_STRICT_TIMING'))
+
+# ---------------------------------------------------------------------------
+# WP-B operator-fusion byte-identity constants.
+# ---------------------------------------------------------------------------
+
+#: Shear orientation / convergence axes added to the certified F_op sweep
+#: so the eigenframe rotation and the mass-sheet prefactor are exercised in
+#: the current-vs-HEAD byte-identity comparison (positive parity only:
+#: every row keeps ``1 - kappa > |gamma|``).
+FOP_IDENTITY_BETAS = (0.0, 0.7)
+FOP_IDENTITY_KAPPAS = (0.0, 0.2)
+
+#: Positive-parity config whose operator series needs several orders to
+#: converge -- the F010 py_func-chain falsification evaluates here so a
+#: perturbed convergence stop / gather index visibly moves the answer.
+FALSIFY_W = 20.0
+FALSIFY_Y = (0.9, 0.0)
+FALSIFY_GAMMA = 0.2
+
+#: Corrupted small-term convergence tolerance for the F010 fused-core
+#: falsification: at 1.0 the small-term stop fires as early as it is
+#: allowed and truncates the O(gamma) shear series, so the perturbed
+#: contraction no longer certifies to `FOP_RTOL`.
+PERTURBED_SERIES_TOLERANCE = 1.0
+
 #: Directory for diagnostic plots (created on demand).
 OUTPUT_DIR = pathlib.Path(__file__).parent / 'output'
 
@@ -562,6 +667,78 @@ def _oracle_fop(w, y, gamma, beta=0.0, kappa=0.0, max_order=FOP_MAX_ORDER):
                                 + 0.5j * w * s)
                  * total)
         return complex(value)
+
+
+# ---------------------------------------------------------------------------
+# Pre-fusion (git HEAD) operator module, loaded side-by-side.
+# ---------------------------------------------------------------------------
+
+#: Cached pre-fusion ``operator`` module (loaded on demand from HEAD).
+_HEAD_OPERATOR = None
+
+#: Repo root of THIS worktree (``cogwheel/tests/... -> repo``), used as the
+#: ``git`` working directory so ``HEAD`` resolves the active branch tip.
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+#: Path of the operator module, relative to the repo root, for ``git show``.
+_OPERATOR_RELPATH = 'cogwheel/lensing/chang_refsdal/operator.py'
+
+
+def _load_head_operator():
+    """
+    Load the pre-fusion ``operator.py`` from ``git HEAD`` as a standalone
+    module (F002/F005 oracle independence for the WP-B byte-identity gate).
+
+    The source is fetched with ``git show HEAD:<relpath>`` and executed as
+    a fresh module under a UNIQUE name so its numba cores recompile from
+    the frozen source rather than reusing the working tree's ``__pycache__``
+    (a distinct ``co_filename`` forces a fresh njit compile).  operator.py
+    imports its siblings ABSOLUTELY (``from cogwheel.lensing.chang_refsdal
+    import ...``), and those siblings are byte-identical at HEAD (only
+    ``operator.py`` changed), so the frozen module binds the SAME kernel,
+    geometry and Schwinger code the working tree does -- isolating the
+    fusion as the only moving part.
+
+    Returns
+    -------
+    module
+        The HEAD ``operator`` module, exposing the pre-fusion
+        ``_weight_vectors`` + ``_contract_grid`` two-stage pipeline and the
+        unchanged public ``F_op`` / ``F_op_grid``.
+
+    Raises
+    ------
+    RuntimeError
+        If ``git show`` fails (not a git checkout, or HEAD missing the
+        file) -- the byte-identity gate cannot certify without the frozen
+        reference, so it must refuse loudly rather than silently skip.
+    """
+    global _HEAD_OPERATOR
+    if _HEAD_OPERATOR is not None:
+        return _HEAD_OPERATOR
+    completed = subprocess.run(
+        ['git', 'show', f'HEAD:{_OPERATOR_RELPATH}'],
+        cwd=_REPO_ROOT, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f'cannot load the pre-fusion operator from HEAD: `git show '
+            f'HEAD:{_OPERATOR_RELPATH}` failed in {_REPO_ROOT} with '
+            f'{completed.stderr.strip()!r}; the WP-B byte-identity gate '
+            'has no frozen reference to certify against')
+    with tempfile.NamedTemporaryFile(
+            'w', suffix='_operator_head.py', delete=False) as handle:
+        handle.write(completed.stdout)
+        head_path = handle.name
+    spec = importlib.util.spec_from_file_location(
+        'cogwheel_chang_refsdal_operator_head', head_path)
+    module = importlib.util.module_from_spec(spec)
+    # Register BEFORE exec so dataclass / relative machinery resolves the
+    # module by name during its own execution (the established idiom).
+    import sys as _sys
+    _sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    _HEAD_OPERATOR = module
+    return module
 
 
 class FastPathTestCase(TestCase):
@@ -906,6 +1083,371 @@ class NumbaOperatorPreservationTestCase(FastPathTestCase):
         self.assertGreater(refused, 0,
                            'no config refused; the above-ceiling arm was '
                            'not exercised')
+
+
+class OperatorFusionByteIdentityTestCase(FastPathTestCase):
+    """
+    WP-B (Build 8b): the fused-contraction ``operator.F_op`` /
+    ``operator.F_op_grid`` are BYTE-IDENTICAL to the pre-fusion ``HEAD``
+    operator across a certified sweep spanning the whole in-domain band,
+    its near-refusal edge, and the refusing configs beyond it.
+
+    The Build 8b lever merged the former ``w``-independent
+    ``_weight_vectors`` build and the batched ``_contract_grid`` node
+    contraction into ONE njit core, `operator._fused_contraction`.  The
+    claim is a DISPATCH-ONLY merge: every float64 add/multiply happens in
+    the identical order, so the returned amplifications, the exposed
+    diagnostics, and the certify-or-refuse decision are unchanged to the
+    BIT.  This suite certifies that against an F005-style INDEPENDENT
+    reference -- the pre-fusion ``operator.py`` loaded straight from
+    ``git HEAD`` (`_load_head_operator`), whose byte-identical siblings
+    bind the SAME kernel/geometry/Schwinger code, so the fusion is the
+    only moving part.  Where the current tree and ``HEAD`` disagree on a
+    single bit of value, a single diagnostics field, or the refuse/certify
+    outcome, the fusion moved an answer and the gate goes red.
+
+    Independence (F005): the reference is a distinct module object with
+    its own freshly-compiled njit cores (a unique ``co_filename`` forces a
+    fresh compile off the frozen source), sharing NONE of the working
+    tree's ``__pycache__``; it is not a re-run of the code under test.
+    """
+
+    @staticmethod
+    def _scalar_outcome(module, w, y, gamma, beta, kappa):
+        """Run ``module.F_op`` and freeze the value + all four diagnostics
+        as typed numpy scalars (for ``tobytes`` comparison), or record the
+        named refusal.  Positive-parity inputs only raise the operator
+        refusals (`CancellationError`) or a kernel-ceiling
+        `HypergeometricDomainError`; both are captured for refusal-parity."""
+        try:
+            value, diagnostics = module.F_op(
+                w, np.asarray(y, dtype=float), gamma,
+                beta=beta, kappa=kappa, max_order=FOP_MAX_ORDER)
+        # ``module.CancellationError`` -- each operator module (working
+        # tree and the HEAD load) defines its OWN CancellationError class,
+        # so catch the one THIS module raises; the domain/kernel refusals
+        # come from byte-identical siblings and are the same class object.
+        except (module.CancellationError, HypergeometricDomainError,
+                geometry.LensDomainError) as exc:
+            return {'raised': True, 'exc': type(exc).__name__}
+        return {
+            'raised': False, 'exc': None,
+            'value': np.complex128(value),
+            'order': np.int64(diagnostics.order_used),
+            'converged': np.bool_(diagnostics.converged),
+            'tail': np.float64(diagnostics.estimated_relative_tail),
+            'cancellation': np.float64(diagnostics.cancellation_ratio)}
+
+    @staticmethod
+    def _grid_outcome(module, grid, y, gamma, beta, kappa):
+        """Run ``module.F_op_grid`` and return the three public arrays, or
+        record the named whole-grid refusal (a single uncertifiable node
+        refuses the whole grid, F005)."""
+        try:
+            values, orders, converged = module.F_op_grid(
+                grid, np.asarray(y, dtype=float), gamma,
+                beta=beta, kappa=kappa, max_order=FOP_MAX_ORDER)
+        # ``module.CancellationError``: HEAD's operator defines its own
+        # (see `_scalar_outcome`); catch the one THIS module raises.
+        except (module.CancellationError, HypergeometricDomainError,
+                geometry.LensDomainError) as exc:
+            return {'raised': True, 'exc': type(exc).__name__}
+        return {'raised': False, 'exc': None, 'values': values,
+                'orders': orders, 'converged': converged}
+
+    def _scalar_configs(self):
+        """``(w, sqrt_s, gamma, beta, kappa)`` spanning the certified band
+        (with the eigenframe rotation + mass-sheet axes) plus the refusing
+        edge."""
+        for gamma in FOP_GRID_GAMMA:
+            for w in FOP_GRID_W:
+                for sqrt_s in FOP_GRID_SQRT_S:
+                    for beta in FOP_IDENTITY_BETAS:
+                        for kappa in FOP_IDENTITY_KAPPAS:
+                            yield (w, sqrt_s, gamma, beta, kappa)
+        # The dedicated refusing configs (incl. the above-ceiling w = 63
+        # node that certify-or-refuse must still reject) at beta=kappa=0.
+        for w, sqrt_s, gamma in FOP_REFUSALS:
+            yield (w, sqrt_s, gamma, 0.0, 0.0)
+
+    def test_fop_scalar_byte_identical_to_head(self):
+        """
+        Scalar ``F_op`` is byte-for-byte the pre-fusion HEAD across the
+        sweep: the complex value AND every OperatorDiagnostics field
+        (``order_used``, ``converged``, ``estimated_relative_tail``,
+        ``cancellation_ratio``) ``tobytes``-match, and the certify-XOR-
+        refuse decision (and the refusal TYPE) never flips.
+        """
+        head = _load_head_operator()
+        certified = refused = 0
+        for w, sqrt_s, gamma, beta, kappa in self._scalar_configs():
+            y = (sqrt_s, 0.0)
+            with self.subTest(w=w, sqrt_s=sqrt_s, gamma=gamma,
+                              beta=beta, kappa=kappa):
+                current = self._scalar_outcome(
+                    operator, w, y, gamma, beta, kappa)
+                reference = self._scalar_outcome(
+                    head, w, y, gamma, beta, kappa)
+                self.n_checks += 1
+                self.assertEqual(
+                    current['raised'], reference['raised'],
+                    f'w={w} sqrt_s={sqrt_s} gamma={gamma} beta={beta} '
+                    f'kappa={kappa}: fused F_op '
+                    f'{"refused" if current["raised"] else "certified"} but '
+                    f'HEAD {"refused" if reference["raised"] else "certified"}'
+                    ' -- the fusion flipped a certify-XOR-refuse decision')
+                if current['raised']:
+                    refused += 1
+                    self.n_checks += 1
+                    self.assertEqual(
+                        current['exc'], reference['exc'],
+                        f'w={w} sqrt_s={sqrt_s} gamma={gamma}: fused F_op '
+                        f'raised {current["exc"]} but HEAD raised '
+                        f'{reference["exc"]} -- the refusal type moved')
+                    continue
+                certified += 1
+                for field, label in (
+                        ('value', 'amplification F'),
+                        ('order', 'diagnostics.order_used'),
+                        ('converged', 'diagnostics.converged'),
+                        ('tail', 'diagnostics.estimated_relative_tail'),
+                        ('cancellation', 'diagnostics.cancellation_ratio')):
+                    self.n_checks += 1
+                    self.assertEqual(
+                        current[field].tobytes(), reference[field].tobytes(),
+                        f'w={w} sqrt_s={sqrt_s} gamma={gamma} beta={beta} '
+                        f'kappa={kappa}: fused {label} '
+                        f'{current[field]!r} is not byte-identical to HEAD '
+                        f'{reference[field]!r} -- the fusion moved a bit')
+        self.assertGreater(
+            certified, 0, 'no config certified; the byte-identity sweep '
+            'never exercised a returned value (vacuous)')
+        self.assertGreater(
+            refused, 0, 'no config refused; the sweep never exercised the '
+            'certify-XOR-refuse parity on the refusing edge (vacuous)')
+
+    def test_fop_grid_byte_identical_to_head(self):
+        """
+        The BATCHED ``F_op_grid`` -- the direct consumer of the fused
+        core -- is byte-for-byte the pre-fusion HEAD over a multi-node
+        ``w`` grid: ``values`` / ``orders`` / ``converged`` ``tobytes``-
+        match wherever the grid certifies, and the whole-grid refusal
+        (any uncertifiable node) fires on exactly the same configs.  This
+        is the primary WP-B gate: the batched sweep IS what the fusion
+        rewrote.
+        """
+        head = _load_head_operator()
+        # Append an ABOVE-Schwinger-ceiling node (w = 63 > 60): sub-ceiling
+        # refusals are rescued by the Schwinger fallback, so without a
+        # supra-ceiling node the whole grid always certifies and the
+        # refusal-parity arm would be vacuous.  At high L (sqrt_s = 0.9,
+        # gamma = 0.2) this node refuses the whole grid; at low L it
+        # certifies -- so the sweep exercises both parities.
+        grid = np.asarray(FOP_GRID_W + (63.0,), dtype=float)
+        certified = refused = 0
+        for gamma in FOP_GRID_GAMMA:
+            for sqrt_s in FOP_GRID_SQRT_S:
+                for beta in FOP_IDENTITY_BETAS:
+                    for kappa in FOP_IDENTITY_KAPPAS:
+                        y = (sqrt_s, 0.0)
+                        with self.subTest(gamma=gamma, sqrt_s=sqrt_s,
+                                          beta=beta, kappa=kappa):
+                            current = self._grid_outcome(
+                                operator, grid, y, gamma, beta, kappa)
+                            reference = self._grid_outcome(
+                                head, grid, y, gamma, beta, kappa)
+                            self.n_checks += 1
+                            self.assertEqual(
+                                current['raised'], reference['raised'],
+                                f'gamma={gamma} sqrt_s={sqrt_s} beta={beta} '
+                                f'kappa={kappa}: fused F_op_grid and HEAD '
+                                'disagree on whole-grid refusal -- a '
+                                'certify-XOR-refuse flip')
+                            if current['raised']:
+                                refused += 1
+                                self.n_checks += 1
+                                self.assertEqual(
+                                    current['exc'], reference['exc'],
+                                    f'gamma={gamma} sqrt_s={sqrt_s}: fused '
+                                    f'grid raised {current["exc"]} but HEAD '
+                                    f'raised {reference["exc"]}')
+                                continue
+                            certified += 1
+                            for field, label in (
+                                    ('values', 'F values'),
+                                    ('orders', 'operator orders'),
+                                    ('converged', 'converged flags')):
+                                self.n_checks += 1
+                                self.assertEqual(
+                                    current[field].tobytes(),
+                                    reference[field].tobytes(),
+                                    f'gamma={gamma} sqrt_s={sqrt_s} '
+                                    f'beta={beta} kappa={kappa}: fused '
+                                    f'F_op_grid {label} array is not '
+                                    'byte-identical to HEAD -- the batched '
+                                    'fusion moved a bit')
+        self.assertGreater(
+            certified, 0, 'no grid certified; the batched byte-identity '
+            'sweep never compared a returned array (vacuous)')
+        self.assertGreater(
+            refused, 0, 'no grid refused; the whole-grid refusal parity '
+            'was never exercised (vacuous)')
+
+
+class OperatorFusionFalsificationTestCase(FastPathTestCase):
+    """
+    WP-B F010 preservation: the fused-contraction accuracy gate is NOT
+    vacuous, re-homed onto the single fused njit core the Build 8b lever
+    created.
+
+    The Build 8b fusion merged the former ``_weight_vectors`` +
+    ``_contract_grid`` two-stage pipeline into ONE core,
+    `operator._fused_contraction`, so BOTH former py_func-chain
+    falsifications -- the corrupted convergence tolerance and the zeroed
+    radial-index gather -- now flow through that ONE function.  numba
+    freezes module globals at compile time, so a patched
+    ``_SERIES_TOLERANCE`` never reaches the compiled dispatcher; each
+    perturbation is injected through the ``py_func`` chain -- the fused
+    core is swapped for its ``.py_func`` body, which re-reads the module
+    globals in the interpreter -- and the ``half_sum`` gather stays an
+    explicit ARGUMENT the wrapper can corrupt.  Each perturbation must
+    drive the `FOP_RTOL` gate red (refuse OR return past tolerance); a
+    perturbation that left it green would mean the fused njit core is dead
+    code or the ``py_func`` chain is incomplete.
+
+    The gate targets the LEGACY certified path `operator._grid_certified`
+    directly: the public `F_op_grid` rescues a sub-ceiling refusal with
+    the Schwinger fallback (which does not consume the perturbed series),
+    so a perturbation-induced refusal would be masked through the public
+    entry point and the falsification would go vacuous.
+    """
+
+    def _gate_outcome(self):
+        """Run the certified path at the FALSIFY config; return
+        ``(raised, rel_err)`` -- ``rel_err`` is ``inf`` on refusal, else
+        the relative error against the INDEPENDENT mpmath ``F_op``
+        oracle."""
+        try:
+            values, *_ = operator._grid_certified(
+                np.array([FALSIFY_W], dtype=float),
+                np.asarray(FALSIFY_Y, dtype=float), FALSIFY_GAMMA,
+                max_order=FOP_MAX_ORDER)
+        except CancellationError:
+            return True, float('inf')
+        oracle = _oracle_fop(FALSIFY_W, FALSIFY_Y, FALSIFY_GAMMA,
+                             max_order=FOP_MAX_ORDER)
+        rel = abs(complex(values[0]) - oracle) / abs(oracle)
+        return False, rel
+
+    def _assert_green_unpatched(self):
+        """The gate must be green BEFORE any patch, so RED is the patch's
+        doing and not a broken precondition."""
+        raised, rel = self._gate_outcome()
+        self.n_checks += 1
+        self.assertFalse(
+            raised, 'unpatched _grid_certified refused the certified '
+            'FALSIFY config; the falsification precondition is broken')
+        self.n_checks += 1
+        self.assertLessEqual(
+            rel, FOP_RTOL,
+            f'unpatched fused contraction rel error {rel:.3e} already '
+            f'exceeds {FOP_RTOL:.0e}; the gate is not green to begin with')
+
+    def test_fused_core_exposes_patchable_py_func_and_globals(self):
+        """
+        Introspection (F010): the fusion kept the core PERTURBABLE.  The
+        fused function exposes a plain ``.py_func`` body (no compiled
+        ``.signatures``, so a swap re-reads module globals in the
+        interpreter); ``_SERIES_TOLERANCE`` remains a MODULE GLOBAL the
+        perturbation can patch; and ``half_sum`` remains an ARGUMENT the
+        gather corruption can zero.  If any of these regressed, the two
+        falsification tests below would be silently vacuous.
+        """
+        self.n_checks += 1
+        self.assertTrue(
+            hasattr(operator._fused_contraction, 'py_func'),
+            '_fused_contraction does not expose .py_func; the F010 '
+            'perturbations cannot reach the compiled core')
+        pyfunc = operator._fused_contraction.py_func
+        self.n_checks += 1
+        self.assertFalse(
+            hasattr(pyfunc, 'signatures'),
+            '_fused_contraction.py_func carries .signatures; it is not a '
+            'plain py_func body, so a perturbation would not reach compiled '
+            'code (F010 vacuity)')
+        self.n_checks += 1
+        self.assertIn(
+            'half_sum', inspect.signature(pyfunc).parameters,
+            "half_sum is no longer an explicit argument of "
+            "_fused_contraction; the gather-index falsification cannot "
+            'corrupt it')
+        self.n_checks += 1
+        self.assertTrue(
+            hasattr(operator, '_SERIES_TOLERANCE'),
+            '_SERIES_TOLERANCE is not a module global; the series-'
+            'tolerance falsification cannot patch it')
+
+    def test_series_tolerance_perturbation_drives_gate_red(self):
+        """
+        Patching `operator._SERIES_TOLERANCE` to 1.0 through the fused
+        core's ``py_func`` makes the small-term stop fire as early as it
+        is allowed, dropping the O(gamma) shear correction; the result no
+        longer certifies to `FOP_RTOL` (it refuses on the truncation cut
+        or returns past tolerance).
+        """
+        self._assert_green_unpatched()
+        core_pyfunc = operator._fused_contraction.py_func
+        self.n_checks += 1
+        self.assertFalse(
+            hasattr(core_pyfunc, 'signatures'),
+            '_fused_contraction.py_func carries .signatures (F010 vacuity)')
+        with mock.patch.object(operator, '_fused_contraction', core_pyfunc), \
+                mock.patch.object(operator, '_SERIES_TOLERANCE',
+                                  PERTURBED_SERIES_TOLERANCE):
+            raised, rel = self._gate_outcome()
+        print(f'\n[Falsification] fused series-tolerance -> '
+              f'{PERTURBED_SERIES_TOLERANCE}: raised={raised} '
+              f'rel_err={rel:.3e}')
+        self.n_checks += 1
+        self.assertTrue(
+            raised or rel > FOP_RTOL,
+            f'the truncated shear series still certified (rel_err '
+            f'{rel:.3e} <= {FOP_RTOL:.0e}); the fused accuracy gate is '
+            'vacuous or the py_func chain is incomplete (F010)')
+
+    def test_gather_index_perturbation_drives_gate_red(self):
+        """
+        Feeding an all-zero ``half_sum`` ARGUMENT into the fused core's
+        ``py_func`` sends every ``(a, b)`` monomial to radial index
+        ``= order`` instead of the ``idx(a, b, n)`` gather, so the
+        contraction reads a single wrong derivative per order and the
+        amplitude is wrong at any nontrivial source; the gate must go red.
+        """
+        self._assert_green_unpatched()
+        core_pyfunc = operator._fused_contraction.py_func
+        self.n_checks += 1
+        self.assertFalse(
+            hasattr(core_pyfunc, 'signatures'),
+            '_fused_contraction.py_func carries .signatures (F010 vacuity)')
+
+        def corrupt_fused(table, z_powers, zbar_powers, abs_powers,
+                          half_sum, derivs_scaled, w_array, gamma_scaled,
+                          max_order, dim):
+            zeroed = np.zeros_like(half_sum)  # collapse the gather index
+            return core_pyfunc(table, z_powers, zbar_powers, abs_powers,
+                               zeroed, derivs_scaled, w_array, gamma_scaled,
+                               max_order, dim)
+
+        with mock.patch.object(operator, '_fused_contraction', corrupt_fused):
+            raised, rel = self._gate_outcome()
+        print(f'\n[Falsification] fused zeroed half_sum gather: '
+              f'raised={raised} rel_err={rel:.3e}')
+        self.n_checks += 1
+        self.assertTrue(
+            raised or rel > FOP_RTOL,
+            f'the collapsed bilinear form still certified (rel_err '
+            f'{rel:.3e} <= {FOP_RTOL:.0e}); the fused accuracy gate is '
+            'vacuous or the py_func chain is incomplete (F010)')
 
 
 # ---------------------------------------------------------------------------
@@ -1256,7 +1798,7 @@ class CausticSearchPreservationTestCase(FastPathTestCase):
     """
 
     @staticmethod
-    def _oracle_caustic_xy(theta, gamma, beta, kappa):
+    def _oracle_caustic_xy(theta, gamma, beta, kappa, branch=1.0):
         """
         Closed-form caustic (source-plane) point(s) at polar angle(s).
 
@@ -1264,15 +1806,31 @@ class CausticSearchPreservationTestCase(FastPathTestCase):
         ``x(theta)``, written out in plain vectorized numpy from the
         Chang--Refsdal critical-curve geometry -- the physics reference,
         independent of the compiled search under test.
+
+        ``branch`` selects the sign of the square-root branch of the
+        critical radius: ``+1.0`` is the only real branch at positive
+        parity (the single 4-cusp astroid), and a macro saddle uses both
+        ``+-1.0`` to trace the two edges of each 3-cusp deltoid lobe.  The
+        discriminant is clamped at zero so the wedge endpoints (where the
+        two branches meet) do not emit ``nan`` from float64 rounding --
+        the SAME clamp `geometry._caustic_source` applies; at positive
+        parity the discriminant is strictly positive, so with ``branch =
+        1.0`` this is byte-for-byte the former positive-parity formula.
         """
         theta = np.asarray(theta, dtype=float)
         lam = 1.0 - kappa
         effective_gamma = gamma / lam
         phase = theta - beta
+        discriminant = np.maximum(
+            1.0 - effective_gamma**2 * np.sin(2.0 * phase)**2, 0.0)
         effective_u = (effective_gamma * np.cos(2.0 * phase)
-                       + np.sqrt(1.0 - effective_gamma**2
-                                 * np.sin(2.0 * phase)**2))
-        radius = 1.0 / np.sqrt(lam * effective_u)
+                       + branch * np.sqrt(discriminant))
+        # Outside a saddle wedge ``effective_u`` turns non-positive; the
+        # resulting non-real radius is INTENTIONAL (those angles are off
+        # the caustic and map to +inf distance downstream), so silence the
+        # expected invalid-sqrt warning rather than let it mask real ones.
+        with np.errstate(invalid='ignore', divide='ignore'):
+            radius = 1.0 / np.sqrt(lam * effective_u)
         image_x = radius * np.cos(theta)
         image_y = radius * np.sin(theta)
         cos2b = np.cos(2.0 * beta)
@@ -1320,6 +1878,426 @@ class CausticSearchPreservationTestCase(FastPathTestCase):
         """Positive-parity ``(gamma, beta, kappa, source)`` combinations."""
         return itertools.product(
             CAUSTIC_GAMMAS, CAUSTIC_BETAS, CAUSTIC_KAPPAS, CAUSTIC_SOURCES)
+
+    def _saddle_config_grid(self):
+        """Macro-saddle ``(gamma, beta, kappa, source)`` combinations."""
+        return itertools.product(
+            CAUSTIC_SADDLE_GAMMAS, CAUSTIC_SADDLE_BETAS,
+            CAUSTIC_SADDLE_KAPPAS, CAUSTIC_SADDLE_SOURCES)
+
+    @staticmethod
+    def _angular_gap(theta_a, theta_b):
+        """Smallest absolute angle [rad] between two directions (mod 2*pi)."""
+        return abs((theta_a - theta_b + np.pi) % (2.0 * np.pi) - np.pi)
+
+    @classmethod
+    def _point_self_consistency_gap(cls, produced, gamma, beta, kappa):
+        """
+        Max-abs gap between production's returned source-plane point and
+        the INDEPENDENT caustic formula evaluated at production's OWN
+        ``theta`` (min over both square-root branches).
+
+        This certifies that the ``(theta, source)`` pair production
+        reports genuinely lies on the closed-form caustic, WITHOUT
+        inheriting the oracle's argmin angular resolution -- the caustic
+        map ``theta -> point`` has O(1) derivative, so the gap is ~1e-12
+        when the pair is consistent.  Non-real branch evaluations (outside
+        a saddle wedge) map to ``+inf`` and are excluded by the ``min``.
+        """
+        produced_source = np.asarray(produced.source, dtype=float)
+        gaps = []
+        for branch in (1.0, -1.0):
+            xco, yco = cls._oracle_caustic_xy(
+                produced.theta, gamma, beta, kappa, branch)
+            if np.isfinite(xco) and np.isfinite(yco):
+                gaps.append(float(np.max(np.abs(
+                    np.array([xco, yco]) - produced_source))))
+        return min(gaps) if gaps else np.inf
+
+    @classmethod
+    def _caustic_speed(cls, theta, gamma, beta, kappa, branch):
+        """
+        Local caustic speed ``|d(x, y) / d theta|`` [source-plane units per
+        rad] from the INDEPENDENT closed-form caustic map, by a symmetric
+        central difference.  Vanishes at cusps (where the map is stationary
+        and ``theta`` is under-determined) and is O(1) at regular points.
+
+        Returns ``0.0`` if either sampled point is non-real (outside a
+        saddle wedge), which conservatively tolerates the angle there.
+        """
+        h = 1e-7
+        x_hi, y_hi = cls._oracle_caustic_xy(
+            theta + h, gamma, beta, kappa, branch)
+        x_lo, y_lo = cls._oracle_caustic_xy(
+            theta - h, gamma, beta, kappa, branch)
+        if not (np.isfinite(x_hi) and np.isfinite(y_hi)
+                and np.isfinite(x_lo) and np.isfinite(y_lo)):
+            return 0.0
+        return float(np.hypot(x_hi - x_lo, y_hi - y_lo) / (2.0 * h))
+
+    @classmethod
+    def _lobe_of_theta(cls, theta, beta):
+        """Lobe index of a saddle angle: 0 near ``beta``, 1 near ``beta+pi``."""
+        gap0 = cls._angular_gap(theta, beta % (2.0 * np.pi))
+        gap1 = cls._angular_gap(theta, (beta + np.pi) % (2.0 * np.pi))
+        return 0 if gap0 <= gap1 else 1
+
+    @classmethod
+    def _scan_branch(cls, thetas, gamma, beta, kappa, branch, source):
+        """
+        Nearest source-to-caustic point on ONE branch over a theta grid.
+
+        Returns ``(best_squared, best_theta, best_xy)``.  A two-stage
+        search: a coarse ``argmin`` over ``thetas`` localizes the winning
+        cell, then a dense local ``linspace`` spanning the two neighbouring
+        cells is re-scanned and its winner refined by a parabolic-vertex
+        fit.  The fine stage drives ``best_theta`` to ~1e-11 (far below the
+        coarse grid step), so the oracle's argmin theta is itself tight
+        enough to certify the production theta at 1e-9.  Grid cells whose
+        radius is non-real (outside a saddle wedge, where the clamped
+        discriminant collapses ``effective_u`` to a non-positive value)
+        map to ``+inf`` and never win.
+        """
+        def squared_dist(angles):
+            xco, yco = cls._oracle_caustic_xy(angles, gamma, beta, kappa,
+                                              branch)
+            sq = (xco - source[0])**2 + (yco - source[1])**2
+            return np.where(np.isfinite(sq), sq, np.inf)
+
+        # Stage 1: coarse argmin over the supplied grid.
+        squared = squared_dist(thetas)
+        index = int(np.argmin(squared))
+        best_sq = float(squared[index])
+        best_theta = float(thetas[index])
+        step = float(thetas[1] - thetas[0])
+
+        # Stage 2: dense local rescan spanning the two neighbouring cells.
+        fine = np.linspace(best_theta - step, best_theta + step,
+                           N_THETA_ORACLE)
+        fine_sq = squared_dist(fine)
+        j = int(np.argmin(fine_sq))
+        if float(fine_sq[j]) < best_sq:
+            best_sq, best_theta = float(fine_sq[j]), float(fine[j])
+        # Parabolic-vertex refine using the two interior fine neighbours.
+        if 0 < j < fine.size - 1:
+            y_lo, y_mid, y_hi = (float(fine_sq[j - 1]), float(fine_sq[j]),
+                                 float(fine_sq[j + 1]))
+            denom = y_lo - 2.0 * y_mid + y_hi
+            if np.isfinite(denom) and denom > 0.0:
+                fstep = float(fine[1] - fine[0])
+                offset = 0.5 * fstep * (y_lo - y_hi) / denom
+                theta_star = best_theta + offset
+                sq_star = float(squared_dist(np.array([theta_star]))[0])
+                if np.isfinite(sq_star) and sq_star < best_sq:
+                    best_sq, best_theta = sq_star, theta_star
+
+        x_best, y_best = cls._oracle_caustic_xy(
+            best_theta, gamma, beta, kappa, branch)
+        return best_sq, best_theta, np.array([float(x_best), float(y_best)])
+
+    def _oracle_nearest(self, gamma, beta, kappa, source, *, saddle):
+        """
+        Fully independent nearest-caustic solution: distance, theta,
+        branch, lobe, source-plane point, and a degeneracy count.
+
+        Positive parity scans the single 4-cusp astroid (``+`` branch,
+        full circle).  A macro saddle scans BOTH deltoid lobes (centres
+        ``beta`` and ``beta+pi``) on BOTH square-root branches over their
+        critical wedges and takes the global minimum.  ``n_near_equal``
+        counts how many independent branch/lobe minima fall within a
+        relative ``1e-6`` of the winner -- the benign degeneracy (source
+        on a symmetry axis) where ``theta``/``lobe`` are ambiguous and
+        only the distance is well posed.
+        """
+        source = np.asarray(source, dtype=float)
+        if not saddle:
+            grid = np.linspace(0.0, 2.0 * np.pi, N_THETA_ORACLE,
+                               endpoint=False)
+            best_sq, best_theta, best_xy = self._scan_branch(
+                grid, gamma, beta, kappa, 1.0, source)
+            # Cyclic local minima of the coarse scan (degeneracy flag).
+            caustic_x, caustic_y = self._oracle_caustic_xy(
+                grid, gamma, beta, kappa, 1.0)
+            squared = (caustic_x - source[0])**2 + (caustic_y - source[1])**2
+            left, right = np.roll(squared, 1), np.roll(squared, -1)
+            minima = np.sort(squared[(squared < left) & (squared < right)])
+            n_near_equal = int(np.sum(minima <= best_sq * (1.0 + 1e-6))) \
+                if minima.size else 1
+            return {'distance': float(np.sqrt(best_sq)),
+                    'theta': best_theta % (2.0 * np.pi),
+                    'branch': 1, 'lobe': None, 'caustic_xy': best_xy,
+                    'n_near_equal': n_near_equal}
+
+        lam = 1.0 - kappa
+        theta_max = 0.5 * np.arcsin(lam / abs(gamma))
+        winners = []  # (squared, theta, branch, lobe, xy) per branch/lobe
+        for lobe, center in enumerate((beta, beta + np.pi)):
+            wedge = np.linspace(center - theta_max, center + theta_max,
+                                N_THETA_ORACLE)
+            for branch in (1.0, -1.0):
+                sq, theta, xy = self._scan_branch(
+                    wedge, gamma, beta, kappa, branch, source)
+                winners.append((sq, theta, int(branch), lobe, xy))
+        best_sq, best_theta, best_branch, best_lobe, best_xy = min(
+            winners, key=lambda item: item[0])
+        n_near_equal = int(sum(
+            1 for sq, *_ in winners if sq <= best_sq * (1.0 + 1e-6)))
+        return {'distance': float(np.sqrt(best_sq)),
+                'theta': best_theta % (2.0 * np.pi),
+                'branch': best_branch, 'lobe': best_lobe,
+                'caustic_xy': best_xy, 'n_near_equal': n_near_equal}
+
+    def test_positive_parity_theta_and_point_match_bruteforce_oracle(self):
+        """
+        ``nearest_caustic_point`` returns the SAME argmin ``theta`` (mod
+        ``2*pi``) and the SAME source-plane caustic POINT as the dense
+        brute-force oracle across the positive-parity astroid grid.  Where
+        the nearest point is degenerate (multiple near-axis minima) the
+        angle/point are ambiguous, so those configs assert distance only.
+        This extends the distance-only gate to the full returned geometry.
+        """
+        residuals = []
+        for gamma, beta, kappa, source in self._config_grid():
+            with self.subTest(gamma=gamma, beta=beta, kappa=kappa,
+                              source=source):
+                produced = geometry.nearest_caustic_point(
+                    gamma, beta, np.asarray(source, dtype=float),
+                    kappa=kappa)
+                oracle = self._oracle_nearest(
+                    gamma, beta, kappa, source, saddle=False)
+                if oracle['n_near_equal'] > 1:
+                    # Degenerate: theta/point ambiguous; distance only.
+                    self.n_checks += 1
+                    self.assertLess(
+                        abs(produced.distance - oracle['distance'])
+                        / oracle['distance'], CAUSTIC_RTOL,
+                        f'gamma={gamma} beta={beta} kappa={kappa} '
+                        f'source={source}: degenerate-config distance drift')
+                    continue
+                theta_gap = self._angular_gap(produced.theta, oracle['theta'])
+                point_gap = self._point_self_consistency_gap(
+                    produced, gamma, beta, kappa)
+                residuals.append((oracle['distance'], theta_gap, point_gap))
+                speed = self._caustic_speed(
+                    oracle['theta'], gamma, beta, kappa, 1.0)
+                arclen_gap = theta_gap * speed
+                self.n_checks += 1
+                self.assertLess(
+                    arclen_gap, CAUSTIC_ARCLEN_ATOL,
+                    f'gamma={gamma} beta={beta} kappa={kappa} '
+                    f'source={source}: returned theta {produced.theta:.12g} '
+                    f'differs from the brute-force argmin {oracle["theta"]:.12g}'
+                    f' by {theta_gap:.3e} rad, arc-length {arclen_gap:.3e} > '
+                    f'{CAUSTIC_ARCLEN_ATOL} (caustic speed {speed:.3e}); the '
+                    'search converged to a non-global stationary point')
+                self.n_checks += 1
+                self.assertLess(
+                    point_gap, CAUSTIC_POINT_ATOL,
+                    f'gamma={gamma} beta={beta} kappa={kappa} '
+                    f'source={source}: returned caustic point '
+                    f'{np.asarray(produced.source)} differs from the oracle '
+                    f'{oracle["caustic_xy"]} by {point_gap:.3e} > '
+                    f'{CAUSTIC_POINT_ATOL}')
+        self._plot_theta_error(residuals, 'positive parity',
+                               'caustic_search_theta_error_positive')
+
+    def test_saddle_distance_theta_lobe_match_bruteforce_oracle(self):
+        """
+        On BOTH macro-saddle deltoid lobes (centres ``beta`` and
+        ``beta+pi``) and BOTH square-root branches, the accelerated search
+        returns the SAME distance, argmin ``theta``, source-plane point,
+        and LOBE as the dense two-lobe/two-branch oracle.  Distance is
+        gated at `CAUSTIC_RTOL`; the resolution-limited saddle angle at
+        `CAUSTIC_SADDLE_THETA_ATOL`; the lobe identity exactly.  Degenerate
+        (competing-lobe) configs assert distance only.
+        """
+        residuals = []
+        n_saddle = 0
+        for gamma, beta, kappa, source in self._saddle_config_grid():
+            with self.subTest(gamma=gamma, beta=beta, kappa=kappa,
+                              source=source):
+                produced = geometry.nearest_caustic_point(
+                    gamma, beta, np.asarray(source, dtype=float),
+                    kappa=kappa)
+                oracle = self._oracle_nearest(
+                    gamma, beta, kappa, source, saddle=True)
+                n_saddle += 1
+                self.n_checks += 1
+                self.assertLess(
+                    abs(produced.distance - oracle['distance'])
+                    / oracle['distance'], CAUSTIC_RTOL,
+                    f'gamma={gamma} beta={beta} kappa={kappa} '
+                    f'source={source}: saddle distance {produced.distance:.12g}'
+                    f' disagrees with the two-lobe oracle '
+                    f'{oracle["distance"]:.12g}')
+                if oracle['n_near_equal'] > 1:
+                    continue  # competing lobes: theta/lobe ambiguous
+                produced_lobe = self._lobe_of_theta(produced.theta, beta)
+                theta_gap = self._angular_gap(produced.theta, oracle['theta'])
+                point_gap = self._point_self_consistency_gap(
+                    produced, gamma, beta, kappa)
+                residuals.append((gamma, theta_gap, oracle['lobe']))
+                self.n_checks += 1
+                self.assertEqual(
+                    produced_lobe, oracle['lobe'],
+                    f'gamma={gamma} beta={beta} kappa={kappa} '
+                    f'source={source}: selected lobe {produced_lobe} != '
+                    f'oracle lobe {oracle["lobe"]} (a lobe jump)')
+                speed = self._caustic_speed(
+                    oracle['theta'], gamma, beta, kappa,
+                    float(oracle['branch']))
+                arclen_gap = theta_gap * speed
+                self.n_checks += 1
+                self.assertLess(
+                    arclen_gap, CAUSTIC_ARCLEN_ATOL,
+                    f'gamma={gamma} beta={beta} kappa={kappa} '
+                    f'source={source}: saddle theta {produced.theta:.12g} '
+                    f'differs from the oracle {oracle["theta"]:.12g} by '
+                    f'{theta_gap:.3e} rad, arc-length {arclen_gap:.3e} > '
+                    f'{CAUSTIC_ARCLEN_ATOL} (caustic speed {speed:.3e})')
+                self.n_checks += 1
+                self.assertLess(
+                    point_gap, CAUSTIC_POINT_ATOL,
+                    f'gamma={gamma} beta={beta} kappa={kappa} '
+                    f'source={source}: saddle caustic point drift '
+                    f'{point_gap:.3e} > {CAUSTIC_POINT_ATOL}')
+        self.assertGreaterEqual(
+            n_saddle, 9,
+            f'only {n_saddle} saddle configs exercised; the Professor '
+            'specification requires at least 9 spanning both lobes/branches')
+        self._plot_theta_error(
+            [(g, t, 0) for g, t, _ in residuals], 'macro saddle',
+            'caustic_search_theta_error_saddle', xlabel='gamma')
+
+    def test_saddle_branch_selection_tracks_reference(self):
+        """
+        Branch-invariance falsification: on a near-symmetric saddle
+        (``beta = 0``, mirror lobes across ``y1 = 0``) a source swept in
+        ``y1`` through the symmetry line flips the nearest LOBE exactly as
+        the independent oracle does -- one clean transition, no
+        Newton-induced chatter, and never a flip the reference does not
+        also make.
+        """
+        beta = 0.0
+        produced_lobes, oracle_lobes = [], []
+        for y1 in CAUSTIC_SYMMETRY_Y1_SWEEP:
+            source = (y1, CAUSTIC_SYMMETRY_Y2)
+            with self.subTest(y1=y1):
+                produced = geometry.nearest_caustic_point(
+                    CAUSTIC_SYMMETRY_GAMMA, beta,
+                    np.asarray(source, dtype=float),
+                    kappa=CAUSTIC_SYMMETRY_KAPPA)
+                oracle = self._oracle_nearest(
+                    CAUSTIC_SYMMETRY_GAMMA, beta, CAUSTIC_SYMMETRY_KAPPA,
+                    source, saddle=True)
+                self.n_checks += 1
+                self.assertLess(
+                    abs(produced.distance - oracle['distance'])
+                    / oracle['distance'], CAUSTIC_RTOL,
+                    f'y1={y1}: distance drift across the symmetry sweep')
+                if oracle['n_near_equal'] > 1:
+                    continue
+                produced_lobe = self._lobe_of_theta(produced.theta, beta)
+                produced_lobes.append(produced_lobe)
+                oracle_lobes.append(oracle['lobe'])
+                self.n_checks += 1
+                self.assertEqual(
+                    produced_lobe, oracle['lobe'],
+                    f'y1={y1}: selected lobe {produced_lobe} != oracle lobe '
+                    f'{oracle["lobe"]}; the search chattered off the '
+                    'reference lobe across the symmetry line')
+        self.assertEqual(
+            set(oracle_lobes), {0, 1},
+            'the source sweep never crossed the lobe-symmetry line, so the '
+            'branch-invariance falsification is vacuous; widen the sweep')
+        self._plot_lobe_sweep(produced_lobes, oracle_lobes)
+
+    @staticmethod
+    def _warm_best_ms(gamma, beta, kappa, source):
+        """Warm best-of-N per-call cost [ms] of `nearest_caustic_point`."""
+        source = np.asarray(source, dtype=float)
+
+        def search():
+            geometry.nearest_caustic_point(gamma, beta, source, kappa=kappa)
+
+        search()  # warm (compile numba caustic core + caches)
+        best = np.inf
+        for _ in range(CAUSTIC_TIMING_REPEATS):
+            start = time.perf_counter()
+            search()
+            best = min(best, time.perf_counter() - start)
+        return best * 1e3
+
+    def test_caustic_search_warm_timing_probe(self):
+        """
+        WP-A timing probe (SOFT).  Times `nearest_caustic_point` warm on
+        BOTH cost classes the Newton caustic shortcut targeted -- the
+        POSITIVE-parity astroid (single 4-cusp search, measured ~0.1 ms
+        class) and the MACRO-SADDLE two-lobe/two-branch search (measured
+        ~1 ms class) -- and prints each per-call cost with its ratio to
+        the ~0.3 ms target.  The hard sub-millisecond assertion (on the
+        slower saddle class) is enforced only under
+        ``COGWHEEL_STRICT_TIMING`` (machine dependent); otherwise a
+        generous non-flaky ceiling guards a catastrophic regression.
+        This is a diagnostic guard, not a physical claim.
+        """
+        positive_ms = self._warm_best_ms(
+            0.20, 0.0, 0.0, (0.15, 0.05))
+        saddle_ms = self._warm_best_ms(
+            CAUSTIC_SYMMETRY_GAMMA, 0.0, CAUSTIC_SYMMETRY_KAPPA, (0.20, 0.05))
+        print(f'\n[CausticTiming] warm nearest_caustic_point: '
+              f'positive-parity = {positive_ms:.4f} ms (~0.1 ms class), '
+              f'macro-saddle = {saddle_ms:.4f} ms (~1 ms class); '
+              f'target ~{CAUSTIC_TIMING_TARGET_MS} ms, saddle ratio '
+              f'{saddle_ms / CAUSTIC_TIMING_TARGET_MS:.2f}x')
+        # Gate the SLOWER (saddle) class -- the worst case bounds both.
+        self.n_checks += 1
+        if _STRICT_TIMING:
+            self.assertLess(
+                saddle_ms, 1.0,
+                f'warm saddle caustic search {saddle_ms:.4f} ms exceeds the '
+                'strict 1 ms class (COGWHEEL_STRICT_TIMING set)')
+        else:
+            self.assertLess(
+                saddle_ms, CAUSTIC_TIMING_LOOSE_CEILING_MS,
+                f'warm saddle caustic search {saddle_ms:.4f} ms exceeds the '
+                f'loose {CAUSTIC_TIMING_LOOSE_CEILING_MS} ms regression '
+                'ceiling')
+
+    def _plot_theta_error(self, residuals, label, name, xlabel=None):
+        """Scatter of returned-vs-oracle angular residual."""
+        if not residuals:
+            return
+        residuals = np.array(residuals)
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.scatter(residuals[:, 0], np.maximum(residuals[:, 1], 1e-18),
+                   s=22, zorder=3)
+        gate = (CAUSTIC_SADDLE_THETA_ATOL if 'saddle' in label
+                else CAUSTIC_THETA_ATOL)
+        ax.axhline(gate, color='k', ls='--', label=f'{gate:g} gate')
+        ax.set_xlabel(xlabel or 'source-to-caustic distance (oracle)')
+        ax.set_ylabel('|theta_produced - theta_oracle| (mod 2*pi)')
+        ax.set_yscale('log')
+        ax.set_title(f'WP-A caustic argmin theta preserved ({label})')
+        ax.legend(fontsize=8)
+        self._save_figure(fig, name)
+
+    def _plot_lobe_sweep(self, produced_lobes, oracle_lobes):
+        """Selected-lobe id vs the source sweep across the symmetry line."""
+        if not oracle_lobes:
+            return
+        y1 = np.asarray(CAUSTIC_SYMMETRY_Y1_SWEEP[:len(oracle_lobes)])
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.step(y1, oracle_lobes, where='mid', color='k', lw=2,
+                label='oracle lobe', zorder=2)
+        ax.scatter(y1, produced_lobes, color='crimson', s=40,
+                   label='produced lobe', zorder=3)
+        ax.set_xlabel('source $y_1$ (swept across the symmetry line)')
+        ax.set_ylabel('selected lobe id')
+        ax.set_yticks((0, 1))
+        ax.set_title('WP-A saddle lobe selection tracks the reference')
+        ax.legend(fontsize=8)
+        self._save_figure(fig, 'caustic_search_lobe_sweep')
 
     def test_distance_matches_bruteforce_oracle(self):
         """
@@ -1428,6 +2406,61 @@ class CausticSearchPreservationTestCase(FastPathTestCase):
                         f'(delta_min={delta_min:.4g}, L={exponent:.4g}, '
                         f'RHO_END={RHO_END}, L_MAX={L_MAX}); WP1 '
                         'perturbed the geometry the branch gate consumes')
+
+    def test_arclength_theta_gate_rejects_a_forged_non_global_theta(self):
+        """
+        Self-falsification PARTNER for the arc-length theta certification
+        (`CAUSTIC_ARCLEN_ATOL`) that gates `nearest_caustic_point`'s
+        returned ``theta`` in the two preservation tests above.  A theta
+        at the floating-point localization floor (~1e-9 rad from the
+        oracle argmin) passes; a FORGED non-global stationary theta offset
+        O(1) rad away lands at O(1) arc-length and is REJECTED.  Without
+        this partner the theta gate could not be shown to go red -- yet a
+        wrong stationary point (a genuine lobe-jump / non-global
+        convergence) is exactly what it must catch.  Evaluated at a
+        REGULAR (non-cusp) caustic point, where the caustic speed is O(1)
+        so the arc-length currency is sharp; at a cusp the speed vanishes
+        and the gate deliberately tolerates theta, so a cusp config would
+        make the forgery vacuous.
+        """
+        gamma, beta, kappa = 0.20, 0.0, 0.0
+        source = (0.15, 0.05)  # unique minimum at a regular caustic point
+        oracle = self._oracle_nearest(gamma, beta, kappa, source,
+                                      saddle=False)
+        theta_star = oracle['theta']
+        speed = self._caustic_speed(theta_star, gamma, beta, kappa, 1.0)
+        # Preconditions: a clean, discriminating forgery needs a unique
+        # minimum at a regular (non-cusp, speed O(1)) point.
+        self.n_checks += 1
+        self.assertEqual(
+            oracle['n_near_equal'], 1,
+            'the forgery config lost its unique minimum; pick another')
+        self.n_checks += 1
+        self.assertGreater(
+            speed, 1e-2,
+            f'caustic speed {speed:.3e} is near a cusp; the arc-length '
+            'forgery would be vacuous there -- pick a regular point')
+        # A theta at the floating-point localization floor passes the gate.
+        good_arclen = self._angular_gap(
+            theta_star + 1e-9, theta_star) * speed
+        self.n_checks += 1
+        self.assertLess(
+            good_arclen, CAUSTIC_ARCLEN_ATOL,
+            f'a theta at the localization floor lands at arc-length '
+            f'{good_arclen:.3e}, already past the {CAUSTIC_ARCLEN_ATOL} '
+            'gate; the gate is too tight to admit the true answer')
+        # A forged non-global stationary theta (O(1) rad away) is rejected.
+        forged = theta_star + 0.5
+        forged_gap = self._angular_gap(forged, theta_star)
+        forged_arclen = forged_gap * speed
+        self.n_checks += 1
+        self.assertGreater(
+            forged_arclen, CAUSTIC_ARCLEN_ATOL,
+            f'a forged non-global theta {forged:.6g} (gap {forged_gap:.3e} '
+            f'rad, speed {speed:.3e}) lands at arc-length '
+            f'{forged_arclen:.3e}, which does not exceed the '
+            f'{CAUSTIC_ARCLEN_ATOL} gate; the theta certification cannot '
+            'reject a wrong stationary point')
 
 
 class SelfFalsificationTestCase(FastPathTestCase):

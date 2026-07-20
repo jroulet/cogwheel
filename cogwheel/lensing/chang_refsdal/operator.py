@@ -617,33 +617,60 @@ def _refusal_message(w: float, y: np.ndarray, gamma: float,
 
 
 @numba.njit(cache=True, fastmath=False)
-def _weight_vectors(table, z_powers, zbar_powers, abs_powers, half_sum,
-                    max_order, dim):
-    """Precompute the w-independent per-order weight vectors.
+def _fused_contraction(table, z_powers, zbar_powers, abs_powers, half_sum,
+                       derivs_scaled, w_array, gamma_scaled, max_order, dim):
+    """Fused w-independent weight-vector build + batched node contraction.
 
-    Within one `F_op_grid` call the lens parameters are fixed and only
-    ``w`` varies over the node grid, so ``z_powers``, ``zbar_powers``,
-    the operator ``table`` and the radial-index selector ``half_sum`` are
-    all ``w``-INDEPENDENT.  The order-``n`` contraction
-    ``sum_{a,b} z_powers[a] * table[n,a,b] * zbar_powers[b] *
-    derivs[idx(a,b,n)]`` (with ``idx = min(half_sum[a,b] + n, dim - 1)``,
-    the SAME clamp the scalar kernel used) can therefore be regrouped by
-    the radial index ``j`` into a single length-``dim`` weight vector
+    THE single njit hot core of `F_op_grid`, merging the two formerly
+    separate stages -- the ``w``-INDEPENDENT per-order weight-vector build
+    and the per-node operator-series contraction -- into one dispatch.
+    The fusion is a DISPATCH-ONLY merge: the two loop nests below are the
+    former ``_weight_vectors`` and ``_contract_grid`` bodies inlined
+    verbatim, in the identical iteration order, so every float64
+    add/multiply happens in the SAME sequence as before.  The weight
+    vectors ``v`` / ``v_abs`` are now internal per-call temporaries rather
+    than arrays handed across an njit boundary; nothing is re-associated,
+    nothing switches to ``np.dot``/BLAS, and the ``(order, a, b)`` scatter
+    and ``(node, order, j)`` contraction are byte-for-byte unchanged.  The
+    win is eliminating the intermediate materialization/handoff of
+    ``v`` / ``v_abs`` and the second njit dispatch -- NOT any arithmetic
+    restructuring; the returned 6-tuple is bit-identical to the former
+    ``_weight_vectors`` -> ``_contract_grid`` pipeline (FINDINGS F005).
 
-        v[n, j] = sum over (a, b) with idx(a, b, n) == j of
-                  z_powers[a] * table[n,a,b] * zbar_powers[b],
-
-    reducing each per-node order to a length-``dim`` dot
-    ``v[n] . derivs`` instead of a full ``dim x dim`` bilinear form.
-    ``v_abs`` is the all-positive companion built from
+    Stage 1 -- w-independent weight vectors.  Within one `F_op_grid` call
+    the lens parameters are fixed and only ``w`` varies over the node
+    grid, so ``z_powers``, ``zbar_powers``, the operator ``table`` and the
+    radial-index selector ``half_sum`` are all ``w``-INDEPENDENT.  The
+    order-``n`` contraction ``sum_{a,b} z_powers[a] * table[n,a,b] *
+    zbar_powers[b] * derivs[idx(a,b,n)]`` (with ``idx = min(half_sum[a,b]
+    + n, dim - 1)``, the SAME clamp the scalar kernel used) is regrouped
+    by the radial index ``j`` into a single length-``dim`` weight vector
+    ``v[n, j]`` and its all-positive companion ``v_abs[n, j]`` (built from
     ``|z_powers[a]| * |table[n,a,b]| * |zbar_powers[b]|`` for the
-    ``sum|term|`` / ``max_term`` cancellation bookkeeping.  Built ONCE
-    per grid call and reused across every node.
+    ``sum|term|`` / ``max_term`` cancellation bookkeeping).  Built ONCE
+    per call and reused across every node.  GATHER-INDEX INVARIANT: a
+    nonzero monomial at order ``n`` obeys ``half_sum + n <= 2*max_order =
+    dim - 1``, so any index that would clamp carries a zero table
+    coefficient and is skipped -- the clamp never scatters a spurious
+    contribution into ``v[n, dim-1]``.
 
-    GATHER-INDEX INVARIANT: a nonzero monomial at order ``n`` obeys
-    ``half_sum + n <= 2*max_order = dim - 1``, so any index that would
-    clamp carries a zero table coefficient and is skipped -- the clamp
-    therefore never scatters a spurious contribution into ``v[n, dim-1]``.
+    Stage 2 -- per-node contraction.  For every node it sums the operator
+    power series ``sum_n coeff_n * (v[n] . derivs)`` -- one length-``dim``
+    dot of the weight vector built above against that node's rescaled
+    radial derivatives -- accumulates the all-positive companion
+    ``sum|term|`` (the honest cancellation condition the round-off
+    certification measures), and runs the same small-term convergence test
+    the scalar kernel used, per node.  It stays complex128 -- the
+    double-double substrate lives only in the 1F1 kernel (FINDINGS F001) --
+    factors nothing out itself (the caller does the exact per-node
+    power-of-two rescaling of ``derivs_scaled``), and owns no threshold,
+    refusal, or reconstruction.
+
+    F010 note: ``half_sum`` stays an explicit ARGUMENT and
+    ``_SERIES_TOLERANCE`` / ``_CONSECUTIVE_SMALL`` / ``_MIN_ORDER`` are
+    referenced by name as MODULE GLOBALS, so the py_func-chain
+    self-falsification tests can still patch the gather index and the
+    convergence tolerance and drive the accuracy gate red.
 
     Parameters
     ----------
@@ -656,68 +683,6 @@ def _weight_vectors(table, z_powers, zbar_powers, abs_powers, half_sum,
         ``(dim,)`` float magnitudes ``|z_powers|``.
     half_sum : np.ndarray
         ``(dim, dim)`` int table ``(a + b) // 2``.
-    max_order, dim : int
-        Series order cap and monomial dimension ``2*max_order + 1``.
-
-    Returns
-    -------
-    v : np.ndarray
-        ``(max_order + 1, dim)`` complex weight vectors.
-    v_abs : np.ndarray
-        ``(max_order + 1, dim)`` float all-positive companion vectors.
-    """
-    v = np.zeros((max_order + 1, dim), dtype=np.complex128)
-    v_abs = np.zeros((max_order + 1, dim), dtype=np.float64)
-    for order in range(max_order + 1):
-        tbl = table[order]
-        vn = v[order]
-        vabs = v_abs[order]
-        for a in range(dim):
-            za = z_powers[a]
-            aa = abs_powers[a]
-            for b in range(dim):
-                coefficient = tbl[a, b]
-                if coefficient == 0.0:
-                    continue
-                idx = half_sum[a, b] + order
-                if idx > dim - 1:
-                    idx = dim - 1
-                vn[idx] += za * (coefficient * zbar_powers[b])
-                vabs[idx] += aa * (abs(coefficient) * abs_powers[b])
-    return v, v_abs
-
-
-@numba.njit(cache=True, fastmath=False)
-def _contract_grid(v, v_abs, derivs_scaled, w_array, gamma_scaled,
-                   max_order, dim):
-    """Batched operator-series contraction over the whole ``w`` grid.
-
-    The njit hot core of `F_op_grid`: for every node it sums the operator
-    power series ``sum_n coeff_n * (v[n] . derivs)`` -- one length-``dim``
-    dot of the precomputed weight vector `_weight_vectors` builds against
-    that node's rescaled radial derivatives, replacing the former
-    per-node ``dim x dim`` bilinear form.  It also accumulates the
-    all-positive companion ``sum|term|`` (the honest cancellation
-    condition the round-off certification measures) and the same
-    small-term convergence test the scalar kernel used, per node.
-
-    The accumulation ORDER differs from the former column-then-row
-    reduction (it is a blocked/dot reduction), which is SAFE inside the
-    certified band: for every returned point the cancellation condition
-    ``sum|term| / |total|`` stays below the ``_CONTRACTION_GUARD`` net,
-    so the reordering perturbs the total by far less than the ``1e-10``
-    target; higher-condition points are refused by the caller (FINDINGS
-    F005).  It stays complex128 -- the double-double substrate lives only
-    in the 1F1 kernel (FINDINGS F001) -- factors nothing out itself (the
-    caller does the exact per-node power-of-two rescaling of
-    ``derivs_scaled``), and owns no threshold, refusal, or reconstruction.
-
-    Parameters
-    ----------
-    v : np.ndarray
-        ``(max_order + 1, dim)`` complex weight vectors.
-    v_abs : np.ndarray
-        ``(max_order + 1, dim)`` float all-positive companion vectors.
     derivs_scaled : np.ndarray
         ``(n_nodes, dim)`` complex radial derivatives, each row already
         rescaled by that node's exact power of two by the caller.
@@ -744,6 +709,31 @@ def _contract_grid(v, v_abs, derivs_scaled, w_array, gamma_scaled,
     converged : np.ndarray
         ``(n_nodes,)`` bool small-term-stop flag per node.
     """
+    # --- Stage 1: w-independent per-order weight vectors ------------------
+    # (formerly ``_weight_vectors``; loop copied verbatim so the (order, a,
+    # b) scatter accumulates into v/v_abs in the identical float64 order.)
+    v = np.zeros((max_order + 1, dim), dtype=np.complex128)
+    v_abs = np.zeros((max_order + 1, dim), dtype=np.float64)
+    for order in range(max_order + 1):
+        tbl = table[order]
+        vn = v[order]
+        vabs = v_abs[order]
+        for a in range(dim):
+            za = z_powers[a]
+            aa = abs_powers[a]
+            for b in range(dim):
+                coefficient = tbl[a, b]
+                if coefficient == 0.0:
+                    continue
+                idx = half_sum[a, b] + order
+                if idx > dim - 1:
+                    idx = dim - 1
+                vn[idx] += za * (coefficient * zbar_powers[b])
+                vabs[idx] += aa * (abs(coefficient) * abs_powers[b])
+
+    # --- Stage 2: batched per-node operator-series contraction -----------
+    # (formerly ``_contract_grid``; loop copied verbatim so the (node,
+    # order, j) contraction and small-term stop are byte-for-byte unchanged.)
     n_nodes = w_array.shape[0]
     totals = np.zeros(n_nodes, dtype=np.complex128)
     positive_totals = np.zeros(n_nodes, dtype=np.float64)
@@ -811,12 +801,12 @@ def _grid_certified(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     four F005 refusals -- a value returned by either entry point and the
     diagnostics reported alongside it can never disagree.
 
-    The weight vectors and operator table are built ONCE (they are
-    ``w``-independent), the point-mass kernel is evaluated per node (its
-    series length varies with ``w``), the batched njit core `_contract_grid`
-    sums the operator series for every node, and then each node is
-    certified-or-refused with the four thresholds BYTE-UNCHANGED from the
-    former scalar path (FINDINGS F005/F001).
+    The operator table is built ONCE and the point-mass kernel is
+    evaluated per node (its series length varies with ``w``); the single
+    fused njit core `_fused_contraction` builds the ``w``-independent
+    weight vectors once and sums the operator series for every node, and
+    then each node is certified-or-refused with the four thresholds
+    BYTE-UNCHANGED from the former scalar path (FINDINGS F005/F001).
 
     Parameters
     ----------
@@ -868,19 +858,18 @@ def _grid_certified(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     table = _operator_table(max_order)
     dim = 2 * max_order + 1
 
-    # The weight vectors and every quantity feeding them are
-    # w-INDEPENDENT within one grid call, so build them ONCE.  Evaluate
-    # the beta=0 table at the eigenframe-rotated source; the exp(-1j*beta)
-    # rotation reproduces the full shear-orientation dependence (see the
-    # module docstring).
+    # Every quantity feeding the w-INDEPENDENT weight vectors is fixed
+    # within one grid call; the fused contraction below builds those
+    # vectors ONCE internally from these inputs.  Evaluate the beta=0
+    # table at the eigenframe-rotated source; the exp(-1j*beta) rotation
+    # reproduces the full shear-orientation dependence (see the module
+    # docstring).
     z_eig = np.exp(-1j * beta) * complex(y_scaled[0], y_scaled[1])
     powers = np.arange(dim)
     z_powers = z_eig ** powers
     zbar_powers = np.conjugate(z_eig) ** powers
     abs_powers = np.abs(z_powers)
     half_sum = (np.add.outer(powers, powers) // 2).astype(np.int64)
-    weights, weights_abs = _weight_vectors(
-        table, z_powers, zbar_powers, abs_powers, half_sum, max_order, dim)
 
     # Per-node kernel evaluation and overflow-safe rescaling (FINDINGS
     # F005).  The kernel is NOT batched -- its series length varies with
@@ -908,14 +897,15 @@ def _grid_certified(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
                                + 1j * np.ldexp(derivs.imag, -scale_exp))
         kernel_tails[node] = float(np.max(relative_tail))
 
-    # The order-accumulation loop -- the length-dim weight-vector dot, its
-    # all-positive companion, and the small-term convergence test -- runs
-    # in the njit core `_contract_grid` for all nodes at once.  Everything
-    # that raises, thresholds, or reconstructs stays here in Python.
+    # The w-independent weight-vector build and the order-accumulation
+    # loop -- the length-dim weight-vector dot, its all-positive companion,
+    # and the small-term convergence test -- run in the single fused njit
+    # core `_fused_contraction` for all nodes at once.  Everything that
+    # raises, thresholds, or reconstructs stays here in Python.
     (totals, positive_totals, max_terms, orders_used,
-     last_ratios, converged) = _contract_grid(
-         weights, weights_abs, derivs_scaled, w_array, gamma_scaled,
-         max_order, dim)
+     last_ratios, converged) = _fused_contraction(
+         table, z_powers, zbar_powers, abs_powers, half_sum,
+         derivs_scaled, w_array, gamma_scaled, max_order, dim)
 
     values = np.empty(n_nodes, dtype=complex)
     estimated_tails = np.empty(n_nodes, dtype=float)

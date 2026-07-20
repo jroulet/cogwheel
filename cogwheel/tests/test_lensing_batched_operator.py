@@ -185,11 +185,6 @@ FALS_W = 20.0
 FALS_Y = (0.55, 0.0)
 FALS_GAMMA = 0.20
 
-#: Corrupted small-term convergence tolerance: at 1.0 the stopping rule
-#: fires as early as it is allowed and truncates the shear series, so the
-#: perturbed result no longer certifies to `FOP_RTOL`.
-PERTURBED_SERIES_TOLERANCE = 1.0
-
 # ---------------------------------------------------------------------------
 # Timing-fixture constants (crown four-image, shared with the crown
 # likelihood suite so the fixture is read off the SAME configuration).
@@ -708,73 +703,18 @@ class BatchedContractionFalsificationTestCase(BatchedOperatorTestCase):
             f'unpatched F_op_grid rel error {rel:.3e} already exceeds '
             f'{FOP_RTOL:.0e}; the gate is not green to begin with')
 
-    def test_series_tolerance_perturbation_drives_gate_red(self):
-        """A corrupted convergence tolerance truncates the shear series.
-
-        Patching `operator._SERIES_TOLERANCE` to 1.0 through the batched
-        core's ``py_func`` makes the small-term stop fire as early as it
-        is allowed, dropping the O(gamma) shear correction; the result no
-        longer certifies to `FOP_RTOL` (it refuses on the truncation cut
-        or returns past tolerance).
-        """
-        self._assert_green_unpatched()
-
-        core_pyfunc = operator._contract_grid.py_func
-        self.assertFalse(
-            hasattr(core_pyfunc, 'signatures'),
-            '_contract_grid.py_func carries .signatures; it is not a plain '
-            'py_func body, so the perturbation would not reach compiled '
-            'code (F010 vacuity)')
-        with mock.patch.object(operator, '_contract_grid', core_pyfunc), \
-                mock.patch.object(operator, '_SERIES_TOLERANCE',
-                                  PERTURBED_SERIES_TOLERANCE):
-            raised, rel = self._gate_outcome()
-        print(f'\n[Falsification] series-tolerance -> '
-              f'{PERTURBED_SERIES_TOLERANCE}: raised={raised} '
-              f'rel_err={rel:.3e}')
-
-        self.n_checks += 1
-        self.assertTrue(
-            raised or rel > FOP_RTOL,
-            f'the truncated shear series still certified (rel_err '
-            f'{rel:.3e} <= {FOP_RTOL:.0e}); the accuracy gate is vacuous '
-            'or the py_func chain is incomplete (F010)')
-
-    def test_gather_index_perturbation_drives_gate_red(self):
-        """A zeroed radial-index gather collapses the bilinear form.
-
-        Feeding an all-zero ``half_sum`` into the weight-vector builder's
-        ``py_func`` sends every ``(a, b)`` monomial to radial index
-        ``= order``, so the contraction reads a single wrong derivative
-        per order instead of the ``idx(a, b, n)`` gather; the amplitude
-        is wrong at any nontrivial source and the gate must go red.
-        """
-        self._assert_green_unpatched()
-
-        weight_pyfunc = operator._weight_vectors.py_func
-        self.assertFalse(
-            hasattr(weight_pyfunc, 'signatures'),
-            '_weight_vectors.py_func carries .signatures; it is not a '
-            'plain py_func body (F010 vacuity)')
-
-        def corrupt_weight_vectors(table, z_powers, zbar_powers,
-                                   abs_powers, half_sum, max_order, dim):
-            zeroed = np.zeros_like(half_sum)  # collapse the gather index
-            return weight_pyfunc(table, z_powers, zbar_powers, abs_powers,
-                                 zeroed, max_order, dim)
-
-        with mock.patch.object(operator, '_weight_vectors',
-                               corrupt_weight_vectors):
-            raised, rel = self._gate_outcome()
-        print(f'\n[Falsification] zeroed half_sum gather: raised={raised} '
-              f'rel_err={rel:.3e}')
-
-        self.n_checks += 1
-        self.assertTrue(
-            raised or rel > FOP_RTOL,
-            f'the collapsed bilinear form still certified (rel_err '
-            f'{rel:.3e} <= {FOP_RTOL:.0e}); the accuracy gate is vacuous '
-            'or the py_func chain is incomplete (F010)')
+    # RETIRED (Build 8b-levers fusion): the two F010 falsifications that
+    # patched `operator._contract_grid.py_func` and
+    # `operator._weight_vectors.py_func` are gone — WP-B merged both
+    # stages into `operator._fused_contraction`, so those attributes no
+    # longer exist (the tests died on AttributeError, not on physics).
+    # The IDENTICAL falsification concerns (series-tolerance truncation
+    # and the zeroed half_sum gather collapse) are re-homed through the
+    # fused core's py_func in
+    # test_lensing_fast_path.py::OperatorFusionFalsificationTestCase,
+    # which also pins that half_sum stays an argument and
+    # _SERIES_TOLERANCE a patchable module global (F010: a falsification
+    # must always have a reachable red path).
 
 
 # ---------------------------------------------------------------------------
