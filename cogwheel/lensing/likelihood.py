@@ -212,6 +212,12 @@ _FID_Y_SPACING = 0.05
 #: ``E_candidate / E_fiducial`` against division by a near-zero fiducial.
 _ENVELOPE_HEALTH_FLOOR = 0.01
 
+#: Minimum source-plane caustic distance for the amplification surrogate
+#: fast path.  Nearer the caustic the envelope surface sharpens and its
+#: image-count region can flip, so a candidate within this distance falls
+#: through to the exact engine instead of the interpolated surrogate.
+_SURROGATE_CAUSTIC_FLOOR = 0.05
+
 #: Maximum number of macro images a Chang--Refsdal lens produces (four
 #: inside the caustic, two outside).  Matches the engine's channel count
 #: ``channels._N_CHANNELS``: when fewer than this many real images exist
@@ -682,6 +688,18 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         NOT evaluated at these sub-samples -- the candidate kernels are
         reconstructed there in closed form from the single interpolated
         SACR-C envelope (see ``_amplification_coefficients``).
+    amplification_surrogate : lensing.surrogate.LensAmplificationSurrogate \
+            or None
+        Optional trained envelope emulator (Build 8a).  When supplied and
+        the candidate lies inside the surrogate's certified box,
+        `_amplification_coefficients` serves the amplification from a cheap
+        geometry-only partition plus the emulated envelope, short-circuiting
+        the entire per-candidate engine cost (seed evaluation, fiducial
+        cache, ratio/LOO paths).  A candidate that is out of the surrogate's
+        domain, in a different image-count region, near the caustic, or that
+        the surrogate declines to serve falls through to the exact path with
+        no behavioural change.  The default ``None`` disables the fast path,
+        leaving every evaluation byte-identical to the pure-engine build.
 
     Notes
     -----
@@ -708,7 +726,8 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
     def __init__(self, event_data, waveform_generator, par_dic_0,
                  delta_t_max, *, fbin=None, pn_phase_tol=None,
                  spline_degree=3, bin_delay_tol=_DEFAULT_BIN_DELAY_TOL,
-                 kernel_subsamples=_DEFAULT_KERNEL_SUBSAMPLES):
+                 kernel_subsamples=_DEFAULT_KERNEL_SUBSAMPLES,
+                 amplification_surrogate=None):
         if isinstance(waveform_generator, LensedWaveformGenerator):
             base_generator = waveform_generator.waveform_generator
         else:
@@ -724,6 +743,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         self.delta_t_max = float(delta_t_max)
         self.bin_delay_tol = float(bin_delay_tol)
         self.kernel_subsamples = int(kernel_subsamples)
+        # Optional trained envelope emulator; stored under the constructor
+        # name so `JSONMixin.get_init_dict` reads it back (see the
+        # `get_init_dict` override for the None-vs-fitted serialization).
+        self.amplification_surrogate = amplification_surrogate
 
         # Populated by ``_set_summary`` (triggered by the ``fbin`` setter
         # inside ``super().__init__``).
@@ -747,6 +770,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # path, so a test can compare the two paths on one candidate.  Not
         # a constructor argument and never set by the hot path.
         self._force_direct = False
+        # Lazily computed real-image count of the surrogate box's single
+        # region (derived cache; dropped on pickle and recomputed).
+        self._surrogate_region_nimg = None
 
         if fbin is None and pn_phase_tol is None:
             pn_phase_tol = _DEFAULT_PN_PHASE_TOL
@@ -757,25 +783,53 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
     def __getstate__(self):
         """
-        Pickle state, dropping the transient fiducial-envelope cache.
+        Pickle state, dropping the transient derived caches.
 
         ``_fid_cache`` is a pure memoization of a deterministic function
         of the candidate on a fixed lattice (see ``_fiducial_key``), so a
         forked/unpickled worker rebuilds bit-identical values on first
         evaluation -- roughly one direct SACR-C eval per lattice cell per
-        worker, which is acceptable -- and determinism is preserved.  The
-        behavioural testing seam ``_force_direct`` is NOT derived state
-        and is kept, so a pickled instance evaluates identically to its
-        parent.
+        worker, which is acceptable -- and determinism is preserved.
+        ``_surrogate_region_nimg`` is likewise a deterministic cache
+        recomputed from the preserved surrogate, so it too is dropped.
+        The behavioural testing seam ``_force_direct`` is NOT derived
+        state and is kept, so a pickled instance evaluates identically to
+        its parent.  The trained ``amplification_surrogate`` (small flat
+        ndarrays; sampler workers need it) rides along in the ``__dict__``
+        copy and is preserved.
         """
         state = self.__dict__.copy()
         state.pop('_fid_cache', None)
+        state.pop('_surrogate_region_nimg', None)
         return state
 
     def __setstate__(self, state):
-        """Restore pickle state with an empty fiducial-envelope cache."""
+        """Restore pickle state with the derived caches reset."""
         self.__dict__.update(state)
         self._fid_cache = {}
+        self._surrogate_region_nimg = None
+
+    def get_init_dict(self, **kwargs):
+        """
+        JSON init dict, deferring surrogate serialization.
+
+        With the default ``amplification_surrogate=None`` the key is
+        dropped so the serialized JSON is byte-identical to the pure-engine
+        build (a None-surrogate instance round-trips unchanged).  JSON
+        serialization of a *fitted* surrogate is deferred to a later build
+        (sampling is out of scope here); a non-None surrogate raises rather
+        than emitting an unserializable object.
+        """
+        init_dict = super().get_init_dict(**kwargs)
+        if init_dict.get('amplification_surrogate') is None:
+            init_dict.pop('amplification_surrogate', None)
+        else:
+            raise NotImplementedError(
+                'JSON serialization of a fitted `amplification_surrogate` '
+                'is deferred to a later build; pickle preserves it for '
+                'sampler workers.  Serialize with `amplification_surrogate='
+                'None` or omit the surrogate for JSON round-trips.')
+        return init_dict
 
     # -- Parameters ------------------------------------------------------
 
@@ -1262,9 +1316,125 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             switch_dense, partition.critical_delay)
         return kernels
 
+    def _surrogate_region_image_count(self):
+        """
+        Real-image count of the surrogate box's (single) region, cached.
+
+        A trained `LensAmplificationSurrogate` box lies wholly inside one
+        image-count region (its training contract), so the region's
+        real-image count is computed once -- from a cheap, ``w``-independent
+        `ChangRefsdalChannels.geometry_partition` at the box centre (no
+        exact total) -- and cached.  A candidate whose own image count
+        differs is in a different topological region and must not be served
+        the box's envelope.
+
+        Returns
+        -------
+        int
+            Number of real images in the surrogate box's region.
+        """
+        if self._surrogate_region_nimg is None:
+            surrogate = self.amplification_surrogate
+            gamma_c = 0.5 * float(surrogate.gamma_grid[0]
+                                  + surrogate.gamma_grid[-1])
+            y1_c = 0.5 * float(surrogate.y1_grid[0] + surrogate.y1_grid[-1])
+            y2_c = 0.5 * float(surrogate.y2_grid[0] + surrogate.y2_grid[-1])
+            # The box is trained at beta = 0, kappa = 0 with eigenframe
+            # (y1, y2) axes, so the centre is a genuine training point; the
+            # image count is w-independent, hence a two-point w grid.
+            geom = ChangRefsdalChannels(np.array([1.0, 2.0])).geometry_partition(
+                gamma=gamma_c, y=(y1_c, y2_c), beta=0.0, kappa=0.0)
+            self._surrogate_region_nimg = int(geom.real_mask.sum())
+        return self._surrogate_region_nimg
+
+    def _surrogate_coefficients(self, par_dic):
+        """
+        Surrogate fast-path amplification coefficients, or ``None``.
+
+        Serves the candidate amplification from the attached
+        `LensAmplificationSurrogate` WITHOUT any exact-engine total: a
+        cheap geometry-only partition
+        (`ChangRefsdalChannels.geometry_partition`) supplies the channel
+        delays, analytic saddle kernels, switch and critical delay; the
+        surrogate supplies the smooth envelope ``E(w)``; and
+        `reconstruct_from_envelope` rebuilds the channel kernels, reduced
+        to the same per-bin ``(value, slope)`` coefficients as the exact
+        path.
+
+        Returns ``None`` -- signalling the caller to fall through to the
+        exact path -- when the candidate is out of the surrogate's domain,
+        in a different image-count region, within `_SURROGATE_CAUSTIC_FLOOR`
+        of the caustic, or the surrogate declines to serve (out of the
+        trained ``w`` band).  A `geometry.LensDomainError` raised by the
+        geometry-only partition is NOT caught: it propagates exactly as the
+        exact path's seed evaluation would raise it, preserving the refusal
+        set.  (The surrogate is never queried where the engine would raise
+        an `operator.CancellationError` / `SchwingerCertificationError`:
+        the surrogate's in-domain gate excludes those points via its
+        training-refusal exclusion balls.)
+
+        Parameters
+        ----------
+        par_dic : dict
+            Waveform and lens parameters, keys per ``self.params``.
+
+        Returns
+        -------
+        tuple or None
+            ``(delays, k0, k1, partition)`` in the same shape as
+            `_amplification_coefficients`, or ``None`` to fall through.
+        """
+        lens = self._lens_params(par_dic)
+        dense_w = dimensionless_frequency(
+            self._kernel_dense_f, lens['m_lens_msun'], lens['z_lens'])
+        if not np.all(dense_w > 0):
+            # Let the exact path raise the LensedBinningError, unchanged.
+            return None
+
+        surrogate = self.amplification_surrogate
+        if not surrogate.in_domain(lens['gamma'], lens['y1'], lens['y2'],
+                                   lens['beta']):
+            return None
+
+        # Cheap geometry-only partition (no exact total).  A candidate-side
+        # `geometry.LensDomainError` propagates UNSWALLOWED.
+        geom = ChangRefsdalChannels(dense_w).geometry_partition(
+            gamma=lens['gamma'], y=(lens['y1'], lens['y2']),
+            beta=lens['beta'], kappa=lens['kappa'])
+
+        # Topology / caustic guards: the candidate must sit in the box's
+        # image-count region and away from the caustic, else the emulated
+        # envelope is for the wrong (or a sharpening) surface.
+        if (int(geom.real_mask.sum()) != self._surrogate_region_image_count()
+                or geom.caustic_distance < _SURROGATE_CAUSTIC_FLOOR):
+            return None
+
+        envelope_dense, served = surrogate.envelope(
+            dense_w, lens['gamma'], lens['y1'], lens['y2'], lens['beta'])
+        if not served:
+            return None
+
+        kernels, _total = reconstruct_from_envelope(
+            dense_w, envelope_dense, geom.delays, geom.saddle_kernels,
+            geom.switch, geom.critical_delay)
+        k0, k1 = self._reduce_dense_kernels(kernels)
+        delays = self._image_delays(lens, geom)
+        return delays, k0, k1, geom
+
     def _amplification_coefficients(self, par_dic):
         """
         Candidate amplification coefficients (ratio-layer dispatch).
+
+        0. Surrogate fast path (Build 8a).  If an
+           ``amplification_surrogate`` is attached and the candidate is
+           inside its certified box, the amplification is served from a
+           cheap geometry-only partition plus the emulated envelope
+           (`_surrogate_coefficients`), short-circuiting the entire
+           per-candidate engine cost below.  A miss (no surrogate, out of
+           domain, image-count mismatch, near the caustic, or a surrogate
+           that declines) falls through with no behavioural change, so
+           ``amplification_surrogate=None`` is byte-identical to the
+           pure-engine path.
 
         Evaluates the candidate SACR-C seed partition once, then routes to
         the fast ratio path or the direct path:
@@ -1310,6 +1480,17 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         partition : ChangRefsdalPartition
             The candidate seed engine evaluation (w-independent geometry).
         """
+        # SINGLE surrogate intercept.  A trained envelope emulator
+        # supersedes any in-place kernel swap: it short-circuits the WHOLE
+        # per-candidate cost (seed eval, fiducial cache, ratio/LOO), which
+        # stay intact below as the fallback.  Named refusals from the
+        # geometry-only partition are NEVER caught here -- they propagate
+        # exactly as the exact seed evaluation's would.
+        if self.amplification_surrogate is not None:
+            served = self._surrogate_coefficients(par_dic)
+            if served is not None:
+                return served
+
         lens = self._lens_params(par_dic)
         dense_w = dimensionless_frequency(
             self._kernel_dense_f, lens['m_lens_msun'], lens['z_lens'])

@@ -103,8 +103,9 @@ from cogwheel.lensing.chang_refsdal.operator import (
     RHO_START, RHO_END, MAX_ORDER, F_op_grid, cancellation_exponent,
     geometric_amplification, select_branch)
 
-__all__ = ['ChangRefsdalChannels', 'ChangRefsdalPartition',
-           'real_image_delays', 'reconstruct_from_envelope']
+__all__ = ['ChangRefsdalChannels', 'ChangRefsdalGeometryPartition',
+           'ChangRefsdalPartition', 'real_image_delays',
+           'reconstruct_from_envelope']
 
 #: The fixed number of topology-stable labels.
 _N_CHANNELS = 4
@@ -835,6 +836,53 @@ class ChangRefsdalPartition:
             self.critical_delay, self.envelope)
 
 
+@dataclass(frozen=True)
+class ChangRefsdalGeometryPartition:
+    """Geometry-only Chang-Refsdal partition -- no exact amplification.
+
+    The CHEAP half of `ChangRefsdalChannels.evaluate`: the label-continued
+    channel geometry a surrogate envelope needs to be reconstructed to
+    channels via `reconstruct_from_envelope`, computed WITHOUT the
+    expensive exact operator/Schwinger total (`_exact_total`) or the
+    SACR-C envelope build.  It carries exactly the arguments
+    `reconstruct_from_envelope` consumes alongside an interpolated
+    envelope, plus the caustic distance the microlensed likelihood reads
+    for its in-domain check.
+
+    Attributes
+    ----------
+    w : np.ndarray
+        Dimensionless frequency grid the kernels and switch are sampled
+        on.
+    delays : np.ndarray
+        Shape ``(4,)`` channel delays ``tau_a``, relative to the minimum
+        image delay ``t_min``.
+    saddle_kernels : np.ndarray
+        Shape ``(n_w, 4)`` analytic saddle kernels ``H_a(w)``
+        (`geometry.image_kernel`), zero for virtual channels.
+    switch : np.ndarray
+        Shape ``(n_w, 4)`` per-channel switch ``S_a(w)`` in ``[0, 1]``,
+        keyed on the criticality separation ``|tau_a - tau_c|``.
+    critical_delay : float
+        Delay ``tau_c`` of the parked critical carrier, relative to the
+        minimum image delay ``t_min``.
+    real_mask : np.ndarray
+        Shape ``(4,)`` boolean: ``True`` where the channel holds a real
+        image rather than a parked virtual label.
+    caustic_distance : float
+        Source-plane distance from the source to the caustic; the
+        in-domain proximity the likelihood reads.
+    """
+
+    w: np.ndarray
+    delays: np.ndarray
+    saddle_kernels: np.ndarray
+    switch: np.ndarray
+    critical_delay: float
+    real_mask: np.ndarray
+    caustic_distance: float
+
+
 class ChangRefsdalChannels:
     """Topology-stable four-channel Chang-Refsdal amplification.
 
@@ -992,6 +1040,96 @@ class ChangRefsdalChannels:
             caustic_distance=float(caustic.distance),
             operator_orders=orders,
             operator_converged=converged)
+
+    def geometry_partition(self, *, gamma: float, y: Sequence[float],
+                           beta: float = 0.0,
+                           kappa: float = 0.0
+                           ) -> ChangRefsdalGeometryPartition:
+        """Cheap channel geometry without the exact amplification total.
+
+        Computes exactly the geometry `evaluate` builds BEFORE the
+        expensive exact total -- the macro-matrix domain check, the
+        nearest caustic, the per-image delays, the analytic saddle
+        kernels ``H_a``, the criticality switch ``S_a``, the critical
+        carrier delay ``tau_c``, and the real-image mask -- and returns
+        them WITHOUT ever evaluating the operator/Schwinger total
+        (`_exact_total`) or building the SACR-C envelope.  It exists so a
+        surrogate envelope ``E(w)`` (Build 8a) can be reconstructed to
+        channels through `reconstruct_from_envelope`, which consumes
+        precisely ``delays``, ``saddle_kernels``, ``switch`` and
+        ``critical_delay``.
+
+        Labels are continued from the previous `evaluate` /
+        `geometry_partition` call exactly as `evaluate` does (call `reset`
+        for the deterministic initial labeling), so at a given point with
+        the same continuation state the geometry is identical to
+        `evaluate`'s -- this method reproduces those lines verbatim and
+        merely stops short of the exact total.
+
+        Parameters
+        ----------
+        gamma : float
+            External shear magnitude.
+        y : Sequence[float]
+            Shape ``(2,)`` source position.
+        beta : float, optional
+            External shear orientation, radians.
+        kappa : float, optional
+            External convergence.
+
+        Returns
+        -------
+        ChangRefsdalGeometryPartition
+            The channel delays, saddle kernels, switch, critical delay,
+            real-image mask, and caustic distance for this point.
+
+        Raises
+        ------
+        geometry.LensDomainError
+            Raised by name for the SAME macro-matrix refusals as
+            `evaluate` -- Type III ``1 - kappa <= 0`` and the
+            ``det A = 0`` parity boundary ``abs(gamma) == 1 - kappa`` --
+            and the downstream image-census / fold-degenerate-metric
+            guards.  The cheap decidable domain refusals stay live at this
+            API boundary because `geometry.macro_matrix` is evaluated
+            first, exactly as in `evaluate`; only the expensive exact
+            total, whose ``operator.CancellationError`` /
+            ``SchwingerCertificationError`` refusals `evaluate` can raise,
+            is skipped here.
+        """
+        source = np.asarray(y, dtype=float)
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        caustic = geometry.nearest_caustic_point(
+            gamma, beta, source, kappa=kappa)
+
+        images = geometry.find_images(source, matrix)
+        absolute_delays = np.array(
+            [geometry.delay(image, source, matrix) for image in images],
+            dtype=float)
+        t_min = float(absolute_delays.min())
+        relative_delays = absolute_delays - t_min
+
+        assignment, markers = _assign_labels(
+            self._markers, images, caustic.image)
+        self._markers = markers.copy()
+
+        virtual_delay = geometry.delay(caustic.image, source, matrix)
+        critical_delay = virtual_delay - t_min
+        delays, real_mask = _labeled_delays(
+            assignment, relative_delays, critical_delay)
+
+        physical = _physical_kernels(self._w, assignment, images, matrix)
+        switch = _channel_switch(self._w, delays, real_mask,
+                                 critical_delay)
+
+        return ChangRefsdalGeometryPartition(
+            w=self._w,
+            delays=delays,
+            saddle_kernels=physical,
+            switch=switch,
+            critical_delay=float(critical_delay),
+            real_mask=real_mask,
+            caustic_distance=float(caustic.distance))
 
     def evaluate_path(self, path: Iterable[dict]
                       ) -> list[ChangRefsdalPartition]:

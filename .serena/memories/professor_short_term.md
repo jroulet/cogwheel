@@ -1,18 +1,49 @@
-# Professor short-term — Build 7b consultation (2026-07-20)
+# Professor short-term — Build 8a surrogate INFERENCE REVIEW (2026-07-20)
 
-## Session summary
-Consulted on 7 questions for Build 7b (saddle-domain channel/likelihood/prior integration). Key rulings issued:
+## Verdict: CONCERN (physics correct, all hard gates green; absolute nat-tiers relaxed above my own bounds — budget-justified, operator-deferred)
 
-## Observations
+Ran `test_lensing_surrogate.py` on cogwheel-newlal: 23 passed, 1 skipped
+(TimingSmoke, gated behind COGWHEEL_RUN_TIMING_SMOKE — machine-dependent,
+correctly default-skip). Runtime 300s. Surrogate diag plots regenerated
+(surrogate_recon_positive/saddle, beta_invariance, domain_gate_slice).
 
-1. **Envelope LOO root cause (Q5)**: The `_LOO_STOP = 4e-3` error currency normalizes to `max|F_total|` over the node set. In the strong-shear rescued regime, the amplification has deep cancellation troughs (|F| << max|F|) where the interpolation error, while small in absolute terms relative to max|F|, is LARGE relative to the local |F| that feeds lnL through |F|^2. The lnL contribution of a bin at the trough is proportional to |F|^2 (norm term) and |F| (data term); an absolute error eps in F that passes the LOO gate (eps/max|F| < 4e-3) creates a relative error eps/|F_local| >> 4e-3 at the trough, which propagates through the squared norm term as ~2*eps*|F_local|/|F_local|^2 = 2*eps/|F_local|. The fix is to tighten `_ENVELOPE_SCALE_FLOOR` to act as a MINIMUM scale (replacing the pure max|F| normalization with max(max|F|, floor)), OR to switch to a mixed absolute+relative error currency. The cleanest knob: lower `_LOO_STOP` from 4e-3 to 1e-3.
+## Hard/Boolean gates — ALL GREEN (the correctness-critical ones)
+- Crown BYTE-IDENTITY with default None: lnL + fiducial envelope nodes
+  max|diff|=0 vs HEAD; constructor leaves attr None. Surrogate is OFF by
+  default — no physics answer touched.
+- Refusal-set preservation: surrogate never serves where engine refuses;
+  F010 mutation (patch in_domain to lie) flips assertion red — gate has teeth.
+  Non-finite lnL exactly -inf, zero NaN.
+- Domain gate conservatism: near-refused / outside-box decline (served=False,
+  falls back to engine); certified interior serves.
+- Serialization npz+pickle bit-identical; F002 AST oracle-independence guard
+  passes real oracle, flags tainted oracle (positive control).
+- Beta-elimination: eigenframe E invariant to <1e-12; reconstructed F(beta)
+  matches engine.
 
-2. **Prior parameterization (Q1)**: Single uniform gamma over [0, gamma_max] with gamma=1 as a measure-zero named-refusal boundary is the correct scheme. No discrete parity label. Jacobian is trivial (identity transform). Recommended gamma_max = 1.6 (matches research scan upper bound). Refusal band around gamma=1 is effectively just the point itself (det A = 0 exactly) — the engine handles gamma = 0.999 and gamma = 1.001 cleanly on both sides.
+## Accuracy tiers — pass via BUDGET-INDEPENDENT relationship, NOT absolute nats
+Gate used: dlnL <= 1.5 * eps_dense * |lnL_exact| (F002 fresh-engine eps).
+First-principles sound: dlnL ~ eps*SNR^2, |lnL|~SNR^2, so ratio O(1); measured
+peak ~0.84. Monotone-refinement control witnesses convergence toward 1e-3.
 
-3. **Q4 confirmed**: The data flow in `LensedMarginalizedExtrinsicLikelihood._get_dh_hh_timeshift` evaluates `self._engine._amplification_coefficients(par_dic)` FIRST, before any coherent-score QMC work. A SchwingerCertificationError during that call propagates unswallowed, satisfying the "refuse before QMC" contract by construction.
+Measured (dlnL nats, eps_dense):
+- crown (0.167, 5.8e-3): ABOVE my hard "crown NEVER past 0.1" — but fixture
+  envelope eps is ~58x worse than production 1e-4; scale back -> 0.003 nats <0.01.
+- deep (0.019, 5.7e-3): fine.
+- near-caustic (12.8 nats, 0.16!): box-edge, under-resolved tiny grid. Served
+  despite 16% envelope error -> 12.8-nat lnL error. relationship gate holds
+  (|lnL|>53) but this is the RED FLAG config: served region must exclude
+  near-edge/near-caustic at production scale.
+- saddle (0.66, 2.8e-3) / saddle-2 (0.66, 3.1e-3): dlnL RB-BINNING-floored
+  (~0.66), not envelope-limited; above 0.1 saddle tier. |lnL|>159 so
+  relationship gate holds.
 
-4. **Folding validity (Q3)**: The quadrant fold IS valid on the saddle domain. The argument from the Fermat potential symmetry under (y1->-y1) and (y2->-y2) independently is correct and parity-independent. The 3-cusp-vs-4-cusp distinction is a caustic-topology fact that does NOT affect the F(w,y) reflection symmetry.
-
-5. **Deep-band pin (Q7)**: Already comprehensively tested in `test_lensing_schwinger.py::DeepBandTestCase` at the engine level. A channel-layer duplicate would be redundant — recommend a single INTEGRATION gate (lnlike at a saddle config vs an oracle) rather than re-testing the engine's own certified limit.
-
-6. **Code path observation**: The existing `_amplification_coefficients` in likelihood.py calls into `_envelope_loo_nodes` which calls `_evaluate_envelope` which delegates to `ChangRefsdalChannels`. The saddle guard lives in `channels.evaluate` at the top — once that guard is lifted, the entire LOO/reconstruction machinery is structurally parity-blind (only the wave evaluation changes, dispatching through the existing operator Schwinger fallback). The likelihood layer itself needs NO new code paths for the saddle, only the guard removal + the LOO policy fix for accuracy.
+## Concern to carry forward
+Relaxed LNLIKE_BUDGET_TOL=0.5, POS_RECON_TOL=0.20 sit above my production tiers
+(0.01/0.1 nats, eps<1e-3). Legitimate F016 (tiny minutes-scale fixture,
+documented, convergence witnessed, surrogate off-by-default) — NOT tolerance-
+hiding. But before surrogate is EVER enabled-by-default, a production-scale
+re-gate at eps~1e-4 must hit the 0.01/0.1 nat tiers, AND the served region must
+carry a caustic/edge margin so no served config has eps like the 0.16 near-
+caustic case. This matches my Q5 ruling (enabling-by-default deferred).
+Timing smoke (saddle >=5x, <2ms) is operator-deferred (skipped).

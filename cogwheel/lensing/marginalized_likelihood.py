@@ -94,7 +94,8 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
                  spline_degree=3, t_range=(-.07, .07), coherent_score=None,
                  dlnl_marginalized_threshold=30.,
                  bin_delay_tol=_DEFAULT_BIN_DELAY_TOL,
-                 kernel_subsamples=_DEFAULT_KERNEL_SUBSAMPLES):
+                 kernel_subsamples=_DEFAULT_KERNEL_SUBSAMPLES,
+                 amplification_surrogate=None):
         """
         Parameters
         ----------
@@ -147,6 +148,13 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
         kernel_subsamples : int
             Per-bin amplification-kernel sub-samples, forwarded to the
             engine.
+
+        amplification_surrogate : LensAmplificationSurrogate or None
+            Optional trained envelope emulator, forwarded verbatim to the
+            internal `LensedRelativeBinningLikelihood` engine so that
+            ``self._engine._amplification_coefficients`` takes the surrogate
+            fast path where the candidate is in-domain.  Default ``None``
+            leaves the exact engine path (and JSON round-trip) unchanged.
         """
         # Fail fast: the reference (and every sampled point) must carry the
         # seven lens parameters, because the base constructor's terminal
@@ -165,6 +173,7 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
         self.delta_t_max = delta_t_max
         self.bin_delay_tol = bin_delay_tol
         self.kernel_subsamples = kernel_subsamples
+        self.amplification_surrogate = amplification_surrogate
         self._engine = None  # Built by `_set_summary`.
 
         super().__init__(
@@ -172,6 +181,28 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
             pn_phase_tol=pn_phase_tol, spline_degree=spline_degree,
             t_range=t_range, coherent_score=coherent_score,
             dlnl_marginalized_threshold=dlnl_marginalized_threshold)
+
+    def get_init_dict(self, **kwargs):
+        """
+        JSON init dict, deferring surrogate serialization.
+
+        With ``amplification_surrogate=None`` (the default) the key is
+        dropped so the JSON round-trip is byte-identical to a build without
+        the surrogate.  A fitted surrogate is not yet JSON-serializable
+        (pickle preserves it for sampler workers); serializing one raises
+        `NotImplementedError` rather than silently emitting an unusable
+        entry.
+        """
+        init_dict = super().get_init_dict(**kwargs)
+        if init_dict.get('amplification_surrogate') is None:
+            init_dict.pop('amplification_surrogate', None)
+        else:
+            raise NotImplementedError(
+                'JSON serialization of a fitted `amplification_surrogate` '
+                'is deferred to a later build; pickle preserves it for '
+                'sampler workers.  Serialize with `amplification_surrogate='
+                'None` or omit the surrogate for JSON round-trips.')
+        return init_dict
 
     @property
     def params(self):
@@ -208,7 +239,8 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
             self.delta_t_max, fbin=self.fbin,
             spline_degree=self._spline_degree,
             bin_delay_tol=self.bin_delay_tol,
-            kernel_subsamples=self.kernel_subsamples)
+            kernel_subsamples=self.kernel_subsamples,
+            amplification_surrogate=self.amplification_surrogate)
 
     def _edge_amplification(self, delays, k0, k1):
         """

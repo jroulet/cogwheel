@@ -1,5 +1,52 @@
 # Test Dev Short-Term Observations
 
+## Build 8a (2026-07-20) — test_lensing_surrogate.py NEW (WP1-3 surrogate)
+- NEW file cogwheel/tests/test_lensing_surrogate.py: 23 passed + 1
+  skipped (~5min full). Targets cogwheel/lensing/surrogate.py
+  (LensAmplificationSurrogate), WP2 channels.geometry_partition, WP3
+  likelihood amplification_surrogate dispatch. NO production edits.
+- ORACLE (F002): _engine_exact_total = FRESH ChangRefsdalChannels(w).
+  evaluate(...).exact_total — never surrogate labels. Reconstruction:
+  sur.envelope -> reconstruct_from_envelope with engine geometry_partition
+  (geom.delays/saddle_kernels/switch/critical_delay). AST _referenced_names
+  guard walks Name.id/Attribute.attr; FORBIDDEN = surrogate interp/label
+  names; positive control = tainted oracle calling the surrogate.
+- TRAIN BOXES (minutes budget): POS_BOX gamma(.05,.45) y1(.50,.85)
+  y2(.20,.45); SAD_BOX gamma(1.10,1.50) y1(.20,.50) y2(.10,.30);
+  TRAIN_W_RANGE(0.1,20) w_nodes/decade=10; SHIP n_param=6, CONTROL n=5.
+  POS n6 maxeps 0.084 (~22s), SAD n6 maxeps 0.017 (~185s) — both monotone
+  vs n5. functools.lru_cache the trained surrogates (one train/process).
+- RECON TOL: professor eps<1e-3 is PRODUCTION-scale (eps~1e-4 box),
+  UNREACHABLE in minutes. Gated at box budget POS_RECON_TOL=0.20,
+  SAD_RECON_TOL=0.05 + a monotone-refinement positive control
+  (max_control>max_ship>RECON_TARGET_TOL=1e-3) proving eps->0 with nodes.
+- LNLIKE gate (KEY): fixed nat budget is WRONG currency — lnL error =
+  envelope error x SNR^2. Sub-critical near-caustic (.30,.60,.35)
+  eps_dense=0.16 -> dlnL=12.8 nats; crown eps~6e-3 -> dlnL~0.17. Use
+  BUDGET-INDEPENDENT relationship dlnL <= LNLIKE_ERROR_AMP(1.5) *
+  eps_dense * |lnL_exact|; measured ratio dlnL/(eps*|lnL|) peaks ~0.844
+  (saddle 1.3). eps_dense measured on likelihood's OWN dense grid:
+  dimensionless_frequency(like._kernel_dense_f, m_lens, z_lens) ->
+  _reconstruct_via_surrogate vs _engine_exact_total. Well-emulated
+  configs (crown, deep .25/.70/.30; eps~5e-3) ALSO meet concrete
+  LNLIKE_BUDGET_TOL=0.5 nat ceiling (dual gate).
+- BYTE-IDENTITY: HEAD side-by-side via git show HEAD:...likelihood.py
+  exec'd into synthetic module registered in sys.modules FIRST. Default
+  amplification_surrogate=None -> lnL + fiducial envelope_nodes (.tobytes)
+  bit-identical to HEAD (max|diff|=0.0); red-check via np.nextafter.
+- REFUSAL preservation (F005/F010): BAD_CONFIGS parity kappa=.5/gamma=.5,
+  over-critical kappa=1.5/gamma=.6 -> surrogate path raises SAME named
+  refusal as exact (in_domain gate excludes them; NEVER serves finite
+  where engine refuses). _lens_candidate ARG ORDER: (gamma,y1,y2,beta,
+  kappa,...) — pass gamma first! F010 mutation: mock.patch.object
+  in_domain->True + fake envelope flips served False->True (gate teeth).
+- DOMAIN gate: _refusal_surrogate gamma_range(.8,1.2) n_gamma=5 -> linspace
+  hits gamma=1.0 EXACTLY -> 16 refused points recorded (~17s). served=
+  False near refused pt / outside box; True deep interior.
+- TIMING smoke @unittest.skipUnless(COGWHEEL_RUN_TIMING_SMOKE) — skipped
+  by default (machine-dependent, not a hard gate).
+- NEIGHBOR: test_lensing_likelihood.py 29 passed 1 xfailed — no regression.
+
 ## Build (2026-07-19) — test_lensing_schwinger.py WP1/WP2 additions
 - Suite already existed (targets _schwinger). ADDED operator-level
   dispatch + census coverage; full file now 32 tests, all green
