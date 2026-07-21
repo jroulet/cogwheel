@@ -17,6 +17,38 @@ has_spec_update=true.
 
 (empty — last consolidated by Dreamer on 2026-07-20)
 
+## Build 8e — cusp fast-serving planning — 2026-07-21
+Two serving holes to close for "ms everywhere": (1) 8c cusp exclusion
+windows (sqrt(eta) fold model invalid, 2/3 Pearcey scaling); (2)
+unresolved-high-w corner w>60 non-geometric SchwingerCertificationError
+(F019, ~25% prior draws). Owner direction: UNIFORM ASYMPTOTICS — Airy
+(fold) + Pearcey (cusp) arms, refusal-conservative fall-through, NO new
+exception classes, engine internals untouched, arms are NEW modules +
+dispatch-ladder edits. Serving ladder: surrogate->geometric->uniform
+(certified)->Schwinger exact(w<=60)->named refusal (measured-hard core).
+Corner-scoping census FIRST (fractions a-d Wilson). census script =
+scripts/census_homogenization_corners.py (extend). Charts: surrogate.py
+TubeChart.cusp_windows, select_chart/_tube_serves. Airy arg from
+image-pair delay splitting (geometry.py). NO retrain (post), NO
+quad-double (escalate). Housekeeping: gate exact-heavy slow tests. ALL
+tests -> Test Developer.
+
+## Build 8e — cusp fast-serving PLANNING START — 2026-07-21
+Brief mandates EXACTLY 4 WPs (census, fold/Airy arm, cusp/Pearcey arm,
+dispatch), NO housekeeping (tier-split already landed). Code map done:
+dispatch = operator.select_branch (RHO_END=4, L_MAX=48), saddle ceiling
+_schwinger.W_CEILING_SCHWINGER=60 (_CERTIFICATION_TOL=3e-10). Surrogate
+select_chart in surrogate.py, TubeChart.cusp_windows = tuple(theta_cusp,
+delta_theta); _tube_serves refuses inside window. Exceptions:
+SchwingerCertificationError(RuntimeError), CancellationError(RuntimeError),
+LensDomainError(ValueError), HypergeometricDomainError(ValueError). NO new
+exception classes. Census script scripts/census_homogenization_corners.py
+already classifies schwinger/geometric/refusal geometrically — EXTEND to
+add fractions (c) uniform-resolvable and (d) hard-core. Airy arg from
+geometry.delay image-pair splitting; Pearcey 2/3 scaling. Refusal-
+conservative fall-through; arms are NEW modules + dispatch edits only,
+engine internals untouched. All tests -> Test Developer, exact-heavy gated.
+
 ## Build 8c-cont triage — 2026-07-20
 INS-1-001 (missing census test suite, confirmed absent via find_file/grep) ->
 coder_fix, routed to Test Developer (never Coder) sharded ~9 specs per

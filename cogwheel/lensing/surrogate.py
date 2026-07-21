@@ -134,6 +134,20 @@ _GAMMA_GUARD_BAND = 1e-3
 # 8a caustic-floor behaviour is preserved after rewiring.
 _DEFAULT_CAUSTIC_FLOOR = 0.05
 
+# Angular half-width (radians) of the certified Pearcey-cusp arm coverage,
+# subtracted from each TubeChart cusp-exclusion window in `_tube_serves`.
+# Each 8c window ``(theta_cusp, delta_theta)`` excludes the tube where the
+# sqrt(eta) fold model is invalid near a cusp; the near-cusp uniform
+# Pearcey arm now covers the OUTER part of that neighbourhood (far enough
+# from the cusp vertex that ``R = hypot(x, y)`` clears the arm's radius
+# gate), so the window shrinks to ``max(0, delta_theta - coverage)`` -- the
+# complement of the arm's certified reach.  A query still inside the
+# shrunken window falls through to the arm, then the exact engine.
+# Default 0.0 keeps the 8c windows byte-identical and enables no new
+# serving by default; a nonzero value must be pinned by the corner census
+# against the arm's measured angular coverage (UNVERIFIED until then).
+_CUSP_ARM_COVERAGE = 0.0
+
 # Default package-data artifact name (under ``cogwheel/data/``).  The
 # trained global artifact is shipped here once training lands; until then
 # `load()` with no argument raises a clear FileNotFoundError.
@@ -626,7 +640,17 @@ def _tube_serves(chart: TubeChart, gamma: float, log_w_min: float,
         return False
     two_pi = 2.0 * np.pi
     for theta_cusp, delta_theta in chart.cusp_windows:
-        if abs((theta - theta_cusp + np.pi) % two_pi - np.pi) < delta_theta:
+        # Shrink each 8c cusp-exclusion window to the COMPLEMENT of the
+        # Pearcey arm's certified angular coverage: the arm serves the
+        # outer part of the cusp neighbourhood, so only the residual
+        # near-vertex core still excludes the tube.  A query inside this
+        # residual window returns False and falls through to the arm, then
+        # the engine.  ``_CUSP_ARM_COVERAGE`` defaults to 0.0, so the
+        # window is unchanged (byte-identical) until the census pins a
+        # nonzero coverage.  The chart schema is untouched -- the shrink is
+        # applied at query time from the module constant, not stored.
+        residual = max(0.0, delta_theta - _CUSP_ARM_COVERAGE)
+        if abs((theta - theta_cusp + np.pi) % two_pi - np.pi) < residual:
             return False
     return True
 

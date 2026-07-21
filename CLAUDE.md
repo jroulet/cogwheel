@@ -98,6 +98,8 @@ shallow:
 - Slow sweeps are the driver's post-build parallel job: `.claude/sdk/post_build_sweeps.sh` (one process per file, per-process numba cache).
 - Agents verify ONLY the tests they changed. The driver runs the full tally once per build.
 - Every long run emits a countable progress stream: pytest `-v` teed to a log + a Monitor reporting percent/rate/projected finish. Zero progress across two beats = investigate with py-spy, never wait. A run without a progress monitor is unattended, not monitored.
+- MECHANICAL PAIRING: the same response that launches a background run arms its progress monitor. Launch and monitor are one action, never two. Long-running scripts additionally SELF-EMIT progress beats on stdout so observation needs no instrumentation.
+- Monitors emit on CHANGE only: a beat fires when the progress count moves, ONCE on entering a stall, and at terminal — never on an unchanged interval. Poll internally as often as needed; each EMITTED line costs a driver invocation. Scale the poll interval to the run (minutes-scale run: 1-2 min; hour-scale: 10-15 min).
 <!-- END AGENT INFRA SECTION -->
 
 ### Full-suite gate
@@ -110,6 +112,7 @@ shallow:
 - xdist worker argv is `python -u -c import sys;exec(...)` — it does not contain "pytest".
 - `pgrep -f`/`pkill -f`: bracket idiom (`pgrep -f "pytest [c]ogwheel"`) or the check matches itself.
 - Kill a run only on ~10x contention-adjusted overshoot or zero log growth.
+- Never write in place to a script a live shell may be executing (bash reads incrementally; a mid-run edit corrupts the running instance). Patch via sidecar + atomic replace (os.replace / mv).
 - Fresh worktrees lack the untracked `cogwheel/waveform_models/IMRPhenomXODE` symlink; recreate it or `test_waveform`/`test_posterior`/`test_gw_prior` silently collect-error.
 
 ## CHANGELOG.md Invariant

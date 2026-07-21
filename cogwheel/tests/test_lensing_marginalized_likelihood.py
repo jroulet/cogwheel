@@ -110,7 +110,8 @@ import inspect
 import pathlib
 import types
 import warnings
-from unittest import TestCase, main, mock
+import os
+from unittest import TestCase, main, mock, skipUnless
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -180,14 +181,22 @@ OVER_CRITICAL_LENS = {'m_lens_msun': M_LENS_MSUN, 'z_lens': Z_LENS,
                       'y1': 0.20, 'y2': 0.05, 'gamma': 0.50, 'beta': 0.0,
                       'kappa': 1.50}
 
-#: Uncertifiable wave-branch config: the engine raises
-#: `operator.CancellationError` (matched to `test_lensing_ratio_layer`'s
-#: ``CANCELLATION_CONFIG``).  The ``m_lens_msun`` x4 scale (Build 7a)
-#: pushes the refusing nodes above the ``w = 60`` Schwinger ceiling,
-#: where the named refusal survives the cross-parity fallback.
+#: HARD-CORE wave-branch config: a near-caustic 4-image positive-parity
+#: source whose above-ceiling nodes (``w > 60``) are refused by BOTH
+#: uniform arms (fold argument xi ~ 2.4 and Pearcey radius R ~ 2.6 both
+#: too small to certify), so the engine raises the named
+#: `SchwingerCertificationError`.  RE-BASELINE (Build 8e serving ladder):
+#: the previous strong-shear ``CANCELLATION_LENS`` (gamma' = 0.94,
+#: y = (0.20, 0.05)) is now ARM-SERVED at the engine, so its refusal moved
+#: downstream to the bin guard (`LensedBinningError`) -- no longer a
+#: wave-branch refusal.  This hard-core config keeps the refusal on the
+#: engine's named wave-branch exit, which the refusal-precedence contract
+#: needs.  The ``m_lens_msun`` x4 scale pushes the refusing nodes above
+#: the ``w = 60`` Schwinger ceiling (engine refusal precedes the bin
+#: guard, so the tiny-splitting delay is immaterial here).
 CANCELLATION_LENS = {'m_lens_msun': M_LENS_MSUN * 4, 'z_lens': Z_LENS,
-                     'y1': 0.20, 'y2': 0.05, 'gamma': 0.405, 'beta': 0.0,
-                     'kappa': 0.57}
+                     'y1': 0.10, 'y2': 0.10, 'gamma': 0.47, 'beta': 0.0,
+                     'kappa': 0.0}
 
 #: Relative tolerance on the unlensed-limit ``_get_dh_hh_timeshift``
 #: identity (spec 1).  Only ``F``'s ``O(w) ~ 1e-7`` wave residual and
@@ -380,6 +389,10 @@ class _MarginalizedLensTestCase(TestCase):
                 'here would be a false pass.')
 
 
+@skipUnless(
+    os.environ.get('COGWHEEL_BRUTE_ACCURACY'),
+    'brute-force accuracy tier: set COGWHEEL_BRUTE_ACCURACY=1 — exact '
+    'path ~90 ms/node makes lnlike_bruteforce ~138 s/call post-8d')
 class UnlensedLimitTimeseriesIdentityTestCase(_MarginalizedLensTestCase):
     """
     Spec 1 -- at ``gamma = kappa = 0`` with a tiny lens mass (``F == 1``,
@@ -452,6 +465,10 @@ class UnlensedLimitTimeseriesIdentityTestCase(_MarginalizedLensTestCase):
         plt.close(fig)
 
 
+@skipUnless(
+    os.environ.get('COGWHEEL_BRUTE_ACCURACY'),
+    'brute-force accuracy tier: set COGWHEEL_BRUTE_ACCURACY=1 — exact '
+    'path ~90 ms/node makes lnlike_bruteforce ~138 s/call post-8d')
 class SingleImageTimeShiftTestCase(_MarginalizedLensTestCase):
     """
     Spec 2 -- on a genuinely lensed two-image config the production lensed
@@ -546,6 +563,10 @@ class SingleImageTimeShiftTestCase(_MarginalizedLensTestCase):
         plt.close(fig)
 
 
+@skipUnless(
+    os.environ.get('COGWHEEL_BRUTE_ACCURACY'),
+    'brute-force accuracy tier: set COGWHEEL_BRUTE_ACCURACY=1 — exact '
+    'path ~90 ms/node makes lnlike_bruteforce ~138 s/call post-8d')
 class NormPathAmplificationTestCase(_MarginalizedLensTestCase):
     """
     Spec 7 -- the ``|F(f_b)|**2`` that scales the marginalized norm (from
@@ -621,12 +642,16 @@ class RefusalContractTestCase(_MarginalizedLensTestCase):
     mutation guard proves this is non-vacuous.
     """
 
-    # RE-BASELINE (Build 8d homogenization): the cancellation-band config is
-    # a sheared positive-parity host (gamma' = 0.94) now served by the exact
-    # Schwinger evaluator, so above its ceiling the named refusal is
-    # SchwingerCertificationError (was CancellationError); the refusal-
-    # precedence contract is unchanged (the engine still refuses BEFORE the
-    # coherent score).  Both named wave-branch refusals are accepted.
+    # RE-BASELINE (Build 8e serving ladder): the Build-8d cancellation-band
+    # config (gamma' = 0.94, moderate-splitting) is now ARM-SERVED at the
+    # engine, so it no longer refuses through the likelihood -- the spy
+    # premise died.  CANCELLATION_LENS is repointed at a HARD-CORE
+    # near-caustic config whose above-ceiling nodes NO arm certifies, so the
+    # engine still raises the named SchwingerCertificationError BEFORE the
+    # coherent score.  The refusal-precedence contract is unchanged; the
+    # assertRaises below verifies the config genuinely refuses through the
+    # full likelihood before the spy call-count is checked.  Both named
+    # wave-branch refusals are accepted.
     REFUSING_CONFIGS = (
         ('over_critical', OVER_CRITICAL_LENS, LensDomainError),
         ('cancellation', CANCELLATION_LENS,
@@ -862,6 +887,10 @@ class RegistrationPairingSerializationTestCase(_MarginalizedLensTestCase):
         self.assertEqual(ts0, ts1)
 
 
+@skipUnless(
+    os.environ.get('COGWHEEL_BRUTE_ACCURACY'),
+    'brute-force accuracy tier: set COGWHEEL_BRUTE_ACCURACY=1 — exact '
+    'path ~90 ms/node makes lnlike_bruteforce ~138 s/call post-8d')
 class ConditionalDrawConsistencyTestCase(_MarginalizedLensTestCase):
     """
     Spec 6: conditional extrinsic draws round-trip against the plain engine.
@@ -974,6 +1003,10 @@ class ConditionalDrawConsistencyTestCase(_MarginalizedLensTestCase):
         plt.close(fig)
 
 
+@skipUnless(
+    os.environ.get('COGWHEEL_BRUTE_ACCURACY'),
+    'brute-force accuracy tier: set COGWHEEL_BRUTE_ACCURACY=1 — exact '
+    'path ~90 ms/node makes lnlike_bruteforce ~138 s/call post-8d')
 class SelfFalsificationTestCase(_MarginalizedLensTestCase):
     """
     Proof-of-teeth: the central numerical gates go RED when fed a

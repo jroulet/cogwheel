@@ -2051,7 +2051,12 @@ class BuildOrchestrator:
         )
         result_text, session_id = await self._run_agent(
             "coder", task,
-            max_turns_override=wp.max_turns,
+            # Floor the plan-supplied budget: an under-budgeted WP dies at
+            # error_max_turns and kills the whole DAG (measured twice:
+            # 8c coder-4 mid-debug, 8e coder-2 at a plan-set 20 on a
+            # read+decorate task). The Architect-estimate fallback already
+            # floors at 75; plan-supplied values get the same protection.
+            max_turns_override=max(75, wp.max_turns or 75),
         )
         # Record this WP's declared files so later coders in the build see them
         # as potentially-stale even if the edit landed on an untracked file.

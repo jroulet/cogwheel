@@ -173,7 +173,8 @@ from dataclasses import dataclass
 import numba
 import numpy as np
 
-from cogwheel.lensing.chang_refsdal import geometry, _schwinger
+from cogwheel.lensing.chang_refsdal import (
+    geometry, _schwinger, _airy_fold, _pearcey_cusp)
 from cogwheel.lensing.chang_refsdal._hyp1f1 import (
     point_mass_g_derivatives)
 
@@ -489,6 +490,58 @@ def _real_delay_min_separation(source: np.ndarray, matrix: np.ndarray
     return float(np.min(upper))
 
 
+def _uniform_arm_value(w: float, y: np.ndarray, gamma: float, *,
+                       beta: float = 0.0, kappa: float = 0.0
+                       ) -> complex | None:
+    """Uniform-asymptotic rung of the per-node serving ladder, or ``None``.
+
+    Offered at a node the geometric and Schwinger paths have already
+    declined -- ``w > _schwinger.W_CEILING_SCHWINGER`` and not
+    geometric-resolved -- BEFORE the existing named
+    `_schwinger.SchwingerCertificationError` refusal fires.  Tries the
+    near-fold uniform Airy arm (`_airy_fold.fold_amplification`) first,
+    then the near-cusp uniform Pearcey arm
+    (`_pearcey_cusp.cusp_amplification`), and returns the FIRST that
+    certifies a finite value; if neither certifies it returns ``None`` so
+    the caller lets the existing NAMED refusal stand (refusal-conservative
+    -- no swallowing, no new exception class).
+
+    The order (fold then cusp) is a pure, deterministic function of the
+    node, so the serving ladder is reproducible.  Each arm runs its own
+    local caustic classification and returns ``None`` when the node is not
+    of its type, so trying both in a fixed order is safe: a fold-type node
+    is served by the fold arm (the cusp arm refuses it) and vice versa.
+
+    Parameters
+    ----------
+    w : float
+        Dimensionless frequency of the refusing node (``w > 60``).
+    y : np.ndarray
+        Shape ``(2,)`` source position in the physical (un-rotated) frame;
+        the arms rotate into their own frames internally.
+    gamma : float
+        External shear magnitude.
+    beta : float, optional
+        External shear orientation, radians.
+    kappa : float, optional
+        External convergence.
+
+    Returns
+    -------
+    complex or None
+        The first certified uniform amplification, or ``None`` if neither
+        arm certifies.
+    """
+    value = _airy_fold.fold_amplification(w, y, gamma, beta=beta, kappa=kappa)
+    if value is not None:
+        return complex(value)
+    value = _pearcey_cusp.cusp_amplification(w, y, gamma, beta=beta,
+                                             kappa=kappa)
+    if value is not None:
+        return complex(value)
+    return None
+
+
 def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
                  beta: float = 0.0, kappa: float = 0.0) -> np.ndarray:
     """Macro-saddle amplification over a ``w`` grid, node by node.
@@ -506,8 +559,13 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     ``delta_min`` (computed once, only when some node exceeds the
     ceiling).  Because `_schwinger.f_schwinger` ALSO hard-refuses
     ``w > W_CEILING_SCHWINGER`` internally, an unresolved saddle above the
-    ceiling propagates `_schwinger.SchwingerCertificationError` from the
-    wave branch rather than returning a wrong value.
+    ceiling is first offered to the uniform arms (`_uniform_arm_value`:
+    fold Airy then cusp Pearcey); only if BOTH arms refuse does the node
+    propagate `_schwinger.SchwingerCertificationError` from the wave
+    branch rather than returning a wrong value.  The arm intercept fires
+    ONLY on this previously-refusing branch, so resolved (geometric) and
+    ``w <= W_CEILING_SCHWINGER`` nodes are byte-identical to the exact
+    path.
 
     Parameters
     ----------
@@ -579,7 +637,20 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
                 w_node, y, gamma, beta=beta, kappa=kappa))
             continue
         # Wave branch.  An unresolved node with w > ceiling reaches here
-        # too and `f_schwinger` refuses it (SchwingerCertificationError).
+        # too and `f_schwinger` would refuse it
+        # (SchwingerCertificationError).  Before that named refusal fires,
+        # offer the uniform-asymptotic rung of the serving ladder (fold
+        # then cusp arm).  The intercept fires ONLY on such a
+        # previously-refusing node: a resolved node `continue`s above, and
+        # a node with w <= ceiling never satisfies the guard, so resolved
+        # and w <= ceiling nodes take the identical old f_schwinger path
+        # and stay byte-identical.
+        if w_node > _schwinger.W_CEILING_SCHWINGER:
+            arm_value = _uniform_arm_value(
+                w_node, source, gamma, beta=beta, kappa=kappa)
+            if arm_value is not None:
+                values[node] = arm_value
+                continue
         f_pure = _schwinger.f_schwinger(w_node, y_eig, gamma_prime)
         mass_sheet_phase = np.exp(
             0.5j * w_node * np.log(lam) - 0.5j * w_node * float(kappa) * s)
@@ -1026,12 +1097,16 @@ def _positive_parity_grid(
     * ``gamma' > 0`` (every sheared positive-parity host -- the whole
       sampled prior box): each node is evaluated by `f_schwinger` in the
       pure-shear eigenframe and reconstructed with the mass-sheet
-      identity.  `f_schwinger` certifies-or-refuses its own paired-rule
-      quadrature per node, so a node it cannot certify (including any
-      ``w > _schwinger.W_CEILING_SCHWINGER``) raises
-      `_schwinger.SchwingerCertificationError` -- the named refusal
-      stands; there is NO legacy fallback catch (that would re-introduce
-      a parallel production path).
+      identity.  Before the named refusal fires for a
+      ``w > _schwinger.W_CEILING_SCHWINGER`` node (the previously-
+      refusing set), the uniform-asymptotic rung is offered first
+      (`_uniform_arm_value`: fold Airy then cusp Pearcey); the first arm
+      that certifies serves the node.  Only if BOTH arms refuse does the
+      node raise `_schwinger.SchwingerCertificationError` -- the named
+      refusal still stands; there is NO legacy fallback catch (that would
+      re-introduce a parallel production path).  A ``w <= ceiling`` node
+      never reaches the arm intercept, so it is byte-identical to the
+      exact path.
 
     * ``gamma' == 0`` (the shear-free point lens; measure-zero in the
       prior but reachable in unit tests and by direct callers): the 1D
@@ -1087,6 +1162,19 @@ def _positive_parity_grid(
     values = np.empty(n_nodes, dtype=complex)
     for node in range(n_nodes):
         w_node = float(w_array[node])
+        # Before the named f_schwinger refusal fires for a w > ceiling node
+        # (every w > W_CEILING_SCHWINGER here is a previously-refusing node
+        # -- a w <= ceiling node certifies and stays byte-identical), offer
+        # the uniform-asymptotic rung of the ladder (fold then cusp arm).
+        # A served node carries zero operator-series diagnostics like the
+        # Schwinger nodes (the diagnostic arrays below are uniformly
+        # zero / True).
+        if w_node > _schwinger.W_CEILING_SCHWINGER:
+            arm_value = _uniform_arm_value(
+                w_node, y, gamma, beta=beta, kappa=kappa)
+            if arm_value is not None:
+                values[node] = arm_value
+                continue
         # `f_schwinger` certifies-or-refuses its own quadrature and hard-
         # refuses w > W_CEILING_SCHWINGER; the prefactor is a single
         # float64 exp / mul / div outside the paired-rule certificate,

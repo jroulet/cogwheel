@@ -87,7 +87,8 @@ from unittest import TestCase, main
 import numpy as np
 
 from cogwheel.lensing import waveform
-from cogwheel.lensing.chang_refsdal import operator, geometry
+from cogwheel.lensing.chang_refsdal import (
+    operator, geometry, _airy_fold, _pearcey_cusp)
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 
@@ -212,6 +213,18 @@ BAND_EDGE = _LensConfig(
     name='band-edge', y=(0.50, 0.25), gamma=0.25, beta=0.0, kappa=0.5,
     w_probes=(30.0, 40.0, 60.5))
 
+#: HARD-CORE positive-parity companion (Build 8e serving ladder): a
+#: near-caustic 4-image source whose above-ceiling probe (``w = 61 > 60``)
+#: is refused by BOTH uniform arms -- the fold argument xi (~2.4) and the
+#: Pearcey radius R (~2.6) are both too small to certify -- so the named
+#: `SchwingerCertificationError` still stands.  The sub-ceiling probe
+#: (``w = 30``) is Schwinger-served.  This is the refusing branch of the
+#: conditional serving contract that BAND_EDGE (now arm-served at 60.5)
+#: no longer exercises.
+HARD_CORE = _LensConfig(
+    name='hard-core', y=(0.10, 0.10), gamma=0.47, beta=0.0, kappa=0.0,
+    w_probes=(30.0, 61.0))
+
 #: Weak-lens configuration for the unlensed-limit floor sweep.
 FLOOR_CONFIG = _LensConfig(
     name='unlensed-floor', y=(0.30, 0.10), gamma=0.10, beta=0.0,
@@ -306,6 +319,27 @@ def _f_op_returns(config: _LensConfig, w: float) -> bool:
     except (operator.CancellationError, SchwingerCertificationError):
         return False
     return bool(np.isfinite(value.real) and np.isfinite(value.imag))
+
+
+def _serving_arm_value(config: _LensConfig, w: float):
+    """The uniform arm that serves `config` at `w`, called DIRECTLY.
+
+    Reproduces the production ladder's fixed fold-then-cusp order
+    (`operator._uniform_arm_value`) by calling the arm modules themselves
+    -- an INDEPENDENT path to the served value, not operator's dispatcher
+    -- so a served ``F_op`` value can be pinned to BE the arm's number
+    (Build 8e).  Returns the complex arm value, or ``None`` when neither
+    arm certifies (a genuinely hard-core node).
+    """
+    value = _airy_fold.fold_amplification(
+        w, config.y_array, config.gamma, beta=config.beta, kappa=config.kappa)
+    if value is not None:
+        return complex(value)
+    value = _pearcey_cusp.cusp_amplification(
+        w, config.y_array, config.gamma, beta=config.beta, kappa=config.kappa)
+    if value is not None:
+        return complex(value)
+    return None
 
 
 def _is_strictly_increasing(values) -> bool:
@@ -541,27 +575,77 @@ class MacroSaddleControlTestCase(WaveformTestCase):
                                 f'in-band w={w} tail not certified')
                 self.n_checks += 1
 
-    def test_band_edge_companion_refuses_cleanly(self):
+    def test_band_edge_companion_now_served_by_arm(self):
         """
-        The band-edge companion raises a NAMED wave-branch refusal at the
-        waveform layer.  RE-BASELINE (Build 8d): the above-ceiling probe
-        (``w = 60.5 > 60``) refuses at the operator level with
-        `SchwingerCertificationError` (the sub-ceiling probes are now
-        Schwinger-certified), and ``amplification`` over the probe grid
-        propagates the refusal unswallowed (never a ``nan`` or a
-        finite-but-wrong factor).
+        RE-BASELINE (Build 8e serving ladder): the band-edge companion's
+        above-ceiling probe (``w = 60.5 > 60``), a sheared positive-parity
+        host the exact path refused under Build 8d, is now SERVED by the
+        certified uniform Airy fold arm.  So ``amplification`` over the
+        probe grid returns a finite, O(1) factor (no ``nan``, no refusal),
+        and the served ``F_op`` value at each above-ceiling probe must BE
+        the serving arm's number (the arm called DIRECTLY, at 1e-12) -- the
+        (a) branch of the conditional serving contract.
         """
-        refusals = [w for w in BAND_EDGE.w_probes
-                    if not _f_op_returns(BAND_EDGE, w)]
+        above_ceiling = [w for w in BAND_EDGE.w_probes
+                         if w > operator._schwinger.W_CEILING_SCHWINGER]
         self.assertTrue(
-            refusals,
-            'the band-edge companion certified every probe; it is no '
-            'longer at the certification edge')
-        self.n_checks += len(BAND_EDGE.w_probes)
+            above_ceiling,
+            'the band-edge companion has no above-ceiling probe to witness')
+        served = 0
+        for w in above_ceiling:
+            with self.subTest(w=w):
+                arm = _serving_arm_value(BAND_EDGE, w)
+                self.assertIsNotNone(
+                    arm, f'band-edge w={w} is no longer arm-served -- the '
+                    'serving contract has changed')
+                value, _ = operator.F_op(
+                    w, BAND_EDGE.y_array, BAND_EDGE.gamma,
+                    beta=BAND_EDGE.beta, kappa=BAND_EDGE.kappa,
+                    max_order=CERT_MAX_ORDER)
+                self.assertAlmostEqual(
+                    abs(value - arm), 0.0, delta=1e-12,
+                    msg=f'band-edge w={w}: served F_op {value!r} is not the '
+                    f'serving arm value {arm!r}')
+                served += 1
+                self.n_checks += 1
+        self.assertGreater(served, 0, 'no above-ceiling probe was witnessed')
 
+        # The full waveform-layer path now returns finite factors (served).
         generator = _make_generator(BAND_EDGE, _CONTROL_MASS_MSUN,
                                     _CONTROL_Z)
         f_hz = _frequencies_for_w(BAND_EDGE.w_probes, generator)
+        factor = generator.amplification(f_hz)
+        self.assertEqual(factor.shape, f_hz.shape)
+        self.assertTrue(np.all(np.isfinite(factor)),
+                        f'band-edge amplification not all finite: {factor}')
+        self.n_checks += 1
+
+    def test_hard_core_companion_refuses_cleanly(self):
+        """
+        The HARD-CORE companion raises a NAMED wave-branch refusal at the
+        waveform layer -- the (b) branch of the conditional serving
+        contract that BAND_EDGE (now arm-served) no longer exercises.  Its
+        above-ceiling probe (``w = 61 > 60``) is refused by BOTH uniform
+        arms, so ``amplification`` over the probe grid propagates the
+        `SchwingerCertificationError` unswallowed (never a ``nan`` or a
+        finite-but-wrong factor).
+        """
+        refusals = [w for w in HARD_CORE.w_probes
+                    if not _f_op_returns(HARD_CORE, w)]
+        self.assertTrue(
+            refusals,
+            'the hard-core companion certified every probe; it is no '
+            'longer at the certification edge')
+        for w in refusals:
+            # Genuinely hard-core: NO arm may certify the refusing probe.
+            self.assertIsNone(
+                _serving_arm_value(HARD_CORE, w),
+                f'hard-core w={w} refused yet an arm certifies it')
+        self.n_checks += len(HARD_CORE.w_probes)
+
+        generator = _make_generator(HARD_CORE, _CONTROL_MASS_MSUN,
+                                    _CONTROL_Z)
+        f_hz = _frequencies_for_w(HARD_CORE.w_probes, generator)
         with self.assertRaises(
                 (operator.CancellationError, SchwingerCertificationError)):
             generator.amplification(f_hz)
@@ -571,22 +655,25 @@ class MacroSaddleControlTestCase(WaveformTestCase):
         """
         A refusal identifies the offending configuration so a caller can
         tell which was refused, not merely that one was.  RE-BASELINE
-        (Build 8d): the band-edge refusal is now the Schwinger w-ceiling
-        (``w = 60.5 > 60``), which is y-independent (F013), so the
+        (Build 8e serving ladder): the message contract is UNCHANGED for
+        genuine refusals, but the band-edge companion now SERVES via an
+        arm, so this pin moves to the HARD-CORE companion whose
+        above-ceiling probe (``w = 61 > 60``) no arm certifies.  Its
+        refusal is the Schwinger w-ceiling (y-independent, F013), so the
         `SchwingerCertificationError` message names the offending ``w`` and
         the ceiling -- the complete identifier for a w-keyed refusal (the
         ``gamma'==0`` legacy exit still names the full ``(w, y, gamma,
         kappa)`` via `CancellationError`, exercised elsewhere).
         """
-        refusing_w = next((w for w in BAND_EDGE.w_probes
-                           if not _f_op_returns(BAND_EDGE, w)), None)
+        refusing_w = next((w for w in HARD_CORE.w_probes
+                           if not _f_op_returns(HARD_CORE, w)), None)
         self.assertIsNotNone(refusing_w,
-                             'no band-edge probe refused to inspect')
+                             'no hard-core probe refused to inspect')
         with self.assertRaises(
                 (operator.CancellationError,
                  SchwingerCertificationError)) as ctx:
-            operator.F_op(refusing_w, BAND_EDGE.y_array, BAND_EDGE.gamma,
-                          beta=BAND_EDGE.beta, kappa=BAND_EDGE.kappa,
+            operator.F_op(refusing_w, HARD_CORE.y_array, HARD_CORE.gamma,
+                          beta=HARD_CORE.beta, kappa=HARD_CORE.kappa,
                           max_order=CERT_MAX_ORDER)
         message = str(ctx.exception)
         if isinstance(ctx.exception, SchwingerCertificationError):

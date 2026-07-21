@@ -2502,3 +2502,111 @@ rate/projected finish); zero progress across two beats = investigate
 with py-spy, never wait; completion notifications only cover success
 — a run without a progress monitor is unattended, not monitored.
 Applies to builds, gates, sweeps, and driver probes alike.
+
+
+## 2026-07-21 — BUILD 8D COMMITTED (4e26103); SDK upgraded; sweeps running
+
+Gate 430p/35 tier-skips/0F in 12:07 (8-wide, progress-monitored).
+41 files, +3076/-703. claude-agent-sdk upgraded 0.1.48 -> 0.1.53
+(owner order, gw version-match) — 8e runs on the proven stack with
+all 14 port-item fixes as belt. post_build_sweeps.sh first production
+run in flight (brute tier incl. tonight's prior gatings). Ladder:
+8e brief next (corner target: legacy-truncation-refused subset of the
+~25% upper bound; exact-heavy tier split rides along). Driver tally
+for the night: 8b-levers + 8c + 8d committed; serving 4.1x floor;
+homogenization complete; SDK hardened items 1-14.
+
+
+## 2026-07-21 — 8D SLOW TIER GREEN; sweep incidents closed; 8e launching
+
+Sweep verdict: 19/19 files, 461p/2xf/1skip, ZERO failures (likelihood
+1:09:13, prior 1:02:23, ratio 36:35 under the flag) — 8d verified at
+both tiers. Sweep-run incidents, all fixed in the script + CLAUDE.md:
+(i) 19-wide x 64 BLAS threads exhausted pthreads -> width cap 8 +
+thread caps; (ii) shared-cache races -> per-process NUMBA_CACHE_DIR
+(already); (iii) live-editing the running script corrupted the bash
+instance ('sees' syntax error) -> atomic-replace rule; (iv) skip-
+green resumability + self-emitting beats added. Port item 14 extended
+with i-iv. 8e launches now on claude-agent-sdk 0.1.53.
+
+
+## 2026-07-21 — PORT ITEM 14 ADDENDUM: monitor emit-on-change economy
+
+Fold into the gw CLAUDE.md port text (owner-confirmed propagation):
+monitors poll internally as often as needed but EMIT only on progress
+change, once on stall entry, and at terminal — never on unchanged
+intervals (each emitted line re-invokes the driver; measured: 18
+invocations where 7 carried information). Poll interval scales with
+run duration (minutes-scale: 1-2 min; hour-scale: 10-15 min). NOTE
+for port day: driver persistent memory is PROJECT-SCOPED and does not
+follow to the gw repo — the CLAUDE.md text is the sole durable
+carrier there; port the terse-imperative form, no narrative.
+
+## 2026-07-21 — 8e plan APPROVED round 1 (first code-grounded plan)
+
+The 0.1.53 + readiness-poll + read-tools stack delivered: the
+Architect READ the codebase while planning (live serena calls on a
+cold server) — no env-note, exact formulas (fold uniform with
+zeta=(0.75 w dtau)^{2/3}, Pearcey anisotropic scalings x~w^{3/4}
+y~w^{1/2}), the L_MAX relaxation honestly deferred with the missing
+pin NAMED (L_cross >= 57.33 unpinned), runtime cusp-window override
+(no schema/DATA_CONTRACTS churn, pipeline_graph consumer check in
+the WP), tests born gated per the tier law, arms refusal-conservative
+with paired-resolution self-certificates and NO new exceptions
+(F019 vocabulary discipline), census-predicate-consistency test
+(cheap predicate must never over-claim vs the actual arm).
+Driver spot-check: geometric_amplification pin real. APPROVED round 1
+— the first plan of the program needing zero rejection rounds.
+
+
+## 2026-07-21 — 8e v1 death (WP-E@20 turns) -> driver-finish + floor + relaunch
+
+8e v1: coder-2 (WP-E housekeeping) died error_max_turns at the
+plan-set 20-turn budget — tools fine (every call succeeded; NOT the
+crash-era disease), a mundane under-budget that still killed the DAG
+(port item 9 brittleness, second occurrence). RECOVERY: (1) WP-E
+DRIVER-FINISHED — 5 heavy marginalized classes gated (11p/10skip,
+6:45 residual = shared-harness cost serving the KEPT-fast
+RefusalContract/BinGuard falsifications; surrogate fixtures left
+ungated by adjudication -> curation pass); (2) orchestrator now
+FLOORS every WP turn budget at 75 at the spawn site (the
+architect-estimate path already did; plan-supplied values now get the
+same clamp); (3) brief updated (housekeeping = landed fact, 4-WP
+scope) and 8e v2 launched. Port item 9 evidence updated: TWO
+max-turns DAG deaths; coder continuation remains the structural fix.
+
+## 2026-07-21 — 8e v2 plan APPROVED round 1 (second consecutive)
+
+Strongest plan of the program: fold-frame-curvature amplitudes (the
+divergent-mu trap named + at-the-fold finiteness test), closed-form
+calibration to the code's geometric limit, Connor-Curtis rotated
+contour with certify-P-before-prefactor (mirrors _schwinger),
+asymmetric-fixture falsifiers (symmetric would hide the p/q swap),
+threshold-free census (argument CDFs + fraction-vs-threshold table),
+previously-refusing-site-only intercept with byte-identity test via
+the sys.modules idiom. L_MAX untouched (measured-only, Professor +
+Simplifier concur — the arms remove the relaxation pressure).
+DRIVER AUTHORIZATION (in-remit, owner may veto): the sparse w>60
+mpmath high-dps anchor is APPROVED as a post-build driver sweep step
+— it is F002 oracle infrastructure (the suite's standing tradition),
+NOT the parked quad-double serving substrate. Turn floor verified
+live (55/80/100/70). Budgets floored at 75 regardless.
+
+
+## 2026-07-21 — 8e gate: 10F+7E, ALL the predicted refusal-pin class
+
+First 8e tree gate: 458p/52skip but 10 failed + 7 vacuity errors —
+every one an inherited above-ceiling REFUSAL pin (schwinger +
+saddle_geometry RefusalAboveCeiling, waveform band-edge trio [third
+flip of that fixture: 7b vocab -> 8d vocab -> 8e serves], the 8d
+fast_path flip witness whose contract embedded the old refusal, the
+marginalized refusal-spy whose fixture no longer refuses). The
+build's OWN tests all green — the misses are pre-8e pins, exactly
+the class the design predicted. Re-baseline agent commissioned:
+conditional contract (served-iff-arm-certifies with served==arm at
+1e-12, else named refusal), MANDATORY hard-core refusing fixture
+(construct via census geometry; inability to construct = reportable
+finding), spy repointed, flip witness split with history comment.
+PORT ITEM 15: the Inspector PASS did not run the inherited fast
+gate (build-suite-scoped verification) — inspector protocol should
+include the tree-wide fast tally, or the commit preflight should.

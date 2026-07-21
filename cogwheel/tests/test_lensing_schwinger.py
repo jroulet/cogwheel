@@ -93,7 +93,8 @@ import matplotlib.pyplot as plt
 import mpmath
 import numpy as np
 
-from cogwheel.lensing.chang_refsdal import _schwinger, geometry, operator
+from cogwheel.lensing.chang_refsdal import (
+    _airy_fold, _pearcey_cusp, _schwinger, geometry, operator)
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError, W_CEILING_SCHWINGER, f_schwinger)
 from cogwheel.lensing.chang_refsdal.operator import (
@@ -300,13 +301,16 @@ POINTLENS_BITFREEZE_GAMMA = 0.0
 POINTLENS_BITFREEZE_Y = (0.3, 0.0)
 POINTLENS_BITFREEZE_WS = (1.0, 2.0, 3.0, 5.0)
 
-#: Above-ceiling refusal fixtures: positive-parity strong-shear points
-#: the legacy path refuses, evaluated at ``w > W_CEILING_SCHWINGER`` so
-#: the Schwinger fallback cannot rescue them and the named
-#: `CancellationError` stands (F005).  ``y = (0.4, 0.3)`` / ``(0.1, 0.1)``
-#: keep the refusal on the contraction's `CancellationError` branch
-#: (the on-axis ``y = (1, 0)`` refuses via a different named kernel
-#: error and is excluded here).
+#: Above-ceiling fixtures: positive-parity strong-shear points evaluated
+#: at ``w > W_CEILING_SCHWINGER``, spanning BOTH serving-ladder outcomes.
+#: RE-BASELINE (Build 8e serving ladder): the ``y = (0.4, 0.3)`` column is
+#: now SERVED by the certified uniform Airy fold arm (moderate image
+#: splitting -> fold argument xi large enough to certify), while the
+#: near-caustic ``y = (0.1, 0.1)`` column is genuinely HARD-CORE -- both
+#: the fold argument xi (~2.4) and the Pearcey radius R (~2.6) are too
+#: small for either arm, so the named `SchwingerCertificationError` still
+#: stands.  `RefusalAboveCeilingTestCase` asserts the CONDITIONAL contract
+#: per fixture and proves both branches are exercised.
 ABOVE_CEILING_GAMMAS = (0.47, 0.49)
 ABOVE_CEILING_YS = ((0.4, 0.3), (0.1, 0.1))
 ABOVE_CEILING_WS = (61.0, 80.0)
@@ -1230,49 +1234,120 @@ class PositiveParityBitFreezeTestCase(SchwingerTestCase):
 
 class RefusalAboveCeilingTestCase(SchwingerTestCase):
     """
-    The certify-XOR-refuse contract at the ceiling (F005): a
-    positive-parity strong-shear node the legacy path refuses, evaluated
-    at ``w > W_CEILING_SCHWINGER``, cannot be rescued by the Schwinger
-    fallback -- so `F_op` / `F_op_grid` must PROPAGATE a named refusal
-    (`CancellationError` or `SchwingerCertificationError`) and never
-    return a finite value.
+    The serving ladder at the ceiling (F005 / Build 8e): a positive-parity
+    strong-shear node evaluated at ``w > W_CEILING_SCHWINGER`` is now
+    EITHER served by a certified uniform arm (fold Airy / cusp Pearcey) OR
+    falls through to the SAME existing named `SchwingerCertificationError`.
+
+    RE-BASELINE (Build 8e serving ladder): the old UNCONDITIONAL
+    above-ceiling refusal pin becomes CONDITIONAL, asserted per fixture.
+    A served node's ``F_op`` value must BE the serving arm's number (the
+    arm called DIRECTLY, agreeing at 1e-12 -- no third path); a refusing
+    node must be genuinely HARD-CORE (NO arm certifies it) and raise the
+    named `SchwingerCertificationError`.  Both branches are asserted
+    non-vacuous: the fixture set spans an arm-served column
+    (``y = (0.4, 0.3)``) and a hard-core column (``y = (0.1, 0.1)``).
     """
 
-    _REFUSALS = (CancellationError, SchwingerCertificationError)
+    def _serving_arm(self, w, y, gamma, beta=0.0, kappa=0.0):
+        """The uniform arm that serves this node, called DIRECTLY.
+
+        Reproduces the production ladder's fixed fold-then-cusp order
+        (`operator._uniform_arm_value`) by calling the arm modules
+        themselves -- an INDEPENDENT path to the served value, not
+        operator's own dispatcher -- so a served ``F_op`` value can be
+        pinned to BE the arm's number.  Returns the complex arm value, or
+        ``None`` when neither arm certifies (a genuinely hard-core node).
+        """
+        source = np.asarray(y, dtype=float)
+        value = _airy_fold.fold_amplification(w, source, gamma,
+                                              beta=beta, kappa=kappa)
+        if value is not None:
+            return complex(value)
+        value = _pearcey_cusp.cusp_amplification(w, source, gamma,
+                                                 beta=beta, kappa=kappa)
+        if value is not None:
+            return complex(value)
+        return None
 
     def test_scalar_fop_refuses_above_ceiling(self):
+        n_served = n_refused = 0
         for gamma, y, w in itertools.product(
                 ABOVE_CEILING_GAMMAS, ABOVE_CEILING_YS, ABOVE_CEILING_WS):
             with self.subTest(gamma=gamma, y=y, w=w):
-                self.n_checks += 1
                 self.assertGreater(w, W_CEILING_SCHWINGER)
-                with self.assertRaises(self._REFUSALS):
-                    result = F_op(w, np.asarray(y), gamma)
-                    self.fail(
-                        f'F_op returned {result[0]!r} above the ceiling '
-                        f'at w={w}, y={y}, gamma={gamma} instead of '
-                        'refusing (F005 violation)')
                 self.n_checks += 1
+                arm = self._serving_arm(w, y, gamma)
+                try:
+                    value, _ = F_op(w, np.asarray(y), gamma)
+                except SchwingerCertificationError:
+                    # (b) genuine hard-core refusal: NO arm may certify it.
+                    self.assertIsNone(
+                        arm, f'F_op refused at w={w}, y={y}, gamma={gamma} '
+                        'yet an arm certifies it -- the ladder should have '
+                        'served this node')
+                    n_refused += 1
+                    self.n_checks += 1
+                    continue
+                # (a) arm-served: the served number must BE the arm's number.
+                self.assertIsNotNone(
+                    arm, f'F_op served {value!r} at w={w}, y={y}, '
+                    f'gamma={gamma} but neither arm certifies -- served by '
+                    'a non-arm path')
+                self.assertAlmostEqual(
+                    abs(value - arm), 0.0, delta=1e-12,
+                    msg=f'served F_op {value!r} is not the serving arm value '
+                    f'{arm!r} at w={w}, y={y}, gamma={gamma}')
+                n_served += 1
+                self.n_checks += 1
+        self.assertGreater(n_refused, 0,
+                           'no genuinely hard-core refusal in the fixture set')
+        self.assertGreater(n_served, 0,
+                           'no arm-served node in the fixture set')
 
     def test_grid_fop_refuses_above_ceiling(self):
+        n_served = n_refused = 0
         for gamma, y, w in itertools.product(
                 ABOVE_CEILING_GAMMAS, ABOVE_CEILING_YS, ABOVE_CEILING_WS):
             with self.subTest(gamma=gamma, y=y, w=w):
-                with self.assertRaises(self._REFUSALS):
-                    result = F_op_grid(np.asarray([float(w)]),
-                                       np.asarray(y), gamma)
-                    self.fail(
-                        f'F_op_grid returned {result[0]!r} above the '
-                        f'ceiling at w={w}, y={y}, gamma={gamma} instead '
-                        'of refusing (F005 violation)')
+                arm = self._serving_arm(w, y, gamma)
+                try:
+                    values, *_ = F_op_grid(np.asarray([float(w)]),
+                                           np.asarray(y), gamma)
+                except SchwingerCertificationError:
+                    self.assertIsNone(
+                        arm, f'F_op_grid refused at w={w}, y={y}, '
+                        f'gamma={gamma} yet an arm certifies it')
+                    n_refused += 1
+                    self.n_checks += 1
+                    continue
+                self.assertIsNotNone(
+                    arm, f'F_op_grid served {values[0]!r} at w={w}, y={y}, '
+                    f'gamma={gamma} but neither arm certifies')
+                self.assertAlmostEqual(
+                    abs(complex(values[0]) - arm), 0.0, delta=1e-12,
+                    msg=f'served F_op_grid {values[0]!r} is not the serving '
+                    f'arm value {arm!r} at w={w}, y={y}, gamma={gamma}')
+                n_served += 1
                 self.n_checks += 1
+        self.assertGreater(n_refused, 0,
+                           'no genuinely hard-core refusal in the fixture set')
+        self.assertGreater(n_served, 0,
+                           'no arm-served node in the fixture set')
 
     def test_mixed_grid_refuses_whole_grid(self):
-        """A grid mixing a certifiable node with an above-ceiling node
-        refuses the WHOLE grid rather than returning a partial result
-        (per-node refusal fails the batch)."""
-        with self.assertRaises(self._REFUSALS):
-            F_op_grid(np.asarray([5.0, 61.0]), np.asarray([0.4, 0.3]), 0.47)
+        """A grid mixing a certifiable node with a HARD-CORE above-ceiling
+        node refuses the WHOLE grid rather than returning a partial result
+        (per-node refusal fails the batch).  RE-BASELINE (Build 8e): the
+        above-ceiling node is the near-caustic hard-core ``y = (0.1, 0.1)``
+        column (no arm certifies it), so the named refusal still stands --
+        the arm-served ``y = (0.4, 0.3)`` column would NOT refuse the grid.
+        """
+        self.assertIsNone(self._serving_arm(61.0, (0.1, 0.1), 0.47),
+                          'the mixed-grid above-ceiling node is no longer '
+                          'hard-core -- an arm now certifies it')
+        with self.assertRaises(SchwingerCertificationError):
+            F_op_grid(np.asarray([5.0, 61.0]), np.asarray([0.1, 0.1]), 0.47)
         self.n_checks += 1
 
 

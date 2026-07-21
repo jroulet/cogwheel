@@ -1,5 +1,249 @@
 # Coder Short-Term Observations
 
+- WP4 (Build 8e wire uniform arms into serving ladder): edited 3 files,
+  engine internals (_schwinger/_dd/_hyp1f1) + L_MAX + select_branch
+  UNTOUCHED. (1) operator.py: new module-level helper _uniform_arm_value(
+  w,y,gamma,*,beta,kappa)->complex|None = fold Airy (_airy_fold.
+  fold_amplification) THEN cusp Pearcey (_pearcey_cusp.cusp_amplification),
+  first non-None wins, else None (refusal-conservative, NO new exception).
+  Import line extended: `from ...chang_refsdal import (geometry,_schwinger,
+  _airy_fold,_pearcey_cusp)`. Intercept inserted at BOTH node-level wave
+  refusal sites (_saddle_grid ~L647; _positive_parity_grid gamma'>0 loop
+  ~L1171), each guarded `if w_node > _schwinger.W_CEILING_SCHWINGER:` ->
+  try arm, serve+continue, else fall to existing f_schwinger (named
+  SchwingerCertificationError stands). BYTE-IDENTITY by construction: the
+  guard is EXACTLY the previously-refusing set (geometric nodes continue
+  earlier via resolved gate; w<=60 nodes never satisfy guard -> identical
+  old f_schwinger path). _saddle_grid passes `source`(=asarray(y)),
+  _positive_parity_grid passes `y` (both physical frame; arms rotate
+  internally). Docstrings updated in both fns (uniform rung before named
+  refusal). (2) __init__.py: added `from ._airy_fold import
+  fold_amplification, airy_fold_value` + `from ._pearcey_cusp import
+  cusp_amplification, pearcey, pearcey_asymptotic` (names verified vs each
+  module's __all__). (3) surrogate.py: new module const _CUSP_ARM_COVERAGE
+  =0.0 (angular half-width rad of certified Pearcey coverage); _tube_serves
+  cusp-window loop now uses `residual=max(0.0,delta_theta-_CUSP_ARM_COVERAGE)`
+  in place of raw delta_theta. Chart SCHEMA UNCHANGED (shrink applied at
+  query time from module const, not stored). At 0.0 -> residual==delta_theta
+  => byte-identical, no enable-by-default. Only _tube_serves cusp loop
+  touched; gamma guard/eta floor/image-count/farfield/exclusion-balls
+  untouched.
+- VERIFIED (read-only + smoke, engine present): ast.parse 3 files OK;
+  imports+all 5 arm exports+helper+const resolve; w<=60 pos-parity &
+  saddle byte-path finite; w>60 pos-parity ladder: w=80 & 2000 SERVED by
+  arm (finite), w=300 named SchwingerCertificationError stands (arms
+  declined) — ladder tries fold-then-cusp before named refusal exactly per
+  brief. arm signatures find_symbol-verified before wiring:
+  fold_amplification(w,source,gamma,*,beta,kappa,envelope_bar),
+  cusp_amplification(w,source,gamma,*,beta,kappa,envelope_bar).
+- UNVERIFIED (WP4): (a) full lensing test suite pass/fail (I do not run
+  suites; downstream). Test Dev OWED: ladder-order gate (fold tried before
+  cusp), byte-identity witnesses (w<=60 + geometric == HEAD), w>60
+  served-vs-named-refusal decision, surrogate cusp-window shrink at
+  nonzero coverage. (b) _CUSP_ARM_COVERAGE nonzero value: left 0.0
+  (byte-identical, safe). The actual certified angular coverage of the
+  Pearcey arm must be pinned by the corner census (WP1 8e census tool)
+  before any window is truly shrunk; served AMPLITUDE of both arms is
+  itself leading-order/UNVERIFIED (see WP2/WP3 notes: fold q=0 b4 deferred;
+  cusp b1,b2 curvature calibration deferred), so opening coverage>0 waits
+  on those calibrations too. Arm intercept is refusal-conservative: a
+  wrong arm value can only appear if an arm's OWN runtime certificate
+  passes — the ladder itself never fabricates a number.
+- SELF-INFLICTED BUG fixed same session (lesson): replace_content called
+  with a bogus extra kwarg + repl='placeholder' overwrote the
+  _DEFAULT_CAUSTIC_FLOOR/artifact-name block with the literal 'placeholder'
+  — re-read confirmed corruption, restored via a second replace_content.
+  LESSON: pass ONLY the documented replace_content params (needle,repl,
+  mode,relative_path); a stray kwarg is silently ignored and repl still
+  applies.
+
+- WP2 (Build 8e uniform Airy fold arm): NEW
+  cogwheel/lensing/chang_refsdal/_airy_fold.py (~430 lines, engine +
+  geometry.py + __init__.py ALL untouched — git status: only new file;
+  WP4 dispatch adds the export). __all__=['airy_fold_value',
+  'fold_amplification']. NO new exception class; pure fns; complex-or-None.
+  * EVALUATOR airy_fold_value(w,tau_bar,xi_control,p,q,sigma): total fn,
+    F=2sqrt(pi)exp(i(w tau_bar+sigma))[p w^{1/6}Ai(-xi) - i q w^{-1/6}
+    Ai'(-xi)] via scipy.special.airy. xi_control SIGNED: >0 inside-caustic
+    (Ai(-xi) oscillatory), <0 outside (Ai(+|xi|) evanescent) — one formula
+    Ai(-xi_control) does both. Finite at xi=0 (Ai(0),Ai'(0) finite).
+    Verified: evanescent decays (|F| 1e-48 -> 1e-136 for xi -30 -> -60).
+  * CONVENTION FIX (resolved brief inconsistency, high-value): brief gives
+    BOTH xi=(3 w Delta_tau/4)^{2/3} AND Delta_tau=(tau_minus-tau_plus)/2 —
+    mutually inconsistent by factor 2. Self-consistent choice (the one that
+    makes large-xi limit reproduce the geometric two-image sum) uses the
+    FULL separation DT=tau_minus-tau_plus: xi=(3 w DT/4)^{2/3}. Derivation:
+    Airy osc (2/3)xi^{3/2}=w DT/2 must equal carrier-relative image offset
+    w(tau_minus-tau_bar)=w DT/2 -> xi^{3/2}=3wDT/4. Documented in module
+    docstring; used DT (full) in code.
+  * CALIBRATION (Professor flag #1, closed-form, VERIFIED to full prec):
+    matched large-xi asymptotic to geometric sum sqrt|mu_+|e^{iw tau_+} +
+    sqrt|mu_-|e^{iw tau_- - i pi/2}. Result: sigma=-pi/4, q=0 (leading),
+    p=2^{-1/6}|lambda_h|^{-1/2}|b3|^{-1/3}. The divergent merge scale s0
+    CANCELS out of p (confirmed numerically: p==m*c0^{1/4} to 1e-15,
+    m=sqrt|mu|=1/sqrt(|lambda_h||b3|s0)). So p is FINITE at the fold, built
+    from curvatures NOT raw sqrt|mu| — exactly the flag. q=0 is RIGOROUS
+    leading for the pure-phase lensing diffraction integral (unit Kirchhoff
+    amplitude => two stationary curvatures equal in magnitude to cubic
+    order => Ai' channel vanishes); the Ai' correction needs the QUARTIC b4
+    (outside gathered inputs), deferred. Large-xi reconstruction of the
+    two-image sum verified by construction: rel_err 7.6e-3 @ xi=3.6, 3.2e-5
+    @ xi=16.5 (O(xi^{-3/2}) convergence; correct -pi/2 saddle Morse phase).
+  * b3 (soft-axis cubic) = 2 q_s(3p-4 q_s^2)/p^3, p=|x_c|^2,
+    q_s=x_c·soft_axis, x_c=nearest.image (caustic critical pt), from the
+    3rd deriv of -ln|x| along soft axis (quadratic part contributes 0). In
+    the eigenframe soft/hard mixed 2nd-deriv=0 so bare cubic == reduced
+    (Lyapunov-Schmidt) cubic at leading order. lambda_h=nearest.
+    hard_eigenvalue. |b3|<=_B3_MIN=1e-6 -> refuse (cusp neighborhood).
+  * Merging pair: _merging_fold_pair scans find_images sorted by delay,
+    takes the delay-ADJACENT (n=0 lower, n=1 higher) pair with min gap;
+    ONLY delays used (near-fold mags ill-conditioned, never evaluated).
+    tau_plus=min, tau_minus=saddle, DT>0 required.
+  * SELF-CERT (literal per brief): err=c_A*xi^{-3/2}, c_A=max(|C1_+|,|C1_-|)
+    from geometry.saddle_coefficients (guarded LensDomainError->None);
+    refuse if err>envelope_bar (default 0.05) or non-finite.
+  * DIAGNOSTIC / UNVERIFIED (served region, same class as cusp arm): the
+    LITERAL c_A xi^{-3/2} certificate is the FAR-FIELD (geometric) error,
+    which is LARGE near the fold (small xi, large C1) — so it REFUSES the
+    tight near-fold band (0 served @ eps<=0.06,w<=800) and only SERVES
+    well-separated folds (731/4000 @ eps 0.02-0.15, w 200-8000). The true
+    uniform-Airy error is O(w^{-1/3}) UNIFORMLY (incl. on-caustic), NOT
+    c_A xi^{-3/2}; the literal estimate inverts the intended served region.
+    I did NOT re-tune the constant (would fabricate a served region against
+    no oracle = grading own homework). Arm is ALIVE (nonempty served set,
+    0 exceptions over ~10k configs) and refusal-conservative (never serves
+    a wrong number: evaluator+p+sigma verified, only the GATE constant is
+    the question). OWED to driver/Test Dev: brute-force calibrate the
+    uniform-error gate (likely ~w^{-1/3} with an O(1) c_A, not xi^{-3/2})
+    to open the intended near-fold served band; the served AMPLITUDE is
+    leading-order (q=0, b4 deferred) => also owe the Ai' quartic refinement
+    cross-check. Structure/refusal-gating/primitive-calibration VERIFIED;
+    served near-fold region + Ai' term UNVERIFIED. Caveat in module +
+    fold_amplification docstrings.
+  * Test authorship (fold-arm gates: evaluator, p/sigma calibration match,
+    on-caustic finiteness, evanescent decay, certificate red-capability)
+    is Test Dev's — declined (code+blessing must not share an author).
+
+- WP3 (Build 8e uniform Pearcey cusp arm): NEW
+  cogwheel/lensing/chang_refsdal/_pearcey_cusp.py (726 lines, engine
+  untouched, reads geometry.py, NOT yet exported in __init__.py — WP4
+  dispatch adds that). __all__=['pearcey','pearcey_asymptotic',
+  'cusp_amplification']. NO new exception class; pure fns; complex-or-None.
+  * PRIMITIVE pearcey(x,y): P=int exp[i(t^4+x t^2+y t)]dt via rotated
+    contour = central [-hw,hw] + right tail on pi/8 valley + left tail on
+    9pi/8 valley (=-e^{i pi/8}); brief's "3pi/8" is a HILL (divergent), used
+    pi/8 & its reflection 9pi/8 (documented). Certifies P BEFORE any
+    prefactor with paired composite GL N/2N (mirrors _schwinger:
+    _CERTIFICATION_TOL=3e-10, _PANEL_ORDER=24, _WAVELENGTHS_PER_PANEL=2.0);
+    |P_N-P_2N|/|P_2N|>tol -> None. float64.
+  * BUG FIXED (real, high-value): left-tail Jacobian had wrong sign
+    (-_VALLEY_DIR); correct is +_VALLEY_DIR (deform real-axis left tail
+    onto 9pi/8 ray: dt=-e^{i pi/8}du traversed u:inf->0, two sign flips ->
+    +). With wrong sign, at x=y=0 (even integrand) left tail EXACTLY
+    cancels right tail leaving only central -> P off by the missing
+    real-axis tails (~1%). The N/2N certificate CANNOT catch a contour/
+    Jacobian error (both rules integrate the same mis-oriented contour;
+    error cancels in the ratio). After fix: P(0,0) matches analytic
+    Gamma(1/4)/2*e^{i pi/8} to 2.2e-15; large-arg P converges to
+    stationary-phase asymptotic (rel 3.4e-4 at (-12,1); ~1% at moderate R
+    is the expected O(R^{-3/2}) leading correction).
+    LESSON: a paired N/2N quadrature certificate proves QUADRATURE
+    convergence only, NOT contour correctness — always cross-check the
+    primitive against a closed-form value at >=1 point.
+  * C4<0 DUAL CUSP handled (was a dead-arm bug): the standard
+    minimum-image cusp has reduced quartic C4<0 (measured -0.196 at the
+    gamma=0.4 real cusp). Old guard c4>0 refused the ENTIRE physical class.
+    Relaxed _soft_normal_form to accept signed C4 (reject only |C4|<=_C4_MIN
+    =1e-6 degeneracy). C4<0 maps to the primitive by the EXACT identity
+    int exp[i(C4 s^4+..)]ds = |C4|^{-1/4} conj(P(-x,-y)) (substitution
+    s=|C4|^{-1/4}t, NOT a fit): cusp_amplification now sets reflected=c4<0,
+    x_eval,y_eval=(-x,-y), conjugates primitive & asymptotic, and flips the
+    reduced-phase sign (phase_sign=-1). abs_c4 used in the w^{1/2}/w^{3/4}
+    control scalings (math.sqrt(c4) would ValueError for c4<0).
+  * DIAGNOSTIC / UNVERIFIED (calibration): with C4<0 accepted the refusal
+    moved to the runtime CALIBRATION CERTIFICATE (_calibration_certified:
+    each reduced stationary phase must match a distinct geometric cusp-
+    cluster scaled delay w*(tau-tau_c) within _CALIBRATION_TOL). At the real
+    cusp the reduced stationary phase vs geometric cluster delay differ by a
+    factor CONSTANT IN w but VARYING WITH OFFSET (4.26 at eps=0.25, 6.95 at
+    eps=0.12, 12.5 at eps=0.05). => the w^{1/2}/w^{3/4} SCALINGS ARE CORRECT
+    (mismatch w-independent) but the offset->normal-form-coefficient map
+    (b1,b2) uses BARE soft/hard-axis projections and is missing O(1)
+    curvature factors (b1=-Delta·e_s times mixed 2nd-derivs of the Fermat
+    potential, not the bare offset); also #stationary pts (1) vs geometric
+    cluster (3 merging images) => controls land in the wrong Pearcey region.
+    The certificate is DOING ITS JOB: refuses the mis-calibrated mapping,
+    NEVER serves a wrong number. Broad random sweep (600 configs, seed 0):
+    0 exceptions, 4 served, 596 refused — arm is refusal-conservative and
+    NOT dead. I did NOT hand-tune the curvature constants (would make the
+    certificate pass on an unvalidated amplitude = grading own homework
+    against a fitted oracle). OWED to driver/Test Dev: pin & brute-force
+    validate the b1,b2 offset->control curvature calibration; the served
+    AMPLITUDE is UNVERIFIED (structure/refusal-gating verified; primitive
+    verified). Caveat documented in cusp_amplification docstring Notes.
+  * Gates (cusp_amplification, in order): input guards (w>0, shape (2,),
+    finite, envelope_bar>0) -> geometry LensDomainError -> _cusp_vertex
+    (golden-section on caustic-speed min) None -> _soft_normal_form None ->
+    F016 radius gate R<R_min=(c_P/bar)^{2/3} -> pearcey None -> per-image
+    _leading_geometric None -> _calibration_certified. All return None; no
+    raise. Full smoke suite GREEN.
+
+- WP1 (Build 8e corner-scoping census): EXTENDED
+  scripts/census_homogenization_corners.py ONLY (engine untouched;
+  operator.L_MAX stays 48, select_branch/geometry.py NOT modified —
+  git status confirms census script is my sole change). Pure-geometry,
+  engine-free, deterministic (same seed -> byte-identical JSON; verified
+  n=300 seed=1 twice). Classifies refused high-w corner nodes into 4
+  buckets under report['corner_scoping']:
+  (a) a_geometric_now = high & geometric-served already (smoke: 1091/3040,
+      frac 0.359 +Wilson95).
+  (b) b_geometric_under_relaxed_l_max = MEASURED-ONLY: resolved refused
+      POSITIVE-parity nodes (L=w*|y'|<=48, blocked only by conservative
+      cancellation gate) that L_MAX_RELAXED=60 PLUS image-census guard
+      (_image_census_matches: mags.size in {2,4} & merging pair is one
+      +min & one -saddle) would move onto geometric. Saddle refusals have
+      NO L gate -> never rescued. Reports frac 0.194 + Wilson +
+      production_l_max=48 note. select_branch/L_MAX UNCHANGED (raising
+      L_MAX would REDUCE geometric since gate is L>L_MAX; (b) is a
+      what-if count, not an action).
+  (c)/(d) cd_uniform_or_hardcore = refusal & ~relaxed: NO hardcoded
+      xi*/R* threshold. Emits full fold (w*Delta_tau, +xi=(0.75*wDtau)^(2/3))
+      and cusp (R) argument CDFs as fraction_vs_threshold TABLES over fixed
+      grids (FOLD_WDTAU_THRESHOLD_GRID 33pt linspace 0..8;
+      CUSP_R_THRESHOLD_GRID 32pt [0]+logspace(-1,2,31)); each row
+      fraction_resolvable_ge + Wilson95 + fraction_hardcore_lt; split read
+      off at arms' certified thresholds POST-BUILD.
+- Geometry-only args per refused node: ONE geometry.find_images solve per
+  config (when any w>60); delta_min inline-mirrors
+  operator._real_delay_min_separation; Delta_tau=delta_min/2 EXACT (merging
+  min(n=0)/saddle(n=1) pair IS the delta_min pair — no re-solve). Topology
+  via _classify_fold_or_cusp(delays): 'cusp' when a 3+ cluster of
+  consecutive delay gaps within CUSP_CLUSTER_DELAY_RATIO=3*gmin, else
+  'fold', else 'degenerate' (<2 real images -> hard-core (d)). Cusp R:
+  x=w^0.5*|delta_parallel|, y=w^0.75*|delta_perp| (2/3 law), offsets from
+  geometry.nearest_caustic_point(gamma,beta,source,kappa) projected on
+  soft_axis(parallel)/hard_axis(perp); guarded try/except LensDomainError
+  -> degenerate.
+- Memory-bounded: streams cd fold/cusp args into fixed threshold-grid
+  histograms (counts_ge += (arg[:,None]>=grid[None,:]).sum(0)) — no storing
+  2e5x128 per-node samples; the CDF/table IS the histogram. Wilson95 reuses
+  existing wilson_interval helper. partition_check asserts
+  n_fold_cd+n_cusp_cd+n_degenerate_cd == cd_node_total (smoke: 1358==1358,
+  consistent True). All existing report keys preserved (additive section).
+- BUG hit & fixed (recorded lesson): replace_symbol_body on `run` DELETED
+  the def+docstring (tool body MUST include the signature line) -> col-0
+  IndentationError; repaired via replace_content re-adding def/docstring +
+  reindent, then all later replace_symbol_body calls INCLUDED signatures.
+  ast.parse + importlib(exec w/ sys.modules registration for KW_ONLY
+  dataclass resolution) both GREEN; e2e smoke run GREEN.
+- UNVERIFIED (WP1 8e): full N>=1e5/2e5 production run pass/fail + wall-clock
+  (smoke n=300 only; each high-w config does one find_images solve +
+  possibly one nearest_caustic_point — offline run, owner/downstream
+  executes). The reported fractions (a 0.359 / b 0.194 / cd 0.447) and
+  topology counts are FIXTURE-scale (seed=1 n=300); owner-facing numbers
+  need the full draw. Test authorship (census-extension gates) is Test
+  Dev's — declined (code+blessing must not share an author).
+
 - WP3 (Build 8d homogenization-corner census): NEW standalone
   scripts/census_homogenization_corners.py — geometry-only Monte-Carlo
   REPORTING deliverable (NOT a gate), modifies NO engine code (git status:

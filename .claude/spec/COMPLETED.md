@@ -80,6 +80,18 @@ gates re-tuned, zero genuine regressions, F015 net verified. F019.
 Pipeline crashed at the revision-coder spawn (argv, root-caused to
 spec inlining — de-inlined; port items 9-13); driver hand-finished.
 
+### Build 8e — uniform-asymptotic serving (complete)
+
+First fully clean SDK run on the 0.1.53 stack: plan approved round 1
+(code-grounded), four WPs + three sharded test devs, Inspector PASS
+with ZERO findings, no crashes; only the orchestrator commit was
+blocked by the spec-discipline hook (new modules not yet in SPEC) —
+driver close-out as planned. Corner census (argument CDFs +
+fraction-vs-threshold table), fold + cusp arms, ladder wiring with
+byte-identical certified paths. Post-build: sweep under the flag,
+sparse w>60 mpmath anchor, hard-core fraction memo to owner; then the
+full-box training campaign.
+
 ### Build 8b-levers — serving-path levers (complete)
 
 Newton caustic shortcut (WP-A) + operator contraction fusion (WP-B),

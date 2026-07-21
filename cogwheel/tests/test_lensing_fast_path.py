@@ -150,7 +150,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from cogwheel import data, waveform
-from cogwheel.lensing.chang_refsdal import channels, geometry, operator
+from cogwheel.lensing.chang_refsdal import (
+    channels, geometry, operator, _airy_fold, _pearcey_cusp)
 from cogwheel.lensing.chang_refsdal._hyp1f1 import (
     DD_PRODUCT_CEILING, HypergeometricDomainError, W_MAX_CERTIFIED,
     point_mass_g_derivatives)
@@ -1399,14 +1400,24 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
         """
         FLIPPED arm, batched: ``F_op_grid`` at ``gamma' > 0`` is served by
         Schwinger; its values agree with HEAD in the max-normalized
-        currency at `_WITNESS_TOL` on the sub-ceiling grid, every returned
-        order is 0 (single-dispatch), and appending an above-ceiling node
-        refuses the whole grid with `SchwingerCertificationError`.
+        currency at `_WITNESS_TOL` on the sub-ceiling grid, and every
+        returned order is 0 (single-dispatch).
+
+        RE-BASELINE (Build 8d -> 8e): under Build 8d the above-ceiling
+        clause pinned an UNCONDITIONAL whole-grid
+        `SchwingerCertificationError` for the appended ``w = 63`` node.
+        The Build 8e serving ladder splits that clause: the sub-ceiling
+        flip witness stands UNCHANGED, while the above-ceiling ``w = 63``
+        node is now CONDITIONAL -- EITHER served by a certified uniform arm
+        (in which case the grid returns and the node's value must BE the
+        arm's number at 1e-12, order 0) OR hard-core (the whole grid
+        refuses with `SchwingerCertificationError`).  The fixture grid
+        spans both outcomes (asserted non-vacuous below).
         """
         head = _load_head_operator()
         sub_grid = np.asarray(FOP_GRID_W, dtype=float)  # all w <= 50 <= 60
         supra_grid = np.asarray(FOP_GRID_W + (63.0,), dtype=float)
-        witnessed = refused = 0
+        witnessed = refused = served = 0
         for sqrt_s in FOP_GRID_SQRT_S:
             for beta in FOP_IDENTITY_BETAS:
                 for kappa in FOP_IDENTITY_KAPPAS:
@@ -1438,19 +1449,69 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
                                 f'exceeds {self._WITNESS_TOL:.0e} '
                                 f'(scale={scale:.4f}) -- physics regression')
                             witnessed += 1
-                        # Above-ceiling node refuses the whole grid.
+                        # Above-ceiling w=63 node: CONDITIONAL (Build 8e).
                         self.n_checks += 1
+                        arm = self._serving_arm(63.0, y, 0.2, beta, kappa)
                         supra = self._grid_outcome(
                             operator, supra_grid, y, 0.2, beta, kappa)
-                        self.assertTrue(
-                            supra['raised']
-                            and supra['exc'] == 'SchwingerCertificationError',
-                            f'sqrt_s={sqrt_s}: appending w=63 did not refuse '
-                            'the whole grid with SchwingerCertificationError '
-                            f'(got {supra})')
-                        refused += 1
+                        if supra['raised']:
+                            # (b) hard-core: NO arm may certify the node.
+                            self.assertEqual(
+                                supra['exc'], 'SchwingerCertificationError',
+                                f'sqrt_s={sqrt_s} beta={beta} kappa={kappa}: '
+                                'above-ceiling refusal is not '
+                                f'SchwingerCertificationError (got {supra})')
+                            self.assertIsNone(
+                                arm, f'sqrt_s={sqrt_s} beta={beta} '
+                                f'kappa={kappa}: grid refused w=63 yet an '
+                                'arm certifies it')
+                            refused += 1
+                        else:
+                            # (a) arm-served: the node's value IS the arm's.
+                            self.assertIsNotNone(
+                                arm, f'sqrt_s={sqrt_s} beta={beta} '
+                                f'kappa={kappa}: grid served w=63 but neither '
+                                'arm certifies -- served by a non-arm path')
+                            self.assertEqual(
+                                int(supra['orders'][-1]), 0,
+                                f'sqrt_s={sqrt_s} beta={beta} kappa={kappa}: '
+                                'arm-served w=63 node reports order != 0')
+                            self.assertAlmostEqual(
+                                abs(complex(supra['values'][-1]) - arm), 0.0,
+                                delta=1e-12,
+                                msg=f'sqrt_s={sqrt_s} beta={beta} '
+                                f'kappa={kappa}: served w=63 value '
+                                f'{supra["values"][-1]!r} is not the serving '
+                                f'arm value {arm!r}')
+                            served += 1
         self.assertGreater(witnessed, 0, 'no flipped grid was witnessed')
-        self.assertGreater(refused, 0, 'no above-ceiling grid refused')
+        self.assertGreater(refused, 0,
+                           'no above-ceiling grid refused (hard-core branch '
+                           'not exercised)')
+        self.assertGreater(served, 0,
+                           'no above-ceiling grid was arm-served (Build 8e '
+                           'serving branch not exercised)')
+
+    @staticmethod
+    def _serving_arm(w, y, gamma, beta=0.0, kappa=0.0):
+        """The uniform arm that serves this node, called DIRECTLY.
+
+        Reproduces the production ladder's fixed fold-then-cusp order
+        (`operator._uniform_arm_value`) by calling the arm modules
+        themselves -- an INDEPENDENT path to the served value, not
+        operator's dispatcher.  Returns the complex arm value, or ``None``
+        when neither arm certifies (a genuinely hard-core node).
+        """
+        source = np.asarray(y, dtype=float)
+        value = _airy_fold.fold_amplification(w, source, gamma,
+                                              beta=beta, kappa=kappa)
+        if value is not None:
+            return complex(value)
+        value = _pearcey_cusp.cusp_amplification(w, source, gamma,
+                                                 beta=beta, kappa=kappa)
+        if value is not None:
+            return complex(value)
+        return None
 
 
 class OperatorFusionFalsificationTestCase(FastPathTestCase):
