@@ -1,5 +1,83 @@
 # Coder Short-Term Observations
 
+- WP3 (Build 8d homogenization-corner census): NEW standalone
+  scripts/census_homogenization_corners.py — geometry-only Monte-Carlo
+  REPORTING deliverable (NOT a gate), modifies NO engine code (git status:
+  only new file; operator.py mod is the pre-existing WP1 change). Draws from
+  _LensPriorBox(CombinedPrior) = [FixedLensGeometryPrior, UniformLensMassPrior,
+  UniformReducedShearPrior, UniformSourcePositionPrior] via
+  generate_random_samples (box READ from prior classes, not hardcoded), mirrors
+  surrogate_census idiom but self-contained (all logic in-script per WP "new
+  standalone script under scripts/"). Reports: (a) gamma'==0 fraction (==0 in
+  smoke, measure-zero) + gamma'<0.01 bonus (tracks analytic 0.01/1.6); (b)
+  unresolved-high-w NAMED-refusal corner fraction with Wilson95 interval.
+  classify_config mirrors PRODUCTION dispatch per parity: positive
+  select_branch gate (resolved w*delta_min>=RHO_END AND L=w*|y'|>L_MAX);
+  saddle _saddle_grid gate (resolved AND w>W_CEILING, NO L condition);
+  w<=60 -> served-by-Schwinger both parities; w>60 & not-geom-eligible ->
+  refusal. delta_min (real-image delay sep, one quartic solve) computed ONCE
+  per config and ONLY when any w>60 (perf). macro_matrix/maps/find_images
+  LensDomainError (incl. F012 census) -> engine_refused bucket (precedes
+  dispatch). gamma_prime read from engine mass-sheet map, cross-checked vs
+  analytic gamma/(1-kappa) (smoke: max diff 0.0). Constants imported not
+  hardcoded (W_CEILING=_schwinger.W_CEILING_SCHWINGER, RHO_END/L_MAX from
+  operator). Smoke n=300 seed=1: gamma'==0=0, gamma'<0.01=1/300, corner
+  0.23 [0.186,0.281], engine_refused=0, max_w=441.6<500, xcheck=0.0; JSON
+  well-formed (10 top keys). Parse+import+e2e all GREEN.
+- UNVERIFIED (WP3): full N>=1e5 production run pass/fail + wall-clock (smoke
+  was n=300 only; 2e5 does ~most-config quartic solves for delta_min — offline
+  run, downstream/owner executes). Refusal-corner fraction is FIXTURE-scale
+  seed=1 n=300 (0.23); the owner-facing number needs the full N>=1e5 draw.
+
+- WP1 (Build 8d homogenize positive parity onto Schwinger): rerouted
+  operator.py positive-parity wave branch. RENAMED
+  _positive_parity_grid_with_fallback -> _positive_parity_grid (internal;
+  only F_op/F_op_grid callers, no test refs to the name). New body is a
+  DIRECT dispatch on gamma_prime=_mass_sheet_map(y,gamma,kappa)[2]
+  (=gamma/(1-kappa)): gamma'>0 -> per-node _schwinger.f_schwinger with the
+  IDENTICAL reduce/rotate/reconstruct copied verbatim from the old 7a
+  fallback AND _saddle_grid (z_eig rotate, mass_sheet_phase, /lam); gamma'==0
+  (exact, via `not gamma_prime>0.0`) -> legacy _grid_certified (sole legacy
+  production exit). Deleted the try/except-CancellationError-then-Schwinger
+  fallback structure entirely. Added w_array.ndim!=1 guard (matches
+  _saddle_grid). Both F_op(scalar, 1-elem grid) and F_op_grid delegate here
+  => single-intercept reroute for both.
+- STEP2 refusal symmetry: gamma'>0 above-ceiling now raises
+  SchwingerCertificationError (named), NOT the old CancellationError — this
+  is the intended homogenization (positive parity == saddle arm behavior).
+  No legacy fallback catch. gamma'==0 keeps CancellationError.
+- STEP3 oracle alias: module-level `legacy_operator_oracle = _grid_certified`
+  inserted right after _grid_certified def, with 'test-only oracle; NOT a
+  production path (see Build 8d)' comment. No wrapper/logic.
+- STEP4 verified intact (I did NOT touch _grid_certified/_fused_contraction):
+  _SERIES_TOLERANCE=2e-12 module global, _fused_contraction.py_func reachable,
+  half_sum still a param. Smoke: gamma'>0 F_op order_used=0 & matches direct
+  Schwinger recon <1e-14; gamma'==0 order_used=9 (legacy); grid==scalar;
+  w=70 gamma'>0 -> SchwingerCertificationError.
+- Docstrings updated in-file (F_op, F_op_grid, _positive_parity_grid, module
+  MACRO-SADDLE DISPATCH para): removed the now-false 'positive parity ...
+  BYTE-IDENTICAL operator/1F1 branch' claim; documented gamma'=0 as sole
+  legacy exit + Schwinger for gamma'>0 on both parities.
+- DID NOT TOUCH: _saddle_grid (saddle arm), channels.py, select_branch,
+  geometry branch dispatch, refusal vocabulary (no new exception classes).
+- OWED to Test Dev (Build 8d): tests that pin positive-parity gamma'>0 to
+  the LEGACY operator path WILL now go RED and need re-baselining with
+  contract-flip witnesses (7b precedent) — NOT my defect, intended flip:
+  (1) test_lensing_schwinger.py::PositiveParityBitFreezeTestCase — asserts
+  F_op/F_op_grid return frozen literals AND diagnostics.order_used>0 for
+  moderate-shear (gamma'>0) configs; both now false (Schwinger value within
+  1e-10 of the frozen literal, order_used==0). Re-baseline literals to the
+  Schwinger values + flip the order_used>0 assertion to ==0.
+  (2) crown byte-identity pin (test_lensing_surrogate.py) and ratio-layer
+  cache-determinism pin against the CURRENT positive-parity evaluator WILL
+  flip (brief anticipates this); physics tolerances (RB-vs-brute, oracle
+  1e-10) must hold. (3) The NEW Build-8d overlap-domain harness
+  (Schwinger-vs-legacy_operator_oracle at 1e-10 on the certified overlap,
+  refusal-decision identity both directions) + a dispatch mutation test are
+  Test Dev deliverables — legacy_operator_oracle is the import handle.
+  (4) UNVERIFIED: full lensing suite pass/fail at fixture scale (I only
+  smoke-checked import+wiring+one config per branch; downstream runs it).
+
 - WP1 (Build 8c multi-chart surrogate): rewrote
   cogwheel/lensing/surrogate.py into a flat multi-chart emulator — two
   FROZEN dataclasses (TubeChart in (gamma,u=sqrt(eta),theta,log w);

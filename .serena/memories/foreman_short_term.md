@@ -1,25 +1,22 @@
-# Foreman Short-Term Notes
-
-- INS-3-001 fix: surrogate_training.py's train() computed per-parity
-  `dropped` sliver lists (from stable_gamma_bands) but only wrote them into
-  parity_reports (the JSON training report), never into the surrogate's
-  serialized provenance. Fixed by threading a flat `all_dropped_slivers`
-  list (accumulated across both parity loop iterations) into
-  `_build_provenance(box, config, charts, dropped_gamma_slivers=...)`,
-  which now stores `provenance['dropped_gamma_slivers']` as flat
-  `[[lo, hi], ...]` pairs -- matching the shape `_normalize_slivers` and
-  `dropped_slivers_from_training_report` already expect. No change needed
-  on surrogate_census.py's read side (`_dropped_slivers_from` already
-  defaulted to provenance) -- only updated its stale docstring NOTE that
-  described the now-fixed discrepancy as still-open. Verified via
-  ast.parse, import + signature check, and a manual
-  `_dropped_slivers_from(FakeSurrogate, None)` smoke probe; existing
-  Serialization/MultiChart provenance round-trip tests (6) still pass
-  unchanged since that fixture builds provenance by hand, not via train().
-- INS-1-003 handled per explicit driver decision (item 3): "ACCEPTED AS
-  DEFERRED — no build action." Declined per Librarian-owned convention.
-- INS-1-001 (commissioning a Test Developer to author
-  test_lensing_surrogate_census.py) is NOT trivial-fix scope for
-  Foreman-Lite (requires coordinating another agent) and was not in the
-  top-level findings list handed to me — left untouched/out of scope,
-  flagging for orchestrator routing to a Test Developer agent.
+- INS-1-003 (census_homogenization_corners.py node_classification_totals
+  undercounting served_by_geometric for w<=60 positive-parity nodes that
+  would be geometric in production): fixed via the doc-the-simplification
+  option (not the "compute geometric independently of high" option) —
+  added a `note` string key to the `node_classification_totals` dict in
+  `run()` explaining the w<=60 schwinger/geometric split discrepancy vs
+  operator.select_branch (which is w-independent for positive parity),
+  and confirming the two headline fractions (gamma_prime_zero,
+  unresolved_high_w_refusal_corner) are unaffected. Chose this over
+  computing an independent geometric mask because the latter requires
+  computing the expensive real-image delta_min for EVERY config (not
+  just configs with a high node), which contradicts the function's
+  documented efficiency contract ("computed at most ONCE per config,
+  only when some node exceeds the ceiling") — that's a real behavior/
+  perf change, out of trivial-fix scope for Foreman-Lite. Verified via
+  ast.parse, import via sys.path insert (note: loading the script file
+  directly via importlib.util.spec_from_file_location fails on its
+  CensusConfig dataclass regardless of my edit — an unrelated dataclass/
+  module-resolution artifact of loading outside normal package context;
+  use sys.path.insert(0, 'scripts'); import census_homogenization_corners
+  instead), and an actual `run()` smoke call confirming the note renders
+  with W_CEILING interpolated and totals still populate correctly.

@@ -131,6 +131,8 @@ from cogwheel.lensing.prior import LensedMarginalizedExtrinsicIASPrior
 from cogwheel.lensing.waveform import LensedWaveformGenerator
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
 from cogwheel.lensing.chang_refsdal.operator import CancellationError
+from cogwheel.lensing.chang_refsdal._schwinger import (
+    SchwingerCertificationError)
 
 #: Higher-mode precessing approximant, so the mode-pair (``M**2``) norm
 #: contraction and the per-``|m|`` data fold are genuinely exercised
@@ -619,9 +621,16 @@ class RefusalContractTestCase(_MarginalizedLensTestCase):
     mutation guard proves this is non-vacuous.
     """
 
+    # RE-BASELINE (Build 8d homogenization): the cancellation-band config is
+    # a sheared positive-parity host (gamma' = 0.94) now served by the exact
+    # Schwinger evaluator, so above its ceiling the named refusal is
+    # SchwingerCertificationError (was CancellationError); the refusal-
+    # precedence contract is unchanged (the engine still refuses BEFORE the
+    # coherent score).  Both named wave-branch refusals are accepted.
     REFUSING_CONFIGS = (
         ('over_critical', OVER_CRITICAL_LENS, LensDomainError),
-        ('cancellation', CANCELLATION_LENS, CancellationError))
+        ('cancellation', CANCELLATION_LENS,
+         (CancellationError, SchwingerCertificationError)))
 
     @classmethod
     def setUpClass(cls):

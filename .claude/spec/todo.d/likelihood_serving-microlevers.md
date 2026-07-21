@@ -19,6 +19,14 @@ section: Backlog
   ORDERING: after 8e (cusp fast-serving); may overlap the full-box
   training run (training cost is exact-quadrature-dominated, so these
   levers do not materially change it).
+  (c) NODE-PARALLEL EXACT EVALUATION (owner-spotted 2026-07-21): the
+  positive-parity and saddle wave arms evaluate w nodes in a SERIAL
+  loop (~90 ms/node, all nodes independent) — a prange/threaded node
+  loop is embarrassingly parallel and value-preserving (8b-levers
+  certification mold). Biggest payoff: the full-box TRAINING campaign
+  is engine-call-dominated, so node parallelism divides its wall-clock
+  by ~core count; also cuts exact-heavy test tiers and any pre-enable
+  exact serving.
   PRE-BRIEF DRIVER STEP: profile the 2.0 ms partition residual
   (find_images quartic vs kernels vs switch) so the brief carries
   measured facts, not guesses.

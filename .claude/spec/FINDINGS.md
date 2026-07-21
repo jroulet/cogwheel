@@ -749,6 +749,41 @@ denominator effect). Dispositions:
   production-density training report (post-8e), measured in BOTH
   currencies.
 
+## F019 — the two exact evaluators' ceilings live in different variables; a homogenization plan missed it and the census caught it pre-commit (2026-07-21, Build 8d)
+
+The legacy operator series refuses on the PRODUCT w*sqrt(s) <= 60
+(the y-dependent dd channel, F001/F005); the Schwinger quadrature
+refuses on the frequency ALONE, w <= 60 (its cancellation channel
+L_S = pi*w/4 is y-independent, F011/F013). The sampled prior box
+bounds the PRODUCT (w*sqrt(s) <= 58 by construction) while w itself
+runs to ~443 — so the two domains are NOT nested, and "route
+everything through Schwinger" (the approved 8d plan, incl. Professor
+Q2(b) "Schwinger-refuses => production refuses", driver-co-signed)
+would have wholesale-changed the disposition of the ~25% of prior
+draws carrying w > 60 non-geometric nodes. The WP3 geometry census
+measured this BEFORE commit. Dispositions:
+- OWNER RULING: 8d ships as the PURE homogenization anyway — the
+  corner refuses by name until Build 8e serves it, because sampling
+  is PARKED (ruling A): nothing production evaluates the corner in
+  the interim, so coverage parity with pre-8d was a non-goal. (A
+  driver per-band legacy revival was implemented and REVERTED on
+  this ruling.)
+- The legacy series also truncation-refuses part of the corner
+  (shear-ladder degradation with w, measured at w=100 gamma'=0.2),
+  so the 25% is an UPPER BOUND on what 8e must serve, not a
+  pre-8d-served fraction; the truly-refused sub-fraction needs the
+  8e scoping census (per-node evaluation).
+- Standing lessons: domain claims comparing two evaluators must name
+  the VARIABLE each ceiling lives in; reverse-coverage (B-refuses-
+  where-A-served) is part of any evaluator-swap verification; and a
+  cheap geometry census run BEFORE commit is what turned this from a
+  shipped regression into a plan amendment.
+- Cost note: homogenization re-prices the exact path (~90 ms/node,
+  crown lnlike ~751 ms default; brute comparisons ~138 s/call) —
+  brute-heavy accuracy tests are gated behind COGWHEEL_BRUTE_ACCURACY
+  (driver post-build tier); the production hot path (surrogate/
+  geometry) is unaffected.
+
 ## F015 — fold-degenerate images crashed the geometric kernel with a raw LinAlgError (2026-07-19, surfaced in production, fixed Build 7a)
 
 The headline marginalized sampling run died mid-flight (bound 17+)

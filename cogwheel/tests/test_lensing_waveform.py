@@ -88,6 +88,8 @@ import numpy as np
 
 from cogwheel.lensing import waveform
 from cogwheel.lensing.chang_refsdal import operator, geometry
+from cogwheel.lensing.chang_refsdal._schwinger import (
+    SchwingerCertificationError)
 
 
 try:  # Diagnostics only; never gate a test on plotting being present.
@@ -291,15 +293,17 @@ def _frequencies_for_w(w_values,
 def _f_op_returns(config: _LensConfig, w: float) -> bool:
     """Whether `operator.F_op` certifies a finite return for `config`.
 
-    ``True`` if the call returns a finite value; ``False`` if it raises
-    `operator.CancellationError`.  Other exceptions propagate -- they are
-    not the certified/refused distinction this probe reports.
+    ``True`` if the call returns a finite value; ``False`` if it raises a
+    named wave-branch refusal -- `operator.CancellationError` (the
+    ``gamma'==0`` legacy exit) or `SchwingerCertificationError` (the
+    homogenized Schwinger path, Build 8d).  Other exceptions propagate --
+    they are not the certified/refused distinction this probe reports.
     """
     try:
         value, _ = operator.F_op(
             w, config.y_array, config.gamma, beta=config.beta,
             kappa=config.kappa, max_order=CERT_MAX_ORDER)
-    except operator.CancellationError:
+    except (operator.CancellationError, SchwingerCertificationError):
         return False
     return bool(np.isfinite(value.real) and np.isfinite(value.imag))
 
@@ -483,10 +487,15 @@ class MacroSaddleControlTestCase(WaveformTestCase):
 
     An in-band configuration returns a finite, certified O(1)
     amplification at order 42; the band-edge companion (the mis-specified
-    ``gamma_eff = 0.5`` control) refuses cleanly with
-    `operator.CancellationError`.  The refusal is a FEATURE, asserted
-    where it belongs -- in the waveform layer that consumes the engine's
-    certified-or-refuse contract.
+    ``gamma_eff = 0.5`` control) refuses cleanly with a NAMED wave-branch
+    refusal.  RE-BASELINE (Build 8d homogenization): the band-edge
+    companion is a sheared positive-parity host (``gamma' = 0.5 > 0``) now
+    served by the exact Schwinger evaluator, so its sub-ceiling probes
+    (``w = 30, 40``) CERTIFY and only the above-ceiling probe
+    (``w = 60.5 > 60``) refuses -- with `SchwingerCertificationError` (was
+    the Build-7a fallback's `operator.CancellationError`).  The refusal is
+    a FEATURE, asserted where it belongs -- in the waveform layer that
+    consumes the engine's certified-or-refuse contract.
     """
 
     def test_config_effective_shears_are_as_documented(self):
@@ -534,11 +543,12 @@ class MacroSaddleControlTestCase(WaveformTestCase):
 
     def test_band_edge_companion_refuses_cleanly(self):
         """
-        The band-edge companion raises `operator.CancellationError` at the
-        waveform layer: the above-Schwinger-ceiling probe (``w = 60.5``)
-        refuses at the operator level (the sub-ceiling probes are rescued
-        by the Build 7a fallback), and ``amplification`` over the probe
-        grid propagates the refusal unswallowed (never a ``nan`` or a
+        The band-edge companion raises a NAMED wave-branch refusal at the
+        waveform layer.  RE-BASELINE (Build 8d): the above-ceiling probe
+        (``w = 60.5 > 60``) refuses at the operator level with
+        `SchwingerCertificationError` (the sub-ceiling probes are now
+        Schwinger-certified), and ``amplification`` over the probe grid
+        propagates the refusal unswallowed (never a ``nan`` or a
         finite-but-wrong factor).
         """
         refusals = [w for w in BAND_EDGE.w_probes
@@ -552,28 +562,44 @@ class MacroSaddleControlTestCase(WaveformTestCase):
         generator = _make_generator(BAND_EDGE, _CONTROL_MASS_MSUN,
                                     _CONTROL_Z)
         f_hz = _frequencies_for_w(BAND_EDGE.w_probes, generator)
-        with self.assertRaises(operator.CancellationError):
+        with self.assertRaises(
+                (operator.CancellationError, SchwingerCertificationError)):
             generator.amplification(f_hz)
         self.n_checks += 1
 
     def test_refusal_message_names_the_configuration(self):
         """
-        A refusal identifies the offending ``(w, y, gamma, kappa)`` so a
-        caller can tell which configuration was refused, not merely that
-        one was.
+        A refusal identifies the offending configuration so a caller can
+        tell which was refused, not merely that one was.  RE-BASELINE
+        (Build 8d): the band-edge refusal is now the Schwinger w-ceiling
+        (``w = 60.5 > 60``), which is y-independent (F013), so the
+        `SchwingerCertificationError` message names the offending ``w`` and
+        the ceiling -- the complete identifier for a w-keyed refusal (the
+        ``gamma'==0`` legacy exit still names the full ``(w, y, gamma,
+        kappa)`` via `CancellationError`, exercised elsewhere).
         """
         refusing_w = next((w for w in BAND_EDGE.w_probes
                            if not _f_op_returns(BAND_EDGE, w)), None)
         self.assertIsNotNone(refusing_w,
                              'no band-edge probe refused to inspect')
-        with self.assertRaises(operator.CancellationError) as ctx:
+        with self.assertRaises(
+                (operator.CancellationError,
+                 SchwingerCertificationError)) as ctx:
             operator.F_op(refusing_w, BAND_EDGE.y_array, BAND_EDGE.gamma,
                           beta=BAND_EDGE.beta, kappa=BAND_EDGE.kappa,
                           max_order=CERT_MAX_ORDER)
         message = str(ctx.exception)
-        for token in ('w =', 'y =', 'gamma', 'kappa'):
-            self.assertIn(token, message,
-                          f'refusal message omits {token!r}: {message}')
+        if isinstance(ctx.exception, SchwingerCertificationError):
+            # w-keyed ceiling refusal: names the offending w and the reason.
+            for token in ('w =', str(refusing_w), 'ceiling'):
+                self.assertIn(
+                    token, message,
+                    f'Schwinger ceiling refusal omits {token!r}: {message}')
+        else:
+            # gamma'==0 legacy exit: names the full configuration.
+            for token in ('w =', 'y =', 'gamma', 'kappa'):
+                self.assertIn(token, message,
+                              f'refusal message omits {token!r}: {message}')
         self.n_checks += 1
 
     def test_diagnostic_scatter(self):

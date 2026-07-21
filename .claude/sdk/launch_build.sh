@@ -102,6 +102,7 @@ fi
 disown -a
 
 echo "launched: $LOG (watchdog ${STALE}s)"
+echo "POST-BUILD (after the driver commit): .claude/sdk/post_build_sweeps.sh  # slow sweeps NEVER run in-build"
 echo "arm the Monitor from the log header: tail -20 $LOG once it exists"
 if [[ "$AUTO" != "--auto" ]]; then
   echo "PLAN APPROVAL: on the plan-ready log line,"

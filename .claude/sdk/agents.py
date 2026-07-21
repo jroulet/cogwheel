@@ -198,6 +198,13 @@ def _build_env() -> dict[str, str]:
         "HOME": os.environ.get("HOME", ""),
         "USER": os.environ.get("USER", ""),
         "CLAUDECODE": "",
+        # BUILDS ARE FAST — owner mandate (2026-07-21, stated three
+        # times): the slow test tiers NEVER run inside a build.  These
+        # gates are pinned EMPTY here so no in-build agent inherits or
+        # accidentally enables them; the slow sweeps are the driver's
+        # POST-BUILD parallel jobs (.claude/sdk/post_build_sweeps.sh).
+        "COGWHEEL_BRUTE_ACCURACY": "",
+        "COGWHEEL_STRICT_TIMING": "",
     }
     return env
 
@@ -290,18 +297,40 @@ class SerenaManager:
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
             return False
 
-    async def _wait_for_ready(self, startup_delay: float = 8.0):
-        """Wait for Serena SSE server to start.
+    async def _wait_for_ready(self, timeout: float = 180.0,
+                              settle: float = 3.0):
+        """Wait for the Serena SSE server to accept connections.
 
-        IMPORTANT: do NOT connect to the SSE endpoint before the agent does.
-        SSE resets project activation on each new client connection.
-        A fixed delay is the simplest approach that preserves activation.
+        IMPORTANT: do NOT open an SSE/HTTP session before the agent does —
+        SSE resets project activation on each new client connection. A bare
+        TCP connect (`_url_reachable`) sends no request and does not create
+        an MCP session, so it is activation-safe; uvicorn only accepts TCP
+        once the application is up, so TCP-accept is a faithful readiness
+        signal.
+
+        HISTORY (2026-07-20): this was a fixed 8 s sleep. On a loaded box
+        the uvx cold start (git fetch + pyright + LSP init) can exceed it;
+        the port then accepts nothing when the FIRST agent — always the
+        Architect — connects, and that session runs tool-less for its whole
+        life ('No such tool available' for every Serena tool). Three
+        consecutive builds planned blind this way, while warm-server
+        launches worked, masking the race as flakiness.
         """
-        await asyncio.sleep(startup_delay)
-        if self.process and self.process.poll() is not None:
-            raise RuntimeError(
-                f"Serena SSE server exited during startup (rc={self.process.returncode})"
-            )
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            if self.process and self.process.poll() is not None:
+                raise RuntimeError(
+                    f"Serena SSE server exited during startup "
+                    f"(rc={self.process.returncode})")
+            if await self._url_reachable(self.url):
+                break
+            if asyncio.get_event_loop().time() > deadline:
+                raise RuntimeError(
+                    f"Serena SSE server not accepting connections at "
+                    f"{self.url} after {timeout:.0f}s")
+            await asyncio.sleep(0.5)
+        # Small margin between socket-accept and full MCP readiness.
+        await asyncio.sleep(settle)
 
     def get_mcp_config(self) -> dict:
         """MCP server config dict for ClaudeAgentOptions."""
@@ -387,12 +416,26 @@ _SERENA_EDIT_NO_SHELL = _SERENA_READ + _SERENA_CODE_EDIT + [
 ]
 
 AGENT_TOOLS: dict[str, dict[str, list[str]]] = {
+    # Planning agents (architect/professor/simplifier) ALSO get the
+    # built-in read tools as a belt-and-braces fallback: their sessions
+    # are the FIRST to connect after a Serena SSE start, and a session
+    # whose MCP handshake fails at startup has no MCP tools for its
+    # whole life ("No such tool available"). Root-caused 2026-07-20:
+    # the readiness wait was a fixed 8 s sleep that a loaded-box uvx
+    # cold start can exceed (fixed in SerenaManager._wait_for_ready —
+    # TCP-accept poll), after three consecutive builds planned blind;
+    # warm-server launches worked, masking the race as flakiness.
+    # NOT a plan-mode/MCP interaction (disproven: the 8c-cont
+    # architect made successful serena calls in plan mode). Built-in
+    # Read/Glob/Grep are read-only and plan-mode-permitted, so this
+    # is additive and safe, and keeps planning functional under ANY
+    # future MCP-session failure.
     "architect": {
-        "serena": _SERENA_READ,
+        "serena": _SERENA_READ + _READ_TOOLS,
         "fallback": _READ_TOOLS + ["Agent"],
     },
     "professor": {
-        "serena": _SERENA_READ,
+        "serena": _SERENA_READ + _READ_TOOLS,
         "fallback": _READ_TOOLS,
     },
     "prof_review": {
@@ -401,7 +444,7 @@ AGENT_TOOLS: dict[str, dict[str, list[str]]] = {
         "fallback": _READ_TOOLS + ["Bash"],
     },
     "simplifier": {
-        "serena": _SERENA_READ,
+        "serena": _SERENA_READ + _READ_TOOLS,  # see plan-mode note above
         "fallback": _READ_TOOLS,
     },
     "coder": {

@@ -96,6 +96,7 @@ from __future__ import annotations
 
 import functools
 import itertools
+import os
 import pathlib
 import types
 import unittest
@@ -204,12 +205,13 @@ MASSSHEET_W_GRID = np.linspace(1.5, 15.0, 40)
 
 #: Max in-support seeded draws scanned to collect NAMED-refusal proposals
 #: for C6.  The prior box (gamma up to 0.45, lens mass up to 3500) overlaps
-#: the engine's ``operator.CancellationError`` band via source curvature, so
+#: a NAMED wave refusal (post-8d dominated by the Schwinger ceiling: any
+#: draw whose w grid crosses w = 60 refuses on its first such node), so
 #: such proposals are dense; this budget finds several well before exhausting.
 C6_SEARCH_BUDGET = 800
 
-#: Number of CancellationError-tripping proposals C6 pins (posterior -> -inf,
-#: raw path -> raise, and the mutation check).
+#: Number of named-refusal proposals C6 pins (posterior -> -inf, raw
+#: path -> raise, and the mutation check).
 C6_N_REFUSALS = 3
 
 #: Reference near-unlensed lens config for the C7 peak-vs-truth sanity: the
@@ -636,6 +638,10 @@ class ReflectionSymmetryTestCase(_LensSuiteTestCase):
                 self.n_compared += 1
 
 
+@unittest.skipUnless(
+    os.environ.get('COGWHEEL_BRUTE_ACCURACY'),
+    'brute-force accuracy tier: set COGWHEEL_BRUTE_ACCURACY=1 — exact '
+    'path ~90 ms/node makes lnlike_bruteforce ~138 s/call post-8d')
 class FoldUnfoldConsistencyTestCase(_LensSuiteTestCase):
     """C4b -- the folded posterior equals a hand-built quadrant sum.
 
@@ -870,6 +876,10 @@ def _massheet_twin(par_dic: dict) -> dict:
     return twin
 
 
+@unittest.skipUnless(
+    os.environ.get('COGWHEEL_BRUTE_ACCURACY'),
+    'brute-force accuracy tier: set COGWHEEL_BRUTE_ACCURACY=1 — exact '
+    'path ~90 ms/node makes lnlike_bruteforce ~138 s/call post-8d')
 class MassSheetDegeneracyTestCase(_LensSuiteTestCase):
     """C5 -- the eliminated ``kappa`` direction is an exact degeneracy.
 
@@ -984,18 +994,22 @@ class RefusalNetTestCase(_LensSuiteTestCase):
 
     @classmethod
     def _collect_cancellation_proposals(cls):
-        """Seeded in-support draws that trip `operator.CancellationError`.
+        """Seeded in-support draws that trip a NAMED wave refusal.
 
-        Returns a list of ``(sampled_vec, standard_par_dic)`` whose raw
-        likelihood raises `operator.CancellationError`.  Since Build 7b
-        the both-parity gamma box makes OTHER members of the named
-        refusal vocabulary reachable in support (`LensedBinningError`
-        for wide-delay saddle images; `SchwingerCertificationError`
-        near the gamma' -> 1 pinch; `LensDomainError` only on the
-        measure-zero boundary): the scan skips those draws rather than
-        letting them kill the fixture -- this class pins the
-        CancellationError branch of the net specifically (the other
-        branches are pinned by the saddle-likelihood suite).
+        Returns ``(sampled_vec, standard_par_dic, exc_class)`` triples
+        whose raw likelihood raises a named engine refusal.  Since the
+        Build-8d homogenization, `operator.CancellationError` is
+        UNREACHABLE from in-support draws (only the never-sampled
+        ``gamma' == 0`` legacy exit raises it): the reachable in-support
+        vocabulary is `SchwingerCertificationError` (dominant -- any
+        draw whose ``w`` grid crosses the ceiling refuses on its first
+        such node), `LensedBinningError` (wide-delay saddle images) and
+        `CancellationError` on the saddle-era paths where it survives.
+        This class pins the posterior net for whatever named refusals
+        the box actually reaches; the CancellationError-specific branch
+        keeps its falsification through the injection tests below
+        (reachability not required).  ``LensDomainError`` draws (the
+        measure-zero boundary) are skipped.
         """
         rng = np.random.default_rng(SEED + 6)
         found = []
@@ -1004,12 +1018,12 @@ class RefusalNetTestCase(_LensSuiteTestCase):
             standard = cls.prior.transform(*sampled)
             try:
                 cls.likelihood.lnlike(standard)
-            except CancellationError:
-                found.append((sampled, standard))
+            except (CancellationError, SchwingerCertificationError,
+                    LensedBinningError) as exc:
+                found.append((sampled, standard, type(exc)))
                 if len(found) >= C6_N_REFUSALS:
                     break
-            except (LensDomainError, SchwingerCertificationError,
-                    LensedBinningError):
+            except LensDomainError:
                 pass
         return found
 
@@ -1017,13 +1031,13 @@ class RefusalNetTestCase(_LensSuiteTestCase):
         """The seeded scan actually located in-support named refusals."""
         self.assertGreaterEqual(
             len(self.refusals), C6_N_REFUSALS,
-            f'only {len(self.refusals)} CancellationError proposals found in '
+            f'only {len(self.refusals)} named-refusal proposals found in '
             f'{C6_SEARCH_BUDGET} in-support draws; C6 cannot proceed')
         self.n_compared += 1
 
     def test_posterior_maps_refusal_to_neginf(self):
         """The posterior returns ``(-inf, dict, None)`` and never raises."""
-        for sampled, _standard in self.refusals:
+        for sampled, _standard, _exc in self.refusals:
             result = self.posterior.lnposterior_pardic_and_metadata(*sampled)
             with self.subTest(sampled=tuple(np.round(sampled, 4))):
                 self.assertEqual(len(result), 3)
@@ -1034,27 +1048,45 @@ class RefusalNetTestCase(_LensSuiteTestCase):
 
     def test_raw_likelihood_still_raises_named_refusal(self):
         """The raw likelihood on the same config raises the named refusal."""
-        for _sampled, standard in self.refusals:
+        for _sampled, standard, exc_class in self.refusals:
             with self.subTest(config='raw'):
-                with self.assertRaises((LensDomainError, CancellationError)):
+                with self.assertRaises(exc_class):
                     self.likelihood.lnlike(standard)
             self.n_compared += 1
 
     def test_mutation_narrowing_except_turns_neginf_red(self):
-        """Dropping ``CancellationError`` from the net makes (a) re-raise."""
+        """Dropping the collected refusal class from the net re-raises."""
         class _UnrelatedRefusal(Exception):
-            """Stand-in that does NOT match the real CancellationError."""
+            """Stand-in that does NOT match the real refusal class."""
 
-        sampled, _standard = self.refusals[0]
+        sampled, _standard, exc_class = self.refusals[0]
         # Control: the unmutated net swallows the refusal.
         self.assertTrue(np.isneginf(
             self.posterior.lnposterior_pardic_and_metadata(*sampled)[0]))
-        # Mutation: patch the module global the ``except`` tuple resolves so
-        # the real CancellationError is no longer caught.
-        with mock.patch.object(posterior_module, 'CancellationError',
+        # Mutation: patch the module global the ``except`` tuple resolves
+        # (the CLASS of the refusal this config actually raises) so it is
+        # no longer caught -- the falsification path must stay reachable
+        # for the vocabulary the box actually produces (F010).
+        with mock.patch.object(posterior_module, exc_class.__name__,
                                _UnrelatedRefusal):
-            with self.assertRaises(CancellationError):
+            with self.assertRaises(exc_class):
                 self.posterior.lnposterior_pardic_and_metadata(*sampled)
+        self.n_compared += 1
+
+    def test_cancellation_branch_is_also_caught(self):
+        """An injected `CancellationError` is likewise mapped to -inf.
+
+        In-support unreachable post-8d (only the ``gamma' == 0`` legacy
+        exit raises it), so it is injected at the likelihood boundary to
+        keep the net's CancellationError branch pinned.
+        """
+        sampled, _standard, _exc = self.refusals[0]
+        with mock.patch.object(
+                self.likelihood, 'lnlike_and_metadata',
+                side_effect=CancellationError('injected legacy refusal')):
+            result = self.posterior.lnposterior_pardic_and_metadata(*sampled)
+        self.assertTrue(np.isneginf(result[0]))
+        self.assertIsNone(result[2])
         self.n_compared += 1
 
     def test_domain_error_branch_is_also_caught(self):
@@ -1064,7 +1096,7 @@ class RefusalNetTestCase(_LensSuiteTestCase):
         box, so it is injected at the likelihood boundary (a synthetic raise)
         to exercise the OTHER named branch of the net's ``except`` clause.
         """
-        sampled, _standard = self.refusals[0]
+        sampled, _standard, _exc = self.refusals[0]
         with mock.patch.object(
                 self.likelihood, 'lnlike_and_metadata',
                 side_effect=LensDomainError('injected macro saddle')):
@@ -1074,6 +1106,10 @@ class RefusalNetTestCase(_LensSuiteTestCase):
         self.n_compared += 1
 
 
+@unittest.skipUnless(
+    os.environ.get('COGWHEEL_BRUTE_ACCURACY'),
+    'brute-force accuracy tier: set COGWHEEL_BRUTE_ACCURACY=1 — each C7 '
+    'draw rebuilds a full exact envelope (seconds/draw post-8d)')
 class SamplingSmokeTestCase(_LensSuiteTestCase):
     """C7 -- a seeded prior draw runs clean through the posterior.
 

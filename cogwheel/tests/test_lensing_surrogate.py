@@ -103,6 +103,12 @@ from cogwheel import data, waveform
 from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal.channels import reconstruct_from_envelope
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
+from cogwheel.lensing.chang_refsdal import operator as operator_module
+from cogwheel.lensing.chang_refsdal import _schwinger as schwinger_module
+from cogwheel.lensing.chang_refsdal.operator import (
+    F_op, F_op_grid, legacy_operator_oracle, CancellationError)
+from cogwheel.lensing.chang_refsdal._schwinger import (
+    SchwingerCertificationError, W_CEILING_SCHWINGER)
 from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate, _rotate_to_eigenframe)
@@ -234,6 +240,124 @@ plt.switch_backend('Agg')
 
 #: Repo root, for the HEAD side-by-side byte-identity load.
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+# --------------------------------------------------------------------------
+# Contract-flip witness (byte-pin RE-BASELINE, Build-8d WP1).
+# --------------------------------------------------------------------------
+# WP1 reroutes the SHEARED positive-parity wave branch (``gamma' > 0``) of
+# ``F_op`` / ``F_op_grid`` from the legacy operator-series contraction to
+# the exact 1D Schwinger-parameter quadrature, demoting the legacy path to
+# a test-only oracle (`operator.legacy_operator_oracle`) and to the
+# shear-free ``gamma' == 0`` point-lens exit.  Positive-parity F values
+# therefore CHANGE at the ~1e-14 level -- a BYTE flip, not a physics flip.
+#
+# The pre-WP1 crown byte-identity pin (`CrownByteIdentityTestCase`) loads
+# only HEAD's ``likelihood.py`` side-by-side; both it and the current
+# likelihood import the SAME working-tree ``operator.py``, so that pin does
+# NOT witness the operator-level value change (it still passes, correctly
+# certifying the Build-8a likelihood.py wiring is additive-neutral).  The
+# WP1 flip is therefore witnessed HERE, at the ``F_op`` level, by comparing
+# the NEW production Schwinger path against the OLD legacy contraction
+# (an independent algorithm) on the certified overlap.
+
+#: Max-normalized agreement tolerance for the NEW-vs-OLD contract flip.
+#: The flip is a byte change, not a physics change, so old and new must
+#: agree to ``1e-10`` in the max-normalized currency (measured peak
+#: ~3.2e-14 across the crown family -- four decades of headroom).  This
+#: mirrors the cross-suite OVERLAP-DOMAIN currency and is NOT loosened.
+FLIP_WITNESS_TOL = 1e-10
+
+#: Frequency sweep for the flip witness (a broadband overlap probe -- a
+#: broadband residual above ``FLIP_WITNESS_TOL`` signals a genuine
+#: dispatch / reduce-rotate-reconstruct error, not a diffraction-minimum
+#: artefact of a mis-chosen pointwise currency).
+FLIP_WITNESS_W = np.arange(0.1, 25.0 + 1e-9, 0.75)
+
+#: Minimum legacy-certified overlap nodes a witnessed config must supply
+#: (anti-vacuity WITHIN the test: a config whose legacy oracle refuses the
+#: entire sweep would witness nothing).  All FLIP_CONFIGS clear this.
+FLIP_MIN_OVERLAP = 8
+
+#: Positive-parity (``kappa = 0`` so ``gamma' = gamma``), sub-critical
+#: (``gamma < 1``) hosts on the certified overlap: the Professor A/crown
+#: and B/two-image fixtures plus the crown-family configs the byte-pin
+#: covered.  ``sub-critical`` (gamma = 0.35) exercises a PARTIAL overlap
+#: (its legacy oracle refuses above ``w ~ 17``), proving the witness
+#: adapts to the legacy-certified band rather than assuming full coverage.
+#: The four low-shear configs agree at ~5e-15; ``sub-critical`` is the
+#: tightest (measured ~4.8e-11) because its certified nodes crowd the
+#: legacy CANCELLATION EDGE, where the legacy oracle sits at its OWN
+#: ``1e-10`` certification floor -- so the residual there is the legacy
+#: oracle's error against the exact Schwinger truth, NOT a Schwinger
+#: defect, and it still clears the gate.
+FLIP_CONFIGS = (
+    ('A/crown', dict(gamma=0.10, y1=0.50, y2=0.00)),
+    ('B/two-image', dict(gamma=0.05, y1=0.30, y2=0.10)),
+    ('crown 2-image', dict(gamma=0.20, y1=0.65, y2=0.30)),
+    ('near-fold 4-image', dict(gamma=0.20, y1=0.08, y2=0.06)),
+    ('sub-critical', dict(gamma=0.35, y1=0.50, y2=0.30)),
+)
+
+#: Relative perturbation injected in the arithmetic self-falsification of
+#: the max-normalized metric (proves the gate's currency has teeth).
+FLIP_MUTATION_SCALE = 1e-6
+
+#: Positive-parity gamma' > 0 config driven PAST the Schwinger arithmetic
+#: ceiling (``w > W_CEILING_SCHWINGER = 60``): the NEW production path must
+#: refuse with a NAMED `SchwingerCertificationError`, never a silent nan
+#: or a legacy fallback.
+FLIP_REFUSAL_W = 68.0
+FLIP_REFUSAL_CONFIG = dict(gamma=0.20, y1=0.20, y2=0.00)
+
+#: Shear-free point lens (``gamma == 0`` exactly -> ``gamma' == 0``): the
+#: ONLY remaining production exit through the legacy contraction; the
+#: Schwinger integrand degenerates at eigenvalue coincidence so it must
+#: NOT be invoked here.
+FLIP_POINTLENS_W = np.arange(0.1, 4.0 + 1e-9, 0.5)
+FLIP_POINTLENS_CONFIG = dict(gamma=0.0, y1=0.30, y2=0.00)
+
+
+def _flip_witness_metrics(gamma: float, y1: float, y2: float,
+                          w_grid: np.ndarray) -> tuple | None:
+    """Max-normalized NEW-vs-OLD agreement on the legacy-certified overlap.
+
+    Collects, node by node, the frequencies where the legacy operator
+    oracle CERTIFIES (`operator.legacy_operator_oracle`), then evaluates
+    the NEW production Schwinger path (`F_op_grid`) on exactly that
+    overlap and reports the max-normalized real/imag residuals in the
+    cross-suite currency
+
+        ``metric = max_i |Re/Im(F_new - F_old)| / max(max_i |F_old|, 1e-15)``.
+
+    A pointwise-relative gate on ``|F|`` is deliberately AVOIDED (it is
+    ill-posed at diffraction minima); the denominator is the peak legacy
+    magnitude over the overlap.
+
+    Returns ``None`` if the legacy oracle refuses every node (no overlap),
+    otherwise ``(metric_re, metric_im, scale, w_overlap, f_new, f_old)``.
+    """
+    y = np.array([float(y1), float(y2)])
+    w_overlap: list[float] = []
+    f_old: list[complex] = []
+    for w_node in np.asarray(w_grid, dtype=float):
+        try:
+            legacy_value, *_ = legacy_operator_oracle(
+                np.array([float(w_node)]), y, float(gamma),
+                beta=0.0, kappa=0.0)
+        except CancellationError:
+            continue  # legacy refuses this node: outside the overlap
+        w_overlap.append(float(w_node))
+        f_old.append(complex(legacy_value[0]))
+    if not w_overlap:
+        return None
+    w_arr = np.asarray(w_overlap, dtype=float)
+    old_arr = np.asarray(f_old, dtype=complex)
+    new_arr, _orders, _converged = F_op_grid(
+        w_arr, y, float(gamma), beta=0.0, kappa=0.0)
+    scale = max(float(np.max(np.abs(old_arr))), 1e-15)
+    metric_re = float(np.max(np.abs(new_arr.real - old_arr.real))) / scale
+    metric_im = float(np.max(np.abs(new_arr.imag - old_arr.imag))) / scale
+    return metric_re, metric_im, scale, w_arr, new_arr, old_arr
 
 
 # ==========================================================================
@@ -970,6 +1094,260 @@ class CrownByteIdentityTestCase(SurrogateTestCase):
         self.assertNotEqual(lnl, np.nextafter(lnl, np.inf),
                             'a 1-ulp perturbation compares bit-equal -- the '
                             'byte-identity gate would assert nothing')
+
+class CrownContractFlipWitnessTestCase(SurrogateTestCase):
+    """Byte-pin RE-BASELINE (Build-8d WP1): the positive-parity ``F_op``
+    value change from the legacy operator-series contraction to the exact
+    Schwinger quadrature is a BYTE flip, not a PHYSICS flip.
+
+    `CrownByteIdentityTestCase` reloads only HEAD's ``likelihood.py`` and
+    so shares the working-tree ``operator.py`` -- it cannot see the WP1
+    operator-level change (and still correctly passes, certifying the
+    Build-8a likelihood wiring is additive-neutral).  This suite witnesses
+    the flip WHERE it happens, at ``F_op``: for each sheared positive-parity
+    host it certifies the NEW production Schwinger path against the OLD
+    legacy contraction (`operator.legacy_operator_oracle`, an INDEPENDENT
+    algorithm, F002) on the certified overlap, at ``1e-10`` in the
+    max-normalized currency.  The named-refusal, single-dispatch and
+    bit-reproducibility contracts are re-pinned against the NEW values.
+    """
+
+    def test_new_schwinger_agrees_with_legacy_max_normalized(self):
+        """Contract-flip witness: NEW Schwinger and OLD legacy agree to
+        ``FLIP_WITNESS_TOL`` in the max-normalized currency on every
+        positive-parity host -- the flip carries no physics."""
+        witness_rows = []
+        for label, cfg in FLIP_CONFIGS:
+            with self.subTest(config=label):
+                result = _flip_witness_metrics(
+                    cfg['gamma'], cfg['y1'], cfg['y2'], FLIP_WITNESS_W)
+                self.assertIsNotNone(
+                    result,
+                    f'{label}: legacy oracle refused the entire sweep -- '
+                    f'no certified overlap to witness the flip against')
+                metric_re, metric_im, scale, w_arr, _new, _old = result
+                self.assertGreaterEqual(
+                    w_arr.size, FLIP_MIN_OVERLAP,
+                    f'{label}: only {w_arr.size} legacy-certified overlap '
+                    f'nodes (need >= {FLIP_MIN_OVERLAP})')
+                witness_rows.append(
+                    (label, w_arr.size, scale, metric_re, metric_im))
+                self.n_checks += 1
+                self.assertLess(
+                    max(metric_re, metric_im), FLIP_WITNESS_TOL,
+                    f'{label}: NEW-vs-OLD disagreement '
+                    f'{max(metric_re, metric_im):.3e} exceeds the '
+                    f'{FLIP_WITNESS_TOL:.0e} byte-flip currency -- this is a '
+                    f'PHYSICS regression, not a byte change '
+                    f'(scale={scale:.4f}, overlap={w_arr.size} nodes)')
+        self._emit_witness_table(witness_rows)
+
+    @staticmethod
+    def _emit_witness_table(rows: list) -> None:
+        """Print the contract-flip witness table (visible under ``-v`` and
+        on failure): every ``|old-new|/scale`` entry is a byte flip below
+        ``FLIP_WITNESS_TOL``; an entry above it is a real physics change."""
+        header = (f"\n{'config':<20}{'overlap':>8}{'scale':>12}"
+                  f"{'metric_re':>14}{'metric_im':>14}")
+        lines = [header, '-' * len(header)]
+        for label, n_ov, scale, m_re, m_im in rows:
+            lines.append(f"{label:<20}{n_ov:>8}{scale:>12.4f}"
+                         f"{m_re:>14.3e}{m_im:>14.3e}")
+        print('\n'.join(lines))
+
+    def test_new_production_path_is_bit_reproducible(self):
+        """Cache-determinism / bit-reproducibility against the NEW values:
+        the Schwinger production path returns the SAME bits on repeat."""
+        for label, cfg in FLIP_CONFIGS:
+            with self.subTest(config=label):
+                y = np.array([cfg['y1'], cfg['y2']])
+                first, _o1, _c1 = F_op_grid(
+                    FLIP_WITNESS_W, y, cfg['gamma'], beta=0.0, kappa=0.0)
+                second, _o2, _c2 = F_op_grid(
+                    FLIP_WITNESS_W, y, cfg['gamma'], beta=0.0, kappa=0.0)
+                self.n_checks += 1
+                self.assertEqual(
+                    first.tobytes(), second.tobytes(),
+                    f'{label}: the Schwinger production path is not '
+                    f'bit-reproducible (max|diff|='
+                    f'{float(np.max(np.abs(first - second))):.3e})')
+
+    def test_sheared_positive_parity_routes_through_schwinger(self):
+        """Single-dispatch witness: a sheared positive-parity host
+        (``gamma' > 0``) is served by the Schwinger evaluator and NEVER
+        touches the legacy contraction."""
+        cfg = FLIP_CONFIGS[2][1]  # crown 2-image
+        y = np.array([cfg['y1'], cfg['y2']])
+        w_probe = np.arange(0.1, 8.0, 0.5)
+        schwinger_calls = self._count_calls(
+            schwinger_module, 'f_schwinger',
+            lambda: F_op_grid(w_probe, y, cfg['gamma'], beta=0.0, kappa=0.0),
+            also_spy=(operator_module, '_grid_certified'))
+        n_schwinger, n_legacy = schwinger_calls
+        self.n_checks += 1
+        self.assertEqual(
+            n_schwinger, w_probe.size,
+            'the Schwinger evaluator must serve every positive-parity node')
+        self.n_checks += 1
+        self.assertEqual(
+            n_legacy, 0,
+            'a sheared positive-parity host must NOT reach the legacy '
+            'operator contraction (that would re-open a parallel path)')
+
+    def test_shear_free_point_lens_routes_through_legacy(self):
+        """gamma' == 0 exception: the shear-free point lens is served by
+        the LEGACY contraction (the Schwinger integrand degenerates at
+        eigenvalue coincidence and must not be invoked)."""
+        cfg = FLIP_POINTLENS_CONFIG
+        y = np.array([cfg['y1'], cfg['y2']])
+        n_schwinger, n_legacy = self._count_calls(
+            schwinger_module, 'f_schwinger',
+            lambda: F_op_grid(FLIP_POINTLENS_W, y, cfg['gamma'],
+                              beta=0.0, kappa=0.0),
+            also_spy=(operator_module, '_grid_certified'))
+        self.n_checks += 1
+        self.assertEqual(
+            n_schwinger, 0,
+            'the Schwinger evaluator must NOT be invoked at gamma\' == 0')
+        self.n_checks += 1
+        self.assertGreater(
+            n_legacy, 0,
+            'the shear-free point lens must be served by the legacy path')
+
+    @staticmethod
+    def _count_calls(mod, attr, thunk, *, also_spy):
+        """Run ``thunk`` while spying two module attributes; return
+        ``(primary_calls, secondary_calls)``.  Patches the module ATTRIBUTE
+        the production callee resolves at call time (a Python-level
+        dispatch seam even though the target is njit-compiled)."""
+        counts = {'primary': 0, 'secondary': 0}
+        real_primary = getattr(mod, attr)
+        sec_mod, sec_attr = also_spy
+        real_secondary = getattr(sec_mod, sec_attr)
+
+        def spy_primary(*args, **kwargs):
+            counts['primary'] += 1
+            return real_primary(*args, **kwargs)
+
+        def spy_secondary(*args, **kwargs):
+            counts['secondary'] += 1
+            return real_secondary(*args, **kwargs)
+
+        with mock.patch.object(mod, attr, spy_primary), \
+                mock.patch.object(sec_mod, sec_attr, spy_secondary):
+            thunk()
+        return counts['primary'], counts['secondary']
+
+    def test_new_production_path_refuses_above_ceiling(self):
+        """Named-refusal contract against the NEW values: a positive-parity
+        ``gamma' > 0`` host above ``W_CEILING_SCHWINGER`` raises the named
+        `SchwingerCertificationError` -- never a silent nan, never a legacy
+        fallback."""
+        cfg = FLIP_REFUSAL_CONFIG
+        y = np.array([cfg['y1'], cfg['y2']])
+        self.assertGreater(FLIP_REFUSAL_W, W_CEILING_SCHWINGER,
+                           'the refusal probe must sit above the ceiling')
+        self.n_checks += 1
+        with self.assertRaises(SchwingerCertificationError):
+            F_op(FLIP_REFUSAL_W, y, cfg['gamma'], beta=0.0, kappa=0.0)
+
+    def test_flip_metric_currency_can_go_red(self):
+        """Self-falsification (arithmetic): perturbing the NEW value by
+        ``FLIP_MUTATION_SCALE`` of the scale drives the max-normalized
+        metric above the gate -- the currency is not vacuously green."""
+        cfg = FLIP_CONFIGS[2][1]  # crown 2-image
+        result = _flip_witness_metrics(
+            cfg['gamma'], cfg['y1'], cfg['y2'], FLIP_WITNESS_W)
+        self.assertIsNotNone(result, 'crown must supply a certified overlap')
+        _mre, _mim, scale, _w, new_arr, old_arr = result
+        perturbed = new_arr + FLIP_MUTATION_SCALE * scale
+        bad_metric = float(np.max(np.abs(perturbed.real - old_arr.real))) \
+            / scale
+        self.n_checks += 1
+        self.assertGreater(
+            bad_metric, FLIP_WITNESS_TOL,
+            'a scale-relative perturbation left the metric below the gate '
+            '-- the byte-flip currency would assert nothing')
+
+    def test_dispatch_mutation_flips_witness_red(self):
+        """F010 dispatch mutation: corrupting the Schwinger evaluator
+        through the module seam the production path resolves makes the
+        overlap witness go RED -- proving the flip witness genuinely
+        exercises the compiled Schwinger route (not a vacuous green)."""
+        cfg = FLIP_CONFIGS[2][1]  # crown 2-image
+        y = np.array([cfg['y1'], cfg['y2']])
+        real_f_schwinger = schwinger_module.f_schwinger
+
+        def corrupted_f_schwinger(*args, **kwargs):
+            # A sign/scale corruption in the reconstruct-fed value; well
+            # above 1e-10 but small enough to stay finite and certified.
+            return real_f_schwinger(*args, **kwargs) * (1.0 + 1e-4)
+
+        # Legacy overlap oracle (unmutated -- it holds its own reference to
+        # the real evaluator, so the mutation cannot leak into the oracle).
+        old_arr = []
+        w_overlap = []
+        for w_node in FLIP_WITNESS_W:
+            try:
+                value, *_ = legacy_operator_oracle(
+                    np.array([float(w_node)]), y, cfg['gamma'],
+                    beta=0.0, kappa=0.0)
+            except CancellationError:
+                continue
+            w_overlap.append(float(w_node))
+            old_arr.append(complex(value[0]))
+        w_arr = np.asarray(w_overlap)
+        old_arr = np.asarray(old_arr, dtype=complex)
+        with mock.patch.object(schwinger_module, 'f_schwinger',
+                               corrupted_f_schwinger):
+            mutated, _o, _c = F_op_grid(
+                w_arr, y, cfg['gamma'], beta=0.0, kappa=0.0)
+        scale = max(float(np.max(np.abs(old_arr))), 1e-15)
+        mutated_metric = float(np.max(np.abs(mutated - old_arr))) / scale
+        self.n_checks += 1
+        self.assertGreater(
+            mutated_metric, FLIP_WITNESS_TOL,
+            'a corrupted Schwinger evaluator left the witness green -- the '
+            'dispatch is not exercised through the compiled path (F010 '
+            'vacuous-green trap)')
+
+    def test_flip_witness_diagnostic_plot(self):
+        """Diagnostic overlay: Re/Im of both evaluators and the
+        max-normalized residual vs ``w`` for the crown config, saved to
+        ``output/``.  A residual spike localized at a ``|F|`` trough with a
+        small absolute value would flag a mis-chosen pointwise currency; a
+        broadband residual would flag a real dispatch error."""
+        cfg = FLIP_CONFIGS[2][1]  # crown 2-image
+        result = _flip_witness_metrics(
+            cfg['gamma'], cfg['y1'], cfg['y2'], FLIP_WITNESS_W)
+        self.assertIsNotNone(result, 'crown must supply a certified overlap')
+        _mre, _mim, scale, w_arr, new_arr, old_arr = result
+        residual = np.abs(new_arr - old_arr) / scale
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig, (ax_val, ax_res) = plt.subplots(2, 1, figsize=(7, 7),
+                                             sharex=True)
+        ax_val.plot(w_arr, new_arr.real, 'C0-', label='Re F (Schwinger)')
+        ax_val.plot(w_arr, old_arr.real, 'C0--', label='Re F (legacy)')
+        ax_val.plot(w_arr, new_arr.imag, 'C1-', label='Im F (Schwinger)')
+        ax_val.plot(w_arr, old_arr.imag, 'C1--', label='Im F (legacy)')
+        ax_val.set_ylabel('F')
+        ax_val.legend(fontsize=8)
+        ax_val.set_title('Crown contract-flip witness (Schwinger vs legacy)')
+        ax_res.semilogy(w_arr, np.maximum(residual, 1e-18), 'C3-')
+        ax_res.axhline(FLIP_WITNESS_TOL, color='k', ls=':',
+                       label=f'gate {FLIP_WITNESS_TOL:.0e}')
+        ax_res.set_xlabel('w')
+        ax_res.set_ylabel('max-normalized residual')
+        ax_res.legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'flip_witness_crown_schwinger_vs_legacy.png',
+                    dpi=110)
+        plt.close(fig)
+        self.n_checks += 1
+        self.assertTrue(
+            (OUTPUT_DIR / 'flip_witness_crown_schwinger_vs_legacy.png'
+             ).exists(),
+            'the diagnostic plot was not written')
 
 
 # ==========================================================================

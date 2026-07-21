@@ -97,7 +97,8 @@ from cogwheel.lensing.chang_refsdal import _schwinger, geometry, operator
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError, W_CEILING_SCHWINGER, f_schwinger)
 from cogwheel.lensing.chang_refsdal.operator import (
-    CancellationError, F_op, F_op_grid, _grid_certified)
+    CancellationError, F_op, F_op_grid, _grid_certified,
+    legacy_operator_oracle)
 
 #: Where the dispatch-accuracy diagnostic plot is written (the house
 #: convention: ``cogwheel/tests/output/<test>_<desc>.png``).
@@ -257,18 +258,47 @@ POSITIVE_PARITY_ACCEPTED = tuple(
 #: ``gamma_prime <= 0`` (``det A == 0`` or wrong sign) is a DOMAIN error.
 NONPOSITIVE_GAMMA_PRIME = (0.0, -0.5, -1.3)
 
-#: Certified positive-parity operator-path points (moderate shear, so
-#: the LEGACY contraction certifies and the WP2 fallback never fires).
-#: The complex values are BYTE-FROZEN from pre-build HEAD; the fallback
-#: dispatch must not perturb an already-certified answer.
+#: Positive-parity operator-path points (moderate shear, gamma' = 0.2 > 0).
+#: RE-BASELINE (Build 8d, F017 contract-flip discipline): these configs are
+#: now served by the exact Schwinger evaluator (order_used == 0), NOT the
+#: legacy operator series.  `CERTIFIED_BITFREEZE` holds the NEW Schwinger
+#: production values (byte-frozen); `LEGACY_BITFREEZE` holds the OLD legacy
+#: literals (reproduced bit-for-bit by `operator.legacy_operator_oracle`).
+#: The re-baseline carries a WITNESS: NEW and OLD agree to
+#: `BITFREEZE_WITNESS_TOL` in the max-normalized currency -- the flip is a
+#: byte/contract change, not a physics change (measured max-normalized
+#: residual 5.4e-15 real / 1.4e-15 imag over this grid, scale 1.615).
 CERTIFIED_BITFREEZE_GAMMA = 0.2
 CERTIFIED_BITFREEZE_Y = (0.4, 0.3)
+#: NEW (Build 8d) Schwinger production values.
 CERTIFIED_BITFREEZE = {
+    3.0: complex(1.0977672009048085, 0.8231261499570348),
+    5.0: complex(0.23148446460210984, -0.5479573270850424),
+    8.0: complex(1.6103326490603147, -0.12532868210912673),
+    10.0: complex(0.3668222757423122, -0.22370837989397843),
+}
+#: OLD (pre-8d) legacy operator-series values, kept for the contract-flip
+#: witness only.  `operator.legacy_operator_oracle` reproduces these
+#: bit-for-bit (it IS the retired contraction), so the witness compares the
+#: production Schwinger path against an INDEPENDENT algorithm (F002).
+LEGACY_BITFREEZE = {
     3.0: complex(1.0977672009048116, 0.8231261499570363),
     5.0: complex(0.23148446460211186, -0.5479573270850447),
     8.0: complex(1.610332649060306, -0.12532868210912573),
     10.0: complex(0.36682227574231296, -0.2237083798939786),
 }
+#: Max-normalized byte-flip currency (the F005/7a/8d owner-set 1e-10
+#: standard): |F_new - F_old| / max(max|F_old|, 1e-15) below this proves
+#: the re-baseline moved only bytes, not physics.
+BITFREEZE_WITNESS_TOL = 1e-10
+
+#: Companion pin: the shear-free ``gamma' == 0`` point lens (measure-zero
+#: in the sampled prior, but reachable) that Schwinger CANNOT represent, so
+#: it stays on the legacy operator series (order_used > 0).  This keeps a
+#: reachable pin on the sole remaining legacy production exit (Build 8d).
+POINTLENS_BITFREEZE_GAMMA = 0.0
+POINTLENS_BITFREEZE_Y = (0.3, 0.0)
+POINTLENS_BITFREEZE_WS = (1.0, 2.0, 3.0, 5.0)
 
 #: Above-ceiling refusal fixtures: positive-parity strong-shear points
 #: the legacy path refuses, evaluated at ``w > W_CEILING_SCHWINGER`` so
@@ -1084,12 +1114,55 @@ class GuardRelaxationTestCase(SchwingerTestCase):
 
 class PositiveParityBitFreezeTestCase(SchwingerTestCase):
     """
-    A moderate-shear positive-parity config the LEGACY operator path
-    certifies WITHOUT the WP2 fallback firing: the returned values must
-    equal the pre-build literals to full float64 precision, proving the
-    added fallback dispatch (a try/except around `_grid_certified`) did
-    not perturb an already-certified answer.
+    RE-BASELINE (Build 8d, F017): the moderate-shear positive-parity
+    config (``gamma' = 0.2 > 0``) that the LEGACY operator series used to
+    certify is now served by the exact Schwinger evaluator on the wave
+    branch (``w <= W_CEILING_SCHWINGER``), so its diagnostics report
+    ``order_used == 0``.  The frozen literals are re-baselined to the NEW
+    Schwinger production values; each carries a contract-flip WITNESS --
+    the NEW Schwinger value and the OLD legacy value (reproduced
+    bit-for-bit by `legacy_operator_oracle`, an INDEPENDENT algorithm,
+    F002) agree to `BITFREEZE_WITNESS_TOL` in the max-normalized currency,
+    proving the flip moved bytes, not physics.  A companion pin keeps the
+    shear-free ``gamma' == 0`` point lens on the legacy series
+    (``order_used > 0``), the sole remaining legacy production exit below
+    the ceiling.
     """
+
+    def test_new_schwinger_agrees_with_old_legacy_max_normalized(self):
+        """Contract-flip WITNESS: the NEW Schwinger production values and
+        the OLD legacy literals agree to `BITFREEZE_WITNESS_TOL` in the
+        max-normalized currency -- the re-baseline is a byte flip, not a
+        physics change."""
+        w_array = np.asarray(sorted(CERTIFIED_BITFREEZE))
+        new_arr, _orders, _conv = F_op_grid(
+            w_array, np.asarray(CERTIFIED_BITFREEZE_Y),
+            CERTIFIED_BITFREEZE_GAMMA)
+        old_arr = np.asarray(
+            [LEGACY_BITFREEZE[float(w)] for w in w_array], dtype=complex)
+        # `legacy_operator_oracle` (the retired contraction) must reproduce
+        # the OLD literals bit-for-bit, else the witness baseline has moved.
+        oracle_arr, *_ = legacy_operator_oracle(
+            w_array, np.asarray(CERTIFIED_BITFREEZE_Y),
+            CERTIFIED_BITFREEZE_GAMMA)
+        self.n_checks += 1
+        self.assertEqual(
+            np.asarray(oracle_arr, dtype=complex).tobytes(),
+            old_arr.tobytes(),
+            'legacy_operator_oracle no longer reproduces the OLD literals '
+            'bit-for-bit; the witness baseline has moved')
+        scale = max(float(np.max(np.abs(old_arr))), 1e-15)
+        metric_re = float(
+            np.max(np.abs(new_arr.real - old_arr.real))) / scale
+        metric_im = float(
+            np.max(np.abs(new_arr.imag - old_arr.imag))) / scale
+        self.n_checks += 1
+        self.assertLess(
+            max(metric_re, metric_im), BITFREEZE_WITNESS_TOL,
+            f'NEW-vs-OLD disagreement {max(metric_re, metric_im):.3e} '
+            f'exceeds the {BITFREEZE_WITNESS_TOL:.0e} byte-flip currency '
+            f'(scale={scale:.4f}) -- this is a PHYSICS regression, not a '
+            'byte re-baseline')
 
     def test_scalar_fop_matches_frozen_literals(self):
         for w, frozen in CERTIFIED_BITFREEZE.items():
@@ -1100,18 +1173,18 @@ class PositiveParityBitFreezeTestCase(SchwingerTestCase):
                 self.n_checks += 1
                 self.assertEqual(
                     value, frozen,
-                    f'certified F_op at w={w} drifted from the frozen '
-                    f'literal {frozen!r}; the fallback dispatch perturbed '
-                    'the certified path')
-                # order_used > 0 proves the CERTIFIED operator series ran,
-                # not the fallback (which reports order_used = 0).
+                    f'F_op at w={w} drifted from the re-baselined Schwinger '
+                    f'literal {frozen!r}')
+                # order_used == 0 proves the SCHWINGER evaluator served this
+                # sheared positive-parity node (the legacy series would
+                # report order_used > 0).
                 self.n_checks += 1
-                self.assertGreater(
+                self.assertEqual(
                     diagnostics.order_used, 0,
-                    f'F_op at w={w} reports order_used=0, i.e. the WP2 '
-                    'fallback fired where the legacy path was expected to '
-                    'certify; the bit-freeze is not testing the certified '
-                    'path')
+                    f'F_op at w={w} reports '
+                    f'order_used={diagnostics.order_used} -- a sheared '
+                    'positive-parity node must be Schwinger-served '
+                    '(order_used == 0) since Build 8d')
 
     def test_grid_fop_matches_frozen_literals(self):
         w_array = np.asarray(sorted(CERTIFIED_BITFREEZE))
@@ -1124,14 +1197,35 @@ class PositiveParityBitFreezeTestCase(SchwingerTestCase):
                 self.assertEqual(
                     complex(values[index]), CERTIFIED_BITFREEZE[float(w)],
                     f'certified F_op_grid at w={w} drifted from the '
-                    'frozen literal')
+                    're-baselined Schwinger literal')
                 self.n_checks += 1
-                self.assertGreater(
+                self.assertEqual(
                     int(orders[index]), 0,
-                    f'F_op_grid node w={w} reports order 0 (fallback '
-                    'fired) where the certified path was expected')
+                    f'F_op_grid node w={w} reports order {int(orders[index])}'
+                    ' -- a sheared positive-parity node must be '
+                    'Schwinger-served (order 0) since Build 8d')
                 self.n_checks += 1
                 self.assertTrue(bool(converged[index]))
+
+    def test_shear_free_point_lens_stays_on_legacy_series(self):
+        """Companion pin: the shear-free ``gamma' == 0`` point lens (which
+        the 1D Schwinger representation cannot represent) is served by the
+        legacy operator series -- ``order_used > 0``, converged -- the sole
+        remaining legacy production exit below the ceiling (Build 8d)."""
+        y = np.asarray(POINTLENS_BITFREEZE_Y)
+        for w in POINTLENS_BITFREEZE_WS:
+            with self.subTest(w=w):
+                value, diagnostics = F_op(w, y, POINTLENS_BITFREEZE_GAMMA)
+                self.n_checks += 1
+                self.assertGreater(
+                    diagnostics.order_used, 0,
+                    f"gamma'==0 point lens at w={w} reports order_used=0 -- "
+                    'the shear-free config must stay on the legacy operator '
+                    'series (Schwinger cannot represent it)')
+                self.n_checks += 1
+                self.assertTrue(bool(diagnostics.converged))
+                self.n_checks += 1
+                self.assertTrue(np.isfinite(value))
 
 
 class RefusalAboveCeilingTestCase(SchwingerTestCase):

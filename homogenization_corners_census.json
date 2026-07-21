@@ -1,0 +1,61 @@
+{
+  "config": {
+    "n_samples": 2000,
+    "seed": 0,
+    "f_min_hz": 20.0,
+    "f_max_hz": 1024.0,
+    "n_freq": 128
+  },
+  "n_samples": 2000,
+  "gamma_prime_zero": {
+    "count": 0,
+    "fraction": 0.0,
+    "note": "measure-zero for gamma ~ U(0, 1.6); expected ~0"
+  },
+  "gamma_prime_near_zero": {
+    "threshold": 0.01,
+    "count": 16,
+    "fraction": 0.008,
+    "analytic_expectation": 0.0062499999999999995
+  },
+  "unresolved_high_w_refusal_corner": {
+    "count": 493,
+    "fraction_of_prior_box": 0.2465,
+    "wilson95_of_prior_box": [
+      0.2281096206139167,
+      0.2658623580095434
+    ],
+    "fraction_of_classifiable": 0.2465,
+    "wilson95_of_classifiable": [
+      0.2281096206139167,
+      0.2658623580095434
+    ],
+    "definition": "any frequency node with w > 60.0 that is not geometric-eligible"
+  },
+  "engine_refused": {
+    "count": 0,
+    "fraction": 0.0,
+    "note": "geometry refusals (macro-matrix parity boundary, Type III, or F012 near-axial census) preceding wave/geometric dispatch"
+  },
+  "node_classification_totals": {
+    "served_by_schwinger": 233167,
+    "served_by_geometric": 7191,
+    "named_refusal": 15642,
+    "n_nodes_per_config": 128,
+    "note": "the schwinger/geometric split mirrors production operator.select_branch exactly: the positive-parity geometric gate (resolved AND L > L_MAX) is w-independent, so strongly-cancelling resolved nodes below w = 60.0 count as served_by_geometric; the saddle geometric gate additionally requires the node above the Schwinger ceiling."
+  },
+  "w_range": {
+    "max_w_seen": 443.4514866351522,
+    "engine_ceiling": 500.0,
+    "n_configs_exceeding_engine_ceiling": 0
+  },
+  "gamma_prime_cross_check": {
+    "max_abs_diff_engine_vs_analytic": 0.0,
+    "note": "engine mass-sheet map gamma_prime vs analytic gamma/(1-kappa); should agree to ~machine precision"
+  },
+  "thresholds": {
+    "w_ceiling_schwinger": 60.0,
+    "rho_end": 4.0,
+    "l_max": 48
+  }
+}

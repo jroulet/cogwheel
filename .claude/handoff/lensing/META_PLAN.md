@@ -2323,3 +2323,182 @@ descriptions, binding bars 0.05/0.1/1.5, both falsifiables, F010
 mutation, theta-wrap/arc-projection traps. HARD PRECONDITION of the
 driver commit gate: this suite green. Build proceeding past
 Inspector: PASS into close-out phases.
+
+## 2026-07-20 — BUILD 8C COMMITTED (c4312a6) — surrogate program milestone
+
+Gate: 463 collected (precheck clean), 450p+1xf parallel 16:05 + 10p/
+1skip serial timing 53s = fully green. Registration verified live
+(pipeline_graph list/trace: registry_path=yes, 8 real consumers).
+Census tests: driver-commissioned dev delivered 27 green (tiers
+0.0148/0.0008/0.0163 vs 0.05/0.1/1.5; falsifiables at F018 bars;
+census-tool bugs found: NONE). #21 binning-floor line implemented +
+smoked (dependency-injected, delta vs delta/4). F018 written. SPEC
+0.14.0; DATA_CONTRACTS 0.1.0. No doc-sync trigger post-commit.
+
+SDK PROVING RUN VERDICT (fixes 1-8): graph injection unverified-by-
+architect (tool failure) but registration flowed through WP-REG;
+stale-file warning FIRED correctly; ESCALATION channel used twice
+(both legitimate); write-ownership + sharding present; retry not
+exercised (no infra deaths). NEW port items: 9 (coder continuation),
+10 (decision-wait monitor markers + dead-man's-switch idiom, cli.py
+fixed here), 11 (revision loops cannot re-enter test phase). Next:
+8d homogenization brief; SDK port package after 8d? per owner "after
+8c proving" — assemble port checklist consolidation at 8d planning.
+
+## 2026-07-20 — 8d pre-brief probe: the Schwinger w-ceiling is an arithmetic wall
+
+Measured (ceiling patched to expose the true wall): N-vs-2N
+certification survives at w=55/60 (both configs), is config-dependent
+at w=64 (the 10-digit margin boundary exactly as documented: 31.9 dd
+digits - 0.341*w), and refuses universally by w=68. The contract
+held — refusals, never values. Consequences for the 8d brief:
+- The w push CANNOT come from the dd Schwinger quadrature (more nodes
+  don't help; only precision does). Quad-double (~63 digits) would
+  reach w ~ 155 at ~4x node cost — training-time-only cost once the
+  surrogate serves production. This is an OWNER-DECISION option, not
+  8d default scope.
+- 8d w-range scope = ROUTING: resolved high-w via the geometric
+  branch (engine ceiling 500), unresolved high-w near-caustic stays a
+  named refusal for 8e's uniform patch (scope fence).
+- Warm per-point cost at the ceiling: ~300-450 ms (loaded box, cert
+  pair included) — reinforces surrogate-as-production-layer.
+
+## 2026-07-20 — OWNER RULINGS: high-w = geometric optics; prior bounds as args
+
+1. Owner physics point, confirmed and encoded: the bulk high-w regime
+   IS geometric optics (engine-certified to w<=500); the exact-
+   quadrature dd wall only matters in the near-caustic unresolved
+   sliver, which SHRINKS with w — 8d widens geometric coverage
+   (headroom audit), 8d WP3 measures the sliver fraction, 8e serves
+   it via uniform asymptotics. Quad-double stays parked unless the
+   measured sliver is non-negligible (likely retires it).
+2. Design ruling (todo.d/likelihood_prior-bounds-instantiation.md):
+   prior bounds = constructor args with defaults; surrogate box =
+   coverage not constraint; explicit cheap-first serving ladder
+   outside the box (surrogate -> geometric -> 8e uniform -> exact ->
+   named refusal); census reports fractions vs instantiated bounds;
+   box widenings (incl. relaxing w<=58 conditioning post-8d/8e)
+   decided on those numbers. Lands with/after 8e, before the
+   full-box training run.
+
+## 2026-07-20 — CORRECTION (owner-caught): blind-architect root cause revised
+
+Owner: "not true... I have seen innumerable cases of the architect
+using serena tools [in plan mode]." CORRECT — my plan-mode-blocks-MCP
+claim is DISPROVEN by our own logs (the 8c-cont architect made
+mcp__serena__read_file calls; its only failures were /tmp paths,
+which is Serena's by-design project-root scoping). REAL root cause:
+SerenaManager._wait_for_ready was a FIXED 8 s SLEEP (deliberately not
+probing — SSE connects reset project activation); a loaded-box uvx
+cold start exceeds it; the FIRST connector (always the architect)
+then binds a session whose MCP handshake fails and stays tool-less
+for life. Warm-server launches (8c-cont "Using existing Serena SSE")
+skip the race — matching every observation, including the owner's.
+FIXES: (a) _wait_for_ready now POLLS TCP-accept via the existing
+_url_reachable (bare TCP connect = activation-safe; uvicorn accepts
+only when up) with 180 s cap + 3 s settle + process-death check;
+(b) the AGENT_TOOLS built-in-read addition STANDS as belt-and-braces
+(re-commented with the correct cause). PORT ITEM 12 REVISED: port the
+readiness poll + allowlist belt to the gw repo (its hardcoded-8322
+SerenaManager has the same fixed-sleep race). Effective next build
+(8e); 8d already past planning.
+
+## 2026-07-20/21 — 8d CRITICAL driver catch: the two ceilings are different variables
+
+The WP3 corner census (driver smoke, 2000 draws) exposed a design
+error in the approved 8d plan that I co-signed: ~25% of prior draws
+carry w > 60 non-geometric wave nodes (max w seen 443; the prior
+bounds the PRODUCT w*sqrt(s) <= 58, not w). Pre-8d those nodes were
+dispatched to the LEGACY series, whose ceiling is the product (dd
+channel L = w*sqrt(s), F001/F005) — a DIFFERENT VARIABLE from
+Schwinger's y-independent w <= 60 (L_S = pi*w/4, F011/F013). The
+plan's WP1-as-delivered routed ALL gamma'>0 positive nodes to
+Schwinger → wholesale disposition change of that 25% corner
+(unconditional refusals where the legacy series had certified).
+Professor Q2(b) ("Schwinger-refuses => production refuses") was wrong
+for that band and I approved it — the pin verification checked
+forward coverage, not the reverse direction. The CENSUS caught it
+pre-commit: this is why WP3 existed.
+
+DRIVER FIX (in tree, smoked green): _positive_parity_grid is now
+PER-BAND — gamma'>0 & w <= 60 -> Schwinger (homogenized with the
+saddle arm); gamma'>0 & w > 60 -> legacy series under its own product
+ceiling and CancellationError semantics; gamma'==0 -> legacy any w.
+High band verified BIT-IDENTICAL to legacy_operator_oracle (pre-8d
+equivalence: 8d is now a PURE homogenization, zero coverage change
+either way). Nuance (measured): the legacy series ALSO refuses some
+high-w nodes (truncation, e.g. w=100 gamma'=0.2 tail 2.5e-5), so the
+25% corner is legacy-DISPATCHED, not legacy-guaranteed — census
+relabeled (unresolved_high_w_legacy_corner, upper bound on refusals;
+true refused sub-fraction = 8e scoping census, per-node evaluation).
+Docstrings (module, _positive_parity_grid, F_op, F_op_grid, oracle
+alias) rewritten to the per-band truth. Re-baseline test dev amended
+mid-flight (above-ceiling expectations stay pre-8d). FINDINGS F019
+to write at close. The 8e brief inherits: the corner target is
+legacy-truncation-refused nodes, not all w>60 nodes.
+
+
+## 2026-07-21 — OWNER RULING EXECUTED: per-band reverted; pure homogenization restored
+
+Owner: the corner belongs to 8e; do not lengthen 8d or resurrect the
+legacy series ('why are you even talking about the legacy series').
+The decisive point I missed: sampling is PARKED (ruling A) — nothing
+production evaluates the corner between 8d and 8e, so interim named
+refusals cost zero; pre-8d coverage parity was a non-goal I invented.
+EXECUTION (serena MCP died mid-revert — the crashed 8d orchestrator
+stopped the shared SSE server at 22:42:56 and my session client
+followed; revert completed via an exact-needle python script through
+run_py.sh, 8 operator.py edits + 4 census edits, each asserted
+unique, ast-verified): operator.py restored to WP1 verbatim
+(gamma>0 -> Schwinger any w, above-ceiling unconditional
+SchwingerCertificationError; gamma==0 legacy; oracle alias test-only);
+census keeps ONLY the Inspector select_branch gate fix, labels
+restored to named_refusal / unresolved_high_w_refusal_corner with the
+8e ownership named in the definition. Contract smoke green (3/3).
+Corner-service measurement probes ABANDONED (moot). Test dev holds
+the original-brief contract (final amendment sent). DRIVER LESSONS
+(standing): (1) weigh conservatism against PROGRAM STATE, parked vs
+live; (2) design-scale changes go to the owner BEFORE the tree.
+NOTE: serena is DOWN (owner: /mcp reconnect serena when convenient);
+driver file ops routed through run_py.sh scripts meanwhile.
+
+
+## 2026-07-21 — OWNER-CAUGHT ROOT CAUSE: spec inlining, killed at the root
+
+Owner: the gw builds never inline entire files into prompts — wtf.
+Confirmed: _pre_read_specs inlined FULL spec-file contents into every
+agent system prompt since the port baseline (015a6df); harmless at
+gw-era spec sizes, fatal at cogwheel-era sizes (~103 KB > the 128 KiB
+per-argv kernel limit => the 8d revision-coder death; plus ~25k
+wasted tokens per agent spawn). FIX: _pre_read_specs now emits a
+346-char INDEX (path, size, first heading) + the mandatory-read
+instruction; agents read the files with their own tools (viable since
+the plan-mode read-tools + serena readiness fixes). Task-file
+pre-read (the brief, ~6 KB) unchanged. PORT ITEM 13 REVISED: the
+root fix is DE-INLINING (port this); stdin-passing stays as a note,
+not the fix. Effective 8e.
+
+
+## 2026-07-21 — ADDENDUM: pointer-not-content is now the prompt rule
+
+Owner rule: give the filename + what part to look at; never inline
+content. Applied to ALL injection paths: _pre_read_specs (103 KB ->
+346-char index), _pre_read_task_files (content blocks -> pointer
+lines with first-line hints), _pre_read_pipeline_graph KEPT as-is
+(4 KB-capped task-scoped digest for the plan-mode Architect, which
+has no shell to regenerate it; underlying files readable via its
+read tools). PORT ITEM 13 covers all three. Rule of thumb for any
+future injection: pointers + reading directions; a digest only when
+the recipient provably cannot obtain the data itself, and always
+hard-capped.
+
+
+## 2026-07-21 — SDK PORT CHECKLIST item 14: monitored-not-unattended
+
+Owner: general rule worth porting. Port to the gw repo CLAUDE.md
+verbatim (terse form, no narrative): every long run emits a countable
+progress stream (pytest -v teed to a log; Monitor reports percent/
+rate/projected finish); zero progress across two beats = investigate
+with py-spy, never wait; completion notifications only cover success
+— a run without a progress monitor is unattended, not monitored.
+Applies to builds, gates, sweeps, and driver probes alike.

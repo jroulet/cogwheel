@@ -63,6 +63,7 @@ import numpy as np
 
 from cogwheel.lensing.chang_refsdal import operator, geometry
 from cogwheel.lensing.chang_refsdal import _hyp1f1
+from cogwheel.lensing.chang_refsdal import _schwinger
 from cogwheel.lensing.chang_refsdal import channels
 
 
@@ -401,6 +402,17 @@ class OperatorOracleTestCase(OperatorTestCase):
         The recorded ``cancellation_ratio`` equals an independent
         mpmath ``max_partial_term/|total|`` -- it is the MEASURED
         summation quantity, not a heuristic.
+
+        RE-TARGET (Build 8d): since homogenization the sheared
+        positive-parity wave band (``w <= 60``) is served by the exact
+        Schwinger evaluator, whose diagnostics report
+        ``cancellation_ratio == 0.0`` (it has no operator-series
+        summation to measure).  The operator-series cancellation ratio
+        lives on the LEGACY contraction, now demoted to the test-only
+        `operator.legacy_operator_oracle`; the diagnostic is therefore
+        exercised there against the SAME independent mpmath oracle at the
+        SAME 1e-3 tolerance -- the physics gate is unchanged, only the
+        producing path moved.
         """
         for name, y, gamma, beta, kappa, w in (
                 ('two-image', np.array([0.55, 0.0]), PAPER_GAMMA,
@@ -408,16 +420,18 @@ class OperatorOracleTestCase(OperatorTestCase):
                 ('large-shear', np.array([0.20, 0.15]), 0.40, 0.0, 0.0,
                  40.0)):
             with self.subTest(config=name):
-                _, diag = operator.F_op(w, y, gamma, beta=beta,
-                                        kappa=kappa,
-                                        max_order=FOP_MAX_ORDER)
+                (_values, _orders, converged, _tails,
+                 cancellation_ratios) = operator.legacy_operator_oracle(
+                     np.array([w]), y, gamma, beta=beta, kappa=kappa,
+                     max_order=FOP_MAX_ORDER)
+                measured = float(cancellation_ratios[0])
                 reference = _oracle_cancellation_ratio(
                     w, y, gamma, beta=beta, kappa=kappa)
+                self.assertTrue(bool(converged[0]))
                 self.assertAlmostEqual(
-                    diag.cancellation_ratio / reference, 1.0, delta=1e-3,
-                    msg=f'{name}: reported ratio '
-                    f'{diag.cancellation_ratio:.4e} vs independent '
-                    f'{reference:.4e}')
+                    measured / reference, 1.0, delta=1e-3,
+                    msg=f'{name}: reported ratio {measured:.4e} vs '
+                    f'independent {reference:.4e}')
                 self.n_checks += 1
 
     def test_raises_named_error_above_w_ceiling(self):
@@ -425,10 +439,18 @@ class OperatorOracleTestCase(OperatorTestCase):
         Above ``W_MAX_CERTIFIED`` the kernel's named
         `HypergeometricDomainError` propagates rather than a silently
         wrong number being returned.
+
+        RE-TARGET (Build 8d): the kernel wave path is reached only on
+        the shear-free ``gamma' == 0`` legacy exit now (a sheared
+        ``gamma' > 0`` host is served by Schwinger, which refuses above
+        its OWN ceiling with `SchwingerCertificationError` -- pinned by
+        `test_sheared_host_above_ceiling_refuses_schwinger`).  So the
+        kernel-ceiling contract is exercised at ``gamma = 0.0``, the sole
+        remaining path that consumes the 1F1 kernel.
         """
         with self.assertRaises(_hyp1f1.HypergeometricDomainError):
             operator.F_op(_hyp1f1.W_MAX_CERTIFIED + 100.0,
-                          np.array([0.05, 0.0]), 0.1)
+                          np.array([0.05, 0.0]), 0.0)
         self.n_checks += 1
 
     def test_raises_named_error_above_cancellation_ceiling(self):
@@ -436,11 +458,37 @@ class OperatorOracleTestCase(OperatorTestCase):
         Above the kernel's ``w*sqrt(s) = DD_PRODUCT_CEILING`` ceiling the
         named `HypergeometricDomainError` propagates.  Here ``y=(1,0)``,
         ``kappa=0`` gives ``w*sqrt(s) = w = 70 > 60``.
+
+        RE-TARGET (Build 8d): as for the ``w`` ceiling above, the 1F1
+        kernel is consumed only on the shear-free ``gamma' == 0`` legacy
+        exit now, so the product-ceiling contract is pinned at
+        ``gamma = 0.0`` (a sheared host at this ``w`` is Schwinger-served
+        and refuses with `SchwingerCertificationError`).
         """
         with self.assertRaises(_hyp1f1.HypergeometricDomainError):
             operator.F_op(_hyp1f1.DD_PRODUCT_CEILING + 10.0,
-                          np.array([1.0, 0.0]), 0.1)
+                          np.array([1.0, 0.0]), 0.0)
         self.n_checks += 1
+
+    def test_sheared_host_above_ceiling_refuses_schwinger(self):
+        """
+        NEW-contract pin (Build 8d homogenization): a sheared
+        positive-parity host (``gamma' > 0``) above the Schwinger ceiling
+        (``w > _schwinger.W_CEILING_SCHWINGER``) is served by the exact
+        1D Schwinger evaluator, which refuses by name with
+        `SchwingerCertificationError` -- unconditionally, with NO legacy
+        fallback (the w > 60 non-geometric corner refuses by name until
+        Build 8e serves it).  This replaces the old expectation that the
+        1F1 kernel error propagates here; the kernel is no longer reached
+        for a sheared host.
+        """
+        w_above = _schwinger.W_CEILING_SCHWINGER + 10.0
+        for y in (np.array([0.05, 0.0]), np.array([1.0, 0.0])):
+            with self.subTest(y=tuple(y)):
+                with self.assertRaises(
+                        _schwinger.SchwingerCertificationError):
+                    operator.F_op(w_above, y, 0.1)
+                self.n_checks += 1
 
     def _plot_rel_vs_l(self, rel_by_l):
         if not _HAVE_MPL or not rel_by_l:
@@ -567,10 +615,20 @@ class GeometricOpticsSlopeTestCase(OperatorTestCase):
 class ContractionCertificationTestCase(OperatorTestCase):
     """
     FINDINGS F005 closure gate: across the cancellation band
-    ``L in [24, 48]`` every ``F_op`` call is EITHER finite and
-    oracle-accurate to `RTOL_GATE` OR a NAMED
+    ``L in [24, 48]`` every LEGACY-CONTRACTION evaluation is EITHER
+    finite and oracle-accurate to `RTOL_GATE` OR a NAMED
     `operator.CancellationError` -- never a silent ``nan`` and never a
     finite-but-wrong value.
+
+    RE-TARGET (Build 8d homogenization): the F005 certify-XOR-refuse
+    contract is a property of the legacy dd/1F1 CONTRACTION, which this
+    build demoted to the test-only oracle `operator.legacy_operator_oracle`
+    (production now serves this sheared positive-parity host through the
+    exact Schwinger evaluator, which certifies-or-refuses by its own
+    `SchwingerCertificationError`).  These gates therefore exercise the
+    contraction on the demoted oracle -- at the UNCHANGED `RTOL_GATE`,
+    with the ORIGINAL F005 refusal onset (~``L = 46``), NOT the Build-7a
+    fallback-shifted onset (the oracle carries no Schwinger fallback).
 
     This is the contract WP1 added (the overflow-safe frexp/ldexp
     contraction plus the ``_CONTRACTION_TARGET`` certification refusal),
@@ -603,16 +661,14 @@ class ContractionCertificationTestCase(OperatorTestCase):
 
     def test_certified_or_named_refusal_across_band(self):
         """
-        Sweeping ``L in [24, 59.4]``, each ``F_op`` call either matches
-        the mpmath oracle within `RTOL_GATE` or raises
-        `operator.CancellationError`.  A non-finite return without a
-        raise, or a finite value disagreeing with the oracle, is the
-        F005 bug and fails.  Both outcomes must occur across the band:
-        since Build 7a the legacy refusals at ``w <= 60`` are rescued by
-        the cross-parity Schwinger fallback (and the rescued values must
-        ALSO match the oracle), so the refusal onset sits at the
-        Schwinger ceiling ``w = 60`` (``L = 54`` at ``|y'| = 0.9``); the
-        band stays below the kernel's own ``L <= 60`` product ceiling.
+        Sweeping ``L in [24, 59.4]``, each legacy-contraction evaluation
+        (`operator.legacy_operator_oracle`) either matches the mpmath
+        oracle within `RTOL_GATE` or raises `operator.CancellationError`.
+        A non-finite return without a raise, or a finite value
+        disagreeing with the oracle, is the F005 bug and fails.  Both
+        outcomes must occur across the band: the contraction certifies
+        the lower band and refuses (named) once ``L`` crosses its F005
+        certification limit near ``L ~ 46``.
         """
         returned, refused = 0, 0
         outcome_by_l = []
@@ -620,9 +676,10 @@ class ContractionCertificationTestCase(OperatorTestCase):
             w = self._w_for(cexp)
             with self.subTest(L=cexp, w=w):
                 try:
-                    value, _ = operator.F_op(
-                        w, self.CERT_Y, self.CERT_GAMMA,
+                    values, *_ = operator.legacy_operator_oracle(
+                        np.array([w]), self.CERT_Y, self.CERT_GAMMA,
                         kappa=self.CERT_KAPPA, max_order=FOP_MAX_ORDER)
+                    value = complex(values[0])
                 except operator.CancellationError:
                     refused += 1
                     outcome_by_l.append((cexp, None))
@@ -632,17 +689,17 @@ class ContractionCertificationTestCase(OperatorTestCase):
                 # silent nan or a finite-but-wrong value is the F005 bug.
                 self.assertTrue(
                     np.isfinite(value),
-                    f'L={cexp:.1f}: F_op returned non-finite {value} '
-                    'without raising CancellationError (silent nan is '
-                    'the F005 bug)')
+                    f'L={cexp:.1f}: legacy oracle returned non-finite '
+                    f'{value} without raising CancellationError (silent '
+                    'nan is the F005 bug)')
                 reference = _oracle_amplification(
                     w, self.CERT_Y, self.CERT_GAMMA, kappa=self.CERT_KAPPA)
                 rel = abs(value - reference) / abs(reference)
                 self.assertLessEqual(
                     rel, RTOL_GATE,
-                    f'L={cexp:.1f}: F_op returned a finite but wrong '
-                    f'value (rel {rel:.3e} > {RTOL_GATE}) instead of '
-                    'raising CancellationError')
+                    f'L={cexp:.1f}: legacy oracle returned a finite but '
+                    f'wrong value (rel {rel:.3e} > {RTOL_GATE}) instead '
+                    'of raising CancellationError')
                 returned += 1
                 outcome_by_l.append((cexp, rel))
                 self.n_checks += 1
@@ -652,25 +709,30 @@ class ContractionCertificationTestCase(OperatorTestCase):
             'lower band should still be accurate')
         self.assertGreater(
             refused, 0,
-            'no configuration refused in [24, 59.4]; above the Schwinger '
-            'ceiling (w > 60, L > 54) the named CancellationError must '
-            'still stand')
+            'no configuration refused in [24, 59.4]; the legacy '
+            'contraction must still raise CancellationError above its '
+            'F005 certification band')
         self._plot(outcome_by_l)
 
     def test_former_silent_nan_config_now_refuses(self):
         """
-        A configuration whose contraction is uncertifiable AND that sits
-        above the Schwinger ceiling (``L = 59``, ``w = 65.6 > 60`` --
-        since Build 7a the sub-ceiling uncertifiable band is rescued by
-        the cross-parity fallback, so the refusal contract now lives
-        above ``w = 60``) raises a NAMED `operator.CancellationError`
-        whose message identifies the offending ``(w, y, gamma, kappa)``
-        -- instead of the pre-F005 silent overflow to ``nan``.
+        A configuration whose contraction is uncertifiable (``L = 59``,
+        ``w = 65.6``, kernel-legal at ``w*sqrt(s) = 59 < 60``) raises a
+        NAMED `operator.CancellationError` whose message identifies the
+        offending ``(w, y, gamma, kappa)`` -- instead of the pre-F005
+        silent overflow to ``nan``.
+
+        RE-TARGET (Build 8d): exercised on the demoted legacy contraction
+        (`legacy_operator_oracle`); production serves this sheared host
+        through Schwinger, which refuses the same ``w = 65.6 > 60`` node
+        with `SchwingerCertificationError`.  The F005 named-refusal
+        contract is pinned where the contraction lives.
         """
-        w = self._w_for(59.0)  # w = 65.6 > 60: unrescuable, kernel-legal
+        w = self._w_for(59.0)  # w = 65.6: uncertifiable, kernel-legal
         with self.assertRaises(operator.CancellationError) as ctx:
-            operator.F_op(w, self.CERT_Y, self.CERT_GAMMA,
-                          kappa=self.CERT_KAPPA, max_order=FOP_MAX_ORDER)
+            operator.legacy_operator_oracle(
+                np.array([w]), self.CERT_Y, self.CERT_GAMMA,
+                kappa=self.CERT_KAPPA, max_order=FOP_MAX_ORDER)
         message = str(ctx.exception)
         for token in ('w =', 'y =', 'gamma', 'kappa'):
             self.assertIn(
@@ -680,18 +742,23 @@ class ContractionCertificationTestCase(OperatorTestCase):
 
     def test_returned_branch_is_never_nan(self):
         """
-        Stark finiteness guard on the returned branch: wherever ``F_op``
-        does NOT raise across the band, the value is finite.  Complements
-        the oracle-accuracy assertion with a check that would catch a
-        returned ``nan`` even if the oracle comparison were skipped.
+        Stark finiteness guard on the returned branch: wherever the
+        legacy contraction does NOT raise across the band, the value is
+        finite.  Complements the oracle-accuracy assertion with a check
+        that would catch a returned ``nan`` even if the oracle comparison
+        were skipped.
+
+        RE-TARGET (Build 8d): exercised on `legacy_operator_oracle` (the
+        demoted contraction), consistent with the sibling F005 gates.
         """
         for cexp in self.CERT_LS:
             w = self._w_for(cexp)
             with self.subTest(L=cexp):
                 try:
-                    value, _ = operator.F_op(
-                        w, self.CERT_Y, self.CERT_GAMMA,
+                    values, *_ = operator.legacy_operator_oracle(
+                        np.array([w]), self.CERT_Y, self.CERT_GAMMA,
                         kappa=self.CERT_KAPPA, max_order=FOP_MAX_ORDER)
+                    value = complex(values[0])
                 except operator.CancellationError:
                     self.n_checks += 1
                     continue
@@ -863,13 +930,21 @@ class CancellationRefusalTestCase(OperatorTestCase):
                 self.assertIn(token, message)
             self.n_checks += 1
 
-            # Companion below the threshold returns and records its
-            # ratio.
-            value, diag = operator.F_op(low_w, low_y, low_g, beta=low_b,
-                                        kappa=low_k, max_order=low_o)
-            self.assertTrue(np.isfinite(value))
-            self.assertLess(diag.cancellation_ratio, threshold)
-            self.assertGreater(diag.cancellation_ratio, 0.0)
+            # Companion below the threshold: the LEGACY certified path
+            # returns and records its measured ratio.  RE-TARGET (Build
+            # 8d): the public `F_op` now serves this sub-ceiling sheared
+            # node via Schwinger (whose diagnostics carry
+            # cancellation_ratio == 0.0), so the ratio-gated companion is
+            # exercised on the legacy contraction that owns the gate --
+            # exactly the path the HIGH refusal above targets.
+            (low_vals, _lo, low_conv, _lt,
+             low_ratios) = operator._grid_certified(
+                 np.array([low_w]), low_y, low_g, beta=low_b,
+                 kappa=low_k, max_order=low_o)
+            self.assertTrue(np.isfinite(low_vals[0]))
+            self.assertTrue(bool(low_conv[0]))
+            self.assertLess(float(low_ratios[0]), threshold)
+            self.assertGreater(float(low_ratios[0]), 0.0)
             self.n_checks += 1
 
     def test_refusal_tracks_the_ratio_not_a_formula(self):
@@ -878,13 +953,26 @@ class CancellationRefusalTestCase(OperatorTestCase):
         config (measured ratio ~1.7e3) does NOT refuse -- proof the
         refusal follows the measured ratio against the threshold, not an
         unconditional or up-front rule.
+
+        RE-TARGET (Build 8d): exercised on the LEGACY contraction
+        (`_grid_certified`), which OWNS the ratio-gated refusal.  Since
+        homogenization the public `F_op` serves this sub-ceiling sheared
+        node (``w = 40 <= 60``) via Schwinger, whose diagnostics report
+        ``cancellation_ratio == 0.0`` -- so an `F_op` assertion would be
+        vacuous (``0.0 < 1e13`` regardless of the ratio gate).  Pinning
+        the ratio-tracking contract where it lives keeps the
+        falsification real: a below-threshold ratio recorded, no refusal.
         """
         _, y, gamma, beta, kappa, w, order = self.HIGH
-        value, diag = operator.F_op(w, y, gamma, beta=beta, kappa=kappa,
-                                    max_order=order)
-        self.assertTrue(np.isfinite(value))
-        self.assertLess(diag.cancellation_ratio,
+        (values, _orders, converged, _tails,
+         cancellation_ratios) = operator._grid_certified(
+             np.array([w]), y, gamma, beta=beta, kappa=kappa,
+             max_order=order)
+        self.assertTrue(np.isfinite(values[0]))
+        self.assertTrue(bool(converged[0]))
+        self.assertLess(float(cancellation_ratios[0]),
                         operator._CANCELLATION_REFUSAL)
+        self.assertGreater(float(cancellation_ratios[0]), 0.0)
         self.n_checks += 1
 
 

@@ -166,13 +166,28 @@ tip over.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import time
 import warnings
-from unittest import TestCase, expectedFailure, main, mock
+from unittest import TestCase, expectedFailure, main, mock, skipUnless
 
 import numpy as np
 from matplotlib import pyplot as plt
+
+# --- Two-tier test split (Build 8d re-pricing) -------------------------------
+# The exact positive-parity path is now the Schwinger evaluator (~90 ms/node),
+# so ``lnlike_bruteforce`` -- the full-FFT-grid matched filter that evaluates
+# the exact engine per frequency -- costs ~138 s/call post-8d.  Tests whose
+# runtime is dominated by that brute-force accuracy oracle are the DRIVER /
+# post-build tier, gated OFF by default and run in-build only as FAST
+# structural / witness / refusal gates.  Set ``COGWHEEL_BRUTE_ACCURACY=1`` to
+# run the brute-force accuracy tier (it remains falsifiable and green there).
+_BRUTE_ACCURACY = bool(os.environ.get('COGWHEEL_BRUTE_ACCURACY'))
+_brute_accuracy_tier = skipUnless(
+    _BRUTE_ACCURACY,
+    'brute-force accuracy tier: set COGWHEEL_BRUTE_ACCURACY=1 -- exact path '
+    '~90 ms/node makes lnlike_bruteforce ~138 s/call post-8d')
 
 from cogwheel import data, waveform
 from cogwheel.likelihood.relative_binning import RelativeBinningLikelihood
@@ -640,6 +655,9 @@ def _exact_total(w, gamma, y, beta, kappa):
         gamma=gamma, y=y, beta=beta, kappa=kappa).exact_total
 
 
+
+# brute-force accuracy tier (Build 8d): _assert_agrees calls lnlike_bruteforce (~138 s/call)
+@_brute_accuracy_tier
 class BruteForceAgreementTestCase(LensedLikelihoodTestCase):
     """
     Relative-binning ``lnlike`` reproduces the exact ``lnlike_bruteforce``
@@ -727,6 +745,7 @@ class NearCuspRegressionPinTestCase(LensedLikelihoodTestCase):
         _, y1, y2, gamma, beta, kappa = _NEAR_CUSP
         return self._candidate(self._lens_dic(y1, y2, gamma, beta, kappa))
 
+    @_brute_accuracy_tier
     def test_production_lnlike_pins_bruteforce_at_near_cusp(self):
         """Production ``lnlike`` matches brute force at the near-cusp config."""
         cand = self._near_cusp_candidate()
@@ -808,6 +827,7 @@ class ProductOfSummariesRegressionTestCase(LensedLikelihoodTestCase):
     (in-sum) contraction reproduces the exact cross term.
     """
 
+    @_brute_accuracy_tier
     def test_cross_term_dominated_config_matches_bruteforce(self):
         caustic = geometry.critical_point(0.20, np.pi / 4.0, 0.0, 0.0).source
         y = 0.97 * np.asarray(caustic, dtype=float)
@@ -841,6 +861,7 @@ class NormalizationFactorGateTestCase(LensedLikelihoodTestCase):
     the zero-noise floor does that.
     """
 
+    @_brute_accuracy_tier
     def test_bruteforce_floor_matches_exact_unlensed(self):
         exact_unlensed = self.like.lnlike_fft(self.par_dic_0)
         lensed_bf = self.like.lnlike_bruteforce(self._tiny_candidate())
@@ -989,6 +1010,7 @@ class NormalizationFloorZeroNoiseTestCase(ZeroNoiseAnchorTestCase):
             f'> {FLAT_F_TOL}; its F does NOT tend to unity in band, so the '
             'unlensed reference is the wrong oracle for the floor tests')
 
+    @_brute_accuracy_tier
     def test_bruteforce_floor_is_physically_tight(self):
         """
         Zero-noise brute force at the MACRO-TRIVIAL tiny candidate matches
@@ -1137,6 +1159,7 @@ class MacroSectorContrastTestCase(ZeroNoiseAnchorTestCase):
     premise repair would otherwise silently invite.
     """
 
+    @_brute_accuracy_tier
     def test_macro_shear_offsets_lnlike_by_the_predicted_amount(self):
         """A matches the unlensed reference; B is offset as predicted."""
         reference = self.zero_like.lnlike_fft(self.par_dic_0)
@@ -1298,6 +1321,7 @@ class ContractionTimingTestCase(LensedLikelihoodTestCase):
             best = min(best, time.perf_counter() - start)
         return best
 
+    @_brute_accuracy_tier
     def test_relative_binning_faster_than_bruteforce(self):
         """(a) SPEED-UP: ``lnlike`` beats ``lnlike_bruteforce``."""
         candidate = self._candidate(
@@ -1432,6 +1456,7 @@ class DeterminismTestCase(LensedLikelihoodTestCase):
                     f'seeded strain differs at detector {det}; an unseeded '
                     'input remains in the noise draw')
 
+    @_brute_accuracy_tier
     def test_lnlike_is_exactly_repeatable(self):
         """
         ``lnlike`` and ``lnlike_bruteforce`` return bit-identical values on
@@ -1465,6 +1490,7 @@ class SelfFalsificationTestCase(LensedLikelihoodTestCase):
     a perturbed lnl must breach the tolerance.
     """
 
+    @_brute_accuracy_tier
     def test_agreement_gate_detects_a_perturbed_lnl(self):
         """
         A candidate's exact ``lnlike_bruteforce`` differs from a value
@@ -1737,6 +1763,7 @@ class EnvelopeWarmTimingGateTestCase(LensedLikelihoodTestCase):
     def _crown_candidate(self):
         return self._candidate(self._lens_dic(0.08, 0.06, 0.20, 0.0, 0.0))
 
+    @_brute_accuracy_tier
     def test_public_entry_speedup(self):
         """``lnlike`` beats ``lnlike_bruteforce`` by a conservative margin."""
         cand = self._crown_candidate()

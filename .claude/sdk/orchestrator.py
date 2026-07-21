@@ -371,16 +371,27 @@ class BuildOrchestrator:
                 )
 
     def _pre_read_specs(self) -> str:
-        """Read spec files once in Python, format for system prompt injection."""
+        """Index the spec files for the system prompt; agents READ them.
+
+        Never inline full file contents: agent prompts travel on the CLI
+        argv (128 KiB per-argument kernel limit) and the spec files grow
+        with the project.  The index carries path, size, and the first
+        heading line; every agent has read tools and CLAUDE.md makes
+        reading the specs mandatory before code work.
+        """
         parts = []
         for rel_path in SPEC_FILES:
             full_path = Path(self.project_root) / rel_path
             if full_path.exists():
                 content = full_path.read_text(encoding="utf-8")
-                parts.append(f"### {rel_path}\n```\n{content}\n```")
+                head = next(
+                    (ln for ln in content.splitlines() if ln.strip()), "")
+                parts.append(
+                    f"- {rel_path} ({len(content):,} chars): {head[:100]}")
             else:
-                parts.append(f"### {rel_path}\n(file not found)")
-        return "# Pre-loaded Spec Files\n\n" + "\n\n".join(parts)
+                parts.append(f"- {rel_path} (file not found)")
+        return ("# Spec Files (MANDATORY reading via your file tools; "
+                "contents NOT inlined)\n" + "\n".join(parts))
 
     def _pre_read_task_files(self) -> str:
         """Opportunistically pre-read files mentioned in the task description.
@@ -412,28 +423,32 @@ class BuildOrchestrator:
         if not unique:
             return ""
 
+        # Pointer + description, NEVER content (owner rule 2026-07-21):
+        # prompts carry filenames and a first-line hint; agents read the
+        # files with their own tools.
         parts = []
-        total = 0
-        read_files = []
         for rel_path in unique:
             full_path = Path(self.project_root) / rel_path
             if not full_path.is_file():
                 continue
+            head = ""
+            try:
+                with open(full_path, encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        if line.strip():
+                            head = line.strip()[:100]
+                            break
+            except OSError:
+                pass
             size = full_path.stat().st_size
-            if size > PER_FILE_LIMIT:
-                continue
-            if total + size > TOTAL_LIMIT:
-                break
-            content = full_path.read_text(encoding="utf-8", errors="replace")
-            parts.append(f"### {rel_path}\n```\n{content}\n```")
-            total += size
-            read_files.append(rel_path)
+            parts.append(f"- {rel_path} ({size:,} bytes): {head}")
 
         if not parts:
             return ""
 
-        self._log(f"Pre-read {len(read_files)} task-referenced files ({total // 1024}KB)")
-        return "# Pre-loaded Task Files\n\n" + "\n\n".join(parts)
+        self._log(f"Indexed {len(parts)} task-referenced files (pointers only)")
+        return ("# Task-Referenced Files (read them with your file tools; "
+                "contents NOT inlined)\n" + "\n".join(parts))
 
     def _load_pipeline_graph(self):
         """Import scripts/pipeline_graph.py and return a PipelineGraph, or None.

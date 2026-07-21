@@ -137,6 +137,63 @@ tolerance widening; fallback-to-exact preserves certified-or-refuse).
   median 154 ms, p90 699 ms, p99 2.3 s. The surrogate is load-bearing
   for the PRIOR BOX, not just the rescued strong-shear band.
 
+- [ ] **Prior bounds as instantiation arguments; surrogate box =
+  coverage, not constraint** `[→ spec]` — OWNER RULING (2026-07-20):
+  "in the eventual design, we should use the prior bounds as an
+  instantiation argument, with a reasonable default value. if the
+  bounds are larger, we can just use geometric optics outside the
+  surrogate box." Design consequences to land with / after the 8e
+  build and before the full-box training run:
+  1. Lens prior classes take their bounds (m_lens range, gamma range,
+     source-box scale) as constructor arguments with the current
+     values as defaults — no hard-coded coupling of prior support to
+     surrogate coverage anywhere.
+  2. The serving ladder outside the trained surrogate box is
+     explicit and cheap-first: surrogate (in box) -> geometric branch
+     (resolved; certified to w <= 500, thresholds per the 8d headroom
+     audit) -> 8e uniform-asymptotics patch (near-caustic) -> exact
+     quadrature (w <= 60) -> named refusal. Widening the prior NEVER
+     requires retraining — it shifts the serving-fraction mix.
+  3. The census reports served/geometric/uniform/exact/refused
+     fractions AS A FUNCTION of the instantiated bounds, so any
+     proposed box widening (e.g. relaxing the w <= 58 mass-
+     conditioned source-box shrinkage once 8d+8e land) is decided on
+     measured numbers.
+  4. High-w physics note (owner, same exchange): the bulk high-w
+     regime IS geometric optics — the exact-quadrature arithmetic
+     wall (w ~ 64, dd precision) only matters in the near-caustic
+     unresolved sliver, which SHRINKS with w and is 8e's mandate;
+     the quad-double option stays parked unless the 8d WP3 census
+     measures the sliver as non-negligible.
+  5. SCALE-RELATIVE TUBE DEPTH (owner design confirmation,
+     2026-07-20): node count must stay independent of caustic size —
+     the tube interpolates a slowly-varying modulation of the
+     universal fold profile, so each adapted axis carries an O(1)
+     variation budget PROVIDED the eta band is CAUSTIC-SCALE-RELATIVE
+     (eta_max tied to the local curvature radius / reach), not the
+     current absolute [0.02, 0.05] (adequate for the 8c fixture
+     bands; invalid as gamma -> 0 where the shrinking astroid drops
+     below a fixed absolute band — the same foot-of-normal failure
+     measured at eta_max = 0.3, size-induced). Far-field boxes
+     already reach-scale. Add a tiny-caustic treatment below a gamma
+     floor (weak-shear chart in y/gamma-scaled coordinates or the
+     analytic limit). Required BEFORE the full-box training run.
+     ENFORCEMENT (owner push-back 2026-07-20 — "should have been
+     there from the get-go"; make the invariant CHECKED, not
+     remembered): the trainer must ASSERT the foot-of-normal
+     condition per (band, arc) at build time — eta_max < margin *
+     min local caustic curvature radius over the chart domain,
+     measured from the caustic geometry it already computes — so
+     both the eta_max=0.3 class and the shrinking-caustic class fail
+     LOUDLY at training time with no one needing the insight in
+     advance. Cost of the late catch was ~zero only because
+     TubeChart stores per-chart bounds (computation swap, no schema/
+     serving rework) and the production run is sequenced after
+     8d/8e; the guard removes the dependence on that luck.
+  Links: [[likelihood_cusp-fast-serving]],
+  [[likelihood_schwinger-homogenization]],
+  [[likelihood_envelope-surrogate]].
+
 - [ ] **Homogenize the engine on the Schwinger evaluator (Build 8
   program)** `[→ spec]` — owner directive (2026-07-19): "make it
   homogeneous, use the surrogate to speed it up, and do what is needed
@@ -194,6 +251,14 @@ tolerance widening; fallback-to-exact preserves certified-or-refuse).
   ORDERING: after 8e (cusp fast-serving); may overlap the full-box
   training run (training cost is exact-quadrature-dominated, so these
   levers do not materially change it).
+  (c) NODE-PARALLEL EXACT EVALUATION (owner-spotted 2026-07-21): the
+  positive-parity and saddle wave arms evaluate w nodes in a SERIAL
+  loop (~90 ms/node, all nodes independent) — a prange/threaded node
+  loop is embarrassingly parallel and value-preserving (8b-levers
+  certification mold). Biggest payoff: the full-box TRAINING campaign
+  is engine-call-dominated, so node parallelism divides its wall-clock
+  by ~core count; also cuts exact-heavy test tiers and any pre-enable
+  exact serving.
   PRE-BRIEF DRIVER STEP: profile the 2.0 ms partition residual
   (find_images quartic vs kernels vs switch) so the brief carries
   measured facts, not guesses.
@@ -267,6 +332,37 @@ Rationale: bare-denial rate is transcript-depth-correlated (0/106 in first
 two calls, median call 14, issue #74351); gw's 37 shallow builds recorded
 zero denials on the identical harness. Prove in cogwheel, then port to
 teja-force skill + gw with the rest of the hardening.
+
+- [ ] **Test-suite curation pass (8e window)** `[housekeeping]` —
+  OWNER APPROVED (2026-07-21): audit all ~476 tests for obsolescence
+  accumulated across Builds 3-8d. RETIREMENT RULE (binding, per the
+  8b F010-retirement precedent): a test retires ONLY if its contract
+  no longer exists AND its falsification power is PROVABLY covered by
+  a NAMED successor test — retire with a pointer comment, never
+  silently. Categories to audit:
+  1. TRANSITION WITNESSES past their transition (schedule rule:
+     old-vs-new witness comparisons retire ONE BUILD after their
+     transition commits; the new-value pins stay) — 8d's evaluator-
+     swap witnesses become eligible at 8e close; 7b-era pin witnesses
+     already eligible.
+  2. BACK-COMPAT surfaces with no real users — OWNER DECISION items
+     (e.g. the 8a single-box npz load path: no 8a artifact was ever
+     shipped; retiring it is an API-promise call, list it in the
+     disposition table, do not decide it).
+  3. REDUNDANT certifications across builds (positive-parity oracle
+     agreement in operator + schwinger + fast_path; multiple
+     RB-vs-brute variants) — merge to the strongest single site per
+     contract, pointer comments from the retired sites.
+  4. INTERIM-STATE relics (7a interim refusals, pre-fusion internals)
+     — verify all were re-targeted or retired; sweep for stragglers.
+  DELIVERABLE: a disposition table (keep / retire-with-pointer /
+  merge / owner-decision) over every test with per-test justification;
+  driver adjudicates; owner rules on API-surface rows. MOTIVATION
+  beyond hygiene: pin-heavy suites re-price every future build's
+  re-baseline work (measured 2026-07-21: the 8d re-baseline consumed
+  a full test-dev session across 6 files); pruning dead pins cuts
+  that churn at the source. Do NOT run before the 8d commit lands
+  (its witnesses must first exist to become schedulable).
 
 
 ## In progress

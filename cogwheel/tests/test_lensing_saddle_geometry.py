@@ -117,22 +117,40 @@ GEOMETRIC_GATE_W13 = 5e-4
 #: Schwinger ceiling ``W_CEILING_SCHWINGER = 60``.
 GEOMETRIC_WS = (13.0, 18.0, 25.0)
 
-#: Positive-parity ``F_op`` references at ``w = 5``, captured from the
-#: delivered tree BEFORE authoring these tests (2026-07-18).  The
-#: positive-parity operator path is byte-frozen, so equality is exact.
+#: Positive-parity ``F_op`` references at ``w = 5``.  RE-BASELINE
+#: (Build 8d, F017): since homogenization these sheared positive-parity
+#: hosts are served by the exact Schwinger evaluator (``order_used == 0``),
+#: NOT the legacy operator series.  Entries hold the NEW Schwinger
+#: production values; ``LEGACY_POSITIVE_FOP_REFERENCES`` holds the OLD
+#: (pre-8d) values.  The flip carries a WITNESS: NEW and OLD agree to
+#: `POSITIVE_FLIP_WITNESS_TOL` in the max-normalized currency (measured
+#: max 3.6e-14 across these five) -- a byte/contract change, not physics.
 #: Entries: ``(name, y, gamma, beta, kappa, value)``.
 POSITIVE_FOP_REFERENCES = (
     ('two-image', (0.55, 0.0), 0.2, 0.0, 0.2,
-     complex(-1.9032361747251783, -1.5557556788565754)),
+     complex(-1.903236174725178, -1.5557556788565887)),
     ('four-image', (0.10, 0.10), 0.2, 0.0, 0.2,
-     complex(1.872948815482134, 3.362142904421543)),
+     complex(1.8729488154821328, 3.36214290442154)),
     ('small-shear', (0.30, 0.10), 0.02, 0.0, 0.0,
-     complex(-0.22215898703244166, 1.7936059107533293)),
+     complex(-0.22215898703244213, 1.7936059107533293)),
     ('large-shear', (0.20, 0.15), 0.40, 0.0, 0.0,
-     complex(-0.07921265570218033, 1.540785307607027)),
+     complex(-0.07921265570223635, 1.540785307607048)),
     ('beta-rotated', (0.25, 0.10), 0.20, 0.70, 0.0,
-     complex(-0.3883728241921565, 1.776859609294812)),
+     complex(-0.3883728241921589, 1.7768596092948092)),
 )
+
+#: OLD (pre-8d) legacy operator-series values for the witness only.
+LEGACY_POSITIVE_FOP_REFERENCES = (
+    complex(-1.9032361747251783, -1.5557556788565754),
+    complex(1.872948815482134, 3.362142904421543),
+    complex(-0.22215898703244166, 1.7936059107533293),
+    complex(-0.07921265570218033, 1.540785307607027),
+    complex(-0.3883728241921565, 1.776859609294812),
+)
+
+#: Max-normalized byte-flip currency (the F005/7a/8d owner-set 1e-10
+#: standard) for the positive-parity contract-flip witnesses below.
+POSITIVE_FLIP_WITNESS_TOL = 1e-10
 
 #: Smoke anchors from the Build 6 delivery record (relative 1e-10; the
 #: Schwinger path is certified to 3e-10 internally, and both anchors
@@ -243,27 +261,45 @@ ABOVE_CEILING_REFUSALS = (
 CEILING_REFUSAL_TYPES = (operator.CancellationError,
                          _schwinger.SchwingerCertificationError)
 
-#: Bit-freeze pins of the CERTIFIED positive-parity `operator.F_op`
-#: path, captured from the delivered tree where the legacy
-#: `_grid_certified` returns normally (so the WP2 strong-shear fallback
-#: never fires and the value equals pre-build HEAD bit-for-bit).  A
-#: perturbation from the fallback dispatch would break the ``==``.
+#: Bit-freeze pins of the positive-parity `operator.F_op` path.
+#: RE-BASELINE (Build 8d, F017): these sheared positive-parity hosts are
+#: now Schwinger-served (``order_used == 0``); the literals are the NEW
+#: Schwinger production values, and `LEGACY_FROZEN_FOP_PINS` holds the OLD
+#: (pre-8d) legacy values for the witness (NEW vs OLD agree to
+#: `POSITIVE_FLIP_WITNESS_TOL`; measured max 1.3e-14).
 #: Entries: ``(label, w, y, gamma, beta, kappa, value)``.
 FROZEN_FOP_PINS = (
     ('certified-w5', 5.0, (0.3, 0.1), 0.2, 0.0, 0.0,
-     complex(-0.35753006967142426, 1.1663724461262843)),
+     complex(-0.3575300696714284, 1.1663724461262823)),
     ('certified-w8', 8.0, (0.25, 0.15), 0.3, 0.0, 0.0,
-     complex(0.6320765919626845, -1.4538045398488548)),
+     complex(0.6320765919627044, -1.4538045398488588)),
     ('certified-beta-kappa-w12', 12.0, (0.4, 0.2), 0.2, 0.4, 0.1,
-     complex(-2.3655700830356503, -0.8209728900694678)),
+     complex(-2.3655700830356583, -0.8209728900694808)),
 )
 
-#: Bit-freeze pins of the CERTIFIED positive-parity `operator.F_op_grid`
-#: batched path (same capture, ``gamma = 0.2``, ``y = (0.3, 0.1)``):
-#: ``(w_grid, values)``.  Note ``values[0]`` equals the ``certified-w5``
-#: scalar pin -- the scalar and grid entry points share one contraction.
+#: OLD (pre-8d) legacy values for the `FROZEN_FOP_PINS` witness only.
+LEGACY_FROZEN_FOP_PINS = (
+    complex(-0.35753006967142426, 1.1663724461262843),
+    complex(0.6320765919626845, -1.4538045398488548),
+    complex(-2.3655700830356503, -0.8209728900694678),
+)
+
+#: Bit-freeze pins of the positive-parity `operator.F_op_grid` batched
+#: path (``gamma = 0.2``, ``y = (0.3, 0.1)``).  RE-BASELINE (Build 8d):
+#: NEW Schwinger production values (``order == 0``); ``values[0]`` still
+#: equals the ``certified-w5`` scalar pin -- scalar and grid share one
+#: Schwinger evaluator.  `LEGACY_FROZEN_FOP_GRID_VALUES` holds the OLD
+#: values for the witness (NEW vs OLD agree to `POSITIVE_FLIP_WITNESS_TOL`;
+#: measured max 4.9e-15).
 FROZEN_FOP_GRID_W = (5.0, 8.0, 12.0)
 FROZEN_FOP_GRID_VALUES = (
+    complex(-0.3575300696714284, 1.1663724461262823),
+    complex(1.27080135335917, -1.0973386536711878),
+    complex(0.49060431021725603, 2.4725768493768454),
+)
+
+#: OLD (pre-8d) legacy values for the `FROZEN_FOP_GRID_VALUES` witness.
+LEGACY_FROZEN_FOP_GRID_VALUES = (
     complex(-0.35753006967142426, 1.1663724461262843),
     complex(1.2708013533591618, -1.097338653671187),
     complex(0.4906043102172579, 2.4725768493768356),
@@ -693,16 +729,29 @@ class ParityDispatchTestCase(SaddleTestCase):
 
     def test_positive_parity_values_are_identical_to_references(self) \
             -> None:
-        for name, y, gamma, beta, kappa, reference \
-                in POSITIVE_FOP_REFERENCES:
+        """RE-BASELINE (Build 8d, F017): the sheared positive-parity hosts
+        are now Schwinger-served (``order_used == 0``); the references are
+        the NEW Schwinger values, each witnessed against the OLD legacy
+        value at `POSITIVE_FLIP_WITNESS_TOL` (a byte flip, not physics)."""
+        for (name, y, gamma, beta, kappa, reference), old in zip(
+                POSITIVE_FOP_REFERENCES, LEGACY_POSITIVE_FOP_REFERENCES):
             value, diagnostics = operator.F_op(
                 5.0, np.array(y), gamma, beta=beta, kappa=kappa)
             self.assertEqual(
                 value, reference,
-                f'{name}: frozen positive-parity F_op drifted: '
-                f'{value!r} != {reference!r}')
-            self.assertGreater(diagnostics.order_used, 0,
-                               f'{name} did not run the operator path')
+                f'{name}: positive-parity F_op drifted from the re-baselined '
+                f'Schwinger reference: {value!r} != {reference!r}')
+            self.assertEqual(
+                diagnostics.order_used, 0,
+                f'{name}: sheared positive-parity host reports order_used '
+                f'= {diagnostics.order_used} != 0 -- must be Schwinger-'
+                'served since Build 8d')
+            scale = max(abs(old), 1e-15)
+            self.assertLess(
+                abs(value - old) / scale, POSITIVE_FLIP_WITNESS_TOL,
+                f'{name}: NEW-vs-OLD {abs(value - old) / scale:.2e} exceeds '
+                f'{POSITIVE_FLIP_WITNESS_TOL:.0e} -- a PHYSICS regression, '
+                'not a byte flip')
             self.n_checks += 1
 
     def test_saddle_branch_returns_certified_finite_values(self) \
@@ -1067,31 +1116,44 @@ class RefusalAboveCeilingTestCase(SaddleTestCase):
 
 class FrozenPositiveParityFopTestCase(SaddleTestCase):
     """
-    BIT-FREEZE of the already-certified positive-parity operator path.
+    RE-BASELINE (Build 8d, F017) of the positive-parity operator-path
+    bit-freeze.
 
-    On points where the legacy `operator._grid_certified` returns
-    normally the WP2 strong-shear fallback never fires, so `F_op` and
-    `F_op_grid` must reproduce the pre-build HEAD value BIT-FOR-BIT.
-    The pins are hard-coded complex literals captured from the delivered
-    tree; equality is exact (``==``), so any perturbation from the new
-    fallback dispatch would fail.
+    Pre-8d these certified positive-parity points ran the legacy operator
+    series (``order_used > 0``) and their values were byte-frozen to HEAD.
+    Since homogenization the sheared positive-parity arm is served by the
+    exact Schwinger evaluator (``order_used == 0``), so the values changed
+    at the ~1e-14 level.  The literals are re-baselined to the NEW
+    Schwinger production values (still exact ``==`` pins on the production
+    path), each carrying a contract-flip WITNESS: the NEW value agrees with
+    the OLD legacy literal to `POSITIVE_FLIP_WITNESS_TOL` in the
+    max-normalized currency -- a byte/contract change, not physics.
     """
 
     def test_scalar_certified_values_are_frozen(self) -> None:
-        for label, w, y, gamma, beta, kappa, pin in FROZEN_FOP_PINS:
+        for (label, w, y, gamma, beta, kappa, pin), old in zip(
+                FROZEN_FOP_PINS, LEGACY_FROZEN_FOP_PINS):
             with self.subTest(pin=label):
                 value, diagnostics = operator.F_op(
                     w, np.array(y), gamma, beta=beta, kappa=kappa)
                 self.assertEqual(
                     value, pin,
-                    f'{label}: certified F_op drifted: {value!r} != '
-                    f'{pin!r}')
-                # The certified path ran the operator series (order > 0),
-                # confirming the value did NOT come from the fallback.
-                self.assertGreater(
+                    f'{label}: certified F_op drifted from the re-baselined '
+                    f'Schwinger literal: {value!r} != {pin!r}')
+                # order_used == 0 proves the SCHWINGER evaluator served this
+                # sheared positive-parity node (was the legacy series).
+                self.assertEqual(
                     diagnostics.order_used, 0,
-                    f'{label}: certified pin did not run the operator '
-                    f'series (order_used = {diagnostics.order_used})')
+                    f'{label}: sheared positive-parity node reports '
+                    f'order_used = {diagnostics.order_used} != 0 -- must be '
+                    'Schwinger-served since Build 8d')
+                # Contract-flip witness: NEW vs OLD agree at 1e-10.
+                scale = max(abs(old), 1e-15)
+                self.assertLess(
+                    abs(value - old) / scale, POSITIVE_FLIP_WITNESS_TOL,
+                    f'{label}: NEW-vs-OLD {abs(value - old) / scale:.2e} '
+                    f'exceeds {POSITIVE_FLIP_WITNESS_TOL:.0e} -- a PHYSICS '
+                    'regression, not a byte flip')
                 self.n_checks += 1
 
     def test_grid_certified_values_are_frozen(self) -> None:
@@ -1099,19 +1161,30 @@ class FrozenPositiveParityFopTestCase(SaddleTestCase):
         values, orders, converged = operator.F_op_grid(
             w_grid, np.array([0.3, 0.1]), 0.2)
         self.assertTrue(bool(np.all(converged)))
-        for pin, order, value in zip(FROZEN_FOP_GRID_VALUES, orders,
-                                     values):
+        for pin, old, order, value in zip(
+                FROZEN_FOP_GRID_VALUES, LEGACY_FROZEN_FOP_GRID_VALUES,
+                orders, values):
             self.assertEqual(
                 complex(value), pin,
-                f'certified F_op_grid drifted: {value!r} != {pin!r}')
-            self.assertGreater(int(order), 0,
-                               'certified grid node did not run the '
-                               'operator series')
+                f'certified F_op_grid drifted from the re-baselined '
+                f'Schwinger literal: {value!r} != {pin!r}')
+            self.assertEqual(
+                int(order), 0,
+                'sheared positive-parity grid node reports order != 0 -- '
+                'must be Schwinger-served since Build 8d')
+            scale = max(abs(old), 1e-15)
+            self.assertLess(
+                abs(complex(value) - old) / scale,
+                POSITIVE_FLIP_WITNESS_TOL,
+                f'grid NEW-vs-OLD {abs(complex(value) - old) / scale:.2e} '
+                f'exceeds {POSITIVE_FLIP_WITNESS_TOL:.0e} -- a PHYSICS '
+                'regression, not a byte flip')
             self.n_checks += 1
 
     def test_scalar_and_grid_agree_bit_for_bit(self) -> None:
-        """The scalar and batched entry points share ONE contraction, so
-        the first grid node must equal the scalar call exactly."""
+        """The scalar and batched entry points share ONE Schwinger
+        evaluator, so the first grid node must equal the scalar call
+        exactly."""
         w_grid = np.array(FROZEN_FOP_GRID_W)
         values, _, _ = operator.F_op_grid(w_grid, np.array([0.3, 0.1]),
                                           0.2)

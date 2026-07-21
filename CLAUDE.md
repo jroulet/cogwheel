@@ -53,6 +53,7 @@ Applies to **behavior changes** in `cogwheel/` (new functions, signature/logic/c
 - **DATA_CONTRACTS.yaml edits**: include a `.claude/spec/contracts_changelog.d/<date>_<slug>.md` fragment with `bump:`. Never edit `schema_version` directly.
 - After writing any fragment: `python scripts/render_fragments.py`.
 
+<!-- BEGIN AGENT INFRA SECTION — stripped by bootstrap_claude_workflow.sh for collaborators -->
 ## SDK Build Briefs (driver discipline)
 Transcript depth is a reliability constraint: the auto-mode permission
 classifier fails closed more often as agent transcripts deepen (measured
@@ -79,23 +80,37 @@ shallow:
   build-killer (deep transcripts) and an unverifiable gate (inspectors
   cannot run it).
 
+<!-- END AGENT INFRA SECTION -->
+
 ## Testing
 - Tests live in `cogwheel/tests/` (stdlib `unittest`), **not** a top-level `tests/`.
 - Run: `python -m pytest cogwheel/tests/ -v` (or `python -m unittest discover -s cogwheel/tests`).
 - New tests go beside the suite in `cogwheel/tests/`. Cover numerical-accuracy paths with tolerance-based assertions.
-- (The conda env to run under is machine-specific — set `SDK_CONDA_ENV` in an untracked `.env` at the repo root; copy `.env.example` to start. Defaults to `cogwheel_310` when unset.)
+- Conda env is machine-specific: set `SDK_CONDA_ENV` in untracked `.env` (copy `.env.example`); default `cogwheel_310`.
 
-### Full-suite gate protocol (owner ruling 2026-07-20: parallel by default)
-- Run the full suite with `python -m pytest cogwheel/tests/ -q -n 8 --dist loadfile -k "not Timing and not timing"` (deselects the timing-guard tests by name — all timing classes/methods carry "Timing"/"timing"; loadfile keeps each file's session-scoped fixtures — e.g. trained surrogate fixtures — on one worker), then re-run the deselected timing guards in a short SERIAL pass. Never run the whole gate serially (~1 h vs ~10 min).
-- Before trusting any tally (serial or parallel): `--collect-only -q` and assert the collected count matches expectation — collect-errors (e.g. the missing IMRPhenomXODE symlink) silently shrink the suite.
-- Share the numba on-disk cache across workers (`NUMBA_CACHE_DIR`) so each worker doesn't re-JIT from scratch.
+### Test tiers
+- Default runs execute the fast tier only; slow tests skip with a loud reason.
+- Slow tiers are opt-in by env var: brute-force accuracy `COGWHEEL_BRUTE_ACCURACY=1`; strict timing `COGWHEEL_STRICT_TIMING=1`.
 
-### Detached / parallel test-run health checks
-- Health of a detached pytest-xdist run = **worker CPU + log growth**, never the master process: an xdist master legitimately idles at 0% CPU for the whole run.
-- xdist workers are execnet children whose argv is `python -u -c import sys;exec(...)` — they do NOT contain "pytest". Match on that, or you will conclude "no workers" for a healthy run.
-- `pgrep -f`/`pkill -f` patterns must be self-match-proof (bracket idiom: `pgrep -f "pytest [c]ogwheel"`), or each check matches its own wrapper shell and reads as a respawning process.
-- Before killing a "stuck" run, compare elapsed time against a contention-adjusted baseline (concurrent suites/samplers multiply wall-clock several-fold); kill only on ~10x overshoot or zero log growth.
-- Fresh git worktrees do NOT carry the untracked `cogwheel/waveform_models/IMRPhenomXODE` symlink; without it `test_waveform`/`test_posterior`/`test_gw_prior` collect-error out of the suite silently. Recreate the symlink in every new worktree before trusting a full-suite tally.
+<!-- BEGIN AGENT INFRA SECTION — stripped by bootstrap_claude_workflow.sh for collaborators -->
+### Test tiers — driver/agent discipline
+- Slow tests NEVER run inside a build. No exceptions. (Enforced: the SDK pins both gate vars empty in every agent env.)
+- Slow sweeps are the driver's post-build parallel job: `.claude/sdk/post_build_sweeps.sh` (one process per file, per-process numba cache).
+- Agents verify ONLY the tests they changed. The driver runs the full tally once per build.
+- Every long run emits a countable progress stream: pytest `-v` teed to a log + a Monitor reporting percent/rate/projected finish. Zero progress across two beats = investigate with py-spy, never wait. A run without a progress monitor is unattended, not monitored.
+<!-- END AGENT INFRA SECTION -->
+
+### Full-suite gate
+- `python -m pytest cogwheel/tests/ -q -n 8 --dist loadfile -k "not Timing and not timing"`, then the deselected timing guards in one serial pass. Never serial for the whole gate.
+- First: `--collect-only -q`; the collected count must match expectation.
+- numba cache: xdist workers share one `NUMBA_CACHE_DIR`; independent concurrent pytest processes get one cache dir EACH.
+
+### Detached-run health
+- Health = worker CPU + log growth. An xdist master legitimately idles at 0%.
+- xdist worker argv is `python -u -c import sys;exec(...)` — it does not contain "pytest".
+- `pgrep -f`/`pkill -f`: bracket idiom (`pgrep -f "pytest [c]ogwheel"`) or the check matches itself.
+- Kill a run only on ~10x contention-adjusted overshoot or zero log growth.
+- Fresh worktrees lack the untracked `cogwheel/waveform_models/IMRPhenomXODE` symlink; recreate it or `test_waveform`/`test_posterior`/`test_gw_prior` silently collect-error.
 
 ## CHANGELOG.md Invariant
 - `CHANGELOG.md` is generated by `scripts/render_fragments.py` — do not edit it directly.

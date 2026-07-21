@@ -1,63 +1,69 @@
 # Inspector Short-Term Observations
 
-## 2026-07-20 — Build 8c-cont RE-REVIEW #3 (registration + census + INS-3-001 fix)
+## 2026-07-20 — Build 8d homogenization (WP1 reroute + WP3 census)
 
-Scope: uncommitted tree, worktree /home/tejaswi/Work/cogwheel-claude-dev.
-`cd` into main tree hook-blocked; use `git -C <worktree>` + Serena shell
-with cwd set. Full python: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python.
+Scope: uncommitted tree, worktree /home/tejaswi/Work/cogwheel-claude-dev
+(main-tree `cd` hook-blocked; use `git -C <worktree>`). Full python:
+/home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python.
 
-### Prior-finding dispositions
-- **INS-3-001 (dropped-sliver bucket always-empty) → RESOLVED.**
-  surrogate_training.py now: (a) `_build_provenance(box, config, charts,
-  dropped_gamma_slivers=())` stores `provenance['dropped_gamma_slivers'] =
-  [list(s) for s in dropped_gamma_slivers]` (line 950); (b) train() collects
-  `all_dropped_slivers` across BOTH parities as flat `[float(lo),float(hi)]`
-  pairs (line ~1011) and the single call site passes it:
-  `_build_provenance(box, config, charts, all_dropped_slivers)` (line 1033).
-  Census read side `_dropped_slivers_from` defaults to
-  `surrogate.provenance.get('dropped_gamma_slivers')`; `_normalize_slivers`
-  handles None/empty/[[lo,hi],...] correctly. Report `'parities':
-  parity_reports` each carrying `dropped_gamma_slivers` → the override helper
-  `dropped_slivers_from_training_report` reads `report['parities'][label]
-  ['dropped_gamma_slivers']` consistently. Shape fix matches the prior
-  suggestion (FLAT, not parity-keyed). Import probe green.
-- **INS-1-001 (census test suite) → STILL OPEN.** No
-  `test_lensing_surrogate_census.py` in cogwheel/tests (dir listing +
-  grep for `surrogate_census`/`census.` in test_lensing_surrogate.py both
-  empty). surrogate_census.py (767 lines) + CLI ship with ZERO dedicated
-  tests. The ten Domain Test Descriptions, the two design falsifiables
-  (tube >=3x raw at eps_95; fold-approach flat vs raw ~-1/2 slope) and the
-  F010 mutation test remain absent. Route to Test Developer (independent
-  authorship, NOT WP-CS coder). NOTE: test_lensing_surrogate.py DOES round-
-  trip the `dropped_gamma_slivers` provenance field (lines 1358/1668), so
-  the serialization half of TEST 12 is covered; the census-tool behavior
-  is not.
+### What landed & verified CORRECT
+- operator.py WP1: `_positive_parity_grid_with_fallback` renamed ->
+  `_positive_parity_grid`; positive-parity dispatch now keys on
+  `gamma_prime = _mass_sheet_map(y,gamma,kappa)[2]`. gamma'>0 -> per-node
+  `_schwinger.f_schwinger` (reduce/rotate/reconstruct copied VERBATIM from
+  `_saddle_grid`, verified byte-for-byte identical modulo
+  `_mass_sheet_map` vs `_saddle_mass_sheet_map`); gamma'==0 (`not
+  gamma_prime>0.0`) -> legacy `_grid_certified` (sole legacy production
+  exit). try/except-CancellationError fallback DELETED. Added
+  w_array.ndim!=1 guard. Runtime-verified: gamma'>0 order_used=0 &
+  grid==scalar bit-identical; gamma'==0 order_used=9; w=68 gamma'>0 raises
+  SchwingerCertificationError. `legacy_operator_oracle = _grid_certified`
+  alias present, NOT in __all__. No geometric branch inside
+  `_positive_parity_grid` is CORRECT — positive-parity geometric routing
+  lives in channels.py select_branch (F_op is wave-entry only); matches
+  old `_grid_certified` which was pure-wave too. No stale
+  `_positive_parity_grid_with_fallback` refs anywhere.
+- test_lensing_surrogate.py CrownContractFlipWitnessTestCase (8 tests):
+  RAN GREEN (34s). NEW-Schwinger vs OLD-legacy_operator_oracle on
+  legacy-certified overlap, max-normalized 1e-10; dispatch spies; F010
+  mutation reds. Correct re-baseline.
+- scripts/census_homogenization_corners.py: geometry-only reporting tool,
+  no engine edits. All imported constants/symbols resolve. Smoke n=200
+  seed=1 GREEN (gamma'==0=0, corner 0.26, xcheck 0.0, max_w 433.8<500).
 
-### WP-REG (registration) — COMPLETE, verified
-- DATA_CONTRACTS schema 0.1.0→0.2.0 (correct MINOR). New artifact
-  `lens_amplification_surrogate` producer=scripts/train_lens_surrogate.py::main,
-  consumers = LensedRelativeBinningLikelihood + LensedMarginalizedExtrinsic
-  Likelihood + surrogate_census.run. Both likelihood ctors confirmed accept
-  `amplification_surrogate` (marginalized_likelihood.py:97,175,242 incl.
-  get_init_dict pop-when-None + NotImplementedError-when-set). data_registry
-  package_data root + entry added. regenerate_consumer_graph LOADERS entry;
-  CONSUMER_GRAPH.json regenerated (generated_at 2026-07-20).
-- `pipeline_graph.py list` → lens_amplification_surrogate consumers=8
-  registry_path=yes; consumers_of resolves 2 declared likelihoods + census
-  run [declared+actual] + 4 test callers + _load_or_build [ACTUAL-undeclared].
-  `_load_or_build` (training resume path) undeclared is benign (producer-side).
-
-### No new findings this pass
-The continuation only added: surrogate_training.py provenance threading
-(additive, correct), registration files, test_lensing_surrogate.py growth.
-No regression to surrogate.py/channels.py/likelihood.py crown byte-identity
-introduced by this delta.
-
-### Verdict
-ISSUES — solely because INS-1-001 (census test suite) is undelivered.
-resolved_ids: INS-3-001.
+### FINDINGS (introduced by this change, actionable)
+- INS-1-001 (implementation): plan-listed test suites NOT re-baselined ->
+  lensing suite RED. CONFIRMED red:
+  test_lensing_schwinger.py::PositiveParityBitFreezeTestCase (asserts
+  order_used>0 + frozen literals for gamma=0.2 positive parity — both now
+  false); test_lensing_operator.py 6 fail + 4 err (OperatorOracle /
+  ContractionCertification / CancellationRefusal — old positive-parity
+  operator-series refusal contract rerouted to Schwinger). UNVERIFIED but
+  plan-listed & likely affected: test_lensing_fast_path.py,
+  test_lensing_ratio_layer.py, test_lensing_batched_operator.py (value +
+  timing pins on the positive-parity operator path; Schwinger ~58ms/node
+  is far slower). Coder+Test-Dev memories both OWE these re-baselines to
+  a separate Test Dev dispatch — not yet done. Acceptance criterion
+  "full lensing-suite green at fixture scale" NOT met as delivered.
+- INS-1-002 (design/spec): SPEC.md line 54 spec-code divergence. Two now-
+  FALSE claims: (a) parity dispatch "whose positive-parity arm is
+  bit-frozen"; (b) Build-7a "(2) ... the all-certified hot path and every
+  certified output stay byte-identical". Post-WP1 the positive-parity
+  gamma'>0 hot path IS Schwinger and values changed ~1e-15. SPEC was in
+  the plan's expected-change list but untouched. Route to Librarian/spec-
+  owner (I own accuracy, they own the edit). Interpretation: spec needs
+  updating (WP1 is approved homogenization), not code wrong.
+- INS-1-003 (trivial): census node_classification_totals split — a
+  positive-parity node with w<=60 AND resolved AND L>48 is 'geometric' in
+  production (select_branch is w-independent) but the census labels all
+  w<=60 as served_by_schwinger. Minor undercount of served_by_geometric in
+  the owner-facing report; documented simplification; HEADLINE fractions
+  (gamma'=0, refusal corner) unaffected.
 
 ### Carry-forward
-Census tube cusp-window fall-through, refusal-ball, both design
-falsifiables, F010 mutation remain runtime-unexercised until the missing
-census test suite lands (INS-1-001).
+Once the operator/schwinger/fast-path/ratio/batched suites are re-baselined
+(order_used>0->==0 for gamma'>0; frozen literals->Schwinger values;
+CancellationError->SchwingerCertificationError above ceiling; timing gates
+retuned for Schwinger cost), re-run full lensing suite to confirm green
+before commit. INS-1-001 (census test suite from 8c) — check if still open
+in a later review; not in scope this build.
