@@ -1,5 +1,104 @@
 # Test Dev Short-Term Observations
 
+## 2026-07-21 build8g WP4/WP5 test_lensing_levers.py (EXTENDED: Lever4 Pearcey table + Lever5 L_MAX bracket)
+- Added Lever4 (Pearcey table certification/fallback/hash) + Lever5 (L_MAX
+  enforcement bracket + geometric census guards) shards to the existing
+  Lever1/2/3 value-preservation suite (do-not-rewrite). FULL FILE: 47 passed
+  /1 xfailed ~70s. Neighbors all green: geometry 13, operator 23, schwinger
+  34, airy_fold 48p/7s/1xf. NO production touched (only test file is `??`).
+- LEVER4 modules `_pearcey_table.py` + `_pearcey_cusp.py`. Oracle F002 = live
+  certified quadrature `_pearcey_cusp.pearcey(x,y)` (rotated steepest-descent
+  contour) vs bicubic `_pearcey_table` (RectBivariateSpline on DEMODULATED
+  Re/Im, remultiply Fresnel carrier phi_sp=t*^4+x t*^2+y t*). Currency =
+  ABSOLUTE error on P (rel meaningless at oscillatory zeros). Held-out =
+  LHS(400)+box corners+DENSE caustic line 27y^2=-8x^3 (LHS ALONE MISSES the
+  worst case). Caustic line attains ~0.98 of overall max err @n=91; positive-x
+  half (xs>0.15) is 4 orders cleaner (fold caustic lives only at x<=0).
+- LEVER4 UNREACHABLE PIN handled per house idiom: production 1e-8 abs pin
+  unreachable in minutes fixture (measured floor ~2.7e-5). Gated fixture floor
+  1e-4 + budget-independent CONVERGENCE control err(91)/err(61)=0.499<=0.7
+  (bicubic h^4) + @unittest.expectedFailure test_fixture_cannot_reach_
+  production_pin (honest RED). Pin==derive_box default asserted via
+  inspect.signature(derive_box).parameters['oracle_tol'].default==1e-8.
+- LEVER4 FALLBACK both directions: (a) outside-box -> table.evaluate returns
+  None -> pearcey routes to live quad; no-serve-gap proved by comparing
+  table.evaluate vs pearcey at the SAME near-edge interior pt across y (NOT two
+  different pts — that measures P's own variation, my first bug: 4.7e-4). (b)
+  F010 SHA1 hash mismatch: PearceyTable.load raises ValueError; corrupt table
+  content -> loader detects -> FALLS BACK to live quad, never serves corrupt
+  value. GLOBAL STATE HYGIENE: setUp/tearDown save+restore
+  _pearcey_cusp.get_pearcey_table() process global + tempdir. Self-falsif:
+  one-ULP nextafter breaks hash; corruption-is-consequential control.
+- LEVER5 modules operator.py + _schwinger.py + geometry.py. L=cancellation_
+  exponent(w,y,gamma,kappa)=w*|y'|. Config LEVER5_config lru_cached
+  (find_images+delay, delta_min). L_geo=34 MEASURED (smallest sweep L where
+  geometric_amplification-vs-F_op rel-err stays <1e-4). L_MAX=48 pinned INSIDE
+  double-sided bracket L_geo(34)<=48<=ceiling(60)-headroom(6). Oracle for
+  geometric err = f_schwinger/F_op (fast ~0.2s; mpmath ABANDONED — caused 3
+  prior build timeouts).
+- LEVER5 PREMISE REPAIR (post-8d): F_op SERVES above ceiling via WP4 uniform/
+  geometric arm; only `_schwinger.f_schwinger(w,source,gamma)` HARD-REFUSES
+  w>60 (SchwingerCertificationError). So wave-serves-below/refuses-above tests
+  drive f_schwinger DIRECTLY (eigenframe reduction identity for beta=0,kappa=0),
+  NOT F_op. Verified f_schwinger(60)=0.3089-0.6998j==F_op(60); f_schwinger(60.5)
+  raises while F_op serves. Enforced upper edge = kernel ceiling - headroom.
+- LEVER5 CENSUS GUARDS on every geometric-served node (F002): image count ==
+  quartic find_images root count; Morse parity-sum Sum sign(mu_a)==sign(detA)-1
+  (Morse index theorem, independent of amplitude path). Guard teeth: flip_first
+  closure flips one Morse sign -> geometric_amplification refuses (RED);
+  perturbed find_images -> refuses. Self-falsif: too-low L_MAX=25 serves
+  inaccurate geometric @w=28; too-high L_MAX=65 loses availability @w=62 where
+  f_schwinger refuses. Diagnostics: lever4_pearcey_abs_error_over_box.png,
+  lever5_wave_geometric_rel_err_vs_L.png.
+
+## 2026-07-21 build8f LEVERS test_lensing_levers.py (NEW suite, value-preservation vs HEAD)
+- 18 tests, all green ~29s. Verifies 3 uncommitted working-tree perf levers
+  are value-preserving vs HEAD=044eebb. NO production touched. Neighbor suites
+  all green: geometry 13, channels 16, likelihood 17p/12s/1xf, operator 23,
+  schwinger 34.
+- HEAD side-by-side load idiom for geometry.py: `git show HEAD:path`->REAL temp
+  .py file->importlib.spec_from_file_location, register in sys.modules FIRST
+  (numba @njit(cache=True) needs a file locator), lru_cached as module
+  `cogwheel_head_geometry_lever1`. For likelihood _norm_term/_data_term (both
+  self-contained) used AST extraction: ast.parse HEAD src, find FunctionDef,
+  ast.get_source_segment, exec in ns {'np':np,'_TWO_PI_I':likelihood._TWO_PI_I}.
+- LEVER1 (geometry.py companion-root image solve): _companion_roots byte-
+  identical to np.roots (sort_complex, max|diff|==0.0); find_images cur vs HEAD
+  count byte-identical + <=1e-10 rel; geometry_partition via patching
+  channels.geometry->head module, real_mask/switch byte-identical, delays/
+  saddle_kernels/critical_delay/caustic_distance <=1e-10 rel. GOTCHAS:
+  _source_frame returns (radius, basis) NOT (basis,radius); find_images_quartic
+  builds rotated=basis.T@matrix@basis then image_quartic_coefficients(radius,
+  rotated); channels.geometry_partition continues labels -> needs .reset()
+  before each call; config 'y' must be (radius-0.05)*unit (VECTOR not scalar,
+  else numba TypingError). Config sweep: pos-parity inside/outside/near-caustic
+  (+-CAUSTIC_HALFWIDTH=2e-3 via bisection _caustic_crossing_radius), saddle
+  2-image, kappa=0.3. Scatter diag relerror vs _min_pairwise_separation.
+- LEVER2 (likelihood.py _norm_term einsum-hoist): _data_term UNCHANGED (trivial
+  exact guard); _norm_term <=1e-10 REL normal regime, ABSOLUTE tol (NORM_ABS_TOL
+  =1e-11) where denom underflows (<NORM_UNDERFLOW_FLOOR=1e-6) — relative tol
+  meaningless at near-zero norm. Near-underflow input via LINEARITY nullspace
+  trick: _norm_term linear in b_moments so norm(b1+s*b2)=h1+s*h2; s=-h1[0]/h2[0]
+  drives det-0 norm to ~1e-13 with O(1) intermediates (genuine catastrophic
+  cancellation). Scatter diag relerror vs |denom|.
+- LEVER3 (operator.py node-parallel Schwinger): "serial" oracle = SAME grid
+  func with njit map swapped for .py_func (prange->range) via
+  mock.patch.object(operator,'_schwinger_raw_integral_map', <captured
+  _REAL_MAP_PYFUNC>). Byte-identity: _positive_parity_grid (5-tuple) +
+  _saddle_grid (BARE ndarray) every node max|diff|==0.0, converged/orders/
+  diag arrays bit-for-bit. Refusal identity via patch _schwinger._CERTIFICATION
+  _TOL=0.0 (all w<=60 wave nodes refuse) -> serial+parallel raise SAME
+  SchwingerCertificationError, any-node->whole-grid, scheduling-independent
+  (repeat runs identical). F010: _cert_collapsing_map (static, uses module-level
+  _REAL_MAP_PYFUNC captured before any patch) returns (int_n,int_n) collapsing
+  coarse/refined -> always-certified -> parallel serves a refused config ->
+  refusal-identity RED (confirmed). W_SWEEP=(5,18,40,55,59,61); 61>60 arm branch.
+  Heatmap diag |parallel-serial| over (w,gamma) uniformly zero.
+- 3 self-falsification classes (companion-roots perturb, norm-term perturb,
+  node-parallel F010). Plots: lever1_find_images_relerror_vs_double_root.png,
+  lever2_norm_term_relerror_vs_denominator.png,
+  lever3_parallel_minus_serial_heatmap.png in cogwheel/tests/output/.
+
 ## 2026-07-21 build8f/g WP1/WP4 test_lensing_airy_fold.py (EXTENDED: ladder wiring)
 - Added FOUR shards to the existing Airy/Pearcey suite (do-not-rewrite):
   ServingLadderDeterminismTestCase, CertifiedPathByteIdentityTestCase,

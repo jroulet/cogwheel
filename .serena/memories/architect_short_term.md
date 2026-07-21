@@ -1,5 +1,27 @@
 # Architect Short-Term Observations
 
+## Build 8f — serving micro-levers PLANNING — 2026-07-21
+5 levers -> 5 Coder WPs (Simplifier: fold arm-wiring into WP4;
+profile-first WPs must commit a benchmark script + pre-identify target).
+CRITICAL Professor reframing of Lever 5: RAISING L_MAX is the WRONG
+direction — L_MAX is a HANDOFF exponent, not an accuracy floor. The
+L~45-46 datum (F005) is the WAVE-branch 1e-10 crossing; geometric-branch
+accuracy is governed by w*delta (F013), NOT L (F019-class distinction).
+Ship L_MAX=48 UNCHANGED (50 = ceiling of any defensible raise). Retired
+the earlier ceil(1.5*L_c) formula. Enforcement = double-sided bracket
+L_geo <= L_MAX <= L_wave+margin, both floors MEASURED by Test Dev oracle
+sweep at production resolution. Lever5 Coder code = add image-count-match
++ Morse parity-sum (Sum sign(mu_a)==sign(detA)-1) guards to
+geometric_amplification (no new exception; reuse LensDomainError) +
+corrected provenance on named L_MAX. geometric_amplification confirmed
+guard-free today. Lever3 = njit prange pure-map, fastmath OFF, eigenframe
+reduce outside loop, any-node-refuses->whole-grid-refuses, byte-identity
+==0.0. Lever4 Pearcey box DERIVED at build time (asympt-handoff 1e-8 +15%
+margin, caustic 27y^2=-8x^3 inside, stored in provenance), demodulate
+Fresnel carrier phi_sp=t*^4+x t*^2+y t*, spline Re/Im separately, 1e-8 abs
+on P. All tests -> Test Developer.
+
+
 ## Build 8b-levers — FINAL plan emitted 2026-07-20
 
 Two Coder WPs (Simplifier: keep split). WP-A geometry Newton caustic

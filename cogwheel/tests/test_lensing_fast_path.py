@@ -117,9 +117,16 @@ from __future__ import annotations
 # MS_CEILING is a machine-calibrated guard.
 import os as _os
 
-for _thread_var in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS',
-                    'NUMBA_NUM_THREADS', 'OPENBLAS_NUM_THREADS'):
-    _os.environ.setdefault(_thread_var, '1')
+# Pin single-threaded numerics ONLY in strict-timing mode (the sole
+# consumer of the determinism): an import-scope pin poisons shared
+# pytest workers — numba's thread layer launches once per process, so
+# a layer launched at 1 by a lensing prange call makes any later
+# parallel ufunc (e.g. marginalized_extrinsic_qas) hard-fail on the
+# default 64 (Build 8f gate incident, 2026-07-21).
+if _os.environ.get('COGWHEEL_STRICT_TIMING'):
+    for _thread_var in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS',
+                        'NUMBA_NUM_THREADS', 'OPENBLAS_NUM_THREADS'):
+        _os.environ.setdefault(_thread_var, '1')
 
 import importlib.util
 import inspect

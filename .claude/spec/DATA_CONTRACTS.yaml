@@ -211,3 +211,15 @@ artifacts:
     conventions_applied:
       - units
       - array_axes
+
+  pearcey_table:
+    description: "Precomputed bicubic-spline table of the Fresnel-demodulated universal Pearcey primitive P(x, y) over a build-time-derived (x, y) box. Single npz of graded grid axes plus demodulated Re/Im grids and a JSON provenance scalar (box edges, overlap margin, oracle tolerance, SHA1 content hash); loaded and hash-verified via PearceyTable.load. Off by default (opt-in via set_pearcey_table / use_pearcey_table); the cusp arm consults it inside the box and falls back to live certified quadrature outside the box or on any load/hash anomaly. Controls (x, y) are dimensionless scaled cusp controls, so no physical-unit convention applies."
+    format: "npz"
+    producer:
+      module: "scripts/train_pearcey_table.py"
+      function: "main"
+    consumers:
+      - module: "cogwheel/lensing/chang_refsdal/_pearcey_cusp.py"
+        function: "cusp_amplification"
+      - module: "cogwheel/lensing/chang_refsdal/_pearcey_cusp.py"
+        function: "use_pearcey_table"

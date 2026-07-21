@@ -1,5 +1,308 @@
 # Coder Short-Term Observations
 
+- WP5 (Build 8f lever 5, L_MAX gate hardening): edited ONLY
+  cogwheel/lensing/chang_refsdal/operator.py (geometry.py/channels.py
+  UNTOUCHED; L_MAX stays 48 per Professor override of the brief's
+  "relax toward floor"). Three changes, no new exception class:
+  (1) L_MAX constant comment (~L206) re-provenanced to the mandated
+  double-sided-bracket text (HANDOFF exponent in the wave/geometric
+  OVERLAP, wave series acc L~45-46 F005, geometric onset ~50 governed
+  by w*delta F013, 48=census-(b) 13.9% crossover, refusal band [46,48]
+  by CancellationError, 50=ceiling; raising past 48 pushes nodes onto
+  wave past 1e-10 => refuse). Value UNCHANGED (48).
+  (2) NEW module helper `_certify_geometric_census(images, matrix)`
+  inserted before geometric_amplification. Guard (a) IMAGE-COUNT:
+  len(images) not in {2,4} -> geometry.LensDomainError. Guard (b)
+  MORSE PARITY-SUM: sum((-1)**geometry.morse_index(im,matrix)) must ==
+  (1 if det(matrix)>0 else -1)-1 (0 pos-parity, -2 saddle); else
+  LensDomainError. morse_index = eigvalsh strict <0 (reused, DRY).
+  This is _check_image_census's core WITHOUT the degeneracy escape
+  (strict) — the degenerate fold-3/cusp-2 censuses that the escape
+  lets through are exactly the "must not reach geometric" cases (they
+  route to wave via the resolution gate in production, so never hit
+  here => byte-identical prod).
+  (3) geometric_amplification now hoists images=find_images(...) into
+  a list, calls the guard, then iterates the SAME list (same order =>
+  byte-identical sum). Docstring Raises updated. select_branch: LOGIC
+  UNCHANGED, added Notes provenance paragraph only.
+  * KEY PHYSICS (why {2,4} is value-preserving for BOTH parities): the
+    Morse index theorem forces n_pos-n_neg == sign(detA)-1 (even), so
+    n_total is EVEN; quartic gives <=4 real roots => valid served
+    counts are exactly {2,4} (2=outside caustic, 4=inside) for positive
+    parity AND macro saddle alike. So guard (a)={2,4} never fires on a
+    valid saddle config (saddle "outside"=2 saddles, "inside"=4).
+  * VERIFIED (engine present): ast.parse OK; import OK. Value-
+    preservation vs ungated sum: pos-parity 1385 configs (426 count-2 +
+    959 count-4, w={80,500,3000}) tobytes-IDENTICAL, 0 spurious guard
+    fires; genuine macro-saddle (|gamma|>1-kappa) 400 configs (396
+    count-2 + 4 count-4) all byte-identical, 0 spurious fires; count
+    histogram both parities EXCLUSIVELY {2,4} (0 "other"). Guard RED:
+    count 1 and 3 -> guard-a LensDomainError; fabricated two-minima
+    (morse [0,0], signed sum 2 != 0) -> guard-b LensDomainError. L_MAX
+    ==48 exported.
+  * OWED to Test Dev (WP5 gates): (1) enforcement graduation of the
+    8d headroom audit test — assert shipped L_MAX (48) respects the
+    measured worst-config 1e-4 crossing floor + 1.5x margin; the
+    empirical bracket floors (L_geo, L_wave) are Test-Dev-measured, NOT
+    Coder-derivable (brief). (2) guard red-capability: wrong image
+    count (odd/>4) and Morse parity-sum violation each RED via
+    geometry.LensDomainError (no new exception). (3) value-preservation
+    witness: every resolved served config (both parities) byte-identical
+    to HEAD (guards pass silently) — the ~1800-config sweep above is the
+    template. (4) NOTE the guard is STRICTER than find_images'
+    _check_image_census (no degeneracy escape) — a fold-merged-3 /
+    cusp-merged-2 census that find_images returns will be REFUSED here
+    (correct: those must route to wave, and the resolution gate ensures
+    they never reach geometric in prod). Test authorship declined
+    (code+blessing must not share an author).
+  * UNVERIFIED (WP5): full lensing test suite pass/fail (downstream, I
+    do not run suites). Any existing test that drives
+    geometric_amplification on a DEGENERATE (near-caustic, count 1/3 or
+    cusp-merged-2) census directly — bypassing the resolution gate —
+    will now RED by design (intended strict refusal); such tests must
+    move to a resolved fixture or assert the LensDomainError.
+
+- WP1 (Build 8f lever 1, geometry_partition residual): edited ONLY the
+  quartic root solve inside cogwheel/lensing/chang_refsdal/geometry.py
+  (new `_companion_roots` helper + one call swap in `_generic_candidates`
+  line ~615) + NEW committed micro-benchmark
+  scripts/profile_geometry_partition.py. channels.py UNTOUCHED;
+  image_kernel physics, Newton polish, census, sort ALL UNTOUCHED.
+  * PROFILE (committed script, ran as diagnostic): residual ~636us/call
+    (n_configs160,n_w128,rep40,seed0). Split: find_images 47.6%
+    (312us, DOMINANT, n_w-independent scalar), physical_kernels 41%
+    (265us, mostly per-image linalg det/eigvalsh — grows slowly w/ n_w),
+    per_image_delays 5.3%, channel_switch 6.1%. nearest_caustic_point
+    (122us, Build-8b, NOT optimized) + assign_labels reported as context.
+    find_images DOMINANT across n_w in {32,128}. Confirms Professor+
+    Simplifier prior.
+  * WITHIN find_images (~316us): candidate-gen incl np.roots 73us
+    (np.roots alone ~58us), +accept/polish 106us, +sort/census 102us.
+    Census (morse_index=eigvalsh per image) + polish are CORRECTNESS
+    GATES whose DISCRETE outputs are byte-identity-FRAGILE near folds
+    (eigvalsh sign of a ~0 eigenvalue) — UNSAFE to rewrite. The root
+    solve is the one BYTE-IDENTICAL win.
+  * OPT: replaced np.roots(quartic) with `_companion_roots` = eigvals of
+    the Frobenius companion — the SAME algorithm np.roots uses, minus its
+    generic wrapper (leading/trailing-zero trim, dtype promo, root pad).
+    NOT Ferrari — sidesteps the Professor resolvent-cubic branch-select /
+    double-root hazard entirely (backward-stable eigenvalue method,
+    identical to HEAD). Guard: only fast-paths a full-degree monic-ish
+    quartic (coeff[0]!=0, coeff[-1]!=0, 1-D size>=2, all finite); else
+    DEFERS to np.roots verbatim. Production always qualifies (det A!=0
+    refused upstream => constant=det^2>0, leading=1.0). np.roots' own
+    code path for such polys IS eigvals(companion) with no padding, so
+    bit-for-bit identical.
+  * VERIFIED (engine present): ast.parse+import OK. np.roots-vs-companion
+    tobytes IDENTICAL (maxdiff 0.0) on samples. find_images byte-identity
+    vs HEAD side-by-side (git show HEAD:geometry.py loaded standalone):
+    1800 configs incl near-caustic eta=+-0.002 crossings — worst image
+    rel-diff 0.0, worst delay rel-diff 0.0, refuse_decision_mismatch=0,
+    image_count_mismatch=0. End-to-end geometry_partition (400 configs):
+    real_mask_mismatch=0, worst kernel/switch/delay abs-diff 0.0 (channels
+    unchanged => byte-identical by construction). Post-opt benchmark:
+    find_images 312->298us (root solve 58->34.5us in isolation, ~40%
+    faster). Timing is a DIAGNOSTIC, not a gate (architect policy).
+  * NOTE: np.roots also appears in _pearcey_cusp.py & _pearcey_table.py
+    (fold-caustic cubic 4t^3+2xt+y) — DIFFERENT module, NOT the
+    geometry_partition residual, left UNTOUCHED (out of WP1 scope).
+  * OWED to Test Dev (WP1 gates): (1) find_images value-preservation
+    new-vs-HEAD <=1e-10 relative (actually 0.0) over the sweep INCLUDING
+    eta=+-0.002 near-caustic; (2) image count / labels / real_mask /
+    switch-decision byte-identity; (3) _companion_roots delegation: a
+    trailing-zero / leading-zero / non-finite quartic must equal
+    np.roots(coeffs) exactly (the deferral branch); (4) the fast-path
+    companion tobytes == np.roots on the monic quartic. Test authorship
+    declined (code+blessing must not share an author).
+  * UNVERIFIED (WP1): full lensing test suite pass/fail (downstream, I do
+    not run suites); the reported residual split is FIXTURE-scale
+    synthetic (seed0, n_w128) — owner-facing ~2ms real split needs a run
+    on production dense_w with real lens configs.
+
+- WP2 (Build 8f lever 2, likelihood moment contraction): edited ONLY the
+  mode-pair reduction inside cogwheel/lensing/likelihood.py::_norm_term
+  (lines ~549-654) + NEW committed micro-benchmark
+  scripts/profile_likelihood_contraction.py. _data_term UNTOUCHED (its
+  mode reduction is 'mdb,mdb->db', LINEAR in n_m, only 5 einsums — not the
+  measured-dominant term). Everything in _norm_term from `m0 = n00+n11+n22`
+  onward (image reduction, kpair/nu/phase/contrib) is BYTE-IDENTICAL to HEAD.
+  * FUSION: replaced the 12 three-operand einsums `np.einsum('mMdb,mdb,
+    Mdb->db', bp, x_m, y_mprime)` (reduce_pairs called 12x, quadratic in
+    n_m) with a hoisted left-contraction per B^(p): r_stack=stack(r0,r1),
+    rho_stack=stack(rho0,rho1); bilinear(bp)= einsum('mMdb,pmdb->pMdb',bp,
+    r_stack) then einsum('pMdb,qMdb->pqdb',left,rho_stack) -> Q[p,q,d,b].
+    Then n00=q0[0,0], n11=q1[1,0]+q1[0,1], n10=q1[0,0], n22=q2[1,1],
+    n21=q2[1,0]+q2[0,1], n20=q2[0,0], n32=q3[1,1], n31=q3[1,0]+q3[0,1],
+    n30=q3[0,0]. p=left mode (r), q=right mode (rho) — MAPS EXACTLY to
+    original reduce_pairs(bp,x=r_p,y=rho_q). 4 B^(p) tensors -> 8 quadratic
+    einsums (2 per bilinear) vs 12 originally; the m'-dots are linear. Pure
+    re-association (sum over m first then m') — NO math change, NO mask/
+    branch change.
+  * VERIFIED (engine present): ast.parse both files OK; module imports OK.
+    VALUE-PRESERVATION vs HEAD side-by-side copy (git show HEAD:...
+    _norm_term regex-extracted, exec'd sharing np/_TWO_PI_I) over 5-shape
+    sweep [(5,3,256,4),(2,1,64,2),(6,2,128,5),(1,3,32,1),(4,2,300,3)]:
+    WORST max_rel=1.66e-15 (<= 1e-10, PASS), dtype+shape identical every
+    shape. Benchmark smoke (n_bins64,repeats20): runs, _norm_term 84.1% of
+    contraction — CONFIRMS Simplifier static call that norm-term (quadratic
+    n_m) dominates; dominance grows with n_modes. --help OK.
+  * Benchmark = self-contained micro-bench (synthetic complex-normal arrays
+    at documented shapes, argparse n-modes/n-det/n-bins/n-img/repeats/seed,
+    warm-up call each, timeit mean); reports per-call ms + %-split +
+    dominant term. TIMING IS A DIAGNOSTIC, not a gate (per WP + my role).
+  * OWED to Test Dev (WP2 gates): (1) value-preservation _norm_term
+    new-vs-HEAD <=1e-10 RELATIVE over the shape sweep WITH an ABSOLUTE-
+    tolerance fallback where the normalization denominator underflows
+    (Professor guard — relative tol meaningless there); (2) mask/branch
+    byte-identity (no included-term/mask decision changed — structurally
+    true, downstream of `m0=...` untouched); (3) dtype/shape identity.
+    Test authorship declined (code+blessing must not share an author).
+  * UNVERIFIED (WP2): full lensing test suite pass/fail (downstream, I do
+    not run suites); the reported 84.1% split is FIXTURE-scale synthetic
+    (seed0, small shape) — the owner-facing ~2.3ms real split needs a run
+    on production (n_modes,n_det,n_bins) with real moment tensors.
+
+- WP4 (Build 8f lever 4, universal Pearcey P(x,y) spline table as a
+  registered data product): NEW
+  cogwheel/lensing/chang_refsdal/_pearcey_table.py + scripts/
+  train_pearcey_table.py; EDITED _pearcey_cusp.py (consult wiring only,
+  pearcey()/pearcey_asymptotic/primitive-quadrature internals UNTOUCHED);
+  registered pearcey_table in DATA_CONTRACTS.yaml (0.1.0->0.2.0) +
+  data_registry.yaml (1.0.0->1.1.0). NO engine internals touched.
+  * TABLE = bicubic RectBivariateSpline (kx=ky=3,s=0) of the FRESNEL-
+    DEMODULATED P: store demod = P*exp(-i*phi_sp), phi_sp = t*^4+x t*^2+
+    y t* at the DOMINANT-CONTINUOUS real stationary root t* of
+    4t^3+2xt+y=0. Selection rule = MAX |phi''|=|12t^2+2x| (the isolated/
+    non-merging branch) => carrier CONTINUOUS across the fold caustic
+    27y^2=-8x^3 (the required property; the merging pair has curvature->0
+    there). Only C0 (value-continuous, phi equal) across the interior
+    Maxwell seam y=0 — absorbed by grid grading. remodulate multiplies
+    exp(+i phi_sp) back.
+  * SERIALIZATION allow_pickle=False: npz of plain float64 arrays x_grid,
+    y_grid (graded, symmetric, power=1.6 clustering near 0), demod_real,
+    demod_imag (nx,ny) + provenance JSON stored as np.asarray(json.dumps)
+    (0-d '<U' unicode scalar, NOT pickled). from_grid REFITS splines at
+    load (splines never serialized). content_hash = sha1 over the 4
+    arrays' float64 bytes + box scalars [x_max,y_max,margin,oracle_tol]
+    bytes; PearceyTable.load recomputes & compares -> ValueError on
+    mismatch (NO new exception class per 8f fence; ValueError/OSError/
+    KeyError are the load-anomaly vocabulary).
+  * BOX derive_box (OFFLINE): ray fan (180 rays) x radial march (240),
+    handoff r per ray = smallest r beyond which |pearcey_asymptotic-
+    pearcey| < oracle_tol staying below out to r_stop; X_MAX,Y_MAX =
+    axis-aligned enclosing half-widths *(1+margin=0.15). Then FORCE the
+    served semicubical caustic strictly inside: y_max = max(y_max,
+    sqrt(8/27)*x_max^1.5*(1+margin)). derive_box is EXPENSIVE (43200
+    pearcey@~45ms ~ 30min) — the offline training run, NOT run by me.
+  * CONSULT WIRING (_pearcey_cusp.py): module global _PEARCEY_TABLE=None
+    + set/get/use_pearcey_table (use_ = opt-in loader: on ANY load/hash
+    anomaly warns, leaves global None, returns False — never installs a
+    bad table). cusp_amplification gained kwarg pearcey_table=None; the
+    single primitive site `primitive = pearcey(x_eval,y_eval)` became
+    `table = pearcey_table or _PEARCEY_TABLE; primitive =
+    _consult_pearcey(x_eval,y_eval,table)`. _consult_pearcey: table None
+    -> pearcey(x,y) (BYTE-IDENTICAL HEAD); else table.evaluate (None if
+    outside box / non-finite / anomaly) -> serve, else fall back to
+    pearcey(x,y). evaluate() is TOTAL (returns None, never raises) so the
+    consult needs no try/except (avoids generic-except smell). Default
+    (no global, no kwarg) => byte-identical to HEAD by construction.
+  * pearcey_asymptotic NOT tabled (closed-form, cheap); only the 45ms
+    quadrature primitive is amortized. kappa has no table axis — fine,
+    P(x,y) is lens-independent (the demod controls already fold in all
+    geometry).
+  * VERIFIED (smoke, engine present): ast.parse 3 files; import OK;
+    pipeline_graph trace pearcey_table -> producer main + 2 consumers;
+    list -> registry_path=yes. Tiny-box round-trip (build->save->load):
+    hash matches, evaluate reproducible, grid-node table-vs-quad
+    abs-err 3e-16 (spline interpolates nodes exactly), outside-box
+    evaluate None, byte-identity _consult_pearcey(x,y,None)==pearcey(x,y)
+    at 3 pts, consult inside==table & outside==live pearcey, hash-mismatch
+    load raises ValueError, use_pearcey_table(bad|missing) False + global
+    cleared. cusp_amplification runs both with/without global table (no
+    crash; returns None for the test config — calibration cert refuses,
+    per WP3-8e, routing verified).
+  * UNVERIFIED (WP4 8f): (a) FULL derive_box + build + held_out 1e-8
+    certification at shipped resolution — offline ~30min+ run, driver
+    executes; NO shipped pearcey_table.npz in tree (loader default is
+    package-data path; absent file => use_pearcey_table returns False =>
+    live-quad fallback, so nothing breaks). (b) full lensing test suite
+    pass/fail (downstream). (c) the served AMPLITUDE the table reproduces
+    is only as good as pearcey() quadrature (exact-to-1e-8 of the
+    primitive) — the cusp arm's own calibration (b1,b2) is still deferred
+    per WP3-8e; the table faithfully amortizes pearcey(), it does not fix
+    calibration.
+  * OWED to Test Dev (8f table gates): (1) round-trip byte-identity
+    (save->load->evaluate); (2) hash-mismatch load RED -> ValueError ->
+    use_pearcey_table False (F010-style stored-hash mutation MUST fall
+    back, not serve — brief-mandated); (3) missing-file fallback; (4)
+    byte-identity cusp_amplification with no table == HEAD (consult(None)
+    ==pearcey); (5) held-out 1e-8 accuracy vs quadrature on a small
+    fixture box; (6) outside-box -> live-quad fallback both directions.
+    Test authorship declined (code+blessing must not share an author).
+  * NOTE: sync_derived_docs.py --check rc=1 is PRE-EXISTING
+    (lens_amplification_surrogate TEST consumers not in DATA_CONTRACTS,
+    consumer-graph not regenerated — rg missing per WP-REG note); my
+    pearcey_table entry raised ZERO new complaints.
+
+- WP3 (Build 8f lever 3, node-parallel exact Schwinger): edited ONLY
+  cogwheel/lensing/chang_refsdal/operator.py (evaluator bodies
+  _schwinger/_dd/_hyp1f1 UNTOUCHED). Added `import math`, `dd_complex_sub`
+  from _dd, and a BARE module-global alias
+  `_schwinger_raw_t_integral_core = _schwinger._raw_t_integral_core`
+  (this alias is the F010 patch handle — numba freezes it at compile time,
+  so patching it only bites through .py_func). NEW njit driver
+  `_schwinger_raw_integral_map(w_nodes,a,b,y1,y2,u_lo,u_mid,u_hi,n_panels,
+  xk_hi,xk_lo,wk_hi,wk_lo)` = njit(parallel=True,cache=True,fastmath=False),
+  PURE MAP over numba.prange(m): per node calls core at n_panels[i] then
+  2*n_panels[i], writes dd-complex 4-tuples to DISJOINT rows int_n[i,:]/
+  int_2n[i,:], returns (int_n,int_2n) shape (m,4). NO reduction inside
+  prange. NEW Python wrapper `_schwinger_wave_grid_values(w_nodes,y_eig,
+  gamma_prime,lam,kappa,s)`: computes per-node setup (t_cap,log_t_cap,
+  margin,u_lo/mid/hi,n_panels via _panel_count) in CPython byte-identical
+  to f_schwinger, calls driver, then per-node cert (dd_complex_sub +
+  _dd_complex_magnitude + _CERTIFICATION_TOL) + _reconstruct + mass-sheet
+  phase; returns (values, certified) — does NOT raise.
+- Both _saddle_grid (~910-993) and _positive_parity_grid (gamma'>0 loop,
+  ~1470-1540) node loops REPLACED with a Python PRE-PASS classifying nodes
+  into geometric (saddle only, resolved & w>60), arm (_uniform_arm_value ->
+  value or ceiling_refusers), else batch_index; then ONE
+  _schwinger_wave_grid_values call over w_array[batch_index]; then refusal
+  reduction in Python: refusers = ceiling_refusers + uncertified batch
+  nodes; if any, re-run f_schwinger on min(refusers) to raise the AUTHENTIC
+  SchwingerCertificationError (lowest-index = serial first-refuser message
+  identity) + unreachable guard raise. Eigenframe reduce (lam,y_scaled,
+  gamma_prime,z_eig,y_eig,s) computed ONCE above the pre-pass in both
+  (saddle L910-919), passed INTO the batch — never recomputed per node.
+  NEW diagnostic `_measure_node_parallel_speedup(...)` (mirrors
+  _measure_warm_cost, not in __all__, local `import time`).
+- VERIFIED (smoke, engine present): ast.parse OK. Byte-identity grid
+  (parallel) vs per-node F_op both parities: max|diff|=0.0, tobytes equal.
+  F_op/F_op_grid end-to-end finite both parities (pos kappa=0; saddle
+  kappa=0.8). Driver .py_func present. F010 RED via .py_func: clean py_func
+  max|int_2n|=7e-6, with mock.patch.object(op,'_schwinger_raw_t_integral_core',
+  zeroing corrupt) py_func -> 0.0 (corruption reachable through compiled-
+  driver's py_func chain). Refusal identity: serial F_op(w=300) and
+  F_op_grid([12,18,300,24]) both raise SchwingerCertificationError, SAME
+  type AND SAME message. Determinism: 5 grid runs tobytes-identical.
+  Speedup diagnostic: 12 nodes serial 1535.7ms / parallel 299.0ms = 5.14x.
+- NOTE: mock.patch.object on the module global does NOT falsify the
+  COMPILED F_op_grid path (numba froze the core ref) — that's the F010
+  contract; falsification MUST go through .py_func. Confirmed: patched +
+  compiled F_op_grid still returned a value (expected); patched + .py_func
+  went to 0.0 (red).
+- UNVERIFIED (WP3 8f): full lensing test suite pass/fail (I do not run
+  suites; downstream). OWED to Test Dev: (1) new/updated F010 gate must
+  patch `operator._schwinger_raw_t_integral_core` and drive
+  `_schwinger_raw_integral_map.py_func(...)` RED (compiled F_op_grid path
+  will NOT go red — that's correct, must use py_func). (2) byte-identity
+  sweep parallel-vs-serial per node both parities (max|diff|==0.0,
+  diagnostics arrays bit-for-bit). (3) refusal-decision identity (same
+  SchwingerCertificationError type+message). (4) scheduling-independent
+  determinism (repeated runs byte-identical). (5) maintenance-coupling
+  guard: _schwinger_wave_grid_values setup/cert/reconstruct tail MIRRORS
+  f_schwinger's body — if f_schwinger's setup/cert changes, the wrapper
+  must change in lockstep (byte-identity suite is the guard).
+
 - WP4 (Build 8e wire uniform arms into serving ladder): edited 3 files,
   engine internals (_schwinger/_dd/_hyp1f1) + L_MAX + select_branch
   UNTOUCHED. (1) operator.py: new module-level helper _uniform_arm_value(

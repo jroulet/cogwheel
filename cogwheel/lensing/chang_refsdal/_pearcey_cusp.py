@@ -94,12 +94,74 @@ from __future__ import annotations
 import cmath
 import functools
 import math
+import warnings
 
 import numpy as np
 
 from cogwheel.lensing.chang_refsdal import geometry
+from cogwheel.lensing.chang_refsdal._pearcey_table import PearceyTable
 
-__all__ = ['pearcey', 'pearcey_asymptotic', 'cusp_amplification']
+__all__ = ['pearcey', 'pearcey_asymptotic', 'cusp_amplification',
+           'PearceyTable', 'set_pearcey_table', 'get_pearcey_table',
+           'use_pearcey_table']
+
+# ----------------------------------------------------------------------
+# Optional Pearcey table (opt-in amortization of the primitive; off by
+# default so the cusp arm stays byte-identical to the live-quadrature
+# path).  See `_pearcey_table.PearceyTable`.
+# ----------------------------------------------------------------------
+
+#: Process-global table consulted by `cusp_amplification` when no explicit
+#: ``pearcey_table`` is passed.  ``None`` (the default) keeps the cusp arm
+#: byte-identical to HEAD.
+_PEARCEY_TABLE: PearceyTable | None = None
+
+
+def set_pearcey_table(table: PearceyTable | None) -> None:
+    """Install (or clear, with ``None``) the process-global Pearcey table."""
+    global _PEARCEY_TABLE
+    _PEARCEY_TABLE = table
+
+
+def get_pearcey_table() -> PearceyTable | None:
+    """Return the process-global Pearcey table (``None`` if unset)."""
+    return _PEARCEY_TABLE
+
+
+def use_pearcey_table(path: str | None = None) -> bool:
+    """Load and install the process-global Pearcey table (opt-in switch).
+
+    Returns ``True`` on success.  On ANY load / hash anomaly the global is
+    left cleared (``None``) and ``False`` is returned, so the cusp arm
+    transparently falls back to live certified quadrature -- the table is
+    never installed in a state that could serve a wrong number.
+    """
+    try:
+        table = PearceyTable.load(path)
+    except (OSError, ValueError, KeyError) as error:
+        warnings.warn(f'Pearcey table unavailable ({error}); using live '
+                      f'certified quadrature.', RuntimeWarning)
+        set_pearcey_table(None)
+        return False
+    set_pearcey_table(table)
+    return True
+
+
+def _consult_pearcey(x: float, y: float,
+                     table: PearceyTable | None) -> complex | None:
+    """Table-first Pearcey lookup with live certified-quadrature fallback.
+
+    ``table is None`` (the default) evaluates the certified quadrature
+    `pearcey` directly -- byte-identical to HEAD.  Otherwise the table is
+    consulted inside its box; the live quadrature is used outside the box
+    or on any table anomaly (`PearceyTable.evaluate` returning ``None``).
+    """
+    if table is None:
+        return pearcey(x, y)
+    served = table.evaluate(x, y)
+    if served is not None:
+        return served
+    return pearcey(x, y)
 
 # ----------------------------------------------------------------------
 # Primitive: certified Pearcey function P(x, y).
@@ -515,7 +577,8 @@ def _leading_geometric(w: float, image: np.ndarray, source: np.ndarray,
 
 def cusp_amplification(w: float, source, gamma: float, *,
                        beta: float = 0.0, kappa: float = 0.0,
-                       envelope_bar: float = _DEFAULT_ENVELOPE_BAR
+                       envelope_bar: float = _DEFAULT_ENVELOPE_BAR,
+                       pearcey_table: PearceyTable | None = None
                        ) -> complex | None:
     """
     Uniform Pearcey amplification in a caustic-cusp neighborhood.
@@ -550,6 +613,13 @@ def cusp_amplification(w: float, source, gamma: float, *,
         External convergence.
     envelope_bar : float, optional
         Max-normalized (F016) bar on the leading uniform error.
+    pearcey_table : PearceyTable, optional
+        Precomputed table amortizing the certified quadrature.  When
+        given (or when a process-global table is installed via
+        `set_pearcey_table`) the primitive is served from the table
+        inside its box and from live certified quadrature outside the box
+        or on any table anomaly.  ``None`` (the default, no global) keeps
+        the primitive call byte-identical to the live-quadrature path.
 
     Returns
     -------
@@ -633,7 +703,8 @@ def cusp_amplification(w: float, source, gamma: float, *,
     x_eval, y_eval = (-x, -y) if reflected else (x, y)
     phase_sign = -1.0 if reflected else 1.0
 
-    primitive = pearcey(x_eval, y_eval)
+    table = pearcey_table if pearcey_table is not None else _PEARCEY_TABLE
+    primitive = _consult_pearcey(x_eval, y_eval, table)
     if primitive is None:
         return None
     asymptotic = pearcey_asymptotic(x_eval, y_eval)

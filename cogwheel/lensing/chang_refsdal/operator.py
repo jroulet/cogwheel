@@ -168,6 +168,7 @@ geometric branch obtains convergence directly from
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numba
@@ -175,8 +176,17 @@ import numpy as np
 
 from cogwheel.lensing.chang_refsdal import (
     geometry, _schwinger, _airy_fold, _pearcey_cusp)
+from cogwheel.lensing.chang_refsdal._dd import dd_complex_sub
 from cogwheel.lensing.chang_refsdal._hyp1f1 import (
     point_mass_g_derivatives)
+# Bare module-global alias for the Schwinger raw-integral njit core so the
+# node-parallel driver `_schwinger_raw_integral_map` can call it inside
+# `numba.prange` AND its `.py_func` chain can be patched by the F010
+# self-falsification tests (the same discipline `_fused_contraction` uses
+# for its module-global references).  The evaluator body itself is UNTOUCHED
+# (Build 8f lever 3 restructures only the calling loop).
+from cogwheel.lensing.chang_refsdal._schwinger import (
+    _raw_t_integral_core as _schwinger_raw_t_integral_core)
 
 __all__ = [
     'RHO_START', 'RHO_END', 'L_MAX', 'MAX_ORDER',
@@ -194,9 +204,18 @@ RHO_START = 0.5
 #: resolution onset ``rho1`` (see the module docstring).
 RHO_END = 4.0
 
-#: Cancellation-exponent threshold above which, once resolved, the
-#: geometric branch is certified.  Sits below the kernel ceiling of 60
-#: and above the geometric onset near 50 so the branches overlap.
+#: Cancellation-exponent HANDOFF threshold: above it, once resolved, the
+#: geometric branch is certified.  L_MAX is a handoff exponent INSIDE the
+#: certified wave/geometric overlap, NOT a one-sided accuracy floor.  The
+#: wave operator series is accurate to ``L ~ 45-46`` (FINDINGS F005); the
+#: geometric asymptote is accurate above its ``~50`` onset at resolved
+#: clusters (FINDINGS F013, governed by ``w*delta`` NOT ``L``); ``48`` is
+#: the census-(b) 13.9%-calibrated crossover; the refusal band
+#: ``[46, 48]`` exits by named `CancellationError`.  ``50`` is the ceiling
+#: of any defensible raise, gated by the enforcement bracket (the
+#: Test-Developer's graduated audit test).  Raising L_MAX past ~48 would
+#: push previously-geometric-served nodes onto the wave path past its
+#: 1e-10 accuracy ceiling (~L45-46), where they refuse -- so it stays 48.
 L_MAX = 48
 
 #: Operator-series order cap.  The kernel derivative ladder handed to
@@ -542,6 +561,285 @@ def _uniform_arm_value(w: float, y: np.ndarray, gamma: float, *,
     return None
 
 
+@numba.njit(parallel=True, cache=True, fastmath=False)
+def _schwinger_raw_integral_map(
+        w_nodes, a, b, y1, y2, u_lo, u_mid, u_hi, n_panels,
+        xk_hi, xk_lo, wk_hi, wk_lo):
+    """Node-parallel PURE MAP of the raw Schwinger ``t``-integral.
+
+    THE parallel hot core of the node-parallel exact wave path (Build 8f
+    lever 3).  For each of the ``m`` independent nodes it evaluates the
+    coarse (``N``-panel) and refined (``2N``-panel) raw ``t``-integrals via
+    the byte-frozen `_schwinger._raw_t_integral_core` -- the SAME njit core,
+    with the SAME per-node float64 arguments the serial `f_schwinger`
+    passes -- and stores the two dd-complex results in disjoint rows.  The
+    ``w``-independent eigenframe reduction (``a``, ``b``, ``y1``, ``y2``,
+    the shared Gauss-Legendre rule) is computed ONCE by the Python wrapper
+    and broadcast in; each ``prange`` iteration only INDEXES the per-node
+    setup arrays and writes ``int_n[i]`` / ``int_2n[i]``.
+
+    This is a pure map by construction (Professor rules for lever 3):
+
+    * NO cross-node reduction lives in the ``prange`` (a parallel
+      ``sum``/``max`` would reassociate and break bit-exactness); the
+      certification magnitudes and the named-refusal AND are reduced in the
+      Python wrapper `_schwinger_wave_grid_values`.
+    * ``fastmath`` is OFF, so no reassociation is introduced relative to the
+      serial `f_schwinger` path.
+    * Each node's `_raw_t_integral_core` call is self-contained and
+      deterministic in its inputs, so the result is INDEPENDENT of which
+      thread runs it or of the node ordering -- the two returned arrays are
+      byte-for-byte identical to a serial loop over the same nodes.
+    * No per-thread scratch buffer changes the within-node accumulation
+      order (the accumulation lives entirely inside the untouched core).
+
+    The named `_schwinger.SchwingerCertificationError` is NEVER raised here
+    -- it would have to cross a thread boundary; the refusal is a boolean
+    reduced and raised by the Python wrapper AFTER this map completes.
+
+    Parameters
+    ----------
+    w_nodes : np.ndarray
+        ``(m,)`` float dimensionless frequencies, each ``0 < w <=
+        W_CEILING_SCHWINGER`` (the wave-branch nodes gathered by the
+        wrapper).
+    a, b, y1, y2 : float
+        The ``w``-independent eigenframe scalars ``1 - gamma'``,
+        ``1 + gamma'`` and the two eigenframe source components, computed
+        ONCE by the wrapper.
+    u_lo, u_mid, u_hi : np.ndarray
+        ``(m,)`` float ``ln t`` integration range ends per node
+        (``u_mid == log_t_cap``), computed in the wrapper with CPython
+        ``math`` so they reach the core bit-identical to `f_schwinger`.
+    n_panels : np.ndarray
+        ``(m,)`` int coarse composite-panel count per node; the refined
+        rule uses ``2 * n_panels``.
+    xk_hi, xk_lo, wk_hi, wk_lo : np.ndarray
+        The shared double-double Gauss-Legendre nodes and weights.
+
+    Returns
+    -------
+    int_n, int_2n : np.ndarray
+        ``(m, 4)`` float dd-complex ``(re_hi, re_lo, im_hi, im_lo)`` raw
+        ``t``-integrals from the ``N`` and ``2N`` rules, BEFORE any
+        prefactor -- the wrapper certifies and reconstructs them.
+    """
+    m = w_nodes.shape[0]
+    int_n = np.empty((m, 4), dtype=np.float64)
+    int_2n = np.empty((m, 4), dtype=np.float64)
+    for i in numba.prange(m):
+        w = w_nodes[i]
+        # Same call order as `f_schwinger`'s ``for n_side in (n_panels,
+        # 2 * n_panels)`` loop, so int_n / int_2n match the serial path.
+        rn0, rn1, rn2, rn3 = _schwinger_raw_t_integral_core(
+            w, a, b, y1, y2, u_lo[i], u_mid[i], u_hi[i], n_panels[i],
+            xk_hi, xk_lo, wk_hi, wk_lo)
+        int_n[i, 0] = rn0
+        int_n[i, 1] = rn1
+        int_n[i, 2] = rn2
+        int_n[i, 3] = rn3
+        r20, r21, r22, r23 = _schwinger_raw_t_integral_core(
+            w, a, b, y1, y2, u_lo[i], u_mid[i], u_hi[i], 2 * n_panels[i],
+            xk_hi, xk_lo, wk_hi, wk_lo)
+        int_2n[i, 0] = r20
+        int_2n[i, 1] = r21
+        int_2n[i, 2] = r22
+        int_2n[i, 3] = r23
+    return int_n, int_2n
+
+
+def _schwinger_wave_grid_values(
+        w_nodes: np.ndarray, y_eig: np.ndarray, gamma_prime: float,
+        lam: float, kappa: float, s: float
+        ) -> tuple[np.ndarray, np.ndarray]:
+    """Byte-identical node-parallel batch of the ``w <= ceiling`` wave nodes.
+
+    The Python wrapper around `_schwinger_raw_integral_map`.  Given the
+    ``w <= W_CEILING_SCHWINGER`` wave-branch frequencies of a single lens
+    config (all sharing the eigenframe ``y_eig`` and reduced shear
+    ``gamma'``), it reproduces `_schwinger.f_schwinger` node by node with
+    the expensive raw ``t``-integrals evaluated in PARALLEL, and returns
+    the mass-sheet-reconstructed grid values together with a per-node
+    certification flag.  It does NOT raise: the refusal is reduced by the
+    GRID caller over the full node ordering (so the authentic named
+    exception carries the lowest-index refuser's message, matching the
+    serial first-refuser).
+
+    Byte-identity is by construction: the setup scalars (``t_cap``,
+    ``margin``, ``u_lo``/``u_mid``/``u_hi``, ``n_panels``) are computed here
+    in CPython exactly as `f_schwinger` computes them (same ``math.log``,
+    same `_schwinger._panel_count`), the raw integrals come from the SAME
+    frozen core, and the certification + `_schwinger._reconstruct` +
+    mass-sheet reconstruction reuse the SAME frozen helpers and tolerance.
+    The only re-sequencing is that the per-node quadrature now runs across
+    threads; each node's arithmetic sequence is untouched.
+
+    NOTE (maintenance coupling): the setup, certification and
+    reconstruction below MIRROR the body of `_schwinger.f_schwinger`; they
+    are byte-identity-critical.  If `f_schwinger`'s setup or certification
+    ever changes, this wrapper must change in lockstep (the byte-identity
+    test suite is the guard).  The heavy `_raw_t_integral_core` math itself
+    is reused, not reimplemented.
+
+    Parameters
+    ----------
+    w_nodes : np.ndarray
+        ``(m,)`` float frequencies with ``0 < w <= W_CEILING_SCHWINGER``.
+    y_eig : np.ndarray
+        Shape ``(2,)`` eigenframe source position (soft/hard axes).
+    gamma_prime : float
+        Reduced external shear ``gamma' > 0``.
+    lam : float
+        Mass-sheet scale ``lam = 1 - kappa`` for the reconstruction.
+    kappa : float
+        External convergence (the mass-sheet phase).
+    s : float
+        Rescaled ``|y'|**2`` for the mass-sheet phase.
+
+    Returns
+    -------
+    values : np.ndarray
+        ``(m,)`` complex grid amplifications; entries flagged uncertified
+        are left unspecified (the caller refuses instead of serving them).
+    certified : np.ndarray
+        ``(m,)`` bool per-node paired-rule certification outcome.
+    """
+    m = w_nodes.shape[0]
+    values = np.empty(m, dtype=complex)
+    certified = np.zeros(m, dtype=bool)
+    if m == 0:
+        return values, certified
+
+    a = 1.0 - gamma_prime
+    b = 1.0 + gamma_prime
+    y1 = float(y_eig[0])
+    y2 = float(y_eig[1])
+
+    # Per-node ``ln t`` range and panel count, computed in PLAIN CPython
+    # exactly as `f_schwinger` does, so the float64 arguments reach the
+    # frozen core bit-identical to the serial path (numba's libm is NOT
+    # assumed to match CPython's to the last ULP -- byte-identity by
+    # construction rather than by hope).
+    u_lo = np.empty(m, dtype=float)
+    u_mid = np.empty(m, dtype=float)
+    u_hi = np.empty(m, dtype=float)
+    n_panels = np.empty(m, dtype=np.int64)
+    for k in range(m):
+        w = float(w_nodes[k])
+        t_cap = 0.5 * w * (abs(a) + abs(b) + 2.0)
+        log_t_cap = math.log(t_cap)
+        margin = _schwinger._CANCEL_SCALE * w + _schwinger._U_MARGIN_CONST
+        u_lo[k] = log_t_cap - margin
+        u_mid[k] = log_t_cap
+        u_hi[k] = log_t_cap + margin
+        n_panels[k] = _schwinger._panel_count(margin, w)
+
+    xk_hi, xk_lo, wk_hi, wk_lo = _schwinger._dd_gl_rule(
+        _schwinger._PANEL_ORDER)
+
+    int_n, int_2n = _schwinger_raw_integral_map(
+        np.ascontiguousarray(w_nodes, dtype=float), a, b, y1, y2,
+        u_lo, u_mid, u_hi, n_panels, xk_hi, xk_lo, wk_hi, wk_lo)
+
+    # Per-node certification + reconstruction, byte-identical to the tail of
+    # `f_schwinger` (same dd_complex_sub, magnitude, _CERTIFICATION_TOL,
+    # _reconstruct) and the grid mass-sheet identity.
+    for k in range(m):
+        rn = int_n[k]
+        r2 = int_2n[k]
+        difference = dd_complex_sub(
+            rn[0], rn[1], rn[2], rn[3], r2[0], r2[1], r2[2], r2[3])
+        reference_magnitude = _schwinger._dd_complex_magnitude(
+            (r2[0], r2[1], r2[2], r2[3]))
+        difference_magnitude = _schwinger._dd_complex_magnitude(difference)
+        if (reference_magnitude == 0.0
+                or difference_magnitude
+                > _schwinger._CERTIFICATION_TOL * reference_magnitude):
+            certified[k] = False
+            continue
+        integral = complex(r2[0] + r2[1], r2[2] + r2[3])
+        w = float(w_nodes[k])
+        f_pure = _schwinger._reconstruct(w, y_eig, integral)
+        mass_sheet_phase = np.exp(
+            0.5j * w * np.log(lam) - 0.5j * w * float(kappa) * s)
+        values[k] = complex(mass_sheet_phase * f_pure / lam)
+        certified[k] = True
+    return values, certified
+
+
+def _measure_node_parallel_speedup(
+        gamma: float = 0.4, kappa: float = 0.0,
+        y: tuple[float, float] = (0.3, 0.2),
+        n_nodes: int = 32, repeats: int = 3) -> dict[str, float]:
+    """Measure the node-parallel exact-path speedup on a small grid.
+
+    A MEASUREMENT-ONLY diagnostic (never touches evaluator control flow),
+    mirroring `_schwinger._measure_warm_cost`.  It prices the serial
+    per-node `_schwinger.f_schwinger` loop against the node-parallel
+    `_schwinger_wave_grid_values` batch on a positive-parity config whose
+    grid sits entirely below ``W_CEILING_SCHWINGER`` (so every node takes
+    the exact wave branch).  Returns a summary dict and prints one line.
+
+    Parameters
+    ----------
+    gamma, kappa : float
+        Positive-parity lens parameters (``1 - kappa > |gamma|``).
+    y : tuple of float
+        Source position.
+    n_nodes : int
+        Grid size (kept small so the measurement stays bounded).
+    repeats : int
+        Best-of timing repeats.
+
+    Returns
+    -------
+    dict of float
+        ``n_nodes``, ``serial_ms``, ``parallel_ms``, ``speedup``.
+    """
+    import time  # local: keep the timing dependency out of the hot module
+
+    y_arr = np.asarray(y, dtype=float)
+    lam, y_scaled, gamma_prime = _mass_sheet_map(y_arr, gamma, kappa)
+    z_eig = np.exp(-1j * 0.0) * complex(y_scaled[0], y_scaled[1])
+    y_eig = np.array([z_eig.real, z_eig.imag])
+    s = float(y_scaled @ y_scaled)
+    w_nodes = np.linspace(
+        1.0, 0.9 * _schwinger.W_CEILING_SCHWINGER, n_nodes)
+
+    # Warm up: trigger numba compilation of the core, the parallel map, and
+    # the lru_cache population once for both paths.
+    for w in w_nodes:
+        _schwinger.f_schwinger(float(w), y_eig, gamma_prime)
+    _schwinger_wave_grid_values(w_nodes, y_eig, gamma_prime, lam, kappa, s)
+
+    serial_best = math.inf
+    for _ in range(repeats):
+        start = time.perf_counter()
+        for w in w_nodes:
+            _schwinger.f_schwinger(float(w), y_eig, gamma_prime)
+        serial_best = min(serial_best, time.perf_counter() - start)
+
+    parallel_best = math.inf
+    for _ in range(repeats):
+        start = time.perf_counter()
+        _schwinger_wave_grid_values(w_nodes, y_eig, gamma_prime, lam, kappa, s)
+        parallel_best = min(parallel_best, time.perf_counter() - start)
+
+    summary = {
+        'n_nodes': float(n_nodes),
+        'serial_ms': 1e3 * serial_best,
+        'parallel_ms': 1e3 * parallel_best,
+        'speedup': (serial_best / parallel_best
+                    if parallel_best > 0.0 else math.inf),
+    }
+    print(
+        f'[node-parallel speedup] {summary["n_nodes"]:.0f} nodes | '
+        f'serial {summary["serial_ms"]:.1f} ms | '
+        f'parallel {summary["parallel_ms"]:.1f} ms | '
+        f'{summary["speedup"]:.2f}x')
+    return summary
+
+
 def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
                  beta: float = 0.0, kappa: float = 0.0) -> np.ndarray:
     """Macro-saddle amplification over a ``w`` grid, node by node.
@@ -566,6 +864,20 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     ONLY on this previously-refusing branch, so resolved (geometric) and
     ``w <= W_CEILING_SCHWINGER`` nodes are byte-identical to the exact
     path.
+
+    NODE-PARALLEL EXACT EVALUATION (Build 8f lever 3).  A Python pre-pass
+    classifies each node into its branch (geometric / arm / exact wave /
+    refuse) and gathers the independent ``w <= ceiling`` exact wave nodes;
+    those are evaluated across cores by `_schwinger_wave_grid_values` (an
+    njit ``prange`` PURE MAP over `_schwinger_raw_integral_map`, the frozen
+    `_schwinger._raw_t_integral_core` unchanged).  The per-node value is
+    byte-identical to the serial `f_schwinger` path (fastmath off, no
+    cross-node reduction in the parallel region, the ``w``-independent
+    eigenframe reduction done once here); the named
+    `_schwinger.SchwingerCertificationError` never crosses a thread
+    boundary -- it is reduced over the full node ordering and raised by the
+    Python wrapper with the lowest-index refuser's authentic message
+    (serial first-refuser identity; scheduling-independent).
 
     Parameters
     ----------
@@ -623,38 +935,67 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     if np.any(w_array > _schwinger.W_CEILING_SCHWINGER):
         delta_min = _real_delay_min_separation(source, matrix)
 
-    values = np.empty(w_array.shape[0], dtype=complex)
-    for node in range(w_array.shape[0]):
+    n_nodes = w_array.shape[0]
+    values = np.empty(n_nodes, dtype=complex)
+
+    # Python PRE-PASS over the nodes in index order (Build 8f lever 3):
+    # classify each into its serving branch and GATHER the expensive
+    # ``w <= ceiling`` exact wave nodes for the node-parallel batch.  The
+    # geometric and arm branches stay in Python; only the pure Schwinger
+    # inner map is parallelized.  `select_branch` is NOT the saddle
+    # authority (it stays byte-frozen for the positive-parity operator
+    # path); the saddle takeover is owned here (channels.py / Build 7).
+    batch_index: list[int] = []
+    ceiling_refusers: list[int] = []
+    for node in range(n_nodes):
         w_node = float(w_array[node])
-        # NOTE: `select_branch` is NOT the saddle authority in Build S1 --
-        # it stays byte-frozen for the positive-parity operator path; the
-        # saddle takeover is owned here (channels.py / Build 7 wires it).
         if (w_node > _schwinger.W_CEILING_SCHWINGER
                 and w_node * delta_min >= RHO_END):
             # Resolved and above the wave ceiling: stationary-phase sum
             # over the real images of the indefinite matrix.
             values[node] = complex(geometric_amplification(
                 w_node, y, gamma, beta=beta, kappa=kappa))
-            continue
-        # Wave branch.  An unresolved node with w > ceiling reaches here
-        # too and `f_schwinger` would refuse it
-        # (SchwingerCertificationError).  Before that named refusal fires,
-        # offer the uniform-asymptotic rung of the serving ladder (fold
-        # then cusp arm).  The intercept fires ONLY on such a
-        # previously-refusing node: a resolved node `continue`s above, and
-        # a node with w <= ceiling never satisfies the guard, so resolved
-        # and w <= ceiling nodes take the identical old f_schwinger path
-        # and stay byte-identical.
-        if w_node > _schwinger.W_CEILING_SCHWINGER:
+        elif w_node > _schwinger.W_CEILING_SCHWINGER:
+            # Unresolved above the ceiling: `f_schwinger` would refuse
+            # (SchwingerCertificationError).  Offer the uniform-asymptotic
+            # rung of the serving ladder (fold then cusp arm) first; only
+            # if BOTH arms refuse does the node become a refuser.
             arm_value = _uniform_arm_value(
                 w_node, source, gamma, beta=beta, kappa=kappa)
             if arm_value is not None:
                 values[node] = arm_value
-                continue
-        f_pure = _schwinger.f_schwinger(w_node, y_eig, gamma_prime)
-        mass_sheet_phase = np.exp(
-            0.5j * w_node * np.log(lam) - 0.5j * w_node * float(kappa) * s)
-        values[node] = complex(mass_sheet_phase * f_pure / lam)
+            else:
+                ceiling_refusers.append(node)
+        else:
+            # w <= ceiling exact wave node: the parallel batch (byte-
+            # identical to the serial `f_schwinger` path per node).
+            batch_index.append(node)
+
+    batch_index_arr = np.array(batch_index, dtype=np.int64)
+    batch_values, batch_cert = _schwinger_wave_grid_values(
+        w_array[batch_index_arr], y_eig, gamma_prime, lam, kappa, s)
+
+    # Reduce the named refusal ACROSS THE FULL node ordering in the Python
+    # wrapper (never across a thread boundary): any node refuses -> the
+    # whole grid refuses, raised with the authentic message of the
+    # LOWEST-index refuser (serial first-refuser identity).
+    refusers = list(ceiling_refusers)
+    for pos, node in enumerate(batch_index):
+        if batch_cert[pos]:
+            values[node] = batch_values[pos]
+        else:
+            refusers.append(node)
+    if refusers:
+        first = int(min(refusers))
+        # Re-run the lowest-index refuser through `f_schwinger` to raise
+        # the exact named exception (ceiling or paired-rule); identical
+        # inputs -> identical decision and message as the serial path.
+        _schwinger.f_schwinger(float(w_array[first]), y_eig, gamma_prime)
+        raise _schwinger.SchwingerCertificationError(  # unreachable guard
+            f'Node-parallel batch flagged node {first} '
+            f'(w = {float(w_array[first])}) as refused, but the serial '
+            f're-evaluation certified it; refusing rather than serving an '
+            f'unverified value.')
     return values
 
 
@@ -1121,6 +1462,16 @@ def _positive_parity_grid(
     arm); the ``gamma' == 0`` legacy nodes keep their measured
     diagnostics.
 
+    NODE-PARALLEL EXACT EVALUATION (Build 8f lever 3).  On the
+    ``gamma' > 0`` route a Python pre-pass gathers the independent
+    ``w <= ceiling`` exact wave nodes and evaluates them across cores via
+    `_schwinger_wave_grid_values` (the njit ``prange`` PURE MAP over the
+    frozen `_schwinger._raw_t_integral_core`); each per-node value is
+    byte-identical to the serial `f_schwinger` path, and the named
+    refusal is reduced over the full node ordering and raised by the
+    Python wrapper (never across a thread boundary) with the lowest-index
+    refuser's authentic message.
+
     Parameters and returns match `_grid_certified`.  The caller
     guarantees positive parity (``1 - kappa > |gamma|``), so the
     mass-sheet map never refuses here.
@@ -1160,29 +1511,59 @@ def _positive_parity_grid(
 
     n_nodes = w_array.shape[0]
     values = np.empty(n_nodes, dtype=complex)
+
+    # Python PRE-PASS over the nodes in index order (Build 8f lever 3):
+    # gather the expensive ``w <= ceiling`` exact wave nodes for the
+    # node-parallel batch; the arm-served / above-ceiling-refusing nodes
+    # stay in Python.  A served node carries zero operator-series
+    # diagnostics like the Schwinger nodes (the diagnostic arrays below are
+    # uniformly zero / True).
+    batch_index: list[int] = []
+    ceiling_refusers: list[int] = []
     for node in range(n_nodes):
         w_node = float(w_array[node])
-        # Before the named f_schwinger refusal fires for a w > ceiling node
-        # (every w > W_CEILING_SCHWINGER here is a previously-refusing node
-        # -- a w <= ceiling node certifies and stays byte-identical), offer
-        # the uniform-asymptotic rung of the ladder (fold then cusp arm).
-        # A served node carries zero operator-series diagnostics like the
-        # Schwinger nodes (the diagnostic arrays below are uniformly
-        # zero / True).
         if w_node > _schwinger.W_CEILING_SCHWINGER:
+            # Previously-refusing node: offer the uniform-asymptotic rung
+            # (fold then cusp arm) before the named refusal; only if BOTH
+            # arms refuse does the node become a refuser (NO legacy
+            # fallback catch -- that would re-introduce a parallel path).
             arm_value = _uniform_arm_value(
                 w_node, y, gamma, beta=beta, kappa=kappa)
             if arm_value is not None:
                 values[node] = arm_value
-                continue
-        # `f_schwinger` certifies-or-refuses its own quadrature and hard-
-        # refuses w > W_CEILING_SCHWINGER; the prefactor is a single
-        # float64 exp / mul / div outside the paired-rule certificate,
-        # bounded by inspection (FINDINGS F011).
-        f_pure = _schwinger.f_schwinger(w_node, y_eig, gamma_prime)
-        mass_sheet_phase = np.exp(
-            0.5j * w_node * np.log(lam) - 0.5j * w_node * float(kappa) * s)
-        values[node] = complex(mass_sheet_phase * f_pure / lam)
+            else:
+                ceiling_refusers.append(node)
+        else:
+            # w <= ceiling exact wave node: the parallel batch (byte-
+            # identical to the serial `f_schwinger` path per node).
+            batch_index.append(node)
+
+    batch_index_arr = np.array(batch_index, dtype=np.int64)
+    batch_values, batch_cert = _schwinger_wave_grid_values(
+        w_array[batch_index_arr], y_eig, gamma_prime, lam, kappa, s)
+
+    # Reduce the named refusal ACROSS THE FULL node ordering in the Python
+    # wrapper (never across a thread boundary): any node refuses -> the
+    # whole grid refuses, raised with the authentic message of the
+    # LOWEST-index refuser (serial first-refuser identity).
+    refusers = list(ceiling_refusers)
+    for pos, node in enumerate(batch_index):
+        if batch_cert[pos]:
+            values[node] = batch_values[pos]
+        else:
+            refusers.append(node)
+    if refusers:
+        first = int(min(refusers))
+        # Re-run the lowest-index refuser through `f_schwinger` to raise
+        # the exact named exception (ceiling or paired-rule); identical
+        # inputs -> identical decision and message as the serial path.
+        _schwinger.f_schwinger(float(w_array[first]), y_eig, gamma_prime)
+        raise _schwinger.SchwingerCertificationError(  # unreachable guard
+            f'Node-parallel batch flagged node {first} '
+            f'(w = {float(w_array[first])}) as refused, but the serial '
+            f're-evaluation certified it; refusing rather than serving an '
+            f'unverified value.')
+
     orders = np.zeros(n_nodes, dtype=int)
     converged = np.ones(n_nodes, dtype=bool)
     estimated_tails = np.zeros(n_nodes, dtype=float)
@@ -1399,6 +1780,79 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
     return complex(values[0]), diagnostics
 
 
+def _certify_geometric_census(images: list, matrix: np.ndarray) -> None:
+    """Refuse an image census that cannot license the geometric asymptote.
+
+    The stationary-phase (``w -> inf``) sum in `geometric_amplification`
+    is legitimate only on a RESOLVED, NON-DEGENERATE image census.  In
+    production the resolution gate (`select_branch`) already routes every
+    unresolved cluster to the wave branch, so for a valid served config
+    BOTH guards below pass silently and the returned amplification is
+    byte-identical to the ungated sum.  They fire only on an inconsistent
+    census that must never reach geometric optics, and they do so through
+    the EXISTING refusal vocabulary -- `geometry.LensDomainError` -- with
+    no new exception type (Build 8f lever 5).
+
+    Guard (a), IMAGE-COUNT MATCH against the caustic classification.  A
+    non-degenerate Chang-Refsdal source has exactly TWO real images
+    outside the caustic and FOUR inside it; the image quartic admits at
+    most four real roots, and the Morse index theorem forces the count to
+    be EVEN for both the positive parity and the macro saddle, so ``2``
+    and ``4`` are the only valid served counts.  Any other count -- an odd
+    count from a fold-merged ``(min, saddle)`` pair or a cusp-merged
+    triple, or a dropped image -- means the source sits on or across a
+    caustic: a degenerate census that belongs on the wave branch.
+
+    Guard (b), MORSE PARITY-SUM.  The signed magnification sum obeys the
+    Morse index theorem ``sum_a sign(mu_a) == sign(det A) - 1`` -- ``0``
+    for the positive parity (``det A > 0``) and ``-2`` for the macro
+    saddle (``det A < 0``).  ``sign(mu_a)`` is ``(-1)`` to the Morse index
+    (the number of NEGATIVE Fermat-Hessian eigenvalues, from `eigvalsh`
+    with a strict ``< 0`` test; see `geometry.morse_index`).  A violation
+    means the quartic solve silently dropped or duplicated an image, so
+    the census is unfaithful and the summed amplification would be finite
+    but wrong.
+
+    Parameters
+    ----------
+    images : list of np.ndarray
+        The real images from `geometry.find_images`, each shape ``(2,)``,
+        for `matrix`.
+    matrix : np.ndarray
+        Shape ``(2, 2)`` macro matrix the images were solved for.
+
+    Raises
+    ------
+    geometry.LensDomainError
+        If the census fails the image-count match or the Morse
+        parity-sum guard.
+    """
+    image_count = len(images)
+    if image_count not in (2, 4):
+        raise geometry.LensDomainError(
+            f'Geometric-optics census defect: {image_count} real images '
+            f'for macro matrix {np.asarray(matrix).tolist()}, but a '
+            f'non-degenerate Chang-Refsdal source has exactly 2 images '
+            f'(outside the caustic) or 4 (inside). An odd or otherwise '
+            f'anomalous count is a fold/cusp-merged or dropped census that '
+            f'must be served on the wave branch, not by the stationary-'
+            f'phase sum.')
+
+    signed_magnification_sum = sum(
+        (-1) ** geometry.morse_index(image, matrix) for image in images)
+    expected_sum = (1 if float(np.linalg.det(matrix)) > 0.0 else -1) - 1
+    if signed_magnification_sum != expected_sum:
+        raise geometry.LensDomainError(
+            f'Geometric-optics census defect: the {image_count} images '
+            f'give a signed magnification sum sum_a sign(mu_a) = '
+            f'{signed_magnification_sum}, but the Morse index theorem '
+            f'requires sum_a sign(mu_a) == sign(det A) - 1 = {expected_sum} '
+            f'for macro matrix {np.asarray(matrix).tolist()}. A mismatch '
+            f'means the quartic solve dropped or duplicated an image, so '
+            f'the census is unfaithful and the summed amplification would '
+            f'be finite but wrong.')
+
+
 def geometric_amplification(w, y: np.ndarray, gamma: float, *,
                             beta: float = 0.0, kappa: float = 0.0):
     """Stationary-phase (``w -> inf``) amplification, as glue.
@@ -1430,15 +1884,24 @@ def geometric_amplification(w, y: np.ndarray, gamma: float, *,
     Raises
     ------
     geometry.LensDomainError
-        If ``1 - kappa <= abs(gamma)`` (from `geometry.macro_matrix`).
+        If ``1 - kappa <= abs(gamma)`` (from `geometry.macro_matrix`),
+        or if the solved image census fails the geometric-served handoff
+        guards -- image-count match (2 outside the caustic, 4 inside) or
+        the Morse parity-sum (see `_certify_geometric_census`).
     """
     source = np.asarray(y, dtype=float)
     if source.shape != (2,):
         raise ValueError(
             f'Source position must have shape (2,), got {source.shape}.')
     matrix = geometry.macro_matrix(gamma, beta, kappa)
+    images = geometry.find_images(source, matrix)
+    # Build 8f lever 5: refuse an inconsistent census (image count vs the
+    # quartic solve, and the Morse parity-sum) before summing.  Value-
+    # preserving -- a resolved, non-degenerate served census passes
+    # silently and ``total`` below is byte-identical to the ungated sum.
+    _certify_geometric_census(images, matrix)
     total = np.zeros_like(np.asarray(w, dtype=float), dtype=complex)
-    for image in geometry.find_images(source, matrix):
+    for image in images:
         tau = geometry.delay(image, source, matrix)
         total = total + (np.exp(1j * np.asarray(w, dtype=float) * tau)
                          * geometry.image_kernel(w, image, matrix))
@@ -1505,6 +1968,17 @@ def select_branch(w: float, delta_min: float,
     str
         ``'geometric'`` if ``w*delta_min >= RHO_END`` and
         ``cancellation_exp > L_MAX``; otherwise ``'wave'``.
+
+    Notes
+    -----
+    ``L_MAX`` is a HANDOFF exponent inside the certified wave/geometric
+    overlap, not a one-sided accuracy floor (see the `L_MAX` provenance):
+    the wave series is accurate to ``L ~ 45-46`` (F005) and the geometric
+    asymptote above its ``~50`` onset at resolved clusters (F013), so the
+    shipped ``48`` sits in the overlap and the refusal band ``[46, 48]``
+    exits by named `CancellationError`.  The geometric-served path itself
+    additionally enforces the census guards of
+    `_certify_geometric_census` before summing.
     """
     resolved = float(w) * float(delta_min) >= RHO_END
     strongly_cancelling = float(cancellation_exp) > L_MAX

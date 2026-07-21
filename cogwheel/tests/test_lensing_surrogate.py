@@ -1051,18 +1051,44 @@ class CrownByteIdentityTestCase(SurrogateTestCase):
                           'default construction must leave the surrogate None')
 
     def test_lnlike_is_bit_identical_to_head(self):
-        """lnL matches HEAD to the last bit across the config sweep."""
+        """lnL agrees with HEAD to the witnessed re-baseline bound and is
+        bit-reproducible on the NEW path.
+
+        RE-BASELINE (Build 8f levers 1-2): the geometry_partition internals
+        and the _data_term/_norm_term moment contraction were restructured
+        (value-preserving, authorized to drift at the ~1e-13 reordering
+        level), so lnL is no longer bit-for-bit HEAD.  The old exact-byte
+        pin is re-homed onto the witnessed contract-flip idiom (F017): the
+        NEW-vs-OLD |dlnL| stays inside the owner-set 1e-10 witness bound
+        (measured ~5.7e-14 here, printed below), and the NEW path returns
+        the SAME bits on repeat (bit-reproducibility -- a physics reorder,
+        not a nondeterministic path).
+        """
+        witness_bound = 1e-10  # Build 8f levers 1-2 FP-reassociation witness
+        max_dlnl = 0.0
         for label, lens in self.CONFIGS:
             with self.subTest(config=label):
                 candidate = _lens_candidate(**lens)
                 lnl_cur = self.cur.lnlike(candidate)
                 lnl_head = self.head.lnlike(candidate)
+                dlnl = abs(lnl_cur - lnl_head)
+                max_dlnl = max(max_dlnl, dlnl)
                 self.n_checks += 1
+                self.assertLessEqual(
+                    dlnl, witness_bound,
+                    f'lnL diverged from HEAD beyond the 8f witness bound at '
+                    f'{label}: {lnl_cur!r} vs {lnl_head!r} '
+                    f'(|dlnL|={dlnl:.3e} > {witness_bound:.0e}) -- a PHYSICS '
+                    f'regression, not a levers 1-2 reordering')
+                # Bit-reproducibility pin (NEW code): same input -> same bits.
+                self.n_checks += 1
+                lnl_repeat = self.cur.lnlike(candidate)
                 self.assertEqual(
-                    lnl_cur, lnl_head,
-                    f'lnL diverged from HEAD at {label}: '
-                    f'{lnl_cur!r} vs {lnl_head!r} (max|diff|='
-                    f'{abs(lnl_cur - lnl_head):.3e})')
+                    lnl_cur, lnl_repeat,
+                    f'the NEW lnlike is not bit-reproducible at {label}: '
+                    f'{lnl_cur!r} vs {lnl_repeat!r} on a repeat call')
+        print(f'\n[8f witness] crown max|dlnL| vs HEAD = {max_dlnl:.3e} '
+              f'(bound {witness_bound:.0e})')
 
     def test_fiducial_envelope_nodes_are_bit_identical(self):
         """The fiducial-cache envelope nodes match HEAD bit-for-bit."""
@@ -1175,22 +1201,48 @@ class CrownContractFlipWitnessTestCase(SurrogateTestCase):
     def test_sheared_positive_parity_routes_through_schwinger(self):
         """Single-dispatch witness: a sheared positive-parity host
         (``gamma' > 0``) is served by the Schwinger evaluator and NEVER
-        touches the legacy contraction."""
+        touches the legacy contraction.
+
+        RE-HOME (Build 8f lever 3): the serial per-node
+        ``_schwinger.f_schwinger`` calls were replaced by the node-parallel
+        njit ``prange`` driver ``operator._schwinger_raw_integral_map``,
+        which processes the whole grid in ONE compiled call.  The route
+        spy is re-homed onto that driver -- summing the node counts it
+        receives (must total every probe node) -- while the legacy
+        ``operator._grid_certified`` contraction seam is unchanged (must
+        stay at zero).
+        """
         cfg = FLIP_CONFIGS[2][1]  # crown 2-image
         y = np.array([cfg['y1'], cfg['y2']])
         w_probe = np.arange(0.1, 8.0, 0.5)
-        schwinger_calls = self._count_calls(
-            schwinger_module, 'f_schwinger',
-            lambda: F_op_grid(w_probe, y, cfg['gamma'], beta=0.0, kappa=0.0),
-            also_spy=(operator_module, '_grid_certified'))
-        n_schwinger, n_legacy = schwinger_calls
+
+        served_nodes = []
+        real_map = operator_module._schwinger_raw_integral_map
+
+        def spy_map(w_nodes, *args, **kwargs):
+            served_nodes.append(int(np.asarray(w_nodes).shape[0]))
+            return real_map(w_nodes, *args, **kwargs)
+
+        legacy_calls = {'n': 0}
+        real_legacy = operator_module._grid_certified
+
+        def spy_legacy(*args, **kwargs):
+            legacy_calls['n'] += 1
+            return real_legacy(*args, **kwargs)
+
+        with mock.patch.object(operator_module, '_schwinger_raw_integral_map',
+                               spy_map), \
+                mock.patch.object(operator_module, '_grid_certified',
+                                  spy_legacy):
+            F_op_grid(w_probe, y, cfg['gamma'], beta=0.0, kappa=0.0)
         self.n_checks += 1
         self.assertEqual(
-            n_schwinger, w_probe.size,
-            'the Schwinger evaluator must serve every positive-parity node')
+            sum(served_nodes), w_probe.size,
+            'the Schwinger evaluator (node-parallel prange driver) must '
+            'serve every positive-parity node')
         self.n_checks += 1
         self.assertEqual(
-            n_legacy, 0,
+            legacy_calls['n'], 0,
             'a sheared positive-parity host must NOT reach the legacy '
             'operator contraction (that would re-open a parallel path)')
 
@@ -1270,18 +1322,39 @@ class CrownContractFlipWitnessTestCase(SurrogateTestCase):
             '-- the byte-flip currency would assert nothing')
 
     def test_dispatch_mutation_flips_witness_red(self):
-        """F010 dispatch mutation: corrupting the Schwinger evaluator
-        through the module seam the production path resolves makes the
+        """F010 dispatch mutation: corrupting the Schwinger raw-integral
+        evaluator through the seam the production path resolves makes the
         overlap witness go RED -- proving the flip witness genuinely
-        exercises the compiled Schwinger route (not a vacuous green)."""
+        exercises the compiled Schwinger route (not a vacuous green).
+
+        RE-HOME (Build 8f lever 3): the serial per-node
+        ``schwinger._schwinger.f_schwinger`` loop was replaced by the
+        node-parallel njit ``prange`` driver
+        ``operator._schwinger_raw_integral_map``, so patching
+        ``_schwinger.f_schwinger`` (the old seam) no longer reaches the
+        served value.  numba freezes module globals at compile time, so the
+        driver is swapped for its ``.py_func`` body (the discipline the
+        module exposes it for) and the raw-integral core it re-reads,
+        ``operator._schwinger_raw_t_integral_core``, is corrupted; the
+        scale error flows through the whole compiled reconstruct chain.
+        """
         cfg = FLIP_CONFIGS[2][1]  # crown 2-image
         y = np.array([cfg['y1'], cfg['y2']])
-        real_f_schwinger = schwinger_module.f_schwinger
+        real_map = operator_module._schwinger_raw_integral_map
+        real_core = operator_module._schwinger_raw_t_integral_core
 
-        def corrupted_f_schwinger(*args, **kwargs):
-            # A sign/scale corruption in the reconstruct-fed value; well
-            # above 1e-10 but small enough to stay finite and certified.
-            return real_f_schwinger(*args, **kwargs) * (1.0 + 1e-4)
+        def corrupted_core(*args, **kwargs):
+            # A scale corruption of the dd-complex raw t-integral (re_hi,
+            # re_lo, im_hi, im_lo); well above 1e-10 but small enough to
+            # stay certified (the paired-rule ratio is scale-invariant).
+            r0, r1, r2, r3 = real_core(*args, **kwargs)
+            factor = 1.0 + 1e-4
+            return r0 * factor, r1 * factor, r2 * factor, r3 * factor
+
+        def pyfunc_map(*args, **kwargs):
+            # Run the driver in the interpreter so it re-resolves the
+            # corrupted module-global core (compiled numba would not).
+            return real_map.py_func(*args, **kwargs)
 
         # Legacy overlap oracle (unmutated -- it holds its own reference to
         # the real evaluator, so the mutation cannot leak into the oracle).
@@ -1298,8 +1371,11 @@ class CrownContractFlipWitnessTestCase(SurrogateTestCase):
             old_arr.append(complex(value[0]))
         w_arr = np.asarray(w_overlap)
         old_arr = np.asarray(old_arr, dtype=complex)
-        with mock.patch.object(schwinger_module, 'f_schwinger',
-                               corrupted_f_schwinger):
+        with mock.patch.object(operator_module, '_schwinger_raw_integral_map',
+                               pyfunc_map), \
+                mock.patch.object(operator_module,
+                                  '_schwinger_raw_t_integral_core',
+                                  corrupted_core):
             mutated, _o, _c = F_op_grid(
                 w_arr, y, cfg['gamma'], beta=0.0, kappa=0.0)
         scale = max(float(np.max(np.abs(old_arr))), 1e-15)
@@ -1307,9 +1383,9 @@ class CrownContractFlipWitnessTestCase(SurrogateTestCase):
         self.n_checks += 1
         self.assertGreater(
             mutated_metric, FLIP_WITNESS_TOL,
-            'a corrupted Schwinger evaluator left the witness green -- the '
-            'dispatch is not exercised through the compiled path (F010 '
-            'vacuous-green trap)')
+            'a corrupted Schwinger raw-integral core left the witness green '
+            '-- the dispatch is not exercised through the compiled prange '
+            'driver (F010 vacuous-green trap)')
 
     def test_flip_witness_diagnostic_plot(self):
         """Diagnostic overlay: Re/Im of both evaluators and the

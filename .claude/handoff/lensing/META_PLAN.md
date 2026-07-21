@@ -2644,3 +2644,34 @@ now FIXED here (gw follow-up block after 8f proves them):
   refusal-pin evidence cited in-code).
 Both parse-verified; 8f is the proving run; the gw follow-up message
 ships after that proof.
+
+## 2026-07-21 — 8f plan APPROVED round 1 (third consecutive); L_MAX inverted
+
+Professor DIRECTION CORRECTION of the driver brief: L_MAX is the
+wave/geometric HANDOFF exponent (geometric serves L > 48), not a
+one-sided floor — the brief's "relax toward 60" would push
+geometric-served nodes onto the degrading wave path (F019-class
+two-variable confusion, caught at the plan gate this time). Ships
+48 unchanged + image-count/parity-sum runtime guards + double-sided
+enforcement bracket (L_geo <= 48 <= L_wave+margin, test-dev oracle
+sweep). OWNER NOTIFIED (their "yes #3" mooted; safety half lands).
+Census (b)=13.9% re-labeled: not a viable lever; arms/qd territory.
+Rest: prange pure-map with the full byte-identity rule set; Pearcey
+table with build-time-derived box + demodulation + absolute-error
+certification + fallback contract; committed profiling benchmarks as
+provenance. Approved round 1 — third consecutive.
+
+
+## 2026-07-21 — ITEM 15 PROVEN BY RED: tree gate blocked the 8f commit
+
+First in-situ firing of _run_tree_fast_gate: Inspector PASS ->
+tree gate RED on 5 inherited pins -> commit BLOCKED. Exactly the 8e
+slip-class the fix was built from, caught by the fix on its first
+production run — proof by catch, the strongest kind. Triage: all 5 =
+authorized re-baseline class (crown/frozen-arm byte pins moved by the
+value-preserving levers at ~1e-13; the 8d dispatch witnesses hooks
+point at the pre-prange loop internals). Zero physics regression
+signals (in-build 1e-10 preservation + bit-exact parallel-vs-serial
+green). Re-baseline agent commissioned (5 tests, witnessed flips +
+py_func re-homing per the plan requirement). gw follow-up upgrades
+item 15 to PROVEN on the 8f close report.

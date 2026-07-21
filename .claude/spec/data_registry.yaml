@@ -18,7 +18,7 @@
 #   MINOR: new data entries or storage locations
 #   PATCH: path corrections, metadata fixes
 
-schema_version: "1.0.0"
+schema_version: "1.1.0"
 
 # ── Storage roots ────────────────────────────────────────────────────────
 # Define named storage locations. Code references roots by name, not path.
@@ -51,6 +51,14 @@ entries:
     created_by: "scripts/train_lens_surrogate.py"
     schema_ref: "lens_amplification_surrogate"
     notes: "Off by default; regenerate with: python scripts/train_lens_surrogate.py"
+  pearcey_table:
+    description: "Precomputed bicubic-spline table of the universal Pearcey primitive P(x, y), amortizing the certified cusp-arm quadrature."
+    storage_root: "package_data"
+    relative_path: "pearcey_table.npz"
+    format: "npz"
+    created_by: "scripts/train_pearcey_table.py"
+    schema_ref: "pearcey_table"
+    notes: "Off by default; regenerate with: python scripts/train_pearcey_table.py <path>"
   # Example:
   # training_data:
   #   description: "Preprocessed training dataset"

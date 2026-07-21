@@ -605,6 +605,45 @@ def _axial_candidates(source_radius: float, a11: float, a22: float, *,
     return candidates
 
 
+def _companion_roots(coefficients: np.ndarray) -> np.ndarray:
+    """Polynomial roots via the companion eigenvalue method.
+
+    This is the SAME algorithm ``numpy.roots`` uses -- the eigenvalues
+    of the Frobenius companion matrix -- but without the generic input
+    handling (leading/trailing-zero trimming, dtype promotion, root
+    padding) that dominates its cost for the small fixed-degree image
+    quartic.  For a polynomial with no leading or trailing zero it
+    returns the SAME LAPACK eigenvalues of the SAME companion matrix as
+    ``numpy.roots``, hence a bit-for-bit identical root set; any other
+    polynomial (a leading/trailing zero or a non-finite coefficient,
+    which the production quartic never has because ``det A != 0`` is
+    refused upstream) is deferred to ``numpy.roots`` so the general
+    contract is preserved exactly.
+
+    Parameters
+    ----------
+    coefficients : np.ndarray
+        1-D polynomial coefficients in descending degree order, as
+        returned by `image_quartic_coefficients`.
+
+    Returns
+    -------
+    np.ndarray
+        The polynomial roots, identical to ``numpy.roots(coefficients)``.
+    """
+    coefficients = np.asarray(coefficients)
+    if (coefficients.ndim != 1 or coefficients.size < 2
+            or coefficients[0] == 0.0 or coefficients[-1] == 0.0
+            or not np.all(np.isfinite(coefficients))):
+        return np.roots(coefficients)
+    # No leading/trailing zeros: numpy.roots would build exactly this
+    # companion matrix and return eigvals(companion) with no padding.
+    size = coefficients.size - 1
+    companion = np.diag(np.ones(size - 1, dtype=coefficients.dtype), -1)
+    companion[0, :] = -coefficients[1:] / coefficients[0]
+    return np.linalg.eigvals(companion)
+
+
 def _generic_candidates(source_radius: float, rotated: np.ndarray, *,
                         root_tolerance: float) -> list[np.ndarray]:
     """Candidates in the source frame from the roots of the quartic in
@@ -613,8 +652,8 @@ def _generic_candidates(source_radius: float, rotated: np.ndarray, *,
     a12 = float(rotated[0, 1])
     a22 = float(rotated[1, 1])
     candidates: list[np.ndarray] = []
-    for raw_root in np.roots(image_quartic_coefficients(source_radius,
-                                                        rotated)):
+    for raw_root in _companion_roots(image_quartic_coefficients(source_radius,
+                                                                rotated)):
         if raw_root.real <= 0.0:
             continue
         if abs(raw_root.imag) > root_tolerance * (1.0 + abs(raw_root.real)):

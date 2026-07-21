@@ -1,87 +1,82 @@
 # Inspector Short-Term Observations
 
-## 2026-07-21 — Build 8e review (uniform-asymptotic fold/cusp arms)
+## 2026-07-21 — Build 8f review (five serving micro-levers)
 
 Scope: uncommitted tree, worktree /home/tejaswi/Work/cogwheel-claude-dev.
 Full python: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python.
-Changed code: chang_refsdal/{operator.py,__init__.py,_airy_fold.py(new),
-_pearcey_cusp.py(new)}, surrogate.py, scripts/census_homogenization_corners.py,
-tests/{test_lensing_airy_fold.py(new),test_lensing_marginalized_likelihood.py}.
 
-### VERDICT: ISSUES
+### VERDICT: PASS (no NEW code defects). Three carried non-code items open.
 
-### Verified CORRECT
-- Pearcey primitive `_pearcey_cusp.pearcey`: rotated steepest-descent contour
-  (central + two 9pi/8-reflected tails), paired N/2N cert at 3e-10 BEFORE
-  prefactor. P(0,0) matches closed form (1/2)Gamma(1/4)e^{ipi/8} to ~13 digits.
-  Left-tail Jacobian sign (+_VALLEY_DIR) is correct & documented (wrong sign
-  cancels both tails for even integrands). Asymptotic P/P_asymp -> 1 with R.
-- Cusp arm reconstruction is SOUND in structure: uniform = cluster_sum*(P/P_asymp)
-  + far_sum — preserves true image magnitudes, -> geometric sum at large R.
-  Calibration certificate (real stationary values match distinct scaled delays).
-- geometry API used by both arms all resolve (NearestCausticPoint/CriticalPoint
-  fields image/source/hard_axis/soft_axis/hard_eigenvalue/theta; morse_index,
-  delay, magnification, saddle_coefficients, macro_matrix, critical_point,
-  find_images, nearest_caustic_point). imports clean, no circular-import.
-- operator ladder intercept fires ONLY on w>W_CEILING_SCHWINGER previously-
-  refusing nodes (byte-identity of resolved & w<=ceiling confirmed by passing
-  CertifiedPathByteIdentityTestCase). census is measurement-only (no engine/
-  threshold edits). marg test gating (5 heavy classes behind
-  COGWHEEL_BRUTE_ACCURACY) correct; RefusalContract/BinGuard kept fast.
-- test_lensing_airy_fold.py: 48 passed / 7 skipped / 1 xfail.
-- surrogate.py change (`_CUSP_ARM_COVERAGE=0.0`, residual=max(0,dtheta-0.0)==
-  dtheta) is provably a no-op. (Suite too slow to finish <500s; not a defect.)
+Code files changed: geometry.py (_companion_roots), likelihood.py
+(_norm_term), operator.py (WP3 node-parallel Schwinger + WP5 census guard +
+L_MAX comment), _pearcey_cusp.py (WP4 table hooks), new _pearcey_table.py,
+new tests/scripts, DATA_CONTRACTS.yaml (0.1.0->0.2.0), data_registry.yaml
+(1.0.0->1.1.0). SPEC.md NOT changed (still 0.16.0).
 
-### FINDINGS (introduced by 8e)
-- INS-2-001 (implementation/BUG): FOLD arm serves leading-order-INACCURATE
-  amplitudes into production. `_airy_fold._fold_amplitudes` sets q=0 and builds p
-  from curvatures (2^-1/6 |lam_h|^-1/2 |b3|^-1/3). For generic ASYMMETRIC folds
-  (mag ratio 1.22 in fixture — the common case) the max-normalized envelope error
-  vs the exact geometric two-image sum PLATEAUS at ~0.095-0.10 and does NOT fall
-  with xi (leading-order error), > the 0.05 crown bar. The only accuracy test
-  (AiryFoldFarFieldEnvelopeTestCase) certifies a DIFFERENT amplitude set
-  (test-only `_farfield_amplitudes`: q=difference, p=sum) which converges to
-  <1e-3 — so the GREEN suite masks the production inaccuracy; NO test certifies
-  production `_fold_amplitudes`. The self-cert `c_A xi^-3/2 < envelope_bar` bounds
-  only the higher-order uniform term, NOT the q=0/curv-p model error, so it PASSES
-  wrong values -> violates the "never serve where wrong" refusal-conservative
-  contract. Demonstrated: fold arm serves ALL 43 wave nodes of CANCELLATION_LENS
-  in the marginalized production path (cusp arm never reached — fold tried first).
-  Fix: reconstruct like the cusp arm (geometric image sum x Ai-uniform-ratio, keeps
-  asymmetric mags & nonzero-q), OR derive p,q from real sqrt|mu_+/-| (sum/diff) +
-  add a certificate bounding amplitude error vs geometric sum; until certified the
-  fold arm must REFUSE (fall through), not serve.
-- INS-2-002 (implementation/REGRESSION): tests/test_lensing_marginalized_
-  likelihood.py::RefusalContractTestCase::test_refusal_precedes_coherent_score is
-  RED with 8e, GREEN at HEAD (verified via git stash). The fold arm now SERVES the
-  CANCELLATION_LENS wave nodes HEAD refused, so the config no longer raises the
-  wave-branch refusal (CancellationError, SchwingerCertificationError); it surfaces
-  LensedBinningError later (candidate delay 0.0355s > delta_t_max 0.02s). Non-gated
-  load-bearing falsification -> fast tier is RED, violates acceptance. Coupled to
-  INS-2-001. Resolve by re-baselining the expected refusal / choosing a fixture that
-  still refuses at the wave branch AND/OR fixing INS-2-001.
-- INS-2-003 (design/SPEC divergence, flag to Librarian): SPEC.md line 54 still says
-  positive-parity gamma'>0 refuses "UNCONDITIONALLY every w>60 ... refuses by name
-  until the Build-8e uniform-asymptotics build serves it — accepted interim state,
-  sampling parked." Post-8e the w>60 corner IS served by the uniform arms -> the
-  "unconditionally refuses" claim is false. Plan expected SPEC.md to change; it did
-  NOT (SPEC untouched). I own accuracy, Librarian owns the edit. Interp: spec needs
-  updating — but the update must reflect that serving is currently INACCURATE
-  (INS-2-001), so arguably the corner is not yet correctly served.
-- INS-2-004 (trivial): WP4 cusp-window shrink is INERT by default — _CUSP_ARM_
-  COVERAGE=0.0 makes _tube_serves residual==delta_theta, so mission hole class 1
-  (8c cusp exclusion windows) is NOT shrunk; cusp arm only serves the operator-
-  ladder w>60 corner. Documented as pending census pin; conservative default, not a
-  blocker, but the "shrink cusp exclusion windows" deliverable is deferred.
+### Re-derived CORRECT this round
+- WP1 geometry._companion_roots == numpy.roots: same Frobenius companion
+  diag(ones(N-2),-1), A[0,:]=-p[1:]/p[0], numpy.linalg.eigvals; guard
+  defers leading/trailing-zero + non-finite to np.roots. Bit-identical for
+  the production quartic (det A!=0). dtype preserved via asarray.
+- WP2 likelihood._norm_term bilinear re-association: ALL nine n** re-checked
+  against the frozen reduce_pairs semantics (Q[p,q]=reduce_pairs(bp,r_p,rho_q)):
+  n00=q0[0,0], n11=q1[1,0]+q1[0,1], n22=q2[1,1], n10=q1[0,0],
+  n21=q2[1,0]+q2[0,1], n32=q3[1,1], n20=q2[0,0], n31=q3[1,0]+q3[0,1],
+  n30=q3[0,0]. einsum 'mMdb,pmdb->pMdb' then 'pMdb,qMdb->pqdb'. FP order only.
+- WP3 _schwinger_wave_grid_values MIRRORS f_schwinger byte-for-byte (read
+  f_schwinger body @748-837 line-by-line): a=1-g',b=1+g', t_cap, log_t_cap,
+  margin=_CANCEL_SCALE*w+_U_MARGIN_CONST, u_lo/mid/hi, _panel_count,
+  _dd_gl_rule(_PANEL_ORDER), core call order (N then 2N with u_mid==log_t_cap),
+  dd_complex_sub cert vs _CERTIFICATION_TOL, integral=r2[0]+r2[1]+i(r2[2]+r2[3]),
+  _reconstruct, mass-sheet phase*f_pure/lam. njit prange PURE MAP, fastmath=OFF,
+  no cross-node reduction. Classification partition in _saddle_grid /
+  _positive_parity_grid matches OLD serial exactly (geometric: w>ceil&resolved;
+  arm/ceiling-refuse: w>ceil&unresolved; batch: w<=ceil). Refusers=ceiling_refusers
+  ∪ uncertified-batch; min(refusers) re-run through f_schwinger for authentic
+  named exc = OLD first-refuser (lowest index) identity. _validate_inputs skipped
+  in batch — harmless (grid nodes pre-validated). NOTE off-production nuance:
+  pre-pass evaluates geometric nodes eagerly, so on a pathological multi-defect
+  grid a higher-index geometric census defect (LensDomainError) can surface
+  before a lower-index Schwinger refuser — both are named refusals -> -inf at
+  posterior, so NOT a serving defect; never fires in production (resolved
+  geometric censuses are non-degenerate). Covered by INS-3-003.
+- WP4 PearceyTable OFF by default (_PEARCEY_TABLE=None -> _consult_pearcey(...,None)
+  -> pearcey() byte-identical). load(): allow_pickle=False + SHA1 content-hash
+  verify (raises ValueError on mismatch); use_pearcey_table catches
+  OSError/ValueError/KeyError -> clears global, returns False. evaluate() returns
+  None outside box / non-finite / non-finite remodulation. Internal artifact
+  schema 0.1.0. Graph trace resolves (producer train_pearcey_table.py::main
+  confirmed exists, 2 consumers cusp_amplification/use_pearcey_table).
+- WP5 L_MAX==48 confirmed at runtime. _certify_geometric_census: (a) count in
+  {2,4}, (b) sum((-1)**morse_index)==sign(detA)-1 (0 for det>0, -2 for det<0).
+  morse_index=eigvalsh(hessian)<0 count -> sign(mu). Called once (find_images
+  reused). Passes silently on resolved non-degenerate censuses = byte-identical.
 
-### Resolved from prior review
-- INS-1-003 (8d census undercount): FIXED. census positive-parity geometric gate is
-  now `resolved & (l_arr > L_MAX)` (dropped the `high &` mask); diff comment cites
-  INS-1-003 explicitly.
+### Tests run GREEN this round
+- test_lensing_levers.py: 47 passed, 1 xfailed (70s).
+- test_lensing_geometry.py: 13 passed (16s).
+- test_lensing_schwinger.py: 34 passed (188s).
+- test_lensing_fast_path.py + test_lensing_batched_operator.py: 38 passed,
+  4 skipped (138s).
+- test_lensing_saddle_channels.py: 13 passed (25s).
+- imports clean; L_MAX=48; pipeline_graph trace pearcey_table resolves.
 
-### Carry-forward (NOT re-checked this round — out of 8e scope)
-- Prior INS-1-001 (8d): several lensing suites (schwinger/operator/fast_path/
-  ratio/batched) were RED pending re-baseline. Not re-run this review; check if
-  still open.
-- Prior INS-1-002 (8d): SPEC line-54 "bit-frozen"/"byte-identical" positive-parity
-  claims — superseded by/entangled with INS-2-003; needs Librarian pass.
+### OPEN carried findings (NOT code defects; unchanged since prior review)
+- INS-3-001 (trivial, LIBRARIAN): SPEC.md microlensing paragraph does NOT
+  mention the registered pearcey_table product (asymmetric with
+  lens_amplification_surrogate). Off-by-default+byte-identical -> default
+  narrative stays accurate. Needs one Librarian sentence + spec_version bump.
+  STILL OPEN (SPEC.md unchanged, 0.16.0).
+- INS-3-002 (informational, DRIVER/ARCHITECT): WP5 kept L_MAX=48 (certified
+  overlap ceiling) rather than relaxing toward the census-(b) floor; brief's
+  ~13.9% served-fraction payoff intentionally forgone. Reconcile floor ledger.
+- INS-3-003 (informational): _certify_geometric_census is STRICTER than
+  geometry._check_image_census (refuses degenerate fold/cusp censuses the
+  latter permits); value-preserving only because production resolution gate
+  routes degenerate censuses to wave branch. Direct public geometric_amplification
+  call on a degenerate config now raises LensDomainError earlier — fail-fast,
+  off-production exception timing/type shift only.
+
+### Carry-forward from 8e (not in 8f scope, unverified)
+- INS-2-001 fold arm leading-order; INS-2-002 RefusalContract RED;
+  INS-2-003 SPEC line-54 stale; INS-2-004 cusp-window shrink inert.

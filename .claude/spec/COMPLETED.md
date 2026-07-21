@@ -92,6 +92,17 @@ byte-identical certified paths. Post-build: sweep under the flag,
 sparse w>60 mpmath anchor, hard-core fraction memo to owner; then the
 full-box training campaign.
 
+### Build 8f — serving micro-levers (complete)
+
+Five levers landed by a round-1-approved plan (Professor inverted the
+brief's L_MAX direction — handoff exponent, not accuracy floor).
+Tree-gate preflight PROVEN BY RED twice in situ: caught 5 inherited
+pin re-baselines, then the numba thread-layer conflict (import-scope
+NUMBA_NUM_THREADS pins vs the new prange driver) — both invisible to
+build-scoped inspection. Final gate 516p/0F. Post-build: floor
+ledger re-measure, training-throughput probe, sweep; then the
+full-box training campaign.
+
 ### Build 8b-levers — serving-path levers (complete)
 
 Newton caustic shortcut (WP-A) + operator contraction fusion (WP-B),

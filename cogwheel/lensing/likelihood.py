@@ -583,22 +583,46 @@ def _norm_term(b_moments, r0, r1, rho0, rho1, k0, k1, kbar0, kbar1,
     """
     b0, b1, b2, b3 = b_moments
 
-    def reduce_pairs(bp, x_m, y_mprime):
-        """Contract ``sum_{m,m'} B^(p) x_m y_m'`` -> ``(n_det, n_bins)``."""
-        return np.einsum('mMdb,mdb,Mdb->db', bp, x_m, y_mprime)
+    # Mode-pair reduction -- the dominant cost of the lensed likelihood
+    # (quadratic in the mode count via the ``(n_m, n_m, n_det, n_bins)``
+    # moment tensors).  Each B^(p) is contracted against the ordered outer
+    # product ``r_p[m] * rho_q[m']`` for ``p, q in {0, 1}``.  The original
+    # form summed the joint ``(m, m')`` index in a single three-operand
+    # einsum, repeated once per required ``(p, q)`` combination (twelve
+    # quadratic passes).  Here the left-mode contraction is hoisted:
+    # contract the ``m`` index first (batched over the two left vectors
+    # ``r0, r1``), then contract the ``m'`` index (batched over the two
+    # right vectors ``rho0, rho1``).  Each B^(p) then costs one quadratic
+    # einsum plus cheap linear dot products, and the intermediate is reused
+    # across all ``(p, q)`` entries.  This is a pure re-association of the
+    # same double sum: the mathematics and every downstream branch/mask
+    # decision are unchanged; only the floating-point accumulation order
+    # differs (~1e-15 relative, well inside the 1e-10 preservation bound).
+    r_stack = np.stack((r0, r1))        # (2, n_m, n_det, n_bins)
+    rho_stack = np.stack((rho0, rho1))  # (2, n_m, n_det, n_bins)
 
-    # Mode reduction: N^(p,q) with q the order of the mode-pair ratio
-    # mu_q, q in {0,1,2}: mu0 = r0 rho0', mu1 = r1 rho0' + r0 rho1',
-    # mu2 = r1 rho1'.
-    n00 = reduce_pairs(b0, r0, rho0)
-    n11 = reduce_pairs(b1, r1, rho0) + reduce_pairs(b1, r0, rho1)
-    n22 = reduce_pairs(b2, r1, rho1)
-    n10 = reduce_pairs(b1, r0, rho0)
-    n21 = reduce_pairs(b2, r1, rho0) + reduce_pairs(b2, r0, rho1)
-    n32 = reduce_pairs(b3, r1, rho1)
-    n20 = reduce_pairs(b2, r0, rho0)
-    n31 = reduce_pairs(b3, r1, rho0) + reduce_pairs(b3, r0, rho1)
-    n30 = reduce_pairs(b3, r0, rho0)
+    def bilinear(bp):
+        """Ordered mode-pair form ``Q[p, q, d, b]`` for one B^(p) tensor."""
+        # left[p, m', d, b] = sum_m bp[m, m', d, b] r_p[m, d, b]
+        left = np.einsum('mMdb,pmdb->pMdb', bp, r_stack)
+        # Q[p, q, d, b] = sum_m' left[p, m', d, b] rho_q[m', d, b]
+        return np.einsum('pMdb,qMdb->pqdb', left, rho_stack)
+
+    q0, q1, q2, q3 = bilinear(b0), bilinear(b1), bilinear(b2), bilinear(b3)
+
+    # Assemble N^(p,q) with q the order of the mode-pair ratio mu_q,
+    # q in {0,1,2}: mu0 = r0 rho0', mu1 = r1 rho0' + r0 rho1', mu2 = r1 rho1'
+    # (each entry q*[p, q] has shape ``(n_det, n_bins)``, identical to the
+    # previous ``reduce_pairs`` output).
+    n00 = q0[0, 0]
+    n11 = q1[1, 0] + q1[0, 1]
+    n22 = q2[1, 1]
+    n10 = q1[0, 0]
+    n21 = q2[1, 0] + q2[0, 1]
+    n32 = q3[1, 1]
+    n20 = q2[0, 0]
+    n31 = q3[1, 0] + q3[0, 1]
+    n30 = q3[0, 0]
 
     # Collect by image-side in-bin order s (coefficient of nu_s):
     m0 = n00 + n11 + n22  # (n_det, n_bins)
