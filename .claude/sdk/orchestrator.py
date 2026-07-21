@@ -1199,6 +1199,7 @@ class BuildOrchestrator:
         self._collect_change_report(result_text)
 
         commit_msg = self._build_commit_message()
+        self._run_tree_fast_gate()
         commit_sha = self._git_commit_safe(commit_msg)
 
         write_state(self.project_root, "foreman_lite", last_commit=commit_sha, status="fast_path_complete")
@@ -1245,6 +1246,7 @@ class BuildOrchestrator:
         self._collect_change_report(result_text)
 
         commit_msg = self._build_commit_message()
+        self._run_tree_fast_gate()
         commit_sha = self._git_commit_safe(commit_msg)
 
         write_state(self.project_root, "foreman_lite", last_commit=commit_sha, status="fast_path_complete")
@@ -1299,6 +1301,7 @@ class BuildOrchestrator:
         check_commit_allowed(self._inspector_result, BuildMode.FULL)
         self._log("Committing changes")
         commit_msg = self._build_commit_message()
+        self._run_tree_fast_gate()
         commit_sha = self._git_commit_safe(commit_msg)
         if commit_sha:
             report.commits.append(commit_sha)
@@ -1960,6 +1963,38 @@ class BuildOrchestrator:
                 )
                 trivial_result, _ = await self._run_agent("foreman_lite", trivial_task)
                 self._collect_change_report(trivial_result)
+
+            # Tier 1.5 (port item 11): findings whose remedy is TEST
+            # AUTHORSHIP route to a fresh Test Developer -- coders never
+            # author tests (crew law), so leaving these in the coder tier
+            # dead-loops the revision cycle to escalation (measured: the
+            # 8c-cont census-test finding escalated twice unresolved).
+            test_findings = [
+                f for f in impl_findings
+                if (f.suggested_fix
+                    and 'test developer' in f.suggested_fix.lower())
+                or (f.file and '/tests/' in f.file
+                    and not (Path(self.project_root) / f.file).exists())]
+            if test_findings:
+                findings_text = chr(10).join(
+                    f'- [id: {f.finding_id}] [{f.file}] {f.description}'
+                    + ((chr(10) + '  Suggested fix: ' + f.suggested_fix)
+                       if f.suggested_fix else '')
+                    for f in test_findings)
+                td_task = (
+                    '## Missing/deficient test deliverables '
+                    '(Inspector findings)' + chr(10) * 2
+                    + findings_text + chr(10) * 2
+                    + 'Author the missing tests per the findings and the '
+                    'approved plan domain test descriptions. Follow the '
+                    'repo test-tier law (exact-heavy tests born gated '
+                    'under COGWHEEL_BRUTE_ACCURACY). Do not modify '
+                    'non-test files.'
+                    + CHANGE_REPORT_INSTRUCTION)
+                td_result, _ = await self._run_agent('test_dev', td_task)
+                self._collect_change_report(td_result)
+                impl_findings = [
+                    f for f in impl_findings if f not in test_findings]
 
             # Tier 2: Coder fixes implementation findings
             if impl_findings:
@@ -3385,6 +3420,34 @@ class BuildOrchestrator:
             capture_output=True, text=True, cwd=self.project_root,
         )
         return bool(result.stdout.strip())
+
+    def _run_tree_fast_gate(self) -> None:
+        """Tree-wide FAST tally as a commit precondition (port item 15).
+
+        Inspector verification is build-suite-scoped, so inherited
+        contract pins on unchanged suites can slip through (measured:
+        8e refusal pins passed a zero-finding Inspector, failed the
+        tree gate). Runs the gated fast suite and blocks the commit on
+        any red. Skippable via SDK_SKIP_TREE_GATE=1.
+        """
+        if os.environ.get("SDK_SKIP_TREE_GATE"):
+            self._log("  Tree gate SKIPPED (SDK_SKIP_TREE_GATE)")
+            return
+        self._log("  Tree-wide fast gate (commit precondition)...")
+        runner = str(Path(self.project_root) / ".claude/sdk/run_py.sh")
+        proc = subprocess.run(
+            [runner, "-m", "pytest", "cogwheel/tests/", "-q",
+             "-p", "no:cacheprovider", "-n", "8", "--dist", "loadfile",
+             "-k", "not Timing and not timing"],
+            capture_output=True, text=True, cwd=self.project_root,
+            timeout=3600)
+        tail_txt = chr(10).join((proc.stdout or '').splitlines()[-25:])
+        if proc.returncode != 0:
+            raise GateFailure(
+                'Tree-wide fast gate RED -- commit blocked. Tail:' + chr(10)
+                + tail_txt)
+        last = tail_txt.splitlines()[-1] if tail_txt else ''
+        self._log(f'  Tree gate green: {last}')
 
     def _git_commit_safe(self, message: str) -> Optional[str]:
         """Create a git commit, staging only tracked + safe new files."""

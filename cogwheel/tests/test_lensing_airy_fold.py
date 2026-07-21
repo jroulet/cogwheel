@@ -1947,7 +1947,13 @@ def _head_operator():
     once per process.
     """
     source = subprocess.check_output(
-        ['git', 'show', 'HEAD:cogwheel/lensing/chang_refsdal/operator.py'],
+        # Pinned to the PRE-8e commit (4e26103, Build 8d): this is a
+        # TRANSITION witness -- 'HEAD' became self-referential the moment
+        # 8e was committed (HEAD then already served the fold node,
+        # voiding the refuses-premise; reddened in the first post-commit
+        # sweep). Transition baselines must pin the SHA at authorship.
+        ['git', 'show',
+         '4e26103:cogwheel/lensing/chang_refsdal/operator.py'],
         cwd=_REPO_ROOT).decode()
     tmpdir = tempfile.mkdtemp(prefix='head_operator_')
     tmppath = os.path.join(tmpdir, '_operator_head_ref.py')

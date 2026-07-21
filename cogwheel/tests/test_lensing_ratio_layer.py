@@ -261,8 +261,15 @@ MACRO_SADDLE = dict(gamma=0.5, beta=0.0, kappa=0.6, y1=0.20, y2=0.05)
 #: scaled x4 to push the refusing nodes above the ``w = 60`` Schwinger
 #: ceiling, where the named refusal stands on every path (measured:
 #: x2 certifies on all three paths, x4 refuses on all three).
-CANCELLATION_CONFIG = dict(gamma=0.405, beta=0.0, kappa=0.57,
-                           y1=0.20, y2=0.05, m_lens=M_LENS_MSUN * 4)
+#: RE-BASELINE (Build 8e uniform arms): the former strong-shear config
+#: (gamma'=0.94, y=(0.20,0.05)) is now ARM-SERVED at the engine and
+#: refuses downstream at the bin guard instead — the wave-refusal
+#: symmetry premise died. HARD-CORE replacement (both arms return
+#: None: fold xi and Pearcey R both small for an interior 4-image
+#: source at w > 60): verified refusing with SchwingerCertificationError
+#: through the full path (same family as the marginalized spy fixture).
+CANCELLATION_CONFIG = dict(gamma=0.47, beta=0.0, kappa=0.0,
+                           y1=0.10, y2=0.10, m_lens=M_LENS_MSUN * 4)
 
 #: Image-count-mismatch config: the candidate has two real images while
 #: its snapped-lattice fiducial has four (verified in the guard test).
@@ -787,11 +794,11 @@ class RefusalSymmetryTestCase(RatioLayerTestCase):
     # ~90 ms/node exact path (vocab re-baseline preserved, not weakened).
     def test_uncertifiable_branch_refused_symmetrically(self):
         """All three paths raise the SAME named wave-branch refusal on an
-        uncertifiable config.  RE-BASELINE (Build 8d homogenization): this
-        strong-shear positive-parity config (``gamma' = 0.94``) is served
-        by the exact Schwinger evaluator, so above its ceiling the named
-        refusal is `SchwingerCertificationError` (was `CancellationError`);
-        the SYMMETRY contract is unchanged -- ratio, direct, and
+        uncertifiable config.  RE-BASELINE (8d vocab; 8e hard-core
+        repoint — the old config became arm-served and refused at the
+        bin guard downstream): a genuinely hard-core interior source
+        (both uniform arms uncertifiable at w > 60) refuses with
+        SchwingerCertificationError; the SYMMETRY contract is unchanged -- ratio, direct, and
         bruteforce must still all refuse with the SAME named type."""
         named_refusals = (CancellationError, SchwingerCertificationError,
                           LensDomainError)

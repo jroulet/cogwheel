@@ -1,12 +1,12 @@
 {
   "config": {
-    "n_samples": 2000,
+    "n_samples": 100000,
     "seed": 0,
     "f_min_hz": 20.0,
     "f_max_hz": 1024.0,
     "n_freq": 128
   },
-  "n_samples": 2000,
+  "n_samples": 100000,
   "gamma_prime_zero": {
     "count": 0,
     "fraction": 0.0,
@@ -14,23 +14,23 @@
   },
   "gamma_prime_near_zero": {
     "threshold": 0.01,
-    "count": 16,
-    "fraction": 0.008,
+    "count": 626,
+    "fraction": 0.00626,
     "analytic_expectation": 0.0062499999999999995
   },
   "unresolved_high_w_refusal_corner": {
-    "count": 493,
-    "fraction_of_prior_box": 0.2465,
+    "count": 24615,
+    "fraction_of_prior_box": 0.24615,
     "wilson95_of_prior_box": [
-      0.2281096206139167,
-      0.2658623580095434
+      0.24348986369526673,
+      0.24882963935870397
     ],
-    "fraction_of_classifiable": 0.2465,
+    "fraction_of_classifiable": 0.24615,
     "wilson95_of_classifiable": [
-      0.2281096206139167,
-      0.2658623580095434
+      0.24348986369526673,
+      0.24882963935870397
     ],
-    "definition": "any frequency node with w > 60.0 that is not geometric-eligible"
+    "definition": "any frequency node with w > 60.0 that is not geometric-eligible (a NAMED SchwingerCertificationError refusal under the Build-8d homogenization; the Build-8e uniform-asymptotics build owns serving this corner)"
   },
   "engine_refused": {
     "count": 0,
@@ -38,14 +38,707 @@
     "note": "geometry refusals (macro-matrix parity boundary, Type III, or F012 near-axial census) preceding wave/geometric dispatch"
   },
   "node_classification_totals": {
-    "served_by_schwinger": 233167,
-    "served_by_geometric": 7191,
-    "named_refusal": 15642,
+    "served_by_schwinger": 11680450,
+    "served_by_geometric": 349629,
+    "named_refusal": 769921,
     "n_nodes_per_config": 128,
     "note": "the schwinger/geometric split mirrors production operator.select_branch exactly: the positive-parity geometric gate (resolved AND L > L_MAX) is w-independent, so strongly-cancelling resolved nodes below w = 60.0 count as served_by_geometric; the saddle geometric gate additionally requires the node above the Schwinger ceiling."
   },
+  "corner_scoping": {
+    "high_w_node_categories": {
+      "n_high_w_nodes": 1119532,
+      "definition": "categories (a)-(d) partition the high-w nodes (w > 60.0): n_high_w_nodes == a + b + (c+d)",
+      "a_geometric_now": {
+        "count": 349611,
+        "fraction": 0.3122831683239068,
+        "wilson95": [
+          0.311425359884012,
+          0.3131422650351616
+        ],
+        "note": "high-w nodes already served by the geometric branch"
+      },
+      "b_geometric_under_relaxed_l_max": {
+        "count": 155164,
+        "fraction": 0.13859719954409522,
+        "wilson95": [
+          0.13795838325741813,
+          0.1392384960818668
+        ],
+        "relaxed_l_max": 60.0,
+        "production_l_max": 48,
+        "note": "MEASURED ONLY: resolved refused positive-parity nodes a relaxed cancellation ceiling plus the image-census guard would move onto the geometric branch; operator.L_MAX and operator.select_branch are UNCHANGED"
+      },
+      "cd_uniform_or_hardcore": {
+        "count": 614757,
+        "fraction": 0.549119632131998,
+        "wilson95": [
+          0.5481977388812098,
+          0.5500411882824061
+        ],
+        "note": "residual refused nodes; the (c) uniform-resolvable / (d) genuinely-hard-core split is read off the fold and cusp threshold tables below at the arms' certified thresholds"
+      },
+      "correlation_caveat": "nodes within a config share geometry; the Wilson intervals treat nodes as independent and are indicative, not rigorous"
+    },
+    "fold_argument": {
+      "definition": "xi = (3 w Delta_tau / 4)**(2/3), Delta_tau = delta_min / 2 (half the merging minimum/saddle Fermat-delay separation)",
+      "population": "refused fold-type nodes not rescued by category (b)",
+      "w_delta_tau_distribution": {
+        "count": 487511,
+        "min": 2.4550559505725154e-05,
+        "max": 29.637557064563865,
+        "mean": 4.18245174921183,
+        "std": 4.498764248908369
+      },
+      "fraction_vs_threshold": [
+        {
+          "w_delta_tau_threshold": 0.0,
+          "fraction_resolvable_ge": 1.0,
+          "wilson95_resolvable": [
+            0.999992120034772,
+            1.0
+          ],
+          "fraction_hardcore_lt": 0.0,
+          "xi_threshold": 0.0
+        },
+        {
+          "w_delta_tau_threshold": 0.25,
+          "fraction_resolvable_ge": 0.9273554853121263,
+          "wilson95_resolvable": [
+            0.9266235141447379,
+            0.9280807213867861
+          ],
+          "fraction_hardcore_lt": 0.0726445146878737,
+          "xi_threshold": 0.3275926742761121
+        },
+        {
+          "w_delta_tau_threshold": 0.5,
+          "fraction_resolvable_ge": 0.8657773875871518,
+          "wilson95_resolvable": [
+            0.8648175754644528,
+            0.86673143508366
+          ],
+          "fraction_hardcore_lt": 0.13422261241284816,
+          "xi_threshold": 0.520020955762976
+        },
+        {
+          "w_delta_tau_threshold": 0.75,
+          "fraction_resolvable_ge": 0.807817669755144,
+          "wilson95_resolvable": [
+            0.8067091894854558,
+            0.8089212988397637
+          ],
+          "fraction_hardcore_lt": 0.19218233024485598,
+          "xi_threshold": 0.6814202223120522
+        },
+        {
+          "w_delta_tau_threshold": 1.0,
+          "fraction_resolvable_ge": 0.7524814824691135,
+          "wilson95_resolvable": [
+            0.7512680178238273,
+            0.7536909680237944
+          ],
+          "fraction_hardcore_lt": 0.2475185175308865,
+          "xi_threshold": 0.8254818122236567
+        },
+        {
+          "w_delta_tau_threshold": 1.25,
+          "fraction_resolvable_ge": 0.6985606478623047,
+          "wilson95_resolvable": [
+            0.6972709389496778,
+            0.6998472274729297
+          ],
+          "fraction_hardcore_lt": 0.30143935213769535,
+          "xi_threshold": 0.9578867904919413
+        },
+        {
+          "w_delta_tau_threshold": 1.5,
+          "fraction_resolvable_ge": 0.6465043865676877,
+          "wilson95_resolvable": [
+            0.6451612705956391,
+            0.6478451936407925
+          ],
+          "fraction_hardcore_lt": 0.3534956134323123,
+          "xi_threshold": 1.0816871777305563
+        },
+        {
+          "w_delta_tau_threshold": 1.75,
+          "fraction_resolvable_ge": 0.5961280873662338,
+          "wilson95_resolvable": [
+            0.594749949685173,
+            0.5975047100753227
+          ],
+          "fraction_hardcore_lt": 0.4038719126337662,
+          "xi_threshold": 1.1987617435402722
+        },
+        {
+          "w_delta_tau_threshold": 2.0,
+          "fraction_resolvable_ge": 0.547419442843341,
+          "wilson95_resolvable": [
+            0.5460218317165003,
+            0.5488163066430601
+          ],
+          "fraction_hardcore_lt": 0.452580557156659,
+          "xi_threshold": 1.3103706971044484
+        },
+        {
+          "w_delta_tau_threshold": 2.25,
+          "fraction_resolvable_ge": 0.5217687395771583,
+          "wilson95_resolvable": [
+            0.5203663351087725,
+            0.5231708009717223
+          ],
+          "fraction_hardcore_lt": 0.4782312604228417,
+          "xi_threshold": 1.417411181131732
+        },
+        {
+          "w_delta_tau_threshold": 2.5,
+          "fraction_resolvable_ge": 0.4973385215923333,
+          "wilson95_resolvable": [
+            0.4959349986608552,
+            0.498742086468526
+          ],
+          "fraction_hardcore_lt": 0.5026614784076666,
+          "xi_threshold": 1.5205504988933498
+        },
+        {
+          "w_delta_tau_threshold": 2.75,
+          "fraction_resolvable_ge": 0.47378828375154614,
+          "wilson95_resolvable": [
+            0.47238685647105627,
+            0.47519012412686124
+          ],
+          "fraction_hardcore_lt": 0.5262117162484539,
+          "xi_threshold": 1.6203020127373398
+        },
+        {
+          "w_delta_tau_threshold": 3.0,
+          "fraction_resolvable_ge": 0.4510995649328938,
+          "wilson95_resolvable": [
+            0.4497031151050626,
+            0.452496785428181
+          ],
+          "fraction_hardcore_lt": 0.5489004350671062,
+          "xi_threshold": 1.7170713638299975
+        },
+        {
+          "w_delta_tau_threshold": 3.25,
+          "fraction_resolvable_ge": 0.42929697996558025,
+          "wilson95_resolvable": [
+            0.42790807665909164,
+            0.4306869975467476
+          ],
+          "fraction_hardcore_lt": 0.5707030200344198,
+          "xi_threshold": 1.8111861266834752
+        },
+        {
+          "w_delta_tau_threshold": 3.5,
+          "fraction_resolvable_ge": 0.4084318097437801,
+          "wilson95_resolvable": [
+            0.4070527050699252,
+            0.40981235752594547
+          ],
+          "fraction_hardcore_lt": 0.5915681902562199,
+          "xi_threshold": 1.9029156527550615
+        },
+        {
+          "w_delta_tau_threshold": 3.75,
+          "fraction_resolvable_ge": 0.3883625189995713,
+          "wilson95_resolvable": [
+            0.3869952668895246,
+            0.38973153050855486
+          ],
+          "fraction_hardcore_lt": 0.6116374810004287,
+          "xi_threshold": 1.992484817217396
+        },
+        {
+          "w_delta_tau_threshold": 4.0,
+          "fraction_resolvable_ge": 0.3691239787409925,
+          "wilson95_resolvable": [
+            0.367770380892222,
+            0.3704796391867564
+          ],
+          "fraction_hardcore_lt": 0.6308760212590074,
+          "xi_threshold": 2.080083823051904
+        },
+        {
+          "w_delta_tau_threshold": 4.25,
+          "fraction_resolvable_ge": 0.3507305476184127,
+          "wilson95_resolvable": [
+            0.3493921656180022,
+            0.352071282095012
+          ],
+          "fraction_hardcore_lt": 0.6492694523815873,
+          "xi_threshold": 2.165875368503786
+        },
+        {
+          "w_delta_tau_threshold": 4.5,
+          "fraction_resolvable_ge": 0.3331760719245309,
+          "wilson95_resolvable": [
+            0.3318542493684749,
+            0.3345005236140918
+          ],
+          "fraction_hardcore_lt": 0.6668239280754691,
+          "xi_threshold": 2.25
+        },
+        {
+          "w_delta_tau_threshold": 4.75,
+          "fraction_resolvable_ge": 0.31649542266738595,
+          "wilson95_resolvable": [
+            0.3151912485174371,
+            0.317802488836712
+          ],
+          "fraction_hardcore_lt": 0.683504577332614,
+          "xi_threshold": 2.3325801849310412
+        },
+        {
+          "w_delta_tau_threshold": 5.0,
+          "fraction_resolvable_ge": 0.30072552209078357,
+          "wilson95_resolvable": [
+            0.299439817007178,
+            0.3020143677263027
+          ],
+          "fraction_hardcore_lt": 0.6992744779092164,
+          "xi_threshold": 2.4137234615140746
+        },
+        {
+          "w_delta_tau_threshold": 5.25,
+          "fraction_resolvable_ge": 0.28570842504066574,
+          "wilson95_resolvable": [
+            0.28444198935569753,
+            0.2869782379459527
+          ],
+          "fraction_hardcore_lt": 0.7142915749593343,
+          "xi_threshold": 2.4935249104316157
+        },
+        {
+          "w_delta_tau_threshold": 5.5,
+          "fraction_resolvable_ge": 0.27145849016740137,
+          "wilson95_resolvable": [
+            0.2702119264005514,
+            0.2727086557325526
+          ],
+          "fraction_hardcore_lt": 0.7285415098325987,
+          "xi_threshold": 2.572069119525444
+        },
+        {
+          "w_delta_tau_threshold": 5.75,
+          "fraction_resolvable_ge": 0.2579572563490875,
+          "wilson95_resolvable": [
+            0.2567310147757416,
+            0.2591873124992407
+          ],
+          "fraction_hardcore_lt": 0.7420427436509125,
+          "xi_threshold": 2.6494317637683054
+        },
+        {
+          "w_delta_tau_threshold": 6.0,
+          "fraction_resolvable_ge": 0.24512677662657867,
+          "wilson95_resolvable": [
+            0.24392126277762946,
+            0.2463363072598034
+          ],
+          "fraction_hardcore_lt": 0.7548732233734213,
+          "xi_threshold": 2.725680889248209
+        },
+        {
+          "w_delta_tau_threshold": 6.25,
+          "fraction_resolvable_ge": 0.23298346088601077,
+          "wilson95_resolvable": [
+            0.23179890103150957,
+            0.23417222890259903
+          ],
+          "fraction_hardcore_lt": 0.7670165391139893,
+          "xi_threshold": 2.8008779665982275
+        },
+        {
+          "w_delta_tau_threshold": 6.5,
+          "fraction_resolvable_ge": 0.2214432084609373,
+          "wilson95_resolvable": [
+            0.22027983108691493,
+            0.22261097587062242
+          ],
+          "fraction_hardcore_lt": 0.7785567915390628,
+          "xi_threshold": 2.875078762807558
+        },
+        {
+          "w_delta_tau_threshold": 6.75,
+          "fraction_resolvable_ge": 0.21042396992067872,
+          "wilson95_resolvable": [
+            0.20928203687499428,
+            0.21157046666445897
+          ],
+          "fraction_hardcore_lt": 0.7895760300793213,
+          "xi_threshold": 2.9483340684850092
+        },
+        {
+          "w_delta_tau_threshold": 7.0,
+          "fraction_resolvable_ge": 0.1999175403221671,
+          "wilson95_resolvable": [
+            0.19879722508425637,
+            0.2010425848387735
+          ],
+          "fraction_hardcore_lt": 0.8000824596778329,
+          "xi_threshold": 3.020690308990137
+        },
+        {
+          "w_delta_tau_threshold": 7.25,
+          "fraction_resolvable_ge": 0.1899793030311111,
+          "wilson95_resolvable": [
+            0.1888805504982422,
+            0.19108294146860422
+          ],
+          "fraction_hardcore_lt": 0.8100206969688889,
+          "xi_threshold": 3.092190061448653
+        },
+        {
+          "w_delta_tau_threshold": 7.5,
+          "fraction_resolvable_ge": 0.18050464502339433,
+          "wilson95_resolvable": [
+            0.17942751815075678,
+            0.1815868071206074
+          ],
+          "fraction_hardcore_lt": 0.8194953549766056,
+          "xi_threshold": 3.1628724948815594
+        },
+        {
+          "w_delta_tau_threshold": 7.75,
+          "fraction_resolvable_ge": 0.17158792314429827,
+          "wilson95_resolvable": [
+            0.17053215930359858,
+            0.1726488627364902
+          ],
+          "fraction_hardcore_lt": 0.8284120768557017,
+          "xi_threshold": 3.232773747055658
+        },
+        {
+          "w_delta_tau_threshold": 8.0,
+          "fraction_resolvable_ge": 0.16313683178430846,
+          "wilson95_resolvable": [
+            0.1621022759760023,
+            0.16417669653271894
+          ],
+          "fraction_hardcore_lt": 0.8368631682156915,
+          "xi_threshold": 3.3019272488946267
+        }
+      ]
+    },
+    "cusp_argument": {
+      "definition": "R = sqrt(x**2 + y**2), x = w**(1/2) delta_parallel, y = w**(3/4) delta_perp (cusp 2/3 law; offsets from nearest_caustic_point soft/hard axes)",
+      "population": "refused cusp-type nodes not rescued by category (b)",
+      "R_distribution": {
+        "count": 127246,
+        "min": 0.01792388083788298,
+        "max": 9.263802539966585,
+        "mean": 3.0559021009291016,
+        "std": 1.6931204734104974
+      },
+      "fraction_vs_threshold": [
+        {
+          "R_threshold": 0.0,
+          "fraction_resolvable_ge": 1.0,
+          "wilson95_resolvable": [
+            0.9999698105714578,
+            1.0
+          ],
+          "fraction_hardcore_lt": 0.0
+        },
+        {
+          "R_threshold": 0.1,
+          "fraction_resolvable_ge": 0.9971551168602549,
+          "wilson95_resolvable": [
+            0.9968470784641229,
+            0.9974331375986373
+          ],
+          "fraction_hardcore_lt": 0.002844883139745069
+        },
+        {
+          "R_threshold": 0.125893,
+          "fraction_resolvable_ge": 0.9952375713185483,
+          "wilson95_resolvable": [
+            0.9948440522707871,
+            0.995601188487768
+          ],
+          "fraction_hardcore_lt": 0.004762428681451714
+        },
+        {
+          "R_threshold": 0.158489,
+          "fraction_resolvable_ge": 0.9926834635273407,
+          "wilson95_resolvable": [
+            0.9922000950907891,
+            0.9931370842994601
+          ],
+          "fraction_hardcore_lt": 0.007316536472659285
+        },
+        {
+          "R_threshold": 0.199526,
+          "fraction_resolvable_ge": 0.9888247960643164,
+          "wilson95_resolvable": [
+            0.9882322666335062,
+            0.9893878108126257
+          ],
+          "fraction_hardcore_lt": 0.011175203935683609
+        },
+        {
+          "R_threshold": 0.251189,
+          "fraction_resolvable_ge": 0.9837794508275309,
+          "wilson95_resolvable": [
+            0.9830706128511006,
+            0.9844590787536394
+          ],
+          "fraction_hardcore_lt": 0.016220549172469068
+        },
+        {
+          "R_threshold": 0.316228,
+          "fraction_resolvable_ge": 0.975818493312167,
+          "wilson95_resolvable": [
+            0.9749599846271285,
+            0.9766482726203997
+          ],
+          "fraction_hardcore_lt": 0.024181506687833032
+        },
+        {
+          "R_threshold": 0.398107,
+          "fraction_resolvable_ge": 0.9623170865881835,
+          "wilson95_resolvable": [
+            0.9612567302572577,
+            0.9633495287418106
+          ],
+          "fraction_hardcore_lt": 0.03768291341181651
+        },
+        {
+          "R_threshold": 0.501187,
+          "fraction_resolvable_ge": 0.9438253461798406,
+          "wilson95_resolvable": [
+            0.9425467221824971,
+            0.9450771725100365
+          ],
+          "fraction_hardcore_lt": 0.056174653820159404
+        },
+        {
+          "R_threshold": 0.630957,
+          "fraction_resolvable_ge": 0.920547600710435,
+          "wilson95_resolvable": [
+            0.9190489007806971,
+            0.9220209084566923
+          ],
+          "fraction_hardcore_lt": 0.07945239928956505
+        },
+        {
+          "R_threshold": 0.794328,
+          "fraction_resolvable_ge": 0.8981186049070304,
+          "wilson95_resolvable": [
+            0.8964445014718744,
+            0.8997686703958382
+          ],
+          "fraction_hardcore_lt": 0.10188139509296956
+        },
+        {
+          "R_threshold": 1.0,
+          "fraction_resolvable_ge": 0.8733162535561039,
+          "wilson95_resolvable": [
+            0.8714773800894244,
+            0.8751325866140625
+          ],
+          "fraction_hardcore_lt": 0.12668374644389613
+        },
+        {
+          "R_threshold": 1.258925,
+          "fraction_resolvable_ge": 0.8358533863539915,
+          "wilson95_resolvable": [
+            0.8338080154598246,
+            0.8378784788045424
+          ],
+          "fraction_hardcore_lt": 0.16414661364600847
+        },
+        {
+          "R_threshold": 1.584893,
+          "fraction_resolvable_ge": 0.7771324835358282,
+          "wilson95_resolvable": [
+            0.7748374587688248,
+            0.7794107753602147
+          ],
+          "fraction_hardcore_lt": 0.2228675164641718
+        },
+        {
+          "R_threshold": 1.995262,
+          "fraction_resolvable_ge": 0.6972950033792811,
+          "wilson95_resolvable": [
+            0.6947647136804599,
+            0.6998133806312897
+          ],
+          "fraction_hardcore_lt": 0.3027049966207189
+        },
+        {
+          "R_threshold": 2.511886,
+          "fraction_resolvable_ge": 0.5920500447951212,
+          "wilson95_resolvable": [
+            0.5893469763413373,
+            0.594747555372406
+          ],
+          "fraction_hardcore_lt": 0.40794995520487876
+        },
+        {
+          "R_threshold": 3.162278,
+          "fraction_resolvable_ge": 0.46083963346588497,
+          "wilson95_resolvable": [
+            0.45810200901890774,
+            0.46357962237103667
+          ],
+          "fraction_hardcore_lt": 0.539160366534115
+        },
+        {
+          "R_threshold": 3.981072,
+          "fraction_resolvable_ge": 0.30142401332851326,
+          "wilson95_resolvable": [
+            0.2989087088024341,
+            0.30395130764571215
+          ],
+          "fraction_hardcore_lt": 0.6985759866714867
+        },
+        {
+          "R_threshold": 5.011872,
+          "fraction_resolvable_ge": 0.13635006208446632,
+          "wilson95_resolvable": [
+            0.13447551956738812,
+            0.13824656136917474
+          ],
+          "fraction_hardcore_lt": 0.8636499379155337
+        },
+        {
+          "R_threshold": 6.309573,
+          "fraction_resolvable_ge": 0.033085519387642835,
+          "wilson95_resolvable": [
+            0.03211677005678354,
+            0.03408246048119774
+          ],
+          "fraction_hardcore_lt": 0.9669144806123572
+        },
+        {
+          "R_threshold": 7.943282,
+          "fraction_resolvable_ge": 0.0017839460572434498,
+          "wilson95_resolvable": [
+            0.0015666370439499687,
+            0.0020313367864551774
+          ],
+          "fraction_hardcore_lt": 0.9982160539427566
+        },
+        {
+          "R_threshold": 10.0,
+          "fraction_resolvable_ge": 0.0,
+          "wilson95_resolvable": [
+            1.6940658945086007e-21,
+            3.018942854228276e-05
+          ],
+          "fraction_hardcore_lt": 1.0
+        },
+        {
+          "R_threshold": 12.589254,
+          "fraction_resolvable_ge": 0.0,
+          "wilson95_resolvable": [
+            1.6940658945086007e-21,
+            3.018942854228276e-05
+          ],
+          "fraction_hardcore_lt": 1.0
+        },
+        {
+          "R_threshold": 15.848932,
+          "fraction_resolvable_ge": 0.0,
+          "wilson95_resolvable": [
+            1.6940658945086007e-21,
+            3.018942854228276e-05
+          ],
+          "fraction_hardcore_lt": 1.0
+        },
+        {
+          "R_threshold": 19.952623,
+          "fraction_resolvable_ge": 0.0,
+          "wilson95_resolvable": [
+            1.6940658945086007e-21,
+            3.018942854228276e-05
+          ],
+          "fraction_hardcore_lt": 1.0
+        },
+        {
+          "R_threshold": 25.118864,
+          "fraction_resolvable_ge": 0.0,
+          "wilson95_resolvable": [
+            1.6940658945086007e-21,
+            3.018942854228276e-05
+          ],
+          "fraction_hardcore_lt": 1.0
+        },
+        {
+          "R_threshold": 31.622777,
+          "fraction_resolvable_ge": 0.0,
+          "wilson95_resolvable": [
+            1.6940658945086007e-21,
+            3.018942854228276e-05
+          ],
+          "fraction_hardcore_lt": 1.0
+        },
+        {
+          "R_threshold": 39.810717,
+          "fraction_resolvable_ge": 0.0,
+          "wilson95_resolvable": [
+            1.6940658945086007e-21,
+            3.018942854228276e-05
+          ],
+          "fraction_hardcore_lt": 1.0
+        },
+        {
+          "R_threshold": 50.118723,
+          "fraction_resolvable_ge": 0.0,
+          "wilson95_resolvable": [
+            1.6940658945086007e-21,
+            3.018942854228276e-05
+          ],
+          "fraction_hardcore_lt": 1.0
+        },
+        {
+          "R_threshold": 63.095734,
+          "fraction_resolvable_ge": 0.0,
+          "wilson95_resolvable": [
+            1.6940658945086007e-21,
+            3.018942854228276e-05
+          ],
+          "fraction_hardcore_lt": 1.0
+        },
+        {
+          "R_threshold": 79.432823,
+          "fraction_resolvable_ge": 0.0,
+          "wilson95_resolvable": [
+            1.6940658945086007e-21,
+            3.018942854228276e-05
+          ],
+          "fraction_hardcore_lt": 1.0
+        },
+        {
+          "R_threshold": 100.0,
+          "fraction_resolvable_ge": 0.0,
+          "wilson95_resolvable": [
+            1.6940658945086007e-21,
+            3.018942854228276e-05
+          ],
+          "fraction_hardcore_lt": 1.0
+        }
+      ]
+    },
+    "topology_config_counts": {
+      "fold": 18512,
+      "cusp": 6103,
+      "degenerate": 0,
+      "degenerate_hardcore_nodes": 0,
+      "note": "per refusal-corner config topology from the real-image delay spectrum; degenerate (< 2 real images) nodes have no exploitable fold/cusp structure and count as (d)"
+    },
+    "partition_check": {
+      "cd_node_total": 614757,
+      "fold_plus_cusp_plus_degenerate": 614757,
+      "consistent": true
+    },
+    "production_l_max_unchanged": 48
+  },
   "w_range": {
-    "max_w_seen": 443.4514866351522,
+    "max_w_seen": 443.647789458496,
     "engine_ceiling": 500.0,
     "n_configs_exceeding_engine_ceiling": 0
   },

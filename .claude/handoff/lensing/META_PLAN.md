@@ -2610,3 +2610,37 @@ finding), spy repointed, flip witness split with history comment.
 PORT ITEM 15: the Inspector PASS did not run the inherited fast
 gate (build-suite-scoped verification) — inspector protocol should
 include the tree-wide fast tally, or the commit preflight should.
+
+
+## 2026-07-21 — 8E COMMITTED (d8d1481); post-build: census + anchor DONE
+
+Commit: 33 files, +5817. Final gate 469p/52skip/0F in 12:02. Census
+(1e5 draws): corner draws 24.62% [24.35,24.88]; of 1.12M high-w
+nodes: 31.2% geometric-now, 13.9% relaxed-L_MAX (measured-only),
+54.9% uniform-or-hard (c/d split read off the JSON threshold table
+at the arms measured thresholds once the sweep lands); refusal
+topologies fold:cusp = 3:1. mpmath anchor: Pearcey worst 7.9e-14 /
+Airy 2.1e-14 vs dps=30 (two instrument bugs in MY anchor script en
+route — unsubdivided oscillatory mp.quad, then an argument-order
+swap vs the module convention; the x==y diagonal isolated the swap;
+the MODULE was right throughout, its in-build certificates already
+proved it). Pending: the sweep (arms gated accuracy tests) -> owner
+serving-numbers package (c/d split, arm accuracy, per-node cost
+split, parity-asymmetric hard core, quad-double verdict).
+
+
+## 2026-07-21 — STRUCTURAL GAPS 11 + 15 CLOSED (8f = proving run)
+
+Prompted by the gw port session honest note, both documented gaps are
+now FIXED here (gw follow-up block after 8f proves them):
+- Item 11: revision loops gain a Tier-1.5 TEST-DEV route — findings
+  whose suggested_fix names the Test Developer, or whose file is a
+  nonexistent tests/ path, spawn a fresh test_dev instead of
+  dead-looping in the coder tier (8c-cont evidence cited in-code).
+- Item 15: _run_tree_fast_gate() — the tree-wide gated fast tally is
+  now a COMMIT PRECONDITION at all three build commit sites (blocks
+  with the failure tail; SDK_SKIP_TREE_GATE=1 escape for test-free
+  changes). Converts the driver manual gate into pipeline law (8e
+  refusal-pin evidence cited in-code).
+Both parse-verified; 8f is the proving run; the gw follow-up message
+ships after that proof.
