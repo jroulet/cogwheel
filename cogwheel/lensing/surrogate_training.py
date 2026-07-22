@@ -247,7 +247,9 @@ class TrainingConfig:
     min_gamma_band: float = 0.02
     engine_budget: int = 400
     max_tube_arcs: int = 1
-    max_farfield_regions: int = 1
+    # ``None`` = no cap (the production default: the tiling itself bounds the
+    # count); an int caps admitted tiles with a loud truncation record.
+    max_farfield_regions: int | None = None
     # Cartesian grid side for the mass-stratified far-field tiling (Build 8g
     # WP2): each stratum's shear-frame y-support box ``[-Y(m_lo), Y(m_lo)]^2``
     # is split into ``n_farfield_tiles_per_side^2`` square tiles (tile half
@@ -1541,7 +1543,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
 
     # ``max_farfield_regions`` is a TRUE cap on distinct admitted tiles; a
     # truncation is recorded loudly with the dropped count.
-    if len(admitted) > config.max_farfield_regions:
+    if (config.max_farfield_regions is not None
+            and len(admitted) > config.max_farfield_regions):
         chart_reports.append({
             'name': f'chart_{label}_farfield_truncated',
             'parity': parity, 'truncated': True,
