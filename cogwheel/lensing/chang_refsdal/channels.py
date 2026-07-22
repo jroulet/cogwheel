@@ -104,8 +104,8 @@ from cogwheel.lensing.chang_refsdal.operator import (
     geometric_amplification, select_branch)
 
 __all__ = ['ChangRefsdalChannels', 'ChangRefsdalGeometryPartition',
-           'ChangRefsdalPartition', 'real_image_delays',
-           'reconstruct_from_envelope']
+           'ChangRefsdalPartition', 'farfield_envelope_from_partition',
+           'real_image_delays', 'reconstruct_from_envelope']
 
 #: The fixed number of topology-stable labels.
 _N_CHANNELS = 4
@@ -697,6 +697,61 @@ def reconstruct_from_envelope(w: np.ndarray | float,
     return channels_from_envelope(
         w, envelope, delays, saddle_kernels, switch, critical_delay,
         weights)
+
+
+def farfield_envelope_from_partition(
+        partition: 'ChangRefsdalPartition') -> np.ndarray:
+    """Far-field training label ``E_ff = F - sum_{a real} H_a e^{1j w tau_a}``.
+
+    The exterior (far-field) surrogate label, DISTINCT from the
+    caustic-region transition envelope `ChangRefsdalPartition.envelope`.
+    In the exterior every image is well resolved, so the criticality
+    switch ``S_a`` and the ``tau_c`` demodulation carrier that the
+    caustic-region envelope needs do no useful work; worse, on the
+    astroid diagonals (the lobe-equidistance lines) the
+    ``nearest_caustic_point`` carrier flips lobes, a well-resolved image
+    spuriously reads as near-critical, its switch turns off, and its full
+    oscillation is left UN-subtracted -- the stored envelope jumps by
+    ~1500x mid-tile and no spline can fit it (Build 8g-b measurement).
+
+    This removes that dependence entirely for far-field charts by reusing
+    the existing SACR-C projection (`switched_analytic_channels`, no new
+    gauge math) with the switch forced to ``1`` on every real channel
+    (``0`` on a virtual channel, whose saddle kernel is a structural
+    zero, so forcing it is a no-op) and the carrier parked at
+    ``tau_c = 0`` (a constant carrier -- no caustic point consulted).
+    The projection then returns exactly
+
+        E_ff(w) = F(w) - sum_{a real} H_a(w) * exp(1j*w*tau_a),
+
+    the full post-geometric-optics remainder, measured smooth and
+    ``~1e-4`` in magnitude on the good side of every flip line.  The
+    range-reduced carriers keep the ``F - sum_a H_a`` subtraction at
+    machine precision.
+
+    This is the SINGLE authoritative source of the far-field label, so
+    the trained object, the held-out eps gate reference, and the census
+    reference can never diverge (a divergence would pass charts that do
+    not match their own label).
+
+    Parameters
+    ----------
+    partition : ChangRefsdalPartition
+        A fully evaluated partition (its ``exact_total`` is required);
+        the geometry-only `ChangRefsdalGeometryPartition` has no exact
+        total and cannot be used here.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(n_w,)`` complex far-field envelope ``E_ff(w)``.
+    """
+    switch = np.zeros((partition.w.shape[0], _N_CHANNELS), dtype=float)
+    switch[:, np.asarray(partition.real_mask, dtype=bool)] = 1.0
+    _, envelope = switched_analytic_channels(
+        partition.w, partition.exact_total, partition.delays,
+        partition.saddle_kernels, switch, 0.0, _envelope_weights(switch))
+    return envelope
 
 
 @dataclass(frozen=True)

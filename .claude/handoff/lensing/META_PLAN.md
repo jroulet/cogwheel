@@ -2696,3 +2696,23 @@ emit-on-change, stall alarm. Floor verdict banked: 3.9x (target 2x
 missed; ~1.8 ms unattributed glue exposed — follow-up profile, not a
 blocker). Next: campaign report -> census + PP -> owner enable
 package.
+
+## Overnight autonomous run (2026-07-22 evening, owner asleep — standing orders)
+Mission: global surrogate artifact on hand by morning, with evidence it is
+the morally correct interpolant (certified serves + named-bucket non-serves
++ census-measured coverage; NO small-patch-style silent coverage bugs).
+1. 8g-b: review gates/escalations; driver tree gate (641+ collect, -n8) then
+   commit (verdict-flip SDK bug already fixed).
+2. Campaign v3: FRESH outdir /home/tejaswi/Work/cogwheel_training/full_box_v3;
+   v2 config + Professor Q7 consolidation (n_farfield_tiles_per_side=2,
+   n_y1=n_y2=5); setsid detach + chart-count monitor w/ stall alarm.
+3. Mid-run probe at ~1 h (STANDING PROTOCOL): partial-artifact serve/refuse
+   probe + per-tile eps in F-normalized currency; kill+report if systemic red.
+4. On completion: census v3 (census_full_box driver script; update for serve
+   3-tuple + new far-field reference) — serve fraction, bucket partition,
+   per-chart eps vs bars, lnL tiers, binning floor.
+5. Morning report: artifact path/size/chart count, eps distribution, census
+   verdict, residue named (interior high-gamma + saddle beyond-w-cap m>458
+   pending 8h qd), seam evidence. Push ONLY on hard failure needing owner.
+Fallbacks: 8g-b hard-fail or probe systemic red -> stop, preserve state,
+write diagnosis, do not thrash. Fable tier owner-only; agents standard.

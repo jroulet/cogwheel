@@ -80,6 +80,8 @@ from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing import surrogate_training as training_module
 from cogwheel.lensing import surrogate_census as census
 from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
+from cogwheel.lensing.chang_refsdal.channels import (
+    farfield_envelope_from_partition)
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, dimensionless_frequency)
 from cogwheel.lensing.surrogate import (
@@ -361,7 +363,7 @@ def _served_eps(surrogate, chart_for_raw, gamma, source, log_w_grid,
     env_eng = np.asarray(part.envelope)
     if not np.all(np.isfinite(env_eng)):
         return None
-    e_tube, served = surrogate.serve(
+    e_tube, served, _definition = surrogate.serve(
         w_grid, gamma=gamma, y1=float(source[0]), y2=float(source[1]),
         beta=0.0, eta=part.caustic_distance, theta=part.critical_theta,
         image_count=int(part.real_mask.sum()))
@@ -612,6 +614,29 @@ class ArcProjectionOutOfBoxTestCase(CensusTestCase):
 # ==========================================================================
 # Section C -- per-chart held-out envelope eps (currency + F002 + node/trough)
 # ==========================================================================
+def _reference_env_and_denom(chart, part):
+    """Held-out eps reference envelope + normalization denominator, dispatched
+    on chart type EXACTLY as `surrogate_census.heldout_envelope_eps`
+    (Build 8g-b) -- the one place in this suite deciding far-field-vs-tube
+    reference semantics.
+
+    A `FarFieldChart` is referenced against the far-field label
+    ``E_ff = F - sum_{a real} H_a e^{1j w tau_a}``
+    (`farfield_envelope_from_partition`) and F-normalized by
+    ``max|exact_total|`` (``max|E_ff| ~ 1e-4`` is too tiny a denominator); a
+    `TubeChart` keeps the caustic-region ``part.envelope`` reference normalized
+    by ``max|E|`` (unchanged).  The deliberate ``EPS_DENOM_FLOOR`` floor is
+    applied to the denominator in both branches.
+    """
+    if isinstance(chart, FarFieldChart):
+        env_eng = farfield_envelope_from_partition(part)
+        denom_base = float(np.max(np.abs(part.exact_total)))
+    else:
+        env_eng = np.asarray(part.envelope)
+        denom_base = float(np.max(np.abs(env_eng)))
+    return env_eng, max(denom_base, census.EPS_DENOM_FLOOR)
+
+
 
 class HeldoutEnvelopeEpsTestCase(CensusTestCase):
     """The census held-out envelope error uses the max-normalized currency
@@ -658,7 +683,7 @@ class HeldoutEnvelopeEpsTestCase(CensusTestCase):
         """Positive control: a fake oracle that reads the surrogate IS flagged
         by the same name walk, so the guard is non-vacuous."""
         def _tainted(surrogate, w, gamma, y1, y2):
-            env_eng, _served = surrogate.serve(  # circular oracle
+            env_eng, _served, _definition = surrogate.serve(  # circular oracle
                 w, gamma=gamma, y1=y1, y2=y2, beta=0.0, eta=0.0, theta=0.0,
                 image_count=2)
             return env_eng
@@ -684,7 +709,7 @@ class HeldoutEnvelopeEpsTestCase(CensusTestCase):
         part = ChangRefsdalChannels(w_grid).evaluate(
             gamma=gmid, y=(float(src[0]), float(src[1])), beta=0.0, kappa=0.0)
         env_eng = np.asarray(part.envelope)
-        e_sur, served = surrogate.serve(
+        e_sur, served, _definition = surrogate.serve(
             w_grid, gamma=gmid, y1=float(src[0]), y2=float(src[1]), beta=0.0,
             eta=part.caustic_distance, theta=part.critical_theta,
             image_count=int(part.real_mask.sum()))
@@ -720,13 +745,12 @@ class HeldoutEnvelopeEpsTestCase(CensusTestCase):
         y2 = float(chart.y2_grid[2])
         part = ChangRefsdalChannels(w_grid).evaluate(
             gamma=gamma, y=(y1, y2), beta=0.0, kappa=0.0)
-        env_eng = np.asarray(part.envelope)
-        e_sur, served = surrogate.serve(
+        env_eng, denom = _reference_env_and_denom(chart, part)
+        e_sur, served, _definition = surrogate.serve(
             w_grid, gamma=gamma, y1=y1, y2=y2, beta=0.0,
             eta=part.caustic_distance, theta=part.critical_theta,
             image_count=int(part.real_mask.sum()))
         self.assertTrue(served, 'node point must serve')
-        denom = max(float(np.max(np.abs(env_eng))), census.EPS_DENOM_FLOOR)
         eps = float(np.max(np.abs(e_sur - env_eng)) / denom)
         self.n_checks += 1
         self.assertLess(eps, 1e-8,
@@ -744,15 +768,14 @@ class HeldoutEnvelopeEpsTestCase(CensusTestCase):
         y2 = 0.5 * (chart.y2_grid[1] + chart.y2_grid[2])
         part = ChangRefsdalChannels(w_grid).evaluate(
             gamma=gmid, y=(y1, y2), beta=0.0, kappa=0.0)
-        env_eng = np.asarray(part.envelope)
+        env_eng, denom = _reference_env_and_denom(chart, part)
         abs_env = np.abs(env_eng)
         trough_ratio = float(abs_env.min() / abs_env.max())
-        e_sur, served = surrogate.serve(
+        e_sur, served, _definition = surrogate.serve(
             w_grid, gamma=gmid, y1=y1, y2=y2, beta=0.0,
             eta=part.caustic_distance, theta=part.critical_theta,
             image_count=int(part.real_mask.sum()))
         self.assertTrue(served)
-        denom = max(float(np.max(np.abs(env_eng))), census.EPS_DENOM_FLOOR)
         eps_maxnorm = float(np.max(np.abs(e_sur - env_eng)) / denom)
         self.n_checks += 1
         self.assertLess(trough_ratio, 0.5,

@@ -49,7 +49,8 @@ import numpy as np
 import pandas as pd
 
 from cogwheel.lensing import surrogate as _surrogate
-from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
+from cogwheel.lensing.chang_refsdal import (ChangRefsdalChannels,
+                                            farfield_envelope_from_partition)
 from cogwheel.lensing.prior import (FixedLensGeometryPrior,
                                     UniformLensMassPrior,
                                     UniformReducedShearPrior,
@@ -458,10 +459,20 @@ def heldout_envelope_eps(
 
     For each served sample (an off-node, in-box point of its serving chart),
     compares the surrogate envelope ``E_sur`` (via `surrogate.serve`) to a
-    FRESH `ChangRefsdalChannels.evaluate` envelope ``E_eng`` (F002 -- never the
-    surrogate's own reconstruction) on the sample's own ``w`` grid.  Error
-    currency is ``max|E_sur - E_eng| / max(max|E_eng|, EPS_DENOM_FLOOR)``
-    (Professor Q3 max-normalization with the deliberate 1e-6 floor).
+    FRESH engine reference (F002 -- never the surrogate's own reconstruction)
+    on the sample's own ``w`` grid.  The reference and its normalization mirror
+    the label the SERVING chart is trained on (Build 8g-b):
+
+    - a `FarFieldChart` is referenced against the far-field label
+      ``E_ff = F - sum_a H_a e^{1j w tau_a}``
+      (`farfield_envelope_from_partition`), F-normalized by ``max|exact_total|``
+      (``max|E_ff| ~ 1e-4`` is too tiny a denominator);
+    - a `TubeChart` keeps ``partition.envelope`` normalized by ``max|E|``
+      (unchanged).
+
+    In both cases the error is
+    ``max|E_sur - E_eng| / max(denom, EPS_DENOM_FLOOR)`` (the deliberate 1e-6
+    floor).
 
     Parameters
     ----------
@@ -497,17 +508,28 @@ def heldout_envelope_eps(
                 kappa=0.0)
         except _ENGINE_REFUSALS:
             continue
-        env_eng = np.asarray(partition.envelope)
+        # Reference envelope + normalization mirror the label each chart is
+        # trained on (Build 8g-b): a far-field chart is referenced against the
+        # far-field label ``E_ff = F - sum_a H_a e^{1j w tau_a}`` and
+        # F-normalized by ``max|exact_total|``; a tube chart keeps the
+        # caustic-region ``partition.envelope`` reference and ``max|E|``
+        # normalization (byte-identical to HEAD).
+        if isinstance(surrogate.charts[chart_index], _surrogate.FarFieldChart):
+            env_eng = farfield_envelope_from_partition(partition)
+            denom_base = float(np.max(np.abs(partition.exact_total)))
+        else:
+            env_eng = np.asarray(partition.envelope)
+            denom_base = float(np.max(np.abs(env_eng)))
         if not np.all(np.isfinite(env_eng)):
             continue
-        env_sur, served = surrogate.serve(
+        env_sur, served, _definition = surrogate.serve(
             w_grid, gamma=record.gamma, y1=record.y1, y2=record.y2,
             beta=0.0, eta=partition.caustic_distance,
             theta=partition.critical_theta,
             image_count=int(partition.real_mask.sum()))
         if not served:
             continue
-        denom = max(float(np.max(np.abs(env_eng))), EPS_DENOM_FLOOR)
+        denom = max(denom_base, EPS_DENOM_FLOOR)
         eps = float(np.max(np.abs(env_sur - env_eng)) / denom)
         per_chart[chart_index].append(eps)
         seen[chart_index] += 1

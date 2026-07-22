@@ -1,4 +1,190 @@
 \1
+
+## 2026-07-22 INS-8gbc-002 fix: test_lensing_surrogate.py DELTA_T_MAX/DF_BIN
+re-derivation + DelayMarginContractTestCase (test-only, no production touched)
+- Root cause confirmed WORSE than the finding stated: at old DELTA_T_MAX=0.02,
+  the kappa=0.1 fall-through candidate (RefusalPreservationTestCase.
+  test_nonzero_kappa_never_served) already measured 0.020863s relative delay
+  -- OVER the bound -- so that test was ALREADY RED (LensedBinningError) in
+  the working tree before this fix, not merely fragile. Measured via
+  like._amplification_coefficients(candidate) (production path) for every
+  reused far-field-exterior config.
+- FIX: DELTA_T_MAX 0.02->0.05; DF_BIN re-derived by the SAME criterion
+  comment (pi*DF_BIN*DELTA_T_MAX ~= 0.25 rad, half of _DEFAULT_BIN_DELAY_TOL
+  =0.5) -> DF_BIN 4.0->1.6 (criterion 0.2513, same safety factor as before,
+  not loosened). n_bins 158->632 (edges built from event_data band); full
+  file still ran in ~99s.
+- MEASURED margins at new bound (delay/DELTA_T_MAX): crown(kappa=0) 0.3734,
+  crown kappa=0.1 fall-through 0.4173 (was the offender, now clears),
+  pos_configs/deep 0.3789, pos_configs/box-edge 0.3646. SAD_CONFIGS and
+  CrownByteIdentityTestCase.CONFIGS all <=0.08 (never fragile). All well
+  under the new 0.60 comfortable ceiling I pinned.
+- ADDED (before LnlikeAccuracyTestCase): DelayMarginContractTestCase (3
+  tests: per-config margin <=0.60, targeted kappa=0.1 regression witness +
+  "old bound genuinely fails" premise check, DF_BIN/DELTA_T_MAX criterion
+  pin) + DelayMarginSelfFalsificationTestCase (1 test: rebuild likelihood at
+  the OLD 0.02s/4.0Hz bound on a throwaway fbin, assertRaises
+  LensedBinningError on the SAME candidate -- proves the margin gate has
+  teeth). Import added: LensedBinningError from cogwheel.lensing.likelihood.
+- FULL FILE RE-RUN (per finding's explicit requirement, not a targeted
+  subset): 45 passed / 1 skipped (TimingSmokeTestCase, env-gated) in 98.6s.
+  test_nonzero_kappa_never_served now PASSES (was ERROR+FAILED before).
+  No other test file imports constants from this module (grep confirmed) so
+  the DELTA_T_MAX/DF_BIN change is fully contained.
+
+## 2026-07-22 build8g-b WP1/WP2 test_lensing_farfield_envelope.py (EXTENDED: node-convergence Q7 + tube byte-identity + gate-currency mutation)
+- Added 3 shards (FarFieldNodeConvergence 6t, TubeByteIdentity 5t,
+  FarFieldGateCurrencyMutation 4t) to the 27-test far-field suite (do-not-
+  rewrite). FULL FILE: 42 passed ~179s. Neighbors: channels+geometry 29
+  passed ~53s. test_lensing_surrogate 6 FAILED/35p/1s/1err = SAME PRE-
+  EXISTING WP1/WP2 drift (surrogate.py/surrogate_training.py/channels.py are
+  `M` by Coder; test_lensing_surrogate.py untouched; my file ONLY `??`).
+  Report don't touch. 2 diagnostics: farfield_node_convergence_eps.png,
+  farfield_gate_currency_mutation.png.
+- SPEC A (Q7/accept-d) FarFieldNodeConvergence: exterior tile (1.5,1.5)+-0.2,
+  4 shear x 14 log-w fixed, sweep y-nodes {4,5,7}. MEASURED eps_ff (F-norm,
+  held-out): 4x4=1.222e-4, 5x5=1.256e-4, 7x7=1.257e-4; oversized (0.5,0.5)+-
+  0.3 @5x5=4.514e-4. ALL < gate 1e-3. NEW smooth E_ff so easy to fit that
+  eps is the F-magnitude FLOOR at coarse grids -> curve FLAT (plateau ratio
+  ~1.001, bound 2.0). Can't exhibit real coarse-fail; "promote not widen"
+  encoded as (a) SAME fixed gate at every node count, (b) bar TIGHTENED not
+  widened: branch farfield_eps_max=1e-3 <= HEAD 3e-3 (via _head_git_default
+  regex on HEAD surrogate_training.py), (c) self-falsif: coeff-corrupted
+  authorized chart -> eps>gate.
+- SPEC B (accept-e) TubeByteIdentity: _head_module loads HEAD surrogate.py
+  side-by-side (git show -> temp .py -> spec_from_file_location -> sys.modules
+  register FIRST -> exec). TubeChart.from_values(**cfg) HEAD vs branch:
+  real/imag coeffs+knots+4 axes max|diff|==0.0 over 3 probe boxes. Served
+  envelopes byte-identical over 3 queries (config[0] box gamma 0.10-0.30,
+  eta 0.04-0.25). npz round-trip preserves coeffs. tube_eps_max=5e-2 both
+  HEAD+branch; tube currency (env_true=partition.envelope) present in both
+  _heldout_eps sources. GOTCHA: branch serve()=3-tuple, HEAD=2-tuple ->
+  unpack res[0],res[1] defensively.
+- SPEC C FarFieldGateCurrencyMutation: healthy exterior chart (1.5,1.5) 5x5
+  eps_F=1.26e-4 GREEN; additive coeff bump 5e-3*max|F| (partition-of-unity
+  B-spline shifts value by ~const) -> eps_bad_F~5.3e-3 RED (>10x healthy);
+  SAME healthy chart under Eff-norm (denom max|E_ff|~1e-4) thrashes to ~1.5
+  > EFFNORM_THRASH_MIN 0.1 -> proves why production F-normalizes. dataclasses.
+  replace on frozen FarFieldChart works.
+- HELPERS added (before __main__): _head_module (lru), _exterior_samples,
+  _train_exterior_chart (lru, EXTERIOR_N_GAMMA=4 shear axis -- NOTE >=4-node
+  _validate_axis minimum; "2 tiles/side" is tiling NOT gamma nodes),
+  _chart_eps(normalization 'F'|'Eff'), _exterior_eps (lru), _center_f_scale
+  (lru), _head_git_default (regex field:float=val), _tube_probe_configs/
+  _queries. Added imports: `from cogwheel.lensing import surrogate_training`.
+  _W_EVAL interior geomspace dodges log-w endpoint un-serve trap.
+
+## 2026-07-22 build8g-b WP1/WP2 test_lensing_farfield_envelope.py (EXTENDED: trainability + serving mirror + tag-loader refusal)
+- Added 3 shards + 1 self-falsif class to the existing 3-shard far-field
+  suite (do-not-rewrite). FULL FILE: 27 passed ~79s. Neighbors green:
+  channels 16 + geometry 13 = 29 ~34s. test_lensing_surrogate 6 FAILED/35
+  passed/1 err = PRE-EXISTING WP1/WP2 DRIFT (envelope redefinition + tag
+  serialization landed in surrogate.py/surrogate_training.py by Coder;
+  git status: those are `M`, my file is the ONLY `??`). Report don't touch.
+  2 new diagnostics: farfield_trainability_eps_histogram.png,
+  farfield_serving_mirror_overlay.png. Deleted probes _probe_ff2/_ff3.py.
+- MEASURED (fixed-grid from_values training, 4x4x7 source grid x 14 log-w
+  nodes over [5,60], both labels same axes/fit): STRADDLE(1.30,1.26)
+  new eps=1.62e-4 old eps=762; ONAXIS(1.30,1.45) new eps=1.40e-4 old
+  eps=0.864; serve-mirror max rel=1.61e-4. So NEW clears gate 1e-3 on BOTH
+  boxes; OLD fails BOTH (762 straddle, 0.86 on-axis -- coarse w-grid can't
+  fit the huge SACR-C subtracted oscillation even off-diagonal, straddle
+  3 orders worse). Gates: FARFIELD_EPS_GATE=1e-3, OLD_STRADDLING_EPS_MIN=
+  1.0 (reachable-red foil, 762 measured), NEW_OVER_OLD_RATIO_MIN=1e3
+  (measured ~4.7e6), SERVE_MIRROR_TOL=3e-3 (Q6b, measured 1.6e-4).
+- CRITICAL serve() BUG WORKAROUND (log-w endpoint round-trip): serve()
+  does log_w=np.log(w_flat); select_chart uses log_w.min(). If you query on
+  wg=np.exp(chart.log_w_grid) the low endpoint log(exp(lwg[0])) sits 2.22e-16
+  BELOW lwg[0] -> `_log_w_band_inside` strict `grid[0]<=log_w_min` FAILS ->
+  served=False (silently, nan eps). VERIFIED numerically: high endpoint
+  round-trips exact, LOW endpoint fails. So held-out eval MUST use interior
+  w: _W_EVAL=np.geomspace(5*1.003, 60*0.997, 40). (Latent production
+  fragility in _heldout_eps too, but NOT my fix to make.) fs=True/sc=True
+  with RAW grid bounds but served=False from serve() = this exact trap.
+- MIRROR CORRUPTION must be ADDITIVE not multiplicative: served E_ff~1e-4,
+  F~1, so env*(1+0.01) moves F by ~1e-6 (invisible vs 3e-3 gate). Use
+  env+0.01 -> reconstruct -> mirror err~0.01 > 3e-3. (Same trap the
+  ReconstructionExactness self-falsif dodges by *(1+1e-6) on the RECON band
+  where it's gated at 1e-12, not here at 3e-3.)
+- SPEC3 loader F010 (both directions, 6 tests): save surrogate([chart]) ->
+  np.load(allow_pickle=False) all arrays -> json.loads chart0_meta ->
+  del/replace 'envelope_definition' -> np.savez -> load() raises ValueError.
+  _validate_farfield_definition msg names 'chart 0'/'legacy single-box' +
+  'rebuild'. LEGACY path: build npz dict WITHOUT 'n_charts' key, keys =
+  gamma_grid/y1_grid/y2_grid/log_w_grid/real_coeffs/imag_coeffs/knot_log_w/
+  knot_gamma/knot_y1/knot_y2/refused_points/provenance(+optional
+  envelope_definition). chart.knots is (log_w,gamma,y1,y2) tuple order.
+  Known-tag serves + definition==_FARFIELD_ENVELOPE_DEFINITION. Tube-only
+  artifact (TubeChart meta has NO envelope_definition) loads unaffected.
+  GOTCHA: _validate_axis needs >=4 nodes/axis -- synthetic TubeChart grids
+  must be >=4 (my first pass used 3 -> ValueError in from_values).
+- API: FarFieldChart.from_values(gamma_grid,y1_grid,y2_grid,log_w_grid,
+  envelope_real,envelope_imag,image_count,parity,eta_overlap_min,
+  refused_points); serve() returns (env,served,definition) 3-tuple;
+  geometry_partition() exposes caustic_theta (NOT critical_theta -- that's
+  on evaluate()'s partition). reconstruct_from_envelope(w,env,delays,
+  saddle_kernels,switch(n_w,4),critical_delay)->(kernels,total). Refusals:
+  (LensDomainError, CancellationError, SchwingerCertificationError).
+
+## 2026-07-22 build8g-b WP1 test_lensing_farfield_envelope.py (NEW suite, far-field envelope redefinition)
+- 12 tests, all green ~8s. NO production touched (test-only add). Neighbor
+  test_lensing_channels.py 16 passed ~21s (no regression). 2 diagnostics:
+  farfield_envelope_continuity_across_diagonal.png, farfield_envelope_
+  reconstruction_error.png. Env python = /home/tejaswi/anaconda3/envs/
+  cogwheel-newlal/bin/python (role's /Users/... macOS path is WRONG; this is
+  Linux worktree /home/tejaswi/Work/cogwheel-claude-dev). Deleted probes
+  _probe_ff/_probe_recon/_probe_lobe.py.
+- MODULE UNDER TEST: channels.farfield_envelope_from_partition (NEW far-field
+  label E_ff = F - sum_{a real} H_a e^{iw tau_a}, switch forced 1 on real,
+  tau_c=0) vs OLD partition.envelope (caustic-region SACR-C, lobe-dependent
+  via nearest_caustic_point). Also reconstruct_from_envelope + _gauge.
+  envelope_total. 3 classes mirror 3 Architect specs + SelfFalsification.
+- Q6a EnvelopeContinuityAcrossDiagonal: gamma=0.0387, y1=1.3, Y2_SWEEP=
+  linspace(1.10,1.50,33) (step 0.0125 lands ON 1.250 AND 1.275 w/ neighbors
+  both sides -> straddles both flip lines), w=(5,20,60). BOTH labels computed
+  side-by-side from SAME evaluated partition (no runtime flag). MEASURED: OLD
+  max adjacent ratio ~1492x at y2 in [1.25,1.2625] w=5 (gate >=100x, reachable-
+  red an order below); NEW max|E_ff|=1.9e-4 (gate abs <=5e-3); NEW adjacent
+  continuity 5.2e-6 (gate abs <=1e-3). GOTCHA: OLD label drops to ~1e-16 at the
+  flip -> ratio denom floored at 1e-12 to keep finite while genuine >=100x
+  still registers.
+- Q6c LobeAssignmentInvariance: on-diagonal exterior (1.3,1.3). E_ff invariant
+  to lobe = 0.0 (BY CONSTRUCTION: farfield_envelope_from_partition reads only
+  {w,real_mask,exact_total,delays,saddle_kernels}, NEVER {critical_delay,
+  switch,envelope}). Gate <=1e-12*max|F|. FLIP FIXTURE `_lobe_flipped_
+  partition`: `_two_nearest_lobes` scans 721 thetas, finds 2 nearest local
+  minima of |critical_point(th)[1]-source| (INDEPENDENT of channels, uses
+  geometry.critical_point only). At (1.3,1.3) the 2 lobes are theta~pi/2
+  (dist 1.78353) and theta~pi (dist 1.78558) -- NEARLY equidistant = ON the
+  flip line. Force other lobe: tau_c'=delay(other_image)-t_min (4.178 vs
+  1.616), recompute switch via channels._channel_switch + envelope via _gauge.
+  switched_analytic_channels(...,_envelope_weights(switch)), dataclasses.
+  replace. TEETH: OLD envelope MOVES 0.196 under flip (gate >=1e-2) -> removed
+  DOF not vacuous. GOTCHA: naive y=(1.3,1.3+-1e-3) perturbation gives SAME
+  lobe (dA==dB==P.critical_delay) -- must enumerate lobes via theta scan.
+- Q2/Q3 ReconstructionExactness: RECON_BAND=linspace(1.0,60.0,160) (reaches
+  w=60 Schwinger ceiling). E_ff -> reconstruct_from_envelope(switch=real_mask
+  broadcast to (n_w,4), critical_delay=0.0) AND _gauge.envelope_total, both
+  vs partition.exact_total (INDEPENDENT engine oracle, shares no code w/ SACR-C
+  envelope). MEASURED rel err = 0.0 both paths (subtract-then-add cancels
+  bit-for-bit, range-reduced _unit_carrier). Gate <=1e-12*max|F|. GOTCHA:
+  switch MUST be full (n_w,4) shape -- passing bare (4,) real_mask raises
+  ValueError in _switched_setup ("expected switch of shape (160,4)"). Build
+  (n_w,4) zeros + set real columns to 1.0 (mirrors likelihood.py ff_switch).
+- SELF-FALSIFICATION (all confirmed red-under-foil): OLD label fed to NEW
+  continuity+ceiling gates trips both (jump 0.2 > 1e-3, max 0.218 > 5e-3);
+  OLD envelope lobe-diff 0.196/max|F| >> 1e-12 breaks invariance gate;
+  E_ff*(1+1e-6) breaks reconstruction (rel err >> 1e-12). Base FarfieldEnvelope
+  TestCase.tearDown fails if comparisons==0 (anti-vacuity); assert_within
+  bumps counter.
+- API NOTES: reconstruct_from_envelope(w,envelope,delays,saddle_kernels,
+  switch,critical_delay)->(kernels,total); internally _envelope_weights(switch)
+  + channels_from_envelope. envelope_total(w,delays,saddle_kernels,switch,
+  critical_delay,envelope)->total. farfield_envelope_from_partition needs a
+  FULL partition (exact_total required), not geometry_partition. critical_point
+  returns CriticalPoint(image, source_caustic, hard_axis, soft_axis, eig);
+  [0]=lens image, [1]=caustic source point.
+
 ## 2026-07-22 build8g INS-1-001 regression: test_lensing_surrogate_training.py
 (EXTENDED: FarFieldCornerCapTestCase, far-field DD product corner cap)
 - Added 4-test class pinning Inspector finding INS-1-001: `_stratum_w_range`'s

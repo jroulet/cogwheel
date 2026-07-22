@@ -1,5 +1,28 @@
 # Architect Short-Term Observations
 
+## Build 8g-b — far-field envelope redefinition PLANNING 2026-07-22
+Root cause: far-field label = partition.envelope (SACR-C, demodulated at
+tau_c w/ criticality switch S_a keyed on w|tau_a-tau_c|); on astroid
+diagonals tau_c flips lobes, a resolved image looks near-critical, S_a->0,
+its oscillation left UN-subtracted -> env jumps x1500 mid-tile. Fix: for
+FAR-FIELD charts ONLY, E_ff = F - sum_{REAL a} H_a e^{i w tau_a} (switch=
+real_mask, critical_delay=0, no carrier). Reuse existing gauge:
+switched_analytic_channels(w, exact_total, delays, saddle_kernels,
+switch=real_mask_float, critical_delay=0.0, weights=_envelope_weights) ->
+envelope=E_ff; reconstruct_from_envelope(...same gauge...) inverts to F
+exactly (sum u_a=1). ChannelPartition exposes exact_total, delays,
+saddle_kernels, real_mask. from_engine (surrogate.py) builds ONLY
+far-field charts (tube via _build_tube_chart -> byte-identical). Serve
+path: serve() returns E; likelihood _surrogate_coefficients line~1423
+reconstruct_from_envelope(geom.switch, geom.critical_delay) -> must
+DISPATCH far-field vs tube via a definition tag serve() now returns.
+_heldout_eps compares serve envelope to partition.envelope -> far-field
+reference MUST switch to E_ff (else gate inconsistent). Tag lives in
+FarFieldChart.envelope_definition + _chart_to/from_npz meta; loader hard-
+refuses missing/unknown tag (v1/v2 legacy predate tag). Lever3 tiling =
+convergence probe (Test Dev) recommends n_per_side 2-3 + y-nodes on new
+~1e-4 envelope; gate enforces; driver dials production in v3.
+
 ## Build 8g — far-field tiling / eps gate / saddle tail PLAN — 2026-07-22
 3 WPs = 3 levers. WP1 eps gate (TrainingConfig tube_eps_max=5e-2,
 farfield_eps_max=3e-3; gated OR NaN-eps chart recorded but NOT appended
@@ -122,3 +145,28 @@ breaking the default provenance-read path it exists to fix.
 INS-1-003 (SPEC/doc staleness) -> override, doc-sync is post-gate driver
 responsibility per project policy regardless of what any single build's
 plan says.
+
+## Build 8g-bc triage — 2026-07-22
+INS-8gbc-002 (CROWN_LENS relocated fixture sits 2e-4s under DELTA_T_MAX,
+0.01966 vs 0.02 -> whole crown/positive fixture family one perturbation
+from LensedBinningError; root cause of INS-8gbc-001) -> coder_fix, routed
+to Test Developer (test-file-only fixture/constant fix, never Coder,
+matches build 8c-cont INS-1-001 precedent). Accepted Inspector's systemic
+fix verbatim: raise DELTA_T_MAX and re-derive _shared_fixture fbin so
+every far-field-exterior config (incl. kappa=0.1 fall-through, all
+LnlikeAccuracy configs) sits <=60% of the new delta_t_max -- physically
+sound since fbin spacing is derived FROM delta_t_max (~1/(2*delta_t_max)
+phase-accuracy criterion), so raising delta_t_max legitimately produces a
+finer, still-valid binning rather than loosening a physical check. Full
+re-run + per-config margin report stays with Test Developer since it owns
+this fixture; not a Coder self-grading violation because Coder WPs never
+touch this file.
+
+## Build 8g-b triage — 2026-07-22
+INS-8gb-005 (SPEC.md/DATA_CONTRACTS staleness re farfield_eps_max value,
+E_ff redefinition narrative, envelope_definition meta tag) -> override.
+Doc-sync is post-gate Librarian/driver responsibility regardless of the
+build plan's own prose about "Post-gate doc-sync owns..." — matches prior
+INS-1-003 precedent exactly. Flagged forward to Librarian with the two
+concrete deltas (farfield_eps_max 3e-3->1e-3; E_ff/envelope_definition-tag
+narrative) as exact replacement text.

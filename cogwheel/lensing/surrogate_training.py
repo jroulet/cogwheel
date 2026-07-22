@@ -48,7 +48,8 @@ import numpy as np
 from cogwheel.lensing import prior as _lens_prior
 from cogwheel.lensing.waveform import dimensionless_frequency
 from cogwheel.lensing.chang_refsdal import geometry
-from cogwheel.lensing.chang_refsdal.channels import ChangRefsdalChannels
+from cogwheel.lensing.chang_refsdal.channels import (
+    ChangRefsdalChannels, farfield_envelope_from_partition)
 from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
 from cogwheel.lensing.surrogate import (
     FarFieldChart, TubeChart, LensAmplificationSurrogate,
@@ -257,16 +258,22 @@ class TrainingConfig:
     # admitted.  ``max_farfield_regions`` then caps the total admitted tiles.
     n_farfield_tiles_per_side: int = 5
     n_heldout: int = 10
-    # Held-out max-normalized envelope-eps bars for chart registration: a
-    # chart above its bar (or with NaN eps -- zero held-out points served) is
-    # recorded as gated in the report and NOT packed into the artifact, so its
-    # window falls through to the serving ladder.  Defaults (Professor 8g):
+    # Held-out envelope-eps bars for chart registration: a chart above its
+    # bar (or with NaN eps -- zero held-out points served) is recorded as
+    # gated in the report and NOT packed into the artifact, so its window
+    # falls through to the serving ladder.  The two bars use DIFFERENT error
+    # currencies: the tube bar is max-normalized on ``max|E|`` (unchanged),
+    # while the far-field bar is F-NORMALIZED on ``max|F| = max|exact_total|``
+    # (Build 8g-b), because the redefined far-field label
+    # ``E_ff = F - sum_a H_a e^{1j w tau_a}`` has ``max|E_ff| ~ 1e-4`` -- too
+    # tiny and unstable a denominator to normalize against.  Defaults:
     # tube median is 3.8e-2, so 5e-2 separates the 0.43/1.15/2.15 saddle tail
-    # (and the five >=0.09 charts) from healthy ~1e-2 siblings; far-field
-    # median is 3.7e-4, so 3e-3 passes the healthy population with headroom
-    # while holding served-region dlnL under the 0.1-nat tier.
+    # (and the five >=0.09 charts) from healthy ~1e-2 siblings; the far-field
+    # bar is 1e-3, the Professor 8g-b campaign-start value against the new
+    # F-normalized currency (production re-gate to ~1e-4 with a caustic-edge
+    # margin is a driver deferral, mirroring the 8a Q5 deferral).
     tube_eps_max: float = 5e-2
-    farfield_eps_max: float = 3e-3
+    farfield_eps_max: float = 1e-3
     n_caustic_samples: int = 200
     seed: int = 0
 
@@ -1072,11 +1079,23 @@ def _heldout_eps(chart: TubeChart | FarFieldChart,
     """Max relative envelope error of a chart over held-out geometry points.
 
     Serves each ``(gamma, y1, y2)`` through the full guard stack of a one-chart
-    surrogate and compares to a fresh engine envelope; unserved points are
+    surrogate and compares to a fresh engine reference; unserved points are
     skipped.  Returns ``nan`` when no held-out point is served.
+
+    The reference envelope and its normalization depend on the chart type,
+    matching the label each chart is trained on (Build 8g-b):
+
+    - a `FarFieldChart` is trained on the far-field label
+      ``E_ff = F - sum_{a real} H_a e^{1j w tau_a}``
+      (`farfield_envelope_from_partition`), so the reference is that SAME
+      helper and the error is F-normalized by ``max|exact_total|`` (``max|E_ff|
+      ~ 1e-4`` is too tiny a denominator);
+    - a `TubeChart` keeps the caustic-region ``partition.envelope`` reference
+      normalized by ``max|E|`` -- byte-identical to HEAD.
     """
     surrogate = LensAmplificationSurrogate([chart], provenance)
     w_grid = np.exp(chart.log_w_grid)
+    is_farfield = isinstance(chart, FarFieldChart)
     errors: list[float] = []
     for gamma, y1, y2 in samples:
         channels = ChangRefsdalChannels(w_grid)
@@ -1085,16 +1104,20 @@ def _heldout_eps(chart: TubeChart | FarFieldChart,
                 gamma=gamma, y=(y1, y2), beta=0.0, kappa=0.0)
         except _ENGINE_REFUSALS:
             continue
-        env_true = np.asarray(partition.envelope)
+        if is_farfield:
+            env_true = farfield_envelope_from_partition(partition)
+            denom = float(np.max(np.abs(partition.exact_total))) or 1.0
+        else:
+            env_true = np.asarray(partition.envelope)
+            denom = float(np.max(np.abs(env_true))) or 1.0
         if not np.all(np.isfinite(env_true)):
             continue
-        emulated, served = surrogate.serve(
+        emulated, served, _definition = surrogate.serve(
             w_grid, gamma=gamma, y1=y1, y2=y2, beta=0.0,
             eta=partition.caustic_distance, theta=partition.critical_theta,
             image_count=int(partition.real_mask.sum()))
         if not served:
             continue
-        denom = float(np.max(np.abs(env_true))) or 1.0
         errors.append(float(np.max(np.abs(emulated - env_true)) / denom))
     return max(errors) if errors else float('nan')
 

@@ -56,5 +56,28 @@
 - A documented @expectedFailure efficiency aspiration (prior-width
   refusal fraction) is a property, not a bug — but verify all non-finites
   are exact -inf with zero NaN before accepting.
+- A crash that aborts tuple-unpacking (e.g. an arity change) MASKS every
+  downstream content assertion in that test process. After the crash-fix,
+  the FIRST full green run is the real content review — never close a build
+  on "unpack fixed"; run the whole suite to completion and grep the summary
+  line (a background wrapper's exit_code can be the trailing echo, not pytest).
+- When a producer label is redefined (e.g. far-field envelope), stale test
+  ORACLES and reconstruction HELPERS that still reference the OLD label/path
+  are the likely failure — distinguish from a production bug via a node-exact
+  test: if served==new-label to machine precision but the oracle uses the old
+  label, it's a test bug; production is fine.
 - Builds run in the sibling worktree cogwheel-claude-dev; `cd` to the
   main tree is hook-blocked — run Bash from the worktree cwd.
+- A partial/targeted re-run that greenlights the NAMED finding can HIDE a
+  sibling regression from the SAME edit. When a build resolves an
+  emulation-accuracy finding by RELOCATING a shared fixture (e.g. moving
+  the source to the far-field exterior / larger |y|), the relocation
+  changes downstream PHYSICS (larger image separation -> larger relative
+  delays) and can break unrelated tests that reuse the fixture — most
+  likely those hitting the RB delta_t_max binning limit or a kappa!=0 /
+  larger-separation variant. Always run the WHOLE changed test file(s) to
+  completion and audit every reuse of any relocated shared fixture.
+- A shared lnlike fixture whose relative delay sits ~1e-4 under
+  delta_t_max is a latent trip-wire: any variant that grows the delay
+  (nonzero kappa, larger source offset) tips it over. Flag edge-margin
+  fixtures as design fragility even when the base config passes.

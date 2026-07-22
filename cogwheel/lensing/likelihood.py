@@ -96,6 +96,7 @@ from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
 from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
+from cogwheel.lensing.surrogate import _FARFIELD_ENVELOPE_DEFINITION
 
 __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
 
@@ -1413,7 +1414,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # Full multi-chart guard stack: chart selection keys on the
         # certified physical caustic distance + real-image count (theta is
         # used only for cusp exclusion).  Recomputes NO geometry.
-        envelope_dense, served = surrogate.serve(
+        envelope_dense, served, definition = surrogate.serve(
             dense_w, gamma=lens['gamma'], y1=lens['y1'], y2=lens['y2'],
             beta=lens['beta'], eta=geom.caustic_distance,
             theta=geom.caustic_theta,
@@ -1421,9 +1422,24 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         if not served:
             return None
 
-        kernels, _total = reconstruct_from_envelope(
-            dense_w, envelope_dense, geom.delays, geom.saddle_kernels,
-            geom.switch, geom.critical_delay)
+        if definition == _FARFIELD_ENVELOPE_DEFINITION:
+            # Far-field label is ``E_ff = F - sum_{a real} H_a e^{1j w tau_a}``
+            # (`farfield_envelope_from_partition`): reconstruct its exact
+            # inverse with the switch forced to 1 on every real channel and
+            # NO ``tau_c`` carrier, so the kernel sum added back telescopes
+            # to ``F`` to machine precision (Build 8g-b serving mirror).
+            ff_switch = np.zeros(
+                (dense_w.shape[0], geom.real_mask.size), dtype=float)
+            ff_switch[:, np.asarray(geom.real_mask, dtype=bool)] = 1.0
+            kernels, _total = reconstruct_from_envelope(
+                dense_w, envelope_dense, geom.delays, geom.saddle_kernels,
+                ff_switch, 0.0)
+        else:
+            # Tube (or legacy) label uses the caustic-region envelope with
+            # the geometry's switch and critical delay -- unchanged.
+            kernels, _total = reconstruct_from_envelope(
+                dense_w, envelope_dense, geom.delays, geom.saddle_kernels,
+                geom.switch, geom.critical_delay)
         k0, k1 = self._reduce_dense_kernels(kernels)
         delays = self._image_delays(lens, geom)
         return delays, k0, k1, geom

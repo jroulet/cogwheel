@@ -1,5 +1,264 @@
 # Coder Short-Term Observations
 
+- INS-8gbc-001 VERIFY (Build 8g-b-c; kappa=0.1 fall-through relative delay
+  0.020863 s > OLD DELTA_T_MAX 0.02 -> LensedBinningError in
+  RefusalPreservationTestCase::test_nonzero_kappa_never_served). Root
+  cause: an EARLIER finding relocated CROWN_LENS to the far-field exterior
+  (gamma=0.35, y1=2.25) for eps; wider image separation -> larger relative
+  delays that tipped the tight 0.02 s binding limit. PRODUCTION CORRECT
+  (delay genuinely exceeds certified binning); test-fixture fragility only.
+  * SYSTEMIC FIX ALREADY APPLIED by Test Dev in the working tree (I did NOT
+    re-edit — the fix was complete and correct): DELTA_T_MAX 0.02->0.05,
+    DF_BIN 4.0->1.6 (RE-DERIVED by the SAME phase criterion
+    pi*DF_BIN*DELTA_T_MAX~=0.25 rad, half the 0.5-rad _DEFAULT_BIN_DELAY_TOL
+    -> NOT a loosened safety factor; the _shared_fixture fbin=edges refines
+    automatically off DF_BIN). Uniform raise, NO per-config nudge. One-line
+    note present in the DELTA_T_MAX docstring (far-field exterior sources
+    have wider image separations -> larger relative delays). New
+    DelayMarginContractTestCase (MARGIN_FRACTION_CEILING=0.60) pins the
+    whole positive-parity far-field family under 60%.
+  * MY DELIVERABLE THIS PASS = verification + per-config margin report
+    (finding's explicit ask). MEASURED delay/DELTA_T_MAX at DELTA_T_MAX=
+    0.05: crown(kappa=0) 0.018669 s / 0.3734; crown kappa=0.1 fall-through
+    0.020863 s / 0.4173 (WORST, was 1.04 over the old 0.02); pos_configs/
+    crown 0.018669/0.3734; deep 0.018944/0.3789; box-edge 0.018229/0.3646.
+    ALL <= 0.42 << 0.60 ceiling, comfortable uniform margin.
+  * VERIFIED: DelayMarginContractTestCase 3/3 pass; FULL
+    test_lensing_surrogate.py 45 passed, 1 skipped, 0 failed (96.9 s) —
+    confirms BOTH this fix AND my prior INS-8gb-006 RB_DLNL_ATOL saddle-gate
+    fix are green together, no cross-regression. Production code untouched
+    this pass. UNVERIFIED: nothing outstanding for this finding.
+
+- INS-8gb-006 FIX (Build 8g-b RED-suite; test-gate re-currency for the
+  saddle family, ONLY test_lensing_surrogate.py touched; no production/
+  tolerance change). Root cause: this build's OWN INS-8gb-003 fix corrected
+  eps_dense (previously inflated), which UNMASKED that the F016 LINEAR gate
+  dlnL<=LNLIKE_ERROR_AMP*eps_dense*|lnL| (amp 1.5) is the WRONG currency for
+  the saddle: its lnL rides the QUADRATIC |F|^2 signal power, so a tiny
+  max-relative envelope error propagates with a measured eps->dlnL gain ~1.85.
+  * Attempted the finding's PRIMARY option (a): built a read-only
+    _ExactEnvelopeOracle (surrogate-shaped wrapper: SAME serve() decision,
+    substitutes EXACT engine envelope via farfield_envelope_from_partition
+    for far-field / part.envelope for tube) and a baseline likelihood so
+    dlnl_new=|lnl_sur-lnl_base| runs the IDENTICAL dense-reconstruction/
+    kernel-reduction path -> cancels the RB re-binning floor. MEASURED
+    (probe, deleted): floor=|lnl_base-lnl_exact| is only ~0.17 nats for
+    saddle-2 (NOT the Inspector's ~0.66 estimate); dlnl_old = dlnl_new +
+    floor EXACTLY (0.7427+0.1682=0.9109) confirming the oracle correctly
+    isolates the emulation contribution. But the isolated dlnl_new=0.743
+    STILL exceeds bound 0.611 (ratio 1.82>1.5). So option (a) is
+    DEMONSTRABLY INSUFFICIENT -> fell back to option (b) per the finding.
+  * Option (b) IMPLEMENTED: NEW constant RB_DLNL_ATOL=1.5 (finding "RB_ATOL",
+    absolute nat acceptance ceiling for the saddle). _assert_served_close
+    gained relationship_gate=True param: positive family UNCHANGED (linear
+    F016 relationship bound, ratios<=0.11, pass); saddle family
+    (relationship_gate=False) gated at abs dlnL<=RB_DLNL_ATOL (served 0.299/
+    0.911 both <1.5, headroom) with quadratic-sensitivity ratio surfaced in
+    the assert message. test_saddle_served_lnlike_tracks_engine passes
+    relationship_gate=False. LNLIKE_ERROR_AMP STAYS 1.5; ALL tolerances
+    unchanged (LNLIKE_BUDGET_TOL 0.5, LNLIKE_CROWN_TARGET 0.01, POS/SAD_
+    RECON_TOL 0.20/0.05, RECON_TARGET_TOL 1e-3 all verified unchanged).
+  * DOCS corrected (stale after INS-8gb-003): class docstring now carries
+    the measured dlnL/eps_dense/|lnL|/ratio/floor TABLE for all 5 configs +
+    two-families-two-currencies explanation; LNLIKE_ERROR_AMP docstring
+    "peaks at ~0.84 across positive AND saddle" -> positive-only ~0.11 +
+    saddle uses RB_DLNL_ATOL; SAD_CONFIGS comment "RB layer floors ~0.66" ->
+    correct |F|^2 quadratic gain ~1.85 attribution.
+  * VERIFIED: ast.parse OK; smoke-ran LnlikeAccuracyTestCase (project rule:
+    modified test file MUST be smoke-tested) -> BOTH tests ok, 2/2 GREEN,
+    printed diagnostics byte-match the probe (saddle-2 9.108e-1/1.175e-3).
+    Probe deleted (never committed).
+  * OWED to Test Dev / Inspector (this IS a gate re-currency, borders on
+    blessing authorship — flagged loudly): (1) bless RB_DLNL_ATOL=1.5 as the
+    right saddle currency; (2) the honest finding correction — the RB floor
+    is ~0.17 nats NOT ~0.66, and option (a) does NOT resolve the saddle
+    (isolated emulation ratio ~1.82>1.5); the true blocker is the |F|^2
+    quadratic sensitivity, so a production-scale surrogate (eps~1e-4) is
+    what drives the saddle under BOTH currencies, not a test-gate change.
+    UNVERIFIED: full lensing suite pass/fail (I smoke-ran only the one
+    edited TestCase; downstream runs the whole suite).
+
+- INS-8gb-002/003/004 FIX (Build 8g-b stale test-oracle/fixture bugs;
+  production CORRECT, only tests touched + 1 production docstring). Root
+  cause: WP1 redefined the far-field label to E_ff = F - sum_{a real}
+  H_a e^{i w tau_a}; WP2 flipped serve() to 3-tuple (env,served,definition)
+  with tag dispatch — but TEST oracles still used the OLD caustic-region
+  label / OLD reconstruction path, and ship POS_BOX was near-caustic
+  (invalid far-field domain).
+  * INS-8gb-002 (test_lensing_surrogate_census.py): NEW module helper
+    _reference_env_and_denom(chart,part) dispatched EXACTLY like
+    census.heldout_envelope_eps (ONE place). FarFieldChart -> env=
+    farfield_envelope_from_partition(part), denom=max|part.exact_total|
+    (F-normalized) floored at census.EPS_DENOM_FLOOR; tube -> part.envelope
+    /max|E| UNCHANGED. test_node_exactness & test_trough_normalization use
+    it; part from ChangRefsdalChannels.evaluate() (HAS exact_total;
+    geometry_partition() does NOT). NO tolerances touched. VERIFIED: node
+    eps 5.5e-15 (<1e-8, was 99.7); trough_ratio 4.3e-18, eps_maxnorm 0.018
+    (<1.0, was 129.3).
+  * INS-8gb-003 (test_lensing_surrogate.py): _reconstruct_via_surrogate
+    rewritten to serve() 3-tuple + DISPATCH on `definition` tag like
+    production likelihood._surrogate_coefficients: far-field -> ff_switch
+    (real_mask->1.0) + critical_delay 0.0; else geom.switch/critical_delay
+    (tube byte-identical). Imported _FARFIELD_ENVELOPE_DEFINITION. VERIFIED
+    recon eps crown 3.2e-4/deep 8.1e-4/box-edge 7.7e-3 (was 11.7/24.6/19.1).
+  * INS-8gb-004: relocated POS_BOX -> ((0.30,0.50),(1.95,2.30),(-0.15,
+    0.15)) genuinely exterior (worst corner |y|=1.95 > disk ~1.46@g=0.50).
+    CROWN_LENS->(0.35,2.25,0.0); EnvelopeBeta eig->(0.40,2.15,0.05);
+    POS_CONFIGS-> crown(0.35,2.25,0.0,T)/deep(0.40,2.20,0.05,T)/box-edge
+    (0.50,1.98,0.10,F). Stale eps provenance comments made truthful w/o new
+    precise numbers. NO tolerance changed. surrogate.py from_engine gained
+    ONE "Domain contract (exterior-only)" docstring paragraph (docs only,
+    no guard). VERIFIED all 3 serve far-field; eig serves at all 8 betas;
+    eps dropped ~200x (0.16->~5e-4).
+  * OTHER y1=0.65 sites (FLIP_CONFIGS, CrownByteIdentity) are direct-engine
+    configs; tube configs carry eta/theta — all LEFT UNTOUCHED.
+  * VERIFIED ast.parse+import OK. UNVERIFIED: full suite incl
+    LnlikeAccuracyTestCase on the RB fixture (needs lnlike; I probed
+    reconstruction eps only). Per finding: if a genuinely-exterior config
+    STILL exceeds 0.5 nats, STOP + escalate to Professor, do NOT touch
+    tolerances. Recon-eps evidence says it will pass.
+
+- INS-8gb-001 FIX (mechanical serve() arity migration after WP2 3-tuple
+  flip): serve() now returns (env, served, definition); updated ALL stale
+  2-tuple unpacks in 3 test files (consumer-API migration, NOT test
+  authorship — no assertion logic touched). test_lensing_surrogate.py:
+  _serve_for_query docstring '(E_array, served)'->'(E_array, served,
+  definition)' (fn already forwarded full tuple); 4 consumers 1930/1931
+  (deterministic) + 2083/2084 (reload) -> `env_a, served_a, _def_a = ...`.
+  test_lensing_surrogate_census.py: 363 (e_tube), 660 (env_eng,_served
+  circular-oracle), 686/723/749 (e_sur) -> +`,_definition`.
+  test_lensing_surrogate_training.py: 1273 (_wp3_overlay emulated), 1941
+  (_envelope) -> +`,_definition`. VERIFIED: ast.parse all 3 files OK; broad
+  `.serve(` sweep across cogwheel/tests confirms EVERY unpack site is now
+  3-tuple (farfield_envelope suite already 3-tuple by Test Dev; 1611/1612
+  store whole tuple, no unpack). Production callers (likelihood.py:1416,
+  surrogate_census.py:524, surrogate_training.py:1114) were already correct
+  from WP2. UNVERIFIED: full suite pass/fail (downstream runs it; I only
+  parse-checked + arity-migrated).
+
+- WP2 (Build 8g-b lever 2, envelope-definition tag + loader hard-refusal
+  + serving mirror): edited surrogate.py, likelihood.py + 1-line serve
+  unpacks in surrogate_training.py & surrogate_census.py. Engine/tube
+  untouched. (1) NEW module consts _FARFIELD_ENVELOPE_DEFINITION=
+  'farfield_full_kernel_sum' + _KNOWN_FARFIELD_DEFINITIONS frozenset.
+  (2) FarFieldChart gained `envelope_definition: str` field (TubeChart
+  UNTOUCHED); _assemble defaults it to the const (from_values/from_engine
+  ride the default via positional _assemble call — no signature churn).
+  (3) _chart_to_npz writes meta['envelope_definition'] in the FARFIELD
+  branch only (tube meta byte-identical: verified keys unchanged). (4)
+  NEW _validate_farfield_definition(tag,label) raises ValueError on
+  None/unknown; called from _chart_from_npz far-field branch AND
+  _load_legacy_single_box (legacy npz has no tag key -> ALWAYS refused,
+  by design — v1/v2 predate the new label). (5) serve now returns 3-tuple
+  (E, served, definition): chart.envelope_definition for FarFieldChart,
+  None for TubeChart/not-served (persisted tag IS the dispatch signal, no
+  parallel bool). (6) likelihood _surrogate_coefficients unpacks 3-tuple
+  and DISPATCHES: definition==_FARFIELD_ENVELOPE_DEFINITION -> ff_switch=
+  zeros((n_w,4)); ff_switch[:,real_mask]=1.0; reconstruct_from_envelope(
+  ...,ff_switch,0.0) (exact inverse of WP1 label, telescopes to F);
+  else -> existing geom.switch/geom.critical_delay path UNCHANGED. Import
+  _FARFIELD_ENVELOPE_DEFINITION from surrogate (no hardcoded string; no
+  circular import — surrogate does not import likelihood).
+  * VERIFIED (engine present): serving mirror on real config (gamma=0.0387,
+    y=(1.3,1.35), w geomspace 1->60, 40 nodes): max|F_recon - exact_total|
+    = 0.0 (machine precision, Professor Q2 confirmed). Fresh far-field tag
+    defaults correctly; tube meta keys unchanged (no envelope_definition).
+    npz round-trip preserves tag. Missing-tag & unknown-tag loads -> RED
+    ValueError. Legacy single-box npz (no n_charts, no tag) -> RED
+    ValueError. serve returns exactly 3 elements (served=False,
+    definition=None on miss). dataclasses.replace (census) preserves tag.
+    ast.parse + import all 4 files OK.
+  * OWED to Test Dev (WP2 8g-b acceptance (c) + contract-flip): the 3-tuple
+    serve return BREAKS existing 2-tuple unpacks in tests
+    (test_lensing_surrogate.py L1869, test_lensing_surrogate_census.py
+    L363/686/723/749, test_lensing_surrogate_training.py L1273/1941) — these
+    go RED and need re-baselining to `E, served, definition = serve(...)`
+    (intended API flip, mirrors prior builds). NEW gates owed: (c1) F010
+    both directions — a chart with absent tag AND a chart with unknown tag
+    are BOTH refused by load/_chart_from_npz/_load_legacy_single_box with a
+    rebuild-instructing ValueError; (c2) serving-mirror witness — a
+    new-definition far-field tile's reconstructed F matches exact engine F
+    at held-out points incl across a diagonal within the bar (the max|diff|
+    =0.0 telescoping identity is the template); (c3) tube byte-identity —
+    tube npz meta + reconstruction (geom.switch/critical_delay path)
+    unchanged to the byte; (c4) serve returns definition==tag for a served
+    FarFieldChart and None for a served TubeChart. Test authorship declined
+    (code+blessing must not share an author).
+  * NOT DONE by me (owned elsewhere): DATA_CONTRACTS chart-schema note +
+    contracts_changelog fragment for the new far-field meta field — the
+    npz gained an `envelope_definition` key inside the per-chart JSON meta
+    blob (a schema addition; producer/consumer graph UNCHANGED so no
+    pipeline_graph/contract-token gate breaks). Flag to Inspector
+    (accuracy) / Librarian (sync) to record the schema note + changelog.
+  * SCOPE: WP2 is lever 2 ONLY (tag + refusal + serving mirror). Lever 1
+    (envelope redefinition, WP1 — done) and lever 3 (consolidated tiling)
+    are separate WPs, NOT touched here. UNVERIFIED: full lensing suite
+    pass/fail (downstream; the 2-tuple test unpacks above will RED until
+    Test Dev re-baselines).
+
+- WP1 (Build 8g-b lever 1, far-field envelope redefinition + gate/census
+  reference consistency): edited 5 files. NEW authoritative helper
+  `channels.farfield_envelope_from_partition(partition)->np.ndarray` next
+  to reconstruct_from_envelope returns E_ff = F - sum_{a real} H_a
+  e^{1j w tau_a} by REUSING the existing gauge verbatim: switch =
+  zeros((n_w,4)); switch[:, real_mask]=1.0 (virtual channels carry a
+  STRUCTURAL zero saddle kernel so forcing switch is a no-op-safe drop of
+  nothing, Professor Q1); _, envelope = switched_analytic_channels(w,
+  exact_total, delays, saddle_kernels, switch, 0.0, _envelope_weights
+  (switch)); return envelope. With tau_c=0 the gauge's conj(carrier_c)
+  factor is 1, so envelope == F - sum_{real} H_a e^{i w tau_a} at machine
+  precision. Added to channels.__all__ (alpha order) + re-exported from
+  chang_refsdal/__init__.py. Single source of truth => label and gate
+  reference can never diverge (DRY, the whole point of WP1).
+  * from_engine (surrogate.py ~828): env = np.asarray(partition.envelope)
+    -> env = farfield_envelope_from_partition(partition); non-finite
+    conservative-refusal guard UNCHANGED. from_engine builds ONLY
+    far-field charts => no tube training touched. Import + docstring
+    updated.
+  * _heldout_eps (surrogate_training.py ~1068): BRANCH on
+    isinstance(chart, FarFieldChart). Far-field: env_true =
+    farfield_envelope_from_partition(partition), denom = max|exact_total|
+    (F-normalized, Professor Q5 — max|E_ff|~1e-4 is a tiny unstable
+    denominator). Tube: env_true = partition.envelope, denom =
+    max|env_true| UNCHANGED (byte-identity, acceptance e). serve/served/
+    error-append loop preserved. `denom or 1.0` idiom kept.
+  * census heldout_envelope_eps (surrogate_census.py ~451-503): mirror
+    the same far-field branch keyed on surrogate.charts[chart_index] type;
+    env_eng = helper, denom_base = max|exact_total| for far-field; tube
+    branch untouched. EPS_DENOM_FLOOR=1e-6 kept both branches
+    (max(denom_base, floor)).
+  * TrainingConfig.farfield_eps_max 3e-3 -> 1e-3 (Professor Q5 campaign-
+    start bar; comment now states tube bar max-normalized on max|E|,
+    far-field bar F-normalized on max|F|=max|exact_total|, production
+    re-gate to ~1e-4 with caustic-edge margin is a driver deferral
+    mirroring 8a Q5). tube_eps_max=5e-2, tube gate, node counts,
+    n_farfield_tiles_per_side UNCHANGED.
+  * VERIFIED (engine present): ast.parse all 5 files OK; import of helper
+    from all 5 modules resolves to the SAME fn identity. Real partition
+    (gamma=0.0387, y=(1.3,1.35), w geomspace 1->60, 40 nodes, 2 real
+    images): helper reproduces manual F - sum_{real} H_a e^{1j w tau_a}
+    to max|Eff-manual|=6.0e-15; max|Eff|=0.0119, max|F|=1.208, shape (40,)
+    complex128. serve() (read-only) returns interpolated ENVELOPE (not
+    reconstructed F) => eps gate self-consistent in envelope space, WP1
+    needs NO serving-mirror (that's lever 2, a separate WP).
+  * SCOPE: WP1 is lever 1 (envelope definition) + gate/census reference
+    ONLY. Lever 2 (serving mirror + definition tag) and lever 3
+    (consolidated tiling) are SEPARATE WPs, NOT touched here.
+  * OWED to Test Dev (8g-b WP1 gates): (a) diagonal-continuity reachable-
+    red — the OLD label (partition.envelope) jumps ~1500x across the
+    astroid-diagonal lobe-equidistance flip (nearest_caustic_point carrier
+    flips lobes, a resolved image reads near-critical, switch off,
+    oscillation un-subtracted); the NEW E_ff label is continuous ~1e-4
+    across that flip. (e) tube byte-identity witness on a fixed probe set:
+    tube branch of _heldout_eps + census + from_engine's tube path (none)
+    all leave partition.envelope + max-normalization untouched. Test
+    authorship declined (code+blessing must not share an author).
+  * UNVERIFIED (WP1 8g-b): full lensing test suite pass/fail (downstream,
+    I do not run suites); the actual trained far-field charts' held-out
+    F-normalized eps at production grid scale (driver campaign, offline);
+    whether 1e-3 vs the deferred ~1e-4 production bar changes chart
+    registration counts (driver re-gate).
+
 - INS-2-001 FIX (Build 8g WP2 far-field DD-cap corner bug): edited ONLY
   cogwheel/lensing/surrogate_training.py cap helpers. Root cause: far-field
   square tiles admit sources to the box CORNER |y|=sqrt(2)*Y, but

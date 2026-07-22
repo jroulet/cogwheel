@@ -96,7 +96,8 @@ from pathlib import Path
 import numpy as np
 from scipy.interpolate import BSpline, make_interp_spline
 
-from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
+from cogwheel.lensing.chang_refsdal import (ChangRefsdalChannels,
+                                            farfield_envelope_from_partition)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
 from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.chang_refsdal._schwinger import (
@@ -133,6 +134,21 @@ _GAMMA_GUARD_BAND = 1e-3
 # Legacy single-box charts adopt this as their ``eta_overlap_min`` so the
 # 8a caustic-floor behaviour is preserved after rewiring.
 _DEFAULT_CAUSTIC_FLOOR = 0.05
+
+# Envelope-definition tag persisted in each far-field chart's npz meta.
+# A far-field chart is trained on the label
+# ``E_ff = F - sum_{a real} H_a e^{1j w tau_a}``
+# (`channels.farfield_envelope_from_partition`, Build 8g-b): the full
+# post-geometric-optics remainder with the criticality switch forced to 1
+# on every real channel and NO ``tau_c`` demodulation carrier.  The
+# serving side must mirror this exactly (add the full real-channel kernel
+# sum back with ``critical_delay = 0``) or the reconstructed ``F`` would
+# not match the label.  The loader hard-refuses a far-field chart whose
+# tag is absent or unknown: the v1/v2 partial artifacts predate the tag
+# and were trained on the OLD (lobe-flipping) caustic-region envelope, so
+# reconstructing them under the new definition would be finite-but-wrong.
+_FARFIELD_ENVELOPE_DEFINITION = 'farfield_full_kernel_sum'
+_KNOWN_FARFIELD_DEFINITIONS = frozenset({_FARFIELD_ENVELOPE_DEFINITION})
 
 # Angular half-width (radians) of the certified Pearcey-cusp arm coverage,
 # subtracted from each TubeChart cusp-exclusion window in `_tube_serves`.
@@ -390,6 +406,11 @@ class FarFieldChart:
     param_spacing : np.ndarray
         Shape ``(3,)`` mean spacing of ``(gamma, y1, y2)`` for the
         exclusion-ball normalization.
+    envelope_definition : str
+        Tag naming the label the chart's envelope encodes (Build 8g-b).
+        Persisted in the npz meta and checked on load; the serving side
+        dispatches the reconstruction on it.  Fresh charts default to
+        `_FARFIELD_ENVELOPE_DEFINITION`.
     """
 
     gamma_grid: np.ndarray
@@ -404,6 +425,7 @@ class FarFieldChart:
     eta_overlap_min: float
     refused_points: np.ndarray
     param_spacing: np.ndarray
+    envelope_definition: str
 
     @classmethod
     def from_values(cls, *, gamma_grid: np.ndarray, y1_grid: np.ndarray,
@@ -445,7 +467,9 @@ class FarFieldChart:
     @classmethod
     def _assemble(cls, gamma_grid, y1_grid, y2_grid, log_w_grid, real_coeffs,
                   imag_coeffs, knots, image_count, parity, eta_overlap_min,
-                  refused_points) -> 'FarFieldChart':
+                  refused_points,
+                  envelope_definition=_FARFIELD_ENVELOPE_DEFINITION
+                  ) -> 'FarFieldChart':
         """Assemble a chart from prebuilt coefficient tensors and knots."""
         param_spacing = np.array([
             float(np.mean(np.diff(gamma_grid))),
@@ -463,7 +487,8 @@ class FarFieldChart:
             parity=None if parity is None else int(parity),
             eta_overlap_min=float(eta_overlap_min),
             refused_points=_normalize_refused(refused_points),
-            param_spacing=param_spacing)
+            param_spacing=param_spacing,
+            envelope_definition=str(envelope_definition))
 
 
 @dataclass(frozen=True, eq=False)
@@ -842,13 +867,33 @@ class LensAmplificationSurrogate:
         Evaluates `ChangRefsdalChannels.evaluate` at ``beta = 0``,
         ``kappa = 0`` on the full dense ``w`` grid for every parameter
         grid point (no LOO / adaptive logic -- unlimited offline engine
-        calls), taking ``partition.envelope`` as the label.  A parameter
+        calls), taking the far-field label
+        ``E_ff = F - sum_{a real} H_a e^{1j w tau_a}``
+        (`farfield_envelope_from_partition`) rather than the caustic-region
+        ``partition.envelope`` -- in the exterior the switch/carrier the
+        caustic-region envelope needs flip lobes on the astroid diagonals
+        and leave a resolved image un-subtracted (Build 8g-b).  A parameter
         point that refuses at any ``w`` node (or returns a non-finite
         envelope) is recorded as refused and left as zeros in the value
         arrays.  The box must lie wholly inside one image-count region
         with caustic distance bounded away from zero; the region's real
         image count is read once at the box centre and stored as the
         chart's `image_count` label.
+
+        Domain contract (exterior-only): the far-field label subtracts the
+        resolved geometric-optics images with the switch forced on for
+        every real channel, so it is small and smooth ONLY where the box
+        lies wholly in the caustic EXTERIOR -- every corner outside
+        ``caustic_reach + eta_max`` for its gamma range.  Near the caustic
+        an image is not fully resolved; forcing its switch on leaves an
+        un-subtracted oscillatory term, ``E_ff`` grows and a coarse spline
+        fits it poorly.  Near-caustic domains therefore belong to TUBE
+        charts (the caustic-region ``partition.envelope`` label), not to a
+        far-field chart built here; production tiling enforces this by
+        admitting only tiles wholly outside ``caustic_reach + eta_max``.
+        This method applies the far-field label unconditionally and does
+        NOT itself guard the exterior contract -- callers must supply an
+        exterior box.
 
         Parameters
         ----------
@@ -899,7 +944,7 @@ class LensAmplificationSurrogate:
                         refused.append((float(gamma), float(y1_eig),
                                         float(y2_eig)))
                         continue
-                    env = np.asarray(partition.envelope)
+                    env = farfield_envelope_from_partition(partition)
                     if not np.all(np.isfinite(env)):
                         # Conservative: a non-finite envelope is treated as
                         # a refusal rather than served as a value (F005).
@@ -1004,7 +1049,7 @@ class LensAmplificationSurrogate:
 
     def serve(self, w_array: np.ndarray, *, gamma: float, y1: float,
               y2: float, beta: float, eta: float, theta: float,
-              image_count: int) -> tuple[np.ndarray, bool]:
+              image_count: int) -> tuple[np.ndarray, bool, str | None]:
         """Emulated envelope ``E(w)`` via the full multi-chart guard stack.
 
         Rotates ``(y1, y2)`` into the shear eigenframe, runs `select_chart`
@@ -1040,11 +1085,17 @@ class LensAmplificationSurrogate:
         served : bool
             ``True`` if the surrogate emulated the envelope; ``False`` if
             the caller must fall back to the exact engine.
+        definition : str or None
+            The served chart's envelope-definition tag when a
+            `FarFieldChart` is served (the serving-side reconstruction
+            dispatches on it), ``None`` for a `TubeChart` or when not
+            served.  The persisted tag is the single dispatch signal --
+            no parallel flag.
         """
         w = np.asarray(w_array, dtype=float)
         w_flat = np.atleast_1d(w).ravel()
         if w_flat.size == 0 or not np.all(w_flat > 0.0):
-            return np.zeros(w.shape, dtype=complex), False
+            return np.zeros(w.shape, dtype=complex), False, None
 
         log_w = np.log(w_flat)
         y1_eig, y2_eig = _rotate_to_eigenframe(y1, y2, beta)
@@ -1053,11 +1104,13 @@ class LensAmplificationSurrogate:
             log_w_max=float(log_w.max()), eta=eta, theta=theta,
             image_count=image_count, y1_eig=y1_eig, y2_eig=y2_eig)
         if chart is None:
-            return np.zeros(w.shape, dtype=complex), False
+            return np.zeros(w.shape, dtype=complex), False, None
 
         env_flat = _evaluate_chart(chart, gamma, y1_eig, y2_eig, eta, theta,
                                    log_w)
-        return env_flat.reshape(w.shape), True
+        definition = (chart.envelope_definition
+                      if isinstance(chart, FarFieldChart) else None)
+        return env_flat.reshape(w.shape), True, definition
 
     # ---- Legacy single-box (far-field) query --------------------------
 
@@ -1235,6 +1288,14 @@ class LensAmplificationSurrogate:
         boundary.
         """
         gamma_grid = data['gamma_grid']
+        # A legacy single-box artifact predates the far-field
+        # envelope-definition tag (Build 8g-b), so it carries the OLD
+        # caustic-region label and must be refused rather than served under
+        # the new reconstruction (an unknown/absent tag hard-refuses).
+        tag = (str(data['envelope_definition'])
+               if 'envelope_definition' in data.files else None)
+        definition = _validate_farfield_definition(
+            tag, 'legacy single-box artifact')
         parity = (1 if 0.5 * float(gamma_grid[0] + gamma_grid[-1]) < 1.0
                   else -1)
         chart = FarFieldChart._assemble(
@@ -1245,12 +1306,50 @@ class LensAmplificationSurrogate:
                    data['knot_y2']),
             image_count=None, parity=parity,
             eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
-            refused_points=data['refused_points'])
+            refused_points=data['refused_points'],
+            envelope_definition=definition)
         provenance = json.loads(str(data['provenance']))
         return cls([chart], provenance)
 
 
 # ---- Per-chart (de)serialization helpers ------------------------------
+
+
+def _validate_farfield_definition(tag, artifact_label: str) -> str:
+    """Hard-refuse a far-field chart with an absent or unknown definition tag.
+
+    Build 8g-b redefined the far-field envelope label; a chart trained
+    before the tag existed (v1/v2 partial artifacts) encodes the OLD
+    lobe-flipping caustic-region envelope and would reconstruct a
+    finite-but-wrong ``F`` under the new serving mirror.  Refuse rather
+    than serve it.
+
+    Parameters
+    ----------
+    tag : str or None
+        The ``envelope_definition`` read from the artifact meta.
+    artifact_label : str
+        Human-readable identifier (e.g. ``'chart 3'``) for the error.
+
+    Returns
+    -------
+    str
+        The validated tag.
+
+    Raises
+    ------
+    ValueError
+        If ``tag`` is ``None`` or not in `_KNOWN_FARFIELD_DEFINITIONS`.
+    """
+    if tag is None or tag not in _KNOWN_FARFIELD_DEFINITIONS:
+        raise ValueError(
+            f'Far-field {artifact_label} carries envelope-definition tag '
+            f'{tag!r}, which is absent or unknown (known: '
+            f'{sorted(_KNOWN_FARFIELD_DEFINITIONS)}).  This artifact '
+            f'predates the Build 8g-b far-field envelope redefinition and '
+            f'must not serve under the new reconstruction; rebuild the '
+            f'surrogate.')
+    return str(tag)
 
 
 def _chart_to_npz(chart, index: int) -> dict:
@@ -1267,7 +1366,8 @@ def _chart_to_npz(chart, index: int) -> dict:
     else:
         meta = {'kind': 'farfield', 'image_count': chart.image_count,
                 'parity': chart.parity,
-                'eta_overlap_min': chart.eta_overlap_min}
+                'eta_overlap_min': chart.eta_overlap_min,
+                'envelope_definition': chart.envelope_definition}
         axes = (chart.log_w_grid, chart.gamma_grid, chart.y1_grid,
                 chart.y2_grid)
         arrays = {prefix + 'refused': chart.refused_points}
@@ -1297,10 +1397,13 @@ def _chart_from_npz(data, index: int):
             image_count=meta['image_count'], parity=meta['parity'],
             eta_floor=meta['eta_floor'], eta_max=meta['eta_max'],
             cusp_windows=[tuple(win) for win in meta['cusp_windows']])
+    definition = _validate_farfield_definition(
+        meta.get('envelope_definition'), f'chart {index}')
     return FarFieldChart._assemble(
         gamma_grid=gamma_grid, y1_grid=p1_grid, y2_grid=p2_grid,
         log_w_grid=log_w_grid, real_coeffs=real_coeffs,
         imag_coeffs=imag_coeffs, knots=knots,
         image_count=meta['image_count'], parity=meta['parity'],
         eta_overlap_min=meta['eta_overlap_min'],
-        refused_points=data[prefix + 'refused'])
+        refused_points=data[prefix + 'refused'],
+        envelope_definition=definition)

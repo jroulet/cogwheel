@@ -1271,7 +1271,7 @@ def _wp3_overlay(chart, arc, gamma: float, eta: float, n_theta: int
         if not np.all(np.isfinite(env_true)):
             continue
         engine_env[idx] = float(np.max(np.abs(env_true)))
-        emulated, served = surrogate.serve(
+        emulated, served, _definition = surrogate.serve(
             w_grid, gamma=gamma, y1=float(source[0]), y2=float(source[1]),
             beta=0.0, eta=partition.caustic_distance,
             theta=partition.critical_theta,
@@ -1939,7 +1939,7 @@ def _census_serves(surrogate: LensAmplificationSurrogate,
     try:
         partition = channels.geometry_partition(
             gamma=gamma, y=[y1, y2], beta=0.0)
-        _envelope, served = surrogate.serve(
+        _envelope, served, _definition = surrogate.serve(
             np.array([band_lo, band_hi]), gamma=gamma, y1=y1, y2=y2,
             beta=0.0, eta=partition.caustic_distance,
             theta=partition.caustic_theta,

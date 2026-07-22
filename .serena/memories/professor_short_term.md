@@ -1,36 +1,33 @@
-# Professor short-term — Build 8g inference review (2026-07-22)
+# Professor short-term (2026-07-22) — Build 8g-b far-field envelope redefinition REVIEW
 
-VERDICT: PASS. Ran the new WP1/WP2/WP3 domain shard
-`cogwheel/tests/test_lensing_surrogate_training.py` in env `cogwheel-newlal`:
-**59 passed, 0 failed in 452 s (~7.5 min)**. Independently re-derived the
-physics-critical margins (script, since deleted):
+Inference review of Build 8g-b (far-field surrogate LABEL redefined from
+`partition.envelope`/SACR-C τ_c-demodulated to the full post-geometric-optics
+remainder E_ff = F - Σ_{a real} H_a e^{iwτ_a}; switch=1 for real, critical_delay=0).
 
-- WP3 saddle tube-tail (Q6-iv): fix-ON heldout_eps = **0.0263** (< tube bar
-  5e-2, < 0.1 headline); fix-OFF = **0.4335** (> pathology floor 0.09, matches
-  Professor's measured ~0.43; coarse fixture so below the 1.15 headline). Fix-on
-  arc is a genuine `_saddle_arcs` product carrying the wedge-edge exclusion
-  window; fix-off faithfully reverts to astroid cusp-safety + no wedge window.
-  Straddles the registration bar => reachable-red, bites the real pathology.
-- Residue partition (Q5): N=3000 draws, seed 8080808, closes exactly
-  (359 beyond_w_cap + 30 chart_served + 2611 residue = 3000), beyond_served=0
-  (no beyond-ceiling draw served its whole band). residue_frac=0.870 is
-  MEASURED-and-reported, NOT asserted zero (Build 8h north star). The ~1%
-  whole-prior chart-served is a SMOKE-CONFIG artifact (n_gamma=n_u=n_theta=4),
-  not production coverage — expected, not a defect.
-- Tiling (Q6-i): strict disjointness (max-norm sep >= 2h, tol 1e-9 ULP guard),
-  outside-disk, >=3 low-stratum tiles, dropped=admitted-cap, saddle beyond_w_cap
-  starts m>400 (~458) with w_ceiling=58, astroid fully reachable (no beyond
-  bucket) — all consistent with my 8g consult numeric geometry.
-- Corner-cap fix (INS-1-001) LANDED: FarFieldCornerCap tests (designed red vs
-  unfixed code) now green — corner product 82 -> 58 via y_max=Y*sqrt2.
-- Eps gate reachable-red + resume: healthy registers, poisoned+NaN gated with
-  reasons, reverting poison re-registers, persisted eps round-trips on resume
-  (deterministic, no recompute), legacy-no-eps mixed-version resume passes
-  ungated. Astroid byte-identity max diff 0.0. SelfFalsification suite (11
-  mutations) all bite. Whole-band containment uses independent w oracle
-  (1.2372e-4), distinct from production `dimensionless_frequency`.
+## Verdict: PASS
+- Ran `cogwheel/tests/test_lensing_farfield_envelope.py` (py3.10
+  gw_detection_ias_310; cogwheel_310 absent on this box). 42 tests + 9 subtests
+  PASS in 180s. All 6 diagnostic PNGs written to cogwheel/tests/output/.
+- Threshold constants verified against my own 8g-b rulings: OLD_JUMP_MIN_RATIO=100,
+  NEW_ENVELOPE_MAX=5e-3, NEW_CONTINUITY_MAX=1e-3, MACHINE_REL_TOL=1e-12,
+  SERVE_MIRROR_TOL=3e-3, FARFIELD_EPS_GATE=1e-3. gamma=0.0387,y1=1.3,
+  Y2_SWEEP linspace(1.10,1.50,33) lands on 1.250 & 1.275. All match.
+- Independent numeric probe (2 partition builds): reconstruction rel err = 0.000e+00
+  (telescoping range-reduced carriers, Q2/Q3 confirmed exact, not just <1e-12);
+  lobe-flip invariance rel dev = 0.000e+00 while critical_delay gap=2.56 and OLD
+  envelope moves 0.58 => the lobe DOF is provably GONE. Root-cause fix confirmed.
+- Tests are self-falsifying: SelfFalsificationTestCase + NewGateSelfFalsification
+  feed the OLD label / corrupted E_ff into the SAME gates and assert red — gates
+  have teeth (no decoration). Good practice.
+- max|E_ff|=1.2e-2 at on-diagonal (1.3,1.3) over w∈[1,60] is NOT a violation: that
+  point is near the caustic and low-w E_ff re-acquires near-critical oscillation
+  (my Q4 caveat); it is not gated by the exterior-sweep 5e-3 ceiling.
 
-Operator-deferred (out of my budget): heavy full-sampling PP/injection
-recovery. Fresh diagnostic PNGs at cogwheel/tests/output/wp{1,2,3}_*.png,
-q5_residue_bucket_over_lnm.png (07:06-07:11) — could not view (no image tool
-in this mode); verified their embedded numbers via the assertions + rerun.
+## Operator-deferred (out of my turn budget, correctly)
+- Full posterior sampling / real-data PP is the operator ship gate; I did not run it.
+- Did NOT re-run the full modified surrogate/census/training suites (potentially
+  slow); tube byte-identity + gate-currency-mutation are covered inside the
+  far-field file and passed. If a regression review is wanted, run those three fast.
+
+Related: mem:professor/microlensing_chang_refsdal (SACR-C; τ_c jumps between lobes
+were the flagged known risk — this build is that risk being closed).
