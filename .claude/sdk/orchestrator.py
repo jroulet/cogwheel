@@ -1874,6 +1874,12 @@ class BuildOrchestrator:
                 if decision == "accept":
                     self._log("  User: accepted remaining findings — "
                               "proceeding past the Inspector gate")
+                    # Human override must also flip the stored verdict:
+                    # check_commit_allowed re-reads self._inspector_result
+                    # at the commit site and rejects ISSUES even when the
+                    # findings were dispositioned here (2026-07-22 build
+                    # 8g died on this after a green Inspector/Professor).
+                    inspector_result.verdict = InspectorVerdict.PASS
                     break
                 if decision == "fix":
                     self._log(f"  User: one more revision with "

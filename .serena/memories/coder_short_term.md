@@ -1,5 +1,224 @@
 # Coder Short-Term Observations
 
+- INS-2-001 FIX (Build 8g WP2 far-field DD-cap corner bug): edited ONLY
+  cogwheel/lensing/surrogate_training.py cap helpers. Root cause: far-field
+  square tiles admit sources to the box CORNER |y|=sqrt(2)*Y, but
+  _stratum_w_range's DD cap divided by the per-axis half-width Y, so
+  w_max*(sqrt(2)*Y) overshot the point-mass kernel ceiling (60) ->
+  HypergeometricDomainError at outer-corner nodes (coverage holes, F005
+  intact so no wrong served value). Fix: (1) NEW shared helper
+  `_upper_w_cap(w_max, parity, y_magnitude)` = min(w_max, ceiling,
+  _DD_PRODUCT_MARGIN/max(y_magnitude,1e-3)) — one place for ceiling+DD
+  arithmetic, y_magnitude semantics = a source MAGNITUDE (radius). (2)
+  `_capped_w_range` STOPPED delegating to _stratum_w_range; now computes
+  w_min/w_max itself and calls _upper_w_cap with the tube-shell RADIUS
+  (caustic_reach+eta_max) directly — NO sqrt(2). BYTE-IDENTICAL to prior
+  magnitude-cap behavior (verified new==min(w,ceil,58/y) over parity x
+  {0.2,1,3,5}). (3) `_stratum_w_range` param renamed y_max->y_half_width
+  (all callers positional, safe); now computes y_corner=y_half_width*
+  sqrt(2.0) and caps via _upper_w_cap(y_corner). The far-field caller in
+  _train_band_charts is UNCHANGED (still passes per-axis y_extent; the
+  sqrt(2) now lives inside _stratum_w_range, matching the Test Dev's
+  FarFieldCornerCapTestCase which drives _stratum_w_range directly with
+  per-axis y_extent and asserts w_max*(Y*sqrt2)<=60). Tiles still use
+  y_extent (true half-width). Docstrings updated to name the corner-
+  magnitude bound.
+  * WHY inside _stratum_w_range not the caller: the Inspector offered
+    caller-side (pass y_extent*sqrt2) as an option, but the Test Dev's
+    FarFieldCornerCapTestCase._dd_binding_strata calls _stratum_w_range
+    (box,parity,m_lo,m_hi,y_extent) DIRECTLY with per-axis y_extent and
+    asserts on the RETURNED w_max — a caller-only fix leaves that helper
+    per-axis => test stays RED. Corner-awareness MUST live in
+    _stratum_w_range. Decoupling _capped_w_range keeps the tube shell
+    (a genuine radius, not a square half-width) byte-identical.
+  * VERIFIED (engine present, F002 oracle = the real point_mass_g_
+    derivatives kernel): finding's exact stratum parity=1 (70.47,496.64):
+    y_extent=3.0, corner=4.2426, w_max 19.333->13.6707, product 82.02->
+    58.0000 (==_DD_PRODUCT_MARGIN), kernel ACCEPTS. All 3 DD-cap-binding
+    strata (both parities): corner products<=60, kernel accepts every
+    corner node. _capped_w_range magnitude-cap byte-identity holds.
+    ast.parse OK, import OK. WholeBandContainment suite consistency
+    preserved: report caller and test both call _stratum_w_range with
+    per-axis y_extent so recorded==recompute (corner-aware on both sides).
+  * SCOPE: WP1 (_chart_gated/eps gate) and WP3 (saddle tube paths)
+    UNTOUCHED. Only the two cap functions + new _upper_w_cap helper.
+  * UNVERIFIED: full lensing test suite pass/fail (downstream runs it); I
+    verified the exact contract FarFieldCornerCapTestCase asserts against
+    the same real kernel it uses, plus tube byte-identity — did not run
+    the suite (code+blessing must not share an author).
+
+- WP2 (Build 8g lever 1, mass-stratified far-field tiling): edited ONLY
+  cogwheel/lensing/surrogate_training.py (far-field section of
+  _train_band_charts + 3 new helpers + refactor of _capped_w_range +
+  new config field). Tube path, serving code (surrogate.py), eps gate
+  (_chart_gated, WP1) UNTOUCHED. Replaces the legacy single hard-coded
+  duplicate box (box_center=(caustic_reach+eta_max+0.2,0), half=0.15
+  looped under different filenames) with per-parity mass-stratified
+  exterior tiling.
+  * NEW config field TrainingConfig.n_farfield_tiles_per_side=5 (Cartesian
+    grid side; tile half=Y(m_lo)/n).
+  * NEW _stratum_w_range(box,parity,m_lo,m_hi,y_max): [w(f_lo,m_lo),
+    w(f_hi,m_hi)] then min(_,ceiling,dd_cap) — whole-band containment +
+    same cap arithmetic as _capped_w_range. _capped_w_range REFACTORED to
+    delegate to _stratum_w_range over box.m_lens_range (DRY, BYTE-IDENTICAL
+    — verified new==old three-way min for both parities; census test
+    _pos_arc uses _capped_w_range, unaffected).
+  * NEW _mass_strata(box,parity)->(strata,beyond): reachable top =
+    min(m_hi_prior, ceiling/w_per_msun_at_fhi); R=sqrt(f_hi/f_lo)~7.16;
+    n_strata=max(1,ceil(log10(range)/log10(R))) (astroid 3, saddle 2);
+    logspace edges. `beyond` records the un-tileable high-mass tail
+    (saddle [457.55,3500] @ ceiling 58 — matches brief ~458), None if
+    whole prior reachable (astroid). Guard: m_reachable_hi<=m_lo ->
+    strata=[], whole range beyond.
+  * NEW _farfield_tiles(y_extent,exclusion_radius,n_per_side): uniform
+    n x n grid over [-Y,Y]^2, admit tile iff min-L2-dist origin->tile box
+    hypot(max(0,|cx|-h),max(0,|cy|-h)) >= exclusion_radius
+    (=caustic_reach+eta_max). Exterior-only => single 2-image region, no
+    per-point probing. Returns (center,half,i,j) row-major.
+  * Tiling loop: emit beyond_w_cap record (loud) if beyond; per-stratum
+    _stratum_w_range + tiles + corner_beyond_cap flag (dd_cap truncates
+    w below w(f_hi,m_hi)); loud strata_summary record (n_strata, per-
+    stratum mass/Y/w/corner/tile-count incl 0-count near-caustic strata);
+    max_farfield_regions is a TRUE cap with loud `truncated` record
+    (admitted/cap/dropped); each admitted tile -> distinct tag
+    chart_{label}_s{si}_ff_{i}_{j} via _load_or_build, eps via
+    _farfield_heldout_samples+_heldout_eps, WP1 _chart_gated applied
+    verbatim (gated/NaN recorded not appended). closure default-arg binds
+    center/half/w_range/si/m_lo/m_hi (late-binding trap avoided).
+  * Report additions (beyond_w_cap/strata_summary/truncated) set NO
+    'gated' key -> train()'s gated_charts _gated_counts (filters r.get
+    ('gated')) UNAFFECTED. Census only reads report['parities'], not
+    chart_reports. No existing test asserts old far-field tag/report
+    structure (grep confirmed: tests hit serving helpers + _capped_w_range
+    only).
+  * VERIFIED (engine present): ast.parse+import OK; pyright clean (only
+    pre-existing numpy-resolution warning). _mass_strata astroid 3 strata
+    beyond=None, saddle 2 strata beyond=[457.55,3500]@58. _stratum_w_range
+    whole-band containment holds; corner_beyond_cap fires where dd_cap
+    truncates. _farfield_tiles: all admitted tiles wholly outside disk,
+    half=Y/n, distinct non-overlapping (spacing==2*half), excl-monotone
+    (0.1->24, 1.0->16, 5->0). END-TO-END _train_band_charts astroid
+    (max_tube_arcs=0, cap=3): 3 DISTINCT non-overlapping tile files
+    s0_ff_0_0/0_1/0_2, strata summary (16,16,0 tiles), TRUNCATED
+    (32 admitted, dropped 29), eps gate fired on all 3 (coarse-fixture
+    eps 0.076/0.14/0.008 > 3e-3 bar => 0 registered, expected at fixture
+    scale). Saddle end-to-end: BEYOND_W_CAP [457.55,3500]@58 emitted,
+    strata (16,16) s1 corner-capped, TRUNCATED.
+  * OWED to Test Dev (WP2 8g acceptance (a)/(b)): (1) synthetic run
+    produces >=3 DISTINCT non-overlapping far-field tiles over a y-annulus,
+    every tile + cap-truncation + beyond_w_cap stratum recorded loudly;
+    (2) serve-fraction smoke: draws inside tiled support serve >=90%,
+    outside fall through (additive contract both directions) — needs a
+    config whose tiles PASS the eps bar (raise grids so eps<3e-3;
+    fixture-coarse tiles gate out, that's WP1 working not a defect);
+    (3) whole-band containment gate: every tile w-range contains
+    [w(20,m),w(1024,m)] for in-stratum draws except recorded beyond-cap
+    corners; (4) tiles wholly outside caustic_reach+eta_max disk;
+    (5) _capped_w_range byte-identity vs HEAD (delegation). Test
+    authorship declined (code+blessing must not share an author).
+  * UNVERIFIED (WP2): full lensing test suite pass/fail (downstream, I
+    do not run suites); full-box campaign coverage numbers (driver
+    post-build step, offline). Fixture-scale tiles gate out on eps — the
+    production grids that make tiles PASS are the driver's campaign, not
+    an in-build run.
+
+- WP3 (Build 8g saddle tube-tail fix): edited ONLY
+  cogwheel/lensing/surrogate_training.py (astroid path byte-identical).
+  Fixes the 3 pathological saddle deltoid-arc tube charts (saddle_b0_tube_5
+  eps 2.15, saddle_b1_tube_2 1.15, saddle_b1_tube_5 0.43; siblings ~1e-2)
+  via saddle-ONLY guard widening. Changes: (1) NEW constants
+  `_SADDLE_CUSP_WIDTH_SAFETY=2.5` (vs 1.5) and `_SADDLE_CUSP_MIN_HALFWIDTH
+  =0.08` (vs 0.05). (2) `_find_cusps` gained kw-only params
+  `width_safety=_CUSP_WIDTH_SAFETY, min_halfwidth=_CUSP_MIN_HALFWIDTH`
+  (defaults = astroid constants). Astroid call unchanged -> uses defaults
+  -> BYTE-IDENTICAL. Saddle call passes the wider saddle values.
+  (3) WEDGE-EDGE GUARD (the actual root cause, Professor Q4): in
+  `_saddle_arcs`, the wedge-edge turnaround walls that previously carried
+  half-width 0.0 (emitting NO cusp_window) now carry
+  `_SADDLE_CUSP_MIN_HALFWIDTH` -> walls = [(lo_edge, 0.08)] + cusps +
+  [(hi_edge, 0.08)]; `_make_arc` includes them (w>0) so `_tube_serves`
+  falls through near the unguarded high-curvature end. (4) Updated
+  FoldArc.cusp_windows docstring (turnarounds now contribute a guard
+  window on the saddle path). NO n_theta/n_w bump. `_astroid_arcs`,
+  `_make_arc` core, astroid cusp path UNTOUCHED.
+  * VERIFIED (engine present): ast.parse OK; import OK. Astroid
+    byte-identity vs HEAD side-by-side (git show HEAD copy) over gammas
+    {0.2,0.45,0.7,0.9}: repr-identical arcs+cusps+reach; `_find_cusps`
+    default(periodic) == HEAD. Saddle (gammas 1.1..3.0): EVERY arc now has
+    >=1 cusp_window (all_guarded True; HEAD left wedge-terminated arcs with
+    0 windows -> windowed_ends e.g. 8->12), min window half-width == 0.080;
+    arc count narrows refusal-conservatively (g=1.1 10->6, g=3.0 6->2) as
+    tiny near-wedge arcs drop. Synthetic worst-case wedge-terminated lobe
+    (d(theta)^{-1/4} fold divergence at the merging wedge): OLD unguarded
+    window eps=0.526 (>0.05 bar, REPRODUCES the tail); NEW WP3 window
+    eps~0.000 (<bar). No new diagnostics.
+  * OWED to Test Dev (WP3 gates): (1) astroid byte-identity witness
+    (charts + `_find_cusps` default path == HEAD); (2) saddle arcs carry a
+    wedge-edge cusp_window of half-width `_SADDLE_CUSP_MIN_HALFWIDTH` and
+    the wider saddle cusp windows; (3) refusal-conservative narrowing (no
+    n_theta/n_w change; saddle served theta shrinks near cusps/wedges);
+    (4) the actual eps-below-bar for the 3 charts on a real engine build
+    (my reproduction is SYNTHETIC). Test authorship declined (code+blessing
+    must not share an author).
+  * UNVERIFIED (WP3): full lensing suite pass/fail (downstream); the actual
+    trained saddle charts' held-out eps at production grid scale requires an
+    engine build + train() run (offline). My reproduction demonstrates the
+    MECHANISM (excluding the coordinate-singular wedge/cusp core drops the
+    cubic-spline fit eps below 5e-2), not the production eps numbers.
+
+- WP1 (Build 8g lever 2, eps registration gate): edited ONLY
+  cogwheel/lensing/surrogate_training.py (surrogate.py serving code
+  UNTOUCHED => passing charts byte-identical serving). Changes: (1)
+  `import math`. (2) TrainingConfig +tube_eps_max=5e-2,
+  farfield_eps_max=3e-3 (Professor 8g defaults; tube median 3.8e-2,
+  ff median 3.7e-4). (3) NEW private `_chart_gated(kind,eps,config)->
+  (gated,reason)`: math.isnan(eps)->'nan_eps'; eps>bar->'eps_above_bar';
+  else (False,None); bad kind->ValueError. (4) _load_or_build RESUME
+  WRINKLE fix: on build, persist report['heldout_eps'] into the saved
+  per-chart provenance (chart_provenance=dict(provenance)+heldout_eps);
+  on reuse, read loaded.provenance['heldout_eps'] back into report (NO
+  recompute — deterministic). NaN round-trips fine (default json
+  allow_nan on both save np.array(json.dumps) and load json.loads).
+  (5) _train_band_charts BOTH append sites (tube kind='tube', ff
+  kind='farfield'): read eps=report.get('heldout_eps',nan), call
+  _chart_gated; if gated -> chart_report+={'gated':True,'gate_reason':
+  reason}, append to chart_reports, `continue` (NOT charts.append);
+  else register as before. foot_of_normal 'skipped' records untouched &
+  distinct. (6) train: NEW report['gated_charts'] = {total,astroid,
+  saddle} each {total,nan_eps,eps_above_bar} from chart_reports.
+  * VERIFIED (engine present): ast.parse+import OK; unit: gate
+    pass/above/nan for both kinds + bad-kind ValueError + NaN JSON
+    round-trip. END-TO-END smoke train (default config, both parities):
+    fresh built 4 charts, gated 3 (astroid tube eps 0.434, saddle tube
+    0.195, saddle ff 0.076 all >bar), packed ONLY the 1 passing chart
+    (astroid ff eps 0.0016<3e-3); gated_charts accounting correct
+    (total 3 eps_above_bar; astroid 1/saddle 2). RESUME into same dir:
+    all 4 reused=True, eps values BYTE-IDENTICAL via provenance, and
+    registered-set MATCH fresh==resume (['chart_astroid_b0_farfield_0'])
+    => gate fires identically on reuse. Reachable-red confirmed (charts
+    excluded from artifact).
+  * NOTE: smoke-scale charts happen to exceed the bars (coarse grids fit
+    badly) — that's expected at fixture scale; the gate mechanism +
+    reuse round-trip are what WP1 verifies, not chart quality.
+  * NOTE: a legacy per-chart .npz whose provenance predates this build
+    (no 'heldout_eps' key) reuses with eps=nan -> gated 'nan_eps'
+    (conservative-serve; unverified charts not registered). Charts built
+    from this build onward always carry heldout_eps.
+  * OWED to Test Dev (WP1 8g gates, per brief acceptance (c)): (1) F010
+    reachable-red — a deliberately poisoned (mutated-label) chart above
+    its bar AND a NaN-eps (all-refused) chart are BOTH excluded from
+    the packed artifact and recorded with 'gated'+'gate_reason'; (2)
+    reuse identity — heldout_eps round-trips through per-chart
+    provenance so a resumed chart gates identically to fresh (no
+    recompute); (3) passing-chart byte-identity — a chart under both
+    bars registers and serves byte-identical to HEAD (no serving code
+    touched). Test authorship declined (code+blessing must not share an
+    author).
+  * UNVERIFIED (WP1 8g): full lensing test suite pass/fail (downstream,
+    I do not run suites). WP1 is lever 2 ONLY — far-field tiling
+    (lever 1) and saddle-tube-tail diagnosis (lever 3) are separate WPs,
+    NOT touched here.
+
 - WP5 (Build 8f lever 5, L_MAX gate hardening): edited ONLY
   cogwheel/lensing/chang_refsdal/operator.py (geometry.py/channels.py
   UNTOUCHED; L_MAX stays 48 per Professor override of the brief's

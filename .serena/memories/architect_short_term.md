@@ -1,5 +1,23 @@
 # Architect Short-Term Observations
 
+## Build 8g — far-field tiling / eps gate / saddle tail PLAN — 2026-07-22
+3 WPs = 3 levers. WP1 eps gate (TrainingConfig tube_eps_max=5e-2,
+farfield_eps_max=3e-3; gated OR NaN-eps chart recorded but NOT appended
+to charts; must persist eps in per-chart provenance so gate applies on
+reuse too). WP2 tiling depends_on WP1 (both rewrite _train_band_charts
+far-field section; WP2 must PRESERVE WP1's gate conditional). WP3
+saddle-tube-tail independent. Professor: strata per-parity by constant
+log-mass factor R=sqrt(51.2)~7.16 -> astroid 3-4 strata, saddle 2 (m>458
+beyond-w-cap, recorded loud). DD cap slack; binding = parity ceiling.
+Tiling = uniform Cartesian square tiles over [-Y(m_lo),Y(m_lo)]^2, admit
+iff box wholly outside caustic_reach+eta_max disk (single 2-image
+exterior region, no per-point engine probe); far-field EXTERIOR only.
+Reuse PriorBox.y_reach, _capped_w_range, _load_or_build. Tube-tail root
+cause = missing wedge-edge guard (wedge walls emit NO cusp_window) +
+shallow-cusp under-res; fix SADDLE-ONLY (astroid byte-identical): widen
+saddle cusp exclusion + add wedge-edge exclusion window in _saddle_arcs.
+All tests -> Test Developer.
+
 ## Build 8f — serving micro-levers PLANNING — 2026-07-21
 5 levers -> 5 Coder WPs (Simplifier: fold arm-wiring into WP4;
 profile-first WPs must commit a benchmark script + pre-identify target).
@@ -21,6 +39,20 @@ margin, caustic 27y^2=-8x^3 inside, stored in provenance), demodulate
 Fresnel carrier phi_sp=t*^4+x t*^2+y t*, spline Re/Im separately, 1e-8 abs
 on P. All tests -> Test Developer.
 
+
+## Build 8g triage — 2026-07-22
+INS-1-001 (far-field DD product cap drops sqrt(2) corner factor:
+_stratum_w_range dd_cap=_DD_PRODUCT_MARGIN/y_max uses per-axis half-width
+Y instead of box-CORNER magnitude sqrt(2)*Y, matching prior's _Y_SCALE=307
+corner convention and legacy hypot(center)+half*sqrt(2); under-caps by
+sqrt(2) so admitted tile corners exceed engine's w*sqrt(s)<=60 ceiling and
+get refused -> exactly the coverage holes WP2's tiling exists to close,
+though serving stays safe/additive) -> coder_fix. This is a numerical
+convention bug in WP2's own new _stratum_w_range helper (introduced by
+this build's tiling lever), not a design call Inspector misread — the
+sqrt(2) corner-vs-axis distinction is well-established elsewhere in this
+codebase (prior's _Y_SCALE, legacy far-field code) so it's an
+implementation slip, squarely coder_fix not escalate.
 
 ## Build 8b-levers — FINAL plan emitted 2026-07-20
 

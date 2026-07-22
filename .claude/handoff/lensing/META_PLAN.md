@@ -2675,3 +2675,24 @@ signals (in-build 1e-10 preservation + bit-exact parallel-vs-serial
 green). Re-baseline agent commissioned (5 tests, witnessed flips +
 py_func re-homing per the plan requirement). gw follow-up upgrades
 item 15 to PROVEN on the 8f close report.
+
+
+## 2026-07-21 — THE FULL-BOX TRAINING CAMPAIGN LAUNCHED (owner order)
+
+Production config: full gamma range both parities (halfwidth clipped
+to sub-ranges; stable-band bisection + foot-of-normal skip-and-record
+assertion BOTH active — the assertion implemented at launch per the
+checked-not-remembered mandate, three-point-circumradius R_min over
+band-edge gammas, skip when eta_max > 0.5*R_min); grids 6 gamma x 8 u
+x 28 theta x 12 w/decade (tubes), 10x10 far-field; eta [0.005, 0.05];
+budgets 6000/chart; resumable per-chart at
+/home/tejaswi/Work/cogwheel_training/full_box_v1 (outside the repo).
+Detached via setsid nohup (Bash task ceiling is 10 min — the first
+launch would have died at timeout; also: the pkill self-match trap
+struck TWICE more — the bracket idiom fails when the command line
+legitimately contains the target string elsewhere; kill and launch
+must be separate commands). Monitor: chart-file count, 10-min beats,
+emit-on-change, stall alarm. Floor verdict banked: 3.9x (target 2x
+missed; ~1.8 ms unattributed glue exposed — follow-up profile, not a
+blocker). Next: campaign report -> census + PP -> owner enable
+package.

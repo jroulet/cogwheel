@@ -573,11 +573,24 @@ class NormTermValuePreservationTestCase(_LeverTestCase):
         cur = likelihood._norm_term(*inputs)
         head = head_norm(*inputs)
         # Detector 0 is engineered below the underflow floor; confirm the
-        # premise (else the absolute branch is untested) and the relative
-        # error there really is large (relative tol would falsely fail).
+        # premise (else the absolute branch is untested).
         self.assertLess(abs(head[0]), NORM_UNDERFLOW_FLOOR)
-        relative_det0 = abs(cur[0] - head[0]) / max(abs(head[0]), 1e-300)
-        self.assertGreater(relative_det0, REL_TOL)
+        # First sweep run (8f close) measured the optimized _norm_term
+        # BIT-IDENTICAL to HEAD in this regime — the original assertion
+        # demanded real HEAD-vs-new drift here to demonstrate that
+        # relative comparison misbehaves at underflow, which
+        # over-satisfied preservation makes impossible.  Demonstrate the
+        # currency lesson SYNTHETICALLY instead: a 1e-13-absolute
+        # perturbation (far inside NORM_ABS_TOL) must explode the
+        # relative currency at an underflowed denominator while staying
+        # acceptable in the absolute currency the branch uses.
+        synthetic = cur[0] + 1e-13
+        synthetic_rel = abs(synthetic - head[0]) / max(abs(head[0]), 1e-300)
+        self.assertGreater(
+            synthetic_rel, REL_TOL,
+            'the underflow fixture no longer makes relative comparison '
+            'meaningless; re-engineer the fixture denominator')
+        self.assertLessEqual(abs(synthetic - head[0]), NORM_ABS_TOL)
         self._compare(cur, head)
         self.record_comparison()
 

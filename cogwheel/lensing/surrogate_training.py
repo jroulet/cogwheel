@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -101,6 +102,18 @@ _CUSP_SPEED_REL_FRAC = 0.2
 #: Cusp-window half-width = safety factor x measured dip half-width, floored.
 _CUSP_WIDTH_SAFETY = 1.5
 _CUSP_MIN_HALFWIDTH = 0.05
+#: Saddle-only cusp-exclusion widening (Build 8g WP3).  The macro-saddle
+#: deltoid lobes have shallow interior cusps and, crucially, wedge-edge
+#: turnaround walls whose foot-of-normal map is near-singular; the astroid
+#: siblings fit at ~1e-2 with the values above, but three saddle deltoid-arc
+#: tube charts fit at eps 0.4..2.2 because their arcs are clipped to these
+#: least-guarded ends.  Widening the saddle cusp windows (and guarding the
+#: wedge edges, see `_saddle_arcs`) refuses the polluted near-vertex core so
+#: the arm/ladder serves it -- a refusal-conservative narrowing.  These are
+#: threaded ONLY through the saddle path; the astroid path keeps the constants
+#: above verbatim so its charts stay byte-identical.
+_SADDLE_CUSP_WIDTH_SAFETY = 2.5
+_SADDLE_CUSP_MIN_HALFWIDTH = 0.08
 #: Fractional shrink of each fold arc away from its bounding walls.
 _ARC_MARGIN_FRAC = 0.03
 #: Small offset off the saddle wedge edges when sampling a branch.
@@ -235,7 +248,23 @@ class TrainingConfig:
     engine_budget: int = 400
     max_tube_arcs: int = 1
     max_farfield_regions: int = 1
+    # Cartesian grid side for the mass-stratified far-field tiling (Build 8g
+    # WP2): each stratum's shear-frame y-support box ``[-Y(m_lo), Y(m_lo)]^2``
+    # is split into ``n_farfield_tiles_per_side^2`` square tiles (tile half
+    # ``Y(m_lo) / n``); only tiles lying wholly outside the caustic disk are
+    # admitted.  ``max_farfield_regions`` then caps the total admitted tiles.
+    n_farfield_tiles_per_side: int = 5
     n_heldout: int = 10
+    # Held-out max-normalized envelope-eps bars for chart registration: a
+    # chart above its bar (or with NaN eps -- zero held-out points served) is
+    # recorded as gated in the report and NOT packed into the artifact, so its
+    # window falls through to the serving ladder.  Defaults (Professor 8g):
+    # tube median is 3.8e-2, so 5e-2 separates the 0.43/1.15/2.15 saddle tail
+    # (and the five >=0.09 charts) from healthy ~1e-2 siblings; far-field
+    # median is 3.7e-4, so 3e-3 passes the healthy population with headroom
+    # while holding served-region dlnL under the 0.1-nat tier.
+    tube_eps_max: float = 5e-2
+    farfield_eps_max: float = 3e-3
     n_caustic_samples: int = 200
     seed: int = 0
 
@@ -261,8 +290,11 @@ class FoldArc:
     image_count : int
         Real-image count on the served (image-pair) side.
     cusp_windows : tuple of (float, float)
-        ``(theta_cusp, delta_theta)`` exclusion windows bounding the arc
-        (edge/turnaround walls contribute none).
+        ``(theta_cusp, delta_theta)`` exclusion windows bounding the arc.
+        Interior cusps always contribute one; on the saddle deltoid the
+        wedge-edge turnarounds also contribute a `_SADDLE_CUSP_MIN_HALFWIDTH`
+        guard window (Build 8g WP3), whereas the astroid arcs have no
+        turnaround walls (their branch is periodic).
     """
 
     branch: int
@@ -393,13 +425,18 @@ def _branch_speed_profile(gamma: float, branch: int, theta_lo: float,
     return good_theta, speed
 
 
-def _find_cusps(thetas: np.ndarray, speed: np.ndarray, periodic: bool
+def _find_cusps(thetas: np.ndarray, speed: np.ndarray, periodic: bool, *,
+                width_safety: float = _CUSP_WIDTH_SAFETY,
+                min_halfwidth: float = _CUSP_MIN_HALFWIDTH
                 ) -> list[tuple[float, float]]:
     """Cusp ``(theta, delta_theta)`` pairs from caustic-speed minima.
 
     A cusp is a local minimum of ``speed`` below `_CUSP_SPEED_REL_FRAC` of the
-    median speed; ``delta_theta`` is `_CUSP_WIDTH_SAFETY` times the half-width
-    of the below-threshold dip around it, floored at `_CUSP_MIN_HALFWIDTH`.
+    median speed; ``delta_theta`` is ``width_safety`` times the half-width of
+    the below-threshold dip around it, floored at ``min_halfwidth``.  The
+    astroid path uses the module defaults (`_CUSP_WIDTH_SAFETY`,
+    `_CUSP_MIN_HALFWIDTH`); the saddle path passes its wider
+    `_SADDLE_CUSP_WIDTH_SAFETY` / `_SADDLE_CUSP_MIN_HALFWIDTH` (Build 8g WP3).
     """
     if speed.size < 4:
         return []
@@ -427,7 +464,7 @@ def _find_cusps(thetas: np.ndarray, speed: np.ndarray, periodic: bool
             if hi == i:
                 break
         span = abs(thetas[i] - thetas[lo]) + abs(thetas[hi] - thetas[i])
-        delta = max(_CUSP_MIN_HALFWIDTH, _CUSP_WIDTH_SAFETY * 0.5 * span)
+        delta = max(min_halfwidth, width_safety * 0.5 * span)
         cusps.append((float(thetas[i]), float(delta)))
     return cusps
 
@@ -474,10 +511,21 @@ def _saddle_arcs(gamma: float, n: int
                 gamma, branch, lo_edge, hi_edge, n, periodic=False)
             reach = max(reach, _caustic_reach(
                 gamma, branch, lo_edge, hi_edge, n))
-            cusps = _find_cusps(thetas, speed, periodic=False)
+            cusps = _find_cusps(
+                thetas, speed, periodic=False,
+                width_safety=_SADDLE_CUSP_WIDTH_SAFETY,
+                min_halfwidth=_SADDLE_CUSP_MIN_HALFWIDTH)
             cusps.sort()
             all_cusps.extend(cusps)
-            walls = [(lo_edge, 0.0)] + cusps + [(hi_edge, 0.0)]
+            # Guard the wedge-edge turnarounds (Build 8g WP3).  These walls
+            # are smooth (not cusps) but the foot-of-normal map is near-
+            # singular there and today they emit no exclusion, leaving the
+            # arc's high-curvature end unguarded -- the measured root cause of
+            # the saddle tube-tail (saddle_b*_tube_2/5 at eps 0.4..2.2).
+            # Attaching a `_SADDLE_CUSP_MIN_HALFWIDTH` window makes
+            # `_tube_serves` fall through near the turnaround.
+            edge_hw = _SADDLE_CUSP_MIN_HALFWIDTH
+            walls = [(lo_edge, edge_hw)] + cusps + [(hi_edge, edge_hw)]
             for (t_lo, w_lo), (t_hi, w_hi) in zip(walls[:-1], walls[1:]):
                 windows = [(t, w) for (t, w) in ((t_lo, w_lo), (t_hi, w_hi))
                            if w > 0.0]
@@ -691,6 +739,33 @@ def stable_gamma_bands(band: tuple[float, float], parity: int, *,
     return sorted(stable), sorted(dropped)
 
 
+def _min_curvature_radius(band: tuple[float, float], arc: FoldArc,
+                          n_samples: int) -> float:
+    """Minimum caustic curvature radius over an arc, worst gamma in band.
+
+    Three-point circumradius over densely sampled caustic points at the
+    band's edge gammas (curvature is worst where the caustic is
+    smallest). Conservative floor for the foot-of-normal assertion.
+    """
+    r_min = np.inf
+    thetas = np.linspace(arc.theta_lo, arc.theta_hi, max(n_samples // 2, 32))
+    for gamma in (band[0], band[1]):
+        pts = np.array([
+            geometry.critical_point(float(gamma), float(t), 0.0, 0.0,
+                                    arc.branch).source
+            for t in thetas])
+        for i in range(1, len(pts) - 1):
+            a, b, c = pts[i - 1], pts[i], pts[i + 1]
+            ab, bc, ca = (np.linalg.norm(b - a), np.linalg.norm(c - b),
+                          np.linalg.norm(a - c))
+            area2 = abs((b[0] - a[0]) * (c[1] - a[1])
+                        - (b[1] - a[1]) * (c[0] - a[0]))
+            if area2 < 1e-30:
+                continue  # collinear: infinite radius, not a constraint
+            r_min = min(r_min, ab * bc * ca / (2.0 * area2))
+    return float(r_min)
+
+
 # ---------------------------------------------------------------------------
 # Chart builders (engine sampling)
 # ---------------------------------------------------------------------------
@@ -712,20 +787,188 @@ def _gamma_band(box: PriorBox, parity: int, halfwidth: float
     return (max(sub[0], center - halfwidth), min(sub[1], center + halfwidth))
 
 
+def _upper_w_cap(w_max: float, parity: int, y_magnitude: float) -> float:
+    """Lower an uncapped ``w`` top by the parity ceiling and the DD product cap.
+
+    The double-double point-mass kernel refuses ``w * |y|`` above its ceiling,
+    so the largest ``w`` a chart may sample is ``_DD_PRODUCT_MARGIN /
+    y_magnitude`` where ``y_magnitude`` is the largest source MAGNITUDE (``|y|``,
+    not a per-axis coordinate) the chart reaches.  One authoritative place for
+    the ceiling + DD arithmetic shared by `_capped_w_range` (tube-shell radius)
+    and `_stratum_w_range` (far-field square-box corner).
+
+    Parameters
+    ----------
+    w_max : float
+        The stratum's uncapped band top ``w(f_hi, m_hi)``.
+    parity : int
+        ``+1`` astroid / ``-1`` saddle (selects the ``w`` ceiling).
+    y_magnitude : float
+        Largest source magnitude ``|y|`` the chart samples (a radius, already
+        including any geometric corner factor).
+    """
+    ceiling = _POSITIVE_W_CEILING if parity == 1 else _SADDLE_W_CEILING
+    dd_cap = _DD_PRODUCT_MARGIN / max(y_magnitude, 1e-3)
+    return min(w_max, ceiling, dd_cap)
+
+
 def _capped_w_range(box: PriorBox, parity: int, y_max: float
                     ) -> tuple[float, float]:
     """Chart ``w`` band, capped so ``w_max * y_max`` stays below the DD ceiling.
 
-    Starts from the prior's mass-derived ``w`` band and lowers the upper edge to
-    ``_DD_PRODUCT_MARGIN / y_max`` when the chart's largest source magnitude
-    would otherwise push ``w * |y|`` past the point-mass kernel's ceiling.  This
-    mirrors the prior, where the mass-conditioned source scale keeps
-    ``w * |y| <= ~55`` by construction, so the (large-w, large-|y|) corner the
-    engine refuses is never sampled.
+    Starts from the prior's mass-derived ``w`` band (the full prior mass range)
+    and lowers the upper edge to ``_DD_PRODUCT_MARGIN / y_max`` when the chart's
+    largest source magnitude would otherwise push ``w * |y|`` past the
+    point-mass kernel's ceiling.  This mirrors the prior, where the
+    mass-conditioned source scale keeps ``w * |y| <= ~55`` by construction, so
+    the (large-w, large-|y|) corner the engine refuses is never sampled.
+
+    ``y_max`` here is a source MAGNITUDE (the tube-shell radius
+    ``caustic_reach + eta_max``), so it feeds `_upper_w_cap` directly with no
+    corner factor.
     """
-    w_min, w_max = box.w_range(parity)
-    dd_cap = _DD_PRODUCT_MARGIN / max(y_max, 1e-3)
-    return (w_min, min(w_max, dd_cap))
+    m_lo, m_hi = box.m_lens_range
+    w_min = float(dimensionless_frequency(box.f_lo_hz, m_lo, 0.0))
+    w_max = float(dimensionless_frequency(box.f_hi_hz, m_hi, 0.0))
+    return (w_min, _upper_w_cap(w_max, parity, y_max))
+
+
+def _stratum_w_range(box: PriorBox, parity: int, m_lo: float, m_hi: float,
+                     y_half_width: float) -> tuple[float, float]:
+    """Whole-band ``w`` range of one mass stratum, with the parity + DD caps.
+
+    Returns ``[w(f_lo, m_lo), w(f_hi, m_hi)]`` -- the band that contains every
+    in-stratum draw's ``[w(20, m), w(1024, m)]`` (whole-band containment is the
+    serving contract) -- then lowers the upper edge via `_upper_w_cap`: the
+    parity engine ceiling and the double-double product cap.  Unlike
+    `_capped_w_range` it does NOT start from ``box.w_range`` (which spans the
+    whole prior mass range); it brackets a single stratum.  Where the cap
+    truncates ``w_max`` below ``w(f_hi, m_hi)`` the high-mass corner of the
+    stratum is beyond the cap and the caller records it.
+
+    ``y_half_width`` is the far-field square-box PER-AXIS half-width ``Y``, but
+    `_farfield_tiles` admits tiles out to the box CORNER at ``|y| = Y *
+    sqrt(2)`` (INS-1-001).  The DD cap must bound ``w * |y|`` at that corner --
+    the exact node the tiling is built to cover -- so the corner magnitude
+    ``y_half_width * sqrt(2)`` (not the per-axis half-width) is what feeds
+    `_upper_w_cap`; the largest ``w`` a tile samples then keeps
+    ``w * (Y * sqrt(2)) <= _DD_PRODUCT_MARGIN`` and the engine never refuses
+    the outer corner.
+
+    Parameters
+    ----------
+    box : PriorBox
+        Supplies the detector frequency band bounds.
+    parity : int
+        ``+1`` astroid / ``-1`` saddle (selects the ``w`` ceiling).
+    m_lo, m_hi : float
+        Stratum mass edges (solar masses), ``m_lo <= m_hi``.
+    y_half_width : float
+        Per-axis half-width ``Y`` of the stratum's square y-support box; the DD
+        cap uses the box-corner magnitude ``Y * sqrt(2)``.
+    """
+    w_min = float(dimensionless_frequency(box.f_lo_hz, m_lo, 0.0))
+    w_max = float(dimensionless_frequency(box.f_hi_hz, m_hi, 0.0))
+    y_corner = y_half_width * math.sqrt(2.0)
+    return (w_min, _upper_w_cap(w_max, parity, y_corner))
+
+
+def _mass_strata(box: PriorBox, parity: int
+                 ) -> tuple[list[tuple[float, float]], dict | None]:
+    """Partition the parity's REACHABLE lens-mass range into log strata.
+
+    A stratum's mass ratio is fixed at ``R = sqrt(f_hi / f_lo)`` (~7.16 for the
+    20-1024 Hz band), so each chart's log-``w`` range is ~1.5x a single draw's
+    ``f_hi/f_lo`` band -- the spline-accuracy sweet spot (Professor 8g Q1).
+
+    The reachable top is ``min(m_hi_prior, m_ceiling)`` where ``m_ceiling`` is
+    the mass at which ``w(f_hi, m)`` reaches the parity's engine ceiling
+    (astroid ``_POSITIVE_W_CEILING``, saddle ``_SADDLE_W_CEILING`` -- the
+    Schwinger wall, so the saddle tops out near ~458 Msun today).  Mass above
+    the reachable top cannot satisfy whole-band containment and is returned as
+    a loud ``beyond_w_cap`` record, never silently dropped.
+
+    Parameters
+    ----------
+    box : PriorBox
+        Supplies the prior mass range and the detector frequency band.
+    parity : int
+        ``+1`` astroid / ``-1`` saddle.
+
+    Returns
+    -------
+    tuple[list[tuple[float, float]], dict | None]
+        ``(strata, beyond)`` -- ``strata`` is the list of ``(m_lo, m_hi)``
+        stratum mass edges; ``beyond`` is ``None`` when the whole prior mass
+        range is reachable, else a record of the un-tileable high-mass tail.
+    """
+    m_lo_prior, m_hi_prior = box.m_lens_range
+    ceiling = _POSITIVE_W_CEILING if parity == 1 else _SADDLE_W_CEILING
+    w_per_msun_at_fhi = float(dimensionless_frequency(box.f_hi_hz, 1.0, 0.0))
+    m_ceiling = ceiling / w_per_msun_at_fhi
+    m_reachable_hi = min(m_hi_prior, m_ceiling)
+
+    beyond: dict | None = None
+    if m_reachable_hi < m_hi_prior:
+        beyond = {'m_lo': float(m_reachable_hi), 'm_hi': float(m_hi_prior),
+                  'ceiling': float(ceiling)}
+
+    if m_reachable_hi <= m_lo_prior:
+        # No mass is reachable at this parity; the whole prior range is beyond
+        # the w-cap.  (Not expected for the real parities, guarded for safety.)
+        return [], {'m_lo': float(m_lo_prior), 'm_hi': float(m_hi_prior),
+                    'ceiling': float(ceiling)}
+
+    band_factor = box.f_hi_hz / box.f_lo_hz
+    log_ratio = math.sqrt(band_factor)
+    n_strata = max(1, math.ceil(
+        math.log10(m_reachable_hi / m_lo_prior) / math.log10(log_ratio)))
+    edges = np.logspace(math.log10(m_lo_prior), math.log10(m_reachable_hi),
+                        n_strata + 1)
+    strata = [(float(edges[k]), float(edges[k + 1])) for k in range(n_strata)]
+    return strata, beyond
+
+
+def _farfield_tiles(y_extent: float, exclusion_radius: float, n_per_side: int
+                    ) -> list[tuple[tuple[float, float], float, int, int]]:
+    """Square exterior tiles of the ``[-y_extent, y_extent]^2`` support box.
+
+    Lays a uniform ``n_per_side x n_per_side`` Cartesian grid of square tiles
+    (tile half ``y_extent / n_per_side``) over the shear-frame y-support box and
+    ADMITS a tile iff its axis-aligned box lies WHOLLY OUTSIDE the disk of
+    radius ``exclusion_radius`` centered at the origin.  The minimum L2 distance
+    from the origin to a tile box ``[cx-h, cx+h] x [cy-h, cy+h]`` is
+    ``hypot(max(0, |cx|-h), max(0, |cy|-h))``.  Because the caustic lies inside
+    that disk, an admitted tile is entirely in the single 2-image exterior
+    region, so the one-image-count-per-box constraint holds by construction and
+    no per-point engine probing is needed (Professor 8g Q2).
+
+    Parameters
+    ----------
+    y_extent : float
+        Half-width of the (square) y-support box, ``Y(m_lo)``.
+    exclusion_radius : float
+        Caustic-disk radius ``caustic_reach + eta_max``; tiles touching this
+        disk are dropped (covered by the tube shell + serving ladder).
+    n_per_side : int
+        Number of tiles along each axis.
+
+    Returns
+    -------
+    list[tuple[tuple[float, float], float, int, int]]
+        ``(tile_center, half, i, j)`` for each admitted tile, in row-major grid
+        order (deterministic).
+    """
+    half = y_extent / n_per_side
+    centers = [-y_extent + half * (2 * k + 1) for k in range(n_per_side)]
+    tiles: list[tuple[tuple[float, float], float, int, int]] = []
+    for i, cx in enumerate(centers):
+        for j, cy in enumerate(centers):
+            dx = max(0.0, abs(cx) - half)
+            dy = max(0.0, abs(cy) - half)
+            if math.hypot(dx, dy) >= exclusion_radius:
+                tiles.append(((float(cx), float(cy)), float(half), i, j))
+    return tiles
 
 
 def _budget_check(n_points: int, budget: int, name: str) -> None:
@@ -854,6 +1097,78 @@ def _heldout_eps(chart: TubeChart | FarFieldChart,
     return max(errors) if errors else float('nan')
 
 
+def _chart_gated(kind: str, eps: float, config: TrainingConfig
+                 ) -> tuple[bool, str | None]:
+    """Decide whether a chart's held-out eps disqualifies it from registration.
+
+    A chart is *gated* -- excluded from the packed artifact and recorded in the
+    report -- when its max-normalized held-out envelope error is NaN (zero
+    held-out points served, e.g. an all-refused far-field chart) or exceeds the
+    per-kind bar.  Passing charts are registered unchanged (no serve-time
+    behavior change).
+
+    Parameters
+    ----------
+    kind : {'tube', 'farfield'}
+        Which registration bar to apply.
+    eps : float
+        The chart's max-normalized held-out envelope error (may be NaN).
+    config : TrainingConfig
+        Supplies ``tube_eps_max`` and ``farfield_eps_max``.
+
+    Returns
+    -------
+    tuple[bool, str | None]
+        ``(gated, reason)`` where ``reason`` is ``'nan_eps'``,
+        ``'eps_above_bar'``, or ``None`` when the chart passes.
+
+    Raises
+    ------
+    ValueError
+        If ``kind`` is neither 'tube' nor 'farfield'.
+    """
+    bars = {'tube': config.tube_eps_max, 'farfield': config.farfield_eps_max}
+    if kind not in bars:
+        raise ValueError(
+            f"kind must be 'tube' or 'farfield'; got {kind!r}.")
+    if math.isnan(eps):
+        return True, 'nan_eps'
+    if eps > bars[kind]:
+        return True, 'eps_above_bar'
+    return False, None
+
+
+def _gate_chart(kind: str, report: dict, config: TrainingConfig
+                ) -> tuple[bool, str | None]:
+    """Decide whether a fresh-or-resumed chart is gated from registration.
+
+    Thin wrapper around `_chart_gated` that additionally honors the
+    ``legacy_no_eps`` marker `_load_or_build` sets when a resumed chart's
+    provenance predates the ``heldout_eps`` key (pre-8g trainer).  Such
+    charts are passed through un-gated rather than being gated on a
+    manufactured NaN eps, so a mixed-version resume never silently drops a
+    previously-registered chart.
+
+    Parameters
+    ----------
+    kind : {'tube', 'farfield'}
+        Which registration bar to apply.
+    report : dict
+        The per-chart report returned by `_load_or_build`.
+    config : TrainingConfig
+        Supplies ``tube_eps_max`` and ``farfield_eps_max``.
+
+    Returns
+    -------
+    tuple[bool, str | None]
+        ``(gated, reason)``, see `_chart_gated`.
+    """
+    if report.get('legacy_no_eps'):
+        return False, None
+    eps = float(report.get('heldout_eps', float('nan')))
+    return _chart_gated(kind, eps, config)
+
+
 def _tube_heldout_samples(gamma_band: tuple[float, float], arc: FoldArc,
                           config: TrainingConfig, rng: np.random.Generator
                           ) -> list[tuple[float, float, float]]:
@@ -890,17 +1205,40 @@ def _load_or_build(path: Path, build_fn: Callable[[], tuple],
     """Load a per-chart file if present, else build it and save it.
 
     Returns ``(chart, chart_report, reused)``.  Resumability is a plain file
-    existence check -- no within-chart progress manifest.
+    existence check -- no within-chart progress manifest.  The chart's
+    ``heldout_eps`` is persisted into the saved per-chart provenance and read
+    back on reuse, so the registration gate fires identically on freshly-built
+    and resumed charts WITHOUT recomputing eps (kept deterministic) --
+    *except* for charts written by a pre-8g trainer, whose provenance has no
+    ``heldout_eps`` key.  Treating that absence as eps=NaN would silently gate
+    out (drop) a previously-registered chart across a mixed-version resume,
+    so the returned report instead carries a loud ``legacy_no_eps: True``
+    marker; callers (via ``_gate_chart``) pass such charts through un-gated
+    rather than gating them on a manufactured NaN.
     """
     if path.exists():
         loaded = LensAmplificationSurrogate.load(path)
-        return loaded.charts[0], {}, True
+        # Surface the persisted held-out eps so the registration gate is
+        # applied consistently on reuse (do NOT recompute -- deterministic).
+        # Pre-8g charts predate the heldout_eps provenance key; flag that
+        # explicitly rather than silently defaulting eps to NaN downstream.
+        report: dict = {}
+        if 'heldout_eps' in loaded.provenance:
+            report['heldout_eps'] = loaded.provenance['heldout_eps']
+        else:
+            report['legacy_no_eps'] = True
+        return loaded.charts[0], report, True
     start = time.perf_counter()
     chart, calls, refused, report_extra = build_fn()
     report = {'engine_calls': int(calls), 'refused_points': int(refused),
               'build_seconds': round(time.perf_counter() - start, 3),
               **report_extra}
-    LensAmplificationSurrogate([chart], provenance).save(path)
+    # Persist the held-out eps into the per-chart provenance so a later resume
+    # can gate the reused chart without re-running the engine.
+    chart_provenance = dict(provenance)
+    if 'heldout_eps' in report:
+        chart_provenance['heldout_eps'] = report['heldout_eps']
+    LensAmplificationSurrogate([chart], chart_provenance).save(path)
     return chart, report, False
 
 
@@ -1037,11 +1375,31 @@ def train(*, outdir: str | Path,
         outdir / 'lens_amplification_surrogate.npz')
     surrogate.save(artifact_path)
 
+    # Per-parity + total counts of gated (unregistered) charts by reason, so
+    # the driver census can see coverage holes the eps gate opened.
+    def _gated_counts(reports: list[dict]) -> dict:
+        counts = {'total': 0, 'nan_eps': 0, 'eps_above_bar': 0}
+        for chart_report in reports:
+            counts['total'] += 1
+            reason = chart_report.get('gate_reason')
+            if reason in counts:
+                counts[reason] += 1
+        return counts
+
+    gated_reports = [r for r in chart_reports if r.get('gated')]
+    gated_charts = {
+        'total': _gated_counts(gated_reports),
+        'astroid': _gated_counts(
+            [r for r in gated_reports if r['parity'] == 1]),
+        'saddle': _gated_counts(
+            [r for r in gated_reports if r['parity'] == -1])}
+
     report = {
         'prior_box': provenance['prior_box'],
         'config': provenance['config'],
         'parities': parity_reports,
         'charts': chart_reports,
+        'gated_charts': gated_charts,
         'artifact': {
             'path': str(artifact_path),
             'size_bytes': _artifact_size_bytes(artifact_path),
@@ -1068,6 +1426,24 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     tube_w_range = _capped_w_range(
         box, parity, structure.caustic_reach + config.eta_max)
     for idx, arc in enumerate(structure.arcs[:config.max_tube_arcs]):
+        # FOOT-OF-NORMAL ASSERTION (owner-mandated, checked not
+        # remembered): the tube map (theta, eta) -> caustic + eta*normal
+        # is invertible by the query-time nearest-point projection only
+        # for eta below the local caustic curvature radius. A band whose
+        # minimum curvature radius over the arc cannot support eta_max is
+        # SKIPPED with a loud record (far-field charts + the serving
+        # ladder cover it) -- never trained wrongly (the eta_max=0.3
+        # failure class, size-induced at small gamma).
+        r_min = _min_curvature_radius(band, arc, config.n_caustic_samples)
+        if config.eta_max > 0.5 * r_min:
+            chart_reports.append({
+                'name': f'chart_{label}_tube_{idx}',
+                'parity': parity, 'skipped': 'foot_of_normal',
+                'min_curvature_radius': round(float(r_min), 6),
+                'eta_max': config.eta_max,
+                'theta_range': [round(arc.theta_lo, 5),
+                                round(arc.theta_hi, 5)]})
+            continue
         tag = f'chart_{label}_tube_{idx}'
         path = outdir / f'{tag}.npz'
 
@@ -1093,39 +1469,123 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
 
         chart, report, reused = _load_or_build(
             path, build_tube, {'schema': 'build8c-chart', 'parity': parity})
+        gated, gate_reason = _gate_chart('tube', report, config)
+        chart_report = {'name': tag, 'parity': parity, 'file': str(path),
+                        'reused': reused, **report}
+        if gated:
+            chart_report['gated'] = True
+            chart_report['gate_reason'] = gate_reason
+            chart_reports.append(chart_report)
+            continue
         charts.append(chart)
-        chart_reports.append({'name': tag, 'parity': parity,
-                              'file': str(path), 'reused': reused,
-                              **report})
+        chart_reports.append(chart_report)
 
-    # -- Far-field charts (per image-count region, resumable) --
-    half = 0.15
-    box_center = (structure.caustic_reach + config.eta_max + 0.2, 0.0)
-    ff_y_max = float(np.hypot(*box_center) + half * np.sqrt(2.0))
-    ff_w_range = _capped_w_range(box, parity, ff_y_max)
-    for idx in range(config.max_farfield_regions):
-        tag = f'chart_{label}_farfield_{idx}'
+    # -- Far-field charts (mass-stratified exterior tiling, resumable) --
+    # Build 8g WP2: partition the parity's REACHABLE mass range into log strata
+    # so each stratum's whole ``[w(20, m), w(1024, m)]`` band fits one chart w
+    # range (whole-band containment is the serving contract), then tile each
+    # stratum's shear-frame y-support box ``[-Y(m_lo), Y(m_lo)]^2`` with
+    # DISTINCT square tiles lying wholly outside the caustic disk.  This
+    # replaces the legacy single hard-coded box that was rebuilt under
+    # different filenames, giving real prior coverage.
+    strata, beyond = _mass_strata(box, parity)
+    if beyond is not None:
+        # Mass above the parity w-ceiling cannot satisfy whole-band containment
+        # today (saddle Schwinger wall ~458 Msun); record it loudly, never drop
+        # it silently.  Build 8h moves the wall.
+        chart_reports.append({
+            'name': f'chart_{label}_farfield_beyond_w_cap',
+            'parity': parity, 'beyond_w_cap': True,
+            'mass_range': [round(beyond['m_lo'], 3), round(beyond['m_hi'], 3)],
+            'w_ceiling': round(beyond['ceiling'], 3),
+            'reason': 'lens mass above the parity w-ceiling is not tileable'})
+
+    # The caustic (and the eta_max tube shell around it) lies inside this disk,
+    # so a tile wholly outside it is entirely in the single 2-image exterior
+    # region -- no per-point engine/geometry probing needed.
+    exclusion_radius = structure.caustic_reach + config.eta_max
+    admitted: list[dict] = []
+    stratum_records: list[dict] = []
+    for si, (m_lo, m_hi) in enumerate(strata):
+        y_extent = float(_lens_prior._source_scale(m_lo))
+        stratum_w_range = _stratum_w_range(box, parity, m_lo, m_hi, y_extent)
+        # The high-mass corner of a stratum is beyond the w-cap when the DD /
+        # ceiling cap truncates the stratum w range below ``w(f_hi, m_hi)``.
+        w_max_uncapped = float(dimensionless_frequency(box.f_hi_hz, m_hi, 0.0))
+        corner_beyond_cap = stratum_w_range[1] < w_max_uncapped * (1.0 - 1e-9)
+        tiles = _farfield_tiles(
+            y_extent, exclusion_radius, config.n_farfield_tiles_per_side)
+        stratum_records.append({
+            'stratum_index': si,
+            'mass_range': [round(m_lo, 3), round(m_hi, 3)],
+            'y_extent': round(y_extent, 6),
+            'w_range': [round(stratum_w_range[0], 6),
+                        round(stratum_w_range[1], 6)],
+            'w_max_uncapped': round(w_max_uncapped, 6),
+            'high_w_corner_beyond_cap': bool(corner_beyond_cap),
+            'admitted_tiles': len(tiles)})
+        for center, half, i, j in tiles:
+            admitted.append({
+                'si': si, 'i': i, 'j': j, 'center': center, 'half': half,
+                'm_lo': m_lo, 'm_hi': m_hi, 'w_range': stratum_w_range})
+
+    # Loud per-stratum summary (0-count strata are recorded too: a high-mass
+    # stratum whose whole y-box lies inside the caustic disk admits no exterior
+    # tile -- those draws are near-caustic, served by tube + ladder).
+    chart_reports.append({
+        'name': f'chart_{label}_farfield_strata',
+        'parity': parity, 'strata_summary': True,
+        'n_strata': len(strata),
+        'exclusion_radius': round(float(exclusion_radius), 6),
+        'strata': stratum_records})
+
+    # ``max_farfield_regions`` is a TRUE cap on distinct admitted tiles; a
+    # truncation is recorded loudly with the dropped count.
+    if len(admitted) > config.max_farfield_regions:
+        chart_reports.append({
+            'name': f'chart_{label}_farfield_truncated',
+            'parity': parity, 'truncated': True,
+            'admitted_tiles': len(admitted),
+            'cap': config.max_farfield_regions,
+            'dropped': len(admitted) - config.max_farfield_regions})
+        admitted = admitted[:config.max_farfield_regions]
+
+    for tile in admitted:
+        si, i, j = tile['si'], tile['i'], tile['j']
+        center, half, w_range = tile['center'], tile['half'], tile['w_range']
+        m_lo, m_hi = tile['m_lo'], tile['m_hi']
+        tag = f'chart_{label}_s{si}_ff_{i}_{j}'
         path = outdir / f'{tag}.npz'
 
-        def build_ff(band=band, box_center=box_center, w_range=ff_w_range):
+        def build_ff(band=band, center=center, half=half, w_range=w_range,
+                     si=si, m_lo=m_lo, m_hi=m_hi):
             chart, calls, refused = _build_farfield_chart(
-                gamma_band=band, parity=parity, box_center=box_center,
+                gamma_band=band, parity=parity, box_center=center,
                 half=half, w_range=w_range, config=config)
             samples = _farfield_heldout_samples(
-                band, box_center, half, config, rng)
+                band, center, half, config, rng)
             eps = _heldout_eps(chart, samples,
                                {'schema': 'heldout-probe'})
             return chart, calls, refused, {
                 'kind': 'farfield',
                 'image_count': chart.image_count,
-                'y_box': [list(box_center), half],
+                'stratum_index': si,
+                'stratum_mass_range': [round(m_lo, 3), round(m_hi, 3)],
+                'y_box': [list(center), half],
+                'w_range': [round(w_range[0], 6), round(w_range[1], 6)],
                 'node_counts': {'n_gamma': config.n_gamma,
                                 'n_y1': config.n_y1, 'n_y2': config.n_y2},
                 'heldout_eps': eps}
 
         chart, report, reused = _load_or_build(
             path, build_ff, {'schema': 'build8c-chart', 'parity': parity})
+        gated, gate_reason = _gate_chart('farfield', report, config)
+        chart_report = {'name': tag, 'parity': parity, 'file': str(path),
+                        'reused': reused, **report}
+        if gated:
+            chart_report['gated'] = True
+            chart_report['gate_reason'] = gate_reason
+            chart_reports.append(chart_report)
+            continue
         charts.append(chart)
-        chart_reports.append({'name': tag, 'parity': parity,
-                              'file': str(path), 'reused': reused,
-                              **report})
+        chart_reports.append(chart_report)

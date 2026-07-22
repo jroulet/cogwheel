@@ -1,4 +1,207 @@
-# Test Dev Short-Term Observations
+\1
+## 2026-07-22 build8g INS-1-001 regression: test_lensing_surrogate_training.py
+(EXTENDED: FarFieldCornerCapTestCase, far-field DD product corner cap)
+- Added 4-test class pinning Inspector finding INS-1-001: `_stratum_w_range`'s
+  DD product cap (`dd_cap = _DD_PRODUCT_MARGIN / y_max`) is fed
+  `y_extent` (per-axis box half-width Y) by `_train_band_charts`, never the
+  box's true CORNER magnitude `Y*sqrt(2)` the far-field tiling actually
+  samples to. Confirmed via direct probe: current code's `w_max` at the
+  real box outer corner gives product ~82.024 > `DD_PRODUCT_CEILING`(60)
+  on 3/5 real strata (both parities) -- STILL UNFIXED in the working tree
+  as of this build (`git diff` of surrogate_training.py shows no corner
+  factor anywhere). THIS SUITE IS EXPECTED RED (2/4 tests fail) until
+  Coder applies the sqrt(2) corner fix -- that is its job, not a mistake.
+- ORACLE = the REAL production kernel `_hyp1f1.point_mass_g_derivatives`
+  (via its `_validate_domain` gate, `DD_PRODUCT_CEILING=60`), called
+  directly at (w_max, corner_y**2) -- not a re-derivation of the cap
+  arithmetic, the actual authority the cap exists to satisfy. No mocking.
+  `_dd_binding_strata` helper isolates strata where the DD cap (not the
+  parity ceiling, not the prior's own band top) is the binding constraint,
+  via independent recompute `dd_cap = _DD_PRODUCT_MARGIN/y_extent` vs
+  ceiling vs `_w_indep` uncapped top (same F002 constant as
+  WholeBandContainmentTestCase).
+- 2 regression tests (RED now): outer-corner tile must survive the real
+  kernel gate; direct product<=60 arithmetic mirror. 2 controls (GREEN):
+  recomputing the SAME cap with `y_max=Y*sqrt(2)` lands product at EXACTLY
+  `_DD_PRODUCT_MARGIN`(58) and the kernel accepts it (proves contract is
+  satisfiable, not vacuously impossible -- this IS the suggested fix,
+  verified numerically); self-falsification feeding the UNCAPPED band top
+  at the corner confirms the kernel call has teeth (raises).
+- GOTCHA: anti-vacuity `self.comparisons += 1` must be bumped BEFORE the
+  (expected-to-fail) assertion in a deliberately-red test, else a subTest
+  that fails on EVERY iteration leaves comparisons==0 and tearDown adds a
+  redundant/confusing ERROR on top of the real FAILED (same pattern as the
+  `@expectedFailure` note in long-term memory, but here for a plain red
+  test, not an xfail). Fixed by moving the increment to the top of each
+  `with self.subTest(...)` block.
+- Full file: 58 tests collected (was 54); ran the fast-ish subset (Tiling
+  RecordTestCase + WholeBandContainmentTestCase + new class) clean: 15
+  passed / 2 failed-as-designed in ~177s (TilingRecordTestCase pulls in
+  the lru_cached train() fixture). Did NOT touch surrogate_training.py or
+  any other file -- test-only addition, per role (do not modify production
+  code; the corner-magnitude fix itself is Coder's to land).
+
+## 2026-07-22 build8g WP3/Q5 test_lensing_surrogate_training.py (EXTENDED: astroid byte-identity + residue-bucket partition)
+- Added 2 shard classes (AstroidByteIdentity 4t, ResidueBucketPartition 6t)
+  + 3 SelfFalsification methods to the WP1/2/3 tiling suite (do-not-rewrite).
+  FULL FILE: 54 passed ~423s (was 41). Neighbors green: test_lensing_surrogate
+  41p/1s ~84s, test_lensing_geometry 13p ~23s. NO production touched (test file
+  only). Deleted throwaway probes _probe_wp3.py/_probe_census.py. 2 diagnostics:
+  wp3_astroid_byte_identity_diff.png, q5_residue_bucket_over_lnm.png.
+- ASTROID BYTE-IDENTITY: WP3 is UNCOMMITTED in working tree, so HEAD is the
+  literal pre-WP3 state (HEAD _find_cusps has NO width_safety/min_halfwidth
+  kwargs; worktree signature `def _find_cusps(...,*,width_safety=_CUSP_WIDTH_
+  SAFETY,min_halfwidth=_CUSP_MIN_HALFWIDTH)`). Verified via per-function md5
+  (git show HEAD:... | awk-extract 2-blank-line body): _astroid_arcs, _make_arc,
+  _branch_speed_profile, _caustic_reach BYTE-IDENTICAL HEAD<->worktree; only
+  _find_cusps (WP3) + FoldArc (docstring only) differ. So HEAD-vs-worktree
+  _astroid_arcs diff isolates WP3 cleanly. _head_training_module() lru_cached:
+  git show HEAD:cogwheel/lensing/surrogate_training.py -> temp .py ->
+  importlib.spec_from_file_location, register sys.modules FIRST (frozen
+  dataclass resolve). Absolute imports (from cogwheel.lensing...) resolve
+  against installed pkg; HEAD copy imports the SAME working-tree geometry
+  (fine, astroid geometry unchanged). FoldArc cross-module == is False ->
+  compare _arc_fields tuple (branch/theta_lo/theta_hi/inward_sign/image_count
+  + cusp_windows). _astroid_arcs_max_diff returns +inf on structural mismatch,
+  else max|elt|. Sweep gamma (0.1..0.95)x n(120,200), all diff==0.0.
+- ASTROID mechanism pin: inspect.signature(_find_cusps).parameters[
+  'width_safety'].default == _CUSP_WIDTH_SAFETY (and min_halfwidth); saddle
+  constants strictly GREATER. Self-falsif: (a) _find_cusps(...,width_safety=
+  _SADDLE_CUSP_WIDTH_SAFETY,min_halfwidth=_SADDLE_...) on the astroid speed
+  profile MOVES cusp windows (>1e-9) while COUNT unchanged -> byte-identity has
+  teeth; (b) mock.patch.object(training,'_find_cusps',shifted) nudging cusp[0]
+  theta +1e-3 -> _astroid_arcs diff > 0 (patchable because _astroid_arcs calls
+  module-global _find_cusps).
+- RESIDUE BUCKET (Q5): _census_surrogate() lru_cached SECOND real train()
+  (~175s) with _FIXTURE_CONFIG -- needed because _trained_report DISCARDS the
+  surrogate and census needs the served object as the chart-served oracle
+  (double-train ~2x175s acceptable; both smoke-scale, no MemoryError intra-
+  file). _census_result() lru_cached classifies N=3000 fixed-seed draws into
+  EXACTLY one of beyond_w_cap (F002 _w_indep band_hi=1.2372e-4*m*1024 >
+  ceiling; POS 480 gamma<1 else SAD 58) -> chart_served (surrogate.serve whole
+  band [w_lo,w_hi] True) -> residue. Measured: served~0.014 beyond~0.132
+  residue~0.854, beyond_served==0. Teeth: every beyond-labelled draw satisfies
+  independent _w_indep>ceiling; every served/residue draw is NOT beyond (clean
+  separation, seed-independent). beyond_served==0 is STRUCTURAL not lucky: chart
+  w_max clamps to ceiling, band_hi>ceiling>=chart_w_max -> whole-band never
+  covered. Residue fraction REPORTED (print + stacked hist over ln m), NOT
+  asserted zero (Build 8h north star). partition assert = sum(counts)==N +
+  fractions sum to 1.0.
+- GOTCHAS: geometry_partition(gamma=,y=[y1,y2],beta=0.0) returns .caustic_
+  distance/.caustic_theta/.real_mask (NOTE: .caustic_theta here, but WP3
+  overlay path uses .critical_theta -- different attrs on same partition
+  object). channels.reset() before each geometry_partition. Only catch named
+  geometry.LensDomainError (LensDomainError IS-A ValueError); serve itself
+  never raises engine errors (pure chart interpolation, returns (env,bool)).
+  Added imports: importlib.util, inspect, subprocess, sys, +from cogwheel.
+  lensing.chang_refsdal import geometry. Serena replace_content REQUIRES mode
+  arg (literal/regex) -- omitting it errors.
+
+
+## 2026-07-22 build8g WP1/WP3 test_lensing_surrogate_training.py (EXTENDED: eps gate + saddle tube-tail)
+- Added 3 shard classes + 3 SelfFalsification tests to the WP2 tiling suite
+  (do-not-rewrite). FULL FILE: 41 passed ~245s (dominated by 2 lru_cached
+  engine fixtures: WP1 3-far-field-charts ~30s, WP3 2-tube-builds ~19s).
+  Neighbors green: test_lensing_surrogate 41p/1s ~86s, test_lensing_geometry
+  13p ~18s. NO production touched (test file only). 2 diagnostics:
+  wp1_eps_gate_report_diff.png, wp3_saddle_tube_tail_overlay.png.
+- EpsRegistrationGateTestCase (8t, F010 reachable-red): 3 REAL engine far-field
+  charts via _build_farfield_chart + eps via production _heldout_eps (engine
+  = ChangRefsdalChannels = independent oracle). HEALTHY center (2.5,2.5) eps
+  4.6e-4; POISON via dataclasses.replace(chart, real_coeffs=coeffs*1.1) ->
+  eps 0.0968 (~32x the 3e-3 bar); NAN via held-out samples 20 units OUTSIDE
+  the box (zero served -> _heldout_eps returns nan). _register_entries mirrors
+  the _train_band_charts registration block using production _chart_gated;
+  gated charts get report['gated']=True + gate_reason 'eps_above_bar'/'nan_eps'.
+  Fall-through proved: select_chart([healthy_only]) serves healthy center,
+  None at poison/nan centers. Reachable-red: un-poisoned base (eps<bar)
+  re-registers. DISJOINT clean centers A(2.5,2.5)/B(2.5,3.4)/C(3.4,3.4)
+  max-norm sep 0.9 > 2*half(0.5).
+- EpsGateResumeTestCase (4t): save poisoned chart to temp .npz with
+  provenance {'heldout_eps': 0.0968}; _load_or_build(path, boom, {...}) where
+  boom() raises if called -> proves NO engine recompute on reuse. Asserts
+  reused=True, report['heldout_eps']==persisted, _chart_gated excludes it,
+  path.exists() True while registered==[]. Determinism: two reuses give same
+  eps + same gate decision. KEY: _load_or_build persists heldout_eps into
+  per-chart provenance on build, reads it back on reuse (surrogate.provenance).
+- SaddleTubeTailTestCase (5t, Q6-iv): _WP3_GAMMA=1.55 strong-shear saddle.
+  FIX-ON left arc = _saddle_arcs(g,n) branch==1 min theta_lo (a REAL production
+  arc; carries wedge-edge window (lo_edge=-theta_max+_WEDGE_EPS, halfwidth=
+  _SADDLE_CUSP_MIN_HALFWIDTH)). FIX-OFF reconstructs pre-fix arc: edge_hw=0
+  (NO wedge window) + astroid _CUSP_WIDTH_SAFETY/_CUSP_MIN_HALFWIDTH (1.5/0.05
+  vs saddle 2.5/0.08). Measured on_eps 0.0263 < tube bar 5e-2 << pre-fix 1.15;
+  off_eps 0.4335 > _WP3_PATHOLOGY_FLOOR 0.09. _chart_gated('tube',on)=(False,
+  None); ('tube',off)=(True,'eps_above_bar'). has_edge_window predicate keys
+  on |theta - edge_theta|<1e-6 & halfwidth>0 -> True fix-on, False fix-off.
+  Overlay _wp3_overlay sweeps theta on the arc: engine (ChangRefsdalChannels)
+  vs surrogate.serve max|envelope|, NaN where unserved.
+- SelfFalsification adds: (a) opening farfield_eps_max=1e9 lets poisoned chart
+  pass (default bar load-bearing); (b) select_chart([poisoned]) at poison
+  center is NOT None (window live; only the gate removes it); (c) fix-off eps
+  > bar genuinely (WP3 non-vacuous control).
+- GOTCHAS: Serena execute_shell_command has ~240s internal timeout -> heavy
+  suites MUST be launched detached (`nohup ... > log 2>&1 & echo pid $!`) then
+  polled via `sleep N; tail; pgrep`. Bash tool BLOCKED for python/sleep (hook)
+  -> all shell via Serena; pgrep/ls/wc/tail allowed. FoldArc frozen dataclass
+  -> equality works for `on_arc in arcs` assertion.
+
+
+## 2026-07-22 build8g WP2 test_lensing_surrogate_training.py (NEW suite, mass-stratified far-field tiling)
+- 21 tests, all green ~179s (dominated by ONE lru_cached train() smoke run).
+  Neighbor test_lensing_surrogate.py 41p/1s ~85s (no regression; test-only add,
+  no production touched). 3 diagnostics in tests/output/: wp2_tiling_centers_
+  over_box.png, wp2_whole_band_containment.png, wp2_serve_fraction_map.png.
+- 4 classes: TilingRecordTestCase (report-backed), WholeBandContainmentTestCase
+  (pure _mass_strata/_stratum_w_range + F002 oracle), ServeFractionTestCase
+  (synthetic FarFieldChart set on real _farfield_tiles boxes), SelfFalsification.
+  Anti-vacuity tearDown base _CountingTestCase.
+- FIXTURE: train() with default eps bars gates ALL charts ("A surrogate needs
+  at least one chart"); OPEN tube_eps_max/farfield_eps_max=1e9 so charts
+  register. The RECORDS read (y_box, admitted/dropped counts, beyond_w_cap,
+  strata w_range) are INDEPENDENT of interpolation accuracy, so loose eps is
+  sound. max_farfield_regions=4 so cap truncation fires (24 admitted>4).
+- REPORT STRUCTURE (surrogate_training._train_band_charts): report['charts'] is
+  a flat list of dicts. strata summary rec: {strata_summary:True, parity,
+  n_strata, strata:[{stratum_index, mass_range:[m_lo,m_hi], y_extent,
+  w_range:[wmin,wmax], w_max_uncapped, high_w_corner_beyond_cap, admitted_tiles}]}.
+  beyond rec: {beyond_w_cap:True, mass_range, w_ceiling}. truncation rec:
+  {truncated:True, admitted_tiles, cap, dropped}. built ff rec: {kind:'farfield',
+  y_box:[[cx,cy],half], stratum_index, w_range, ...}. ff name =
+  chart_{label}_s{si}_ff_{i}_{j}, label=e.g. astroid_b0. mass_range ROUNDED to
+  3 decimals in report.
+- F002 ORACLE: _w_indep = 1.2372e-4*m*f (hand-rounded 8πG Msun/c^3), NEVER
+  production dimensionless_frequency (lal.MTSUN_SI-derived ~1.2378e-4).
+  _W_CONTAINMENT_REL_TOL=5e-3 absorbs the ~5e-4 constant gap.
+- GOTCHA 1 (FP disjointness): adjacent tile centres separate by EXACTLY 2*half
+  analytically but abs(cx_a-cx_b) vs 2*half each carry ~1 ULP -> observed
+  1.1999999999999997 vs 1.2. Spec says "overlap tol exactly 0"; set
+  _TILE_DISJOINT_TOL=1e-9 as a PURE FP-representation guard (a real overlap
+  separates by <=half~0.6, 1e9x larger), documented as noise-not-slack.
+- GOTCHA 2 (beyond-box = MAX norm not Euclidean): _farfield_tiles fill the
+  square [-Y,Y]^2 out to its CORNERS, so a point at Euclidean radius up to
+  Y*sqrt2 (e.g. (-2.9,-2.9), r=4.1>3) still sits inside a corner tile ->
+  serves. "Beyond box" MUST force max(|y1|,|y2|)>Y (one coord outside the box
+  interval), guarded with _point_in_tiles(...)==False before asserting None.
+- GOTCHA 3 (report w_range vs recompute): report stores mass_range rounded to
+  3 decimals; recomputing _stratum_w_range from rounded edges gives ~4e-7
+  relative mass-rounding artifact (3.7e-5 abs at w~93.8) -> assertAlmostEqual
+  places=5 FAILS. Use RELATIVE tol _W_CONTAINMENT_REL_TOL, not absolute places.
+- SERVE-FRACTION teeth: synthetic FarFieldChart per admitted tile (env=ones,
+  image_count=2, gamma_grid [0.15,0.55] away from gamma=1 guard, log_w_grid ln-
+  padded around stratum band so band-guard always passes -> serve decided by
+  y-box GEOMETRY). Draws from REAL prior classes: UniformLensMassPrior.transform,
+  UniformSourcePositionPrior.transform (y_i=u_i*min(307/m,3)); low astroid
+  stratum has Y=3 CONSTANT (m<=102). INDEPENDENT geometric classifier
+  _point_in_tiles (keys on tile boxes, NOT select_chart) -> inside serves 100%
+  (>=90% floor), interior-hole (dropped centre cell) + max-norm-exterior draws
+  return None 100% (additive contract both directions). exclusion_radius=0.6 on
+  5x5/Y=3 drops ONLY the centre cell (24-tile ring, 1 hole).
+- SELF-FALSIFICATION (all confirmed red-under-corruption): overlapping boxes
+  (sep 0.5<2*half) trip disjointness; origin tile trips exterior-disk check;
+  3x-wrong w constant escapes containment; a chart widened over the hole
+  (y-grid [-0.6,0.6]) SERVES the (0,0) hole point while the honest fixture
+  returns None (proves outside-None has teeth).
+
 
 ## 2026-07-21 build8g WP4/WP5 test_lensing_levers.py (EXTENDED: Lever4 Pearcey table + Lever5 L_MAX bracket)
 - Added Lever4 (Pearcey table certification/fallback/hash) + Lever5 (L_MAX
