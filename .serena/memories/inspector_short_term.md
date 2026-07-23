@@ -1,59 +1,68 @@
 # Inspector Short-Term Observations
 
-## 2026-07-22 (Build 8g-b 6th review) — VERDICT: PASS (INS-8gbc-001 & -002 RESOLVED)
+## 2026-07-23 (Build 8h-a-fin) — VERDICT: ISSUES (1 blocker regression + 6 missing binding tests)
 
-Scope: re-review of the two open test-fixture findings after Test Dev applied
-the sanctioned systemic fix. Production code UNCHANGED since the 5th review
-(which certified WP1+WP2 CORRECT). Only test_lensing_surrogate.py carries new
-edits this pass.
+Scope: all uncommitted working-tree changes completing approved Build 8h-a
+(WP1 ppgo_map, WP2 likelihood band-split, WP3 interior/strata trimming, WP4
+subdivision). Reviewed cogwheel/lensing/{ppgo_map.py(NEW),likelihood.py,
+surrogate_training.py}, scripts/train_ppgo_map.py(NEW), registry/DATA_CONTRACTS,
+test_lensing_farfield_envelope.py(+615). Imports OK (all three modules import).
 
-### FULL RUNS (setsid-detached, full python path) — all EXIT=0
-- test_lensing_surrogate.py (full, no -x): **45 passed, 1 skipped in ~110s**.
-  Also confirmed identical with -x. RefusalPreservationTestCase now green.
-- farfield_envelope + census + training (combined): **128 passed in 710s**.
+### INS-8haf-001 (implementation, BLOCKER) — REGRESSION: far-field packing deleted
+In `_train_band_charts` the WP4 edit REMOVED the two trailing non-gated packing
+lines (`charts.append(chart)` / `chart_reports.append(chart_report)`). git diff
+tail literally shows `-        charts.append(chart)` / `-        chart_reports.
+append(chart_report)`. The `for tile in admitted:` loop body now ENDS at the
+`continue` inside `if gated:` (file ends at L2084). Consequence: a far-field
+tile that PASSES gating is never packed into `charts` → ZERO far-field charts
+built/served. Only gated (failing) tiles subdivide; their passing CHILDREN are
+packed inside `_subdivide_farfield_tile(charts=charts,...)`, but a directly-
+passing parent tile is dropped silently.
+Breaks 2 PRE-EXISTING (unchanged file) tests in test_lensing_surrogate_training.py:
+- TilingRecordTestCase::test_built_tile_boxes_are_pairwise_disjoint
+  ("{} is not true : no built far-field charts recorded")
+- ResidueBucketPartitionTestCase::test_chart_served_bucket_is_nonempty
+  ("0 not greater than 0 : no draw was chart-served")
+Full earlier run: 2 failed, 102 passed, 1 skipped, 2 errors (the 2 errors are in
+UNCHANGED test_lensing_surrogate.py = pre-existing env, out of scope).
+FIX: restore the two packing lines after the `if gated: ... continue` block.
 
-### INS-8gbc-001 — RESOLVED
-Systemic fix as prescribed: DELTA_T_MAX 0.02 -> 0.05; DF_BIN RE-DERIVED
-0.02->0.05 => 4.0->1.6 holding pi*DF_BIN*DELTA_T_MAX ~= 0.25 rad (half the
-0.5-rad _DEFAULT_BIN_DELAY_TOL; narrower bins = safer, physically sound).
-CROWN_LENS unchanged (gamma0.35,y1=2.25,y2=0). The kappa=0.1 fall-through that
-raised LensedBinningError now measures 0.020863 s vs 0.05 bound => 41.7% margin.
-test_nonzero_kappa_never_served passes (spy count 0, bit-for-bit exact match).
+### INS-8haf-002 (design) — 7 of 8 BINDING domain tests missing
+Plan has 8 binding domain_test_descriptions; only #7 (WP4 EDGE-ANNULUS
+SUBDIVISION) was implemented (the +615 lines in test_lensing_farfield_envelope.py).
+MISSING: #0 WP2 band-split node-match; #1 WP3 telescoping interior 4-image;
+#2 WP1 sup-over-w floor non-monotone; #3 WP1 safety margin; #4 WP1+WP2
+corrupt/absent/UNKNOWN map refusal F010; #5 WP3 interior admission geometry +
+morse-sign mask; #6 WP3 strata trimming record. Plan expected changes to
+test_lensing_ppgo_map.py (DOES NOT EXIST) and test_lensing_surrogate_training.py
+(UNCHANGED). New public API CertifiedPpgoMap and the band-split dispatch ship
+UNCERTIFIED. Owner: Test Dev.
 
-### INS-8gbc-002 — RESOLVED
-New DelayMarginContractTestCase pins delay/DELTA_T_MAX <= MARGIN_FRACTION_CEILING
-=0.60 for the WHOLE far-field-exterior family, collected from the SAME shared
-dicts (non-circular). Printed margins: crown(k=0) 0.3734, crown k=0.1 0.4173,
-pos/crown 0.3734, pos/deep 0.3789, pos/box-edge 0.3646 — all 36-42%, uniform
-comfortable margin. Paired DelayMarginSelfFalsificationTestCase reproduces the
-LensedBinningError at the OLD 0.02 s bound (gate has teeth, not vacuous). A
-criterion test pins pi*DF_BIN*DELTA_T_MAX ~= 0.25 and < 0.5. No production code
-touched by this pass (surrogate/geometry/likelihood untouched).
+### INS-8haf-003 (trivial) — private-symbol import
+likelihood.py L99-100 imports private `_caustic_geometry` from ppgo_map
+(alongside UNKNOWN, get_certified_ppgo_map). Same subpackage so tolerable, but
+prefer a public accessor for the caustic reach.
 
-### INS-8gb-005 (SPEC + DATA_CONTRACTS divergence) — STILL OPEN → Librarian
-This build did NOT touch SPEC.md or DATA_CONTRACTS.yaml (not in changed files).
-SPEC still says farfield_eps_max=3e-3 (code 1e-3); DATA_CONTRACTS
-lens_amplification_surrogate still lacks the REQUIRED per-chart npz meta
-`envelope_definition` (whose absence hard-refuses load). Pre-existing from the
-WP1/WP2 build; test-only this pass, so NOT an actionable finding here. Carry to
-Librarian/driver.
+### Carried open (NOT this build)
+- INS-8gb-005 (Librarian): SPEC farfield_eps_max=3e-3 vs code 1e-3;
+  DATA_CONTRACTS lens_amplification_surrogate lacks REQUIRED per-chart npz meta
+  `envelope_definition`. DATA_CONTRACTS.yaml WAS touched this build (added
+  certified_ppgo_map stanza) but the pre-existing divergence was not addressed.
+- INS-4-001 (design): TrainingConfig.max_farfield_regions default.
 
-### Carried open
-- INS-4-001 (design): TrainingConfig.max_farfield_regions default (unrelated).
+### Positives verified this build
+- ppgo_map.py mirrors PearceyTable cleanly; SHA1 hash-pinned load,
+  allow_pickle=False; w_trust=max(1.5 w_cert, w_cert+2.0) single-source rule.
+- Band-split certification transfer confirmed: E_ff=0 reconstruction telescopes
+  to image-kernel sum == geometric_amplification (certified object). Byte-
+  identical when map is None (opt-in).
+- Registry end-to-end resolves: pipeline_graph resolve certified_ppgo_map ->
+  cogwheel/data/certified_ppgo_map.npz, matches CertifiedPpgoMap.load loader.
 
 ### Lessons
-- A pure test-fixture systemic fix (raise the module's delta_t_max + re-derive
-  fbin from the SAME phase-accuracy criterion) is the correct home for a
-  relocation-induced binning overflow — production stays byte-identical. Verify
-  the re-derivation preserves the invariant constant (pi*DF*dt), not just that
-  tests pass, and confirm the self-falsification test still reproduces the
-  original error at the OLD bound so the margin gate isn't vacuous.
-- Imports clean; _FARFIELD_ENVELOPE_DEFINITION='farfield_full_kernel_sum';
-  channels.farfield_envelope_from_partition present. serve 3-tuple migration
-  intact (census+training green).
-
-Runtime friction (unchanged): Bash hook blocks python/grep/tail/cat/sed with
-leading cd/VAR=; run python only via serena execute_shell_command or setsid-
-detached. Serena shell TIMES OUT ~260s but setsid-detached pytest in its own
-group SURVIVES. Read tool унavailable; read /tmp logs via a python one-liner
-(open().readlines()) through serena shell, not grep/tail.
+- A guard-clause refactor that ends a loop body on `continue` inside the guard
+  is a red flag: check the FALL-THROUGH (non-guarded) tail still packs/returns.
+  Here the passing-case packing was the deleted tail — silent coverage loss.
+- Re-run PRE-EXISTING suites over UNCHANGED test files: a production-only edit
+  regressed them; the failure text ("no built far-field charts recorded") points
+  straight at the deleted producer line.

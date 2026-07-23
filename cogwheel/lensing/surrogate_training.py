@@ -51,6 +51,8 @@ from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels, farfield_envelope_from_partition)
 from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
+from cogwheel.lensing.ppgo_map import (
+    CertifiedPpgoMap, UNKNOWN, get_certified_ppgo_map)
 from cogwheel.lensing.surrogate import (
     FarFieldChart, TubeChart, LensAmplificationSurrogate,
     _REFUSAL_ERRORS, _log_w_grid, _uniform_axis)
@@ -980,6 +982,186 @@ def _farfield_tiles(y_extent: float, exclusion_radius: float, n_per_side: int
     return tiles
 
 
+def _caustic_points(gamma: float, parity: int, n: int) -> np.ndarray:
+    """All sampled caustic source-plane points for one parity, shape ``(k, 2)``.
+
+    Sweeps the astroid (single periodic branch, ``theta`` over ``2 pi``) or the
+    saddle deltoid (two lobes centred at ``theta = 0, pi``, each with two
+    square-root branches over the critical wedge).  Points outside a branch's
+    domain (the saddle wedge) are dropped.  Mirrors the branch enumeration of
+    `_astroid_arcs` / `_saddle_arcs` but returns only the caustic points.
+    """
+    points: list[np.ndarray] = []
+    if parity == 1:
+        segments = [(1, np.linspace(0.0, 2.0 * np.pi, n, endpoint=False))]
+    else:
+        theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
+        segments = []
+        for center in (0.0, np.pi):
+            thetas = np.linspace(center - theta_max + _WEDGE_EPS,
+                                 center + theta_max - _WEDGE_EPS, n)
+            for branch in (1, -1):
+                segments.append((branch, thetas))
+    for branch, thetas in segments:
+        for theta in thetas:
+            try:
+                src = geometry.critical_point(
+                    gamma, theta, 0.0, 0.0, branch).source
+            except geometry.LensDomainError:
+                continue
+            points.append(np.asarray(src, dtype=float))
+    return np.asarray(points) if points else np.empty((0, 2))
+
+
+def _winding_number(points: np.ndarray) -> float:
+    """Signed winding number of an ORDERED closed curve about the origin.
+
+    ``points`` must trace the curve in traversal order (shape ``(k, 2)``); the
+    loop is closed back to the first point.  Sums the signed angular increments
+    seen from the origin, each wrapped to ``(-pi, pi]``, and divides by
+    ``2 pi``.  A curve enclosing the origin returns ``+-1``; one that does not
+    returns ``0``.  Only meaningful for a genuinely ordered single loop (the
+    positive-parity astroid sweep); the disjoint saddle lobes are NOT such a
+    loop, so this is never applied to them.
+    """
+    angles = np.arctan2(points[:, 1], points[:, 0])
+    increments = np.diff(np.concatenate([angles, angles[:1]]))
+    increments = (increments + np.pi) % (2.0 * np.pi) - np.pi
+    return float(increments.sum() / (2.0 * np.pi))
+
+
+def _caustic_inradius(gamma: float, parity: int, n: int) -> tuple[float, bool]:
+    """Minimum caustic radius and whether the caustic encloses the origin.
+
+    Returns ``(inradius, encloses_origin)``.  ``inradius`` is the smallest
+    source-plane radius any caustic point reaches -- the radius of the largest
+    origin-centred disk that fits inside the caustic curve, which the interior
+    far-field tiles must stay within.
+
+    ``encloses_origin`` keys the interior admission off the caustic TOPOLOGY,
+    never a bare image count (Professor 8h-a):
+
+    * The positive-parity astroid is a single closed 4-cusped curve swept over
+      one continuous ``theta`` branch; it winds once around the origin, so an
+      origin-centred interior disk is a genuine 4-image region.  Enclosure is
+      the winding number of that ordered sweep about the origin (robust across
+      the whole band; an angular-gap heuristic misclassifies near ``gamma = 1``
+      where the astroid and the saddle deltoids merge).
+    * The macro-saddle caustic (``gamma > 1``) is TWO disjoint deltoid lobes
+      sitting OFF the origin on the shear axis.  The origin is a 2-image saddle
+      region enclosed by neither lobe at any ``gamma > 1`` (each lobe's winding
+      number about the origin is 0), so there is no valid origin-centred
+      interior disk -- the interior loop records a loud skip and admits nothing
+      (the tube charts and the serving ladder cover the near-lobe regions).
+      The lobes are not a single ordered loop, so their winding number is not
+      computed from the point order (which is a segment-enumeration artifact);
+      enclosure is False by the two-lobe topology.
+    """
+    points = _caustic_points(gamma, parity, n)
+    if points.shape[0] < 4:
+        return 0.0, False
+    radii = np.hypot(points[:, 0], points[:, 1])
+    inradius = float(radii.min())
+    if parity != 1:
+        return inradius, False
+    return inradius, abs(_winding_number(points)) >= 0.5
+
+
+def _farfield_interior_tiles(grid_extent: float, admit_radius: float,
+                             n_per_side: int
+                             ) -> list[tuple[tuple[float, float], float,
+                                             int, int]]:
+    """Square interior tiles wholly inside the caustic disk minus the tube shell.
+
+    Companion to `_farfield_tiles` with the admission test INVERTED: lays the
+    same uniform ``n_per_side x n_per_side`` grid over
+    ``[-grid_extent, grid_extent]^2`` (tile half ``grid_extent / n_per_side``)
+    and ADMITS a tile iff its axis-aligned box lies WHOLLY INSIDE the disk of
+    radius ``admit_radius`` centred at the origin.  The MAXIMUM L2 distance from
+    the origin to a tile box ``[cx-h, cx+h] x [cy-h, cy+h]`` is the corner
+    FARTHEST from the origin, ``hypot(|cx| + h, |cy| + h)``; when that stays
+    below ``admit_radius`` the whole tile is inside the caustic interior
+    (single 4-image region) with no caustic crossing and no overlap with the
+    tube shell.  So the one-image-count-per-box constraint holds by
+    construction, exactly as the exterior predicate enforces 2-image by
+    geometry -- no per-point engine image-count probing (Professor 8h-a).
+
+    Parameters
+    ----------
+    grid_extent : float
+        Half-width of the (square) grid, ``min(interior_admit_radius,
+        Y(m_lo))`` (the intersection of the interior disk and the prior
+        y-support box).
+    admit_radius : float
+        Interior admission radius ``caustic_inradius - eta_max`` (the caustic
+        disk minus the tube shell); tiles whose farthest corner exceeds this
+        are dropped (they would straddle the tube shell or the caustic).
+    n_per_side : int
+        Number of tiles along each axis.
+
+    Returns
+    -------
+    list[tuple[tuple[float, float], float, int, int]]
+        ``(tile_center, half, i, j)`` for each admitted tile, in row-major grid
+        order (deterministic).
+    """
+    half = grid_extent / n_per_side
+    centers = [-grid_extent + half * (2 * k + 1) for k in range(n_per_side)]
+    tiles: list[tuple[tuple[float, float], float, int, int]] = []
+    for i, cx in enumerate(centers):
+        for j, cy in enumerate(centers):
+            far = math.hypot(abs(cx) + half, abs(cy) + half)
+            if far <= admit_radius:
+                tiles.append(((float(cx), float(cy)), float(half), i, j))
+    return tiles
+
+
+def _stratum_ppgo_boundary(parity: int, gamma: float, rho: float,
+                           ppgo_map: CertifiedPpgoMap | None
+                           ) -> float | None:
+    """Certified-ppGO dispatch floor ``w_trust`` for a region, or ``None``.
+
+    Returns the margin-inflated handoff floor (a ``float``) only when the map
+    certifies the ``(parity, gamma, rho)`` cell; ``None`` when no map is
+    installed or the cell is `UNKNOWN` (out-of-grid / beyond-wall /
+    uncertified).  The caller trims a stratum's chart w-range against this
+    floor: whole band above it -> ppGO serves the stratum, drop the chart; top
+    above it -> cap the chart at the floor (band-split serving hands the tail
+    to ppGO).  ``None`` -> no trim, keep the chart intact.
+
+    The floor is ``w_trust`` (margin-inflated), NOT the raw ``w_cert``: the
+    ``[w_cert, w_trust]`` band is the dispatch hand-off margin and must stay
+    with the chart, else that band routes to a dropped / capped chart and
+    leaves a serving gap.
+    """
+    if ppgo_map is None:
+        return None
+    parity_str = 'positive' if parity == 1 else 'saddle'
+    floor = ppgo_map.w_trust(parity_str, float(gamma), float(rho))
+    if floor is UNKNOWN:
+        return None
+    return float(floor)
+
+
+def _apply_ppgo_trim(w_range: tuple[float, float], boundary: float | None
+                     ) -> tuple[tuple[float, float], str]:
+    """Trim a stratum ``w`` range against the ppGO hand-off floor.
+
+    Returns ``(new_w_range, action)`` with ``action`` one of ``'drop'`` (the
+    whole band lies above the floor -- ppGO serves it, no chart needed),
+    ``'cap'`` (the top is lowered to the floor) or ``'keep'`` (unchanged).  A
+    ``None`` boundary (no map / `UNKNOWN` cell) always keeps the range.
+    """
+    if boundary is None:
+        return w_range, 'keep'
+    w_min, w_max = w_range
+    if w_min >= boundary:
+        return w_range, 'drop'
+    if w_max > boundary:
+        return (w_min, boundary), 'cap'
+    return w_range, 'keep'
+
+
 def _budget_check(n_points: int, budget: int, name: str) -> None:
     """Fail fast if a chart's grid exceeds its per-chart engine-call budget."""
     if n_points > budget:
@@ -1320,7 +1502,8 @@ def train(*, outdir: str | Path,
           config: TrainingConfig | None = None,
           f_lo_hz: float = DEFAULT_F_LO_HZ,
           f_hi_hz: float = DEFAULT_F_HI_HZ,
-          report_path: str | Path | None = None
+          report_path: str | Path | None = None,
+          ppgo_map: CertifiedPpgoMap | None = None
           ) -> tuple[LensAmplificationSurrogate, dict]:
     """Build the multi-chart surrogate artifact from the prior box.
 
@@ -1351,6 +1534,11 @@ def train(*, outdir: str | Path,
     """
     box = PriorBox.from_prior_classes(f_lo_hz=f_lo_hz, f_hi_hz=f_hi_hz)
     config = config or TrainingConfig()
+    # The certified-ppGO map trims mass strata that ppGO already serves.  Fall
+    # back to the process-global map (opt-in switch); absent -> None -> no trim
+    # and interior/exterior tiling proceeds under the ceiling caps unchanged.
+    if ppgo_map is None:
+        ppgo_map = get_certified_ppgo_map()
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(config.seed)
@@ -1392,7 +1580,7 @@ def train(*, outdir: str | Path,
                 box=box, config=config, rng=rng, outdir=outdir,
                 parity=parity, label=f'{label}_b{i_band}', band=sub,
                 structure=structure, charts=charts,
-                chart_reports=chart_reports)
+                chart_reports=chart_reports, ppgo_map=ppgo_map)
 
     provenance = _build_provenance(box, config, charts, all_dropped_slivers)
     surrogate = LensAmplificationSurrogate(charts, provenance)
@@ -1436,11 +1624,169 @@ def train(*, outdir: str | Path,
     return surrogate, report
 
 
+def _subdivide_farfield_tile(
+        *, tile: dict, parent_tag: str, band: tuple[float, float],
+        parity: int, config: TrainingConfig, rng: np.random.Generator,
+        outdir: Path, exclusion_radius: float, interior_admit_radius: float,
+        charts: list, chart_reports: list[dict]) -> dict:
+    """Halve one eps-gated far-field tile into up to four children (Build 8h-a WP4).
+
+    Single-level corrective subdivision, no recursion: a far-field tile whose
+    held-out eps failed the registration bar is split into up to four children
+    at ``(cx +/- h/2, cy +/- h/2)`` each with half ``h/2``.  A smaller tile
+    carries less envelope oscillation content, so re-fitting the same
+    far-field label on a quarter box is a strictly easier fit against the SAME
+    (tile-size-invariant, absolute-``max|E_ff|``) ``farfield_eps_max`` bar --
+    halving is the corrective lever.
+
+    Each child is re-admitted through the PARENT's OWN region predicate
+    (carried verbatim in ``tile['region']`` -- never re-derived from geometry):
+
+    - an exterior parent admits a child iff its min corner satisfies
+      ``hypot(max(0, |ccx|-h/2), max(0, |ccy|-h/2)) >= exclusion_radius``
+      (mirrors `_farfield_tiles`);
+    - an interior parent admits a child iff its max corner satisfies
+      ``hypot(|ccx|+h/2, |ccy|+h/2) <= interior_admit_radius``
+      (mirrors `_farfield_interior_tiles`).
+
+    A child the disk excludes is DROPPED silently -- it is correct geometry
+    (the parent's edge straddles the disk boundary), not a training failure, so
+    it is packed into neither ``charts`` nor the still-failing chart reports
+    (its outcome is recorded only in the returned subdivision summary).  Each
+    admitted child inherits the parent's already-ppGO-trimmed ``w_range``
+    verbatim (no per-child ``_stratum_w_range`` / ``_apply_ppgo_trim``
+    recompute), retrains via `_build_farfield_chart`, and re-gates via
+    `_gate_chart`.  A passing child is appended to ``charts`` and recorded in
+    ``chart_reports`` (tag ``{parent_tag}_c{ci}``, ``subdivided_from`` field)
+    exactly like a normal admitted tile; a still-failing child is recorded in
+    ``chart_reports`` with its ``gate_reason`` but NOT packed -- its windows
+    fall to the serving ladder, which the ladder census attributes.  A
+    ``nan_eps`` parent whose child re-nans (a genuine engine cancellation in
+    the same parity/gamma cell) is EXPECTED to still fail; it is recorded, not
+    special-cased -- halving cannot fix a cancellation.
+
+    Children are iterated in a fixed row-major order over the ``+/-h/2`` signs
+    (``sx`` outer, ``sy`` inner) so the report is reproducible.
+
+    Parameters
+    ----------
+    tile : dict
+        The gated parent tile record (``center``, ``half``, ``w_range``,
+        ``region``, ``si``, ``m_lo``, ``m_hi``).
+    parent_tag : str
+        The parent chart's tag, used to name children ``{parent_tag}_c{ci}``.
+    band, parity, config, rng, outdir
+        Threaded through unchanged from `_train_band_charts`.
+    exclusion_radius : float
+        Exterior admission radius ``caustic_reach + eta_max``.
+    interior_admit_radius : float
+        Interior admission radius ``caustic_inradius - eta_max``.
+    charts : list
+        Packed-chart accumulator; passing children are appended in place.
+    chart_reports : list of dict
+        Per-chart report accumulator; every admitted child (packed or
+        still-gated) is appended in place.
+
+    Returns
+    -------
+    dict
+        Subdivision summary (parent tag, region, per-child admission result,
+        per-child eps vs bar, packed/recorded) for the ladder census to
+        attribute cleared-vs-still-gated windows.
+    """
+    cx, cy = tile['center']
+    child_half = 0.5 * float(tile['half'])
+    region = tile['region']
+    w_range = tile['w_range']
+    si, m_lo, m_hi = tile['si'], tile['m_lo'], tile['m_hi']
+
+    children_summary: list[dict] = []
+    ci = 0
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            ccx = float(cx) + sx * child_half
+            ccy = float(cy) + sy * child_half
+            # Re-admit through the PARENT's region predicate (carried
+            # verbatim, never re-derived from geometry -- Professor guard (e)).
+            if region == 'interior':
+                far = math.hypot(abs(ccx) + child_half, abs(ccy) + child_half)
+                admitted_child = far <= interior_admit_radius
+            else:  # exterior
+                dx = max(0.0, abs(ccx) - child_half)
+                dy = max(0.0, abs(ccy) - child_half)
+                admitted_child = math.hypot(dx, dy) >= exclusion_radius
+            if not admitted_child:
+                # The parent's edge lies partly across the disk boundary; a
+                # disk-excluded child is correct geometry, dropped silently
+                # (recorded here for the census, packed nowhere).
+                children_summary.append({
+                    'ci': ci, 'center': [round(ccx, 6), round(ccy, 6)],
+                    'half': round(child_half, 6),
+                    'admission': 'disk_excluded', 'result': 'disk_excluded'})
+                ci += 1
+                continue
+
+            child_center = (ccx, ccy)
+            child_tag = f'{parent_tag}_c{ci}'
+            child_path = outdir / f'{child_tag}.npz'
+
+            def build_child(center=child_center, half=child_half,
+                            w_range=w_range, si=si, m_lo=m_lo, m_hi=m_hi,
+                            region=region):
+                chart, calls, refused = _build_farfield_chart(
+                    gamma_band=band, parity=parity, box_center=center,
+                    half=half, w_range=w_range, config=config)
+                samples = _farfield_heldout_samples(
+                    band, center, half, config, rng)
+                eps = _heldout_eps(chart, samples,
+                                   {'schema': 'heldout-probe'})
+                return chart, calls, refused, {
+                    'kind': 'farfield', 'region': region,
+                    'image_count': chart.image_count,
+                    'stratum_index': si,
+                    'stratum_mass_range': [round(m_lo, 3), round(m_hi, 3)],
+                    'y_box': [list(center), half],
+                    'w_range': [round(w_range[0], 6), round(w_range[1], 6)],
+                    'node_counts': {'n_gamma': config.n_gamma,
+                                    'n_y1': config.n_y1, 'n_y2': config.n_y2},
+                    'heldout_eps': eps}
+
+            chart, report, reused = _load_or_build(
+                child_path, build_child,
+                {'schema': 'build8c-chart', 'parity': parity})
+            gated, gate_reason = _gate_chart('farfield', report, config)
+            child_eps = float(report.get('heldout_eps', float('nan')))
+            child_report = {'name': child_tag, 'parity': parity,
+                            'file': str(child_path), 'reused': reused,
+                            'subdivided_from': parent_tag, **report}
+            if gated:
+                child_report['gated'] = True
+                child_report['gate_reason'] = gate_reason
+                chart_reports.append(child_report)
+                result = 'recorded_gated'
+            else:
+                charts.append(chart)
+                chart_reports.append(child_report)
+                result = 'packed'
+            children_summary.append({
+                'ci': ci, 'center': [round(ccx, 6), round(ccy, 6)],
+                'half': round(child_half, 6), 'admission': 'admitted',
+                'eps': (None if math.isnan(child_eps)
+                        else round(child_eps, 8)),
+                'bar': config.farfield_eps_max,
+                'gate_reason': gate_reason, 'result': result})
+            ci += 1
+
+    return {'parent_tag': parent_tag, 'region': region,
+            'child_half': round(child_half, 6), 'children': children_summary}
+
+
 def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                        rng: np.random.Generator, outdir: Path, parity: int,
                        label: str, band: tuple[float, float],
                        structure: CausticStructure, charts: list,
-                       chart_reports: list[dict]) -> None:
+                       chart_reports: list[dict],
+                       ppgo_map: CertifiedPpgoMap | None = None) -> None:
     """Build the tube + far-field charts of one topology-stable gamma band."""
     gamma_grid = _uniform_axis(band, config.n_gamma, f'gamma_{label}')
 
@@ -1529,8 +1875,21 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # so a tile wholly outside it is entirely in the single 2-image exterior
     # region -- no per-point engine/geometry probing needed.
     exclusion_radius = structure.caustic_reach + config.eta_max
+    caustic_reach = structure.caustic_reach
+    gamma_mid = 0.5 * (band[0] + band[1])
     admitted: list[dict] = []
     stratum_records: list[dict] = []
+    dropped_strata: list[dict] = []
+    # Certified-ppGO strata trimming (Build 8h-a WP3): where the map certifies a
+    # region, ppGO serves the high-``w`` tail, so a stratum whose whole band is
+    # above the hand-off floor needs no chart (dropped) and one whose top
+    # exceeds it is capped (band-split serving hands the tail to ppGO).  The
+    # representative rho is the exterior INNER edge (closest to the caustic,
+    # highest w_cert): certifying THERE implies the easier outer regions are
+    # covered too, so the drop never over-clears.
+    ext_rho = (exclusion_radius / caustic_reach
+               if caustic_reach > 0.0 else float('inf'))
+    ext_boundary = _stratum_ppgo_boundary(parity, gamma_mid, ext_rho, ppgo_map)
     for si, (m_lo, m_hi) in enumerate(strata):
         y_extent = float(_lens_prior._source_scale(m_lo))
         stratum_w_range = _stratum_w_range(box, parity, m_lo, m_hi, y_extent)
@@ -1538,6 +1897,18 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         # ceiling cap truncates the stratum w range below ``w(f_hi, m_hi)``.
         w_max_uncapped = float(dimensionless_frequency(box.f_hi_hz, m_hi, 0.0))
         corner_beyond_cap = stratum_w_range[1] < w_max_uncapped * (1.0 - 1e-9)
+        trimmed_w_range, action = _apply_ppgo_trim(
+            stratum_w_range, ext_boundary)
+        if action == 'drop':
+            dropped_strata.append({
+                'stratum_index': si, 'region': 'exterior',
+                'mass_range': [round(m_lo, 3), round(m_hi, 3)],
+                'w_range': [round(stratum_w_range[0], 6),
+                            round(stratum_w_range[1], 6)],
+                'w_trust': round(float(ext_boundary), 6),
+                'reason': 'ppGO certified over the whole stratum w-band'})
+            continue
+        stratum_w_range = trimmed_w_range
         tiles = _farfield_tiles(
             y_extent, exclusion_radius, config.n_farfield_tiles_per_side)
         stratum_records.append({
@@ -1548,21 +1919,100 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                         round(stratum_w_range[1], 6)],
             'w_max_uncapped': round(w_max_uncapped, 6),
             'high_w_corner_beyond_cap': bool(corner_beyond_cap),
+            'ppgo_capped': bool(action == 'cap'),
             'admitted_tiles': len(tiles)})
         for center, half, i, j in tiles:
             admitted.append({
                 'si': si, 'i': i, 'j': j, 'center': center, 'half': half,
-                'm_lo': m_lo, 'm_hi': m_hi, 'w_range': stratum_w_range})
+                'm_lo': m_lo, 'm_hi': m_hi, 'w_range': stratum_w_range,
+                'region': 'exterior'})
+
+    # -- Interior (4-image) far-field tiles (Build 8h-a WP3) --
+    # The astroid interior is a single 4-image region enclosing the origin, so
+    # tiles wholly inside ``caustic_inradius - eta_max`` carry the SAME E_ff /
+    # far-field label (the subtraction runs over the morse-sign real_mask, so an
+    # interior box subtracts four kernels automatically -- no code change to
+    # `_build_farfield_chart`).  The saddle deltoid's lobes do NOT enclose the
+    # origin; there is no origin-centred interior disk, so the interior loop
+    # records a loud skip and admits nothing (the eps gate is the final safety
+    # net for any mis-admission).
+    inradius, encloses = _caustic_inradius(
+        gamma_mid, parity, config.n_caustic_samples)
+    interior_admit_radius = inradius - config.eta_max
+    interior_records: list[dict] = []
+    interior_admitted = 0
+    interior_skip: str | None = None
+    if not encloses:
+        interior_skip = 'caustic_not_origin_enclosing'
+    elif interior_admit_radius <= 0.0:
+        interior_skip = 'tube_shell_fills_interior'
+    else:
+        int_rho = 0.0  # near-origin: the hardest interior region (Build 8h-a)
+        int_boundary = _stratum_ppgo_boundary(
+            parity, gamma_mid, int_rho, ppgo_map)
+        for si, (m_lo, m_hi) in enumerate(strata):
+            y_extent = float(_lens_prior._source_scale(m_lo))
+            grid_extent = min(interior_admit_radius, y_extent)
+            int_w_range = _stratum_w_range(box, parity, m_lo, m_hi, grid_extent)
+            trimmed_w_range, action = _apply_ppgo_trim(
+                int_w_range, int_boundary)
+            if action == 'drop':
+                dropped_strata.append({
+                    'stratum_index': si, 'region': 'interior',
+                    'mass_range': [round(m_lo, 3), round(m_hi, 3)],
+                    'w_range': [round(int_w_range[0], 6),
+                                round(int_w_range[1], 6)],
+                    'w_trust': round(float(int_boundary), 6),
+                    'reason': 'ppGO certified over the whole stratum w-band'})
+                continue
+            int_w_range = trimmed_w_range
+            tiles = _farfield_interior_tiles(
+                grid_extent, interior_admit_radius,
+                config.n_farfield_tiles_per_side)
+            interior_admitted += len(tiles)
+            interior_records.append({
+                'stratum_index': si,
+                'mass_range': [round(m_lo, 3), round(m_hi, 3)],
+                'grid_extent': round(float(grid_extent), 6),
+                'w_range': [round(int_w_range[0], 6), round(int_w_range[1], 6)],
+                'ppgo_capped': bool(action == 'cap'),
+                'admitted_tiles': len(tiles)})
+            for center, half, i, j in tiles:
+                admitted.append({
+                    'si': si, 'i': i, 'j': j, 'center': center, 'half': half,
+                    'm_lo': m_lo, 'm_hi': m_hi, 'w_range': int_w_range,
+                    'region': 'interior'})
+
+    # Loud interior summary.  Where geometry permits an interior disk (origin
+    # enclosed, admit radius positive) admission MUST be non-empty; a zero count
+    # there is a coverage defect and is flagged loudly (mirrors the exterior
+    # n_per_side admission finding).
+    interior_report: dict = {
+        'name': f'chart_{label}_farfield_interior',
+        'parity': parity, 'interior_summary': True,
+        'origin_enclosed': bool(encloses),
+        'caustic_inradius': round(float(inradius), 6),
+        'interior_admit_radius': round(float(interior_admit_radius), 6),
+        'interior_admitted_tiles': int(interior_admitted),
+        'strata': interior_records}
+    if interior_skip is not None:
+        interior_report['interior_skipped'] = interior_skip
+    elif interior_admitted == 0:
+        interior_report['interior_zero_admission'] = True
+    chart_reports.append(interior_report)
 
     # Loud per-stratum summary (0-count strata are recorded too: a high-mass
     # stratum whose whole y-box lies inside the caustic disk admits no exterior
-    # tile -- those draws are near-caustic, served by tube + ladder).
+    # tile -- those draws are near-caustic, served by tube + ladder).  Strata
+    # dropped by ppGO trimming are listed separately so the ladder census can
+    # attribute the cleared budget.
     chart_reports.append({
         'name': f'chart_{label}_farfield_strata',
         'parity': parity, 'strata_summary': True,
         'n_strata': len(strata),
         'exclusion_radius': round(float(exclusion_radius), 6),
-        'strata': stratum_records})
+        'strata': stratum_records,
+        'dropped_strata': dropped_strata})
 
     # ``max_farfield_regions`` is a TRUE cap on distinct admitted tiles; a
     # truncation is recorded loudly with the dropped count.
@@ -1580,11 +2030,15 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         si, i, j = tile['si'], tile['i'], tile['j']
         center, half, w_range = tile['center'], tile['half'], tile['w_range']
         m_lo, m_hi = tile['m_lo'], tile['m_hi']
-        tag = f'chart_{label}_s{si}_ff_{i}_{j}'
+        region = tile['region']
+        # Interior (4-image) tiles reuse the identical far-field build/serve
+        # path -- only the tag infix distinguishes them (``ffin`` vs ``ff``).
+        infix = 'ffin' if region == 'interior' else 'ff'
+        tag = f'chart_{label}_s{si}_{infix}_{i}_{j}'
         path = outdir / f'{tag}.npz'
 
         def build_ff(band=band, center=center, half=half, w_range=w_range,
-                     si=si, m_lo=m_lo, m_hi=m_hi):
+                     si=si, m_lo=m_lo, m_hi=m_hi, region=region):
             chart, calls, refused = _build_farfield_chart(
                 gamma_band=band, parity=parity, box_center=center,
                 half=half, w_range=w_range, config=config)
@@ -1593,7 +2047,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             eps = _heldout_eps(chart, samples,
                                {'schema': 'heldout-probe'})
             return chart, calls, refused, {
-                'kind': 'farfield',
+                'kind': 'farfield', 'region': region,
                 'image_count': chart.image_count,
                 'stratum_index': si,
                 'stratum_mass_range': [round(m_lo, 3), round(m_hi, 3)],
@@ -1611,7 +2065,22 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         if gated:
             chart_report['gated'] = True
             chart_report['gate_reason'] = gate_reason
+            # Build 8h-a WP4: a gated far-field tile is halved once (single
+            # level, no recursion) into up to four children, each re-admitted
+            # through the parent's own region predicate, retrained on the
+            # inherited w_range and re-gated against the same bar.  Passing
+            # children are packed; still-failing (and disk-excluded) children
+            # are recorded so the serving ladder / ladder census can attribute
+            # their windows.  A still-failing child is a recorded chart gap
+            # served by the ladder -- never numerical quadrature.
+            chart_report['subdivided'] = True
             chart_reports.append(chart_report)
+            chart_report['subdivision'] = _subdivide_farfield_tile(
+                tile=tile, parent_tag=tag, band=band, parity=parity,
+                config=config, rng=rng, outdir=outdir,
+                exclusion_radius=exclusion_radius,
+                interior_admit_radius=interior_admit_radius,
+                charts=charts, chart_reports=chart_reports)
             continue
         charts.append(chart)
         chart_reports.append(chart_report)

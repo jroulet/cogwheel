@@ -109,7 +109,9 @@ import pathlib
 import subprocess
 import sys
 import tempfile
-from unittest import TestCase, main
+import types
+from contextlib import ExitStack
+from unittest import TestCase, main, mock
 
 import numpy as np
 
@@ -1759,6 +1761,618 @@ class FarFieldGateCurrencyMutationTestCase(FarfieldEnvelopeTestCase):
             self.eps_healthy_eff, EFFNORM_THRASH_MIN,
             f'Eff-normalized eps {self.eps_healthy_eff:.3e} did not thrash -- '
             f'the tiny-denominator hazard the F-norm avoids is not exhibited')
+
+
+# ==========================================================================
+# Build 8h-a / WP4: edge-annulus far-field tile subdivision
+# (`surrogate_training._subdivide_farfield_tile`).
+#
+# A far-field tile whose held-out eps fails the registration bar is halved
+# ONCE (single level, no recursion) into up to four children at
+# ``(cx +/- h/2, cy +/- h/2)`` each with half ``h/2``.  Each child is
+# re-admitted through the PARENT's OWN region predicate (carried verbatim,
+# never re-derived from geometry): an exterior parent uses the min-corner
+# exclusion test, an interior parent the max-corner containment test.  A
+# disk-excluded child is DROPPED silently (recorded only in the subdivision
+# summary, packed in neither the charts nor the failing-chart reports).  An
+# admitted child retrains on the parent's inherited (already ppGO-trimmed)
+# ``w_range`` and re-gates against the SAME ``farfield_eps_max`` bar: a
+# passing child is packed, a still-failing child is recorded with its
+# ``gate_reason`` but NOT packed.
+#
+# These classes drive the REAL ``_subdivide_farfield_tile`` on synthetic
+# gated tiles with the four engine-backed helpers
+# (`_build_farfield_chart`, `_farfield_heldout_samples`, `_heldout_eps`,
+# `_load_or_build`) replaced by physics-free stand-ins, so the WP4 dispatch
+# logic is exercised deterministically -- the engine's fit quality is a
+# separate physics claim owned by the trainability classes above.  The gate
+# arithmetic (`_gate_chart` / `_chart_gated`) and the admission geometry are
+# the REAL production code, never stubbed.  `SubdivisionSelfFalsificationTest
+# Case` proves the packing gate, the admission predicate and the exact-centre
+# assertion each go red under a corruption.
+# ==========================================================================
+
+#: The production far-field registration bar the children are re-gated
+#: against (`TrainingConfig.farfield_eps_max`, currently ``1e-3``).
+_SUB_FARFIELD_BAR = surrogate_training.TrainingConfig().farfield_eps_max
+
+#: Synthetic held-out eps a stand-in child reports: one an order of
+#: magnitude BELOW the bar (packs) and one well ABOVE it (recorded, gated).
+_SUB_PASS_EPS = 1.0e-4
+_SUB_FAIL_EPS = 5.0e-3
+
+#: Exterior parent straddling the exclusion disk: with half ``0.4`` and
+#: ``exclusion_radius = 1.0`` the two inner children (min corner ``0.8``)
+#: are disk-excluded and the two outer children (min corner ``1.2``) admit.
+_EXT_PARENT_CENTER = (1.2, 0.0)
+_EXT_PARENT_HALF = 0.4
+_EXT_EXCLUSION_RADIUS = 1.0
+
+#: Interior parent straddling the admit disk: with half ``0.2`` and
+#: ``interior_admit_radius = 0.5`` only the origin-ward child (far corner
+#: ``0.495``) admits; the other three (far corner ``>= 0.652``) are excluded.
+_INT_PARENT_CENTER = (0.35, 0.35)
+_INT_PARENT_HALF = 0.2
+_INT_ADMIT_RADIUS = 0.5
+
+#: A parent whose exterior/interior admission sets DIFFER, used to prove the
+#: child admission is governed by the parent's region key, not re-derived
+#: geometry.  Exterior (``exclusion_radius = 0.5``) excludes the two inner
+#: children; interior (``interior_admit_radius = 1.5``) admits all four.
+_FLIP_PARENT_CENTER = (0.6, 0.0)
+_FLIP_PARENT_HALF = 0.4
+_FLIP_EXCLUSION_RADIUS = 0.5
+_FLIP_ADMIT_RADIUS = 1.5
+
+#: The parent's already-ppGO-trimmed w-band, inherited verbatim by children.
+_SUB_W_RANGE = (5.0, 60.0)
+
+
+def _fake_heldout_samples(gamma_band, box_center, half, config, rng):
+    """Patched stand-in: the sample list is irrelevant to the WP4 dispatch."""
+    return []
+
+
+def _make_fake_build(build_calls: list) -> object:
+    """A `_build_farfield_chart` stand-in recording every child box it builds.
+
+    Returns a lightweight ``SimpleNamespace`` chart (never touches the engine)
+    tagged with the exact ``box_center`` / ``half`` / ``w_range`` it received,
+    so the test can assert the children were built at ``(cx +/- h/2, cy +/-
+    h/2)`` with half ``h/2`` on the inherited w-band.
+    """
+    def _fake_build_farfield_chart(*, gamma_band, parity, box_center, half,
+                                   w_range, config):
+        build_calls.append({'center': tuple(box_center), 'half': float(half),
+                            'w_range': tuple(w_range)})
+        chart = types.SimpleNamespace(
+            image_count=2, parity=parity,
+            refused_points=np.empty((0, 3), dtype=float),
+            center=tuple(box_center), half=float(half),
+            w_range=tuple(w_range))
+        return chart, config.n_gamma * config.n_y1 * config.n_y2, 0
+    return _fake_build_farfield_chart
+
+
+def _make_fake_eps(eps_for) -> object:
+    """A `_heldout_eps` stand-in returning ``eps_for(child_center)``.
+
+    ``eps_for`` maps a child centre to the synthetic held-out eps; return
+    ``float('nan')`` to simulate a cancellation fail (zero served points).
+    """
+    def _fake_heldout_eps(chart, samples, provenance):
+        return float(eps_for(chart.center))
+    return _fake_heldout_eps
+
+
+def _fake_load_or_build(path, build_fn, provenance):
+    """A `_load_or_build` stand-in: run the build closure, skip the npz I/O.
+
+    Mirrors the fresh-build branch of `surrogate_training._load_or_build`
+    (report assembly, ``heldout_eps`` surfaced) so the REAL `_gate_chart`
+    sees the same report shape, without a filesystem round-trip.
+    """
+    chart, calls, refused, report_extra = build_fn()
+    report = {'engine_calls': int(calls), 'refused_points': int(refused),
+              'build_seconds': 0.0, **report_extra}
+    return chart, report, False
+
+
+def _expected_children(center: tuple[float, float], half: float
+                       ) -> list[dict]:
+    """The four ``(cx +/- h/2, cy +/- h/2)`` child boxes in production order.
+
+    Reproduces `_subdivide_farfield_tile`'s row-major loop (``sx`` outer in
+    ``(-1, 1)``, ``sy`` inner) with the SAME float arithmetic, so the centres
+    are bit-for-bit comparable to the ones the code builds.
+    """
+    cx, cy = center
+    child_half = 0.5 * float(half)
+    out: list[dict] = []
+    ci = 0
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            out.append({'ci': ci, 'half': child_half,
+                        'center': (float(cx) + sx * child_half,
+                                   float(cy) + sy * child_half)})
+            ci += 1
+    return out
+
+
+def _run_subdivision(*, center: tuple[float, float], half: float,
+                     region: str, eps_for,
+                     exclusion_radius: float = 1.0e9,
+                     interior_admit_radius: float = 1.0e9,
+                     w_range: tuple[float, float] = _SUB_W_RANGE,
+                     parent_tag: str = 'chart_pos_s0_ff_2_3',
+                     si: int = 0, m_lo: float = 20.0, m_hi: float = 40.0
+                     ) -> types.SimpleNamespace:
+    """Drive the real `_subdivide_farfield_tile` on one synthetic gated tile.
+
+    The four engine-backed helpers are patched on the ``surrogate_training``
+    module (the globals the subdivision resolves at call time); spies on
+    `_apply_ppgo_trim` and `_stratum_w_range` witness that NO per-child
+    re-trim fires.  Returns a namespace bundling the subdivision summary, the
+    (mutated in place) ``charts`` / ``chart_reports`` accumulators, the list
+    of built child boxes, and the re-trim spy call counts.
+    """
+    tile = {'center': center, 'half': half, 'w_range': w_range,
+            'region': region, 'si': si, 'm_lo': m_lo, 'm_hi': m_hi}
+    charts: list = []
+    chart_reports: list[dict] = []
+    build_calls: list[dict] = []
+    config = surrogate_training.TrainingConfig()
+    ppgo_spy = mock.Mock(name='_apply_ppgo_trim')
+    wrange_spy = mock.Mock(name='_stratum_w_range')
+    with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+        stack.enter_context(mock.patch.object(
+            surrogate_training, '_build_farfield_chart',
+            _make_fake_build(build_calls)))
+        stack.enter_context(mock.patch.object(
+            surrogate_training, '_farfield_heldout_samples',
+            _fake_heldout_samples))
+        stack.enter_context(mock.patch.object(
+            surrogate_training, '_heldout_eps', _make_fake_eps(eps_for)))
+        stack.enter_context(mock.patch.object(
+            surrogate_training, '_load_or_build', _fake_load_or_build))
+        stack.enter_context(mock.patch.object(
+            surrogate_training, '_apply_ppgo_trim', ppgo_spy))
+        stack.enter_context(mock.patch.object(
+            surrogate_training, '_stratum_w_range', wrange_spy))
+        summary = surrogate_training._subdivide_farfield_tile(
+            tile=tile, parent_tag=parent_tag, band=(0.02, 0.06), parity=1,
+            config=config, rng=np.random.default_rng(0),
+            outdir=pathlib.Path(tmp), exclusion_radius=exclusion_radius,
+            interior_admit_radius=interior_admit_radius,
+            charts=charts, chart_reports=chart_reports)
+    return types.SimpleNamespace(
+        summary=summary, charts=charts, chart_reports=chart_reports,
+        build_calls=build_calls, ppgo_calls=ppgo_spy.call_count,
+        wrange_calls=wrange_spy.call_count, parent_tag=parent_tag,
+        tile=tile, config=config)
+
+
+def _plot_subdivision_tree(result: types.SimpleNamespace, region: str,
+                           filename: str) -> None:
+    """Diagnostic: parent box -> child boxes coloured by disposition."""
+    if not _HAVE_MPL:
+        return
+    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    colors = {'packed': 'C2', 'recorded_gated': 'C3',
+              'disk_excluded': '0.7'}
+    cx, cy = result.tile['center']
+    half = result.tile['half']
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.add_patch(plt.Rectangle((cx - half, cy - half), 2 * half, 2 * half,
+                               fill=False, edgecolor='k', lw=1.5,
+                               label='parent tile'))
+    for child in result.summary['children']:
+        ccx, ccy = child['center']
+        ch = child['half']
+        res = child['result']
+        ax.add_patch(plt.Rectangle(
+            (ccx - ch, ccy - ch), 2 * ch, 2 * ch, alpha=0.5,
+            facecolor=colors.get(res, 'C0'), edgecolor='k', lw=0.6))
+        eps = child.get('eps')
+        tag = (f"c{child['ci']}\n{res}"
+               + ('' if eps is None else f"\neps={eps:.1e}"))
+        ax.annotate(tag, (ccx, ccy), ha='center', va='center', fontsize=7)
+    ax.set_xlabel('y1')
+    ax.set_ylabel('y2')
+    ax.set_aspect('equal')
+    ax.autoscale_view()
+    ax.margins(0.3)
+    ax.set_title(f'WP4 edge-annulus subdivision ({region} parent)\n'
+                 f'bar={_SUB_FARFIELD_BAR:g}')
+    fig.tight_layout()
+    fig.savefig(_OUTPUT_DIR / filename, dpi=110)
+    plt.close(fig)
+
+
+class ExteriorEdgeAnnulusSubdivisionTestCase(FarfieldEnvelopeTestCase):
+    """WP4: an exterior gated tile halves, drops disk-excluded children, and
+    packs/records the admitted ones by the re-gate outcome.
+
+    Fixture (`_EXT_PARENT_CENTER`, half ``0.4``, ``exclusion_radius = 1.0``):
+    the two inner children (``ci0``, ``ci1`` at ``y1 = 1.0``) are disk-
+    excluded; the two outer children (``ci2``, ``ci3`` at ``y1 = 1.4``) admit.
+    ``ci2`` (``y2 < 0``) is handed a passing eps and ``ci3`` (``y2 > 0``) a
+    failing eps, so ONE admitted child packs and ONE is recorded gated -- both
+    dispositions in a single run.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.result = _run_subdivision(
+            center=_EXT_PARENT_CENTER, half=_EXT_PARENT_HALF,
+            region='exterior', exclusion_radius=_EXT_EXCLUSION_RADIUS,
+            eps_for=lambda c: (_SUB_FAIL_EPS if c[1] > 0.0 else _SUB_PASS_EPS))
+        cls.expected = _expected_children(_EXT_PARENT_CENTER, _EXT_PARENT_HALF)
+        cls.tag = cls.result.parent_tag
+        _plot_subdivision_tree(cls.result, 'exterior',
+                               'farfield_subdivision_tree_exterior.png')
+
+    def _child_summary(self, ci: int) -> dict:
+        return next(c for c in self.result.summary['children']
+                    if c['ci'] == ci)
+
+    def _report_named(self, name: str) -> dict | None:
+        return next((r for r in self.result.chart_reports
+                     if r.get('name') == name), None)
+
+    def test_children_halve_into_exact_quarter_boxes(self):
+        """Every child sits at ``(cx +/- h/2, cy +/- h/2)`` with half ``h/2``.
+
+        Guard (b): an off-by-half (using ``h`` instead of ``h/2``) still gates
+        green by luck, so the centres and half-width are pinned EXACTLY.
+        Admitted children are checked against the un-rounded box the builder
+        received; all four against the 6-dp summary record.
+        """
+        built = {call['center']: call for call in self.result.build_calls}
+        for child in self.expected:
+            summ = self._child_summary(child['ci'])
+            self.comparisons += 1
+            self.assertEqual(
+                summ['center'],
+                [round(child['center'][0], 6), round(child['center'][1], 6)],
+                f'child {child["ci"]} summary centre is not (cx+/-h/2, cy+/-h/2)')
+            self.assertEqual(round(0.5 * _EXT_PARENT_HALF, 6), summ['half'],
+                             f'child {child["ci"]} half-width is not h/2')
+        for call in self.result.build_calls:
+            self.comparisons += 1
+            self.assertIn(
+                call['center'], {ch['center'] for ch in self.expected},
+                'a child was built at a centre other than (cx+/-h/2, cy+/-h/2)')
+            self.assertEqual(0.5 * _EXT_PARENT_HALF, call['half'],
+                             'a child was built with a half-width != h/2')
+
+    def test_disk_excluded_children_absent_from_packed_and_recorded(self):
+        """Guard (a): the two inner children are dropped -- present in NEITHER
+        the packed charts NOR the recorded-failure reports (only the summary).
+        """
+        for ci in (0, 1):
+            summ = self._child_summary(ci)
+            self.comparisons += 1
+            self.assertEqual('disk_excluded', summ['admission'])
+            self.assertEqual('disk_excluded', summ['result'])
+            self.assertIsNone(self._report_named(f'{self.tag}_c{ci}'),
+                              f'disk-excluded child c{ci} leaked into reports')
+            self.assertNotIn(
+                (float(summ['center'][0]), float(summ['center'][1])),
+                {ch.center for ch in self.result.charts},
+                f'disk-excluded child c{ci} leaked into packed charts')
+
+    def test_passing_child_is_packed(self):
+        """The admitted child under the bar is packed into ``charts`` and
+        recorded WITHOUT a gated marker."""
+        self.comparisons += 1
+        self.assertEqual(1, len(self.result.charts),
+                         'exactly one child should have packed')
+        packed = self.result.charts[0]
+        self.assertEqual(self.expected[2]['center'], packed.center,
+                         'the packed child is not ci2')
+        report = self._report_named(f'{self.tag}_c2')
+        self.assertIsNotNone(report)
+        self.assertNotIn('gated', report)
+        self.assertEqual(self.tag, report['subdivided_from'])
+        self.assertEqual(self._child_summary(2)['result'], 'packed')
+
+    def test_failing_child_is_recorded_gated_not_packed(self):
+        """Guard: the admitted child above the bar is recorded with its
+        gate-reason but NOT packed into ``charts``."""
+        report = self._report_named(f'{self.tag}_c3')
+        self.comparisons += 1
+        self.assertIsNotNone(report, 'the failing child was not recorded')
+        self.assertTrue(report.get('gated'))
+        self.assertEqual('eps_above_bar', report['gate_reason'])
+        self.assertEqual(self.tag, report['subdivided_from'])
+        self.assertNotIn(self.expected[3]['center'],
+                         {ch.center for ch in self.result.charts},
+                         'the failing child was packed despite gating')
+        self.assertEqual(self._child_summary(3)['result'], 'recorded_gated')
+
+    def test_accuracy_fail_reason_is_eps_above_bar(self):
+        """Guard (d): an accuracy fail carries ``'eps_above_bar'`` so the
+        serving ladder routes it correctly.
+
+        (The Architect brief calls this reason ``heldout_eps``; the production
+        `_chart_gated` returns ``'eps_above_bar'`` for an eps-over-bar fail,
+        which is the string asserted here -- verified against source.)
+        """
+        self.comparisons += 1
+        self.assertEqual('eps_above_bar',
+                         self._child_summary(3)['gate_reason'])
+        self.assertEqual(_SUB_FARFIELD_BAR, self._child_summary(3)['bar'])
+
+    def test_children_inherit_parent_w_range_verbatim(self):
+        """The children retrain on the parent's already-trimmed ``w_range``;
+        no per-child ``_stratum_w_range`` / ``_apply_ppgo_trim`` recompute."""
+        self.comparisons += 1
+        self.assertEqual(0, self.result.ppgo_calls,
+                         '_apply_ppgo_trim was called during subdivision')
+        self.assertEqual(0, self.result.wrange_calls,
+                         '_stratum_w_range was called during subdivision')
+        for call in self.result.build_calls:
+            self.comparisons += 1
+            self.assertEqual(_SUB_W_RANGE, call['w_range'],
+                             'a child did not inherit the parent w_range')
+
+    def test_child_tags_are_row_major_and_carry_provenance(self):
+        """Admitted children are tagged ``{parent}_c{ci}`` in row-major order
+        with a ``subdivided_from`` back-reference."""
+        names = [r['name'] for r in self.result.chart_reports]
+        self.comparisons += 1
+        self.assertEqual([f'{self.tag}_c2', f'{self.tag}_c3'], names)
+        for report in self.result.chart_reports:
+            self.assertEqual(self.tag, report['subdivided_from'])
+
+    def test_no_second_halving_depth_is_one(self):
+        """Guard (c): a still-failing child spawns NO grandchildren -- exactly
+        one build per admitted child and no ``{parent}_c#_c#`` report."""
+        self.comparisons += 1
+        self.assertEqual(2, len(self.result.build_calls),
+                         'more builds than admitted children -> recursion')
+        for report in self.result.chart_reports:
+            self.assertNotRegex(
+                report['name'], r'_c\d+_c\d+',
+                'a grandchild tag appeared -> a second halving fired')
+
+    def test_summary_records_all_four_children_with_census_fields(self):
+        """The subdivision summary carries every child (packed, recorded, and
+        disk-excluded) with the census fields the ladder attributes."""
+        children = self.result.summary['children']
+        self.comparisons += 1
+        self.assertEqual(4, len(children))
+        self.assertEqual('exterior', self.result.summary['region'])
+        self.assertEqual([0, 1, 2, 3], [c['ci'] for c in children])
+        for ci in (2, 3):
+            summ = self._child_summary(ci)
+            for key in ('eps', 'bar', 'gate_reason', 'result'):
+                self.assertIn(key, summ,
+                              f'child c{ci} summary missing {key!r}')
+
+
+class InteriorEdgeAnnulusSubdivisionTestCase(FarfieldEnvelopeTestCase):
+    """WP4: an INTERIOR gated tile re-admits children by the parent's
+    max-corner containment predicate, packs the admitted one, and drops the
+    disk-excluded ones.
+
+    Fixture (`_INT_PARENT_CENTER`, half ``0.2``, ``interior_admit_radius =
+    0.5``): only the origin-ward child ``ci0`` (far corner ``0.495``) lies
+    wholly inside the admit disk; ``ci1``/``ci2``/``ci3`` (far corner ``>=
+    0.652``) straddle it and are dropped.  The admitted child is handed a
+    passing eps.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.result = _run_subdivision(
+            center=_INT_PARENT_CENTER, half=_INT_PARENT_HALF,
+            region='interior', interior_admit_radius=_INT_ADMIT_RADIUS,
+            eps_for=lambda c: _SUB_PASS_EPS)
+        cls.tag = cls.result.parent_tag
+        _plot_subdivision_tree(cls.result, 'interior',
+                               'farfield_subdivision_tree_interior.png')
+
+    def _child_summary(self, ci: int) -> dict:
+        return next(c for c in self.result.summary['children']
+                    if c['ci'] == ci)
+
+    def test_interior_admission_uses_max_corner_predicate(self):
+        """Only the origin-ward child is admitted; the three edge children are
+        disk-excluded by the ``hypot(|cx|+h, |cy|+h) <= admit_radius`` test."""
+        self.comparisons += 1
+        self.assertEqual('admitted', self._child_summary(0)['admission'])
+        for ci in (1, 2, 3):
+            self.assertEqual('disk_excluded',
+                             self._child_summary(ci)['admission'],
+                             f'child c{ci} should straddle the admit disk')
+
+    def test_admitted_interior_child_packed_with_interior_region(self):
+        """The admitted child packs and its report carries the parent's
+        ``interior`` region key (never re-derived to exterior)."""
+        self.comparisons += 1
+        self.assertEqual(1, len(self.result.charts))
+        report = next(r for r in self.result.chart_reports
+                      if r['name'] == f'{self.tag}_c0')
+        self.assertEqual('interior', report['region'])
+        self.assertNotIn('gated', report)
+        self.assertEqual('interior', self.result.summary['region'])
+
+    def test_disk_excluded_interior_children_dropped(self):
+        """The three straddling children appear in neither packed nor
+        recorded lists."""
+        names = {r['name'] for r in self.result.chart_reports}
+        self.comparisons += 1
+        for ci in (1, 2, 3):
+            self.assertNotIn(f'{self.tag}_c{ci}', names)
+        self.assertEqual([f'{self.tag}_c0'],
+                         [r['name'] for r in self.result.chart_reports])
+
+    def test_interior_child_inherits_parent_w_range(self):
+        """The admitted interior child retrains on the inherited w_range with
+        no per-child re-trim."""
+        self.comparisons += 1
+        self.assertEqual(0, self.result.ppgo_calls)
+        self.assertEqual(0, self.result.wrange_calls)
+        self.assertEqual(1, len(self.result.build_calls))
+        self.assertEqual(_SUB_W_RANGE, self.result.build_calls[0]['w_range'])
+
+
+class CancellationChildSubdivisionTestCase(FarfieldEnvelopeTestCase):
+    """WP4 guard (d): a child that re-nans (a genuine cancellation in the same
+    parity/gamma cell) is recorded with ``'nan_eps'`` -- not special-cased,
+    not packed.  Halving cannot fix a cancellation, so both admitted children
+    of the exterior fixture are handed a NaN eps.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.result = _run_subdivision(
+            center=_EXT_PARENT_CENTER, half=_EXT_PARENT_HALF,
+            region='exterior', exclusion_radius=_EXT_EXCLUSION_RADIUS,
+            eps_for=lambda c: float('nan'))
+        cls.tag = cls.result.parent_tag
+
+    def test_cancellation_children_carry_nan_eps_reason(self):
+        """Both admitted children are gated with reason ``'nan_eps'``."""
+        for ci in (2, 3):
+            report = next(r for r in self.result.chart_reports
+                          if r['name'] == f'{self.tag}_c{ci}')
+            self.comparisons += 1
+            self.assertTrue(report.get('gated'))
+            self.assertEqual('nan_eps', report['gate_reason'])
+
+    def test_nan_eps_children_are_not_packed(self):
+        """A cancellation fail leaves ``charts`` empty; the windows fall to the
+        serving ladder (never numerical quadrature)."""
+        self.comparisons += 1
+        self.assertEqual(0, len(self.result.charts),
+                         'a NaN-eps child was packed despite gating')
+        gated = [r for r in self.result.chart_reports if r.get('gated')]
+        self.assertEqual(2, len(gated))
+        for report in gated:
+            self.assertTrue(np.isnan(report['heldout_eps']),
+                            'a cancellation child recorded a finite eps')
+
+
+class RegionKeyConsistencySubdivisionTestCase(FarfieldEnvelopeTestCase):
+    """WP4 guard (e): the child admission is governed by the PARENT's region
+    key, never re-derived from the child's geometry.
+
+    The SAME parent box (`_FLIP_PARENT_CENTER`, half ``0.4``) is subdivided
+    twice.  As an EXTERIOR parent (``exclusion_radius = 0.5``) the two inner
+    children are disk-excluded; as an INTERIOR parent (``interior_admit_radius
+    = 1.5``) all four admit.  A single fixed predicate could not produce both
+    admission sets, so the differing outcome proves the region key drives the
+    decision.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.exterior = _run_subdivision(
+            center=_FLIP_PARENT_CENTER, half=_FLIP_PARENT_HALF,
+            region='exterior', exclusion_radius=_FLIP_EXCLUSION_RADIUS,
+            eps_for=lambda c: _SUB_PASS_EPS)
+        cls.interior = _run_subdivision(
+            center=_FLIP_PARENT_CENTER, half=_FLIP_PARENT_HALF,
+            region='interior', interior_admit_radius=_FLIP_ADMIT_RADIUS,
+            eps_for=lambda c: _SUB_PASS_EPS)
+
+    @staticmethod
+    def _admissions(result) -> list[str]:
+        return [c['admission'] for c in
+                sorted(result.summary['children'], key=lambda c: c['ci'])]
+
+    def test_region_governs_admission_not_geometry(self):
+        """Identical geometry -> different admission sets under the two region
+        keys (exterior excludes two children, interior admits all four)."""
+        self.comparisons += 1
+        self.assertEqual(
+            ['disk_excluded', 'disk_excluded', 'admitted', 'admitted'],
+            self._admissions(self.exterior))
+        self.assertEqual(['admitted'] * 4, self._admissions(self.interior))
+        self.assertNotEqual(self._admissions(self.exterior),
+                            self._admissions(self.interior),
+                            'the region key did not change the admission set')
+
+    def test_summaries_carry_the_parent_region(self):
+        """Each summary reports the parent's own region string."""
+        self.comparisons += 1
+        self.assertEqual('exterior', self.exterior.summary['region'])
+        self.assertEqual('interior', self.interior.summary['region'])
+
+    def test_child_reports_never_flip_region(self):
+        """Every admitted child inherits the parent's region key verbatim."""
+        self.comparisons += 1
+        for report in self.exterior.chart_reports:
+            self.assertEqual('exterior', report['region'])
+        for report in self.interior.chart_reports:
+            self.assertEqual('interior', report['region'])
+
+
+class SubdivisionSelfFalsificationTestCase(FarfieldEnvelopeTestCase):
+    """Prove the WP4 gates can each go red: the packing gate, the admission
+    predicate, and the exact-centre assertion.
+    """
+
+    def test_lowering_eps_flips_recorded_to_packed(self):
+        """The packed-vs-recorded split is driven by the eps gate, not luck:
+        the SAME failing child (ci3), given an eps below the bar, now packs.
+        """
+        baseline = _run_subdivision(
+            center=_EXT_PARENT_CENTER, half=_EXT_PARENT_HALF,
+            region='exterior', exclusion_radius=_EXT_EXCLUSION_RADIUS,
+            eps_for=lambda c: (_SUB_FAIL_EPS if c[1] > 0.0 else _SUB_PASS_EPS))
+        healed = _run_subdivision(
+            center=_EXT_PARENT_CENTER, half=_EXT_PARENT_HALF,
+            region='exterior', exclusion_radius=_EXT_EXCLUSION_RADIUS,
+            eps_for=lambda c: _SUB_PASS_EPS)
+        self.comparisons += 1
+        self.assertEqual(1, len(baseline.charts),
+                         'baseline should pack only the passing child')
+        self.assertEqual(2, len(healed.charts),
+                         'lowering the failing eps below the bar did not pack '
+                         'the previously-recorded child -- the gate has no '
+                         'teeth')
+
+    def test_shrinking_exclusion_admits_a_previously_excluded_child(self):
+        """The admission predicate has teeth: a smaller exclusion radius admits
+        an inner child that was disk-excluded before."""
+        excluded = _run_subdivision(
+            center=_EXT_PARENT_CENTER, half=_EXT_PARENT_HALF,
+            region='exterior', exclusion_radius=_EXT_EXCLUSION_RADIUS,
+            eps_for=lambda c: _SUB_PASS_EPS)
+        admitted = _run_subdivision(
+            center=_EXT_PARENT_CENTER, half=_EXT_PARENT_HALF,
+            region='exterior', exclusion_radius=0.5,
+            eps_for=lambda c: _SUB_PASS_EPS)
+        n_excluded = sum(c['admission'] == 'disk_excluded'
+                         for c in excluded.summary['children'])
+        n_admitted = sum(c['admission'] == 'disk_excluded'
+                         for c in admitted.summary['children'])
+        self.comparisons += 1
+        self.assertEqual(2, n_excluded)
+        self.assertLess(n_admitted, n_excluded,
+                        'shrinking the exclusion radius did not admit any '
+                        'previously-excluded child -- no teeth')
+
+    def test_off_by_half_center_would_be_caught(self):
+        """The exact-centre assertion is load-bearing: the code centres children
+        at ``cx +/- h/2`` (half ``h/2``), NOT the off-by-half ``cx +/- h``."""
+        result = _run_subdivision(
+            center=_EXT_PARENT_CENTER, half=_EXT_PARENT_HALF,
+            region='exterior', exclusion_radius=_EXT_EXCLUSION_RADIUS,
+            eps_for=lambda c: _SUB_PASS_EPS)
+        built = {call['center'] for call in result.build_calls}
+        cx, cy = _EXT_PARENT_CENTER
+        off_by_half = {(cx + sx * _EXT_PARENT_HALF, cy + sy * _EXT_PARENT_HALF)
+                       for sx in (-1.0, 1.0) for sy in (-1.0, 1.0)}
+        self.comparisons += 1
+        self.assertTrue(built, 'no child was built')
+        self.assertFalse(built & off_by_half,
+                         'a child was built at cx+/-h (off-by-half) -- the '
+                         'exact-centre guard would not catch the bug')
 
 
 if __name__ == '__main__':

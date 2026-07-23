@@ -1997,7 +1997,11 @@ class BuildOrchestrator:
                     'under COGWHEEL_BRUTE_ACCURACY). Do not modify '
                     'non-test files.'
                     + CHANGE_REPORT_INSTRUCTION)
-                td_result, _ = await self._run_agent('test_dev', td_task)
+                # Same turn-floor protection as coders: an under-budgeted
+                # revision-loop test_dev died at error_max_turns and killed
+                # build 8h-a-fin (2026-07-23) with the content nearly done.
+                td_result, _ = await self._run_agent(
+                    'test_dev', td_task, max_turns_override=75)
                 self._collect_change_report(td_result)
                 impl_findings = [
                     f for f in impl_findings if f not in test_findings]

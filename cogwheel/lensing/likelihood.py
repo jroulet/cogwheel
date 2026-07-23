@@ -97,6 +97,9 @@ from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
 from cogwheel.lensing.surrogate import _FARFIELD_ENVELOPE_DEFINITION
+from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
+                                       caustic_geometry,
+                                       get_certified_ppgo_map)
 
 __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
 
@@ -1328,6 +1331,66 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             switch_dense, partition.critical_delay)
         return kernels
 
+    def _ppgo_band_split(self, lens):
+        """
+        Trusted dispatch floor ``w_trust`` for a per-node band split, or
+        ``None``.
+
+        Queries the process-global certified-ppGO map
+        (`get_certified_ppgo_map`) for the margin-inflated trusted floor
+        ``w_trust`` at this draw's ``(parity, gamma, caustic-frame rho)``.
+        Above ``w_trust`` the bare point-mass geometric-optics (ppGO)
+        reconstruction is certified accurate, so the dense ``w`` band may
+        be split: chart-served below, bare ppGO above
+        (`_surrogate_coefficients`).  ``w_trust`` is read from the map --
+        never a hardcoded constant.
+
+        The caustic-frame annulus coordinate is
+        ``rho = |y| / caustic_reach`` with ``caustic_reach`` from
+        `ppgo_map.caustic_geometry` -- the SAME authoritative reach the
+        map was built with, so the query lands in the cell the draw
+        belongs to (DRY: one caustic-reach convention, shared).
+
+        Returns ``None`` -- meaning "do NOT band-split; keep today's
+        whole-band behaviour" -- when no map is installed, the caustic
+        reach is undefined, or the cell is `UNKNOWN` (out of grid, beyond
+        the Schwinger wall, or a parity-invalid band).  ``kappa`` is
+        assumed ``0`` (the caller has already refused ``kappa != 0``); the
+        map and its caustic-reach convention are ``kappa = 0`` surfaces.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters (`_lens_params`); ``gamma``, ``y1``, ``y2``
+            are used.
+
+        Returns
+        -------
+        float or None
+            The trusted dispatch floor ``w_trust`` (raw ``w`` units), or
+            ``None`` to keep whole-band behaviour.
+        """
+        ppgo_map = get_certified_ppgo_map()
+        if ppgo_map is None:
+            return None
+        gamma = float(lens['gamma'])
+        # kappa == 0 here (the caller refused kappa != 0): the macro image
+        # is a minimum (positive parity) for gamma < 1 and a saddle for
+        # gamma > 1.  The gamma == 1 parity boundary lies inside the map's
+        # guard band and returns UNKNOWN, so no split is attempted there.
+        parity = 'positive' if gamma < 1.0 else 'saddle'
+        try:
+            reach, _direction = caustic_geometry(gamma, 0.0)
+        except LensDomainError:
+            return None
+        if not reach > 0.0:
+            return None
+        rho = float(np.hypot(lens['y1'], lens['y2'])) / reach
+        w_trust = ppgo_map.w_trust(parity, gamma, rho)
+        if w_trust is UNKNOWN:
+            return None
+        return float(w_trust)
+
     def _surrogate_coefficients(self, par_dic):
         """
         Surrogate fast-path amplification coefficients, or ``None``.
@@ -1353,6 +1416,25 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         the candidate (out of the trained ``w`` / ``gamma`` box, wrong
         image-count region, inside a chart's caustic floor, or in a cusp
         window).
+
+        Per-node band split (Build 8h-a WP2).  When a certified-ppGO map
+        is installed (`_ppgo_band_split`) and this draw's cell is
+        certified, the dense ``w`` band is split at the map's trusted
+        floor ``w_trust``: nodes at or below ``w_trust`` are served by the
+        chart (over the sub-band slice, so whole-band containment is
+        checked against the sub-band), and nodes above ``w_trust`` are
+        served by the bare point-mass ppGO -- the far-field kernel sum
+        with the wave correction ``E_ff = 0``, which telescopes to the
+        existing image-kernel sum (no new formula).  Both segments share
+        the ONE full-band partition, so their per-channel kernels are
+        w-ordered by construction and reduce through the unchanged
+        `_reduce_dense_kernels`.  Beyond-wall / out-of-grid cells return
+        `UNKNOWN` from the map, so no split is attempted and any node no
+        rung certifies still raises its named refusal.  The split applies
+        only to the far-field label; a tube candidate is never band-split
+        (the ppGO telescoping identity is a far-field-gauge identity).
+        When the map is None or the cell is `UNKNOWN` the flow is
+        byte-identical to the whole-band path.
 
         Returns ``None`` -- signalling the caller to fall through to the
         exact path -- when the candidate carries ``kappa != 0`` (the
@@ -1397,25 +1479,75 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         surrogate = self.amplification_surrogate
 
-        # Cheap pre-check on (gamma, w-band) BEFORE building the geometry
-        # partition: a candidate no chart's (gamma, log w) box can contain
-        # is unservable, so skip the partition work entirely.
-        log_w = np.log(dense_w)
-        if not surrogate.may_serve(
-                lens['gamma'], float(log_w.min()), float(log_w.max())):
+        # Per-node band split (Build 8h-a WP2).  If a certified-ppGO map
+        # is installed AND this draw's cell is certified, split the dense
+        # w band at the trusted floor ``w_trust`` (read from the map, never
+        # a hardcoded constant): nodes at or below w_trust are chart-served,
+        # nodes above are served by the bare point-mass ppGO reconstruction
+        # (the far-field kernel sum with the wave correction ``E_ff = 0``,
+        # which telescopes to the existing image-kernel sum).  When the map
+        # is None or the cell is UNKNOWN, w_trust is None and the flow is
+        # byte-identical to the whole-band path (surrogate None short-
+        # circuits even earlier, via the caller's ``is not None`` guard).
+        w_trust = self._ppgo_band_split(lens)
+        w_lo = float(dense_w.min())
+        w_hi = float(dense_w.max())
+        # F005 / beyond-wall guard (INS-8haf-002): the map certifies a
+        # CELL by geometry, but certification only exists BELOW the
+        # parity's Schwinger wall — the exact reference does not exist
+        # above it.  A draw whose band tops out beyond the wall must NOT
+        # be band-split (bare ppGO would silently serve uncertified
+        # beyond-wall nodes); fall through to the whole-band path, which
+        # refuses loudly exactly as HEAD does.
+        if w_trust is not None:
+            wall = (ASTROID_WALL if float(lens['gamma']) < 1.0
+                    else SADDLE_WALL)
+            if w_hi > wall:
+                w_trust = None
+        band_split = w_trust is not None and w_lo < w_trust < w_hi
+
+        # The chart segment is the sub-band the surrogate must actually
+        # serve, so whole-band containment (`may_serve` / `select_chart`)
+        # is checked against THIS slice, not the full band.  Without a
+        # split it is the whole band (byte-identical to HEAD).
+        below_mask = ((dense_w <= w_trust) if band_split
+                      else np.ones(dense_w.shape, dtype=bool))
+        chart_w = dense_w[below_mask]
+        if chart_w.size == 0:
             return None
 
-        # Cheap geometry-only partition (no exact total).  A candidate-side
-        # `geometry.LensDomainError` propagates UNSWALLOWED.
+        # Cheap pre-check on (gamma, chart sub-band) BEFORE building the
+        # geometry partition.  Weakened from the full band to the chart
+        # sub-band (Build 8h-a WP2): a band-splittable candidate whose FULL
+        # band overflows every chart's log-w box can still have a servable
+        # lower sub-band.  This stays a pure performance gate -- select_chart
+        # below still returns None (fall through) if no chart covers the
+        # sub-band, so it never serves where a chart would refuse.
+        log_chart_w = np.log(chart_w)
+        if not surrogate.may_serve(
+                lens['gamma'], float(log_chart_w.min()),
+                float(log_chart_w.max())):
+            return None
+
+        # Cheap geometry-only partition over the FULL dense band (no exact
+        # total).  A candidate-side `geometry.LensDomainError` propagates
+        # UNSWALLOWED.  The chart segment and the ppGO segment both reduce
+        # through this ONE partition, so their per-channel kernels share
+        # the same minimum-relative delays and channel structure and the
+        # w-ordered "concatenation" is structural: the intact full-band
+        # array carries the chart envelope below w_trust and E_ff = 0 above,
+        # so no reordering of the bin/sub-sample grid is ever needed.
         geom = ChangRefsdalChannels(dense_w).geometry_partition(
             gamma=lens['gamma'], y=(lens['y1'], lens['y2']),
             beta=lens['beta'], kappa=lens['kappa'])
 
-        # Full multi-chart guard stack: chart selection keys on the
-        # certified physical caustic distance + real-image count (theta is
-        # used only for cusp exclusion).  Recomputes NO geometry.
-        envelope_dense, served, definition = surrogate.serve(
-            dense_w, gamma=lens['gamma'], y1=lens['y1'], y2=lens['y2'],
+        # Full multi-chart guard stack on the CHART sub-band slice only:
+        # chart selection keys on the certified physical caustic distance +
+        # real-image count (theta is used only for cusp exclusion) and its
+        # whole-band containment is thus enforced against the sub-band.
+        # Recomputes NO geometry.
+        envelope_chart, served, definition = surrogate.serve(
+            chart_w, gamma=lens['gamma'], y1=lens['y1'], y2=lens['y2'],
             beta=lens['beta'], eta=geom.caustic_distance,
             theta=geom.caustic_theta,
             image_count=int(geom.real_mask.sum()))
@@ -1427,18 +1559,36 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             # (`farfield_envelope_from_partition`): reconstruct its exact
             # inverse with the switch forced to 1 on every real channel and
             # NO ``tau_c`` carrier, so the kernel sum added back telescopes
-            # to ``F`` to machine precision (Build 8g-b serving mirror).
+            # to ``F`` to machine precision (Build 8g-b serving mirror).  On
+            # a band split the wave correction above w_trust is certified
+            # below the ppGO bar, so ``E_ff = 0`` there: the upper-band
+            # kernels collapse to the bare image-kernel sum (the existing
+            # ppGO), routed through the SAME partition for per-channel
+            # consistency -- routing only, not a new formula.  Without a
+            # split ``envelope_dense`` equals the served envelope exactly
+            # (below_mask is all True), so the path is byte-identical.
+            envelope_dense = np.zeros(dense_w.shape, dtype=complex)
+            envelope_dense[below_mask] = envelope_chart
             ff_switch = np.zeros(
                 (dense_w.shape[0], geom.real_mask.size), dtype=float)
             ff_switch[:, np.asarray(geom.real_mask, dtype=bool)] = 1.0
             kernels, _total = reconstruct_from_envelope(
                 dense_w, envelope_dense, geom.delays, geom.saddle_kernels,
                 ff_switch, 0.0)
+        elif band_split:
+            # A tube carries the caustic-region envelope reconstructed with
+            # the geometry's own switch / critical delay; the ppGO
+            # telescoping identity above does NOT hold for that gauge, so a
+            # band split of a tube is not served -- fall through to the
+            # exact path.  Tubes live near-caustic where the map returns
+            # UNKNOWN (so band_split is normally already False for them);
+            # this guard is the belt-and-braces case.
+            return None
         else:
             # Tube (or legacy) label uses the caustic-region envelope with
             # the geometry's switch and critical delay -- unchanged.
             kernels, _total = reconstruct_from_envelope(
-                dense_w, envelope_dense, geom.delays, geom.saddle_kernels,
+                dense_w, envelope_chart, geom.delays, geom.saddle_kernels,
                 geom.switch, geom.critical_delay)
         k0, k1 = self._reduce_dense_kernels(kernels)
         delays = self._image_delays(lens, geom)

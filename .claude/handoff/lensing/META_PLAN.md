@@ -2696,23 +2696,45 @@ emit-on-change, stall alarm. Floor verdict banked: 3.9x (target 2x
 missed; ~1.8 ms unattributed glue exposed — follow-up profile, not a
 blocker). Next: campaign report -> census + PP -> owner enable
 package.
+## Current plan (2026-07-23, supersedes prior sequencing entries — history in git)
 
-## Overnight autonomous run (2026-07-22 evening, owner asleep — standing orders)
-Mission: global surrogate artifact on hand by morning, with evidence it is
-the morally correct interpolant (certified serves + named-bucket non-serves
-+ census-measured coverage; NO small-patch-style silent coverage bugs).
-1. 8g-b: review gates/escalations; driver tree gate (641+ collect, -n8) then
-   commit (verdict-flip SDK bug already fixed).
-2. Campaign v3: FRESH outdir /home/tejaswi/Work/cogwheel_training/full_box_v3;
-   v2 config + Professor Q7 consolidation (n_farfield_tiles_per_side=2,
-   n_y1=n_y2=5); setsid detach + chart-count monitor w/ stall alarm.
-3. Mid-run probe at ~1 h (STANDING PROTOCOL): partial-artifact serve/refuse
-   probe + per-tile eps in F-normalized currency; kill+report if systemic red.
-4. On completion: census v3 (census_full_box driver script; update for serve
-   3-tuple + new far-field reference) — serve fraction, bucket partition,
-   per-chart eps vs bars, lnL tiers, binning floor.
-5. Morning report: artifact path/size/chart count, eps distribution, census
-   verdict, residue named (interior high-gamma + saddle beyond-w-cap m>458
-   pending 8h qd), seam evidence. Push ONLY on hard failure needing owner.
-Fallbacks: 8g-b hard-fail or probe systemic red -> stop, preserve state,
-write diagnosis, do not thrash. Fable tier owner-only; agents standard.
+Standing owner rulings in force: zero-quadrature final serving (charts or
+ppGO/arms only); 100% coverage mandatory; expensive campaigns fired ONLY
+after cheap validation gates pass; journal carries current state only.
+
+Sequence (each step gates the next; any red -> stop and diagnose):
+1. Build 8h-a-fin commits green (WP4 + full verification of in-tree
+   WP1-3: ppGO map product, band-split dispatch, interior tiles,
+   annulus subdivision).
+2. Production ppGO w_cert map sweep (~30-60 min, exact references).
+3. Cheap validation on the EXISTING v3 artifact + new dispatch + map:
+   ladder census (expect B_ppgo bucket to appear from 0) and an lnL
+   spot-check (~50-100 draws, band-split paths, within tier bars).
+4. P1 probe (scratchpad): decompose annulus E_ff into complex-image
+   pair + remainder; success = remainder fits raw-coordinate splines at
+   deep-exterior accuracy (~1e-4). P2 measurement: one-band pilot
+   training run at production config; inspect interior gate pass-rate
+   for band-edge losses (fix would be diamond-scaled interior coords).
+5. Build 8h-b (PLANNED, owner ruling 2026-07-23 — both levers shrink
+   the patch count): annulus complex-pair subtraction (Stokes
+   bookkeeping) + caustic-fixed interior coordinates (per-lobe frames
+   give the saddle deltoids interior coverage). The P1/P2 probes
+   CALIBRATE the implementation (P1: remainder smoothness + Stokes
+   lines; P2: pilot gate pass-rate + coordinate details); a lever is
+   dropped only if its probe falsifies the premise outright. qd is
+   8h-c.
+6. qd build (engine numerics only; needs NO trained artifact): dd->qd
+   Schwinger core, certified wall ~155; then extend the w_cert map
+   sweep into [58, 155] with the new exact references.
+7. ONE full campaign with ALL fixes and qd-unlocked saddle strata;
+   standing 1-h mid-run probe; then the ladder census -> 100% (zero
+   quadrature, no open tail); then PP validation and the owner
+   enable-by-default package.
+   Contingency: if qd stalls beyond bound, fire the campaign without
+   the tail and carry the measured ~360/1024 beyond-wall residual as
+   the single open bucket until qd lands.
+
+Post-commit driver chores: /dream consolidation pass (Phase 3 skipped
+by three failed builds; SDK now caps inlined memories at 24 KB), gw
+port items 16-18 (escalation verdict flip, memory-inline cap,
+consolidation coupling), spec sync via Librarian.

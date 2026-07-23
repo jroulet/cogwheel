@@ -1,5 +1,63 @@
 # Architect Short-Term Observations
 
+## Build 8h-a-FIN — complete WP4 + test batch PLANNING 2026-07-23
+WP1-3 uncommitted in tree (verified: _farfield_interior_tiles,
+_stratum_ppgo_boundary, _apply_ppgo_trim present; _train_band_charts
+takes ppgo_map arg). Only WP4 to implement + all 8 domain tests (verbatim
+from approved plan) -> Test Developer. ONE Coder WP (Simplifier: lean).
+WP4 = subdivision in _train_band_charts final `for tile in admitted:`
+loop: gated tile (eps>farfield_eps_max OR nan_eps) -> halve h->h/2 into
+<=4 children at (cx±h/2, cy±h/2), re-admit per-child via SAME region key
+(exterior hypot(max(0,|cx|-h/2),...)>=exclusion_radius / interior
+hypot(|cx|+h/2,...)<=admit_radius), retrain _build_farfield_chart,
+re-gate _gate_chart; pass->pack, fail->record gate_reason (NOT pack).
+CONSTRAINTS baked: (Simplifier) ONE level NO recursion explicit; children
+INHERIT parent trimmed w_range, don't recompute; region key from PARENT
+never re-derive. (Professor) irreducible near-annulus child fail EXPECTED
+(-> serving ladder); nan_eps CancellationError child re-nans halving
+can't fix, also expected; bar tile-size-invariant abs on max|E_ff|, child
+sees easier target; _build_farfield_chart fixed node count over smaller
+area = finer density OK. Test guards ADDED to WP4 test desc: (a) disk-
+excluded child in NEITHER packed NOR recorded list; (b) child centers
+exactly (cx±h/2,cy±h/2) half h/2; (c) no 2nd halving depth==1; (d) fail
+child carries correct gate_reason string (heldout_eps vs nan_eps); (e)
+region-key consistency parent->child. Leave .claude/sdk/memory.py +
+.serena memories as found (E2BIG infra fix, commit with build). No
+surrogate.py/tube change; no doc/changelog WP (post-gate). WP4 depends WP3.
+
+
+## Build 8h-a — band-split serving + ppGO map PLANNING 2026-07-23
+4 WPs = 4 levers. WP1 certified-ppGO domain map (NEW data product,
+Pearcey pattern): cogwheel/lensing/ppgo_map.py CertifiedPpgoMap
+(load+SHA1+w_cert(parity,gamma,annulus)->float|UNKNOWN) + producer
+scripts/train_ppgo_map.py (offline sweep |F-ppGO_full|/max|F| vs exact,
+synthetic-scale in-build) + DATA_CONTRACTS/data_registry/regenerate_
+consumer_graph entries (mechanical, mirror pearcey_table). WP2 band-split
+dispatch ENTIRELY in likelihood.py _surrogate_coefficients (Simplifier:
+do NOT touch surrogate.py serve; split dense_w at w_cert, serve() sub-band
+slice below, bare ppGO geometric_amplification image_kernel sum above,
+concat, reduce; may_serve->gamma-only if too conservative, perf-only).
+depends WP1. WP3 interior 4-image tiles in surrogate_training.py (E_ff=
+F-4 kernels via real_mask, admit inside caustic disk minus tube shell,
+companion predicate to _farfield_tiles) + strata-trim above w_cert.
+depends WP1. WP4 edge-annulus subdivision (halve 166 gated tiles,
+children re-check disk admission, re-gate). depends WP3.
+Professor NUMBERS (cite): w_trust=max(1.5*w_cert, w_cert+2.0); error
+NON-monotone (image-delay beats) -> store SUP-over-w floor (last upward
+re-crossing), NOT first crossing; certify per-node eps<1e-4 F-norm (NOT
+1e-3, probe-only; coherent lnL accum ~eps*SNR^2); annulus edges
+{0,0.5,0.9,1.0-,1.0+,1.5,2.5,4.0,inf}; gamma log 0.05-1.55 6-8 cells +
+density@0.5,1.0; w log >=12/decade; max-jump guard=additive margin;
+real_mask by morse_index SIGN not hardcoded-4 (astroid interior sum 0 !=
+saddle deltoid interior sum -2); refuse beyond-wall (UNKNOWN never
+certifies, ~360/1024 m>458 measured invariant). Test bars: ppGO seg
+<=1e-4 F-norm every node; chart seg 5e-3 abs on max|E_ff|; seam agree
+5e-3; telescoping 1e-12*max|F|; sup-floor test=SYNTHETIC injected beat
+array; F010 both dirs on ONE fixed draw + beyond-wall + assert loud
+refusal not quad fallthrough; interior admission incl cusp-adjacent
+mixed-morse-sign fixture. All tests -> Test Developer.
+
+
 ## Build 8g-b — far-field envelope redefinition PLANNING 2026-07-22
 Root cause: far-field label = partition.envelope (SACR-C, demodulated at
 tau_c w/ criticality switch S_a keyed on w|tau_a-tau_c|); on astroid

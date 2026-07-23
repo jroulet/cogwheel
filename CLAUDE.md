@@ -66,6 +66,9 @@ shallow:
   decomposition), history/narrative (reference files instead), or pointers
   to `.claude/handoff/**/META_PLAN.md` (driver journal, never agent
   context).
+- Live documents (META_PLAN, plans, configs, briefs) state CURRENT truth
+  only: rewrite superseded content in place — git is the archive. Never
+  append corrections atop stale entries.
 - Prefer several small sequential builds over one wide one. If an honest
   decomposition needs more than ~3 WPs, split into sequential builds; reject
   over-wide plans at the plan gate.

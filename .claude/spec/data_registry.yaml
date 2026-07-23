@@ -18,7 +18,7 @@
 #   MINOR: new data entries or storage locations
 #   PATCH: path corrections, metadata fixes
 
-schema_version: "1.1.0"
+schema_version: "1.2.0"
 
 # ── Storage roots ────────────────────────────────────────────────────────
 # Define named storage locations. Code references roots by name, not path.
@@ -59,6 +59,14 @@ entries:
     created_by: "scripts/train_pearcey_table.py"
     schema_ref: "pearcey_table"
     notes: "Off by default; regenerate with: python scripts/train_pearcey_table.py <path>"
+  certified_ppgo_map:
+    description: "Certified-ppGO frequency-floor map: per (parity, gamma-band, caustic-frame annulus) cell, the sup-over-w floor w_cert at which the bare point-mass geometric-optics reconstruction matches the exact engine to the 1e-4 F-normalized bar (UNKNOWN beyond the Schwinger wall)."
+    storage_root: "package_data"
+    relative_path: "certified_ppgo_map.npz"
+    format: "npz"
+    created_by: "scripts/train_ppgo_map.py"
+    schema_ref: "certified_ppgo_map"
+    notes: "Off by default; regenerate with: python scripts/train_ppgo_map.py <path> (add --production for the true walls)."
   # Example:
   # training_data:
   #   description: "Preprocessed training dataset"

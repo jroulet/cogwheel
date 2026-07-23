@@ -223,3 +223,13 @@ artifacts:
         function: "cusp_amplification"
       - module: "cogwheel/lensing/chang_refsdal/_pearcey_cusp.py"
         function: "use_pearcey_table"
+
+  certified_ppgo_map:
+    description: "Hash-pinned lookup of the certified-ppGO frequency floor w_cert per (parity, gamma-band, caustic-frame annulus rho=|y|/caustic_reach) cell. Single npz of the parity codes, gamma-band and annulus edges, and per-cell w_cert (the sup-over-w floor at the 1e-4 F-normalized bar), diagnostic w_cert (1e-3 probe bar), status codes and interpolability flags, plus a JSON provenance scalar (grid bounds, certification bar, safety-margin rule w_trust=max(1.5*w_cert, w_cert+2.0), walls, SHA1 content hash); loaded and hash-verified via CertifiedPpgoMap.load. Off by default (opt-in via set_certified_ppgo_map / use_certified_ppgo_map); the band-split dispatch queries w_cert/w_trust to place the ppGO-vs-chart split and refuses / charts on the UNKNOWN sentinel (beyond-wall, invalid, out-of-grid, or no map installed). w is dimensionless frequency; gamma is external shear magnitude; rho is the dimensionless caustic-frame annulus radius."
+    format: "npz"
+    producer:
+      module: "scripts/train_ppgo_map.py"
+      function: "main"
+    consumers:
+      - module: "cogwheel/lensing/ppgo_map.py"
+        function: "use_certified_ppgo_map"

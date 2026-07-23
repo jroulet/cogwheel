@@ -121,6 +121,24 @@ def get_write_memory_for_agent(agent_name: str) -> Optional[str]:
     return config.get("writes")
 
 
+#: Per-memory cap on content inlined into agent system prompts. The system
+#: prompt travels as ONE argv string and Linux MAX_ARG_STRLEN is 128 KiB;
+#: an uncapped coder short_term memory (measured 104 KB, 2026-07-23) pushed
+#: a spawn over the limit and killed build 8h-a with E2BIG at coder-5.
+_MEMORY_INLINE_CAP = 24_000
+
+
+def _cap_memory_content(content: str) -> str:
+    """Cap memory content at the inline limit, keeping the most recent tail."""
+    if len(content) <= _MEMORY_INLINE_CAP:
+        return content
+    kept = content[-_MEMORY_INLINE_CAP:]
+    return (
+        f"[TRUNCATED for prompt size: kept most recent {_MEMORY_INLINE_CAP} "
+        f"of {len(content)} bytes — read the full memory via "
+        f"mcp__serena__read_memory if earlier entries are needed]\n" + kept)
+
+
 async def load_memories_text(
     memory_names: list[str],
     project_root: str,
@@ -146,7 +164,7 @@ async def load_memories_text(
             else:
                 content = f"(memory '{name}' not found)"
 
-        parts.append(f"### Memory: {name}\n{content}")
+        parts.append(f"### Memory: {name}\n{_cap_memory_content(content)}")
 
     return "\n\n".join(parts)
 
@@ -164,7 +182,7 @@ def load_memories_text_sync(
             content = mem_path.read_text(encoding="utf-8")
         else:
             content = f"(memory '{name}' not found)"
-        parts.append(f"### Memory: {name}\n{content}")
+        parts.append(f"### Memory: {name}\n{_cap_memory_content(content)}")
 
     return "\n\n".join(parts)
 

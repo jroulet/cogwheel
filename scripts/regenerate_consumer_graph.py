@@ -76,6 +76,15 @@ LOADERS: dict[str, dict] = {
              "cogwheel.lensing.surrogate.LensAmplificationSurrogate.load"),
         ],
     },
+    "CertifiedPpgoMap.load": {
+        "artifact": "certified_ppgo_map",
+        "method": "load",
+        "class_name": "CertifiedPpgoMap",
+        "definitions": [
+            ("cogwheel/lensing/ppgo_map.py",
+             "cogwheel.lensing.ppgo_map.CertifiedPpgoMap.load"),
+        ],
+    },
 }
 
 # ripgrep --glob exclusions. Keep in sync with EXCLUDED_PREFIXES in
