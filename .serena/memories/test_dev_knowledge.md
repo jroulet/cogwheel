@@ -25,7 +25,11 @@
   back); assert fallback==direct bit-identically via float64 .tobytes().
   Byte-identity vs HEAD: exec `git show HEAD:file` into a module registered in
   sys.modules FIRST, compare lnL + fiducial nodes max|diff|=0, red-check via
-  np.nextafter.
+  np.nextafter. For a module with numba @njit(cache=True) decorators, the HEAD
+  copy MUST be a REAL temp .py file loaded via
+  `importlib.util.spec_from_file_location` (register in sys.modules before
+  exec) — numba needs a real file locator; exec-ing HEAD source into a
+  synthetic module raises "no locator available".
 - When a production-scale absolute tolerance (eps<1e-3, nat tiers) is
   UNREACHABLE in a minutes-scale fixture, gate on a BUDGET-INDEPENDENT
   relationship: for lnL-from-envelope error use dlnL <= AMP * eps_dense *
@@ -66,3 +70,23 @@
   command shape (`python -m pytest <file> -q`) from the WORKTREE root; retry a
   bare denial once, a reasoned denial binds. Heavy lensing suites run together
   -> MemoryError; run one file at a time.
+- For self-contained HEAD functions (no module-level state), AST-extract just
+  the FunctionDef (`ast.get_source_segment`) and exec in a minimal namespace —
+  cheaper than loading the whole HEAD module side-by-side when the function
+  doesn't need it.
+- To fixture near-singular/underflow behavior of a quantity LINEAR in its
+  inputs, solve for a nullspace combination (e.g. s such that h1+s*h2 drives
+  the target to ~0) rather than hand-tuning — produces genuine catastrophic
+  cancellation with O(1) intermediates.
+- Before using a config as a dispatch/ladder probe fixture, verify it's
+  actually served by the TARGET arm and not preempted by a higher-priority
+  arm — check which arm served bit-for-bit, don't assume from parameter
+  ranges alone.
+- Huge test files can break the built-in Edit/Read tools (size/token limits,
+  "not read yet") — use Serena `replace_content` (relative path) and
+  `read_file` ranges + `get_symbols_overview` instead of a full-file read.
+  `tests/output/` can be hook-blocked from `list_dir`/`find_file` ("Path
+  ignored") — verify generated artifacts (plots) via plain Python
+  (`pathlib.glob`) in the conda env instead.
+- SDK now caps inlined short-term memories at 24KB (tail-kept); earlier
+  entries survive only in git history, not the prompt.

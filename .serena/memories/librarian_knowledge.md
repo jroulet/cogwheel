@@ -37,3 +37,13 @@
   engine-row prose (which may describe the lower layer). Flip the sentence
   only once the public layer's raise is gone (channels saddle guard was
   lifted at Build 7b — the positive-parity-only claim is now due to flip).
+- A todo fragment's itemized list can imply more distinct mechanisms than
+  actually landed — ground-truth against `git log`/code before hunting for
+  a claimed Nth separate change; N items can resolve as fewer mechanisms.
+- If a symbol's own docstring already carries thorough rationale (e.g. a
+  config dataclass docstring), treat SPEC.md's paragraph as a compressed
+  echo of it — check the docstring first for staleness before re-deriving
+  from the functions.
+- If the Serena MCP connection drops mid-task, just retry — the project's
+  own hooks block Bash/Read fallbacks on project files/commands, so there
+  is no usable fallback anyway.

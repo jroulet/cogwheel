@@ -14,3 +14,6 @@
   Decline immediately; do not re-verify the same no-op every pass (it
   recurred 7x on INS-5-DOC-1). Escalate the mis-route as an orchestrator
   routing bug rather than burning an agent turn repeating the decline.
+- `rename_symbol` updates live code references but not docstring mentions
+  of the old name written as `module._old_name` text — grep and fix those
+  separately.

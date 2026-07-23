@@ -98,3 +98,13 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   (INS-8a-001): serve gate has NO kappa axis (trained kappa=0) — safe only
   because production pins kappa=0; add a kappa!=0 -> None guard for the
   conservative-serve contract.
+- Far-field tile subdivision (Build 8h WP4): halving a tile reduces heldout
+  eps because E_ff (the demodulated SACR-C envelope) is smooth — spline
+  error ~h^(p+1) drops ~2^(p+1) per halving — EXCEPT tiles straddling a
+  genuine caustic non-analyticity (fold/cusp turning point, or a tau_c lobe
+  jump between deltoid lobes), which subdivision cannot rescue; those
+  children correctly stay failing and fall to the ppGO serving ladder below
+  w_cert.
+- farfield_eps_max is an ABSOLUTE bound on max|E_ff| residual, not
+  per-tile/density-normalized — valid to compare parent vs child directly
+  since E_ff's config-level max|F| scale is identical for both.

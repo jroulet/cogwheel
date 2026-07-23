@@ -74,3 +74,17 @@
   Int_0^inf t^{s-1} h(t) form is ill-posed — use subtract-h(0) or IBP-with-
   h'. A DIFFERENT regularization scheme from the code's is the point (F002
   non-circular); phase agreement also confirms sign/conjugation convention.
+- Serena `replace_symbol_body` on a function target: the new body MUST
+  include the `def` signature line — omitting it deletes the def+docstring,
+  producing a column-0 IndentationError.
+- Never hand-tune a calibration/curvature constant just to make your own
+  certificate pass — that fits the oracle to the code under test
+  (self-grading); leave it refusing and flag the calibration as owed work.
+- For large Monte-Carlo census sweeps (N>=1e5), stream results into fixed
+  threshold-grid histograms (`counts_ge += (arg>=grid).sum()`) instead of
+  storing per-sample arrays — the histogram IS the CDF, no memory blowup.
+- To classify which guard blocks a sample, toggle ONE guard off via
+  `dataclasses.replace` on a frozen config object and re-call the real
+  guard function — never re-derive the guard math inline.
+- SDK now caps inlined short-term memories at 24KB (tail-kept); earlier
+  entries survive only in git history, not the prompt.

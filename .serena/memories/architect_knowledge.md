@@ -68,3 +68,14 @@
 - Two-tier verify: in-build = small reduced-domain surrogate/fixture + fast
   falsifiable gates; full-box training/census/PP-plots are POST-BUILD driver
   steps named in acceptance, never in-build test specs.
+- Accuracy/eps gates evaluated at artifact-build time must persist their
+  metric in per-artifact provenance so a reload/reuse path re-applies the
+  same gate, not just the build path.
+- Distinguish a handoff/switching exponent (asymptotic-regime boundary)
+  from an accuracy floor before proposing to raise a ceiling constant —
+  raising the wrong one buys nothing and can cross into the wrong regime.
+- A finding whose fix is confined to test-file fixtures/constants routes to
+  Test Developer, never Coder — recurring precedent (3x).
+- Feed Inspector-authored fix snippets through Simplifier before endorsing
+  verbatim — a shape mismatch (e.g. dict vs flat-list) can ship a fix that
+  passes in isolation but breaks the existing consumer contract.

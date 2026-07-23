@@ -81,3 +81,10 @@
   delta_t_max is a latent trip-wire: any variant that grows the delay
   (nonzero kappa, larger source offset) tips it over. Flag edge-margin
   fixtures as design fragility even when the base config passes.
+- A guard-clause refactor that ends a loop body on `continue` inside the
+  guard is a red flag: check the fall-through (non-guarded) tail still
+  packs/returns — a deleted pass-case tail is a silent regression.
+- After a production-only edit, re-run PRE-EXISTING suites over UNCHANGED
+  test files too — a production change can regress suites that never
+  touched the diff; the failure text usually points straight at the
+  deleted/changed line.
