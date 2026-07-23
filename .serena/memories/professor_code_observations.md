@@ -108,3 +108,20 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
 - farfield_eps_max is an ABSOLUTE bound on max|E_ff| residual, not
   per-tile/density-normalized — valid to compare parent vs child directly
   since E_ff's config-level max|F| scale is identical for both.
+- ppGO ceiling mechanism (Build 8h-b, verified against
+  test_lensing_ppgo_bandsplit.py, 66/66 green): `_measure_cell` in
+  ppgo_map.py does truncation-on-refusal via `_max_accepted_prefix`
+  (bisects the w-node INDEX per angle, monotone-refusal assumption; a
+  non-monotone break only shrinks the accepted set, never over-accepts).
+  w_ceiling = min-over-angles of the accepted-prefix endpoint; a fully-
+  accepted cell forces ceiling=wall (byte-identical to HEAD).
+  `_surrogate_coefficients`/`surrogate_training.train` both gate on
+  eff_ceiling=min(wall, cell_ceiling) via `_ppgo_band_split`/
+  `_ppgo_cell_ceiling` (likelihood.py) and `_stratum_ppgo_boundary`/
+  `_stratum_ppgo_ceiling` (surrogate_training.py). The outer annulus
+  [4,inf) rho band is additionally capped at rho_measured_max_grid
+  (inclusive boundary); loader hard-refuses (KeyError/hash ValueError) on
+  pre-0.2.0 artifacts.
+- This agent instance has no image-rendering/Read-image tool — validate
+  diagnostic PNGs via the numeric asserts backing the same plotted
+  quantities (independent-oracle asserts etc.), not visual inspection.

@@ -88,3 +88,22 @@
   guard function — never re-derive the guard math inline.
 - SDK now caps inlined short-term memories at 24KB (tail-kept); earlier
   entries survive only in git history, not the prompt.
+- Prefer OPTIONAL trailing args with backward-compatible defaults over
+  changing a function's return-tuple shape when adding capability — keeps
+  existing call sites/tests passing as regression guards for the untouched
+  path (Build 8h-b).
+- A shared derivation helper (DRY refactor) dedupes CODE but not
+  necessarily RUNTIME: if several call sites each independently invoke the
+  shared helper, an expensive underlying computation (e.g. a full geometry
+  sweep) can still run once PER CALLER — for genuinely expensive shared
+  derivations, compute once and pass the result to all consumers.
+- When a boundary/refusal is known to be monotone over an ordered grid,
+  bisect on the node INDEX (not value) for O(log n) determination; even if
+  monotonicity breaks locally, the bisection result stays conservative
+  (never over-accepts) — safe default for w-node-style prefix acceptance.
+- Schema/artifact evolution: make new certification-critical fields
+  REQUIRED positional (no default) so pre-migration artifacts hard-refuse
+  (KeyError/False) instead of silently certifying with missing data;
+  enforce new validity caps at the single internal accessor chokepoint so
+  every external accessor inherits the guard for free without a new
+  sentinel.

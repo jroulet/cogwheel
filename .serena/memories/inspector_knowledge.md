@@ -88,3 +88,14 @@
   test files too — a production change can regress suites that never
   touched the diff; the failure text usually points straight at the
   deleted/changed line.
+- A shared 'DRY' helper invoked independently by two accessors can still
+  trigger its expensive underlying computation (e.g. a full geometry
+  sweep) TWICE per request — code-level dedup doesn't guarantee runtime
+  dedup; flag redundant re-invocation of expensive shared derivations as
+  a design finding even when functionally correct (Build 8h-b, pattern
+  INS-1-001).
+- When verifying an added ceiling/boundary mechanism, confirm the
+  degenerate "fully accepted / no restriction" case algebraically forces
+  the new boundary equal to the old default (e.g. ceiling=wall) — this is
+  how byte-identical-to-HEAD behavior is actually proven, not just
+  asserted (Build 8h-b).

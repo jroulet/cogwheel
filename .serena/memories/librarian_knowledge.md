@@ -47,3 +47,25 @@
 - If the Serena MCP connection drops mid-task, just retry — the project's
   own hooks block Bash/Read fallbacks on project files/commands, so there
   is no usable fallback anyway.
+- Commit-preflight hooks can auto-stub `contracts_changelog.d/`/
+  `spec_changelog.d/` fragments with placeholder text ("Auto-generated ...
+  Librarian should refine this entry"); check the ACTUAL BODY of every
+  changelog fragment touched in a diff for this stub marker before
+  trusting render_fragments.py output — a fragment can exist and render
+  cleanly while still being a content stub.
+- When adding/repairing a DATA_CONTRACTS.yaml consumer list, grep for ALL
+  direct callers of the artifact's accessor function across the codebase
+  (not just the most obvious one) — consumer gaps often predate the
+  current build.
+- DATA_CONTRACTS.yaml consumer lists are production-only by convention;
+  test-file-only callers (flagged by sync_derived_docs.py) should be left
+  off and flagged for the artifact's own contract owner, not fixed
+  opportunistically outside the current build's scope.
+- On this machine, `scripts/sync_derived_docs.py` and
+  `regenerate_consumer_graph.py` need `jedi` (present in conda env
+  cogwheel-newlal, absent from the default PATH python) and ripgrep `rg`
+  (absent entirely) — use
+  `/home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python` for both.
+  Without `rg`, `regenerate_consumer_graph.py` hard-fails; `sync_derived_
+  docs.py` still runs against the stale cached CONSUMER_GRAPH.json (misses
+  brand-new call sites only).

@@ -19,7 +19,9 @@
   side_effect / SimpleNamespace fakes reusing real sub-objects; under numba
   patch the FULL .py_func chain (F010); a serve gate: patch its in_domain to
   lie + feed a fake result to prove the gate has teeth. "Gate RED" = refusal
-  raised OR error>tol; test refusals at the production operating point.
+  raised OR error>tol; test refusals at the production operating point. A
+  function with LOCAL (call-time) imports needs patching at EACH consuming
+  module's namespace, not just the module where the target is defined.
 - Detect a silent fast-path fallback by spying the fast method (call_count==0
   under assertRaises = short-circuited; not-called on a served config = fell
   back); assert fallback==direct bit-identically via float64 .tobytes().
@@ -90,3 +92,17 @@
   (`pathlib.glob`) in the conda env instead.
 - SDK now caps inlined short-term memories at 24KB (tail-kept); earlier
   entries survive only in git history, not the prompt.
+- When production adds a new REQUIRED positional field to a serialized-
+  artifact constructor, update every test helper that rebuilds/re-saves that
+  artifact (synthetic fixtures, corrupt-artifact variants) with ALL fields —
+  otherwise load() raises KeyError before reaching the intended validation
+  error, silently invalidating the test's premise.
+- To unit-test a method that was refactored out of a free function into an
+  instance method, bind the REAL methods onto a lightweight stateless probe
+  class (class attrs) and call as instance methods — preserves `self`
+  dispatch semantics without reimplementing logic or calling unbound on a
+  bare object().
+- A test-only change (no production edits) cannot regress an unrelated
+  slow/heavy suite that doesn't import the touched symbols — verify via a
+  grep for zero imports/references, then skip running the heavy suite
+  rather than waiting out a multi-minute campaign.

@@ -9,6 +9,9 @@
   verification WPs "just in case". A verify-only Coder WP (confirm
   invariants readable from bodies) is bureaucratic relay = Inspector's
   job; trim it. Timing/warm-cost measurements are diagnostics, never gates.
+  A design element explicitly pinned by an upstream domain-expert ruling
+  (e.g. Professor) is not open for a Simplifier alternative — phrase the
+  WP directly around the pinned design (Build 8h-b).
 - Verify any "code-pinned"/"already exists" claim with fresh find_symbol/
   grep BEFORE planning WPs on it; agents refusing to fabricate a missing
   primitive = plan failure, not agent failure.
@@ -43,7 +46,12 @@
   SEPARATE parallel functions behind a classification gate that mirrors the
   frozen path's gate; never refactor the frozen one. Shared entry points get
   an optional flag so the default call stays byte-identical; keep the
-  regime-branch decision INSIDE the new function (Build 6 saddle).
+  regime-branch decision INSIDE the new function (Build 6 saddle). Same for
+  a genuinely new physical contribution (e.g. a ghost/complex-saddle term):
+  build a DEDICATED kernel, never route through unrelated existing kernel/
+  delay/index helpers; gate activation on a physically meaningful currency
+  (e.g. w·Im tau_c) mirroring existing threshold-constant conventions, plus
+  explicit degenerate-axis refusal (Build 8h-b).
 - Surrogate/emulator design (Build 8a): emulate the SMOOTH symmetry-
   invariant object (the beat-free envelope E(w)), NOT the oscillatory total;
   build ONE interpolant PER topology region (parity/image-count) since the
@@ -79,3 +87,15 @@
 - Feed Inspector-authored fix snippets through Simplifier before endorsing
   verbatim — a shape mismatch (e.g. dict vs flat-list) can ship a fix that
   passes in isolation but breaks the existing consumer contract.
+- Grid/node reprovisioning: reuse an existing normalized held-out-error
+  metric (e.g. LOO) to decide how many nodes to keep/drop rather than
+  hardcoding a reduction heuristic (e.g. a flat 2x) — let a probe decide
+  (Build 8h-b).
+- When an accuracy/interior label becomes ill-conditioned in a parameter
+  sub-region (e.g. near a higher-order catastrophe), plan a switch to an
+  alternate ALREADY-ESTABLISHED label/envelope for that sub-region with a
+  concrete falsifiable pass/fail pair, rather than tuning the ill-
+  conditioned label further (Build 8h-b).
+- New accessors added to an existing family (e.g. w_ceiling alongside
+  w_cert/w_trust) should mirror that family's naming/behavior exactly
+  rather than invent a new sentinel type (Build 8h-b).
