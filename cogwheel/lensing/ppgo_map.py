@@ -49,12 +49,42 @@ no certified floor: it is marked **UNKNOWN** (`UNKNOWN` sentinel), never
 certified and never extrapolated.  Dispatch (WP2) then refuses / charts
 rather than serving ppGO there.
 
+TRUNCATION ON REFUSAL AND MEASURED CEILINGS
+-------------------------------------------
+An engine refusal in the middle of a cell's ``w`` sweep does *not*
+invalidate the whole cell.  The dominant refusal -- the saddle-image
+wave branch above ``W_CEILING_SCHWINGER = 60`` (positive-parity cells
+sweep to ``w = 443.7`` and cross it) -- is MONOTONE in ``w``: it refuses
+for *all* ``w`` above a per-cell ceiling, so the accepted set is a prefix
+``[w_min, w_ceiling]``.  `_measure_cell` finds that maximal accepted
+prefix per angle by bisection on the prefix-endpoint index (O(log n_w)
+engine calls, not a re-sweep), certifies the sup-over-w floor on the
+accepted range only, and stores a per-cell ``w_ceiling`` (the min over
+angles of each angle's maximal accepted ``w``).  A cell certifies on its
+measured range even when its top-``w`` refuses; **beyond the ceiling stays
+UNKNOWN** -- never extrapolated.  A genuine refusal at the *lowest* ``w``
+(no accepted prefix at all) still invalidates the cell (`STATUS_INVALID`).
+
+OUTER-ANNULUS MEASURED-RHO CAP
+------------------------------
+The outermost annulus ``[4.0, inf)`` is sampled at a single finite
+representative radius (``rho = lo * 1.5``), yet its open outer edge would
+imply certification out to ``rho = inf`` -- unsound from one finite
+sample (the same soundness rule as an uncertified ``w`` ceiling).  Each
+cell therefore carries a finite ``rho_measured_max`` (the finite band top
+edge for inner annuli; the sampled radius for the open outer annulus), and
+*every* cell accessor returns `UNKNOWN` for a query ``rho`` beyond it via
+the same out-of-grid fall-through (no new sentinel).  A
+Professor-certified monotone-outward argument may later replace this cap;
+until then the infinite tail is UNKNOWN.
+
 SERIALIZATION AND INTEGRITY
 ---------------------------
 The artifact is a single ``.npz`` of plain float64 arrays (the parity
 codes, the gamma-band and annulus edges, and the per-cell ``w_cert``,
-diagnostic ``w_cert`` at the 1e-3 probe bar, status codes, and
-interpolability flags) plus a JSON provenance scalar carrying the grid
+diagnostic ``w_cert`` at the 1e-3 probe bar, measured ``w_ceiling``,
+status codes, interpolability flags, and measured-``rho`` cap
+``rho_measured_max``) plus a JSON provenance scalar carrying the grid
 bounds, the certification bar, the safety-margin rule, the walls and a
 SHA1 content hash.  `CertifiedPpgoMap.load` reads it with
 ``allow_pickle=False``, recomputes the content hash and refuses (raises
@@ -80,7 +110,7 @@ import numpy as np
 __all__ = ['CertifiedPpgoMap', 'UNKNOWN',
            'set_certified_ppgo_map', 'get_certified_ppgo_map',
            'use_certified_ppgo_map', 'certified_w_cert', 'certified_w_trust',
-           'caustic_geometry',
+           'certified_w_ceiling', 'caustic_geometry',
            'build_map', 'save_map', 'map_summary',
            'CERTIFICATION_BAR', 'DIAGNOSTIC_BAR',
            'W_TRUST_MULTIPLIER', 'W_TRUST_ADDITIVE', 'MAX_CELL_JUMP',
@@ -125,8 +155,11 @@ UNKNOWN = _UnknownSentinel()
 #: Shipped package-data artifact name (under ``cogwheel/data/``).
 _DEFAULT_MAP_NAME = 'certified_ppgo_map.npz'
 
-#: Provenance schema version for the artifact.
-_SCHEMA_VERSION = '0.1.0'
+#: Provenance schema version for the artifact.  Bumped 0.1.0 -> 0.2.0 with
+#: the per-cell ``w_ceiling`` (truncation-on-refusal) and
+#: ``rho_measured_max`` (outer-annulus cap) grids; old ceiling-less
+#: artifacts lack these arrays and the loader hard-refuses them.
+_SCHEMA_VERSION = '0.2.0'
 
 #: F-normalized ppGO certification bar (Professor: 1e-3 is a probe / onset
 #: bar only -- per-node ppGO error accumulates coherently across the band
@@ -174,12 +207,20 @@ _DEFAULT_RHO_EDGES: tuple[float, ...] = (0.0, 0.5, 0.9, 1.0, 1.5, 2.5, 4.0,
 
 def _content_hash(parity_codes: np.ndarray, gamma_edges: np.ndarray,
                   rho_edges: np.ndarray, w_cert: np.ndarray,
-                  w_cert_diagnostic: np.ndarray, cell_status: np.ndarray,
-                  interpolable: np.ndarray, scalars: Sequence[float]) -> str:
-    """SHA1 over the stored arrays and the certification scalars (float64)."""
+                  w_cert_diagnostic: np.ndarray, w_ceiling: np.ndarray,
+                  cell_status: np.ndarray, interpolable: np.ndarray,
+                  rho_measured_max: np.ndarray,
+                  scalars: Sequence[float]) -> str:
+    """SHA1 over the stored arrays and the certification scalars (float64).
+
+    ``w_ceiling`` and ``rho_measured_max`` are hashed alongside the other
+    grids so a ceiling-less or tampered artifact fails the hash and
+    `use_certified_ppgo_map` refuses (the 8g-b tag philosophy).
+    """
     hasher = hashlib.sha1()
     for array in (parity_codes, gamma_edges, rho_edges, w_cert,
-                  w_cert_diagnostic, cell_status, interpolable):
+                  w_cert_diagnostic, w_ceiling, cell_status, interpolable,
+                  rho_measured_max):
         hasher.update(np.ascontiguousarray(array, dtype=np.float64).tobytes())
     hasher.update(np.asarray(scalars, dtype=np.float64).tobytes())
     return hasher.hexdigest()
@@ -222,11 +263,22 @@ class CertifiedPpgoMap:
         read `cell_status_grid`, not ``nan``, to decide UNKNOWN).
     w_cert_diagnostic_grid : ndarray, same shape
         The floor at the 1e-3 diagnostic bar (reported column only).
+    w_ceiling_grid : ndarray, same shape
+        Per-cell measured ``w`` ceiling -- the min over angles of each
+        angle's maximal accepted ``w`` (truncation-on-refusal).  A
+        certified cell is trusted only on ``[w_cert, w_ceiling]``; beyond
+        the ceiling is UNKNOWN.  ``nan`` where the cell is invalid.
     cell_status_grid : ndarray, same shape
         ``STATUS_CERTIFIED`` / ``STATUS_BEYOND_WALL`` / ``STATUS_INVALID``.
     interpolable_grid : ndarray, same shape
         ``1.0`` where every certified neighbour is within `MAX_CELL_JUMP`,
         else ``0.0`` (WP2 must not interpolate across a flagged cell).
+    rho_measured_max_grid : ndarray, same shape
+        Finite ``rho`` upper bound at which the cell was actually sampled
+        (the finite band top edge for inner annuli; ``lo * 1.5`` for the
+        open outer annulus).  Every accessor returns UNKNOWN for a query
+        ``rho`` above this bound -- an infinite annulus is never certified
+        from one finite sample.
     provenance : dict
         Grid bounds, certification bar, safety-margin rule, walls,
         ``content_hash`` and build metadata.
@@ -237,8 +289,10 @@ class CertifiedPpgoMap:
     rho_edges: np.ndarray
     w_cert_grid: np.ndarray
     w_cert_diagnostic_grid: np.ndarray
+    w_ceiling_grid: np.ndarray
     cell_status_grid: np.ndarray
     interpolable_grid: np.ndarray
+    rho_measured_max_grid: np.ndarray
     provenance: dict
 
     # -- construction -------------------------------------------------
@@ -247,8 +301,10 @@ class CertifiedPpgoMap:
     def from_arrays(cls, parity_codes: np.ndarray, gamma_edges: np.ndarray,
                     rho_edges: np.ndarray, w_cert_grid: np.ndarray,
                     w_cert_diagnostic_grid: np.ndarray,
+                    w_ceiling_grid: np.ndarray,
                     cell_status_grid: np.ndarray,
                     interpolable_grid: np.ndarray,
+                    rho_measured_max_grid: np.ndarray,
                     provenance: dict) -> 'CertifiedPpgoMap':
         """Validate shapes and assemble a `CertifiedPpgoMap`."""
         parity_codes = np.ascontiguousarray(parity_codes, dtype=np.float64)
@@ -258,10 +314,14 @@ class CertifiedPpgoMap:
             'w_cert_grid': np.ascontiguousarray(w_cert_grid, dtype=np.float64),
             'w_cert_diagnostic_grid': np.ascontiguousarray(
                 w_cert_diagnostic_grid, dtype=np.float64),
+            'w_ceiling_grid': np.ascontiguousarray(
+                w_ceiling_grid, dtype=np.float64),
             'cell_status_grid': np.ascontiguousarray(
                 cell_status_grid, dtype=np.float64),
             'interpolable_grid': np.ascontiguousarray(
                 interpolable_grid, dtype=np.float64),
+            'rho_measured_max_grid': np.ascontiguousarray(
+                rho_measured_max_grid, dtype=np.float64),
         }
         if parity_codes.ndim != 1 or gamma_edges.ndim != 1 \
                 or rho_edges.ndim != 1:
@@ -281,7 +341,8 @@ class CertifiedPpgoMap:
                     f'{expected}.')
         return cls(parity_codes, gamma_edges, rho_edges,
                    grids['w_cert_grid'], grids['w_cert_diagnostic_grid'],
-                   grids['cell_status_grid'], grids['interpolable_grid'],
+                   grids['w_ceiling_grid'], grids['cell_status_grid'],
+                   grids['interpolable_grid'], grids['rho_measured_max_grid'],
                    dict(provenance))
 
     # -- load ---------------------------------------------------------
@@ -318,16 +379,23 @@ class CertifiedPpgoMap:
             w_cert_grid = np.asarray(data['w_cert'], dtype=np.float64)
             w_cert_diagnostic_grid = np.asarray(data['w_cert_diagnostic'],
                                                 dtype=np.float64)
+            # A ceiling-less (pre-0.2.0) artifact lacks these keys; the
+            # direct item access raises KeyError, which `use_certified_ppgo_map`
+            # turns into a refuse-to-certify (global stays None).
+            w_ceiling_grid = np.asarray(data['w_ceiling'], dtype=np.float64)
             cell_status_grid = np.asarray(data['cell_status'],
                                           dtype=np.float64)
             interpolable_grid = np.asarray(data['interpolable'],
                                            dtype=np.float64)
+            rho_measured_max_grid = np.asarray(data['rho_measured_max'],
+                                               dtype=np.float64)
             provenance = json.loads(str(data['provenance']))
 
         expected = provenance.get('content_hash')
         actual = _content_hash(parity_codes, gamma_edges, rho_edges,
                                w_cert_grid, w_cert_diagnostic_grid,
-                               cell_status_grid, interpolable_grid,
+                               w_ceiling_grid, cell_status_grid,
+                               interpolable_grid, rho_measured_max_grid,
                                _hash_scalars(provenance))
         if expected != actual:
             raise ValueError(
@@ -337,7 +405,9 @@ class CertifiedPpgoMap:
                 f'scripts/train_ppgo_map.py.')
         return cls.from_arrays(parity_codes, gamma_edges, rho_edges,
                                w_cert_grid, w_cert_diagnostic_grid,
-                               cell_status_grid, interpolable_grid, provenance)
+                               w_ceiling_grid, cell_status_grid,
+                               interpolable_grid, rho_measured_max_grid,
+                               provenance)
 
     @staticmethod
     def _default_artifact_path() -> Path:
@@ -384,11 +454,20 @@ class CertifiedPpgoMap:
 
     def _cell(self, parity: str, gamma: float, rho: float
               ) -> tuple[int, int, int] | None:
-        """``(p, gi, ri)`` index of the cell, or ``None`` if out of grid."""
+        """``(p, gi, ri)`` index of the cell, or ``None`` if out of grid.
+
+        A query ``rho`` above the cell's finite ``rho_measured_max`` (the
+        open outer annulus was sampled at one finite radius) returns
+        ``None`` via the same out-of-grid fall-through -- the infinite
+        tail is never certified from that single sample, so every accessor
+        yields UNKNOWN there.
+        """
         p = self._parity_index(parity)
         gi = self._band_index(self.gamma_edges, float(gamma))
         ri = self._band_index(self.rho_edges, float(rho))
         if gi is None or ri is None:
+            return None
+        if float(rho) > self.rho_measured_max_grid[p, gi, ri]:
             return None
         return p, gi, ri
 
@@ -433,6 +512,37 @@ class CertifiedPpgoMap:
         if floor is UNKNOWN:
             return UNKNOWN
         return self.w_trust_from_cert(float(floor))
+
+    def w_ceiling(self, parity: str, gamma: float, rho: float
+                  ) -> float | _UnknownSentinel:
+        """Measured ``w`` ceiling for the cell, or `UNKNOWN`.
+
+        Returns the stored per-cell ceiling (a plain ``float``) only for a
+        ``STATUS_CERTIFIED`` cell -- the top of the trusted range
+        ``[w_cert, w_ceiling]``; WP2 dispatch splits the ppGO band at
+        ``min(parity_wall, w_ceiling)`` and refuses / charts above it.
+        Out-of-grid, beyond-``rho_measured_max``, beyond-wall and invalid
+        cells return the `UNKNOWN` sentinel (mirrors `w_cert` exactly; no
+        new sentinel).
+
+        Parameters
+        ----------
+        parity : str
+            ``'positive'`` or ``'saddle'``.
+        gamma : float
+            External shear magnitude.
+        rho : float
+            Caustic-frame annulus coordinate ``|y| / caustic_reach``.
+        """
+        cell = self._cell(parity, gamma, rho)
+        if cell is None:
+            return UNKNOWN
+        if self.cell_status_grid[cell] != STATUS_CERTIFIED:
+            return UNKNOWN
+        value = float(self.w_ceiling_grid[cell])
+        if not math.isfinite(value):
+            return UNKNOWN
+        return value
 
     def is_interpolable(self, parity: str, gamma: float, rho: float) -> bool:
         """Whether the cell may be interpolated across (max-jump guard).
@@ -510,6 +620,14 @@ def certified_w_trust(parity: str, gamma: float, rho: float
     if _CERTIFIED_PPGO_MAP is None:
         return UNKNOWN
     return _CERTIFIED_PPGO_MAP.w_trust(parity, gamma, rho)
+
+
+def certified_w_ceiling(parity: str, gamma: float, rho: float
+                        ) -> float | _UnknownSentinel:
+    """Global-map ``w_ceiling`` query; `UNKNOWN` when no map is installed."""
+    if _CERTIFIED_PPGO_MAP is None:
+        return UNKNOWN
+    return _CERTIFIED_PPGO_MAP.w_ceiling(parity, gamma, rho)
 
 
 # ----------------------------------------------------------------------
@@ -606,15 +724,82 @@ def _sup_over_w_floor(w_nodes: np.ndarray, error: np.ndarray, bar: float
     return float(w_nodes[last + 1])
 
 
-def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
-                  wall: float) -> tuple[float, float, float]:
-    """Measure one cell against the exact engine.
+def _max_accepted_prefix(evaluate, n_nodes: int, refusal_types: tuple):
+    """Largest accepted ``w``-prefix length by bisection on the prefix index.
 
-    Returns ``(status_code, w_cert, w_cert_diagnostic)``; ``w_cert`` /
-    ``w_cert_diagnostic`` are ``nan`` when uncertified at the respective
-    bar.  Any engine refusal (`LensDomainError`, `CancellationError`,
-    `SchwingerCertificationError`) -> ``STATUS_INVALID``; an error that
-    never clears `CERTIFICATION_BAR` below the wall -> ``STATUS_BEYOND_WALL``.
+    The named engine refusals -- chiefly the saddle-image wave branch above
+    ``W_CEILING_SCHWINGER`` -- are treated as MONOTONE in ``w``: the accepted
+    set is a prefix ``w_nodes[:k]`` (refuse for all ``w`` above a per-cell
+    ceiling).  This finds the largest ``k`` in ``[0, n_nodes]`` for which
+    ``evaluate(k)`` (the engine run on the first ``k`` nodes) does not raise
+    one of ``refusal_types``, in ``O(log n_nodes)`` engine evaluations --
+    NOT a full re-sweep per step.
+
+    Parameters
+    ----------
+    evaluate : callable
+        ``evaluate(k)`` runs the engine on the first ``k`` ``w``-nodes and
+        returns its result, or raises one of ``refusal_types`` when the
+        accepted prefix is shorter than ``k``.
+    n_nodes : int
+        Total number of ``w``-nodes (the full prefix length).
+    refusal_types : tuple of type
+        Exception classes that mark a refused prefix (the truncation
+        vocabulary); anything else propagates and invalidates the cell.
+
+    Returns
+    -------
+    (k_max, result) : (int, object or None)
+        ``k_max`` is the largest accepted prefix length; ``result`` is the
+        value ``evaluate(k_max)`` returned, or ``None`` when even the
+        single-node prefix refuses (``k_max == 0``) -- which the caller
+        maps to ``STATUS_INVALID`` (a genuine refusal at the lowest ``w``,
+        not a ceiling).
+
+    Notes
+    -----
+    A non-monotone refusal can only make ``k_max`` SMALLER than the true
+    accepted set (bisection probes a subset), which is conservative:
+    ``result`` is always from a prefix that genuinely evaluated without a
+    refusal.
+    """
+    try:
+        return n_nodes, evaluate(n_nodes)
+    except refusal_types:
+        pass
+    lo, hi = 1, n_nodes - 1
+    best_k, best_result = 0, None
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        try:
+            result = evaluate(mid)
+        except refusal_types:
+            hi = mid - 1
+        else:
+            best_k, best_result = mid, result
+            lo = mid + 1
+    return best_k, best_result
+
+
+def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
+                  wall: float) -> tuple[float, float, float, float]:
+    """Measure one cell against the exact engine (truncation-on-refusal).
+
+    Returns ``(status_code, w_cert, w_cert_diagnostic, w_ceiling)``.
+    ``w_cert`` / ``w_cert_diagnostic`` are ``nan`` when uncertified at the
+    respective bar; ``w_ceiling`` is the min over angles of each angle's
+    maximal accepted ``w`` (``nan`` only for ``STATUS_INVALID``).
+
+    A named engine refusal (`LensDomainError`, `CancellationError`,
+    `SchwingerCertificationError`) part-way up an angle's ``w`` sweep
+    TRUNCATES that angle at its maximal accepted ``w``-prefix rather than
+    invalidating the cell -- the saddle-image branch ceiling is monotone in
+    ``w`` (accepted set is a prefix).  The sup-over-w floor is then measured
+    on the accepted prefix only, so a cell certifies on its measured range
+    even when its top-``w`` refuses.  A refusal at the *lowest* ``w`` (no
+    accepted prefix) or a failed caustic placement still yields
+    ``STATUS_INVALID``; an angle whose accepted prefix never clears
+    `CERTIFICATION_BAR` yields ``STATUS_BEYOND_WALL``.
     """
     from cogwheel.lensing.chang_refsdal import geometry
     from cogwheel.lensing.chang_refsdal.channels import ChangRefsdalChannels
@@ -623,62 +808,93 @@ def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
     from cogwheel.lensing.chang_refsdal._schwinger import (
         SchwingerCertificationError)
 
+    refusal_types = (geometry.LensDomainError, CancellationError,
+                     SchwingerCertificationError)
+
     w_nodes = _w_nodes(wall)
+    n_nodes = w_nodes.size
+
+    # Caustic placement is w-independent: a failure here means the source
+    # cannot be placed at all, so the whole cell is invalid (not truncated).
+    try:
+        reach, direction = caustic_geometry(gamma, kappa)
+    except geometry.LensDomainError:
+        return STATUS_INVALID, math.nan, math.nan, math.nan
+
     # ANGULAR SWEEP (driver fix 2026-07-23): a cell certified from a single
     # axial source point is blind to the measured angular anisotropy of the
     # ppGO error (axis-good/diagonal-bad, factor ~500 at fixed radius in the
     # v2 tile diagnosis; for the saddle the axis point sits BETWEEN the two
     # deltoid lobes while near-lobe angles degrade).  Certify each cell
-    # against the WORST of several angles: sup of per-angle floors; any
-    # refusing/invalid angle invalidates the cell (conservative).
+    # against the WORST of several angles: sup of per-angle floors, min of
+    # per-angle ceilings.
     angles = (0.0, np.pi / 8, np.pi / 4, 3 * np.pi / 8, np.pi / 2)
-    try:
-        reach, direction = caustic_geometry(gamma, kappa)
-        floors_cert: list = []
-        floors_diag: list = []
-        for angle in angles:
-            cos_a, sin_a = np.cos(angle), np.sin(angle)
-            rot = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
-            source = rho_center * reach * (rot @ np.asarray(direction))
-            partition = ChangRefsdalChannels(w_nodes).evaluate(
+    floors_cert: list = []
+    floors_diag: list = []
+    angle_ceilings: list = []
+    for angle in angles:
+        cos_a, sin_a = np.cos(angle), np.sin(angle)
+        rot = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
+        source = rho_center * reach * (rot @ np.asarray(direction))
+
+        def evaluate(k: int, source=source):
+            """Engine total and demodulated ppGO glue on ``w_nodes[:k]``."""
+            w_prefix = w_nodes[:k]
+            partition = ChangRefsdalChannels(w_prefix).evaluate(
                 gamma=gamma, y=source, beta=0.0, kappa=kappa)
-            exact = np.asarray(partition.exact_total)
             # Align the time origin before differencing.  The engine
             # expresses ``exact_total`` RELATIVE to the minimum image delay
-            # ``t_min`` (the operator series is demodulated at that
-            # carrier; see ``ChangRefsdalChannels.evaluate``), whereas
+            # ``t_min`` (the operator series is demodulated at that carrier;
+            # see ``ChangRefsdalChannels.evaluate``), whereas
             # ``geometric_amplification`` sums the ABSOLUTE image delays
             # ``exp(1j w tau_a)``.  Demodulating the ppGO glue by
-            # ``exp(-1j w t_min)`` removes the pure global winding phase
-            # that would otherwise dominate the residual and grow with
-            # ``w`` -- without it the F-normalized error never falls
-            # (every cell would be spuriously beyond-wall).  After
-            # alignment the residual is the genuine geometric-optics
-            # defect (-> machine precision at high w).
+            # ``exp(-1j w t_min)`` removes the pure global winding phase that
+            # would otherwise dominate the residual and grow with ``w`` --
+            # without it the F-normalized error never falls (every cell would
+            # be spuriously beyond-wall).  After alignment the residual is
+            # the genuine geometric-optics defect (-> machine precision at
+            # high w).
             ppgo = np.asarray(geometric_amplification(
-                w_nodes, source, gamma, beta=0.0, kappa=kappa))
-            ppgo = ppgo * np.exp(-1j * w_nodes * float(partition.t_min))
-            denominator = float(np.max(np.abs(exact)))
-            if not (denominator > 0.0):
-                return STATUS_INVALID, math.nan, math.nan
-            error = np.abs(exact - ppgo) / denominator
-            floors_cert.append(
-                _sup_over_w_floor(w_nodes, error, CERTIFICATION_BAR))
-            floors_diag.append(
-                _sup_over_w_floor(w_nodes, error, DIAGNOSTIC_BAR))
-    except (geometry.LensDomainError, CancellationError,
-            SchwingerCertificationError):
-        return STATUS_INVALID, math.nan, math.nan
+                w_prefix, source, gamma, beta=0.0, kappa=kappa))
+            ppgo = ppgo * np.exp(-1j * w_prefix * float(partition.t_min))
+            return w_prefix, np.asarray(partition.exact_total), ppgo
 
-    # Worst angle governs: any angle that never clears the bar makes the
-    # cell beyond-wall; otherwise the cell floor is the sup over angles.
+        best_k, best = _max_accepted_prefix(evaluate, n_nodes, refusal_types)
+        if best_k == 0:
+            # Even the single-node prefix refuses: a genuine refusal at the
+            # lowest w (or a w-independent geometry error), not a ceiling.
+            return STATUS_INVALID, math.nan, math.nan, math.nan
+        w_prefix, exact, ppgo = best
+        denominator = float(np.max(np.abs(exact)))
+        if not (denominator > 0.0):
+            return STATUS_INVALID, math.nan, math.nan, math.nan
+        error = np.abs(exact - ppgo) / denominator
+        floors_cert.append(
+            _sup_over_w_floor(w_prefix, error, CERTIFICATION_BAR))
+        floors_diag.append(
+            _sup_over_w_floor(w_prefix, error, DIAGNOSTIC_BAR))
+        angle_ceilings.append(float(w_prefix[-1]))
+
+    # The cell is trusted only up to the tightest per-angle ceiling.
+    w_ceiling = min(angle_ceilings)
+
+    # Worst angle governs: any angle that never clears the bar within its
+    # accepted range makes the cell beyond-wall; otherwise the cell floor is
+    # the sup over angles.
     if any(f is None for f in floors_diag):
         diagnostic = math.nan
     else:
         diagnostic = max(floors_diag)
     if any(f is None for f in floors_cert):
-        return STATUS_BEYOND_WALL, math.nan, diagnostic
-    return STATUS_CERTIFIED, max(floors_cert), diagnostic
+        return STATUS_BEYOND_WALL, math.nan, diagnostic, w_ceiling
+    floor = max(floors_cert)
+    # Degenerate interplay: the worst angle only clears above a w that the
+    # tightest-ceiling angle no longer accepts, so no w is simultaneously
+    # certified for all angles -- the certified interval is empty.  Refuse
+    # (uncertified), never certify an empty range.
+    if floor > w_ceiling:
+        return STATUS_BEYOND_WALL, math.nan, diagnostic, w_ceiling
+    return STATUS_CERTIFIED, floor, diagnostic, w_ceiling
 
 
 def _compute_interpolable(w_cert_grid: np.ndarray, cell_status_grid: np.ndarray
@@ -716,8 +932,12 @@ def build_map(*, kappa: float = 0.0, astroid_wall: float = ASTROID_WALL,
     For each ``(parity, gamma band, annulus)`` cell a representative
     below-the-wall config is measured (`_measure_cell`): the sup-over-w
     floor at `CERTIFICATION_BAR`, the diagnostic floor at `DIAGNOSTIC_BAR`,
-    and a status code.  Parity-invalid gamma bands (a positive-parity band
-    above ``1.0`` or a saddle band below it) stay ``STATUS_INVALID``.
+    the measured ``w_ceiling`` (truncation-on-refusal), and a status code.
+    Parity-invalid gamma bands (a positive-parity band above ``1.0`` or a
+    saddle band below it) stay ``STATUS_INVALID``.  Each cell also records
+    ``rho_measured_max`` -- the finite radius at which it was sampled (the
+    band top edge for inner annuli; ``lo * 1.5`` for the open outer annulus)
+    -- so the accessors never certify the infinite tail beyond it.
 
     Parameters
     ----------
@@ -745,7 +965,18 @@ def build_map(*, kappa: float = 0.0, astroid_wall: float = ASTROID_WALL,
     shape = (parity_codes.size, n_gamma, n_rho)
     w_cert_grid = np.full(shape, np.nan, dtype=np.float64)
     w_cert_diagnostic_grid = np.full(shape, np.nan, dtype=np.float64)
+    w_ceiling_grid = np.full(shape, np.nan, dtype=np.float64)
     cell_status_grid = np.full(shape, STATUS_INVALID, dtype=np.float64)
+
+    # Per-cell finite rho cap: the band top edge for inner annuli; the
+    # finite sampled radius (``_rho_center``) for the open outer annulus.
+    # Depends only on the annulus index, but is stored per cell (in the
+    # (2, n_gamma, n_rho) grid family) and hashed like ``w_ceiling``.
+    rho_measured_max_grid = np.empty(shape, dtype=np.float64)
+    for ri in range(n_rho):
+        hi = float(rho_axis[ri + 1])
+        rho_cap = hi if math.isfinite(hi) else _rho_center(rho_axis, ri)
+        rho_measured_max_grid[:, :, ri] = rho_cap
 
     walls = {'positive': float(astroid_wall), 'saddle': float(saddle_wall)}
     for p, parity in enumerate(('positive', 'saddle')):
@@ -755,12 +986,13 @@ def build_map(*, kappa: float = 0.0, astroid_wall: float = ASTROID_WALL,
                 continue
             gamma_center = float(math.sqrt(lo * hi))
             for ri in range(n_rho):
-                status, floor, diagnostic = _measure_cell(
+                status, floor, diagnostic, ceiling = _measure_cell(
                     parity, gamma_center, _rho_center(rho_axis, ri), kappa,
                     walls[parity])
                 cell_status_grid[p, gi, ri] = status
                 w_cert_grid[p, gi, ri] = floor
                 w_cert_diagnostic_grid[p, gi, ri] = diagnostic
+                w_ceiling_grid[p, gi, ri] = ceiling
 
     interpolable_grid = _compute_interpolable(w_cert_grid, cell_status_grid)
 
@@ -773,6 +1005,16 @@ def build_map(*, kappa: float = 0.0, astroid_wall: float = ASTROID_WALL,
         'w_trust_rule': 'w_trust = max(1.5 * w_cert, w_cert + 2.0)',
         'floor_rule': 'sup-over-w (smallest w above the last upward '
                       're-crossing of the bar), not the first crossing',
+        'w_ceiling_rule': 'truncation-on-refusal: per angle the maximal '
+                          'accepted w-prefix (the monotone saddle-image '
+                          'branch ceiling), w_ceiling = min over angles; a '
+                          'certified cell is trusted only on '
+                          '[w_cert, w_ceiling], beyond it is UNKNOWN',
+        'rho_measured_max_rule': 'finite sampled-rho cap: band top edge for '
+                                 'inner annuli, lo*1.5 for the open outer '
+                                 'annulus; queries beyond it return UNKNOWN '
+                                 '(no infinite-annulus certification from one '
+                                 'finite sample)',
         'max_cell_jump': MAX_CELL_JUMP,
         'astroid_wall': float(astroid_wall),
         'saddle_wall': float(saddle_wall),
@@ -785,13 +1027,13 @@ def build_map(*, kappa: float = 0.0, astroid_wall: float = ASTROID_WALL,
     }
     provenance['content_hash'] = _content_hash(
         parity_codes, gamma_axis, rho_axis, w_cert_grid,
-        w_cert_diagnostic_grid, cell_status_grid, interpolable_grid,
-        _hash_scalars(provenance))
+        w_cert_diagnostic_grid, w_ceiling_grid, cell_status_grid,
+        interpolable_grid, rho_measured_max_grid, _hash_scalars(provenance))
 
     return CertifiedPpgoMap.from_arrays(
         parity_codes, gamma_axis, rho_axis, w_cert_grid,
-        w_cert_diagnostic_grid, cell_status_grid, interpolable_grid,
-        provenance)
+        w_cert_diagnostic_grid, w_ceiling_grid, cell_status_grid,
+        interpolable_grid, rho_measured_max_grid, provenance)
 
 
 def save_map(ppgo_map: CertifiedPpgoMap, path: str | Path) -> None:
@@ -810,8 +1052,10 @@ def save_map(ppgo_map: CertifiedPpgoMap, path: str | Path) -> None:
         rho_edges=ppgo_map.rho_edges,
         w_cert=ppgo_map.w_cert_grid,
         w_cert_diagnostic=ppgo_map.w_cert_diagnostic_grid,
+        w_ceiling=ppgo_map.w_ceiling_grid,
         cell_status=ppgo_map.cell_status_grid,
         interpolable=ppgo_map.interpolable_grid,
+        rho_measured_max=ppgo_map.rho_measured_max_grid,
         provenance=np.asarray(json.dumps(ppgo_map.provenance)),
     )
 

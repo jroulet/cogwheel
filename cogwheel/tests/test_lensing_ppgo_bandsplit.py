@@ -53,6 +53,7 @@ import json
 import math
 import pathlib
 import tempfile
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -64,22 +65,29 @@ try:
 except Exception:  # pragma: no cover - environment dependent
     _HAVE_MPL = False
 
-from unittest import TestCase, main
+from unittest import TestCase, main, mock
 
-from cogwheel.lensing.chang_refsdal import geometry, channels as _channels
+from cogwheel.lensing.chang_refsdal import (
+    geometry, channels as _channels, operator as _operator)
 from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels, farfield_envelope_from_partition,
     reconstruct_from_envelope)
+from cogwheel.lensing.chang_refsdal.operator import CancellationError
+from cogwheel.lensing.chang_refsdal._schwinger import (
+    SchwingerCertificationError)
 from cogwheel.lensing import ppgo_map
 from cogwheel.lensing.ppgo_map import (
-    CertifiedPpgoMap, build_map, save_map,
+    CertifiedPpgoMap, build_map, save_map, UNKNOWN,
     set_certified_ppgo_map, get_certified_ppgo_map, use_certified_ppgo_map,
-    _sup_over_w_floor,
-    CERTIFICATION_BAR, W_TRUST_MULTIPLIER, W_TRUST_ADDITIVE,
-    STATUS_CERTIFIED, STATUS_BEYOND_WALL, STATUS_INVALID,
+    certified_w_cert, certified_w_trust, certified_w_ceiling,
+    _sup_over_w_floor, _measure_cell, _w_nodes, _max_accepted_prefix,
+    _content_hash, _hash_scalars, _SCHEMA_VERSION,
+    CERTIFICATION_BAR, DIAGNOSTIC_BAR, W_TRUST_MULTIPLIER, W_TRUST_ADDITIVE,
+    MAX_CELL_JUMP, STATUS_CERTIFIED, STATUS_BEYOND_WALL, STATUS_INVALID,
     ASTROID_WALL, SADDLE_WALL, _PARITY_CODES)
 from cogwheel.lensing.surrogate_training import (
-    _farfield_interior_tiles, _stratum_ppgo_boundary, _apply_ppgo_trim)
+    _farfield_interior_tiles, _stratum_ppgo_boundary, _apply_ppgo_trim,
+    _stratum_ppgo_ceiling)
 from cogwheel.lensing.surrogate import LensAmplificationSurrogate
 from cogwheel.lensing.likelihood import LensedRelativeBinningLikelihood
 
@@ -118,7 +126,8 @@ def _partition(w_grid: np.ndarray, gamma: float, y: tuple[float, float]):
 
 
 def _synthetic_map(*, parity: str, gamma: float, rho: float, w_cert: float,
-                   status: float = STATUS_CERTIFIED) -> CertifiedPpgoMap:
+                   status: float = STATUS_CERTIFIED,
+                   w_ceiling: float = 1.0e9) -> CertifiedPpgoMap:
     """A one-cell-live synthetic map certifying ``w_cert`` at a chosen cell.
 
     Built directly through `CertifiedPpgoMap.from_arrays` (no engine sweep,
@@ -126,6 +135,15 @@ def _synthetic_map(*, parity: str, gamma: float, rho: float, w_cert: float,
     in the refusal test).  The grid is a minimal ``2 x 2 x 3`` lattice with
     an edge exactly at the ``gamma = 1.0`` parity boundary; every cell but
     the requested one is `STATUS_INVALID`.
+
+    ``w_ceiling`` (Build 8h-b WP1) is the certified cell's measured ``w``
+    ceiling -- the top of the trusted range ``[w_cert, w_ceiling]``.  It
+    defaults to a value far above any test band (``1e9``) so callers that
+    do not exercise the ceiling guard see HEAD-identical behaviour; the
+    cell-ceiling band-split / strata tests pass a finite ceiling BELOW the
+    Schwinger wall on purpose.  ``rho_measured_max`` is ``inf`` for every
+    cell (the finite-annulus cap is not under test here), so a query at the
+    requested ``rho`` always lands in the cell.
     """
     gamma_edges = np.array([0.2, 1.0, 1.6], dtype=float)
     rho_edges = np.array([0.0, 0.5, 1.0, math.inf], dtype=float)
@@ -134,8 +152,10 @@ def _synthetic_map(*, parity: str, gamma: float, rho: float, w_cert: float,
     shape = (2, gamma_edges.size - 1, rho_edges.size - 1)
     w_cert_grid = np.full(shape, np.nan)
     diag_grid = np.full(shape, np.nan)
+    w_ceiling_grid = np.full(shape, np.nan)
     status_grid = np.full(shape, STATUS_INVALID)
     interp_grid = np.zeros(shape)
+    rho_measured_max_grid = np.full(shape, np.inf)
 
     p = 0 if parity == 'positive' else 1
     gi = int(np.searchsorted(gamma_edges, gamma, side='right') - 1)
@@ -145,13 +165,137 @@ def _synthetic_map(*, parity: str, gamma: float, rho: float, w_cert: float,
     status_grid[p, gi, ri] = status
     if status == STATUS_CERTIFIED:
         w_cert_grid[p, gi, ri] = w_cert
+        w_ceiling_grid[p, gi, ri] = w_ceiling
         interp_grid[p, gi, ri] = 1.0
 
     provenance = {'schema_version': 'test',
                   'certification_bar': CERTIFICATION_BAR}
     return CertifiedPpgoMap.from_arrays(
         parity_codes, gamma_edges, rho_edges, w_cert_grid, diag_grid,
-        status_grid, interp_grid, provenance)
+        w_ceiling_grid, status_grid, interp_grid, rho_measured_max_grid,
+        provenance)
+
+
+def _saveable_ceiling_map(*, gamma: float, rho: float, w_cert: float,
+                          w_ceiling: float) -> CertifiedPpgoMap:
+    """A one-certified-cell map with a FULL provenance + valid content hash.
+
+    Unlike `_synthetic_map` (which skips the hash so it can be installed
+    directly), this one carries every scalar `_hash_scalars` folds into the
+    content hash and computes that hash exactly as `build_map` does, so the
+    artifact survives `CertifiedPpgoMap.load` / `use_certified_ppgo_map`.
+    It is the loader-refusal suite's WELL-FORMED baseline: the same npz is
+    then tampered (``w_ceiling`` key removed, or a ceiling value mutated
+    without re-hashing) to prove the loader hard-refuses.  The certified
+    cell sits in the positive-parity slice at ``(gamma, rho)``; every other
+    cell is `STATUS_INVALID`.
+    """
+    gamma_edges = np.array([0.2, 1.0, 1.6], dtype=float)
+    rho_edges = np.array([0.0, 0.5, 1.0, math.inf], dtype=float)
+    parity_codes = np.array([_PARITY_CODES['positive'],
+                             _PARITY_CODES['saddle']], dtype=float)
+    shape = (2, gamma_edges.size - 1, rho_edges.size - 1)
+    w_cert_grid = np.full(shape, np.nan)
+    diag_grid = np.full(shape, np.nan)
+    w_ceiling_grid = np.full(shape, np.nan)
+    status_grid = np.full(shape, STATUS_INVALID)
+    interp_grid = np.zeros(shape)
+    rho_measured_max_grid = np.full(shape, np.inf)
+
+    gi = int(np.searchsorted(gamma_edges, gamma, side='right') - 1)
+    ri = int(np.searchsorted(rho_edges, rho, side='right') - 1)
+    status_grid[0, gi, ri] = STATUS_CERTIFIED
+    w_cert_grid[0, gi, ri] = w_cert
+    w_ceiling_grid[0, gi, ri] = w_ceiling
+    interp_grid[0, gi, ri] = 1.0
+
+    provenance = {
+        'schema_version': _SCHEMA_VERSION,
+        'certification_bar': CERTIFICATION_BAR,
+        'diagnostic_bar': DIAGNOSTIC_BAR,
+        'w_trust_multiplier': W_TRUST_MULTIPLIER,
+        'w_trust_additive': W_TRUST_ADDITIVE,
+        'max_cell_jump': MAX_CELL_JUMP,
+        'astroid_wall': ASTROID_WALL,
+        'saddle_wall': SADDLE_WALL,
+        'kappa': 0.0,
+    }
+    provenance['content_hash'] = _content_hash(
+        parity_codes, gamma_edges, rho_edges, w_cert_grid, diag_grid,
+        w_ceiling_grid, status_grid, interp_grid, rho_measured_max_grid,
+        _hash_scalars(provenance))
+    return CertifiedPpgoMap.from_arrays(
+        parity_codes, gamma_edges, rho_edges, w_cert_grid, diag_grid,
+        w_ceiling_grid, status_grid, interp_grid, rho_measured_max_grid,
+        provenance)
+
+
+def _finite_rho_map(*, rho_measured_max: float, w_cert: float,
+                    w_ceiling: float, gamma: float = 0.5) -> CertifiedPpgoMap:
+    """One-cell map whose OPEN outer rho annulus was measured to a finite rho.
+
+    The outermost rho band is ``[4.0, inf)`` (Build 8h-b WP1 outer-annulus
+    cap); its positive-parity cell is certified with a FINITE
+    ``rho_measured_max`` -- the single representative radius the open annulus
+    was actually sampled at.  A query ``rho`` inside ``[4.0, rho_measured_max]``
+    lands in the cell and every accessor returns the stored certified value;
+    a query beyond ``rho_measured_max`` falls out of grid
+    (`CertifiedPpgoMap._cell` returns ``None`` on the strict
+    ``rho > rho_measured_max`` test) and every accessor yields `UNKNOWN` --
+    the infinite tail is never certified from that one finite sample.
+
+    Passing ``rho_measured_max = inf`` reproduces HEAD-without-the-cap: the
+    reachable-red twin in which the beyond-measured query certifies a
+    (unsound) finite floor.  ``gamma`` selects the sole gamma band and stays
+    below the ``1.0`` parity boundary so the positive-parity slice is the
+    physically valid one.  ``rho`` is deliberately NOT a parameter: the outer
+    band spans ``[4.0, inf)`` and callers choose their query radius.
+    """
+    if not gamma < 1.0:
+        raise ValueError('gamma must sit below the 1.0 parity boundary.')
+    gamma_edges = np.array([0.2, 1.6], dtype=float)          # one gamma band
+    rho_edges = np.array([0.0, 4.0, math.inf], dtype=float)  # outer=[4, inf)
+    parity_codes = np.array([_PARITY_CODES['positive'],
+                             _PARITY_CODES['saddle']], dtype=float)
+    shape = (2, gamma_edges.size - 1, rho_edges.size - 1)    # (2, 1, 2)
+    w_cert_grid = np.full(shape, np.nan)
+    diag_grid = np.full(shape, np.nan)
+    w_ceiling_grid = np.full(shape, np.nan)
+    status_grid = np.full(shape, STATUS_INVALID)
+    interp_grid = np.zeros(shape)
+    rho_measured_max_grid = np.full(shape, np.inf)
+
+    outer = (0, 0, 1)      # positive parity, sole gamma band, outer rho band
+    status_grid[outer] = STATUS_CERTIFIED
+    w_cert_grid[outer] = w_cert
+    w_ceiling_grid[outer] = w_ceiling
+    interp_grid[outer] = 1.0
+    rho_measured_max_grid[outer] = rho_measured_max
+
+    provenance = {'schema_version': 'test',
+                  'certification_bar': CERTIFICATION_BAR}
+    return CertifiedPpgoMap.from_arrays(
+        parity_codes, gamma_edges, rho_edges, w_cert_grid, diag_grid,
+        w_ceiling_grid, status_grid, interp_grid, rho_measured_max_grid,
+        provenance)
+
+
+class _DispatchProbe:
+    """Stateless stand-in exposing the REAL ppGO dispatch helpers.
+
+    Build 8h-b WP2 refactored the inline cell-coordinate derivation into
+    `LensedRelativeBinningLikelihood._ppgo_cell_coords`, which
+    `_ppgo_band_split` and `_ppgo_cell_ceiling` both call via ``self``.
+    All three read ONLY the process-global map and the ``lens`` dict (no
+    likelihood state), so binding the real functions onto a bare object
+    reproduces production dispatch truth without constructing a whole
+    likelihood -- the served-vs-refused flip is production code, not a
+    reimplementation.
+    """
+
+    _ppgo_cell_coords = LensedRelativeBinningLikelihood._ppgo_cell_coords
+    _ppgo_band_split = LensedRelativeBinningLikelihood._ppgo_band_split
+    _ppgo_cell_ceiling = LensedRelativeBinningLikelihood._ppgo_cell_ceiling
 
 
 class _PpgoTestCase(TestCase):
@@ -712,9 +856,9 @@ class BandSplitReconstructionTestCase(_PpgoTestCase):
         set_certified_ppgo_map(_synthetic_map(
             parity='positive', gamma=cls.GAMMA, rho=rho, w_cert=cls.W_CERT))
         try:
-            cls.w_trust = LensedRelativeBinningLikelihood._ppgo_band_split(
-                object(), {'gamma': cls.GAMMA, 'y1': cls.SOURCE[0],
-                           'y2': cls.SOURCE[1]})
+            cls.w_trust = _DispatchProbe()._ppgo_band_split(
+                {'gamma': cls.GAMMA, 'y1': cls.SOURCE[0],
+                 'y2': cls.SOURCE[1]})
         finally:
             set_certified_ppgo_map(None)
 
@@ -860,7 +1004,7 @@ class MapRefusalTestCase(_PpgoTestCase):
     @staticmethod
     def _bandsplit(lens):
         """The REAL dispatch helper (no likelihood state read)."""
-        return LensedRelativeBinningLikelihood._ppgo_band_split(object(), lens)
+        return _DispatchProbe()._ppgo_band_split(lens)
 
     def setUp(self) -> None:
         super().setUp()
@@ -905,12 +1049,17 @@ class MapRefusalTestCase(_PpgoTestCase):
             self.comparisons += 1
             self.assertIsInstance(CertifiedPpgoMap.load(path), CertifiedPpgoMap)
 
-            # Corrupt the stored content hash -> loud ValueError.
+            # Corrupt the stored content hash -> loud ValueError.  Carry
+            # EVERY stored array (including ``w_ceiling`` /
+            # ``rho_measured_max``, Build 8h-b) so the artifact is
+            # well-formed except for the hash: the failure is a genuine
+            # hash MISMATCH (ValueError), not a missing-key KeyError.
             with np.load(path, allow_pickle=False) as data:
                 prov = json.loads(str(data['provenance']))
                 arrays = {k: np.asarray(data[k]) for k in (
                     'parity_codes', 'gamma_edges', 'rho_edges', 'w_cert',
-                    'w_cert_diagnostic', 'cell_status', 'interpolable')}
+                    'w_cert_diagnostic', 'w_ceiling', 'cell_status',
+                    'interpolable', 'rho_measured_max')}
             prov['content_hash'] = 'deadbeef'
             np.savez(path, provenance=np.asarray(json.dumps(prov)), **arrays)
             self.comparisons += 1
@@ -996,6 +1145,900 @@ class MapRefusalTestCase(_PpgoTestCase):
         self.assertTrue(served_valid and not served_absent,
                         f'the served flag did not flip with the map state '
                         f'(valid={served_valid}, absent={served_absent})')
+
+# ======================================================================
+# Test #6 -- TRUNCATION-ON-REFUSAL: TOP-W REFUSAL CERTIFIES A PREFIX (WP1).
+# ======================================================================
+
+class TruncationOnRefusalTestCase(_PpgoTestCase):
+    """A cell whose saddle branch refuses above ``w*`` certifies its prefix.
+
+    Build 8h-b WP1 truncation-on-refusal: a named engine refusal
+    (`CancellationError`) part-way up an angle's ``w``-sweep TRUNCATES that
+    angle at its maximal accepted ``w``-prefix instead of invalidating the
+    whole cell.  Here the exact engine is STUBBED -- ``_measure_cell``
+    imports ``ChangRefsdalChannels`` / ``geometric_amplification`` LOCALLY
+    at call time, so patching the two source modules (and the module-level
+    ``caustic_geometry``) swaps them for a synthetic scenario in which the
+    saddle-image branch refuses monotonically above a per-angle ceiling
+    ``w*(angle)``, tightest at the ``pi/2`` diagonal.  The ppGO glue is made
+    to match the exact total on every accepted node (error 0), so the
+    accepted prefix certifies cleanly and the ONLY thing under test is the
+    truncation bookkeeping: the cell is CERTIFIED (not ``STATUS_INVALID``),
+    its stored ``w_ceiling`` is the MIN over angles of each accepted-prefix
+    endpoint, and ``w_cert`` is the sup-over-w floor on the accepted prefix
+    (``w_nodes[0]`` here, since the zeroed error never violates the bar).
+
+    Independent oracle: the expected per-angle endpoints and their minimum
+    are recomputed directly from ``_w_nodes(wall)`` and the stub's own
+    ``w*(angle)`` law -- never read back from ``_measure_cell``'s internals.
+
+    Reachable-red (mutation): with truncation DISABLED (``_max_accepted_prefix``
+    swapped for a no-prefix variant that invalidates on the first top-node
+    refusal, i.e. HEAD-pre-8h-b whole-cell invalidation), the SAME stubbed
+    cell must go ``STATUS_INVALID``.
+    """
+
+    PARITY = 'positive'
+    GAMMA = 0.5
+    RHO_CENTER = 0.5
+    KAPPA = 0.0
+    WALL = 100.0
+    W_STAR_AXIS = 90.0         #: refusal ceiling at angle 0 (loosest)
+    W_STAR_DIAG = 40.0         #: refusal ceiling at angle pi/2 (tightest)
+    #: The five source angles ``_measure_cell`` sweeps for each cell.
+    ANGLES = (0.0, math.pi / 8, math.pi / 4, 3 * math.pi / 8, math.pi / 2)
+
+    @classmethod
+    def _w_star(cls, angle: float) -> float:
+        """Per-angle monotone-decreasing refusal ceiling (the fixture law)."""
+        frac = angle / (math.pi / 2)
+        return cls.W_STAR_AXIS + (cls.W_STAR_DIAG - cls.W_STAR_AXIS) * frac
+
+    @staticmethod
+    def _no_truncation(evaluate, n_nodes, refusal_types):
+        """HEAD-pre-8h-b: any top-node refusal invalidates the whole cell."""
+        try:
+            return n_nodes, evaluate(n_nodes)
+        except refusal_types:
+            return 0, None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.w_nodes = _w_nodes(cls.WALL)
+        w_star = cls._w_star
+        real_cancel = CancellationError
+
+        class _StubChannels:
+            """Refuses monotonically above ``w*(angle)``; glue == exact."""
+
+            def __init__(self, w_prefix):
+                self.w_prefix = np.asarray(w_prefix, dtype=float)
+
+            def evaluate(self, *, gamma, y, beta, kappa):
+                angle = math.atan2(float(y[1]), float(y[0]))
+                if float(self.w_prefix[-1]) > w_star(angle):
+                    raise real_cancel(
+                        f'stub saddle-branch refusal above '
+                        f'w*={w_star(angle):.3f}')
+                exact = np.ones(self.w_prefix.size, dtype=complex)
+                return SimpleNamespace(exact_total=exact, t_min=0.0)
+
+        def _stub_amplification(w, source, gamma, beta=0.0, kappa=0.0):
+            return np.ones(np.asarray(w).size, dtype=complex)
+
+        patchers = [
+            mock.patch.object(
+                ppgo_map, 'caustic_geometry',
+                lambda gamma, kappa=0.0: (1.0, np.array([1.0, 0.0]))),
+            mock.patch.object(
+                _channels, 'ChangRefsdalChannels', _StubChannels),
+            mock.patch.object(
+                _operator, 'geometric_amplification', _stub_amplification),
+        ]
+        for patcher in patchers:
+            patcher.start()
+        try:
+            cls.result = _measure_cell(
+                cls.PARITY, cls.GAMMA, cls.RHO_CENTER, cls.KAPPA, cls.WALL)
+            with mock.patch.object(ppgo_map, '_max_accepted_prefix',
+                                   cls._no_truncation):
+                cls.result_no_trunc = _measure_cell(
+                    cls.PARITY, cls.GAMMA, cls.RHO_CENTER, cls.KAPPA,
+                    cls.WALL)
+        finally:
+            for patcher in patchers:
+                patcher.stop()
+
+        # INDEPENDENT ORACLE: per-angle accepted endpoint = largest node
+        # <= w*(angle); the cell ceiling is their minimum (the pi/2 angle).
+        cls.endpoints = [
+            float(cls.w_nodes[cls.w_nodes <= cls._w_star(angle)][-1])
+            for angle in cls.ANGLES]
+        cls.expected_ceiling = min(cls.endpoints)
+        cls._plot()
+
+    @classmethod
+    def _plot(cls) -> None:
+        if not _HAVE_MPL:
+            return
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(np.degrees(cls.ANGLES), cls.endpoints, 'bo-',
+                label='accepted-prefix endpoint')
+        ax.axhline(
+            cls.expected_ceiling, color='g', ls='--',
+            label=f'stored w_ceiling = min = {cls.expected_ceiling:.2f}')
+        ax.axhline(cls.WALL, color='r', ls=':', label=f'wall = {cls.WALL}')
+        ax.set_xlabel('source angle [deg]')
+        ax.set_ylabel('accepted-prefix endpoint  w')
+        ax.set_title('Truncation-on-refusal: per-angle ceiling, cell = min')
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(_OUTPUT_DIR / 'ppgo_truncation_per_angle_endpoint.png',
+                    dpi=110)
+        plt.close(fig)
+
+    def test_cell_is_certified_not_invalidated(self):
+        """A top-w refusal truncates; the cell stays CERTIFIED."""
+        status, _w_cert, _diag, w_ceiling = self.result
+        self.comparisons += 1
+        self.assertEqual(
+            status, STATUS_CERTIFIED,
+            'a top-w refusal invalidated the whole cell instead of '
+            'truncating it to the accepted prefix')
+        self.comparisons += 1
+        self.assertTrue(math.isfinite(w_ceiling),
+                        'a certified cell must carry a finite w_ceiling')
+
+    def test_ceiling_is_min_over_angle_prefix_endpoints(self):
+        """``w_ceiling`` is the tightest (min) per-angle accepted endpoint."""
+        _status, _w_cert, _diag, w_ceiling = self.result
+        self.assert_within(
+            abs(w_ceiling - self.expected_ceiling), 1e-12,
+            f'stored w_ceiling {w_ceiling} != min-over-angles prefix '
+            f'endpoint {self.expected_ceiling}')
+        self.comparisons += 1
+        self.assertLessEqual(
+            w_ceiling, min(self.endpoints[:-1]) + 1e-12,
+            'the ceiling is not the tightest per-angle endpoint')
+
+    def test_ceiling_is_below_the_wall(self):
+        """The trusted range is truncated strictly below the wall."""
+        _status, _w_cert, _diag, w_ceiling = self.result
+        self.comparisons += 1
+        self.assertLess(w_ceiling, self.WALL,
+                        'the cell was not truncated below the wall')
+
+    def test_floor_is_sup_over_w_on_the_accepted_prefix(self):
+        """``w_cert`` is the sup-over-w floor measured on the prefix only."""
+        _status, w_cert, _diag, _w_ceiling = self.result
+        self.assert_within(
+            abs(w_cert - float(self.w_nodes[0])), 1e-12,
+            f'w_cert {w_cert} is not the sup-over-w floor on the accepted '
+            f'prefix (error is 0 on every accepted node, so the floor is the '
+            f'lowest node {float(self.w_nodes[0])})')
+
+    def test_disabling_truncation_invalidates_the_cell(self):
+        """Reachable-red: without prefix truncation the cell goes INVALID."""
+        status = self.result_no_trunc[0]
+        self.comparisons += 1
+        self.assertEqual(
+            status, STATUS_INVALID,
+            'HEAD-pre-8h-b (no prefix truncation) did not invalidate the '
+            'top-w-refusing cell -- the truncate-vs-invalidate contrast is '
+            'not reachable-red')
+
+
+# ======================================================================
+# Test #7 -- CELL-CEILING BAND-SPLIT GUARD, REACHABLE-RED BOTH WAYS (WP2).
+# ======================================================================
+
+class CellCeilingBandSplitGuardTestCase(_PpgoTestCase):
+    """A draw beyond the cell ceiling must NOT band-split.
+
+    Build 8h-b WP2 beyond-ceiling guard: the map certifies a cell only over
+    its MEASURED range ``[w_cert, w_ceiling]``, so the band-split effective
+    ceiling is ``min(parity_wall, cell_ceiling)`` -- a draw whose band tops
+    out above it must fall through to the loud whole-band refusal, never let
+    bare ppGO silently serve beyond-ceiling nodes.  A coarse synthetic map
+    installs a certified positive-parity cell whose ceiling ``C = 40`` sits
+    strictly BELOW the astroid parity wall ``W = 443.7`` (``gamma = 0.5``).
+
+    The band-split DECISION is reproduced exactly as production's
+    `_surrogate_coefficients` computes it (``w_trust`` and ``w_ceiling`` are
+    the REAL `_ppgo_band_split` / `_ppgo_cell_ceiling` map reads via
+    `_DispatchProbe`; the ``min(wall, ceiling)`` cap and
+    ``w_lo < w_trust < w_hi`` straddle rule mirror the method line-for-line).
+    Two draws share the same cell:
+
+    * ``w_hi in (C, W)`` -- above the ceiling but below the wall: production
+      does NOT band-split (whole-band refuse); the ceiling-IGNORING
+      (parity-wall-only, HEAD) decision WOULD split -> that is the
+      reachable-red witness the guard exists to stop.
+    * ``w_hi < C`` -- within the measured range: production band-splits
+      normally.
+    """
+
+    GAMMA = 0.5                # astroid parity (wall = ASTROID_WALL)
+    SOURCE = (0.9, 0.9)
+    W_CERT = 8.0               # -> w_trust = max(12, 10) = 12.0
+    CEILING = 40.0             # C: measured ceiling, strictly below the wall
+    DENSE_ABOVE = np.geomspace(2.0, 100.0, 50)  # w_hi = 100 in (C, W)
+    DENSE_BELOW = np.geomspace(2.0, 30.0, 50)   # w_hi = 30 < C
+
+    @staticmethod
+    def _dispatch_band_splits(lens, dense_w, *, honor_ceiling: bool) -> bool:
+        """Reproduce `_surrogate_coefficients`'s band-split decision.
+
+        ``w_trust`` (`_ppgo_band_split`) and ``w_ceiling``
+        (`_ppgo_cell_ceiling`) are the REAL production map reads; the cap
+        ``eff_ceiling = min(parity_wall, cell_ceiling)`` and the straddle
+        test ``w_lo < w_trust < w_hi`` mirror the production method.  With
+        ``honor_ceiling=False`` the cap is dropped -- the HEAD
+        (parity-wall-only) behaviour, kept here as the falsification arm.
+        """
+        probe = _DispatchProbe()
+        w_trust = probe._ppgo_band_split(lens)
+        if w_trust is None:
+            return False
+        w_lo, w_hi = float(dense_w.min()), float(dense_w.max())
+        wall = ASTROID_WALL if float(lens['gamma']) < 1.0 else SADDLE_WALL
+        if honor_ceiling:
+            cell_ceiling = probe._ppgo_cell_ceiling(lens)
+            eff_ceiling = (wall if cell_ceiling is None
+                           else min(wall, cell_ceiling))
+            if w_hi > eff_ceiling:
+                w_trust = None
+        if w_trust is None:
+            return False
+        return w_lo < w_trust < w_hi
+
+    def setUp(self) -> None:
+        super().setUp()
+        reach = ppgo_map.caustic_geometry(self.GAMMA, 0.0)[0]
+        rho = math.hypot(*self.SOURCE) / reach
+        set_certified_ppgo_map(_synthetic_map(
+            parity='positive', gamma=self.GAMMA, rho=rho,
+            w_cert=self.W_CERT, w_ceiling=self.CEILING))
+        self.lens = {'gamma': self.GAMMA, 'y1': self.SOURCE[0],
+                     'y2': self.SOURCE[1]}
+
+    def tearDown(self) -> None:
+        set_certified_ppgo_map(None)
+        super().tearDown()
+
+    def test_cell_is_certified_with_finite_subwall_ceiling(self):
+        """The fixture is a real certified cell with ``C < W`` (not vacuous)."""
+        probe = _DispatchProbe()
+        w_trust = probe._ppgo_band_split(self.lens)
+        ceiling = probe._ppgo_cell_ceiling(self.lens)
+        self.comparisons += 1
+        self.assertIsNotNone(w_trust, 'the cell did not certify a w_trust')
+        self.comparisons += 1
+        self.assertIsNotNone(ceiling, 'the certified cell has no w_ceiling')
+        self.assert_within(
+            abs(ceiling - self.CEILING), 1e-12,
+            f'_ppgo_cell_ceiling read {ceiling}, not the stored {self.CEILING}')
+        self.comparisons += 1
+        self.assertLess(self.CEILING, ASTROID_WALL,
+                        'the fixture ceiling is not strictly below the wall')
+
+    def test_draw_above_ceiling_does_not_band_split(self):
+        """A ``w_hi in (C, W)`` draw falls through to the whole-band refuse."""
+        self.comparisons += 1
+        self.assertFalse(
+            self._dispatch_band_splits(
+                self.lens, self.DENSE_ABOVE, honor_ceiling=True),
+            'a draw topping out above the cell ceiling was band-split -- bare '
+            'ppGO would serve beyond-ceiling (uncertified) nodes')
+
+    def test_draw_below_ceiling_band_splits_normally(self):
+        """A ``w_hi < C`` draw band-splits (chart below, ppGO above)."""
+        self.comparisons += 1
+        self.assertTrue(
+            self._dispatch_band_splits(
+                self.lens, self.DENSE_BELOW, honor_ceiling=True),
+            'a draw wholly within the measured range failed to band-split')
+
+    def test_ignoring_ceiling_wrongly_splits_the_above_draw(self):
+        """Reachable-red: parity-wall-only (HEAD) splits the beyond-C draw."""
+        self.comparisons += 1
+        self.assertTrue(
+            self._dispatch_band_splits(
+                self.lens, self.DENSE_ABOVE, honor_ceiling=False),
+            'the ceiling-ignoring (HEAD) decision did NOT split the '
+            'beyond-ceiling draw -- the guard has nothing to catch, so the '
+            'ceiling-aware refusal is not reachable-red')
+
+
+# ======================================================================
+# Test #8 -- CEILING-AWARE STRATA TRIM, REACHABLE-RED BOTH WAYS (WP2).
+# ======================================================================
+
+class CeilingAwareStrataTrimTestCase(_PpgoTestCase):
+    """`_apply_ppgo_trim` respects the measured ceiling above the floor.
+
+    Build 8h-b WP2 strata-trim ceiling arg: a stratum is handed to ppGO
+    (``'drop'`` / ``'cap'``) only when the cell's MEASURED ceiling
+    ``_stratum_ppgo_ceiling`` covers the stratum top; a stratum whose top
+    lies ABOVE the ceiling is kept charted (``'keep'``) so its tail routes
+    to the loud whole-band refusal instead of to uncertified bare ppGO.
+    The synthetic map certifies a positive cell with hand-off floor
+    ``boundary = 5`` (from ``w_cert = 3``) and ceiling ``C = 20``.
+
+    Both directions are reachable-red: the SAME beyond-ceiling strata that
+    are KEPT with the ceiling supplied are wrongly ``'drop'``/``'cap'``-ed
+    when the ceiling is dropped (``ceiling=None``, HEAD behaviour) -- that
+    ``None``-ceiling contrast is the falsification the ceiling arm stops.
+    """
+
+    PARITY = 1                 # positive parity (int convention)
+    GAMMA = 0.5
+    RHO = 0.3
+    W_CERT = 3.0               # -> boundary (w_trust) = 5.0
+    CEILING = 20.0             # C: measured ceiling above the floor
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.cmap = _synthetic_map(parity='positive', gamma=cls.GAMMA,
+                                  rho=cls.RHO, w_cert=cls.W_CERT,
+                                  w_ceiling=cls.CEILING)
+        cls.boundary = _stratum_ppgo_boundary(
+            cls.PARITY, cls.GAMMA, cls.RHO, cls.cmap)
+        cls.ceiling = _stratum_ppgo_ceiling(
+            cls.PARITY, cls.GAMMA, cls.RHO, cls.cmap)
+
+    def test_ceiling_reads_the_certified_cell(self):
+        """`_stratum_ppgo_ceiling` returns the stored ceiling for the cell."""
+        self.comparisons += 1
+        self.assertIsNotNone(self.ceiling,
+                             'a certified cell must yield a finite ceiling')
+        self.assert_within(
+            abs(self.ceiling - self.CEILING), 1e-12,
+            f'strata ceiling {self.ceiling} is not the stored {self.CEILING}')
+
+    def test_no_map_and_unknown_cell_yield_no_ceiling(self):
+        """No map / a beyond-wall cell impose no ceiling constraint."""
+        self.comparisons += 1
+        self.assertIsNone(
+            _stratum_ppgo_ceiling(self.PARITY, self.GAMMA, self.RHO, None),
+            'no map must yield a None ceiling')
+        beyond = _synthetic_map(parity='positive', gamma=self.GAMMA,
+                                rho=self.RHO, w_cert=math.nan,
+                                status=STATUS_BEYOND_WALL)
+        self.comparisons += 1
+        self.assertIsNone(
+            _stratum_ppgo_ceiling(self.PARITY, self.GAMMA, self.RHO, beyond),
+            'a beyond-wall cell must not impose a ceiling constraint')
+
+    def test_stratum_above_floor_within_ceiling_is_dropped(self):
+        """Above the floor and below the ceiling -> ppGO serves it (drop)."""
+        _new_range, action = _apply_ppgo_trim(
+            (self.boundary + 1.0, self.CEILING - 5.0), self.boundary,
+            self.ceiling)
+        self.comparisons += 1
+        self.assertEqual(action, 'drop',
+                         'a stratum within [floor, ceiling] was not dropped')
+
+    def test_stratum_straddling_floor_within_ceiling_is_capped(self):
+        """Straddles the floor, top below the ceiling -> capped at the floor."""
+        new_range, action = _apply_ppgo_trim(
+            (self.boundary - 1.0, self.CEILING - 5.0), self.boundary,
+            self.ceiling)
+        self.comparisons += 1
+        self.assertEqual(action, 'cap', 'a straddling stratum was not capped')
+        self.assert_within(
+            abs(new_range[1] - self.boundary), 1e-12,
+            f'capped top {new_range[1]} is not the hand-off floor '
+            f'{self.boundary}')
+
+    def test_stratum_top_above_ceiling_is_kept(self):
+        """A stratum topping past the ceiling is kept charted (not ppGO)."""
+        # Wholly above the floor but beyond the ceiling: HEAD would 'drop'.
+        _r, action_above = _apply_ppgo_trim(
+            (self.boundary + 1.0, self.CEILING + 10.0), self.boundary,
+            self.ceiling)
+        self.comparisons += 1
+        self.assertEqual(
+            action_above, 'keep',
+            'a stratum whose top exceeds the ceiling was handed to ppGO')
+        # Straddles the floor and tops past the ceiling: HEAD would 'cap'.
+        _r, action_straddle = _apply_ppgo_trim(
+            (self.boundary - 1.0, self.CEILING + 10.0), self.boundary,
+            self.ceiling)
+        self.comparisons += 1
+        self.assertEqual(
+            action_straddle, 'keep',
+            'a straddling stratum topping past the ceiling was trimmed')
+
+    def test_dropping_the_ceiling_wrongly_trims_beyond_ceiling_strata(self):
+        """Reachable-red: ceiling=None (HEAD) drops/caps the beyond-C strata."""
+        _r, action_above = _apply_ppgo_trim(
+            (self.boundary + 1.0, self.CEILING + 10.0), self.boundary, None)
+        self.comparisons += 1
+        self.assertEqual(
+            action_above, 'drop',
+            'HEAD (no ceiling) did not drop the beyond-ceiling stratum -- the '
+            'ceiling-aware keep is not reachable-red')
+        _r, action_straddle = _apply_ppgo_trim(
+            (self.boundary - 1.0, self.CEILING + 10.0), self.boundary, None)
+        self.comparisons += 1
+        self.assertEqual(
+            action_straddle, 'cap',
+            'HEAD (no ceiling) did not cap the straddling beyond-ceiling '
+            'stratum -- the ceiling-aware keep is not reachable-red')
+
+
+# ======================================================================
+# Test #9 -- LOADER HARD-REFUSES CEILING-LESS / TAMPERED MAPS (WP1).
+# ======================================================================
+
+class LoaderCeilingRefusalTestCase(_PpgoTestCase):
+    """`use_certified_ppgo_map` refuses ceiling-less / tampered artifacts.
+
+    Build 8h-b WP1 loader hard-refusal: a well-formed ``.npz`` carrying the
+    ``w_ceiling`` grid and a matching content hash loads and installs, and
+    its ceiling accessor returns finite ceilings for certified cells and
+    `UNKNOWN` out of grid.  Two tampered artifacts must instead be
+    HARD-refused -- ``use_certified_ppgo_map`` returns ``False`` and leaves
+    the process-global map ``None`` (every query returns `UNKNOWN`):
+
+    * a ceiling-LESS artifact (the ``w_ceiling`` key removed, pre-0.2.0
+      shape) -> ``CertifiedPpgoMap.load`` raises ``KeyError`` on the direct
+      item access;
+    * a TAMPERED artifact (one ``w_ceiling`` value mutated without
+      re-hashing) -> ``load`` raises ``ValueError`` on the content-hash
+      mismatch.
+
+    The baseline is `_saveable_ceiling_map` (a full provenance + valid
+    content hash) written with the production `save_map`; the two failing
+    variants are the SAME npz re-saved with one field dropped / mutated, so
+    the ONLY difference from the loadable baseline is the schema breach.
+    """
+
+    GAMMA = 0.5
+    RHO = 0.3
+    W_CERT = 8.0
+    W_CEILING = 40.0
+    _STORED_KEYS = ('parity_codes', 'gamma_edges', 'rho_edges', 'w_cert',
+                    'w_cert_diagnostic', 'w_ceiling', 'cell_status',
+                    'interpolable', 'rho_measured_max')
+
+    def setUp(self) -> None:
+        super().setUp()
+        set_certified_ppgo_map(None)
+
+    def tearDown(self) -> None:
+        set_certified_ppgo_map(None)
+        super().tearDown()
+
+    def _write_baseline(self, path: pathlib.Path) -> None:
+        save_map(_saveable_ceiling_map(
+            gamma=self.GAMMA, rho=self.RHO, w_cert=self.W_CERT,
+            w_ceiling=self.W_CEILING), path)
+
+    @staticmethod
+    def _reload_arrays(path: pathlib.Path, keys):
+        with np.load(path, allow_pickle=False) as data:
+            arrays = {k: np.asarray(data[k]) for k in keys}
+            provenance = json.loads(str(data['provenance']))
+        return arrays, provenance
+
+    def test_well_formed_map_loads_and_ceiling_accessor_answers(self):
+        """The baseline installs; the ceiling accessor is finite / UNKNOWN."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'ceiling_map.npz'
+            self._write_baseline(path)
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', RuntimeWarning)
+                ok = use_certified_ppgo_map(path)
+            self.comparisons += 1
+            self.assertTrue(ok, 'a well-formed ceiling map failed to load')
+            self.comparisons += 1
+            self.assertIsNotNone(get_certified_ppgo_map(),
+                                 'the loaded map was not installed')
+            ceiling = certified_w_ceiling('positive', self.GAMMA, self.RHO)
+            self.assertIsNot(ceiling, UNKNOWN,
+                             'a certified cell returned UNKNOWN ceiling')
+            self.assert_within(
+                abs(float(ceiling) - self.W_CEILING), 1e-12,
+                f'certified ceiling {ceiling} != stored {self.W_CEILING}')
+            self.comparisons += 1
+            self.assertIs(
+                certified_w_ceiling('positive', 5.0, self.RHO), UNKNOWN,
+                'an out-of-grid gamma did not return UNKNOWN')
+
+    def test_ceiling_less_artifact_is_hard_refused(self):
+        """Dropping the ``w_ceiling`` key -> KeyError -> refuse, global None."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'ceiling_map.npz'
+            self._write_baseline(path)
+            keys = tuple(k for k in self._STORED_KEYS if k != 'w_ceiling')
+            arrays, provenance = self._reload_arrays(path, keys)
+            ceiling_less = pathlib.Path(tmp) / 'noceil.npz'
+            np.savez(ceiling_less,
+                     provenance=np.asarray(json.dumps(provenance)), **arrays)
+            self.comparisons += 1
+            with self.assertRaises(KeyError):
+                CertifiedPpgoMap.load(ceiling_less)
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', RuntimeWarning)
+                ok = use_certified_ppgo_map(ceiling_less)
+            self.comparisons += 1
+            self.assertFalse(ok, 'a ceiling-less artifact reported success')
+            self.comparisons += 1
+            self.assertIsNone(get_certified_ppgo_map(),
+                              'a ceiling-less artifact was left installed')
+
+    def test_tampered_ceiling_value_is_hard_refused(self):
+        """Mutating a ``w_ceiling`` value -> hash ValueError -> refuse, None."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'ceiling_map.npz'
+            self._write_baseline(path)
+            arrays, provenance = self._reload_arrays(path, self._STORED_KEYS)
+            gamma_edges = arrays['gamma_edges']
+            gi = int(np.searchsorted(gamma_edges, self.GAMMA,
+                                     side='right') - 1)
+            mutated = arrays['w_ceiling'].copy()
+            mutated[0, gi, 0] = self.W_CEILING + 59.0   # value != stored hash
+            arrays['w_ceiling'] = mutated
+            tampered = pathlib.Path(tmp) / 'tamper.npz'
+            np.savez(tampered,
+                     provenance=np.asarray(json.dumps(provenance)), **arrays)
+            self.comparisons += 1
+            with self.assertRaises(ValueError):
+                CertifiedPpgoMap.load(tampered)
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', RuntimeWarning)
+                ok = use_certified_ppgo_map(tampered)
+            self.comparisons += 1
+            self.assertFalse(ok, 'a hash-tampered artifact reported success')
+            self.comparisons += 1
+            self.assertIsNone(get_certified_ppgo_map(),
+                              'a hash-tampered artifact was left installed')
+
+    def test_refused_map_makes_every_ceiling_query_unknown(self):
+        """After a refusal the global is None -> all ceiling queries UNKNOWN."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'ceiling_map.npz'
+            self._write_baseline(path)
+            keys = tuple(k for k in self._STORED_KEYS if k != 'w_ceiling')
+            arrays, provenance = self._reload_arrays(path, keys)
+            ceiling_less = pathlib.Path(tmp) / 'noceil.npz'
+            np.savez(ceiling_less,
+                     provenance=np.asarray(json.dumps(provenance)), **arrays)
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', RuntimeWarning)
+                use_certified_ppgo_map(ceiling_less)
+        self.comparisons += 1
+        self.assertIs(
+            certified_w_ceiling('positive', self.GAMMA, self.RHO), UNKNOWN,
+            'a query on a refused (None) map did not return UNKNOWN')
+
+
+# ======================================================================
+# Test #10 -- STRATA TRIM RESPECTS THE CEILING OVER A HETEROGENEOUS SWEEP
+#             (WP2).
+# ======================================================================
+
+class StrataTrimCeilingSweepTestCase(_PpgoTestCase):
+    """A single strata-trim pass keeps beyond-ceiling strata, trims the rest.
+
+    Build 8h-b WP2 strata-trim (the sweep view, complementing the isolated
+    per-call `CeilingAwareStrataTrimTestCase`): the training loop
+    `_train_band_charts` iterates strata and calls
+    ``_apply_ppgo_trim(stratum_w_range, boundary, ceiling)`` once per
+    stratum with the cell's REAL hand-off floor
+    (`_stratum_ppgo_boundary` -> ``w_trust``) and measured ceiling
+    (`_stratum_ppgo_ceiling` -> ``w_ceiling``).  Fed a HETEROGENEOUS set of
+    strata in one pass, the recorded action vector must be
+
+    * ``'keep'`` for a stratum below the floor (never ppGO's),
+    * ``'cap'`` / ``'drop'`` for a stratum within ``[floor, ceiling]``
+      (handed to ppGO as before),
+    * ``'keep'`` for a stratum whose TOP exceeds the ceiling -- its
+      beyond-ceiling tail is UNKNOWN and must stay charted intact so it
+      routes to the loud whole-band refusal, not to uncertified bare ppGO.
+
+    The two ceiling-topping strata are the reachable-red witnesses: the
+    SAME sweep run with ``ceiling=None`` (HEAD, parity-wall-only) trims them
+    (``'drop'`` / ``'cap'``), so the ceiling arm changes the action vector.
+    The floor / ceiling are sourced from a synthetic map through the REAL
+    boundary / ceiling helpers, so the oracle is production dispatch truth.
+    """
+
+    PARITY = 1                 # positive parity (int convention)
+    GAMMA = 0.5
+    RHO = 0.3
+    W_CERT = 3.0               # -> boundary (w_trust) = 5.0
+    CEILING = 20.0
+
+    #: Heterogeneous strata (label, (w_min, w_max)) fed in a single pass.
+    #: Expected actions below assume boundary == 5.0, ceiling == 20.0.
+    STRATA = (
+        ('below_floor', (1.2, 4.0)),            # -> keep
+        ('straddle_within', (4.0, 15.0)),       # -> cap
+        ('above_within', (6.0, 15.0)),          # -> drop
+        ('straddle_over_ceiling', (4.0, 30.0)),  # -> keep (top > ceiling)
+        ('above_ceiling', (25.0, 30.0)),        # -> keep (top > ceiling)
+    )
+    EXPECTED_WITH_CEILING = ('keep', 'cap', 'drop', 'keep', 'keep')
+    EXPECTED_NO_CEILING = ('keep', 'cap', 'drop', 'cap', 'drop')
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.cmap = _synthetic_map(parity='positive', gamma=cls.GAMMA,
+                                  rho=cls.RHO, w_cert=cls.W_CERT,
+                                  w_ceiling=cls.CEILING)
+        cls.boundary = _stratum_ppgo_boundary(
+            cls.PARITY, cls.GAMMA, cls.RHO, cls.cmap)
+        cls.ceiling = _stratum_ppgo_ceiling(
+            cls.PARITY, cls.GAMMA, cls.RHO, cls.cmap)
+
+    def _sweep(self, ceiling):
+        """Mirror `_train_band_charts`' per-stratum trim call in one pass."""
+        actions = []
+        ranges = []
+        for _label, w_range in self.STRATA:
+            new_range, action = _apply_ppgo_trim(w_range, self.boundary,
+                                                 ceiling)
+            actions.append(action)
+            ranges.append(new_range)
+        return tuple(actions), ranges
+
+    def test_sweep_action_vector_honors_the_ceiling(self):
+        """The per-stratum action vector matches the ceiling-aware expectation."""
+        actions, _ranges = self._sweep(self.ceiling)
+        self.comparisons += 1
+        self.assertEqual(
+            actions, self.EXPECTED_WITH_CEILING,
+            f'ceiling-aware sweep actions {actions} != '
+            f'{self.EXPECTED_WITH_CEILING}')
+
+    def test_beyond_ceiling_strata_keep_their_full_range(self):
+        """A KEPT beyond-ceiling stratum retains its whole range (tail intact)."""
+        _actions, ranges = self._sweep(self.ceiling)
+        for idx, (label, original) in enumerate(self.STRATA):
+            if label not in ('straddle_over_ceiling', 'above_ceiling'):
+                continue
+            with self.subTest(stratum=label):
+                self.comparisons += 1
+                self.assertEqual(
+                    ranges[idx], original,
+                    f'{label} was truncated to {ranges[idx]} -- a '
+                    'beyond-ceiling tail must stay charted for refusal')
+
+    def test_within_ceiling_strata_are_still_handed_to_ppgo(self):
+        """Strata within [floor, ceiling] keep their cap/drop behaviour."""
+        actions, _ranges = self._sweep(self.ceiling)
+        labels = [label for label, _ in self.STRATA]
+        self.comparisons += 1
+        self.assertEqual(actions[labels.index('straddle_within')], 'cap',
+                         'a within-ceiling straddling stratum was not capped')
+        self.comparisons += 1
+        self.assertEqual(actions[labels.index('above_within')], 'drop',
+                         'a within-ceiling above-floor stratum was not dropped')
+
+    def test_dropping_ceiling_changes_the_sweep_vector(self):
+        """Reachable-red: the HEAD (no-ceiling) sweep trims the topping strata."""
+        actions_head, _ranges = self._sweep(None)
+        self.comparisons += 1
+        self.assertEqual(
+            actions_head, self.EXPECTED_NO_CEILING,
+            f'HEAD (no ceiling) sweep actions {actions_head} != '
+            f'{self.EXPECTED_NO_CEILING}')
+        # The ceiling arm must actually change the outcome, else it is a
+        # green no-op rather than a reachable-red guard.
+        self.comparisons += 1
+        self.assertNotEqual(
+            self.EXPECTED_WITH_CEILING, self.EXPECTED_NO_CEILING,
+            'the ceiling-aware and HEAD action vectors are identical -- the '
+            'ceiling arm is not reachable-red')
+
+
+# ======================================================================
+# Test #11 -- OUTERMOST RHO ANNULUS CAPPED AT ITS MEASURED RHO (WP1).
+# ======================================================================
+
+class OuterAnnulusRhoCapTestCase(_PpgoTestCase):
+    """The open outer rho annulus certifies only up to its measured radius.
+
+    Build 8h-b WP1 outer-annulus cap: the outermost rho band ``[4.0, inf)``
+    was measured at a SINGLE finite representative radius
+    ``rho_measured_max`` (here ``6.0``).  A ``w_cert`` / ``w_trust`` /
+    ``w_ceiling`` query at a ``rho`` inside the measured range returns the
+    certified value; a query far beyond ``rho_measured_max`` (``rho = 50``)
+    returns `UNKNOWN` -- the infinite tail is not certified from one finite
+    sample, so the consumer (`_stratum_ppgo_boundary` /
+    `_stratum_ppgo_ceiling` -> ``None``) routes to the loud whole-band
+    refusal (`_apply_ppgo_trim` keeps the whole chart).
+
+    Reachable-red: the twin map built with ``rho_measured_max = inf`` (HEAD
+    without the cap) certifies the SAME beyond-measured query with a finite
+    (unsound) floor -- the finite cap is what stops that.  The UNKNOWN step
+    lands exactly at ``rho_measured_max`` (inclusive: the boundary radius is
+    still certified; the next float above it is UNKNOWN).
+    """
+
+    GAMMA = 0.5
+    RHO_MEASURED_MAX = 6.0
+    W_CERT = 8.0
+    W_CEILING = 40.0
+    RHO_IN = 5.0               # inside [4.0, 6.0]
+    RHO_BEYOND = 50.0          # far past the measured radius
+    EXPECTED_W_TRUST = 12.0    # max(1.5 * 8, 8 + 2)
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.cmap = _finite_rho_map(rho_measured_max=cls.RHO_MEASURED_MAX,
+                                   w_cert=cls.W_CERT, w_ceiling=cls.W_CEILING,
+                                   gamma=cls.GAMMA)
+        cls.uncapped = _finite_rho_map(rho_measured_max=math.inf,
+                                       w_cert=cls.W_CERT,
+                                       w_ceiling=cls.W_CEILING, gamma=cls.GAMMA)
+        cls._plot()
+
+    @classmethod
+    def _plot(cls) -> None:
+        """Diagnostic: accessor return vs rho, UNKNOWN step at measured max."""
+        if not _HAVE_MPL:
+            return
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        rhos = np.linspace(4.05, 12.0, 400)
+        capped = [cls.cmap.w_cert('positive', cls.GAMMA, float(r))
+                  for r in rhos]
+        uncapped = [cls.uncapped.w_cert('positive', cls.GAMMA, float(r))
+                    for r in rhos]
+        capped_y = [v if v is not UNKNOWN else math.nan for v in capped]
+        uncapped_y = [v if v is not UNKNOWN else math.nan for v in uncapped]
+        fig, ax = plt.subplots(figsize=(7.0, 4.0))
+        ax.plot(rhos, uncapped_y, color='tab:red', lw=3.0, alpha=0.4,
+                label='uncapped twin (rho_measured_max=inf)')
+        ax.plot(rhos, capped_y, color='tab:blue', lw=2.0,
+                label='capped (rho_measured_max=6)')
+        ax.axvline(cls.RHO_MEASURED_MAX, color='k', ls='--',
+                   label='rho_measured_max')
+        ax.set_xlabel('query rho')
+        ax.set_ylabel('w_cert (NaN == UNKNOWN)')
+        ax.set_title('Outer-annulus cap: UNKNOWN step at measured rho')
+        ax.legend(loc='center right', fontsize=8)
+        fig.tight_layout()
+        fig.savefig(_OUTPUT_DIR / 'outer_annulus_rho_cap_step.png', dpi=110)
+        plt.close(fig)
+
+    def test_in_range_rho_returns_certified_floors(self):
+        """Inside the measured range every accessor returns the stored value."""
+        floor = self.cmap.w_cert('positive', self.GAMMA, self.RHO_IN)
+        self.comparisons += 1
+        self.assertIsNot(floor, UNKNOWN,
+                         'an in-range rho returned UNKNOWN w_cert')
+        self.assert_within(abs(float(floor) - self.W_CERT), 1e-12,
+                           f'in-range w_cert {floor} != {self.W_CERT}')
+        trust = self.cmap.w_trust('positive', self.GAMMA, self.RHO_IN)
+        self.assert_within(abs(float(trust) - self.EXPECTED_W_TRUST), 1e-12,
+                           f'in-range w_trust {trust} != '
+                           f'{self.EXPECTED_W_TRUST}')
+        ceiling = self.cmap.w_ceiling('positive', self.GAMMA, self.RHO_IN)
+        self.assert_within(abs(float(ceiling) - self.W_CEILING), 1e-12,
+                           f'in-range w_ceiling {ceiling} != {self.W_CEILING}')
+
+    def test_boundary_radius_is_inclusive(self):
+        """rho == rho_measured_max is still certified (strict > cut-off)."""
+        floor = self.cmap.w_cert('positive', self.GAMMA,
+                                 self.RHO_MEASURED_MAX)
+        self.comparisons += 1
+        self.assertIsNot(floor, UNKNOWN,
+                         'the measured-max boundary radius returned UNKNOWN')
+        self.assert_within(abs(float(floor) - self.W_CERT), 1e-12,
+                           f'boundary w_cert {floor} != {self.W_CERT}')
+
+    def test_beyond_measured_rho_is_unknown(self):
+        """Far past the measured radius all three accessors return UNKNOWN."""
+        for name, value in (
+                ('w_cert', self.cmap.w_cert('positive', self.GAMMA,
+                                            self.RHO_BEYOND)),
+                ('w_trust', self.cmap.w_trust('positive', self.GAMMA,
+                                              self.RHO_BEYOND)),
+                ('w_ceiling', self.cmap.w_ceiling('positive', self.GAMMA,
+                                                  self.RHO_BEYOND))):
+            with self.subTest(accessor=name):
+                self.comparisons += 1
+                self.assertIs(value, UNKNOWN,
+                              f'{name} certified a beyond-measured rho')
+
+    def test_unknown_step_lands_exactly_at_measured_max(self):
+        """The certified -> UNKNOWN step is exactly at rho_measured_max."""
+        just_above = math.nextafter(self.RHO_MEASURED_MAX, math.inf)
+        self.comparisons += 1
+        self.assertIsNot(
+            self.cmap.w_cert('positive', self.GAMMA, self.RHO_MEASURED_MAX),
+            UNKNOWN, 'the boundary radius must be certified')
+        self.comparisons += 1
+        self.assertIs(
+            self.cmap.w_cert('positive', self.GAMMA, just_above), UNKNOWN,
+            'the first float above rho_measured_max must be UNKNOWN')
+
+    def test_consumer_routes_beyond_measured_to_refuse(self):
+        """The beyond-measured cell drives the consumer to keep/refuse."""
+        # In range: the consumer gets a finite hand-off floor + ceiling.
+        boundary_in = _stratum_ppgo_boundary(1, self.GAMMA, self.RHO_IN,
+                                             self.cmap)
+        ceiling_in = _stratum_ppgo_ceiling(1, self.GAMMA, self.RHO_IN,
+                                           self.cmap)
+        self.comparisons += 1
+        self.assertIsNotNone(boundary_in,
+                             'an in-range rho gave no hand-off floor')
+        self.assert_within(abs(float(boundary_in) - self.EXPECTED_W_TRUST),
+                           1e-12,
+                           f'in-range boundary {boundary_in} != '
+                           f'{self.EXPECTED_W_TRUST}')
+        self.comparisons += 1
+        self.assertIsNotNone(ceiling_in,
+                             'an in-range rho gave no ceiling')
+        # Beyond measured: None floor / None ceiling -> whole chart kept.
+        boundary_far = _stratum_ppgo_boundary(1, self.GAMMA, self.RHO_BEYOND,
+                                              self.cmap)
+        ceiling_far = _stratum_ppgo_ceiling(1, self.GAMMA, self.RHO_BEYOND,
+                                            self.cmap)
+        self.comparisons += 1
+        self.assertIsNone(boundary_far,
+                          'a beyond-measured rho yielded a hand-off floor')
+        self.comparisons += 1
+        self.assertIsNone(ceiling_far,
+                          'a beyond-measured rho yielded a ceiling')
+        w_range = (10.0, 80.0)
+        new_range, action = _apply_ppgo_trim(w_range, boundary_far,
+                                             ceiling_far)
+        self.comparisons += 1
+        self.assertEqual(action, 'keep',
+                         'a beyond-measured stratum was not kept (refused)')
+        self.comparisons += 1
+        self.assertEqual(new_range, w_range,
+                         'a beyond-measured stratum range was trimmed')
+
+    def test_uncapped_twin_wrongly_certifies_beyond_measured(self):
+        """Reachable-red: without the cap the beyond-measured query certifies."""
+        floor = self.uncapped.w_cert('positive', self.GAMMA, self.RHO_BEYOND)
+        self.comparisons += 1
+        self.assertIsNot(
+            floor, UNKNOWN,
+            'the uncapped twin did not certify the beyond-measured rho -- the '
+            'finite cap is not reachable-red')
+        self.assert_within(
+            abs(float(floor) - self.W_CERT), 1e-12,
+            f'uncapped beyond-measured w_cert {floor} != {self.W_CERT}')
+
+    def test_global_accessors_track_the_cap(self):
+        """The module-level accessors honour the cap once the map is installed."""
+        saved = get_certified_ppgo_map()
+        try:
+            set_certified_ppgo_map(self.cmap)
+            in_range = certified_w_cert('positive', self.GAMMA, self.RHO_IN)
+            self.comparisons += 1
+            self.assertIsNot(in_range, UNKNOWN,
+                             'the global accessor lost an in-range floor')
+            self.assert_within(abs(float(in_range) - self.W_CERT), 1e-12,
+                               f'global in-range w_cert {in_range} != '
+                               f'{self.W_CERT}')
+            for name, value in (
+                    ('w_cert', certified_w_cert('positive', self.GAMMA,
+                                                self.RHO_BEYOND)),
+                    ('w_trust', certified_w_trust('positive', self.GAMMA,
+                                                  self.RHO_BEYOND)),
+                    ('w_ceiling', certified_w_ceiling('positive', self.GAMMA,
+                                                      self.RHO_BEYOND))):
+                with self.subTest(accessor=name):
+                    self.comparisons += 1
+                    self.assertIs(value, UNKNOWN,
+                                  f'global {name} certified beyond measured')
+        finally:
+            set_certified_ppgo_map(saved)
+
 
 
 if __name__ == '__main__':

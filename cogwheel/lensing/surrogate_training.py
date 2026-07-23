@@ -1143,7 +1143,33 @@ def _stratum_ppgo_boundary(parity: int, gamma: float, rho: float,
     return float(floor)
 
 
-def _apply_ppgo_trim(w_range: tuple[float, float], boundary: float | None
+def _stratum_ppgo_ceiling(parity: int, gamma: float, rho: float,
+                          ppgo_map: CertifiedPpgoMap | None
+                          ) -> float | None:
+    """Measured ppGO ``w`` ceiling for a region, or ``None``.
+
+    Reads ``w_ceiling`` from the SAME ``(parity, gamma, rho)`` cell as
+    `_stratum_ppgo_boundary` reads ``w_trust`` (Build 8h-b).  Returns the
+    measured ceiling (a ``float``) only when the map certifies the cell;
+    ``None`` when no map is installed or the cell is `UNKNOWN` (out-of-grid /
+    beyond-wall / uncertified).  `_apply_ppgo_trim` trims a stratum only when
+    this ceiling covers the stratum top; above it the reference is UNKNOWN, so
+    the tail stays charted / refused, never handed to ppGO.  A certified cell
+    always carries a finite ceiling, so a non-``None`` ``w_trust`` from
+    `_stratum_ppgo_boundary` implies a non-``None`` ceiling here (both gate on
+    the same certified cell).
+    """
+    if ppgo_map is None:
+        return None
+    parity_str = 'positive' if parity == 1 else 'saddle'
+    ceiling = ppgo_map.w_ceiling(parity_str, float(gamma), float(rho))
+    if ceiling is UNKNOWN:
+        return None
+    return float(ceiling)
+
+
+def _apply_ppgo_trim(w_range: tuple[float, float], boundary: float | None,
+                     ceiling: float | None = None
                      ) -> tuple[tuple[float, float], str]:
     """Trim a stratum ``w`` range against the ppGO hand-off floor.
 
@@ -1151,10 +1177,20 @@ def _apply_ppgo_trim(w_range: tuple[float, float], boundary: float | None
     whole band lies above the floor -- ppGO serves it, no chart needed),
     ``'cap'`` (the top is lowered to the floor) or ``'keep'`` (unchanged).  A
     ``None`` boundary (no map / `UNKNOWN` cell) always keeps the range.
+
+    ``ceiling`` is the cell's MEASURED ``w`` ceiling (`_stratum_ppgo_ceiling`,
+    Build 8h-b).  A stratum is trimmed (``'drop'`` / ``'cap'``) only when the
+    ceiling covers the stratum top (``w_max <= ceiling``); when the top exceeds
+    the ceiling the exact reference is UNKNOWN there, so the chart is kept
+    intact (``'keep'``) and its tail routes to the loud whole-band refusal
+    rather than to ppGO.  A ``None`` ceiling (UNKNOWN cell) imposes no ceiling
+    constraint -- byte-identical to HEAD.
     """
     if boundary is None:
         return w_range, 'keep'
     w_min, w_max = w_range
+    if ceiling is not None and w_max > ceiling:
+        return w_range, 'keep'
     if w_min >= boundary:
         return w_range, 'drop'
     if w_max > boundary:
@@ -1890,6 +1926,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     ext_rho = (exclusion_radius / caustic_reach
                if caustic_reach > 0.0 else float('inf'))
     ext_boundary = _stratum_ppgo_boundary(parity, gamma_mid, ext_rho, ppgo_map)
+    ext_ceiling = _stratum_ppgo_ceiling(parity, gamma_mid, ext_rho, ppgo_map)
     for si, (m_lo, m_hi) in enumerate(strata):
         y_extent = float(_lens_prior._source_scale(m_lo))
         stratum_w_range = _stratum_w_range(box, parity, m_lo, m_hi, y_extent)
@@ -1898,7 +1935,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         w_max_uncapped = float(dimensionless_frequency(box.f_hi_hz, m_hi, 0.0))
         corner_beyond_cap = stratum_w_range[1] < w_max_uncapped * (1.0 - 1e-9)
         trimmed_w_range, action = _apply_ppgo_trim(
-            stratum_w_range, ext_boundary)
+            stratum_w_range, ext_boundary, ext_ceiling)
         if action == 'drop':
             dropped_strata.append({
                 'stratum_index': si, 'region': 'exterior',
@@ -1950,12 +1987,14 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         int_rho = 0.0  # near-origin: the hardest interior region (Build 8h-a)
         int_boundary = _stratum_ppgo_boundary(
             parity, gamma_mid, int_rho, ppgo_map)
+        int_ceiling = _stratum_ppgo_ceiling(
+            parity, gamma_mid, int_rho, ppgo_map)
         for si, (m_lo, m_hi) in enumerate(strata):
             y_extent = float(_lens_prior._source_scale(m_lo))
             grid_extent = min(interior_admit_radius, y_extent)
             int_w_range = _stratum_w_range(box, parity, m_lo, m_hi, grid_extent)
             trimmed_w_range, action = _apply_ppgo_trim(
-                int_w_range, int_boundary)
+                int_w_range, int_boundary, int_ceiling)
             if action == 'drop':
                 dropped_strata.append({
                     'stratum_index': si, 'region': 'interior',

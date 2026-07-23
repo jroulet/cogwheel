@@ -6,6 +6,11 @@ Add a new entry by creating a fragment in `contracts_changelog.d/`.
 
 ---
 
+- `0.1.1` (): 
+### feat: ppGO map truncation-on-refusal: per-angle bisected w-prefix + p.
+
+(Auto-generated at commit preflight because the build staged the canonical file without a fragment; Librarian should refine this entry from the commit diff.)
+
 - `0.1.0` (): 
 ### Register cogwheel's disk data artifacts
 

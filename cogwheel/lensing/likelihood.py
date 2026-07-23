@@ -1331,6 +1331,54 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             switch_dense, partition.critical_delay)
         return kernels
 
+    def _ppgo_cell_coords(self, lens):
+        """
+        ``(parity, gamma, rho)`` locating this draw in the ppGO map grid,
+        or ``None``.
+
+        The parity / shear / caustic-frame annulus coordinate shared by the
+        two per-cell map queries -- `_ppgo_band_split` reads ``w_trust`` and
+        `_ppgo_cell_ceiling` reads ``w_ceiling`` -- so both land in the SAME
+        cell from ONE derivation (DRY: one caustic-reach convention).
+
+        The caustic-frame annulus coordinate is
+        ``rho = |y| / caustic_reach`` with ``caustic_reach`` from
+        `ppgo_map.caustic_geometry` -- the SAME authoritative reach the map
+        was built with.  ``kappa`` is assumed ``0`` (the caller has already
+        refused ``kappa != 0``); the map's caustic-reach convention is a
+        ``kappa = 0`` surface.
+
+        Returns ``None`` when the caustic reach is undefined
+        (`LensDomainError`) or non-positive, so the caller keeps whole-band
+        behaviour.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters (`_lens_params`); ``gamma``, ``y1``, ``y2``
+            are used.
+
+        Returns
+        -------
+        tuple or None
+            ``(parity, gamma, rho)`` -- ``parity`` one of
+            ``'positive'`` / ``'saddle'`` -- or ``None``.
+        """
+        gamma = float(lens['gamma'])
+        # kappa == 0 here (the caller refused kappa != 0): the macro image
+        # is a minimum (positive parity) for gamma < 1 and a saddle for
+        # gamma > 1.  The gamma == 1 parity boundary lies inside the map's
+        # guard band and returns UNKNOWN, so no split is attempted there.
+        parity = 'positive' if gamma < 1.0 else 'saddle'
+        try:
+            reach, _direction = caustic_geometry(gamma, 0.0)
+        except LensDomainError:
+            return None
+        if not reach > 0.0:
+            return None
+        rho = float(np.hypot(lens['y1'], lens['y2'])) / reach
+        return parity, gamma, rho
+
     def _ppgo_band_split(self, lens):
         """
         Trusted dispatch floor ``w_trust`` for a per-node band split, or
@@ -1338,18 +1386,13 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         Queries the process-global certified-ppGO map
         (`get_certified_ppgo_map`) for the margin-inflated trusted floor
-        ``w_trust`` at this draw's ``(parity, gamma, caustic-frame rho)``.
-        Above ``w_trust`` the bare point-mass geometric-optics (ppGO)
-        reconstruction is certified accurate, so the dense ``w`` band may
-        be split: chart-served below, bare ppGO above
-        (`_surrogate_coefficients`).  ``w_trust`` is read from the map --
-        never a hardcoded constant.
-
-        The caustic-frame annulus coordinate is
-        ``rho = |y| / caustic_reach`` with ``caustic_reach`` from
-        `ppgo_map.caustic_geometry` -- the SAME authoritative reach the
-        map was built with, so the query lands in the cell the draw
-        belongs to (DRY: one caustic-reach convention, shared).
+        ``w_trust`` at this draw's ``(parity, gamma, caustic-frame rho)``
+        cell (`_ppgo_cell_coords`).  Above ``w_trust`` the bare point-mass
+        geometric-optics (ppGO) reconstruction is certified accurate, so
+        the dense ``w`` band may be split: chart-served below, bare ppGO
+        above -- but only up to the cell's measured ceiling, enforced by
+        the caller via `_ppgo_cell_ceiling` (`_surrogate_coefficients`).
+        ``w_trust`` is read from the map -- never a hardcoded constant.
 
         Returns ``None`` -- meaning "do NOT band-split; keep today's
         whole-band behaviour" -- when no map is installed, the caustic
@@ -1373,23 +1416,56 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         ppgo_map = get_certified_ppgo_map()
         if ppgo_map is None:
             return None
-        gamma = float(lens['gamma'])
-        # kappa == 0 here (the caller refused kappa != 0): the macro image
-        # is a minimum (positive parity) for gamma < 1 and a saddle for
-        # gamma > 1.  The gamma == 1 parity boundary lies inside the map's
-        # guard band and returns UNKNOWN, so no split is attempted there.
-        parity = 'positive' if gamma < 1.0 else 'saddle'
-        try:
-            reach, _direction = caustic_geometry(gamma, 0.0)
-        except LensDomainError:
+        coords = self._ppgo_cell_coords(lens)
+        if coords is None:
             return None
-        if not reach > 0.0:
-            return None
-        rho = float(np.hypot(lens['y1'], lens['y2'])) / reach
-        w_trust = ppgo_map.w_trust(parity, gamma, rho)
+        w_trust = ppgo_map.w_trust(*coords)
         if w_trust is UNKNOWN:
             return None
         return float(w_trust)
+
+    def _ppgo_cell_ceiling(self, lens):
+        """
+        Measured ``w`` ceiling of this draw's ppGO map cell, or ``None``.
+
+        Reads ``w_ceiling`` from the SAME ``(parity, gamma, rho)`` cell as
+        `_ppgo_band_split` reads ``w_trust`` (`_ppgo_cell_coords`).  The
+        certified range is ``[w_cert, w_ceiling]``; above the ceiling the
+        exact reference is UNKNOWN, so the band-split guard caps the split
+        at ``min(parity_wall, cell_ceiling)`` and refuses / charts above it
+        (Build 8h-b).
+
+        Returns ``None`` -- meaning "no measured ceiling constraint; keep
+        HEAD behaviour" -- when no map is installed, the caustic reach is
+        undefined, or the cell is `UNKNOWN` (out of grid,
+        beyond-``rho_measured_max``, beyond the Schwinger wall, or a
+        parity-invalid band).  A certified cell always carries a finite
+        ceiling, so a non-``None`` ``w_trust`` from `_ppgo_band_split`
+        implies a non-``None`` ceiling here (both gate on the same
+        certified cell).
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters (`_lens_params`); ``gamma``, ``y1``, ``y2``
+            are used.
+
+        Returns
+        -------
+        float or None
+            The measured ceiling ``w_ceiling`` (raw ``w`` units), or
+            ``None`` to keep HEAD behaviour.
+        """
+        ppgo_map = get_certified_ppgo_map()
+        if ppgo_map is None:
+            return None
+        coords = self._ppgo_cell_coords(lens)
+        if coords is None:
+            return None
+        ceiling = ppgo_map.w_ceiling(*coords)
+        if ceiling is UNKNOWN:
+            return None
+        return float(ceiling)
 
     def _surrogate_coefficients(self, par_dic):
         """
@@ -1492,17 +1568,25 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         w_trust = self._ppgo_band_split(lens)
         w_lo = float(dense_w.min())
         w_hi = float(dense_w.max())
-        # F005 / beyond-wall guard (INS-8haf-002): the map certifies a
-        # CELL by geometry, but certification only exists BELOW the
-        # parity's Schwinger wall — the exact reference does not exist
-        # above it.  A draw whose band tops out beyond the wall must NOT
-        # be band-split (bare ppGO would silently serve uncertified
-        # beyond-wall nodes); fall through to the whole-band path, which
-        # refuses loudly exactly as HEAD does.
+        # F005 / beyond-ceiling guard (INS-8haf-002, Build 8h-b): the map
+        # certifies a CELL by geometry, but certification only exists BELOW
+        # the parity's Schwinger wall AND only over the cell's MEASURED
+        # range ``[w_cert, w_ceiling]`` -- the exact reference does not
+        # exist above either bound.  The effective ceiling is therefore the
+        # tighter of the two, ``min(parity_wall, cell_ceiling)`` (the cell
+        # ceiling read from the SAME cell as ``w_trust``).  A draw whose
+        # band tops out beyond that must NOT be band-split (bare ppGO would
+        # silently serve uncertified beyond-wall / beyond-measured-ceiling
+        # nodes); fall through to the whole-band path, which refuses loudly
+        # exactly as HEAD does.  When the cell ceiling is UNKNOWN the
+        # effective ceiling is the wall alone -- byte-identical to HEAD.
         if w_trust is not None:
             wall = (ASTROID_WALL if float(lens['gamma']) < 1.0
                     else SADDLE_WALL)
-            if w_hi > wall:
+            cell_ceiling = self._ppgo_cell_ceiling(lens)
+            eff_ceiling = (wall if cell_ceiling is None
+                           else min(wall, cell_ceiling))
+            if w_hi > eff_ceiling:
                 w_trust = None
         band_split = w_trust is not None and w_lo < w_trust < w_hi
 

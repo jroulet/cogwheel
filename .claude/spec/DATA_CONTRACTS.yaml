@@ -13,7 +13,7 @@
 #   MINOR: new artifacts, conventions, or consumer/producer entries
 #   PATCH: field list corrections, wording fixes
 
-schema_version: "0.1.0"
+schema_version: "0.1.1"
 
 # ── Conventions ──────────────────────────────────────────────────────────
 # Define project-wide data conventions here. These are referenced by
@@ -225,7 +225,7 @@ artifacts:
         function: "use_pearcey_table"
 
   certified_ppgo_map:
-    description: "Hash-pinned lookup of the certified-ppGO frequency floor w_cert per (parity, gamma-band, caustic-frame annulus rho=|y|/caustic_reach) cell. Single npz of the parity codes, gamma-band and annulus edges, and per-cell w_cert (the sup-over-w floor at the 1e-4 F-normalized bar), diagnostic w_cert (1e-3 probe bar), status codes and interpolability flags, plus a JSON provenance scalar (grid bounds, certification bar, safety-margin rule w_trust=max(1.5*w_cert, w_cert+2.0), walls, SHA1 content hash); loaded and hash-verified via CertifiedPpgoMap.load. Off by default (opt-in via set_certified_ppgo_map / use_certified_ppgo_map); the band-split dispatch queries w_cert/w_trust to place the ppGO-vs-chart split and refuses / charts on the UNKNOWN sentinel (beyond-wall, invalid, out-of-grid, or no map installed). w is dimensionless frequency; gamma is external shear magnitude; rho is the dimensionless caustic-frame annulus radius."
+    description: "Hash-pinned lookup of the certified-ppGO frequency floor w_cert per (parity, gamma-band, caustic-frame annulus rho=|y|/caustic_reach) cell. Single npz (schema 0.2.0) of the parity codes, gamma-band and annulus edges, and per-cell w_cert (the sup-over-w floor at the 1e-4 F-normalized bar), diagnostic w_cert (1e-3 probe bar), w_ceiling, status codes, interpolability flags and rho_measured_max, plus a JSON provenance scalar (grid bounds, certification bar, safety-margin rule w_trust=max(1.5*w_cert, w_cert+2.0), w_ceiling_rule, rho_measured_max_rule, walls, SHA1 content hash over all grids incl. w_ceiling and rho_measured_max); loaded and hash-verified via CertifiedPpgoMap.load. TRUNCATION-ON-REFUSAL: a monotone saddle-image-branch refusal part-way up a cell's w sweep truncates that angle at its maximal accepted w-prefix instead of invalidating the whole cell; the cell certifies on its measured range and carries a finite w_ceiling = min over angles of each angle's max accepted w (a certified cell is trusted only on [w_cert, w_ceiling], beyond it is UNKNOWN). OUTER-ANNULUS CAP: the open outer annulus [4.0, inf) is sampled at one finite radius, so each cell carries rho_measured_max (band top edge for inner annuli; lo*1.5 for the open outer annulus) and every accessor returns UNKNOWN for a query rho beyond it (no infinite-annulus certification from one finite sample). The loader HARD-REFUSES a map lacking the w_ceiling or rho_measured_max grids (KeyError -> use_certified_ppgo_map returns False, global stays None). Off by default (opt-in via set_certified_ppgo_map / use_certified_ppgo_map); the band-split dispatch queries w_cert/w_trust/w_ceiling to place the ppGO-vs-chart split at min(parity_wall, w_ceiling) and refuses / charts on the UNKNOWN sentinel (beyond-wall, invalid, out-of-grid, beyond rho_measured_max, or no map installed). w is dimensionless frequency; gamma is external shear magnitude; rho is the dimensionless caustic-frame annulus radius."
     format: "npz"
     producer:
       module: "scripts/train_ppgo_map.py"
