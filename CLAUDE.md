@@ -69,6 +69,10 @@ shallow:
 - Live documents (META_PLAN, plans, configs, briefs) state CURRENT truth
   only: rewrite superseded content in place — git is the archive. Never
   append corrections atop stale entries.
+- NO engine-run launch (campaign, pilot, sweep, probe) without a cost
+  estimate computed first — unit count x measured per-unit cost, quoted
+  in the launch message. Applies to every config change, including
+  expert-authorized ones and the driver's own launches.
 - Prefer several small sequential builds over one wide one. If an honest
   decomposition needs more than ~3 WPs, split into sequential builds; reject
   over-wide plans at the plan gate.
