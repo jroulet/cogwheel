@@ -1486,3 +1486,454 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
         theta,
         *critical_point(gamma, best_theta, beta, kappa, best_branch),
         distance=float(np.sqrt(best_fun)))
+
+
+# ---------------------------------------------------------------------------
+# Ghost (complex-saddle) machinery
+# ---------------------------------------------------------------------------
+#
+# A source outside the astroid caustic has only two real images, but the
+# image quartic in ``u = 1 / |x|**2`` always has four roots: the two real
+# images plus a complex-conjugate pair that ``_generic_candidates``
+# discards at its imaginary-part cut.  That discarded pair is the pair of
+# *ghost* (complex-saddle) images -- the analytic continuation of the two
+# real images that have merged and gone complex across the fold
+# (Picard--Lefschetz / steepest-descent picture of the diffraction
+# integral).  One member decays (``Im tau_c > 0``, so
+# ``exp(1j * w * tau_c)`` is exponentially suppressed) and is the physical
+# deep-diffraction correction; its conjugate grows and is unphysical.
+#
+# Everything below continues the real geometrical-optics formulae to the
+# complex root position with BILINEAR (non-conjugated) products.  The
+# Fermat delay and the stationary-phase kernel are holomorphic functions
+# of the (complex) image position, so replacing every ``a . b`` inner
+# product by the bilinear contraction ``sum_i a_i b_i`` (no conjugation)
+# and every ``|x|`` by ``sqrt(x . x)`` gives the unique analytic
+# continuation.  The real-only building blocks (`delay`, `hessian`,
+# `magnification`, `morse_index`, `_saddle_metric`, `saddle_coefficients`,
+# `image_kernel`) embed conjugating / positive-definite operations
+# (``np.linalg.norm``, ``np.log|.|``, ``eigvalsh``, ``dtype=float``) and so
+# are NOT reused here; only the pure-arithmetic coefficient polynomials
+# `_c1_polynomial` / `_c2_polynomial` and the (real) quartic solver are
+# shared.  These functions are purely additive: the real-image path is
+# untouched.
+#
+# Units follow the module docstring: ``w`` and ``tau`` are dimensionless,
+# with the same ``t_min`` demodulation convention the map layer uses (see
+# ``ppgo_map._measure_cell``); nothing here consumes the ghost yet, so no
+# demodulation is applied at this layer.
+
+
+class GhostDomainError(LensDomainError):
+    """The complex-saddle ('ghost') continuation is degenerate or absent.
+
+    Raised when the decaying complex image required by the ghost kernel
+    cannot be continued from the real fold:
+
+    * no complex-conjugate quartic pair exists (the source lies inside
+      the caustic, giving four real images and no ghost to continue);
+    * the bilinear radius ``z = x_c . x_c`` has ``Re(z) <= 0``, so the
+      principal branch of ``log(z)`` (and of ``sqrt(z)``) can no longer
+      be continued by continuity from the real fold, where ``z > 0`` --
+      a topology breakdown near the cusp;
+    * the complex Fermat Hessian is near singular
+      (``|det H_c| < 1e-8 * (1 + ||A||_F)**2``), a near-fold merge where
+      the stationary-phase amplitude ``1 / sqrt(det H_c)`` and its
+      sqrt-branch reference are ill conditioned.
+
+    It subclasses `LensDomainError` so existing domain-refusal handlers
+    catch it unchanged.
+    """
+
+
+#: Relative floor on ``|det H_c|`` below which the complex saddle is
+#: treated as a degenerate near-fold merge.  Scaled by
+#: ``(1 + ||A||_F)**2`` so it tracks the macro-matrix magnitude.
+_GHOST_DET_FLOOR = 1e-8
+
+
+class GhostContribution(NamedTuple):
+    """The decaying ghost image's carrier-free kernel and complex delay.
+
+    Attributes
+    ----------
+    kernel : np.ndarray
+        Carrier-free ghost kernel ``amplitude * (1 + 1j*C1/w + C2/w**2)``
+        broadcast over the input frequencies; the oscillatory/decaying
+        carrier ``exp(1j * w * tau_c)`` is NOT included (mirroring
+        `image_kernel`).
+    delay : complex
+        Complex Fermat delay ``tau_c`` of the decaying ghost.  Its real
+        part is the oscillation phase and ``Im tau_c >= 0`` controls the
+        exponential suppression ``exp(-w * Im tau_c)``.  Exposed so a
+        future build can gate the ghost on ``w * Im tau_c``.
+    position : np.ndarray
+        Complex ghost image position ``x_c`` (shape (2,)) in the lens
+        frame.
+    """
+
+    kernel: np.ndarray
+    delay: complex
+    position: np.ndarray
+
+
+def _wrapped_angle(delta: float) -> float:
+    """Smallest absolute angle equivalent to ``delta`` (radians), in
+    ``[0, pi]``."""
+    wrapped = (float(delta) + np.pi) % (2.0 * np.pi) - np.pi
+    return abs(wrapped)
+
+
+def _branch_pinned_amplitude(root: complex,
+                             reference_amplitude: complex) -> complex:
+    """Pin the ``+/- 1/sqrt(det H_c)`` branch to the real saddle reference.
+
+    The complex amplitude ``1 / sqrt(det H_c)`` is defined only up to an
+    overall sign (the two square roots).  Continued from the real fold,
+    the physical root is the one whose phase matches the real merged
+    saddle, whose amplitude carries the Morse phase ``exp(-0.5j * pi)``
+    (index 1).  Selecting that root therefore ABSORBS the ``-i pi / 2``
+    Morse factor -- multiplying by an explicit ``morse_index`` phase on
+    top would double-count it.
+
+    Parameters
+    ----------
+    root : complex
+        The principal candidate ``1 / sqrt(det H_c)``.  The other
+        candidate is ``-root``.
+    reference_amplitude : complex
+        The real merged-saddle amplitude; only its phase is used.
+
+    Returns
+    -------
+    complex
+        Whichever of ``root``, ``-root`` has the smaller angular
+        distance to ``reference_amplitude``'s phase.
+    """
+    reference_angle = np.angle(reference_amplitude)
+    return min((root, -root),
+               key=lambda candidate: _wrapped_angle(
+                   np.angle(candidate) - reference_angle))
+
+
+def _ghost_candidates(source: np.ndarray, matrix: np.ndarray, *,
+                      root_tolerance: float = 3e-7) -> list[np.ndarray]:
+    """Complex-conjugate ('ghost') image candidates the real finder drops.
+
+    Reuses the SAME source-aligned frame and companion-matrix quartic
+    solve as `find_images_quartic` / `_generic_candidates`, but KEEPS the
+    complex-conjugate root pair (``|Im u| ABOVE`` the tolerance) instead
+    of discarding it.  For each complex root ``u_c`` the image position
+    is reconstructed with the same closed form the real path uses, now
+    evaluated at a complex ``u_c`` (the map ``u -> x`` is a rational,
+    hence complex-analytic, function), and rotated back to the lens frame
+    by the real orthogonal source-frame basis.  Because ``x . x`` is
+    rotation invariant the continuation is frame independent.
+
+    Parameters
+    ----------
+    source : np.ndarray
+        Shape (2,), source position.
+    matrix : np.ndarray
+        Shape (2, 2), symmetric macro matrix (see `macro_matrix`).
+    root_tolerance : float
+        Relative imaginary part ABOVE which a quartic root counts as
+        complex (a ghost); the same tolerance the real finder uses below
+        which a root counts as real.
+
+    Returns
+    -------
+    list of np.ndarray
+        Complex ghost image positions (each shape (2,), dtype complex)
+        in the lens frame.  Empty when the source is centered or lies
+        inside the caustic (no complex pair to continue).
+
+    Raises
+    ------
+    ValueError
+        If the shapes are wrong.
+    """
+    source = np.asarray(source, dtype=float)
+    matrix = np.asarray(matrix, dtype=float)
+    if source.shape != (2,) or matrix.shape != (2, 2):
+        raise ValueError(
+            f'Cannot extract ghost candidates for source of shape '
+            f'{source.shape} and matrix of shape {matrix.shape}: they '
+            f'must have shapes (2,) and (2, 2).')
+
+    source_radius, basis = _source_frame(source)
+    if source_radius <= 1e-14:
+        # A centered source has no shear-broken ghost pair to continue;
+        # the source-aligned reduction is undefined there.
+        return []
+
+    rotated = basis.T @ matrix @ basis
+    a11 = float(rotated[0, 0])
+    a12 = float(rotated[0, 1])
+    a22 = float(rotated[1, 1])
+    candidates: list[np.ndarray] = []
+    for raw_root in _companion_roots(image_quartic_coefficients(source_radius,
+                                                                rotated)):
+        if raw_root.real <= 0.0:
+            continue
+        if abs(raw_root.imag) <= root_tolerance * (1.0 + abs(raw_root.real)):
+            continue  # real root -> a genuine image, owned by find_images
+        u_c = complex(raw_root)
+        denominator = (a11 - u_c) * (a22 - u_c) - a12 * a12
+        if abs(denominator) <= 1e-12 * (1.0 + abs(a11 * a22) + abs(u_c)**2):
+            continue
+        rotated_candidate = np.array(
+            [source_radius * (a22 - u_c) / denominator,
+             -source_radius * a12 / denominator], dtype=complex)
+        candidates.append(basis @ rotated_candidate)
+    return candidates
+
+
+def _ghost_delay(x_c: np.ndarray, source: np.ndarray,
+                 matrix: np.ndarray) -> complex:
+    """Analytically-continued complex Fermat delay of a ghost image.
+
+    The real Fermat delay ``0.5 x.A.x - y.x + 0.5 y.y - ln|x|`` continues
+    to
+
+        ``tau_c = 0.5 x_c.A.x_c - y.x_c + 0.5 y.y - 0.5 * log(z)``,
+        ``z = x_c . x_c`` (bilinear, ``x1**2 + x2**2``),
+
+    with every product the bilinear contraction (NO conjugation) so the
+    map ``x -> tau`` is holomorphic and reduces to `delay` on the real
+    fold, where ``z = |x|**2 > 0`` and ``0.5 * log(z) = ln|x|``.  The
+    principal branch of ``log`` is correct by continuity from the real
+    fold (``arg z = 0`` there) while ``Re(z) > 0``.
+
+    Parameters
+    ----------
+    x_c : np.ndarray
+        Shape (2,), complex ghost image position (lens frame).
+    source : np.ndarray
+        Shape (2,), source position.
+    matrix : np.ndarray
+        Shape (2, 2), the macro matrix.
+
+    Returns
+    -------
+    complex
+        The complex delay ``tau_c``.  ``Im tau_c > 0`` for the decaying
+        member of a conjugate pair.
+
+    Raises
+    ------
+    GhostDomainError
+        If ``Re(z) <= 0`` (the complex-log branch can no longer be
+        continued from the real fold -- topology breakdown near the
+        cusp).
+    """
+    x_c = np.asarray(x_c, dtype=complex)
+    source = np.asarray(source, dtype=float)
+    matrix = np.asarray(matrix, dtype=float)
+    z = x_c[0] * x_c[0] + x_c[1] * x_c[1]
+    if z.real <= 0.0:
+        raise GhostDomainError(
+            f'Cannot continue the ghost delay at x_c = '
+            f'({x_c[0]!r}, {x_c[1]!r}): the bilinear radius z = x_c . x_c '
+            f'= {z!r} has Re(z) <= 0, so the principal branch of log(z) is '
+            f'no longer the continuation from the real fold (topology '
+            f'breakdown near the cusp).')
+    return (0.5 * (x_c @ matrix @ x_c) - source @ x_c
+            + 0.5 * (source @ source) - 0.5 * np.log(z))
+
+
+def _ghost_kernel(w_dimensionless, x_c: np.ndarray, source: np.ndarray,
+                  matrix: np.ndarray,
+                  reference_amplitude: complex) -> tuple[np.ndarray, complex]:
+    """Carrier-free ghost kernel and complex delay by analytic continuation.
+
+    Continues the stationary-phase (saddle) kernel of `image_kernel` to
+    the complex ghost position.  All geometry is bilinear (holomorphic);
+    none of the real-only helpers (`delay`, `hessian`, `magnification`,
+    `morse_index`, `_saddle_metric`, `saddle_coefficients`, `image_kernel`)
+    is called.  The amplitude is ``1 / sqrt(det H_c)`` with the sqrt
+    branch pinned to the real merged saddle via ``reference_amplitude``
+    (which absorbs the ``-i pi / 2`` Morse phase -- see
+    `_branch_pinned_amplitude`); ``C1``/``C2`` reuse the shared
+    coefficient polynomials on a complex saddle metric.
+
+    Parameters
+    ----------
+    w_dimensionless : float or np.ndarray
+        Dimensionless frequency ``w``; the carrier ``exp(1j * w * tau_c)``
+        is NOT included.
+    x_c : np.ndarray
+        Shape (2,), complex ghost image position (lens frame).
+    source : np.ndarray
+        Shape (2,), source position.
+    matrix : np.ndarray
+        Shape (2, 2), the macro matrix.
+    reference_amplitude : complex
+        Real merged-saddle amplitude; only its phase pins the sqrt
+        branch.
+
+    Returns
+    -------
+    kernel : np.ndarray
+        ``amplitude * (1 + 1j*C1/w + C2/w**2)`` broadcast over ``w``.
+    tau_c : complex
+        The complex Fermat delay (also returned by `_ghost_delay`),
+        exposed so callers can gate on ``Im tau_c``.
+
+    Raises
+    ------
+    GhostDomainError
+        If ``Re(z) <= 0`` or ``|det H_c| < 1e-8 * (1 + ||A||_F)**2``
+        (near-fold merge, ill-conditioned sqrt reference).
+    """
+    x_c = np.asarray(x_c, dtype=complex)
+    matrix = np.asarray(matrix, dtype=float)
+    w_dimensionless = np.asarray(w_dimensionless, dtype=float)
+
+    z = x_c[0] * x_c[0] + x_c[1] * x_c[1]
+    if z.real <= 0.0:
+        raise GhostDomainError(
+            f'Cannot continue the ghost kernel at x_c = '
+            f'({x_c[0]!r}, {x_c[1]!r}): the bilinear radius z = x_c . x_c '
+            f'= {z!r} has Re(z) <= 0 (topology breakdown near the cusp).')
+    tau_c = _ghost_delay(x_c, source, matrix)
+
+    # Complex Fermat Hessian: the continuation of
+    #   hessian = A - I / r**2 + 2 outer(x, x) / r**4,  r**2 = z,
+    # with the BILINEAR (non-conjugated) outer product.
+    complex_hessian = (matrix - np.eye(2) / z
+                       + 2.0 * np.outer(x_c, x_c) / z**2)
+    det_hessian = (complex_hessian[0, 0] * complex_hessian[1, 1]
+                   - complex_hessian[0, 1] * complex_hessian[1, 0])
+    frobenius = float(np.linalg.norm(matrix))
+    if abs(det_hessian) < _GHOST_DET_FLOOR * (1.0 + frobenius)**2:
+        raise GhostDomainError(
+            f'Cannot continue the ghost kernel at x_c = '
+            f'({x_c[0]!r}, {x_c[1]!r}): |det H_c| = {abs(det_hessian)!r} is '
+            f'below the near-fold floor {_GHOST_DET_FLOOR} * (1 + ||A||_F)**2 '
+            f'= {_GHOST_DET_FLOOR * (1.0 + frobenius)**2!r}; the sqrt-branch '
+            f'amplitude reference is ill conditioned at a merged saddle.')
+    amplitude = _branch_pinned_amplitude(1.0 / np.sqrt(det_hessian),
+                                         reference_amplitude)
+
+    # Complex saddle metric: the continuation of _saddle_metric with the
+    # bilinear (non-conjugate) radial/tangential frame and matrix inverse.
+    # det(basis2) = radial . radial + ... = z / z = 1 exactly, so the
+    # projected determinant equals det H_c and no extra guard is needed.
+    root_z = np.sqrt(z)
+    radial = x_c / root_z
+    tangential = np.array([-radial[1], radial[0]], dtype=complex)
+    frame = np.column_stack([radial, tangential])
+    projected = frame.T @ complex_hessian @ frame
+    projected_det = (projected[0, 0] * projected[1, 1]
+                     - projected[0, 1] * projected[1, 0])
+    inverse = np.array([[projected[1, 1], -projected[0, 1]],
+                        [-projected[1, 0], projected[0, 0]]],
+                       dtype=complex) / projected_det
+    scale = 1.0 / z
+    prr = scale * inverse[0, 0]
+    prt = scale * inverse[0, 1]
+    ptt = scale * inverse[1, 1]
+
+    c1_coefficient = _c1_polynomial(prr, prt, ptt)
+    c2_coefficient = _c2_polynomial(prr, prt, ptt)
+    kernel = amplitude * (1.0 + 1j * c1_coefficient / w_dimensionless
+                          + c2_coefficient / w_dimensionless**2)
+    return kernel, tau_c
+
+
+def ghost_kernel(w_dimensionless, source: np.ndarray, matrix: np.ndarray, *,
+                 root_tolerance: float = 3e-7) -> GhostContribution:
+    """
+    Carrier-free kernel of the decaying complex-saddle ('ghost') image.
+
+    Extracts the complex-conjugate quartic-root pair the real image
+    finder discards, selects the decaying member (largest ``Im tau_c``,
+    positive off the cusp axis), and returns its analytically-continued
+    stationary-phase kernel and complex Fermat delay.  Nothing in the
+    pipeline consumes this yet; it is the physics primitive a later build
+    gates on ``w * Im tau_c``.
+
+    The amplitude's sqrt branch is pinned to the real merged saddle,
+    which the two real images continue into across the fold: that saddle
+    has Morse index 1, i.e. amplitude phase ``exp(-0.5j * pi)`` (arg
+    ``-pi/2``).  Only the phase enters the ``+/- sqrt`` selection, so the
+    reference is built directly from the Morse phase rather than from a
+    real magnification, which would be ill conditioned exactly in the
+    near-caustic regime where the ghost matters.
+
+    Parameters
+    ----------
+    w_dimensionless : float or np.ndarray
+        Dimensionless frequency ``w`` (see the module docstring); the
+        carrier ``exp(1j * w * tau_c)`` is NOT included.
+    source : np.ndarray
+        Shape (2,), source position.
+    matrix : np.ndarray
+        Shape (2, 2), symmetric macro matrix (see `macro_matrix`).
+    root_tolerance : float
+        Relative imaginary part above which a quartic root counts as a
+        ghost (see `_ghost_candidates`).
+
+    Returns
+    -------
+    GhostContribution
+        The decaying ghost's ``kernel`` (over ``w``), complex ``delay``
+        ``tau_c`` (with ``Im tau_c`` exposed for the future gate), and
+        complex ``position`` ``x_c``.
+
+    Raises
+    ------
+    ValueError
+        If the shapes are wrong.
+    GhostDomainError
+        If no complex-saddle pair exists (source inside the caustic), or
+        if the continuation is degenerate (see `_ghost_kernel`).
+
+    Notes
+    -----
+    As the source approaches a principal axis, ``Im tau_c -> 0``
+    continuously and the ghost kernel converges to a finite limit (the
+    on-axis ghost is pure oscillation with no decay).  EXACTLY on a
+    principal axis the source-aligned macro matrix is diagonal and the
+    complex-conjugate quartic pair collapses onto the removable
+    singularity ``u = a22`` (the same degeneracy the real finder resolves
+    with `_axial_candidates`); the generic reconstruction this routine
+    uses cannot produce ``x_c`` there, so `GhostDomainError` is raised at
+    that measure-zero set.  Grid evaluations that avoid the exact axis
+    reach the finite limit from either side.  The gate that refuses to
+    *use* the ghost near the cusp is a downstream concern, not this
+    primitive's.  This routine is purely additive: the real-image path
+    (`find_images`, `image_kernel`, `delay`, `morse_index`, ...) is
+    untouched and byte-identical.
+    """
+    source = np.asarray(source, dtype=float)
+    matrix = np.asarray(matrix, dtype=float)
+    if source.shape != (2,) or matrix.shape != (2, 2):
+        raise ValueError(
+            f'Cannot evaluate the ghost kernel for source of shape '
+            f'{source.shape} and matrix of shape {matrix.shape}: they '
+            f'must have shapes (2,) and (2, 2).')
+
+    candidates = _ghost_candidates(source, matrix, root_tolerance=root_tolerance)
+    if not candidates:
+        raise GhostDomainError(
+            f'No complex-saddle (ghost) pair for source '
+            f'({source[0]!r}, {source[1]!r}): the image quartic has no '
+            f'complex-conjugate root above the tolerance, so the source '
+            f'lies inside the caustic (four real images) or is centered; '
+            f'there is no ghost to continue.')
+
+    delays = [_ghost_delay(x_c, source, matrix) for x_c in candidates]
+    # The decaying member has the largest Im tau_c (> 0 off the cusp axis,
+    # == 0 on it, where argmax still returns a valid pure-oscillation
+    # member rather than the growing conjugate).
+    decaying_index = int(np.argmax([tau.imag for tau in delays]))
+    x_c = candidates[decaying_index]
+
+    # Merged-saddle Morse reference (index 1): the two real images
+    # continue into a Morse-index-1 saddle, amplitude phase exp(-0.5j*pi).
+    reference_amplitude = np.exp(-0.5j * np.pi)
+    kernel, tau_c = _ghost_kernel(w_dimensionless, x_c, source, matrix,
+                                  reference_amplitude)
+    return GhostContribution(kernel=kernel, delay=tau_c, position=x_c)

@@ -75,6 +75,21 @@ def ensure_spec_doc_fragments(project_root, message, log=print):
             return
         out = (res.stdout or "") + (res.stderr or "")
 
+    # Last remediation: the deterministic sync script auto-fixes SPEC
+    # module lists (the "new module added but SPEC.md not updated" class
+    # that killed builds 8g-b and 8h-b2). Run it, restage, re-check.
+    sync = root / "scripts" / "sync_derived_docs.py"
+    if sync.exists():
+        subprocess.run([sys.executable, str(sync)],
+                       capture_output=True, text=True, cwd=root)
+        subprocess.run(["git", "add", "-u"], cwd=root, check=True)
+        log("Commit preflight: ran sync_derived_docs.py auto-fix, "
+            "re-checking the hook")
+        res = run_hook()
+        if res.returncode == 0:
+            return
+        out = (res.stdout or "") + (res.stderr or "")
+
     raise RuntimeError(
         "Spec/doc discipline hook blocks the commit and preflight "
         "could not auto-remediate. Hook output:\n" + out)
