@@ -6,10 +6,40 @@ Add a new entry by creating a fragment in `contracts_changelog.d/`.
 
 ---
 
-- `0.1.1` (): 
-### feat: ppGO map truncation-on-refusal: per-angle bisected w-prefix + p.
+- `0.2.0` (): 
+### certified_ppgo_map: register the likelihood and surrogate-training consumers
 
-(Auto-generated at commit preflight because the build staged the canonical file without a fragment; Librarian should refine this entry from the commit diff.)
+`cogwheel/lensing/likelihood.py` (`LensedRelativeBinningLikelihood._ppgo_band_split`,
+which also backs `_ppgo_cell_ceiling`) and `cogwheel/lensing/surrogate_training.py`
+(`train`, via the `_stratum_ppgo_boundary`/`_stratum_ppgo_ceiling` helpers) both
+call `get_certified_ppgo_map` directly to read `w_trust`/`w_ceiling` per cell —
+the band-split guard and the strata-trim decision, respectively. These were
+consuming the artifact already; only the `ppgo_map.py::use_certified_ppgo_map`
+entry point was on record. Added both as consumers so the data-flow graph
+matches the code.
+
+- `0.1.1` (): 
+### ppGO map truncation-on-refusal: per-cell w_ceiling and rho_measured_max
+
+`certified_ppgo_map` schema bumps to `0.2.0`. Each cell now carries a
+measured `w_ceiling` (min over angles of that angle's bisected max
+accepted `w`: a monotone saddle-image-branch refusal part-way up a
+cell's `w` sweep truncates that angle at its accepted w-prefix instead
+of invalidating the whole cell — the cell certifies on its measured
+range, trusted only on `[w_cert, w_ceiling]`) and `rho_measured_max`
+(the open outer annulus `[4.0, inf)` is sampled at one finite radius,
+so every cell records how far out that sample reached; accessors
+return UNKNOWN beyond it). The provenance scalar gains `w_ceiling_rule`
+and `rho_measured_max_rule`, and the SHA1 content hash now covers both
+new grids. `CertifiedPpgoMap.load` hard-refuses (`KeyError` ->
+`use_certified_ppgo_map` returns `False`) any map missing `w_ceiling`
+or `rho_measured_max`.
+
+Consumers updated to match: the band-split dispatch in
+`cogwheel/lensing/likelihood.py` now places the ppGO-vs-chart split at
+`min(parity_wall, w_ceiling)` instead of the wall alone, and
+`cogwheel/lensing/surrogate_training.py` strata trim only trims a
+stratum when the cell's ceiling covers that stratum's top edge.
 
 - `0.1.0` (): 
 ### Register cogwheel's disk data artifacts

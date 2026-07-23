@@ -13,7 +13,7 @@
 #   MINOR: new artifacts, conventions, or consumer/producer entries
 #   PATCH: field list corrections, wording fixes
 
-schema_version: "0.1.1"
+schema_version: "0.2.0"
 
 # ── Conventions ──────────────────────────────────────────────────────────
 # Define project-wide data conventions here. These are referenced by
@@ -233,3 +233,7 @@ artifacts:
     consumers:
       - module: "cogwheel/lensing/ppgo_map.py"
         function: "use_certified_ppgo_map"
+      - module: "cogwheel/lensing/likelihood.py"
+        function: "LensedRelativeBinningLikelihood._ppgo_band_split"
+      - module: "cogwheel/lensing/surrogate_training.py"
+        function: "train"
