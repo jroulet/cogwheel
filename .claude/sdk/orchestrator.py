@@ -726,7 +726,7 @@ class BuildOrchestrator:
         branch = check_branch_safety(self.project_root)
         self._log(f"Branch: {branch}")
 
-        # Both providers share one build-scoped Serena SSE server. Interactive
+        # Both providers share one build-scoped Serena server. Interactive
         # Claude/Codex sessions keep their own stdio Serena processes, while
         # every role in this build reuses this warm index. Codex gets a
         # distinct default port so simultaneous Claude and Codex builds cannot
@@ -745,12 +745,17 @@ class BuildOrchestrator:
                     if RUNTIME_PROVIDER == "claude"
                     else "codex"
                 ),
+                transport=(
+                    "sse"
+                    if RUNTIME_PROVIDER == "claude"
+                    else "streamable-http"
+                ),
             )
             if self.serena_url:
-                self._log(f"Using existing Serena SSE at {self.serena_url}")
+                self._log(f"Using existing Serena at {self.serena_url}")
             else:
                 self._log(
-                    f"Starting {RUNTIME_PROVIDER} build Serena SSE server..."
+                    f"Starting {RUNTIME_PROVIDER} build Serena server..."
                 )
             await self._serena.start()
             if RUNTIME_PROVIDER == "codex":
@@ -759,7 +764,7 @@ class BuildOrchestrator:
                 # every `codex exec` process at this one warm build server.
                 os.environ["CODEX_SERENA_URL"] = self._serena.url
             if not self.serena_url:
-                self._log(f"Serena SSE ready at {self._serena.url}")
+                self._log(f"Serena ready at {self._serena.url}")
 
         # Pre-read spec files
         self._log("Pre-reading spec files...")
@@ -926,7 +931,7 @@ class BuildOrchestrator:
                     f"silent wedges — skipping to preserve the failure signal."
                 )
             if self._serena is not None:
-                self._log("Stopping Serena SSE server...")
+                self._log("Stopping Serena server...")
                 await self._serena.stop()
                 self._serena = None
             os.environ.pop("SDK_BUILD_ACTIVE", None)
@@ -3167,12 +3172,22 @@ class BuildOrchestrator:
                     self._log(f"[{agent_id}] done ({cost})")
             else:
                 result_text = message.result or result_text
+                failure_detail = result_text.strip()[-2000:]
                 self._log(
                     f"[{agent_id}] FAILED: {message.subtype} "
                     f"(partial output: {len(result_text)} chars)"
                 )
+                if failure_detail:
+                    self._log(
+                        f"[{agent_id}] failure detail:\n{failure_detail}"
+                    )
                 raise RuntimeError(
                     f"Agent {agent_id} ended with status '{message.subtype}'."
+                    + (
+                        f"\n{failure_detail}"
+                        if failure_detail
+                        else ""
+                    )
                 )
 
         return result_text, session_id

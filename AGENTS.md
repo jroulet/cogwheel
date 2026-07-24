@@ -62,8 +62,9 @@ Applies to **behavior changes** in `cogwheel/` (new functions, signature/logic/c
   and launch paths. `.claude/build` defaults to the Claude Agent SDK.
 - Codex uses `.codex/config.toml`, `.codex/hooks.json`, `.codex/agents/`, and
   `.agents/skills/`. Launch the same state machine with `.codex/build`. A
-  Codex build starts one shared Serena SSE server on `CODEX_SERENA_PORT`
-  (default `8324`) and reuses its warm index for every build role.
+  Codex build starts one shared Serena Streamable HTTP server on
+  `CODEX_SERENA_PORT` (default `8324`) and reuses its warm index for every
+  build role.
 - Codex routes scientific-authority roles (Architect, Coder, Inspector,
   Professor, ProfReview) to `gpt-5.6-sol` at high reasoning and bounded support
   roles to `gpt-5.6-terra` at medium reasoning. `CODEX_MODEL` /
@@ -156,9 +157,9 @@ shallow:
 Serena MCP is available (project `cogwheel`). Interactive Claude uses the
 `claude-code` context from `.mcp.json`; interactive Codex uses the `codex`
 context from `.codex/config.toml`. Builds use a separate, build-scoped Serena
-SSE server: Claude on `SDK_SERENA_PORT` (default `8322`, locally `8323`) and
-Codex on `CODEX_SERENA_PORT` (default `8324`). Each server is shared by every
-role in that build. Prefer Serena for symbolic navigation, search, and edits
+server: Claude uses SSE on `SDK_SERENA_PORT` (default `8322`, locally `8323`);
+Codex uses Streamable HTTP on `CODEX_SERENA_PORT` (default `8324`). Each server
+is shared by every role in that build. Prefer Serena for symbolic navigation, search, and edits
 because it minimizes context and preserves reference awareness. Use a
 client-native exact patch when Serena cannot represent the change. Intent ->
 tool:

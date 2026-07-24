@@ -72,7 +72,7 @@ class CodexSerenaConfigTests(unittest.TestCase):
         command: list[str] = []
         with patch.dict(
             os.environ,
-            {"CODEX_SERENA_URL": "http://localhost:8324/sse"},
+            {"CODEX_SERENA_URL": "http://localhost:8324/mcp"},
             clear=False,
         ):
             os.environ.pop("AGENT_DISABLE_SERENA", None)
@@ -83,7 +83,7 @@ class CodexSerenaConfigTests(unittest.TestCase):
             value for value in command
             if value.startswith("mcp_servers.serena_build=")
         )
-        self.assertIn('url="http://localhost:8324/sse"', shared)
+        self.assertIn('url="http://localhost:8324/mcp"', shared)
         self.assertIn("required=true", shared)
 
     def test_no_serena_suppresses_shared_server(self):
@@ -91,7 +91,7 @@ class CodexSerenaConfigTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "CODEX_SERENA_URL": "http://localhost:8324/sse",
+                "CODEX_SERENA_URL": "http://localhost:8324/mcp",
                 "AGENT_DISABLE_SERENA": "1",
             },
             clear=False,
@@ -109,7 +109,7 @@ class CodexSerenaConfigTests(unittest.TestCase):
         )
         with patch.dict(
             os.environ,
-            {"CODEX_SERENA_URL": "http://localhost:8324/sse"},
+            {"CODEX_SERENA_URL": "http://localhost:8324/mcp"},
             clear=False,
         ):
             os.environ.pop("AGENT_DISABLE_SERENA", None)
@@ -123,11 +123,22 @@ class CodexSerenaConfigTests(unittest.TestCase):
 
 
 class SerenaManagerContextTests(unittest.IsolatedAsyncioTestCase):
+    def test_claude_default_remains_sse(self):
+        manager = SerenaManager("/repo", port=8323)
+
+        self.assertEqual(manager.transport, "sse")
+        self.assertEqual(manager.url, "http://localhost:8323/sse")
+        self.assertEqual(
+            manager.get_mcp_config(),
+            {"type": "sse", "url": "http://localhost:8323/sse"},
+        )
+
     async def test_codex_server_uses_distinct_port_and_context(self):
         manager = SerenaManager(
             "/repo",
             port=8324,
             context="codex",
+            transport="streamable-http",
         )
         manager._wait_for_ready = AsyncMock()
 
@@ -139,7 +150,10 @@ class SerenaManagerContextTests(unittest.IsolatedAsyncioTestCase):
         argv = popen.call_args.args[0]
         self.assertEqual(argv[argv.index("--port") + 1], "8324")
         self.assertEqual(argv[argv.index("--context") + 1], "codex")
-        self.assertEqual(manager.url, "http://localhost:8324/sse")
+        self.assertEqual(
+            argv[argv.index("--transport") + 1], "streamable-http"
+        )
+        self.assertEqual(manager.url, "http://localhost:8324/mcp")
 
 
 if __name__ == "__main__":

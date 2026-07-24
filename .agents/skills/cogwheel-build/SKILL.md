@@ -24,7 +24,8 @@ deep implementation build, or resume a build driven by the shared SDK.
 
 The Codex adapter uses `codex exec --json`; authentication, hooks, and thread
 persistence remain Codex-native. The long-lived orchestrator starts one
-build-scoped Serena SSE server on `CODEX_SERENA_PORT` (default `8324`) and
+build-scoped Serena Streamable HTTP server on `CODEX_SERENA_PORT` (default
+`8324`) and
 points every Codex role at that warm server; it does not repeatedly start the
 interactive stdio configuration. `CODEX_MODEL` and `CODEX_REASONING_EFFORT`
 are optional environment overrides. If unset, Codex uses the user's normal

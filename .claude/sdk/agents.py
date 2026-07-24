@@ -210,15 +210,16 @@ def _build_env() -> dict[str, str]:
     return env
 
 
-# ── Shared Serena SSE manager ────────────────────────────────────────────────
+# ── Shared Serena server manager ────────────────────────────────────────────
 
 
 class SerenaManager:
-    """Manage one shared Serena SSE server for every role in a build."""
+    """Manage one shared Serena server for every role in a build."""
 
     def __init__(self, project_root: str, port: int | None = None,
                  external_url: str | None = None,
-                 context: str = "claude-code"):
+                 context: str = "claude-code",
+                 transport: str = "sse"):
         if port is None:
             # Per-repo SSE port via the .env idiom (SDK_SERENA_PORT,
             # exported by launch_build.sh / .claude/build). Sibling
@@ -227,6 +228,7 @@ class SerenaManager:
             port = int(os.environ.get("SDK_SERENA_PORT", "8322"))
         self.project_root = project_root
         self.context = context
+        self.transport = transport
         self._configured_port = port
         self.external_url = external_url
         if external_url:
@@ -234,11 +236,12 @@ class SerenaManager:
             self.port = 0
         else:
             self.port = port
-            self.url = f"http://localhost:{port}/sse"
+            endpoint = "mcp" if transport == "streamable-http" else "sse"
+            self.url = f"http://localhost:{port}/{endpoint}"
         self.process: subprocess.Popen | None = None
 
     async def start(self) -> str:
-        """Start Serena SSE server, return SSE URL.
+        """Start the configured Serena server and return its MCP URL.
 
         If external_url is set, probe the URL first. If unreachable, fall
         back to spawning our own Serena on the default port. Makes the
@@ -250,19 +253,22 @@ class SerenaManager:
                 return self.url
             fallback_port = self._configured_port
             logger.warning(
-                "Serena SSE at %s unreachable; spawning own Serena on :%d",
+                "Serena at %s unreachable; spawning own Serena on :%d",
                 self.external_url, fallback_port,
             )
             self.external_url = None
             self.port = fallback_port
-            self.url = f"http://localhost:{self.port}/sse"
+            endpoint = (
+                "mcp" if self.transport == "streamable-http" else "sse"
+            )
+            self.url = f"http://localhost:{self.port}/{endpoint}"
         python_bin_dir = os.path.dirname(sys.executable)
         self.process = subprocess.Popen(
             [
                 "uvx", "--from", "git+https://github.com/oraios/serena",
                 "--with", "pyright[nodejs]",
                 "serena", "start-mcp-server",
-                "--transport", "sse",
+                "--transport", self.transport,
                 "--port", str(self.port),
                 "--project", self.project_root,
                 "--context", self.context,
@@ -303,7 +309,7 @@ class SerenaManager:
 
     async def _wait_for_ready(self, timeout: float = 180.0,
                               settle: float = 3.0):
-        """Wait for the Serena SSE server to accept connections.
+        """Wait for the Serena server to accept connections.
 
         IMPORTANT: do NOT open an SSE/HTTP session before the agent does —
         SSE resets project activation on each new client connection. A bare
@@ -324,13 +330,13 @@ class SerenaManager:
         while True:
             if self.process and self.process.poll() is not None:
                 raise RuntimeError(
-                    f"Serena SSE server exited during startup "
+                    f"Serena server exited during startup "
                     f"(rc={self.process.returncode})")
             if await self._url_reachable(self.url):
                 break
             if asyncio.get_event_loop().time() > deadline:
                 raise RuntimeError(
-                    f"Serena SSE server not accepting connections at "
+                    f"Serena server not accepting connections at "
                     f"{self.url} after {timeout:.0f}s")
             await asyncio.sleep(0.5)
         # Small margin between socket-accept and full MCP readiness.
@@ -338,7 +344,7 @@ class SerenaManager:
 
     def get_mcp_config(self) -> dict:
         """MCP server config dict for ClaudeAgentOptions."""
-        return {"type": "sse", "url": self.url}
+        return {"type": self.transport, "url": self.url}
 
     async def stop(self):
         if self.external_url:
