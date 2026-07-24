@@ -173,14 +173,20 @@ def _synthetic_surrogate():
         log_w_grid=SYN_LOG_W, envelope_real=real, envelope_imag=imag,
         image_count=2, parity=1, eta_floor=0.02, eta_max=0.05,
         cusp_windows=[(0.2, 0.1)])
-    pos_y1 = np.linspace(0.5, 0.85, 4)
-    pos_y2 = np.linspace(0.2, 0.45, 4)
-    real, imag = _smooth_tensor(pos_gamma, pos_y1, pos_y2, SYN_LOG_W, 0.5)
+    # Caustic-fixed (rho, theta_c) axes (Build 8h-b3): the caustic-fixed image
+    # of the original physical box (y1 in [0.5, 0.85], y2 in [0.2, 0.45]) over
+    # gamma in [0.3, 0.5] spans rho ~ [0.38, 1.34], theta_c ~ [0.23, 0.73].  The
+    # refused point is the caustic-fixed image of the SAME physical refusal
+    # (gamma=0.4, y1=0.67, y2=0.32) -> (rho, theta_c) ~ (0.719, 0.446) so a
+    # physical query there still lands in the exclusion ball.
+    pos_rho = np.linspace(0.38, 1.34, 4)
+    pos_theta_c = np.linspace(0.23, 0.73, 4)
+    real, imag = _smooth_tensor(pos_gamma, pos_rho, pos_theta_c, SYN_LOG_W, 0.5)
     pos_ff = FarFieldChart.from_values(
-        gamma_grid=pos_gamma, y1_grid=pos_y1, y2_grid=pos_y2,
+        gamma_grid=pos_gamma, rho_grid=pos_rho, theta_c_grid=pos_theta_c,
         log_w_grid=SYN_LOG_W, envelope_real=real, envelope_imag=imag,
         image_count=2, parity=1, eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
-        refused_points=np.array([[0.4, 0.67, 0.32]]))
+        refused_points=np.array([[0.4, 0.7189, 0.4456]]))
     sad_gamma = np.linspace(1.1, 1.4, 4)
     sad_theta = np.linspace(-0.39, -0.09, 4)
     real, imag = _smooth_tensor(sad_gamma, u_grid, sad_theta, SYN_LOG_W, 1.0)
@@ -189,14 +195,19 @@ def _synthetic_surrogate():
         log_w_grid=SYN_LOG_W, envelope_real=real, envelope_imag=imag,
         image_count=4, parity=-1, eta_floor=0.02, eta_max=0.05,
         cusp_windows=[(-0.39, 0.05)])
-    sad_y1 = np.linspace(0.2, 0.5, 4)
-    sad_y2 = np.linspace(0.1, 0.3, 4)
-    real, imag = _smooth_tensor(sad_gamma, sad_y1, sad_y2, SYN_LOG_W, 1.5)
+    # Caustic-fixed image of the physical saddle box (y1 in [0.2, 0.5],
+    # y2 in [0.1, 0.3]) over gamma in [1.1, 1.4]: rho ~ [0.11, 0.32],
+    # theta_c ~ [0.20, 0.98].  The refused point is the caustic-fixed image
+    # of the SAME physical refusal (gamma=1.35, y1=0.25, y2=0.15) ->
+    # (rho, theta_c) ~ (0.1655, 0.5404).
+    sad_rho = np.linspace(0.11, 0.32, 4)
+    sad_theta_c = np.linspace(0.20, 0.98, 4)
+    real, imag = _smooth_tensor(sad_gamma, sad_rho, sad_theta_c, SYN_LOG_W, 1.5)
     sad_ff = FarFieldChart.from_values(
-        gamma_grid=sad_gamma, y1_grid=sad_y1, y2_grid=sad_y2,
+        gamma_grid=sad_gamma, rho_grid=sad_rho, theta_c_grid=sad_theta_c,
         log_w_grid=SYN_LOG_W, envelope_real=real, envelope_imag=imag,
         image_count=4, parity=-1, eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
-        refused_points=np.array([[1.35, 0.25, 0.15]]))
+        refused_points=np.array([[1.35, 0.1655, 0.5404]]))
     provenance = {'chart_count': 4,
                   'chart_types': ['tube', 'farfield', 'tube', 'farfield'],
                   'dropped_gamma_slivers': [list(SYN_DROPPED[0])]}
@@ -256,9 +267,13 @@ def _pos_tube():
 def _pos_raw_out():
     """A raw far-field chart trained OUTSIDE the caustic (extrapolates inward).
 
-    Cartesian ``(y1_eig, y2_eig)`` box covering the fold strip at eta in
-    ``[0.06, 0.30]`` -- i.e. the production far-field region that cannot reach
-    the near-caustic band; evaluated inside it, it extrapolates.
+    Caustic-fixed ``(rho, theta_c)`` box (Build 8h-b3) covering the fold strip
+    at eta in ``[0.06, 0.30]`` -- i.e. the production far-field region that
+    cannot reach the near-caustic band; evaluated inside it, it extrapolates.
+    The box is the caustic-fixed image of the SAME physical fold strip; each
+    grid node is mapped back to a physical eigenframe source
+    (`_from_caustic_fixed`) before the engine call, so the fitted label is the
+    same physical envelope at the same point.
     """
     arc, log_w_grid = _pos_arc()
     w_grid = np.exp(log_w_grid)
@@ -269,21 +284,26 @@ def _pos_raw_out():
                                      arc.inward_sign)
         for th in np.linspace(*TUBE_THETA, 12)
         for eta in np.linspace(0.06, 0.30, 4)])
-    y1_grid = np.linspace(srcs[:, 0].min(), srcs[:, 0].max(), 7)
-    y2_grid = np.linspace(srcs[:, 1].min(), srcs[:, 1].max(), 7)
-    shape = (log_w_grid.size, gamma_grid.size, y1_grid.size, y2_grid.size)
+    caustic = np.array([surrogate_module._to_caustic_fixed(gmid, s[0], s[1])
+                        for s in srcs])
+    rho_grid = np.linspace(caustic[:, 0].min(), caustic[:, 0].max(), 7)
+    theta_c_grid = np.linspace(caustic[:, 1].min(), caustic[:, 1].max(), 7)
+    shape = (log_w_grid.size, gamma_grid.size, rho_grid.size,
+             theta_c_grid.size)
     er = np.zeros(shape)
     ei = np.zeros(shape)
     for ig, gamma in enumerate(gamma_grid):
-        for i1, a in enumerate(y1_grid):
-            for i2, b in enumerate(y2_grid):
+        for i1, r in enumerate(rho_grid):
+            for i2, tc in enumerate(theta_c_grid):
+                y1e, y2e = surrogate_module._from_caustic_fixed(
+                    float(gamma), float(r), float(tc))
                 env = training_module._engine_envelope(
-                    w_grid, float(gamma), np.array([a, b]))
+                    w_grid, float(gamma), np.array([y1e, y2e]))
                 if env is not None:
                     er[:, ig, i1, i2] = env.real
                     ei[:, ig, i1, i2] = env.imag
     return FarFieldChart.from_values(
-        gamma_grid=gamma_grid, y1_grid=y1_grid, y2_grid=y2_grid,
+        gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=er, envelope_imag=ei,
         image_count=arc.image_count, parity=1, eta_overlap_min=0.0)
 
@@ -298,10 +318,18 @@ def _pos_farfield_dense():
     the census crown / strong bars.  Built via the reused 8a `from_engine`
     far-field trainer.
     """
+    # Caustic-fixed image (Build 8h-b3) of the SAME physical exterior box
+    # (y1 in [2.05, 2.35], y2 in [-0.15, 0.15]) over gamma in [0.35, 0.65]:
+    # rho in [~1.05, ~2.72] (kept strictly > 1 => exterior far-field valid),
+    # theta_c in [-0.08, 0.08].  Because the scalar caustic reach varies ~2.5x
+    # across the gamma band, the fixed-|y| shell smears over a wide rho span,
+    # so n_rho is raised (5 -> 9) to hold the per-gamma radial resolution the
+    # served points need -- densifying nodes preserves (does not weaken) the
+    # accuracy the LnlikeAccuracy tier bars certify.
     return LensAmplificationSurrogate.from_engine(
-        gamma_range=(0.35, 0.65), y1_range=(2.05, 2.35), y2_range=(-0.15, 0.15),
-        w_range=(0.02, 260.0), n_gamma=6, n_y1=5, n_y2=5,
-        w_nodes_per_decade=12)
+        gamma_range=(0.35, 0.65), rho_range=(1.05, 2.75),
+        theta_c_range=(-0.08, 0.08), w_range=(0.02, 260.0),
+        n_gamma=6, n_rho=9, n_theta=5, w_nodes_per_decade=12)
 
 
 # ==========================================================================
@@ -367,9 +395,12 @@ def _served_eps(surrogate, chart_for_raw, gamma, source, log_w_grid,
         w_grid, gamma=gamma, y1=float(source[0]), y2=float(source[1]),
         beta=0.0, eta=part.caustic_distance, theta=part.critical_theta,
         image_count=int(part.real_mask.sum()))
-    e_raw = _evaluate_chart(chart_for_raw, gamma, float(source[0]),
-                            float(source[1]), float('nan'), float('nan'),
-                            log_w_grid)
+    # Raw far-field chart contracts on caustic-fixed (rho, theta_c); convert
+    # the physical (beta=0 eigenframe) source before evaluating it.
+    rho_q, theta_c_q = surrogate_module._to_caustic_fixed(
+        gamma, float(source[0]), float(source[1]))
+    e_raw = _evaluate_chart(chart_for_raw, gamma, rho_q, theta_c_q,
+                            float('nan'), float('nan'), log_w_grid)
     denom = max(float(np.max(np.abs(env_eng))), census.EPS_DENOM_FLOOR)
     tube_eps = (float(np.max(np.abs(e_tube - env_eng)) / denom) if served
                 else None)
@@ -741,8 +772,10 @@ class HeldoutEnvelopeEpsTestCase(CensusTestCase):
         chart = surrogate.charts[0]
         w_grid = np.exp(chart.log_w_grid)
         gamma = float(chart.gamma_grid[2])
-        y1 = float(chart.y1_grid[2])
-        y2 = float(chart.y2_grid[2])
+        # Caustic-fixed node -> physical eigenframe source (Build 8h-b3).
+        rho = float(chart.rho_grid[2])
+        theta_c = float(chart.theta_c_grid[2])
+        y1, y2 = surrogate_module._from_caustic_fixed(gamma, rho, theta_c)
         part = ChangRefsdalChannels(w_grid).evaluate(
             gamma=gamma, y=(y1, y2), beta=0.0, kappa=0.0)
         env_eng, denom = _reference_env_and_denom(chart, part)
@@ -764,8 +797,11 @@ class HeldoutEnvelopeEpsTestCase(CensusTestCase):
         chart = surrogate.charts[0]
         w_grid = np.exp(chart.log_w_grid)
         gmid = float(np.mean(chart.gamma_grid))
-        y1 = 0.5 * (chart.y1_grid[1] + chart.y1_grid[2])
-        y2 = 0.5 * (chart.y2_grid[1] + chart.y2_grid[2])
+        # Caustic-fixed off-node midpoint -> physical eigenframe source.
+        rho = 0.5 * (float(chart.rho_grid[1]) + float(chart.rho_grid[2]))
+        theta_c = 0.5 * (float(chart.theta_c_grid[1])
+                         + float(chart.theta_c_grid[2]))
+        y1, y2 = surrogate_module._from_caustic_fixed(gmid, rho, theta_c)
         part = ChangRefsdalChannels(w_grid).evaluate(
             gamma=gmid, y=(y1, y2), beta=0.0, kappa=0.0)
         env_eng, denom = _reference_env_and_denom(chart, part)
@@ -1046,9 +1082,12 @@ class MutationFalsificationTestCase(CensusTestCase):
         self.sur = _synthetic_surrogate()
         self.pos_tube = self.sur.charts[0]
         self.pos_ff = self.sur.charts[1]
+        # Caustic-fixed query (Build 8h-b3): the physical (gamma=0.4,
+        # y1_eig=0.6, y2_eig=0.3) maps to (rho, theta_c) ~ (0.6495, 0.4636),
+        # inside the pos_ff (rho, theta_c) box but off its refused point.
         self.query = dict(gamma=0.4, log_w_min=SYN_LWMIN, log_w_max=SYN_LWMAX,
-                          eta=0.03, theta=0.7, image_count=2, y1_eig=0.6,
-                          y2_eig=0.3)
+                          eta=0.03, theta=0.7, image_count=2, rho=0.6495,
+                          theta_c=0.4636)
 
     def _select(self, charts):
         return select_chart(charts, **self.query)
@@ -1107,6 +1146,9 @@ class MutationFalsificationTestCase(CensusTestCase):
             gamma=gmid, y=(float(src[0]), float(src[1])), beta=0.0, kappa=0.0)
         env_eng = np.asarray(part.envelope)
         y1e, y2e = _rotate_to_eigenframe(float(src[0]), float(src[1]), 0.0)
+        # Caustic-fixed image of the eigenframe source (Build 8h-b3): the
+        # far-field serve gate and chart contraction key on (rho, theta_c).
+        rho_q, theta_c_q = surrogate_module._to_caustic_fixed(gmid, y1e, y2e)
         raw = _pos_raw_out()
         image_count = int(part.real_mask.sum())
         refusing = dataclasses.replace(raw, eta_overlap_min=0.05)
@@ -1116,15 +1158,18 @@ class MutationFalsificationTestCase(CensusTestCase):
         self.n_checks += 1
         self.assertFalse(surrogate_module._farfield_serves(
             refusing, gmid, lw_min, lw_max, part.caustic_distance,
-            image_count, y1e, y2e), 'precondition: far-field must refuse')
+            image_count, rho_q, theta_c_q),
+            'precondition: far-field must refuse')
         self.n_checks += 1
         self.assertTrue(surrogate_module._farfield_serves(
             admitting, gmid, lw_min, lw_max, part.caustic_distance,
-            image_count, y1e, y2e), 'lowering overlap did not admit the query')
-        e_raw = _evaluate_chart(admitting, gmid, y1e, y2e, float('nan'),
-                                float('nan'), log_w_grid)
+            image_count, rho_q, theta_c_q),
+            'lowering overlap did not admit the query')
+        e_raw = _evaluate_chart(admitting, gmid, rho_q, theta_c_q,
+                                float('nan'), float('nan'), log_w_grid)
         tube = _pos_tube()
-        e_tube = _evaluate_chart(tube, gmid, y1e, y2e, part.caustic_distance,
+        e_tube = _evaluate_chart(tube, gmid, rho_q, theta_c_q,
+                                 part.caustic_distance,
                                  part.critical_theta, log_w_grid)
         denom = max(float(np.max(np.abs(env_eng))), census.EPS_DENOM_FLOOR)
         raw_eps = float(np.max(np.abs(e_raw - env_eng)) / denom)

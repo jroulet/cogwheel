@@ -2034,9 +2034,29 @@ class BuildOrchestrator:
                     list(self._coder_sessions.values())[-1]
                     if self._coder_sessions else None
                 )
-                fix_result, _ = await self._run_agent(
-                    "coder", fix_task, resume_session=last_coder,
-                )
+                try:
+                    fix_result, _ = await self._run_agent(
+                        "coder", fix_task, resume_session=last_coder,
+                        max_turns_override=75,
+                    )
+                except RuntimeError as exc:
+                    if "error_max_turns" not in str(exc):
+                        raise
+                    # A RESUMED session inherits its spent turns and can
+                    # exhaust immediately (8h-b3-fin coder-23, 2026-07-23).
+                    # One FRESH continuation over the partial tree, same
+                    # rule as the WP path.
+                    self._log("  fix-coder exhausted max_turns — one fresh "
+                              "continuation with the partial tree")
+                    fix_result, _ = await self._run_agent(
+                        "coder",
+                        "CONTINUATION: a previous coder ran out of turns "
+                        "mid-fix; its partial work is in the working tree. "
+                        "Run `git status --short` and `git diff` first, "
+                        "verify against the findings below, then complete "
+                        "the remaining fixes.\n\n" + fix_task,
+                        max_turns_override=75,
+                    )
                 self._collect_change_report(fix_result)
 
             round_number += 1
@@ -2094,15 +2114,37 @@ class BuildOrchestrator:
             f"**Verification**: {wp.verification}\n"
             + CHANGE_REPORT_INSTRUCTION
         )
-        result_text, session_id = await self._run_agent(
-            "coder", task,
-            # Floor the plan-supplied budget: an under-budgeted WP dies at
-            # error_max_turns and kills the whole DAG (measured twice:
-            # 8c coder-4 mid-debug, 8e coder-2 at a plan-set 20 on a
-            # read+decorate task). The Architect-estimate fallback already
-            # floors at 75; plan-supplied values get the same protection.
-            max_turns_override=max(75, wp.max_turns or 75),
-        )
+        try:
+            result_text, session_id = await self._run_agent(
+                "coder", task,
+                # Floor the plan-supplied budget: an under-budgeted WP dies at
+                # error_max_turns and kills the whole DAG (measured twice:
+                # 8c coder-4 mid-debug, 8e coder-2 at a plan-set 20 on a
+                # read+decorate task). The Architect-estimate fallback already
+                # floors at 75; plan-supplied values get the same protection.
+                max_turns_override=max(75, wp.max_turns or 75),
+            )
+        except RuntimeError as exc:
+            if "error_max_turns" not in str(exc):
+                raise
+            # Bounded continuation on honest overflow (the test_dev path got
+            # this in fix #8; coders got it after 8h-b3 coder-2 exhausted a
+            # legitimate 90-turn budget mid-migration and killed the DAG,
+            # 2026-07-23). ONE fresh continuation agent, full budget, sees
+            # the predecessor's partial work in the tree. No recursion.
+            self._log(f"  {wp.id}: coder exhausted max_turns — one bounded "
+                      f"continuation with the partial tree")
+            continuation = (
+                "CONTINUATION: a previous coder ran out of turns while "
+                "implementing this work package and its PARTIAL WORK is in "
+                "the working tree (uncommitted). First run `git status "
+                "--short` and `git diff` on the named files to see what "
+                "exists, verify it against the spec below, then COMPLETE "
+                "the remaining work. Do not restart from scratch; do not "
+                "revert the partial work except where it is wrong.\n\n"
+                + task)
+            result_text, session_id = await self._run_agent(
+                "coder", continuation, max_turns_override=75)
         # Record this WP's declared files so later coders in the build see them
         # as potentially-stale even if the edit landed on an untracked file.
         self._completed_wp_files.update(_where_files(wp.where))

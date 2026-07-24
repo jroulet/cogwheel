@@ -89,14 +89,16 @@ from scipy.interpolate import CubicSpline
 from cogwheel import utils
 from cogwheel.likelihood.relative_binning import BaseLinearFree
 from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
-from cogwheel.lensing.chang_refsdal.channels import (_channel_switch,
-                                                     _physical_kernels,
-                                                     reconstruct_from_envelope)
-from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
+from cogwheel.lensing.chang_refsdal.channels import (
+    _channel_switch, _physical_kernels, reconstruct_from_envelope,
+    reconstruct_farfield, farfield_ghost_term, FARFIELD_DIFFRACTIVE,
+    FARFIELD_KERNEL_SUM_MINUS_GHOST, KNOWN_FARFIELD_DEFINITIONS,
+    KNOWN_INTERIOR_DEFINITIONS)
+from cogwheel.lensing.chang_refsdal.geometry import (
+    LensDomainError, GhostDomainError, macro_matrix)
 from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
-from cogwheel.lensing.surrogate import _FARFIELD_ENVELOPE_DEFINITION
 from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
                                        caustic_geometry,
                                        get_certified_ppgo_map)
@@ -1638,39 +1640,75 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         if not served:
             return None
 
-        if definition == _FARFIELD_ENVELOPE_DEFINITION:
-            # Far-field label is ``E_ff = F - sum_{a real} H_a e^{1j w tau_a}``
-            # (`farfield_envelope_from_partition`): reconstruct its exact
-            # inverse with the switch forced to 1 on every real channel and
-            # NO ``tau_c`` carrier, so the kernel sum added back telescopes
-            # to ``F`` to machine precision (Build 8g-b serving mirror).  On
-            # a band split the wave correction above w_trust is certified
-            # below the ppGO bar, so ``E_ff = 0`` there: the upper-band
-            # kernels collapse to the bare image-kernel sum (the existing
-            # ppGO), routed through the SAME partition for per-channel
-            # consistency -- routing only, not a new formula.  Without a
-            # split ``envelope_dense`` equals the served envelope exactly
-            # (below_mask is all True), so the path is byte-identical.
+        if definition in KNOWN_FARFIELD_DEFINITIONS:
+            # Far-field serve mirror (Build 8h-b3-fin S1-2): reconstruct
+            # ``F`` by inverting the SAME w-windowed window-class label the
+            # chart was trained on, dispatched on its envelope-definition
+            # tag through `reconstruct_farfield` (which mirrors
+            # `farfield_envelope_from_partition`: the switch policy is
+            # `_farfield_switch(definition)` and the carrier is parked at
+            # ``tau_c = 0``).  On a band split the wave correction above
+            # ``w_trust`` is certified below the ppGO bar, so ``E_ff = 0``
+            # there and the upper-band kernels collapse to the bare
+            # image-kernel sum -- the kernel-sum-gauge telescoping identity.
+            # That identity holds ONLY for the kernel-sum family (real
+            # switch = 1), NOT for the diffractive (switch = 0) gauge, so a
+            # diffractive band split is refused (fall through to the exact
+            # path).  Without a split ``envelope_dense`` equals the served
+            # envelope exactly (below_mask is all True), and for the legacy
+            # `FARFIELD_KERNEL_SUM` tag this path is byte-identical to HEAD.
+            if definition == FARFIELD_DIFFRACTIVE and band_split:
+                return None
             envelope_dense = np.zeros(dense_w.shape, dtype=complex)
             envelope_dense[below_mask] = envelope_chart
-            ff_switch = np.zeros(
-                (dense_w.shape[0], geom.real_mask.size), dtype=float)
-            ff_switch[:, np.asarray(geom.real_mask, dtype=bool)] = 1.0
-            kernels, _total = reconstruct_from_envelope(
+            if definition == FARFIELD_KERNEL_SUM_MINUS_GHOST:
+                # The mid-band ghost label subtracted the decaying
+                # complex-saddle ghost ``G`` analytically; re-add it over
+                # the chart region with the SAME primitive and gate
+                # (`farfield_ghost_term`, source/matrix rebuilt exactly as
+                # the training partition did) so ``F`` telescopes to machine
+                # precision.  ``G`` lives in the mid-band window only, never
+                # in the bare ppGO band above ``w_trust`` (where
+                # ``envelope_dense`` is already zero).  A GhostDomainError
+                # (source too near a principal axis / inside the caustic)
+                # refuses symmetrically with the training label: fall
+                # through to the exact path.
+                source = np.array([lens['y1'], lens['y2']], dtype=float)
+                matrix = macro_matrix(
+                    lens['gamma'], lens['beta'], lens['kappa'])
+                try:
+                    ghost = farfield_ghost_term(chart_w, source, matrix)
+                except GhostDomainError:
+                    return None
+                envelope_dense[below_mask] += ghost
+            kernels, _total = reconstruct_farfield(
                 dense_w, envelope_dense, geom.delays, geom.saddle_kernels,
-                ff_switch, 0.0)
+                geom.real_mask, definition)
         elif band_split:
-            # A tube carries the caustic-region envelope reconstructed with
-            # the geometry's own switch / critical delay; the ppGO
-            # telescoping identity above does NOT hold for that gauge, so a
-            # band split of a tube is not served -- fall through to the
-            # exact path.  Tubes live near-caustic where the map returns
-            # UNKNOWN (so band_split is normally already False for them);
-            # this guard is the belt-and-braces case.
+            # A tube OR a whole-interior SACR-C chart carries the
+            # caustic-region ``tau_c``-demodulated envelope reconstructed with
+            # the geometry's own switch / critical delay; the far-field-gauge
+            # ppGO telescoping identity above does NOT hold for that gauge, so
+            # a band split of such a chart is not served -- fall through to the
+            # exact path.  Tubes and interior charts live where the map returns
+            # UNKNOWN (near-caustic / inside the caustic), so band_split is
+            # normally already False for them; this guard is belt-and-braces.
             return None
         else:
-            # Tube (or legacy) label uses the caustic-region envelope with
-            # the geometry's switch and critical delay -- unchanged.
+            # SACR-C caustic-region envelope, dispatched here for BOTH a tube
+            # chart (``definition is None``) and a whole-interior chart
+            # (``definition in KNOWN_INTERIOR_DEFINITIONS``, the S2-3
+            # `INTERIOR_SACR_C` tag): reconstruct with the geometry's OWN
+            # switch and critical delay, i.e. add the switched near-merged
+            # channels back at ``tau_c``.  The reconstruction algebra is
+            # identical for tube and interior (`reconstruct_from_envelope`),
+            # so no separate branch is warranted; the far-field family is the
+            # only case handled above.  ``definition`` here is guaranteed to
+            # be ``None`` or an interior tag by the loader's tag validation.
+            assert (definition is None
+                    or definition in KNOWN_INTERIOR_DEFINITIONS), (
+                f'unexpected non-interior envelope tag {definition!r} reached '
+                'the caustic-region reconstruction branch')
             kernels, _total = reconstruct_from_envelope(
                 dense_w, envelope_chart, geom.delays, geom.saddle_kernels,
                 geom.switch, geom.critical_delay)

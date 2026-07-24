@@ -877,11 +877,15 @@ class BandSplitReconstructionTestCase(_PpgoTestCase):
         cls.f_scale = float(np.max(np.abs(cls.exact)))
 
         # A real trained far-field chart over a tile covering the draw, whole
-        # band -- its spline envelope serves the chart sub-band.
+        # band -- its spline envelope serves the chart sub-band. The draw
+        # SOURCE=(1.3, 1.3) at GAMMA=0.3 sits at caustic-fixed
+        # rho=|y|/_caustic_reach(gamma) ~= 2.56, theta_c=pi/4; the box spans
+        # the whole gamma sweep of that point (rho ~= 2.12 at gamma=0.35 to
+        # ~= 3.18 at gamma=0.25) so serve interpolates strictly inside.
         surrogate = LensAmplificationSurrogate.from_engine(
-            gamma_range=(0.25, 0.35), y1_range=(1.2, 1.4),
-            y2_range=(1.2, 1.4), w_range=(2.0, 40.0), n_gamma=4, n_y1=4,
-            n_y2=4, w_nodes_per_decade=8)
+            gamma_range=(0.25, 0.35), rho_range=(2.0, 3.3),
+            theta_c_range=(0.6, 0.95), w_range=(2.0, 40.0), n_gamma=4,
+            n_rho=4, n_theta=4, w_nodes_per_decade=8)
         cls.env_chart, cls.served, cls.definition = surrogate.serve(
             cls.DENSE_W[cls.below], gamma=cls.GAMMA, y1=cls.SOURCE[0],
             y2=cls.SOURCE[1], beta=0.0, eta=cls.geom.caustic_distance,

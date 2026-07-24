@@ -2696,45 +2696,31 @@ emit-on-change, stall alarm. Floor verdict banked: 3.9x (target 2x
 missed; ~1.8 ms unattributed glue exposed — follow-up profile, not a
 blocker). Next: campaign report -> census + PP -> owner enable
 package.
-## Current plan (2026-07-23, supersedes prior sequencing entries — history in git)
+## Current plan (2026-07-23 23:00 — USAGE-LIMIT PAUSE; resets Jul 26 6pm ET)
 
-Standing owner rulings in force: zero-quadrature final serving (charts or
-ppGO/arms only); 100% coverage mandatory; expensive campaigns fired ONLY
-after cheap validation gates pass; journal carries current state only.
+STATE: 8h-b3 caustic-fixed core COMPLETE in tree, committed as a
+PRE-GATE WIP checkpoint (all 6 WPs; new exterior-windows suite green;
+36 old-suite tests red = fixture-port debt ONLY, tally in scratchpad
+port_state.log). Ghost kernel b14df4b, map v2 with ceilings, SDK
+hardenings (port ledger 16-22) all committed. GLoW probe verdict:
+PARTIAL (cross-oracle for positive parity/high w; NOT a qd
+replacement — gamma>1 topology unsupported upstream; owner may report
+to authors). Serving census baseline 2.2%.
 
-Sequence (each step gates the next; any red -> stop and diagnose):
-1. Build 8h-a-fin commits green (WP4 + full verification of in-tree
-   WP1-3: ppGO map product, band-split dispatch, interior tiles,
-   annulus subdivision).
-2. Production ppGO w_cert map sweep (~30-60 min, exact references).
-3. Cheap validation on the EXISTING v3 artifact + new dispatch + map:
-   ladder census (expect B_ppgo bucket to appear from 0) and an lnL
-   spot-check (~50-100 draws, band-split paths, within tier bars).
-4. P1 probe (scratchpad): decompose annulus E_ff into complex-image
-   pair + remainder; success = remainder fits raw-coordinate splines at
-   deep-exterior accuracy (~1e-4). P2 measurement: one-band pilot
-   training run at production config; inspect interior gate pass-rate
-   for band-edge losses (fix would be diamond-scaled interior coords).
-5. Build 8h-b (PLANNED, owner ruling 2026-07-23 — both levers shrink
-   the patch count): annulus complex-pair subtraction (Stokes
-   bookkeeping) + caustic-fixed interior coordinates (per-lobe frames
-   give the saddle deltoids interior coverage). The P1/P2 probes
-   CALIBRATE the implementation (P1: remainder smoothness + Stokes
-   lines; P2: pilot gate pass-rate + coordinate details); a lever is
-   dropped only if its probe falsifies the premise outright. qd is
-   8h-c.
-6. qd build (engine numerics only; needs NO trained artifact): dd->qd
-   Schwinger core, certified wall ~155; then extend the w_cert map
-   sweep into [58, 155] with the new exact references.
-7. ONE full campaign with ALL fixes and qd-unlocked saddle strata;
-   standing 1-h mid-run probe; then the ladder census -> 100% (zero
-   quadrature, no open tail); then PP validation and the owner
-   enable-by-default package.
-   Contingency: if qd stalls beyond bound, fire the campaign without
-   the tail and carry the measured ~360/1024 beyond-wall residual as
-   the single open bucket until qd lands.
+ON RESUME (in order):
+1. Finish the fixture port (rules: no weakening; same-physics
+   reconversion via _caustic_reach/r_caustic; deletions justified
+   line-by-line). Then FULL tree gate. Then amend/replace the WIP
+   checkpoint with the real 8h-b3 commit.
+2. Calibration re-pilot (cost-quoted ~30-45 min) vs P2 before-numbers
+   (ext 22%/60% rescue; interior 0% crown / 6e-2 mid-gamma).
+3. Serving census — the climb from 2.2% must begin.
+4. Born-rung build (small, certain; before campaign — no throwaway
+   tiles; makes the artifact prior-universal).
+5. qd build (8h-c, riskiest; saddle tail; GLoW cross-oracle folded
+   into its certification story via Professor consult).
+6. Map extension sweep; ONE campaign (1-h mid-run probe); ladder
+   census -> 100%; PP validation; owner enable package.
 
-Post-commit driver chores: /dream consolidation pass (Phase 3 skipped
-by three failed builds; SDK now caps inlined memories at 24 KB), gw
-port items 16-18 (escalation verdict flip, memory-inline cap,
-consolidation coupling), spec sync via Librarian.
+Standing rules unchanged (zero-quadrature; estimator before every
+launch; live docs current-state only; width law; Fable owner-only).

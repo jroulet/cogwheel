@@ -1488,6 +1488,106 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
         distance=float(np.sqrt(best_fun)))
 
 
+def r_caustic(gamma: float, theta: float, *, kappa: float = 0.0,
+              n_sample: int = 720) -> float:
+    """
+    Directional source-plane caustic radius along the ray at angle ``theta``.
+
+    The caustic is the source-plane image of the critical curve; this helper
+    returns the radius (in dimensionless ``y`` units) at which the ray from
+    the origin at source-plane polar angle ``theta`` crosses the caustic,
+    taking the OUTERMOST crossing so that a source at
+    ``rho = |y| / r_caustic(gamma, theta) > 1`` lies outside the whole
+    caustic in that direction.
+
+    The curve is sampled by sweeping `critical_point` over lens-plane polar
+    angle (both square-root branches, wedge-forbidden angles skipped); each
+    critical point carries its caustic (source-plane) image.  The sampled
+    caustic points whose source-plane direction lies within one angular
+    sample of ``theta`` are collected and the largest radius among them is
+    returned.  For a positive-parity astroid the caustic is star-shaped
+    about the origin, so the directional radius is single-valued and this is
+    a well-defined boundary radius.  For a macro saddle the two deltoid
+    lobes do not enclose the origin, so only directions that actually cross
+    a lobe have a finite radius; the rest raise `LensDomainError`.
+
+    Note (cusp rays): ``r_caustic`` has kinks (slope discontinuities) at the
+    four astroid cusp rays, so a smooth patch tiled in ``theta`` must not
+    straddle a cusp ray.  Interior cusp-ray tile alignment is Build 8h S2-1;
+    the exterior far-field tiling keeps the existing cusp-window exclusion
+    as its safety net and inherits a single, consistent directional-radius
+    convention from this shared helper.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    theta : float
+        Source-plane polar angle of the query ray, radians.
+    kappa : float, optional
+        External convergence (default 0.0, the sampled-space surface).
+    n_sample : int, optional
+        Number of lens-plane polar angles per square-root branch in the
+        caustic sweep (default 720; the directional resolution is
+        ``~2 * pi / n_sample``).
+
+    Returns
+    -------
+    float
+        The outermost caustic radius in direction ``theta`` (dimensionless
+        ``y`` units).
+
+    Raises
+    ------
+    LensDomainError
+        If ``1 - kappa <= 0`` or ``abs(gamma) == 1 - kappa`` (the geometry
+        refusals of `critical_point`), or if no caustic point lies in the
+        direction ``theta`` (a macro-saddle direction that misses both
+        deltoid lobes).
+    """
+    lam = 1.0 - float(kappa)
+    if lam <= 0.0:
+        raise LensDomainError(
+            f'Cannot locate a caustic radius for (kappa, gamma) = '
+            f'({kappa}, {gamma}): 1 - kappa = {lam} <= 0 (over-critical '
+            f'/ Type III); such configurations are out of scope.')
+    if abs(gamma) == lam:
+        raise LensDomainError(
+            f'Cannot locate a caustic radius for (kappa, gamma) = '
+            f'({kappa}, {gamma}): |gamma| == 1 - kappa = {lam} exactly '
+            f'(det A = 0, the parity boundary); this boundary is a named '
+            f'refusal.')
+
+    target = float(theta) % (2.0 * np.pi)
+    thetas = np.linspace(0.0, 2.0 * np.pi, int(n_sample), endpoint=False)
+    phis: list[float] = []
+    radii: list[float] = []
+    for branch in (1, -1):
+        for theta_lens in thetas:
+            try:
+                source = critical_point(
+                    gamma, float(theta_lens), 0.0, kappa, branch).source
+            except LensDomainError:
+                continue
+            radius = float(np.hypot(source[0], source[1]))
+            if radius <= 0.0:
+                continue
+            phis.append(float(np.arctan2(source[1], source[0])) % (2.0 * np.pi))
+            radii.append(radius)
+    if not radii:
+        raise LensDomainError(
+            f'No caustic point found in direction theta={theta} for '
+            f'(kappa, gamma) = ({kappa}, {gamma}); a macro-saddle ray that '
+            f'misses both deltoid lobes has no caustic radius.')
+    phi_arr = np.asarray(phis)
+    radius_arr = np.asarray(radii)
+    # Wrapped angular gap to the query direction, in [0, pi].
+    gaps = np.abs((phi_arr - target + np.pi) % (2.0 * np.pi) - np.pi)
+    window = 2.0 * np.pi / int(n_sample)
+    near = gaps <= gaps.min() + window
+    return float(radius_arr[near].max())
+
+
 # ---------------------------------------------------------------------------
 # Ghost (complex-saddle) machinery
 # ---------------------------------------------------------------------------

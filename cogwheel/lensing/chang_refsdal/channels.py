@@ -105,10 +105,78 @@ from cogwheel.lensing.chang_refsdal.operator import (
 
 __all__ = ['ChangRefsdalChannels', 'ChangRefsdalGeometryPartition',
            'ChangRefsdalPartition', 'farfield_envelope_from_partition',
-           'real_image_delays', 'reconstruct_from_envelope']
+           'real_image_delays', 'reconstruct_from_envelope',
+           'reconstruct_farfield', 'farfield_ghost_term', 'farfield_w_floor',
+           'FARFIELD_KERNEL_SUM', 'FARFIELD_DIFFRACTIVE',
+           'FARFIELD_KERNEL_SUM_MINUS_GHOST', 'KNOWN_FARFIELD_DEFINITIONS',
+           'INTERIOR_SACR_C', 'KNOWN_INTERIOR_DEFINITIONS']
 
 #: The fixed number of topology-stable labels.
 _N_CHANNELS = 4
+
+#: Far-field envelope-definition tags -- the ``w``-windowed exterior label
+#: classes, each subtracting only the analytic terms valid on its window
+#: (Build 8h-b3-fin S1-2).  ``FARFIELD_KERNEL_SUM`` (window iii, the legacy
+#: Build 8g-b label) subtracts the real-image kernels and hands the band
+#: above ``w_trust`` to the point-mass ppGO band split; ``FARFIELD_DIFFRACTIVE``
+#: (window i, the diffractive bottom below ``w_floor``) subtracts NOTHING and
+#: fits the bounded smooth ``F`` object (``F -> 1`` as ``w -> 0``);
+#: ``FARFIELD_KERNEL_SUM_MINUS_GHOST`` (window ii, the mid band
+#: ``[w_floor, w_trust)``) additionally subtracts the decaying complex-saddle
+#: ghost ``G`` so the stored remainder is smooth across the fold.  The tags
+#: NAME the reconstruction algebra, so they live here (the physics label home)
+#: and the surrogate imports them for its known-tag set and per-tile stamping.
+FARFIELD_KERNEL_SUM = 'farfield_full_kernel_sum'
+FARFIELD_DIFFRACTIVE = 'farfield_diffractive_bare_total'
+FARFIELD_KERNEL_SUM_MINUS_GHOST = 'farfield_kernel_sum_minus_ghost'
+
+#: Every far-field envelope-definition tag with a reconstruction path.  A
+#: chart whose tag is absent from this set is hard-refused at load BEFORE any
+#: numerics (the atomicity invariant: no tag can be written without its
+#: reconstruction branch existing here).
+KNOWN_FARFIELD_DEFINITIONS = frozenset({
+    FARFIELD_KERNEL_SUM, FARFIELD_DIFFRACTIVE, FARFIELD_KERNEL_SUM_MINUS_GHOST})
+
+#: Interior (inside-the-caustic) envelope-definition tag.  Unlike the far-field
+#: tags -- which SUBTRACT individually-divergent near-merged image kernels and
+#: therefore fail generically inside the astroid/deltoid (the near-merged pair
+#: has a small ``w * |tau_a - tau_c|`` so its subtracted kernel blows up) --
+#: the interior tag stamps tiles that store the FULL SACR-C ``tau_c``-demodulated
+#: envelope ``E`` (the same object `reconstruct_from_envelope` consumes): the
+#: switch is ON, near-merged images are SWITCHED INTO the bounded envelope
+#: instead of subtracted, and demodulation is the unimodular multiply
+#: ``e^{-i w tau_c}`` with ``tau_c`` the finite/smooth critical (virtual) delay.
+#: The label has NO ``1/(tau_a - tau_c)`` and NO ``Im tau_c`` denominator, so it
+#: is bounded at every interior point the charts admit -- including near-cusp
+#: directions, the regime SACR-C was built for -- and needs no interior
+#: carve-out.  Reconstruction is the EXISTING `reconstruct_from_envelope`
+#: (SACR-C caustic-region path with the geometry's own switch and critical
+#: delay); no new reconstruction algebra is introduced (Build S2-3, frozen WP8
+#: amended to whole-interior, Professor R4 ruling).
+INTERIOR_SACR_C = 'interior_sacr_c_envelope'
+
+#: Every interior envelope-definition tag with a reconstruction path.  A chart
+#: whose interior tag is absent here is hard-refused at load BEFORE any numerics
+#: (same atomicity invariant as `mem:KNOWN_FARFIELD_DEFINITIONS`: no tag can be
+#: stamped without its reconstruction branch -- here the SACR-C
+#: `reconstruct_from_envelope` -- existing).
+KNOWN_INTERIOR_DEFINITIONS = frozenset({INTERIOR_SACR_C})
+
+#: The two far-field tags whose gauge forces the switch to ``1`` on every real
+#: channel (``F`` minus the real kernels).  ``FARFIELD_DIFFRACTIVE`` is the odd
+#: one out: it forces the switch to ``0`` everywhere (subtract nothing), so the
+#: ``E_ff = 0`` ppGO telescoping identity does NOT hold for it and it is never
+#: band-split.
+_FARFIELD_KERNEL_FAMILY = frozenset({
+    FARFIELD_KERNEL_SUM, FARFIELD_KERNEL_SUM_MINUS_GHOST})
+
+#: Half the SACR-C resolution scale ``RHO_END`` (in radians of accumulated
+#: phase), shared by the ``w_floor`` window boundary and the mid-band ghost
+#: gate: ``w_floor`` is the smallest ``w`` resolving the closest real image
+#: pair (``w * min|tau_a - tau_b| >= RHO_END/2``), and the ghost is subtracted
+#: only where ``w_min * Im tau_c >= RHO_END/2``.  A PHYSICS constant derived
+#: from geometry, not a fit knob.
+_FARFIELD_WINDOW_RADIANS = RHO_END / 2.0
 
 #: Floor added to every channel's envelope weight ``1 - S_a`` so that a
 #: fully resolved channel (``S_a = 1``) still carries a small, non-zero
@@ -699,9 +767,195 @@ def reconstruct_from_envelope(w: np.ndarray | float,
         weights)
 
 
+def farfield_w_floor(delays: np.ndarray, real_mask: np.ndarray) -> float:
+    """Diffractive/mid-band window boundary ``w_floor`` from geometry.
+
+    The smallest dimensionless frequency at which the CLOSEST real image
+    pair is resolved to half the SACR-C resolution scale,
+
+        w_floor = (RHO_END / 2) / min_{a != b real} |tau_a - tau_b|,
+
+    so that ``w_floor * min|tau_a - tau_b| == RHO_END / 2`` -- the same
+    radian currency as the mid-band ghost gate.  Below ``w_floor`` no real
+    pair separates and the exterior label is the bounded diffractive-bottom
+    object (`FARFIELD_DIFFRACTIVE`, subtract nothing); at and above it the
+    real kernels may be subtracted (`FARFIELD_KERNEL_SUM_MINUS_GHOST`).  A
+    PHYSICS constant per region derived from geometry, not a fit knob.
+
+    Parameters
+    ----------
+    delays : np.ndarray
+        Per-channel delays ``tau_a`` (`ChangRefsdalPartition.delays`).
+    real_mask : np.ndarray
+        Boolean mask of real channels.
+
+    Returns
+    -------
+    float
+        The window boundary ``w_floor``; ``inf`` when fewer than two real
+        images exist (no pair to resolve, so the whole exterior is the
+        diffractive bottom).
+    """
+    separation = _min_delay_separation(delays, real_mask)
+    if separation <= 0.0:
+        return float('inf')
+    return _FARFIELD_WINDOW_RADIANS / separation
+
+
+def _farfield_switch(real_mask: np.ndarray, n_w: int,
+                     definition: str) -> np.ndarray:
+    """Per-tag far-field switch: ``1`` on real channels, or all ``0``.
+
+    The far-field gauge parks the critical carrier at ``tau_c = 0`` and uses
+    a constant switch (no criticality demodulation), so the switch reduces to
+    a tag choice: the kernel-sum family (`_FARFIELD_KERNEL_FAMILY`) forces
+    ``S_a = 1`` on every real channel (subtract the real kernels), while
+    `FARFIELD_DIFFRACTIVE` forces ``S_a = 0`` everywhere (subtract nothing).
+    Virtual channels always carry ``S_a = 0`` (their saddle kernel is a
+    structural zero, so forcing it would be a no-op anyway).
+
+    Parameters
+    ----------
+    real_mask : np.ndarray
+        Shape ``(_N_CHANNELS,)`` boolean mask of real channels.
+    n_w : int
+        Number of frequencies.
+    definition : str
+        A far-field envelope-definition tag in `KNOWN_FARFIELD_DEFINITIONS`.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(n_w, _N_CHANNELS)`` switch in ``{0, 1}``.
+
+    Raises
+    ------
+    ValueError
+        If ``definition`` is not a known far-field tag.
+    """
+    if definition not in KNOWN_FARFIELD_DEFINITIONS:
+        raise ValueError(
+            f'Unknown far-field envelope-definition tag {definition!r} '
+            f'(known: {sorted(KNOWN_FARFIELD_DEFINITIONS)}).')
+    switch = np.zeros((n_w, _N_CHANNELS), dtype=float)
+    if definition in _FARFIELD_KERNEL_FAMILY:
+        switch[:, np.asarray(real_mask, dtype=bool)] = 1.0
+    return switch
+
+
+def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
+                        matrix: np.ndarray) -> np.ndarray:
+    """Decaying complex-saddle ghost contribution ``G(w)`` to the total.
+
+    The carrier-restored ghost term the mid-band label subtracts and the
+    likelihood serve mirror re-adds,
+
+        G(w) = C_c(w) * exp(1j * w * tau_c),   Im tau_c >= 0,
+
+    where the carrier-free kernel ``C_c`` and complex Fermat delay ``tau_c``
+    come from `geometry.ghost_kernel` (decaying-member selection and the sqrt
+    branch pinned there).  Because ``Im tau_c >= 0`` the carrier decays as
+    ``exp(-w * Im tau_c)``.  This is the SINGLE authoritative ghost primitive:
+    the training label (`farfield_envelope_from_partition`) and the serve
+    mirror both call it, so the subtracted and re-added ``G`` cannot diverge
+    in member selection or carrier convention.
+
+    The mid-band ghost gate is enforced here: the ghost is well-defined for
+    the label ONLY where its carrier accumulates at least half the resolution
+    scale over the served band, ``w_min * Im tau_c >= RHO_END / 2``.  On a
+    principal axis ``Im tau_c -> 0`` and the gate refuses by construction
+    (`geometry.ghost_kernel` itself raises on the exact axis and inside the
+    caustic); the cusp-window mask carried by the surrogate tiling is the
+    belt-and-suspenders topological guard upstream.
+
+    Parameters
+    ----------
+    w : np.ndarray
+        Dimensionless frequency grid (1-D); its minimum gates the ghost.
+    source : np.ndarray
+        Shape ``(2,)`` source position.
+    matrix : np.ndarray
+        Shape ``(2, 2)`` symmetric macro matrix (`geometry.macro_matrix`).
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(n_w,)`` complex ghost contribution ``G(w)``.
+
+    Raises
+    ------
+    geometry.GhostDomainError
+        If no complex-saddle pair exists, the continuation is degenerate,
+        or the gate ``w_min * Im tau_c >= RHO_END / 2`` fails.  Subclasses
+        `geometry.LensDomainError`, so it refuses symmetrically with the
+        exact path.
+    """
+    w = np.asarray(w, dtype=float)
+    contribution = geometry.ghost_kernel(w, source, matrix)
+    im_tau_c = float(contribution.delay.imag)
+    w_min = float(np.min(w))
+    if not w_min * im_tau_c >= _FARFIELD_WINDOW_RADIANS:
+        raise geometry.GhostDomainError(
+            f'Ghost gate w_min * Im tau_c = {w_min * im_tau_c!r} is below '
+            f'the mid-band threshold {_FARFIELD_WINDOW_RADIANS!r}: the '
+            f'decaying ghost is not resolved over the served band (source '
+            f'too close to a principal axis), so it must not be subtracted.')
+    return contribution.kernel * np.exp(1j * w * contribution.delay)
+
+
+def reconstruct_farfield(w: np.ndarray,
+                         envelope: np.ndarray,
+                         delays: np.ndarray,
+                         saddle_kernels: np.ndarray,
+                         real_mask: np.ndarray,
+                         definition: str
+                         ) -> tuple[np.ndarray, np.ndarray]:
+    """Serve-mirror reconstruction, dispatching the switch on the window tag.
+
+    The far-field twin of `reconstruct_from_envelope`: rebuild the channel
+    kernels and total from an interpolated far-field envelope, choosing the
+    switch policy from the window-class tag (`_farfield_switch`) with the
+    critical carrier parked at ``tau_c = 0`` -- exactly mirroring
+    `farfield_envelope_from_partition`.  The caller MUST supply the envelope
+    already carrying the window's analytic content: for
+    `FARFIELD_KERNEL_SUM_MINUS_GHOST` the analytic ghost term
+    (`farfield_ghost_term`) must have been re-added over the chart region
+    before this call (the ghost lives in the mid-band window only, never in
+    the bare ppGO band above ``w_trust``).
+
+    Parameters
+    ----------
+    w : np.ndarray
+        Dimensionless frequency, 1-D grid.
+    envelope : np.ndarray
+        The interpolated (and, for the mid band, ghost-restored) far-field
+        envelope, with the shape of ``w``.
+    delays : np.ndarray
+        Shape ``(_N_CHANNELS,)`` channel delays ``tau_a``.
+    saddle_kernels : np.ndarray
+        Analytic saddle kernels ``H_a``, shape ``(n_w, _N_CHANNELS)``.
+    real_mask : np.ndarray
+        Shape ``(_N_CHANNELS,)`` boolean mask of real channels.
+    definition : str
+        A far-field envelope-definition tag in `KNOWN_FARFIELD_DEFINITIONS`.
+
+    Returns
+    -------
+    kernels : np.ndarray
+        Channel kernels ``K_a``.
+    total : np.ndarray
+        The reconstructed amplification total ``F``.
+    """
+    w = np.asarray(w, dtype=float)
+    switch = _farfield_switch(real_mask, w.shape[0], definition)
+    return reconstruct_from_envelope(
+        w, envelope, delays, saddle_kernels, switch, 0.0)
+
+
 def farfield_envelope_from_partition(
-        partition: 'ChangRefsdalPartition') -> np.ndarray:
-    """Far-field training label ``E_ff = F - sum_{a real} H_a e^{1j w tau_a}``.
+        partition: 'ChangRefsdalPartition',
+        definition: str = FARFIELD_KERNEL_SUM) -> np.ndarray:
+    """Far-field training label for one w-windowed window class.
 
     The exterior (far-field) surrogate label, DISTINCT from the
     caustic-region transition envelope `ChangRefsdalPartition.envelope`.
@@ -716,41 +970,76 @@ def farfield_envelope_from_partition(
 
     This removes that dependence entirely for far-field charts by reusing
     the existing SACR-C projection (`switched_analytic_channels`, no new
-    gauge math) with the switch forced to ``1`` on every real channel
-    (``0`` on a virtual channel, whose saddle kernel is a structural
-    zero, so forcing it is a no-op) and the carrier parked at
-    ``tau_c = 0`` (a constant carrier -- no caustic point consulted).
-    The projection then returns exactly
+    gauge math) with the switch chosen per window class by
+    `_farfield_switch` and the carrier parked at ``tau_c = 0`` (a constant
+    carrier -- no caustic point consulted).  The three window classes, each
+    subtracting only the analytic terms valid on its w window, are:
 
-        E_ff(w) = F(w) - sum_{a real} H_a(w) * exp(1j*w*tau_a),
+    * `FARFIELD_DIFFRACTIVE` -- the diffractive bottom ``[w_small, w_floor)``
+      where no real pair separates.  Switch ``0`` everywhere: subtract
+      nothing, so the label is the bounded smooth ``F`` object (``F -> 1``
+      limit; no kernel divergence).
+    * `FARFIELD_KERNEL_SUM` -- the mid band ``[w_floor, w_trust)`` with the
+      real kernels subtracted,
 
-    the full post-geometric-optics remainder, measured smooth and
-    ``~1e-4`` in magnitude on the good side of every flip line.  The
-    range-reduced carriers keep the ``F - sum_a H_a`` subtraction at
-    machine precision.
+          E_ff(w) = F(w) - sum_{a real} H_a(w) * exp(1j*w*tau_a),
 
-    This is the SINGLE authoritative source of the far-field label, so
-    the trained object, the held-out eps gate reference, and the census
-    reference can never diverge (a divergence would pass charts that do
-    not match their own label).
+      the full post-geometric-optics remainder, measured smooth and
+      ``~1e-4`` in magnitude on the good side of every flip line.
+    * `FARFIELD_KERNEL_SUM_MINUS_GHOST` -- the mid band with the decaying
+      complex-saddle ghost ``G`` additionally subtracted (`farfield_ghost_term`,
+      gated at ``w_min * Im tau_c >= RHO_END / 2`` outside the cusp windows;
+      on a principal axis ``Im tau_c -> 0`` and the gate refuses by
+      construction).
+
+    The window boundary ``w_floor`` is `farfield_w_floor`; ``w_trust`` (the
+    upper mid-band edge, above which the bare ppGO band-split serves) is a
+    tiling concern, not this label's.  Mixed-tag charts are legal: each
+    tile carries its own envelope-definition tag and the serve mirror
+    (`reconstruct_farfield`, `farfield_ghost_term`) reconstructs each via
+    its own path.
+
+    The range-reduced carriers keep the ``F - sum_a H_a`` subtraction at
+    machine precision.  This is the SINGLE authoritative source of the
+    far-field label, so the trained object, the held-out eps gate
+    reference, and the census reference can never diverge for a given tag.
 
     Parameters
     ----------
     partition : ChangRefsdalPartition
         A fully evaluated partition (its ``exact_total`` is required);
         the geometry-only `ChangRefsdalGeometryPartition` has no exact
-        total and cannot be used here.
+        total and cannot be used here.  For `FARFIELD_KERNEL_SUM_MINUS_GHOST`
+        the partition's ``source`` and ``matrix`` feed the ghost extractor.
+    definition : str
+        The window-class envelope-definition tag; one of
+        `KNOWN_FARFIELD_DEFINITIONS`.  Defaults to `FARFIELD_KERNEL_SUM`,
+        which reproduces the historical mid-band kernel-sum label
+        byte-identically.
 
     Returns
     -------
     np.ndarray
-        Shape ``(n_w,)`` complex far-field envelope ``E_ff(w)``.
+        Shape ``(n_w,)`` complex far-field envelope for the window class.
+
+    Raises
+    ------
+    ValueError
+        If ``definition`` is not a known far-field tag.
+    geometry.GhostDomainError
+        For `FARFIELD_KERNEL_SUM_MINUS_GHOST` when the ghost gate refuses
+        (source too close to a principal axis, inside the caustic, or the
+        continuation is degenerate).  Subclasses `geometry.LensDomainError`,
+        so it refuses symmetrically with the exact path.
     """
-    switch = np.zeros((partition.w.shape[0], _N_CHANNELS), dtype=float)
-    switch[:, np.asarray(partition.real_mask, dtype=bool)] = 1.0
+    switch = _farfield_switch(
+        partition.real_mask, partition.w.shape[0], definition)
     _, envelope = switched_analytic_channels(
         partition.w, partition.exact_total, partition.delays,
         partition.saddle_kernels, switch, 0.0, _envelope_weights(switch))
+    if definition == FARFIELD_KERNEL_SUM_MINUS_GHOST:
+        envelope = envelope - farfield_ghost_term(
+            partition.w, partition.source, partition.matrix)
     return envelope
 
 
