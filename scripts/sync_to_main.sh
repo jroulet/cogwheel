@@ -23,8 +23,12 @@ MAIN_BRANCH="main"
 # Agent-only paths to exclude from sync
 EXCLUDE_PATHS=(
     ".claude/"
+    ".codex/"
+    ".agents/"
     ".serena/"
     ".mcp.json"
+    "AGENTS.md"
+    "CLAUDE.md"
     "scripts/bootstrap_claude_workflow.sh"
     "scripts/sync_to_main.sh"
     "scripts/verify_installation.sh"

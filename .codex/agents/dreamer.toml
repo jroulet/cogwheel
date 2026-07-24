@@ -1,0 +1,5 @@
+name = "dreamer"
+description = "Surfaces bounded follow-up ideas after a successful build."
+developer_instructions = "Read .claude/crew/dreamer.md completely before acting and treat it as your role contract. Propose only; do not implement or edit project files."
+sandbox_mode = "read-only"
+model_reasoning_effort = "medium"

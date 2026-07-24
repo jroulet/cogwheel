@@ -1,16 +1,14 @@
 ---
 section: Backlog
 ---
-- **Get the agent pipeline off claude-agent-sdk 0.1.48** `[housekeeping]` — the
+- **Declare and modernize the Claude Agent SDK dependency** `[housekeeping]` — the
   SDK version is not declared anywhere: no pin in `pyproject.toml`, no
-  requirements file, nothing. `0.1.48` is simply what happens to be installed in
-  the `cogwheel_310` env, held there only by nobody running `pip install -U`.
-  Latest is `0.2.120` — about 72 releases ahead. The gw env sits on the same
-  0.1.48. An undeclared dependency at a known-old version is worse than an
-  outdated pin: a routine upgrade silently changes the pipeline's behaviour, and
-  a fresh install gets whatever PyPI serves that day.
+  requirements file, nothing. `0.1.53` is what is installed in the active SDK
+  environment as verified 2026-07-24. An undeclared dependency is worse than
+  an outdated pin: a routine upgrade silently changes the pipeline's behaviour,
+  and a fresh install gets whatever PyPI serves that day.
   **Why this is load-bearing, not hygiene.** Three orchestrator behaviours exist
-  ONLY as workarounds for 0.1.48's anyio semantics, and all three cost real
+  ONLY as workarounds for the 0.1.x anyio semantics, and all three cost real
   throughput: (1) `_run_dag` runs DAG nodes sequentially, (2) `_run_coders` runs
   each batch's work packages sequentially, and (3) `_iter_query_with_timeout`
   drains the stream through a queue in one dedicated task. All three exist

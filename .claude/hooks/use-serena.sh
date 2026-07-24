@@ -63,7 +63,11 @@ is_gitignored() {
 }
 
 deny() {
-  jq -n --arg reason "$1" '{
+  local reason="$1"
+  if [[ "${AGENT_PROVIDER:-}" == "codex" && -n "${CODEX_SERENA_URL:-}" ]]; then
+    reason="${reason//mcp__serena__/mcp__serena_build__}"
+  fi
+  jq -n --arg reason "$reason" '{
     "hookSpecificOutput": {
       "hookEventName": "PreToolUse",
       "permissionDecision": "deny",
@@ -170,7 +174,9 @@ All use relative paths from project root."
     fi
     # Allow project-owned shell scripts under .claude/sdk/ and .claude/hooks/
     # (these are our own code; they already route through the safety model).
-    if [[ "$stripped" =~ ^\.claude/(sdk|hooks)/[A-Za-z0-9_.-]+\.sh([[:space:]]|$) ]]; then
+    if [[ "$stripped" =~ ^\.claude/(sdk|hooks)/[A-Za-z0-9_.-]+\.sh([[:space:]]|$) ]] \
+       || [[ "$stripped" =~ ^\.codex/build([[:space:]]|$) ]] \
+       || [[ "$stripped" =~ ^\.codex/hooks/[A-Za-z0-9_.-]+\.sh([[:space:]]|$) ]]; then
       exit 0
     fi
     deny "USE SERENA for shell commands: mcp__serena__execute_shell_command (command, cwd).
@@ -186,7 +192,7 @@ then arm the Monitor printed in the log header (health = log mtime, not pgrep)."
   # ── Within-Serena shell command hygiene ──────────────────────────────
   # Block shell commands inside execute_shell_command that have dedicated
   # Serena symbolic tools (cat->read_file, grep->search_for_pattern, etc.)
-  mcp__serena__execute_shell_command)
+  mcp__serena__execute_shell_command|mcp__serena_build__execute_shell_command)
     cmd=$(jq -r '.tool_input.command // ""' <<< "$input")
     # Strip leading cd ... && or whitespace
     clean_cmd=$(echo "$cmd" | sed 's/^cd [^&]*&& *//' | sed 's/^ *//')

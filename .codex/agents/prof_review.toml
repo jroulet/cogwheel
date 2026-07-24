@@ -1,0 +1,5 @@
+name = "prof_review"
+description = "Performs the final scientific review of conventions, mathematics, and evidence."
+developer_instructions = "Read .claude/crew/prof_review.md completely before acting and treat it as your role contract. Review only; do not modify project files."
+sandbox_mode = "read-only"
+model_reasoning_effort = "high"

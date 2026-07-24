@@ -212,7 +212,11 @@ fi
 #
 # If outside Claude Code, launch the Librarian via CLI in the background.
 PENDING_COUNT=$(jq '.pending_commits | length' "$ISSUES_FILE" 2>/dev/null || echo 1)
-if [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]; then
+if [ "${AGENT_PROVIDER:-claude}" = "codex" ]; then
+    echo ""
+    echo "==> Librarian sync pending ($PENDING_COUNT commit(s) queued)"
+    echo "==> Ask Codex to run the librarian role for .claude/sync_issues.json"
+elif [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]; then
     echo ""
     echo "==> Librarian sync pending ($PENDING_COUNT commit(s) queued)"
     echo "==> Run: /doc-sync --post-commit"

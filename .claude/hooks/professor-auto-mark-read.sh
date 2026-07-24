@@ -17,7 +17,8 @@ input=$(cat)
 tool_name=$(jq -r '.tool_name // ""' <<< "$input")
 
 # Only fire on Serena's write_memory tool.
-[[ "$tool_name" == "mcp__serena__write_memory" ]] || exit 0
+[[ "$tool_name" == "mcp__serena__write_memory"
+   || "$tool_name" == "mcp__serena_build__write_memory" ]] || exit 0
 
 # Only fire on professor topic memory writes.
 memory_name=$(jq -r '.tool_input.memory_name // ""' <<< "$input")

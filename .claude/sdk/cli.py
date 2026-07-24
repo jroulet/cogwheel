@@ -71,6 +71,11 @@ def main():
         help="Disable Serena MCP (use built-in tools only)",
     )
     build_parser.add_argument(
+        "--provider", choices=("claude", "codex"),
+        default=os.environ.get("AGENT_PROVIDER", "claude"),
+        help="Agent runtime backend (default: AGENT_PROVIDER or claude)",
+    )
+    build_parser.add_argument(
         "--yes", "-y", action="store_true",
         help="Auto-approve the Phase 1 plan (skip interactive [y/n/q] prompt). "
              "Required for non-TTY runs (subprocess, agent invocation, CI).",
@@ -124,6 +129,14 @@ class _TeeWriter:
 
 def _run_build(args):
     """Execute the build pipeline."""
+    # runtime.py selects its provider at import time, so establish the choice
+    # before importing the orchestrator. The standard .claude launchers omit
+    # this flag and therefore retain their historical Claude behavior.
+    os.environ["AGENT_PROVIDER"] = args.provider
+    if args.no_serena:
+        os.environ["AGENT_DISABLE_SERENA"] = "1"
+    else:
+        os.environ.pop("AGENT_DISABLE_SERENA", None)
     from sdk.orchestrator import BuildOrchestrator, Verbosity
 
     # Support @file syntax: if task starts with @, inject a short task
@@ -187,6 +200,7 @@ def _run_build(args):
         pass
 
     print(f"Log: {log_path}")
+    print(f"Provider: {args.provider}")
     print(f"Monitor: tail -f {latest_link}")
     # The build runs detached, so whoever launched it (a Claude Code agent)
     # must arm an EVENT-DRIVEN Monitor on the log rather than timer-polling.

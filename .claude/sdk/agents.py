@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from claude_agent_sdk import (  # pyright: ignore[reportMissingImports]  # install-time dep; this is a template repo
+from .runtime import (
     AgentDefinition,
     ClaudeAgentOptions,
     HookJSONOutput,
@@ -198,6 +198,7 @@ def _build_env() -> dict[str, str]:
         "HOME": os.environ.get("HOME", ""),
         "USER": os.environ.get("USER", ""),
         "CLAUDECODE": "",
+        "AGENT_PROVIDER": os.environ.get("AGENT_PROVIDER", "claude"),
         # BUILDS ARE FAST — owner mandate (2026-07-21, stated three
         # times): the slow test tiers NEVER run inside a build.  These
         # gates are pinned EMPTY here so no in-build agent inherits or
@@ -213,10 +214,11 @@ def _build_env() -> dict[str, str]:
 
 
 class SerenaManager:
-    """Manages a single shared Serena SSE server for all agents/skills."""
+    """Manage one shared Serena SSE server for every role in a build."""
 
     def __init__(self, project_root: str, port: int | None = None,
-                 external_url: str | None = None):
+                 external_url: str | None = None,
+                 context: str = "claude-code"):
         if port is None:
             # Per-repo SSE port via the .env idiom (SDK_SERENA_PORT,
             # exported by launch_build.sh / .claude/build). Sibling
@@ -224,6 +226,8 @@ class SerenaManager:
             # 8322 listener, so this repo's port must be movable.
             port = int(os.environ.get("SDK_SERENA_PORT", "8322"))
         self.project_root = project_root
+        self.context = context
+        self._configured_port = port
         self.external_url = external_url
         if external_url:
             self.url = external_url
@@ -244,7 +248,7 @@ class SerenaManager:
         if self.external_url:
             if await self._url_reachable(self.external_url):
                 return self.url
-            fallback_port = int(os.environ.get("SDK_SERENA_PORT", "8322"))
+            fallback_port = self._configured_port
             logger.warning(
                 "Serena SSE at %s unreachable; spawning own Serena on :%d",
                 self.external_url, fallback_port,
@@ -261,7 +265,7 @@ class SerenaManager:
                 "--transport", "sse",
                 "--port", str(self.port),
                 "--project", self.project_root,
-                "--context", "claude-code",
+                "--context", self.context,
             ],
             env={
                 **os.environ,

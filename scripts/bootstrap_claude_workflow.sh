@@ -4,7 +4,7 @@
 # Two tiers:
 #
 #   Default (non-agentic):
-#     - Copy CLAUDE.md (stripping Serena-specific sections)
+#     - Create canonical AGENTS.md plus a CLAUDE.md compatibility symlink
 #     - Create CLAUDE.local.md.example
 #     - Print quickstart
 #     For collaborators who use Claude Code with CLAUDE.md only (no
@@ -156,26 +156,34 @@ cd "$REPO_ROOT"
 
 echo "Bootstrapping Claude Code workflow..."
 
-# 1. Copy CLAUDE.md, stripping Serena sections
-CLAUDE_SRC=".claude/CLAUDE.md"
-CLAUDE_DST="CLAUDE.md"
-if [ -f "$CLAUDE_SRC" ]; then
+# 1. Create canonical AGENTS.md and Claude Code compatibility symlink.
+# The template asset retains its historical name for installer compatibility.
+INSTRUCTIONS_SRC=".claude/CLAUDE.md"
+INSTRUCTIONS_DST="AGENTS.md"
+if [ -f "$INSTRUCTIONS_SRC" ]; then
     if [ "$WITH_AGENTIC" -eq 1 ]; then
         # Agentic tier installs Serena + the agent infra, so KEEP the
         # sentinel-gated sections that document those capabilities.
-        cp "$CLAUDE_SRC" "$CLAUDE_DST"
-        echo "  Created $CLAUDE_DST (agentic tier: gated sections kept)"
+        cp "$INSTRUCTIONS_SRC" "$INSTRUCTIONS_DST"
+        echo "  Created $INSTRUCTIONS_DST (agentic tier: gated sections kept)"
     else
         # Non-agentic collaborators can't use Serena / agent-infra tools —
         # strip BOTH sentinel-gated sections (SERENA and AGENT INFRA).
         sed '/<!-- BEGIN SERENA SECTION/,/<!-- END SERENA SECTION -->/d;/<!-- BEGIN AGENT INFRA SECTION/,/<!-- END AGENT INFRA SECTION -->/d' \
-            "$CLAUDE_SRC" > "$CLAUDE_DST"
-        echo "  Created $CLAUDE_DST (gated sections stripped)"
+            "$INSTRUCTIONS_SRC" > "$INSTRUCTIONS_DST"
+        echo "  Created $INSTRUCTIONS_DST (gated sections stripped)"
     fi
+elif [ -f "AGENTS.md" ]; then
+    echo "  AGENTS.md already exists, skipping"
 elif [ -f "CLAUDE.md" ]; then
-    echo "  CLAUDE.md already exists, skipping"
+    cp "CLAUDE.md" "AGENTS.md"
+    echo "  Migrated existing CLAUDE.md to canonical AGENTS.md"
 else
-    echo "  WARNING: No CLAUDE.md source found"
+    echo "  WARNING: No shared instruction source found"
+fi
+if [ -f "AGENTS.md" ]; then
+    ln -sfn "AGENTS.md" "CLAUDE.md"
+    echo "  Linked CLAUDE.md -> AGENTS.md"
 fi
 
 # 2. Create CLAUDE.local.md.example if it doesn't exist
@@ -289,7 +297,7 @@ if [ -n "$BRANCH" ]; then
 else
     echo "  2. Open Claude Code in this directory"
 fi
-echo "  3. The agent will read CLAUDE.md for project conventions"
+echo "  3. Agents read AGENTS.md (Claude follows the CLAUDE.md symlink)"
 
 if [ "$WITH_AGENTIC" -eq 1 ]; then
     cat <<'AGENTIC_TIPS'

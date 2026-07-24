@@ -25,17 +25,17 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from claude_agent_sdk import (  # pyright: ignore[reportMissingImports]  # install-time dep; this is a template repo
+from .runtime import (
     AssistantMessage,
     ClaudeAgentOptions,
+    PermissionMode,
+    RUNTIME_PROVIDER,
     ResultMessage,
     SystemMessage,
     TextBlock,
     ToolUseBlock,
     query,
 )
-
-from claude_agent_sdk import PermissionMode  # pyright: ignore[reportMissingImports]  # install-time dep; this is a template repo
 
 from .agents import (
     _build_env, _build_sdk_hooks, build_agent_options, build_phase1_subagents,
@@ -726,16 +726,38 @@ class BuildOrchestrator:
         branch = check_branch_safety(self.project_root)
         self._log(f"Branch: {branch}")
 
-        # Start shared Serena SSE server
+        # Both providers share one build-scoped Serena SSE server. Interactive
+        # Claude/Codex sessions keep their own stdio Serena processes, while
+        # every role in this build reuses this warm index. Codex gets a
+        # distinct default port so simultaneous Claude and Codex builds cannot
+        # cross-kill or bind-collide.
         if self.use_serena:
+            serena_port = (
+                None if RUNTIME_PROVIDER == "claude"
+                else int(os.environ.get("CODEX_SERENA_PORT", "8324"))
+            )
             self._serena = SerenaManager(
-                self.project_root, external_url=self.serena_url
+                self.project_root,
+                port=serena_port,
+                external_url=self.serena_url,
+                context=(
+                    "claude-code"
+                    if RUNTIME_PROVIDER == "claude"
+                    else "codex"
+                ),
             )
             if self.serena_url:
                 self._log(f"Using existing Serena SSE at {self.serena_url}")
             else:
-                self._log("Starting Serena SSE server...")
+                self._log(
+                    f"Starting {RUNTIME_PROVIDER} build Serena SSE server..."
+                )
             await self._serena.start()
+            if RUNTIME_PROVIDER == "codex":
+                # runtime_codex.py converts this to a per-invocation Codex MCP
+                # override, disabling the interactive stdio server and pointing
+                # every `codex exec` process at this one warm build server.
+                os.environ["CODEX_SERENA_URL"] = self._serena.url
             if not self.serena_url:
                 self._log(f"Serena SSE ready at {self._serena.url}")
 
@@ -909,6 +931,7 @@ class BuildOrchestrator:
                 self._serena = None
             os.environ.pop("SDK_BUILD_ACTIVE", None)
             os.environ.pop("SDK_FAST_PATH", None)
+            os.environ.pop("CODEX_SERENA_URL", None)
 
     # ── Phase 1: Planning ────────────────────────────────────────────────
 
@@ -2184,7 +2207,9 @@ class BuildOrchestrator:
             )
             proc = await asyncio.wait_for(
                 asyncio.create_subprocess_exec(
-                    "codex", "ask", "-q", prompt,
+                    "codex", "exec", "--ephemeral", "--sandbox", "read-only",
+                    "-c", 'approval_policy="never"',
+                    "--dangerously-bypass-hook-trust", prompt,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL,
                     cwd=self.project_root,
@@ -2295,7 +2320,7 @@ class BuildOrchestrator:
             n_files = len(changed_files)
             max_turns = max(75, min(n_files * 8 + 15, 200))
 
-        if round_number == 0 and CODEX_ENABLED:
+        if round_number == 0 and CODEX_ENABLED and RUNTIME_PROVIDER == "claude":
             # Round 0 with Codex: run both in parallel via asyncio.gather.
             # Claude failure is fatal; Codex failure is soft.
             async def _claude_inspector():
@@ -2943,7 +2968,7 @@ class BuildOrchestrator:
                       f"(cancel-scope RuntimeError); retrying with a "
                       f"fresh stream")
             e_for_retry = e
-            if not self.use_serena:
+            if not self.use_serena or RUNTIME_PROVIDER != "claude":
                 raise
             # Reuse the generic retry path by handling it here directly.
             self._log(f"[{agent_id}] MCP failed ({type(e_for_retry).__name__}: "
@@ -2992,7 +3017,7 @@ class BuildOrchestrator:
                         agent_id, message, result_text, session_id,
                     )
         except Exception as e:
-            if self.use_serena:
+            if self.use_serena and RUNTIME_PROVIDER == "claude":
                 self._log(f"[{agent_id}] MCP failed ({type(e).__name__}: {e}), retrying with built-in tools")
                 _retry_kwargs: dict = dict(
                     agent_name=agent_name,

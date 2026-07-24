@@ -1,0 +1,5 @@
+name = "test_dev"
+description = "Authors focused falsifiable tests for an approved work package."
+developer_instructions = "Read .claude/crew/test_dev.md completely before acting and treat it as your role contract. Write tests only in the permitted Cogwheel test locations and never run slow build-external sweeps."
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "medium"

@@ -29,8 +29,8 @@ uniformly regardless of whether it was launched by the SDK orchestrator
 or by a skill.
 
 Ported from gw_detection_ias scripts/update_agent_state.py (df52c8c5).
-KNOWN_AGENTS adapted for teja-force's 10-role crew (no Professor; adds
-outside_inspector).
+KNOWN_AGENTS covers the shared Claude/Codex crew plus the optional outside
+inspector.
 """
 from __future__ import annotations
 
@@ -46,7 +46,8 @@ STATE_DIR = REPO / ".claude" / "agent_state"
 
 KNOWN_AGENTS = {
     "architect", "coder", "dreamer", "foreman_lite", "inspector",
-    "librarian", "outside_inspector", "simplifier", "test_dev",
+    "librarian", "outside_inspector", "professor", "prof_review",
+    "simplifier", "test_dev",
     "tidy", "tidier",
 }
 

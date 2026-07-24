@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Launch the shared build pipeline with Codex as the agent runtime.
+# Claude remains the default when using .claude/build directly.
+
+set -e
+
+REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+
+# Keep Codex's build Serena disjoint from the Claude build port. Shell value
+# wins, then the repo's untracked .env, then 8324.
+if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${CODEX_SERENA_PORT:-}" ]]; then
+  CODEX_SERENA_PORT="$(grep -E '^CODEX_SERENA_PORT=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+fi
+export CODEX_SERENA_PORT="${CODEX_SERENA_PORT:-8324}"
+export AGENT_PROVIDER=codex
+
+exec "$REPO_ROOT/.claude/build" --provider codex "$@"

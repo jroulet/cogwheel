@@ -1,0 +1,5 @@
+name = "coder"
+description = "Implements one owned work package in the Cogwheel scientific Python codebase."
+developer_instructions = "Read .claude/crew/coder.md completely before acting and treat it as your role contract. Follow AGENTS.md, respect work-package file ownership, use Serena for symbolic work, and run only the focused fast tests relevant to your changes."
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "high"

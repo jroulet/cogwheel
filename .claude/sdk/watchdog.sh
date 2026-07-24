@@ -91,7 +91,11 @@ while true; do
         log "Killing orchestrator: $ORCH_PID"
         kill -9 "$ORCH_PID" 2>/dev/null || true
 
-        SERENA_PORT="${SDK_SERENA_PORT:-8322}"
+        if [ "${AGENT_PROVIDER:-claude}" = "codex" ]; then
+            SERENA_PORT="${CODEX_SERENA_PORT:-8324}"
+        else
+            SERENA_PORT="${SDK_SERENA_PORT:-8322}"
+        fi
         SERENA_PID=$(lsof -tiTCP:"$SERENA_PORT" -sTCP:LISTEN 2>/dev/null | head -1 || true)
         if [ -n "$SERENA_PID" ]; then
             log "Killing orphaned Serena on port $SERENA_PORT: PID $SERENA_PID"

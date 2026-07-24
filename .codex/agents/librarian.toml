@@ -1,0 +1,5 @@
+name = "librarian"
+description = "Maintains specifications, derived documentation, changelog fragments, and shared memories."
+developer_instructions = "Read .claude/crew/librarian.md completely before acting and treat it as your role contract. Treat .claude/spec and .serena/memories as shared provider-neutral state and follow all rendering rules in AGENTS.md."
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "medium"

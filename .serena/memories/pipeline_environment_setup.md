@@ -20,17 +20,29 @@ without depending on the per-machine `~/.claude/projects/.../memory/` path.
   `core.hooksPath=.claude/hooks` and `ALLOWED_BRANCHES=["claude-dev"]` in
   `.claude/sdk/gates.py`; a pre-push guard blocks pushes to main/master.
 - Conda env routing: the pipeline orchestrator AND agents run cogwheel code
-  in **`cogwheel_310`** (Python 3.10, has both `cogwheel` and
+  in the environment selected by `SDK_CONDA_ENV`. The portable default is
+  `cogwheel_310`; this IAS worktree's untracked `.env` currently selects
+  **`cogwheel-newlal`** (Python 3.10, has both `cogwheel` and
   `claude-agent-sdk`) — NOT the main research env `cogwheel` (Python 3.9,
-  incompatible with `claude-agent-sdk` >=3.10). `environment.yaml`'s
-  declared `cogwheel-env` (python 3.12) does not exist on this machine —
-  ignore it.
-- SDK version pin: `claude-agent-sdk` must be **0.1.48** in `cogwheel_310`.
+  incompatible with `claude-agent-sdk` >=3.10).
+- Installed Claude runtime: `claude-agent-sdk` is **0.1.53** in
+  the active `cogwheel-newlal` environment (verified 2026-07-24, but still
+  not declared as a project dependency).
   The 0.2.x line (e.g. 0.2.119) times out on the SDK<->CLI handshake at the
   first live `query()` ("Control request timeout: initialize"). All local
   conda envs are x86_64 (Rosetta on an arm64 Mac); the Bun "CPU lacks AVX"
   warning is a red herring — the SDK version, not the arch, is the gate.
 - Docs: cogwheel uses Sphinx (`docs/source/`, RST, autosummary in
   `api.rst`), built on Read the Docs.
-- To run: from the worktree, `python .claude/sdk/cli.py build "task"` (or
-  `/build`).
+- Provider layout (2026-07-24): `AGENTS.md` is canonical and `CLAUDE.md`
+  symlinks to it. Claude keeps `.mcp.json`, `.claude/settings.json`, and
+  `.claude/build`; Codex uses `.codex/config.toml`, `.codex/hooks.json`, and
+  `.codex/build`. Both backends share `.claude/sdk`, crew contracts, specs,
+  handoffs, and these Serena memories.
+- Serena build lifecycle (2026-07-24): interactive sessions own independent
+  stdio Serena processes. Each multi-agent build owns one warm SSE Serena
+  shared by all of its roles. Claude uses `SDK_SERENA_PORT` (this worktree:
+  8323); Codex uses distinct `CODEX_SERENA_PORT` (default 8324), so concurrent
+  Claude/Codex builds do not bind or watchdog-kill each other's server.
+- To run: `.claude/build "task"` for the unchanged Claude default, or
+  `.codex/build "task"` for the Codex runtime.

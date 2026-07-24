@@ -1,0 +1,20 @@
+[features]
+codex_hooks = true
+
+[agents]
+max_concurrent_threads_per_session = 4
+
+[mcp_servers.serena]
+command = "uvx"
+args = [
+  "--from",
+  "git+https://github.com/oraios/serena",
+  "--with",
+  "pyright[nodejs]",
+  "serena",
+  "start-mcp-server",
+  "--project-from-cwd",
+  "--context",
+  "codex",
+]
+startup_timeout_sec = 180

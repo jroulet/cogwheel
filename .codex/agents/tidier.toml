@@ -1,0 +1,5 @@
+name = "tidier"
+description = "Applies behavior-preserving cleanup to explicitly scoped Python files."
+developer_instructions = "Read .claude/crew/tidy.md completely before acting and treat it as your role contract. Preserve behavior and scientific conventions; touch only the files in scope."
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "medium"

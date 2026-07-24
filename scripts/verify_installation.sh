@@ -36,6 +36,8 @@ echo "1. Required files..."
 for f in \
     .claude/sdk/orchestrator.py \
     .claude/sdk/agents.py \
+    .claude/sdk/runtime.py \
+    .claude/sdk/runtime_codex.py \
     .claude/sdk/cli.py \
     .claude/sdk/build.py \
     .claude/sdk/gates.py \
@@ -52,6 +54,12 @@ for f in \
     .claude/spec/SPEC.md \
     .claude/spec/TODO.md \
     .claude/spec/COMPLETED.md \
+    AGENTS.md \
+    CLAUDE.md \
+    .codex/config.toml \
+    .codex/hooks.json \
+    .codex/build \
+    .agents/skills/cogwheel-build/SKILL.md \
     ; do
     if [ -f "$f" ]; then
         ok "$f"
@@ -59,6 +67,19 @@ for f in \
         err "$f missing"
     fi
 done
+
+if [ -L CLAUDE.md ] && [ "$(readlink CLAUDE.md)" = "AGENTS.md" ]; then
+    ok "CLAUDE.md -> AGENTS.md"
+else
+    err "CLAUDE.md must be a symlink to AGENTS.md"
+fi
+
+codex_agent_count=$(find .codex/agents -name '*.toml' 2>/dev/null | wc -l | tr -d ' ')
+if [ "$codex_agent_count" -ge 11 ]; then
+    ok ".codex/agents/ has $codex_agent_count role definitions"
+else
+    err ".codex/agents/ has only $codex_agent_count role definitions (need >= 11)"
+fi
 
 # Crew prompts (at least 9 required)
 crew_count=$(find .claude/crew -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
@@ -109,7 +130,7 @@ echo ""
 # ── 3. JSON validity ────────────────────────────────────────────────────
 
 echo "3. JSON validity..."
-for f in .claude/settings.json; do
+for f in .claude/settings.json .codex/hooks.json; do
     if [ -f "$f" ]; then
         if python3 -c "import json; json.load(open('$f'))" 2>/dev/null; then
             ok "$f is valid JSON"
@@ -118,6 +139,20 @@ for f in .claude/settings.json; do
         fi
     fi
 done
+
+if python3 -c "
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
+from pathlib import Path
+for path in Path('.codex').rglob('*.toml'):
+    tomllib.loads(path.read_text())
+" 2>/dev/null; then
+    ok ".codex TOML files are valid"
+else
+    err ".codex contains invalid TOML"
+fi
 
 echo ""
 
@@ -130,6 +165,9 @@ for f in \
     .claude/hooks/post-merge \
     .claude/hooks/install_hooks.sh \
     .claude/sdk/watchdog.sh \
+    .codex/build \
+    .codex/hooks/session-start.sh \
+    .codex/hooks/conda-python.sh \
     ; do
     if [ -f "$f" ]; then
         if [ -x "$f" ]; then
@@ -179,23 +217,19 @@ echo ""
 # ── 7. Settings.json hooks reference existing scripts ───────────────────
 
 echo "7. Hook script references..."
-if [ -f .claude/settings.json ]; then
+for settings_file in .claude/settings.json .codex/hooks.json; do
+  if [ -f "$settings_file" ]; then
     hook_scripts=$(python3 -c "
-import json
-s = json.load(open('.claude/settings.json'))
+import json, re
+s = json.load(open('$settings_file'))
 for phase in s.get('hooks', {}).values():
     for entry in phase:
         for h in entry.get('hooks', []):
             cmd = h.get('command', '')
-            if '/' in cmd and not cmd.startswith('jq'):
-                # Extract the script path (first token that looks like a path)
-                for token in cmd.split():
-                    if '/' in token:
-                        print(token)
-                        break
+            for path in re.findall(r'\\.(?:claude|codex)/hooks/[A-Za-z0-9_.-]+\\.sh', cmd):
+                print(path)
 " 2>/dev/null || true)
     for script in $hook_scripts; do
-        # Resolve relative to repo root
         resolved="$script"
         if [ -f "$resolved" ]; then
             ok "Hook references $resolved (exists)"
@@ -203,7 +237,8 @@ for phase in s.get('hooks', {}).values():
             err "Hook references $resolved (NOT FOUND)"
         fi
     done
-fi
+  fi
+done
 
 echo ""
 
