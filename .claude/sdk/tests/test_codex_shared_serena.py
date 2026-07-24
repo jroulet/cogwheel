@@ -14,10 +14,57 @@ if str(CLAUDE_DIR) not in sys.path:
 
 from sdk.agents import SerenaManager
 from sdk.runtime_codex import (
+    CODEX_ROLE_MODELS,
     ClaudeAgentOptions,
     _append_serena_config,
     _effective_prompt,
+    _model_for,
+    _reasoning_for,
 )
+
+
+class CodexRoleRoutingTests(unittest.TestCase):
+    def test_scientific_roles_use_frontier_model(self):
+        for role in ("architect", "coder", "inspector", "professor",
+                     "prof_review"):
+            with self.subTest(role=role), patch.dict(os.environ, {}, clear=True):
+                options = ClaudeAgentOptions(agent_name=role)
+                self.assertEqual(_model_for(options), "gpt-5.6-sol")
+                self.assertEqual(_reasoning_for(options), "high")
+
+    def test_support_roles_use_balanced_model(self):
+        for role in ("foreman_lite", "test_dev", "librarian", "tidier",
+                     "dreamer", "simplifier"):
+            with self.subTest(role=role), patch.dict(os.environ, {}, clear=True):
+                options = ClaudeAgentOptions(agent_name=role)
+                self.assertEqual(_model_for(options), "gpt-5.6-terra")
+                self.assertEqual(_reasoning_for(options), "medium")
+
+    def test_role_override_precedes_global_override(self):
+        options = ClaudeAgentOptions(agent_name="test_dev")
+        with patch.dict(
+            os.environ,
+            {
+                "CODEX_MODEL": "global-model",
+                "CODEX_MODEL_TEST_DEV": "test-model",
+                "CODEX_REASONING_EFFORT": "low",
+                "CODEX_REASONING_EFFORT_TEST_DEV": "high",
+            },
+            clear=True,
+        ):
+            self.assertEqual(_model_for(options), "test-model")
+            self.assertEqual(_reasoning_for(options), "high")
+
+    def test_unknown_role_inherits_normal_codex_config(self):
+        options = ClaudeAgentOptions(agent_name="unknown")
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(_model_for(options), "")
+            self.assertEqual(_reasoning_for(options), "")
+
+    def test_role_map_covers_every_codex_agent_definition(self):
+        agents_dir = CLAUDE_DIR.parent / ".codex" / "agents"
+        configured = {path.stem for path in agents_dir.glob("*.toml")}
+        self.assertEqual(configured, set(CODEX_ROLE_MODELS))
 
 
 class CodexSerenaConfigTests(unittest.TestCase):

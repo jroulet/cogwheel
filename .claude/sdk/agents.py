@@ -668,6 +668,7 @@ async def build_agent_options(
     allowed_tools = [t for t in allowed_tools if t not in disallowed_set]
 
     return ClaudeAgentOptions(
+        agent_name=agent_name,
         model=model,
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,

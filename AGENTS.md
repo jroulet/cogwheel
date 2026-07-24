@@ -64,6 +64,12 @@ Applies to **behavior changes** in `cogwheel/` (new functions, signature/logic/c
   `.agents/skills/`. Launch the same state machine with `.codex/build`. A
   Codex build starts one shared Serena SSE server on `CODEX_SERENA_PORT`
   (default `8324`) and reuses its warm index for every build role.
+- Codex routes scientific-authority roles (Architect, Coder, Inspector,
+  Professor, ProfReview) to `gpt-5.6-sol` at high reasoning and bounded support
+  roles to `gpt-5.6-terra` at medium reasoning. `CODEX_MODEL` /
+  `CODEX_REASONING_EFFORT` override all roles; suffixed variables such as
+  `CODEX_MODEL_TEST_DEV` override one role. Claude's native role map is
+  unchanged.
 - The orchestration state, role contracts, specs, handoffs, and memories remain
   shared under `.claude/` and `.serena/`; never fork provider-specific copies.
 - `.claude/sdk/runtime.py` is the provider boundary. `AGENT_PROVIDER` defaults

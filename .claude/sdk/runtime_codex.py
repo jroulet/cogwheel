@@ -21,6 +21,37 @@ HookJSONOutput = dict[str, Any]
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 SandboxSettings = dict[str, Any]
 
+# Provider-specific cost/quality routing.  Claude keeps its established
+# AGENT_MODELS map in agents.py; these defaults apply only when the shared
+# orchestrator is running through ``codex exec``.
+CODEX_ROLE_MODELS = {
+    "architect": "gpt-5.6-sol",
+    "coder": "gpt-5.6-sol",
+    "inspector": "gpt-5.6-sol",
+    "professor": "gpt-5.6-sol",
+    "prof_review": "gpt-5.6-sol",
+    "foreman_lite": "gpt-5.6-terra",
+    "test_dev": "gpt-5.6-terra",
+    "librarian": "gpt-5.6-terra",
+    "tidier": "gpt-5.6-terra",
+    "dreamer": "gpt-5.6-terra",
+    "simplifier": "gpt-5.6-terra",
+}
+
+CODEX_ROLE_REASONING_EFFORTS = {
+    "architect": "high",
+    "coder": "high",
+    "inspector": "high",
+    "professor": "high",
+    "prof_review": "high",
+    "foreman_lite": "medium",
+    "test_dev": "medium",
+    "librarian": "medium",
+    "tidier": "medium",
+    "dreamer": "medium",
+    "simplifier": "medium",
+}
+
 
 @dataclass
 class AgentDefinition:
@@ -71,6 +102,37 @@ class ResultMessage:
     result: str
     total_cost_usd: Optional[float] = None
     session_id: Optional[str] = None
+
+
+def _role_override(prefix: str, role: str) -> str:
+    """Return a role-specific environment override, if configured."""
+
+    if not role:
+        return ""
+    key = f"{prefix}_{role.upper()}"
+    return os.environ.get(key, "").strip()
+
+
+def _model_for(options: ClaudeAgentOptions) -> str:
+    """Resolve Codex model with role-specific, global, then default precedence."""
+
+    role = getattr(options, "agent_name", "")
+    return (
+        _role_override("CODEX_MODEL", role)
+        or os.environ.get("CODEX_MODEL", "").strip()
+        or CODEX_ROLE_MODELS.get(role, "")
+    )
+
+
+def _reasoning_for(options: ClaudeAgentOptions) -> str:
+    """Resolve Codex reasoning effort with the same override precedence."""
+
+    role = getattr(options, "agent_name", "")
+    return (
+        _role_override("CODEX_REASONING_EFFORT", role)
+        or os.environ.get("CODEX_REASONING_EFFORT", "").strip()
+        or CODEX_ROLE_REASONING_EFFORTS.get(role, "")
+    )
 
 
 def _effective_prompt(prompt: str, options: ClaudeAgentOptions) -> str:
@@ -207,10 +269,10 @@ async def query(
             "--dangerously-bypass-hook-trust",
         ])
 
-    model = os.environ.get("CODEX_MODEL", "").strip()
+    model = _model_for(options)
     if model:
         command.extend(["--model", model])
-    reasoning = os.environ.get("CODEX_REASONING_EFFORT", "").strip()
+    reasoning = _reasoning_for(options)
     if reasoning:
         command.extend(["-c", f'model_reasoning_effort="{reasoning}"'])
     _append_serena_config(command)
