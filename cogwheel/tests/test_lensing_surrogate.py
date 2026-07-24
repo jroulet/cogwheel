@@ -422,13 +422,31 @@ def _sad_surrogate_ship() -> LensAmplificationSurrogate:
     """Saddle-parity ship surrogate (``SHIP_PARAM_NODES`` per axis)."""
     return _train(SAD_BOX, SHIP_PARAM_NODES)
 
-
 def _train(box: tuple, n_param: int) -> LensAmplificationSurrogate:
-    """Train a tiny surrogate on ``box`` at ``n_param`` nodes/param axis."""
+    """Train a tiny surrogate on ``box`` at ``n_param`` nodes/param axis.
+
+    The eigenframe box ``(gamma, y1, y2)`` is expressed in the surrogate's
+    caustic-fixed ``(rho, theta_c)`` coordinates (Build 8h-b3): the physical
+    box is sampled and every sample mapped through the SHARED
+    `_to_caustic_fixed` (`_caustic_reach`), then the enclosing
+    ``(rho, theta_c)`` bounding box is trained.  Same physical
+    configuration, in the coordinate the far-field chart now interpolates
+    over -- train and serve normalise ``rho`` through the identical
+    `_caustic_reach`, so the mapping is exact.
+    """
     gamma_range, y1_range, y2_range = box
+    rhos, theta_cs = [], []
+    for gamma in np.linspace(gamma_range[0], gamma_range[1], 5):
+        for y1 in np.linspace(y1_range[0], y1_range[1], 5):
+            for y2 in np.linspace(y2_range[0], y2_range[1], 5):
+                rho, theta_c = surrogate_module._to_caustic_fixed(
+                    float(gamma), float(y1), float(y2))
+                rhos.append(rho)
+                theta_cs.append(theta_c)
     return LensAmplificationSurrogate.from_engine(
-        gamma_range=gamma_range, y1_range=y1_range, y2_range=y2_range,
-        w_range=TRAIN_W_RANGE, n_gamma=n_param, n_y1=n_param, n_y2=n_param,
+        gamma_range=gamma_range, rho_range=(min(rhos), max(rhos)),
+        theta_c_range=(min(theta_cs), max(theta_cs)), w_range=TRAIN_W_RANGE,
+        n_gamma=n_param, n_rho=n_param, n_theta=n_param,
         w_nodes_per_decade=TRAIN_W_NODES_PER_DECADE)
 
 
@@ -520,25 +538,32 @@ def _heldout_configs(sur: LensAmplificationSurrogate,
 
     The stringent worst case for tensor interpolation is the CELL
     body-centre (off-grid in all three param axes simultaneously); we add
-    a deterministic quasi-random interior sample for coverage.  None of
-    these coincide with a training node, so the gate measures genuine
-    generalization, not node reproduction.
+    a deterministic quasi-random interior sample for coverage.  The two
+    spatial axes are the caustic-fixed ``(rho, theta_c)`` the chart
+    interpolates over (Build 8h-b3); each held-out node is mapped back to
+    a physical eigenframe source through the SHARED `_from_caustic_fixed`
+    before the query, so the eigenframe ``(gamma, y1, y2)`` the gate serves
+    is exactly the held-out caustic-fixed point.  None of these coincide
+    with a training node, so the gate measures genuine generalization, not
+    node reproduction.
     """
     configs = []
     for i in range(sur.gamma_grid.size - 1):
-        configs.append((
-            0.5 * (sur.gamma_grid[i] + sur.gamma_grid[i + 1]),
-            0.5 * (sur.y1_grid[i] + sur.y1_grid[i + 1]),
-            0.5 * (sur.y2_grid[i] + sur.y2_grid[i + 1])))
+        gamma = 0.5 * (sur.gamma_grid[i] + sur.gamma_grid[i + 1])
+        rho = 0.5 * (sur.rho_grid[i] + sur.rho_grid[i + 1])
+        theta_c = 0.5 * (sur.theta_c_grid[i] + sur.theta_c_grid[i + 1])
+        y1, y2 = surrogate_module._from_caustic_fixed(gamma, rho, theta_c)
+        configs.append((gamma, float(y1), float(y2)))
     rng = np.random.default_rng(seed)
     g_lo, g_hi = sur.gamma_grid[0], sur.gamma_grid[-1]
-    a_lo, a_hi = sur.y1_grid[0], sur.y1_grid[-1]
-    b_lo, b_hi = sur.y2_grid[0], sur.y2_grid[-1]
+    r_lo, r_hi = sur.rho_grid[0], sur.rho_grid[-1]
+    t_lo, t_hi = sur.theta_c_grid[0], sur.theta_c_grid[-1]
     for _ in range(n_random):
-        configs.append((rng.uniform(g_lo, g_hi), rng.uniform(a_lo, a_hi),
-                        rng.uniform(b_lo, b_hi)))
+        gamma = rng.uniform(g_lo, g_hi)
+        y1, y2 = surrogate_module._from_caustic_fixed(
+            gamma, rng.uniform(r_lo, r_hi), rng.uniform(t_lo, t_hi))
+        configs.append((gamma, float(y1), float(y2)))
     return configs
-
 
 def _engine_exact_total(w_array: np.ndarray, gamma: float, y1: float,
                         y2: float, beta: float = 0.0) -> np.ndarray:

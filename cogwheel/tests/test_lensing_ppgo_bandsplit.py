@@ -54,6 +54,7 @@ import math
 import pathlib
 import tempfile
 from types import SimpleNamespace
+import dataclasses
 
 import numpy as np
 
@@ -88,6 +89,8 @@ from cogwheel.lensing.ppgo_map import (
 from cogwheel.lensing.surrogate_training import (
     _farfield_interior_tiles, _stratum_ppgo_boundary, _apply_ppgo_trim,
     _stratum_ppgo_ceiling)
+from cogwheel.lensing import surrogate_training as st
+from cogwheel.lensing import surrogate
 from cogwheel.lensing.surrogate import LensAmplificationSurrogate
 from cogwheel.lensing.likelihood import LensedRelativeBinningLikelihood
 
@@ -542,77 +545,125 @@ class InteriorTelescopingTestCase(_PpgoTestCase):
 # ======================================================================
 
 class InteriorAdmissionTestCase(_PpgoTestCase):
-    """`_farfield_interior_tiles` admits wholly-inside tiles, rejects the rest.
+    """`_farfield_interior_tiles` admits interior tiles, rejects the rest.
 
-    A tile is admitted iff its FARTHEST corner from the origin stays inside
-    ``admit_radius = caustic_inradius - eta_max`` (the caustic disk minus
-    the tube shell), so an admitted tile carries no caustic crossing and no
-    tube-shell overlap -- the single 4-image region by construction.  A
-    tile whose far corner exceeds the radius (straddling the shell or the
-    caustic) is dropped.
+    Ported to the caustic-fixed directional-radius admission (S2-1): the
+    retired isotropic scalar ``admit_radius = caustic_inradius - eta_max``
+    is replaced by the band-minimum directional caustic boundary
+    ``min_gamma r_caustic(gamma, theta) / reach`` carried by an
+    `_InteriorAdmission`, minus the ``eta_max`` nearest-caustic tube shell.
+    A caustic-fixed ``(rho, theta)`` tile is admitted iff it lies wholly
+    inside that directional boundary and clear of the shell, so an admitted
+    tile is a genuine 4-image interior config by construction; tiles that
+    straddle the boundary/shell (or a cusp ray) are dropped.  The same
+    physical certification intent as the retired scalar-circle version,
+    expressed in the coordinates the tiler now uses.
     """
 
-    GRID_EXTENT = 1.0
-    ADMIT_RADIUS = 0.6
+    BAND = (0.45, 0.55)
+    GAMMA_MID = 0.5
     N_PER_SIDE = 5
 
     @classmethod
     def setUpClass(cls) -> None:
+        cls.config = st.TrainingConfig()
+        cls.reach = surrogate._caustic_reach(cls.GAMMA_MID)
+        cls.admission = st._interior_admission(
+            cls.BAND, 1, cls.reach, cls.config)
+        cls.cusp_angles = st._cusp_source_angles(
+            cls.GAMMA_MID, cls.config.n_caustic_samples)
         cls.tiles = _farfield_interior_tiles(
-            cls.GRID_EXTENT, cls.ADMIT_RADIUS, cls.N_PER_SIDE)
+            1.0, cls.N_PER_SIDE, admission=cls.admission,
+            cusp_angles=cls.cusp_angles)
+
+    @staticmethod
+    def _straddles_ray(center, half, rays, tol=1e-9):
+        """Whether a ``(rho, theta)`` tile strictly contains any cusp ray."""
+        lo, hi = center[1] - half[1], center[1] + half[1]
+        for ray in rays:
+            for wrap in (-2.0 * math.pi, 0.0, 2.0 * math.pi):
+                if lo + tol < ray + wrap < hi - tol:
+                    return True
+        return False
+
+    @staticmethod
+    def _n_images(gamma, rho, theta):
+        """Independent engine oracle: image count at a caustic-fixed node."""
+        source = surrogate._from_caustic_fixed(gamma, rho, theta)
+        matrix = geometry.macro_matrix(gamma)
+        return len(geometry.find_images(np.asarray(source, dtype=float),
+                                        matrix))
 
     def test_admitted_tiles_are_wholly_inside_admit_radius(self):
-        """Every admitted tile's farthest corner is within the radius."""
-        for (cx, cy), half, _i, _j in self.tiles:
-            far = math.hypot(abs(cx) + half, abs(cy) + half)
+        """Every admitted tile is inside the directional boundary/shell and
+        is a genuine 4-image interior config (independent engine oracle)."""
+        for center, half, _i, _j in self.tiles:
             self.assert_within(
-                far, self.ADMIT_RADIUS + 1e-12,
-                f'admitted tile at ({cx:.3f},{cy:.3f}) half {half} straddles '
-                f'the admit radius (far corner {far:.4f})')
+                0.0 if self.admission.admits(center, half) else 1.0, 0.0,
+                f'tile at rho={center[0]:.3f} theta={center[1]:.3f} '
+                f'half={half} straddles the directional admission boundary')
+            self.comparisons += 1
+            self.assertEqual(
+                self._n_images(self.GAMMA_MID, center[0], center[1]), 4,
+                f'admitted tile centre rho={center[0]:.3f} '
+                f'theta={center[1]:.3f} is not a 4-image interior config')
 
     def test_some_tiles_are_admitted_where_geometry_permits(self):
         """'admitted > 0 where geometry permits' -- the loud assert."""
         self.comparisons += 1
         self.assertGreater(
             len(self.tiles), 0,
-            'no interior tile admitted where the disk permits some')
+            'no interior tile admitted where the caustic permits some')
 
     def test_straddling_and_exterior_tiles_are_rejected(self):
-        """Tiles crossing the disk boundary are dropped (fewer than full)."""
+        """A point beyond the directional boundary is refused, and no
+        admitted tile straddles an astroid cusp ray."""
         self.comparisons += 1
-        # Radius 0.6 inside a 1.0-extent 5x5 grid (tile half 0.2) cannot
-        # admit all 25 tiles: the outer corners straddle or exit the disk.
-        self.assertLess(
-            len(self.tiles), self.N_PER_SIDE ** 2,
-            'admission accepted every tile; the outer straddlers were not '
-            'rejected')
-        # A concrete straddler: the outermost corner tile is wholly outside.
-        half = self.GRID_EXTENT / self.N_PER_SIDE
-        corner = self.GRID_EXTENT - half     # center of the corner tile
-        far = math.hypot(corner + half, corner + half)
-        self.assertGreater(far, self.ADMIT_RADIUS,
-                           'fixture no longer has an excluded corner tile')
+        self.assertEqual(len(self.cusp_angles), 4,
+                         'astroid interior must expose four cusp rays')
+        # A concrete exterior straddler: 1.2x the directional boundary at an
+        # off-cusp angle is a 2-image exterior config, and must be refused.
+        theta = math.radians(30.0)
+        rho_boundary = float(np.interp(theta, self.admission.theta_axis,
+                                       self.admission.rho_boundary))
+        rho_out = 1.2 * rho_boundary
         self.comparisons += 1
-        self.assertNotIn(
-            (corner, corner),
-            [tile[0] for tile in self.tiles],
-            'a tile straddling the caustic/tube-shell was wrongly admitted')
+        self.assertFalse(
+            self.admission.admits((rho_out, theta), (1e-9, 1e-9)),
+            'admitted a point beyond the directional caustic boundary')
+        self.comparisons += 1
+        self.assertEqual(
+            self._n_images(self.GAMMA_MID, rho_out, theta), 2,
+            'the exterior probe is not a 2-image config -- retune')
+        straddlers = [(c, h) for c, h, _i, _j in self.tiles
+                      if self._straddles_ray(c, h, self.cusp_angles)]
+        self.comparisons += 1
+        self.assertEqual(straddlers, [],
+                         'a tile straddling an astroid cusp ray was admitted')
 
     def test_tighter_radius_admits_strictly_fewer(self):
-        """Shrinking the disk (more tube shell) drops more tiles (monotone).
-
-        A wide disk (0.85, admitting the centre + first two rings) against a
-        tight one (0.40, only the centre tile clears): more tube shell must
-        exclude strictly more interior tiles.
+        """A wider ``eta_max`` tube shell (more exclusion) admits strictly
+        fewer interior configs (monotone) -- the directional-radius analog
+        of the retired 'shrinking disk drops more tiles' guard.
         """
-        wide = _farfield_interior_tiles(self.GRID_EXTENT, 0.85,
-                                        self.N_PER_SIDE)
-        tight = _farfield_interior_tiles(self.GRID_EXTENT, 0.40,
-                                         self.N_PER_SIDE)
+        thetas = np.linspace(-math.pi, math.pi, 37)
+        rhos = np.linspace(0.02, 0.6, 40)
+
+        def admitted_count(eta_max):
+            admission = st._interior_admission(
+                self.BAND, 1, self.reach,
+                dataclasses.replace(self.config, eta_max=eta_max))
+            return sum(
+                admission.admits((float(r), float(t)), (1e-9, 1e-9))
+                for t in thetas for r in rhos)
+
+        wide_shell = admitted_count(3.0 * self.config.eta_max)
+        narrow_shell = admitted_count(self.config.eta_max)
         self.comparisons += 1
-        self.assertLess(len(tight), len(wide),
-                        f'a tighter admit radius did not drop more tiles '
-                        f'(wide={len(wide)}, tight={len(tight)})')
+        self.assertLess(
+            wide_shell, narrow_shell,
+            f'a wider tube shell did not exclude strictly more configs '
+            f'(narrow={narrow_shell}, wide={wide_shell})')
 
 
 class MorseSignMaskTestCase(_PpgoTestCase):
