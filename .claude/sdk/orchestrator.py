@@ -97,6 +97,19 @@ from .state import write_state
 SHORT_TERM_CONSOLIDATION_THRESHOLD = 1500
 
 
+def _agent_model_label(
+    agent_name: str,
+    model_override: Optional[str] = None,
+) -> str:
+    """Return the provider-effective model name used in build logs."""
+
+    if RUNTIME_PROVIDER == "codex":
+        from .runtime_codex import model_for_role
+
+        return model_for_role(agent_name, model_override)
+    return model_override or AGENT_MODELS[agent_name]
+
+
 class Verbosity(Enum):
     QUIET = "quiet"
     NORMAL = "normal"
@@ -1084,7 +1097,10 @@ class BuildOrchestrator:
         self._agents_that_ran.append("architect")
         agent_id = f"architect-{self._agent_count}"
         if self.verbosity != Verbosity.QUIET:
-            self._log(f"[{agent_id}] spawning ({AGENT_MODELS['architect']})")
+            self._log(
+                f"[{agent_id}] spawning "
+                f"({_agent_model_label('architect')})"
+            )
 
         result_text = ""
         all_text_blocks: list[str] = []
@@ -2920,7 +2936,7 @@ class BuildOrchestrator:
         verb = "resuming" if resume_session else "spawning"
 
         if self.verbosity != Verbosity.QUIET:
-            model = model_override or AGENT_MODELS[agent_name]
+            model = _agent_model_label(agent_name, model_override)
             self._log(f"[{agent_id}] {verb} ({model})")
 
         mcp_config = (

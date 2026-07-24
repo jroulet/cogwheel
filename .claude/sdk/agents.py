@@ -23,6 +23,7 @@ from .runtime import (
     HookJSONOutput,
     HookMatcher,
     PermissionMode,
+    RUNTIME_PROVIDER,
     SandboxSettings,
 )
 
@@ -673,6 +674,11 @@ async def build_agent_options(
     disallowed_set = set(disallowed_tools)
     allowed_tools = [t for t in allowed_tools if t not in disallowed_set]
 
+    provider_options = (
+        {"codex_model_override": model_override}
+        if RUNTIME_PROVIDER == "codex"
+        else {}
+    )
     return ClaudeAgentOptions(
         agent_name=agent_name,
         model=model,
@@ -700,6 +706,7 @@ async def build_agent_options(
         cwd=project_root,
         env=env,
         sandbox=sandbox,
+        **provider_options,
     )
 
 

@@ -51,6 +51,7 @@ CODEX_ROLE_REASONING_EFFORTS = {
     "dreamer": "medium",
     "simplifier": "medium",
 }
+DEFAULT_CODEX_JSON_STREAM_LIMIT = 8 * 1024 * 1024
 
 
 @dataclass
@@ -113,15 +114,41 @@ def _role_override(prefix: str, role: str) -> str:
     return os.environ.get(key, "").strip()
 
 
-def _model_for(options: ClaudeAgentOptions) -> str:
-    """Resolve Codex model with role-specific, global, then default precedence."""
+def model_for_role(
+    role: str,
+    explicit_override: Optional[str] = None,
+) -> str:
+    """Resolve the effective Codex model for one build role."""
 
-    role = getattr(options, "agent_name", "")
     return (
-        _role_override("CODEX_MODEL", role)
+        (explicit_override or "").strip()
+        or _role_override("CODEX_MODEL", role)
         or os.environ.get("CODEX_MODEL", "").strip()
         or CODEX_ROLE_MODELS.get(role, "")
     )
+
+
+def _model_for(options: ClaudeAgentOptions) -> str:
+    """Resolve Codex model with explicit, environment, then default precedence."""
+
+    return model_for_role(
+        getattr(options, "agent_name", ""),
+        getattr(options, "codex_model_override", None),
+    )
+
+
+def _json_stream_limit() -> int:
+    """Return the reader limit for newline-delimited Codex JSON events."""
+
+    raw = os.environ.get("CODEX_JSON_STREAM_LIMIT", "").strip()
+    if not raw:
+        return DEFAULT_CODEX_JSON_STREAM_LIMIT
+    limit = int(raw)
+    if limit < 65_536:
+        raise ValueError(
+            "CODEX_JSON_STREAM_LIMIT must be at least 65536 bytes"
+        )
+    return limit
 
 
 def _reasoning_for(options: ClaudeAgentOptions) -> str:
@@ -295,6 +322,7 @@ async def query(
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        limit=_json_stream_limit(),
     )
     assert process.stdin is not None
     assert process.stdout is not None

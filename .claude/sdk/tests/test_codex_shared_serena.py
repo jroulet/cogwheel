@@ -15,11 +15,14 @@ if str(CLAUDE_DIR) not in sys.path:
 from sdk.agents import SerenaManager
 from sdk.runtime_codex import (
     CODEX_ROLE_MODELS,
+    DEFAULT_CODEX_JSON_STREAM_LIMIT,
     ClaudeAgentOptions,
     _append_serena_config,
     _effective_prompt,
+    _json_stream_limit,
     _model_for,
     _reasoning_for,
+    model_for_role,
 )
 
 
@@ -55,6 +58,25 @@ class CodexRoleRoutingTests(unittest.TestCase):
             self.assertEqual(_model_for(options), "test-model")
             self.assertEqual(_reasoning_for(options), "high")
 
+    def test_explicit_model_override_precedes_environment(self):
+        options = ClaudeAgentOptions(
+            agent_name="test_dev",
+            codex_model_override="one-off-model",
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "CODEX_MODEL": "global-model",
+                "CODEX_MODEL_TEST_DEV": "test-model",
+            },
+            clear=True,
+        ):
+            self.assertEqual(_model_for(options), "one-off-model")
+            self.assertEqual(
+                model_for_role("test_dev", "one-off-model"),
+                "one-off-model",
+            )
+
     def test_unknown_role_inherits_normal_codex_config(self):
         options = ClaudeAgentOptions(agent_name="unknown")
         with patch.dict(os.environ, {}, clear=True):
@@ -65,6 +87,29 @@ class CodexRoleRoutingTests(unittest.TestCase):
         agents_dir = CLAUDE_DIR.parent / ".codex" / "agents"
         configured = {path.stem for path in agents_dir.glob("*.toml")}
         self.assertEqual(configured, set(CODEX_ROLE_MODELS))
+
+    def test_json_stream_limit_is_large_and_configurable(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(
+                _json_stream_limit(),
+                DEFAULT_CODEX_JSON_STREAM_LIMIT,
+            )
+            self.assertGreater(_json_stream_limit(), 65_536)
+        with patch.dict(
+            os.environ,
+            {"CODEX_JSON_STREAM_LIMIT": "16777216"},
+            clear=True,
+        ):
+            self.assertEqual(_json_stream_limit(), 16_777_216)
+
+    def test_json_stream_limit_rejects_legacy_sized_reader(self):
+        with patch.dict(
+            os.environ,
+            {"CODEX_JSON_STREAM_LIMIT": "65535"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "at least 65536"):
+                _json_stream_limit()
 
 
 class CodexSerenaConfigTests(unittest.TestCase):

@@ -25,8 +25,12 @@ deep implementation build, or resume a build driven by the shared SDK.
 The Codex adapter uses `codex exec --json`; authentication, hooks, and thread
 persistence remain Codex-native. The long-lived orchestrator starts one
 build-scoped Serena Streamable HTTP server on `CODEX_SERENA_PORT` (default
-`8324`) and
-points every Codex role at that warm server; it does not repeatedly start the
-interactive stdio configuration. `CODEX_MODEL` and `CODEX_REASONING_EFFORT`
-are optional environment overrides. If unset, Codex uses the user's normal
-configured model and reasoning effort.
+`8324`) and points every Codex role at that warm server; it does not repeatedly
+start the interactive stdio configuration. `CODEX_MODEL` and
+`CODEX_REASONING_EFFORT`
+provide global overrides; role-specific forms such as
+`CODEX_MODEL_TEST_DEV` take precedence. Without overrides, scientific
+authority roles use `gpt-5.6-sol` at high effort and bounded support roles use
+`gpt-5.6-terra` at medium effort. The adapter raises asyncio's newline reader
+limit to 8 MiB because one `codex exec --json` tool event can contain a large
+whole-file result; `CODEX_JSON_STREAM_LIMIT` is the escape hatch.
