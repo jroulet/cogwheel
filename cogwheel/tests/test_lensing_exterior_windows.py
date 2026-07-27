@@ -1575,8 +1575,16 @@ class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
 
     def _rho_boundary(self, theta: float) -> float:
         """Band-minimum directional caustic radius (``rho``) at angle ``theta``."""
-        return float(np.interp(theta, self.admission.theta_axis,
-                               self.admission.rho_boundary))
+        # `_InteriorAdmission` has NO ``rho_boundary`` attribute -- that name
+        # appears only in a module comment.  It stores PHYSICAL directional
+        # caustic radii per band gamma (``radius_grid``, shape
+        # ``(n_gamma, n_theta)``), and the interior coordinate is
+        # ``rho = |y| / _caustic_reach``, so the band-conservative boundary
+        # is the per-angle MINIMUM over gamma normalised by the band-mid
+        # scalar reach (verified: min 0.318 == the isotropic inradius this
+        # suite contrasts against, max 0.858).
+        boundary = self.admission.radius_grid.min(axis=0) / self.reach
+        return float(np.interp(theta, self.admission.theta_axis, boundary))
 
     def test_anisotropic_gain_admits_fat_direction_refuses_thin(self) -> None:
         # The headline S2-1 gain: at rho = 0.40 -- between the isotropic
