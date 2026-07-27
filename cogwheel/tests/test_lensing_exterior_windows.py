@@ -24,9 +24,13 @@ Three Architect specifications are certified here:
    mirror (`channels.reconstruct_farfield`) reproduces the engine's exact
    total across both the diffractive/mid seam (``w_floor``) and into the
    ppGO band, within the 1e-3 F-normalised bar.  The ghost term is subtracted
-   only where its gate ``w_min * Im tau_c >= RHO_END / 2 = 2`` holds; below
-   it the mid band is the plain kernel sum (ghost gated OFF), so the
-   reconstructed ``F`` has no step at the seam.
+   only where the complex ghost saddle is geometrically resolved from every
+   real image, ``min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN`` (a
+   frequency-independent geometric gate, Build 8h-d1); where the ghost is
+   inseparable from a real image near a cusp the mid band falls back to the
+   plain kernel sum (ghost gated OFF).  Both the diffractive and kernel-sum
+   windows reconstruct the engine's exact total, so the served ``F`` has no
+   step at the seam.
 
 3. **Diffractive-bottom bounded object (both bounds).**  On ``[0.03, w_floor]``
    the diffractive label is the bounded smooth ``F`` object with
@@ -37,15 +41,15 @@ Three Architect specifications are certified here:
 4. **Mid-window ghost subtraction is helpful-outside / harmful-inside the
    cusp window.**  Outside the cusp (fold annulus, ``gamma = 0.4``,
    off-cusp ``theta_c ~ 45 deg``, ``rho in [1.9, 2.1]``, ``w in [3, 40]``)
-   the gate ``w_min * Im tau_c >= 2`` APPLIES (measured 2.6-3.7: the
-   caustic-fixed exterior arm is directional, so a resolved ``Im tau_c``
-   sits near ``rho ~ 2``, not ``rho ~ 1.5``): the decaying complex-saddle
-   ghost is resolved, finite, and an ``O(1e-2)`` mid-band contribution.
-   Inside the cusp (``gamma = 0.4`` near the caustic axis,
-   ``rho ~ 1.05-1.15``, ``w in [3, 20]``, ``Im tau_c ~ 0``) the gate
-   REFUSES, and *force-applying* the ghost (the production ``E - G``
-   subtraction) GROWS the interpolated object by ``>= 1.5x`` -- the gate
-   correctly excludes it.  NOTE (measured, this build): at the
+   the re-keyed geometric gate ``min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN``
+   (Build 8h-d1) ADMITS: the complex ghost saddle is well separated from
+   every real image, so the decaying complex-saddle ghost is resolved,
+   finite, and an ``O(1e-2)`` mid-band contribution.  Inside the cusp
+   (``gamma = 0.4`` near the caustic axis, ``rho ~ 1.05-1.15``,
+   ``w in [3, 20]``) the ghost saddle coalesces with a real image
+   (``min_a |x_a - x_c| -> 0``) so the gate REFUSES, and *force-applying* the
+   ghost (the production ``E - G`` subtraction) GROWS the interpolated object
+   by ``>= 1.5x`` -- the gate correctly excludes it.  NOTE (measured, this build): at the
    gate-PASSING ``gamma = 0.4`` fold configs the ghost that production
    subtracts is anti-aligned with the residual, so production's ``E - G``
    *inflates* the object ~2x while ``E + G`` shrinks it ~3x; the spec's
@@ -89,17 +93,20 @@ re-derived reach (the reachable-red) misses by O(1) and trips it.  The
 diffractive bounds ``(0.3, 3)`` are the Professor-pinned physics bar; the
 measured diffractive ratio band is ``[0.86, 0.92]`` (comfortably interior)
 while the kernel-sum foil reaches ~32 (upper bound has teeth) and a zeroed
-fit reads 0 (lower bound has teeth).  The ghost gate threshold ``2.0`` is
-``RHO_END / 2`` (`channels._FARFIELD_WINDOW_RADIANS`); at the fold config the
-full-grid gate value is ~0.03 (refuses) and the spurious ghost admitted by a
-lowered threshold reaches ~19*max|F| (reachable-red).
+fit reads 0 (lower bound has teeth).  The re-keyed ghost gate threshold
+``_GHOST_SEPARATION_MIN`` (`channels._GHOST_SEPARATION_MIN`, Build 8h-d1) is a
+frequency-independent geometric separation ``min_a |x_a - x_c|``; at a
+near-cusp config the separation is below it (refuses) and the spurious ghost
+admitted by a lowered threshold is >> the 1e-3 reconstruction bar
+(reachable-red).
 
 All oracles are INDEPENDENT of the label/tiler algebra under test:
 ``ChangRefsdalPartition.exact_total`` is the engine's exact amplification
 (a different code path than the switched-kernel label + serve mirror);
 `geometry.r_caustic` is the directional caustic radius (a different helper
-than the scalar `surrogate._caustic_reach`); `geometry.ghost_kernel`
-supplies ``Im tau_c`` directly so the gate outcome is predicted without the
+than the scalar `surrogate._caustic_reach`); `geometry.ghost_kernel` supplies
+the complex ghost saddle position and `geometry.find_images` the real images,
+so the geometric separation-gate outcome is predicted without the
 `channels.farfield_ghost_term` wrapper.
 
 10. **Whole-interior SACR-C passes where the far-field interior label fails
@@ -178,8 +185,19 @@ TOL_RHO: float = 1e-9
 DIFFRACTIVE_LOWER: float = 0.3
 DIFFRACTIVE_UPPER: float = 3.0
 
-#: Mid-band ghost gate threshold ``RHO_END / 2`` (radians of accumulated
-#: carrier); the ghost is subtracted only where ``w_min * Im tau_c >=`` this.
+#: Production geometric ghost gate (Build 8h-d1): the ghost is subtracted
+#: only where the complex saddle is resolved from every real image,
+#: ``min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN``.  Mirrors the live module
+#: constant (asserted equal in `GhostGateTestCase`) so the test cannot drift
+#: from production; matches the independent oracle in
+#: ``test_lensing_ghost_gate.py``.
+GHOST_SEPARATION_MIN: float = ch._GHOST_SEPARATION_MIN
+
+#: RETIRED decay-gate threshold ``RHO_END / 2`` (radians of accumulated
+#: carrier), ``== channels._FARFIELD_WINDOW_RADIANS``.  NO LONGER the ghost
+#: admit/refuse criterion (re-keyed to the geometric separation above); kept
+#: only as the carrier-resolution / frame-collapse target used by
+#: `GhostFrameCollapseTestCase`, whose probes are chosen to clear it.
 GHOST_GATE: float = 2.0
 
 #: Number of exterior tiles per axis for the tiler-geometry checks.
@@ -429,6 +447,30 @@ def _partition_at(gamma: float, source: tuple[float, float], w: np.ndarray
     channels = ch.ChangRefsdalChannels(w)
     channels.reset()
     return channels.evaluate(gamma=gamma, y=(source[0], source[1]))
+
+
+#: Frequency-independent probe grid for the geometric ghost gate oracle; the
+#: ghost saddle POSITION does not depend on ``w`` so any grid serves (mirrors
+#: ``GATE_W`` in ``test_lensing_ghost_gate.py``).
+_GHOST_PROBE_W: np.ndarray = np.array([15.0, 25.0, 35.0])
+
+
+def _ghost_separation(source: np.ndarray, matrix: np.ndarray) -> float:
+    """``min_a |x_a - x_c|`` recomputed from the geometry primitives.
+
+    The re-keyed ghost gate (Build 8h-d1) subtracts the ghost only where the
+    complex ghost saddle ``x_c`` is resolved from every real image ``x_a``.
+    This oracle is INDEPENDENT of ``channels.farfield_ghost_term``'s decision
+    branch: the ghost position comes from ``geometry.ghost_kernel(...).position``
+    (imaginary part KEPT) and the real images from ``geometry.find_images``, so
+    the gate under test is never used to grade itself.  Mirrors the identically
+    named helper in ``test_lensing_ghost_gate.py``.
+    """
+    contribution = geometry.ghost_kernel(_GHOST_PROBE_W, source, matrix)
+    x_c = contribution.position
+    real_images = geometry.find_images(source, matrix)
+    return min(
+        float(np.sqrt(np.sum(np.abs(x_a - x_c) ** 2))) for x_a in real_images)
 
 
 def _make_farfield_chart(envelope_definition: str, n: int = 4
@@ -1012,7 +1054,7 @@ class WindowSeamReconstructionTestCase(ExteriorWindowsTestCase):
 
     def test_seam_jump_between_windows_is_below_the_bar(self) -> None:
         # (i)/(ii) seam at w_floor: the diffractive window and the mid-band
-        # kernel-sum window (ghost gated OFF here) both reconstruct
+        # kernel-sum window (which subtracts no ghost) both reconstruct
         # exact_total, so the served F has no step across the seam.
         total_diffractive = self._reconstruct(ch.FARFIELD_DIFFRACTIVE)
         total_kernel_sum = self._reconstruct(ch.FARFIELD_KERNEL_SUM)
@@ -1021,20 +1063,28 @@ class WindowSeamReconstructionTestCase(ExteriorWindowsTestCase):
         self.assertLess(jump / self.max_f, TOL_RECON)
         self.record_comparison()
 
-    def test_ghost_is_gated_off_in_the_fold_mid_band(self) -> None:
-        # At the fold config the full-grid gate value w_min * Im tau_c is far
-        # below the threshold, so the minus-ghost label refuses (the mid band
-        # is the plain kernel sum -- this is WHY there is no seam step).
-        contribution = geometry.ghost_kernel(
+    def test_ghost_is_resolved_in_the_fold_mid_band(self) -> None:
+        # Re-keyed gate (Build 8h-d1): at this exterior fold config the complex
+        # ghost saddle is geometrically resolved from every real image
+        # (min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN), so the minus-ghost
+        # label ADMITS.  Being a telescoping switched-kernel subtraction it
+        # still reconstructs the engine's exact_total across the mid band, so
+        # there is no seam step.  Oracle: separation recomputed from
+        # geometry.ghost_kernel.position + geometry.find_images, independent of
+        # farfield_ghost_term's own decision branch.
+        separation = _ghost_separation(self.part.source, self.part.matrix)
+        self.assertGreaterEqual(separation, GHOST_SEPARATION_MIN)
+        # The gate admits: farfield_ghost_term returns a finite ghost (it
+        # raised GhostDomainError under the retired decay gate) and the
+        # minus-ghost window now assembles instead of refusing.  (Full serve-
+        # mirror reconstruction of the minus-ghost label is certified on the
+        # mid-band grid by `GhostGateTestCase` / `TagContractTestCase`.)
+        ghost = ch.farfield_ghost_term(
             self.w, self.part.source, self.part.matrix)
-        gate_value = float(self.w.min()) * float(contribution.delay.imag)
-        self.assertLess(gate_value, GHOST_GATE)
-        with self.assertRaises(geometry.GhostDomainError):
-            ch.farfield_ghost_term(
-                self.w, self.part.source, self.part.matrix)
-        with self.assertRaises(geometry.GhostDomainError):
-            ch.farfield_envelope_from_partition(
-                self.part, ch.FARFIELD_KERNEL_SUM_MINUS_GHOST)
+        self.assertTrue(np.all(np.isfinite(ghost)))
+        envelope = ch.farfield_envelope_from_partition(
+            self.part, ch.FARFIELD_KERNEL_SUM_MINUS_GHOST)
+        self.assertTrue(np.all(np.isfinite(envelope)))
         self.record_comparison()
 
     def test_seam_reconstruction_diagnostic_plot(self) -> None:
@@ -1060,34 +1110,37 @@ class WindowSeamReconstructionTestCase(ExteriorWindowsTestCase):
 
 
 class GhostGateTestCase(ExteriorWindowsTestCase):
-    """Spec 2: the mid-band ghost gate refuses / passes on the right side."""
+    """Spec 2: the geometric ghost gate refuses / passes on the right side."""
 
-    def test_gate_refuses_when_carrier_underresolved(self) -> None:
-        # Below-threshold gate: the decaying ghost is not resolved over the
-        # band, so farfield_ghost_term raises (refuses symmetrically with the
-        # exact path).  Oracle: Im tau_c from geometry.ghost_kernel directly.
-        source = _eigenframe_source(1.2, 30.0)
-        w = np.geomspace(0.03, 30.0, 200)
-        part = _partition(source, w)
-        gate = float(w.min()) * float(
-            geometry.ghost_kernel(w, part.source, part.matrix).delay.imag)
-        self.assertLess(gate, GHOST_GATE)
+    def test_gate_refuses_when_saddle_is_inseparable(self) -> None:
+        # Re-keyed gate (Build 8h-d1): near a cusp the complex ghost saddle
+        # coalesces with a real image (min_a |x_a - x_c| < _GHOST_SEPARATION_MIN),
+        # so the single-saddle expansion is invalid and farfield_ghost_term
+        # raises (refuses symmetrically with the exact path).  Oracle:
+        # separation from geometry.ghost_kernel.position + geometry.find_images,
+        # independent of the gate's own branch.  This near-cusp fixture is the
+        # one `MidWindowGhostTestCase` establishes as refusing.
+        source = _source_at(GHOST_GAMMA, 1.05, 0.2)
+        w = np.geomspace(3.0, 20.0, 200)
+        part = _partition_at(GHOST_GAMMA, source, w)
+        separation = _ghost_separation(part.source, part.matrix)
+        self.assertLess(separation, GHOST_SEPARATION_MIN)
         with self.assertRaises(geometry.GhostDomainError):
             ch.farfield_ghost_term(w, part.source, part.matrix)
         self.record_comparison()
 
-    def test_gate_passes_on_a_high_w_min_grid(self) -> None:
-        # A config far enough from the caustic that Im tau_c is resolved
-        # (0.915) on a mid-band grid whose minimum frequency is 3, so
-        # w_min * Im tau_c = 2.75 >= 2 passes; the ghost term is finite and
-        # the minus-ghost label reconstructs exact_total.
+    def test_gate_passes_on_a_well_separated_fold(self) -> None:
+        # A fold config far enough from the caustic that the ghost saddle is
+        # geometrically resolved from every real image
+        # (min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN), so the gate ADMITS;
+        # the ghost term is finite and the minus-ghost label reconstructs
+        # exact_total.  Oracle: separation from geometry.ghost_kernel.position.
         source = _eigenframe_source(2.0, 45.0)
         w = np.geomspace(3.0, 40.0, 200)
         part = _partition(source, w)
         max_f = float(np.max(np.abs(part.exact_total)))
-        gate = float(w.min()) * float(
-            geometry.ghost_kernel(w, part.source, part.matrix).delay.imag)
-        self.assertGreaterEqual(gate, GHOST_GATE)
+        separation = _ghost_separation(part.source, part.matrix)
+        self.assertGreaterEqual(separation, GHOST_SEPARATION_MIN)
         ghost = ch.farfield_ghost_term(w, part.source, part.matrix)
         self.assertTrue(np.all(np.isfinite(ghost)))
         # the resolved decaying ghost is an O(1e-2) mid-band contribution
@@ -1101,9 +1154,10 @@ class GhostGateTestCase(ExteriorWindowsTestCase):
         self.assertLess(err / max_f, TOL_RECON)
         self.record_comparison()
 
-    def test_ghost_gate_threshold_equals_rho_end_half(self) -> None:
-        # The module constant mirrors the production threshold exactly.
-        self.assertEqual(GHOST_GATE, ch._FARFIELD_WINDOW_RADIANS)
+    def test_ghost_gate_threshold_mirrors_production(self) -> None:
+        # The module constant mirrors the live production gate exactly, so the
+        # separation assertions above cannot drift from the code under test.
+        self.assertEqual(GHOST_SEPARATION_MIN, ch._GHOST_SEPARATION_MIN)
         self.record_comparison()
 
 
@@ -1177,11 +1231,13 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
                      w: np.ndarray):
         """Independent ghost diagnostics for one caustic-fixed config.
 
-        The ghost term ``G`` and ``Im tau_c`` come straight from
-        `geometry.ghost_kernel` (the oracle), NOT from
-        `channels.farfield_ghost_term`, so the gate/label under test is not
-        used to grade itself.  ``E = F - ppGO`` is the kernel-sum label
-        envelope (the object the surrogate interpolates in the mid band).
+        The ghost term ``G`` and the geometric saddle ``separation`` come
+        straight from `geometry.ghost_kernel` / `geometry.find_images` (the
+        oracle), NOT from `channels.farfield_ghost_term`, so the gate/label
+        under test is not used to grade itself.  ``E = F - ppGO`` is the
+        kernel-sum label envelope (the object the surrogate interpolates in the
+        mid band).  The last returned element is the re-keyed gate currency
+        ``min_a |x_a - x_c|`` (Build 8h-d1), not the retired ``w_min*Im tau_c``.
         """
         source = _source_at(gamma, rho, theta_c_deg)
         part = _partition_at(gamma, source, w)
@@ -1190,12 +1246,15 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         max_f = float(np.max(np.abs(part.exact_total)))
         contribution = geometry.ghost_kernel(w, part.source, part.matrix)
         ghost = contribution.kernel * np.exp(1j * w * contribution.delay)
-        gate_value = float(w.min()) * float(contribution.delay.imag)
-        return part, envelope, ghost, max_f, gate_value
+        # Re-keyed gate currency (Build 8h-d1): the frequency-independent
+        # min saddle separation, recomputed from the same geometry primitives.
+        separation = _ghost_separation(part.source, part.matrix)
+        return part, envelope, ghost, max_f, separation
 
     def test_helpful_fold_annulus_gate_applies_and_ghost_is_bounded(self):
-        # Outside the cusp (fold annulus) the gate PASSES and the resolved
-        # ghost is a finite O(1e-2) mid-band term.  Oracle: the RAW carrier
+        # Outside the cusp (fold annulus) the gate ADMITS (the ghost saddle is
+        # separated from every real image) and the resolved ghost is a finite
+        # O(1e-2) mid-band term.  Oracle: the RAW carrier
         # kernel * exp(1j*w*tau_c) from geometry.ghost_kernel, re-framed by the
         # partition's minimum real-image Fermat delay t_min.  WP1 carries the
         # ghost in that min-subtracted frame (tau_c - t_min); we reconstruct
@@ -1205,10 +1264,10 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         w = np.geomspace(3.0, 40.0, 240)
         for rho in (1.9, 2.1):
             with self.subTest(rho=rho):
-                part, _envelope, ghost, max_f, gate = self._ghost_frame(
+                part, _envelope, ghost, max_f, separation = self._ghost_frame(
                     GHOST_GAMMA, rho, 45.0, w)
                 self.assertEqual(int(part.real_mask.sum()), 2)
-                self.assertGreaterEqual(gate, GHOST_GATE)
+                self.assertGreaterEqual(separation, GHOST_SEPARATION_MIN)
                 produced = ch.farfield_ghost_term(w, part.source, part.matrix)
                 self.assertTrue(np.all(np.isfinite(produced)))
                 # Independent min-subtracted frame: t_min from the geometry
@@ -1230,15 +1289,16 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
                 self.record_comparison()
 
     def test_harmful_cusp_gate_refuses_and_force_apply_grows_residual(self):
-        # Inside the cusp window (Im tau_c ~ 0) the gate REFUSES, and
+        # Inside the cusp window the ghost saddle coalesces with a real image
+        # (separation < _GHOST_SEPARATION_MIN) so the gate REFUSES, and
         # force-applying the production subtraction E - G GROWS the
         # interpolated object by >= 1.5x -- neither sign rescues it.
         w = np.geomspace(3.0, 20.0, 240)
         for rho, theta in ((1.05, 0.2), (1.05, 2.0), (1.15, 1.0)):
             with self.subTest(rho=rho, theta=theta):
-                part, envelope, ghost, _mf, gate = self._ghost_frame(
+                part, envelope, ghost, _mf, separation = self._ghost_frame(
                     GHOST_GAMMA, rho, theta, w)
-                self.assertLess(gate, GHOST_GATE)
+                self.assertLess(separation, GHOST_SEPARATION_MIN)
                 with self.assertRaises(geometry.GhostDomainError):
                     ch.farfield_ghost_term(w, part.source, part.matrix)
                 base = float(np.max(np.abs(envelope)))
@@ -1256,9 +1316,9 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         # makes the sign load-bearing and documents WHY the literal helpful
         # contract below is an expected failure.
         w = np.geomspace(3.0, 40.0, 240)
-        _part, envelope, ghost, _mf, gate = self._ghost_frame(
+        _part, envelope, ghost, _mf, separation = self._ghost_frame(
             GHOST_GAMMA, 2.0, 45.0, w)
-        self.assertGreaterEqual(gate, GHOST_GATE)
+        self.assertGreaterEqual(separation, GHOST_SEPARATION_MIN)
         base = float(np.max(np.abs(envelope)))
         add = float(np.max(np.abs(envelope + ghost))) / base
         sub = float(np.max(np.abs(envelope - ghost))) / base
@@ -1276,9 +1336,9 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         # sign is corrected.  Anti-vacuity counter is bumped BEFORE the
         # (expected-failing) assertion.
         w = np.geomspace(3.0, 40.0, 240)
-        _part, envelope, ghost, _mf, gate = self._ghost_frame(
+        _part, envelope, ghost, _mf, separation = self._ghost_frame(
             GHOST_GAMMA, 2.0, 45.0, w)
-        self.assertGreaterEqual(gate, GHOST_GATE)
+        self.assertGreaterEqual(separation, GHOST_SEPARATION_MIN)
         base = float(np.max(np.abs(envelope)))
         minus_ghost = float(np.max(np.abs(envelope - ghost)))
         self.record_comparison()
@@ -1288,7 +1348,7 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         # Diagnostic: |E|, |E - G|, |E + G| vs w for the helpful config; the
         # residual-reducing (beat-free) curve is visibly the flat one.
         w = np.geomspace(3.0, 40.0, 240)
-        _part, envelope, ghost, max_f, _gate = self._ghost_frame(
+        _part, envelope, ghost, max_f, _separation = self._ghost_frame(
             GHOST_GAMMA, 2.0, 45.0, w)
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig, ax = plt.subplots(figsize=(6, 4))
@@ -1332,8 +1392,9 @@ class TagContractTestCase(ExteriorWindowsTestCase):
     def test_minus_ghost_tag_route_reconstructs_f_on_gated_config(self):
         # The third window class (kernel-sum-minus-ghost) served on a
         # gate-passing config: envelope + ghost through the MINUS_GHOST path
-        # reconstructs exact_total within the bar.  (Same gate-passing fold
-        # config as `GhostGateTestCase`: w_min * Im tau_c = 2.75.)
+        # reconstructs exact_total within the bar.  (Same well-separated fold
+        # config as `GhostGateTestCase.test_gate_passes_on_a_well_separated_fold`:
+        # min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN, so the gate admits.)
         source = _eigenframe_source(2.0, 45.0)
         w = np.geomspace(3.0, 40.0, 200)
         part = _partition(source, w)
@@ -2645,23 +2706,26 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
         self.record_comparison()
 
     def test_lowered_gate_admits_a_spurious_ghost(self) -> None:
-        # Reachable-red (Spec 2): lowering _FARFIELD_WINDOW_RADIANS below the
-        # fold-config gate value flips the ghost from refused to admitted, and
-        # the admitted ghost is >> the 1e-3 reconstruction bar -- the strict
-        # gate correctly excludes it.
-        source = _eigenframe_source(1.2, 30.0)
-        w = np.geomspace(0.03, 30.0, 200)
-        part = _partition(source, w)
+        # Reachable-red (Spec 2, re-keyed Build 8h-d1): near a cusp the ghost
+        # saddle is inseparable from a real image
+        # (min_a |x_a - x_c| < _GHOST_SEPARATION_MIN), so the production gate
+        # REFUSES.  Lowering _GHOST_SEPARATION_MIN below the config's own
+        # separation flips the ghost from refused to admitted, and the spurious
+        # (undecayed near-cusp) ghost is >> the 1e-3 reconstruction bar -- the
+        # strict geometric gate correctly excludes it.  Oracle: separation from
+        # geometry.ghost_kernel.position, independent of the gate branch.
+        source = _source_at(GHOST_GAMMA, 1.05, 0.2)
+        w = np.geomspace(3.0, 20.0, 200)
+        part = _partition_at(GHOST_GAMMA, source, w)
         max_f = float(np.max(np.abs(part.exact_total)))
-        gate = float(w.min()) * float(
-            geometry.ghost_kernel(w, part.source, part.matrix).delay.imag)
-        self.assertLess(gate, GHOST_GATE)
+        separation = _ghost_separation(part.source, part.matrix)
+        self.assertLess(separation, GHOST_SEPARATION_MIN)
         # unmutated: refuses
         with self.assertRaises(geometry.GhostDomainError):
             ch.farfield_ghost_term(w, part.source, part.matrix)
-        # mutated: threshold below the config's own gate value (measured
-        # 2.06e-3) -> admits the ghost the production gate excludes
-        with mock.patch.object(ch, '_FARFIELD_WINDOW_RADIANS', 0.5 * gate):
+        # mutated: threshold below the config's own separation -> admits the
+        # ghost the production gate excludes
+        with mock.patch.object(ch, '_GHOST_SEPARATION_MIN', 0.5 * separation):
             spurious = ch.farfield_ghost_term(w, part.source, part.matrix)
         self.assertGreater(float(np.max(np.abs(spurious))) / max_f, TOL_RECON)
         self.record_comparison()

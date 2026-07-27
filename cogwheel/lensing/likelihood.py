@@ -1549,6 +1549,19 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         if lens['kappa'] != 0.0:
             return None
 
+        # The surrogate is likewise a beta = 0 surface BY CONSTRUCTION.
+        # ``serve`` de-rotates the source position into the shear eigenframe
+        # (via y1, y2) but passes ``theta`` (the caustic arc angle)
+        # UN-rotated, so the served geometry corresponds to
+        # ``theta = theta_eig + beta`` exactly; the emulator was trained only
+        # on the beta = 0 surface, so serving a beta != 0 candidate would use
+        # a mis-rotated caustic angle — finite-but-wrong, the same
+        # never-serve-where-wrong violation the kappa guard prevents.  Fall
+        # through to the exact engine, which handles beta fully.  Latent only
+        # because production pins beta = 0.0 (Inspector latent finding).
+        if lens['beta'] != 0.0:
+            return None
+
         dense_w = dimensionless_frequency(
             self._kernel_dense_f, lens['m_lens_msun'], lens['z_lens'])
         if not np.all(dense_w > 0):
@@ -1678,12 +1691,20 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 # the chart region with the SAME primitive and gate
                 # (`farfield_ghost_term`, source/matrix rebuilt exactly as
                 # the training partition did) so ``F`` telescopes to machine
-                # precision.  ``G`` lives in the mid-band window only, never
-                # in the bare ppGO band above ``w_trust`` (where
+                # precision.  The ghost gate is the GEOMETRIC separation
+                # ``min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN``, which is
+                # frequency-independent: it reads only ``(source, matrix)``,
+                # so this serve mirror and the training label reach a
+                # PROVABLY IDENTICAL admit/refuse decision for a fixed config
+                # -- the old ``w_min * Im tau_c`` decay gate, keyed on the
+                # caller's ``w`` array, could re-add a ghost the label never
+                # subtracted; the separation gate removes that skew by
+                # construction.  ``G`` lives in the mid-band window only,
+                # never in the bare ppGO band above ``w_trust`` (where
                 # ``envelope_dense`` is already zero).  A GhostDomainError
-                # (source too near a principal axis / inside the caustic)
-                # refuses symmetrically with the training label: fall
-                # through to the exact path.
+                # (ghost inseparable from a real image near a cusp / inside
+                # the caustic) refuses symmetrically with the training label:
+                # fall through to the exact path.
                 # ``geom.t_min`` is the frame origin the geometry partition
                 # already solved for; passing it spares a second image-quartic
                 # solve on this per-likelihood-evaluation path.

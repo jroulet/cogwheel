@@ -178,6 +178,31 @@ _FARFIELD_KERNEL_FAMILY = frozenset({
 #: from geometry, not a fit knob.
 _FARFIELD_WINDOW_RADIANS = RHO_END / 2.0
 
+#: Minimum lens-plane separation between the decaying complex-saddle ('ghost')
+#: image and its nearest REAL image, in Einstein-radius units, below which the
+#: mid-band label must NOT subtract the ghost.  The currency is the bare
+#: (un-normalized) complex Euclidean distance ``min_a |x_a - x_c|``, where the
+#: ghost position ``x_c`` is complex (its imaginary part carries the
+#: coalescence information and MUST be kept).  This is a GEOMETRIC,
+#: frequency-independent criterion: unlike the old decay gate
+#: ``w_min * Im tau_c`` it reads only the configuration, so the training label
+#: and the serve mirror reach a provably identical admit/refuse decision for a
+#: fixed config (no ``w``-array skew).  The single-saddle stationary-phase
+#: expansion the ghost kernel relies on is valid only where the ghost is
+#: RESOLVED from every real image; near a cusp the ghost coalesces with a real
+#: image and the expansion breaks even though the ghost has not decayed (decay
+#: and separation disagree exactly there).  The driver measured a clean gap
+#: (2026-07-27): configurations that must be refused reach separation down to
+#: 0.24, while configurations that must be admitted stay at 1.33 and above.
+#: The threshold sits inside that gap and is deliberately biased toward REFUSE:
+#: a false admit injects a silent lnL bias into the served ``F`` (never caught,
+#: since the ghost is baked into the label), whereas a false refuse only drops
+#: to the exact engine, which is never wrong.  CAVEAT: if any refuse-required
+#: (fact-2) config ever sweeps to separation > 0.7, or any admit-required
+#: (fact-1) config to separation < 0.7, this threshold must move to the
+#: geometric mean of the measured refuse-max and admit-min.
+_GHOST_SEPARATION_MIN = 0.7
+
 #: Floor added to every channel's envelope weight ``1 - S_a`` so that a
 #: fully resolved channel (``S_a = 1``) still carries a small, non-zero
 #: share of the transition envelope and the per-frequency weights are
@@ -698,11 +723,14 @@ def real_image_delays(gamma: float, y: Sequence[float], *,
     """
     source = np.asarray(y, dtype=float)
     matrix = geometry.macro_matrix(gamma, beta, kappa)
-    images = geometry.find_images(source, matrix)
-    absolute_delays = np.array(
-        [geometry.delay(image, source, matrix) for image in images],
-        dtype=float)
-    return np.sort(absolute_delays - absolute_delays.min())
+    # Frame origin ``t_min`` from THE authoritative helper (the fourth site
+    # of the 8h-b7 min-subtraction convention), not an inline ``.min()``
+    # rebuild.  ``_frame_delays`` returns ``t_min = min(absolute_delays)``
+    # as a real float, so ``np.sort(absolute_delays - t_min)`` is
+    # byte-identical to the previous expression while sharing the single
+    # source of the frame convention.
+    _images, absolute_delays, t_min = _frame_delays(source, matrix)
+    return np.sort(absolute_delays - t_min)
 
 
 def reconstruct_from_envelope(w: np.ndarray | float,
@@ -910,11 +938,10 @@ def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
     frame; otherwise the subtracted/re-added ``G`` is off by
     ``exp(-1j * w * t_min)`` and the mid-band residual ``|R - G| / |F|``
     does not collapse.  Because ``t_min`` is real, the shift is a pure
-    phase and ``Im tau_c`` (hence the decay ``exp(-w * Im tau_c)``) is
-    unchanged.  This is the SINGLE authoritative ghost primitive: the
-    training label (`farfield_envelope_from_partition`) and the serve
-    mirror both call it, so the subtracted and re-added ``G`` cannot
-    diverge in member selection, carrier convention, or frame.
+    phase.  This is the SINGLE authoritative ghost primitive: the training
+    label (`farfield_envelope_from_partition`) and the serve mirror both
+    call it, so the subtracted and re-added ``G`` cannot diverge in member
+    selection, carrier convention, or frame.
 
     The min-subtraction correction lives HERE, in the composition layer,
     NOT in `geometry.ghost_kernel`: ``tau_c`` is a holomorphic,
@@ -922,23 +949,37 @@ def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
     the partition's gauge choice -- a property of the SET of real images,
     unknown to (and none of the business of) the single-saddle primitive.
     `geometry.ghost_kernel` / `geometry._ghost_delay` therefore stay RAW
-    and byte-identical, honouring their documented contract (``delay`` is
-    the raw complex Fermat delay; ``Im tau_c`` is exposed for the gate).
+    and byte-identical, honouring their documented contract.
 
-    The mid-band ghost gate is enforced here on the RAW ``tau_c``: the
-    ghost is well-defined for the label ONLY where its carrier accumulates
-    at least half the resolution scale over the served band,
-    ``w_min * Im tau_c >= RHO_END / 2``.  ``t_min`` is real, so it does not
-    enter the gate (``Im tau_c`` is frame-invariant) and admit/reject is
-    unchanged.  On a principal axis ``Im tau_c -> 0`` and the gate refuses
-    by construction (`geometry.ghost_kernel` itself raises on the exact
-    axis and inside the caustic); the cusp-window mask carried by the
-    surrogate tiling is the belt-and-suspenders topological guard upstream.
+    The mid-band ghost gate is a GEOMETRIC SEPARATION criterion, enforced
+    here on the lens-plane image positions: the single-saddle
+    stationary-phase expansion the ghost kernel relies on is valid ONLY
+    where the ghost image ``x_c`` is resolved from every real image, so the
+    ghost is subtracted only where
+
+        min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN,
+
+    a bare complex Euclidean distance over the real images ``x_a``
+    (`geometry.find_images`) and the complex ghost position ``x_c``.  The
+    imaginary part of ``x_c`` is KEPT (it carries the near-cusp coalescence
+    information; dropping it would corrupt the separation).  Unlike the
+    former decay gate ``w_min * Im tau_c``, this criterion contains no
+    ``w``: it is a pure property of the configuration, so the training
+    label and the serve mirror -- which historically saw different ``w``
+    sub-bands -- now reach a PROVABLY IDENTICAL admit/refuse decision for a
+    fixed ``(source, matrix)``, removing the train/serve skew by
+    construction.  Near a cusp the ghost coalesces with a real image
+    (``min_a |x_a - x_c| -> 0``) while it may not have decayed at all;
+    the separation gate refuses there where the old decay gate wrongly
+    admitted.  The distinct self-merge pathology (the ghost at its OWN
+    fold) is caught earlier and independently by ``_GHOST_DET_FLOOR``
+    inside `geometry._ghost_kernel`.
 
     Parameters
     ----------
     w : np.ndarray
-        Dimensionless frequency grid (1-D); its minimum gates the ghost.
+        Dimensionless frequency grid (1-D); builds the ghost kernel and
+        carrier but does NOT enter the admit/refuse gate.
     source : np.ndarray
         Shape ``(2,)`` source position.
     matrix : np.ndarray
@@ -953,25 +994,43 @@ def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
     Raises
     ------
     geometry.GhostDomainError
-        If no complex-saddle pair exists, the continuation is degenerate,
-        or the gate ``w_min * Im tau_c >= RHO_END / 2`` fails.  Subclasses
+        If no complex-saddle pair exists, the continuation is degenerate
+        (both from `geometry.ghost_kernel`), or the separation gate
+        ``min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN`` fails (the ghost is
+        inseparable from a real image near a cusp, so the single-saddle
+        expansion is invalid and it must not be subtracted).  Subclasses
         `geometry.LensDomainError`, so it refuses symmetrically with the
         exact path.
     """
     w = np.asarray(w, dtype=float)
+    source = np.asarray(source, dtype=float)
     contribution = geometry.ghost_kernel(w, source, matrix)
-    im_tau_c = float(contribution.delay.imag)
-    w_min = float(np.min(w))
-    if not w_min * im_tau_c >= _FARFIELD_WINDOW_RADIANS:
+    x_c = contribution.position
+    # Geometric separation gate: refuse where the ghost is inseparable from
+    # a real image near a cusp.  ``find_images`` is a quartic solve of the
+    # same cost class already paid inside ``ghost_kernel`` -- no operator
+    # sweep -- and the geometry partition does not expose image positions,
+    # so it is recomputed here rather than threaded in.  The norm is complex
+    # (``|.|`` over the complex ``x_a - x_c``): dropping Im(x_c) would
+    # corrupt the near-cusp separation.
+    real_images = geometry.find_images(source, matrix)
+    if not real_images:
         raise geometry.GhostDomainError(
-            f'Ghost gate w_min * Im tau_c = {w_min * im_tau_c!r} is below '
-            f'the mid-band threshold {_FARFIELD_WINDOW_RADIANS!r}: the '
-            f'decaying ghost is not resolved over the served band (source '
-            f'too close to a principal axis), so it must not be subtracted.')
+            f'No real image for source ({source[0]!r}, {source[1]!r}) to '
+            f'separate the ghost from: the single-saddle expansion cannot '
+            f'be validated, so the ghost must not be subtracted.')
+    separation = min(
+        float(np.sqrt(np.sum(np.abs(x_a - x_c) ** 2))) for x_a in real_images)
+    if not separation >= _GHOST_SEPARATION_MIN:
+        raise geometry.GhostDomainError(
+            f'Ghost separation min_a |x_a - x_c| = {separation!r} is below '
+            f'the threshold {_GHOST_SEPARATION_MIN!r}: single-saddle '
+            f'expansion invalid: ghost inseparable from a real image near a '
+            f'cusp, so it must not be subtracted.')
     # Carry the ghost in the partition's min-subtracted frame: the real
     # kernels it is subtracted alongside use tau_a - t_min, so the ghost
-    # carries tau_c - t_min.  t_min is real, so the gate above (on raw
-    # Im tau_c) is untouched.
+    # carries tau_c - t_min.  t_min is real, so it is a pure phase and does
+    # not affect the (frequency-independent) separation gate above.
     if t_min is None:
         t_min = _frame_t_min(source, matrix)
     return contribution.kernel * np.exp(1j * w * (contribution.delay - t_min))
@@ -1062,9 +1121,13 @@ def farfield_envelope_from_partition(
       ``~1e-4`` in magnitude on the good side of every flip line.
     * `FARFIELD_KERNEL_SUM_MINUS_GHOST` -- the mid band with the decaying
       complex-saddle ghost ``G`` additionally subtracted (`farfield_ghost_term`,
-      gated at ``w_min * Im tau_c >= RHO_END / 2`` outside the cusp windows;
-      on a principal axis ``Im tau_c -> 0`` and the gate refuses by
-      construction).
+      gated on the GEOMETRIC separation ``min_a |x_a - x_c| >=
+      _GHOST_SEPARATION_MIN``: the ghost is subtracted only where it is
+      resolved from every real image, so the single-saddle expansion is
+      valid.  The gate is frequency-independent, so the training label here
+      and the serve mirror decide admit/refuse identically for a fixed
+      config; near a cusp the ghost coalesces with a real image and the gate
+      refuses).
 
     The window boundary ``w_floor`` is `farfield_w_floor`; ``w_trust`` (the
     upper mid-band edge, above which the bare ppGO band-split serves) is a
@@ -1292,10 +1355,12 @@ class ChangRefsdalGeometryPartition:
         Source-plane distance from the source to the caustic; the
         in-domain proximity the likelihood reads.
     caustic_theta : float
-        Polar angle in ``[0, 2*pi)`` parametrizing the critical curve at
-        the closest caustic point (`geometry.NearestCausticPoint.theta`).
-        A GAUGE coordinate carried for the surrogate's cusp-window
-        exclusion test (Build 8c); no engine logic consumes it.
+        LENS-plane critical-curve parameter: the angle in ``[0, 2*pi)``
+        that parametrizes the critical curve at the closest caustic point
+        (`geometry.NearestCausticPoint.theta`).  This is NOT the
+        source-plane caustic angle ``theta_c``.  A GAUGE coordinate
+        carried for the surrogate's cusp-window exclusion test (Build 8c);
+        no engine logic consumes it.
     t_min : float
         Minimum absolute Fermat delay subtracted to form ``delays`` (the
         relative-delay frame origin, `_frame_delays`).  Carried -- as

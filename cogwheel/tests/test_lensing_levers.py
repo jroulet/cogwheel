@@ -1453,6 +1453,22 @@ LEVER5_INACCURATE_W = 28.0
 #: availability.
 LEVER5_ABOVE_CEILING_W = 62.0
 
+#: Nonzero-gauge drift point for the lever-5 wave-vs-geometric comparison.
+#: The default sweep runs at ``beta == kappa == 0``, which makes the
+#: eigenframe rotation (``beta``) and the mass-sheet map (``kappa``) the
+#: identity -- so those two gauge factors could drift without any test
+#: noticing.  This point engages BOTH, well inside the resolved
+#: positive-parity regime (``1 - kappa = 0.8 > gamma = 0.5`` and
+#: ``w * delta_min >> RHO_END``), and demands the SAME agreement.
+LEVER5_GAUGE_BETA = 0.3
+LEVER5_GAUGE_KAPPA = 0.2
+
+#: Resolved frequencies for the nonzero-gauge check: ``w <= 60`` so the
+#: exact wave branch serves, and ``L`` large enough that the geometric
+#: asymptote is already accurate (measured rel-err ``~5e-6``, twenty times
+#: inside ``LEVER5_L_GEO_TOL``).
+LEVER5_GAUGE_W = (55.0, 58.0)
+
 
 @functools.lru_cache(maxsize=None)
 def _lever5_config():
@@ -1478,6 +1494,24 @@ def _geometric_rel_err(w: float) -> float:
     source, gamma, _, _ = _lever5_config()
     geometric = operator.geometric_amplification(w, source, gamma)
     exact = operator.F_op(w, source, gamma)[0]
+    return abs(complex(geometric) - complex(exact)) / abs(complex(exact))
+
+
+def _geometric_rel_err_gauge(w: float, y: np.ndarray, gamma: float,
+                             beta: float, kappa: float) -> float:
+    """Wave-vs-geometric relative error with the gauge factors engaged.
+
+    Identical comparison to `_geometric_rel_err` (independent derivations,
+    F002: `operator.F_op` exact 1D Schwinger quadrature as oracle vs
+    `operator.geometric_amplification` stationary phase as candidate) but
+    with a nonzero shear orientation ``beta`` and convergence ``kappa``,
+    so the eigenframe rotation and mass-sheet map -- both the identity
+    when ``beta == kappa == 0`` -- are actually exercised.
+    """
+    source = np.asarray(y, dtype=float)
+    geometric = operator.geometric_amplification(
+        w, source, gamma, beta=beta, kappa=kappa)
+    exact = operator.F_op(w, source, gamma, beta=beta, kappa=kappa)[0]
     return abs(complex(geometric) - complex(exact)) / abs(complex(exact))
 
 
@@ -1527,6 +1561,35 @@ class LMaxEnforcementBracketTestCase(_LeverTestCase):
             f'L_geo={L_geo} exceeds L_MAX={operator.L_MAX}: the geometric '
             f'asymptote is not yet accurate where the gate hands off.')
         self.record_comparison()
+
+    def test_wave_geometric_agree_at_nonzero_gauge(self) -> None:
+        # The default L-sweep runs at beta == kappa == 0, leaving the
+        # eigenframe rotation (beta) and the mass-sheet map (kappa) inert.
+        # Engage BOTH at a resolved positive-parity point and demand the
+        # same wave-vs-geometric agreement, so a drift in either gauge
+        # factor -- silent at the all-zero point -- is caught here.
+        source = np.array(LEVER5_Y, dtype=float)
+        # Positive parity: 1 - kappa > |gamma|.
+        self.assertGreater(1.0 - LEVER5_GAUGE_KAPPA, abs(LEVER5_GAMMA))
+        matrix = geometry.macro_matrix(
+            LEVER5_GAMMA, LEVER5_GAUGE_BETA, LEVER5_GAUGE_KAPPA)
+        images = geometry.find_images(source, matrix)
+        delays = [geometry.delay(image, source, matrix) for image in images]
+        delta_min = min(abs(delays[i] - delays[j])
+                        for i in range(len(delays))
+                        for j in range(i + 1, len(delays)))
+        for w in LEVER5_GAUGE_W:
+            with self.subTest(w=w):
+                # Deep in the resolved regime: w * delta_min >> RHO_END.
+                self.assertGreater(w * delta_min, operator.RHO_END)
+                rel = _geometric_rel_err_gauge(
+                    w, source, LEVER5_GAMMA,
+                    LEVER5_GAUGE_BETA, LEVER5_GAUGE_KAPPA)
+                self.assertLess(
+                    rel, LEVER5_L_GEO_TOL,
+                    f'nonzero-gauge wave/geometric rel-err {rel:.2e} at '
+                    f'w={w} exceeds L_GEO_TOL={LEVER5_L_GEO_TOL:.0e}.')
+                self.record_comparison()
 
     def test_L_MAX_clears_ceiling_with_headroom(self) -> None:
         self.assertLessEqual(
