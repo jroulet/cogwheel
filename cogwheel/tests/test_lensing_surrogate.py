@@ -836,7 +836,28 @@ class EnvelopeReconstructionTestCase(SurrogateTestCase):
         return epsilons, served_configs
 
     def test_positive_box_reconstruction_within_budget(self):
-        """Positive-parity box: every held-out eps < `POS_RECON_TOL`."""
+        """Positive-parity box: every held-out eps < `POS_RECON_TOL`.
+
+        KNOWN RED (Build 8h-b5, localized, NOT a tolerance problem).  Twelve of
+        the thirteen held-out configs pass with median eps 3.3e-2; ONE fails at
+        eps 2.61e-1 -- the config ``(gamma = 0.40, y1 = 2.183, y2 = 0.0)``.
+        Localization (measured this build): that config sits EXACTLY on the
+        astroid cusp ray ``theta_c = 0``, where the directional caustic radius
+        ``geometry.r_caustic(gamma, theta_c)`` -- and hence the caustic-fixed
+        coordinate map -- has a slope KINK.  Holding ``gamma`` and ``rho``
+        fixed and sweeping ``theta_c`` across the box gives eps 1.5e-4 off the
+        ray and 2.6e-1 ON it; sweeping gamma at fixed off-ray ``theta_c`` gives
+        1.0e-4 ... 3.1e-4 while the same sweep ON the ray gives 1.6e-1 ...
+        3.9e-1 (growing with gamma as the cusp sharpens).  The cubic spline
+        cannot represent the kink because the cusp ray falls in a cell
+        INTERIOR: production aligns INTERIOR tile edges to the cusp rays
+        (`surrogate_training._cusp_aligned_theta_tiles`) but deliberately lays
+        a UNIFORM ``theta_c`` grid for EXTERIOR tiles
+        (`_farfield_exterior_tiles`), on the stated premise that the exterior
+        fit does not need cusp alignment.  This measurement contradicts that
+        premise.  The tolerance is budget-calibrated and is NOT widened to hide
+        it; the red is carried until the exterior tiler aligns to cusp rays.
+        """
         sur = _pos_surrogate_ship()
         epsilons, configs = self._box_eps(sur)
         self.assertGreater(len(epsilons), 0,

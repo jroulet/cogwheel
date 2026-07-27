@@ -36,8 +36,10 @@ Three Architect specifications are certified here:
 
 4. **Mid-window ghost subtraction is helpful-outside / harmful-inside the
    cusp window.**  Outside the cusp (fold annulus, ``gamma = 0.4``,
-   off-cusp ``theta_c ~ 45 deg``, ``rho in [1.4, 1.6]``, ``w in [3, 40]``)
-   the gate ``w_min * Im tau_c >= 2`` APPLIES: the decaying complex-saddle
+   off-cusp ``theta_c ~ 45 deg``, ``rho in [1.9, 2.1]``, ``w in [3, 40]``)
+   the gate ``w_min * Im tau_c >= 2`` APPLIES (measured 2.6-3.7: the
+   caustic-fixed exterior arm is directional, so a resolved ``Im tau_c``
+   sits near ``rho ~ 2``, not ``rho ~ 1.5``): the decaying complex-saddle
    ghost is resolved, finite, and an ``O(1e-2)`` mid-band contribution.
    Inside the cusp (``gamma = 0.4`` near the caustic axis,
    ``rho ~ 1.05-1.15``, ``w in [3, 20]``, ``Im tau_c ~ 0``) the gate
@@ -105,9 +107,9 @@ supplies ``Im tau_c`` directly so the gate outcome is predicted without the
     ``gamma in {0.40, 0.65, 0.90}`` (``w in [0.05, 20]``) the far-field
     kernel-sum label FAILS the ``1e-3`` interior bar at every gamma (it
     subtracts near-merged image kernels that individually diverge inside the
-    caustic; measured held-out eps 0.12 / 33 / 2.5e11) while the SACR-C
+    caustic; measured held-out eps 85.7 / 22.5 / 6.6) while the SACR-C
     ``tau_c``-demodulated envelope label is BOUNDED and orders of magnitude
-    tighter (0.023 / 0.072 / 0.100).  The far-field/SACR-C eps CONTRAST is the
+    tighter (0.064 / 0.053 / 0.060).  The far-field/SACR-C eps CONTRAST is the
     reachable-red proof the win is REPRESENTATIONAL (a different, bounded
     label), not resolution.  The literal ``1e-3`` SACR-C bar is UNREACHABLE at
     a unit-test budget and is carried as an ``@expectedFailure`` tripwire
@@ -236,22 +238,38 @@ REPROV_EPS_HI: float = 1e-3
 INTERIOR_BAND: tuple[float, float] = (0.45, 0.55)
 INTERIOR_GAMMA_MID: float = 0.5
 
-#: A "fat" cusp-axis direction (``theta_c = 0``) where the band-minimum
-#: directional caustic radius is large (``~0.53`` in ``rho``) and a "thin"
-#: diagonal direction (``theta_c = 45 deg``) where it is small (``~0.32``).
+#: A "fat" cusp-axis direction (``theta_c = 0``, directional caustic radius
+#: ``r_caustic(0.5, 0) = 0.816``) and a "thin" diagonal direction
+#: (``theta_c = 45 deg``, ``r_caustic(0.5, pi/4) = 0.505``).  Positive-parity
+#: ``rho`` is normalised by the DIRECTIONAL radius at the same
+#: ``(gamma, theta_c)`` (`surrogate._to_caustic_fixed`), so ``rho = 1`` is the
+#: caustic in every direction and the anisotropy shows up in the PHYSICAL
+#: magnitude a given ``rho`` maps to, not in a direction-dependent ``rho``
+#: boundary.
 FAT_THETA_DEG: float = 0.0
 THIN_THETA_DEG: float = 45.0
 
-#: A ``rho`` between the isotropic inradius (``old_admit_rho ~ 0.318``) and
-#: the fat-direction directional radius: the anisotropic interior the old
-#: inscribed disk discarded.  Admitted in the fat direction (4 images,
-#: interior), refused in the thin direction (2 images, exterior).
-INTERIOR_GAIN_RHO: float = 0.40
+#: PHYSICAL source magnitude of the headline S2-1 anisotropic-gain point:
+#: beyond the isotropic inscribed disk the old admission allowed
+#: (``inradius - eta_max = 0.450``) yet inside the fat-direction caustic
+#: (``0.816``) and outside the thin-direction one (``0.505``).  In
+#: caustic-fixed coordinates it is ``rho = 0.735`` along the cusp axis
+#: (admitted, 4 images) and ``rho = 1.187`` along the diagonal (refused,
+#: 2 images) -- one physical radius, two verdicts, which is exactly the
+#: anisotropy the isotropic disk could not express.
+INTERIOR_GAIN_MAGNITUDE: float = 0.60
 
-#: A radially-interior near-cusp ``rho`` (``< 0.53`` fat-direction radius)
-#: whose nearest caustic point is within ``eta_max`` (measured ``0.033``):
-#: the tube shell excludes it even though it is inside the caustic radially.
-INTERIOR_TUBE_RHO: float = 0.45
+#: A radially-interior near-cusp ``rho`` on the fat (cusp) axis whose NEAREST
+#: caustic point lies OFF the radial ray: its radial gap to the caustic is
+#: ``(1 - rho) * r_caustic = 0.122`` -- nearly 2.5 tube shells -- yet the true
+#: nearest-caustic distance is ``0.011 < eta_max``, so the shell test refuses
+#: it.  Proves the shell keys off nearest distance, not the radial gap.
+INTERIOR_TUBE_RHO: float = 0.85
+
+#: Bisection steps used to locate the exact-oracle band-safe ``rho`` boundary
+#: (`InteriorDirectionalAdmissionTestCase._rho_boundary`); 40 halvings of
+#: ``[0, 1]`` resolve it far below any tolerance the brackets use.
+INTERIOR_BISECTIONS: int = 40
 
 # --- Spec 9 (S2-2): per-lobe macro-saddle interior admission -------------
 #: Macro-saddle shear (``gamma > 1``: two disjoint deltoid lobes off the
@@ -344,9 +362,19 @@ SACRC_CROWN_BAR: float = 1.5e-1
 
 #: Minimum far-field/SACR-C held-out-eps CONTRAST at every gamma: the
 #: reachable-red proof that the SACR-C win is REPRESENTATIONAL (a different,
-#: bounded label) and not merely finer resolution.  Measured 5.4 / 4.6e2 /
-#: 2.5e12; ``2.0`` is a conservative floor that still separates the labels.
+#: bounded label) and not merely finer resolution.  Measured 1.3e3 / 4.2e2 /
+#: 1.1e2; ``2.0`` is a conservative floor that still separates the labels.
 SACRC_CONTRAST_MIN: float = 2.0
+
+#: Order-of-magnitude floor on the WORST (smallest) contrast over the gamma
+#: grid.  The contrast DECREASES with gamma here (1.3e3 -> 4.2e2 -> 1.1e2):
+#: the SACR-C interior eps is flat in gamma (0.064 / 0.053 / 0.060 -- it is a
+#: representational floor, not a resolution one) while the far-field interior
+#: eps falls (85.7 / 22.5 / 6.6) as the caustic degenerates toward the crown
+#: and its near-merged kernels stop diverging so violently.  ``50`` keeps a
+#: 2x margin under the measured worst case while still demanding the
+#: separation be two orders of magnitude everywhere.
+SACRC_CONTRAST_FLOOR: float = 50.0
 
 #: Production carrier-flip fraction (`surrogate._CARRIER_FLIP_FRACTION`):
 #: an interior tile whose parked critical carrier ``tau_c`` hops more than
@@ -729,23 +757,40 @@ class ExteriorTilerReachTestCase(ExteriorWindowsTestCase):
         self.record_comparison()
 
     def test_notch_point_is_below_the_exterior_admission_floor(self) -> None:
-        # A near-cusp point just outside the DIRECTIONAL caustic
-        # (r_caustic) is physically exterior (2 images) yet its SCALAR rho
-        # is < the exclusion floor, so no exterior tile admits it: it is
-        # owned by the Slice-2 interior charts.
+        # The "notch": a near-cusp point just outside the DIRECTIONAL caustic
+        # (r_caustic) is physically exterior (2 images) yet no exterior tile
+        # admits it -- it is owned by the tube / Slice-2 interior charts.
+        # NOTE (caustic-fixed migration): the chart coordinate is now
+        # DIRECTIONAL (`surrogate._to_caustic_fixed` normalises by
+        # r_caustic(gamma, theta_c)), so such a point has rho slightly ABOVE
+        # one, not below it -- the old scalar-reach notch (rho < 1 while
+        # physically exterior) is retired.  What excludes it now is the
+        # eta_max tube shell: its true nearest-caustic distance is 0.0097,
+        # a fifth of eta_max.
         theta_c_deg = 20.0
-        r_dir = geometry.r_caustic(GAMMA, math.radians(theta_c_deg))
+        theta_c = math.radians(theta_c_deg)
+        r_dir = geometry.r_caustic(GAMMA, theta_c)
         reach = surrogate._caustic_reach(GAMMA)
         exclusion_rho = 1.0 + ETA_MAX / reach
-        mag = 1.05 * r_dir  # just outside the directional caustic lobe
-        source = (mag * math.cos(math.radians(theta_c_deg)),
-                  mag * math.sin(math.radians(theta_c_deg)))
-        rho_scalar, _theta = surrogate._to_caustic_fixed(GAMMA, *source)
+        mag = 1.02 * r_dir  # just outside the directional caustic lobe
+        source = (mag * math.cos(theta_c), mag * math.sin(theta_c))
+        rho_scalar, theta_serve = surrogate._to_caustic_fixed(GAMMA, *source)
         # physically exterior: mag exceeds the directional caustic radius ...
         self.assertGreater(mag, r_dir)
-        # ... yet the scalar-reach rho is well below the exterior floor.
-        self.assertLess(rho_scalar, 1.0)
+        # ... so the directional coordinate places it just outside rho = 1 ...
+        self.assertGreater(rho_scalar, 1.0)
+        # ... still below the old scalar-reach exterior floor ...
         self.assertLess(rho_scalar, exclusion_rho)
+        # ... and inside the eta_max tube shell (exact independent oracle).
+        distance = float(geometry.nearest_caustic_point(
+            GAMMA, 0.0, np.asarray(source, dtype=float)).distance)
+        self.assertLess(distance, ETA_MAX)
+        # ... so the per-column exterior admission refuses a tile there.
+        band = (GAMMA - 0.01, GAMMA + 0.01)
+        admission = st._interior_admission(
+            band, 1, reach, st.TrainingConfig())
+        self.assertFalse(admission.admits_exterior(
+            (rho_scalar, theta_serve), (1e-9, 1e-9), 10.0))
         # the engine confirms it is a two-image (exterior) point, not 4-image
         part = _partition(source, np.geomspace(0.5, 5.0, 32))
         self.assertEqual(int(part.real_mask.sum()), 2)
@@ -917,11 +962,12 @@ class GhostGateTestCase(ExteriorWindowsTestCase):
         self.record_comparison()
 
     def test_gate_passes_on_a_high_w_min_grid(self) -> None:
-        # A grid whose minimum frequency is large enough that
-        # w_min * Im tau_c >= 2 passes; the ghost term is finite and the
-        # minus-ghost label reconstructs exact_total.
-        source = _eigenframe_source(1.5, 40.0)
-        w = np.geomspace(1.5, 40.0, 200)
+        # A config far enough from the caustic that Im tau_c is resolved
+        # (0.915) on a mid-band grid whose minimum frequency is 3, so
+        # w_min * Im tau_c = 2.75 >= 2 passes; the ghost term is finite and
+        # the minus-ghost label reconstructs exact_total.
+        source = _eigenframe_source(2.0, 45.0)
+        w = np.geomspace(3.0, 40.0, 200)
         part = _partition(source, w)
         max_f = float(np.max(np.abs(part.exact_total)))
         gate = float(w.min()) * float(
@@ -1038,7 +1084,7 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         # geometry.ghost_kernel; production agreement: farfield_ghost_term
         # returns the SAME finite term (no refusal).
         w = np.geomspace(3.0, 40.0, 240)
-        for rho in (1.4, 1.6):
+        for rho in (1.9, 2.1):
             with self.subTest(rho=rho):
                 part, _envelope, ghost, max_f, gate = self._ghost_frame(
                     GHOST_GAMMA, rho, 45.0, w)
@@ -1057,10 +1103,10 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         # force-applying the production subtraction E - G GROWS the
         # interpolated object by >= 1.5x -- neither sign rescues it.
         w = np.geomspace(3.0, 20.0, 240)
-        for theta in (0.2, 0.5, 1.0):
-            with self.subTest(theta=theta):
+        for rho, theta in ((1.05, 0.2), (1.05, 2.0), (1.15, 1.0)):
+            with self.subTest(rho=rho, theta=theta):
                 part, envelope, ghost, _mf, gate = self._ghost_frame(
-                    GHOST_GAMMA, 1.15, theta, w)
+                    GHOST_GAMMA, rho, theta, w)
                 self.assertLess(gate, GHOST_GATE)
                 with self.assertRaises(geometry.GhostDomainError):
                     ch.farfield_ghost_term(w, part.source, part.matrix)
@@ -1080,7 +1126,7 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         # contract below is an expected failure.
         w = np.geomspace(3.0, 40.0, 240)
         _part, envelope, ghost, _mf, gate = self._ghost_frame(
-            GHOST_GAMMA, 1.4, 45.0, w)
+            GHOST_GAMMA, 2.0, 45.0, w)
         self.assertGreaterEqual(gate, GHOST_GATE)
         base = float(np.max(np.abs(envelope)))
         add = float(np.max(np.abs(envelope + ghost))) / base
@@ -1100,7 +1146,7 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         # (expected-failing) assertion.
         w = np.geomspace(3.0, 40.0, 240)
         _part, envelope, ghost, _mf, gate = self._ghost_frame(
-            GHOST_GAMMA, 1.4, 45.0, w)
+            GHOST_GAMMA, 2.0, 45.0, w)
         self.assertGreaterEqual(gate, GHOST_GATE)
         base = float(np.max(np.abs(envelope)))
         minus_ghost = float(np.max(np.abs(envelope - ghost)))
@@ -1112,7 +1158,7 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         # residual-reducing (beat-free) curve is visibly the flat one.
         w = np.geomspace(3.0, 40.0, 240)
         _part, envelope, ghost, max_f, _gate = self._ghost_frame(
-            GHOST_GAMMA, 1.4, 45.0, w)
+            GHOST_GAMMA, 2.0, 45.0, w)
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig, ax = plt.subplots(figsize=(6, 4))
         ax.loglog(w, np.abs(envelope) / max_f, label='|E| = |F - ppGO|')
@@ -1122,7 +1168,7 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
                   label='|E + G| (beat-free)', ls=':')
         ax.set_xlabel('w')
         ax.set_ylabel('|object| / max|F|')
-        ax.set_title(f'Mid-window ghost overlay (gamma={GHOST_GAMMA}, rho=1.4)')
+        ax.set_title(f'Mid-window ghost overlay (gamma={GHOST_GAMMA}, rho=2.0)')
         ax.legend(fontsize=7)
         fig.tight_layout()
         fig.savefig(OUTPUT_DIR / 'exterior_windows_ghost_overlay.png', dpi=110)
@@ -1155,9 +1201,10 @@ class TagContractTestCase(ExteriorWindowsTestCase):
     def test_minus_ghost_tag_route_reconstructs_f_on_gated_config(self):
         # The third window class (kernel-sum-minus-ghost) served on a
         # gate-passing config: envelope + ghost through the MINUS_GHOST path
-        # reconstructs exact_total within the bar.
-        source = _eigenframe_source(1.5, 40.0)
-        w = np.geomspace(1.5, 40.0, 200)
+        # reconstructs exact_total within the bar.  (Same gate-passing fold
+        # config as `GhostGateTestCase`: w_min * Im tau_c = 2.75.)
+        source = _eigenframe_source(2.0, 45.0)
+        w = np.geomspace(3.0, 40.0, 200)
         part = _partition(source, w)
         max_f = float(np.max(np.abs(part.exact_total)))
         envelope = ch.farfield_envelope_from_partition(
@@ -1545,17 +1592,25 @@ class ReprovisionNodeCountTestCase(ExteriorWindowsTestCase):
 class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
     """Spec 8 (S2-1): caustic-fixed interior directional-radius admission.
 
-    The frozen-WP6 interior admission keeps a tile iff its outer ``rho`` edge
-    is inside the band-MINIMUM directional caustic radius
-    ``min_gamma r_caustic(gamma, theta) / reach`` for every gamma in the band
-    AND at least ``eta_max`` from the nearest caustic point.  This suite
-    certifies, with `geometry.find_images` (the exact quartic image finder) as
-    the fully independent interior/exterior oracle, that
+    Positive-parity ``rho`` is normalised by the DIRECTIONAL caustic radius at
+    the same ``(gamma, theta_c)`` (`surrogate._to_caustic_fixed`), so ``rho = 1``
+    is the caustic for every gamma and every direction: the anisotropy the old
+    isotropic inscribed disk threw away lives in the PHYSICAL magnitude a given
+    ``rho`` maps to, and the residual admission boundary below ``rho = 1`` is
+    set by the ``eta_max`` tube shell alone.  The frozen-WP6 interior admission
+    keeps a tile iff its outer ``rho`` edge is strictly inside ``rho = 1`` AND
+    at least ``eta_max`` from the nearest caustic point at EVERY gamma in the
+    band.  This suite certifies, with `geometry.find_images` (the exact quartic
+    image finder) and `geometry.nearest_caustic_point` (the exact caustic
+    -distance oracle) as fully independent oracles, that
 
     * the anisotropic interior between the isotropic inradius and the
       directional radius -- which the old inscribed-disk admission discarded --
-      is now admitted where it is interior and refused where it is not;
-    * just-inside points admit and just-outside points refuse across the band;
+      is now admitted where it is interior and refused where it is not (ONE
+      physical magnitude, admitted along the cusp axis, refused along the
+      diagonal);
+    * just-inside points admit and just-outside points refuse across the band,
+      bracketed against an exact-oracle boundary;
     * the ``eta_max`` tube shell excludes a radially-interior near-cusp point
       by NEAREST-caustic distance (off the radial ray); and
     * no admitted interior tile straddles one of the four astroid cusp rays.
@@ -1570,47 +1625,93 @@ class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
         super().setUp()
         self.config = st.TrainingConfig()
         self.reach = surrogate._caustic_reach(INTERIOR_GAMMA_MID)
+        self.band_gammas = (INTERIOR_BAND[0], INTERIOR_GAMMA_MID,
+                            INTERIOR_BAND[1])
         self.admission = st._interior_admission(
             INTERIOR_BAND, 1, self.reach, self.config)
 
     def _rho_boundary(self, theta: float) -> float:
-        """Band-minimum directional caustic radius (``rho``) at angle ``theta``."""
-        # `_InteriorAdmission` has NO ``rho_boundary`` attribute -- that name
-        # appears only in a module comment.  It stores PHYSICAL directional
-        # caustic radii per band gamma (``radius_grid``, shape
-        # ``(n_gamma, n_theta)``), and the interior coordinate is
-        # ``rho = |y| / _caustic_reach``, so the band-conservative boundary
-        # is the per-angle MINIMUM over gamma normalised by the band-mid
-        # scalar reach (verified: min 0.318 == the isotropic inradius this
-        # suite contrasts against, max 0.858).
-        boundary = self.admission.radius_grid.min(axis=0) / self.reach
-        return float(np.interp(theta, self.admission.theta_axis, boundary))
+        """Largest band-safe interior ``rho`` at ``theta``, from the EXACT oracle.
+
+        `_InteriorAdmission` has NO ``rho_boundary`` attribute -- that name
+        appears only in a module comment; it stores the PHYSICAL directional
+        caustic radii per band gamma (``radius_grid``).  Because chart ``rho``
+        is normalised by the directional radius AT EACH GAMMA, ``rho = 1`` is
+        the caustic everywhere and the only boundary below it is the
+        ``eta_max`` tube shell.  This returns the largest ``rho`` whose
+        reconstructed physical point clears ``eta_max`` of the caustic at every
+        gamma in the band, located by bisection on the EXACT
+        `geometry.nearest_caustic_point` oracle -- independent of the sampled
+        caustic cloud the production predicate uses, so a just-inside /
+        just-outside bracket built on it cross-checks production instead of
+        restating it.  Measured: ``0.798`` on the cusp axis (where the nearest
+        caustic point is far off the radial ray) rising to ``0.889`` on the
+        diagonal.
+        """
+        radii = [(gamma, geometry.r_caustic(gamma, theta))
+                 for gamma in self.band_gammas]
+
+        def clears(rho: float) -> bool:
+            for gamma, radius in radii:
+                magnitude = rho * radius
+                source = np.array([magnitude * math.cos(theta),
+                                   magnitude * math.sin(theta)])
+                distance = float(geometry.nearest_caustic_point(
+                    gamma, 0.0, source).distance)
+                if distance < self.config.eta_max:
+                    return False
+            return True
+
+        lo, hi = 0.0, 1.0
+        for _ in range(INTERIOR_BISECTIONS):
+            mid = 0.5 * (lo + hi)
+            if clears(mid):
+                lo = mid
+            else:
+                hi = mid
+        return lo
 
     def test_anisotropic_gain_admits_fat_direction_refuses_thin(self) -> None:
-        # The headline S2-1 gain: at rho = 0.40 -- between the isotropic
-        # inradius (old_admit_rho ~ 0.318) and the fat-direction directional
-        # radius (~0.53) -- the point is a genuine 4-image interior along the
-        # cusp axis (fat) but a 2-image exterior along the diagonal (thin).
-        # The old inscribed disk rejected BOTH (band-edge waste); the
-        # directional admission admits the fat one and still refuses the thin.
+        # The headline S2-1 gain, stated where the anisotropy actually lives:
+        # ONE physical magnitude (0.60 -- beyond the isotropic disk the old
+        # admission allowed, |y| <= inradius - eta_max = 0.450) is a genuine
+        # 4-image interior along the cusp axis (fat) and a 2-image exterior
+        # along the diagonal (thin).  The old inscribed disk rejected BOTH
+        # (band-edge waste); the directional normalisation maps it to
+        # rho = 0.735 (admitted) and rho = 1.095 (refused) respectively.
         inradius, encloses = st._caustic_inradius(
             INTERIOR_GAMMA_MID, 1, self.config.n_caustic_samples)
-        old_admit_rho = (inradius - self.config.eta_max) / self.reach
         self.assertTrue(encloses)  # astroid encloses the origin
-        # 0.40 is in the interior the old isotropic disk discarded.
-        self.assertGreater(INTERIOR_GAIN_RHO, old_admit_rho)
+        old_admit_magnitude = inradius - self.config.eta_max
+        # The gain point is outside the interior the old isotropic disk kept.
+        self.assertGreater(INTERIOR_GAIN_MAGNITUDE, old_admit_magnitude)
         tiny = (1e-9, 1e-9)
-        fat = (INTERIOR_GAIN_RHO, math.radians(FAT_THETA_DEG))
-        thin = (INTERIOR_GAIN_RHO, math.radians(THIN_THETA_DEG))
-        # ... and still inside the fat-direction directional radius.
-        self.assertGreater(self._rho_boundary(fat[1]), INTERIOR_GAIN_RHO)
+        fat_theta = math.radians(FAT_THETA_DEG)
+        thin_theta = math.radians(THIN_THETA_DEG)
+        r_fat = geometry.r_caustic(INTERIOR_GAMMA_MID, fat_theta)
+        r_thin = geometry.r_caustic(INTERIOR_GAMMA_MID, thin_theta)
+        # ... inside the caustic along the cusp axis, outside it on the diagonal
+        self.assertGreater(r_fat, INTERIOR_GAIN_MAGNITUDE)
+        self.assertLess(r_thin, INTERIOR_GAIN_MAGNITUDE)
+        fat_src = (INTERIOR_GAIN_MAGNITUDE * math.cos(fat_theta),
+                   INTERIOR_GAIN_MAGNITUDE * math.sin(fat_theta))
+        thin_src = (INTERIOR_GAIN_MAGNITUDE * math.cos(thin_theta),
+                    INTERIOR_GAIN_MAGNITUDE * math.sin(thin_theta))
+        # Production's own coordinate map: multiplicative inside the caustic
+        # (fat, rho = 0.735) and additive outside it (thin, rho = 1.095).
+        fat = surrogate._to_caustic_fixed(INTERIOR_GAMMA_MID, *fat_src)
+        thin = surrogate._to_caustic_fixed(INTERIOR_GAMMA_MID, *thin_src)
+        self.assertLess(fat[0], 1.0)
+        self.assertGreater(thin[0], 1.0)
+        # ... and clear of the tube shell in the fat direction.
+        self.assertGreater(self._rho_boundary(fat_theta), fat[0])
         self.assertTrue(self.admission.admits(fat, tiny))
         self.assertFalse(self.admission.admits(thin, tiny))
         # Independent engine oracle: fat is 4-image interior, thin 2-image.
-        fat_src = surrogate._from_caustic_fixed(INTERIOR_GAMMA_MID, *fat)
-        thin_src = surrogate._from_caustic_fixed(INTERIOR_GAMMA_MID, *thin)
-        self.assertEqual(_signed_morse_sum(INTERIOR_GAMMA_MID, fat_src)[0], 4)
-        self.assertEqual(_signed_morse_sum(INTERIOR_GAMMA_MID, thin_src)[0], 2)
+        self.assertEqual(_signed_morse_sum(
+            INTERIOR_GAMMA_MID, np.asarray(fat_src))[0], 4)
+        self.assertEqual(_signed_morse_sum(
+            INTERIOR_GAMMA_MID, np.asarray(thin_src))[0], 2)
         self.record_comparison()
 
     def test_just_inside_directional_radius_admits_across_band(self) -> None:
@@ -1631,41 +1732,71 @@ class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
                 self.record_comparison()
 
     def test_just_outside_directional_radius_refuses_across_band(self) -> None:
-        # Just outside the band-minimum directional radius (rho = 1.10 *
-        # boundary): refused, and exterior (2 images) for the tightest gamma in
-        # the band (the one whose directional radius set the band minimum).
-        band_gammas = (INTERIOR_BAND[0], INTERIOR_GAMMA_MID, INTERIOR_BAND[1])
+        # Just outside the band-safe boundary (rho = 1.10 * boundary): refused
+        # by production, and the EXACT oracle confirms the refusal is earned --
+        # at some gamma in the band the point is either genuinely exterior
+        # (rho >= 1, 2 images) or inside the eta_max tube shell.  The bracket
+        # is one-sided by construction (the companion test admits at
+        # 0.5 * boundary), so the pair straddles the true boundary.
         for theta_deg in self.SWEEP_THETA_DEG:
             with self.subTest(theta_deg=theta_deg):
                 theta = math.radians(theta_deg)
                 rho_out = 1.10 * self._rho_boundary(theta)
                 self.assertFalse(
                     self.admission.admits((rho_out, theta), (1e-9, 1e-9)))
-                radii = [geometry.r_caustic(
-                    g, theta, n_sample=self.config.n_caustic_samples)
-                    for g in band_gammas]
-                tightest = band_gammas[int(np.argmin(radii))]
-                src = surrogate._from_caustic_fixed(
-                    INTERIOR_GAMMA_MID, rho_out, theta)
-                self.assertEqual(_signed_morse_sum(tightest, src)[0], 2)
+                if rho_out >= 1.0:
+                    # Beyond the caustic in this direction: 2-image exterior
+                    # at the tightest gamma in the band.
+                    radii = [geometry.r_caustic(g, theta)
+                             for g in self.band_gammas]
+                    tightest = self.band_gammas[int(np.argmin(radii))]
+                    src = surrogate._from_caustic_fixed(
+                        tightest, rho_out, theta)
+                    self.assertEqual(_signed_morse_sum(tightest, src)[0], 2)
+                else:
+                    # Still radially interior, but the tube shell bites at
+                    # some band gamma (exact nearest-caustic distance).
+                    distances = []
+                    for gamma in self.band_gammas:
+                        src = surrogate._from_caustic_fixed(
+                            gamma, rho_out, theta)
+                        distances.append(float(
+                            geometry.nearest_caustic_point(
+                                gamma, 0.0,
+                                np.asarray(src, dtype=float)).distance))
+                    self.assertLess(min(distances), self.config.eta_max)
                 self.record_comparison()
 
     def test_tube_shell_excludes_radially_interior_near_cusp_point(self) -> None:
-        # A radially-interior near-cusp point (rho = 0.45 < fat-direction
-        # boundary 0.53, and a 4-image interior by the engine) is nonetheless
-        # REFUSED because its NEAREST caustic point -- off the radial ray near
-        # the cusp -- is within eta_max.  Proves the tube shell keys off
-        # nearest-distance, not the radial gap.
+        # A radially-interior near-cusp point (rho = 0.85 < 1, a 4-image
+        # interior by the engine) whose RADIAL gap to the caustic is 0.122 --
+        # nearly 2.5 tube shells -- is nonetheless REFUSED, because its
+        # NEAREST caustic point lies off the radial ray near the cusp and is
+        # only 0.011 away.  Proves the tube shell keys off nearest-distance,
+        # not the radial gap.
         theta = math.radians(FAT_THETA_DEG)
         center = (INTERIOR_TUBE_RHO, theta)
-        self.assertLess(INTERIOR_TUBE_RHO, self._rho_boundary(theta))  # radial
-        src = surrogate._from_caustic_fixed(
-            INTERIOR_GAMMA_MID, *center)
+        self.assertLess(INTERIOR_TUBE_RHO, 1.0)  # radially inside the caustic
+        # ... yet beyond the band-safe boundary the exact oracle locates.
+        self.assertGreater(INTERIOR_TUBE_RHO, self._rho_boundary(theta))
+        src = surrogate._from_caustic_fixed(INTERIOR_GAMMA_MID, *center)
         self.assertEqual(_signed_morse_sum(INTERIOR_GAMMA_MID, src)[0], 4)
-        nearest = float(np.hypot(
-            self.admission.caustic_cloud[:, 0] - src[0],
-            self.admission.caustic_cloud[:, 1] - src[1]).min())
-        self.assertLess(nearest, self.config.eta_max)  # inside the tube shell
+        radial_gap = (1.0 - INTERIOR_TUBE_RHO) * geometry.r_caustic(
+            INTERIOR_GAMMA_MID, theta)
+        self.assertGreater(radial_gap, 2.0 * self.config.eta_max)
+        # The production predicate's own per-gamma caustic clouds ...
+        nearest_cloud = min(
+            float(np.hypot(cloud[:, 0] - src[0], cloud[:, 1] - src[1]).min())
+            for cloud in self.admission.caustic_clouds)
+        self.assertLess(nearest_cloud, self.config.eta_max)
+        # ... agreeing with the exact independent oracle.
+        nearest_exact = min(
+            float(geometry.nearest_caustic_point(
+                gamma, 0.0,
+                np.asarray(surrogate._from_caustic_fixed(gamma, *center),
+                           dtype=float)).distance)
+            for gamma in self.band_gammas)
+        self.assertLess(nearest_exact, self.config.eta_max)
         self.assertFalse(self.admission.admits(center, (1e-9, 1e-9)))
         self.record_comparison()
 
@@ -1688,7 +1819,7 @@ class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
         """Admission map over ``(|y|, theta)`` vs the true directional caustic."""
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         thetas = np.linspace(-math.pi, math.pi, 181)
-        rhos = np.linspace(0.02, 0.75, 60)
+        rhos = np.linspace(0.02, 1.05, 60)
         admit_theta: list[float] = []
         admit_rho: list[float] = []
         refuse_theta: list[float] = []
@@ -1702,20 +1833,16 @@ class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
                 else:
                     refuse_theta.append(theta)
                     refuse_rho.append(rho)
-        boundary = [geometry.r_caustic(
-            INTERIOR_GAMMA_MID, float(t),
-            n_sample=self.config.n_caustic_samples) / self.reach
-            for t in thetas]
         fig, ax = plt.subplots(figsize=(8.0, 4.0))
         ax.scatter(refuse_theta, refuse_rho, s=4, c='lightgrey',
                    label='refused')
         ax.scatter(admit_theta, admit_rho, s=4, c='tab:blue', label='admitted')
-        ax.plot(thetas, boundary, 'r-', lw=1.5,
-                label=r'$r_{\rm caustic}(\gamma_{\rm mid},\theta)/{\rm reach}$')
+        ax.axhline(1.0, color='r', lw=1.5,
+                   label=r'caustic ($\rho = 1$, every direction)')
         for angle in cusp_angles:
             ax.axvline(angle, color='k', ls=':', lw=0.7)
         ax.set_xlabel(r'$\theta$ [rad]')
-        ax.set_ylabel(r'$\rho = |y| / {\rm reach}$')
+        ax.set_ylabel(r'$\rho = |y| / r_{\rm caustic}(\gamma, \theta)$')
         ax.set_title('S2-1 interior directional-radius admission')
         ax.legend(loc='upper right', fontsize=8)
         fig.tight_layout()
@@ -1918,8 +2045,15 @@ class WholeInteriorSacrcTestCase(ExteriorWindowsTestCase):
                 self.record_comparison()
 
     def test_representational_contrast_far_over_sacrc(self) -> None:
-        # The reachable-red core: far-field/SACR-C eps contrast >> 1 at every
-        # gamma, and GROWS with gamma (0.90 crown far-field diverges hardest).
+        # The reachable-red core: the far-field/SACR-C held-out eps contrast
+        # is >> 1 at EVERY gamma, and two orders of magnitude at the worst
+        # one.  (The retired sub-claim "the contrast GROWS with gamma" is not
+        # migrated: it is false as measured -- the contrast DECREASES,
+        # 1.3e3 / 4.2e2 / 1.1e2, because the SACR-C eps is a flat
+        # representational floor in gamma while the far-field interior eps
+        # falls as the caustic degenerates.  The load-bearing claim is the
+        # separation itself, which is asserted per gamma AND on the worst
+        # case below.)
         contrasts: list[float] = []
         for gamma in SACRC_GAMMAS:
             far, _ = _interior_heldout_eps(
@@ -1930,8 +2064,8 @@ class WholeInteriorSacrcTestCase(ExteriorWindowsTestCase):
                 self.assertGreater(far / sac, SACRC_CONTRAST_MIN)
                 self.record_comparison()
             contrasts.append(far / sac)
-        # Monotone-growing separation: the crown contrast dwarfs the 0.40 one.
-        self.assertGreater(contrasts[-1], contrasts[0])
+        # The separation holds everywhere, not just on average.
+        self.assertGreater(min(contrasts), SACRC_CONTRAST_FLOOR)
         self.record_comparison()
         self._plot_contrast(contrasts)
 
@@ -2108,13 +2242,18 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
     """
 
     def test_directional_reach_breaks_train_serve_rho_agreement(self) -> None:
-        # Reachable-red (Spec 1): if the serve side re-derived rho from the
-        # DIRECTIONAL caustic radius (geometry.r_caustic) instead of the
-        # shared scalar _caustic_reach, train and serve rho would disagree by
-        # O(1) -- far above TOL_RHO.
-        deg = 20.0
-        source = _eigenframe_source(1.5, deg)  # train rho = 1.5 (scalar)
+        # Reachable-red (Spec 1): the caustic-fixed exterior arm is ADDITIVE
+        # (rho = 1 + |y| - r_caustic).  A serve side that re-derived rho as the
+        # RATIO |y| / r_caustic instead would disagree with train by O(1) --
+        # far above TOL_RHO.  The discrepancy is (rho - 1) * |1/r_dir - 1|, so
+        # it is measured where it is largest: the thin diagonal direction
+        # (r_caustic = 0.505, the smallest directional radius) at an outer
+        # exterior node; measured 1.468.
+        deg = THIN_THETA_DEG
+        rho_node = 2.5
+        source = _eigenframe_source(rho_node, deg)
         rho_train, _theta = surrogate._to_caustic_fixed(GAMMA, *source)
+        self.assertAlmostEqual(rho_train, rho_node, places=12)
         r_dir = geometry.r_caustic(GAMMA, math.radians(deg))
         rho_serve_bad = float(np.hypot(*source)) / r_dir
         self.assertGreater(abs(rho_serve_bad - rho_train), TOL_RHO)
@@ -2130,11 +2269,15 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
         w = np.geomspace(0.03, 30.0, 200)
         part = _partition(source, w)
         max_f = float(np.max(np.abs(part.exact_total)))
+        gate = float(w.min()) * float(
+            geometry.ghost_kernel(w, part.source, part.matrix).delay.imag)
+        self.assertLess(gate, GHOST_GATE)
         # unmutated: refuses
         with self.assertRaises(geometry.GhostDomainError):
             ch.farfield_ghost_term(w, part.source, part.matrix)
-        # mutated: threshold below the ~0.03 gate value -> admits the ghost
-        with mock.patch.object(ch, '_FARFIELD_WINDOW_RADIANS', 0.01):
+        # mutated: threshold below the config's own gate value (measured
+        # 2.06e-3) -> admits the ghost the production gate excludes
+        with mock.patch.object(ch, '_FARFIELD_WINDOW_RADIANS', 0.5 * gate):
             spurious = ch.farfield_ghost_term(w, part.source, part.matrix)
         self.assertGreater(float(np.max(np.abs(spurious))) / max_f, TOL_RECON)
         self.record_comparison()
@@ -2180,10 +2323,13 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
         self.record_comparison()
 
     def test_isotropic_inradius_admission_loses_the_anisotropic_gain(self) -> None:
-        # Reachable-red (Spec 8): reverting the directional boundary to the old
-        # isotropic inscribed-disk radius (a constant rho_boundary =
-        # inradius / reach) flips the fat-direction gain point from admitted to
-        # refused -- the band-edge waste the migration removed.
+        # Reachable-red (Spec 8): reverting the DIRECTIONAL radius grid to the
+        # old isotropic inscribed-disk radius (one constant radius in every
+        # direction, `radius_grid` filled with the inradius) flips the
+        # fat-direction gain point from admitted to refused -- the band-edge
+        # waste the migration removed.  Under the isotropic radius the same
+        # physical magnitude 0.60 reads rho = 1.20 (outside the inscribed
+        # disk); under the directional radius it reads rho = 0.735.
         config = st.TrainingConfig()
         reach = surrogate._caustic_reach(INTERIOR_GAMMA_MID)
         admission = st._interior_admission(
@@ -2192,10 +2338,17 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
             INTERIOR_GAMMA_MID, 1, config.n_caustic_samples)
         isotropic = dataclasses.replace(
             admission,
-            rho_boundary=np.full_like(admission.rho_boundary, inradius / reach))
-        fat = (INTERIOR_GAIN_RHO, math.radians(FAT_THETA_DEG))
+            radius_grid=np.full_like(admission.radius_grid, inradius))
+        fat_theta = math.radians(FAT_THETA_DEG)
+        fat_src = (INTERIOR_GAIN_MAGNITUDE * math.cos(fat_theta),
+                   INTERIOR_GAIN_MAGNITUDE * math.sin(fat_theta))
+        fat = surrogate._to_caustic_fixed(INTERIOR_GAMMA_MID, *fat_src)
+        fat_isotropic = (INTERIOR_GAIN_MAGNITUDE / inradius, fat_theta)
+        self.assertLess(fat[0], 1.0)
+        self.assertGreater(fat_isotropic[0], 1.0)
         self.assertTrue(admission.admits(fat, (1e-9, 1e-9)))       # directional
-        self.assertFalse(isotropic.admits(fat, (1e-9, 1e-9)))      # isotropic
+        self.assertFalse(
+            isotropic.admits(fat_isotropic, (1e-9, 1e-9)))         # isotropic
         self.record_comparison()
 
     def test_broken_winding_test_loses_saddle_lobe_membership(self) -> None:

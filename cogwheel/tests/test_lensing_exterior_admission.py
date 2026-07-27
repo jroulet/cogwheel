@@ -19,9 +19,13 @@ Three Professor-authored specifications are certified here.
    astroid spike moves with gamma, so the worst case is the band's largest
    directional reach, i.e. its upper edge) -- must be covered by the union of
    admitted exterior tiles to at least ``COVERAGE_BAR = 0.95`` in EVERY band,
-   INCLUDING the previously-dead ``0.80-0.90`` band.  The bar is 0.95 (NOT
-   0.97): the measured coverage at ``COVERAGE_N_TILES = 150`` is ~0.977
-   (0.80-0.90) / ~0.99 (0.40-0.50), leaving margin for grid discretization
+   INCLUDING the previously-dead ``0.80-0.90`` band.  The five certified bands
+   are the four the OLD scalar-reach admission was measured to fail
+   (0.944 / 0.632 / 0.271 / 0.000 for 0.30-0.40 / 0.50-0.70 / 0.70-0.80 /
+   0.80-0.90) plus the 0.40-0.50 control.  The bar is 0.95 (NOT
+   0.97): the measured coverage at ``COVERAGE_N_TILES = 150`` is 0.996 /
+   0.994 / 0.986 / 0.980 / 0.973 in band order, leaving margin for grid
+   discretization
    (binomial sampling std ~0.002 at ``|T| ~ 9000``).  Coverage rises
    monotonically with tiling resolution (0.908 -> 0.942 -> 0.973 -> 0.982 at
    n = 30, 60, 120, 200) and converges toward 1, so there is NO persistent
@@ -124,8 +128,15 @@ COVERAGE_N_TILES = 150
 #: Coverage acceptance bar (Professor: 0.95, NOT 0.97 -- discretization margin).
 COVERAGE_BAR = 0.95
 
-#: Bands certified for coverage: a low band and the previously-dead high band.
-COVERAGE_BANDS = ((0.40, 0.50), (0.80, 0.90))
+#: Bands certified for coverage.  The four driver-measured bands that pinned
+#: the OLD scalar-reach defect (0.944 / 0.632 / 0.271 / 0.000 coverage) plus
+#: the original (0.40, 0.50) control, so the acceptance covers the whole
+#: positive-parity gamma range up to the crown, not only its two ends.
+#: Measured NEW coverage at `COVERAGE_N_TILES`: 0.996 / 0.994 / 0.986 /
+#: 0.980 / 0.973 -- monotone decreasing in gamma (the cusp spike lengthens),
+#: all clear of the 0.95 bar.
+COVERAGE_BANDS = ((0.30, 0.40), (0.40, 0.50), (0.50, 0.70), (0.70, 0.80),
+                  (0.80, 0.90))
 
 #: Band used for the HARD no-false-admit invariant (the critical high band).
 NFA_BAND = (0.80, 0.90)

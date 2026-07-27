@@ -318,17 +318,30 @@ def _pos_farfield_dense():
     the census crown / strong bars.  Built via the reused 8a `from_engine`
     far-field trainer.
     """
-    # Caustic-fixed image (Build 8h-b3) of the SAME physical exterior box
-    # (y1 in [2.05, 2.35], y2 in [-0.15, 0.15]) over gamma in [0.35, 0.65]:
-    # rho in [~1.05, ~2.72] (kept strictly > 1 => exterior far-field valid),
-    # theta_c in [-0.08, 0.08].  Because the scalar caustic reach varies ~2.5x
-    # across the gamma band, the fixed-|y| shell smears over a wide rho span,
-    # so n_rho is raised (5 -> 9) to hold the per-gamma radial resolution the
-    # served points need -- densifying nodes preserves (does not weaken) the
-    # accuracy the LnlikeAccuracy tier bars certify.
+    # Caustic-fixed image of the SAME physical exterior box
+    # (y1 in [2.05, 2.35], y2 in [-0.15, 0.15]) over gamma in [0.35, 0.65].
+    # The positive-parity exterior arm is DIRECTIONAL
+    # (rho = 1 + |y| - r_caustic(gamma, theta_c), `_to_caustic_fixed`), so that
+    # box images onto rho in [2.203, 2.852] -- NOT the [1.05, 2.75] a scalar
+    # reach would give.  Using the scalar-era range put the chart's inner rows
+    # against the caustic (rho = 1.05 <=> |y| = r_caustic + 0.05), where the
+    # kernel-sum far-field label diverges; the range below is the true image of
+    # the box with a 0.02 pad.  n_rho stays at 9 (raised from 5) for radial
+    # resolution -- densifying nodes preserves (does not weaken) the accuracy
+    # the LnlikeAccuracy tier bars certify.
+    #
+    # w_range starts at 0.10, just below the m = 60 Msun detector band
+    # (15-1024 Hz => w in [0.111, 7.61]) and ABOVE the diffractive bottom.  The
+    # chart carries the ``farfield_full_kernel_sum`` label, which diverges as
+    # w -> 0 (measured max|E| = 2.7 at w = 0.12 but 69 at w = 0.02, ~40x
+    # max|F|); production
+    # never trains that label below the region ``w_floor`` -- it serves the
+    # bounded diffractive label there -- so training down to 0.02 put the
+    # fixture in a regime the label is not defined to represent (its held-out
+    # eps then reads 13.6 and is insensitive to node density in every axis).
     return LensAmplificationSurrogate.from_engine(
-        gamma_range=(0.35, 0.65), rho_range=(1.05, 2.75),
-        theta_c_range=(-0.08, 0.08), w_range=(0.02, 260.0),
+        gamma_range=(0.35, 0.65), rho_range=(2.18, 2.87),
+        theta_c_range=(-0.08, 0.08), w_range=(0.10, 260.0),
         n_gamma=6, n_rho=9, n_theta=5, w_nodes_per_decade=12)
 
 

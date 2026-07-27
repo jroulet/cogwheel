@@ -623,10 +623,13 @@ class InteriorAdmissionTestCase(_PpgoTestCase):
                          'astroid interior must expose four cusp rays')
         # A concrete exterior straddler: 1.2x the directional boundary at an
         # off-cusp angle is a 2-image exterior config, and must be refused.
+        # `_InteriorAdmission` has NO ``rho_boundary`` attribute -- that name
+        # appears only in a module comment.  Positive-parity rho is normalised
+        # by the DIRECTIONAL caustic radius at the same (gamma, theta_c)
+        # (`surrogate._to_caustic_fixed`), so the directional boundary IS
+        # rho = 1 in every direction and 1.2x it is simply rho = 1.2.
         theta = math.radians(30.0)
-        rho_boundary = float(np.interp(theta, self.admission.theta_axis,
-                                       self.admission.rho_boundary))
-        rho_out = 1.2 * rho_boundary
+        rho_out = 1.2
         self.comparisons += 1
         self.assertFalse(
             self.admission.admits((rho_out, theta), (1e-9, 1e-9)),
