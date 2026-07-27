@@ -1673,11 +1673,15 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 # (source too near a principal axis / inside the caustic)
                 # refuses symmetrically with the training label: fall
                 # through to the exact path.
+                # ``geom.t_min`` is the frame origin the geometry partition
+                # already solved for; passing it spares a second image-quartic
+                # solve on this per-likelihood-evaluation path.
                 source = np.array([lens['y1'], lens['y2']], dtype=float)
                 matrix = macro_matrix(
                     lens['gamma'], lens['beta'], lens['kappa'])
                 try:
-                    ghost = farfield_ghost_term(chart_w, source, matrix)
+                    ghost = farfield_ghost_term(
+                        chart_w, source, matrix, t_min=geom.t_min)
                 except GhostDomainError:
                     return None
                 envelope_dense[below_mask] += ghost

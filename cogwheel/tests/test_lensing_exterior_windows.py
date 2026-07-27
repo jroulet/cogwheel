@@ -712,6 +712,14 @@ COLLAPSE_RAW_ACTIVE: float = 1e-2
 #: conservative floor under the measured collapses 174x / 31x / 607x).
 COLLAPSE_FIXED_BAR: float = 5e-3
 COLLAPSE_RAW_FLOOR: float = 1e-2
+
+#: A gate-ADMITTED near-principal-axis config where subtracting the
+#: correctly-framed ghost still makes the label WORSE than subtracting
+#: nothing (``(gamma, theta_c_deg, offset)``).  Measured 2026-07-27:
+#: fixed 4.31e-2 vs bare 4.03e-3, i.e. 10.7x worse.  The `COLLAPSE_PROBES`
+#: all sit at ``theta_c`` 45/45/75 deg -- the angular sweet spot -- so this
+#: probe exists to stop that sample being read as a global claim.
+NEAR_AXIS_PROBE: tuple[float, float, float] = (0.30, 85.0, 1.00)
 COLLAPSE_RATIO_FLOOR: float = 10.0
 
 #: Scalar frequency at which the frozen real-image kernels are captured.
@@ -2392,10 +2400,16 @@ class GhostFrameCollapseTestCase(ExteriorWindowsTestCase):
             part, ch.FARFIELD_KERNEL_SUM_MINUS_GHOST)
         resid_raw = np.abs(kernel_sum - ghost_raw) / np.abs(exact)
         resid_fixed = np.abs(minus_ghost) / np.abs(exact)
+        # The DO-NOTHING control: subtract no ghost at all.  Without this the
+        # suite can only say the fixed frame beats the BROKEN frame, which is
+        # a low bar -- it cannot detect a configuration where subtracting the
+        # correctly-framed ghost is still worse than leaving it alone.
+        resid_bare = np.abs(kernel_sum) / np.abs(exact)
         return {
             'w': w,
             'resid_raw': resid_raw,
             'resid_fixed': resid_fixed,
+            'resid_bare': resid_bare,
             'active': resid_raw >= COLLAPSE_RAW_ACTIVE,
             'gate': gate,
             'n_real': int(part.real_mask.sum()),
@@ -2426,7 +2440,58 @@ class GhostFrameCollapseTestCase(ExteriorWindowsTestCase):
                 self.assertGreater(raw, COLLAPSE_RAW_FLOOR)
                 self.assertLess(fixed, COLLAPSE_FIXED_BAR)
                 self.assertGreaterEqual(raw / fixed, COLLAPSE_RATIO_FLOOR)
+                # Beating the BROKEN frame is not enough: subtracting the
+                # correctly-framed ghost must also beat subtracting NOTHING.
+                # Without this control the suite cannot see a config where
+                # the corrected ghost still degrades the label -- and such
+                # configs exist and are gate-admitted (see
+                # `test_near_axis_ghost_degrades_the_label`).
+                bare = float(trace['resid_bare'][active].max())
+                self.assertLessEqual(
+                    fixed, bare,
+                    f'ghost subtraction is worse than no subtraction at '
+                    f'gamma={gamma}, theta_c={theta_c_deg} deg: '
+                    f'{fixed:.3e} vs {bare:.3e}')
                 self.record_comparison()
+
+    def test_near_axis_ghost_degrades_the_label(self) -> None:
+        """PINNED LIMITATION: gate-admitted near-axis configs get WORSE.
+
+        The ``w_min * Im tau_c >= RHO_END / 2`` gate keys on whether the
+        ghost has DECAYED, not on whether the saddles are SEPARATED.  Near a
+        principal axis the ghost is undecayed -- so the gate admits -- while
+        the real image and the ghost pair are coalescing toward the cusp, so
+        the single-saddle expansion is invalid and subtracting the ghost,
+        correctly framed or not, INFLATES the stored label.
+
+        This pins the defect as real and gate-admitted, so the collapse
+        suite's three sweet-spot probes cannot be mistaken for a global
+        claim.  DELETE this test when the gate is re-keyed on saddle
+        separation: it going red is the signal that the fix landed.
+        """
+        gamma, theta_c_deg, offset = NEAR_AXIS_PROBE
+        source = _source_at(gamma, 1.0 + offset, theta_c_deg)
+        probe_w = np.geomspace(1.0, COLLAPSE_WMAX, 8)
+        probe_part = _partition_at(gamma, source, probe_w)
+        im_tau_c = float(geometry.ghost_kernel(
+            probe_w, probe_part.source, probe_part.matrix).delay.imag)
+        self.assertGreater(im_tau_c, 0.0)
+        # Smallest grid minimum that clears the gate, so the config is
+        # genuinely ADMITTED rather than refused for an unrelated reason.
+        w_min = 1.02 * GHOST_GATE / im_tau_c
+        self.assertLess(w_min, COLLAPSE_WMAX,
+                        'near-axis probe cannot clear the gate below w_max')
+
+        trace = self._collapse_residuals(gamma, theta_c_deg, offset, w_min)
+        self.assertEqual(trace['n_real'], 2)
+        self.assertGreaterEqual(trace['gate'], GHOST_GATE)
+        bare = float(trace['resid_bare'].max())
+        fixed = float(trace['resid_fixed'].max())
+        self.assertGreater(
+            fixed, bare,
+            'near-axis ghost subtraction no longer degrades the label -- if '
+            'the gate was re-keyed on saddle separation, delete this test')
+        self.record_comparison()
 
     def test_collapse_diagnostic_plot(self) -> None:
         # Diagnostic: |E_ff - G|/|F| vs w for the raw and fixed ghost frames
@@ -2739,11 +2804,17 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
         resid_raw = np.abs(kernel_sum - ghost_raw) / np.abs(exact)
         active = resid_raw >= COLLAPSE_RAW_ACTIVE
         self.assertTrue(bool(active.any()))
-        # Mutate: zero the frame shift -> the ghost is subtracted in the wrong
-        # (raw) frame, exactly the pre-fix state.
-        with mock.patch.object(ch, '_frame_t_min', return_value=0.0):
-            mutated = ch.farfield_envelope_from_partition(
-                part, ch.FARFIELD_KERNEL_SUM_MINUS_GHOST)
+        # Mutate: zero the frame origin the label reads -> the ghost is
+        # subtracted in the wrong (raw) frame, exactly the pre-fix state.
+        #
+        # The mutation MUST target `partition.t_min`, the value the label
+        # actually consumes -- not `_frame_t_min`, which the label no longer
+        # calls now that the frame origin is carried on the partition.  A mock
+        # of the helper would patch a function that is never reached, leaving
+        # the label unchanged and this reachable-red control silently inert.
+        mutated = ch.farfield_envelope_from_partition(
+            dataclasses.replace(part, t_min=0.0),
+            ch.FARFIELD_KERNEL_SUM_MINUS_GHOST)
         resid_mutated = np.abs(mutated) / np.abs(exact)
         self.assertGreater(
             float(resid_mutated[active].max()), COLLAPSE_FIXED_BAR)

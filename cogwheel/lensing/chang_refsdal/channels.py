@@ -843,22 +843,16 @@ def _farfield_switch(real_mask: np.ndarray, n_w: int,
     return switch
 
 
-def _frame_t_min(source: np.ndarray, matrix: np.ndarray) -> float:
-    """Minimum real-image Fermat delay: the partition frame's origin.
+def _frame_delays(source: np.ndarray, matrix: np.ndarray
+                  ) -> tuple[np.ndarray, np.ndarray, float]:
+    """``(images, absolute_delays, t_min)`` -- the relative-delay frame.
 
-    The min-subtraction convention that defines the relative-delay frame
-    every channel kernel is carried in.  This value MUST equal
-    `ChangRefsdalPartition`'s ``t_min = min(absolute Fermat delays)``: the
-    partition builds ``absolute_delays = [geometry.delay(image, source,
-    matrix) for image in geometry.find_images(source, matrix)]`` and
-    subtracts ``t_min = float(absolute_delays.min())`` from every delay.
-    This helper recomputes that value through the SAME deterministic path
-    (`geometry.find_images` + `geometry.delay`, identical array
-    construction) so the two are bit-identical -- one authoritative
-    expression of the frame origin, recomputable anywhere the source and
-    macro matrix are known even after the absolute delays have been
-    dropped (e.g. the likelihood serve mirror, which keeps only the
-    already-min-subtracted ``geom.delays``).
+    THE authoritative construction of the min-subtraction convention every
+    channel kernel is carried in: `ChangRefsdalChannels.evaluate`,
+    `ChangRefsdalChannels.geometry_partition` and `farfield_ghost_term` all
+    obtain ``t_min`` from here, so no two sites can drift apart.  Returning
+    the images and absolute delays alongside it keeps the partition builders
+    from re-solving the image quartic just to recover them.
 
     Parameters
     ----------
@@ -869,21 +863,35 @@ def _frame_t_min(source: np.ndarray, matrix: np.ndarray) -> float:
 
     Returns
     -------
-    float
-        ``min_image geometry.delay(image, source, matrix)`` -- the minimum
-        real-image Fermat delay subtracted to form the relative-delay
-        frame.  Real (``t_min`` carries no imaginary part), so subtracting
-        it leaves ``Im tau_c`` invariant.
+    images : np.ndarray
+        The real images (`geometry.find_images`).
+    absolute_delays : np.ndarray
+        Their absolute Fermat delays, in image order.
+    t_min : float
+        ``min(absolute_delays)`` -- the frame origin subtracted from every
+        delay.  Real, so subtracting it leaves ``Im tau_c`` invariant.
     """
     images = geometry.find_images(source, matrix)
     absolute_delays = np.array(
         [geometry.delay(image, source, matrix) for image in images],
         dtype=float)
-    return float(absolute_delays.min())
+    return images, absolute_delays, float(absolute_delays.min())
+
+
+def _frame_t_min(source: np.ndarray, matrix: np.ndarray) -> float:
+    """Minimum real-image Fermat delay: the partition frame's origin.
+
+    Thin accessor over `_frame_delays` for callers that hold only
+    ``(source, matrix)`` and cannot be handed a precomputed ``t_min`` --
+    it costs an image-quartic solve, so prefer passing `partition.t_min`
+    or `geometry_partition.t_min` where one is already in hand.
+    """
+    return _frame_delays(source, matrix)[2]
 
 
 def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
-                        matrix: np.ndarray) -> np.ndarray:
+                        matrix: np.ndarray, *,
+                        t_min: float | None = None) -> np.ndarray:
     """Decaying complex-saddle ghost contribution ``G(w)`` to the total.
 
     The carrier-restored ghost term the mid-band label subtracts and the
@@ -964,7 +972,8 @@ def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
     # kernels it is subtracted alongside use tau_a - t_min, so the ghost
     # carries tau_c - t_min.  t_min is real, so the gate above (on raw
     # Im tau_c) is untouched.
-    t_min = _frame_t_min(source, matrix)
+    if t_min is None:
+        t_min = _frame_t_min(source, matrix)
     return contribution.kernel * np.exp(1j * w * (contribution.delay - t_min))
 
 
@@ -1104,7 +1113,8 @@ def farfield_envelope_from_partition(
         partition.saddle_kernels, switch, 0.0, _envelope_weights(switch))
     if definition == FARFIELD_KERNEL_SUM_MINUS_GHOST:
         envelope = envelope - farfield_ghost_term(
-            partition.w, partition.source, partition.matrix)
+            partition.w, partition.source, partition.matrix,
+            t_min=partition.t_min)
     return envelope
 
 
@@ -1286,6 +1296,13 @@ class ChangRefsdalGeometryPartition:
         the closest caustic point (`geometry.NearestCausticPoint.theta`).
         A GAUGE coordinate carried for the surrogate's cusp-window
         exclusion test (Build 8c); no engine logic consumes it.
+    t_min : float
+        Minimum absolute Fermat delay subtracted to form ``delays`` (the
+        relative-delay frame origin, `_frame_delays`).  Carried -- as
+        `ChangRefsdalPartition` already carries it -- so a consumer that
+        must express another term in this frame, such as the ghost
+        carrier in `farfield_ghost_term`, can be handed the value instead
+        of re-solving the image quartic to recover it.
     """
 
     w: np.ndarray
@@ -1296,6 +1313,7 @@ class ChangRefsdalGeometryPartition:
     real_mask: np.ndarray
     caustic_distance: float
     caustic_theta: float
+    t_min: float
 
 
 class ChangRefsdalChannels:
@@ -1393,11 +1411,7 @@ class ChangRefsdalChannels:
         caustic = geometry.nearest_caustic_point(
             gamma, beta, source, kappa=kappa)
 
-        images = geometry.find_images(source, matrix)
-        absolute_delays = np.array(
-            [geometry.delay(image, source, matrix) for image in images],
-            dtype=float)
-        t_min = float(absolute_delays.min())
+        images, absolute_delays, t_min = _frame_delays(source, matrix)
         relative_delays = absolute_delays - t_min
 
         assignment, markers = _assign_labels(
@@ -1517,11 +1531,7 @@ class ChangRefsdalChannels:
         caustic = geometry.nearest_caustic_point(
             gamma, beta, source, kappa=kappa)
 
-        images = geometry.find_images(source, matrix)
-        absolute_delays = np.array(
-            [geometry.delay(image, source, matrix) for image in images],
-            dtype=float)
-        t_min = float(absolute_delays.min())
+        images, absolute_delays, t_min = _frame_delays(source, matrix)
         relative_delays = absolute_delays - t_min
 
         assignment, markers = _assign_labels(
@@ -1545,7 +1555,8 @@ class ChangRefsdalChannels:
             critical_delay=float(critical_delay),
             real_mask=real_mask,
             caustic_distance=float(caustic.distance),
-            caustic_theta=float(caustic.theta))
+            caustic_theta=float(caustic.theta),
+            t_min=t_min)
 
     def evaluate_path(self, path: Iterable[dict]
                       ) -> list[ChangRefsdalPartition]:
