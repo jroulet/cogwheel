@@ -3592,15 +3592,43 @@ class BuildOrchestrator:
         if os.environ.get("SDK_SKIP_TREE_GATE"):
             self._log("  Tree gate SKIPPED (SDK_SKIP_TREE_GATE)")
             return
-        self._log("  Tree-wide fast gate (commit precondition)...")
+        # STREAM to a file rather than capturing silently: this gate is an
+        # embarrassingly parallel pytest run that has taken 45+ minutes when
+        # a build ships a heavy acceptance test, and `capture_output=True`
+        # made it a total black box for its whole runtime — no way to answer
+        # "how far along is it?" without py-spy forensics. pytest -q emits
+        # "[ NN%]" progress, so a tailable log turns the gate into something
+        # the driver can actually monitor (owner-requested 2026-07-27).
+        gate_log = Path(self.project_root) / ".claude/sdk/logs/tree_gate.log"
+        self._log(f"  Tree-wide fast gate (commit precondition) — progress: "
+                  f"tail -f {gate_log}")
         runner = str(Path(self.project_root) / ".claude/sdk/run_py.sh")
-        proc = subprocess.run(
-            [runner, "-m", "pytest", "cogwheel/tests/", "-q",
-             "-p", "no:cacheprovider", "-n", "8", "--dist", "loadfile",
-             "-k", "not Timing and not timing"],
-            capture_output=True, text=True, cwd=self.project_root,
-            timeout=3600)
-        tail_txt = chr(10).join((proc.stdout or '').splitlines()[-25:])
+        try:
+            gate_log.parent.mkdir(parents=True, exist_ok=True)
+            stream = open(gate_log, "w", encoding="utf-8", buffering=1)
+        except OSError:
+            stream = None
+        try:
+            if stream is not None:
+                proc = subprocess.run(
+                    [runner, "-m", "pytest", "cogwheel/tests/", "-q",
+                     "-p", "no:cacheprovider", "-n", "8", "--dist", "loadfile",
+                     "-k", "not Timing and not timing"],
+                    stdout=stream, stderr=subprocess.STDOUT, text=True,
+                    cwd=self.project_root, timeout=3600)
+                stdout_txt = gate_log.read_text(encoding="utf-8", errors="replace")
+            else:
+                proc = subprocess.run(
+                    [runner, "-m", "pytest", "cogwheel/tests/", "-q",
+                     "-p", "no:cacheprovider", "-n", "8", "--dist", "loadfile",
+                     "-k", "not Timing and not timing"],
+                    capture_output=True, text=True, cwd=self.project_root,
+                    timeout=3600)
+                stdout_txt = proc.stdout or ""
+        finally:
+            if stream is not None:
+                stream.close()
+        tail_txt = chr(10).join(stdout_txt.splitlines()[-25:])
         if proc.returncode != 0:
             raise GateFailure(
                 'Tree-wide fast gate RED -- commit blocked. Tail:' + chr(10)

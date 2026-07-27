@@ -168,6 +168,16 @@ TEST_TIER_LAW = """\
   post-build") — never in an in-build test spec or work package.
 - Cost every acceptance criterion BEFORE writing it: unit count x measured
   per-unit cost. If you cannot bound it, it is post-build by default.
+- HARD CEILING: any single test must run in < 60 s, and a test FILE in
+  < 5 min, on the fast tier. Before writing a test that loops over a grid
+  (N samples x M bands x K tiles ...), multiply it out and write the
+  arithmetic in the test docstring. "The oracle is cheap" is NOT a bound —
+  0.09 ms x 10,000 probes x 5 bands x 5x5 tile grids is 20 minutes. A test
+  that cannot state its own cost does not go in the fast tier.
+- Remember the gate runs your tests AGAIN: every fast-tier test is paid
+  twice, once by you and once by the tree-wide commit gate, which runs the
+  WHOLE suite. A 40-minute test file makes every future build 40 minutes
+  slower for everyone.
 - A test spec that takes an hour to run is a build-killer (deep transcripts)
   and an unverifiable gate.
 - Agents verify ONLY what they changed; the driver runs the full tally.
