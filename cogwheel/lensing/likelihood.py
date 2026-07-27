@@ -1713,7 +1713,8 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                     lens['gamma'], lens['beta'], lens['kappa'])
                 try:
                     ghost = farfield_ghost_term(
-                        chart_w, source, matrix, t_min=geom.t_min)
+                        chart_w, source, matrix, t_min=geom.t_min,
+                        real_images=geom.images)
                 except GhostDomainError:
                     return None
                 envelope_dense[below_mask] += ghost

@@ -919,7 +919,8 @@ def _frame_t_min(source: np.ndarray, matrix: np.ndarray) -> float:
 
 def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
                         matrix: np.ndarray, *,
-                        t_min: float | None = None) -> np.ndarray:
+                        t_min: float | None = None,
+                        real_images: np.ndarray | None = None) -> np.ndarray:
     """Decaying complex-saddle ghost contribution ``G(w)`` to the total.
 
     The carrier-restored ghost term the mid-band label subtracts and the
@@ -1007,14 +1008,18 @@ def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
     contribution = geometry.ghost_kernel(w, source, matrix)
     x_c = contribution.position
     # Geometric separation gate: refuse where the ghost is inseparable from
-    # a real image near a cusp.  ``find_images`` is a quartic solve of the
-    # same cost class already paid inside ``ghost_kernel`` -- no operator
-    # sweep -- and the geometry partition does not expose image positions,
-    # so it is recomputed here rather than threaded in.  The norm is complex
-    # (``|.|`` over the complex ``x_a - x_c``): dropping Im(x_c) would
-    # corrupt the near-cusp separation.
-    real_images = geometry.find_images(source, matrix)
-    if not real_images:
+    # a real image near a cusp.  The norm is complex (``|.|`` over the
+    # complex ``x_a - x_c``): dropping Im(x_c) would corrupt the near-cusp
+    # separation.
+    #
+    # The images are PASSED where the caller already has them -- both the
+    # training label and the likelihood serve mirror hold a partition that
+    # carries them -- because re-solving the image quartic here costs ~234 us,
+    # 51% of this function, on a per-likelihood-evaluation path.  Same
+    # treatment as ``t_min``: carry the value, do not re-derive it.
+    if real_images is None:
+        real_images = geometry.find_images(source, matrix)
+    if len(real_images) == 0:
         raise geometry.GhostDomainError(
             f'No real image for source ({source[0]!r}, {source[1]!r}) to '
             f'separate the ghost from: the single-saddle expansion cannot '
@@ -1177,7 +1182,7 @@ def farfield_envelope_from_partition(
     if definition == FARFIELD_KERNEL_SUM_MINUS_GHOST:
         envelope = envelope - farfield_ghost_term(
             partition.w, partition.source, partition.matrix,
-            t_min=partition.t_min)
+            t_min=partition.t_min, real_images=partition.images)
     return envelope
 
 
@@ -1368,6 +1373,11 @@ class ChangRefsdalGeometryPartition:
         must express another term in this frame, such as the ghost
         carrier in `farfield_ghost_term`, can be handed the value instead
         of re-solving the image quartic to recover it.
+    images : np.ndarray
+        The real image positions (`geometry.find_images`) this partition was
+        built from, carried for the same reason as ``t_min``: the ghost
+        separation gate needs them, and re-solving the quartic on the serve
+        path costs ~234 us per call (51% of `farfield_ghost_term`).
     """
 
     w: np.ndarray
@@ -1379,6 +1389,7 @@ class ChangRefsdalGeometryPartition:
     caustic_distance: float
     caustic_theta: float
     t_min: float
+    images: np.ndarray
 
 
 class ChangRefsdalChannels:
@@ -1621,7 +1632,8 @@ class ChangRefsdalChannels:
             real_mask=real_mask,
             caustic_distance=float(caustic.distance),
             caustic_theta=float(caustic.theta),
-            t_min=t_min)
+            t_min=t_min,
+            images=images)
 
     def evaluate_path(self, path: Iterable[dict]
                       ) -> list[ChangRefsdalPartition]:
