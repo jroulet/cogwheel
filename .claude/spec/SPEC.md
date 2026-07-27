@@ -1,6 +1,6 @@
 ---
-spec_version: 0.19.0
-last_updated: 2026-07-20
+spec_version: 0.20.0
+last_updated: 2026-07-27
 ---
 
 # cogwheel — Project Specification
@@ -86,6 +86,20 @@ Docs). Packaging: setuptools + setuptools_scm, GPL-3.0-or-later, Python >=3.9.
   `.gwf` frame files used by tutorials — not part of the installed package.
 - Numerically hot paths (relative binning, coherent-score marginalization) use
   numba and lookup tables and must remain numerically accurate.
+- **Lensing delay frame.** Every channel kernel in `chang_refsdal` is carried in
+  the partition's *min-subtracted* frame: `ChangRefsdalPartition` subtracts
+  `t_min = min(absolute real-image Fermat delays)` from every delay, so
+  `partition.delays` always contains an exact `0`. Any term added to or
+  subtracted from a sum of channel kernels MUST be carried in that same frame.
+  The `geometry` primitives (`delay`, `ghost_kernel`, `_ghost_delay`) return
+  RAW absolute delays and are deliberately frame-agnostic — `t_min` is a gauge
+  choice belonging to the *set* of real images, not to any single saddle — so
+  the min-subtraction is applied at the composition layer in `channels`, where
+  `_frame_t_min(source, matrix)` is the single authoritative expression of the
+  frame origin. Mixing the two frames is silent: it leaves magnitudes and decay
+  rates correct while corrupting only the phase, so it is invisible to any
+  amplitude-based check and must be pinned by frame assertions
+  (`test_lensing_chang_refsdal_ghost_frame.py`).
 
 ## Constraints
 

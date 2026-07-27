@@ -843,30 +843,89 @@ def _farfield_switch(real_mask: np.ndarray, n_w: int,
     return switch
 
 
+def _frame_t_min(source: np.ndarray, matrix: np.ndarray) -> float:
+    """Minimum real-image Fermat delay: the partition frame's origin.
+
+    The min-subtraction convention that defines the relative-delay frame
+    every channel kernel is carried in.  This value MUST equal
+    `ChangRefsdalPartition`'s ``t_min = min(absolute Fermat delays)``: the
+    partition builds ``absolute_delays = [geometry.delay(image, source,
+    matrix) for image in geometry.find_images(source, matrix)]`` and
+    subtracts ``t_min = float(absolute_delays.min())`` from every delay.
+    This helper recomputes that value through the SAME deterministic path
+    (`geometry.find_images` + `geometry.delay`, identical array
+    construction) so the two are bit-identical -- one authoritative
+    expression of the frame origin, recomputable anywhere the source and
+    macro matrix are known even after the absolute delays have been
+    dropped (e.g. the likelihood serve mirror, which keeps only the
+    already-min-subtracted ``geom.delays``).
+
+    Parameters
+    ----------
+    source : np.ndarray
+        Shape ``(2,)`` source position.
+    matrix : np.ndarray
+        Shape ``(2, 2)`` symmetric macro matrix (`geometry.macro_matrix`).
+
+    Returns
+    -------
+    float
+        ``min_image geometry.delay(image, source, matrix)`` -- the minimum
+        real-image Fermat delay subtracted to form the relative-delay
+        frame.  Real (``t_min`` carries no imaginary part), so subtracting
+        it leaves ``Im tau_c`` invariant.
+    """
+    images = geometry.find_images(source, matrix)
+    absolute_delays = np.array(
+        [geometry.delay(image, source, matrix) for image in images],
+        dtype=float)
+    return float(absolute_delays.min())
+
+
 def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
                         matrix: np.ndarray) -> np.ndarray:
     """Decaying complex-saddle ghost contribution ``G(w)`` to the total.
 
     The carrier-restored ghost term the mid-band label subtracts and the
-    likelihood serve mirror re-adds,
+    likelihood serve mirror re-adds, carried in the partition's
+    min-subtracted (relative-delay) frame,
 
-        G(w) = C_c(w) * exp(1j * w * tau_c),   Im tau_c >= 0,
+        G(w) = C_c(w) * exp(1j * w * (tau_c - t_min)),   Im tau_c >= 0,
 
-    where the carrier-free kernel ``C_c`` and complex Fermat delay ``tau_c``
-    come from `geometry.ghost_kernel` (decaying-member selection and the sqrt
-    branch pinned there).  Because ``Im tau_c >= 0`` the carrier decays as
-    ``exp(-w * Im tau_c)``.  This is the SINGLE authoritative ghost primitive:
-    the training label (`farfield_envelope_from_partition`) and the serve
-    mirror both call it, so the subtracted and re-added ``G`` cannot diverge
-    in member selection or carrier convention.
+    where the carrier-free kernel ``C_c`` and complex Fermat delay
+    ``tau_c`` come from `geometry.ghost_kernel` (decaying-member selection
+    and the sqrt branch pinned there), and ``t_min`` is the minimum
+    real-image Fermat delay (`_frame_t_min`).  The real channel kernels the
+    ghost is subtracted alongside -- via `switched_analytic_channels` in
+    `farfield_envelope_from_partition` -- are carried at ``tau_a - t_min``,
+    so the ghost MUST be shifted by the same ``-t_min`` to sit in the same
+    frame; otherwise the subtracted/re-added ``G`` is off by
+    ``exp(-1j * w * t_min)`` and the mid-band residual ``|R - G| / |F|``
+    does not collapse.  Because ``t_min`` is real, the shift is a pure
+    phase and ``Im tau_c`` (hence the decay ``exp(-w * Im tau_c)``) is
+    unchanged.  This is the SINGLE authoritative ghost primitive: the
+    training label (`farfield_envelope_from_partition`) and the serve
+    mirror both call it, so the subtracted and re-added ``G`` cannot
+    diverge in member selection, carrier convention, or frame.
 
-    The mid-band ghost gate is enforced here: the ghost is well-defined for
-    the label ONLY where its carrier accumulates at least half the resolution
-    scale over the served band, ``w_min * Im tau_c >= RHO_END / 2``.  On a
-    principal axis ``Im tau_c -> 0`` and the gate refuses by construction
-    (`geometry.ghost_kernel` itself raises on the exact axis and inside the
-    caustic); the cusp-window mask carried by the surrogate tiling is the
-    belt-and-suspenders topological guard upstream.
+    The min-subtraction correction lives HERE, in the composition layer,
+    NOT in `geometry.ghost_kernel`: ``tau_c`` is a holomorphic,
+    gauge-independent property of the ghost saddle, whereas ``t_min`` is
+    the partition's gauge choice -- a property of the SET of real images,
+    unknown to (and none of the business of) the single-saddle primitive.
+    `geometry.ghost_kernel` / `geometry._ghost_delay` therefore stay RAW
+    and byte-identical, honouring their documented contract (``delay`` is
+    the raw complex Fermat delay; ``Im tau_c`` is exposed for the gate).
+
+    The mid-band ghost gate is enforced here on the RAW ``tau_c``: the
+    ghost is well-defined for the label ONLY where its carrier accumulates
+    at least half the resolution scale over the served band,
+    ``w_min * Im tau_c >= RHO_END / 2``.  ``t_min`` is real, so it does not
+    enter the gate (``Im tau_c`` is frame-invariant) and admit/reject is
+    unchanged.  On a principal axis ``Im tau_c -> 0`` and the gate refuses
+    by construction (`geometry.ghost_kernel` itself raises on the exact
+    axis and inside the caustic); the cusp-window mask carried by the
+    surrogate tiling is the belt-and-suspenders topological guard upstream.
 
     Parameters
     ----------
@@ -880,7 +939,8 @@ def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
     Returns
     -------
     np.ndarray
-        Shape ``(n_w,)`` complex ghost contribution ``G(w)``.
+        Shape ``(n_w,)`` complex ghost contribution ``G(w)`` in the
+        min-subtracted frame.
 
     Raises
     ------
@@ -900,7 +960,12 @@ def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
             f'the mid-band threshold {_FARFIELD_WINDOW_RADIANS!r}: the '
             f'decaying ghost is not resolved over the served band (source '
             f'too close to a principal axis), so it must not be subtracted.')
-    return contribution.kernel * np.exp(1j * w * contribution.delay)
+    # Carry the ghost in the partition's min-subtracted frame: the real
+    # kernels it is subtracted alongside use tau_a - t_min, so the ghost
+    # carries tau_c - t_min.  t_min is real, so the gate above (on raw
+    # Im tau_c) is untouched.
+    t_min = _frame_t_min(source, matrix)
+    return contribution.kernel * np.exp(1j * w * (contribution.delay - t_min))
 
 
 def reconstruct_farfield(w: np.ndarray,

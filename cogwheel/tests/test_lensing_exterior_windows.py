@@ -669,6 +669,113 @@ def _synthetic_tube_chart(module: types.ModuleType,
 _TUBE_QUERY_SEED: int = 0
 _TUBE_QUERY_COUNT: int = 30
 
+# --- WP1: ghost carrier delay-frame collapse (Build 8h-b WP1) ------------
+# `channels.farfield_ghost_term` carries the decaying complex-saddle ghost in
+# the partition's MIN-SUBTRACTED frame -- ``G = C_c * exp(1j*w*(tau_c - t_min))``
+# -- because the real channel kernels it is subtracted alongside are carried at
+# ``tau_a - t_min``.  The PRE-FIX carrier was the RAW ``exp(1j*w*tau_c)``, off by
+# ``exp(-1j*w*t_min)``, so the mid-band residual ``|R - G|/|F|`` did NOT collapse.
+# The COLLAPSE test measures both frames on the same physical config: the fixed
+# frame drives the residual to the label's representational floor while the raw
+# frame leaves it O(1e-1).
+
+#: The three fact-6 collapse probes, ``(gamma, theta_c_deg, offset, w_min)``.
+#: Positive parity, ``beta = kappa = 0``, source at ``|y| = r_caustic + offset``
+#: (caustic-fixed ``rho = 1 + offset``; see `surrogate._from_caustic_fixed`).
+#: ``w_min`` is chosen just above each probe's ghost gate ``2 / Im tau_c``
+#: (measured gate values 2.23 / 2.22 / 2.16, all clearing ``GHOST_GATE = 2``)
+#: so the ghost is materially resolved AT the band bottom -- exactly where the
+#: raw-frame carrier error is largest -- and stays well below 60.  ``Im tau_c``
+#: is 0.319 / 0.404 / 0.187: the ``theta = 75 deg`` probe sits nearest a
+#: principal axis (slowest ghost decay, hardest collapse), which is why its
+#: ``w_min`` must be the largest to clear the gate.
+COLLAPSE_PROBES: tuple[tuple[float, float, float, float], ...] = (
+    (0.90, 45.0, 0.60, 7.0),
+    (0.50, 45.0, 0.60, 5.5),
+    (0.90, 75.0, 0.60, 11.5))
+
+#: Common upper edge (< 60) and node count of the mid-band collapse grid.
+COLLAPSE_WMAX: float = 55.0
+COLLAPSE_NW: int = 256
+
+#: Frame-relevance window: the frequencies at which the RAW-frame ghost
+#: subtraction is materially wrong, ``|R - G_raw| / |F| >= this``.  The
+#: collapse claim ("the fixed frame is small WHERE the frame matters") is
+#: reduced over this window; outside it the ghost has decayed and both frames
+#: trivially agree with the bare-label residual (they must NOT be counted, or
+#: an intrinsic label feature far above the ghost band would mask the collapse).
+COLLAPSE_RAW_ACTIVE: float = 1e-2
+
+#: Professor-set collapse bars.  ``fixed < 5e-3`` (absolute -- NOT 1e-2, which
+#: is too close to a partial fix); ``raw > 1e-2`` (the demonstrably-red pre-fix
+#: state; measured 4.9e-2 / 5.9e-2 / 7.2e-2); ``raw / fixed >= 10`` (a
+#: conservative floor under the measured collapses 174x / 31x / 607x).
+COLLAPSE_FIXED_BAR: float = 5e-3
+COLLAPSE_RAW_FLOOR: float = 1e-2
+COLLAPSE_RATIO_FLOOR: float = 10.0
+
+#: Scalar frequency at which the frozen real-image kernels are captured.
+KERNEL_W: float = 25.0
+
+#: Frozen bit-identity reference for the pure real-image primitives
+#: (`geometry.find_images` / `delay` / `morse_index` / `image_kernel`).  WP1
+#: added a `find_images` + `delay` call INSIDE `channels.farfield_ghost_term`;
+#: these fixtures guard that the primitives it now calls were NOT perturbed.
+#: ``geometry.py`` is byte-identical to HEAD (only ``channels.py`` changed this
+#: build), so the captured values ARE the pre-change references.  All floats
+#: are frozen as ``float.hex()`` strings (EXACT); the ``(source, matrix)`` are
+#: rebuilt from stored hex so the guard isolates the primitives from any
+#: ``r_caustic`` / ``_from_caustic_fixed`` drift upstream.  Every exterior probe
+#: resolves two real images (a minimum + a saddle, Morse ``[0, 1]``).
+REAL_IMAGE_FIXTURES: tuple[dict, ...] = (
+    {
+        'label': 'g0.9_th45.0_off0.6',
+        'source': ('0x1.16181868e831fp+0', '0x1.16181868e831ep+0'),
+        'matrix': ('0x1.9999999999998p-4', '0x0.0p+0', '0x0.0p+0', '0x1.e666666666666p+0'),
+        'images': [('0x1.76de554967305p+3', '0x1.25dade059056bp-1'), ('-0x1.eb471dfd8002bp-3', '-0x1.97affe809e8f4p-2')],
+        'delays': ['-0x1.dd3820ec03305p+2', '0x1.6577ac467b2a0p+1'],
+        'morse': [0, 1],
+        'kernels': [('0x1.1c1d90db71f8ap+1', '-0x1.01c7779eee22fp-12'), ('-0x1.912dad195f5bbp-9', '-0x1.9831a07d76744p-3')],
+    },
+    {
+        'label': 'g0.5_th45.0_off0.6',
+        'source': ('0x1.9038870204337p-1', '0x1.9038870204336p-1'),
+        'matrix': ('0x1.0000000000000p-1', '0x0.0p+0', '0x0.0p+0', '0x1.8000000000000p+0'),
+        'images': [('0x1.2e37eecd2cdcdp+1', '0x1.2cad1bffe2b16p-1'), ('-0x1.30e5e0bcfe545p-2', '-0x1.ec7ed86e85293p-2')],
+        'delays': ['-0x1.dc6268562f40dp-1', '0x1.fc31e710c81b3p+0'],
+        'morse': [0, 1],
+        'kernels': [('0x1.1256aa4f79ce3p+0', '0x1.8c6038e5ebfd9p-12'), ('-0x1.5ab750c0a34b0p-8', '-0x1.3d0bb36e911d5p-2')],
+    },
+    {
+        'label': 'g0.9_th75.0_off0.6',
+        'source': ('0x1.16498f60036b3p-1', '0x1.03a547cac019dp+1'),
+        'matrix': ('0x1.9999999999998p-4', '0x0.0p+0', '0x0.0p+0', '0x1.e666666666666p+0'),
+        'images': [('0x1.b6ec3a29854cep+2', '0x1.14541c59d230bp+0'), ('-0x1.2865504131331p-4', '-0x1.6bb2ab1129b37p-2')],
+        'delays': ['-0x1.1878ba4b4a630p+1', '0x1.0662f9bdcfadfp+2'],
+        'morse': [0, 1],
+        'kernels': [('0x1.0dc8805f7cef8p+1', '-0x1.15d3573bed90bp-10'), ('-0x1.83618bc3f0f04p-11', '-0x1.e82bd30fb8cc1p-4')],
+    },
+    {
+        'label': 'g0.3_th30.0_off0.4',
+        'source': ('0x1.39981d5b86aeap-1', '0x1.6a1b7ddc185b9p-2'),
+        'matrix': ('0x1.6666666666666p-1', '0x0.0p+0', '0x0.0p+0', '0x1.4cccccccccccdp+0'),
+        'images': [('0x1.af4111bac2d78p+0', '0x1.77cad15d80d44p-2'), ('-0x1.ec60878793564p-2', '-0x1.0cb4e50a6d9cbp-1')],
+        'delays': ['-0x1.806647b815c2ap-2', '0x1.5482d24bab4e1p+0'],
+        'morse': [0, 1],
+        'kernels': [('0x1.0282667c09348p+0', '0x1.3d2886e2cc613p-9'), ('-0x1.232bf624c500dp-6', '-0x1.22966cc66fe42p-1')],
+    },
+    {
+        'label': 'g0.7_th10.0_off1.0',
+        'source': ('0x1.c99adc7d1d562p+0', '0x1.42c09c018f2ddp-2'),
+        'matrix': ('0x1.3333333333334p-2', '0x0.0p+0', '0x0.0p+0', '0x1.b333333333333p+0'),
+        'images': [('0x1.9e4475f7d79bfp+2', '0x1.811c615b1b8a6p-3'), ('-0x1.eb09674d51cfdp-2', '-0x1.15519a5dbc798p-3')],
+        'delays': ['-0x1.6247f84d6a7dbp+2', '0x1.a59b3ce060e20p+1'],
+        'morse': [0, 1],
+        'kernels': [('0x1.5b7c25343cddbp+0', '-0x1.0bd4892fa2195p-13'), ('0x1.9dc4b6a4eccbep-8', '-0x1.369416f5da0c0p-2')],
+    },
+)
+
+
 
 class ExteriorWindowsTestCase(unittest.TestCase):
     """Base carrying the anti-vacuity comparison counter.
@@ -1080,9 +1187,13 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
 
     def test_helpful_fold_annulus_gate_applies_and_ghost_is_bounded(self):
         # Outside the cusp (fold annulus) the gate PASSES and the resolved
-        # ghost is a finite O(1e-2) mid-band term.  Oracle: Im tau_c from
-        # geometry.ghost_kernel; production agreement: farfield_ghost_term
-        # returns the SAME finite term (no refusal).
+        # ghost is a finite O(1e-2) mid-band term.  Oracle: the RAW carrier
+        # kernel * exp(1j*w*tau_c) from geometry.ghost_kernel, re-framed by the
+        # partition's minimum real-image Fermat delay t_min.  WP1 carries the
+        # ghost in that min-subtracted frame (tau_c - t_min); we reconstruct
+        # t_min INDEPENDENTLY from the geometry primitives (find_images +
+        # delay), never from channels._frame_t_min, so farfield_ghost_term is
+        # not graded against itself.
         w = np.geomspace(3.0, 40.0, 240)
         for rho in (1.9, 2.1):
             with self.subTest(rho=rho):
@@ -1092,7 +1203,19 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
                 self.assertGreaterEqual(gate, GHOST_GATE)
                 produced = ch.farfield_ghost_term(w, part.source, part.matrix)
                 self.assertTrue(np.all(np.isfinite(produced)))
-                np.testing.assert_allclose(produced, ghost, rtol=1e-10)
+                # Independent min-subtracted frame: t_min from the geometry
+                # primitives (the same deterministic construction the partition
+                # uses), applied to the RAW oracle ghost as a pure phase.
+                images = geometry.find_images(part.source, part.matrix)
+                t_min = min(float(geometry.delay(image, part.source,
+                                                 part.matrix))
+                            for image in images)
+                expected = ghost * np.exp(-1j * w * t_min)
+                np.testing.assert_allclose(produced, expected, rtol=1e-10)
+                # The re-framing is a pure phase, so |G| (hence the magnitude
+                # bound) is frame-invariant: |produced| == |ghost|.
+                self.assertTrue(np.allclose(np.abs(produced), np.abs(ghost),
+                                            rtol=0.0, atol=1e-12))
                 mag = float(np.max(np.abs(ghost))) / max_f
                 self.assertGreater(mag, TOL_RECON)   # not a collapsed zero
                 self.assertLess(mag, GHOST_MAG_UPPER)
@@ -2234,6 +2357,202 @@ class TubeByteIdentityTestCase(ExteriorWindowsTestCase):
         plt.close(fig)
 
 
+class GhostFrameCollapseTestCase(ExteriorWindowsTestCase):
+    """WP1 collapse: the min-subtracted ghost frame drives the mid-band
+    residual to the label floor where the raw frame leaves it O(1e-1).
+
+    Cost: 3 probes x one 256-node partition build + two far-field envelope
+    evaluations (~2 s/probe on the fast tier), well under the 60 s/test and
+    5 min/file ceilings.
+    """
+
+    def _collapse_residuals(self, gamma: float, theta_c_deg: float,
+                            offset: float, w_min: float
+                            ) -> dict:
+        """Both-frame residual traces for one collapse probe.
+
+        Returns a dict with the frequency grid, the RAW-frame residual
+        ``|E_ff - G_raw| / |F|``, the FIXED-frame residual
+        ``|E_ff - G_fixed| / |F|`` (the `FARFIELD_KERNEL_SUM_MINUS_GHOST`
+        label over ``|F|``), the raw-active mask, the ghost gate value, and
+        the real-image count.  The two residuals differ ONLY in the ghost
+        carrier frame, so their ratio isolates the WP1 fix.
+        """
+        source = _source_at(gamma, 1.0 + offset, theta_c_deg)
+        w = np.geomspace(w_min, COLLAPSE_WMAX, COLLAPSE_NW)
+        part = _partition_at(gamma, source, w)
+        contribution = geometry.ghost_kernel(w, part.source, part.matrix)
+        gate = float(w.min()) * float(contribution.delay.imag)
+        exact = part.exact_total
+        kernel_sum = ch.farfield_envelope_from_partition(
+            part, ch.FARFIELD_KERNEL_SUM)
+        # Pre-fix RAW carrier: exp(1j*w*tau_c) with NO min subtraction.
+        ghost_raw = contribution.kernel * np.exp(1j * w * contribution.delay)
+        minus_ghost = ch.farfield_envelope_from_partition(
+            part, ch.FARFIELD_KERNEL_SUM_MINUS_GHOST)
+        resid_raw = np.abs(kernel_sum - ghost_raw) / np.abs(exact)
+        resid_fixed = np.abs(minus_ghost) / np.abs(exact)
+        return {
+            'w': w,
+            'resid_raw': resid_raw,
+            'resid_fixed': resid_fixed,
+            'active': resid_raw >= COLLAPSE_RAW_ACTIVE,
+            'gate': gate,
+            'n_real': int(part.real_mask.sum()),
+        }
+
+    def test_fixed_frame_collapses_where_raw_frame_is_wrong(self) -> None:
+        # On each fact-6 probe the fixed-frame residual sits below the
+        # Professor bar (< 5e-3) over the window where the raw frame is
+        # materially wrong, while the raw residual stays above 1e-2 and is
+        # at least 10x larger -- the demonstrably-red pre-fix witness.
+        for gamma, theta_c_deg, offset, w_min in COLLAPSE_PROBES:
+            with self.subTest(gamma=gamma, theta=theta_c_deg, offset=offset):
+                trace = self._collapse_residuals(
+                    gamma, theta_c_deg, offset, w_min)
+                # Premise: two real images and the ghost gate clears at the
+                # band bottom, so the ghost is materially resolved there.
+                self.assertEqual(trace['n_real'], 2)
+                self.assertGreaterEqual(trace['gate'], GHOST_GATE)
+                active = trace['active']
+                # Anti-vacuity: the raw-frame error window must be non-empty,
+                # else the collapse claim is measured on nothing.
+                self.assertTrue(
+                    bool(active.any()),
+                    'no frequency has raw residual >= COLLAPSE_RAW_ACTIVE; '
+                    'the ghost never becomes materially active on this grid.')
+                raw = float(trace['resid_raw'].max())
+                fixed = float(trace['resid_fixed'][active].max())
+                self.assertGreater(raw, COLLAPSE_RAW_FLOOR)
+                self.assertLess(fixed, COLLAPSE_FIXED_BAR)
+                self.assertGreaterEqual(raw / fixed, COLLAPSE_RATIO_FLOOR)
+                self.record_comparison()
+
+    def test_collapse_diagnostic_plot(self) -> None:
+        # Diagnostic: |E_ff - G|/|F| vs w for the raw and fixed ghost frames
+        # across the mid band; the fixed curve sits >=10x below the raw curve
+        # over the raw-active window on every probe.
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig, axes = plt.subplots(
+            1, len(COLLAPSE_PROBES), figsize=(4.2 * len(COLLAPSE_PROBES), 3.4),
+            squeeze=False)
+        for col, (gamma, theta_c_deg, offset, w_min) in enumerate(
+                COLLAPSE_PROBES):
+            trace = self._collapse_residuals(
+                gamma, theta_c_deg, offset, w_min)
+            axis = axes[0][col]
+            axis.semilogy(trace['w'], trace['resid_raw'],
+                          label='raw frame')
+            axis.semilogy(trace['w'], trace['resid_fixed'],
+                          label='fixed frame')
+            axis.axhline(COLLAPSE_FIXED_BAR, color='k', ls='--', lw=0.8)
+            axis.set_title(f'g={gamma} th={theta_c_deg:g}deg')
+            axis.set_xlabel('w')
+            if col == 0:
+                axis.set_ylabel('|E_ff - G| / |F|')
+                axis.legend(fontsize=8)
+            # The plot must witness the same >=10x separation the gate asserts.
+            active = trace['active']
+            ratio = float((trace['resid_raw'][active]
+                           / trace['resid_fixed'][active]).min())
+            self.assertGreaterEqual(ratio, COLLAPSE_RATIO_FLOOR)
+            self.record_comparison()
+        fig.tight_layout()
+        fig.savefig(
+            OUTPUT_DIR / 'exterior_windows_ghost_frame_collapse.png', dpi=110)
+        plt.close(fig)
+        self.assertTrue(
+            (OUTPUT_DIR / 'exterior_windows_ghost_frame_collapse.png').exists())
+        self.record_comparison()
+
+
+class RealImagePathBitIdentityTestCase(ExteriorWindowsTestCase):
+    """Brief-mandated guard: WP1 added a `find_images` + `delay` call inside
+    `channels.farfield_ghost_term`, but the PURE real-image primitives must be
+    byte-identical to their pre-change values.
+
+    The ``(source, matrix)`` are rebuilt from frozen ``float.hex()`` strings so
+    the guard isolates `geometry.find_images` / `image_kernel` / `delay` /
+    `morse_index` from any upstream ``_from_caustic_fixed`` / reach drift; any
+    nonzero diff pinpoints exactly which primitive was perturbed.
+    """
+
+    @staticmethod
+    def _source_matrix(fixture: dict) -> tuple[np.ndarray, np.ndarray]:
+        """Rebuild the exact ``(source, matrix)`` from the frozen hex fields."""
+        source = np.array(
+            [float.fromhex(fixture['source'][0]),
+             float.fromhex(fixture['source'][1])])
+        raw = [float.fromhex(component) for component in fixture['matrix']]
+        matrix = np.array([[raw[0], raw[1]], [raw[2], raw[3]]])
+        return source, matrix
+
+    def test_find_images_are_bit_identical(self) -> None:
+        # find_images must return the same image positions, in the same order,
+        # to the last bit.  A permuted or shifted image would break the ghost
+        # branch selection WP1 relies on.
+        for fixture in REAL_IMAGE_FIXTURES:
+            with self.subTest(fixture=fixture['label']):
+                source, matrix = self._source_matrix(fixture)
+                # `find_images` returns a Python list of shape-(2,) arrays;
+                # stack it so a permuted/dropped image also fails the shape.
+                images = np.array(
+                    [np.asarray(image) for image in
+                     geometry.find_images(source, matrix)])
+                expected = np.array(
+                    [[float.fromhex(x), float.fromhex(y)]
+                     for x, y in fixture['images']])
+                self.assertEqual(images.shape, expected.shape)
+                np.testing.assert_array_equal(images, expected)
+                self.record_comparison()
+
+    def test_delays_are_bit_identical(self) -> None:
+        # The Fermat delay of each real image must be unchanged: WP1 calls
+        # geometry.delay inside the ghost term to build t_min, and a drift
+        # here would silently re-frame every real channel too.
+        for fixture in REAL_IMAGE_FIXTURES:
+            with self.subTest(fixture=fixture['label']):
+                source, matrix = self._source_matrix(fixture)
+                images = geometry.find_images(source, matrix)
+                delays = np.array(
+                    [geometry.delay(image, source, matrix) for image in images])
+                expected = np.array(
+                    [float.fromhex(value) for value in fixture['delays']])
+                np.testing.assert_array_equal(delays, expected)
+                self.record_comparison()
+
+    def test_morse_indices_are_unchanged(self) -> None:
+        # Every exterior probe resolves a minimum + a saddle (Morse [0, 1]);
+        # the integer census must be identical.
+        for fixture in REAL_IMAGE_FIXTURES:
+            with self.subTest(fixture=fixture['label']):
+                source, matrix = self._source_matrix(fixture)
+                images = geometry.find_images(source, matrix)
+                morse = [int(geometry.morse_index(image, matrix))
+                         for image in images]
+                self.assertEqual(morse, list(fixture['morse']))
+                self.record_comparison()
+
+    def test_image_kernels_are_bit_identical(self) -> None:
+        # The stationary-phase kernel of each real image at the frozen probe
+        # frequency must match to the last bit of both real and imaginary
+        # parts.
+        for fixture in REAL_IMAGE_FIXTURES:
+            with self.subTest(fixture=fixture['label']):
+                source, matrix = self._source_matrix(fixture)
+                images = geometry.find_images(source, matrix)
+                for index, image in enumerate(images):
+                    kernel = complex(
+                        geometry.image_kernel(KERNEL_W, image, matrix))
+                    exp_real, exp_imag = fixture['kernels'][index]
+                    with self.subTest(image=index):
+                        self.assertEqual(
+                            kernel.real, float.fromhex(exp_real))
+                        self.assertEqual(
+                            kernel.imag, float.fromhex(exp_imag))
+                        self.record_comparison()
+
+
 class SelfFalsificationTestCase(ExteriorWindowsTestCase):
     """The suite must be able to go RED -- reachable-red mutations.
 
@@ -2398,6 +2717,55 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
             _interior_chart(0.40, ch.INTERIOR_SACR_C), 0.40, True)
         degenerate_contrast = sac / sac
         self.assertLessEqual(degenerate_contrast, SACRC_CONTRAST_MIN)
+        self.record_comparison()
+
+    def test_raw_frame_ghost_leaves_residual_uncollapsed(self) -> None:
+        # Reachable-red (WP1): the fix is `_frame_t_min` re-framing the ghost
+        # carrier.  Patching it to return 0.0 reverts to the PRE-FIX raw frame
+        # exp(1j*w*tau_c); the `FARFIELD_KERNEL_SUM_MINUS_GHOST` residual then
+        # no longer collapses -- it breaches the Professor bar over the same
+        # raw-active window the green collapse test clears.
+        gamma, theta_c_deg, offset, w_min = COLLAPSE_PROBES[0]
+        source = _source_at(gamma, 1.0 + offset, theta_c_deg)
+        w = np.geomspace(w_min, COLLAPSE_WMAX, COLLAPSE_NW)
+        part = _partition_at(gamma, source, w)
+        contribution = geometry.ghost_kernel(w, part.source, part.matrix)
+        exact = part.exact_total
+        kernel_sum = ch.farfield_envelope_from_partition(
+            part, ch.FARFIELD_KERNEL_SUM)
+        ghost_raw = contribution.kernel * np.exp(1j * w * contribution.delay)
+        # The raw-active window is a property of the ghost carrier alone and is
+        # unaffected by the mutation.
+        resid_raw = np.abs(kernel_sum - ghost_raw) / np.abs(exact)
+        active = resid_raw >= COLLAPSE_RAW_ACTIVE
+        self.assertTrue(bool(active.any()))
+        # Mutate: zero the frame shift -> the ghost is subtracted in the wrong
+        # (raw) frame, exactly the pre-fix state.
+        with mock.patch.object(ch, '_frame_t_min', return_value=0.0):
+            mutated = ch.farfield_envelope_from_partition(
+                part, ch.FARFIELD_KERNEL_SUM_MINUS_GHOST)
+        resid_mutated = np.abs(mutated) / np.abs(exact)
+        self.assertGreater(
+            float(resid_mutated[active].max()), COLLAPSE_FIXED_BAR)
+        # The mutation reproduces the raw frame pointwise (t_min drops out).
+        np.testing.assert_allclose(
+            resid_mutated[active], resid_raw[active], rtol=0.0, atol=1e-12)
+        self.record_comparison()
+
+    def test_one_ulp_image_perturbation_breaks_bit_identity(self) -> None:
+        # Reachable-red (bit-identity guard): the real-image identity gate uses
+        # exact array equality, so a single-ULP nudge of one captured image
+        # coordinate MUST make the compare fail -- proving the guard is not
+        # trivially tolerant.
+        fixture = REAL_IMAGE_FIXTURES[0]
+        expected = np.array(
+            [[float.fromhex(x), float.fromhex(y)]
+             for x, y in fixture['images']])
+        perturbed = expected.copy()
+        perturbed[0, 0] = np.nextafter(perturbed[0, 0], np.inf)
+        self.assertNotEqual(perturbed[0, 0], expected[0, 0])
+        with self.assertRaises(AssertionError):
+            np.testing.assert_array_equal(perturbed, expected)
         self.record_comparison()
 
 
