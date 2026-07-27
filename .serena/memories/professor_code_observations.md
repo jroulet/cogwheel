@@ -125,3 +125,11 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
 - This agent instance has no image-rendering/Read-image tool — validate
   diagnostic PNGs via the numeric asserts backing the same plotted
   quantities (independent-oracle asserts etc.), not visual inspection.
+- Build 8h-b6 cusp-alignment review: `EnvelopeReconstructionTestCase.
+  test_positive_box_reconstruction_within_budget` stayed RED after the
+  cusp-aligned-tiler fix because that test's `_train()` fixture builds via
+  `LensAmplificationSurrogate.from_engine()` — a single-box surrogate with
+  a UNIFORM theta_c grid that never calls the production tiler
+  (`_train_band_charts`/`_farfield_exterior_tiles`) the fix landed in. A
+  tiler-level fix cannot move an eps measured on a fixture that bypasses
+  the tiler entirely.

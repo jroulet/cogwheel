@@ -107,3 +107,16 @@
   enforce new validity caps at the single internal accessor chokepoint so
   every external accessor inherits the guard for free without a new
   sentinel.
+- When a literal `replace_content`/`replace_symbol_body` match is
+  ambiguous because an identical code block is duplicated across sibling
+  classes/functions, prefer `replace_symbol_body` (unambiguous by name
+  path) over widening the literal needle (Build 8h-b6).
+- A byte-identical default/fallback branch must keep the LITERAL original
+  expression, not a call into the new generalized helper fed a degenerate/
+  empty input — the generalized form can be FP-close but not bit-identical
+  to the original construction (Build 8h-b6).
+- For non-circular/star-shaped admission or boundary regions (e.g. sheared
+  lobes), normalize by a DIRECTIONAL per-angle boundary function, not a
+  scalar reach/radius constant — scalar normalization can zero out all
+  admitted tiles even where the region has room, because near-cusp
+  clearance can be far below the far-cusp scalar extent.

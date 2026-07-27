@@ -111,3 +111,13 @@
   same physical quantity, require them to call one identical shared
   function — independent reimplementations invite serve-mirror
   divergence (Build 8h-b3-FIN).
+- When two sibling code paths (e.g. interior/exterior admission) derive
+  from the same shared geometric anchor (e.g. caustic cusp rays),
+  symmetrize a structural fix (e.g. cusp-alignment) across BOTH rather
+  than patching one — an asymmetric fix inherits the same kink the other
+  side already solved (Build 8h-b6).
+- A gate relaxation that is only sound GIVEN a prerequisite structural fix
+  (e.g. a coarse multi-probe test collapsing to one representative probe
+  is only valid once directions are pre-aligned) must be planned as ONE
+  merged WP with that prerequisite — landing the relaxation alone is
+  unsound (Build 8h-b6).

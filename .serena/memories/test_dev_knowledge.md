@@ -106,3 +106,13 @@
   slow/heavy suite that doesn't import the touched symbols — verify via a
   grep for zero imports/references, then skip running the heavy suite
   rather than waiting out a multi-minute campaign.
+- When picking the worst-case band edge for a coverage/admission fixture,
+  check which direction is actually worst instead of assuming the same
+  edge serves both: exterior admission truth-sets are worst at the band
+  edge with the LARGEST caustic reach, interior admission at the SMALLEST
+  reach (nearest caustic) — they can point opposite ways (Build 8h-b6).
+- To isolate one gate's teeth when tightening a threshold also reshapes an
+  upstream derived quantity (e.g. tile count via a recomputed extent),
+  re-run the gate function directly on the SAME fixed tile/sample set with
+  only the threshold changed, rather than regenerating the fixture —
+  otherwise the confound masks whether the gate itself has teeth.

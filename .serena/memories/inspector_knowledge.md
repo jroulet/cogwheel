@@ -99,3 +99,9 @@
   the new boundary equal to the old default (e.g. ceiling=wall) — this is
   how byte-identical-to-HEAD behavior is actually proven, not just
   asserted (Build 8h-b).
+- Before crediting a fix against its named acceptance-gate test, confirm
+  the test's fixture actually ROUTES THROUGH the fixed code path — a
+  correct production fix (e.g. in a tiler) can leave the named gate red
+  if the test builds via a different entry point (e.g. a single-box
+  from_engine call) that bypasses the fixed component entirely
+  (Build 8h-b6, INS-1-001).
