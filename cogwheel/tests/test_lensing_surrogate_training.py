@@ -207,7 +207,7 @@ _INSIDE_SERVE_FLOOR = 0.90
 #: Fixture training config: a smoke-scale multi-band run with a 5x5 tiling of
 #: the low-mass (Y=3) stratum and a moderate region cap so the cap truncation
 #: fires (32 admitted > 4) AND >=3 far-field tiles are actually built and
-#: recorded with their ``y_box``.  The eps bars are opened wide so charts
+#: recorded with their ``rho_theta_box``.  The eps bars are opened wide so charts
 #: register (train() needs >=1 chart); the RECORDS this suite reads --
 #: tile boxes, admitted/dropped counts, beyond-cap masses -- are independent
 #: of the (budget-limited) interpolation accuracy.
@@ -243,7 +243,7 @@ def _strata_records(report: dict, parity: int) -> list[dict]:
 
 
 def _built_farfield_reports(report: dict) -> list[dict]:
-    """The built far-field chart records (those carrying a ``y_box``)."""
+    """The built far-field chart records (those carrying a ``rho_theta_box``)."""
     return [r for r in report['charts'] if r.get('kind') == 'farfield']
 
 
@@ -342,23 +342,36 @@ class TilingRecordTestCase(_CountingTestCase):
                 self.comparisons += 1
 
     def test_built_tile_boxes_are_pairwise_disjoint(self) -> None:
-        """Built ff charts of one (band x stratum) have disjoint y_boxes."""
+        """Built ff charts of one (band x stratum) have disjoint tile boxes.
+
+        The record key is ``rho_theta_box`` and the box is CAUSTIC-FIXED and
+        ANISOTROPIC: ``[(rho_c, theta_c), (half_rho, half_theta)]``.  Two
+        axis-aligned rectangles are disjoint when they separate on EITHER
+        axis, so the old square-tile test (one scalar half, Chebyshev centre
+        distance >= 2*half) is not the right predicate here -- it would demand
+        separation in both axes at once and fail on legitimately disjoint
+        tiles that abut along one axis.
+        """
         report = _trained_report()
         groups: dict[tuple[str, int], list[tuple]] = {}
         for record in _built_farfield_reports(report):
             key = _group_key(record['name'])
             self.assertIsNotNone(key, f"unparsed ff name {record['name']}")
-            center, half = record['y_box']
-            groups.setdefault(key, []).append(((center[0], center[1]), half))
+            center, half = record['rho_theta_box']
+            groups.setdefault(key, []).append(
+                ((float(center[0]), float(center[1])),
+                 (float(half[0]), float(half[1]))))
         self.assertTrue(groups, 'no built far-field charts recorded')
         for key, boxes in groups.items():
             for box_a, box_b in itertools.combinations(boxes, 2):
-                separation = _max_norm_center_separation(box_a, box_b)
-                half = box_a[1]
+                (a_c, a_h), (b_c, b_h) = box_a, box_b
+                gaps = [abs(a_c[i] - b_c[i]) - (a_h[i] + b_h[i])
+                        for i in (0, 1)]
                 with self.subTest(group=key):
                     self.assertGreaterEqual(
-                        separation, 2.0 * half - _TILE_DISJOINT_TOL,
-                        f'overlapping built tiles in {key}')
+                        max(gaps), -_TILE_DISJOINT_TOL,
+                        f'overlapping built tiles in {key}: centres {a_c} '
+                        f'{b_c}, halves {a_h} {b_h}')
                     self.comparisons += 1
 
     def test_region_cap_truncation_records_dropped_count(self) -> None:
@@ -577,12 +590,16 @@ class WholeBandContainmentTestCase(_CountingTestCase):
                         abs(rec_max - w_max) / w_max, _W_CONTAINMENT_REL_TOL,
                         'recorded w_max does not reproduce _stratum_w_range')
                     self.comparisons += 1
-                    # Independent-oracle cross-check of the uncapped top.
-                    indep_hi = _w_indep(self._F_HI_HZ, m_hi)
-                    self.assertLessEqual(
-                        abs(indep_hi - stratum['w_max_uncapped'])
-                        / stratum['w_max_uncapped'], _W_CONTAINMENT_REL_TOL)
-                    self.comparisons += 1
+                    # The uncapped band top is no longer carried on the
+                    # per-stratum record: Build S1-3 retired the outer
+                    # per-stratum partitioning for the EXTERIOR, and the
+                    # quantity now lives on the REGION window report as
+                    # ``w_top_uncapped`` (`_farfield_region_window`).  The
+                    # independent-oracle cross-check of it therefore belongs
+                    # with the region window, not here; what this test owns --
+                    # that the RECORDED w-range reproduces `_stratum_w_range`
+                    # and contains every in-stratum draw's band -- is asserted
+                    # above and below and is unaffected.
                     checked += 1
         self.assertGreater(checked, 0, 'no stratum records to cross-check')
 
@@ -1080,31 +1097,31 @@ _GATE_GAMMA_BAND = (0.2, 0.5)
 #: the gate fixture charts (Build 8h-b3: `_build_farfield_chart`'s ``half``
 #: is a caustic-fixed ``(rho, theta_c)`` half-pair, not a scalar).
 _GATE_HALF = (0.25, 0.2)
-_GATE_W_TOP = 2.0
+
+#: Mid-band top for the gate fixture, and the safety factor applied to the
+#: region ``w_floor`` when setting the band bottom.  The band must lie wholly
+#: inside ``[w_floor, w_trust)`` where FARFIELD_KERNEL_SUM is the valid label;
+#: the top is raised from the original 2.0 so the above-floor band still spans
+#: ~1 decade at ``w_nodes_per_decade=8`` (a 4-node w axis under-resolves the
+#: spline and re-inflates eps for a reason unrelated to the gate under test).
+_GATE_W_TOP = 8.0
+_GATE_W_FLOOR_MARGIN = 1.05
 
 #: Three DISJOINT clean far-field tile centres ``(rho_c, theta_c_c)``
 #: (``theta_c`` separation 0.9 > ``2 * half_theta = 0.4``, so no two boxes'
 #: theta_c spans overlap even though they share ``rho_c``).
 #:
-#: KNOWN OPEN ISSUE (test-port, not fixed here -- budget-limited): under the
-#: retired raw ``(y1, y2)`` axis API this fixture's engine-measured held-out
-#: eps was well below the 3e-3 bar (~5e-4, ~1e-4, ~2e-4) at the literal
-#: values ``(2.5, 2.5)`` / ``(2.5, 3.4)`` / ``(3.4, 3.4)``.  Reinterpreting
-#: those SAME numbers as caustic-fixed ``(rho, theta_c)`` (the mechanical
-#: port) measures eps of order 1-7 (checked directly against
-#: `_build_farfield_chart` + `_heldout_eps`, independent of this test file,
-#: across several ``rho_c`` in [2.5, 6.0], several ``(half_rho, half_theta)``
-#: down to (0.1, 0.03), and several narrower ``gamma_band`` widths down to
-#: (0.33, 0.40)) -- none of the combinations tried recovered the pre-port
-#: eps.  `EpsRegistrationGateTestCase` / `EpsGateResumeTestCase` are
-#: therefore LEFT FAILING on the ``eps < _FARFIELD_EPS_BAR`` fixture
-#: preconditions (not a crash: `_build_farfield_chart` / `select_chart` run
-#: to completion with the corrected caustic-fixed API); a further root-cause
-#: pass on why this particular box position degrades this badly under the
-#: new axes is future work.
-_GATE_HEALTHY_CENTER = (2.5, 0.0)
-_GATE_POISON_CENTER = (2.5, 0.9)
-_GATE_NAN_CENTER = (2.5, 1.8)
+#: ``theta_c`` is chosen to keep every tile CLEAR OF THE CUSP RAYS.  For the
+#: astroid the cusps sit at ``theta_c = 0, pi/2, pi, 3pi/2``, where
+#: ``r_caustic`` has a slope kink; a tile straddling one asks a cubic spline
+#: to represent a non-smooth map and its held-out eps inflates for reasons
+#: unrelated to whatever the test is gating (the same defect the production
+#: tiling addresses with cusp-aligned columns).  Centres at 0.5 / 0.95 / 1.4
+#: with ``half_theta = 0.2`` keep every box inside ``(0, pi/2)`` and pairwise
+#: disjoint (separation 0.45 > ``2 * half_theta = 0.4``).
+_GATE_HEALTHY_CENTER = (2.5, 0.5)
+_GATE_POISON_CENTER = (2.5, 0.95)
+_GATE_NAN_CENTER = (2.5, 1.4)
 
 #: Spline-coefficient poison factor: scaling ``real_coeffs`` by 1.1 lifts the
 #: far-field envelope ~10% off the engine truth, so the measured held-out eps
@@ -1135,7 +1152,19 @@ def _wp1_gate_fixture() -> dict:
     config = TrainingConfig(
         n_gamma=6, n_rho=6, n_theta_c=6, w_nodes_per_decade=8, n_heldout=8,
         farfield_eps_max=_FARFIELD_EPS_BAR)
-    w_range = (full_w[0], _GATE_W_TOP)
+    # The band MUST start above the region's physics w_floor.  FARFIELD_KERNEL_SUM
+    # subtracts the real image kernels, which is the right label only in the mid
+    # band ``[w_floor, w_trust)``; below the floor the residual is the divergent
+    # diffractive-bottom object and FARFIELD_DIFFRACTIVE (subtract nothing) is
+    # the correct label.  Starting at ``full_w[0]`` put ~11 of ~15 log-w nodes
+    # under the floor (floor 0.661 vs band start 0.0248), so the charts fitted a
+    # divergent object and measured eps 1-7 regardless of tile placement -- which
+    # is why varying rho_c, the halves and the gamma band never helped.
+    inner_rho = _GATE_HEALTHY_CENTER[0] - _GATE_HALF[0]
+    region_floor, _floor_report = training._farfield_region_w_floor(
+        box, _GATE_GAMMA_BAND, inner_rho, config)
+    w_range = (max(full_w[0], region_floor * _GATE_W_FLOOR_MARGIN),
+               _GATE_W_TOP)
 
     def build(center: tuple[float, float]):
         chart, _calls, _refused = _build_farfield_chart(
