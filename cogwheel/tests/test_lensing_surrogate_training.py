@@ -2,6 +2,31 @@
 `lensing.surrogate_training` trainer, plus the serving-contract both
 directions through `lensing.surrogate.select_chart`.
 
+PROVISIONAL -- READ BEFORE "FIXING" ANYTHING HERE
+-------------------------------------------------
+The STRUCTURAL assertions in this file (tile counts, record keys, stratum
+bookkeeping, box shapes, report schema) pin the CURRENT training-record
+structure, which is MID-REDESIGN.  They are NOT a specification and must not
+be treated as one.
+
+The surrogate serves ~2% of the prior today.  Its structure has already
+changed three times -- 8h-b3 moved the spatial axes to caustic-fixed
+``(rho, theta_c)``, 8h-b4 replaced scalar exclusion with per-column
+admission, S1-3 retired per-stratum exterior partitioning for region windows
+-- and each migration silently killed the tests written against the previous
+shape (25 of them, undetected for a whole build cycle).  The gate re-key,
+Born wiring and census work will move it again.
+
+So, if your change breaks a structural test here: UPDATE OR DELETE IT.  Do
+not contort production to keep it green, and do not spend a build debugging
+it.  The durable claims in the lensing suites are the NUMERICAL ones -- does
+the reconstruction match the engine, does held-out eps clear its bar, does a
+poisoned chart degrade, does the delay frame round-trip.  Those survive
+refactors; the bookkeeping does not.
+
+Revisit the structural layer when the serving design stops moving, i.e.
+after the ladder actually closes.
+
 WHAT THIS SUITE PINS
 --------------------
 Build 8g WP2 replaced the surrogate's single hard-coded far-field box --

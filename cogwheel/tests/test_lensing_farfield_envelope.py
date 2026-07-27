@@ -1,5 +1,17 @@
 """Tests for the far-field envelope redefinition in ``channels``.
 
+PROVISIONAL -- READ BEFORE "FIXING" ANYTHING HERE
+-------------------------------------------------
+The STRUCTURAL assertions in this file (tile geometry, chart record keys,
+subdivision bookkeeping) pin the CURRENT training structure, which is
+MID-REDESIGN.  They are NOT a specification.  The surrogate serves ~2% of
+the prior; 8h-b3, 8h-b4 and S1-3 each changed this structure and each
+silently killed the tests written against the previous shape.  If your
+change breaks a structural test here, UPDATE OR DELETE IT -- do not contort
+production to keep it green, and do not spend a build debugging it.  The
+durable claims are the NUMERICAL ones (reconstruction vs engine, held-out
+eps, node convergence, frame round-trip); those survive refactors.
+
 Build 8g-b redefined the exterior (far-field) surrogate label.  The OLD
 label was ``ChangRefsdalPartition.envelope`` -- the caustic-region SACR-C
 transition envelope, demodulated at the critical carrier ``tau_c`` whose
