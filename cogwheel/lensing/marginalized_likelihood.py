@@ -35,17 +35,25 @@ enforces at construction (`LensedBinningError`).
 
 Distance convention (IMPORTANT, deferred to post-analysis)
 ----------------------------------------------------------
-The coherent score marginalizes and (in postprocessing) draws
-``d_luminosity``, but for a lensed signal the quantity that enters the strain
-is the APPARENT luminosity distance ``d_app = d_luminosity / sqrt(mu_macro)``,
-NOT the physical luminosity distance.  The macro magnification is
-``mu_macro = 1 / ((1 - kappa)**2 - gamma**2)`` (F009).  Consequently the
-'d_luminosity' column produced by `get_blob` / `postprocess_samples` is the
-apparent distance ``d_app``; the physical distance is
-``d_L = d_app * sqrt(mu_macro)``.  The column is deliberately NOT relabelled
-here (relabelling breaks ``lnl_aux`` bookkeeping and downstream plotting).
-Both the ``d_app -> d_L`` conversion and the apparent-vs-physical
-distance-prior reweighting are DEFERRED to post-analysis.
+Distance here is neither a sampled nor a standard parameter: extrinsic
+parameters are marginalized, so ``d_luminosity`` exists only as a
+postprocessing column drawn by the coherent score
+(`CoherentScoreHM._sample_distance(d_h, h_h)`) and surfaced through `get_blob`
+/ `postprocess_samples`.
+
+That column is the PHYSICAL luminosity distance.  `_get_dh_hh_timeshift` folds
+``F * h`` into ``d_h`` and ``|F|**2`` into ``h_h``, so the sampled distance
+scales as ``|F| * (h_h_unlensed / d_h_unlensed)`` -- the magnification is
+carried by the template, not absorbed into the distance variable.  Since
+``F(w -> 0) = sqrt(mu_macro) = 1/sqrt((1-kappa)**2 - gamma**2)`` (F009), the
+APPARENT distance an unlensed amplitude fit would report is
+``d_app = d_luminosity / sqrt(mu_macro)``.  No rescaling of the column is
+required or correct.
+
+See `cogwheel.lensing.waveform` for the authoritative statement of the
+convention, and `test_lensing_prior.py::MassSheetDegeneracyTestCase` for the
+gate: its mass-sheet twin sets ``d_L_B = d_L * lam`` against
+``|F_B| = lam * |F_A|``, an exact cancellation only under this convention.
 """
 from __future__ import annotations
 

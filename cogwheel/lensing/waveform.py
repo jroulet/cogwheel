@@ -19,6 +19,33 @@ is *linear* in the observed frequency ``f`` and depends only on ``f`` (not
 on the mode), so ``F(w(f))`` is a single multiplicative factor shared
 across all modes and both polarizations.
 
+DISTANCE CONVENTION (authoritative)
+-----------------------------------
+``F`` multiplies the wrapped generator's strain with NO compensating
+normalisation, and ``F`` already carries the macro magnification:
+``F(w -> 0) = sqrt(mu_macro) = 1/sqrt((1-kappa)**2 - gamma**2)`` (F009).
+Therefore ``d_luminosity`` -- as sampled by the priors and as drawn by the
+coherent score -- is the PHYSICAL luminosity distance, entering the amplitude
+as ``1/d_luminosity`` with the magnification supplied separately by ``F``.
+The APPARENT distance, what an amplitude fit ignorant of the lens would
+report, is ``d_app = d_luminosity / sqrt(mu_macro)``.
+
+This is the single authoritative statement of the convention.  Every
+likelihood and prior in `cogwheel.lensing` inherits it, by two routes:
+
+* `LensedIASPrior` samples ``d_hat`` and transforms to the standard parameter
+  ``d_luminosity`` through `UniformLuminosityVolumePrior`, reused unchanged --
+  physical by construction of the transform and its Jacobian.
+* `LensedMarginalizedExtrinsicIASPrior` has no distance parameter in either
+  coordinate set; the ``d_luminosity`` blob column is drawn by the coherent
+  score from ``(d_h, h_h)``, both of which carry ``F`` -- physical as a
+  consequence.
+
+No post-analysis rescaling of ``d_luminosity`` is required or correct on
+either route.  Pinned by `test_lensing_prior.py::MassSheetDegeneracyTestCase`,
+whose mass-sheet twin sets ``d_L_B = d_L * lam`` against
+``|F_B| = lam * |F_A|`` -- an exact cancellation only under this convention.
+
 WHY A COMPOSER, NOT A SUBCLASS
 ------------------------------
 The lens amplification is orthogonal to how the unlensed strain is built:

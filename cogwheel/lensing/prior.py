@@ -305,11 +305,11 @@ class LensedMarginalizedExtrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
     ``m_lens_msun`` (produced by the former); `prior.CombinedPrior` requires
     every conditioned-on parameter to be supplied by an earlier subprior.
 
-    Distance convention: the coherent score marginalizes and draws
-    ``d_luminosity``, but for a lensed signal that column is the APPARENT
-    luminosity distance ``d_app = d_luminosity / sqrt(mu_macro)`` (F009); the
-    physical-distance conversion and apparent-vs-physical prior reweighting are
-    deferred to post-analysis (see the likelihood's distance-convention note).
+    Distance convention: extrinsic parameters are marginalized, so distance is
+    neither sampled nor standard here; ``d_luminosity`` is a postprocessing
+    column drawn by the coherent score, and it is the PHYSICAL luminosity
+    distance.  No rescaling is required or correct.  See
+    `cogwheel.lensing.waveform` for the authoritative statement.
     """
     default_likelihood_class = LensedMarginalizedExtrinsicLikelihood
 

@@ -888,8 +888,10 @@ class MassSheetDegeneracyTestCase(_LensSuiteTestCase):
     |F_{0,gamma/lam}(w, y/sqrt(lam))|`` (professor closed form, evaluated
     from RAW coordinates through a fresh `ChangRefsdalChannels` per config,
     so the oracle is the analytic mass-sheet rescaling, not a value the
-    pipeline reuses).  This is the amplitude content that folds
-    ``sqrt(mu_macro)`` into the apparent distance.  (ii) The spec's
+    pipeline reuses).  This is the amplitude content ``F`` carries on TOP of
+    ``1/d_luminosity``: ``d_luminosity`` is the PHYSICAL distance and the
+    apparent distance an unlensed amplitude fit would report is
+    ``d_luminosity / sqrt(mu_macro)``.  (ii) The spec's
     brute-force ``lnlike`` invariance along the twin built by
     `_massheet_twin`, tying the amplitude to ``d_L`` and the residual phase
     to a constant ``t_c`` shift.
