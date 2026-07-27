@@ -141,6 +141,16 @@ _EXPECTED_CUSPS = {1: 4, -1: 6}
 #: smooth diagonal minimum interior to a cusp-aligned tile is not missed.
 _INTERIOR_BOUNDARY_NODES = 181
 _INTERIOR_EDGE_SAMPLES = 5
+#: Dimensionless safety margin on the interior caustic-cloud distance test.  The
+#: shared 200-point ``_caustic_points`` cloud is discrete, so the nearest-cloud
+#: distance overshoots the exact nearest-caustic distance by ~8% of ``eta_max``
+#: (measured at band (0.45, 0.55): exact ``nearest_caustic_point`` distance
+#: 0.0462 vs ``eta_max`` 0.05).  Inflating the interior refusal threshold by 10%
+#: rejects such near-shell tiles without densifying the shared cloud (which also
+#: feeds ``admits_exterior``) or spending extra oracle calls; the margin scales
+#: with ``eta_max``.  Interior-only: the exterior path's ~0.35 caustic margin
+#: dwarfs this slop, so no margin is applied there (kept byte-identical).
+_CLOUD_MARGIN_FRAC = 0.10
 #: S2-2 per-lobe saddle interior (frozen WP7).  Lens-plane angular centres of
 #: the two macro-saddle deltoid lobes on the negative-eigenvalue (shear) axis at
 #: ``beta = 0``; each lobe is swept over its critical wedge
@@ -1514,7 +1524,13 @@ class _InteriorAdmission:
             nearest = np.sqrt(
                 delta_x * delta_x + delta_y * delta_y,
             ).min(axis=1)
-            if np.any(nearest < self.eta_max):
+            # Inflate the tube-shell refusal by _CLOUD_MARGIN_FRAC: the discrete
+            # 200-point caustic cloud reads ~8% of eta_max farther than the
+            # exact nearest-caustic distance, so without the margin a tile whose
+            # true clearance is below eta_max can be false-admitted.  Interior
+            # only -- admits_exterior stays byte-identical (its ~0.35 margin
+            # dwarfs the slop).
+            if np.any(nearest < self.eta_max * (1.0 + _CLOUD_MARGIN_FRAC)):
                 return False
         return True
 
@@ -1535,15 +1551,23 @@ class _InteriorAdmission:
         arm of `surrogate._from_caustic_fixed`) at every sampled gamma in the
         band.
 
-        A tile is admitted iff EVERY probe (every band gamma, every angle) is
-        (1) strictly outside the caustic (``rho_inner > 1``), (2) at least
-        ``eta_max`` from the nearest per-gamma caustic-cloud point -- the SAME
-        cloud test `admits` uses, because near a cusp the nearest caustic point
-        is off the radial ray -- and (3) inside the prior source box
-        (``y_mag <= source_magnitude_max``).  This per-direction test replaces
-        the single over-conservative scalar ``exclusion_rho`` built from the
-        cusp-spike ``_caustic_reach``, which excluded the whole prior box for
-        ``gamma >= 0.85`` (exterior coverage 0.000).
+        A tile is admitted iff (1) its inner ``rho`` edge is strictly outside
+        the caustic (``rho_inner > 1``); (2) EVERY probe (every band gamma,
+        every angle) is at least ``eta_max`` from the nearest per-gamma
+        caustic-cloud point -- the SAME cloud test `admits` uses, because near
+        a cusp the nearest caustic point is off the radial ray; and (3) the
+        tile-CENTRE direction stays inside the prior source box for every band
+        gamma (``r_caustic(gamma, theta_center) + rho_inner - 1 <=
+        source_magnitude_max``).  The box (usefulness) gate is evaluated at the
+        centre direction ONLY (WP1 defect 2): columns are cusp-aligned, so the
+        centre is representative and an off-centre angular probe poking out of
+        the box no longer discards a tile that still admits useful in-box
+        sources; the caustic-distance (correctness) gate is independent and
+        remains an ``np.any`` over all 5 probes and every gamma.  This
+        per-direction test replaces the single over-conservative scalar
+        ``exclusion_rho`` built from the cusp-spike ``_caustic_reach``, which
+        excluded the whole prior box for ``gamma >= 0.85`` (exterior coverage
+        0.000).
 
         Parameters
         ----------
@@ -1568,7 +1592,16 @@ class _InteriorAdmission:
                 return False
             radii = np.interp(thetas, self.theta_axis, radius_axis)
             y_magnitudes = radii + rho_inner - 1.0
-            if np.any(y_magnitudes > source_magnitude_max):
+            # Box (usefulness) gate on the tile-CENTRE direction only (WP1
+            # defect 2).  Columns are cusp-aligned, so the centre is
+            # representative and an off-centre angular probe poking out of the
+            # prior box no longer discards the whole tile.  The caustic-distance
+            # (correctness) gate below is INDEPENDENT and still spans all 5
+            # probes and every band gamma, so relaxing the box test cannot admit
+            # a near-caustic tile -- only one whose angular edge sees
+            # out-of-box (large ``|y|``) sources.
+            if (np.interp(theta_center, self.theta_axis, radius_axis)
+                    + rho_inner - 1.0 > source_magnitude_max):
                 return False
             probe_x = y_magnitudes * np.cos(thetas)
             probe_y = y_magnitudes * np.sin(thetas)
@@ -1683,7 +1716,8 @@ def _farfield_interior_tiles(rho_extent: float, n_per_side: int, *,
 
 def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
                              admission: '_InteriorAdmission',
-                             source_magnitude_max: float
+                             source_magnitude_max: float,
+                             cusp_angles: list[float] | None = None
                              ) -> list[tuple[tuple[float, float],
                                              tuple[float, float], int, int]]:
     """Per-``theta_c``-column exterior tiles of the caustic-fixed annulus.
@@ -1692,31 +1726,44 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
     over-conservative scalar ``exclusion_rho`` inner edge (built from the
     cusp-spike ``_caustic_reach``, which swallowed the whole prior box for
     ``gamma >= 0.85``) with a per-column DIRECTIONAL admission
-    (`_InteriorAdmission.admits_exterior`).  Lays a UNIFORM ``theta_c`` grid
-    over ``[-pi, pi]`` -- edges fall exactly on ``+-pi`` so no tile straddles
-    the ``atan2`` branch cut, and there is no cusp-alignment (the exterior fit
-    does not need it; the defect is zero-tile admission, not eps loss) --
-    and, per column, ``n_per_side`` ``rho`` rows over ``[1, rho_outer]``
-    (``rho = 1`` is the caustic in every direction).  A tile is kept iff
-    ``admission.admits_exterior`` is True: its INNER ``rho`` edge stays
-    outside the caustic, at least ``eta_max`` from the nearest caustic
-    point, and inside the prior source box, for every gamma in the band.  The
-    kept tiles form a per-column band whose inner radius emerges from the
-    direction's true caustic distance; cusp columns whose whole ``rho`` range
-    is out-of-box (even ``rho`` near one) admit nothing.
+    (`_InteriorAdmission.admits_exterior`).  Per column, ``n_per_side`` ``rho``
+    rows over ``[1, rho_outer]`` (``rho = 1`` is the caustic in every
+    direction).  The ``theta_c`` columns are cusp-aligned EXACTLY like the
+    interior tiler (`_farfield_interior_tiles`): when ``cusp_angles`` is
+    supplied the columns come from `_cusp_aligned_theta_tiles` so no admitted
+    tile straddles an astroid cusp ray (an ``r_caustic`` slope kink) or the
+    ``+-pi`` branch cut -- the positive-parity exterior ``rho > 1`` arm of
+    `surrogate._from_caustic_fixed` is a ``theta_c``-independent affine push-out
+    of ``r_caustic(gamma, theta_c)``, so it inherits the same four source-plane
+    cusp rays as the interior.  When ``cusp_angles`` is None/empty the columns
+    fall back to the byte-identical UNIFORM ``theta_c`` grid over ``[-pi, pi]``
+    (edges pinned on ``+-pi``) so existing callers/tests are unaffected.  A tile
+    is kept iff ``admission.admits_exterior`` is True: its INNER ``rho`` edge
+    stays outside the caustic, at least ``eta_max`` from the nearest caustic
+    point (over all probes and band gammas), and its centre direction is inside
+    the prior source box, for every gamma in the band.  The kept tiles form a
+    per-column band whose inner radius emerges from the direction's true caustic
+    distance.
 
     Parameters
     ----------
     rho_outer : float
         Outer prior-support radius in caustic-fixed ``rho`` units.
     n_per_side : int
-        Number of ``rho`` rows and of ``theta_c`` columns.
+        Number of ``rho`` rows and of ``theta_c`` sub-tiles per cusp sector
+        (or over the whole ``[-pi, pi]`` sector when no cusp ray is supplied).
     admission : _InteriorAdmission
         The band's directional-admission geometry (`_interior_admission`),
         reused via its exterior probe `admits_exterior`.
     source_magnitude_max : float
         Largest physical source magnitude in the region (the union extent
-        ``y_outer_region``); a probe beyond it lies outside the prior box.
+        ``y_outer_region``); a centre-direction probe beyond it lies outside
+        the prior box.
+    cusp_angles : list of float, optional
+        Source-plane cusp-ray angles (`_cusp_source_angles`).  When non-empty
+        the ``theta_c`` tile edges are aligned to them (and the ``+-pi`` branch
+        cut) so no tile straddles a cusp kink; when None/empty the columns fall
+        back to the byte-identical uniform ``theta_c`` grid.
 
     Returns
     -------
@@ -1732,14 +1779,17 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
     if rho_outer <= rho_inner_floor:
         return []
     half_rho = 0.5 * (rho_outer - rho_inner_floor) / n_per_side
-    half_theta = math.pi / n_per_side
     rho_centers = [rho_inner_floor + half_rho * (2 * k + 1)
                    for k in range(n_per_side)]
-    theta_centers = [-math.pi + half_theta * (2 * k + 1)
-                     for k in range(n_per_side)]
+    if cusp_angles:
+        theta_tiles = _cusp_aligned_theta_tiles(cusp_angles, n_per_side)
+    else:
+        half_theta = math.pi / n_per_side
+        theta_tiles = [(-math.pi + half_theta * (2 * k + 1), half_theta)
+                       for k in range(n_per_side)]
     tiles: list[tuple[tuple[float, float], tuple[float, float], int, int]] = []
     for i, rho_c in enumerate(rho_centers):
-        for j, theta_c in enumerate(theta_centers):
+        for j, (theta_c, half_theta) in enumerate(theta_tiles):
             center = (float(rho_c), float(theta_c))
             half = (float(half_rho), float(half_theta))
             if admission.admits_exterior(center, half, source_magnitude_max):
@@ -3259,10 +3309,18 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     if parity == 1:
         exterior_admission = _interior_admission(
             band, 1, reach_scalar, config)
+        # Cusp-align the exterior ``theta_c`` columns to the SAME source-plane
+        # astroid cusp rays as the interior (WP1 defect 1): the exterior
+        # ``rho > 1`` arm is a theta-independent affine push-out of
+        # ``r_caustic``, so it inherits the interior's slope kinks.  Reuse the
+        # band's ``gamma_mid`` (already computed above); cusp rays are
+        # gamma-dependent, so never recompute at a band edge.
+        cusp_angles = _cusp_source_angles(gamma_mid, config.n_caustic_samples)
         exterior_tiles = _farfield_exterior_tiles(
             rho_outer_region, config.n_farfield_tiles_per_side,
             admission=exterior_admission,
-            source_magnitude_max=y_outer_region)
+            source_magnitude_max=y_outer_region,
+            cusp_angles=cusp_angles)
         region_exclusion_rho = (
             min(center[0] - half[0] for center, half, _, _ in exterior_tiles)
             if exterior_tiles else exclusion_rho)

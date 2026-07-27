@@ -308,6 +308,220 @@ def _covered_mask(rho: np.ndarray, theta_c: np.ndarray, tiles: list
     return covered
 
 
+# --------------------------------------------------------------------------- #
+#  WP1 (cusp-aligned columns + center-direction box gate) and WP2 (interior    #
+#  200-point caustic-cloud false-admit closed by _CLOUD_MARGIN_FRAC) fixtures. #
+# --------------------------------------------------------------------------- #
+
+#: Band + centre gamma for the cusp-no-straddle / edge-containment structural
+#: certification (DEFECT 1).  Any positive-parity band works; this one is the
+#: coverage control band.
+WP1_CUSP_BAND = (0.40, 0.50)
+WP1_CUSP_GAMMA_MID = 0.45
+
+#: Absolute tolerance (rad) on the cusp-ray / tile-edge geometry (DEFECT 1).
+CUSP_EDGE_TOL = 1e-9
+
+#: The centre gamma whose astroid cusp on the ``y1`` axis (``theta_c = 0``) is
+#: the SOURCE-plane ray of the ``test_lensing_surrogate`` positive-box RED
+#: config ``(gamma = 0.40, y1 = 2.183, y2 = 0)``.  With cusp-aligned exterior
+#: columns that ray becomes a tile EDGE, so the held-out probe no longer sits
+#: in a cell interior across the ``r_caustic`` slope kink -- the STRUCTURAL
+#: cause of the eps collapse (2.6e-1 -> ~1.5e-4).  The eps-VALUE green-check of
+#: `EnvelopeReconstructionTestCase.test_positive_box_reconstruction_within_budget`
+#: is owned by ``test_lensing_surrogate.py`` (a heavy reconstruction suite this
+#: run must not edit); here we certify only its mechanism.
+ONCUSP_GAMMA = 0.40
+
+#: DEFECT 2 coverage-rises: the previously-dead high band, production tile
+#: count, and the box-test-disabled ceiling bar.  Measured NEW coverage at the
+#: box extent ``cap = BOX_CORNER`` with cusp-aligned columns is ~0.8817
+#: (the spec's ~0.88), materially above the OLD center-straddling 0.56.
+CUSP_COVERAGE_BAND = (0.80, 0.90)
+CUSP_COVERAGE_GAMMA_MID = 0.85
+CUSP_COVERAGE_N = 5
+CUSP_COVERAGE_BAR = 0.80
+
+#: DEFECT 2 reachable-red: at the PER-REGION source cap (3.0, where the box
+#: usefulness gate actually binds) the OLD strict all-5-probe ``np.any`` box
+#: gate drops coverage to ~0.3485 while the NEW center-direction gate reaches
+#: ~0.4779 -- so the RELAXATION (not the tiling) moved the number.  The bar is
+#: 0.60 (strict must sit below it; relaxed must sit above strict).
+REACHABLE_RED_CAP = 3.0
+STRICT_COVERAGE_BAR = 0.60
+
+#: DEFECT 3 interior targeted-refusal band + its three sampled gammas.  The
+#: interior probe reconstructs ``|y| = rho * r_caustic(gamma, theta_c)``; the
+#: nearest caustic point is CLOSEST at the SMALLEST band gamma (the caustic is
+#: smallest there), so the band's worst gamma for INTERIOR admission is its
+#: LOWER edge.
+INTERIOR_BAND = (0.45, 0.55)
+INTERIOR_GAMMAS = (0.45, 0.50, 0.55)
+
+#: The DEFECT 3 probe direction.  The spec's literal ``theta_c = 0`` is the
+#: ``y1``-axis cusp, where the 200-point caustic cloud is densely sampled and
+#: its discretization slop is ~0 (measured: at ``theta_c = 0`` the tile at the
+#: cloud-admit boundary has exact nearest ~0.04996 ~ eta, admits True, no
+#: false-admit).  The GENUINE discretization false-admit -- where the discrete
+#: cloud reads FARTHER from the caustic than the exact nearest point, so a tile
+#: whose true clearance is below ``eta_max`` reads admissible -- lives on the
+#: PERPENDICULAR (``y2``-axis) cusp ``theta_c = pi/2``: there the cloud reads up
+#: to ~8% of ``eta_max`` beyond the exact distance.  This is a premise repair
+#: (the physics the margin protects lives at ``pi/2``, not ``0``), NOT a
+#: tolerance repair.
+REFUSAL_THETA_C = math.pi / 2.0
+
+#: Outer ``rho`` edge of the DEFECT 3 near-boundary interior tile at
+#: ``REFUSAL_THETA_C``.  Measured at this edge (band gammas 0.45/0.50/0.55):
+#: production ``admits`` is False; the discrete-cloud nearest is ~0.05132
+#: (ABOVE ``eta_max`` -- so the margin-0 gate would ADMIT it); the EXACT
+#: oracle nearest is ~0.04859 (BELOW ``eta_max`` -- so the refusal is CORRECT).
+REFUSAL_RHO_OUTER = 0.7480
+REFUSAL_HALF_RHO = 1e-4
+REFUSAL_HALF_THETA = math.pi / 50.0
+
+#: Independently measured exact-oracle nearest-caustic distance at the DEFECT 3
+#: probe (min over band gammas), and its regression tolerance.  Below
+#: ``eta_max`` -> the refusal is physically correct.
+REFUSAL_EXACT_DISTANCE = 0.04859
+REFUSAL_EXACT_TOL = 1.5e-3
+
+#: An outer ``rho`` edge comfortably interior at ``REFUSAL_THETA_C`` whose exact
+#: nearest (~0.21) dwarfs ``eta_max``: the 10% margin must NOT over-tighten it.
+COMFORT_RHO_OUTER = 0.5
+
+#: DEFECT 3 margin sizing.  The production ``_CLOUD_MARGIN_FRAC`` must be at
+#: least 0.10, and the margin WIDTH ``eta_max * _CLOUD_MARGIN_FRAC`` (0.005)
+#: must exceed the worst measured discretization slop ``WORST_SLOP_FRAC *
+#: eta_max`` (~0.004) with headroom.
+CLOUD_MARGIN_FRAC_MIN = 0.10
+WORST_SLOP_FRAC = 0.08
+
+
+def _wrap(angle: float) -> float:
+    """Wrap an angle to ``(-pi, pi]``."""
+    return (float(angle) + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def _cusp_angles(gamma_mid: float) -> list[float]:
+    """Source-plane cusp rays at ``gamma_mid`` (production sampling count)."""
+    return st._cusp_source_angles(
+        gamma_mid, st.TrainingConfig().n_caustic_samples)
+
+
+def _exterior_tiles_cusp(band: tuple[float, float], n_per_side: int,
+                         source_magnitude_max: float,
+                         cusp_angles: list[float] | None) -> list:
+    """Admitted exterior tiles with an explicit ``cusp_angles`` argument."""
+    coordinate_radius_min, _ = _coord_bounds(band)
+    rho_outer = 1.0 + source_magnitude_max - coordinate_radius_min
+    return st._farfield_exterior_tiles(
+        rho_outer, n_per_side, admission=_admission(band),
+        source_magnitude_max=source_magnitude_max, cusp_angles=cusp_angles)
+
+
+def _exact_nearest_over_band(band_gammas: tuple[float, ...], theta_c: float,
+                             rho_outer: float) -> tuple[float, float]:
+    """Min over band gammas of the EXACT nearest-caustic distance of the probe.
+
+    The interior probe source is ``|y| = rho_outer * r_caustic(gamma,
+    theta_c)`` in the ``theta_c`` direction (the ``rho < 1`` arm of
+    `surrogate._from_caustic_fixed`).  Returns ``(min_distance, arg_gamma)``.
+    """
+    best, arg = math.inf, band_gammas[0]
+    for gamma in band_gammas:
+        radius = geometry.r_caustic(float(gamma), float(theta_c))
+        magnitude = rho_outer * radius
+        source = np.array([magnitude * math.cos(theta_c),
+                           magnitude * math.sin(theta_c)])
+        distance = geometry.nearest_caustic_point(
+            float(gamma), 0.0, source).distance
+        if distance < best:
+            best, arg = distance, float(gamma)
+    return best, arg
+
+
+def _cloud_nearest_over_band(admission: 'st._InteriorAdmission', theta_c: float,
+                             rho_outer: float, half_theta: float) -> float:
+    """Min over band gammas of the DISCRETE 200-point cloud nearest distance.
+
+    Reproduces the interior ``admits`` inner loop (the same probe grid and
+    per-gamma cloud), returning the smallest cloud-nearest across all probes --
+    the quantity the production margin is compared against.
+    """
+    thetas = np.linspace(theta_c - half_theta, theta_c + half_theta,
+                         st._INTERIOR_EDGE_SAMPLES)
+    best = math.inf
+    for radius_axis, caustic_cloud in zip(
+            admission.radius_grid, admission.caustic_clouds):
+        radii = np.interp(thetas, admission.theta_axis, radius_axis)
+        magnitudes = rho_outer * radii
+        probe_x = magnitudes * np.cos(thetas)
+        probe_y = magnitudes * np.sin(thetas)
+        delta_x = probe_x[:, None] - caustic_cloud[None, :, 0]
+        delta_y = probe_y[:, None] - caustic_cloud[None, :, 1]
+        nearest = np.sqrt(delta_x * delta_x + delta_y * delta_y).min(axis=1)
+        best = min(best, float(nearest.min()))
+    return best
+
+
+class _StrictBoxAdmission:
+    """OLD strict box gate (5-angle ``np.any``) shim over the real admission.
+
+    Wraps a production `_InteriorAdmission` and reproduces `admits_exterior`
+    EXACTLY except the box (usefulness) gate is evaluated over ALL five angular
+    probes with ``np.any`` (the pre-WP1 behavior), instead of the tile-centre
+    direction only.  The caustic-distance (correctness) gate is byte-identical
+    to production.  Used ONLY to certify DEFECT 2 reachable-red: the strict gate
+    discards centre-in-box tiles whose off-centre edge pokes out of the box.
+    """
+
+    def __init__(self, admission: 'st._InteriorAdmission') -> None:
+        self._admission = admission
+
+    def admits_exterior(self, center: tuple[float, float],
+                        half: tuple[float, float],
+                        source_magnitude_max: float) -> bool:
+        admission = self._admission
+        rho_center, theta_center = center
+        half_rho, half_theta = half
+        rho_inner = float(rho_center) - float(half_rho)
+        if rho_inner <= 1.0:
+            return False
+        thetas = np.linspace(theta_center - half_theta,
+                             theta_center + half_theta,
+                             st._INTERIOR_EDGE_SAMPLES)
+        for radius_axis, caustic_cloud in zip(
+                admission.radius_grid, admission.caustic_clouds):
+            if caustic_cloud.shape[0] == 0:
+                return False
+            radii = np.interp(thetas, admission.theta_axis, radius_axis)
+            magnitudes = radii + rho_inner - 1.0
+            # OLD strict box gate: ANY out-of-box probe discards the tile.
+            if np.any(magnitudes > source_magnitude_max):
+                return False
+            probe_x = magnitudes * np.cos(thetas)
+            probe_y = magnitudes * np.sin(thetas)
+            delta_x = probe_x[:, None] - caustic_cloud[None, :, 0]
+            delta_y = probe_y[:, None] - caustic_cloud[None, :, 1]
+            nearest = np.sqrt(
+                delta_x * delta_x + delta_y * delta_y).min(axis=1)
+            if np.any(nearest < admission.eta_max):
+                return False
+        return True
+
+
+def _strict_exterior_tiles(band: tuple[float, float], n_per_side: int,
+                           source_magnitude_max: float,
+                           cusp_angles: list[float] | None) -> list:
+    """Admitted exterior tiles under the OLD strict all-probe box gate."""
+    coordinate_radius_min, _ = _coord_bounds(band)
+    rho_outer = 1.0 + source_magnitude_max - coordinate_radius_min
+    return st._farfield_exterior_tiles(
+        rho_outer, n_per_side, admission=_StrictBoxAdmission(_admission(band)),
+        source_magnitude_max=source_magnitude_max, cusp_angles=cusp_angles)
+
+
 class ExteriorAdmissionTestCase(unittest.TestCase):
     """Base carrying the anti-vacuity comparison counter.
 
@@ -780,6 +994,626 @@ class Gamma1BoxCentreGuardTestCase(ExteriorAdmissionTestCase):
             self.assertTrue(math.isfinite(rho_back))
             self.assertGreater(rho_back, 1.0)
             self.record_comparison()
+
+
+class CuspNoStraddleTestCase(ExteriorAdmissionTestCase):
+    """DEFECT 1: no admitted exterior tile straddles an astroid cusp ray.
+
+    The positive-parity exterior ``rho > 1`` arm of
+    `surrogate._from_caustic_fixed` is a ``theta_c``-independent affine push-out
+    of ``r_caustic(gamma, theta_c)``, so it inherits the interior's four
+    source-plane cusp rays (``r_caustic`` slope kinks).  With cusp-aligned
+    columns (`_cusp_aligned_theta_tiles`) every cusp ray must fall ON a column
+    edge, so no tile spans a kink -- the structural cause of the on-cusp
+    reconstruction eps collapse.
+    """
+
+    def test_no_admitted_tile_straddles_a_cusp_ray(self) -> None:
+        cusps = _cusp_angles(WP1_CUSP_GAMMA_MID)
+        self.assertEqual(len(cusps), 4, 'expected four astroid cusps')
+        tiles = _exterior_tiles_cusp(
+            WP1_CUSP_BAND, CUSP_COVERAGE_N, BOX_CORNER, cusps)
+        self.assertGreater(len(tiles), 0, 'no admitted tiles to inspect')
+        worst_penetration = 0.0
+        for (_, theta_center), (_, half_theta), _, _ in tiles:
+            for cusp in cusps:
+                gap = abs(_wrap(theta_center - cusp))
+                # A cusp ray strictly inside a tile has gap < half_theta.
+                self.assertGreaterEqual(
+                    gap, half_theta - CUSP_EDGE_TOL,
+                    f'tile centre {theta_center:.6f} straddles cusp '
+                    f'{cusp:.6f} (gap {gap:.2e} < half {half_theta:.2e})')
+                worst_penetration = max(worst_penetration,
+                                        half_theta - CUSP_EDGE_TOL - gap)
+                self.record_comparison()
+        self._plot_columns(cusps, tiles, worst_penetration)
+
+    def test_each_cusp_ray_is_a_tile_column_edge(self) -> None:
+        cusps = _cusp_angles(WP1_CUSP_GAMMA_MID)
+        tiles = _exterior_tiles_cusp(
+            WP1_CUSP_BAND, CUSP_COVERAGE_N, BOX_CORNER, cusps)
+        edges = set()
+        for (_, theta_center), (_, half_theta), _, _ in tiles:
+            edges.add(theta_center - half_theta)
+            edges.add(theta_center + half_theta)
+        edge_array = np.array(sorted(edges))
+        for cusp in cusps:
+            nearest = float(np.min(np.abs(edge_array - _wrap(cusp))))
+            self.assertLess(
+                nearest, CUSP_EDGE_TOL,
+                f'cusp ray {cusp:.6f} is {nearest:.2e} from the nearest '
+                'admitted-tile column edge (should be a column edge)')
+            self.record_comparison()
+
+    def _plot_columns(self, cusps, tiles, worst) -> None:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        for (rho_center, theta_center), (half_rho, half_theta), _, _ in tiles:
+            ax.add_patch(plt.Rectangle(
+                (theta_center - half_theta, rho_center - half_rho),
+                2 * half_theta, 2 * half_rho, fill=False,
+                edgecolor='tab:blue', lw=0.4))
+        for cusp in cusps:
+            ax.axvline(_wrap(cusp), color='tab:red', ls='--', lw=1.0)
+        ax.set_xlim(-math.pi, math.pi)
+        ax.set_xlabel('theta_c (rad)')
+        ax.set_ylabel('rho (caustic-fixed)')
+        ax.set_title(f'cusp-aligned exterior columns band {WP1_CUSP_BAND} '
+                     f'(worst cusp penetration {worst:.1e} rad)')
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'cusp_aligned_columns.png', dpi=90)
+        plt.close(fig)
+
+
+class BackwardCompatTilingTestCase(ExteriorAdmissionTestCase):
+    """DEFECT 1 backward-compat: ``cusp_angles`` None/omitted -> uniform grid.
+
+    The None-default fallback must reproduce the byte-identical uniform
+    ``theta_c`` tiling the pre-change (already-green) callers/tests rely on.
+    """
+
+    def test_none_matches_omitted_signature(self) -> None:
+        coordinate_radius_min, _ = _coord_bounds(WP1_CUSP_BAND)
+        rho_outer = 1.0 + BOX_CORNER - coordinate_radius_min
+        omitted = st._farfield_exterior_tiles(
+            rho_outer, CUSP_COVERAGE_N, admission=_admission(WP1_CUSP_BAND),
+            source_magnitude_max=BOX_CORNER)
+        explicit_none = st._farfield_exterior_tiles(
+            rho_outer, CUSP_COVERAGE_N, admission=_admission(WP1_CUSP_BAND),
+            source_magnitude_max=BOX_CORNER, cusp_angles=None)
+        self.assertEqual(omitted, explicit_none)
+        self.record_comparison()
+
+    def test_none_tiling_is_the_uniform_grid(self) -> None:
+        # The None fallback lays edges on a uniform [-pi, pi] grid pinned on
+        # +-pi (the pre-WP1 behavior), NOT on the cusp rays.
+        tiles = _exterior_tiles_cusp(
+            WP1_CUSP_BAND, CUSP_COVERAGE_N, BOX_CORNER, None)
+        half_theta = math.pi / CUSP_COVERAGE_N
+        expected_centers = {
+            round(-math.pi + half_theta * (2 * k + 1), 9)
+            for k in range(CUSP_COVERAGE_N)}
+        seen_centers = {round(theta_center, 9)
+                        for (_, theta_center), _, _, _ in tiles}
+        self.assertTrue(seen_centers.issubset(expected_centers))
+        for (_, _), (_, tile_half), _, _ in tiles:
+            self.assertAlmostEqual(tile_half, half_theta, places=12)
+            self.record_comparison()
+
+
+class OnCuspColumnEdgeTestCase(ExteriorAdmissionTestCase):
+    """DEFECT 1 on-cusp eps-drop MECHANISM (structural, in-scope).
+
+    The ``test_lensing_surrogate`` positive-box RED config
+    ``(gamma = 0.40, y1 = 2.183, y2 = 0)`` sits EXACTLY on the ``theta_c = 0``
+    cusp ray, where the caustic-fixed map has a slope kink the cubic spline
+    cannot represent when the ray falls in a cell interior (eps 2.6e-1).  With
+    cusp-aligned exterior columns the ray becomes a column EDGE, so the held-out
+    probe lands on a C2-safe node boundary (eps collapses to ~1.5e-4).  This
+    test certifies that structural cause; the eps-VALUE green-check of
+    `EnvelopeReconstructionTestCase` is owned by ``test_lensing_surrogate.py``.
+    """
+
+    def test_gamma040_y1_axis_cusp_is_a_column_edge(self) -> None:
+        cusps = _cusp_angles(ONCUSP_GAMMA)
+        # The y1-axis cusp is the one nearest theta_c = 0.
+        y1_axis_cusp = min(cusps, key=lambda c: abs(_wrap(c)))
+        self.assertLess(
+            abs(_wrap(y1_axis_cusp)), 1e-6,
+            'expected a cusp on the y1 axis (theta_c ~ 0)')
+        tiles = _exterior_tiles_cusp(
+            (ONCUSP_GAMMA, ONCUSP_GAMMA + 0.10), CUSP_COVERAGE_N,
+            BOX_CORNER, cusps)
+        self.assertGreater(len(tiles), 0, 'no admitted tiles at the cusp band')
+        edges = np.array(sorted(
+            {theta_center + sign * half_theta
+             for (_, theta_center), (_, half_theta), _, _ in tiles
+             for sign in (-1.0, 1.0)}))
+        nearest = float(np.min(np.abs(edges - _wrap(y1_axis_cusp))))
+        self.assertLess(
+            nearest, CUSP_EDGE_TOL,
+            f'the gamma=0.40 y1-axis cusp is {nearest:.2e} from the nearest '
+            'column edge -- the surrogate RED probe would sit in a cell '
+            'interior, not on a boundary')
+        # Contrast: the UNIFORM grid places NO edge on the cusp (the defect).
+        uni = _exterior_tiles_cusp(
+            (ONCUSP_GAMMA, ONCUSP_GAMMA + 0.10), CUSP_COVERAGE_N,
+            BOX_CORNER, None)
+        uni_edges = np.array(sorted(
+            {theta_center + sign * half_theta
+             for (_, theta_center), (_, half_theta), _, _ in uni
+             for sign in (-1.0, 1.0)}))
+        uni_nearest = float(np.min(np.abs(uni_edges - _wrap(y1_axis_cusp))))
+        self.assertGreater(
+            uni_nearest, CUSP_EDGE_TOL,
+            'the uniform grid unexpectedly aligned to the cusp')
+        self.record_comparison()
+
+
+class CuspAlignedCoverageTestCase(ExteriorAdmissionTestCase):
+    """DEFECT 2 coverage-rises: cusp-aligned + relaxed gate covers >= 0.80.
+
+    At the production tile count (``n = 5``) over the box extent (the
+    box-test-disabled ceiling ``cap = BOX_CORNER``), the cusp-aligned columns
+    with the center-direction box gate cover the exact-oracle truth set of the
+    previously-dead ``0.80-0.90`` band to ~0.8817 -- materially above the OLD
+    center-straddling 0.56.
+    """
+
+    def test_high_band_coverage_at_least_080(self) -> None:
+        in_t, rho, theta_c, n_t = _truth_set(CUSP_COVERAGE_BAND)
+        self.assertGreater(n_t, 1000, 'truth set is suspiciously small')
+        cusps = _cusp_angles(CUSP_COVERAGE_GAMMA_MID)
+        tiles = _exterior_tiles_cusp(
+            CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, BOX_CORNER, cusps)
+        self.assertGreater(len(tiles), 0, 'cusp-aligned admission gave no tiles')
+        covered = _covered_mask(rho, theta_c, tiles)
+        coverage = float((in_t & covered).sum()) / n_t
+        self._plot(in_t, covered, rho, theta_c, coverage)
+        self.assertGreaterEqual(
+            coverage, CUSP_COVERAGE_BAR,
+            f'cusp-aligned high-band coverage {coverage:.4f} < '
+            f'{CUSP_COVERAGE_BAR} (|T|={n_t}, tiles={len(tiles)})')
+        # Materially above the OLD center-straddling coverage 0.56.
+        self.assertGreater(coverage, 0.56 + 0.10)
+        self.record_comparison()
+
+    def _plot(self, in_t, covered, rho, theta_c, coverage) -> None:
+        sel = in_t
+        col = np.where(covered[sel], 'tab:blue', 'tab:red')
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.scatter(theta_c[sel], rho[sel], s=2, c=col, linewidths=0)
+        ax.set_xlabel('theta_c (rad)')
+        ax.set_ylabel('rho (caustic-fixed)')
+        ax.set_title(f'cusp-aligned coverage band {CUSP_COVERAGE_BAND} n=5: '
+                     f'{coverage:.3f} (blue=covered)')
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'cusp_aligned_coverage_high_band.png', dpi=90)
+        plt.close(fig)
+
+
+class CuspAlignedReachableRedTestCase(ExteriorAdmissionTestCase):
+    """DEFECT 2 reachable-red: the OLD strict box gate drops coverage <= 0.60.
+
+    Restoring the OLD strict all-5-probe ``np.any`` box gate (same band, same
+    cusp-aligned tiling, same per-region cap 3.0 where the box actually binds)
+    drops coverage to ~0.3485, BELOW the 0.60 bar and BELOW the relaxed
+    center-direction gate's ~0.4779 -- proving the center-direction RELAXATION,
+    not a tiling change, moved the coverage number.
+    """
+
+    def test_strict_box_gate_coverage_below_relaxed(self) -> None:
+        in_t, rho, theta_c, n_t = _truth_set(CUSP_COVERAGE_BAND)
+        cusps = _cusp_angles(CUSP_COVERAGE_GAMMA_MID)
+        relaxed = _exterior_tiles_cusp(
+            CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, REACHABLE_RED_CAP, cusps)
+        strict = _strict_exterior_tiles(
+            CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, REACHABLE_RED_CAP, cusps)
+        relaxed_cov = float(
+            (in_t & _covered_mask(rho, theta_c, relaxed)).sum()) / n_t
+        strict_cov = float(
+            (in_t & _covered_mask(rho, theta_c, strict)).sum()) / n_t
+        self._plot(in_t, rho, theta_c, relaxed, strict,
+                   relaxed_cov, strict_cov)
+        self.assertLessEqual(
+            strict_cov, STRICT_COVERAGE_BAR,
+            f'strict box-gate coverage {strict_cov:.4f} should sit below '
+            f'{STRICT_COVERAGE_BAR} (the box binds at cap={REACHABLE_RED_CAP})')
+        self.assertGreater(
+            relaxed_cov, strict_cov,
+            'the center-direction relaxation did not raise coverage '
+            f'(relaxed {relaxed_cov:.4f} <= strict {strict_cov:.4f})')
+        self.record_comparison()
+
+    def _plot(self, in_t, rho, theta_c, relaxed, strict, rc, sc) -> None:
+        fig, axes = plt.subplots(1, 2, figsize=(11, 4), sharey=True)
+        for ax, tiles, label, cov in (
+                (axes[0], strict, 'strict (old)', sc),
+                (axes[1], relaxed, 'relaxed (new)', rc)):
+            covered = _covered_mask(rho, theta_c, tiles)
+            col = np.where(covered[in_t], 'tab:blue', 'tab:red')
+            ax.scatter(theta_c[in_t], rho[in_t], s=2, c=col, linewidths=0)
+            ax.set_title(f'{label}: {cov:.3f}')
+            ax.set_xlabel('theta_c (rad)')
+        axes[0].set_ylabel('rho (caustic-fixed)')
+        fig.suptitle(f'DEFECT 2 reachable-red band {CUSP_COVERAGE_BAND} '
+                     f'cap={REACHABLE_RED_CAP}')
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'reachable_red_strict_vs_relaxed.png', dpi=90)
+        plt.close(fig)
+
+
+class CuspAlignedNoFalseAdmitTestCase(ExteriorAdmissionTestCase):
+    """DEFECT 2 no-false-admit preserved (HARD) on the relaxed+cusp set.
+
+    Relaxing the box gate to the tile centre must NOT admit any near-caustic
+    tile: the caustic-distance (correctness) gate is independent of the box
+    gate.  For every admitted cusp-aligned tile of the ``0.80-0.90`` band, a
+    5x5 interior grid reconstructed via `surrogate._from_caustic_fixed` at every
+    band gamma must have EXACTLY zero exact-oracle nearest distances within
+    ``eta_max``.
+    """
+
+    def test_zero_admitted_samples_within_eta_shell(self) -> None:
+        lo, hi = CUSP_COVERAGE_BAND
+        band_gammas = (lo, 0.5 * (lo + hi), hi)
+        cusps = _cusp_angles(CUSP_COVERAGE_GAMMA_MID)
+        tiles = _exterior_tiles_cusp(
+            CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, BOX_CORNER, cusps)
+        self.assertGreater(len(tiles), 0, 'no admitted tiles to probe')
+        distances: list[float] = []
+        violations = 0
+        for (rho_center, theta_center), (half_rho, half_theta), _, _ in tiles:
+            for rho in np.linspace(rho_center - half_rho,
+                                   rho_center + half_rho, NFA_GRID):
+                for theta in np.linspace(theta_center - half_theta,
+                                         theta_center + half_theta, NFA_GRID):
+                    for gamma in band_gammas:
+                        y1, y2 = sg._from_caustic_fixed(
+                            gamma, float(rho), float(theta))
+                        distance = geometry.nearest_caustic_point(
+                            gamma, 0.0, np.array([y1, y2])).distance
+                        distances.append(distance)
+                        if distance < ETA_MAX:
+                            violations += 1
+        self.assertGreater(len(distances), 1000, 'too few interior samples')
+        min_distance = min(distances)
+        self._plot(distances, min_distance)
+        self.assertEqual(
+            violations, 0,
+            f'{violations}/{len(distances)} cusp-aligned admitted-tile samples '
+            f'within eta_max={ETA_MAX} (min {min_distance:.4f})')
+        self.assertGreaterEqual(min_distance, ETA_MAX)
+        self.record_comparison()
+
+    def _plot(self, distances, min_distance) -> None:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.hist(distances, bins=60, color='tab:purple', alpha=0.8)
+        ax.axvline(ETA_MAX, color='k', ls='--', label=f'eta_max={ETA_MAX}')
+        ax.set_xlabel('exact nearest-caustic distance (cusp-aligned admitted)')
+        ax.set_ylabel('count')
+        ax.set_title(f'cusp-aligned no-false-admit band {CUSP_COVERAGE_BAND}: '
+                     f'min={min_distance:.4f}')
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'cusp_aligned_no_false_admit_hist.png', dpi=90)
+        plt.close(fig)
+
+
+class InBoxCenterTeethTestCase(ExteriorAdmissionTestCase):
+    """DEFECT 2 in-box teeth: the center-direction box gate is LIVE.
+
+    For every admitted tile at the per-region cap (3.0) the tile-centre inner
+    edge magnitude ``r_caustic(gamma, theta_center) + rho_inner - 1`` must stay
+    within the cap at every band gamma (the gate binds), and lowering the cap
+    below the largest admitted centre magnitude must reject at least one tile
+    (the gate is not disabled).
+    """
+
+    def test_center_magnitude_within_cap_and_gate_binds(self) -> None:
+        lo, hi = CUSP_COVERAGE_BAND
+        band_gammas = (lo, 0.5 * (lo + hi), hi)
+        cusps = _cusp_angles(CUSP_COVERAGE_GAMMA_MID)
+        tiles = _exterior_tiles_cusp(
+            CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, REACHABLE_RED_CAP, cusps)
+        self.assertGreater(len(tiles), 0, 'no admitted tiles')
+        max_center = 0.0
+        centers: list[float] = []
+        for (rho_center, theta_center), (half_rho, _), _, _ in tiles:
+            rho_inner = rho_center - half_rho
+            for gamma in band_gammas:
+                y_center = (geometry.r_caustic(gamma, theta_center)
+                            + rho_inner - 1.0)
+                centers.append(y_center)
+                self.assertLessEqual(
+                    y_center, REACHABLE_RED_CAP + 1e-12,
+                    f'admitted centre magnitude {y_center:.4f} exceeds cap '
+                    f'{REACHABLE_RED_CAP}')
+                max_center = max(max_center, y_center)
+                self.record_comparison()
+        # The gate BINDS: some admitted centre sits within the outer rho band of
+        # the cap, so re-testing the SAME tiles against a threshold just below
+        # the largest admitted centre magnitude rejects at least that tile.  The
+        # tile geometry is held fixed (only the box threshold changes), so this
+        # isolates the box gate from the rho tiling.
+        self.assertGreater(
+            max_center, REACHABLE_RED_CAP - 0.5,
+            'no admitted tile approaches the cap -- cannot show the gate binds')
+        admission = _admission(CUSP_COVERAGE_BAND)
+        reduced_cap = max_center - 0.05
+        still_admitted = sum(
+            admission.admits_exterior(center, half, reduced_cap)
+            for center, half, _, _ in tiles)
+        self.assertLess(
+            still_admitted, len(tiles),
+            'reducing the box threshold rejected no tile -- box gate not live')
+        self._plot(centers)
+        self.record_comparison()
+
+    def _plot(self, centers) -> None:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.hist(centers, bins=40, color='tab:orange', alpha=0.8)
+        ax.axvline(REACHABLE_RED_CAP, color='k', ls='--',
+                   label=f'cap={REACHABLE_RED_CAP}')
+        ax.set_xlabel('admitted tile centre magnitude y_center')
+        ax.set_ylabel('count')
+        ax.set_title('in-box center teeth: all admitted centres within cap')
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'in_box_center_teeth.png', dpi=90)
+        plt.close(fig)
+
+
+class InteriorTargetedRefusalTestCase(ExteriorAdmissionTestCase):
+    """DEFECT 3 targeted refusal: a near-boundary interior tile is CORRECTLY
+    refused because it is genuinely within ``eta_max`` of the caustic.
+
+    Premise repair: the spec's literal ``theta_c = 0`` probe is the ``y1``-axis
+    cusp, where the 200-point cloud is dense and its slop ~0 (there the tile at
+    the cloud-admit boundary admits True with exact nearest ~ eta -- no
+    false-admit exists).  The genuine discretization false-admit -- where the
+    discrete cloud reads FARTHER than the exact nearest so a too-close tile
+    reads admissible -- lives on the perpendicular ``y2``-axis cusp
+    ``theta_c = pi/2``.  There the interior tile at ``rho_outer = 0.7480``:
+
+    * production ``admits`` returns False (the 10% margin refuses it);
+    * the INDEPENDENT exact oracle nearest-caustic distance (min over band
+      gammas) is ~0.04859 < ``eta_max`` = 0.05, so the refusal is PHYSICALLY
+      CORRECT.
+    """
+
+    def test_near_boundary_tile_refused_and_genuinely_too_close(self) -> None:
+        admission = _admission(INTERIOR_BAND)
+        center = (REFUSAL_RHO_OUTER - REFUSAL_HALF_RHO, REFUSAL_THETA_C)
+        half = (REFUSAL_HALF_RHO, REFUSAL_HALF_THETA)
+        admits = admission.admits(center, half)
+        self.assertFalse(
+            admits, 'production admits() should REFUSE the near-boundary tile')
+        exact_distance, arg_gamma = _exact_nearest_over_band(
+            INTERIOR_GAMMAS, REFUSAL_THETA_C, REFUSAL_RHO_OUTER)
+        self.assertLess(
+            exact_distance, ETA_MAX,
+            f'exact nearest {exact_distance:.5f} is not below eta_max='
+            f'{ETA_MAX}: the refusal would be a false negative')
+        self.assertAlmostEqual(
+            exact_distance, REFUSAL_EXACT_DISTANCE, delta=REFUSAL_EXACT_TOL)
+        self._plot(arg_gamma, exact_distance)
+        self.record_comparison()
+
+    def test_literal_cusp_axis_probe_has_no_false_admit(self) -> None:
+        # The premise repair, made explicit: at the spec's literal theta_c = 0
+        # (the y1-axis cusp) the cloud slop is ~0, the tile at rho_outer = 0.74
+        # is ADMITTED, and the exact nearest there is ABOVE eta_max -- so there
+        # is no genuine false-admit to protect against on that axis.
+        admission = _admission(INTERIOR_BAND)
+        center = (0.74 - REFUSAL_HALF_RHO, 0.0)
+        half = (REFUSAL_HALF_RHO, REFUSAL_HALF_THETA)
+        self.assertTrue(admission.admits(center, half))
+        exact_distance, _ = _exact_nearest_over_band(
+            INTERIOR_GAMMAS, 0.0, 0.74)
+        self.assertGreater(exact_distance, ETA_MAX)
+        self.record_comparison()
+
+    def _plot(self, gamma, exact_distance) -> None:
+        theta_axis = np.linspace(-math.pi, math.pi, 721)
+        radii = np.array([geometry.r_caustic(gamma, float(t))
+                          for t in theta_axis])
+        caustic_x = radii * np.cos(theta_axis)
+        caustic_y = radii * np.sin(theta_axis)
+        magnitude = REFUSAL_RHO_OUTER * geometry.r_caustic(
+            gamma, REFUSAL_THETA_C)
+        source = (magnitude * math.cos(REFUSAL_THETA_C),
+                  magnitude * math.sin(REFUSAL_THETA_C))
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.plot(caustic_x, caustic_y, color='tab:gray', lw=1.0, label='caustic')
+        ax.plot(source[0], source[1], 'rx', ms=10,
+                label=f'refused source (d={exact_distance:.4f})')
+        ax.add_patch(plt.Circle(source, ETA_MAX, fill=False, color='tab:red',
+                                ls='--', label=f'eta_max={ETA_MAX} shell'))
+        ax.set_aspect('equal')
+        ax.set_title(f'DEFECT 3 targeted refusal (gamma={gamma}, '
+                     f'theta_c=pi/2)')
+        ax.legend(loc='upper right', fontsize=8)
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'interior_targeted_refusal.png', dpi=90)
+        plt.close(fig)
+
+
+class CloudMarginTestCase(ExteriorAdmissionTestCase):
+    """DEFECT 3 reachable-red + margin sizing + positive controls (WP2)."""
+
+    def test_margin_zero_admits_the_genuine_false_admit(self) -> None:
+        # Reachable-red: with the margin removed the SAME tile is ADMITTED,
+        # because the discrete cloud reads its nearest as >= eta_max even though
+        # the exact nearest is below it -- exactly the discretization
+        # false-admit the 10% margin closes.
+        admission = _admission(INTERIOR_BAND)
+        center = (REFUSAL_RHO_OUTER - REFUSAL_HALF_RHO, REFUSAL_THETA_C)
+        half = (REFUSAL_HALF_RHO, REFUSAL_HALF_THETA)
+        cloud_nearest = _cloud_nearest_over_band(
+            admission, REFUSAL_THETA_C, REFUSAL_RHO_OUTER, REFUSAL_HALF_THETA)
+        self.assertGreaterEqual(
+            cloud_nearest, ETA_MAX,
+            f'cloud nearest {cloud_nearest:.5f} is below eta_max -- the '
+            'margin-0 gate would already refuse (no discretization slop here)')
+        with mock.patch.object(st, '_CLOUD_MARGIN_FRAC', 0.0):
+            self.assertTrue(
+                admission.admits(center, half),
+                'with margin 0 the genuine false-admit tile should be ADMITTED')
+        # And the production margin closes it (contrast).
+        self.assertFalse(admission.admits(center, half))
+        self._plot(admission, cloud_nearest)
+        self.record_comparison()
+
+    def test_margin_frac_at_least_ten_percent(self) -> None:
+        self.assertGreaterEqual(st._CLOUD_MARGIN_FRAC, CLOUD_MARGIN_FRAC_MIN)
+        self.record_comparison()
+
+    def test_margin_width_exceeds_worst_measured_slop(self) -> None:
+        # The margin WIDTH eta_max * _CLOUD_MARGIN_FRAC must exceed the worst
+        # measured discretization slop (WORST_SLOP_FRAC * eta_max) with headroom.
+        margin_width = ETA_MAX * st._CLOUD_MARGIN_FRAC
+        worst_slop = WORST_SLOP_FRAC * ETA_MAX
+        self.assertGreater(
+            margin_width, worst_slop,
+            f'margin width {margin_width:.5f} does not exceed worst slop '
+            f'{worst_slop:.5f}')
+        # Independently confirm the worst slop at the probe is within the
+        # WORST_SLOP_FRAC budget (cloud reads no farther than 8% of eta beyond
+        # the exact nearest here).
+        admission = _admission(INTERIOR_BAND)
+        cloud_nearest = _cloud_nearest_over_band(
+            admission, REFUSAL_THETA_C, REFUSAL_RHO_OUTER, REFUSAL_HALF_THETA)
+        exact_nearest, _ = _exact_nearest_over_band(
+            INTERIOR_GAMMAS, REFUSAL_THETA_C, REFUSAL_RHO_OUTER)
+        measured_slop = cloud_nearest - exact_nearest
+        self.assertGreater(measured_slop, 0.0,
+                           'the cloud does not over-read here -- wrong probe')
+        self.assertLessEqual(measured_slop, worst_slop)
+        self.record_comparison()
+
+    def test_comfortably_interior_tile_still_admits(self) -> None:
+        # The margin must NOT over-tighten a genuinely interior tile whose exact
+        # clearance dwarfs eta_max.
+        admission = _admission(INTERIOR_BAND)
+        center = (COMFORT_RHO_OUTER - REFUSAL_HALF_RHO, REFUSAL_THETA_C)
+        half = (REFUSAL_HALF_RHO, REFUSAL_HALF_THETA)
+        exact_distance, _ = _exact_nearest_over_band(
+            INTERIOR_GAMMAS, REFUSAL_THETA_C, COMFORT_RHO_OUTER)
+        self.assertGreater(exact_distance, 2.5 * ETA_MAX,
+                           'the comfort probe is not comfortably interior')
+        self.assertTrue(
+            admission.admits(center, half),
+            'the 10% margin over-tightened a comfortably-interior tile')
+        self.record_comparison()
+
+    def test_exterior_admitted_set_unchanged_under_margin(self) -> None:
+        # admits_exterior does NOT use _CLOUD_MARGIN_FRAC (its ~0.35 margin
+        # dwarfs the slop), so inflating the interior margin x50 leaves the
+        # exterior admitted set byte-identical.
+        cusps = _cusp_angles(CUSP_COVERAGE_GAMMA_MID)
+        base_box = _exterior_tiles_cusp(
+            CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, BOX_CORNER, cusps)
+        base_cap = _exterior_tiles_cusp(
+            CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, REACHABLE_RED_CAP, cusps)
+        with mock.patch.object(st, '_CLOUD_MARGIN_FRAC', 5.0):
+            infl_box = _exterior_tiles_cusp(
+                CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, BOX_CORNER, cusps)
+            infl_cap = _exterior_tiles_cusp(
+                CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, REACHABLE_RED_CAP, cusps)
+        self.assertEqual(base_box, infl_box)
+        self.assertEqual(base_cap, infl_cap)
+        # Control: the INTERIOR admits DOES change (the margin is live there).
+        admission = _admission(INTERIOR_BAND)
+        center = (REFUSAL_RHO_OUTER - REFUSAL_HALF_RHO, REFUSAL_THETA_C)
+        half = (REFUSAL_HALF_RHO, REFUSAL_HALF_THETA)
+        self.assertFalse(admission.admits(center, half))
+        with mock.patch.object(st, '_CLOUD_MARGIN_FRAC', 0.0):
+            self.assertTrue(admission.admits(center, half))
+        self.record_comparison()
+
+    def _plot(self, admission, cloud_nearest) -> None:
+        rho_grid = np.linspace(0.70, 0.80, 41)
+        cloud = [_cloud_nearest_over_band(
+            admission, REFUSAL_THETA_C, float(r), REFUSAL_HALF_THETA)
+            for r in rho_grid]
+        exact = [_exact_nearest_over_band(
+            INTERIOR_GAMMAS, REFUSAL_THETA_C, float(r))[0] for r in rho_grid]
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(rho_grid, cloud, 'o-', ms=3, label='discrete cloud nearest')
+        ax.plot(rho_grid, exact, 's-', ms=3, label='exact oracle nearest')
+        ax.axhline(ETA_MAX, color='k', ls='--', label=f'eta_max={ETA_MAX}')
+        ax.axhline(ETA_MAX * (1.0 + st._CLOUD_MARGIN_FRAC), color='tab:red',
+                   ls=':', label='eta_max * (1 + margin)')
+        ax.axvline(REFUSAL_RHO_OUTER, color='tab:gray', lw=0.7)
+        ax.set_xlabel('rho_outer at theta_c = pi/2')
+        ax.set_ylabel('nearest-caustic distance')
+        ax.set_title('DEFECT 3: cloud over-reads exact near the boundary')
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'cloud_margin_false_admit.png', dpi=90)
+        plt.close(fig)
+
+
+class CuspAlignmentSelfFalsificationTestCase(ExteriorAdmissionTestCase):
+    """Prove the WP1/WP2 detectors can go RED on planted defects."""
+
+    def test_uniform_tiling_straddles_a_cusp_ray(self) -> None:
+        # WITHOUT cusp alignment (the pre-WP1 uniform grid) at least one
+        # admitted tile straddles a cusp ray -- so the no-straddle detector is
+        # NOT vacuous: it would fire on the old tiling.
+        cusps = _cusp_angles(WP1_CUSP_GAMMA_MID)
+        uniform = _exterior_tiles_cusp(
+            WP1_CUSP_BAND, CUSP_COVERAGE_N, BOX_CORNER, None)
+        straddles = 0
+        for (_, theta_center), (_, half_theta), _, _ in uniform:
+            for cusp in cusps:
+                if abs(_wrap(theta_center - cusp)) < half_theta - CUSP_EDGE_TOL:
+                    straddles += 1
+        self.assertGreater(
+            straddles, 0,
+            'the uniform tiling straddled no cusp -- the no-straddle detector '
+            'cannot distinguish the WP1 fix from the defect')
+        self.record_comparison()
+
+    def test_strict_gate_lowers_coverage_below_relaxed(self) -> None:
+        # The coverage metric responds to the box-gate change: strict < relaxed
+        # at the binding cap, so the reachable-red is not vacuously satisfied.
+        in_t, rho, theta_c, n_t = _truth_set(CUSP_COVERAGE_BAND)
+        cusps = _cusp_angles(CUSP_COVERAGE_GAMMA_MID)
+        relaxed = float((in_t & _covered_mask(rho, theta_c, _exterior_tiles_cusp(
+            CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, REACHABLE_RED_CAP, cusps))
+            ).sum()) / n_t
+        strict = float((in_t & _covered_mask(rho, theta_c, _strict_exterior_tiles(
+            CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, REACHABLE_RED_CAP, cusps))
+            ).sum()) / n_t
+        self.assertLess(strict, relaxed)
+        self.record_comparison()
+
+    def test_margin_detector_distinguishes_admit_from_refuse(self) -> None:
+        # At the DEFECT 3 probe the production margin refuses while margin-0
+        # admits: the margin detector genuinely flips, so it is non-vacuous.
+        admission = _admission(INTERIOR_BAND)
+        center = (REFUSAL_RHO_OUTER - REFUSAL_HALF_RHO, REFUSAL_THETA_C)
+        half = (REFUSAL_HALF_RHO, REFUSAL_HALF_THETA)
+        with mock.patch.object(st, '_CLOUD_MARGIN_FRAC', 0.0):
+            margin0 = admission.admits(center, half)
+        production = admission.admits(center, half)
+        self.assertTrue(margin0)
+        self.assertFalse(production)
+        self.assertNotEqual(margin0, production)
+        self.record_comparison()
+
+    def test_exact_oracle_is_independent_of_cloud(self) -> None:
+        # The exact oracle (Newton critical-curve search) and the discrete
+        # 200-point cloud disagree at the probe (the cloud over-reads); if they
+        # were the same object the DEFECT 3 tests would be circular.
+        admission = _admission(INTERIOR_BAND)
+        cloud = _cloud_nearest_over_band(
+            admission, REFUSAL_THETA_C, REFUSAL_RHO_OUTER, REFUSAL_HALF_THETA)
+        exact, _ = _exact_nearest_over_band(
+            INTERIOR_GAMMAS, REFUSAL_THETA_C, REFUSAL_RHO_OUTER)
+        self.assertNotAlmostEqual(cloud, exact, places=4)
+        self.record_comparison()
 
 
 if __name__ == '__main__':

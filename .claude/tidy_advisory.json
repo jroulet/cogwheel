@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "61dff78c1700a50f935f78ac34c53b0ae6eaf052",
-  "timestamp": "2026-07-27T07:38:38Z",
+  "commit": "5501ec8921071b588e00c3c689fdcd9374a64a55",
+  "timestamp": "2026-07-27T09:01:24Z",
   "touched_files": [
     "cogwheel/lensing/chang_refsdal/geometry.py",
     "cogwheel/lensing/surrogate.py",
@@ -12,6 +12,7 @@
     "cogwheel/tests/test_lensing_farfield_envelope.py",
     "cogwheel/tests/test_lensing_ppgo_bandsplit.py",
     "cogwheel/tests/test_lensing_surrogate.py",
+    "cogwheel/tests/test_lensing_surrogate_census.py",
     "cogwheel/tests/test_lensing_surrogate_training.py"
   ]
 }
