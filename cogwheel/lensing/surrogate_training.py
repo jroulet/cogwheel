@@ -1518,6 +1518,69 @@ class _InteriorAdmission:
                 return False
         return True
 
+    def admits_exterior(self, center: tuple[float, float],
+                        half: tuple[float, float],
+                        source_magnitude_max: float) -> bool:
+        """Whether the exterior tile clears the caustic and tube shell.
+
+        Positive-parity EXTERIOR companion to `admits` (WP1).  ``center`` is
+        ``(rho_center, theta_c_center)`` and ``half`` is
+        ``(half_rho, half_theta_c)`` in caustic-fixed coordinates.  The INNER
+        ``rho`` edge ``rho_inner = rho_center - half_rho`` -- the point of the
+        tile CLOSEST to the caustic, hence the hardest to admit -- is probed at
+        `_INTERIOR_EDGE_SAMPLES` polar angles across the tile's ``theta_c``
+        span.  Each physical probe is reconstructed with the additive
+        positive-parity exterior form
+        ``y_mag = r_caustic(gamma, theta_c) + rho_inner - 1`` (the ``rho > 1``
+        arm of `surrogate._from_caustic_fixed`) at every sampled gamma in the
+        band.
+
+        A tile is admitted iff EVERY probe (every band gamma, every angle) is
+        (1) strictly outside the caustic (``rho_inner > 1``), (2) at least
+        ``eta_max`` from the nearest per-gamma caustic-cloud point -- the SAME
+        cloud test `admits` uses, because near a cusp the nearest caustic point
+        is off the radial ray -- and (3) inside the prior source box
+        (``y_mag <= source_magnitude_max``).  This per-direction test replaces
+        the single over-conservative scalar ``exclusion_rho`` built from the
+        cusp-spike ``_caustic_reach``, which excluded the whole prior box for
+        ``gamma >= 0.85`` (exterior coverage 0.000).
+
+        Parameters
+        ----------
+        center : tuple[float, float]
+            Tile centre ``(rho_center, theta_c_center)``.
+        half : tuple[float, float]
+            Tile half-widths ``(half_rho, half_theta_c)``.
+        source_magnitude_max : float
+            Largest physical source magnitude in the prior box (the union
+            extent ``y_outer_region``); a probe beyond it is out of the box.
+        """
+        rho_center, theta_center = center
+        half_rho, half_theta = half
+        rho_inner = float(rho_center) - float(half_rho)
+        if rho_inner <= 1.0:
+            return False
+        thetas = np.linspace(theta_center - half_theta,
+                             theta_center + half_theta, _INTERIOR_EDGE_SAMPLES)
+        for radius_axis, caustic_cloud in zip(
+                self.radius_grid, self.caustic_clouds):
+            if caustic_cloud.shape[0] == 0:
+                return False
+            radii = np.interp(thetas, self.theta_axis, radius_axis)
+            y_magnitudes = radii + rho_inner - 1.0
+            if np.any(y_magnitudes > source_magnitude_max):
+                return False
+            probe_x = y_magnitudes * np.cos(thetas)
+            probe_y = y_magnitudes * np.sin(thetas)
+            delta_x = probe_x[:, None] - caustic_cloud[None, :, 0]
+            delta_y = probe_y[:, None] - caustic_cloud[None, :, 1]
+            nearest = np.sqrt(
+                delta_x * delta_x + delta_y * delta_y,
+            ).min(axis=1)
+            if np.any(nearest < self.eta_max):
+                return False
+        return True
+
 
 def _interior_admission(band: tuple[float, float], parity: int, reach: float,
                         config: 'TrainingConfig') -> _InteriorAdmission:
@@ -1614,6 +1677,72 @@ def _farfield_interior_tiles(rho_extent: float, n_per_side: int, *,
             center = (float(rho_c), float(theta_c))
             half = (float(half_rho), float(half_theta))
             if admission.admits(center, half):
+                tiles.append((center, half, i, j))
+    return tiles
+
+
+def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
+                             admission: '_InteriorAdmission',
+                             source_magnitude_max: float
+                             ) -> list[tuple[tuple[float, float],
+                                             tuple[float, float], int, int]]:
+    """Per-``theta_c``-column exterior tiles of the caustic-fixed annulus.
+
+    Positive-parity companion to `_farfield_tiles` that replaces the single
+    over-conservative scalar ``exclusion_rho`` inner edge (built from the
+    cusp-spike ``_caustic_reach``, which swallowed the whole prior box for
+    ``gamma >= 0.85``) with a per-column DIRECTIONAL admission
+    (`_InteriorAdmission.admits_exterior`).  Lays a UNIFORM ``theta_c`` grid
+    over ``[-pi, pi]`` -- edges fall exactly on ``+-pi`` so no tile straddles
+    the ``atan2`` branch cut, and there is no cusp-alignment (the exterior fit
+    does not need it; the defect is zero-tile admission, not eps loss) --
+    and, per column, ``n_per_side`` ``rho`` rows over ``[1, rho_outer]``
+    (``rho = 1`` is the caustic in every direction).  A tile is kept iff
+    ``admission.admits_exterior`` is True: its INNER ``rho`` edge stays
+    outside the caustic, at least ``eta_max`` from the nearest caustic
+    point, and inside the prior source box, for every gamma in the band.  The
+    kept tiles form a per-column band whose inner radius emerges from the
+    direction's true caustic distance; cusp columns whose whole ``rho`` range
+    is out-of-box (even ``rho`` near one) admit nothing.
+
+    Parameters
+    ----------
+    rho_outer : float
+        Outer prior-support radius in caustic-fixed ``rho`` units.
+    n_per_side : int
+        Number of ``rho`` rows and of ``theta_c`` columns.
+    admission : _InteriorAdmission
+        The band's directional-admission geometry (`_interior_admission`),
+        reused via its exterior probe `admits_exterior`.
+    source_magnitude_max : float
+        Largest physical source magnitude in the region (the union extent
+        ``y_outer_region``); a probe beyond it lies outside the prior box.
+
+    Returns
+    -------
+    list[tuple[tuple[float, float], tuple[float, float], int, int]]
+        ``((rho_center, theta_c_center), (half_rho, half_theta_c), i, j)`` for
+        each admitted tile, in row-major order (``i`` the ``rho`` row from the
+        caustic outward, ``j`` the ``theta_c`` column).  Empty when no column
+        admits any tile.  Because ``i`` runs inner-first, ``tiles[0]`` is the
+        tile with the SMALLEST admitted ``rho_inner`` (closest to the caustic,
+        hardest to fit) -- the reprovision probe and the region ``w_floor``.
+    """
+    rho_inner_floor = 1.0
+    if rho_outer <= rho_inner_floor:
+        return []
+    half_rho = 0.5 * (rho_outer - rho_inner_floor) / n_per_side
+    half_theta = math.pi / n_per_side
+    rho_centers = [rho_inner_floor + half_rho * (2 * k + 1)
+                   for k in range(n_per_side)]
+    theta_centers = [-math.pi + half_theta * (2 * k + 1)
+                     for k in range(n_per_side)]
+    tiles: list[tuple[tuple[float, float], tuple[float, float], int, int]] = []
+    for i, rho_c in enumerate(rho_centers):
+        for j, theta_c in enumerate(theta_centers):
+            center = (float(rho_c), float(theta_c))
+            half = (float(half_rho), float(half_theta))
+            if admission.admits_exterior(center, half, source_magnitude_max):
                 tiles.append((center, half, i, j))
     return tiles
 
@@ -2733,7 +2862,9 @@ def _subdivide_farfield_tile(
         parity: int, config: TrainingConfig, rng: np.random.Generator,
         outdir: Path, exclusion_rho: float,
         interior_admission: '_InteriorAdmission | None',
-        charts: list, chart_reports: list[dict]) -> dict:
+        charts: list, chart_reports: list[dict],
+        exterior_admission: '_InteriorAdmission | None' = None,
+        source_magnitude_max: float | None = None) -> dict:
     """Halve one eps-gated far-field tile into up to four children (Build 8h-a WP4).
 
     Single-level corrective subdivision, no recursion, in caustic-fixed
@@ -2750,9 +2881,16 @@ def _subdivide_farfield_tile(
     (carried verbatim in ``tile['region']`` -- never re-derived from geometry),
     now expressed in ``rho`` because ``rho`` IS the normalised source radius:
 
-    - an exterior parent admits a child iff its inner ``rho`` edge stays outside
-      the caustic + tube shell, ``rho_c_child - half_rho/2 >= exclusion_rho``
-      (mirrors `_farfield_tiles`);
+    - a positive-parity exterior parent admits a child through the SAME
+      per-``theta_c``-column directional predicate the tiler used
+      (`_InteriorAdmission.admits_exterior`, passed as ``exterior_admission``)
+      -- the child's inner ``rho`` edge must clear the caustic + tube shell and
+      lie inside the prior box for its direction (mirrors
+      `_farfield_exterior_tiles`, Build 8h-b4 WP1);
+    - a macro-saddle exterior parent (no ``exterior_admission``) admits a child
+      iff its inner ``rho`` edge stays outside the scalar-reach caustic + tube
+      shell, ``rho_c_child - half_rho/2 >= exclusion_rho`` (mirrors
+      `_farfield_tiles`);
     - an interior parent admits a child iff its farthest edge passes the SAME
       directional caustic-radius + nearest-caustic-distance test the tiler used
       (``interior_admission.admits`` -- mirrors `_farfield_interior_tiles`).
@@ -2802,6 +2940,16 @@ def _subdivide_farfield_tile(
     chart_reports : list of dict
         Per-chart report accumulator; every admitted child (packed or
         still-gated) is appended in place.
+    exterior_admission : _InteriorAdmission or None, optional
+        The positive-parity band's directional exterior-admission geometry
+        (`_interior_admission`); when supplied (with ``source_magnitude_max``)
+        exterior children are re-admitted through `admits_exterior` instead of
+        the scalar floor.  ``None`` (default) keeps the byte-identical
+        scalar-reach path for macro-saddle exterior parents.
+    source_magnitude_max : float or None, optional
+        The exterior region's prior-box source extent (``y_outer_region``),
+        required by `admits_exterior`.  ``None`` (default) selects the scalar
+        path.
 
     Returns
     -------
@@ -2840,14 +2988,30 @@ def _subdivide_farfield_tile(
             # Re-admit through the PARENT's region predicate (carried
             # verbatim -- Professor guard (e)).  Interior children re-run the
             # SAME directional caustic-radius + nearest-distance test the tiler
-            # used; exterior children the scalar-rho exclusion floor.
+            # used; positive-parity exterior children re-run the SAME
+            # per-column directional `admits_exterior` test; macro-saddle
+            # exterior children the scalar-rho exclusion floor.
             if region == 'interior':
                 admitted_child = (
                     interior_admission is not None
                     and interior_admission.admits(
                         (child_rho, child_theta),
                         (child_half_rho, child_half_theta)))
-            else:  # exterior
+            elif (exterior_admission is not None
+                  and source_magnitude_max is not None):
+                # Positive-parity exterior (WP1): re-admit through the SAME
+                # per-``theta_c``-column directional predicate the tiler used
+                # (`admits_exterior`), NOT the scalar cusp-spike floor.  The
+                # scalar ``exclusion_rho`` here is the band-max reach (the very
+                # over-conservative quantity WP1 replaces); using it would drop
+                # legitimate high-gamma exterior children and defeat the
+                # eps-gate corrective subdivision exactly where WP1 restored
+                # coverage.
+                admitted_child = exterior_admission.admits_exterior(
+                    (child_rho, child_theta),
+                    (child_half_rho, child_half_theta),
+                    source_magnitude_max)
+            else:  # macro-saddle exterior: unchanged scalar-reach floor
                 admitted_child = child_rho - child_half_rho >= exclusion_rho
             if not admitted_child:
                 # The parent's edge lies partly across the caustic/shell
@@ -3042,11 +3206,14 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     reach_scalar = _scalar_caustic_reach(gamma_mid)
     coordinate_radius_min, reach_max = _coordinate_radius_bounds(band, parity)
     physical_exclusion_radius = reach_max + config.eta_max
-    exclusion_rho = (
-        1.0 + physical_exclusion_radius - coordinate_radius_min
-        if parity == 1
-        else physical_exclusion_radius / coordinate_radius_min
-    )
+    # Additive scalar/directional caustic-fixed inner edge for BOTH parities:
+    # ``rho = 1 + |y| - coordinate_radius_min`` is the exact inverse of the
+    # serve map's exterior arm (`_from_caustic_fixed`), giving ``rho = 1`` at
+    # the caustic and ``drho/d|y| = 1``.  The parity difference lives entirely
+    # in ``coordinate_radius_min`` (per-angle minimum critical-curve radius for
+    # positive parity; band-minimum scalar ``_caustic_reach`` for macro
+    # saddles, whose disconnected deltoids miss most origin-centred rays).
+    exclusion_rho = 1.0 + physical_exclusion_radius - coordinate_radius_min
     ppgo_exclusion_rho = physical_exclusion_radius / reach_scalar
     admitted: list[dict] = []
     dropped_strata: list[dict] = []
@@ -3075,19 +3242,37 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # Union spatial extent: the largest physical source magnitude mapped with
     # the band's minimum directional radius covers every gamma and theta.
     y_outer_region = float(_lens_prior._source_scale(m_lo_region))
-    rho_outer_region = (
-        1.0 + y_outer_region - coordinate_radius_min
-        if parity == 1
-        else y_outer_region / coordinate_radius_min
-    )
-    window, window_action, window_report = _farfield_region_window(
-        box, parity, band, exclusion_rho, rho_outer_region, reach_max,
-        ext_boundary, ext_ceiling, config,
-        source_magnitude_max=y_outer_region)
+    # Additive outer edge, same convention as ``exclusion_rho`` above and the
+    # serve map: mutual inverse of `_from_caustic_fixed` for both parities.
+    rho_outer_region = 1.0 + y_outer_region - coordinate_radius_min
+    # Exterior admission (WP1).  Positive parity: per-``theta_c``-column
+    # directional admission (`_farfield_exterior_tiles` via `admits_exterior`)
+    # replaces the single scalar ``exclusion_rho``.  Each column's inner rho
+    # edge is admitted on the TRUE per-gamma nearest-caustic distance, so the
+    # ``gamma >= 0.85`` prior box (swallowed whole by the cusp-spike scalar
+    # reach) is covered again.  The window / w-floor machinery is fed the
+    # MINIMUM admitted per-column rho_inner (the column closest to the caustic,
+    # hence the largest local w_floor), so the ppGO / physics-floor
+    # certification stays conservative.  Macro saddles keep the scalar
+    # ``_farfield_tiles(exclusion_rho, ...)`` path unchanged (parity != 1).
+    exterior_tiles: list | None = None
+    if parity == 1:
+        exterior_admission = _interior_admission(
+            band, 1, reach_scalar, config)
+        exterior_tiles = _farfield_exterior_tiles(
+            rho_outer_region, config.n_farfield_tiles_per_side,
+            admission=exterior_admission,
+            source_magnitude_max=y_outer_region)
+        region_exclusion_rho = (
+            min(center[0] - half[0] for center, half, _, _ in exterior_tiles)
+            if exterior_tiles else exclusion_rho)
+    else:
+        region_exclusion_rho = exclusion_rho
     exterior_region_report: dict = {
         'name': f'chart_{label}_farfield_region',
         'parity': parity, 'exterior_region_summary': True,
         'exclusion_rho': round(float(exclusion_rho), 6),
+        'region_exclusion_rho': round(float(region_exclusion_rho), 6),
         'ppgo_exclusion_rho': round(float(ppgo_exclusion_rho), 6),
         'coordinate_radius_min': round(float(coordinate_radius_min), 6),
         'reach_scalar': round(float(reach_scalar), 6),
@@ -3095,54 +3280,82 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         'rho_outer': round(float(rho_outer_region), 6),
         'mass_range': [round(float(m_lo_region), 3),
                        round(float(m_hi_region), 3)],
-        'n_rho': config.n_rho, 'n_theta_c': config.n_theta_c,
-        'window_action': window_action}
-    if window is None:
-        # No exterior chart: 'drop' (ppGO serves the whole band) or 'empty'
-        # (degenerate w_floor >= w_trust window).  Loud record; those draws fall
-        # to the tube / interior / serving ladder.
+        'n_rho': config.n_rho, 'n_theta_c': config.n_theta_c}
+    if parity == 1 and not exterior_tiles:
+        # Loud zero-admission (WP1): no ``theta_c`` column clears the caustic +
+        # tube shell inside the prior box, so no exterior chart is built and
+        # those draws fall to the tube / interior / serving ladder.  (Restoring
+        # the scalar test makes the gamma 0.80-0.90 band collapse HERE -- the
+        # coverage defect this WP repairs.)
         exterior_region_report.update(
-            {'window': None, 'admitted_tiles': 0, **window_report})
+            {'window': None, 'admitted_tiles': 0,
+             'window_action': 'zero_admission',
+             'zero_admission': True,
+             'zero_admission_reason': 'no_exterior_column_admits_tile'})
     else:
-        w_floor, w_trust = window
-        # Containment RANGE CHECK (S1-3): every in-region draw's chart w-segment
-        # must lie within [w_floor, w_trust] to 1e-12 -- a self-consistency
-        # invariant replacing the strata whole-band containment bookkeeping.
-        contained, containment_report = _farfield_window_contains_draws(
-            box, window)
-        tiles = _farfield_tiles(
-            exclusion_rho, rho_outer_region, config.n_farfield_tiles_per_side)
-        # Per-window node reprovision (w-axis ONLY): probe the innermost tile
-        # (largest w_floor, hardest fit) for the minimal w-node density N_rec
-        # still clearing the eps bar; the rho/theta_c tiling density is HELD.
-        n_rec = int(config.w_nodes_per_decade)
-        reprovision_report: dict = {'status': 'no_admitted_tile',
-                                    'n_rec': n_rec}
-        if tiles:
-            probe_center, probe_half = tiles[0][0], tiles[0][1]
-            probe_tile = {'center': probe_center, 'half': probe_half,
-                          'si': 0, 'i': tiles[0][2], 'j': tiles[0][3],
-                          'm_lo': m_lo_region, 'm_hi': m_hi_region,
-                          'w_range': window, 'region': 'exterior'}
-            n_rec, reprovision_report = _reprovision_w_nodes(
-                band=band, parity=parity, tile=probe_tile, window=window,
-                config=config, rng=rng)
-        for center, half, i, j in tiles:
-            admitted.append({
-                'si': 0, 'i': i, 'j': j, 'center': center, 'half': half,
-                'm_lo': m_lo_region, 'm_hi': m_hi_region, 'w_range': window,
-                'w_nodes_per_decade': int(n_rec), 'region': 'exterior'})
-        exterior_region_report.update({
-            'window': [round(float(w_floor), 6), round(float(w_trust), 6)],
-            'admitted_tiles': len(tiles),
-            'n_w_per_decade': int(n_rec),
-            'containment_ok': bool(contained),
-            'containment': containment_report,
-            'reprovision': reprovision_report, **window_report})
-        if not contained:
-            # True by construction of the clip; a violation signals a
-            # window/clip inconsistency -- flagged loudly, not silently.
-            exterior_region_report['containment_violation'] = True
+        window, window_action, window_report = _farfield_region_window(
+            box, parity, band, region_exclusion_rho, rho_outer_region,
+            reach_max, ext_boundary, ext_ceiling, config,
+            source_magnitude_max=y_outer_region)
+        exterior_region_report['window_action'] = window_action
+        if window is None:
+            # No exterior chart: 'drop' (ppGO serves the whole band) or 'empty'
+            # (degenerate w_floor >= w_trust window).  Loud record; those draws
+            # fall to the tube / interior / serving ladder.
+            exterior_region_report.update(
+                {'window': None, 'admitted_tiles': 0, **window_report})
+        else:
+            w_floor, w_trust = window
+            # Containment RANGE CHECK (S1-3): every in-region draw's chart
+            # w-segment must lie within [w_floor, w_trust] to 1e-12 -- a
+            # self-consistency invariant replacing the strata whole-band
+            # containment bookkeeping.
+            contained, containment_report = _farfield_window_contains_draws(
+                box, window)
+            if parity == 1:
+                # Per-column admitted set (`_farfield_exterior_tiles`); every
+                # tile's inner edge already clears the caustic + tube shell and
+                # lies inside the prior box for its direction.
+                tiles = exterior_tiles
+            else:
+                # Macro saddle: unchanged scalar-reach annulus tiler.
+                tiles = _farfield_tiles(
+                    exclusion_rho, rho_outer_region,
+                    config.n_farfield_tiles_per_side)
+            # Per-window node reprovision (w-axis ONLY): probe the innermost
+            # tile (largest w_floor, hardest fit) for the minimal w-node
+            # density N_rec still clearing the eps bar; the rho/theta_c tiling
+            # density is HELD.
+            n_rec = int(config.w_nodes_per_decade)
+            reprovision_report: dict = {'status': 'no_admitted_tile',
+                                        'n_rec': n_rec}
+            if tiles:
+                probe_center, probe_half = tiles[0][0], tiles[0][1]
+                probe_tile = {'center': probe_center, 'half': probe_half,
+                              'si': 0, 'i': tiles[0][2], 'j': tiles[0][3],
+                              'm_lo': m_lo_region, 'm_hi': m_hi_region,
+                              'w_range': window, 'region': 'exterior'}
+                n_rec, reprovision_report = _reprovision_w_nodes(
+                    band=band, parity=parity, tile=probe_tile, window=window,
+                    config=config, rng=rng)
+            for center, half, i, j in tiles:
+                admitted.append({
+                    'si': 0, 'i': i, 'j': j, 'center': center, 'half': half,
+                    'm_lo': m_lo_region, 'm_hi': m_hi_region,
+                    'w_range': window, 'w_nodes_per_decade': int(n_rec),
+                    'region': 'exterior'})
+            exterior_region_report.update({
+                'window': [round(float(w_floor), 6),
+                           round(float(w_trust), 6)],
+                'admitted_tiles': len(tiles),
+                'n_w_per_decade': int(n_rec),
+                'containment_ok': bool(contained),
+                'containment': containment_report,
+                'reprovision': reprovision_report, **window_report})
+            if not contained:
+                # True by construction of the clip; a violation signals a
+                # window/clip inconsistency -- flagged loudly, not silently.
+                exterior_region_report['containment_violation'] = True
     chart_reports.append(exterior_region_report)
     # -- Interior (4-image) far-field tiles (frozen WP6, S2-1) --
     # The astroid interior is a single 4-image region enclosing the origin, so
@@ -3398,7 +3611,11 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 config=config, rng=rng, outdir=outdir,
                 exclusion_rho=exclusion_rho,
                 interior_admission=admission,
-                charts=charts, chart_reports=chart_reports)
+                charts=charts, chart_reports=chart_reports,
+                exterior_admission=(exterior_admission if parity == 1
+                                    else None),
+                source_magnitude_max=(y_outer_region if parity == 1
+                                      else None))
             continue
         gated, gate_reason = _gate_chart(kind, report, config)
         chart_report = {'name': tag, 'parity': parity, 'file': str(path),
@@ -3421,7 +3638,11 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 config=config, rng=rng, outdir=outdir,
                 exclusion_rho=exclusion_rho,
                 interior_admission=admission,
-                charts=charts, chart_reports=chart_reports)
+                charts=charts, chart_reports=chart_reports,
+                exterior_admission=(exterior_admission if parity == 1
+                                    else None),
+                source_magnitude_max=(y_outer_region if parity == 1
+                                      else None))
             continue
         charts.append(chart)
         chart_reports.append(chart_report)

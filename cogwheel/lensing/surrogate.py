@@ -288,8 +288,10 @@ def _to_caustic_fixed(gamma: float, y1_eig: float, y2_eig: float
     ``rho = 1 + |y| - r_caustic`` outside it. The piecewise map is continuous
     at the exact critical-curve image ``rho = 1``; its additive exterior arm
     avoids a persistent gamma/radius interpolation coupling. Macro-saddle
-    exterior charts retain scalar-reach normalization because their
-    disconnected deltoids do not intersect every origin-centred ray.
+    exterior charts use an ADDITIVE scalar-reach offset
+    (rho = 1 + |y| - _caustic_reach) -- still scalar because the disconnected
+    deltoids do not intersect every origin-centred ray, but additive to remove
+    the reach-stretch gamma/radius coupling; drho/d|y| = 1.
     ``theta_c = atan2(y2_eig, y1_eig)`` in ``(-pi, pi]``.
 
     Parameters
@@ -312,7 +314,7 @@ def _to_caustic_fixed(gamma: float, y1_eig: float, y2_eig: float
                if source_radius <= caustic_radius
                else 1.0 + source_radius - caustic_radius)
     else:
-        rho = source_radius / _caustic_reach(gamma)
+        rho = 1.0 + source_radius - _caustic_reach(gamma)
     return rho, theta_c
 
 
@@ -322,9 +324,11 @@ def _from_caustic_fixed(gamma: float, rho: float, theta_c: float
 
     Positive parity uses ``rho * r_caustic`` for ``rho <= 1`` and
     ``r_caustic + rho - 1`` for ``rho > 1``. Macro-saddle exterior charts use
-    the same scalar fallback as `_to_caustic_fixed`. The map is used at train
-    time before each engine evaluation and is the exact inverse of the serve
-    coordinate.
+    an ADDITIVE scalar-reach offset (|y| = _caustic_reach + rho - 1) -- still
+    scalar because the disconnected deltoids do not intersect every
+    origin-centred ray, but additive to remove the reach-stretch gamma/radius
+    coupling; drho/d|y| = 1. The map is used at train time before each engine
+    evaluation and is the exact inverse of the serve coordinate.
 
     Parameters
     ----------
@@ -348,7 +352,7 @@ def _from_caustic_fixed(gamma: float, rho: float, theta_c: float
         y_mag = (rho * caustic_radius if rho <= 1.0
                  else caustic_radius + rho - 1.0)
     else:
-        y_mag = rho * _caustic_reach(gamma)
+        y_mag = _caustic_reach(gamma) + rho - 1.0
     return y_mag * float(np.cos(theta_c)), y_mag * float(np.sin(theta_c))
 
 
@@ -1326,7 +1330,8 @@ class LensAmplificationSurrogate:
 
     @staticmethod
     def _box_region_labels(gamma_grid: np.ndarray, rho_grid: np.ndarray,
-                           theta_c_grid: np.ndarray) -> tuple[int, int]:
+                           theta_c_grid: np.ndarray
+                           ) -> tuple[int | None, int | None]:
         """Real-image count and parity of the box's single region.
 
         The box lies inside one image-count region, so the region label is
@@ -1337,13 +1342,21 @@ class LensAmplificationSurrogate:
         (`_from_caustic_fixed`) before the geometry call.  Parity is
         deterministic in ``gamma`` (``+1`` for ``gamma < 1``, ``-1`` for
         ``gamma > 1``).
+
+        Returns ``(None, None)`` when the box-centre map refuses -- e.g. a box
+        whose centre ``gamma`` is exactly ``1.0`` hits the ``_caustic_reach``
+        parity wall (`LensDomainError`).  The chart then records unknown labels
+        (handled conservatively downstream) instead of crashing construction.
         """
         gamma_c = 0.5 * float(gamma_grid[0] + gamma_grid[-1])
         rho_c = 0.5 * float(rho_grid[0] + rho_grid[-1])
         theta_cc = 0.5 * float(theta_c_grid[0] + theta_c_grid[-1])
-        y1_c, y2_c = _from_caustic_fixed(gamma_c, rho_c, theta_cc)
-        geom = ChangRefsdalChannels(np.array([1.0, 2.0])).geometry_partition(
-            gamma=gamma_c, y=(y1_c, y2_c), beta=0.0, kappa=0.0)
+        try:
+            y1_c, y2_c = _from_caustic_fixed(gamma_c, rho_c, theta_cc)
+            geom = ChangRefsdalChannels(np.array([1.0, 2.0])).geometry_partition(
+                gamma=gamma_c, y=(y1_c, y2_c), beta=0.0, kappa=0.0)
+        except _REFUSAL_ERRORS:
+            return None, None
         parity = 1 if gamma_c < 1.0 else -1
         return int(geom.real_mask.sum()), parity
 

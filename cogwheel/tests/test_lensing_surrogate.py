@@ -449,34 +449,43 @@ def _train(box: tuple, n_param: int) -> LensAmplificationSurrogate:
     """Train a tiny surrogate on ``box`` at ``n_param`` nodes/param axis.
 
     The eigenframe box ``(gamma, y1, y2)`` is expressed in the surrogate's
-    caustic-fixed ``(rho, theta_c)`` coordinates (Build 8h-b3) through a
-    SINGLE reach evaluated at the gamma-range MIDPOINT -- NOT a per-sample
-    hull (mapping every ``(gamma, y1, y2)`` corner through its own
-    ``_caustic_reach(gamma)`` and taking the min/max over the whole
-    sample).  ``_caustic_reach`` varies by up to ~2x across a several-
-    tenths-wide gamma band (measured), so a per-sample hull unions rho
-    ranges that individually correspond to very different physical
-    scales, silently pulling near-caustic (gamma, rho) COMBINATIONS into
-    the trained box that were never part of the intended physical region
-    at that gamma -- a genuine fixture bug found while porting this box
-    to caustic-fixed coordinates (it produced held-out eps ~6.6 for
-    `POS_BOX` and ~31 for the original `SAD_BOX` placement, both `>>` the
-    ship tolerance).  A single mid-band reach keeps the box's rho/theta_c
-    shape tied to ONE physical scale, matching the scale
-    `_from_caustic_fixed` uses at that same reference gamma; the residual
-    scale drift across the gamma band (~1.2-1.3x, measured) stays
-    comfortably inside the far-field domain once the module boxes are
-    also positioned generously outside the caustic (see `POS_BOX` /
+    caustic-fixed ``(rho, theta_c)`` coordinates (Build 8h-b3) by mapping
+    every ``(y1, y2)`` corner through the SHARED production helper
+    ``surrogate._to_caustic_fixed`` at a SINGLE reach reference -- the
+    gamma-range MIDPOINT -- rather than a per-sample hull (mapping each
+    corner through its own gamma).  ``_caustic_reach`` varies by up to
+    ~2x across a several-tenths-wide gamma band (measured), so a
+    per-sample hull unions rho ranges that individually correspond to
+    very different physical scales, silently pulling near-caustic
+    (gamma, rho) COMBINATIONS into the trained box that were never part
+    of the intended physical region at that gamma.  A single mid-band
+    reference keeps the box's rho/theta_c shape tied to ONE physical
+    scale, matching the scale ``_from_caustic_fixed`` uses at that same
+    reference gamma; the residual scale drift across the gamma band
+    stays comfortably inside the far-field domain once the module boxes
+    are also positioned generously outside the caustic (see `POS_BOX` /
     `SAD_BOX`).
+
+    Earlier ports of this helper hand-rolled the corner conversion as a
+    scalar ``hypot(y1, y2) / reach`` -- the RETIRED multiplicative
+    reach-normalized form.  That formula is wrong for both parities: for
+    ``|gamma| < 1`` production uses the DIRECTIONAL ``r_caustic(gamma,
+    theta_c)`` with a piecewise interior/exterior split, and for
+    ``|gamma| >= 1`` it uses the ADDITIVE scalar form ``rho = 1 + |y| -
+    _caustic_reach(gamma)``.  Calling the shared
+    ``surrogate_module._to_caustic_fixed`` per corner (still at the
+    single ``gamma_mid`` reference) reproduces exactly the formula
+    production dispatches on, for whichever parity the box lives in.
     """
     gamma_range, y1_range, y2_range = box
     gamma_mid = 0.5 * (gamma_range[0] + gamma_range[1])
-    reach = surrogate_module._caustic_reach(gamma_mid)
     rhos, theta_cs = [], []
     for y1 in np.linspace(y1_range[0], y1_range[1], 5):
         for y2 in np.linspace(y2_range[0], y2_range[1], 5):
-            rhos.append(float(np.hypot(y1, y2)) / reach)
-            theta_cs.append(float(np.arctan2(y2, y1)))
+            rho, theta_c = surrogate_module._to_caustic_fixed(
+                gamma_mid, y1, y2)
+            rhos.append(rho)
+            theta_cs.append(theta_c)
     return LensAmplificationSurrogate.from_engine(
         gamma_range=gamma_range, rho_range=(min(rhos), max(rhos)),
         theta_c_range=(min(theta_cs), max(theta_cs)), w_range=TRAIN_W_RANGE,
@@ -494,53 +503,51 @@ def _refusal_surrogate() -> LensAmplificationSurrogate:
     columns train cleanly -- a partial, deterministic refusal set for the
     domain-gate and F010 tests.
 
-    The box straddles ``gamma = 1`` (unavoidable: the refusal we exercise
-    IS the ``gamma = 1`` parity boundary), but its CENTRE must be a valid
-    config: the multi-chart `from_engine` reads the box-centre region
-    label via a `geometry_partition` that is NOT wrapped in the refusal
-    handler, so a box centred exactly on ``gamma = 1`` would raise there.
-    The 8a box ``(0.8, 1.2)`` centred on ``gamma = 1`` exactly; the
-    intent-preserving ``(0.8, 1.3)`` keeps the identical ``0.1`` spacing
-    and the same ``gamma = 1`` refusal column while nudging the centre to
-    the valid ``gamma = 1.05`` (a saddle-side config that trains cleanly,
-    as the passing saddle box ``SAD_BOX`` witnesses).  No assertion is
-    weakened: spacing, the refusal column, the served interior point and
-    the out-of-box probes are all unchanged.
+    The physical box ``y1 in (6.0, 7.0)``, ``y2 in (0.3, 1.0)`` is mapped
+    to the surrogate's caustic-fixed ``(rho, theta_c)`` coordinates
+    (Build 8h-b3) through the SHARED `surrogate_module._to_caustic_fixed`
+    at the box-centre reference ``gamma_mid = 1.05`` (a saddle-side
+    config, ``_caustic_reach(1.05) ~= 3.0``).  The box radius is
+    deliberately large: `_caustic_reach` DIVERGES as ``gamma -> 1`` from
+    either side (measured ``reach(0.9) ~= 5.7``, ``reach(1.01) ~= 7.0``),
+    so a small physical box that is safely exterior at ``gamma_mid`` can
+    fall INSIDE the caustic (or even give a NEGATIVE ``rho``) at gamma
+    nodes further from 1 -- the pre-port box (radius ~0.2-0.6) did
+    exactly that once routed through the shared coordinate helper. The
+    relocated box keeps ``rho > 1`` (exterior) at every trained gamma
+    node while preserving the fixture's intent unchanged: same gamma
+    grid/spacing, same ``gamma = 1`` refusal column, same 4x4 rho/theta_c
+    refinement.
 
-    KNOWN PRODUCTION GAP surfaced while porting this fixture to the
-    caustic-fixed API (documented here, NOT fixed -- production code is
-    out of scope for this port): under the retired raw ``(y1, y2)`` axis
-    API this fixture built cleanly, because the ``gamma = 1`` refusal was
-    only ever raised INSIDE ``channels.evaluate``, which `from_engine`
-    wraps in its per-node ``_REFUSAL_ERRORS`` handler.  Under the
-    caustic-fixed API, `from_engine` must first map every ``(gamma, rho,
-    theta_c)`` node to an eigenframe source via `_from_caustic_fixed`,
-    which calls `_caustic_reach(gamma)` -- and that call sits OUTSIDE the
-    per-node ``try/except _REFUSAL_ERRORS`` block (see the loop body in
-    `LensAmplificationSurrogate.from_engine`).  ``_caustic_reach(1.0)``
-    itself raises `LensDomainError` (confirmed directly), so a trained
-    gamma grid that lands exactly on the parity wall now propagates an
-    UNCAUGHT exception out of `from_engine` instead of recording that
-    column as refused, contradicting the method's own documented contract
-    ("a parameter point that refuses ... is recorded as refused").  No
-    fixture-only workaround exists: this exact box is the ONLY
-    configuration found (of the eigenframe box swept at gamma in
-    ``(0.8, 1.0) union (1.0, 1.3)``) that raises any refusal at all here
-    -- every OTHER gamma in that box, including values immediately
-    adjacent to 1.0 (0.999, 1.001), trains with zero refusals, so
-    avoiding the exact wall value would make the fixture vacuous instead
-    of broken.  `DomainGateTestCase` and `SerializationTestCase` (both of
-    which depend on this fixture) therefore ERROR at ``setUp`` with this
-    `LensDomainError` and are left failing per this port's instructions,
-    rather than routing around a genuine production gap.
+    This box straddles ``gamma = 1`` (unavoidable: the refusal we
+    exercise IS the ``gamma = 1`` parity boundary), but its CENTRE
+    (``gamma_mid``) must be a valid config: the multi-chart
+    `from_engine` reads the box-centre region label via a
+    `geometry_partition` that is NOT wrapped in the refusal handler, so a
+    box centred exactly on ``gamma = 1`` would raise there.
+    ``gamma_mid = 1.05`` is a saddle-side config that trains cleanly (as
+    the passing saddle box `SAD_BOX` witnesses).
+
+    CONFIRMED (no longer a production gap): `from_engine`'s per-node loop
+    wraps BOTH the caustic-fixed -> eigenframe conversion
+    (`_from_caustic_fixed`, which calls `_caustic_reach(gamma)`) AND the
+    engine ``channels.evaluate`` call in a single ``try/except
+    _REFUSAL_ERRORS`` block, so the ``gamma = 1`` column -- where
+    `_caustic_reach` itself raises `LensDomainError` -- is recorded as
+    refused rather than propagating an uncaught exception (verified
+    directly: training this exact box returns cleanly with
+    ``refused_points`` spanning exactly ``gamma = 1``, 16 nodes).
+    `DomainGateTestCase` and `SerializationTestCase` therefore build and
+    run normally; no test is left erroring at ``setUp``.
     """
     gamma_mid = 1.05
-    reach = surrogate_module._caustic_reach(gamma_mid)
     rhos, theta_cs = [], []
-    for y1 in np.linspace(0.2, 0.5, 5):
-        for y2 in np.linspace(0.1, 0.4, 5):
-            rhos.append(float(np.hypot(y1, y2)) / reach)
-            theta_cs.append(float(np.arctan2(y2, y1)))
+    for y1 in np.linspace(6.0, 7.0, 5):
+        for y2 in np.linspace(0.3, 1.0, 5):
+            rho, theta_c = surrogate_module._to_caustic_fixed(
+                gamma_mid, y1, y2)
+            rhos.append(rho)
+            theta_cs.append(theta_c)
     return LensAmplificationSurrogate.from_engine(
         gamma_range=(0.8, 1.3), rho_range=(min(rhos), max(rhos)),
         theta_c_range=(min(theta_cs), max(theta_cs)),
@@ -919,15 +926,30 @@ class DomainGateTestCase(SurrogateTestCase):
 
     def test_query_near_refused_point_declines(self):
         """A query within one grid spacing of a refused point -> served
-        False (the exclusion ball), and the refused point itself -> False."""
+        False (the exclusion ball), and the refused point itself -> False.
+
+        The refused node sits EXACTLY on ``gamma = 1``, the parity
+        boundary where the caustic-fixed -> eigenframe map
+        (`_from_caustic_fixed`) is itself undefined (`_caustic_reach`
+        diverges as ``gamma -> 1``) -- there is no finite eigenframe
+        point AT ``gamma = 1`` to query with.  Both probes below reuse
+        the eigenframe point that the SAME ``(rho_r, theta_c_r)`` maps to
+        at the frac=0.3 gamma (just inside the exclusion ball, and a
+        valid, non-singular config): at ``frac=0.0`` this tests that
+        `in_domain` declines at the exact parity wall (true for ANY
+        finite source there, since `_to_caustic_fixed` itself raises at
+        ``gamma = 1`` and `in_domain` catches it and returns False
+        unconditionally); at ``frac=0.3`` it tests the exclusion ball
+        around the refused ``(gamma, rho, theta_c)`` node specifically.
+        """
         refused = self.sur.refused_points[0]
         gamma_r, rho_r, theta_c_r = refused
-        y1_r, y2_r = surrogate_module._from_caustic_fixed(
-            gamma_r, rho_r, theta_c_r)
         # 8a exposed the exclusion-ball spacing on the surrogate; the
         # multi-chart layout carries it per-chart, so read it off the
         # (single) far-field chart -- the same array, same intent.
         spacing = self.sur.charts[0].param_spacing
+        y1_r, y2_r = surrogate_module._from_caustic_fixed(
+            gamma_r + 0.3 * spacing[0], rho_r, theta_c_r)
         for frac in (0.0, 0.3):  # exactly on it, and just inside the ball
             with self.subTest(offset_frac=frac):
                 self.n_checks += 1
@@ -961,7 +983,12 @@ class DomainGateTestCase(SurrogateTestCase):
     def test_certified_interior_serves(self):
         """A point well inside the box, far from the refused column -> True
         with a finite envelope."""
-        gamma, y1, y2 = 0.85, 0.35, 0.25  # far from gamma = 1
+        rho_mid = 0.5 * (self.sur.rho_grid[0] + self.sur.rho_grid[-1])
+        theta_mid = 0.5 * (self.sur.theta_c_grid[0]
+                           + self.sur.theta_c_grid[-1])
+        gamma = 0.85  # far from gamma = 1
+        y1, y2 = surrogate_module._from_caustic_fixed(
+            gamma, rho_mid, theta_mid)
         self.n_checks += 1
         self.assertTrue(self.sur.in_domain(gamma, y1, y2, 0.0),
                         'declined a certified-interior query')
@@ -975,40 +1002,59 @@ class DomainGateTestCase(SurrogateTestCase):
     def test_f010_mutated_gate_serves_where_engine_refused(self):
         """F010: the exclusion-ball gate has TEETH.
 
-        GREEN: at every refused training point the surrogate declines
-        (``served=False``) -- it never emulates a value the engine refused.
-        RED under mutation: patching the exclusion-ball helper
-        (`surrogate._in_exclusion_ball`, the module global both
-        ``envelope`` and ``in_domain`` resolve through
-        `_farfield_raw_chart`) to claim NO point is ever in a refusal ball
-        makes ``envelope`` serve a (fabricated) value -- and ``in_domain``
-        claim domain -- at that same refused point, so the
+        GREEN: at a point inside the exclusion ball around a refused
+        training node, the surrogate declines (``served=False``) -- it
+        never emulates a value the engine refused.  RED under mutation:
+        patching the exclusion-ball helper (`surrogate._in_exclusion_ball`,
+        the module global both ``envelope`` and ``in_domain`` resolve
+        through `_farfield_raw_chart`) to claim NO point is ever in a
+        refusal ball makes ``envelope`` serve a (fabricated) value -- and
+        ``in_domain`` claim domain -- at that same point, so the
         ``served=False`` invariant the green test relies on FLIPS,
         proving the gate is load-bearing, not decorative.
+
+        The probe point is deliberately NOT the refused node's own
+        ``gamma = 1`` coordinates: at ``gamma = 1`` exactly,
+        `_to_caustic_fixed` itself raises (the parity boundary is
+        undefined there), so ``envelope``/``in_domain`` decline
+        UNCONDITIONALLY regardless of the exclusion ball -- mutating the
+        ball there would prove nothing.  Instead this probes a valid,
+        non-singular gamma just inside the exclusion ball around the
+        refused ``(gamma, rho, theta_c)`` node (the same construction
+        `test_query_near_refused_point_declines` uses at
+        ``offset_frac=0.3``), which isolates the exclusion-ball guard
+        specifically.
 
         NOTE (8a -> multi-chart re-target): the 8a suite mutated
         ``in_domain`` directly because 8a's ``envelope`` consulted it; the
         multi-chart ``envelope`` instead consults `_farfield_raw_chart`,
         whose load-bearing guard IS the exclusion ball named in this
         docstring.  Mutating that exact guard preserves the original
-        intent (and now flips BOTH ``envelope`` and ``in_domain`` red)."""
-        gamma_r, y1_r, y2_r = self.sur.refused_points[0]
+        intent (and now flips BOTH ``envelope`` and ``in_domain`` red).
+        """
+        gamma_r, rho_r, theta_c_r = self.sur.refused_points[0]
+        spacing = self.sur.charts[0].param_spacing
+        gamma_q = gamma_r + 0.3 * spacing[0]
+        y1_q, y2_q = surrogate_module._from_caustic_fixed(
+            gamma_q, rho_r, theta_c_r)
         w = np.array([1.0, 2.0, 4.0])
 
-        _env, served = self.sur.envelope(w, gamma_r, y1_r, y2_r, 0.0)
-        self.n_checks += 1
-        self.assertFalse(served,
-                         'un-mutated gate served a refused training point')
+        _env, served = self.sur.envelope(w, gamma_q, y1_q, y2_q, 0.0)
         self.n_checks += 1
         self.assertFalse(
-            self.sur.in_domain(gamma_r, y1_r, y2_r, 0.0),
-            'un-mutated gate claimed a refused training point in-domain')
+            served,
+            'un-mutated gate served a point in a refused exclusion ball')
+        self.n_checks += 1
+        self.assertFalse(
+            self.sur.in_domain(gamma_q, y1_q, y2_q, 0.0),
+            'un-mutated gate claimed a point in a refused exclusion ball '
+            'in-domain')
 
         with mock.patch.object(surrogate_module, '_in_exclusion_ball',
                                return_value=False):
             _env_mut, served_mut = self.sur.envelope(
-                w, gamma_r, y1_r, y2_r, 0.0)
-            in_domain_mut = self.sur.in_domain(gamma_r, y1_r, y2_r, 0.0)
+                w, gamma_q, y1_q, y2_q, 0.0)
+            in_domain_mut = self.sur.in_domain(gamma_q, y1_q, y2_q, 0.0)
         self.n_checks += 1
         self.assertTrue(
             served_mut,
@@ -1039,7 +1085,13 @@ class DomainGateTestCase(SurrogateTestCase):
                             for g in gammas] for b in y2s], dtype=float)
         fig, ax = plt.subplots()
         ax.pcolormesh(gammas, y2s, served, shading='auto', cmap='Greens')
-        refused_y2 = [surrogate_module._from_caustic_fixed(*row)[1]
+        # Every refused node sits at gamma = 1 exactly, where
+        # `_from_caustic_fixed` is itself undefined (the parity wall);
+        # nudge by a fraction of a grid spacing purely to plot a
+        # representative y2 marker position.
+        spacing0 = self.sur.charts[0].param_spacing[0]
+        refused_y2 = [surrogate_module._from_caustic_fixed(
+                         row[0] + 0.3 * spacing0, row[1], row[2])[1]
                      for row in self.sur.refused_points]
         ax.scatter(self.sur.refused_points[:, 0], refused_y2,
                    c='red', s=8, label='refused nodes')
