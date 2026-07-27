@@ -8,6 +8,7 @@ sections and memories relevant to its role.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import subprocess
@@ -28,6 +29,16 @@ from .runtime import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Constructor fields the INSTALLED `ClaudeAgentOptions` actually accepts.
+#: Newer SDK builds add fields (e.g. ``agent_name``) that the pinned
+#: version rejects with TypeError at spawn; introspect once so option
+#: construction stays compatible across both providers and SDK versions.
+try:
+    _CLAUDE_AGENT_OPTION_FIELDS = set(
+        inspect.signature(ClaudeAgentOptions.__init__).parameters)
+except (TypeError, ValueError):  # pragma: no cover - defensive
+    _CLAUDE_AGENT_OPTION_FIELDS = set()
 
 from .memory import get_memory_names_for_agent, load_memories_text
 from .prompts.sections import get_sections_for_agent
@@ -679,8 +690,16 @@ async def build_agent_options(
         if RUNTIME_PROVIDER == "codex"
         else {}
     )
+    # `agent_name` is accepted only by newer claude_agent_sdk builds; the
+    # pinned 0.1.53 rejects it and every Claude-path build dies at spawn
+    # with TypeError (witnessed 2026-07-26, build 8h-b4). Pass it only when
+    # the installed SDK actually supports it so both providers work.
+    _extra_options = (
+        {"agent_name": agent_name}
+        if "agent_name" in _CLAUDE_AGENT_OPTION_FIELDS
+        else {})
     return ClaudeAgentOptions(
-        agent_name=agent_name,
+        **_extra_options,
         model=model,
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,
