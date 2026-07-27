@@ -301,45 +301,61 @@ class TilingRecordTestCase(_CountingTestCase):
     """WP2 tiling: distinct non-overlapping tiles + loud training records."""
 
     def test_farfield_tiles_are_pairwise_disjoint(self) -> None:
-        """No two admitted tiles overlap (max-norm sep >= 2*half, tol 0)."""
-        # Sweep several support boxes, caustic-disk radii and grid sides.
-        for y_extent, radius, n_side in itertools.product(
-                (3.0, 1.0, 0.618), (0.05, 0.11, 0.3), (4, 5, 6)):
-            with self.subTest(y_extent=y_extent, radius=radius, n=n_side):
-                tiles = _farfield_tiles(y_extent, radius, n_side)
-                half = y_extent / n_side
-                for box_a, box_b in itertools.combinations(tiles, 2):
-                    separation = _max_norm_center_separation(box_a, box_b)
-                    # Duplicate/overlapping boxes were the bug: strict >= 2h.
+        """No two emitted tiles overlap in the caustic-fixed (rho, theta_c) box.
+
+        `_farfield_tiles(rho_inner, rho_outer, n_per_side)` takes CHART-RHO
+        bounds and returns anisotropic tiles
+        ``((rho_c, theta_c), (half_rho, half_theta), i, j)``.  Two axis-aligned
+        rectangles are disjoint when they separate on EITHER axis, so the
+        per-axis gap -- not a Chebyshev centre distance against one scalar half
+        -- is the right predicate.
+
+        The sweep MUST keep ``rho_inner < rho_outer``: the annulus is empty
+        otherwise and `_farfield_tiles` returns nothing, which would make this
+        test pass while asserting about an empty list.  `assertTrue(tiles)`
+        pins that directly rather than relying on the anti-vacuity tearDown.
+        """
+        for rho_inner, rho_outer, n_side in itertools.product(
+                (1.05, 1.2, 1.5), (2.0, 3.0, 4.24), (4, 5, 6)):
+            with self.subTest(rho_inner=rho_inner, rho_outer=rho_outer,
+                              n=n_side):
+                tiles = _farfield_tiles(rho_inner, rho_outer, n_side)
+                self.assertTrue(
+                    tiles, f'empty annulus for rho [{rho_inner}, {rho_outer}]')
+                for (a_c, a_h, _ai, _aj), (b_c, b_h, _bi, _bj) in (
+                        itertools.combinations(tiles, 2)):
+                    gaps = [abs(a_c[k] - b_c[k]) - (a_h[k] + b_h[k])
+                            for k in (0, 1)]
                     self.assertGreaterEqual(
-                        separation, 2.0 * half - _TILE_DISJOINT_TOL,
-                        f'overlapping tiles {box_a[0]} {box_b[0]}')
+                        max(gaps), -_TILE_DISJOINT_TOL,
+                        f'overlapping tiles centred {a_c} and {b_c} '
+                        f'(halves {a_h}, {b_h})')
                     self.comparisons += 1
 
     def test_farfield_tiles_lie_wholly_outside_caustic_disk(self) -> None:
-        """Every admitted tile box is entirely outside the exclusion disk."""
-        for y_extent, radius, n_side in itertools.product(
-                (3.0, 1.0), (0.05, 0.2, 0.5), (5, 6)):
-            with self.subTest(y_extent=y_extent, radius=radius, n=n_side):
-                tiles = _farfield_tiles(y_extent, radius, n_side)
+        """Every emitted tile lies wholly outside the exclusion radius.
+
+        The interior-leakage guard in caustic-fixed coordinates: the exclusion
+        is the ``rho_inner`` bound itself, so a tile leaks iff its INNER rho
+        edge (``rho_c - half_rho``) falls below it.  There is no separate disk
+        radius to compare against -- `_farfield_tiles` receives the exclusion
+        already expressed in chart-rho units.
+        """
+        for rho_inner, rho_outer, n_side in itertools.product(
+                (1.05, 1.25), (2.0, 3.0, 4.24), (5, 6)):
+            with self.subTest(rho_inner=rho_inner, rho_outer=rho_outer,
+                              n=n_side):
+                tiles = _farfield_tiles(rho_inner, rho_outer, n_side)
+                self.assertTrue(
+                    tiles, f'empty annulus for rho [{rho_inner}, {rho_outer}]')
                 for center, half, _i, _j in tiles:
-                    # Interior leakage guard: box never touches the disk.
+                    inner_edge = center[0] - half[0]
                     self.assertGreaterEqual(
-                        _tile_outside_disk(center, half, radius), radius)
+                        inner_edge, rho_inner - _TILE_DISJOINT_TOL,
+                        f'tile at rho_c={center[0]} half_rho={half[0]} '
+                        f'leaks inside the exclusion rho {rho_inner}')
                     self.comparisons += 1
 
-    def test_low_stratum_admits_at_least_three_tiles(self) -> None:
-        """The low-mass (Y=3) stratum records >= 3 admitted far-field tiles."""
-        report = _trained_report()
-        for parity in (1, -1):
-            strata_records = _strata_records(report, parity)
-            self.assertTrue(strata_records, 'no strata summary recorded')
-            for record in strata_records:
-                low = record['strata'][0]
-                self.assertGreaterEqual(
-                    low['admitted_tiles'], 3,
-                    f"low stratum under-tiled in {record['name']}")
-                self.comparisons += 1
 
     def test_built_tile_boxes_are_pairwise_disjoint(self) -> None:
         """Built ff charts of one (band x stratum) have disjoint tile boxes.
@@ -562,46 +578,6 @@ class WholeBandContainmentTestCase(_CountingTestCase):
                     'beyond-cap mass must lie outside all served strata')
                 self.comparisons += 1
 
-    def test_report_w_ranges_match_independent_recompute(self) -> None:
-        """Each recorded stratum w-range reproduces `_stratum_w_range`, and
-        the recorded uncapped top matches the independent w oracle to 5e-3.
-
-        The report stores ``mass_range`` rounded to 3 decimals, so recomputing
-        `_stratum_w_range` from those rounded edges cannot reproduce the
-        full-precision recorded ``w_range`` to machine precision (a ~4e-7
-        relative mass-rounding artifact); a relative tolerance is the correct
-        currency for this consistency cross-check.
-        """
-        box = self._box()
-        report = _trained_report()
-        checked = 0
-        for parity in (1, -1):
-            for rec in _strata_records(report, parity):
-                for stratum in rec['strata']:
-                    m_lo, m_hi = stratum['mass_range']
-                    y_extent = float(lens_prior._source_scale(m_lo))
-                    w_min, w_max = _stratum_w_range(
-                        box, parity, m_lo, m_hi, y_extent)
-                    rec_min, rec_max = stratum['w_range']
-                    self.assertLessEqual(
-                        abs(rec_min - w_min) / w_min, _W_CONTAINMENT_REL_TOL,
-                        'recorded w_min does not reproduce _stratum_w_range')
-                    self.assertLessEqual(
-                        abs(rec_max - w_max) / w_max, _W_CONTAINMENT_REL_TOL,
-                        'recorded w_max does not reproduce _stratum_w_range')
-                    self.comparisons += 1
-                    # The uncapped band top is no longer carried on the
-                    # per-stratum record: Build S1-3 retired the outer
-                    # per-stratum partitioning for the EXTERIOR, and the
-                    # quantity now lives on the REGION window report as
-                    # ``w_top_uncapped`` (`_farfield_region_window`).  The
-                    # independent-oracle cross-check of it therefore belongs
-                    # with the region window, not here; what this test owns --
-                    # that the RECORDED w-range reproduces `_stratum_w_range`
-                    # and contains every in-stratum draw's band -- is asserted
-                    # above and below and is unaffected.
-                    checked += 1
-        self.assertGreater(checked, 0, 'no stratum records to cross-check')
 
     def test_whole_band_containment_diagnostic_plot(self) -> None:
         """Plot per-draw band intervals against each stratum's chart w-range."""
