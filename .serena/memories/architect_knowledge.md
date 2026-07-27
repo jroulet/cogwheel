@@ -83,7 +83,7 @@
   from an accuracy floor before proposing to raise a ceiling constant —
   raising the wrong one buys nothing and can cross into the wrong regime.
 - A finding whose fix is confined to test-file fixtures/constants routes to
-  Test Developer, never Coder — recurring precedent (3x).
+  Test Developer, never Coder — recurring precedent (4x+).
 - Feed Inspector-authored fix snippets through Simplifier before endorsing
   verbatim — a shape mismatch (e.g. dict vs flat-list) can ship a fix that
   passes in isolation but breaks the existing consumer contract.
@@ -99,3 +99,15 @@
 - New accessors added to an existing family (e.g. w_ceiling alongside
   w_cert/w_trust) should mirror that family's naming/behavior exactly
   rather than invent a new sentinel type (Build 8h-b).
+- A WP framed as "find a bug that a test might expose" with no pre-
+  identifiable defect is not a valid Coder WP — it's a forbidden measure-
+  and-decide campaign; a repair already committed but unexercised by
+  tests is a Test-Dev completion/port task, not Coder (Build 8h-b5).
+- When a WP is explicitly redirected off the default agent for a routing-
+  precedent reason (e.g. Coder -> Test Developer), name the executing
+  agent directly in coder_instructions — an implicit redirect risks
+  silent mis-route back to the default agent (Build 8h-b4).
+- When multiple pipeline stages (e.g. tiler/chart/serve) each need the
+  same physical quantity, require them to call one identical shared
+  function — independent reimplementations invite serve-mirror
+  divergence (Build 8h-b3-FIN).

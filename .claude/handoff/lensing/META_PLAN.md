@@ -2696,68 +2696,63 @@ emit-on-change, stall alarm. Floor verdict banked: 3.9x (target 2x
 missed; ~1.8 ms unattributed glue exposed — follow-up profile, not a
 blocker). Next: campaign report -> census + PP -> owner enable
 package.
-## Current plan (2026-07-26 — rewritten in place; history in git)
+## Current plan (2026-07-27 — rewritten in place; history in git)
 
 Standing rulings: zero-quadrature serving; 100% coverage mandatory;
-prior-universality is the goal; ONE campaign, fired only when nothing
+prior-universality is the goal; ONE campaign fired only when nothing
 pending can invalidate its tiles; cost estimate before every engine
-launch; live docs carry current state only; Fable tier owner-only.
+launch; live docs carry current state only; in-build tests FAST and
+bulk work post-build; Fable tier owner-only.
 
-RECOVERY STATE after the interrupted-agents episode:
-- claude-dev baseline = my 8h-b3 caustic-fixed core + Codex infra, with
-  Codex's 3 reviewed science files cherry-picked and the gamma=1
-  node-loop guard fixed (c28408b), plus the SDK compat fix bd3bc65.
-- codex-snapshot-832a2b3 holds ALL interrupted work (Codex SDK recovery
-  machinery worth reviewing separately; its production edits already
-  adopted where reviewed).
-- CAUTION PROVEN: Codex's committed infra broke the Claude build path
-  (agent_name= rejected by SDK 0.1.53) — every build died at spawn
-  until bd3bc65. Treat cross-provider "backward compatible" claims as
-  unverified until a Claude build actually spawns.
+COMMITTED AND SOLID
+- bc27d39 Build 8h-b4 WPs: per-theta_c-column exterior admission
+  (_InteriorAdmission.admits_exterior), saddle ADDITIVE scalar-reach
+  axis, gamma=1 box-centre guard. NOT yet gate-verified.
+- bd3bc65 / e1915ae / 7e9ec1e / 7dd96e1: SDK port items 23, 24, 18, 25
+  and the POS_CONFIGS repositioning.
+- codex-snapshot-832a2b3 holds ALL interrupted Codex/port work.
 
-PROFESSOR RULINGS (2026-07-26), both driver-verified:
-1. Saddle exterior label: (A) BENIGN near-caustic physics, not a
-   conditioning defect. The large |E_ff|/|F| lives entirely below
-   w_floor; inside the label's valid window it is 0.01-1.5. No SACR-C
-   work for the exterior. Fixture relocation endorsed.
-2. Coordinates: the exterior positive-parity axis is ADDITIVE
-   (rho = 1 + |y| - r_caustic), drho/d|y| = 1.0000 verified — already
-   Einstein-scale, caustic-anchored, and measured BETTER than plain
-   Einstein at every radius. KEEP exterior(+1), interior (multiplicative
-   by DOMAIN argument) and tube axes AS SHIPPED. Only the parity -1
-   (saddle) exterior arm still uses the multiplicative stretch and must
-   switch to additive.
-   THE REAL DEFECT IS ADMISSION: `_farfield_tiles` excludes on a scalar
-   reach_max, but the astroid is a SPIKE (gamma=0.9: r_caustic ~0.9-1.5
-   most angles, 5.69 at the cusp). Measured exterior coverage 0.891 ->
-   0.496 -> 0.094 -> 0.000 across gamma bands; above gamma~0.85 the
-   exclusion circle (5.99) exceeds the whole prior box (4.24) so NO
-   exterior chart is built though ~98% is genuinely exterior. Fix =
-   per-theta_c-column admission via exact nearest_caustic_point
-   distance >= eta_max (the test the interior tiler already uses);
-   recovers 0.97-0.98. A radial proxy is UNSAFE (overstates true
-   distance up to 10x near the cusp).
+PROFESSOR RULINGS (verified by driver)
+- Saddle exterior label: BENIGN near-caustic physics, no SACR-C work.
+- Coordinates: exterior positive-parity axis is ADDITIVE
+  (rho = 1 + |y| - r_caustic), drho/d|y| = 1.0000 verified, already
+  Einstein-scale and BETTER than plain Einstein. KEEP exterior(+1),
+  interior (multiplicative, DOMAIN argument) and tube axes as shipped.
+  Only the saddle exterior arm needed the additive switch (done).
+- THE REAL DEFECT WAS ADMISSION: scalar reach_max excluded the whole
+  prior box above gamma~0.85 (coverage 0.891 -> 0.496 -> 0.094 ->
+  0.000). Fixed by per-column nearest-caustic admission.
 
-OPEN CAVEAT: every driver coordinate probe was taken at theta=45deg,
-where Im tau_c = 0 identically (symmetry diagonal). Nothing measured
-about the GHOST regime; do not extrapolate to generic angles. Close
-this before the ghost gate is trusted in the campaign.
+PORT STATE (driver work, in progress)
+Five-suite tally after WP work: 19 failed / 211 passed / 13 errors.
+Concentration: 28 of 32 in test_lensing_exterior_windows.py.
+Root causes found:
+ 1. `_InteriorAdmission.rho_boundary` does NOT exist (the name is only
+    in a module comment). Correct formula, verified:
+    rho_boundary(theta) = radius_grid.min(axis=0) / _caustic_reach
+    (min 0.318 == the isotropic inradius the suite contrasts against).
+    FIXED in _rho_boundary; 14 anti-vacuity errors were downstream.
+ 2. _train derives the chart rho range from raw box corners at
+    gamma_mid ONLY, but rho shifts with gamma, so a config at a
+    band-edge gamma falls outside even with y1 inside the raw box.
+    THIS IS A PATTERN — check every fixture placing configs at
+    band-edge gammas. FIXED for POS_CONFIGS.
+ 3. Remaining: 2 GhostDomainError cases, 1 threshold (0.72 vs 2.0),
+    and EnvelopeReconstruction eps 0.261 vs tol 0.2 (12/13 pass,
+    median 3.3e-2 — ONE local outlier; do NOT weaken the tolerance,
+    it is budget-calibrated. Owner decision or eps-gate follow-up).
 
-SEQUENCE (each step gates the next):
-1. 8h-b4 (RUNNING): exterior admission repair + saddle additive axis +
-   second gamma=1 guard (_box_region_labels box centre) + fixture-port
-   finish. Acceptance: coverage >= 0.95 in every band INCLUDING
-   0.80-0.90, far-field regression battery green, tube byte-identity.
-2. Serving census: the climb from 2.2% must begin, and gamma>=0.8 bands
-   must stop contributing zero exterior coverage.
-3. Calibration re-pilot (cost-quoted) vs P2 before-numbers.
-4. Born rung (non-negotiable; before the campaign so no throwaway tiles;
-   small and certain).
-5. qd (riskiest; saddle tail). GLoW verdict: PARTIAL — good cross-oracle
-   for positive parity and high w, NOT a qd replacement (gamma>1
-   topology unsupported upstream, spurious central-image term).
-6. Map extension sweep; ONE campaign; ladder census -> 100%; PP
-   validation; owner enable package.
+NEXT
+1. Finish the port (pattern above), tree gate, commit verified 8h-b4.
+2. SERVING CENSUS — the number that matters; admission fix should move
+   2.2% for the first time. Can run against committed production code
+   independently of the port.
+3. Calibration re-pilot; Born rung (before campaign); qd (8h-c; GLoW
+   is a cross-oracle only, NOT a qd replacement); map extension; ONE
+   campaign; ladder census -> 100%; PP; enable package.
 
-Driver chores: Librarian doc backlog (7 commits queued, /doc-sync);
-gw port ledger items 16-23 (latest: 23 = ClaudeAgentOptions compat).
+OPEN CAVEAT: all driver coordinate probes sat at theta=45deg where
+Im tau_c = 0 identically — nothing measured about the GHOST regime.
+Close before the campaign trusts the ghost gate.
+
+Chores: Librarian backlog (13 commits queued); gw ledger 16-25.

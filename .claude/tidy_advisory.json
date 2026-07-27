@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "6330ba8364c434fb4030c00833610eeef088836f",
-  "timestamp": "2026-07-27T06:15:05Z",
+  "commit": "61dff78c1700a50f935f78ac34c53b0ae6eaf052",
+  "timestamp": "2026-07-27T07:38:38Z",
   "touched_files": [
     "cogwheel/lensing/chang_refsdal/geometry.py",
     "cogwheel/lensing/surrogate.py",

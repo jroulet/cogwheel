@@ -127,6 +127,48 @@ def get_write_memory_for_agent(agent_name: str) -> Optional[str]:
 #: a spawn over the limit and killed build 8h-a with E2BIG at coder-5.
 _MEMORY_INLINE_CAP = 24_000
 
+#: TOTAL budget across ALL memories inlined into one prompt. The per-memory
+#: cap alone is NOT sufficient: the Dreamer reads 16 memories, so the
+#: per-file cap permits 16 x 24 KB = 375 KB against a 128 KiB limit. The gw
+#: pipeline hit exactly this — its size-triggered consolidation (the
+#: interlocked fix) correctly fired on a failed build, and the Dreamer then
+#: died with the very E2BIG the per-file cap was meant to prevent. cogwheel
+#: measured 90.7 KB at port time: under the limit, but only by luck of
+#: current sizes.
+_MEMORY_TOTAL_CAP = 60_000
+
+#: Floor per memory when the total budget binds, so a large memory cannot
+#: starve the others to nothing (the Dreamer must still SEE every memory it
+#: is meant to consolidate).
+_MEMORY_MIN_PER = 2_000
+
+
+def _allocate_memory_budget(sizes: list[int]) -> list[int]:
+    """Per-memory byte allowances honouring BOTH the per-file and total caps.
+
+    Each memory is first capped at `_MEMORY_INLINE_CAP`. If the resulting
+    total still exceeds `_MEMORY_TOTAL_CAP`, every memory is given
+    `_MEMORY_MIN_PER` (or an equal share if even that does not fit) and the
+    remaining budget is distributed in proportion to how much each memory
+    still wants — so a single huge memory is trimmed hardest and none is
+    starved to nothing.
+    """
+    capped = [min(size, _MEMORY_INLINE_CAP) for size in sizes]
+    total = sum(capped)
+    if total <= _MEMORY_TOTAL_CAP or not capped:
+        return capped
+
+    n = len(capped)
+    floor = min(_MEMORY_MIN_PER, _MEMORY_TOTAL_CAP // n)
+    allowances = [min(size, floor) for size in capped]
+    remaining = _MEMORY_TOTAL_CAP - sum(allowances)
+    wants = [c - a for c, a in zip(capped, allowances)]
+    total_want = sum(wants)
+    if remaining > 0 and total_want > 0:
+        for i, want in enumerate(wants):
+            allowances[i] += int(remaining * want / total_want)
+    return allowances
+
 
 def _cap_memory_content(content: str) -> str:
     """Cap memory content at the inline limit, keeping the most recent tail."""
@@ -146,6 +188,7 @@ async def load_memories_text(
 ) -> str:
     """Load and concatenate memory contents for inclusion in a system prompt."""
     parts: list[str] = []
+    loaded: list[tuple[str, str]] = []
 
     for name in memory_names:
         content = None
@@ -164,7 +207,20 @@ async def load_memories_text(
             else:
                 content = f"(memory '{name}' not found)"
 
-        parts.append(f"### Memory: {name}\n{_cap_memory_content(content)}")
+        loaded.append((name, content))
+
+    # Apply the per-file AND total caps together: the per-file cap alone
+    # lets a many-memory reader (the Dreamer, 16 memories) blow the argv
+    # limit even with every file individually "capped".
+    allowances = _allocate_memory_budget([len(c) for _n, c in loaded])
+    for (name, content), allowance in zip(loaded, allowances):
+        if len(content) > allowance:
+            content = (
+                f"[TRUNCATED for prompt size: kept most recent {allowance} "
+                f"of {len(content)} bytes — read the full memory via "
+                f"mcp__serena__read_memory if earlier entries are needed]\n"
+                + content[-allowance:])
+        parts.append(f"### Memory: {name}\n{content}")
 
     return "\n\n".join(parts)
 
