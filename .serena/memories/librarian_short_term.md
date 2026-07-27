@@ -1,90 +1,94 @@
-# Librarian Short-Term Observations (2026-07-27)
+# Librarian Short-Term Observations (2026-07-27, second pass this date)
 
-Scope: cleared the 15+ commit backlog (dc984c1..d47422a). Documented ONLY
-the scope the driver named — bc27d39 (Build 8h-b4) as SPEC/changelog
-content, plus a rolled-up agent-infra changelog line. Left untouched (by
-design, not oversight):
-- b14df4b (Build 8h-b2 ghost-kernel machinery) — Inspector/Professor PASS,
-  looks production-real, but the driver's task explicitly scoped "the
-  substantive PRODUCTION change to document is Build 8h-b4" and the open
-  todo.d fragment `surrogate_component-representation-8hb.md` frames
-  ghost-kernel/component-representation as still "In progress" (P1/P2
-  probes, not landed levers). Don't backfill this on the next pass without
-  re-confirming with the driver/todo state — it may be intentionally held
-  until the wider 8h-b program closes.
-- 497ecf1/75bf00f (WIP checkpoints, explicitly "PRE-GATE do not build on")
-  and c28408b (WIP, "KNOWN REMAINING" gamma=1 bug later fixed for real in
-  bc27d39) — all superseded by bc27d39, correctly not documented separately.
+Scope: cleared the 14-commit backlog (d84a2d5..d0dc6da, ghost delay-frame
+repair through the ghost gate re-key and geometry-partition perf commit).
+Per driver's explicit scope: cogwheel/lensing/** and cogwheel/tests/**
+production/test code untouched (read-only); test-only commits (a4385b2,
+3c107d4, 1faca34, 56b755c, edf8d48, 2cd23b3) and agent-infra-only commits
+(d84a2d5, 1e60697) skip-entirely per the triage table — verified each by
+reading its changed_files list in sync_issues.json rather than re-deriving.
 
-## New pattern: HARD FENCE + sync_derived_docs.py interaction
-When another agent is concurrently editing cogwheel/tests/ (or any fenced
-dir), running `scripts/sync_derived_docs.py` can print "N checks run, some
-issues auto-fixed" and `git status` afterward will show files change in the
-fenced dir — but check with `git diff --stat` on JUST your own edited
-files (e.g. SPEC.md) before assuming the sync script touched the fenced
-files. In this run, `git status` showed 4 modified cogwheel/tests/*.py
-files after sync_derived_docs.py ran, but a targeted `git diff --stat
-.claude/spec/SPEC.md` proved my own edit was a clean single-line diff — the
-test-file changes were the concurrent agent's own uncommitted work
-(content matched their exact feature: coverage-band docstrings/numbers for
-the same exterior-admission build I was documenting), not something the
-sync script wrote. Lesson: NEVER assume dirty state under a fenced path is
-your own tool's side effect — diff-check your own targets specifically,
-and leave the fenced files alone either way (do not revert, do not
-"clean up").  sync_derived_docs.py's only real output here was 4 stale
-DATA_CONTRACTS.yaml consumer-list warnings, all test-file-only callers of
-`LensAmplificationSurrogate.load` — left off per the established
-test-file-only-consumers convention (long-term memory already covers
-this).
+## What was actually stale (two SPEC.md sentences, both self-inflicted by
+## a WITHIN-BACKLOG code change outpacing the doc entry that described it)
 
-## Refined: SPEC_CHANGELOG.md version-ordering quirk (precise mechanism)
-Previously flagged as "alphabetical filename order" — more precisely, it
-is a TWO-TIER sort: `_render_versioned_changelog` sorts new (bump-only)
-fragments by `(meta.get("date",""), filename)`. Fragments that carry NO
-`date:` frontmatter field (the majority — e.g. all of Build 8b through
-8h-b4, i.e. everything from `2026-07-20_build8b-levers.md` onward except
-a handful) sort with key `("", filename)`, and `""` sorts BEFORE any real
-date string. So EVERY undated fragment — regardless of how recent its
-underlying build actually is — gets a LOWER derived version number than
-EVERY dated fragment, and within each tier ordering is by filename only.
-My new fragment `2026-07-27_build8hb4-exterior-admission.md` (undated,
-matching sibling convention) landed at derived version `0.9.0`, sorted
-behind `farfield-tiling-eps-gate` (`0.8.0`) and ahead of nothing higher —
-even though it is chronologically the newest fragment in the directory,
-because the ~10 OLDER fragments that happen to carry an explicit `date:`
-field (Builds 3-7b era) all out-rank it. Content integrity was still
-100%: 23 fragments in, 23 distinct entries out (0.1.0..0.19.0, no gaps/
-dupes), final `spec_version` (0.19.0) genuinely is the max of all 23.
-Confirmed this is a pure display/versioning artifact, not a content bug —
-flag, don't fix (per precedent), and don't retrofit a `date:` field onto
-new fragments just to "escape" the low tier — that would be inconsistent
-with how every recent sibling fragment (8b through 8g) already looks.
+1. **Delay frame authority drifted one commit after being documented.**
+   6658e6d added the "Lensing delay frame" Conventions entry naming
+   `_frame_t_min(source, matrix)` as the single authoritative frame-origin
+   expression. The VERY NEXT lensing commit, 74c1d55, refactored this:
+   `_frame_delays` became THE authoritative construction (returns
+   `(images, absolute_delays, t_min)` together, so partition builders don't
+   re-solve the image quartic) and `_frame_t_min` was demoted to "a thin
+   accessor over `_frame_delays`" per its own docstring. 74c1d55 touched no
+   doc files (see its changed_files list — channels.py/likelihood.py/tests
+   only), so the SPEC.md entry silently went stale one commit after
+   landing. Pattern to watch: when a build's SPEC.md entry documents a
+   just-added function by name, and a LATER commit in the same backlog
+   refactors that function's role, the entry doesn't self-correct — check
+   the CURRENT docstring of any function SPEC.md cites by name against
+   what SPEC.md says about it, don't trust that citing it once means it's
+   still accurate three commits later.
 
-## last_updated frontmatter never advances
-`SPEC.md`'s `last_updated:` field is only rewritten by
-`update_spec_version()` when the WINNING (highest-version) fragment has a
-non-empty `date` meta field. Because the highest-version fragment is
-currently `2026-07-20_surrogate-8a.md` (an OLD dated fragment, per the
-two-tier quirk above) and not the most recently-added one, `last_updated`
-has been stuck at `2026-07-20` across at least two Librarian passes now
-(confirmed unchanged before/after this run) despite real content changes
-on 2026-07-22 and 2026-07-27. Same "flag don't fix" call — this will keep
-happening until either (a) a future fragment happens to out-rank
-surrogate-8a's tier, or (b) the render script's sort key is fixed
-upstream (out of Librarian scope; it's a `scripts/` change, not a
-`.claude/spec/` doc).
+2. **Distance convention flip (4ffbde5) never reached SPEC.md at all.**
+   4ffbde5 rewrote `cogwheel/lensing/waveform.py` as "the single
+   authoritative statement" that `d_luminosity` is PHYSICAL luminosity
+   distance on both routes (LensedIASPrior's d_hat->d_luminosity, and the
+   marginalized coherent-score blob column) — flipping an OLDER SPEC.md
+   sentence (predating this backlog, likely from the original F009 build)
+   that said `d_luminosity` was the APPARENT distance requiring a
+   post-analysis `sqrt(mu_macro)` rescale. 4ffbde5's changed_files list
+   (CHANGELOG.md, changelog.d, marginalized_likelihood.py, prior.py,
+   waveform.py, tests) never included SPEC.md — this was a genuine gap,
+   not an artifact of my triage. Fixed by rewriting the one sentence in
+   the "Microlensed sampling layer" row's Marginalized-path paragraph.
+   FINDINGS.md F009 was checked and does NOT restate the apparent/physical
+   distinction (it's about the F(w->0)=sqrt(mu_macro) physics only) — left
+   untouched, correctly.
 
-## Skipped by design
-- todo.d/completed.d: left alone — the crew prompt's deliverable list did
-  not include closing out `surrogate_component-representation-8hb.md` or
-  `surrogate_farfield-envelope-v2.md`, and neither fragment's listed scope
-  is fully covered by bc27d39 alone (component-representation especially
-  is explicitly a bigger, still-open program).
-- DATA_CONTRACTS.yaml: untouched — commit message and code comments both
-  say chart npz schema is unchanged by Build 8h-b4; sync_derived_docs.py's
-  only complaint was the known test-file-only consumer gap (not a real
-  contract change).
-- docs/source/: grepped for far-field/exterior-admission/caustic_reach
-  terms, zero hits — the Sphinx narrative pages sit above this
-  implementation-detail layer (consistent with the standing "don't
-  manufacture a perf/impl blurb" note), nothing to sync there.
+Both fixes recorded in one fragment
+`spec_changelog.d/2026-07-27_librarian_sync_backlog.md` (bump: patch — a
+correction to already-recorded content, not new capability), rendered via
+`render_fragments.py` -> spec_version 0.21.0 -> 0.21.1, last_updated stays
+2026-07-27 (the newest-dated fragment already led the two-tier sort, so
+this is the first pass in a while where last_updated genuinely reflects
+the latest change instead of being stuck — see long-term memory's
+"last_updated never advances" note; that failure mode did NOT recur here
+because 2026-07-27 fragments now dominate the dated tier).
+
+## Confirmed NOT stale (checked, not skipped blind)
+- `docs/source/api.rst`: `:recursive:` autosummary over bare `cogwheel`
+  confirmed still in place — `_born.py` (private) and all of 87643d7/
+  d0dc6da's channels.py changes need no manual api.rst entry.
+- `docs/source/*`: zero grep hits for d_luminosity/ghost/Born/delay
+  frame/mu_macro/apparent — the Sphinx narrative sits above this
+  implementation layer, consistent with prior passes. No Sphinx rebuild
+  needed (nothing under docs/source/ touched).
+- `DATA_CONTRACTS.yaml`: `ChangRefsdalGeometryPartition` (which gained
+  `t_min`/`images` fields in 74c1d55/d0dc6da) is an in-memory dataclass,
+  never serialized to disk — confirmed via its docstring/attributes
+  before deciding it needs no contract entry. DATA_CONTRACTS.yaml is for
+  disk artifacts; don't conflate "gained new fields" with "needs a
+  contract" without checking whether the object round-trips through disk.
+- `sync_derived_docs.py`'s only complaint (4 warnings) was the familiar
+  test-file-only `lens_amplification_surrogate` consumer gap (via
+  `LensAmplificationSurrogate.load` in test_lensing_surrogate.py) — same
+  pre-existing pattern as prior passes, left off per the established
+  test-file-only-consumers convention (see long-term memory).
+- Ghost gate re-key (87643d7, DECAY -> GEOMETRIC SEPARATION criterion,
+  `_GHOST_SEPARATION_MIN = 0.7`): grepped SPEC.md for "decay"/"admission"/
+  "w_min"/"Im tau_c" — the only hits were inside the delay-frame
+  Conventions entry (about frame mixing, not the admission criterion
+  itself). SPEC.md's Conventions section never described the gate
+  criterion's specific formula in the first place (that detail lives only
+  in the channels.py module docstring/constants), so there was nothing to
+  flip here — don't manufacture a gate-criterion sentence that wasn't
+  there before; the module docstring is the right home for that level of
+  detail, not SPEC.md.
+
+## Reconfirmed from long-term memory (both held on this pass)
+- Two-tier SPEC_CHANGELOG sort (dated fragments always outrank undated
+  ones): still true, still a "flag don't fix" — not touched this pass.
+- Fenced-dir safety: `git status --short` before AND after my edits
+  showed only .claude/agent_state/*.json, .claude/tidy_advisory.json, and
+  several .serena/memories/*_short_term.md as pre-existing dirty state
+  from concurrent agents — left entirely alone, not part of my diff, not
+  staged in my commit.
