@@ -7,6 +7,43 @@
 
 ---
 
+## 2026-07-27
+
+### Per-column exterior admission, saddle additive axis, gamma=1 guard (Build 8h-b4)
+
+The far-field trainer's exterior tile admission now probes each tile's
+theta_c column against the exact nearest-caustic distance instead of
+testing against a single scalar exclusion disk, fixing a coverage
+collapse above gamma~0.85 where the disk (built from the astroid's
+directional cusp spike) exceeded the entire prior source box and
+admitted zero exterior tiles. The saddle-parity exterior arm of the
+caustic-fixed radial coordinate switches from multiplicative
+reach-normalisation to an additive scalar-reach offset (a directional
+caustic radius is undefined for the saddle's two disjoint deltoid
+lobes); the interior and astroid-exterior arms are unchanged. Chart
+construction no longer crashes when a box centre lands exactly on the
+`gamma = 1` parity wall — it now records an unknown image_count/parity
+for that chart instead.
+
+---
+
+### Agent-infra hardening: memory budget, staging allowlist, test-tier law (.claude/ only)
+
+`ClaudeAgentOptions` gains `agent_name` compatibility; a TEST_TIER_LAW
+prompt section is added for the architect, test_dev, and inspector
+roles; size-triggered Phase 3 memory consolidation is added; the
+new-file staging allowlist widens to cover `.claude/sdk`, `.claude/
+handoff`, and `.claude/crew` (paths outside the prior prefixes were
+silently dropped at commit while the commit message advertised them);
+and a TOTAL inlined-memory budget (60 KB, with a 2 KB per-file floor)
+is layered on top of the existing per-file 24 KB cap, since the
+per-file cap alone permitted an agent reading many memories (e.g. the
+Dreamer's 16) to blow the argv limit. These changes are agent-
+infrastructure only, under `.claude/`, and are excluded from the
+`main`-branch sync.
+
+---
+
 ## 2026-07-23
 
 ### Band-split serving, certified-ppGO map, interior tiles, subdivision (Build 8h-a)

@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.18.0` (2026-07-20): Build 8a surrogate speed layer: new public module
+- `0.19.0` (2026-07-20): Build 8a surrogate speed layer: new public module
 `cogwheel/lensing/surrogate.py` (`LensAmplificationSurrogate`) — an
 offline-trained tensor cubic-spline emulator of the SACR-C envelope
 over (log w, gamma, y1_eig, y2_eig) with exact beta elimination, a
@@ -17,7 +17,7 @@ additive `ChangRefsdalChannels.geometry_partition` method; and an
 the Build 7b state (both-parity gamma range; four-refusal posterior
 net; deltoid fold validity).
 
-- `0.17.0` (2026-07-20): Build 7b saddle integration: the interim negative-parity refusals are
+- `0.18.0` (2026-07-20): Build 7b saddle integration: the interim negative-parity refusals are
 lifted end to end — channel layer serves saddle hosts (delegating
 saddle nodes to the operator's own routing), the waveform generator
 constructs on saddles (`macro_matrix` remains the domain gate), the
@@ -27,7 +27,7 @@ gamma'-keyed (crown byte-identical). FINDINGS F016 records the
 falsification of the envelope-limited hypothesis for the rescued
 strong-shear nat-gap (RB-binning/noise-limited).
 
-- `0.16.0` (2026-07-19): Negative-parity (macro-saddle) engine branch (Build 6): saddle-capable
+- `0.17.0` (2026-07-19): Negative-parity (macro-saddle) engine branch (Build 6): saddle-capable
 geometry (two deltoid caustic lobes, census certified), the exact 1D
 Schwinger dd-quadrature wave evaluator (`_schwinger.py`, ceiling
 w <= 60, certify-or-refuse), parity dispatch with the positive-parity
@@ -37,7 +37,7 @@ two instances fixed and proven extinct), F012 (near-axial quartic dead
 zone, Build-7 guard precondition), F013 (saddle-branch certification
 summary).
 
-- `0.15.0` (2026-07-19): Build 7a engine hardening: runtime index-theorem census guard (F012
+- `0.16.0` (2026-07-19): Build 7a engine hardening: runtime index-theorem census guard (F012
 dead zone now a named refusal, both parities, with Morse-theory-correct
 degenerate pass-throughs for fold-merged and on-cusp censuses),
 cross-parity strong-shear Schwinger fallback in `F_op`/`F_op_grid`
@@ -49,7 +49,7 @@ crash surfaced in production (F015), and the `LensedPosterior` refusal
 net extended to the full named vocabulary (adds
 `SchwingerCertificationError`, `LensedBinningError`).
 
-- `0.14.0` (2026-07-18): SACR-C channel construction (Build 3f): switched-analytic saddle
+- `0.15.0` (2026-07-18): SACR-C channel construction (Build 3f): switched-analytic saddle
 kernels under criticality-separation smootherstep weights + ONE
 beat-free transition envelope demodulated at the parked critical
 carrier, LOO-adaptive coarse node grid (config-independent, ceiling
@@ -57,13 +57,13 @@ carrier, LOO-adaptive coarse node grid (config-independent, ceiling
 Supersedes the flat artificial-split construction and the F008
 full-cluster switch keying (see the F008 addendum).
 
-- `0.13.0` (2026-07-18): Candidate/fiducial ratio layer (Build 3g): lattice-snapped memoized
+- `0.14.0` (2026-07-18): Candidate/fiducial ratio layer (Build 3g): lattice-snapped memoized
 fiducial envelope, heterodyned ratio interpolation (~8 LOO nodes,
 config-independent), guard/refusal-symmetric fallback to the direct
 SACR-C path. Measured warm single-thread lnlike ~9.8 ms (~143x brute).
 New test module `cogwheel/tests/test_lensing_ratio_layer.py`.
 
-- `0.12.0` (2026-07-18): Microlensed sampling layer (Build 4): `LensedIASPrior` (sampled reduced
+- `0.13.0` (2026-07-18): Microlensed sampling layer (Build 4): `LensedIASPrior` (sampled reduced
 lens coordinates — redshifted ln lens mass, reduced shear, shear-frame
 source box; kappa/beta/z_lens eliminated; astroid quadrant folding; no
 phase-fold) and `LensedPosterior` (named engine refusals mapped to
@@ -71,7 +71,7 @@ lnL = -inf at the posterior boundary only); fiducial cache dropped on
 pickle for fork-safe determinism. New row in the Layers table; new test
 module `cogwheel/tests/test_lensing_prior.py`.
 
-- `0.11.0` (2026-07-18): Marginalized lensed likelihood (Build 5): `LensedMarginalizedExtrinsicLikelihood`
+- `0.12.0` (2026-07-18): Marginalized lensed likelihood (Build 5): `LensedMarginalizedExtrinsicLikelihood`
 + registered `LensedMarginalizedExtrinsicIASPrior` — coherent-score
 (higher-mode) extrinsic marginalization for the microlensed model via
 exact per-image time shifts through the unchanged fiducial weights and
@@ -79,19 +79,37 @@ exact per-image time shifts through the unchanged fiducial weights and
 apparent distance d_app (F009 transform deferred to post-analysis).
 New test module `cogwheel/tests/test_lensing_marginalized_likelihood.py`.
 
-- `0.10.0` (2026-07-18): Batched engine fast path (Build 3c): new public `operator.F_op_grid`
+- `0.11.0` (2026-07-18): Batched engine fast path (Build 3c): new public `operator.F_op_grid`
 (per-order weight-vector contraction over the whole wave-branch node
 grid, refusal thresholds byte-unchanged, scalar `F_op` delegates);
 `channels._exact_total` wired to one batched call; certified by the new
 `cogwheel/tests/test_lensing_batched_operator.py`.
 
-- `0.9.0` (2026-07-17): Microlensed likelihood fast path (Builds 3/3b): coarse full-cluster
+- `0.10.0` (2026-07-17): Microlensed likelihood fast path (Builds 3/3b): coarse full-cluster
 kernel-node spline grid (`_DEFAULT_KERNEL_NODES = 100`), numba-njit
 dd/1F1 ladder + operator contraction (refusal contract untouched),
 njit nearest-caustic search; certified by the new
 `cogwheel/tests/test_lensing_fast_path.py` (numba-vs-mpmath
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
+
+- `0.9.0` (): ### Build 8h-b4 — per-column exterior admission, saddle additive axis, gamma=1 guard
+
+The far-field tiler's exterior admission test is replaced: a per-theta_c-
+column probe (`_InteriorAdmission.admits_exterior`) against the exact
+nearest-caustic distance supersedes the old single scalar exclusion disk
+(`caustic_reach + eta_max`), which conflated the astroid caustic's
+directional cusp spike with a uniform radius and built zero exterior
+tiles above gamma~0.85 despite ~98% of that region being genuinely
+exterior. The saddle (parity -1) exterior arm of the caustic-fixed radial
+coordinate (`_to_caustic_fixed`/`_from_caustic_fixed`) switches from
+multiplicative reach-normalisation to an additive scalar-reach offset,
+since a directional caustic radius is ill-posed for the saddle's two
+disjoint deltoid lobes; the interior and astroid-exterior arms are
+unchanged. `_box_region_labels` now catches the named refusal errors
+around the box-centre coordinate map and returns `(None, None)` instead
+of crashing when a chart's box centre sits exactly on the `gamma = 1`
+parity wall.
 
 - `0.8.0` (): ### Build 8g — far-field tiling + eps registration gate
 
