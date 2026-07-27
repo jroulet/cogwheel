@@ -12,7 +12,9 @@ at low-to-moderate w. Everything outside it is analytic:
 - serving rungs (all analytic, zero training): real-image ppGO above
   the measured trust floor; the ghost-pair term in the fold annulus;
   Airy/Pearcey arms in their windows; (candidate) a Born rung at the
-  deep-diffraction floor where F -> 1.
+  deep-diffraction floor, expanded about the exact macro limit
+  `F(w -> 0) = 1/sqrt((1-kappa)^2 - gamma^2)` (NOT about 1: `F -> 1` holds
+  only at `gamma = kappa = 0` — F009, `.claude/spec/FINDINGS.md`).
 - the trained core: charts ONLY over (rho = caustic-scaled radius,
   theta_c, gamma, w in [w_floor, w_cert(cell)]) — ONE coordinate
   system for interior AND exterior, per-lobe frames for the saddle.

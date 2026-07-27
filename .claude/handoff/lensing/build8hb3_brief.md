@@ -22,7 +22,9 @@ amendments layered on:
 2. **W-WINDOWED component label** (floor-probe finding, binding): the
    exterior label subtracts each analytic component only where valid —
    at the diffractive bottom (below ppGO's meaningful range) subtract
-   NOTHING and fit the bounded smooth F-object (F -> 1 limit); in the
+   NOTHING and fit the bounded smooth F-object (whose w -> 0 limit is
+   the exact macro magnification 1/sqrt((1-kappa)^2 - gamma^2), NOT 1 —
+   F009, .claude/spec/FINDINGS.md); in the
    mid band fit F minus real kernels minus the GHOST term (built and
    verified in 8h-b2: geometry ghost extractor + _ghost_kernel; gate
    at w_min*Im tau_c >= 2 outside cusp windows per the frozen WP4
