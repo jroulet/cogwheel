@@ -3504,9 +3504,17 @@ class BuildOrchestrator:
             # Seed isolated index from HEAD, then stage tracked + safe-new files.
             _git(["read-tree", "HEAD"], check=True)
             _git(["add", "-u"], check=True)
+            # Prefix-matched against `git ls-files --others`. A path a build
+            # legitimately creates but that matches NO prefix is silently
+            # dropped at commit while the commit message advertises it
+            # (gw pipeline, port item 25: "tests/" never matched
+            # "scripts/tests/..."). cogwheel's "cogwheel/" covers
+            # cogwheel/tests/, but SDK tests, briefs and prompt sections
+            # were being lost the same way.
             safe_dirs = (
                 "cogwheel/", "docs/", "scripts/", "changelog.d/",
                 ".claude/spec/", ".claude/agent_state/", ".serena/memories/",
+                ".claude/sdk/", ".claude/handoff/", ".claude/crew/",
             )
             others = _git(["ls-files", "--others", "--exclude-standard"])
             if others.returncode == 0 and others.stdout.strip():
@@ -3607,9 +3615,12 @@ class BuildOrchestrator:
 
         subprocess.run(["git", "add", "-u"], cwd=self.project_root, check=True)
 
+        # See the sibling allowlist above (port item 25): a build-created
+        # path matching no prefix is silently dropped at commit.
         safe_dirs = [
             "cogwheel/", "docs/", "scripts/", "changelog.d/",
             ".claude/spec/", ".claude/agent_state/", ".serena/memories/",
+            ".claude/sdk/", ".claude/handoff/", ".claude/crew/",
         ]
         new_files = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
