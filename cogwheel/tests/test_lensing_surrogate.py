@@ -1981,10 +1981,22 @@ class LnlikeAccuracyTestCase(SurrogateTestCase):
     #: concrete nat ceiling too; ``box-edge`` sits at the high-gamma /
     #: low-y1 corner (coarsest spline fit -> larger eps) and exercises the
     #: relationship gate at the box's worst-case eps.
+    #: Repositioned for the caustic-fixed axes (2026-07-27).  `_train`
+    #: derives the chart's ``rho`` range from the raw box corners at
+    #: ``gamma_mid`` ONLY, but ``rho = 1 + |y| - r_caustic(gamma, theta_c)``
+    #: shifts with ``gamma`` -- so a config at a band-edge ``gamma`` maps
+    #: OUTSIDE that range even with its ``y1`` inside the raw box (the old
+    #: raw-axis ``crown`` at ``gamma = 0.35`` landed above the top edge and
+    #: was declined).  Each ``y1`` below is solved so the config lands at a
+    #: chosen fraction of the chart's actual ``rho`` span AT ITS OWN
+    #: ``gamma``, preserving the original intent (``crown``/``deep``
+    #: interior, ``box-edge`` near the outer edge) and the small ``y2``
+    #: offsets that exercise ``theta_c``.  Chart span: rho in
+    #: (2.274, 2.740), theta_c in (-0.077, 0.077).
     POS_CONFIGS = (
-        ('crown', dict(gamma=0.35, y1=1.80, y2=0.0), True),
-        ('deep', dict(gamma=0.40, y1=2.20, y2=0.05), True),
-        ('box-edge', dict(gamma=0.50, y1=2.70, y2=0.10), False),
+        ('crown', dict(gamma=0.35, y1=2.039, y2=0.0), True),      # rho 2.437
+        ('deep', dict(gamma=0.40, y1=2.145, y2=0.05), True),      # rho 2.530
+        ('box-edge', dict(gamma=0.50, y1=2.408, y2=0.10), False),  # rho 2.693
     )
     #: Served saddle configs (gamma' ~1.3); well emulated (eps_dense ~1e-3)
     #: but the |F|^2 quadratic sensitivity gives an eps->dlnL gain of ~1.85
