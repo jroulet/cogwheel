@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.20.0` (2026-07-27): 
+- `0.21.0` (2026-07-27): 
 Record the lensing delay-frame convention under Conventions: all
 `chang_refsdal` channel kernels are carried in the partition's min-subtracted
 frame (`t_min = min(absolute real-image Fermat delays)`), the `geometry`
@@ -18,6 +18,16 @@ Added because a frame mismatch in the ghost carrier was invisible to every
 amplitude-based check: it corrupts phase only, leaving magnitudes and decay
 rates correct. The convention is now stated so any future term added to a
 kernel sum is required to declare its frame.
+
+- `0.20.0` (2026-07-27): 
+Record the Born rung under Conventions as present but DORMANT: the analytic
+weak-deflection module `chang_refsdal/_born.py` exists, is tested, and is
+deliberately NOT wired into the serve path because its O(1) coefficient `b1` is
+an unpinned placeholder giving ~13% disagreement with `operator.F_op` inside
+its own gate's pass region.
+
+Recorded rather than omitted so the annulus `3.0 < |y| <= 4.2426` is not
+mistaken for covered: those draws still reach the exact engine.
 
 - `0.19.0` (2026-07-20): Build 8a surrogate speed layer: new public module
 `cogwheel/lensing/surrogate.py` (`LensAmplificationSurrogate`) — an

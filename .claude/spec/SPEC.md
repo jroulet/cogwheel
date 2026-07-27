@@ -1,5 +1,5 @@
 ---
-spec_version: 0.20.0
+spec_version: 0.21.0
 last_updated: 2026-07-27
 ---
 
@@ -86,6 +86,16 @@ Docs). Packaging: setuptools + setuptools_scm, GPL-3.0-or-later, Python >=3.9.
   `.gwf` frame files used by tutorials — not part of the installed package.
 - Numerically hot paths (relative binning, coherent-score marginalization) use
   numba and lookup tables and must remain numerically accurate.
+- **Born rung (DORMANT).** `chang_refsdal/_born.py` provides the analytic
+  weak-deflection amplification intended to cover the low-`w` far zone
+  (`3.0 < |y| <= 4.2426`, the annulus between the surrogate charts' extent and
+  the prior-box corner), expanded about `sqrt(mu_macro)` rather than about 1.
+  It is NOT wired into the serve path: its O(1) coefficient `b1` is an unpinned
+  placeholder, and it disagrees with `operator.F_op` by up to ~13% inside the
+  region where its own gate passes. Draws in the annulus therefore still fall
+  through to the exact engine, which is certifiable there (`w * |y| <= 60`
+  never binds inside the prior). Wiring it requires a closed form for `b1` plus
+  an oracle-accuracy gate at a stated tolerance.
 - **Lensing delay frame.** Every channel kernel in `chang_refsdal` is carried in
   the partition's *min-subtracted* frame: `ChangRefsdalPartition` subtracts
   `t_min = min(absolute real-image Fermat delays)` from every delay, so
