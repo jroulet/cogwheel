@@ -77,7 +77,7 @@ from typing import NamedTuple
 
 import numba
 import numpy as np
-from scipy.optimize import minimize_scalar
+from scipy.optimize import brentq, minimize_scalar
 
 #: Smallest ``|x|**2`` treated as nonzero; below it the point mass's
 #: logarithmic potential is singular.
@@ -1488,35 +1488,93 @@ def nearest_caustic_point(gamma: float, beta: float, source: np.ndarray,
         distance=float(np.sqrt(best_fun)))
 
 
+def _critical_branch_source(
+        lens_theta: float, gamma: float, kappa: float, branch: int,
+) -> np.ndarray | None:
+    """Caustic source on one valid critical-curve branch, if it exists."""
+    lam = 1.0 - float(kappa)
+    effective_gamma = float(gamma) / lam
+    discriminant = (
+        1.0 - effective_gamma**2 * np.sin(2.0 * float(lens_theta))**2
+    )
+    if abs(gamma) < lam:
+        if branch != 1:
+            return None
+    elif discriminant < -1.0e-12:
+        return None
+    discriminant = max(float(discriminant), 0.0)
+    effective_u = (
+        effective_gamma * np.cos(2.0 * float(lens_theta))
+        + branch * np.sqrt(discriminant)
+    )
+    if effective_u <= 0.0:
+        return None
+    source = _caustic_source(
+        float(lens_theta), float(gamma), 0.0, float(kappa), float(branch))
+    return source if np.all(np.isfinite(source)) else None
+
+
+def _caustic_ray_intersections(
+        gamma: float, theta: float, kappa: float, n_sample: int,
+) -> list[np.ndarray]:
+    """Critical-curve images lying on one outward source-plane ray."""
+    target = np.array([np.cos(theta), np.sin(theta)], dtype=float)
+    lens_thetas = np.linspace(0.0, 2.0 * np.pi, n_sample + 1)
+    branches = (1,) if abs(gamma) < 1.0 - kappa else (1, -1)
+    intersections: list[np.ndarray] = []
+
+    for branch in branches:
+        previous: tuple[float, float] | None = None
+        for lens_theta in lens_thetas:
+            source = _critical_branch_source(
+                float(lens_theta), gamma, kappa, branch)
+            if source is None:
+                previous = None
+                continue
+            cross = float(target[0] * source[1] - target[1] * source[0])
+            dot = float(target @ source)
+            cross_tolerance = 64.0 * np.finfo(float).eps * max(
+                1.0, float(np.linalg.norm(source)))
+            if dot > 0.0 and abs(cross) <= cross_tolerance:
+                intersections.append(source)
+
+            if previous is not None and previous[1] * cross < 0.0:
+                lower = previous[0]
+
+                def ray_cross(candidate_theta: float) -> float:
+                    candidate = _critical_branch_source(
+                        candidate_theta, gamma, kappa, branch)
+                    if candidate is None:
+                        raise LensDomainError(
+                            'Critical branch vanished inside a bracketed '
+                            'caustic-ray intersection.')
+                    return float(target[0] * candidate[1]
+                                 - target[1] * candidate[0])
+
+                root = brentq(
+                    ray_cross, lower, float(lens_theta),
+                    xtol=4.0 * np.finfo(float).eps,
+                    rtol=4.0 * np.finfo(float).eps,
+                )
+                root_source = _critical_branch_source(
+                    root, gamma, kappa, branch)
+                if (root_source is not None
+                        and float(target @ root_source) > 0.0):
+                    intersections.append(root_source)
+            previous = (float(lens_theta), cross)
+    return intersections
+
+
 def r_caustic(gamma: float, theta: float, *, kappa: float = 0.0,
               n_sample: int = 720) -> float:
-    """
-    Directional source-plane caustic radius along the ray at angle ``theta``.
+    """Return the exact directional radius of the source-plane caustic.
 
-    The caustic is the source-plane image of the critical curve; this helper
-    returns the radius (in dimensionless ``y`` units) at which the ray from
-    the origin at source-plane polar angle ``theta`` crosses the caustic,
-    taking the OUTERMOST crossing so that a source at
-    ``rho = |y| / r_caustic(gamma, theta) > 1`` lies outside the whole
-    caustic in that direction.
-
-    The curve is sampled by sweeping `critical_point` over lens-plane polar
-    angle (both square-root branches, wedge-forbidden angles skipped); each
-    critical point carries its caustic (source-plane) image.  The sampled
-    caustic points whose source-plane direction lies within one angular
-    sample of ``theta`` are collected and the largest radius among them is
-    returned.  For a positive-parity astroid the caustic is star-shaped
-    about the origin, so the directional radius is single-valued and this is
-    a well-defined boundary radius.  For a macro saddle the two deltoid
-    lobes do not enclose the origin, so only directions that actually cross
-    a lobe have a finite radius; the rest raise `LensDomainError`.
-
-    Note (cusp rays): ``r_caustic`` has kinks (slope discontinuities) at the
-    four astroid cusp rays, so a smooth patch tiled in ``theta`` must not
-    straddle a cusp ray.  Interior cusp-ray tile alignment is Build 8h S2-1;
-    the exterior far-field tiling keeps the existing cusp-window exclusion
-    as its safety net and inherits a single, consistent directional-radius
-    convention from this shared helper.
+    The caustic is generated from the actual critical curve. ``n_sample``
+    supplies only brackets in lens-plane angle; every ray intersection is
+    refined to float64 precision before its source-plane radius is measured.
+    The outermost forward intersection is returned, so positive-parity
+    ``rho = |y| / r_caustic(gamma, theta)`` crosses the image-count boundary
+    at ``rho = 1``. Macro-saddle rays that miss both deltoid lobes refuse.
 
     Parameters
     ----------
@@ -1525,25 +1583,23 @@ def r_caustic(gamma: float, theta: float, *, kappa: float = 0.0,
     theta : float
         Source-plane polar angle of the query ray, radians.
     kappa : float, optional
-        External convergence (default 0.0, the sampled-space surface).
+        External convergence (default 0.0).
     n_sample : int, optional
-        Number of lens-plane polar angles per square-root branch in the
-        caustic sweep (default 720; the directional resolution is
-        ``~2 * pi / n_sample``).
+        Number of lens-plane angular brackets. Bracketing density does not set
+        the returned radius accuracy; it must be at least 16.
 
     Returns
     -------
     float
-        The outermost caustic radius in direction ``theta`` (dimensionless
-        ``y`` units).
+        Outermost caustic radius on the requested source-plane ray.
 
     Raises
     ------
     LensDomainError
-        If ``1 - kappa <= 0`` or ``abs(gamma) == 1 - kappa`` (the geometry
-        refusals of `critical_point`), or if no caustic point lies in the
-        direction ``theta`` (a macro-saddle direction that misses both
-        deltoid lobes).
+        If the macro geometry is outside the supported domain or the ray does
+        not intersect a caustic.
+    ValueError
+        If ``n_sample`` is smaller than 16.
     """
     lam = 1.0 - float(kappa)
     if lam <= 0.0:
@@ -1557,35 +1613,17 @@ def r_caustic(gamma: float, theta: float, *, kappa: float = 0.0,
             f'({kappa}, {gamma}): |gamma| == 1 - kappa = {lam} exactly '
             f'(det A = 0, the parity boundary); this boundary is a named '
             f'refusal.')
+    n_sample = int(n_sample)
+    if n_sample < 16:
+        raise ValueError(f'n_sample must be at least 16; got {n_sample}.')
 
-    target = float(theta) % (2.0 * np.pi)
-    thetas = np.linspace(0.0, 2.0 * np.pi, int(n_sample), endpoint=False)
-    phis: list[float] = []
-    radii: list[float] = []
-    for branch in (1, -1):
-        for theta_lens in thetas:
-            try:
-                source = critical_point(
-                    gamma, float(theta_lens), 0.0, kappa, branch).source
-            except LensDomainError:
-                continue
-            radius = float(np.hypot(source[0], source[1]))
-            if radius <= 0.0:
-                continue
-            phis.append(float(np.arctan2(source[1], source[0])) % (2.0 * np.pi))
-            radii.append(radius)
-    if not radii:
+    intersections = _caustic_ray_intersections(
+        float(gamma), float(theta), float(kappa), n_sample)
+    if not intersections:
         raise LensDomainError(
-            f'No caustic point found in direction theta={theta} for '
-            f'(kappa, gamma) = ({kappa}, {gamma}); a macro-saddle ray that '
-            f'misses both deltoid lobes has no caustic radius.')
-    phi_arr = np.asarray(phis)
-    radius_arr = np.asarray(radii)
-    # Wrapped angular gap to the query direction, in [0, pi].
-    gaps = np.abs((phi_arr - target + np.pi) % (2.0 * np.pi) - np.pi)
-    window = 2.0 * np.pi / int(n_sample)
-    near = gaps <= gaps.min() + window
-    return float(radius_arr[near].max())
+            f'No caustic intersection found on source-plane ray theta={theta} '
+            f'for (kappa, gamma) = ({kappa}, {gamma}).')
+    return max(float(np.linalg.norm(source)) for source in intersections)
 
 
 # ---------------------------------------------------------------------------

@@ -212,7 +212,7 @@ _INSIDE_SERVE_FLOOR = 0.90
 #: tile boxes, admitted/dropped counts, beyond-cap masses -- are independent
 #: of the (budget-limited) interpolation accuracy.
 _FIXTURE_CONFIG = TrainingConfig(
-    n_gamma=4, n_u=4, n_theta=4, n_y1=4, n_y2=4, w_nodes_per_decade=3,
+    n_gamma=4, n_u=4, n_theta=4, n_rho=4, n_theta_c=4, w_nodes_per_decade=3,
     n_farfield_tiles_per_side=5, max_farfield_regions=4, n_caustic_samples=60,
     n_heldout=6, tube_eps_max=1e9, farfield_eps_max=1e9)
 
@@ -844,6 +844,14 @@ _SERVE_EXCLUSION_RADIUS = 0.6
 _SERVE_N_PER_SIDE = 5
 
 
+#: Band-midpoint scalar caustic reach normalising this fixture's caustic-fixed
+#: ``(rho, theta_c)`` tiling (Build 8h-b3 port) -- the SAME convention
+#: `_train_band_charts` uses (``reach_scalar = _scalar_caustic_reach(gamma_mid)``)
+#: for a topology-stable gamma band.
+_SERVE_REACH = surrogate_module._caustic_reach(
+    0.5 * (_SERVE_GAMMA_BAND[0] + _SERVE_GAMMA_BAND[1]))
+
+
 @functools.lru_cache(maxsize=1)
 def _serve_fixture() -> dict:
     """Build the synthetic tiled far-field chart set once.
@@ -853,41 +861,65 @@ def _serve_fixture() -> dict:
     contain every in-stratum draw's whole band, so the serve/None decision is
     dominated by the tile-box GEOMETRY -- which is the additive serving
     contract under test.
+
+    Tiles are now the caustic-fixed ``(rho, theta_c)`` ANNULUS
+    `_farfield_tiles` returns (Build 8h-b3) -- production retired the raw
+    Cartesian-square-with-dropped-centre tiling this fixture originally
+    mimicked (`_farfield_tiles(y_extent, exclusion_radius, n_per_side)` no
+    longer exists; the current `_farfield_tiles(rho_inner, rho_outer,
+    n_per_side)` tiles ``rho in [rho_inner, rho_outer] x theta_c in
+    (-pi, pi]``).  The certification INTENT is unchanged and preserved
+    exactly: an inner disk (``rho < exclusion_rho``, the caustic + eta_max
+    shell) is never tiled (the "interior hole"), a ring of tiles covers the
+    admitted exterior annulus, and points beyond the annulus's outer edge
+    fall through -- only the tile SHAPE (annular wedges, not a dropped
+    Cartesian centre cell) changed.
     """
     box = PriorBox.from_prior_classes()
     strata, _beyond = _mass_strata(box, 1)
     m_lo, m_hi = strata[0]
     y_extent = float(lens_prior._source_scale(m_lo))
-    tiles = _farfield_tiles(
-        y_extent, _SERVE_EXCLUSION_RADIUS, _SERVE_N_PER_SIDE)
+    exclusion_rho = _SERVE_EXCLUSION_RADIUS / _SERVE_REACH
+    rho_outer = y_extent / _SERVE_REACH
+    tiles = _farfield_tiles(exclusion_rho, rho_outer, _SERVE_N_PER_SIDE)
     # ln-w grid padded around the stratum band (ln units, matching the query).
     w_lo = _w_indep(20.0, m_lo)
     w_hi = _w_indep(1024.0, m_hi)
     log_w_grid = np.log(np.geomspace(w_lo * 0.8, w_hi * 1.25, 4))
     gamma_grid = np.linspace(_SERVE_GAMMA_BAND[0], _SERVE_GAMMA_BAND[1], 4)
     charts = []
-    for (cx, cy), half, _i, _j in tiles:
+    for (rho_c, theta_c), (half_rho, half_theta), _i, _j in tiles:
         envelope = np.ones((4, 4, 4, 4))
         charts.append(FarFieldChart.from_values(
             gamma_grid=gamma_grid,
-            y1_grid=np.linspace(cx - half, cx + half, 4),
-            y2_grid=np.linspace(cy - half, cy + half, 4),
+            rho_grid=np.linspace(rho_c - half_rho, rho_c + half_rho, 4),
+            theta_c_grid=np.linspace(theta_c - half_theta,
+                                     theta_c + half_theta, 4),
             log_w_grid=log_w_grid, envelope_real=envelope,
             envelope_imag=envelope, image_count=2, parity=1,
             eta_overlap_min=0.05))
     return {'charts': charts, 'tiles': tiles, 'y_extent': y_extent,
             'gamma_band': _SERVE_GAMMA_BAND, 'm_range': (m_lo, m_hi),
-            'log_w_grid': log_w_grid}
+            'log_w_grid': log_w_grid, 'reach': _SERVE_REACH,
+            'exclusion_rho': exclusion_rho, 'rho_outer': rho_outer}
 
 
-def _point_in_tiles(y1: float, y2: float, tiles: list[tuple]) -> bool:
-    """Independent geometric classifier: is ``(y1, y2)`` in some tile box?
+def _point_in_tiles(y1: float, y2: float, gamma: float,
+                    tiles: list[tuple]) -> bool:
+    """Independent geometric classifier: is ``(gamma, y1, y2)`` in some tile?
 
     Keys ONLY on the tile-box geometry, never on `select_chart`, so a
     containment bug in the guard stack shows up as a dropped serve fraction.
+    Converts to caustic-fixed ``(rho, theta_c)`` via `_to_caustic_fixed` at
+    the QUERY'S OWN ``gamma`` -- the identical conversion `select_chart`'s
+    caller (`serve`) performs -- so the oracle and the code under test agree
+    on what "inside" means even though the tiles themselves were built at
+    the band-midpoint reach.
     """
-    for (cx, cy), half, _i, _j in tiles:
-        if cx - half <= y1 <= cx + half and cy - half <= y2 <= cy + half:
+    rho, theta_c = surrogate_module._to_caustic_fixed(gamma, y1, y2)
+    for (rho_c, theta_ctr), (half_rho, half_theta), _i, _j in tiles:
+        if (rho_c - half_rho <= rho <= rho_c + half_rho
+                and theta_ctr - half_theta <= theta_c <= theta_ctr + half_theta):
             return True
     return False
 
@@ -923,12 +955,14 @@ class ServeFractionTestCase(_CountingTestCase):
     at >= 90%, outside-support draws return ``None`` 100% of the time."""
 
     def _serve(self, fixture: dict, draw: dict):
+        rho, theta_c = surrogate_module._to_caustic_fixed(
+            draw['gamma'], draw['y1'], draw['y2'])
         return select_chart(
             fixture['charts'], gamma=draw['gamma'],
             log_w_min=math.log(draw['band_lo']),
             log_w_max=math.log(draw['band_hi']),
             eta=5.0, theta=0.0, image_count=2,
-            y1_eig=draw['y1'], y2_eig=draw['y2'])
+            rho=rho, theta_c=theta_c)
 
     def test_inside_support_draws_serve_at_least_ninety_percent(self) -> None:
         """Draws whose source lands in an admitted tile serve at >= 90%."""
@@ -937,7 +971,8 @@ class ServeFractionTestCase(_CountingTestCase):
         draws = _draw_support_samples(
             rng, 700, fixture['gamma_band'], fixture['m_range'])
         inside = [d for d in draws
-                  if _point_in_tiles(d['y1'], d['y2'], fixture['tiles'])]
+                  if _point_in_tiles(d['y1'], d['y2'], d['gamma'],
+                                     fixture['tiles'])]
         self.assertGreater(len(inside), 50, 'too few inside draws to test')
         served = sum(self._serve(fixture, d) is not None for d in inside)
         fraction = served / len(inside)
@@ -947,14 +982,16 @@ class ServeFractionTestCase(_CountingTestCase):
         self.comparisons += 1
 
     def test_interior_hole_draws_never_serve(self) -> None:
-        """Draws in the interior caustic hole (dropped centre cell) return
-        ``None`` even though gamma / w / eta / image-count are all valid."""
+        """Draws in the interior caustic hole (un-tiled ``rho < exclusion_rho``
+        disk) return ``None`` even though gamma / w / eta / image-count are
+        all valid."""
         fixture = _serve_fixture()
         rng = np.random.default_rng(31415926)
         draws = _draw_support_samples(
             rng, 900, fixture['gamma_band'], fixture['m_range'])
         outside = [d for d in draws
-                   if not _point_in_tiles(d['y1'], d['y2'], fixture['tiles'])]
+                   if not _point_in_tiles(d['y1'], d['y2'], d['gamma'],
+                                          fixture['tiles'])]
         self.assertGreater(len(outside), 5, 'too few interior-hole draws')
         for draw in outside:
             with self.subTest(y1=round(draw['y1'], 3), y2=round(draw['y2'], 3)):
@@ -964,31 +1001,34 @@ class ServeFractionTestCase(_CountingTestCase):
                 self.comparisons += 1
 
     def test_beyond_box_draws_never_serve(self) -> None:
-        """Draws beyond the ``[-Y, Y]^2`` support box return ``None`` 100%.
+        """Draws beyond the annulus's outer edge return ``None`` 100%.
 
-        "Beyond" is measured in the MAX norm (the tiles fill the square box out
-        to its corners, so a large-Euclidean-radius point can still sit inside
-        a corner tile -- only ``max(|y1|, |y2|) > Y`` is guaranteed exterior).
+        Ported from the retired square-box "MAX norm" criterion (the
+        Cartesian tiling this fixture originally mimicked no longer exists
+        -- see `_serve_fixture`).  The tiled region is now the caustic-fixed
+        annulus ``rho in [exclusion_rho, rho_outer]``, so "beyond" is
+        unambiguously ``rho > rho_outer`` at every ``theta_c`` -- the
+        annulus has no corners, so no max-norm subtlety is needed.
         """
         fixture = _serve_fixture()
         rng = np.random.default_rng(2718281)
-        y_extent = fixture['y_extent']
+        rho_outer = fixture['rho_outer']
         m_mid = math.sqrt(fixture['m_range'][0] * fixture['m_range'][1])
-        band = {'gamma': 0.35, 'band_lo': _w_indep(20.0, m_mid),
+        gamma = 0.35
+        band = {'gamma': gamma, 'band_lo': _w_indep(20.0, m_mid),
                 'band_hi': _w_indep(1024.0, m_mid)}
         for _ in range(300):
-            # Force one coordinate outside the box (max-norm exterior); the
-            # other ranges freely, including inside the box interval.
-            outer = rng.uniform(y_extent * 1.05, y_extent * 1.8)
-            inner = rng.uniform(-y_extent * 1.8, y_extent * 1.8)
-            outer *= rng.choice((-1.0, 1.0))
-            y1, y2 = ((outer, inner) if rng.random() < 0.5 else (inner, outer))
+            rho_beyond = rng.uniform(rho_outer * 1.05, rho_outer * 1.8)
+            theta = rng.uniform(-math.pi, math.pi)
+            y1, y2 = surrogate_module._from_caustic_fixed(
+                gamma, rho_beyond, theta)
             draw = {**band, 'y1': float(y1), 'y2': float(y2)}
             # Defensive: the point is genuinely outside every tile box.
-            self.assertFalse(_point_in_tiles(y1, y2, fixture['tiles']))
+            self.assertFalse(
+                _point_in_tiles(y1, y2, gamma, fixture['tiles']))
             self.assertIsNone(
                 self._serve(fixture, draw),
-                'a beyond-box draw served (additive-contract violation)')
+                'a beyond-annulus draw served (additive-contract violation)')
             self.comparisons += 1
 
     def test_serve_fraction_diagnostic_plot(self) -> None:
@@ -1036,18 +1076,35 @@ _FARFIELD_EPS_BAR = 3e-3
 #: below the ``gamma = 1`` guard band so no chart is refused for parity.
 _GATE_GAMMA_BAND = (0.2, 0.5)
 
-#: Far-field tile half-width and w-band top for the gate fixture charts.
-_GATE_HALF = 0.25
+#: Far-field tile half-width ``(half_rho, half_theta_c)`` and w-band top for
+#: the gate fixture charts (Build 8h-b3: `_build_farfield_chart`'s ``half``
+#: is a caustic-fixed ``(rho, theta_c)`` half-pair, not a scalar).
+_GATE_HALF = (0.25, 0.2)
 _GATE_W_TOP = 2.0
 
-#: Three DISJOINT clean far-field tile centres (max-norm separation 0.9 >
-#: ``2 * half = 0.5``) whose engine-measured held-out eps is well below the
-#: 3e-3 bar (~5e-4, ~1e-4, ~2e-4).  Disjointness matters for the fall-through
-#: test: with only the healthy chart registered, the poisoned/NaN centres must
-#: lie OUTSIDE the healthy chart's box so `select_chart` returns ``None`` there.
-_GATE_HEALTHY_CENTER = (2.5, 2.5)
-_GATE_POISON_CENTER = (2.5, 3.4)
-_GATE_NAN_CENTER = (3.4, 3.4)
+#: Three DISJOINT clean far-field tile centres ``(rho_c, theta_c_c)``
+#: (``theta_c`` separation 0.9 > ``2 * half_theta = 0.4``, so no two boxes'
+#: theta_c spans overlap even though they share ``rho_c``).
+#:
+#: KNOWN OPEN ISSUE (test-port, not fixed here -- budget-limited): under the
+#: retired raw ``(y1, y2)`` axis API this fixture's engine-measured held-out
+#: eps was well below the 3e-3 bar (~5e-4, ~1e-4, ~2e-4) at the literal
+#: values ``(2.5, 2.5)`` / ``(2.5, 3.4)`` / ``(3.4, 3.4)``.  Reinterpreting
+#: those SAME numbers as caustic-fixed ``(rho, theta_c)`` (the mechanical
+#: port) measures eps of order 1-7 (checked directly against
+#: `_build_farfield_chart` + `_heldout_eps`, independent of this test file,
+#: across several ``rho_c`` in [2.5, 6.0], several ``(half_rho, half_theta)``
+#: down to (0.1, 0.03), and several narrower ``gamma_band`` widths down to
+#: (0.33, 0.40)) -- none of the combinations tried recovered the pre-port
+#: eps.  `EpsRegistrationGateTestCase` / `EpsGateResumeTestCase` are
+#: therefore LEFT FAILING on the ``eps < _FARFIELD_EPS_BAR`` fixture
+#: preconditions (not a crash: `_build_farfield_chart` / `select_chart` run
+#: to completion with the corrected caustic-fixed API); a further root-cause
+#: pass on why this particular box position degrades this badly under the
+#: new axes is future work.
+_GATE_HEALTHY_CENTER = (2.5, 0.0)
+_GATE_POISON_CENTER = (2.5, 0.9)
+_GATE_NAN_CENTER = (2.5, 1.8)
 
 #: Spline-coefficient poison factor: scaling ``real_coeffs`` by 1.1 lifts the
 #: far-field envelope ~10% off the engine truth, so the measured held-out eps
@@ -1076,7 +1133,7 @@ def _wp1_gate_fixture() -> dict:
     y_extent = float(lens_prior._source_scale(m_lo))
     full_w = _stratum_w_range(box, 1, m_lo, m_hi, y_extent)
     config = TrainingConfig(
-        n_gamma=6, n_y1=6, n_y2=6, w_nodes_per_decade=8, n_heldout=8,
+        n_gamma=6, n_rho=6, n_theta_c=6, w_nodes_per_decade=8, n_heldout=8,
         farfield_eps_max=_FARFIELD_EPS_BAR)
     w_range = (full_w[0], _GATE_W_TOP)
 
@@ -1097,8 +1154,14 @@ def _wp1_gate_fixture() -> dict:
         poison_base, real_coeffs=poison_base.real_coeffs * _GATE_POISON_FACTOR)
     # Held-out samples entirely outside the NaN chart's box -> never served ->
     # `_heldout_eps` returns nan (the "all held-out points refused" case).
+    # The offset is applied in PHYSICAL eigenframe (y1, y2) units (a +20
+    # shift is comfortably outside any `_GATE_HALF`-sized box regardless of
+    # rho/theta_c placement), so the NaN centre is mapped through
+    # `_from_caustic_fixed` first.
+    nan_center_y1, nan_center_y2 = surrogate_module._from_caustic_fixed(
+        0.35, *_GATE_NAN_CENTER)
     nan_samples = [
-        (0.35, _GATE_NAN_CENTER[0] + 20.0, _GATE_NAN_CENTER[1] + 20.0)
+        (0.35, nan_center_y1 + 20.0, nan_center_y2 + 20.0)
         for _ in range(config.n_heldout)]
 
     healthy_eps = _heldout_eps(healthy, healthy_samples, _HELDOUT_PROV)
@@ -1375,7 +1438,7 @@ class EpsRegistrationGateTestCase(_CountingTestCase):
             return select_chart(
                 registered, gamma=0.35, log_w_min=mid_log_w,
                 log_w_max=mid_log_w, eta=5.0, theta=0.0, image_count=2,
-                y1_eig=center[0], y2_eig=center[1])
+                rho=center[0], theta_c=center[1])
 
         self.assertIsNotNone(
             serve_at(fixture['healthy']['center']),
@@ -2167,32 +2230,41 @@ class SelfFalsificationTestCase(_CountingTestCase):
 
     def test_chart_over_hole_makes_interior_point_serve(self) -> None:
         """A chart widened over the interior hole serves a hole point, which
-        would break the outside-``None`` contract (proving it has teeth)."""
+        would break the outside-``None`` contract (proving it has teeth).
+
+        The "hole" is the un-tiled disk ``rho < exclusion_rho`` around the
+        origin (Build 8h-b3: `_farfield_tiles` tiles only the exterior
+        annulus).  The origin itself (``y1_eig = y2_eig = 0``) maps to
+        ``rho = 0`` at ANY ``gamma`` and an ARBITRARY ``theta_c`` (``atan2``
+        of a zero vector; caustic-fixed ``theta_c`` is undefined exactly at
+        the origin, so the bad chart's box must cover the FULL angular
+        range, not just a wedge, to genuinely "cover the hole").
+        """
         fixture = _serve_fixture()
         log_w_grid = fixture['log_w_grid']
         gamma_grid = np.linspace(_SERVE_GAMMA_BAND[0], _SERVE_GAMMA_BAND[1], 4)
         envelope = np.ones((4, 4, 4, 4))
-        # A far-field chart whose box COVERS the dropped centre cell.
+        # A far-field chart whose box COVERS the un-tiled interior disk: all
+        # of rho in [0, 1.5 * exclusion_rho] (comfortably past the hole's
+        # outer edge) at every theta_c.
         bad_chart = FarFieldChart.from_values(
             gamma_grid=gamma_grid,
-            y1_grid=np.linspace(-_SERVE_EXCLUSION_RADIUS,
-                                _SERVE_EXCLUSION_RADIUS, 4),
-            y2_grid=np.linspace(-_SERVE_EXCLUSION_RADIUS,
-                                _SERVE_EXCLUSION_RADIUS, 4),
+            rho_grid=np.linspace(0.0, 1.5 * fixture['exclusion_rho'], 4),
+            theta_c_grid=np.linspace(-math.pi, math.pi, 4),
             log_w_grid=log_w_grid, envelope_real=envelope,
             envelope_imag=envelope, image_count=2, parity=1,
             eta_overlap_min=0.05)
         mid_log_w = float(0.5 * (log_w_grid[0] + log_w_grid[-1]))
         served = select_chart(
             [bad_chart], gamma=0.35, log_w_min=mid_log_w, log_w_max=mid_log_w,
-            eta=5.0, theta=0.0, image_count=2, y1_eig=0.0, y2_eig=0.0)
+            eta=5.0, theta=0.0, image_count=2, rho=0.0, theta_c=0.0)
         self.assertIsNotNone(
             served, 'a chart over the hole must serve the hole point')
         # And the honest fixture (hole not covered) must NOT serve it.
         clean = select_chart(
             fixture['charts'], gamma=0.35, log_w_min=mid_log_w,
             log_w_max=mid_log_w, eta=5.0, theta=0.0, image_count=2,
-            y1_eig=0.0, y2_eig=0.0)
+            rho=0.0, theta_c=0.0)
         self.assertIsNone(clean, 'the honest fixture leaves the hole unserved')
         self.comparisons += 1
 
@@ -2220,7 +2292,7 @@ class SelfFalsificationTestCase(_CountingTestCase):
         served = select_chart(
             [poisoned], gamma=0.35, log_w_min=mid_log_w, log_w_max=mid_log_w,
             eta=5.0, theta=0.0, image_count=2,
-            y1_eig=center[0], y2_eig=center[1])
+            rho=center[0], theta_c=center[1])
         self.assertIsNotNone(
             served, 'the poisoned window is live; only the gate removes it')
         self.comparisons += 1

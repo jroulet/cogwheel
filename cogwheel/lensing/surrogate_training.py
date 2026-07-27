@@ -264,10 +264,9 @@ class TrainingConfig:
     n_u: int = 4
     n_theta: int = 4
     # Caustic-fixed far-field node counts (Build 8h-b3): a far-field chart's
-    # two spatial axes are ``rho = |y| / caustic_reach(gamma)`` and the
-    # eigenframe polar angle ``theta_c``.  ``n_theta_c`` is DISTINCT from the
-    # tube's ``n_theta`` (the tube's along-caustic angle) -- the two axes are
-    # unrelated and keep independent node budgets.
+    # two spatial axes are the piecewise caustic-fixed ``rho`` from
+    # `_to_caustic_fixed` and the eigenframe polar angle ``theta_c``.
+    # ``n_theta_c`` is DISTINCT from the tube's along-caustic ``n_theta``.
     n_rho: int = 4
     n_theta_c: int = 4
     w_nodes_per_decade: int = 4
@@ -282,11 +281,12 @@ class TrainingConfig:
     # count); an int caps admitted tiles with a loud truncation record.
     max_farfield_regions: int | None = None
     # Tile-grid side for the mass-stratified far-field tiling in caustic-fixed
-    # coordinates (Build 8h-b3): each stratum's exterior annulus
-    # ``rho in [1 + margin, Y(m_lo) / caustic_reach]`` x ``theta_c in (-pi, pi]``
-    # is split into ``n_farfield_tiles_per_side^2`` rectangular tiles (the
-    # inner rho edge already lies outside the caustic + tube shell, so every
-    # admitted tile is exterior by construction; theta_c tile edges land on
+    # coordinates (Build 8h-b3): each stratum's exterior annulus uses the
+    # additive physical radial offset arm of ``rho`` and
+    # ``theta_c in (-pi, pi]``.  It is split into
+    # ``n_farfield_tiles_per_side^2`` rectangular tiles (the inner rho edge
+    # already lies outside the caustic + tube shell, so every admitted tile is
+    # exterior by construction; theta_c tile edges land on
     # +-pi so no tile straddles the branch cut).  ``max_farfield_regions``
     # then caps the total admitted tiles.
     n_farfield_tiles_per_side: int = 5
@@ -1035,21 +1035,50 @@ def _mass_strata(box: PriorBox, parity: int
     return strata, beyond
 
 
+def _coordinate_radius_bounds(
+        band: tuple[float, float], parity: int,
+) -> tuple[float, float]:
+    """Minimum directional caustic radius and maximum reach over a gamma band.
+
+    The first value maps a physical support or exclusion disk to one
+    conservative chart-rho bound. Positive parity takes the minimum actual
+    critical-curve radius over polar angle and the band's edges/midpoint;
+    macro-saddle charts use their scalar-reach fallback. The second value
+    bounds the whole physical caustic independently of direction.
+    """
+    gamma_lo, gamma_hi = band
+    gammas = (gamma_lo, 0.5 * (gamma_lo + gamma_hi), gamma_hi)
+    scalar_reaches = [_scalar_caustic_reach(gamma) for gamma in gammas]
+    if parity == 1:
+        thetas = np.linspace(
+            -math.pi, math.pi, _INTERIOR_BOUNDARY_NODES,
+        )
+        coordinate_radii = [
+            geometry.r_caustic(gamma, float(theta))
+            for gamma in gammas
+            for theta in thetas
+        ]
+    else:
+        coordinate_radii = scalar_reaches
+    radius_min = float(min(coordinate_radii))
+    reach_max = float(max(scalar_reaches))
+    if not (math.isfinite(radius_min) and radius_min > 0.0):
+        raise geometry.LensDomainError(
+            f'Invalid caustic coordinate radius {radius_min} for band {band}.')
+    return radius_min, reach_max
+
+
 def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int
                     ) -> list[tuple[tuple[float, float],
                                     tuple[float, float], int, int]]:
-    """Rectangular exterior tiles of the caustic-fixed ``(rho, theta_c)`` annulus.
+    """Rectangular exterior tiles of a caustic-fixed ``(rho, theta_c)`` annulus.
 
     Lays a uniform ``n_per_side x n_per_side`` grid over the exterior annulus
     ``rho in [rho_inner, rho_outer]`` x ``theta_c in [-pi, pi]`` and returns one
-    tile per grid cell.  ``rho_inner`` is the exterior admission floor
-    ``1 + eta_max / caustic_reach`` (scalar-reach normalised): a source at
-    ``rho >= rho_inner`` lies wholly outside the caustic disk AND its ``eta_max``
-    tube shell for every ``gamma`` (because the caustic sits at ``rho = 1`` for
-    every ``gamma`` under the shared scalar-reach normalisation), so EVERY tile
-    of this annulus is in the single 2-image exterior region by construction --
-    no per-point engine image-count probing is needed (Professor 8g Q2, Build
-    8h-b3 notch pin).
+    tile per grid cell. The caller derives ``rho_inner`` from the physical
+    ``reach_max + eta_max`` exclusion disk and the band's minimum coordinate
+    radius. Therefore every emitted tile is in the single 2-image exterior
+    region even though positive-parity rho uses a directional radius.
 
     The ``theta_c`` axis is tiled over ``[-pi, pi]`` so tile edges fall exactly
     on ``+-pi``; no tile spans the ``atan2`` branch cut at ``theta_c = +-pi``
@@ -1061,11 +1090,9 @@ def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int
     Parameters
     ----------
     rho_inner : float
-        Inner (exterior-admission) radius in caustic-fixed ``rho`` units,
-        ``1 + eta_max / caustic_reach``.
+        Conservative inner exterior-admission radius in chart-rho units.
     rho_outer : float
-        Outer radius in caustic-fixed ``rho`` units, ``Y(m_lo) / caustic_reach``
-        (the prior ``y``-support box mapped through the scalar reach).
+        Outer prior-support radius in chart-rho units.
     n_per_side : int
         Number of tiles along each axis (``rho`` and ``theta_c``).
 
@@ -1161,10 +1188,11 @@ def _farfield_region_w_floor(box: PriorBox, band: tuple[float, float],
 
 def _farfield_region_window(box: PriorBox, parity: int,
                             band: tuple[float, float], exclusion_rho: float,
-                            rho_outer: float, reach_scalar: float,
+                            rho_outer: float, coordinate_radius_max: float,
                             ppgo_boundary: float | None,
                             ppgo_ceiling: float | None,
-                            config: TrainingConfig
+                            config: TrainingConfig,
+                            source_magnitude_max: float | None = None,
                             ) -> tuple[tuple[float, float] | None, str, dict]:
     """Fixed ``[w_floor, w_trust]`` w-window for the exterior far-field region.
 
@@ -1175,7 +1203,7 @@ def _farfield_region_window(box: PriorBox, parity: int,
       (`_farfield_region_w_floor`);
     - the uncapped top is the prior's highest ``w`` edge ``w(f_hi, m_hi)``,
       lowered by the parity engine ceiling and the double-double product cap at
-      the region's largest source magnitude ``rho_outer * reach`` (`_upper_w_cap`);
+      the region's largest physical source magnitude (`_upper_w_cap`);
     - ``w_trust`` is that top trimmed against the certified-ppGO hand-off floor
       via the SAME `_apply_ppgo_trim` the strata path used (band-split serving is
       live above ``w_trust``), so a certified region whose whole band sits above
@@ -1195,7 +1223,10 @@ def _farfield_region_window(box: PriorBox, parity: int,
         box, band, exclusion_rho, config)
     w_top_uncapped = float(dimensionless_frequency(
         box.f_hi_hz, box.m_lens_range[1], 0.0))
-    y_magnitude = float(rho_outer) * float(reach_scalar)
+    y_magnitude = (
+        float(rho_outer) * float(coordinate_radius_max)
+        if source_magnitude_max is None else float(source_magnitude_max)
+    )
     base_top = _upper_w_cap(w_top_uncapped, parity, y_magnitude)
     trimmed, action = _apply_ppgo_trim(
         (w_floor, base_top), ppgo_boundary, ppgo_ceiling)
@@ -1429,49 +1460,29 @@ def _cusp_aligned_theta_tiles(cusp_angles: list[float], n_per_side: int
 class _InteriorAdmission:
     """Directional caustic-radius interior admission across a gamma band (S2-1).
 
-    Frozen WP6.  A candidate interior far-field tile is admitted iff its
-    FARTHEST point -- its outer ``rho`` edge, probed over the tile's
-    ``theta_c`` span -- lies simultaneously
-
-    * strictly inside the caustic in that direction for EVERY gamma in the band:
-      ``rho_outer < rho_boundary(theta_c)`` where ``rho_boundary`` is the
-      band-MINIMUM directional caustic radius
-      ``min_gamma r_caustic(gamma, theta_c) / reach`` (dimensionless ``rho``).
-      Taking the band minimum makes admission exact across the whole band -- a
-      point admitted here is interior for every gamma, with no band-edge waste
-      (the isotropic inscribed disk it replaces discarded the anisotropic
-      interior between the inradius and the directional radius); and
-    * at least ``eta_max`` (dimensionless ``y``) from the NEAREST caustic point:
-      ``min_c |p - c| >= eta_max`` over the band's caustic point cloud.  The
-      nearest-caustic distance -- NOT the radial gap ``rho_boundary - rho`` --
-      is what excludes the ``eta_max`` tube shell, because near a cusp the
-      nearest caustic point lies OFF the radial ray (Professor caveat ii).
-
-    ``rho`` is ``|y| / reach`` with ONE scalar reach shared with the exterior
-    tiler and the serve side (`surrogate._caustic_reach(gamma_mid)`), so a
-    physical point's train-time and serve-time ``rho`` agree exactly.
+    A candidate tile is admitted only when its outer rho edge is strictly below
+    one and remains at least ``eta_max`` from the caustic at every sampled gamma
+    in the band. Because positive-parity rho is normalized by the directional
+    radius at the same ``(gamma, theta_c)``, ``rho = 1`` is the caustic for
+    every direction and gamma. The physical nearest-distance check is still
+    required: near a cusp the nearest caustic point is off the radial ray.
 
     Attributes
     ----------
-    reach : float
-        Scalar caustic reach normalising ``rho`` (dimensionless ``y`` units).
     eta_max : float
         Tube-shell half-width excluded from the interior (dimensionless ``y``).
     theta_axis : np.ndarray
-        Sorted polar-angle nodes in ``[-pi, pi]`` for ``rho_boundary``.
-    rho_boundary : np.ndarray
-        Band-minimum directional caustic radius at ``theta_axis``, in ``rho``
-        units (``min_gamma r_caustic / reach``).
-    caustic_cloud : np.ndarray
-        ``(K, 2)`` eigenframe caustic points across the band, for the
-        nearest-distance tube-shell test.
+        Sorted polar-angle nodes in ``[-pi, pi]``.
+    radius_grid : np.ndarray
+        Shape ``(n_gamma, n_theta)`` directional physical caustic radii.
+    caustic_clouds : tuple[np.ndarray, ...]
+        Per-gamma ``(K, 2)`` eigenframe caustic point clouds.
     """
 
-    reach: float
     eta_max: float
     theta_axis: np.ndarray
-    rho_boundary: np.ndarray
-    caustic_cloud: np.ndarray
+    radius_grid: np.ndarray
+    caustic_clouds: tuple[np.ndarray, ...]
 
     def admits(self, center: tuple[float, float],
                half: tuple[float, float]) -> bool:
@@ -1480,69 +1491,65 @@ class _InteriorAdmission:
         ``center`` is ``(rho_center, theta_c_center)`` and ``half`` is
         ``(half_rho, half_theta_c)`` in caustic-fixed coordinates.  The outer
         ``rho`` edge is probed at `_INTERIOR_EDGE_SAMPLES` polar angles across
-        the tile's ``theta_c`` span; the tile is admitted iff every probe is
-        inside the band-minimum directional caustic radius and at least
-        ``eta_max`` from the nearest caustic point.
+        the tile's ``theta_c`` span. Every physical probe is reconstructed with
+        the same gamma- and angle-dependent radius as the chart.
         """
         rho_center, theta_center = center
         half_rho, half_theta = half
         rho_outer = float(rho_center) + float(half_rho)
-        if rho_outer <= 0.0 or self.caustic_cloud.shape[0] == 0:
+        if rho_outer <= 0.0 or rho_outer >= 1.0:
             return False
         thetas = np.linspace(theta_center - half_theta,
                              theta_center + half_theta, _INTERIOR_EDGE_SAMPLES)
-        # Directional caustic boundary (band minimum) at each probed angle: the
-        # outer edge must sit strictly inside it in every direction.
-        rho_bnd = np.interp(thetas, self.theta_axis, self.rho_boundary)
-        if np.any(rho_outer >= rho_bnd):
-            return False
-        # Nearest-caustic-distance tube-shell exclusion (off-radial near cusps).
-        y_mag = rho_outer * self.reach
-        probe_x = y_mag * np.cos(thetas)
-        probe_y = y_mag * np.sin(thetas)
-        delta_x = probe_x[:, None] - self.caustic_cloud[None, :, 0]
-        delta_y = probe_y[:, None] - self.caustic_cloud[None, :, 1]
-        nearest = np.sqrt(delta_x * delta_x + delta_y * delta_y).min(axis=1)
-        return bool(np.all(nearest >= self.eta_max))
+        for radius_axis, caustic_cloud in zip(
+                self.radius_grid, self.caustic_clouds):
+            if caustic_cloud.shape[0] == 0:
+                return False
+            radii = np.interp(thetas, self.theta_axis, radius_axis)
+            y_magnitudes = rho_outer * radii
+            probe_x = y_magnitudes * np.cos(thetas)
+            probe_y = y_magnitudes * np.sin(thetas)
+            delta_x = probe_x[:, None] - caustic_cloud[None, :, 0]
+            delta_y = probe_y[:, None] - caustic_cloud[None, :, 1]
+            nearest = np.sqrt(
+                delta_x * delta_x + delta_y * delta_y,
+            ).min(axis=1)
+            if np.any(nearest < self.eta_max):
+                return False
+        return True
 
 
 def _interior_admission(band: tuple[float, float], parity: int, reach: float,
                         config: 'TrainingConfig') -> _InteriorAdmission:
     """Precompute the directional interior-admission geometry for one band.
 
-    Builds the band-minimum directional caustic boundary ``rho_boundary`` by
-    calling `geometry.r_caustic` -- the authoritative directional radius,
-    reused not re-added -- at each of `_INTERIOR_BOUNDARY_NODES` polar angles
-    for the band's two edges and midpoint, then taking the per-angle minimum
-    (the tightest caustic across the band).  The nearest-distance caustic cloud
-    is the union of `_caustic_points` over the same three band gammas.
-
-    The boundary sweep re-derives the caustic per angle (``r_caustic`` is scalar
-    per direction), so it is deliberately kept to a modest node count; the cost
-    is negligible beside the per-chart engine evaluations.
+    The retained ``reach`` argument is ignored for call-site compatibility:
+    positive-parity chart rho now uses the directional radius at each gamma and
+    angle. The physical radius grid and matching caustic cloud are stored per
+    sampled gamma so the tube-shell distance test never mixes coordinate scales
+    from different members of the band.
     """
+    del reach
+    if parity != 1:
+        raise ValueError(
+            'Origin-centred interior admission is defined only for the '
+            'positive-parity astroid.')
     gamma_lo, gamma_hi = band
     gamma_mid = 0.5 * (gamma_lo + gamma_hi)
     band_gammas = (gamma_lo, gamma_mid, gamma_hi)
     theta_axis = np.linspace(-math.pi, math.pi, _INTERIOR_BOUNDARY_NODES)
-    rho_boundary = np.full(theta_axis.shape, np.inf)
-    for gamma in band_gammas:
-        for m, theta in enumerate(theta_axis):
-            try:
-                radius = geometry.r_caustic(
-                    float(gamma), float(theta),
-                    n_sample=config.n_caustic_samples)
-            except geometry.LensDomainError:
-                radius = 0.0
-            rho_boundary[m] = min(rho_boundary[m], radius / reach)
-    rho_boundary[~np.isfinite(rho_boundary)] = 0.0
-    cloud_parts = [pts for pts in
-                   (_caustic_points(gamma, parity, config.n_caustic_samples)
-                    for gamma in band_gammas) if pts.shape[0] > 0]
-    cloud = np.vstack(cloud_parts) if cloud_parts else np.empty((0, 2))
+    radius_grid = np.array([
+        [geometry.r_caustic(float(gamma), float(theta))
+         for theta in theta_axis]
+        for gamma in band_gammas
+    ])
+    caustic_clouds = tuple(
+        _caustic_points(gamma, parity, config.n_caustic_samples)
+        for gamma in band_gammas
+    )
     return _InteriorAdmission(
-        reach=float(reach), eta_max=float(config.eta_max),
-        theta_axis=theta_axis, rho_boundary=rho_boundary, caustic_cloud=cloud)
+        eta_max=float(config.eta_max), theta_axis=theta_axis,
+        radius_grid=radius_grid, caustic_clouds=caustic_clouds)
 
 
 def _farfield_interior_tiles(rho_extent: float, n_per_side: int, *,
@@ -1578,9 +1585,9 @@ def _farfield_interior_tiles(rho_extent: float, n_per_side: int, *,
     Parameters
     ----------
     rho_extent : float
-        Outer radius of the tiled disk in caustic-fixed ``rho`` units,
-        ``min(caustic_reach, Y(m_lo)) / caustic_reach`` (i.e. ``rho`` up to the
-        cusp reach ``~1``, capped by the stratum source-magnitude support).
+        Outer radius of the tiled disk in directional caustic-fixed ``rho``
+        units.  ``rho = 1`` is the caustic boundary in every direction; the
+        source-magnitude support may cap it below one.
     n_per_side : int
         Number of ``rho`` rows and of ``theta_c`` sub-tiles per cusp sector.
     admission : _InteriorAdmission
@@ -2123,8 +2130,8 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
     caustic-fixed box ``rho in [rho_c +- half_rho]`` x
     ``theta_c in [theta_c +- half_theta_c]`` via the migrated `from_engine`
     trainer, which maps each ``(gamma, rho, theta_c)`` node to a physical
-    eigenframe source through the SAME scalar caustic reach the serve side uses
-    (`_from_caustic_fixed`), so train-time and serve-time ``rho`` agree exactly.
+    eigenframe source through the SAME piecewise caustic-fixed inverse the
+    serve side uses (`_from_caustic_fixed`).
 
     ``definition`` selects the envelope label the chart is trained on: the
     default far-field kernel-sum label for EXTERIOR tiles, or the interior
@@ -2479,8 +2486,8 @@ def _farfield_heldout_samples(gamma_band: tuple[float, float],
 
     Draws ``(gamma, rho, theta_c)`` uniformly inside the chart's caustic-fixed
     box and maps each draw to a PHYSICAL eigenframe source ``(y1, y2)`` through
-    the shared scalar caustic reach (`_from_caustic_fixed`), matching the
-    per-``gamma`` mapping the trainer applied at each grid node.  The returned
+    `_from_caustic_fixed`, matching the per-``gamma`` mapping the trainer
+    applied at each grid node. The returned
     ``(gamma, y1, y2)`` points are what `_heldout_eps` serves through the full
     guard stack, so the probe exercises the exact train/serve coordinate round
     trip.
@@ -2783,8 +2790,8 @@ def _subdivide_farfield_tile(
     band, parity, config, rng, outdir
         Threaded through unchanged from `_train_band_charts`.
     exclusion_rho : float
-        Exterior admission floor in caustic-fixed ``rho`` units,
-        ``1 + eta_max / caustic_reach``.
+        Conservative exterior admission floor in directional caustic-fixed
+        ``rho`` units.
     interior_admission : _InteriorAdmission or None
         The band's directional interior-admission geometry
         (`_interior_admission`), used to re-admit interior children exactly as
@@ -3025,21 +3032,22 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             'w_ceiling': round(beyond['ceiling'], 3),
             'reason': 'lens mass above the parity w-ceiling is not tileable'})
 
-    # Far-field tiles live in caustic-fixed ``(rho, theta_c)`` coordinates
-    # (Build 8h-b3).  ``reach_scalar`` is the band-midpoint scalar caustic
-    # reach -- the SAME kappa=0 max-over-angle reach the chart trainer and the
-    # serve side use to normalise ``rho`` (`surrogate._caustic_reach`), so
-    # train-time and serve-time ``rho`` of a physical point agree exactly.  The
-    # caustic sits at ``rho = 1`` for every gamma, so a tile whose inner edge is
-    # ``rho >= exclusion_rho = 1 + eta_max/reach`` lies wholly outside the
-    # caustic + tube shell by construction -- no per-tile disk test.  This uses
-    # the SCALAR reach (max over angle), NOT the directional
-    # ``geometry.r_caustic``: the near-cusp "notch" (directional radius < scalar
-    # max) has scalar-rho < 1 and is owned by the Slice-2 interior charts, not
-    # the exterior (notch pin).
+    # Far-field tiles live in caustic-fixed ``(rho, theta_c)`` coordinates.
+    # Positive-parity exterior rho is one plus the physical radial offset from
+    # the directional caustic. Subtracting the band's MINIMUM caustic radius
+    # from the physical exclusion disk yields a rho floor safe for every chart
+    # node. The ppGO map remains scalar-reach based and receives its own annulus
+    # coordinate below. Macro saddles retain scalar-reach rho.
     gamma_mid = 0.5 * (band[0] + band[1])
     reach_scalar = _scalar_caustic_reach(gamma_mid)
-    exclusion_rho = 1.0 + config.eta_max / reach_scalar
+    coordinate_radius_min, reach_max = _coordinate_radius_bounds(band, parity)
+    physical_exclusion_radius = reach_max + config.eta_max
+    exclusion_rho = (
+        1.0 + physical_exclusion_radius - coordinate_radius_min
+        if parity == 1
+        else physical_exclusion_radius / coordinate_radius_min
+    )
+    ppgo_exclusion_rho = physical_exclusion_radius / reach_scalar
     admitted: list[dict] = []
     dropped_strata: list[dict] = []
     # -- Exterior far-field: ONE fixed [w_floor, w_trust] region window (S1-3) --
@@ -3053,29 +3061,37 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # by mass -- but the whole exterior annulus is now tiled ONCE over the union
     # source extent (largest ``|y|`` at the smallest reachable lens mass), not
     # once per stratum.  The certified-ppGO trim uses the exterior INNER edge
-    # ``exclusion_rho`` (closest to the caustic, highest w_cert): certifying
+    # ``ppgo_exclusion_rho`` (closest to the caustic, highest w_cert): certifying
     # THERE implies the easier outer regions are covered, so the drop never
     # over-clears.
     ext_boundary = _stratum_ppgo_boundary(
-        parity, gamma_mid, exclusion_rho, ppgo_map)
+        parity, gamma_mid, ppgo_exclusion_rho, ppgo_map)
     ext_ceiling = _stratum_ppgo_ceiling(
-        parity, gamma_mid, exclusion_rho, ppgo_map)
+        parity, gamma_mid, ppgo_exclusion_rho, ppgo_map)
     if strata:
         m_lo_region, m_hi_region = strata[0][0], strata[-1][1]
     else:
         m_lo_region, m_hi_region = box.m_lens_range
-    # Union spatial extent: largest source magnitude (smallest reachable mass),
-    # normalised by the shared scalar reach -> outermost caustic-fixed rho.
+    # Union spatial extent: the largest physical source magnitude mapped with
+    # the band's minimum directional radius covers every gamma and theta.
+    y_outer_region = float(_lens_prior._source_scale(m_lo_region))
     rho_outer_region = (
-        float(_lens_prior._source_scale(m_lo_region)) / reach_scalar)
+        1.0 + y_outer_region - coordinate_radius_min
+        if parity == 1
+        else y_outer_region / coordinate_radius_min
+    )
     window, window_action, window_report = _farfield_region_window(
-        box, parity, band, exclusion_rho, rho_outer_region, reach_scalar,
-        ext_boundary, ext_ceiling, config)
+        box, parity, band, exclusion_rho, rho_outer_region, reach_max,
+        ext_boundary, ext_ceiling, config,
+        source_magnitude_max=y_outer_region)
     exterior_region_report: dict = {
         'name': f'chart_{label}_farfield_region',
         'parity': parity, 'exterior_region_summary': True,
         'exclusion_rho': round(float(exclusion_rho), 6),
+        'ppgo_exclusion_rho': round(float(ppgo_exclusion_rho), 6),
+        'coordinate_radius_min': round(float(coordinate_radius_min), 6),
         'reach_scalar': round(float(reach_scalar), 6),
+        'reach_max': round(float(reach_max), 6),
         'rho_outer': round(float(rho_outer_region), 6),
         'mass_range': [round(float(m_lo_region), 3),
                        round(float(m_hi_region), 3)],
@@ -3137,8 +3153,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # point has ``rho = |y| / r_caustic(gamma, theta_y) < 1`` for every gamma in
     # the band (`_InteriorAdmission`), replacing the isotropic inscribed disk
     # ``caustic_inradius - eta_max`` that discarded the anisotropic interior
-    # between the inradius and the directional radius -- the near-cusp "notch"
-    # the exterior scalar-``rho > 1`` tiler leaves uncovered (Professor R3).
+    # between the inradius and the directional radius.
     # The eta_max tube shell is excluded with the NEAREST-caustic distance (not
     # the radial gap -- off-radial near a cusp), and theta_c tile edges align to
     # the four cusp rays so no tile straddles a kink.  The saddle deltoid's
@@ -3212,9 +3227,14 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             parity, gamma_mid, int_rho, ppgo_map)
         for si, (m_lo, m_hi) in enumerate(strata):
             y_extent = float(_lens_prior._source_scale(m_lo))
-            # The directional interior reaches the full caustic (``rho`` up to
-            # the cusp reach ``~1``), capped by the stratum source support.
-            grid_extent = min(reach_scalar, y_extent)
+            # The directional interior reaches the full caustic at ``rho=1``,
+            # capped conservatively by the stratum source support divided by
+            # the smallest physical directional radius in the band.
+            coordinate_radius_min = float(np.min(admission.radius_grid))
+            grid_rho_extent = min(
+                1.0, float(y_extent) / coordinate_radius_min,
+            )
+            grid_extent = grid_rho_extent * reach_max
             int_w_range = _stratum_w_range(box, parity, m_lo, m_hi, grid_extent)
             trimmed_w_range, action = _apply_ppgo_trim(
                 int_w_range, int_boundary, int_ceiling)
@@ -3228,7 +3248,6 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     'reason': 'ppGO certified over the whole stratum w-band'})
                 continue
             int_w_range = trimmed_w_range
-            grid_rho_extent = grid_extent / reach_scalar
             tiles = _farfield_interior_tiles(
                 grid_rho_extent, config.n_farfield_tiles_per_side,
                 admission=admission, cusp_angles=cusp_angles)

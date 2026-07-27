@@ -96,8 +96,8 @@ from pathlib import Path
 import numpy as np
 from scipy.interpolate import BSpline, make_interp_spline
 
-from cogwheel.lensing.chang_refsdal import (ChangRefsdalChannels,
-                                            farfield_envelope_from_partition)
+from cogwheel.lensing.chang_refsdal import (
+    ChangRefsdalChannels, farfield_envelope_from_partition, geometry)
 from cogwheel.lensing.chang_refsdal.channels import (
     FARFIELD_KERNEL_SUM, KNOWN_FARFIELD_DEFINITIONS, INTERIOR_SACR_C,
     KNOWN_INTERIOR_DEFINITIONS)
@@ -183,18 +183,20 @@ _KNOWN_ENVELOPE_DEFINITIONS = (
     KNOWN_FARFIELD_DEFINITIONS | KNOWN_INTERIOR_DEFINITIONS)
 
 # Axis-schema tag persisted in each far-field chart's npz meta (Build
-# 8h-b3).  A far-field chart now stores CAUSTIC-FIXED spatial axes
-# ``(rho, theta_c)`` -- ``rho = |y| / caustic_reach(gamma)`` and the
-# eigenframe polar angle -- so ONE coordinate system spans both sides of
-# the caustic and matches the certified-ppGO map's ``rho`` convention
-# exactly (`_caustic_reach`).  Charts trained before this build stored raw
+# 8h-b3). A positive-parity far-field chart stores CAUSTIC-FIXED spatial axes
+# ``(rho, theta_c)``. Inside the caustic rho is the directional radius ratio;
+# outside it is one plus the physical radial offset from the caustic. Thus the
+# caustic is exactly rho=1 without coupling the far exterior coordinate to a
+# multiplicative gamma-dependent scale. The certified-ppGO map retains its
+# separate scalar annulus coordinate. Charts trained before this build stored
+# raw
 # eigenframe axes ``(y1_eig, y2_eig)``; reconstructing them under the
 # caustic-fixed serve mirror would query the spline at the wrong
 # coordinate and return a finite-but-wrong ``F``.  The loader hard-refuses
 # a far-field chart whose axis-schema tag is absent or unknown (mirroring
-# the 8g-b envelope-definition hard-refuse): a stale raw-coordinate
-# artifact fails loudly, never serves silently.
-_FARFIELD_AXIS_SCHEMA = 'caustic_fixed_rho_theta'
+# the 8g-b envelope-definition hard-refuse): a stale raw-coordinate,
+# scalar-reach, or multiplicative-directional artifact fails loudly.
+_FARFIELD_AXIS_SCHEMA = 'caustic_radial_offset_rho_theta'
 _KNOWN_FARFIELD_AXIS_SCHEMAS = frozenset({_FARFIELD_AXIS_SCHEMA})
 
 # Angular half-width (radians) of the certified Pearcey-cusp arm coverage,
@@ -245,24 +247,17 @@ def _rotate_to_eigenframe(y1: float, y2: float,
 
 
 def _caustic_reach(gamma: float) -> float:
-    """Scalar source-plane caustic reach used to normalise ``rho``.
+    """Maximum source-plane caustic reach used by conservative disk guards.
 
     Returns the SAME authoritative ``kappa = 0`` caustic reach the
-    certified-ppGO map and the likelihood serve path use
-    (`ppgo_map.caustic_geometry`), so a chart's caustic-fixed ``rho`` axis
-    is byte-for-byte the coordinate the serve side derives from
-    ``|y| / reach`` (`likelihood._ppgo_cell_coords`).  ONE reach convention
-    spans the map, the charts, and the query -- train-time and serve-time
-    ``rho`` agree exactly because both call this function.
+    certified-ppGO map uses (`ppgo_map.caustic_geometry`). The map's annulus
+    coordinate, saddle chart fallback, and physical exterior-disk guards
+    remain scalar-reach based. Positive-parity charts use the actual
+    directional boundary from `geometry.r_caustic`.
 
     The reach is the MAXIMUM caustic radius over polar angle (a single
-    scalar per ``gamma``), so ``rho > 1`` guarantees the source lies
-    outside the whole caustic (the conservative exterior-admission
-    direction).  The directional per-ray radius `geometry.r_caustic` is a
-    separate helper reserved for cusp-ray tile alignment (Build 8h S2-1);
-    it is NOT used to normalise the exterior chart ``rho`` because that
-    would diverge from the map's scalar-reach convention and break the
-    shared-coordinate contract.
+    scalar per ``gamma``), so a physical source beyond ``reach + eta`` lies
+    outside the whole caustic and its ``eta`` shell.
 
     Parameters
     ----------
@@ -289,11 +284,13 @@ def _to_caustic_fixed(gamma: float, y1_eig: float, y2_eig: float
                       ) -> tuple[float, float]:
     """Caustic-fixed ``(rho, theta_c)`` of an eigenframe source position.
 
-    ``rho = |y| / _caustic_reach(gamma)`` (the shared scalar-reach
-    normalisation) and ``theta_c = atan2(y2_eig, y1_eig)`` in
-    ``(-pi, pi]``.  Beta elimination is preserved upstream: the caller
-    rotates the query into the ``beta = 0`` eigenframe first
-    (`_rotate_to_eigenframe`), so ``theta_c`` is a shear-eigenframe angle.
+    For positive parity, ``rho = |y| / r_caustic`` inside the caustic and
+    ``rho = 1 + |y| - r_caustic`` outside it. The piecewise map is continuous
+    at the exact critical-curve image ``rho = 1``; its additive exterior arm
+    avoids a persistent gamma/radius interpolation coupling. Macro-saddle
+    exterior charts retain scalar-reach normalization because their
+    disconnected deltoids do not intersect every origin-centred ray.
+    ``theta_c = atan2(y2_eig, y1_eig)`` in ``(-pi, pi]``.
 
     Parameters
     ----------
@@ -307,9 +304,15 @@ def _to_caustic_fixed(gamma: float, y1_eig: float, y2_eig: float
     tuple[float, float]
         ``(rho, theta_c)``.
     """
-    reach = _caustic_reach(gamma)
-    rho = float(np.hypot(y1_eig, y2_eig)) / reach
+    source_radius = float(np.hypot(y1_eig, y2_eig))
     theta_c = float(np.arctan2(y2_eig, y1_eig))
+    if abs(float(gamma)) < 1.0:
+        caustic_radius = geometry.r_caustic(float(gamma), theta_c)
+        rho = (source_radius / caustic_radius
+               if source_radius <= caustic_radius
+               else 1.0 + source_radius - caustic_radius)
+    else:
+        rho = source_radius / _caustic_reach(gamma)
     return rho, theta_c
 
 
@@ -317,19 +320,18 @@ def _from_caustic_fixed(gamma: float, rho: float, theta_c: float
                         ) -> tuple[float, float]:
     """Eigenframe source position of a caustic-fixed ``(rho, theta_c)`` node.
 
-    Inverse of `_to_caustic_fixed`: the physical eigenframe magnitude is
-    ``rho * _caustic_reach(gamma)`` along direction ``theta_c``.  Used at
-    train time to place a caustic-fixed grid node on the physical source
-    plane before the engine evaluation, so the reconstructed ``F`` at that
-    node matches the raw-eigenframe HEAD value at the same physical point
-    (the coordinate is only a reparameterisation of the same label).
+    Positive parity uses ``rho * r_caustic`` for ``rho <= 1`` and
+    ``r_caustic + rho - 1`` for ``rho > 1``. Macro-saddle exterior charts use
+    the same scalar fallback as `_to_caustic_fixed`. The map is used at train
+    time before each engine evaluation and is the exact inverse of the serve
+    coordinate.
 
     Parameters
     ----------
     gamma : float
         External shear magnitude.
     rho : float
-        Caustic-fixed radial coordinate ``|y| / reach``.
+        Piecewise caustic-fixed radial coordinate for positive parity.
     theta_c : float
         Caustic-fixed polar angle, radians.
 
@@ -338,7 +340,15 @@ def _from_caustic_fixed(gamma: float, rho: float, theta_c: float
     tuple[float, float]
         The eigenframe source position ``(y1_eig, y2_eig)``.
     """
-    y_mag = float(rho) * _caustic_reach(gamma)
+    rho = float(rho)
+    if rho < 0.0:
+        raise ValueError(f'rho must be non-negative; got {rho}.')
+    if abs(float(gamma)) < 1.0:
+        caustic_radius = geometry.r_caustic(float(gamma), float(theta_c))
+        y_mag = (rho * caustic_radius if rho <= 1.0
+                 else caustic_radius + rho - 1.0)
+    else:
+        y_mag = rho * _caustic_reach(gamma)
     return y_mag * float(np.cos(theta_c)), y_mag * float(np.sin(theta_c))
 
 
@@ -616,12 +626,9 @@ class FarFieldChart:
 
     Interpolates ``E(w)`` over ``(log w, gamma, rho, theta_c)`` for one
     image-count region, where the two spatial axes are the CAUSTIC-FIXED
-    coordinates ``rho = |y| / caustic_reach(gamma)`` (the shared
-    scalar-reach normalisation, `_caustic_reach`) and the eigenframe polar
-    angle ``theta_c = atan2(y2_eig, y1_eig)`` (Build 8h-b3).  This is the
-    single-box interpolant the 8a surrogate shipped, migrated to the
-    caustic-fixed frame so ONE coordinate system spans both sides of the
-    caustic and matches the certified-ppGO map exactly.  Serve only where
+    coordinates: a directional radius ratio inside the caustic and a physical
+    radial offset outside it, with ``rho = 1`` on the caustic. The second axis
+    is ``theta_c = atan2(y2_eig, y1_eig)`` (Build 8h-b3). Serve only where
     ``eta > eta_overlap_min`` (bounded away from the caustic) and the
     candidate matches ``image_count``.
 
@@ -948,10 +955,9 @@ def _farfield_serves(chart: FarFieldChart, gamma: float, log_w_min: float,
     """Whether a far-field chart serves this candidate (steps 1,3,5,7).
 
     The source containment test is in the chart's caustic-fixed
-    ``(rho, theta_c)`` axes (Build 8h-b3); the query ``(rho, theta_c)`` is
-    derived by the caller from the eigenframe source via the shared
-    scalar-reach normalisation (`_to_caustic_fixed`), so it matches the
-    coordinate the chart was trained in exactly.
+    ``(rho, theta_c)`` axes. The caller and trainer both route through
+    `_to_caustic_fixed` / `_from_caustic_fixed`, so the piecewise
+    positive-parity coordinate (and the saddle scalar fallback) agree.
     """
     # (1) certified-box containment on gamma, log w, and the source.
     if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
@@ -1007,9 +1013,8 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
     image_count : int
         Real-image count ``int(partition.real_mask.sum())``.
     rho, theta_c : float
-        Caustic-fixed source coordinate (`_to_caustic_fixed`): ``rho =
-        |y| / caustic_reach(gamma)`` and the eigenframe polar angle.  The
-        far-field charts are queried in these axes (Build 8h-b3).
+        Piecewise caustic-fixed source coordinate and eigenframe polar angle
+        from `_to_caustic_fixed`.
 
     Returns
     -------
@@ -1168,14 +1173,16 @@ class LensAmplificationSurrogate:
         so a tile straddling a medial ridge is rejected for subdivision
         rather than fitted with a phase-kinked envelope.
 
-        Caustic-fixed grid (Build 8h-b3).  The two spatial axes are the
-        caustic-fixed coordinates ``rho`` and ``theta_c``; each grid node
-        ``(gamma, rho, theta_c)`` is mapped to a physical eigenframe source
-        ``(y1_eig, y2_eig) = rho * caustic_reach(gamma) * (cos theta_c,
-        sin theta_c)`` (`_from_caustic_fixed`) BEFORE the engine call, so
-        the label evaluated at each node is the same physical envelope the
-        raw-eigenframe HEAD chart evaluated at the same point -- only the
-        coordinate the same label is fitted over changes.  A parameter
+        Caustic-fixed grid (Build 8h-b3). The two spatial axes are the
+        caustic-fixed coordinates ``rho`` and ``theta_c``; each positive-
+        parity grid node ``(gamma, rho, theta_c)`` is mapped to a physical
+        eigenframe source via `_from_caustic_fixed` BEFORE the engine call.
+        Thus the caustic is the fixed surface ``rho = 1`` while the exterior
+        coordinate remains an additive physical radial offset. Macro-saddle
+        exterior
+        charts use the documented scalar fallback because the disconnected
+        deltoids have no origin-centred directional radius on every ray. A
+        parameter
         point that refuses at any ``w`` node (or returns a non-finite
         envelope) is recorded as refused (in caustic-fixed coordinates) and
         left as zeros in the value arrays.
@@ -1198,9 +1205,11 @@ class LensAmplificationSurrogate:
         gamma_range : tuple[float, float]
             External-shear axis bounds ``(low, high)``.
         rho_range, theta_c_range : tuple[float, float]
-            Caustic-fixed spatial axis bounds ``(low, high)``: ``rho`` is
-            ``|y| / caustic_reach(gamma)`` and ``theta_c`` is the
-            eigenframe polar angle (radians).
+            Caustic-fixed spatial axis bounds ``(low, high)``: at positive
+            parity ``rho`` is a directional ratio below one and an additive
+            physical radial offset above one; ``theta_c`` is the eigenframe
+            polar angle (radians). Macro-saddle exterior charts use the
+            scalar-reach fallback.
         w_range : tuple[float, float]
             Dimensionless-frequency bounds ``(w_min, w_max)``, both
             strictly positive.
@@ -1252,14 +1261,20 @@ class LensAmplificationSurrogate:
         for i_g, gamma in enumerate(gamma_grid):
             for i_rho, rho in enumerate(rho_grid):
                 for i_th, theta_c in enumerate(theta_c_grid):
-                    # Caustic-fixed node -> physical eigenframe source.
-                    y1_eig, y2_eig = _from_caustic_fixed(
-                        float(gamma), float(rho), float(theta_c))
                     # Fresh tracker per point -> deterministic initial
                     # labeling; the envelope is well-defined per point and
                     # independent of label continuation.
                     channels = ChangRefsdalChannels(w_grid, **channels_kwargs)
                     try:
+                        # Caustic-fixed node -> physical eigenframe source.
+                        # This conversion calls `_caustic_reach`, which
+                        # raises `LensDomainError` at the ``gamma = 1``
+                        # parity wall, so it must sit INSIDE the refusal
+                        # guard: such a node is recorded refused (the
+                        # documented `from_engine` contract) instead of
+                        # crashing chart construction.
+                        y1_eig, y2_eig = _from_caustic_fixed(
+                            float(gamma), float(rho), float(theta_c))
                         partition = channels.evaluate(
                             gamma=float(gamma),
                             y=(y1_eig, y2_eig),
@@ -1745,13 +1760,10 @@ def _validate_farfield_definition(tag, artifact_label: str) -> str:
 def _validate_farfield_axis_schema(tag, artifact_label: str) -> str:
     """Hard-refuse a far-field chart with an absent or unknown axis schema.
 
-    Build 8h-b3 migrated the far-field charts' two spatial axes from raw
-    eigenframe coordinates ``(y1_eig, y2_eig)`` to the caustic-fixed
-    coordinate ``(rho, theta_c)`` shared with the certified-ppGO map.  A
-    chart trained before this build stored raw axes and would be queried
-    by the caustic-fixed serve mirror at the WRONG coordinate, returning a
-    finite-but-wrong ``F``.  Refuse rather than serve it (mirroring the
-    8g-b envelope-definition hard-refuse).
+    Positive-parity far-field charts use piecewise caustic-fixed
+    ``(rho, theta_c)`` coordinates. A chart trained on raw eigenframe axes,
+    scalar-reach rho, or multiplicative directional rho would be queried at
+    the wrong coordinate and could return a finite-but-wrong amplification.
 
     Parameters
     ----------
@@ -1774,11 +1786,11 @@ def _validate_farfield_axis_schema(tag, artifact_label: str) -> str:
         raise ValueError(
             f'Far-field {artifact_label} carries axis-schema tag '
             f'{tag!r}, which is absent or unknown (known: '
-            f'{sorted(_KNOWN_FARFIELD_AXIS_SCHEMAS)}).  This artifact '
-            f'predates the Build 8h-b3 caustic-fixed axis migration '
-            f'(raw eigenframe (y1_eig, y2_eig) axes) and must not serve '
-            f'under the caustic-fixed (rho, theta_c) reconstruction; '
-            f'rebuild the surrogate.')
+            f'{sorted(_KNOWN_FARFIELD_AXIS_SCHEMAS)}). This artifact may use '
+            f'raw eigenframe, scalar-reach, or multiplicative directional '
+            f'axes and must not serve under the current caustic-fixed '
+            f'reconstruction; rebuild '
+            f'the surrogate.')
     return str(tag)
 
 

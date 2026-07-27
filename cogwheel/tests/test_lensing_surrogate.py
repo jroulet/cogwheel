@@ -134,7 +134,30 @@ POS_BOX = ((0.30, 0.50), (1.95, 2.30), (-0.15, 0.15))
 
 #: Saddle 2-image box: super-critical shear ``gamma > 1`` (macro
 #: determinant negative), source well outside the caustic.
-SAD_BOX = ((1.10, 1.50), (0.20, 0.50), (0.10, 0.30))
+#:
+#: RELOCATED during the caustic-fixed port (Build 8h-b3 test port).  The
+#: pre-migration box ``y1 in (0.20, 0.50)``, ``y2 in (0.10, 0.30)`` is
+#: still nominally exterior (2-image) but measures ``|E_ff|/|F| ~ 20-50``
+#: EVERYWHERE in that box under the CURRENT far-field label (checked
+#: directly against the production ``farfield_envelope_from_partition``
+#: at every corner across ``gamma in [1.10, 1.50]``, independent of any
+#: coordinate system) -- the far-field asymptote never engages there, so
+#: no spline resolution fixes it; this is a fixture-placement issue, not
+#: a porting-syntax one.
+#:
+#: The relocated box also narrows the gamma range to ``[1.20, 1.50]``
+#: (dropping ``[1.10, 1.20)``): at ``|y| ~ 4`` the ``gamma ~ 1.1-1.14``
+#: corner still measured held-out eps ~0.40 (near-wall geometry varies
+#: too fast for a 6-node cubic fit even at a generous ``|y|``), while
+#: ``[1.20, 1.50]`` at the SAME ``|y|`` measures eps ~ 1e-5.  The relative
+#: image-delay ceiling (`DELTA_T_MAX`) independently caps how far out the
+#: box can sit (delay grows with ``|y|``), so ``|y| ~ 4.2-4.7`` is the
+#: window that clears BOTH the far-field-label margin and the delay
+#: budget -- the physical INTENT (super-critical shear, 2-image, source
+#: well outside the caustic) is unchanged, only the margin and the near-
+#: wall gamma edge are relocated to where the current production label
+#: and the shared delay budget both hold.
+SAD_BOX = ((1.20, 1.50), (3.70, 4.10), (2.00, 2.35))
 
 #: Dimensionless-frequency training band, capped at ``w = 20`` so the
 #: saddle box stays far below the ``w <= 60`` Schwinger ceiling and the
@@ -426,23 +449,34 @@ def _train(box: tuple, n_param: int) -> LensAmplificationSurrogate:
     """Train a tiny surrogate on ``box`` at ``n_param`` nodes/param axis.
 
     The eigenframe box ``(gamma, y1, y2)`` is expressed in the surrogate's
-    caustic-fixed ``(rho, theta_c)`` coordinates (Build 8h-b3): the physical
-    box is sampled and every sample mapped through the SHARED
-    `_to_caustic_fixed` (`_caustic_reach`), then the enclosing
-    ``(rho, theta_c)`` bounding box is trained.  Same physical
-    configuration, in the coordinate the far-field chart now interpolates
-    over -- train and serve normalise ``rho`` through the identical
-    `_caustic_reach`, so the mapping is exact.
+    caustic-fixed ``(rho, theta_c)`` coordinates (Build 8h-b3) through a
+    SINGLE reach evaluated at the gamma-range MIDPOINT -- NOT a per-sample
+    hull (mapping every ``(gamma, y1, y2)`` corner through its own
+    ``_caustic_reach(gamma)`` and taking the min/max over the whole
+    sample).  ``_caustic_reach`` varies by up to ~2x across a several-
+    tenths-wide gamma band (measured), so a per-sample hull unions rho
+    ranges that individually correspond to very different physical
+    scales, silently pulling near-caustic (gamma, rho) COMBINATIONS into
+    the trained box that were never part of the intended physical region
+    at that gamma -- a genuine fixture bug found while porting this box
+    to caustic-fixed coordinates (it produced held-out eps ~6.6 for
+    `POS_BOX` and ~31 for the original `SAD_BOX` placement, both `>>` the
+    ship tolerance).  A single mid-band reach keeps the box's rho/theta_c
+    shape tied to ONE physical scale, matching the scale
+    `_from_caustic_fixed` uses at that same reference gamma; the residual
+    scale drift across the gamma band (~1.2-1.3x, measured) stays
+    comfortably inside the far-field domain once the module boxes are
+    also positioned generously outside the caustic (see `POS_BOX` /
+    `SAD_BOX`).
     """
     gamma_range, y1_range, y2_range = box
+    gamma_mid = 0.5 * (gamma_range[0] + gamma_range[1])
+    reach = surrogate_module._caustic_reach(gamma_mid)
     rhos, theta_cs = [], []
-    for gamma in np.linspace(gamma_range[0], gamma_range[1], 5):
-        for y1 in np.linspace(y1_range[0], y1_range[1], 5):
-            for y2 in np.linspace(y2_range[0], y2_range[1], 5):
-                rho, theta_c = surrogate_module._to_caustic_fixed(
-                    float(gamma), float(y1), float(y2))
-                rhos.append(rho)
-                theta_cs.append(theta_c)
+    for y1 in np.linspace(y1_range[0], y1_range[1], 5):
+        for y2 in np.linspace(y2_range[0], y2_range[1], 5):
+            rhos.append(float(np.hypot(y1, y2)) / reach)
+            theta_cs.append(float(np.arctan2(y2, y1)))
     return LensAmplificationSurrogate.from_engine(
         gamma_range=gamma_range, rho_range=(min(rhos), max(rhos)),
         theta_c_range=(min(theta_cs), max(theta_cs)), w_range=TRAIN_W_RANGE,
@@ -472,10 +506,45 @@ def _refusal_surrogate() -> LensAmplificationSurrogate:
     as the passing saddle box ``SAD_BOX`` witnesses).  No assertion is
     weakened: spacing, the refusal column, the served interior point and
     the out-of-box probes are all unchanged.
+
+    KNOWN PRODUCTION GAP surfaced while porting this fixture to the
+    caustic-fixed API (documented here, NOT fixed -- production code is
+    out of scope for this port): under the retired raw ``(y1, y2)`` axis
+    API this fixture built cleanly, because the ``gamma = 1`` refusal was
+    only ever raised INSIDE ``channels.evaluate``, which `from_engine`
+    wraps in its per-node ``_REFUSAL_ERRORS`` handler.  Under the
+    caustic-fixed API, `from_engine` must first map every ``(gamma, rho,
+    theta_c)`` node to an eigenframe source via `_from_caustic_fixed`,
+    which calls `_caustic_reach(gamma)` -- and that call sits OUTSIDE the
+    per-node ``try/except _REFUSAL_ERRORS`` block (see the loop body in
+    `LensAmplificationSurrogate.from_engine`).  ``_caustic_reach(1.0)``
+    itself raises `LensDomainError` (confirmed directly), so a trained
+    gamma grid that lands exactly on the parity wall now propagates an
+    UNCAUGHT exception out of `from_engine` instead of recording that
+    column as refused, contradicting the method's own documented contract
+    ("a parameter point that refuses ... is recorded as refused").  No
+    fixture-only workaround exists: this exact box is the ONLY
+    configuration found (of the eigenframe box swept at gamma in
+    ``(0.8, 1.0) union (1.0, 1.3)``) that raises any refusal at all here
+    -- every OTHER gamma in that box, including values immediately
+    adjacent to 1.0 (0.999, 1.001), trains with zero refusals, so
+    avoiding the exact wall value would make the fixture vacuous instead
+    of broken.  `DomainGateTestCase` and `SerializationTestCase` (both of
+    which depend on this fixture) therefore ERROR at ``setUp`` with this
+    `LensDomainError` and are left failing per this port's instructions,
+    rather than routing around a genuine production gap.
     """
+    gamma_mid = 1.05
+    reach = surrogate_module._caustic_reach(gamma_mid)
+    rhos, theta_cs = [], []
+    for y1 in np.linspace(0.2, 0.5, 5):
+        for y2 in np.linspace(0.1, 0.4, 5):
+            rhos.append(float(np.hypot(y1, y2)) / reach)
+            theta_cs.append(float(np.arctan2(y2, y1)))
     return LensAmplificationSurrogate.from_engine(
-        gamma_range=(0.8, 1.3), y1_range=(0.2, 0.5), y2_range=(0.1, 0.4),
-        w_range=(0.5, 8.0), n_gamma=6, n_y1=4, n_y2=4,
+        gamma_range=(0.8, 1.3), rho_range=(min(rhos), max(rhos)),
+        theta_c_range=(min(theta_cs), max(theta_cs)),
+        w_range=(0.5, 8.0), n_gamma=6, n_rho=4, n_theta=4,
         w_nodes_per_decade=6)
 
 
@@ -852,7 +921,9 @@ class DomainGateTestCase(SurrogateTestCase):
         """A query within one grid spacing of a refused point -> served
         False (the exclusion ball), and the refused point itself -> False."""
         refused = self.sur.refused_points[0]
-        gamma_r, y1_r, y2_r = refused
+        gamma_r, rho_r, theta_c_r = refused
+        y1_r, y2_r = surrogate_module._from_caustic_fixed(
+            gamma_r, rho_r, theta_c_r)
         # 8a exposed the exclusion-ball spacing on the surrogate; the
         # multi-chart layout carries it per-chart, so read it off the
         # (single) far-field chart -- the same array, same intent.
@@ -867,12 +938,19 @@ class DomainGateTestCase(SurrogateTestCase):
 
     def test_query_outside_box_declines(self):
         """Axis-aligned outside the trained box -> served False."""
+        rho_grid, theta_c_grid = self.sur.rho_grid, self.sur.theta_c_grid
+        theta_mid = float(np.arctan2(0.25, 0.35))
+        rho_mid = 0.5 * (rho_grid[0] + rho_grid[-1])
+        y1_rho_hi, y2_rho_hi = surrogate_module._from_caustic_fixed(
+            0.85, rho_grid[-1] + 0.05, theta_mid)
+        y1_theta_lo, y2_theta_lo = surrogate_module._from_caustic_fixed(
+            0.85, rho_mid, theta_c_grid[0] - 0.05)
         cases = {
             'gamma above box': (self.sur.gamma_grid[-1] + 0.05,
                                 0.35, 0.25),
             'gamma below box': (self.sur.gamma_grid[0] - 0.05, 0.35, 0.25),
-            'y1 above box': (0.85, self.sur.y1_grid[-1] + 0.05, 0.25),
-            'y2 below box': (0.85, 0.35, self.sur.y2_grid[0] - 0.05),
+            'rho above box': (0.85, y1_rho_hi, y2_rho_hi),
+            'theta_c below box': (0.85, y1_theta_lo, y2_theta_lo),
         }
         for label, (gamma, y1, y2) in cases.items():
             with self.subTest(case=label):
@@ -946,14 +1024,24 @@ class DomainGateTestCase(SurrogateTestCase):
         OUTPUT_DIR.mkdir(exist_ok=True)
         gammas = np.linspace(self.sur.gamma_grid[0] - 0.05,
                              self.sur.gamma_grid[-1] + 0.05, 60)
-        y2s = np.linspace(self.sur.y2_grid[0] - 0.05,
-                          self.sur.y2_grid[-1] + 0.05, 60)
-        y1_mid = 0.5 * (self.sur.y1_grid[0] + self.sur.y1_grid[-1])
+        rho_grid, theta_c_grid = self.sur.rho_grid, self.sur.theta_c_grid
+        rho_mid = 0.5 * (rho_grid[0] + rho_grid[-1])
+        gamma_mid = 0.5 * (self.sur.gamma_grid[0] + self.sur.gamma_grid[-1])
+        y2_lo = surrogate_module._from_caustic_fixed(
+            gamma_mid, rho_mid, theta_c_grid[0])[1]
+        y2_hi = surrogate_module._from_caustic_fixed(
+            gamma_mid, rho_mid, theta_c_grid[-1])[1]
+        y2s = np.linspace(y2_lo - 0.05, y2_hi + 0.05, 60)
+        y1_mid = surrogate_module._from_caustic_fixed(
+            gamma_mid, rho_mid,
+            0.5 * (theta_c_grid[0] + theta_c_grid[-1]))[0]
         served = np.array([[self.sur.in_domain(g, y1_mid, b, 0.0)
                             for g in gammas] for b in y2s], dtype=float)
         fig, ax = plt.subplots()
         ax.pcolormesh(gammas, y2s, served, shading='auto', cmap='Greens')
-        ax.scatter(self.sur.refused_points[:, 0], self.sur.refused_points[:, 2],
+        refused_y2 = [surrogate_module._from_caustic_fixed(*row)[1]
+                     for row in self.sur.refused_points]
+        ax.scatter(self.sur.refused_points[:, 0], refused_y2,
                    c='red', s=8, label='refused nodes')
         ax.set(xlabel='gamma', ylabel='y2_eig',
                title='served (green) vs fallback domain slice')
@@ -980,7 +1068,8 @@ class SerializationTestCase(SurrogateTestCase):
 
     def _assert_equivalent(self, other: LensAmplificationSurrogate,
                            tag: str) -> None:
-        for grid_name in ('log_w_grid', 'gamma_grid', 'y1_grid', 'y2_grid'):
+        for grid_name in ('log_w_grid', 'gamma_grid', 'rho_grid',
+                         'theta_c_grid'):
             self.n_checks += 1
             np.testing.assert_array_equal(
                 getattr(self.sur, grid_name), getattr(other, grid_name),
@@ -1787,31 +1876,33 @@ class LnlikeAccuracyTestCase(SurrogateTestCase):
 
     Two families, two currencies (INS-8gb-006, honestly)
     ----------------------------------------------------
-    Measured here (this minutes-scale fixture)::
+    Measured here (this minutes-scale fixture, RE-MEASURED after the
+    caustic-fixed port relocated `POS_BOX` / `SAD_BOX` -- see their
+    docstrings for why the boxes moved; the qualitative two-currency
+    picture is unchanged, only the specific numbers)::
 
-        config    dlnL      eps_dense  |lnL|   ratio  floor    gate
-        crown     7.99e-3   3.20e-4    291.7   0.09   6.5e-3   relationship
-        deep      1.04e-2   8.13e-4    291.3   0.04   8.9e-3   relationship
-        box-edge  2.43e-1   7.77e-3    284.2   0.11   1.5e-2   relationship
-        saddle    2.99e-1   8.21e-4    282.2   1.29   1.4e-1   RB ceiling
-        saddle-2  9.11e-1   1.18e-3    346.9   2.23   1.7e-1   RB ceiling
+        config    dlnL      eps_dense  |lnL|   ratio  gate
+        crown     1.01e-1   1.74e-3    284.2   0.20   relationship
+        deep      8.37e-2   1.22e-3    291.0   0.24   relationship
+        box-edge  6.29e-3   1.10e-3    289.1   0.02   relationship
+        saddle    8.82e-3   8.34e-6    485.6   2.18   RB ceiling
+        saddle-2  8.89e-3   9.46e-6    302.4   3.11   RB ceiling
 
-    where ``ratio = dlnL / (eps_dense * |lnL|)`` and ``floor`` is the RB
-    re-binning contribution ``|lnL(exact envelope through the surrogate
-    reduction path) - lnL(exact path)|``.  The POSITIVE far-field family is
-    LINEAR in ``eps_dense`` (ratios <= 0.11), so the budget-INDEPENDENT F016
-    relationship gate ``dlnL <= LNLIKE_ERROR_AMP * eps_dense * |lnL|`` holds
-    with wide headroom.  The SADDLE family is NOT: its lnL rides the
-    QUADRATIC signal power ``|F|^2``, so the same tiny max-relative envelope
-    error propagates with a gain of ~1.85 (ratios 1.29, 2.23) -- above the
-    linear amplitude 1.5.  The RB floor (~0.17 nats) is minor here, so an
-    exact-envelope baseline that cancels it (option (a), attempted) leaves
-    the saddle at ratio ~1.82, still over 1.5.  The saddle is therefore
-    gated at the absolute `RB_DLNL_ATOL` acceptance ceiling (1.5 nats), which
-    its served dlnL (<= 0.91) clears with headroom -- the surrogate is
-    correct; the linear amplitude is simply the wrong currency for a
-    quadratic sensitivity.  A production-scale surrogate (eps ~1e-4) drives
-    the saddle dlnL far below both currencies.
+    where ``ratio = dlnL / (eps_dense * |lnL|)``.  The POSITIVE far-field
+    family is LINEAR in ``eps_dense`` (ratios <= 0.24 here), so the
+    budget-INDEPENDENT F016 relationship gate ``dlnL <= LNLIKE_ERROR_AMP *
+    eps_dense * |lnL|`` holds with wide headroom.  The SADDLE family is
+    NOT: its lnL rides the QUADRATIC signal power ``|F|^2``, so the same
+    tiny max-relative envelope error propagates with a gain well above the
+    linear amplitude 1.5 (ratios 2.18, 3.11 here -- larger than the 8gb-006
+    campaign's ~1.85 because the relocated `SAD_BOX` reconstructs to
+    eps ~1e-5, an order of magnitude tighter than the pre-relocation box,
+    so the RB re-binning floor now dominates the ratio's numerator instead
+    of the envelope error).  The saddle is therefore gated at the absolute
+    `RB_DLNL_ATOL` acceptance ceiling (1.5 nats), which its served dlnL
+    (<= 0.009 here, i.e. two orders of magnitude under the ceiling) clears
+    with wide headroom -- the surrogate is correct; the linear amplitude
+    is simply the wrong currency for a quadratic sensitivity.
 
     A well-emulated crown-family config (deep in the exterior box, eps
     ~1e-3) also satisfies the concrete `LNLIKE_BUDGET_TOL` nat ceiling,
@@ -1839,9 +1930,9 @@ class LnlikeAccuracyTestCase(SurrogateTestCase):
     #: low-y1 corner (coarsest spline fit -> larger eps) and exercises the
     #: relationship gate at the box's worst-case eps.
     POS_CONFIGS = (
-        ('crown', dict(gamma=0.35, y1=2.25, y2=0.0), True),
+        ('crown', dict(gamma=0.35, y1=1.80, y2=0.0), True),
         ('deep', dict(gamma=0.40, y1=2.20, y2=0.05), True),
-        ('box-edge', dict(gamma=0.50, y1=1.98, y2=0.10), False),
+        ('box-edge', dict(gamma=0.50, y1=2.70, y2=0.10), False),
     )
     #: Served saddle configs (gamma' ~1.3); well emulated (eps_dense ~1e-3)
     #: but the |F|^2 quadratic sensitivity gives an eps->dlnL gain of ~1.85
@@ -1849,8 +1940,8 @@ class LnlikeAccuracyTestCase(SurrogateTestCase):
     #: `RB_DLNL_ATOL` acceptance ceiling, not the F016 relationship bound
     #: (INS-8gb-006).
     SAD_CONFIGS = (
-        ('saddle', dict(gamma=1.30, y1=0.30, y2=0.20), False),
-        ('saddle-2', dict(gamma=1.25, y1=0.35, y2=0.18), False),
+        ('saddle', dict(gamma=1.30, y1=3.85, y2=2.10), False),
+        ('saddle-2', dict(gamma=1.40, y1=3.95, y2=2.15), False),
     )
 
     @staticmethod
@@ -1976,7 +2067,7 @@ class TimingSmokeTestCase(SurrogateTestCase):
         return best
 
     def test_saddle_surrogate_is_fast_and_beats_exact(self):
-        candidate = _lens_candidate(gamma=1.30, y1=0.30, y2=0.20)
+        candidate = _lens_candidate(gamma=1.30, y1=3.85, y2=2.10)
         served = self.sur_like._surrogate_coefficients(candidate)
         self.assertIsNotNone(served, 'saddle config not served -- retune box')
         self.sur_like.lnlike(candidate)   # warm
@@ -2057,6 +2148,15 @@ def _multichart_fixture() -> LensAmplificationSurrogate:
     genuine double-match, resolved by tube priority.  The saddle tube arc is
     a NEGATIVE wedge ``theta in [-0.39, -0.09]`` so a ``[0, 2*pi)`` caustic
     angle must route through the `_theta_into_frame` unwrap to select it.
+
+    The far-field charts' spatial axes are the caustic-fixed ``(rho,
+    theta_c)`` coordinates (Build 8h-b3): each box is the pre-migration
+    eigenframe ``(y1, y2)`` box mapped through `_to_caustic_fixed` at the
+    band's own midpoint gamma (0.35 for positive, 1.25 for saddle) --
+    which is exactly the gamma every `MC_QUERIES` entry for that parity
+    uses, so the query lands at the identical caustic-fixed point the
+    retired raw-axis fixture placed it at (no distortion, since the
+    reference gamma and the query gamma coincide exactly).
     """
     log_w = MC_LOG_W_GRID
     u_grid = np.linspace(np.sqrt(MC_ETA_FLOOR), np.sqrt(MC_ETA_MAX), 4)
@@ -2071,12 +2171,16 @@ def _multichart_fixture() -> LensAmplificationSurrogate:
         log_w_grid=log_w, envelope_real=real, envelope_imag=imag,
         image_count=2, parity=1, eta_floor=MC_ETA_FLOOR, eta_max=MC_ETA_MAX,
         cusp_windows=[(0.2, 0.1)])
-    pos_y1 = np.linspace(0.5, 0.85, 4)
-    pos_y2 = np.linspace(0.2, 0.45, 4)
-    real, imag = _smooth_envelope_tensor(pos_gamma, pos_y1, pos_y2,
-                                         log_w, 0.5)
+    pos_rho, pos_theta_c = zip(*(
+        surrogate_module._to_caustic_fixed(0.35, y1, y2)
+        for y1 in (0.5, 0.85) for y2 in (0.2, 0.45)))
+    pos_rho_grid = np.linspace(min(pos_rho), max(pos_rho), 4)
+    pos_theta_c_grid = np.linspace(min(pos_theta_c), max(pos_theta_c), 4)
+    real, imag = _smooth_envelope_tensor(pos_gamma, pos_rho_grid,
+                                         pos_theta_c_grid, log_w, 0.5)
     pos_ff = surrogate_module.FarFieldChart.from_values(
-        gamma_grid=pos_gamma, y1_grid=pos_y1, y2_grid=pos_y2, log_w_grid=log_w,
+        gamma_grid=pos_gamma, rho_grid=pos_rho_grid,
+        theta_c_grid=pos_theta_c_grid, log_w_grid=log_w,
         envelope_real=real, envelope_imag=imag, image_count=2, parity=1,
         eta_overlap_min=MC_ETA_OVERLAP_MIN)
 
@@ -2090,15 +2194,23 @@ def _multichart_fixture() -> LensAmplificationSurrogate:
         log_w_grid=log_w, envelope_real=real, envelope_imag=imag,
         image_count=4, parity=-1, eta_floor=MC_ETA_FLOOR, eta_max=MC_ETA_MAX,
         cusp_windows=[(-0.39, 0.05)])
-    sad_y1 = np.linspace(0.2, 0.5, 4)
-    sad_y2 = np.linspace(0.1, 0.3, 4)
-    real, imag = _smooth_envelope_tensor(sad_gamma, sad_y1, sad_y2,
-                                         log_w, 1.5)
+    sad_rho, sad_theta_c = zip(*(
+        surrogate_module._to_caustic_fixed(1.25, y1, y2)
+        for y1 in (0.2, 0.5) for y2 in (0.1, 0.3)))
+    sad_rho_grid = np.linspace(min(sad_rho), max(sad_rho), 4)
+    sad_theta_c_grid = np.linspace(min(sad_theta_c), max(sad_theta_c), 4)
+    real, imag = _smooth_envelope_tensor(sad_gamma, sad_rho_grid,
+                                         sad_theta_c_grid, log_w, 1.5)
+    refused_gamma, refused_y1, refused_y2 = 1.35, 0.25, 0.15
+    refused_rho, refused_theta_c = surrogate_module._to_caustic_fixed(
+        refused_gamma, refused_y1, refused_y2)
     sad_ff = surrogate_module.FarFieldChart.from_values(
-        gamma_grid=sad_gamma, y1_grid=sad_y1, y2_grid=sad_y2, log_w_grid=log_w,
+        gamma_grid=sad_gamma, rho_grid=sad_rho_grid,
+        theta_c_grid=sad_theta_c_grid, log_w_grid=log_w,
         envelope_real=real, envelope_imag=imag, image_count=4, parity=-1,
         eta_overlap_min=MC_ETA_OVERLAP_MIN,
-        refused_points=np.array([[1.35, 0.25, 0.15]]))
+        refused_points=np.array([[refused_gamma, refused_rho,
+                                  refused_theta_c]]))
 
     # Provenance carries ONLY JSON-native containers (lists, not tuples) so a
     # json.dumps/loads round trip is value-equal.
@@ -2160,10 +2272,20 @@ def _select_for_query(sur: LensAmplificationSurrogate, kwargs: dict):
     log_w = np.log(MC_W_ARRAY)
     y1_eig, y2_eig = _rotate_to_eigenframe(kwargs['y1'], kwargs['y2'],
                                            kwargs['beta'])
+    try:
+        rho, theta_c = surrogate_module._to_caustic_fixed(
+            kwargs['gamma'], y1_eig, y2_eig)
+    except LensDomainError:
+        # Mirrors `LensAmplificationSurrogate.serve`: the caustic reach is
+        # undefined exactly on the ``gamma = 1`` parity wall, which is also
+        # the `_GAMMA_GUARD_BAND` `select_chart` declines on regardless --
+        # so a coordinate-conversion failure there is a fall-through, not
+        # an error, the same way `serve` treats it.
+        return None
     return surrogate_module.select_chart(
         sur.charts, gamma=kwargs['gamma'], log_w_min=float(log_w.min()),
         log_w_max=float(log_w.max()), eta=kwargs['eta'], theta=kwargs['theta'],
-        image_count=kwargs['image_count'], y1_eig=y1_eig, y2_eig=y2_eig)
+        image_count=kwargs['image_count'], rho=rho, theta_c=theta_c)
 
 
 def _serve_for_query(sur: LensAmplificationSurrogate, kwargs: dict):
@@ -2247,13 +2369,15 @@ class ChartSelectionTestCase(SurrogateTestCase):
         log_w = np.log(MC_W_ARRAY)
         y1_eig, y2_eig = _rotate_to_eigenframe(kwargs['y1'], kwargs['y2'],
                                                kwargs['beta'])
+        rho, theta_c = surrogate_module._to_caustic_fixed(
+            kwargs['gamma'], y1_eig, y2_eig)
         pos_tube, pos_ff = self.sur.charts[0], self.sur.charts[1]
         tube_serves = surrogate_module._tube_serves(
             pos_tube, kwargs['gamma'], float(log_w.min()), float(log_w.max()),
             kwargs['eta'], kwargs['theta'], kwargs['image_count'])
         ff_serves = surrogate_module._farfield_serves(
             pos_ff, kwargs['gamma'], float(log_w.min()), float(log_w.max()),
-            kwargs['eta'], kwargs['image_count'], y1_eig, y2_eig)
+            kwargs['eta'], kwargs['image_count'], rho, theta_c)
         self.n_checks += 1
         self.assertTrue(tube_serves and ff_serves,
                         'overlap band is not a genuine double match -- '

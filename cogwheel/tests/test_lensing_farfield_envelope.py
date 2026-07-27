@@ -133,7 +133,9 @@ from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate, FarFieldChart, TubeChart,
-    _FARFIELD_ENVELOPE_DEFINITION, _KNOWN_FARFIELD_DEFINITIONS)
+    _FARFIELD_ENVELOPE_DEFINITION, _KNOWN_FARFIELD_DEFINITIONS,
+    _FARFIELD_AXIS_SCHEMA)
+from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing import surrogate_training
 
 _OUTPUT_DIR = pathlib.Path(__file__).resolve().parent / 'output'
@@ -253,6 +255,42 @@ def _held_out_samples(center: tuple[float, float], count: int,
             for _ in range(count)]
 
 
+def _box_to_caustic_fixed(y1_range: tuple[float, float],
+                          y2_range: tuple[float, float], n1: int, n2: int,
+                          gamma_range: tuple[float, float] = TILE_GAMMA_BAND
+                          ) -> tuple[np.ndarray, np.ndarray]:
+    """``(rho_grid, theta_c_grid)`` for a rectangular eigenframe box.
+
+    Maps every corner of the ``gamma_range x y1_range x y2_range`` box
+    through `_to_caustic_fixed` (EACH corner's own ``gamma``, i.e. its own
+    ``_caustic_reach``) and returns the enclosing ``n1``/``n2``-node axes.
+
+    A per-corner hull -- rather than a single fixed reference reach -- is
+    safe HERE specifically: every tile in this file sits deep in the far
+    field (``rho`` from ~5 to ~45 measured across the full
+    ``TILE_GAMMA_BAND = (0.02, 0.06)``, since ``|y| ~ 0.2-1.7`` while
+    ``reach`` is only ``~0.04-0.12`` even at the band edges), so the union
+    over gamma never approaches the ``rho ~ 1`` caustic boundary the way
+    it does for the wider, closer-to-unity-rho boxes in
+    `test_lensing_surrogate.py` (whose `_train` docstring records that
+    exact failure mode) -- a per-corner hull is the more literal
+    "same physical box" conversion and is used here because it is safe.
+    A held-out query anywhere in the box, evaluated at ITS OWN gamma via
+    `LensAmplificationSurrogate.serve`, therefore always falls inside the
+    trained ``rho_grid``/``theta_c_grid`` bounds.
+    """
+    rhos, theta_cs = [], []
+    for gamma in np.linspace(*gamma_range, 5):
+        for y1 in y1_range:
+            for y2 in y2_range:
+                rho, theta_c = surrogate_module._to_caustic_fixed(
+                    float(gamma), y1, y2)
+                rhos.append(rho)
+                theta_cs.append(theta_c)
+    return (np.linspace(min(rhos), max(rhos), n1),
+            np.linspace(min(theta_cs), max(theta_cs), n2))
+
+
 @functools.lru_cache(maxsize=None)
 def _train_tile(center: tuple[float, float], label: str) -> FarFieldChart:
     """Fit a `FarFieldChart` to a fixed engine grid under ``label``.
@@ -263,12 +301,17 @@ def _train_tile(center: tuple[float, float], label: str) -> FarFieldChart:
     so the two are compared under an identical spline fit -- the only
     difference is the label being interpolated.  Points the engine refuses
     (or that return a non-finite envelope) are recorded as refused.
+
+    The chart's spatial axes are the caustic-fixed ``(rho, theta_c)``
+    (Build 8h-b3): the physical box is UNCHANGED (``center +/- TILE_HALF``
+    in eigenframe ``(y1, y2)``), only the coordinate the label is fitted
+    over changes -- see `_box_to_caustic_fixed`.
     """
     gamma_grid = np.linspace(*TILE_GAMMA_BAND, TILE_N_GAMMA)
-    y1_grid = np.linspace(center[0] - TILE_HALF, center[0] + TILE_HALF,
-                          TILE_N_Y1)
-    y2_grid = np.linspace(center[1] - TILE_HALF, center[1] + TILE_HALF,
-                          TILE_N_Y2)
+    rho_grid, theta_c_grid = _box_to_caustic_fixed(
+        (center[0] - TILE_HALF, center[0] + TILE_HALF),
+        (center[1] - TILE_HALF, center[1] + TILE_HALF),
+        TILE_N_Y1, TILE_N_Y2)
     log_w_grid = np.linspace(np.log(TILE_W_RANGE[0]), np.log(TILE_W_RANGE[1]),
                              TILE_N_W)
     w_grid = np.exp(log_w_grid)
@@ -277,8 +320,10 @@ def _train_tile(center: tuple[float, float], label: str) -> FarFieldChart:
     envelope_imag = np.zeros(shape)
     refused: list[tuple[float, float, float]] = []
     for ig, gamma in enumerate(gamma_grid):
-        for i1, y1 in enumerate(y1_grid):
-            for i2, y2 in enumerate(y2_grid):
+        for i1, rho in enumerate(rho_grid):
+            for i2, theta_c in enumerate(theta_c_grid):
+                y1, y2 = surrogate_module._from_caustic_fixed(
+                    float(gamma), float(rho), float(theta_c))
                 engine = ChangRefsdalChannels(w_grid)
                 engine.reset()
                 try:
@@ -286,20 +331,20 @@ def _train_tile(center: tuple[float, float], label: str) -> FarFieldChart:
                         gamma=float(gamma), y=(float(y1), float(y2)),
                         beta=0.0, kappa=0.0)
                 except _ENGINE_REFUSALS:
-                    refused.append((float(gamma), float(y1), float(y2)))
+                    refused.append((float(gamma), float(rho), float(theta_c)))
                     continue
                 envelope = (farfield_envelope_from_partition(partition)
                             if label == 'new'
                             else np.asarray(partition.envelope))
                 if not np.all(np.isfinite(envelope)):
-                    refused.append((float(gamma), float(y1), float(y2)))
+                    refused.append((float(gamma), float(rho), float(theta_c)))
                     continue
                 envelope_real[:, ig, i1, i2] = envelope.real
                 envelope_imag[:, ig, i1, i2] = envelope.imag
     refused_points = (np.array(refused) if refused
                       else np.empty((0, 3), dtype=float))
     return FarFieldChart.from_values(
-        gamma_grid=gamma_grid, y1_grid=y1_grid, y2_grid=y2_grid,
+        gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=envelope_real,
         envelope_imag=envelope_imag, image_count=2, parity=1,
         refused_points=refused_points)
@@ -924,15 +969,26 @@ def _legacy_single_box_arrays(chart: FarFieldChart, tag: str | None
     NO ``n_charts`` key -- so `LensAmplificationSurrogate.load` routes to
     the legacy path.  ``tag=None`` omits ``envelope_definition`` (a genuine
     pre-tag artifact); a string writes it.
+
+    ALWAYS writes a valid ``axis_schema`` (Build 8h-b3): `chart` (from
+    `_train_tile`) already carries the caustic-fixed ``(rho, theta_c)``
+    axes the current loader unconditionally reads (``data['rho_grid']``,
+    ``data['knot_rho']``, etc. -- it no longer reads ``y1_grid``/``y2_grid``
+    at all), so this fixture is a genuine legacy artifact ONLY along the
+    ``envelope_definition`` axis this test class targets, not the axis
+    schema (a separate, later hard-refuse `_validate_farfield_axis_schema`
+    would otherwise trip regardless of ``tag``, making every case here
+    refuse for the wrong reason).
     """
-    knot_log_w, knot_gamma, knot_y1, knot_y2 = chart.knots
+    knot_log_w, knot_gamma, knot_rho, knot_theta_c = chart.knots
     arrays = {
-        'gamma_grid': chart.gamma_grid, 'y1_grid': chart.y1_grid,
-        'y2_grid': chart.y2_grid, 'log_w_grid': chart.log_w_grid,
+        'gamma_grid': chart.gamma_grid, 'rho_grid': chart.rho_grid,
+        'theta_c_grid': chart.theta_c_grid, 'log_w_grid': chart.log_w_grid,
         'real_coeffs': chart.real_coeffs, 'imag_coeffs': chart.imag_coeffs,
         'knot_log_w': knot_log_w, 'knot_gamma': knot_gamma,
-        'knot_y1': knot_y1, 'knot_y2': knot_y2,
+        'knot_rho': knot_rho, 'knot_theta_c': knot_theta_c,
         'refused_points': chart.refused_points,
+        'axis_schema': np.array(_FARFIELD_AXIS_SCHEMA),
         'provenance': np.array(json.dumps({}))}
     if tag is not None:
         arrays['envelope_definition'] = np.array(tag)
@@ -1255,11 +1311,26 @@ def _train_exterior_chart(center: tuple[float, float], half: float,
     A parameterized companion to `_train_tile`: the source box is
     ``center +/- half`` with ``n_y x n_y`` nodes and ``n_w`` log-``w`` nodes,
     the shear axis is the fixed 4-node `TILE_GAMMA_BAND`.  Always fits the
-    production label `farfield_envelope_from_partition`.
+    production label `farfield_envelope_from_partition`.  Spatial axes are
+    caustic-fixed ``(rho, theta_c)`` (Build 8h-b3) via `_box_to_caustic_fixed`
+    -- the SAME fixed-reach convention `_train_tile` uses.
     """
+    # Unlike `_train_tile` (a narrow, off-origin box where a per-gamma hull
+    # is needed so randomly-gamma'd held-out queries stay contained), this
+    # tile can be centred near the origin with a wide half (`OVERSIZED_TILE_*`),
+    # spanning a wide angular sweep whose per-gamma hull would badly dilate
+    # the trained rho/theta_c box (measured: dilated hull held-out eps
+    # ~3.8e-2 for the oversized tile vs ~2.6e-3 at a single band-midpoint
+    # reach).  Use the FIXED band-midpoint reach here for a materially
+    # tighter box; `_chart_eps`/`_exterior_eps` already skip any held-out
+    # sample that ends up not served, so the narrower containment this
+    # trades away costs no assertion.
     gamma_grid = np.linspace(*TILE_GAMMA_BAND, EXTERIOR_N_GAMMA)
-    y1_grid = np.linspace(center[0] - half, center[0] + half, n_y)
-    y2_grid = np.linspace(center[1] - half, center[1] + half, n_y)
+    gamma_mid = 0.5 * sum(TILE_GAMMA_BAND)
+    rho_grid, theta_c_grid = _box_to_caustic_fixed(
+        (center[0] - half, center[0] + half),
+        (center[1] - half, center[1] + half), n_y, n_y,
+        gamma_range=(gamma_mid, gamma_mid))
     log_w_grid = np.linspace(np.log(TILE_W_RANGE[0]), np.log(TILE_W_RANGE[1]),
                              n_w)
     w_grid = np.exp(log_w_grid)
@@ -1268,8 +1339,10 @@ def _train_exterior_chart(center: tuple[float, float], half: float,
     envelope_imag = np.zeros(shape)
     refused: list[tuple[float, float, float]] = []
     for ig, gamma in enumerate(gamma_grid):
-        for i1, y1 in enumerate(y1_grid):
-            for i2, y2 in enumerate(y2_grid):
+        for i1, rho in enumerate(rho_grid):
+            for i2, theta_c in enumerate(theta_c_grid):
+                y1, y2 = surrogate_module._from_caustic_fixed(
+                    float(gamma), float(rho), float(theta_c))
                 engine = ChangRefsdalChannels(w_grid)
                 engine.reset()
                 try:
@@ -1277,18 +1350,18 @@ def _train_exterior_chart(center: tuple[float, float], half: float,
                         gamma=float(gamma), y=(float(y1), float(y2)),
                         beta=0.0, kappa=0.0)
                 except _ENGINE_REFUSALS:
-                    refused.append((float(gamma), float(y1), float(y2)))
+                    refused.append((float(gamma), float(rho), float(theta_c)))
                     continue
                 envelope = farfield_envelope_from_partition(partition)
                 if not np.all(np.isfinite(envelope)):
-                    refused.append((float(gamma), float(y1), float(y2)))
+                    refused.append((float(gamma), float(rho), float(theta_c)))
                     continue
                 envelope_real[:, ig, i1, i2] = envelope.real
                 envelope_imag[:, ig, i1, i2] = envelope.imag
     refused_points = (np.array(refused) if refused
                       else np.empty((0, 3), dtype=float))
     return FarFieldChart.from_values(
-        gamma_grid=gamma_grid, y1_grid=y1_grid, y2_grid=y2_grid,
+        gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=envelope_real,
         envelope_imag=envelope_imag, image_count=2, parity=1,
         refused_points=refused_points)
@@ -1850,7 +1923,7 @@ def _make_fake_build(build_calls: list) -> object:
             refused_points=np.empty((0, 3), dtype=float),
             center=tuple(box_center), half=float(half),
             w_range=tuple(w_range))
-        return chart, config.n_gamma * config.n_y1 * config.n_y2, 0
+        return chart, config.n_gamma * config.n_rho * config.n_theta_c, 0
     return _fake_build_farfield_chart
 
 
