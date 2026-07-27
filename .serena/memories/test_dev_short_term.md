@@ -1,5 +1,126 @@
 # Test Dev Short-Term Observations
 
+## test_lensing_exterior_admission.py EXTENDED (WP2a saddle triple + WP2b gamma=1 guard) — 2026-07-27
+- Added 4 classes / 11 tests to my own suite -> 23 passed (was 12), 145s
+  full file. conda python /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/
+  python. TEST-ONLY (no production edits). Neighbor test_lensing_geometry
+  13 green.
+- WP2a saddle additive-scalar coord (gamma in (1,1.6], EXTERIOR rho>1).
+  Production sg._to/_from_caustic_fixed for |gamma|>=1 use SCALAR additive
+  rho=1+|y|-_caustic_reach(gamma) (NOT directional r_caustic). Measured:
+  round-trip |y|->rho->|y| worst 4.44e-16 (<<1e-12); rho-|y| INVARIANT in
+  |y| (spread 0 or 4.4e-16 == equals 1-reach) => drho/d|y| identically 1;
+  FD central slope (step 0.25 on-axis) within 1e-12 of 1. Refusal-absence:
+  NO LensDomainError across theta_c[-pi,pi] x {1.05,1.3,1.6} x offsets.
+  REACHABLE-RED: geometry.r_caustic(1.6, pi/2) RAISES LensDomainError
+  (ray misses both deltoids on the between-lobe/pos-eigen axis) while
+  r_caustic(1.6,0.0)=1.9846 SUCCEEDS (on-lobe, deltoids on y1 axis) —
+  discriminates scalar-additive from directional. OFF_WEDGE=pi/2 is the
+  single most discriminating node.
+- WP2b gamma=1 box-centre guard. _caustic_reach(1.0) RAISES LensDomainError
+  (det A=0 parity wall); _caustic_reach(1±ulp) FINITE but HUGE (~1.8e8,
+  near-degenerate). from_engine build cheap (~3.5s) at n_gamma=n_rho=
+  n_theta=4, w_range(1,3), wnpd=4, rho(1.05,1.30), theta_c(0.3,0.9).
+  (1) gamma_range(0.5,1.5) centre 0.5*(0.5+1.5)==1.0 BIT-EXACT ->
+  chart.image_count is None AND parity is None (assertIs, so (0,0) refactor
+  fails). (2) gamma_range(1.0,1.6) n=4 axis {1.0,1.2,1.4,1.6} -> node 1.0
+  slab (4x4=16) all in refused_points[:,0]==1.0 (c28408b node-loop fix);
+  saddle centre 1.3 -> image_count=2 parity=-1. (3) LensDomainError in
+  sg._REFUSAL_ERRORS (=(LensDomainError,CancellationError,
+  SchwingerCertificationError)); Exception/BaseException NOT in it; mock
+  side_effect LensDomainError on sg._from_caustic_fixed -> all 64 refused
+  (swallowed); side_effect KeyError -> PROPAGATES (assertRaises KeyError,
+  teeth: guard specific not bare). (4) 1±ulp SERVED finite no-raise (stable
+  boundary, NOT knife-edge) — DO NOT assert 1e-12 round-trip at 1±ulp
+  (reach 1.8e8 makes abs residual ~1e-8; assert finiteness + rho_back>1
+  only). GOTCHA: first draft asserted round-trip 1e-12 at 1±ulp -> FAILED
+  (residual scales with the enormous reach) + anti-vacuity tearDown ERROR
+  cascade (record_comparison after the failing assert). Fixed.
+- API PINS: sg.LensAmplificationSurrogate.from_engine(gamma_range,rho_range,
+  theta_c_range,w_range,n_gamma,n_rho,n_theta,w_nodes_per_decade,definition=
+  sg._FARFIELD_ENVELOPE_DEFINITION('farfield_full_kernel_sum')).charts[0];
+  chart.image_count/parity/refused_points(shape (n,3): gamma,rho,theta_c).
+  _box_region_labels reads centre gamma_c=0.5*(gamma_grid[0]+gamma_grid[-1])
+  -> (None,None) on _REFUSAL_ERRORS. Node loop wraps _from_caustic_fixed +
+  channels.evaluate in try/except _REFUSAL_ERRORS. mock.patch.object(sg,
+  '_from_caustic_fixed',...) hits the module-global from_engine resolves.
+- WP3 NOT undertaken: FAR-FIELD REGRESSION PORT lists migrating
+  test_lensing_surrogate / _ppgo_bandsplit / _surrogate_census /
+  _exterior_windows — those are OTHER suites owned by other Test Dev runs;
+  the hard Scope-Discipline directive ("write ONLY your suite; do not edit
+  others") controls. Flagged for the owning runs.
+
+## test_lensing_exterior_admission.py NEW (WP1 per-column exterior admission) — 2026-07-27
+- New suite `cogwheel/tests/test_lensing_exterior_admission.py`, 12 tests
+  green (118s). Certifies 3 Professor specs for WP1 positive-parity
+  per-theta_c-column exterior admission (surrogate_training
+  ._farfield_exterior_tiles + _InteriorAdmission.admits_exterior). conda
+  python /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python.
+- SPEC1 COVERAGE: fixed-seed (SEED=20260727) quasi-uniform disk N=10000
+  radius BOX_CORNER=sqrt(2)*3.0=4.2426. Truth set T = outside-caustic AND
+  geometry.nearest_caustic_point(g_worst,0,y).distance>=eta(0.05), worst
+  gamma = band HI (reach monotone incr: g0.8..0.9 max r_caustic 3.58/4.39/
+  5.69). coverage = |T∩admitted tiles|/|T|, membership in caustic-fixed
+  (rho,theta_c). *** KEY: coverage MONOTONE in N_TILES (row i=0 has
+  rho_inner=1.0 -> admits_exterior returns False, so innermost admitted
+  rho_inner=1+2*half_rho -> uncovered near-caustic shell shrinks with n):
+  n=30 0.908, n=60 0.942, n=120 0.973, n=200 0.982 (high band) -> converges
+  to ~1, NO persistent cusp wedge. Chose N_TILES=150 (high band ~0.977, low
+  band ~0.99), BAR=0.95 (Prof: NOT 0.97, margin; binomial std ~0.002 at
+  |T|~9000). Feed source_magnitude_max=BOX_CORNER (spec |y|max=4.24) so
+  whole box coverable — production wiring passes per-region y_outer=3.0, but
+  admission fn TAKES the cap as arg; identical machinery, box-extent arg
+  differs (documented). Plots exterior_coverage_band_{lo}_{hi}.png.
+- PERF: exact oracle nearest_caustic_point only 0.54ms/call (n_grid=256) ->
+  10000 calls 5.4s. The SLOW one is geometry.r_caustic 8.76ms -> outside
+  test + (rho,theta_c) map done via lru_cached 1441-node r_caustic interp
+  TABLE per worst-gamma (12.6s each) + np.interp (vectorized _to_caustic_
+  fixed repro, xchecked <5e-3 vs scalar sg._to_caustic_fixed on 60 pts, err
+  dominated by cusp interp << half_rho). lru_cache on _rcaustic_table/
+  _admission/_coord_bounds/_truth_set to avoid recompute across classes.
+- SPEC2 NO-FALSE-ADMIT (HARD/exact): band (0.80,0.90), NFA_N_TILES=10 (64
+  admitted tiles), 5x5 interior grid x 3 band gammas = 4800 samples,
+  reconstruct y via REAL sg._from_caustic_fixed (r_caustic 8.76ms/call ->
+  ~42s; DON'T raise n_tiles here, _from_caustic_fixed is the bottleneck:
+  n=30 would be ~500s), exact nearest_caustic distance. 0 violations,
+  min_dist 0.182 >> eta 0.05 (n=15/7x7 gave 0.056, right at eta, but 206s).
+  assertEqual(violations,0) + assertGreaterEqual(min_dist,eta). Histogram
+  no_false_admit_distance_hist.png.
+- SPEC3 REACHABLE-RED: OLD scalar exclusion_rho = 1+(reach_max+eta)-
+  coord_radius_min via st._farfield_tiles(excl,rho_outer,n). High band
+  (0.80,0.90): reach_max=5.6921 cr_min=0.8001 -> excl_rho=5.9420 >
+  rho_outer=4.4425 -> 0 tiles (n=5 AND n=150) -> coverage 0.000. Contrast
+  test: NEW admission same band admits >100 tiles + coverage>=0.95. (Low
+  band (0.4,0.5) excl_rho=2.06<rho_outer=4.84 admits tiles — defect only
+  zeroes the HIGH band, as designed.)
+- SELF-FALSIF class (3): empty-tiles coverage==0.0<BAR (metric not vacuous);
+  rho-map vectorization matches production <5e-3; caustic-HUGGING tile
+  (rho_center=1+1.5*half_rho, half_rho=5e-4, theta 0.3 non-cusp) ->
+  reconstructs y within eta -> violations>0 (no-false-admit detector has
+  teeth). Base class ExteriorAdmissionTestCase carries anti-vacuity
+  n_compared/tearDown (copied windows idiom).
+- API PINS: st._farfield_exterior_tiles(rho_outer,n_per_side,*,admission=,
+  source_magnitude_max=) rho_inner_floor=1.0, half_rho=0.5*(rho_outer-1)/n,
+  half_theta=pi/n, returns ((rho_c,theta_c),(half_rho,half_theta),i,j).
+  _InteriorAdmission.admits_exterior(center,half,source_magnitude_max):
+  rho_inner<=1 -> False; 5 edge angles; y_mag=radii+rho_inner-1; >cap ->
+  False; cloud nearest<eta -> False. st._interior_admission(band,parity,
+  reach(IGNORED),config); st._coordinate_radius_bounds(band,parity)->
+  (radius_min,reach_max); st._farfield_tiles(rho_inner,rho_outer,n)->[] if
+  rho_outer<=rho_inner. Config: eta_max=0.05, n_farfield_tiles_per_side=5,
+  n_caustic_samples=200. sg._to/_from_caustic_fixed exterior arm:
+  |y|=r_caustic(g,theta_c)+rho-1 for rho>1. _lens_prior._source_scale(
+  m_lens_range[0])=3.0.
+- NEIGHBOR DRIFT (report-only, NOT mine): test_lensing_geometry 13 green.
+  test_lensing_exterior_windows.py 15 failed + 54 passed + 1 xfail + 13
+  errors (was 68+2xfail) — production surrogate.py/surrogate_training.py
+  MODIFIED this build (coder) drifted ghost_kernel/farfield_ghost_term/
+  _interior_admission numerics (e.g. GhostGate gate=0.452 vs expected 2.0;
+  ghost |E+G|/base 0.776 vs >=1.0). ALL primary reds are ghost/directional-
+  admission numeric assertions; teardown ERRORs are anti-vacuity cascades
+  after the body raised. My change is test-only (new independent file) so
+  cannot cause them; that suite owned by another run. Did NOT touch it.
+
 ## test_lensing_exterior_windows.py EXTENDED (Build 8h-b3 Specs 10-11) — 2026-07-23
 - Added WholeInteriorSacrcTestCase(6) + WholeInteriorSacrcLiteralBarTestCase
   (1 xfail) + TubeByteIdentityTestCase(2) + 2 self-falsif -> full file now

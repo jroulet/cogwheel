@@ -46,6 +46,7 @@ from .memory import (
     get_memory_names_for_agent,
     load_memories_text,
     SERENA_MEMORIES_DIR,
+    _MEMORY_INLINE_CAP,
 )
 from .prompts.sections import get_sections_for_agent
 # ── Codex outside inspector (optional) ──────────────────────────────────────
@@ -938,11 +939,36 @@ class BuildOrchestrator:
                 except Exception as dream_err:
                     self._log(f"Dreamer failed (non-fatal): {dream_err}")
             elif _exc_type is not None:
-                self._log(
-                    f"Skipping Phase 3: build raised {_exc_type.__name__}. "
-                    f"Memory consolidation against incomplete state risks "
-                    f"silent wedges — skipping to preserve the failure signal."
-                )
+                # Size-triggered override (ported from the gw pipeline,
+                # 2026-07-27): skipping on failure preserves the failure
+                # signal, but a STREAK of failed builds never consolidates,
+                # so short_term memories grow unbounded until they blow the
+                # argv limit at agent spawn (the E2BIG that killed build
+                # 8h-a; the 24 KB inline cap only truncates the symptom).
+                # If any short_term memory already exceeds the inline cap,
+                # consolidate anyway — starving the Dreamer is the worse
+                # failure mode.
+                oversized = self._oversized_short_term_memories()
+                if oversized:
+                    self._log(
+                        f"Build raised {_exc_type.__name__}, but "
+                        f"{', '.join(oversized)} exceed the inline cap — "
+                        f"running Phase 3 anyway so a failure streak cannot "
+                        f"starve the Dreamer.")
+                    try:
+                        self.phase = Phase.DREAMING
+                        self._log_phase("Phase 3: Memory Consolidation "
+                                        "(size-triggered)")
+                        await self._run_phase_3()
+                    except Exception as dream_err:
+                        self._log(f"Dreamer failed (non-fatal): {dream_err}")
+                else:
+                    self._log(
+                        f"Skipping Phase 3: build raised "
+                        f"{_exc_type.__name__}. Memory consolidation against "
+                        f"incomplete state risks silent wedges — skipping to "
+                        f"preserve the failure signal."
+                    )
             if self._serena is not None:
                 self._log("Stopping Serena server...")
                 await self._serena.stop()
@@ -2197,6 +2223,23 @@ class BuildOrchestrator:
         if session_id:
             self._coder_sessions[wp.id] = session_id
         return result_text, session_id
+
+    def _oversized_short_term_memories(self) -> list[str]:
+        """Short-term memory names already past the prompt-inline cap.
+
+        Used by the size-triggered Phase 3 override: a build failure
+        normally skips consolidation, but memories over
+        `_MEMORY_INLINE_CAP` must be consolidated regardless or a run of
+        failed builds grows them until agent spawn dies on the argv
+        limit. Never raises — a stat failure simply reports nothing.
+        """
+        try:
+            mem_dir = Path(self.project_root) / SERENA_MEMORIES_DIR
+            return sorted(
+                path.stem for path in mem_dir.glob("*_short_term.md")
+                if path.stat().st_size > _MEMORY_INLINE_CAP)
+        except Exception:  # pragma: no cover - defensive
+            return []
 
     async def _run_codex_review(
         self, changed_files: list[str], plan_context: str,

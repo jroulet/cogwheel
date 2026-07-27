@@ -2696,31 +2696,68 @@ emit-on-change, stall alarm. Floor verdict banked: 3.9x (target 2x
 missed; ~1.8 ms unattributed glue exposed — follow-up profile, not a
 blocker). Next: campaign report -> census + PP -> owner enable
 package.
-## Current plan (2026-07-23 23:00 — USAGE-LIMIT PAUSE; resets Jul 26 6pm ET)
+## Current plan (2026-07-26 — rewritten in place; history in git)
 
-STATE: 8h-b3 caustic-fixed core COMPLETE in tree, committed as a
-PRE-GATE WIP checkpoint (all 6 WPs; new exterior-windows suite green;
-36 old-suite tests red = fixture-port debt ONLY, tally in scratchpad
-port_state.log). Ghost kernel b14df4b, map v2 with ceilings, SDK
-hardenings (port ledger 16-22) all committed. GLoW probe verdict:
-PARTIAL (cross-oracle for positive parity/high w; NOT a qd
-replacement — gamma>1 topology unsupported upstream; owner may report
-to authors). Serving census baseline 2.2%.
+Standing rulings: zero-quadrature serving; 100% coverage mandatory;
+prior-universality is the goal; ONE campaign, fired only when nothing
+pending can invalidate its tiles; cost estimate before every engine
+launch; live docs carry current state only; Fable tier owner-only.
 
-ON RESUME (in order):
-1. Finish the fixture port (rules: no weakening; same-physics
-   reconversion via _caustic_reach/r_caustic; deletions justified
-   line-by-line). Then FULL tree gate. Then amend/replace the WIP
-   checkpoint with the real 8h-b3 commit.
-2. Calibration re-pilot (cost-quoted ~30-45 min) vs P2 before-numbers
-   (ext 22%/60% rescue; interior 0% crown / 6e-2 mid-gamma).
-3. Serving census — the climb from 2.2% must begin.
-4. Born-rung build (small, certain; before campaign — no throwaway
-   tiles; makes the artifact prior-universal).
-5. qd build (8h-c, riskiest; saddle tail; GLoW cross-oracle folded
-   into its certification story via Professor consult).
-6. Map extension sweep; ONE campaign (1-h mid-run probe); ladder
-   census -> 100%; PP validation; owner enable package.
+RECOVERY STATE after the interrupted-agents episode:
+- claude-dev baseline = my 8h-b3 caustic-fixed core + Codex infra, with
+  Codex's 3 reviewed science files cherry-picked and the gamma=1
+  node-loop guard fixed (c28408b), plus the SDK compat fix bd3bc65.
+- codex-snapshot-832a2b3 holds ALL interrupted work (Codex SDK recovery
+  machinery worth reviewing separately; its production edits already
+  adopted where reviewed).
+- CAUTION PROVEN: Codex's committed infra broke the Claude build path
+  (agent_name= rejected by SDK 0.1.53) — every build died at spawn
+  until bd3bc65. Treat cross-provider "backward compatible" claims as
+  unverified until a Claude build actually spawns.
 
-Standing rules unchanged (zero-quadrature; estimator before every
-launch; live docs current-state only; width law; Fable owner-only).
+PROFESSOR RULINGS (2026-07-26), both driver-verified:
+1. Saddle exterior label: (A) BENIGN near-caustic physics, not a
+   conditioning defect. The large |E_ff|/|F| lives entirely below
+   w_floor; inside the label's valid window it is 0.01-1.5. No SACR-C
+   work for the exterior. Fixture relocation endorsed.
+2. Coordinates: the exterior positive-parity axis is ADDITIVE
+   (rho = 1 + |y| - r_caustic), drho/d|y| = 1.0000 verified — already
+   Einstein-scale, caustic-anchored, and measured BETTER than plain
+   Einstein at every radius. KEEP exterior(+1), interior (multiplicative
+   by DOMAIN argument) and tube axes AS SHIPPED. Only the parity -1
+   (saddle) exterior arm still uses the multiplicative stretch and must
+   switch to additive.
+   THE REAL DEFECT IS ADMISSION: `_farfield_tiles` excludes on a scalar
+   reach_max, but the astroid is a SPIKE (gamma=0.9: r_caustic ~0.9-1.5
+   most angles, 5.69 at the cusp). Measured exterior coverage 0.891 ->
+   0.496 -> 0.094 -> 0.000 across gamma bands; above gamma~0.85 the
+   exclusion circle (5.99) exceeds the whole prior box (4.24) so NO
+   exterior chart is built though ~98% is genuinely exterior. Fix =
+   per-theta_c-column admission via exact nearest_caustic_point
+   distance >= eta_max (the test the interior tiler already uses);
+   recovers 0.97-0.98. A radial proxy is UNSAFE (overstates true
+   distance up to 10x near the cusp).
+
+OPEN CAVEAT: every driver coordinate probe was taken at theta=45deg,
+where Im tau_c = 0 identically (symmetry diagonal). Nothing measured
+about the GHOST regime; do not extrapolate to generic angles. Close
+this before the ghost gate is trusted in the campaign.
+
+SEQUENCE (each step gates the next):
+1. 8h-b4 (RUNNING): exterior admission repair + saddle additive axis +
+   second gamma=1 guard (_box_region_labels box centre) + fixture-port
+   finish. Acceptance: coverage >= 0.95 in every band INCLUDING
+   0.80-0.90, far-field regression battery green, tube byte-identity.
+2. Serving census: the climb from 2.2% must begin, and gamma>=0.8 bands
+   must stop contributing zero exterior coverage.
+3. Calibration re-pilot (cost-quoted) vs P2 before-numbers.
+4. Born rung (non-negotiable; before the campaign so no throwaway tiles;
+   small and certain).
+5. qd (riskiest; saddle tail). GLoW verdict: PARTIAL — good cross-oracle
+   for positive parity and high w, NOT a qd replacement (gamma>1
+   topology unsupported upstream, spurious central-image term).
+6. Map extension sweep; ONE campaign; ladder census -> 100%; PP
+   validation; owner enable package.
+
+Driver chores: Librarian doc backlog (7 commits queued, /doc-sync);
+gw port ledger items 16-23 (latest: 23 = ClaudeAgentOptions compat).

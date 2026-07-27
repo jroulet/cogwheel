@@ -1,5 +1,65 @@
 # Coder Short-Term Observations
 
+## WP1 (Build 8h-b4): per-theta_c-column exterior admission (positive parity)
+- surrogate_training.py ONLY. Replaced the scalar exclusion_rho exterior tiling
+  test (parity==1 only) with per-column directional admission mirroring the S2-1
+  interior tiler. Saddle (parity==-1) path + `_farfield_tiles` +
+  `ppgo_exclusion_rho` UNTOUCHED; interior `admits` byte-identical to HEAD.
+- 4 edit locations (WP "Where" named 3; I added the 4th, see below):
+  * `_InteriorAdmission.admits_exterior(center, half, source_magnitude_max)`
+    (~L1478): probes INNER rho edge rho_inner=center[0]-half[0] across
+    _INTERIOR_EDGE_SAMPLES=5 thetas over the tile theta span; per band gamma
+    interp directional radii; ADDITIVE positive-parity reconstruction
+    y_mag = radii + rho_inner - 1.0 (rho>1 arm of _from_caustic_fixed). True iff
+    EVERY probe: (1) rho_inner>1.0, (2) nearest caustic-CLOUD dist>=eta_max (same
+    cloud `admits` uses), (3) y_mag<=source_magnitude_max. NOTE: added
+    source_magnitude_max as explicit param (frozen dataclass can't carry the
+    per-region prior box extent; brief's sig omitted it).
+  * `_farfield_exterior_tiles(rho_outer, n_per_side, *, admission,
+    source_magnitude_max)` (~L1554): UNIFORM theta grid over [-pi,pi] (NO
+    cusp-alignment per Simplifier), rho rows over [rho_inner_floor=1.0,
+    rho_outer]; keep tiles where admits_exterior True. Row-major i(rho inner
+    -first)/j(theta) -> tiles[0] = global-min rho_inner (innermost, hardest).
+  * exterior region loop rewire (~L3222): parity==1 builds
+    exterior_admission=_interior_admission(band,1,reach_scalar,config) + tiles
+    via _farfield_exterior_tiles; region_exclusion_rho = MIN admitted per-column
+    rho_inner (fed to _farfield_region_window so w_floor/ppGO stays
+    conservative). report keeps scalar 'exclusion_rho' (backward compat) + adds
+    'region_exclusion_rho'. If parity==1 and zero columns admit -> LOUD
+    zero_admission report (window None, admitted_tiles 0), no crash. Saddle:
+    region_exclusion_rho=exclusion_rho, tiles=_farfield_tiles(exclusion_rho,...).
+  * (4th, NOT in WP "Where" - correctness completion) `_subdivide_farfield_tile`
+    (~L2859): the eps-gate corrective subdivision re-admitted EXTERIOR children
+    via scalar `child_rho-child_half_rho >= exclusion_rho`. For parity==1
+    exclusion_rho IS the cusp-spike (1+reach_max+eta_max-coord_radius_min ~5.94
+    @ gamma0.85) - the very quantity WP1 replaces - so it would drop ALL children
+    of a legit rho_inner~1.4 tile, defeating subdivision EXACTLY in the high-gamma
+    exterior WP1 restores. Fix: added OPTIONAL trailing params
+    exterior_admission=None, source_magnitude_max=None; exterior branch now
+    if/elif/else: interior->admits; parity==1 (params given)->admits_exterior;
+    else (saddle/None default)->scalar floor (BYTE-IDENTICAL). Both call sites
+    (L3572 carrier-flip, L3595 gated) pass
+    exterior_admission=(exterior_admission if parity==1 else None),
+    source_magnitude_max=(y_outer_region if parity==1 else None). Conditional
+    expr never evaluates exterior_admission for saddle (unbound-safe);
+    y_outer_region bound for both parities.
+- VERIFIED (sandbox ran, cheap geometry - no engine build): AST+import OK;
+  _subdivide sig has both new params. gamma 0.80-0.90 band:
+  _farfield_exterior_tiles admits 12 tiles (scalar path -> 0, the WP1 symptom);
+  scalar cusp-spike exclusion_rho=5.942 vs admitted tile rho_inner=1.4; the 4
+  subdivision children of tiles[0] -> directional admits 4, scalar floor admits 0
+  (proves the defect + fix). Earlier partial already smoke-verified admits_exterior
+  vs EXACT nearest_caustic_point 0 violations across 4 bands, reject cases (inside
+  caustic / tube shell / out-of-box) all False, interior admits() unchanged.
+- CONSUMER CHECK: pipeline_graph consumers_of lens_amplification_surrogate = 8;
+  tiles stay (rho,theta_c) rectangles, no schema/serve/npz change -> consumers
+  unaffected (per-column rho_inner only differs).
+- UNVERIFIED (Test Dev/Inspector, need engine training): held-out eps-gate
+  accuracy of per-column exterior tiles; live region report admitted_tiles>0 on a
+  real gamma0.80-0.90 build; subdivision exterior-child recovery end-to-end on a
+  real gated tile; production per-column rho_inner + window w_floor boundaries;
+  full suite green. Saddle byte-identity to HEAD under a real saddle build.
+
 ## Findings pass (Build 8h-b3-fin): INS-2-002 FIXED; INS-2-001 -> Test Dev
 - INS-2-002 (surrogate_training.py _heldout_eps ~L2187): FIXED. The LOO held-out
   reference was built via farfield_envelope_from_partition(partition) with the
@@ -142,6 +202,73 @@
   touched interior); production window boundaries + drop/empty/cap fractions per
   region against real ppGO map.
 
+
+## Build 8h-b4 findings-fix (INS-4-001 done; INS-2-001 -> Test Dev)
+- INS-4-001 (surrogate_training.py _train_band_charts): saddle (parity!=1)
+  exterior tile bounds still used OLD multiplicative/division convention
+  (exclusion_rho = physical_exclusion_radius/coordinate_radius_min;
+  rho_outer_region = y_outer_region/coordinate_radius_min) while surrogate.py
+  serve map went ADDITIVE in WP2(a). FIXED: collapsed both ternaries to the
+  single additive form `1.0 + <phys|y_outer> - coordinate_radius_min` (parity
+  difference is fully encapsulated in coordinate_radius_min from
+  _coordinate_radius_bounds: per-angle min r_caustic for parity==1, band-min
+  scalar _caustic_reach for saddle). parity==1 BYTE-IDENTICAL (same expression
+  evaluated). Added explanatory comments.
+- VERIFIED (sandbox ran): AST+import OK; saddle coordinate_radius_min ==
+  min scalar _caustic_reach over band edges/mid (True); additive tile bound is
+  exact mutual inverse of _from_caustic_fixed at band-min gamma (y_back==3.0);
+  rho=1 at |y|=coordinate_radius_min; drho/d|y|=1 by linearity.
+- FLAG to Inspector: saddle parity!=1 path in _train_band_charts is exercised
+  by _sad_surrogate_ship()=_train(SAD_BOX,...) -> test_lensing_surrogate.py
+  :847 (DomainGate box eps), :1920/:2031/:2054 (lnlike/chart-select saddle).
+  _farfield_tiles/_farfield_region_window DIRECT-call tests (exterior_windows,
+  surrogate_training) build their own exclusion_rho/rho_outer -> unaffected by
+  this caller-side change.
+- INS-2-001 (four RED suites: test_lensing_surrogate/ppgo_bandsplit/
+  surrogate_census/exterior_windows) NOT DONE BY CODER - it is Test Developer
+  work: (a) requires AUTHORING/choosing new test-fixture coordinates ("you
+  never write the tests"), (b) requires RUNNING the 4 suites to green ("do NOT
+  run test suites"). Root cause (Inspector-diagnosed): stale test fixtures pick
+  physical sources now outside the trained caustic-fixed domain, e.g.
+  BetaEliminationTestCase.setUp self.eig=(0.40,2.15,0.05) -> served=False
+  ("anchor beta=0 source out of domain"). RECIPE for Test Dev: pick a TRAINED
+  caustic-fixed (rho<=~rho_outer, theta_c) node, map to physical via
+  surrogate._from_caustic_fixed(gamma,rho,theta_c), use as the fixture source;
+  preserve all assertions/tolerances (POS_RECON_TOL/SAD_RECON_TOL/
+  E_INVARIANCE_TOL unchanged). If Test Dev finds the domain gate wrongly
+  rejects a legitimately-covered source, escalate BACK to Coder (production
+  bug, not fixture).
+
+## WP2 (Build 8h-b4): saddle additive-scalar axis + gamma=1 box-centre guard
+- surrogate.py ONLY. (a) parity-else (saddle) arm of _to_caustic_fixed (~L282)
+  and _from_caustic_fixed (~L318): switched multiplicative reach-norm to ADDITIVE
+  scalar-reach: rho = 1.0 + |y| - _caustic_reach(gamma); inverse |y| =
+  _caustic_reach(gamma) + rho - 1.0. KEPT scalar _caustic_reach (NOT directional
+  geometry.r_caustic - Prof: r_caustic raises LensDomainError for saddle rays
+  missing the two disjoint deltoid lobes -> ill-posed on most exterior rays).
+  Both docstrings updated to describe additive scalar-reach (drho/d|y|=1).
+  Positive-parity (astroid directional) arm + interior multiplicative arm
+  UNTOUCHED (only the `else:` branch bodies changed).
+- (b) _box_region_labels (~L1326): wrapped box-centre _from_caustic_fixed +
+  geometry_partition in try/except _REFUSAL_ERRORS -> return None,None; return
+  annotation now tuple[int|None,int|None]; docstring notes the None case (box
+  gamma_c==1.0 hits _caustic_reach parity wall). Fixes chart-construction crash
+  when box centre gamma exactly 1.0.
+- VERIFIED (sandbox ran): AST+import OK; saddle round-trip exact 1e-12 for
+  |y|>=reach (exterior range); drho/d|y|=1.0; rho=1.0 at |y|=reach (continuity
+  with astroid arm); box gamma=1 -> (None,None); box gamma=1.5 -> (2,-1).
+  NOTE: additive rho goes negative for |y|<reach-1 (below exterior); that hits
+  the PRE-EXISTING rho>=0 guard in _from_caustic_fixed - expected, saddle
+  exterior charts live at large |y|.
+- CONFIRMED present & UNMODIFIED: c28408b node-loop guard (~L1268-1284) already
+  wraps _from_caustic_fixed in try/except _REFUSAL_ERRORS + refused.append.
+- _REFUSAL_ERRORS = (LensDomainError, CancellationError,
+  SchwingerCertificationError) at L110.
+- UNVERIFIED (Test Dev/Inspector): full suite green; whether existing saddle
+  round-trip tests assumed multiplicative rho=|y|/reach (would now fail - the
+  additive form is the intended replacement, tests need updating); held-out
+  eps-gate accuracy on additive-axis saddle tiles; interp coupling reduction
+  claim on a real trained saddle band.
 
 ## WP S2-3 (frozen WP8 amended): whole-interior SACR-C tau_c-demodulated label
 - CONTINUATION completion. channels.py/surrogate.py were ALREADY done by prior

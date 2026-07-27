@@ -1,59 +1,44 @@
 # Inspector Short-Term Observations
 
-## 2026-07-23 — Build 8h-b3-fin FINAL re-review (caustic-fixed core complete)
+## 2026-07-27 — Build 8h-b4 follow-up review (INS-4-001 saddle-axis formula fix)
 
-Scope: uncommitted worktree cogwheel-claude-dev, branch claude-dev. This
-build COMPLETED the caustic-fixed migration + S1-2/S1-3/S2-1/S2-2/S2-3 WPs
-(per plan). Prod code changed: channels.py, geometry.py, likelihood.py,
-surrogate.py, surrogate_training.py. One NEW test file added
-(test_lensing_exterior_windows.py). NO existing suites ported.
+Scope: uncommitted worktree cogwheel-claude-dev, branch claude-dev.
+ONLY production change: cogwheel/lensing/surrogate_training.py (`_train_band_charts`,
+~L3206 and ~L3242). No test files touched; surrogate.py NOT touched this build.
 
-### Verdict: ISSUES (2 carried findings BOTH still open; 0 resolved)
+### Verdict: ISSUES (1 resolved: INS-4-001; INS-2-001 + INS-3-001 STILL OPEN)
 
-### Carried-finding dispositions
-- INS-2-001 STILL OPEN (unchanged root cause, broad scope). Existing
-  far-field regression battery left RED because the (y1,y2)->(rho,theta_c)
-  from_engine/from_values migration was NOT propagated to tests:
-    * test_lensing_surrogate.py: 21 failed, 18 passed, 1 skipped, 9 errors.
-      Confirmed TypeError: from_engine() got unexpected kwarg 'y1_range'
-      (L458). Dark certs: DomainGate, Serialization(single+MultiChart),
-      ChartSelection, EnvelopeReconstruction, RefusalPreservation
-      (never-serves-refused/finite-no-NaN/nonzero-kappa-never-served),
-      LnlikeAccuracy (served-lnlike-tracks-engine).
-    * test_lensing_ppgo_bandsplit.py + test_lensing_surrogate_census.py:
-      19 failed, 66 passed, 15 errors (143s). Same stale-API root cause.
-  NEW test_lensing_exterior_windows.py: 68 passed, 2 xfailed (283s) — green
-  but has NO served-lnlike-tracks-engine and NO never-serves-refused cert;
-  serve-path accuracy/refusal certs remain dark. Build ships regression
-  battery RED. ACTIONABLE (bug-severity blocker).
-- INS-3-001 STILL OPEN (flag to Librarian). git diff --stat HEAD shows
-  SPEC.md and DATA_CONTRACTS.yaml BOTH UNCHANGED; plan has_spec_update=True.
-  Far-field chart schema materially changed: axes now caustic-fixed
-  (rho,theta_c) not (y1,y2); each chart carries envelope_definition tag
-  (FARFIELD_KERNEL_SUM / FARFIELD_DIFFRACTIVE / FARFIELD_KERNEL_SUM_MINUS_
-  GHOST / INTERIOR_SACR_C) with train/serve tag-symmetry contract. SPEC
-  narrative still describes old axes. Bidirectional divergence. Inspector
-  does not edit canonical surfaces.
+### INS-4-001 — RESOLVED
+Both `exclusion_rho` and `rho_outer_region` in `_train_band_charts` now use the
+additive form `1.0 + <physical> - coordinate_radius_min` for BOTH parities
+(the multiplicative `/ coordinate_radius_min` else-arm is gone).
+- parity==1: BYTE-IDENTICAL to HEAD (parity==1 branch already used exactly this
+  additive expression; removing the conditional is a no-op for it). Confirmed
+  via diff + test_lensing_exterior_admission.py 23 passed (141s).
+- parity!=1 (saddle): now exact inverse of `_from_caustic_fixed` saddle arm
+  `y_mag = _caustic_reach(gamma) + rho - 1` => `rho = 1 + |y| - _caustic_reach`.
+  `coordinate_radius_min` for parity!=1 = `min` over band edges/midpoint of
+  `_scalar_caustic_reach` (which is `_caustic_reach` imported-as-alias, L59),
+  i.e. band-minimum scalar reach — a conservative inner-edge bound, mirroring
+  parity==1's min-over-angles semantics. rho=1 <=> |y|=_caustic_reach, drho/d|y|=1.
+Module ast.parse OK. Saddle exterior charts still not trained (dormant path), so
+zero live behavior change; fix is correctness-consistency for when S2-2 wiring lands.
 
-### Production verified SOUND this pass (no new bug)
-- All 5 lensing modules import cleanly (IMPORTS_OK).
-- Only TEST call sites use stale from_engine(y1_range=...); production
-  surrogate_training.py L2153 uses rho_range/theta_c_range; producer
-  scripts/train_lens_surrogate.py goes through TrainingConfig (unaffected).
-- Serve mirror (likelihood.py _surrogate_coefficients) tag-symmetric with
-  training label: definition in KNOWN_FARFIELD_DEFINITIONS ->
-  reconstruct_farfield(...,definition) mirroring farfield_envelope_from_
-  partition (switch=_farfield_switch(definition), tau_c=0). MINUS_GHOST
-  re-adds farfield_ghost_term(chart_w, source, macro_matrix(gamma,beta,
-  kappa)) over below_mask before reconstruct; GhostDomainError -> return
-  None (symmetric refusal). Diffractive band-split refused (telescoping
-  identity holds only for kernel-sum switch=1 family). Interior/tube ->
-  reconstruct_from_envelope with geom switch+critical_delay, asserted
-  definition is None or in KNOWN_INTERIOR_DEFINITIONS. Well-constructed.
+### INS-2-001 — STILL OPEN (blocker vs acceptance (d))
+Far-field battery NOT ported. test_lensing_surrogate.py::BetaEliminationTestCase
+::test_eigenframe_envelope_is_beta_invariant still RED: "the anchor beta=0 source
+is out of domain" (served_0=False), stale (y1,y2)->(rho,theta_c) API. -x run
+1 failed + 1 error in 28s. Acceptance (d) requires this + ppgo_bandsplit +
+surrogate_census + exterior_windows GREEN — unmet. WP3 port not done this build.
+
+### INS-3-001 — STILL OPEN (flag to Librarian)
+SPEC.md + DATA_CONTRACTS.yaml unchanged. Saddle exterior axis prose (multiplicative
+-> additive) likely stale. DATA_CONTRACTS `rho=|y|/caustic_reach` is the ppGO
+annulus (scalar-reach, intentionally unchanged) — NOT a divergence. Surrogate .npz
+offline/unshipped — no contract entry owed.
 
 ### Carry-forward
-- INS-1-001 (ghost_kernel double _ghost_delay compute, geometry.py) — not
-  re-examined this pass; still presumed open non-blocking micro-DRY.
-- After suites ported, RE-RUN full lensing battery; watch on-axis ghost
-  xfail and RB delta_t_max edge-margin fixtures under larger-separation
-  caustic-fixed configs (INS long-term note).
+- Re-run FULL far-field battery once WP3 port lands; watch on-axis ghost xfail +
+  RB delta_t_max edge-margin fixtures under caustic-fixed larger-separation configs.
+- INS-1-001 (ghost_kernel double _ghost_delay) not re-examined; presumed open,
+  non-blocking micro-DRY.

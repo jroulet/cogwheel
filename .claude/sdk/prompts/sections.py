@@ -157,6 +157,23 @@ def _get_python_path_section() -> str:
 PYTHON_PATH = _get_python_path_section()
 
 
+TEST_TIER_LAW = """\
+## Test tiers (LAW — builds are FAST)
+
+- In-build tests MUST be fast: small/synthetic configurations, analytic or
+  few-evaluation oracles. Every claim needs a gate an agent can actually run.
+- Slow work NEVER runs inside a build: bulk-data sweeps, hour-scale
+  regressions, full-suite port-to-green, and campaign-scale training are
+  POST-BUILD DRIVER steps. Name them in acceptance ("driver-verified
+  post-build") — never in an in-build test spec or work package.
+- Cost every acceptance criterion BEFORE writing it: unit count x measured
+  per-unit cost. If you cannot bound it, it is post-build by default.
+- A test spec that takes an hour to run is a build-killer (deep transcripts)
+  and an unverifiable gate.
+- Agents verify ONLY what they changed; the driver runs the full tally.
+"""
+
+
 # ── Per-agent section mapping ────────────────────────────────────────────────
 
 AGENT_SECTIONS: dict[str, list[str]] = {
@@ -164,6 +181,7 @@ AGENT_SECTIONS: dict[str, list[str]] = {
         "KNOWLEDGE_ANCHORING",
         "SERENA_TOOLING",
         "IMPORT_CONVENTION",
+        "TEST_TIER_LAW",
     ],
     "simplifier": [
         "SERENA_TOOLING",
@@ -193,6 +211,7 @@ AGENT_SECTIONS: dict[str, list[str]] = {
         "SERENA_TOOLING",
         "PYTHON_PATH",
         "EXECUTABLE_ARTIFACT_VERIFICATION",
+        "TEST_TIER_LAW",
     ],
     "inspector": [
         "KNOWLEDGE_ANCHORING",
@@ -200,6 +219,7 @@ AGENT_SECTIONS: dict[str, list[str]] = {
         "IMPORT_CONVENTION",
         "SERENA_TOOLING",
         "PYTHON_PATH",
+        "TEST_TIER_LAW",
     ],
     "librarian": [
         "KNOWLEDGE_ANCHORING",
@@ -224,6 +244,7 @@ ALL_SECTIONS: dict[str, str] = {
     "INSERTION_SAFETY": INSERTION_SAFETY,
     "PYTHON_PATH": PYTHON_PATH,
     "EXECUTABLE_ARTIFACT_VERIFICATION": EXECUTABLE_ARTIFACT_VERIFICATION,
+    "TEST_TIER_LAW": TEST_TIER_LAW,
 }
 
 

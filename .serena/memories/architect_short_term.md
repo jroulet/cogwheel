@@ -1,5 +1,47 @@
 # Architect Short-Term Observations
 
+- Build 8h-b4 TRIAGE (2026-07-27): INS-2-001 (four-suite far-field
+  regression battery still RED, test_lensing_surrogate.py untouched) =
+  legitimate unmet acceptance(d), NOT a wrong finding, NOT new architecture
+  — plan already delegated the fixture port to Test Developer (approach
+  fully specified: _caustic_reach/_from_caustic_fixed, no tolerance
+  weakening) and it simply wasn't executed. Routed coder_fix bucket but
+  EXPLICITLY redirected to Test Developer per architect_knowledge
+  precedent (test-file-fixture-confined fixes never go to Coder, 3x+
+  precedent, now 4x). coder_instructions must name the executing agent.
+- Build 8h-b4 (2026-07-26): 3 defects, 2 Coder WPs + Test-Dev port.
+  WP1 exterior admission (surrogate_training.py): scalar exclusion_rho
+  (reach_max cusp SPIKE) swallows box for gamma>=0.85 -> 0 ext tiles.
+  Fix = per-theta_c-column admission. SIMPLIFIER: TRIM new dataclass;
+  ADD `admits_exterior` method to existing `_InteriorAdmission` (reuse
+  eta_max/theta_axis/radius_grid/caustic_clouds), keep `admits` byte-
+  identical (frozen S2-1). parity==1 ONLY; saddle exterior stays scalar
+  `_farfield_tiles`. Probe INNER rho edge: y_mag=radii+rho_inner-1
+  (additive), nearest caustic-cloud dist>=eta_max AND outside AND
+  inner edge in-box; per-column rho_inner, rho_outer shared; UNIFORM
+  theta grid (no cusp-align unless eps-fail). Prod uses cloud; TEST
+  oracle exact nearest_caustic_point. Coverage>=0.95 all bands incl
+  0.80-0.90; zero false-admit; reachable-red = restore scalar ->
+  0.80-0.90 collapses to 0 tiles. Keep ppgo_exclusion_rho scalar.
+  WP2 (surrogate.py): (a) saddle parity-1 arm of _to/_from_caustic_fixed
+  -> ADDITIVE-WITH-SCALAR-REACH: rho=1+|y|-_caustic_reach(gamma),
+  |y|=_caustic_reach+rho-1. PROFESSOR (confirmed by code): directional
+  r_caustic(gamma,theta) RAISES LensDomainError off-wedge on saddle
+  (disjoint deltoids don't enclose origin) -> literal "same additive
+  form" (directional) is ill-posed; scalar-reach additive kills reach-
+  stretch, drho/d|y|=1, round-trips everywhere. rho NOT an outside-
+  caustic certificate here (serve uses eta/image_count) -> DROP
+  (rho>1)<=>outside test. Saddle test triple: round-trip 1e-12 +
+  drho/d|y|=1 exact + REFUSAL-ABSENCE across theta_c in [-pi,pi] AND
+  gamma in (1,1.6] (catches regression to directional form). Defer
+  lobe-local radius to S2-2 serve slice. (b) _box_region_labels box-
+  CENTER _from_caustic_fixed unguarded -> gamma_c==1.0 crashes; wrap in
+  try/except _REFUSAL_ERRORS -> return (None,None) (int|None ok, guard
+  skips). Node-loop guard c28408b already in-tree: VERIFY not redo.
+  WP2(b) unblocks test_lensing_surrogate setUp ERROR (DomainGate/
+  Serialization). Librarian: check _to/_from docstrings + SPEC saddle-
+  coord sentence for staleness.
+
 - Build 8h-b3-FIN (2026-07-23): CONTINUATION, plan BINDING, do-not-replan.
   In-tree partial S1-1 measured: geometry.r_caustic DONE; surrogate.py
   FarFieldChart->(rho,theta_c), _to/_from_caustic_fixed, serve mirror,
