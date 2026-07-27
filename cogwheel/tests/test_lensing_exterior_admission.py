@@ -95,6 +95,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.spatial import cKDTree
 
 from cogwheel.lensing import prior as _lens_prior
 from cogwheel.lensing import surrogate as sg
@@ -121,9 +122,21 @@ N_SOURCES = 10_000
 #: Fixed RNG seed for the source grid (reproducible truth set).
 SEED = 20_260_727
 
-#: ``theta_c`` columns / ``rho`` rows for the coverage tiling.  Coverage is
-#: monotone increasing in this count; 150 clears the 0.95 bar in both bands.
-COVERAGE_N_TILES = 150
+#: ``theta_c`` columns / ``rho`` rows for the coverage tiling.
+#:
+#: COST ARITHMETIC (test-tier law): tile construction runs
+#: ``admits_exterior`` over n^2 candidates per band (5 probes x n_gamma
+#: against a 200-point cloud each), so cost scales as n^2 -- this is the
+#: DOMINANT cost of the coverage test, not the source count.
+#:
+#: Measured worst-band coverage vs n (2026-07-27, all five bands):
+#:     n = 60 -> 0.9845   (tiles+mask 3.3 s total)
+#:     n = 90 -> 0.9853   (tiles+mask 7.3 s total)
+#:     n = 150 -> 0.9725
+#: 150 was over-provisioned: 60 clears the 0.95 bar in EVERY band with more
+#: margin than 150 did, at 6.25x less tile construction.  The bar, the bands
+#: and N_SOURCES are unchanged.
+COVERAGE_N_TILES = 60
 
 #: Coverage acceptance bar (Professor: 0.95, NOT 0.97 -- discretization margin).
 COVERAGE_BAR = 0.95
@@ -151,8 +164,18 @@ NFA_GRID = 5
 #: Band whose OLD scalar exclusion admits zero tiles (reachable-red).
 RED_BAND = (0.80, 0.90)
 
-#: Polar nodes of the cached ``r_caustic`` interpolation table.
-RCAUSTIC_NODES = 1441
+#: Nodes for the exact-preserving caustic polyline that prefilters the
+#: eta-shell test (see `_beyond_eta_shell`).
+#:
+#: This samples the CRITICAL-CURVE parameter via ``geometry._caustic_source``
+#: -- the compiled helper ``nearest_caustic_point`` itself uses -- NOT the
+#: polar angle.  That choice is what makes the bound usable: polar sampling
+#: bunches badly at the astroid cusps, where ``r_caustic`` spikes (5.69 at
+#: gamma = 0.90), so a 1441-node polar table has a 0.891 max chord -- 18x
+#: eta_max, far too loose to certify anything -- and costs 12.7 s to build.
+#: The parametric sample is uniform along the curve: 16k nodes hold a 0.0031
+#: chord (6% of eta_max) and build in 0.020 s.  Measured 2026-07-27.
+PREFILTER_NODES = 16_000
 
 #: Directory for diagnostic plots.
 OUTPUT_DIR = Path(__file__).parent / 'output'
@@ -219,14 +242,79 @@ def _build_guard_chart(gamma_range: tuple[float, float]) -> 'sg.FarFieldChart':
     return single.charts[0]
 
 
-@functools.lru_cache(maxsize=None)
 def _rcaustic_table(gamma: float) -> tuple[np.ndarray, np.ndarray]:
-    """Cached ``(theta_axis, r_caustic_axis)`` for one gamma over ``[-pi, pi]``."""
-    theta_axis = np.linspace(-math.pi, math.pi, RCAUSTIC_NODES)
-    radius_axis = np.array(
-        [geometry.r_caustic(float(gamma), float(theta))
-         for theta in theta_axis])
-    return theta_axis, radius_axis
+    """Cached ``(theta_axis, r_caustic_axis)`` for one gamma over ``[-pi, pi]``.
+
+    Derived from the PARAMETRIC caustic sample (`_caustic_polyline`) and
+    converted to polar, rather than by root-finding ``geometry.r_caustic`` at
+    each of a grid of polar angles.  Both describe the same star-shaped
+    positive-parity astroid, but the parametric route costs 0.021 s against
+    12.50 s for 1441 root-finds -- a 595x saving on what was, measured
+    2026-07-27, the single dominant cost of the whole coverage suite (it is
+    reached twice per band, here and through `_to_caustic_fixed_vec`).
+
+    Accuracy against ``geometry.r_caustic`` over 997 probe angles: max error
+    9.0e-08 (gamma = 0.30), 1.9e-07 (0.50), 1.4e-06 (0.90) -- the worst is
+    0.003% of ``ETA_MAX``, far below every tolerance built on this table.
+    """
+    points, _ = _caustic_polyline(gamma)
+    theta = np.arctan2(points[:, 1], points[:, 0])
+    radius = np.hypot(points[:, 0], points[:, 1])
+    order = np.argsort(theta)
+    theta, radius = theta[order], radius[order]
+    # Wrap the period so np.interp is exact either side of +-pi.
+    theta = np.concatenate(([theta[-1] - 2.0 * math.pi], theta,
+                            [theta[0] + 2.0 * math.pi]))
+    radius = np.concatenate(([radius[-1]], radius, [radius[0]]))
+    return theta, radius
+
+
+@functools.lru_cache(maxsize=None)
+def _caustic_polyline(gamma: float) -> tuple[np.ndarray, float]:
+    """``(points, max_chord)``: dense caustic sample and its node spacing.
+
+    Positive parity only -- every coverage band has ``gamma < 1`` -- so the
+    caustic is the single closed 4-cusp astroid traced by the ``+`` branch.
+    """
+    theta = np.linspace(0.0, 2.0 * math.pi, PREFILTER_NODES, endpoint=False)
+    points = np.array(
+        [geometry._caustic_source(float(node), float(gamma), 0.0, 0.0, 1.0)
+         for node in theta])
+    closed = np.vstack([points, points[:1]])
+    max_chord = float(np.max(np.hypot(*np.diff(closed, axis=0).T)))
+    return points, max_chord
+
+
+def _beyond_eta_shell(gamma: float, y1: np.ndarray, y2: np.ndarray
+                      ) -> np.ndarray:
+    """``nearest caustic distance >= ETA_MAX``, exactly, without ``N`` searches.
+
+    The truth set needs only this BOOLEAN, never the distance itself, so the
+    ~1.4 ms per-source `geometry.nearest_caustic_point` search need only run
+    where a cheap bound cannot already decide the comparison.
+
+    With ``U`` the distance to the nearest polyline NODE (one KD-tree query)
+    and ``h`` the max node spacing, every point of the caustic lies within
+    ``h`` of some node, so the true distance ``d`` is bracketed:
+
+        U - h  <=  d  <=  U
+
+    The upper bound refutes the test when ``U < ETA_MAX``; the lower bound
+    certifies it when ``U - h >= ETA_MAX``.  Only sources whose ``U`` lands in
+    the ``h``-thin shell ``[ETA_MAX, ETA_MAX + h)`` are genuinely undecided and
+    fall through to the exact oracle -- ~0.1% of a uniform disk draw at
+    ``PREFILTER_NODES``.  The returned mask is therefore IDENTICAL to calling
+    the oracle on every source (asserted by `PrefilterExactnessTestCase`),
+    at ~1/100 the cost.
+    """
+    points, max_chord = _caustic_polyline(gamma)
+    upper = cKDTree(points).query(np.column_stack([y1, y2]))[0]
+    beyond = upper - max_chord >= ETA_MAX
+    undecided = np.flatnonzero(~beyond & (upper >= ETA_MAX))
+    for index in undecided:
+        beyond[index] = geometry.nearest_caustic_point(
+            gamma, 0.0, np.array([y1[index], y2[index]])).distance >= ETA_MAX
+    return beyond
 
 
 @functools.lru_cache(maxsize=None)
@@ -278,11 +366,7 @@ def _truth_set(band: tuple[float, float]
     magnitude = np.hypot(y1, y2)
     theta_c = np.arctan2(y2, y1)
     outside = magnitude > np.interp(theta_c, theta_axis, radius_axis)
-    distance = np.array(
-        [geometry.nearest_caustic_point(
-            gamma, 0.0, np.array([y1[k], y2[k]])).distance
-         for k in range(N_SOURCES)])
-    in_t = outside & (distance >= ETA_MAX)
+    in_t = outside & _beyond_eta_shell(gamma, y1, y2)
     rho, _ = _to_caustic_fixed_vec(gamma, y1, y2)
     return in_t, rho, theta_c, int(in_t.sum())
 
@@ -579,6 +663,55 @@ class WorstGammaTestCase(ExteriorAdmissionTestCase):
                 self.assertEqual(reaches, sorted(reaches))
                 self.assertEqual(_worst_gamma(band), hi)
                 self.record_comparison()
+
+
+class PrefilterExactnessTestCase(ExteriorAdmissionTestCase):
+    """The eta-shell prefilter agrees with the exact oracle, source by source.
+
+    `_beyond_eta_shell` replaces ``N`` exact `nearest_caustic_point` searches
+    with a KD-tree bracket that defers to the oracle only inside an ``h``-thin
+    undecided shell.  Because the whole truth set rests on that substitution,
+    it is asserted EXACT -- not merely close -- on a sample deliberately
+    concentrated ON the ``eta_max`` contour, where any bracket error would
+    surface first.  A uniform-disk control is included so the far field is
+    covered too, and both decision branches are asserted live: a prefilter
+    that cheaply decided every source would leave the oracle fallback untested.
+    """
+
+    def test_matches_exact_oracle_on_the_eta_contour(self) -> None:
+        gamma = 0.90              # worst band: loosest chord, tightest margin
+        points, max_chord = _caustic_polyline(gamma)
+        rng = np.random.default_rng(7)
+
+        # Ring: sources straddling the eta_max contour, radially offset from
+        # random caustic nodes, plus a uniform-disk control for the far field.
+        seeds = points[rng.integers(0, len(points), 900)]
+        radial = seeds / np.linalg.norm(seeds, axis=1, keepdims=True)
+        ring = seeds + radial * rng.uniform(
+            -2.0 * ETA_MAX, 2.0 * ETA_MAX, (900, 1))
+        magnitude = BOX_CORNER * np.sqrt(rng.random(300))
+        angle = rng.uniform(-math.pi, math.pi, 300)
+        control = np.column_stack([magnitude * np.cos(angle),
+                                   magnitude * np.sin(angle)])
+        sample = np.vstack([ring, control])
+
+        fast = _beyond_eta_shell(gamma, sample[:, 0], sample[:, 1])
+        exact = np.array(
+            [geometry.nearest_caustic_point(
+                gamma, 0.0, sample[k]).distance >= ETA_MAX
+             for k in range(len(sample))])
+        np.testing.assert_array_equal(fast, exact)
+        self.record_comparison()
+
+        upper = cKDTree(points).query(sample)[0]
+        undecided = int(((upper - max_chord < ETA_MAX)
+                         & (upper >= ETA_MAX)).sum())
+        self.assertGreater(
+            undecided, 0,
+            'no source was undecided: the oracle fallback never fired, so '
+            'this test would not detect a broken fallback')
+        self.assertLess(undecided, len(sample), 'nothing decided cheaply')
+        self.record_comparison()
 
 
 class ExteriorCoverageTestCase(ExteriorAdmissionTestCase):
