@@ -17,3 +17,20 @@
 - `rename_symbol` updates live code references but not docstring mentions
   of the old name written as `module._old_name` text — grep and fix those
   separately.
+- PROBE BEFORE ASSERTING: when told to add tests for an untested module,
+  measure the actual numbers first (`execute_shell_command` against the
+  real functions) so every tolerance is grounded in a measured value with
+  real headroom, never guessed. A measured disagreement that confirms a
+  known defect becomes a concrete @unittest.expectedFailure tripwire —
+  the repo convention for carrying a literal contract as an honest RED
+  that flips loud when the defect is fixed.
+- To isolate ONE of two independent guards, choose a fixture where the
+  OTHER guard is trivially satisfied (e.g. run the parity-margin tests at
+  w=0.01 so the w-scaled series guard can never trip) rather than hunting
+  for a literal simultaneous boundary.
+- An accuracy gate that is RED because of one unpinned constant does NOT
+  invalidate invariants that are independent of it (e.g. a w->0 limit
+  whose leading term carries no b1) — those stay genuinely green oracles.
+  Keep the two separated in the suite; don't conflate.
+- `pyflakes` is absent from the cogwheel-newlal env — fall back to
+  `ast.parse` plus the actual pytest run for syntax/import verification.

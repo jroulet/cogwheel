@@ -24,48 +24,55 @@
   `render_fragments.py` assigns bumps by alphabetical filename order
   within `spec_changelog.d/`, not by fragment date or build sequence —
   a known rendering quirk; flag, don't "fix".
-- When SPEC gains low-level perf/implementation detail (numba, grid
-  sizes, timings) but overview.rst is pitched at architecture/API level
-  with no per-eval perf claim, there is usually nothing to propagate —
-  don't manufacture a performance blurb. While there, verify the
-  FINDINGS IDs cited by SPEC exist and remain consistent.
+- SPEC ENTRIES THAT CITE A FUNCTION BY NAME GO STALE SILENTLY: a LATER
+  commit in the SAME backlog can refactor that function's role (e.g.
+  `_frame_t_min` demoted to a thin accessor once `_frame_delays` became
+  the authoritative construction) while touching no doc files. Check the
+  CURRENT docstring of every function SPEC.md names against what SPEC.md
+  claims about it — citing it once does not keep it accurate three
+  commits later.
+- WHEN A COMMIT DECLARES A MODULE "the single authoritative statement"
+  about a convention (e.g. `d_luminosity` is PHYSICAL, not apparent),
+  grep SPEC.md for the older contradicting sentence yourself: such
+  commits routinely omit SPEC.md from changed_files, so the flip never
+  propagates. Check FINDINGS.md too, but leave it alone if the finding
+  is about different physics.
+- If SPEC.md never described a mechanism's specific criterion in the
+  first place, a build that CHANGES that criterion creates no staleness —
+  don't manufacture a sentence that wasn't there. Implementation-level
+  detail (gate formulas, constants) belongs in the module docstring;
+  SPEC.md carries conventions and architecture.
+- When SPEC gains low-level perf/implementation detail but overview.rst
+  is pitched at architecture/API level, there is usually nothing to
+  propagate — don't manufacture a performance blurb. While there, verify
+  the FINDINGS IDs cited by SPEC exist and remain consistent.
 - LAYERED capability claims: a doc sentence about the PUBLIC entry point
-  (e.g. overview.rst "ChangRefsdalChannels is positive-parity only") can
-  stay TRUE while a lower layer (geometry/operator) already supports the
-  new regime — before editing, re-read the actual PUBLIC-layer refusal
-  CODE (does channels.py still `raise LensDomainError`?), not SPEC's
-  engine-row prose (which may describe the lower layer). Flip the sentence
-  only once the public layer's raise is gone (channels saddle guard was
-  lifted at Build 7b — the positive-parity-only claim is now due to flip).
+  can stay TRUE while a lower layer already supports the new regime —
+  re-read the actual PUBLIC-layer refusal CODE before editing, not SPEC's
+  engine-row prose. Flip the sentence only once the public raise is gone.
 - A todo fragment's itemized list can imply more distinct mechanisms than
   actually landed — ground-truth against `git log`/code before hunting for
-  a claimed Nth separate change; N items can resolve as fewer mechanisms.
-- If a symbol's own docstring already carries thorough rationale (e.g. a
-  config dataclass docstring), treat SPEC.md's paragraph as a compressed
-  echo of it — check the docstring first for staleness before re-deriving
-  from the functions.
+  a claimed Nth separate change.
+- If a symbol's own docstring already carries thorough rationale, treat
+  SPEC.md's paragraph as a compressed echo of it — check the docstring
+  first for staleness before re-deriving from the functions.
 - If the Serena MCP connection drops mid-task, just retry — the project's
-  own hooks block Bash/Read fallbacks on project files/commands, so there
-  is no usable fallback anyway.
+  own hooks block Bash/Read fallbacks on project files/commands.
 - Commit-preflight hooks can auto-stub `contracts_changelog.d/`/
-  `spec_changelog.d/` fragments with placeholder text ("Auto-generated ...
-  Librarian should refine this entry"); check the ACTUAL BODY of every
-  changelog fragment touched in a diff for this stub marker before
-  trusting render_fragments.py output — a fragment can exist and render
-  cleanly while still being a content stub.
-- When adding/repairing a DATA_CONTRACTS.yaml consumer list, grep for ALL
-  direct callers of the artifact's accessor function across the codebase
-  (not just the most obvious one) — consumer gaps often predate the
-  current build.
-- DATA_CONTRACTS.yaml consumer lists are production-only by convention;
-  test-file-only callers (flagged by sync_derived_docs.py) should be left
-  off and flagged for the artifact's own contract owner, not fixed
-  opportunistically outside the current build's scope.
+  `spec_changelog.d/` fragments with placeholder text ("... Librarian
+  should refine this entry"); check the ACTUAL BODY of every changelog
+  fragment touched in a diff for this stub marker.
+- DATA_CONTRACTS.yaml is for DISK artifacts: an in-memory dataclass that
+  gained new fields needs no entry unless it round-trips through disk —
+  confirm via its docstring before conflating "gained fields" with
+  "needs a contract". When adding/repairing a consumer list, grep for ALL
+  direct callers of the accessor (gaps often predate the build); consumer
+  lists are production-only by convention — test-file-only callers flagged
+  by sync_derived_docs.py stay off and get flagged to the contract owner.
 - On this machine, `scripts/sync_derived_docs.py` and
   `regenerate_consumer_graph.py` need `jedi` (present in conda env
   cogwheel-newlal, absent from the default PATH python) and ripgrep `rg`
   (absent entirely) — use
   `/home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python` for both.
   Without `rg`, `regenerate_consumer_graph.py` hard-fails; `sync_derived_
-  docs.py` still runs against the stale cached CONSUMER_GRAPH.json (misses
-  brand-new call sites only).
+  docs.py` still runs against the stale cached CONSUMER_GRAPH.json.

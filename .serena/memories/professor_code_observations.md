@@ -14,17 +14,57 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   guard at the top of `ChangRefsdalChannels.evaluate` was LIFTED — the
   channel layer now serves BOTH parities; only `macro_matrix`'s two named
   refusals (Type III lam<=0, det A=0 boundary) + census/fold guards raise.
+- `channels.farfield_ghost_term` GHOST ADMISSION GATE (Build 8h-d1,
+  reviewed PASS): the old frequency-dependent DECAY gate
+  (w_min * Im tau_c >= _FARFIELD_WINDOW_RADIANS = 2.0) is RETIRED. The
+  production gate is a frequency-INDEPENDENT geometric separation:
+  min over real images of the complex Euclidean |x_a - x_c| (Einstein
+  units, bare — no normalization, no w floor) >= `_GHOST_SEPARATION_MIN`
+  = 0.7, with x_c = ghost_kernel(...).position (Im kept) and x_a from
+  geometry.find_images. w-independence means the train and serve paths
+  reach the SAME decision by construction (the old gate skewed: train's
+  w-grid min=2 refused while serve's min=4 admitted the same config).
+  Verified numbers: near-cusp REFUSE separations 0.205-0.294 (cluster
+  ~0.24), well-separated ADMIT 1.43-1.96 (higher than the brief's 1.33
+  anchor, same order) — 0.7 sits inside the gap, biased toward refuse
+  (false-admit = silent lnL bias; false-refuse only falls back to exact).
+  Do-nothing ratios resid(MINUS_GHOST)/resid(KERNEL_SUM) = 0.009-0.323 on
+  every admitted config: subtracting a resolved ghost strictly reduces the
+  un-modelled remainder, as stationary phase predicts. `_GHOST_DET_FLOOR`
+  in `geometry._ghost_kernel` is a DISTINCT self-merge pathology, kept.
+  The 2.0 constant survives only as a carrier-resolution target in the
+  ghost-frame-collapse tests, not as an admission gate.
+- Ghost delay frame (Build 8h-b7 + 74c1d55): the ghost carrier is now
+  min-subtracted like the real kernels — `_frame_delays(source, matrix)`
+  returns (images, absolute_delays, t_min) as THE authoritative frame
+  construction (`_frame_t_min` is a thin accessor over it), and
+  `ChangRefsdalGeometryPartition` carries t_min/images so builders don't
+  re-solve the image quartic. `geometry.ghost_kernel` stays RAW/holomorphic.
+- `likelihood.py::_surrogate_coefficients` guards (Build 8h-d1): a
+  `beta != 0 -> return None` guard now sits beside the kappa!=0 guard.
+  Rationale: serve de-rotates the source into the shear eigenframe (y1,y2)
+  but passes theta un-rotated, so served geometry = theta_eig + beta while
+  the emulator was trained on the beta=0 surface — finite-but-wrong.
+  Latent only because production pins beta=0.
+- `lensing/chang_refsdal/_born.py` (Build 8h-c1) is DORMANT and UNWIRED:
+  F_born = sqrt(mu_macro)*exp(iw phi_geo)*(1 + i(w/2) b1/Q2r + O(w^2/Q2r^2)),
+  expanded about sqrt(mu_macro) = 1/sqrt((1-kappa)^2 - gamma^2), NOT about 1.
+  OWED (mine): the O(1) numerator b1 is a placeholder = 1.0 at a single edit
+  site — the closed form is nowhere in-repo, and 229/229 gate-passing annulus
+  configs disagree with `operator.F_op` by up to 13%. Guard A is calibrated
+  from the same b1, so it cannot refuse the error b1 causes. The w->0 macro
+  limit F -> sqrt(mu_macro) IS b1-independent and exact, so it stays a valid
+  green oracle while the accuracy gate is red — don't conflate the two.
 - `likelihood.py` post-3f: `_amplification_coefficients` interpolates
   ONLY the envelope E(w) on a LOO-adaptive coarse grid (seed 8, ceiling
   48; measured N=26-32), with closed-form switched-saddle reconstruction.
   Post-3g a candidate/fiducial ratio layer (lattice-snapped fiducials,
   `_fid_cache`, health/image-count guards, fallback to certified direct)
-  brings warm lnlike to 9.8 ms; the engine 1F1 ladder dominates residual
-  cost. Build 7b: the LOO stop is now gamma'-keyed — _LOO_STOP_FAST=4e-3
-  for gamma'<0.5 (incl. crown, byte-identical to old) tightening to
-  _LOO_STOP_STRONG=1e-3 for gamma'>=0.5 (macro-saddle rescue), via a pure
-  helper reading only lens gamma/kappa so fiducial-cache purity holds;
-  a global tighten to 1e-3 measured 1.44x crown wall time (rejected).
+  brings warm lnlike to 9.8 ms. Build 7b: the LOO stop is gamma'-keyed —
+  _LOO_STOP_FAST=4e-3 for gamma'<0.5 (byte-identical to old) tightening to
+  _LOO_STOP_STRONG=1e-3 for gamma'>=0.5, via a pure helper reading only
+  lens gamma/kappa so fiducial-cache purity holds; a global tighten to
+  1e-3 measured 1.44x crown wall time (rejected).
 - Zero-noise F->1 floor in `likelihood.py`: after anchoring on a
   gamma=kappa=0 candidate (genuinely F->1), the residual RB gap traces
   to a construction asymmetry — `_set_summary` builds `_h0_edges` with
@@ -56,9 +96,8 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   fixed 0 via FixedPrior. prior.standard_params == likelihood.params.
   Build 7b: reduced-shear gamma range WIDENED (0,0.45)->(0.0,1.6),
   a SINGLE uniform range spanning positive parity (gamma<1) AND macro
-  saddle (gamma>1); identity transform, NO discrete parity label (parity
-  is a deterministic fn of gamma); gamma=1 (det A=0) is a measure-zero
-  named refusal -> -inf at posterior, no prior special-casing. The
+  saddle (gamma>1); identity transform, NO discrete parity label; gamma=1
+  (det A=0) is a measure-zero named refusal -> -inf at posterior. The
   ['u1','u2'] astroid quadrant fold stays valid on the deltoid caustic.
 - C7 measurement (Build 4 review, verdict CONCERN): only 41.2%
   (206/500) of prior draws finite — the gamma prior overlaps the
@@ -70,11 +109,11 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   imaginary offsets; the real-t contour stays clean for both parities, so
   the `gamma_prime>1` guard in `_validate_inputs` was POLICY, not a math
   necessity (relaxed to >0). Cancellation law L_S=pi*w/4 holds on BOTH
-  parities (from the `t^{iw/2-1}` factor, never references signature).
-  Positive-parity mass-sheet fallback = (1/lam)*exp[0.5j*w*ln lam -
-  0.5j*w*kappa*s]*f_schwinger(w,y_eig,gamma') with gamma'<1 — EXACTLY
-  `_saddle_grid`'s formula (note `_grid_certified` multiplies an EXTRA
-  exp(0.5j*w*s) because its pure-shear G kernel excludes e^{iw|y|^2/2}).
+  parities (from the `t^{iw/2-1}` factor). Positive-parity mass-sheet
+  fallback = (1/lam)*exp[0.5j*w*ln lam - 0.5j*w*kappa*s]*
+  f_schwinger(w,y_eig,gamma') with gamma'<1 — EXACTLY `_saddle_grid`'s
+  formula (`_grid_certified` multiplies an EXTRA exp(0.5j*w*s) because its
+  pure-shear G kernel excludes e^{iw|y|^2/2}).
 - Index-theorem guard (Build 7a): unified invariant sum_a sign(mu_a) ==
   sign(det A) - 1 (positive parity -> 0, saddle -> -2). No maxima since
   tr Hess = 2*lam > 0. `morse_index` uses eigvalsh with strict `< 0.0`; a
@@ -84,43 +123,33 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   emulates the SACR-C ENVELOPE E(w) (smooth/beat-free), NOT the oscillatory
   F; tensor cubic spline over (ln w, gamma, y1_eig, y2_eig), real/imag
   interpolated SEPARATELY, per-region (parity/image-count). beta eliminated
-  EXACTLY by eigenframe rotation R(-beta) (E invariant to <1e-12 — empirical
-  confirmation of the Q2 ruling). Off by default (amplification_surrogate=
-  None -> crown byte-identical, surrogate never touches a physics answer).
-  Serve gate = box containment + exclusion balls around refused points +
-  per-w refusal propagation, no learned mask. lnL-from-envelope error obeys
-  dlnL ~ eps_dense*SNR^2 with |lnL|~SNR^2 (ratio O(1), measured peak ~0.84)
-  — a fixed nat budget is the WRONG currency. RED FLAG: a near-caustic box-
-  edge config eps=0.16 gave a 12.8-nat lnL error; before ANY enable-by-
-  default the served region must carry a caustic/edge margin and re-gate at
-  production eps~1e-4 to the 0.01/0.1-nat tiers (Q5 deferral stands). Saddle
-  dlnL~0.66 is RB-binning-floored (F016), not envelope-limited. LATENT
-  (INS-8a-001): serve gate has NO kappa axis (trained kappa=0) — safe only
-  because production pins kappa=0; add a kappa!=0 -> None guard for the
-  conservative-serve contract.
+  EXACTLY by eigenframe rotation R(-beta) (E invariant to <1e-12). Off by
+  default (amplification_surrogate=None -> crown byte-identical). Serve gate
+  = box containment + exclusion balls + per-w refusal propagation, no
+  learned mask. lnL-from-envelope error obeys dlnL ~ eps_dense*SNR^2 with
+  |lnL|~SNR^2 (ratio O(1), measured peak ~0.84) — a fixed nat budget is the
+  WRONG currency. RED FLAG: a near-caustic box-edge config eps=0.16 gave a
+  12.8-nat lnL error; before ANY enable-by-default the served region needs a
+  caustic/edge margin and a re-gate at production eps~1e-4. Saddle dlnL~0.66
+  is RB-binning-floored (F016), not envelope-limited.
 - Far-field tile subdivision (Build 8h WP4): halving a tile reduces heldout
   eps because E_ff (the demodulated SACR-C envelope) is smooth — spline
   error ~h^(p+1) drops ~2^(p+1) per halving — EXCEPT tiles straddling a
   genuine caustic non-analyticity (fold/cusp turning point, or a tau_c lobe
   jump between deltoid lobes), which subdivision cannot rescue; those
   children correctly stay failing and fall to the ppGO serving ladder below
-  w_cert.
-- farfield_eps_max is an ABSOLUTE bound on max|E_ff| residual, not
-  per-tile/density-normalized — valid to compare parent vs child directly
-  since E_ff's config-level max|F| scale is identical for both.
+  w_cert. `farfield_eps_max` is an ABSOLUTE bound on max|E_ff| residual, not
+  per-tile/density-normalized — valid to compare parent vs child directly.
 - ppGO ceiling mechanism (Build 8h-b, verified against
   test_lensing_ppgo_bandsplit.py, 66/66 green): `_measure_cell` in
   ppgo_map.py does truncation-on-refusal via `_max_accepted_prefix`
   (bisects the w-node INDEX per angle, monotone-refusal assumption; a
-  non-monotone break only shrinks the accepted set, never over-accepts).
-  w_ceiling = min-over-angles of the accepted-prefix endpoint; a fully-
-  accepted cell forces ceiling=wall (byte-identical to HEAD).
+  non-monotone break only shrinks the accepted set). w_ceiling =
+  min-over-angles of the accepted-prefix endpoint; a fully-accepted cell
+  forces ceiling=wall (byte-identical to HEAD).
   `_surrogate_coefficients`/`surrogate_training.train` both gate on
-  eff_ceiling=min(wall, cell_ceiling) via `_ppgo_band_split`/
-  `_ppgo_cell_ceiling` (likelihood.py) and `_stratum_ppgo_boundary`/
-  `_stratum_ppgo_ceiling` (surrogate_training.py). The outer annulus
-  [4,inf) rho band is additionally capped at rho_measured_max_grid
-  (inclusive boundary); loader hard-refuses (KeyError/hash ValueError) on
+  eff_ceiling=min(wall, cell_ceiling); the outer annulus [4,inf) rho band is
+  additionally capped at rho_measured_max_grid; loader hard-refuses on
   pre-0.2.0 artifacts.
 - This agent instance has no image-rendering/Read-image tool — validate
   diagnostic PNGs via the numeric asserts backing the same plotted

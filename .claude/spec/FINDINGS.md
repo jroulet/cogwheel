@@ -814,3 +814,62 @@ numerical neighborhood. Two open notes:
    path is a latent member of this class (a repo grep found exactly
    this one; `_newton_polish` already guards its solve with an lstsq
    fallback).
+
+## F020 — a far-field chart trained below `w_floor` fits a divergent object; and a tile centred on a cusp ray fits a slope kink (2026-07-27, Build 8h-d triage)
+
+Two INDEPENDENT causes of an inflated held-out `eps` in exterior chart
+fixtures, both invisible to inspection and both worth orders of magnitude.
+Recorded because a prior pass searched only box PLACEMENT (three `rho_c`
+values, halves down to `(0.1, 0.03)`, narrower gamma bands), found nothing,
+and recorded the degradation as unexplained. Neither cause is reachable by
+varying tile geometry.
+
+1. WRONG LABEL BELOW `w_floor`. `FARFIELD_KERNEL_SUM` subtracts the real
+   image kernels, which is the correct label only in the mid band
+   `[w_floor, w_trust)`. Below `w_floor` no real pair separates and the
+   residual is the divergent diffractive-bottom object; the correct label
+   there is `FARFIELD_DIFFRACTIVE` (subtract nothing). A fixture training the
+   kernel-sum label from `w = 0.0248` against a region `w_floor = 0.661` put
+   ~11 of ~15 log-`w` nodes under the floor and measured `eps = 7.67` against
+   a `3e-3` bar. Correcting the band bottom to the region floor
+   (`_farfield_region_w_floor`) alone took `eps` to `9.0e-3` — a factor 847.
+
+2. CUSP-RAY TILE CENTRES. For the astroid the cusps sit at
+   `theta_c = 0, pi/2, pi, 3pi/2`, where `r_caustic` has a slope KINK. A tile
+   centred on one asks a cubic spline to represent a non-smooth map. Moving
+   the same fixture's centres off the rays (to 0.5 / 0.95 / 1.4, all inside
+   `(0, pi/2)`) took `eps` from `9.0e-3` to `3.4e-4`. Combined with (1):
+   `7.67 -> 3.4e-4`, a factor 22,500, with the bar and the poison factor
+   UNCHANGED.
+
+DIAGNOSTIC SIGNATURE for (2): the ordering inverts. A deliberately POISONED
+chart scored BETTER than the "healthy" one (2.61 vs 7.67) because the healthy
+tile straddled a cusp ray while the poisoned tile sat between cusps. An
+incoherent ordering between a control and its degraded twin means neither is
+fitting anything — look for a structural cause, not a tolerance.
+
+The production tiler already addresses (2) with cusp-ALIGNED columns
+(`_cusp_aligned_theta_tiles`), which put the ray on a column EDGE; see
+`OnCuspColumnEdgeTestCase`. Any fixture or chart path that does NOT route
+through that alignment inherits this defect.
+
+## F021 — agent short-term memories are tail-capped, so a build's findings can be evicted before the Dreamer consolidates them (2026-07-27)
+
+Inlined short-term memories are truncated to a 24 KB tail. When several
+builds run between Dreamer passes, the OLDEST entries are dropped first — so
+a finding recorded early in a busy day never reaches long-term memory, and
+its absence is silent: consolidation reports success having promoted only
+what survived.
+
+Observed 2026-07-27: after three builds in one day, two substantive findings
+(F020 above, and the deletion of 25 structural test classes with a restore
+SHA) were absent from every short-term memory at consolidation time. The
+Dreamer correctly REFUSED to promote them rather than inventing content, and
+flagged the gap — which is the right behaviour and the only reason the loss
+was noticed.
+
+Mitigations, in order of preference: run the Dreamer between builds on a busy
+day rather than at the end; write durable findings to `FINDINGS.md` (this
+file) at the time they are measured, not via memory; and treat a Dreamer
+report that flags "pattern not present" as a signal to recover from git or
+the build handoffs, never as a reason to drop the finding.

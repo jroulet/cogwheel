@@ -31,36 +31,46 @@
   editing existing suites is a benign plan deviation.
 - A build that REMOVES named constants/mechanisms almost always leaves
   stale the exact SPEC sentence naming them — check that paragraph. Doc
-  staleness is a flag-to-Librarian finding, not a Coder defect. A build
-  the plan expected to touch SPEC but didn't = flag to Librarian.
+  staleness is a flag-to-Librarian finding, not a Coder defect; a build
+  the plan expected to touch SPEC but didn't = flag to Librarian. CARVE-
+  OUT: retired-mechanism text surviving in COMPLETED.md / completed.d /
+  changelog fragments is append-only HISTORY describing a past build —
+  correctly frozen, NOT staleness. Only the canonical surfaces (SPEC.md,
+  FINDINGS.md, DATA_CONTRACTS.yaml, docs/source) can go stale.
+- A GATE-CONTRACT swap (retiring one admission criterion for another)
+  breaks every sibling suite that encoded the OLD contract, not just the
+  changed module's own new test — require the fix to re-key EVERY named
+  required-green suite, and verify by running each file to completion
+  (Build 8h-d1, INS-d1-001; confirmed across two passes).
+- Reconcile a suite's result against the file's ACTUAL test-method count
+  (passed + xfailed + failed must equal it, HEAD count == worktree count
+  unless methods were added/removed). A pass/fail count carried over from
+  your own earlier pass can be a miscount — re-derive it, don't trust it.
 - Re-reviewing a byte-identical diff: still re-run the suite + import
   probes and re-derive the key identity by hand.
 - DATA_CONTRACTS covers serialized/shipped artifacts only; new fields on
   an in-memory dataclass need no contract change (pickle __getstate__
-  still deserves a round-trip probe). An OFFLINE-ONLY artifact (surrogate
-  .npz, trained but not shipped/consumed by pipeline scripts) likewise
+  still deserves a round-trip probe). An OFFLINE-ONLY artifact likewise
   needs no entry yet — revisit if a file is actually shipped/consumed.
 - A serve/approximation gate must include EVERY parameter axis the
-  approximation was trained at. A missing axis (e.g. surrogate has no
-  kappa axis, trained kappa=0) that is harmless only because production
-  pins that axis is still a LATENT correctness violation of the
-  conservative-serve contract — flag it, don't wave it through on
-  "non-triggering in production".
+  approximation was trained at. A missing axis (surrogate has no kappa
+  axis, trained kappa=0) that is harmless only because production pins
+  that axis is still a LATENT correctness violation of the conservative-
+  serve contract — flag it, don't wave it through on "non-triggering in
+  production". (Build 8h-d1 landed the matching beta!=0 guard.)
 - Refusal-net reviews: trace EVERY dispatch route to the boundary —
   scalar lnposterior AND the sampler's prior.unfold_apply wrap must both
   route through the override; except must name specific refusal types,
   never bare (Build 4).
 - Check the approved plan JSON before flagging a constraint deviation: an
-  explicitly documented/approved deviation (e.g. d_app deferral to Build
-  5) is not a finding.
-- A documented @expectedFailure efficiency aspiration (prior-width
-  refusal fraction) is a property, not a bug — but verify all non-finites
-  are exact -inf with zero NaN before accepting.
+  explicitly documented/approved deviation is not a finding.
+- A documented @expectedFailure efficiency aspiration is a property, not
+  a bug — but verify all non-finites are exact -inf with zero NaN.
 - A crash that aborts tuple-unpacking (e.g. an arity change) MASKS every
   downstream content assertion in that test process. After the crash-fix,
   the FIRST full green run is the real content review — never close a build
   on "unpack fixed"; run the whole suite to completion and grep the summary
-  line (a background wrapper's exit_code can be the trailing echo, not pytest).
+  line (a background wrapper's exit_code can be the trailing echo).
 - When a producer label is redefined (e.g. far-field envelope), stale test
   ORACLES and reconstruction HELPERS that still reference the OLD label/path
   are the likely failure — distinguish from a production bug via a node-exact
@@ -71,16 +81,13 @@
 - A partial/targeted re-run that greenlights the NAMED finding can HIDE a
   sibling regression from the SAME edit. When a build resolves an
   emulation-accuracy finding by RELOCATING a shared fixture (e.g. moving
-  the source to the far-field exterior / larger |y|), the relocation
-  changes downstream PHYSICS (larger image separation -> larger relative
-  delays) and can break unrelated tests that reuse the fixture — most
-  likely those hitting the RB delta_t_max binning limit or a kappa!=0 /
-  larger-separation variant. Always run the WHOLE changed test file(s) to
-  completion and audit every reuse of any relocated shared fixture.
-- A shared lnlike fixture whose relative delay sits ~1e-4 under
-  delta_t_max is a latent trip-wire: any variant that grows the delay
-  (nonzero kappa, larger source offset) tips it over. Flag edge-margin
-  fixtures as design fragility even when the base config passes.
+  the source to a larger |y|), the relocation changes downstream PHYSICS
+  (larger image separation -> larger relative delays) and can break unrelated
+  tests — most likely those hitting the RB delta_t_max binning limit. Always
+  run the WHOLE changed test file(s) and audit every reuse of a relocated
+  shared fixture. A shared lnlike fixture whose relative delay sits ~1e-4
+  under delta_t_max is a latent trip-wire: flag edge-margin fixtures as
+  design fragility even when the base config passes.
 - A guard-clause refactor that ends a loop body on `continue` inside the
   guard is a red flag: check the fall-through (non-guarded) tail still
   packs/returns — a deleted pass-case tail is a silent regression.
@@ -92,16 +99,13 @@
   trigger its expensive underlying computation (e.g. a full geometry
   sweep) TWICE per request — code-level dedup doesn't guarantee runtime
   dedup; flag redundant re-invocation of expensive shared derivations as
-  a design finding even when functionally correct (Build 8h-b, pattern
-  INS-1-001).
+  a design finding even when functionally correct (Build 8h-b).
 - When verifying an added ceiling/boundary mechanism, confirm the
   degenerate "fully accepted / no restriction" case algebraically forces
   the new boundary equal to the old default (e.g. ceiling=wall) — this is
-  how byte-identical-to-HEAD behavior is actually proven, not just
-  asserted (Build 8h-b).
+  how byte-identical-to-HEAD behavior is actually proven.
 - Before crediting a fix against its named acceptance-gate test, confirm
   the test's fixture actually ROUTES THROUGH the fixed code path — a
   correct production fix (e.g. in a tiler) can leave the named gate red
-  if the test builds via a different entry point (e.g. a single-box
-  from_engine call) that bypasses the fixed component entirely
-  (Build 8h-b6, INS-1-001).
+  if the test builds via a different entry point that bypasses the fixed
+  component entirely (Build 8h-b6, INS-1-001).

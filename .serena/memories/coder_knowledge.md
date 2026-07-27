@@ -9,6 +9,18 @@
 - Never author certification gates for your own WP code; when retiring
   superseded tests, leave a loud OWED list naming replacement gates for
   Test Dev.
+- NEVER hand-tune a calibration/curvature constant to make your own
+  certificate pass (self-grading). When a plan pins a formula's STRUCTURE
+  but not an O(1) constant, hard-code the unknown at ONE named edit site
+  with a loud placeholder note and flag it as owed expert work. Corollary
+  (Build 8h-c1): a guard whose threshold is DERIVED from that same unpinned
+  constant is self-referential — it passes exactly where the constant is
+  wrong, so it cannot be cited as evidence the rung is accurate.
+- UNSHIP, DON'T PATCH: when review shows a new rung is uncertified, remove
+  it from the live serve path (slot returns None -> falls through to the
+  certified exact engine), revert its census category, and leave the module
+  dormant/unwired with a STATUS docstring naming the re-enable condition.
+  Deriving the missing constant is expert work, not a Coder guess.
 - After a regex-anchored method retirement, re-parse the file (ast.parse):
   substring anchors can leave a silent IndentationError.
 - Cubic splines are C2: put a NODE on each C2 kink, never a segment break;
@@ -16,8 +28,7 @@
   rebuild analytic/switched parts closed-form at dense samples.
 - LOO adaptive refinement: held-out error from a few-nearest-OTHER-node
   fit, normalized in the gate's error currency, hard-coded threshold.
-  Keep ONE shared refinement loop parameterized by a node_error closure
-  (DRY across direct/ratio paths).
+  Keep ONE shared refinement loop parameterized by a node_error closure.
 - Include the known worst-case point in every seed grid so refusals fire
   unswallowed on first eval; fallback paths must forward the already-
   computed seed — never redo engine work on fallback.
@@ -39,7 +50,7 @@
   empty, behavioral flags (testing seams) PRESERVED. For an optional
   not-yet-serializable feature: override get_init_dict to POP the key when
   default (JSON byte-identical vs HEAD) and raise NotImplementedError when
-  set (defer fitted serialization); the object rides pickle in __dict__.
+  set; the object rides pickle in __dict__.
 - Numerical series: prefer reciprocal-binomial O(1)-scaled factorization;
   large phases lose precision in the w*tau MULTIPLICATION — reduce mod
   2*pi first. Accuracy tests near singularities need scale-aware bounds
@@ -59,64 +70,69 @@
   the HEAD module copy via importlib SIDE-BY-SIDE (register it in
   sys.modules FIRST so @dataclass fields resolve) and assert max|diff|=0.0
   over a config sweep + full refusal-decision match. Make the new-regime
-  classification gate EXACTLY mirror the frozen path's gate so the new
-  prefix returns before touching frozen internals (byte-identity by
-  construction). A SINGLE fast-path intercept at the top of the expensive
-  method that returns None on every guard miss lets the exact path fall
-  through untouched when the feature is off or any guard fails.
+  classification gate EXACTLY mirror the frozen path's gate. A SINGLE
+  fast-path intercept at the top of the expensive method that returns None
+  on every guard miss lets the exact path fall through untouched.
+- SINGLE-SOURCE A CONVENTION: when you find an inline re-expression of a
+  rule a primitive already owns (e.g. `np.sort(d - d.min())` beside
+  `_frame_delays`), route it through the primitive. Byte-identity is proved
+  by the ALGEBRAIC identity (float() of a np.float64 min is the exact same
+  64-bit value), not by a rerun. Forward references to a helper defined
+  later in the module resolve at call time — fine.
+- A shared derivation helper dedupes CODE but not RUNTIME: if several call
+  sites each invoke it, an expensive underlying computation (e.g. a full
+  geometry sweep / image quartic solve) still runs once PER CALLER. For
+  values derived from a fixed input pair, compute ONCE and carry them as
+  fields on the partition/dataclass instead of re-deriving them inside
+  hot-path functions.
+- TRAIN/SERVE CONSISTENCY: when a guard is monotone over the band, gate at
+  the band's WORST case and use the SAME worst-case point in every consumer
+  (serve, census, training) — gating census at the best case over-attributes
+  configs to a rung that serve actually refuses. Deviating from WP text for
+  this reason is correct, but flag it loudly.
 - Tighten a tolerance ONLY in a sub-region without touching the certified
   hot path: gate the constant on a PURE fn of the candidate params at the
-  single shared decision site (split _LOO_STOP -> FAST/STRONG keyed on
-  gamma'); the unchanged branch returns the OLD constant verbatim so the
-  certified region stays byte-identical and fiducial/cache purity holds.
-  Key on the PHYSICALLY correct variable (gamma', not |gamma|).
+  single shared decision site; the unchanged branch returns the OLD constant
+  verbatim so cache purity holds. Key on the PHYSICALLY correct variable.
 - Independent oracles for singular integrands must be regularized: a naive
   Int_0^inf t^{s-1} h(t) form is ill-posed — use subtract-h(0) or IBP-with-
   h'. A DIFFERENT regularization scheme from the code's is the point (F002
   non-circular); phase agreement also confirms sign/conjugation convention.
 - Serena `replace_symbol_body` on a function target: the new body MUST
   include the `def` signature line — omitting it deletes the def+docstring,
-  producing a column-0 IndentationError.
-- Never hand-tune a calibration/curvature constant just to make your own
-  certificate pass — that fits the oracle to the code under test
-  (self-grading); leave it refusing and flag the calibration as owed work.
+  producing a column-0 IndentationError. When a literal replace_content
+  needle is ambiguous across sibling classes, prefer replace_symbol_body
+  (unambiguous by name path) over widening the needle.
 - For large Monte-Carlo census sweeps (N>=1e5), stream results into fixed
   threshold-grid histograms (`counts_ge += (arg>=grid).sum()`) instead of
   storing per-sample arrays — the histogram IS the CDF, no memory blowup.
 - To classify which guard blocks a sample, toggle ONE guard off via
   `dataclasses.replace` on a frozen config object and re-call the real
   guard function — never re-derive the guard math inline.
-- SDK now caps inlined short-term memories at 24KB (tail-kept); earlier
-  entries survive only in git history, not the prompt.
+- SDK caps inlined short-term memories at 24KB (tail-kept); earlier entries
+  survive only in git history, not the prompt.
 - Prefer OPTIONAL trailing args with backward-compatible defaults over
-  changing a function's return-tuple shape when adding capability — keeps
-  existing call sites/tests passing as regression guards for the untouched
-  path (Build 8h-b).
-- A shared derivation helper (DRY refactor) dedupes CODE but not
-  necessarily RUNTIME: if several call sites each independently invoke the
-  shared helper, an expensive underlying computation (e.g. a full geometry
-  sweep) can still run once PER CALLER — for genuinely expensive shared
-  derivations, compute once and pass the result to all consumers.
-- When a boundary/refusal is known to be monotone over an ordered grid,
-  bisect on the node INDEX (not value) for O(log n) determination; even if
-  monotonicity breaks locally, the bisection result stays conservative
-  (never over-accepts) — safe default for w-node-style prefix acceptance.
+  changing a function's return-tuple shape when adding capability.
+- When a boundary/refusal is monotone over an ordered grid, bisect on the
+  node INDEX (not value); even if monotonicity breaks locally the result
+  stays conservative (never over-accepts).
 - Schema/artifact evolution: make new certification-critical fields
   REQUIRED positional (no default) so pre-migration artifacts hard-refuse
-  (KeyError/False) instead of silently certifying with missing data;
-  enforce new validity caps at the single internal accessor chokepoint so
-  every external accessor inherits the guard for free without a new
-  sentinel.
-- When a literal `replace_content`/`replace_symbol_body` match is
-  ambiguous because an identical code block is duplicated across sibling
-  classes/functions, prefer `replace_symbol_body` (unambiguous by name
-  path) over widening the literal needle (Build 8h-b6).
+  instead of silently certifying; enforce new validity caps at the single
+  internal accessor chokepoint.
 - A byte-identical default/fallback branch must keep the LITERAL original
-  expression, not a call into the new generalized helper fed a degenerate/
-  empty input — the generalized form can be FP-close but not bit-identical
-  to the original construction (Build 8h-b6).
-- For non-circular/star-shaped admission or boundary regions (e.g. sheared
-  lobes), normalize by a DIRECTIONAL per-angle boundary function, not a
-  scalar reach/radius constant — scalar normalization can zero out all
-  admitted tiles even where the region has room, because near-cusp
-  clearance can be far below the far-cusp scalar extent.
+  expression, not a call into the new generalized helper fed a degenerate
+  input — the generalized form can be FP-close but not bit-identical.
+- For non-circular/star-shaped admission regions (e.g. sheared lobes),
+  normalize by a DIRECTIONAL per-angle boundary function, not a scalar
+  reach/radius constant — near-cusp clearance is far below the far-cusp
+  scalar extent.
+- Tell Test Dev when a refusal is bounded BELOW by an intrinsic quantity
+  (e.g. complex-norm separation >= |Im(x_c)|): mutating one input cannot
+  force the refusal branch, so reachable-red requires the genuine physical
+  regime, not a monkeypatched value.
+- A partially-rotated frame is a silent correctness trap: if serve
+  de-rotates some coordinates (y1,y2 into the eigenframe) but passes another
+  angle un-rotated, an off-axis parameter yields finite-but-wrong output.
+  Guard every parameter axis the emulator/approximation was trained at by
+  mirroring the existing axis guard exactly (`if lens['x'] != 0: return None`).
