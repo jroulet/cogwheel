@@ -38,8 +38,16 @@ def write_state(
     last_commit: Optional[str] = None,
     status: Optional[str] = None,
     extra: Optional[dict] = None,
+    touch_last_run: bool = True,
 ) -> Path:
-    """Write (or update) an agent's state file."""
+    """Write (or update) an agent's state file.
+
+    ``touch_last_run=False`` records a status WITHOUT claiming the agent ran.
+    Use it when reporting that a role was skipped: stamping ``last_run`` there
+    would redefine the field as "last time we considered running it", which
+    silently destroys the staleness signal that tells a driver a role has not
+    actually executed in days.
+    """
     path = _state_path(project_root, agent_name)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -54,7 +62,8 @@ def write_state(
 
     state = {
         "last_commit": last_commit,
-        "last_run": datetime.now(timezone.utc).isoformat(),
+        "last_run": (datetime.now(timezone.utc).isoformat() if touch_last_run
+                     else existing.get("last_run", "")),
         "status": status or existing.get("status", ""),
     }
     if extra:

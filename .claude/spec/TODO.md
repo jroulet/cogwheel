@@ -69,27 +69,6 @@ Tag conventions:
   stack — changing the SDK underneath an unproven pipeline would confound the
   two. Once cogwheel proves it, port to `~/Work/teja-force` (assets/sdk) and gw.
 
-- **The Tidy role has been silently failing since 2026-07-19** `[housekeeping]`
-  — `.claude/agent_state/tidy.json` records `last_run: 2026-07-19T03:10:29`
-  with `status: "failed"`, and `.serena/memories/tidy_short_term.md` has been
-  87 bytes since the same date. Meanwhile the post-commit hook regenerates
-  `.claude/tidy_advisory.json` on every commit (last written 2026-07-27
-  19:42), so the trigger fires continuously and nothing consumes it.
-
-  Eight days of no-op with no signal. Same failure shape as the rotted test
-  suites: a step that reports success by silence, so its absence looks
-  identical to its working.
-
-  Worth: (a) finding why the 2026-07-19 run failed (its own logs, or re-run
-  it and read the error); (b) deciding whether the advisory trigger should
-  fail loudly when nothing consumes it for N commits, rather than
-  accumulating; (c) either restoring the role to the post-build sequence or
-  retiring it deliberately.
-
-  NOT urgent for correctness — Tidy is repo hygiene, and no defect has been
-  traced to its absence. But an agent whose failure is indistinguishable
-  from its success is worth either fixing or deleting, not leaving armed.
-
 - **Derive the Born correction coefficient `b1`, then wire the rung** — the
   Born module (`chang_refsdal/_born.py`) ships DORMANT: its two-term series
   `F_born = sqrt(mu_macro) * exp(1j*w*Phi_geo) * (1 + 1j*(w/2)*b1/Q2r + ...)`
@@ -116,36 +95,6 @@ Tag conventions:
   Until this lands the annulus is NOT covered and the exact engine serves it --
   which is correct, certifiable (`w * |y| <= 60` never binds inside the prior),
   and not zero-quadrature.
-
-
-- **Frame-invariant label round-trip costs ~3e-11 on near-fold configs**
-  `[→ spec]` — WP2 (8h-d2) made the far-field label frame-INVARIANT by storing
-  `E_tilde = E_minrel * exp(+1j*w*t_min)`, with `channels.reconstruct_farfield`
-  undoing it via `exp(-1j*w*t_min)`. That round trip is not the identity in
-  floating point: the error is `~eps * |w*t_min| * |E_tilde|`, and near a fold
-  the label is LARGE (measured `max|E_tilde| = 2.55e5`, `max|w*t_min| = 13.66`),
-  so the absolute error reaches `+2.9e-11`.
-
-  Consequence: `MorseSignMaskTestCase.test_telescoping_holds_for_the_cusp_
-  adjacent_mask` (`test_lensing_ppgo_bandsplit.py`) moved from `4.9e-12` on the
-  retired direct min-relative path to `1.66e-11` against its `1e-11` bound. It
-  is currently held by `@expectedFailure` with the bound kept VERBATIM — the
-  tolerance was deliberately NOT weakened. `InteriorTelescopingTestCase`, a
-  non-fold config through the SAME helper, still passes at `1.6e-16`, so the
-  xfail is correctly scoped to the near-degenerate cusp regime.
-
-  This is a real (small) precision cost bought for frame-invariance, not a
-  fixture artifact. Two candidate resolutions, both needing a decision rather
-  than a patch:
-  1. Reconstruct in the min-relative frame on this path (the direct route
-     measures `4.9e-12`), i.e. do not round-trip at all — a data-flow change.
-  2. Accept the cost and re-derive the tolerance from the production serve
-     precision, which is the honest bar if the round trip stays.
-
-  Do NOT resolve by raising `1e-11` to make the test pass; that would hide the
-  regression rather than price it. The large `|E_tilde|` near folds is itself
-  worth a look — a demodulated label that grows to `1e5` is poorly conditioned
-  exactly where the physics is hardest.
 
 - **Restore the surrogate structural tests once the serving schema settles**
   `[housekeeping]` — three classes were DELETED from
@@ -486,7 +435,28 @@ teja-force skill + gw with the rest of the hardening.
   the SAME symbol; the second one escalates to a review of the guard rather
   than a third bypass.
 
-  Third: the build that added the fourth bypass had ALREADY MEASURED the
+  Third rule, added 2026-07-28: A TEST WHOSE PREMISE IS "HEAD IS THE
+  PRE-CHANGE REVISION" CANNOT BE BOTH GREEN AND MEANINGFUL IN THE TREE IT IS
+  COMMITTED TO. `test_lensing_farfield_envelope.py` carried a `_head_module`
+  helper that imported a module via `git show HEAD:<path>` and compared it
+  against the working tree, to certify the 8h-d2 far-field changes were
+  additive. Before the commit it passed and meant something; after the commit
+  HEAD *is* the branch, so `TubeByteIdentityTestCase` compared
+  `surrogate.py` to itself and passed unconditionally, while
+  `FarfieldTelescopingRoundTripTestCase` errored outright
+  (`reconstruct_farfield() missing 1 required positional argument: 't_min'`).
+  It had no window in which it was correct in its own repository.
+
+  Worse, it is invisible to the pre-commit gate BY CONSTRUCTION: the full
+  suite was green immediately before the commit, because HEAD was still the
+  old revision then. The breakage appears only in the NEXT run. Retired the
+  apparatus rather than re-pinning it to a fixed SHA, which defers the rot
+  instead of removing it. Migration equivalence belongs in a throwaway probe
+  the driver runs while the migration is in flight, never in a committed
+  test. What belongs in the suite is the intrinsic claim -- here, that
+  `reconstruct_farfield` reproduces the engine's exact total.
+
+  Fourth: the build that added the fourth bypass had ALREADY MEASURED the
   refutation — its docstring records `n_gamma in {6, 8, 12, 16}` all raising at
   `~3.1 rad` — and filed it as an unavoidable "integration tension". A step
   that does not shrink under refinement is not an under-resolution problem, by

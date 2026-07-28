@@ -122,7 +122,10 @@ def demodulate(value: complex, x: float, y: float) -> complex:
 
 
 def remodulate(demod_value: complex, x: float, y: float) -> complex:
-    """Restore the cusp Fresnel carrier: ``P_demod -> P_demod exp(i phi_sp)``."""
+    """Restore the cusp Fresnel carrier.
+
+    ``P_demod -> P_demod exp(i phi_sp)``.
+    """
     return demod_value * cmath.exp(1j * _carrier_phase(x, y))
 
 

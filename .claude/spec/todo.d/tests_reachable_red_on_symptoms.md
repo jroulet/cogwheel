@@ -32,7 +32,28 @@ section: Backlog
   the SAME symbol; the second one escalates to a review of the guard rather
   than a third bypass.
 
-  Third: the build that added the fourth bypass had ALREADY MEASURED the
+  Third rule, added 2026-07-28: A TEST WHOSE PREMISE IS "HEAD IS THE
+  PRE-CHANGE REVISION" CANNOT BE BOTH GREEN AND MEANINGFUL IN THE TREE IT IS
+  COMMITTED TO. `test_lensing_farfield_envelope.py` carried a `_head_module`
+  helper that imported a module via `git show HEAD:<path>` and compared it
+  against the working tree, to certify the 8h-d2 far-field changes were
+  additive. Before the commit it passed and meant something; after the commit
+  HEAD *is* the branch, so `TubeByteIdentityTestCase` compared
+  `surrogate.py` to itself and passed unconditionally, while
+  `FarfieldTelescopingRoundTripTestCase` errored outright
+  (`reconstruct_farfield() missing 1 required positional argument: 't_min'`).
+  It had no window in which it was correct in its own repository.
+
+  Worse, it is invisible to the pre-commit gate BY CONSTRUCTION: the full
+  suite was green immediately before the commit, because HEAD was still the
+  old revision then. The breakage appears only in the NEXT run. Retired the
+  apparatus rather than re-pinning it to a fixed SHA, which defers the rot
+  instead of removing it. Migration equivalence belongs in a throwaway probe
+  the driver runs while the migration is in flight, never in a committed
+  test. What belongs in the suite is the intrinsic claim -- here, that
+  `reconstruct_farfield` reproduces the engine's exact total.
+
+  Fourth: the build that added the fourth bypass had ALREADY MEASURED the
   refutation — its docstring records `n_gamma in {6, 8, 12, 16}` all raising at
   `~3.1 rad` — and filed it as an unavoidable "integration tension". A step
   that does not shrink under refinement is not an under-resolution problem, by

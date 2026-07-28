@@ -44,8 +44,8 @@ class LensedPosterior(Posterior):
     same ``(-inf, standard_par_dic, None)`` triple the base class returns for a
     point of zero prior density.  This is the ONLY site at which those refusals
     are swallowed; the engine and likelihood keep raising them.  No refusal
-    counter is kept -- the ``-inf`` entries in the sample array are the reliable,
-    fork-safe record of refused proposals.
+    counter is kept -- the ``-inf`` entries in the sample array are the
+    reliable, fork-safe record of refused proposals.
     """
 
     def lnposterior_pardic_and_metadata(self, *args, **kwargs):
@@ -57,9 +57,10 @@ class LensedPosterior(Posterior):
         (any member of `_NAMED_REFUSALS`), return
         ``(-inf, standard_par_dic, None)`` -- the same shape the base class
         returns for a zero-prior-density point -- instead of propagating the
-        exception into the sampler.  The coordinate transform recomputed here to
-        recover ``standard_par_dic`` maps sampled to standard parameters only and
-        never touches the lens engine, so it cannot itself raise a refusal.
+        exception into the sampler.  The coordinate transform recomputed
+        here to recover ``standard_par_dic`` maps sampled to standard
+        parameters only and never touches the lens engine, so it cannot
+        itself raise a refusal.
 
         Parameters
         ----------

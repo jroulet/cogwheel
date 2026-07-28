@@ -3358,12 +3358,14 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # recovered by inverting the additive exterior gauge
     # (``rho = 1 + |y| - coordinate_radius_min`` => ``|y| = rho - 1 +
     # coordinate_radius_min``).  Deriving from the narrowed region gives a
-    # smaller/closer inner edge and hence a not-easier ppGO cell -- conservatism
+    # smaller/closer inner edge and hence a not-easier ppGO cell --
+    # conservatism
     # compounds, never over-accepts.  Macro saddles (parity != 1) keep the HEAD
     # scalar-reach edge: their additive exterior gauge collapses to scalar
     # reach, so ``region_exclusion_rho == exclusion_rho`` and the physical
     # exclusion radius is already the authoritative inner edge.  Both branches
-    # nonetheless obtain ``rho`` through ``annulus_rho`` so the ppGO gauge lives
+    # nonetheless obtain ``rho`` through ``annulus_rho`` so the ppGO gauge
+    # lives
     # in exactly ONE place (``_scalar_caustic_reach == caustic_geometry(gamma,
     # 0)[0]`` bit-exact, so the saddle result is byte-identical to the former
     # hand-rolled ``physical_exclusion_radius / reach_scalar``).
@@ -3375,7 +3377,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     else:
         ppgo_exclusion_rho = annulus_rho(
             gamma_mid, physical_exclusion_radius, kappa=0.0)
-    # -- Exterior far-field: ONE fixed [w_floor, w_trust] region window (S1-3) --
+    # -- Exterior far-field: ONE fixed [w_floor, w_trust] window (S1-3) --
     # Build S1-3 replaces the per-mass-stratum ``w`` partitioning of the
     # exterior with a SINGLE fixed window ``[w_floor(region),
     # w_trust(region)]`` that contains every in-region draw's chart w-segment
@@ -3507,7 +3509,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     cusp_angles: list[float] = []
     lobe_records: list[dict] = []
     if parity != 1:
-        # --- Saddle (gamma > 1): per-lobe deltoid interiors (frozen WP7, S2-2).
+        # --- Saddle (gamma > 1): per-lobe deltoid interiors
+        # (frozen WP7, S2-2).
         # The macro-saddle caustic is two disjoint 3-cusp deltoid lobes off the
         # origin on the shear axis; neither encloses the origin, so the
         # origin-centred astroid admission does not apply.  Each lobe gets its

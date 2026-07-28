@@ -102,7 +102,32 @@ fi
 disown -a
 
 echo "launched: $LOG (watchdog ${STALE}s)"
-echo "POST-BUILD (after the driver commit): .claude/sdk/post_build_sweeps.sh  # slow sweeps NEVER run in-build"
+# The post-build SEQUENCE, not just the sweeps.  Librarian and Dreamer run
+# IN the DAG; the Tidier is the one crew role with no automated home, since
+# its in-DAG run was made opt-in on 2026-07-18 after an error_max_turns
+# finalization tore down the whole DAG group.  A single unmechanised step in
+# an otherwise automated pipeline is exactly what goes unnoticed -- it lapsed
+# for nine days -- so print it where the driver actually looks.
+cat <<'POSTBUILD'
+POST-BUILD SEQUENCE (driver steps -- the DAG does NOT run these):
+  1. full-suite tally   python -m pytest cogwheel/tests/ -q -n 8 --dist loadfile \
+                          -k "not Timing and not timing"   (then timing serially)
+  2. commit the build's work
+  3. slow sweeps        .claude/sdk/post_build_sweeps.sh   # slow tiers NEVER in-build
+  4. /tidy              then: python scripts/update_agent_state.py tidy
+                        (in-DAG tidier is opt-in, SDK_RUN_TIDIER=1, default OFF --
+                         it tore down the DAG group on 2026-07-18, so style is a
+                         post-commit advisory role and this step is the ONLY one
+                         that consumes .claude/tidy_advisory.json)
+
+IN-DAG (the build runs these itself -- do NOT re-run on a clean build):
+  Librarian, Dreamer.
+  EXCEPTION: if the build STRANDED without committing, its Librarian/Dreamer
+  work is not on disk or not committed. Then the driver runs them by hand:
+    /doc-sync --post-commit <sha>   # also clears the pre-commit backlog guard
+    /dream                          # short-term memories are tail-capped (F021):
+                                    # a busy day evicts findings before consolidation
+POSTBUILD
 echo "arm the Monitor from the log header: tail -20 $LOG once it exists"
 if [[ "$AUTO" != "--auto" ]]; then
   echo "PLAN APPROVAL: on the plan-ready log line,"

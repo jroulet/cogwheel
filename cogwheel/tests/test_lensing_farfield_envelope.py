@@ -1312,7 +1312,6 @@ CONVERGENCE_PLATEAU_RATIO = 2.0
 #: TIGHTENED the bar to `FARFIELD_EPS_GATE` (``1e-3``); it was never widened
 #: to admit the OLD label.  The convergence probe asserts the served bar is
 #: at most this (a strict tightening, the "never widen admittance" direction).
-HEAD_FARFIELD_EPS_MAX = 3.0e-3
 
 #: The tube eps bar (`surrogate_training.TrainingConfig.tube_eps_max`), which
 #: Build 8g-b left UNCHANGED at ``5e-2`` (only the far-field bar/currency
@@ -1332,24 +1331,6 @@ EFFNORM_THRASH_MIN = 1.0e-1
 
 
 @functools.lru_cache(maxsize=None)
-def _head_module(rel_path: str, mod_name: str):
-    """Import a module from its HEAD revision, side by side with the branch.
-
-    ``git show HEAD:<rel_path>`` is written to a real temporary ``.py`` file
-    and imported under ``mod_name`` (registered in ``sys.modules`` first so
-    any dataclass field resolution succeeds).  Used to prove the tube path
-    is byte-identical to HEAD after the additive far-field changes.
-    """
-    source = subprocess.check_output(
-        ['git', 'show', f'HEAD:{rel_path}'], cwd=_REPO_ROOT).decode()
-    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False)
-    tmp.write(source)
-    tmp.close()
-    spec = importlib.util.spec_from_file_location(mod_name, tmp.name)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[mod_name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def _exterior_samples(center: tuple[float, float], half: float, count: int,
@@ -1687,141 +1668,6 @@ class FarFieldNodeConvergenceTestCase(FarfieldEnvelopeTestCase):
             f'convergence currency has no teeth')
 
 
-class TubeByteIdentityTestCase(FarfieldEnvelopeTestCase):
-    """Spec B (acceptance e): the tube path is byte-identical to HEAD.
-
-    The Build 8g-b far-field redefinition is ADDITIVE -- it must not touch
-    the tube (near-caustic) chart's construction, serving, serialization,
-    or eps gate.  This shard loads HEAD's ``surrogate.py`` side by side with
-    the branch, builds `TubeChart` charts from a fixed probe set of value
-    tensors on both, and asserts:
-
-    * training labels (coefficient tensors, knots, axes) agree to the byte;
-    * served envelopes on a fixed query set agree to the byte;
-    * the tube npz round-trips unchanged;
-    * the tube eps bar (``tube_eps_max``) and the tube currency
-      (``max|partition.envelope|`` normalization in `_heldout_eps`) are
-      unchanged from HEAD.
-
-    ``max|diff| == 0.0`` is the whole claim -- an independent HEAD build of
-    the identical machinery, not a tolerance.
-    """
-
-    HEAD_MODULE = 'cogwheel/lensing/surrogate.py'
-    HEAD_TRAINING = 'cogwheel/lensing/surrogate_training.py'
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.head = _head_module(cls.HEAD_MODULE, 'cogwheel_head_surrogate_tube')
-        cls.configs = _tube_probe_configs()
-        cls.queries = _tube_probe_queries()
-
-    def setUp(self) -> None:
-        super().setUp()
-        self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = pathlib.Path(self._tmp.name)
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
-        super().tearDown()
-
-    @staticmethod
-    def _max_abs_diff(branch_array: np.ndarray, head_array: np.ndarray
-                      ) -> float:
-        """``max|branch - head|`` after asserting identical shapes."""
-        branch_array = np.asarray(branch_array)
-        head_array = np.asarray(head_array)
-        if branch_array.shape != head_array.shape:
-            return float('inf')
-        if branch_array.size == 0:
-            return 0.0
-        return float(np.max(np.abs(branch_array - head_array)))
-
-    def test_tube_training_labels_are_byte_identical(self):
-        """Coefficient tensors, knots and axes match HEAD to the byte."""
-        for index, config in enumerate(self.configs):
-            with self.subTest(tube=index):
-                branch = TubeChart.from_values(**config)
-                head = self.head.TubeChart.from_values(**config)
-                for name, got, ref in (
-                        ('real_coeffs', branch.real_coeffs, head.real_coeffs),
-                        ('imag_coeffs', branch.imag_coeffs, head.imag_coeffs),
-                        ('gamma_grid', branch.gamma_grid, head.gamma_grid),
-                        ('u_grid', branch.u_grid, head.u_grid),
-                        ('theta_grid', branch.theta_grid, head.theta_grid),
-                        ('log_w_grid', branch.log_w_grid, head.log_w_grid)):
-                    self.assert_within(
-                        self._max_abs_diff(got, ref), 0.0,
-                        f'tube {index} {name} diverged from HEAD')
-                for axis, (got, ref) in enumerate(
-                        zip(branch.knots, head.knots)):
-                    self.assert_within(
-                        self._max_abs_diff(got, ref), 0.0,
-                        f'tube {index} knot axis {axis} diverged from HEAD')
-
-    def test_tube_served_envelopes_are_byte_identical(self):
-        """Serving the probe queries yields byte-identical envelopes."""
-        config = self.configs[0]
-        branch_sur = LensAmplificationSurrogate(
-            [TubeChart.from_values(**config)], {})
-        head_sur = self.head.LensAmplificationSurrogate(
-            [self.head.TubeChart.from_values(**config)], {})
-        for index, query in enumerate(self.queries):
-            with self.subTest(query=index):
-                branch_res = branch_sur.serve(_W_EVAL, **query)
-                head_res = head_sur.serve(_W_EVAL, **query)
-                env_b, served_b = branch_res[0], branch_res[1]
-                env_h, served_h = head_res[0], head_res[1]
-                self.comparisons += 1
-                self.assertTrue(
-                    served_b and served_h,
-                    f'query {index} was not served on both '
-                    f'(branch={served_b}, head={served_h})')
-                self.assert_within(
-                    self._max_abs_diff(env_b, env_h), 0.0,
-                    f'served tube envelope {index} diverged from HEAD')
-
-    def test_tube_npz_round_trips_unchanged(self):
-        """Saving and reloading a tube-only artifact preserves the chart."""
-        config = self.configs[0]
-        original = TubeChart.from_values(**config)
-        surrogate = LensAmplificationSurrogate([original], {})
-        path = self.tmp / 'tube_only'
-        surrogate.save(path)
-        loaded = LensAmplificationSurrogate.load(path.with_suffix('.npz'))
-        self.comparisons += 1
-        self.assertIsInstance(loaded.charts[0], TubeChart)
-        restored = loaded.charts[0]
-        self.assert_within(
-            self._max_abs_diff(restored.real_coeffs, original.real_coeffs),
-            0.0, 'tube real_coeffs changed across an npz round-trip')
-        self.assert_within(
-            self._max_abs_diff(restored.imag_coeffs, original.imag_coeffs),
-            0.0, 'tube imag_coeffs changed across an npz round-trip')
-
-    def test_tube_eps_bar_is_unchanged(self):
-        """``tube_eps_max`` equals ``5e-2`` on both HEAD and branch."""
-        branch_bar = surrogate_training.TrainingConfig().tube_eps_max
-        head_bar = _head_git_default(self.HEAD_TRAINING, 'tube_eps_max')
-        self.comparisons += 1
-        self.assertEqual(branch_bar, TUBE_EPS_MAX)
-        self.comparisons += 1
-        self.assertEqual(head_bar, TUBE_EPS_MAX)
-
-    def test_tube_eps_currency_is_unchanged(self):
-        """The tube branch of ``_heldout_eps`` still normalizes by
-        ``max|partition.envelope|`` on both HEAD and branch."""
-        branch_src = pathlib.Path(
-            surrogate_training.__file__).read_text()
-        head_src = subprocess.check_output(
-            ['git', 'show', f'HEAD:{self.HEAD_TRAINING}'],
-            cwd=_REPO_ROOT).decode()
-        needle = 'env_true = np.asarray(partition.envelope)'
-        for label, src in (('branch', branch_src), ('head', head_src)):
-            self.comparisons += 1
-            self.assertIn(
-                needle, src,
-                f'{label} _heldout_eps no longer uses the tube currency')
 
 
 @_TRAIN_TIER_SKIP
@@ -1933,36 +1779,6 @@ class FarFieldGateCurrencyMutationTestCase(FarfieldEnvelopeTestCase):
 #
 # WHY THESE TOLERANCES / ORACLES (D3)
 # -----------------------------------
-# * Telescoping round trip (`FarfieldTelescopingRoundTripTestCase`).  The
-#   stored label demodulates by ``exp(+1j w t_min)`` and `reconstruct_farfield`
-#   re-modulates by ``exp(-1j w t_min)`` FIRST, so the reconstructed complex
-#   field must reproduce the pre-demodulation (HEAD) field.  TWO independent
-#   oracles gate this: (a) the HEAD `channels` module loaded side by side
-#   (`_head_module`), whose `reconstruct_farfield` has no ``t_min`` argument
-#   and no demodulation -- the frozen pre-8h-d2 baseline; and (b) the engine's
-#   ``partition.exact_total`` (the operator/Schwinger amplification total),
-#   which shares no code with the SACR-C projection under test.  The gate is
-#   ``1e-12 * max|F|`` (measured ``0`` -- the round trip telescopes exactly).
-#   The teeth: a stale caller passing ``t_min = 0`` fails to invert the
-#   demodulation and departs from HEAD by the un-cancelled ``exp(+1j w t_min)``
-#   (measured ~7e-3), so the required argument is load-bearing.
-# * Carrier continuity (`FarfieldCarrierContinuityGuardTestCase`).  The guard
-#   rejects a demodulated label whose adjacent-node phase winds by ``>= pi/2``
-#   (the Nyquist quarter-turn a cubic spline cannot represent) and passes a
-#   well-sampled continuous label.  The oracle is the guard's raise/no-raise
-#   contract on constructed grids; the ``pi/2`` bound is pinned against the
-#   production constant.
-# * Stale axis schema (`StaleFarfieldAxisSchemaRefusalTestCase`).  A chart
-#   stamped with the OLD frame-DEPENDENT schema tag
-#   ``'caustic_radial_offset_rho_theta'`` is not in the current known set, so
-#   the loader must hard-refuse at load rather than silently reconstruct in
-#   the wrong frame.  A boolean contract, not a tolerance.
-# --------------------------------------------------------------------------
-
-#: HEAD path of the channels module (absolute imports, so it loads standalone
-#: via `_head_module`); its `reconstruct_farfield` predates the ``t_min``
-#: argument and the demodulation -- the frozen pre-8h-d2 reconstruction.
-_HEAD_CHANNELS_REL = 'cogwheel/lensing/chang_refsdal/channels.py'
 
 #: Exterior off-axis configs (gamma, y1, y2) for the round trip.  All three
 #: sit well outside the sub-``0.1`` astroid (two resolved real images) AND
@@ -1987,45 +1803,32 @@ CARRIER_STEP_MAX = 1.0
 OLD_FARFIELD_AXIS_SCHEMA = 'caustic_radial_offset_rho_theta'
 
 
-def _farfield_reconstruction(head_module, partition: ChangRefsdalPartition,
-                             definition: str
-                             ) -> tuple[np.ndarray, np.ndarray]:
-    """Reconstruct ``F`` on the branch and the HEAD baseline for one window.
 
-    Mirrors the likelihood far-field serve path (`reconstruct_farfield`) on
-    both revisions.  On the branch the stored label is demodulated by
-    ``exp(+1j w t_min)`` and `reconstruct_farfield` inverts it with the
-    ``t_min`` argument; on HEAD neither demodulation nor argument exists.
-    For `FARFIELD_KERNEL_SUM_MINUS_GHOST` the analytic ghost is re-added
-    BEFORE reconstruction with the SAME ghost-restore ordering the serve path
-    uses: the branch adds the min-relative ghost with the ``+t_min`` tilt (so
-    the single ``exp(-1j w t_min)`` de-tilt returns label AND ghost together),
-    HEAD adds the bare min-relative ghost.
 
-    Returns the ``(branch_total, head_total)`` reconstructed complex fields.
-    """
-    w = partition.w
-    t_min = partition.t_min
-    env_branch = farfield_envelope_from_partition(partition, definition)
-    env_head = head_module.farfield_envelope_from_partition(
-        partition, definition)
-    if definition == channels.FARFIELD_KERNEL_SUM_MINUS_GHOST:
-        ghost = channels.farfield_ghost_term(
-            w, partition.source, partition.matrix,
-            t_min=t_min, real_images=partition.images)
-        ghost_head = head_module.farfield_ghost_term(
-            w, partition.source, partition.matrix,
-            t_min=t_min, real_images=partition.images)
-        env_branch = env_branch + ghost * np.exp(1j * w * t_min)
-        env_head = env_head + ghost_head
-    _, total_branch = channels.reconstruct_farfield(
-        w, env_branch, partition.delays, partition.saddle_kernels,
-        partition.real_mask, definition, t_min)
-    _, total_head = head_module.reconstruct_farfield(
-        w, env_head, partition.delays, partition.saddle_kernels,
-        partition.real_mask, definition)
-    return total_branch, total_head
 
+# RETIRED (2026-07-28): the branch-vs-HEAD byte-equivalence apparatus.
+#
+# `_head_module` imported a module via `git show HEAD:<path>` and compared it
+# against the working tree, to certify that the 8h-d2 far-field changes were
+# additive.  That is a MIGRATION-TIME guard, and its premise is that HEAD is
+# the pre-migration revision.  The moment the migration is committed, HEAD IS
+# the branch and every such comparison becomes the code against itself:
+# vacuous where the signature is unchanged (`TubeByteIdentityTestCase` passed
+# unconditionally), broken where it changed
+# (`FarfieldTelescopingRoundTripTestCase` errored with
+# "reconstruct_farfield() missing 1 required positional argument: 't_min'"
+# once `reconstruct_farfield` landed in HEAD).
+#
+# It could not fail before the commit and could not pass after it -- so it
+# never had a window in which it was both green and meaningful in the tree it
+# was committed to.  Retired rather than re-pinned to a fixed SHA, which would
+# only defer the rot.  The physics it guarded is covered intrinsically, with
+# no dependency on git history: `FarfieldReconstructionTestCase` and the
+# telescoping tests assert that `reconstruct_farfield` reproduces the engine's
+# exact total, which is the actual claim.
+#
+# Restore with:
+#   git show 66a0100 -- cogwheel/tests/test_lensing_farfield_envelope.py
 
 def _adjacent_top_slice_steps(env_grid: np.ndarray,
                               shape: tuple[int, int, int]) -> np.ndarray:
@@ -2066,130 +1869,6 @@ def _adjacent_top_slice_steps(env_grid: np.ndarray,
     return np.array(steps) if steps else np.zeros(0)
 
 
-class FarfieldTelescopingRoundTripTestCase(FarfieldEnvelopeTestCase):
-    """D3: the ``exp(+/-1j w t_min)`` round trip reproduces HEAD's field.
-
-    Build 8h-d2 made the stored far-field label frame-INVARIANT by
-    demodulating it with ``exp(+1j w t_min)``; `reconstruct_farfield`
-    re-modulates by ``exp(-1j w t_min)`` FIRST and takes ``t_min`` as a
-    REQUIRED positional.  The reconstructed complex field must therefore be
-    UNCHANGED from the pre-8h-d2 (HEAD) reconstruction -- the demod/re-mod
-    telescopes -- for both the `FARFIELD_KERNEL_SUM` window and the
-    `FARFIELD_KERNEL_SUM_MINUS_GHOST` window (whose ghost-restore ordering is
-    mirrored from the likelihood serve path).  Gated to ``1e-12 * max|F|``
-    against TWO independent oracles: the HEAD `channels` module loaded side by
-    side, and the engine's ``exact_total``.  The teeth: a stale caller
-    passing ``t_min = 0`` fails to invert the demodulation and departs.
-    """
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.head = _head_module(_HEAD_CHANNELS_REL,
-                                'cogwheel_head_channels_d3')
-        w_key = tuple(float(v) for v in RECON_BAND)
-        cls.partitions = [_partition(w_key, gamma, y1, y2)
-                          for gamma, y1, y2 in ROUNDTRIP_CONFIGS]
-        cls._plot()
-
-    @classmethod
-    def _plot(cls) -> None:
-        if not _HAVE_MPL:
-            return
-        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        partition = cls.partitions[0]
-        f_scale = float(np.max(np.abs(partition.exact_total)))
-        fig, ax = plt.subplots(figsize=(7, 4))
-        for definition, style in (
-                (channels.FARFIELD_KERNEL_SUM, 'b.-'),
-                (channels.FARFIELD_KERNEL_SUM_MINUS_GHOST, 'g.-')):
-            branch, head = _farfield_reconstruction(
-                cls.head, partition, definition)
-            ax.semilogy(partition.w, np.maximum(np.abs(branch - head), 1e-18),
-                        style, label=definition.split('_')[-1])
-        ax.axhline(MACHINE_REL_TOL * f_scale, color='r', ls='--',
-                   label='1e-12 * max|F|')
-        ax.set_xlabel('w')
-        ax.set_ylabel('|F_branch - F_head|')
-        ax.set_title('D3: farfield t_min round trip telescopes to the floor')
-        ax.legend(fontsize=8)
-        fig.tight_layout()
-        fig.savefig(
-            _OUTPUT_DIR / 'farfield_telescoping_roundtrip_error.png', dpi=110)
-        plt.close(fig)
-
-    def _assert_matches_head(self, definition: str) -> None:
-        for partition in self.partitions:
-            with self.subTest(source=tuple(partition.source),
-                              gamma=partition.gamma):
-                branch, head = _farfield_reconstruction(
-                    self.head, partition, definition)
-                f_scale = float(np.max(np.abs(partition.exact_total)))
-                error = float(np.max(np.abs(branch - head)))
-                self.assert_within(
-                    error / f_scale, MACHINE_REL_TOL,
-                    f'{definition} round trip departed from the HEAD field '
-                    f'by {error / f_scale:.3e} (relative)')
-
-    def test_kernel_sum_round_trip_reproduces_head(self):
-        """`FARFIELD_KERNEL_SUM` reconstruction matches HEAD's field."""
-        self._assert_matches_head(channels.FARFIELD_KERNEL_SUM)
-
-    def test_minus_ghost_round_trip_reproduces_head(self):
-        """`FARFIELD_KERNEL_SUM_MINUS_GHOST` (ghost-restored) matches HEAD."""
-        self._assert_matches_head(channels.FARFIELD_KERNEL_SUM_MINUS_GHOST)
-
-    def test_round_trip_matches_the_engine_total(self):
-        """Independent oracle: both windows telescope to ``exact_total``.
-
-        The engine's operator/Schwinger total shares no code with the SACR-C
-        envelope projection, so agreeing with it is a stronger claim than the
-        HEAD comparison alone.
-        """
-        for partition in self.partitions:
-            for definition in (channels.FARFIELD_KERNEL_SUM,
-                               channels.FARFIELD_KERNEL_SUM_MINUS_GHOST):
-                with self.subTest(source=tuple(partition.source),
-                                  definition=definition):
-                    branch, _head = _farfield_reconstruction(
-                        self.head, partition, definition)
-                    f_scale = float(np.max(np.abs(partition.exact_total)))
-                    error = float(np.max(np.abs(
-                        branch - partition.exact_total)))
-                    self.assert_within(
-                        error / f_scale, MACHINE_REL_TOL,
-                        f'{definition} reconstruction departed from the '
-                        f'engine total by {error / f_scale:.3e} (relative)')
-
-    def test_stale_t_min_zero_breaks_the_round_trip(self):
-        """Teeth: a stale ``t_min = 0`` caller departs from the HEAD field.
-
-        With the demodulated label but ``t_min = 0``, `reconstruct_farfield`
-        does not invert the ``exp(+1j w t_min)`` demodulation, so the
-        reconstructed field is wrong by the un-cancelled carrier -- the
-        REQUIRED ``t_min`` argument is load-bearing, not decorative.
-        """
-        for partition in self.partitions:
-            with self.subTest(source=tuple(partition.source)):
-                env = farfield_envelope_from_partition(
-                    partition, channels.FARFIELD_KERNEL_SUM)
-                _kernels, stale = channels.reconstruct_farfield(
-                    partition.w, env, partition.delays,
-                    partition.saddle_kernels, partition.real_mask,
-                    channels.FARFIELD_KERNEL_SUM, 0.0)
-                _kernels_h, head = self.head.reconstruct_farfield(
-                    partition.w,
-                    self.head.farfield_envelope_from_partition(
-                        partition, channels.FARFIELD_KERNEL_SUM),
-                    partition.delays, partition.saddle_kernels,
-                    partition.real_mask, channels.FARFIELD_KERNEL_SUM)
-                f_scale = float(np.max(np.abs(partition.exact_total)))
-                error = float(np.max(np.abs(stale - head))) / f_scale
-                self.comparisons += 1
-                self.assertGreater(
-                    error, STALE_TMIN_FOIL_MIN,
-                    f'stale t_min=0 reconstruction stayed within '
-                    f'{error:.3e} of the HEAD field -- the demodulation '
-                    f'argument is not load-bearing')
 
 
 class FarfieldCarrierContinuityGuardTestCase(FarfieldEnvelopeTestCase):

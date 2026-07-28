@@ -333,7 +333,8 @@ class CertifiedPpgoMap:
             raise ValueError('gamma_edges must be strictly increasing.')
         if np.any(np.diff(rho_edges) <= 0.0):
             raise ValueError('rho_edges must be strictly increasing.')
-        expected = (parity_codes.size, gamma_edges.size - 1, rho_edges.size - 1)
+        expected = (parity_codes.size, gamma_edges.size - 1,
+                    rho_edges.size - 1)
         for name, array in grids.items():
             if array.shape != expected:
                 raise ValueError(
@@ -380,7 +381,8 @@ class CertifiedPpgoMap:
             w_cert_diagnostic_grid = np.asarray(data['w_cert_diagnostic'],
                                                 dtype=np.float64)
             # A ceiling-less (pre-0.2.0) artifact lacks these keys; the
-            # direct item access raises KeyError, which `use_certified_ppgo_map`
+            # direct item access raises KeyError, which
+            # `use_certified_ppgo_map`
             # turns into a refuse-to-certify (global stays None).
             w_ceiling_grid = np.asarray(data['w_ceiling'], dtype=np.float64)
             cell_status_grid = np.asarray(data['cell_status'],

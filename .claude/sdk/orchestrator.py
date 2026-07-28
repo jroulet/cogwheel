@@ -1592,6 +1592,19 @@ class BuildOrchestrator:
                       else "in-DAG run is opt-in (set SDK_RUN_TIDIER=1); "
                            "style handled by post-commit advisory mode")
             self._log(f"Step 2: Tidier SKIPPED — {reason}")
+            # Record the CURRENT regime, or tidy.json stays a fossil of the
+            # last in-DAG run.  It held status="failed" from 2026-07-19 --
+            # the run whose crash caused this very opt-out -- for nine days,
+            # so every driver reading it concluded the role was broken when
+            # it had simply moved to post-commit advisory mode.  ``last_run``
+            # is deliberately NOT touched: the role did not run, and the age
+            # of the last REAL run is what the post-commit staleness banner
+            # keys on.
+            write_state(
+                self.project_root, "tidy", status="skipped_in_dag",
+                touch_last_run=False,
+                extra={"skip_reason": reason,
+                       "style_handled_by": "post-commit advisory; run /tidy"})
             return "Tidier skipped (post-commit advisory role by default)."
         self._log("Step 2: Tidier running in-DAG (SDK_RUN_TIDIER=1 set)")
         all_files_changed = self._git_changed_files()

@@ -822,7 +822,8 @@ def f_schwinger(w: float, y_eig, gamma_prime: float) -> complex:
     difference_magnitude = _dd_complex_magnitude(difference)
 
     if (reference_magnitude == 0.0
-            or difference_magnitude > _CERTIFICATION_TOL * reference_magnitude):
+            or difference_magnitude
+            > _CERTIFICATION_TOL * reference_magnitude):
         relative = (math.inf if reference_magnitude == 0.0
                     else difference_magnitude / reference_magnitude)
         raise SchwingerCertificationError(

@@ -145,6 +145,43 @@ case "$COMMIT_MSG_SUBJECT" in
                     '{trigger: "post-commit", commit: $sha, timestamp: $ts, touched_files: $nf}' \
                     > "$TIDY_ADVISORY"
             fi
+
+            # Staleness alarm. The advisory ACCUMULATES; nothing consumes it
+            # unless a driver runs /tidy. Between 2026-07-19 and 2026-07-28
+            # the Tidier's state sat at status="failed" while the advisory
+            # kept growing, and the absence of the role was indistinguishable
+            # from it working -- the same failure shape as a rotted test
+            # suite: a step that reports success by silence.
+            #
+            # So say something. This is advisory-only by design (post-commit
+            # cannot fail a commit that already happened), but it is LOUD and
+            # it names the exact command, which is the difference between a
+            # backlog someone notices and one that runs for eight days.
+            TIDY_STATE="$REPO_ROOT/.claude/agent_state/tidy.json"
+            if [ -f "$TIDY_STATE" ]; then
+                TIDY_STATUS=$(jq -r '.status // "unknown"' "$TIDY_STATE" 2>/dev/null || echo unknown)
+                TIDY_LAST=$(jq -r '.last_run // ""' "$TIDY_STATE" 2>/dev/null || echo "")
+                N_PENDING=$(jq -r '.touched_files | length' "$TIDY_ADVISORY" 2>/dev/null || echo 0)
+                TIDY_AGE_D=""
+                if [ -n "$TIDY_LAST" ]; then
+                    TIDY_EPOCH=$(date -u -d "$TIDY_LAST" +%s 2>/dev/null || echo "")
+                    if [ -n "$TIDY_EPOCH" ]; then
+                        TIDY_AGE_D=$(( ( $(date -u +%s) - TIDY_EPOCH ) / 86400 ))
+                    fi
+                fi
+                # Alarm only when style work is actually QUEUED and the last
+                # real run is stale or failed. "skipped_in_dag" is the normal
+                # regime (the in-DAG tidier is opt-in), so it must not fire on
+                # its own -- a banner that prints on every commit is one
+                # nobody reads, which is the failure being fixed here.
+                if [ "$N_PENDING" -gt 0 ] \
+                   && { [ "$TIDY_STATUS" = "failed" ] \
+                        || [ -z "$TIDY_AGE_D" ] \
+                        || [ "$TIDY_AGE_D" -ge 3 ]; }; then
+                    echo "==> Tidier STALE: status=$TIDY_STATUS${TIDY_AGE_D:+, last real run ${TIDY_AGE_D}d ago}, $N_PENDING file(s) queued"
+                    echo "==> Run: /tidy   (then: python scripts/update_agent_state.py tidy)"
+                fi
+            fi
         fi
         ;;
 esac
