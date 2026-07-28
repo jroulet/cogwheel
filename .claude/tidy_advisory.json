@@ -1,11 +1,15 @@
 {
   "trigger": "post-commit",
-  "commit": "74c1d552390ee9b876b0d5737d11478e340c1b43",
-  "timestamp": "2026-07-27T15:00:04Z",
+  "commit": "8901b0b191d859876009c15fdac919c37cd4e213",
+  "timestamp": "2026-07-28T09:32:00Z",
   "touched_files": [
+    "cogwheel/lensing/chang_refsdal/_pearcey_table.py",
+    "cogwheel/lensing/chang_refsdal/_schwinger.py",
     "cogwheel/lensing/chang_refsdal/channels.py",
     "cogwheel/lensing/chang_refsdal/geometry.py",
     "cogwheel/lensing/likelihood.py",
+    "cogwheel/lensing/posterior.py",
+    "cogwheel/lensing/ppgo_map.py",
     "cogwheel/lensing/surrogate.py",
     "cogwheel/lensing/surrogate_census.py",
     "cogwheel/lensing/surrogate_training.py",

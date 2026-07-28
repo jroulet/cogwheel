@@ -58,6 +58,7 @@ from cogwheel.lensing.surrogate import (
     FarFieldChart, TubeChart, LensAmplificationSurrogate,
     _REFUSAL_ERRORS, _log_w_grid, _uniform_axis,
     _caustic_reach as _scalar_caustic_reach, _from_caustic_fixed,
+    _from_lobe_fixed, _lobe_boundary_radius, LobeInteriorChart,
     CarrierDiscontinuityError)
 
 #: Engine refusals treated conservatively as "do not serve here" during
@@ -2034,12 +2035,14 @@ class _SaddleLobeAdmission:
     def _r_deltoid(self, theta: np.ndarray) -> np.ndarray:
         """Directional lobe boundary radius at lobe-local angle(s) ``theta``.
 
-        Periodic linear interpolation of ``boundary_r`` over
-        ``boundary_theta``; ``rho_lobe = 1`` at this radius traces the deltoid
-        boundary in the direction ``theta`` (`_directional_lobe_boundary`).
+        Delegates to the authoritative ``surrogate._lobe_boundary_radius`` so
+        that the deltoid-boundary convention (periodic linear interpolation of
+        ``boundary_r`` over ``boundary_theta``; ``rho_lobe = 1`` traces the
+        deltoid boundary) has a single source shared with the lobe coordinate
+        maps and ``from_lobe_engine``.
         """
-        return np.interp(theta, self.boundary_theta, self.boundary_r,
-                         period=2.0 * np.pi)
+        return _lobe_boundary_radius(theta, self.boundary_theta,
+                                     self.boundary_r)
 
     def _probe_points(self, center: tuple[float, float],
                       half: tuple[float, float]) -> np.ndarray:
@@ -2381,6 +2384,75 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
     return chart, n_points, refused
 
 
+def _build_lobe_chart(*, gamma_band: tuple[float, float], parity: int,
+                      lobe: '_SaddleLobeAdmission',
+                      box_center: tuple[float, float],
+                      half: tuple[float, float],
+                      w_range: tuple[float, float], config: TrainingConfig,
+                      w_nodes_per_decade: int | None = None
+                      ) -> tuple['LobeInteriorChart', int, int]:
+    """Build one macro-saddle lobe-interior chart in lobe-local coordinates.
+
+    The lobe-interior counterpart of `_build_farfield_chart`.  ``box_center``
+    is ``(rho_lobe_center, theta_local_center)`` and ``half`` is
+    ``(half_rho, half_theta)``; the chart is trained on the axis-aligned
+    lobe-local box ``rho_lobe in [rho_lobe_center +- half_rho]`` x
+    ``theta_local in [theta_local_center +- half_theta]`` via
+    `LensAmplificationSurrogate.from_lobe_engine`, which maps each
+    ``(gamma, rho_lobe, theta_local)`` node to a physical eigenframe source
+    through the lobe frame (`_from_lobe_fixed`, NOT the origin-centred
+    `_from_caustic_fixed`) and stores the ``tau_c``-demodulated
+    `INTERIOR_SACR_C` envelope on a `LobeInteriorChart`.
+
+    The lobe frame is read straight off ``lobe`` (`_SaddleLobeAdmission`):
+    `centroid`, `other_centroid`, `corridor_half`, `boundary_theta`,
+    `boundary_r` are all carried by `from_lobe_engine` and persisted on the
+    chart so a served node maps back to its true physical source.  Building a
+    lobe chart on a tile that straddles a critical-basin flip raises
+    `CarrierDiscontinuityError` (the caller records the ladder-served gap).
+
+    Only macro-saddle (``parity != 1``) bands have lobe interiors; a
+    positive-parity call is a programming error.  ``w_nodes_per_decade``
+    overrides the ``w``-axis node density for THIS chart only; ``None`` falls
+    back to ``config.w_nodes_per_decade``.
+
+    Returns
+    -------
+    tuple[LobeInteriorChart, int, int]
+        The built `LobeInteriorChart` itself (unwrapped from the
+        single-chart surrogate `from_lobe_engine` returns), the engine node
+        count, and the number of refused nodes.
+
+    Raises
+    ------
+    ValueError
+        If ``parity == 1`` (positive-parity bands have no lobe interior).
+    CarrierDiscontinuityError
+        If the tile straddles a critical-basin flip (caller records the gap).
+    """
+    if parity == 1:
+        raise ValueError(
+            'lobe-interior charts exist only for macro-saddle (parity != 1) '
+            f'bands; got parity={parity}.')
+    nodes_per_decade = (config.w_nodes_per_decade
+                        if w_nodes_per_decade is None
+                        else int(w_nodes_per_decade))
+    n_points = config.n_gamma * config.n_rho * config.n_theta_c
+    _budget_check(n_points, config.engine_budget, 'lobe')
+    rho_lobe_c, theta_local_c = box_center
+    half_rho, half_theta = half
+    rho_lobe_range = (rho_lobe_c - half_rho, rho_lobe_c + half_rho)
+    theta_local_range = (theta_local_c - half_theta, theta_local_c + half_theta)
+    single = LensAmplificationSurrogate.from_lobe_engine(
+        admission=lobe, gamma_range=gamma_band,
+        rho_lobe_range=rho_lobe_range, theta_local_range=theta_local_range,
+        w_range=w_range, n_gamma=config.n_gamma, n_rho=config.n_rho,
+        n_theta=config.n_theta_c, w_nodes_per_decade=nodes_per_decade)
+    chart = single.charts[0]
+    refused = int(chart.refused_points.shape[0])
+    return chart, n_points, refused
+
+
 def _engine_envelope(w_grid: np.ndarray, gamma: float, source: np.ndarray
                      ) -> np.ndarray | None:
     """Exact SACR-C envelope ``E(w)`` at a point, or ``None`` if refused.
@@ -2405,7 +2477,7 @@ def _engine_envelope(w_grid: np.ndarray, gamma: float, source: np.ndarray
 # Held-out accuracy
 # ---------------------------------------------------------------------------
 
-def _heldout_eps(chart: TubeChart | FarFieldChart,
+def _heldout_eps(chart: TubeChart | FarFieldChart | LobeInteriorChart,
                  samples: Sequence[tuple[float, float, float]],
                  provenance: dict) -> float:
     """Max relative envelope error of a chart over held-out geometry points.
@@ -2718,13 +2790,51 @@ def _farfield_heldout_samples(gamma_band: tuple[float, float],
     return samples
 
 
+def _lobe_heldout_samples(gamma_band: tuple[float, float],
+                          box_center: tuple[float, float],
+                          half: tuple[float, float],
+                          config: TrainingConfig,
+                          rng: np.random.Generator, *,
+                          lobe: '_SaddleLobeAdmission'
+                          ) -> list[tuple[float, float, float]]:
+    """Random held-out sources inside a lobe chart's lobe-local box.
+
+    The lobe-interior counterpart of `_farfield_heldout_samples`.  Draws
+    ``(gamma, rho_lobe, theta_local)`` uniformly inside the chart's lobe-local
+    box and maps each draw to a PHYSICAL eigenframe source ``(y1, y2)`` through
+    the lobe frame (`_from_lobe_fixed` with the passed ``lobe``'s ``centroid``,
+    ``boundary_theta``, ``boundary_r``), matching the per-``gamma`` mapping the
+    lobe trainer applied at each grid node.  Using the origin-centred
+    `_from_caustic_fixed` here would silently place the probe at the wrong
+    physical source, so the lobe-local forward map is used instead; the
+    returned ``(gamma, y1, y2)`` points are what `_heldout_eps` serves through
+    the full guard stack.
+    """
+    rho_lobe_c, theta_local_c = box_center
+    half_rho, half_theta = half
+    centroid = np.ascontiguousarray(lobe.centroid, dtype=float).reshape(2)
+    samples: list[tuple[float, float, float]] = []
+    for _ in range(config.n_heldout):
+        gamma = float(rng.uniform(*gamma_band))
+        rho_lobe = float(rng.uniform(rho_lobe_c - half_rho,
+                                     rho_lobe_c + half_rho))
+        theta_local = float(rng.uniform(theta_local_c - half_theta,
+                                        theta_local_c + half_theta))
+        y1_eig, y2_eig = _from_lobe_fixed(
+            centroid, lobe.boundary_theta, lobe.boundary_r, rho_lobe,
+            theta_local)
+        samples.append((gamma, float(y1_eig), float(y2_eig)))
+    return samples
+
+
 # ---------------------------------------------------------------------------
 # Per-chart resumability
 # ---------------------------------------------------------------------------
 
 def _load_or_build(path: Path, build_fn: Callable[[], tuple],
                    provenance: dict
-                   ) -> tuple[TubeChart | FarFieldChart, dict, bool]:
+                   ) -> tuple[TubeChart | FarFieldChart | LobeInteriorChart,
+                              dict, bool]:
     """Load a per-chart file if present, else build it and save it.
 
     Returns ``(chart, chart_report, reused)``.  Resumability is a plain file
@@ -3521,23 +3631,43 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         # the lobe's three cusp rays and no tile straddles the inter-lobe
         # equidistance (perpendicular-bisector) line.
         #
-        # These lobe-local tiles are RECORDED but NOT packed into ``admitted``:
-        # the far-field serve mapping (`surrogate._from_caustic_fixed`) is
-        # strictly origin-centred and carries no lobe-centroid offset, so a
-        # lobe-local chart cannot yet be served at its true physical location.
-        # Wiring the lobe frame through the serve pipeline is a follow-on slice
-        # (flagged ``served=False`` / ``serve_note`` in the report); this slice
-        # delivers the admission + tiling geometry (the S2-2 verification
-        # target: admits inside each lobe, refuses the inter-lobe corridor, no
-        # tile straddles a cusp ray or the equidistance line).
+        # These lobe-local tiles are packed into ``admitted`` with
+        # ``region='lobe_interior'`` and their owning ``_SaddleLobeAdmission``
+        # (S2-3 serve wiring): the build loop trains each through
+        # ``_build_lobe_chart`` / ``from_lobe_engine`` in lobe-local
+        # ``(rho_lobe, theta_local)`` coordinates and the persisted lobe frame
+        # (centroid, boundary) maps a served node back to its true physical
+        # source, so the lobe interiors are now served (not just recorded).
         lobe_admissions = _saddle_lobe_admissions(band, config)
-        for lens_center, lobe in zip(_SADDLE_LOBE_CENTERS, lobe_admissions):
+        for lobe_index, (lens_center, lobe) in enumerate(
+                zip(_SADDLE_LOBE_CENTERS, lobe_admissions)):
             lobe_cusps = _lobe_cusp_source_angles(
                 gamma_mid, lens_center, lobe.centroid,
                 config.n_caustic_samples)
             lobe_tiles = _lobe_interior_tiles(
                 lobe, lobe_cusps, config.n_farfield_tiles_per_side)
             interior_admitted += len(lobe_tiles)
+            # Pack each admitted lobe tile into the served build set carrying
+            # its owning ``_SaddleLobeAdmission`` (S2-3 serve wiring): the build
+            # loop routes ``region == 'lobe_interior'`` tiles through
+            # ``_build_lobe_chart`` / ``from_lobe_engine`` in lobe-local
+            # ``(rho_lobe, theta_local)`` coordinates, so the lobe-centroid
+            # offset now flows through the serve pipeline.  ``si = lobe_index``
+            # disambiguates the two lobes' per-chart tags.
+            centroid_mag = float(np.hypot(lobe.centroid[0], lobe.centroid[1]))
+            r_deltoid_max = float(np.max(lobe.boundary_r))
+            for center, half, i, j in lobe_tiles:
+                rho_lobe_max = float(center[0]) + float(half[0])
+                # Union spatial extent for the frequency cap: the farthest
+                # physical source magnitude reachable inside this lobe-local
+                # tile (centroid offset + outer directional boundary radius).
+                y_max_tile = centroid_mag + rho_lobe_max * r_deltoid_max
+                admitted.append({
+                    'si': lobe_index, 'i': i, 'j': j,
+                    'center': center, 'half': half,
+                    'm_lo': m_lo_region, 'm_hi': m_hi_region,
+                    'w_range': _capped_w_range(box, parity, y_max_tile),
+                    'region': 'lobe_interior', 'lobe': lobe})
             lobe_records.append({
                 'lens_center': round(float(lens_center), 6),
                 'centroid': [round(float(lobe.centroid[0]), 6),
@@ -3626,16 +3756,19 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         'interior_admitted_tiles': int(interior_admitted),
         'strata': interior_records}
     if parity != 1:
-        # Per-lobe saddle interior (S2-2): record the lobe frames + admitted
-        # lobe-local tile counts, but the origin-centred serve mapping cannot
-        # yet place a lobe-local chart, so these are NOT served this slice
-        # (serve-wiring is a follow-on slice -- flagged loudly here).
+        # Per-lobe saddle interior (S2-3): record the lobe frames + admitted
+        # lobe-local tile counts.  The lobe-local tiles are now PACKED into the
+        # served build set and trained via ``from_lobe_engine`` in lobe-local
+        # ``(rho_lobe, theta_local)`` coordinates; the persisted lobe frame
+        # (centroid + directional boundary) carries the lobe-centroid offset
+        # through the serve pipeline, so lobe interiors are served.
         interior_report['lobes'] = lobe_records
-        interior_report['served'] = False
+        interior_report['served'] = interior_admitted > 0
         interior_report['serve_note'] = (
-            'lobe-local tiles admitted + cusp-aligned; serve pipeline is '
-            'origin-centred (no lobe-centroid offset), so lobe interiors are '
-            'not packed into served charts this slice')
+            'lobe-local tiles admitted + cusp-aligned and PACKED into served '
+            'charts; trained via from_lobe_engine in (rho_lobe, theta_local) '
+            'coordinates with the persisted lobe frame (centroid + directional '
+            'boundary) mapping served nodes to their true physical source')
     if interior_skip is not None:
         interior_report['interior_skipped'] = interior_skip
     elif interior_admitted == 0:
@@ -3690,6 +3823,78 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         # is fitted poorly; the SACR-C label switches that pair INTO the
         # bounded envelope.  The tag infix (``ffin`` vs ``ff``) and the
         # registration ``kind`` (interior eps bar vs far-field) also switch.
+        if region == 'lobe_interior':
+            # Macro-saddle lobe-interior tile (S2-3): trained in lobe-local
+            # (rho_lobe, theta_local) coordinates via ``from_lobe_engine`` on
+            # the tile's owning ``_SaddleLobeAdmission`` (carried on the tile),
+            # storing the INTERIOR_SACR_C tau_c-demodulated envelope on a
+            # ``LobeInteriorChart``.  Gated on the SAME interior eps bar as the
+            # origin-centred interior path, but the held-out probe maps through
+            # the LOBE frame (`_lobe_heldout_samples`), never the origin-centred
+            # `_from_caustic_fixed`.  ``si`` disambiguates the two lobes' tags.
+            lobe = tile['lobe']
+            lobe_tag = f'chart_{label}_s{si}_fflobe_{i}_{j}'
+            lobe_path = outdir / f'{lobe_tag}.npz'
+
+            def build_lobe(band=band, center=center, half=half,
+                           w_range=w_range, si=si, m_lo=m_lo, m_hi=m_hi,
+                           region=region, lobe=lobe, eff_w_nodes=eff_w_nodes,
+                           w_nodes=tile_w_nodes):
+                chart, calls, refused = _build_lobe_chart(
+                    gamma_band=band, parity=parity, lobe=lobe,
+                    box_center=center, half=half, w_range=w_range,
+                    config=config, w_nodes_per_decade=w_nodes)
+                samples = _lobe_heldout_samples(
+                    band, center, half, config, rng, lobe=lobe)
+                eps = _heldout_eps(chart, samples,
+                                   {'schema': 'heldout-probe'})
+                return chart, calls, refused, {
+                    'kind': 'interior', 'region': region,
+                    'image_count': chart.image_count,
+                    'stratum_index': si,
+                    'stratum_mass_range': [round(m_lo, 3), round(m_hi, 3)],
+                    'rho_theta_box': [list(center), list(half)],
+                    'w_range': [round(w_range[0], 6), round(w_range[1], 6)],
+                    'node_counts': {'n_gamma': config.n_gamma,
+                                    'n_rho': config.n_rho,
+                                    'n_theta_c': config.n_theta_c,
+                                    'n_w_per_decade': int(eff_w_nodes)},
+                    'heldout_eps': eps}
+
+            try:
+                chart, report, reused = _load_or_build(
+                    lobe_path, build_lobe,
+                    {'schema': 'build8c-chart', 'parity': parity})
+            except CarrierDiscontinuityError as exc:
+                # The lobe tile straddles a critical-basin (``tau_c``) flip.
+                # The far-field subdivider is origin-centred (scalar
+                # ``exclusion_rho`` + ``_from_caustic_fixed`` samples) and
+                # CANNOT resubdivide a lobe-local box, so the tile is recorded
+                # as a ladder-served gap (not subdivided); lobe-aware
+                # subdivision is owed follow-on work.
+                chart_reports.append({
+                    'name': lobe_tag, 'parity': parity,
+                    'file': str(lobe_path), 'region': region,
+                    'carrier_flip': True, 'carrier_flip_detail': str(exc),
+                    'subdivided': False, 'ladder_served_gap': True})
+                continue
+            gated, gate_reason = _gate_chart('interior', report, config)
+            chart_report = {'name': lobe_tag, 'parity': parity,
+                            'file': str(lobe_path), 'reused': reused, **report}
+            if gated:
+                # A gated lobe tile is a ladder-served gap: the far-field
+                # subdivider cannot halve a lobe-local box (see above), so the
+                # window is served by the ladder, never numerical quadrature.
+                chart_report['gated'] = True
+                chart_report['gate_reason'] = gate_reason
+                chart_report['subdivided'] = False
+                chart_report['ladder_served_gap'] = True
+                chart_reports.append(chart_report)
+                continue
+            charts.append(chart)
+            chart_reports.append(chart_report)
+            continue
+
         interior = region == 'interior'
         kind = 'interior' if interior else 'farfield'
         definition = INTERIOR_SACR_C if interior else FARFIELD_KERNEL_SUM

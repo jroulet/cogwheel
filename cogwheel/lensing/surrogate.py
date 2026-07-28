@@ -92,6 +92,7 @@ import json
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.interpolate import BSpline, make_interp_spline
@@ -105,6 +106,10 @@ from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
 from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
+
+if TYPE_CHECKING:  # typing-only; NEVER a runtime import (surrogate is the
+    # lower module -- ``surrogate_training`` imports it, not vice versa).
+    from cogwheel.lensing.surrogate_training import _SaddleLobeAdmission
 
 # The engine's named refusals.  Any of these at ANY w node marks the whole
 # parameter grid point refused (per-w refusal propagation, Professor Q4).
@@ -219,6 +224,32 @@ _KNOWN_ENVELOPE_DEFINITIONS = (
 # finite-but-wrong reconstruction.
 _FARFIELD_AXIS_SCHEMA = 'caustic_radial_offset_rho_theta_framewinv'
 _KNOWN_FARFIELD_AXIS_SCHEMAS = frozenset({_FARFIELD_AXIS_SCHEMA})
+
+# Axis-schema tag persisted in each macro-saddle LOBE-INTERIOR chart's npz
+# meta (Build S2 saddle-lobe serve).  A lobe-interior chart (``gamma > 1``)
+# stores LOBE-LOCAL spatial axes ``(rho_lobe, theta_local)`` centred on the
+# lobe's source-plane deltoid centroid, where ``rho_lobe = |y - centroid| /
+# r_deltoid(theta_local)`` normalises by the DIRECTIONAL boundary radius so
+# ``rho_lobe = 1`` traces the deltoid boundary in every direction (a scalar
+# reach overshoots the near-cusp directions of an elongated/sheared lobe and
+# leaves its interior untileable).  These axes are meaningless without the
+# lobe frame (centroid + directional boundary), which is why they carry their
+# OWN schema tag: a far-field or tube chart reconstructed under the lobe
+# mirror -- or a lobe chart reconstructed under the far-field mirror -- would
+# be queried at the wrong coordinate and return a finite-but-wrong ``F``.  The
+# loader hard-refuses a lobe chart whose tag is absent or unknown, exactly as
+# the far-field loader does.  The ``_framewinv`` suffix mirrors the far-field
+# frame-invariant-label convention: the stored envelope is the ``tau_c``-
+# demodulated INTERIOR_SACR_C label.
+_LOBE_AXIS_SCHEMA = 'lobe_local_offset_rholobe_thetalocal_framewinv'
+_KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA})
+
+# Real-image count of a macro-saddle deltoid-lobe INTERIOR (``gamma > 1``).
+# A candidate strictly inside one lobe images into four real geometric-optics
+# images; a lobe-interior training node whose engine partition reports a
+# different count straddles a region boundary and is recorded refused rather
+# than fitted (Professor Q2).
+_MACRO_SADDLE_IMAGE_COUNT = 4
 
 # Angular half-width (radians) of the certified Pearcey-cusp arm coverage,
 # subtracted from each TubeChart cusp-exclusion window in `_tube_serves`.
@@ -375,6 +406,129 @@ def _from_caustic_fixed(gamma: float, rho: float, theta_c: float
     else:
         y_mag = _caustic_reach(gamma) + rho - 1.0
     return y_mag * float(np.cos(theta_c)), y_mag * float(np.sin(theta_c))
+
+
+def _lobe_boundary_radius(theta, boundary_theta: np.ndarray,
+                          boundary_r: np.ndarray):
+    """Directional macro-saddle lobe boundary radius ``r_deltoid(theta)``.
+
+    THE single authoritative definition of the lobe deltoid boundary:
+    periodic linear interpolation of ``boundary_r`` over ``boundary_theta``
+    with period ``2*pi``.  ``rho_lobe = |y - centroid| / r_deltoid(theta)``
+    so ``rho_lobe = 1`` tracks the deltoid boundary in EVERY lobe-local
+    direction -- a scalar reach overshoots the near-cusp directions of an
+    elongated (sheared) lobe and leaves its interior untileable.  The lobe
+    coordinate maps (`_from_lobe_fixed` / `_to_lobe_fixed`) and the
+    training-side admission predicate
+    (`surrogate_training._SaddleLobeAdmission._r_deltoid`, routed here in
+    WP3) BOTH use this helper so the convention has exactly one home.
+
+    Parameters
+    ----------
+    theta : float or np.ndarray
+        Lobe-local polar angle(s), radians.
+    boundary_theta : np.ndarray
+        Ascending lobe-local angular nodes on ``(-pi, pi]``.
+    boundary_r : np.ndarray
+        Directional boundary radius at ``boundary_theta`` (dimensionless
+        ``y`` units), strictly positive.
+
+    Returns
+    -------
+    float or np.ndarray
+        The directional boundary radius at ``theta``.
+    """
+    return np.interp(theta, boundary_theta, boundary_r, period=2.0 * np.pi)
+
+
+def _from_lobe_fixed(centroid: np.ndarray, boundary_theta: np.ndarray,
+                     boundary_r: np.ndarray, rho_lobe: float,
+                     theta_local: float) -> tuple[float, float]:
+    """Eigenframe source of a lobe-local ``(rho_lobe, theta_local)`` node.
+
+    Macro-saddle lobe-interior forward map (train time, before each engine
+    call): ``radius = rho_lobe * r_deltoid(theta_local)`` and
+    ``y = centroid + radius * (cos theta_local, sin theta_local)``, the
+    exact inverse of `_to_lobe_fixed`.  Uses the single authoritative
+    `_lobe_boundary_radius`; NEVER a private ``np.interp`` copy.
+
+    Parameters
+    ----------
+    centroid : np.ndarray
+        ``(2,)`` source-plane lobe centroid (lobe-local frame origin).
+    boundary_theta, boundary_r : np.ndarray
+        Directional-boundary nodes for `_lobe_boundary_radius`.
+    rho_lobe : float
+        Lobe-local radial coordinate (``rho_lobe = 1`` on the deltoid
+        boundary); must be non-negative.
+    theta_local : float
+        Lobe-local polar angle, radians.
+
+    Returns
+    -------
+    tuple[float, float]
+        The eigenframe source position ``(y1_eig, y2_eig)``.
+
+    Raises
+    ------
+    ValueError
+        If ``rho_lobe`` is negative.
+    """
+    rho_lobe = float(rho_lobe)
+    if rho_lobe < 0.0:
+        raise ValueError(f'rho_lobe must be non-negative; got {rho_lobe}.')
+    theta_local = float(theta_local)
+    radius = rho_lobe * float(
+        _lobe_boundary_radius(theta_local, boundary_theta, boundary_r))
+    y1_eig = float(centroid[0]) + radius * float(np.cos(theta_local))
+    y2_eig = float(centroid[1]) + radius * float(np.sin(theta_local))
+    return y1_eig, y2_eig
+
+
+def _to_lobe_fixed(centroid: np.ndarray, boundary_theta: np.ndarray,
+                   boundary_r: np.ndarray, y1_eig: float, y2_eig: float
+                   ) -> tuple[float, float]:
+    """Lobe-local ``(rho_lobe, theta_local)`` of an eigenframe source.
+
+    Macro-saddle lobe-interior inverse map (serve time): with
+    ``rel = y_eig - centroid``, ``theta_local = atan2(rel_y, rel_x)`` and
+    ``rho_lobe = |rel| / r_deltoid(theta_local)``.  Uses the single
+    authoritative `_lobe_boundary_radius`; NEVER a private ``np.interp``
+    copy.  The ``+-pi`` angular seam is handled by the ``period = 2*pi``
+    interpolation and round-trips through `_from_lobe_fixed`.
+
+    Parameters
+    ----------
+    centroid : np.ndarray
+        ``(2,)`` source-plane lobe centroid (lobe-local frame origin).
+    boundary_theta, boundary_r : np.ndarray
+        Directional-boundary nodes for `_lobe_boundary_radius`.
+    y1_eig, y2_eig : float
+        Eigenframe source position (dimensionless).
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(rho_lobe, theta_local)``.
+
+    Raises
+    ------
+    ValueError
+        If the query lies EXACTLY at the centroid, where ``theta_local``
+        is undefined (``atan2(0, 0)``); such a degenerate query is refused
+        rather than served an arbitrary angle (Professor Q4).
+    """
+    rel_x = float(y1_eig) - float(centroid[0])
+    rel_y = float(y2_eig) - float(centroid[1])
+    if rel_x == 0.0 and rel_y == 0.0:
+        raise ValueError(
+            'Lobe-local coordinate is undefined at the lobe centroid '
+            '(theta_local = atan2(0, 0)); this degenerate query is refused.')
+    theta_local = float(np.arctan2(rel_y, rel_x))
+    r_dir = float(
+        _lobe_boundary_radius(theta_local, boundary_theta, boundary_r))
+    rho_lobe = float(np.hypot(rel_x, rel_y)) / r_dir
+    return rho_lobe, theta_local
 
 
 def _log_w_grid(w_range: tuple[float, float],
@@ -955,6 +1109,180 @@ class FarFieldChart:
 
 
 @dataclass(frozen=True, eq=False)
+class LobeInteriorChart:
+    """Lobe-local-coordinate interior envelope chart for a macro-saddle lobe.
+
+    Interpolates ``E(w)`` over ``(log w, gamma, rho_lobe, theta_local)`` for
+    ONE macro-saddle (``gamma > 1``) deltoid lobe, where the two spatial axes
+    are the LOBE-LOCAL polar coordinates centred on the lobe's source-plane
+    deltoid centroid: ``rho_lobe = |y - centroid| / r_deltoid(theta_local)``
+    (so ``rho_lobe = 1`` traces the deltoid boundary in every direction) and
+    ``theta_local = atan2(y - centroid)``.  This mirrors `FarFieldChart` but
+    the spatial frame is lobe-local rather than origin-centred, so the chart
+    ALSO carries the lobe frame (`centroid`, `other_centroid`, `corridor_half`,
+    `boundary_theta`, `boundary_r`) needed to place a query at its true
+    physical source at serve time.  The envelope is the ``tau_c``-demodulated
+    INTERIOR_SACR_C label (`_INTERIOR_ENVELOPE_DEFINITION`), reconstructed by
+    the interior serve mirror; the coordinate convention is stamped as
+    `_LOBE_AXIS_SCHEMA` so a mislabeled artifact hard-refuses at load.
+
+    Attributes
+    ----------
+    gamma_grid, rho_lobe_grid, theta_local_grid, log_w_grid : np.ndarray
+        1-D strictly increasing training axes.  ``rho_lobe_grid`` /
+        ``theta_local_grid`` are the lobe-local spatial axes.
+    real_coeffs, imag_coeffs : np.ndarray
+        Cubic B-spline coefficient tensors, axes ``(log w, gamma, rho_lobe,
+        theta_local)``.
+    knots : tuple of np.ndarray
+        Knot vectors ``(t_logw, t_gamma, t_rho_lobe, t_theta_local)``.
+    image_count : int or None
+        Real-image count of the lobe interior (`_MACRO_SADDLE_IMAGE_COUNT`).
+    parity : int or None
+        Macro-image parity ``-1`` for a ``gamma > 1`` lobe interior.
+    eta_overlap_min : float
+        Minimum caustic distance the chart serves at.
+    refused_points : np.ndarray
+        Shape ``(n, 3)`` lobe-local ``(gamma, rho_lobe, theta_local)``
+        training points the engine refused.
+    param_spacing : np.ndarray
+        Shape ``(3,)`` mean spacing of ``(gamma, rho_lobe, theta_local)``
+        for the exclusion-ball normalization.
+    envelope_definition : str
+        Tag naming the label the chart's envelope encodes (default the
+        interior SACR-C label); the serve side dispatches on it.
+    centroid : np.ndarray
+        ``(2,)`` source-plane lobe centroid (lobe-local frame origin), read
+        off the `_SaddleLobeAdmission` frame.
+    other_centroid : np.ndarray
+        ``(2,)`` centroid of the OTHER lobe, for the serve-time inter-lobe
+        corridor refusal.
+    corridor_half : float
+        Inter-lobe corridor half-width (dimensionless ``y``).
+    boundary_theta, boundary_r : np.ndarray
+        Directional lobe boundary nodes normalising ``rho_lobe``
+        (`_lobe_boundary_radius`).
+    """
+
+    gamma_grid: np.ndarray
+    rho_lobe_grid: np.ndarray
+    theta_local_grid: np.ndarray
+    log_w_grid: np.ndarray
+    real_coeffs: np.ndarray
+    imag_coeffs: np.ndarray
+    knots: tuple
+    image_count: int | None
+    parity: int | None
+    eta_overlap_min: float
+    refused_points: np.ndarray
+    param_spacing: np.ndarray
+    envelope_definition: str
+    centroid: np.ndarray
+    other_centroid: np.ndarray
+    corridor_half: float
+    boundary_theta: np.ndarray
+    boundary_r: np.ndarray
+
+    @classmethod
+    def from_lobe_values(cls, *, gamma_grid: np.ndarray,
+                         rho_lobe_grid: np.ndarray,
+                         theta_local_grid: np.ndarray, log_w_grid: np.ndarray,
+                         envelope_real: np.ndarray, envelope_imag: np.ndarray,
+                         image_count: int | None, parity: int | None,
+                         centroid: np.ndarray, other_centroid: np.ndarray,
+                         corridor_half: float, boundary_theta: np.ndarray,
+                         boundary_r: np.ndarray,
+                         eta_overlap_min: float = _DEFAULT_CAUSTIC_FLOOR,
+                         refused_points: np.ndarray | None = None,
+                         envelope_definition: str
+                         = _INTERIOR_ENVELOPE_DEFINITION
+                         ) -> 'LobeInteriorChart':
+        """Build a lobe-interior chart by fitting splines to a value tensor.
+
+        Parameters
+        ----------
+        gamma_grid, rho_lobe_grid, theta_local_grid, log_w_grid : np.ndarray
+            1-D strictly increasing training axes (the two spatial axes are
+            the lobe-local ``rho_lobe`` and ``theta_local``).
+        envelope_real, envelope_imag : np.ndarray
+            Shape ``(n_w, n_gamma, n_rho_lobe, n_theta_local)`` real/imag
+            envelope values (the ``tau_c``-demodulated interior label).
+        image_count, parity : int or None
+            Region labels (``None`` if unrecorded).
+        centroid, other_centroid : np.ndarray
+            ``(2,)`` this-lobe and other-lobe source-plane centroids.
+        corridor_half : float
+            Inter-lobe corridor half-width.
+        boundary_theta, boundary_r : np.ndarray
+            Directional lobe boundary nodes normalising ``rho_lobe``.
+        eta_overlap_min : float, optional
+            Minimum caustic distance served (default the caustic floor).
+        refused_points : np.ndarray, optional
+            Refused lobe-local ``(gamma, rho_lobe, theta_local)`` training
+            points.
+        envelope_definition : str, optional
+            Tag naming the label the chart's envelope encodes (default the
+            interior SACR-C label).
+        """
+        gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
+        rho_lobe_grid = _validate_axis(rho_lobe_grid, 'rho_lobe_grid')
+        theta_local_grid = _validate_axis(theta_local_grid,
+                                          'theta_local_grid')
+        log_w_grid = _validate_axis(log_w_grid, 'log_w_grid')
+        expected = (log_w_grid.size, gamma_grid.size, rho_lobe_grid.size,
+                    theta_local_grid.size)
+        _check_value_shape(envelope_real, envelope_imag, expected)
+        real_c, imag_c, knots = _fit_tensor_spline(
+            (log_w_grid, gamma_grid, rho_lobe_grid, theta_local_grid),
+            envelope_real, envelope_imag)
+        return cls._assemble(
+            gamma_grid, rho_lobe_grid, theta_local_grid, log_w_grid,
+            real_c, imag_c, knots, image_count, parity, eta_overlap_min,
+            refused_points, centroid, other_centroid, corridor_half,
+            boundary_theta, boundary_r,
+            envelope_definition=envelope_definition)
+
+    @classmethod
+    def _assemble(cls, gamma_grid, rho_lobe_grid, theta_local_grid, log_w_grid,
+                  real_coeffs, imag_coeffs, knots, image_count, parity,
+                  eta_overlap_min, refused_points, centroid, other_centroid,
+                  corridor_half, boundary_theta, boundary_r,
+                  envelope_definition=_INTERIOR_ENVELOPE_DEFINITION
+                  ) -> 'LobeInteriorChart':
+        """Assemble a lobe chart from prebuilt coefficient tensors and knots.
+
+        Load-bearing for `_chart_from_npz`: rebuilds the frozen chart from
+        the persisted axes, coefficients, knots and lobe frame without
+        re-fitting.
+        """
+        param_spacing = np.array([
+            float(np.mean(np.diff(gamma_grid))),
+            float(np.mean(np.diff(rho_lobe_grid))),
+            float(np.mean(np.diff(theta_local_grid)))])
+        return cls(
+            gamma_grid=_validate_axis(gamma_grid, 'gamma_grid'),
+            rho_lobe_grid=_validate_axis(rho_lobe_grid, 'rho_lobe_grid'),
+            theta_local_grid=_validate_axis(theta_local_grid,
+                                            'theta_local_grid'),
+            log_w_grid=_validate_axis(log_w_grid, 'log_w_grid'),
+            real_coeffs=np.ascontiguousarray(real_coeffs, dtype=float),
+            imag_coeffs=np.ascontiguousarray(imag_coeffs, dtype=float),
+            knots=tuple(np.ascontiguousarray(t, dtype=float) for t in knots),
+            image_count=None if image_count is None else int(image_count),
+            parity=None if parity is None else int(parity),
+            eta_overlap_min=float(eta_overlap_min),
+            refused_points=_normalize_refused(refused_points),
+            param_spacing=param_spacing,
+            envelope_definition=str(envelope_definition),
+            centroid=np.ascontiguousarray(centroid, dtype=float).reshape(2),
+            other_centroid=np.ascontiguousarray(
+                other_centroid, dtype=float).reshape(2),
+            corridor_half=float(corridor_half),
+            boundary_theta=np.ascontiguousarray(boundary_theta, dtype=float),
+            boundary_r=np.ascontiguousarray(boundary_r, dtype=float))
+
+
+@dataclass(frozen=True, eq=False)
 class TubeChart:
     """Near-caustic envelope chart in caustic-adapted coordinates.
 
@@ -1074,16 +1402,18 @@ def _check_value_shape(value_real: np.ndarray, value_imag: np.ndarray,
 # ---- Chart selection (deterministic guard stack) ----------------------
 
 
-def _in_exclusion_ball(chart: FarFieldChart, gamma: float, rho: float,
-                       theta_c: float) -> bool:
-    """Whether caustic-fixed ``(gamma, rho, theta_c)`` is within a refusal
-    ball.
+def _in_exclusion_ball(chart: 'FarFieldChart | LobeInteriorChart',
+                       gamma: float, rho: float, theta_c: float) -> bool:
+    """Whether the chart's spatial ``(gamma, rho, theta_c)`` is within a
+    refusal ball.
 
-    ``refused_points`` and ``param_spacing`` are both in the chart's
-    caustic-fixed ``(gamma, rho, theta_c)`` coordinate (Build 8h-b3), so
-    the normalized ball test is unchanged in form.  Tiles are sub-arcs in
-    ``theta_c`` (they never wrap), so no angular-wrap handling is needed:
-    refused points and queries share the tile's ``theta_c`` range.
+    ``refused_points`` and ``param_spacing`` are both in the chart's own
+    spatial coordinate -- caustic-fixed ``(gamma, rho, theta_c)`` for a
+    `FarFieldChart` (Build 8h-b3) or lobe-local ``(gamma, rho_lobe,
+    theta_local)`` for a `LobeInteriorChart`, which shares this exact
+    normalized-ball form -- so the test is coordinate-agnostic.  Tiles are
+    sub-arcs in the angular axis (they never wrap), so no angular-wrap
+    handling is needed: refused points and queries share the tile's range.
     """
     refused = chart.refused_points
     if refused.shape[0] == 0:
@@ -1181,9 +1511,102 @@ def _farfield_serves(chart: FarFieldChart, gamma: float, log_w_min: float,
     return True
 
 
+def _lobe_serves(chart: 'LobeInteriorChart', gamma: float, log_w_min: float,
+                 log_w_max: float, eta: float, image_count: int,
+                 y1_eig: float, y2_eig: float) -> bool:
+    """Whether a macro-saddle lobe-interior chart serves this candidate.
+
+    A SEPARATE guard from `_farfield_serves`: the far-field chart lives in
+    origin-centred caustic-fixed axes, whereas a lobe chart lives in
+    LOBE-LOCAL ``(rho_lobe, theta_local)`` axes centred on its own
+    source-plane deltoid centroid, so the containment test must first place
+    the eigenframe source in the chart's stored frame.
+
+    Gate order (Professor Q1/Q5), each an independently observable abstention
+    reason: (a) gamma box containment; (b) ``ln w`` band inside; (c) the
+    inter-lobe CORRIDOR test in the chart's stored frame -- this lobe serves
+    only when the query is closer to THIS centroid than to the other lobe's
+    by the corridor half-width margin, so a source in the inter-lobe corridor
+    fails (c) for BOTH lobes and no lobe chart serves it (the documented,
+    named fall-through to the exact-engine ladder, Professor Q5); (d)
+    lobe-local box containment on ``(rho_lobe, theta_local)``; (e) the
+    inherited engine-refusal exclusion balls in lobe-local coordinates; (f)
+    the image-count guard; (g) the interior ``eta`` floor.  The frozen 9-probe
+    winding admission is NOT replicated here (Professor Q1 + Simplifier): its
+    no-false-admit guarantee is inherited via the identical interpolated
+    ``r_deltoid`` boundary used to normalise ``rho_lobe``.
+
+    Parameters
+    ----------
+    chart : LobeInteriorChart
+        The lobe-interior chart under test.
+    gamma : float
+        External shear magnitude (``> 1`` for a macro-saddle lobe).
+    log_w_min, log_w_max : float
+        Bounds of the query's ``ln w`` band.
+    eta : float
+        Caustic distance ``partition.caustic_distance``.
+    image_count : int
+        Real-image count ``int(partition.real_mask.sum())``.
+    y1_eig, y2_eig : float
+        Eigenframe source position (dimensionless); placed in the chart's
+        lobe-local frame for the corridor and box-containment tests.
+
+    Returns
+    -------
+    bool
+        ``True`` when this lobe chart serves the candidate.
+    """
+    # Precondition: a usable eigenframe source.  A non-finite coordinate
+    # (e.g. a caller that did not thread the source) declines cleanly rather
+    # than relying on NaN comparison semantics downstream.
+    if not (np.isfinite(y1_eig) and np.isfinite(y2_eig)):
+        return False
+    # (a) certified gamma box containment.
+    if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
+        return False
+    # (b) ln w band inside.
+    if not _log_w_band_inside(chart, log_w_min, log_w_max):
+        return False
+    # (c) inter-lobe corridor test in the chart's stored source-plane frame:
+    # serve only when strictly closer to THIS centroid than to the other by
+    # the corridor half-width.  A corridor source fails this for BOTH lobes.
+    near_this = float(np.hypot(y1_eig - float(chart.centroid[0]),
+                               y2_eig - float(chart.centroid[1])))
+    near_other = float(np.hypot(y1_eig - float(chart.other_centroid[0]),
+                                y2_eig - float(chart.other_centroid[1])))
+    if near_this + chart.corridor_half > near_other:
+        return False
+    # (d) lobe-local box containment.  A query exactly at the centroid has an
+    # undefined theta_local (`_to_lobe_fixed` raises); that degenerate point
+    # is refused rather than served an arbitrary angle (Professor Q4).
+    try:
+        rho_lobe, theta_local = _to_lobe_fixed(
+            chart.centroid, chart.boundary_theta, chart.boundary_r,
+            y1_eig, y2_eig)
+    except ValueError:
+        return False
+    if not (chart.rho_lobe_grid[0] <= rho_lobe <= chart.rho_lobe_grid[-1]
+            and chart.theta_local_grid[0] <= theta_local
+            <= chart.theta_local_grid[-1]):
+        return False
+    # (e) inherited engine-refusal exclusion ball, in lobe-local coordinates
+    # (refused_points and param_spacing are both lobe-local for this chart).
+    if _in_exclusion_ball(chart, gamma, rho_lobe, theta_local):
+        return False
+    # (f) image-count guard.
+    if chart.image_count is not None and image_count != chart.image_count:
+        return False
+    # (g) interior eta floor.
+    if eta <= chart.eta_overlap_min:
+        return False
+    return True
+
+
 def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
                  eta: float, theta: float, image_count: int, rho: float,
-                 theta_c: float):
+                 theta_c: float, y1_eig: float = float('nan'),
+                 y2_eig: float = float('nan')):
     """Deterministically pick the chart to serve a candidate, or ``None``.
 
     The guard stack (Professor Q7), executed in order, keys ONLY on the
@@ -1193,15 +1616,19 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
     caller uses the exact engine.
 
     Order: (2) gamma guard band near ``gamma = 1`` -> fall through; then
-    TUBE charts have priority over FAR-FIELD charts (step 7).  Per chart:
-    (1) certified-box containment on ``(gamma, log w)``; (3) far-field
-    engine-refusal exclusion balls; (5) image-count match; (6) cusp
-    exclusion / ``eta`` floor; (7) tube when ``eta in [eta_floor,
-    eta_max]``, else far-field when ``eta > eta_overlap_min``.
+    TUBE charts have priority over FAR-FIELD charts, and FAR-FIELD over
+    LOBE-INTERIOR charts (step 7).  Box containment is mutually exclusive
+    across the three kinds -- a positive-parity far-field box and a
+    macro-saddle lobe box never overlap in ``gamma`` -- so the scan order
+    is deterministic, not arbitrating overlap.  Per chart: (1) certified-box
+    containment on ``(gamma, log w)``; (3) far-field engine-refusal exclusion
+    balls; (5) image-count match; (6) cusp exclusion / ``eta`` floor; (7)
+    tube when ``eta in [eta_floor, eta_max]``, else far-field when ``eta >
+    eta_overlap_min``, else a lobe chart when the source falls in that lobe.
 
     Parameters
     ----------
-    charts : sequence of TubeChart or FarFieldChart
+    charts : sequence of TubeChart, FarFieldChart or LobeInteriorChart
         The surrogate's charts.
     gamma : float
         External shear magnitude.
@@ -1216,17 +1643,24 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
         Real-image count ``int(partition.real_mask.sum())``.
     rho, theta_c : float
         Piecewise caustic-fixed source coordinate and eigenframe polar angle
-        from `_to_caustic_fixed`.
+        from `_to_caustic_fixed` (the far-field query axes).
+    y1_eig, y2_eig : float, optional
+        Eigenframe source position, threaded to the lobe-interior guard
+        `_lobe_serves` so a macro-saddle lobe chart can place the query in
+        its own lobe-local frame.  Defaults are non-finite: a caller that
+        does not thread the source declines every lobe chart cleanly (only
+        the far-field/tube dispatch is exercised), preserving the legacy
+        call sites unchanged.
 
     Returns
     -------
-    TubeChart or FarFieldChart or None
+    TubeChart, FarFieldChart, LobeInteriorChart or None
         The selected chart, or ``None`` to fall through to the engine.
     """
     # (2) gamma guard band around the det-A = 0 parity boundary.
     if abs(gamma - 1.0) < _GAMMA_GUARD_BAND:
         return None
-    # (7) priority: tube charts first, then far-field charts.
+    # (7) priority: tube charts first, then far-field, then lobe-interior.
     for chart in charts:
         if isinstance(chart, TubeChart) and _tube_serves(
                 chart, gamma, log_w_min, log_w_max, eta, theta, image_count):
@@ -1236,21 +1670,37 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
                 chart, gamma, log_w_min, log_w_max, eta, image_count,
                 rho, theta_c):
             return chart
+    for chart in charts:
+        if isinstance(chart, LobeInteriorChart) and _lobe_serves(
+                chart, gamma, log_w_min, log_w_max, eta, image_count,
+                y1_eig, y2_eig):
+            return chart
     return None
 
 
 def _evaluate_chart(chart, gamma: float, rho: float, theta_c: float,
                     eta: float, theta: float,
-                    log_w_query: np.ndarray) -> np.ndarray:
+                    log_w_query: np.ndarray,
+                    y1_eig: float = float('nan'),
+                    y2_eig: float = float('nan')) -> np.ndarray:
     """Evaluate the selected chart's complex envelope over ``log_w_query``.
 
     A tube chart contracts on ``(sqrt(eta), theta-into-frame)``; a
     far-field chart contracts on its caustic-fixed spatial axes
-    ``(rho, theta_c)`` (Build 8h-b3).
+    ``(rho, theta_c)`` (Build 8h-b3); a lobe-interior chart contracts on
+    the LOBE-LOCAL ``(rho_lobe, theta_local)`` computed from the chart's
+    OWN stored frame via `_to_lobe_fixed` (so the eigenframe source is
+    placed at its true lobe-local position).  ``y1_eig`` / ``y2_eig`` are
+    required for a `LobeInteriorChart` and ignored for the other kinds;
+    their non-finite defaults keep the legacy far-field/tube call sites
+    unchanged.
     """
     if isinstance(chart, TubeChart):
         v1 = float(np.sqrt(eta))
         v2 = _theta_into_frame(theta, float(chart.theta_grid[0]))
+    elif isinstance(chart, LobeInteriorChart):
+        v1, v2 = _to_lobe_fixed(chart.centroid, chart.boundary_theta,
+                                chart.boundary_r, y1_eig, y2_eig)
     else:
         v1, v2 = rho, theta_c
     real = _contract_tensor_spline(chart.real_coeffs, chart.knots,
@@ -1295,9 +1745,11 @@ class LensAmplificationSurrogate:
         if not charts:
             raise ValueError('A surrogate needs at least one chart.')
         for chart in charts:
-            if not isinstance(chart, (FarFieldChart, TubeChart)):
+            if not isinstance(chart, (FarFieldChart, TubeChart,
+                                      LobeInteriorChart)):
                 raise ValueError(
-                    'charts must be FarFieldChart or TubeChart instances; '
+                    'charts must be FarFieldChart, TubeChart or '
+                    'LobeInteriorChart instances; '
                     f'got {type(chart).__name__}.')
         self.charts = charts
         self.provenance = dict(provenance)
@@ -1553,6 +2005,181 @@ class LensAmplificationSurrogate:
             envelope_real, envelope_imag)
         return cls([chart], provenance)
 
+    @classmethod
+    def from_lobe_engine(cls, *, admission: '_SaddleLobeAdmission',
+                         gamma_range: tuple[float, float],
+                         rho_lobe_range: tuple[float, float],
+                         theta_local_range: tuple[float, float],
+                         w_range: tuple[float, float],
+                         n_gamma: int = _DEFAULT_PARAM_NODES,
+                         n_rho: int = _DEFAULT_PARAM_NODES,
+                         n_theta: int = _DEFAULT_PARAM_NODES,
+                         w_nodes_per_decade: int = _DEFAULT_W_NODES_PER_DECADE,
+                         max_order: int | None = None
+                         ) -> 'LensAmplificationSurrogate':
+        """Train a macro-saddle lobe-interior surrogate on a dense engine grid.
+
+        The macro-saddle (``gamma > 1``) counterpart of `from_engine`'s
+        interior branch, but in LOBE-LOCAL coordinates.  For each grid node
+        ``(gamma, rho_lobe, theta_local)`` the lobe frame maps the node to a
+        physical eigenframe source via `_from_lobe_fixed` (NOT the
+        origin-centred `_from_caustic_fixed`), evaluates
+        `ChangRefsdalChannels.evaluate` at ``beta = 0``, ``kappa = 0`` on the
+        full dense ``w`` grid, and stores the ``tau_c``-demodulated
+        INTERIOR_SACR_C ``partition.envelope`` (the interior label).  A node
+        that refuses at any ``w`` or returns a non-finite envelope is recorded
+        refused (in lobe-local coordinates) and left as zeros.
+
+        Image count (Professor Q2).  The lobe interior is a single
+        four-real-image region: the image count is read from
+        ``partition.real_mask.sum()`` at the FIRST successful node and asserted
+        equal to `_MACRO_SADDLE_IMAGE_COUNT`; a later node reporting a
+        different count straddles a region boundary and is recorded refused
+        rather than fitted.  Interior interpolator hygiene: the collected
+        parked-carrier ``critical_source`` grid is passed to the SAME
+        `_assert_carrier_continuity` guard the interior branch of `from_engine`
+        uses (unchanged, F022), so a tile straddling a critical-basin flip is
+        rejected for subdivision.
+
+        The lobe frame (`centroid`, `other_centroid`, `corridor_half`,
+        `boundary_theta`, `boundary_r`) is read straight off the passed
+        `_SaddleLobeAdmission` and persisted on the `LobeInteriorChart` so the
+        node maps to its true physical source at serve time.
+
+        Parameters
+        ----------
+        admission : _SaddleLobeAdmission
+            The frozen per-lobe admission carrying the lobe frame.
+        gamma_range : tuple[float, float]
+            External-shear axis bounds ``(low, high)``; both above one for a
+            macro-saddle lobe.
+        rho_lobe_range, theta_local_range : tuple[float, float]
+            Lobe-local spatial axis bounds ``(low, high)``: ``rho_lobe`` is
+            the directional radius ratio (``rho_lobe = 1`` on the deltoid
+            boundary) and ``theta_local`` the lobe-local polar angle (radians).
+        w_range : tuple[float, float]
+            Dimensionless-frequency bounds ``(w_min, w_max)``, both positive.
+        n_gamma, n_rho, n_theta : int, optional
+            Nodes per parameter axis (default 7).
+        w_nodes_per_decade : int, optional
+            Density of the dense log-w training axis (default 15).
+        max_order : int, optional
+            Operator-series order cap forwarded to `ChangRefsdalChannels`.
+
+        Returns
+        -------
+        LensAmplificationSurrogate
+            The trained single-chart lobe-interior surrogate.
+
+        Raises
+        ------
+        ValueError
+            If the first evaluated node is not a
+            `_MACRO_SADDLE_IMAGE_COUNT`-image lobe interior.
+        CarrierDiscontinuityError
+            If a lobe tile straddles a critical-basin flip
+            (`_assert_carrier_continuity`); the tile must be subdivided.
+        """
+        centroid = np.ascontiguousarray(
+            admission.centroid, dtype=float).reshape(2)
+        other_centroid = np.ascontiguousarray(
+            admission.other_centroid, dtype=float).reshape(2)
+        corridor_half = float(admission.corridor_half)
+        boundary_theta = np.ascontiguousarray(
+            admission.boundary_theta, dtype=float)
+        boundary_r = np.ascontiguousarray(admission.boundary_r, dtype=float)
+
+        log_w_grid = _log_w_grid(w_range, w_nodes_per_decade)
+        gamma_grid = _uniform_axis(gamma_range, n_gamma, 'gamma')
+        rho_lobe_grid = _uniform_axis(rho_lobe_range, n_rho, 'rho_lobe')
+        theta_local_grid = _uniform_axis(
+            theta_local_range, n_theta, 'theta_local')
+        w_grid = np.exp(log_w_grid)
+
+        shape = (log_w_grid.size, gamma_grid.size, rho_lobe_grid.size,
+                 theta_local_grid.size)
+        envelope_real = np.zeros(shape, dtype=float)
+        envelope_imag = np.zeros(shape, dtype=float)
+        refused: list[tuple[float, float, float]] = []
+        # Parked-carrier ``critical_source`` per node for the basin-continuity
+        # guard; NaN marks a refused/unfilled node.
+        carrier = np.full((gamma_grid.size, rho_lobe_grid.size,
+                           theta_local_grid.size, 2), np.nan, dtype=float)
+        image_count: int | None = None
+
+        channels_kwargs = {} if max_order is None else {'max_order': max_order}
+        for i_g, gamma in enumerate(gamma_grid):
+            for i_rho, rho_lobe in enumerate(rho_lobe_grid):
+                for i_th, theta_local in enumerate(theta_local_grid):
+                    channels = ChangRefsdalChannels(w_grid, **channels_kwargs)
+                    try:
+                        # Lobe-local node -> physical eigenframe source (NOT
+                        # origin-centred). Inside the refusal guard so an
+                        # engine refusal records the node instead of crashing.
+                        y1_eig, y2_eig = _from_lobe_fixed(
+                            centroid, boundary_theta, boundary_r,
+                            float(rho_lobe), float(theta_local))
+                        partition = channels.evaluate(
+                            gamma=float(gamma), y=(y1_eig, y2_eig),
+                            beta=0.0, kappa=0.0)
+                    except _REFUSAL_ERRORS:
+                        refused.append((float(gamma), float(rho_lobe),
+                                        float(theta_local)))
+                        continue
+                    env = partition.envelope
+                    if not np.all(np.isfinite(env)):
+                        # Conservative: a non-finite envelope is a refusal.
+                        refused.append((float(gamma), float(rho_lobe),
+                                        float(theta_local)))
+                        continue
+                    count = int(partition.real_mask.sum())
+                    if image_count is None:
+                        image_count = count
+                        if image_count != _MACRO_SADDLE_IMAGE_COUNT:
+                            raise ValueError(
+                                'from_lobe_engine expects a '
+                                f'{_MACRO_SADDLE_IMAGE_COUNT}-real-image '
+                                'macro-saddle lobe interior, but the first '
+                                f'evaluated node reports {image_count} real '
+                                'images; the requested box is not a lobe '
+                                'interior.')
+                    elif count != image_count:
+                        # A node with a different image count straddles a
+                        # region boundary; record it refused, do not fit it.
+                        refused.append((float(gamma), float(rho_lobe),
+                                        float(theta_local)))
+                        continue
+                    envelope_real[:, i_g, i_rho, i_th] = env.real
+                    envelope_imag[:, i_g, i_rho, i_th] = env.imag
+                    carrier[i_g, i_rho, i_th] = partition.critical_source
+
+        # Interior interpolator hygiene (SAME guard as `from_engine`'s
+        # interior branch, unchanged -- F022): reject a tile that straddles a
+        # medial ridge (critical-basin flip) for subdivision.
+        _assert_carrier_continuity(
+            carrier, gamma_grid,
+            (gamma_grid.size, rho_lobe_grid.size, theta_local_grid.size))
+
+        refused_points = (np.array(refused, dtype=float) if refused
+                          else np.empty((0, 3), dtype=float))
+        parity = (1 if 0.5 * float(gamma_grid[0] + gamma_grid[-1]) < 1.0
+                  else -1)
+        chart = LobeInteriorChart.from_lobe_values(
+            gamma_grid=gamma_grid, rho_lobe_grid=rho_lobe_grid,
+            theta_local_grid=theta_local_grid, log_w_grid=log_w_grid,
+            envelope_real=envelope_real, envelope_imag=envelope_imag,
+            image_count=image_count, parity=parity,
+            centroid=centroid, other_centroid=other_centroid,
+            corridor_half=corridor_half, boundary_theta=boundary_theta,
+            boundary_r=boundary_r, eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
+            refused_points=refused_points,
+            envelope_definition=_INTERIOR_ENVELOPE_DEFINITION)
+        provenance = cls._build_lobe_provenance(
+            gamma_range, rho_lobe_range, theta_local_range, w_range, shape,
+            envelope_real, envelope_imag, centroid, other_centroid,
+            corridor_half)
+        return cls([chart], provenance)
+
     @staticmethod
     def _box_region_labels(gamma_grid: np.ndarray, rho_grid: np.ndarray,
                            theta_c_grid: np.ndarray
@@ -1618,6 +2245,52 @@ class LensAmplificationSurrogate:
             'kappa': 0.0,
             'chart_count': 1,
             'chart_types': ['farfield'],
+            'training_hash': hasher.hexdigest()[:12]}
+
+    @staticmethod
+    def _build_lobe_provenance(gamma_range: tuple[float, float],
+                               rho_lobe_range: tuple[float, float],
+                               theta_local_range: tuple[float, float],
+                               w_range: tuple[float, float],
+                               shape: tuple[int, int, int, int],
+                               envelope_real: np.ndarray,
+                               envelope_imag: np.ndarray,
+                               centroid: np.ndarray,
+                               other_centroid: np.ndarray,
+                               corridor_half: float) -> dict:
+        """Build the provenance dict for a macro-saddle lobe-interior chart.
+
+        The lobe counterpart of `_build_provenance`.  The spatial ranges are
+        the LOBE-LOCAL ``(rho_lobe, theta_local)`` axis bounds (WP1); the
+        ``axis_schema`` tag records the lobe-local convention so a stale
+        origin-centred or old-tag artifact is distinguishable (and hard-
+        refused) at load.  The lobe frame (`centroid`, `other_centroid`,
+        `corridor_half`) is stamped so the training source geometry is
+        recoverable from the provenance alone.
+        """
+        hasher = hashlib.sha1()
+        hasher.update(np.ascontiguousarray(envelope_real).tobytes())
+        hasher.update(np.ascontiguousarray(envelope_imag).tobytes())
+        n_w, n_gamma, n_rho, n_theta = shape
+        return {
+            'gamma_range': [float(gamma_range[0]), float(gamma_range[1])],
+            'rho_lobe_range': [float(rho_lobe_range[0]),
+                               float(rho_lobe_range[1])],
+            'theta_local_range': [float(theta_local_range[0]),
+                                  float(theta_local_range[1])],
+            'axis_schema': _LOBE_AXIS_SCHEMA,
+            'w_range': [float(w_range[0]), float(w_range[1])],
+            'resolution': {'n_w': int(n_w), 'n_gamma': int(n_gamma),
+                           'n_rho_lobe': int(n_rho),
+                           'n_theta_local': int(n_theta)},
+            'beta': 0.0,
+            'kappa': 0.0,
+            'centroid': [float(centroid[0]), float(centroid[1])],
+            'other_centroid': [float(other_centroid[0]),
+                               float(other_centroid[1])],
+            'corridor_half': float(corridor_half),
+            'chart_count': 1,
+            'chart_types': ['lobe'],
             'training_hash': hasher.hexdigest()[:12]}
 
     # ---- Query --------------------------------------------------------
@@ -1693,10 +2366,13 @@ class LensAmplificationSurrogate:
             the caller must fall back to the exact engine.
         definition : str or None
             The served chart's envelope-definition tag when a
-            `FarFieldChart` is served (the serving-side reconstruction
-            dispatches on it), ``None`` for a `TubeChart` or when not
-            served.  The persisted tag is the single dispatch signal --
-            no parallel flag.
+            `FarFieldChart` or `LobeInteriorChart` is served (the
+            serving-side reconstruction dispatches on it -- a lobe chart's
+            INTERIOR_SACR_C label reconstructs by the interior mirror in the
+            query geometry's ``tau_c`` frame, identical to an origin-centred
+            interior chart, Professor Q3), ``None`` for a `TubeChart` or
+            when not served.  The persisted tag is the single dispatch
+            signal -- no parallel flag.
         """
         w = np.asarray(w_array, dtype=float)
         w_flat = np.atleast_1d(w).ravel()
@@ -1718,14 +2394,16 @@ class LensAmplificationSurrogate:
         chart = select_chart(
             self.charts, gamma=gamma, log_w_min=float(log_w.min()),
             log_w_max=float(log_w.max()), eta=eta, theta=theta,
-            image_count=image_count, rho=rho, theta_c=theta_c)
+            image_count=image_count, rho=rho, theta_c=theta_c,
+            y1_eig=y1_eig, y2_eig=y2_eig)
         if chart is None:
             return np.zeros(w.shape, dtype=complex), False, None
 
         env_flat = _evaluate_chart(chart, gamma, rho, theta_c, eta, theta,
-                                   log_w)
+                                   log_w, y1_eig, y2_eig)
         definition = (chart.envelope_definition
-                      if isinstance(chart, FarFieldChart) else None)
+                      if isinstance(chart, (FarFieldChart, LobeInteriorChart))
+                      else None)
         return env_flat.reshape(w.shape), True, definition
 
     # ---- Legacy single-box (far-field) query --------------------------
@@ -1998,18 +2676,25 @@ def _validate_farfield_definition(tag, artifact_label: str) -> str:
     return str(tag)
 
 
-def _validate_farfield_axis_schema(tag, artifact_label: str) -> str:
-    """Hard-refuse a far-field chart with an absent or unknown axis schema.
+def _validate_axis_schema(tag, known_set: frozenset[str],
+                          artifact_label: str) -> str:
+    """Hard-refuse a chart with an absent or unknown axis schema.
 
-    Positive-parity far-field charts use piecewise caustic-fixed
-    ``(rho, theta_c)`` coordinates. A chart trained on raw eigenframe axes,
-    scalar-reach rho, or multiplicative directional rho would be queried at
-    the wrong coordinate and could return a finite-but-wrong amplification.
+    Generic axis-schema gate shared by every chart kind.  A chart trained
+    on a stale or wrong-frame coordinate convention (raw eigenframe,
+    scalar-reach rho, multiplicative directional rho, or an origin-centred
+    axis on a lobe chart) would be queried at the WRONG coordinate and could
+    return a finite-but-wrong amplification.  Refusing at load -- naming the
+    artifact, the offending tag, and the known set, and instructing a
+    rebuild -- turns that silent mis-serve into a loud, unmissable failure.
 
     Parameters
     ----------
     tag : str or None
         The ``axis_schema`` read from the artifact meta.
+    known_set : frozenset[str]
+        The axis schemas accepted for this chart kind (e.g.
+        `_KNOWN_FARFIELD_AXIS_SCHEMAS` or `_KNOWN_LOBE_AXIS_SCHEMAS`).
     artifact_label : str
         Human-readable identifier (e.g. ``'chart 3'``) for the error.
 
@@ -2021,18 +2706,43 @@ def _validate_farfield_axis_schema(tag, artifact_label: str) -> str:
     Raises
     ------
     ValueError
-        If ``tag`` is ``None`` or not in `_KNOWN_FARFIELD_AXIS_SCHEMAS`.
+        If ``tag`` is ``None`` or not in ``known_set``.
     """
-    if tag is None or tag not in _KNOWN_FARFIELD_AXIS_SCHEMAS:
+    if tag is None or tag not in known_set:
         raise ValueError(
-            f'Far-field {artifact_label} carries axis-schema tag '
-            f'{tag!r}, which is absent or unknown (known: '
-            f'{sorted(_KNOWN_FARFIELD_AXIS_SCHEMAS)}). This artifact may use '
-            f'raw eigenframe, scalar-reach, or multiplicative directional '
-            f'axes and must not serve under the current caustic-fixed '
-            f'reconstruction; rebuild '
+            f'{artifact_label} carries axis-schema tag {tag!r}, which is '
+            f'absent or unknown (known: {sorted(known_set)}). This artifact '
+            f'may use a stale or wrong-frame coordinate convention and must '
+            f'not serve under the current reconstruction; rebuild '
             f'the surrogate.')
     return str(tag)
+
+
+def _validate_farfield_axis_schema(tag, artifact_label: str) -> str:
+    """Hard-refuse a far-field chart with an absent or unknown axis schema.
+
+    Thin wrapper over `_validate_axis_schema` binding the far-field known
+    set.  Positive-parity far-field charts use piecewise caustic-fixed
+    ``(rho, theta_c)`` coordinates; a chart trained on raw eigenframe axes,
+    scalar-reach rho, or multiplicative directional rho would be queried at
+    the wrong coordinate and could return a finite-but-wrong amplification.
+    """
+    return _validate_axis_schema(
+        tag, _KNOWN_FARFIELD_AXIS_SCHEMAS, f'Far-field {artifact_label}')
+
+
+def _validate_lobe_axis_schema(tag, artifact_label: str) -> str:
+    """Hard-refuse a lobe-interior chart with an absent or unknown schema.
+
+    Thin wrapper over `_validate_axis_schema` binding the lobe known set.
+    Macro-saddle lobe-interior charts are queried on lobe-local
+    ``(rho_lobe, theta_local)`` coordinates centred on the lobe centroid; a
+    chart stamped with the far-field caustic-fixed tag, an origin-centred
+    axis, or an old lobe tag would be reconstructed at the wrong coordinate
+    and must hard-refuse at load.
+    """
+    return _validate_axis_schema(
+        tag, _KNOWN_LOBE_AXIS_SCHEMAS, f'Lobe-interior {artifact_label}')
 
 
 def _chart_to_npz(chart, index: int) -> dict:
@@ -2046,6 +2756,25 @@ def _chart_to_npz(chart, index: int) -> dict:
         axes = (chart.log_w_grid, chart.gamma_grid, chart.u_grid,
                 chart.theta_grid)
         arrays = {}
+    elif isinstance(chart, LobeInteriorChart):
+        # Additive lobe branch (WP1): the persisted record carries the lobe
+        # frame (centroid, other_centroid, boundary_theta/boundary_r as
+        # arrays; corridor_half scalar in meta) alongside the interior spline.
+        # The lobe axis-schema tag makes a mislabeled/old artifact hard-refuse
+        # at load rather than reconstruct a finite-but-wrong F.
+        meta = {'kind': 'lobe', 'image_count': chart.image_count,
+                'parity': chart.parity,
+                'eta_overlap_min': chart.eta_overlap_min,
+                'envelope_definition': chart.envelope_definition,
+                'corridor_half': float(chart.corridor_half),
+                'axis_schema': _LOBE_AXIS_SCHEMA}
+        axes = (chart.log_w_grid, chart.gamma_grid, chart.rho_lobe_grid,
+                chart.theta_local_grid)
+        arrays = {prefix + 'refused': chart.refused_points,
+                  prefix + 'centroid': chart.centroid,
+                  prefix + 'other_centroid': chart.other_centroid,
+                  prefix + 'boundary_theta': chart.boundary_theta,
+                  prefix + 'boundary_r': chart.boundary_r}
     else:
         meta = {'kind': 'farfield', 'image_count': chart.image_count,
                 'parity': chart.parity,
@@ -2081,6 +2810,26 @@ def _chart_from_npz(data, index: int):
             image_count=meta['image_count'], parity=meta['parity'],
             eta_floor=meta['eta_floor'], eta_max=meta['eta_max'],
             cusp_windows=[tuple(win) for win in meta['cusp_windows']])
+    if meta['kind'] == 'lobe':
+        # Additive lobe branch (WP1): a lobe chart demands the lobe axis
+        # schema, so a mislabeled/old artifact hard-refuses here rather than
+        # reconstructing at the wrong (origin-centred or far-field) coordinate.
+        _validate_lobe_axis_schema(meta.get('axis_schema'), f'chart {index}')
+        definition = _validate_farfield_definition(
+            meta.get('envelope_definition'), f'chart {index}')
+        return LobeInteriorChart._assemble(
+            gamma_grid=gamma_grid, rho_lobe_grid=p1_grid,
+            theta_local_grid=p2_grid, log_w_grid=log_w_grid,
+            real_coeffs=real_coeffs, imag_coeffs=imag_coeffs, knots=knots,
+            image_count=meta['image_count'], parity=meta['parity'],
+            eta_overlap_min=meta['eta_overlap_min'],
+            refused_points=data[prefix + 'refused'],
+            centroid=data[prefix + 'centroid'],
+            other_centroid=data[prefix + 'other_centroid'],
+            corridor_half=meta['corridor_half'],
+            boundary_theta=data[prefix + 'boundary_theta'],
+            boundary_r=data[prefix + 'boundary_r'],
+            envelope_definition=definition)
     definition = _validate_farfield_definition(
         meta.get('envelope_definition'), f'chart {index}')
     _validate_farfield_axis_schema(
