@@ -1456,18 +1456,29 @@ def born_carrier_from_partition(
         above = ~below
         if is_saddle:
             # Macro-saddle branch (det A < 0): pure two-real-image ppGO, the
-            # complex ghost REFUSED.  We do NOT call ``farfield_ghost_term`` at
-            # all: ``geometry.ghost_kernel`` pins its sqrt branch with
-            # ``reference_amplitude = exp(-0.5j*pi)``, justified in its own
-            # docstring by "the two real images continue into a Morse-index-1
-            # saddle" -- a POSITIVE-PARITY statement.  On the macro saddle both
-            # real images are ALREADY index-1, so that branch reference has not
-            # been derived for ``det A < 0`` (F024); admitting the ghost here
-            # inflates the azimuthal node count (measured N(theta) 4 -> 14 at
-            # gamma=1.6, |y|=4.243, w=5).  A ZERO envelope with
-            # `FARFIELD_KERNEL_SUM` (``S_a = 1`` on the real channels)
-            # reconstructs exactly the pure ppGO coherent sum over the two real
-            # images, demodulated to the min-relative frame (Professor).
+            # complex ghost REFUSED.  NOT because the ghost is wrong here --
+            # F027 measured the opposite: ``geometry._branch_pinned_amplitude``
+            # pins its sqrt branch against ``exp(-0.5j*pi)`` with a
+            # positive-parity PHRASING, but the reference is parity-independent
+            # (``tr Hess = 2*lam > 0`` forbids index-2 images on both branches,
+            # so every A2 fold annihilates an (index 0, index 1) pair), and
+            # ``+G`` beats bare ppGO at every ``w <= 1.41`` on the saddle.
+            #
+            # The refusal is owed to a MISSING FENCE, not a wrong sign: the
+            # ghost's decay gate was retired in Build 8h-d1 and replaced by a
+            # geometric separation gate only.  Near a principal axis
+            # ``Im tau_c -> 0``, so the ghost stops decaying with ``w`` while
+            # the ppGO residual keeps shrinking; measured at ``w = 5``,
+            # ``|y| = 4.2426``, ``gamma = 1.60``, ``|G|/|F|`` climbs 5.2e-6 ->
+            # 1.0e-1 as theta falls 0.90 -> 0.02, degrading the residual up to
+            # 64x versus ppGO alone (F027).  Nothing currently refuses that
+            # regime.  Until a band-floor-pinned decay gate exists the
+            # conservative arm is to omit an ADDITIVE correction, which costs
+            # accuracy where the ghost would have helped but can never inject a
+            # silent bias.  A ZERO envelope with `FARFIELD_KERNEL_SUM`
+            # (``S_a = 1`` on the real channels) reconstructs exactly the pure
+            # ppGO coherent sum over the two real images, demodulated to the
+            # min-relative frame (Professor).
             _kernels, ppgo = reconstruct_farfield(
                 w, np.zeros(w.shape, dtype=complex), partition.delays,
                 partition.saddle_kernels, partition.real_mask,

@@ -215,13 +215,15 @@ def finding_signature(findings: list[Finding]) -> frozenset[str]:
 
     Two consecutive revisions producing the same signature means the loop is
     re-deriving findings the fixer cannot or will not clear — spending the
-    remaining budget on it buys nothing.  Keyed on id + severity + file +
-    a description prefix so a genuinely re-worded finding still counts as
-    new, while an identical re-raise does not.
+    remaining budget on it buys nothing.  Keyed on ``finding_id + severity +
+    file`` ONLY: the Inspector already assigns a stable per-build id, so the
+    description adds no identity, and including it DEFEATED the check —
+    descriptions quote line numbers, and a partial fix that shifts the file
+    re-words the same unfixed finding into a "new" signature, so the loop
+    never detects that it is stuck.
     """
     return frozenset(
-        f'{f.finding_id}|{f.severity}|{f.file}|{(f.description or "")[:120]}'
-        for f in findings
+        f'{f.finding_id}|{f.severity}|{f.file}' for f in findings
     )
 
 
