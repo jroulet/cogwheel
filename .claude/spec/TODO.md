@@ -127,6 +127,58 @@ Tag conventions:
   Saddle branch: see [[lensing_saddle_born]].
 
 
+- **Dropped metamorphosis gamma slivers get NO chart of any kind, and the code
+  comment says otherwise** `[→ spec]` — a first-class census fall-through
+  bucket with no owner. Found by backlog audit 2026-07-28; it had never been
+  written down.
+
+  `surrogate_training.py` calls `stable_gamma_bands(..., min_width=
+  config.min_gamma_band)` (default `0.02`) and DISCARDS every topology-stable
+  gamma sub-band narrower than that. The training loop then calls
+  `_train_band_charts` only over the SURVIVING sub-bands — and
+  `_train_band_charts` is what builds BOTH the tube charts AND the
+  far-field/interior tiles for a band.
+
+  So a dropped sliver receives no chart at all: the entire source plane and the
+  entire `w` band at those gammas fall through to the exact engine. Not a
+  degraded serve — no serve.
+
+  **The in-code comment asserts the opposite and is WRONG** (near
+  `surrogate_training.py:2982`):
+
+      "metamorphosis slivers are dropped (they fall through to
+       far-field/exact serving)"
+
+  There is no far-field to fall through to, because the far-field tiles are
+  built inside the same per-sub-band call that was skipped. Fix the comment in
+  the same change that fixes the behaviour — a comment that misdescribes a
+  known gap is how the gap stayed invisible.
+
+  `surrogate_census._FALLTHROUGH_CATEGORIES` already lists `'dropped-sliver'`
+  alongside `'cusp-window'` and `'refusal-ball'`, so the census would REPORT
+  this bucket — but no fragment tracked closing it, and its magnitude has
+  never been measured.
+
+  Owed, in order:
+  1. MEASURE it first. Each sliver is at most `min_gamma_band = 0.02` wide, but
+     the COUNT is data-dependent (it is whatever the astroid/deltoid
+     metamorphosis structure produces across `gamma` in (0, 1.6) on both
+     parities) and has never been counted. Total prior mass in dropped slivers
+     is the number that decides whether this is a rounding error or a real
+     hole. Cheap: run the band splitter across the prior and sum the dropped
+     widths.
+  2. Fix the comment regardless of (1).
+  3. If the mass is non-negligible, decide the treatment: widen the bands to
+     absorb the sliver (accepting topology mixing within a chart), serve the
+     sliver from a neighbouring band's charts with an accuracy check, or make
+     it an explicit named refusal so it is counted rather than silently
+     exact-served.
+
+  Do NOT close this by lowering `min_gamma_band`: the threshold exists because
+  a topology-unstable band cannot be tiled coherently. The question is what
+  serves the sliver, not how to make the sliver disappear.
+
+
 - **Born rung for the MACRO-SADDLE (`gamma > 1`) is unwritten and was
   untracked** — `chang_refsdal/_born.py` is positive-parity ONLY, by
   construction, not by omission:
@@ -328,75 +380,6 @@ tolerance widening; fallback-to-exact preserves certified-or-refuse).
   Links: [[likelihood_cusp-fast-serving]],
   [[likelihood_schwinger-homogenization]],
   [[likelihood_envelope-surrogate]].
-
-- [ ] **Homogenize the engine on the Schwinger evaluator (Build 8
-  program)** `[→ spec]` — owner directive (2026-07-19): "make it
-  homogeneous, use the surrogate to speed it up, and do what is needed
-  to make the w range higher." Target architecture: Schwinger as THE
-  single wave evaluator on both parities; the legacy
-  hypergeometric/operator-series path demoted to ORACLE duty (byte-level
-  regression gate on the overlap domain — owner-set gate); the
-  surrogate (see `likelihood_envelope-surrogate.md`) as the production
-  speed layer trained on Schwinger; resolved high-w served by geometric
-  optics + per-image relative binning; the narrow unresolved-high-w
-  near-caustic corner left as a NAMED refusal / exact fallback in THIS
-  build — all fold/cusp uniform-asymptotics (Airy/Pearcey) serving
-  belongs to the subsequent cusp fast-serving build
-  ([[likelihood_cusp-fast-serving]]; scope fence set 2026-07-20 so the
-  two builds do not collide), with the v-plane evaluator demoted to
-  not-needed-unless-the-uniform-patch-falls-short.
-  Interim state to be dissolved (Build 7a, deliberate): legacy
-  bit-frozen wherever it certifies, Schwinger only for saddle parity
-  and as the strong-shear refusal fallback (w <= 60, gamma' > 0).
-  Measured constraints driving the ordering: warm Schwinger
-  30-125 ms/point vs the 9.8 ms full lnlike (surrogate is
-  load-bearing); rescued strong-shear SACR-C envelope shows a 0.94-nat
-  interpolation discrepancy vs brute force (rescued-node envelope
-  accuracy gate is a Build 7b precondition).
-
-  OWNER DESIGN SEED (2026-07-20, for the Build 8b full-box tiling):
-  fit the surrogate in CAUSTIC-ADAPTED coordinates so the non-smooth
-  locus sits at a fixed place — (gamma, eta, theta, log w) with
-  (eta, theta) from `nearest_caustic_point` puts every caustic at the
-  eta = 0 plane for all gamma; fitting in u = sqrt(eta) (the known
-  fold exponent) makes the interpolant smooth through the transition.
-  One near-caustic tube chart + far-field raw charts beats tiling
-  axis-aligned boxes around a curved surface. Cusp neighborhoods need
-  their own patches (2/3-power scaling; Airy -> Pearcey) — this is
-  where the surrogate and the fold/cusp uniform-asymptotics (Airy)
-  programs CONVERGE: the uniform form IS the known structure at the
-  fixed transition. Query-time remapping is nearly free
-  (geometry_partition already returns caustic_distance).
-
-- [ ] **Build 8f — serving micro-levers: close 4.1x -> ~2x**
-  `[→ spec]` — OWNER SCHEDULED (2026-07-20): the post-8b floor ledger
-  puts the served lensed likelihood at 6.37 ms median = 4.1x the
-  1.56 ms unlensed generic floor (owner target 2-4x; owner wants the
-  remaining gap closed as its own build — "let's make it 8f").
-  Remaining budget: (a) geometry_partition residual ~2.0 ms — quartic
-  image solve + per-image delays + physical kernels + channel switch
-  (the caustic search is already Newton, 8b); (b) likelihood-side
-  data/norm contraction overhead ~2.3 ms. Both are VALUE-PRESERVING
-  optimization targets in the proven 8b-levers mold (HEAD side-by-side
-  certification, byte-identity where claimed, F010 falsifications
-  through the surviving py_funcs, arc-length-style gauge rules per
-  F017). DELIBERATELY NOT bundled into 8d (homogenization): these
-  levers need a standing-still baseline to certify against, and 8d's
-  baseline moves; they are orthogonal to 8d/8e file-wise.
-  ORDERING: after 8e (cusp fast-serving); may overlap the full-box
-  training run (training cost is exact-quadrature-dominated, so these
-  levers do not materially change it).
-  (c) NODE-PARALLEL EXACT EVALUATION (owner-spotted 2026-07-21): the
-  positive-parity and saddle wave arms evaluate w nodes in a SERIAL
-  loop (~90 ms/node, all nodes independent) — a prange/threaded node
-  loop is embarrassingly parallel and value-preserving (8b-levers
-  certification mold). Biggest payoff: the full-box TRAINING campaign
-  is engine-call-dominated, so node parallelism divides its wall-clock
-  by ~core count; also cuts exact-heavy test tiers and any pre-enable
-  exact serving.
-  PRE-BRIEF DRIVER STEP: profile the 2.0 ms partition residual
-  (find_images quartic vs kernels vs switch) so the brief carries
-  measured facts, not guesses.
 
 # Standard RB zero-noise floor (8.96e-3) — fix upstream [→ docs]
 
@@ -675,34 +658,6 @@ teja-force skill + gw with the rest of the hardening.
 
 ## In progress
 
-- **Microlensed-PE program (Chang–Refsdal)** `[→ spec]` `[→ docs]` — three-build
-  sequence implementing relative binning for microlensed waveforms per the
-  manuscript + design decisions in `.claude/handoff/lensing/META_PLAN.md`:
-  (1) lens engine `cogwheel/lensing/chang_refsdal/` (geometry / contour-free
-  operator / topology-stable channels) with oracle + exact-reconstruction +
-  continuity tests; (2) `LensedWaveformGenerator` + multi-component
-  relative-binning likelihood (delay-continuous summaries, sequential
-  mode→image contraction, FFTs setup-only) with brute-force lnL agreement
-  tests; (3) sampled lens coordinates (κ, β eliminated exactly; {ln δt,
-  contrast, folded source angle, γ'}), astroid folding, injection-recovery
-  validation. Source paper (unpublished) + prototype:
-  `.claude/spec/lensing_paper/`.
-
-- **Band-split serving + certified-ppGO map + interior/annulus charts
-  (Build 8h-a)** `[→ spec]` — ladder census (2026-07-23): true
-  zero-quadrature coverage is 2.1%; 72.5% of draws are whole-band
-  Schwinger-served and 25.5% carry high-w refusal nodes. Measured
-  per-node |F − ppGO|/max|F|: ppGO certifies above a config-dependent
-  w_cert (≈1.3–20 across the probe grid; fails everywhere at
-  low w and close to the caustic). Build: (1) per-node band-split
-  dispatch — charts below w_cert, bare certified ppGO above, arms at
-  refusal windows; (2) w_cert(γ, annulus, parity) as a measured,
-  hash-pinned artifact consulted by dispatch; (3) interior (4-image)
-  tile family via the same E_ff/real_mask definition; (4) targeted
-  edge-annulus subdivision for the 166 gated tiles. Acceptance:
-  ladder census quadrature bucket = 0 except the beyond-wall heavy
-  saddle tail (m > 458, Build 8h-b qd).
-
 - **Component representation + measured ceilings + caustic-fixed
   interiors (Build 8h-b)** `[→ spec]` — measured basis (2026-07-23):
   serving census 2.3%; map 43/84 physical cells certified with 30
@@ -719,15 +674,3 @@ teja-force skill + gw with the rest of the hardening.
   convergence-measured sparser grids) + serve-side mirror via a new
   envelope-definition tag; (3) caustic-fixed interior coordinates,
   per-lobe saddle interiors, crown-aware interior banding.
-
-- **Far-field envelope redefinition + consolidated tiling (Build 8g-b)**
-  `[→ spec]` — mid-campaign probe (2026-07-22) found far-field tiles
-  straddling the astroid diagonals fit garbage (eps 0.3-0.9): the
-  criticality switch keyed on nearest-caustic ``tau_c`` flips lobes on the
-  equidistance line, leaving a resolved image un-subtracted (envelope
-  jumps x1500 mid-tile, measured). Fix: far-field charts subtract the
-  FULL ppGO sum (switch forced on) with no ``tau_c`` carrier — envelope
-  becomes smooth ~1e-4 ``F − Σ H_a e^{i w tau_a}``; serving reconstruction
-  mirrors the new definition via a chart-meta envelope-definition tag;
-  tiling re-provisioned coarser against the now-tiny envelope. Tubes
-  unchanged (their carrier/switch are correct near-caustic).

@@ -34,7 +34,19 @@ never called, so there is no fall-through to compare against.
   `-1`). `a0` is a real, `w`-independent term at the SAME order `1/q2r` that
   the current series omits entirely. Series becomes
   `1 + a0/q2r + 1j*(w/2)*b1/q2r`.
-- Band split at `w_split`, keyed on `w * r0_sq <~ 8` (i.e. `w ~ 0.5`):
+- SCOPE FENCE, ADDED AFTER A SECOND MEASUREMENT PASS: everything below was
+  measured at `gamma` in {0.2, 0.25, 0.3, 0.45} ONLY. It is established for
+  `gamma <~ 0.75` and is NOT established for `0.75 <~ gamma < 1`. The reason
+  is structural, not sampling: the annulus `3.0 < |y| <= 4.2426` is a FAR
+  EXTERIOR region only for `gamma <~ 0.75`. Above that the astroid grows past
+  it (max |y| inside the caustic: 1.85 at gamma=0.60, 2.95 at 0.75, 4.35 at
+  0.85, >=6.00 at gamma>=0.95), so the annulus straddles or lies INSIDE the
+  caustic with fold crossings in the tile and a (0,1,1,1) census. THIS BUILD
+  SERVES `gamma <~ 0.75` ONLY and must REFUSE by name above it -- do not
+  extrapolate the carrier into a region where the geometry is different.
+- Band split at `w_split`, keyed on `w * Delta_tau ~ 4`, where `Delta_tau` is
+  the FERMAT-DELAY DIFFERENCE of the two real images (available from the
+  partition via `geometry.delay`, at no extra cost):
   * `w <  w_split`: carrier ALONE. No second image, no ppGO, no complex ghost.
     Residual 2.4e-2 - 8.7e-2 of `max|F|`; 4-15 nodes on `log_w`, 4 per y-axis.
   * `w >= w_split`: `geometric_amplification` with BOTH real images at FULL
@@ -42,6 +54,14 @@ never called, so there is no fall-through to compare against.
     1.6e-3 - 2.5e-2; 4-8 nodes on `log_w`, 4 per y-axis.
 - DO NOT mix the bands. Adding ppGO below `w = 0.05` inflates the residual by
   FIVE ORDERS OF MAGNITUDE through its `1/w**2` kernel.
+- WHY THE CURRENCY IS `w * Delta_tau` AND NOT `w * r0_sq`: the two agree at
+  positive parity ONLY because `Delta_tau ~ r0_sq / 2` there -- a coincidence
+  of that regime, not an identity. Measured on the macro saddle,
+  `r0_sq / (2*Delta_tau)` ranges 0.16 to 35.6, so `w * r0_sq` mispredicts the
+  split by two orders of magnitude in BOTH directions. `w * Delta_tau ~ 4`
+  is the invariant, and it coincides with SACR-C's own switch scale
+  `RHO_END = 4`. Use the invariant even though this build only serves positive
+  parity: the saddle build must not have to re-key it.
 - The chart absorbs `ln(w/2)` on its existing `log_w` axis at ZERO node cost,
   so there is NO low-`w` analytic rung. Node counts are identical with and
   without the log term at every tolerance from 4e-3 to 1e-5.
@@ -82,9 +102,15 @@ never called, so there is no fall-through to compare against.
 
 ## Out of scope
 
-- The macro-saddle branch (`gamma > 1`). Its derivation is in flight; it is
-  the NEXT build. Do not speculate it into this one — but do not hardcode
-  anything that would make adding it a restructure either.
+- The macro-saddle branch (`gamma > 1`). Its derivation has now landed and
+  differs from this one in ways that MUST NOT leak backwards into this build:
+  there the carrier is LEAD-ONLY (`a0`/`b1` make the saddle chart 6-16x more
+  expensive in the y-plane) and the complex ghost is REFUSED. Build the
+  positive-parity form here. Keep the band-split criterion and the carrier
+  choice parameterised so the saddle build adds a branch, not a rewrite.
+- The `gamma` band `0.75 <~ gamma <~ 1.03`, where the annulus is not exterior
+  on either side of the parity wall. Refuse it by name; it is a separate
+  problem for the interior machinery.
 - The low-`w` analytic rung. Measured unnecessary; building it adds a fifth
   ladder component for no gain.
 - Both carrier-continuity guards (F022). Different observables, not implicated.
@@ -100,8 +126,13 @@ never called, so there is no fall-through to compare against.
 3. Residual node counts are within a factor ~2 of the measured table above, in
    both bands, on a small synthetic annulus config. This is the real gate: it
    is what "the residual splines cheaply" means operationally.
-4. The band-split criterion is a named constant, and crossing it is continuous
-   in the served `F` to the chart's own eps bar — no seam discontinuity.
+4. The band-split criterion is a named constant expressed in `w * Delta_tau`,
+   and crossing it is continuous in the served `F` to the chart's own eps bar
+   — no seam discontinuity. A reachable-red must show that keying it on
+   `w * r0_sq` instead would mis-split on a configuration where
+   `Delta_tau != r0_sq/2`.
+4b. A `gamma > 0.75` query in the annulus REFUSES by name rather than being
+   served by the carrier.
 5. A source where `ghost_kernel` raises still serves (carrier or ppGO without
    the ghost term), and is not a refusal.
 6. `classify_fallthrough` attributes annulus draws to `'born'`, not

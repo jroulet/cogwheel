@@ -1061,3 +1061,78 @@ diagnosis, and the `log_w` absorbability measurement — not an accuracy gain.
 The rung's own T1 target of 1e-3 was never the right bar: in the
 carrier-plus-chart architecture the criterion is how CHEAPLY THE RESIDUAL
 SPLINES, not how accurate the analytic term is standing alone.
+
+## F024 — the band-split currency `w*r0_sq` was a positive-parity coincidence; the invariant is `w*Delta_tau`, and the annulus is only "exterior" for part of the prior (2026-07-28, Professor saddle commission)
+
+Three results, each of which invalidated something already written down.
+
+**1. The split currency.** F023 set the carrier/ppGO band split at
+`w * r0_sq ~ 8`. That is correct ONLY at positive parity, and only because
+`Delta_tau ~ r0_sq / 2` happens to hold there — a coincidence of the regime,
+not an identity. On the macro saddle `x0_i = y_i / a_i` with `a1 = lam - gamma
+< 0`, so `r0_sq` swings 1700x with angle (3721 -> 2.2 at gamma = 1.05) while
+`Delta_tau` does not; measured `r0_sq / (2*Delta_tau)` spans 0.16 to 35.6.
+
+The invariant is `w * Delta_tau ~ 4`, with `Delta_tau` the Fermat-delay
+difference of the two real images — already available from the partition via
+`geometry.delay`. It coincides with SACR-C's own switch scale `RHO_END = 4`.
+Confirmed both directions: at `gamma=1.6, |y|=4.24, theta=0.9`,
+`Delta_tau = 0.294` gives `w_split = 13.6` and the carrier still works at
+`w = 8` (N=7); at `gamma=1.2, theta=0.3`, `Delta_tau = 35.3` gives
+`w_split = 0.113` and the carrier has already failed by `w = 0.5` (N=161).
+`w * r0_sq` mispredicts both by two orders of magnitude.
+
+**2. The annulus is not always exterior.** Measured caustic extent on a 241^2
+source grid: max `|y|` inside the caustic is 1.85 at `gamma=0.60`, 2.95 at
+0.75, 4.35 at 0.85, and `>= 6.00` for `gamma >= 0.95`; on the saddle side
+`>= 6.00` at `gamma = 1.005`, 3.71 at 1.02, 2.49 at 1.05, 1.70 at 1.30.
+
+So the target annulus `3.0 < |y| <= 4.2426` is a FAR EXTERIOR region only for
+`gamma <~ 0.75` and `gamma >~ 1.03`. Between them — roughly 17 % of the
+prior's uniform `(0, 1.6)` shear range — it straddles or lies INSIDE the
+caustic, with fold crossings in the tile and a (0,1,1,1) census. The exterior
+ladder cannot close that band; it is either an interior-chart problem or a
+named refusal.
+
+This RETRO-SCOPES F023, whose positive-parity ladder was measured at
+`gamma` in {0.2, 0.25, 0.3, 0.45} only. F023's conclusions stand for
+`gamma <~ 0.75` and are NOT established above it. The Professor flagged this
+against its own prior report rather than letting it stand.
+
+**3. The saddle carrier is LEAD-ONLY, and the complex ghost is harmful there.**
+`|a0|, |b1| ~ 1/(gamma' - 1)` (a0 = 10.24 at gamma = 1.05), so `a0/q2r` is
+O(1) wherever `q2r` is small, and `q2r` falls to 1.4 near the
+positive-eigenvalue axis. Measured on `[1e-3, 0.05]`: lead-only
+`sqrt|mu_macro| * exp(-1j*pi/2) * exp(1j*w*phi_geo)` gives residual
+1.0e-2 - 7.4e-2 at N=4 on both `log_w` and the y-axes, while the full
+`(a0,b1)` carrier gives 1.7e-2 - 1.42 and needs N = 23-65 in the y-plane. The
+correction injects theta-structure that is not in `F`. Drop it on the saddle.
+
+The complex ghost is worse than useless there: at `gamma=1.6, |y|=4.243,
+w=5`, ppGO alone gives residual 1.4e-3 at N(theta)=4; adding the admitted
+ghost gives 4.2e-2 at N(theta)=14. Two causes — the admission set flips across
+theta inside a tile (43-54 of 65 points admitted), and, more fundamentally,
+`geometry.ghost_kernel` pins its sqrt branch with
+`reference_amplitude = exp(-0.5j*pi)` justified in its own docstring by "the
+two real images continue into a Morse-index-1 saddle". THAT IS A
+POSITIVE-PARITY STATEMENT: on the macro saddle both real images are ALREADY
+index-1. The branch reference has not been re-derived for `det A < 0`. Refuse
+the complex ghost on the saddle branch until it is.
+
+**Method caveat recorded by the Professor against its own numbers:** its
+theta-direction node counts demodulate by the SINGLE carrier
+`exp(1j*w*phi_geo)`. Above the split the residual inherits the other image's
+carrier (`Delta_tau` varies ~25 per radian, so at `w=5` the fringe spacing is
+~0.05 rad), which is why ppGO's theta counts look bad at `gamma=1.2` despite a
+residual of 8.2e-3. The correct object above the split is the SACR-C switched
+envelope. Residual SIZES are demodulation-independent and stand; the
+above-split theta NODE COUNTS are pessimistic and must be re-measured through
+`switched_analytic_channels` before they size a tile.
+
+**Pattern.** Both F023 and F024 corrected a fact that had already been written
+down and acted on — F023 the `b1` sign and the missing `a0`, F024 the split
+currency and the annulus's exteriority. In each case the wrong version was not
+a guess but a measurement taken over too narrow a slice. A measured fact
+carries the scope of its measurement; F023 said "the split is at
+`w * r0_sq ~ 8`" when what was measured was "the split is at
+`w * r0_sq ~ 8` FOR gamma in [0.2, 0.45]". State the sweep next to the result.
