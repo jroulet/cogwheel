@@ -27,6 +27,40 @@ else
     esac
 fi
 
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# -----------------------------------------------------------------------
+# Resolve Python interpreter (needed by the correctness checks below and by
+# render + sync_derived_docs further down).
+# Delegates to the shared conda-Python resolver: shell SDK_CONDA_ENV wins,
+# then a repo-root .env, then the cogwheel_310 default (never hard-fails on a
+# missing .env).
+# -----------------------------------------------------------------------
+. "$REPO_ROOT/.claude/hooks/conda-python.sh"
+
+# -----------------------------------------------------------------------
+# CORRECTNESS GATES FIRST
+# -----------------------------------------------------------------------
+# Ordering is deliberate: correctness checks run BEFORE the documentation
+# hygiene guards below. The Librarian backlog guard is chronic by nature --
+# it rebuilds on every commit and blocks at >5 -- so leaving it first meant a
+# documentation gate masked a correctness gate, and every --no-verify used to
+# get past the backlog silently skipped the correctness check too.
+
+# Changed API still referenced by SKIPPED tests.
+# A skipped/gated/xfailed test does not run, so it cannot report that a
+# signature change or a bumped constant broke it: the suite stays green and
+# the breakage surfaces days later with no link to this commit. Mechanical
+# counterpart to the READ-don't-run audit in .claude/crew/test_dev.md
+# (step 7) and .claude/crew/inspector.md (check 5b) -- prompts can be
+# skipped, this cannot. Self-skips if the checker is absent.
+DRIFT_CHECK="$REPO_ROOT/.claude/hooks/check_gated_test_drift.py"
+if [ -f "$DRIFT_CHECK" ] && [ -n "$PYTHON" ]; then
+    if ! "$PYTHON" "$DRIFT_CHECK"; then
+        exit 1
+    fi
+fi
+
 # -----------------------------------------------------------------------
 # Librarian sync backlog guard
 # -----------------------------------------------------------------------
@@ -35,7 +69,6 @@ fi
 # PostToolUse nag notifications don't reliably surface in the agent's
 # context, so we enforce at pre-commit time where `echo` output IS visible.
 # Threshold: >5 pending commits = hard block, >2 = advisory.
-REPO_ROOT="$(git rev-parse --show-toplevel)"
 SYNC_FILE="$REPO_ROOT/.claude/sync_issues.json"
 # Exemption: the Librarian's own sync commit must not be blocked by the
 # backlog it is clearing. Pre-commit can't see the commit message, so we
@@ -57,14 +90,6 @@ elif [ -f "$SYNC_FILE" ] && command -v jq >/dev/null 2>&1; then
         echo "  [advisory] $PENDING_N commits pending Librarian sync -- consider running /doc-sync"
     fi
 fi
-
-# -----------------------------------------------------------------------
-# Resolve Python interpreter (needed for render + sync_derived_docs below).
-# Delegates to the shared conda-Python resolver: shell SDK_CONDA_ENV wins,
-# then a repo-root .env, then the cogwheel_310 default (never hard-fails on a
-# missing .env). REPO_ROOT is resolved above.
-# -----------------------------------------------------------------------
-. "$REPO_ROOT/.claude/hooks/conda-python.sh"
 
 # -----------------------------------------------------------------------
 # Render fragment directories into canonical files + auto-stage.
@@ -244,21 +269,8 @@ if [ -n "$errors" ]; then
     exit 1
 fi
 
-# -----------------------------------------------------------------------
-# Changed API still referenced by SKIPPED tests
-# -----------------------------------------------------------------------
-# A skipped/gated/xfailed test does not run, so it cannot report that a
-# signature change or a bumped constant broke it. The suite stays green and
-# the breakage surfaces days later with no link to this commit. Mechanical
-# counterpart to the READ-don't-run audit in .claude/crew/test_dev.md (step 7)
-# and .claude/crew/inspector.md (check 5b) -- prompts can be skipped, this
-# cannot. Skips itself if the checker is absent.
-DRIFT_CHECK=".claude/hooks/check_gated_test_drift.py"
-if [ -f "$DRIFT_CHECK" ] && [ -n "$PYTHON" ]; then
-    if ! "$PYTHON" "$DRIFT_CHECK"; then
-        exit 1
-    fi
-fi
+# (The gated-test drift check runs near the top of this hook, before the
+# documentation-hygiene guards -- see "CORRECTNESS GATES FIRST" above.)
 
 # 7. Auto-stage the consumer graph cache if a background regen left it dirty.
 # (Only fires if the project has a consumer graph — conditional on file existence.)
