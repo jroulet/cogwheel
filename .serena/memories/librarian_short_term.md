@@ -1,76 +1,82 @@
-# Librarian Short-Term Observations — 2026-07-28 (post-commit for 8901b0b, 04f9f5c)
+# Librarian Short-Term Observations — 2026-07-28 (post-commit --post-commit 31ee133, 7 queued)
 
-Scope: sync_issues.json listed 8901b0b (telescoping-bound test fix / Tidy
-repair / retire branch-vs-HEAD apparatus) and 04f9f5c (macro-saddle
-per-lobe interior surrogate charts, SPEC.md -> 0.22.0) as pending. The
-task prompt called them "(3d8fd8f, 04f9f5c)" but the actual trigger file
-listed 8901b0b + 04f9f5c — 3d8fd8f (Dreamer memory consolidation) touches
-no doc-relevant files and was correctly absent from the trigger; treated
-the trigger file as authoritative, not the prompt's paraphrase.
+Scope: .claude/sync_issues.json listed 7 commits (079db9c, 2f7efe5, 2fc3f30,
+5cc9429, 22fd569, f8a88d2, 31ee133) as pending — backlog had been bypassed
+twice. Confirmed 079db9c/2f7efe5 were already synced by my own prior session
+(overview.rst parity fix + lobe-serve changelog); 2fc3f30 (test suite off the
+API surface, Sphinx warnings fixed) and 5cc9429/22fd569/f8a88d2 (FINDINGS
+F023-F026, TODO restructure — spec-only, told not to rewrite) were self-
+contained and needed no further action. The only commit with real downstream
+doc-sync work was 31ee133 (Born carrier + band split + 'born' census + SDK
+revision-loop fix).
 
 What I fixed:
-- Added `changelog.d/2026-07-28_saddle_lobe_serve.md` for 04f9f5c. EVERY
-  prior lensing-surrogate feature build (8a/8b/8c/8d/8e/8f/8g/8h-b4/
-  farfield-envelope-v2) has a changelog.d entry describing the change in
-  prose synthesized from SPEC.md; 04f9f5c (new public `LobeInteriorChart`
-  + `from_lobe_engine`, closes the saddle-interior coverage gap) fit that
-  precedent exactly and had none despite touching everything else
-  (SPEC.md, TODO.md, tests). Ran render_fragments.py after.
+- SPEC.md: rewrote the "Born rung (DORMANT)" Conventions bullet — it claimed
+  `b1` was "an unpinned placeholder" disagreeing with `operator.F_op` by
+  ~13%, which is now FALSE (F023 derived closed-form `b1`/`a0`; the module's
+  own docstring/WHY was fully rewritten in the same commit). New bullet:
+  "Born rung (carrier machinery landed; serve slot still unwired)" — carrier
+  + band-split + exterior fence described, wiring blocker now correctly
+  named as the missing TRAIN_TIER residual chart, not a missing derivation.
+  Also fixed the CENSUS row's "5-way MECE... (gamma-guard / cusp-window /
+  refusal-ball / out-of-box / dropped-sliver)" -> 6-way with 'born' added,
+  matching `_FALLTHROUGH_CATEGORIES`' actual tuple order. Bump: minor (fragment
+  `spec_changelog.d/2026-07-28_born_carrier_bandsplit.md`), landed at
+  rendered 0.22.0 (the alphabetically-later `saddle_lobe_serve` fragment from
+  the PRIOR session claimed 0.23.0 — reconfirms the standing memory note:
+  render_fragments.py assigns bumps by filename alphabetical order within
+  spec_changelog.d/, not by content date; flag, don't fix).
+- `todo.d/lensing_born_b1_derivation.md`: this fragment was STALE in a
+  meaningful way — it itemized "the coefficients", "the ladder", "guard A
+  re-derivation", "correct the docstring", and "the 'born' category ...
+  absent from the tree" as OWED work, but 31ee133 landed every one of those
+  except the final wiring-into-likelihood step. Left the item OPEN (did not
+  delete/move to completed.d — the multi-part-program rule: it stays open
+  until every listed part finishes, and wiring genuinely isn't done), but
+  rewrote the body so it no longer asserts finished sub-items as pending.
+  This is the same class of staleness as the "SPEC entries that cite a
+  function by name go stale silently" note, just in TODO.d instead of
+  SPEC.md — a fragment describing a plan goes stale when a LATER commit does
+  most but not all of the plan and nobody edited the fragment.
+- changelog.d: added 2026-07-28_born_carrier_bandsplit.md (prose synthesized
+  from the commit message + module docstrings, following the standing
+  precedent that every lensing-surrogate feature build gets one) and
+  2026-07-28_sdk_revision_loop_fix.md (.claude/-only agent-infra fix;
+  precedent for documenting these is `2026-07-27_sdk-agent-infra-hardening.md`,
+  which also chose to record despite being excluded from main-sync).
 
-What I verified and left alone (no action needed):
-- SPEC.md's 04f9f5c diff is a single-row rewrite (Microlensed sampling
-  layer) plus the version bump — nothing else in SPEC.md changed, so no
-  other SPEC-internal cross-references went stale.
-- DATA_CONTRACTS.yaml: Inspector's INS-3-001 "no schema bump" judgement
-  HOLDS — the `lens_amplification_surrogate` description already reads
-  "per-chart coefficient/knot arrays" generically; confirmed no chart-kind
-  enumeration exists there to go stale.
-- api.rst: `:recursive:` autosummary over bare `cogwheel` (still true) —
-  new class/classmethod in an existing module (`surrogate.py`) needs no
-  manual entry. Reconfirms the standing memory note.
-- overview.rst / crash_course.rst / index.rst: lensing is not mentioned in
-  crash_course.rst or index.rst at all (intentionally out of the
-  user-facing narrative — experimental, off-by-default). overview.rst's
-  "Microlensing engine" section is the only Sphinx mention.
-- 8901b0b's non-test .py diffs (_pearcey_table.py, _schwinger.py,
-  posterior.py, ppgo_map.py, surrogate_training.py) are PURE Tidy
-  line-wrap reflow, zero logic change — confirmed via full diff, not just
-  the commit message. The actual telescoping-bound fix lives entirely in
-  test files (test_lensing_farfield_envelope.py,
-  test_lensing_ppgo_bandsplit.py) and is already narrated in
-  `completed.d/2026-07-28_telescoping-conditioning-bound.md`
-  (self-synced by the commit). Considered promoting it to a FINDINGS.md
-  entry (it's a real condition-number-based tolerance derivation, exactly
-  FINDINGS.md's stated subject matter) but left it as completed.d-only:
-  it reads as test-bound bookkeeping for one xfail, not a reusable trap,
-  and the commit author already chose completed.d as the record — did not
-  second-guess a surface choice that was itself already made in-commit.
+What I verified and left alone:
+- FINDINGS F023-F026 and F009 all exist with matching headers; not touched
+  (driver said already written/rendered, and Inspector owns spec accuracy).
+- DATA_CONTRACTS.yaml / docs/source: grepped for the fall-through category
+  strings and "Born" — zero hits in either. The census categories are not
+  enumerated on any Sphinx page, and no new disk artifact exists yet (the
+  residual chart is TRAIN_TIER and unbuilt), so neither surface needed edits.
+- api.rst: `:recursive:` autosummary over bare `cogwheel` still holds — new
+  public functions in EXISTING modules (`_born.py`, `channels.py`,
+  `surrogate_census.py`) need no manual entry.
+- overview.rst: not touched, and confirmed NOT reverted (this session's
+  driver context explicitly warned about this; the both-parities correction
+  from 2f7efe5 is still in place).
+- Old changelog.d/2026-07-27_born_rung.md (the original DORMANT entry) is
+  now factually superseded by the new entry's content but was correctly left
+  UNEDITED — CHANGELOG is append-only history, not a living doc.
+- Test counts: SPEC's "27 tests" for `test_lensing_surrogate_census.py` is
+  still accurate post-31ee133 (counted `def test_` — still 27; the 'born'
+  category is exercised inside existing tests, no new test method added)
+  — did not need updating despite the file's diff stat showing +/-25 lines.
+- Sphinx rebuilt clean (`python -m sphinx -b html docs/source docs/build`,
+  zero warnings) even though I touched no file under docs/source/ this pass
+  — ran it anyway as due diligence given the backlog had been bypassed
+  twice; confirms 2fc3f30's "fix every in-repo Sphinx warning" claim still
+  holds.
+- `sync_derived_docs.py` run 1: zero-diff auto-fix (no stray
+  tidy_advisory.json this time, unlike prior sessions); flagged the same 4
+  test-only `lens_amplification_surrogate` consumers as before — correctly
+  left off DATA_CONTRACTS per the production-only consumer-list convention.
 
-SURPRISE — found, but NOT fixed (predates both queued commits by ~15
-builds, so out of THIS post-commit's scope; flagging for a future pass):
-overview.rst's "Microlensing engine" section still says the two
-higher-level entry points (LensedWaveformGenerator,
-LensedRelativeBinningLikelihood) "support positive-parity macro images
-only: a configuration with `1 - kappa <= |gamma|` raises ... rather than
-returning a degraded result." This has been false since the negative-
-parity/macro-saddle branch landed (Build 6/7, changelog.d
-2026-07-19_saddle-branch.md / 2026-07-20_saddle-integration-7b.md) — both
-parities have been supported for ~15 SPEC versions. Also never mentions
-the surrogate layer (8a-8h) at all. Prior "backlog clear" sync passes
-(aff725f and earlier) missed this too — it is NOT new staleness from
-8901b0b/04f9f5c, so I did not rewrite it here (would be a substantial,
-judgment-heavy content addition, better done as its own scoped pass
-rather than folded into a two-commit post-commit sync). Next Librarian
-run (or a dedicated doc-sync invocation) should pick this up explicitly.
-
-Mechanical notes:
-- `sync_derived_docs.py` run 1 left the now-familiar stray
-  `.claude/tidy_advisory.json` diff (commit-pointer rewrite as a side
-  effect) — reverted with `git checkout --`, not committed. Confirms the
-  standing memory note, now observed a second time on a different script
-  (previously only seen from render_fragments.py).
-- `sync_derived_docs.py` also flagged 4 test-only consumers of
-  `lens_amplification_surrogate` (via `LensAmplificationSurrogate.load`)
-  as "not in DATA_CONTRACTS.yaml — add it or confirm transient". Per
-  standing convention (consumer lists are production-only), these
-  correctly stay off the list — no action.
+Mechanical/process note: the task prompt said "seven commits queued" and gave
+driver context per-commit, but did NOT itself enumerate the commit hashes —
+cross-checked against `.claude/sync_issues.json` (authoritative) rather than
+inferring from `git log`, per the standing practice of trusting the trigger
+file over any paraphrase.

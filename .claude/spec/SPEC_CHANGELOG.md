@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.22.0` (2026-07-28): 
+- `0.23.0` (2026-07-28): 
 ### Macro-saddle per-lobe interior charts are now servable
 
 The multi-chart narrative previously named only TUBE and FAR-FIELD charts and
@@ -32,6 +32,18 @@ is what guarantees no source is served from the wrong lobe.
 entry describes per-chart coefficient/knot arrays generically, so the added
 lobe-frame arrays do not break a contract lock (verified by the Inspector as
 INS-3-001).
+
+- `0.22.0` (2026-07-28): 
+Update the Born rung Conventions bullet: `b1`/`a0` are now DERIVED closed
+forms (F023), not an unpinned placeholder, and the serve object is the
+lead-only `born_lead_carrier` plus a band-split assembler
+(`channels.born_carrier_from_partition`) — a carrier + driver-trained-residual
+decomposition, not a standalone two-term series with its own accuracy bar.
+The exterior fence is `gamma < 3/4` exact (F025/F026). Serve slot stays
+unwired: the residual chart is a TRAIN_TIER driver artifact that has not been
+built.
+
+Census row: the fall-through breakdown is now six-way MECE, `'born'` added.
 
 - `0.21.1` (2026-07-27): 
 Doc-sync correction (Librarian post-commit pass over the 14-commit backlog
