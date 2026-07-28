@@ -1,82 +1,70 @@
-# Librarian Short-Term Observations — 2026-07-28 (post-commit --post-commit 31ee133, 7 queued)
+Librarian run — 2026-07-28 (INS-10-001 doc-sync, saddle Born carrier)
 
-Scope: .claude/sync_issues.json listed 7 commits (079db9c, 2f7efe5, 2fc3f30,
-5cc9429, 22fd569, f8a88d2, 31ee133) as pending — backlog had been bypassed
-twice. Confirmed 079db9c/2f7efe5 were already synced by my own prior session
-(overview.rst parity fix + lobe-serve changelog); 2fc3f30 (test suite off the
-API surface, Sphinx warnings fixed) and 5cc9429/22fd569/f8a88d2 (FINDINGS
-F023-F026, TODO restructure — spec-only, told not to rewrite) were self-
-contained and needed no further action. The only commit with real downstream
-doc-sync work was 31ee133 (Born carrier + band split + 'born' census + SDK
-revision-loop fix).
+Scope: single Inspector finding INS-10-001 (trivial): SPEC.md's Born-rung
+Conventions bullet (lines 88-112) still described positive-parity-only
+serving after commit 31ee133 landed macro-saddle serving in _born.py,
+channels.py, and surrogate_census.py. Foreman-Lite twice explicitly
+declined to touch SPEC.md (correctly — it's Librarian-owned) and left the
+finding for me. Confirmed via git diff that SPEC.md itself had zero changes
+since 31ee133 while the three source files gained ~150 lines of saddle
+machinery.
 
 What I fixed:
-- SPEC.md: rewrote the "Born rung (DORMANT)" Conventions bullet — it claimed
-  `b1` was "an unpinned placeholder" disagreeing with `operator.F_op` by
-  ~13%, which is now FALSE (F023 derived closed-form `b1`/`a0`; the module's
-  own docstring/WHY was fully rewritten in the same commit). New bullet:
-  "Born rung (carrier machinery landed; serve slot still unwired)" — carrier
-  + band-split + exterior fence described, wiring blocker now correctly
-  named as the missing TRAIN_TIER residual chart, not a missing derivation.
-  Also fixed the CENSUS row's "5-way MECE... (gamma-guard / cusp-window /
-  refusal-ball / out-of-box / dropped-sliver)" -> 6-way with 'born' added,
-  matching `_FALLTHROUGH_CATEGORIES`' actual tuple order. Bump: minor (fragment
-  `spec_changelog.d/2026-07-28_born_carrier_bandsplit.md`), landed at
-  rendered 0.22.0 (the alphabetically-later `saddle_lobe_serve` fragment from
-  the PRIOR session claimed 0.23.0 — reconfirms the standing memory note:
-  render_fragments.py assigns bumps by filename alphabetical order within
-  spec_changelog.d/, not by content date; flag, don't fix).
-- `todo.d/lensing_born_b1_derivation.md`: this fragment was STALE in a
-  meaningful way — it itemized "the coefficients", "the ladder", "guard A
-  re-derivation", "correct the docstring", and "the 'born' category ...
-  absent from the tree" as OWED work, but 31ee133 landed every one of those
-  except the final wiring-into-likelihood step. Left the item OPEN (did not
-  delete/move to completed.d — the multi-part-program rule: it stays open
-  until every listed part finishes, and wiring genuinely isn't done), but
-  rewrote the body so it no longer asserts finished sub-items as pending.
-  This is the same class of staleness as the "SPEC entries that cite a
-  function by name go stale silently" note, just in TODO.d instead of
-  SPEC.md — a fragment describing a plan goes stale when a LATER commit does
-  most but not all of the plan and nobody edited the fragment.
-- changelog.d: added 2026-07-28_born_carrier_bandsplit.md (prose synthesized
-  from the commit message + module docstrings, following the standing
-  precedent that every lensing-surrogate feature build gets one) and
-  2026-07-28_sdk_revision_loop_fix.md (.claude/-only agent-infra fix;
-  precedent for documenting these is `2026-07-27_sdk-agent-infra-hardening.md`,
-  which also chose to record despite being excluded from main-sync).
+- SPEC.md Born bullet: rewrote to describe BOTH parities served —
+  positive-parity minimum image (unchanged gamma<3/4 fence) AND macro-saddle
+  (det A<0, F026 closed-form `saddle_caustic_max_y` fence, serving band
+  1.0502342<gamma<3). Added: the exact Morse phase -1j applied by
+  `born_lead_carrier` on the saddle (F024/F009-S, explicitly NOT
+  cmath.exp(-1j*pi/2) which injects a ~6e-17 real-part rotation error —
+  this distinction is load-bearing in the code's own comment, so I kept it
+  in SPEC too); `born_gate`'s three named guards (guard B two-sided
+  parity-wall margin, the parity-split exterior fence, guard A band split);
+  `channels.born_carrier_from_partition`'s macro-saddle above-split branch
+  (pure two-real-image ppGO, complex ghost explicitly REFUSED for det A<0,
+  positive-parity path unchanged); and the census's mirroring saddle arm.
+  Called out that `born_amplification`/`born_envelope` remain
+  positive-parity-only diagnostics (the a0/b1 correction is NOT derived on
+  the saddle — I checked this is still true by reading both docstrings,
+  which raise BornDomainError on det_a<=0 unconditionally). Bump: minor
+  (fragment `spec_changelog.d/2026-07-28_born_saddle_carrier_sync.md`),
+  rendered to spec_version 0.24.0 — landed in alphabetical order after last
+  session's 0.23.0 fragment, no reordering surprise this time.
+- `todo.d/lensing_saddle_born.md`: this fragment's 4-item ordered plan (1.
+  b1/a0 derivation, 2. saddle expansion origin+guard, 3. saddle fence, 4.
+  wire into likelihood) had items 2 and 3 fully landed this build (tests:
+  11 carrier/gate tests + 12 band-split tests + 6 census tests = 29, cross-
+  checked against the 3 separate coder change-reports' claimed counts,
+  which sum correctly). Rewrote the fragment to mark 1-3 done with specifics
+  and keep 4 open, per the standing "multi-part program stays open until
+  every part finishes" rule — same pattern as last session's
+  lensing_born_b1_derivation.md edit, just the sibling fragment this time.
+  Cross-referenced the two TODOs (both converge on the same TRAIN_TIER
+  residual-chart wiring blocker) so wiring doesn't get duplicated between
+  them.
+- changelog.d/2026-07-28_born_saddle_carrier.md: new entry. Caught my own
+  arithmetic slip while drafting — first wrote "19 new tests" without
+  actually summing the three coder reports (11+12+6=29); recomputed and
+  corrected before finalizing. Lesson: always sum test counts from the
+  literal per-report numbers, don't eyeball a round total.
 
 What I verified and left alone:
-- FINDINGS F023-F026 and F009 all exist with matching headers; not touched
-  (driver said already written/rendered, and Inspector owns spec accuracy).
-- DATA_CONTRACTS.yaml / docs/source: grepped for the fall-through category
-  strings and "Born" — zero hits in either. The census categories are not
-  enumerated on any Sphinx page, and no new disk artifact exists yet (the
-  residual chart is TRAIN_TIER and unbuilt), so neither surface needed edits.
-- api.rst: `:recursive:` autosummary over bare `cogwheel` still holds — new
-  public functions in EXISTING modules (`_born.py`, `channels.py`,
-  `surrogate_census.py`) need no manual entry.
-- overview.rst: not touched, and confirmed NOT reverted (this session's
-  driver context explicitly warned about this; the both-parities correction
-  from 2f7efe5 is still in place).
-- Old changelog.d/2026-07-27_born_rung.md (the original DORMANT entry) is
-  now factually superseded by the new entry's content but was correctly left
-  UNEDITED — CHANGELOG is append-only history, not a living doc.
-- Test counts: SPEC's "27 tests" for `test_lensing_surrogate_census.py` is
-  still accurate post-31ee133 (counted `def test_` — still 27; the 'born'
-  category is exercised inside existing tests, no new test method added)
-  — did not need updating despite the file's diff stat showing +/-25 lines.
-- Sphinx rebuilt clean (`python -m sphinx -b html docs/source docs/build`,
-  zero warnings) even though I touched no file under docs/source/ this pass
-  — ran it anyway as due diligence given the backlog had been bypassed
-  twice; confirms 2fc3f30's "fix every in-repo Sphinx warning" claim still
-  holds.
-- `sync_derived_docs.py` run 1: zero-diff auto-fix (no stray
-  tidy_advisory.json this time, unlike prior sessions); flagged the same 4
-  test-only `lens_amplification_surrogate` consumers as before — correctly
-  left off DATA_CONTRACTS per the production-only consumer-list convention.
+- docs/source/**: grepped for "born"/"Born" — zero hits, confirming (again)
+  that no Sphinx page enumerates census categories or Born-rung internals;
+  no rebuild needed since nothing under docs/source/ was touched this run.
+- DATA_CONTRACTS.yaml: grepped for "born" — zero hits; no disk artifact
+  changed (the Born carrier is in-memory analytic, no save/load), so no
+  contract entry needed.
+- sync_derived_docs.py: ran clean, zero new diff beyond the SPEC/TODO edits
+  already made by render_fragments.py; only flagged the same 4 test-file-
+  only `lens_amplification_surrogate` consumers as prior sessions — left
+  off DATA_CONTRACTS per the standing production-only convention.
+- Did not touch .claude/agent_state/foreman_lite.json (pre-existing dirty
+  state, not mine, not a doc surface).
+- Did not rebuild Sphinx docs this run — correctly skipped per the rule
+  (only required when docs/source/ or surfaced docstrings change); this
+  run touched neither.
 
-Mechanical/process note: the task prompt said "seven commits queued" and gave
-driver context per-commit, but did NOT itself enumerate the commit hashes —
-cross-checked against `.claude/sync_issues.json` (authoritative) rather than
-inferring from `git log`, per the standing practice of trusting the trigger
-file over any paraphrase.
+Process note: this was the cleanest possible Librarian trigger — a single
+named finding, already fully diagnosed by Inspector down to file/lines, with
+Foreman-Lite explicitly deferring rather than guessing at spec prose. No
+ambiguity about scope or ownership boundary this time.

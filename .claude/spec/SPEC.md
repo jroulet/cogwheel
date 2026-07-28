@@ -1,5 +1,5 @@
 ---
-spec_version: 0.23.0
+spec_version: 0.24.0
 last_updated: 2026-07-28
 ---
 
@@ -86,31 +86,49 @@ Docs). Packaging: setuptools + setuptools_scm, GPL-3.0-or-later, Python >=3.9.
   `.gwf` frame files used by tutorials — not part of the installed package.
 - Numerically hot paths (relative binning, coherent-score marginalization) use
   numba and lookup tables and must remain numerically accurate.
-- **Born rung (carrier machinery landed; serve slot still unwired).**
-  `chang_refsdal/_born.py` provides the analytic carrier for the far annulus
-  (`3.0 < |y| <= 4.2426`, positive parity, exact exterior fence `gamma < 3/4`,
-  F025/F026). `_born_factors` returns the DERIVED, closed-form `b1`/`a0`
-  (F023; a pure point mass gives `b1 = -1`, `a0 = 0`) feeding two consumers:
-  `born_lead_carrier`, the lead-only serve object
-  `sqrt(mu_macro)*exp(1j*w*phi_geo)` with NO `a0`/`b1` correction, and
-  `born_amplification`/`born_envelope`, the resolved-image macro-limit
-  diagnostic that DOES carry them. `a0`/`b1` serve nowhere (F025): `a0`
-  violates the exact `F(w->0) = sqrt(mu_macro)` limit (F009) and the
+- **Born rung (carrier machinery landed for both parities; serve slot still
+  unwired).** `chang_refsdal/_born.py` provides the analytic carrier for the
+  far annulus `3.0 < |y| <= 4.2426`, serving BOTH macro parities: the
+  positive-parity minimum image (`det A = (1-kappa)**2 - gamma**2 > 0`, exact
+  exterior fence `gamma < 3/4`, F025) and the macro-saddle image (`det A < 0`,
+  exact exterior fence via the F026 closed form `saddle_caustic_max_y`,
+  serving band `1.0502342 < gamma < 3` at `kappa = 0`). `_born_factors`
+  returns the DERIVED, closed-form `b1`/`a0` (F023; a pure point mass gives
+  `b1 = -1`, `a0 = 0`) and the parity-agnostic magnitude
+  `sqrt(abs(det_a))`, feeding two consumers: `born_lead_carrier`, the
+  lead-only serve object — `sqrt(mu_macro)*exp(1j*w*phi_geo)` at positive
+  parity, with the exact Morse phase `-1j` applied on the macro saddle
+  (F024/F009-S) — carrying NO `a0`/`b1` correction on either parity; and
+  `born_amplification`/`born_envelope`, the positive-parity-only
+  resolved-image macro-limit diagnostic that DOES carry them (the a0/b1
+  correction is not derived on the saddle). `a0`/`b1` serve nowhere (F025):
+  `a0` violates the exact `F(w->0) = sqrt(mu_macro)` limit (F009) and the
   resolved-image correction inflates the demodulated residual's azimuthal
-  node count 2.5x-11x over the lead-only carrier. `channels.
+  node count 2.5x-11x over the lead-only carrier. `born_gate` refuses via
+  three guards: guard B, a two-sided parity-wall margin
+  (`abs(gamma_p - 1) > DELTA_GAMMA_P` on `gamma_p = abs(gamma)/(1-kappa)`,
+  catching degeneration from EITHER side of `det A = 0`); the parity-split
+  exterior fence above; and guard A, the band split. `channels.
   born_carrier_from_partition` assembles the band-split carrier at
   `w * Delta_tau = RHO_END` (`Delta_tau` read from the partition's real-image
   delays, never recomputed, never `phi_geo`, never `w*r0_sq` — F024): below
-  the split, the lead-only carrier; above, the two-real-image
-  geometric-optics sum plus `farfield_ghost_term` where admitted. It is
-  STILL NOT wired into the serve path: the served object is `F_carrier`
-  minus a driver-trained residual chart (`F_exact - F_carrier`), and that
-  chart is a TRAIN_TIER artifact that does not yet exist. Draws in the
-  annulus therefore still fall through to the exact engine via
-  `likelihood._surrogate_coefficients`, which is certifiable there
-  (`w * |y| <= 60` never binds inside the prior). Wiring requires the
-  trained residual chart, not a coefficient derivation — that blocker is
-  discharged.
+  the split, the parity-agnostic lead-only carrier (`born_lead_carrier`
+  applies the Morse phase internally); above the split, positive parity
+  serves the two-real-image geometric-optics sum plus `farfield_ghost_term`
+  where admitted, while the macro saddle serves the pure two-real-image
+  geometric-optics sum with the complex ghost explicitly REFUSED (`det A <
+  0` is not a regime `farfield_ghost_term`'s sqrt branch is derived for).
+  The census (`surrogate_census.classify_fallthrough`) attributes both
+  arms to the `'born'` category via the same shared closed-form fences,
+  independent of `born_gate` (no `w` available at census time). It is
+  STILL NOT wired into the serve path on either parity: the served object
+  is `F_carrier` minus a driver-trained residual chart
+  (`F_exact - F_carrier`), and that chart is a TRAIN_TIER artifact that
+  does not yet exist. Draws in the annulus therefore still fall through to
+  the exact engine via `likelihood._surrogate_coefficients`, which is
+  certifiable there (`w * |y| <= 60` never binds inside the prior). Wiring
+  requires the trained residual chart, not a coefficient derivation — that
+  blocker is discharged for both parities.
 - **Lensing delay frame.** Every channel kernel in `chang_refsdal` is carried in
   the partition's *min-subtracted* frame: `ChangRefsdalPartition` subtracts
   `t_min = min(absolute real-image Fermat delays)` from every delay, so
