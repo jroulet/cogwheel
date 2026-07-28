@@ -675,7 +675,7 @@ def binning_floor(records: Sequence[SampleRecord],
     enable-by-default decision should see BOTH floors side by side, each
     with its knob and cost slope.  This evaluates the EXACT engine's RB
     lnL at the working ``pn_phase_tol`` and at ``pn_phase_tol /
-    refine_factor`` on the same served configs; the |difference| is a
+    refine_factor`` on the same served configs; the ``|difference|`` is a
     direct measurement of the binning floor at working resolution.  The
     surrogate artifact is delta-independent (bins only move the spline's
     ``w`` query abscissae), so this stage never retrains anything --

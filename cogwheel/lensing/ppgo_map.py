@@ -12,6 +12,8 @@ point-mass geometric-optics reconstruction -- the plain image-kernel sum
 no envelope) -- reproduces the exact engine total ``F`` to the F-normalized
 certification bar
 
+::
+
     max_over_band( |F - ppGO_full| / max|F| )  <  BAR   (BAR = 1e-4)
 
 (``F`` and the ppGO sum are first put on a common time origin -- the engine

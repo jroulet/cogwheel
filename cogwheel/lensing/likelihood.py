@@ -30,6 +30,8 @@ HOW (the three design decisions, locked)
    expanded to first order across the bin.  Concretely the summaries are
    the delay-free frequency moments
 
+   ::
+
        A^(p)_{m,d,b} = 4 df sum_{f in b} d(f) conj(h0_{m,d}(f)) (f-f_b)^p
        B^(p)_{mm',d,b} = 4 df sum_{f in b}
                          h0_{m,d}(f) conj(h0_{m',d}(f)) wht_d(f)^2 (f-f_b)^p

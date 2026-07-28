@@ -804,6 +804,8 @@ def farfield_w_floor(delays: np.ndarray, real_mask: np.ndarray) -> float:
     The smallest dimensionless frequency at which the CLOSEST real image
     pair is resolved to half the SACR-C resolution scale,
 
+    ::
+
         w_floor = (RHO_END / 2) / min_{a != b real} |tau_a - tau_b|,
 
     so that ``w_floor * min|tau_a - tau_b| == RHO_END / 2`` -- the same
@@ -960,6 +962,8 @@ def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
     stationary-phase expansion the ghost kernel relies on is valid ONLY
     where the ghost image ``x_c`` is resolved from every real image, so the
     ghost is subtracted only where
+
+    ::
 
         min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN,
 

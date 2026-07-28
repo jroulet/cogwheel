@@ -96,7 +96,20 @@ If any file under `docs/source/` was edited, rebuild the Sphinx docs and confirm
 /Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python -m sphinx -b html docs/source docs/build
 # or, equivalently: make -C docs html
 ```
-Zero warnings required (`docs/build/` is gitignored).
+Zero warnings required, counting only warnings that originate IN THIS REPO
+(`docs/build/` is gitignored).
+
+Two things that will otherwise stop you:
+
+- The doc toolchain is not in the project env by default. Install it once:
+  `python -m pip install sphinx numpydoc furo` (the last two are what
+  `docs/requirements.txt` declares; `conf.py` loads `numpydoc`). Do NOT report
+  "docs updated" when you could not build — say you could not verify.
+- `cogwheel/waveform_models/IMRPhenomXODE` is an untracked SYMLINK to a
+  separate repository. Warnings from under it are NOT this project's to fix
+  and never reach Read the Docs (the symlink is not committed). Exclude them
+  when judging the build clean; as of 2026-07-28 they are the only ones left
+  (4 of them), and every in-repo warning is fixed.
 
 ### Step 5: Report
 List what you fixed and what you skipped (with reason). Be terse.
