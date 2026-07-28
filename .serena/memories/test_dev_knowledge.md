@@ -123,3 +123,25 @@
   upstream derived quantity, re-run the gate function directly on the SAME
   fixed tile/sample set with only the threshold changed, rather than
   regenerating the fixture.
+- Content-stable digest for a saved .npz: raw-byte hashing is flaky (zip
+  member timestamps aren't reproducible) — hash sha256 over the LOADED
+  arrays sorted by (name,dtype,shape,tobytes) instead; guard the digest
+  helper itself with a save-twice-matches test.
+- Golden/history-free regression recipe: build the frozen fixture once via
+  a THROWAWAY generator script, print frozen bits as `float.hex()` literals
+  (or a content digest), bake the literals into the test, then DELETE the
+  generator — no HEAD import, no self-oracle, immune to future drift.
+- Before assuming interpolation/new code is the runtime cost, profile:
+  a coarse test grid can be slow because each cell re-invokes an expensive
+  shared primitive (e.g. a caustic-reach sweep) that has nothing to do with
+  what's under test — reduce grid density (keep odd counts to preserve an
+  exact symmetry point) rather than optimizing the wrong function.
+- Guard-bypass pattern for legacy fixtures broken by a new production guard:
+  mock.patch the guard for the legacy path, but pair it with a reachable-red
+  test that calls the SAME entry point unpatched and asserts the guard fires
+  for real; the guard's own dedicated teeth-test lives in its owning suite.
+- Don't trust a brief's stated sign/direction for a fix — measure it. A
+  brief can claim "move outward/harder" while the code's own inline comment
+  and the measured values show the opposite; encode the invariant that
+  matches MEASURED behavior (e.g. "never easier than before") and flag the
+  brief's direction error separately, rather than encoding the brief's claim.

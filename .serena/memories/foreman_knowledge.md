@@ -34,3 +34,9 @@
   Keep the two separated in the suite; don't conflate.
 - `pyflakes` is absent from the cogwheel-newlal env — fall back to
   `ast.parse` plus the actual pytest run for syntax/import verification.
+- With `from __future__ import annotations` active in a module, a type
+  hint can reference a not-yet-imported class as a lazy string — widening
+  a `Union` type hint needs no new import; verify via `ast.parse` alone.
+- When the working tree already has unrelated uncommitted changes (e.g.
+  from parallel sessions), confirm your fix touched ONLY the intended
+  lines via `git diff` before considering the finding resolved.

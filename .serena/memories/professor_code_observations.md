@@ -154,6 +154,19 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
 - This agent instance has no image-rendering/Read-image tool — validate
   diagnostic PNGs via the numeric asserts backing the same plotted
   quantities (independent-oracle asserts etc.), not visual inspection.
+- Saddle lobe-serve build (test_lensing_surrogate_lobe.py, 32/32 PASS,
+  reviewed numerically not just green): `_lobe_boundary_radius` is
+  confirmed the single authoritative r_deltoid source (max diff 0.0 vs
+  `_r_deltoid` across a theta sweep). Corridor predicate correctly routes
+  a bisector-equidistant source to decline BOTH lobes (falls to the exact
+  ladder), never double-serves. `image_count==4` is a genuine INTERIOR
+  property under the eta_max shell (all interior nodes real_mask.sum()==4;
+  exterior sources give 2), matching the (0,1,1,1) An&Evans neg-parity
+  partition. heldout_eps stored on a chart is a COARSE smoke-tile LOO bar
+  (measured 0.138 here); actual interior error sits only ~6x below it, not
+  the ~50x (~3e-3) some docstrings imply — the gate is still correct
+  (compares against the chart's OWN eps), but don't read a chart's
+  heldout_eps as a tight accuracy estimate for its interior.
 - Build 8h-b6 cusp-alignment review: `EnvelopeReconstructionTestCase.
   test_positive_box_reconstruction_within_budget` stayed RED after the
   cusp-aligned-tiler fix because that test's `_train()` fixture builds via

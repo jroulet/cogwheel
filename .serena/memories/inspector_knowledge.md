@@ -109,3 +109,12 @@
   correct production fix (e.g. in a tiler) can leave the named gate red
   if the test builds via a different entry point that bypasses the fixed
   component entirely (Build 8h-b6, INS-1-001).
+- Validate a persisted schema/version tag from the artifact's OWN stored
+  meta (e.g. the chart's saved attribute), not from a provenance wrapper
+  that may be rebuilt minimally on reload — the wrapper can silently lose
+  the tag while the artifact's own meta still round-trips correctly.
+- When a serve dispatch chain gains new optional context (e.g. eigenframe
+  coords) threaded through select/evaluate, check ALL consumers of that
+  chain (census, reporting, not just the primary serve path) also thread
+  it — a consumer left behind silently undercounts/misclassifies once an
+  artifact exercising the new path ships (Build 3, saddle lobe-serve).

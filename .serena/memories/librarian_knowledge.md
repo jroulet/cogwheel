@@ -76,3 +76,7 @@
   `/home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python` for both.
   Without `rg`, `regenerate_consumer_graph.py` hard-fails; `sync_derived_
   docs.py` still runs against the stale cached CONSUMER_GRAPH.json.
+- Running `scripts/render_fragments.py` can leave a stray unrelated diff
+  in `.claude/tidy_advisory.json` as a side effect — revert it with
+  `git checkout --` and don't commit it; "All surfaces up to date" with
+  zero real diff is a legitimate clean-backlog outcome, not a missed check.

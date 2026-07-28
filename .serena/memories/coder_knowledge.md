@@ -136,3 +136,22 @@
   angle un-rotated, an off-axis parameter yields finite-but-wrong output.
   Guard every parameter axis the emulator/approximation was trained at by
   mirroring the existing axis guard exactly (`if lens['x'] != 0: return None`).
+- When a node-dependent carrier phase (e.g. exp(±iw t_min)) must be applied
+  symmetrically on both the producer and reconstruct sides, factor it into
+  ONE shared `_frame_phase(w, t_min)` helper both call — prevents a mod-2pi
+  or sign asymmetry between the two sides (Build 8h-d2).
+  Compose a multi-stage serve gate cheapest/most-discriminating-first
+  (region box -> band -> corridor/exclusivity -> fine containment ->
+  exclusion balls -> count/floor checks), and make an eigenframe/optional
+  arg's "not supplied" case decline via an explicit `isfinite` precondition
+  rather than relying on bare NaN-comparison-is-False semantics.
+- To tell a genuine discontinuity/kink from grid aliasing, refine node
+  density (e.g. 4->6->8->12) and confirm the jump does NOT shrink; also
+  check whether narrowing the domain range removes the trip. If neither
+  changes it, it's a real feature of the function, not an artifact.
+- When a mandated fix ("route through the shared inverter") is algebraically
+  equivalent to what a tight legacy tolerance was already measuring, and
+  replaying it as a round-trip reintroduces FP cancellation on a near-
+  degenerate fixture, the two mandates ("use the shared path" and "don't
+  weaken the tolerance") are mutually incompatible for that fixture —
+  escalate the conflict rather than silently picking one side.

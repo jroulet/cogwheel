@@ -141,3 +141,22 @@
 - NAMING HAZARD: don't overload an established term when adding a regime
   (here "far-field" = a trained chart GAUGE, NOT weak deflection) — pick a
   distinct name in the brief or the WPs inherit the ambiguity.
+- FRAME-INVARIANT RELABELING: when a trained/interpolated label carries a
+  per-node reference-frame phase (e.g. min-relative time delay) that varies
+  node-to-node, the fix is to relabel into an ABSOLUTE frame (multiply out
+  the node-dependent carrier) before interpolation, and hand the frame value
+  back at reconstruct time to de-tilt — never just tighten a continuity
+  guard around the frame-mixed label. Pair with an axis-schema version bump
+  (hard-refuse pre-relabel artifacts) and a dedicated carrier-continuity
+  guard on the NEW label (Build 8h-d2).
+- Exact/closed-form geometric nodes (e.g. astroid cusp angles) that are
+  independent of the varying parameter should be UNIONED into the
+  interpolation grid as exact spline nodes rather than left to a uniform
+  grid to approximate — gate the union on the regime where the closed form
+  actually holds (e.g. positive parity only), and derive it from existing
+  geometry primitives directly rather than importing a sibling module (risk
+  of circular import).
+- Two WPs that both edit the SAME function/entry point (e.g. both touch
+  `from_engine`) must be sequenced via depends_on, never planned to run in
+  parallel — even when their changes are conceptually orthogonal, they will
+  conflict on the same code region.
