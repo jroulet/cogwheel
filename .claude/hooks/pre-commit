@@ -244,6 +244,22 @@ if [ -n "$errors" ]; then
     exit 1
 fi
 
+# -----------------------------------------------------------------------
+# Changed API still referenced by SKIPPED tests
+# -----------------------------------------------------------------------
+# A skipped/gated/xfailed test does not run, so it cannot report that a
+# signature change or a bumped constant broke it. The suite stays green and
+# the breakage surfaces days later with no link to this commit. Mechanical
+# counterpart to the READ-don't-run audit in .claude/crew/test_dev.md (step 7)
+# and .claude/crew/inspector.md (check 5b) -- prompts can be skipped, this
+# cannot. Skips itself if the checker is absent.
+DRIFT_CHECK=".claude/hooks/check_gated_test_drift.py"
+if [ -f "$DRIFT_CHECK" ] && [ -n "$PYTHON" ]; then
+    if ! "$PYTHON" "$DRIFT_CHECK"; then
+        exit 1
+    fi
+fi
+
 # 7. Auto-stage the consumer graph cache if a background regen left it dirty.
 # (Only fires if the project has a consumer graph — conditional on file existence.)
 GRAPH_FILE=".claude/spec/CONSUMER_GRAPH.json"
