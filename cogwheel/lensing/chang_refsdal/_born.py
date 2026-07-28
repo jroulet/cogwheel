@@ -121,6 +121,51 @@ assert math.isclose(
     'exterior-fence closed form must equal the annulus inner edge at gamma=3/4'
 
 
+def saddle_caustic_max_y(gamma: float, kappa: float) -> float:
+    """Exact maximum source extent of the astroid caustic on the SADDLE.
+
+    The F026 closed form for the macro-saddle branch (``gamma > 1 -
+    kappa``, ``det A < 0``).  The caustic radius is stationary in
+    ``u = 1 / |x|**2`` at the on-axis cusp ``u = 1`` and the off-axis cusp
+    ``u_c = (sqrt(4*gp**2 - 3) - 1) / 2`` (real iff ``gp = gamma / lam >
+    1``), and the OUTERMOST point switches from the off-axis to the
+    on-axis candidate at ``gp ~ 1.1777`` -- so the ``max(...)`` of the two
+    candidates is load-bearing, not decorative (F026, correcting F024's
+    measured extent table).
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    kappa : float
+        Convergence.
+
+    Returns
+    -------
+    float
+        The maximum ``|y|`` reached by the astroid caustic, in Einstein
+        radii.  On the saddle band this exceeds ``3.0`` iff the caustic
+        breaches the target annulus inner edge.
+    """
+    lam = 1.0 - kappa
+    gp = gamma / lam
+    u_c = (math.sqrt(4.0 * gp ** 2 - 3.0) - 1.0) / 2.0
+    off_axis = 4.0 * u_c + 1.0 / u_c - 2.0
+    on_axis = 4.0 * gp ** 2 / (gp + 1.0)
+    return math.sqrt(lam) * math.sqrt(max(off_axis, on_axis))
+
+
+# Self-check: at kappa = 0 the saddle max|y| closed form hits the annulus
+# inner edge (3.0) exactly at the off-axis inner-edge root
+# gamma = sqrt((189 - 15*sqrt(105)) / 32) = 1.0502342 (F026).
+assert math.isclose(
+    saddle_caustic_max_y(
+        math.sqrt((189.0 - 15.0 * math.sqrt(105.0)) / 32.0), 0.0),
+    ANNULUS_INNER_RADIUS, rel_tol=0.0, abs_tol=1e-10), \
+    'saddle-fence closed form must equal the annulus inner edge at the ' \
+    'off-axis inner-edge root gamma = 1.0502342'
+
+
 class BornDomainError(geometry.LensDomainError):
     """Lens parameters fall outside the measured Born validity region.
 
@@ -158,9 +203,12 @@ def _born_factors(y1: float, y2: float, gamma: float, beta: float,
     Returns
     -------
     sqrt_mu : float
-        ``sqrt(mu_macro) = 1 / sqrt((1 - kappa)**2 - gamma**2)``, the
-        ``w -> 0`` amplification (positive parity, so the radicand is
-        positive; the caller must have gated the parity wall).
+        The MAGNITUDE ``sqrt(|mu_macro|) = 1 / sqrt(|(1 - kappa)**2 -
+        gamma**2|)``, the ``w -> 0`` amplification amplitude.  This is the
+        unsigned magnitude for BOTH parities: on the macro saddle
+        (``det_a < 0``) the radicand's absolute value is taken here and the
+        caller (`born_lead_carrier`) applies the Morse phase ``-1j``
+        separately (F024/F009-S).
     phi_geo : float
         Geometric (Fermat) phase at the macro image ``x0 = A^{-1} y``,
         identical to ``geometry.delay(x0, y, A)`` (same Fermat
@@ -195,7 +243,11 @@ def _born_factors(y1: float, y2: float, gamma: float, beta: float,
     a22 = lam + gamma * cos2b
     det_a = a11 * a22 - a12 * a12  # == lam**2 - gamma**2 == 1 / mu_macro
 
-    sqrt_mu = 1.0 / math.sqrt(det_a)
+    # Magnitude of the amplification for BOTH parities: abs() makes the
+    # radicand safe on the macro saddle (det_a < 0), where the Morse phase
+    # is applied by the caller (F024).  Positive parity (det_a > 0) is
+    # bit-identical to the old 1/sqrt(det_a) (abs is the identity there).
+    sqrt_mu = 1.0 / math.sqrt(abs(det_a))
 
     # Macro image x0 = A^{-1} y (leading weak-deflection image position).
     x0_1 = (a22 * y1 - a12 * y2) / det_a
@@ -253,9 +305,11 @@ def born_amplification(w: float, y1: float, y2: float, gamma: float,
     demodulation.
 
     Pure ``float64`` / ``complex128`` scalar arithmetic (``numba``-ready,
-    no ``fastmath``).  Assumes the configuration has passed `born_gate`:
-    the positive-parity radicand ``(1 - kappa)**2 - gamma**2 > 0`` is a
-    precondition (a saddle host makes ``math.sqrt`` raise -- fail loud).
+    no ``fastmath``).  This resolved-image DIAGNOSTIC is POSITIVE-PARITY
+    ONLY: the radicand ``(1 - kappa)**2 - gamma**2 > 0`` is a precondition,
+    enforced by an explicit `BornDomainError` guard (the ``abs()`` in
+    `_born_factors` no longer lets a saddle host fail via ``math.sqrt``;
+    extending the ``a0``/``b1`` correction to the saddle is out of scope).
 
     Parameters
     ----------
@@ -271,6 +325,15 @@ def born_amplification(w: float, y1: float, y2: float, gamma: float,
     complex
         The resolved-image amplification diagnostic ``F_born(w)``.
     """
+    # Fail-loud positive-parity precondition: the a0/b1 resolved-image
+    # correction is derived only for det_a > 0.  Guard on the SAME radicand
+    # _born_factors uses; det_a == 0 is the measure-zero parity wall.
+    if (1.0 - kappa) ** 2 - gamma ** 2 <= 0.0:
+        raise BornDomainError(
+            f'born_amplification is positive-parity only: radicand '
+            f'(1 - kappa)**2 - gamma**2 = {(1.0 - kappa) ** 2 - gamma ** 2} '
+            f'<= 0 for (kappa, gamma) = ({kappa}, {gamma}). The a0/b1 '
+            f'resolved-image correction is not derived on the macro saddle.')
     sqrt_mu, phi_geo, q2r, b1, a0 = _born_factors(y1, y2, gamma, beta, kappa)
     correction = 1.0 + a0 / q2r + 1j * (0.5 * w) * b1 / q2r
     return sqrt_mu * cmath.exp(1j * w * phi_geo) * correction
@@ -278,7 +341,7 @@ def born_amplification(w: float, y1: float, y2: float, gamma: float,
 
 def born_lead_carrier(w: float, y1: float, y2: float, gamma: float,
                       beta: float = 0.0, kappa: float = 0.0) -> complex:
-    """Lead-only Born carrier ``sqrt(mu_macro) * exp(1j*w*phi_geo)``.
+    """Lead-only Born carrier ``morse * sqrt(|mu_macro|) * exp(1j*w*phi_geo)``.
 
     THE SERVE OBJECT for the far annulus.  It carries ONLY the analytic
     lead term -- NO ``a0``/``b1`` resolved-image correction -- because a
@@ -289,6 +352,15 @@ def born_lead_carrier(w: float, y1: float, y2: float, gamma: float,
     ``F(w -> 0) = sqrt(mu_macro)`` (F009).  ``phi_geo`` supplies the
     Einstein-scale phase variation in closed form, so the demodulated
     residual varies slowly.
+
+    Serves BOTH parities.  On the macro saddle (``det_a = (1 - kappa)**2 -
+    gamma**2 < 0``, macro Morse index 1) the carrier origin carries the
+    exact Morse phase ``-1j`` (F024/F009-S): the Fresnel prefactor is
+    ``(2*pi*i/w) |det A|^(-1/2) exp(-i*pi*n/2)`` and the Morse phase does
+    NOT cancel in the carrier itself.  ``|F_carrier| = sqrt(|mu_macro|)``
+    is therefore ``w``-INDEPENDENT for both parities, but the TOTAL phase
+    is not (F009-S drift ``w * [tau_G + 0.5*ln(w/2) + c0]`` lives in
+    ``exp(1j*w*phi_geo)``).
 
     Returned in the ABSOLUTE Fermat-delay frame, matching
     `operator.F_op`; downstream demodulation is the caller's (mirroring
@@ -308,10 +380,23 @@ def born_lead_carrier(w: float, y1: float, y2: float, gamma: float,
     Returns
     -------
     complex
-        The lead-only carrier ``sqrt(mu_macro) * exp(1j*w*phi_geo)``.
+        The lead-only carrier ``morse * sqrt(|mu_macro|) *
+        exp(1j*w*phi_geo)``, with ``morse = -1j`` on the macro saddle and
+        ``1.0`` at positive parity.
     """
     sqrt_mu, phi_geo, _, _, _ = _born_factors(y1, y2, gamma, beta, kappa)
-    return sqrt_mu * cmath.exp(1j * w * phi_geo)
+
+    # Morse phase of the macro image.  det_a is beta-independent (A's
+    # eigenvalues are lam -/+ gamma), so the parity is fixed by (gamma,
+    # kappa) alone.  For the macro SADDLE (det_a < 0, Morse index 1) the
+    # carrier origin is the EXACT literal -1j (F009-S); cmath.exp(-1j*pi/2)
+    # is NOT used -- it injects a ~6e-17 real part that rotates into |F|
+    # and breaks the w-independent-magnitude acceptance.  For positive
+    # parity (det_a > 0) morse is the float 1.0, so the product is
+    # bit-identical to sqrt_mu * exp(1j*w*phi_geo).
+    det_a = (1.0 - kappa) ** 2 - gamma ** 2
+    morse = (-1j) ** 1 if det_a < 0.0 else 1.0
+    return morse * sqrt_mu * cmath.exp(1j * w * phi_geo)
 
 
 def born_gate(w: float, y1: float, y2: float, gamma: float,
@@ -321,21 +406,28 @@ def born_gate(w: float, y1: float, y2: float, gamma: float,
     Three physically distinct, load-bearing guards, all raising
     `BornDomainError` (a named refusal, never a silent ``nan``):
 
-    * **Guard B -- parity-wall margin.**  The reduced shear
+    * **Guard B -- two-sided parity-wall margin.**  The reduced shear
       ``gamma_p = |gamma| / (1 - kappa)`` must stay at least
-      `DELTA_GAMMA_P` below ``1``.  The convergence radius is the parity
-      wall ``gamma_p = 1`` (``det A = 0``), where the macro image
-      degenerates; positive parity only, so the macro saddle
-      (``gamma_p > 1``) is refused here by construction.  NOT made
-      redundant by the exterior fence (it also catches ``kappa``-driven
-      approaches to the wall at ``gamma < 3/4``).
-    * **Exterior fence -- ``gamma < 3/4``.**  On the astroid caustic the
-      maximum source extent is ``max|y| = sqrt(lam) * 2 * gp /
-      sqrt(1 - gp)`` (``gp = gamma / lam``, ``lam = 1 - kappa``), which at
-      ``gamma = 3/4`` (kappa = 0) equals the annulus inner edge ``3.0``
-      exactly.  When it reaches `ANNULUS_INNER_RADIUS` the caustic
-      breaches the annulus (fold crossings in the tile), a different,
-      interior geometry out of this rung's scope -- refuse.
+      `DELTA_GAMMA_P` away from ``1`` on EITHER side
+      (``|gamma_p - 1| > DELTA_GAMMA_P``).  The convergence radius is the
+      parity wall ``gamma_p = 1`` (``det A = 0``), where the macro image
+      degenerates on both parities; the wall strip is refused so the
+      positive branch (``gamma_p < 1``) and the saddle branch
+      (``gamma_p > 1``) each see ``det A`` safely away from zero.  NOT made
+      redundant by the fences (it also catches ``kappa``-driven approaches
+      to the wall away from the fence edges).
+    * **Exterior fence -- parity-split caustic extent.**  On the astroid
+      caustic the maximum source extent must stay below the annulus inner
+      edge `ANNULUS_INNER_RADIUS`.  At positive parity (``gamma_p < 1``)
+      it is ``max|y| = sqrt(lam) * 2 * gp / sqrt(1 - gp)``
+      (``gp = gamma / lam``, ``lam = 1 - kappa``), equal to ``3.0`` exactly
+      at ``gamma = 3/4`` (kappa = 0).  On the macro saddle
+      (``gamma_p > 1``) it is the F026 closed form `saddle_caustic_max_y`,
+      equal to ``3.0`` at the off-axis inner-edge root
+      ``gamma = 1.0502342`` (kappa = 0); the saddle serving band is the
+      exterior annulus ``1.0502342 < gamma < 3``.  When either extent
+      reaches `ANNULUS_INNER_RADIUS` the caustic breaches the annulus (a
+      different, interior fold geometry out of this rung's scope) -- refuse.
     * **Guard A -- band split (re-keyed).**  Refuse once the two real
       images are RESOLVED, ``w * Delta_tau >= RHO_END``, with
       ``Delta_tau`` the difference of their FULL Fermat delays
@@ -364,8 +456,8 @@ def born_gate(w: float, y1: float, y2: float, gamma: float,
         Degenerate macro axis (``1 - kappa <= 0`` or
         ``|gamma| == 1 - kappa``), from `geometry.macro_matrix`.
     BornDomainError
-        Guard B (parity-wall margin), the exterior fence
-        (``gamma >= 3/4`` in the annulus), or guard A (band split).
+        Guard B (two-sided parity-wall margin), the exterior/saddle
+        fence (caustic breaches the annulus), or guard A (band split).
     """
     # Degenerate-axis refusal, shared with every other wave-branch path;
     # its matrix is reused by the band-split image finder below.
@@ -374,8 +466,14 @@ def born_gate(w: float, y1: float, y2: float, gamma: float,
     lam = 1.0 - float(kappa)
     gamma_p = abs(float(gamma)) / lam
 
-    # Guard B: parity-wall convergence margin.
-    if gamma_p >= 1.0 - DELTA_GAMMA_P:
+    # Guard B: two-sided parity-wall margin.  Refuse the strip
+    # |gamma_p - 1| <= DELTA_GAMMA_P straddling the parity wall gamma_p = 1
+    # (det A = 0), where the macro image degenerates on BOTH parities.  For
+    # positive parity (gamma_p < 1) this is byte-identical to the old
+    # one-sided gamma_p >= 1 - DELTA_GAMMA_P refusal; it additionally
+    # refuses the wall strip just above 1 so the saddle branch below only
+    # sees gamma_p safely past the wall.
+    if abs(gamma_p - 1.0) <= DELTA_GAMMA_P:
         raise BornDomainError(
             f'Born rung refuses (kappa, gamma) = ({kappa}, {gamma}): '
             f'reduced shear gamma_p = |gamma| / (1 - kappa) = {gamma_p} '
@@ -383,18 +481,35 @@ def born_gate(w: float, y1: float, y2: float, gamma: float,
             f'converges only inside the positive-parity margin; the macro '
             f'image degenerates at the parity wall gamma_p = 1.')
 
-    # Exterior fence: refuse when the caustic's maximum source extent
-    # reaches the annulus inner edge (equivalently gamma >= 3/4 at
-    # kappa = 0).  gamma_p < 1 here (guard B passed), so the sqrt is safe.
-    caustic_max_y = math.sqrt(lam) * 2.0 * gamma_p / math.sqrt(1.0 - gamma_p)
-    if caustic_max_y >= ANNULUS_INNER_RADIUS:
-        raise BornDomainError(
-            f'Born rung refuses (kappa, gamma) = ({kappa}, {gamma}): '
-            f'caustic max|y| = sqrt(lam) * 2 gp / sqrt(1 - gp) = '
-            f'{caustic_max_y} >= annulus inner edge = '
-            f'{ANNULUS_INNER_RADIUS} (gamma >= 3/4 at kappa = 0). The '
-            f'caustic breaches the annulus; that interior fold geometry is '
-            f'out of the Born rung scope.')
+    if gamma_p < 1.0:
+        # Exterior fence (positive parity): refuse when the caustic's
+        # maximum source extent reaches the annulus inner edge
+        # (equivalently gamma >= 3/4 at kappa = 0).  gamma_p < 1 here, so
+        # the sqrt is safe.
+        caustic_max_y = math.sqrt(lam) * 2.0 * gamma_p / math.sqrt(1.0 - gamma_p)
+        if caustic_max_y >= ANNULUS_INNER_RADIUS:
+            raise BornDomainError(
+                f'Born rung refuses (kappa, gamma) = ({kappa}, {gamma}): '
+                f'caustic max|y| = sqrt(lam) * 2 gp / sqrt(1 - gp) = '
+                f'{caustic_max_y} >= annulus inner edge = '
+                f'{ANNULUS_INNER_RADIUS} (gamma >= 3/4 at kappa = 0). The '
+                f'caustic breaches the annulus; that interior fold geometry is '
+                f'out of the Born rung scope.')
+    else:
+        # Saddle fence (gamma_p > 1, det A < 0): refuse when the astroid
+        # caustic's exact maximum extent (F026 closed form) reaches the
+        # annulus inner edge.  Serving is confined to the exterior saddle
+        # band 1.0502342 < gamma < 3 (kappa = 0), where the whole annulus
+        # 3.0 < |y| <= 4.2426 lies OUTSIDE the caustic.
+        saddle_max_y = saddle_caustic_max_y(gamma, kappa)
+        if saddle_max_y >= ANNULUS_INNER_RADIUS:
+            raise BornDomainError(
+                f'Born rung refuses (kappa, gamma) = ({kappa}, {gamma}): '
+                f'saddle caustic max|y| = {saddle_max_y} >= annulus inner '
+                f'edge = {ANNULUS_INNER_RADIUS}. The macro-saddle serving '
+                f'band is the exterior annulus 1.0502342 < gamma < 3 '
+                f'(kappa = 0); outside it the caustic breaches the annulus '
+                f'(interior fold geometry, out of the Born rung scope).')
 
     # Guard A: band split.  Delta_tau is the FULL Fermat-delay difference
     # of the two real images (includes -ln|x|); resolved => decline.
@@ -462,10 +577,26 @@ def born_envelope(dense_w: np.ndarray, y1: float, y2: float, gamma: float,
 
     Raises
     ------
+    BornDomainError
+        If the radicand ``(1 - kappa)**2 - gamma**2 <= 0`` (macro saddle):
+        this positive-parity diagnostic's ``a0``/``b1`` correction is not
+        derived there.
     ValueError
         If ``dense_w`` does not match ``geom.w`` (the kernels and switch
         would be sampled on a different grid than the Born total).
     """
+    # Fail-loud positive-parity precondition: this resolved-image
+    # DIAGNOSTIC envelope carries the a0/b1 correction, derived only for
+    # det_a > 0.  Guard on the SAME radicand _born_factors uses (the
+    # ``abs()`` there no longer surfaces a saddle host via math.sqrt);
+    # det_a == 0 is the measure-zero parity wall.
+    if (1.0 - kappa) ** 2 - gamma ** 2 <= 0.0:
+        raise BornDomainError(
+            f'born_envelope is positive-parity only: radicand '
+            f'(1 - kappa)**2 - gamma**2 = {(1.0 - kappa) ** 2 - gamma ** 2} '
+            f'<= 0 for (kappa, gamma) = ({kappa}, {gamma}). The a0/b1 '
+            f'resolved-image correction is not derived on the macro saddle.')
+
     dense_w = np.asarray(dense_w, dtype=float)
     if not np.array_equal(dense_w, np.asarray(geom.w, dtype=float)):
         raise ValueError(

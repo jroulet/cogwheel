@@ -1411,6 +1411,14 @@ def born_carrier_from_partition(
         float(partition.gamma), float(partition.beta), float(partition.kappa))
     t_min = float(partition.t_min)
 
+    # Macro parity: det A = (1 - kappa)**2 - gamma**2.  On the macro saddle
+    # (det A < 0) both real images are already Morse-index 1, so the above-split
+    # branch serves the pure two-real-image ppGO sum and REFUSES the complex
+    # ghost (see the above-split block).  The below-split lead-only carrier is
+    # parity-agnostic: the default ``_born.born_lead_carrier`` applies the Morse
+    # -1j for the saddle internally, so one code path serves both parities.
+    is_saddle = (1.0 - kappa) ** 2 - gamma ** 2 < 0.0
+
     # Delta_tau: the FULL Fermat-delay difference of the two real images, read
     # straight from the partition's real-channel delays (F024/Professor: NOT
     # ``phi_geo``, NOT ``w * r0_sq``, NOT a re-solve).  ``partition.delays`` is
@@ -1445,20 +1453,41 @@ def born_carrier_from_partition(
     # re-modulates by ``exp(-1j w t_min)`` with the SAME reduced ``_frame_phase``
     # so label and ghost telescope back to the min-relative frame together.
     if not below.all():
-        try:
-            ghost = farfield_ghost_term(
-                w, source, partition.matrix,
-                t_min=t_min, real_images=partition.images)
-            envelope = ghost * np.exp(1j * _frame_phase(w, t_min))
-        except geometry.LensDomainError:
-            # Ghost unadmitted (separation gate) or its continuation refused:
-            # the ghost is an ADDITIVE correction, so serve the bare ppGO sum.
-            envelope = np.zeros(w.shape, dtype=complex)
-        _kernels, ppgo_plus_ghost = reconstruct_farfield(
-            w, envelope, partition.delays, partition.saddle_kernels,
-            partition.real_mask, FARFIELD_KERNEL_SUM_MINUS_GHOST, t_min)
         above = ~below
-        carrier[above] = ppgo_plus_ghost[above]
+        if is_saddle:
+            # Macro-saddle branch (det A < 0): pure two-real-image ppGO, the
+            # complex ghost REFUSED.  We do NOT call ``farfield_ghost_term`` at
+            # all: ``geometry.ghost_kernel`` pins its sqrt branch with
+            # ``reference_amplitude = exp(-0.5j*pi)``, justified in its own
+            # docstring by "the two real images continue into a Morse-index-1
+            # saddle" -- a POSITIVE-PARITY statement.  On the macro saddle both
+            # real images are ALREADY index-1, so that branch reference has not
+            # been derived for ``det A < 0`` (F024); admitting the ghost here
+            # inflates the azimuthal node count (measured N(theta) 4 -> 14 at
+            # gamma=1.6, |y|=4.243, w=5).  A ZERO envelope with
+            # `FARFIELD_KERNEL_SUM` (``S_a = 1`` on the real channels)
+            # reconstructs exactly the pure ppGO coherent sum over the two real
+            # images, demodulated to the min-relative frame (Professor).
+            _kernels, ppgo = reconstruct_farfield(
+                w, np.zeros(w.shape, dtype=complex), partition.delays,
+                partition.saddle_kernels, partition.real_mask,
+                FARFIELD_KERNEL_SUM, t_min)
+            carrier[above] = ppgo[above]
+        else:
+            try:
+                ghost = farfield_ghost_term(
+                    w, source, partition.matrix,
+                    t_min=t_min, real_images=partition.images)
+                envelope = ghost * np.exp(1j * _frame_phase(w, t_min))
+            except geometry.LensDomainError:
+                # Ghost unadmitted (separation gate) or its continuation
+                # refused: the ghost is an ADDITIVE correction, so serve the
+                # bare ppGO sum.
+                envelope = np.zeros(w.shape, dtype=complex)
+            _kernels, ppgo_plus_ghost = reconstruct_farfield(
+                w, envelope, partition.delays, partition.saddle_kernels,
+                partition.real_mask, FARFIELD_KERNEL_SUM_MINUS_GHOST, t_min)
+            carrier[above] = ppgo_plus_ghost[above]
 
     return carrier
 

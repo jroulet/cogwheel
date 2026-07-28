@@ -1,5 +1,74 @@
 # Coder Short-Term Observations
 
+WP2 channels.born_carrier_from_partition saddle branch (Build): added
+`is_saddle = (1.0-kappa)**2 - gamma**2 < 0.0` right after gamma/beta/kappa/t_min
+reads. Below-split block UNCHANGED (default _born.born_lead_carrier applies Morse
+-1j internally -> lead-only serves both parities, one path). Above-split now
+branches on is_saddle: POSITIVE arm is the EXISTING code VERBATIM (indented under
+else:; farfield_ghost_term caught on geometry.LensDomainError -> envelope*exp(
+1j*_frame_phase), reconstruct_farfield w/ FARFIELD_KERNEL_SUM_MINUS_GHOST). SADDLE
+arm does NOT call farfield_ghost_term at all (ghost REFUSED: geometry.ghost_kernel
+pins sqrt branch w/ reference_amplitude=exp(-0.5j*pi), a POSITIVE-PARITY statement
+underived for det A<0, F024; comment names it). Saddle serve: reconstruct_farfield(
+w, np.zeros(w.shape,complex), partition.delays, partition.saddle_kernels,
+partition.real_mask, FARFIELD_KERNEL_SUM, t_min)[above] -> zero envelope + S_a=1 on
+real channels = pure ppGO coherent sum over 2 real images, min-rel frame. `above=
+~below` hoisted above branch (same value, shared). ValueError(<2 real) shared,
+unchanged. VERIFIED: ast OK, import OK, FARFIELD_KERNEL_SUM exists, reconstruct_
+farfield returns (kernels,total). Positive path values byte-identical (else-body
+verbatim). UNVERIFIED: no numerical run vs exact saddle ppGO (no test suite per
+role). OWED to Test Dev: saddle-partition suite — (1) below-split lead-only both
+parities; (2) above-split saddle == FARFIELD_KERNEL_SUM zero-envelope ppGO, no
+ghost, finite; (3) farfield_ghost_term NOT invoked on saddle path (spy/patch);
+(4) positive-parity byte-identical to HEAD (below+above).
+
+WP3 surrogate_census saddle 'born' arm (Build): added a SECOND born arm in
+classify_fallthrough immediately after the positive arm (det_a_macro<0 and
+_born.saddle_caustic_max_y(gamma,kappa)<_born.ANNULUS_INNER_RADIUS and
+INNER<abs_y<=_BORN_ANNULUS_OUTER_RADIUS -> 'born'). Fence keyed on SHARED
+closed-form helper (no inline math; single-source w/ born_gate). saddle_max_y<3
+reproduces band 1.0502342<gamma<3 automatically (VERIFIED: g=1.02->4.89 refused,
+1.0502342->3.0 boundary, 1.06/1.3/2.9 served). Positive arm VERBATIM (byte-
+identical, gamma=0.5 still 'born'). gamma-guard band=0.001 shields wall earlier.
+Updated docstring cat-3 note (two arms share annulus, saddle mirrors positive via
+shared fence). _born lives at cogwheel/lensing/chang_refsdal/_born.py (imported).
+VERIFIED: ast OK, import OK, branch matrix (saddle-annulus->born, inside-inner->
+fall-through, positive->born). No test file touched (per WP). OWED to Test Dev:
+classify_fallthrough returns 'born' for saddle exterior-annulus draw + mutation
+controls (det_a_macro>=0 not saddle-arm, saddle_max_y>=3 refuse, inner/outer edges).
+
+WP1 _born.py saddle carrier (Build: macro-saddle lead carrier + fence):
+(a) _born_factors sqrt_mu now 1/sqrt(ABS(det_a)) -> magnitude for BOTH
+parities; positive parity bit-identical (abs is identity for det_a>0);
+a0/b1 signed formulas unchanged (carry over w/ det_a<0 flipping signs,
+F024). (b) born_lead_carrier: det_a=(1-kappa)**2-gamma**2 (beta-indep),
+morse=(-1j)**1 if det_a<0 else 1.0 -> return morse*sqrt_mu*exp(1j*w*phi_geo).
+EXACT literal -1j (NOT cmath.exp(-1j*pi/2) which injects ~6e-17 real part,
+F009-S). pos parity morse=1.0 float -> byte-identical (VERIFIED new==old).
+(c) NEW module fn saddle_caustic_max_y(gamma,kappa): F026 closed form,
+max(off_axis=4u_c+1/u_c-2, on_axis=4gp^2/(gp+1)) load-bearing cusp switch;
+u_c=(sqrt(4gp^2-3)-1)/2. Module self-check assert ==3.0 abs_tol 1e-10 at
+gamma=sqrt((189-15sqrt105)/32)=1.0502342 (VERIFIED 2.9999999999999950).
+(d) born_gate guard B -> two-sided abs(gamma_p-1)<=DELTA_GAMMA_P (byte-
+identical for gamma_p<1; refuses wall strip above 1). Branch: gamma_p<1 keeps
+positive fence VERBATIM (raise text unchanged); else saddle_max_y>=3.0 ->
+refuse w/ saddle band msg. Guard A (band split w*Delta_tau>=RHO_END via
+find_images/delay) SHARED unchanged below branch. Serving band gamma ABOVE
+lower root 1.0502342 (extent DECREASES as gamma rises to cusp-switch 1.1777).
+(e) born_amplification + born_envelope: fail-loud guard at entry
+`if (1-kappa)**2-gamma**2<=0: raise BornDomainError` (abs() removed the
+implicit math.sqrt(neg) ValueError these pos-parity diagnostics relied on;
+saddle extension out of scope). born_envelope guard placed FIRST (before geom
+use) VERIFIED raises w/ geom=None. VERIFIED: ast.parse OK, import+module
+asserts OK, gate SERVE/REFUSE matrix (saddle served gamma=1.3|y|=3.4 w=0.01,
+saddle-fence refuse gamma=1.04, wall-strip refuse gamma=1.002, pos served
+gamma=0.5), |carrier| w-indep to 1e-14 == sqrt(|mu|). UNVERIFIED: no accuracy/
+residual-node run vs exact (no test suite per role); channels/census saddle
+arms are SEPARATE WPs (WP2/WP3) not touched here. FLAG->Librarian/Inspector:
+module docstring WHAT line still says rung serves "at positive parity
+(gamma < 3/4)" — now stale (saddle branch added); left unedited (spec/doc
+surface ownership).
+
 INS-2-001 FIX (test_lensing_surrogate_census.py): WP3's 6th category 'born'
 (_FALLTHROUGH_CATEGORIES = gamma-guard,dropped-sliver,BORN,cusp-window,
 refusal-ball,out-of-box) broke BreakdownPartitionTestCase.test_counts_match_

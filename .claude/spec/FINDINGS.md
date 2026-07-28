@@ -1295,3 +1295,86 @@ F023's headline; F026 retires F024's extent table. Every wrong version was a
 real measurement whose resolution or sweep was narrower than the claim built on
 it. Grid at 241^2, sweep at four gammas, radial-only, ring scan at 0.0087 rad —
 four different ways to under-resolve, four wrong tables.
+
+## F027 — the ghost branch reference is CORRECT on both parities; the real defect is the near-axis non-decaying ghost, ungated since 8h-d1 retired the decay condition (2026-07-28)
+
+Three hypotheses died here, two of them the driver's. Sweeps stated per claim.
+
+**1. The sqrt-branch reference is parity-independent.** `geometry.
+_branch_pinned_amplitude` resolves the `+/-` ambiguity of `1/sqrt(det H_c)` by
+matching phase to `reference_amplitude = exp(-0.5j*pi)`, justified in the
+docstring by "the two real images continue into a Morse-index-1 saddle" — a
+positive-parity phrasing. It is nonetheless CORRECT for `det A < 0`:
+`tr Hess = 2*lam > 0` forbids index-2 images on BOTH branches, so an (1,2)
+merge is impossible and every A2 fold annihilates an (index 0, index 1) pair.
+Measured radial scans across the caustic (theta = 0.30, 36 radii): saddle
+`gamma = 1.60` and `1.20` both go `0111` inside -> closest pair at the fold is
+(0,1) -> `11` outside, the same annihilating pair as positive parity.
+
+Confirmed numerically (30 log-spaced `w` in [0.3, 6], saddle `gamma = 1.2`,
+`|y| = 3.05`, `theta = 0.30`, `Im tau_c = 0.919`, `Delta_tau = 16.25`,
+separation 1.57): `-G` is NEVER best at any `w`; `+G` wins at all 16 points
+with `w <= 1.41`. The DRIVER'S claim that the subtraction is "actively wrong"
+on the saddle was FALSE.
+
+**2. The driver's fallback hypothesis — an admission-set discontinuity inside
+the tile — was ALSO false.** Tested on a theta interval with no boundary
+crossing (`theta in [0.1, 0.7]`, 61 samples, all admitted): `ppGO + G` is still
+7x to 64x worse than ppGO alone, while NODE COUNTS BARELY MOVE (4->5, 5->6,
+4->4, 11->10). The damage is to residual SIZE, not to splineability, so it is
+not a tiling problem.
+
+**3. The actual mechanism: the near-axis ghost stops decaying.** As the source
+approaches a principal axis `Im tau_c -> 0` (stated in `ghost_kernel`'s own
+docstring: "the on-axis ghost is pure oscillation with no decay"), so the ghost
+no longer falls off with `w` and swamps a ppGO residual that has become tiny.
+Measured at `w = 5`, `|y| = 4.2426`, theta from 0.90 down to 0.02:
+
+| gamma | Im tau_c | \|G\|/\|F\| | r(ppGO) | r(ppGO+G) |
+|---|---|---|---|---|
+| 1.60 | 2.14 -> 0.099 | 5.2e-6 -> 1.04e-1 | 3.3e-4 | 1.03e-1 |
+| 1.20 | 3.15 -> 0.139 | 1.9e-8 -> 4.3e-2 | 3.5e-5 | 4.33e-2 |
+| 0.45 POSITIVE | 9.51 -> 0.394 | 3.0e-22 -> 1.44e-2 | 1.5e-5 | 1.44e-2 |
+
+At `gamma = 0.45, theta = 0.02` admitting the ghost is 1000x WORSE — on the
+POSITIVE-parity branch, in code shipped by `31ee133`.
+
+**THIS IS A REGRESSION WE INTRODUCED.** Build 8h-d1 re-keyed the ghost gate
+from decay (`w_min * Im tau_c >= _FARFIELD_WINDOW_RADIANS = 2.0`) to geometric
+separation (`min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN = 0.7`) to kill
+train/serve skew. The two gates are ORTHOGONAL: separation guards near-cusp
+coalescence, decay guards the near-axis non-decaying ghost. Retiring the decay
+condition left the near-axis case ungated on BOTH branches. At
+`gamma = 1.6, theta = 0.02, w = 5` the retired gate gives `5 * 0.099 = 0.497`
+-> refuse, which is correct.
+
+Measured separation on the saddle NEVER binds: `min_a |x_a - x_c| in
+[0.942, 2.421]` over 121 theta-samples x 4 (gamma, |y|) configs, always above
+0.7. (This also corrects F024's "43-54 of 65 admitted", which was the
+EXISTENCE boundary — no complex-conjugate pair — not the separation gate.)
+
+**The fix keeps both goals.** Pin `w_min` to the CHART BAND FLOOR — a property
+of the chart, identical at train and serve — rather than to whichever `w` grid
+each side happens to hold. That restores decay protection without
+reintroducing the skew that motivated the retirement. Re-admit the ghost gated
+on band-floor decay AND separation together.
+
+**Tile alignment, if wanted:** the operative boundary is the ghost EXISTENCE
+locus (where the conjugate pair merges onto the real axis) — a level set of the
+image quartic's discriminant, computable in closed form from the coefficients
+`geometry.image_quartic_coefficients` already returns. Clean: exactly ONE flip
+per 121-sample theta sweep, at `theta ~ 1.06` (1.6, 3.05), `1.09` (1.6, 4.24),
+`1.32` (1.2, 3.05), `1.31` (1.2, 4.24).
+
+**Interim status.** Refusing the ghost remains SAFER than admitting it under
+the separation gate alone: the near-axis failure is 1000x in the wrong
+direction and silently biases lnL, whereas refusing costs only the modest
+`w <~ 1.4` improvement. So the saddle build's BEHAVIOUR is fine; its stated
+JUSTIFICATION ("underived branch reference") is wrong and the comment must be
+corrected. The same decay gate is owed on positive parity regardless.
+
+**Pattern.** An orthogonal guard was retired as a duplicate. Both gates
+mentioned the ghost, both looked like admission criteria, and one was replaced
+by the other on the strength of that resemblance. Before retiring a guard, ask
+what it refuses that the replacement does not — here, a whole boundary of
+parameter space that neither the tests nor the census was measuring.

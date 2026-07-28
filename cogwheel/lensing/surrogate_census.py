@@ -240,12 +240,17 @@ def classify_fallthrough(
     1. ``gamma-guard``  -- ``|gamma - 1| < _GAMMA_GUARD_BAND`` (checked first).
     2. ``dropped-sliver`` -- ``gamma`` inside a training-dropped metamorphosis
        band (a subset of ``out-of-box`` on the gamma axis, so checked first).
-    3. ``born``         -- a far-annulus positive-parity draw the analytic
-       Born carrier rung serves (`_born`).  Claimed here (Professor Q5) --
-       before the relaxed-guard probes -- via an INDEPENDENT geometric
-       predicate (positive parity ``det A > 0``, the ``gamma < 3/4`` exterior
-       fence, and the annulus ``3 < |y| <= 3 sqrt(2)``), NOT a `_born.born_gate`
-       call, which needs ``w`` and an engine-built band split.
+    3. ``born``         -- a far-annulus draw the analytic Born carrier rung
+       serves (`_born`).  Claimed here (Professor Q5) -- before the
+       relaxed-guard probes -- via an INDEPENDENT geometric predicate, NOT a
+       `_born.born_gate` call (which needs ``w`` and an engine-built band
+       split).  Two arms share the annulus ``3 < |y| <= 3 sqrt(2)``: a
+       positive-parity arm (``det A > 0``, the ``gamma < 3/4`` exterior fence)
+       and a macro-saddle arm (``det A < 0``) that mirrors it, keying the
+       exterior fence on the shared closed-form helper
+       ``_born.saddle_caustic_max_y < _born.ANNULUS_INNER_RADIUS`` instead of
+       the scalar ``gamma < 3/4`` -- the whole caustic inside ``|y| < 3``, so
+       the annulus stays exterior (single-source with `_born.born_gate`).
     4. ``cusp-window``  -- some TUBE chart would serve but for its cusp
        exclusion (detected by relaxing ``cusp_windows`` to empty and
        re-calling `surrogate._tube_serves`).  Per Professor Q7 a near-cusp
@@ -291,6 +296,19 @@ def classify_fallthrough(
     abs_y = math.hypot(y1_eig, y2_eig)
     if (det_a_macro > 0.0
             and gamma < _born.GAMMA_FENCE
+            and _born.ANNULUS_INNER_RADIUS < abs_y <= _BORN_ANNULUS_OUTER_RADIUS):
+        return 'born'
+
+    # born (saddle arm): a far-annulus NEGATIVE-parity (macro-saddle) draw the
+    # same Born carrier rung serves.  Mirrors the positive arm but keys the
+    # exterior fence on the shared closed-form saddle helper instead of the
+    # gamma < 3/4 scalar: the whole astroid caustic lies inside |y| < 3 (so the
+    # annulus is fully exterior) iff `_born.saddle_caustic_max_y` < the inner
+    # radius, which reproduces the serve band 1.0502342 < gamma < 3 without
+    # inlining the closed form (single-source with `_born.born_gate`).  The
+    # gamma-guard band near det A = 0 is checked earlier and shields the wall.
+    if (det_a_macro < 0.0
+            and _born.saddle_caustic_max_y(gamma, kappa) < _born.ANNULUS_INNER_RADIUS
             and _born.ANNULUS_INNER_RADIUS < abs_y <= _BORN_ANNULUS_OUTER_RADIUS):
         return 'born'
 

@@ -43,6 +43,9 @@ TRAIN_TIER; this suite pins only the narrow ``[1e-3, 0.05]`` low band.
 """
 from __future__ import annotations
 
+import cmath
+import functools
+import itertools
 import math
 import pathlib
 import types
@@ -749,6 +752,998 @@ class SelfFalsificationTestCase(BornTestCase):
         self.assertGreater(
             _greedy_node_count(x, wiggly, 1e-3),
             _greedy_node_count(x, flat, 1e-3))
+
+
+# ======================================================================= #
+# SADDLE-BRANCH acceptances (WP1: macro-saddle lead-only carrier + fence).
+#
+# The three blocks below bless the SADDLE half of WP1 (det A < 0,
+# gamma > 1 - kappa), which the positive-parity classes above do not touch:
+#
+#   * the lead-only carrier's Morse phase ``-1j`` and magnitude
+#     ``sqrt(|mu_macro|)`` on the saddle (Acceptance saddle-#1/#2), and
+#   * the exterior fence being the exact BAND ``1.0502342 < gamma < 3``
+#     via the F026 closed form `saddle_caustic_max_y` (Acceptance saddle-#3).
+#
+# Tolerance justification (saddle).
+#   * Saddle carrier vs the independent matrix-solve oracle: the ONLY
+#     numerical difference is float64 round-off in ``phi_geo`` amplified by
+#     ``w`` inside ``exp(1j w phi_geo)``.  Measured worst case over the 72
+#     swept combos is ``1.14e-13`` (at ``w = 8``, where the phase argument
+#     ``w * phi_geo`` is largest); the gate is ``2e-13`` (~1.8x headroom).
+#     The brief's nominal ``1e-13`` is BELOW the measured float64 reality at
+#     ``w = 8``, so gating at ``1e-13`` would read red on correct code -- the
+#     bar is set from the measurement, not the brief's round number.
+#   * The saddle F009 magnitude pin is ``w``-independent by construction
+#     (``|-1j| = 1`` and ``|exp(1j w phi)| = 1``), so ``|F| == sqrt(|mu|)``
+#     is asserted at ``1e-12`` relative (measured: identically ``0``).
+#   * The fence closed form is exact algebra: ``max|y|(root) == 3.0`` holds
+#     to ``1e-10`` only at the EXACT root ``sqrt((189 - 15 sqrt(105))/32)``
+#     (the brief's 7-digit literal ``1.0502342`` lands ~``7e-7`` off, so the
+#     tight gate uses the exact root -- mirroring the module's own
+#     self-check -- while the serve/refuse straddle uses the literal pivot).
+# ======================================================================= #
+
+# --------------------------------------------------------------------------- #
+# Acceptance saddle-#1 -- saddle carrier vs an independent mu_macro / phi_geo.
+# --------------------------------------------------------------------------- #
+#: Macro-saddle shears (all in the serving band 1.0502342 < gamma < 3, det<0).
+SADDLE_CARRIER_GAMMAS = (1.1, 1.2, 1.4, 1.6)
+#: Annulus radii (inner edge, outer 3*sqrt(2)).
+SADDLE_CARRIER_ABSY = (3.05, 4.2426)
+#: Source azimuths (radians).
+SADDLE_CARRIER_THETAS = (0.3, 0.9, 1.35)
+#: Frequencies spanning below the split to deep resolved-image (F009-S drift).
+SADDLE_CARRIER_WS = (1e-3, 0.05, 8.0)
+#: Relative tolerance on |carrier - oracle| / |oracle|.  Measured worst 1.14e-13
+#: (w = 8); gate 2e-13 (the brief's 1e-13 is below the float64 reality).
+SADDLE_CARRIER_REL_TOL = 2e-13
+
+# --------------------------------------------------------------------------- #
+# Acceptance saddle-#2 -- |F_carrier| is w-independent (the saddle F009 pin).
+# --------------------------------------------------------------------------- #
+#: Fixed saddle config for the magnitude pin.
+SADDLE_F009_GAMMA = 1.3
+SADDLE_F009_ABSY = 3.5
+SADDLE_F009_THETA = 0.5
+#: Frequency grid; |F_carrier| must not drift across it.
+SADDLE_F009_WS = (1e-3, 1e-2, 0.05, 1.0, 8.0)
+#: Relative tolerance on |F_carrier| / sqrt(|mu_macro|) - 1 (measured: 0).
+SADDLE_F009_REL_TOL = 1e-12
+
+# --------------------------------------------------------------------------- #
+# Acceptance saddle-#3 -- the fence is the exact band 1.0502342 < gamma < 3.
+# --------------------------------------------------------------------------- #
+#: Exact off-axis inner-edge root gamma = sqrt((189 - 15 sqrt(105)) / 32) at
+#: kappa = 0, where saddle_caustic_max_y == 3.0 (the module's own self-check).
+SADDLE_FENCE_ROOT = math.sqrt((189.0 - 15.0 * math.sqrt(105.0)) / 32.0)
+#: The brief's 7-digit literal pivot used for the serve/refuse straddle.
+SADDLE_FENCE_ROOT_LITERAL = 1.0502342
+#: Upper band edge: saddle_caustic_max_y(3.0, 0) == 3.0 (on-axis candidate).
+SADDLE_FENCE_UPPER = 3.0
+#: Tolerance on the closed form == annulus inner edge (3.0) at the exact root.
+SADDLE_FENCE_MAXY_TOL = 1e-10
+#: Small offset used to straddle each band edge (serve vs refuse).
+SADDLE_FENCE_EPS = 1e-6
+#: Annulus radius / azimuth / frequency for the gate straddle (outer edge,
+#: safely exterior to the caustic -> two real images; w below the band split).
+SADDLE_FENCE_ANNULUS_ABSY = 4.2426
+SADDLE_FENCE_THETA = 0.3
+SADDLE_FENCE_W = 1e-3
+
+
+def _saddle_carrier_independent(w: float, y1: float, y2: float, gamma: float,
+                                beta: float, kappa: float
+                                ) -> tuple[complex, float]:
+    """Independent macro-saddle carrier from a matrix solve (no _born algebra).
+
+    Reconstructs the lead-only saddle carrier as
+    ``sqrt(|mu_macro|) * (-1j) * exp(1j w phi_geo)`` with
+
+    * ``mu_macro = 1 / ((1 - kappa)**2 - gamma**2)`` (negative on the saddle),
+    * ``x0 = solve(A, y)`` from ``np.linalg.solve`` on the independently built
+      shear matrix, and
+    * ``phi_geo`` the FULL Fermat delay ``0.5 x0.A.x0 - y.x0 + 0.5 y.y -
+      ln|x0|`` -- the un-collapsed form, so it shares no algebra with
+      ``_born._born_factors`` (which uses ``A x0 = y`` to drop the quadratic
+      term).
+
+    Returns the carrier and ``mu_macro`` (so the caller can assert the config
+    is genuinely on the saddle, ``mu_macro < 0``).
+    """
+    lam = 1.0 - kappa
+    matrix = _shear_matrix(gamma, beta, kappa)
+    source = np.array([y1, y2])
+    x0 = np.linalg.solve(matrix, source)
+    mu_macro = 1.0 / (lam * lam - gamma * gamma)
+    phi_geo = float(0.5 * x0 @ matrix @ x0 - source @ x0
+                    + 0.5 * source @ source - math.log(np.linalg.norm(x0)))
+    carrier = math.sqrt(abs(mu_macro)) * (-1j) * cmath.exp(1j * w * phi_geo)
+    return carrier, float(mu_macro)
+
+
+def _saddle_off_on_axis(gamma: float, kappa: float) -> tuple[float, float]:
+    """Independent (off_axis, on_axis) astroid extent candidates on the saddle.
+
+    Re-derives the two ``u = 1/|x|**2`` cusp radicands of the F026 closed form
+    without calling `saddle_caustic_max_y`, so the test can assert WHICH
+    candidate the ``max(...)`` selects at a given root.
+    """
+    lam = 1.0 - kappa
+    gp = gamma / lam
+    u_c = (math.sqrt(4.0 * gp ** 2 - 3.0) - 1.0) / 2.0
+    off_axis = 4.0 * u_c + 1.0 / u_c - 2.0
+    on_axis = 4.0 * gp ** 2 / (gp + 1.0)
+    return off_axis, on_axis
+
+
+def _plot_saddle_magnitude(axis, w_grid, mags, sqrt_mu) -> None:
+    """Diagnostic: |F_carrier| vs log w on the saddle -- any slope is the bug."""
+    axis.semilogx(w_grid, mags, 'o-', label='|F_carrier|')
+    axis.axhline(sqrt_mu, ls='--', color='red', label='sqrt(|mu_macro|)')
+    axis.set_xlabel('w')
+    axis.set_ylabel('|F_carrier|')
+    axis.legend()
+    axis.set_title('saddle F009 pin: magnitude is w-independent')
+
+
+def _plot_saddle_fence(axis) -> None:
+    """Diagnostic: saddle_caustic_max_y vs gamma over (1.05, 3.2)."""
+    gammas = np.linspace(1.051, 3.2, 200)
+    max_y = np.array([_born.saddle_caustic_max_y(g, 0.0) for g in gammas])
+    axis.plot(gammas, max_y)
+    axis.axhline(_born.ANNULUS_INNER_RADIUS, ls='--', color='red',
+                 label='inner edge 3.0')
+    axis.axvline(SADDLE_FENCE_ROOT, ls=':', color='grey',
+                 label='root 1.0502')
+    axis.axvline(3.0, ls=':', color='green', label='gamma = 3')
+    axis.plot([1.1777], [1.5961], 'k*', label='min 1.5961')
+    axis.set_xlabel('gamma')
+    axis.set_ylabel('saddle caustic max|y|')
+    axis.legend()
+    axis.set_title('saddle fence: band 1.0502342 < gamma < 3')
+
+
+class SaddleCarrierClosedFormTestCase(BornTestCase):
+    """Acceptance saddle-#1: saddle carrier matches an independent oracle.
+
+    Sweeps the macro-saddle band ``gamma in {1.1, 1.2, 1.4, 1.6}`` at the
+    annulus edges, several azimuths and ``w in {1e-3, 0.05, 8}``, comparing
+    `born_lead_carrier` (Morse phase ``-1j``, magnitude ``sqrt(|mu_macro|)``)
+    to a matrix-solve reconstruction that shares no algebra with ``_born``.
+    """
+
+    def test_saddle_carrier_matches_independent_reconstruction(self) -> None:
+        worst = 0.0
+        drift_by_gamma: dict[float, float] = {}
+        for gamma in SADDLE_CARRIER_GAMMAS:
+            for absy in SADDLE_CARRIER_ABSY:
+                for theta in SADDLE_CARRIER_THETAS:
+                    for w in SADDLE_CARRIER_WS:
+                        y1 = absy * math.cos(theta)
+                        y2 = absy * math.sin(theta)
+                        with self.subTest(gamma=gamma, absy=absy,
+                                          theta=theta, w=w):
+                            code = _born.born_lead_carrier(
+                                w, y1, y2, gamma, 0.0, 0.0)
+                            oracle, mu_macro = _saddle_carrier_independent(
+                                w, y1, y2, gamma, 0.0, 0.0)
+                            # Genuinely the macro saddle (det A < 0).
+                            self.assertLess(
+                                mu_macro, 0.0,
+                                'config must be on the macro saddle')
+                            rel = abs(code - oracle) / abs(oracle)
+                            self.assert_within(
+                                rel, SADDLE_CARRIER_REL_TOL,
+                                'saddle carrier vs independent oracle')
+                            worst = max(worst, rel)
+                            drift_by_gamma[gamma] = max(
+                                drift_by_gamma.get(gamma, 0.0),
+                                abs(code - oracle))
+        self.assertLess(worst, SADDLE_CARRIER_REL_TOL)
+        _save_plot(
+            'saddle_carrier_oracle_drift.png',
+            lambda ax: (ax.scatter(list(drift_by_gamma),
+                                   list(drift_by_gamma.values())),
+                        ax.set_xlabel('gamma'),
+                        ax.set_ylabel('max |carrier - oracle|'),
+                        ax.set_title('saddle carrier: no sign/branch offset')))
+
+    def test_saddle_carrier_morse_phase_is_minus_j(self) -> None:
+        # A pure lead carrier on the saddle is sqrt(|mu|) * (-1j) * unit-phase;
+        # at w = 0 the exp is 1, so the carrier is exactly -1j * sqrt(|mu|)
+        # (negative imaginary, zero real).  This isolates the Morse phase.
+        gamma, absy, theta = 1.4, 3.6, 0.7
+        y1, y2 = absy * math.cos(theta), absy * math.sin(theta)
+        carrier = _born.born_lead_carrier(0.0, y1, y2, gamma, 0.0, 0.0)
+        sqrt_mu = 1.0 / math.sqrt(gamma * gamma - 1.0)  # kappa = 0.
+        self.assert_within(
+            carrier.real, 1e-15, 'saddle carrier at w=0 must be pure imaginary')
+        self.assert_within(
+            carrier.imag - (-sqrt_mu), 1e-14,
+            'saddle carrier at w=0 must be -1j * sqrt(|mu_macro|)')
+
+
+class SaddleLeadCarrierF009PinTestCase(BornTestCase):
+    """Acceptance saddle-#2: |F_carrier| == sqrt(|mu_macro|) at every w.
+
+    The saddle counterpart of the F009 pin the positive branch's ``a0``
+    violated: the served carrier must NOT pick up a ``w``-dependent
+    resolved-image correction, so its MAGNITUDE is flat across the frequency
+    grid even though its total phase drifts (F009-S).
+    """
+
+    def test_saddle_magnitude_is_w_independent_sqrt_mu(self) -> None:
+        y1 = SADDLE_F009_ABSY * math.cos(SADDLE_F009_THETA)
+        y2 = SADDLE_F009_ABSY * math.sin(SADDLE_F009_THETA)
+        sqrt_mu = 1.0 / math.sqrt(SADDLE_F009_GAMMA ** 2 - 1.0)  # kappa = 0.
+        mags = []
+        for w in SADDLE_F009_WS:
+            carrier = _born.born_lead_carrier(
+                w, y1, y2, SADDLE_F009_GAMMA, 0.0, 0.0)
+            with self.subTest(w=w):
+                self.assert_within(
+                    abs(carrier) / sqrt_mu - 1.0, SADDLE_F009_REL_TOL,
+                    'saddle |F_carrier| not sqrt(|mu_macro|)')
+            mags.append(abs(carrier))
+        # Cross-w constancy: the spread across the grid is float64 zero.
+        spread = (max(mags) - min(mags)) / sqrt_mu
+        self.assert_within(
+            spread, SADDLE_F009_REL_TOL, 'saddle |F_carrier| drifts with w')
+        _save_plot(
+            'saddle_f009_magnitude_pin.png',
+            lambda ax: _plot_saddle_magnitude(
+                ax, SADDLE_F009_WS, mags, sqrt_mu))
+
+    def test_saddle_total_phase_does_drift(self) -> None:
+        # Guard against over-pinning: the TOTAL phase is NOT w-flat (F009-S),
+        # so a naive "phase constant" gate would be wrong.  The phase must
+        # genuinely move between the smallest and largest w.
+        y1 = SADDLE_F009_ABSY * math.cos(SADDLE_F009_THETA)
+        y2 = SADDLE_F009_ABSY * math.sin(SADDLE_F009_THETA)
+        lo = _born.born_lead_carrier(
+            SADDLE_F009_WS[0], y1, y2, SADDLE_F009_GAMMA, 0.0, 0.0)
+        hi = _born.born_lead_carrier(
+            SADDLE_F009_WS[-1], y1, y2, SADDLE_F009_GAMMA, 0.0, 0.0)
+        self.comparisons += 1
+        self.assertGreater(
+            abs(cmath.phase(hi) - cmath.phase(lo)), 1e-3,
+            'saddle carrier total phase must drift with w (F009-S)')
+
+
+class SaddleExteriorFenceTestCase(BornTestCase):
+    """Acceptance saddle-#3: the fence is the exact band 1.0502342 < gamma < 3.
+
+    Pins (i) the F026 closed form at the off-axis inner-edge root, (ii) the
+    serve/refuse straddle at the lower edge, and (iii) the refusal at the
+    upper edge ``gamma >= 3`` -- reachable-red near both edges.
+    """
+
+    def _gate(self, gamma: float) -> None:
+        """Call born_gate on the annulus straddle fixture (may raise)."""
+        y1 = SADDLE_FENCE_ANNULUS_ABSY * math.cos(SADDLE_FENCE_THETA)
+        y2 = SADDLE_FENCE_ANNULUS_ABSY * math.sin(SADDLE_FENCE_THETA)
+        _born.born_gate(SADDLE_FENCE_W, y1, y2, gamma, 0.0, 0.0)
+
+    def test_closed_form_hits_inner_edge_at_off_axis_root(self) -> None:
+        # (i) saddle_caustic_max_y(root, 0) == 3.0 to 1e-10, and the max is
+        # taken from the OFF-AXIS candidate there (off_axis >= on_axis).
+        value = _born.saddle_caustic_max_y(SADDLE_FENCE_ROOT, 0.0)
+        self.assert_within(
+            value - _born.ANNULUS_INNER_RADIUS, SADDLE_FENCE_MAXY_TOL,
+            'saddle max|y| at the root != annulus inner edge')
+        off_axis, on_axis = _saddle_off_on_axis(SADDLE_FENCE_ROOT, 0.0)
+        self.comparisons += 1
+        self.assertGreaterEqual(
+            off_axis, on_axis,
+            f'at the inner-edge root the outermost extent must come from the '
+            f'OFF-AXIS candidate (off={off_axis:.4f}, on={on_axis:.4f})')
+        _save_plot('saddle_fence_maxy.png', _plot_saddle_fence)
+
+    def test_upper_edge_selects_on_axis_candidate(self) -> None:
+        # Companion to (i): by gamma = 3 the outermost extent has switched to
+        # the ON-AXIS candidate (the F026 switch near gamma ~ 1.1777), and the
+        # closed form again equals the inner edge 3.0.
+        value = _born.saddle_caustic_max_y(SADDLE_FENCE_UPPER, 0.0)
+        self.assert_within(
+            value - _born.ANNULUS_INNER_RADIUS, SADDLE_FENCE_MAXY_TOL,
+            'saddle max|y| at gamma=3 != annulus inner edge')
+        off_axis, on_axis = _saddle_off_on_axis(SADDLE_FENCE_UPPER, 0.0)
+        self.comparisons += 1
+        self.assertGreater(
+            on_axis, off_axis,
+            f'at gamma=3 the outermost extent must come from the ON-AXIS '
+            f'candidate (off={off_axis:.4f}, on={on_axis:.4f})')
+
+    def test_lower_edge_refuses_below_serves_above(self) -> None:
+        # (ii) refuse at root - 1e-6 (caustic breaches), serve at root + 1e-6.
+        with self.subTest(edge='lower', side='refuse'):
+            self.comparisons += 1
+            with self.assertRaises(_born.BornDomainError):
+                self._gate(SADDLE_FENCE_ROOT_LITERAL - SADDLE_FENCE_EPS)
+        with self.subTest(edge='lower', side='serve'):
+            self.comparisons += 1
+            try:
+                self._gate(SADDLE_FENCE_ROOT_LITERAL + SADDLE_FENCE_EPS)
+            except _born.BornDomainError as exc:  # pragma: no cover
+                self.fail(
+                    f'gamma just above the root should serve, refused: {exc}')
+
+    def test_upper_edge_refuses_at_three_serves_just_below(self) -> None:
+        # (iii) refuse at gamma = 3.0 (and 3.0 exactly hits the inner edge),
+        # serve at 3.0 - 1e-6 (still inside the band).
+        with self.subTest(edge='upper', side='refuse'):
+            self.comparisons += 1
+            with self.assertRaises(_born.BornDomainError) as ctx:
+                self._gate(SADDLE_FENCE_UPPER)
+            self.assertIn(
+                str(SADDLE_FENCE_UPPER), str(ctx.exception),
+                'refusal message must name the offending gamma')
+        with self.subTest(edge='upper', side='serve'):
+            self.comparisons += 1
+            try:
+                self._gate(SADDLE_FENCE_UPPER - SADDLE_FENCE_EPS)
+            except _born.BornDomainError as exc:  # pragma: no cover
+                self.fail(
+                    f'gamma just below 3 should serve, refused: {exc}')
+
+
+class SaddleSelfFalsificationTestCase(BornTestCase):
+    """House idiom: prove the saddle gates above can actually go RED."""
+
+    def test_wrong_morse_sign_breaks_carrier_agreement(self) -> None:
+        # If the carrier used +1j (or +1) instead of the Morse -1j, the
+        # independent oracle would disagree by O(1), far above the gate.
+        gamma, absy, theta, w = 1.2, 4.2426, 0.3, 0.05
+        y1, y2 = absy * math.cos(theta), absy * math.sin(theta)
+        oracle, _mu = _saddle_carrier_independent(w, y1, y2, gamma, 0.0, 0.0)
+        # A tainted "carrier" with the Morse phase dropped (+1 instead of -1j).
+        tainted = abs(oracle) * cmath.exp(1j * cmath.phase(oracle) + 1j * math.pi / 2)
+        self.comparisons += 1
+        self.assertGreater(
+            abs(tainted - oracle) / abs(oracle), SADDLE_CARRIER_REL_TOL,
+            'a dropped Morse phase must exceed the saddle carrier gate')
+
+    def test_a0_saddle_diagnostic_refuses(self) -> None:
+        # The resolved-image a0/b1 diagnostic is positive-parity only; on the
+        # saddle it must REFUSE (proving the serve carrier is the ONLY saddle
+        # path and no a0 correction leaks in).
+        self.comparisons += 1
+        with self.assertRaises(_born.BornDomainError):
+            _born.born_amplification(0.05, SADDLE_F009_ABSY, 0.0,
+                                     SADDLE_F009_GAMMA)
+
+    def test_fence_serve_side_is_genuinely_reachable_red(self) -> None:
+        # Prove the lower-edge serve assertion is not vacuous: a gamma well
+        # BELOW the root (deeper into 1 < gamma < root, caustic breaching)
+        # must refuse, so the serve/refuse boundary is real.
+        self.comparisons += 1
+        with self.assertRaises(_born.BornDomainError):
+            self._deep_refuse_gate()
+
+    def _deep_refuse_gate(self) -> None:
+        gamma = 1.02  # gamma_p = 1.02: past guard B, below the inner-edge root.
+        y1 = SADDLE_FENCE_ANNULUS_ABSY * math.cos(SADDLE_FENCE_THETA)
+        y2 = SADDLE_FENCE_ANNULUS_ABSY * math.sin(SADDLE_FENCE_THETA)
+        _born.born_gate(SADDLE_FENCE_W, y1, y2, gamma, 0.0, 0.0)
+
+
+# --------------------------------------------------------------------------- #
+# Saddle Acceptance #4/#5/#6 constants (measured, not brief-trusted).          #
+# --------------------------------------------------------------------------- #
+
+#: Saddle band-split witness (Acceptance #4): a clearly-exterior macro-saddle
+#: config (gamma_p = 1.2 > 1, |y| = 3.05 just outside the 3.0 inner edge).
+SADDLE_SPLIT_GAMMA = 1.2
+SADDLE_SPLIT_THETA = 0.3
+SADDLE_SPLIT_ABSY = 3.05
+#: Frequencies at which ``w * Delta_tau < RHO_END`` -- the gate SERVES (measured
+#: Delta_tau = 16.25, so w * Delta_tau = 0.81 / 1.63 < 4).  The retired
+#: ``w * r0_sq`` currency (r0_sq = 212.4) puts BOTH above 4 -> would refuse.
+SADDLE_SPLIT_SERVE_WS = (0.05, 0.1)
+#: Frequencies at which ``w * Delta_tau >= RHO_END`` -- the gate REFUSES.
+SADDLE_SPLIT_REFUSE_WS = (0.5, 1.0, 5.0)
+#: Saddle sweep over which ``r0_sq / (2 Delta_tau)`` is measured; the two split
+#: currencies must disagree by more than two orders of magnitude somewhere on
+#: it (measured span ~3.9e4x, brief's ">100x").
+SADDLE_SPLIT_SPAN_GAMMAS = tuple(float(g) for g in np.linspace(1.05, 2.5, 30))
+SADDLE_SPLIT_SPAN_THETAS = tuple(
+    float(t) for t in np.linspace(0.05, math.pi / 2 - 0.05, 15))
+SADDLE_SPLIT_SPAN_ABSY = 3.05
+#: Minimum span factor of ``r0_sq / (2 Delta_tau)`` across the saddle sweep.
+SADDLE_SPLIT_SPAN_MIN = 100.0
+
+#: Ghost-refused node-count witness (Acceptance #5): saddle gamma_p = 1.6,
+#: |y| = 4.243, w = 5, entirely above-split azimuthal arc.
+SADDLE_GHOST_GAMMA = 1.6
+SADDLE_GHOST_ABSY = 4.243
+#: Two-point frequency grid; index 1 (w = 5.0) is the served above-split point.
+SADDLE_GHOST_WGRID = (4.9, 5.0)
+SADDLE_GHOST_WIDX = 1
+SADDLE_GHOST_NTHETA = 65
+#: Azimuthal arc restricted so the WHOLE sweep stays above the band split (the
+#: ghost is admitted at every point); a wider arc dips below-split near
+#: theta ~ 0.9 and contaminates both variants (compaction finding).
+SADDLE_GHOST_THETA_RANGE = (0.02, 0.6)
+#: Absolute residual resolution target (brief's eps = 4e-3).
+SADDLE_GHOST_EPS = 4e-3
+#: The shipped ppGO-only residual splines trivially (measured N = 2); gate at a
+#: factor ~2 of the brief's N = 4.
+SADDLE_GHOST_PPGO_NODE_MAX = 4
+#: Admitting the complex ghost inflates the residual (measured ~300x); gate a
+#: conservative order of magnitude.
+SADDLE_GHOST_INFLATION_MIN = 10.0
+#: The shipped saddle carrier must equal a zero-envelope FARFIELD_KERNEL_SUM
+#: reconstruction to round-off (WP2 wiring: ghost REFUSED on the saddle).
+SADDLE_GHOST_WIRING_TOL = 1e-12
+
+#: Low-band residual node-count witnesses (Acceptance #6).
+SADDLE_NODE_BAND = (1e-3, 0.05)
+SADDLE_NODE_GAMMAS = (1.1, 1.3, 1.5)
+#: Relative residual resolution target (fraction of ``max|F_exact|``).
+SADDLE_NODE_EPS_FRAC = 4e-3
+#: Node ceiling in every direction (factor ~2 of the brief's N = 4).
+SADDLE_NODE_MAX = 8
+SADDLE_NODE_LOGW_N = 17
+SADDLE_NODE_LOGW_ABSY = 3.5
+SADDLE_NODE_LOGW_THETA = 0.5
+SADDLE_NODE_RAD_N = 17
+SADDLE_NODE_RAD_W = 0.01
+SADDLE_NODE_RAD_THETA = 0.4
+SADDLE_NODE_RAD_ABSY_RANGE = (3.05, 4.24)
+#: The AZIMUTHAL sweep is NON-NEGOTIABLE (F025: the positive-branch a0
+#: pathology was azimuthal and a radial-only sweep hid it for two rounds).
+SADDLE_NODE_AZ_N = 65
+SADDLE_NODE_AZ_W = 0.01
+SADDLE_NODE_AZ_ABSY = 3.6
+SADDLE_NODE_AZ_THETA_RANGE = (0.05, math.pi / 2 - 0.05)
+
+#: Self-falsification foil: a mis-keyed split (``split_constant = 0.0`` forces
+#: the ppGO branch onto the whole low band); the residual balloons (measured
+#: ~5.6e5x), proving the node-count gate can go RED.
+SADDLE_FOIL_SPLIT_CONSTANT = 0.0
+SADDLE_FOIL_INFLATION_MIN = 100.0
+
+# --------------------------------------------------------------------------- #
+# Acceptance #7 -- census 'born' SADDLE arm (reachable-red).
+# --------------------------------------------------------------------------- #
+#: Macro-saddle annulus draw the saddle Born arm must classify as 'born'.
+#: gamma = 1.2 -> det A = 1 - 1.2**2 = -0.44 < 0 (macro image is a saddle, so
+#: the positive-parity arm's ``det A > 0`` first clause fails outright), sits in
+#: the exterior fence band 1.0502342 < gamma < 3, and |y| = 3.5 lands in the
+#: annulus (3.0, 3 sqrt(2) = 4.2426].  saddle_caustic_max_y(1.2, 0) = 1.618 < 3
+#: (measured) so the whole caustic is interior and the annulus is exterior.
+SADDLE_CENSUS_GAMMA = 1.2
+SADDLE_CENSUS_Y1_EIG = 3.5
+SADDLE_CENSUS_Y2_EIG = 0.0
+#: theta is arbitrary here: with y2_eig = 0 the eigenframe radius (and hence the
+#: annulus test) is fixed by y1_eig, and the empty chart list means theta never
+#: reaches a chart-serve predicate.
+SADDLE_CENSUS_THETA = 0.4
+#: Non-annulus saddle draw (|y| = 2.0 < 3): outside the born annulus, so the
+#: saddle arm must NOT claim it (it falls through to 'out-of-box').
+SADDLE_CENSUS_NONANNULUS_Y1_EIG = 2.0
+#: Small saddle-annulus tally grid.  All gammas are macro-saddle (>1, det A < 0)
+#: and inside the fence band with saddle_caustic_max_y < 3 (measured: 2.08, 1.62,
+#: 1.81, 1.98, 2.15); all radii lie in (3, 4.2426].  5 x 3 x 2 = 30 closed-form
+#: classifications, each on an empty chart list -- sub-millisecond, no engine.
+SADDLE_CENSUS_GRID_GAMMAS = (1.1, 1.2, 1.4, 1.6, 1.8)
+SADDLE_CENSUS_GRID_ABSY = (3.05, 3.5, 4.2)
+SADDLE_CENSUS_GRID_THETAS = (0.2, 0.9)
+
+
+
+def _polar_source(absy: float, theta: float) -> np.ndarray:
+    """Cartesian source position ``(absy cos, absy sin)`` for a polar config."""
+    return np.array([absy * math.cos(theta), absy * math.sin(theta)])
+
+
+@functools.lru_cache(maxsize=1)
+def _saddle_ghost_sweep() -> types.SimpleNamespace:
+    """Build the Acceptance #5 above-split azimuthal sweep once (cached).
+
+    Returns both residual arrays -- variant A (the SHIPPED ppGO-only saddle
+    carrier, complex ghost REFUSED) and variant B (the same reconstruction but
+    with the admitted complex ghost added, i.e. the positive-parity
+    else-branch) -- against the independent ``operator.F_op`` exact oracle, plus
+    the geometry bookkeeping needed for the anti-vacuity guards.  The residual
+    is a direct subtraction ``exact_total - carrier`` (both in the min-relative
+    delay frame), exactly what a driver-trained chart would spline.
+    """
+    wgrid = np.array(SADDLE_GHOST_WGRID, dtype=float)
+    widx = SADDLE_GHOST_WIDX
+    thetas = np.linspace(*SADDLE_GHOST_THETA_RANGE, SADDLE_GHOST_NTHETA)
+    channels_obj = channels.ChangRefsdalChannels(wgrid)
+    channels_obj.reset()
+
+    resid_ppgo = np.empty(SADDLE_GHOST_NTHETA, dtype=complex)
+    resid_ghost = np.empty(SADDLE_GHOST_NTHETA, dtype=complex)
+    all_above = True
+    ghost_admitted = True
+    wiring_max_diff = 0.0
+    for idx, theta in enumerate(thetas):
+        source = _polar_source(SADDLE_GHOST_ABSY, theta)
+        part = channels_obj.evaluate(
+            gamma=SADDLE_GHOST_GAMMA, y=source, beta=0.0, kappa=0.0)
+        real_delays = part.delays[np.asarray(part.real_mask, dtype=bool)]
+        delta_tau = float(real_delays.max() - real_delays.min())
+        if wgrid[widx] * delta_tau < channels.RHO_END:
+            all_above = False
+
+        # Variant A: the shipped saddle carrier (ppGO-only).
+        carrier_ppgo = channels.born_carrier_from_partition(part)
+
+        # Wiring check: the shipped saddle above-split carrier must equal a
+        # zero-envelope FARFIELD_KERNEL_SUM reconstruction (no ghost term).
+        _k, ppgo_manual = channels.reconstruct_farfield(
+            wgrid, np.zeros(wgrid.shape, dtype=complex), part.delays,
+            part.saddle_kernels, part.real_mask,
+            channels.FARFIELD_KERNEL_SUM, part.t_min)
+        wiring_max_diff = max(
+            wiring_max_diff, abs(carrier_ppgo[widx] - ppgo_manual[widx]))
+
+        # Variant B: admit the complex ghost (the positive-parity else-branch).
+        try:
+            ghost = channels.farfield_ghost_term(
+                wgrid, source, part.matrix,
+                t_min=part.t_min, real_images=part.images)
+            envelope = ghost * np.exp(1j * channels._frame_phase(
+                wgrid, part.t_min))
+        except geometry.LensDomainError:
+            ghost_admitted = False
+            envelope = np.zeros(wgrid.shape, dtype=complex)
+        _k2, ppgo_plus_ghost = channels.reconstruct_farfield(
+            wgrid, envelope, part.delays, part.saddle_kernels, part.real_mask,
+            channels.FARFIELD_KERNEL_SUM_MINUS_GHOST, part.t_min)
+
+        resid_ppgo[idx] = part.exact_total[widx] - carrier_ppgo[widx]
+        resid_ghost[idx] = part.exact_total[widx] - ppgo_plus_ghost[widx]
+
+    return types.SimpleNamespace(
+        thetas=thetas,
+        resid_ppgo=resid_ppgo,
+        resid_ghost=resid_ghost,
+        all_above=all_above,
+        ghost_admitted=ghost_admitted,
+        wiring_max_diff=wiring_max_diff)
+
+
+def _plot_saddle_split_currency(axis) -> None:
+    """Diagnostic: w_split predicted by each currency vs theta (gamma=1.2)."""
+    thetas = np.linspace(0.05, math.pi / 2 - 0.05, 40)
+    w_tau = np.empty_like(thetas)
+    w_r0 = np.empty_like(thetas)
+    for idx, theta in enumerate(thetas):
+        _n, delta_tau, r0_sq = _delta_tau_and_r0_sq(
+            SADDLE_SPLIT_GAMMA, SADDLE_SPLIT_ABSY, theta)
+        w_tau[idx] = SPLIT_CONSTANT / delta_tau
+        w_r0[idx] = SPLIT_CONSTANT / r0_sq
+    axis.plot(thetas, w_tau, label='w_split = RHO_END / Delta_tau (shipped)')
+    axis.plot(thetas, w_r0, '--', label='w_split = RHO_END / r0_sq (retired)')
+    axis.set_yscale('log')
+    axis.set_xlabel('theta [rad]')
+    axis.set_ylabel('predicted split frequency w_split')
+    axis.set_title('Saddle band-split currency (gamma=1.2, |y|=3.05)')
+    axis.legend(fontsize=7)
+
+
+def _plot_saddle_ghost_residual(axis) -> None:
+    """Diagnostic: overlay ppGO-only vs ghost-admitted residual vs theta."""
+    sweep = _saddle_ghost_sweep()
+    axis.plot(sweep.thetas, np.abs(sweep.resid_ppgo),
+              label='|resid| ppGO-only (shipped)')
+    axis.plot(sweep.thetas, np.abs(sweep.resid_ghost), '--',
+              label='|resid| ghost-admitted (refused)')
+    axis.set_yscale('log')
+    axis.set_xlabel('theta [rad]')
+    axis.set_ylabel('|F_exact - carrier|')
+    axis.set_title('Saddle ghost inflation (gamma=1.6, |y|=4.243, w=5)')
+    axis.legend(fontsize=7)
+
+
+class SaddleBandSplitCurrencyTestCase(BornTestCase):
+    """Acceptance #4: the saddle band split keys on w*Delta_tau, not w*r0_sq.
+
+    Pure geometry + the real ``_born.born_gate`` -- no wave-optics oracle
+    (fast).  At the clearly-exterior saddle witness (gamma_p = 1.2, |y| = 3.05)
+    the two currencies give OPPOSITE split decisions at low w, and the gate
+    follows ``w * Delta_tau``: it SERVES the low-w points the retired
+    ``w * r0_sq`` currency would refuse, and REFUSES once ``w * Delta_tau``
+    crosses ``RHO_END`` (reachable-red against the retired currency).
+    """
+
+    def test_gate_refuses_above_the_true_split(self) -> None:
+        # Above the w*Delta_tau split the two real images are resolved: the
+        # Born lead-only carrier is superseded, so the gate must refuse.
+        y1, y2 = _polar_source(SADDLE_SPLIT_ABSY, SADDLE_SPLIT_THETA)
+        for w in SADDLE_SPLIT_REFUSE_WS:
+            self.comparisons += 1
+            with self.subTest(w=w):
+                with self.assertRaises(_born.BornDomainError):
+                    _born.born_gate(
+                        w, y1, y2, SADDLE_SPLIT_GAMMA, 0.0, 0.0)
+
+    def test_gate_serves_below_split_where_r0_currency_would_refuse(
+            self) -> None:
+        # Reachable-red: at these low w the config is BELOW the w*Delta_tau
+        # split (gate serves) but ABOVE the retired w*r0_sq split (>= RHO_END),
+        # so a gate keyed on w*r0_sq would wrongly refuse.  Serving here proves
+        # the currency is w*Delta_tau.
+        _n, delta_tau, r0_sq = _delta_tau_and_r0_sq(
+            SADDLE_SPLIT_GAMMA, SADDLE_SPLIT_ABSY, SADDLE_SPLIT_THETA)
+        y1, y2 = _polar_source(SADDLE_SPLIT_ABSY, SADDLE_SPLIT_THETA)
+        for w in SADDLE_SPLIT_SERVE_WS:
+            self.comparisons += 1
+            with self.subTest(w=w):
+                # The retired currency puts this config above the split ...
+                self.assertGreaterEqual(
+                    w * r0_sq, SPLIT_CONSTANT,
+                    f'w*r0_sq = {w * r0_sq:.3f} should be >= RHO_END '
+                    f'(retired currency would refuse)')
+                # ... but the true w*Delta_tau currency keeps it below ...
+                self.assertLess(
+                    w * delta_tau, SPLIT_CONSTANT,
+                    f'w*Delta_tau = {w * delta_tau:.3f} should be < RHO_END')
+                # ... and the gate SERVES (no refusal) -- follows w*Delta_tau.
+                _born.born_gate(w, y1, y2, SADDLE_SPLIT_GAMMA, 0.0, 0.0)
+
+    def test_currencies_disagree_by_more_than_two_orders(self) -> None:
+        # r0_sq / (2 Delta_tau) spans far more than 100x across the saddle
+        # (F024: the two currencies coincide only on the positive branch),
+        # so the split-frequency prediction differs by > two orders of
+        # magnitude somewhere on the sweep.
+        ratios = []
+        for gamma in SADDLE_SPLIT_SPAN_GAMMAS:
+            for theta in SADDLE_SPLIT_SPAN_THETAS:
+                n_img, delta_tau, r0_sq = _delta_tau_and_r0_sq(
+                    gamma, SADDLE_SPLIT_SPAN_ABSY, theta)
+                if n_img >= 2 and delta_tau > 0.0:
+                    ratios.append(r0_sq / (2.0 * delta_tau))
+        self.assertGreater(
+            len(ratios), 0, 'saddle sweep produced no two-image configs')
+        span = max(ratios) / min(ratios)
+        self.comparisons += 1
+        self.assertGreater(
+            span, SADDLE_SPLIT_SPAN_MIN,
+            f'r0_sq/(2 Delta_tau) span {span:.1f}x should exceed '
+            f'{SADDLE_SPLIT_SPAN_MIN}x -- the two split currencies disagree '
+            f'by more than two orders of magnitude on the saddle')
+        _save_plot(
+            'saddle_split_currency.png', _plot_saddle_split_currency)
+
+
+class SaddleGhostRefusedNodeCountTestCase(BornTestCase):
+    """Acceptance #5: the shipped saddle carrier refuses the complex ghost.
+
+    Above-split azimuthal arc (gamma_p = 1.6, |y| = 4.243, w = 5): the SHIPPED
+    ppGO-only carrier's residual against the independent ``operator.F_op``
+    oracle splines trivially, while admitting the complex ghost inflates the
+    residual and its azimuthal node count -- the exact F024 signature.  The
+    shipped path must be the ppGO-only one (WP2: ghost REFUSED on the saddle).
+    """
+
+    def test_sweep_is_entirely_above_split_with_ghost_admissible(self) -> None:
+        # Premise guard: every point of the arc is above the band split and the
+        # complex ghost IS admissible there (so variant B genuinely adds it).
+        sweep = _saddle_ghost_sweep()
+        self.comparisons += 1
+        self.assertTrue(
+            sweep.all_above,
+            'the azimuthal arc must stay above the band split throughout')
+        self.assertTrue(
+            sweep.ghost_admitted,
+            'the complex ghost must be admissible on the arc (else variant B '
+            'is not a real ghost-admitted foil)')
+
+    def test_shipped_saddle_carrier_is_ppgo_only(self) -> None:
+        # WP2 wiring: the shipped saddle above-split carrier equals a
+        # zero-envelope FARFIELD_KERNEL_SUM reconstruction to round-off -- pure
+        # two-real-image ppGO, no ghost envelope.
+        sweep = _saddle_ghost_sweep()
+        self.assert_within(
+            sweep.wiring_max_diff, SADDLE_GHOST_WIRING_TOL,
+            'shipped saddle carrier vs zero-envelope FARFIELD_KERNEL_SUM')
+
+    def test_ppgo_only_residual_splines_cheaply(self) -> None:
+        # The shipped ppGO-only residual needs few azimuthal nodes.
+        sweep = _saddle_ghost_sweep()
+        nodes = _greedy_node_count(
+            sweep.thetas, sweep.resid_ppgo, SADDLE_GHOST_EPS)
+        self.comparisons += 1
+        self.assertLessEqual(
+            nodes, SADDLE_GHOST_PPGO_NODE_MAX,
+            f'ppGO-only azimuthal node count {nodes} > '
+            f'{SADDLE_GHOST_PPGO_NODE_MAX}')
+
+    def test_admitting_ghost_inflates_residual_and_node_count(self) -> None:
+        # Reachable-red: admitting the ghost inflates both the residual
+        # magnitude and its azimuthal node count -- why the saddle branch
+        # refuses it.
+        sweep = _saddle_ghost_sweep()
+        nodes_ppgo = _greedy_node_count(
+            sweep.thetas, sweep.resid_ppgo, SADDLE_GHOST_EPS)
+        nodes_ghost = _greedy_node_count(
+            sweep.thetas, sweep.resid_ghost, SADDLE_GHOST_EPS)
+        peak_ppgo = float(np.max(np.abs(sweep.resid_ppgo)))
+        peak_ghost = float(np.max(np.abs(sweep.resid_ghost)))
+        inflation = peak_ghost / max(peak_ppgo, 1e-30)
+        self.comparisons += 1
+        self.assertGreater(
+            nodes_ghost, nodes_ppgo,
+            f'ghost-admitted node count {nodes_ghost} should exceed the '
+            f'ppGO-only {nodes_ppgo}')
+        self.assertGreater(
+            inflation, SADDLE_GHOST_INFLATION_MIN,
+            f'ghost residual inflation {inflation:.1f}x should exceed '
+            f'{SADDLE_GHOST_INFLATION_MIN}x')
+        _save_plot(
+            'saddle_ghost_residual.png', _plot_saddle_ghost_residual)
+
+
+class SaddleLowBandResidualNodeCountTestCase(BornTestCase):
+    """Acceptance #6: the saddle low-band residual splines cheaply.
+
+    Narrow low band [1e-3, 0.05] at saddle gamma in {1.1, 1.3, 1.5}: the
+    demodulated residual ``F_exact - lead-only carrier`` is counted in log_w,
+    along a RADIAL |y| sweep, AND along an AZIMUTHAL theta sweep.  The
+    azimuthal sweep is NON-NEGOTIABLE (F025: the positive-branch a0 pathology
+    was azimuthal and a radial-only sweep hid it for two rounds).  The full
+    higher bands are DRIVER-verified post-build under TRAIN_TIER.
+    """
+
+    def _lead_residual_at_fixed_w(self, w: float, points: np.ndarray,
+                                  gamma: float) -> tuple[np.ndarray, float]:
+        """Demodulated ``F_exact - lead`` residual at fixed w (saddle lead)."""
+        return _demodulated_residual(w, points, gamma, _born.born_lead_carrier)
+
+    def test_low_band_log_w_node_count(self) -> None:
+        w_grid = np.geomspace(*SADDLE_NODE_BAND, SADDLE_NODE_LOGW_N)
+        y1, y2 = _polar_source(SADDLE_NODE_LOGW_ABSY, SADDLE_NODE_LOGW_THETA)
+        for gamma in SADDLE_NODE_GAMMAS:
+            resid = np.empty(SADDLE_NODE_LOGW_N, dtype=complex)
+            fmax = 0.0
+            for idx, w in enumerate(w_grid):
+                f_exact = _f_exact(w, y1, y2, gamma)
+                f_lead = _born.born_lead_carrier(w, y1, y2, gamma, 0.0, 0.0)
+                lead_phase = np.exp(-1j * np.angle(f_lead))
+                resid[idx] = (f_exact - f_lead) * lead_phase
+                fmax = max(fmax, abs(f_exact))
+            nodes = _greedy_node_count(
+                np.log(w_grid), resid, SADDLE_NODE_EPS_FRAC * fmax)
+            self.comparisons += 1
+            with self.subTest(gamma=gamma):
+                self.assertLessEqual(
+                    nodes, SADDLE_NODE_MAX,
+                    f'saddle lead log_w node count {nodes} > '
+                    f'{SADDLE_NODE_MAX}')
+
+    def test_radial_node_count(self) -> None:
+        ys = np.linspace(*SADDLE_NODE_RAD_ABSY_RANGE, SADDLE_NODE_RAD_N)
+        points = np.column_stack(
+            [ys * math.cos(SADDLE_NODE_RAD_THETA),
+             ys * math.sin(SADDLE_NODE_RAD_THETA)])
+        for gamma in SADDLE_NODE_GAMMAS:
+            resid, fmax = self._lead_residual_at_fixed_w(
+                SADDLE_NODE_RAD_W, points, gamma)
+            nodes = _greedy_node_count(ys, resid, SADDLE_NODE_EPS_FRAC * fmax)
+            self.comparisons += 1
+            with self.subTest(gamma=gamma):
+                self.assertLessEqual(
+                    nodes, SADDLE_NODE_MAX,
+                    f'saddle lead radial node count {nodes} > '
+                    f'{SADDLE_NODE_MAX}')
+
+    def test_azimuthal_node_count(self) -> None:
+        # NON-NEGOTIABLE (F025): sweep theta at fixed |y| in the annulus.
+        thetas = np.linspace(*SADDLE_NODE_AZ_THETA_RANGE, SADDLE_NODE_AZ_N)
+        points = np.column_stack(
+            [SADDLE_NODE_AZ_ABSY * np.cos(thetas),
+             SADDLE_NODE_AZ_ABSY * np.sin(thetas)])
+        for gamma in SADDLE_NODE_GAMMAS:
+            # Premise guard: the whole azimuthal arc stays below the band split
+            # (so we are testing the lead-only carrier's regime).
+            below_all = True
+            for theta in thetas:
+                n_img, delta_tau, _r0 = _delta_tau_and_r0_sq(
+                    gamma, SADDLE_NODE_AZ_ABSY, theta)
+                if n_img >= 2 and SADDLE_NODE_AZ_W * delta_tau >= SPLIT_CONSTANT:
+                    below_all = False
+            resid, fmax = self._lead_residual_at_fixed_w(
+                SADDLE_NODE_AZ_W, points, gamma)
+            nodes = _greedy_node_count(thetas, resid, SADDLE_NODE_EPS_FRAC * fmax)
+            self.comparisons += 1
+            with self.subTest(gamma=gamma):
+                self.assertTrue(
+                    below_all,
+                    'azimuthal arc must stay below the band split')
+                self.assertLessEqual(
+                    nodes, SADDLE_NODE_MAX,
+                    f'saddle lead azimuthal node count {nodes} > '
+                    f'{SADDLE_NODE_MAX}')
+
+
+class SaddleBandSplitSelfFalsificationTestCase(BornTestCase):
+    """Reachable-red: the saddle #4/#6 gates CAN go red under a mis-keyed split.
+
+    A numerical suite without a self-falsification class is not finished: these
+    foils prove the anti-vacuity comparisons above are not vacuously green.
+    """
+
+    def test_r0_currency_would_flip_the_served_config(self) -> None:
+        # If the split were keyed on w*r0_sq, the low-w served witness would be
+        # classified ABOVE the split (refused) -- the opposite of the shipped
+        # w*Delta_tau decision.  A foil gate built on w*r0_sq refuses where the
+        # real gate serves.
+        _n, delta_tau, r0_sq = _delta_tau_and_r0_sq(
+            SADDLE_SPLIT_GAMMA, SADDLE_SPLIT_ABSY, SADDLE_SPLIT_THETA)
+        w = SADDLE_SPLIT_SERVE_WS[0]
+
+        def _r0_keyed_gate_refuses(freq: float) -> bool:
+            return freq * r0_sq >= SPLIT_CONSTANT
+
+        def _tau_keyed_gate_refuses(freq: float) -> bool:
+            return freq * delta_tau >= SPLIT_CONSTANT
+
+        self.comparisons += 1
+        self.assertTrue(
+            _r0_keyed_gate_refuses(w) and not _tau_keyed_gate_refuses(w),
+            f'at w={w} the r0-keyed foil must refuse '
+            f'(w*r0_sq={w * r0_sq:.3f}) while the shipped tau-keyed gate '
+            f'serves (w*Delta_tau={w * delta_tau:.3f})')
+
+    def test_forcing_above_split_ppgo_balloons_the_low_band_residual(
+            self) -> None:
+        # Mis-keying the split (split_constant=0.0 forces the ppGO branch onto
+        # the whole low band) inflates the residual by orders of magnitude,
+        # proving the #6 node-count gate has teeth: the 1/w**2 ppGO kernel
+        # blows up below w ~ 0.05.
+        w_grid = np.geomspace(*SADDLE_NODE_BAND, SADDLE_NODE_LOGW_N)
+        source = _polar_source(
+            SADDLE_NODE_LOGW_ABSY, SADDLE_NODE_LOGW_THETA)
+        channels_obj = channels.ChangRefsdalChannels(w_grid)
+        channels_obj.reset()
+        part = channels_obj.evaluate(
+            gamma=SADDLE_NODE_GAMMAS[1], y=source, beta=0.0, kappa=0.0)
+
+        carrier_shipped = channels.born_carrier_from_partition(part)
+        carrier_forced = channels.born_carrier_from_partition(
+            part, split_constant=SADDLE_FOIL_SPLIT_CONSTANT)
+        peak_shipped = float(np.max(np.abs(part.exact_total - carrier_shipped)))
+        peak_forced = float(np.max(np.abs(part.exact_total - carrier_forced)))
+        inflation = peak_forced / max(peak_shipped, 1e-30)
+
+        self.comparisons += 1
+        self.assertGreater(
+            inflation, SADDLE_FOIL_INFLATION_MIN,
+            f'forced-ppGO low-band residual inflation {inflation:.1f}x should '
+            f'exceed {SADDLE_FOIL_INFLATION_MIN}x (the shipped lead-only '
+            f'carrier is what keeps the residual small)')
+
+def _classify_saddle(gamma: float, y1_eig: float, *,
+                     disable_saddle_arm: bool = False) -> str:
+    """Classify a fall-through draw via the production census predicate.
+
+    A stateless ``surrogate`` with no charts isolates the analytic Born arms
+    (`_born`) from the chart-serve relaxation probes, exactly as
+    `BornCensusReachableRedTestCase` does for the positive-parity arm.
+
+    When ``disable_saddle_arm`` is set, `_born.saddle_caustic_max_y` is patched
+    to ``+inf`` so the saddle branch's ``max_y < ANNULUS_INNER_RADIUS`` clause
+    is always False -- reproducing the PRE-BUILD positive-only predicate, in
+    which the saddle arm simply did not exist.
+    """
+    surrogate = types.SimpleNamespace(charts=[])
+    kwargs = dict(
+        gamma=gamma, log_w_min=-5.0, log_w_max=-1.0, eta=1.0,
+        theta=SADDLE_CENSUS_THETA, image_count=2, y1_eig=y1_eig,
+        y2_eig=SADDLE_CENSUS_Y2_EIG, dropped_slivers=(), kappa=0.0)
+    if not disable_saddle_arm:
+        return surrogate_census.classify_fallthrough(surrogate, **kwargs)
+    with mock.patch.object(
+            _born, 'saddle_caustic_max_y', lambda gamma, kappa: math.inf):
+        return surrogate_census.classify_fallthrough(surrogate, **kwargs)
+
+
+def _plot_saddle_census_tally(axis, tally: dict[str, int]) -> None:
+    """Bar chart of the saddle-annulus category tally (diagnostic only)."""
+    labels = list(tally)
+    axis.bar(labels, [tally[k] for k in labels], color='steelblue')
+    axis.set_ylabel('draws')
+    axis.set_title('saddle-annulus fall-through tally (all must be born)')
+
+
+class SaddleCensusReachableRedTestCase(BornTestCase):
+    """Acceptance #7: a macro-saddle annulus draw classifies 'born'.
+
+    The saddle arm mirrors the positive-parity arm but keys the exterior fence
+    on `_born.saddle_caustic_max_y` (single-source with `_born.born_gate`).  The
+    reachable-red foil disables that arm and shows the SAME draw falls through
+    to 'out-of-box' -- because ``det A = 1 - gamma**2 < 0`` fails the positive
+    arm's first clause outright, there is nothing else to catch it.
+    """
+
+    def test_saddle_annulus_draw_classifies_born(self) -> None:
+        # Guard the premise: this witness is genuinely a macro-saddle
+        # (det A < 0), not the positive-parity arm under test elsewhere.
+        det_a_macro = (1.0 - 0.0) ** 2 - SADDLE_CENSUS_GAMMA ** 2
+        self.assertLess(det_a_macro, 0.0,
+                        'witness must be a macro-saddle (det A < 0)')
+        category = _classify_saddle(SADDLE_CENSUS_GAMMA, SADDLE_CENSUS_Y1_EIG)
+        self.comparisons += 1
+        self.assertEqual(category, CENSUS_BORN_CATEGORY)
+
+    def test_prebuild_positive_only_predicate_returns_out_of_box(self) -> None:
+        # Reachable-red: with the saddle arm removed (pre-build positive-only
+        # predicate) the identical saddle draw fails the positive arm's
+        # det A > 0 clause and falls through to 'out-of-box'.
+        category = _classify_saddle(
+            SADDLE_CENSUS_GAMMA, SADDLE_CENSUS_Y1_EIG, disable_saddle_arm=True)
+        self.comparisons += 1
+        self.assertEqual(category, CENSUS_FALLBACK_CATEGORY)
+
+    def test_non_annulus_saddle_draw_not_born(self) -> None:
+        # A |y| = 2.0 < 3 saddle draw is inside the annulus inner edge: the
+        # saddle arm's radius clause fails, so it must NOT be claimed 'born'.
+        category = _classify_saddle(
+            SADDLE_CENSUS_GAMMA, SADDLE_CENSUS_NONANNULUS_Y1_EIG)
+        self.comparisons += 1
+        self.assertNotEqual(category, CENSUS_BORN_CATEGORY)
+        self.assertEqual(category, CENSUS_FALLBACK_CATEGORY)
+
+    def test_saddle_annulus_grid_all_born_none_out_of_box(self) -> None:
+        # Diagnostic tally: every in-band saddle-annulus draw lands in 'born',
+        # and none fall through to 'out-of-box'.
+        tally: dict[str, int] = {}
+        for gamma, absy, theta in itertools.product(
+                SADDLE_CENSUS_GRID_GAMMAS, SADDLE_CENSUS_GRID_ABSY,
+                SADDLE_CENSUS_GRID_THETAS):
+            with self.subTest(gamma=gamma, absy=absy, theta=theta):
+                # y2_eig = 0 pins |y| = absy; theta is carried only for the
+                # (empty) chart-serve probes, so re-key y1_eig = absy.
+                category = _classify_saddle(gamma, absy)
+                self.comparisons += 1
+                self.assertEqual(category, CENSUS_BORN_CATEGORY)
+                tally[category] = tally.get(category, 0) + 1
+        _save_plot('saddle_census_tally.png',
+                   lambda ax: _plot_saddle_census_tally(ax, tally))
+        self.assertNotIn(CENSUS_FALLBACK_CATEGORY, tally)
+        self.assertEqual(sum(tally.values()),
+                         len(SADDLE_CENSUS_GRID_GAMMAS)
+                         * len(SADDLE_CENSUS_GRID_ABSY)
+                         * len(SADDLE_CENSUS_GRID_THETAS))
+
+
+class SaddleCensusSelfFalsificationTestCase(BornTestCase):
+    """Reachable-red: the saddle census arm CAN go red, so #7 is not vacuous.
+
+    A numerical/decision suite without a self-falsification class is not
+    finished.  These foils prove the 'born' verdicts above are not trivially
+    true for every input the arm sees.
+    """
+
+    def test_pushing_gamma_above_the_fence_upper_edge_refuses(self) -> None:
+        # gamma >= 3 breaches the exterior fence (saddle_caustic_max_y >= 3),
+        # so an otherwise-identical saddle annulus draw is NOT 'born'.
+        self.assertGreaterEqual(
+            _born.saddle_caustic_max_y(3.0, 0.0), _born.ANNULUS_INNER_RADIUS,
+            'premise: gamma = 3 caustic reaches the annulus inner edge')
+        category = _classify_saddle(3.0, SADDLE_CENSUS_Y1_EIG)
+        self.comparisons += 1
+        self.assertNotEqual(category, CENSUS_BORN_CATEGORY)
+
+    def test_positive_parity_gamma_takes_the_positive_arm_not_saddle(
+            self) -> None:
+        # A det A > 0 draw (gamma < 1) is served by the POSITIVE arm; disabling
+        # the SADDLE arm must leave that verdict untouched -- proving the two
+        # arms are independent and the saddle patch is not a global kill-switch.
+        pos_gamma = CENSUS_GAMMA  # 0.45 < 3/4 fence, det A > 0.
+        with_saddle = _classify_saddle(pos_gamma, CENSUS_Y1_EIG)
+        without_saddle = _classify_saddle(
+            pos_gamma, CENSUS_Y1_EIG, disable_saddle_arm=True)
+        self.comparisons += 1
+        self.assertEqual(with_saddle, CENSUS_BORN_CATEGORY)
+        self.assertEqual(without_saddle, CENSUS_BORN_CATEGORY)
+
 
 
 if __name__ == '__main__':

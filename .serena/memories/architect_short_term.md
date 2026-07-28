@@ -1,5 +1,29 @@
 # Architect Short-Term Observations
 
+## Saddle Born carrier build (brief_saddle_born_carrier, 2026-07-28)
+Twin of positive-parity 31ee133; ADD A BRANCH, not a mechanism. 3 Coder WPs
+(all lean per Simplifier), tests->Test Dev.
+- WP1 _born.py: _born_factors sqrt_mu=1/sqrt(ABS(det_a)) (byte-id positive);
+  born_lead_carrier applies morse=(-1j)**n_macro (n_macro=1 iff det_a<0),
+  EXACT literal -1j not cmath.exp (Prof: 6e-17 real part breaks |F| pin #2).
+  det_a=(1-kappa)^2-gamma^2 beta-independent. New helper saddle_caustic_max_y
+  (F026 closed form, max of off-axis u_c & on-axis cand, sqrt(lam) reduction).
+  born_gate: guard B -> abs(gamma_p-1)<=DELTA (two-sided wall), gamma_p<1 keeps
+  EXISTING positive fence raise verbatim, gamma_p>1 saddle fence via helper;
+  guard A shared unchanged (find_images returns exactly 2, index thm). Diagnostics
+  born_amplification/born_envelope: add fail-loud guard radicand<=0 (abs() removed
+  the implicit math.sqrt ValueError).
+- WP2 channels.born_carrier_from_partition: saddle iff det_a<0; below split
+  unchanged (born_lead_carrier auto-Morse); above split REFUSE ghost (don't call
+  farfield_ghost_term) -> FARFIELD_KERNEL_SUM + zero envelope = pure 2-image ppGO.
+  Explicit refusal comment naming underived exp(-0.5j*pi) branch ref.
+- WP3 surrogate_census.classify_fallthrough: saddle arm det_a<0 & saddle_caustic_max_y
+  <3.0 & annulus -> 'born'. Prof tols: #1 1e-13 rel, #2 1e-12 rel (phase NOT w-flat,
+  only |F| + const -i pinned), #3 1e-10 off-axis branch, #4 gamma1.2/th0.3/y3.05 dtau35.3,
+  #5 gamma1.6/y4.243/w5 N4->14 eps4e-3, #6 eps4e-3 azimuthal+radial, #7 gamma1.2/y3.5.
+  #8 driver byte-diff MUST include a positive cfg through new diagnostic guard.
+
+
 ## Born band-split RE-ISSUE (2026-07-28, F025 supersedes earlier brief)
 F025 OVERRIDES the older "a0 in carrier" plan below. SERVE CARRIER = LEAD-ONLY
 `sqrt(mu_macro)*exp(1j*w*phi_geo)`; a0 NOT in serve path (violates F009). a0/b1
