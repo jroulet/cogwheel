@@ -1,97 +1,98 @@
-# Professor — short-term (2026-07-28: Born b1, low-w form, ladder, SADDLE)
+# Professor — short-term (2026-07-28: Born b1, low-w form, ladder, saddle,
+# F023 gap sweep)
 
-## PART A — b1 / a0 PINNED (both parities; derived + confirmed)
-`_born.py::_born_factors` placeholder `b1 = 1.0` — DISCHARGED.
-Shift `x = x0+u` in `phi = 0.5 x.A.x - x.y + 0.5|y|^2 - ln|x|`, factor
-`exp(iw phi(x0))` (== `phi_geo`), moments `<u_i u_j> = (i/w)(A^{-1})_{ij}`:
+## A — b1 / a0 CLOSED FORMS (both parities; derived + pinned vs F_op)
+    b1 = -lam*(lam + gamma*P)/detA = -lam*(2*lam*r0_sq - x0_dot_y)/(det_a*r0_sq)
+    a0 = -lam*gamma*P/detA         = -lam*(lam*r0_sq - x0_dot_y)/(det_a*r0_sq)
+    P = cos2(theta_x0 - beta);  point mass -> b1 = -1 (placeholder had the
+    WRONG SIGN).  Saddle: det_a<0 flips both.  Verified 0.01-2% at |y|=12,20.
 
-    b1 = -lam*(lam + gamma*P)/detA = -lam*S/|x0|^2
-       = -lam*(2*lam*r0_sq - x0_dot_y)/(det_a*r0_sq)
-    a0 = -lam*gamma*P/detA = -lam*(lam*r0_sq - x0_dot_y)/(det_a*r0_sq)
-    S = x0.A^{-1}.x0 ,  P = (x0.Q.x0)/|x0|^2 = cos2(theta_x0 - beta)
+## B — LOW-w FORM (derived, verified, NOT NEEDED: log_w spline absorbs it)
+    F_low = sqrt(mu_macro) e^{iwc} {1 + pi w/4
+            + i(w/2)[ln(w/2) + gamma_E + 2 ln Lambda]},  c = phi_geo + 0.5 ln r0_sq
+    Lambda = sqrt(2 detA/(lam + sqrt detA))
+Reduces to Takahashi & Nakamura 2003 Eq.(18).  T&N's "-2 phi_m" is the
+MIN-SUBTRACTED frame; my earlier "- s" was WRONG.
 
-Point mass -> b1 = -1 exactly (placeholder had the WRONG SIGN).  Pinned vs
-`F_op` to 0.01-0.9% at |y|=12,20, positive parity AND saddle (saddle:
-det_a<0 flips both signs; b1_fit/a0_fit match to 0.02-2%).
+## C — a0 MUST NEVER BE APPLIED BELOW THE SPLIT (supersedes F023's advice)
+MECHANISM (not a gamma threshold): F(w->0) = sqrt(mu_macro) EXACTLY (F009),
+but the carrier gives sqrt(mu_macro)*(1 + a0/q2r).  a0 is a RESOLVED-image
+amplitude correction (valid w*dtau >> 1); below the split it is a constant
+F009 violation of size |a0|/q2r.  b1's term carries w, vanishes correctly,
+and is harmless (but buys ~nothing).
+MEASURED, band [1e-3,0.05], kappa=0, |y| in {3.05,4.2426}, th in {0.3,0.9,1.35},
+gamma in {0.45,0.5,0.6,0.65,0.7,0.75}:
+    lead    sz 2.0e-2..5.3e-2, N(log w)=4-5
+    b1 only sz 2.1e-2..4.9e-2, N=4-5      (indistinguishable from lead)
+    a0+b1   sz 2.1e-2..1.08e-1, N=4-5     (excess tracks |a0|/q2r exactly)
+Y-AXIS (AZIMUTHAL) node counts, theta in [0.05, pi/2), 65 pts:
+    N(F) == N(lead) EXACTLY at every (gamma, w, radius) sampled:
+      g=0.45: 4,4,6,7,13,20   g=0.60: 4,4,9,9,23,33   g=0.75: 4,4,14,14,33,64
+    N(a0+b1): 10-11 (g=0.45), 17-20 (g=0.60), 33-44 (g=0.75) where N(lead)=4
+=> NO CROSSOVER GAMMA.  a0 hurts at EVERY gamma including 0.45; the penalty
+   grows 2.5x -> 5x -> 11x as gamma 0.45 -> 0.60 -> 0.75.
+METHOD ERROR THAT HID THIS IN F023: F023's y-plane counts swept |y| RADIALLY
+at fixed theta=0.3.  The a0 pathology is AZIMUTHAL (q2r depends strongly on
+theta via x0 = (y1/(1-gamma), y2/(1+gamma))).  Radial sweep at th=0.3 gave
+N=4, sz 2.4e-2; azimuthal at the same gamma gives N=11, sz 1.2e-1.
+RULE: LEAD-ONLY below the split, BOTH parities.  One rule, no branch.
 
-## PART B — LOW-w CHANG-REFSDAL FORM (derived, verified, NOT NEEDED)
-    F_low = sqrt(mu_macro) exp(iwc) {1 + pi w/4
-            + i(w/2)[ln(w/2) + gamma_E + 2 ln Lambda]} + O(w^2)
-    c = 0.5(|y|^2 - x0.y) = phi_geo + 0.5 ln r0_sq
-    Lambda = 2 sqrt(a1 a2)/(sqrt a1 + sqrt a2) = sqrt(2 detA/(lam+sqrt detA))
-Via Frullani + Legendre `Int_0^pi (P-Q cos)^{-s} = pi R^{-s} P_{-s}(P/R)`,
-`dP_nu/dnu|_0 = ln((1+z)/2)`.  `s` does NOT appear in the O(w) bracket;
-beta cancels; gamma_E and pi w/4 coefficients unchanged from the point mass.
-Reduces to Takahashi & Nakamura 2003 Eq.(18).  CORRECTION: T&N's "-2 phi_m"
-is the MIN-SUBTRACTED frame; in the absolute frame it cancels against
-e^{iw phi_m} — my earlier "- s" was WRONG.  Residual ~ 0.02 (w r0_sq)^2.
-NOT NEEDED: `w ln w = e^u u` is entire in u = ln w, so a log_w spline
-absorbs it at ZERO node cost (measured identical N at eps 4e-3..1e-5).
+## D — ASTROID EXTENT: EXACT CLOSED FORM (positive parity)
+Critical curve u = gamma cos2theta +- sqrt(1 - gamma^2 sin^2 2theta),
+u = 1/|x|^2.  On the y2 axis u = 1 - gamma, giving the outermost cusp
 
-## PART C — POSITIVE-PARITY LADDER (measured, eps = 4e-3 abs of max|F|)
-Split at `w*dtau ~ 4` (== `w*r0_sq ~ 8` there, since dtau ~ r0_sq/2).
-  [1e-3,0.05]: carrier N=4 (sz 3e-2..4e-2); ppGO DIVERGES (1e3)
-  [0.05,0.5] : carrier N=7-15; ppGO sz 1.0-2.3
-  [0.5,8]    : carrier ALONE N=161-241 (BEAT); carrier+real2nd N=4-8;
-               ppGO N=4-8 sz 2.5e-3..2.5e-2; +complex ghost 1.6e-3..1.7e-2
-Real 2nd image needs its FULL C1/C2 `image_kernel` — leading sqrt|mu| alone
-leaves a beat (my earlier 121-241-node claim was that artifact).
+    max |y| on the astroid = 2*gamma/sqrt(1-gamma)      (kappa=0)
+    general kappa: sqrt(lam) * 2*gamma'/sqrt(1-gamma'),  gamma' = gamma/lam
 
-## PART D — MACRO SADDLE (gamma > 1), exterior annulus
-Census (1,1), both Morse index 1, at every sampled annulus point for
-gamma in [1.05,1.6].  Geometry is violently anisotropic: x0_i = y_i/a_i with
-a1 = lam-gamma < 0, a2 = lam+gamma, so r0_sq swings 1700x with theta
-(3721 -> 2.2 at gamma=1.05; 25.8 -> 1.38 at gamma=1.6).  1/q2r reaches 0.73.
-- SPLIT CURRENCY: `w*dtau ~ 4` HOLDS on the saddle; `w*r0_sq` does NOT
-  (r0_sq/(2 dtau) measured 0.16 .. 35.6).  Use the two real images' Fermat
-  delay difference, which `geometry` already computes.
-- (a0,b1) ARE HARMFUL ON THE SADDLE.  |a0|,|b1| ~ 1/(gamma'-1) (a0=10.2 at
-  gamma=1.05), so a0/q2r is O(1) where q2r is small.  Measured, band
-  [1e-3,0.05]: lead-only sz 1.0e-2..7.4e-2 with N(log w)=4 AND N(theta)=4;
-  full carrier sz 1.7e-2..1.42 with N(theta)=23-65.  The carrier injects
-  theta-structure that is not in F.  USE LEAD-ONLY BELOW THE SPLIT.
-- COMPLEX GHOST IS HARMFUL ON THE SADDLE.  gamma=1.6,|y|=4.243,w=5:
-  ppGO sz 1.4e-3 N(theta)=4 -> ppGO+ghost sz 4.2e-2 N(theta)=14.  Two
-  causes: (i) the admission set flips across theta (43-54 of 65 admitted,
-  1 flip) making the served model discontinuous; (ii) `geometry.ghost_kernel`
-  pins its sqrt branch via `reference_amplitude = exp(-0.5j pi)` justified by
-  "the two real images continue into a Morse-index-1 saddle" — a POSITIVE-
-  PARITY statement.  On the saddle both real images are ALREADY index 1.
-  DO NOT ADMIT THE COMPLEX GHOST ON THE SADDLE until that branch is
-  re-derived.
-- b1 zero locus (`1 + gamma' P = 0`) is a pair of STRAIGHT RAYS through the
-  origin in the eigenframe: `y2/y1 = +- ((lam+gamma)/(gamma-lam))**1.5`
-  (verified: gamma=1.6 -> slope 9.021 -> theta_y = 1.4604 rad).  Sits within
-  0.004-0.11 rad of the positive-eigenvalue axis, i.e. inside the
-  small-q2r region.  MOOT once (a0,b1) are dropped on the saddle.
+Verified to 4 dp at gamma = 0.60/0.70/0.75/0.80/0.85 ->
+1.8974/2.5560/3.0000/3.5777/4.3894 (measured identical).
+FENCES (solve 2s^2 + R s - 2 = 0 with s = sqrt(1-gamma), R = target |y|):
+  inner edge |y| = 3.0     breached at s = 1/2            -> gamma = 3/4 EXACT
+  outer edge |y| = 3*sqrt2 breached at s = (sqrt34-3sqrt2)/4 -> gamma = 0.842329
+So the annulus is fully exterior for gamma < 3/4, STRADDLES the caustic for
+3/4 <= gamma < 0.8423, fully interior above.  (My earlier "<~0.75" was a
+geometric guess; it is exactly 3/4.)
+SADDLE analogue is NOT this formula (max is off-axis); measured extents:
+gamma 1.005->=6.0, 1.01->5.90, 1.02->3.71, 1.05->2.49, 1.10->1.99, 1.6->1.95.
 
-## PART E — THE REAL GAP IS IN gamma, NOT w  (caustic extent)
-Measured max |y| of the 4-image (caustic-interior) region, 241^2 grid:
-  SADDLE : gamma 1.005 -> >=6.00 | 1.01 -> 5.90 | 1.02 -> 3.71 |
-           1.05 -> 2.49 | 1.10 -> 1.99 | 1.30 -> 1.70 | 1.60 -> 1.95
-  POSITIVE: gamma 0.20 -> 0.40 | 0.45 -> 1.20 | 0.60 -> 1.85 | 0.75 -> 2.95 |
-           0.85 -> 4.35 | 0.90 -> 5.65 | >=0.95 -> >=6.00
-So the annulus 3.0<|y|<=4.2426 is FAR-EXTERIOR only for
-`gamma <~ 0.75` and `gamma >~ 1.03`.  For `0.75 <~ gamma <~ 1.03` it
-STRADDLES or lies INSIDE the caustic (fold crossings inside the tile;
-census (0,1,1,1)); ~17% of the prior's uniform (0,1.6) shear range.
-CAVEAT ON MY OWN EARLIER REPORT: the positive-parity ladder was measured at
-gamma in {0.2,0.25,0.3,0.45} only — it is established for gamma <~ 0.75,
-NOT for the whole prior.  The coordinator's `LobeInteriorChart` (deltoid
-interior) genuinely reaches |y| ~ 3-6 for gamma <~ 1.03 — the interior and
-exterior programs are NOT independent near the wall.
+## E — BAND SPLIT + TABLE (positive parity, gamma <= 0.75, kappa=0)
+Split `w*dtau ~ 4` HOLDS across the whole swept range; it simply moves DOWN
+in w as gamma grows because dtau grows (|y|=4.2426, th=0.3: dtau 10.8 at
+gamma=0.5 -> 19.3 at 0.75).
+  [1e-3,0.05] lead : sz 2.0e-2..5.3e-2  N(log w)=4-5   N(y-axis)=4
+  [0.05,0.5]  lead : sz 4.2e-2..1.17e-1 N(log w)=6-31  N(y-axis)=6-14
+  [0.5,8]     ppGO : sz 2.4e-3..2.0e-1  N(log w)=4-27
+DEGRADATION vs F023 (which stopped at gamma=0.45): log-w N in [0.05,0.5]
+grows 17->19->21->23->26->31 (|y|=4.2426, th=0.3) as gamma 0.5->0.75; ppGO N
+in [0.5,8] grows 12->13->15->18->21->27 (|y|=3.05, th=0.3) and ppGO size at
+|y|=3.05, th=1.35 rises 5.0e-2->9.7e-2->1.6e-1->2.0e-1->2.0e-1->1.8e-1 as the
+inner edge approaches the y2-axis cusp (which sits exactly at |y|=3.0 when
+gamma=3/4).  Gradual, no blow-up; the ladder HOLDS to gamma = 3/4.
+NOT SWEPT: kappa != 0 (production prior pins kappa=0) and beta != 0.
 
-## PART F — measurement caveat to honour
-My theta-direction node counts demodulate by the SINGLE carrier
-`exp(iw phi_geo)`.  Above the split the residual inherits the OTHER image's
-carrier (dtau varies ~25 per rad of theta, so at w=5 fringes are ~0.05 rad),
-so those counts are PESSIMISTIC.  The correct object is the SACR-C switched
-envelope, already measured elsewhere at greedy N=20-25 on saddle configs
-(see `professor/microlensing_chang_refsdal`).  Residual SIZES quoted are
-demodulation-independent and stand.
+## F — SADDLE (gamma > 1) findings
+Census (1,1) both Morse index 1 in the exterior annulus for gamma in
+[1.05,1.6].  Split currency is `w*dtau ~ 4`, NOT `w*r0_sq` (measured
+r0_sq/(2 dtau) = 0.16..35.6).  Lead-only below the split: sz 1.0e-2..7.4e-2,
+N=4 on log w AND 4 in theta.  Complex ghost is HARMFUL on the saddle
+(gamma=1.6,|y|=4.243,w=5: ppGO 1.4e-3/N=4 -> +ghost 4.2e-2/N=14): its
+admission set flips across theta, and `geometry.ghost_kernel` pins the sqrt
+branch via `reference_amplitude = exp(-0.5j pi)` justified by "the two real
+images continue into a Morse-index-1 saddle" — a POSITIVE-PARITY statement.
+REFUSE the complex ghost for det A < 0 until re-derived.
+b1 zero locus `1 + gamma' P = 0` = straight rays y2/y1 = +-((lam+gamma)/
+(gamma-lam))^1.5 in the eigenframe; moot once a0/b1 are dropped.
+
+## G — measurement caveat to honour
+Above-split theta node counts demodulate by the SINGLE carrier
+exp(iw phi_geo); the residual there inherits the other image's carrier, so
+those counts are PESSIMISTIC.  The correct object is the SACR-C switched
+envelope (measured elsewhere at greedy N=20-25 on saddle configs).  Residual
+SIZES are demodulation-independent and stand.  Below the split there is one
+stationary point, so those counts (N=4) are sound.
 
 ## Cross-references
-`professor/microlensing_chang_refsdal` (F009/F009-S, SACR-C, mass-sheet,
-negative-parity report), `professor_code_observations` (_born.py entry now
-dischargeable; add ppGO-down-to-w~0.5, C1/C2-smoothness, ghost-branch-is-
-positive-parity, caustic-extent-vs-gamma).
+`professor/microlensing_chang_refsdal` (F009/F009-S, SACR-C, mass-sheet),
+`professor_code_observations` (add: a0-violates-F009-below-split,
+astroid-extent closed form, ghost-branch-is-positive-parity, ppGO reaches
+down to w~0.5, C1/C2 needed for smoothness).

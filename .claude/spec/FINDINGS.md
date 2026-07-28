@@ -1136,3 +1136,77 @@ a guess but a measurement taken over too narrow a slice. A measured fact
 carries the scope of its measurement; F023 said "the split is at
 `w * r0_sq ~ 8`" when what was measured was "the split is at
 `w * r0_sq ~ 8` FOR gamma in [0.2, 0.45]". State the sweep next to the result.
+
+## F025 — `a0` violates F009 and belongs in no serving path; the exterior fence is `gamma < 3/4` exactly; and F023's node counts were swept in one direction only (2026-07-28)
+
+Third correction from the same Professor thread, and the one that most
+simplifies the build. Sweep for every number: `gamma` in {0.45, 0.50, 0.55,
+0.60, 0.65, 0.70, 0.75}, `|y|` in {3.05, 4.2426}, `theta` in {0.3, 0.9, 1.35},
+`kappa = 0`, `beta = 0` (production pins both), azimuthal sweeps at 65 points.
+
+**1. `a0` hurts at EVERY gamma, including 0.45 — the value F023 reported on.**
+Azimuthal node counts at eps 4e-3, `w = 0.01`:
+
+| gamma | N(F) | N(lead-only) | N(a0+b1) |
+|---|---|---|---|
+| 0.45 | 4 | 4 (size 1.9e-2) | 11 (size 1.2e-1) |
+| 0.60 | 4 | 4 (size 2.0e-2) | 20 (size 2.5e-1) |
+| 0.75 | 4 | 4 (size 2.3e-2) | 44 (size 5.5e-1) |
+
+`N(F) == N(lead)` EXACTLY at all 18 sampled (gamma, w, radius) combinations.
+
+**2. The mechanism is an F009 violation, not a coefficient blow-up.**
+`F(w -> 0) = sqrt(mu_macro)` exactly (F009), but the carrier returns
+`sqrt(mu_macro) * (1 + a0/q2r)`. `a0` is a RESOLVED-IMAGE amplitude
+correction, valid only for `w * Delta_tau >> 1`; below the split it is a
+constant offset of size `|a0|/q2r`. `b1` alone is indistinguishable from
+lead-only — its term carries `w` and vanishes correctly — so it is harmless
+but buys nothing.
+
+CONSEQUENCE: `(a0, b1)` serve NOWHERE. Below the split lead-only wins; above
+it ppGO wins. Use the lead-only carrier
+`sqrt(mu_macro) * exp(1j*w*phi_geo)` below the split at ALL gamma on BOTH
+parities — one rule, no branch, matching the saddle recommendation. The
+coefficients remain correct physics and the right macro-limit diagnostic, and
+should stay in the module as such; they should not be in the serving path.
+
+**3. Why F023 missed it — a METHOD error, not a sampling one.** F023's y-plane
+node counts swept `|y|` RADIALLY at fixed `theta = 0.3`. The `a0` pathology is
+AZIMUTHAL: `q2r` varies strongly with angle through
+`x0 = (y1/(1-gamma), y2/(1+gamma))`. Same gamma, same radii — the radial sweep
+gives N=4 and size 2.4e-2; the azimuthal sweep gives N=11 and size 1.2e-1. One
+direction was swept and reported as "per y-axis".
+
+**4. The exterior fence, in closed form.** With `u = 1/|x|**2` on the critical
+curve `u = gamma*cos2theta +- sqrt(1 - gamma**2 sin**2 2theta)`, the outermost
+astroid cusp is
+
+    max |y| on the astroid = 2*gamma / sqrt(1 - gamma)             (kappa = 0)
+                           = sqrt(lam) * 2*gp / sqrt(1 - gp)       (gp = gamma/lam)
+
+verified against the measured extent to 4 decimals at five gammas (0.60 ->
+1.8974, 0.70 -> 2.5560, 0.75 -> 3.0000, 0.80 -> 3.5777, 0.85 -> 4.3894).
+Solving `2 s**2 + R s - 2 = 0` with `s = sqrt(1 - gamma)`:
+
+* the annulus INNER edge `|y| = 3.0` is breached at `gamma = 3/4` EXACTLY;
+* the outer edge `|y| = 3*sqrt(2)` at `gamma = 0.8423291`.
+
+So the annulus is fully exterior for `gamma < 3/4`, straddles the caustic for
+`3/4 <= gamma < 0.84233`, and is fully interior above. The earlier "`<~ 0.75`"
+was a geometric guess that happened to land on the right number; encode the
+derived form.
+
+**5. F023's node counts were floors, not ceilings.** Over `gamma <= 3/4` the
+true ceilings are 5 on `[1e-3, 0.05]`, **31** on `[0.05, 0.5]` (F023 said
+4-15), and **27** on `[0.5, 8]` (F023 said 4-8), with 4 and 14 per y-axis in
+the two sub-split bands. The `[0.5, 8]` ppGO residual rises to 2.0e-1 near the
+`y2`-axis cusp and PLATEAUS rather than diverging — that cusp reaches
+`|y| = 3.0` exactly at `gamma = 3/4`, which is the same fence.
+
+**The pattern, now three deep.** F023 corrected the placeholder; F024
+corrected F023's split currency and scope; F025 corrects F023's node counts
+and retires its headline recommendation. None of the wrong versions was a
+guess — each was a real measurement whose SWEEP was narrower than the claim
+built on it. F023 swept four gammas and one angular direction. The discipline
+that would have caught all three: state the sweep in the same sentence as the
+result, and treat any claim that outruns it as unmeasured.
