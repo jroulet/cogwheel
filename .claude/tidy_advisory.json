@@ -1,8 +1,9 @@
 {
   "trigger": "post-commit",
-  "commit": "8901b0b191d859876009c15fdac919c37cd4e213",
-  "timestamp": "2026-07-28T09:32:00Z",
+  "commit": "2fc3f30f29806f56095aefb8632d06eb092b5d35",
+  "timestamp": "2026-07-28T13:18:10Z",
   "touched_files": [
+    "cogwheel/gw_prior/twosquircle.py",
     "cogwheel/lensing/chang_refsdal/_pearcey_table.py",
     "cogwheel/lensing/chang_refsdal/_schwinger.py",
     "cogwheel/lensing/chang_refsdal/channels.py",

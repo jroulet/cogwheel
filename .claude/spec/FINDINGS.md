@@ -979,3 +979,85 @@ amplitude at the offending pair (the guard now does this in its error message)
 tells you which regime you are in without a probe, but only the sweep proves
 it. Two plausible mechanisms were adopted here without that sweep and both
 were wrong.
+
+## F023 — the Born rung's stated rationale is backwards, its series was missing a term, and its `b1` had the wrong sign; the chart absorbs `ln w` for free (2026-07-28, Professor commission)
+
+`chang_refsdal/_born.py` shipped DORMANT with `b1 = 1.0`, a placeholder, and a
+stated purpose that measurement contradicts. Four separate results, all
+measured against the exact engine rather than argued.
+
+**1. `b1` is derived, and the placeholder had the WRONG SIGN.**
+
+    b1 = -lam * (x0 . A^-1 . x0) / |x0|**2        # reduced: -(1 + g'P)/(1 - g'**2)
+    a0 = -lam * gamma * P / det_a                  # P = cos 2(theta_x0 - beta)
+
+with `P` referred to the MACRO IMAGE direction, not the source. A pure point
+mass gives `b1 = -1`, not `+1`. Both collapse onto `r0_sq` and `x0_dot_y`,
+which `_born_factors` already computes — no new geometry, no fifth convention
+site. Three algebraic forms agree to 2.2e-14 over 4000 both-parity draws.
+
+**2. The mandated series structure was INCOMPLETE.** Expanding the Kirchhoff
+integral leaves TWO terms at order `1/q2r`, not one: the imaginary `b1` term
+the ansatz had, and a real, `w`-independent `a0` term it did not. Worth
+1-20 % depending on shear. The build implemented its mandate faithfully; the
+mandate was wrong. A structure handed down as fixed is still a hypothesis.
+
+**3. The WHY premise is measurably backwards.** The module says the low-`w`
+far zone "varies on the Einstein scale, so trained tiles there are
+prior-sized". Once `exp(1j*w*phi_geo)` is demodulated out, that variation is
+ENTIRELY GONE — it lives in the closed-form phase. Measured: the demodulated
+residual needs 4 y-nodes across the whole annulus at `w <= 0.2`, versus 9-17
+at `w >~ 1`. Einstein-scale fringe motion is a MID/HIGH-`w` problem, the
+opposite of the documented rationale. The rung is worth having, for the
+reverse reason.
+
+**4. The chart absorbs `ln(w/2)` at ZERO node cost, so no low-`w` analytic
+rung is needed.** The term the mid-`w` carrier omits is
+`(1j*w/2)*[ln(w*r0_sq/2) + EULER_GAMMA + 2*ln(Lam)] + pi*w/4`. With `u = ln w`,
+`w*ln w = exp(u)*u` is ENTIRE in `u`, and the charts already carry a `log_w`
+axis. Node counts to a given held-out error are IDENTICAL with and without the
+log term at every tolerance from 4e-3 down to 1e-5. The residual is also
+bounded as `w -> 0` (tends to `-a0/q2r`).
+
+**Measured ladder (positive parity), residual as an interpolation object:**
+
+| band | serve | residual / `max|F|` | nodes (`log_w`, y) |
+|---|---|---|---|
+| `w < 0.5` | carrier `(a0,b1)` ALONE | 2.4e-2 - 8.7e-2 | 4-15, 4 |
+| `w >= 0.5` | ppGO (both real images, full C1/C2) + complex ghost where admitted | 1.6e-3 - 2.5e-2 | 4-8, 4 |
+
+No gap: the seam `[0.05, 0.5]` is covered by the carrier at 7-15 nodes with
+prior-universal tiles. Mixing the bands the other way is catastrophic — adding
+ppGO below `w = 0.05` inflates the residual by FIVE ORDERS OF MAGNITUDE through
+the `1/w**2` kernel.
+
+**Terminology, resolved because it nearly caused a double-count.** The faint
+near-lens SECOND REAL IMAGE (`x_c ~ -y/|y|**2`, Morse index 1, from
+`find_images`, worth 4.4e-2 - 8.4e-2 here) is NOT the COMPLEX-saddle ghost that
+`farfield_ghost_term` implements (conjugate quartic pair, `Im tau_c > 0`,
+Picard-Lefschetz, gated on geometric separation >= 0.7). Both are real
+contributions and must be counted ONCE EACH. The complex ghost is large below
+`w ~ 0.2` but UNUSABLE there — its own stationary-phase kernel diverges as
+`1/w`, `1/w**2` — and is worth 2.5e-3 -> 1.6e-3 in `[0.5, 8]`.
+
+Also measured: `ghost_kernel` raises `GhostDomainError` at
+`(|y|=3.6, theta=0.5, gamma=0.25, kappa=0.3, beta=0.5)` while `find_images`
+returns 2 real images, so the complex ghost is NOT universally available in the
+annulus and the serve path must tolerate its absence (it does — the error is a
+`LensDomainError`).
+
+**A methodological correction worth keeping.** The first pass reported that
+adding the second image made the chart WORSE (121-241 nodes). That was an
+artifact of using the leading `sqrt|mu|` amplitude only; with the full C1/C2
+`image_kernel` the same residual collapses to 4 nodes. An approximation used
+while EVALUATING an architecture can condemn the architecture. When a
+measurement says a component hurts, check that the component was measured at
+full fidelity before believing it.
+
+**What `b1`/`a0` actually buy:** ~10-25 % smaller residual in the low band at
+the same node count, superseded by ppGO above `w ~ 0.5`. The load-bearing
+results of this commission were the sign fix, the `a0` omission, the regime
+diagnosis, and the `log_w` absorbability measurement — not an accuracy gain.
+The rung's own T1 target of 1e-3 was never the right bar: in the
+carrier-plus-chart architecture the criterion is how CHEAPLY THE RESIDUAL
+SPLINES, not how accurate the analytic term is standing alone.
