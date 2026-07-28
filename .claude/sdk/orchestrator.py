@@ -71,6 +71,8 @@ from .gates import (
     prompt_escalation_decision,
     prompt_user_approval,
     should_escalate,
+    revision_budget_spent,
+    finding_signature,
     verify_plan,
 )
 from .schemas import (
@@ -1902,6 +1904,7 @@ class BuildOrchestrator:
 
         revision_loops = 0
         closure_rechecks = 0
+        prev_finding_signature: frozenset[str] | None = None
 
         while not check_inspector_gate(inspector_result) or open_findings:
             # Closure re-check path
@@ -1985,6 +1988,69 @@ class BuildOrchestrator:
                 f" ({len(trivial_findings)} trivial, {len(impl_findings)} impl"
                 f", {len(design_findings)} design)"
             )
+            # Log WHAT, not just how many. Counts alone cannot distinguish a
+            # converging loop from a stuck one, which is how a build reached
+            # revision 8/2 before anyone opened a transcript (2026-07-28).
+            for _f in inspector_result.findings:
+                self._log(
+                    f"      [{_f.severity}] {_f.finding_id} {_f.file}: "
+                    f"{(_f.description or '')[:140]}"
+                )
+
+            # Non-convergence: the same finding SET twice running means the
+            # fixer cannot or will not clear it, so further revisions buy
+            # nothing. Stop now rather than spending the rest of the budget
+            # re-deriving it.
+            _signature = finding_signature(inspector_result.findings)
+            if _signature and _signature == prev_finding_signature:
+                self._log(
+                    f"  Inspector loop NOT CONVERGING — revision "
+                    f"{revision_loops} reproduced the identical finding set; "
+                    f"stopping the loop."
+                )
+                if should_escalate(inspector_result.findings, MAX_REVISION_LOOPS + 1):
+                    decision, feedback = prompt_escalation_decision(
+                        inspector_result.findings,
+                        architect_rationale=(
+                            "Revision loop did not converge: revision "
+                            f"{revision_loops} reproduced the identical "
+                            "finding set. Actionable findings remain."
+                        ),
+                        approval_dir=self.approval_dir,
+                    )
+                    if decision == "accept":
+                        inspector_result.verdict = InspectorVerdict.PASS
+                        break
+                    if decision == "abort":
+                        raise EscalationNeeded(
+                            inspector_result.findings, revision_loops)
+                    # "fix" on a non-converging loop would re-enter the same
+                    # cycle; take the single granted retry and no more.
+                    prev_finding_signature = None
+                else:
+                    self._log(
+                        "  Remaining findings are TRIVIAL only — non-blocking "
+                        "by definition; proceeding and carrying them into the "
+                        "change report."
+                    )
+                    inspector_result.verdict = InspectorVerdict.PASS
+                    break
+            prev_finding_signature = _signature
+
+            # Budget spent at ANY severity. `should_escalate` deliberately
+            # ignores TRIVIAL (they must never consume a human decision), but
+            # the loop still has to TERMINATE — that gap is what produced
+            # revision 8/2.
+            if (revision_budget_spent(inspector_result.findings, revision_loops)
+                    and not impl_findings and not design_findings):
+                self._log(
+                    f"  Revision budget spent ({revision_loops}/"
+                    f"{MAX_REVISION_LOOPS}) with {len(trivial_findings)} "
+                    f"TRIVIAL finding(s) outstanding — non-blocking by "
+                    f"definition; proceeding without escalating."
+                )
+                inspector_result.verdict = InspectorVerdict.PASS
+                break
 
             if not trivial_findings and not impl_findings and not design_findings and not open_findings:
                 self._log("  Inspector: no actionable findings — treating as PASS.")

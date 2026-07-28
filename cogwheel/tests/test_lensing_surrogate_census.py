@@ -8,9 +8,10 @@ WHAT THIS SUITE PINS
 The census tool measures three properties of a trained surrogate WITHOUT ever
 trusting the surrogate's own labels:
 
-* Served fraction + a five-way MUTUALLY-EXCLUSIVE fall-through breakdown
-  (``gamma-guard`` / ``dropped-sliver`` / ``cusp-window`` / ``refusal-ball`` /
-  ``out-of-box``), attributed by calling the census's OWN guard predicates --
+* Served fraction + a six-way MUTUALLY-EXCLUSIVE fall-through breakdown
+  (``gamma-guard`` / ``dropped-sliver`` / ``born`` / ``cusp-window`` /
+  ``refusal-ball`` / ``out-of-box``), attributed by calling the census's OWN
+  guard predicates --
   never a re-implementation (`classify_fallthrough`, `fallthrough_breakdown`).
   Section A pins each category by CONSTRUCTION and the MECE partition
   (served + engine_refused + Sum(categories) == n).
@@ -465,11 +466,11 @@ class CensusTestCase(TestCase):
 
 
 # ==========================================================================
-# Section A -- served fraction + five-way fall-through breakdown (MECE)
+# Section A -- served fraction + six-way fall-through breakdown (MECE)
 # ==========================================================================
 
 class FallthroughCategorizationTestCase(CensusTestCase):
-    """`classify_fallthrough` attributes each of the five categories BY
+    """`classify_fallthrough` attributes each of the six categories BY
     CONSTRUCTION, calling the census's own guard predicates (one source of
     truth) -- never a re-implementation."""
 
@@ -526,7 +527,7 @@ class FallthroughCategorizationTestCase(CensusTestCase):
 
 
 class BreakdownPartitionTestCase(CensusTestCase):
-    """`fallthrough_breakdown` counts served / engine-refused / the five
+    """`fallthrough_breakdown` counts served / engine-refused / the six
     categories and enforces the MECE partition (served + refused + Sum(cats)
     == n)."""
 
@@ -545,10 +546,16 @@ class BreakdownPartitionTestCase(CensusTestCase):
         return recs
 
     def test_counts_match_hand_computed(self):
-        """3 served + 1 engine-refused + 2 per category (10) == 14 total."""
+        """3 served + 1 engine-refused + 2 per fall-through category == n.
+
+        Derived from ``len(census._FALLTHROUGH_CATEGORIES)`` so the count
+        stays correct as categories are added (six categories -> 16 total
+        after the ``born`` category landed; was 14 for five)."""
+        n_cats = len(census._FALLTHROUGH_CATEGORIES)
+        n_samples = 3 + 1 + 2 * n_cats
         breakdown = census.fallthrough_breakdown(self._population())
         self.n_checks += 1
-        self.assertEqual(breakdown['n_samples'], 14)
+        self.assertEqual(breakdown['n_samples'], n_samples)
         self.n_checks += 1
         self.assertEqual(breakdown['served'], 3)
         self.n_checks += 1
@@ -557,7 +564,7 @@ class BreakdownPartitionTestCase(CensusTestCase):
             self.n_checks += 1
             self.assertEqual(breakdown['fallthrough'][cat], 2)
         self.n_checks += 1
-        self.assertAlmostEqual(breakdown['served_fraction'], 3 / 14)
+        self.assertAlmostEqual(breakdown['served_fraction'], 3 / n_samples)
 
     def test_partition_is_mece(self):
         """served + engine_refused + Sum(categories) == n_samples."""

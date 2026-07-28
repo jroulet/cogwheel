@@ -91,7 +91,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import permutations
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 import numpy as np
 
@@ -105,6 +105,7 @@ from cogwheel.lensing.chang_refsdal.operator import (
 
 __all__ = ['ChangRefsdalChannels', 'ChangRefsdalGeometryPartition',
            'ChangRefsdalPartition', 'farfield_envelope_from_partition',
+           'born_carrier_from_partition',
            'real_image_delays', 'reconstruct_from_envelope',
            'reconstruct_farfield', 'farfield_ghost_term', 'farfield_w_floor',
            'FARFIELD_KERNEL_SUM', 'FARFIELD_DIFFRACTIVE',
@@ -1288,6 +1289,178 @@ def farfield_envelope_from_partition(
     # to machine precision even for large ``w t_min`` near a fold (Build 8h-d2,
     # INS-4-003) -- node-exact telescoping.
     return envelope * np.exp(1j * _frame_phase(partition.w, partition.t_min))
+
+
+def born_carrier_from_partition(
+        partition: 'ChangRefsdalPartition', *,
+        split_constant: float = RHO_END,
+        lead_carrier: Callable[..., complex] | None = None) -> np.ndarray:
+    """Band-split analytic carrier ``F_carrier`` for the far annulus.
+
+    The training/serve carrier of the Born (weak-deflection) annulus rung
+    (``3.0 < |y| <= 4.2426`` at positive parity, ``gamma < 3/4``): the
+    analytic object a driver-trained chart interpolates the RESIDUAL
+    ``F_exact - F_carrier`` against, the same carrier + interpolated-remainder
+    decomposition as SACR-C and the far-field label.  The carrier does NOT
+    have to hit an accuracy target on its own; the criterion is how cheaply
+    the residual splines (F025).  It is returned in the SAME min-relative
+    delay frame as `ChangRefsdalPartition.exact_total`, so the driver forms
+    the residual by a direct subtraction.
+
+    The carrier is split per-frequency at ``w * Delta_tau = split_constant``
+    (``RHO_END = 4`` by default, the SAME resolution scale SACR-C switches on
+    and `_born.born_gate` guard A keys on), where ``Delta_tau`` is the FULL
+    Fermat-delay difference of the two real images read straight from
+    ``partition.delays`` on its real channels (already min-subtracted, so the
+    difference is frame-invariant).  ``Delta_tau`` is NOT reconstructed from
+    ``phi_geo``, NOT ``w * r0_sq`` (which coincides with ``Delta_tau`` only on
+    the positive-parity branch, F024), and the images are NOT re-solved -- the
+    partition already carries the delays.  Keying the split on the invariant
+    ``w * Delta_tau`` means the out-of-scope macro-saddle branch (``gamma > 1``,
+    where ``r0_sq / (2 Delta_tau)`` spans 0.16 to 35.6, F024) adds a branch
+    (a different ``lead_carrier``), not a re-key.
+
+    * **Below the split** (``w * Delta_tau < split_constant``): the LEAD-ONLY
+      carrier ``sqrt(mu_macro) * exp(1j*w*phi_geo)`` from ``lead_carrier``
+      (`_born.born_lead_carrier` by default), demodulated to the min-relative
+      frame by ``exp(-1j*w*t_min)`` with ``t_min`` read ONLY from
+      ``partition.t_min`` (never recomputed; Build 8h-b7).  NO ``a0``/``b1``
+      resolved-image correction, NO second image, NO ppGO, NO ghost: the ppGO
+      ``1/w**2`` kernel would inflate the residual by five orders of magnitude
+      below ``w ~ 0.05`` (F023), and ``a0`` breaks the exact limit
+      ``F(w->0) = sqrt(mu_macro)`` (F009).
+    * **Above the split** (``w * Delta_tau >= split_constant``): the resolved
+      two-real-image geometric-optics sum plus the decaying complex-saddle
+      ghost where admitted, demodulated the same way.  This is
+      `geometric_amplification` over both real images at the full C1/C2 image
+      kernels (``partition.saddle_kernels``) demodulated to the min-relative
+      frame, PLUS `farfield_ghost_term`, reconstructed through the SACR-C
+      switched-analytic projection (`reconstruct_farfield` ->
+      `switched_analytic_channels`) in the resolved (``S_a = 1``) limit -- the
+      SAME `FARFIELD_KERNEL_SUM_MINUS_GHOST` serve mirror the far-field label
+      uses.  Reusing that one authoritative reconstruction (rather than a
+      second, independent geometric-optics sum that could drift) keeps every
+      real image's own carrier ``exp(1j*w*(tau_a - t_min))`` -- crucially the
+      second image's ``exp(1j*w*Delta_tau)`` -- so the above-split residual is
+      NOT demodulated by a single macro carrier, which would inflate the
+      azimuthal node count (F024).
+
+    Ghost absence is tolerated: `farfield_ghost_term`'s admission gate is the
+    frequency-independent geometric separation
+    ``min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN``, and its kernel can raise
+    `geometry.GhostDomainError` / `geometry.LensDomainError` (the F023 witness
+    ``|y|=3.6, theta=0.5, gamma=0.25, kappa=0.3, beta=0.5``, where
+    `geometry.find_images` returns two real images but the ghost continuation
+    refuses).  The ghost is an ADDITIVE correction, never a precondition: when
+    it raises or is not admitted the carrier continues with the bare ppGO sum
+    alone, so the returned array is always finite over the whole grid.
+
+    Parameters
+    ----------
+    partition : ChangRefsdalPartition
+        A partition of the served config; its ``w``, ``source``, ``gamma``,
+        ``beta``, ``kappa``, ``matrix``, ``delays``, ``saddle_kernels``,
+        ``real_mask``, ``images`` and ``t_min`` are read.  ``exact_total`` is
+        NOT read -- the carrier is analytic -- so the cheap geometry-only build
+        is sufficient in principle, but a `ChangRefsdalPartition` is taken to
+        mirror `farfield_envelope_from_partition` and carry the source/matrix
+        the ghost and lead carrier need.
+    split_constant : float, optional
+        The ``w * Delta_tau`` band-split threshold; defaults to `RHO_END`.
+        Parameterised so the macro-saddle branch can re-scale the split
+        without a rewrite.
+    lead_carrier : callable, optional
+        The below-split lead carrier, a scalar callable
+        ``(w, y1, y2, gamma, beta, kappa) -> complex`` returning the carrier
+        in the ABSOLUTE Fermat-delay frame (this function demodulates it).
+        Defaults to `_born.born_lead_carrier`.  Parameterised so the
+        macro-saddle branch (whose carrier is also lead-only) can supply its
+        own lead term without a rewrite.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(n_w,)`` complex analytic carrier ``F_carrier(w)`` on
+        ``partition.w``, in the min-relative delay frame of
+        ``partition.exact_total``.
+
+    Raises
+    ------
+    ValueError
+        If the partition carries fewer than two real images, so the
+        two-real-image band split ``Delta_tau`` is undefined (the far annulus
+        at ``gamma < 3/4`` is exterior to the caustic and must yield two).
+    geometry.LensDomainError
+        Propagated from `geometric_amplification` / `reconstruct_farfield` if
+        the served census is inconsistent -- refusing symmetrically with the
+        exact path.  A ghost-only `geometry.GhostDomainError` does NOT
+        propagate: it is caught and the ppGO sum serves alone.
+    """
+    # Deferred import: ``_born`` imports ``channels`` at module load, so a
+    # top-level ``import _born`` here would close the cycle.  Importing inside
+    # the call keeps ``_born`` a pure scalar leaf module (the composition lives
+    # here) and resolves the default carrier lazily.
+    if lead_carrier is None:
+        from cogwheel.lensing.chang_refsdal import _born
+        lead_carrier = _born.born_lead_carrier
+
+    w = np.asarray(partition.w, dtype=float)
+    source = np.asarray(partition.source, dtype=float)
+    y1, y2 = float(source[0]), float(source[1])
+    gamma, beta, kappa = (
+        float(partition.gamma), float(partition.beta), float(partition.kappa))
+    t_min = float(partition.t_min)
+
+    # Delta_tau: the FULL Fermat-delay difference of the two real images, read
+    # straight from the partition's real-channel delays (F024/Professor: NOT
+    # ``phi_geo``, NOT ``w * r0_sq``, NOT a re-solve).  ``partition.delays`` is
+    # min-subtracted, so the max-minus-min difference is the frame-invariant
+    # full-delay span.
+    real_delays = partition.delays[np.asarray(partition.real_mask, dtype=bool)]
+    if real_delays.size < 2:
+        raise ValueError(
+            f'born_carrier_from_partition needs two real images to form the '
+            f'band-split Delta_tau, but the partition has {real_delays.size} '
+            f'real channel(s).  The far annulus at gamma < 3/4 is exterior to '
+            f'the caustic and should yield two real images.')
+    delta_tau = float(real_delays.max() - real_delays.min())
+
+    below = w * delta_tau < float(split_constant)
+    carrier = np.empty(w.shape, dtype=complex)
+
+    # Below the split: lead-only carrier, demodulated to the min-relative
+    # frame.  ``lead_carrier`` is a scalar entry point, evaluated only on the
+    # sub-band it serves (the above-split values would be discarded).
+    if below.any():
+        w_below = w[below]
+        lead_absolute = np.array(
+            [lead_carrier(float(w_i), y1, y2, gamma, beta, kappa)
+             for w_i in w_below], dtype=complex)
+        carrier[below] = lead_absolute * np.exp(-1j * w_below * t_min)
+
+    # Above the split: the resolved two-image ppGO sum + ghost, reconstructed
+    # through the switched-analytic projection in the ``S_a = 1`` far-field
+    # gauge.  The ghost enters in the frame-invariant convention the stored
+    # label uses (``exp(+1j w t_min)`` tilt); ``reconstruct_farfield``
+    # re-modulates by ``exp(-1j w t_min)`` with the SAME reduced ``_frame_phase``
+    # so label and ghost telescope back to the min-relative frame together.
+    if not below.all():
+        try:
+            ghost = farfield_ghost_term(
+                w, source, partition.matrix,
+                t_min=t_min, real_images=partition.images)
+            envelope = ghost * np.exp(1j * _frame_phase(w, t_min))
+        except geometry.LensDomainError:
+            # Ghost unadmitted (separation gate) or its continuation refused:
+            # the ghost is an ADDITIVE correction, so serve the bare ppGO sum.
+            envelope = np.zeros(w.shape, dtype=complex)
+        _kernels, ppgo_plus_ghost = reconstruct_farfield(
+            w, envelope, partition.delays, partition.saddle_kernels,
+            partition.real_mask, FARFIELD_KERNEL_SUM_MINUS_GHOST, t_min)
+        above = ~below
+        carrier[above] = ppgo_plus_ghost[above]
+
+    return carrier
 
 
 @dataclass(frozen=True)

@@ -7,10 +7,10 @@ weights) from the registered lens subpriors and, for each, decides whether
 the multi-chart `LensAmplificationSurrogate` serves the point or falls
 through to the exact engine.  It then reports:
 
-- ``served_fraction`` and a five-way, MUTUALLY-EXCLUSIVE breakdown of the
-  fall-through causes (``gamma-guard``, ``dropped-sliver``, ``cusp-window``,
-  ``refusal-ball``, ``out-of-box``), plus a separate ``engine-refused`` bucket
-  for domain refusals the geometry itself raises;
+- ``served_fraction`` and a six-way, MUTUALLY-EXCLUSIVE breakdown of the
+  fall-through causes (``gamma-guard``, ``dropped-sliver``, ``born``,
+  ``cusp-window``, ``refusal-ball``, ``out-of-box``), plus a separate
+  ``engine-refused`` bucket for domain refusals the geometry itself raises;
 - per-chart held-out envelope error ``eps`` against a FRESH engine oracle;
 - ``(gamma, image_count, eta)``-partitioned lnL error tiers versus the exact
   engine (dependency-injected; never partitioned by the gauge angle ``theta``,
@@ -39,6 +39,7 @@ the always-run stages need only the surrogate and the engine, never a full
 from __future__ import annotations
 
 import dataclasses
+import math
 import os
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -51,6 +52,7 @@ import pandas as pd
 from cogwheel.lensing import surrogate as _surrogate
 from cogwheel.lensing.chang_refsdal import (ChangRefsdalChannels,
                                             farfield_envelope_from_partition)
+from cogwheel.lensing.chang_refsdal import _born
 from cogwheel.lensing.prior import (FixedLensGeometryPrior,
                                     UniformLensMassPrior,
                                     UniformReducedShearPrior,
@@ -98,9 +100,17 @@ _ENGINE_REFUSALS = _surrogate._REFUSAL_ERRORS
 # Empty refused-point set for the refusal-ball toggle probe.
 _EMPTY_REFUSED = np.empty((0, 3), dtype=float)
 
-# The five mutually-exclusive surrogate fall-through categories.
-_FALLTHROUGH_CATEGORIES = ('gamma-guard', 'dropped-sliver', 'cusp-window',
-                           'refusal-ball', 'out-of-box')
+# The six mutually-exclusive surrogate fall-through categories.  ``born`` sits
+# between ``dropped-sliver`` and the relaxed-guard probes (Professor Q5): a
+# far-annulus positive-parity draw the analytic Born carrier rung serves.
+_FALLTHROUGH_CATEGORIES = ('gamma-guard', 'dropped-sliver', 'born',
+                           'cusp-window', 'refusal-ball', 'out-of-box')
+
+# Outer edge of the Born rung's target annulus ``3.0 < |y| <= 3 * sqrt(2)``.
+# The inner edge is the Born module's `_born.ANNULUS_INNER_RADIUS`; the outer
+# edge is the corner of the [-3, 3]^2 source-position sampling box (half-width
+# 3.0), |y| = 3 * sqrt(2) ~ 4.2426 -- the farthest a boxed source can sit.
+_BORN_ANNULUS_OUTER_RADIUS = 3.0 * math.sqrt(2.0)
 
 
 class CensusError(RuntimeError):
@@ -216,7 +226,8 @@ def classify_fallthrough(
         surrogate: _surrogate.LensAmplificationSurrogate, *,
         gamma: float, log_w_min: float, log_w_max: float, eta: float,
         theta: float, image_count: int, y1_eig: float, y2_eig: float,
-        dropped_slivers: tuple[tuple[float, float], ...]) -> str:
+        dropped_slivers: tuple[tuple[float, float], ...],
+        kappa: float = 0.0) -> str:
     """Attribute a single fall-through cause for a NON-served sample.
 
     Assumes the geometry partition succeeded (so ``eta``, ``theta``,
@@ -229,16 +240,29 @@ def classify_fallthrough(
     1. ``gamma-guard``  -- ``|gamma - 1| < _GAMMA_GUARD_BAND`` (checked first).
     2. ``dropped-sliver`` -- ``gamma`` inside a training-dropped metamorphosis
        band (a subset of ``out-of-box`` on the gamma axis, so checked first).
-    3. ``cusp-window``  -- some TUBE chart would serve but for its cusp
+    3. ``born``         -- a far-annulus positive-parity draw the analytic
+       Born carrier rung serves (`_born`).  Claimed here (Professor Q5) --
+       before the relaxed-guard probes -- via an INDEPENDENT geometric
+       predicate (positive parity ``det A > 0``, the ``gamma < 3/4`` exterior
+       fence, and the annulus ``3 < |y| <= 3 sqrt(2)``), NOT a `_born.born_gate`
+       call, which needs ``w`` and an engine-built band split.
+    4. ``cusp-window``  -- some TUBE chart would serve but for its cusp
        exclusion (detected by relaxing ``cusp_windows`` to empty and
        re-calling `surrogate._tube_serves`).  Per Professor Q7 a near-cusp
        source projecting onto a neighbouring arc with out-of-range ``theta``
        still fails the theta-range gate with cusps relaxed, so it correctly
        falls to ``out-of-box``.
-    4. ``refusal-ball`` -- some FAR-FIELD chart would serve but for its
+    5. ``refusal-ball`` -- some FAR-FIELD chart would serve but for its
        engine-refusal exclusion ball (detected by relaxing ``refused_points``
        to empty and re-calling `surrogate._farfield_serves`).
-    5. ``out-of-box``   -- outside every chart's certified box otherwise.
+    6. ``out-of-box``   -- outside every chart's certified box otherwise.
+
+    Parameters
+    ----------
+    kappa : float, optional
+        External convergence (default ``0.0``, which production pins).  Kept
+        as a parameter so the parity determinant ``det A = (1 - kappa)**2 -
+        gamma**2`` stays correct for the later saddle branch.
 
     Returns
     -------
@@ -253,6 +277,22 @@ def classify_fallthrough(
     for lo, hi in dropped_slivers:
         if lo <= gamma <= hi:
             return 'dropped-sliver'
+
+    # born: a far-annulus positive-parity draw the analytic Born carrier rung
+    # serves.  Independent geometric predicate mirroring the Born rung's
+    # admission region (NOT a `_born.born_gate` call -- that needs w and an
+    # engine-built band split): positive parity det A > 0 (macro image is a
+    # minimum, not a saddle), the gamma < 3/4 exterior fence (whole annulus
+    # lies outside the caustic), and the target annulus 3 < |y| <= 3 sqrt(2).
+    # |y| is the eigenframe source radius; rotation preserves the norm, so this
+    # equals the lens-plane |y| without re-solving geometry.  kappa-aware for
+    # the later saddle branch; production pins kappa = 0.
+    det_a_macro = (1.0 - kappa) ** 2 - gamma ** 2
+    abs_y = math.hypot(y1_eig, y2_eig)
+    if (det_a_macro > 0.0
+            and gamma < _born.GAMMA_FENCE
+            and _born.ANNULUS_INNER_RADIUS < abs_y <= _BORN_ANNULUS_OUTER_RADIUS):
+        return 'born'
 
     # cusp-window: a tube chart blocked ONLY by its cusp exclusion.
     for chart in surrogate.charts:
@@ -403,10 +443,10 @@ def characterize(
 
 
 def fallthrough_breakdown(records: Sequence[SampleRecord]) -> dict:
-    """Aggregate serve counts + the five-way fall-through breakdown.
+    """Aggregate serve counts + the six-way fall-through breakdown.
 
     Also verifies (defensively) that the buckets partition the sample set:
-    ``served + engine_refused + sum(five categories) == n_samples``.  The five
+    ``served + engine_refused + sum(six categories) == n_samples``.  The six
     guard categories partition the surrogate's own fall-throughs; the
     ``engine_refused`` bucket (named geometry refusals) is reported separately
     because it is not a surrogate guard decision.

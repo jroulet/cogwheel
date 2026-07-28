@@ -182,12 +182,47 @@ def should_escalate(findings: list[Finding], loop_count: int) -> bool:
     Only escalate when revision loops are exhausted AND actionable findings
     remain.  DESIGN findings are no longer instant-death — they go through
     the Architect → User chain of command first.
+
+    TRIVIAL findings deliberately do NOT escalate: by their own definition
+    ("style, missing tests, minor inefficiency — fix at convenience") they
+    must never block a build or consume a human decision.  They must still
+    TERMINATE the loop though — see `revision_budget_spent`, which is what
+    the caller uses to decide whether to keep looping at all.
     """
     has_actionable = any(
         f.severity in (EscalationLevel.IMPLEMENTATION, EscalationLevel.DESIGN)
         for f in findings
     )
     return has_actionable and loop_count > MAX_REVISION_LOOPS
+
+
+def revision_budget_spent(findings: list[Finding], loop_count: int) -> bool:
+    """True when the revision loop must STOP, at ANY severity.
+
+    `should_escalate` answers "does a human need to decide?"; this answers
+    "may we go round again?".  They are different questions, and conflating
+    them is what let a build run to `revision 8/2`: with only TRIVIAL
+    findings outstanding `should_escalate` was permanently False, so the
+    loop neither escalated nor exited and re-derived the same two findings
+    eight times (2026-07-28, Born carrier build, ~26 min and ~$24 of
+    Inspector + foreman_lite cycles with ZERO implementation findings).
+    """
+    return bool(findings) and loop_count > MAX_REVISION_LOOPS
+
+
+def finding_signature(findings: list[Finding]) -> frozenset[str]:
+    """Identity of a finding SET, for non-convergence detection.
+
+    Two consecutive revisions producing the same signature means the loop is
+    re-deriving findings the fixer cannot or will not clear — spending the
+    remaining budget on it buys nothing.  Keyed on id + severity + file +
+    a description prefix so a genuinely re-worded finding still counts as
+    new, while an identical re-raise does not.
+    """
+    return frozenset(
+        f'{f.finding_id}|{f.severity}|{f.file}|{(f.description or "")[:120]}'
+        for f in findings
+    )
 
 
 def has_design_findings(findings: list[Finding]) -> bool:

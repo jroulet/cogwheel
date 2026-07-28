@@ -1210,3 +1210,88 @@ guess — each was a real measurement whose SWEEP was narrower than the claim
 built on it. F023 swept four gammas and one angular direction. The discipline
 that would have caught all three: state the sweep in the same sentence as the
 result, and treat any claim that outruns it as unmeasured.
+
+## F026 — one closed form gives the caustic extent on BOTH parities; the saddle fence is a BAND; and F024's measured extent table under-reported the spike (2026-07-28)
+
+Sweep: `kappa = 0`, `beta = 0`; closed form checked against a direct caustic
+parametrisation (2e6 points per branch) at 16 gammas spanning both parities
+(0.45 to 3.0) — agreement to 4 decimals at all 16. `kappa != 0` enters only
+through the mass-sheet reduction (`gp = gamma/lam`, `|y| -> sqrt(lam)*|y'|`).
+
+**The closed form.** The critical curve satisfies
+`u**2 - 2*gamma*cos(2*theta)*u - (1 - gamma**2) = 0` with `u = 1/|x|**2`, and
+the caustic is `y = ((a1-u)x1, (a2-u)x2)`, `a1,a2 = 1 -+ gamma`. Eliminating
+`theta`, `|y|**2` becomes a function of `u` ALONE:
+
+    |y|**2 (u) = 2*u - 3 + 2*gamma**2/u + (1 - gamma**2)/u**2,
+                                       u in [abs(1-gamma), 1+gamma]
+    f'(u) = (2/u**3) * (u - 1) * (u**2 + u + 1 - gamma**2)
+        -> stationary at u = 1 and u_c = (sqrt(4*gamma**2 - 3) - 1)/2
+
+`u_c > 0` IFF `gamma > 1`. That single fact is the whole difference between the
+two parities.
+
+* POSITIVE PARITY: `u**2 + u + 1 - gamma**2 > 0` for `u > 0`, so `f` falls then
+  rises and the maximum is at the endpoint `u = 1 - gamma`:
+  `max|y| = 2*gamma/sqrt(1 - gamma)`, UNCONDITIONALLY for all `gamma < 1`.
+  The fence recorded in F025 is right with no caveat.
+* SADDLE: `u_c` is always interior (`u_c > gamma - 1` iff `gamma > 1`), and
+  there `gamma**2 = u_c**2 + u_c + 1`, collapsing `f` to
+
+      max|y|_saddle = sqrt(max( 4*u_c + 1/u_c - 2,  4*gamma**2/(gamma + 1) ))
+
+  the two candidates being the OFF-AXIS cusp (`u_c`) and the ON-AXIS cusp
+  (`u = gamma + 1`, giving `2*gamma/sqrt(gamma + 1)`).
+
+**The non-monotonicity is real: a cusp switch.** The outermost point sits on
+the off-axis cusp for `gamma < 1.177651` and on the on-axis cusp above; the
+`u_c` branch falls while `2*gamma/sqrt(gamma+1)` rises, so the extent MINIMISES
+at the switch: `max|y| = 1.596072` at `gamma = 1.177651`.
+
+**F024's extent table under-reported and is RETIRED.** Its 241^2 source grid
+misses the thin spike. True vs grid: `gamma=1.005` -> 9.939 vs 6.002
+(grid-capped); `1.02` -> 4.886 vs 3.712; `1.05` -> 3.008 vs 2.491. Use the
+closed form.
+
+**The saddle fence is a BAND, not a one-sided inequality.** Solving
+`4v + 1/v - 2 = R**2` then `gamma = sqrt(v**2 + v + 1)`:
+
+| edge | exact | value |
+|---|---|---|
+| inner, `\|y\| = 3.0` | `sqrt((189 - 15*sqrt(105))/32)` | 1.0502342 |
+| outer, `\|y\| = 3*sqrt(2)` | `sqrt(63 - 24*sqrt(6))/2` | 1.0261879 |
+
+and the RISING branch reaches the inner edge again at `4*gamma**2/(gamma+1) = 9`,
+i.e. `4*gamma**2 - 9*gamma - 9 = 0`, `gamma = 3` EXACTLY (outer edge at
+`gamma = 5.342329`). So the annulus is exterior for
+`1.0502342 < gamma < 3`. The prior stops at `gamma = 1.6` where
+`max|y| = 1.9846`, clear of 3.0 by a factor 1.51 — safe, but write the fence as
+a band in case the prior is ever widened.
+
+**Both sides diverge as `|gamma - 1|**(-1/2)`** — positive `2/sqrt(1-gamma)`,
+saddle `1/sqrt(2*(gamma-1))` — so they join at the wall in power but not in
+amplitude: the astroid is `2*sqrt(2) ~ 2.83x` larger at equal distance from it.
+
+**The deltoid is spiky too, but a scalar fence costs far less there.** Angular
+width beyond radius R (upper bound on the inside-fraction): `gamma=1.02` gives
+<= 3.95 % beyond `|y| = 3.0`, `1.05` gives <= 0.029 %. On a uniform `(0, 1.6)`
+prior the POSITIVE fence `gamma < 3/4` discards 15.6 % of the shear range while
+the SADDLE fence `gamma > 1.0502342` discards only 3.1 %. Ship the scalar fence
+on the saddle; spend per-theta admission on the positive branch, where it is
+worth 5x more.
+
+**METHOD WARNING, and it applies to the driver's own probe.** A 721-point ring
+scan reported 0.00 % inside at `gamma=1.03, |y|=3.6` where the true spike is
+NARROWER than the 0.0087 rad sampling. The driver's 1441-point scan
+(0.0044 rad) returned 0.42 % at `gamma=0.80` and 2.91 % at `0.90`, just under
+the analytic bounds 0.58 % and 2.98 % — it held, but only just. TRUST THE
+PARAMETRISATION, NOT RING SCANS, FOR SPIKE GEOMETRY. A caustic that is a
+directional spike cannot be characterised by sampling angles; sample the curve
+itself.
+
+**Fourth correction in one thread.** F023 fixed the placeholder; F024 fixed
+F023's split currency and scope; F025 fixed F024's node counts and retired
+F023's headline; F026 retires F024's extent table. Every wrong version was a
+real measurement whose resolution or sweep was narrower than the claim built on
+it. Grid at 241^2, sweep at four gammas, radial-only, ring scan at 0.0087 rad —
+four different ways to under-resolve, four wrong tables.

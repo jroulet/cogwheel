@@ -1652,16 +1652,16 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             image_count=int(geom.real_mask.sum()))
         if not served:
             # Fact-4 slot (Build 8h-c1): the analytic Born (weak-deflection)
-            # rung is NOT wired here.  Its two-term series about
-            # ``sqrt(mu_macro)`` uses an unpinned O(1) coefficient
-            # (``_born._born_factors`` b1 = 1.0 placeholder) and disagrees
-            # with the exact operator by up to ~13% across the target annulus
-            # where its gate PASSES (Inspector INS-c1-001) -- an uncertified
-            # analytic rung must never ship into the serve path.  Fall
-            # through to the exact engine, which is certifiable throughout
-            # the annulus (``w * |y| <= 60``).  Re-enable this slot only once
-            # the Professor pins b1's closed form AND an oracle-accuracy gate
-            # against ``operator.F_op`` passes at a stated tolerance.
+            # rung is NOT wired here.  Its lead-only carrier
+            # (``_born.born_lead_carrier``) and band-split gate
+            # (``_born.born_gate``) ship as correct primitives, but the
+            # served object is ``F_carrier`` MINUS a trained residual chart,
+            # and that residual chart is a TRAIN_TIER driver artifact that
+            # has not yet been trained.  Until it exists, fall through to the
+            # exact engine, which is certifiable throughout the annulus
+            # (``w * |y| <= 60``).  Re-enable this slot only once the
+            # driver-trained residual chart lands and its reconstruction is
+            # wired here.
             return None
 
         if definition in KNOWN_FARFIELD_DEFINITIONS:

@@ -1,44 +1,51 @@
-"""Born (weak-deflection) analytic amplification for the low-w far zone.
+"""Born (weak-deflection) analytic carrier for the far annulus.
 
 WHAT
-    The last rung of the Chang-Refsdal serving ladder: an *analytic*
-    microlensing amplification valid in the low-frequency far zone --
-    large reduced impact ``|y'|`` and small ``w`` -- where the exact
-    engine is still certifiable but a *trained* cover cannot be
-    prior-universal (the low-w far zone varies on the Einstein scale, so
-    trained tiles there are prior-sized).  This module supplies
+    The last rung of the Chang-Refsdal serving ladder for the far
+    annulus ``3.0 < |y| <= 4.2426`` at positive parity (``gamma < 3/4``).
+    The served object is an *analytic carrier*; a driver-trained chart
+    interpolates the cheap RESIDUAL ``F_exact - F_carrier`` (the same
+    carrier + interpolated-remainder decomposition as SACR-C and the
+    far-field label).  This module supplies
 
-    * `born_amplification` -- the total wave-optics amplification
-      ``F_born`` expanded about ``sqrt(mu_macro)``;
-    * `born_gate` -- the measured validity boundary as a named refusal;
-    * `born_envelope` -- the demodulated far-field envelope, built with
-      the SAME `switched_analytic_channels` projection the trained
-      far-field charts use, so the serve mirror is byte-for-byte the
-      existing one; and
+    * `born_lead_carrier` -- the SERVE object: the LEAD-ONLY carrier
+      ``sqrt(mu_macro) * exp(1j*w*phi_geo)`` with NO ``a0``/``b1``
+      correction (F025: the resolved-image correction splines far worse
+      and violates F009 below the band split, so it serves nowhere);
+    * `born_amplification` -- the resolved-image (``w*Delta_tau >> 1``)
+      two-term diagnostic ``F_born`` expanded about ``sqrt(mu_macro)``,
+      carrying the real ``a0`` and imaginary ``b1`` corrections;
+    * `born_gate` -- the measured validity boundary as a named refusal
+      (the ``gamma < 3/4`` exterior fence and the band-split guard);
+    * `born_envelope` -- the demodulated far-field envelope of the
+      diagnostic total, built with the SAME `switched_analytic_channels`
+      projection the trained far-field charts use; and
     * `BornDomainError` -- the rung's named refusal.
 
 WHY
-    Owner ruling 2026-07-23 (NON-NEGOTIABLE): zero-quadrature serving
-    plus prior-universality leave no other cover for the low-w far zone.
+    F023's original premise is BACKWARDS.  It is NOT that the far zone
+    "varies on the Einstein scale" so a trained cover cannot help: once
+    the analytic carrier ``exp(1j*w*phi_geo)`` is demodulated, the
+    Einstein-scale variation lives in that CLOSED-FORM phase, and the
+    residual ``F_exact - F_carrier`` splines cheaply -- ~4 y-nodes at low
+    ``w`` and MORE at mid/high ``w`` (F023).  The old label
+    "low-frequency far zone" is therefore a misnomer: this is a MID-``w``
+    RESOLVED-IMAGE expansion, keyed on ``w * Delta_tau`` (the Fermat-delay
+    difference of the two real images), NOT on ``w`` or ``|y|`` alone.
     Born is needed for prior-universality, NOT because the oracle fails
-    -- every Born claim in the target annulus ``3.0 < |y| <= 4.2426`` is
-    certifiable against the exact engine (``w * |y| <= 60``).
+    -- every claim in the target annulus is certifiable against the exact
+    engine (``w * |y| <= 60``).
 
-STATUS -- NOT WIRED INTO THE SERVE PATH (Inspector INS-c1-001).  The
-    two-term series carries an unpinned O(1) numerator
-    (`_born_factors` ``b1 = 1.0``, a placeholder the Professor has not yet
-    derived a closed form for), so ``born_amplification`` disagrees with
-    the exact `operator.F_op` by up to ~13% across the target annulus even
-    where `born_gate` PASSES -- guard A is calibrated to the same
-    placeholder and so fails to refuse where inaccurate.  This module is
-    therefore kept for its primitives and for the oracle-accuracy tests
-    that measure the gap, but `likelihood._surrogate_coefficients` does
-    NOT call it: the low-w far zone falls through to the exact engine.
-    Re-enable the serve slot ONLY once the Professor pins ``b1`` AND an
-    oracle-accuracy gate against `operator.F_op` passes at a stated
-    tolerance.
-
-CONVENTIONS (each expressed ONCE here, asserted at its consumer -- the
+STATUS -- CARRIER SHIPS; LIVE SERVE AWAITS THE TRAINED RESIDUAL CHART.
+    `born_lead_carrier` and the band-split gate (`born_gate`) are correct
+    and shippable primitives, but the residual chart that the carrier is
+    subtracted from is a TRAIN_TIER driver artifact that has not yet been
+    trained.  Until it exists, `likelihood._surrogate_coefficients` does
+    NOT wire this slot: the far annulus falls through to the exact engine,
+    which is certifiable throughout (``w * |y| <= 60``).  ``a0``/``b1``
+    are the correct resolved-image physics and the macro-limit diagnostic
+    (`born_amplification`); they are deliberately kept OUT of the serve
+    carrier (F025).
 delay-frame bug fixed in Build 8h-b7 was a convention held implicitly at
 four sites; this module adds no fifth):
 
@@ -68,18 +75,50 @@ import cmath
 
 import numpy as np
 
-from cogwheel.lensing.chang_refsdal import geometry, channels
+from cogwheel.lensing.chang_refsdal import geometry, channels, operator
 
-#: Held-out accuracy budget for the Born series (guard A): the estimated
-#: magnitude of the first neglected ``O(w**2 / Q2r**2)`` term must stay
-#: below this for the two-term series to be trusted.
-EPS_BORN = 1e-4
+#: Upper edge of the smooth-switch window and geometric-optics resolution
+#: onset, imported from `operator` as the ONE authoritative home of the
+#: SACR-C resolution scale ``RHO_END = 4`` (do not introduce a second
+#: literal).  Guard A refuses once the two real images are resolved,
+#: ``w * Delta_tau >= RHO_END``, the same band split SACR-C switches on.
+RHO_END = operator.RHO_END
+
+#: Inner edge of the target annulus ``3.0 < |y| <= 4.2426``.  The
+#: exterior fence refuses when the caustic's maximum extent reaches it:
+#: the astroid ``max|y|`` closed form (below) equals ``3.0`` exactly at
+#: ``gamma = 3/4``, so serving is confined to ``gamma < 3/4`` where the
+#: whole annulus lies OUTSIDE the caustic.
+ANNULUS_INNER_RADIUS = 3.0
+
+#: EPS_BORN was the RETIRED T1 accuracy bar of the standalone two-term
+#: series (guard A's old ``O(w**2 / Q2r**2)`` estimate vs 1e-4).  The
+#: production criterion is no longer that the standalone series hits an
+#: accuracy target -- the carrier is subtracted and a chart interpolates
+#: the residual (F025) -- so the constant is retired and guard A is
+#: re-keyed to the band split ``w * Delta_tau >= RHO_END``.
 
 #: Positive-parity convergence margin (guard B): the reduced shear
 #: ``gamma_p = |gamma| / (1 - kappa)`` must stay this far below the parity
 #: wall ``gamma_p = 1`` (``det A = 0``).  The series' convergence radius
 #: IS the parity wall, so the macro image degenerates as ``gamma_p -> 1``.
 DELTA_GAMMA_P = 5e-3
+
+#: The ``gamma < 3/4`` exterior fence.  On the astroid caustic the maximum
+#: source extent is ``max|y| = 2 * gamma / sqrt(1 - gamma)`` (kappa = 0),
+#: or ``sqrt(lam) * 2 * gp / sqrt(1 - gp)`` with ``gp = gamma / lam`` and
+#: ``lam = 1 - kappa`` in general.  At ``gamma = 3/4`` (kappa = 0) this is
+#: exactly ``3.0`` -- the annulus inner edge -- so ``gamma >= 3/4`` lets
+#: the caustic breach the annulus (fold crossings in the tile: a different,
+#: interior geometry, out of this rung's scope).
+GAMMA_FENCE = 0.75
+
+# Self-check: the astroid max|y| closed form hits the annulus inner edge
+# exactly at the fence (kappa = 0).  2 * 0.75 / sqrt(0.25) == 1.5 / 0.5.
+assert math.isclose(
+    2.0 * GAMMA_FENCE / math.sqrt(1.0 - GAMMA_FENCE),
+    ANNULUS_INNER_RADIUS, rel_tol=0.0, abs_tol=1e-12), \
+    'exterior-fence closed form must equal the annulus inner edge at gamma=3/4'
 
 
 class BornDomainError(geometry.LensDomainError):
@@ -93,7 +132,7 @@ class BornDomainError(geometry.LensDomainError):
 
 
 def _born_factors(y1: float, y2: float, gamma: float, beta: float,
-                  kappa: float) -> tuple[float, float, float, float]:
+                  kappa: float) -> tuple[float, float, float, float, float]:
     """Frequency-independent geometry factors of the Born series.
 
     Every returned quantity is ``w``-independent, so it is computed once
@@ -131,8 +170,19 @@ def _born_factors(y1: float, y2: float, gamma: float, beta: float,
         coordinates (``x0' = sqrt(1 - kappa) * x0``); the ``O(|y'|**2)``
         denominator whose reciprocal is the series' small parameter.
     b1 : float
-        The ``O(1)`` reduced-coordinate numerator of the leading
-        correction ``1j * (w / 2) * b1 / q2r``.
+        The ``O(1)`` reduced-coordinate numerator of the IMAGINARY,
+        ``w``-linear leading correction ``1j * (w / 2) * b1 / q2r``.  The
+        matrix form is ``b1 = -lam * (2 lam r0_sq - x0.y) / (det_a r0_sq)``
+        (F023); a pure point mass (``gamma = kappa = 0``) gives exactly
+        ``b1 = -1``.
+    a0 : float
+        The ``O(1)`` reduced-coordinate numerator of the REAL,
+        ``w``-independent resolved-image correction ``a0 / q2r`` (valid
+        only for ``w * Delta_tau >> 1``; it must NOT enter the serve
+        carrier, F009/F025).  ``a0 = -lam * (lam r0_sq - x0.y) /
+        (det_a r0_sq)``; a pure point mass gives exactly ``a0 = 0``.  The
+        pair satisfies the macro-limit invariant
+        ``b1 - a0 == -lam**2 * mu_macro``.
     """
     lam = 1.0 - kappa
     cos2b = math.cos(2.0 * beta)
@@ -164,38 +214,38 @@ def _born_factors(y1: float, y2: float, gamma: float, beta: float,
     # is x0' = A'^{-1} y' = sqrt(lam) * x0 and |x0'|**2 = lam * |x0|**2.
     q2r = lam * r0_sq
 
-    # BLOCKED-derivation: the exact O(1) numerator b1 of the leading
-    # correction is owned by the Professor and is NOT recorded anywhere
-    # in the repository (searched .claude/spec, FINDINGS, every handoff).
-    # The MANDATED STRUCTURE is honoured exactly -- imaginary correction
-    # 1j*(w/2)*b1/q2r, w in the numerator, smallness 1/|y'|**2 = 1/q2r --
-    # but the numeric value below is a documented placeholder pending the
-    # pinned derivation; the Test Developer's oracle-accuracy gate against
-    # the exact engine is what fixes it.  Single authoritative site: edit
-    # here only.  UNVERIFIED (see change report).
-    b1 = 1.0
+    # Closed-form O(1) numerators of the resolved-image expansion (F023,
+    # Professor-confirmed).  b1 is the imaginary w-linear correction, a0
+    # the real w-independent one; they equal the matrix forms
+    # -lam * x0^T A^{-1} x0 / |x0|**2 evaluated with A x0 = y.  Point mass
+    # (gamma = kappa = 0): b1 = -1, a0 = 0; invariant b1 - a0 =
+    # -lam**2 * mu_macro.  Serve uses NEITHER (F025) -- these feed the
+    # resolved-image diagnostic `born_amplification`/`born_envelope` only.
+    b1 = -lam * (2.0 * lam * r0_sq - x0_dot_y) / (det_a * r0_sq)
+    a0 = -lam * (lam * r0_sq - x0_dot_y) / (det_a * r0_sq)
 
-    return sqrt_mu, phi_geo, q2r, b1
+    return sqrt_mu, phi_geo, q2r, b1, a0
 
 
 def born_amplification(w: float, y1: float, y2: float, gamma: float,
                        beta: float = 0.0, kappa: float = 0.0) -> complex:
-    """Total Born amplification ``F_born`` at one frequency.
+    """Resolved-image Born amplification diagnostic ``F_born``.
 
-    The weak-deflection wave-optics amplification, expanded about
-    ``sqrt(mu_macro)``::
+    The weak-deflection wave-optics amplification in the RESOLVED-IMAGE
+    regime (``w * Delta_tau >> 1``), expanded about ``sqrt(mu_macro)``::
 
         F_born = sqrt(mu_macro) * exp(1j*w*phi_geo)
-                 * (1 + 1j*(w/2)*b1/Q2r + O(w**2 / Q2r**2)),
+                 * (1 + a0/Q2r + 1j*(w/2)*b1/Q2r + O(w**2 / Q2r**2)),
 
     with ``mu_macro = 1 / ((1 - kappa)**2 - gamma**2)``, ``phi_geo`` the
-    geometric Fermat phase at the macro image, and ``(b1, Q2r)`` the
-    ``O(1)`` geometry factors of `_born_factors`.  The correction carries
-    ``w`` in the numerator, so ``F_born -> sqrt(mu_macro)`` as ``w -> 0``
-    (the macro-magnification limit) and the leading term is
-    ``w``-independent.  Positive parity only; a ``c1 = 1 / (2 w)`` form
-    (diverging as ``w -> 0``) would be the inverted-power bug the
-    Professor explicitly ruled out.
+    geometric Fermat phase at the macro image, and ``(b1, a0, Q2r)`` the
+    ``O(1)`` geometry factors of `_born_factors`.  This is a DIAGNOSTIC /
+    macro-limit form, NOT the serve object: the ``a0`` constant offset
+    violates F009 below the band split (``F(w->0) = sqrt(mu_macro)``
+    exactly, whereas ``1 + a0/Q2r`` does not), so the SERVE path uses the
+    lead-only carrier `born_lead_carrier` instead (F025).  A
+    ``c1 = 1 / (2 w)`` form (diverging as ``w -> 0``) would be the
+    inverted-power bug the Professor explicitly ruled out.
 
     Returned in the ABSOLUTE Fermat-delay frame, matching
     `operator.F_op` (which `channels._exact_total` later demodulates by
@@ -219,36 +269,85 @@ def born_amplification(w: float, y1: float, y2: float, gamma: float,
     Returns
     -------
     complex
-        The total amplification ``F_born(w)``.
+        The resolved-image amplification diagnostic ``F_born(w)``.
     """
-    sqrt_mu, phi_geo, q2r, b1 = _born_factors(y1, y2, gamma, beta, kappa)
-    correction = 1.0 + 1j * (0.5 * w) * b1 / q2r
+    sqrt_mu, phi_geo, q2r, b1, a0 = _born_factors(y1, y2, gamma, beta, kappa)
+    correction = 1.0 + a0 / q2r + 1j * (0.5 * w) * b1 / q2r
     return sqrt_mu * cmath.exp(1j * w * phi_geo) * correction
+
+
+def born_lead_carrier(w: float, y1: float, y2: float, gamma: float,
+                      beta: float = 0.0, kappa: float = 0.0) -> complex:
+    """Lead-only Born carrier ``sqrt(mu_macro) * exp(1j*w*phi_geo)``.
+
+    THE SERVE OBJECT for the far annulus.  It carries ONLY the analytic
+    lead term -- NO ``a0``/``b1`` resolved-image correction -- because a
+    driver-trained chart interpolates the residual ``F_exact - F_carrier``
+    and the lead-only carrier is what makes that residual splinable
+    (F025): the ``(a0, b1)`` carrier inflates the azimuthal node count
+    2.5x-11x over the swept gamma range, and ``a0`` breaks the exact limit
+    ``F(w -> 0) = sqrt(mu_macro)`` (F009).  ``phi_geo`` supplies the
+    Einstein-scale phase variation in closed form, so the demodulated
+    residual varies slowly.
+
+    Returned in the ABSOLUTE Fermat-delay frame, matching
+    `operator.F_op`; downstream demodulation is the caller's (mirroring
+    `born_amplification`).  Pure ``float64`` / ``complex128`` scalar
+    arithmetic (``numba``-ready, no ``fastmath``).  Assumes the
+    configuration has passed `born_gate`.
+
+    Parameters
+    ----------
+    w : float
+        Dimensionless frequency (``> 0``).
+    y1, y2 : float
+        Source position in the lens plane.
+    gamma, beta, kappa : float
+        External shear magnitude, orientation (radians), convergence.
+
+    Returns
+    -------
+    complex
+        The lead-only carrier ``sqrt(mu_macro) * exp(1j*w*phi_geo)``.
+    """
+    sqrt_mu, phi_geo, _, _, _ = _born_factors(y1, y2, gamma, beta, kappa)
+    return sqrt_mu * cmath.exp(1j * w * phi_geo)
 
 
 def born_gate(w: float, y1: float, y2: float, gamma: float,
               beta: float, kappa: float) -> None:
     """Refuse configurations outside the measured Born validity region.
 
-    Two physically distinct, load-bearing guards, both raising
+    Three physically distinct, load-bearing guards, all raising
     `BornDomainError` (a named refusal, never a silent ``nan``):
 
-    * **Guard A -- series convergence.**  The estimated magnitude of the
-      first neglected ``O(w**2 / Q2r**2)`` term must stay below
-      `EPS_BORN`.  ``Q2r`` shrinks as the source approaches the shear
-      anisotropy, so this is the boundary where the two-term series stops
-      being accurate.
     * **Guard B -- parity-wall margin.**  The reduced shear
       ``gamma_p = |gamma| / (1 - kappa)`` must stay at least
-      `DELTA_GAMMA_P` below ``1``.  The series' convergence radius is the
-      parity wall ``gamma_p = 1`` (``det A = 0``), where the macro image
+      `DELTA_GAMMA_P` below ``1``.  The convergence radius is the parity
+      wall ``gamma_p = 1`` (``det A = 0``), where the macro image
       degenerates; positive parity only, so the macro saddle
-      (``gamma_p > 1``) is refused here by construction.
+      (``gamma_p > 1``) is refused here by construction.  NOT made
+      redundant by the exterior fence (it also catches ``kappa``-driven
+      approaches to the wall at ``gamma < 3/4``).
+    * **Exterior fence -- ``gamma < 3/4``.**  On the astroid caustic the
+      maximum source extent is ``max|y| = sqrt(lam) * 2 * gp /
+      sqrt(1 - gp)`` (``gp = gamma / lam``, ``lam = 1 - kappa``), which at
+      ``gamma = 3/4`` (kappa = 0) equals the annulus inner edge ``3.0``
+      exactly.  When it reaches `ANNULUS_INNER_RADIUS` the caustic
+      breaches the annulus (fold crossings in the tile), a different,
+      interior geometry out of this rung's scope -- refuse.
+    * **Guard A -- band split (re-keyed).**  Refuse once the two real
+      images are RESOLVED, ``w * Delta_tau >= RHO_END``, with
+      ``Delta_tau`` the difference of their FULL Fermat delays
+      (`geometry.find_images` + `geometry.delay`, including the ``-ln|x|``
+      term; NOT ``phi_geo`` nor ``w * r0_sq`` -- F024).  Above the split
+      the served lead-only carrier is superseded by the two-real-image
+      ppGO + ghost branch, so the Born carrier rung declines there.
 
     The exact degenerate axes (``1 - kappa <= 0`` and
     ``|gamma| == 1 - kappa``) are refused first by delegating to
     `geometry.macro_matrix`, whose `geometry.LensDomainError` propagates
-    unchanged.
+    unchanged; its returned matrix feeds `geometry.find_images`.
 
     Parameters
     ----------
@@ -265,10 +364,12 @@ def born_gate(w: float, y1: float, y2: float, gamma: float,
         Degenerate macro axis (``1 - kappa <= 0`` or
         ``|gamma| == 1 - kappa``), from `geometry.macro_matrix`.
     BornDomainError
-        Guard A (series non-convergence) or guard B (parity-wall margin).
+        Guard B (parity-wall margin), the exterior fence
+        (``gamma >= 3/4`` in the annulus), or guard A (band split).
     """
-    # Degenerate-axis refusal, shared with every other wave-branch path.
-    geometry.macro_matrix(gamma, beta=beta, kappa=kappa)
+    # Degenerate-axis refusal, shared with every other wave-branch path;
+    # its matrix is reused by the band-split image finder below.
+    matrix = geometry.macro_matrix(gamma, beta=beta, kappa=kappa)
 
     lam = 1.0 - float(kappa)
     gamma_p = abs(float(gamma)) / lam
@@ -282,17 +383,39 @@ def born_gate(w: float, y1: float, y2: float, gamma: float,
             f'converges only inside the positive-parity margin; the macro '
             f'image degenerates at the parity wall gamma_p = 1.')
 
-    # Guard A: first-neglected-term estimate against the accuracy budget.
-    _, _, q2r, b1 = _born_factors(float(y1), float(y2), float(gamma),
-                                  float(beta), float(kappa))
-    next_term = 0.5 * (0.5 * float(w) * abs(b1) / q2r) ** 2
-    if next_term >= EPS_BORN:
+    # Exterior fence: refuse when the caustic's maximum source extent
+    # reaches the annulus inner edge (equivalently gamma >= 3/4 at
+    # kappa = 0).  gamma_p < 1 here (guard B passed), so the sqrt is safe.
+    caustic_max_y = math.sqrt(lam) * 2.0 * gamma_p / math.sqrt(1.0 - gamma_p)
+    if caustic_max_y >= ANNULUS_INNER_RADIUS:
         raise BornDomainError(
-            f'Born rung refuses (w, y1, y2, gamma_p) = '
-            f'({w}, {y1}, {y2}, {gamma_p}): estimated next-order term '
-            f'|O(w^2 / Q2r^2)| = {next_term:.3e} >= EPS_BORN = {EPS_BORN}. '
-            f'The reduced impact Q2r = {q2r:.3e} is too small (source too '
-            f'close to the shear anisotropy) for the two-term series.')
+            f'Born rung refuses (kappa, gamma) = ({kappa}, {gamma}): '
+            f'caustic max|y| = sqrt(lam) * 2 gp / sqrt(1 - gp) = '
+            f'{caustic_max_y} >= annulus inner edge = '
+            f'{ANNULUS_INNER_RADIUS} (gamma >= 3/4 at kappa = 0). The '
+            f'caustic breaches the annulus; that interior fold geometry is '
+            f'out of the Born rung scope.')
+
+    # Guard A: band split.  Delta_tau is the FULL Fermat-delay difference
+    # of the two real images (includes -ln|x|); resolved => decline.
+    source = np.array([float(y1), float(y2)], dtype=float)
+    images = geometry.find_images(source, matrix)
+    if len(images) < 2:
+        raise BornDomainError(
+            f'Born rung refuses (w, y1, y2, gamma) = '
+            f'({w}, {y1}, {y2}, {gamma}): the band split needs the two '
+            f'real images, but geometry.find_images returned '
+            f'{len(images)}. The far annulus at gamma < 3/4 is exterior to '
+            f'the caustic and should yield two real images.')
+    delays = [geometry.delay(image, source, matrix) for image in images]
+    delta_tau = max(delays) - min(delays)
+    if float(w) * delta_tau >= RHO_END:
+        raise BornDomainError(
+            f'Born rung refuses (w, y1, y2, gamma) = '
+            f'({w}, {y1}, {y2}, {gamma}): the two real images are resolved, '
+            f'w * Delta_tau = {float(w) * delta_tau} >= RHO_END = '
+            f'{RHO_END}. Above the band split the lead-only carrier is '
+            f'superseded by the two-real-image ppGO + ghost branch.')
 
 
 def born_envelope(dense_w: np.ndarray, y1: float, y2: float, gamma: float,
@@ -359,9 +482,11 @@ def born_envelope(dense_w: np.ndarray, y1: float, y2: float, gamma: float,
         'born_envelope must demodulate in a finite geom.t_min frame'
 
     # Frequency-independent factors computed once, then broadcast over w.
-    sqrt_mu, phi_geo, q2r, b1 = _born_factors(
+    # This is the resolved-image DIAGNOSTIC envelope (a0 + b1 correction),
+    # not the serve object; the served carrier is `born_lead_carrier`.
+    sqrt_mu, phi_geo, q2r, b1, a0 = _born_factors(
         float(y1), float(y2), float(gamma), float(beta), float(kappa))
-    correction = 1.0 + 1j * (0.5 * dense_w) * b1 / q2r
+    correction = 1.0 + a0 / q2r + 1j * (0.5 * dense_w) * b1 / q2r
     f_born = sqrt_mu * np.exp(1j * dense_w * phi_geo) * correction
 
     # Demodulate the absolute-frame total into the relative-delay frame,
