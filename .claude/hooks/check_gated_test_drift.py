@@ -202,9 +202,14 @@ def _helper_symbols(helpers: dict[str, ast.AST],
     return reach
 
 
-def _gated_references(symbols: dict[str, str]
+def _gated_references(symbols: dict[str, str], advisory: list
                       ) -> list[tuple[str, str, str, str]]:
-    """(test_file, gated_test, symbol, how) for refs reachable from skips."""
+    """(test_file, gated_test, symbol, how) for refs reachable from skips.
+
+    Also appends ``(file, test, symbol)`` to ``advisory`` for RUNNING tests
+    that reference the same symbols -- reported as blast radius, never a
+    block, since a running test announces its own breakage.
+    """
     findings: list[tuple[str, str, str, str]] = []
     if not symbols:
         return findings
@@ -228,7 +233,19 @@ def _gated_references(symbols: dict[str, str]
                     continue
                 here = gated or _is_gated(child)
                 name = f'{prefix}{child.name}'
+                hits = set(_referenced(child, set(symbols)))
+                for helper in _referenced(child, set(helpers)):
+                    hits |= reach.get(helper, set())
                 if not here:
+                    # A RUNNING test that breaks reports itself, loudly, the
+                    # moment the suite runs -- so this is advisory blast
+                    # radius, never a block.  Blocking here would fire on
+                    # every routine signature change and train everyone to
+                    # --no-verify past the gate, which is how the gate that
+                    # DOES matter stops being read.
+                    if isinstance(child, ast.ClassDef):
+                        for symbol in sorted(hits):
+                            advisory.append((rel, name, symbol))
                     scan(child, f'{name}.', here)
                     continue
                 for symbol in sorted(_referenced(child, set(symbols))):
@@ -251,7 +268,19 @@ def _gated_references(symbols: dict[str, str]
 
 def main() -> int:
     symbols = _changed_symbols()
-    findings = _gated_references(symbols)
+    advisory: list[tuple[str, str, str]] = []
+    findings = _gated_references(symbols, advisory)
+    if advisory:
+        by_symbol: dict[str, set[str]] = {}
+        for _file, test, symbol in advisory:
+            by_symbol.setdefault(symbol, set()).add(test)
+        print('  [advisory] changed API is referenced by running tests '
+              '(they will report their own breakage):')
+        for symbol in sorted(by_symbol):
+            tests = sorted(by_symbol[symbol])
+            shown = ', '.join(tests[:3])
+            more = f' (+{len(tests) - 3} more)' if len(tests) > 3 else ''
+            print(f'      {symbol}: {shown}{more}')
     if not findings:
         return 0
     print('===== PRE-COMMIT: changed API referenced by SKIPPED tests =====')
