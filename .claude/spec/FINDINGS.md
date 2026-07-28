@@ -1378,3 +1378,64 @@ mentioned the ghost, both looked like admission criteria, and one was replaced
 by the other on the strength of that resemblance. Before retiring a guard, ask
 what it refuses that the replacement does not — here, a whole boundary of
 parameter space that neither the tests nor the census was measuring.
+
+## F028 — the uniform fold Airy arm SERVES wrong values on the positive-parity path: its `xi`-only certificate cannot see distance from the caustic, and `q = 0` cannot represent an asymmetric fold (2026-07-28)
+
+Found while trying to measure C6. Four things, in the order they were forced.
+
+**1. `F_op` is NOT an independent oracle above `w = 60`.** `_positive_parity_grid`
+(line ~1524) and `_saddle_grid` (line ~957) both hand every `w >
+W_CEILING_SCHWINGER` node to `_uniform_arm_value` — the same fold Airy arm.
+A first attempt to measure `|F_op - F_Airy|` returned IDENTICALLY `0.0` in
+every cell because both sides were the same call. Any future accuracy claim
+about the uniform arms must pin `w <= 60` (quadrature) or use
+`geometric_amplification`, never `F_op`.
+
+**2. The two routing rules differ, and the positive-parity one has no geometric
+branch.** `_saddle_grid` offers the arm only when the node is UNRESOLVED
+(`w * delta_min < RHO_END`); `_positive_parity_grid` offers it to EVERY node
+above the ceiling. So on the positive-parity path — the whole sampled prior box
+— a perfectly resolved config at `w > 60` is served by the Airy arm rather than
+by geometric optics, which is exact to `1e-5` there.
+
+**3. Measured: the served value is wrong by O(1).** Positive parity, off-cusp
+ray `t = 0.55`, oracle `geometric_amplification` (cross-checked against the
+Schwinger quadrature at `w = 45..60`, agreeing to `1e-5`–`1e-4`):
+
+| gamma | eta/R_c | w | w*Dtau | \|F_arm/F_geo\| | rel err |
+|---|---|---|---|---|---|
+| 0.70 | 0.40 | 70 | 35.2 | 0.348 | 7.5e-1 |
+| 0.70 | 0.40 | 500 | 251.6 | 1.846 | 2.7e+0 |
+| 0.90 | 0.40 | 500 | 564.2 | 0.192 | 9.4e-1 |
+| 0.90 | 0.20 | 500 | 176.4 | 1.715 | 2.7e+0 |
+
+The error does NOT shrink with `w` — it grows and oscillates. This directly
+contradicts `_airy_fold`'s module docstring ("the large-`xi` limit reproduces
+`geometry`'s exact geometric two-image sum by construction"). Meanwhile the
+arm's own certificate reads `1.2e-2`–`4.7e-2`, passing the `envelope_bar = 0.05`
+gate: it is optimistic by 20x–100x.
+
+**4. Mechanism — `q = 0` is a SYMMETRIC-fold assumption, not a leading-order
+truncation.** `fold_amplification` sets the `Ai'` amplitude `q` to zero (its
+docstring calls this "the pure-phase symmetric-fold result"). With `q = 0` the
+served form is a single `Ai(-xi)` term, whose large-argument limit is ONE
+sinusoid of fixed amplitude. The true two-image sum has two independent complex
+amplitudes, equal only when the merging pair has equal magnification — i.e.
+only AT the caustic. Away from it the fold is asymmetric and no choice of `p`
+alone can represent it, so the error is O(1) however large `xi` becomes.
+
+**Why the certificate misses it.** `xi = (3 w DT / 4)**(2/3)` is large in TWO
+different regimes: deep in the asymptotic limit near the caustic (where the arm
+is valid) and far from the caustic at any `w` (where `DT` is large and the fold
+normal form has broken down). `xi` alone cannot distinguish them. The missing
+ingredient is exactly COVERAGE_DESIGN C6's caustic-relative distance `eta/R_c`:
+admission must bound the fold ASYMMETRY, which `xi` does not measure.
+
+**Corollary — the arm's certifying set and its serving set are nearly
+disjoint.** Random sweep, 4000 draws with a merging fold pair, saddle routing
+rule: 906 were routed to the arm and only 2 (0.22%) certified; a further 712
+certified where the routing never calls them. So on the saddle path the uniform
+rung is very nearly dead code, while on the positive-parity path it is live and
+wrong.
+
+Probes: `probe_c6_window.py`, `probe_arm_reachable.py` (scratchpad).
