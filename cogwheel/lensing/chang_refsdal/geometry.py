@@ -2053,7 +2053,8 @@ def ghost_kernel(w_dimensionless, source: np.ndarray, matrix: np.ndarray, *,
             f'{source.shape} and matrix of shape {matrix.shape}: they '
             f'must have shapes (2,) and (2, 2).')
 
-    candidates = _ghost_candidates(source, matrix, root_tolerance=root_tolerance)
+    candidates = _ghost_candidates(source, matrix,
+                                   root_tolerance=root_tolerance)
     if not candidates:
         raise GhostDomainError(
             f'No complex-saddle (ghost) pair for source '

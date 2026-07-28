@@ -35,6 +35,7 @@ Exit 0 = clean.  Exit 1 = drift found.
 from __future__ import annotations
 
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -283,6 +284,41 @@ def main() -> int:
             print(f'      {symbol}: {shown}{more}')
     if not findings:
         return 0
+
+    # Targeted acknowledgement.  A gated test flagged here is not necessarily
+    # BROKEN -- the honest resolution is often "I ran it under its tier and it
+    # passes", which neither a fix nor a deletion expresses.  Without a way to
+    # say that, the only exit is ``--no-verify``, which also skips the
+    # correctness gates that run BEFORE this one and trains exactly the habit
+    # this file's docstring warns about.
+    #
+    # ``GATED_DRIFT_ACK`` takes a comma-separated list of ``Class`` or
+    # ``Class.test_method`` names the committer has actually RUN.  It is
+    # deliberately per-test rather than a blanket switch: acknowledging one
+    # test says nothing about the next one, so drift in a test you did not
+    # check still blocks.  Substring-free exact matching keeps it honest.
+    acked = {entry.strip()
+             for entry in os.environ.get('GATED_DRIFT_ACK', '').split(',')
+             if entry.strip()}
+    if acked:
+        kept = []
+        confirmed = []
+        for finding in findings:
+            _file, test_name, _symbol, _how = finding
+            head = test_name.split('.', 1)[0]
+            if test_name in acked or head in acked:
+                confirmed.append(test_name)
+            else:
+                kept.append(finding)
+        if confirmed:
+            print('  [acknowledged] gated tests the committer states they ran '
+                  '(GATED_DRIFT_ACK):')
+            for name in sorted(set(confirmed)):
+                print(f'      {name}')
+        findings = kept
+        if not findings:
+            return 0
+
     print('===== PRE-COMMIT: changed API referenced by SKIPPED tests =====')
     print('  These tests do NOT run, so they will NOT report their own')
     print('  breakage. The suite can be green while they are broken.')
@@ -292,7 +328,10 @@ def main() -> int:
         reason = symbols.get(symbol, 'unparseable test file')
         print(f'      references {symbol!r} {how} -- {reason}')
     print()
-    print('  Fix the test, delete it with a reason, or bypass:')
+    print('  Fix the test, delete it with a reason, or -- if you RAN it under')
+    print('  its tier and it passes -- acknowledge that specific test:')
+    print('    GATED_DRIFT_ACK="ClassName,Other.test_method" git commit ...')
+    print('  Blanket bypass (also skips the correctness gates above):')
     print('    git commit --no-verify')
     print('==============================================================')
     return 1

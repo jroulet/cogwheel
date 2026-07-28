@@ -232,7 +232,14 @@ GUARD_W_NODES_PER_DECADE = 4
 
 
 def _build_guard_chart(gamma_range: tuple[float, float]) -> 'sg.FarFieldChart':
-    """Build one cheap exterior far-field chart over ``gamma_range`` (WP2b)."""
+    """Build one cheap exterior far-field chart over ``gamma_range`` (WP2b).
+
+    These tests assert refusal BOOKKEEPING at the ``gamma = 1`` parity wall
+    (``image_count``/``parity``/``refused_points``).  The chart is coarse on
+    purpose; it no longer needs to bypass the carrier guard, which since F022
+    measures re/im increments rather than ``arg`` and so does not fire on the
+    amplitude nulls this box contains.
+    """
     single = sg.LensAmplificationSurrogate.from_engine(
         gamma_range=gamma_range, rho_range=GUARD_RHO_RANGE,
         theta_c_range=GUARD_THETA_C_RANGE, w_range=GUARD_W_RANGE,

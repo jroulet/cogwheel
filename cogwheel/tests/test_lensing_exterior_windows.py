@@ -1030,7 +1030,7 @@ class WindowSeamReconstructionTestCase(ExteriorWindowsTestCase):
         envelope = ch.farfield_envelope_from_partition(self.part, definition)
         _kernels, total = ch.reconstruct_farfield(
             self.w, envelope, self.part.delays, self.part.saddle_kernels,
-            self.part.real_mask, definition)
+            self.part.real_mask, definition, self.part.t_min)
         return total
 
     def test_fixture_is_a_two_image_exterior_fold(self) -> None:
@@ -1147,9 +1147,15 @@ class GhostGateTestCase(ExteriorWindowsTestCase):
         self.assertLess(float(np.max(np.abs(ghost))) / max_f, 0.1)
         envelope = ch.farfield_envelope_from_partition(
             part, ch.FARFIELD_KERNEL_SUM_MINUS_GHOST)
+        # The stored label is DEMODULATED (E_tilde = E_ff_minrel *
+        # exp(+1j w t_min), Build 8h-d2), so the min-relative ghost from
+        # farfield_ghost_term must be re-added in the SAME demodulated frame
+        # (mirrors likelihood.py's serve mirror) before reconstruct_farfield
+        # re-modulates by exp(-1j w t_min) and telescopes.
         _kernels, total = ch.reconstruct_farfield(
-            w, envelope + ghost, part.delays, part.saddle_kernels,
-            part.real_mask, ch.FARFIELD_KERNEL_SUM_MINUS_GHOST)
+            w, envelope + ghost * np.exp(1j * w * part.t_min), part.delays,
+            part.saddle_kernels, part.real_mask,
+            ch.FARFIELD_KERNEL_SUM_MINUS_GHOST, part.t_min)
         err = float(np.max(np.abs(total - part.exact_total)))
         self.assertLess(err / max_f, TOL_RECON)
         self.record_comparison()
@@ -1242,7 +1248,9 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         source = _source_at(gamma, rho, theta_c_deg)
         part = _partition_at(gamma, source, w)
         envelope = ch.farfield_envelope_from_partition(
-            part, ch.FARFIELD_KERNEL_SUM)  # E = F - ppGO (tau_c = 0)
+            part, ch.FARFIELD_KERNEL_SUM)  # E: frame-invariant F - ppGO label
+        # (WP2 8h-d2: demodulated by exp(+1j*w*t_min), so E - ghost_raw is the
+        #  production minus-ghost label -- the residual-reducing direction.)
         max_f = float(np.max(np.abs(part.exact_total)))
         contribution = geometry.ghost_kernel(w, part.source, part.matrix)
         ghost = contribution.kernel * np.exp(1j * w * contribution.delay)
@@ -1309,12 +1317,15 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
                 self.assertGreaterEqual(other / base, 1.0)
                 self.record_comparison()
 
-    def test_production_ghost_sign_is_anti_aligned_outside_cusp(self):
-        # PASS test pinning the exact measured sign discrepancy (this build):
-        # at the gate-PASSING fold config the residual-reducing direction is
-        # E + G (shrinks > 2x), while production's E - G INFLATES (~2x).  This
-        # makes the sign load-bearing and documents WHY the literal helpful
-        # contract below is an expected failure.
+    def test_production_ghost_sign_is_helpful_outside_cusp(self):
+        # PASS test pinning the exact measured sign contract (WP2, 8h-d2): in
+        # the frame-invariant far-field label the production subtraction E - G
+        # is the residual-reducing direction (shrinks > 2x), while the wrong
+        # sign E + G INFLATES the object (>= 5/3x, forced by triangle
+        # inequality once E - G <= |E|/3).  The sign is load-bearing and now
+        # AGREES with the literal helpful contract below.  Before the WP2
+        # relabel this pinned the OPPOSITE sign, which was a min-relative-label
+        # vs absolute-ghost frame mismatch, not a physical sign error.
         w = np.geomspace(3.0, 40.0, 240)
         _part, envelope, ghost, _mf, separation = self._ghost_frame(
             GHOST_GAMMA, 2.0, 45.0, w)
@@ -1322,19 +1333,18 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         base = float(np.max(np.abs(envelope)))
         add = float(np.max(np.abs(envelope + ghost))) / base
         sub = float(np.max(np.abs(envelope - ghost))) / base
-        self.assertLess(add, 0.5)      # E + G shrinks the object > 2x
-        self.assertGreater(sub, 1.5)   # E - G (production) inflates it
+        self.assertGreater(add, 1.5)   # E + G (wrong sign) inflates it
+        self.assertLess(sub, 0.5)      # E - G (production) shrinks it > 2x
         self.record_comparison()
 
-    @unittest.expectedFailure
     def test_literal_helpful_contract_production_minus_ghost_shrinks(self):
-        # Spec-4 LITERAL helpful contract, carried as a tripwire: at a
-        # gate-passing fold config production's E - G should reduce the
-        # interpolated object to <= |E| / 3.  It does NOT in this build (the
-        # subtracted ghost is anti-aligned -> ~2x inflation), so this XFAILs
-        # now and flips to a RED unexpected-success once the production ghost
-        # sign is corrected.  Anti-vacuity counter is bumped BEFORE the
-        # (expected-failing) assertion.
+        # Spec-4 LITERAL helpful contract (now GREEN after WP2, 8h-d2): at a
+        # gate-passing fold config production's E - G reduces the interpolated
+        # object to <= |E| / 3.  Before the frame-invariant relabel this XFAILed
+        # because the retired min-relative label was compared against the
+        # absolute-frame ghost (a carrier mismatch, not a physical sign error);
+        # the WP2 demod removes that mismatch and the literal contract holds.
+        # Anti-vacuity counter is bumped BEFORE the assertion.
         w = np.geomspace(3.0, 40.0, 240)
         _part, envelope, ghost, _mf, separation = self._ghost_frame(
             GHOST_GAMMA, 2.0, 45.0, w)
@@ -1384,7 +1394,7 @@ class TagContractTestCase(ExteriorWindowsTestCase):
                 envelope = ch.farfield_envelope_from_partition(part, definition)
                 _kernels, total = ch.reconstruct_farfield(
                     w, envelope, part.delays, part.saddle_kernels,
-                    part.real_mask, definition)
+                    part.real_mask, definition, part.t_min)
                 err = float(np.max(np.abs(total - part.exact_total))) / max_f
                 self.assertLess(err, TOL_RECON)
                 self.record_comparison()
@@ -1402,9 +1412,12 @@ class TagContractTestCase(ExteriorWindowsTestCase):
         envelope = ch.farfield_envelope_from_partition(
             part, ch.FARFIELD_KERNEL_SUM_MINUS_GHOST)
         ghost = ch.farfield_ghost_term(w, part.source, part.matrix)
+        # Re-add the min-relative ghost in the DEMODULATED label frame
+        # (exp(+1j w t_min)); reconstruct_farfield re-modulates it back.
         _kernels, total = ch.reconstruct_farfield(
-            w, envelope + ghost, part.delays, part.saddle_kernels,
-            part.real_mask, ch.FARFIELD_KERNEL_SUM_MINUS_GHOST)
+            w, envelope + ghost * np.exp(1j * w * part.t_min), part.delays,
+            part.saddle_kernels, part.real_mask,
+            ch.FARFIELD_KERNEL_SUM_MINUS_GHOST, part.t_min)
         err = float(np.max(np.abs(total - part.exact_total))) / max_f
         self.assertLess(err, TOL_RECON)
         self.record_comparison()
@@ -1424,7 +1437,7 @@ class TagContractTestCase(ExteriorWindowsTestCase):
                 envelope = ch.farfield_envelope_from_partition(part, build)
                 _kernels, total = ch.reconstruct_farfield(
                     w, envelope, part.delays, part.saddle_kernels,
-                    part.real_mask, serve)
+                    part.real_mask, serve, part.t_min)
                 err = float(np.max(np.abs(total - part.exact_total))) / max_f
                 self.assertGreater(err, TAG_MISMATCH_FLOOR)
                 self.record_comparison()
@@ -1488,7 +1501,7 @@ class TagContractTestCase(ExteriorWindowsTestCase):
         for serve in (ch.FARFIELD_DIFFRACTIVE, ch.FARFIELD_KERNEL_SUM):
             _kernels, total = ch.reconstruct_farfield(
                 w, envelope, part.delays, part.saddle_kernels,
-                part.real_mask, serve)
+                part.real_mask, serve, part.t_min)
             rel[serve] = np.abs(total - part.exact_total) / max_f
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig, ax = plt.subplots(figsize=(6, 4))
@@ -2459,7 +2472,14 @@ class GhostFrameCollapseTestCase(ExteriorWindowsTestCase):
         ghost_raw = contribution.kernel * np.exp(1j * w * contribution.delay)
         minus_ghost = ch.farfield_envelope_from_partition(
             part, ch.FARFIELD_KERNEL_SUM_MINUS_GHOST)
-        resid_raw = np.abs(kernel_sum - ghost_raw) / np.abs(exact)
+        # WP2 (8h-d2) made the FARFIELD_KERNEL_SUM label frame-INVARIANT by
+        # demodulating it with exp(+1j*w*t_min).  The raw-frame witness needs
+        # the label in the retired MIN-RELATIVE frame so that subtracting the
+        # absolute-frame ghost_raw exposes the carrier mismatch; demodulate the
+        # label back before the raw subtraction.  resid_fixed / resid_bare are
+        # magnitudes and stay frame-invariant, so they are left untouched.
+        kernel_sum_minrel = kernel_sum * np.exp(-1j * w * part.t_min)
+        resid_raw = np.abs(kernel_sum_minrel - ghost_raw) / np.abs(exact)
         resid_fixed = np.abs(minus_ghost) / np.abs(exact)
         # The DO-NOTHING control: subtract no ghost at all.  Without this the
         # suite can only say the fixed frame beats the BROKEN frame, which is
@@ -2749,7 +2769,7 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
         # reconstruct with the WRONG (kernel-sum) switch policy
         _kernels, total = ch.reconstruct_farfield(
             w, envelope, part.delays, part.saddle_kernels, part.real_mask,
-            ch.FARFIELD_KERNEL_SUM)
+            ch.FARFIELD_KERNEL_SUM, part.t_min)
         err = float(np.max(np.abs(total - part.exact_total)))
         self.assertGreater(err / max_f, TOL_RECON)
         self.record_comparison()
@@ -2863,9 +2883,15 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
         kernel_sum = ch.farfield_envelope_from_partition(
             part, ch.FARFIELD_KERNEL_SUM)
         ghost_raw = contribution.kernel * np.exp(1j * w * contribution.delay)
+        # WP2 (8h-d2) demodulates the FARFIELD_KERNEL_SUM label to the frame-
+        # invariant frame; demodulate back to the retired MIN-RELATIVE frame so
+        # the raw witness matches the t_min=0 mutation below, which subtracts
+        # the ghost with NO exp(+1j*w*t_min) label demod (t_min drops out of
+        # both the ghost frame and the final demod, leaving E_minrel - G_raw).
         # The raw-active window is a property of the ghost carrier alone and is
         # unaffected by the mutation.
-        resid_raw = np.abs(kernel_sum - ghost_raw) / np.abs(exact)
+        kernel_sum_minrel = kernel_sum * np.exp(-1j * w * part.t_min)
+        resid_raw = np.abs(kernel_sum_minrel - ghost_raw) / np.abs(exact)
         active = resid_raw >= COLLAPSE_RAW_ACTIVE
         self.assertTrue(bool(active.any()))
         # Mutate: zero the frame origin the label reads -> the ghost is

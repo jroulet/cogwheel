@@ -255,9 +255,10 @@ class LensedWaveformGenerator(utils.JSONMixin):
 
         # Macro-geometry domain gate at CONSTRUCTION. Both parities are
         # served (positive parity 1 - kappa > |gamma| and the macro saddle
-        # 0 < 1 - kappa < |gamma|); macro_matrix raises geometry.LensDomainError
-        # by name only for the over-critical / Type III case (1 - kappa <= 0)
-        # and the exact det-A = 0 parity boundary (|gamma| == 1 - kappa).
+        # 0 < 1 - kappa < |gamma|); macro_matrix raises
+        # geometry.LensDomainError by name only for the over-critical / Type
+        # III case (1 - kappa <= 0) and the exact det-A = 0 parity boundary
+        # (|gamma| == 1 - kappa).
         geometry.macro_matrix(gamma, beta, kappa)
 
         self.waveform_generator = waveform_generator

@@ -100,7 +100,7 @@ from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
 from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
-                                       caustic_geometry,
+                                       annulus_rho,
                                        get_certified_ppgo_map)
 
 __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
@@ -178,12 +178,12 @@ _LOO_STOP_STRONG = 1e-3
 
 #: Threshold on the mass-sheet-reduced shear ``gamma' = gamma / (1 - kappa)``
 #: separating the certified fast region (``gamma' < 0.5`` -> `_LOO_STOP_FAST`)
-#: from the strong-shear/saddle region (``gamma' >= 0.5`` -> `_LOO_STOP_STRONG`).
-#: The key is ``gamma'`` (NOT ``abs(gamma)``): the rescued cancellation
-#: family ``gamma = 0.405, kappa = 0.57`` has ``gamma' = 0.94`` -- an
-#: ``abs(gamma) >= 0.5`` key would wrongly leave it on the fast stop and
-#: fail the accuracy gate.  In the ``kappa = 0`` sampled space ``gamma' ==
-#: gamma``, so the crown fixture stays on the fast stop unchanged.
+#: from the strong-shear/saddle region (``gamma' >= 0.5`` ->
+#: `_LOO_STOP_STRONG`).  The key is ``gamma'`` (NOT ``abs(gamma)``): the
+#: rescued cancellation family ``gamma = 0.405, kappa = 0.57`` has ``gamma' =
+#: 0.94`` -- an ``abs(gamma) >= 0.5`` key would wrongly leave it on the fast
+#: stop and fail the accuracy gate.  In the ``kappa = 0`` sampled space
+#: ``gamma' == gamma``, so the crown fixture stays on the fast stop unchanged.
 _STRONG_SHEAR_STOP_THRESHOLD = 0.5
 
 #: Hard ceiling on the number of coarse envelope nodes.  The SACR-C
@@ -1343,7 +1343,8 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         `_ppgo_cell_ceiling` reads ``w_ceiling`` -- so both land in the SAME
         cell from ONE derivation (DRY: one caustic-reach convention).
 
-        The caustic-frame annulus coordinate is
+        The caustic-frame annulus coordinate is obtained from the single
+        authoritative converter `ppgo_map.annulus_rho`, which returns
         ``rho = |y| / caustic_reach`` with ``caustic_reach`` from
         `ppgo_map.caustic_geometry` -- the SAME authoritative reach the map
         was built with.  ``kappa`` is assumed ``0`` (the caller has already
@@ -1351,8 +1352,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         ``kappa = 0`` surface.
 
         Returns ``None`` when the caustic reach is undefined
-        (`LensDomainError`) or non-positive, so the caller keeps whole-band
-        behaviour.
+        (`LensDomainError`), so the caller keeps whole-band behaviour.
 
         Parameters
         ----------
@@ -1373,12 +1373,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # guard band and returns UNKNOWN, so no split is attempted there.
         parity = 'positive' if gamma < 1.0 else 'saddle'
         try:
-            reach, _direction = caustic_geometry(gamma, 0.0)
+            rho = annulus_rho(
+                gamma, float(np.hypot(lens['y1'], lens['y2'])), kappa=0.0)
         except LensDomainError:
             return None
-        if not reach > 0.0:
-            return None
-        rho = float(np.hypot(lens['y1'], lens['y2'])) / reach
         return parity, gamma, rho
 
     def _ppgo_band_split(self, lens):
@@ -1680,7 +1678,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             # diffractive band split is refused (fall through to the exact
             # path).  Without a split ``envelope_dense`` equals the served
             # envelope exactly (below_mask is all True), and for the legacy
-            # `FARFIELD_KERNEL_SUM` tag this path is byte-identical to HEAD.
+            # `FARFIELD_KERNEL_SUM` tag this path is identical to HEAD up to
+            # the frame demod/re-mod round-trip (label demodulated by
+            # ``exp(+1j w t_min)``, reconstruct_farfield re-modulates by
+            # ``exp(-1j w t_min)``) -- differences are ~machine eps.
             if definition == FARFIELD_DIFFRACTIVE and band_split:
                 return None
             envelope_dense = np.zeros(dense_w.shape, dtype=complex)
@@ -1717,10 +1718,20 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                         real_images=geom.images)
                 except GhostDomainError:
                     return None
-                envelope_dense[below_mask] += ghost
+                # Re-add the ghost in the SAME frame-invariant (demodulated)
+                # convention the stored far-field label uses (Build 8h-d2):
+                # the training label subtracted the min-relative ghost BEFORE
+                # the ``exp(+1j w t_min)`` demodulation, so the serve mirror
+                # adds it back with the same ``+t_min`` tilt.
+                # `reconstruct_farfield` then de-tilts label-plus-ghost
+                # together back to the min-relative frame in one
+                # ``exp(-1j w t_min)`` multiply, so the telescoping stays exact
+                # to machine precision.
+                envelope_dense[below_mask] += ghost * np.exp(
+                    1j * chart_w * geom.t_min)
             kernels, _total = reconstruct_farfield(
                 dense_w, envelope_dense, geom.delays, geom.saddle_kernels,
-                geom.real_mask, definition)
+                geom.real_mask, definition, geom.t_min)
         elif band_split:
             # A tube OR a whole-interior SACR-C chart carries the
             # caustic-region ``tau_c``-demodulated envelope reconstructed with

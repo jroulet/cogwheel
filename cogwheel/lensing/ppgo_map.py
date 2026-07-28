@@ -110,7 +110,7 @@ import numpy as np
 __all__ = ['CertifiedPpgoMap', 'UNKNOWN',
            'set_certified_ppgo_map', 'get_certified_ppgo_map',
            'use_certified_ppgo_map', 'certified_w_cert', 'certified_w_trust',
-           'certified_w_ceiling', 'caustic_geometry',
+           'certified_w_ceiling', 'caustic_geometry', 'annulus_rho',
            'build_map', 'save_map', 'map_summary',
            'CERTIFICATION_BAR', 'DIAGNOSTIC_BAR',
            'W_TRUST_MULTIPLIER', 'W_TRUST_ADDITIVE', 'MAX_CELL_JUMP',
@@ -697,6 +697,64 @@ def caustic_geometry(gamma: float, kappa: float = 0.0, n_theta: int = 720
         raise geometry.LensDomainError(
             f'No caustic reach found for gamma={gamma}, kappa={kappa}.')
     return reach, direction
+
+
+def annulus_rho(gamma: float, y_magnitude: float, kappa: float = 0.0) -> float:
+    """Authoritative ppGO annulus coordinate ``rho`` for a source magnitude.
+
+    Converts a physical source-plane offset magnitude ``|y|`` into the ONE
+    scalar-reach ppGO annulus gauge in which the certified-ppGO map is built
+    and queried::
+
+        rho = |y| / caustic_reach(gamma, kappa)
+
+    where ``caustic_reach`` is element 0 of `caustic_geometry` -- the MAXIMUM
+    source-plane caustic radius over polar angle (a single scalar per
+    ``gamma``).  ``rho`` is dimensionless (Einstein-radius-normalised): the
+    caustic sits at ``rho = 1``, the interior at ``rho < 1`` and the exterior
+    at ``rho > 1``.
+
+    This is the SINGLE authoritative converter into the ppGO annulus gauge.
+    It is DISTINCT from the additive directional interior/exterior gauge used
+    by the far-field charts (``rho = 1 + |y| - r_caustic``); the two gauges
+    must not be conflated.  Both `likelihood._ppgo_cell_coords` and
+    `surrogate_training._train_band_charts` obtain their ppGO ``rho``
+    exclusively through this function, so the map is always queried in the
+    gauge it was certified in.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    y_magnitude : float
+        Physical source-plane offset magnitude ``|y|`` (dimensionless ``y``
+        units); must be non-negative.
+    kappa : float, optional
+        Convergence.  Defaults to ``0.0`` (the ppGO map's ``kappa = 0``
+        certified surface).
+
+    Returns
+    -------
+    float
+        The ppGO annulus coordinate ``rho``.
+
+    Raises
+    ------
+    ValueError
+        If ``y_magnitude`` is negative or the caustic reach is non-positive.
+    LensDomainError
+        Propagated from `caustic_geometry` at the ``det A = 0`` parity
+        boundary or an over-critical convergence.
+    """
+    if y_magnitude < 0.0:
+        raise ValueError(
+            f'y_magnitude must be non-negative, got {y_magnitude}.')
+    reach, _direction = caustic_geometry(gamma, kappa)
+    if not reach > 0.0:
+        raise ValueError(
+            f'Non-positive caustic reach {reach} for gamma={gamma}, '
+            f'kappa={kappa}.')
+    return float(y_magnitude) / float(reach)
 
 
 def _w_nodes(wall: float, nodes_per_decade: int = 12) -> np.ndarray:

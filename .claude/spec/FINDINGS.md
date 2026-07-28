@@ -873,3 +873,109 @@ day rather than at the end; write durable findings to `FINDINGS.md` (this
 file) at the time they are measured, not via memory; and treat a Dreamer
 report that flags "pattern not present" as a signal to recover from git or
 the build handoffs, never as a reason to drop the finding.
+
+## F022 — the far-field carrier guard measures `arg`, but the interpolant splines re/im; a phase flip at an amplitude null is smooth in re/im and refinement cannot remove it (2026-07-28, Build 8h-d2 triage)
+
+`_assert_farfield_carrier_continuity` (`lensing/surrogate.py`) rejects an
+exterior tile whose frame-invariant label `E_tilde` winds by `>= pi/2` in
+`arg` between adjacent spatial nodes at the top of the band. Three coarse
+fixtures trip it: `test_lensing_surrogate_census.py::_pos_farfield_dense`,
+`test_lensing_ppgo_bandsplit.py::BandSplitReconstructionTestCase.setUpClass`,
+and `test_lensing_exterior_admission.py::_build_guard_chart`.
+
+**The refinement test is the discriminator, and it must be run before any
+conclusion about this guard.** A carrier / under-resolution story predicts the
+per-gap step falls like `1/n` as nodes are added. An amplitude-null story
+predicts it stays pinned at `pi` forever. Measured on the two `gamma`-wall
+guard boxes:
+
+| n_gamma | max wind (rad) | rel. amplitude at that pair | `d|re|/span` | `d|im|/span` |
+|---|---|---|---|---|
+| 4 | 2.68 | 0.157 | 0.430 | 0.239 |
+| 6 | 3.00 | 0.051 | 0.153 | 0.015 |
+| 8 | 3.07 | 0.621 | 0.392 | 1.572 |
+| 12 | 2.97 | 0.948 | 0.119 | 1.938 |
+| 16 | 3.12 | 0.0027 | 0.0036 | 0.0160 |
+
+(box `gamma in (0.5, 1.5)` behaves identically, reaching 3.14 rad at relative
+amplitude 8.8e-6.) The step does not shrink — it converges to `pi` — while the
+amplitude at the offending pair collapses and the re/im increments go smooth.
+That is a null, not a carrier. This reproduces independently what the 8h-d2
+Coder found by instrumenting the census and band-split boxes (refine
+`n_gamma` 4 -> 6 -> 8 -> 12, step does not shrink; census trips even at
+`w_max = 4`), and it confirms Inspector finding INS-5-001.
+
+**Root cause.** `FarFieldChart` stores and splines `envelope_real` and
+`envelope_imag` as separate real fields. Near an amplitude null the complex
+label passes close to the origin: `arg` swings by `pi` while `re` and `im`
+both pass smoothly through zero. The guard therefore measures a quantity the
+interpolant never sees. `pi/2` is the right Nyquist bound for a *carrier*, but
+`arg`-winding is not the right observable for a re/im spline — the failure is
+in the metric, not the threshold.
+
+**Two wrong turns taken here, both from reasoning instead of measuring:**
+
+1. *Parity-flip story* (driver): the `(0.5, 1.5)` box straddles the `gamma = 1`
+   parity wall and showed a ~`pi` step, which looked conclusive. Refuted by the
+   `(1.0, 1.6)` box, which lies entirely in the saddle region with the
+   `gamma = 1` node refused out of every pair, and still winds 2.5-2.7 rad.
+2. *"Genuinely too coarse" story* (driver): supported by one measurement at one
+   resolution showing the flips at 9-29 % relative amplitude — healthy, so not
+   noise. Refuted by the refinement table above: at `n = 16` the same flip sits
+   at 0.27 % amplitude with smooth re/im. Measuring a single grid cannot
+   distinguish a carrier from a null; only the `n`-sweep can.
+
+**Why the prescribed floor was not enough.** A relative-magnitude floor is the
+right direction and INS-5-001 stands, but a floor alone does not retire the
+bypasses: at the fixtures' actual coarseness the worst pair sits at 0.157
+relative amplitude, far above any sane floor, because a coarse grid straddles
+the null at moderate amplitude. A 1e-3 floor was implemented and excluded
+nothing.
+
+**FIXED 2026-07-28.** The guard now measures the complex increment
+`|E_lead - E_trail|` normalized by the peak `|E_tilde|` over the WHOLE grid,
+against `_FARFIELD_CARRIER_STEP_MAX = 1.0`, replacing
+`_FARFIELD_CARRIER_WIND_MAX = pi/2`. All three `_skip_carrier_guard=True`
+bypasses are removed and the kwarg is deleted from `from_engine`, so the
+escape hatch cannot be reached for again.
+
+Calibration across every known fixture (this is what the bound is set from,
+and re-deriving it is how to change it safely):
+
+| fixture | slice-norm | whole-norm | all-slices | verdict |
+|---|---|---|---|---|
+| synthetic continuous | 0.1997 | 0.1997 | 0.1997 | pass |
+| synthetic zeroed-flip | 0.1997 | 0.1997 | 0.1997 | pass |
+| `gamma1 (0.5,1.5)` | 1.0861 | 0.1160 | 1.0619 | pass |
+| `gamma1 (1.0,1.6)` | 1.2928 | 0.1556 | 1.3703 | pass |
+| band-split box | 1.3542 | 0.0000 | 1.0004 | pass |
+| census dense box | 1.5289 | 0.0000 | 0.2881 | pass |
+| synthetic pathological | 1.8980 | 1.8980 | 1.8980 | **raise** |
+
+Whole-grid normalization is the only column with a real margin: worst
+must-pass 0.1997 against must-raise 1.8980, a 9.5x gap, bound placed at 1.0.
+Two alternatives were measured and REJECTED — top-slice normalization (margin
+1.24x) and scanning all `w` slices (margin 1.38x). Do not re-propose either
+without re-running the calibration.
+
+The bound is tuning-free to state: a violation means the label changed by more
+than the entire chart's peak magnitude across one node gap. At full amplitude
+that is `pi/3` of winding, i.e. STRICTER than the retired `pi/2` where the
+label is strong, and permissive only where it has decayed to noise. The change
+does not weaken the guard; it re-points it at the quantity the spline sees.
+
+**What the all-slices experiment taught, and why it is recorded.** Scanning
+every `w` slice flags the census box at 1.37 — yet that chart meets its
+accuracy bar (1.08e-3 against 5e-3). So large mid-band increments are
+COMPATIBLE with an accurate chart, which means this guard is a cheap
+GROSS-ALIASING SCREEN and not an accuracy proxy. The held-out eps gate
+(`_gate_chart`) is the real falsifier. Treating the carrier guard as an
+accuracy check is what produced both over-strict designs.
+
+**Lesson.** For any guard that measures the phase of a complex field, the
+`n`-refinement sweep is the cheap discriminator and should be run *first*: a
+carrier shrinks like `1/n`, a null pins at `pi`. Reporting the relative
+amplitude at the offending pair (the guard now does this in its error message)
+tells you which regime you are in without a probe, but only the sweep proves
+it. Two plausible mechanisms were adopted here without that sweep and both
+were wrong.

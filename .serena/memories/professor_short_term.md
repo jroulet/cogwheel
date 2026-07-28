@@ -1,55 +1,41 @@
-# Professor short-term (session: Build 8h-d2 four-defect rulings)
+# Professor short-term (session: Build 8h-d2 four-defect INFERENCE REVIEW)
 
-Consultation on the exterior far-field tiling/training path. Four rulings derived
-from code + physics. Key durable findings (Dreamer: promote the starred ones):
+Reviewed the four-defect tiling-correctness build (uncommitted worktree; HEAD 2cbab59).
+Ran fast domain tests with cogwheel-newlal python. VERDICT: PASS.
 
-## Q4 * — astroid cusp SOURCE angles are gauge-exact {0, ±pi/2, pi} (kappa=0, pos parity)
-DERIVED in closed form (not just measured). For kappa=0, beta=0 eigenframe,
-A = diag(1-gamma, 1+gamma). Astroid cusps sit at LENS-plane angles theta = 0,
-pi/2, pi, 3pi/2 (the shear axes). Mapping through y = A x - x/|x|^2:
-- theta=0: v = 1+gamma, r=1/sqrt(1+gamma), y = (-2 gamma r, 0) -> SOURCE angle pi.
-- theta=pi/2: v = 1-gamma, r=1/sqrt(1-gamma), y = (0, +2 gamma r) -> SOURCE angle pi/2.
-By the C4v symmetry the four cusps land at source angles EXACTLY {0, pi/2, pi, -pi/2},
-INDEPENDENT of gamma. The magnitude |y_cusp| = 2 gamma / sqrt(1±gamma) IS gamma-dependent,
-but the ANGLES are not. So `from_engine` can cusp-align theta_c nodes by inserting
-whichever of {0, ±pi/2, pi} fall in theta_c_range as exact nodes — pure closed form,
-no surrogate_training import, no circular dependency. This matches
-`_cusp_source_angles` output (which detects them numerically via branch-speed sweep).
-NOTE: this is the POSITIVE-parity astroid only. Saddle (two deltoids, 3 cusps each)
-is NOT on-axis in general — the closed-form shortcut is positive-parity-specific.
+## D1 (ppGO exclusion ordering) + D2 (annulus_rho extraction) — GREEN
+- test_lensing_ppgo_map.py 22/22, test_lensing_ppgo_bandsplit.py 65/65 (+1 xfail literal bar).
+- annulus_rho byte-equivalence exact (matches legacy hypot/reach), input guards name the
+  offending arg, zero-magnitude allowed. Matches my Q2 ruling (annulus_rho = |y|/reach).
+- Monotonic-conservatism invariant holds: fixed ppGO exclusion reads w_cert <= HEAD (never
+  easier); narrowed served region strictly inside outer annulus. Reachable-red guard
+  (PpgoOrderingReachableRedTestCase) flips RED on buggy ordering, GREEN on fix — not vacuous.
+- Saddle branch byte-identical to HEAD (only positive parity changed). Correct.
 
-## Q3 * — far-field carrier IS recomputed fresh at serve; residual defect is winding in E
-Serve path (likelihood.py ~1640): `geom = ChangRefsdalChannels(dense_w).
-geometry_partition(...)` rebuilds delays FRESH from the query source (min-relative,
-t_min-subtracted), and `reconstruct_farfield` re-applies exp(1j w tau_a) with those
-fresh delays. So the CARRIER is query-fresh (analytic), like the interior tau_c.
-BUT the far-field label E_ff = F - sum_a H_a exp(1j w (tau_a - t_min(x))) is built in
-EACH node's own t_min(x) frame at train time. The spline interpolates E_ff across
-nodes with different t_min frames -> E_ff carries a fast winding phase exp(-1j w t_min(x))
-that varies node-to-node -> E non-smooth even though the carrier is re-applied fresh.
-This is the SAME class of pathology the interior avoids because tau_c-demodulation is
-algebraically frame-invariant, whereas the far-field label parks carrier at tau_c=0
-(constant) and leaves t_min(x) in the delays only.
-Measured: d t_min/d rho ~ -1.03 at gamma=0.30 theta_c=0.4; n_rho=4 -> node gap ~5e-2;
-w_max~60 -> per-gap winding ~ 60*1.03*5e-2 ~ 3.1 rad. That EXCEEDS a pi/2 continuity
-bound, so a t_min-continuity assertion on current ship tiling would FAIL -> this defect
-is NOT guard-only; it needs the frame-invariant relabel (demodulate each node's E by
-exp(+1j w t_min(node)) at train, re-apply exp(-1j w t_min(query)) at serve) OR much
-finer rho tiling. Frame-invariant relabel is the physically-correct, lower-risk route
-(mirrors the interior's frame-invariance; t_min is real so pure phase, no magnitude change).
+## D3 (far-field frame-invariant relabel E_tilde) — GREEN
+- test_lensing_farfield_envelope.py 34 passed / 21 skipped (all skips = COGWHEEL_TRAIN_TIER=1
+  engine training, operator-deferred). exterior_windows + born also green.
+- Telescoping round trip reproduces HEAD to <1e-12 (KERNEL_SUM + MINUS_GHOST); self-falsif
+  test_stale_t_min_zero_breaks_the_round_trip confirms exp(+-1jw t_min) round trip is
+  load-bearing. Matches my R2.1-R2.4 exact-relabel derivation (E_tilde = absolute-frame
+  post-GO remainder = F_abs - sum_a H_a exp(1jw tau_a_abs)).
+- Carrier-continuity guard fires on pathological grid, passes continuous; bound = pi/2
+  Nyquist quarter-turn (my R2.6). Stale far-field axis-schema hard-refuses at load.
 
-## Q1/Q2 — ppGO annulus gauge conversion + one converter
-Q2: annulus_rho(gamma,|y|,kappa=0) := |y| / caustic_geometry(gamma,kappa)[0] is the
-single correct ppGO-gauge def. likelihood.py:1375 hypot(y1,y2)/reach is byte-equivalent
-(reach = _caustic_reach = caustic_geometry(...)[0], same call) -> pure refactor.
-kappa!=0 caveat: caustic_geometry accepts kappa but production pins kappa=0; annulus_rho
-must forward kappa, and callers that hard-code kappa=0 stay correct.
-Q1: to recover the annulus rho the region actually covers from region_exclusion_rho
-(additive gauge, rho_add = 1 + |y|_inner - coordinate_radius_min):
-|y|_inner = region_exclusion_rho - 1 + coordinate_radius_min; then annulus rho =
-|y|_inner / reach_scalar. reach_scalar = MAX directional radius, coordinate_radius_min =
-MIN directional radius. Dividing |y|_inner by the MAX reach gives the SMALLEST annulus
-rho -> reads w_cert at a cell CLOSER to the caustic (harder, higher w_cert) -> conservative
-(never certifies a cell easier than reality). The mixed use (min radius additively,
-max radius as divisor) makes recovered |y|_inner a LOWER bound on the true per-column
-inner physical radius -> annulus rho is a lower bound -> conservative. GOOD.
+## D4 (cusp-aligned from_engine + positive-box reconstruction) — GREEN
+- ClosedFormCuspAngle 4/4: detector matches closed-form {0,+-pi/2,pi} across gamma to <1e-9,
+  angles gamma-INDEPENDENT (magnitude varies). CONFIRMS my Q4 closed-form ruling; production
+  hardcode validated.
+- FromEngineCuspWiring 7/7: positive chart carries cusp node, union dedups/inserts in-range
+  cusps, macro-saddle chart has NO cusp nodes (saddle deltoids off-axis, correct);
+  test_unpatched_positive_box_build_raises_carrier_discontinuity = reachable-red (fix load-bearing).
+- positive-box reconstruction: @expectedFailure REMOVED, POS_RECON_TOL=0.20 NOT widened.
+  Cusp union ON -> cusp-ray (gamma=0.40,y1=2.183,y2=0 on theta_c=0 kink) eps~1.1e-4;
+  OFF -> 2.6031e-1 (reproduces historical failure). Physics: C2 kink placed ON a spline node.
+  CONFIRMED: both positive-box tests PASSED (86s). Kink-on-node fix + E_tilde relabel land it
+  within the unchanged 0.20 budget; reachable-red (cusp-union-off regresses to 2.6e-1) green.
+
+## Constraint note
+All heavy engine-backed training (COGWHEEL_TRAIN_TIER=1, ~minutes/class) correctly deferred
+to the operator's post-build gate; verdict based on fast tests + self-falsification guards +
+node-exact identities. No full sampling run touched.

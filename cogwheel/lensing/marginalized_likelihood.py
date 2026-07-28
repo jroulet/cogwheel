@@ -237,8 +237,9 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
         lensed relative-binning engine on the SAME bins.
 
         Constructing the engine on ``self.fbin`` re-runs the lens-aware bin
-        guard (`LensedRelativeBinningLikelihood._validate_bin_delay_criterion`),
-        so a construction on bins too coarse for ``delta_t_max`` raises
+        guard
+        (`LensedRelativeBinningLikelihood._validate_bin_delay_criterion`), so a
+        construction on bins too coarse for ``delta_t_max`` raises
         `LensedBinningError` here, at construction time.
         """
         super()._set_summary()
@@ -282,9 +283,9 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
             Shape ``(n_bins + 1,)`` complex total amplification at the edges.
         """
         fbin = self.fbin
-        f_center = 0.5 * (fbin[:-1] + fbin[1:])          # (n_bins,)
-        left = k0 + k1 * (fbin[:-1] - f_center)          # K_a at bin left edges
-        right = k0 + k1 * (fbin[1:] - f_center)          # K_a at bin right edges
+        f_center = 0.5 * (fbin[:-1] + fbin[1:])   # (n_bins,)
+        left = k0 + k1 * (fbin[:-1] - f_center)   # K_a at bin left edges
+        right = k0 + k1 * (fbin[1:] - f_center)   # K_a at bin right edges
 
         kernel_edges = np.empty((k0.shape[0], fbin.size), dtype=complex)
         kernel_edges[:, 0] = left[:, 0]
@@ -314,7 +315,8 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
         delays, k0, k1, _partition = \
             self._engine._amplification_coefficients(par_dic)
         self._engine._check_candidate_delays(delays)
-        amplification = self._edge_amplification(delays, k0, k1)  # (b,) complex
+        amplification = self._edge_amplification(
+            delays, k0, k1)  # (b,) complex
 
         # Unlensed linear-free bin templates, exactly as the base class.
         h_mpb, timeshift = self._get_linearfree_hplus_hcross_dt(

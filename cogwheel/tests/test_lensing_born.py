@@ -350,10 +350,21 @@ class ServeCensusRoundTripTestCase(BornTestCase):
         cls.envelope = _born.born_envelope(
             cls.geom.w, CENSUS_Y1, CENSUS_Y2, CENSUS_GAMMA, CENSUS_BETA,
             CENSUS_KAPPA, cls.geom)
+        # `born_envelope` still emits the MIN-RELATIVE-delay envelope (Born
+        # production code is out of scope here); WP2's `reconstruct_farfield`
+        # now expects the FRAME-INVARIANT label (E_minrel * exp(+1j w t_min))
+        # and re-modulates it by exp(-1j w t_min) internally.  Bridge the two
+        # frames by demodulating the min-relative envelope here so the round
+        # trip is exact; the internal re-modulation cancels this factor,
+        # reproducing the min-relative total below.  (When the dormant Born
+        # rung is re-enabled, `born_envelope` itself should adopt the
+        # frame-invariant convention -- OWED for re-enablement.)
+        demodulated_envelope = cls.envelope * np.exp(
+            1j * cls.geom.w * cls.geom.t_min)
         _kernels, cls.reconstructed_total = channels.reconstruct_farfield(
-            cls.geom.w, cls.envelope, cls.geom.delays,
+            cls.geom.w, demodulated_envelope, cls.geom.delays,
             cls.geom.saddle_kernels, cls.geom.real_mask,
-            channels.FARFIELD_KERNEL_SUM)
+            channels.FARFIELD_KERNEL_SUM, cls.geom.t_min)
         f_born_grid = np.array([
             _born.born_amplification(w, CENSUS_Y1, CENSUS_Y2, CENSUS_GAMMA,
                                      CENSUS_BETA, CENSUS_KAPPA)

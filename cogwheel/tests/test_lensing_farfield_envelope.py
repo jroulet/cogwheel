@@ -646,11 +646,13 @@ class ReconstructionExactnessTestCase(FarfieldEnvelopeTestCase):
     """Q2/Q3: adding the real carriers back to E_ff returns exact_total.
 
     Forms ``E_ff`` on the full ``w``-band (up to 60) and reconstructs
-    ``F`` two ways -- through the public `reconstruct_from_envelope` and
-    through `_gauge.envelope_total`, both with ``switch = real_mask`` and
-    ``critical_delay = 0`` -- comparing to the untouched engine oracle
-    ``partition.exact_total``.  The range-reduced carriers keep the
-    subtract-then-add at the ``1e-12`` floor.
+    ``F`` two ways -- through the public frame-aware `reconstruct_farfield`
+    (WP2, Build 8h-d2: it re-modulates the frame-invariant stored label by
+    ``exp(-1j w t_min)`` before rebuilding) and through `_gauge.envelope_total`
+    fed the re-modulated (min-relative-frame) envelope, both with
+    ``switch = real_mask`` and ``critical_delay = 0`` -- comparing to the
+    untouched engine oracle ``partition.exact_total``.  The range-reduced
+    carriers keep the subtract-then-add at the ``1e-12`` floor.
     """
 
     @classmethod
@@ -665,16 +667,31 @@ class ReconstructionExactnessTestCase(FarfieldEnvelopeTestCase):
 
     @classmethod
     def _reconstruct_public(cls) -> np.ndarray:
-        _kernels, total = reconstruct_from_envelope(
+        # WP2 (Build 8h-d2) made `farfield_envelope_from_partition` return a
+        # frame-INVARIANT label (demodulated by ``exp(+1j w t_min)``); the
+        # authoritative inverse is `reconstruct_farfield`, which re-modulates
+        # by ``exp(-1j w t_min)`` FIRST before rebuilding.  Reconstructing the
+        # frame-invariant label through the bare `reconstruct_from_envelope`
+        # (no ``t_min``) leaves the frame carrier in and departs from
+        # ``exact_total`` by the winding ``w t_min``; the migrated call below
+        # returns to the machine floor.
+        _kernels, total = channels.reconstruct_farfield(
             cls.partition.w, cls.envelope, cls.partition.delays,
-            cls.partition.saddle_kernels, cls.switch, 0.0)
+            cls.partition.saddle_kernels, cls.partition.real_mask,
+            channels.FARFIELD_KERNEL_SUM, cls.partition.t_min)
         return total
 
     @classmethod
     def _reconstruct_gauge(cls) -> np.ndarray:
+        # `_gauge.envelope_total` reconstructs in the min-relative delay frame,
+        # so it must be fed the RE-MODULATED envelope (``exp(-1j w t_min)``) --
+        # the same de-tilt `reconstruct_farfield` applies internally -- for the
+        # frame-invariant WP2 label to rebuild ``exact_total`` exactly.
+        env_minrel = np.asarray(cls.envelope) * np.exp(
+            -1j * cls.partition.w * cls.partition.t_min)
         return _gauge.envelope_total(
             cls.partition.w, cls.partition.delays,
-            cls.partition.saddle_kernels, cls.switch, 0.0, cls.envelope)
+            cls.partition.saddle_kernels, cls.switch, 0.0, env_minrel)
 
     @classmethod
     def _plot(cls) -> None:
@@ -1902,6 +1919,518 @@ class FarFieldGateCurrencyMutationTestCase(FarfieldEnvelopeTestCase):
             self.eps_healthy_eff, EFFNORM_THRASH_MIN,
             f'Eff-normalized eps {self.eps_healthy_eff:.3e} did not thrash -- '
             f'the tiny-denominator hazard the F-norm avoids is not exhibited')
+
+# --------------------------------------------------------------------------
+# Build 8h-d2 / WP2 D3 specs: the frame-invariant far-field label.  The three
+# classes below pin the ``exp(+/-1j w t_min)`` demodulation contract that
+# Build 8h-d2 introduced (channels.py) together with the two guards that
+# protect it: the exterior carrier-continuity Nyquist gate
+# (`surrogate._assert_farfield_carrier_continuity`) and the axis-schema load
+# refusal (`surrogate._validate_farfield_axis_schema`).  All three are
+# fast-tier: the round trip is three single engine evaluations, the carrier
+# guard is pure numpy, and the schema refusal builds a synthetic chart -- no
+# training tier, no engine sweep.
+#
+# WHY THESE TOLERANCES / ORACLES (D3)
+# -----------------------------------
+# * Telescoping round trip (`FarfieldTelescopingRoundTripTestCase`).  The
+#   stored label demodulates by ``exp(+1j w t_min)`` and `reconstruct_farfield`
+#   re-modulates by ``exp(-1j w t_min)`` FIRST, so the reconstructed complex
+#   field must reproduce the pre-demodulation (HEAD) field.  TWO independent
+#   oracles gate this: (a) the HEAD `channels` module loaded side by side
+#   (`_head_module`), whose `reconstruct_farfield` has no ``t_min`` argument
+#   and no demodulation -- the frozen pre-8h-d2 baseline; and (b) the engine's
+#   ``partition.exact_total`` (the operator/Schwinger amplification total),
+#   which shares no code with the SACR-C projection under test.  The gate is
+#   ``1e-12 * max|F|`` (measured ``0`` -- the round trip telescopes exactly).
+#   The teeth: a stale caller passing ``t_min = 0`` fails to invert the
+#   demodulation and departs from HEAD by the un-cancelled ``exp(+1j w t_min)``
+#   (measured ~7e-3), so the required argument is load-bearing.
+# * Carrier continuity (`FarfieldCarrierContinuityGuardTestCase`).  The guard
+#   rejects a demodulated label whose adjacent-node phase winds by ``>= pi/2``
+#   (the Nyquist quarter-turn a cubic spline cannot represent) and passes a
+#   well-sampled continuous label.  The oracle is the guard's raise/no-raise
+#   contract on constructed grids; the ``pi/2`` bound is pinned against the
+#   production constant.
+# * Stale axis schema (`StaleFarfieldAxisSchemaRefusalTestCase`).  A chart
+#   stamped with the OLD frame-DEPENDENT schema tag
+#   ``'caustic_radial_offset_rho_theta'`` is not in the current known set, so
+#   the loader must hard-refuse at load rather than silently reconstruct in
+#   the wrong frame.  A boolean contract, not a tolerance.
+# --------------------------------------------------------------------------
+
+#: HEAD path of the channels module (absolute imports, so it loads standalone
+#: via `_head_module`); its `reconstruct_farfield` predates the ``t_min``
+#: argument and the demodulation -- the frozen pre-8h-d2 reconstruction.
+_HEAD_CHANNELS_REL = 'cogwheel/lensing/chang_refsdal/channels.py'
+
+#: Exterior off-axis configs (gamma, y1, y2) for the round trip.  All three
+#: sit well outside the sub-``0.1`` astroid (two resolved real images) AND
+#: off both principal axes, so the `FARFIELD_KERNEL_SUM_MINUS_GHOST` ghost
+#: gate ADMITS (the complex saddle is resolved from every real image); each
+#: is verified to reconstruct to ``exact_total`` to ``0`` under both windows.
+ROUNDTRIP_CONFIGS = ((0.0387, 1.3, 1.3), (0.04, 1.5, 1.5), (0.05, 1.2, 0.9))
+
+#: Minimum HEAD-relative departure a stale ``t_min = 0`` reconstruction must
+#: EXCEED (measured ~6-8e-3): the reachable-red floor for the round-trip
+#: teeth, gated far below the data so the foil is not perched on an edge.
+STALE_TMIN_FOIL_MIN = 1.0e-3
+
+#: The exterior carrier-continuity bound: a normalized complex INCREMENT, not
+#: a phase step (F022).  Mirrors the production
+#: ``surrogate._FARFIELD_CARRIER_STEP_MAX`` and is asserted equal to it.
+CARRIER_STEP_MAX = 1.0
+
+#: The OLD (pre-8h-d2) far-field axis-schema tag: the frame-DEPENDENT
+#: caustic-fixed coordinate, before the ``framewinv`` demodulation.  A chart
+#: stamped with it must hard-refuse at load under the current known set.
+OLD_FARFIELD_AXIS_SCHEMA = 'caustic_radial_offset_rho_theta'
+
+
+def _farfield_reconstruction(head_module, partition: ChangRefsdalPartition,
+                             definition: str
+                             ) -> tuple[np.ndarray, np.ndarray]:
+    """Reconstruct ``F`` on the branch and the HEAD baseline for one window.
+
+    Mirrors the likelihood far-field serve path (`reconstruct_farfield`) on
+    both revisions.  On the branch the stored label is demodulated by
+    ``exp(+1j w t_min)`` and `reconstruct_farfield` inverts it with the
+    ``t_min`` argument; on HEAD neither demodulation nor argument exists.
+    For `FARFIELD_KERNEL_SUM_MINUS_GHOST` the analytic ghost is re-added
+    BEFORE reconstruction with the SAME ghost-restore ordering the serve path
+    uses: the branch adds the min-relative ghost with the ``+t_min`` tilt (so
+    the single ``exp(-1j w t_min)`` de-tilt returns label AND ghost together),
+    HEAD adds the bare min-relative ghost.
+
+    Returns the ``(branch_total, head_total)`` reconstructed complex fields.
+    """
+    w = partition.w
+    t_min = partition.t_min
+    env_branch = farfield_envelope_from_partition(partition, definition)
+    env_head = head_module.farfield_envelope_from_partition(
+        partition, definition)
+    if definition == channels.FARFIELD_KERNEL_SUM_MINUS_GHOST:
+        ghost = channels.farfield_ghost_term(
+            w, partition.source, partition.matrix,
+            t_min=t_min, real_images=partition.images)
+        ghost_head = head_module.farfield_ghost_term(
+            w, partition.source, partition.matrix,
+            t_min=t_min, real_images=partition.images)
+        env_branch = env_branch + ghost * np.exp(1j * w * t_min)
+        env_head = env_head + ghost_head
+    _, total_branch = channels.reconstruct_farfield(
+        w, env_branch, partition.delays, partition.saddle_kernels,
+        partition.real_mask, definition, t_min)
+    _, total_head = head_module.reconstruct_farfield(
+        w, env_head, partition.delays, partition.saddle_kernels,
+        partition.real_mask, definition)
+    return total_branch, total_head
+
+
+def _adjacent_top_slice_steps(env_grid: np.ndarray,
+                              shape: tuple[int, int, int]) -> np.ndarray:
+    """Per-gap ``|E_lead - E_trail| / peak|E|`` over the top-``w`` slice.
+
+    A diagnostic reproduction of the quantity
+    `_assert_farfield_carrier_continuity` compares to
+    `CARRIER_STEP_MAX` (only node pairs with non-zero magnitude on both
+    sides), used for the histogram and the continuous-grid consistency check
+    -- the guard's raise/no-raise is the behavioural oracle, this is only the
+    reported increment.
+
+    The normalizing peak is taken over the WHOLE grid, not this slice: where
+    the label has decayed with ``w`` the top slice can be pure floating-point
+    noise, and noise measured against itself is O(1) while noise measured
+    against the chart is zero (F022).
+    """
+    full = np.asarray(env_grid)
+    all_magnitude = np.abs(full)
+    scale = float(np.max(all_magnitude[np.isfinite(all_magnitude)],
+                         initial=0.0))
+    if scale <= 0.0:
+        return np.zeros(0)
+    top = full[-1]
+    magnitude = np.abs(top)
+    steps: list[float] = []
+    for axis in range(3):
+        n_axis = shape[axis]
+        if n_axis < 2:
+            continue
+        lead = np.take(top, range(1, n_axis), axis=axis)
+        trail = np.take(top, range(0, n_axis - 1), axis=axis)
+        mag_lead = np.take(magnitude, range(1, n_axis), axis=axis)
+        mag_trail = np.take(magnitude, range(0, n_axis - 1), axis=axis)
+        both = (mag_lead > 0.0) & (mag_trail > 0.0)
+        step = np.abs(lead - trail) / scale
+        steps.extend(step[both].ravel().tolist())
+    return np.array(steps) if steps else np.zeros(0)
+
+
+class FarfieldTelescopingRoundTripTestCase(FarfieldEnvelopeTestCase):
+    """D3: the ``exp(+/-1j w t_min)`` round trip reproduces HEAD's field.
+
+    Build 8h-d2 made the stored far-field label frame-INVARIANT by
+    demodulating it with ``exp(+1j w t_min)``; `reconstruct_farfield`
+    re-modulates by ``exp(-1j w t_min)`` FIRST and takes ``t_min`` as a
+    REQUIRED positional.  The reconstructed complex field must therefore be
+    UNCHANGED from the pre-8h-d2 (HEAD) reconstruction -- the demod/re-mod
+    telescopes -- for both the `FARFIELD_KERNEL_SUM` window and the
+    `FARFIELD_KERNEL_SUM_MINUS_GHOST` window (whose ghost-restore ordering is
+    mirrored from the likelihood serve path).  Gated to ``1e-12 * max|F|``
+    against TWO independent oracles: the HEAD `channels` module loaded side by
+    side, and the engine's ``exact_total``.  The teeth: a stale caller
+    passing ``t_min = 0`` fails to invert the demodulation and departs.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.head = _head_module(_HEAD_CHANNELS_REL,
+                                'cogwheel_head_channels_d3')
+        w_key = tuple(float(v) for v in RECON_BAND)
+        cls.partitions = [_partition(w_key, gamma, y1, y2)
+                          for gamma, y1, y2 in ROUNDTRIP_CONFIGS]
+        cls._plot()
+
+    @classmethod
+    def _plot(cls) -> None:
+        if not _HAVE_MPL:
+            return
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        partition = cls.partitions[0]
+        f_scale = float(np.max(np.abs(partition.exact_total)))
+        fig, ax = plt.subplots(figsize=(7, 4))
+        for definition, style in (
+                (channels.FARFIELD_KERNEL_SUM, 'b.-'),
+                (channels.FARFIELD_KERNEL_SUM_MINUS_GHOST, 'g.-')):
+            branch, head = _farfield_reconstruction(
+                cls.head, partition, definition)
+            ax.semilogy(partition.w, np.maximum(np.abs(branch - head), 1e-18),
+                        style, label=definition.split('_')[-1])
+        ax.axhline(MACHINE_REL_TOL * f_scale, color='r', ls='--',
+                   label='1e-12 * max|F|')
+        ax.set_xlabel('w')
+        ax.set_ylabel('|F_branch - F_head|')
+        ax.set_title('D3: farfield t_min round trip telescopes to the floor')
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(
+            _OUTPUT_DIR / 'farfield_telescoping_roundtrip_error.png', dpi=110)
+        plt.close(fig)
+
+    def _assert_matches_head(self, definition: str) -> None:
+        for partition in self.partitions:
+            with self.subTest(source=tuple(partition.source),
+                              gamma=partition.gamma):
+                branch, head = _farfield_reconstruction(
+                    self.head, partition, definition)
+                f_scale = float(np.max(np.abs(partition.exact_total)))
+                error = float(np.max(np.abs(branch - head)))
+                self.assert_within(
+                    error / f_scale, MACHINE_REL_TOL,
+                    f'{definition} round trip departed from the HEAD field '
+                    f'by {error / f_scale:.3e} (relative)')
+
+    def test_kernel_sum_round_trip_reproduces_head(self):
+        """`FARFIELD_KERNEL_SUM` reconstruction matches HEAD's field."""
+        self._assert_matches_head(channels.FARFIELD_KERNEL_SUM)
+
+    def test_minus_ghost_round_trip_reproduces_head(self):
+        """`FARFIELD_KERNEL_SUM_MINUS_GHOST` (ghost-restored) matches HEAD."""
+        self._assert_matches_head(channels.FARFIELD_KERNEL_SUM_MINUS_GHOST)
+
+    def test_round_trip_matches_the_engine_total(self):
+        """Independent oracle: both windows telescope to ``exact_total``.
+
+        The engine's operator/Schwinger total shares no code with the SACR-C
+        envelope projection, so agreeing with it is a stronger claim than the
+        HEAD comparison alone.
+        """
+        for partition in self.partitions:
+            for definition in (channels.FARFIELD_KERNEL_SUM,
+                               channels.FARFIELD_KERNEL_SUM_MINUS_GHOST):
+                with self.subTest(source=tuple(partition.source),
+                                  definition=definition):
+                    branch, _head = _farfield_reconstruction(
+                        self.head, partition, definition)
+                    f_scale = float(np.max(np.abs(partition.exact_total)))
+                    error = float(np.max(np.abs(
+                        branch - partition.exact_total)))
+                    self.assert_within(
+                        error / f_scale, MACHINE_REL_TOL,
+                        f'{definition} reconstruction departed from the '
+                        f'engine total by {error / f_scale:.3e} (relative)')
+
+    def test_stale_t_min_zero_breaks_the_round_trip(self):
+        """Teeth: a stale ``t_min = 0`` caller departs from the HEAD field.
+
+        With the demodulated label but ``t_min = 0``, `reconstruct_farfield`
+        does not invert the ``exp(+1j w t_min)`` demodulation, so the
+        reconstructed field is wrong by the un-cancelled carrier -- the
+        REQUIRED ``t_min`` argument is load-bearing, not decorative.
+        """
+        for partition in self.partitions:
+            with self.subTest(source=tuple(partition.source)):
+                env = farfield_envelope_from_partition(
+                    partition, channels.FARFIELD_KERNEL_SUM)
+                _kernels, stale = channels.reconstruct_farfield(
+                    partition.w, env, partition.delays,
+                    partition.saddle_kernels, partition.real_mask,
+                    channels.FARFIELD_KERNEL_SUM, 0.0)
+                _kernels_h, head = self.head.reconstruct_farfield(
+                    partition.w,
+                    self.head.farfield_envelope_from_partition(
+                        partition, channels.FARFIELD_KERNEL_SUM),
+                    partition.delays, partition.saddle_kernels,
+                    partition.real_mask, channels.FARFIELD_KERNEL_SUM)
+                f_scale = float(np.max(np.abs(partition.exact_total)))
+                error = float(np.max(np.abs(stale - head))) / f_scale
+                self.comparisons += 1
+                self.assertGreater(
+                    error, STALE_TMIN_FOIL_MIN,
+                    f'stale t_min=0 reconstruction stayed within '
+                    f'{error:.3e} of the HEAD field -- the demodulation '
+                    f'argument is not load-bearing')
+
+
+class FarfieldCarrierContinuityGuardTestCase(FarfieldEnvelopeTestCase):
+    """D3: the exterior carrier-continuity guard fires on phase aliasing.
+
+    `surrogate._assert_farfield_carrier_continuity` protects the far-field
+    spline: even after the ``exp(+1j w t_min)`` demodulation removes the
+    dominant spatial phase, a cubic spline cannot represent a complex label
+    whose phase winds by a Nyquist quarter turn (``pi/2``) between adjacent
+    spatial nodes.  The guard evaluates the top-of-band slice and raises
+    `CarrierDiscontinuityError` on any such gap.  This constructs a
+    well-sampled continuous grid (must pass), a pathological grid with one
+    ``2.5``-rad gap (must raise), a grid whose flip sits on a zero-magnitude
+    node (skipped, must pass), and a shape mismatch (must raise ValueError).
+    """
+
+    N_W = 5
+    N_GAMMA, N_RHO, N_THETA = 3, 4, 4
+    W_MAX = 60.0
+    #: The rad phase jump injected across a single adjacent-node gap; well
+    #: above ``pi/2`` so the positive control is not perched on the bound.
+    FLIP_STEP = 2.5
+
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        return (self.N_GAMMA, self.N_RHO, self.N_THETA)
+
+    def _axes(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        return (np.linspace(0.02, 0.06, self.N_GAMMA),
+                np.linspace(5.0, 8.0, self.N_RHO),
+                np.linspace(0.1, 0.5, self.N_THETA))
+
+    def _continuous_grid(self) -> np.ndarray:
+        """A slowly-winding unit-magnitude label (well under ``pi/2``)."""
+        gamma, rho, theta = self._axes()
+        grid = np.ones((self.N_W, self.N_GAMMA, self.N_RHO, self.N_THETA),
+                       dtype=complex)
+        for i in range(self.N_GAMMA):
+            for j in range(self.N_RHO):
+                for k in range(self.N_THETA):
+                    phase = 0.2 * rho[j] + 0.1 * theta[k] + 0.05 * gamma[i]
+                    grid[:, i, j, k] = np.exp(1j * phase)
+        return grid
+
+    def _pathological_grid(self) -> np.ndarray:
+        """Continuous except one ``FLIP_STEP``-rad jump across a rho gap."""
+        grid = self._continuous_grid()
+        base = np.angle(grid[:, 1, 1, :])
+        grid[:, 1, 2, :] = np.exp(1j * (base + self.FLIP_STEP))
+        return grid
+
+    @classmethod
+    def _plot(cls) -> None:
+        if not _HAVE_MPL:
+            return
+        case = cls()
+        case.N_W, case.N_GAMMA, case.N_RHO, case.N_THETA = (
+            cls.N_W, cls.N_GAMMA, cls.N_RHO, cls.N_THETA)
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        cont = _adjacent_top_slice_steps(case._continuous_grid(), case.shape)
+        path = _adjacent_top_slice_steps(case._pathological_grid(), case.shape)
+        fig, ax = plt.subplots(figsize=(7, 4))
+        bins = np.linspace(0.0, 2.0, 20)
+        ax.hist(cont, bins=bins, alpha=0.6, label='continuous')
+        ax.hist(path, bins=bins, alpha=0.6, label='pathological')
+        ax.axvline(CARRIER_STEP_MAX, color='r', ls='--',
+                   label='1.0 x peak |E| bound')
+        ax.set_xlabel('per-gap |delta E| / peak |E|')
+        ax.set_ylabel('count')
+        ax.set_title('D3: exterior carrier-continuity increment vs bound')
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(
+            _OUTPUT_DIR / 'farfield_carrier_continuity_winding.png', dpi=110)
+        plt.close(fig)
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._plot()
+
+    def test_continuous_grid_passes(self):
+        """A well-sampled continuous label does not trip the guard."""
+        gamma, _rho, _theta = self._axes()
+        grid = self._continuous_grid()
+        self.comparisons += 1
+        try:
+            surrogate_module._assert_farfield_carrier_continuity(
+                grid, self.W_MAX, gamma, self.shape)
+        except surrogate_module.CarrierDiscontinuityError as exc:
+            self.fail(f'the continuous label tripped the guard: {exc}')
+        max_step = float(np.max(_adjacent_top_slice_steps(grid, self.shape)))
+        self.assert_within(
+            max_step, CARRIER_STEP_MAX,
+            f'the continuous grid stepped by {max_step:.3g} x peak |E|, '
+            f'above the {CARRIER_STEP_MAX:.3g} bound')
+
+    def test_pathological_grid_raises(self):
+        """An adjacent-node phase flip above ``pi/2`` is refused."""
+        gamma, _rho, _theta = self._axes()
+        grid = self._pathological_grid()
+        self.comparisons += 1
+        with self.assertRaises(surrogate_module.CarrierDiscontinuityError):
+            surrogate_module._assert_farfield_carrier_continuity(
+                grid, self.W_MAX, gamma, self.shape)
+
+    def test_zero_magnitude_flip_is_skipped(self):
+        """A flip across a zero-magnitude (refused) node does not trip.
+
+        Refused/unfilled nodes are exactly zero; a zero-magnitude label
+        carries no meaningful phase, so the guard skips the pair rather than
+        reading it as a discontinuity.
+        """
+        gamma, _rho, _theta = self._axes()
+        grid = self._pathological_grid()
+        grid[:, 1, 2, :] = 0.0  # zero out the flipped node
+        self.comparisons += 1
+        try:
+            surrogate_module._assert_farfield_carrier_continuity(
+                grid, self.W_MAX, gamma, self.shape)
+        except surrogate_module.CarrierDiscontinuityError as exc:
+            self.fail(f'a zeroed node was read as a flip: {exc}')
+
+    def test_gamma_grid_length_mismatch_raises(self):
+        """A ``gamma_grid`` inconsistent with ``shape[0]`` is a ValueError."""
+        gamma, _rho, _theta = self._axes()
+        grid = self._continuous_grid()
+        self.comparisons += 1
+        with self.assertRaises(ValueError):
+            surrogate_module._assert_farfield_carrier_continuity(
+                grid, self.W_MAX, gamma[:-1], self.shape)
+
+    def test_the_bound_is_the_nyquist_quarter_turn(self):
+        """The production bound equals ``pi/2`` (pinned against drift)."""
+        self.comparisons += 1
+        self.assertEqual(
+            surrogate_module._FARFIELD_CARRIER_STEP_MAX, CARRIER_STEP_MAX,
+            'the production carrier bound is no longer 1.0 x peak |E|')
+
+
+def _synthetic_farfield_chart() -> FarFieldChart:
+    """A cheap far-field chart (no engine) for load-refusal contract tests.
+
+    Four-node caustic-fixed axes and a smooth unit-magnitude value tensor --
+    enough for the cubic tensor-spline fit; the reconstruction is never
+    served, only loaded, so the numbers need not be physical.
+    """
+    gamma_grid = np.linspace(0.02, 0.06, 4)
+    rho_grid = np.linspace(5.0, 8.0, 4)
+    theta_c_grid = np.linspace(0.1, 0.5, 4)
+    log_w_grid = np.linspace(np.log(5.0), np.log(60.0), 5)
+    shape = (log_w_grid.size, gamma_grid.size, rho_grid.size,
+             theta_c_grid.size)
+    values = np.ones(shape)
+    return FarFieldChart.from_values(
+        gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
+        log_w_grid=log_w_grid, envelope_real=values,
+        envelope_imag=0.1 * values, image_count=2, parity=1)
+
+
+class StaleFarfieldAxisSchemaRefusalTestCase(FarfieldEnvelopeTestCase):
+    """D3: a chart stamped with the OLD axis schema hard-refuses at load.
+
+    Positive-parity far-field charts are queried on caustic-fixed
+    ``(rho, theta_c)`` axes.  Build 8h-d2 bumped the ``axis_schema`` tag from
+    the frame-DEPENDENT ``'caustic_radial_offset_rho_theta'`` to the
+    frame-invariant ``..._framewinv`` value, so a chart trained under the OLD
+    label would be reconstructed in the wrong frame and could return a
+    finite-but-WRONG amplification.  `_validate_farfield_axis_schema` must
+    therefore refuse any chart whose tag is absent or not in the current
+    known set, at load, naming the chart and instructing a rebuild -- never a
+    silent mis-serve.  A contract test: the assertions are boolean.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = pathlib.Path(self._tmp.name)
+        self.chart = _synthetic_farfield_chart()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+        super().tearDown()
+
+    def _save_base(self) -> pathlib.Path:
+        """Save a one-far-field-chart surrogate; return the ``.npz`` path."""
+        surrogate = LensAmplificationSurrogate([self.chart], {})
+        path = self.tmp / 'base'
+        surrogate.save(path)
+        return path.with_suffix('.npz')
+
+    def _restamp(self, name: str, transform) -> pathlib.Path:
+        """Re-save the base artifact with ``chart0_meta`` JSON transformed."""
+        base = self._save_base()
+        out = self.tmp / name
+        with np.load(base, allow_pickle=False) as data:
+            arrays = {key: data[key] for key in data.files}
+        meta = json.loads(str(arrays['chart0_meta']))
+        arrays['chart0_meta'] = np.array(json.dumps(transform(meta)))
+        np.savez(out, **arrays)
+        return out
+
+    def test_old_axis_schema_refuses_at_load(self):
+        """A chart stamped with the OLD schema raises, naming the tag."""
+        corrupt = self._restamp(
+            'old_schema.npz',
+            lambda meta: {**meta, 'axis_schema': OLD_FARFIELD_AXIS_SCHEMA})
+        self.comparisons += 1
+        with self.assertRaises(ValueError) as ctx:
+            LensAmplificationSurrogate.load(corrupt)
+        message = str(ctx.exception)
+        self.assertIn(OLD_FARFIELD_AXIS_SCHEMA, message)
+        self.assertIn('rebuild', message)
+
+    def test_absent_axis_schema_refuses_at_load(self):
+        """A chart whose meta lacks the schema tag is refused."""
+        corrupt = self._restamp(
+            'no_schema.npz',
+            lambda meta: {k: v for k, v in meta.items()
+                          if k != 'axis_schema'})
+        self.comparisons += 1
+        with self.assertRaises(ValueError) as ctx:
+            LensAmplificationSurrogate.load(corrupt)
+        self.assertIn('rebuild', str(ctx.exception))
+
+    def test_current_axis_schema_loads(self):
+        """The control: the current-schema artifact loads without refusal."""
+        base = self._save_base()
+        loaded = LensAmplificationSurrogate.load(base)
+        self.comparisons += 1
+        self.assertEqual(len(loaded.charts), 1)
+        self.assertIsInstance(loaded.charts[0], FarFieldChart)
+
+    def test_old_schema_is_not_in_the_known_set(self):
+        """The OLD tag is genuinely retired; the current tag is known."""
+        self.comparisons += 1
+        self.assertNotIn(OLD_FARFIELD_AXIS_SCHEMA,
+                         surrogate_module._KNOWN_FARFIELD_AXIS_SCHEMAS)
+        self.comparisons += 1
+        self.assertIn(_FARFIELD_AXIS_SCHEMA,
+                      surrogate_module._KNOWN_FARFIELD_AXIS_SCHEMAS)
+
 
 if __name__ == '__main__':
     main()

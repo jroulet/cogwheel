@@ -13,14 +13,16 @@ Reduced parametrization (WHY these coordinates)
 -----------------------------------------------
 The full Chang--Refsdal geometry has parameters
 ``{m_lens_msun, z_lens, y1, y2, gamma, beta, kappa}`` (the seven the lensed
-waveform/likelihood consume).  Three of them are eliminated rather than sampled:
+waveform/likelihood consume).  Three of them are eliminated rather than
+sampled:
 
 * ``kappa`` (convergence) is exactly mass-sheet degenerate -- rescaling it is
   absorbed into the source amplitude, so it carries no independent posterior
   information and is fixed to ``0``.
 * ``beta`` (shear orientation) is a circular degree of freedom of the point
   mass; the physical content lives in the shear-frame source position, so
-  ``beta`` is fixed to ``0`` and the source angle is sampled in the shear frame.
+  ``beta`` is fixed to ``0`` and the source angle is sampled in the shear
+  frame.
 * ``z_lens`` (lens redshift) enters observables only through the dimensionless
   frequency ``w = xi(m_lens_msun, z_lens) * f`` (see
   `lensing.waveform.dimensionless_frequency`); it is therefore folded into the
@@ -72,9 +74,9 @@ _LN_M_LENS_RANGE = (np.log(10.0), np.log(3500.0))
 #: Source-position scale numerator (dimensionless, Einstein-radius units).
 #: ``307 = 55 / (sqrt(2) * 1.2372e-4 * 1024)`` keeps the double-double product
 #: ``w * sqrt(s)`` below the engine's certified ceiling of 60 at the *corner*
-#: of the ``[-1, 1]^2`` sampling box (the ``sqrt(2)`` is the box-corner factor),
-#: so ``Y(m) = _Y_SCALE / m_lens_msun`` shrinks the source box as the lens mass
-#: (hence ``w``) grows.
+#: of the ``[-1, 1]^2`` sampling box (the ``sqrt(2)`` is the box-corner
+#: factor), so ``Y(m) = _Y_SCALE / m_lens_msun`` shrinks the source box as the
+#: lens mass (hence ``w``) grows.
 _Y_SCALE = 307.0
 
 #: Upper cap on the source-position scale ``Y(m)`` (dimensionless).  For small
@@ -167,19 +169,20 @@ class UniformReducedShearPrior(UniformPriorMixin, IdentityTransformMixin,
     (``1 - kappa < gamma``), so one uniform range spans both branches.
 
     The range ``[0, 1.6]`` supersedes the obsolete ``0.45`` positive-parity
-    headroom.  Post-Build-7a the wave branch is certified-or-named-refuse across
-    the strong-shear band: a ``gamma`` approaching ``1`` from below no longer
-    needs to be excluded here because the engine either certifies the value or
-    raises ``operator.CancellationError`` (the strong-shear cross-parity
-    Schwinger fallback rescues certifiable strong-shear nodes; the rest refuse
-    by name).  For ``gamma > 1`` the geometry layer takes the macro-saddle
-    branch and the wave branch routes through the Schwinger evaluator; the upper
-    bound ``1.6`` gives working saddle headroom while staying inside the
-    engine's certified/refusable band (the ``w <= 60`` saddle ceiling is
-    enforced downstream as a named band-limit refusal).  The ``gamma = 1``
-    det-A = 0 boundary is a float64 measure-zero event refused by
-    ``geometry.macro_matrix`` at evaluation time and mapped to ``lnL = -inf`` by
-    the posterior-boundary refusal net -- there is no prior-side special-casing.
+    headroom.  Post-Build-7a the wave branch is certified-or-named-refuse
+    across the strong-shear band: a ``gamma`` approaching ``1`` from below no
+    longer needs to be excluded here because the engine either certifies the
+    value or raises ``operator.CancellationError`` (the strong-shear
+    cross-parity Schwinger fallback rescues certifiable strong-shear nodes; the
+    rest refuse by name).  For ``gamma > 1`` the geometry layer takes the
+    macro-saddle branch and the wave branch routes through the Schwinger
+    evaluator; the upper bound ``1.6`` gives working saddle headroom while
+    staying inside the engine's certified/refusable band (the ``w <= 60``
+    saddle ceiling is enforced downstream as a named band-limit refusal).  The
+    ``gamma = 1`` det-A = 0 boundary is a float64 measure-zero event refused by
+    ``geometry.macro_matrix`` at evaluation time and mapped to ``lnL = -inf``
+    by the posterior-boundary refusal net -- there is no prior-side
+    special-casing.
     """
     range_dic = {'gamma': (0.0, 1.6)}
 
@@ -257,17 +260,17 @@ class LensedIASPrior(RegisteredPriorMixin, CombinedPrior):
     with the lensed likelihood inside a `lensing.posterior.LensedPosterior`.
 
     The lens subpriors are appended AFTER the CBC subpriors, and
-    ``UniformLensMassPrior`` precedes ``UniformSourcePositionPrior`` because the
-    latter is conditioned on ``m_lens_msun`` (produced by the former);
-    `prior.CombinedPrior` requires every conditioned-on parameter to be supplied
-    by an earlier subprior.
+    ``UniformLensMassPrior`` precedes ``UniformSourcePositionPrior`` because
+    the latter is conditioned on ``m_lens_msun`` (produced by the former);
+    `prior.CombinedPrior` requires every conditioned-on parameter to be
+    supplied by an earlier subprior.
 
     Distance is sampled in physical luminosity volume: the CBC
-    ``UniformLuminosityVolumePrior`` is reused unchanged, so the sampled distance
-    is the physical ``d_luminosity`` rather than the lens-corrected apparent
-    distance ``d_app = d_luminosity / sqrt(mu_macro)``.  A lens-aware
-    apparent-distance subprior that absorbs the macro-magnification amplitude is
-    DEFERRED to Build 5.
+    ``UniformLuminosityVolumePrior`` is reused unchanged, so the sampled
+    distance is the physical ``d_luminosity`` rather than the lens-corrected
+    apparent distance ``d_app = d_luminosity / sqrt(mu_macro)``.  A lens-aware
+    apparent-distance subprior that absorbs the macro-magnification amplitude
+    is DEFERRED to Build 5.
     """
     default_likelihood_class = LensedRelativeBinningLikelihood
 
@@ -298,12 +301,13 @@ class LensedMarginalizedExtrinsicIASPrior(RegisteredPriorMixin, CombinedPrior):
     likelihood's ``params`` exactly and it pairs with it inside a
     `lensing.posterior.LensedPosterior`.
 
-    The CBC subpriors are reused verbatim from `IntrinsicIASPrior.prior_classes`
-    (DRY: the intrinsic subprior list is defined once, in `gw_prior`).  The lens
-    subpriors are appended AFTER them, with ``UniformLensMassPrior`` preceding
-    ``UniformSourcePositionPrior`` because the latter is conditioned on
-    ``m_lens_msun`` (produced by the former); `prior.CombinedPrior` requires
-    every conditioned-on parameter to be supplied by an earlier subprior.
+    The CBC subpriors are reused verbatim from
+    `IntrinsicIASPrior.prior_classes` (DRY: the intrinsic subprior list is
+    defined once, in `gw_prior`).  The lens subpriors are appended AFTER them,
+    with ``UniformLensMassPrior`` preceding ``UniformSourcePositionPrior``
+    because the latter is conditioned on ``m_lens_msun`` (produced by the
+    former); `prior.CombinedPrior` requires every conditioned-on parameter to
+    be supplied by an earlier subprior.
 
     Distance convention: extrinsic parameters are marginalized, so distance is
     neither sampled nor standard here; ``d_luminosity`` is a postprocessing

@@ -118,14 +118,15 @@ _N_CHANNELS = 4
 #: classes, each subtracting only the analytic terms valid on its window
 #: (Build 8h-b3-fin S1-2).  ``FARFIELD_KERNEL_SUM`` (window iii, the legacy
 #: Build 8g-b label) subtracts the real-image kernels and hands the band
-#: above ``w_trust`` to the point-mass ppGO band split; ``FARFIELD_DIFFRACTIVE``
-#: (window i, the diffractive bottom below ``w_floor``) subtracts NOTHING and
-#: fits the bounded smooth ``F`` object (``F -> 1`` as ``w -> 0``);
-#: ``FARFIELD_KERNEL_SUM_MINUS_GHOST`` (window ii, the mid band
-#: ``[w_floor, w_trust)``) additionally subtracts the decaying complex-saddle
-#: ghost ``G`` so the stored remainder is smooth across the fold.  The tags
-#: NAME the reconstruction algebra, so they live here (the physics label home)
-#: and the surrogate imports them for its known-tag set and per-tile stamping.
+#: above ``w_trust`` to the point-mass ppGO band split;
+#: ``FARFIELD_DIFFRACTIVE`` (window i, the diffractive bottom below
+#: ``w_floor``) subtracts NOTHING and fits the bounded smooth ``F`` object (``F
+#: -> 1`` as ``w -> 0``); ``FARFIELD_KERNEL_SUM_MINUS_GHOST`` (window ii, the
+#: mid band ``[w_floor, w_trust)``) additionally subtracts the decaying
+#: complex-saddle ghost ``G`` so the stored remainder is smooth across the
+#: fold.  The tags NAME the reconstruction algebra, so they live here (the
+#: physics label home) and the surrogate imports them for its known-tag set and
+#: per-tile stamping.
 FARFIELD_KERNEL_SUM = 'farfield_full_kernel_sum'
 FARFIELD_DIFFRACTIVE = 'farfield_diffractive_bare_total'
 FARFIELD_KERNEL_SUM_MINUS_GHOST = 'farfield_kernel_sum_minus_ghost'
@@ -135,30 +136,32 @@ FARFIELD_KERNEL_SUM_MINUS_GHOST = 'farfield_kernel_sum_minus_ghost'
 #: numerics (the atomicity invariant: no tag can be written without its
 #: reconstruction branch existing here).
 KNOWN_FARFIELD_DEFINITIONS = frozenset({
-    FARFIELD_KERNEL_SUM, FARFIELD_DIFFRACTIVE, FARFIELD_KERNEL_SUM_MINUS_GHOST})
+    FARFIELD_KERNEL_SUM, FARFIELD_DIFFRACTIVE,
+    FARFIELD_KERNEL_SUM_MINUS_GHOST})
 
 #: Interior (inside-the-caustic) envelope-definition tag.  Unlike the far-field
 #: tags -- which SUBTRACT individually-divergent near-merged image kernels and
 #: therefore fail generically inside the astroid/deltoid (the near-merged pair
 #: has a small ``w * |tau_a - tau_c|`` so its subtracted kernel blows up) --
-#: the interior tag stamps tiles that store the FULL SACR-C ``tau_c``-demodulated
-#: envelope ``E`` (the same object `reconstruct_from_envelope` consumes): the
-#: switch is ON, near-merged images are SWITCHED INTO the bounded envelope
-#: instead of subtracted, and demodulation is the unimodular multiply
-#: ``e^{-i w tau_c}`` with ``tau_c`` the finite/smooth critical (virtual) delay.
-#: The label has NO ``1/(tau_a - tau_c)`` and NO ``Im tau_c`` denominator, so it
-#: is bounded at every interior point the charts admit -- including near-cusp
-#: directions, the regime SACR-C was built for -- and needs no interior
-#: carve-out.  Reconstruction is the EXISTING `reconstruct_from_envelope`
-#: (SACR-C caustic-region path with the geometry's own switch and critical
-#: delay); no new reconstruction algebra is introduced (Build S2-3, frozen WP8
-#: amended to whole-interior, Professor R4 ruling).
+#: the interior tag stamps tiles that store the FULL SACR-C
+#: ``tau_c``-demodulated envelope ``E`` (the same object
+#: `reconstruct_from_envelope` consumes): the switch is ON, near-merged images
+#: are SWITCHED INTO the bounded envelope instead of subtracted, and
+#: demodulation is the unimodular multiply ``e^{-i w tau_c}`` with ``tau_c``
+#: the finite/smooth critical (virtual) delay.  The label has NO ``1/(tau_a -
+#: tau_c)`` and NO ``Im tau_c`` denominator, so it is bounded at every interior
+#: point the charts admit -- including near-cusp directions, the regime SACR-C
+#: was built for -- and needs no interior carve-out.  Reconstruction is the
+#: EXISTING `reconstruct_from_envelope` (SACR-C caustic-region path with the
+#: geometry's own switch and critical delay); no new reconstruction algebra is
+#: introduced (Build S2-3, frozen WP8 amended to whole-interior, Professor R4
+#: ruling).
 INTERIOR_SACR_C = 'interior_sacr_c_envelope'
 
 #: Every interior envelope-definition tag with a reconstruction path.  A chart
-#: whose interior tag is absent here is hard-refused at load BEFORE any numerics
-#: (same atomicity invariant as `mem:KNOWN_FARFIELD_DEFINITIONS`: no tag can be
-#: stamped without its reconstruction branch -- here the SACR-C
+#: whose interior tag is absent here is hard-refused at load BEFORE any
+#: numerics (same atomicity invariant as `mem:KNOWN_FARFIELD_DEFINITIONS`: no
+#: tag can be stamped without its reconstruction branch -- here the SACR-C
 #: `reconstruct_from_envelope` -- existing).
 KNOWN_INTERIOR_DEFINITIONS = frozenset({INTERIOR_SACR_C})
 
@@ -1041,12 +1044,56 @@ def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
     return contribution.kernel * np.exp(1j * w * (contribution.delay - t_min))
 
 
+def _frame_phase(w: np.ndarray, t_min: float) -> np.ndarray:
+    """Frame-demodulation phase ``w * t_min`` reduced modulo ``2*pi``.
+
+    The far-field label is demodulated by ``exp(+1j w t_min)`` and
+    `reconstruct_farfield` re-modulates by ``exp(-1j w t_min)`` (Build 8h-d2,
+    frame invariance).  This is the SINGLE authoritative source of that phase,
+    called by BOTH sites so the convention has exactly one expression (Build
+    8h-d2, INS-4-003).  The reduction modulo ``2*pi`` is load-bearing: ``exp``
+    is ``2*pi``-periodic, so it leaves the demodulation mathematically
+    unchanged, but it bounds the argument to ``[0, 2*pi)`` so the two
+    exponentials round against a small argument instead of one growing like
+    ``|w t_min|``.  That keeps the demod/re-mod pair exact to machine precision
+    wherever the reconstruction is WELL CONDITIONED.
+
+    Precision caveat near a fold (Build 8h-d2, INS-4-003).  The reduction does
+    NOT restore machine precision when the far-field envelope is huge relative
+    to the reconstructed total -- i.e. next to a fold, where the analytic
+    kernel sum nearly cancels the envelope.  There the re-modulation multiply
+    injects a rounding of order ``eps * |E_tilde|`` into the envelope that the
+    independently-formed kernel sum cannot cancel, so the residual in ``F``
+    scales as ``eps * |E_tilde| / max|F|`` (the catastrophic-cancellation
+    amplification), independent of ``|w t_min|``.  For the worst measured
+    cusp-adjacent fixture (``|E_tilde| ~ 2.6e5``, ``max|F| ~ 2.8``) that floor
+    is ``~1.7e-11`` -- above a ``1e-11`` telescoping bound.  Removing it
+    requires reconstructing in the min-relative frame from the small envelope
+    (avoiding the round-trip multiply on the large one), a data-flow change out
+    of scope for this phase-reduction helper.
+
+    Parameters
+    ----------
+    w : np.ndarray
+        Dimensionless frequency grid.
+    t_min : float
+        Minimum real-image Fermat delay of the config (the frame origin).
+
+    Returns
+    -------
+    np.ndarray
+        ``(w * t_min) mod 2*pi``, broadcast to the shape of ``w``.
+    """
+    return np.mod(np.asarray(w, dtype=float) * float(t_min), 2.0 * np.pi)
+
+
 def reconstruct_farfield(w: np.ndarray,
                          envelope: np.ndarray,
                          delays: np.ndarray,
                          saddle_kernels: np.ndarray,
                          real_mask: np.ndarray,
-                         definition: str
+                         definition: str,
+                         t_min: float
                          ) -> tuple[np.ndarray, np.ndarray]:
     """Serve-mirror reconstruction, dispatching the switch on the window tag.
 
@@ -1055,19 +1102,37 @@ def reconstruct_farfield(w: np.ndarray,
     switch policy from the window-class tag (`_farfield_switch`) with the
     critical carrier parked at ``tau_c = 0`` -- exactly mirroring
     `farfield_envelope_from_partition`.  The caller MUST supply the envelope
-    already carrying the window's analytic content: for
+    already carrying the window's analytic content in the SAME frame-invariant
+    (demodulated) convention the stored label uses: for
     `FARFIELD_KERNEL_SUM_MINUS_GHOST` the analytic ghost term
     (`farfield_ghost_term`) must have been re-added over the chart region
-    before this call (the ghost lives in the mid-band window only, never in
-    the bare ppGO band above ``w_trust``).
+    BEFORE this call and carried with the same ``+t_min`` tilt as the stored
+    label (the ghost lives in the mid-band window only, never in the bare
+    ppGO band above ``w_trust``), so that the internal ``exp(-1j w t_min)``
+    de-tilt returns label and ghost together to the min-relative frame.
+
+    Frame convention (Build 8h-d2).  `farfield_envelope_from_partition`
+    demodulates the label by ``exp(+1j w t_min)`` to make it frame-invariant;
+    this function re-modulates by ``exp(-1j w t_min)`` FIRST, returning to the
+    min-relative delay frame the SACR-C reconstruction below works in.  Both
+    directions take the phase from `_frame_phase` (``w t_min`` reduced modulo
+    ``2*pi``), so the round trip reproduces the pre-demodulation field to
+    machine precision wherever the reconstruction is well conditioned.  It does
+    NOT reach machine precision next to a fold: there ``|E_tilde|`` dwarfs
+    ``max|F|`` and the re-modulation multiply injects an ``eps * |E_tilde|``
+    rounding the kernel sum cannot cancel, leaving a residual ``~ eps *
+    |E_tilde| / max|F|`` that the phase reduction cannot remove (see
+    `_frame_phase`; Build 8h-d2, INS-4-003).  ``t_min`` is a REQUIRED
+    positional (no default) so a stale caller that has not migrated hard-fails
+    rather than silently reconstructing in the wrong frame.
 
     Parameters
     ----------
     w : np.ndarray
         Dimensionless frequency, 1-D grid.
     envelope : np.ndarray
-        The interpolated (and, for the mid band, ghost-restored) far-field
-        envelope, with the shape of ``w``.
+        The interpolated (and, for the mid band, ghost-restored)
+        frame-invariant far-field envelope, with the shape of ``w``.
     delays : np.ndarray
         Shape ``(_N_CHANNELS,)`` channel delays ``tau_a``.
     saddle_kernels : np.ndarray
@@ -1076,6 +1141,10 @@ def reconstruct_farfield(w: np.ndarray,
         Shape ``(_N_CHANNELS,)`` boolean mask of real channels.
     definition : str
         A far-field envelope-definition tag in `KNOWN_FARFIELD_DEFINITIONS`.
+    t_min : float
+        Minimum real-image Fermat delay of the served config
+        (`ChangRefsdalPartition.t_min` / geometry ``t_min``), the frame
+        origin the demodulation is inverted against.
 
     Returns
     -------
@@ -1085,6 +1154,17 @@ def reconstruct_farfield(w: np.ndarray,
         The reconstructed amplification total ``F``.
     """
     w = np.asarray(w, dtype=float)
+    # Invert the frame-invariance demodulation applied by
+    # `farfield_envelope_from_partition`: the stored label is
+    # ``E_tilde = E_ff_minrel * exp(+1j w t_min)``, so re-modulate by
+    # ``exp(-1j w t_min)`` to return to the min-relative delay frame.  The
+    # phase is `_frame_phase` (``w t_min`` reduced modulo ``2*pi``) -- the SAME
+    # authoritative expression the producer used -- so the demod/re-mod pair
+    # cancels to machine precision regardless of ``|w t_min|`` (Build 8h-d2,
+    # INS-4-003).  For `FARFIELD_KERNEL_SUM_MINUS_GHOST` the caller has already
+    # added the ghost in the demodulated frame, so this single multiply
+    # de-tilts label and ghost together.
+    envelope = np.asarray(envelope) * np.exp(-1j * _frame_phase(w, t_min))
     switch = _farfield_switch(real_mask, w.shape[0], definition)
     return reconstruct_from_envelope(
         w, envelope, delays, saddle_kernels, switch, 0.0)
@@ -1125,14 +1205,13 @@ def farfield_envelope_from_partition(
       the full post-geometric-optics remainder, measured smooth and
       ``~1e-4`` in magnitude on the good side of every flip line.
     * `FARFIELD_KERNEL_SUM_MINUS_GHOST` -- the mid band with the decaying
-      complex-saddle ghost ``G`` additionally subtracted (`farfield_ghost_term`,
-      gated on the GEOMETRIC separation ``min_a |x_a - x_c| >=
-      _GHOST_SEPARATION_MIN``: the ghost is subtracted only where it is
-      resolved from every real image, so the single-saddle expansion is
-      valid.  The gate is frequency-independent, so the training label here
-      and the serve mirror decide admit/refuse identically for a fixed
-      config; near a cusp the ghost coalesces with a real image and the gate
-      refuses).
+      complex-saddle ghost ``G`` additionally subtracted
+      (`farfield_ghost_term`, gated on the GEOMETRIC separation ``min_a |x_a -
+      x_c| >= _GHOST_SEPARATION_MIN``: the ghost is subtracted only where it is
+      resolved from every real image, so the single-saddle expansion is valid.
+      The gate is frequency-independent, so the training label here and the
+      serve mirror decide admit/refuse identically for a fixed config; near a
+      cusp the ghost coalesces with a real image and the gate refuses).
 
     The window boundary ``w_floor`` is `farfield_w_floor`; ``w_trust`` (the
     upper mid-band edge, above which the bare ppGO band-split serves) is a
@@ -1162,7 +1241,14 @@ def farfield_envelope_from_partition(
     Returns
     -------
     np.ndarray
-        Shape ``(n_w,)`` complex far-field envelope for the window class.
+        Shape ``(n_w,)`` complex far-field envelope for the window class,
+        DEMODULATED by ``exp(+1j w t_min)`` (Build 8h-d2) so the stored label
+        is frame-INVARIANT.  The demodulation phase is `_frame_phase` (``w
+        t_min`` reduced modulo ``2*pi``); `reconstruct_farfield` inverts it
+        with the SAME range-reduced phase and its required ``t_min`` argument
+        before rebuilding, so the round trip reproduces the pre-demodulation
+        field to machine precision (the reduction is what keeps the two
+        large-argument exponentials cancelling; see `_frame_phase`).
 
     Raises
     ------
@@ -1183,7 +1269,21 @@ def farfield_envelope_from_partition(
         envelope = envelope - farfield_ghost_term(
             partition.w, partition.source, partition.matrix,
             t_min=partition.t_min, real_images=partition.images)
-    return envelope
+    # Demodulate the residual ``t_min`` carrier so the STORED far-field label
+    # is frame-INVARIANT (Build 8h-d2).  ``switched_analytic_channels`` and
+    # ``farfield_ghost_term`` above both carry the envelope in the partition's
+    # min-relative delay frame (``tau_a - t_min``); that frame origin
+    # ``t_min`` varies from node to node, so the un-demodulated label winds by
+    # ``w * t_min`` across a tile -- the dominant spatial phase of the fitted
+    # object -- and a spline mixes incompatible frames (Build 8h-d2 defect 3).
+    # Multiplying by ``exp(+1j w t_min)`` removes that frame dependence,
+    # mirroring the interior SACR-C ``tau_c`` demodulation and the Born
+    # ``exp(-1j w t_min)`` convention.  `reconstruct_farfield` re-modulates by
+    # ``exp(-1j w t_min)`` before rebuilding.  Both sites take the phase from
+    # `_frame_phase` (reduced modulo ``2*pi``) so the demod/re-mod pair cancels
+    # to machine precision even for large ``w t_min`` near a fold (Build 8h-d2,
+    # INS-4-003) -- node-exact telescoping.
+    return envelope * np.exp(1j * _frame_phase(partition.w, partition.t_min))
 
 
 @dataclass(frozen=True)

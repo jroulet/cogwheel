@@ -117,43 +117,35 @@ Tag conventions:
   which is correct, certifiable (`w * |y| <= 60` never binds inside the prior),
   and not zero-quadrature.
 
-- **Port the subdivision test fixture to caustic-fixed coordinates**
-  `[housekeeping]` — `cogwheel/tests/test_lensing_farfield_envelope.py` has 4
-  failures and 21 errors: every test routed through `_run_subdivision`
-  (line ~1974) is dead, so `ExteriorEdgeAnnulusSubdivisionTestCase`,
-  `InteriorEdgeAnnulusSubdivisionTestCase`,
-  `CancellationChildSubdivisionTestCase`,
-  `RegionKeyConsistencySubdivisionTestCase` and
-  `SubdivisionSelfFalsificationTestCase` assert nothing.
 
-  NOT a stale-kwarg fix. Three interface migrations landed without the fixture
-  following: (1) `exclusion_radius` -> `exclusion_rho`, still a float, same
-  slot (`bc27d39`); (2) `interior_admit_radius: float` ->
-  `interior_admission: _InteriorAdmission | None` plus new optional
-  `exterior_admission` / `source_magnitude_max` — every value the fixture
-  passes (1e9 default, 1.5 for the flip case) means "admit everything", which
-  the object API expresses as `None`; (3) THE BLOCKER — the tile dict moved to
-  caustic-fixed coordinates: `_subdivide_farfield_tile` unpacks
-  `rho_c, theta_c = tile['center']` and `half_rho, half_theta = tile['half']`
-  (`surrogate_training.py:3011-3012`) while the fixture supplies `(y1, y2)`
-  centres and a SCALAR half (`_EXT_PARENT_CENTER = (1.2, 0.0)`,
-  `_EXT_PARENT_HALF = 0.4`).
+- **Frame-invariant label round-trip costs ~3e-11 on near-fold configs**
+  `[→ spec]` — WP2 (8h-d2) made the far-field label frame-INVARIANT by storing
+  `E_tilde = E_minrel * exp(+1j*w*t_min)`, with `channels.reconstruct_farfield`
+  undoing it via `exp(-1j*w*t_min)`. That round trip is not the identity in
+  floating point: the error is `~eps * |w*t_min| * |E_tilde|`, and near a fold
+  the label is LARGE (measured `max|E_tilde| = 2.55e5`, `max|w*t_min| = 13.66`),
+  so the absolute error reaches `+2.9e-11`.
 
-  So the port must rewrite the fixture's geometry — parent centres and halves
-  in `(rho, theta_c)`, `_expected_children` child-centre arithmetic, and the
-  "inner children disk-excluded / outer admit" construction that currently
-  relies on Cartesian distance from the origin. Re-derive the exclusion
-  semantics in the caustic-fixed gauge rather than transliterating: `rho` is
-  multiplicative inside the caustic, additive outside, and the ppGO map uses a
-  third (scalar-reach) convention.
+  Consequence: `MorseSignMaskTestCase.test_telescoping_holds_for_the_cusp_
+  adjacent_mask` (`test_lensing_ppgo_bandsplit.py`) moved from `4.9e-12` on the
+  retired direct min-relative path to `1.66e-11` against its `1e-11` bound. It
+  is currently held by `@expectedFailure` with the bound kept VERBATIM — the
+  tolerance was deliberately NOT weakened. `InteriorTelescopingTestCase`, a
+  non-fold config through the SAME helper, still passes at `1.6e-16`, so the
+  xfail is correctly scoped to the near-degenerate cusp regime.
 
-  Introduced by `bc27d39` (8h-b4) on top of the 8h-b3 caustic-fixed migration.
-  Silent because the suite was never run after that commit and nothing in the
-  fast tier exercises `_subdivide_farfield_tile`.
+  This is a real (small) precision cost bought for frame-invariance, not a
+  fixture artifact. Two candidate resolutions, both needing a decision rather
+  than a patch:
+  1. Reconstruct in the min-relative frame on this path (the direct route
+     measures `4.9e-12`), i.e. do not round-trip at all — a data-flow change.
+  2. Accept the cost and re-derive the tolerance from the production serve
+     precision, which is the honest bar if the round trip stays.
 
-  Acceptance: all 25 tests green, each demonstrably reachable-red (this file's
-  self-falsification class must actually fire), and the fixture's coordinate
-  gauge named in a comment so the next migration breaks loudly.
+  Do NOT resolve by raising `1e-11` to make the test pass; that would hide the
+  regression rather than price it. The large `|E_tilde|` near folds is itself
+  worth a look — a demodulated label that grows to `1e5` is poorly conditioned
+  exactly where the physics is hardest.
 
 - **Restore the surrogate structural tests once the serving schema settles**
   `[housekeeping]` — three classes were DELETED from
@@ -462,6 +454,45 @@ Rationale: bare-denial rate is transcript-depth-correlated (0/106 in first
 two calls, median call 14, issue #74351); gw's 37 shallow builds recorded
 zero denials on the identical harness. Prove in cogwheel, then port to
 teja-force skill + gw with the rest of the hardening.
+
+
+- **Never pin a symptom with a reachable-red; pin the invariant**
+  `[housekeeping]` — process rule drawn from the F022 post-mortem, to be
+  folded into `.claude/crew/test_dev.md` and `.claude/crew/inspector.md`.
+
+  `test_unpatched_positive_box_build_raises_carrier_discontinuity` existed to
+  assert that a coarse box TRIPS the far-field carrier guard. Its stated intent
+  was honourable — prove the fixtures' bypass was not masking a guard that had
+  silently stopped firing. Its effect was the opposite: it promoted a false
+  positive to a specification. Once written, fixing the guard REGISTERS AS A
+  REGRESSION, and the only reason the defect was found is that this test failed
+  when the guard was corrected.
+
+  Rule: a reachable-red belongs on an INVARIANT ("a genuinely discontinuous
+  tile is rejected", certified synthetically in
+  `FarfieldCarrierContinuityGuardTestCase`), never on a SYMPTOM ("this specific
+  real fixture is rejected"). If liveness of a guard needs proving, prove it
+  against a constructed pathological input, not against a production input
+  whose rejection is the thing under suspicion.
+
+  Second rule, same post-mortem: RECURRING ACCOMMODATION IS A SIGNAL ABOUT THE
+  THING BEING ACCOMMODATED. Four independent bypasses accumulated for this one
+  guard (three `_skip_carrier_guard=True` sites plus a
+  `_from_engine_without_carrier_guard` mock-patch helper), each with a written,
+  locally-reasonable justification citing real accuracy evidence. No mechanism
+  existed to ask whether four accommodations meant the guard was wrong, because
+  each build only sees its own. Proposed check for the Inspector: when adding a
+  bypass/skip/xfail for a named production guard, grep for existing bypasses of
+  the SAME symbol; the second one escalates to a review of the guard rather
+  than a third bypass.
+
+  Third: the build that added the fourth bypass had ALREADY MEASURED the
+  refutation — its docstring records `n_gamma in {6, 8, 12, 16}` all raising at
+  `~3.1 rad` — and filed it as an unavoidable "integration tension". A step
+  that does not shrink under refinement is not an under-resolution problem, by
+  definition. The refinement sweep is the discriminator (carrier shrinks like
+  `1/n`, null pins at `pi`) and should be run before any conclusion about a
+  phase-based guard.
 
 - [ ] **Test-suite curation pass (8e window)** `[housekeeping]` —
   OWNER APPROVED (2026-07-21): audit all ~476 tests for obsolescence

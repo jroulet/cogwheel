@@ -101,8 +101,11 @@ import numpy as np
 
 from cogwheel import data, waveform
 from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
-from cogwheel.lensing.chang_refsdal.channels import reconstruct_from_envelope
+from cogwheel.lensing.chang_refsdal.channels import (
+    reconstruct_from_envelope, reconstruct_farfield)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
+from cogwheel.lensing.chang_refsdal import geometry
+from cogwheel.lensing import surrogate_training
 from cogwheel.lensing.chang_refsdal import operator as operator_module
 from cogwheel.lensing.chang_refsdal import _schwinger as schwinger_module
 from cogwheel.lensing.chang_refsdal.operator import (
@@ -112,7 +115,8 @@ from cogwheel.lensing.chang_refsdal._schwinger import (
 from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate, _rotate_to_eigenframe,
-    _FARFIELD_ENVELOPE_DEFINITION)
+    _FARFIELD_ENVELOPE_DEFINITION, _union_cusp_nodes, _ASTROID_CUSP_ANGLES,
+    _CUSP_NODE_DEDUP_TOL, CarrierDiscontinuityError)
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, LensedBinningError,
     dimensionless_frequency)
@@ -200,6 +204,31 @@ RECON_TARGET_TOL = 1e-3
 #: is beta-independent to machine precision; 1e-12 is ~4 decades above the
 #: measured ~1e-15 residual.
 E_INVARIANCE_TOL = 1e-12
+
+#: (D4) Gammas at which the source-plane astroid cusp angles are probed.  All
+#: strictly inside ``(0, 1)`` -- the positive-parity band `from_engine` unions
+#: cusp nodes onto -- and spread so the gamma-INDEPENDENCE of the angle set is
+#: genuinely exercised while the cusp MAGNITUDE (which does vary) sweeps ~10x.
+CUSP_PROBE_GAMMAS = (0.15, 0.30, 0.45, 0.60, 0.75, 0.90)
+
+#: Branch-sweep resolution for `surrogate_training._cusp_source_angles`.  The
+#: four astroid cusps are speed minima of a 2*pi periodic sweep; a few
+#: thousand samples resolves each minimum's LENS angle finely enough that its
+#: SOURCE image lands on the closed-form ray far below `CUSP_ANGLE_TOL`
+#: (measured: 2000 samples already gives exact 0 / +-pi/2 / pi to <1e-12).
+CUSP_DETECTOR_N = 2000
+
+#: (D4) Agreement tolerance between the independent branch-speed cusp-angle
+#: detector and the closed-form ruled set ``{0, +-pi/2, pi}``.  The spec asks
+#: for ``< 1e-9``; the measured residual is machine-zero, so 1e-9 is a
+#: generous, non-vacuous bar.
+CUSP_ANGLE_TOL = 1e-9
+
+#: The closed-form source-plane astroid cusp angles the Professor ruled
+#: `from_engine` may hardcode, written out INDEPENDENTLY here (NOT imported
+#: from production) so the cross-check does not gate a value against itself.
+#: Sorted ascending to match the detector's ``sorted(...)`` return.
+CLOSED_FORM_CUSP_ANGLES = (-np.pi / 2, 0.0, np.pi / 2, np.pi)
 
 # --------------------------------------------------------------------------
 # Likelihood-level fixture + tolerances (mirrors test_lensing_likelihood).
@@ -427,6 +456,19 @@ def _flip_witness_metrics(gamma: float, y1: float, y2: float,
 # ==========================================================================
 # Cached training + fixtures (each trains ONCE per process, reused by all).
 # ==========================================================================
+
+# NOTE (F022): these fixtures used to build through a
+# `_from_engine_without_carrier_guard` helper that mock-patched
+# `surrogate._assert_farfield_carrier_continuity` to a no-op, because the
+# coarse single boxes below tripped it at every node density tried
+# (n_gamma in {6, 8, 12, 16}, max step ~3.1 rad).  That was read at the time
+# as an unavoidable WP2/WP3 integration tension.  It was not: the guard was
+# measuring `arg`-winding, which swings by pi at an amplitude null even where
+# the separately-splined re/im fields stay smooth.  The guard now measures a
+# normalized re/im increment and these boxes pass it on their merits, so the
+# neutering helper and its reachable-red control are both gone and the
+# fixtures call the REAL `from_engine`.
+
 
 @functools.lru_cache(maxsize=1)
 def _pos_surrogate_ship() -> LensAmplificationSurrogate:
@@ -689,12 +731,21 @@ def _reconstruct_via_surrogate(sur: LensAmplificationSurrogate,
     if not served:
         return np.zeros_like(np.asarray(w_array, dtype=complex)), False
     if definition == _FARFIELD_ENVELOPE_DEFINITION:
-        ff_switch = np.zeros((w_float.shape[0], geom.real_mask.size),
-                             dtype=float)
-        ff_switch[:, np.asarray(geom.real_mask, dtype=bool)] = 1.0
-        _kernels, total = reconstruct_from_envelope(
+        # Build 8h-d2 (WP2) relabel: the stored far-field envelope is now the
+        # frame-INVARIANT label ``E_tilde = E_ff * exp(+1j w t_min)``.  Its
+        # exact inverse is `reconstruct_farfield`, which re-modulates by
+        # ``exp(-1j w t_min)`` FIRST (using the geometry's OWN ``t_min``)
+        # before the SACR-C telescoping -- byte-for-byte the production
+        # likelihood mirror (`LensedRelativeBinningLikelihood.
+        # _surrogate_coefficients` calls
+        # ``reconstruct_farfield(dense_w, env, geom.delays,
+        # geom.saddle_kernels, geom.real_mask, definition, geom.t_min)``).
+        # The retired ``reconstruct_from_envelope(..., ff_switch, 0.0)`` path
+        # de-tilted by NOTHING, so it no longer inverts the demodulated label
+        # (measured: it inflates held-out eps ~1.3e-1 -> ~1.6e0).
+        _kernels, total = reconstruct_farfield(
             w_float, envelope, geom.delays, geom.saddle_kernels,
-            ff_switch, 0.0)
+            geom.real_mask, definition, geom.t_min)
     else:
         _kernels, total = reconstruct_from_envelope(
             w_float, envelope, geom.delays, geom.saddle_kernels,
@@ -835,39 +886,36 @@ class EnvelopeReconstructionTestCase(SurrogateTestCase):
             served_configs.append((gamma, y1, y2))
         return epsilons, served_configs
 
-    # XFAIL: known red since 8h-b5, and still red because the FIX is not wired
-    # into the chart this test builds.  The failing config sits exactly on the
-    # theta_c = 0 cusp ray, where r_caustic has a slope kink a cubic spline
-    # cannot represent while the ray falls in a CELL INTERIOR.  Build 8h-b6
-    # added cusp-ALIGNED exterior columns, which put the ray on a column EDGE
-    # and collapse eps 2.6e-1 -> ~1.5e-4; that structural fix is certified by
-    # test_lensing_exterior_admission.OnCuspColumnEdgeTestCase.  This chart is
-    # still built without cusp alignment, so eps stays at the recorded 2.6e-1.
-    # NOT a tolerance problem -- do not widen POS_RECON_TOL.  Wire cusp-aligned
-    # columns into this chart path and this test goes green on its own.
-    @unittest.expectedFailure
-    def test_positive_box_reconstruction_within_budget(self):
-        """Positive-parity box: every held-out eps < `POS_RECON_TOL`.
+    #: The historically-failing exterior config: it sits EXACTLY on the
+    #: astroid cusp ray ``theta_c = 0`` where the directional caustic radius
+    #: ``geometry.r_caustic`` (hence the caustic-fixed map) has a slope KINK.
+    #: ``(gamma, y1_eig, y2_eig)`` -- ``y2 = 0`` puts it dead on the ray.
+    CUSP_RAY_CONFIG = (0.40, 2.183, 0.0)
 
-        KNOWN RED (Build 8h-b5, localized, NOT a tolerance problem).  Twelve of
-        the thirteen held-out configs pass with median eps 3.3e-2; ONE fails at
-        eps 2.61e-1 -- the config ``(gamma = 0.40, y1 = 2.183, y2 = 0.0)``.
-        Localization (measured this build): that config sits EXACTLY on the
-        astroid cusp ray ``theta_c = 0``, where the directional caustic radius
-        ``geometry.r_caustic(gamma, theta_c)`` -- and hence the caustic-fixed
-        coordinate map -- has a slope KINK.  Holding ``gamma`` and ``rho``
-        fixed and sweeping ``theta_c`` across the box gives eps 1.5e-4 off the
-        ray and 2.6e-1 ON it; sweeping gamma at fixed off-ray ``theta_c`` gives
-        1.0e-4 ... 3.1e-4 while the same sweep ON the ray gives 1.6e-1 ...
-        3.9e-1 (growing with gamma as the cusp sharpens).  The cubic spline
-        cannot represent the kink because the cusp ray falls in a cell
-        INTERIOR: production aligns INTERIOR tile edges to the cusp rays
-        (`surrogate_training._cusp_aligned_theta_tiles`) but deliberately lays
-        a UNIFORM ``theta_c`` grid for EXTERIOR tiles
-        (`_farfield_exterior_tiles`), on the stated premise that the exterior
-        fit does not need cusp alignment.  This measurement contradicts that
-        premise.  The tolerance is budget-calibrated and is NOT widened to hide
-        it; the red is carried until the exterior tiler aligns to cusp rays.
+    def test_positive_box_reconstruction_within_budget(self):
+        """Positive-parity box: every held-out eps < `POS_RECON_TOL`, AND the
+        historically-failing cusp-ray config reconstructs within budget.
+
+        GREEN as of the WP3 build (D4).  Two independent things had to land for
+        this test -- previously ``@unittest.expectedFailure`` at eps 2.61e-1 --
+        to pass without touching `POS_RECON_TOL`:
+
+        1. WP3 wires cusp-ALIGNED exact columns into the ``from_engine`` chart
+           grid: `surrogate._union_cusp_nodes` now unions the in-range astroid
+           cusp angles ``{0, +/-pi/2, pi}`` onto the positive-parity
+           ``theta_c`` axis, so the ``theta_c = 0`` cusp ray falls ON a spline
+           NODE (a C2 kink on a node) instead of a cell interior.  Measured
+           this build: with the cusp union ON the named config reconstructs at
+           eps ~1.1e-4; with it OFF (uniform grid) it regresses to eps
+           2.6031e-1 -- reproducing the exact historical failure, and pinned
+           as a reachable-red in `test_cusp_union_off_regresses_cusp_ray`.
+        2. WP2 relabelled the stored far-field envelope as the frame-invariant
+           ``E_tilde``; `_reconstruct_via_surrogate` now inverts it with
+           `reconstruct_farfield` (the production mirror), without which the
+           held-out eps inflates ~1.3e-1 -> ~1.6e0 for ALL configs.
+
+        The tolerance is the SAME budget-calibrated 0.20 as before; the fix is
+        structural (a node on the kink), not a widened gate.
         """
         sur = _pos_surrogate_ship()
         epsilons, configs = self._box_eps(sur)
@@ -880,7 +928,100 @@ class EnvelopeReconstructionTestCase(SurrogateTestCase):
                     eps, POS_RECON_TOL,
                     f'positive-box held-out eps={eps:.3e} exceeds '
                     f'{POS_RECON_TOL} at {cfg}')
+        # The named, previously-failing cusp-ray config, tested EXPLICITLY
+        # (it is a theta_c NODE now, so it is not among the held-out
+        # cell-midpoints, yet it is genuinely held out in gamma and rho).
+        gamma, y1, y2 = self.CUSP_RAY_CONFIG
+        w_grid = np.exp(sur.log_w_grid)
+        f_sur, served = _reconstruct_via_surrogate(sur, w_grid, gamma, y1, y2,
+                                                   0.0)
+        self.assertTrue(served, 'the cusp-ray config fell out of domain')
+        f_eng = _engine_exact_total(w_grid, gamma, y1, y2, 0.0)
+        cusp_eps = self._relative_eps(f_sur, f_eng)
+        self.n_checks += 1
+        self.assertLess(
+            cusp_eps, POS_RECON_TOL,
+            f'cusp-ray config {self.CUSP_RAY_CONFIG} eps={cusp_eps:.3e} '
+            f'exceeds {POS_RECON_TOL} -- WP3 cusp-node wiring regressed')
         self._plot_eps('positive', epsilons, POS_RECON_TOL)
+        self._plot_positive_box_heatmap(sur)
+
+    def test_cusp_union_off_regresses_cusp_ray(self):
+        """Reachable-red: strip WP3's cusp-node union and the named cusp-ray
+        config regresses to the historical eps ~2.6e-1 (> `POS_RECON_TOL`).
+
+        This is the teeth behind `test_positive_box_reconstruction_within_
+        budget`: it proves the pass is DUE to the cusp-aligned column (a node
+        on the ``theta_c = 0`` kink), not an accidental budget cushion.  Same
+        box, same reconstruction; only `surrogate._union_cusp_nodes` is
+        neutered to the identity (uniform ``theta_c`` grid).
+        """
+        gamma_range, y1_range, y2_range = POS_BOX
+        gamma_mid = 0.5 * (gamma_range[0] + gamma_range[1])
+        rhos, theta_cs = [], []
+        for y1 in np.linspace(y1_range[0], y1_range[1], 5):
+            for y2 in np.linspace(y2_range[0], y2_range[1], 5):
+                rho, theta_c = surrogate_module._to_caustic_fixed(
+                    gamma_mid, y1, y2)
+                rhos.append(rho)
+                theta_cs.append(theta_c)
+        with mock.patch.object(surrogate_module, '_union_cusp_nodes',
+                               lambda grid, rng: grid):
+            sur_uniform = LensAmplificationSurrogate.from_engine(
+                gamma_range=gamma_range, rho_range=(min(rhos), max(rhos)),
+                theta_c_range=(min(theta_cs), max(theta_cs)),
+                w_range=TRAIN_W_RANGE, n_gamma=SHIP_PARAM_NODES,
+                n_rho=SHIP_PARAM_NODES, n_theta=SHIP_PARAM_NODES,
+                w_nodes_per_decade=TRAIN_W_NODES_PER_DECADE)
+        # The cusp node must be ABSENT from the uniform grid (the union off).
+        tg = sur_uniform.charts[0].theta_c_grid
+        self.assertFalse(bool(np.any(np.abs(tg) < 1e-12)),
+                         'cusp union was not actually disabled')
+        gamma, y1, y2 = self.CUSP_RAY_CONFIG
+        w_grid = np.exp(sur_uniform.log_w_grid)
+        f_sur, served = _reconstruct_via_surrogate(sur_uniform, w_grid, gamma,
+                                                   y1, y2, 0.0)
+        self.assertTrue(served)
+        f_eng = _engine_exact_total(w_grid, gamma, y1, y2, 0.0)
+        eps = self._relative_eps(f_sur, f_eng)
+        self.n_checks += 1
+        self.assertGreater(
+            eps, POS_RECON_TOL,
+            f'stripping the cusp union did NOT regress the cusp-ray config '
+            f'(eps={eps:.3e}); the pass is not attributable to WP3')
+
+    @staticmethod
+    def _plot_positive_box_heatmap(sur):
+        """Held-out reconstruction eps over a (gamma, theta_c) slice of the
+        positive box at fixed mid-rho, with the theta_c=0 cusp ray marked."""
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        w_grid = np.exp(sur.log_w_grid)
+        gammas = np.linspace(sur.gamma_grid[0], sur.gamma_grid[-1], 11)
+        thetas = np.linspace(sur.theta_c_grid[0], sur.theta_c_grid[-1], 21)
+        rho_mid = 0.5 * (sur.rho_grid[0] + sur.rho_grid[-1])
+        grid = np.full((thetas.size, gammas.size), np.nan)
+        for i_t, th in enumerate(thetas):
+            for i_g, gm in enumerate(gammas):
+                y1, y2 = surrogate_module._from_caustic_fixed(gm, rho_mid, th)
+                f_sur, served = _reconstruct_via_surrogate(
+                    sur, w_grid, gm, float(y1), float(y2), 0.0)
+                if not served:
+                    continue
+                f_eng = _engine_exact_total(w_grid, gm, float(y1), float(y2),
+                                            0.0)
+                scale = float(np.max(np.abs(f_eng)))
+                grid[i_t, i_g] = float(np.max(np.abs(f_sur - f_eng)) / scale)
+        fig, ax = plt.subplots()
+        mesh = ax.pcolormesh(gammas, thetas, np.log10(np.maximum(grid, 1e-8)),
+                             shading='auto', cmap='viridis')
+        ax.axhline(0.0, color='r', ls='--', label='theta_c = 0 cusp ray')
+        fig.colorbar(mesh, ax=ax, label='log10 reconstruction eps')
+        ax.set(xlabel='gamma', ylabel='theta_c [rad]',
+               title='Positive box reconstruction eps (mid-rho slice)')
+        ax.legend(loc='upper right')
+        fig.savefig(OUTPUT_DIR / 'surrogate_positive_box_eps_heatmap.png',
+                    dpi=90)
+        plt.close(fig)
 
     def test_saddle_box_reconstruction_within_budget(self):
         """Saddle-parity box: every held-out eps < `SAD_RECON_TOL`."""
@@ -929,6 +1070,245 @@ class EnvelopeReconstructionTestCase(SurrogateTestCase):
                title=f'{label} box held-out reconstruction')
         ax.legend()
         fig.savefig(OUTPUT_DIR / f'surrogate_recon_{label}.png', dpi=90)
+
+# ==========================================================================
+# Closed-form vs branch-speed detector cusp angles (D4, spec 1)
+# ==========================================================================
+
+class ClosedFormCuspAngleTestCase(SurrogateTestCase):
+    """The closed-form source-plane cusp set ``{0, +-pi/2, pi}`` that
+    `from_engine` hardcodes (`surrogate._ASTROID_CUSP_ANGLES`) agrees, to far
+    below `CUSP_ANGLE_TOL`, with the INDEPENDENT branch-speed cusp-angle
+    detector `surrogate_training._cusp_source_angles`, and the set is
+    gamma-INDEPENDENT while only the cusp MAGNITUDE varies with gamma.
+
+    Oracle independence: the closed-form set (`CLOSED_FORM_CUSP_ANGLES`) is
+    an analytic geometry result written out here by hand; the detector is a
+    numerical 2*pi branch-speed sweep (`_find_cusps` -> `critical_point`).
+    Neither derivation feeds the other, so this is a genuine cross-check of
+    the Professor's ruling that `from_engine` may hardcode the angles.
+    """
+
+    def _detected(self, gamma: float) -> np.ndarray:
+        angles = surrogate_training._cusp_source_angles(gamma, CUSP_DETECTOR_N)
+        return np.asarray(sorted(angles), dtype=float)
+
+    def test_detector_matches_closed_form_across_gamma(self):
+        """For every probed gamma the detector returns exactly the four
+        closed-form rays ``{-pi/2, 0, pi/2, pi}`` within `CUSP_ANGLE_TOL`."""
+        closed = np.asarray(CLOSED_FORM_CUSP_ANGLES, dtype=float)
+        for gamma in CUSP_PROBE_GAMMAS:
+            with self.subTest(gamma=gamma):
+                detected = self._detected(gamma)
+                self.assertEqual(
+                    detected.size, closed.size,
+                    f'detector found {detected.size} cusps at gamma={gamma}, '
+                    f'expected {closed.size}')
+                dev = float(np.max(np.abs(detected - closed)))
+                self.n_checks += 1
+                self.assertLess(
+                    dev, CUSP_ANGLE_TOL,
+                    f'detected cusp angles at gamma={gamma} deviate by '
+                    f'{dev:.3e} from the closed-form set {closed}')
+
+    def test_cusp_angles_are_gamma_independent(self):
+        """The detected angle SET does not move with gamma (only its
+        magnitude does): the spread of each angle across all probed gammas is
+        below `CUSP_ANGLE_TOL`."""
+        stacked = np.vstack([self._detected(g) for g in CUSP_PROBE_GAMMAS])
+        spread = float(np.max(np.ptp(stacked, axis=0)))
+        self.n_checks += 1
+        self.assertLess(
+            spread, CUSP_ANGLE_TOL,
+            f'the cusp angle set drifts by {spread:.3e} across gamma -- it '
+            'must be gamma-independent for the hardcode to be valid')
+
+    def test_production_hardcode_matches_closed_form(self):
+        """`from_engine`'s hardcoded `_ASTROID_CUSP_ANGLES` equals the
+        independently-written closed-form set (sorted)."""
+        production = np.asarray(sorted(_ASTROID_CUSP_ANGLES), dtype=float)
+        closed = np.asarray(CLOSED_FORM_CUSP_ANGLES, dtype=float)
+        dev = float(np.max(np.abs(production - closed)))
+        self.n_checks += 1
+        self.assertLess(
+            dev, CUSP_ANGLE_TOL,
+            f'production _ASTROID_CUSP_ANGLES deviates by {dev:.3e} from the '
+            'closed-form ruling {0, +-pi/2, pi}')
+
+    def test_cusp_magnitude_varies_with_gamma(self):
+        """The claim is "only magnitude varies": the source-plane cusp
+        magnitude (an INDEPENDENT quantity from the angle) grows strictly with
+        gamma while the angles stay pinned.  Magnitude via
+        `geometry.critical_point(...).source` at the detector's own cusp lens
+        angles -- a separate computation from the atan2 the detector reports.
+        """
+        max_mags = []
+        for gamma in CUSP_PROBE_GAMMAS:
+            thetas, speed = surrogate_training._branch_speed_profile(
+                gamma, 1, 0.0, 2.0 * np.pi, CUSP_DETECTOR_N, periodic=True)
+            cusps = surrogate_training._find_cusps(
+                thetas, speed, periodic=True)
+            mags = []
+            for theta_lens, _delta in cusps:
+                try:
+                    src = geometry.critical_point(
+                        gamma, float(theta_lens), 0.0, 0.0, 1).source
+                except geometry.LensDomainError:
+                    continue
+                mags.append(float(np.hypot(src[0], src[1])))
+            self.assertGreater(len(mags), 0,
+                               f'no cusp magnitude resolved at gamma={gamma}')
+            max_mags.append(max(mags))
+        # Strictly increasing max magnitude across the ascending gamma grid.
+        diffs = np.diff(max_mags)
+        self.n_checks += 1
+        self.assertTrue(
+            bool(np.all(diffs > 0.0)),
+            f'cusp magnitude did not increase monotonically with gamma: '
+            f'max_mags={np.round(max_mags, 4)}')
+        # And it genuinely MOVES (not a flat set): total sweep well above the
+        # angle tolerance floor.
+        self.n_checks += 1
+        self.assertGreater(
+            max_mags[-1] - max_mags[0], 1.0,
+            f'cusp magnitude barely moved across gamma (sweep '
+            f'{max_mags[-1] - max_mags[0]:.3e}); the "magnitude varies" '
+            'premise is not exercised')
+        self._plot_angles_and_magnitudes(max_mags)
+
+    def _plot_angles_and_magnitudes(self, max_mags):
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        gammas = np.asarray(CUSP_PROBE_GAMMAS)
+        stacked = np.vstack([self._detected(g) for g in CUSP_PROBE_GAMMAS])
+        fig, (ax_a, ax_m) = plt.subplots(1, 2, figsize=(9, 4))
+        for col in range(stacked.shape[1]):
+            ax_a.plot(gammas, stacked[:, col], 'o-')
+        for ray in CLOSED_FORM_CUSP_ANGLES:
+            ax_a.axhline(ray, color='k', ls=':', lw=0.6)
+        ax_a.set(xlabel='gamma', ylabel='detected cusp angle [rad]',
+                 title='Cusp angles vs gamma (four flat lines)')
+        ax_m.plot(gammas, max_mags, 's-', color='C3')
+        ax_m.set(xlabel='gamma', ylabel='max source-plane cusp magnitude',
+                 title='Cusp magnitude vs gamma (varies)')
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'surrogate_cusp_angles_vs_gamma.png', dpi=90)
+        plt.close(fig)
+
+
+# ==========================================================================
+# from_engine cusp-node presence + WP3/WP2 wiring (D4, spec 2)
+# ==========================================================================
+
+class FromEngineCuspWiringTestCase(SurrogateTestCase):
+    """`_union_cusp_nodes` places an exact spline node on every in-range
+    astroid cusp for a positive-parity axis (deduplicated, sorted, strictly
+    increasing), a macro-saddle chart gets NONE, and `from_engine` actually
+    wires this into the built chart's ``theta_c`` grid.  A reachable-red pins
+    that the un-neutered WP2 carrier-continuity guard really raises on the
+    coarse exterior box these fixtures build.
+    """
+
+    def test_union_inserts_cusp_node_when_range_straddles_zero(self):
+        """A uniform axis straddling ``theta_c = 0`` gains an exact node at 0,
+        and the result stays sorted and strictly increasing."""
+        grid = np.linspace(-0.20, 0.25, 4)
+        rng = (-0.20, 0.25)
+        merged = _union_cusp_nodes(grid, rng)
+        self.n_checks += 1
+        self.assertTrue(bool(np.any(np.abs(merged) < _CUSP_NODE_DEDUP_TOL)),
+                        f'no cusp node at 0 was inserted: {merged}')
+        self.assertTrue(bool(np.all(np.diff(merged) > 0.0)),
+                        f'merged axis is not strictly increasing: {merged}')
+        # Every original node survives (union, not replacement).
+        for node in grid:
+            self.assertTrue(bool(np.any(np.abs(merged - node) < 1e-12)),
+                            f'original node {node} was dropped')
+
+    def test_union_inserts_all_in_range_cusps(self):
+        """A wide range picks up every in-range cusp (0, pi/2, pi) and NOT the
+        out-of-range one (-pi/2)."""
+        rng = (-0.1, np.pi + 0.1)
+        grid = np.linspace(rng[0], rng[1], 5)
+        merged = _union_cusp_nodes(grid, rng)
+        for ray in (0.0, np.pi / 2, np.pi):
+            with self.subTest(ray=ray):
+                self.n_checks += 1
+                self.assertTrue(
+                    bool(np.any(np.abs(merged - ray) < _CUSP_NODE_DEDUP_TOL)),
+                    f'in-range cusp {ray} not unioned into {merged}')
+        self.assertFalse(
+            bool(np.any(np.abs(merged + np.pi / 2) < _CUSP_NODE_DEDUP_TOL)),
+            f'out-of-range cusp -pi/2 was wrongly inserted: {merged}')
+
+    def test_union_dedups_coincident_cusp(self):
+        """A cusp angle coincident (within `_CUSP_NODE_DEDUP_TOL`) with an
+        existing uniform node is NOT doubled: the axis stays strictly
+        increasing and gains no length."""
+        # A grid whose first node is exactly the cusp 0.0.
+        grid = np.linspace(0.0, 0.4, 5)
+        merged = _union_cusp_nodes(grid, (0.0, 0.4))
+        self.n_checks += 1
+        self.assertTrue(bool(np.all(np.diff(merged) > _CUSP_NODE_DEDUP_TOL)),
+                        f'dedup failed -- near-coincident nodes remain: '
+                        f'{merged}')
+        self.assertEqual(merged.size, grid.size,
+                         'a coincident cusp added a duplicate node')
+
+    def test_union_is_noop_without_in_range_cusp(self):
+        """A range with no cusp inside returns the axis unchanged (identity)."""
+        grid = np.linspace(0.5, 1.0, 4)
+        merged = _union_cusp_nodes(grid, (0.5, 1.0))
+        self.n_checks += 1
+        np.testing.assert_array_equal(merged, grid)
+
+    def test_positive_chart_grid_carries_cusp_node(self):
+        """The built positive-parity ship chart (`_pos_surrogate_ship`, whose
+        ``theta_c`` range straddles 0) has an exact node at the ``theta_c = 0``
+        cusp ray and a NON-uniform axis (a node was inserted)."""
+        chart = _pos_surrogate_ship().charts[0]
+        tg = np.asarray(chart.theta_c_grid, dtype=float)
+        self.assertTrue(tg[0] < 0.0 < tg[-1], 'range does not straddle 0')
+        self.n_checks += 1
+        self.assertTrue(bool(np.any(np.abs(tg) < _CUSP_NODE_DEDUP_TOL)),
+                        f'positive chart lacks the theta_c=0 cusp node: {tg}')
+        # Deduped + sorted strictly increasing.
+        self.assertTrue(bool(np.all(np.diff(tg) > _CUSP_NODE_DEDUP_TOL)),
+                        f'chart theta_c axis not strictly increasing: {tg}')
+        # A cusp was inserted, so the axis is NOT uniformly spaced.
+        spacings = np.diff(tg)
+        self.assertGreater(float(np.ptp(spacings)), 1e-9,
+                           'axis is uniform -- no cusp node was wired in')
+        self._plot_cusp_nodes_on_rays(tg)
+
+    def test_macro_saddle_chart_has_no_cusp_nodes(self):
+        """A macro-saddle chart (`_sad_surrogate_ship`, ``gamma_mid >= 1``)
+        keeps the PLAIN uniform ``theta_c`` axis: no cusp node is unioned in
+        (its disconnected deltoids have no single origin-centred cusp set)."""
+        tg = np.asarray(_sad_surrogate_ship().charts[0].theta_c_grid,
+                        dtype=float)
+        spacings = np.diff(tg)
+        self.n_checks += 1
+        self.assertLess(
+            float(np.ptp(spacings)), 1e-9,
+            f'saddle chart theta_c axis is NOT uniform -- a cusp node was '
+            f'wrongly unioned: {tg}')
+
+    @staticmethod
+    def _plot_cusp_nodes_on_rays(theta_c_grid):
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        fig, ax = plt.subplots()
+        for ray in CLOSED_FORM_CUSP_ANGLES:
+            ax.axvline(ray, color='r', ls='--', lw=0.8)
+        ax.plot(theta_c_grid, np.zeros_like(theta_c_grid), 'o', color='C0',
+                label='chart theta_c nodes')
+        ax.axvline(CLOSED_FORM_CUSP_ANGLES[1], color='r', ls='--', lw=0.8,
+                   label='astroid cusp rays')
+        ax.set(xlabel='theta_c [rad]', yticks=[],
+               title='Positive chart nodes vs cusp rays')
+        ax.legend(loc='upper right')
+        fig.savefig(OUTPUT_DIR / 'surrogate_cusp_nodes_on_rays.png', dpi=90)
+        plt.close(fig)
+
         plt.close(fig)
 
 

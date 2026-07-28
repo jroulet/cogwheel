@@ -114,8 +114,8 @@ class _LensSampledPrior(CombinedPrior):
     subpriors), so its ``.generate_random_samples`` draws ``gamma``,
     ``m_lens_msun`` and the shear-frame source ``(y1, y2)`` from the SAME
     sampled->standard machinery the production `LensedIASPrior` uses.
-    ``UniformLensMassPrior`` precedes ``UniformSourcePositionPrior`` because the
-    latter is conditioned on ``m_lens_msun``.
+    ``UniformLensMassPrior`` precedes ``UniformSourcePositionPrior`` because
+    the latter is conditioned on ``m_lens_msun``.
     """
     prior_classes = [FixedLensGeometryPrior, UniformLensMassPrior,
                      UniformReducedShearPrior, UniformSourcePositionPrior]
@@ -279,7 +279,8 @@ def classify_fallthrough(
 
 
 def _chart_index(charts: Sequence, chart) -> int:
-    """Index of ``chart`` in ``charts`` by identity (charts are ``eq=False``)."""
+    """Index of ``chart`` in ``charts`` by identity (charts are
+    ``eq=False``)."""
     for i, candidate in enumerate(charts):
         if candidate is chart:
             return i
@@ -396,7 +397,8 @@ def characterize(
     return [characterize_sample(
                 surrogate, engine_factory, gamma=float(row.gamma),
                 m_lens_msun=float(row.m_lens_msun), y1=float(row.y1),
-                y2=float(row.y2), f_grid=f_grid, dropped_slivers=dropped_slivers)
+                y2=float(row.y2), f_grid=f_grid,
+                dropped_slivers=dropped_slivers)
             for row in samples.itertuples(index=False)]
 
 
@@ -470,8 +472,8 @@ def heldout_envelope_eps(
 
     - a `FarFieldChart` is referenced against the far-field label
       ``E_ff = F - sum_a H_a e^{1j w tau_a}``
-      (`farfield_envelope_from_partition`), F-normalized by ``max|exact_total|``
-      (``max|E_ff| ~ 1e-4`` is too tiny a denominator);
+      (`farfield_envelope_from_partition`), F-normalized by
+      ``max|exact_total|`` (``max|E_ff| ~ 1e-4`` is too tiny a denominator);
     - a `TubeChart` keeps ``partition.envelope`` normalized by ``max|E|``
       (unchanged).
 
@@ -593,7 +595,8 @@ def lnl_error_tiers(
         records: Sequence[SampleRecord],
         lnlike_pair: Callable[[dict], tuple[float, float]] | None, *,
         base_par_dic: dict | None = None,
-        rescued_predicate: Callable[[dict], bool] | None = None) -> dict | None:
+        rescued_predicate: Callable[[dict], bool] | None = None
+        ) -> dict | None:
     """Partition served-config lnL errors into accuracy tiers.
 
     For each SERVED sample, evaluates ``lnlike_pair(par_dic) -> (lnl_served,
@@ -756,7 +759,8 @@ def _dropped_slivers_from(
     """
     if override is not None:
         return _normalize_slivers(override)
-    return _normalize_slivers(surrogate.provenance.get('dropped_gamma_slivers'))
+    return _normalize_slivers(
+        surrogate.provenance.get('dropped_gamma_slivers'))
 
 
 def dropped_slivers_from_training_report(

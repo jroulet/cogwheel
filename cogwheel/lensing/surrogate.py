@@ -115,6 +115,19 @@ _REFUSAL_ERRORS = (LensDomainError, CancellationError,
 _DEFAULT_W_NODES_PER_DECADE = 15
 _DEFAULT_PARAM_NODES = 7
 
+# Source-plane cusp angles of the astroid caustic (eigenframe polar angle
+# ``theta_c``, radians).  Closed form and gamma-INDEPENDENT: only the cusp
+# MAGNITUDE (reach) scales with the external shear ``gamma``, not the angle
+# (Professor ruling, Build 8h-d2 WP3/D4).  A positive-parity far-field
+# chart places an exact spline node on each in-range cusp angle so a cubic
+# fit sits a node ON the C2 curvature kink instead of smoothing across it.
+_ASTROID_CUSP_ANGLES: tuple[float, ...] = (0.0, np.pi / 2, -np.pi / 2, np.pi)
+
+# Absolute tolerance (radians) below which a cusp angle coincident with an
+# existing uniform ``theta_c`` node is treated as the same node and NOT
+# doubled, keeping the augmented axis strictly increasing.
+_CUSP_NODE_DEDUP_TOL = 1e-9
+
 # Exclusion-ball radius in units of the parameter-grid spacing: a query
 # within one grid cell (normalized Euclidean) of any refused training
 # point is refused conservatively.
@@ -166,12 +179,13 @@ _KNOWN_FARFIELD_DEFINITIONS = KNOWN_FARFIELD_DEFINITIONS
 # far-field label subtracts individually-divergent near-merged image kernels
 # and fails generically inside the caustic (eps ~ 6e-2 at mid-gamma), whereas
 # the SACR-C label switches the near-merged pair INTO the bounded envelope and
-# carries no ``1/(tau_a - tau_c)`` or ``Im tau_c`` denominator.  Interior charts
-# stay in the SAME caustic-fixed ``(rho, theta_c)`` coordinate the far-field
-# charts use; only the ENVELOPE LABEL differs, so they are still ``FarFieldChart``
-# objects distinguished purely by this tag.  The single authoritative interior
-# tag frozenset lives in `channels` (`KNOWN_INTERIOR_DEFINITIONS`), extended
-# atomically with its reconstruction dispatch.
+# carries no ``1/(tau_a - tau_c)`` or ``Im tau_c`` denominator.  Interior
+# charts stay in the SAME caustic-fixed ``(rho, theta_c)`` coordinate the
+# far-field charts use; only the ENVELOPE LABEL differs, so they are still
+# ``FarFieldChart`` objects distinguished purely by this tag.  The single
+# authoritative interior tag frozenset lives in `channels`
+# (`KNOWN_INTERIOR_DEFINITIONS`), extended atomically with its reconstruction
+# dispatch.
 _INTERIOR_ENVELOPE_DEFINITION = INTERIOR_SACR_C
 _KNOWN_INTERIOR_DEFINITIONS = KNOWN_INTERIOR_DEFINITIONS
 
@@ -196,7 +210,14 @@ _KNOWN_ENVELOPE_DEFINITIONS = (
 # a far-field chart whose axis-schema tag is absent or unknown (mirroring
 # the 8g-b envelope-definition hard-refuse): a stale raw-coordinate,
 # scalar-reach, or multiplicative-directional artifact fails loudly.
-_FARFIELD_AXIS_SCHEMA = 'caustic_radial_offset_rho_theta'
+#
+# Build 8h-d2 additionally makes the STORED far-field label frame-invariant
+# (`channels.farfield_envelope_from_partition` demodulates by
+# ``exp(+1j w t_min)``); a chart trained under the OLD frame-dependent label
+# stores incompatible values, so the tag carries a ``_framewinv`` suffix and
+# the loader hard-refuses any pre-8h-d2 artifact rather than serving a
+# finite-but-wrong reconstruction.
+_FARFIELD_AXIS_SCHEMA = 'caustic_radial_offset_rho_theta_framewinv'
 _KNOWN_FARFIELD_AXIS_SCHEMAS = frozenset({_FARFIELD_AXIS_SCHEMA})
 
 # Angular half-width (radians) of the certified Pearcey-cusp arm coverage,
@@ -436,6 +457,44 @@ def _validate_axis(axis: np.ndarray, name: str) -> np.ndarray:
     return arr
 
 
+def _union_cusp_nodes(theta_c_grid: np.ndarray,
+                      theta_c_range: tuple[float, float]) -> np.ndarray:
+    """Union the astroid cusp angles into a positive-parity theta_c axis.
+
+    Adds an exact spline node at every source-plane cusp angle
+    (`_ASTROID_CUSP_ANGLES`) that lies within ``theta_c_range`` so a cubic
+    chart places a node ON each C2 curvature kink rather than smoothing
+    across it (a cusp column is a curvature discontinuity, and a cubic
+    spline needs a node on the kink).  A cusp angle coincident with an
+    existing uniform node (within `_CUSP_NODE_DEDUP_TOL`) is dropped so the
+    axis stays strictly increasing for the spline fit.
+
+    Parameters
+    ----------
+    theta_c_grid : np.ndarray
+        Strictly increasing uniform ``theta_c`` axis to augment.
+    theta_c_range : tuple[float, float]
+        ``(low, high)`` chart bounds; only cusp angles inside are unioned.
+
+    Returns
+    -------
+    np.ndarray
+        Strictly increasing ``theta_c`` axis with the in-range cusp angles
+        unioned in and sorted ascending.
+    """
+    low, high = float(theta_c_range[0]), float(theta_c_range[1])
+    cusp_angles = [a for a in _ASTROID_CUSP_ANGLES if low <= a <= high]
+    if not cusp_angles:
+        return theta_c_grid
+    merged = np.sort(np.concatenate(
+        [theta_c_grid, np.array(cusp_angles, dtype=float)]))
+    # Keep the first node of every near-coincident cluster: a cusp angle
+    # within the dedup tolerance of a uniform node must not double it.
+    keep = np.concatenate(
+        ([True], np.diff(merged) > _CUSP_NODE_DEDUP_TOL))
+    return merged[keep]
+
+
 def _fit_tensor_spline(axis_grids: tuple[np.ndarray, ...],
                        value_real: np.ndarray, value_imag: np.ndarray
                        ) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
@@ -539,6 +598,26 @@ def _normalize_refused(refused_points: np.ndarray | None) -> np.ndarray:
 #: knob): well above smooth motion, well below a genuine flip.
 _CARRIER_FLIP_FRACTION = 0.5
 
+#: Maximum phase (radians) the frame-invariant far-field label ``E_tilde``
+#: may wind between adjacent spatial nodes at the top of the band before a
+#: cubic spline can no longer represent it (Build 8h-d2).  A Nyquist
+#: quarter-turn ``pi/2``: beyond it the real/imag components each swing more
+#: than the spline tracks, so the tile must be subdivided.  Checked ONLY on
+#: the demodulated (frame-invariant) label, whose dominant ``w * t_min``
+#: frame phase has already been removed; a surviving violation is genuine
+#: physical oscillation the tile is too coarse for.
+#:
+#: Expressed as a normalized COMPLEX INCREMENT, not a phase step: a violation
+#: means the label changes by more than the whole chart's peak ``|E_tilde|``
+#: across one adjacent-node gap.  Phase is the wrong observable because the
+#: chart splines ``re`` and ``im`` separately, so an ``arg`` swing at an
+#: amplitude null is smooth in the fields actually being fitted (F022).
+#: Calibrated 2026-07-28: worst must-pass fixture 0.1997, must-raise
+#: (synthetic 2.5 rad flip at unit magnitude) 1.8980.  At full amplitude 1.0
+#: corresponds to ``pi/3`` of winding -- stricter than the retired ``pi/2``
+#: where the label is strong, permissive where it has decayed to noise.
+_FARFIELD_CARRIER_STEP_MAX = 1.0
+
 
 class CarrierDiscontinuityError(ValueError):
     """A SACR-C interior tile straddles a critical-basin (carrier) flip.
@@ -619,6 +698,124 @@ def _assert_carrier_continuity(critical_sources: np.ndarray,
                 f'vs reach scale {float(np.max(reach_pair)):.3g}); subdivide '
                 'the tile so each sub-tile lands in a single nearest-caustic '
                 'basin.')
+
+
+def _assert_farfield_carrier_continuity(env_grid: np.ndarray,
+                                        w_max: float,
+                                        gamma_grid: np.ndarray,
+                                        shape: tuple[int, int, int]) -> None:
+    """Assert the frame-invariant far-field label is spline-representable.
+
+    Interpolator hygiene for the EXTERIOR far-field label, the far-field twin
+    of `_assert_carrier_continuity`.  This is a cheap GROSS-ALIASING SCREEN,
+    not an accuracy check -- the held-out eps gate (`_gate_chart`) is the real
+    falsifier.  Its job is to catch a tile whose label jumps so violently
+    between adjacent nodes that fitting it would alias, and reject it for
+    subdivision rather than serve a phase-aliased envelope.
+
+    WHAT IS MEASURED, and why it is not the phase (F022).  `FarFieldChart`
+    stores ``envelope_real`` and ``envelope_imag`` and splines them as
+    SEPARATE REAL FIELDS.  The representability question is therefore about
+    the increments of ``re`` and ``im``, not about ``arg``.  These differ
+    exactly where it matters: at an amplitude NULL the label passes close to
+    the origin, so ``arg`` swings by ``pi`` while ``re`` and ``im`` pass
+    smoothly through zero.  An earlier version of this guard measured ``arg``
+    and consequently false-positived on every null -- and because nulls are
+    generic in an interference pattern, while `surrogate_training` responds to
+    this error by subdividing ONCE and then recording the child as a
+    ladder-served gap, that turned a benign feature into silent coverage loss.
+    Refinement cannot fix a null (the step pins at ``pi`` as nodes are added
+    instead of shrinking like ``1/n``), so the subdivision never converged.
+
+    The measured quantity is the complex increment ``|E_lead - E_trail|``
+    between adjacent nodes on the top-of-band slice, normalized by the peak
+    ``|E_tilde|`` over the WHOLE grid (every ``w``, not just this slice).
+    Normalizing by the whole grid is load-bearing: where the label has decayed
+    with ``w``, the top slice can be entirely floating-point noise, and
+    noise-relative-to-noise is O(1) while noise-relative-to-the-chart is zero.
+
+    CALIBRATION (measured 2026-07-28 across every known fixture).  Must-pass:
+    synthetic continuous 0.1997, synthetic zeroed-flip 0.1997, the two
+    ``gamma``-wall guard boxes 0.1160 and 0.1556, the band-split box 0.0000,
+    the census dense box 0.0000.  Must-raise: the synthetic pathological grid
+    (a 2.5 rad flip at unit magnitude) 1.8980.  The bound sits at 1.0 --
+    5x above the worst must-pass and 1.9x below the must-raise.  Two rejected
+    alternatives, both recorded so they are not re-proposed: normalizing by the
+    top-SLICE peak collapses that margin to 1.24x (must-pass reaches 1.5289),
+    and scanning ALL ``w`` slices collapses it to 1.38x (must-pass reaches
+    1.3703) because accurate charts genuinely carry large mid-band increments.
+
+    The bound has a tuning-free reading: a violation means the label changes
+    by more than the entire chart's peak magnitude across ONE node gap.  At
+    full amplitude that corresponds to ``pi/3`` of phase winding
+    (``2 sin(phi/2) = 1``), i.e. STRICTER than the retired ``pi/2`` bound
+    where the label is strong, and correctly permissive where it has decayed.
+
+    Parameters
+    ----------
+    env_grid : np.ndarray
+        Complex far-field label per node, shape ``(n_w, n_gamma, n_rho,
+        n_theta)``.  Refused/unfilled nodes are exactly zero (`from_engine`
+        leaves the value arrays zero there) and are skipped: a refused
+        neighbour is a hole in the grid, not a discontinuity.
+    w_max : float
+        Top-of-band dimensionless frequency; the check is applied on this
+        (last, highest) ``w`` slice and the value is reported in the error.
+    gamma_grid : np.ndarray
+        The ``n_gamma`` gamma axis, carried for parallelism with the interior
+        guard; length-checked against ``shape``.
+    shape : tuple[int, int, int]
+        The ``(n_gamma, n_rho, n_theta)`` spatial node-grid shape.
+
+    Raises
+    ------
+    CarrierDiscontinuityError
+        If the normalized adjacent-node increment reaches
+        `_FARFIELD_CARRIER_STEP_MAX` along any spatial axis.
+    ValueError
+        If ``gamma_grid`` length disagrees with ``shape[0]``.
+    """
+    n_gamma, _n_rho, _n_theta = shape
+    if gamma_grid.shape[0] != n_gamma:
+        raise ValueError(
+            f'gamma_grid length {gamma_grid.shape[0]} does not match '
+            f'shape[0] = {n_gamma}.')
+    grid = np.asarray(env_grid)
+    # Reference scale: the peak over the WHOLE grid, so a decayed top slice
+    # is measured against the chart it belongs to rather than against itself.
+    all_magnitude = np.abs(grid)
+    finite = np.isfinite(all_magnitude)
+    scale = float(np.max(all_magnitude[finite], initial=0.0))
+    if scale <= 0.0:
+        # An all-zero (fully refused) grid carries no label to check.
+        return
+    top = grid[-1]
+    magnitude = np.abs(top)
+    # Compare adjacent nodes along each spatial axis (gamma, rho, theta_c).
+    for axis in range(3):
+        n_axis = shape[axis]
+        if n_axis < 2:
+            continue
+        lead = np.take(top, range(1, n_axis), axis=axis)
+        trail = np.take(top, range(0, n_axis - 1), axis=axis)
+        mag_lead = np.take(magnitude, range(1, n_axis), axis=axis)
+        mag_trail = np.take(magnitude, range(0, n_axis - 1), axis=axis)
+        # Only node pairs with a finite, non-zero label on BOTH sides certify
+        # (a refused neighbour cannot certify continuity but is not a jump).
+        both = ((mag_lead > 0.0) & (mag_trail > 0.0)
+                & np.isfinite(mag_lead) & np.isfinite(mag_trail))
+        step = np.abs(lead - trail) / scale
+        bad = both & (step >= _FARFIELD_CARRIER_STEP_MAX)
+        if np.any(bad):
+            worst = int(np.argmax(np.where(bad, step, -np.inf)))
+            rel = float(np.minimum(mag_lead, mag_trail).flat[worst] / scale)
+            raise CarrierDiscontinuityError(
+                'Frame-invariant far-field label jumps by more than the '
+                f'bound {_FARFIELD_CARRIER_STEP_MAX:.3g} x peak |E| along '
+                f'axis {axis} at w_max = {float(w_max):.3g} (max step '
+                f'{float(step.flat[worst]):.3g} x peak, at relative amplitude '
+                f'{rel:.3g}); subdivide the tile so the demodulated envelope '
+                'is spline-representable.')
 
 
 # ---- Charts -----------------------------------------------------------
@@ -879,7 +1076,8 @@ def _check_value_shape(value_real: np.ndarray, value_imag: np.ndarray,
 
 def _in_exclusion_ball(chart: FarFieldChart, gamma: float, rho: float,
                        theta_c: float) -> bool:
-    """Whether caustic-fixed ``(gamma, rho, theta_c)`` is within a refusal ball.
+    """Whether caustic-fixed ``(gamma, rho, theta_c)`` is within a refusal
+    ball.
 
     ``refused_points`` and ``param_spacing`` are both in the chart's
     caustic-fixed ``(gamma, rho, theta_c)`` coordinate (Build 8h-b3), so
@@ -1121,7 +1319,8 @@ class LensAmplificationSurrogate:
 
     @property
     def rho_grid(self) -> np.ndarray:
-        """Caustic-fixed ``rho`` axis of the first (far-field) chart (8a shim)."""
+        """Caustic-fixed ``rho`` axis of the first (far-field) chart (8a
+        shim)."""
         return self.charts[0].rho_grid
 
     @property
@@ -1229,7 +1428,6 @@ class LensAmplificationSurrogate:
             (`_INTERIOR_ENVELOPE_DEFINITION`) to build a whole-interior
             chart on the caustic-region ``partition.envelope`` (Build
             S2-3).
-
         Returns
         -------
         LensAmplificationSurrogate
@@ -1241,7 +1439,10 @@ class LensAmplificationSurrogate:
             If ``definition`` is not a known envelope-definition tag.
         CarrierDiscontinuityError
             For an interior chart whose tile straddles a critical-basin
-            flip (the tile must be subdivided).
+            flip, or for an exterior chart whose frame-invariant far-field
+            label winds faster than the Nyquist ``pi/2`` per node gap
+            (`_assert_farfield_carrier_continuity`); the tile must be
+            subdivided.
         """
         definition = _validate_farfield_definition(definition, 'chart build')
         interior = definition in _KNOWN_INTERIOR_DEFINITIONS
@@ -1249,6 +1450,17 @@ class LensAmplificationSurrogate:
         gamma_grid = _uniform_axis(gamma_range, n_gamma, 'gamma')
         rho_grid = _uniform_axis(rho_range, n_rho, 'rho')
         theta_c_grid = _uniform_axis(theta_c_range, n_theta, 'theta_c')
+        # Positive-parity charts: union exact spline nodes onto the
+        # source-plane astroid cusp angles {0, +/-pi/2, pi} that fall in
+        # range, so cusp columns (C2 curvature kinks) are charted ON a node
+        # rather than smoothed across.  Parity is deterministic in the box-
+        # centre ``gamma`` (mirrors `_box_region_labels`: +1 below the
+        # ``gamma = 1`` parity wall).  The macro-saddle path keeps the plain
+        # uniform axis -- its disconnected deltoids have no single origin-
+        # centred cusp-angle set.
+        gamma_mid = 0.5 * float(gamma_grid[0] + gamma_grid[-1])
+        if gamma_mid < 1.0:
+            theta_c_grid = _union_cusp_nodes(theta_c_grid, theta_c_range)
         w_grid = np.exp(log_w_grid)
 
         shape = (log_w_grid.size, gamma_grid.size, rho_grid.size,
@@ -1310,6 +1522,19 @@ class LensAmplificationSurrogate:
             _assert_carrier_continuity(
                 carrier, gamma_grid,
                 (gamma_grid.size, rho_grid.size, theta_c_grid.size))
+        else:
+            # Interpolator hygiene, exterior twin: the stored far-field label
+            # is the frame-invariant demodulated ``E_tilde``.  Reject for
+            # subdivision a tile whose label JUMPS by more than the chart's
+            # peak magnitude across one node gap -- gross aliasing a cubic
+            # spline cannot represent.  Measured as a re/im increment, not a
+            # phase step, so amplitude nulls (where ``arg`` swings but the
+            # splined fields stay smooth) are not false-positived into
+            # ladder-served gaps (F022).
+            _assert_farfield_carrier_continuity(
+                envelope_real + 1j * envelope_imag, float(w_grid[-1]),
+                gamma_grid,
+                (gamma_grid.size, rho_grid.size, theta_c_grid.size))
 
         refused_points = (np.array(refused, dtype=float) if refused
                           else np.empty((0, 3), dtype=float))
@@ -1353,8 +1578,9 @@ class LensAmplificationSurrogate:
         theta_cc = 0.5 * float(theta_c_grid[0] + theta_c_grid[-1])
         try:
             y1_c, y2_c = _from_caustic_fixed(gamma_c, rho_c, theta_cc)
-            geom = ChangRefsdalChannels(np.array([1.0, 2.0])).geometry_partition(
-                gamma=gamma_c, y=(y1_c, y2_c), beta=0.0, kappa=0.0)
+            geom = ChangRefsdalChannels(
+                np.array([1.0, 2.0])).geometry_partition(
+                    gamma=gamma_c, y=(y1_c, y2_c), beta=0.0, kappa=0.0)
         except _REFUSAL_ERRORS:
             return None, None
         parity = 1 if gamma_c < 1.0 else -1
@@ -1382,7 +1608,8 @@ class LensAmplificationSurrogate:
         return {
             'gamma_range': [float(gamma_range[0]), float(gamma_range[1])],
             'rho_range': [float(rho_range[0]), float(rho_range[1])],
-            'theta_c_range': [float(theta_c_range[0]), float(theta_c_range[1])],
+            'theta_c_range': [float(theta_c_range[0]),
+                              float(theta_c_range[1])],
             'axis_schema': _FARFIELD_AXIS_SCHEMA,
             'w_range': [float(w_range[0]), float(w_range[1])],
             'resolution': {'n_w': int(n_w), 'n_gamma': int(n_gamma),
@@ -1678,7 +1905,8 @@ class LensAmplificationSurrogate:
 
     @staticmethod
     def _default_artifact_path() -> Path:
-        """Resolve the shipped package-data artifact path under cogwheel/data."""
+        """Resolve the shipped package-data artifact path under
+        cogwheel/data."""
         return Path(str(files('cogwheel').joinpath('data',
                                                     _DEFAULT_ARTIFACT_NAME)))
 

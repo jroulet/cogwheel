@@ -70,6 +70,7 @@ import ast
 import dataclasses
 import functools
 import inspect
+import os
 import unittest
 from unittest import TestCase
 
@@ -339,6 +340,7 @@ def _pos_farfield_dense():
     # bounded diffractive label there -- so training down to 0.02 put the
     # fixture in a regime the label is not defined to represent (its held-out
     # eps then reads 13.6 and is insensitive to node density in every axis).
+    #
     return LensAmplificationSurrogate.from_engine(
         gamma_range=(0.35, 0.65), rho_range=(2.18, 2.87),
         theta_c_range=(-0.08, 0.08), w_range=(0.10, 260.0),
@@ -424,6 +426,32 @@ def _served_eps(surrogate, chart_for_raw, gamma, source, log_w_grid,
 # ==========================================================================
 # Anti-vacuity base
 # ==========================================================================
+
+#: ENGINE-BACKED TIER (opt-in).  Classes marked `_TRAIN_TIER_SKIP` drive the
+#: real engine through the cached `_pos_arc` / `_pos_tube` / `_pos_raw_out` /
+#: `_pos_farfield_dense` builders -- they train actual surrogate charts and run
+#: hundreds of Schwinger/operator evaluations.  Measured 2026-07-28: they cost
+#: 60.8s, 43.4s, 29.7s, 2.0s and 0.2s respectively, i.e. essentially the whole
+#: 137s this file used to spend, against ~3s for everything else.  Census and
+#: training runs belong to whoever DRIVES the build -- they are post-build
+#: driver steps, not work the build does and not unit tests -- and a
+#: multi-minute file in the fast tier is one nobody runs.
+#:
+#: TIER THE WHOLE SHARING CLUSTER, not just the slow-looking members: the
+#: builders are `functools.lru_cache`d, so their fill cost is attributed to
+#: whichever test touches them FIRST.  `FoldApproachRayTestCase` and
+#: `MutationFalsificationTestCase` profile as cheap only because
+#: `TubeBeatsRawTestCase` already warmed `_pos_arc`/`_pos_tube`/`_pos_raw_out`.
+#: Gate one without the others and the cost silently migrates instead of going
+#: away.  Matches the existing COGWHEEL_BRUTE_ACCURACY / COGWHEEL_STRICT_TIMING
+#: idiom and the twin gate in `test_lensing_farfield_envelope.py`.
+#:
+#: Run them with:  COGWHEEL_TRAIN_TIER=1 python -m pytest <file>
+_TRAIN_TIER_SKIP = unittest.skipUnless(
+    os.environ.get('COGWHEEL_TRAIN_TIER'),
+    'engine-backed training tier: set COGWHEEL_TRAIN_TIER=1 (builds real '
+    'surrogate charts, minutes per class; the driver runs these post-build)')
+
 
 class CensusTestCase(TestCase):
     """Base carrying the comparison tally; `tearDown` fails a vacuous test."""
@@ -556,6 +584,7 @@ class BreakdownPartitionTestCase(CensusTestCase):
             census.fallthrough_breakdown(recs)
 
 
+@_TRAIN_TIER_SKIP
 class EndToEndPartitionTestCase(CensusTestCase):
     """`characterize` -> `fallthrough_breakdown` on REAL prior samples with a
     REAL engine yields a MECE partition, and the census `run` end-to-end
@@ -682,6 +711,7 @@ def _reference_env_and_denom(chart, part):
 
 
 
+@_TRAIN_TIER_SKIP
 class HeldoutEnvelopeEpsTestCase(CensusTestCase):
     """The census held-out envelope error uses the max-normalized currency
     against a FRESH engine oracle (F002), is machine-exact at a training node,
@@ -961,6 +991,7 @@ class LnlTierTestCase(CensusTestCase):
 # Section E -- tube beats the equal-budget raw far-field near the caustic
 # ==========================================================================
 
+@_TRAIN_TIER_SKIP
 class TubeBeatsRawTestCase(CensusTestCase):
     """Through the near-caustic band the TUBE chart beats an EQUAL-BUDGET raw
     Cartesian FAR-FIELD chart (trained outside the caustic, extrapolated
@@ -1022,6 +1053,7 @@ class TubeBeatsRawTestCase(CensusTestCase):
 # Section F -- fold-approach ray: tube stays flat, raw degrades
 # ==========================================================================
 
+@_TRAIN_TIER_SKIP
 class FoldApproachRayTestCase(CensusTestCase):
     """Down a fold-approach ray (fixed mid-arc theta, eta halving from eta_max
     to ~4e-4), the u=sqrt(eta) TUBE stays FLAT and bounded, while the raw
@@ -1083,6 +1115,7 @@ class FoldApproachRayTestCase(CensusTestCase):
 # Section G -- F010 mutation reachability (the falsification path is live)
 # ==========================================================================
 
+@_TRAIN_TIER_SKIP
 class MutationFalsificationTestCase(CensusTestCase):
     """Mutating a load-bearing chart bound flips a previously-correct serve /
     fall-through decision RED (F010): the census's serve decisions are
