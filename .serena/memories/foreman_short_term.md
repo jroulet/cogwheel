@@ -1,18 +1,15 @@
 # Foreman-Lite Short-Term Observations
 
-- INS-8-001 and INS-8-002 (this pass, 2026-07-28): NINTH distinct
-  finding-ID batch (INS-1..8 pairs, plus INS-5-DOC-1 x7) showing the
-  identical mis-route — both findings explicitly say "Flag to Librarian"
-  / "Inspector does not edit canonical surfaces" in their own text, yet
-  land in the Foreman-Lite queue again. Re-verified read-only via
-  search_for_pattern: SPEC.md line 55 still says "5-way MECE" fall-through
-  breakdown (code's _FALLTHROUGH_CATEGORIES is six-way, 'born' category
-  present) and the "Born rung (DORMANT)" paragraph (lines 88-91) still
-  cites the low-w far-zone / sqrt(mu_macro)-expansion premise superseded
-  per F025. Declined both edits, touched nothing — SPEC.md is
-  Librarian-owned per the ownership split and my hard requirement not to
-  write SPEC.md. The orchestrator routing bug is now confirmed persistent
-  across 9 separate passes — strongly recommend filtering "-> Librarian"
-  tagged findings out of the Foreman-Lite queue at the source
-  (orchestrator level) rather than relying on each pass to catch and
-  decline it individually.
+- INS-10-001 (this pass, 2026-07-28, repeat): ELEVENTH distinct
+  finding-ID instance of the same mis-route pattern — finding text
+  explicitly says "→ Librarian: extend the Born-rung paragraph..." yet
+  was routed into the Foreman-Lite queue again. Declined without
+  touching any files; SPEC.md editing is Librarian-owned and explicitly
+  forbidden by my hard requirements. No code change made — this was pure
+  doc-narrative work (rewriting the Born rung paragraph in SPEC.md to
+  describe positive+saddle parity serving, Morse phase, Guard B, F026
+  fence, ghost refusal above split). Now an 11x recurrence of the
+  identical routing bug across sessions — strongly recommend the
+  orchestrator add a pre-filter that strips "→ Librarian"-tagged findings
+  from the Foreman-Lite queue before dispatch, since per-pass decline is
+  not resolving the upstream bug.

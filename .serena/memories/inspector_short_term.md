@@ -1,43 +1,39 @@
 # Inspector Short-Term Observations
 
-## 2026-07-28 (re-review #9) — Born carrier + band-split (F025), uncommitted tree
+## 2026-07-29 (review #12) — working tree = advisory + memory only; INS-10-001 still open
 
-Scope: uncommitted working tree vs HEAD. SAME code tree as passes 1-8
-(diffstat identical: _born.py +313, channels.py +175, surrogate_census.py +66,
-likelihood.py 20, __init__.py 4, tests grown: test_lensing_born.py +1060,
-test_lensing_surrogate_census.py +25). SPEC.md NOT in git status (clean/unmodified).
+Scope: "review all uncommitted changes." Working tree is CLEAN of code:
+`git status --porcelain` shows only
+  M .claude/tidy_advisory.json
+  M .serena/memories/foreman_short_term.md
+  M .serena/memories/inspector_short_term.md
+No .py, no SPEC, no DATA_CONTRACTS changes. `git diff --stat HEAD` on
+SPEC.md and DATA_CONTRACTS.yaml is EMPTY. HEAD is still d0aadf7 (same
+commit reviewed in #10/#11). The saddle Born build landed in 31ee133 +
+d0aadf7; nothing new to certify this pass. This is the THIRD consecutive
+pass (10, 11, 12) with no code delta.
 
-### Re-verified this pass (own re-review, did NOT trust priors)
-- Suite: pytest test_lensing_born.py test_lensing_surrogate_census.py -q
-  => 37 passed, 13 skipped, 101.44s. GREEN (matches passes 3-8).
-- Census six-way via import: sc._FALLTHROUGH_CATEGORIES =
-  ('gamma-guard','dropped-sliver','born','cusp-window','refusal-ball','out-of-box').
-  GAMMA_FENCE=0.75 in _born.py.
-- born_lead_carrier body (lines 34-35): unpacks sqrt_mu,phi_geo,_,_,_ =
-  _born_factors(...); returns sqrt_mu*cmath.exp(1j*w*phi_geo). Uses NEITHER
-  a0 nor b1 (F009/F025). The 'a0'/'b1' substring hits are docstring-only.
-- _born_factors callers (grep): line 274 (5-tuple, born_amplification),
-  313 (_,_,_ placeholders, lead carrier), 487 (5-tuple, DIAGNOSTIC per comment).
-  NO stale 4-tuple caller.
-- likelihood.py slot (lines 1654-1666): Fact-4/8h-c1 F025 status comment;
-  slot returns None (dormant/unwired, awaiting TRAIN_TIER residual chart). Correct.
-- channels.born_carrier_from_partition (line 1294) defaults lead_carrier=
-  _born.born_lead_carrier (line 1405), needs two real images (guard line 1422).
+### Re-check of carried finding INS-10-001 (SPEC Born-rung stale) — NOT RESOLVED
+Re-read SPEC.md lines 88-112 directly and re-read HEAD code:
+- SPEC still: "positive parity, exact exterior fence gamma < 3/4",
+  born_lead_carrier = "sqrt(mu_macro)*exp(1j*w*phi_geo)" NO a0/b1, NO
+  Morse; above-split = "two-real-image geometric-optics sum plus
+  farfield_ghost_term where admitted". "serve slot still unwired" (correct).
+- Code (_born.py born_lead_carrier, lines 341-398) at HEAD: docstring +
+  body serve BOTH parities; det_a=(1-kappa)^2-gamma^2<0 => morse=(-1j)**1,
+  else 1.0. Macro-saddle band served with Morse phase.
+Conclusion: INS-10-001 OPEN. SPEC paragraph never updated (no diff touches
+SPEC). Librarian doc-sync item; code correct & tested (verified review #10).
+Carry forward unchanged.
 
-### FINDINGS (both PERSIST — SPEC.md unmodified; Librarian doc-sync work)
-Confirmed by grep on SPEC.md this pass:
-- INS-9-001 (trivial doc-sync; carries INS-1..8-001): SPEC.md line 54 (big
-  table cell) still "5-way MECE fall-through breakdown (gamma-guard /
-  cusp-window / refusal-ball / out-of-box / dropped-sliver)"; code is six-way
-  with 'born'.
-- INS-9-002 (trivial doc-sync; carries INS-1..8-002): SPEC.md lines 89-94
-  "Born rung (DORMANT)" still: "placeholder", "disagrees with operator.F_op
-  by up to ~13%"; superseded by F025 lead-only carrier + band split +
-  None-returning dormant slot.
+### No new findings
+No code changed => no new code defects. tidy_advisory.json + memories are
+housekeeping, not shipped artifacts / not code. DATA_CONTRACTS unchanged &
+correct (serve slot UNWIRED per SPEC; census offline).
 
-### resolved_ids this pass: NONE (both persist; SPEC not yet synced).
-Verdict: ISSUES (2 persisting SPEC doc-sync only; ZERO code defect).
-DATA_CONTRACTS unchanged: Born slot unwired, census offline; no shipped
-artifact schema changed.
-LESSON: 9th byte-identical re-review; still re-ran suite + import probes +
-traced callers + inspected the served carrier body. Rule holds.
+Verdict: ISSUES (1 carried SPEC doc-sync finding INS-10-001; ZERO code
+defect, ZERO new finding). resolved_ids: [].
+LESSON (reaffirmed): advisory/memory-only working trees have nothing to
+certify, but carried doc-sync findings do NOT auto-close — re-read the
+actual SPEC paragraph + the actual code symbol and confirm the divergence
+byte-for-byte before deciding resolved vs open.

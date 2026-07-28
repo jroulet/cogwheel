@@ -1,9 +1,10 @@
 {
   "trigger": "post-commit",
-  "commit": "2fc3f30f29806f56095aefb8632d06eb092b5d35",
-  "timestamp": "2026-07-28T13:18:10Z",
+  "commit": "d0aadf7704fb68eb85069bc2be33a00ea8249ef3",
+  "timestamp": "2026-07-28T18:42:34Z",
   "touched_files": [
     "cogwheel/gw_prior/twosquircle.py",
+    "cogwheel/lensing/chang_refsdal/_born.py",
     "cogwheel/lensing/chang_refsdal/_pearcey_table.py",
     "cogwheel/lensing/chang_refsdal/_schwinger.py",
     "cogwheel/lensing/chang_refsdal/channels.py",
@@ -14,6 +15,7 @@
     "cogwheel/lensing/surrogate.py",
     "cogwheel/lensing/surrogate_census.py",
     "cogwheel/lensing/surrogate_training.py",
+    "cogwheel/tests/test_lensing_born.py",
     "cogwheel/tests/test_lensing_chang_refsdal_ghost_frame.py",
     "cogwheel/tests/test_lensing_exterior_admission.py",
     "cogwheel/tests/test_lensing_exterior_windows.py",
