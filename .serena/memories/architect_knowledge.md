@@ -64,6 +64,16 @@
   a genuinely new physical contribution (e.g. a ghost/complex-saddle term):
   build a DEDICATED kernel, never route through unrelated existing kernel/
   delay/index helpers, plus explicit degenerate-axis refusal (Build 8h-b).
+  REFINEMENT (Build saddle Born carrier): this "separate function" rule is
+  for a genuinely NEW physical contribution. When instead mirroring an
+  EXISTING rung to the opposite-sign/mirror-symmetric regime of the SAME
+  physical object (e.g. real vs complex Morse index by parity sign), an
+  IN-FUNCTION branch keyed on the same classification gate is correct and
+  cheaper; generalize an existing one-sided wall-margin guard to two-sided
+  when the new branch admits the opposite side. Known exact phase/index
+  constants (e.g. Morse factor i^n) must be hardcoded as the exact literal,
+  never evaluated via cmath.exp/trig — sub-eps round-off in the
+  transcendental form can break a downstream flat-magnitude pin invariant.
 - GATE CURRENCY: prefer a STATE-INDEPENDENT (geometric) admission currency
   over a state-dependent one whenever train and serve can see different
   states. The w-dependent decay gate (w_min * Im tau_c) skewed train vs

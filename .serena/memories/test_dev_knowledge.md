@@ -55,7 +55,15 @@
   measuring them first: named coordinates routinely miss the intended regime
   (the "near-cusp" configs at theta_c=15/85 deg did NOT refuse — cusps sit
   near the theta=0/90 axes, so refusal needed theta_c~0.3 deg). Record the
-  measured quantity in the test, not the brief's number.
+  measured quantity in the test, not the brief's number. Same applies to a
+  brief's cited constant/root: derive the EXACT closed form yourself for a
+  tight gate (a brief's truncated literal can miss by ~1e-6, well inside a
+  tight tolerance); the brief's literal is fine only for a serve/refuse
+  straddle check where the tolerance margin dwarfs the literal's own error.
+- When constructing a fixture meant to reveal a correction term's effect,
+  sweep the coordinate the term actually DEPENDS ON (e.g. angular for an
+  angular-cosine term), not one it's insensitive to — a radial sweep can
+  hide a break that an azimuthal sweep reveals (same node count either side).
 - Gate each path at its OWN numerical floor (aggregate can pass while a
   component fails). Identity gates across DIFFERENT node grids floor at engine
   reproducibility ~1e-11 not eps. _snap lattice anchors are NOT bit-exact —
@@ -82,9 +90,10 @@
   needs t_geo_twin = t_c - dt_ms - xi*(t_min_B - t_min_A)/2pi (read t_min from
   a throwaway eval). Unlensed-injection near-truth reference = LIGHTEST lens,
   source OFF the caustic centre (y=(0,0) -> -inf). Census: saddle(det<0)
-  signed=-2, positive(det>0) signed=0. Cheap real
-  ChangRefsdalGeometryPartition: `ChangRefsdalChannels(w).reset().
-  geometry_partition(gamma=, y=, beta=, kappa=)` — no exact total needed.
+  signed=-2, positive(det>0) signed=0. `ChangRefsdalChannels(w).reset()`
+  mutates IN-PLACE and returns None (NOT chainable) — call `ch = Chang
+  RefsdalChannels(w); ch.reset(); ch.evaluate(gamma=, y=, beta=, kappa=)` (or
+  `ch.geometry_partition(...)`) as separate statements, never chained.
 - Neighbor-suite reds from drift: report, don't touch. Fully revert probe/
   mutation edits (verify by read-back + pattern search). Shell gate: plainest
   command shape (`python -m pytest <file> -q`) from the WORKTREE root; retry a

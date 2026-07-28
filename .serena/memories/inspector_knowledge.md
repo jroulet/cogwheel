@@ -118,3 +118,8 @@
   chain (census, reporting, not just the primary serve path) also thread
   it — a consumer left behind silently undercounts/misclassifies once an
   artifact exercising the new path ships (Build 3, saddle lobe-serve).
+- A clean/advisory-only working tree (no .py/SPEC/DATA_CONTRACTS diff)
+  means nothing NEW to certify, but does NOT auto-close a carried finding —
+  re-read the actual SPEC paragraph and the actual code symbol byte-for-
+  byte each pass to confirm the divergence still holds before deciding
+  resolved vs still-open.

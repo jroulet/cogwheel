@@ -46,15 +46,28 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   but passes theta un-rotated, so served geometry = theta_eig + beta while
   the emulator was trained on the beta=0 surface — finite-but-wrong.
   Latent only because production pins beta=0.
-- `lensing/chang_refsdal/_born.py` (Build 8h-c1) is DORMANT and UNWIRED:
-  F_born = sqrt(mu_macro)*exp(iw phi_geo)*(1 + i(w/2) b1/Q2r + O(w^2/Q2r^2)),
-  expanded about sqrt(mu_macro) = 1/sqrt((1-kappa)^2 - gamma^2), NOT about 1.
-  OWED (mine): the O(1) numerator b1 is a placeholder = 1.0 at a single edit
-  site — the closed form is nowhere in-repo, and 229/229 gate-passing annulus
-  configs disagree with `operator.F_op` by up to 13%. Guard A is calibrated
-  from the same b1, so it cannot refuse the error b1 causes. The w->0 macro
-  limit F -> sqrt(mu_macro) IS b1-independent and exact, so it stays a valid
-  green oracle while the accuracy gate is red — don't conflate the two.
+- `lensing/chang_refsdal/_born.py` STATUS UPDATE (2026-07-28, saddle Born
+  carrier build; supersedes the Build 8h-c1 "b1 placeholder" entry below —
+  that concern is RESOLVED, not applicable to current code): the lead
+  SERVE carrier is `born_lead_carrier` = sqrt(mu_macro)*exp(iw*phi_geo)*morse
+  (morse = literal -1j iff det_a=(1-kappa)^2-gamma^2<0 else literal 1.0 —
+  hardcoded, NOT cmath.exp, to avoid a ~6e-17 real-part rotation error).
+  Verified against an independent matrix-solve full-Fermat-delay oracle to
+  2.8e-14 over the full gamma/|y|/theta/w sweep, both parities (mu_macro<0
+  confirmed genuine saddles). b1/a0 (F023/F025 closed forms, point-mass
+  b1=-1,a0=0, invariant b1-a0=-lam^2*mu_macro) are now DERIVED (matrix-solve
+  oracle agreement 7e-15) but stay DIAGNOSTIC-only in born_amplification/
+  born_envelope — NOT in the serve carrier (F009 pin: |F| must stay
+  w-flat). Band-split currency re-keyed to w*Delta_tau (full Fermat-delay
+  span of the 2 real images, read off the partition, not re-solved) —
+  confirmed genuinely distinct from the retired w*r0_sq currency (opposite
+  serve/refuse decisions on a measured witness config). Positive-parity
+  exterior fence (gamma<3/4) and a new closed-form macro-saddle fence
+  (`saddle_caustic_max_y`, F026, serving band ~1.0502342<gamma<3) both
+  gate born_gate. Function+gate+census 'born' category+coefficients are
+  SHIPPED; the live likelihood serve slot remains DORMANT/UNWIRED (falls
+  through to the certified exact engine) pending the TRAIN_TIER residual-
+  chart driver step.
 - `likelihood.py` post-3f: `_amplification_coefficients` interpolates
   ONLY the envelope E(w) on a LOO-adaptive coarse grid (seed 8, ceiling
   48; measured N=26-32), with closed-form switched-saddle reconstruction.

@@ -72,7 +72,12 @@
   over a config sweep + full refusal-decision match. Make the new-regime
   classification gate EXACTLY mirror the frozen path's gate. A SINGLE
   fast-path intercept at the top of the expensive method that returns None
-  on every guard miss lets the exact path fall through untouched.
+  on every guard miss lets the exact path fall through untouched. When
+  generalizing a parity/domain-restricted closed form to a wider domain,
+  wrap the restricted term in abs()/sign-canonicalize and prove old-domain
+  byte-identity via the ALGEBRAIC identity (abs() is identity when the
+  original argument was already positive) rather than a rerun; only branch
+  explicitly where the underlying physics changes sign (e.g. a Morse phase).
 - SINGLE-SOURCE A CONVENTION: when you find an inline re-expression of a
   rule a primitive already owns (e.g. `np.sort(d - d.min())` beside
   `_frame_delays`), route it through the primitive. Byte-identity is proved
@@ -155,3 +160,14 @@
   degenerate fixture, the two mandates ("use the shared path" and "don't
   weaken the tolerance") are mutually incompatible for that fixture —
   escalate the conflict rather than silently picking one side.
+- Exact literal complex constants for known phase/parity factors (e.g. a
+  Morse index i^n) — hardcode the literal (-1j, 1.0) rather than evaluate
+  via cmath.exp/trig; sub-eps round-off (~1e-16) in the transcendental form
+  can break a downstream flat-magnitude pin invariant.
+- Two mutually-dependent modules (parent imports child at module load;
+  child needs a parent-only helper) — break the cycle with a function-local
+  (lazy) import inside the child function, not a restructure.
+- When a fall-through/enum-like category tuple gains a member, fix any test
+  that hardcoded per-category sample counts to derive them from
+  `len(category_tuple)` dynamically instead of a magic number, so future
+  category additions don't silently rot the count.

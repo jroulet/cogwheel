@@ -80,3 +80,7 @@
   in `.claude/tidy_advisory.json` as a side effect — revert it with
   `git checkout --` and don't commit it; "All surfaces up to date" with
   zero real diff is a legitimate clean-backlog outcome, not a missed check.
+- When a changelog/TODO fragment reports "N new tests", SUM the literal
+  per-report test counts from each contributing agent's own change report
+  rather than eyeballing a round total — an un-summed guess is an easy
+  off-by-a-few arithmetic slip caught only by re-adding the numbers.

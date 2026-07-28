@@ -11,9 +11,12 @@
   retrying.
 - A finding whose text says "Librarian-owned" / "-> Librarian:" (doc-sync,
   SPEC row) is NOT Foreman-Lite work — Foreman-Lite must not write SPEC.md.
-  Decline immediately; do not re-verify the same no-op every pass (it
-  recurred 7x on INS-5-DOC-1). Escalate the mis-route as an orchestrator
-  routing bug rather than burning an agent turn repeating the decline.
+  Decline immediately without touching files; do not re-verify the same
+  no-op every pass. This finding-ID mis-route has now recurred 11x+ across
+  sessions (was 7x) — per-pass decline is not fixing the upstream bug;
+  escalate it as an orchestrator routing bug (recommend a pre-filter that
+  strips "-> Librarian"-tagged findings from the Foreman-Lite queue before
+  dispatch) rather than expecting future declines to resolve it.
 - `rename_symbol` updates live code references but not docstring mentions
   of the old name written as `module._old_name` text — grep and fix those
   separately.
