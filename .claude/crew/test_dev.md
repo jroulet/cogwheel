@@ -42,7 +42,42 @@ not share an author. Never name a suite after a module that does not exist.
    - **Waveform sanity**: a generated waveform's amplitude/phase match the LALSimulation reference
      for a known approximant + parameters.
    Save diagnostic plots to `cogwheel/tests/output/<test_name>_<desc>.png`.
-7. Memory checkpoint: write at least one line to `test_dev_short_term` via
+7. **Backward-compatibility audit of EXISTING tests (mandatory whenever the WP
+   changes an API, signature, convention, coordinate system, gauge, or the
+   meaning of a constant).** This is a READING task, not a running task — you
+   must do it even for tests you are not permitted or able to run.
+
+   For every symbol the WP changed — a function whose signature moved, a
+   module constant whose value or meaning changed, a coordinate/gauge whose
+   definition changed, a tag or schema string that was bumped — do:
+
+   a. `search_for_pattern` for that symbol across ALL of `cogwheel/tests/`,
+      not just the files you are editing.
+   b. Read each hit and decide, by reading, whether the test still holds:
+      does it call a signature that gained a required argument? assert a
+      constant that changed? encode the retired criterion? build a fixture in
+      the old coordinate system?
+   c. Update the ones that broke, and say in your change report which files
+      you audited and what you changed.
+
+   **Skipped and gated tests count.** A test behind
+   `@unittest.skipUnless(os.environ.get('COGWHEEL_TRAIN_TIER'), ...)`, an
+   `@expectedFailure`, or any other skip does NOT run in your build and will
+   NOT tell you it is broken. Those are exactly the ones that rot silently:
+   on 2026-07-27 a coordinate migration plus an admission change left 25 tests
+   dead for a whole build cycle because every one of them was erroring at
+   setup where nobody looked. Gating a test is not the same as maintaining it.
+
+   Do NOT run an engine-backed or otherwise expensive test just to find out —
+   that is the driver's post-build job and it blows your budget. Read it and
+   reason. A signature mismatch, a bumped schema string, or an assertion on a
+   retired constant is visible on the page.
+
+   If you conclude a test cannot be made to hold because the behaviour it
+   pinned is genuinely gone, say so and propose deletion with the reason —
+   do not leave it broken-but-skipped, and do not weaken it to pass.
+
+8. Memory checkpoint: write at least one line to `test_dev_short_term` via
    `mcp__serena__edit_memory`.
 
 ## Hard requirements
