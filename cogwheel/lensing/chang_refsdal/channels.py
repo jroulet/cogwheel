@@ -100,7 +100,7 @@ from cogwheel.lensing.chang_refsdal._gauge import (
     channels_from_envelope, envelope_total, reconstructed_total,
     smootherstep, switched_analytic_channels)
 from cogwheel.lensing.chang_refsdal.operator import (
-    RHO_START, RHO_END, MAX_ORDER, F_op_grid, cancellation_exponent,
+    RHO_START, RHO_END, F_op_grid, cancellation_exponent,
     geometric_amplification, select_branch)
 
 __all__ = ['ChangRefsdalChannels', 'ChangRefsdalGeometryPartition',
@@ -586,7 +586,7 @@ def _min_delay_separation(delays: np.ndarray,
 
 def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
                  beta: float, kappa: float, t_min: float,
-                 delta_min: float, max_order: int
+                 delta_min: float
                  ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Evaluate the exact amplification total over the grid.
 
@@ -614,8 +614,6 @@ def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
     delta_min : float
         Smallest pairwise real-channel delay separation, for the branch
         gate.
-    max_order : int
-        Operator-series order cap forwarded to `operator.F_op_grid`.
 
     Returns
     -------
@@ -649,18 +647,13 @@ def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
     # decision below is byte-identical to before.
     saddle_host = not 1.0 - kappa > abs(gamma)
 
-    # Third leg of the authoritative gate: distance to the caustic (F031).
-    # `eta` is w-INDEPENDENT, so it is measured once here rather than per
-    # node, exactly as `operator._positive_parity_grid` does. A refusing
-    # caustic search means no geometric admission (`eta = 0.0` -> 'wave'),
-    # the conservative direction.
-    #
-    # This MUST be supplied. Omitting it defaults to `inf`, which silently
-    # satisfies the leg and puts this path back out of sync with the
-    # operator grids for every source inside `ETA_MIN_GEOMETRIC` of the
-    # caustic -- a training-label-vs-serve skew of exactly the kind F028
-    # was. Pinned by `test_lensing_operator.py::BranchGateTestCase::
-    # test_thresholds_have_one_home`.
+    # Third leg of the authoritative gate: distance to the caustic (F031),
+    # w-independent so measured once.  MUST be passed -- the default `inf`
+    # silently satisfies the leg and desynchronises this path from the
+    # operator grids.  Pinned by
+    # `test_lensing_operator.py::BranchGateTestCase::
+    # test_thresholds_have_one_home`.  A refusing caustic search gives
+    # `eta = 0.0` -> 'wave', the conservative direction.
     eta = 0.0
     if not saddle_host:
         try:
@@ -693,8 +686,7 @@ def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
         # and propagates unswallowed -- identical to the former per-node
         # `F_op` raise -- so the RB and brute paths refuse symmetrically.
         values_wave, orders_wave, converged_wave = F_op_grid(
-            w_wave, source, gamma, beta=beta, kappa=kappa,
-            max_order=max_order)
+            w_wave, source, gamma, beta=beta, kappa=kappa)
         # Same per-node relative-delay carrier as the geometric branch,
         # applied elementwise over the wave subset.
         total[wave_idx] = values_wave * np.exp(-1j * w_wave * t_min)
@@ -1743,9 +1735,6 @@ class ChangRefsdalChannels:
     w : Sequence[float]
         Dimensionless frequency grid: 1-D, strictly positive, strictly
         increasing.
-    max_order : int, optional
-        Operator-series order cap forwarded to `operator.F_op`.
-        Defaults to `operator.MAX_ORDER`.
 
     Raises
     ------
@@ -1753,10 +1742,8 @@ class ChangRefsdalChannels:
         If ``w`` is not a valid frequency grid.
     """
 
-    def __init__(self, w: Sequence[float], *,
-                 max_order: int = MAX_ORDER) -> None:
+    def __init__(self, w: Sequence[float]) -> None:
         self._w = _validate_frequencies(w)
-        self._max_order = int(max_order)
         self._markers: np.ndarray | None = None
 
     @property
@@ -1841,8 +1828,7 @@ class ChangRefsdalChannels:
         delta_min = _min_delay_separation(delays, real_mask)
 
         exact_total, orders, converged = _exact_total(
-            self._w, source, gamma, beta, kappa, t_min, delta_min,
-            self._max_order)
+            self._w, source, gamma, beta, kappa, t_min, delta_min)
 
         # SACR-C decomposition: switched analytic saddle trials
         # ``S_a * H_a`` plus one envelope ``E`` demodulated at the

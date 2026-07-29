@@ -115,12 +115,6 @@ MTSUN_LIT = 4.925490947641266e-6
 #: missing ``8*pi`` / ``(1 + z)`` factor.
 FREQ_RTOL = 1e-6
 
-#: Operator-series order budget the waveform layer runs at
-#: (``ChangRefsdalChannels`` default).  The macro-saddle control is a
-#: statement about certification AT THIS ORDER, matching the spec's
-#: "order-42".
-CERT_MAX_ORDER = operator.MAX_ORDER
-
 #: Cancellation-exponent ceiling ``L = w*|y'|`` below which the wave
 #: branch is the only branch (``select_branch`` cannot pick geometric),
 #: so every probed frequency actually exercises ``F_op``.  Mirrors
@@ -314,7 +308,7 @@ def _f_op_returns(config: _LensConfig, w: float) -> bool:
     try:
         value, _ = operator.F_op(
             w, config.y_array, config.gamma, beta=config.beta,
-            kappa=config.kappa, max_order=CERT_MAX_ORDER)
+            kappa=config.kappa)
     except SchwingerCertificationError:
         return False
     return bool(np.isfinite(value.real) and np.isfinite(value.imag))
@@ -564,7 +558,7 @@ class MacroSaddleControlTestCase(WaveformTestCase):
             with self.subTest(w=w):
                 value, diag = operator.F_op(
                     w, IN_BAND.y_array, IN_BAND.gamma, beta=IN_BAND.beta,
-                    kappa=IN_BAND.kappa, max_order=CERT_MAX_ORDER)
+                    kappa=IN_BAND.kappa)
                 self.assertTrue(np.isfinite(value.real)
                                 and np.isfinite(value.imag))
                 self.assertTrue(diag.converged,
@@ -599,8 +593,7 @@ class MacroSaddleControlTestCase(WaveformTestCase):
                     'serving contract has changed')
                 value, _ = operator.F_op(
                     w, BAND_EDGE.y_array, BAND_EDGE.gamma,
-                    beta=BAND_EDGE.beta, kappa=BAND_EDGE.kappa,
-                    max_order=CERT_MAX_ORDER)
+                    beta=BAND_EDGE.beta, kappa=BAND_EDGE.kappa)
                 self.assertAlmostEqual(
                     abs(value - arm), 0.0, delta=1e-12,
                     msg=f'band-edge w={w}: served F_op {value!r} is not the '
@@ -667,8 +660,7 @@ class MacroSaddleControlTestCase(WaveformTestCase):
                              'no hard-core probe refused to inspect')
         with self.assertRaises(SchwingerCertificationError) as ctx:
             operator.F_op(refusing_w, HARD_CORE.y_array, HARD_CORE.gamma,
-                          beta=HARD_CORE.beta, kappa=HARD_CORE.kappa,
-                          max_order=CERT_MAX_ORDER)
+                          beta=HARD_CORE.beta, kappa=HARD_CORE.kappa)
         message = str(ctx.exception)
         # w-keyed ceiling refusal: names the offending w and the reason.
         for token in ('w =', str(refusing_w), 'ceiling'):

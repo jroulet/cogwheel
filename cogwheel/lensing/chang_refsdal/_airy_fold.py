@@ -148,6 +148,15 @@ _B3_MIN = 1e-6
 #: estimate ``c_A xi^{-3/2}`` exceeds this.
 _DEFAULT_ENVELOPE_BAR = 0.05
 
+#: Maximum distance from the caustic at which this arm may serve, in
+#: Einstein-radius units.  ``q = 0`` is a symmetric-fold assumption, exact
+#: only where the merging pair has equal magnification (at the caustic), so
+#: validity is bounded by distance from the caustic -- which the ``xi``
+#: certificate does not measure.  Complement of
+#: `operator.ETA_MIN_GEOMETRIC`; a literal, not an import, because
+#: `operator` imports this module.  Pinned equal by test.  F028, F031, F032.
+_ETA_MAX_FOLD = 0.3
+
 
 # ----------------------------------------------------------------------
 # The pure uniform Airy fold form.
@@ -400,6 +409,12 @@ def fold_amplification(w: float, source, gamma: float, *,
         nearest = geometry.nearest_caustic_point(gamma, beta, source,
                                                  kappa=kappa)
     except geometry.LensDomainError:
+        return None
+
+    # Caustic-relative admission: the ``q = 0`` symmetric-fold assumption
+    # fails away from the caustic, and the ``xi`` certificate cannot see it
+    # (F028, F032).
+    if not float(nearest.distance) < _ETA_MAX_FOLD:
         return None
 
     pair = _merging_fold_pair(images, source, matrix)

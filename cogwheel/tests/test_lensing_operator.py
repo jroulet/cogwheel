@@ -78,8 +78,9 @@ ORACLE_DPS = 50
 #: the wave branch, achievable because the oracle is effectively exact.
 RTOL_GATE = 1e-10
 
-#: Operator-order cap handed to ``F_op`` in the oracle comparison; large
-#: enough that the highest-``w`` configuration (order ~57) converges.
+#: Ceiling the reported ``order_used`` is held under in the oracle
+#: comparison; large enough that the highest-``w`` configuration
+#: (order ~57) converged under the retired operator series.
 FOP_MAX_ORDER = 70
 
 #: Operator-order cap for the mpmath oracle; exceeds ``F_op``'s
@@ -339,8 +340,7 @@ class OperatorOracleTestCase(OperatorTestCase):
             for w in ws:
                 with self.subTest(config=name, w=w):
                     value, diag = operator.F_op(
-                        w, y, gamma, beta=beta, kappa=kappa,
-                        max_order=FOP_MAX_ORDER)
+                        w, y, gamma, beta=beta, kappa=kappa)
                     reference = _oracle_amplification(
                         w, y, gamma, beta=beta, kappa=kappa)
                     rel = abs(value - reference) / abs(reference)
@@ -369,7 +369,7 @@ class OperatorOracleTestCase(OperatorTestCase):
         caller can edit is a report that gets believed after editing.
         """
         _, diag = operator.F_op(8.0, np.array([0.55, 0.0]), PAPER_GAMMA,
-                                kappa=PAPER_KAPPA, max_order=40)
+                                kappa=PAPER_KAPPA)
         for field in ('converged', 'order_used', 'cancellation_ratio',
                       'estimated_relative_tail'):
             with self.subTest(field=field):
@@ -494,8 +494,7 @@ class GeometricOpticsSlopeTestCase(OperatorTestCase):
                for im in images]
         residuals = []
         for w in self.SLOPE_W:
-            value, _ = operator.F_op(w, self.SLOPE_Y, self.SLOPE_GAMMA,
-                                     max_order=60)
+            value, _ = operator.F_op(w, self.SLOPE_Y, self.SLOPE_GAMMA)
             approx = 0j
             for tau, mu, n, (c1, c2) in zip(delays, mus, morse, c12):
                 lead = np.sqrt(abs(mu)) * np.exp(-0.5j * np.pi * n)
@@ -1101,8 +1100,7 @@ class SelfFalsificationTestCase(OperatorTestCase):
     def test_oracle_gate_rejects_a_wrong_amplification(self):
         """A 1% error in ``F_op`` must blow the `RTOL_GATE`."""
         y, gamma, kappa = np.array([0.55, 0.0]), PAPER_GAMMA, PAPER_KAPPA
-        value, _ = operator.F_op(20.0, y, gamma, kappa=kappa,
-                                 max_order=FOP_MAX_ORDER)
+        value, _ = operator.F_op(20.0, y, gamma, kappa=kappa)
         reference = _oracle_amplification(20.0, y, gamma, kappa=kappa)
         good = abs(value - reference) / abs(reference)
         bad = abs(value * 1.01 - reference) / abs(reference)

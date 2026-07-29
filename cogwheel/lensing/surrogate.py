@@ -1794,7 +1794,6 @@ class LensAmplificationSurrogate:
                     n_rho: int = _DEFAULT_PARAM_NODES,
                     n_theta: int = _DEFAULT_PARAM_NODES,
                     w_nodes_per_decade: int = _DEFAULT_W_NODES_PER_DECADE,
-                    max_order: int | None = None,
                     definition: str = _FARFIELD_ENVELOPE_DEFINITION
                     ) -> 'LensAmplificationSurrogate':
         """Train a single-box far-field surrogate on a dense engine grid.
@@ -1870,8 +1869,6 @@ class LensAmplificationSurrogate:
             Nodes per parameter axis (default 7; Professor Q2 sizing).
         w_nodes_per_decade : int, optional
             Density of the dense log-w training axis (default 15).
-        max_order : int, optional
-            Operator-series order cap forwarded to `ChangRefsdalChannels`.
         definition : str, optional
             Envelope-definition tag the chart is trained on (default the
             far-field kernel-sum label).  Pass the interior SACR-C tag
@@ -1923,14 +1920,13 @@ class LensAmplificationSurrogate:
         carrier = np.full((gamma_grid.size, rho_grid.size,
                            theta_c_grid.size, 2), np.nan, dtype=float)
 
-        channels_kwargs = {} if max_order is None else {'max_order': max_order}
         for i_g, gamma in enumerate(gamma_grid):
             for i_rho, rho in enumerate(rho_grid):
                 for i_th, theta_c in enumerate(theta_c_grid):
                     # Fresh tracker per point -> deterministic initial
                     # labeling; the envelope is well-defined per point and
                     # independent of label continuation.
-                    channels = ChangRefsdalChannels(w_grid, **channels_kwargs)
+                    channels = ChangRefsdalChannels(w_grid)
                     try:
                         # Caustic-fixed node -> physical eigenframe source.
                         # This conversion calls `_caustic_reach`, which
@@ -2012,8 +2008,7 @@ class LensAmplificationSurrogate:
                          n_gamma: int = _DEFAULT_PARAM_NODES,
                          n_rho: int = _DEFAULT_PARAM_NODES,
                          n_theta: int = _DEFAULT_PARAM_NODES,
-                         w_nodes_per_decade: int = _DEFAULT_W_NODES_PER_DECADE,
-                         max_order: int | None = None
+                         w_nodes_per_decade: int = _DEFAULT_W_NODES_PER_DECADE
                          ) -> 'LensAmplificationSurrogate':
         """Train a macro-saddle lobe-interior surrogate on a dense engine grid.
 
@@ -2061,8 +2056,6 @@ class LensAmplificationSurrogate:
             Nodes per parameter axis (default 7).
         w_nodes_per_decade : int, optional
             Density of the dense log-w training axis (default 15).
-        max_order : int, optional
-            Operator-series order cap forwarded to `ChangRefsdalChannels`.
 
         Returns
         -------
@@ -2105,11 +2098,10 @@ class LensAmplificationSurrogate:
                            theta_local_grid.size, 2), np.nan, dtype=float)
         image_count: int | None = None
 
-        channels_kwargs = {} if max_order is None else {'max_order': max_order}
         for i_g, gamma in enumerate(gamma_grid):
             for i_rho, rho_lobe in enumerate(rho_lobe_grid):
                 for i_th, theta_local in enumerate(theta_local_grid):
-                    channels = ChangRefsdalChannels(w_grid, **channels_kwargs)
+                    channels = ChangRefsdalChannels(w_grid)
                     try:
                         # Lobe-local node -> physical eigenframe source (NOT
                         # origin-centred). Inside the refusal guard so an

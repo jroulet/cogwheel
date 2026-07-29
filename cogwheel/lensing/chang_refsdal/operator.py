@@ -34,11 +34,6 @@ configuration leaves it invariant.  So there is exactly ONE
 integer-keyed real table, stored as a dense array; no float ever keys a
 cache and no mutable container is returned to a caller.
 
-Each application of ``D_0`` lowers ``a + b - 2*k`` by exactly two, so
-starting from ``(a, b, k) = (0, 0, 0)`` every order-``n`` monomial obeys
-``k = (a + b)//2 + n``.  The radial-derivative index is therefore a
-function of ``(a, b, n)`` and the table needs only the ``(n, a, b)``
-axes; the ladder length handed to the kernel is ``2 * max_order``.
 
 CERTIFIED DOMAIN AND THE BRANCH GATE
 ------------------------------------
@@ -55,17 +50,7 @@ its derivatives has its own cancellation limit.  The radial derivatives
 span a huge dynamic range, so `F_op` first factors their peak magnitude
 out as an exact power of two before the matmuls (otherwise the products
 overflow to a silent ``nan`` near ``L ~ 40``), which pushes the usable
-contraction out to ``L ~ 45``.  `F_op` then refuses an uncertifiable
-input through EITHER of two measured cuts, for two INDEPENDENT error
-sources: a TRUNCATION cut on ``estimated_relative_tail`` (the operator-
-series last-term ratio and the kernel's per-order tail), binding when
-``max_order`` is too small for the shear series to converge; and a
-CONTRACTION round-off cut on ``eps * (sum|term| / |total|)`` past
-``_CONTRACTION_GUARD``, binding once the series has converged and the
-float64 derivative-ladder cancellation dominates near ``L ~ 45``.
-Neither cut alone suffices: at the high ``max_order`` the deep-band
-sweeps use, the truncation tail goes blind (the series converges) while
-the contraction round-off is the live limit.  Every uncertifiable input
+contraction out to ``L ~ 45``.  Every uncertifiable input
 in the wave branch therefore exits through a named exception -- never a
 ``nan`` and never a finite-but-wrong number (FINDINGS F005).
 
@@ -189,7 +174,7 @@ from cogwheel.lensing.chang_refsdal._schwinger import (
     _raw_t_integral_core as _schwinger_raw_t_integral_core)
 
 __all__ = [
-    'RHO_START', 'RHO_END', 'L_MAX', 'MAX_ORDER',
+    'RHO_START', 'RHO_END', 'L_MAX',
     'OperatorDiagnostics',
     'F_op', 'F_op_grid', 'geometric_amplification', 'select_branch',
     'cancellation_exponent',
@@ -220,35 +205,12 @@ RHO_END = 4.0
 L_MAX = 48
 
 #: Minimum distance from the source to the caustic for the geometric
-#: asymptote to be admitted, in Einstein-radius units.  The THIRD leg of
-#: `select_branch`, and the one `L_MAX` cannot substitute for.
-#:
-#: Measured (F031, driver sweep 2026-07-29, 2600 resolved positive-parity
-#: samples against the Schwinger quadrature).  Binning the geometric error
-#: by ``eta`` and by ``L`` separates two effects that were previously
-#: confounded: at fixed ``eta`` the error falls monotonically with ``L``
-#: (so ``L_MAX`` is a real onset), but at ``eta < 0.1`` the error is FLAT
-#: in ``L`` and the two-condition gate still admitted nodes at p90 = 1.17,
-#: i.e. 117% relative error.  Per-band p90 with the ``L > L_MAX`` leg
-#: applied: eta 0-0.1 -> 1.17, 0.1-0.3 -> 5.6e-2, 0.3-1 -> 7.65e-5,
-#: >1 -> 1.54e-6.  The floor sits at the knee.
-#:
-#: WHY no amount of ``L`` helps below it: just outside a fold the image
-#: pair that annihilates at the caustic has become complex saddles with
-#: ``Im tau_c -> 0``, so they are undamped and a real-image-only sum omits
-#: an O(1) term (F029).  That is a validity failure of geometric optics,
-#: not a convergence rate.
-#:
-#: COST: this is a REFUSAL-INCREASING gate.  Nodes below the floor fall to
-#: the uniform arms (themselves wrong far from the caustic, F028) or to a
-#: named refusal.  Coverage is traded for correctness, deliberately.
+#: asymptote to be admitted, in Einstein-radius units.  Third leg of
+#: `select_branch`; `L_MAX` cannot substitute for it, because below this
+#: the error is flat in ``L`` -- near a fold the annihilated pair are
+#: undamped complex saddles a real-image sum omits.  Refusal-increasing by
+#: design.  Measured p90: 1.17 below 0.1, 7.65e-5 above 0.3 (F029, F031).
 ETA_MIN_GEOMETRIC = 0.3
-
-#: Operator-series order cap.  The kernel derivative ladder handed to
-#: `_hyp1f1.point_mass_g_derivatives` is ``2 * MAX_ORDER`` because each
-#: application of ``D_0`` raises the radial index by up to two.
-MAX_ORDER = 42
-
 
 #: First-order float64 round-off unit for the operator CONTRACTION
 #: (machine epsilon).  The contraction stays in complex128 -- the
@@ -280,10 +242,6 @@ _CONTRACTION_TARGET = 1e-10
 #: but-wrong; see the refusal site.)
 _CONTRACTION_GUARD = 2e-9
 
-# Operator-series convergence policy (not per-call knobs).
-_MIN_ORDER = 6
-_CONSECUTIVE_SMALL = 4
-_SERIES_TOLERANCE = 2e-12
 
 
 @dataclass(frozen=True)
@@ -299,7 +257,7 @@ class OperatorDiagnostics:
         Highest operator order actually summed.
     converged : bool
         Whether the operator series met the small-term stopping rule
-        before reaching ``max_order``.
+        before reaching its order cap.
     estimated_relative_tail : float
         MEASURED truncation estimate: the larger of the operator
         series' last-term ratio and the kernel's worst per-order
@@ -1002,8 +960,7 @@ def _series_length(w: float, s: float) -> int:
 
 def _positive_parity_grid(
         w_array: np.ndarray, y: np.ndarray, gamma: float, *,
-        beta: float = 0.0, kappa: float = 0.0,
-        max_order: int = MAX_ORDER
+        beta: float = 0.0, kappa: float = 0.0
         ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray,
                    np.ndarray]:
     """Positive-parity wave-branch grid: Schwinger for ``gamma' > 0``.
@@ -1090,26 +1047,12 @@ def _positive_parity_grid(
             f'w_array must be one-dimensional, got shape {w_array.shape}.')
     lam, y_scaled, gamma_prime = _mass_sheet_map(y, gamma, kappa)
     if not gamma_prime > 0.0:
-        # Shear-free (gamma' = 0, pure point lens) CLOSED FORM.
-        #
-        # The Schwinger 1D representation requires gamma' > 0, so this
-        # route used to fall through to the legacy operator-series
-        # contraction.  It no longer needs to: at gamma' = 0 the shear
-        # operator exp[i*gamma*D_beta/(2w)] is the IDENTITY, so the whole
-        # series collapses to its zeroth term, which is exactly the
-        # point-mass kernel `point_mass_g_derivatives` already computes.
-        # The series was doing one multiply in an 85x85 dress.
-        #
-        # Driver-verified equivalence to the retired route over 36 configs
-        # (w in {1, 8, 30} x |y| in {0.2, 0.9} x kappa in {0, 0.3, -0.4} x
-        # beta in {0, 0.7}): worst relative difference 1.76e-15, and
-        # EXACTLY 0.0 at kappa = 0 -- the residual is log/exp
-        # reassociation in the mass-sheet prefactor, nothing more.  `beta`
-        # is correctly absent: with no shear there is no preferred axis.
-        #
-        # `HypergeometricDomainError` still propagates from the kernel
-        # above its certified (w, s) domain. That refusal belongs to the
-        # kernel, not to the series, and is unchanged.
+        # Shear-free (gamma' = 0, pure point lens) closed form.  The
+        # Schwinger 1D representation requires gamma' > 0; at gamma' = 0 the
+        # shear operator is the identity, so the amplification is just the
+        # point-mass kernel times the mass-sheet prefactor.  `beta` is
+        # correctly absent: with no shear there is no preferred axis.
+        # `HypergeometricDomainError` propagates from the kernel unchanged.
         source_scaled = np.asarray(y, dtype=float) / np.sqrt(lam)
         s_shear_free = float(source_scaled @ source_scaled)
         n_nodes = w_array.shape[0]
@@ -1120,11 +1063,10 @@ def _positive_parity_grid(
             kernel, kernel_tail = point_mass_g_derivatives(
                 w_node, s_shear_free, 0,
                 _series_length(w_node, s_shear_free))
-            # Reconstruct in the EXACT operation order the retired route
-            # used (two separate exponentials, then `* total / lam`).
-            # Folding the three phase terms into one `exp` is
-            # mathematically identical and 1 ULP different in float64,
-            # which the SHA-pinned byte-identity tests correctly reject.
+            # Two separate exponentials, then `* total / lam`.  Folding the
+            # phase terms into one `exp` is mathematically identical and
+            # 1 ULP different in float64; the byte-identity tests hold this
+            # association.
             phase_scaled = np.exp(0.5j * w_node * s_shear_free)
             mass_sheet_phase = np.exp(
                 0.5j * w_node * np.log(lam)
@@ -1266,8 +1208,7 @@ def _positive_parity_grid(
 
 
 def F_op_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
-              beta: float = 0.0, kappa: float = 0.0,
-              max_order: int = MAX_ORDER
+              beta: float = 0.0, kappa: float = 0.0
               ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Batched contour-free Chang-Refsdal amplification over a ``w`` grid.
 
@@ -1304,9 +1245,6 @@ def F_op_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
         eigenframe; the amplification is invariant.
     kappa : float, optional
         External convergence; enters through `_mass_sheet_map`.
-    max_order : int, optional
-        Operator-series order cap; also fixes the kernel ladder length
-        ``2 * max_order``.
 
     Returns
     -------
@@ -1343,13 +1281,12 @@ def F_op_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
         converged = np.ones(values.shape[0], dtype=bool)
         return values, orders, converged
     values, orders, converged, _, _ = _positive_parity_grid(
-        w_array, y, gamma, beta=beta, kappa=kappa, max_order=max_order)
+        w_array, y, gamma, beta=beta, kappa=kappa)
     return values, orders, converged
 
 
 def F_op(w: float, y: np.ndarray, gamma: float, *,
-         beta: float = 0.0, kappa: float = 0.0,
-         max_order: int = MAX_ORDER
+         beta: float = 0.0, kappa: float = 0.0
          ) -> tuple[complex, OperatorDiagnostics]:
     """Contour-free Chang-Refsdal amplification at one frequency.
 
@@ -1383,9 +1320,6 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
     kappa : float, optional
         External convergence; enters through `_mass_sheet_map` (positive
         parity) or `_saddle_mass_sheet_map` (macro saddle).
-    max_order : int, optional
-        Operator-series order cap; also fixes the kernel ladder length
-        ``2 * max_order``.  Ignored on the saddle branch.
 
     Returns
     -------
@@ -1439,7 +1373,7 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
     (values, orders, converged, estimated_tails,
      cancellation_ratios) = _positive_parity_grid(
          np.asarray([float(w)], dtype=float), y, gamma,
-         beta=beta, kappa=kappa, max_order=max_order)
+         beta=beta, kappa=kappa)
     diagnostics = OperatorDiagnostics(
         order_used=int(orders[0]),
         converged=bool(converged[0]),

@@ -147,10 +147,6 @@ FOP_RTOL = 1e-10
 #: arithmetic, so a larger gap is cross-node contamination.
 SINGLE_BATCH_RTOL = 1e-14
 
-#: Operator-order cap handed to ``F_op_grid`` for the oracle comparison
-#: (large enough that the highest-``w`` grid point converges).
-FOP_MAX_ORDER = 70
-
 #: In-domain grid axes: ``w``, physical ``sqrt(s) = |y|`` (kappa=0), and
 #: shear.  ``L = w*sqrt(s)`` runs from 0.3 to 45; some high-``L``,
 #: shear-on points refuse (routed to the certified-XOR-refuse contract).
@@ -597,7 +593,7 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
         try:
             values, _, _ = F_op_grid(
                 np.array([w], dtype=float), y, gamma, beta=beta,
-                kappa=kappa, max_order=FOP_MAX_ORDER)
+                kappa=kappa)
         except _WAVE_REFUSALS:
             return False, None
         return True, complex(values[0])
@@ -671,7 +667,7 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
                 # No certified node may flip to a refusal in the batch.
                 values, _, _ = F_op_grid(
                     np.array(certified, dtype=float), y, gamma, beta=beta,
-                    kappa=kappa, max_order=FOP_MAX_ORDER)
+                    kappa=kappa)
                 self.n_checks += 1
                 self.assertEqual(
                     len(values), len(certified),
@@ -687,8 +683,7 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
                         msg=f'{label}: solo-refused w={w_refused:g} did '
                             'not refuse when batched'):
                     F_op_grid(np.array(batch, dtype=float), y, gamma,
-                              beta=beta, kappa=kappa,
-                              max_order=FOP_MAX_ORDER)
+                              beta=beta, kappa=kappa)
 
     def test_single_and_batch_values_agree(self):
         """Where both return, solo and full-batch agree to
@@ -704,7 +699,7 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
                 continue
             batch_values, _, _ = F_op_grid(
                 np.array(certified, dtype=float), y, gamma, beta=beta,
-                kappa=kappa, max_order=FOP_MAX_ORDER)
+                kappa=kappa)
             for w, batch_value in zip(certified, batch_values):
                 solo_value = self._solo(w, y, gamma, beta, kappa)[1]
                 self.assert_relative(
@@ -1110,11 +1105,9 @@ class BatchedEquivalenceTestCase(BatchedOperatorTestCase):
                     with self.subTest(sqrt_s=sqrt_s, gamma=gamma, w=w):
                         y = np.array([sqrt_s, 0.0])
                         try:
-                            scalar_value, _ = F_op(
-                                w, y, gamma, max_order=FOP_MAX_ORDER)
+                            scalar_value, _ = F_op(w, y, gamma)
                             grid_values, _, _ = F_op_grid(
-                                np.array([w], dtype=float), y, gamma,
-                                max_order=FOP_MAX_ORDER)
+                                np.array([w], dtype=float), y, gamma)
                         except _WAVE_REFUSALS:
                             continue  # refused nodes carry no value to match
                         self.n_checks += 1

@@ -299,7 +299,7 @@ KERNEL_REFUSALS = (
 #: a property of ``F_op``, not the oracle.
 FOP_RTOL = 1e-10
 
-#: Order cap handed to ``F_op`` and the oracle for the in-domain grid.
+#: Order cap handed to the mpmath oracle for the in-domain grid.
 FOP_MAX_ORDER = 70
 
 #: In-domain ``F_op`` grid: ``(w, sqrt_s, gamma)``.  ``L = w*sqrt(s)`` is
@@ -1039,8 +1039,7 @@ class NumbaOperatorPreservationTestCase(FastPathTestCase):
                     y = [sqrt_s, 0.0]  # kappa=0 => s = |y|**2 = sqrt_s**2
                     with self.subTest(w=w, sqrt_s=sqrt_s, gamma=gamma):
                         try:
-                            value, _ = F_op(w, y, gamma,
-                                            max_order=FOP_MAX_ORDER)
+                            value, _ = F_op(w, y, gamma)
                         except SchwingerCertificationError:
                             continue  # uncertifiable: owned by refusal test
                         reference = _oracle_fop(w, y, gamma,
@@ -1077,10 +1076,8 @@ class NumbaOperatorPreservationTestCase(FastPathTestCase):
                     y = [sqrt_s, 0.0]
                     with self.subTest(w=w, sqrt_s=sqrt_s, gamma=gamma):
                         try:
-                            first, _ = F_op(w, y, gamma,
-                                            max_order=FOP_MAX_ORDER)
-                            second, _ = F_op(w, y, gamma,
-                                             max_order=FOP_MAX_ORDER)
+                            first, _ = F_op(w, y, gamma)
+                            second, _ = F_op(w, y, gamma)
                         except SchwingerCertificationError:
                             continue
                         self.n_checks += 1
@@ -1095,8 +1092,8 @@ class NumbaOperatorPreservationTestCase(FastPathTestCase):
         finite-but-untrusted legacy value (F005) through the JIT path.
         RE-BASELINE (Build 8d homogenization): these sheared
         positive-parity configs (``gamma' > 0``) are served by the exact
-        Schwinger evaluator, so there are two legal outcomes at the
-        production default ``max_order``: at ``w <= 60`` Schwinger
+        Schwinger evaluator, so there are two legal outcomes: at
+        ``w <= 60`` Schwinger
         certifies with diagnostics ``order_used == 0`` (the uncertifiable
         legacy series was never trusted); at ``w > 60`` the named refusal
         propagates -- now `SchwingerCertificationError`.  A finite value with
@@ -1179,7 +1176,7 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
         try:
             value, diagnostics = module.F_op(
                 w, np.asarray(y, dtype=float), gamma,
-                beta=beta, kappa=kappa, max_order=FOP_MAX_ORDER)
+                beta=beta, kappa=kappa)
         # The Schwinger / domain / kernel refusals come from byte-identical
         # siblings (the SAME _schwinger / geometry / kernel code) shared by
         # the working tree and the HEAD load, so they are the same class
@@ -1203,7 +1200,7 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
         try:
             values, orders, converged = module.F_op_grid(
                 grid, np.asarray(y, dtype=float), gamma,
-                beta=beta, kappa=kappa, max_order=FOP_MAX_ORDER)
+                beta=beta, kappa=kappa)
         except (SchwingerCertificationError,
                 HypergeometricDomainError, geometry.LensDomainError) as exc:
             return {'raised': True, 'exc': type(exc).__name__}

@@ -166,10 +166,6 @@ TOTAL_RATE_SLACK = 400.0
 #: exercised.
 W_GRID = np.linspace(5.0, 20.0, 6)
 
-#: Operator-series order cap, taken from the module under test's
-#: dependency so the fixtures and the tracker agree on the wave branch.
-MAX_ORDER = operator.MAX_ORDER
-
 #: Seed for the random self-falsification perturbations.
 SEED = 20260716
 
@@ -279,8 +275,7 @@ def _independent_total(w: np.ndarray, source: np.ndarray, gamma: float,
                 frequency, source, gamma, beta=beta, kappa=kappa))
         else:
             value, _ = operator.F_op(
-                frequency, source, gamma, beta=beta, kappa=kappa,
-                max_order=MAX_ORDER)
+                frequency, source, gamma, beta=beta, kappa=kappa)
         total[index] = value * np.exp(-1j * frequency * t_min)
     return total
 

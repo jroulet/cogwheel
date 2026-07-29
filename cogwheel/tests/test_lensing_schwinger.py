@@ -300,15 +300,28 @@ POINTLENS_BITFREEZE_WS = (1.0, 2.0, 3.0, 5.0)
 
 #: Above-ceiling fixtures: positive-parity strong-shear points evaluated
 #: at ``w > W_CEILING_SCHWINGER``, spanning BOTH serving-ladder outcomes.
-#: RE-BASELINE (Build 8e serving ladder): the ``y = (0.4, 0.3)`` column is
-#: now SERVED by the certified uniform Airy fold arm (moderate image
-#: splitting -> fold argument xi large enough to certify), while the
-#: near-caustic ``y = (0.1, 0.1)`` column is genuinely HARD-CORE -- both
-#: the fold argument xi (~2.4) and the Pearcey radius R (~2.6) are too
-#: small for either arm, so the named `SchwingerCertificationError` still
-#: stands.  `RefusalAboveCeilingTestCase` asserts the CONDITIONAL contract
-#: per fixture and proves both branches are exercised.
-ABOVE_CEILING_GAMMAS = (0.47, 0.49)
+#: RE-BASELINE (Build 8e serving ladder): at ``gamma in (0.47, 0.49)`` the
+#: ``y = (0.4, 0.3)`` column is SERVED by the certified uniform Airy fold
+#: arm (moderate image splitting -> fold argument xi large enough to
+#: certify), while the near-caustic ``y = (0.1, 0.1)`` column is genuinely
+#: HARD-CORE -- both the fold argument xi (~2.4) and the Pearcey radius R
+#: (~2.6) are too small for either arm, so the named
+#: `SchwingerCertificationError` still stands.
+#: `RefusalAboveCeilingTestCase` asserts the CONDITIONAL contract per
+#: fixture and proves both branches are exercised.
+#:
+#: DO NOT PRUNE ``0.9`` / ``0.95`` as duplicates of ``0.47`` / ``0.49``.
+#: They are the NEAR-DEGENERATE strong-shear probe: at ``kappa = 0`` the
+#: parity is still positive (``det A = 1 - gamma**2 = 0.19`` / ``0.0975``)
+#: but the weak eigenvalue is ``lambda_1 = 1 - gamma = 0.1`` / ``0.05`` --
+#: an order of magnitude closer to the degenerate limit than the
+#: ``0.53`` / ``0.51`` of the 0.47/0.49 pair, i.e. exactly where the
+#: Schwinger 1D representation breaks down.  Measured 2026-07-29: ALL
+#: eight of their nodes are hard-core (neither arm certifies, F_op and
+#: F_op_grid both raise the named refusal), so they extend the refusal
+#: branch only; the arm-served branch is kept non-vacuous by the
+#: ``gamma in (0.47, 0.49)`` x ``y = (0.4, 0.3)`` nodes.
+ABOVE_CEILING_GAMMAS = (0.47, 0.49, 0.9, 0.95)
 ABOVE_CEILING_YS = ((0.4, 0.3), (0.1, 0.1))
 ABOVE_CEILING_WS = (61.0, 80.0)
 
