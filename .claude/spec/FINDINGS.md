@@ -1851,12 +1851,16 @@ the arm is 63%-64% off throughout. Independent, and consistent with F028's
 original magnitude and sign. **The `ETA_MIN_GEOMETRIC` floor (F031) was the
 right call, and the arm's `q = 0` defect is real.**
 
-**SCOPE, and it is narrow.** The confirmation rests on `w <= 70`. Above
-`w ~ 100` GLoW's own output degrades: `|F|` climbs 1.90 -> 2.65 -> 3.31 with
-`w`, which is unphysical, and both error columns inflate together. That is the
-`wmax` stretch beyond the validated range, not a result. The `w = 200-500`
-rows must NOT be cited. Also: positive parity only, two configurations, one
-external code.
+**SCOPE.** Positive parity only, two configurations, one external code.
+
+The `w <= 70` cap originally stated here is SUPERSEDED by F035: the apparent
+high-`w` degradation was not GLoW's, it was the `beta_break` symmetry
+workaround making GLoW evaluate a slightly rotated lens. With `beta_break`
+extrapolated toward zero the agreement holds to 2.4% at `w = 100` and 6.1% at
+`w = 200` and keeps improving. The `w = 200-500` rows quoted in the original
+verdict table were computed at a single `beta_break = 0.015` and carry its
+phase error; do not cite those NUMBERS, but the confirmation itself is not
+confined to `w <= 70`.
 
 **Established along the way.** GLoW agrees with this engine to ~1e-4 in `|F|`
 at `w = 0.5..50` outside the caustic, and `xc` has a convergence plateau at
@@ -1948,3 +1952,52 @@ serving a 484x error. An unmeasured branch is a queued measurement, not a
 defensible default.
 
 Probe: `probe_saddle_eta.py` (scratchpad).
+
+## F035 — GLoW reaches the F028 regime; the high-`w` "disagreement" was the symmetry-break workaround, not physics (2026-07-29)
+
+F032 confirmed F028 but capped its scope at `w <= 70`, because above `w ~ 100`
+GLoW disagreed with geometric optics by 28% (w=100) rising to 406% (w=500).
+That cap was right to impose and wrong in its stated reason.
+
+**Not a resolution artifact.** `|F|` is stable to <1.5% across `Nt` 600 ->
+38400 (64x) and to 4-5 decimals across `wmax` 300 -> 5000 (17x). The values
+are numerically solid.
+
+**It was the symmetry break.** GLoW's contour finder needs the exact
+source/shear axis alignment broken (F032), so the lens it evaluates is rotated
+`beta_break` away from the one handed to `geometric_amplification`. In a
+4-image interference pattern that phase error grows as `w * Delta_tau`.
+Shrinking it:
+
+| beta_break | rel(w=70) | rel(w=100) | rel(w=200) |
+|---|---|---|---|
+| 0.030 | 5.78e-2 | 5.89e-1 | 1.52e+0 |
+| 0.015 | 2.09e-2 | 2.76e-1 | 8.55e-1 |
+| 0.008 | 8.46e-3 | 1.37e-1 | 4.44e-1 |
+| 0.004 | 3.26e-3 | 6.10e-2 | 1.91e-1 |
+| 0.002 | 1.11e-3 | 2.38e-2 | 6.11e-2 |
+
+Monotonic in every column, roughly `beta**1.4`, still falling at the small
+end. At `beta = 0.002`: 0.11% at `w = 70`, 2.4% at `w = 100`, 6.1% at
+`w = 200`.
+
+**Consequences.**
+1. GEOMETRIC OPTICS IS VINDICATED at high `w` -- it does not degrade, and was
+   never the suspect. F031's accuracy claim extends above the Schwinger
+   ceiling rather than being extrapolated there on faith.
+2. GLoW REACHES the F028 regime. F032's confirmation is not confined to
+   `w <= 70`; the cap was a comparison bug.
+3. PROCEDURE for any future GLoW comparison: `beta_break` is a systematic,
+   not a free knob. Either use the smallest value GLoW tolerates and quote the
+   induced error, or run the `beta -> 0` extrapolation. Comparing at a single
+   `beta` silently charges its phase error to whichever code is under test,
+   and at `w = 70` that error is ~2% -- small enough to read as success.
+
+**Process note.** Codex's recipe arrived with the instruction that the
+configuration "needs an explicitly checked `beta -> 0` limit". The frequency
+range was pushed without performing that check, and four subsequent probes
+(Nt convergence, wmax edge, two verdict runs) were spent chasing a
+discrepancy the instruction had already named.
+
+Probes: `probe_glow_highw.py`, `probe_glow_wmax_edge.py`,
+`probe_glow_beta_break.py` (scratchpad).
