@@ -2361,3 +2361,52 @@ census could report. That is why the measurement never happened.
 
 **Requires `y'''`, which build 1a does NOT deliver** — 1a exports `y'` and
 `y''` only. Extend the cascade to third order before the cusp-window work.
+
+## F041 — the fold-opening direction is nearly TANGENT to the caustic at small gamma, so an absolute `|dot|` guard reproduces the `_PROBE_ETA` bug (2026-07-29)
+
+**Where:** `surrogate_training._make_arc`'s `abs(dot) > 0.1` guard and
+`surrogate_training._tube_normal`.
+
+Build 1b replaced `_probe_arc_side`'s absolute-length step with
+`inward_sign = sign(fold_opening_direction . serve_normal)` — correct — and
+guarded it with `abs(dot) > 0.1` to reject cusp-proximity. Measured, the
+overlap scales LINEARLY with gamma:
+
+| gamma | 0.02 | 0.04 | 0.06 | 0.08 | 0.10 | 0.30 | 0.90 |
+|---|---|---|---|---|---|---|---|
+| `\|dot\|` | 0.030 | 0.060 | 0.090 | 0.120 | 0.150 | 0.441 | 0.994 |
+| angle to normal | 88.3 deg | — | 84.8 deg | — | 81.4 deg | 63.8 deg | 6.2 deg |
+
+So `|dot| ~ 1.5 * gamma`, and an ABSOLUTE cut at 0.1 fails for every
+`gamma < ~0.067`. That is the same category error as `_PROBE_ETA` (F039), one
+level up: an absolute threshold on a quantity that scales with the caustic.
+
+**Consequence: a REGRESSION, not a fix.** `stable_gamma_bands((0.01, 0.30),
++1)` previously returned 4 stable bands each with 2 arcs (mislabelled at small
+gamma). After 1b two of the bands return ZERO arcs — `_make_arc` returns None
+for every fallback fraction — so the small-gamma collar is now unserved for a
+new reason. The labels ARE fixed where arcs survive (uniform `(-1, 4)` versus
+the old `(1,2)`/`(-1,4)` split), so the geometry is right and only the guard
+is wrong.
+
+**The SIGN is not in doubt; only the magnitude guard is.** At `gamma = 0.02`
+the overlap is 0.03 against a float64 noise floor of ~1e-16 — the sign is
+determined to 14 orders of magnitude. A guard is still wanted (near a cusp the
+soft axis genuinely degenerates), but it must be RELATIVE — measured against
+numerical noise or against the local `|y''|` scale — never a fixed 0.1.
+
+**Why the near-tangency is real physics, not a bug.** `D2y[e,e]` is the
+direction the fold OPENS, and for a fold it need only be TRANSVERSE to the
+caustic, not perpendicular to it. As `gamma -> 0` the astroid degenerates and
+the opening direction rotates toward the tangent. F039's image-count check
+still passes at `gamma = 0.005` (31/32 overall), so the direction remains a
+correct side-indicator throughout; it is the projection onto the normal that
+shrinks, not the answer that degrades.
+
+**Separately: `_tube_normal` was missed by the whole sweep, and still
+finite-differences.** It builds the caustic tangent as
+`critical_point(theta + 1e-6) - critical_point(theta)` — a forward difference
+of a closed form with a hardcoded step, on the serve-consistency path. It was
+absent from the [[lensing_analytic_derivatives]] inventory (driver's miss, not
+the build's) and is now a one-line replacement:
+`tangent = y' / |y'|` from `caustic_derivatives`. Add it as target 5 there.
