@@ -1936,11 +1936,12 @@ class SelectBranchSelfFalsificationTestCase(_SelectBranchRoutingTestCase):
     SELF-FALSIFICATION: the routing suite can go RED.
 
     A numerical routing suite is only trustworthy if its assertions have
-    teeth.  Each method reaches into a genuine fixture and shows that a
-    deliberately WRONG expectation is REJECTED -- the one-home comparison,
-    the byte-identity check, and the F028 geometric serve all fail loudly
-    when fed a corrupted oracle.  Also pins that `select_branch` itself
-    has BOTH live legs (flipping either input flips the label).
+    teeth.  `test_opposite_label_breaks_one_home` reaches into a genuine
+    fixture -- a real `F_op` serve at a near-caustic node -- pins the
+    label it actually produces, and shows the opposite label is rejected.
+    `test_select_branch_has_both_live_legs` pins that `select_branch` has
+    BOTH live legs: flipping either input flips the label, so neither leg
+    alone licenses the geometric asymptote.
     """
 
     def test_opposite_label_breaks_one_home(self):
@@ -1954,26 +1955,17 @@ class SelectBranchSelfFalsificationTestCase(_SelectBranchRoutingTestCase):
             self.assertEqual(observed, 'geometric')
         self.n_checks += 1
 
-    def test_corrupted_byte_reference_is_detected(self):
-        gamma, y, beta, kappa = BYTEFREEZE_CONFIGS[0]
-        ref_re, _ = BYTEFREEZE_REFERENCE[(gamma, y, beta, kappa)][5.0]
-        served = complex(
-            F_op(5.0, np.asarray(y, dtype=float), gamma,
-                 beta=beta, kappa=kappa)[0])
-        # Flip the last hex nibble of the reference: no longer byte-equal.
-        corrupted = float.fromhex(ref_re) * (1.0 + 1e-12)
-        with self.assertRaises(AssertionError):
-            self.assertEqual(served.real, corrupted)
-        self.n_checks += 1
-
-    def test_perturbed_geometric_serve_is_detected(self):
-        gamma, w, y = F028_SERVE[0]
-        served = complex(F_op(w, np.asarray(y, dtype=float), gamma)[0])
-        direct = complex(geometric_amplification(
-            w, np.asarray(y, dtype=float), gamma))
-        with self.assertRaises(AssertionError):
-            self.assertEqual(served, direct * (1.0 + 1e-9))
-        self.n_checks += 1
+    # RETIRED (vacuity audit): `test_corrupted_byte_reference_is_detected`
+    # and `test_perturbed_geometric_serve_is_detected` mutated the EXPECTED
+    # VALUE (`ref * (1 + 1e-12)`, `direct * (1 + 1e-9)`) and then asserted
+    # that `assertEqual` rejected it.  That proves only that `assertEqual`
+    # distinguishes two distinct float64s -- it exercised no cogwheel code
+    # path and could not fail whatever the operator did.  A genuine
+    # mutation test perturbs PRODUCTION, not the oracle; see
+    # `DdMandatoryFalsificationTestCase::test_float64_dd_accumulation_
+    # drives_gate_red` in this file for the correct py_func-chain pattern.
+    # The surviving methods here retain teeth: they read a real served
+    # value and pin a real routing label.
 
     def test_select_branch_has_both_live_legs(self):
         # Resolved and strongly cancelling -> 'geometric'; killing EITHER

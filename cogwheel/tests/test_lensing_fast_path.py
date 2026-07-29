@@ -710,57 +710,76 @@ def _oracle_fop(w, y, gamma, beta=0.0, kappa=0.0, max_order=FOP_MAX_ORDER):
 # Pre-fusion (git HEAD) operator module, loaded side-by-side.
 # ---------------------------------------------------------------------------
 
-#: Cached pre-fusion ``operator`` module (loaded on demand from HEAD).
+#: Cached pre-8d ``operator`` module (loaded on demand from `_BASELINE_SHA`).
 _HEAD_OPERATOR = None
 
 #: Repo root of THIS worktree (``cogwheel/tests/... -> repo``), used as the
-#: ``git`` working directory so ``HEAD`` resolves the active branch tip.
+#: ``git`` working directory for ``git show``.
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 #: Path of the operator module, relative to the repo root, for ``git show``.
 _OPERATOR_RELPATH = 'cogwheel/lensing/chang_refsdal/operator.py'
 
+#: PINNED baseline: ``cf3c427`` is Build 8b-levers, the parent of ``4e26103``
+#: (Build 8d) -- i.e. the pre-8d operator this suite was authored against.
+#: This MUST NOT be ``HEAD``.  A transition baseline named ``HEAD`` becomes
+#: self-referential the instant the transition commit lands: ``git show
+#: HEAD:operator.py`` then returns the working tree's own bytes, every
+#: ``tobytes()`` comparison compares the module to itself, and all four
+#: byte-identity / flip-witness gates pass unconditionally on a clean tree.
+#: The sibling suite `test_lensing_airy_fold.py` diagnosed and fixed this
+#: exact failure the same way (it pins ``4e26103``); transition baselines
+#: must pin the SHA they were authored against.
+_BASELINE_SHA = 'cf3c427'
+
 
 def _load_head_operator():
     """
-    Load the pre-fusion ``operator.py`` from ``git HEAD`` as a standalone
-    module (F002/F005 oracle independence for the WP-B byte-identity gate).
+    Load the pre-8d ``operator.py`` from the PINNED `_BASELINE_SHA` as a
+    standalone module (F002/F005 oracle independence for the byte-identity
+    and flip-witness gates).
 
-    The source is fetched with ``git show HEAD:<relpath>`` and executed as
-    a fresh module under a UNIQUE name so its numba cores recompile from
-    the frozen source rather than reusing the working tree's ``__pycache__``
-    (a distinct ``co_filename`` forces a fresh njit compile).  operator.py
-    imports its siblings ABSOLUTELY (``from cogwheel.lensing.chang_refsdal
-    import ...``), and those siblings are byte-identical at HEAD (only
-    ``operator.py`` changed), so the frozen module binds the SAME kernel,
-    geometry and Schwinger code the working tree does -- isolating the
-    fusion as the only moving part.
+    The source is fetched with ``git show <_BASELINE_SHA>:<relpath>`` --
+    NOT ``HEAD``, which on a clean tree is the working tree itself and
+    would make every comparison a self-comparison (see `_BASELINE_SHA`).
+    It is executed as a fresh module under a UNIQUE name so its numba
+    cores recompile from the frozen source rather than reusing the working
+    tree's ``__pycache__`` (a distinct ``co_filename`` forces a fresh njit
+    compile).
+
+    ``operator.py`` imports its siblings ABSOLUTELY (``from
+    cogwheel.lensing.chang_refsdal import ...``), so the frozen module
+    binds the WORKING TREE's kernel, geometry and Schwinger code.  That is
+    deliberate: it isolates ``operator.py`` -- the only file this gate
+    freezes -- as the single moving part, exactly as the sibling
+    `test_lensing_airy_fold.py` baseline does.
 
     Returns
     -------
     module
-        The HEAD ``operator`` module, exposing the pre-fusion
-        ``_weight_vectors`` + ``_contract_grid`` two-stage pipeline and the
-        unchanged public ``F_op`` / ``F_op_grid``.
+        The pre-8d ``operator`` module, exposing the legacy fused
+        contraction on the sheared positive-parity arm and the unchanged
+        public ``F_op`` / ``F_op_grid`` entry points.
 
     Raises
     ------
     RuntimeError
-        If ``git show`` fails (not a git checkout, or HEAD missing the
-        file) -- the byte-identity gate cannot certify without the frozen
-        reference, so it must refuse loudly rather than silently skip.
+        If ``git show`` fails (not a git checkout, or the pinned commit is
+        missing) -- the byte-identity gate cannot certify without the
+        frozen reference, so it must refuse loudly rather than silently
+        skip.
     """
     global _HEAD_OPERATOR
     if _HEAD_OPERATOR is not None:
         return _HEAD_OPERATOR
     completed = subprocess.run(
-        ['git', 'show', f'HEAD:{_OPERATOR_RELPATH}'],
+        ['git', 'show', f'{_BASELINE_SHA}:{_OPERATOR_RELPATH}'],
         cwd=_REPO_ROOT, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         raise RuntimeError(
-            f'cannot load the pre-fusion operator from HEAD: `git show '
-            f'HEAD:{_OPERATOR_RELPATH}` failed in {_REPO_ROOT} with '
-            f'{completed.stderr.strip()!r}; the WP-B byte-identity gate '
+            f'cannot load the pre-8d operator baseline: `git show '
+            f'{_BASELINE_SHA}:{_OPERATOR_RELPATH}` failed in {_REPO_ROOT} '
+            f'with {completed.stderr.strip()!r}; the byte-identity gate '
             'has no frozen reference to certify against')
     with tempfile.NamedTemporaryFile(
             'w', suffix='_operator_head.py', delete=False) as handle:
@@ -1156,9 +1175,13 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
       named `SchwingerCertificationError`.
 
     Independence (F005): the reference is the pre-8d ``operator.py`` loaded
-    straight from ``git HEAD`` (`_load_head_operator`) as a distinct module
-    with freshly-compiled njit cores -- not a re-run of the code under
-    test.
+    from the PINNED commit `_BASELINE_SHA` (`_load_head_operator`) as a
+    distinct module with freshly-compiled njit cores -- not a re-run of the
+    code under test.  "HEAD" in the method names below is historical: the
+    baseline is a fixed SHA, never the branch tip.  Pinning is load-bearing,
+    not cosmetic -- against ``HEAD`` on a clean tree the reference IS the
+    working tree, every ``tobytes()`` comparison compares the module to
+    itself, and all four gates below pass no matter what the code does.
     """
 
     _WITNESS_TOL = FOP_RTOL  # 1e-10, the F005/7a/8d owner-set byte-flip gate

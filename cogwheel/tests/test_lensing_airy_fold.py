@@ -186,6 +186,16 @@ _INSIDE_RADII = (0.14, 0.20)
 _OUTSIDE_RADIUS = 0.35
 _NEAR_CAUSTIC_RADIUS = 0.28
 
+#: F028's measured configuration, in the driver probe's parametrization:
+#: the positive-parity caustic point at critical-curve parameter
+#: ``_F028_T`` (radians, off the cusps), offset along the caustic normal
+#: by ``_F028_RATIO`` times the caustic's LOCAL CURVATURE RADIUS there.
+#: `fold_amplification` certifies and serves at ``_F028_W``.
+_F028_GAMMA = 0.70
+_F028_T = 0.55
+_F028_RATIO = 0.40
+_F028_W = 70.0
+
 #: The Airy control above which the leading uniform term clears the 1e-3
 #: envelope bar (measured: 8.7e-4 at xi ~ 26, 4.8e-4 at xi ~ 39).
 _XI_FARFIELD = 40.0
@@ -221,6 +231,42 @@ def _matrix():
 def _source(radius):
     """Source position at ``radius`` along the off-axis fixture ray."""
     return radius * np.array([math.cos(_RAY_ANGLE), math.sin(_RAY_ANGLE)])
+
+
+def _caustic_normal_source(gamma, t_parameter, ratio):
+    """
+    Source offset from a caustic point by ``ratio`` local curvature radii.
+
+    Takes the positive-parity caustic point at critical-curve parameter
+    ``t_parameter``, builds the local unit normal and the local curvature
+    radius ``R_c`` from three closely spaced caustic points (the
+    circumradius), and steps ``ratio * R_c`` along that normal.  The
+    normal is oriented toward the side with the LARGER image count, which
+    reproduces the F028 driver probe (`probe_c6_window.py`) exactly, so
+    the configuration its table reports can be named here without
+    ambiguity.
+    """
+    def caustic_point(parameter):
+        return np.asarray(geometry.critical_point(
+            gamma, float(parameter), 0.0, 0.0, +1).source, dtype=float)
+
+    step = 1e-4
+    back = caustic_point(t_parameter - step)
+    here = caustic_point(t_parameter)
+    ahead = caustic_point(t_parameter + step)
+    tangent = (ahead - back) / np.linalg.norm(ahead - back)
+    normal = np.array([-tangent[1], tangent[0]])
+    twice_area = abs((here[0] - back[0]) * (ahead[1] - back[1])
+                     - (here[1] - back[1]) * (ahead[0] - back[0]))
+    curvature_radius = (np.linalg.norm(here - back)
+                        * np.linalg.norm(ahead - here)
+                        * np.linalg.norm(back - ahead)) / (2.0 * twice_area)
+    matrix = geometry.macro_matrix(gamma, 0.0, 0.0)
+    probe = 1e-3 * curvature_radius
+    if (len(geometry.find_images(here - probe * normal, matrix))
+            > len(geometry.find_images(here + probe * normal, matrix))):
+        normal = -normal
+    return here + ratio * curvature_radius * normal
 
 
 def _merging_pair(source, matrix):
@@ -804,20 +850,37 @@ class AiryFoldAtCausticTestCase(_FoldArmTestCase):
 
 class AiryFoldFarFieldEnvelopeTestCase(_FoldArmTestCase):
     """
-    The large-``xi`` arm reproduces the exact geometric two-image sum of
-    an ASYMMETRIC merging fold pair, in the max-normalized ENVELOPE
-    currency, at the leading uniform rate ``~ xi^{-3/2}``.
+    Accuracy of the fold CLOSED FORM `airy_fold_value` when it is handed
+    an ASYMMETRIC amplitude pair -- NOT of the arm that production serves.
 
-    The oracle is `geometry`'s exact ``sqrt|mu_+| e^{i w tau_+} +
-    sqrt|mu_-| e^{i w tau_- - i pi/2}`` (a DIFFERENT module, no arm
-    arithmetic).  The Airy amplitudes fed to `airy_fold_value` are the SUM
-    ``p`` and DIFFERENCE ``q`` derived in `_farfield_amplitudes`; a
-    symmetric approach would hide the sum-vs-difference assignment, so the
-    fixture source sits well off the cusp axis (``sqrt|mu|`` ratio ~1.2).
+    SCOPE, PLAINLY.  Every test in this class calls
+    `_airy_fold.airy_fold_value` directly with the oracle-derived
+    amplitudes of `_farfield_amplitudes`, whose ``Ai'`` amplitude ``q`` is
+    NON-ZERO.  `_airy_fold.fold_amplification` -- the only entry point
+    production uses -- is never called here, and it hard-codes ``q = 0``.
+    These tests therefore certify a closed form evaluated at an amplitude
+    pair that production never constructs.
+
+    THE ACCURACY OF THE SERVED ARM IS NOT COVERED BY THIS CLASS.  F028
+    measured the served arm at 60%-267% relative error against geometric
+    optics on well-resolved above-ceiling configs while this class's 1e-3
+    gate stayed green -- the two evaluate different amplitudes, so no
+    result here transfers to `fold_amplification`.  The gap is kept
+    visible by `FoldAmplificationServingTestCase.
+    test_served_arm_accuracy_is_unverified_pending_an_oracle`.
+
+    WHAT IS CERTIFIED.  Given the SUM ``p`` and DIFFERENCE ``q``
+    amplitudes, the closed form reproduces `geometry`'s exact
+    ``sqrt|mu_+| e^{i w tau_+} + sqrt|mu_-| e^{i w tau_- - i pi/2}``
+    two-image sum (a DIFFERENT module, no arm arithmetic) in the
+    max-normalized ENVELOPE currency, at the leading uniform rate
+    ``~ xi^{-3/2}``.  A symmetric approach would hide the
+    sum-vs-difference assignment, so the fixture source sits well off the
+    cusp axis (``sqrt|mu|`` ratio ~1.2); the p/q swap it is built to
+    expose is falsified in `FoldArmSelfFalsificationTestCase`.
 
     This scans ``w`` (hence ``xi``) over the merging pair and is therefore
-    the brute-force accuracy tier.  The p/q swap that this fixture is
-    built to expose is falsified in `FoldArmSelfFalsificationTestCase`.
+    the brute-force accuracy tier.
     """
 
     #: Airy controls at which the leading uniform envelope error is
@@ -826,9 +889,15 @@ class AiryFoldFarFieldEnvelopeTestCase(_FoldArmTestCase):
 
     def _envelope_error(self, xi_target, pair):
         """
-        Max-normalized envelope error ``max_w||F_arm| - |F_geom|| /
+        Max-normalized envelope error ``max_w||F_closed| - |F_geom|| /
         (s_+ + s_-)`` over one beat window of ``w`` centred on the ``w``
         that yields ``xi_target``.
+
+        ``F_closed`` is `airy_fold_value` fed the oracle's ASYMMETRIC
+        ``(p, q != 0)`` from `_farfield_amplitudes`.  It is NOT the value
+        `fold_amplification` serves, which is the same closed form at
+        ``q = 0``; nothing measured through this helper bounds the served
+        arm's error (F028).
         """
         tau_plus, tau_minus, s_plus, s_minus = pair
         delta_tau = tau_minus - tau_plus
@@ -836,23 +905,33 @@ class AiryFoldFarFieldEnvelopeTestCase(_FoldArmTestCase):
         w_centre = (4.0 / 3.0 * xi_target ** 1.5) / delta_tau
         beat = 2.0 * math.pi / delta_tau
         ws = np.linspace(w_centre - beat, w_centre + beat, 80)
-        arm = np.empty_like(ws)
+        closed_form = np.empty_like(ws)
         geom = np.empty_like(ws)
         for index, w in enumerate(ws):
             xi = (3.0 * w * delta_tau / 4.0) ** (2.0 / 3.0)
             p, q = _farfield_amplitudes(w, xi, s_plus, s_minus)
-            arm[index] = abs(_airy_fold.airy_fold_value(
+            closed_form[index] = abs(_airy_fold.airy_fold_value(
                 w, tau_bar, xi, p, q, _SIGMA_FOLD))
             geom[index] = abs(_geometric_two_image_sum(
                 w, tau_plus, tau_minus, s_plus, s_minus))
-        return float(np.max(np.abs(arm - geom)) / (s_plus + s_minus))
+        return float(np.max(np.abs(closed_form - geom)) / (s_plus + s_minus))
 
     @_brute_accuracy_tier
-    def test_far_field_envelope_matches_geometric_sum(self):
+    def test_closed_form_with_asymmetric_amplitudes_matches_geometric_sum(
+            self):
         """
         For every inside-caustic asymmetric fixture and every
-        ``xi >= _XI_FARFIELD``, the envelope error clears the spec bar
-        `_FARFIELD_ENVELOPE_TOL`.
+        ``xi >= _XI_FARFIELD``, `airy_fold_value` EVALUATED AT THE
+        ORACLE-DERIVED ``(p, q != 0)`` clears the spec bar
+        `_FARFIELD_ENVELOPE_TOL` against the geometric two-image sum.
+
+        This tests the CLOSED FORM, not the served arm.
+        `fold_amplification` is never called, and it would supply
+        ``q = 0`` -- a symmetric-fold assumption that cannot represent an
+        unequal-magnification image pair at all (F028).  A green result
+        here therefore says nothing about the accuracy of what production
+        serves; see `FoldAmplificationServingTestCase.
+        test_served_arm_accuracy_is_unverified_pending_an_oracle`.
         """
         matrix = _matrix()
         for radius in _INSIDE_RADII:
@@ -870,10 +949,18 @@ class AiryFoldFarFieldEnvelopeTestCase(_FoldArmTestCase):
     @_brute_accuracy_tier
     def test_envelope_error_falls_as_xi_to_the_minus_three_halves(self):
         """
-        The envelope error decreases monotonically with ``xi`` and, per
-        ``xi`` doubling, drops by ~``2^{3/2} = 2.83`` -- the signature of
-        the leading uniform ``xi^{-3/2}`` term, not of an accidental
-        near-cancellation.  Emits the residual-vs-``xi`` diagnostic plot.
+        The CLOSED FORM's envelope error decreases monotonically with
+        ``xi`` and, per ``xi`` doubling, drops by ~``2^{3/2} = 2.83`` --
+        the signature of the leading uniform ``xi^{-3/2}`` term, not of an
+        accidental near-cancellation.  Emits the residual-vs-``xi``
+        diagnostic plot.
+
+        Measured on `airy_fold_value` at the oracle-derived ASYMMETRIC
+        ``(p, q != 0)``, so the rate certified belongs to the closed form
+        and NOT to the served arm.  `fold_amplification` serves ``q = 0``,
+        whose error does not fall with ``xi`` at all: F028 measured it
+        GROWING with ``w`` (``|F_arm/F_geo| = 0.348`` at ``w = 70``,
+        ``1.846`` at ``w = 500``).  This decay law does not transfer.
         """
         matrix = _matrix()
         pair = _merging_pair(_source(_INSIDE_RADII[0]), matrix)
@@ -910,16 +997,20 @@ class FoldAmplificationServingTestCase(_FoldArmTestCase):
     `fold_amplification` wires `airy_fold_value` with the geometry-derived
     control and the calibrated fold amplitude, and refuses conservatively.
 
-    The serving check is a WIRING contract: for a served config it
-    reproduces ``airy_fold_value`` evaluated at the INDEPENDENTLY
-    re-derived (`geometry`) ``tau_bar`` and ``xi = (3 w DT / 4)^{2/3}``,
-    with the module's calibrated leading amplitude ``(p, q = 0,
-    sigma = -pi/4)``.  It never returns anything but ``None`` or a finite
-    complex.  (The served amplitude is leading order in the asymmetric
-    fold -- see the module docstring -- so its accuracy against the
-    geometric sum is NOT asserted here; that certification lives at the
-    `airy_fold_value` level with the full SUM/DIFFERENCE amplitudes in
-    `AiryFoldFarFieldEnvelopeTestCase`.)
+    SCOPE, PLAINLY: this class tests WIRING and REFUSALS, never accuracy.
+    The serving check reproduces ``airy_fold_value`` evaluated at the
+    INDEPENDENTLY re-derived (`geometry`) ``tau_bar`` and
+    ``xi = (3 w DT / 4)^{2/3}`` with the module's own calibrated
+    ``(p, q = 0, sigma = -pi/4)``; both sides use the module's amplitudes,
+    so a wrong amplitude is invisible to it.  The refusal check asserts
+    only that out-of-domain inputs return ``None``.
+
+    The served value's ACCURACY is not certified anywhere in this file.
+    `AiryFoldFarFieldEnvelopeTestCase` measures the closed form at
+    DIFFERENT (asymmetric, ``q != 0``) amplitudes, so it does not cover
+    the served path either.  `test_served_arm_accuracy_is_unverified_
+    pending_an_oracle` is the expected-failure marker that keeps that gap
+    visible.
     """
 
     #: Frequencies high enough that the leading uniform-error estimate
@@ -929,9 +1020,18 @@ class FoldAmplificationServingTestCase(_FoldArmTestCase):
 
     def test_served_value_matches_independent_wiring(self):
         """
-        A served value equals ``airy_fold_value`` at the geometry-derived
-        ``tau_bar``/``xi`` with the module's calibrated ``(p, 0, sigma)``,
-        and is finite.
+        A served value equals ``airy_fold_value`` at the independently
+        re-derived ``tau_bar``/``xi`` with the module's own calibrated
+        ``(p, q, sigma)``, and is finite.
+
+        A TRANSCRIPTION/WIRING contract only.  Both sides read the
+        amplitudes from `_airy_fold`, so this comparison cannot detect a
+        wrong amplitude -- and the served ``q`` IS wrong (see the pinned
+        known defect below).  Nothing here bounds the served value's
+        error against physics; the arm's accuracy is untested (F028,
+        F030), which is what
+        `test_served_arm_accuracy_is_unverified_pending_an_oracle`
+        records.
         """
         matrix = _matrix()
         source = _source(_INSIDE_RADII[0])
@@ -946,6 +1046,15 @@ class FoldAmplificationServingTestCase(_FoldArmTestCase):
         amplitudes = _airy_fold._fold_amplitudes(nearest.hard_eigenvalue, b3)
         self.assertIsNotNone(amplitudes)
         p_amplitude, q_amplitude, sigma = amplitudes
+        # KNOWN DEFECT, PINNED -- NOT AN ENDORSEMENT.  `_fold_amplitudes`
+        # hard-codes the ``Ai'`` amplitude ``q = 0``.  That is a
+        # SYMMETRIC-fold assumption, not a leading-order truncation: a lone
+        # ``Ai`` term has a single-sinusoid large-argument limit and cannot
+        # represent a two-image sum with unequal magnifications -- i.e. every
+        # source position except exactly on the caustic (F028).  The
+        # assertion is kept because it correctly pins CURRENT behaviour and
+        # would catch an accidental change, not because ``q = 0`` is right.
+        # Open: .claude/spec/todo.d/lensing_fold_arm_serves_wrong_values.md
         self.assertEqual(q_amplitude, 0.0)
         self.assertAlmostEqual(sigma, _SIGMA_FOLD)
         for w in self.SERVED_WS:
@@ -961,6 +1070,58 @@ class FoldAmplificationServingTestCase(_FoldArmTestCase):
                 self.assertTrue(np.isfinite(abs(served)))
                 self.assertLessEqual(abs(served - wired),
                                      _TRANSCRIPTION_TOL * max(abs(wired), 1.0))
+
+    @expectedFailure
+    def test_served_arm_accuracy_is_unverified_pending_an_oracle(self):
+        """
+        EXPECTED FAILURE BECAUSE THE SERVED ARM IS WRONG, NOT BECAUSE THE
+        TEST IS.
+
+        At F028's measured configuration -- ``gamma = 0.70``, the source
+        offset ``0.40 R_c`` along the normal of the off-cusp caustic point
+        ``t = 0.55``, ``w = 70`` -- `fold_amplification` CERTIFIES (its
+        ``c_A xi^{-3/2}`` estimate clears the 0.05 envelope bar) and
+        returns a value.  The node is delay-resolved and sits ``eta = 0.50``
+        from the caustic, well inside F029's ``eta > 0.3`` bin where
+        `operator.geometric_amplification` was measured accurate to a
+        median ``2e-7`` against the Schwinger quadrature.  Geometric optics
+        is therefore the better reference here, and the arm ought to agree
+        with it to well inside its own certificate.
+
+        It does not.  Measured 2026-07-29 (reproducing F028's table row):
+        ``|F_arm| / |F_geo| = 0.348``, an envelope error of ``0.65``
+        against a certificate claiming ``0.05`` -- optimistic by ~13x.
+        The cause is `fold_amplification`'s ``q = 0``: a single ``Ai``
+        term cannot represent a two-image sum with unequal magnifications
+        (F028, pinned in `test_served_value_matches_independent_wiring`).
+
+        THIS IS A MARKER, NOT A GATE.  Geometric optics is a stand-in, not
+        the missing oracle: the suite still owns no reference valid at
+        ``L ~ 100-200`` where the arms actually serve, so no arm accuracy
+        claim in this file is falsifiable there (F030).  Convert this into
+        a real gate -- and drop the `expectedFailure` marker -- once such
+        an oracle exists.  Should it start PASSING, unittest reports an
+        unexpected success and the run fails: that is the intended signal
+        that the arm changed and this marker must be revisited.
+
+        Open: `.claude/spec/todo.d/lensing_fold_arm_serves_wrong_values.md`
+        """
+        source = _caustic_normal_source(_F028_GAMMA, _F028_T, _F028_RATIO)
+        served = _airy_fold.fold_amplification(_F028_W, source, _F028_GAMMA)
+        self.n_checks += 1
+        self.assertIsNotNone(
+            served,
+            'the F028 config is no longer served: re-derive this marker '
+            'against a config the arm does certify, do not delete it')
+        reference = operator.geometric_amplification(_F028_W, source,
+                                                     _F028_GAMMA)
+        envelope_error = abs(abs(served) - abs(reference)) / abs(reference)
+        self.assertLessEqual(
+            envelope_error, _airy_fold._DEFAULT_ENVELOPE_BAR,
+            f'served arm envelope error {envelope_error:.3f} exceeds the '
+            f'{_airy_fold._DEFAULT_ENVELOPE_BAR} bar its own certificate '
+            f'claimed to meet (|F_arm|/|F_geo| = '
+            f'{abs(served) / abs(reference):.3f})')
 
     def test_refuses_conservatively(self):
         """

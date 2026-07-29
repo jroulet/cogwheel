@@ -24,10 +24,13 @@ certified-or-refuse contract.  This suite re-certifies that claim:
   ``[w]`` call and the full batch (no cross-node convergence-state
   leakage), and the returned VALUE agrees to ``1e-14`` (identical code on
   identical data).
-* `BatchedContractionFalsificationTestCase` proves that certification is
-  not vacuous for the new ``njit`` core: two perturbations injected
-  through the numba ``py_func`` chain (a corrupted convergence tolerance
-  and a corrupted radial-index gather) each drive the accuracy gate red.
+* The proof that certification is not vacuous for the ``njit`` core --
+  two perturbations injected through the numba ``py_func`` chain (a
+  corrupted convergence tolerance and a corrupted radial-index gather)
+  each driving the accuracy gate red -- now lives in
+  test_lensing_fast_path.py::OperatorFusionFalsificationTestCase, which
+  the Build 8b-levers fusion re-homed it to (the two-stage pipeline it
+  used to patch was merged into one fused core).
 * `FewMsTimingTestCase` pins the machine-INDEPENDENT speed properties the
   batching was for (RB beats brute by >= `SPEEDUP_MIN`; the pure
   contraction is subdominant to the amplification engine) plus an
@@ -68,9 +71,9 @@ TOLERANCES
 ANTI-VACUITY AND SELF-FALSIFICATION
 -----------------------------------
 `BatchedOperatorTestCase.tearDown` fails a test that made zero
-comparisons.  `BatchedContractionFalsificationTestCase` and
-`SelfFalsificationTestCase` prove the accuracy gate and the anti-vacuity
-guard can each go red.
+comparisons.  `SelfFalsificationTestCase` proves the anti-vacuity guard
+can go red; the accuracy gate's own falsification is re-homed in
+test_lensing_fast_path.py::OperatorFusionFalsificationTestCase.
 """
 from __future__ import annotations
 
@@ -849,72 +852,20 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
             'gate never ran')
 
 
-class BatchedContractionFalsificationTestCase(BatchedOperatorTestCase):
-    """Prove the batched-contraction accuracy gate is not vacuous (F010).
-
-    numba freezes module globals at compile time, so patching a
-    module-global never reaches the compiled ``njit`` core.  Each
-    perturbation is therefore injected through the ``py_func`` chain:
-    the batched core (and, for the gather perturbation, the weight-vector
-    builder) is replaced by its ``.py_func`` body, which re-reads the
-    module globals in the interpreter.  Two perturbations -- a corrupted
-    convergence tolerance that truncates the shear series, and a zeroed
-    radial-index gather that collapses the bilinear form -- must each
-    drive the `FOP_RTOL` gate red (refuse OR return past the tolerance).
-    A perturbation that left the gate green would mean the njit core is
-    dead code or the ``py_func`` chain is incomplete.
-    """
-
-    def _gate_outcome(self):
-        """Run the FALS point; return ``(raised, rel_err)``.
-
-        ``raised`` is True with ``rel_err = inf`` when the contraction
-        refuses (`CancellationError`); otherwise ``rel_err`` is the
-        relative error against the mpmath oracle.
-
-        Targets the LEGACY certified path `operator._grid_certified`
-        directly: since Build 7a the public `F_op_grid` rescues a
-        legacy refusal at ``w <= 60`` with a correct Schwinger-fallback
-        value (which does not consume the perturbed series), so a
-        perturbation-induced refusal would be masked and the
-        falsification would go vacuous through the public entry point.
-        """
-        try:
-            values, *_ = operator._grid_certified(
-                np.array([FALS_W], dtype=float), np.array(FALS_Y),
-                FALS_GAMMA, max_order=FOP_MAX_ORDER)
-        except CancellationError:
-            return True, float('inf')
-        oracle = _oracle_fop(FALS_W, FALS_Y, FALS_GAMMA,
-                             max_order=ORACLE_MAX_ORDER)
-        rel = abs(complex(values[0]) - oracle) / abs(oracle)
-        return False, rel
-
-    def _assert_green_unpatched(self):
-        """The gate must be green before a patch, so RED is the patch's
-        doing."""
-        raised, rel = self._gate_outcome()
-        self.n_checks += 1
-        self.assertFalse(
-            raised, 'unpatched F_op_grid refused the certified FALS '
-            'config; the falsification precondition is broken')
-        self.n_checks += 1
-        self.assertLessEqual(
-            rel, FOP_RTOL,
-            f'unpatched F_op_grid rel error {rel:.3e} already exceeds '
-            f'{FOP_RTOL:.0e}; the gate is not green to begin with')
-
-    # RETIRED (Build 8b-levers fusion): the two F010 falsifications that
-    # patched `operator._contract_grid.py_func` and
-    # `operator._weight_vectors.py_func` are gone — WP-B merged both
-    # stages into `operator._fused_contraction`, so those attributes no
-    # longer exist (the tests died on AttributeError, not on physics).
-    # The IDENTICAL falsification concerns (series-tolerance truncation
-    # and the zeroed half_sum gather collapse) are re-homed through the
-    # fused core's py_func in
-    # test_lensing_fast_path.py::OperatorFusionFalsificationTestCase,
-    # which also pins that half_sum stays an argument and
-    # _SERIES_TOLERANCE a patchable module global (F010: a falsification
+# RETIRED (Build 8b-levers fusion, class removed by the vacuity audit):
+# `BatchedContractionFalsificationTestCase` proved the batched-contraction
+# accuracy gate was not vacuous (F010) by patching
+# `operator._contract_grid.py_func` and `operator._weight_vectors.py_func`.
+# WP-B merged both stages into `operator._fused_contraction`, so those
+# attributes no longer exist and both test methods were re-homed to
+# test_lensing_fast_path.py::OperatorFusionFalsificationTestCase, which
+# carries the IDENTICAL falsification concerns (series-tolerance truncation
+# and the zeroed half_sum gather collapse) through the fused core's py_func
+# and also pins that half_sum stays an argument and _SERIES_TOLERANCE a
+# patchable module global.  What was left behind here was a TestCase with
+# ZERO test methods plus two orphan helpers (`_gate_outcome`,
+# `_assert_green_unpatched`) that nothing called -- a class that reported
+# coverage it did not provide.  Deleted; the live gate is in fast_path.
     # must always have a reachable red path).
 
 
