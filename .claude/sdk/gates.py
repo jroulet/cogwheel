@@ -215,15 +215,27 @@ def finding_signature(findings: list[Finding]) -> frozenset[str]:
 
     Two consecutive revisions producing the same signature means the loop is
     re-deriving findings the fixer cannot or will not clear — spending the
-    remaining budget on it buys nothing.  Keyed on ``finding_id + severity +
-    file`` ONLY: the Inspector already assigns a stable per-build id, so the
-    description adds no identity, and including it DEFEATED the check —
-    descriptions quote line numbers, and a partial fix that shifts the file
-    re-words the same unfixed finding into a "new" signature, so the loop
-    never detects that it is stuck.
+    remaining budget on it buys nothing.
+
+    Keyed on ``severity + file + digit-stripped description``. Every component
+    must be ROUND-INVARIANT or the check can never fire, and two earlier
+    attempts got this wrong in the same way:
+
+    * the raw description quotes LINE NUMBERS, so a partial fix that shifts
+      the file re-words an unfixed finding into a "new" signature;
+    * ``finding_id`` EMBEDS THE ROUND (``INS-1-001`` becomes ``INS-2-001`` for
+      the same defect — the Inspector's own text says "INS-1-001 UNRESOLVED"),
+      so keying on it guarantees the signature changes every revision.
+
+    Stripping digits kills both the round counter and the line numbers while
+    keeping the prose that distinguishes two different findings in one file.
+    Measured against the authoritative-gate build (2026-07-29), whose three
+    findings repeated verbatim across revisions 1 -> 2 and were not detected.
     """
     return frozenset(
-        f'{f.finding_id}|{f.severity}|{f.file}' for f in findings
+        f'{f.severity}|{f.file}|'
+        f'{re.sub(r"[0-9]+", "#", (f.description or ""))[:160]}'
+        for f in findings
     )
 
 
