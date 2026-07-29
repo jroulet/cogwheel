@@ -1,82 +1,74 @@
-## 2026-07-29 post-commit sync — retired operator series / eta gate (commits 16f7ec0..4318dab)
+## 2026-07-29 (later) post-commit sync — fold arm eta fence / saddle eta leg / max_order removal (commits 285f6cc..d4ee4cb)
 
-Scope: 5 of 6 queued commits in .claude/sync_issues.json were test-only or
-FINDINGS-only (16f7ec0, c7d2cff, 27f5cda skip per rule; 53d3d36 was already
-committed by a prior session). The two with real cogwheel/ production diffs:
-c1a552f (shear-free gamma'==0 exit moved off the legacy series onto a closed
-form) and 4318dab (eta/distance-to-caustic leg added to `select_branch`;
-`CancellationError` class deleted entirely; routing-pin consolidation).
+Scope: 7 pending commits. Only cf1267f had a real cogwheel/ production diff
+(_airy_fold.py +15, channels.py -38, operator.py -140, surrogate.py -14);
+the rest were test-only or FINDINGS-only (already committed by the feature
+author, per house rule "verify-only is correct outcome" — checked, no doc
+staleness from those).
 
-STALENESS FOUND AND FIXED (SPEC.md, .claude/spec/SPEC.md, 8 targeted edits in
-the single giant "Microlensing engine" table row):
-1. Limitations bullet still described "wave-branch contraction... L in
-   [~30,48] certified-or-refused... CancellationError" as CURRENT — that
-   framing predates even Build 8d and describes a mechanism (the legacy
-   dd/1F1 series as a live wave evaluator) that no longer exists at all.
-   Rewrote to name the actual current ceiling/refusal (Schwinger quadrature,
-   `w<=60`, `SchwingerCertificationError`) and added the eta leg.
-2. HOMOGENIZATION (Build 8d) paragraph said the legacy series was "DEMOTED to
-   the shear-free exit" with "CancellationError/F005 unchanged there" — true
-   as of 8d, false after c1a552f (that exit itself now runs a closed form,
-   not the series) and false after 4318dab (CancellationError deleted).
-3. ENGINE HARDENING (Build 7a) point (2), a "cross-parity fallback... routes
-   CancellationError refusals" — historical narrative, left the sentence
-   intact (matches this doc's own precedent of preserving build history) but
-   appended a SUPERSEDED-by-8d/CancellationError-retirement note rather than
-   deleting it.
-4. Two "named refusal vocabulary" lists (LensedPosterior's refusal net, in
-   two different rows) both still listed `CancellationError` as live —
-   deleted from both.
-5. ONE-HOME PREDICATE / UNIFORM-ASYMPTOTIC SERVING paragraph's `select_branch`
-   description ("resolved AND L > L_MAX") was missing the third (eta) leg
-   4318dab added — this is the SAME select_branch SPEC already documents
-   elsewhere, so the omission would have made SPEC self-inconsistent, not
-   just outdated. Added the eta leg + FINDINGS F031 pointer in both the
-   serving-ladder sentence and the F029-tail sentence (F031 is F029's fix).
-   Also noted the saddle now passes `eta = inf` alongside its existing
-   infinite cancellation exponent (F031 is positive-parity-only evidence).
+STALENESS FOUND AND FIXED in SPEC.md's single giant "Microlensing engine"
+table row (3 targeted literal replace_content edits):
+1. The saddle branch of `select_branch` was described as passing
+   `eta = inf` with "whether the saddle needs its own eta floor" left as
+   an OPEN, UNMEASURED question. FALSE after 7b775a1/F034: `_saddle_grid`
+   now measures eta via `nearest_caustic_point` and passes it through —
+   the eta leg is live on BOTH parities (positive parity F031, saddle
+   F034). Rewrote with F034's numbers (p90 8.95e-1 -> 4.54e-3, worst case
+   484x, 15% of resolved draws).
+2. SPEC.md's bullet (a) about F028 (fold arm 60%-267% wrong) had NO
+   closing note — the arm now carries a caustic-relative admission fence
+   (`_ETA_MAX_FOLD = 0.3` in `_airy_fold.py`, a LITERAL not an import of
+   `ETA_MIN_GEOMETRIC` because `operator` imports `_airy_fold`). Added the
+   fence + F032 (independent GLoW confirmation, 63-64% wrong) + F033 (why
+   the fence, not a `b4` amplitude fix, is the permanent treatment: the
+   residual is the CUBIC NORMAL FORM's own O(eta) truncation, not `q=0`).
+3. Same fold-arm fence added to the `_airy_fold.py` architecture sentence
+   itself (the None-fall-through contract now has two triggers: outside
+   the fence, or otherwise uncertifiable).
 
-VERIFIED, NOT edited: `MAX_ORDER` is genuinely vestigial now (threaded as a
-parameter default through `F_op`/`F_op_grid`/`_positive_parity_grid`/
-`ChangRefsdalChannels.__init__` but never referenced inside
-`_positive_parity_grid`'s body — grep confirms zero use past the signature).
-SPEC.md never named `MAX_ORDER` directly (it's implementation-level), so
-nothing to fix there; noted the fact in the spec_changelog fragment instead
-of inventing a SPEC sentence about it, per the "SPEC never described this
-criterion in the first place -> no staleness to manufacture" house rule.
+VERIFIED, NOT touched: `max_order`/`MAX_ORDER` was never named in SPEC.md
+(confirmed by grep, same as last session) despite being fully removed from
+cogwheel/ (`F_op`, `F_op_grid`, `ChangRefsdalChannels.__init__`,
+`_positive_parity_grid`, `surrogate.from_engine`/`from_lobe_engine`, plus
+orphaned `_MIN_ORDER`/`_CONSECUTIVE_SMALL`/`_SERIES_TOLERANCE` module
+globals) — so no SPEC sentence needed correcting, only a changelog entry
+(public API break, the notable user-facing item this round).
+DATA_CONTRACTS.yaml: zero max_order hits, nothing to touch (no disk
+artifact). docs/source: zero hits for any of these terms — no Sphinx
+rebuild needed. TODO.md / todo.d/lensing_fold_arm_serves_wrong_values.md:
+already correctly rewritten by the feature commit itself (95fa3f8) to
+describe the CURRENT fence and point at F033's "don't derive b4" finding
+— verify-only, matches the SPEC `[→ spec]` tag I've now closed.
 
-FINDINGS.md (canonical, hand-maintained, not fragment-generated) had its own
-staleness: F031's own body still concluded "**NOT implemented, deliberately**"
-even though 4318dab's commit message says it WAS implemented that same
-commit, with the SAME measured numbers (p90 1.17 -> 7.65e-5) the "not
-implemented" paragraph cites as a future possibility. This is a genuine
-self-contradiction inside one finding entry, not a downstream-sync gap —
-4318dab touched FINDINGS.md (197 insertions) but that diff evidently went to
-extending F030 (the GLoW root-cause investigation, confirmed by reading it —
-long GLoW/tmin/Fw-NaN narrative) and never circled back to close F031's own
-verdict sentence. Fixed the verdict paragraph in place (IMPLEMENTED, cites
-4318dab, keeps the still-true caveats: positive-parity only, no oracle above
-the Schwinger ceiling).
+NOT FIXED, FLAGGED ONLY (out of scope — code file, not doc):
+`operator.py`'s OWN `select_branch` docstring (its Notes section) still
+says "The macro saddle passes `inf` deliberately... whether the saddle
+needs its own eta floor is OPEN" — this is now stale INSIDE the code
+itself post-7b775a1, which changed `_saddle_grid`'s call site but never
+touched `select_branch`'s docstring. Librarian scope is docs, not code
+files (hard rule); flagging for the Coder/Inspector to fix the docstring
+to match the `_saddle_grid` behavior it documents.
 
-NOT touched, flagged only: `.claude/spec/todo.d/tests_consolidate_duplicate_
-routing_pins.md`'s table ("select_branch routing | 16 | 6") is now an
-overcount — 4318dab's own commit message says duplicate `select_branch`
-routing pins were deleted from schwinger/airy_fold/levers, and I found
-"DELETED (one-home consolidation)" pointer-comments confirming this in
-`test_lensing_schwinger.py` and `test_lensing_airy_fold.py`. Did not edit the
-fragment: no clean before/after count without a slower per-file audit, and
-per house rule a multi-part TODO stays open until every part (also
-`SchwingerCertificationError` and `W_CEILING_SCHWINGER` pin counts, untouched)
-finishes — the stale COUNT doesn't change the OPEN status, so it's a nice-to-
-fix not a must-fix. Next Librarian: re-count before touching.
+NOT FIXED, FLAGGED ONLY (pre-existing, predates this window): the
+"Build 8b-levers" historical paragraph in SPEC.md's same giant row still
+describes `operator._fused_contraction`, `half_sum`, `_SERIES_TOLERANCE`
+as a "patchable module global", and
+`test_lensing_fast_path.py::OperatorFusionFalsificationTestCase` as live
+mechanisms. Checked: `_fused_contraction` and
+`OperatorFusionFalsificationTestCase` were ALREADY GONE from the codebase
+at eff1de7 (before this session's window) — only `_SERIES_TOLERANCE`
+newly died in this window (cf1267f). This paragraph is historical
+Build-8b-levers narrative (house convention: preserve with a SUPERSEDED
+note rather than delete) but is now a compound dead-reference case
+spanning two sessions; didn't touch it this round — flag for next
+Librarian, needs a proper SUPERSEDED annotation, not a quick patch.
 
-git mechanics: `scripts/render_fragments.py` bumped spec_version 0.25.0 ->
-0.26.0 (minor, per my own spec_changelog fragment's `bump: minor`) and left
-the usual stray `.claude/tidy_advisory.json` diff (commit-tracking metadata
-racing ahead to 4318dab) — reverted with `git checkout --` per established
-pattern, not committed. `cogwheel/tests/test_lensing_batched_operator.py`
-arrived ALREADY STAGED (index differs from HEAD) at session start — not mine,
-didn't touch it, committed my own files via `git commit -- <explicit paths>`
-so its staged state survives untouched in the index for whoever owns it.
-`docs/source/**` had zero hits for any of these terms — no Sphinx rebuild
-needed this session (nothing under docs/source touched).
+git mechanics: `render_fragments.py` bumped spec_version 0.26.0 -> 0.27.0
+(minor). Confirmed AGAIN the known out-of-order-versioning quirk: my
+fragment `2026-07-29_fold_arm_fence_saddle_eta.md` got assigned 0.26.0
+while the PRE-EXISTING `2026-07-29_operator_series_retired.md` (same
+date, alphabetically later filename) got 0.27.0 and renders ABOVE mine —
+bump-by-filename-alphabetical, not by content chronology or mtime. Left
+the stray `.claude/tidy_advisory.json` diff (commit-tracking metadata
+racing ahead) reverted via `git checkout --`, not committed — same
+pattern as every prior session.

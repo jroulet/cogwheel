@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.26.0` (2026-07-29): 
+- `0.27.0` (2026-07-29): 
 ### Legacy operator-series contraction fully retired; `CancellationError` deleted; `select_branch` gains an eta (distance-to-caustic) leg
 
 SPEC.md described the shear-free `gamma' == 0` point-lens exit as still running
@@ -33,6 +33,31 @@ only, so its boundary is not inherited unmeasured).
 `operator.MAX_ORDER` is unaffected by this entry — it was already vestigial
 (a parameter default threaded through `F_op`/`F_op_grid`/`ChangRefsdalChannels`
 but not consumed by any surviving series) and SPEC.md never named it directly.
+
+- `0.26.0` (2026-07-29): 
+### Fold arm gains a caustic-relative admission fence; the macro-saddle eta leg is live too
+
+SPEC.md described the uniform fold Airy arm (F028: measured 60%-267% wrong on
+well-resolved above-ceiling configs) with no fix in place. It now has one:
+`_airy_fold.fold_amplification` refuses (returns `None`, falling through)
+outside `eta < _ETA_MAX_FOLD = 0.3` — the complement of
+`operator.ETA_MIN_GEOMETRIC`. F032 independently confirmed the unfenced arm
+63%-64% wrong against GLoW; F033 traced the residual to the cubic normal
+form's own `O(eta)` truncation rather than the `q = 0` symmetric-fold
+assumption, so the fence is the permanent treatment — no amplitude
+refinement (`b4`) can recover the far-from-caustic region. The threshold
+itself is not yet tight: F033 measured the arm still off by 14%-29% at
+`eta = 0.3`; tightening it further is open work
+(`todo.d/lensing_fold_arm_serves_wrong_values.md`).
+
+Also corrected: SPEC.md said the macro-saddle branch of `select_branch`
+passes `eta = inf` (the eta leg switched off), leaving "whether the saddle
+needs its own eta floor" as an open question. F034 answered it — the `inf`
+default was measured NOT safe (p90 8.95e-1 for `eta < 0.3`, worst case 484x
+over 15% of resolved draws, worse than the positive-parity band F031
+measured). `_saddle_grid` now measures `eta` via `nearest_caustic_point`
+once per grid and passes it through `select_branch`; the eta leg is live on
+both parities, each independently measured.
 
 - `0.25.0` (2026-07-29): 
 ### Serving ladder: one authoritative geometric-vs-wave gate; arms and geometric branch are NOT certified
