@@ -43,6 +43,14 @@ section: Backlog
   all four fall out of the SAME cascade, which is why build 1a exports `y'` and
   `y''` themselves rather than only the scalars derived from them.
 
+  **Extend the cascade to `y'''` (build 1a-bis or folded into 1b).** F040
+  shows the cusp-exclusion half-width is not a measurement either: it is
+  `w^{-1/4}` with coefficients in `|y''|` and `|y'''_perp|`. 1a delivers only
+  the first two orders, so the third is owed before any cusp-window work. The
+  same Taylor tail also supplies the cusp LOCATION (`y' = 0`) and the fold
+  direction (`y''`), so third order closes the set: after it, no quantity in
+  this package's caustic geometry is estimated rather than derived.
+
   1. **`_pearcey_cusp._cusp_vertex` — SERVING PATH, highest priority.** Finds
      the cusp vertex by computing caustic speed with a hardcoded central
      difference `delta = 1e-4`, scanning 129 thetas over a `pi` window (~258

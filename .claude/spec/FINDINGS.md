@@ -2304,3 +2304,60 @@ different `image_count`, which is then stored on the chart and keys
 today depends on it. That is exactly the inertness window F036 describes, and
 it is another reason not to train until the coordinates are settled: training
 now would bake a probe-step-dependent side label into a shipped artifact.
+
+## F040 — the cusp-exclusion half-width is DERIVABLE and scales as `w^(-1/4)`; the incumbent is w-INDEPENDENT and 2-50x too narrow (2026-07-29)
+
+**Where:** `surrogate_training._find_cusps` (`delta_theta`),
+`_CUSP_WIDTH_SAFETY`, `_CUSP_MIN_HALFWIDTH`, the `_SADDLE_*` variants, and
+`surrogate._CUSP_ARM_COVERAGE`.
+
+The cusp window was queued as a driver MEASUREMENT. It is not one. A cusp is
+`y'(theta_c) = 0`, so the local structure is entirely in the Taylor tail, and
+the width follows from the derivatives plus the cusp scaling SPEC already
+records (`x ~ w^{1/2} delta_par`, `y ~ w^{3/4} delta_perp`):
+
+    delta_par  ~ (1/2)|y''| dth^2       =>  dth_par  ~ sqrt(2/(|y''| w^{1/2}))
+    delta_perp ~ (1/6)|y'''_perp| dth^3 =>  dth_perp ~ (6/(|y'''_perp| w^{3/4}))^{1/3}
+
+Both go as `w^{-1/4}`, so their ratio is w-independent and the law carries ONE
+dimensionless prefactor — set by the eps bar the chart must meet, not by a
+sampling artifact.
+
+**Measured** (astroid cusp at `theta = pi/2`, `kappa = 0`; derivatives from the
+`critical_point`-validated curve). Half-width `max(dth_par, dth_perp)`:
+
+| gamma | `y''` | `y'''_perp` | w=1 | w=10 | w=60 | incumbent |
+|---|---|---|---|---|---|---|
+| 0.05 | 0.308 | 0.585 | 2.549 | 1.434 | 0.916 | 0.0942 |
+| 0.30 | 2.151 | 3.012 | 1.258 | 0.708 | 0.452 | 0.0500 |
+| 0.90 | 17.076 | 3.415 | 1.207 | 0.679 | 0.434 | 0.0500 |
+
+**Two consequences.** (1) The incumbent carries NO `w` dependence while the
+physics is `w^{-1/4}`. That is structural: `cusp_windows` is STORED per chart
+as a fixed `(theta_cusp, delta_theta)` pair, so the schema itself cannot
+express the right answer — fixing this changes the chart schema, not a value.
+(2) It is 2-50x TOO NARROW over the served band, i.e. charts are trained INTO
+the Pearcey region a spline cannot represent. This retrodicts the failure
+already recorded at `_SADDLE_CUSP_WIDTH_SAFETY` ("three saddle deltoid-arc
+tube charts fit at eps 0.4..2.2 because their arcs are clipped to these
+least-guarded ends"), whose fix was an empirical 2.5x saddle widening — right
+direction, wrong reason: the deficit is the missing `w` scaling and the
+astroid carries it too.
+
+**Two candidate widths that are WRONG, recorded so they are not retried.**
+(a) The Taylor SHAPE scale `3|y''|/|y'''|` — where the curve leaves its
+osculating parabola — measures 1.58 rad at `gamma = 0.05` rising to 15 rad at
+`gamma = 0.9`. It GROWS with gamma and is O(1) radians: a shape scale, not an
+exclusion scale. (b) The tube self-intersection scale, `dth` solving
+`R_c(theta_c +- dth) = eta_max`, runs 0.157 down to 3e-4 over the same range —
+but C6 makes it VACUOUS by construction, since `eta_max = f * R_c` with
+`f < 1` never crosses. Neither is the criterion; the envelope's own 2/3-power
+structure is.
+
+**So `_CUSP_ARM_COVERAGE` was never going to be pinned by a census.** It
+defaults to `0.0` "until the census pins a nonzero coverage", but the quantity
+it stands for is a FUNCTION of `w` and the local derivatives, not a constant a
+census could report. That is why the measurement never happened.
+
+**Requires `y'''`, which build 1a does NOT deliver** — 1a exports `y'` and
+`y''` only. Extend the cascade to third order before the cusp-window work.
