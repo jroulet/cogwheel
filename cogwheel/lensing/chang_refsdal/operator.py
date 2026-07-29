@@ -851,11 +851,24 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     `_schwinger.f_schwinger` in the shear eigenframe and reconstructed
     with the same mass-sheet identity the operator path uses.
 
-    Per node the geometric-vs-wave decision is ``(resolved AND
-    w > W_CEILING_SCHWINGER) -> geometric``, else the Schwinger wave
-    branch.  ``resolved`` uses the frequency-independent real-image
-    ``delta_min`` (computed once, only when some node exceeds the
-    ceiling).  Because `_schwinger.f_schwinger` ALSO hard-refuses
+    Per node the geometric-vs-wave decision above the ceiling is routed
+    through the authoritative `select_branch`, called with an INFINITE
+    cancellation exponent (``math.inf``).  That makes its
+    ``strongly_cancelling`` leg vacuously true so ONLY the resolution
+    leg is live: ``select_branch(w, delta_min, inf) == 'geometric'``
+    holds iff ``w*delta_min >= RHO_END``.  This PRESERVES the historical
+    saddle boundary ``(resolved AND w > W_CEILING_SCHWINGER) ->
+    geometric`` EXACTLY -- the routing is behaviour-preserving and the
+    boundary did not move.  Whether the saddle ADDITIONALLY needs a
+    geometric-onset gate (the positive-parity ``L > L_MAX`` accuracy leg
+    that `select_branch` normally enforces) is an OPEN, UNMEASURED
+    question: every driver sweep behind F028 and the gate comparison was
+    positive-parity only, so there is no saddle data on that leg.  Note
+    that ceiling exhaustion above ``w = 60`` explains only wave
+    UNAVAILABILITY, not geometric accuracy, so it does not settle the
+    accuracy question.  ``resolved`` uses the frequency-independent
+    real-image ``delta_min`` (computed once, only when some node exceeds
+    the ceiling).  Because `_schwinger.f_schwinger` ALSO hard-refuses
     ``w > W_CEILING_SCHWINGER`` internally, an unresolved saddle above the
     ceiling is first offered to the uniform arms (`_uniform_arm_value`:
     fold Airy then cusp Pearcey); only if BOTH arms refuse does the node
@@ -942,30 +955,40 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     # classify each into its serving branch and GATHER the expensive
     # ``w <= ceiling`` exact wave nodes for the node-parallel batch.  The
     # geometric and arm branches stay in Python; only the pure Schwinger
-    # inner map is parallelized.  `select_branch` is NOT the saddle
-    # authority (it stays byte-frozen for the positive-parity operator
-    # path); the saddle takeover is owned here (channels.py / Build 7).
+    # inner map is parallelized.  The geometric-vs-wave choice above the
+    # ceiling is routed through the authoritative `select_branch` with an
+    # infinite cancellation exponent, so ONLY its resolution leg is live
+    # and the historical ``w > 60 AND resolved`` saddle boundary is
+    # preserved exactly (see the function docstring).
     batch_index: list[int] = []
     ceiling_refusers: list[int] = []
     for node in range(n_nodes):
         w_node = float(w_array[node])
-        if (w_node > _schwinger.W_CEILING_SCHWINGER
-                and w_node * delta_min >= RHO_END):
-            # Resolved and above the wave ceiling: stationary-phase sum
-            # over the real images of the indefinite matrix.
-            values[node] = complex(geometric_amplification(
-                w_node, y, gamma, beta=beta, kappa=kappa))
-        elif w_node > _schwinger.W_CEILING_SCHWINGER:
-            # Unresolved above the ceiling: `f_schwinger` would refuse
-            # (SchwingerCertificationError).  Offer the uniform-asymptotic
-            # rung of the serving ladder (fold then cusp arm) first; only
-            # if BOTH arms refuse does the node become a refuser.
-            arm_value = _uniform_arm_value(
-                w_node, source, gamma, beta=beta, kappa=kappa)
-            if arm_value is not None:
-                values[node] = arm_value
+        if w_node > _schwinger.W_CEILING_SCHWINGER:
+            # Above the wave ceiling.  Route the geometric-vs-wave choice
+            # through the authoritative `select_branch`, passing an
+            # INFINITE cancellation exponent so its `strongly_cancelling`
+            # leg is vacuously true and ONLY the resolution leg is live:
+            # `select_branch(w, delta_min, inf) == 'geometric'` iff
+            # `w*delta_min >= RHO_END`.  This preserves the historical
+            # ``w > 60 AND resolved`` boundary EXACTLY (behaviour is
+            # unchanged; the boundary did not move).
+            if select_branch(w_node, delta_min, math.inf) == 'geometric':
+                # Resolved and above the wave ceiling: stationary-phase sum
+                # over the real images of the indefinite matrix.
+                values[node] = complex(geometric_amplification(
+                    w_node, y, gamma, beta=beta, kappa=kappa))
             else:
-                ceiling_refusers.append(node)
+                # Unresolved above the ceiling: `f_schwinger` would refuse
+                # (SchwingerCertificationError).  Offer the uniform-asymptotic
+                # rung of the serving ladder (fold then cusp arm) first; only
+                # if BOTH arms refuse does the node become a refuser.
+                arm_value = _uniform_arm_value(
+                    w_node, source, gamma, beta=beta, kappa=kappa)
+                if arm_value is not None:
+                    values[node] = arm_value
+                else:
+                    ceiling_refusers.append(node)
         else:
             # w <= ceiling exact wave node: the parallel batch (byte-
             # identical to the serial `f_schwinger` path per node).
@@ -1438,16 +1461,28 @@ def _positive_parity_grid(
     * ``gamma' > 0`` (every sheared positive-parity host -- the whole
       sampled prior box): each node is evaluated by `f_schwinger` in the
       pure-shear eigenframe and reconstructed with the mass-sheet
-      identity.  Before the named refusal fires for a
-      ``w > _schwinger.W_CEILING_SCHWINGER`` node (the previously-
-      refusing set), the uniform-asymptotic rung is offered first
-      (`_uniform_arm_value`: fold Airy then cusp Pearcey); the first arm
-      that certifies serves the node.  Only if BOTH arms refuse does the
-      node raise `_schwinger.SchwingerCertificationError` -- the named
-      refusal still stands; there is NO legacy fallback catch (that would
-      re-introduce a parallel production path).  A ``w <= ceiling`` node
-      never reaches the arm intercept, so it is byte-identical to the
-      exact path.
+      identity.  A ``w > _schwinger.W_CEILING_SCHWINGER`` node (the set
+      the exact wave evaluator refuses) is routed by the AUTHORITATIVE
+      gate `select_branch` -- the SAME predicate `channels._exact_total`
+      and `_saddle_grid` use, so the wave/geometric decision has one home:
+
+      - `select_branch` returns ``'geometric'`` (resolved AND strongly
+        cancelling): the node is served by `geometric_amplification`, the
+        stationary-phase asymptote.  F028 measured the uniform fold arm at
+        60%-267% relative error on exactly these well-resolved,
+        strongly-cancelling configs, which the geometric serve replaces.
+        This is the BEST AVAILABLE serve under the authoritative gate,
+        with a measured ~1% O(1) residual tail (driver sweep,
+        2026-07-28); it is NOT certified or exact.
+      - `select_branch` returns ``'wave'``: the uniform-asymptotic rung is
+        offered (`_uniform_arm_value`: fold Airy then cusp Pearcey); the
+        first arm that certifies serves the node.  Only if BOTH arms
+        refuse does the node raise `_schwinger.SchwingerCertificationError`
+        -- the named refusal still stands; there is NO legacy fallback
+        catch (that would re-introduce a parallel production path).
+
+      A ``w <= ceiling`` node never reaches the ceiling classifier, so it
+      is byte-identical to the exact path.
 
     * ``gamma' == 0`` (the shear-free point lens; measure-zero in the
       prior but reachable in unit tests and by direct callers): the 1D
@@ -1509,6 +1544,27 @@ def _positive_parity_grid(
     y_eig = np.array([z_eig.real, z_eig.imag])
     s = float(y_scaled @ y_scaled)
 
+    # Geometric-vs-wave routing constants for the above-ceiling nodes
+    # (F028), computed once per grid call.  `y_prime_norm = |y'|` is the
+    # frequency-independent part of the cancellation exponent
+    # (`cancellation_exponent(w, y, gamma, kappa) == w * |y'|` with
+    # `|y'| = sqrt(y_scaled @ y_scaled)`), so `w_node * y_prime_norm`
+    # reproduces ``L`` exactly WITHOUT re-running `_mass_sheet_map` per
+    # node.  `delta_min` is the frequency-independent real-image
+    # resolution measure; `_real_delay_min_separation` solves the image
+    # quartic, so -- exactly as `_saddle_grid` guards its own delta_min --
+    # both the macro matrix and the quartic solve are skipped entirely
+    # when no node exceeds the ceiling.  FRAME DISCIPLINE: the geometric
+    # gate feeds the PHYSICAL source / matrix, never the eigenframe
+    # ``y_eig`` (`geometric_amplification` rebuilds `macro_matrix`
+    # internally from the physical ``y`` / ``beta``).
+    source = np.asarray(y, dtype=float)
+    y_prime_norm = float(np.sqrt(y_scaled @ y_scaled))
+    delta_min = 0.0
+    if np.any(w_array > _schwinger.W_CEILING_SCHWINGER):
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        delta_min = _real_delay_min_separation(source, matrix)
+
     n_nodes = w_array.shape[0]
     values = np.empty(n_nodes, dtype=complex)
 
@@ -1523,16 +1579,37 @@ def _positive_parity_grid(
     for node in range(n_nodes):
         w_node = float(w_array[node])
         if w_node > _schwinger.W_CEILING_SCHWINGER:
-            # Previously-refusing node: offer the uniform-asymptotic rung
-            # (fold then cusp arm) before the named refusal; only if BOTH
-            # arms refuse does the node become a refuser (NO legacy
-            # fallback catch -- that would re-introduce a parallel path).
-            arm_value = _uniform_arm_value(
-                w_node, y, gamma, beta=beta, kappa=kappa)
-            if arm_value is not None:
-                values[node] = arm_value
+            # Above the wave ceiling: the AUTHORITATIVE gate decides
+            # geometric vs wave, so the predicate has ONE home shared with
+            # `channels._exact_total` and `_saddle_grid` (F028).  ``L`` is
+            # reconstructed as ``w_node * |y'|`` from the cached
+            # w-independent norm; `select_branch` returns 'geometric' only
+            # when the node is BOTH resolved (``w * delta_min >= RHO_END``)
+            # and strongly cancelling (``L > L_MAX``).
+            branch = select_branch(
+                w_node, delta_min, w_node * y_prime_norm)
+            if branch == 'geometric':
+                # Resolved and strongly cancelling: served by the
+                # stationary-phase asymptote instead of the uniform fold
+                # arm, which F028 measured at 60%-267% relative error on
+                # exactly these well-resolved configs.  This is the best
+                # available serve under the authoritative gate, with a
+                # measured ~1% O(1) tail (driver sweep, 2026-07-28) -- it
+                # is NOT certified or exact.
+                values[node] = complex(geometric_amplification(
+                    w_node, y, gamma, beta=beta, kappa=kappa))
             else:
-                ceiling_refusers.append(node)
+                # Gate says 'wave': offer the uniform-asymptotic rung
+                # (fold then cusp arm) before the named refusal; only if
+                # BOTH arms refuse does the node become a refuser (NO
+                # legacy fallback catch -- that would re-introduce a
+                # parallel production path).
+                arm_value = _uniform_arm_value(
+                    w_node, y, gamma, beta=beta, kappa=kappa)
+                if arm_value is not None:
+                    values[node] = arm_value
+                else:
+                    ceiling_refusers.append(node)
         else:
             # w <= ceiling exact wave node: the parallel batch (byte-
             # identical to the serial `f_schwinger` path per node).

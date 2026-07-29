@@ -1,27 +1,33 @@
-# Fold Airy arm serves O(1)-wrong values on the positive-parity path [→ spec]
+---
+section: Backlog
+---
 
-F028. `_positive_parity_grid` hands EVERY `w > W_CEILING_SCHWINGER` node to
-`_uniform_arm_value`, with no geometric branch. Well-resolved configs
-(`w * Dtau` up to 564) are therefore served by the fold Airy arm at 60%–267%
-relative error, while `geometric_amplification` is exact to `1e-5` there.
+- **Fold Airy arm cannot represent an asymmetric fold (`q = 0`) [→ spec].**
+  F028, defect 2 of 2. Defect 1 (admission routing) is CLOSED by the
+  authoritative-gate build: both operator grids now decide geometric-vs-wave
+  through `select_branch`, so well-resolved above-ceiling positive-parity
+  nodes are served by geometric optics instead of the arm.
 
-Two independent defects, both needed:
+  What remains is the arm's own accuracy. `fold_amplification` sets the `Ai'`
+  amplitude `q = 0`, which its docstring calls "the pure-phase symmetric-fold
+  result". That is a SYMMETRIC-FOLD ASSUMPTION, not a leading-order
+  truncation: with one `Ai` term the large-argument limit is a single sinusoid
+  of fixed amplitude, while a true two-image sum has two independent complex
+  amplitudes, equal only where the merging pair has equal magnification — i.e.
+  only exactly on the caustic. Away from it the error is O(1) however large
+  `xi` becomes, which is why F028 measured the error GROWING with `w`
+  (0.348x at `w = 70` to 1.846x at `w = 500`) rather than shrinking.
 
-1. **Admission is not caustic-relative.** The certificate `c_A * xi**-1.5` is a
-   function of `xi` alone, and `xi` is large both near the caustic at high `w`
-   (valid) and far from the caustic at any `w` (invalid). Admission must bound
-   the fold ASYMMETRY — COVERAGE_DESIGN C6's `eta/R_c` is the natural currency.
-2. **`q = 0` cannot represent an asymmetric fold.** It is a symmetric-fold
-   assumption, not a leading-order truncation: with one `Ai` term the
-   large-`xi` limit is a single sinusoid and cannot reproduce a two-image sum
-   with unequal magnifications. Either derive the `b4` refinement of `q` or
-   fence the arm to where the fold is near-symmetric.
+  Two options, not exclusive:
+  1. Derive the `b4` (quartic) refinement of `q` so the form can represent an
+     asymmetric fold.
+  2. Fence the arm to where the fold is near-symmetric. Its current `xi`-only
+     certificate cannot do this — `xi` is large both near the caustic at high
+     `w` (valid) and far from it at any `w` (invalid). Admission needs a
+     caustic-relative term; COVERAGE_DESIGN C6's `eta/R_c` is the natural
+     currency.
 
-Cheapest correct interim fix: on the positive-parity path, prefer
-`geometric_amplification` whenever the node is resolved (`w * delta_min >=
-RHO_END`), matching what `_saddle_grid` already does, and only fall to the arm
-when unresolved. This removes the whole measured-wrong region without touching
-the arm's internals.
-
-Update SPEC.md's serving-ladder description: it presents the uniform arms as a
-certified rung, which the measurement does not support.
+  Note the symmetry with F029: the arm is admitted far from the caustic where
+  it is invalid, and geometric optics is admitted near the caustic where it is
+  invalid, both because no admission term measures distance to the caustic.
+  Fixing either one properly probably fixes both.

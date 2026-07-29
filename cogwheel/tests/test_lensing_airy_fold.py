@@ -1833,10 +1833,19 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
 #: near-fold / near-cusp uniform corners (empirically served by exactly
 #: one arm each); the refusal node is a near-caustic unresolved node both
 #: arms decline.
+#:
+#: F028 re-point: the fold node's radius is kept small
+#: (``L = w*|y'| = 500*0.06 = 30 < L_MAX``) so it stays on the WAVE branch
+#: and is served by the fold arm.  Since Build 8f WP1 the authoritative
+#: `select_branch` gate routes a resolved, strongly-cancelling
+#: positive-parity above-ceiling corner to the F028 geometric asymptote
+#: instead of the fold arm; the former ``radius = 0.14`` fold node became
+#: geometric (``L = 70 > L_MAX``, ``w*delta_min = 67 >= RHO_END``) and no
+#: longer exercises the fold rung, so it is pulled back below the handoff.
 _LADDER_NODES = (
     ('schwinger', 40.0, 0.20, 0.25 * math.pi, 0.5, 0.0, 0.0),
     ('geometric', 100.0, 1.20, _RAY_ANGLE, 1.5, 0.0, 0.0),
-    ('fold', 500.0, 0.14, _RAY_ANGLE, _GAMMA, 0.0, 0.0),
+    ('fold', 500.0, 0.06, _RAY_ANGLE, _GAMMA, 0.0, 0.0),
     ('cusp', _CUSP_NODE_W, _CUSP_NODE_RADIUS, _CUSP_NODE_ANGLE,
      _CUSP_NODE_GAMMA, 0.0, 0.0),
     ('refusal', _ABOVE_CEILING_W, 0.28, _RAY_ANGLE, _GAMMA, 0.0, 0.0),

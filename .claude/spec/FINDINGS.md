@@ -1439,3 +1439,67 @@ rung is very nearly dead code, while on the positive-parity path it is live and
 wrong.
 
 Probes: `probe_c6_window.py`, `probe_arm_reachable.py` (scratchpad).
+
+## F029 — the geometric branch's residual error is controlled by DISTANCE TO THE CAUSTIC, not by delay resolution; the existing ghost primitive does not repair it (2026-07-29)
+
+Companion to F028, found while auditing the gate F028's fix routes through.
+`select_branch` admits a node to geometric optics on `w * delta_min >= RHO_END`
+AND `L > L_MAX`. Neither term measures distance to the caustic, and that is
+what the residual error tracks.
+
+Driver sweep, 1200 positive-parity draws at `w in [55, 60]` (below
+`W_CEILING_SCHWINGER`, so `F_op` is the Schwinger quadrature and a legitimate
+oracle — above the ceiling it would serve THROUGH the uniform arm, F028),
+restricted to nodes the authoritative gate ADMITS. Error of
+`geometric_amplification` vs the quadrature, binned by `eta` = distance to the
+caustic:
+
+| eta | n | median err | max |
+|---|---|---|---|
+| < 0.02 | 5 | 1.02e+0 | 7.4e+1 |
+| 0.02–0.05 | 15 | 4.96e-1 | 2.5e+0 |
+| 0.05–0.1 | 22 | 2.55e-1 | 5.1e-1 |
+| 0.1–0.3 | 143 | 1.82e-3 | 1.8e-1 |
+| > 0.3 | 1015 | **2.08e-7** | 8.3e-3 |
+
+Five orders of magnitude, monotonic. What it is NOT:
+
+* NOT the oracle degrading. Error does not track `L` — outliers appear in every
+  `L` bin including `L > 100` (`L` outlier median 60.8 vs 96.8 for the rest).
+  The `L ~ 45-46` Schwinger accuracy limit (F005) is not the mechanism.
+* NOT a delay-resolution deficit. `w * delta_min` barely separates (outlier
+  median 208 vs 261), which is why raising that floor from `RHO_END` to 100 did
+  not move the tail at all. This REFUTES the reviewing Professor's hypothesis
+  of a near-degenerate non-merging delay pair.
+* NOT a near-critical magnification divergence. Every outlier has exactly 2
+  real images (outside the caustic) with modest `|mu|max` of 1.1–8.1.
+
+**Mechanism.** Just outside a fold, the two images that annihilate AT the
+caustic have become complex saddles with small `Im tau_c`. Measured at the
+outliers: `Im tau_c = 1e-4 .. 5.6e-3`, so at `w ~ 56` the damping
+`exp(-w Im tau_c)` is ~1 — the complex saddles are entirely undamped, and a
+real-image-only sum is missing an O(1) contribution. Same near-axis
+non-decay as F027, reached from the caustic side.
+
+**The existing ghost primitive does NOT fix it.** Adding
+`channels.farfield_ghost_term` (frames aligned, absolute-frame reconstruction)
+to the geometric sum on the six worst configs: `|G|/|F|` came out 0.94 to 21.5,
+the correction HELPED 3 and made 2 substantially worse (3.45 -> 18.1), and the
+single worst config was refused outright by the `_GHOST_SEPARATION_MIN` gate. A
+"correction" tens of times the signal means the single-saddle expansion is
+itself out of validity there. The near-caustic region needs the UNIFORM (Airy)
+form, not a ghost term added to geometric optics.
+
+**Symmetry with F028, and the design consequence.** The fold arm is admitted
+FAR from the caustic where it is invalid (its `xi` certificate cannot see
+distance); geometric optics is admitted NEAR the caustic where it is invalid
+(its `w*delta_min`/`L` gate cannot see distance either). Both failures have one
+cause: no admission term measures distance to the caustic. This is
+COVERAGE_DESIGN Part 0 ("no absolute length may appear where the only scale is
+the caustic") arrived at a third independent time.
+
+SCOPE: measured on POSITIVE PARITY ONLY. No saddle sweep exists; do not
+generalise these numbers to `det A < 0`. `_certify_geometric_census` passes
+every one of these points, so it is not a guard against this.
+
+Probes: `probe_geo_gate.py`, `probe_tail_origin.py` (scratchpad).

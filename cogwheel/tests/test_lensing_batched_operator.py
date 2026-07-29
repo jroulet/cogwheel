@@ -185,6 +185,20 @@ CERT_LS = np.linspace(24.0, 48.0, 17)
 #: third, separate refusal tier outside this test's contract.
 XOR_BAND_LS = np.linspace(24.0, 59.4, 22)
 
+#: Above-ceiling config that still REFUSES, for the certify-XOR-refuse
+#: contract.  The `XOR_BAND_LS` host above is hugely RESOLVED
+#: (``delta_min = 2.094``, so ``w * delta_min = 56..138``), and since the
+#: authoritative-gate build its above-ceiling nodes are served by
+#: `geometric_amplification` rather than refused -- correctly, since
+#: ``L = 54..59.4 > L_MAX`` and ``|y| = 0.9`` sits ``eta ~ 0.45`` outside a
+#: caustic of extent ``0.447``, the ``2e-7`` regime of F029.  The named
+#: refusal now fires only where the gate says 'wave' above the ceiling and
+#: BOTH uniform arms decline, which needs an UNRESOLVED host:
+#: ``w * delta_min = 0.836 < RHO_END``.
+XOR_REFUSING_GAMMA = 0.8722
+XOR_REFUSING_Y = (0.80786, 0.28183)
+XOR_REFUSING_W = 65.0
+
 #: Production names the independent oracle helpers must NOT reference
 #: (F002 oracle independence, enforced by the AST guard).
 ORACLE_FORBIDDEN_NAMES = frozenset({
@@ -637,20 +651,28 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
                     f'{label} w={w:g} solo-vs-batch')
 
     def test_cert_band_certifies_low_l_and_refuses_high_l(self):
-        """The certify-XOR-refuse boundary shows BOTH outcomes.
+        """The certify-XOR-refuse contract still shows BOTH outcomes.
 
-        Across ``L in [24, 59.4]`` at ``gamma = 0.20`` some nodes
-        certify and some refuse; a band that only ever returned, or only
-        ever refused, would be a silent regression of the
-        certified-or-refuse guarantee.  RE-BASELINE (Build 8d
-        homogenization): this sheared positive-parity host (``gamma' > 0``)
-        is served by the exact Schwinger evaluator, which certifies every
-        node up to its ceiling and refuses by name with
-        `SchwingerCertificationError` for ``w > 60`` (``L = 54`` at
-        ``sqrt(s) = 0.9``).  The refusal onset therefore sits at the
-        Schwinger ceiling, and the named refusal is
-        `SchwingerCertificationError` (was the Build-7a fallback's
-        re-raised `CancellationError`); `_solo` accepts either.
+        A path that only ever returned, or only ever refused, would be a
+        silent regression of the certified-or-refuse guarantee (F005).
+
+        RE-BASELINE (authoritative-gate build, F028/F029): the refusal half
+        no longer comes from THIS host.  ``gamma = 0.20``, ``|y| = 0.9`` is
+        hugely resolved (``delta_min = 2.094``, so ``w * delta_min`` runs
+        56..138 across the band) and sits ``eta ~ 0.45`` outside a caustic
+        of extent ``0.447``.  Its above-ceiling nodes therefore satisfy the
+        authoritative gate (`select_branch`: resolved AND ``L > L_MAX``) and
+        are now SERVED by `geometric_amplification` -- accurately; F029
+        measures ``2e-7`` median error at ``eta > 0.3``.  Previously they
+        raised `SchwingerCertificationError` because the uniform arm
+        declined, which was a refusal where a correct answer was available.
+
+        So the band is now expected to certify END TO END, and the refusal
+        half is witnessed by an UNRESOLVED above-ceiling host
+        (`XOR_REFUSING_*`, ``w * delta_min = 0.836 < RHO_END``), where the
+        gate says 'wave', both uniform arms decline, and the named refusal
+        fires.  The XOR guarantee is unchanged; only which configuration
+        exhibits which half has moved.
         """
         y = np.array([CERT_SQRT_S, 0.0])
         decisions = {
@@ -664,22 +686,30 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
         self.n_checks += 1
         self.assertTrue(
             certified,
-            'no L in [24, 59.4] certified; the boundary band never '
-            'returns')
+            'no L in [24, 59.4] certified; the boundary band never returns')
         self.n_checks += 1
-        self.assertTrue(
+        self.assertFalse(
             refused,
-            'no L in [24, 59.4] refused; the ceiling refusal never '
-            'fires (w > 60 must raise SchwingerCertificationError)')
+            f'L values {sorted(refused)} refused on a resolved host whose '
+            f'above-ceiling nodes the authoritative gate sends to geometric '
+            f'optics; a refusal here means the gate regressed to the '
+            f'pre-F028 arm-or-refuse routing')
         self.n_checks += 1
         self.assertTrue(
             decisions[float(XOR_BAND_LS[0])],
             f'the lowest band point L={XOR_BAND_LS[0]:.0f} did not certify')
+
+        # The refusal half of the XOR, on an UNRESOLVED above-ceiling host.
+        refusing_certified = self._solo(
+            XOR_REFUSING_W, np.array(XOR_REFUSING_Y), XOR_REFUSING_GAMMA,
+            0.0, 0.0)[0]
         self.n_checks += 1
-        self.assertLess(
-            max(certified), min(refused) + 1e-9,
-            'certified and refused Ls interleave; the refusal boundary '
-            'is not monotone in L as F005 expects')
+        self.assertFalse(
+            refusing_certified,
+            f'the unresolved above-ceiling host gamma={XOR_REFUSING_GAMMA}, '
+            f'y={XOR_REFUSING_Y}, w={XOR_REFUSING_W} certified; the named '
+            f'refusal never fires, so the certified-or-refuse contract has '
+            f'no refusing witness left')
 
 
 class BatchedContractionFalsificationTestCase(BatchedOperatorTestCase):

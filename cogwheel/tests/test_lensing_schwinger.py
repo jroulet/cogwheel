@@ -98,8 +98,9 @@ from cogwheel.lensing.chang_refsdal import (
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError, W_CEILING_SCHWINGER, f_schwinger)
 from cogwheel.lensing.chang_refsdal.operator import (
-    CancellationError, F_op, F_op_grid, _grid_certified,
-    legacy_operator_oracle)
+    CancellationError, F_op, F_op_grid, L_MAX, RHO_END, _grid_certified,
+    cancellation_exponent, geometric_amplification, legacy_operator_oracle,
+    select_branch)
 
 #: Where the dispatch-accuracy diagnostic plot is written (the house
 #: convention: ``cogwheel/tests/output/<test>_<desc>.png``).
@@ -323,6 +324,132 @@ CENSUS_POSITIVE_MATRIX_ARGS = (0.3, 0.0, 0.0)
 CENSUS_POSITIVE_SOURCE = (0.05, 0.03)
 CENSUS_SADDLE_MATRIX_ARGS = (1.3, 0.0, 0.0)
 CENSUS_SADDLE_SOURCE = (0.1, 0.05)
+
+# =====================================================================
+# Build 8f (F028) select_branch routing fixtures.  WP1 gave
+# `_positive_parity_grid` a geometric branch routed through
+# `select_branch`; WP2 routed `_saddle_grid`'s above-ceiling geometric
+# decision through the SAME `select_branch` predicate (boundary
+# preserving).  The tests below pin one-home predicate agreement, exact
+# geometric serve on the F028 table configs, a below-ceiling accuracy
+# anchor, below-ceiling byte-identity, the saddle serve boundary, the
+# delta_min single-solve budget, and the three above-ceiling 'wave'
+# outcomes.  All fixture branch labels were MEASURED (probe 2026-07-28),
+# never assumed from the brief's named coordinates.
+# =====================================================================
+
+#: One-home predicate grid (acceptance #2).  Positive parity keeps
+#: ``1 - kappa > |gamma|``; saddle uses ``kappa = 0`` so ``|gamma| > 1``.
+#: The ``|y|`` set spans inside and outside the astroid caustic (4- and
+#: 2-image census); ``beta`` spans the un-sheared and sheared micro-image.
+#: Sources are OFF-AXIS (fixed unit direction ``(0.8, 0.6)`` scaled to each
+#: ``|y|``): an on-axis source has mirror-degenerate Fermat delays, so
+#: ``delta_min = 0`` and the resolution leg is dead everywhere -- the
+#: geometric outcome would never appear (MEASURED 2026-07-28).
+_ONEHOME_DIR = (0.8, 0.6)  # unit vector: 0.8**2 + 0.6**2 == 1
+_ONEHOME_YMAGS = (0.05, 0.3, 1.0, 2.0)
+_ONEHOME_YS = tuple((mag * _ONEHOME_DIR[0], mag * _ONEHOME_DIR[1])
+                    for mag in _ONEHOME_YMAGS)
+ONEHOME_POSITIVE = tuple(  # (gamma, kappa, y, beta)
+    (gamma, kappa, y, beta)
+    for gamma in (0.2, 0.5, 0.9)
+    for kappa in (0.0, 0.3)
+    for y in _ONEHOME_YS
+    for beta in (0.0, 0.7)
+    if 1.0 - kappa > abs(gamma))
+ONEHOME_SADDLE = tuple(  # (gamma, kappa, y, beta)
+    (gamma, 0.0, y, beta)
+    for gamma in (1.2, 2.0)
+    for y in _ONEHOME_YS
+    for beta in (0.0, 0.7))
+#: w nodes: below ceiling, astride it, and deep.  Includes resolved and
+#: unresolved above-ceiling nodes so both resolution outcomes appear.
+ONEHOME_WS = (5.0, 40.0, 59.0, 61.0, 70.0, 150.0, 500.0)
+
+#: Below-ceiling nodes (acceptance #1): the exact wave batch must not move.
+BELOW_CEILING_WS = (5.0, 40.0, 59.0)
+
+#: F028 table configs (acceptance #3): positive parity, ``|y|`` MEASURED
+#: (probe 2026-07-28) to be BOTH resolved AND select_branch-geometric so
+#: the grid serves `geometric_amplification` exactly.  The on-axis brief
+#: coordinates gave ``delta_min = 0`` (unresolved -> 'wave'); an OFF-axis
+#: source restores a resolved 4-image geometry.
+F028_SERVE = (  # (gamma, w, y)
+    (0.70, 70.0, (1.0, 0.7)),
+    (0.70, 500.0, (1.0, 0.7)),
+    (0.90, 500.0, (1.5, 1.0)),
+)
+#: Same configs BELOW the ceiling (acceptance: geometric-vs-quadrature
+#: anchor).  Here the Schwinger quadrature is a legitimate oracle, so the
+#: geometric asymptote is anchored to `f_schwinger` at these w.
+F028_ANCHOR = (  # (gamma, y)
+    (0.70, (1.0, 0.7)),
+    (0.90, (1.5, 1.0)),
+)
+F028_ANCHOR_WS = (45.0, 55.0, 60.0)
+#: The asymptote is a leading-order stationary-phase approximation, so
+#: near the ceiling it agrees with the exact quadrature only to a few
+#: parts in 1e4; the spec upper bound (~1e-4) with a comfortable margin
+#: (measured worst ~4.4e-6) documents this is an ACCURACY anchor, not a
+#: certification claim.
+F028_ANCHOR_TOL = 1e-4
+
+#: Byte-identity reference (acceptance #1), captured as exact `float.hex()`
+#: literals of the served F_op value BELOW the ceiling.  Frozen from BOTH
+#: the pre-build (HEAD, git-worktree) and post-build trees, verified
+#: IDENTICAL 2026-07-28 -- the select_branch insertion perturbs nothing
+#: below w = 60.  (label, gamma, y, beta, kappa) -> {w: (re_hex, im_hex)}.
+#: NEVER import a module from a prior revision to regenerate this (F022).
+BYTEFREEZE_CONFIGS = (  # (gamma, y, beta, kappa)
+    (0.2, (0.03, 0.04), 0.0, 0.0),
+    (0.5, (0.18, 0.24), 0.7, 0.3),
+    (0.9, (0.6, 0.8), 0.0, 0.0),
+    (1.2, (0.18, 0.24), 0.0, 0.0),
+    (2.0, (0.6, 0.8), 0.7, 0.0),
+)
+BYTEFREEZE_REFERENCE = {
+    (0.2, (0.03, 0.04), 0.0, 0.0): {
+        5.0: ('-0x1.7bdfd68459dc8p-2', '0x1.db774973d8f16p+1'),
+        40.0: ('-0x1.a01871a342ea7p-1', '0x1.2d26878ef9dbfp-3'),
+        59.0: ('0x1.3a31ed6b9835ap+0', '-0x1.0daa9d4839567p-2')},
+    (0.5, (0.18, 0.24), 0.7, 0.3): {
+        5.0: ('0x1.83551ffafbc32p-1', '0x1.0d39084dc0090p+2'),
+        40.0: ('-0x1.4987ed76bbbf0p+0', '-0x1.1dc1d4d9d2c02p-1'),
+        59.0: ('-0x1.380cac59cb467p+0', '-0x1.3646ca36ce5bfp-1')},
+    (0.9, (0.6, 0.8), 0.0, 0.0): {
+        5.0: ('-0x1.9cd1cb4cdde5ep+0', '0x1.9eb6646d5846cp+0'),
+        40.0: ('-0x1.6e7bdca33fcb1p+1', '0x1.35e0f5e1fd3cfp-1'),
+        59.0: ('0x1.2cf5933db121cp-3', '0x1.61098fb994692p+0')},
+    (1.2, (0.18, 0.24), 0.0, 0.0): {
+        5.0: ('-0x1.a87905cdc357ep-2', '0x1.a164b635e2c0dp-4'),
+        40.0: ('-0x1.7b4202339d504p-4', '-0x1.3716832a74d41p-1'),
+        59.0: ('0x1.20298e9a20a2dp-1', '0x1.0ba8eea8b55bap-2')},
+    (2.0, (0.6, 0.8), 0.7, 0.0): {
+        5.0: ('0x1.6b503b3c7eba2p-2', '0x1.43ce298db67bcp-4'),
+        40.0: ('-0x1.4e34796c43220p-5', '-0x1.54e31a62cb16ep-6'),
+        59.0: ('-0x1.d23811ac54f32p-3', '0x1.127cc1ab82d5ap-2')},
+}
+
+#: Saddle serve-boundary fixtures (anti-variant): a RESOLVED saddle config
+#: straddling the ceiling.  Both w must be geometric-served, proving the
+#: boundary stayed at ``w > 60`` (NOT the rejected ``pi w / 4 > 48`` ->
+#: ``w > 61.115`` variant, which would leave w = 60.5 AND w = 61.5 on
+#: different sides / un-served).
+SADDLE_BOUNDARY = (  # (gamma, y)
+    (1.2, (0.18, 0.24)),
+    (2.0, (0.18, 0.24)),
+)
+SADDLE_BOUNDARY_WS = (60.5, 61.5)
+
+#: Three above-ceiling 'wave' outcomes (acceptance #4/#5), MEASURED
+#: 2026-07-28.  Fold-Airy-served, Pearcey-cusp-served, and both-arms-
+#: refuse (named refusal with the lowest-index refuser's authentic
+#: `f_schwinger` message).  All positive parity, w = 61 (just above the
+#: ceiling), ce < L_MAX so select_branch routes to the wave arm.
+THREE_OUTCOME_W = 61.0
+THREE_OUTCOME_FOLD = (0.47, (0.4, 0.3))      # fold certifies, cusp does not
+THREE_OUTCOME_CUSP = (0.5, (0.5, 0.1))       # cusp certifies, fold does not
+THREE_OUTCOME_REFUSE = (0.5, (0.3, 0.2))     # neither arm certifies
 
 
 # ---------------------------------------------------------------------
@@ -1431,6 +1558,435 @@ class ImageCensusGuardFalsificationTestCase(SchwingerTestCase):
                     geometry._check_image_census(images, matrix),
                     f'the faithful census for {matrix_args} was refused; '
                     'the guard is over-firing')
+
+class _SelectBranchRoutingTestCase(SchwingerTestCase):
+    """
+    Shared machinery for the Build 8f (F028) select_branch routing tests.
+
+    `_predicate_branch` recomputes the shared gate's arguments from the
+    public helpers (`macro_matrix`, `_real_delay_min_separation`,
+    `cancellation_exponent`) and returns `select_branch`'s label.
+    `_observed_branch` recovers the grid's INTERNAL routing decision by
+    what the scalar `F_op` entry actually serves at that node: a value
+    bit-equal to `geometric_amplification` means the grid took the
+    geometric branch; any other value (a uniform arm) or a named
+    `SchwingerCertificationError` means it took the wave branch; a
+    `geometry.LensDomainError` can only come from the geometric handoff's
+    census guard, so it is a geometric routing that the census refused.
+    Comparing the two pins that the predicate has exactly ONE home.
+    """
+
+    _expect_checks = True
+
+    @staticmethod
+    def _is_positive_parity(gamma, kappa):
+        return 1.0 - float(kappa) > abs(float(gamma))
+
+    def _predicate_branch(self, w, y, gamma, beta, kappa):
+        """The shared gate's label, arguments rebuilt independently."""
+        source = np.asarray(y, dtype=float)
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        delta_min = operator._real_delay_min_separation(source, matrix)
+        if self._is_positive_parity(gamma, kappa):
+            # Positive parity: L == w*|y'| == cancellation_exponent.
+            exponent = cancellation_exponent(w, source, gamma, kappa)
+            return select_branch(w, delta_min, exponent)
+        # Saddle: infinite exponent -> only the resolution leg is live.
+        return select_branch(w, delta_min, math.inf)
+
+    def _observed_branch(self, w, y, gamma, beta, kappa):
+        """The grid's routing, read off the served scalar `F_op` value."""
+        source = np.asarray(y, dtype=float)
+        try:
+            geom = complex(geometric_amplification(
+                w, source, gamma, beta=beta, kappa=kappa))
+            geom_ok = True
+        except geometry.LensDomainError:
+            geom, geom_ok = None, False
+        try:
+            served = complex(F_op(w, source, gamma, beta=beta, kappa=kappa)[0])
+        except SchwingerCertificationError:
+            return 'wave', None
+        except geometry.LensDomainError:
+            # Only the geometric handoff census raises this above ceiling.
+            return 'geometric', None
+        if geom_ok and served == geom:
+            return 'geometric', served
+        return 'wave', served
+
+
+class SelectBranchOneHomeTestCase(_SelectBranchRoutingTestCase):
+    """
+    ONE-HOME PREDICATE AGREEMENT (F028, acceptance #2).
+
+    For every above-ceiling node of the analytic config grid, the grid's
+    OWN geometric-vs-wave routing (recovered from what `F_op` serves) must
+    equal the label of the shared `select_branch` predicate -- positive
+    parity fed ``select_branch(w, delta_min, w*|y'|)`` and saddle fed
+    ``select_branch(w, delta_min, math.inf)``.  This is the predicate
+    analogue of ``test_thresholds_have_one_home``: the routing rule lives
+    in exactly one place.  The grid spans both parities, each gate leg,
+    inside/outside the astroid caustic, and both resolution outcomes.
+    """
+
+    def _run_grid(self, configs, parity_name):
+        n_geometric = n_wave = 0
+        for gamma, kappa, y, beta in configs:
+            for w in ONEHOME_WS:
+                if w <= W_CEILING_SCHWINGER:
+                    continue  # no branch decision below the ceiling
+                with self.subTest(parity=parity_name, gamma=gamma,
+                                  kappa=kappa, y=y, beta=beta, w=w):
+                    predicted = self._predicate_branch(w, y, gamma, beta,
+                                                       kappa)
+                    observed, _ = self._observed_branch(w, y, gamma, beta,
+                                                        kappa)
+                    self.n_checks += 1
+                    self.assertEqual(
+                        observed, predicted,
+                        f'{parity_name} node gamma={gamma}, kappa={kappa}, '
+                        f'y={y}, beta={beta}, w={w}: grid routed '
+                        f'{observed!r} but select_branch says {predicted!r} '
+                        '-- the predicate has more than one home')
+                    if predicted == 'geometric':
+                        n_geometric += 1
+                    else:
+                        n_wave += 1
+        # Non-vacuity: BOTH branch labels must be exercised, else the
+        # agreement is trivially satisfied by a constant predicate.
+        self.assertGreater(n_geometric, 0,
+                           f'no geometric-routed {parity_name} node')
+        self.assertGreater(n_wave, 0,
+                           f'no wave-routed {parity_name} node')
+
+    def test_positive_parity_routing_has_one_home(self):
+        self._run_grid(ONEHOME_POSITIVE, 'positive')
+
+    def test_saddle_routing_has_one_home(self):
+        self._run_grid(ONEHOME_SADDLE, 'saddle')
+
+
+class F028GeometricServeTestCase(_SelectBranchRoutingTestCase):
+    """
+    F028 GEOMETRIC SERVE + QUADRATURE ANCHOR (acceptance #3).
+
+    On the F028 table configs (positive parity, ``|y|`` chosen so each is
+    resolved AND select_branch-geometric), the positive-parity grid serves
+    THROUGH `geometric_amplification`: the served value is bit-for-bit
+    equal to a direct call.  This replaces the previously-measured
+    60%-267% fold-arm error on exactly these well-resolved configs (F028).
+    The serve is NOT asserted against the quadrature above the ceiling
+    (there ``F_op`` IS the arm, so the difference is identically zero and
+    the quadrature does not answer above w = 60).
+
+    Its accuracy is anchored SEPARATELY, below/at the ceiling, where the
+    Schwinger quadrature is a legitimate independent oracle: the geometric
+    asymptote agrees with the exact `F_op` wave value to a few parts in
+    1e4.  That anchor makes the byte-equal serve meaningful without being
+    a certification claim.
+    """
+
+    def test_f028_configs_served_through_geometric_amplification(self):
+        for gamma, w, y in F028_SERVE:
+            with self.subTest(gamma=gamma, w=w, y=y):
+                source = np.asarray(y, dtype=float)
+                # Sanity: these fixtures really are positive-parity,
+                # resolved AND select_branch-geometric.
+                self.assertEqual(
+                    self._predicate_branch(w, y, gamma, 0.0, 0.0),
+                    'geometric',
+                    f'F028 fixture gamma={gamma}, w={w}, y={y} is not '
+                    'select_branch-geometric -- fixture drifted')
+                served = complex(F_op(w, source, gamma)[0])
+                direct = complex(geometric_amplification(w, source, gamma))
+                self.n_checks += 1
+                self.assertEqual(
+                    served, direct,
+                    f'F028 gamma={gamma}, w={w}, y={y}: served {served!r} '
+                    f'is not the geometric_amplification value {direct!r}')
+
+    def test_geometric_asymptote_anchors_to_quadrature_below_ceiling(self):
+        """Accuracy anchor: below/at the ceiling the stationary-phase
+        asymptote matches the exact Schwinger quadrature (`F_op` there) to
+        ``F028_ANCHOR_TOL``.  This is an ACCURACY anchor with an
+        INDEPENDENT oracle (asymptote vs exact quadrature), NOT a
+        certification claim.
+        """
+        worst = 0.0
+        for gamma, y in F028_ANCHOR:
+            source = np.asarray(y, dtype=float)
+            for w in F028_ANCHOR_WS:
+                with self.subTest(gamma=gamma, y=y, w=w):
+                    self.assertLessEqual(w, W_CEILING_SCHWINGER)
+                    quadrature = complex(F_op(w, source, gamma)[0])
+                    asymptote = complex(
+                        geometric_amplification(w, source, gamma))
+                    rel = self.assert_close(
+                        asymptote, mpmath.mpc(quadrature), F028_ANCHOR_TOL,
+                        f'gamma={gamma}, y={y}, w={w}')
+                    worst = max(worst, rel)
+        self.assertLess(worst, F028_ANCHOR_TOL)
+
+
+class BelowCeilingByteIdentityTestCase(SchwingerTestCase):
+    """
+    BELOW-CEILING BYTE-IDENTITY (F028, acceptance #1).
+
+    The `select_branch` insertion is above-ceiling only, so the exact
+    wave batch below ``W_CEILING_SCHWINGER`` must not move a single bit.
+    Each served value is compared to a pre-build reference captured as
+    exact `float.hex()` literals (`BYTEFREEZE_REFERENCE`), frozen from
+    BOTH the pre-build (HEAD) and post-build trees and verified IDENTICAL
+    (2026-07-28).  The reference is a stored constant -- NEVER an import
+    of a module from a prior git revision (F022, a build-killer).  The
+    fixtures span both parities, five ``gamma``, ``beta in {0, 0.7}`` and
+    ``kappa in {0, 0.3}``.
+    """
+
+    def test_served_values_are_byte_identical_below_ceiling(self):
+        for gamma, y, beta, kappa in BYTEFREEZE_CONFIGS:
+            source = np.asarray(y, dtype=float)
+            reference = BYTEFREEZE_REFERENCE[(gamma, y, beta, kappa)]
+            for w in BELOW_CEILING_WS:
+                with self.subTest(gamma=gamma, y=y, beta=beta, kappa=kappa,
+                                  w=w):
+                    self.assertLess(w, W_CEILING_SCHWINGER)
+                    served = complex(
+                        F_op(w, source, gamma, beta=beta, kappa=kappa)[0])
+                    ref_re, ref_im = reference[w]
+                    self.n_checks += 1
+                    self.assertEqual(
+                        served.real, float.fromhex(ref_re),
+                        f'real part moved at gamma={gamma}, y={y}, '
+                        f'beta={beta}, kappa={kappa}, w={w}: '
+                        f'{served.real.hex()} != {ref_re}')
+                    self.assertEqual(
+                        served.imag, float.fromhex(ref_im),
+                        f'imag part moved at gamma={gamma}, y={y}, '
+                        f'beta={beta}, kappa={kappa}, w={w}: '
+                        f'{served.imag.hex()} != {ref_im}')
+
+
+class SaddleServeBoundaryInvarianceTestCase(_SelectBranchRoutingTestCase):
+    """
+    SADDLE SERVE-BOUNDARY INVARIANCE (F028; anti-variant guard).
+
+    This test exists to prevent the REJECTED incoherent saddle-exponent
+    variant from silently returning.  WP2 routes the saddle geometric
+    decision through ``select_branch(w, delta_min, math.inf)``, so the
+    only live leg is resolution and the boundary is ``w > 60 AND
+    resolved``.  A rejected variant fed ``pi*w/4`` as the exponent against
+    ``L_MAX = 48``, which would move the frequency boundary to
+    ``w > 4*48/pi ~ 61.115`` -- splitting a straddling pair at
+    ``w in {60.5, 61.5}`` onto different sides.  A RESOLVED saddle config
+    must therefore be geometric-served at BOTH ``w = 60.5`` and
+    ``w = 61.5``; if either fell to the wave arm the incoherent variant
+    would be back.
+    """
+
+    def test_resolved_saddle_served_geometric_across_the_boundary(self):
+        for gamma, y in SADDLE_BOUNDARY:
+            source = np.asarray(y, dtype=float)
+            for w in SADDLE_BOUNDARY_WS:
+                with self.subTest(gamma=gamma, y=y, w=w):
+                    # Guard the premise: this config is resolved at w=61,
+                    # so both straddling nodes SHOULD be geometric under
+                    # the w>60 boundary.
+                    self.assertEqual(
+                        self._predicate_branch(w, y, gamma, 0.0, 0.0),
+                        'geometric',
+                        f'saddle fixture gamma={gamma}, y={y}, w={w} is not '
+                        'select_branch-geometric -- fixture drifted')
+                    observed, served = self._observed_branch(
+                        w, y, gamma, 0.0, 0.0)
+                    self.n_checks += 1
+                    self.assertEqual(
+                        observed, 'geometric',
+                        f'resolved saddle gamma={gamma}, y={y} served '
+                        f'{observed!r} at w={w} -- the boundary moved off '
+                        '``w > 60`` (the rejected pi*w/4 variant returned)')
+                    direct = complex(
+                        geometric_amplification(w, source, gamma))
+                    self.assertEqual(
+                        served, direct,
+                        f'saddle gamma={gamma}, y={y}, w={w}: served '
+                        f'{served!r} is not the geometric value {direct!r}')
+
+
+class DeltaMinComputedAtMostOnceTestCase(SchwingerTestCase):
+    """
+    DELTA_MIN COMPUTED-AT-MOST-ONCE / NOT-BELOW-CEILING (F028, #6).
+
+    The image-quartic solve `_real_delay_min_separation` is the only
+    expensive geometric primitive on the routing path.  Both grids guard
+    it behind ``np.any(w_array > ceiling)`` and compute it ONCE per grid
+    evaluation.  Spying the module-qualified symbol
+    ``operator._real_delay_min_separation`` (patched on the module so the
+    grid's global lookup is intercepted): a grid entirely below the
+    ceiling triggers ZERO solves, and a grid with one above-ceiling node
+    triggers EXACTLY ONE, for BOTH the positive-parity and saddle grids.
+    """
+
+    #: (label, w_array, gamma, y, kappa, expected_calls)
+    _CASES = (
+        ('positive below', (5.0, 40.0, 59.0), 0.9, (1.0, 0.7), 0.0, 0),
+        ('positive one-above', (5.0, 70.0), 0.9, (1.0, 0.7), 0.0, 1),
+        ('saddle below', (5.0, 40.0, 59.0), 1.2, (0.3, 0.2), 0.0, 0),
+        ('saddle one-above', (5.0, 70.0), 1.2, (0.3, 0.2), 0.0, 1),
+    )
+
+    def test_delta_min_solve_count_per_grid(self):
+        original = operator._real_delay_min_separation
+        for label, w_tuple, gamma, y, kappa, expected in self._CASES:
+            with self.subTest(case=label):
+                w_array = np.asarray(w_tuple, dtype=float)
+                source = np.asarray(y, dtype=float)
+                with mock.patch.object(
+                        operator, '_real_delay_min_separation',
+                        side_effect=original) as spy:
+                    try:
+                        F_op_grid(w_array, source, gamma, kappa=kappa)
+                    except SchwingerCertificationError:
+                        # A refusing above-ceiling node still computes
+                        # delta_min once BEFORE the node pre-pass.
+                        pass
+                    self.n_checks += 1
+                    self.assertEqual(
+                        spy.call_count, expected,
+                        f'{label}: expected {expected} quartic solve(s), '
+                        f'got {spy.call_count}')
+
+
+class AboveCeilingWaveThreeOutcomeTestCase(SchwingerTestCase):
+    """
+    ABOVE-CEILING 'WAVE' THREE-OUTCOME COVERAGE (F028, #4/#5).
+
+    A positive-parity node routed to the wave branch above the ceiling
+    lands in exactly one of three outcomes; this exercises all three:
+    (i) the uniform fold Airy arm certifies and serves;
+    (ii) the fold arm refuses but the cusp Pearcey arm serves;
+    (iii) BOTH arms refuse and the named `SchwingerCertificationError`
+    fires with the lowest-index refuser's authentic `f_schwinger`
+    message.  The refusal message at ``w > 60`` is the y-independent
+    ceiling refusal, reproduced here by an INDEPENDENT direct call to
+    `f_schwinger` at the same ``w`` (its ceiling guard fires before any
+    y-dependent work).  Refusal-identity across the fixture matrix is
+    already covered by `RefusalAboveCeilingTestCase`; this only pins that
+    the third outcome is reachable and named.
+    """
+
+    def _arms(self, w, y, gamma):
+        source = np.asarray(y, dtype=float)
+        fold = _airy_fold.fold_amplification(w, source, gamma)
+        cusp = _pearcey_cusp.cusp_amplification(w, source, gamma)
+        return fold, cusp
+
+    def test_fold_airy_arm_serves(self):
+        gamma, y = THREE_OUTCOME_FOLD
+        source = np.asarray(y, dtype=float)
+        fold, cusp = self._arms(THREE_OUTCOME_W, y, gamma)
+        self.assertIsNotNone(fold, 'fold fixture no longer fold-served')
+        served = complex(F_op(THREE_OUTCOME_W, source, gamma)[0])
+        self.n_checks += 1
+        self.assertEqual(
+            served, complex(fold),
+            f'fold outcome: served {served!r} is not the fold arm value '
+            f'{complex(fold)!r}')
+
+    def test_cusp_pearcey_arm_serves_when_fold_refuses(self):
+        gamma, y = THREE_OUTCOME_CUSP
+        source = np.asarray(y, dtype=float)
+        fold, cusp = self._arms(THREE_OUTCOME_W, y, gamma)
+        self.assertIsNone(fold, 'cusp fixture is now fold-served, not cusp')
+        self.assertIsNotNone(cusp, 'cusp fixture no longer cusp-served')
+        served = complex(F_op(THREE_OUTCOME_W, source, gamma)[0])
+        self.n_checks += 1
+        self.assertEqual(
+            served, complex(cusp),
+            f'cusp outcome: served {served!r} is not the cusp arm value '
+            f'{complex(cusp)!r}')
+
+    def test_both_arms_refuse_raises_named_authentic_message(self):
+        gamma, y = THREE_OUTCOME_REFUSE
+        source = np.asarray(y, dtype=float)
+        fold, cusp = self._arms(THREE_OUTCOME_W, y, gamma)
+        self.assertIsNone(fold, 'refuse fixture is now fold-served')
+        self.assertIsNone(cusp, 'refuse fixture is now cusp-served')
+        # Independent oracle for the authentic message: f_schwinger's
+        # ceiling guard fires before any y-dependent work, so a direct
+        # call at the same w reproduces the exact message text.
+        expected_message = None
+        try:
+            f_schwinger(THREE_OUTCOME_W, np.asarray([0.3, 0.2]), 0.3)
+        except SchwingerCertificationError as exc:
+            expected_message = str(exc)
+        self.assertIsNotNone(expected_message,
+                             'f_schwinger did not refuse above the ceiling')
+        with self.assertRaises(SchwingerCertificationError) as caught:
+            F_op(THREE_OUTCOME_W, source, gamma)
+        self.n_checks += 1
+        self.assertEqual(
+            str(caught.exception), expected_message,
+            'both-refuse node did not raise the authentic f_schwinger '
+            'ceiling message')
+
+
+class SelectBranchSelfFalsificationTestCase(_SelectBranchRoutingTestCase):
+    """
+    SELF-FALSIFICATION: the routing suite can go RED.
+
+    A numerical routing suite is only trustworthy if its assertions have
+    teeth.  Each method reaches into a genuine fixture and shows that a
+    deliberately WRONG expectation is REJECTED -- the one-home comparison,
+    the byte-identity check, and the F028 geometric serve all fail loudly
+    when fed a corrupted oracle.  Also pins that `select_branch` itself
+    has BOTH live legs (flipping either input flips the label).
+    """
+
+    def test_opposite_label_breaks_one_home(self):
+        # A genuinely wave-routed node (near-caustic, unresolved above
+        # the ceiling): asserting it is 'geometric' MUST fail.
+        gamma, kappa, beta = 0.9, 0.0, 0.0
+        y = (0.05 * 0.8, 0.05 * 0.6)
+        observed, _ = self._observed_branch(61.0, y, gamma, beta, kappa)
+        self.assertEqual(observed, 'wave', 'falsification premise drifted')
+        with self.assertRaises(AssertionError):
+            self.assertEqual(observed, 'geometric')
+        self.n_checks += 1
+
+    def test_corrupted_byte_reference_is_detected(self):
+        gamma, y, beta, kappa = BYTEFREEZE_CONFIGS[0]
+        ref_re, _ = BYTEFREEZE_REFERENCE[(gamma, y, beta, kappa)][5.0]
+        served = complex(
+            F_op(5.0, np.asarray(y, dtype=float), gamma,
+                 beta=beta, kappa=kappa)[0])
+        # Flip the last hex nibble of the reference: no longer byte-equal.
+        corrupted = float.fromhex(ref_re) * (1.0 + 1e-12)
+        with self.assertRaises(AssertionError):
+            self.assertEqual(served.real, corrupted)
+        self.n_checks += 1
+
+    def test_perturbed_geometric_serve_is_detected(self):
+        gamma, w, y = F028_SERVE[0]
+        served = complex(F_op(w, np.asarray(y, dtype=float), gamma)[0])
+        direct = complex(geometric_amplification(
+            w, np.asarray(y, dtype=float), gamma))
+        with self.assertRaises(AssertionError):
+            self.assertEqual(served, direct * (1.0 + 1e-9))
+        self.n_checks += 1
+
+    def test_select_branch_has_both_live_legs(self):
+        # Resolved and strongly cancelling -> 'geometric'; killing EITHER
+        # leg -> 'wave'.  Proves neither leg alone licenses the asymptote.
+        resolved_delta = (RHO_END + 1.0) / 70.0  # w*delta_min > RHO_END
+        self.assertEqual(
+            select_branch(70.0, resolved_delta, L_MAX + 1.0), 'geometric')
+        self.assertEqual(
+            select_branch(70.0, resolved_delta, L_MAX - 1.0), 'wave')
+        self.assertEqual(
+            select_branch(70.0, 0.0, L_MAX + 1.0), 'wave')
+        self.n_checks += 1
+
 
 
 if __name__ == '__main__':

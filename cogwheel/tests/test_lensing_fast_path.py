@@ -314,13 +314,23 @@ FOP_GRID_GAMMA = (0.0, 0.2)
 #: Since Build 7a the ``w <= 60`` members are rescued by the cross-parity
 #: Schwinger fallback (finite, certified, ``order_used == 0`` marks that
 #: the value did NOT come from the uncertifiable series); the ``w > 60``
-#: member must still raise `operator.CancellationError` through the JIT
-#: path (F005) — never a silent finite value from the legacy series.
+#: member must still refuse by name (never a silent finite value from the
+#: legacy series).
+#:
+#: F028 re-point: the above-ceiling member is ``(63.0, 0.3, 0.2)`` -- a
+#: genuinely hard-core WAVE node (``w*delta_min < RHO_END`` unresolved,
+#: ``L = w*|y'| = 63*0.3 = 18.9`` so `select_branch` stays on 'wave', and
+#: BOTH uniform arms decline), which raises `SchwingerCertificationError`
+#: at the Schwinger ceiling.  The former ``(63.0, 0.9, 0.2)`` is now
+#: resolved AND strongly cancelling, so since Build 8f WP1 the
+#: authoritative `select_branch` gate serves it with the F028 geometric
+#: asymptote instead of refusing -- it no longer exercises the
+#: above-ceiling refusal edge.
 FOP_REFUSALS = (
     (40.0, 0.9, 0.2),
     (50.0, 0.9, 0.2),
     (50.0, 0.95, 0.2),
-    (63.0, 0.9, 0.2),
+    (63.0, 0.3, 0.2),
 )
 
 # ---------------------------------------------------------------------------
@@ -1410,21 +1420,33 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
         currency at `_WITNESS_TOL` on the sub-ceiling grid, and every
         returned order is 0 (single-dispatch).
 
-        RE-BASELINE (Build 8d -> 8e): under Build 8d the above-ceiling
-        clause pinned an UNCONDITIONAL whole-grid
+        RE-BASELINE (Build 8d -> 8e -> 8f WP1/F028): under Build 8d the
+        above-ceiling clause pinned an UNCONDITIONAL whole-grid
         `SchwingerCertificationError` for the appended ``w = 63`` node.
-        The Build 8e serving ladder splits that clause: the sub-ceiling
-        flip witness stands UNCHANGED, while the above-ceiling ``w = 63``
-        node is now CONDITIONAL -- EITHER served by a certified uniform arm
-        (in which case the grid returns and the node's value must BE the
-        arm's number at 1e-12, order 0) OR hard-core (the whole grid
-        refuses with `SchwingerCertificationError`).  The fixture grid
-        spans both outcomes (asserted non-vacuous below).
+        The Build 8e serving ladder split that clause, and Build 8f WP1
+        added the F028 geometric rung, so the above-ceiling ``w = 63``
+        node now has THREE mutually exclusive outcomes, each pinned to the
+        rung the ladder copies bit-for-bit:
+
+        * (a) hard-core: NO uniform arm certifies and the node is not
+          geometric-resolved, so the whole grid refuses with
+          `SchwingerCertificationError`;
+        * (b) arm-served: the node's value IS the fold/cusp arm value at
+          ``1e-12``, order 0;
+        * (c) F028 geometric-served (resolved AND strongly cancelling):
+          the node's value IS `operator.geometric_amplification` byte-for-
+          byte, order 0.  This is a DISPATCH-parity pin (the ladder copies
+          the labelled geometric rung), NOT an accuracy certification of
+          the asymptote -- that independent gate is owed to the Test
+          Developer.
+
+        The fixture grid spans all three outcomes (asserted non-vacuous
+        below).
         """
         head = _load_head_operator()
         sub_grid = np.asarray(FOP_GRID_W, dtype=float)  # all w <= 50 <= 60
         supra_grid = np.asarray(FOP_GRID_W + (63.0,), dtype=float)
-        witnessed = refused = served = 0
+        witnessed = refused = served = served_geometric = 0
         for sqrt_s in FOP_GRID_SQRT_S:
             for beta in FOP_IDENTITY_BETAS:
                 for kappa in FOP_IDENTITY_KAPPAS:
@@ -1456,13 +1478,17 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
                                 f'exceeds {self._WITNESS_TOL:.0e} '
                                 f'(scale={scale:.4f}) -- physics regression')
                             witnessed += 1
-                        # Above-ceiling w=63 node: CONDITIONAL (Build 8e).
+                        # Above-ceiling w=63 node: CONDITIONAL, THREE-way
+                        # (Build 8e serving ladder + Build 8f WP1 / F028).
                         self.n_checks += 1
                         arm = self._serving_arm(63.0, y, 0.2, beta, kappa)
+                        geo = complex(operator.geometric_amplification(
+                            63.0, np.asarray(y, dtype=float), 0.2,
+                            beta=beta, kappa=kappa))
                         supra = self._grid_outcome(
                             operator, supra_grid, y, 0.2, beta, kappa)
                         if supra['raised']:
-                            # (b) hard-core: NO arm may certify the node.
+                            # (a) hard-core: NO arm may certify the node.
                             self.assertEqual(
                                 supra['exc'], 'SchwingerCertificationError',
                                 f'sqrt_s={sqrt_s} beta={beta} kappa={kappa}: '
@@ -1473,18 +1499,26 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
                                 f'kappa={kappa}: grid refused w=63 yet an '
                                 'arm certifies it')
                             refused += 1
+                            continue
+                        node_value = complex(supra['values'][-1])
+                        self.assertEqual(
+                            int(supra['orders'][-1]), 0,
+                            f'sqrt_s={sqrt_s} beta={beta} kappa={kappa}: '
+                            'served w=63 node reports order != 0')
+                        if node_value == geo:
+                            # (c) F028 geometric serve: the node's value IS
+                            # geometric_amplification bit-for-bit (dispatch
+                            # parity, NOT an accuracy certification).
+                            served_geometric += 1
                         else:
-                            # (a) arm-served: the node's value IS the arm's.
+                            # (b) arm-served: the node's value IS the arm's.
                             self.assertIsNotNone(
                                 arm, f'sqrt_s={sqrt_s} beta={beta} '
-                                f'kappa={kappa}: grid served w=63 but neither '
-                                'arm certifies -- served by a non-arm path')
-                            self.assertEqual(
-                                int(supra['orders'][-1]), 0,
-                                f'sqrt_s={sqrt_s} beta={beta} kappa={kappa}: '
-                                'arm-served w=63 node reports order != 0')
+                                f'kappa={kappa}: grid served w=63 but it is '
+                                'neither the geometric rung nor an arm -- '
+                                'served by a non-ladder path')
                             self.assertAlmostEqual(
-                                abs(complex(supra['values'][-1]) - arm), 0.0,
+                                abs(node_value - arm), 0.0,
                                 delta=1e-12,
                                 msg=f'sqrt_s={sqrt_s} beta={beta} '
                                 f'kappa={kappa}: served w=63 value '
@@ -1498,6 +1532,9 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
         self.assertGreater(served, 0,
                            'no above-ceiling grid was arm-served (Build 8e '
                            'serving branch not exercised)')
+        self.assertGreater(served_geometric, 0,
+                           'no above-ceiling grid was geometric-served (F028 '
+                           'geometric branch not exercised)')
 
     @staticmethod
     def _serving_arm(w, y, gamma, beta=0.0, kappa=0.0):

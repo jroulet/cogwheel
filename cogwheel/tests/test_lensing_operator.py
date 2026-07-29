@@ -474,16 +474,26 @@ class OperatorOracleTestCase(OperatorTestCase):
         """
         NEW-contract pin (Build 8d homogenization): a sheared
         positive-parity host (``gamma' > 0``) above the Schwinger ceiling
-        (``w > _schwinger.W_CEILING_SCHWINGER``) is served by the exact
-        1D Schwinger evaluator, which refuses by name with
-        `SchwingerCertificationError` -- unconditionally, with NO legacy
-        fallback (the w > 60 non-geometric corner refuses by name until
-        Build 8e serves it).  This replaces the old expectation that the
-        1F1 kernel error propagates here; the kernel is no longer reached
-        for a sheared host.
+        (``w > _schwinger.W_CEILING_SCHWINGER``) that is NOT
+        geometric-resolved is served by the exact 1D Schwinger evaluator,
+        which refuses by name with `SchwingerCertificationError` -- with
+        NO legacy fallback (the ``w > 60`` non-geometric corner refuses by
+        name until Build 8e serves it via a uniform arm).  This replaces
+        the old expectation that the 1F1 kernel error propagates here; the
+        kernel is no longer reached for a sheared host.
+
+        F028 re-point: both fixtures are small-radius on-axis sources
+        (``|y| = 0.05`` and ``0.08``) that are genuinely hard-core --
+        unresolved (``w*delta_min < RHO_END``) and declined by BOTH
+        uniform arms -- so `select_branch` stays on the WAVE branch and
+        the named refusal fires.  The former ``y = [1.0, 0.0]`` fixture is
+        now resolved AND strongly cancelling (``L = 70 > L_MAX``,
+        ``w*delta_min >= RHO_END``), so since Build 8f WP1 the
+        authoritative gate serves it with the F028 geometric asymptote
+        instead of refusing.
         """
         w_above = _schwinger.W_CEILING_SCHWINGER + 10.0
-        for y in (np.array([0.05, 0.0]), np.array([1.0, 0.0])):
+        for y in (np.array([0.05, 0.0]), np.array([0.08, 0.0])):
             with self.subTest(y=tuple(y)):
                 with self.assertRaises(
                         _schwinger.SchwingerCertificationError):
