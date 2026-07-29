@@ -2,32 +2,29 @@
 section: Backlog
 ---
 
-- **Fold Airy arm cannot represent an asymmetric fold (`q = 0`) [→ spec].**
-  F028, defect 2 of 2. Defect 1 (admission routing) is CLOSED by the
-  authoritative-gate build: both operator grids now decide geometric-vs-wave
-  through `select_branch`, so well-resolved above-ceiling positive-parity
-  nodes are served by geometric optics instead of the arm.
+- **Tighten the fold arm's caustic fence; the `b4` route is CLOSED
+  [→ spec].** F028 defect 2. Defect 1 (admission routing) closed by the
+  authoritative-gate work; the arm is now fenced to `eta < _ETA_MAX_FOLD`
+  (0.3) and no longer serves where F032 measured it 63%-64% wrong.
 
-  What remains is the arm's own accuracy. `fold_amplification` sets the `Ai'`
-  amplitude `q = 0`, which its docstring calls "the pure-phase symmetric-fold
-  result". That is a SYMMETRIC-FOLD ASSUMPTION, not a leading-order
-  truncation: with one `Ai` term the large-argument limit is a single sinusoid
-  of fixed amplitude, while a true two-image sum has two independent complex
-  amplitudes, equal only where the merging pair has equal magnification — i.e.
-  only exactly on the caustic. Away from it the error is O(1) however large
-  `xi` becomes, which is why F028 measured the error GROWING with `w`
-  (0.348x at `w = 70` to 1.846x at `w = 500`) rather than shrinking.
+  DO NOT derive `b4`. F033 measured why: the far-field error is not the
+  `q = 0` symmetric-fold assumption but the O(eta) truncation of the CUBIC
+  NORMAL FORM itself. Production's `p` (from the finite cubic curvatures)
+  and the CFU `p` (from the merging pair's amplitudes) agree to 0.7% at
+  `eta = 0.015` and diverge monotonically as `ratio - 1 ~ 0.5*eta`
+  (gamma = 0.70) to `~1.1*eta` (gamma = 0.90). `p` is wrong away from the
+  caustic by the same mechanism as `q`, so refining `q` alone cannot
+  recover that region.
 
-  Two options, not exclusive:
-  1. Derive the `b4` (quartic) refinement of `q` so the form can represent an
-     asymmetric fold.
-  2. Fence the arm to where the fold is near-symmetric. Its current `xi`-only
-     certificate cannot do this — `xi` is large both near the caustic at high
-     `w` (valid) and far from it at any `w` (invalid). Admission needs a
-     caustic-relative term; COVERAGE_DESIGN C6's `eta/R_c` is the natural
-     currency.
+  WHAT REMAINS: the fence threshold is unmeasured for the arm.
+  `_ETA_MAX_FOLD = 0.3` was set as the complement of `ETA_MIN_GEOMETRIC`,
+  which was measured for the GEOMETRIC branch. F033 shows the arm's
+  amplitude is already off by 14% (gamma = 0.70) to 29% (gamma = 0.90) at
+  `eta = 0.3`, and 3%-7% at `eta = 0.1`.
 
-  Note the symmetry with F029: the arm is admitted far from the caustic where
-  it is invalid, and geometric optics is admitted near the caustic where it is
-  invalid, both because no admission term measures distance to the caustic.
-  Fixing either one properly probably fixes both.
+  Needed before changing it, mirroring what F031 did for the geometric side:
+  a served-`|F|` error sweep versus an oracle binned by `eta` (F033 measured
+  an amplitude RATIO, not a served error), and the coverage cost — the
+  current fence already gives up ~10% of draws (measured over 2500), and
+  tightening to 0.1 will give up more. Recovering that region needs a
+  higher-order uniform form, not a patched cubic one.

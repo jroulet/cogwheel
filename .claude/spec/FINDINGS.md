@@ -1862,3 +1862,53 @@ external code.
 at `w = 0.5..50` outside the caustic, and `xc` has a convergence plateau at
 the 1e-4 level across a 4x sweep -- far below the effect under test. This is
 the first independent validation this engine has ever had.
+
+## F033 — the fold arm's far-field error is the CUBIC NORMAL FORM's O(eta) truncation, not `q = 0`; the b4 refinement cannot fix it (2026-07-29)
+
+F028's todo listed two routes to repairing the uniform fold arm: derive the
+`b4` quartic refinement of the `Ai'` amplitude `q`, or fence the arm to where
+the fold is near-symmetric. This measurement closes the first.
+
+**The test.** The CFU uniform form wants both amplitudes of the merging pair:
+
+    p = (s_+ + s_-)/2 * w^{-1/6} * xi^{ 1/4}
+    q = (s_- - s_+)/2 * w^{ 1/6} * xi^{-1/4}
+
+with `s_a = sqrt|mu_a|`. Production instead builds `p` from the FINITE
+cubic curvatures (hard eigenvalue and soft-axis `b3`) and sets `q = 0`. If
+`q = 0` were the whole defect, the two `p` values would agree and only `q`
+would be missing.
+
+**They do not agree, and the disagreement is structured.** Sweeping `eta` at
+FIXED `gamma` (w = 100):
+
+| eta (gamma=0.70) | p_CFU / p_prod | eta (gamma=0.90) | p_CFU / p_prod |
+|---|---|---|---|
+| 0.0147 | 1.0069 | 0.0195 | 1.0135 |
+| 0.0735 | 1.0348 | 0.0977 | 1.0709 |
+| 0.1470 | 1.0702 | 0.1954 | 1.1509 |
+| 0.2941 | 1.1427 | 0.3907 | 1.3437 |
+| 0.5659 | 1.3292 | 0.7814 | 1.8781 |
+
+Monotonic, `-> 1` as `eta -> 0` (0.7% at eta = 0.015), and
+`ratio - 1 ~ 0.5*eta` (gamma = 0.70), `~ 0.7-1.1*eta` (gamma = 0.90).
+
+**Conclusion.** The amplitude convention is correct -- the two agree wherever
+the cubic normal form is valid. What fails away from the caustic is the
+NORMAL FORM ITSELF, at O(eta), the first neglected order. `p` is wrong there
+by the same mechanism as `q`, so setting `q` from `b4` cannot recover the
+far-from-caustic region. THE ETA FENCE IS THE CORRECT PERMANENT TREATMENT,
+not a stopgap, and the `b4` derivation should NOT be undertaken for this
+purpose.
+
+**Consequence for the fence threshold, and it is not comfortable.**
+`_ETA_MAX_FOLD = 0.3` was set as the complement of `ETA_MIN_GEOMETRIC`,
+which was measured for the GEOMETRIC branch -- never for the arm. At
+`eta = 0.3` the arm's amplitude is already off by 14% (gamma = 0.70) to 29%
+(gamma = 0.90). At `eta = 0.1` it is 3%-7%. So the current fence still admits
+the arm at tens of percent error. Tightening to ~0.1 is indicated but was NOT
+applied here: it needs its own served-error measurement (this is an amplitude
+ratio, not a served |F| error) and a coverage cost, exactly as F031 did for
+the geometric side.
+
+Probes: `probe_b4_fix.py`, `probe_p_ratio_eta.py` (scratchpad).
