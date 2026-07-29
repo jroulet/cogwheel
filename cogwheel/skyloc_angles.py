@@ -186,24 +186,6 @@ def lon_to_ra(lon, gmst):
     return (lon + gmst) % (2*np.pi)
 
 
-def x_rotation_matrix(angle):
-    """Rotation matrix about x axis in 3d space."""
-    cos = np.cos(angle)
-    sin = np.sin(angle)
-    return np.array([[1, 0, 0],
-                     [0, cos, -sin],
-                     [0, sin, cos]])
-
-
-def z_rotation_matrix(angle):
-    """Rotation matrix about z axis in 3d space."""
-    cos = np.cos(angle)
-    sin = np.sin(angle)
-    return np.array([[cos, -sin, 0],
-                     [sin, cos, 0],
-                     [0, 0, 1]])
-
-
 def get_rotation_matrix(x_3d, y_3d):
     """
     Return a rotation matrix R such that ``R @ r = r'``, where ``r'``
@@ -219,17 +201,9 @@ def get_rotation_matrix(x_3d, y_3d):
         R @ z_3d = (0, 0, 1).
 
     """
-    if not np.allclose(np.matmul((x_3d, y_3d), np.transpose((x_3d, y_3d))),
-                       np.eye(2)):
-        raise ValueError('Pass normalized orthogonal axes.')
-
     z_3d = np.cross(x_3d, y_3d)
-    alpha = np.arctan2(z_3d[0], -z_3d[1])
-    beta = np.arccos(z_3d[2])
-    gamma = np.arctan2(x_3d[2], y_3d[2])
+    rmat = np.array([x_3d, y_3d, z_3d])
+    if not np.allclose(rmat @ rmat.T, np.eye(3)):
+        raise ValueError('Pass orthonormal axes.')
 
-    rot_1 = z_rotation_matrix(alpha)
-    rot_2 = x_rotation_matrix(beta)
-    rot_3 = z_rotation_matrix(gamma)
-
-    return (rot_1 @ rot_2 @ rot_3).T
+    return rmat
