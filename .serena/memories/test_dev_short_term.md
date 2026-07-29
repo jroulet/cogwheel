@@ -1,5 +1,39 @@
 # Test Dev Short-Term Observations
 
+## Build (F038/F039) caustic derivatives — test_lensing_caustic_derivatives.py
+- Added 3 TestCases to the (untracked, never-run) suite + fixed a pre-existing
+  false-positive in OracleIndependenceTestCase. Full file 20 passed in 4.7s;
+  sibling test_lensing_geometry.py 13 passed (no regression, my change is
+  test-only, one untracked file).
+- STAGE-1 curve validation: iterate real_cases() (F038 set), compare mpmath
+  oracle _oracle_y_component to critical_point(...).source[i]. MUST mirror both
+  critical_point quirks: clamp slightly-neg saddle discriminant to 0, ignore
+  branch at positive parity. Headline rel-err 5.144e-15 over 76
+  relative-dominated points == driver's 5.14e-15 (strong independence proof).
+- STAGE-1 gate is TWO-PART: near-axial (theta~0.02) is PURE float64
+  cancellation (abs err 4.3e-18 but rel 5.3e-12) because shipped Ax-x/r^2 and
+  oracle p*r*T are algebraically identical (mpmath diff 4e-50) but differ in
+  float64. So: per-point MIXED tol (atol=1e-13,rtol=1e-12) covers all points +
+  headline rtol=1e-13 gate ONLY on |shipped|>0.1 (the ATOL/RTOL crossover, not
+  an ad-hoc conditioning floor — |expected| is a gapless continuum).
+- Self-falsification for stage-1 MUST pick a well-conditioned point
+  (|source|>0.1 floor) or it lands in the near-axial regime and the wrong-curve
+  mutation hides under cancellation: used gamma=0.99,theta=1.3,comp=1
+  (|source|~17.66).
+- OracleIndependence false-positive: _FORBIDDEN_ORACLE_NAMES had
+  'y_prime'/'y_double_prime' which collide with oracle_derivatives's OWN local
+  accumulators (they're oracle outputs, not module cascade symbols) — removed.
+- POSITIVE-PARITY branch=-1: under simplefilter('error',RuntimeWarning) call
+  caustic_derivatives/speed/curvature_radius branch=-1 vs +1; assert_array_equal
+  (exactly 0.0 — positive parity ignores branch, Prof Q5). Positive control:
+  np.sqrt([-1.0]) must raise under the armed filter.
+- FOLD: positive-parity only (filter |gamma|<1-kappa; (0.9,0.3) is a macro
+  saddle -> LensDomainError, excluded). eps=1e-3, thetas away from astroid
+  cusps 0/pi/2/pi/3pi/2 so the merging pair resolves. n_plus>n_minus on +d
+  side; d unit (|norm-1|<=1e-12); invariant under soft_axis sign flip
+  (mock.patch critical_point returning ._replace(soft_axis=-soft_axis)).
+  Diagnostic scatter -> output/fold_opening_direction_image_counts.png.
+
 ## Build 8f (F028) select_branch routing — test_lensing_schwinger.py
 - WP1/WP2 gave `_positive_parity_grid` and `_saddle_grid` an above-ceiling
   geometric branch routed through the shared `select_branch`. Added 8 new

@@ -1,5 +1,38 @@
 # Coder Short-Term Observations
 
+- WP2 (fold_opening_direction) DONE: added public
+  fold_opening_direction(gamma, theta, *, kappa=0.0, branch=1) to
+  chang_refsdal/geometry.py immediately after WP1's
+  caustic_curvature_radius (before the ghost section). Separate closed
+  form (NOT the theta-derivative cascade): cp=critical_point(gamma,theta,
+  kappa=kappa,branch=branch) -> x=cp.image, e=cp.soft_axis, r2=x@x,
+  xe=x@e, D2=(4*xe*e + 2*x - 8*xe^2*x/r2)/r2^2, return D2/norm(D2). Only
+  point-mass term of y=Ax-x/|x|^2 (Ax has zero 2nd deriv). soft_axis
+  sign ambiguity harmless BY INSPECTION: D2 uses e only via xe^2
+  (e->-e invariant) and 4*xe*e (xe & e both flip -> product invariant),
+  so NO sign correction. Inherits critical_point's LensDomainError (no
+  re-derived domain checks). NO finite diff / probe / image count.
+  Smoke (real production import): gamma0.3,theta0.7 -> unit vec norm=1.0;
+  parity-boundary (gamma0.5,kappa0.5 -> |gamma|==1-kappa) refused
+  LensDomainError. parse+import OK. Did NOT touch consumers or tests.
+
+- WP1 (F038) DONE: added caustic_derivatives/caustic_speed/
+  caustic_curvature_radius to chang_refsdal/geometry.py after r_caustic
+  (before GhostDomainError). Analytic closed-form cascade (NO finite
+  diff): u,u',u'' -> r,r',r'' -> p_i=(lam-+gamma)-lam*u (lam factor
+  present, the load-bearing fix over the brief's p=-u typo) ->
+  y'=p'rT+pr'T+prT', y''=... . Verified the WHOLE cascade by hand
+  (u',u'',r',r'' derivatives re-derived, all match spec) AND against an
+  independent mpmath 40-dps numeric derivative of the curve definition:
+  worst |y'| err 7e-15, |y''| err 1.8e-14 (<< ATOL 5e-13); astroid pin
+  R_c/3g|sin2t| in [0.999,1.001] (<3e-3). Positive parity forces b=+1 and
+  IGNORES branch (branch=-1 finite, no nan, no sqrt RuntimeWarning, byte-
+  = branch=1); macro saddle honours branch, raises LensDomainError BY NAME
+  off-wedge (disc<-1e-12, np.any for arrays) or u<=0, mirrors
+  critical_point max(disc,0) clamp + lam<=0 + |gamma|==lam walls.
+  Vectorised: returns np.array shaped (2,) scalar / (2,N) array. Wrappers
+  delegate. Straight point -> inf (legit). parse+import OK.
+
 - INS-2-001/002/003 RESOLVED (2nd bounce; pipeline forced Coder to edit
   the stale test fixtures after Test Dev didn't). Probed real production
   fns to pick verified wave/refusing re-points, then ran the 6 named tests

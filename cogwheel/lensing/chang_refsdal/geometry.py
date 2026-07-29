@@ -1626,6 +1626,201 @@ def r_caustic(gamma: float, theta: float, *, kappa: float = 0.0,
     return max(float(np.linalg.norm(source)) for source in intersections)
 
 
+def caustic_derivatives(gamma: float, theta, *, kappa: float = 0.0,
+                        branch: int = 1):
+    """Analytic first and second theta-derivatives of the caustic curve.
+
+    The Chang--Refsdal caustic is the exact closed-form parametric curve
+    ``y_i(theta) = p_i(theta) r(theta) T_i(theta)`` with
+    ``T = (cos theta, sin theta)``, ``r = 1 / sqrt(lam u)``,
+    ``p_i = (lam -+ gamma) - lam u`` and
+    ``u(theta) = e cos 2theta + branch sqrt(1 - e**2 sin**2 2theta)``,
+    where ``lam = 1 - kappa`` and ``e = gamma / lam``.  Both derivatives
+    are the *symbolic* differentiation of that curve (no finite
+    difference or sampled arc) and are vectorised over ``theta``.
+
+    The domain contract mirrors :func:`critical_point` exactly: at
+    positive parity (``abs(gamma) < lam``) only the ``+`` root is real,
+    so ``branch`` is ignored; the macro saddle (``abs(gamma) > lam``)
+    honours ``branch`` and refuses outside the critical wedge, exactly on
+    the wedge edge (the deltoid cusp), or where the branch gives a
+    non-positive radial coordinate.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    theta : float or np.ndarray
+        Polar angle(s) in the lens plane, radians (already relative to
+        the shear axis; curvature is rotation-invariant).
+    kappa : float, optional
+        External convergence (default 0.0).
+    branch : int, optional
+        Square-root branch ``+-1`` of ``u`` (default ``+1``); ignored at
+        positive parity.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        ``(y_prime, y_double_prime)``, each shaped ``(2,)`` for scalar
+        ``theta`` or ``(2, N)`` for an array of ``N`` angles.
+
+    Raises
+    ------
+    LensDomainError
+        If ``1 - kappa <= 0``, ``abs(gamma) == 1 - kappa`` (parity wall),
+        or -- for a macro saddle -- ``theta`` lies outside the critical
+        wedge, exactly on the wedge edge (the deltoid cusp, where the
+        derivatives genuinely diverge), or the selected branch gives a
+        non-positive radius.
+    """
+    gamma = float(gamma)
+    lam = 1.0 - float(kappa)
+    if lam <= 0.0:
+        raise LensDomainError(
+            f'Cannot evaluate caustic derivatives for (kappa, gamma) = '
+            f'({kappa}, {gamma}): 1 - kappa = {lam} <= 0 (over-critical '
+            f'/ Type III); such configurations are out of scope.')
+    if abs(gamma) == lam:
+        raise LensDomainError(
+            f'Cannot evaluate caustic derivatives for (kappa, gamma) = '
+            f'({kappa}, {gamma}): |gamma| == 1 - kappa = {lam} exactly '
+            f'(det A = 0, the parity boundary); this boundary is a named '
+            f'refusal.')
+    theta = np.asarray(theta, dtype=float)
+    eff = gamma / lam
+    positive_parity = abs(gamma) < lam
+    b = 1 if positive_parity else int(branch)
+    s, c = np.sin(2.0 * theta), np.cos(2.0 * theta)
+    c4 = np.cos(4.0 * theta)
+    discriminant = 1.0 - eff**2 * s**2
+    if not positive_parity and np.any(discriminant < -1e-12):
+        raise LensDomainError(
+            f'Cannot evaluate macro-saddle caustic derivatives for '
+            f'(kappa, gamma) = ({kappa}, {gamma}): a polar angle lies '
+            f'outside the critical wedge |sin 2 theta| <= (1 - kappa) / '
+            f'|gamma|.')
+    discriminant = np.maximum(discriminant, 0.0)
+    d_root = np.sqrt(discriminant)
+    if not positive_parity and np.any(d_root == 0.0):
+        raise LensDomainError(
+            f'Cannot evaluate macro-saddle caustic derivatives for '
+            f'(kappa, gamma) = ({kappa}, {gamma}): theta lies exactly on '
+            f'the critical wedge edge |sin 2 theta| == (1 - kappa) / '
+            f'|gamma|, the deltoid cusp where the caustic derivatives '
+            f'genuinely diverge (u_p, u_pp -> infinity); this degenerate '
+            f'boundary is a named refusal, mirroring the off-wedge '
+            f'refusal above.')
+    u = eff * c + b * d_root
+    if not positive_parity and np.any(u <= 0.0):
+        raise LensDomainError(
+            f'Cannot evaluate macro-saddle caustic derivatives for '
+            f'(kappa, gamma) = ({kappa}, {gamma}): branch {branch} gives '
+            f'a non-positive radial coordinate u <= 0.')
+    u_p = -2.0 * eff * s - b * 2.0 * eff**2 * s * c / d_root
+    u_pp = (-4.0 * eff * c - b * 4.0 * eff**2
+            * (c4 * d_root**2 + eff**2 * s**2 * c**2) / d_root**3)
+    r = 1.0 / np.sqrt(lam * u)
+    r_p = -r * u_p / (2.0 * u)
+    r_pp = r * (3.0 * u_p**2 / (4.0 * u**2) - u_pp / (2.0 * u))
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    y_prime, y_double_prime = [], []
+    for sign, tan, tan_p, tan_pp in ((-1.0, cos_t, -sin_t, -cos_t),
+                                     (1.0, sin_t, cos_t, -sin_t)):
+        p = (lam + sign * gamma) - lam * u
+        p_p = -lam * u_p
+        p_pp = -lam * u_pp
+        y_prime.append(p_p * r * tan + p * r_p * tan + p * r * tan_p)
+        y_double_prime.append(
+            p_pp * r * tan + 2.0 * p_p * r_p * tan + 2.0 * p_p * r * tan_p
+            + p * r_pp * tan + 2.0 * p * r_p * tan_p + p * r * tan_pp)
+    return np.array(y_prime), np.array(y_double_prime)
+
+
+def caustic_speed(gamma: float, theta, *, kappa: float = 0.0,
+                  branch: int = 1):
+    """Caustic parametric speed ``|y'(theta)|``.
+
+    Thin delegate to :func:`caustic_derivatives`; see it for the domain
+    contract and parameters.  Vectorised over ``theta``.
+    """
+    y_prime, _ = caustic_derivatives(gamma, theta, kappa=kappa, branch=branch)
+    return np.sqrt(y_prime[0]**2 + y_prime[1]**2)
+
+
+def caustic_curvature_radius(gamma: float, theta, *, kappa: float = 0.0,
+                             branch: int = 1):
+    """Caustic curvature radius ``|y'|**3 / |y1' y2'' - y2' y1''|``.
+
+    Thin delegate to :func:`caustic_derivatives`; see it for the domain
+    contract and parameters.  Vectorised over ``theta``.  A genuinely
+    straight caustic point (vanishing cross product) returns ``inf``,
+    which is the physical infinite radius, not an error.
+    """
+    y_prime, y_double_prime = caustic_derivatives(
+        gamma, theta, kappa=kappa, branch=branch)
+    speed = np.sqrt(y_prime[0]**2 + y_prime[1]**2)
+    cross = y_prime[0] * y_double_prime[1] - y_prime[1] * y_double_prime[0]
+    return speed**3 / np.abs(cross)
+
+
+def fold_opening_direction(gamma: float, theta: float, *, kappa: float = 0.0,
+                           branch: int = 1) -> np.ndarray:
+    """Unit source-plane direction toward the fold's two-image side.
+
+    At a fold caustic point ``y_c`` the source-plane curve traced by
+    displacing the critical image along its degenerate (soft) axis ``e``
+    is, to leading order, ``y(t) = y_c + (1/2) D2y[e, e] t**2``.  Because
+    the linear ``t`` term vanishes (the fold is where two images merge),
+    *both* signs of ``t`` map to the same side of the caustic -- the side
+    carrying the extra merging image pair.  The unit vector along
+    ``D2y[e, e]`` therefore points from the caustic toward that
+    two-image side.
+
+    Only the point-mass term of ``y(x) = A x - x / |x|**2`` contributes:
+    the linear macro term ``A x`` has a vanishing second derivative.  The
+    verified closed form of the point-mass second-derivative contraction
+    (Professor Q2) is, with ``x = cp.image``, ``e = cp.soft_axis``,
+    ``r2 = x . x`` and ``xe = x . e``,
+
+        D2y[e, e] = (4 xe e + 2 x - 8 xe**2 x / r2) / r2**2.
+
+    It depends on ``e`` only through ``xe**2`` and ``4 xe e``, both
+    invariant under ``e -> -e``, so the ``soft_axis`` sign ambiguity is
+    harmless and no sign correction is applied.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    theta : float
+        Polar angle of the critical point in the lens plane, radians.
+    kappa : float
+        External convergence.
+    branch : int
+        Square-root branch passed through to :func:`critical_point`.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(2,)`` unit vector ``D2y[e, e] / |D2y[e, e]|``.
+
+    Raises
+    ------
+    LensDomainError
+        Inherited from :func:`critical_point` for out-of-domain
+        ``(kappa, gamma, theta, branch)`` (the domain checks are not
+        re-derived here).
+    """
+    cp = critical_point(gamma, theta, kappa=kappa, branch=branch)
+    x = cp.image
+    e = cp.soft_axis
+    r2 = x @ x
+    xe = x @ e
+    d2 = (4.0 * xe * e + 2.0 * x - 8.0 * xe**2 * x / r2) / r2**2
+    return d2 / np.linalg.norm(d2)
+
+
 # ---------------------------------------------------------------------------
 # Ghost (complex-saddle) machinery
 # ---------------------------------------------------------------------------
