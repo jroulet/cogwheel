@@ -2403,10 +2403,21 @@ still passes at `gamma = 0.005` (31/32 overall), so the direction remains a
 correct side-indicator throughout; it is the projection onto the normal that
 shrinks, not the answer that degrades.
 
-**Separately: `_tube_normal` was missed by the whole sweep, and still
-finite-differences.** It builds the caustic tangent as
+**Separately — and it really is separate: `_tube_normal` was missed by the
+whole sweep, and still finite-differences.** It builds the caustic tangent as
 `critical_point(theta + 1e-6) - critical_point(theta)` — a forward difference
 of a closed form with a hardcoded step, on the serve-consistency path. It was
 absent from the [[lensing_analytic_derivatives]] inventory (driver's miss, not
-the build's) and is now a one-line replacement:
-`tangent = y' / |y'|` from `caustic_derivatives`. Add it as target 5 there.
+the build's) and is a one-line replacement: `tangent = y' / |y'|` from
+`caustic_derivatives`. Added as target 5 there.
+
+**DO NOT expect that fix to rescue the guard.** Measured both ways at the same
+points: the analytic normal differs from the finite-differenced one by
+2.9e-5 degrees, and the resulting `dot` moves by ~5e-7 —
+`-0.029998000` becomes `-0.029997500` at `gamma = 0.02`. The near-tangency is
+GEOMETRY, not discretization. So `_tube_normal`'s finite difference is wrong on
+PRINCIPLE (a numerical derivative of a closed form, unjustified step) and not
+wrong in EFFECT, while the `abs(dot) > 0.1` guard is wrong in effect and must
+be fixed independently. Bundling them — as the driver's first write-up of this
+finding implicitly did — invites someone to replace the difference, see the
+arcs still missing, and go looking for a third bug that is not there.
