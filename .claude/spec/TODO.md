@@ -151,6 +151,43 @@ Tag conventions:
   difference)". The engine layer got this right — the training and cusp-seeding
   layers did not.
 
+  ## Carried forward from build 1b — do not let these go quiet
+
+  Both are open by DESIGN, not by oversight. Written down because a thing kept
+  only in the driver's head dies at the next compaction.
+
+  - **`_CUSP_SPEED_REL_FRAC = 0.2` survived 1b as an inlined local.** 1b
+    deletes the module constant by name but keeps the literal `0.2` inside
+    `_find_cusps`, because it no longer drives cusp DETECTION (that is now an
+    analytic root) — it only measures the dip half-width that sets the cusp
+    exclusion WINDOW, which 1b deliberately leaves byte-identical. That is
+    honest ONLY while the window is explicitly deferred. When the cusp-window
+    schema build lands (F040: the width is `w^{-1/4}` from `|y''|` and
+    `|y'''_perp|`, so it is a FUNCTION and the stored
+    `(theta_cusp, delta_theta)` pair cannot express it), this literal goes with
+    it. A deleted constant that survives as an inlined magic number is the same
+    constant with worse provenance.
+
+  - **The exact interior-admission distance is 91-180x slower than the cloud,
+    and the cheap fix is a derived bound, not the old fudge.** Measured
+    2026-07-29: `nearest_caustic_point` costs 0.536 ms (positive) / 1.060 ms
+    (saddle) per call against 0.0059 ms for the 200-point vectorised cloud
+    minimum, at 15 probes per `admits()` call (`_INTERIOR_EDGE_SAMPLES` x 3
+    band gammas). 1b ships the exact call everywhere, which is CORRECT and is
+    the right default; whether it matters depends on the tile count in a full
+    training run, which is unmeasured.
+    MEASURE FIRST — total training wall-clock before and after 1b. Only if the
+    cost is real, apply the bracket: the cloud distance always OVERSHOOTS the
+    true distance (that is the fact `_CLOUD_MARGIN_FRAC` was compensating), so
+    it is a one-sided bound, and the discretization gap is now computable as
+    `h = caustic_speed * dtheta / 2` rather than measured. Then
+    `cloud < eta_max` rejects cheaply, `cloud - h >= eta_max` admits cheaply,
+    and only the narrow band between needs an exact call. That is the same
+    "sample to BRACKET, refine exactly" idiom `r_caustic` already uses, and it
+    replaces a measured fudge with a derived bound rather than reinstating it.
+    Do NOT pre-optimise: shipping a fudge factor ahead of a measurement is how
+    `_CLOUD_MARGIN_FRAC` got there in the first place.
+
   ## Acceptance
 
   - No production path in `cogwheel/lensing/` differentiates
