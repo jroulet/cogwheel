@@ -826,11 +826,12 @@ class BranchGateTestCase(OperatorTestCase):
                 w, source, gamma, kappa)
             eta = self._caustic_distance(gamma, beta, source, kappa)
             return operator.select_branch(w, delta_min, exponent, eta)
-        # Saddle: infinite exponent AND infinite eta -> only the
-        # resolution leg is live.  F031 is positive-parity only, so the
-        # saddle boundary is deliberately left where it was rather than
-        # inheriting an unmeasured threshold.
-        return operator.select_branch(w, delta_min, math.inf, math.inf)
+        # Saddle: the cancellation exponent is positive-parity bookkeeping
+        # with no saddle analogue, so that leg stays vacuous; the eta leg
+        # is LIVE and measured on the saddle in its own right (F034 --
+        # median 57% error below eta = 0.1, worst case 484x).
+        eta = self._caustic_distance(gamma, beta, source, kappa)
+        return operator.select_branch(w, delta_min, math.inf, eta)
 
     def _observed_branch(self, w, y, gamma, beta, kappa):
         """The grid's routing, read off the served scalar ``F_op`` value.

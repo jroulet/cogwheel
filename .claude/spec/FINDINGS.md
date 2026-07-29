@@ -1912,3 +1912,39 @@ ratio, not a served |F| error) and a coverage cost, exactly as F031 did for
 the geometric side.
 
 Probes: `probe_b4_fix.py`, `probe_p_ratio_eta.py` (scratchpad).
+
+## F034 — the MACRO SADDLE needed the eta floor too, and was worse than positive parity (2026-07-29)
+
+F031 measured the eta leg on positive parity and the saddle was given
+`eta = inf` -- the leg switched OFF -- because no saddle sweep existed. That
+was recorded as an OPEN question rather than a safe default. It was not safe.
+
+Driver sweep, 2000 RESOLVED macro-saddle samples (`kappa = 0`,
+`gamma in [1.05, 1.60]`, so `det A < 0`), `w <= W_CEILING_SCHWINGER` so
+`F_op` is the Schwinger quadrature. Error of `geometric_amplification`
+against it, binned by distance to the caustic:
+
+| eta | n | median | p90 | max |
+|---|---|---|---|---|
+| 0-0.1 | 87 | 5.69e-1 | 1.68e+0 | **4.84e+2** |
+| 0.1-0.3 | 210 | 2.82e-2 | 2.50e-1 | 1.04e+1 |
+| 0.3-1 | 927 | 4.52e-5 | 1.10e-2 | 6.86e-1 |
+| >1 | 776 | 1.04e-5 | 9.13e-4 | 1.05e-1 |
+
+Applying the positive-parity floor: p90 goes from 8.95e-1 (`eta < 0.3`,
+n=297) to 4.54e-3 (`eta >= 0.3`, n=1703) -- a factor of ~200, over 15% of
+resolved draws.
+
+Worse than positive parity, where the same band peaked at p90 1.17 with no
+484x outlier. `_saddle_grid` now passes the measured `eta`; the cancellation
+leg stays vacuous (`inf`), since `cancellation_exponent` is positive-parity
+bookkeeping with no saddle analogue.
+
+**The reasoning error worth keeping.** Passing `inf` was justified at the
+time as refusing to extrapolate an unmeasured threshold onto another branch
+-- which is the right instinct. But "unmeasured, so leave it alone" is only
+conservative when the STATUS QUO is known safe. Here the status quo was
+serving a 484x error. An unmeasured branch is a queued measurement, not a
+defensible default.
+
+Probe: `probe_saddle_eta.py` (scratchpad).

@@ -859,11 +859,19 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     y_eig = np.array([z_eig.real, z_eig.imag])
     s = float(y_scaled @ y_scaled)
 
-    # Resolution is frequency-independent; compute delta_min once and only
-    # if any node could take the geometric branch (w > ceiling).
+    # Resolution and caustic distance are both frequency-independent;
+    # compute each once and only if some node could take the geometric
+    # branch (w > ceiling).  A refusing caustic search gives eta = 0.0 ->
+    # 'wave', the conservative direction.
     delta_min = 0.0
+    eta = 0.0
     if np.any(w_array > _schwinger.W_CEILING_SCHWINGER):
         delta_min = _real_delay_min_separation(source, matrix)
+        try:
+            eta = float(geometry.nearest_caustic_point(
+                gamma, beta, source, kappa=kappa).distance)
+        except geometry.LensDomainError:
+            eta = 0.0
 
     n_nodes = w_array.shape[0]
     values = np.empty(n_nodes, dtype=complex)
@@ -882,15 +890,13 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     for node in range(n_nodes):
         w_node = float(w_array[node])
         if w_node > _schwinger.W_CEILING_SCHWINGER:
-            # Above the wave ceiling.  Route the geometric-vs-wave choice
-            # through the authoritative `select_branch`, passing an
-            # INFINITE cancellation exponent so its `strongly_cancelling`
-            # leg is vacuously true and ONLY the resolution leg is live:
-            # `select_branch(w, delta_min, inf) == 'geometric'` iff
-            # `w*delta_min >= RHO_END`.  This preserves the historical
-            # ``w > 60 AND resolved`` boundary EXACTLY (behaviour is
-            # unchanged; the boundary did not move).
-            if select_branch(w_node, delta_min, math.inf) == 'geometric':
+            # Above the wave ceiling.  The cancellation exponent is
+            # positive-parity bookkeeping and has no saddle analogue, so
+            # `inf` leaves that leg vacuously true; the resolution and
+            # `eta` legs are live.  The `eta` leg is NOT inherited from
+            # positive parity -- it is measured on the saddle (F034).
+            if select_branch(w_node, delta_min, math.inf,
+                             eta) == 'geometric':
                 # Resolved and above the wave ceiling: stationary-phase sum
                 # over the real images of the indefinite matrix.
                 values[node] = complex(geometric_amplification(
