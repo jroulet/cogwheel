@@ -1680,11 +1680,35 @@ succeeds at `|gamma1| = 0.05` (positive only) and returns NaN at
 `gamma = 0.7-0.9`, far outside the working range found so far. So F028 remains
 confirmed only against geometric optics.
 
-NEXT: find what makes `gamma1 = +0.05` succeed where `-0.05` fails --
-the asymmetry is informative and is NOT explained by `tmin`. It is likely the
-contour topology (which axis is soft), which suggests a `p_prec` on
-`It_MultiContour_C` or a source/shear orientation convention rather than a
-numerical limit. Ask the owner what setup reached the high-shear regime.
+MECHANISM IDENTIFIED (owner relayed the lead from Codex: the point-lens
+regularization). `Psi_PointLens` carries `p_prec = {'xc': 1e-10}` --
+"Point mass regularization (Plummer sphere)" -- effectively zero by default.
+Sweeping it surfaced the real error, which the NaN had been hiding:
+
+    ERROR: even number of centers found (n=2) [init_all_Center:62]
+    ERROR: initialization of centers was unsuccessful [find_birth_death:1154]
+
+GLoW's contour initializer requires an ODD number of images (the odd-number
+theorem). A PURE point mass violates it numerically: the central image is
+infinitely demagnified and absent, so outside the caustic GLoW counts 2 and
+refuses. A Plummer sphere with finite `xc` restores that central image and
+makes the count odd -- which is exactly why the regularization is the knob.
+
+NOT YET SOLVED. Sweeping `xc` over 1e-10 .. 1e-2 at `|y| = 0.5, w = 5`:
+`gamma = 0.05` works (ratio 0.995 vs this engine) except at `xc = 1e-3`,
+where the same even-count error fires; `gamma = 0.20` and `0.70` fail at
+EVERY `xc` tried. So the mechanism is right but the working `xc` for
+`gamma >= 0.2` was not found, and by `1e-2` the softening is large enough
+that it is no longer a point mass -- `xc` cannot simply be raised without
+bound. The usable value must be finite AND on a plateau where `|F|` stops
+depending on it; no such plateau was reached above `gamma = 0.05`.
+
+OPEN QUESTION for whoever continues: what `xc` (or additional
+`It_MultiContour_C` setting) makes the central image resolvable so the count
+is odd at `gamma >= 0.2`? Note the failure is NOT monotonic in `xc`
+(`gamma = 0.05` fails at 1e-3 but works at 1e-4 and 1e-2), which suggests
+the centre-finding is sensitive to resolution rather than to the softening
+scale alone.
 
 This also explains the earlier partial successes: the pure-Python
 `It_SingleContour` path agreed with F009 at `w -> 0` because
