@@ -2001,3 +2001,61 @@ discrepancy the instruction had already named.
 
 Probes: `probe_glow_highw.py`, `probe_glow_wmax_edge.py`,
 `probe_glow_beta_break.py` (scratchpad).
+
+---
+
+## F036 — no `|y|` threshold can bound the caustic: `r_caustic` DIVERGES at the parity wall (2026-07-29)
+
+The coverage design carved the source plane with a constant, `ANNULUS_INNER_RADIUS = 3.0`,
+inherited from `_Y_SCALE_CAP` — the PRIOR BOX half-width. That is a sampling
+bound used as a physical boundary, and the failure is not that 3.0 is badly
+chosen. It is that no value exists.
+
+Directional caustic reach `geometry.r_caustic(gamma, theta)` over the prior
+`gamma in (0, 1.6)`, `kappa = 0`:
+
+| gamma | min r_c | max r_c | anisotropy | where `\|y\| = 3` sits |
+|---|---|---|---|---|
+| 0.50 | 0.500 | 1.414 | 2.8 | outside the caustic |
+| 0.70 | 0.700 | 2.556 | 3.7 | outside the caustic |
+| 0.90 | 0.900 | 5.692 | 6.3 | **cuts the caustic** |
+| 0.99 | 0.990 | 19.800 | 20.0 | **cuts the caustic** |
+| 1.02 | 1.020 | 4.682 | 4.6 | **cuts the caustic** |
+| 1.30 | 1.222 | 1.714 | 1.4 | outside the caustic |
+
+`r_caustic -> inf` as `gamma -> 1`: the caustic blows up at `det A = 0`. At
+`gamma = 0.99` its reach is 19.8, versus a prior box corner of 4.2426 — the
+caustic is nearly five times the entire sampled region. ANY fixed `|y|`
+threshold is therefore crossed by the caustic somewhere in the prior.
+
+**Consequence for the design.** The four apparent serving regimes are not four
+physical situations. They are ONE fixed boundary crossing a caustic whose
+extent varies 28x and diverges. In caustic-relative units the relationship is
+constant, and there are TWO regimes per parity: caustic-attached (interior +
+tube shell) and exterior.
+
+**Second consequence, easy to miss.** The anisotropy column reaches 20x near
+the wall, so a SCALAR caustic-relative coordinate is not sufficient either. The
+coordinate must stay directional (`rho = |y| / r_caustic(gamma, theta_c)`), as
+positive-parity charts already are. `surrogate._caustic_reach(gamma)` is the
+scalar conservative-guard path and is NOT a substitute for it.
+
+**The window, and its expiry.** As of this finding every constant in the
+COVERAGE_DESIGN Part IV violation table is INERT with respect to any served
+value: `ANNULUS_INNER_RADIUS` and `GAMMA_FENCE` are read only by
+`surrogate_census` for accounting, the eta/cusp constants are confined to
+`surrogate_training`, `likelihood._surrogate_coefficients` returns `None` in
+the Born slot so that rung never serves, and no trained chart artifact is
+shipped. The coordinate change is therefore a pure-source edit with no
+migration, no retraining and no value churn. That is true ONLY until something
+is trained. Do not train — not the Born residual chart, not a full-box
+surrogate — until the coordinates are final.
+
+**How it happened, since the mechanism matters more than the instance.** The
+prior box was chosen first, in coordinates that do not know where the caustic
+is; regions were then defined against it; fences were derived from those
+regions (`GAMMA_FENCE = 3/4` and the saddle fence `1.0502342` are both
+CONSEQUENCES of the annulus radius, not independent physics). Each step was
+locally reasonable. The check that catches this class is Part 0 of
+COVERAGE_DESIGN: for every length-unit float, ask what sets it, and refuse
+"the prior box", "a round number", and "it worked at one gamma".

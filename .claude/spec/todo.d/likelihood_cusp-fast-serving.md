@@ -9,9 +9,10 @@ section: Backlog
   millisecond scale everywhere!"). The exclusion balls are small in
   prior volume but are magnification peaks — samplers CONCENTRATE
   there, so they are hot regions, not corners. This build closes them:
-  every in-domain query serves at ms scale. Candidate mechanisms (in
-  convergence with the homogenization design seed in
-  [[likelihood_schwinger-homogenization]]): Pearcey-function uniform
+  every in-domain query serves at ms scale. Candidate mechanisms (converging
+  with the Schwinger homogenization, which SHIPPED as Build 8d — the
+  quadrature is now the exact evaluator on both parities): Pearcey-function
+  uniform
   asymptotics in cusp-adapted coordinates (2/3-power scaling; the
   uniform form IS the known structure at the fixed transition), a
   precomputed Pearcey table + smooth correction charts, or dense local

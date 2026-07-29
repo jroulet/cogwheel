@@ -80,6 +80,15 @@ Tag conventions:
   `surrogate_census.classify_fallthrough` (annulus draws no longer
   mis-attributed to `out-of-box`). What remains is the LAST step only:
 
+  **BLOCKED ON C8 — do NOT train the residual chart yet.** The annulus this
+  rung is defined over (`3.0 < |y| <= 4.2426`) is a prior-box artifact being
+  retired; F036 shows no `|y|` threshold can bound the caustic. A chart trained
+  now would be trained in coordinates that are about to change, and training is
+  what closes the cheap-edit window (see
+  [[lensing_caustic_relative_coordinates]]). The carrier, gate and census
+  arithmetic are correct and stay; only the REGION they are keyed to moves. Do
+  the steps below AFTER C8 lands, restated in `rho`.
+
   Once the residual chart `F_exact - F_carrier` is driver-trained
   (TRAIN_TIER artifact — not yet built), re-derive the registration/accuracy
   gate in the residual currency and remove the fall-through at the fact-4
@@ -89,6 +98,129 @@ Tag conventions:
   exact-served — correct, just not zero-quadrature.
 
   Saddle branch: see [[lensing_saddle_born]].
+
+
+- **CAUSTIC-RELATIVE COORDINATES — retire every prior-box length from the
+  serving design** `[→ spec]` — the coverage map's regions are carved by
+  `ANNULUS_INNER_RADIUS = 3.0`, inherited from the PRIOR BOX half-width. F036
+  measures that no `|y|` threshold can bound the caustic at all: `r_caustic`
+  diverges at the parity wall (19.8 at `gamma = 0.99` vs a 4.2426 box corner),
+  so a fixed radius is crossed by the caustic somewhere in every prior. The
+  four apparent serving regimes are ONE fixed boundary crossing a caustic whose
+  extent varies 28x. In caustic-relative units there are TWO per parity:
+  caustic-attached (interior + tube) and exterior.
+
+  Governing principle is COVERAGE_DESIGN Part 0; the constant-by-constant
+  audit is its Part IV. This fragment is the ORDER OF WORK; it does not restate
+  either.
+
+  ## Why now — a window that expires
+
+  Every constant in the Part IV table is currently INERT with respect to any
+  served value (measured 2026-07-29, detail in F036): the Born serve slot
+  returns `None`, the eta/cusp constants are train-time only, and no trained
+  chart artifact is shipped. So this is a pure-source change — no migration, no
+  retraining, no value churn, no byte-identity gate. **It stops being true the
+  moment anything is trained. Do not train until step 9.**
+
+  ## Steps, in series
+
+  1. **Pointwise curvature radius.** Add
+     `geometry.caustic_curvature_radius(gamma, theta, *, kappa, branch)` — the
+     three-point circumradius currently inlined in
+     `surrogate_training._min_curvature_radius`, evaluated AT a point rather
+     than minimised over a band. It belongs in `geometry` because the caustic
+     does; re-express the band-min as a thin wrapper.
+     ACCEPTANCE: matches an independent analytic curvature to 1e-8 on a
+     closed-form case; the rewritten band-min reproduces current
+     `min_curvature_radius` report values exactly.
+
+  2. **DRIVER MEASUREMENT — the tube fraction.** Sweep held-out envelope eps
+     against the DIMENSIONLESS `eta / R_c`, across gamma, both parities. Find
+     `f_max` where eps crosses `TrainingConfig.tube_eps_max = 5e-2`, and
+     `f_floor` likewise. NOT build work: the result goes inline into the step-3
+     brief. Do NOT choose `f` to reproduce the incumbent `0.05`.
+
+  3. **C6 — tube shell becomes curvature-relative.** `_DEFAULT_ETA_MAX` and
+     `_DEFAULT_ETA_FLOOR` become `f * R_c`. Then DELETE the foot-of-normal skip
+     guard: with eta_max a fixed fraction of `R_c` it is vacuous by
+     construction, so it becomes an assertion, not a branch. This converts a
+     refusal into a serve.
+     ACCEPTANCE: no chart skipped for curvature at any gamma in the prior; the
+     small-gamma collar (coverage-map region 3) is closed; held-out eps under
+     bar at both gamma extremes; the same `f` serves every gamma.
+
+  4. **DRIVER MEASUREMENT — the far-zone crossover.** Sweep carrier / ppGO /
+     chart node cost INWARD in `rho` from the box corner, per gamma, both
+     parities, for the real P5/P6 crossover `rho*`. This is an engine run:
+     quote unit count x measured per-unit cost before launching.
+
+  5. **C8 — far zone becomes caustic-relative; the annulus is retired.**
+     `ANNULUS_INNER_RADIUS` -> measured `rho*`. DELETE `GAMMA_FENCE = 3/4` and
+     the saddle fence `1.0502342`; both are consequences of the annulus radius,
+     not independent physics. Do not port them, do not replace them with new
+     fences. Re-express `surrogate_census`'s 6-way MECE breakdown in `rho`.
+     RENAME `ppgo_map.annulus_rho` in this same build — a public symbol named
+     for a retired concept is how the concept survives its own deletion.
+     ACCEPTANCE: no gamma in the prior yields a "boundary cuts the caustic"
+     region; regime count is TWO per parity; coverage-map regions 6-9 collapse
+     to one row.
+
+  6. **C5 — ghost decay gate.** Independent of the coordinate work and owed on
+     both branches regardless (F027): the ghost branch needs a decay gate, not
+     just a separation test.
+
+  7. **`_GHOST_SEPARATION_MIN = 0.7` — the suspect.** Ask the Part 0 question.
+     F027 showed it never binds on the saddle. Re-derive as relative, or
+     delete. The test-heavy step: 22 references across
+     `test_lensing_ghost_gate.py` and `test_lensing_exterior_windows.py`.
+
+  8. **Make Part 0 mechanical.** A test asserting that no length-unit float in
+     `cogwheel/lensing/` traces to the prior box, and that no live document or
+     public symbol names a retired concept. This bug class arrived by
+     accretion, one plausible constant at a time; only a test stops it
+     returning.
+
+  9. **Then train — once**, in final coordinates, on the final engine and chart
+     set. Cost estimate first; full-suite gate green first.
+
+  ## Standing rules for whoever executes this
+
+  These exist because the last pass changed code and left the prose, and the
+  prose is what the next agent reads.
+
+  - **Surfaces are build SCOPE, not cleanup.** Each brief names its spec and
+    test surfaces. A build that moves a boundary and leaves a live document
+    describing the old one FAILS its acceptance, exactly like a red test.
+  - **Default is DELETE, not re-point.** For a test pinning a boundary that no
+    longer exists as a concept, changing `3.0` to `rho*` IS the scar — it
+    preserves the shape of the wrong idea. Re-point ONLY if the test asserts a
+    value that survives the coordinate change. Expect deletion to dominate in
+    `test_lensing_born.py` (52 tests, 70 lines on doomed names).
+  - **Archive is off-limits.** `COMPLETED.md`, `CHANGELOG.md`,
+    `SPEC_CHANGELOG.md`, `DATA_CONTRACTS_CHANGELOG.md` and their `.d/`
+    fragments record what was true when written. Never edit them to match the
+    new design. `FINDINGS.md` is the middle case: findings stay, but a
+    superseded SCOPE gets a pointer to its successor (see F032 -> F035), never
+    a silent edit.
+  - **Never preserve an incumbent number by construction.** Each replaced
+    constant gets a measured or derived value; matching the old one is a
+    coincidence to report, not a target.
+  - **Never add a fence to make a step pass.** Two fences are being deleted
+    here precisely because they were consequences of a bad boundary.
+  - Slow tests never run inside a build; steps 3 and 5 each get a fast in-build
+    gate plus a post-build driver sweep.
+
+  ## Live surfaces in scope (measured 2026-07-29)
+
+  Tests: `test_lensing_born.py` (epicentre), `test_lensing_surrogate_training.py`,
+  `test_lensing_ghost_gate.py`, `test_lensing_exterior_windows.py`.
+  Spec: `SPEC.md`, `COVERAGE_DESIGN.md` (Parts I and IV), `DATA_CONTRACTS.yaml`,
+  `data_registry.yaml`, and the fragments [[lensing_coverage_map]],
+  [[lensing_born_b1_derivation]], [[lensing_saddle_born]],
+  [[surrogate_component-representation-8hb]].
+  Docs: `docs/source/generated/cogwheel.lensing.ppgo_map.annulus_rho.rst`
+  follows the rename in step 5.
 
 
 - **MASTER COVERAGE MAP — every held-out region and what closes it**
@@ -108,13 +240,10 @@ Tag conventions:
   |---|---|---|---|
   | 1 | Caustic interior, astroid (`gamma < 1`) | interior SACR-C charts | OPEN at the high-gamma CROWN band — `interior_eps_max = 5e-2` was set with crown reachability explicitly UNMEASURED; a P2 pilot recorded 0% pass at eps 3.4 |
   | 2 | Caustic interior, saddle lobes (`gamma > 1`) | `LobeInteriorChart` | CLOSED (shipped `04f9f5c`), except the INTER-LOBE CORRIDOR, which `_lobe_serves` refuses for both lobes — whether the saddle exterior charts pick it up is UNKNOWN |
-  | 3 | Near-caustic shell (fold tubes) | `TubeChart`, `eta in [eta_floor, eta_max]` | OPEN at SMALL GAMMA: `eta_max = 0.05` is ABSOLUTE, so as `gamma -> 0` the astroid shrinks below it, `_min_curvature_radius` skips the tube, and the far-field excludes the same collar — nothing serves it |
+  | 3 | Near-caustic shell (fold tubes) | `TubeChart`, `eta in [eta_floor, eta_max]` | OPEN at SMALL GAMMA, owned by C6 of [[lensing_caustic_relative_coordinates]]: `eta_max = 0.05` is ABSOLUTE, so as `gamma -> 0` the astroid shrinks below it, `_min_curvature_radius` skips the tube, and the far-field excludes the same collar — nothing serves it. The code already computes the right scale and uses it to REFUSE rather than to SCALE |
   | 4 | Cusp neighbourhoods | excluded from tubes -> quadrature | OPEN, both parities. Saddle exclusions are WIDER (`_SADDLE_CUSP_WIDTH_SAFETY = 2.5`, min half-width 0.08) because deltoid cusps are shallow and the wedge-edge turnarounds are near-singular |
   | 5 | Exterior far-field | `FarFieldChart` | CLOSED (per-column admission since 8h-b4) |
-  | 6 | Far annulus `3.0 < \|y\| <= 4.2426`, `gamma < 3/4` | Born carrier + residual chart | MACHINERY SHIPPED (`31ee133`); the residual chart is NOT trained, so the region is still exact-served |
-  | 7 | Far annulus, `3/4 <= gamma < 1` | — | REFUSED by the scalar fence. Measured 99.6% exterior at `gamma=0.80`, 97% at 0.90 — the fence discards 15.6% of the shear range to exclude a few-percent cusp wedge |
-  | 8 | Far annulus, `gamma > 1.0502342` | saddle Born | DERIVED (F024 physics, F026 fence), NOT BUILT |
-  | 9 | Far annulus, `1 < gamma <= 1.0502342` | — | REFUSED by the saddle fence; costs only 3.1% of the shear range, so per-theta recovery is low priority here |
+  | 6-9 | ~~Far annulus `3.0 < \|y\| <= 4.2426`, and its three gamma fences~~ | — | **DISSOLVING — do not work these rows.** All four existed only because `\|y\| = 3` (the PRIOR BOX half-width) was treated as a physical boundary. F036 measures that no `\|y\|` threshold can bound the caustic at all: `r_caustic` diverges at the parity wall (19.8 at `gamma = 0.99` vs a 4.2426 box corner). `GAMMA_FENCE = 3/4` and the saddle fence `1.0502342` are CONSEQUENCES of the annulus radius, not independent physics, and are deleted with it. These four rows collapse into ONE caustic-relative exterior region. See [[lensing_caustic_relative_coordinates]] |
   | 10 | DROPPED GAMMA SLIVERS (any `\|y\|`, any `w`) | NOTHING | OPEN. `min_gamma_band = 0.02`; a dropped sliver gets no chart of any kind. Total prior mass NEVER MEASURED |
   | 11 | `w` above the certified ceiling (saddle `w > 60`) | — | OPEN and STRUCTURALLY DIFFERENT: no exact evaluator exists there, so charts cannot be TRAINED, not merely are not |
   | 12 | `gamma = 1` parity wall (`det A = 0`) | named refusal | ACCEPTED — measure zero, not a hole |
@@ -126,11 +255,13 @@ Tag conventions:
      our prior but write it as a band). Carrier is LEAD-ONLY like positive
      parity; the complex ghost is REFUSED there pending (4) below.
      [[lensing_saddle_born]]
-  2. **Per-column admission** (regions 7, 9). No new physics — reuse the
-     per-theta_c pattern `_InteriorAdmission.admits_exterior` already uses.
-     Do BOTH branches at once: the deltoid needs a lobe-aware test because a
-     directional radius from the origin is ill-posed for off-origin lobes.
-     Worth 5x more on the positive branch (15.6% vs 3.1%).
+  2. ~~**Per-column admission** (regions 7, 9).~~ **FROZEN — do not build.**
+     This was queued work to build a smarter version of the very fence
+     [[lensing_caustic_relative_coordinates]] deletes. A per-column admission
+     test for `GAMMA_FENCE` is effort spent making a box-derived boundary more
+     accurate, when the boundary itself is the defect (F036). The per-theta_c
+     PATTERN stays correct and is reused by the caustic-relative exterior
+     region; only this application of it is cancelled.
   3. **Cusp fast-serving** (region 4). Prerequisite DISCHARGED (Schwinger
      homogenization shipped as Build 8d, 2026-07-21). The engine-side machinery
      exists (8e Pearcey arm, 8f table); what is owed is measuring the arm's
@@ -147,10 +278,11 @@ Tag conventions:
      widths across the prior. The count is data-dependent and unmeasured, and
      that number decides whether this is a rounding error or a real hole.
      [[lensing_dropped_gamma_slivers]]
-  6. **Small-gamma collar** (region 3). Make the tube shell SCALE-RELATIVE
-     rather than absolute, or add a weak-shear chart in `y/gamma`-scaled
-     coordinates, or serve the analytic limit. Currently the last clause of
-     [[likelihood_prior-bounds-instantiation]].
+  6. **Small-gamma collar** (region 3). Closed by making the tube shell
+     CURVATURE-RELATIVE (`eta_max = f * R_c`), which is step C6 of
+     [[lensing_caustic_relative_coordinates]] — not a separate treatment and
+     not a weak-shear special case. The collar is a symptom of the same
+     absolute-length defect as regions 6-9.
   7. **Crown-band measurement** (region 1). Measure whether the high-gamma
      astroid interior reaches an acceptable eps at all before deciding it needs
      a treatment. Currently a clause inside
@@ -298,6 +430,13 @@ Tag conventions:
 
   Owed, still open:
 
+  0. **BLOCKED ON C8 — do not train, do not wire yet.** The saddle exterior
+     fence `1.0502342 < gamma < 3` is derived from `ANNULUS_INNER_RADIUS`, a
+     prior-box length being retired (F036); it dissolves with the annulus
+     rather than being ported. The F026 closed form `saddle_caustic_max_y` is
+     real physics and SURVIVES — it is the fence built on top of it that goes.
+     See [[lensing_caustic_relative_coordinates]].
+
   4. Wire the saddle branch (together with the positive-parity branch —
      same blocker) through the fact-4 slot in
      `likelihood.py::_surrogate_coefficients`, once the driver-trained
@@ -350,9 +489,10 @@ Tag conventions:
   millisecond scale everywhere!"). The exclusion balls are small in
   prior volume but are magnification peaks — samplers CONCENTRATE
   there, so they are hot regions, not corners. This build closes them:
-  every in-domain query serves at ms scale. Candidate mechanisms (in
-  convergence with the homogenization design seed in
-  [[likelihood_schwinger-homogenization]]): Pearcey-function uniform
+  every in-domain query serves at ms scale. Candidate mechanisms (converging
+  with the Schwinger homogenization, which SHIPPED as Build 8d — the
+  quadrature is now the exact evaluator on both parities): Pearcey-function
+  uniform
   asymptotics in cusp-adapted coordinates (2/3-power scaling; the
   uniform form IS the known structure at the fixed transition), a
   precomputed Pearcey table + smooth correction charts, or dense local
@@ -461,9 +601,8 @@ tolerance widening; fallback-to-exact preserves certified-or-refuse).
      TubeChart stores per-chart bounds (computation swap, no schema/
      serving rework) and the production run is sequenced after
      8d/8e; the guard removes the dependence on that luck.
-  Links: [[likelihood_cusp-fast-serving]],
-  [[likelihood_schwinger-homogenization]],
-  [[likelihood_envelope-surrogate]].
+  Links: [[likelihood_cusp-fast-serving]], [[likelihood_envelope-surrogate]].
+  (Schwinger homogenization shipped as Build 8d; its fragment is retired.)
 
 # Standard RB zero-noise floor (8.96e-3) — fix upstream [→ docs]
 

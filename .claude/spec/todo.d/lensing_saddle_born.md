@@ -30,6 +30,13 @@ section: Backlog
 
   Owed, still open:
 
+  0. **BLOCKED ON C8 — do not train, do not wire yet.** The saddle exterior
+     fence `1.0502342 < gamma < 3` is derived from `ANNULUS_INNER_RADIUS`, a
+     prior-box length being retired (F036); it dissolves with the annulus
+     rather than being ported. The F026 closed form `saddle_caustic_max_y` is
+     real physics and SURVIVES — it is the fence built on top of it that goes.
+     See [[lensing_caustic_relative_coordinates]].
+
   4. Wire the saddle branch (together with the positive-parity branch —
      same blocker) through the fact-4 slot in
      `likelihood.py::_surrogate_coefficients`, once the driver-trained

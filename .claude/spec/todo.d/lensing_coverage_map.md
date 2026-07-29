@@ -19,13 +19,10 @@ section: Backlog
   |---|---|---|---|
   | 1 | Caustic interior, astroid (`gamma < 1`) | interior SACR-C charts | OPEN at the high-gamma CROWN band — `interior_eps_max = 5e-2` was set with crown reachability explicitly UNMEASURED; a P2 pilot recorded 0% pass at eps 3.4 |
   | 2 | Caustic interior, saddle lobes (`gamma > 1`) | `LobeInteriorChart` | CLOSED (shipped `04f9f5c`), except the INTER-LOBE CORRIDOR, which `_lobe_serves` refuses for both lobes — whether the saddle exterior charts pick it up is UNKNOWN |
-  | 3 | Near-caustic shell (fold tubes) | `TubeChart`, `eta in [eta_floor, eta_max]` | OPEN at SMALL GAMMA: `eta_max = 0.05` is ABSOLUTE, so as `gamma -> 0` the astroid shrinks below it, `_min_curvature_radius` skips the tube, and the far-field excludes the same collar — nothing serves it |
+  | 3 | Near-caustic shell (fold tubes) | `TubeChart`, `eta in [eta_floor, eta_max]` | OPEN at SMALL GAMMA, owned by C6 of [[lensing_caustic_relative_coordinates]]: `eta_max = 0.05` is ABSOLUTE, so as `gamma -> 0` the astroid shrinks below it, `_min_curvature_radius` skips the tube, and the far-field excludes the same collar — nothing serves it. The code already computes the right scale and uses it to REFUSE rather than to SCALE |
   | 4 | Cusp neighbourhoods | excluded from tubes -> quadrature | OPEN, both parities. Saddle exclusions are WIDER (`_SADDLE_CUSP_WIDTH_SAFETY = 2.5`, min half-width 0.08) because deltoid cusps are shallow and the wedge-edge turnarounds are near-singular |
   | 5 | Exterior far-field | `FarFieldChart` | CLOSED (per-column admission since 8h-b4) |
-  | 6 | Far annulus `3.0 < \|y\| <= 4.2426`, `gamma < 3/4` | Born carrier + residual chart | MACHINERY SHIPPED (`31ee133`); the residual chart is NOT trained, so the region is still exact-served |
-  | 7 | Far annulus, `3/4 <= gamma < 1` | — | REFUSED by the scalar fence. Measured 99.6% exterior at `gamma=0.80`, 97% at 0.90 — the fence discards 15.6% of the shear range to exclude a few-percent cusp wedge |
-  | 8 | Far annulus, `gamma > 1.0502342` | saddle Born | DERIVED (F024 physics, F026 fence), NOT BUILT |
-  | 9 | Far annulus, `1 < gamma <= 1.0502342` | — | REFUSED by the saddle fence; costs only 3.1% of the shear range, so per-theta recovery is low priority here |
+  | 6-9 | ~~Far annulus `3.0 < \|y\| <= 4.2426`, and its three gamma fences~~ | — | **DISSOLVING — do not work these rows.** All four existed only because `\|y\| = 3` (the PRIOR BOX half-width) was treated as a physical boundary. F036 measures that no `\|y\|` threshold can bound the caustic at all: `r_caustic` diverges at the parity wall (19.8 at `gamma = 0.99` vs a 4.2426 box corner). `GAMMA_FENCE = 3/4` and the saddle fence `1.0502342` are CONSEQUENCES of the annulus radius, not independent physics, and are deleted with it. These four rows collapse into ONE caustic-relative exterior region. See [[lensing_caustic_relative_coordinates]] |
   | 10 | DROPPED GAMMA SLIVERS (any `\|y\|`, any `w`) | NOTHING | OPEN. `min_gamma_band = 0.02`; a dropped sliver gets no chart of any kind. Total prior mass NEVER MEASURED |
   | 11 | `w` above the certified ceiling (saddle `w > 60`) | — | OPEN and STRUCTURALLY DIFFERENT: no exact evaluator exists there, so charts cannot be TRAINED, not merely are not |
   | 12 | `gamma = 1` parity wall (`det A = 0`) | named refusal | ACCEPTED — measure zero, not a hole |
@@ -37,11 +34,13 @@ section: Backlog
      our prior but write it as a band). Carrier is LEAD-ONLY like positive
      parity; the complex ghost is REFUSED there pending (4) below.
      [[lensing_saddle_born]]
-  2. **Per-column admission** (regions 7, 9). No new physics — reuse the
-     per-theta_c pattern `_InteriorAdmission.admits_exterior` already uses.
-     Do BOTH branches at once: the deltoid needs a lobe-aware test because a
-     directional radius from the origin is ill-posed for off-origin lobes.
-     Worth 5x more on the positive branch (15.6% vs 3.1%).
+  2. ~~**Per-column admission** (regions 7, 9).~~ **FROZEN — do not build.**
+     This was queued work to build a smarter version of the very fence
+     [[lensing_caustic_relative_coordinates]] deletes. A per-column admission
+     test for `GAMMA_FENCE` is effort spent making a box-derived boundary more
+     accurate, when the boundary itself is the defect (F036). The per-theta_c
+     PATTERN stays correct and is reused by the caustic-relative exterior
+     region; only this application of it is cancelled.
   3. **Cusp fast-serving** (region 4). Prerequisite DISCHARGED (Schwinger
      homogenization shipped as Build 8d, 2026-07-21). The engine-side machinery
      exists (8e Pearcey arm, 8f table); what is owed is measuring the arm's
@@ -58,10 +57,11 @@ section: Backlog
      widths across the prior. The count is data-dependent and unmeasured, and
      that number decides whether this is a rounding error or a real hole.
      [[lensing_dropped_gamma_slivers]]
-  6. **Small-gamma collar** (region 3). Make the tube shell SCALE-RELATIVE
-     rather than absolute, or add a weak-shear chart in `y/gamma`-scaled
-     coordinates, or serve the analytic limit. Currently the last clause of
-     [[likelihood_prior-bounds-instantiation]].
+  6. **Small-gamma collar** (region 3). Closed by making the tube shell
+     CURVATURE-RELATIVE (`eta_max = f * R_c`), which is step C6 of
+     [[lensing_caustic_relative_coordinates]] — not a separate treatment and
+     not a weak-shear special case. The collar is a symptom of the same
+     absolute-length defect as regions 6-9.
   7. **Crown-band measurement** (region 1). Measure whether the high-gamma
      astroid interior reaches an acceptable eps at all before deciding it needs
      a treatment. Currently a clause inside

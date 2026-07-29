@@ -54,6 +54,5 @@ section: Backlog
      TubeChart stores per-chart bounds (computation swap, no schema/
      serving rework) and the production run is sequenced after
      8d/8e; the guard removes the dependence on that luck.
-  Links: [[likelihood_cusp-fast-serving]],
-  [[likelihood_schwinger-homogenization]],
-  [[likelihood_envelope-surrogate]].
+  Links: [[likelihood_cusp-fast-serving]], [[likelihood_envelope-surrogate]].
+  (Schwinger homogenization shipped as Build 8d; its fragment is retired.)

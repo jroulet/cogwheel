@@ -12,6 +12,15 @@ section: Backlog
   `surrogate_census.classify_fallthrough` (annulus draws no longer
   mis-attributed to `out-of-box`). What remains is the LAST step only:
 
+  **BLOCKED ON C8 — do NOT train the residual chart yet.** The annulus this
+  rung is defined over (`3.0 < |y| <= 4.2426`) is a prior-box artifact being
+  retired; F036 shows no `|y|` threshold can bound the caustic. A chart trained
+  now would be trained in coordinates that are about to change, and training is
+  what closes the cheap-edit window (see
+  [[lensing_caustic_relative_coordinates]]). The carrier, gate and census
+  arithmetic are correct and stay; only the REGION they are keyed to moves. Do
+  the steps below AFTER C8 lands, restated in `rho`.
+
   Once the residual chart `F_exact - F_carrier` is driver-trained
   (TRAIN_TIER artifact — not yet built), re-derive the registration/accuracy
   gate in the residual currency and remove the fall-through at the fact-4
