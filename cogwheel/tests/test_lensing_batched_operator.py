@@ -224,10 +224,17 @@ GEOMETRIC_SERVE_RTOL = 1e-3
 
 #: Production names the independent oracle helpers must NOT reference
 #: (F002 oracle independence, enforced by the AST guard).
+#:
+#: Pruned 2026-07-29: `_grid_certified`, `_contract_grid` and
+#: `_weight_vectors` were the retired operator-series contraction and its
+#: predecessors. None of them exist any more, so denying them protected
+#: nothing while implying the oracle still had a series to stay clear of.
+#: A denylist that outlives its symbols is indistinguishable from one that
+#: is still doing work.
 ORACLE_FORBIDDEN_NAMES = frozenset({
     'operator', 'F_op', 'F_op_grid', 'channels', 'geometry',
-    '_hyp1f1', 'point_mass_g_derivatives', '_grid_certified',
-    '_contract_grid', '_weight_vectors', 'LensedRelativeBinningLikelihood',
+    '_hyp1f1', 'point_mass_g_derivatives',
+    'LensedRelativeBinningLikelihood',
 })
 
 # ---------------------------------------------------------------------------
