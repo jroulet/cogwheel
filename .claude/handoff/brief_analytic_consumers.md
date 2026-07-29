@@ -17,11 +17,19 @@ build and is NOT in scope.
 
 ## What 1a gave you
 
-In `cogwheel/lensing/chang_refsdal/geometry.py`, all exact and
-oracle-verified to 1e-12: `caustic_derivatives` (the primitive, `y'` and
-`y''`), `caustic_curvature_radius`, `caustic_speed`, and
-`fold_opening_direction` (unit vector toward the two-image side). Use them.
-Do not re-derive the cascade here.
+In `cogwheel/lensing/chang_refsdal/geometry.py` (shipped `1a82046`):
+`caustic_derivatives` (the primitive, `y'` and `y''`),
+`caustic_curvature_radius`, `caustic_speed`, and `fold_opening_direction`
+(unit vector toward the two-image side). Verified against a two-stage oracle
+at `atol = 5e-13 + rtol = 1e-11` — `y'` worst 4.39e-13, `y''` worst 2.56e-14
+over 110 configs; `|y'|` at the astroid cusp is 1.3e-16, i.e. cusps are exact
+roots. Use these. Do not re-derive the cascade, and do not add a finite
+difference anywhere.
+
+Domain contract you inherit: positive parity IGNORES `branch` (mirroring
+`critical_point`), the saddle wedge edge REFUSES by name rather than dividing
+by a clamped-zero discriminant, and refusal is whole-call — never a
+per-element `nan`.
 
 ## Scope
 
@@ -76,13 +84,21 @@ trains through a singularity.
 
 Its width is nonetheless currently derived from a sampling artifact
 (`width_safety * dip half-width`, floored at an absolute 0.05), so it IS on
-the hit list — but not here, because the right width is unmeasured on BOTH
-sides of the interface: `surrogate._CUSP_ARM_COVERAGE`, which is meant to
-shrink the window to the complement of the Pearcey arm's certified angular
-coverage, is a placeholder defaulting to `0.0` and says so in its own
-comment. Picking a width in this build would mean inventing the very kind of
-constant this step exists to delete. It is a named driver measurement; the
-driver owns it.
+the hit list — but not in this build. F040 shows the correct width is
+DERIVABLE and is a FUNCTION of `w`, not a constant:
+
+    dth_par  ~ sqrt(2/(|y''| w^{1/2})),   dth_perp ~ (6/(|y'''_perp| w^{3/4}))^{1/3}
+
+both `w^{-1/4}`. Two reasons that is out of scope here. First, it needs
+`y'''`, which build 1a did not deliver — it is scheduled with 1c. Second,
+`cusp_windows` is STORED per chart as a fixed `(theta_cusp, delta_theta)`
+pair, so the schema itself cannot express a frequency-dependent window;
+fixing it is a schema change, not a value change, and that is its own build.
+
+Note the incumbent is w-INDEPENDENT and 2-50x too narrow over the served
+band, so charts are currently trained INTO the Pearcey region. Do not
+"improve" it here by widening it — a hand-picked wider constant is the same
+bug with a bigger number.
 
 If you find yourself needing a cusp-window width to make something pass,
 STOP and report — that is the signal, not a blocker to route around.
