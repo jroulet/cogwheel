@@ -2390,10 +2390,35 @@ the old `(1,2)`/`(-1,4)` split), so the geometry is right and only the guard
 is wrong.
 
 **The SIGN is not in doubt; only the magnitude guard is.** At `gamma = 0.02`
-the overlap is 0.03 against a float64 noise floor of ~1e-16 — the sign is
-determined to 14 orders of magnitude. A guard is still wanted (near a cusp the
-soft axis genuinely degenerates), but it must be RELATIVE — measured against
-numerical noise or against the local `|y''|` scale — never a fixed 0.1.
+the overlap is 0.03 against a float64 noise floor of ~1e-16. Swept over the
+prior the MINIMUM `|dot|` is 4.4e-3 (at `gamma = 0.01`), so the sign never
+approaches ambiguity anywhere and needs no protection.
+
+**`|dot|` is the WRONG QUANTITY, not a mis-scaled one — and the right form is
+a DIMENSIONLESS RATIO OF LOCAL QUANTITIES.** `|dot|` measures how TRANSVERSE
+the fold opening is, a legitimate gamma-dependent geometric fact. What the
+guard wanted is CUSP PROXIMITY. Because `theta` is dimensionless, `|y'|` and
+`|y''|` both carry length, so `|y'| / |y''|` is exactly the angular distance
+to the cusp (where `y' = 0`); dividing by the arc half-span makes it fully
+arc-relative. Measured at matched cusp proximity:
+
+| gamma | 0.02 | 0.06 | 0.10 | 0.30 | 0.90 |
+|---|---|---|---|---|---|
+| `\|dot\|` | 0.0162 | 0.0486 | 0.0810 | 0.2418 | 0.6902 |
+| `\|y'\|/\|y''\|` | 0.3071 | 0.3099 | 0.3125 | 0.3236 | 0.3188 |
+
+`|dot|` swings 43x; the ratio moves 4%. That is the difference between a
+quantity that tracks the caustic's SIZE and one that tracks its SHAPE, and
+only the second belongs in a guard. GENERAL RULE for this package: a guard is
+a dimensionless O(1) constant applied to a scale-free ratio of local
+quantities carrying the same units. An absolute cut on a dimensionful local
+quantity is the bug class this whole sweep exists to remove — `_PROBE_ETA`
+(F039), `ANNULUS_INNER_RADIUS` (F036) and this guard are three instances of
+it.
+
+Deleting the guard outright is defensible: the arc bounds already exclude the
+cusp windows, and `|y'|/|y''|` over the arc half-span measures >= 0.39
+everywhere sampled. If a guard is kept, it must be the ratio.
 
 **Why the near-tangency is real physics, not a bug.** `D2y[e,e]` is the
 direction the fold OPENS, and for a fold it need only be TRANSVERSE to the

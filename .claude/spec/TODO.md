@@ -318,9 +318,26 @@ Tag conventions:
         quantity measured to scale as `~1.5*gamma`. A band that exists but
         produces nothing is unserved exactly like a dropped one; the
         acceptance must say so or it is satisfiable while the collar stays
-        shut. Whatever replaces `0.1` must be RELATIVE — to the float noise
-        floor, against which the sign carries ~14 orders of margin, or to the
-        local `|y''|` scale. A smaller absolute number is the same bug.
+        shut. And `|dot|` is the WRONG QUANTITY, not merely a mis-scaled one:
+        it measures how TRANSVERSE the fold opening is, which is a legitimate
+        gamma-dependent geometric fact, not a pathology. What the guard wanted
+        is cusp proximity. Use a DIMENSIONLESS RATIO OF LOCAL QUANTITIES:
+        since `theta` is dimensionless, `|y'|` and `|y''|` both carry length,
+        so `|y'| / |y''|` IS the angular distance to the cusp (where
+        `y' = 0`), and dividing by the arc half-span makes it fully
+        arc-relative. Measured, that ratio is gamma-STABLE — 0.307, 0.310,
+        0.313, 0.324, 0.319 at matched cusp proximity across
+        `gamma = 0.02..0.9` — while `|dot|` swings 33x over the same range.
+        A dimensionless O(1) constant on a scale-free ratio is the shape every
+        guard in this package should have; an absolute cut on a
+        dimensionful local quantity is the bug class this whole step exists to
+        remove.
+        The sign needs no protection at all: swept over the prior the minimum
+        `|dot|` is 4.4e-3 at `gamma = 0.01`, twelve orders above the float
+        noise floor, so it never approaches ambiguity. Deleting the guard
+        outright is defensible, since the arc bounds already exclude the cusp
+        windows — measured `|y'|/|y''|` over arc half-span stays >= 0.39
+        everywhere sampled. If a guard is kept, it must be the ratio.
 
      1c. **The serving path, plus third order.** `_pearcey_cusp._cusp_vertex`
         locates a cusp by differencing caustic speed at a hardcoded
