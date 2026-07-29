@@ -46,8 +46,8 @@ STATUS -- CARRIER SHIPS; LIVE SERVE AWAITS THE TRAINED RESIDUAL CHART.
     are the correct resolved-image physics and the macro-limit diagnostic
     (`born_amplification`); they are deliberately kept OUT of the serve
     carrier (F025).
-delay-frame bug fixed in Build 8h-b7 was a convention held implicitly at
-four sites; this module adds no fifth):
+CONVENTIONS (each single-sourced elsewhere; this module adds no new
+site for any of them):
 
     * The expansion origin is ``sqrt(mu_macro)`` with
       ``mu_macro = 1 / ((1 - kappa)**2 - gamma**2)``, NOT ``1``.  A
