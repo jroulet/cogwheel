@@ -111,7 +111,7 @@ from cogwheel.lensing.chang_refsdal import geometry, operator
 from cogwheel.lensing.chang_refsdal.operator import (
     CancellationError, F_op, F_op_grid)
 from cogwheel.lensing.chang_refsdal._schwinger import (
-    SchwingerCertificationError)
+    SchwingerCertificationError, W_CEILING_SCHWINGER)
 
 #: Named wave-branch refusals (Build 8d homogenization): a sheared
 #: positive-parity host (``gamma' > 0``) is served by the exact Schwinger
@@ -198,6 +198,36 @@ XOR_BAND_LS = np.linspace(24.0, 59.4, 22)
 XOR_REFUSING_GAMMA = 0.8722
 XOR_REFUSING_Y = (0.80786, 0.28183)
 XOR_REFUSING_W = 65.0
+
+#: Accuracy gate on the ABOVE-CEILING geometric serve, against the same
+#: independent mpmath `_oracle_fop` used below the ceiling.
+#:
+#: The production exact evaluator (`_schwinger.f_schwinger`) refuses above
+#: ``W_CEILING_SCHWINGER``, and the suite treated that as meaning nothing
+#: above the ceiling could be checked -- so every above-ceiling test asserted
+#: which PATH ran, or byte-identity against production, which is
+#: unfalsifiable by construction (a wrong value passes). But `_oracle_fop` is
+#: a pure mpmath operator-series reconstruction with NO frequency ceiling:
+#: the ceiling is a property of one evaluator, not of the mathematics.
+#:
+#: Measured on the served nodes of `XOR_BAND_LS` (2026-07-29): worst relative
+#: error 3.7e-5, so this gate carries a ~27x margin.
+#:
+#: SCOPE, measured and deliberately narrow. `_oracle_fop` is the LEGACY
+#: operator series -- the path demoted in Build 8d precisely because it
+#: cancels catastrophically at high ``L = w * |y'|`` (F005: certified to
+#: ``L ~ 25-30``, certified-or-refused through 48). It is therefore a valid
+#: reference only at MODERATE ``L``. This band runs ``L`` in [24, 59.4],
+#: near that edge, so treat this as a CONSISTENCY gate between two
+#: independent reconstructions, NOT a certification of either.
+#:
+#: It would NOT have caught F028. Those configs sit at ``L ~ 100-200``
+#: (``|y| ~ 1.5-2.1`` at ``w = 70-500``), where `_oracle_fop` itself
+#: diverges: measured 2026-07-29, the arm AND the geometric serve both
+#: report relative error 1.000e+00 against it there, i.e. the oracle is the
+#: outlier. Falsifying the uniform arms in their own high-``L`` regime needs
+#: a reference this suite does not yet have -- see FINDINGS F028/F029.
+GEOMETRIC_SERVE_RTOL = 1e-3
 
 #: Production names the independent oracle helpers must NOT reference
 #: (F002 oracle independence, enforced by the AST guard).
@@ -710,6 +740,75 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
             f'y={XOR_REFUSING_Y}, w={XOR_REFUSING_W} certified; the named '
             f'refusal never fires, so the certified-or-refuse contract has '
             f'no refusing witness left')
+
+    def test_served_band_values_match_the_oracle_above_the_ceiling_too(self):
+        """Every served node in the band is ACCURATE, not merely served.
+
+        The gap this closes: above `_schwinger.W_CEILING_SCHWINGER` the
+        production exact evaluator refuses, so the suite had no production
+        path to compare against and fell back on asserting WHICH RUNG served
+        the node, or byte-identity against production. Both pass for a wrong
+        number -- byte-identity against the serving rung is true by
+        construction (F028: `F_op` serves THROUGH the arm above the ceiling,
+        so `F_op == arm` is guaranteed however wrong the arm is).
+
+        `_oracle_fop` is an independent mpmath operator-series
+        reconstruction with no FREQUENCY ceiling -- that ceiling belongs to
+        one evaluator, not to the mathematics -- so pointing it above the
+        ceiling turns this band's serve from unfalsifiable into gated.
+
+        Two limits, both measured 2026-07-29, so this is not read as more
+        than it is:
+
+        * `_oracle_fop` is the LEGACY operator series and has its own
+          ``L = w * |y'|`` limit (F005). This band tops out at ``L = 59.4``,
+          near that edge, so this is a consistency gate between two
+          independent reconstructions, not a certification of either.
+        * It does NOT catch F028. On this band the uniform arm does not
+          serve a wrong value -- it DECLINES, so a regression to the pre-fix
+          routing reds the non-vacuity assertion below rather than the
+          accuracy one. F028's configs live at ``L ~ 100-200`` where
+          `_oracle_fop` itself diverges (arm and geometric both report
+          relative error 1.0 against it there).
+
+        What it does buy: the above-ceiling geometric serve is now gated on
+        a VALUE rather than on which rung answered, and the routing cannot
+        silently regress without reddening this test.
+        """
+        y = np.array([CERT_SQRT_S, 0.0])
+        n_above = 0
+        n_below = 0
+        for cancellation_l in XOR_BAND_LS:
+            w = float(cancellation_l) / CERT_SQRT_S
+            certified, value = self._solo(w, y, CERT_GAMMA, 0.0, 0.0)
+            if not certified:
+                continue
+            above = w > W_CEILING_SCHWINGER
+            rtol = GEOMETRIC_SERVE_RTOL if above else FOP_RTOL
+            reference = _oracle_fop(w, y, CERT_GAMMA)
+            error = abs(value - reference) / abs(reference)
+            with self.subTest(L=float(cancellation_l), w=w, above=above):
+                self.n_checks += 1
+                self.assertLess(
+                    error, rtol,
+                    f'served value at L={cancellation_l:.2f} (w={w:.3f}, '
+                    f'{"above" if above else "below"} the ceiling) is '
+                    f'{error:.3e} from the independent mpmath oracle, over '
+                    f'the {rtol:.0e} gate')
+            n_above += int(above)
+            n_below += int(not above)
+
+        # Non-vacuity: the above-ceiling arm is the whole point of the test.
+        self.n_checks += 1
+        self.assertGreater(
+            n_above, 0,
+            'no served node lay above the Schwinger ceiling, so the '
+            'above-ceiling accuracy gate never ran')
+        self.n_checks += 1
+        self.assertGreater(
+            n_below, 0,
+            'no served node lay below the ceiling, so the wave-branch '
+            'gate never ran')
 
 
 class BatchedContractionFalsificationTestCase(BatchedOperatorTestCase):

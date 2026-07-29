@@ -1503,3 +1503,49 @@ generalise these numbers to `det A < 0`. `_certify_geometric_census` passes
 every one of these points, so it is not a guard against this.
 
 Probes: `probe_geo_gate.py`, `probe_tail_origin.py` (scratchpad).
+
+## F030 — the test suite has NO valid oracle in the regime where the uniform arms actually serve (2026-07-29)
+
+Found while consolidating duplicate routing pins. Explains why F028 survived
+undetected and why the suite is structural rather than value-based above the
+Schwinger ceiling.
+
+**The chain.** Above `W_CEILING_SCHWINGER = 60` the production exact evaluator
+(`_schwinger.f_schwinger`) refuses. The suite therefore had no production path
+to compare against and fell back on two things that cannot fail for a wrong
+value: asserting WHICH RUNG served the node, and byte-identity against
+production. The latter is circular by construction — `F_op` serves THROUGH the
+arm above the ceiling (F028), so `F_op == arm` holds however wrong the arm is.
+
+**The near-miss.** `test_lensing_batched_operator._oracle_fop` is an
+independent mpmath operator-series reconstruction with no FREQUENCY ceiling,
+so it looked like the missing oracle. It is not, and the difference matters:
+it is the LEGACY operator series demoted in Build 8d precisely because it
+cancels catastrophically at high `L = w * |y'|` (F005: certified to
+`L ~ 25-30`, certified-or-refused through 48).
+
+**Measured 2026-07-29.** At the F028 configs (`gamma = 0.70, 0.90`,
+`eta/R_c = 0.40`, `w = 70..100`, so `L ~ 100-200`) BOTH the uniform arm and
+the geometric serve report relative error exactly `1.000e+00` against
+`_oracle_fop` — the oracle is the outlier, not the thing under test. So the
+one candidate reference the suite owns is invalid exactly where the arms live.
+
+**Consequence.** The uniform arms are UNFALSIFIABLE by the current suite in
+their own serving regime. Every accuracy claim about them is additionally
+gated behind `COGWHEEL_BRUTE_ACCURACY`, which by policy never runs in a build
+— so nothing that runs in a build has ever compared an arm to truth.
+
+**What IS gated now.** `test_served_band_values_match_the_oracle_above_the_
+ceiling_too` gates the above-ceiling GEOMETRIC serve at `L in [24, 59.4]`
+against `_oracle_fop` (worst measured 3.7e-5 against a 1e-3 gate). That is a
+consistency gate between two independent reconstructions at moderate `L`, and
+it stops the routing regressing silently. It does NOT reach the arms.
+
+**What is still owed.** A reference valid at `L ~ 100-200`. The Schwinger
+quadrature refuses there by frequency; the operator series diverges there by
+cancellation. Candidates not yet tried: direct high-dps numerical evaluation
+of the diffraction integral at a handful of anchor configs, or a stationary-
+phase-plus-correction reference with an independently bounded remainder. Until
+one exists, any statement that the uniform arms are accurate is unverified —
+see F028 for what was measured when geometric optics was used as the stand-in
+reference.
