@@ -88,11 +88,10 @@ MACRO-SADDLE (NEGATIVE-PARITY) DISPATCH
 branch by the exact 1D Schwinger-parameter quadrature
 `_schwinger.f_schwinger`: a positive-parity host ``lam > |gamma|`` with
 reduced shear ``gamma' = gamma/lam > 0`` reduces / rotates /
-reconstructs through the SAME evaluator as the macro saddle (below),
-and the legacy operator / 1F1 contraction is RETIRED to the shear-free
-``gamma' == 0`` point-lens exit (`_grid_certified`, its F001/F005
-refusal constants unchanged) and to test-only oracle duty
-(`legacy_operator_oracle`).  A macro saddle ``0 < lam < |gamma|`` has
+reconstructs through the SAME evaluator as the macro saddle (below).
+The shear-free ``gamma' == 0`` point lens is a closed form: the shear
+operator is the identity there, so the amplification is the point-mass
+kernel times the mass-sheet phase.  A macro saddle ``0 < lam < |gamma|`` has
 NO convergent shear operator series (the series diverges past the
 parity branch point), so those configs route instead to the exact 1D
 Schwinger-parameter quadrature `_schwinger.f_schwinger`, evaluated in
@@ -167,9 +166,7 @@ from cogwheel.lensing.chang_refsdal._hyp1f1 import (
 # Bare module-global alias for the Schwinger raw-integral njit core so the
 # node-parallel driver `_schwinger_raw_integral_map` can call it inside
 # `numba.prange` AND its `.py_func` chain can be patched by the F010
-# self-falsification tests (the same discipline `_fused_contraction` uses
-# for its module-global references).  The evaluator body itself is UNTOUCHED
-# (Build 8f lever 3 restructures only the calling loop).
+# self-falsification tests.
 from cogwheel.lensing.chang_refsdal._schwinger import (
     _raw_t_integral_core as _schwinger_raw_t_integral_core)
 
@@ -212,35 +209,10 @@ L_MAX = 48
 #: design.  Measured p90: 1.17 below 0.1, 7.65e-5 above 0.3 (F029, F031).
 ETA_MIN_GEOMETRIC = 0.3
 
-#: First-order float64 round-off unit for the operator CONTRACTION
-#: (machine epsilon).  The contraction stays in complex128 -- the
-#: double-double substrate lives only in the 1F1 kernel, never here
-#: (FINDINGS F001) -- so its accuracy is bounded by this epsilon times
-#: the measured cancellation condition ``sum|term| / |total|``.
-_CONTRACTION_UNIT_ROUNDOFF = float(np.finfo(np.float64).eps)
-
-#: Relative-accuracy target the wave branch must certify (FINDINGS
-#: F005): the 1e-10 bar every returned amplification is held to, above
-#: which the evaluator refuses by name rather than returning a
-#: finite-but-uncertified value.  The operator-series contraction that
-#: once measured itself against this target is retired; the target
-#: survives as the shared accuracy bar the certified paths quote.
+#: Relative-accuracy bar every wave-branch value must certify to
+#: (FINDINGS F005).  Above it the evaluator refuses by name rather than
+#: returning a finite-but-uncertified value.
 _CONTRACTION_TARGET = 1e-10
-
-#: Round-off certification cut for the CONTRACTION error source, applied
-#: to the measured bound ``eps * (sum|term| / |total|)``.  Set at 2e-9
-#: from direct 70-dps-oracle calibration on the wave band: every config
-#: the suite must return sits at or below ~1.1e-9 on this bound (largest:
-#: CERT y=(0.9,0) L=43.5 at 1.12e-9; large-shear w=40 at 7.4e-10), while
-#: every config whose TRUE error breaches 1e-10 sits at or above ~3e-9
-#: (CERT L>=45).  The bound is a WORST-CASE upper bound, loose by
-#: ~20-30x and NOT a rigorous 1e-10 proof (it can invert across shear);
-#: it is a measured coarse net for the CONTRACTION blow-up the truncation
-#: cut cannot see, sound inside the wave band ``L <= L_MAX`` where the
-#: kernel is itself certified.  (The former 1e-8 was calibrated on
-#: conflated max_order=42 measurements and let L~45-48 leak as finite-
-#: but-wrong; see the refusal site.)
-_CONTRACTION_GUARD = 2e-9
 
 
 
@@ -761,7 +733,7 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
                  beta: float = 0.0, kappa: float = 0.0) -> np.ndarray:
     """Macro-saddle amplification over a ``w`` grid, node by node.
 
-    The negative-parity counterpart of `_grid_certified`.  A saddle host
+    The negative-parity counterpart of `_positive_parity_grid`.  A saddle host
     (``0 < 1 - kappa < |gamma|``) has no convergent operator power series
     (the shear series diverges past the parity boundary), so each node is
     evaluated by the exact 1D Schwinger-parameter quadrature
@@ -974,12 +946,9 @@ def _positive_parity_grid(
     The single positive-parity wave-branch entry point shared by
     `F_op_grid` and `F_op`.  Since Build 8d the exact evaluator is the
     same 1D Schwinger-parameter quadrature `_schwinger.f_schwinger` the
-    macro-saddle arm (`_saddle_grid`) and the former Build-7a strong-
-    shear rescue used (``lam = 1 - kappa``, IDENTICAL reduce / rotate /
-    reconstruct), so BOTH parities now run through ONE exact wave
-    evaluator; the legacy operator-series contraction is retired to the
-    single shear-free exit below (and to test-only oracle duty via
-    `legacy_operator_oracle`).
+    macro-saddle arm (`_saddle_grid`) uses (``lam = 1 - kappa``,
+    IDENTICAL reduce / rotate / reconstruct), so BOTH parities run
+    through ONE exact wave evaluator.
 
     Dispatch is on the reduced shear ``gamma' = gamma / (1 - kappa)``:
 
@@ -1034,7 +1003,7 @@ def _positive_parity_grid(
     Python wrapper (never across a thread boundary) with the lowest-index
     refuser's authentic message.
 
-    Parameters and returns match `_grid_certified`.  The caller
+    Parameters and returns match `_saddle_grid`.  The caller
     guarantees positive parity (``1 - kappa > |gamma|``), so the
     mass-sheet map never refuses here.
 
@@ -1304,13 +1273,11 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
     `_schwinger.f_schwinger` on the wave branch: the positive-parity
     host (``1 - kappa > |gamma|``) with reduced shear ``gamma' > 0`` and
     the macro saddle (``0 < 1 - kappa < |gamma|``) reduce / rotate /
-    reconstruct identically (``lam = 1 - kappa``).  The ONLY remaining
-    legacy operator-series exit is the shear-free ``gamma' == 0`` point
-    lens (measure-zero in the prior, reached via `_grid_certified`).  On
-    the Schwinger branch the operator-series diagnostics do not apply and
-    are reported as zero / converged (the Schwinger evaluator
-    certifies-or-refuses internally, so a returned value is certified);
-    on the ``gamma' == 0`` legacy branch the measured diagnostics stand.
+    reconstruct identically (``lam = 1 - kappa``).  The shear-free
+    ``gamma' == 0`` point lens (measure-zero in the prior) is a closed
+    form.  Diagnostics are reported as zero / converged on both: each
+    evaluator certifies-or-refuses internally, so a returned value is
+    certified.
 
     Parameters
     ----------
@@ -1576,8 +1543,7 @@ def select_branch(w: float, delta_min: float,
         (`geometry.nearest_caustic_point`).  Defaults to ``inf``, which
         satisfies the leg vacuously and reproduces the two-condition
         gate.  A caller that omits it is DISABLING a measured accuracy
-        condition; positive parity must supply it.  The macro saddle
-        passes ``inf`` deliberately -- see the Notes.
+        condition; every production caller supplies it.
 
     Returns
     -------
@@ -1602,11 +1568,12 @@ def select_branch(w: float, delta_min: float,
     annihilated image pair are undamped complex saddles that a real-image
     sum omits).  Adding this leg moves worst-case p90 from 1.17 to 7.65e-5.
 
-    SADDLE: F031 is POSITIVE PARITY ONLY -- there is no saddle sweep. The
-    macro-saddle path therefore passes ``eta = inf``, preserving its
-    boundary exactly rather than extrapolating a positive-parity threshold
-    onto an unmeasured branch.  Whether the saddle needs its own ``eta``
-    floor is OPEN.
+    SADDLE: the leg is live on both parities, each measured on its own
+    terms -- F031 positive parity, F034 saddle.  The saddle needed it MORE:
+    below ``eta = 0.3`` the p90 error was 8.95e-1 and the worst case 484x,
+    over 15% of resolved draws, moving to 4.54e-3 with the leg on.  The
+    saddle still passes an infinite ``cancellation_exp``, which has no
+    saddle analogue.
     """
     resolved = float(w) * float(delta_min) >= RHO_END
     strongly_cancelling = float(cancellation_exp) > L_MAX

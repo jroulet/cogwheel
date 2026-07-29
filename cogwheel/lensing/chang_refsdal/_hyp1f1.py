@@ -467,9 +467,7 @@ def point_mass_g_derivatives(w: float, s: float, max_derivative: int,
         Squared source offset ``s = |y'|**2 >= 0``, constrained by
         ``w * sqrt(s) <= DD_PRODUCT_CEILING``.
     max_derivative : int
-        Highest derivative order, ``>= 0``.  The caller's operator
-        raises the radial index by up to 2 per application, so this
-        reaches ``2 * max_order`` -- 84 at ``max_order = 42``.
+        Highest derivative order, ``>= 0``.
     n_terms : int
         Number of series terms.  The caller owns the adaptive rule;
         check the returned tail rather than trusting it.
