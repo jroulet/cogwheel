@@ -1810,3 +1810,55 @@ ceiling then extrapolated into the above-ceiling regime where the gate
 actually runs, because no oracle exists there (F030).
 
 Probe: `probe_lmax_rederive.py` (scratchpad).
+
+## F032 — F028 CONFIRMED by an independent code: the uniform fold arm is 60-64% wrong where GLoW can adjudicate (2026-07-29)
+
+F028 measured the uniform fold Airy arm at 60%-267% relative error using
+`geometric_amplification` as a stand-in reference, because no true oracle
+existed in that regime (F030). GLoW now provides one, and it agrees.
+
+**Working recipe** (owner + Codex; every element was necessary):
+* `Psi_PointLens({'psi0': 1.0}, {'xc': 1e-4})` INSIDE the caustic. The
+  `xc = 2e-3` value is the OUTSIDE-caustic workaround and produces a spurious
+  six-centre topology here.
+* Break exact source/shear axis alignment: at `gamma2 = 0` the two off-axis
+  saddles share a delay and GLoW's birth/death bookkeeping fails. A rotation
+  of `beta ~ 0.015` rad at fixed `|gamma|`, folded into `(gamma1, gamma2)`,
+  is enough.
+* `It_MultiContour_C(lens, y, p_prec={'Nt': 600, 'tmin': 1e-3,
+  'tmax': 80.0, 'parallel': False})`
+* `Fw_FFT_C(it, p_prec={'wmin': 0.1, 'wmax': ..., 'eval_mode': 'exact',
+  'parallel': False})`
+* HEALTH CHECK, mandatory: the centre list must be
+  `['min', 'min', 'saddle', 'saddle', 'sing/cusp max']` -- FIVE, odd. An even
+  count means initialization failed, and GLoW RETURNS VALUES ANYWAY. A prior
+  run read a verdict off six-centre output before this check existed.
+
+**Result.** `|F|` compared (frame-independent; GLoW is in the absolute delay
+frame, this engine is min-subtracted, related exactly by `exp(i*w*tmin)` --
+verified to five figures).
+
+| gamma | w | geo err | arm err |
+|---|---|---|---|
+| 0.70 | 10 | 3.0e-3 | arm refuses |
+| 0.70 | 70 | 2.3e-2 | 6.4e-1 |
+| 0.90 | 10 | 5.6e-3 | arm refuses |
+| 0.90 | 30 | 7.1e-2 | 6.3e-1 |
+| 0.90 | 50 | 1.9e-1 | 6.4e-1 |
+
+Geometric optics tracks GLoW to sub-percent at low `w` and 2.3% at `w = 70`;
+the arm is 63%-64% off throughout. Independent, and consistent with F028's
+original magnitude and sign. **The `ETA_MIN_GEOMETRIC` floor (F031) was the
+right call, and the arm's `q = 0` defect is real.**
+
+**SCOPE, and it is narrow.** The confirmation rests on `w <= 70`. Above
+`w ~ 100` GLoW's own output degrades: `|F|` climbs 1.90 -> 2.65 -> 3.31 with
+`w`, which is unphysical, and both error columns inflate together. That is the
+`wmax` stretch beyond the validated range, not a result. The `w = 200-500`
+rows must NOT be cited. Also: positive parity only, two configurations, one
+external code.
+
+**Established along the way.** GLoW agrees with this engine to ~1e-4 in `|F|`
+at `w = 0.5..50` outside the caustic, and `xc` has a convergence plateau at
+the 1e-4 level across a 4x sweep -- far below the effect under test. This is
+the first independent validation this engine has ever had.
