@@ -33,9 +33,15 @@ section: Backlog
      `surrogate_training._min_curvature_radius`, evaluated AT a point rather
      than minimised over a band. It belongs in `geometry` because the caustic
      does; re-express the band-min as a thin wrapper.
-     ACCEPTANCE: matches an independent analytic curvature to 1e-8 on a
-     closed-form case; the rewritten band-min reproduces current
-     `min_curvature_radius` report values exactly.
+     ACCEPTANCE: matches an mpmath high-dps curvature oracle to 1e-8 (sympy is
+     NOT in the env; the small-gamma astroid limit `R_c -> 3*gamma*|sin 2th|`
+     is a scale/sign check only, good to 4.4e-5 — F038). The rewritten band-min
+     does NOT reproduce the incumbent: F038 measures the circumradius estimator
+     biased HIGH by 4.9-9.6% on production bands, because a three-point stencil
+     cannot reach the arc endpoints where the true minimum sits. Assert instead
+     that the exact band-min is BELOW the incumbent by that measured margin and
+     that the consumer decision `eta_max > 0.5 * r_min` flips on NO production
+     band. A flip is a finding to report, never a number to tune.
 
   2. **DRIVER MEASUREMENT — the tube fraction.** Sweep held-out envelope eps
      against the DIMENSIONLESS `eta / R_c`, across gamma, both parities. Find
@@ -48,9 +54,24 @@ section: Backlog
      guard: with eta_max a fixed fraction of `R_c` it is vacuous by
      construction, so it becomes an assertion, not a branch. This converts a
      refusal into a serve.
-     ACCEPTANCE: no chart skipped for curvature at any gamma in the prior; the
-     small-gamma collar (coverage-map region 3) is closed; held-out eps under
-     bar at both gamma extremes; the same `f` serves every gamma.
+     ACCEPTANCE: no chart skipped for curvature at any gamma in the prior;
+     held-out eps under bar at both gamma extremes; the same `f` serves every
+     gamma. NOT in scope, and must not be claimed: the small-gamma collar is
+     only PARTLY C6's. F037 measures it as three stacked causes — C6 closes the
+     foot-of-normal skips (`0.0281..0.0462`, `0.0644..0.1550`) and cannot touch
+     the dropped topology slivers (`< 0.0281`, `0.0462..0.0644`), which are a
+     served-side detection instability, not a length scale. Acceptance is
+     "tubes now serve every gamma that `stable_gamma_bands` yields a band for".
+
+  3b. **The dropped topology slivers** (new, from F037). `band_caustic_structure`
+     reports the arc's `(inward_sign, image_count)` flipping between band edges
+     at `gamma < 0.07` — identically at `n_samples` 200, 800 and 3200, so it is
+     not a resolution problem. Bisection recurses to `min_gamma_band` and drops
+     the sliver silently-but-loudly. Find the served-side detector's small-gamma
+     failure and fix it, or establish that the flip is real physics and the
+     drop is correct.
+     ACCEPTANCE: `stable_gamma_bands((0.01, 0.30), +1)` returns zero dropped
+     slivers, or a stated reason why a drop is the right answer.
 
   4. **DRIVER MEASUREMENT — the far-zone crossover.** Sweep carrier / ppGO /
      chart node cost INWARD in `rho` from the box corner, per gamma, both

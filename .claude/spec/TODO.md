@@ -131,9 +131,15 @@ Tag conventions:
      `surrogate_training._min_curvature_radius`, evaluated AT a point rather
      than minimised over a band. It belongs in `geometry` because the caustic
      does; re-express the band-min as a thin wrapper.
-     ACCEPTANCE: matches an independent analytic curvature to 1e-8 on a
-     closed-form case; the rewritten band-min reproduces current
-     `min_curvature_radius` report values exactly.
+     ACCEPTANCE: matches an mpmath high-dps curvature oracle to 1e-8 (sympy is
+     NOT in the env; the small-gamma astroid limit `R_c -> 3*gamma*|sin 2th|`
+     is a scale/sign check only, good to 4.4e-5 — F038). The rewritten band-min
+     does NOT reproduce the incumbent: F038 measures the circumradius estimator
+     biased HIGH by 4.9-9.6% on production bands, because a three-point stencil
+     cannot reach the arc endpoints where the true minimum sits. Assert instead
+     that the exact band-min is BELOW the incumbent by that measured margin and
+     that the consumer decision `eta_max > 0.5 * r_min` flips on NO production
+     band. A flip is a finding to report, never a number to tune.
 
   2. **DRIVER MEASUREMENT — the tube fraction.** Sweep held-out envelope eps
      against the DIMENSIONLESS `eta / R_c`, across gamma, both parities. Find
@@ -146,9 +152,24 @@ Tag conventions:
      guard: with eta_max a fixed fraction of `R_c` it is vacuous by
      construction, so it becomes an assertion, not a branch. This converts a
      refusal into a serve.
-     ACCEPTANCE: no chart skipped for curvature at any gamma in the prior; the
-     small-gamma collar (coverage-map region 3) is closed; held-out eps under
-     bar at both gamma extremes; the same `f` serves every gamma.
+     ACCEPTANCE: no chart skipped for curvature at any gamma in the prior;
+     held-out eps under bar at both gamma extremes; the same `f` serves every
+     gamma. NOT in scope, and must not be claimed: the small-gamma collar is
+     only PARTLY C6's. F037 measures it as three stacked causes — C6 closes the
+     foot-of-normal skips (`0.0281..0.0462`, `0.0644..0.1550`) and cannot touch
+     the dropped topology slivers (`< 0.0281`, `0.0462..0.0644`), which are a
+     served-side detection instability, not a length scale. Acceptance is
+     "tubes now serve every gamma that `stable_gamma_bands` yields a band for".
+
+  3b. **The dropped topology slivers** (new, from F037). `band_caustic_structure`
+     reports the arc's `(inward_sign, image_count)` flipping between band edges
+     at `gamma < 0.07` — identically at `n_samples` 200, 800 and 3200, so it is
+     not a resolution problem. Bisection recurses to `min_gamma_band` and drops
+     the sliver silently-but-loudly. Find the served-side detector's small-gamma
+     failure and fix it, or establish that the flip is real physics and the
+     drop is correct.
+     ACCEPTANCE: `stable_gamma_bands((0.01, 0.30), +1)` returns zero dropped
+     slivers, or a stated reason why a drop is the right answer.
 
   4. **DRIVER MEASUREMENT — the far-zone crossover.** Sweep carrier / ppGO /
      chart node cost INWARD in `rho` from the box corner, per gamma, both
@@ -240,7 +261,7 @@ Tag conventions:
   |---|---|---|---|
   | 1 | Caustic interior, astroid (`gamma < 1`) | interior SACR-C charts | OPEN at the high-gamma CROWN band — `interior_eps_max = 5e-2` was set with crown reachability explicitly UNMEASURED; a P2 pilot recorded 0% pass at eps 3.4 |
   | 2 | Caustic interior, saddle lobes (`gamma > 1`) | `LobeInteriorChart` | CLOSED (shipped `04f9f5c`), except the INTER-LOBE CORRIDOR, which `_lobe_serves` refuses for both lobes — whether the saddle exterior charts pick it up is UNKNOWN |
-  | 3 | Near-caustic shell (fold tubes) | `TubeChart`, `eta in [eta_floor, eta_max]` | OPEN at SMALL GAMMA, owned by C6 of [[lensing_caustic_relative_coordinates]]: `eta_max = 0.05` is ABSOLUTE, so as `gamma -> 0` the astroid shrinks below it, `_min_curvature_radius` skips the tube, and the far-field excludes the same collar — nothing serves it. The code already computes the right scale and uses it to REFUSE rather than to SCALE |
+  | 3 | Near-caustic shell (fold tubes) | `TubeChart`, `eta in [eta_floor, eta_max]` | OPEN below `gamma = 0.155` — measured, THREE stacked causes (F037), not one. Two bands are SKIPPED by the foot-of-normal guard because `eta_max = 0.05` is ABSOLUTE (the code already computes the right scale and uses it to REFUSE rather than to SCALE) — owned by C6 of [[lensing_caustic_relative_coordinates]]. Two more are DROPPED as topology slivers by `stable_gamma_bands`, which C6 does NOT fix — owned by its step 3b |
   | 4 | Cusp neighbourhoods | excluded from tubes -> quadrature | OPEN, both parities. Saddle exclusions are WIDER (`_SADDLE_CUSP_WIDTH_SAFETY = 2.5`, min half-width 0.08) because deltoid cusps are shallow and the wedge-edge turnarounds are near-singular |
   | 5 | Exterior far-field | `FarFieldChart` | CLOSED (per-column admission since 8h-b4) |
   | 6-9 | ~~Far annulus `3.0 < \|y\| <= 4.2426`, and its three gamma fences~~ | — | **DISSOLVING — do not work these rows.** All four existed only because `\|y\| = 3` (the PRIOR BOX half-width) was treated as a physical boundary. F036 measures that no `\|y\|` threshold can bound the caustic at all: `r_caustic` diverges at the parity wall (19.8 at `gamma = 0.99` vs a 4.2426 box corner). `GAMMA_FENCE = 3/4` and the saddle fence `1.0502342` are CONSEQUENCES of the annulus radius, not independent physics, and are deleted with it. These four rows collapse into ONE caustic-relative exterior region. See [[lensing_caustic_relative_coordinates]] |

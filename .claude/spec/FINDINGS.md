@@ -2059,3 +2059,92 @@ CONSEQUENCES of the annulus radius, not independent physics). Each step was
 locally reasonable. The check that catches this class is Part 0 of
 COVERAGE_DESIGN: for every length-unit float, ask what sets it, and refuse
 "the prior box", "a round number", and "it worked at one gamma".
+
+## F037 — the small-gamma collar is THREE stacked causes, not one; C6 closes only the middle one (2026-07-29)
+
+**Where:** `surrogate_training.stable_gamma_bands`,
+`surrogate_training._min_curvature_radius`, coverage-map region 3.
+
+The coverage map recorded the small-gamma near-caustic collar as a single
+failure: `eta_max = 0.05` is absolute, the astroid shrinks below it as
+`gamma -> 0`, `_min_curvature_radius` skips the tube chart, and the far field
+excludes the same collar. Measured on the production path (positive parity,
+`n_caustic_samples = 200`, `min_gamma_band = 0.02`, `eta_max = 0.05`), the
+collar is actually three different failures stacked:
+
+| gamma range | what happens | cause |
+|---|---|---|
+| `< 0.0281` | dropped topology sliver | `stable_gamma_bands` cannot find a stable band |
+| `0.0281 .. 0.0462` | tube SKIPPED (`r_min = 0.0238`) | foot-of-normal guard |
+| `0.0462 .. 0.0644` | dropped topology sliver | `stable_gamma_bands` |
+| `0.0644 .. 0.1550` | tube SKIPPED (`r_min = 0.0518`, `0.0648`) | foot-of-normal guard |
+| `>= 0.1550` | tube trained (`r_min = 0.1120`) | — |
+
+So tubes serve NO gamma below 0.155 — about 9.7% of the sampled prior
+`gamma in (0, 1.6)`.
+
+**Why it matters for the plan.** C6 (curvature-relative `eta_max = f * R_c`)
+makes the foot-of-normal guard vacuous by construction and therefore closes
+the two SKIPPED rows. It does nothing for the two DROPPED rows: those are a
+topology-detection instability, not a length-scale mismatch. An acceptance
+reading "the small-gamma collar is closed" is therefore not achievable by C6
+alone and must not be written into its brief.
+
+**The sliver instability is not a resolution problem.** The raw
+`band_caustic_structure((0.02, 0.07), +1)` failure is
+`Arc served side / image count changes across gamma band: [(-1, 4), (1, 2)]`,
+and it is IDENTICAL at `n_samples` 200, 800 and 3200. The arc's `inward_sign`
+and `image_count` genuinely flip between the band edges as detected; densifying
+the sweep does not help, so band bisection recurses to the `min_gamma_band`
+floor and drops the sliver. Whatever is wrong is in the served-side detection
+at small gamma, not in how finely it is sampled.
+
+## F038 — `_min_curvature_radius` is biased HIGH by 5-10%: a three-point stencil cannot reach the arc endpoints (2026-07-29)
+
+**Where:** `surrogate_training._min_curvature_radius`
+(`cogwheel/lensing/surrogate_training.py`).
+
+The estimator takes three-point circumradii over a sampled arc and minimises
+them. The minimum of the true curvature radius on a fold arc sits at an arc
+ENDPOINT (curvature is worst toward the trimmed cusp windows), and a
+three-point stencil's first usable centre is one sample step inside the
+endpoint. The reported minimum is therefore the curvature radius one step in
+from where the true minimum lives, biased HIGH, converging only at FIRST order
+in the sample spacing:
+
+| samples over a quarter-arc | rel. excess over exact |
+|---|---|
+| 100 | 30.2% |
+| 200 | 14.9% |
+| 400 | 7.4% |
+| 800 | 3.7% |
+
+On PRODUCTION arcs (cusp windows already trimmed by
+`band_caustic_structure`, so the endpoints sit further from the cusps) the bias
+is much milder — measured against an mpmath 40-dps oracle
+`R_c = |y'|^3 / |y1' y2'' - y2' y1''|` on the exact `critical_point`
+parametrization:
+
+| band | circumradius | exact | excess |
+|---|---|---|---|
+| (0.25, 0.35) | 0.16136 | 0.14717 | 9.6% |
+| (0.45, 0.55) | 0.30895 | 0.28747 | 7.5% |
+| (0.65, 0.75) | 0.46892 | 0.44167 | 6.2% |
+| (0.85, 0.95) | 0.78344 | 0.74692 | 4.9% |
+
+**Consequence for step 1 of [[lensing_caustic_relative_coordinates]].**
+Replacing the inlined circumradius with an exact pointwise
+`caustic_curvature_radius` CHANGES the reported number by 5-10%; an acceptance
+demanding byte-identity would force preserving the bias, which the plan's own
+"never preserve an incumbent number by construction" rule forbids. The
+consumer decision `eta_max > 0.5 * r_min` does NOT flip on any sampled
+production band, so the swap is behaviour-preserving where it is actually read.
+The exact value is SMALLER, i.e. the guard becomes marginally more willing to
+skip — the conservative direction.
+
+**mpmath is the oracle; sympy is NOT installed** in the project env
+(`SDK_CONDA_ENV = cogwheel-newlal`, mpmath 1.3.0). The small-`gamma` astroid
+limit `R_c -> 3 * gamma * |sin 2 theta|` is a second, fully analytic check: it
+agrees with the mpmath oracle to 4.4e-5 at `gamma = 1e-3`, degrading as
+`O(gamma^2)` (1.2e-2 at `gamma = 1e-2`), so it pins scale and sign but is not
+a 1e-8 gate.
