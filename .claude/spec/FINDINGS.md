@@ -2178,10 +2178,42 @@ carries mpmath 1.3.0 and sympy 1.14.0. mpmath produced the envelope above.
 sympy is fine for deriving, but `lambdify` of the UNSIMPLIFIED second
 derivative of this expression runs for minutes — simplify or `cse` first.
 
-## F039 — `_PROBE_ETA = 0.05` is an ABSOLUTE length: it decides which side of a fold is served, and the answer changes with the step (2026-07-29)
+## F039 — the fold's two-image side is ANALYTIC; `_probe_arc_side` should not exist (2026-07-29)
 
 **Where:** `surrogate_training._probe_arc_side` / `_PROBE_ETA`
 (`cogwheel/lensing/surrogate_training.py`).
+
+**RESOLUTION FIRST: there is nothing to measure here.** The caustic is the
+image of the critical curve. At a critical point the source-map Jacobian `J`
+is singular with soft eigenvector `e` (`J e = 0`), so displacing along `e`
+kills the linear term:
+
+    y(t) = y_c + (1/2) * D2y[e,e] * t**2 + O(t**3)
+
+BOTH signs of `t` map to the same side — that is what makes it a fold — so the
+two merging images live on the side the quadratic term points to, and
+
+    inward_direction = D2y[e, e]
+
+is exact and sign-definite with NO step, NO tolerance and NO image count. For
+`y(x) = A x - x/|x|^2` only the point-mass term contributes, and contracting
+its second derivative twice with a unit `e` gives, in closed form:
+
+    D2y[e,e] = (4*(x.e)*e + 2*x - 8*(x.e)^2 * x/r^2) / r^4,   r^2 = |x|^2
+
+with `x` and `e` already returned by `geometry.critical_point` as `.image` and
+`.soft_axis`. Verified 2026-07-29 against a direct image count on each side at
+32 `(gamma, theta)` points spanning `gamma` 0.005..0.99: **31 agree**. The one
+exception is `gamma = 0.005, theta = 1.0`, where the image COUNTER returned 2
+on both sides — `find_images_quartic` could not separate the barely-merged
+pair at `eps = 6e-7` — and an `eps` sweep at that same gamma flips to
+agreement as `eps` grows. The direction was right; the verification method was
+the thing that degraded. That is the whole point: an analytic determination has
+no step to degrade.
+
+So step 3b is DELETE `_probe_arc_side` and `_PROBE_ETA`, not retune them. The
+rest of this entry records how the numerical version failed, because it is the
+reason the acceptance is what it is.
 
 `_probe_arc_side` labels a fold arc by placing a test source `_PROBE_ETA` off
 the caustic along the normal on each side, requiring the nearest-caustic
@@ -2217,15 +2249,16 @@ bands with 2 dropped slivers** at `_PROBE_ETA = 0.05` to **1 stable band with
 served-side detection bug needing new physics; they are the same
 absolute-length disease as C6, on a different constant.
 
-**But `f * R_c` is NOT the fix, and this is the trap.** `0.25 * R_c` flips
-`(sign, image_count)` at gamma = 0.15, 0.3 and 0.7 — bands whose charts train
-successfully today. `R_c` is a curvature radius, not a caustic THICKNESS: at
-gamma = 0.3, `R_c = 1.05` while the whole caustic reaches only 0.72, so a
-quarter of `R_c` steps clean through it. The quantity that actually bounds
-this probe is the distance to the OPPOSITE fold along the normal. Whatever
-replaces `_PROBE_ETA` must be measured against that, and the safe direction is
-SMALL (stay near the fold), bounded below only by the conditioning of
-`nearest_caustic_point` and `find_images` near the caustic.
+**`f * R_c` is NOT the fix either, and this is the trap that makes the
+analytic route the only clean one.** `0.25 * R_c` flips `(sign, image_count)`
+at gamma = 0.15, 0.3 and 0.7 — bands whose charts train successfully today.
+`R_c` is a curvature radius, not a caustic THICKNESS: at gamma = 0.3,
+`R_c = 1.05` while the whole caustic reaches only 0.72, so a quarter of `R_c`
+steps clean through it. Every candidate step length is squeezed between "large
+enough that `find_images` can resolve the pair" and "small enough to stay
+inside the caustic", and at small gamma that window closes. There is no good
+constant, which is the signature of a question that should not have been asked
+numerically.
 
 **Severity: latent, not live.** The mislabel is silent — the arc records a
 different `image_count`, which is then stored on the chart and keys

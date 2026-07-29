@@ -72,16 +72,20 @@ section: Backlog
      labelled 2-image on the wrong side. Measured: shrinking the step alone,
      at fixed `n_samples`, takes `stable_gamma_bands((0.01, 0.30), +1)` from
      4 bands / 2 dropped slivers to 1 band / 0 dropped.
-     DO NOT reach for `f * R_c` here. F039 measures `0.25 * R_c` flipping
+     DELETE the probe; do not retune it. The side is ANALYTIC (F039): at a
+     critical point `J e = 0` for the soft eigenvector `e`, so the fold opens
+     along `D2y[e,e]`, which is closed form from `critical_point`'s `.image`
+     and `.soft_axis`. Verified 31/32 against a direct image count; the one
+     miss was the image COUNTER failing to resolve a merged pair, not the
+     direction. `f * R_c` is a trap: F039 measures `0.25 * R_c` flipping
      `(sign, image_count)` at gamma 0.15, 0.3 and 0.7 — bands that train fine
-     today — because a curvature radius is not a caustic THICKNESS. The
-     bounding quantity is the distance to the OPPOSITE fold along the normal;
-     the safe direction is SMALL, floored by the conditioning of
-     `nearest_caustic_point` / `find_images` near the caustic.
-     ACCEPTANCE: `(sign, image_count)` is STABLE under a 4x change of the
-     probe step at every gamma in the prior — the real invariant, since a
-     label that moves with the step is not measuring the geometry. Then zero
-     dropped slivers over `(0.01, 0.30)`, or a stated reason a drop is right.
+     today — because a curvature radius is not a caustic THICKNESS. No step
+     length works, which is the signature of a question that should never have
+     been asked numerically.
+     ACCEPTANCE: `_PROBE_ETA` and `_probe_arc_side` are gone; the served side
+     agrees with an independent image count wherever that count is
+     well-conditioned; zero dropped slivers over `(0.01, 0.30)`. There is no
+     step-size parameter left to be stable under.
 
   4. **DRIVER MEASUREMENT — the far-zone crossover.** Sweep carrier / ppGO /
      chart node cost INWARD in `rho` from the box corner, per gamma, both
@@ -140,9 +144,11 @@ section: Backlog
 
   8. **Make Part 0 mechanical.** A test asserting that no length-unit float in
      `cogwheel/lensing/` traces to the prior box, and that no live document or
-     public symbol names a retired concept. This bug class arrived by
-     accretion, one plausible constant at a time; only a test stops it
-     returning.
+     public symbol names a retired concept. Extend it to the METHOD form of
+     the question: no constant in the geometry or training path may exist to
+     absorb a discretization error, and no decision with a closed form may be
+     taken by stepping. This bug class arrived by accretion, one plausible
+     constant at a time; only a test stops it returning.
 
   9. **Then train — once**, in final coordinates, on the final engine and chart
      set. Cost estimate first; full-suite gate green first.
@@ -166,6 +172,18 @@ section: Backlog
     new design. `FINDINGS.md` is the middle case: findings stay, but a
     superseded SCOPE gets a pointer to its successor (see F032 -> F035), never
     a silent edit.
+  - **Ask Part 0 of the METHOD, not only of the constant.** The governing
+    principle generalises: for every DECISION, ask what determines it, and
+    whether that determination is analytic. This geometry is closed form
+    end to end — the caustic, its derivatives, its curvature, and which side
+    of a fold carries the image pair are all algebra at the critical point.
+    A sampled estimator or a probe step in that setting is not an
+    approximation of the answer, it is a SUBSTITUTE for having derived it,
+    and it drags in a step-size constant that then needs its own tuning,
+    safety factor and margin. Three constants died to this in one sitting
+    (F038 `_min_curvature_radius`, F039 `_PROBE_ETA`, and the
+    `_CLOUD_MARGIN_FRAC` family in step 7b). The tell is a constant whose
+    docstring explains a discretization error rather than a physical scale.
   - **Never preserve an incumbent number by construction.** Each replaced
     constant gets a measured or derived value; matching the old one is a
     coincidence to report, not a target.
