@@ -162,15 +162,24 @@ Tag conventions:
      served-side detection instability, not a length scale. Acceptance is
      "tubes now serve every gamma that `stable_gamma_bands` yields a band for".
 
-  3b. **The dropped topology slivers** (new, from F037). `band_caustic_structure`
-     reports the arc's `(inward_sign, image_count)` flipping between band edges
-     at `gamma < 0.07` — identically at `n_samples` 200, 800 and 3200, so it is
-     not a resolution problem. Bisection recurses to `min_gamma_band` and drops
-     the sliver silently-but-loudly. Find the served-side detector's small-gamma
-     failure and fix it, or establish that the flip is real physics and the
-     drop is correct.
-     ACCEPTANCE: `stable_gamma_bands((0.01, 0.30), +1)` returns zero dropped
-     slivers, or a stated reason why a drop is the right answer.
+  3b. **`_PROBE_ETA` — the fold-side probe is an absolute length** (F039; this
+     is F037's second cause, now diagnosed). `_probe_arc_side` steps an
+     absolute `0.05` off the caustic to decide which side of a fold carries
+     the image pair. When that step exceeds the local caustic half-extent the
+     4-image probe fails its reconstruction check and the arc is SILENTLY
+     labelled 2-image on the wrong side. Measured: shrinking the step alone,
+     at fixed `n_samples`, takes `stable_gamma_bands((0.01, 0.30), +1)` from
+     4 bands / 2 dropped slivers to 1 band / 0 dropped.
+     DO NOT reach for `f * R_c` here. F039 measures `0.25 * R_c` flipping
+     `(sign, image_count)` at gamma 0.15, 0.3 and 0.7 — bands that train fine
+     today — because a curvature radius is not a caustic THICKNESS. The
+     bounding quantity is the distance to the OPPOSITE fold along the normal;
+     the safe direction is SMALL, floored by the conditioning of
+     `nearest_caustic_point` / `find_images` near the caustic.
+     ACCEPTANCE: `(sign, image_count)` is STABLE under a 4x change of the
+     probe step at every gamma in the prior — the real invariant, since a
+     label that moves with the step is not measuring the geometry. Then zero
+     dropped slivers over `(0.01, 0.30)`, or a stated reason a drop is right.
 
   4. **DRIVER MEASUREMENT — the far-zone crossover.** Sweep carrier / ppGO /
      chart node cost INWARD in `rho` from the box corner, per gamma, both
@@ -196,6 +205,36 @@ Tag conventions:
      F027 showed it never binds on the saddle. Re-derive as relative, or
      delete. The test-heavy step: 22 references across
      `test_lensing_ghost_gate.py` and `test_lensing_exterior_windows.py`.
+
+  7b. **The remaining sampled estimators.** Surveyed 2026-07-29 while briefing
+     step 1; each computes by sampling something that has a closed form or an
+     exact solver already in the package. Ask the Part 0 question of the
+     METHOD, not just the constant.
+     - `_CLOUD_MARGIN_FRAC = 0.10` — a round number inflating a refusal
+       threshold to cover a MEASURED ~8% overshoot of the discrete 200-point
+       `_caustic_points` cloud, when `geometry.nearest_caustic_point` is exact
+       (9.3e-12) and already imported in the same file. Its own docstring says
+       the margin buys not "densifying the cloud or spending extra oracle
+       calls". It is applied INTERIOR-ONLY; the exterior path carries the same
+       slop uncompensated, protected only by a larger margin — two paths, one
+       corrected, an F019-shaped trap.
+     - `_find_cusps` — cusps as sampled caustic-SPEED minima below a relative
+       threshold, with `_CUSP_WIDTH_SAFETY` and an absolute
+       `_CUSP_MIN_HALFWIDTH = 0.05` floor. A cusp is exactly `|y'(theta)| = 0`,
+       and `y'(theta)` is closed form after step 1, so cusp angles are roots
+       findable to machine precision and the safety factors lose their reason
+       to exist.
+     - `_caustic_inradius` — `min |y(theta)|` over the same cloud; likewise a
+       closed-form minimisation.
+     The MODEL to copy is already in the package: `geometry.r_caustic` samples
+     only to BRACKET, then refines every root with `brentq` to `4*eps`, and
+     says so in its docstring ("bracketing density does not set the returned
+     radius accuracy"); `nearest_caustic_point` uses analytic Newton;
+     `_schwinger._log_derivative` is "in closed form (never a finite
+     difference)".
+     ACCEPTANCE: no constant in `surrogate_training` exists to compensate for
+     a discretization error. Deleting `_CLOUD_MARGIN_FRAC` changes no
+     admission decision, because the distance it corrects is now exact.
 
   8. **Make Part 0 mechanical.** A test asserting that no length-unit float in
      `cogwheel/lensing/` traces to the prior box, and that no live document or

@@ -2177,3 +2177,59 @@ skip — the conservative direction.
 carries mpmath 1.3.0 and sympy 1.14.0. mpmath produced the envelope above.
 sympy is fine for deriving, but `lambdify` of the UNSIMPLIFIED second
 derivative of this expression runs for minutes — simplify or `cse` first.
+
+## F039 — `_PROBE_ETA = 0.05` is an ABSOLUTE length: it decides which side of a fold is served, and the answer changes with the step (2026-07-29)
+
+**Where:** `surrogate_training._probe_arc_side` / `_PROBE_ETA`
+(`cogwheel/lensing/surrogate_training.py`).
+
+`_probe_arc_side` labels a fold arc by placing a test source `_PROBE_ETA` off
+the caustic along the normal on each side, requiring the nearest-caustic
+reconstruction to come back within `0.25 * _PROBE_ETA` in distance and 0.1 rad
+in theta, and PREFERRING the side with more real images. The step is an
+absolute 0.05 — the same numeric value as `_DEFAULT_ETA_MAX`, and, like it,
+blind to how big the caustic actually is.
+
+**Failure mechanism.** The probe must land INSIDE the caustic on the
+image-pair side. It fails whenever the step exceeds the local caustic
+half-extent: the 4-image side then fails its reconstruction check, only the
+exterior probe survives, and the arc is silently labelled `(sign=+1,
+image_count=2)` instead of `(sign=-1, image_count=4)`. This is not a
+resolution effect — it is a step-size effect, which is why F037 measured the
+consequent band failure as IDENTICAL at `n_samples` 200, 800 and 3200.
+
+**Measured (positive parity, kappa = 0, branch +1).** Probe outcome
+`(sign, n_img)`; `None` = neither side reconstructed:
+
+| gamma | theta | caustic reach | step 0.05 | step 0.25*R_c |
+|---|---|---|---|---|
+| 0.02 | 0.6 | 0.0404 | None | (1, 2) |
+| 0.02 | 2.3 | 0.0404 | (1, 2) | (-1, 4) |
+| 0.07 | 2.3 | 0.1450 | (-1, 4) | (1, 2) |
+| 0.15 | 1.0 | 0.3251 | (-1, 4) | (1, 2) |
+| 0.30 | 1.0 | 0.7165 | (-1, 4) | (1, 2) |
+| 0.70 | 1.0 | 2.5537 | (-1, 4) | (1, 2) |
+
+**This resolves F037's second cause.** Holding `n_samples = 200` and shrinking
+the step alone: `stable_gamma_bands((0.01, 0.30), +1)` goes from **4 stable
+bands with 2 dropped slivers** at `_PROBE_ETA = 0.05` to **1 stable band with
+0 dropped** at `_PROBE_ETA = 0.004`. The dropped topology slivers are not a
+served-side detection bug needing new physics; they are the same
+absolute-length disease as C6, on a different constant.
+
+**But `f * R_c` is NOT the fix, and this is the trap.** `0.25 * R_c` flips
+`(sign, image_count)` at gamma = 0.15, 0.3 and 0.7 — bands whose charts train
+successfully today. `R_c` is a curvature radius, not a caustic THICKNESS: at
+gamma = 0.3, `R_c = 1.05` while the whole caustic reaches only 0.72, so a
+quarter of `R_c` steps clean through it. The quantity that actually bounds
+this probe is the distance to the OPPOSITE fold along the normal. Whatever
+replaces `_PROBE_ETA` must be measured against that, and the safe direction is
+SMALL (stay near the fold), bounded below only by the conditioning of
+`nearest_caustic_point` and `find_images` near the caustic.
+
+**Severity: latent, not live.** The mislabel is silent — the arc records a
+different `image_count`, which is then stored on the chart and keys
+`select_chart`. No trained chart artifact is shipped (F036), so nothing served
+today depends on it. That is exactly the inertness window F036 describes, and
+it is another reason not to train until the coordinates are settled: training
+now would bake a probe-step-dependent side label into a shipped artifact.
