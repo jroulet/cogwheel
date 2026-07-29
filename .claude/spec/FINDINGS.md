@@ -2132,15 +2132,34 @@ parametrization:
 | (0.65, 0.75) | 0.46892 | 0.44167 | 6.2% |
 | (0.85, 0.95) | 0.78344 | 0.74692 | 4.9% |
 
-**Consequence for step 1 of [[lensing_caustic_relative_coordinates]].**
-Replacing the inlined circumradius with an exact pointwise
-`caustic_curvature_radius` CHANGES the reported number by 5-10%; an acceptance
-demanding byte-identity would force preserving the bias, which the plan's own
-"never preserve an incumbent number by construction" rule forbids. The
-consumer decision `eta_max > 0.5 * r_min` does NOT flip on any sampled
-production band, so the swap is behaviour-preserving where it is actually read.
-The exact value is SMALLER, i.e. the guard becomes marginally more willing to
-skip — the conservative direction.
+**RESOLUTION: there is no estimator to port. `R_c` is a CLOSED FORM.** The
+caustic is an exact parametric curve `y(theta)`, so its curvature radius is an
+exact function of `(gamma, theta, kappa, branch)` — differentiate the closed
+form analytically rather than sampling it. Derived and verified 2026-07-29:
+about 25 lines of plain numpy (chain rule through
+`u -> r -> y`, then `R_c = |y'|^3 / |y1' y2'' - y2' y1''|`), vectorised over
+`theta`, no new dependency, numba-compatible. Worst relative disagreement
+against an independent mpmath 40-dps numerical-differentiation oracle over 42
+cases spanning both parities, both branches, `kappa = 0.3`, near-axial
+`theta = 0.02`, and `gamma = 0.99` where `R_c = 1145`: **4.4e-13**.
+
+So the whole three-point-circumradius question is moot: the estimator is
+DELETED, not relocated with a looser acceptance. The band minimum becomes a
+minimum over exact values, which also removes the endpoint bias above
+outright (endpoints are now evaluable, so no `n_samples`-dependent excess
+remains). This is the plan's own Part 0 discipline applied to a method rather
+than a constant: ask what actually sets the number, and the answer was never
+"a finite difference".
+
+**Consequence for step 1 of [[lensing_caustic_relative_coordinates]].** Do NOT
+assert byte-identity, and do NOT assert the 5-10% margin either. The gate is
+agreement with an independent oracle at 1e-12. The one behavioural claim worth
+pinning is that the consumer decision `eta_max > 0.5 * r_min` flips on NO
+production band — verified for `(0.25,0.35)`, `(0.45,0.55)`, `(0.65,0.75)`,
+`(0.85,0.95)` and the small-gamma bands `(0.0281,0.0462)`, `(0.0644,0.0825)`,
+`(0.0825,0.1550)`, `(0.1550,0.3000)`. The exact value is SMALLER than the
+incumbent, i.e. the guard becomes marginally more willing to skip — the
+conservative direction.
 
 **Oracles available in the project env** (`SDK_CONDA_ENV = cogwheel-newlal`,
 read from the repo-root `.env`): mpmath 1.3.0 and sympy 1.14.0 (installed

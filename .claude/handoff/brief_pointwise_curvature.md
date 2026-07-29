@@ -19,17 +19,23 @@ radius. Today the only curvature the package computes is
 REFUSE (skip a tube chart). A boundary that scales with curvature needs the
 value AT a point, not the worst value over a band.
 
-The three-point circumradius is currently inlined inside that band-min. It
-belongs in `geometry` because the caustic does.
+That band-min estimates curvature with a three-point circumradius over a
+sampled arc. It does not need to: the caustic is a closed-form parametric
+curve, so its curvature radius is a closed-form function. **Differentiate it,
+do not sample it.** The estimator is DELETED, not relocated.
 
 ## Scope
 
 IN:
 - New public `geometry.caustic_curvature_radius(gamma, theta, *, kappa=0.0,
-  branch=1)` in `cogwheel/lensing/chang_refsdal/geometry.py`. Place it beside
-  `r_caustic` (currently ends before `class GhostDomainError`).
-- Re-express `surrogate_training._min_curvature_radius` as a thin band-min
-  wrapper over the new function. Keep its name, signature and call site.
+  branch=1)` in `cogwheel/lensing/chang_refsdal/geometry.py`, computed
+  analytically. Place it beside `r_caustic` (currently ends before
+  `class GhostDomainError`). Vectorise over `theta`.
+- Re-express `surrogate_training._min_curvature_radius` as a minimum over
+  exact values from that function, and DELETE the inlined circumradius,
+  including its `area2 < 1e-30` collinearity guard (an artifact of the
+  three-point stencil, with no analogue in the closed form). Keep the name,
+  signature and call site.
 - Tests for both, in `cogwheel/tests/`.
 
 OUT — do not touch, in this build:
@@ -51,41 +57,58 @@ OUT — do not touch, in this build:
     x        = r * (cos theta, sin theta)
     y        = macro_matrix @ x - x / r^2
 
-So `R_c = |y'|^3 / |y1' y2'' - y2' y1''|` with derivatives in `theta`. Prefer
-an analytic derivative over any finite difference; `critical_point` itself is
-the reference for the parametrization, but do NOT call it in a loop and
-difference the result — that reproduces the very estimator being replaced.
+So `R_c = |y'|^3 / |y1' y2'' - y2' y1''|` with derivatives in `theta`. `beta`
+is a rigid rotation and curvature is rotation-invariant, so
+`R_c(theta; beta) = R_c(theta - beta; 0)` — do not carry `beta` through the
+algebra.
 
-**Oracles.** The project env (`SDK_CONDA_ENV`, read from the repo-root `.env`)
-has mpmath 1.3.0 and sympy 1.14.0. Either is a valid independent oracle:
-sympy for a symbolic `dy/dtheta` of the closed form above, mpmath `diff` at
-40 dps for a numerical one. Prefer sympy for the derivative and mpmath for the
-high-precision evaluation. Do NOT hard-code an interpreter path — resolve it
-as `$(conda info --base)/envs/$SDK_CONDA_ENV/bin/python`.
+**The derivative cascade, derived and VERIFIED by the driver.** Reproduce or
+improve on it; the acceptance is the oracle, not this text. With
+`s = sin 2th`, `c = cos 2th`, `c4 = cos 4th`, `e = gamma/lam`, `b = branch`,
+`D = sqrt(1 - e^2 s^2)`:
 
-**Second, fully analytic check (scale and sign only).** As `gamma -> 0` with
-`kappa = 0` the caustic tends to the astroid `y = (-2g cos^3 th, 2g sin^3 th)`,
-whose curvature radius is `R_c -> 3*gamma*|sin 2 theta|`. Measured agreement
-with the mpmath oracle: 4.4e-5 at `gamma = 1e-3`, 4.9e-4 at `1e-2`, 9.9e-3 at
-`0.1` — it degrades as `O(gamma^2)`, so it pins scale and sign but is NOT a
-1e-8 gate. Do not write it as one.
+    u   = e*c + b*D
+    u'  = -2*e*s - b*2*e^2*s*c/D
+    u'' = -4*e*c - b*4*e^2*(c4*D^2 + e^2*s^2*c^2)/D^3
+    r   = 1/sqrt(lam*u);  r' = -r*u'/(2u);  r'' = r*(3u'^2/(4u^2) - u''/(2u))
 
-**The incumbent is biased HIGH; byte-identity is NOT the gate (F038).** The
-three-point stencil's first usable centre is one sample step inside the arc
-endpoint, and the true curvature minimum sits AT an endpoint (curvature is
-worst toward the trimmed cusp windows). Measured on production bands, positive
-parity, `n_caustic_samples = 200`:
+then for each component with `p = (lam -+ gamma) - u`, `p' = -u'`,
+`p'' = -u''`, and `T` the component's `cos/sin` factor:
 
-| band | incumbent circumradius | exact | excess |
-|---|---|---|---|
-| (0.25, 0.35) | 0.16136 | 0.14717 | 9.6% |
-| (0.45, 0.55) | 0.30895 | 0.28747 | 7.5% |
-| (0.65, 0.75) | 0.46892 | 0.44167 | 6.2% |
-| (0.85, 0.95) | 0.78344 | 0.74692 | 4.9% |
+    y_i'  = p'*r*T + p*r'*T + p*r*T'
+    y_i'' = p''*r*T + 2p'*r'*T + 2p'*r*T' + p*r''*T + 2p*r'*T' + p*r*T''
 
-The convergence is FIRST order in sample spacing (30.2% / 14.9% / 7.4% / 3.7%
-at 100 / 200 / 400 / 800 samples over a quarter-arc), which is the signature of
-the endpoint exclusion rather than of the circumradius formula.
+About 25 lines of plain numpy, vectorised over `theta`, no new dependency.
+
+**Verification envelope already measured (F038).** This cascade agrees with an
+independent mpmath 40-dps numerical-differentiation oracle to **4.4e-13 worst
+case** over 42 cases: `gamma` in {0.05, 0.3, 0.9, 0.99, 1.02, 1.3}, both
+branches, `kappa` in {0, 0.3}, `theta` in {0.02, 0.17, 0.5, 1.0, 1.3, 2.2,
+3.9} — i.e. including near-axial angles, the saddle `-1` branch, and
+`gamma = 0.99` where `R_c = 1145`. Your gate is 1e-12; if you cannot reach it,
+the algebra is wrong, not the tolerance.
+
+**Oracles.** `SDK_CONDA_ENV` (from the repo-root `.env`) has mpmath 1.3.0 and
+sympy 1.14.0. mpmath `diff` at 40 dps is the cheap independent check and is
+what produced the envelope above. sympy is available for a symbolic
+cross-check, but note: `lambdify` of the UNSIMPLIFIED second derivative of
+this expression takes minutes — if you use sympy, simplify or `cse` first.
+Do NOT hard-code an interpreter path; resolve it as
+`$(conda info --base)/envs/$SDK_CONDA_ENV/bin/python`.
+
+**Second check, scale and sign only.** As `gamma -> 0` with `kappa = 0` the
+caustic tends to the astroid `y = (-2g cos^3 th, 2g sin^3 th)`, whose curvature
+radius is `R_c -> 3*gamma*|sin 2 theta|`. Measured: 4.4e-6..1.2e-4 at
+`gamma = 1e-4`, degrading as `O(gamma^2)` to 4.9e-4..1.2e-2 at `1e-2`. Pins
+scale and sign; NOT a 1e-12 gate. Do not write it as one.
+
+**The incumbent's numbers are NOT the gate (F038).** The circumradius
+estimator is biased HIGH by 4.9-9.6% on production bands, because a three-point
+stencil's first usable centre is one sample step inside the arc endpoint and
+the true minimum sits AT an endpoint. Do not assert byte-identity with it and
+do not assert that margin either — both enshrine a discretization artifact.
+Once the band-min uses exact values, the endpoints are evaluable and the bias
+is simply gone.
 
 **The consumer decision does not flip.** `r_min` is read at exactly one place,
 `surrogate_training.py:3331`, as `config.eta_max > 0.5 * r_min`. With
@@ -95,15 +118,15 @@ above, and on the small-gamma bands `(0.0281, 0.0462)`, `(0.0644, 0.0825)`,
 
 ## Acceptance
 
-1. `caustic_curvature_radius` agrees with an independent mpmath high-dps
-   curvature oracle to **1e-8 relative**, on both parities, at several
-   `(gamma, theta, branch)` including near-cusp angles where `R_c` is small.
+1. `caustic_curvature_radius` agrees with an independent high-precision
+   curvature oracle to **1e-12 relative** across the case set above — both
+   parities, both branches, `kappa != 0`, near-axial `theta`, and near the
+   parity wall. The driver measured 4.4e-13, so 1e-12 has margin.
 2. The astroid limit holds: `R_c / (3*gamma*|sin 2 theta|) -> 1` as
    `gamma -> 0`, to the measured `O(gamma^2)` accuracy above.
-3. The rewritten `_min_curvature_radius` is BELOW the incumbent values in the
-   table above, by the stated margin. Pin the new values. **Do not assert
-   byte-identity with the incumbent** — that would preserve a discretization
-   artifact, which the plan's standing rules forbid.
+3. No finite difference and no sampled-arc estimator survives anywhere in the
+   curvature path. `_min_curvature_radius` returns a minimum over EXACT values
+   and its `area2 < 1e-30` guard is gone.
 4. The `eta_max > 0.5 * r_min` decision flips on NO band listed above. Assert
    the decision, once, in the file that owns it. If a flip appears anywhere,
    STOP and report it — it is a finding, never a number to tune.

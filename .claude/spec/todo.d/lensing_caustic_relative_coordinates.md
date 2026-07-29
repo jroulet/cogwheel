@@ -27,22 +27,22 @@ section: Backlog
 
   ## Steps, in series
 
-  1. **Pointwise curvature radius.** Add
-     `geometry.caustic_curvature_radius(gamma, theta, *, kappa, branch)` — the
-     three-point circumradius currently inlined in
-     `surrogate_training._min_curvature_radius`, evaluated AT a point rather
-     than minimised over a band. It belongs in `geometry` because the caustic
-     does; re-express the band-min as a thin wrapper.
-     ACCEPTANCE: matches an independent symbolic/high-dps curvature oracle
-     (sympy 1.14.0 and mpmath 1.3.0 are both in the env) to 1e-8; the
-     small-gamma astroid limit `R_c -> 3*gamma*|sin 2th|` is a scale/sign
-     check only, good to 4.4e-5 — F038. The rewritten band-min
-     does NOT reproduce the incumbent: F038 measures the circumradius estimator
-     biased HIGH by 4.9-9.6% on production bands, because a three-point stencil
-     cannot reach the arc endpoints where the true minimum sits. Assert instead
-     that the exact band-min is BELOW the incumbent by that measured margin and
-     that the consumer decision `eta_max > 0.5 * r_min` flips on NO production
-     band. A flip is a finding to report, never a number to tune.
+  1. **Pointwise curvature radius — CLOSED FORM.** Add
+     `geometry.caustic_curvature_radius(gamma, theta, *, kappa, branch)`
+     computed ANALYTICALLY: the caustic is an exact parametric curve, so
+     differentiate it, do not sample it. Chain rule through `u -> r -> y`,
+     then `R_c = |y'|^3 / |y1' y2'' - y2' y1''|`. It belongs in `geometry`
+     because the caustic does. Then DELETE the three-point circumradius inlined
+     in `surrogate_training._min_curvature_radius` and re-express that as a
+     minimum over exact values.
+     ACCEPTANCE: agrees with an independent high-precision oracle to 1e-12
+     (measured 4.4e-13 over 42 cases, F038), on both parities and branches,
+     including `kappa != 0`, near-axial `theta`, and near the parity wall; the
+     astroid limit `R_c -> 3*gamma*|sin 2th|` holds to its own `O(gamma^2)`;
+     and the consumer decision `eta_max > 0.5 * r_min` flips on NO production
+     band. Do NOT assert byte-identity with the incumbent and do NOT assert its
+     5-10% bias margin — both would enshrine a discretization artifact. A flip
+     is a finding to report, never a number to tune.
 
   2. **DRIVER MEASUREMENT — the tube fraction.** Sweep held-out envelope eps
      against the DIMENSIONLESS `eta / R_c`, across gamma, both parities. Find
