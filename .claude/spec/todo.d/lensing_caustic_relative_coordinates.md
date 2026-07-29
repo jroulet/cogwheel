@@ -179,6 +179,16 @@ section: Backlog
 
   9. **Then train — once**, in final coordinates, on the final engine and chart
      set. Cost estimate first; full-suite gate green first.
+     PREREQUISITE: [[lensing_collocation_from_local_scales]]. Training bakes
+     the node layout into a shipped artifact, and today every chart axis is a
+     uniform grid in a coordinate that does not know the local scale — a bare
+     count against the wrong measure. The scales are all closed form from the
+     step-1 cascade (arc length and curvature for `theta`, the Airy argument
+     for `eta`, the envelope's own variation for `w`, caustic-relative for
+     `gamma`), so this is derivation, not a sweep. Getting it wrong does not
+     cost speed, it costs COVERAGE: nodes uniform in the wrong measure starve
+     the region that sets the held-out eps, and the historical response to
+     that has been to widen an exclusion window and serve less.
 
   ## Standing rules for whoever executes this
 
