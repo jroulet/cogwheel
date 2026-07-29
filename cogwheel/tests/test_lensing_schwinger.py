@@ -1338,21 +1338,39 @@ class PositiveParityBitFreezeTestCase(SchwingerTestCase):
                 self.n_checks += 1
                 self.assertTrue(bool(converged[index]))
 
-    def test_shear_free_point_lens_stays_on_legacy_series(self):
-        """Companion pin: the shear-free ``gamma' == 0`` point lens (which
-        the 1D Schwinger representation cannot represent) is served by the
-        legacy operator series -- ``order_used > 0``, converged -- the sole
-        remaining legacy production exit below the ceiling (Build 8d)."""
+    def test_shear_free_point_lens_uses_the_closed_form(self):
+        """Companion pin: the shear-free ``gamma' == 0`` point lens is
+        served by the point-mass CLOSED FORM, not by any series.
+
+        RE-BASELINE. This previously asserted ``order_used > 0`` -- that
+        the shear-free config stayed on the legacy operator series, which
+        was then its sole production exit. The series has been retired
+        from this route: at ``gamma' = 0`` the shear operator
+        ``exp[i*gamma*D_beta/(2w)]`` is the IDENTITY, so the series
+        collapsed to its zeroth term, which is exactly the point-mass
+        kernel `point_mass_g_derivatives` already computes. The serve is
+        now that kernel times the mass-sheet prefactor.
+
+        Equivalence is not assumed: the SHA-pinned byte-identity tests in
+        `test_lensing_fast_path.py::OperatorFusionByteIdentityTestCase`
+        compare the served amplification against the pre-change module and
+        find it byte-identical. Only ``order_used`` moved (9 -> 0), which
+        is the intended signal that no operator series ran.
+
+        The Schwinger 1D representation still cannot represent this
+        config, so the claim that it must NOT be reached is unchanged and
+        is pinned in `test_lensing_surrogate.py`.
+        """
         y = np.asarray(POINTLENS_BITFREEZE_Y)
         for w in POINTLENS_BITFREEZE_WS:
             with self.subTest(w=w):
                 value, diagnostics = F_op(w, y, POINTLENS_BITFREEZE_GAMMA)
                 self.n_checks += 1
-                self.assertGreater(
+                self.assertEqual(
                     diagnostics.order_used, 0,
-                    f"gamma'==0 point lens at w={w} reports order_used=0 -- "
-                    'the shear-free config must stay on the legacy operator '
-                    'series (Schwinger cannot represent it)')
+                    f"gamma'==0 point lens at w={w} reports order_used="
+                    f'{diagnostics.order_used} -- the closed form runs no '
+                    'operator series, so the order must be 0')
                 self.n_checks += 1
                 self.assertTrue(bool(diagnostics.converged))
                 self.n_checks += 1

@@ -1269,10 +1269,17 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
     def test_fop_scalar_frozen_arm_byte_identical_to_head(self):
         """
         FROZEN arm: scalar ``F_op`` at ``gamma' == 0`` is byte-for-byte
-        the pre-fusion HEAD -- the complex value AND every
-        OperatorDiagnostics field ``tobytes``-match, and the
-        certify-XOR-refuse decision (and refusal TYPE) never flips.  The
-        fused legacy contraction still serves this arm.
+        the pinned baseline in its PHYSICS -- the complex value and the
+        convergence flag ``tobytes``-match, and the certify-XOR-refuse
+        decision (and refusal TYPE) never flips.
+
+        RE-BASELINE: the legacy operator series has been retired from this
+        route in favour of the point-mass closed form, so the SERIES
+        diagnostics (``order_used``, ``cancellation_ratio``) legitimately
+        differ from the baseline and are asserted against the closed
+        form's own contract instead. The value staying byte-identical
+        across that swap is exactly what makes the retirement safe, and is
+        the reason this test is worth keeping.
         """
         head = _load_head_operator()
         certified = refused = 0
@@ -1300,19 +1307,44 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
                         f'{reference["exc"]} -- the refusal type moved')
                     continue
                 certified += 1
+                # The PHYSICS must not move: the amplification and the
+                # convergence flag stay byte-identical to the pinned
+                # module.  The SERIES diagnostics deliberately do move --
+                # see the assertions below.
                 for field, label in (
                         ('value', 'amplification F'),
-                        ('order', 'diagnostics.order_used'),
-                        ('converged', 'diagnostics.converged'),
-                        ('tail', 'diagnostics.estimated_relative_tail'),
-                        ('cancellation', 'diagnostics.cancellation_ratio')):
+                        ('converged', 'diagnostics.converged')):
                     self.n_checks += 1
                     self.assertEqual(
                         current[field].tobytes(), reference[field].tobytes(),
                         f'w={w} sqrt_s={sqrt_s} beta={beta} kappa={kappa}: '
                         f'frozen-arm {label} {current[field]!r} is not '
-                        f'byte-identical to HEAD {reference[field]!r} -- '
-                        'the fusion moved a bit on the gamma\'==0 arm')
+                        f'byte-identical to the pinned baseline '
+                        f'{reference[field]!r}')
+                # Series diagnostics: the gamma'==0 route no longer runs an
+                # operator series. At gamma' = 0 the shear operator
+                # exp[i*gamma*D_beta/(2w)] is the IDENTITY, so the series
+                # collapsed to its zeroth term -- the point-mass kernel --
+                # and the serve is now that closed form. The pinned
+                # baseline reports order_used = 9 and a series cancellation
+                # ratio here; the closed form reports 0 for both, BY
+                # DESIGN. That the `value` above is nevertheless
+                # byte-identical is the evidence the retirement was exact.
+                # `estimated_relative_tail` is not compared: the closed
+                # form reports the KERNEL's measured truncation tail, a
+                # different (and more honest) quantity than the series'.
+                self.n_checks += 1
+                self.assertEqual(
+                    int(current['order']), 0,
+                    f'w={w} sqrt_s={sqrt_s}: the shear-free closed form '
+                    f'runs no operator series, so order_used must be 0, '
+                    f'got {current["order"]!r}')
+                self.n_checks += 1
+                self.assertEqual(
+                    float(current['cancellation']), 0.0,
+                    f'w={w} sqrt_s={sqrt_s}: the shear-free closed form '
+                    f'has no series cancellation, so the ratio must be '
+                    f'0.0, got {current["cancellation"]!r}')
         self.assertGreater(
             certified, 0, 'no gamma\'==0 config certified; the frozen-arm '
             'byte-identity sweep never exercised a returned value')
@@ -1384,10 +1416,16 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
 
     def test_fop_grid_frozen_arm_byte_identical_to_head(self):
         """
-        FROZEN arm, batched: ``F_op_grid`` at ``gamma' == 0`` is
-        byte-for-byte HEAD over a multi-node ``w`` grid; the whole-grid
-        refusal (any uncertifiable node) fires on exactly the same configs
-        and with the same refusal type.
+        FROZEN arm, batched: ``F_op_grid`` at ``gamma' == 0`` matches the
+        pinned baseline byte-for-byte in its PHYSICS over a multi-node
+        ``w`` grid; the whole-grid refusal (any uncertifiable node) fires
+        on exactly the same configs and with the same refusal type.
+
+        RE-BASELINE: the shear-free route now serves the point-mass closed
+        form rather than the legacy operator series, so the series-only
+        ``orders`` array is asserted to be all-zero instead of matching
+        the baseline. Values and refusal parity are unchanged -- see the
+        scalar twin for the full rationale.
         """
         head = _load_head_operator()
         # Append an above-legacy-ceiling node (w = 63): at high L
@@ -1420,9 +1458,10 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
                                 f'{reference["exc"]}')
                             continue
                         certified += 1
+                        # Physics byte-identical; the series-only `orders`
+                        # array deliberately moves (see the scalar twin).
                         for field, label in (
                                 ('values', 'F values'),
-                                ('orders', 'operator orders'),
                                 ('converged', 'converged flags')):
                             self.n_checks += 1
                             self.assertEqual(
@@ -1430,7 +1469,14 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
                                 reference[field].tobytes(),
                                 f'sqrt_s={sqrt_s} beta={beta} kappa={kappa}: '
                                 f'frozen-arm F_op_grid {label} is not '
-                                'byte-identical to HEAD')
+                                'byte-identical to the pinned baseline')
+                        self.n_checks += 1
+                        self.assertTrue(
+                            np.all(np.asarray(current['orders']) == 0),
+                            f'sqrt_s={sqrt_s} beta={beta} kappa={kappa}: the '
+                            f'shear-free closed form runs no operator '
+                            f'series, so every operator order must be 0, got '
+                            f'{np.asarray(current["orders"])!r}')
         self.assertGreater(
             certified, 0, 'no gamma\'==0 grid certified (vacuous)')
         self.assertGreater(

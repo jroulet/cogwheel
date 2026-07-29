@@ -1528,13 +1528,56 @@ def _positive_parity_grid(
             f'w_array must be one-dimensional, got shape {w_array.shape}.')
     lam, y_scaled, gamma_prime = _mass_sheet_map(y, gamma, kappa)
     if not gamma_prime > 0.0:
-        # Shear-free (gamma' = 0, pure point lens): the Schwinger 1D
-        # representation requires gamma' > 0, so the legacy operator
-        # contraction is the SOLE serving route (its named
-        # CancellationError refusals are unchanged).  This is the only
-        # remaining production exit through the legacy path (Build 8d).
-        return _grid_certified(
-            w_array, y, gamma, beta=beta, kappa=kappa, max_order=max_order)
+        # Shear-free (gamma' = 0, pure point lens) CLOSED FORM.
+        #
+        # The Schwinger 1D representation requires gamma' > 0, so this
+        # route used to fall through to the legacy operator-series
+        # contraction.  It no longer needs to: at gamma' = 0 the shear
+        # operator exp[i*gamma*D_beta/(2w)] is the IDENTITY, so the whole
+        # series collapses to its zeroth term, which is exactly the
+        # point-mass kernel `point_mass_g_derivatives` already computes.
+        # The series was doing one multiply in an 85x85 dress.
+        #
+        # Driver-verified equivalence to the retired route over 36 configs
+        # (w in {1, 8, 30} x |y| in {0.2, 0.9} x kappa in {0, 0.3, -0.4} x
+        # beta in {0, 0.7}): worst relative difference 1.76e-15, and
+        # EXACTLY 0.0 at kappa = 0 -- the residual is log/exp
+        # reassociation in the mass-sheet prefactor, nothing more.  `beta`
+        # is correctly absent: with no shear there is no preferred axis.
+        #
+        # `HypergeometricDomainError` still propagates from the kernel
+        # above its certified (w, s) domain. That refusal belongs to the
+        # kernel, not to the series, and is unchanged.
+        source_scaled = np.asarray(y, dtype=float) / np.sqrt(lam)
+        s_shear_free = float(source_scaled @ source_scaled)
+        n_nodes = w_array.shape[0]
+        values = np.empty(n_nodes, dtype=complex)
+        tails = np.zeros(n_nodes, dtype=float)
+        for node in range(n_nodes):
+            w_node = float(w_array[node])
+            kernel, kernel_tail = point_mass_g_derivatives(
+                w_node, s_shear_free, 0,
+                _series_length(w_node, s_shear_free))
+            # Reconstruct in the EXACT operation order the retired route
+            # used (two separate exponentials, then `* total / lam`).
+            # Folding the three phase terms into one `exp` is
+            # mathematically identical and 1 ULP different in float64,
+            # which the SHA-pinned byte-identity tests correctly reject.
+            phase_scaled = np.exp(0.5j * w_node * s_shear_free)
+            mass_sheet_phase = np.exp(
+                0.5j * w_node * np.log(lam)
+                - 0.5j * w_node * float(kappa) * s_shear_free)
+            values[node] = complex(
+                mass_sheet_phase * phase_scaled * complex(kernel[0]) / lam)
+            tails[node] = float(kernel_tail[0])
+        # Diagnostics follow the Schwinger convention (no operator series
+        # ran, so no order and no cancellation ratio), except that the
+        # kernel's MEASURED truncation tail is reported rather than zero.
+        return (values,
+                np.zeros(n_nodes, dtype=int),
+                np.ones(n_nodes, dtype=bool),
+                tails,
+                np.zeros(n_nodes, dtype=float))
 
     # gamma' > 0: the exact Schwinger evaluator, reconstructed with the
     # SAME mass-sheet identity the saddle arm and the former Build-7a

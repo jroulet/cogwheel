@@ -1891,13 +1891,30 @@ class CrownContractFlipWitnessTestCase(SurrogateTestCase):
             'a sheared positive-parity host must NOT reach the legacy '
             'operator contraction (that would re-open a parallel path)')
 
-    def test_shear_free_point_lens_routes_through_legacy(self):
-        """gamma' == 0 exception: the shear-free point lens is served by
-        the LEGACY contraction (the Schwinger integrand degenerates at
-        eigenvalue coincidence and must not be invoked)."""
+    def test_shear_free_point_lens_never_invokes_schwinger(self):
+        """gamma' == 0 exception: the Schwinger evaluator must NOT run.
+
+        The 1D Schwinger representation degenerates at eigenvalue
+        coincidence, so the shear-free point lens has to be served some
+        other way. That claim is unchanged and is what this test pins.
+
+        RE-BASELINE. This previously also asserted the LEGACY operator
+        contraction served it (`_grid_certified` call count > 0). The
+        series has been retired from this route: at ``gamma' = 0`` the
+        shear operator is the identity, so it collapsed to its zeroth
+        term -- the point-mass kernel -- and the serve is now that closed
+        form. The served amplification is byte-identical across the
+        change (SHA-pinned comparison in
+        `test_lensing_fast_path.py::OperatorFusionByteIdentityTestCase`);
+        only ``order_used`` moved, 9 -> 0.
+
+        Asserting WHICH internal function ran is what this suite is being
+        weaned off, so the positive half is now a VALUE check: the served
+        grid is finite and matches the scalar entry point.
+        """
         cfg = FLIP_POINTLENS_CONFIG
         y = np.array([cfg['y1'], cfg['y2']])
-        n_schwinger, n_legacy = self._count_calls(
+        n_schwinger, _ = self._count_calls(
             schwinger_module, 'f_schwinger',
             lambda: F_op_grid(FLIP_POINTLENS_W, y, cfg['gamma'],
                               beta=0.0, kappa=0.0),
@@ -1906,10 +1923,21 @@ class CrownContractFlipWitnessTestCase(SurrogateTestCase):
         self.assertEqual(
             n_schwinger, 0,
             'the Schwinger evaluator must NOT be invoked at gamma\' == 0')
+
+        values, _orders, _converged = F_op_grid(
+            FLIP_POINTLENS_W, y, cfg['gamma'], beta=0.0, kappa=0.0)
         self.n_checks += 1
-        self.assertGreater(
-            n_legacy, 0,
-            'the shear-free point lens must be served by the legacy path')
+        self.assertTrue(
+            np.all(np.isfinite(values)),
+            'the shear-free closed form returned a non-finite value')
+        for index, w in enumerate(np.asarray(FLIP_POINTLENS_W, dtype=float)):
+            scalar, _diagnostics = operator_module.F_op(
+                float(w), y, cfg['gamma'], beta=0.0, kappa=0.0)
+            self.n_checks += 1
+            self.assertEqual(
+                complex(values[index]), complex(scalar),
+                f'grid and scalar entry points disagree at w={w} on the '
+                f'shear-free closed-form route')
 
     @staticmethod
     def _count_calls(mod, attr, thunk, *, also_spy):
