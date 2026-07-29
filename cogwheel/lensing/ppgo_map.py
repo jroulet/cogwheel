@@ -852,7 +852,7 @@ def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
     respective bar; ``w_ceiling`` is the min over angles of each angle's
     maximal accepted ``w`` (``nan`` only for ``STATUS_INVALID``).
 
-    A named engine refusal (`LensDomainError`, `CancellationError`,
+    A named engine refusal (`LensDomainError`,
     `SchwingerCertificationError`) part-way up an angle's ``w`` sweep
     TRUNCATES that angle at its maximal accepted ``w``-prefix rather than
     invalidating the cell -- the saddle-image branch ceiling is monotone in
@@ -866,12 +866,11 @@ def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
     from cogwheel.lensing.chang_refsdal import geometry
     from cogwheel.lensing.chang_refsdal.channels import ChangRefsdalChannels
     from cogwheel.lensing.chang_refsdal.operator import (
-        geometric_amplification, CancellationError)
+        geometric_amplification)
     from cogwheel.lensing.chang_refsdal._schwinger import (
         SchwingerCertificationError)
 
-    refusal_types = (geometry.LensDomainError, CancellationError,
-                     SchwingerCertificationError)
+    refusal_types = (geometry.LensDomainError, SchwingerCertificationError)
 
     w_nodes = _w_nodes(wall)
     n_nodes = w_nodes.size

@@ -542,7 +542,7 @@ _NEAR_CUSP = ('near-cusp', -0.38, 0.00, 0.20, 0.0, 0.0)
 
 #: Two-decade production ``w`` window shared with the lens-engine / gauge
 #: suites.  Every anchor's operator branch converges here; ``w >= ~50``
-#: trips a `operator.CancellationError` for the two-image / near-cusp /
+#: trips a named engine refusal for the two-image / near-cusp /
 #: rotated-shear anchors, so the window stops short of it.  Declared here
 #: rather than imported from a sibling suite, so this suite never reaches
 #: into another test module for its ground truth.

@@ -727,9 +727,9 @@ ANCHOR_CONFIGS = (
 )
 
 #: Two-decade production frequency window on which every anchor's
-#: operator branch converges; ``w >= ~50`` trips a CancellationError for
-#: the two-image / near-cusp / rotated-shear anchors, so the window stops
-#: short of it.
+#: operator branch converges; ``w >= ~50`` trips a named engine refusal
+#: for the two-image / near-cusp / rotated-shear anchors, so the window
+#: stops short of it.
 W_DECADE_LO = 0.3
 W_DECADE_HI = 30.0
 

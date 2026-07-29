@@ -123,7 +123,6 @@ from cogwheel.lensing.waveform import (
     LensedWaveformGenerator, dimensionless_frequency, _EIGHT_PI_MTSUN_S)
 from cogwheel.lensing.chang_refsdal.channels import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
-from cogwheel.lensing.chang_refsdal.operator import CancellationError
 
 # ---------------------------------------------------------------------------
 # Fixed configuration (all stochastic inputs are seeded from here).
@@ -975,15 +974,16 @@ class RefusalNetTestCase(_LensSuiteTestCase):
     """C6 -- the posterior maps NAMED engine refusals to exactly ``-inf``.
 
     In-support proposals (``gamma <= 0.45``, ``kappa = 0`` so positive
-    parity always holds) can still trip `operator.CancellationError` when
+    parity always holds) can still trip `SchwingerCertificationError` when
     source curvature drives the effective shear into the uncertifiable
-    contraction band.  The suite collects real such proposals by a seeded
+    band.  The suite collects real such proposals by a seeded
     scan of the sampled box, then pins that (a) the posterior returns the
     ``(-inf, dict, None)`` triple with NO exception escaping, while (b) the
     raw likelihood on the SAME standard config still raises the named
-    refusal.  A MUTATION that removes ``CancellationError`` from the net's
-    ``except`` clause (by patching the module global the clause resolves)
-    must turn (a) red -- the standing proof the ``-inf`` gate is not vacuous.
+    refusal.  A MUTATION that removes the refusal the box actually produces
+    from the net's ``except`` clause (by patching the module global the
+    clause resolves) must turn (a) red -- the standing proof the ``-inf``
+    gate is not vacuous.
     """
 
     @classmethod
@@ -999,19 +999,16 @@ class RefusalNetTestCase(_LensSuiteTestCase):
         """Seeded in-support draws that trip a NAMED wave refusal.
 
         Returns ``(sampled_vec, standard_par_dic, exc_class)`` triples
-        whose raw likelihood raises a named engine refusal.  Since the
-        Build-8d homogenization, `operator.CancellationError` is
-        UNREACHABLE from in-support draws (only the never-sampled
-        ``gamma' == 0`` legacy exit raises it): the reachable in-support
-        vocabulary is `SchwingerCertificationError` (dominant -- any
-        draw whose ``w`` grid crosses the ceiling refuses on its first
-        such node), `LensedBinningError` (wide-delay saddle images) and
-        `CancellationError` on the saddle-era paths where it survives.
-        This class pins the posterior net for whatever named refusals
-        the box actually reaches; the CancellationError-specific branch
-        keeps its falsification through the injection tests below
-        (reachability not required).  ``LensDomainError`` draws (the
-        measure-zero boundary) are skipped.
+        whose raw likelihood raises a named engine refusal.  The
+        reachable in-support vocabulary is `SchwingerCertificationError`
+        (dominant -- any draw whose ``w`` grid crosses the ceiling
+        refuses on its first such node) and `LensedBinningError`
+        (wide-delay saddle images).  This class pins the posterior net
+        for whatever named refusals the box actually reaches; the
+        remaining branches keep their falsification through the
+        injection tests below (reachability not required).
+        ``LensDomainError`` draws (the measure-zero boundary) are
+        skipped.
         """
         rng = np.random.default_rng(SEED + 6)
         found = []
@@ -1020,7 +1017,7 @@ class RefusalNetTestCase(_LensSuiteTestCase):
             standard = cls.prior.transform(*sampled)
             try:
                 cls.likelihood.lnlike(standard)
-            except (CancellationError, SchwingerCertificationError,
+            except (SchwingerCertificationError,
                     LensedBinningError) as exc:
                 found.append((sampled, standard, type(exc)))
                 if len(found) >= C6_N_REFUSALS:
@@ -1073,22 +1070,6 @@ class RefusalNetTestCase(_LensSuiteTestCase):
                                _UnrelatedRefusal):
             with self.assertRaises(exc_class):
                 self.posterior.lnposterior_pardic_and_metadata(*sampled)
-        self.n_compared += 1
-
-    def test_cancellation_branch_is_also_caught(self):
-        """An injected `CancellationError` is likewise mapped to -inf.
-
-        In-support unreachable post-8d (only the ``gamma' == 0`` legacy
-        exit raises it), so it is injected at the likelihood boundary to
-        keep the net's CancellationError branch pinned.
-        """
-        sampled, _standard, _exc = self.refusals[0]
-        with mock.patch.object(
-                self.likelihood, 'lnlike_and_metadata',
-                side_effect=CancellationError('injected legacy refusal')):
-            result = self.posterior.lnposterior_pardic_and_metadata(*sampled)
-        self.assertTrue(np.isneginf(result[0]))
-        self.assertIsNone(result[2])
         self.n_compared += 1
 
     def test_domain_error_branch_is_also_caught(self):

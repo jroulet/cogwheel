@@ -74,8 +74,7 @@ refusals -- over-critical / Type III (``1 - kappa <= 0``) and the exact
 `geometry.LensDomainError`, propagated unswallowed from both the
 constructor and every strain/decomposition call -- never downgraded to a
 warning or a ``nan``.  Beyond the certified Schwinger ceiling the operator
-raises `operator.CancellationError` / `SchwingerCertificationError` by
-name, likewise never swallowed.
+raises `SchwingerCertificationError` by name, likewise never swallowed.
 
 Conventions
 -----------
@@ -295,9 +294,8 @@ class LensedWaveformGenerator(utils.JSONMixin):
         Returns ``(w, positive_mask, partition)``.  ``partition`` is
         ``None`` when no frequency maps to positive ``w`` (the fully
         unlensed limit).  Named engine refusals -- `geometry.LensDomainError`
-        (Type III / parity boundary), `operator.CancellationError` and
-        `SchwingerCertificationError` (uncertifiable / above-ceiling
-        contraction) -- propagate unswallowed.
+        (Type III / parity boundary) and `SchwingerCertificationError`
+        (uncertifiable / above-ceiling quadrature) -- propagate unswallowed.
         """
         w = self.dimensionless_frequency(f_hz)
         positive = w > 0.0

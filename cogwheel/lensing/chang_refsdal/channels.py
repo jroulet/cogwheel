@@ -649,6 +649,26 @@ def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
     # decision below is byte-identical to before.
     saddle_host = not 1.0 - kappa > abs(gamma)
 
+    # Third leg of the authoritative gate: distance to the caustic (F031).
+    # `eta` is w-INDEPENDENT, so it is measured once here rather than per
+    # node, exactly as `operator._positive_parity_grid` does. A refusing
+    # caustic search means no geometric admission (`eta = 0.0` -> 'wave'),
+    # the conservative direction.
+    #
+    # This MUST be supplied. Omitting it defaults to `inf`, which silently
+    # satisfies the leg and puts this path back out of sync with the
+    # operator grids for every source inside `ETA_MIN_GEOMETRIC` of the
+    # caustic -- a training-label-vs-serve skew of exactly the kind F028
+    # was. Pinned by `test_lensing_operator.py::BranchGateTestCase::
+    # test_thresholds_have_one_home`.
+    eta = 0.0
+    if not saddle_host:
+        try:
+            eta = float(geometry.nearest_caustic_point(
+                gamma, beta, source, kappa=kappa).distance)
+        except geometry.LensDomainError:
+            eta = 0.0
+
     wave_indices = []
     for index in range(n_w):
         frequency = float(w[index])
@@ -656,7 +676,7 @@ def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
             wave_indices.append(index)
             continue
         exponent = cancellation_exponent(frequency, source, gamma, kappa)
-        if select_branch(frequency, delta_min, exponent) == 'geometric':
+        if select_branch(frequency, delta_min, exponent, eta) == 'geometric':
             value = complex(geometric_amplification(
                 frequency, source, gamma, beta=beta, kappa=kappa))
             orders[index] = _GEOMETRIC_ORDER
@@ -669,7 +689,7 @@ def _exact_total(w: np.ndarray, source: np.ndarray, gamma: float,
         wave_idx = np.asarray(wave_indices, dtype=int)
         w_wave = w[wave_idx]
         # A single batched wave-branch evaluation.  Any uncertifiable
-        # node raises `operator.CancellationError` from inside this call
+        # node raises `SchwingerCertificationError` from inside this call
         # and propagates unswallowed -- identical to the former per-node
         # `F_op` raise -- so the RB and brute paths refuse symmetrically.
         values_wave, orders_wave, converged_wave = F_op_grid(
@@ -1792,12 +1812,11 @@ class ChangRefsdalChannels:
             macro saddle ``0 < 1 - kappa < abs(gamma)`` flow through the
             same parity-blind SACR-C construction, the saddle wave branch
             being routed to `f_schwinger` by the operator parity dispatch.
-        operator.CancellationError
-            If the operator-series contraction is uncertifiable (strong
-            shear / high ``w``; FINDINGS F005).
         SchwingerCertificationError
-            If the saddle Schwinger evaluator fails its paired-rule
-            certification (above the ``w <= 60`` ceiling; FINDINGS F013).
+            The wave-branch refusal on BOTH parities: if the Schwinger
+            evaluator fails its paired-rule certification (strong shear /
+            high ``w``, FINDINGS F005; above the ``w <= 60`` ceiling,
+            FINDINGS F013).
         """
         source = np.asarray(y, dtype=float)
         matrix = geometry.macro_matrix(gamma, beta, kappa)
@@ -1915,9 +1934,8 @@ class ChangRefsdalChannels:
             guards.  The cheap decidable domain refusals stay live at this
             API boundary because `geometry.macro_matrix` is evaluated
             first, exactly as in `evaluate`; only the expensive exact
-            total, whose ``operator.CancellationError`` /
-            ``SchwingerCertificationError`` refusals `evaluate` can raise,
-            is skipped here.
+            total, whose ``SchwingerCertificationError`` refusal
+            `evaluate` can raise, is skipped here.
         """
         source = np.asarray(y, dtype=float)
         matrix = geometry.macro_matrix(gamma, beta, kappa)

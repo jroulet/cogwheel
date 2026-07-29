@@ -47,7 +47,7 @@ so the check is not circular:
 
 * REFUSAL CONTRACT (spec 5).  A macro-saddle config raises
   `geometry.LensDomainError` and a cancellation-band config raises
-  `operator.CancellationError`; the lensed ``_get_dh_hh_timeshift`` calls
+  `SchwingerCertificationError`; the lensed ``_get_dh_hh_timeshift`` calls
   the engine BEFORE the coherent score, so the refusal must propagate with
   the coherent-score ``get_marginalization_info`` call-count at exactly
   ZERO, and `LensedPosterior` must map it to an exact ``-inf`` (no NaN).
@@ -131,7 +131,6 @@ from cogwheel.lensing.posterior import LensedPosterior
 from cogwheel.lensing.prior import LensedMarginalizedExtrinsicIASPrior
 from cogwheel.lensing.waveform import LensedWaveformGenerator
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
-from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 
@@ -635,7 +634,8 @@ class NormPathAmplificationTestCase(_MarginalizedLensTestCase):
 class RefusalContractTestCase(_MarginalizedLensTestCase):
     """
     Spec 5 -- a macro-saddle (`LensDomainError`) and a cancellation-band
-    (`CancellationError`) config are refused by the lens engine BEFORE the
+    (`SchwingerCertificationError`) config are refused by the lens engine
+    BEFORE the
     extrinsic marginalization: the coherent-score
     ``get_marginalization_info`` call-count stays exactly 0 and
     `LensedPosterior` maps the refusal to an exact ``-inf`` (no NaN).  The
@@ -650,12 +650,10 @@ class RefusalContractTestCase(_MarginalizedLensTestCase):
     # engine still raises the named SchwingerCertificationError BEFORE the
     # coherent score.  The refusal-precedence contract is unchanged; the
     # assertRaises below verifies the config genuinely refuses through the
-    # full likelihood before the spy call-count is checked.  Both named
-    # wave-branch refusals are accepted.
+    # full likelihood before the spy call-count is checked.
     REFUSING_CONFIGS = (
         ('over_critical', OVER_CRITICAL_LENS, LensDomainError),
-        ('cancellation', CANCELLATION_LENS,
-         (CancellationError, SchwingerCertificationError)))
+        ('cancellation', CANCELLATION_LENS, SchwingerCertificationError))
 
     @classmethod
     def setUpClass(cls):
@@ -703,7 +701,7 @@ class RefusalContractTestCase(_MarginalizedLensTestCase):
         vec = self._in_support_sampled_vec()
 
         for label, exc in (('macro_saddle', LensDomainError),
-                           ('cancellation', CancellationError)):
+                           ('cancellation', SchwingerCertificationError)):
             with self.subTest(refusal=label):
                 with mock.patch.object(
                         posterior.likelihood, 'lnlike_and_metadata',

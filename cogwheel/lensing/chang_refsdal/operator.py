@@ -190,7 +190,7 @@ from cogwheel.lensing.chang_refsdal._schwinger import (
 
 __all__ = [
     'RHO_START', 'RHO_END', 'L_MAX', 'MAX_ORDER',
-    'OperatorDiagnostics', 'CancellationError',
+    'OperatorDiagnostics',
     'F_op', 'F_op_grid', 'geometric_amplification', 'select_branch',
     'cancellation_exponent',
 ]
@@ -211,22 +211,44 @@ RHO_END = 4.0
 #: geometric asymptote is accurate above its ``~50`` onset at resolved
 #: clusters (FINDINGS F013, governed by ``w*delta`` NOT ``L``); ``48`` is
 #: the census-(b) 13.9%-calibrated crossover; the refusal band
-#: ``[46, 48]`` exits by named `CancellationError`.  ``50`` is the ceiling
+#: ``[46, 48]`` exits by a named refusal
+#: (`_schwinger.SchwingerCertificationError`).  ``50`` is the ceiling
 #: of any defensible raise, gated by the enforcement bracket (the
 #: Test-Developer's graduated audit test).  Raising L_MAX past ~48 would
 #: push previously-geometric-served nodes onto the wave path past its
 #: 1e-10 accuracy ceiling (~L45-46), where they refuse -- so it stays 48.
 L_MAX = 48
 
+#: Minimum distance from the source to the caustic for the geometric
+#: asymptote to be admitted, in Einstein-radius units.  The THIRD leg of
+#: `select_branch`, and the one `L_MAX` cannot substitute for.
+#:
+#: Measured (F031, driver sweep 2026-07-29, 2600 resolved positive-parity
+#: samples against the Schwinger quadrature).  Binning the geometric error
+#: by ``eta`` and by ``L`` separates two effects that were previously
+#: confounded: at fixed ``eta`` the error falls monotonically with ``L``
+#: (so ``L_MAX`` is a real onset), but at ``eta < 0.1`` the error is FLAT
+#: in ``L`` and the two-condition gate still admitted nodes at p90 = 1.17,
+#: i.e. 117% relative error.  Per-band p90 with the ``L > L_MAX`` leg
+#: applied: eta 0-0.1 -> 1.17, 0.1-0.3 -> 5.6e-2, 0.3-1 -> 7.65e-5,
+#: >1 -> 1.54e-6.  The floor sits at the knee.
+#:
+#: WHY no amount of ``L`` helps below it: just outside a fold the image
+#: pair that annihilates at the caustic has become complex saddles with
+#: ``Im tau_c -> 0``, so they are undamped and a real-image-only sum omits
+#: an O(1) term (F029).  That is a validity failure of geometric optics,
+#: not a convergence rate.
+#:
+#: COST: this is a REFUSAL-INCREASING gate.  Nodes below the floor fall to
+#: the uniform arms (themselves wrong far from the caustic, F028) or to a
+#: named refusal.  Coverage is traded for correctness, deliberately.
+ETA_MIN_GEOMETRIC = 0.3
+
 #: Operator-series order cap.  The kernel derivative ladder handed to
 #: `_hyp1f1.point_mass_g_derivatives` is ``2 * MAX_ORDER`` because each
 #: application of ``D_0`` raises the radial index by up to two.
 MAX_ORDER = 42
 
-#: Refuse and raise `CancellationError` when the measured operator-series
-#: cancellation ratio ``max_partial_term / |total|`` exceeds this: past
-#: ~13 digits the double-double substrate no longer protects the sum.
-_CANCELLATION_REFUSAL = 1e13
 
 #: First-order float64 round-off unit for the operator CONTRACTION
 #: (machine epsilon).  The contraction stays in complex128 -- the
@@ -235,12 +257,12 @@ _CANCELLATION_REFUSAL = 1e13
 #: the measured cancellation condition ``sum|term| / |total|``.
 _CONTRACTION_UNIT_ROUNDOFF = float(np.finfo(np.float64).eps)
 
-#: Relative-accuracy target the wave-branch contraction must certify
-#: (FINDINGS F005).  When the measured round-off estimate
-#: ``_CONTRACTION_UNIT_ROUNDOFF * (sum|term| / |total|)`` exceeds this,
-#: `F_op` raises `CancellationError` rather than returning a
-#: finite-but-uncertified amplification.  This is the certification cut
-#: that replaces the former silent-``nan`` overflow near ``L ~ 40``.
+#: Relative-accuracy target the wave branch must certify (FINDINGS
+#: F005): the 1e-10 bar every returned amplification is held to, above
+#: which the evaluator refuses by name rather than returning a
+#: finite-but-uncertified value.  The operator-series contraction that
+#: once measured itself against this target is retired; the target
+#: survives as the shared accuracy bar the certified paths quote.
 _CONTRACTION_TARGET = 1e-10
 
 #: Round-off certification cut for the CONTRACTION error source, applied
@@ -262,20 +284,6 @@ _CONTRACTION_GUARD = 2e-9
 _MIN_ORDER = 6
 _CONSECUTIVE_SMALL = 4
 _SERIES_TOLERANCE = 2e-12
-
-#: Cache of dense operator tables keyed by integer ``max_order``.  The
-#: arrays are marked read-only and never returned to callers.
-_TABLE_CACHE: dict[int, np.ndarray] = {}
-
-
-class CancellationError(RuntimeError):
-    """Raised when two channels cancel past the certified depth.
-
-    The runtime expression of the two-channel cancellation law: the
-    operator series has lost so many digits to cancellation that the
-    result can no longer be trusted, and refusing is safer than
-    returning a plausible-but-wrong amplification.
-    """
 
 
 @dataclass(frozen=True)
@@ -299,64 +307,15 @@ class OperatorDiagnostics:
         any order heuristic being tight.
     cancellation_ratio : float
         MEASURED ``max_partial_term / |total|`` over the operator
-        summation; the refusal in `F_op` triggers off this quantity.
+        summation.  Reported as zero on every current serving route --
+        the operator-series contraction that produced it is retired --
+        and kept for the test-only legacy oracle.
     """
 
     order_used: int
     converged: bool
     estimated_relative_tail: float
     cancellation_ratio: float
-
-
-def _build_operator_table(max_order: int) -> np.ndarray:
-    """Dense real table of ``D_0**n`` in the shear eigenframe.
-
-    Parameters
-    ----------
-    max_order : int
-        Highest operator order to tabulate.
-
-    Returns
-    -------
-    np.ndarray
-        Read-only array of shape ``(max_order + 1, dim, dim)`` with
-        ``dim = 2*max_order + 1``.  Entry ``[n, a, b]`` is the real
-        coefficient of the monomial ``z**a * zbar**b * G^(k)(s)`` in
-        ``D_0**n``, with ``k = (a + b)//2 + n`` implied.
-    """
-    dim = 2 * max_order + 1
-    table = np.zeros((max_order + 1, dim, dim), dtype=float)
-    table[0, 0, 0] = 1.0
-    for order in range(1, max_order + 1):
-        prev = table[order - 1]
-        cur = table[order]
-        for a in range(dim):
-            for b in range(dim):
-                coeff = prev[a, b]
-                if coeff == 0.0:
-                    continue
-                # D_0 = 2 d_z^2 + 2 d_zbar^2, real in the eigenframe.
-                if a >= 2:
-                    cur[a - 2, b] += 2.0 * coeff * a * (a - 1)
-                if a >= 1:
-                    cur[a - 1, b + 1] += 4.0 * coeff * a
-                cur[a, b + 2] += 2.0 * coeff
-                if b >= 2:
-                    cur[a, b - 2] += 2.0 * coeff * b * (b - 1)
-                if b >= 1:
-                    cur[a + 1, b - 1] += 4.0 * coeff * b
-                cur[a + 2, b] += 2.0 * coeff
-    table.flags.writeable = False
-    return table
-
-
-def _operator_table(max_order: int) -> np.ndarray:
-    """Return the cached read-only operator table for ``max_order``."""
-    table = _TABLE_CACHE.get(max_order)
-    if table is None:
-        table = _build_operator_table(max_order)
-        _TABLE_CACHE[max_order] = table
-    return table
 
 
 def _mass_sheet_map(y: np.ndarray, gamma: float, kappa: float
@@ -1041,403 +1000,6 @@ def _series_length(w: float, s: float) -> int:
                        + 20.0))
 
 
-def _refusal_message(w: float, y: np.ndarray, gamma: float,
-                     kappa: float, reason: str) -> str:
-    """Uniform `CancellationError` message naming the configuration.
-
-    Every wave-branch refusal -- cancellation-ratio, contraction
-    magnitude spread, or a non-finite (overflow) result -- reports the
-    same ``(w, y, gamma, kappa)`` context and the same remedy, so a
-    caller can always tell which configuration was refused and why.
-    """
-    return (
-        f'Refusing F_op at w = {w}, y = {np.asarray(y).tolist()}, '
-        f'gamma = {gamma}, kappa = {kappa}: {reason}. The result cannot '
-        f'be trusted; use the geometric branch or a coherent '
-        f'multi-image sum.')
-
-
-@numba.njit(cache=True, fastmath=False)
-def _fused_contraction(table, z_powers, zbar_powers, abs_powers, half_sum,
-                       derivs_scaled, w_array, gamma_scaled, max_order, dim):
-    """Fused w-independent weight-vector build + batched node contraction.
-
-    THE single njit hot core of `F_op_grid`, merging the two formerly
-    separate stages -- the ``w``-INDEPENDENT per-order weight-vector build
-    and the per-node operator-series contraction -- into one dispatch.
-    The fusion is a DISPATCH-ONLY merge: the two loop nests below are the
-    former ``_weight_vectors`` and ``_contract_grid`` bodies inlined
-    verbatim, in the identical iteration order, so every float64
-    add/multiply happens in the SAME sequence as before.  The weight
-    vectors ``v`` / ``v_abs`` are now internal per-call temporaries rather
-    than arrays handed across an njit boundary; nothing is re-associated,
-    nothing switches to ``np.dot``/BLAS, and the ``(order, a, b)`` scatter
-    and ``(node, order, j)`` contraction are byte-for-byte unchanged.  The
-    win is eliminating the intermediate materialization/handoff of
-    ``v`` / ``v_abs`` and the second njit dispatch -- NOT any arithmetic
-    restructuring; the returned 6-tuple is bit-identical to the former
-    ``_weight_vectors`` -> ``_contract_grid`` pipeline (FINDINGS F005).
-
-    Stage 1 -- w-independent weight vectors.  Within one `F_op_grid` call
-    the lens parameters are fixed and only ``w`` varies over the node
-    grid, so ``z_powers``, ``zbar_powers``, the operator ``table`` and the
-    radial-index selector ``half_sum`` are all ``w``-INDEPENDENT.  The
-    order-``n`` contraction ``sum_{a,b} z_powers[a] * table[n,a,b] *
-    zbar_powers[b] * derivs[idx(a,b,n)]`` (with ``idx = min(half_sum[a,b]
-    + n, dim - 1)``, the SAME clamp the scalar kernel used) is regrouped
-    by the radial index ``j`` into a single length-``dim`` weight vector
-    ``v[n, j]`` and its all-positive companion ``v_abs[n, j]`` (built from
-    ``|z_powers[a]| * |table[n,a,b]| * |zbar_powers[b]|`` for the
-    ``sum|term|`` / ``max_term`` cancellation bookkeeping).  Built ONCE
-    per call and reused across every node.  GATHER-INDEX INVARIANT: a
-    nonzero monomial at order ``n`` obeys ``half_sum + n <= 2*max_order =
-    dim - 1``, so any index that would clamp carries a zero table
-    coefficient and is skipped -- the clamp never scatters a spurious
-    contribution into ``v[n, dim-1]``.
-
-    Stage 2 -- per-node contraction.  For every node it sums the operator
-    power series ``sum_n coeff_n * (v[n] . derivs)`` -- one length-``dim``
-    dot of the weight vector built above against that node's rescaled
-    radial derivatives -- accumulates the all-positive companion
-    ``sum|term|`` (the honest cancellation condition the round-off
-    certification measures), and runs the same small-term convergence test
-    the scalar kernel used, per node.  It stays complex128 -- the
-    double-double substrate lives only in the 1F1 kernel (FINDINGS F001) --
-    factors nothing out itself (the caller does the exact per-node
-    power-of-two rescaling of ``derivs_scaled``), and owns no threshold,
-    refusal, or reconstruction.
-
-    F010 note: ``half_sum`` stays an explicit ARGUMENT and
-    ``_SERIES_TOLERANCE`` / ``_CONSECUTIVE_SMALL`` / ``_MIN_ORDER`` are
-    referenced by name as MODULE GLOBALS, so the py_func-chain
-    self-falsification tests can still patch the gather index and the
-    convergence tolerance and drive the accuracy gate red.
-
-    Parameters
-    ----------
-    table : np.ndarray
-        Read-only ``(max_order + 1, dim, dim)`` operator table.
-    z_powers, zbar_powers : np.ndarray
-        ``(dim,)`` complex monomial powers of the eigenframe source and
-        its conjugate.
-    abs_powers : np.ndarray
-        ``(dim,)`` float magnitudes ``|z_powers|``.
-    half_sum : np.ndarray
-        ``(dim, dim)`` int table ``(a + b) // 2``.
-    derivs_scaled : np.ndarray
-        ``(n_nodes, dim)`` complex radial derivatives, each row already
-        rescaled by that node's exact power of two by the caller.
-    w_array : np.ndarray
-        ``(n_nodes,)`` float dimensionless frequencies.
-    gamma_scaled : float
-        Effective shear ``gamma / (1 - kappa)``.
-    max_order, dim : int
-        Series order cap and monomial dimension ``2*max_order + 1``.
-
-    Returns
-    -------
-    totals : np.ndarray
-        ``(n_nodes,)`` complex summed contractions, each in its node's
-        ``2**scale_exp`` units.
-    positive_totals : np.ndarray
-        ``(n_nodes,)`` float ``sum|term|`` per node, same units.
-    max_terms : np.ndarray
-        ``(n_nodes,)`` float largest per-order ``|term|`` per node.
-    orders_used : np.ndarray
-        ``(n_nodes,)`` int highest order actually summed per node.
-    last_ratios : np.ndarray
-        ``(n_nodes,)`` float last per-order ``|term| / |total|`` per node.
-    converged : np.ndarray
-        ``(n_nodes,)`` bool small-term-stop flag per node.
-    """
-    # --- Stage 1: w-independent per-order weight vectors ------------------
-    # (formerly ``_weight_vectors``; loop copied verbatim so the (order, a,
-    # b) scatter accumulates into v/v_abs in the identical float64 order.)
-    v = np.zeros((max_order + 1, dim), dtype=np.complex128)
-    v_abs = np.zeros((max_order + 1, dim), dtype=np.float64)
-    for order in range(max_order + 1):
-        tbl = table[order]
-        vn = v[order]
-        vabs = v_abs[order]
-        for a in range(dim):
-            za = z_powers[a]
-            aa = abs_powers[a]
-            for b in range(dim):
-                coefficient = tbl[a, b]
-                if coefficient == 0.0:
-                    continue
-                idx = half_sum[a, b] + order
-                if idx > dim - 1:
-                    idx = dim - 1
-                vn[idx] += za * (coefficient * zbar_powers[b])
-                vabs[idx] += aa * (abs(coefficient) * abs_powers[b])
-
-    # --- Stage 2: batched per-node operator-series contraction -----------
-    # (formerly ``_contract_grid``; loop copied verbatim so the (node,
-    # order, j) contraction and small-term stop are byte-for-byte unchanged.)
-    n_nodes = w_array.shape[0]
-    totals = np.zeros(n_nodes, dtype=np.complex128)
-    positive_totals = np.zeros(n_nodes, dtype=np.float64)
-    max_terms = np.zeros(n_nodes, dtype=np.float64)
-    orders_used = np.zeros(n_nodes, dtype=np.int64)
-    last_ratios = np.zeros(n_nodes, dtype=np.float64)
-    converged = np.zeros(n_nodes, dtype=np.bool_)
-    for node in range(n_nodes):
-        w = w_array[node]
-        derivs = derivs_scaled[node]
-        total = 0.0 + 0.0j          # in units of 2**scale_exp
-        coeff = 1.0 + 0.0j
-        max_term = 0.0
-        positive_total = 0.0        # sum of |summand| magnitudes
-        small_count = 0
-        node_converged = False
-        order_used = 0
-        last_ratio = np.inf
-        for order in range(max_order + 1):
-            if order:
-                coeff = coeff * (1j * gamma_scaled / (2.0 * w * order))
-            vn = v[order]
-            vabs = v_abs[order]
-            contribution = 0.0 + 0.0j
-            abs_contribution = 0.0
-            for j in range(dim):
-                contribution += vn[j] * derivs[j]
-                abs_contribution += vabs[j] * abs(derivs[j])
-            term = coeff * contribution
-            total += term
-            positive_total += abs(coeff) * abs_contribution
-            order_used = order
-            term_abs = abs(term)
-            max_term = max(max_term, term_abs)
-            scale = max(abs(total), 1e-300)
-            last_ratio = term_abs / scale
-            if (order >= _MIN_ORDER
-                    and term_abs <= _SERIES_TOLERANCE * scale):
-                small_count += 1
-                if small_count >= _CONSECUTIVE_SMALL:
-                    node_converged = True
-                    break
-            else:
-                small_count = 0
-        totals[node] = total
-        positive_totals[node] = positive_total
-        max_terms[node] = max_term
-        orders_used[node] = order_used
-        last_ratios[node] = last_ratio
-        converged[node] = node_converged
-    return (totals, positive_totals, max_terms, orders_used,
-            last_ratios, converged)
-
-
-def _grid_certified(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
-                    beta: float = 0.0, kappa: float = 0.0,
-                    max_order: int = MAX_ORDER
-                    ) -> tuple[np.ndarray, np.ndarray, np.ndarray,
-                               np.ndarray, np.ndarray]:
-    """Shared contraction + certification for the whole ``w`` node grid.
-
-    THE single wave-branch contraction and certification path.  Both the
-    lean public `F_op_grid` and the scalar `F_op` delegate here, so there
-    is exactly ONE contraction implementation and ONE application of the
-    four F005 refusals -- a value returned by either entry point and the
-    diagnostics reported alongside it can never disagree.
-
-    The operator table is built ONCE and the point-mass kernel is
-    evaluated per node (its series length varies with ``w``); the single
-    fused njit core `_fused_contraction` builds the ``w``-independent
-    weight vectors once and sums the operator series for every node, and
-    then each node is certified-or-refused with the four thresholds
-    BYTE-UNCHANGED from the former scalar path (FINDINGS F005/F001).
-
-    Parameters
-    ----------
-    w_array : np.ndarray
-        ``(n_nodes,)`` dimensionless frequencies,
-        ``0 < w <= _hyp1f1.W_MAX_CERTIFIED``.
-    y : np.ndarray
-        Shape ``(2,)`` source position (physical frame).
-    gamma : float
-        External shear magnitude.
-    beta : float, optional
-        External shear orientation, radians (rotated into the eigenframe).
-    kappa : float, optional
-        External convergence; enters through `_mass_sheet_map`.
-    max_order : int, optional
-        Operator-series order cap; fixes the kernel ladder length
-        ``2 * max_order``.
-
-    Returns
-    -------
-    values : np.ndarray
-        ``(n_nodes,)`` complex amplifications ``F``.
-    orders_used : np.ndarray
-        ``(n_nodes,)`` int highest operator order summed per node.
-    converged : np.ndarray
-        ``(n_nodes,)`` bool small-term-stop flag per node.
-    estimated_tails : np.ndarray
-        ``(n_nodes,)`` float measured truncation estimate per node.
-    cancellation_ratios : np.ndarray
-        ``(n_nodes,)`` float measured ``max_term / |total|`` per node.
-
-    Raises
-    ------
-    geometry.LensDomainError
-        If ``1 - kappa <= abs(gamma)``.
-    CancellationError
-        If any node cannot be certified to the ``1e-10`` target (the four
-        F005 refusals, per node).
-    _hyp1f1.HypergeometricDomainError
-        Propagated from the kernel above its certified ceilings.
-    """
-    w_array = np.asarray(w_array, dtype=float)
-    if w_array.ndim != 1:
-        raise ValueError(
-            f'w_array must be one-dimensional, got shape {w_array.shape}.')
-    lam, y_scaled, gamma_scaled = _mass_sheet_map(y, gamma, kappa)
-    s = float(y_scaled @ y_scaled)
-
-    table = _operator_table(max_order)
-    dim = 2 * max_order + 1
-
-    # Every quantity feeding the w-INDEPENDENT weight vectors is fixed
-    # within one grid call; the fused contraction below builds those
-    # vectors ONCE internally from these inputs.  Evaluate the beta=0
-    # table at the eigenframe-rotated source; the exp(-1j*beta) rotation
-    # reproduces the full shear-orientation dependence (see the module
-    # docstring).
-    z_eig = np.exp(-1j * beta) * complex(y_scaled[0], y_scaled[1])
-    powers = np.arange(dim)
-    z_powers = z_eig ** powers
-    zbar_powers = np.conjugate(z_eig) ** powers
-    abs_powers = np.abs(z_powers)
-    half_sum = (np.add.outer(powers, powers) // 2).astype(np.int64)
-
-    # Per-node kernel evaluation and overflow-safe rescaling (FINDINGS
-    # F005).  The kernel is NOT batched -- its series length varies with
-    # w -- so each node's derivatives are computed and rescaled here, then
-    # stacked for the single batched contraction call.  At high
-    # cancellation exponent ``L = w*|y'|`` the radial derivatives span a
-    # huge dynamic range, so factor each node's peak magnitude out as an
-    # EXACT power of two (``np.frexp`` / ``np.ldexp`` introduce no
-    # rounding) before the contraction; the total is scaled back exactly
-    # below.  This is NOT extended precision (FINDINGS F001).
-    n_nodes = w_array.shape[0]
-    derivs_scaled = np.empty((n_nodes, dim), dtype=complex)
-    scale_exps = np.empty(n_nodes, dtype=np.int64)
-    kernel_tails = np.empty(n_nodes, dtype=float)
-    for node in range(n_nodes):
-        w_node = float(w_array[node])
-        n_terms = _series_length(w_node, s)
-        derivs, relative_tail = point_mass_g_derivatives(
-            w_node, s, 2 * max_order, n_terms)
-        max_abs = float(np.max(np.abs(derivs)))
-        _, scale_exp = np.frexp(max_abs)  # max_abs == frac * 2**scale_exp
-        scale_exp = int(scale_exp)
-        scale_exps[node] = scale_exp
-        derivs_scaled[node] = (np.ldexp(derivs.real, -scale_exp)
-                               + 1j * np.ldexp(derivs.imag, -scale_exp))
-        kernel_tails[node] = float(np.max(relative_tail))
-
-    # The w-independent weight-vector build and the order-accumulation
-    # loop -- the length-dim weight-vector dot, its all-positive companion,
-    # and the small-term convergence test -- run in the single fused njit
-    # core `_fused_contraction` for all nodes at once.  Everything that
-    # raises, thresholds, or reconstructs stays here in Python.
-    (totals, positive_totals, max_terms, orders_used,
-     last_ratios, converged) = _fused_contraction(
-         table, z_powers, zbar_powers, abs_powers, half_sum,
-         derivs_scaled, w_array, gamma_scaled, max_order, dim)
-
-    values = np.empty(n_nodes, dtype=complex)
-    estimated_tails = np.empty(n_nodes, dtype=float)
-    cancellation_ratios = np.empty(n_nodes, dtype=float)
-    for node in range(n_nodes):
-        w_node = float(w_array[node])
-        total = totals[node]
-
-        # A non-finite running total means the scaled contraction still
-        # overflowed; refuse instead of letting a ``nan`` slip past the
-        # ratio gates below (``nan > threshold`` is False, so those gates
-        # would NOT fire on it).  Primary closure of the silent-nan bug.
-        if not (np.isfinite(total.real) and np.isfinite(total.imag)):
-            raise CancellationError(_refusal_message(
-                w_node, y, gamma, kappa,
-                'the scaled operator contraction is non-finite '
-                '(overflow)'))
-
-        total_abs = max(abs(total), 1e-300)
-        cancellation_ratio = max_terms[node] / total_abs
-        if cancellation_ratio > _CANCELLATION_REFUSAL:
-            raise CancellationError(_refusal_message(
-                w_node, y, gamma, kappa,
-                f'the two channels cancel to a measured ratio '
-                f'max_partial_term / |total| = {cancellation_ratio:.3e}, '
-                f'past the certified {_CANCELLATION_REFUSAL:.0e}'))
-
-        # TRUNCATION certification (FINDINGS F005): the max of the operator
-        # series' last-term ratio and the kernel's worst per-order tail.
-        # The BINDING cut at small ``max_order`` where the shear series has
-        # not converged; it goes blind (~1e-14) once it has, where the
-        # round-off GUARD below is what certifies.
-        estimated_tail = max(float(last_ratios[node]), kernel_tails[node])
-        if estimated_tail > _CONTRACTION_TARGET:
-            raise CancellationError(_refusal_message(
-                w_node, y, gamma, kappa,
-                f'the series truncation cannot certify the '
-                f'{_CONTRACTION_TARGET:.0e} target: estimated relative '
-                f'tail = {estimated_tail:.3e} at max_order = {max_order} '
-                f'(converged = {bool(converged[node])})'))
-
-        # Round-off CERTIFICATION for the CONTRACTION source: the first-
-        # order float64 round-off ``eps * (sum|term| / |total|)``.  The
-        # ONLY cut that sees the contraction blow-up near ``L ~ 45`` once
-        # the shear series has converged (FINDINGS F005).  The scale-
-        # invariant ratio is unperturbed by the power-of-two rescaling.
-        contraction_condition = positive_totals[node] / total_abs
-        contraction_error = (_CONTRACTION_UNIT_ROUNDOFF
-                             * contraction_condition)
-        if contraction_error > _CONTRACTION_GUARD:
-            raise CancellationError(_refusal_message(
-                w_node, y, gamma, kappa,
-                f'the wave-branch contraction round-off guard tripped: '
-                f'eps * (sum|term| / |total|) = {contraction_error:.3e} '
-                f'(guard {_CONTRACTION_GUARD:.0e}) from a magnitude '
-                f'spread sum|term| / |total| = '
-                f'{contraction_condition:.3e}'))
-
-        # Undo the power-of-two rescaling EXACTLY (``ldexp`` by the same
-        # exponent), then reconstruct F from G and undo the mass-sheet
-        # rescaling.  Because y_scaled = y / sqrt(lam), the physical
-        # |y|**2 / lam is exactly s.
-        scale_exp = int(scale_exps[node])
-        total = complex(np.ldexp(total.real, scale_exp),
-                        np.ldexp(total.imag, scale_exp))
-        phase_scaled = np.exp(0.5j * w_node * s)
-        mass_sheet_phase = np.exp(
-            0.5j * w_node * np.log(lam) - 0.5j * w_node * float(kappa) * s)
-        value = complex(mass_sheet_phase * phase_scaled * total / lam)
-        if not (np.isfinite(value.real) and np.isfinite(value.imag)):
-            raise CancellationError(_refusal_message(
-                w_node, y, gamma, kappa,
-                'the reconstructed amplification is non-finite '
-                '(overflow)'))
-        values[node] = value
-        estimated_tails[node] = estimated_tail
-        cancellation_ratios[node] = cancellation_ratio
-
-    return (values, orders_used, converged, estimated_tails,
-            cancellation_ratios)
-
-
-#: Test-only oracle exposing the LEGACY positive-parity operator-series
-#: contraction (the certified dd/1F1 wave path).  Since Build 8d the
-#: production positive-parity evaluator is Schwinger (`_positive_parity_grid`
-#: for ``gamma' > 0``); this alias lets the overlap-domain regression
-#: harness import the legacy evaluator to certify Schwinger against it on
-#: the certified overlap.  NOT a production path (see Build 8d).
-legacy_operator_oracle = _grid_certified
-
-
 def _positive_parity_grid(
         w_array: np.ndarray, y: np.ndarray, gamma: float, *,
         beta: float = 0.0, kappa: float = 0.0,
@@ -1486,16 +1048,18 @@ def _positive_parity_grid(
 
     * ``gamma' == 0`` (the shear-free point lens; measure-zero in the
       prior but reachable in unit tests and by direct callers): the 1D
-      Schwinger representation requires ``gamma' > 0``, so the legacy
-      operator-series contraction `_grid_certified` is the SOLE serving
-      route, with its `CancellationError` semantics unchanged.  This is
-      the only remaining production path through the legacy contraction.
+      Schwinger representation requires ``gamma' > 0``, so this route is
+      served by the CLOSED FORM below -- at ``gamma' == 0`` the shear
+      operator is the identity and the series collapses to the
+      point-mass kernel's zeroth term.  Its only refusal is the kernel's
+      own `_hyp1f1.HypergeometricDomainError`.
 
     The Schwinger nodes carry no operator-series diagnostics, so their
     ``orders`` / ``estimated_tails`` / ``cancellation_ratios`` are
     reported as zero and ``converged`` as ``True`` (mirroring the saddle
-    arm); the ``gamma' == 0`` legacy nodes keep their measured
-    diagnostics.
+    arm); the ``gamma' == 0`` closed form likewise reports no order and
+    no cancellation ratio, but does report the kernel's MEASURED
+    truncation tail.
 
     NODE-PARALLEL EXACT EVALUATION (Build 8f lever 3).  On the
     ``gamma' > 0`` route a Python pre-pass gathers the independent
@@ -1516,11 +1080,9 @@ def _positive_parity_grid(
     _schwinger.SchwingerCertificationError
         If a ``gamma' > 0`` node cannot certify its paired-rule
         quadrature, or lies above ``_schwinger.W_CEILING_SCHWINGER``.
-    CancellationError
-        If a ``gamma' == 0`` node's legacy operator contraction cannot
-        be certified to the ``1e-10`` target (the four F005 refusals).
     geometry.LensDomainError, _hyp1f1.HypergeometricDomainError
-        Propagated from `_grid_certified` on the ``gamma' == 0`` route.
+        Propagated from the point-mass kernel on the ``gamma' == 0``
+        closed-form route.
     """
     w_array = np.asarray(w_array, dtype=float)
     if w_array.ndim != 1:
@@ -1604,9 +1166,20 @@ def _positive_parity_grid(
     source = np.asarray(y, dtype=float)
     y_prime_norm = float(np.sqrt(y_scaled @ y_scaled))
     delta_min = 0.0
+    # `eta` (distance to the caustic) is the third leg of the authoritative
+    # gate and, like `delta_min`, is w-INDEPENDENT -- so it is computed once
+    # per grid call and only when some node exceeds the ceiling.  A refusing
+    # caustic search means no geometric admission: `eta = 0.0` sends every
+    # node to 'wave', which is the conservative direction.
+    eta = 0.0
     if np.any(w_array > _schwinger.W_CEILING_SCHWINGER):
         matrix = geometry.macro_matrix(gamma, beta, kappa)
         delta_min = _real_delay_min_separation(source, matrix)
+        try:
+            eta = float(geometry.nearest_caustic_point(
+                gamma, beta, source, kappa=kappa).distance)
+        except geometry.LensDomainError:
+            eta = 0.0
 
     n_nodes = w_array.shape[0]
     values = np.empty(n_nodes, dtype=complex)
@@ -1630,7 +1203,7 @@ def _positive_parity_grid(
             # when the node is BOTH resolved (``w * delta_min >= RHO_END``)
             # and strongly cancelling (``L > L_MAX``).
             branch = select_branch(
-                w_node, delta_min, w_node * y_prime_norm)
+                w_node, delta_min, w_node * y_prime_norm, eta)
             if branch == 'geometric':
                 # Resolved and strongly cancelling: served by the
                 # stationary-phase asymptote instead of the uniform fold
@@ -1713,8 +1286,9 @@ def F_op_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     raises a named refusal, so a single uncertifiable node refuses the
     whole grid rather than returning a finite-but-uncertified value.  For
     ``gamma' > 0`` the refusal is `_schwinger.SchwingerCertificationError`
-    (including every ``w > _schwinger.W_CEILING_SCHWINGER``); for
-    ``gamma' == 0`` it is `CancellationError` (the four F005 refusals).
+    (including every ``w > _schwinger.W_CEILING_SCHWINGER``); the
+    shear-free ``gamma' == 0`` closed form refuses only through the
+    kernel's own `_hyp1f1.HypergeometricDomainError`.
 
     Parameters
     ----------
@@ -1753,10 +1327,6 @@ def F_op_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
         ``_schwinger.W_CEILING_SCHWINGER`` (``w > 60``, where the named
         refusal stands).  This is the production refusal for every
         sheared positive-parity host (`_positive_parity_grid`).
-    CancellationError
-        Shear-free ``gamma' == 0`` legacy route only: if a node's
-        operator contraction cannot be certified to the ``1e-10`` target
-        (the four F005 refusals, per node).
     _hyp1f1.HypergeometricDomainError
         Propagated from the kernel above its certified ``w`` or
         cancellation-exponent ceiling.
@@ -1831,28 +1401,6 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
     geometry.LensDomainError
         If ``1 - kappa <= 0`` (Type III) or ``|gamma| == 1 - kappa`` (the
         parity boundary).
-    CancellationError
-        Shear-free ``gamma' == 0`` legacy route only (the point lens; see
-        `_positive_parity_grid`): if the operator contraction cannot be
-        certified to the ``1e-10`` target.  Every sheared positive-parity
-        host (``gamma' > 0``) is served by Schwinger instead and refuses,
-        if at all, with `_schwinger.SchwingerCertificationError`.  The
-        underlying contraction covers four refusals, all raised as named
-        errors rather than returning a ``nan`` or a finite-but-uncertified
-        amplification (FINDINGS F005):
-
-        * the scaled contraction still overflows to a non-finite total;
-        * the measured operator-series cancellation ratio
-          ``max_partial_term / |total|`` exceeds ``_CANCELLATION_REFUSAL``
-          (the gamma-channel refusal, FINDINGS F001);
-        * the measured truncation tail ``estimated_relative_tail``
-          exceeds ``_CONTRACTION_TARGET`` (the operator-series / kernel
-          truncation cut, binding at small ``max_order``);
-        * the measured contraction round-off bound
-          ``_CONTRACTION_UNIT_ROUNDOFF * (sum|term| / |total|)`` exceeds
-          ``_CONTRACTION_GUARD`` (the float64 derivative-ladder
-          cancellation cut that replaces the former silent-``nan``
-          overflow near ``L ~ 45``).
     _schwinger.SchwingerCertificationError
         The production wave-branch refusal on BOTH parities: if the
         paired Gauss-Legendre rules cannot certify the Schwinger
@@ -2064,14 +1612,15 @@ def cancellation_exponent(w: float, y: np.ndarray, gamma: float = 0.0,
 
 
 def select_branch(w: float, delta_min: float,
-                  cancellation_exp: float) -> str:
+                  cancellation_exp: float,
+                  eta: float = np.inf) -> str:
     """Authoritative wave/geometric branch gate.
 
     THIS module owns the single implementation; the channel tracker
     imports it rather than redefining the thresholds.  Returns
-    ``'geometric'`` only when BOTH the resolution and the cancellation
-    conditions hold, and ``'wave'`` otherwise.  Neither condition alone
-    licenses the asymptote (see the module docstring).
+    ``'geometric'`` only when ALL THREE conditions hold -- resolution,
+    cancellation, and distance from the caustic -- and ``'wave'``
+    otherwise.  No condition alone licenses the asymptote.
 
     Parameters
     ----------
@@ -2082,26 +1631,46 @@ def select_branch(w: float, delta_min: float,
     cancellation_exp : float
         Measured cancellation exponent ``L`` (see
         `cancellation_exponent`).
+    eta : float, optional
+        Distance from the source to the caustic
+        (`geometry.nearest_caustic_point`).  Defaults to ``inf``, which
+        satisfies the leg vacuously and reproduces the two-condition
+        gate.  A caller that omits it is DISABLING a measured accuracy
+        condition; positive parity must supply it.  The macro saddle
+        passes ``inf`` deliberately -- see the Notes.
 
     Returns
     -------
     str
         ``'geometric'`` if ``w*delta_min >= RHO_END`` and
-        ``cancellation_exp > L_MAX``; otherwise ``'wave'``.
+        ``cancellation_exp > L_MAX`` and ``eta >= ETA_MIN_GEOMETRIC``;
+        otherwise ``'wave'``.
 
     Notes
     -----
-    ``L_MAX`` is a HANDOFF exponent inside the certified wave/geometric
-    overlap, not a one-sided accuracy floor (see the `L_MAX` provenance):
-    the wave series is accurate to ``L ~ 45-46`` (F005) and the geometric
-    asymptote above its ``~50`` onset at resolved clusters (F013), so the
-    shipped ``48`` sits in the overlap and the refusal band ``[46, 48]``
-    exits by named `CancellationError`.  The geometric-served path itself
-    additionally enforces the census guards of
-    `_certify_geometric_census` before summing.
+    ``L_MAX`` is a geometric-optics ONSET threshold, re-derived on its own
+    terms in F031 after the legacy operator series it was originally
+    calibrated against was retired: at FIXED ``eta``, the geometric error
+    falls monotonically with ``L``, 100x to 280x across the range, measured
+    against the Schwinger quadrature.
+
+    The ``eta`` leg exists because ``L`` alone is NOT sufficient, also
+    measured in F031: at ``eta < 0.1`` the error is FLAT in ``L`` and the
+    two-condition gate still admitted nodes at p90 = 1.17 -- 117% relative
+    error.  No amount of ``L`` rescues the near-caustic regime, because
+    geometric optics has no validity there (F029: just outside a fold the
+    annihilated image pair are undamped complex saddles that a real-image
+    sum omits).  Adding this leg moves worst-case p90 from 1.17 to 7.65e-5.
+
+    SADDLE: F031 is POSITIVE PARITY ONLY -- there is no saddle sweep. The
+    macro-saddle path therefore passes ``eta = inf``, preserving its
+    boundary exactly rather than extrapolating a positive-parity threshold
+    onto an unmeasured branch.  Whether the saddle needs its own ``eta``
+    floor is OPEN.
     """
     resolved = float(w) * float(delta_min) >= RHO_END
     strongly_cancelling = float(cancellation_exp) > L_MAX
-    if resolved and strongly_cancelling:
+    far_from_caustic = float(eta) >= ETA_MIN_GEOMETRIC
+    if resolved and strongly_cancelling and far_from_caustic:
         return 'geometric'
     return 'wave'

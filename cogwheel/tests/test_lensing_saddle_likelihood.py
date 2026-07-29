@@ -116,7 +116,6 @@ from matplotlib import pyplot as plt
 import cogwheel.lensing.likelihood as likelihood_module
 from cogwheel.lensing.chang_refsdal.channels import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
-from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 from cogwheel.lensing.likelihood import LensedBinningError

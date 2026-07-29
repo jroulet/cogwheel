@@ -2396,13 +2396,6 @@ _BYTE_IDENTITY_WGRID = np.array([5.0, 20.0, 40.0, 55.0, 60.0])
 #: across the dispatch edits: ``(gamma, radius, angle, beta, kappa, w)``.
 _GEOMETRIC_NODE = (1.5, 1.20, _RAY_ANGLE, 0.0, 0.0, 100.0)
 
-#: ``select_branch`` grid over which the frozen wave/geometric gate must
-#: match HEAD exactly: ``(w, delta_min, cancellation_exp)``.
-_SELECT_BRANCH_GRID = tuple(
-    itertools.product((10.0, 61.0, 100.0), (0.01, 0.05, 0.2),
-                      (10.0, 48.0, 49.0, 60.0)))
-
-
 class CertifiedPathByteIdentityTestCase(_FoldArmTestCase):
     """The certified paths are byte-identical after the WP4 dispatch edits.
 
@@ -2469,21 +2462,16 @@ class CertifiedPathByteIdentityTestCase(_FoldArmTestCase):
             np.complex128(cur).tobytes(), np.complex128(ref).tobytes(),
             'the geometric node value drifted from HEAD')
 
-    def test_select_branch_matches_head_exactly(self):
-        """The frozen wave/geometric gate is unchanged from HEAD.
-
-        `select_branch` is the byte-frozen positive-parity gate; WP4 must
-        not perturb it.  Every point of the ``(w, delta_min, L)`` grid
-        must return the identical label from both modules.
-        """
-        head = _head_operator()
-        for w, delta_min, cancellation_exp in _SELECT_BRANCH_GRID:
-            with self.subTest(w=w, delta_min=delta_min, L=cancellation_exp):
-                self.n_checks += 1
-                self.assertEqual(
-                    operator.select_branch(w, delta_min, cancellation_exp),
-                    head.select_branch(w, delta_min, cancellation_exp),
-                    'select_branch diverged from HEAD')
+    # DELETED (one-home consolidation): `test_select_branch_matches_head_
+    # exactly` re-pinned the routing predicate by replaying a hand-built
+    # ``(w, delta_min, L)`` grid through BOTH this module's
+    # `select_branch` and the HEAD copy's -- a second home for the gate,
+    # and a self-referential one (the gate judged against a copy of
+    # itself).  It also called the three-leg gate with three arguments,
+    # so it could not have seen `eta` move at all.  The predicate is
+    # pinned once, against what the operator grids actually SERVE, in
+    # `test_lensing_operator.BranchGateTestCase.
+    # test_thresholds_have_one_home`.
 
     def test_only_previously_refusing_nodes_change(self):
         """Decisions change ONLY at ``w > 60`` non-geometric nodes.
@@ -2564,39 +2552,29 @@ class CornerCensusContractTestCase(_FoldArmTestCase):
     The extended corner census (category (a)-(d) fractions with Wilson
     intervals and fold / cusp argument distributions) is NOT yet landed,
     so this class gates the invariants that ARE testable now -- the
-    production thresholds are unchanged (``L_MAX == 48``, ``select_branch``
-    byte-frozen) and the census source stays pure of the exact wave
+    production threshold the census reports against is unchanged
+    (``L_MAX == 48``) and the census source stays pure of the exact wave
     evaluators -- and carries an ``@expectedFailure`` tripwire that flips
     RED the moment the extended-census API lands, prompting the real
     structure/determinism gate.
     """
 
     def test_production_thresholds_unchanged(self):
-        """``L_MAX == 48`` and ``select_branch`` keeps its two-condition gate.
+        """``L_MAX == 48``: the census must not move a production threshold.
 
-        The census must REPORT category (b) without moving any production
-        threshold.  ``geometric`` requires BOTH resolution
-        (``w*delta_min >= RHO_END``) and strong cancellation
-        (``L > L_MAX``); neither alone licenses it.
+        The census REPORTS category (b); its (b) fraction is defined
+        against the shipped ``L_MAX``, so a change to that constant
+        invalidates the reported number.  The gate SEMANTICS that
+        consume ``L_MAX`` are pinned elsewhere -- once -- in
+        `test_lensing_operator.BranchGateTestCase` (which sweeps the
+        quadrants, the boundary equalities and both operator grids'
+        actual routing); re-pinning them here would be a second home for
+        the predicate.
         """
         self.n_checks += 1
         self.assertEqual(operator.L_MAX, _L_MAX_PINNED,
                          'production L_MAX changed; the census (b) fraction '
                          'would shift under it')
-        pinned = {
-            (100.0, 0.05, 49.0): 'geometric',   # resolved AND L>48
-            (100.0, 0.05, 48.0): 'wave',         # L == L_MAX, not > it
-            (100.0, 0.01, 49.0): 'wave',         # w*dmin = 1.0 < RHO_END
-            (61.0, 0.20, 49.0): 'geometric',     # 12.2 >= 4 and 49 > 48
-            (10.0, 0.20, 60.0): 'wave',          # 2.0 < RHO_END
-        }
-        for (w, delta_min, cancellation_exp), expected in pinned.items():
-            with self.subTest(w=w, delta_min=delta_min, L=cancellation_exp):
-                self.n_checks += 1
-                self.assertEqual(
-                    operator.select_branch(w, delta_min, cancellation_exp),
-                    expected,
-                    'select_branch gate moved from its frozen semantics')
 
     def test_census_source_is_pure_of_exact_wave_evaluators(self):
         """The census source never names an exact wave evaluator (purity).

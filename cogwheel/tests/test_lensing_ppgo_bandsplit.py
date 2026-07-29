@@ -75,7 +75,6 @@ from cogwheel.lensing.chang_refsdal import (
 from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels, farfield_envelope_from_partition,
     reconstruct_farfield, FARFIELD_KERNEL_SUM)
-from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 from cogwheel.lensing import ppgo_map
@@ -1321,7 +1320,8 @@ class TruncationOnRefusalTestCase(_PpgoTestCase):
     """A cell whose saddle branch refuses above ``w*`` certifies its prefix.
 
     Build 8h-b WP1 truncation-on-refusal: a named engine refusal
-    (`CancellationError`) part-way up an angle's ``w``-sweep TRUNCATES that
+    (`SchwingerCertificationError`) part-way up an angle's ``w``-sweep
+    TRUNCATES that
     angle at its maximal accepted ``w``-prefix instead of invalidating the
     whole cell.  Here the exact engine is STUBBED -- ``_measure_cell``
     imports ``ChangRefsdalChannels`` / ``geometric_amplification`` LOCALLY
@@ -1374,7 +1374,7 @@ class TruncationOnRefusalTestCase(_PpgoTestCase):
     def setUpClass(cls) -> None:
         cls.w_nodes = _w_nodes(cls.WALL)
         w_star = cls._w_star
-        real_cancel = CancellationError
+        real_cancel = SchwingerCertificationError
 
         class _StubChannels:
             """Refuses monotonically above ``w*(angle)``; glue == exact."""

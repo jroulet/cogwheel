@@ -131,14 +131,10 @@ so the geometric separation-gate outcome is predicted without the
     surrogate guard, and the guard is shown to reseat (raise) on a genuine
     basin flip.
 
-11. **Tube byte-identity (hard fence).**  The tube path is explicitly OUT of
-    scope this build and must reproduce HEAD to the last bit.  A synthetic
-    deterministic tube chart is built and served under BOTH the working-tree
-    module and a pristine HEAD copy (`git show HEAD:...` exec'd side-by-side);
-    the served envelope and the fitted spline coefficients match with
-    ``max|diff| == 0`` over a config/query sweep.  The synthetic envelope
-    isolates the tube CHART + SERVE code from the (separately-changed,
-    separately-tested) engine.
+11. **Tube byte-identity (hard fence) -- RETIRED 2026-07-29.**  The tube
+    path was fenced against a pristine HEAD copy of ``surrogate.py``; that
+    apparatus is a migration-time artifact and has been removed.  See the
+    retirement note where `TubeByteIdentityTestCase` stood, below.
 """
 from __future__ import annotations
 
@@ -147,9 +143,6 @@ import functools
 import itertools
 import json
 import math
-import subprocess
-import sys
-import types
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -401,26 +394,6 @@ SACRC_CONTRAST_FLOOR: float = 50.0
 #: against the live module constant so the test cannot drift from production.
 CARRIER_FLIP_FRACTION: float = 0.5
 
-# --- Spec 11 (hard fence): tube-chart byte-identity vs HEAD --------------
-#: Tube-chart config sweep for the byte-identity fence.  A representative
-#: gamma band; the tube serve path is pure spline interpolation, so a
-#: synthetic deterministic envelope tensor (below) isolates the CHART +
-#: SERVE code from the (separately-tested, changed) engine.
-TUBE_GAMMA_BAND: tuple[float, float] = (0.40, 0.60)
-TUBE_ETA_FLOOR: float = 1e-4
-TUBE_ETA_MAX: float = 0.05
-TUBE_N_GAMMA: int = 4
-TUBE_N_U: int = 5
-TUBE_N_THETA: int = 5
-TUBE_N_W: int = 6
-TUBE_THETA_ARC: tuple[float, float] = (0.2, 1.0)
-TUBE_W_RANGE: tuple[float, float] = (1.0, 30.0)
-
-#: Byte-identity bar: the tube path is explicitly OUT of scope this build and
-#: must reproduce HEAD to the last bit (max|diff| == 0.0 exactly).
-TUBE_BYTE_IDENTITY: float = 0.0
-
-
 def _eigenframe_source(rho: float, theta_c_deg: float) -> tuple[float, float]:
     """Eigenframe ``(y1, y2)`` of a caustic-fixed ``(rho, theta_c)`` node."""
     return surrogate._from_caustic_fixed(
@@ -656,60 +629,6 @@ def _max_adjacent_carrier_jump(grid: np.ndarray) -> float:
             worst = max(worst, float(np.max(finite)))
     return worst
 
-
-@functools.lru_cache(maxsize=1)
-def _head_surrogate_module() -> types.ModuleType:
-    """Exec the HEAD ``surrogate.py`` source into a side-by-side module.
-
-    The tube path is out of scope this build; this loads the pristine HEAD
-    revision of the module (`git show HEAD:...`) so a synthetic tube chart can
-    be built and served under BOTH revisions and compared bit-for-bit.  The
-    (unchanged-for-tube) sub-dependencies -- geometry, channels -- resolve to
-    the working-tree copies via the normal import machinery; the tube serve
-    path is pure spline interpolation and never calls them, so this isolates
-    the tube CHART + SERVE code exactly.
-    """
-    head_src = subprocess.check_output(
-        ['git', 'show', 'HEAD:cogwheel/lensing/surrogate.py']).decode()
-    module = types.ModuleType('surrogate_head_byteident')
-    module.__file__ = 'surrogate_head_byteident.py'
-    sys.modules['surrogate_head_byteident'] = module
-    exec(compile(head_src, 'surrogate_head_byteident.py', 'exec'),  # noqa: S102
-         module.__dict__)
-    return module
-
-
-def _synthetic_tube_chart(module: types.ModuleType,
-                          scale: float = 1.0) -> object:
-    """A deterministic synthetic `TubeChart` built via ``module``.
-
-    The envelope tensor is a smooth closed form of the four axes (so the
-    cubic spline reproduces it exactly), identical between the HEAD and
-    working-tree modules.  ``scale`` multiplies the envelope so a
-    self-falsification test can perturb one side and witness a nonzero diff.
-    """
-    gamma_grid = np.linspace(*TUBE_GAMMA_BAND, TUBE_N_GAMMA)
-    u_grid = np.linspace(np.sqrt(TUBE_ETA_FLOOR), np.sqrt(TUBE_ETA_MAX),
-                         TUBE_N_U)
-    theta_grid = np.linspace(*TUBE_THETA_ARC, TUBE_N_THETA)
-    log_w_grid = np.log(np.geomspace(*TUBE_W_RANGE, TUBE_N_W))
-    grid_g, grid_u, grid_t, grid_w = np.meshgrid(
-        gamma_grid, u_grid, theta_grid, log_w_grid, indexing='ij')
-    real = scale * np.cos(2.1 * grid_g + 1.3 * grid_u - 0.7 * grid_t
-                          + 0.4 * grid_w) * np.exp(-0.1 * grid_w)
-    imag = scale * 0.5 * np.sin(1.7 * grid_g + grid_u + grid_t - 0.3 * grid_w)
-    env_real = np.moveaxis(real, 3, 0).copy()
-    env_imag = np.moveaxis(imag, 3, 0).copy()
-    return module.TubeChart.from_values(
-        gamma_grid=gamma_grid, u_grid=u_grid, theta_grid=theta_grid,
-        log_w_grid=log_w_grid, envelope_real=env_real, envelope_imag=env_imag,
-        image_count=4, parity=1, eta_floor=TUBE_ETA_FLOOR,
-        eta_max=TUBE_ETA_MAX, cusp_windows=None)
-
-
-#: Query sweep (gamma, eta, theta) for the tube byte-identity serve compare.
-_TUBE_QUERY_SEED: int = 0
-_TUBE_QUERY_COUNT: int = 30
 
 # --- WP1: ghost carrier delay-frame collapse (Build 8h-b WP1) ------------
 # `channels.farfield_ghost_term` carries the decaying complex-saddle ghost in
@@ -2363,80 +2282,51 @@ class WholeInteriorSacrcLiteralBarTestCase(ExteriorWindowsTestCase):
                             'bar (budget-limited, not a regression)')
 
 
-class TubeByteIdentityTestCase(ExteriorWindowsTestCase):
-    """Spec 11 (hard fence): the tube path is byte-identical to HEAD.
-
-    The tube chart is built and served under BOTH the working-tree module and
-    a pristine HEAD copy (`git show HEAD:...` exec'd side-by-side); the served
-    envelope and the fitted spline coefficients must match to the last bit
-    (``max|diff| == 0``) over a config/query sweep.  A deterministic synthetic
-    envelope tensor isolates the tube CHART + SERVE code from the
-    (separately-changed, separately-tested) engine -- the tube path itself was
-    not touched by the exterior/interior representation edits and must not
-    change under them.
-    """
-
-    def test_tube_serve_byte_identical_to_head(self) -> None:
-        head = _head_surrogate_module()
-        chart_cur = _synthetic_tube_chart(surrogate)
-        chart_head = _synthetic_tube_chart(head)
-        surro_cur = surrogate.LensAmplificationSurrogate(
-            [chart_cur], {'kind': 'byte-identity'})
-        surro_head = head.LensAmplificationSurrogate(
-            [chart_head], {'kind': 'byte-identity'})
-        w = np.geomspace(1.5, 25.0, 12)
-        rng = np.random.default_rng(_TUBE_QUERY_SEED)
-        max_diff = 0.0
-        n_served = 0
-        for _ in range(_TUBE_QUERY_COUNT):
-            gamma = float(rng.uniform(TUBE_GAMMA_BAND[0] + 0.02,
-                                      TUBE_GAMMA_BAND[1] - 0.02))
-            eta = float(rng.uniform(2e-3, 0.045))
-            theta = float(rng.uniform(TUBE_THETA_ARC[0] + 0.1,
-                                      TUBE_THETA_ARC[1] - 0.1))
-            e_cur, ok_cur, _ = surro_cur.serve(
-                w, gamma=gamma, y1=2.0, y2=0.0, beta=0.0, eta=eta,
-                theta=theta, image_count=4)
-            e_head, ok_head, _ = surro_head.serve(
-                w, gamma=gamma, y1=2.0, y2=0.0, beta=0.0, eta=eta,
-                theta=theta, image_count=4)
-            self.assertEqual(ok_cur, ok_head)
-            if ok_cur:
-                n_served += 1
-                max_diff = max(
-                    max_diff, float(np.max(np.abs(e_cur - e_head))))
-        # Anti-vacuity: the sweep must actually serve the tube chart.
-        self.assertGreater(n_served, 0, 'no tube query served -- fixture dead')
-        self.assertEqual(max_diff, TUBE_BYTE_IDENTITY)
-        self.record_comparison()
-        self._plot_diff(n_served, max_diff)
-
-    def test_tube_spline_coefficients_byte_identical_to_head(self) -> None:
-        # Construction identity: the fitted B-spline coefficient tensors match
-        # HEAD bit-for-bit (TubeChart.from_values / _fit_tensor_spline path).
-        head = _head_surrogate_module()
-        chart_cur = _synthetic_tube_chart(surrogate)
-        chart_head = _synthetic_tube_chart(head)
-        for name in ('real_coeffs', 'imag_coeffs'):
-            with self.subTest(coeff=name):
-                a = np.asarray(getattr(chart_cur, name))
-                b = np.asarray(getattr(chart_head, name))
-                self.assertEqual(a.shape, b.shape)
-                self.assertEqual(
-                    float(np.max(np.abs(a - b))), TUBE_BYTE_IDENTITY)
-                self.record_comparison()
-
-    def _plot_diff(self, n_served: int, max_diff: float) -> None:
-        """Diagnostic: per-config served-envelope max|diff| bar."""
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        fig, ax = plt.subplots()
-        ax.bar(['tube serve'], [max_diff + 1e-18])
-        ax.set_yscale('log')
-        ax.set_ylabel('max|diff| vs HEAD (+1e-18 floor)')
-        ax.set_title(f'Tube byte-identity: {n_served} queries, '
-                     f'max|diff|={max_diff:.1e}')
-        fig.savefig(OUTPUT_DIR / 'tube_byte_identity_diff.png', dpi=80)
-        plt.close(fig)
+# RETIRED (2026-07-29): the tube branch-vs-HEAD byte-identity apparatus
+# (`TubeByteIdentityTestCase`, `_head_surrogate_module`,
+# `_synthetic_tube_chart`, the `TUBE_*` fixture constants, and the
+# `SelfFalsificationTestCase` companion
+# `test_perturbed_tube_chart_breaks_head_byte_identity`).
+#
+# `_head_surrogate_module` imported ``surrogate.py`` via
+# `git show HEAD:<path>` and exec'd it side by side with the working tree; a
+# synthetic deterministic `TubeChart` was built and served under BOTH, and the
+# served envelope plus the fitted spline coefficients had to agree with
+# ``max|diff| == 0``.  That certified the exterior/interior representation
+# edits left the OUT-OF-SCOPE tube path untouched -- a MIGRATION-TIME guard
+# whose premise is that HEAD is the pre-migration revision.  Once the
+# migration is committed, HEAD IS the branch and the comparison is the code
+# against itself: vacuous while the module still loads, and broken the moment
+# any dependency moves (it errors today with "cannot import name
+# 'CancellationError' from ...chang_refsdal.operator", deleted 2026-07-29 --
+# HEAD's ``surrogate.py`` cannot even be exec'd against the working tree).
+#
+# It could not fail before the commit and could not pass after it -- so it
+# never had a window in which it was both green and meaningful in the tree it
+# was committed to.  Retired rather than re-pinned to a fixed SHA, which would
+# only defer the rot.  This mirrors the identical decision recorded in
+# `test_lensing_farfield_envelope.py` (2026-07-28).
+#
+# WHAT REPLACES IT.  The tube CHART + SERVE claim has no intrinsic guard in
+# THIS file -- the tube path was explicitly out of scope for the build this
+# suite was written for, so nothing here ever asserted its numbers, only that
+# they were unchanged.  The intrinsic coverage is cross-file and does not
+# depend on git history:
+#   * `test_lensing_surrogate_census.py` -- `TubeBeatsRawTestCase` and
+#     `FoldApproachRayTestCase` build real tube charts and gate the served
+#     envelope error against a FRESH engine oracle, and
+#     `MutationFalsificationTestCase` proves those serves can go red
+#     (eta-floor / cusp-window / gamma-grid-edge mutations flip the serve).
+#   * `test_lensing_surrogate.py` -- `ChartSelectionTestCase` pins tube-chart
+#     selection and serve determinism, and
+#     `SerializationMultiChartTestCase.test_round_trip_served_values_are_bit_identical`
+#     keeps a bit-identity bar on tube serves across a save/load round trip
+#     (a self-comparison of the CURRENT tree, so it stays meaningful).
+# The only thing lost is the "unchanged vs the previous commit" framing, which
+# git diff answers directly.
+#
+# Restore with:
+#   git show c1a552f -- cogwheel/tests/test_lensing_exterior_windows.py
 
 
 class GhostFrameCollapseTestCase(ExteriorWindowsTestCase):
@@ -2831,29 +2721,6 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
         self.assertTrue(lobe_a.admits(center, (1e-9, 1e-9)))
         with mock.patch.object(st, '_winding_number', return_value=0.0):
             self.assertFalse(lobe_a.admits(center, (1e-9, 1e-9)))
-        self.record_comparison()
-
-    def test_perturbed_tube_chart_breaks_head_byte_identity(self) -> None:
-        # Reachable-red (Spec 11): a one-part-in-1e6 perturbation of the
-        # synthetic envelope on one side makes the served max|diff| strictly
-        # positive -- the byte-identity compare is not trivially green.
-        head = _head_surrogate_module()
-        chart_cur = _synthetic_tube_chart(surrogate, scale=1.0)
-        chart_head = _synthetic_tube_chart(head, scale=1.0 + 1e-6)
-        surro_cur = surrogate.LensAmplificationSurrogate(
-            [chart_cur], {'kind': 'byte-identity'})
-        surro_head = head.LensAmplificationSurrogate(
-            [chart_head], {'kind': 'byte-identity'})
-        w = np.geomspace(1.5, 25.0, 12)
-        e_cur, ok_cur, _ = surro_cur.serve(
-            w, gamma=0.50, y1=2.0, y2=0.0, beta=0.0, eta=0.02, theta=0.6,
-            image_count=4)
-        e_head, ok_head, _ = surro_head.serve(
-            w, gamma=0.50, y1=2.0, y2=0.0, beta=0.0, eta=0.02, theta=0.6,
-            image_count=4)
-        self.assertTrue(ok_cur and ok_head)
-        self.assertGreater(float(np.max(np.abs(e_cur - e_head))),
-                           TUBE_BYTE_IDENTITY)
         self.record_comparison()
 
     def test_equal_labels_lose_the_representational_contrast(self) -> None:

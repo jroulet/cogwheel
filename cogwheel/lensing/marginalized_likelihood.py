@@ -308,7 +308,7 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
         fiducial) are reused unchanged.
         """
         # Lens engine, evaluated ONCE.  Candidate-side refusals
-        # (`geometry.LensDomainError`, `operator.CancellationError`) and the
+        # (`geometry.LensDomainError`, `SchwingerCertificationError`) and the
         # bin-resolution guard (`LensedBinningError`) propagate UNSWALLOWED
         # to the posterior boundary -- matching `lnlike_bruteforce` and the
         # engine's own hot path.  `delays` is `_image_delays(...)` [s].

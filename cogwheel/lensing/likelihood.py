@@ -69,10 +69,9 @@ saddle); the amplification is a parity-blind common factor ``F(w)``.  The
 engine's named refusals are *not* caught -- they propagate unswallowed so
 the certified-or-refuse contract is preserved end to end:
 `geometry.LensDomainError` (over-critical / Type III ``1 - kappa <= 0`` and
-the exact ``det A = 0`` parity boundary), `operator.CancellationError`
-(the wave-branch contraction cannot certify its accuracy), and
-`SchwingerCertificationError` (the saddle / strong-shear wave branch above
-its certified ceiling).
+the exact ``det A = 0`` parity boundary) and
+`SchwingerCertificationError` (the wave branch cannot certify its
+accuracy, on either parity, and above its certified ceiling).
 
 Conventions
 -----------
@@ -98,7 +97,6 @@ from cogwheel.lensing.chang_refsdal.channels import (
     KNOWN_INTERIOR_DEFINITIONS)
 from cogwheel.lensing.chang_refsdal.geometry import (
     LensDomainError, GhostDomainError, macro_matrix)
-from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
 from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
@@ -1112,10 +1110,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         The macro-geometry domain refusals (over-critical / Type III and
         the ``det A = 0`` parity boundary) make the first engine evaluation
         raise `geometry.LensDomainError`, and an uncertifiable or
-        above-ceiling wave-branch contraction raises
-        `operator.CancellationError` / `SchwingerCertificationError`; all
-        propagate unswallowed, matching the brute-force path so the two
-        refuse symmetrically.
+        above-ceiling wave-branch quadrature raises
+        `SchwingerCertificationError`; both propagate unswallowed,
+        matching the brute-force path so the two refuse symmetrically.
 
         Parameters
         ----------
@@ -1522,9 +1519,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         by the geometry-only partition is NOT caught: it propagates
         exactly as the exact path's seed evaluation would raise it,
         preserving the refusal set.  (The surrogate is never queried where
-        the engine would raise an `operator.CancellationError` /
-        `SchwingerCertificationError`: each chart's domain gate excludes
-        those points via its training-refusal exclusion balls.)
+        the engine would raise a `SchwingerCertificationError`: each
+        chart's domain gate excludes those points via its
+        training-refusal exclusion balls.)
 
         Parameters
         ----------
@@ -1786,11 +1783,11 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         1. Engine-evaluate the candidate on the `_LOO_SEED_NODES` seed
            grid (a single engine call; a candidate-side
-           `geometry.LensDomainError` or `operator.CancellationError`
+           `geometry.LensDomainError` or `SchwingerCertificationError`
            propagates UNSWALLOWED, matching ``lnlike_bruteforce``).
         2. Look up or build the fiducial envelope for the candidate's
            fiducial cell (`_fiducial_key`).  ONLY the fiducial build is
-           wrapped in ``try/except (LensDomainError, CancellationError)``:
+           wrapped in ``try/except LensDomainError``:
            a candidate inside the certified domain must not be refused
            because its snapped fiducial happens to fall outside, so a
            refusing fiducial falls back to the direct path.
@@ -1845,7 +1842,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 'dimensionless frequency w = xi*f; got a non-positive value.')
 
         # Candidate seed engine evaluation (single call).  A candidate-side
-        # `geometry.LensDomainError` / `operator.CancellationError` from
+        # `geometry.LensDomainError` / `SchwingerCertificationError` from
         # its own seed nodes propagates unswallowed here.
         w_max = float(dense_w.max())
         seed_w = np.geomspace(float(dense_w.min()), w_max, _LOO_SEED_NODES)
@@ -1859,7 +1856,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         key = _fiducial_key(lens)
         try:
             fiducial = self._get_or_build_fiducial(key, _lens_from_key(key))
-        except (LensDomainError, CancellationError):
+        except LensDomainError:
             # Refusal symmetry: a refusing SNAPPED fiducial must not veto a
             # candidate that is itself inside the certified domain.
             return self._amplification_coefficients_direct(par_dic, seed=seed)
@@ -1936,9 +1933,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         Notes
         -----
         `geometry.LensDomainError` (Type III / parity boundary, raised by
-        the first engine evaluation) and `operator.CancellationError` /
-        `SchwingerCertificationError` (uncertifiable or above-ceiling
-        contraction, raised at the worst-cancellation node ``w_max`` that
+        the first engine evaluation) and `SchwingerCertificationError`
+        (uncertifiable or above-ceiling quadrature, raised at the
+        worst-cancellation node ``w_max`` that
         the seed always evaluates) propagate unswallowed, exactly as in
         ``lnlike_bruteforce``, so the two paths refuse symmetrically.
         """
@@ -1952,9 +1949,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         # Coarse-node envelope (LOO-adaptive); the first engine call
         # raises the engine's named refusals (`geometry.LensDomainError`
-        # for Type III / the parity boundary, `operator.CancellationError`
-        # / `SchwingerCertificationError` for an uncertifiable or
-        # above-ceiling contraction), matching the brute-force path.
+        # for Type III / the parity boundary,
+        # `SchwingerCertificationError` for an uncertifiable or
+        # above-ceiling quadrature), matching the brute-force path.
         partition, coarse_w, envelope_nodes = self._envelope_loo_nodes(
             lens, dense_w, seed=seed)
 
@@ -2034,8 +2031,8 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         it.  On a miss the fiducial envelope is engine-evaluated at the
         SNAPPED lens parameters (`_envelope_loo_nodes`) and its Re/Im
         cubic-in-``ln w`` splines are built; a `geometry.LensDomainError`
-        / `operator.CancellationError` from the snapped configuration
-        propagates to the caller, which falls back to the direct path.
+        from the snapped configuration propagates to the caller, which
+        falls back to the direct path.
 
         Parameters
         ----------
@@ -2296,8 +2293,8 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         `LensedWaveformGenerator` (consuming the exact amplification
         ``exact_total``) and evaluates the inner products directly.  This
         is the same-generator reference the relative-binning ``lnlike``
-        must reproduce; a macro-saddle `geometry.LensDomainError` or an
-        `operator.CancellationError` propagates unswallowed.
+        must reproduce; a macro-saddle `geometry.LensDomainError` or a
+        `SchwingerCertificationError` propagates unswallowed.
 
         Parameters
         ----------

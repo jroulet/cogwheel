@@ -142,7 +142,6 @@ from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels, ChangRefsdalPartition,
     farfield_envelope_from_partition, reconstruct_from_envelope)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
-from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 from cogwheel.lensing.surrogate import (
@@ -204,8 +203,7 @@ DIAGONAL_EXTERIOR = (1.3, 1.3)
 # --------------------------------------------------------------------------
 
 #: Engine refusals to skip while sampling a training grid or held-out set.
-_ENGINE_REFUSALS = (LensDomainError, CancellationError,
-                    SchwingerCertificationError)
+_ENGINE_REFUSALS = (LensDomainError, SchwingerCertificationError)
 
 #: Shear band and half-width of the synthetic far-field training tiles.
 TILE_GAMMA_BAND = (0.02, 0.06)

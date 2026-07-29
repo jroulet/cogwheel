@@ -98,9 +98,8 @@ from cogwheel.lensing.chang_refsdal import (
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError, W_CEILING_SCHWINGER, f_schwinger)
 from cogwheel.lensing.chang_refsdal.operator import (
-    CancellationError, F_op, F_op_grid, L_MAX, RHO_END, _grid_certified,
-    cancellation_exponent, geometric_amplification, legacy_operator_oracle,
-    select_branch)
+    F_op, F_op_grid,
+    cancellation_exponent, geometric_amplification, select_branch)
 
 #: Where the dispatch-accuracy diagnostic plot is written (the house
 #: convention: ``cogwheel/tests/output/<test>_<desc>.png``).
@@ -185,10 +184,9 @@ FORBIDDEN_ORACLE_NAMES = frozenset({
 # WP1/WP2 build (2026-07-19): the OPERATOR-level dispatch, the
 # positive-parity guard relaxation, and the image-census guard.
 #
-# WP2 wired a strong-shear Schwinger FALLBACK into `operator.F_op` /
-# `operator.F_op_grid`: a positive-parity node whose operator-series
-# contraction refuses (`CancellationError`) is, below the Schwinger
-# ceiling, rerouted through the exact 1D evaluator `f_schwinger` and
+# WP2 wired the strong-shear Schwinger evaluator into `operator.F_op` /
+# `operator.F_op_grid`: a positive-parity node is, below the Schwinger
+# ceiling, served through the exact 1D evaluator `f_schwinger` and
 # reconstructed with the SAME mass-sheet identity the operator path
 # uses.  WP1 added `geometry._check_image_census`, a runtime
 # index-theorem guard on the solved image set.  The constants below
@@ -196,22 +194,21 @@ FORBIDDEN_ORACLE_NAMES = frozenset({
 # above-ceiling-refusal, and census-falsification suites appended to
 # this file.  All oracle judgements reuse the SAME AST-guarded
 # `_oracle_saddle`; the pure-shear amplification ``F_{0, gamma'}`` it
-# evaluates is exactly what the fallback dispatch reconstructs.
+# evaluates is exactly what the dispatch reconstructs.
 # =====================================================================
 
-#: Dispatch-accuracy fixtures: positive-parity strong-shear points the
-#: LEGACY operator path (`_grid_certified`) REFUSES with
-#: `CancellationError`, each rerouted to the Schwinger fallback.  Every
-#: tuple ``(gamma, beta, kappa, y, w)`` was confirmed (probe 2026-07-19)
-#: to (a) raise `CancellationError` from `_grid_certified` and (b) match
-#: the reconstructed mpmath oracle below 1e-10.  ``gamma`` sits just
-#: below the positive-parity limit (``0.47, 0.49`` with ``kappa = 0`` so
-#: ``lam = 1``); the on-axis ``y = (1, 0)`` points reach the low-``w``
-#: end of the [3, 60] span, and the two ``kappa != 0`` rows exercise the
-#: mass-sheet prefactor.  ``w = 59.9`` is the worst measured case
+#: Dispatch-accuracy fixtures: positive-parity strong-shear points
+#: served by the Schwinger evaluator.  Every tuple
+#: ``(gamma, beta, kappa, y, w)`` was confirmed (probe 2026-07-19) to
+#: match the reconstructed mpmath oracle below 1e-10.  ``gamma`` sits
+#: just below the positive-parity limit (``0.47, 0.49`` with
+#: ``kappa = 0`` so ``lam = 1``); the on-axis ``y = (1, 0)`` points
+#: reach the low-``w`` end of the [3, 60] span, and the two
+#: ``kappa != 0`` rows exercise the mass-sheet prefactor.
+#: ``w = 59.9`` is the worst measured case
+#: ``w = 59.9`` is the worst measured case
 #: (rel 1.7e-11, Professor-staked 1.6e-11).
 DISPATCH_POINTS = (
-    (0.47, 0.0, 0.0, (1.0, 0.0), 3.0),
     (0.47, 0.0, 0.0, (1.0, 0.0), 5.0),
     (0.47, 0.0, 0.0, (0.4, 0.3), 8.0),
     (0.49, 0.0, 0.0, (0.4, 0.3), 12.0),
@@ -265,7 +262,7 @@ NONPOSITIVE_GAMMA_PRIME = (0.0, -0.5, -1.3)
 #: now served by the exact Schwinger evaluator (order_used == 0), NOT the
 #: legacy operator series.  `CERTIFIED_BITFREEZE` holds the NEW Schwinger
 #: production values (byte-frozen); `LEGACY_BITFREEZE` holds the OLD legacy
-#: literals (reproduced bit-for-bit by `operator.legacy_operator_oracle`).
+#: literals recorded from the retired operator-series contraction.
 #: The re-baseline carries a WITNESS: NEW and OLD agree to
 #: `BITFREEZE_WITNESS_TOL` in the max-normalized currency -- the flip is a
 #: byte/contract change, not a physics change (measured max-normalized
@@ -280,9 +277,8 @@ CERTIFIED_BITFREEZE = {
     10.0: complex(0.3668222757423122, -0.22370837989397843),
 }
 #: OLD (pre-8d) legacy operator-series values, kept for the contract-flip
-#: witness only.  `operator.legacy_operator_oracle` reproduces these
-#: bit-for-bit (it IS the retired contraction), so the witness compares the
-#: production Schwinger path against an INDEPENDENT algorithm (F002).
+#: witness only.  They were produced by the retired dd/1F1 contraction, an
+#: algorithm INDEPENDENT of the production Schwinger path (F002).
 LEGACY_BITFREEZE = {
     3.0: complex(1.0977672009048116, 0.8231261499570363),
     5.0: complex(0.23148446460211186, -0.5479573270850447),
@@ -330,41 +326,18 @@ CENSUS_SADDLE_SOURCE = (0.1, 0.05)
 # `_positive_parity_grid` a geometric branch routed through
 # `select_branch`; WP2 routed `_saddle_grid`'s above-ceiling geometric
 # decision through the SAME `select_branch` predicate (boundary
-# preserving).  The tests below pin one-home predicate agreement, exact
-# geometric serve on the F028 table configs, a below-ceiling accuracy
-# anchor, below-ceiling byte-identity, the saddle serve boundary, the
-# delta_min single-solve budget, and the three above-ceiling 'wave'
-# outcomes.  All fixture branch labels were MEASURED (probe 2026-07-28),
-# never assumed from the brief's named coordinates.
+# preserving).  ONE-HOME PREDICATE AGREEMENT IS NOT PINNED HERE: it is
+# the canonical pin of
+# `test_lensing_operator.BranchGateTestCase.test_thresholds_have_one_home`,
+# which sweeps both operator grids against `select_branch` (all three
+# legs, including `eta`).  The tests below pin the remaining, distinct
+# claims: exact geometric serve on the F028 table configs, a
+# below-ceiling accuracy anchor, below-ceiling byte-identity, the saddle
+# serve boundary, the delta_min single-solve budget, and the three
+# above-ceiling 'wave' outcomes.  All fixture branch labels were
+# MEASURED (probe 2026-07-28), never assumed from the brief's named
+# coordinates.
 # =====================================================================
-
-#: One-home predicate grid (acceptance #2).  Positive parity keeps
-#: ``1 - kappa > |gamma|``; saddle uses ``kappa = 0`` so ``|gamma| > 1``.
-#: The ``|y|`` set spans inside and outside the astroid caustic (4- and
-#: 2-image census); ``beta`` spans the un-sheared and sheared micro-image.
-#: Sources are OFF-AXIS (fixed unit direction ``(0.8, 0.6)`` scaled to each
-#: ``|y|``): an on-axis source has mirror-degenerate Fermat delays, so
-#: ``delta_min = 0`` and the resolution leg is dead everywhere -- the
-#: geometric outcome would never appear (MEASURED 2026-07-28).
-_ONEHOME_DIR = (0.8, 0.6)  # unit vector: 0.8**2 + 0.6**2 == 1
-_ONEHOME_YMAGS = (0.05, 0.3, 1.0, 2.0)
-_ONEHOME_YS = tuple((mag * _ONEHOME_DIR[0], mag * _ONEHOME_DIR[1])
-                    for mag in _ONEHOME_YMAGS)
-ONEHOME_POSITIVE = tuple(  # (gamma, kappa, y, beta)
-    (gamma, kappa, y, beta)
-    for gamma in (0.2, 0.5, 0.9)
-    for kappa in (0.0, 0.3)
-    for y in _ONEHOME_YS
-    for beta in (0.0, 0.7)
-    if 1.0 - kappa > abs(gamma))
-ONEHOME_SADDLE = tuple(  # (gamma, kappa, y, beta)
-    (gamma, 0.0, y, beta)
-    for gamma in (1.2, 2.0)
-    for y in _ONEHOME_YS
-    for beta in (0.0, 0.7))
-#: w nodes: below ceiling, astride it, and deep.  Includes resolved and
-#: unresolved above-ceiling nodes so both resolution outcomes appear.
-ONEHOME_WS = (5.0, 40.0, 59.0, 61.0, 70.0, 150.0, 500.0)
 
 #: Below-ceiling nodes (acceptance #1): the exact wave batch must not move.
 BELOW_CEILING_WS = (5.0, 40.0, 59.0)
@@ -1057,47 +1030,30 @@ class WarmCostMeasurementTestCase(SchwingerTestCase):
 
 class DispatchFallbackOracleTestCase(SchwingerTestCase):
     """
-    WP2 positive-parity strong-shear FALLBACK dispatch accuracy.
+    Positive-parity strong-shear dispatch accuracy.
 
-    `operator.F_op` / `operator.F_op_grid` reroute a positive-parity node
-    whose operator-series contraction refuses (`CancellationError`, below
-    the Schwinger ceiling) through the exact 1D evaluator and reconstruct
-    it with the mass-sheet identity.  Each fixture is checked to actually
-    REFUSE the legacy path first (so the fallback is genuinely exercised,
-    not silently skipped), then the rerouted value is judged against the
-    INDEPENDENT reconstructed mpmath oracle at the Professor-staked 1e-10
-    (worst measured 1.7e-11 at ``w = 59.9``).
+    `operator.F_op` / `operator.F_op_grid` serve a positive-parity node
+    through the exact 1D evaluator and reconstruct it with the mass-sheet
+    identity.  Each rerouted value is judged against the INDEPENDENT
+    reconstructed mpmath oracle at the Professor-staked 1e-10 (worst
+    measured 1.7e-11 at ``w = 59.9``).
     """
 
-    def _assert_legacy_refuses(self, w, y, gamma, beta, kappa):
-        """The precondition: `_grid_certified` refuses this node, so the
-        value can ONLY come from the WP2 fallback."""
-        self.n_checks += 1
-        with self.assertRaises(
-                CancellationError,
-                msg=f'legacy _grid_certified did NOT refuse at w={w}, '
-                    f'y={y}, gamma={gamma}, kappa={kappa}; this fixture '
-                    'no longer exercises the fallback'):
-            _grid_certified(np.asarray([float(w)]), np.asarray(y, float),
-                            gamma, beta=beta, kappa=kappa)
-
-    def test_legacy_refuses_then_fop_matches_oracle(self):
+    def test_fop_matches_reconstructed_oracle(self):
         """
-        For every dispatch fixture: the legacy path refuses, then
-        `F_op` returns the reconstructed pure-shear oracle within 1e-10,
-        uniformly across ``w`` in [3, 59.9] and both ``kappa = 0`` and
-        ``kappa != 0``.
+        For every dispatch fixture `F_op` returns the reconstructed
+        pure-shear oracle within 1e-10, uniformly across ``w`` in
+        [3, 59.9] and both ``kappa = 0`` and ``kappa != 0``.
         """
         for gamma, beta, kappa, y, w in DISPATCH_POINTS:
             with self.subTest(gamma=gamma, kappa=kappa, y=y, w=w):
-                self._assert_legacy_refuses(w, y, gamma, beta, kappa)
                 value, _ = F_op(w, np.asarray(y), gamma,
                                 beta=beta, kappa=kappa)
                 oracle = _reconstructed_dispatch_oracle(
                     w, y, gamma, beta, kappa)
                 self.assert_close(
                     value, oracle, DISPATCH_RTOL,
-                    f'F_op fallback vs reconstructed oracle at w={w}, '
+                    f'F_op vs reconstructed oracle at w={w}, '
                     f'y={y}, gamma={gamma}, kappa={kappa}')
 
     def test_grid_and_scalar_fallback_agree(self):
@@ -1129,7 +1085,6 @@ class DispatchFallbackOracleTestCase(SchwingerTestCase):
         gamma, y = DISPATCH_PLOT_GAMMA, DISPATCH_PLOT_Y
         rel_errors = []
         for w in DISPATCH_PLOT_WS:
-            self._assert_legacy_refuses(w, y, gamma, 0.0, 0.0)
             value, _ = F_op(w, np.asarray(y), gamma)
             oracle = _reconstructed_dispatch_oracle(w, y, gamma, 0.0, 0.0)
             rel_errors.append(self.assert_close(
@@ -1164,9 +1119,6 @@ class DispatchSelfFalsificationTestCase(SchwingerTestCase):
 
     def test_wrong_gamma_prime_oracle_fails_the_gate(self):
         gamma, beta, kappa, y, w = 0.47, 0.0, 0.0, (0.4, 0.3), 20.0
-        # This fixture genuinely lands on the fallback.
-        with self.assertRaises(CancellationError):
-            _grid_certified(np.asarray([w]), np.asarray(y, float), gamma)
         value, _ = F_op(w, np.asarray(y), gamma, beta=beta, kappa=kappa)
         correct = _reconstructed_dispatch_oracle(w, y, gamma, beta, kappa)
         # A deliberately mis-set reduced shear (gamma' shifted by 5%).
@@ -1251,13 +1203,12 @@ class PositiveParityBitFreezeTestCase(SchwingerTestCase):
     branch (``w <= W_CEILING_SCHWINGER``), so its diagnostics report
     ``order_used == 0``.  The frozen literals are re-baselined to the NEW
     Schwinger production values; each carries a contract-flip WITNESS --
-    the NEW Schwinger value and the OLD legacy value (reproduced
-    bit-for-bit by `legacy_operator_oracle`, an INDEPENDENT algorithm,
-    F002) agree to `BITFREEZE_WITNESS_TOL` in the max-normalized currency,
-    proving the flip moved bytes, not physics.  A companion pin keeps the
-    shear-free ``gamma' == 0`` point lens on the legacy series
-    (``order_used > 0``), the sole remaining legacy production exit below
-    the ceiling.
+    the NEW Schwinger value and the OLD legacy literal (the retired
+    operator-series contraction's recorded output, an INDEPENDENT
+    algorithm, F002) agree to `BITFREEZE_WITNESS_TOL` in the
+    max-normalized currency, proving the flip moved bytes, not physics.
+    A companion pin keeps the shear-free ``gamma' == 0`` point lens on
+    its own non-Schwinger exit (``order_used > 0``).
     """
 
     def test_new_schwinger_agrees_with_old_legacy_max_normalized(self):
@@ -1271,17 +1222,6 @@ class PositiveParityBitFreezeTestCase(SchwingerTestCase):
             CERTIFIED_BITFREEZE_GAMMA)
         old_arr = np.asarray(
             [LEGACY_BITFREEZE[float(w)] for w in w_array], dtype=complex)
-        # `legacy_operator_oracle` (the retired contraction) must reproduce
-        # the OLD literals bit-for-bit, else the witness baseline has moved.
-        oracle_arr, *_ = legacy_operator_oracle(
-            w_array, np.asarray(CERTIFIED_BITFREEZE_Y),
-            CERTIFIED_BITFREEZE_GAMMA)
-        self.n_checks += 1
-        self.assertEqual(
-            np.asarray(oracle_arr, dtype=complex).tobytes(),
-            old_arr.tobytes(),
-            'legacy_operator_oracle no longer reproduces the OLD literals '
-            'bit-for-bit; the witness baseline has moved')
         scale = max(float(np.max(np.abs(old_arr))), 1e-15)
         metric_re = float(
             np.max(np.abs(new_arr.real - old_arr.real))) / scale
@@ -1579,19 +1519,27 @@ class ImageCensusGuardFalsificationTestCase(SchwingerTestCase):
 
 class _SelectBranchRoutingTestCase(SchwingerTestCase):
     """
-    Shared machinery for the Build 8f (F028) select_branch routing tests.
+    FIXTURE-GUARD machinery for the Build 8f (F028) serve tests.
+
+    NOT a routing pin.  The one-home agreement between the operator
+    grids and `select_branch` is pinned ONCE, in
+    `test_lensing_operator.BranchGateTestCase.test_thresholds_have_one_home`;
+    the helpers here exist only so the serve tests below can guard their
+    own PREMISES (``this fixture is still select_branch-geometric``)
+    instead of assuming a label that a threshold change could silently
+    invalidate.
 
     `_predicate_branch` recomputes the shared gate's arguments from the
     public helpers (`macro_matrix`, `_real_delay_min_separation`,
-    `cancellation_exponent`) and returns `select_branch`'s label.
-    `_observed_branch` recovers the grid's INTERNAL routing decision by
-    what the scalar `F_op` entry actually serves at that node: a value
-    bit-equal to `geometric_amplification` means the grid took the
-    geometric branch; any other value (a uniform arm) or a named
-    `SchwingerCertificationError` means it took the wave branch; a
-    `geometry.LensDomainError` can only come from the geometric handoff's
-    census guard, so it is a geometric routing that the census refused.
-    Comparing the two pins that the predicate has exactly ONE home.
+    `cancellation_exponent`, `geometry.nearest_caustic_point`) and
+    returns `select_branch`'s label.  `_observed_branch` recovers the
+    grid's routing decision from what the scalar `F_op` entry actually
+    serves at that node: a value bit-equal to `geometric_amplification`
+    means the grid took the geometric branch; any other value (a uniform
+    arm) or a named `SchwingerCertificationError` means it took the wave
+    branch; a `geometry.LensDomainError` can only come from the
+    geometric handoff's census guard, so it is a geometric routing that
+    the census refused.
     """
 
     _expect_checks = True
@@ -1606,11 +1554,23 @@ class _SelectBranchRoutingTestCase(SchwingerTestCase):
         matrix = geometry.macro_matrix(gamma, beta, kappa)
         delta_min = operator._real_delay_min_separation(source, matrix)
         if self._is_positive_parity(gamma, kappa):
-            # Positive parity: L == w*|y'| == cancellation_exponent.
+            # Positive parity: L == w*|y'| == cancellation_exponent, and the
+            # third leg is eta, the distance to the caustic (F031). The grid
+            # supplies eta, so this mirror must too -- omitting it silently
+            # disables a live leg and the two would disagree exactly where
+            # the gate does its work (near the caustic).
             exponent = cancellation_exponent(w, source, gamma, kappa)
-            return select_branch(w, delta_min, exponent)
-        # Saddle: infinite exponent -> only the resolution leg is live.
-        return select_branch(w, delta_min, math.inf)
+            try:
+                eta = float(geometry.nearest_caustic_point(
+                    gamma, beta, source, kappa=kappa).distance)
+            except geometry.LensDomainError:
+                eta = 0.0
+            return select_branch(w, delta_min, exponent, eta)
+        # Saddle: infinite exponent AND infinite eta -> only the resolution
+        # leg is live. F031 is positive-parity only, so the saddle boundary
+        # is deliberately left where it was rather than inheriting an
+        # unmeasured threshold.
+        return select_branch(w, delta_min, math.inf, math.inf)
 
     def _observed_branch(self, w, y, gamma, beta, kappa):
         """The grid's routing, read off the served scalar `F_op` value."""
@@ -1631,57 +1591,6 @@ class _SelectBranchRoutingTestCase(SchwingerTestCase):
         if geom_ok and served == geom:
             return 'geometric', served
         return 'wave', served
-
-
-class SelectBranchOneHomeTestCase(_SelectBranchRoutingTestCase):
-    """
-    ONE-HOME PREDICATE AGREEMENT (F028, acceptance #2).
-
-    For every above-ceiling node of the analytic config grid, the grid's
-    OWN geometric-vs-wave routing (recovered from what `F_op` serves) must
-    equal the label of the shared `select_branch` predicate -- positive
-    parity fed ``select_branch(w, delta_min, w*|y'|)`` and saddle fed
-    ``select_branch(w, delta_min, math.inf)``.  This is the predicate
-    analogue of ``test_thresholds_have_one_home``: the routing rule lives
-    in exactly one place.  The grid spans both parities, each gate leg,
-    inside/outside the astroid caustic, and both resolution outcomes.
-    """
-
-    def _run_grid(self, configs, parity_name):
-        n_geometric = n_wave = 0
-        for gamma, kappa, y, beta in configs:
-            for w in ONEHOME_WS:
-                if w <= W_CEILING_SCHWINGER:
-                    continue  # no branch decision below the ceiling
-                with self.subTest(parity=parity_name, gamma=gamma,
-                                  kappa=kappa, y=y, beta=beta, w=w):
-                    predicted = self._predicate_branch(w, y, gamma, beta,
-                                                       kappa)
-                    observed, _ = self._observed_branch(w, y, gamma, beta,
-                                                        kappa)
-                    self.n_checks += 1
-                    self.assertEqual(
-                        observed, predicted,
-                        f'{parity_name} node gamma={gamma}, kappa={kappa}, '
-                        f'y={y}, beta={beta}, w={w}: grid routed '
-                        f'{observed!r} but select_branch says {predicted!r} '
-                        '-- the predicate has more than one home')
-                    if predicted == 'geometric':
-                        n_geometric += 1
-                    else:
-                        n_wave += 1
-        # Non-vacuity: BOTH branch labels must be exercised, else the
-        # agreement is trivially satisfied by a constant predicate.
-        self.assertGreater(n_geometric, 0,
-                           f'no geometric-routed {parity_name} node')
-        self.assertGreater(n_wave, 0,
-                           f'no wave-routed {parity_name} node')
-
-    def test_positive_parity_routing_has_one_home(self):
-        self._run_grid(ONEHOME_POSITIVE, 'positive')
-
-    def test_saddle_routing_has_one_home(self):
-        self._run_grid(ONEHOME_SADDLE, 'saddle')
 
 
 class F028GeometricServeTestCase(_SelectBranchRoutingTestCase):
@@ -1951,15 +1860,13 @@ class AboveCeilingWaveThreeOutcomeTestCase(SchwingerTestCase):
 
 class SelectBranchSelfFalsificationTestCase(_SelectBranchRoutingTestCase):
     """
-    SELF-FALSIFICATION: the routing suite can go RED.
+    SELF-FALSIFICATION: the routing observation can go RED.
 
     A numerical routing suite is only trustworthy if its assertions have
     teeth.  `test_opposite_label_breaks_one_home` reaches into a genuine
     fixture -- a real `F_op` serve at a near-caustic node -- pins the
-    label it actually produces, and shows the opposite label is rejected.
-    `test_select_branch_has_both_live_legs` pins that `select_branch` has
-    BOTH live legs: flipping either input flips the label, so neither leg
-    alone licenses the geometric asymptote.
+    label it actually produces, and shows the opposite label is
+    rejected, so `_observed_branch` is not a constant.
     """
 
     def test_opposite_label_breaks_one_home(self):
@@ -1982,20 +1889,16 @@ class SelectBranchSelfFalsificationTestCase(_SelectBranchRoutingTestCase):
     # mutation test perturbs PRODUCTION, not the oracle; see
     # `DdMandatoryFalsificationTestCase::test_float64_dd_accumulation_
     # drives_gate_red` in this file for the correct py_func-chain pattern.
-    # The surviving methods here retain teeth: they read a real served
-    # value and pin a real routing label.
-
-    def test_select_branch_has_both_live_legs(self):
-        # Resolved and strongly cancelling -> 'geometric'; killing EITHER
-        # leg -> 'wave'.  Proves neither leg alone licenses the asymptote.
-        resolved_delta = (RHO_END + 1.0) / 70.0  # w*delta_min > RHO_END
-        self.assertEqual(
-            select_branch(70.0, resolved_delta, L_MAX + 1.0), 'geometric')
-        self.assertEqual(
-            select_branch(70.0, resolved_delta, L_MAX - 1.0), 'wave')
-        self.assertEqual(
-            select_branch(70.0, 0.0, L_MAX + 1.0), 'wave')
-        self.n_checks += 1
+    # The surviving method here retains teeth: it reads a real served
+    # value and pins a real routing label.
+    #
+    # DELETED (one-home consolidation): `test_select_branch_has_both_live_
+    # legs` re-pinned the gate's legs from hand-built ``(w, delta_min, L)``
+    # triples -- a second home for the predicate, and one that already
+    # silently omitted the third (`eta`) leg.  The legs are pinned once,
+    # in `test_lensing_operator.BranchGateTestCase` (`test_four_quadrants`,
+    # `test_boundary_equalities` and the live-eta-leg assertion inside
+    # `test_thresholds_have_one_home`).
 
 
 

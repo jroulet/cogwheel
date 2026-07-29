@@ -1559,11 +1559,202 @@ against `_oracle_fop` (worst measured 3.7e-5 against a 1e-3 gate). That is a
 consistency gate between two independent reconstructions at moderate `L`, and
 it stops the routing regressing silently. It does NOT reach the arms.
 
-**What is still owed.** A reference valid at `L ~ 100-200`. The Schwinger
-quadrature refuses there by frequency; the operator series fails to converge
-there. Candidates not yet tried: direct high-dps numerical evaluation
+**What is still owed, and what it is.** A reference valid at `L ~ 100-200`.
+The Schwinger quadrature refuses there by frequency; the operator series fails
+to converge there.
+
+THE DESIGNATED ANSWER IS GLoW, already ruled on by the driver and recorded in
+`.claude/handoff/lensing/META_PLAN.md`: *"GLoW is a cross-oracle only, NOT a
+qd replacement"*. It is the right instrument because it is genuinely
+INDEPENDENT — every oracle this suite owns is a re-implementation of the same
+operator reduction, whereas GLoW builds the time-domain `I(tau)` and
+transforms to frequency. That difference favours us: in the time-domain
+picture the high-`w` behaviour is set by the singularity structure of
+`I(tau)`, so GLoW is strongest exactly where we are blind.
+
+STATUS. GLoW has been evaluated before on this project (owner, 2026-07-29) and
+found to WORK for the positive-parity image case with a LARGER RADIUS OF
+CONVERGENCE than either in-repo reference. That is exactly the needed
+combination: every arm defect measured so far (F028, F029, F031) is positive
+parity, and the larger convergence radius reaches the `L ~ 100-200` regime
+where the quadrature refuses by frequency and the operator series fails to
+converge.
+
+The positive-parity restriction is STRUCTURAL, not a configuration choice:
+Chang-Refsdal is not axisymmetric, so it needs `time_domain.It_SingleContour`,
+which follows a single contour around the MINIMUM and therefore cannot see the
+macro saddle. The saddle stays unoracled — the same gap already standing in
+F028/F029/F031.
+
+Cloned to `/home/tejaswi/Work/GLoW` (github.com/miguelzuma/GLoW_public — note
+the repo is `GLoW_public`, not `GLoW`). Imports cleanly into the project env;
+the pure-Python path needs only numpy/scipy. Chang-Refsdal is expressible as
+`lenses.CombinedLens({'lenses': [Psi_PointLens(), Psi_Ext({kappa, gamma1,
+gamma2})]})`. GLoW's own `shear()` docstring defines
+`det A = (1-kappa)**2 - gamma**2`, matching this repo's convention.
+
+ATTEMPTED 2026-07-29, NOT YET WORKING. Recorded in detail so the next attempt
+does not repeat it.
+
+WHAT IS ESTABLISHED:
+* Install: `github.com/miguelzuma/GLoW_public` (the repo is `GLoW_public`, NOT
+  `GLoW`), cloned to `/home/tejaswi/Work/GLoW`. Pure Python needs only
+  numpy/scipy. The C wrapper BUILDS: system GSL 2.5 is present, and
+  `pip install cython` into the env, then
+  `make -C wrapper/glow_lib -j4 && <env python> wrapper/setup.py build_ext
+  --inplace`. Do NOT run the top-level `make` -- it hardcodes system `python3`,
+  which has no numpy.
+* Chang-Refsdal IS expressible:
+  `lenses.CombinedLens({'lenses': [Psi_PointLens(), Psi_Ext({kappa, gamma1,
+  gamma2})]})`. VERIFIED: despite `class CombinedLens(PsiAxisym)`, the shear
+  survives the combination -- `psi` varies with polar angle by 1.92e-1 at
+  `|x| = 0.8, gamma = 0.3`, exactly matching `Psi_Ext` alone. The MRO is
+  `CombinedLens -> PsiAxisym -> PsiGeneral`; `PsiAxisym` is a helper base, not
+  an assertion of symmetry.
+* GLoW's own `shear()` docstring defines `det A = (1-kappa)**2 - gamma**2`,
+  matching this repo.
+
+WHAT IS NOT: no It/Fw method pair has yet produced a usable number for this
+lens. Tried, with the exact failure of each:
+
+| It method | Fw method | outcome |
+|---|---|---|
+| `It_SingleContour` (py) | `Fw_FFT_OldReg` | ANSWERS SILENTLY AND WRONGLY -- see below |
+| `It_SingleContour_C` | `Fw_DirectFT_C` | refuses: "More than one critical point found" |
+| `It_MultiContour_C` | `Fw_DirectFT_C` | NaN; "could not find bracket for R(tau)", GSL Bessel domain errors |
+| `It_AreaIntegral_C` | `Fw_DirectFT_C` | refuses: "no critical points (p_crits) found in It" -- the Fw method needs data this It does not produce |
+
+THE GOTCHA WORTH THE WHOLE EXERCISE: the PURE-PYTHON `It_SingleContour`
+returns confident values for a lens it cannot represent, where the C
+implementation REFUSES BY NAME on identical input. Its output looked
+plausible (|F| ~ O(10)) and moved with `Nt` (14.6 -> 29.0 at `w = 70` between
+`Nt` 500 and 2000), which reads as an under-resolved transform and is
+actually an invalid method. A convergence sweep chasing that is wasted work.
+Same class as this repo's own `_oracle_fop` truncation bug fixed the same day:
+a reference that fails silently converts "cannot check" into a confident false
+comparison.
+
+CONSEQUENCE: an earlier F009 "agreement" at 8e-4 was computed through
+`It_SingleContour` and is therefore SUGGESTIVE ONLY -- right lens, invalid
+method. It must be re-established on a working method before any anchor is
+trusted.
+
+ROOT CAUSE FOUND (2026-07-29), and it is OURS, not GLoW's.
+
+The correct pairing is `It_MultiContour_C` + `Fw_FFT_C` (owner: Codex got
+Chang-Refsdal working with it; the contour warnings are spurious). With that
+pairing the contour is CLEAN -- `It_grid` contains zero NaN at every shear
+tested -- but `Fw` still returned NaN. The discriminator is `tmin`, the
+minimum of the Fermat potential:
+
+| gamma1 | tmin | It NaN | Fw(0.1) |
+|---|---|---|---|
+| 0.000 | +0.057339 | 0 | 1.0701 - 0.1363j |
+| 0.050 | +0.015004 | 0 | 1.0719 - 0.1314j |
+| 0.080 | -0.011755 | 0 | **nan** |
+| 0.200 | -0.130910 | 0 | **nan** |
+
+`Fw` is NaN EXACTLY when `tmin < 0`, with a clean sign crossing between
+`gamma1 = 0.05` and `0.08`. External shear drives the Fermat minimum negative,
+and GLoW's time grid is LOG-sampled (`t range [0.01, 1e6]`, `sampling: 'log'`),
+which cannot represent a domain whose origin is negative.
+
+FIX: offset the lens potential so GLoW sees `tmin >= 0`. A constant shift in
+the Fermat potential is a pure phase `exp(i*w*Delta)` in `F(w)` and leaves
+`|F|` untouched, so it is exactly correctable -- shift, evaluate, multiply the
+phase back.
+
+This also explains the earlier partial successes: the pure-Python
+`It_SingleContour` path agreed with F009 at `w -> 0` because
+`F(w->0) -> sqrt(mu_macro)` is invariant under a shift of the delay ORIGIN,
+and fell apart at high `w` where the phase `exp(i*w*tau)` is not.
+
+CORRECTION to an earlier version of this entry: `It_MultiContour_C` was
+recorded as "NaN, broken". That was wrong -- the contour half was always fine;
+it had been paired with `Fw_DirectFT_C`, which cannot consume it, and then run
+with a negative `tmin`. Method blamed for a convention bug.
+
+STILL TO COLLECT: apply the offset, re-run the F009 gate on the working
+pairing (the earlier 8e-4 agreement was measured through an invalid method and
+does not carry over), then the F028 anchors.
+
+Design when it is done, so it does not become a runtime dependency or a new
+slow tier: use GLoW OFFLINE to generate a small set of anchors at the
+F028/F029 configs (high `L`, above the ceiling, near AND far from the
+caustic), and freeze them as literals with provenance — the frozen-anchor
+idiom the suite already uses. That converts
+`test_lensing_airy_fold::test_served_arm_accuracy_is_unverified_pending_an_oracle`
+from a documented `@expectedFailure` into a real gate on the uniform arms.
+
+CONVENTIONS FIRST, before any arm comparison. Cross-code agreement is worth
+nothing until `w`, the Fermat-potential normalization, the `kappa`/mass-sheet
+convention, the phase sign, and the magnification normalization are aligned —
+this repo has been bitten by convention drift repeatedly (the delay frame at
+four sites, the ghost frame, IMRPhenomXP vs Pv2). F009 is the free check:
+`F(w->0) = sqrt(mu_macro) = 1/sqrt((1-kappa)**2 - gamma**2)`. If GLoW
+reproduces that closed form across several `(gamma, kappa)`, the conventions
+are aligned; if it does not, no high-`w` agreement means anything. OPEN: GLoW's
+strongest support is axisymmetric lenses, and Chang-Refsdal (point mass +
+external shear + convergence) is not axisymmetric — confirm it can express
+this lens before relying on it. If it cannot, the `gamma -> 0` point-lens
+limit is still cross-checkable but does not reach the arms.
+
+Other candidates, if GLoW cannot express the lens: direct high-dps numerical
+evaluation
 of the diffraction integral at a handful of anchor configs, or a stationary-
 phase-plus-correction reference with an independently bounded remainder. Until
 one exists, any statement that the uniform arms are accurate is unverified —
 see F028 for what was measured when geometric optics was used as the stand-in
 reference.
+
+## F031 — `L_MAX = 48` is a genuine geometric-onset threshold, but it is HALF the gate: the missing term is distance to the caustic (2026-07-29)
+
+`L_MAX` was calibrated as a proxy for the LEGACY operator series' accuracy
+ceiling (F005). That series no longer serves anything, so the threshold needed
+re-deriving on its own terms or retiring. It survives — and the same sweep
+identifies what has to sit beside it.
+
+Driver sweep, 2600 RESOLVED positive-parity samples at `w in [5, 60]` (the
+band where the Schwinger quadrature is a legitimate oracle), median relative
+error of `geometric_amplification` vs the quadrature:
+
+| eta band | L 0-20 | L 20-35 | L 35-48 | L 48-70 | L 70-120 |
+|---|---|---|---|---|---|
+| 0-0.1 | 5.27e-1 | 4.53e-1 | 3.83e-1 | 6.07e-1 | (n=6) |
+| 0.1-0.3 | 7.77e-2 | 3.21e-2 | 2.17e-2 | 4.79e-3 | 7.93e-4 |
+| 0.3-1 | 2.77e-4 | 3.84e-5 | 1.12e-5 | 3.32e-6 | 1.00e-6 |
+| 1-inf | 3.52e-5 | 6.29e-6 | 1.68e-6 | 6.57e-7 | 1.76e-7 |
+
+**1. `L` is a real onset variable.** At FIXED `eta`, error falls monotonically
+with `L` — 100x to 280x across the range. This is measured against the
+quadrature, with no reference to the operator series, so the threshold no
+longer depends on the retired path for its meaning. `L_MAX = 48` stays.
+
+**2. `L` alone is not sufficient, and this IS F029's tail.** The `L > L_MAX`
+leg buys, per eta band (p90):
+
+| eta | L<=48 | L>48 | gain |
+|---|---|---|---|
+| 0-0.1 | 2.10e+0 | 1.17e+0 | 1.8x |
+| 0.1-0.3 | 2.90e-1 | 5.62e-2 | 5.2x |
+| 0.3-1 | 1.17e-2 | 7.65e-5 | 153x |
+| 1-inf | 8.19e-5 | 1.54e-6 | 53x |
+
+At `eta < 0.1` the row is FLAT in `L` and the gate still admits nodes with p90
+= 1.17 — 117% error. No amount of `L` rescues the near-caustic regime, because
+geometric optics has no validity there (F029: just outside a fold the
+annihilated pair are undamped complex saddles the real-image sum omits). The
+~1% O(1) tail F029 measured and could not localise is exactly this population.
+
+**Measured gate.** `L > L_MAX` AND `eta >~ 0.3` takes worst-case p90 from
+1.17 to 7.65e-5 — four orders of magnitude.
+
+**NOT implemented, deliberately.** Adding the `eta` floor trades coverage for
+correctness: nodes failing it fall to the uniform arms (wrong, F028) or to a
+named refusal. That is an owner decision about the serving ladder, not a
+cleanup. Two further caveats: the sweep is POSITIVE PARITY only (no saddle
+data, same gap as F028/F029), and it is measured below the Schwinger ceiling
+then extrapolated into the above-ceiling regime where the gate actually runs,
+because no oracle exists there (F030).
+
+Probe: `probe_lmax_rederive.py` (scratchpad).

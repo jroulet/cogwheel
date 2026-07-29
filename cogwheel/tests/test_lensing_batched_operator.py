@@ -12,7 +12,7 @@ precomputed per-order weight vector (built ONCE, since the operator
 table and monomial powers are ``w``-independent within one lens
 configuration) dotted against each node's rescaled radial derivatives,
 and routed BOTH the scalar `F_op` and the batched `F_op_grid` through
-ONE contraction path (`_grid_certified`).  The claim is that this
+ONE contraction path.  The claim is that this
 changed the ACCUMULATION ORDER and the SPEED, not the answer or the
 certified-or-refuse contract.  This suite re-certifies that claim:
 
@@ -24,14 +24,6 @@ certified-or-refuse contract.  This suite re-certifies that claim:
   ``[w]`` call and the full batch (no cross-node convergence-state
   leakage), and the returned VALUE agrees to ``1e-14`` (identical code on
   identical data).
-* The proof that certification is not vacuous for the ``njit`` core --
-  two perturbations injected through the numba ``py_func`` chain (a
-  corrupted convergence tolerance and a corrupted radial-index gather)
-  each driving the accuracy gate red -- now lives in
-  test_lensing_fast_path.py::OperatorFusionFalsificationTestCase, which
-  the Build 8b-levers fusion re-homed it to (the two-stage pipeline it
-  used to patch was merged into one fused core).
-* `FewMsTimingTestCase` pins the machine-INDEPENDENT speed properties the
   batching was for (RB beats brute by >= `SPEEDUP_MIN`; the pure
   contraction is subdominant to the amplification engine) plus an
   arithmetic-derived absolute regression guard `MS_CEILING`.
@@ -72,8 +64,7 @@ ANTI-VACUITY AND SELF-FALSIFICATION
 -----------------------------------
 `BatchedOperatorTestCase.tearDown` fails a test that made zero
 comparisons.  `SelfFalsificationTestCase` proves the anti-vacuity guard
-can go red; the accuracy gate's own falsification is re-homed in
-test_lensing_fast_path.py::OperatorFusionFalsificationTestCase.
+can go red.
 """
 from __future__ import annotations
 
@@ -111,8 +102,7 @@ import numpy as np
 
 from cogwheel import data, waveform
 from cogwheel.lensing.chang_refsdal import geometry, operator
-from cogwheel.lensing.chang_refsdal.operator import (
-    CancellationError, F_op, F_op_grid)
+from cogwheel.lensing.chang_refsdal.operator import (F_op, F_op_grid)
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError, W_CEILING_SCHWINGER)
 
@@ -120,10 +110,10 @@ from cogwheel.lensing.chang_refsdal._schwinger import (
 #: positive-parity host (``gamma' > 0``) is served by the exact Schwinger
 #: evaluator and refuses above its ceiling with
 #: `SchwingerCertificationError`; the shear-free ``gamma' == 0`` point
-#: lens keeps the legacy `CancellationError`.  Both are named refusals of
-#: the certify-XOR-refuse contract, so the batched decision tests accept
-#: EITHER.
-_WAVE_REFUSALS = (CancellationError, SchwingerCertificationError)
+#: lens is a closed form that refuses only through the kernel's own
+#: domain error.  The certify-XOR-refuse contract is carried by the
+#: named refusal below, which the batched decision tests accept.
+_WAVE_REFUSALS = (SchwingerCertificationError,)
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, _data_term, _norm_term)
 
@@ -178,8 +168,8 @@ CERT_LS = np.linspace(24.0, 48.0, 17)
 
 #: Band for the certify-XOR-refuse boundary test.  Build 7a moved the
 #: refusal onset for this configuration to the Schwinger ceiling
-#: (``w = 60``, i.e. ``L = 60 * CERT_SQRT_S = 54``): legacy
-#: `CancellationError` refusals at ``w <= 60`` are rescued by the
+#: (``w = 60``, i.e. ``L = 60 * CERT_SQRT_S = 54``): the legacy
+#: contraction's refusals at ``w <= 60`` are rescued by the
 #: cross-parity Schwinger fallback, so the band must straddle that
 #: ceiling to witness both outcomes.  It must also stay BELOW the
 #: kernel's own ``L = w * sqrt(s) <= 60`` double-double product
@@ -592,10 +582,10 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
     def _solo(self, w, y, gamma, beta, kappa):
         """Return ``(certified, value)`` for a single-``[w]`` batch call.
 
-        ``certified`` is False and ``value`` None when the node raises a
-        named wave-branch refusal (`CancellationError` on the ``gamma'==0``
-        legacy exit, or `SchwingerCertificationError` on the homogenized
-        Schwinger path); otherwise ``value`` is the returned ``F``.
+        ``certified`` is False and ``value`` None when the node raises the
+        named wave-branch refusal (`SchwingerCertificationError` on the
+        homogenized Schwinger path); otherwise ``value`` is the returned
+        ``F``.
         """
         try:
             values, _, _ = F_op_grid(
@@ -852,20 +842,17 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
             'gate never ran')
 
 
-# RETIRED (Build 8b-levers fusion, class removed by the vacuity audit):
-# `BatchedContractionFalsificationTestCase` proved the batched-contraction
-# accuracy gate was not vacuous (F010) by patching
-# `operator._contract_grid.py_func` and `operator._weight_vectors.py_func`.
-# WP-B merged both stages into `operator._fused_contraction`, so those
-# attributes no longer exist and both test methods were re-homed to
-# test_lensing_fast_path.py::OperatorFusionFalsificationTestCase, which
-# carries the IDENTICAL falsification concerns (series-tolerance truncation
-# and the zeroed half_sum gather collapse) through the fused core's py_func
-# and also pins that half_sum stays an argument and _SERIES_TOLERANCE a
-# patchable module global.  What was left behind here was a TestCase with
-# ZERO test methods plus two orphan helpers (`_gate_outcome`,
-# `_assert_green_unpatched`) that nothing called -- a class that reported
-# coverage it did not provide.  Deleted; the live gate is in fast_path.
+# RETIRED (Build 8b-levers fusion, class removed by the vacuity audit;
+# then the whole operator-series contraction was retired from the serving
+# path): `BatchedContractionFalsificationTestCase` proved the batched-
+# contraction accuracy gate was not vacuous (F010) by patching the
+# two-stage weight/contract py_func chain.  The stages were merged into
+# one fused core and the methods re-homed to test_lensing_fast_path.py;
+# the fused core has since been retired along with the series it served,
+# so those falsifications certify nothing that ships and are gone.  What
+# was left behind here was a TestCase with ZERO test methods plus two
+# orphan helpers (`_gate_outcome`, `_assert_green_unpatched`) that
+# nothing called -- a class that reported coverage it did not provide.
     # must always have a reachable red path).
 
 
@@ -1121,7 +1108,7 @@ class BatchedEquivalenceTestCase(BatchedOperatorTestCase):
                             grid_values, _, _ = F_op_grid(
                                 np.array([w], dtype=float), y, gamma,
                                 max_order=FOP_MAX_ORDER)
-                        except CancellationError:
+                        except _WAVE_REFUSALS:
                             continue  # refused nodes carry no value to match
                         self.n_checks += 1
                         self.assertEqual(

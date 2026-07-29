@@ -7,10 +7,10 @@ microlensed relative-binning likelihood and adds a single, tightly scoped
 refusal net.  The Chang--Refsdal engine and likelihood keep their
 "certified-or-named-refusal" contract -- `geometry.LensDomainError` (lens
 domain violations, incl. image-census and fold-degeneracy refusals),
-`operator.CancellationError` (uncertifiable wave-branch contraction),
 `_schwinger.SchwingerCertificationError` (the Schwinger evaluator's
-paired-rule certificate failed; reachable sub-ceiling near the
-``gamma' -> 1`` pinch since the Build 7a strong-shear fallback), and
+paired-rule certificate failed -- the wave-branch refusal on both
+parities; reachable sub-ceiling near the ``gamma' -> 1`` pinch since the
+Build 7a strong-shear fallback), and
 `likelihood.LensedBinningError` (a candidate image delay the certified bins
 cannot resolve; reachable for in-support strong-shear proposals since the
 same fallback widened the evaluable set) propagate unswallowed everywhere
@@ -25,7 +25,6 @@ import numpy as np
 
 from cogwheel.posterior import Posterior
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
-from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 from cogwheel.lensing.likelihood import LensedBinningError
@@ -86,7 +85,7 @@ class LensedPosterior(Posterior):
         # time, from module globals -- never hoisted to an import-time
         # constant -- so the net stays falsifiable by patching a module
         # global (the F010-style mutation test relies on exactly that).
-        except (LensDomainError, CancellationError,
-                SchwingerCertificationError, LensedBinningError):
+        except (LensDomainError, SchwingerCertificationError,
+                LensedBinningError):
             standard_par_dic = self.prior.transform(*args, **kwargs)
             return -np.inf, standard_par_dic, None

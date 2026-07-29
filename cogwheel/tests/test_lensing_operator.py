@@ -28,8 +28,6 @@ Nothing here is judged against the module's own derivation:
   which are physically required to be kappa-independent regardless of
   how the code organizes the rescaling.  Comparing ``F_op`` against its
   own rescaling path would be vacuous and is deliberately avoided.
-* The CANCELLATION test checks the reported ``max_partial_term/|total|``
-  against an INDEPENDENT mpmath recomputation of the same ratio.
 
 TOLERANCES AND TESTED DOMAIN
 ----------------------------
@@ -37,15 +35,11 @@ The oracle is exact to far beyond float64, so ``RTOL_GATE = 1e-10`` is a
 property of ``F_op``, not the oracle.  The compared configurations keep
 the cancellation exponent ``L = w*|y'|`` at or below ~25, where the
 shipped wave branch delivers ~5e-12 or better (measured worst case
-5.65e-12, ~180x inside the gate).  Above ``L ~ 45`` the float64 operator
-contraction can no longer certify the 1e-10 target (WP1's overflow-safe
-rescaling pushed that boundary up from the former ``L ~ 30``); per
-FINDINGS F005 ``F_op`` then raises a named `CancellationError` rather
-than returning a silent ``nan`` or a finite-but-wrong value.
-`ContractionCertificationTestCase` asserts that certified-or-refuse
-contract across the band ``L in [24, 48]`` (each call is accurate to
-`RTOL_GATE` XOR a named refusal, never nan); the ``L <= 25`` oracle
-gates here are the accuracy half of the same guarantee.
+5.65e-12, ~180x inside the gate).  Above the shipped ceilings ``F_op``
+raises a NAMED refusal (`_schwinger.SchwingerCertificationError`)
+rather than returning a silent
+``nan`` or a finite-but-wrong value; the ``L <= 25`` oracle gates here
+are the accuracy half of that certified-or-refuse guarantee.
 
 `OperatorTestCase.tearDown` fails a test that made zero comparisons, and
 `SelfFalsificationTestCase` proves every gate above can actually go red.
@@ -53,10 +47,10 @@ gates here are the accuracy half of the same guarantee.
 from __future__ import annotations
 
 import itertools
+import math
 import pathlib
-import re
 from dataclasses import FrozenInstanceError
-from unittest import TestCase, main, mock
+from unittest import TestCase, main
 
 import mpmath
 import numpy as np
@@ -296,20 +290,6 @@ def _oracle_amplification(w, y, gamma, beta=0.0, kappa=0.0,
         return complex(value)
 
 
-def _oracle_cancellation_ratio(w, y, gamma, beta=0.0, kappa=0.0,
-                               max_order=FOP_MAX_ORDER):
-    """Independent ``max_partial_term / |total|`` of the operator series.
-
-    Mirrors the quantity ``F_op`` measures during summation, computed at
-    oracle precision so the reported ratio can be checked against a
-    reference that shares none of its float64 accumulation.
-    """
-    with mpmath.workdps(ORACLE_DPS):
-        total, max_term, _ = _oracle_series(w, y, gamma, beta, kappa,
-                                            max_order)
-        return float(max_term / abs(total))
-
-
 def _savefig(fig, name):
     """Save a diagnostic figure, swallowing any backend error."""
     if not _HAVE_MPL:
@@ -396,42 +376,6 @@ class OperatorOracleTestCase(OperatorTestCase):
                 with self.assertRaises(FrozenInstanceError):
                     setattr(diag, field, 0)
                 self.n_checks += 1
-
-    def test_cancellation_ratio_field_matches_independent(self):
-        """
-        The recorded ``cancellation_ratio`` equals an independent
-        mpmath ``max_partial_term/|total|`` -- it is the MEASURED
-        summation quantity, not a heuristic.
-
-        RE-TARGET (Build 8d): since homogenization the sheared
-        positive-parity wave band (``w <= 60``) is served by the exact
-        Schwinger evaluator, whose diagnostics report
-        ``cancellation_ratio == 0.0`` (it has no operator-series
-        summation to measure).  The operator-series cancellation ratio
-        lives on the LEGACY contraction, now demoted to the test-only
-        `operator.legacy_operator_oracle`; the diagnostic is therefore
-        exercised there against the SAME independent mpmath oracle at the
-        SAME 1e-3 tolerance -- the physics gate is unchanged, only the
-        producing path moved.
-        """
-        for name, y, gamma, beta, kappa, w in (
-                ('two-image', np.array([0.55, 0.0]), PAPER_GAMMA,
-                 PAPER_BETA, PAPER_KAPPA, 40.0),
-                ('large-shear', np.array([0.20, 0.15]), 0.40, 0.0, 0.0,
-                 40.0)):
-            with self.subTest(config=name):
-                (_values, _orders, converged, _tails,
-                 cancellation_ratios) = operator.legacy_operator_oracle(
-                     np.array([w]), y, gamma, beta=beta, kappa=kappa,
-                     max_order=FOP_MAX_ORDER)
-                measured = float(cancellation_ratios[0])
-                reference = _oracle_cancellation_ratio(
-                    w, y, gamma, beta=beta, kappa=kappa)
-                self.assertTrue(bool(converged[0]))
-                self.assertAlmostEqual(
-                    measured / reference, 1.0, delta=1e-3,
-                    msg=f'{name}: reported ratio {measured:.4e} vs '
-                    f'independent {reference:.4e}')
                 self.n_checks += 1
 
     def test_raises_named_error_above_w_ceiling(self):
@@ -532,13 +476,10 @@ class GeometricOpticsSlopeTestCase(OperatorTestCase):
     SLOPE_GAMMA = 0.20
     #: Frequency sweep.  The top is capped so the cancellation exponent
     #: ``L = w*|y'| = 0.9*w`` stays <= ~24.3 -- inside the region the
-    #: oracle gates certify as accurate and below the ~30 contraction
-    #: certification boundary.  Above it ``F_op`` now correctly raises a
-    #: named `CancellationError` (FINDINGS F005, closed by WP1), which
-    #: would ERROR this asymptotic sweep; that refusal contract is
-    #: exercised instead by `ContractionCertificationTestCase`.  The
-    #: retained 12 -> 27 span still gives the binned slope fit enough
-    #: leverage to separate ``w**-1`` from ``w**-3``.
+    #: oracle gates certify as accurate.  Above it ``F_op`` may refuse by
+    #: name, which would ERROR this asymptotic sweep.  The retained
+    #: 12 -> 27 span still gives the binned slope fit enough leverage to
+    #: separate ``w**-1`` from ``w**-3``.
     SLOPE_W = np.linspace(12.0, 27.0, 84)
     SLOPE_BINS = 8
 
@@ -622,182 +563,6 @@ class GeometricOpticsSlopeTestCase(OperatorTestCase):
         _savefig(fig, 'operator_geometric_slope.png')
 
 
-class ContractionCertificationTestCase(OperatorTestCase):
-    """
-    FINDINGS F005 closure gate: across the cancellation band
-    ``L in [24, 48]`` every LEGACY-CONTRACTION evaluation is EITHER
-    finite and oracle-accurate to `RTOL_GATE` OR a NAMED
-    `operator.CancellationError` -- never a silent ``nan`` and never a
-    finite-but-wrong value.
-
-    RE-TARGET (Build 8d homogenization): the F005 certify-XOR-refuse
-    contract is a property of the legacy dd/1F1 CONTRACTION, which this
-    build demoted to the test-only oracle `operator.legacy_operator_oracle`
-    (production now serves this sheared positive-parity host through the
-    exact Schwinger evaluator, which certifies-or-refuses by its own
-    `SchwingerCertificationError`).  These gates therefore exercise the
-    contraction on the demoted oracle -- at the UNCHANGED `RTOL_GATE`,
-    with the ORIGINAL F005 refusal onset (~``L = 46``), NOT the Build-7a
-    fallback-shifted onset (the oracle carries no Schwinger fallback).
-
-    This is the contract WP1 added (the overflow-safe frexp/ldexp
-    contraction plus the ``_CONTRACTION_TARGET`` certification refusal),
-    which neither the ``L <= 25`` oracle gates nor the gamma-channel
-    `CancellationError` (``max_partial_term/|total|`` vs
-    ``_CANCELLATION_REFUSAL``) exercise: the refusal probed here fires on
-    the CONTRACTION magnitude spread ``sum|term|/|total|`` measured over
-    the derivative ladder, the quantity that formerly overflowed to a
-    silent ``nan`` near ``L ~ 40``.
-
-    The oracle is the same independent mpmath amplification used by
-    `OperatorOracleTestCase`; it is exact far beyond float64 at every
-    ``L`` here, so whenever ``F_op`` returns it is genuinely certified,
-    not merely self-consistent.
-    """
-
-    #: Certified-band probe: ``y=(0.9,0)``, ``kappa=0`` so ``L=w*0.9``
-    #: and ``w*sqrt(s)=L<=48`` stays inside the kernel's dd product
-    #: ceiling of 60 (no `HypergeometricDomainError` intrudes); the only
-    #: two outcomes are a certified return or a contraction
-    #: `CancellationError`.
-    CERT_Y = np.array([0.90, 0.0])
-    CERT_GAMMA = 0.20
-    CERT_KAPPA = 0.0
-    CERT_LS = np.linspace(24.0, 48.0, 17)
-
-    def _w_for(self, cexp):
-        """Frequency giving cancellation exponent ``cexp`` (``|y'|=0.9``)."""
-        return float(cexp / 0.9)
-
-    def test_certified_or_named_refusal_across_band(self):
-        """
-        Sweeping ``L in [24, 59.4]``, each legacy-contraction evaluation
-        (`operator.legacy_operator_oracle`) either matches the mpmath
-        oracle within `RTOL_GATE` or raises `operator.CancellationError`.
-        A non-finite return without a raise, or a finite value
-        disagreeing with the oracle, is the F005 bug and fails.  Both
-        outcomes must occur across the band: the contraction certifies
-        the lower band and refuses (named) once ``L`` crosses its F005
-        certification limit near ``L ~ 46``.
-        """
-        returned, refused = 0, 0
-        outcome_by_l = []
-        for cexp in np.linspace(24.0, 59.4, 17):
-            w = self._w_for(cexp)
-            with self.subTest(L=cexp, w=w):
-                try:
-                    values, *_ = operator.legacy_operator_oracle(
-                        np.array([w]), self.CERT_Y, self.CERT_GAMMA,
-                        kappa=self.CERT_KAPPA, max_order=FOP_MAX_ORDER)
-                    value = complex(values[0])
-                except operator.CancellationError:
-                    refused += 1
-                    outcome_by_l.append((cexp, None))
-                    self.n_checks += 1
-                    continue
-                # Returned: it MUST be finite and oracle-accurate. A
-                # silent nan or a finite-but-wrong value is the F005 bug.
-                self.assertTrue(
-                    np.isfinite(value),
-                    f'L={cexp:.1f}: legacy oracle returned non-finite '
-                    f'{value} without raising CancellationError (silent '
-                    'nan is the F005 bug)')
-                reference = _oracle_amplification(
-                    w, self.CERT_Y, self.CERT_GAMMA, kappa=self.CERT_KAPPA)
-                rel = abs(value - reference) / abs(reference)
-                self.assertLessEqual(
-                    rel, RTOL_GATE,
-                    f'L={cexp:.1f}: legacy oracle returned a finite but '
-                    f'wrong value (rel {rel:.3e} > {RTOL_GATE}) instead '
-                    'of raising CancellationError')
-                returned += 1
-                outcome_by_l.append((cexp, rel))
-                self.n_checks += 1
-        self.assertGreater(
-            returned, 0,
-            'no configuration certified a return in [24, 59.4]; the '
-            'lower band should still be accurate')
-        self.assertGreater(
-            refused, 0,
-            'no configuration refused in [24, 59.4]; the legacy '
-            'contraction must still raise CancellationError above its '
-            'F005 certification band')
-        self._plot(outcome_by_l)
-
-    def test_former_silent_nan_config_now_refuses(self):
-        """
-        A configuration whose contraction is uncertifiable (``L = 59``,
-        ``w = 65.6``, kernel-legal at ``w*sqrt(s) = 59 < 60``) raises a
-        NAMED `operator.CancellationError` whose message identifies the
-        offending ``(w, y, gamma, kappa)`` -- instead of the pre-F005
-        silent overflow to ``nan``.
-
-        RE-TARGET (Build 8d): exercised on the demoted legacy contraction
-        (`legacy_operator_oracle`); production serves this sheared host
-        through Schwinger, which refuses the same ``w = 65.6 > 60`` node
-        with `SchwingerCertificationError`.  The F005 named-refusal
-        contract is pinned where the contraction lives.
-        """
-        w = self._w_for(59.0)  # w = 65.6: uncertifiable, kernel-legal
-        with self.assertRaises(operator.CancellationError) as ctx:
-            operator.legacy_operator_oracle(
-                np.array([w]), self.CERT_Y, self.CERT_GAMMA,
-                kappa=self.CERT_KAPPA, max_order=FOP_MAX_ORDER)
-        message = str(ctx.exception)
-        for token in ('w =', 'y =', 'gamma', 'kappa'):
-            self.assertIn(
-                token, message,
-                f'refusal message does not name {token!r}: {message}')
-        self.n_checks += 1
-
-    def test_returned_branch_is_never_nan(self):
-        """
-        Stark finiteness guard on the returned branch: wherever the
-        legacy contraction does NOT raise across the band, the value is
-        finite.  Complements the oracle-accuracy assertion with a check
-        that would catch a returned ``nan`` even if the oracle comparison
-        were skipped.
-
-        RE-TARGET (Build 8d): exercised on `legacy_operator_oracle` (the
-        demoted contraction), consistent with the sibling F005 gates.
-        """
-        for cexp in self.CERT_LS:
-            w = self._w_for(cexp)
-            with self.subTest(L=cexp):
-                try:
-                    values, *_ = operator.legacy_operator_oracle(
-                        np.array([w]), self.CERT_Y, self.CERT_GAMMA,
-                        kappa=self.CERT_KAPPA, max_order=FOP_MAX_ORDER)
-                    value = complex(values[0])
-                except operator.CancellationError:
-                    self.n_checks += 1
-                    continue
-                self.assertTrue(
-                    np.isfinite(value),
-                    f'L={cexp:.1f}: returned a non-finite value')
-                self.n_checks += 1
-
-    def _plot(self, outcome_by_l):
-        if not _HAVE_MPL or not outcome_by_l:
-            return
-        returned = [(l, r) for l, r in outcome_by_l if r is not None]
-        refused = [l for l, r in outcome_by_l if r is None]
-        fig, ax = plt.subplots(figsize=(6, 4))
-        if returned:
-            ax.scatter([l for l, _ in returned],
-                       [max(r, 1e-18) for _, r in returned],
-                       s=18, c='C0', label='certified return')
-        for edge in refused:
-            ax.axvline(edge, color='C3', ls=':', alpha=0.5)
-        ax.axhline(RTOL_GATE, color='k', ls='--', label='1e-10 gate')
-        ax.set_yscale('log')
-        ax.set_xlabel("cancellation exponent L = w|y'|")
-        ax.set_ylabel('|F_op - oracle| / |oracle|  (returns only)')
-        ax.set_title('certified return (dot) or named refusal (line)')
-        ax.legend()
-        _savefig(fig, 'operator_contraction_certification.png')
-
-
 class MassSheetInvarianceTestCase(OperatorTestCase):
     """
     Mass-sheet degeneracy in NON-VACUOUS form.
@@ -872,126 +637,57 @@ class MassSheetInvarianceTestCase(OperatorTestCase):
         _savefig(fig, 'operator_mass_sheet.png')
 
 
-class CancellationRefusalTestCase(OperatorTestCase):
-    """
-    Cancellation refusal driven by the MEASURED ratio.
+#: Config grid over which the ROUTING PREDICATE is pinned (the predicate
+#: half of `BranchGateTestCase.test_thresholds_have_one_home`).  Positive
+#: parity keeps ``1 - kappa > |gamma|``; the macro saddle uses
+#: ``kappa = 0`` so ``|gamma| > 1``.  The ``|y|`` set spans inside and
+#: outside the astroid caustic (4- and 2-image census) and therefore
+#: ``eta`` both BELOW and ABOVE ``operator.ETA_MIN_GEOMETRIC``; ``beta``
+#: spans the un-sheared and the sheared micro-image.  Sources are
+#: OFF-AXIS (fixed unit direction ``(0.8, 0.6)`` scaled to each ``|y|``):
+#: an on-axis source has mirror-degenerate Fermat delays, so
+#: ``delta_min = 0``, the resolution leg is dead everywhere and the
+#: geometric outcome would never appear (MEASURED 2026-07-28).
+_ONEHOME_DIR = (0.8, 0.6)  # unit vector: 0.8**2 + 0.6**2 == 1
+_ONEHOME_YMAGS = (0.05, 0.3, 1.0, 2.0)
+_ONEHOME_YS = tuple((mag * _ONEHOME_DIR[0], mag * _ONEHOME_DIR[1])
+                    for mag in _ONEHOME_YMAGS)
+ONEHOME_POSITIVE = tuple(  # (gamma, kappa, y, beta)
+    (gamma, kappa, y, beta)
+    for gamma in (0.2, 0.5, 0.9)
+    for kappa in (0.0, 0.3)
+    for y in _ONEHOME_YS
+    for beta in (0.0, 0.7)
+    if 1.0 - kappa > abs(gamma))
+ONEHOME_SADDLE = tuple(  # (gamma, kappa, y, beta)
+    (gamma, 0.0, y, beta)
+    for gamma in (1.2, 2.0)
+    for y in _ONEHOME_YS
+    for beta in (0.0, 0.7))
 
-    The shipped refusal threshold ``1e13`` is not reachable by ordinary
-    configurations before the float64 contraction overflows, so -- as
-    ``test_lensing_dd`` patches ``_dd._SPLITTER`` -- the threshold is
-    patched to sit between two REAL configurations' measured ratios.
-    That is faithful to the contract: the refusal is gated on the ratio
-    measured during summation, whatever the threshold, and the reported
-    ratio is checked against an independent mpmath recomputation so it
-    cannot be an up-front formula.
-    """
-
-    #: Deep-cancellation configuration (measured ratio ~1.7e3).
-    HIGH = ('large-shear', np.array([0.20, 0.15]), 0.40, 0.0, 0.0, 40.0,
-            FOP_MAX_ORDER)
-    #: Companion just below the patched threshold (measured ratio ~2).
-    LOW = ('two-image', np.array([0.55, 0.0]), PAPER_GAMMA, PAPER_BETA,
-           PAPER_KAPPA, 8.0, 40)
-
-    def test_shipped_threshold_is_pinned(self):
-        """The refusal constant is the documented ``1e13``."""
-        self.assertEqual(operator._CANCELLATION_REFUSAL, 1e13)
-        self.n_checks += 1
-
-    def test_refuses_above_and_returns_below_a_patched_threshold(self):
-        """
-        With the threshold placed between the two configurations'
-        measured ratios, the deep-cancellation config REFUSES with a
-        named `CancellationError` whose message reports the measured
-        ratio and the configuration, while the companion returns
-        normally with its ratio recorded.
-        """
-        _, high_y, high_g, high_b, high_k, high_w, high_o = self.HIGH
-        _, low_y, low_g, low_b, low_k, low_w, low_o = self.LOW
-        independent_high = _oracle_cancellation_ratio(
-            high_w, high_y, high_g, beta=high_b, kappa=high_k,
-            max_order=high_o)
-        threshold = 100.0
-        self.assertGreater(independent_high, threshold)
-
-        with mock.patch.object(operator, '_CANCELLATION_REFUSAL',
-                               threshold):
-            # Target the LEGACY certified path directly: since Build 7a
-            # the public `F_op` rescues a sub-ceiling CancellationError
-            # with a correct Schwinger-fallback value (which never sees
-            # the patched threshold), so the falsification would go
-            # vacuous through the public entry point.
-            with self.assertRaises(operator.CancellationError) as ctx:
-                operator._grid_certified(
-                    np.array([high_w]), high_y, high_g, beta=high_b,
-                    kappa=high_k, max_order=high_o)
-            message = str(ctx.exception)
-            # Reported ratio equals the independent recomputation.
-            match = re.search(r'\|total\| = ([0-9.]+e[+\-][0-9]+)',
-                              message)
-            self.assertIsNotNone(match,
-                                 f'no ratio in message: {message}')
-            reported = float(match.group(1))
-            self.assertAlmostEqual(reported / independent_high, 1.0,
-                                   delta=1e-2)
-            self.assertGreater(reported, threshold)
-            # Message names the configuration, not just a number.
-            for token in ('w =', 'gamma', 'kappa', '0.4'):
-                self.assertIn(token, message)
-            self.n_checks += 1
-
-            # Companion below the threshold: the LEGACY certified path
-            # returns and records its measured ratio.  RE-TARGET (Build
-            # 8d): the public `F_op` now serves this sub-ceiling sheared
-            # node via Schwinger (whose diagnostics carry
-            # cancellation_ratio == 0.0), so the ratio-gated companion is
-            # exercised on the legacy contraction that owns the gate --
-            # exactly the path the HIGH refusal above targets.
-            (low_vals, _lo, low_conv, _lt,
-             low_ratios) = operator._grid_certified(
-                 np.array([low_w]), low_y, low_g, beta=low_b,
-                 kappa=low_k, max_order=low_o)
-            self.assertTrue(np.isfinite(low_vals[0]))
-            self.assertTrue(bool(low_conv[0]))
-            self.assertLess(float(low_ratios[0]), threshold)
-            self.assertGreater(float(low_ratios[0]), 0.0)
-            self.n_checks += 1
-
-    def test_refusal_tracks_the_ratio_not_a_formula(self):
-        """
-        Under the shipped ``1e13`` threshold the deep-cancellation
-        config (measured ratio ~1.7e3) does NOT refuse -- proof the
-        refusal follows the measured ratio against the threshold, not an
-        unconditional or up-front rule.
-
-        RE-TARGET (Build 8d): exercised on the LEGACY contraction
-        (`_grid_certified`), which OWNS the ratio-gated refusal.  Since
-        homogenization the public `F_op` serves this sub-ceiling sheared
-        node (``w = 40 <= 60``) via Schwinger, whose diagnostics report
-        ``cancellation_ratio == 0.0`` -- so an `F_op` assertion would be
-        vacuous (``0.0 < 1e13`` regardless of the ratio gate).  Pinning
-        the ratio-tracking contract where it lives keeps the
-        falsification real: a below-threshold ratio recorded, no refusal.
-        """
-        _, y, gamma, beta, kappa, w, order = self.HIGH
-        (values, _orders, converged, _tails,
-         cancellation_ratios) = operator._grid_certified(
-             np.array([w]), y, gamma, beta=beta, kappa=kappa,
-             max_order=order)
-        self.assertTrue(np.isfinite(values[0]))
-        self.assertTrue(bool(converged[0]))
-        self.assertLess(float(cancellation_ratios[0]),
-                        operator._CANCELLATION_REFUSAL)
-        self.assertGreater(float(cancellation_ratios[0]), 0.0)
-        self.n_checks += 1
+#: ``w`` nodes: below the wave ceiling, astride it, and deep.  The
+#: above-ceiling nodes include both resolved and unresolved cases so both
+#: routing outcomes appear.  (Below the ceiling there is no branch
+#: decision at all, so those nodes are skipped by the routing sweep.)
+ONEHOME_WS = (5.0, 40.0, 59.0, 61.0, 70.0, 150.0, 500.0)
 
 
 class BranchGateTestCase(OperatorTestCase):
     """
-    ``select_branch`` returns ``'geometric'`` iff BOTH the resolution
-    (``w*delta_min >= RHO_END``) and the strong-cancellation
-    (``L > L_MAX``) conditions hold.  The three ``'wave'`` quadrants are
-    the substance: neither condition alone may license the asymptote.
+    ``select_branch`` returns ``'geometric'`` iff ALL THREE legs hold --
+    resolution (``w*delta_min >= RHO_END``), strong cancellation
+    (``L > L_MAX``) and distance from the caustic
+    (``eta >= ETA_MIN_GEOMETRIC``, F031).  The ``'wave'`` outcomes are
+    the substance: no leg alone may license the asymptote.
+
+    THIS CLASS IS THE ONE HOME OF THE GEOMETRIC-VS-WAVE ROUTING
+    DECISION.  `test_thresholds_have_one_home` pins BOTH halves of it --
+    the constants (`channels` imports them rather than redefining them)
+    and the predicate itself (both operator grids' actual routing must
+    agree with `select_branch` node for node).  No other test may
+    re-derive the branch condition; a hand-rolled mirror elsewhere is a
+    place to drift, and the ``eta`` leg is exactly the kind of change
+    that silently invalidates one.
     """
 
     def test_four_quadrants(self):
@@ -1005,8 +701,11 @@ class BranchGateTestCase(OperatorTestCase):
         for product, cexp in itertools.product(resolved_products,
                                                exponents):
             with self.subTest(w_delta_min=product, cexp=cexp):
-                # take w = 1 so w*delta_min = delta_min = product
-                branch = operator.select_branch(1.0, product, cexp)
+                # take w = 1 so w*delta_min = delta_min = product, and an
+                # infinite eta so the caustic leg is vacuously satisfied
+                # and the other two are isolated.
+                branch = operator.select_branch(1.0, product, cexp,
+                                                math.inf)
                 resolved = product >= operator.RHO_END
                 cancelling = cexp > operator.L_MAX
                 expected = ('geometric' if resolved and cancelling
@@ -1023,7 +722,8 @@ class BranchGateTestCase(OperatorTestCase):
         """
         ``w*delta_min == RHO_END`` counts as resolved (``>=``) but
         ``L == L_MAX`` does NOT count as cancelling (strict ``>``) -- the
-        exact slips a boundary bug would introduce.
+        exact slips a boundary bug would introduce.  ``eta`` matches the
+        resolution leg: ``eta == ETA_MIN_GEOMETRIC`` is inclusive.
         """
         # Resolved boundary inclusive; geometric only when L > 48 too.
         self.assertEqual(
@@ -1039,15 +739,37 @@ class BranchGateTestCase(OperatorTestCase):
         self.assertEqual(
             operator.select_branch(1.0, 6.0, operator.L_MAX + 1e-9),
             'geometric')
-        self.n_checks += 4
+        # Caustic-distance boundary is inclusive (``>=``).
+        self.assertEqual(
+            operator.select_branch(1.0, 6.0, 60.0,
+                                   operator.ETA_MIN_GEOMETRIC),
+            'geometric')
+        self.assertEqual(
+            operator.select_branch(
+                1.0, 6.0, 60.0,
+                np.nextafter(operator.ETA_MIN_GEOMETRIC, 0.0)),
+            'wave')
+        self.n_checks += 6
 
     def test_thresholds_have_one_home(self):
         """
-        ``channels`` imports the gate and its thresholds from
-        ``operator`` rather than redefining them: the two thresholds
-        must have exactly one home so the switch and the gate cannot
-        drift apart.
+        The routing decision lives in exactly ONE place -- constants AND
+        predicate.
+
+        (a) CONSTANTS: ``channels`` imports the gate and its thresholds
+        from ``operator`` rather than redefining them, so the switch and
+        the gate cannot drift apart.
+
+        (b) PREDICATE: for every above-ceiling node of the config grid,
+        the routing the operator ACTUALLY performed -- recovered from
+        what it SERVED, not from a mock or a spy -- equals the label of
+        `select_branch` fed arguments rebuilt from the public helpers.
+        Both operator grids are swept (`_positive_parity_grid` and
+        `_saddle_grid`, reached through the scalar `F_op` wrapper), and
+        the ``eta`` leg is shown to be LIVE on the positive-parity grid,
+        so a mirror that drops it cannot pass.
         """
+        # (a) The constants and the gate object itself have one home.
         self.assertIs(channels.select_branch, operator.select_branch)
         self.assertIs(channels.RHO_END, operator.RHO_END)
         self.assertIs(channels.RHO_START, operator.RHO_START)
@@ -1055,6 +777,165 @@ class BranchGateTestCase(OperatorTestCase):
         self.assertEqual(
             getattr(channels, 'L_MAX', operator.L_MAX), operator.L_MAX)
         self.n_checks += 1
+
+        # (b) The predicate itself has one home.
+        self._assert_grid_routing(ONEHOME_POSITIVE, 'positive')
+        self._assert_grid_routing(ONEHOME_SADDLE, 'saddle')
+        self._assert_eta_leg_is_live()
+
+    # ---------------------------------------------------------------
+    # Routing machinery for the predicate half of the one-home test.
+    # ---------------------------------------------------------------
+
+    @staticmethod
+    def _is_positive_parity(gamma, kappa):
+        return 1.0 - float(kappa) > abs(float(gamma))
+
+    @staticmethod
+    def _caustic_distance(gamma, beta, source, kappa):
+        """``eta``, with the grids' own refusal convention.
+
+        A refusing caustic search means no geometric admission, so the
+        grids fall back to ``eta = 0.0`` (every node routed to 'wave',
+        the conservative direction).  This mirror must do the same.
+        """
+        try:
+            return float(geometry.nearest_caustic_point(
+                gamma, beta, source, kappa=kappa).distance)
+        except geometry.LensDomainError:
+            return 0.0
+
+    def _predicate_branch(self, w, y, gamma, beta, kappa):
+        """The shared gate's label, its arguments rebuilt independently.
+
+        Recomputes the gate's inputs from the PUBLIC helpers
+        (`geometry.macro_matrix`, `_real_delay_min_separation`,
+        `cancellation_exponent`, `geometry.nearest_caustic_point`) --
+        never from the grid's internals -- and returns
+        `select_branch`'s label.
+        """
+        source = np.asarray(y, dtype=float)
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        delta_min = operator._real_delay_min_separation(source, matrix)
+        if self._is_positive_parity(gamma, kappa):
+            # Positive parity: L == w*|y'| == cancellation_exponent, and
+            # the third leg is eta, the distance to the caustic (F031).
+            # The grid supplies eta, so this mirror must too -- omitting
+            # it silently disables a live leg and the two would disagree
+            # exactly where the gate does its work (near the caustic).
+            exponent = operator.cancellation_exponent(
+                w, source, gamma, kappa)
+            eta = self._caustic_distance(gamma, beta, source, kappa)
+            return operator.select_branch(w, delta_min, exponent, eta)
+        # Saddle: infinite exponent AND infinite eta -> only the
+        # resolution leg is live.  F031 is positive-parity only, so the
+        # saddle boundary is deliberately left where it was rather than
+        # inheriting an unmeasured threshold.
+        return operator.select_branch(w, delta_min, math.inf, math.inf)
+
+    def _observed_branch(self, w, y, gamma, beta, kappa):
+        """The grid's routing, read off the served scalar ``F_op`` value.
+
+        No mock and no spy: the branch is recovered from WHAT WAS
+        SERVED.  A value bit-equal to `geometric_amplification` means
+        the grid took the geometric branch; any other finite value (a
+        uniform arm) or a named `SchwingerCertificationError` means it
+        took the wave branch; a `geometry.LensDomainError` can only come
+        from the geometric handoff's census guard, so it is a geometric
+        routing that the census refused.
+        """
+        source = np.asarray(y, dtype=float)
+        try:
+            geom = complex(operator.geometric_amplification(
+                w, source, gamma, beta=beta, kappa=kappa))
+            geom_ok = True
+        except geometry.LensDomainError:
+            geom, geom_ok = None, False
+        try:
+            served = complex(operator.F_op(
+                w, source, gamma, beta=beta, kappa=kappa)[0])
+        except _schwinger.SchwingerCertificationError:
+            return 'wave'
+        except geometry.LensDomainError:
+            # Only the geometric handoff census raises this above ceiling.
+            return 'geometric'
+        if geom_ok and served == geom:
+            return 'geometric'
+        return 'wave'
+
+    def _assert_grid_routing(self, configs, parity_name):
+        """Grid routing == `select_branch`, node for node, non-vacuously."""
+        n_geometric = n_wave = 0
+        for gamma, kappa, y, beta in configs:
+            for w in ONEHOME_WS:
+                if w <= _schwinger.W_CEILING_SCHWINGER:
+                    continue  # no branch decision below the ceiling
+                with self.subTest(parity=parity_name, gamma=gamma,
+                                  kappa=kappa, y=y, beta=beta, w=w):
+                    predicted = self._predicate_branch(w, y, gamma, beta,
+                                                       kappa)
+                    observed = self._observed_branch(w, y, gamma, beta,
+                                                     kappa)
+                    self.n_checks += 1
+                    self.assertEqual(
+                        observed, predicted,
+                        f'{parity_name} node gamma={gamma}, '
+                        f'kappa={kappa}, y={y}, beta={beta}, w={w}: the '
+                        f'grid routed {observed!r} but select_branch '
+                        f'says {predicted!r} -- the predicate has more '
+                        'than one home')
+                    if predicted == 'geometric':
+                        n_geometric += 1
+                    else:
+                        n_wave += 1
+        # Non-vacuity: BOTH branch labels must be exercised, else the
+        # agreement is trivially satisfied by a constant predicate.
+        self.assertGreater(n_geometric, 0,
+                           f'no geometric-routed {parity_name} node')
+        self.assertGreater(n_wave, 0,
+                           f'no wave-routed {parity_name} node')
+
+    def _assert_eta_leg_is_live(self):
+        """The grid spans ``eta`` on BOTH sides of ``ETA_MIN_GEOMETRIC``.
+
+        Stronger than a span check: at least one positive-parity node
+        must be admitted by the first two legs and REFUSED by ``eta``.
+        Without such a node the agreement above would still pass for a
+        mirror that dropped the third leg, and the sweep would not
+        witness F031 at all.
+        """
+        n_below = n_above = n_eta_blocked = 0
+        for gamma, kappa, y, beta in ONEHOME_POSITIVE:
+            source = np.asarray(y, dtype=float)
+            eta = self._caustic_distance(gamma, beta, source, kappa)
+            if eta < operator.ETA_MIN_GEOMETRIC:
+                n_below += 1
+            else:
+                n_above += 1
+                continue
+            matrix = geometry.macro_matrix(gamma, beta, kappa)
+            delta_min = operator._real_delay_min_separation(source, matrix)
+            for w in ONEHOME_WS:
+                if w <= _schwinger.W_CEILING_SCHWINGER:
+                    continue
+                two_leg = operator.select_branch(
+                    w, delta_min,
+                    operator.cancellation_exponent(w, source, gamma, kappa),
+                    math.inf)
+                if two_leg == 'geometric':
+                    n_eta_blocked += 1
+        self.n_checks += 1
+        self.assertGreater(n_below, 0,
+                           'no config with eta < ETA_MIN_GEOMETRIC: the '
+                           'caustic leg is untested below its threshold')
+        self.assertGreater(n_above, 0,
+                           'no config with eta >= ETA_MIN_GEOMETRIC: the '
+                           'caustic leg is untested above its threshold')
+        self.assertGreater(
+            n_eta_blocked, 0,
+            'no node is admitted by resolution+cancellation and refused '
+            'by eta, so the sweep cannot tell the two-leg gate from the '
+            'three-leg one')
 
     def _plot(self, gate_map):
         if not _HAVE_MPL or not gate_map:
@@ -1092,9 +973,9 @@ class MacroMagnificationLimitTestCase(OperatorTestCase):
     The expected value is written LITERALLY as
     ``1/sqrt((1 - kappa)**2 - gamma**2)`` -- never built from ``F_op``,
     ``channels``, ``geometry``, or any engine path (FINDINGS F002
-    oracle-tautology trap).  A `operator.CancellationError` at these tiny
-    ``w`` is itself NEWS: it is recorded as a refusal and FAILS the test
-    with its message, never skipped.
+    oracle-tautology trap).  A named engine refusal at these tiny ``w``
+    is itself NEWS: it is recorded as a refusal and FAILS the test with
+    its message, never skipped.
 
     If this test FAILS, it is not to be adjusted to pass -- the failure
     is the finding, to be reported verbatim.
@@ -1143,7 +1024,7 @@ class MacroMagnificationLimitTestCase(OperatorTestCase):
                         value, _ = operator.F_op(
                             w, self.LIMIT_Y, gamma, beta=beta,
                             kappa=kappa)
-                    except operator.CancellationError as exc:
+                    except _schwinger.SchwingerCertificationError as exc:
                         # A refusal at w -> 0 is news, not a skip.
                         refusals.append(
                             f'gamma={gamma}, kappa={kappa}, beta={beta}, '
@@ -1268,27 +1149,6 @@ class SelfFalsificationTestCase(OperatorTestCase):
             drift, 1e-6,
             'the broken rescaling left the observable invariant, so the '
             'mass-sheet gate would not detect it')
-
-    def test_certification_band_gate_can_go_red(self):
-        """
-        The F005 certification gate is non-vacuous: at a returning in-band
-        config a 1% perturbation of ``F_op``'s value breaches
-        `RTOL_GATE`, so a finite-but-wrong return could not slip through
-        `ContractionCertificationTestCase`'s accuracy half.
-        """
-        y = ContractionCertificationTestCase.CERT_Y
-        gamma = ContractionCertificationTestCase.CERT_GAMMA
-        w = 24.0 / 0.9  # L ~ 24: a config that certifies a return
-        value, _ = operator.F_op(w, y, gamma, kappa=0.0,
-                                 max_order=FOP_MAX_ORDER)
-        reference = _oracle_amplification(w, y, gamma, kappa=0.0)
-        good = abs(value - reference) / abs(reference)
-        bad = abs(value * 1.01 - reference) / abs(reference)
-        self.assertLessEqual(good, RTOL_GATE)
-        self.assertGreater(
-            bad, RTOL_GATE,
-            'a 1% error slips the certification gate at L~24; its '
-            'accuracy half would assert nothing')
 
     def test_gate_rejects_geometric_when_one_condition_holds(self):
         """

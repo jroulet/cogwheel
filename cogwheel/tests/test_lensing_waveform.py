@@ -18,7 +18,7 @@ waveform layer:
 * MACRO-SADDLE CONTROL (Architect spec 1): an in-band lens configuration
   returns a finite, certified O(1) amplification at the engine's default
   order-42 budget, while a companion at the certification band edge
-  refuses cleanly with `operator.CancellationError`;
+  refuses cleanly with `SchwingerCertificationError`;
 * SMALL-MASS FLOOR (Architect spec 2): as the lens mass shrinks the
   amplification flattens onto the exact geometric-optics macro limit
   ``F -> sqrt(mu_macro) = 1/sqrt((1 - kappa)**2 - gamma**2)`` (the
@@ -204,8 +204,8 @@ IN_BAND = _LensConfig(
 #: 1e-10 target, so the LEGACY path refuses every probe.  Since Build 7a
 #: the ``w <= 60`` probes are rescued by the cross-parity Schwinger
 #: fallback; the ``w = 60.5`` probe sits just ABOVE the Schwinger
-#: ceiling, so its legacy `CancellationError` re-raises — that probe
-#: carries the refusal contract now.  ``L = w*|y'|`` with
+#: ceiling, so it refuses with `SchwingerCertificationError` — that
+#: probe carries the refusal contract now.  ``L = w*|y'|`` with
 #: ``|y'| = |y|/sqrt(1 - kappa) ~ 0.79`` stays below 48 across ALL
 #: probes (60.5 * 0.79 = 47.8), keeping every probe on the wave branch
 #: where the refusal lives (the geometric branch requires ``L > 48``).
@@ -307,8 +307,7 @@ def _f_op_returns(config: _LensConfig, w: float) -> bool:
     """Whether `operator.F_op` certifies a finite return for `config`.
 
     ``True`` if the call returns a finite value; ``False`` if it raises a
-    named wave-branch refusal -- `operator.CancellationError` (the
-    ``gamma'==0`` legacy exit) or `SchwingerCertificationError` (the
+    named wave-branch refusal -- `SchwingerCertificationError` (the
     homogenized Schwinger path, Build 8d).  Other exceptions propagate --
     they are not the certified/refused distinction this probe reports.
     """
@@ -316,7 +315,7 @@ def _f_op_returns(config: _LensConfig, w: float) -> bool:
         value, _ = operator.F_op(
             w, config.y_array, config.gamma, beta=config.beta,
             kappa=config.kappa, max_order=CERT_MAX_ORDER)
-    except (operator.CancellationError, SchwingerCertificationError):
+    except SchwingerCertificationError:
         return False
     return bool(np.isfinite(value.real) and np.isfinite(value.imag))
 
@@ -526,8 +525,8 @@ class MacroSaddleControlTestCase(WaveformTestCase):
     companion is a sheared positive-parity host (``gamma' = 0.5 > 0``) now
     served by the exact Schwinger evaluator, so its sub-ceiling probes
     (``w = 30, 40``) CERTIFY and only the above-ceiling probe
-    (``w = 60.5 > 60``) refuses -- with `SchwingerCertificationError` (was
-    the Build-7a fallback's `operator.CancellationError`).  The refusal is
+    (``w = 60.5 > 60``) refuses -- with `SchwingerCertificationError`.
+    The refusal is
     a FEATURE, asserted where it belongs -- in the waveform layer that
     consumes the engine's certified-or-refuse contract.
     """
@@ -646,8 +645,7 @@ class MacroSaddleControlTestCase(WaveformTestCase):
         generator = _make_generator(HARD_CORE, _CONTROL_MASS_MSUN,
                                     _CONTROL_Z)
         f_hz = _frequencies_for_w(HARD_CORE.w_probes, generator)
-        with self.assertRaises(
-                (operator.CancellationError, SchwingerCertificationError)):
+        with self.assertRaises(SchwingerCertificationError):
             generator.amplification(f_hz)
         self.n_checks += 1
 
@@ -661,32 +659,22 @@ class MacroSaddleControlTestCase(WaveformTestCase):
         above-ceiling probe (``w = 61 > 60``) no arm certifies.  Its
         refusal is the Schwinger w-ceiling (y-independent, F013), so the
         `SchwingerCertificationError` message names the offending ``w`` and
-        the ceiling -- the complete identifier for a w-keyed refusal (the
-        ``gamma'==0`` legacy exit still names the full ``(w, y, gamma,
-        kappa)`` via `CancellationError`, exercised elsewhere).
+        the ceiling -- the complete identifier for a w-keyed refusal.
         """
         refusing_w = next((w for w in HARD_CORE.w_probes
                            if not _f_op_returns(HARD_CORE, w)), None)
         self.assertIsNotNone(refusing_w,
                              'no hard-core probe refused to inspect')
-        with self.assertRaises(
-                (operator.CancellationError,
-                 SchwingerCertificationError)) as ctx:
+        with self.assertRaises(SchwingerCertificationError) as ctx:
             operator.F_op(refusing_w, HARD_CORE.y_array, HARD_CORE.gamma,
                           beta=HARD_CORE.beta, kappa=HARD_CORE.kappa,
                           max_order=CERT_MAX_ORDER)
         message = str(ctx.exception)
-        if isinstance(ctx.exception, SchwingerCertificationError):
-            # w-keyed ceiling refusal: names the offending w and the reason.
-            for token in ('w =', str(refusing_w), 'ceiling'):
-                self.assertIn(
-                    token, message,
-                    f'Schwinger ceiling refusal omits {token!r}: {message}')
-        else:
-            # gamma'==0 legacy exit: names the full configuration.
-            for token in ('w =', 'y =', 'gamma', 'kappa'):
-                self.assertIn(token, message,
-                              f'refusal message omits {token!r}: {message}')
+        # w-keyed ceiling refusal: names the offending w and the reason.
+        for token in ('w =', str(refusing_w), 'ceiling'):
+            self.assertIn(
+                token, message,
+                f'Schwinger ceiling refusal omits {token!r}: {message}')
         self.n_checks += 1
 
     def test_diagnostic_scatter(self):
@@ -718,7 +706,7 @@ class MacroSaddleControlTestCase(WaveformTestCase):
         if refused:
             ax.scatter([w for w, _ in refused],
                        [g for _, g in refused], c='C3', marker='x', s=40,
-                       label='CancellationError')
+                       label='named refusal')
         ax.axhline(0.5, color='k', ls='--', alpha=0.6,
                    label="gamma_eff = 0.5 band edge")
         ax.set_xlabel('w')
@@ -954,7 +942,7 @@ class SelfFalsificationTestCase(WaveformTestCase):
 
     def test_refusal_gate_is_non_vacuous(self):
         """
-        The in-band control does NOT raise `CancellationError`, so the
+        The in-band control does NOT raise a named refusal, so the
         band-edge ``assertRaises`` is meaningful rather than passing for
         any configuration whatsoever.
         """

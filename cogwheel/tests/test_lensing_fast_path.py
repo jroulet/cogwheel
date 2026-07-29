@@ -16,7 +16,7 @@ any answer:
   against an INDEPENDENT oracle.  `NumbaKernelPreservationTestCase` and
   `NumbaOperatorPreservationTestCase` gate both -- accuracy vs a fresh
   mpmath reference (never vs the numba code, FINDINGS F002), determinism
-  by ``assertEqual``, and the F005 ``CancellationError`` / domain refusals
+  by ``assertEqual``, and the F005 named certification / domain refusals
   still firing on the same out-of-certification inputs (F005).
 
 * LEVER 2 -- ``_amplification_coefficients`` evaluates the engine on a
@@ -129,7 +129,6 @@ if _os.environ.get('COGWHEEL_STRICT_TIMING'):
         _os.environ.setdefault(_thread_var, '1')
 
 import importlib.util
-import inspect
 import itertools
 import pathlib
 import subprocess
@@ -165,7 +164,7 @@ from cogwheel.lensing.chang_refsdal._hyp1f1 import (
 from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels, real_image_delays, _GEOMETRIC_ORDER)
 from cogwheel.lensing.chang_refsdal.operator import (
-    CancellationError, F_op, L_MAX, RHO_END, RHO_START, select_branch)
+    F_op, L_MAX, RHO_END, RHO_START, select_branch)
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 from cogwheel.lensing.waveform import dimensionless_frequency
@@ -525,20 +524,6 @@ _STRICT_TIMING = bool(_os.environ.get('COGWHEEL_STRICT_TIMING'))
 #: every row keeps ``1 - kappa > |gamma|``).
 FOP_IDENTITY_BETAS = (0.0, 0.7)
 FOP_IDENTITY_KAPPAS = (0.0, 0.2)
-
-#: Positive-parity config whose operator series needs several orders to
-#: converge -- the F010 py_func-chain falsification evaluates here so a
-#: perturbed convergence stop / gather index visibly moves the answer.
-FALSIFY_W = 20.0
-FALSIFY_Y = (0.9, 0.0)
-FALSIFY_GAMMA = 0.2
-
-#: Corrupted small-term convergence tolerance for the F010 fused-core
-#: falsification: at 1.0 the small-term stop fires as early as it is
-#: allowed and truncates the O(gamma) shear series, so the perturbed
-#: contraction no longer certifies to `FOP_RTOL`.
-PERTURBED_SERIES_TOLERANCE = 1.0
-
 #: Directory for diagnostic plots (created on demand).
 OUTPUT_DIR = pathlib.Path(__file__).parent / 'output'
 
@@ -1036,16 +1021,16 @@ class NumbaOperatorPreservationTestCase(FastPathTestCase):
     """
     LEVER 1, operator: the numba-accelerated ``operator.F_op`` preserves
     the pre-numba accuracy (vs an INDEPENDENT mpmath operator series), is
-    bit-identical on repeat, and every F005 `CancellationError` still
+    bit-identical on repeat, and every F005 named refusal still
     fires on the same uncertifiable inputs.
     """
 
     def test_fop_accuracy_matches_mpmath_within_original_tolerance(self):
         """
         ``F_op`` agrees with the mpmath operator-series oracle within
-        `FOP_RTOL` across the in-domain grid.  Points whose contraction is
-        uncertifiable raise `CancellationError` and are covered by the
-        refusal test, so they are skipped here (never compared).
+        `FOP_RTOL` across the in-domain grid.  Points that cannot be
+        certified raise `SchwingerCertificationError` and are covered by
+        the refusal test, so they are skipped here (never compared).
         """
         records = []
         for gamma in FOP_GRID_GAMMA:
@@ -1056,7 +1041,7 @@ class NumbaOperatorPreservationTestCase(FastPathTestCase):
                         try:
                             value, _ = F_op(w, y, gamma,
                                             max_order=FOP_MAX_ORDER)
-                        except CancellationError:
+                        except SchwingerCertificationError:
                             continue  # uncertifiable: owned by refusal test
                         reference = _oracle_fop(w, y, gamma,
                                                 max_order=FOP_MAX_ORDER)
@@ -1096,7 +1081,7 @@ class NumbaOperatorPreservationTestCase(FastPathTestCase):
                                             max_order=FOP_MAX_ORDER)
                             second, _ = F_op(w, y, gamma,
                                              max_order=FOP_MAX_ORDER)
-                        except CancellationError:
+                        except SchwingerCertificationError:
                             continue
                         self.n_checks += 1
                         self.assertEqual(
@@ -1114,8 +1099,7 @@ class NumbaOperatorPreservationTestCase(FastPathTestCase):
         production default ``max_order``: at ``w <= 60`` Schwinger
         certifies with diagnostics ``order_used == 0`` (the uncertifiable
         legacy series was never trusted); at ``w > 60`` the named refusal
-        propagates -- now `SchwingerCertificationError` (was the Build-7a
-        fallback's re-raised `CancellationError`).  A finite value with
+        propagates -- now `SchwingerCertificationError`.  A finite value with
         ``order_used > 0`` on any of these configs would mean the
         uncertifiable legacy series was silently believed -- the F005 bug.
         """
@@ -1126,8 +1110,7 @@ class NumbaOperatorPreservationTestCase(FastPathTestCase):
                 self.n_checks += 1
                 try:
                     value, diagnostics = F_op(w, y, gamma)
-                except (CancellationError,
-                        SchwingerCertificationError):
+                except SchwingerCertificationError:
                     refused += 1
                     self.assertGreater(
                         w, 60.0,
@@ -1147,22 +1130,22 @@ class NumbaOperatorPreservationTestCase(FastPathTestCase):
 
 class OperatorFusionByteIdentityTestCase(FastPathTestCase):
     """
-    RE-TARGET (Build 8d homogenization) of the Build-8b fused-contraction
+    RE-TARGET (Build 8d homogenization) of the Build-8b contraction
     byte-identity gate.
 
-    The 8b lever merged ``_weight_vectors`` + ``_contract_grid`` into ONE
-    njit core, `operator._fused_contraction`, and this suite pinned
-    ``F_op`` / ``F_op_grid`` BYTE-IDENTICAL to the pre-fusion ``HEAD``.
-    Build 8d moved the SHEARED positive-parity arm (``gamma' > 0``) off
-    the fused contraction entirely: it is now served by the exact
-    Schwinger evaluator (`_schwinger.f_schwinger`, ``order_used == 0``).
-    The fused contraction still serves ONLY the shear-free ``gamma' == 0``
-    point lens.  So the byte-identity premise SPLITS:
+    The 8b lever merged the two-stage weight/contract pipeline into ONE
+    njit core, and this suite pinned ``F_op`` / ``F_op_grid``
+    BYTE-IDENTICAL to the pre-fusion ``HEAD``.  Build 8d moved the SHEARED
+    positive-parity arm (``gamma' > 0``) off that contraction entirely: it
+    is now served by the exact Schwinger evaluator
+    (`_schwinger.f_schwinger`, ``order_used == 0``).  The shear-free
+    ``gamma' == 0`` point lens takes its own closed-form exit.  So the
+    byte-identity premise SPLITS:
 
-    * FROZEN arm (``gamma' == 0``): the fused legacy contraction still
-      runs and MUST stay byte-for-byte HEAD (value, all four
-      `OperatorDiagnostics` fields, and the refusal type).  This keeps
-      the 8b fusion byte-identity gate alive where the fusion serves.
+    * FROZEN arm (``gamma' == 0``): the served value MUST stay
+      byte-for-byte HEAD (value, all four `OperatorDiagnostics` fields
+      except ``order_used``, and the refusal type).  This keeps the
+      byte-identity gate alive where the shear-free route serves.
 
     * FLIPPED arm (``gamma' > 0``): the value change from the legacy
       contraction to Schwinger is an APPROVED CONTRACT FLIP.  It is
@@ -1170,7 +1153,7 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
       value agrees with the OLD HEAD value in the max-normalized physics
       currency at `FOP_RTOL` (1e-10) on the certified overlap -- a
       byte/contract change, not a physics change -- and the NEW path is
-      SINGLE-DISPATCH (``order_used == 0``, Schwinger, never the fused
+      SINGLE-DISPATCH (``order_used == 0``, Schwinger, never the legacy
       contraction).  Above the Schwinger ceiling it refuses by the NEW
       named `SchwingerCertificationError`.
 
@@ -1190,21 +1173,18 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
     def _scalar_outcome(module, w, y, gamma, beta, kappa):
         """Run ``module.F_op`` and freeze the value + all four diagnostics
         as typed numpy scalars (for ``tobytes`` comparison), or record the
-        named refusal.  Captures every wave-branch refusal: the legacy
-        `CancellationError`, the homogenized `SchwingerCertificationError`,
-        the kernel-ceiling `HypergeometricDomainError`, and
-        `LensDomainError`."""
+        named refusal.  Captures every wave-branch refusal: the
+        homogenized `SchwingerCertificationError`, the kernel-ceiling
+        `HypergeometricDomainError`, and `LensDomainError`."""
         try:
             value, diagnostics = module.F_op(
                 w, np.asarray(y, dtype=float), gamma,
                 beta=beta, kappa=kappa, max_order=FOP_MAX_ORDER)
-        # ``module.CancellationError`` -- each operator module (working
-        # tree and the HEAD load) defines its OWN CancellationError class,
-        # so catch the one THIS module raises; the Schwinger / domain /
-        # kernel refusals come from byte-identical siblings (the SAME
-        # _schwinger / geometry / kernel code) and are shared class
-        # objects.
-        except (module.CancellationError, SchwingerCertificationError,
+        # The Schwinger / domain / kernel refusals come from byte-identical
+        # siblings (the SAME _schwinger / geometry / kernel code) shared by
+        # the working tree and the HEAD load, so they are the same class
+        # objects and can be caught by name here.
+        except (SchwingerCertificationError,
                 HypergeometricDomainError, geometry.LensDomainError) as exc:
             return {'raised': True, 'exc': type(exc).__name__}
         return {
@@ -1224,7 +1204,7 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
             values, orders, converged = module.F_op_grid(
                 grid, np.asarray(y, dtype=float), gamma,
                 beta=beta, kappa=kappa, max_order=FOP_MAX_ORDER)
-        except (module.CancellationError, SchwingerCertificationError,
+        except (SchwingerCertificationError,
                 HypergeometricDomainError, geometry.LensDomainError) as exc:
             return {'raised': True, 'exc': type(exc).__name__}
         return {'raised': False, 'exc': None, 'values': values,
@@ -1625,162 +1605,6 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
         if value is not None:
             return complex(value)
         return None
-
-
-class OperatorFusionFalsificationTestCase(FastPathTestCase):
-    """
-    WP-B F010 preservation: the fused-contraction accuracy gate is NOT
-    vacuous, re-homed onto the single fused njit core the Build 8b lever
-    created.
-
-    The Build 8b fusion merged the former ``_weight_vectors`` +
-    ``_contract_grid`` two-stage pipeline into ONE core,
-    `operator._fused_contraction`, so BOTH former py_func-chain
-    falsifications -- the corrupted convergence tolerance and the zeroed
-    radial-index gather -- now flow through that ONE function.  numba
-    freezes module globals at compile time, so a patched
-    ``_SERIES_TOLERANCE`` never reaches the compiled dispatcher; each
-    perturbation is injected through the ``py_func`` chain -- the fused
-    core is swapped for its ``.py_func`` body, which re-reads the module
-    globals in the interpreter -- and the ``half_sum`` gather stays an
-    explicit ARGUMENT the wrapper can corrupt.  Each perturbation must
-    drive the `FOP_RTOL` gate red (refuse OR return past tolerance); a
-    perturbation that left it green would mean the fused njit core is dead
-    code or the ``py_func`` chain is incomplete.
-
-    The gate targets the LEGACY certified path `operator._grid_certified`
-    directly: the public `F_op_grid` rescues a sub-ceiling refusal with
-    the Schwinger fallback (which does not consume the perturbed series),
-    so a perturbation-induced refusal would be masked through the public
-    entry point and the falsification would go vacuous.
-    """
-
-    def _gate_outcome(self):
-        """Run the certified path at the FALSIFY config; return
-        ``(raised, rel_err)`` -- ``rel_err`` is ``inf`` on refusal, else
-        the relative error against the INDEPENDENT mpmath ``F_op``
-        oracle."""
-        try:
-            values, *_ = operator._grid_certified(
-                np.array([FALSIFY_W], dtype=float),
-                np.asarray(FALSIFY_Y, dtype=float), FALSIFY_GAMMA,
-                max_order=FOP_MAX_ORDER)
-        except CancellationError:
-            return True, float('inf')
-        oracle = _oracle_fop(FALSIFY_W, FALSIFY_Y, FALSIFY_GAMMA,
-                             max_order=FOP_MAX_ORDER)
-        rel = abs(complex(values[0]) - oracle) / abs(oracle)
-        return False, rel
-
-    def _assert_green_unpatched(self):
-        """The gate must be green BEFORE any patch, so RED is the patch's
-        doing and not a broken precondition."""
-        raised, rel = self._gate_outcome()
-        self.n_checks += 1
-        self.assertFalse(
-            raised, 'unpatched _grid_certified refused the certified '
-            'FALSIFY config; the falsification precondition is broken')
-        self.n_checks += 1
-        self.assertLessEqual(
-            rel, FOP_RTOL,
-            f'unpatched fused contraction rel error {rel:.3e} already '
-            f'exceeds {FOP_RTOL:.0e}; the gate is not green to begin with')
-
-    def test_fused_core_exposes_patchable_py_func_and_globals(self):
-        """
-        Introspection (F010): the fusion kept the core PERTURBABLE.  The
-        fused function exposes a plain ``.py_func`` body (no compiled
-        ``.signatures``, so a swap re-reads module globals in the
-        interpreter); ``_SERIES_TOLERANCE`` remains a MODULE GLOBAL the
-        perturbation can patch; and ``half_sum`` remains an ARGUMENT the
-        gather corruption can zero.  If any of these regressed, the two
-        falsification tests below would be silently vacuous.
-        """
-        self.n_checks += 1
-        self.assertTrue(
-            hasattr(operator._fused_contraction, 'py_func'),
-            '_fused_contraction does not expose .py_func; the F010 '
-            'perturbations cannot reach the compiled core')
-        pyfunc = operator._fused_contraction.py_func
-        self.n_checks += 1
-        self.assertFalse(
-            hasattr(pyfunc, 'signatures'),
-            '_fused_contraction.py_func carries .signatures; it is not a '
-            'plain py_func body, so a perturbation would not reach compiled '
-            'code (F010 vacuity)')
-        self.n_checks += 1
-        self.assertIn(
-            'half_sum', inspect.signature(pyfunc).parameters,
-            "half_sum is no longer an explicit argument of "
-            "_fused_contraction; the gather-index falsification cannot "
-            'corrupt it')
-        self.n_checks += 1
-        self.assertTrue(
-            hasattr(operator, '_SERIES_TOLERANCE'),
-            '_SERIES_TOLERANCE is not a module global; the series-'
-            'tolerance falsification cannot patch it')
-
-    def test_series_tolerance_perturbation_drives_gate_red(self):
-        """
-        Patching `operator._SERIES_TOLERANCE` to 1.0 through the fused
-        core's ``py_func`` makes the small-term stop fire as early as it
-        is allowed, dropping the O(gamma) shear correction; the result no
-        longer certifies to `FOP_RTOL` (it refuses on the truncation cut
-        or returns past tolerance).
-        """
-        self._assert_green_unpatched()
-        core_pyfunc = operator._fused_contraction.py_func
-        self.n_checks += 1
-        self.assertFalse(
-            hasattr(core_pyfunc, 'signatures'),
-            '_fused_contraction.py_func carries .signatures (F010 vacuity)')
-        with mock.patch.object(operator, '_fused_contraction', core_pyfunc), \
-                mock.patch.object(operator, '_SERIES_TOLERANCE',
-                                  PERTURBED_SERIES_TOLERANCE):
-            raised, rel = self._gate_outcome()
-        print(f'\n[Falsification] fused series-tolerance -> '
-              f'{PERTURBED_SERIES_TOLERANCE}: raised={raised} '
-              f'rel_err={rel:.3e}')
-        self.n_checks += 1
-        self.assertTrue(
-            raised or rel > FOP_RTOL,
-            f'the truncated shear series still certified (rel_err '
-            f'{rel:.3e} <= {FOP_RTOL:.0e}); the fused accuracy gate is '
-            'vacuous or the py_func chain is incomplete (F010)')
-
-    def test_gather_index_perturbation_drives_gate_red(self):
-        """
-        Feeding an all-zero ``half_sum`` ARGUMENT into the fused core's
-        ``py_func`` sends every ``(a, b)`` monomial to radial index
-        ``= order`` instead of the ``idx(a, b, n)`` gather, so the
-        contraction reads a single wrong derivative per order and the
-        amplitude is wrong at any nontrivial source; the gate must go red.
-        """
-        self._assert_green_unpatched()
-        core_pyfunc = operator._fused_contraction.py_func
-        self.n_checks += 1
-        self.assertFalse(
-            hasattr(core_pyfunc, 'signatures'),
-            '_fused_contraction.py_func carries .signatures (F010 vacuity)')
-
-        def corrupt_fused(table, z_powers, zbar_powers, abs_powers,
-                          half_sum, derivs_scaled, w_array, gamma_scaled,
-                          max_order, dim):
-            zeroed = np.zeros_like(half_sum)  # collapse the gather index
-            return core_pyfunc(table, z_powers, zbar_powers, abs_powers,
-                               zeroed, derivs_scaled, w_array, gamma_scaled,
-                               max_order, dim)
-
-        with mock.patch.object(operator, '_fused_contraction', corrupt_fused):
-            raised, rel = self._gate_outcome()
-        print(f'\n[Falsification] fused zeroed half_sum gather: '
-              f'raised={raised} rel_err={rel:.3e}')
-        self.n_checks += 1
-        self.assertTrue(
-            raised or rel > FOP_RTOL,
-            f'the collapsed bilinear form still certified (rel_err '
-            f'{rel:.3e} <= {FOP_RTOL:.0e}); the fused accuracy gate is '
-            'vacuous or the py_func chain is incomplete (F010)')
 
 
 # ---------------------------------------------------------------------------
@@ -2707,11 +2531,11 @@ class CausticSearchPreservationTestCase(FastPathTestCase):
         boundary for a representative set of ``(config, w)`` pairs.
 
         The pipeline evaluates the WAVE branch through `operator.F_op`,
-        which raises `operator.CancellationError` when the wave contraction
-        is uncertifiable; that refusal only ever fires on the wave branch
+        which raises `SchwingerCertificationError` when the wave branch is
+        uncertifiable; that refusal only ever fires on the wave branch
         (the geometric branch is a closed form), so a raised
-        `CancellationError` is itself evidence the wave branch was taken --
-        equivalent to ``produced == 'wave'`` here.
+        `SchwingerCertificationError` is itself evidence the wave branch
+        was taken -- equivalent to ``produced == 'wave'`` here.
         """
         for config in _LENS_CONFIGS:
             label, y1, y2, gamma, beta, kappa = config
@@ -2737,11 +2561,25 @@ class CausticSearchPreservationTestCase(FastPathTestCase):
                         produced = ('geometric'
                                     if partition.operator_orders[0]
                                     == _GEOMETRIC_ORDER else 'wave')
-                    except CancellationError:
+                    except SchwingerCertificationError:
                         # wave branch taken but uncertifiable
                         produced = 'wave'
                     exponent = float(w) * float(np.sqrt(y_scaled @ y_scaled))
-                    predicted = select_branch(float(w), delta_min, exponent)
+                    # THIRD leg: distance to the caustic (F031). The pipeline
+                    # supplies it, so this mirror must too -- omitting it
+                    # silently disables a live leg and the two disagree
+                    # exactly where the gate does its work. This is the third
+                    # hand-rolled copy of the predicate in the suite; the
+                    # canonical pin is
+                    # test_lensing_operator.py::BranchGateTestCase::
+                    # test_thresholds_have_one_home.
+                    try:
+                        eta = float(geometry.nearest_caustic_point(
+                            gamma, beta, source, kappa=kappa).distance)
+                    except geometry.LensDomainError:
+                        eta = 0.0
+                    predicted = select_branch(float(w), delta_min, exponent,
+                                              eta)
                     self.n_checks += 1
                     self.assertEqual(
                         produced, predicted,

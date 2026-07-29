@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "c7d2cff486399d151cf866b0b4fcdf2df0093e08",
-  "timestamp": "2026-07-29T06:34:44Z",
+  "commit": "c1a552f1d60907516a1cea17dd0808881ffb89f7",
+  "timestamp": "2026-07-29T08:42:44Z",
   "touched_files": [
     "cogwheel/gw_prior/twosquircle.py",
     "cogwheel/lensing/chang_refsdal/_born.py",

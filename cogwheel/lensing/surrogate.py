@@ -103,7 +103,6 @@ from cogwheel.lensing.chang_refsdal.channels import (
     FARFIELD_KERNEL_SUM, KNOWN_FARFIELD_DEFINITIONS, INTERIOR_SACR_C,
     KNOWN_INTERIOR_DEFINITIONS)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
-from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 
@@ -113,8 +112,7 @@ if TYPE_CHECKING:  # typing-only; NEVER a runtime import (surrogate is the
 
 # The engine's named refusals.  Any of these at ANY w node marks the whole
 # parameter grid point refused (per-w refusal propagation, Professor Q4).
-_REFUSAL_ERRORS = (LensDomainError, CancellationError,
-                   SchwingerCertificationError)
+_REFUSAL_ERRORS = (LensDomainError, SchwingerCertificationError)
 
 # Default training resolutions (Professor Q2 sizing).
 _DEFAULT_W_NODES_PER_DECADE = 15

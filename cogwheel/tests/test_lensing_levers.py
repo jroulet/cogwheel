@@ -1742,13 +1742,23 @@ class GeometricCensusGuardTestCase(_LeverTestCase):
 
 
 class LMaxSelfFalsificationTestCase(_LeverTestCase):
-    """A mis-set ``L_MAX`` is caught -- both too-low and too-high fail.
+    """``L_MAX = 48`` is bracketed by two MEASURED failure modes.
 
-    Too-low (below ``L_geo``): a sub-accurate node is routed to the
-    geometric asymptote and served with ``rel-err > L_GEO_TOL``.  Too-high
-    (above the kernel ceiling): a geometric-servable node is routed to the
-    wave branch, which refuses -- an availability regression.  The shipped
-    ``L_MAX = 48`` avoids both.
+    Too low (below ``L_geo``): the geometric asymptote at that node is
+    measurably inaccurate (``rel-err > L_GEO_TOL``), so admitting it
+    would serve a wrong value.  Too high (above the kernel ceiling): the
+    wave EVALUATOR cannot serve the node at all -- `f_schwinger` raises
+    -- so refusing the geometric handoff there is an availability loss.
+    Both halves are VALUE claims, measured against an independent oracle.
+
+    The routing consequence of a mis-set ``L_MAX`` is NOT re-asserted
+    here: the branch predicate has exactly one home,
+    `test_lensing_operator.BranchGateTestCase`, which sweeps the gate's
+    quadrants, its boundary equalities and both operator grids' actual
+    routing.  (The mocked-``L_MAX`` routing halves that used to live in
+    these two tests were deleted with that consolidation; they restated
+    ``L > L_MAX`` from hand-built arguments, and already omitted the
+    third, ``eta`` leg.)
     """
 
     def test_too_low_L_MAX_serves_inaccurate_geometric(self) -> None:
@@ -1756,16 +1766,12 @@ class LMaxSelfFalsificationTestCase(_LeverTestCase):
         w = LEVER5_INACCURATE_W
         exponent = operator.cancellation_exponent(w, source, gamma)
         rel_err = _geometric_rel_err(w)
-        # This node's geometric asymptote is NOT yet accurate.
+        # MEASURED: this node's geometric asymptote is NOT yet accurate,
+        # which is why L_MAX must sit above its L.
         self.assertGreater(rel_err, LEVER5_L_GEO_TOL)
         # Shipped L_MAX keeps it on the (exact) wave branch.
         self.assertEqual(
             operator.select_branch(w, delta_min, exponent), 'wave')
-        # A too-low L_MAX (below this node's L) would route it to geometric,
-        # serving the inaccurate value.
-        with mock.patch.object(operator, 'L_MAX', 25):
-            self.assertEqual(
-                operator.select_branch(w, delta_min, exponent), 'geometric')
         self.record_comparison()
 
     def test_too_high_L_MAX_loses_geometric_availability(self) -> None:
@@ -1782,10 +1788,6 @@ class LMaxSelfFalsificationTestCase(_LeverTestCase):
         # Shipped L_MAX routes it to the (working) geometric branch.
         self.assertEqual(
             operator.select_branch(w, delta_min, exponent), 'geometric')
-        # A too-high L_MAX (above the ceiling) routes it to wave -> refusal.
-        with mock.patch.object(operator, 'L_MAX', 65):
-            self.assertEqual(
-                operator.select_branch(w, delta_min, exponent), 'wave')
         self.record_comparison()
 
 

@@ -142,7 +142,6 @@ from cogwheel.lensing.likelihood import (
     _lens_from_key, _snap, _ENVELOPE_HEALTH_FLOOR,
     _FID_GAMMA_SPACING, _FID_BETA_SPACING, _FID_Y_SPACING)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
-from cogwheel.lensing.chang_refsdal.operator import CancellationError
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 
@@ -262,8 +261,8 @@ ROTATED_ANCHOR = ('rotated', 0.30, 0.10, 0.20, 0.70, 0.0)
 MACRO_SADDLE = dict(gamma=0.5, beta=0.0, kappa=0.6, y1=0.20, y2=0.05)
 
 #: A config whose own wave-branch cannot certify: all paths must raise
-#: `CancellationError` (measured: estimated tail ~4e-3 > 1e-10 target).
-#: Since Build 7a the strong-shear refusal at the base lens mass is
+#: the SAME named wave-branch refusal (measured: estimated tail ~4e-3 >
+#: 1e-10 target).  Since Build 7a the strong-shear refusal at the base lens mass is
 #: rescued by the cross-parity Schwinger fallback, so ``m_lens`` is
 #: scaled x4 to push the refusing nodes above the ``w = 60`` Schwinger
 #: ceiling, where the named refusal stands on every path (measured:
@@ -615,7 +614,7 @@ class PerturbedRatioDirectTestCase(RatioLayerTestCase):
                 try:
                     lnr = self._lnlike_ratio(par_dic)
                     lnd = self._lnlike_direct(par_dic)
-                except (LensDomainError, CancellationError):
+                except LensDomainError:
                     # A sub-cell perturbation that wanders into a refusal is
                     # not part of this agreement gate; skip it (the sweep as
                     # a whole still compares many points -> anti-vacuity OK).
@@ -746,7 +745,8 @@ class RefusalSymmetryTestCase(RatioLayerTestCase):
     ratio path, the direct path and brute force all return a finite
     ``lnlike`` agreeing within the inherited RB tolerance.
     (b) A candidate whose own wave-branch cannot certify makes all three
-    raise `CancellationError`.
+    raise the SAME named wave-branch refusal
+    (`SchwingerCertificationError`).
     (c) A candidate INSIDE the certified domain whose SNAPPED fiducial
     refuses must NOT raise: the ratio path falls back to direct and returns
     a finite ``lnlike`` matching brute force -- verified by monkeypatching
@@ -773,7 +773,8 @@ class RefusalSymmetryTestCase(RatioLayerTestCase):
         ``max(RB_ATOL, RB_RTOL*|bf|)``.  The named-refusal symmetry that
         used to live here is now carried, for the surviving boundaries, by
         `test_uncertifiable_branch_refused_symmetrically` (the wave-branch
-        `CancellationError`) and by the waveform/marginalized suites (the
+        `SchwingerCertificationError`) and by the waveform/marginalized
+        suites (the
         over-critical ``kappa >= 1`` and ``det A = 0`` `LensDomainError`).
         """
         par_dic = self._candidate(self._lens_dic(**MACRO_SADDLE))
@@ -807,8 +808,7 @@ class RefusalSymmetryTestCase(RatioLayerTestCase):
         (both uniform arms uncertifiable at w > 60) refuses with
         SchwingerCertificationError; the SYMMETRY contract is unchanged -- ratio, direct, and
         bruteforce must still all refuse with the SAME named type."""
-        named_refusals = (CancellationError, SchwingerCertificationError,
-                          LensDomainError)
+        named_refusals = (SchwingerCertificationError, LensDomainError)
         par_dic = self._candidate(self._lens_dic(**CANCELLATION_CONFIG))
         raised = {}
         for label, call in (('ratio', self._lnlike_ratio),
@@ -840,8 +840,7 @@ class RefusalSymmetryTestCase(RatioLayerTestCase):
         lnd = self._lnlike_direct(par_dic)
         lnbf = self.like.lnlike_bruteforce(par_dic)
 
-        for refusal in (LensDomainError('snapped fiducial macro-saddle'),
-                        CancellationError('snapped fiducial uncertifiable')):
+        for refusal in (LensDomainError('snapped fiducial macro-saddle'),):
             with self.subTest(refusal=type(refusal).__name__):
                 self.like._fid_cache.clear()
 

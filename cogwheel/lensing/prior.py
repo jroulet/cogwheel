@@ -172,7 +172,7 @@ class UniformReducedShearPrior(UniformPriorMixin, IdentityTransformMixin,
     headroom.  Post-Build-7a the wave branch is certified-or-named-refuse
     across the strong-shear band: a ``gamma`` approaching ``1`` from below no
     longer needs to be excluded here because the engine either certifies the
-    value or raises ``operator.CancellationError`` (the strong-shear
+    value or raises ``SchwingerCertificationError`` (the strong-shear
     cross-parity Schwinger fallback rescues certifiable strong-shear nodes; the
     rest refuse by name).  For ``gamma > 1`` the geometry layer takes the
     macro-saddle branch and the wave branch routes through the Schwinger

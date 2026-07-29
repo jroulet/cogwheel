@@ -17,10 +17,11 @@ reach ``e**(w*|y'|)`` while the sum is O(1), so the series' relative
 error follows ``~ eps * e**(w*|y'|)``; Kahan summation does not rescue
 it (its bound also carries ``sum|term_i|``), only a smaller eps does,
 so the terms AND their accumulation go through this module. The
-operator channel is handled elsewhere and differently: `operator.py`
-MEASURES its own cancellation ratio ``max_partial_term / |total|`` and
-REFUSES (raising ``CancellationError``) past ~1e13 rather than leaning
-on dd, so ``L_op`` never demands extended precision here.
+operator channel never demanded extended precision here either: the
+operator series that carried ``L_op`` has since been RETIRED (the wave
+branch is served by the exact 1D Schwinger quadrature, the shear-free
+point lens by a closed form), so no dd-free cancellation channel of
+that kind survives in `operator.py`.
 
 Plain float64 (eps = 2.2e-16, ~15.95 digits) absorbs only
 ``w*|y'| ~ 22``. A double-double number is an unevaluated sum
