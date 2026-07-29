@@ -116,8 +116,9 @@ improve on it; the acceptance is the oracle, not this text. With
     u'' = -4*e*c - b*4*e^2*(c4*D^2 + e^2*s^2*c^2)/D^3
     r   = 1/sqrt(lam*u);  r' = -r*u'/(2u);  r'' = r*(3u'^2/(4u^2) - u''/(2u))
 
-then for each component with `p = (lam -+ gamma) - u`, `p' = -u'`,
-`p'' = -u''`, and `T` the component's `cos/sin` factor:
+then for each component with `p = (lam -+ gamma) - lam*u`, `p' = -lam*u'`,
+`p'' = -lam*u''` (the `lam` factors are the ones the earlier draft dropped),
+and `T` the component's `cos/sin` factor:
 
     y_i'  = p'*r*T + p*r'*T + p*r*T'
     y_i'' = p''*r*T + 2p'*r'*T + 2p'*r*T' + p*r''*T + 2p*r'*T' + p*r*T''
