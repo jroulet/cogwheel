@@ -32,6 +32,24 @@ without depending on the per-machine `~/.claude/projects/.../memory/` path.
   initialize"). All local conda envs are x86_64 (Rosetta on an arm64 Mac);
   the Bun "CPU lacks AVX" warning is a red herring — the SDK version, not the
   arch, is the gate.
+- `conda run -n <env>` IS NOT RELIABLE on the IAS server and must not be used
+  to run project code. `CONDA_ENVS_PATH=/scratch/lustre/tejaswi/conda_envs` is
+  set in the shell profile but that directory is EMPTY, so `conda run -n
+  cogwheel-newlal` finds no env and silently falls back to whatever `python`
+  PATH gives — which is the uv-provisioned interpreter under
+  `/scratch/lustre/tejaswi/.cache/uv/...` with no numpy/scipy/numba. The
+  symptom is a baffling "numpy MISSING" for an env that plainly has numpy.
+  Always resolve the interpreter absolutely:
+  `$(conda info --base)/envs/$SDK_CONDA_ENV/bin/python`.
+  `.claude/sdk/launch_build.sh` already does this deliberately (see its
+  comment at the `PYBIN=` line), so BUILDS are unaffected — only ad-hoc shell
+  calls are. Serena's `execute_shell_command` inherits that same PATH, so a
+  bare `python` there is the uv interpreter, not the project env.
+- Read `.env` FIRST; never assume the `cogwheel_310` default from AGENTS.md.
+  That default is the portable fallback, and on this machine it resolves to a
+  nonexistent path.
+- Scientific extras present in `cogwheel-newlal` (verified 2026-07-29):
+  mpmath 1.3.0, sympy 1.14.0, numba 0.58.1, numpy 1.26.2.
 - Docs: cogwheel uses Sphinx (`docs/source/`, RST, autosummary in `api.rst`),
   built on Read the Docs.
 - Provider layout (2026-07-24): `AGENTS.md` is canonical and `CLAUDE.md`
