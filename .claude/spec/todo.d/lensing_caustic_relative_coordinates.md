@@ -35,6 +35,10 @@ section: Backlog
      because the caustic does. Then DELETE the three-point circumradius inlined
      in `surrogate_training._min_curvature_radius` and re-express that as a
      minimum over exact values.
+     This step is load-bearing well beyond curvature: the same `y'`/`y''`
+     cascade retires the fold-side probe (step 3b) and every target in
+     [[lensing_analytic_derivatives]], including the one on the serving path.
+     Export the derivatives, not just `R_c`.
      ACCEPTANCE: agrees with an independent high-precision oracle to 1e-12
      (measured 4.4e-13 over 42 cases, F038), on both parities and branches,
      including `kappa != 0`, near-axial `theta`, and near the parity wall; the
