@@ -65,10 +65,21 @@ section: Backlog
         exists only to absorb the discreteness of a caustic cloud that
         `nearest_caustic_point` already resolves exactly.
         ACCEPTANCE: the `eta_max > 0.5 * r_min` decision flips on NO production
-        band; `stable_gamma_bands((0.01, 0.30), +1)` drops zero slivers;
-        deleting `_CLOUD_MARGIN_FRAC` changes no admission decision, because
-        the distance it corrected is now exact. Do NOT assert byte-identity
-        with any incumbent estimator — that enshrines its discretization.
+        band; `stable_gamma_bands((0.01, 0.30), +1)` drops zero slivers AND
+        every stable band it returns yields `len(arcs) > 0`; deleting
+        `_CLOUD_MARGIN_FRAC` changes no admission decision, because the
+        distance it corrected is now exact. Do NOT assert byte-identity with
+        any incumbent estimator — that enshrines its discretization.
+        The arcs-non-empty clause is not redundant (F041): the first 1b
+        attempt satisfied "no dropped slivers" more nearly than before while
+        returning ZERO arcs on two small-gamma bands, because
+        `_make_arc`'s new `abs(dot) > 0.1` guard is an ABSOLUTE cut on a
+        quantity measured to scale as `~1.5*gamma`. A band that exists but
+        produces nothing is unserved exactly like a dropped one; the
+        acceptance must say so or it is satisfiable while the collar stays
+        shut. Whatever replaces `0.1` must be RELATIVE — to the float noise
+        floor, against which the sign carries ~14 orders of margin, or to the
+        local `|y''|` scale. A smaller absolute number is the same bug.
 
      1c. **The serving path, plus third order.** `_pearcey_cusp._cusp_vertex`
         locates a cusp by differencing caustic speed at a hardcoded
