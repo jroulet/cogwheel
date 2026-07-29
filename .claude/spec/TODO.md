@@ -70,11 +70,16 @@ Tag conventions:
   two. Once cogwheel proves it, port to `~/Work/teja-force` (assets/sdk) and gw.
 
 
-- **RETIRE THE GRATUITOUS NUMERICAL DERIVATIVES** `[→ spec]` — the
-  Chang-Refsdal geometry is closed form end to end, yet five places compute its
-  derivatives by differencing or sampling. One of them is on the SERVING path.
-  Each imports a step-size or threshold constant that then grows its own safety
-  factor, and each is a substitute for an algebra step nobody took.
+- **RETIRE THE GRATUITOUS NUMERICAL DERIVATIVES** `[→ spec]` — **this is STEP 1
+  of [[lensing_caustic_relative_coordinates]]**, and runs before every
+  coordinate change in it. That fragment carries the ordering and the reason it
+  is first; this one carries the inventory, the rule, and the protected list.
+  Builds 1a / 1b / 1c there map onto the targets below.
+
+  The Chang-Refsdal geometry is closed form end to end, yet five places compute
+  its derivatives by differencing or sampling. One of them is on the SERVING
+  path. Each imports a step-size or threshold constant that then grows its own
+  safety factor, and each is a substitute for an algebra step nobody took.
 
   ## The rule, stated precisely — this matters more than the list
 
@@ -103,8 +108,8 @@ Tag conventions:
   ## The actual targets (surveyed 2026-07-29)
 
   All four compute derivatives of `geometry.critical_point`'s closed form, and
-  all four fall out of the SAME analytic cascade that step 1 of
-  [[lensing_caustic_relative_coordinates]] introduces. Do that step first.
+  all four fall out of the SAME cascade, which is why build 1a exports `y'` and
+  `y''` themselves rather than only the scalars derived from them.
 
   1. **`_pearcey_cusp._cusp_vertex` — SERVING PATH, highest priority.** Finds
      the cusp vertex by computing caustic speed with a hardcoded central
@@ -125,9 +130,11 @@ Tag conventions:
      docstring already concedes the threshold had to be relative "because the
      measured dip depth scales as ~caustic_size/n_samples" — a sampling
      artifact, described as if it were physics.
-  4. **`surrogate_training._probe_arc_side` / `_PROBE_ETA`** — F039; tracked as
-     step 3b of the coordinate plan, listed here for completeness because it is
-     the same cascade (`D2y[e,e]`).
+  4. **`surrogate_training._probe_arc_side` / `_PROBE_ETA`** — F039. An
+     absolute `0.05` step decides which side of a fold carries the image pair,
+     and the answer moves with the step. Analytic replacement is `D2y[e,e]`,
+     the same cascade as the rest. Build 1b, alongside the other
+     training-path consumers.
 
   Already correct, and the model to copy: `geometry.r_caustic` samples only to
   BRACKET and refines every root with `brentq` to `4*eps`;
@@ -206,26 +213,57 @@ Tag conventions:
 
   ## Steps, in series
 
-  1. **Pointwise curvature radius — CLOSED FORM.** Add
-     `geometry.caustic_curvature_radius(gamma, theta, *, kappa, branch)`
-     computed ANALYTICALLY: the caustic is an exact parametric curve, so
-     differentiate it, do not sample it. Chain rule through `u -> r -> y`,
-     then `R_c = |y'|^3 / |y1' y2'' - y2' y1''|`. It belongs in `geometry`
-     because the caustic does. Then DELETE the three-point circumradius inlined
-     in `surrogate_training._min_curvature_radius` and re-express that as a
-     minimum over exact values.
-     This step is load-bearing well beyond curvature: the same `y'`/`y''`
-     cascade retires the fold-side probe (step 3b) and every target in
-     [[lensing_analytic_derivatives]], including the one on the serving path.
-     Export the derivatives, not just `R_c`.
-     ACCEPTANCE: agrees with an independent high-precision oracle to 1e-12
-     (measured 4.4e-13 over 42 cases, F038), on both parities and branches,
-     including `kappa != 0`, near-axial `theta`, and near the parity wall; the
-     astroid limit `R_c -> 3*gamma*|sin 2th|` holds to its own `O(gamma^2)`;
-     and the consumer decision `eta_max > 0.5 * r_min` flips on NO production
-     band. Do NOT assert byte-identity with the incumbent and do NOT assert its
-     5-10% bias margin — both would enshrine a discretization artifact. A flip
-     is a finding to report, never a number to tune.
+  1. **THE ANALYTIC SWEEP — go through the geometry with a fine-toothed comb
+     and derive, rather than estimate, everything that has a closed form.**
+     This is FIRST, ahead of every coordinate change, and it is a phase of
+     three sequential builds rather than one. Detail, inventory and the
+     implementation-vs-oracle rule live in [[lensing_analytic_derivatives]];
+     this entry is only the ordering and the reason.
+
+     WHY FIRST. Every later step measures or re-expresses something in terms
+     of caustic geometry, so each one either inherits exact derivatives or
+     re-derives them badly. Two of the plan's own steps were already mis-
+     specified because the geometry underneath was numerical: this step's own
+     first draft demanded byte-identity with a biased estimator (F038), and a
+     separate step proposed retuning a probe step that should not exist at all
+     (F039). Both dissolved once the algebra was done. Doing this last would
+     mean re-opening finished steps; doing it first means every later
+     acceptance is stated against exact geometry.
+
+     1a. **The cascade in `geometry`.** Analytic `y'(theta)`, `y''(theta)` for
+        the closed-form caustic, and on top of them
+        `caustic_curvature_radius`, caustic speed `|y'|`, and the fold-opening
+        direction `D2y[e,e]`. EXPORT THE DERIVATIVES, not only the derived
+        scalars — four separate consumers need `y'` itself.
+        ACCEPTANCE: 1e-12 against an independent high-precision oracle
+        (measured 4.4e-13 over 42 cases, F038) on both parities and branches,
+        including `kappa != 0`, near-axial `theta` and near the parity wall;
+        the astroid limit `R_c -> 3*gamma*|sin 2th|` holds to its own
+        `O(gamma^2)`; the fold direction agrees with a well-conditioned image
+        count (F039 measured 31/32, the miss being the COUNTER).
+
+     1b. **The training-path consumers.** Retire, against 1a:
+        `_min_curvature_radius`'s three-point circumradius and its
+        `area2 < 1e-30` guard; `_branch_speed_profile`'s `np.gradient`;
+        `_find_cusps`'s speed-minimum detection with its relative threshold and
+        two safety factors; `_probe_arc_side` and `_PROBE_ETA` entirely;
+        `_caustic_inradius`'s cloud minimum; and `_CLOUD_MARGIN_FRAC`, which
+        exists only to absorb the discreteness of a caustic cloud that
+        `nearest_caustic_point` already resolves exactly.
+        ACCEPTANCE: the `eta_max > 0.5 * r_min` decision flips on NO production
+        band; `stable_gamma_bands((0.01, 0.30), +1)` drops zero slivers;
+        deleting `_CLOUD_MARGIN_FRAC` changes no admission decision, because
+        the distance it corrected is now exact. Do NOT assert byte-identity
+        with any incumbent estimator — that enshrines its discretization.
+
+     1c. **The serving path.** `_pearcey_cusp._cusp_vertex` locates a cusp by
+        differencing caustic speed at a hardcoded `delta = 1e-4` over a
+        129-point scan plus a golden-section refine. A cusp is `|y'| = 0`, a
+        root. Separate build because it SERVES: it needs the F016 envelope
+        bar, not just a geometry tolerance.
+        ACCEPTANCE: served Pearcey values unchanged to the F016 bar; cusp
+        angles pinned to the analytic root at 1e-10; O(1) geometry calls per
+        serve instead of ~258.
 
   2. **DRIVER MEASUREMENT — the tube fraction.** Sweep held-out envelope eps
      against the DIMENSIONLESS `eta / R_c`, across gamma, both parities. Find
@@ -240,35 +278,11 @@ Tag conventions:
      refusal into a serve.
      ACCEPTANCE: no chart skipped for curvature at any gamma in the prior;
      held-out eps under bar at both gamma extremes; the same `f` serves every
-     gamma. NOT in scope, and must not be claimed: the small-gamma collar is
-     only PARTLY C6's. F037 measures it as three stacked causes — C6 closes the
-     foot-of-normal skips (`0.0281..0.0462`, `0.0644..0.1550`) and cannot touch
-     the dropped topology slivers (`< 0.0281`, `0.0462..0.0644`), which are a
-     served-side detection instability, not a length scale. Acceptance is
-     "tubes now serve every gamma that `stable_gamma_bands` yields a band for".
-
-  3b. **`_PROBE_ETA` — the fold-side probe is an absolute length** (F039; this
-     is F037's second cause, now diagnosed). `_probe_arc_side` steps an
-     absolute `0.05` off the caustic to decide which side of a fold carries
-     the image pair. When that step exceeds the local caustic half-extent the
-     4-image probe fails its reconstruction check and the arc is SILENTLY
-     labelled 2-image on the wrong side. Measured: shrinking the step alone,
-     at fixed `n_samples`, takes `stable_gamma_bands((0.01, 0.30), +1)` from
-     4 bands / 2 dropped slivers to 1 band / 0 dropped.
-     DELETE the probe; do not retune it. The side is ANALYTIC (F039): at a
-     critical point `J e = 0` for the soft eigenvector `e`, so the fold opens
-     along `D2y[e,e]`, which is closed form from `critical_point`'s `.image`
-     and `.soft_axis`. Verified 31/32 against a direct image count; the one
-     miss was the image COUNTER failing to resolve a merged pair, not the
-     direction. `f * R_c` is a trap: F039 measures `0.25 * R_c` flipping
-     `(sign, image_count)` at gamma 0.15, 0.3 and 0.7 — bands that train fine
-     today — because a curvature radius is not a caustic THICKNESS. No step
-     length works, which is the signature of a question that should never have
-     been asked numerically.
-     ACCEPTANCE: `_PROBE_ETA` and `_probe_arc_side` are gone; the served side
-     agrees with an independent image count wherever that count is
-     well-conditioned; zero dropped slivers over `(0.01, 0.30)`. There is no
-     step-size parameter left to be stable under.
+     gamma. The small-gamma collar (coverage-map region 3) closes HERE, but
+     only because step 1b already removed its other two causes: F037 measures
+     the collar as three stacked failures, and C6 owns just the foot-of-normal
+     skips (`0.0281..0.0462`, `0.0644..0.1550`). If step 1b has not shipped,
+     this acceptance is not achievable — do not weaken it, run 1b.
 
   4. **DRIVER MEASUREMENT — the far-zone crossover.** Sweep carrier / ppGO /
      chart node cost INWARD in `rho` from the box corner, per gamma, both
@@ -294,36 +308,6 @@ Tag conventions:
      F027 showed it never binds on the saddle. Re-derive as relative, or
      delete. The test-heavy step: 22 references across
      `test_lensing_ghost_gate.py` and `test_lensing_exterior_windows.py`.
-
-  7b. **The remaining sampled estimators.** Surveyed 2026-07-29 while briefing
-     step 1; each computes by sampling something that has a closed form or an
-     exact solver already in the package. Ask the Part 0 question of the
-     METHOD, not just the constant.
-     - `_CLOUD_MARGIN_FRAC = 0.10` — a round number inflating a refusal
-       threshold to cover a MEASURED ~8% overshoot of the discrete 200-point
-       `_caustic_points` cloud, when `geometry.nearest_caustic_point` is exact
-       (9.3e-12) and already imported in the same file. Its own docstring says
-       the margin buys not "densifying the cloud or spending extra oracle
-       calls". It is applied INTERIOR-ONLY; the exterior path carries the same
-       slop uncompensated, protected only by a larger margin — two paths, one
-       corrected, an F019-shaped trap.
-     - `_find_cusps` — cusps as sampled caustic-SPEED minima below a relative
-       threshold, with `_CUSP_WIDTH_SAFETY` and an absolute
-       `_CUSP_MIN_HALFWIDTH = 0.05` floor. A cusp is exactly `|y'(theta)| = 0`,
-       and `y'(theta)` is closed form after step 1, so cusp angles are roots
-       findable to machine precision and the safety factors lose their reason
-       to exist.
-     - `_caustic_inradius` — `min |y(theta)|` over the same cloud; likewise a
-       closed-form minimisation.
-     The MODEL to copy is already in the package: `geometry.r_caustic` samples
-     only to BRACKET, then refines every root with `brentq` to `4*eps`, and
-     says so in its docstring ("bracketing density does not set the returned
-     radius accuracy"); `nearest_caustic_point` uses analytic Newton;
-     `_schwinger._log_derivative` is "in closed form (never a finite
-     difference)".
-     ACCEPTANCE: no constant in `surrogate_training` exists to compensate for
-     a discretization error. Deleting `_CLOUD_MARGIN_FRAC` changes no
-     admission decision, because the distance it corrects is now exact.
 
   8. **Make Part 0 mechanical.** A test asserting that no length-unit float in
      `cogwheel/lensing/` traces to the prior box, and that no live document or
@@ -363,10 +347,10 @@ Tag conventions:
     A sampled estimator or a probe step in that setting is not an
     approximation of the answer, it is a SUBSTITUTE for having derived it,
     and it drags in a step-size constant that then needs its own tuning,
-    safety factor and margin. Three constants died to this in one sitting
-    (F038 `_min_curvature_radius`, F039 `_PROBE_ETA`, and the
-    `_CLOUD_MARGIN_FRAC` family in step 7b). The tell is a constant whose
-    docstring explains a discretization error rather than a physical scale.
+    safety factor and margin. This is why step 1 comes first and is a phase,
+    not a task. The tell is a constant whose docstring explains a
+    discretization error rather than a physical scale — `_CLOUD_MARGIN_FRAC`
+    and `_CUSP_SPEED_REL_FRAC` both do, in as many words.
   - **Never preserve an incumbent number by construction.** Each replaced
     constant gets a measured or derived value; matching the old one is a
     coincidence to report, not a target.
@@ -404,7 +388,7 @@ Tag conventions:
   |---|---|---|---|
   | 1 | Caustic interior, astroid (`gamma < 1`) | interior SACR-C charts | OPEN at the high-gamma CROWN band — `interior_eps_max = 5e-2` was set with crown reachability explicitly UNMEASURED; a P2 pilot recorded 0% pass at eps 3.4 |
   | 2 | Caustic interior, saddle lobes (`gamma > 1`) | `LobeInteriorChart` | CLOSED (shipped `04f9f5c`), except the INTER-LOBE CORRIDOR, which `_lobe_serves` refuses for both lobes — whether the saddle exterior charts pick it up is UNKNOWN |
-  | 3 | Near-caustic shell (fold tubes) | `TubeChart`, `eta in [eta_floor, eta_max]` | OPEN below `gamma = 0.155` — measured, THREE stacked causes (F037), not one. Two bands are SKIPPED by the foot-of-normal guard because `eta_max = 0.05` is ABSOLUTE (the code already computes the right scale and uses it to REFUSE rather than to SCALE) — owned by C6 of [[lensing_caustic_relative_coordinates]]. Two more are DROPPED as topology slivers by `stable_gamma_bands`, which C6 does NOT fix — owned by its step 3b |
+  | 3 | Near-caustic shell (fold tubes) | `TubeChart`, `eta in [eta_floor, eta_max]` | OPEN below `gamma = 0.155` — measured, THREE stacked causes (F037), not one. Two bands are SKIPPED by the foot-of-normal guard because `eta_max = 0.05` is ABSOLUTE (the code already computes the right scale and uses it to REFUSE rather than to SCALE) — owned by C6 of [[lensing_caustic_relative_coordinates]]. Two more are DROPPED as topology slivers by `stable_gamma_bands`, which C6 does NOT fix — those are `_PROBE_ETA` (F039) and close in step 1b, the analytic sweep. Both prerequisites are in the same plan; the row closes only when 1b and C6 have both shipped |
   | 4 | Cusp neighbourhoods | excluded from tubes -> quadrature | OPEN, both parities. Saddle exclusions are WIDER (`_SADDLE_CUSP_WIDTH_SAFETY = 2.5`, min half-width 0.08) because deltoid cusps are shallow and the wedge-edge turnarounds are near-singular |
   | 5 | Exterior far-field | `FarFieldChart` | CLOSED (per-column admission since 8h-b4) |
   | 6-9 | ~~Far annulus `3.0 < \|y\| <= 4.2426`, and its three gamma fences~~ | — | **DISSOLVING — do not work these rows.** All four existed only because `\|y\| = 3` (the PRIOR BOX half-width) was treated as a physical boundary. F036 measures that no `\|y\|` threshold can bound the caustic at all: `r_caustic` diverges at the parity wall (19.8 at `gamma = 0.99` vs a 4.2426 box corner). `GAMMA_FENCE = 3/4` and the saddle fence `1.0502342` are CONSEQUENCES of the annulus radius, not independent physics, and are deleted with it. These four rows collapse into ONE caustic-relative exterior region. See [[lensing_caustic_relative_coordinates]] |

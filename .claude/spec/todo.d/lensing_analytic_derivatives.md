@@ -2,11 +2,16 @@
 section: Backlog
 ---
 
-- **RETIRE THE GRATUITOUS NUMERICAL DERIVATIVES** `[→ spec]` — the
-  Chang-Refsdal geometry is closed form end to end, yet five places compute its
-  derivatives by differencing or sampling. One of them is on the SERVING path.
-  Each imports a step-size or threshold constant that then grows its own safety
-  factor, and each is a substitute for an algebra step nobody took.
+- **RETIRE THE GRATUITOUS NUMERICAL DERIVATIVES** `[→ spec]` — **this is STEP 1
+  of [[lensing_caustic_relative_coordinates]]**, and runs before every
+  coordinate change in it. That fragment carries the ordering and the reason it
+  is first; this one carries the inventory, the rule, and the protected list.
+  Builds 1a / 1b / 1c there map onto the targets below.
+
+  The Chang-Refsdal geometry is closed form end to end, yet five places compute
+  its derivatives by differencing or sampling. One of them is on the SERVING
+  path. Each imports a step-size or threshold constant that then grows its own
+  safety factor, and each is a substitute for an algebra step nobody took.
 
   ## The rule, stated precisely — this matters more than the list
 
@@ -35,8 +40,8 @@ section: Backlog
   ## The actual targets (surveyed 2026-07-29)
 
   All four compute derivatives of `geometry.critical_point`'s closed form, and
-  all four fall out of the SAME analytic cascade that step 1 of
-  [[lensing_caustic_relative_coordinates]] introduces. Do that step first.
+  all four fall out of the SAME cascade, which is why build 1a exports `y'` and
+  `y''` themselves rather than only the scalars derived from them.
 
   1. **`_pearcey_cusp._cusp_vertex` — SERVING PATH, highest priority.** Finds
      the cusp vertex by computing caustic speed with a hardcoded central
@@ -57,9 +62,11 @@ section: Backlog
      docstring already concedes the threshold had to be relative "because the
      measured dip depth scales as ~caustic_size/n_samples" — a sampling
      artifact, described as if it were physics.
-  4. **`surrogate_training._probe_arc_side` / `_PROBE_ETA`** — F039; tracked as
-     step 3b of the coordinate plan, listed here for completeness because it is
-     the same cascade (`D2y[e,e]`).
+  4. **`surrogate_training._probe_arc_side` / `_PROBE_ETA`** — F039. An
+     absolute `0.05` step decides which side of a fold carries the image pair,
+     and the answer moves with the step. Analytic replacement is `D2y[e,e]`,
+     the same cascade as the rest. Build 1b, alongside the other
+     training-path consumers.
 
   Already correct, and the model to copy: `geometry.r_caustic` samples only to
   BRACKET and refines every root with `brentq` to `4*eps`;
