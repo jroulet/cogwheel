@@ -33,9 +33,10 @@ section: Backlog
      `surrogate_training._min_curvature_radius`, evaluated AT a point rather
      than minimised over a band. It belongs in `geometry` because the caustic
      does; re-express the band-min as a thin wrapper.
-     ACCEPTANCE: matches an mpmath high-dps curvature oracle to 1e-8 (sympy is
-     NOT in the env; the small-gamma astroid limit `R_c -> 3*gamma*|sin 2th|`
-     is a scale/sign check only, good to 4.4e-5 — F038). The rewritten band-min
+     ACCEPTANCE: matches an independent symbolic/high-dps curvature oracle
+     (sympy 1.14.0 and mpmath 1.3.0 are both in the env) to 1e-8; the
+     small-gamma astroid limit `R_c -> 3*gamma*|sin 2th|` is a scale/sign
+     check only, good to 4.4e-5 — F038. The rewritten band-min
      does NOT reproduce the incumbent: F038 measures the circumradius estimator
      biased HIGH by 4.9-9.6% on production bands, because a three-point stencil
      cannot reach the arc endpoints where the true minimum sits. Assert instead

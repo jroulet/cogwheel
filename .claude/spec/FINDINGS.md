@@ -2142,8 +2142,10 @@ production band, so the swap is behaviour-preserving where it is actually read.
 The exact value is SMALLER, i.e. the guard becomes marginally more willing to
 skip — the conservative direction.
 
-**mpmath is the oracle; sympy is NOT installed** in the project env
-(`SDK_CONDA_ENV = cogwheel-newlal`, mpmath 1.3.0). The small-`gamma` astroid
+**Oracles available in the project env** (`SDK_CONDA_ENV = cogwheel-newlal`,
+read from the repo-root `.env`): mpmath 1.3.0 and sympy 1.14.0 (installed
+2026-07-29 for exactly this — symbolic differentiation of the caustic
+parametrization). The small-`gamma` astroid
 limit `R_c -> 3 * gamma * |sin 2 theta|` is a second, fully analytic check: it
 agrees with the mpmath oracle to 4.4e-5 at `gamma = 1e-3`, degrading as
 `O(gamma^2)` (1.2e-2 at `gamma = 1e-2`), so it pins scale and sign but is not
