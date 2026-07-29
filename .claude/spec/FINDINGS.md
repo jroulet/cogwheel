@@ -2099,18 +2099,48 @@ the sweep does not help, so band bisection recurses to the `min_gamma_band`
 floor and drops the sliver. Whatever is wrong is in the served-side detection
 at small gamma, not in how finely it is sampled.
 
-## F038 — `_min_curvature_radius` is biased HIGH by 5-10%: a three-point stencil cannot reach the arc endpoints (2026-07-29)
+## F038 — the caustic curvature radius is a CLOSED FORM; the sampled circumradius estimator was never necessary (2026-07-29)
 
-**Where:** `surrogate_training._min_curvature_radius`
-(`cogwheel/lensing/surrogate_training.py`).
+**SCOPE.** The durable content is the closed form and its verification
+envelope. The bias measurement further down describes
+`surrogate_training._min_curvature_radius` AS IT STANDS TODAY and expires when
+step 1 of [[lensing_caustic_relative_coordinates]] deletes that estimator; it
+is kept because it is why the step-1 acceptance is worded as it is, not
+because it is open work. Nothing here needs fixing beyond shipping step 1.
 
-The estimator takes three-point circumradii over a sampled arc and minimises
-them. The minimum of the true curvature radius on a fold arc sits at an arc
-ENDPOINT (curvature is worst toward the trimmed cusp windows), and a
-three-point stencil's first usable centre is one sample step inside the
-endpoint. The reported minimum is therefore the curvature radius one step in
-from where the true minimum lives, biased HIGH, converging only at FIRST order
-in the sample spacing:
+**The closed form.** The caustic is an exact parametric curve `y(theta)`, so
+its curvature radius is an exact function of `(gamma, theta, kappa, branch)`:
+differentiate the closed form, do not sample it. Chain rule through
+`u -> r -> y`, then `R_c = |y'|^3 / |y1' y2'' - y2' y1''|`. `beta` is a rigid
+rotation and curvature is rotation-invariant, so
+`R_c(theta; beta) = R_c(theta - beta; 0)`. Derived 2026-07-29: about 25 lines
+of plain numpy, vectorised over `theta`, no new runtime dependency,
+numba-compatible.
+
+**Verification envelope.** Worst relative disagreement against an independent
+mpmath 40-dps numerical-differentiation oracle, over 42 cases — `gamma` in
+{0.05, 0.3, 0.9, 0.99, 1.02, 1.3}, both branches, `kappa` in {0, 0.3}, `theta`
+in {0.02, 0.17, 0.5, 1.0, 1.3, 2.2, 3.9}, i.e. including near-axial angles,
+the saddle `-1` branch, and `gamma = 0.99` where `R_c = 1145`: **4.4e-13**.
+The small-`gamma` astroid limit `R_c -> 3*gamma*|sin 2 theta|` is a second,
+independent scale-and-sign check, good to 4.4e-6..1.2e-4 at `gamma = 1e-4` and
+degrading as `O(gamma^2)`; it is NOT a 1e-12 gate.
+
+**Why this entry exists at all: the method was the bug, not a constant.** The
+plan's Part 0 discipline — for every length-unit float, ask what sets it — was
+applied here to a METHOD, and the answer was never "a finite difference". The
+first draft of step 1 proposed relocating the estimator into `geometry` and
+gating it against a symbolic curvature. That inverts the roles: it ships an
+approximation and uses the exact answer as its oracle. Owner caught it. The
+estimator is DELETED, not relocated.
+
+**What the incumbent does, and why its numbers must not become a gate.** The
+estimator takes three-point circumradii over a sampled arc and minimises them.
+The minimum of the true curvature radius on a fold arc sits at an arc ENDPOINT
+(curvature is worst toward the trimmed cusp windows), and a three-point
+stencil's first usable centre is one sample step inside the endpoint. So it
+reports the curvature one step in from where the minimum lives — biased HIGH,
+converging only at FIRST order in the sample spacing:
 
 | samples over a quarter-arc | rel. excess over exact |
 |---|---|
@@ -2119,11 +2149,8 @@ in the sample spacing:
 | 400 | 7.4% |
 | 800 | 3.7% |
 
-On PRODUCTION arcs (cusp windows already trimmed by
-`band_caustic_structure`, so the endpoints sit further from the cusps) the bias
-is much milder — measured against an mpmath 40-dps oracle
-`R_c = |y'|^3 / |y1' y2'' - y2' y1''|` on the exact `critical_point`
-parametrization:
+On PRODUCTION arcs (cusp windows already trimmed by `band_caustic_structure`,
+so the endpoints sit further from the cusps) the bias is milder:
 
 | band | circumradius | exact | excess |
 |---|---|---|---|
@@ -2132,40 +2159,21 @@ parametrization:
 | (0.65, 0.75) | 0.46892 | 0.44167 | 6.2% |
 | (0.85, 0.95) | 0.78344 | 0.74692 | 4.9% |
 
-**RESOLUTION: there is no estimator to port. `R_c` is a CLOSED FORM.** The
-caustic is an exact parametric curve `y(theta)`, so its curvature radius is an
-exact function of `(gamma, theta, kappa, branch)` — differentiate the closed
-form analytically rather than sampling it. Derived and verified 2026-07-29:
-about 25 lines of plain numpy (chain rule through
-`u -> r -> y`, then `R_c = |y'|^3 / |y1' y2'' - y2' y1''|`), vectorised over
-`theta`, no new dependency, numba-compatible. Worst relative disagreement
-against an independent mpmath 40-dps numerical-differentiation oracle over 42
-cases spanning both parities, both branches, `kappa = 0.3`, near-axial
-`theta = 0.02`, and `gamma = 0.99` where `R_c = 1145`: **4.4e-13**.
+Once the band minimum runs over exact values the endpoints are evaluable and
+this bias does not arise — there is no `n_samples`-dependent excess left to
+document or tolerate.
 
-So the whole three-point-circumradius question is moot: the estimator is
-DELETED, not relocated with a looser acceptance. The band minimum becomes a
-minimum over exact values, which also removes the endpoint bias above
-outright (endpoints are now evaluable, so no `n_samples`-dependent excess
-remains). This is the plan's own Part 0 discipline applied to a method rather
-than a constant: ask what actually sets the number, and the answer was never
-"a finite difference".
+**Consequence for step 1.** Do NOT assert byte-identity with the incumbent,
+and do NOT assert the 5-10% margin either — both enshrine a discretization
+artifact. The gate is 1e-12 against an independent oracle. The one behavioural
+claim worth pinning is that the consumer decision `eta_max > 0.5 * r_min`
+flips on NO production band — verified for `(0.25,0.35)`, `(0.45,0.55)`,
+`(0.65,0.75)`, `(0.85,0.95)` and the small-gamma bands `(0.0281,0.0462)`,
+`(0.0644,0.0825)`, `(0.0825,0.1550)`, `(0.1550,0.3000)`. The exact value is
+SMALLER than the incumbent, i.e. the guard becomes marginally more willing to
+skip — the conservative direction.
 
-**Consequence for step 1 of [[lensing_caustic_relative_coordinates]].** Do NOT
-assert byte-identity, and do NOT assert the 5-10% margin either. The gate is
-agreement with an independent oracle at 1e-12. The one behavioural claim worth
-pinning is that the consumer decision `eta_max > 0.5 * r_min` flips on NO
-production band — verified for `(0.25,0.35)`, `(0.45,0.55)`, `(0.65,0.75)`,
-`(0.85,0.95)` and the small-gamma bands `(0.0281,0.0462)`, `(0.0644,0.0825)`,
-`(0.0825,0.1550)`, `(0.1550,0.3000)`. The exact value is SMALLER than the
-incumbent, i.e. the guard becomes marginally more willing to skip — the
-conservative direction.
-
-**Oracles available in the project env** (`SDK_CONDA_ENV = cogwheel-newlal`,
-read from the repo-root `.env`): mpmath 1.3.0 and sympy 1.14.0 (installed
-2026-07-29 for exactly this — symbolic differentiation of the caustic
-parametrization). The small-`gamma` astroid
-limit `R_c -> 3 * gamma * |sin 2 theta|` is a second, fully analytic check: it
-agrees with the mpmath oracle to 4.4e-5 at `gamma = 1e-3`, degrading as
-`O(gamma^2)` (1.2e-2 at `gamma = 1e-2`), so it pins scale and sign but is not
-a 1e-8 gate.
+**Env note.** `SDK_CONDA_ENV = cogwheel-newlal` (from the repo-root `.env`)
+carries mpmath 1.3.0 and sympy 1.14.0. mpmath produced the envelope above.
+sympy is fine for deriving, but `lambdify` of the UNSIMPLIFIED second
+derivative of this expression runs for minutes — simplify or `cse` first.
