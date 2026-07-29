@@ -70,14 +70,32 @@ section: Backlog
         the distance it corrected is now exact. Do NOT assert byte-identity
         with any incumbent estimator — that enshrines its discretization.
 
-     1c. **The serving path.** `_pearcey_cusp._cusp_vertex` locates a cusp by
-        differencing caustic speed at a hardcoded `delta = 1e-4` over a
-        129-point scan plus a golden-section refine. A cusp is `|y'| = 0`, a
-        root. Separate build because it SERVES: it needs the F016 envelope
-        bar, not just a geometry tolerance.
+     1c. **The serving path, plus third order.** `_pearcey_cusp._cusp_vertex`
+        locates a cusp by differencing caustic speed at a hardcoded
+        `delta = 1e-4` over a 129-point scan plus a golden-section refine. A
+        cusp is `|y'| = 0`, a root. Separate build because it SERVES: it needs
+        the F016 envelope bar, not just a geometry tolerance.
+        Extend `caustic_derivatives` to `y'''` in this same build — it is the
+        cusp build, and F040 shows the cusp-exclusion half-width is
+        `w^{-1/4}` with coefficients in `|y''|` and `|y'''_perp|`. Third order
+        closes the set: location (`y' = 0`), fold direction (`y''`) and width
+        (`y'''`) then all come from one Taylor tail, and nothing in the
+        caustic geometry is estimated rather than derived.
         ACCEPTANCE: served Pearcey values unchanged to the F016 bar; cusp
         angles pinned to the analytic root at 1e-10; O(1) geometry calls per
-        serve instead of ~258.
+        serve instead of ~258; `y'''` verified against the same two-stage
+        oracle at the F038 tolerance.
+
+     1d. **`_WEDGE_EPS = 1e-3` — derivable, not round.** At the macro-saddle
+        wedge edge the two branches meet and `|y''|` diverges as
+        `Δθ^{-3/2}` (measured 2026-07-29: 1.3e4 at `Δθ = 1e-3`, 4.0e8 at
+        1e-6, 4.0e17 at 1e-12). `_WEDGE_EPS` is the absolute angular standoff
+        that keeps every sampler off that singularity, and its correct value
+        follows from the conditioning bound, `Δθ >= |y''|_max^{-2/3}`, not
+        from a round number. `caustic_derivatives` already REFUSES by name
+        exactly at the edge, so this is about sampling margin, not safety.
+        ACCEPTANCE: `_WEDGE_EPS` is derived from a stated `|y''|` ceiling, or
+        deleted in favour of the refusal.
 
   2. **DRIVER MEASUREMENT — the tube fraction.** Sweep held-out envelope eps
      against the DIMENSIONLESS `eta / R_c`, across gamma, both parities. Find
