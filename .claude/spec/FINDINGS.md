@@ -1530,6 +1530,24 @@ the geometric serve report relative error exactly `1.000e+00` against
 `_oracle_fop` — the oracle is the outlier, not the thing under test. So the
 one candidate reference the suite owns is invalid exactly where the arms live.
 
+**The mechanism is TRUNCATION, not cancellation** (a first write-up of this
+finding said cancellation; that was wrong and is corrected here). Measured
+`max|term| / |total|` is only `0.61` and `0.77` at those two configs — no
+catastrophic cancellation at all. What happens instead is that the operator
+series never satisfies its own convergence criterion within
+`ORACLE_MAX_ORDER = 100`, and the loop then FELL OUT and returned the
+truncated partial sum as though it were a reference. There was no
+convergence flag, so no caller could tell a converged answer from a
+truncated one.
+
+**Fixed.** `_oracle_fop` now raises `OracleConvergenceError` instead of
+returning a truncation — the certified-or-refuse contract the production
+code obeys everywhere and the test oracle did not. An oracle that fails
+silently is worse than no oracle: it converts "we cannot check this" into a
+confident false comparison. Blast radius measured before the change: 1 node
+of 39 across the two production bands (`CERT_LS` 17/17 converged,
+`XOR_BAND_LS` 21/22, only `L = 59.4` truncating).
+
 **Consequence.** The uniform arms are UNFALSIFIABLE by the current suite in
 their own serving regime. Every accuracy claim about them is additionally
 gated behind `COGWHEEL_BRUTE_ACCURACY`, which by policy never runs in a build
@@ -1542,8 +1560,8 @@ consistency gate between two independent reconstructions at moderate `L`, and
 it stops the routing regressing silently. It does NOT reach the arms.
 
 **What is still owed.** A reference valid at `L ~ 100-200`. The Schwinger
-quadrature refuses there by frequency; the operator series diverges there by
-cancellation. Candidates not yet tried: direct high-dps numerical evaluation
+quadrature refuses there by frequency; the operator series fails to converge
+there. Candidates not yet tried: direct high-dps numerical evaluation
 of the diffraction integral at a handful of anchor configs, or a stationary-
 phase-plus-correction reference with an independently bounded remainder. Until
 one exists, any statement that the uniform arms are accurate is unverified —

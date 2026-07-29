@@ -366,6 +366,16 @@ def _oracle_operator_step(state):
     return {key: value for key, value in new.items() if value}
 
 
+class OracleConvergenceError(RuntimeError):
+    """The mpmath operator-series oracle did not converge.
+
+    Raised instead of returning a truncated partial sum. An oracle that
+    silently returns a wrong number is worse than no oracle: it converts
+    "we cannot check this" into a confident false comparison, which is
+    exactly how F028 survived and how it was twice misdiagnosed (F030).
+    """
+
+
 def _oracle_fop(w, y, gamma, beta=0.0, kappa=0.0,
                 max_order=ORACLE_MAX_ORDER):
     """INDEPENDENT wave-optics amplification ``F(w)`` at oracle
@@ -408,6 +418,7 @@ def _oracle_fop(w, y, gamma, beta=0.0, kappa=0.0,
         state = {(0, 0): 1}
         factorial = mpmath.mpf(1)
         small = 0
+        converged = False
         for n in range(max_order + 1):
             if n:
                 factorial *= n
@@ -417,9 +428,29 @@ def _oracle_fop(w, y, gamma, beta=0.0, kappa=0.0,
             if n >= 4 and abs(term) <= mpmath.mpf('1e-24') * abs(total):
                 small += 1
                 if small >= 3:
+                    converged = True
                     break
             else:
                 small = 0
+
+        # CERTIFIED-OR-REFUSE, the same contract production obeys. Without
+        # this the loop simply fell out at `max_order` and returned the
+        # TRUNCATED sum, indistinguishable from a converged one -- an oracle
+        # that fails silently, which is the one behaviour this codebase
+        # refuses everywhere else. Measured 2026-07-29: at the F028 configs
+        # (L ~ 100-200) the series never converges, and the truncated value
+        # is so wrong that BOTH the uniform arm and the geometric serve
+        # report relative error 1.000e+00 against it -- the oracle is the
+        # outlier. That silent failure cost two wrong diagnoses before it
+        # was caught. Cost of the guard: 1 node of 39 across the two
+        # production bands (L = 59.4).
+        if not converged:
+            raise OracleConvergenceError(
+                f'the operator-series oracle did not converge at w={w!s}, '
+                f'y=({y[0]!r}, {y[1]!r}), gamma={gamma!r}, kappa={kappa!r} '
+                f'within max_order={max_order}: the partial sum is a '
+                f'TRUNCATION, not a reference, and must not be compared '
+                f'against. This regime needs a different oracle (F030).')
 
         value = ((1 / lam)
                  * mpmath.e ** (0.5j * w * mpmath.log(lam)
@@ -785,7 +816,14 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
                 continue
             above = w > W_CEILING_SCHWINGER
             rtol = GEOMETRIC_SERVE_RTOL if above else FOP_RTOL
-            reference = _oracle_fop(w, y, CERT_GAMMA)
+            try:
+                reference = _oracle_fop(w, y, CERT_GAMMA)
+            except OracleConvergenceError:
+                # No reference exists at this node, so there is nothing to
+                # compare against. Skipping is the honest outcome; the
+                # non-vacuity assertions below ensure the whole band cannot
+                # skip silently. (Measured: only L = 59.4 lands here.)
+                continue
             error = abs(value - reference) / abs(reference)
             with self.subTest(L=float(cancellation_l), w=w, above=above):
                 self.n_checks += 1
