@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.27.1` (2026-07-29): 
+- `0.28.1` (2026-07-29): 
 ### Microlensing SPEC rows rewritten to current truth only
 
 The engine and sampling-layer rows had accreted build-by-build narrative:
@@ -33,7 +33,7 @@ Corrected, not merely trimmed:
   `_certify_geometric_census` is named as NOT covering the near-caustic tail,
   which is the reason the leg exists.
 
-- `0.27.0` (2026-07-29): 
+- `0.28.0` (2026-07-29): 
 ### Legacy operator-series contraction fully retired; `CancellationError` deleted; `select_branch` gains an eta (distance-to-caustic) leg
 
 SPEC.md described the shear-free `gamma' == 0` point-lens exit as still running
@@ -61,7 +61,7 @@ only, so its boundary is not inherited unmeasured).
 (a parameter default threaded through `F_op`/`F_op_grid`/`ChangRefsdalChannels`
 but not consumed by any surviving series) and SPEC.md never named it directly.
 
-- `0.26.0` (2026-07-29): 
+- `0.27.0` (2026-07-29): 
 ### Fold arm gains a caustic-relative admission fence; the macro-saddle eta leg is live too
 
 SPEC.md described the uniform fold Airy arm (F028: measured 60%-267% wrong on
@@ -86,7 +86,7 @@ measured). `_saddle_grid` now measures `eta` via `nearest_caustic_point`
 once per grid and passes it through `select_branch`; the eta leg is live on
 both parities, each independently measured.
 
-- `0.25.0` (2026-07-29): 
+- `0.26.0` (2026-07-29): 
 ### Serving ladder: one authoritative geometric-vs-wave gate; arms and geometric branch are NOT certified
 
 Both operator grids now route the geometric-vs-wave decision through
@@ -102,6 +102,23 @@ above-ceiling positive-parity nodes are served by geometric optics instead.
 Added F029's finding that the geometric branch is not certified either: a
 residual ~1% O(1) tail (p99 7.1e-1, max 74) controlled by distance to the
 caustic, which `_certify_geometric_census` does not catch.
+
+- `0.25.0` (2026-07-29): 
+### `geometry.py` gains analytic caustic derivatives (backward-compatible)
+
+Four new public functions in `cogwheel/lensing/chang_refsdal/geometry.py`,
+beside `r_caustic`: `caustic_derivatives` (analytic first and second
+theta-derivatives of the closed-form caustic curve, `(y', y'')`),
+`caustic_speed` (`|y'|`, vanishes exactly at cusps), `caustic_curvature_radius`
+(`|y'|**3 / |y1'y2'' - y2'y1''|`), and `fold_opening_direction` (unit
+`D2y[e,e]`, pointing to the two-image side of a fold). All four differentiate
+the exact parametric caustic curve directly -- no finite difference, no
+`np.gradient`, no sampled-arc stencil.
+
+They add to the module's public surface without replacing anything: the
+numerical estimators they will eventually retire (`_min_curvature_radius`,
+`_branch_speed_profile`, `_find_cusps`, `_probe_arc_side`, `_cusp_vertex`)
+remain in place, pending later builds.
 
 - `0.24.0` (2026-07-28): 
 ### Macro-saddle per-lobe interior charts are now servable

@@ -111,6 +111,14 @@ Tag conventions:
   all four fall out of the SAME cascade, which is why build 1a exports `y'` and
   `y''` themselves rather than only the scalars derived from them.
 
+  **Extend the cascade to `y'''` (build 1a-bis or folded into 1b).** F040
+  shows the cusp-exclusion half-width is not a measurement either: it is
+  `w^{-1/4}` with coefficients in `|y''|` and `|y'''_perp|`. 1a delivers only
+  the first two orders, so the third is owed before any cusp-window work. The
+  same Taylor tail also supplies the cusp LOCATION (`y' = 0`) and the fold
+  direction (`y''`), so third order closes the set: after it, no quantity in
+  this package's caustic geometry is estimated rather than derived.
+
   1. **`_pearcey_cusp._cusp_vertex` — SERVING PATH, highest priority.** Finds
      the cusp vertex by computing caustic speed with a hardcoded central
      difference `delta = 1e-4`, scanning 129 thetas over a `pi` window (~258
@@ -230,17 +238,17 @@ Tag conventions:
      mean re-opening finished steps; doing it first means every later
      acceptance is stated against exact geometry.
 
-     1a. **The cascade in `geometry`.** Analytic `y'(theta)`, `y''(theta)` for
-        the closed-form caustic, and on top of them
-        `caustic_curvature_radius`, caustic speed `|y'|`, and the fold-opening
-        direction `D2y[e,e]`. EXPORT THE DERIVATIVES, not only the derived
-        scalars — four separate consumers need `y'` itself.
-        ACCEPTANCE: 1e-12 against an independent high-precision oracle
-        (measured 4.4e-13 over 42 cases, F038) on both parities and branches,
-        including `kappa != 0`, near-axial `theta` and near the parity wall;
-        the astroid limit `R_c -> 3*gamma*|sin 2th|` holds to its own
-        `O(gamma^2)`; the fold direction agrees with a well-conditioned image
-        count (F039 measured 31/32, the miss being the COUNTER).
+     1a. **DONE (2026-07-29, commit `1a82046`).** Shipped as `geometry.py`'s
+        `caustic_derivatives` (`y'`, `y''`), `caustic_speed`, and
+        `fold_opening_direction`; `caustic_curvature_radius` derived from
+        `caustic_derivatives` per the acceptance below. Measured against a
+        two-stage oracle (F038's single-stage version was circular): `y'`
+        worst relative 4.39e-13, `y''` worst relative 2.56e-14, 0 failures at
+        atol=5e-13 + rtol=1e-11 over 110 configs on both parities and
+        branches, including `kappa != 0`, near-axial `theta` and near the
+        parity wall; fold direction 16/16 to the correct side, unit to 1e-12;
+        `|y'|` at the astroid cusp = 1.3e-16 (cusps are now exact roots). See
+        `completed.d/2026-07-29_analytic_caustic_derivatives_1a.md`.
 
      1b. **The training-path consumers.** Retire, against 1a:
         `_min_curvature_radius`'s three-point circumradius and its
