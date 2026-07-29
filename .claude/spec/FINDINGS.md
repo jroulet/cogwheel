@@ -2117,12 +2117,50 @@ rotation and curvature is rotation-invariant, so
 of plain numpy, vectorised over `theta`, no new runtime dependency,
 numba-compatible.
 
-**Verification envelope.** Worst relative disagreement against an independent
-mpmath 40-dps numerical-differentiation oracle, over 42 cases — `gamma` in
-{0.05, 0.3, 0.9, 0.99, 1.02, 1.3}, both branches, `kappa` in {0, 0.3}, `theta`
-in {0.02, 0.17, 0.5, 1.0, 1.3, 2.2, 3.9}, i.e. including near-axial angles,
-the saddle `-1` branch, and `gamma = 0.99` where `R_c = 1145`: **4.4e-13**.
-The small-`gamma` astroid limit `R_c -> 3*gamma*|sin 2 theta|` is a second,
+**The radial weight is `p_i = M_ii - lam*u`, NOT `M_ii - u`.** Componentwise
+`y_i = p_i * r * T_i` with `T = (cos, sin)` and `1/r^2 = lam*u`. The two forms
+coincide only at `kappa = 0`, where `lam = 1`. At `kappa = 0.3` they differ by
+0.19-0.39 in absolute source-plane position — not a tolerance issue, a wrong
+curve.
+
+**THE FIRST VERIFICATION OF THIS FINDING WAS CIRCULAR, AND THAT IS THE MOST
+REUSABLE THING IN IT.** The original envelope was measured with an mpmath
+oracle that RE-TRANSCRIBED the caustic curve from the same (wrong) formula the
+implementation used. It therefore checked the DIFFERENTIATION against a shared
+CURVE error, agreed to 1e-16, and certified nothing at `kappa != 0`. The error
+surfaced only when a build's Coder cross-checked the sign against
+`critical_point`'s own `source = macro_matrix @ image - image / radius**2`
+instead of trusting the transcription handed to it.
+
+An oracle for a derived quantity must therefore be TWO-STAGE:
+
+    STAGE 1  validate the transcribed curve against the shipping code's own
+             output (`critical_point(...).source`) at float64
+    STAGE 2  differentiate THAT validated curve at high precision
+
+Stage 1 catches curve errors, stage 2 catches differentiation errors, and
+neither can mask the other. "Sharing the curve definition is not circular" is
+true ONLY once stage 1 has pinned the definition to shipping code.
+
+**Verification envelope, re-measured against the two-stage oracle** over 110
+configs — `gamma` in {0.05, 0.3, 0.9, 0.99, 1.02, 1.3}, both branches, `kappa`
+in {0, 0.3}, `theta` in {0.02, 0.17, 0.5, 1.0, 1.3, 2.2, 3.9}: stage 1 agrees
+to **5.14e-15**; the analytic cascade then agrees to **4.39e-13 on `y'`** and
+**2.56e-14 on `y''`**, ZERO failures at `atol = 5e-13 + rtol = 1e-11`.
+
+Use that MIXED tolerance, never a flat relative one: near-axial `theta = 0.02`
+and the saddle `-1` branch legitimately send individual components through
+zero, where a pure relative gate false-fails on noise.
+
+**Two oracle-construction traps, both of which go COMPLEX rather than fail
+loudly.** `critical_point` CLAMPS a slightly-negative saddle discriminant to
+zero, and it IGNORES `branch` at positive parity (only the `+` root is a
+positive radius there). An oracle that mirrors neither produces `mpc` values;
+an IMPLEMENTATION that mirrors neither produces `nan` from
+`sqrt(negative)` at positive parity with `branch = -1`, silently violating the
+whole-call refusal contract.
+
+The small-`gamma` astroid limit `R_c -> 3*gamma*|sin 2 theta|` is a further
 independent scale-and-sign check, good to 4.4e-6..1.2e-4 at `gamma = 1e-4` and
 degrading as `O(gamma^2)`; it is NOT a 1e-12 gate.
 
