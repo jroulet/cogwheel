@@ -115,6 +115,12 @@ shallow:
 - Tests live in `cogwheel/tests/` (stdlib `unittest`), **not** a top-level `tests/`.
 - Run: `python -m pytest cogwheel/tests/ -v` (or `python -m unittest discover -s cogwheel/tests`).
 - New tests go beside the suite in `cogwheel/tests/`. Cover numerical-accuracy paths with tolerance-based assertions.
+
+### Assert VALUES, not code paths
+- A test should assert **what the answer is**, against an oracle and a tolerance — not **which branch produced it**. Value claims survive refactors and catch bugs; structural claims break on every refactor and catch nothing.
+- Each routing decision gets **ONE canonical pin**, in the file that owns the predicate. Do not re-assert the same decision in every consumer suite. `test_lensing_operator.py::test_thresholds_have_one_home` is the model.
+- Before adding a test that asserts a served path, an exception type, or an internal call, ask: *if this code were wrong but still took this path, would this test fail?* If no, write the value assertion instead.
+- MEASURED COST (2026-07-29): the `select_branch` decision was pinned in 16 test methods across 6 files and `SchwingerCertificationError` identity in 32 methods across 10. Changing two branch conditions therefore re-pointed eight files over three revision rounds — about two-thirds of that build's wall clock — and none of those tests had caught the two real defects (F028, F029), because every one of them asserted the path rather than the number.
 - Conda env is machine-specific: set `SDK_CONDA_ENV` in untracked `.env` (copy `.env.example`); default `cogwheel_310`.
 
 ### Test tiers
