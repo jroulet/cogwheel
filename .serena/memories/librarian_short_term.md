@@ -1,72 +1,82 @@
-## 2026-07-29 post-commit sync (backlog through d61b893) — final
+## 2026-07-29 post-commit sync — retired operator series / eta gate (commits 16f7ec0..4318dab)
 
-Scope: 6 queued commits in .claude/sync_issues.json (3fe5b96, d0aadf7,
-f0cb9dd, a9a1374, 0eddcad, d61b893). Outcome: no doc-surface fixes
-needed — everything already synced by the driver/prior builds. Verified
-each claim rather than trusting it:
+Scope: 5 of 6 queued commits in .claude/sync_issues.json were test-only or
+FINDINGS-only (16f7ec0, c7d2cff, 27f5cda skip per rule; 53d3d36 was already
+committed by a prior session). The two with real cogwheel/ production diffs:
+c1a552f (shear-free gamma'==0 exit moved off the legacy series onto a closed
+form) and 4318dab (eta/distance-to-caustic leg added to `select_branch`;
+`CancellationError` class deleted entirely; routing-pin consolidation).
 
-- SPEC.md's Build 8e text: confirmed already rewritten in 0eddcad
-  ("CORRECTED by the authoritative-gate build", one-home `select_branch`
-  predicate documented).
-- FINDINGS.md F027: already stated the parity-independent rationale
-  BEFORE f0cb9dd; that commit only synced the channels.py code comment
-  to match (confirmed current docstring ~L1456-1480 cites F027
-  correctly). No FINDINGS edit was ever needed despite f0cb9dd touching
-  no doc file.
-- d0aadf7's code diff (_born.py/channels.py/surrogate_census.py/
-  test_lensing_born.py) is not new content — a driver `git add -A`
-  swept the live Born-carrier build's files into this spec commit while
-  it was still running (explained in f0cb9dd's own message); the real
-  doc sync for that feature landed earlier in 416558d
-  ("docs: update documentation after build" — confirmed via `git show
-  --stat` it already touched SPEC.md/TODO.md/CHANGELOG.md).
-- COVERAGE_DESIGN.md (new file, d0aadf7): standalone spec analysis doc,
-  not in the Knowledge Anchoring list, not cross-linked from SPEC.md —
-  confirmed SPEC.md has no "related docs" section linking sibling
-  spec/*.md at all, so the absence is not staleness.
-- todo.d/lensing_fold_arm_serves_wrong_values.md: already marks
-  "defect 1 of 2 (admission routing) CLOSED by the authoritative-gate
-  build" — reflects 0eddcad, not stale.
-- sync_derived_docs.py clean except pre-existing advisory noise (4
-  test-only consumers of lens_amplification_surrogate not in
-  DATA_CONTRACTS.yaml — Build 8a surrogate, unrelated to this window;
-  test-only consumers conventionally stay off per prior sessions).
-- docs/source/**: zero hits for uniform-arm/select_branch/Pearcey/8e —
-  overview.rst stays architecture-level; no docs/source file touched
-  this window so no Sphinx rebuild needed.
+STALENESS FOUND AND FIXED (SPEC.md, .claude/spec/SPEC.md, 8 targeted edits in
+the single giant "Microlensing engine" table row):
+1. Limitations bullet still described "wave-branch contraction... L in
+   [~30,48] certified-or-refused... CancellationError" as CURRENT — that
+   framing predates even Build 8d and describes a mechanism (the legacy
+   dd/1F1 series as a live wave evaluator) that no longer exists at all.
+   Rewrote to name the actual current ceiling/refusal (Schwinger quadrature,
+   `w<=60`, `SchwingerCertificationError`) and added the eta leg.
+2. HOMOGENIZATION (Build 8d) paragraph said the legacy series was "DEMOTED to
+   the shear-free exit" with "CancellationError/F005 unchanged there" — true
+   as of 8d, false after c1a552f (that exit itself now runs a closed form,
+   not the series) and false after 4318dab (CancellationError deleted).
+3. ENGINE HARDENING (Build 7a) point (2), a "cross-parity fallback... routes
+   CancellationError refusals" — historical narrative, left the sentence
+   intact (matches this doc's own precedent of preserving build history) but
+   appended a SUPERSEDED-by-8d/CancellationError-retirement note rather than
+   deleting it.
+4. Two "named refusal vocabulary" lists (LensedPosterior's refusal net, in
+   two different rows) both still listed `CancellationError` as live —
+   deleted from both.
+5. ONE-HOME PREDICATE / UNIFORM-ASYMPTOTIC SERVING paragraph's `select_branch`
+   description ("resolved AND L > L_MAX") was missing the third (eta) leg
+   4318dab added — this is the SAME select_branch SPEC already documents
+   elsewhere, so the omission would have made SPEC self-inconsistent, not
+   just outdated. Added the eta leg + FINDINGS F031 pointer in both the
+   serving-ladder sentence and the F029-tail sentence (F031 is F029's fix).
+   Also noted the saddle now passes `eta = inf` alongside its existing
+   infinite cancellation exponent (F031 is positive-parity-only evidence).
 
-GIT MECHANICS GOTCHA (new, worth remembering): found unrelated
-already-staged content in the index at session start — TODO.md render,
-new fragment .claude/spec/todo.d/tests_consolidate_duplicate_routing_pins.md,
-and an AGENTS.md/CLAUDE.md addition ("Assert VALUES, not code paths").
-Confirmed scripts/sync_derived_docs.py's check_* functions are all
-read-only (no file writes), so this predated my session, not caused by
-running it. Tried to protect my no-op sync commit by pathspec-
-restricting to just the memory file: `git commit -m "..." --
-.serena/memories/librarian_short_term.md`. **This did NOT work as
-"only this path" the way I expected** — the repo's `.claude/hooks/
-pre-commit` hook unconditionally runs `git add ... .claude/spec/TODO.md
-...` (render_fragments step) and, on any sync_derived_docs.py
-auto-fix, `git add docs/ .claude/spec/ README.md` (step 8) — a
-directory-glob `git add` that swallows ANY staged/modified file under
-`.claude/spec/`, including one that had nothing to do with my pathspec.
-The resulting commit picked up TODO.md + the new fragment (both under
-`.claude/spec/`) but correctly left AGENTS.md out (outside that glob).
-Net effect: `git commit -- <one file>` is NOT a hard restriction in
-this repo when the pre-commit hook's own `git add <dir>` calls run
-first — pathspec only guarantees your named file is included, not that
-OTHER already-staged files under hook-globbed directories are excluded.
-Lesson for next time: before a "no fixes, just the memory write" no-op
-commit, run `git status --short` immediately before AND after
-`git commit --dry-run` (or just accept the hook may staple in
-`.claude/spec/**` content and check `git show --stat HEAD` right after
-committing) rather than assuming pathspec = isolation. I closed the
-loop this session by committing the orphaned AGENTS.md counterpart
-in a small follow-up (same fragment's lesson, pre-existing content,
-nothing invented) rather than leaving it half-landed — see commit
-b4c0777.
+VERIFIED, NOT edited: `MAX_ORDER` is genuinely vestigial now (threaded as a
+parameter default through `F_op`/`F_op_grid`/`_positive_parity_grid`/
+`ChangRefsdalChannels.__init__` but never referenced inside
+`_positive_parity_grid`'s body — grep confirms zero use past the signature).
+SPEC.md never named `MAX_ORDER` directly (it's implementation-level), so
+nothing to fix there; noted the fact in the spec_changelog fragment instead
+of inventing a SPEC sentence about it, per the "SPEC never described this
+criterion in the first place -> no staleness to manufacture" house rule.
 
-No SPEC/FINDINGS/DATA_CONTRACTS/docs-source edits were needed or made
-this session. Both commits (53d3d36, b4c0777) only touched TODO.md,
-the pre-existing todo.d fragment, AGENTS.md, and the memory file —
-none of it newly authored by me.
+FINDINGS.md (canonical, hand-maintained, not fragment-generated) had its own
+staleness: F031's own body still concluded "**NOT implemented, deliberately**"
+even though 4318dab's commit message says it WAS implemented that same
+commit, with the SAME measured numbers (p90 1.17 -> 7.65e-5) the "not
+implemented" paragraph cites as a future possibility. This is a genuine
+self-contradiction inside one finding entry, not a downstream-sync gap —
+4318dab touched FINDINGS.md (197 insertions) but that diff evidently went to
+extending F030 (the GLoW root-cause investigation, confirmed by reading it —
+long GLoW/tmin/Fw-NaN narrative) and never circled back to close F031's own
+verdict sentence. Fixed the verdict paragraph in place (IMPLEMENTED, cites
+4318dab, keeps the still-true caveats: positive-parity only, no oracle above
+the Schwinger ceiling).
+
+NOT touched, flagged only: `.claude/spec/todo.d/tests_consolidate_duplicate_
+routing_pins.md`'s table ("select_branch routing | 16 | 6") is now an
+overcount — 4318dab's own commit message says duplicate `select_branch`
+routing pins were deleted from schwinger/airy_fold/levers, and I found
+"DELETED (one-home consolidation)" pointer-comments confirming this in
+`test_lensing_schwinger.py` and `test_lensing_airy_fold.py`. Did not edit the
+fragment: no clean before/after count without a slower per-file audit, and
+per house rule a multi-part TODO stays open until every part (also
+`SchwingerCertificationError` and `W_CEILING_SCHWINGER` pin counts, untouched)
+finishes — the stale COUNT doesn't change the OPEN status, so it's a nice-to-
+fix not a must-fix. Next Librarian: re-count before touching.
+
+git mechanics: `scripts/render_fragments.py` bumped spec_version 0.25.0 ->
+0.26.0 (minor, per my own spec_changelog fragment's `bump: minor`) and left
+the usual stray `.claude/tidy_advisory.json` diff (commit-tracking metadata
+racing ahead to 4318dab) — reverted with `git checkout --` per established
+pattern, not committed. `cogwheel/tests/test_lensing_batched_operator.py`
+arrived ALREADY STAGED (index differs from HEAD) at session start — not mine,
+didn't touch it, committed my own files via `git commit -- <explicit paths>`
+so its staged state survives untouched in the index for whoever owns it.
+`docs/source/**` had zero hits for any of these terms — no Sphinx rebuild
+needed this session (nothing under docs/source touched).

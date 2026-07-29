@@ -1659,10 +1659,32 @@ minimum of the Fermat potential:
 and GLoW's time grid is LOG-sampled (`t range [0.01, 1e6]`, `sampling: 'log'`),
 which cannot represent a domain whose origin is negative.
 
-FIX: offset the lens potential so GLoW sees `tmin >= 0`. A constant shift in
-the Fermat potential is a pure phase `exp(i*w*Delta)` in `F(w)` and leaves
-`|F|` untouched, so it is exactly correctable -- shift, evaluate, multiply the
-phase back.
+THAT HYPOTHESIS IS REFUTED. A shear-SIGN sweep breaks the correlation: at
+`gamma1 = -0.20` (`tmin = +0.204`) and `gamma1 = -0.05` (`tmin = +0.097`) the
+transform still returns NaN despite a POSITIVE `tmin`. The clean crossing seen
+earlier was an artifact of sweeping positive `gamma1` only, where `tmin` and
+shear magnitude move together. `tmin < 0` is a symptom, not the cause; do not
+build a potential-offset fix on it.
+
+WHAT ACTUALLY WORKS, AND THE FIRST CROSS-CODE NUMBER: at
+`gamma1 = +0.05, |y| = 0.5, w = 5` on the `It_MultiContour_C` + `Fw_FFT_C`
+pairing, GLoW returns `|F| = 0.526053` against cogwheel's `0.528894` --
+**agreement to 0.5%**. This is the first genuinely INDEPENDENT validation of
+this engine (different code, different authors, time-domain rather than
+frequency-domain), and it validates the conventions too: a convention error
+would not land within half a percent.
+
+THE REMAINING LIMIT IS SHEAR MAGNITUDE, not `tmin` and not the method. GLoW
+succeeds at `|gamma1| = 0.05` (positive only) and returns NaN at
+`|gamma1| = 0.20` and at `gamma1 = -0.05`. F028's configs need
+`gamma = 0.7-0.9`, far outside the working range found so far. So F028 remains
+confirmed only against geometric optics.
+
+NEXT: find what makes `gamma1 = +0.05` succeed where `-0.05` fails --
+the asymmetry is informative and is NOT explained by `tmin`. It is likely the
+contour topology (which axis is soft), which suggests a `p_prec` on
+`It_MultiContour_C` or a source/shear orientation convention rather than a
+numerical limit. Ask the owner what setup reached the high-shear regime.
 
 This also explains the earlier partial successes: the pure-Python
 `It_SingleContour` path agreed with F009 at `w -> 0` because
@@ -1749,12 +1771,18 @@ annihilated pair are undamped complex saddles the real-image sum omits). The
 **Measured gate.** `L > L_MAX` AND `eta >~ 0.3` takes worst-case p90 from
 1.17 to 7.65e-5 — four orders of magnitude.
 
-**NOT implemented, deliberately.** Adding the `eta` floor trades coverage for
-correctness: nodes failing it fall to the uniform arms (wrong, F028) or to a
-named refusal. That is an owner decision about the serving ladder, not a
-cleanup. Two further caveats: the sweep is POSITIVE PARITY only (no saddle
-data, same gap as F028/F029), and it is measured below the Schwinger ceiling
-then extrapolated into the above-ceiling regime where the gate actually runs,
-because no oracle exists there (F030).
+**IMPLEMENTED** (`4318dab`, 2026-07-29). `select_branch` gains the `eta` leg
+described above (`ETA_MIN_GEOMETRIC = 0.3`), wired into both operator grids
+(`_positive_parity_grid`; `_saddle_grid` passes `eta = inf`, positive-parity
+only per the caveat below) and into `channels._exact_total`'s call site,
+which had been missed on first wiring -- the same shape as F028: the
+training-label path and the serving path went out of sync until the third
+caller was found and fixed. This is a REFUSAL-INCREASING change: nodes
+failing the eta leg fall to the uniform arms (wrong, F028) or to a named
+refusal, trading coverage for correctness -- an owner-endorsed trade, not a
+cleanup. Two caveats remain live: the sweep is POSITIVE PARITY only (no
+saddle data, same gap as F028/F029), and it is measured below the Schwinger
+ceiling then extrapolated into the above-ceiling regime where the gate
+actually runs, because no oracle exists there (F030).
 
 Probe: `probe_lmax_rederive.py` (scratchpad).
