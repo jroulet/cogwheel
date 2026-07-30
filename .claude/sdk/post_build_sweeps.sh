@@ -12,7 +12,37 @@ RUNPY="$REPO_ROOT/.claude/sdk/run_py.sh"
 OUT="${SWEEP_OUT:-/tmp/post_build_sweeps_$(date +%Y%m%d_%H%M%S)}"
 MAX_JOBS="${SWEEP_MAX_JOBS:-8}"
 mkdir -p "$OUT"
-echo "post-build sweeps -> $OUT (slow tiers ON, width $MAX_JOBS)"
+
+# DISCOVER the tier variables instead of hardcoding them (design ported from
+# gw, 2026-07-30). Hardcoding is how F052 happened: the sweep set
+# COGWHEEL_BRUTE_ACCURACY and nothing else, so COGWHEEL_TRAIN_TIER -- which
+# gates every build's ACCEPTANCE tests -- was run by no job at all. Fixing
+# that by hardcoding a second name would leave the same trap for the third.
+# Grepping the suite means a new gated file enrolls itself.
+#
+# PARALLEL_UNSAFE tiers are named explicitly and REPORTED, never silently
+# dropped: timing assertions are meaningless under an 8-wide sweep's CPU
+# contention, so they belong in a serial pass, not here.
+PARALLEL_UNSAFE="COGWHEEL_STRICT_TIMING COGWHEEL_RUN_TIMING_SMOKE"
+DISCOVERED=$(grep -rhoE "environ(\.get)?\(?\[?['\"]COGWHEEL_[A-Z_]+['\"]" \
+    "$REPO_ROOT"/cogwheel/tests/*.py 2>/dev/null \
+    | grep -oE "COGWHEEL_[A-Z_]+" | sort -u)
+TIER_ENV=""
+SKIPPED_TIERS=""
+for v in $DISCOVERED; do
+  case " $PARALLEL_UNSAFE " in
+    *" $v "*) SKIPPED_TIERS="$SKIPPED_TIERS $v" ;;
+    *)        TIER_ENV="$TIER_ENV $v=1" ;;
+  esac
+done
+
+echo "post-build sweeps -> $OUT (width $MAX_JOBS)"
+echo "  tiers enabled :${TIER_ENV:- (none discovered)}"
+if [ -n "$SKIPPED_TIERS" ]; then
+  echo "  tiers SKIPPED :$SKIPPED_TIERS"
+  echo "                  (timing-sensitive; a parallel sweep cannot judge"
+  echo "                   them — they need a serial pass. NOT covered here.)"
+fi
 for f in "$REPO_ROOT"/cogwheel/tests/test_lensing_*.py; do
   base="$(basename "$f" .py)"
   if tail -2 "$OUT/$base.log" 2>/dev/null | grep -qE "[0-9]+ passed"; then
@@ -24,15 +54,7 @@ for f in "$REPO_ROOT"/cogwheel/tests/test_lensing_*.py; do
   mkdir -p "$cache"
   (
     cd "$REPO_ROOT" || exit 1
-    # COGWHEEL_TRAIN_TIER too, not just BRUTE_ACCURACY. The train tier holds
-    # every build's ACCEPTANCE gates -- 1e-tube's knife-edge and node-
-    # efficiency tests live there -- and until 2026-07-30 NO routine job set
-    # it, so the in-build tree gate skipped them and this sweep skipped them
-    # as well. A build could pass every gate it could reach while its central
-    # claim went untested; 1e-tube's were only run because an unrelated
-    # commit gate happened to force it. Same shape as F051: a gate nobody
-    # executes is not a gate.
-    COGWHEEL_BRUTE_ACCURACY=1 COGWHEEL_TRAIN_TIER=1 NUMBA_CACHE_DIR="$cache" \
+    env $TIER_ENV NUMBA_CACHE_DIR="$cache" \
       OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 \
       NUMBA_NUM_THREADS=4 \
       "$RUNPY" -m pytest "$f" -q -p no:cacheprovider "$@" \

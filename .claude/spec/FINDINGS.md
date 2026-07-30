@@ -2650,6 +2650,37 @@ is not a gate. When a test tier is created, name the job that runs it and check
 that job actually sets its variable. "It runs post-build" is a claim about a
 script, and the script is checkable.
 
+**AND THE FIRST FIX WAS ITSELF THE SAME MISTAKE.** Hardcoding
+`COGWHEEL_TRAIN_TIER=1` beside `COGWHEEL_BRUTE_ACCURACY=1` fixed the instance
+and left the class. Prompted by the gw driver — whose sweep DISCOVERS gated
+files by grepping for the variable, so new gated files enrol themselves — an
+audit of every gating env var in `cogwheel/tests/` found FOUR, of which **two
+were still set by nothing**:
+
+| var | refs | before |
+|---|---|---|
+| `COGWHEEL_BRUTE_ACCURACY` | 13 | set by the sweep |
+| `COGWHEEL_TRAIN_TIER` | 4 | set (the F052 fix) |
+| `COGWHEEL_STRICT_TIMING` | 7 | **set by nothing** |
+| `COGWHEEL_RUN_TIMING_SMOKE` | 1 | **set by nothing** |
+
+The sweep now greps the suite for `COGWHEEL_*` gate variables and enables what
+it discovers, so a new tier enrols itself (verified: a probe file introducing
+`COGWHEEL_BRAND_NEW_TIER` was picked up immediately).
+
+**Timing tiers are excluded ON PURPOSE, and REPORTED.** A timing assertion is
+meaningless under an 8-wide sweep's CPU contention, so
+`COGWHEEL_STRICT_TIMING` and `COGWHEEL_RUN_TIMING_SMOKE` are named in a
+`PARALLEL_UNSAFE` list and printed as skipped with the reason, rather than
+silently dropped. **They remain uncovered**: the full-suite gate deselects
+timing tests and runs them serially, but with `COGWHEEL_STRICT_TIMING` unset,
+so the STRICT timing tier still runs nowhere. That is an open gap, now visible
+in the sweep's own output instead of invisible.
+
+**Meta-rule.** When a fix is prompted by one instance, ask what CLASS it
+belongs to and enumerate the class before declaring it fixed. Three of the four
+tier variables were discoverable with one grep.
+
 ## F050 — every revision-budget exhaustion in the SDK's history is the same unfixable SPEC.md finding (2026-07-30)
 
 **Where:** the Inspector revision loop in `.claude/sdk/orchestrator.py`; the
