@@ -2534,3 +2534,43 @@ MORE accurate than its sampled predecessor can still move a knife-edge
 synthetic across a threshold when the synthetic was tuned to the old
 estimator's exact output on a grid placed in the wrong coordinate. The fix is
 the right coordinate, not more nodes.
+
+## F043 — git-HEAD-relative "compare to the old implementation" tests are landmines: they pass in their own build's gate, then break when HEAD moves (2026-07-30)
+
+**Where:** `test_lensing_caustic_cusps.py` (`_head_find_cusps` /
+`_head_module_source`); previously `test_lensing_surrogate_training.py`
+(the astroid byte-identity tests, retired the same day).
+
+A test that reconstructs the PRE-change implementation from `git show HEAD:...`
+to compare against the worktree is valid ONLY while HEAD is still the
+pre-change commit — i.e. only during the build that introduces the change,
+before it commits. The instant that build's commit lands, HEAD becomes the
+NEW version and the cross-version comparison either compares a version to
+itself or, worse, fails to reconstruct because the change deleted a symbol the
+reconstruction needs.
+
+Concretely: `_head_find_cusps` AST-extracts the old `_find_cusps` from HEAD,
+requiring the module constants `_CUSP_SPEED_REL_FRAC`, `_CUSP_WIDTH_SAFETY`,
+`_CUSP_MIN_HALFWIDTH`. Build 1b (`00bf8ae`) DELETED `_CUSP_SPEED_REL_FRAC`
+(inlined as a local). The tests PASSED in 1b's own tree gate — that gate runs
+BEFORE the commit, so HEAD still had the constant — and went RED in the very
+NEXT build's (1c's) tree gate, which runs against the now-advanced HEAD:
+`RuntimeError: HEAD cusp constants missing: ['_CUSP_SPEED_REL_FRAC']`. The
+failure had nothing to do with 1c; 1c never touched `_find_cusps`.
+
+This is the THIRD instance in one day (the two astroid byte-identity tests
+were the first two, retired when 1b deleted their float-path baseline). The
+`@skipUnless(_git_available())` guard did not help: git WAS available and
+`git show HEAD` succeeded; the missing piece was a deleted CONSTANT, which the
+guard does not check.
+
+**Rule.** A regression guard that must survive its own baseline being
+committed cannot key on a moving `HEAD`. Either (a) pin a specific historical
+commit SHA (opaque, and still breaks when the rule legitimately changes), or
+— preferred — (b) freeze the expected values as a GOLDEN TABLE of literals in
+the test, computed once and readable without git. A `git show HEAD`
+cross-version oracle is only legitimate as a WITHIN-BUILD transition check that
+is retired the moment the transition commits. The two 1c-blocking tests are
+retired (`@skip -> F043`); the durable window-width guard, if wanted, is a
+golden-value table (owed to the F040 cusp-window build, which changes the
+window rule anyway).

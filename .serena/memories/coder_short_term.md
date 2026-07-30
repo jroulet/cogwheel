@@ -1,5 +1,69 @@
 # Coder Short-Term Observations
 
+- WP1 (1c, analytic-root _cusp_vertex on SERVE path) DONE in
+  chang_refsdal/_pearcey_cusp.py. Added `from scipy.optimize import brentq`
+  (after numpy; module had none). Rewrote _cusp_vertex body (sig + None-on-
+  refusal contract UNCHANGED): deleted delta=1e-4 central diff, 129-pt pi
+  scan, 40-iter golden section. Now: FRAME seed_phase=seed_theta-beta; nested
+  slope(phase)=y'.y'' via geometry.caustic_derivatives(gamma,phase,
+  kappa=,branch=) (beta-free, exactly _speed_slope idiom); speed(phase)=
+  caustic_speed. Parity-gated bracket: pos parity (|g|<lam) snap phase_cusp=
+  (pi/2)*round(seed_phase/(pi/2)), half_width=0.1; macro saddle theta_max=
+  0.5*asin(lam/|g|), phase_center=pi*round(seed_phase/pi), candidates
+  {center,center±theta_max}, nearest to seed_phase; if |nearest-center|>
+  0.5*theta_max -> NAMED REFUSAL None (diverging wedge edge, Pearcey normal
+  form invalid), else finite tip, half_width=min(1e-2,0.4*theta_max) (strictly
+  inside wedge). TWIN GATE: (a) slope(lo)<0<slope(hi) else None; brentq xtol=
+  4eps; (b) speed(root)<1e-4*speed_scale, speed_scale=max caustic_speed at
+  phase_cusp+{±0.05,±0.1} (probes off-wedge skipped via try/except; empty->
+  None). theta_cusp=phase_root+beta -> critical_point(gamma,theta_cusp,beta,
+  kappa,branch) (do NOT feed phase; it re-subtracts beta). SAME branch end-to-
+  end. Whole root/gate block wrapped try/except geometry.LensDomainError->None.
+  VERIFIED (real import, side-by-side git-show HEAD copy): ast OK; 192 pos-
+  parity REAL serves (nearest_caustic_point seeds, beta∈{0,.3,1.1}, kappa∈
+  {0,.3}) -> served vertex analytic speed worst 1.9e-15 (genuine |y'|=0 root)
+  AND served cusp == nearest astroid cusp to seed_phase to 1e-15 (frame-correct
+  beta!=0). cusp_amplification new-vs-HEAD over pos+saddle sweeps: refusal
+  decision IDENTICAL except 4 saddle pts (gamma2.5,kappa.2) where HEAD SERVED
+  and new REFUSES — all 4 have nearest cand offset ==±theta_max EXACTLY (wedge
+  edge); HEAD's golden-scan aliased to a speed~1.8e-10 near-edge pt and served
+  through a diverging-curvature normal form == the exact pathology WP1's wedge-
+  edge refusal removes. So new = correct; the 4 flips are intended, not a
+  regression. UNVERIFIED: a both-served worst_rel number on the FINITE-TIP
+  cusp (strict calibration cert makes both-served configs rare; 6000-sample
+  random hunt TIMED OUT) — the F016 served-value acceptance gate is Test Dev/
+  Inspector's with proper fixtures. Did NOT touch cusp_amplification,
+  _saddle_branch, _soft_normal_form, _WEDGE_EPS, tables/charts. Part B (y''')
+  already shipped earlier (WP2), not touched here.
+  OWED -> Test Dev/Inspector: (1) run the F016 served-value gate over cusp-
+  neighbourhood fixtures spanning both parities + beta!=0 that ACTUALLY serve
+  (calibration-certified) and pin worst_rel<=F016 bar. (2) Any saddle fixture
+  that pinned a SERVED value at a wedge-edge-adjacent source (offset ~±theta_max
+  from lobe centre) now gets None — re-point to a finite-tip source or assert
+  the named refusal. (3) SPEC microlensing-engine row (Pearcey arm) describes
+  the finite-diff scan -> Librarian: now analytic brentq root, O(1) not ~258.
+
+- WP2 (y''' via shared cascade) DONE in chang_refsdal/geometry.py.
+  Extracted private `_caustic_cascade(gamma,theta,kappa,branch)` +
+  `_CausticCascade` NamedTuple (lam,gamma,u,u_p,u_pp,u_ppp,r,r_p,r_pp,
+  r_ppp,cos_t,sin_t) holding ALL domain guards/LensDomainError text
+  (verbatim from old caustic_derivatives) + the u/r cascade. Added
+  u_ppp = 8*eff*s + b*(32 eff^2 N/d -24 eff^4 c4 N/d^3 -24 eff^6 N^3/d^5),
+  N=s*c; r_ppp = r(-15 u'^3/(8u^3)+9 u'u''/(4u^2)-u'''/(2u)). Both derived
+  by hand from the closed form (u=eff*cos2t+b*sqrt(1-eff^2 sin^2 2t),
+  r=(lam u)^-1/2), NOT transcribed (F038 lesson), then VERIFIED vs mpmath
+  40dps 3rd-deriv oracle worst_abs=4.1e-13/rel=1.1e-14. caustic_derivatives
+  now consumes cascade; y'/y'' assembly lines kept byte-identical -> proven
+  max|diff|==0.0 + refusal_match=True over 20-config (gamma,kappa,branch,
+  scalar+101-array theta) sweep vs HEAD copy loaded side-by-side (git show).
+  NEW public caustic_third_derivative(gamma,theta,*,kappa=0.0,branch=1)
+  after caustic_speed: full 10-term triple-product Leibniz assembly,
+  T'''=(sin,-cos), p'''=-lam u'''; returns (2,) scalar / (2,N) array;
+  shares guards/refusals via cascade (same named LensDomainError). No FD,
+  no new dep, vectorised. ast+import OK. Did NOT touch _cusp_vertex,
+  _WEDGE_EPS, interp coord, caustic_speed/_curvature_radius bodies (still
+  delegate to caustic_derivatives, unchanged 2-tuple).
+
 - INS-1-001 RESOLVED (F041 fix-build, test-file finding; pipeline routed
   stale-fixture retirement to Coder). In test_lensing_caustic_cusps.py
   deleted the 3 pre-fix-pathology pins: (1) whole class

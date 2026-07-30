@@ -1,33 +1,33 @@
-# Professor short-term (this session)
+# Professor short-term — Build 1c inference review (analytic cusp vertex + y''')
 
-## Session: F041 build inference review (2026-07-29) -- VERDICT PASS
+Session 2026-07-29. Reviewed the shipped analytic `_cusp_vertex` + y''' build.
+Ran fast domain tests: `test_lensing_airy_fold.py` + `test_lensing_caustic_derivatives.py`
+= 88 passed / 7 skipped / 2 xfailed in ~25s (cogwheel-newlal env). VERDICT: PASS.
 
-Reviewed the two Test-Developer shards. Ran (cogwheel-newlal python):
-`pytest test_lensing_surrogate.py test_lensing_surrogate_training.py -v`
-=> 60 passed, 37 skipped (env-gated/heavy), 224s. No TypeError on _find_cusps
-=> the stale callers are fixed and RUN green (not merely collect).
+## Independently verified (not just green checks)
+- PRIMARY gate (vertex insensitivity, load-bearing): recomputed by hand — 15/15
+  configs serve (100% >> 60% anti-vacuity floor `_VERTEX_MIN_SERVE_FRACTION`),
+  worst |dF|/max|F| = 1.03e-2 vs F016 bar `_DEFAULT_ENVELOPE_BAR`=0.05 (margin ~4.8x).
+  Deviation scales ~LINEARLY with perturbation (3.1e-5 / 3.1e-4 / 1.0e-2 for dtheta
+  1e-4 / 1e-3 / 0.0245) — clean scaling = correct frame mapping (a frame/bracketing
+  error would give a perturbation-INDEPENDENT flat swing). Constants match spec:
+  angle_tol 1e-10, speed_ratio 1e-8, perturbs {±0.0245,±1e-3,±1e-4}, w{20,40,80}.
+- O(1) cost: 11-12 geometry calls per `_cusp_vertex` (< `_MAX_GEOMETRY_CALLS`=20),
+  never the retired ~258-pt scan. Verified via call-counter on all 7 direct configs.
+- Saddle wedge-edge refusal: new finder returns None at diverging wedge edge, old
+  scan serves finite-meaningless — carve-out documented & tested.
+- y''' STAGE-2: live worst abs 9.507e-12 (gamma=0.99 near parity wall, |exp|=88),
+  worst rel 1.302e-13 over 128 rel-dominated pts. Floors ATOL_3=1e-10/RTOL_3=1e-9
+  WIN (3x measured < floors) → gate is spec floor, clears by ~10x/~2500x. dps 40→60
+  residual dps-INVARIANT ⇒ closed form correct (float64-limited, not oracle-limited).
+  Self-falsification: 1e-6 component corruption goes red vs rtol 1e-9 (teeth). AST
+  oracle-independence guard extended to forbid caustic_third_derivative/_caustic_cascade.
 
-Caller fixes verified in situ:
-- test_lensing_surrogate.py:1068-69  gamma=gamma, branch=1 added; `shifted`
-  wrapper (1947) forwards via **kwargs -> gamma/branch thread through.
-- test_lensing_surrogate_training.py:1006-08 gamma=gamma,branch=branch (+
-  width_safety/min_halfwidth preserved); 1660-65 frozen+widened both
-  gamma=float(gamma),branch=1 with kwargs preserved.
-- Anti-vacuity teardown (surrogate.py:685) present; tests PASSED so n_checks>0.
-- No removed-constant (_PROBE_ETA/_CLOUD_MARGIN_FRAC/_CUSP_SPEED_REL_FRAC)
-  assertion in EITHER shard file (hits exist only in the out-of-scope
-  test_lensing_caustic_cusps.py, not touched here).
-
-F041 acceptance (StableGammaBandsF041TestCase) matches my prior ruling exactly:
-- A1 dropped==[] AND every band len(arcs)>0 (load-bearing witness; pre-fix the
-  (0.01,0.0462) & (0.0462,0.0644) bands built 0 arcs).
-- A2 realized as arc EXISTENCE at gamma in {0.02,0.1,0.3,0.9} -- correct, no
-  gamma-stable orientation ratio to assert once the magnitude guard is gone.
-- A3 image_count==4 (parity constant at kappa=0, (0,1,1,1) An&Evans) +
-  inward_sign in (-1,1) + per-index label stability across gamma>=0.1.
-- Self-falsification (StableGammaBandsF041SelfFalsificationTestCase) is GENUINE:
-  mock strips arcs below gamma<0.05 -> reproduces BOTH a dropped sliver and a
-  zero-arc band, and confirms the clean sweep drops nothing. Can go RED.
-
-All value-based (no code-path / removed-constant assertions). Physics sound.
-Heavy full-sampling / brute-accuracy validation is operator-deferred (skipped).
+## Mild observation (NOT a concern)
+Config set drops brief's gamma=0.05 (never serves — caustic too weak for finite-w
+uniform form) and gamma∈{1.02,0.9} saddles (serve only marginally); saddle frozen at
+gamma=1.3. Documented measure-first deviation (test-dev "never anchor on un-measured
+brief coords"); still spans both parities, beta{0,0.37,1.1}, kappa{0,0.3}. Slight
+saddle-coverage reduction only. Primary-gate margin at coarsest perturb is modest
+(4.8x) — watch if serve-shell later tightens. Heavy full-sampling validation is
+operator-deferred (out of turn budget).

@@ -1,5 +1,43 @@
 # Architect Short-Term Observations
 
+## Build: analytic-cusp-serving-1c (2026-07-29)
+Step 1c: (A) replace _pearcey_cusp._cusp_vertex FD-scan(129 pts ~258 calls)+golden-
+section with analytic root of caustic_speed=0; (B) extend geometry.caustic_derivatives
+to y'''. Prof rulings: FRAME — root-find g=y'.y'' in phase=theta-beta frame (caustic_
+derivatives is beta-free/rotation-invariant), seed_phase=nearest.theta-beta, theta_cusp
+=root+beta THEN critical_point(gamma,theta_cusp,beta,kappa,branch) [do NOT feed phase in,
+it re-subtracts beta]; carry SAME branch end-to-end. BRACKETING — pos parity astroid
+cusps EXACT at phase{0,pi/2,pi,3pi/2}: snap to nearest of 4 + confirm brentq in +-0.1;
+saddle deltoid cusps = wedge-tip phase_c in{0,pi} (finite) + two wedge-EDGE cusps at
+phase_c+-theta_max, theta_max=0.5*arcsin(lam/|gamma|) where caustic_derivatives DIVERGES
+(LensDomainError). Pick candidate nearest seed; wedge-tip->short march+brentq strictly
+inside wedge (_CUSP_BRACKET_EPS); wedge-EDGE->return None (named refusal, correct: old FD
+straddled divergence & served finite-but-meaningless vertex). TWIN GATE: g(lo)<0<g(hi) AND
+caustic_speed(root)<eps_speed*speed_scale, speed_scale=max caustic_speed(phase_c+-0.05..0.1
+off-cusp), eps_speed=1e-4 (measure ratio, tighten if any real cusp in[1e-6,1e-4]); gate
+fail->None (serve contract, NOT training's keep-sampled-min). Y''' TOL: mpmath.diff order3
+@40dps, MEASURE worst, assert mixed atol_3=max(1e-10,3x worst_abs) rtol_3=max(1e-9,3x
+worst_rel); cross-check 40->60 dps to separate mpmath noise (dps-sensitive, point-scatter)
+from wrong closed form (dps-insensitive, systematic curve); stage-1 curve pin already in
+CurveDefinitionStageOneTestCase (<=1e-13). SERVED-VALUES gate (acceptance#2, LOAD-BEARING):
+Prof PRIMARY=vertex-INSENSITIVITY (perturb analytic vertex angle by {+-0.0245,+-1e-3,+-1e-4}
+rad, assert |dF|/max|F|<envelope_bar on COMPLEX F); SECONDARY=reimpl old FD finder as oracle,
+monkeypatch _pearcey_cusp._cusp_vertex, compare, EXCLUDE wedge-edge-divergence configs
+(old serves wrong number there, new refuses = correct improvement). Configs: pos gamma
+{0.05,0.3,0.6}, saddle {1.02,1.3}(+0.9@kappa0.3), kappa{0,0.3}, beta{0,0.37,1.1}, source in
+cusp nbhd R in[1.2,5]*R_min both sides, w{20,40,80}; anti-vacuity >=60% served finite.
+API (Simplifier): NOT order-kwarg (breaks 2-tuple unpackers). Extract private
+_caustic_cascade returning all-order scalars; caustic_derivatives keeps 2-tuple assembly
+LITERALLY identical (byte-id, oracle re-validates 1e-13); new public caustic_third_derivative
+assembles y'''. Simplifier: single confirm-brentq path leaner than snap-only but Prof wedge
+refusal is domain-necessary -> one fn, parity-gated analytic candidate list. Tests -> Test
+Developer AUGMENT test_lensing_airy_fold.py (cusp_amplification lives there) + add direct
+_cusp_vertex test (vertex.source==cusp loc, O(1) call-count) + y''' -> extend
+test_lensing_caustic_derivatives.py. NOT Coder-authored. SPEC row53 geometry public-name
+list gains caustic_third_derivative + verify _cusp_vertex prose still true -> post-gate
+Librarian. WP1(_cusp_vertex) & WP2(y''') independent files, parallel OK.
+
+
 ## Build: arc-guard-fix-F041 (2026-07-29)
 [re-plan 2026-07-29] Confirmed tree: _make_arc guard at line 689 still `abs(dot)<=0.1`;
 _find_cusps sig = (thetas,speed,periodic,*,gamma,branch,width_safety=,min_halfwidth=)

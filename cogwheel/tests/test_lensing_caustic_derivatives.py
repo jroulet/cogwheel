@@ -142,6 +142,72 @@ CURVE_HEADLINE_RTOL = 1e-13
 #: exclude the one failing near-axial point.
 CURVE_HEADLINE_FLOOR = CURVE_STAGE1_ATOL / CURVE_STAGE1_RTOL
 
+# ---------------------------------------------------------------------------
+# Constants for the STAGE-2 third-derivative (y''') gate (Part B, acc. #4).
+#
+# MEASURED ENVELOPE (driver-independent, over the 68 real F038 cases = 136
+# component comparisons, oracle = ``mpmath.diff(_oracle_y_component, theta,
+# 3)`` at 40 dps cast to float64 vs ``geometry.caustic_third_derivative``):
+#
+#   * worst ABSOLUTE residual  9.51e-12  at (gamma, kappa, branch, theta,
+#     comp) = (0.99, 0.0, +1, 2.2, 1), where |expected| = 88.2 (a large,
+#     ill-conditioned near-parity-wall value -- the absolute error is
+#     float64 roundoff of that large number, its RELATIVE error is only
+#     1.08e-13);
+#   * worst RELATIVE residual  1.30e-13  over the 128 relative-dominated
+#     points ``|expected| > ATOL_3 / RTOL_3 = 0.1`` at (0.99, 0.0, +1, 1.0,
+#     1), |expected| = 42.8.
+#
+# The spec sets ``atol_3 = max(1e-10, 3 * worst_abs)`` and ``rtol_3 =
+# max(1e-9, 3 * worst_rel)``.  With 3 * 9.51e-12 = 2.85e-11 < 1e-10 and
+# 3 * 1.30e-13 = 3.91e-13 < 1e-9, BOTH floors win, so the gate is the
+# floor (1e-10, 1e-9) -- comfortably above 3x the measurement, and orders
+# of magnitude below the ~1e-6+ relative error a wrong y''' term would
+# produce.  This is not a tolerance we cannot meet, nor one loosened
+# beyond what the oracle forces: it is the spec's floor, which the oracle
+# clears by ~10x (abs) / ~2500x (rel).
+#
+# dps 40 -> 60 cross-check: the residuals are dps-INVARIANT (identical to
+# float64) and float64-scale relative to |expected| (rel ~1e-13 at worst,
+# ~eps * condition number).  The oracle has therefore converged FAR below
+# float64; the residual floor is the float64 representation of the analytic
+# value, NOT the mpmath step -- i.e. the oracle is not the limiter and the
+# closed form is correct.  A WRONG closed form would give a LARGE (rel >>
+# 1e-9) residual that is ALSO dps-invariant, so the discriminator between
+# right and wrong is the MAGNITUDE gate below, and the dps cross-check only
+# confirms the oracle is not secretly the limiter.
+# ---------------------------------------------------------------------------
+
+#: Absolute floor of the STAGE-2 mixed tolerance for ``y'''``.  The spec's
+#: ``max(1e-10, 3 * 9.51e-12)`` -> the 1e-10 floor.  Covers the small
+#: near-axial components (abs error ~1e-17).
+ATOL_3 = 1e-10
+
+#: Relative term of the STAGE-2 mixed tolerance for ``y'''``.  The spec's
+#: ``max(1e-9, 3 * 1.30e-13)`` -> the 1e-9 floor.  Dominates the large
+#: near-parity-wall components (|y'''| ~ 88).
+RTOL_3 = 1e-9
+
+#: Crossover ``|expected| = ATOL_3 / RTOL_3 = 0.1`` above which the
+#: relative term dominates, so the pure relative residual is well defined
+#: (not float64 cancellation of a near-zero component).  Defines the
+#: relative-dominated subset for the worst-relative measurement.
+D3_CROSSOVER = ATOL_3 / RTOL_3
+
+#: dps values for the oracle-convergence cross-check (spec diagnostic:
+#: shrink 40->60 => oracle-limited noise; stay put => float64-limited, and
+#: only the magnitude gate then tells right from wrong).
+D3_DPS_LOW = 40
+D3_DPS_HIGH = 60
+
+#: Small subset (one per parity/branch regime, incl. near-axial theta) for
+#: the more expensive dps=60 cross-check.  All are real F038 cases.
+D3_DPS_SUBSET = (
+    (0.3, 0.0, 1, 1.0),     # positive parity, mid-arc
+    (0.99, 0.0, 1, 1.3),    # near the parity wall, large |y'''|
+    (1.3, 0.0, -1, 0.17),   # macro saddle, branch -1
+    (0.05, 0.3, 1, 0.02))   # near-axial, with convergence
+
 #: Positive-parity configurations ``(gamma, kappa)`` with ``|gamma| <
 #: 1 - kappa``, used for the branch = -1 no-nan / no-warning gate.
 POSITIVE_PARITY_CONFIGS = ((0.3, 0.0), (0.05, 0.3))
@@ -178,7 +244,8 @@ FOLD_EPS = 1e-3
 #: legitimately independent oracle rather than catch a circular one.
 _FORBIDDEN_ORACLE_NAMES = frozenset({
     'caustic_derivatives', 'caustic_speed', 'caustic_curvature_radius',
-    'geometry', 'u_p', 'u_pp', 'r_p', 'r_pp',
+    'caustic_third_derivative', '_caustic_cascade', 'geometry',
+    'u_p', 'u_pp', 'u_ppp', 'r_p', 'r_pp', 'r_ppp',
     'p_shared_p', 'p_shared_pp'})
 
 #: Directory for diagnostic plots.
@@ -236,6 +303,26 @@ def oracle_derivatives(gamma, kappa, branch, theta):
         y_prime.append(mpmath.diff(func, theta_mp, 1))
         y_double_prime.append(mpmath.diff(func, theta_mp, 2))
     return y_prime, y_double_prime
+
+
+def oracle_third_derivative(gamma, kappa, branch, theta, dps=D3_DPS_LOW):
+    """Return ``y'''`` at ``theta`` from the independent oracle.
+
+    A two-element list of :class:`mpmath.mpf`, the third numerical
+    theta-derivative of :func:`_oracle_y_component` (the shared curve
+    definition) at ``dps`` decimal digits.  This never touches the
+    module's ``u_ppp`` / ``r_ppp`` cascade nor
+    :func:`geometry.caustic_third_derivative`;
+    :class:`OracleIndependenceTestCase` enforces that by AST inspection.
+    """
+    with mpmath.workdps(dps):
+        theta_mp = mpmath.mpf(theta)
+        y_triple_prime = []
+        for comp in (0, 1):
+            func = lambda th, _c=comp: _oracle_y_component(
+                th, gamma, kappa, branch, _c)
+            y_triple_prime.append(mpmath.diff(func, theta_mp, 3))
+        return y_triple_prime
 
 
 def caustic_point_is_real(gamma, kappa, branch, theta):
@@ -373,7 +460,8 @@ class OracleIndependenceTestCase(TestCase):
         # name or attribute (a source-substring check would false-trip on
         # 'r_p' inside 'branch').
         used = set()
-        for func in (_oracle_y_component, oracle_derivatives):
+        for func in (_oracle_y_component, oracle_derivatives,
+                     oracle_third_derivative):
             tree = ast.parse(inspect.getsource(func))
             for node in ast.walk(tree):
                 if isinstance(node, ast.Name):
@@ -469,6 +557,39 @@ class DiagnosticPlotTestCase(TestCase):
         axis.set_title('caustic first-derivative error')
         axis.legend()
         path = _OUTPUT_DIR / 'caustic_derivatives_error_scatter.png'
+        figure.savefig(path)
+        plt.close(figure)
+        self.assertTrue(path.exists())
+
+    def test_third_derivative_error_scatter(self):
+        # |analytic_d3 - oracle_d3| vs theta at dps 40 and 60.  A WRONG
+        # y''' term reads as a coherent curve (systematic, dps-insensitive,
+        # large); float64 noise reads as a scattered floor that does NOT
+        # shrink with dps (it is float64-limited, not oracle-limited).
+        thetas, errors_40, errors_60 = [], [], []
+        for gamma, kappa, branch, theta in real_cases():
+            analytic = geometry.caustic_third_derivative(
+                gamma, theta, kappa=kappa, branch=branch)
+            oracle_40 = oracle_third_derivative(
+                gamma, kappa, branch, theta, dps=40)
+            oracle_60 = oracle_third_derivative(
+                gamma, kappa, branch, theta, dps=60)
+            for comp in (0, 1):
+                value = float(analytic[comp])
+                thetas.append(theta)
+                errors_40.append(abs(value - float(oracle_40[comp])))
+                errors_60.append(abs(value - float(oracle_60[comp])))
+        figure, axis = plt.subplots()
+        axis.semilogy(thetas, np.maximum(errors_40, 1e-18), '.',
+                      label='dps 40')
+        axis.semilogy(thetas, np.maximum(errors_60, 1e-18), 'x',
+                      label='dps 60')
+        axis.axhline(ATOL_3, color='r', linestyle='--', label='atol_3')
+        axis.set_xlabel('theta [rad]')
+        axis.set_ylabel("|analytic - oracle| of y'''")
+        axis.set_title('caustic third-derivative error (dps 40 vs 60)')
+        axis.legend()
+        path = _OUTPUT_DIR / 'caustic_third_derivative_error_scatter.png'
         figure.savefig(path)
         plt.close(figure)
         self.assertTrue(path.exists())
@@ -604,6 +725,198 @@ class CurveDefinitionStageOneTestCase(_CausticDerivativeTestCase):
         # And it also breaks the headline relative gate.
         self.assertGreater(abs(corrupted - shipped) / abs(shipped),
                            CURVE_HEADLINE_RTOL)
+
+
+class ThirdDerivativeStageTwoTestCase(_CausticDerivativeTestCase):
+    """STAGE 2: ``caustic_third_derivative`` matches the 40-dps oracle.
+
+    STAGE 1 (:class:`CurveDefinitionStageOneTestCase`) is the PRECONDITION:
+    it pins the shared curve definition ``y_i = p_i r T_i`` that the oracle
+    reconstructs to the shipping ``critical_point(...).source`` (worst
+    relative 6.5e-14).  Given that the curve is correct, this gate then
+    validates that the module differentiates it correctly to THIRD order --
+    the ``u'''`` / ``r'''`` cascade and the ten-term triple-product Leibniz
+    assembly in :func:`geometry.caustic_third_derivative` -- against a
+    genuinely independent oracle: a high-precision numerical third
+    derivative (:func:`mpmath.diff`, order 3) of the SAME curve definition,
+    which never touches the module's ``u_ppp`` / ``r_ppp`` symbols.
+
+    Mixed tolerance ``|value - expected| <= ATOL_3 + RTOL_3 |expected|``
+    with ``ATOL_3 = 1e-10`` and ``RTOL_3 = 1e-9`` -- the spec floor, which
+    the measured envelope (worst absolute 9.51e-12, worst relative 1.30e-13
+    over the 128 relative-dominated points ``|expected| > 0.1``) clears by
+    ~10x / ~2500x.  See the module-level ``ATOL_3`` / ``RTOL_3`` block for
+    the full measurement.
+    """
+
+    def assert_mixed_d3(self, value, expected, msg):
+        """Assert ``|value - expected| <= ATOL_3 + RTOL_3 |expected|``.
+
+        Counts one comparison against the anti-vacuity tally.
+        """
+        self._comparisons += 1
+        tol = ATOL_3 + RTOL_3 * abs(expected)
+        error = abs(value - expected)
+        self.assertLessEqual(
+            error, tol,
+            f'{msg}: |{value!r} - {expected!r}| = {error:.3e} > {tol:.3e} '
+            f'(atol {ATOL_3:.0e} + rtol {RTOL_3:.0e} * |expected|)')
+
+    def test_third_derivative_matches_oracle(self):
+        # Every real F038 case: both components of y''' against a 40-dps
+        # numerical third derivative of the shared curve definition.
+        worst_abs = 0.0
+        worst_abs_case = None
+        worst_rel = 0.0
+        worst_rel_case = None
+        rel_dominated = 0
+        for gamma, kappa, branch, theta in real_cases():
+            analytic = geometry.caustic_third_derivative(
+                gamma, theta, kappa=kappa, branch=branch)
+            oracle = oracle_third_derivative(gamma, kappa, branch, theta)
+            for comp in (0, 1):
+                value = float(analytic[comp])
+                expected = float(oracle[comp])
+                error = abs(value - expected)
+                if error > worst_abs:
+                    worst_abs = error
+                    worst_abs_case = (gamma, kappa, branch, theta, comp,
+                                      expected)
+                if abs(expected) > D3_CROSSOVER:
+                    rel_dominated += 1
+                    relative = error / abs(expected)
+                    if relative > worst_rel:
+                        worst_rel = relative
+                        worst_rel_case = (gamma, kappa, branch, theta, comp,
+                                          expected)
+                with self.subTest(gamma=gamma, kappa=kappa, branch=branch,
+                                  theta=theta, comp=comp):
+                    self.assert_mixed_d3(value, expected,
+                                         f'y_triple_prime[{comp}]')
+        # The relative gate needs a non-empty relative-dominated subset.
+        self.assertGreater(
+            rel_dominated, 0,
+            'no relative-dominated y-triple-prime comparisons -- vacuous')
+        print(f'\n[STAGE-2 y-triple-prime] worst abs = {worst_abs:.3e} '
+              f'(case {worst_abs_case}); worst rel over {rel_dominated} '
+              f'rel-dominated pts = {worst_rel:.3e} (case {worst_rel_case})')
+
+    def test_oracle_is_dps_converged_not_the_limiter(self):
+        # dps 40 vs 60 cross-check on a small subset.  For a CORRECT closed
+        # form the residual is float64-limited (representation of the
+        # analytic value), so it must be dps-INVARIANT *and* below the
+        # STAGE-2 gate.  If it instead SHRINKS 40->60 the oracle step was
+        # the limiter (noise); if it stays put but is LARGE (> the gate)
+        # the closed form is wrong.  This asserts the first regime.
+        for gamma, kappa, branch, theta in D3_DPS_SUBSET:
+            self.assertTrue(
+                caustic_point_is_real(gamma, kappa, branch, theta),
+                f'dps subset case {(gamma, kappa, branch, theta)} must be '
+                f'a real caustic point')
+            analytic = geometry.caustic_third_derivative(
+                gamma, theta, kappa=kappa, branch=branch)
+            oracle_low = oracle_third_derivative(
+                gamma, kappa, branch, theta, dps=D3_DPS_LOW)
+            oracle_high = oracle_third_derivative(
+                gamma, kappa, branch, theta, dps=D3_DPS_HIGH)
+            for comp in (0, 1):
+                value = float(analytic[comp])
+                low = float(oracle_low[comp])
+                high = float(oracle_high[comp])
+                error_low = abs(value - low)
+                error_high = abs(value - high)
+                tol = ATOL_3 + RTOL_3 * abs(high)
+                with self.subTest(gamma=gamma, kappa=kappa, branch=branch,
+                                  theta=theta, comp=comp):
+                    # (a) both residuals below the gate: the closed form is
+                    #     right, not merely oracle-noise-limited.
+                    self.assertLessEqual(
+                        error_high, tol,
+                        f'dps={D3_DPS_HIGH} residual {error_high:.3e} '
+                        f'exceeds the STAGE-2 gate {tol:.3e}: the closed '
+                        f'form is wrong (a systematic, dps-insensitive '
+                        f'error)')
+                    # (b) dps-invariant: raising dps did not shrink the
+                    #     residual below float64, i.e. the oracle is not the
+                    #     limiter.  The two float64-cast oracles agree to
+                    #     the float64 floor.
+                    self.assertLessEqual(
+                        abs(error_low - error_high),
+                        1e-6 * abs(high) + 1e-12,
+                        f'oracle residual changed materially between '
+                        f'dps={D3_DPS_LOW} ({error_low:.3e}) and '
+                        f'dps={D3_DPS_HIGH} ({error_high:.3e}); the oracle '
+                        f'step, not the closed form, would be the limiter')
+                self._comparisons += 1
+
+
+class ThirdDerivativeSelfFalsificationTestCase(TestCase):
+    """Prove the STAGE-2 y''' gate has teeth: corrupt one component.
+
+    One real INTERIOR case per parity regime (positive parity and macro
+    saddle).  Scaling a single analytic ``y'''`` component by ``1 + 1e-6``
+    is a relative error of 1e-6, three orders above ``RTOL_3 = 1e-9``, so
+    re-running the STAGE-2 mixed-tolerance assertion must go RED.  If the
+    corrupted value still passed, ``RTOL_3`` would be too loose.
+    """
+
+    #: One well-conditioned interior case per parity: (gamma, kappa,
+    #: branch, theta).  Positive parity ``|gamma| < 1 - kappa`` and a macro
+    #: saddle ``|gamma| > 1 - kappa`` on the ``-1`` branch.
+    _CASES = ((0.3, 0.0, 1, 1.0), (1.3, 0.0, -1, 0.17))
+
+    def test_scaled_component_goes_red_against_rtol(self):
+        gate = ThirdDerivativeStageTwoTestCase('assert_mixed_d3')
+        for gamma, kappa, branch, theta in self._CASES:
+            self.assertTrue(
+                caustic_point_is_real(gamma, kappa, branch, theta),
+                f'falsification case {(gamma, kappa, branch, theta)} must '
+                f'be a real caustic point')
+            oracle = oracle_third_derivative(gamma, kappa, branch, theta)
+            analytic = geometry.caustic_third_derivative(
+                gamma, theta, kappa=kappa, branch=branch)
+            # Corrupt the LARGER-magnitude component so the relative gate
+            # unambiguously applies (|expected| well above D3_CROSSOVER).
+            comp = int(np.argmax(np.abs([float(o) for o in oracle])))
+            expected = float(oracle[comp])
+            self.assertGreater(
+                abs(expected), D3_CROSSOVER,
+                'the corrupted component must be relative-dominated so the '
+                'rtol term is what rejects it')
+            corrupted = float(analytic[comp]) * (1.0 + 1e-6)
+            gate.setUp()
+            with self.subTest(gamma=gamma, kappa=kappa, branch=branch,
+                              theta=theta, comp=comp):
+                # Sanity: the uncorrupted value passes the same gate.
+                gate.assert_mixed_d3(float(analytic[comp]), expected,
+                                     'uncorrupted control')
+                # The 1e-6 corruption must trip the mixed tolerance.
+                with self.assertRaises(AssertionError):
+                    gate.assert_mixed_d3(corrupted, expected,
+                                         'corrupted y_triple_prime')
+                # And explicitly: the relative error exceeds RTOL_3.
+                self.assertGreater(
+                    abs(corrupted - expected) / abs(expected), RTOL_3,
+                    'a 1e-6 corruption must exceed RTOL_3 -- otherwise the '
+                    'relative gate is too loose to have teeth')
+
+    def test_patched_module_third_derivative_fails_primary_gate(self):
+        # End-to-end: swap the module's y''' for a one-component-scaled
+        # copy and assert the STAGE-2 sweep detects it.
+        real = geometry.caustic_third_derivative
+
+        def scaled(gamma, theta, *, kappa=0.0, branch=1):
+            out = np.array(real(gamma, theta, kappa=kappa, branch=branch),
+                           dtype=float)
+            out[0] = out[0] * (1.0 + 1e-6)
+            return out
+
+        case = ThirdDerivativeStageTwoTestCase(
+            'test_third_derivative_matches_oracle')
+        case.setUp()
+        with mock.patch.object(geometry, 'caustic_third_derivative', scaled):
+            with self.assertRaises(AssertionError):
+                case.test_third_derivative_matches_oracle()
 
 
 class PositiveParityBranchInvarianceTestCase(TestCase):

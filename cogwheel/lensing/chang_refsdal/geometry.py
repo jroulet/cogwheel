@@ -1626,6 +1626,118 @@ def r_caustic(gamma: float, theta: float, *, kappa: float = 0.0,
     return max(float(np.linalg.norm(source)) for source in intersections)
 
 
+class _CausticCascade(NamedTuple):
+    """Shared closed-form intermediates of the caustic-curve cascade.
+
+    The Chang--Refsdal caustic is ``y_i(theta) = p_i(theta) r(theta)
+    T_i(theta)``.  This bundle carries the pieces every theta-derivative
+    of that curve is assembled from: the shear-aligned reduction ``lam =
+    1 - kappa`` and shear ``gamma`` (both needed for ``p_i = (lam -+
+    gamma) - lam u``), the radial coordinate ``u`` and its first three
+    theta-derivatives, the tube factor ``r = 1 / sqrt(lam u)`` and its
+    first three theta-derivatives, and the tangent components ``cos
+    theta`` / ``sin theta``.  All derivatives are symbolic (no finite
+    difference).  Produced once by :func:`_caustic_cascade`; consumed by
+    :func:`caustic_derivatives` (orders 1--2) and
+    :func:`caustic_third_derivative` (order 3).
+    """
+    lam: float
+    gamma: float
+    u: np.ndarray
+    u_p: np.ndarray
+    u_pp: np.ndarray
+    u_ppp: np.ndarray
+    r: np.ndarray
+    r_p: np.ndarray
+    r_pp: np.ndarray
+    r_ppp: np.ndarray
+    cos_t: np.ndarray
+    sin_t: np.ndarray
+
+
+def _caustic_cascade(gamma: float, theta, kappa: float,
+                     branch: int) -> _CausticCascade:
+    """Closed-form ``u``/``r`` cascade shared by the caustic-derivative API.
+
+    Performs the full domain-guard / refusal cascade (byte-identical to
+    the one previously inlined in :func:`caustic_derivatives`) and returns
+    the scalar/array intermediates ``u, u', u'', u'''`` and ``r, r', r'',
+    r'''`` -- each the *symbolic* theta-derivative of the closed form, no
+    finite difference -- alongside ``lam``, ``gamma`` and the tangent
+    components ``cos theta`` / ``sin theta``.  Both public consumers
+    (:func:`caustic_derivatives`, :func:`caustic_third_derivative`)
+    assemble their curve derivatives from this one bundle, so the domain
+    contract and the ``LensDomainError`` messages are single-sourced here.
+
+    See :func:`caustic_derivatives` for the meaning of ``gamma, theta,
+    kappa, branch`` and the domain contract.
+    """
+    gamma = float(gamma)
+    lam = 1.0 - float(kappa)
+    if lam <= 0.0:
+        raise LensDomainError(
+            f'Cannot evaluate caustic derivatives for (kappa, gamma) = '
+            f'({kappa}, {gamma}): 1 - kappa = {lam} <= 0 (over-critical '
+            f'/ Type III); such configurations are out of scope.')
+    if abs(gamma) == lam:
+        raise LensDomainError(
+            f'Cannot evaluate caustic derivatives for (kappa, gamma) = '
+            f'({kappa}, {gamma}): |gamma| == 1 - kappa = {lam} exactly '
+            f'(det A = 0, the parity boundary); this boundary is a named '
+            f'refusal.')
+    theta = np.asarray(theta, dtype=float)
+    eff = gamma / lam
+    positive_parity = abs(gamma) < lam
+    b = 1 if positive_parity else int(branch)
+    s, c = np.sin(2.0 * theta), np.cos(2.0 * theta)
+    c4 = np.cos(4.0 * theta)
+    discriminant = 1.0 - eff**2 * s**2
+    if not positive_parity and np.any(discriminant < -1e-12):
+        raise LensDomainError(
+            f'Cannot evaluate macro-saddle caustic derivatives for '
+            f'(kappa, gamma) = ({kappa}, {gamma}): a polar angle lies '
+            f'outside the critical wedge |sin 2 theta| <= (1 - kappa) / '
+            f'|gamma|.')
+    discriminant = np.maximum(discriminant, 0.0)
+    d_root = np.sqrt(discriminant)
+    if not positive_parity and np.any(d_root == 0.0):
+        raise LensDomainError(
+            f'Cannot evaluate macro-saddle caustic derivatives for '
+            f'(kappa, gamma) = ({kappa}, {gamma}): theta lies exactly on '
+            f'the critical wedge edge |sin 2 theta| == (1 - kappa) / '
+            f'|gamma|, the deltoid cusp where the caustic derivatives '
+            f'genuinely diverge (u_p, u_pp -> infinity); this degenerate '
+            f'boundary is a named refusal, mirroring the off-wedge '
+            f'refusal above.')
+    u = eff * c + b * d_root
+    if not positive_parity and np.any(u <= 0.0):
+        raise LensDomainError(
+            f'Cannot evaluate macro-saddle caustic derivatives for '
+            f'(kappa, gamma) = ({kappa}, {gamma}): branch {branch} gives '
+            f'a non-positive radial coordinate u <= 0.')
+    u_p = -2.0 * eff * s - b * 2.0 * eff**2 * s * c / d_root
+    u_pp = (-4.0 * eff * c - b * 4.0 * eff**2
+            * (c4 * d_root**2 + eff**2 * s**2 * c**2) / d_root**3)
+    # Third derivative of ``u`` from the SAME closed form differentiated
+    # once further: ``u''' = 8 eff s + b d'''`` with, writing N = s c,
+    # ``d''' = 32 eff^2 N / d - 24 eff^4 c4 N / d^3 - 24 eff^6 N^3 / d^5``.
+    u_ppp = (8.0 * eff * s + b * (
+        32.0 * eff**2 * s * c / d_root
+        - 24.0 * eff**4 * c4 * s * c / d_root**3
+        - 24.0 * eff**6 * s**3 * c**3 / d_root**5))
+    r = 1.0 / np.sqrt(lam * u)
+    r_p = -r * u_p / (2.0 * u)
+    r_pp = r * (3.0 * u_p**2 / (4.0 * u**2) - u_pp / (2.0 * u))
+    # ``r = (lam u)^{-1/2}`` differentiated a third time (chain rule on u):
+    # ``r''' = r (-15 u'^3 / (8 u^3) + 9 u' u'' / (4 u^2) - u''' / (2 u))``.
+    r_ppp = r * (-15.0 * u_p**3 / (8.0 * u**3)
+                 + 9.0 * u_p * u_pp / (4.0 * u**2)
+                 - u_ppp / (2.0 * u))
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    return _CausticCascade(lam, gamma, u, u_p, u_pp, u_ppp,
+                           r, r_p, r_pp, r_ppp, cos_t, sin_t)
+
+
 def caustic_derivatives(gamma: float, theta, *, kappa: float = 0.0,
                         branch: int = 1):
     """Analytic first and second theta-derivatives of the caustic curve.
@@ -1674,56 +1786,11 @@ def caustic_derivatives(gamma: float, theta, *, kappa: float = 0.0,
         derivatives genuinely diverge), or the selected branch gives a
         non-positive radius.
     """
-    gamma = float(gamma)
-    lam = 1.0 - float(kappa)
-    if lam <= 0.0:
-        raise LensDomainError(
-            f'Cannot evaluate caustic derivatives for (kappa, gamma) = '
-            f'({kappa}, {gamma}): 1 - kappa = {lam} <= 0 (over-critical '
-            f'/ Type III); such configurations are out of scope.')
-    if abs(gamma) == lam:
-        raise LensDomainError(
-            f'Cannot evaluate caustic derivatives for (kappa, gamma) = '
-            f'({kappa}, {gamma}): |gamma| == 1 - kappa = {lam} exactly '
-            f'(det A = 0, the parity boundary); this boundary is a named '
-            f'refusal.')
-    theta = np.asarray(theta, dtype=float)
-    eff = gamma / lam
-    positive_parity = abs(gamma) < lam
-    b = 1 if positive_parity else int(branch)
-    s, c = np.sin(2.0 * theta), np.cos(2.0 * theta)
-    c4 = np.cos(4.0 * theta)
-    discriminant = 1.0 - eff**2 * s**2
-    if not positive_parity and np.any(discriminant < -1e-12):
-        raise LensDomainError(
-            f'Cannot evaluate macro-saddle caustic derivatives for '
-            f'(kappa, gamma) = ({kappa}, {gamma}): a polar angle lies '
-            f'outside the critical wedge |sin 2 theta| <= (1 - kappa) / '
-            f'|gamma|.')
-    discriminant = np.maximum(discriminant, 0.0)
-    d_root = np.sqrt(discriminant)
-    if not positive_parity and np.any(d_root == 0.0):
-        raise LensDomainError(
-            f'Cannot evaluate macro-saddle caustic derivatives for '
-            f'(kappa, gamma) = ({kappa}, {gamma}): theta lies exactly on '
-            f'the critical wedge edge |sin 2 theta| == (1 - kappa) / '
-            f'|gamma|, the deltoid cusp where the caustic derivatives '
-            f'genuinely diverge (u_p, u_pp -> infinity); this degenerate '
-            f'boundary is a named refusal, mirroring the off-wedge '
-            f'refusal above.')
-    u = eff * c + b * d_root
-    if not positive_parity and np.any(u <= 0.0):
-        raise LensDomainError(
-            f'Cannot evaluate macro-saddle caustic derivatives for '
-            f'(kappa, gamma) = ({kappa}, {gamma}): branch {branch} gives '
-            f'a non-positive radial coordinate u <= 0.')
-    u_p = -2.0 * eff * s - b * 2.0 * eff**2 * s * c / d_root
-    u_pp = (-4.0 * eff * c - b * 4.0 * eff**2
-            * (c4 * d_root**2 + eff**2 * s**2 * c**2) / d_root**3)
-    r = 1.0 / np.sqrt(lam * u)
-    r_p = -r * u_p / (2.0 * u)
-    r_pp = r * (3.0 * u_p**2 / (4.0 * u**2) - u_pp / (2.0 * u))
-    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    cascade = _caustic_cascade(gamma, theta, kappa, branch)
+    lam, gamma = cascade.lam, cascade.gamma
+    u, u_p, u_pp = cascade.u, cascade.u_p, cascade.u_pp
+    r, r_p, r_pp = cascade.r, cascade.r_p, cascade.r_pp
+    cos_t, sin_t = cascade.cos_t, cascade.sin_t
     y_prime, y_double_prime = [], []
     for sign, tan, tan_p, tan_pp in ((-1.0, cos_t, -sin_t, -cos_t),
                                      (1.0, sin_t, cos_t, -sin_t)):
@@ -1746,6 +1813,83 @@ def caustic_speed(gamma: float, theta, *, kappa: float = 0.0,
     """
     y_prime, _ = caustic_derivatives(gamma, theta, kappa=kappa, branch=branch)
     return np.sqrt(y_prime[0]**2 + y_prime[1]**2)
+
+
+def caustic_third_derivative(gamma: float, theta, *, kappa: float = 0.0,
+                             branch: int = 1):
+    """Analytic third theta-derivative ``y'''`` of the caustic curve.
+
+    Continues the same closed-form cascade one order beyond
+    :func:`caustic_derivatives`.  For the parametric curve
+    ``y_i(theta) = p_i(theta) r(theta) T_i(theta)`` (see
+    :func:`caustic_derivatives` for ``p_i``, ``r`` and ``T``), the third
+    derivative is the full triple-product Leibniz expansion
+
+        y_i''' = p_i''' r T_i + 3 p_i'' r' T_i + 3 p_i'' r T_i'
+               + 3 p_i' r'' T_i + 6 p_i' r' T_i' + 3 p_i' r T_i''
+               + p_i r''' T_i + 3 p_i r'' T_i' + 3 p_i r' T_i''
+               + p_i r T_i''',
+
+    with ``T = (cos theta, sin theta)`` so ``T''' = (sin theta, -cos
+    theta)``, ``p_i''' = -lam u'''``, and ``u'''`` / ``r'''`` the
+    symbolic third derivatives of the closed-form ``u`` and ``r =
+    1 / sqrt(lam u)`` (no finite difference or sampled arc).  Vectorised
+    over ``theta``.
+
+    The domain contract and the ``LensDomainError`` refusals are shared
+    verbatim with :func:`caustic_derivatives` via the private
+    ``_caustic_cascade`` helper: at positive parity ``branch`` is ignored
+    (only the ``+`` root gives a positive radius); the macro saddle
+    honours ``branch`` and refuses outside the critical wedge, on the
+    wedge edge, or where the branch gives a non-positive radius.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    theta : float or np.ndarray
+        Polar angle(s) in the lens plane, radians.
+    kappa : float, optional
+        External convergence (default 0.0).
+    branch : int, optional
+        Square-root branch ``+-1`` of ``u`` (default ``+1``); ignored at
+        positive parity.
+
+    Returns
+    -------
+    np.ndarray
+        ``y_triple_prime`` shaped ``(2,)`` for scalar ``theta`` or
+        ``(2, N)`` for an array of ``N`` angles.
+
+    Raises
+    ------
+    LensDomainError
+        Under exactly the same conditions as :func:`caustic_derivatives`
+        (over-critical ``1 - kappa <= 0``, the parity wall
+        ``abs(gamma) == 1 - kappa``, or -- for a macro saddle -- an angle
+        outside/on the critical wedge or a non-positive branch radius).
+    """
+    cascade = _caustic_cascade(gamma, theta, kappa, branch)
+    lam, gamma = cascade.lam, cascade.gamma
+    u, u_p, u_pp, u_ppp = cascade.u, cascade.u_p, cascade.u_pp, cascade.u_ppp
+    r, r_p, r_pp, r_ppp = cascade.r, cascade.r_p, cascade.r_pp, cascade.r_ppp
+    cos_t, sin_t = cascade.cos_t, cascade.sin_t
+    y_triple_prime = []
+    for sign, tan, tan_p, tan_pp, tan_ppp in (
+            (-1.0, cos_t, -sin_t, -cos_t, sin_t),
+            (1.0, sin_t, cos_t, -sin_t, -cos_t)):
+        p = (lam + sign * gamma) - lam * u
+        p_p = -lam * u_p
+        p_pp = -lam * u_pp
+        p_ppp = -lam * u_ppp
+        y_triple_prime.append(
+            p_ppp * r * tan
+            + 3.0 * p_pp * r_p * tan + 3.0 * p_pp * r * tan_p
+            + 3.0 * p_p * r_pp * tan + 6.0 * p_p * r_p * tan_p
+            + 3.0 * p_p * r * tan_pp
+            + p * r_ppp * tan + 3.0 * p * r_pp * tan_p
+            + 3.0 * p * r_p * tan_pp + p * r * tan_ppp)
+    return np.array(y_triple_prime)
 
 
 def caustic_curvature_radius(gamma: float, theta, *, kappa: float = 0.0,

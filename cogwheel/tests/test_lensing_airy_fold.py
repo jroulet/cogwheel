@@ -2763,3 +2763,994 @@ class LadderByteIdentitySelfFalsificationTestCase(_FoldArmTestCase):
         self.assertTrue(
             flagged,
             'the purity AST walk failed to flag an F_op_grid reference')
+
+
+# ======================================================================
+# WP1: analytic-root `_cusp_vertex` on the serving path.
+#
+# The pre-1c cusp finder scanned a 129-point pi-window of the
+# central-difference caustic speed and refined the minimum by golden
+# section (~258 `geometry.critical_point` evaluations per call).  WP1
+# replaces it with a single `brentq` on the analytic caustic-speed slope
+# ``g(theta) = y'(theta) . y''(theta)`` from `geometry.caustic_derivatives`
+# (O(1) geometry calls), made frame-correct (the root is found in the
+# shear-aligned ``phase = theta - beta`` frame and mapped back), parity-
+# aware (astroid cusps at ``phase in {0, pi/2, pi, 3pi/2}`` vs the macro-
+# saddle finite wedge-tip at ``phase in {0, pi}``), and refusal-safe at a
+# diverging deltoid wedge edge.
+#
+# The three gates below are, in order of load: (1) DIRECT correctness of
+# the returned vertex plus an O(1) geometry-call budget; (2) the
+# load-bearing SERVED-VALUE insensitivity of `cusp_amplification` to a
+# sub-resolution perturbation of the vertex angle (a cusp is a stationary
+# point of the caustic speed, so a served value that swings with a tiny
+# vertex move betrays a frame or bracketing error); (3) a non-load-bearing
+# OLD-vs-NEW equivalence against an independent reimplementation of the
+# retired scan finder.
+# ----------------------------------------------------------------------
+
+#: The real analytic `_cusp_vertex`, captured at import time so the
+#: served-value gates can call it from INSIDE a monkeypatch of
+#: `_pearcey_cusp._cusp_vertex` without recursing into the patched name.
+_REAL_CUSP_VERTEX = _pearcey_cusp._cusp_vertex
+
+#: Positive-parity astroid cusp phases (``phase = theta - beta``): the
+#: four exact cusps of the ``kappa``-reduced astroid.  A returned
+#: positive-parity vertex must sit at one of these, i.e. the image polar
+#: angle must equal ``beta`` plus one of these to `_VERTEX_ANGLE_TOL`.
+_ASTROID_CUSP_PHASES = (0.0, 0.5 * math.pi, math.pi, 1.5 * math.pi)
+
+#: Absolute tolerance on the analytic cusp-angle placement (spec:
+#: <= 1e-10; the `brentq` ``xtol`` is ``4 * eps`` so the measured residual
+#: is at machine level, ~0.0..1e-15).
+_VERTEX_ANGLE_TOL = 1e-10
+
+#: The caustic speed at the located cusp must be below this fraction of
+#: the local off-cusp speed scale (spec: ~1e-8; measured ~1e-16 because
+#: the cusp is an EXACT analytic root, not a sampled minimum).
+_VERTEX_SPEED_RATIO_TOL = 1e-8
+
+#: O(1) budget on the TOTAL number of `geometry.critical_point` +
+#: `geometry.caustic_derivatives` calls a single `_cusp_vertex` makes
+#: (spec: < ~20, never the retired ~258 scan; measured 11).
+_MAX_GEOMETRY_CALLS = 20
+
+#: Sub-resolution vertex-angle perturbations for the SERVED-VALUE
+#: insensitivity gate, radians: the retired scan step ``pi / 128``, an
+#: intermediate, and the finite-difference delta -- each applied with
+#: both signs.  A served value stable across all of these cannot depend
+#: on where inside a scan cell the vertex was placed.
+_VERTEX_PERTURBATIONS = (0.0245, -0.0245, 1e-3, -1e-3, 1e-4, -1e-4)
+
+#: Frequency grid for the served-value gates.  ``w = 20`` is too close to
+#: the cusp for the leading uniform error to clear the envelope bar (the
+#: scaled radius falls below ``R_min``) so it never serves; ``w = 40``
+#: serves every config and ``w = 80`` serves the stronger-shear ones.
+_VERTEX_W_GRID = (20.0, 40.0, 80.0)
+
+#: Fraction of configurations that must serve a finite ``F`` at some
+#: ``w`` for the insensitivity sweep to prove anything (spec: >= 60%;
+#: measured 100% -- all 15 serve at ``w = 40``).
+_VERTEX_MIN_SERVE_FRACTION = 0.60
+
+#: Served-value insensitivity / equivalence bar: the F016 max-normalized
+#: envelope bar of the cusp arm.  Bounds amplitude and phase together
+#: (asserted on the COMPLEX ``F``).
+_VERTEX_ENVELOPE_BAR = _pearcey_cusp._DEFAULT_ENVELOPE_BAR
+
+#: Curated cusp-neighbourhood configurations ``(name, gamma, beta,
+#: kappa, source)`` spanning both parities with ``beta != 0`` and
+#: ``kappa in {0.0, 0.3}``.  Each ``source`` was placed (by a throwaway
+#: generator, then frozen) so the Pearcey scaled radius
+#: ``R = hypot(x, y)`` sits in ``[1.2 R_min, 5 R_min]`` at ``w = 40`` --
+#: inside the served shell and on BOTH sides of the cusp
+#: (``delta_perp`` of either sign across the set).  The brief's
+#: ``gamma = 0.05`` positive fixture and the ``gamma in {1.02, 1.3}``,
+#: ``gamma = 0.9 / kappa = 0.3`` saddles were MEASURED first (per the
+#: test-dev rule never to anchor on a brief's un-measured coordinates):
+#: ``gamma = 0.05`` never serves (the caustic is too weak for a finite-
+#: ``w`` uniform form to clear the bar) and the ``gamma = 1.02`` /
+#: ``gamma = 0.9`` saddles serve only marginally, so the frozen saddle
+#: set is ``gamma = 1.3`` where the wedge-tip Pearcey form is robust.
+_VERTEX_CONFIGS = (
+    ('pos_g03_b0', 0.3, 0.0, 0.0, (0.08834286, 0.09290634)),
+    ('pos_g03_b037_A', 0.3, 0.37, 0.0, (0.0487681, 0.11856526)),
+    ('pos_g03_b037_B', 0.3, 0.37, 0.0, (-0.11596083, 0.05467298)),
+    ('pos_g03_b11_A', 0.3, 1.1, 0.0, (0.04272683, -0.12087376)),
+    ('pos_g03_b11_B', 0.3, 1.1, 0.0, (0.12287079, 0.03658985)),
+    ('pos_g06_b037_A', 0.6, 0.37, 0.0, (0.28738812, 0.28491496)),
+    ('pos_g06_b037_B', 0.6, 0.37, 0.0, (-0.40434181, 0.01661841)),
+    ('pos_g06_b11_A', 0.6, 1.1, 0.0, (-0.02415313, -0.40396175)),
+    ('pos_g06_b11_B', 0.6, 1.1, 0.0, (0.31238748, 0.25725966)),
+    ('pos_g06_b0_k03', 0.6, 0.0, 0.3, (0.58990403, 0.1275953)),
+    ('pos_g06_b037_k03_A', 0.6, 0.37, 0.3, (0.50384323, 0.33227899)),
+    ('pos_g06_b037_k03_B', 0.6, 0.37, 0.3, (-0.59612409, -0.09435781)),
+    ('sad_g13_b0', 1.3, 0.0, 0.0, (-1.05656912, -0.59574096)),
+    ('sad_g13_b037_A', 1.3, 0.37, 0.0, (1.20049741, -0.17335388)),
+    ('sad_g13_b037_B', 1.3, 0.37, 0.0, (-0.76963916, -0.93749728)),
+)
+
+#: Direct-correctness triples ``(gamma, beta, kappa, cusp_index)``: a
+#: source is seeded just off the cusp at astroid index ``cusp_index``
+#: (a lobe centre ``0`` or ``pi`` for the saddle) and the returned vertex
+#: is inspected.  Both parities, ``beta != 0``.
+_DIRECT_VERTEX_CONFIGS = (
+    (0.3, 0.37, 0.0, 0),
+    (0.3, 0.37, 0.0, 1),
+    (0.6, 1.1, 0.3, 0),
+    (0.6, 1.1, 0.3, 2),
+    (0.6, 0.0, 0.3, 3),
+    (1.3, 0.37, 0.0, 0),
+    (1.3, 0.0, 0.0, 0),
+)
+
+
+def _vertex_branch(gamma, beta, kappa, seed_theta):
+    """Serve-path branch for ``_cusp_vertex`` (``+1`` positive parity)."""
+    lam = 1.0 - float(kappa)
+    if abs(gamma) < lam:
+        return 1
+    return _pearcey_cusp._saddle_branch(gamma, beta, kappa, seed_theta)
+
+
+def _seed_source_near_cusp(gamma, beta, kappa, cusp_index, offset=0.02):
+    """
+    Return a source seeded just off the cusp at astroid ``cusp_index``.
+
+    The cusp caustic point is ``geometry.critical_point`` at phase
+    ``cusp_index * pi/2`` (positive parity) or a lobe centre ``0``/``pi``
+    (macro saddle), and the source is pushed a hair along the hard axis
+    so the nearest-caustic seed lands unambiguously on that cusp.
+    """
+    lam = 1.0 - float(kappa)
+    if abs(gamma) < lam:
+        phase = _ASTROID_CUSP_PHASES[cusp_index]
+    else:
+        phase = math.pi * (cusp_index % 2)  # lobe centre 0 or pi
+    theta_cusp = phase + beta
+    branch = _vertex_branch(gamma, beta, kappa, theta_cusp)
+    cusp = geometry.critical_point(gamma, theta_cusp, beta, kappa, branch)
+    return np.asarray(cusp.source) + offset * np.asarray(cusp.hard_axis)
+
+
+def _count_geometry_calls(callable_, *args, **kwargs):
+    """
+    Run ``callable_`` and return ``(result, n_geometry_calls)``.
+
+    Counts every `geometry.critical_point` and
+    `geometry.caustic_derivatives` invocation (the latter also covers
+    `geometry.caustic_speed`, which delegates to it), i.e. every geometry
+    evaluation the analytic cusp finder actually makes.
+    """
+    counter = {'n': 0}
+    real_cp = geometry.critical_point
+    real_cd = geometry.caustic_derivatives
+
+    def counting_cp(*a, **k):
+        counter['n'] += 1
+        return real_cp(*a, **k)
+
+    def counting_cd(*a, **k):
+        counter['n'] += 1
+        return real_cd(*a, **k)
+
+    with mock.patch.object(geometry, 'critical_point', counting_cp), \
+            mock.patch.object(geometry, 'caustic_derivatives', counting_cd):
+        result = callable_(*args, **kwargs)
+    return result, counter['n']
+
+
+def _capture_vertex_theta(gamma, beta, kappa, source, seed_theta, branch):
+    """
+    Return ``(vertex, theta_cusp)`` -- the real `_cusp_vertex` output and
+    the angle it fed to the final `geometry.critical_point`.
+
+    A spy on `geometry.critical_point` records the last angle the analytic
+    finder resolved to, WITHOUT reproducing the root find (which would be
+    self-referential).  ``theta_cusp`` is ``None`` when the finder refused.
+    """
+    captured = {}
+    real_cp = geometry.critical_point
+
+    def spy(g, th, b, k, br):
+        captured['theta'] = th
+        return real_cp(g, th, b, k, br)
+
+    with mock.patch.object(geometry, 'critical_point', spy):
+        vertex = _REAL_CUSP_VERTEX(
+            gamma, beta, kappa, source, seed_theta, branch)
+    return vertex, captured.get('theta')
+
+
+class DirectCuspVertexCorrectnessTestCase(_FoldArmTestCase):
+    """
+    Acceptance #1 / #3: the returned vertex is the frame-correct,
+    parity-aware analytic cusp, found in O(1) geometry calls.
+    """
+
+    def test_positive_parity_vertex_sits_on_an_astroid_cusp(self):
+        """
+        Positive parity: the vertex image polar angle equals ``beta`` plus
+        one of ``{0, pi/2, pi, 3pi/2}`` to `_VERTEX_ANGLE_TOL`.
+
+        The astroid's four cusps sit exactly at ``phase = theta - beta in
+        {0, pi/2, pi, 3pi/2}``; a correct frame mapping puts the returned
+        image on one of them.
+        """
+        for gamma, beta, kappa, cusp_index in _DIRECT_VERTEX_CONFIGS:
+            lam = 1.0 - kappa
+            if abs(gamma) >= lam:
+                continue  # saddle handled separately
+            with self.subTest(gamma=gamma, beta=beta, kappa=kappa,
+                              cusp=cusp_index):
+                source = _seed_source_near_cusp(gamma, beta, kappa,
+                                                cusp_index)
+                nearest = geometry.nearest_caustic_point(
+                    gamma, beta, source, kappa=kappa)
+                branch = _vertex_branch(gamma, beta, kappa, nearest.theta)
+                vertex = _pearcey_cusp._cusp_vertex(
+                    gamma, beta, kappa, source, nearest.theta, branch)
+                self.assertIsNotNone(
+                    vertex, 'positive-parity finder refused a near-cusp seed')
+                angle = math.atan2(vertex.image[1], vertex.image[0])
+                residuals = [
+                    abs((angle - beta - phase + math.pi) % (2.0 * math.pi)
+                        - math.pi)
+                    for phase in _ASTROID_CUSP_PHASES]
+                self.n_checks += 1
+                self.assertLess(
+                    min(residuals), _VERTEX_ANGLE_TOL,
+                    f'vertex image angle {angle} is not beta + k*pi/2 '
+                    f'(min residual {min(residuals):.3e})')
+
+    def test_positive_parity_speed_vanishes_at_the_cusp(self):
+        """
+        Positive parity: the analytic caustic speed at the located cusp
+        angle is below `_VERTEX_SPEED_RATIO_TOL` of the local off-cusp
+        speed scale -- the defining property of a cusp (a speed root).
+        """
+        for gamma, beta, kappa, cusp_index in _DIRECT_VERTEX_CONFIGS:
+            lam = 1.0 - kappa
+            if abs(gamma) >= lam:
+                continue
+            with self.subTest(gamma=gamma, beta=beta, kappa=kappa,
+                              cusp=cusp_index):
+                source = _seed_source_near_cusp(gamma, beta, kappa,
+                                                cusp_index)
+                nearest = geometry.nearest_caustic_point(
+                    gamma, beta, source, kappa=kappa)
+                branch = _vertex_branch(gamma, beta, kappa, nearest.theta)
+                _vertex, theta_cusp = _capture_vertex_theta(
+                    gamma, beta, kappa, source, nearest.theta, branch)
+                self.assertIsNotNone(theta_cusp, 'finder refused')
+                phase_cusp = theta_cusp - beta
+                speed_cusp = float(geometry.caustic_speed(
+                    gamma, phase_cusp, kappa=kappa, branch=branch))
+                off = max(float(geometry.caustic_speed(
+                    gamma, phase_cusp + delta, kappa=kappa, branch=branch))
+                    for delta in (0.05, -0.05, 0.1, -0.1))
+                self.n_checks += 1
+                self.assertLess(
+                    speed_cusp, _VERTEX_SPEED_RATIO_TOL * off,
+                    f'caustic speed {speed_cusp:.3e} at the cusp is not far '
+                    f'below the off-cusp scale {off:.3e}')
+
+    def test_saddle_vertex_sits_at_the_finite_wedge_tip(self):
+        """
+        Macro saddle: the vertex sits at a finite wedge-tip cusp, i.e. its
+        cusp phase ``theta - beta`` reduces to ``0`` or ``pi`` to
+        `_VERTEX_ANGLE_TOL` (never a diverging wedge edge).
+        """
+        for gamma, beta, kappa, cusp_index in _DIRECT_VERTEX_CONFIGS:
+            lam = 1.0 - kappa
+            if abs(gamma) < lam:
+                continue
+            with self.subTest(gamma=gamma, beta=beta, kappa=kappa,
+                              cusp=cusp_index):
+                source = _seed_source_near_cusp(gamma, beta, kappa,
+                                                cusp_index)
+                nearest = geometry.nearest_caustic_point(
+                    gamma, beta, source, kappa=kappa)
+                branch = _vertex_branch(gamma, beta, kappa, nearest.theta)
+                _vertex, theta_cusp = _capture_vertex_theta(
+                    gamma, beta, kappa, source, nearest.theta, branch)
+                self.assertIsNotNone(
+                    theta_cusp, 'saddle finder refused a wedge-tip seed')
+                phase = theta_cusp - beta
+                phase_c = abs((phase + 0.5 * math.pi) % math.pi
+                              - 0.5 * math.pi)
+                self.n_checks += 1
+                self.assertLess(
+                    phase_c, _VERTEX_ANGLE_TOL,
+                    f'saddle vertex phase {phase} is not a wedge tip '
+                    f'(0 or pi), residual {phase_c:.3e}')
+
+    def test_cusp_vertex_uses_o1_geometry_calls(self):
+        """
+        Acceptance #3: a single `_cusp_vertex` makes O(1) geometry calls
+        (< `_MAX_GEOMETRY_CALLS`), never the retired ~258-point scan.
+        """
+        for gamma, beta, kappa, cusp_index in _DIRECT_VERTEX_CONFIGS:
+            with self.subTest(gamma=gamma, beta=beta, kappa=kappa,
+                              cusp=cusp_index):
+                source = _seed_source_near_cusp(gamma, beta, kappa,
+                                                cusp_index)
+                nearest = geometry.nearest_caustic_point(
+                    gamma, beta, source, kappa=kappa)
+                branch = _vertex_branch(gamma, beta, kappa, nearest.theta)
+                vertex, n_calls = _count_geometry_calls(
+                    _pearcey_cusp._cusp_vertex,
+                    gamma, beta, kappa, source, nearest.theta, branch)
+                self.assertIsNotNone(vertex, 'finder refused a near-cusp seed')
+                self.n_checks += 1
+                self.assertLess(
+                    n_calls, _MAX_GEOMETRY_CALLS,
+                    f'_cusp_vertex made {n_calls} geometry calls '
+                    f'(>= {_MAX_GEOMETRY_CALLS}); a scan finder regressed')
+
+
+def _perturbed_cusp_vertex(dtheta):
+    """
+    Return a `_cusp_vertex` replacement that shifts the located cusp
+    ANGLE by ``dtheta`` radians.
+
+    It calls the REAL finder (via `_capture_vertex_theta`) to obtain the
+    frame-correct cusp angle and branch, then returns
+    `geometry.critical_point` at ``theta_cusp + dtheta`` -- i.e. the same
+    caustic point the code would have used had its root landed ``dtheta``
+    away.  Refusals (``None``) are passed through unchanged.
+    """
+    def replacement(gamma, beta, kappa, source, seed_theta, branch):
+        vertex, theta_cusp = _capture_vertex_theta(
+            gamma, beta, kappa, source, seed_theta, branch)
+        if vertex is None or theta_cusp is None:
+            return vertex
+        return geometry.critical_point(
+            gamma, theta_cusp + dtheta, beta, kappa, branch)
+    return replacement
+
+
+def _served_with_vertex(config, w, vertex_impl=None):
+    """
+    Return ``cusp_amplification(w, ...)`` for ``config``, optionally with
+    `_pearcey_cusp._cusp_vertex` monkeypatched to ``vertex_impl``.
+
+    ``config`` is a ``_VERTEX_CONFIGS`` row; ``vertex_impl=None`` uses the
+    real analytic finder.
+    """
+    _name, gamma, beta, kappa, source = config
+    src = np.asarray(source, dtype=float)
+    if vertex_impl is None:
+        return _pearcey_cusp.cusp_amplification(
+            w, src, gamma, beta=beta, kappa=kappa)
+    with mock.patch.object(_pearcey_cusp, '_cusp_vertex', vertex_impl):
+        return _pearcey_cusp.cusp_amplification(
+            w, src, gamma, beta=beta, kappa=kappa)
+
+
+class ServedValueVertexInsensitivityTestCase(_FoldArmTestCase):
+    """
+    Acceptance #2 (LOAD-BEARING): the served `cusp_amplification` value is
+    insensitive to a sub-resolution perturbation of the vertex angle.
+
+    A cusp is a stationary point of the caustic speed, so moving the
+    vertex angle by ``dtheta`` moves the caustic point by ``O(dtheta^3)``;
+    a served value that swings with a tiny vertex move would betray a
+    frame or bracketing error.  The gate bounds ``max_perturbations
+    |F_perturbed - F*| / max_w|F|`` by the F016 envelope bar on the
+    COMPLEX ``F`` (amplitude and phase together).
+    """
+
+    def test_served_value_is_insensitive_to_vertex_angle_perturbation(self):
+        served_configs = 0
+        worst_overall = 0.0
+        plot_angles = []
+        plot_deviations = []
+        for config in _VERTEX_CONFIGS:
+            name = config[0]
+            star = {w: _served_with_vertex(config, w)
+                    for w in _VERTEX_W_GRID}
+            finite = {w: value for w, value in star.items()
+                      if value is not None and np.isfinite(abs(value))}
+            if not finite:
+                continue
+            served_configs += 1
+            denom = max(abs(value) for value in finite.values())
+            self.assertGreater(denom, 0.0, f'{name}: |F| is zero')
+            for w, f_star in finite.items():
+                for dtheta in _VERTEX_PERTURBATIONS:
+                    f_pert = _served_with_vertex(
+                        config, w, _perturbed_cusp_vertex(dtheta))
+                    self.assertIsNotNone(
+                        f_pert,
+                        f'{name} w={w}: a sub-resolution vertex shift '
+                        f'{dtheta} turned a served value into a refusal')
+                    deviation = abs(f_pert - f_star) / denom
+                    worst_overall = max(worst_overall, deviation)
+                    plot_angles.append(dtheta)
+                    plot_deviations.append(deviation)
+                    self.n_checks += 1
+                    with self.subTest(config=name, w=w, dtheta=dtheta):
+                        self.assertLess(
+                            deviation, _VERTEX_ENVELOPE_BAR,
+                            f'{name} w={w}: served value swings '
+                            f'{deviation:.3e} (> bar {_VERTEX_ENVELOPE_BAR}) '
+                            f'under a {dtheta} rad vertex-angle shift -- a '
+                            f'frame or bracketing error')
+
+        serve_fraction = served_configs / len(_VERTEX_CONFIGS)
+        self.assertGreaterEqual(
+            serve_fraction, _VERTEX_MIN_SERVE_FRACTION,
+            f'only {served_configs}/{len(_VERTEX_CONFIGS)} configs served a '
+            f'finite F ({serve_fraction:.0%} < '
+            f'{_VERTEX_MIN_SERVE_FRACTION:.0%}); the sweep proves nothing')
+        _save_plot(
+            'cusp_vertex_insensitivity',
+            plot_angles, plot_deviations,
+            xlabel='vertex-angle perturbation [rad]',
+            ylabel='|F_perturbed - F*| / max_w|F|')
+
+
+#: Retired-scan oracle parameters: the pre-1c finder sampled a 129-point
+#: pi-window of the central-difference caustic speed (finite-difference
+#: step 1e-4) and refined the minimum by golden section.  Numerical
+#: differencing IS the point here -- an INDEPENDENT construction of the
+#: cusp angle to cross-check the analytic root.
+_OLD_SCAN_POINTS = 129
+_OLD_FD_DELTA = 1e-4
+_INV_PHI = (math.sqrt(5.0) - 1.0) / 2.0
+
+
+def _old_caustic_speed(gamma, beta, kappa, branch, phase):
+    """
+    Central-difference caustic speed ``|dy/dphase|`` at ``phase``.
+
+    Independent of `geometry.caustic_derivatives`: it differences the
+    caustic SOURCE point from `geometry.critical_point` (the retired
+    finder's own primitive), so it validates the analytic derivatives
+    rather than reusing them.
+    """
+    plus = geometry.critical_point(
+        gamma, phase + _OLD_FD_DELTA + beta, beta, kappa, branch).source
+    minus = geometry.critical_point(
+        gamma, phase - _OLD_FD_DELTA + beta, beta, kappa, branch).source
+    step = np.asarray(plus) - np.asarray(minus)
+    return float(np.hypot(step[0], step[1])) / (2.0 * _OLD_FD_DELTA)
+
+
+def _golden_section_min(func, lo, hi, xtol=1e-10, itmax=200):
+    """Golden-section minimizer of a scalar ``func`` on ``[lo, hi]``."""
+    left = hi - _INV_PHI * (hi - lo)
+    right = lo + _INV_PHI * (hi - lo)
+    f_left, f_right = func(left), func(right)
+    for _ in range(itmax):
+        if hi - lo < xtol:
+            break
+        if f_left < f_right:
+            hi, right, f_right = right, left, f_left
+            left = hi - _INV_PHI * (hi - lo)
+            f_left = func(left)
+        else:
+            lo, left, f_left = left, right, f_right
+            right = lo + _INV_PHI * (hi - lo)
+            f_right = func(right)
+    return 0.5 * (lo + hi)
+
+
+def _old_cusp_vertex(gamma, beta, kappa, source, seed_theta, branch):
+    """
+    Independent reimplementation of the pre-1c scan cusp finder.
+
+    Scans a 129-point ``pi`` window of the central-difference caustic
+    speed around ``seed_phase = seed_theta - beta``, then golden-section
+    refines the minimum, and returns the `geometry.critical_point` there.
+    Grid points where `geometry.critical_point` refuses (beyond a deltoid
+    wedge edge) are skipped so the scan lands on the finite minimum.
+
+    This is a legitimate ORACLE for the analytic finder: finite
+    differencing is a virtue, not a defect, in an oracle.  Note that at a
+    macro-saddle wedge EDGE this finder returns a finite-but-meaningless
+    minimum where the analytic finder correctly refuses to ``None`` -- the
+    deliberate carve-out documented in the secondary gate.
+    """
+    del source  # `_cusp_vertex` locates the cusp from `seed_theta` alone
+    seed_phase = float(seed_theta) - float(beta)
+    grid = np.linspace(seed_phase - 0.5 * math.pi,
+                       seed_phase + 0.5 * math.pi, _OLD_SCAN_POINTS)
+    phases = []
+    speeds = []
+    for phase in grid:
+        try:
+            speeds.append(
+                _old_caustic_speed(gamma, beta, kappa, branch, phase))
+            phases.append(float(phase))
+        except geometry.LensDomainError:
+            continue
+    if len(phases) < 3:
+        return None
+    index = int(np.argmin(speeds))
+    lo = phases[max(0, index - 1)]
+    hi = phases[min(len(phases) - 1, index + 1)]
+
+    def speed(phase):
+        try:
+            return _old_caustic_speed(gamma, beta, kappa, branch, phase)
+        except geometry.LensDomainError:
+            return math.inf
+
+    phase_min = _golden_section_min(speed, lo, hi)
+    try:
+        return geometry.critical_point(
+            gamma, phase_min + beta, beta, kappa, branch)
+    except geometry.LensDomainError:
+        return None
+
+
+class ServedValueOldVersusNewTestCase(_FoldArmTestCase):
+    """
+    Non-load-bearing equivalence: the analytic finder reproduces the
+    retired scan finder's served values on the non-degenerate subset.
+
+    The two finders must agree on None-vs-served and, where both serve,
+    on the COMPLEX ``F`` to the F016 envelope bar.  Macro-saddle
+    wedge-EDGE configs are excluded on purpose (see the carve-out test):
+    there the old finder returns a finite-but-meaningless vertex while the
+    new one correctly refuses -- a correct IMPROVEMENT, not a regression.
+    """
+
+    def test_analytic_and_scan_finders_serve_equivalent_values(self):
+        table = []  # (name, w, |F_new|, |F_old|) diagnostic
+        for config in _VERTEX_CONFIGS:
+            name = config[0]
+            new_star = {w: _served_with_vertex(config, w)
+                        for w in _VERTEX_W_GRID}
+            finite = {w: value for w, value in new_star.items()
+                      if value is not None and np.isfinite(abs(value))}
+            denom = (max(abs(value) for value in finite.values())
+                     if finite else 1.0)
+            for w in _VERTEX_W_GRID:
+                new_value = new_star[w]
+                old_value = _served_with_vertex(config, w, _old_cusp_vertex)
+                self.n_checks += 1
+                with self.subTest(config=name, w=w):
+                    self.assertEqual(
+                        new_value is None, old_value is None,
+                        f'{name} w={w}: finders disagree on serve-vs-refuse '
+                        f'(new={"None" if new_value is None else "served"}, '
+                        f'old={"None" if old_value is None else "served"})')
+                    if new_value is not None and old_value is not None:
+                        deviation = abs(new_value - old_value) / denom
+                        table.append((name, w, abs(new_value),
+                                      abs(old_value)))
+                        self.assertLess(
+                            deviation, _VERTEX_ENVELOPE_BAR,
+                            f'{name} w={w}: analytic vs scan served values '
+                            f'differ by {deviation:.3e} (> bar '
+                            f'{_VERTEX_ENVELOPE_BAR}) -- a systematic frame '
+                            f'offset')
+        # Diagnostic table (best-effort; never fails the physics test).
+        if table:
+            _save_plot(
+                'cusp_old_vs_new_amplitude',
+                [abs_new for _n, _w, abs_new, _o in table],
+                [abs_old for _n, _w, _new, abs_old in table],
+                xlabel='|F| analytic finder',
+                ylabel='|F| scan finder')
+
+    def test_wedge_edge_carve_out_new_refuses_where_old_serves(self):
+        """
+        Documented carve-out: at a macro-saddle deltoid WEDGE EDGE the
+        analytic finder refuses (``None``) while the retired scan finder
+        returns a finite-but-meaningless vertex.
+
+        This is the intended improvement WP1 makes -- the finite-curvature
+        Pearcey normal form does not apply at a diverging wedge edge -- and
+        is why those configs are excluded from the equivalence sweep above.
+        """
+        gamma, beta, kappa = 1.3, 0.37, 0.0
+        theta_max = 0.5 * math.asin((1.0 - kappa) / abs(gamma))
+        seed_theta = beta + theta_max  # a diverging wedge edge
+        branch = _pearcey_cusp._saddle_branch(gamma, beta, kappa, seed_theta)
+        placeholder_source = np.zeros(2)
+
+        new_vertex = _REAL_CUSP_VERTEX(
+            gamma, beta, kappa, placeholder_source, seed_theta, branch)
+        old_vertex = _old_cusp_vertex(
+            gamma, beta, kappa, placeholder_source, seed_theta, branch)
+
+        self.n_checks += 1
+        self.assertIsNone(
+            new_vertex,
+            'the analytic finder should refuse a diverging wedge edge')
+        self.assertIsNotNone(
+            old_vertex,
+            'the scan finder is expected to return a finite wedge-edge '
+            'vertex (the carve-out would be vacuous otherwise)')
+
+
+#: A gross vertex-angle mislocation, radians: large enough that the
+#: served value either changes beyond the envelope bar or (as measured)
+#: is pushed out of the served shell into a refusal.  Both outcomes trip
+#: the primary insensitivity gate, proving it has teeth.
+_GROSS_VERTEX_SHIFT = 0.05
+
+#: A non-cusp astroid phase used to falsify the direct correctness gates:
+#: its image angle is NOT ``beta + k*pi/2`` and its caustic speed is NOT a
+#: vanishing fraction of the off-cusp scale.
+_NON_CUSP_PHASE = 0.1
+
+
+class CuspVertexSelfFalsificationTestCase(_FoldArmTestCase):
+    """
+    Proof the WP1 gates can go RED: each production check is confronted
+    with a deliberately wrong vertex and must reject it.
+    """
+
+    def test_primary_gate_flags_a_grossly_mislocated_vertex(self):
+        """
+        A ``_GROSS_VERTEX_SHIFT`` mislocation violates the insensitivity
+        gate -- the served value either moves past the bar or refuses.
+        """
+        config = _VERTEX_CONFIGS[0]  # pos_g03_b0: serves at w=40 and 80
+        name = config[0]
+        star = {w: _served_with_vertex(config, w) for w in _VERTEX_W_GRID}
+        finite = {w: value for w, value in star.items()
+                  if value is not None and np.isfinite(abs(value))}
+        self.assertTrue(finite, f'{name}: expected a served baseline')
+        denom = max(abs(value) for value in finite.values())
+        shifted = _perturbed_cusp_vertex(_GROSS_VERTEX_SHIFT)
+        tripped = False
+        for w, f_star in finite.items():
+            f_pert = _served_with_vertex(config, w, shifted)
+            if f_pert is None or abs(f_pert - f_star) / denom >= \
+                    _VERTEX_ENVELOPE_BAR:
+                tripped = True
+        self.n_checks += 1
+        self.assertTrue(
+            tripped,
+            f'{name}: a {_GROSS_VERTEX_SHIFT} rad vertex mislocation left '
+            'every served value inside the bar -- the primary gate is inert')
+
+    def test_direct_angle_gate_flags_a_non_cusp_vertex(self):
+        """A vertex at `_NON_CUSP_PHASE` is not on an astroid cusp."""
+        gamma, beta, kappa, branch = 0.3, 0.37, 0.0, 1
+        cusp = geometry.critical_point(
+            gamma, _NON_CUSP_PHASE + beta, beta, kappa, branch)
+        angle = math.atan2(cusp.image[1], cusp.image[0])
+        residuals = [
+            abs((angle - beta - phase + math.pi) % (2.0 * math.pi) - math.pi)
+            for phase in _ASTROID_CUSP_PHASES]
+        self.n_checks += 1
+        self.assertGreater(
+            min(residuals), _VERTEX_ANGLE_TOL,
+            'a non-cusp angle passed the astroid-cusp placement gate')
+
+    def test_direct_speed_gate_flags_a_non_cusp_angle(self):
+        """The caustic speed off the cusp is not a vanishing fraction."""
+        gamma, beta, kappa, branch = 0.3, 0.37, 0.0, 1
+        off = max(float(geometry.caustic_speed(
+            gamma, 0.0 + delta, kappa=kappa, branch=branch))
+            for delta in (0.05, -0.05, 0.1, -0.1))
+        speed_non_cusp = float(geometry.caustic_speed(
+            gamma, 0.3, kappa=kappa, branch=branch))
+        self.n_checks += 1
+        self.assertGreater(
+            speed_non_cusp, _VERTEX_SPEED_RATIO_TOL * off,
+            'an off-cusp speed passed the cusp speed-vanishing gate')
+
+    def test_o1_budget_flags_the_retired_scan_finder(self):
+        """
+        The retired 129-point scan finder makes ``>= _MAX_GEOMETRY_CALLS``
+        geometry calls, so the O(1) budget genuinely distinguishes the
+        analytic finder (~11) from a scan (~347).
+        """
+        gamma, beta, kappa = 0.3, 0.0, 0.0
+        source = np.asarray(_VERTEX_CONFIGS[0][4], dtype=float)
+        nearest = geometry.nearest_caustic_point(
+            gamma, beta, source, kappa=kappa)
+        branch = _vertex_branch(gamma, beta, kappa, nearest.theta)
+        _vertex, n_calls = _count_geometry_calls(
+            _old_cusp_vertex, gamma, beta, kappa, source, nearest.theta,
+            branch)
+        self.n_checks += 1
+        self.assertGreaterEqual(
+            n_calls, _MAX_GEOMETRY_CALLS,
+            f'the scan finder made only {n_calls} geometry calls; the O(1) '
+            'budget would not distinguish it from the analytic finder')
+
+
+# ----------------------------------------------------------------------
+# SADDLE WEDGE-EDGE REFUSAL (acceptance #1, named refusal).
+#
+# A macro saddle (``|gamma| > 1 - kappa``) has two 3-cusp deltoid lobes.
+# Each lobe has a finite wedge-TIP cusp at its centre (``phase = theta -
+# beta in {0, pi}``) and two DIVERGING wedge-EDGE cusps at ``phase_c +-
+# theta_max`` with ``theta_max = (1/2) arcsin((1 - kappa) / |gamma|)``.
+# `geometry.caustic_derivatives` blows up at a wedge edge, so the
+# finite-curvature Pearcey normal form does not apply there: the analytic
+# `_cusp_vertex` recognises this and returns ``None``, and
+# `cusp_amplification` then falls through to ``None`` (the exact engine
+# catches the fall-through) rather than serving a finite-but-meaningless
+# value.  The retired finite-difference finder returned a finite vertex
+# there -- a straddle of the divergence -- which is exactly the defect
+# WP1 fixes.  The finite wedge TIP is the contrast: a valid CriticalPoint.
+# ----------------------------------------------------------------------
+
+#: Macro-saddle configurations ``(name, gamma, beta, kappa)`` for the
+#: wedge-edge refusal.  ``gamma = 1.3 > 1 - kappa`` puts the critical
+#: curve into the two-deltoid-lobe regime; ``beta != 0`` exercises the
+#: shear-frame mapping and ``kappa in {0, 0.3}`` the convergence-reduced
+#: wedge half-width ``theta_max`` (0.439 rad at kappa=0, 0.284 at 0.3).
+_WEDGE_EDGE_SADDLE_CONFIGS = (
+    ('sad_g13_b0', 1.3, 0.0, 0.0),
+    ('sad_g13_b037', 1.3, 0.37, 0.0),
+    ('sad_g13_k03', 1.3, 0.0, 0.3),
+)
+
+#: Fraction of the wedge half-width ``theta_max`` at which the source is
+#: seeded ALONG the caustic from the finite tip toward a wedge edge.  Any
+#: ``frac > 0.5`` places the nearest caustic cusp past the tip/edge basin
+#: boundary; ``0.9`` gives a comfortable margin (measured resolved
+#: ``|phase - phase_c|`` 0.26..0.40 rad, half-wedge 0.14..0.22 rad) so the
+#: nearest cusp is unambiguously a diverging wedge edge, never the tip.
+_WEDGE_EDGE_SOURCE_FRAC = 0.9
+
+#: Frequencies at which `cusp_amplification` is asked to serve the
+#: wedge-edge source.  All refuse; the refusal is a ``w``-independent
+#: geometry decision taken before any ``w``-dependent normal-form work.
+_WEDGE_EDGE_W_GRID = (40.0, 80.0, 120.0)
+
+
+def _wedge_edge_source(gamma, beta, kappa, phase_c, sgn,
+                       frac=_WEDGE_EDGE_SOURCE_FRAC):
+    """
+    Source whose nearest caustic cusp is a diverging deltoid WEDGE EDGE.
+
+    Returns ``(source, theta_max)``.  The source is the caustic point at
+    phase ``phase_c + sgn * frac * theta_max`` (with ``theta_max = (1/2)
+    arcsin((1 - kappa) / |gamma|)``), i.e. a fraction ``frac`` of the way
+    from the finite wedge tip (lobe centre ``phase_c in {0, pi}``) toward
+    the wedge edge ``phase_c + sgn * theta_max``.  For ``frac > 0.5`` the
+    nearest cusp is the wedge edge, so the serve-path seed drives the
+    named refusal.
+    """
+    lam = 1.0 - float(kappa)
+    theta_max = 0.5 * math.asin(lam / abs(gamma))
+    phase = phase_c + sgn * frac * theta_max
+    branch = _vertex_branch(gamma, beta, kappa, phase + beta)
+    cusp = geometry.critical_point(gamma, phase + beta, beta, kappa, branch)
+    return np.asarray(cusp.source, dtype=float), theta_max
+
+
+class SaddleWedgeEdgeRefusalTestCase(_FoldArmTestCase):
+    """
+    Acceptance #1 (named refusal): when the nearest caustic cusp to the
+    source is a DIVERGING deltoid wedge edge, the analytic `_cusp_vertex`
+    returns ``None`` and `cusp_amplification` falls through to ``None``.
+
+    The contrast is the finite wedge TIP (a lobe centre), where the finder
+    returns a valid `geometry.CriticalPoint`.  The refusal is the correct
+    fix for the retired finite-difference finder, which straddled the
+    divergence and returned a finite-but-meaningless vertex.
+    """
+
+    def test_cusp_vertex_refuses_when_nearest_cusp_is_a_wedge_edge(self):
+        """
+        Direct `_cusp_vertex` refusal at a wedge edge.
+
+        For a source seeded at ``phase_c + sgn * 0.9 * theta_max`` (nearest
+        cusp a wedge edge), the serve-path seed lands past the tip/edge
+        basin boundary at ``0.5 * theta_max`` (premise) and the finder
+        returns ``None`` (behaviour under test).
+        """
+        for name, gamma, beta, kappa in _WEDGE_EDGE_SADDLE_CONFIGS:
+            for phase_c in (0.0, math.pi):
+                for sgn in (1.0, -1.0):
+                    with self.subTest(config=name, phase_c=phase_c, sgn=sgn):
+                        source, theta_max = _wedge_edge_source(
+                            gamma, beta, kappa, phase_c, sgn)
+                        nearest = geometry.nearest_caustic_point(
+                            gamma, beta, source, kappa=kappa)
+                        seed_phase = float(nearest.theta) - beta
+                        phase_center = math.pi * round(seed_phase / math.pi)
+                        reduced = seed_phase - phase_center
+                        # Premise: the resolved seed is nearer a wedge edge
+                        # than the tip, so the nearest cusp candidate is a
+                        # diverging edge (|reduced| > half the wedge width).
+                        self.assertGreater(
+                            abs(reduced), 0.5 * theta_max,
+                            f'{name}: seed phase {reduced:.4f} rad is inside '
+                            f'the tip basin (half-wedge {0.5 * theta_max:.4f} '
+                            'rad) -- the fixture is not at a wedge edge')
+                        branch = _vertex_branch(
+                            gamma, beta, kappa, nearest.theta)
+                        vertex = _pearcey_cusp._cusp_vertex(
+                            gamma, beta, kappa, source, nearest.theta, branch)
+                        self.n_checks += 1
+                        self.assertIsNone(
+                            vertex,
+                            f'{name}: `_cusp_vertex` returned a finite vertex '
+                            'at a diverging wedge edge (the exact defect WP1 '
+                            'fixes)')
+
+    def test_cusp_amplification_falls_through_to_none_at_a_wedge_edge(self):
+        """
+        Downstream `cusp_amplification` fall-through at a wedge edge.
+
+        The pre-vertex geometry (macro matrix, nearest caustic point,
+        image solve) succeeds, a spy confirms `_cusp_vertex` is reached and
+        returns ``None``, and every served value is ``None`` -- so the arm
+        declines and the exact engine takes over, ``w``-independently.
+        """
+        for name, gamma, beta, kappa in _WEDGE_EDGE_SADDLE_CONFIGS:
+            source, _theta_max = _wedge_edge_source(
+                gamma, beta, kappa, 0.0, 1.0)
+            # Pre-vertex geometry must succeed: the fall-through is AT the
+            # vertex gate, not an earlier geometry refusal.
+            matrix = geometry.macro_matrix(gamma, beta, kappa)
+            geometry.nearest_caustic_point(gamma, beta, source, kappa=kappa)
+            images = geometry.find_images(source, matrix)
+            self.assertGreater(
+                len(images), 0,
+                f'{name}: the source has no images -- pre-vertex geometry '
+                'already failed, so the fall-through would not isolate the '
+                'vertex gate')
+            for w in _WEDGE_EDGE_W_GRID:
+                with self.subTest(config=name, w=w):
+                    captured = {}
+
+                    def spy(*args, **kwargs):
+                        vertex = _REAL_CUSP_VERTEX(*args, **kwargs)
+                        captured['vertex'] = vertex
+                        return vertex
+
+                    with mock.patch.object(
+                            _pearcey_cusp, '_cusp_vertex', spy):
+                        served = _pearcey_cusp.cusp_amplification(
+                            w, source, gamma, beta=beta, kappa=kappa)
+                    self.n_checks += 1
+                    self.assertIn(
+                        'vertex', captured,
+                        f'{name} w={w}: `_cusp_vertex` was never reached -- '
+                        'the arm refused before the vertex gate')
+                    self.assertIsNone(
+                        captured['vertex'],
+                        f'{name} w={w}: `_cusp_vertex` served a finite vertex '
+                        'at a wedge edge')
+                    self.assertIsNone(
+                        served,
+                        f'{name} w={w}: `cusp_amplification` served a value '
+                        'despite the wedge-edge refusal (no fall-through)')
+
+    def test_finite_wedge_tip_returns_a_valid_critical_point(self):
+        """
+        Contrast: the finite wedge TIP serves a valid `CriticalPoint`.
+
+        A source seeded at a lobe centre (``phase_c in {0, pi}``) resolves
+        to the finite wedge tip; the finder returns a non-``None`` vertex
+        whose located cusp phase is a lobe centre to `_VERTEX_ANGLE_TOL`.
+        Asserting a value here (vs ``None`` at the edge) is what separates
+        a correct refusal from an inert gate.
+        """
+        for name, gamma, beta, kappa in _WEDGE_EDGE_SADDLE_CONFIGS:
+            for cusp_index in (0, 1):
+                with self.subTest(config=name, cusp=cusp_index):
+                    source = _seed_source_near_cusp(
+                        gamma, beta, kappa, cusp_index)
+                    nearest = geometry.nearest_caustic_point(
+                        gamma, beta, source, kappa=kappa)
+                    branch = _vertex_branch(gamma, beta, kappa, nearest.theta)
+                    vertex, theta_cusp = _capture_vertex_theta(
+                        gamma, beta, kappa, source, nearest.theta, branch)
+                    self.n_checks += 1
+                    self.assertIsNotNone(
+                        vertex,
+                        f'{name} cusp={cusp_index}: the finite wedge tip was '
+                        'refused (the contrast to the edge refusal is gone)')
+                    phase = float(theta_cusp) - beta
+                    phase_center = math.pi * round(phase / math.pi)
+                    residual = abs(phase - phase_center)
+                    self.assertLess(
+                        residual, _VERTEX_ANGLE_TOL,
+                        f'{name} cusp={cusp_index}: located cusp phase '
+                        f'{phase:.6f} is not a lobe centre (residual '
+                        f'{residual:.3e}) -- not the finite wedge tip')
+
+
+class SaddleWedgeEdgeRefusalSelfFalsificationTestCase(_FoldArmTestCase):
+    """
+    Proof the wedge-edge gates can go RED: a finite vertex IS obtainable at
+    the same wedge edge (so ``None`` is a decision, not an inevitability),
+    and the amplification fall-through short-circuits exactly at the vertex
+    gate (injecting a finite vertex reaches the normal-form work).
+    """
+
+    def test_old_scan_finder_serves_a_finite_vertex_at_the_wedge_edge(self):
+        """
+        The retired scan finder returns a finite vertex at the SAME
+        wedge-edge fixture where the analytic finder refuses.
+
+        This proves the analytic ``None`` is a genuine decision: a
+        finite-but-meaningless vertex is reachable there, and the primary
+        refusal test is not vacuously asserting the impossible.
+        """
+        name, gamma, beta, kappa = _WEDGE_EDGE_SADDLE_CONFIGS[0]
+        source, _theta_max = _wedge_edge_source(gamma, beta, kappa, 0.0, 1.0)
+        nearest = geometry.nearest_caustic_point(
+            gamma, beta, source, kappa=kappa)
+        branch = _vertex_branch(gamma, beta, kappa, nearest.theta)
+        new_vertex = _REAL_CUSP_VERTEX(
+            gamma, beta, kappa, source, nearest.theta, branch)
+        old_vertex = _old_cusp_vertex(
+            gamma, beta, kappa, source, nearest.theta, branch)
+        self.n_checks += 1
+        self.assertIsNone(
+            new_vertex,
+            f'{name}: the analytic finder should refuse the wedge edge')
+        self.assertIsNotNone(
+            old_vertex,
+            f'{name}: the scan finder should serve a finite wedge-edge '
+            'vertex -- otherwise the refusal test is vacuous')
+
+    def test_amplification_short_circuits_at_the_vertex_gate(self):
+        """
+        The fall-through is AT the vertex gate, not before or after.
+
+        On the wedge-edge source the real finder refuses and
+        `_soft_normal_form` is NEVER called; injecting a finite (tip)
+        vertex for the SAME source drives at least one `_soft_normal_form`
+        call -- isolating the vertex gate as the short-circuit point.
+        """
+        name, gamma, beta, kappa = _WEDGE_EDGE_SADDLE_CONFIGS[0]
+        source, _theta_max = _wedge_edge_source(gamma, beta, kappa, 0.0, 1.0)
+
+        # A genuine finite tip vertex for the same config, to inject.
+        tip_source = _seed_source_near_cusp(gamma, beta, kappa, 0)
+        tip_nearest = geometry.nearest_caustic_point(
+            gamma, beta, tip_source, kappa=kappa)
+        tip_branch = _vertex_branch(gamma, beta, kappa, tip_nearest.theta)
+        tip_vertex = _REAL_CUSP_VERTEX(
+            gamma, beta, kappa, tip_source, tip_nearest.theta, tip_branch)
+        self.assertIsNotNone(
+            tip_vertex,
+            f'{name}: could not build a finite tip vertex to inject')
+
+        real_snf = _pearcey_cusp._soft_normal_form
+        calls = {'n': 0}
+
+        def snf_spy(*args, **kwargs):
+            calls['n'] += 1
+            return real_snf(*args, **kwargs)
+
+        # Real refusal: the vertex gate short-circuits before normal form.
+        calls['n'] = 0
+        with mock.patch.object(
+                _pearcey_cusp, '_soft_normal_form', snf_spy):
+            served_real = _pearcey_cusp.cusp_amplification(
+                40.0, source, gamma, beta=beta, kappa=kappa)
+        n_real = calls['n']
+
+        # Injected finite vertex: normal-form work is reached.
+        calls['n'] = 0
+        with mock.patch.object(
+                _pearcey_cusp, '_soft_normal_form', snf_spy), \
+                mock.patch.object(
+                    _pearcey_cusp, '_cusp_vertex',
+                    lambda *a, **k: tip_vertex):
+            _pearcey_cusp.cusp_amplification(
+                40.0, source, gamma, beta=beta, kappa=kappa)
+        n_injected = calls['n']
+
+        self.n_checks += 1
+        self.assertIsNone(
+            served_real,
+            f'{name}: the wedge-edge source should refuse')
+        self.assertEqual(
+            n_real, 0,
+            f'{name}: `_soft_normal_form` was called {n_real} times despite '
+            'the vertex-gate refusal -- the short-circuit is not at the '
+            'vertex gate')
+        self.assertGreaterEqual(
+            n_injected, 1,
+            f'{name}: injecting a finite vertex did not reach '
+            '`_soft_normal_form` -- the gate does not short-circuit there')

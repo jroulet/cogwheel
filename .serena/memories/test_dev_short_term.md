@@ -1,5 +1,107 @@
 # Test Dev Short-Term Observations
 
+## Build (WP2 y''' cascade) — EXTENDED test_lensing_caustic_derivatives.py
+- Added STAGE-2 y''' gate + self-falsification. File 20->25 tests, 4.7s green;
+  neighbor test_lensing_geometry.py 13 passed (WP2 internal refactor of
+  caustic_derivatives into _caustic_cascade is byte-identical, no regression).
+- MEASURED (offline throwaway script, 136 comps): worst ABS 9.507e-12 at
+  (0.99,0,+1,2.2,comp1) |exp|=88.2; worst REL 1.302e-13 over 128 rel-dominated
+  pts (|exp|>0.1) at (0.99,0,+1,1.0,comp1) |exp|=42.8. So spec's
+  atol_3=max(1e-10,3*9.51e-12)=1e-10 FLOOR wins; rtol_3=max(1e-9,3*1.30e-13)=
+  1e-9 FLOOR wins. Baked ATOL_3=1e-10, RTOL_3=1e-9, D3_CROSSOVER=0.1.
+- DPS 40 vs 60: residuals IDENTICAL (ratio 1.00) and float64-scale (rel ~1e-13
+  worst). Spec heuristic "stays put=wrong" is INCOMPLETE: correct closed form
+  ALSO gives dps-invariant residual because it's float64-limited (float(oracle)
+  same nearest double regardless of dps once oracle >> float64). Discriminator
+  is MAGNITUDE (mixed gate), NOT dps-behavior. Wrote dps cross-check as: (a)
+  dps=60 residual below STAGE-2 gate (correct, not oracle-noise) AND (b)
+  |err_40-err_60| <= 1e-6*|hi|+1e-12 (dps-invariant => oracle not the limiter).
+  Both PASS for correct code — do NOT assert "must shrink with dps" (would fail
+  correct impl).
+- Oracle: oracle_third_derivative(g,k,br,th,dps) = mpmath.diff(_oracle_y_
+    component,theta,3) in mpmath.workdps(dps). Extended _FORBIDDEN_ORACLE_NAMES
+  with caustic_third_derivative,_caustic_cascade,u_ppp,r_ppp; added the new fn
+  to OracleIndependenceTestCase AST walk tuple.
+- SELF-FALSIF: scale larger-|oracle| comp by (1+1e-6), one interior case per
+  parity: positive (0.3,0,1,1.0), saddle (1.3,0,-1,0.17) [both in real_cases;
+  saddle wedge |sin2th|<=1/1.3=0.769, theta=0.17 ok]. assertRaises on
+  assert_mixed_d3 (built a ThirdDerivativeStageTwoTestCase instance to borrow
+  the method). Plus end-to-end mock.patch.object(geometry,
+  'caustic_third_derivative', scaled) -> STAGE-2 sweep raises.
+- AUDIT: caustic_third_derivative/_caustic_cascade referenced ONLY in my file.
+  caustic_derivatives/speed/curvature used by airy_fold, caustic_cusps,
+  fast_path(local method) but WP2 kept public sigs unchanged -> no break; my
+  green PrimaryDerivativeTestCase re-confirms caustic_derivatives values.
+- Diagnostic plot output/caustic_third_derivative_error_scatter.png (dps40 dots
+  + dps60 x + atol_3 line). tests/output hook-blocked from list_dir -> verify
+  via pathlib.glob.
+
+## Build (WP1 wedge-edge refusal) — EXTENDED test_lensing_airy_fold.py
+- Appended 2 classes (5 tests, all green): SaddleWedgeEdgeRefusalTestCase
+  (direct _cusp_vertex->None at edge; cusp_amplification->None fall-through;
+  finite wedge-TIP contrast serves valid CP) + SelfFalsification (old scan
+  finder serves finite at same edge; _soft_normal_form short-circuits AT
+  vertex gate: 0 calls real refusal, >=1 injecting finite tip vertex). Full
+  file 63 passed/7 skip/2 xfail 21.6s (was 58 passed).
+- FIXTURE _wedge_edge_source(gamma,beta,kappa,phase_c,sgn,frac=0.9): caustic
+  point at phase_c + sgn*0.9*theta_max, theta_max=0.5*asin((1-k)/|g|). Configs
+  sad_g13_b0/b037/k03 (gamma=1.3). Premise assert |reduced|>0.5*theta_max
+  (reduced=nearest.theta-beta-phase_center, phase_center=pi*round(seed/pi)).
+- KEY prod refusal (_pearcey_cusp._cusp_vertex saddle branch): candidates
+  {phase_center, +-theta_max}, nearest by |c-seed_phase|; refuse None if
+  abs(nearest-phase_center)>0.5*theta_max. cusp_amplification order: macro_matrix
+  -> nearest_caustic_point -> find_images (pre-vertex geometry, all succeed) ->
+  branch -> _cusp_vertex (gate, None here) -> _soft_normal_form. So spy on
+  _cusp_vertex proves fall-through is AT vertex; spy on _soft_normal_form (0 vs
+  >=1) proves short-circuit point.
+- TIP contrast: _seed_source_near_cusp(g,b,k,cusp_index) (saddle -> lobe centre
+  pi*(idx%2)); finder SNAPS to phase_center internally, so use
+  _capture_vertex_theta to read the returned theta_cusp; residual
+  |phase-phase_center| = 0 (< 1e-10) for all configs x cusp_index {0,1}.
+- Injected tip vertex for short-circuit test: build via _REAL_CUSP_VERTEX on a
+  tip source, patch _cusp_vertex to `lambda *a,**k: tip_vertex` on the SAME
+  wedge-edge source (only vertex-gate outcome differs -> clean isolation).
+- BACKWARD-COMPAT: test-only change in ONE file, NO production edits. All
+  _cusp_vertex callers in this file already pass seed_theta+branch (green).
+  Cannot regress neighbor suites (no prod touched); skipped running them.
+
+## Build (WP1 analytic _cusp_vertex + WP2 y''') — test_lensing_airy_fold.py
+- APPENDED 4 classes (11 tests, all green, ~11s): DirectCuspVertexCorrectness
+  (angle/speed/wedge-tip/O(1) calls), ServedValueVertexInsensitivity (PRIMARY
+  load-bearing), ServedValueOldVersusNew (secondary + wedge-edge carve-out),
+  CuspVertexSelfFalsification. Full file 58 passed/7 skip/2 xfail 21.6s.
+  Neighbor test_lensing_caustic_derivatives.py 20 passed (WP2 cascade refactor
+  no regression). NO other suite refs _cusp_vertex/caustic_third_derivative/
+  _caustic_cascade (audit clean). Only prod edits are the WP itself.
+- KEY: `_cusp_vertex(gamma,beta,kappa,source,seed_theta,branch)` IGNORES source
+  (locates cusp from seed_theta alone) — vestigial arg. Positive parity: image
+  polar angle == beta + k*pi/2 EXACTLY (resid 0). Saddle wedge-tip phase mod pi
+  == 0 exactly. speed_cusp/off ~1e-16. Geometry calls = 11 (<20); retired scan
+  = 347 (>=20 self-falsify lever).
+- RECURSION TRAP: perturbation/capture helpers call the REAL finder from INSIDE
+  a mock.patch.object(_pearcey_cusp,'_cusp_vertex',...) — must capture
+  `_REAL_CUSP_VERTEX = _pearcey_cusp._cusp_vertex` at IMPORT time and call that,
+  never the patched module global. `_capture_vertex_theta` spies
+  geometry.critical_point to grab the theta the finder resolved to (final call),
+  then perturbed vertex = critical_point(gamma, theta+dtheta, beta, kappa, br).
+- SERVED VALUE IS EXTREMELY STABLE: dtheta 0.0245->1e-2 dev; but at dtheta>=~0.033
+  the perturbed vertex pushes source out of served shell -> cusp_amplification
+  REFUSES (None). So NO served-but-over-bar window exists. Primary gate teeth =
+  assertIsNotNone(f_pert) catches the refusal; self-falsify uses dtheta=0.05
+  (asserts None-or-over-bar). Deviation-metric teeth demoed separately via
+  wrong-angle image resid 0.1 & non-cusp speed ratio 2.93.
+- CONFIG CURATION: brief's gamma=0.05 NEVER serves (caustic too weak); gamma in
+  {1.02,0.9} saddles only marginal. Frozen 15-config set (pos g in {0.3,0.6}
+  incl kappa=0.3; saddle g=1.3) all serve at w=40 (100% >= 60% anti-vacuity).
+  w=20 never serves (R<R_min), w=80 serves stronger-shear only. Sources frozen
+  as literals placed so Pearcey R in [1.2,5]*R_min at w=40, both delta_perp signs.
+- _old_cusp_vertex oracle = 129-pt pi-window central-diff caustic speed via
+  critical_point(...).source (delta=1e-4) + golden-section; SKIP grid pts that
+  raise LensDomainError so scan lands on finite wedge tip. Agrees with analytic
+  new finder to rel <=2.8e-12. Wedge-edge carve-out (seed=beta+theta_max,
+  theta_max=0.5*asin(lam/|g|)): new=None, old=finite — deliberate improvement.
+
+
 ## Build (WP1 F041 _make_arc arc-orientation) — test_lensing_surrogate_training.py (shard 2)
 - Owned ONLY this file. (A) Fixed 3 stale `_find_cusps` callers now that
   gamma/branch are REQUIRED kw-only: L1006 `_wp3_fixoff_left_arc` ->

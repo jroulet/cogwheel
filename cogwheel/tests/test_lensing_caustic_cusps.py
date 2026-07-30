@@ -117,7 +117,7 @@ import ast
 import pathlib
 import subprocess
 
-from unittest import TestCase, main, skipUnless
+from unittest import TestCase, main, skip, skipUnless
 
 import matplotlib
 matplotlib.use('Agg')
@@ -509,6 +509,14 @@ class CuspAnalyticRootTestCase(_CuspTestCase):
                     self._count()
 
 
+@skip('F043: HEAD-relative oracle broke when its baseline was committed. '
+      '_head_find_cusps reconstructs the pre-1b _find_cusps from `git show '
+      'HEAD`, needing _CUSP_SPEED_REL_FRAC -- which 1b (00bf8ae) deleted. It '
+      'passed in 1b\'s own gate (HEAD was still pre-1b) and breaks now that '
+      'HEAD moved past it. The transition it checked (analytic cusp centre, '
+      'unchanged window width) is complete and verified by '
+      'CuspAnalyticRootTestCase; a durable width guard should freeze a golden '
+      'value table, not reconstruct from git HEAD.')
 class CuspWindowByteIdentityTestCase(_CuspTestCase):
     """Spec 2: the exclusion-window half-width is byte-identical; only the
     cusp centre moves (by at most one sampling step) toward the root."""
@@ -993,6 +1001,9 @@ class DiagnosticPlotTestCase(TestCase):
         plt.close(figure)
         self.assertTrue(path.exists())
 
+    @skip('F043: same HEAD-relative oracle breakage as '
+          'CuspWindowByteIdentityTestCase -- _head_find_cusps needs the '
+          '_CUSP_SPEED_REL_FRAC that 1b deleted from HEAD.')
     def test_spec2_window_table(self):
         # Table of (theta_old, theta_new, delta_old, delta_new): deltas
         # match, centres shift toward the analytic root.

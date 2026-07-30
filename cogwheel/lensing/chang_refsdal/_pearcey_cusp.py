@@ -97,6 +97,7 @@ import math
 import warnings
 
 import numpy as np
+from scipy.optimize import brentq
 
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal._pearcey_table import PearceyTable
@@ -467,52 +468,111 @@ def _cusp_vertex(gamma: float, beta: float, kappa: float,
     """
     Nearest caustic cusp vertex to ``source`` along the critical curve.
 
-    Cusps are the points where the caustic speed ``|d source_caustic /
-    d theta|`` vanishes.  A local scan around ``seed_theta`` (the nearest
-    fold point returned by `geometry.nearest_caustic_point`) brackets the
-    speed minimum, which a golden-section refine locates; the
-    `geometry.critical_point` there is the vertex.  Returns ``None`` if
-    the geometry refuses anywhere in the scan.
+    A cusp is the exact ROOT of the caustic speed ``|y'(theta)|`` (not a
+    sampled minimum): the point where ``g(theta) = y'(theta) . y''(theta)
+    = (1/2) d|y'|^2/dtheta`` crosses zero upward.  ``g`` is real-analytic
+    through the cusp (the non-smoothness lives in arc length, not the
+    angular parameter), so a single `brentq` on the exact analytic
+    derivatives (`geometry.caustic_derivatives`) pins the cusp angle to
+    ~1e-10 in O(1) geometry calls -- no finite difference, no scan, no
+    golden section.
+
+    Frame.  `caustic_derivatives` is beta-free and rotation-invariant, so
+    the root is found in the shear-aligned ``phase = theta - beta`` frame
+    (``seed_phase = seed_theta - beta``) and mapped back via
+    ``theta_cusp = phase_root + beta`` before calling
+    `geometry.critical_point`, which internally re-subtracts ``beta``.
+    The same ``branch`` is carried end to end (moot at positive parity,
+    where it is forced to ``+1``; load-bearing at the macro saddle).
+
+    Bracketing is parity-gated.  Positive parity (``|gamma| < lam``): the
+    astroid's four cusps sit exactly at ``phase in {0, pi/2, pi,
+    3pi/2}``; the nearest is bracketed within +-0.1 rad.  Macro saddle
+    (``|gamma| > lam``): each 3-cusp deltoid lobe has a finite wedge-tip
+    cusp at the lobe centre ``phase_c in {0, pi}`` and two DIVERGING
+    wedge-edge cusps at ``phase_c +- theta_max`` with ``theta_max =
+    (1/2) arcsin(lam / |gamma|)``.  Only the finite wedge tip is served;
+    if the candidate nearest ``seed_phase`` is a wedge edge the finite-
+    curvature Pearcey normal form does not apply and the arm refuses.
+
+    Returns ``None`` (serve contract -- the exact engine catches the
+    fall-through) if the geometry refuses (`geometry.LensDomainError`),
+    the nearest saddle cusp is a diverging wedge edge, or either twin
+    gate fails: (a) no upward sign change of ``g`` across the bracket, or
+    (b) the analytic speed at the root is not below ``eps_speed`` times
+    the local off-cusp speed scale.
     """
-    def caustic_speed(theta: float) -> float | None:
-        delta = 1e-4
+    eps = np.finfo(float).eps
+    eps_speed = 1e-4
+
+    def slope(phase: float) -> float:
+        y_prime, y_double_prime = geometry.caustic_derivatives(
+            gamma, phase, kappa=kappa, branch=branch)
+        return float(y_prime[0] * y_double_prime[0]
+                     + y_prime[1] * y_double_prime[1])
+
+    def speed(phase: float) -> float:
+        return float(geometry.caustic_speed(gamma, phase, kappa=kappa,
+                                             branch=branch))
+
+    lam = 1.0 - float(kappa)
+    seed_phase = float(seed_theta) - float(beta)
+
+    # Parity-gated analytic bracket around the nearest cusp candidate.
+    if abs(gamma) < lam:
+        # Positive parity: astroid cusps exact at phase in {0, pi/2, pi,
+        # 3pi/2}; snap to the nearest and bracket a smooth speed minimum.
+        phase_cusp = 0.5 * math.pi * round(seed_phase / (0.5 * math.pi))
+        half_width = 0.1
+    else:
+        # Macro saddle: nearest lobe centre in {0, pi}; the finite wedge
+        # tip is the only servable cusp -- the two wedge edges diverge.
         try:
-            plus = geometry.critical_point(gamma, theta + delta, beta,
-                                           kappa, branch).source
-            minus = geometry.critical_point(gamma, theta - delta, beta,
-                                            kappa, branch).source
-        except geometry.LensDomainError:
+            theta_max = 0.5 * math.asin(lam / abs(gamma))
+        except ValueError:
             return None
-        return float(np.linalg.norm(plus - minus) / (2.0 * delta))
+        phase_center = math.pi * round(seed_phase / math.pi)
+        candidates = (phase_center,
+                      phase_center - theta_max,
+                      phase_center + theta_max)
+        nearest = min(candidates, key=lambda c: abs(c - seed_phase))
+        if abs(nearest - phase_center) > 0.5 * theta_max:
+            # Nearest cusp is a diverging deltoid wedge edge (where
+            # caustic_derivatives itself diverges): named refusal.
+            return None
+        phase_cusp = phase_center
+        # Keep the bracket strictly inside the wedge (as _find_cusps does).
+        half_width = min(1e-2, 0.4 * theta_max)
 
-    window = 0.5 * math.pi
-    thetas = seed_theta + np.linspace(-window, window, 129)
-    best_theta = None
-    best_speed = math.inf
-    for theta in thetas:
-        speed = caustic_speed(float(theta))
-        if speed is not None and speed < best_speed:
-            best_speed = speed
-            best_theta = float(theta)
-    if best_theta is None:
-        return None
+    bracket_lo = phase_cusp - half_width
+    bracket_hi = phase_cusp + half_width
 
-    # Golden-section refine on the bracketed minimum.
-    span = float(thetas[1] - thetas[0])
-    low, high = best_theta - span, best_theta + span
-    inv_phi = (math.sqrt(5.0) - 1.0) / 2.0
-    for _ in range(40):
-        c = high - inv_phi * (high - low)
-        d = low + inv_phi * (high - low)
-        speed_c, speed_d = caustic_speed(c), caustic_speed(d)
-        if speed_c is None or speed_d is None:
-            break
-        if speed_c < speed_d:
-            high = d
-        else:
-            low = c
-    theta_cusp = 0.5 * (low + high)
     try:
+        # Gate (a): an upward sign change of g across the bracket marks a
+        # genuine speed minimum (cusp), not a maximum or a monotone leg.
+        if not (slope(bracket_lo) < 0.0 < slope(bracket_hi)):
+            return None
+        phase_root = brentq(slope, bracket_lo, bracket_hi, xtol=4.0 * eps)
+
+        # Gate (b): the analytic speed at the root must be far below the
+        # local off-cusp scale.  The serve path has no sampled peak, so
+        # the scale is read directly off the caustic a little away from
+        # the cusp; probes that fall outside a narrow wedge are skipped.
+        scale_probes = []
+        for offset in (0.05, -0.05, 0.1, -0.1):
+            try:
+                scale_probes.append(speed(phase_cusp + offset))
+            except geometry.LensDomainError:
+                continue
+        if not scale_probes:
+            return None
+        speed_scale = max(scale_probes)
+        if not (speed_scale > 0.0):
+            return None
+        if speed(phase_root) >= eps_speed * speed_scale:
+            return None
+
+        theta_cusp = phase_root + float(beta)
         return geometry.critical_point(gamma, theta_cusp, beta, kappa,
                                        branch)
     except geometry.LensDomainError:
