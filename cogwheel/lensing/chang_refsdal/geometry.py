@@ -1705,8 +1705,12 @@ def _caustic_cascade(gamma: float, theta, kappa: float,
             f'Cannot evaluate macro-saddle caustic derivatives for '
             f'(kappa, gamma) = ({kappa}, {gamma}): theta lies exactly on '
             f'the critical wedge edge |sin 2 theta| == (1 - kappa) / '
-            f'|gamma|, the deltoid cusp where the caustic derivatives '
-            f'genuinely diverge (u_p, u_pp -> infinity); this degenerate '
+            f'|gamma|, where the two square-root branches meet and the '
+            f'theta-derivatives genuinely diverge (u_p, u_pp -> infinity). '
+            f'The CURVE is regular there: the divergence is an artifact of '
+            f'the theta parametrization, and both position and tangent are '
+            f'finite in s = sqrt(theta_max - theta) (FINDINGS F044), so '
+            f'critical_point still serves this angle. This degenerate '
             f'boundary is a named refusal, mirroring the off-wedge '
             f'refusal above.')
     u = eff * c + b * d_root

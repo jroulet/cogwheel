@@ -2619,6 +2619,49 @@ gamma tested, total arc span slightly LARGER. Against a standoff-free
 reference interior, the open loop rejects 1/792 interior probes at
 `gamma = 1.05`, reaching 0.059 in source-plane units INSIDE the lobe.
 
+## F045 — the HEAD-oracle antipattern spreads by REUSE, and a scan of ADDED lines cannot see it (2026-07-30)
+
+**Where:** `test_lensing_surrogate_training.py::WedgeEdgeSelfFalsification`
+(build 1d); `.claude/hooks/check_head_relative_tests.py`.
+
+F043 was recorded on 2026-07-30 and a pre-commit guard shipped the same day
+(`1f6a907`). The NEXT build reintroduced the antipattern and the guard let it
+through. Both new self-falsification tests failed within the hour, exactly as
+F043 predicts — `gap=0.000e+00` where the test demanded a gap, and
+`2.9072886962267335 not less than 2.9072886962267335`, because "HEAD" was now
+the post-change tree comparing against itself.
+
+**Why the guard missed it.** It scans the ADDED lines of staged test files for
+`git show HEAD:` and friends. That was a deliberate choice — it stops a
+pre-existing oracle from re-firing on every unrelated edit to the same file.
+But the only HEAD-relative line these tests ADDED was
+`head = _head_training_module()`, a call to a helper committed weeks earlier.
+The pattern never appeared in the diff. **A guard keyed on the introduction of
+a construct is blind to its propagation.** Widened (2026-07-30): resolve the
+file's HEAD-oracle helpers by AST first, then treat a CALL to one as the same
+finding. Verified against a replay of the exact lines that got through.
+
+**The second lesson is where it appeared.** The build's GATES were clean — it
+froze `_WP1_INCUMBENT_CLOSURE_GAP` and `_WP1_INCUMBENT_SPAN` as literals and
+its own docstring says "no live `git show` oracle in the gates". The rot was
+in the META-TESTS written to prove those gates were reachable. Reaching for
+the previous commit feels natural there in a way it does not in a gate,
+because the claim genuinely is "the OLD code fails this". Discipline applied
+to the primary assertion does not automatically reach the test that validates
+it.
+
+**The honest form of a self-falsification test** is to reconstruct the
+counterfactual LOCALLY from today's engine, never to fetch a past commit. The
+closure test now rebuilds the inset sweep inline (six lines of
+`critical_point` calls) and shows it fails to close — which additionally
+reproduces the frozen incumbent gap to five places, giving that literal its
+provenance without git. Where the counterfactual is a whole pipeline and
+cannot be reconstructed cheaply (the arc-span test drove
+`detect_caustic_structure`), the residual claim is only the PROVENANCE of a
+frozen number: retire the test and let the gate's own form carry the
+reachability, since a gate asserting `span > incumbent_literal` goes red by
+construction when the change is reverted.
+
 **Rule.** Before adding an absolute standoff to keep a sampler off a
 singularity, ask whether the singularity is in the OBJECT or in the
 PARAMETER. A divergence whose rate is a clean power of the distance to a

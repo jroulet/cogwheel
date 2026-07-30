@@ -118,6 +118,33 @@ def _owner(spans: list[tuple[int, int, str]], line: int) -> str:
     return best or '<module level>'
 
 
+def _head_oracle_helpers(source: str) -> set[str]:
+    """Names of functions in this file whose BODY reconstructs code from HEAD.
+
+    The antipattern spreads by REUSE, not only by re-introduction: build 1d
+    (2026-07-30) added two tests whose only HEAD-relative content was the line
+    ``head = _head_training_module()`` -- a call to a helper committed weeks
+    earlier.  Scanning added lines for ``git show HEAD:`` saw nothing, the
+    tests passed their own build's gate, and they went red in the very next
+    run, which is precisely the failure F043 describes.  So resolve helpers
+    first, then treat a CALL to one as the same finding as the literal.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    lines = source.splitlines()
+    helpers: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        end = getattr(node, 'end_lineno', node.lineno)
+        body = '\n'.join(lines[node.lineno - 1:end])
+        if any(pat.search(body) for pat in _HEAD_PATTERNS):
+            helpers.add(node.name)
+    return helpers
+
+
 def _acked() -> set[str]:
     raw = os.environ.get('GATED_HEAD_ORACLE_ACK', '')
     return {piece.strip() for piece in raw.split(',') if piece.strip()}
@@ -127,18 +154,31 @@ def main() -> int:
     findings: list[tuple[str, int, str, str]] = []
     for path in _staged_test_paths():
         added = _added_lines(path)
-        if not any(pat.search(ln) for ln in added for pat in _HEAD_PATTERNS):
-            continue                      # nothing HEAD-relative added here
         try:
             source = (REPO / path).read_text()
         except OSError:
             continue
+        # A line is HEAD-relative if it carries the literal pattern OR calls a
+        # helper in this file whose body does.
+        helpers = _head_oracle_helpers(source)
+        call_re = (re.compile(r'\b(?:' + '|'.join(map(re.escape, helpers))
+                              + r')\s*\(')
+                   if helpers else None)
+
+        def _is_head_relative(text: str) -> bool:
+            if any(pat.search(text) for pat in _HEAD_PATTERNS):
+                return True
+            return bool(call_re and call_re.search(text))
+
+        if not any(_is_head_relative(ln) for ln in added):
+            continue                      # nothing HEAD-relative added here
         spans = _enclosing_defs(source)
+        added_stripped = {ln.strip() for ln in added}
         for lineno, text in enumerate(source.splitlines(), 1):
-            if not any(pat.search(text) for pat in _HEAD_PATTERNS):
+            if not _is_head_relative(text):
                 continue
             # Only report occurrences this commit actually introduced.
-            if not any(text.strip() == ln.strip() for ln in added):
+            if text.strip() not in added_stripped:
                 continue
             findings.append((path, lineno, _owner(spans, lineno),
                              text.strip()))
@@ -159,9 +199,10 @@ def main() -> int:
         return 0
 
     print('===== PRE-COMMIT: test oracle pinned to a MOVING git HEAD =====')
-    print('  These reconstruct pre-change code from `git show HEAD`. They')
-    print('  PASS this gate (HEAD is still the old version) and BREAK the')
-    print('  NEXT build once this commit lands. See FINDINGS F043.')
+    print('  These reconstruct pre-change code from `git show HEAD` --')
+    print('  directly, or by CALLING a helper in the same file that does.')
+    print('  They PASS this gate (HEAD is still the old version) and BREAK')
+    print('  the NEXT build once this commit lands. See FINDINGS F043.')
     print()
     for path, lineno, owner, text in live:
         print(f'  {path}:{lineno}  in {owner}')

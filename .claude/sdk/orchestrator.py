@@ -3749,7 +3749,18 @@ class BuildOrchestrator:
         # so a completed build doesn't die opaquely at `git commit`.
         self._ensure_spec_doc_fragments(message)
 
-        full_message = message + "\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+        # Attribute the models that actually authored the build's content.
+        # This was hardcoded to a tier no role has ever been assigned, which
+        # wrote a false authorization trail into git history -- Fable is
+        # owner-only, so those commits read as work nobody approved.  Derive
+        # it from AGENT_MODELS so it cannot drift out of truth again.
+        authoring = sorted({AGENT_MODELS[role]
+                            for role in ("architect", "coder", "test_dev")
+                            if role in AGENT_MODELS})
+        trailers = "\n".join(
+            f"Co-Authored-By: Claude ({model}) <noreply@anthropic.com>"
+            for model in authoring)
+        full_message = f"{message}\n\n{trailers}"
         subprocess.run(
             ["git", "commit", "-m", full_message],
             cwd=self.project_root, check=True,

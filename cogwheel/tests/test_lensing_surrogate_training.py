@@ -2529,49 +2529,65 @@ class WedgeEdgeSelfFalsificationTestCase(_CountingTestCase):
                 self.comparisons += 1
 
     def test_reverting_the_inset_reopens_the_winding_loop(self) -> None:
-        """Gate 2 reachability: the pre-WP1 (``HEAD``) ``_lobe_winding_loop``,
-        whose endpoints are inset by ``_WEDGE_EPS``, closes with a gap FAR
-        above ``_WP1_CLOSURE_TOL`` (~0.279 at gamma=1.05) -- so the current
-        ``== 0.0`` closure is a real consequence of removing the inset, not a
-        number preserved by construction."""
-        head = _head_training_module()
+        """Gate 2 reachability: an inset wedge sweep does NOT close.
+
+        Rebuilds `_lobe_winding_loop`'s traversal here with the retired
+        ``+- 1e-3`` inset restored, using TODAY's `geometry.critical_point`.
+        The reconstructed loop's gap must exceed ``_WP1_CLOSURE_TOL`` by
+        orders of magnitude, so the shipped ``== 0.0`` closure is a real
+        consequence of sampling the true edge rather than a number preserved
+        by construction.
+
+        The counterfactual is reconstructed LOCALLY, never fetched from
+        ``git show HEAD`` (F043): a self-falsification test that drives a
+        past commit passes in its own build's gate and breaks in the next
+        one, which is exactly how this test first shipped.  Reproducing the
+        incumbent gap from the current engine also gives
+        `_WP1_INCUMBENT_CLOSURE_GAP` its provenance without git.
+        """
+        inset = 1e-3
         for gamma, center in itertools.product(
                 _WP1_GAMMAS, _WP1_LOBE_CENTERS):
             with self.subTest(gamma=gamma, center=center):
-                loop = head._lobe_winding_loop(gamma, center, _WP1_WINDING_N)
+                theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
+                thetas = np.linspace(center - theta_max + inset,
+                                     center + theta_max - inset,
+                                     _WP1_WINDING_N)
+                loop = []
+                for branch, sweep in ((1, thetas), (-1, thetas[::-1])):
+                    for theta in sweep:
+                        try:
+                            loop.append(np.asarray(
+                                geometry.critical_point(
+                                    gamma, float(theta), 0.0, 0.0,
+                                    branch).source, dtype=float))
+                        except geometry.LensDomainError:
+                            continue
                 self.assertGreaterEqual(len(loop), 3)
                 gap = float(np.hypot(*(loop[0] - loop[-1])))
                 self.assertGreater(
                     gap, _WP1_CLOSURE_TOL,
-                    f'the inset HEAD loop must NOT close (gap={gap:.3e}); '
+                    f'the inset loop must NOT close (gap={gap:.3e}); '
                     f'this is what WP1 fixed to exactly 0.0')
                 self.comparisons += 1
-
-    def test_reverting_the_inset_shrinks_the_arc_span(self) -> None:
-        """Gate 3 reachability: the pre-WP1 (``HEAD``) served arc span is
-        STRICTLY smaller than the WP1 span and matches the frozen incumbent --
-        so ``assertGreater(span, incumbent)`` genuinely distinguishes the two
-        code states (reverting the inset makes Gate 3 red)."""
-        head = _head_training_module()
-        for gamma in _WP1_GAMMAS:
-            with self.subTest(gamma=gamma):
-                head_struct = head.detect_caustic_structure(
-                    gamma, -1, n_samples=_WP1_STRUCTURE_SAMPLES)
-                head_span = sum(arc.theta_hi - arc.theta_lo
-                                for arc in head_struct.arcs)
-                wp1_struct = training.detect_caustic_structure(
-                    gamma, -1, n_samples=_WP1_STRUCTURE_SAMPLES)
-                wp1_span = sum(arc.theta_hi - arc.theta_lo
-                               for arc in wp1_struct.arcs)
-                self.assertLess(
-                    head_span, wp1_span,
-                    f'HEAD (inset) span {head_span!r} must be below the WP1 '
-                    f'span {wp1_span!r} at gamma={gamma}')
+                # ... and it reproduces the frozen incumbent, which is how
+                # that literal is known to describe the inset state.
                 self.assertAlmostEqual(
-                    head_span, _WP1_INCUMBENT_SPAN[gamma],
-                    delta=abs(_WP1_INCUMBENT_SPAN[gamma]) * 1e-9,
-                    msg='frozen incumbent span must come from the HEAD state')
+                    gap, _WP1_INCUMBENT_CLOSURE_GAP[gamma], places=5,
+                    msg=f'reconstructed inset gap {gap!r} does not match the '
+                        f'frozen incumbent at gamma={gamma}')
                 self.comparisons += 1
+
+    # A companion `test_reverting_the_inset_shrinks_the_arc_span` was retired
+    # (F043).  It drove the pre-WP1 module out of `git show HEAD` to show the
+    # inset span was smaller, which stopped meaning anything the moment WP1
+    # committed and HEAD became the post-change tree.  Unlike the closure gap
+    # above, the arc span cannot be reconstructed locally in a few lines --
+    # it runs the whole `detect_caustic_structure` pipeline -- and the claim
+    # it added beyond Gate 3 was only the PROVENANCE of a frozen literal.
+    # Gate 3 asserts `span > _WP1_INCUMBENT_SPAN[gamma]` where that literal
+    # IS the inset-state measurement, so reverting the inset drives the span
+    # back onto the bound and Gate 3 goes red by construction.
 
     def test_branches_differ_off_the_wedge_edge(self) -> None:
         """Gate 2 specificity: WELL INSIDE the wedge the discriminant is
