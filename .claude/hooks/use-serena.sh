@@ -155,17 +155,27 @@ All use relative paths from project root."
     # single unbroken token. The placeholder keeps the safety judgment local
     # to the command boundary, not the substitution contents.
     stripped="$cmd"
+    _prev=""
     while [[ "$stripped" =~ \$\([^\(\)]*\) ]]; do
+      _prev="$stripped"
       stripped="${stripped/${BASH_REMATCH[0]}/X}"
+      # ${var/PAT/rep} globs PAT, but BASH_REMATCH[0] is literal text:
+      # a bracket class like [0-9] never matches itself, so the
+      # replacement no-ops and this loop spins forever (F046).
+      [[ "$stripped" == "$_prev" ]] && break
     done
     while [[ "$stripped" =~ \`[^\`]*\` ]]; do
+      _prev="$stripped"
       stripped="${stripped/${BASH_REMATCH[0]}/X}"
+      [[ "$stripped" == "$_prev" ]] && break
     done
     # Strip leading VAR=value assignments (bash's standard per-command env
     # prefix) so templates like `LOG=/tmp/x conda run ...` are judged on the
     # actual command, not the variable assignment.
     while [[ "$stripped" =~ ^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+ ]]; do
+      _prev="$stripped"
       stripped="${stripped#${BASH_REMATCH[0]}}"
+      [[ "$stripped" == "$_prev" ]] && break
     done
     # Python project: the default passthrough set below is sufficient (python/pip
     # are wrapped by the conda hook, not bypassed here). Add tools here if needed.

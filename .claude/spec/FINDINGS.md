@@ -2619,6 +2619,48 @@ gamma tested, total arc span slightly LARGER. Against a standoff-free
 reference interior, the open loop rejects 1/792 interior probes at
 `gamma = 1.05`, reaching 0.059 in source-plane units INSIDE the lobe.
 
+## F046 — `${var/${BASH_REMATCH[0]}/x}` spins forever on a bracket class: the Bash gate hook hung a core for 7 days (2026-07-30)
+
+**Where:** `.claude/hooks/use-serena.sh`, the three command-normalizer loops
+in the `Bash)` branch (`$( )`, backticks, and the leading `VAR=` stripper).
+
+`${var/PATTERN/repl}` and `${var#PATTERN}` treat PATTERN as a **glob**, but
+`BASH_REMATCH[0]` is the raw matched **text**. When that text contains a
+bracket character class the glob does not match itself — `[0-9]` as a glob
+matches ONE digit, not the four literal characters — so the replacement is a
+no-op, the `while` condition still matches, and the loop spins forever.
+
+Found by the gw_detection driver after an orphaned copy of this hook
+(`ppid 1`, state `RN`) burned 98.9% of a core for **7 days 7 hours**. Both
+repos carry the same hook; cogwheel's was identical and unfixed.
+
+**Why cogwheel was especially exposed:** AGENTS.md *mandates* the bracket
+idiom for process checks (`pgrep -f "pytest [c]ogwheel"`, so the check does
+not match itself). Reproduced locally, `echo $(pgrep -af "[s]dk/build.py")`
+hung; so did `$(grep [0-9] f)` and `$(ls [ab])`. The trigger is narrower than
+"any bracket" — the class must sit INSIDE a command substitution or backticks,
+which is why bare `pgrep -f "[s]dk/..."` calls returned normally and the bug
+stayed invisible for a week.
+
+**Fix** (matching gw's, deliberately — one shared pipeline, one shared fix):
+guard each loop on the string actually shrinking,
+`[[ "$stripped" == "$_prev" ]] && break`. A pathological command is then left
+un-normalized and judged as-is, which is refusal-conservative: it can only
+produce a spurious DENY, never a spurious ALLOW.
+
+**Two process lessons, both about verification, not bash.**
+1. The patch went in via sidecar + atomic `mv`, never in place: this hook runs
+   on EVERY tool call and bash reads scripts incrementally, so an in-place
+   rewrite can corrupt a live instance.
+2. `bash -n` is not enough. My first patch draft declared `local _prev` inside
+   the top-level `case` branch — a RUNTIME error (`local` outside a function)
+   that `bash -n` passes clean, and that would have broken every tool call.
+   The gate must be a FUNCTIONAL probe: drive the candidate with real payloads
+   under `timeout`. And read allow/deny from stdout, never from the exit code
+   — `deny()` prints its JSON and still exits 0, so my first probe scored a
+   correct DENY as an ALLOW. 20 payloads now cover the three former hangs plus
+   every allow/deny decision.
+
 ## F045 — the HEAD-oracle antipattern spreads by REUSE, and a scan of ADDED lines cannot see it (2026-07-30)
 
 **Where:** `test_lensing_surrogate_training.py::WedgeEdgeSelfFalsification`
