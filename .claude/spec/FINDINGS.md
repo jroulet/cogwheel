@@ -2619,6 +2619,37 @@ gamma tested, total arc span slightly LARGER. Against a standoff-free
 reference interior, the open loop rejects 1/792 interior probes at
 `gamma = 1.05`, reaching 0.059 in source-plane units INSIDE the lobe.
 
+## F052 — the train tier holds every build's acceptance gates and NO routine job ran it (2026-07-30)
+
+**Where:** `.claude/sdk/post_build_sweeps.sh`; `_TRAIN_TIER_SKIP` in the
+lensing test suite.
+
+Slow tests never run in-build — correctly, that is a standing law. They are the
+driver's post-build job, and `post_build_sweeps.sh` is the one command that
+does it. But that script exported only `COGWHEEL_BRUTE_ACCURACY=1`. Nothing,
+anywhere, set `COGWHEEL_TRAIN_TIER`.
+
+So roughly 20 classes across four files — including
+`ArcLengthBoundShiftMarginTestCase`, the knife-edge gate that IS build
+1e-tube's central claim — were skipped by the in-build tree gate (correctly)
+AND skipped by the post-build sweep (silently). The sweep reported
+`test_lensing_surrogate_training 31 passed, 48 skipped` and read as green.
+
+**A build could therefore pass every gate it could reach while the thing it
+existed to prove went untested.** 1e-tube's acceptance ran only because an
+unrelated commit gate blocked and forced a manual tier run; without that
+accident the build would have been reported as verified on the strength of
+gates that never touched its claim.
+
+**Fixed**: the sweep now sets `COGWHEEL_TRAIN_TIER=1` alongside
+`COGWHEEL_BRUTE_ACCURACY=1`. Cost is small — the 1e-tube tier ran 65 tests in
+5:15, against a sweep that already takes ~25 minutes.
+
+**Rule.** Same shape as F051, third instance in one day: a gate nobody executes
+is not a gate. When a test tier is created, name the job that runs it and check
+that job actually sets its variable. "It runs post-build" is a claim about a
+script, and the script is checkable.
+
 ## F050 — every revision-budget exhaustion in the SDK's history is the same unfixable SPEC.md finding (2026-07-30)
 
 **Where:** the Inspector revision loop in `.claude/sdk/orchestrator.py`; the

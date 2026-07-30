@@ -24,7 +24,15 @@ for f in "$REPO_ROOT"/cogwheel/tests/test_lensing_*.py; do
   mkdir -p "$cache"
   (
     cd "$REPO_ROOT" || exit 1
-    COGWHEEL_BRUTE_ACCURACY=1 NUMBA_CACHE_DIR="$cache" \
+    # COGWHEEL_TRAIN_TIER too, not just BRUTE_ACCURACY. The train tier holds
+    # every build's ACCEPTANCE gates -- 1e-tube's knife-edge and node-
+    # efficiency tests live there -- and until 2026-07-30 NO routine job set
+    # it, so the in-build tree gate skipped them and this sweep skipped them
+    # as well. A build could pass every gate it could reach while its central
+    # claim went untested; 1e-tube's were only run because an unrelated
+    # commit gate happened to force it. Same shape as F051: a gate nobody
+    # executes is not a gate.
+    COGWHEEL_BRUTE_ACCURACY=1 COGWHEEL_TRAIN_TIER=1 NUMBA_CACHE_DIR="$cache" \
       OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 \
       NUMBA_NUM_THREADS=4 \
       "$RUNPY" -m pytest "$f" -q -p no:cacheprovider "$@" \
