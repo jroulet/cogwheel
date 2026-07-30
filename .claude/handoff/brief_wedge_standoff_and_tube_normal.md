@@ -132,6 +132,31 @@ OUT — do not touch:
 * `_DEFAULT_ETA_MAX`, `ANNULUS_INNER_RADIUS`, `GAMMA_FENCE` (steps 3 and 5);
 * any training or chart artifact; do not train anything.
 
+## Test-suite ownership — DISJOINT, one author per file
+
+Three suites, assigned by which already owns the predicate (one canonical pin
+each; do not re-assert a claim in a second file). A plan whose test shards
+overlap on any file is rejected at the gate.
+
+* `cogwheel/tests/test_lensing_saddle_geometry.py` — the WEDGE-EDGE PREDICATE.
+  It already owns it (`test_outside_wedge_and_boundary_are_refused`, and the
+  lobe-closure test that calls `critical_point` at `center +- tmax` and asserts
+  the two branches meet to 1e-6). Gate 5 lands here: `critical_point` serves
+  `dtheta = 0` and refuses at `dtheta = -1e-12`; `caustic_derivatives` refuses
+  at `dtheta <= 0`. Note its closure assertion is currently `gap < 1e-2` with
+  the comment "scales as the sqrt-resolved step" — if that gap is now exactly
+  representable, tighten it to the measured value rather than leaving slack
+  that no longer means anything.
+* `cogwheel/tests/test_lensing_surrogate_training.py` — the TRAINING-PATH
+  CONSEQUENCES. Gates 1, 2, 3: `_WEDGE_EPS` absent, sweeps run edge to edge,
+  `_lobe_winding_loop` closure gap exactly 0.0, and no shrink in cusp count /
+  arc count / reach / total arc span.
+* `cogwheel/tests/test_lensing_caustic_cusps.py` — SERVE CONSISTENCY, which it
+  already owns (the `fold_dir . serve_normal` invariant built on
+  `_tube_normal`'s normal). Gate 4 lands here: normal unit and perpendicular to
+  `y'`, and `inward_sign` unchanged per production arc. The Part C helper fix
+  (`SERVE_ALIGN_MIN`, the stale `|dot| > 0.1` replay) is also this file's.
+
 ## Acceptance
 
 State the measured number for each; "unchanged" without a number is not a
