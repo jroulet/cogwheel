@@ -76,7 +76,8 @@ section: Backlog
      the same cascade as the rest. Build 1b, alongside the other
      training-path consumers.
 
-  5. **`surrogate_training._tube_normal`** (added 2026-07-29 — MISSED by the
+  5. **DONE (2026-07-30, commit `145cec3`, build 1d).**
+     `surrogate_training._tube_normal` (added 2026-07-29 — MISSED by the
      original survey, found only when build 1b's `inward_sign` was measured
      against it; F041). It builds the caustic tangent as
      `critical_point(theta + 1e-6) - critical_point(theta)`: a forward

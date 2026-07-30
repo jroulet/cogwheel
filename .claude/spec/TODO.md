@@ -144,7 +144,8 @@ Tag conventions:
      the same cascade as the rest. Build 1b, alongside the other
      training-path consumers.
 
-  5. **`surrogate_training._tube_normal`** (added 2026-07-29 — MISSED by the
+  5. **DONE (2026-07-30, commit `145cec3`, build 1d).**
+     `surrogate_training._tube_normal` (added 2026-07-29 — MISSED by the
      original survey, found only when build 1b's `inward_sign` was measured
      against it; F041). It builds the caustic tangent as
      `critical_point(theta + 1e-6) - critical_point(theta)`: a forward
@@ -355,8 +356,9 @@ Tag conventions:
         serve instead of ~258; `y'''` verified against the same two-stage
         oracle at the F038 tolerance.
 
-     1d. **`_WEDGE_EPS = 1e-3` — DELETE it, and close the estimator
-        inventory.** This entry asked for a conditioning bound
+     1d. **DONE (2026-07-30, commit `145cec3`).** `_WEDGE_EPS = 1e-3` —
+        DELETE it, and close the estimator
+        inventory. This entry asked for a conditioning bound
         (`Δθ >= |y''|_max^{-2/3}`) on the theory that the wedge edge is a
         singularity to stand off from. Driver measurement 2026-07-30 (F044)
         says it is not: the edge is a REGULAR point of the caustic — `y` and
@@ -374,11 +376,12 @@ Tag conventions:
         `_tube_normal`'s `dth = 1e-6` forward difference (target 5 in
         [[lensing_analytic_derivatives]]). It is the F041 surface, so
         `inward_sign` is the tripwire.
-        ACCEPTANCE: `_WEDGE_EPS` gone with no inlined replacement, loop
+        ACCEPTANCE (met): `_WEDGE_EPS` gone with no inlined replacement, loop
         closure gap exactly 0.0, no shrink in cusp/arc/reach/arc-span at any
         saddle band; `_tube_normal` analytic with `inward_sign` unchanged on
         every production arc. After this, nothing in the caustic geometry is
         estimated rather than derived — the claim step 1 exists to earn.
+        See `completed.d/2026-07-30_wedge_edge_deletion_1d.md`.
 
      1e. **The interpolation COORDINATE — full detail in
         [[lensing_collocation_from_local_scales]].** Moved here from a step-9
