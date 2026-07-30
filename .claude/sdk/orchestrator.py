@@ -199,6 +199,36 @@ PROFESSOR_INTER_MESSAGE_TIMEOUT = 1800
 _INFRA_DEATH_PATTERNS = ("spend", "limit", "exit code 1", "command failed")
 
 
+#: Text of the deliberate RuntimeError `_handle_message` raises for a fatal
+#: agent verdict (error_max_turns and friends).  That one must ALWAYS
+#: propagate; the trailing-teardown swallow below must never eat it.
+_AGENT_VERDICT_MARKER = "ended with status"
+
+
+def _is_successful_result(message) -> bool:
+    """True for a ``ResultMessage`` the CLI already completed and billed."""
+    return (isinstance(message, ResultMessage)
+            and getattr(message, "subtype", None) == "success")
+
+
+def _is_trailing_teardown(exc: BaseException) -> bool:
+    """True if `exc` looks like the CLI exiting non-zero during TEARDOWN.
+
+    ``claude_agent_sdk``'s transport drains stdout, then ``await
+    process.wait()``, then raises ``ProcessError`` on a non-zero exit -- so a
+    subprocess that dies while shutting down raises AFTER its success
+    ``ResultMessage`` was already yielded and billed.  The work is done; the
+    exception is noise.  Paired with a "did we already get a success result"
+    flag at the call site, never used on its own.
+    """
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if _AGENT_VERDICT_MARKER in text:
+        return False
+    return any(p in text for p in
+               ("exit code 1", "command failed", "message reader",
+                "processerror"))
+
+
 def _looks_infrastructural(exc: BaseException) -> bool:
     """True if an agent-death exception looks like transient infrastructure.
 
@@ -2809,6 +2839,32 @@ class BuildOrchestrator:
 
     # ── Agent runner ─────────────────────────────────────────────────────
 
+    def _keep_result_on_teardown(self, agent_id, exc, got_result,
+                                 result_text) -> bool:
+        """True if `exc` is CLI teardown noise AFTER a completed result.
+
+        ``claude_agent_sdk``'s transport drains stdout, awaits
+        ``process.wait()``, then raises ``ProcessError`` on a non-zero exit --
+        so a subprocess dying while shutting down raises AFTER its success
+        ``ResultMessage`` was yielded AND BILLED.  The agent's work is done.
+
+        Without this gate the handlers below re-run the whole agent with MCP
+        off and discard ``result_text``; if that leg also dies, `_run_agent`
+        classifies "exit code 1" as infrastructural, waits 300 s, and runs it a
+        THIRD time.  One finished result, paid for three times, and a DAG that
+        sometimes dies anyway.  Measured on the gw_detection side: the CLI's
+        stderr goes nowhere, so the exit cause is unnamed -- but naming it is
+        not required to know the result in hand is complete.
+        """
+        if not (got_result and result_text.strip()
+                and _is_trailing_teardown(exc)):
+            return False
+        self._log(
+            f"[{agent_id}] CLI exited non-zero AFTER a completed result "
+            f"({type(exc).__name__}: {str(exc)[:120]}); keeping the result "
+            f"({len(result_text)} chars) rather than re-running")
+        return True
+
     async def _iter_query_with_timeout(self, async_iter, agent_id, timeout=None):
         """Wrap an async iterable with a per-message timeout.
 
@@ -3090,16 +3146,21 @@ class BuildOrchestrator:
         result_text = ""
         session_id = None
         saw_denial = False
+        got_result = False
         try:
             async for message in self._iter_query_with_timeout(
                     query(prompt=task_context, options=options), agent_id,
                     timeout=inter_message_timeout_override):
                 saw_denial = saw_denial or self._stream_saw_bare_denial(
                     message)
+                got_result = got_result or _is_successful_result(message)
                 result_text, session_id = self._handle_message(
                     agent_id, message, result_text, session_id,
                 )
         except RuntimeError as e:
+            if self._keep_result_on_teardown(agent_id, e, got_result,
+                                             result_text):
+                return result_text, session_id
             # Deliberate RuntimeErrors (raised by _handle_message for fatal
             # agent states) must propagate. But the SDK's anyio teardown can
             # surface "Attempted to exit cancel scope in a different task" —
@@ -3160,6 +3221,9 @@ class BuildOrchestrator:
                         agent_id, message, result_text, session_id,
                     )
         except Exception as e:
+            if self._keep_result_on_teardown(agent_id, e, got_result,
+                                             result_text):
+                return result_text, session_id
             if self.use_serena and RUNTIME_PROVIDER == "claude":
                 self._log(f"[{agent_id}] MCP failed ({type(e).__name__}: {e}), retrying with built-in tools")
                 _retry_kwargs: dict = dict(

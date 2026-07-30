@@ -13,7 +13,9 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -372,6 +374,34 @@ class SerenaManager:
 
 # ── Model assignments ────────────────────────────────────────────────────────
 
+#: Where captured CLI stderr goes.  One file per build (appended), so a
+#: teardown failure leaves evidence without interleaving into the build log.
+SDK_STDERR_LOG = os.environ.get(
+    "SDK_CLI_STDERR_LOG",
+    os.path.join(tempfile.gettempdir(), "sdk_cli_stderr.log"))
+
+
+def _stderr_sink_option(agent_name: str) -> dict:
+    """``{'stderr': callable}`` if the installed SDK supports it, else ``{}``.
+
+    The CLI writes a lot of benign chatter here, so this must never be
+    treated as a failure signal on its own -- it is forensic evidence read
+    AFTER a build dies, correlated by agent name and timestamp.
+    """
+    if "stderr" not in _CLAUDE_AGENT_OPTION_FIELDS:
+        return {}
+
+    def _sink(line: str) -> None:
+        try:
+            with open(SDK_STDERR_LOG, "a") as handle:
+                handle.write(f"[{datetime.now():%H:%M:%S}] "
+                             f"[{agent_name}] {line.rstrip()}\n")
+        except OSError:
+            pass          # forensics must never break a build
+
+    return {"stderr": _sink}
+
+
 AGENT_MODELS: dict[str, str] = {
     "architect":    "claude-opus-4-8",
     "professor":    "claude-opus-4-8",
@@ -698,6 +728,16 @@ async def build_agent_options(
         {"agent_name": agent_name}
         if "agent_name" in _CLAUDE_AGENT_OPTION_FIELDS
         else {})
+    # Capture the CLI's own stderr.  Builds die intermittently with "Fatal
+    # error in message reader: Command failed with exit code 1" AFTER the
+    # agent's success ResultMessage is yielded and billed, and the cause has
+    # never been named because the CLI's stderr went nowhere: nothing set
+    # `stderr=`, and launch_build.sh sends the orchestrator to /dev/null.  A
+    # callable sink costs nothing when quiet and names the cause the next time
+    # it happens.  Suspects on the gw_detection side (which reproduced it with
+    # hooks=None AND mcp_config=None, refuting the hook-race hypothesis) point
+    # at the sandbox's bwrap teardown under load; this is how we find out.
+    _extra_options.update(_stderr_sink_option(agent_name))
     return ClaudeAgentOptions(
         **_extra_options,
         model=model,
