@@ -2687,14 +2687,34 @@ single run:
    workaround for the ordering, not a fix. NOTE this gate did not fire in
    1e-tube only because the hook runs correctness gates FIRST and drift
    blocked before it was reached — both were live.
-3. **The gated-test-drift ack**: the gate correctly refuses to
-   auto-remediate, because the only honest resolution is to RUN the gated
-   tier and acknowledge. But **no pipeline stage runs the gated tier.** So any
-   build changing a signature referenced by skipped tests dies at commit
-   awaiting a human — here, 14 classes flagged for a strictly
-   backward-compatible, keyword-only, `None`-defaulted signature change, of
-   which several were name-collision false positives (`FarFieldChart.
-   from_values` never changed).
+3. **The gated-test-drift gate**: for a FALSE positive the remedy is an ack;
+   for a GENUINE break it is updating the gated tests — the Test Developer's
+   work. The Test Developer runs at Step 3; the gate fires at commit, after
+   Step 5. In 1e-tube it finished at 09:32 and the gate fired at 10:09, 37
+   minutes after the only agent who could have fixed it had finished, and
+   nothing re-summons it. **So a build making a genuinely breaking change —
+   e.g. correcting a past mistake — cannot converge**: it does all the work,
+   passes Inspector and Professor, and dies at a gate whose remedy left two
+   steps earlier.
+
+   PARTLY FIXED (2026-07-30): the checker was imprecise as well as
+   mis-scheduled. It compared signature fingerprints for EQUALITY, so a purely
+   additive change — a new keyword-only parameter with a default, which no
+   existing call site can observe — flagged exactly like a rename. And it
+   matched a BARE METHOD NAME, so `TubeChart.from_values` changing flagged
+   test classes that only ever touch `FarFieldChart.from_values`, which never
+   changed. All 14 of 1e-tube's flags were false on both counts. It now
+   classifies additive-vs-breaking and records the owning class. Verified
+   against 16 classification cases and an end-to-end replay: silent on the
+   real 1e-tube change, blocking on a rename, on a new required
+   keyword-only parameter, and on a deleted method, each naming the exact
+   parameter.
+
+   STILL OPEN: surface drift as an INSPECTOR-phase finding, not only a commit
+   gate. The revision loop already has a Tier 1.5 that routes test-authorship
+   findings to a fresh Test Developer; a breaking drift finding routed there
+   would be fixed in-loop and converge, leaving the commit gate as a backstop
+   that should essentially never fire.
 
 **Rule.** For every gate, name the actor who can satisfy it and check that
 actor runs BEFORE the gate, inside the same loop. A gate whose remedy lives

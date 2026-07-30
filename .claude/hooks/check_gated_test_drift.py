@@ -70,25 +70,69 @@ def _head_source(path: str) -> str | None:
     return proc.stdout if proc.returncode == 0 else None
 
 
-def _signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-    """Argument NAMES and kinds -- not defaults, annotations or the body.
+def _params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict:
+    """Structured argument surface -- names, kinds and optionality.
 
-    A docstring edit, a retyped annotation or a changed default must NOT
-    trip the guard; a new required argument or a rename must.
+    Structured rather than a joined string so `_is_breaking` can tell an
+    ADDITIVE change (a new optional keyword, which no existing caller can
+    notice) from a BREAKING one (a removal, rename, reorder, or a default
+    dropped).  Comparing fingerprints for equality, as this hook used to,
+    cannot make that distinction and flags both.
     """
     a = node.args
-    parts = [
-        ','.join(x.arg for x in a.posonlyargs),
-        ','.join(x.arg for x in a.args),
-        a.vararg.arg if a.vararg else '',
-        ','.join(x.arg for x in a.kwonlyargs),
-        a.kwarg.arg if a.kwarg else '',
-        # Which kwonly args are REQUIRED (default None) matters: adding a
-        # required keyword breaks callers, adding an optional one does not.
-        ','.join('R' if d is None else 'O' for d in a.kw_defaults),
-        str(len(a.defaults)),
-    ]
-    return '|'.join(parts)
+    n_pos = len(a.posonlyargs) + len(a.args)
+    # Positional defaults bind to the TRAILING positional params.
+    required_pos = n_pos - len(a.defaults)
+    return {
+        'posonly': [x.arg for x in a.posonlyargs],
+        'args': [x.arg for x in a.args],
+        'required_pos': required_pos,
+        'vararg': a.vararg.arg if a.vararg else None,
+        'kwonly': {x.arg: ('R' if d is None else 'O')
+                   for x, d in zip(a.kwonlyargs, a.kw_defaults)},
+        'kwarg': a.kwarg.arg if a.kwarg else None,
+    }
+
+
+def _is_breaking(before: dict, after: dict) -> str | None:
+    """Why `after` breaks a caller written against `before`, or None.
+
+    THE RULE: a change no existing call site can observe is not drift.
+    Adding a keyword-only parameter WITH a default, or a trailing positional
+    WITH a default, cannot break any caller -- every existing call still
+    binds exactly as it did.  Removing, renaming or reordering a parameter,
+    or making an optional one required, can.
+
+    Measured cost of not distinguishing these (2026-07-30, build 1e-tube):
+    `TubeChart.from_values` gained two optional keyword-only parameters, and
+    the hook blocked the commit over 14 gated classes, none of which could
+    possibly have broken.  The build was left stranded with all its work
+    uncommitted in the working tree.
+    """
+    positional_before = before['posonly'] + before['args']
+    positional_after = after['posonly'] + after['args']
+    # A rename or reorder shows up as a prefix mismatch; a pure APPEND does
+    # not.  Compare only as far as the shorter list.
+    shared = min(len(positional_before), len(positional_after))
+    if positional_before[:shared] != positional_after[:shared]:
+        return 'positional parameters renamed or reordered'
+    if len(positional_after) < len(positional_before):
+        return 'positional parameter removed'
+    if after['required_pos'] > before['required_pos']:
+        return 'a new REQUIRED positional parameter was added'
+    if before['vararg'] and after['vararg'] != before['vararg']:
+        return '*args removed or renamed'
+    if before['kwarg'] and after['kwarg'] != before['kwarg']:
+        return '**kwargs removed or renamed'
+    for name, optionality in before['kwonly'].items():
+        if name not in after['kwonly']:
+            return f'keyword-only parameter {name!r} removed'
+        if optionality == 'O' and after['kwonly'][name] == 'R':
+            return f'keyword-only parameter {name!r} became REQUIRED'
+    for name, optionality in after['kwonly'].items():
+        if name not in before['kwonly'] and optionality == 'R':
+            return f'a new REQUIRED keyword-only parameter {name!r} was added'
+    return None
 
 
 def _api_surface(source: str) -> dict[str, str]:
@@ -102,7 +146,7 @@ def _api_surface(source: str) -> dict[str, str]:
     def walk(node: ast.AST, prefix: str) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                surface[f'{prefix}{child.name}'] = _signature(child)
+                surface[f'{prefix}{child.name}'] = _params(child)
             elif isinstance(child, ast.ClassDef):
                 surface[f'{prefix}{child.name}'] = 'class'
                 walk(child, f'{prefix}{child.name}.')
@@ -119,9 +163,29 @@ def _api_surface(source: str) -> dict[str, str]:
     return surface
 
 
-def _changed_symbols() -> dict[str, str]:
-    """Bare symbol names whose signature or constant value changed."""
-    changed: dict[str, str] = {}
+class _Change:
+    """One caller-visible API change.
+
+    Carries the OWNING CLASS as well as the bare name, because the bare name
+    alone cannot tell `TubeChart.from_values` from `FarFieldChart.from_values`
+    -- and on 2026-07-30 it flagged test classes that only ever touched the
+    far-field one, which had not changed at all.
+    """
+
+    def __init__(self, how: str, qualified: str, path: str) -> None:
+        self.how = how
+        self.qualified = qualified
+        self.path = path
+        parts = qualified.split('.')
+        self.owner = parts[-2] if len(parts) > 1 else None
+
+    def __str__(self) -> str:
+        return self.how
+
+
+def _changed_symbols() -> dict[str, _Change]:
+    """Bare symbol names whose caller-visible API changed."""
+    changed: dict[str, _Change] = {}
     for path in _staged_paths():
         head = _head_source(path)
         if head is None:
@@ -136,13 +200,30 @@ def _changed_symbols() -> dict[str, str]:
             if old is None or old == fingerprint:
                 continue
             bare = name.split('.')[-1]
-            kind = ('constant value' if fingerprint.startswith('const:')
-                    else 'signature')
-            changed[bare] = f'{kind} changed in {path} ({name})'
+            if isinstance(fingerprint, str):
+                # A constant's VALUE changed -- always caller-visible.
+                kind = ('constant value' if fingerprint.startswith('const:')
+                        else 'definition')
+                changed[bare] = _Change(
+                    f'{kind} changed in {path} ({name})', name, path)
+                continue
+            if not isinstance(old, dict):
+                changed[bare] = _Change(
+                    f'became a function in {path} ({name})', name, path)
+                continue
+            reason = _is_breaking(old, fingerprint)
+            if reason is None:
+                # ADDITIVE ONLY: no existing call site can observe this, so
+                # it is not drift and must not stall a commit.
+                continue
+            changed[bare] = _Change(
+                f'signature changed in {path} ({name}): {reason}',
+                name, path)
         for name in before:
             if name not in after:
                 bare = name.split('.')[-1]
-                changed[bare] = f'removed from {path} ({name})'
+                changed[bare] = _Change(
+                    f'removed from {path} ({name})', name, path)
     return changed
 
 
@@ -226,6 +307,22 @@ def _gated_references(symbols: dict[str, str], advisory: list
         helpers = _module_helpers(tree)
         reach = _helper_symbols(helpers, symbols)
         rel = str(path.relative_to(REPO))
+        # Tier 2: a method's bare name is ambiguous across classes.  If the
+        # changed symbol is a METHOD and this file never mentions its owning
+        # class, the file cannot be calling THAT method -- drop it rather
+        # than report a name collision.  Conservative: a file that does
+        # mention the class keeps every hit, and non-methods are unaffected.
+        source_text = path.read_text()
+        # NOTE a LOCAL name: rebinding `symbols` here filtered it destructively
+        # for every later file in the loop, so one file that mentioned no
+        # changed class silenced the hook for the whole run. Caught by the
+        # end-to-end replay, which went SILENT on a parameter rename.
+        file_symbols = {
+            name: change for name, change in symbols.items()
+            if not getattr(change, 'owner', None)
+            or change.owner in source_text}
+        if not file_symbols:
+            continue
 
         def scan(node: ast.AST, prefix: str, gated: bool) -> None:
             for child in ast.iter_child_nodes(node):
