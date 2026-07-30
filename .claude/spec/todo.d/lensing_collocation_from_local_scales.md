@@ -52,6 +52,32 @@ section: Backlog
   coordinate) should beat it and, more importantly, remove the residual
   between-node error this section is about.
 
+  ## REUSE the existing uniformizing maps — do NOT reinvent them (DRY)
+
+  The catastrophe-uniformizing coordinates are ALREADY computed and single-
+  sourced in the uniform-arm evaluators. The collocation build must import and
+  reuse these, not derive an arc-length approximation of them:
+
+  - FOLD (the near-caustic tube axis): the signed Airy control
+    `xi = (3 w Delta_tau / 4)^{2/3}` in `_airy_fold.py` (the `xi` computed at
+    ~line 438, `Delta_tau` from the merging pair's Fermat-delay separation).
+    The envelope is smooth in `xi`; `u = sqrt(eta)` is its `w`-independent
+    shadow, which is WHY the incumbent `u` axis works. The principled tube
+    coordinate is `xi` itself.
+  - CUSP: the Pearcey controls `x = delta_par * sqrt(w) / sqrt(|C4|)`,
+    `y = delta_perp * w^{3/4} / |C4|^{1/4}` in `_pearcey_cusp.py`
+    (~lines 686-687), with `delta_par`/`delta_perp` the source offsets on the
+    soft/hard axes from `nearest_caustic_point` and `C4` the normal-form
+    coefficient. These are the smoothing coordinates near a cusp.
+
+  Arc-length `int caustic_speed dtheta` is the CHEAP STAND-IN, valid only where
+  no catastrophe dominates (mid-arc, away from cusps). Where a fold or cusp
+  governs the local structure, use its uniformizing map. A single authoritative
+  representation per coordinate (Part 0 / DRY): the tube chart, the uniform
+  arms, and the collocation grid must all read the SAME `xi` and `(x, y)`, or
+  the surrogate and the arm it falls through to disagree about where the
+  structure is.
+
   ## ORDERING — this moves UP, ahead of the driver measurements (F042)
 
   Originally scheduled as a step-9 (train-once) prerequisite. F042 shows that
@@ -129,3 +155,8 @@ section: Backlog
     analytic points: held-out eps is INSENSITIVE to a small arc-bound shift
     (the F042 knife-edge is gone). Placement-only cannot pass this; it is the
     acceptance that separates a coordinate change from node placement.
+  - The uniformizing coordinates are IMPORTED from `_airy_fold.py` (`xi`) and
+    `_pearcey_cusp.py` (the Pearcey `(x, y)` controls), not re-derived: a test
+    asserts the collocation coordinate equals the arm's own control to machine
+    precision where they overlap. A second copy of `xi` or `(x, y)` is a DRY
+    violation and a future drift bug, not an implementation detail.
