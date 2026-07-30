@@ -325,61 +325,12 @@ INTERIOR_DENSE_SAMPLES = 40001
 CLEARANCE_SLACK = 2e-3
 
 
-def _git_available() -> bool:
-    """True if ``git show HEAD:<module>`` yields the pre-refactor source."""
-    try:
-        _head_module_source()
-    except (subprocess.CalledProcessError, OSError):
-        return False
-    return True
-
-
-def _head_module_source() -> str:
-    """Return the HEAD text of ``surrogate_training.py`` via ``git show``."""
-    repo_root = pathlib.Path(__file__).resolve().parents[2]
-    completed = subprocess.run(
-        ['git', 'show', f'HEAD:{_MODULE_REL_PATH}'],
-        cwd=repo_root, check=True, capture_output=True, text=True)
-    return completed.stdout
-
-
-def _head_find_cusps():
-    """Build the pre-refactor ``_find_cusps`` as an INDEPENDENT oracle.
-
-    ``_find_cusps`` at HEAD is fully self-contained -- it references only
-    ``numpy`` and the module constants ``_CUSP_SPEED_REL_FRAC``,
-    ``_CUSP_WIDTH_SAFETY`` and ``_CUSP_MIN_HALFWIDTH`` -- so its
-    ``FunctionDef`` is AST-extracted from the HEAD source and exec'd in a
-    minimal namespace carrying just those four names.  This deliberately
-    avoids importing the (heavy, refactored) live module a second time and
-    keeps the window oracle a true cross-version comparison.
-
-    Returns
-    -------
-    callable
-        ``head_find_cusps(thetas, speed, periodic, *, width_safety=...,
-        min_halfwidth=...)`` -> list of ``(theta_cusp, delta_theta)``.
-    """
-    source = _head_module_source()
-    tree = ast.parse(source)
-    namespace: dict = {'np': np}
-    wanted_consts = {
-        '_CUSP_SPEED_REL_FRAC', '_CUSP_WIDTH_SAFETY', '_CUSP_MIN_HALFWIDTH'}
-    func_segment = None
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id in wanted_consts:
-                    namespace[target.id] = ast.literal_eval(node.value)
-        elif isinstance(node, ast.FunctionDef) and node.name == '_find_cusps':
-            func_segment = ast.get_source_segment(source, node)
-    if func_segment is None:
-        raise RuntimeError('HEAD _find_cusps not found in module source')
-    missing = wanted_consts - namespace.keys()
-    if missing:
-        raise RuntimeError(f'HEAD cusp constants missing: {sorted(missing)}')
-    exec(compile(func_segment, '<head_find_cusps>', 'exec'), namespace)
-    return namespace['_find_cusps']
+# `_head_module_source`, `_git_available` and `_head_find_cusps` deleted
+# 2026-07-30 (F045).  `_head_find_cusps` AST-extracted the pre-refactor
+# `_find_cusps` from `git show HEAD` and needed `_CUSP_SPEED_REL_FRAC`, which
+# build 1b deleted -- the original F043 breakage.  Its tests were left as
+# `@unittest.skip` shells, which kept the helpers alive; that is exactly how
+# the antipattern propagated into a later build, so the shells are gone too.
 
 
 def _axis_distance(theta: float) -> float:
@@ -589,51 +540,9 @@ class CuspAnalyticRootTestCase(_CuspTestCase):
                     self._count()
 
 
-@skip('F043: HEAD-relative oracle broke when its baseline was committed. '
-      '_head_find_cusps reconstructs the pre-1b _find_cusps from `git show '
-      'HEAD`, needing _CUSP_SPEED_REL_FRAC -- which 1b (00bf8ae) deleted. It '
-      'passed in 1b\'s own gate (HEAD was still pre-1b) and breaks now that '
-      'HEAD moved past it. The transition it checked (analytic cusp centre, '
-      'unchanged window width) is complete and verified by '
-      'CuspAnalyticRootTestCase; a durable width guard should freeze a golden '
-      'value table, not reconstruct from git HEAD.')
-class CuspWindowByteIdentityTestCase(_CuspTestCase):
-    """Spec 2: the exclusion-window half-width is byte-identical; only the
-    cusp centre moves (by at most one sampling step) toward the root."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls._head_find_cusps = staticmethod(_head_find_cusps())
-
-    @skipUnless(_git_available(), 'git HEAD source unavailable')
-    def test_window_widths_unchanged_centres_shift(self):
-        for gamma in ASTROID_GAMMAS:
-            with self.subTest(gamma=gamma):
-                thetas, speed = st._branch_speed_profile(
-                    gamma, 1, 0.0, 2.0 * np.pi, N_SAMPLES, periodic=True)
-                new = sorted(st._find_cusps(
-                    thetas, speed, periodic=True, gamma=gamma, branch=1))
-                old = sorted(self._head_find_cusps(
-                    thetas, speed, periodic=True))
-                self.assertEqual(
-                    len(new), len(old),
-                    f'gamma={gamma}: cusp count changed old={len(old)} '
-                    f'new={len(new)}')
-                for (theta_new, delta_new), (theta_old, delta_old) in zip(
-                        new, old):
-                    # Window half-width byte-for-byte identical.
-                    self.assertEqual(
-                        delta_new, delta_old,
-                        f'gamma={gamma}: delta changed {delta_old!r} -> '
-                        f'{delta_new!r} (window rule must be untouched)')
-                    # Centre shifts by at most one sampling step.
-                    shift = abs(((theta_new - theta_old + np.pi)
-                                 % (2.0 * np.pi)) - np.pi)
-                    self.assertLessEqual(
-                        shift, SAMPLING_STEP + 1e-12,
-                        f'gamma={gamma}: centre shift {shift:.3e} exceeds '
-                        f'one step {SAMPLING_STEP:.3e}')
-                    self._count()
+# `CuspWindowByteIdentityTestCase` deleted 2026-07-30 (F045).  It was already
+# skipped for F043; a skipped body still exports its helpers, which is how the
+# antipattern reached a later build.
 
 
 class PositiveParityServedImageCountTestCase(_CuspTestCase):
@@ -1232,37 +1141,8 @@ class DiagnosticPlotTestCase(TestCase):
         plt.close(figure)
         self.assertTrue(path.exists())
 
-    @skip('F043: same HEAD-relative oracle breakage as '
-          'CuspWindowByteIdentityTestCase -- _head_find_cusps needs the '
-          '_CUSP_SPEED_REL_FRAC that 1b deleted from HEAD.')
-    def test_spec2_window_table(self):
-        # Table of (theta_old, theta_new, delta_old, delta_new): deltas
-        # match, centres shift toward the analytic root.
-        if not _git_available():
-            self.skipTest('git HEAD source unavailable')
-        head_find_cusps = _head_find_cusps()
-        rows, cell_text = [], []
-        for gamma in ASTROID_GAMMAS:
-            thetas, speed = st._branch_speed_profile(
-                gamma, 1, 0.0, 2.0 * np.pi, N_SAMPLES, periodic=True)
-            new = sorted(st._find_cusps(
-                thetas, speed, periodic=True, gamma=gamma, branch=1))
-            old = sorted(head_find_cusps(thetas, speed, periodic=True))
-            for (tn, dn), (to, do) in zip(new, old):
-                rows.append(f'g={gamma}')
-                cell_text.append([f'{to:.6f}', f'{tn:.6f}',
-                                  f'{do:.6f}', f'{dn:.6f}'])
-        figure, axis = plt.subplots(figsize=(7, 0.4 * len(cell_text) + 1))
-        axis.axis('off')
-        axis.table(cellText=cell_text, rowLabels=rows,
-                   colLabels=['theta_old', 'theta_new',
-                              'delta_old', 'delta_new'],
-                   loc='center')
-        axis.set_title('cusp window byte-identity (delta_old == delta_new)')
-        path = _OUTPUT_DIR / 'caustic_cusps_window_table.png'
-        figure.savefig(path, bbox_inches='tight')
-        plt.close(figure)
-        self.assertTrue(path.exists())
+    # `test_spec2_window_table` deleted 2026-07-30 (F045): a skipped diagnostic
+    # plot whose body still drove the HEAD cusp oracle.
 
     def test_spec3_served_scatter(self):
         # Scatter of served/unserved sources coloured by real-image count.

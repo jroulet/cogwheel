@@ -129,63 +129,16 @@ _REPO_ROOT = subprocess.run(
 # --------------------------------------------------------------------------
 # HEAD (oracle) loaders -- the 8b-levers side-by-side idiom.
 # --------------------------------------------------------------------------
-def _head_source(relpath: str) -> str:
-    """Return the HEAD text of a repo-relative file."""
-    return subprocess.run(
-        ['git', 'show', f'HEAD:{relpath}'],
-        capture_output=True, text=True, check=True, cwd=_REPO_ROOT).stdout
-
-
-@functools.lru_cache(maxsize=None)
-def _head_geometry():
-    """Load HEAD ``geometry.py`` as an independent, importable module.
-
-    ``geometry.py`` imports only ``numba``/``numpy``/``scipy`` (no relative
-    cogwheel imports), so it loads standalone.  A real temp ``.py`` file is
-    used because ``numba.njit(cache=True)`` needs a file locator; the
-    module is registered in ``sys.modules`` before ``exec_module`` so its
-    ``@dataclass``/``NamedTuple`` fields resolve.
-    """
-    source = _head_source('cogwheel/lensing/chang_refsdal/geometry.py')
-    tmp = tempfile.NamedTemporaryFile(
-        mode='w', suffix='_head_geometry.py', delete=False)
-    tmp.write(source)
-    tmp.close()
-    modname = 'cogwheel_head_geometry_lever1'
-    spec = importlib.util.spec_from_file_location(modname, tmp.name)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[modname] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-@functools.lru_cache(maxsize=None)
-def _head_norm_term():
-    """AST-extract the HEAD ``_norm_term`` (self-contained: ``np`` + const)."""
-    return _extract_function('_norm_term')
-
-
-@functools.lru_cache(maxsize=None)
-def _head_data_term():
-    """AST-extract the HEAD ``_data_term`` (self-contained: ``np`` + const)."""
-    return _extract_function('_data_term')
-
-
-def _extract_function(name: str):
-    """Compile a top-level HEAD ``likelihood`` function in isolation.
-
-    ``_data_term`` / ``_norm_term`` reference only ``numpy`` and the module
-    constant ``_TWO_PI_I``, so they compile in a minimal namespace without
-    importing the heavy ``likelihood`` module twice.
-    """
-    source = _head_source('cogwheel/lensing/likelihood.py')
-    tree = ast.parse(source)
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == name:
-            namespace = {'np': np, '_TWO_PI_I': likelihood._TWO_PI_I}
-            exec(ast.get_source_segment(source, node), namespace)
-            return namespace[name]
-    raise LookupError(f'HEAD likelihood.py has no top-level {name!r}.')
+# The HEAD-loading helpers (`_head_source`, `_head_geometry`,
+# `_head_norm_term`, `_head_data_term`, `_extract_function`) were deleted
+# 2026-07-30 (F045) together with the Lever 1 and Lever 2 value-preservation
+# classes they served.  This module's premise -- "HEAD is the commit these
+# levers sit on top of, and therefore the trusted oracle" -- expired when
+# Build 8f committed: HEAD has since advanced, and on the audit date HEAD and
+# the worktree were byte-identical, so those comparisons measured a module
+# against a copy of itself.  Lever 3 below is unaffected and is the model to
+# copy: its oracle is the SAME grid function with the njit map swapped for its
+# `.py_func`, an independence that lives entirely in the worktree.
 
 
 def _ensure_output_dir() -> None:
@@ -319,110 +272,13 @@ class CompanionRootsByteIdentityTestCase(_LeverTestCase):
                 self.record_comparison()
 
 
-class GeometricImageSetTestCase(_LeverTestCase):
-    """``find_images`` value-preservation vs HEAD across the sweep.
-
-    Image COUNT byte-identical, image positions ``<= 1e-10`` relative, and
-    the delay-sort order preserved.  Accumulates (double-root proximity,
-    relative error) for the diagnostic scatter.
-    """
-
-    _scatter: list[tuple[float, float]] = []
-
-    def test_find_images_value_preserving_vs_head(self) -> None:
-        head_geom = _head_geometry()
-        for cfg in _lever1_configs():
-            source = np.asarray(cfg['y'], dtype=float)
-            matrix = geometry.macro_matrix(
-                cfg['gamma'], cfg['beta'], cfg['kappa'])
-            head_matrix = head_geom.macro_matrix(
-                cfg['gamma'], cfg['beta'], cfg['kappa'])
-            cur = geometry.find_images(source, matrix)
-            head = head_geom.find_images(source, head_matrix)
-            with self.subTest(config=cfg['label']):
-                # Image count is a decision quantity -> byte-identical.
-                self.assertEqual(len(cur), len(head))
-                worst_rel = 0.0
-                for image_cur, image_head in zip(cur, head):
-                    denom = max(float(np.linalg.norm(image_head)), 1e-300)
-                    rel = float(np.linalg.norm(image_cur - image_head)) / denom
-                    worst_rel = max(worst_rel, rel)
-                    self.assertLessEqual(rel, REL_TOL)
-                self._scatter.append(
-                    (_min_pairwise_separation(head), worst_rel))
-                self.record_comparison()
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        if not cls._scatter:
-            return
-        _ensure_output_dir()
-        seps, rels = zip(*cls._scatter)
-        fig, axis = plt.subplots(figsize=(6, 4))
-        axis.scatter(seps, np.maximum(rels, 1e-18), s=28)
-        axis.axhline(REL_TOL, color='crimson', ls='--',
-                     label=f'REL_TOL = {REL_TOL:g}')
-        axis.set_xscale('log')
-        axis.set_yscale('log')
-        axis.set_xlabel('min image separation (double-root proximity)')
-        axis.set_ylabel('max relative image error vs HEAD')
-        axis.set_title('Lever 1: find_images preservation near the caustic')
-        axis.legend()
-        fig.tight_layout()
-        fig.savefig(os.path.join(
-            _OUTPUT_DIR,
-            'lever1_find_images_relerror_vs_double_root.png'), dpi=110)
-        plt.close(fig)
-
-
-class GeometryPartitionValuePreservationTestCase(_LeverTestCase):
-    """``geometry_partition`` value-preservation vs HEAD geometry.
-
-    Same unchanged ``channels`` code, only the ``geometry`` module swapped
-    (working tree vs HEAD).  Real-image mask and channel switch are
-    decision bits -> byte-identical; delays, saddle kernels, critical delay
-    and caustic distance are ``<= 1e-10`` relative.
-    """
-
-    def _partition(self, cfg: dict, geom_module):
-        with mock.patch.object(channels, 'geometry', geom_module):
-            chan = channels.ChangRefsdalChannels(np.array([12.0, 34.0]))
-            chan.reset()
-            return chan.geometry_partition(
-                gamma=cfg['gamma'], y=cfg['y'],
-                beta=cfg['beta'], kappa=cfg['kappa'])
-
-    def test_partition_decision_bits_and_values_preserved(self) -> None:
-        head_geom = _head_geometry()
-        for cfg in _lever1_configs():
-            with self.subTest(config=cfg['label']):
-                cur = self._partition(cfg, geometry)
-                head = self._partition(cfg, head_geom)
-                # Decision bits: byte-identical.
-                np.testing.assert_array_equal(
-                    np.asarray(cur.real_mask), np.asarray(head.real_mask))
-                np.testing.assert_array_equal(
-                    np.asarray(cur.switch), np.asarray(head.switch))
-                # Continuous quantities: <= 1e-10 relative.
-                for name in ('delays', 'saddle_kernels'):
-                    self._assert_relative(
-                        np.asarray(getattr(cur, name)),
-                        np.asarray(getattr(head, name)), name, cfg['label'])
-                self._assert_relative(
-                    np.array([cur.critical_delay]),
-                    np.array([head.critical_delay]), 'critical_delay',
-                    cfg['label'])
-                self._assert_relative(
-                    np.array([cur.caustic_distance]),
-                    np.array([head.caustic_distance]), 'caustic_distance',
-                    cfg['label'])
-                self.record_comparison()
-
-    def _assert_relative(self, cur, head, name, label) -> None:
-        denom = np.maximum(np.abs(head), 1e-300)
-        rel = np.max(np.abs(cur - head) / denom)
-        self.assertLessEqual(
-            rel, REL_TOL, f'{name} relerror {rel:g} in {label}')
+# `GeometricImageSetTestCase` and
+# `GeometryPartitionValuePreservationTestCase` deleted 2026-07-30 (F045):
+# Lever 1's value-preservation sweep against `git show HEAD` (image values,
+# image count, real mask, channel switch, delays, saddle kernels, critical
+# delay, caustic distance).  See the helper note above for why the oracle
+# expired.  `CompanionRootsSelfFalsificationTestCase` below survives because
+# its mutant is built from the worktree.
 
 
 class CompanionRootsSelfFalsificationTestCase(_LeverTestCase):
@@ -448,13 +304,19 @@ class CompanionRootsSelfFalsificationTestCase(_LeverTestCase):
         self.record_comparison()
 
     def test_wrong_image_count_is_detected(self) -> None:
-        head_geom = _head_geometry()
+        """A finder that drops an image must fail the image-COUNT check.
+
+        The mutant is built from the worktree finder, not from a previous
+        commit: dropping an element needs no cross-version oracle, and the
+        `git show HEAD` version this replaced (F045) had gone vacuous.
+        """
         source = np.array([0.1, 0.05])
         matrix = geometry.macro_matrix(0.5, 0.0, 0.0)
         cur = geometry.find_images(source, matrix)
+        real_find_images = geometry.find_images
 
         def drop_last(src, mat):
-            return head_geom.find_images(src, mat)[:-1]
+            return real_find_images(src, mat)[:-1]
 
         with mock.patch.object(geometry, 'find_images', drop_last):
             mutated = geometry.find_images(source, matrix)
@@ -536,142 +398,15 @@ def _random_data_inputs(seed: int):
     return a_moments, rho0, rho1, kbar0, kbar1, tau, f_center
 
 
-class DataTermValuePreservationTestCase(_LeverTestCase):
-    """``_data_term`` (unchanged by Lever 2) still reproduces HEAD exactly."""
-
-    def test_data_term_matches_head(self) -> None:
-        head_data = _head_data_term()
-        for seed in range(6):
-            inputs = _random_data_inputs(seed)
-            with self.subTest(seed=seed):
-                cur = likelihood._data_term(*inputs)
-                head = head_data(*inputs)
-                rel = np.max(np.abs(cur - head)
-                             / np.maximum(np.abs(head), 1e-300))
-                self.assertLessEqual(rel, REL_TOL)
-                self.record_comparison()
-
-
-class NormTermValuePreservationTestCase(_LeverTestCase):
-    """``_norm_term`` reassociation preservation, normal + underflow regimes."""
-
-    _scatter: list[tuple[float, float, bool]] = []
-
-    def test_norm_term_relative_in_normal_regime(self) -> None:
-        head_norm = _head_norm_term()
-        for seed in range(8):
-            inputs = _random_norm_inputs(seed)
-            with self.subTest(seed=seed):
-                cur = likelihood._norm_term(*inputs)
-                head = head_norm(*inputs)
-                self._compare(cur, head)
-                self.record_comparison()
-
-    def test_norm_term_absolute_when_denominator_underflows(self) -> None:
-        head_norm = _head_norm_term()
-        inputs = _underflow_norm_inputs()
-        cur = likelihood._norm_term(*inputs)
-        head = head_norm(*inputs)
-        # Detector 0 is engineered below the underflow floor; confirm the
-        # premise (else the absolute branch is untested).
-        self.assertLess(abs(head[0]), NORM_UNDERFLOW_FLOOR)
-        # First sweep run (8f close) measured the optimized _norm_term
-        # BIT-IDENTICAL to HEAD in this regime — the original assertion
-        # demanded real HEAD-vs-new drift here to demonstrate that
-        # relative comparison misbehaves at underflow, which
-        # over-satisfied preservation makes impossible.  Demonstrate the
-        # currency lesson SYNTHETICALLY instead: a 1e-13-absolute
-        # perturbation (far inside NORM_ABS_TOL) must explode the
-        # relative currency at an underflowed denominator while staying
-        # acceptable in the absolute currency the branch uses.
-        synthetic = cur[0] + 1e-13
-        synthetic_rel = abs(synthetic - head[0]) / max(abs(head[0]), 1e-300)
-        self.assertGreater(
-            synthetic_rel, REL_TOL,
-            'the underflow fixture no longer makes relative comparison '
-            'meaningless; re-engineer the fixture denominator')
-        self.assertLessEqual(abs(synthetic - head[0]), NORM_ABS_TOL)
-        self._compare(cur, head)
-        self.record_comparison()
-
-    def _compare(self, cur, head) -> None:
-        cur = np.atleast_1d(cur)
-        head = np.atleast_1d(head)
-        for value_cur, value_head in zip(cur, head):
-            underflow = abs(value_head) < NORM_UNDERFLOW_FLOOR
-            absolute = abs(value_cur - value_head)
-            if underflow:
-                self.assertLessEqual(absolute, NORM_ABS_TOL)
-                relative = absolute / max(abs(value_head), 1e-300)
-            else:
-                relative = absolute / abs(value_head)
-                self.assertLessEqual(relative, REL_TOL)
-            self._scatter.append((abs(value_head), relative, underflow))
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        if not cls._scatter:
-            return
-        _ensure_output_dir()
-        denom, rel, under = zip(*cls._scatter)
-        under = np.array(under)
-        rel = np.maximum(rel, 1e-18)
-        fig, axis = plt.subplots(figsize=(6, 4))
-        axis.scatter(np.array(denom)[~under], np.array(rel)[~under], s=28,
-                     label='relative branch')
-        axis.scatter(np.array(denom)[under], np.array(rel)[under], s=42,
-                     marker='x', color='crimson', label='absolute branch')
-        axis.axvline(NORM_UNDERFLOW_FLOOR, color='k', ls='--',
-                     label=f'floor = {NORM_UNDERFLOW_FLOOR:g}')
-        axis.axhline(REL_TOL, color='grey', ls=':', label=f'REL_TOL={REL_TOL:g}')
-        axis.set_xscale('log')
-        axis.set_yscale('log')
-        axis.set_xlabel('|norm denominator| (h_L|h_L)')
-        axis.set_ylabel('relative error vs HEAD')
-        axis.set_title('Lever 2: _norm_term preservation vs norm magnitude')
-        axis.legend(fontsize=8)
-        fig.tight_layout()
-        fig.savefig(os.path.join(
-            _OUTPUT_DIR, 'lever2_norm_term_relerror_vs_denominator.png'),
-            dpi=110)
-        plt.close(fig)
-
-
-class NormTermSelfFalsificationTestCase(_LeverTestCase):
-    """Prove the Lever-2 guard goes red under a genuinely wrong contraction."""
-
-    def test_wrong_reassociation_breaks_relative_bound(self) -> None:
-        inputs = _random_norm_inputs(0)
-        head_norm = _head_norm_term()
-        head = head_norm(*inputs)
-
-        def wrong_norm(b_moments, *rest):
-            # A DIFFERENT reduction (swap two mode-pair coefficients) -- not
-            # a rounding re-order but a genuine algebra change.
-            swapped = [b_moments[0], b_moments[2], b_moments[1], b_moments[3]]
-            return head_norm(swapped, *rest)
-
-        mutated = wrong_norm(*inputs)
-        rel = np.max(np.abs(mutated - head)
-                     / np.maximum(np.abs(head), 1e-300))
-        # The honest <= 1e-10 relative bound must FAIL against the mutant.
-        self.assertGreater(rel, REL_TOL)
-        with self.assertRaises(AssertionError):
-            self.assertLessEqual(rel, REL_TOL)
-        self.record_comparison()
-
-    def test_absolute_tolerance_still_catches_gross_error(self) -> None:
-        inputs = _underflow_norm_inputs()
-        head_norm = _head_norm_term()
-        head = head_norm(*inputs)
-        # A gross additive error at the underflowing detector must break the
-        # absolute bound too (the absolute branch is not a blank cheque).
-        broken = head.copy()
-        broken[0] = broken[0] + 10.0 * NORM_ABS_TOL
-        with self.assertRaises(AssertionError):
-            self.assertLessEqual(abs(broken[0] - head[0]), NORM_ABS_TOL)
-        self.record_comparison()
-
+# `DataTermValuePreservationTestCase`, `NormTermValuePreservationTestCase` and
+# `NormTermSelfFalsificationTestCase` deleted 2026-07-30 (F045): Lever 2's
+# `_data_term` / `_norm_term` sweeps against `git show HEAD`, including the
+# relative/absolute regime split and its two self-falsification mutants. Every
+# one used HEAD as the reference implementation, so all of them went vacuous
+# when Build 8f committed. The tolerance REASONING they encoded is preserved
+# in this module's docstring (NORM_UNDERFLOW_FLOOR, NORM_ABS_TOL and why a
+# relative bound is meaningless under catastrophic cancellation); re-deriving
+# those bounds needs a golden-value table, not a previous commit.
 
 # --------------------------------------------------------------------------
 # Lever 3: node-parallel exact Schwinger -- byte-identity + refusal identity.

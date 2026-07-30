@@ -343,30 +343,13 @@ BYTEID_SOURCES = (
 )
 
 
-@functools.lru_cache(maxsize=1)
-def _head_geometry():
-    """Import the HEAD revision of ``geometry.py`` side by side.
-
-    ``git show HEAD:<path>`` is written to a REAL temporary ``.py`` file
-    and imported under a private module name (registered in
-    ``sys.modules`` first).  A real file -- not an ``exec`` of the source
-    into a synthetic module -- is required because `geometry` carries
-    ``numba.njit(cache=True)`` functions, and numba needs a real file
-    locator to compile them.  Cached so the (multi-second) numba compile
-    runs once per process.
-    """
-    source = subprocess.check_output(
-        ['git', 'show', f'HEAD:{_GEOMETRY_REL_PATH}'], cwd=_REPO_ROOT).decode()
-    handle = tempfile.NamedTemporaryFile(
-        mode='w', suffix='.py', delete=False)
-    handle.write(source)
-    handle.close()
-    module_name = 'cogwheel_tests_head_geometry_probe'
-    spec = importlib.util.spec_from_file_location(module_name, handle.name)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+# `_head_geometry` deleted 2026-07-30 (F045).  It imported `git show
+# HEAD:geometry.py` side by side as a "byte-identity oracle", but HEAD stops
+# being the pre-change revision the moment the change commits -- audited that
+# day, HEAD and the worktree were byte-identical, so every test using it was
+# comparing the module against an exact copy of itself.  The independent
+# Richardson finite-difference oracle and the AST independence guard in this
+# file are unaffected: they never used it.
 
 
 def _near_fold_position(gamma, theta):
@@ -1319,129 +1302,12 @@ class GhostGuardTestCase(GhostTestCase):
                     geometry.ghost_kernel(BYTEID_W, source, matrix)
 
 
-class RealImageByteIdentityTestCase(GhostTestCase):
-    """
-    The ghost additions left the real-image path byte-identical.
-
-    Over a battery of real (non-ghost) configs spanning inside (four
-    images) and outside (two images) the astroid caustic, `find_images`,
-    `image_kernel`, `delay`, `magnification`, `morse_index` -- and the
-    returned image sets and Morse-census tuples -- are compared bit-for-
-    bit (``max|diff| == 0.0``) against a HEAD copy of ``geometry.py``
-    loaded side by side.  This certifies the WP1 ghost machinery is purely
-    additive and touched no real-path arithmetic.
-    """
-
-    def _images(self, module, gamma, source):
-        """``(images, matrix)`` from ``module`` for one config."""
-        matrix = module.macro_matrix(gamma, 0.0, 0.0)
-        return module.find_images(source, matrix), matrix
-
-    def test_find_images_positions_are_byte_identical(self):
-        """`find_images` returns the SAME number of images in the SAME
-        order at the SAME positions (``max|diff| == 0.0``), and the
-        battery spans both inside (>=4 images) and outside (2 images) the
-        caustic."""
-        self.swept = True
-        head = _head_geometry()
-        n_inside = n_outside = 0
-        for gamma, source in itertools.product(BYTEID_GAMMAS, BYTEID_SOURCES):
-            with self.subTest(gamma=gamma, source=tuple(source)):
-                images, _ = self._images(geometry, gamma, source)
-                images_head, _ = self._images(head, gamma, source)
-                self._record()
-                self.assertEqual(
-                    len(images), len(images_head),
-                    f'image count differs from HEAD: {len(images)} vs '
-                    f'{len(images_head)}')
-                if len(images) >= 4:
-                    n_inside += 1
-                elif len(images) <= 2:
-                    n_outside += 1
-                for branch_image, head_image in zip(images, images_head):
-                    gap = float(np.max(np.abs(
-                        np.asarray(branch_image) - np.asarray(head_image))))
-                    self.assertEqual(
-                        gap, 0.0,
-                        f'image position differs from HEAD by {gap:.3e}')
-        self.assertGreater(
-            n_inside, 0, 'battery must include an inside-caustic (>=4 image) '
-            'config')
-        self.assertGreater(
-            n_outside, 0, 'battery must include an outside-caustic (2 image) '
-            'config')
-
-    def test_delay_magnification_morse_are_byte_identical(self):
-        """Per image, `delay`, `magnification` and `morse_index` are
-        bit-for-bit identical to HEAD -- the scalar real-path outputs the
-        ghost additions must not have perturbed."""
-        self.swept = True
-        head = _head_geometry()
-        for gamma, source in itertools.product(BYTEID_GAMMAS, BYTEID_SOURCES):
-            with self.subTest(gamma=gamma, source=tuple(source)):
-                images, matrix = self._images(geometry, gamma, source)
-                images_head, matrix_head = self._images(head, gamma, source)
-                self._record()
-                for branch_image, head_image in zip(images, images_head):
-                    self.assertEqual(
-                        geometry.delay(branch_image, source, matrix),
-                        head.delay(head_image, source, matrix_head),
-                        'delay differs from HEAD')
-                    self.assertEqual(
-                        geometry.magnification(branch_image, matrix),
-                        head.magnification(head_image, matrix_head),
-                        'magnification differs from HEAD')
-                    self.assertEqual(
-                        geometry.morse_index(branch_image, matrix),
-                        head.morse_index(head_image, matrix_head),
-                        'morse_index differs from HEAD')
-
-    def test_image_kernel_is_byte_identical(self):
-        """`image_kernel` over the probe frequencies is bit-for-bit
-        identical to HEAD (real and imaginary parts), across the whole
-        battery."""
-        self.swept = True
-        head = _head_geometry()
-        for gamma, source in itertools.product(BYTEID_GAMMAS, BYTEID_SOURCES):
-            with self.subTest(gamma=gamma, source=tuple(source)):
-                images, matrix = self._images(geometry, gamma, source)
-                images_head, matrix_head = self._images(head, gamma, source)
-                self._record()
-                for branch_image, head_image in zip(images, images_head):
-                    branch_kernel = geometry.image_kernel(
-                        BYTEID_W, branch_image, matrix)
-                    head_kernel = head.image_kernel(
-                        BYTEID_W, head_image, matrix_head)
-                    gap = float(np.max(np.abs(branch_kernel - head_kernel)))
-                    self.assertEqual(
-                        gap, 0.0,
-                        f'image_kernel differs from HEAD by {gap:.3e}')
-
-    def test_morse_census_tuples_match(self):
-        """The Morse-census tuple (``morse_index`` of every image, in the
-        finder's order) and the signed Morse sum match HEAD exactly -- the
-        census DECISIONS are unchanged, not merely the positions."""
-        self.swept = True
-        head = _head_geometry()
-        for gamma, source in itertools.product(BYTEID_GAMMAS, BYTEID_SOURCES):
-            with self.subTest(gamma=gamma, source=tuple(source)):
-                images, matrix = self._images(geometry, gamma, source)
-                images_head, matrix_head = self._images(head, gamma, source)
-                census = tuple(
-                    geometry.morse_index(image, matrix) for image in images)
-                census_head = tuple(
-                    head.morse_index(image, matrix_head)
-                    for image in images_head)
-                signed = sum((-1) ** n for n in census)
-                signed_head = sum((-1) ** n for n in census_head)
-                self._record()
-                self.assertEqual(
-                    census, census_head,
-                    f'Morse-census tuple differs from HEAD: {census} vs '
-                    f'{census_head}')
-                self.assertEqual(
-                    signed, signed_head,
-                    'signed Morse sum differs from HEAD')
+# `RealImageByteIdentityTestCase` deleted 2026-07-30 (F045): four tests
+# asserting the real-image positions, delay/magnification/Morse values, image
+# kernel and Morse census were byte-identical to `git show HEAD`.  With HEAD
+# and the worktree byte-identical (audited that day) they compared the module
+# to a copy of itself.  A durable version of this claim is a golden-value
+# table of literals, not a cross-commit fetch.
 
 
 class GhostSelfFalsificationTestCase(TestCase):
@@ -1595,29 +1461,11 @@ class GhostSelfFalsificationTestCase(TestCase):
             geometry._ghost_kernel(BYTEID_W, x_c, source, matrix,
                                    GHOST_REFERENCE_AMPLITUDE)
 
-    def test_byte_identity_gate_catches_a_one_ulp_perturbation(self):
-        """Reachable-red for the byte-identity gate: a one-ulp change to a
-        real ``delay`` makes the ``max|diff| == 0.0`` comparison against
-        HEAD nonzero, so the gate would reject any real-path drift.  Proves
-        the byte-identity check has teeth rather than passing vacuously."""
-        head = _head_geometry()
-        gamma, source = self._GAMMA, np.array([0.1, 0.05])
-        matrix = geometry.macro_matrix(gamma, 0.0, 0.0)
-        matrix_head = head.macro_matrix(gamma, 0.0, 0.0)
-        images = geometry.find_images(source, matrix)
-        images_head = head.find_images(source, matrix_head)
-        # Unperturbed: the gate passes (gap == 0.0).
-        image, image_head = images[0], images_head[0]
-        good_gap = abs(geometry.delay(image, source, matrix)
-                       - head.delay(image_head, source, matrix_head))
-        self.assertEqual(good_gap, 0.0, 'baseline delay is not byte-identical')
-        # Perturb the branch value by a single ulp: the gate now fails.
-        head_delay = head.delay(image_head, source, matrix_head)
-        perturbed = np.nextafter(head_delay, np.inf)
-        bad_gap = abs(perturbed - head_delay)
-        self.assertGreater(
-            bad_gap, 0.0,
-            'a one-ulp perturbation must make the byte-identity gap nonzero')
+    # `test_byte_identity_gate_catches_a_one_ulp_perturbation` deleted
+    # 2026-07-30 (F045) with the byte-identity class it guarded.  It was also
+    # vacuous IN PRINCIPLE, not merely today: its reachable-red step asserted
+    # `abs(nextafter(x, inf) - x) > 0`, a property of float arithmetic that
+    # holds no matter what the code under test does.
 
     def test_anti_vacuity_teardown_fails_a_silent_sweep(self):
         """`GhostTestCase.tearDown` fails a test that set ``swept`` but

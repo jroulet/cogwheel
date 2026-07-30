@@ -1464,15 +1464,14 @@ def _center_f_scale(center: tuple[float, float]) -> float:
     return float(np.max(np.abs(partition.exact_total)))
 
 
-def _head_git_default(rel_path: str, field: str) -> float:
-    """Read a ``field: float = <value>`` dataclass default from HEAD source."""
-    source = subprocess.check_output(
-        ['git', 'show', f'HEAD:{rel_path}'], cwd=_REPO_ROOT).decode()
-    import re
-    match = re.search(rf'{field}\s*:\s*float\s*=\s*([0-9eE.+-]+)', source)
-    if match is None:
-        raise AssertionError(f'{field} default not found in HEAD {rel_path}')
-    return float(match.group(1))
+#: The far-field admittance bar BEFORE this suite's build tightened it, frozen
+#: as a literal.  It was read live out of `git show HEAD` until 2026-07-30
+#: (F045); that stopped meaning anything the moment the tightening committed,
+#: because HEAD then carried the NEW value and the assertion compared it to
+#: itself (audited: `0.001 <= 0.001`, while the test's own docstring still
+#: claimed it was checking against 3e-3).  A historical value is a constant,
+#: not a query.
+PRIOR_FARFIELD_EPS_MAX = 3e-3
 
 
 def _tube_probe_configs() -> list[dict]:
@@ -1543,8 +1542,7 @@ class FarFieldNodeConvergenceTestCase(FarfieldEnvelopeTestCase):
         cls.oversized_eps = _exterior_eps(
             OVERSIZED_TILE_CENTER, OVERSIZED_TILE_HALF, AUTHORIZED_N_Y,
             EXTERIOR_N_W, 'F')
-        cls.head_bar = _head_git_default(
-            'cogwheel/lensing/surrogate_training.py', 'farfield_eps_max')
+        cls.head_bar = PRIOR_FARFIELD_EPS_MAX
         # Build-report record: (tile size, node count, eps_ff) per the Q7 ask.
         print('\n[Q7 far-field node-convergence] tile '
               f'{EXTERIOR_TILE_CENTER} +/- {EXTERIOR_TILE_HALF}, '
@@ -1638,7 +1636,7 @@ class FarFieldNodeConvergenceTestCase(FarfieldEnvelopeTestCase):
             f'measured degradation bound {_OVERSIZED_EPS_BOUND:g}')
 
     def test_served_bar_is_a_tightening_not_a_widening(self):
-        """The branch bar equals ``1e-3`` and is at most HEAD's ``3e-3``."""
+        """The branch bar equals ``1e-3``, at most the prior ``3e-3``."""
         branch_bar = surrogate_training.TrainingConfig().farfield_eps_max
         self.comparisons += 1
         self.assertEqual(branch_bar, FARFIELD_EPS_GATE)
