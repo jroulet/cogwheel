@@ -2698,11 +2698,35 @@ single run:
 
 **Rule.** For every gate, name the actor who can satisfy it and check that
 actor runs BEFORE the gate, inside the same loop. A gate whose remedy lives
-downstream of itself is not a guard — it is a scheduled stall. Two cheap
-follow-ups remain open: move the Librarian ahead of the main commit (or give
-the commit a Librarian pass), and let the pipeline run the gated tier for the
-specific classes a drift finding names, so it can ack from evidence instead of
-stranding the build.
+downstream of itself is not a guard — it is a scheduled stall.
+
+**RETRACTED (same day):** the first draft of this finding proposed letting the
+pipeline run the gated tier for the classes a drift finding names, so a build
+could ack from evidence. That is wrong and contradicts a standing law of this
+repo — *slow tests NEVER run inside a build, no exceptions*. The law exists for
+good reasons: an hour-scale in-build test deepens the transcript (which
+measurably raises the permission classifier's fail-closed rate), and it is a
+gate the in-build agents cannot actually run, so it certifies nothing.
+
+The correct fixes are:
+- **Make the checker precise instead of the pipeline slow.** The drift check
+  matches a BARE METHOD NAME, so it cannot distinguish
+  `TubeChart.from_values` from `FarFieldChart.from_values` (which never
+  changed), nor a purely ADDITIVE optional-keyword change from a breaking one.
+  Every one of 1e-tube's 14 flagged classes was a false positive on both
+  counts. A signature-aware check — flag only removed, renamed or reordered
+  parameters, and resolve the owning class — removes the whole class of
+  stall without weakening the guard.
+- **Keep slow verification with the driver, post-build**, which is where the
+  law already puts it (`.claude/sdk/post_build_sweeps.sh`). If a drift finding
+  survives a precise check, the build should COMMIT and record a loud driver
+  task rather than strand — the gate's purpose is to prevent silent breakage,
+  and a recorded task achieves that without leaving a verified build's work
+  uncommitted in a working tree.
+
+Still open and cheap: move the Librarian ahead of the main commit (or give the
+commit a Librarian pass) so item 2 above stops needing its auto-stub
+workaround.
 
 **Rule (F050).** A revision loop can only fix what some agent owns. When
 adding a gate that inspects a surface, check that the surface is inside

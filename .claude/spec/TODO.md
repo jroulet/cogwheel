@@ -695,6 +695,34 @@ Tag conventions:
   trained yet (the window in this fragment's parent), and expensive after
   step 9. Another reason 1e comes before training, not after.
 
+  ## SIZING the stored theta -> s map — revisit before training, not after
+
+  1e-tube ships `N_map = 2001` nodes per chart. Measured 2026-07-30 (clean
+  `h^2` convergence, strict monotonicity everywhere, both parities):
+
+  | N | astroid rel err | saddle rel err | storage/chart |
+  |---|---|---|---|
+  | 101 | 2.42e-5 | 8.55e-5 | 1.6 KiB |
+  | 201 | 6.05e-6 | 2.14e-5 | 3.1 KiB |
+  | 501 | 9.68e-7 | 3.42e-6 | 7.8 KiB |
+  | 2001 | 6.05e-8 | 2.14e-7 | 31.3 KiB |
+
+  The round-trip tolerance is `1e-6`, so **2001 is conservative, not
+  necessary** — `501` clears it with ~3x margin at a quarter the storage. The
+  table ships inside EVERY chart's npz, so the real cost is artifact size and
+  it scales with the chart count, which is unknown until step 9. Size it then,
+  rather than rediscovering the question after training.
+
+  Do NOT reach for a higher-order rule. `scipy.integrate.cumulative_simpson`
+  needs scipy >= 1.12 and this env is 1.11.4, and independently trapezoid is
+  the better choice: for a positive integrand every increment is
+  `(h/2)(f_i + f_{i+1}) > 0`, so monotonicity is guaranteed BY CONSTRUCTION —
+  which the `np.interp` inversion and the map's strict-monotonicity assertion
+  both depend on. Simpson fits parabolas and carries no such guarantee.
+  Accuracy is close to beside the point anyway: the map is a COORDINATE, and
+  the same table places the build nodes and maps the serve query, so a smooth
+  error cancels exactly between them.
+
   ## What each axis should count against
 
   All four scales are now computable in closed form from the step-1 cascade;
