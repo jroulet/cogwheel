@@ -61,6 +61,23 @@ if [ -f "$DRIFT_CHECK" ] && [ -n "$PYTHON" ]; then
     fi
 fi
 
+# Test oracle pinned to a MOVING git HEAD.
+# A test that reconstructs the pre-change implementation via `git show HEAD:`
+# is valid only while HEAD is still the pre-change commit -- i.e. during its
+# own build, before that build commits. Afterwards it compares a version to
+# itself or fails to reconstruct a deleted symbol. The tree gate CANNOT catch
+# this: it runs before the commit, so the test reads the old HEAD and passes;
+# it goes red in the NEXT build, attributed to a build that never touched it
+# (FINDINGS F043 -- three tests broke this way on 2026-07-29/30). Ack a
+# deliberate within-build check with GATED_HEAD_ORACLE_ACK. Self-skips if
+# absent.
+HEAD_ORACLE_CHECK="$REPO_ROOT/.claude/hooks/check_head_relative_tests.py"
+if [ -f "$HEAD_ORACLE_CHECK" ] && [ -n "$PYTHON" ]; then
+    if ! "$PYTHON" "$HEAD_ORACLE_CHECK"; then
+        exit 1
+    fi
+fi
+
 # -----------------------------------------------------------------------
 # Librarian sync backlog guard
 # -----------------------------------------------------------------------
