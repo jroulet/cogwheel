@@ -2619,6 +2619,59 @@ gamma tested, total arc span slightly LARGER. Against a standoff-free
 reference interior, the open loop rejects 1/792 interior probes at
 `gamma = 1.05`, reaching 0.059 in source-plane units INSIDE the lobe.
 
+## F054 — the surrogate spends 90% of its time SAMPLING the caustic and 1.7% evaluating its spline (2026-07-30)
+
+**Where:** `ppgo_map.caustic_geometry` (n_theta=720, both branches), reached
+per serve via `surrogate._caustic_reach` -> `_to_caustic_fixed` -> `serve`.
+
+Measured after the owner asked whether 31 ms per served likelihood is too
+slow. It is, and the reason is not the spline:
+
+| | per served `lnlike` | share |
+|---|---|---|
+| surrogate-served LENSED `lnlike` | 31.25 ms | 100% |
+| `_surrogate_coefficients` | 27.88 ms | **89%** |
+| `ppgo_map.caustic_geometry` | ~27.5 ms | **90% of the serve** |
+| `geometry.critical_point`, **1440 calls per evaluation** | 0.679 s / 20 calls | |
+| `_contract_tensor_spline` — THE SPLINE | 0.013 s / 20 calls | **1.7%** |
+
+`caustic_geometry` is a Python double loop over 2 branches x 720 polar angles,
+calling `critical_point` on each, to find the MAXIMUM source-plane radius by
+scanning. It runs on every likelihood evaluation.
+
+**Two independent defects, either of which is most of the cost.**
+
+1. **It is a sampled scan where a closed form exists** — the same disease
+   step 1 has been curing since F039/F041. The maximum of `|y(theta)|` is an
+   extremum of a closed-form curve, i.e. a ROOT of `d|y|^2/dtheta = 0`, and
+   the 1a cascade (`caustic_derivatives`) supplies the derivative. The model
+   to copy is already in this package and already cited in
+   [[lensing_analytic_derivatives]]: `geometry.r_caustic` "samples only to
+   BRACKET and refines every root with brentq to 4*eps".
+2. **It is recomputed per evaluation for a quantity that does not depend on
+   the evaluation.** `reach` is a function of `(gamma, kappa)` alone — not of
+   the source position. Nothing caches it, while `_schwinger`,
+   `_pearcey_cusp` and `prior` all use `lru_cache`. This is the
+   already-recorded pattern "values derived from (source, matrix) belong ON
+   the partition, not re-derived inside hot-path functions", which cost
+   ~250 us twice in one day earlier in this program.
+
+**Why it went unnoticed:** the surrogate's own timing test asserts a SPEEDUP
+against the exact engine (9.6-20.4x, comfortably passing), and the exact
+engine is ~300-630 ms. A serve that is 100x too slow still looks like a
+triumph next to that. Nothing measured the surrogate against what a spline
+evaluation OUGHT to cost.
+
+**Scale of the prize:** at 31 ms, 5M likelihood evaluations is ~43 core-hours;
+at the ~3 ms the fast path already targets it is ~4 core-hours. Removing the
+scan should recover most of the difference, since 90% of the serve is this one
+function.
+
+**Rule.** A surrogate must be benchmarked against the cost of the operation it
+performs, not only against the exact path it replaces. "Faster than exact" is
+necessary and nowhere near sufficient — it hides a factor of 100 whenever the
+exact path is slow enough.
+
 ## F053 — an absolute wall-clock bar measures the machine; the speedup ratio measures the code (2026-07-30)
 
 **Where:** `test_lensing_surrogate.py::TimingSmokeTestCase`; the new
