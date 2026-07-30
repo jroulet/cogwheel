@@ -230,7 +230,17 @@ def _run_build(args):
     # as alarming as a real hang and trains the reader to ignore the channel.
     # So: check the TERMINAL condition first and exit on it; only consider a
     # stall when the work is still running.
-    _terminal = "Build complete|Build failed|GATE FAILURE|KILLED|BUILD STRANDED"
+    # ANCHORED to the start of a log line (after an optional [HH:MM:SS] and
+    # indent).  Non-negotiable: this very command is echoed INTO the log
+    # header below, so its own marker words appear mid-line inside a quoted
+    # string.  An unanchored grep matches that echo on the FIRST poll and the
+    # monitor exits instantly, reporting a build that just started as
+    # finished -- observed 2026-07-30, and the second time this session that
+    # grepping a log for text the log's own header echoes produced a false
+    # reading.  Real markers always begin a line; the echo never does.
+    _anchor = r"^(\[[0-9:]+\])?[[:space:]]*"
+    _terminal = (_anchor + "(Build complete|Build failed|GATE FAILURE|"
+                 "KILLED|BUILD STRANDED)")
     # Health is EITHER log advancing: during the tree-wide fast gate the build
     # log legitimately freezes for ~10 min while pytest writes to its own file.
     _gate_log = os.path.join(project_root, ".claude", "sdk", "logs",
@@ -238,7 +248,11 @@ def _run_build(args):
     _mon_cmd = (
         f'L={log_path}; G={_gate_log}; p=""; m=""; s=0; '
         'while :; do '
-        f'n=$(grep -aiE "{_mon_markers}" "$L" 2>/dev/null | tail -1); '
+        # `grep -v` drops the header's echo of THIS command, whose text
+        # contains every marker word; without it the first poll reports the
+        # header as an event.
+        f'n=$(grep -av "Monitor(persistent" "$L" 2>/dev/null '
+        f'| grep -aiE "{_mon_markers}" | tail -1); '
         '[ -n "$n" ] && [ "$n" != "$p" ] && { echo "$n"; p="$n"; }; '
         f'if grep -qaiE "{_terminal}" "$L" 2>/dev/null; then '
         f'grep -aiE "{_terminal}" "$L" | tail -2; exit 0; fi; '

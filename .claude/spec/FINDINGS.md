@@ -2619,6 +2619,39 @@ gamma tested, total arc span slightly LARGER. Against a standoff-free
 reference interior, the open loop rejects 1/792 interior probes at
 `gamma = 1.05`, reaching 0.059 in source-plane units INSIDE the lobe.
 
+## F048 — a log monitor that greps for markers the log's own header ECHOES reads its own instructions as results (2026-07-30, twice)
+
+**Where:** `.claude/sdk/cli.py`'s emitted Monitor command; earlier the same
+day, an ad-hoc build-retry loop.
+
+`cli.py` prints the suggested Monitor command INTO the log header. That command
+string contains its own marker regex, so the words `Build complete`,
+`Build failed`, `GATE FAILURE`, `KILLED` all appear on line 5 of every build
+log before the build has done anything. A monitor grepping for them matches its
+own echo on the FIRST poll: build 1e-tube was declared finished nine seconds
+after launch and ran unmonitored until the discrepancy was noticed.
+
+**This was the second instance in one session.** The first: a retry loop keyed
+"did the build survive?" on the log containing `Plan written|plan_ready`, which
+the same header echo also carries, so it reported SURVIVED for builds that had
+already died. That one was fixed by keying on the `plan.json` ARTIFACT instead
+— and then the identical mistake was made again in a different file, because
+the fix had been treated as a one-off rather than as a rule.
+
+**The rule.** A log is not a clean event stream: it contains instructions,
+echoed commands, and quoted examples as well as results. Before grepping a log
+for a marker, ask *what else in this file contains that word*. Two defences,
+both cheap:
+- ANCHOR to line structure. Real markers begin a line (optionally after a
+  `[HH:MM:SS]` stamp); an echoed command carries them mid-line inside a quoted
+  string. `^(\[[0-9:]+\])?[[:space:]]*(MARKER)` separates them completely.
+- Prefer an ARTIFACT to a log line where one exists. `plan.json` on disk cannot
+  be echoed into a log header; the string "plan_ready" can.
+
+Verified with a synthetic log carrying a realistic header echo: unanchored
+matches it, anchored ignores it, and the anchored pattern still catches a real
+`[08:31:02]   Build complete`.
+
 ## F047 — a style pass wrote literal `\n` into operator.py, and nothing in the gate stack checked that staged Python parses (2026-07-30)
 
 **Where:** `cogwheel/lensing/chang_refsdal/operator.py` line ~215;
