@@ -109,13 +109,37 @@ assumed:
     i.e. it is genuinely at least ``eta_max`` clear, and the incumbent
     refused it only because of the 10% cloud-bias inflation the exact
     distance makes unnecessary.
+
+Build 1d WP1 (analytic ``_tube_normal``, serve consistency -- Gate 4).
+  * `TubeNormalGeometryTestCase` (Gate 4a).  Over a production ``(gamma,
+    theta, branch)`` sweep on both parities `_tube_normal` returns a UNIT
+    normal (``|norm| - 1 < 1e-15``, measured 2.2e-16) exactly perpendicular
+    to the analytic tangent ``y'/|y'|`` from `geometry.caustic_derivatives`
+    (``|normal . t| < 1e-14``, measured 2.7e-17), and its source carries no
+    finite-difference step (the deleted ``_WEDGE_EPS``).  Every probe theta
+    sits at ``|y'| > 1e-3`` so the orientation test is off the interior
+    ``|y'| = 0`` cusps, where the analytic tangent is undefined (Professor
+    Q1/Q2).
+  * `InwardSignGoldenTableTestCase` (Gate 4b, LOAD-BEARING).  The built
+    ``inward_sign`` of every fold arc on every band equals a FROZEN table of
+    +-1 literals (`GOLDEN_INWARD_SIGN`, computed once from the shipped build,
+    NOT ``git show HEAD``), so a silent orientation flip in `_tube_normal`
+    (the F041 failure, in this exact function) goes RED -- something the
+    self-consistent ``sign(dot) == inward_sign`` health invariant (which
+    recomputes from the SAME `_tube_normal`) would miss.  Non-circularity is
+    closed by an INDEPENDENT two-image census: the frozen-sign side of each
+    arc carries exactly four real images (`geometry.find_images`).
+    `SelfFalsificationTestCase.test_flipped_golden_literal_fails_table`
+    proves the table can go red.
 """
 
 from __future__ import annotations
 
 import ast
+import inspect
 import pathlib
 import subprocess
+import textwrap
 
 from unittest import TestCase, main, skip, skipUnless
 
@@ -194,11 +218,16 @@ _MODULE_REL_PATH = 'cogwheel/lensing/surrogate_training.py'
 
 #: Interior thetas `_make_arc` tries, in order, to orient a fold arc.  This
 #: MIRRORS the production loop so the chosen serve theta is reproduced
-#: exactly (the arc's own inner span, same fraction order, same 0.1 floor).
+#: exactly (the arc's own inner span, same fraction order, same exact-zero
+#: ``dot == 0.0`` tripwire -- production no longer applies a magnitude floor).
 _MAKE_ARC_FRACS = (0.5, 0.35, 0.65, 0.2, 0.8)
 
-#: Minimum served-alignment ``|fold_dir . serve_normal|`` for a healthy fold
-#: arc (Architect: > 0.1; equals `_make_arc`'s own build floor).
+#: Independent serve-alignment HEALTH floor for ``|fold_dir . serve_normal|``
+#: (Architect: > 0.1).  This is NOT `_make_arc`'s build tripwire: after the
+#: F041 fix production skips a fraction only when ``dot == 0.0`` exactly (the
+#: measure-zero tangency), never on magnitude.  0.1 is used purely as an
+#: independent health threshold in `InwardSignFoldHealthTestCase` and
+#: `test_below_floor_alignment_fails_serve_gate` to flag cusp-proximal arcs.
 SERVE_ALIGN_MIN = 0.1
 
 #: Positive-parity shears for the inward_sign health sweep (measured worst
@@ -208,6 +237,54 @@ HEALTH_POSITIVE_GAMMAS = (0.2, 0.4, 0.7, 0.9)
 #: Macro-saddle shears for the health sweep (both deltoid branches: the
 #: branch=-1 edges give |dot| = 1.0, the branch=+1 edges ~0.77-0.85).
 HEALTH_SADDLE_GAMMAS = (1.2, 1.5)
+
+# --- Gate 4 (serve consistency): analytic `_tube_normal` geometry + frozen
+#     inward_sign golden table (Build 1d WP1). ---
+
+#: Production ``(gamma, branch)`` pairs sampled for the analytic-normal
+#: geometry sweep (Gate 4a): positive-parity astroid uses branch +1 only;
+#: the macro-saddle deltoid honours both square-root branches.
+TUBE_NORMAL_BANDS = (
+    (0.2, (1,)), (0.4, (1,)), (0.7, (1,)), (0.9, (1,)),
+    (1.2, (1, -1)), (1.5, (1, -1)))
+
+#: theta grid (radians) for the analytic-normal sweep.  A LensDomainError
+#: (outside the saddle wedge) or an interior ``|y'| = 0`` deltoid cusp
+#: (guarded below) simply contributes no comparison.
+TUBE_NORMAL_THETAS = tuple(np.linspace(0.0, 2.0 * np.pi, 41, endpoint=False))
+
+#: Unit-normal tolerance (Professor Q2: 1e-15; measured worst 2.2e-16).
+TUBE_NORMAL_UNIT_ATOL = 1e-15
+
+#: Perpendicularity tolerance ``|normal . (y'/|y'|)|`` (Professor Q2: 1e-14;
+#: measured worst 2.7e-17).
+TUBE_NORMAL_PERP_ATOL = 1e-14
+
+#: Minimum ``|y'|`` (source units) for a probe theta to be OFF the interior
+#: ``|y'| = 0`` deltoid/astroid cusps (Professor Q1).  At ``|y'| = 0`` the
+#: analytic tangent ``y'/|y'|`` is undefined (0/0 -> NaN), so the orientation
+#: test must only run where the caustic is genuinely moving; measured worst
+#: retained ``|y'|`` over the sweep is ~4.2e-2, far above this guard.
+YPRIME_MIN_NORM = 1e-3
+
+#: Frozen INCUMBENT / physically-correct ``inward_sign`` for every fold arc
+#: on every production band, both parities (Gate 4b, LOAD-BEARING).  Computed
+#: ONCE from the shipped analytic-tangent build (NOT ``git show HEAD``) and
+#: baked here as +-1 literals: a silent orientation flip in `_tube_normal`
+#: (the F041 failure class, in this exact function) flips a stored sign away
+#: from its literal and turns this table RED.  Keyed by ``(gamma, parity)``;
+#: values are the per-arc signs in `detect_caustic_structure` arc order.
+#: Independently cross-checked below via the two-image census (the served
+#: side of each frozen sign carries exactly four real images) so the frozen
+#: literals are not a self-oracle.
+GOLDEN_INWARD_SIGN = {
+    (0.2, 1): (-1, -1),
+    (0.4, 1): (-1, -1),
+    (0.7, 1): (-1, -1),
+    (0.9, 1): (-1, -1),
+    (1.2, -1): (-1, -1, 1, -1, -1, 1),
+    (1.5, -1): (-1, -1, 1, -1, -1, 1),
+}
 
 #: Astroid shears for the closed-form inradius spec (positive parity).
 INRADIUS_GAMMAS = (0.05, 0.2, 0.4, 0.7)
@@ -335,10 +412,13 @@ def _chosen_serve_theta(gamma: float, arc):
 
     Replays `_make_arc`'s exact fraction loop over the arc's inner span
     (``theta_lo..theta_hi`` already carry the cusp-window/margin cuts), the
-    same ``|dot| > 0.1`` floor and the same `_tube_normal` serve normal, so
+    same exact-zero ``dot == 0.0`` tripwire (production applies NO magnitude
+    floor after the F041 fix) and the same `_tube_normal` serve normal, so
     the returned ``(theta, dot)`` is the very orientation probe that fixed
-    the arc's ``inward_sign``.  Returns ``None`` if no fraction cleared the
-    floor (which cannot happen for an arc that was actually built).
+    the arc's ``inward_sign`` -- it CANNOT pick a different serve theta than
+    `_make_arc` did.  Returns ``None`` only if every fraction is a
+    `LensDomainError` skip or the exact-zero tangency (which cannot happen
+    for an arc that was actually built).
     """
     span = arc.theta_hi - arc.theta_lo
     for frac in _MAKE_ARC_FRACS:
@@ -350,7 +430,7 @@ def _chosen_serve_theta(gamma: float, arc):
         except geometry.LensDomainError:
             continue
         dot = float(fold_dir @ normal)
-        if abs(dot) <= SERVE_ALIGN_MIN:
+        if dot == 0.0:
             continue
         return theta, dot
     return None
@@ -711,6 +791,141 @@ class InwardSignFoldHealthTestCase(_CuspTestCase):
                         self._count()
 
 
+class TubeNormalGeometryTestCase(_CuspTestCase):
+    """Gate 4a (Build 1d WP1): `_tube_normal` returns the EXACT analytic
+    caustic normal.
+
+    Over a sweep of production ``(gamma, theta, branch)`` on both parities,
+    the returned normal is a unit vector (``|norm| - 1 < 1e-15``) exactly
+    perpendicular to the analytic tangent ``y'/|y'|`` from
+    `geometry.caustic_derivatives` (``|normal . t| < 1e-14``), and the
+    function's source carries NO finite-difference step (the deleted
+    ``_WEDGE_EPS``); every probe theta sits at ``|y'| > 1e-3`` so the
+    orientation test is genuinely off the interior ``|y'| = 0`` cusps."""
+
+    def test_normal_is_unit_and_perpendicular_to_analytic_tangent(self):
+        for gamma, branches in TUBE_NORMAL_BANDS:
+            for branch in branches:
+                for theta in TUBE_NORMAL_THETAS:
+                    try:
+                        y_prime, _ = geometry.caustic_derivatives(
+                            gamma, theta, branch=branch)
+                    except geometry.LensDomainError:
+                        continue
+                    y_norm = float(np.hypot(y_prime[0], y_prime[1]))
+                    if y_norm <= YPRIME_MIN_NORM:
+                        continue  # interior |y'| = 0 cusp: tangent undefined.
+                    with self.subTest(gamma=gamma, branch=branch, theta=theta):
+                        # Q1 guard: this probe is genuinely off the cusps.
+                        self.assertGreater(
+                            y_norm, YPRIME_MIN_NORM,
+                            f'gamma={gamma} branch={branch} theta={theta}: '
+                            f'|y prime|={y_norm:.3e} not off the cusp')
+                        _caust, normal = st._tube_normal(gamma, theta, branch)
+                        # (a) unit normal.
+                        normal_norm = float(np.hypot(normal[0], normal[1]))
+                        self.assertLess(
+                            abs(normal_norm - 1.0), TUBE_NORMAL_UNIT_ATOL,
+                            f'gamma={gamma} branch={branch} theta={theta}: '
+                            f'|normal|={normal_norm:.16f} not unit to '
+                            f'{TUBE_NORMAL_UNIT_ATOL:g}')
+                        # (b) perpendicular to the analytic tangent y'/|y'|.
+                        tangent = y_prime / y_norm
+                        self.assertLess(
+                            abs(float(normal @ tangent)), TUBE_NORMAL_PERP_ATOL,
+                            f'gamma={gamma} branch={branch} theta={theta}: '
+                            f'normal . tangent={float(normal @ tangent):.3e} '
+                            f'not below {TUBE_NORMAL_PERP_ATOL:g}')
+                        self._count()
+
+    def test_source_uses_analytic_derivative_no_finite_difference(self):
+        # The normal must come from the closed-form derivative, never a
+        # finite difference: the source references caustic_derivatives, the
+        # deleted _WEDGE_EPS step is gone, and no theta +- step is ever fed
+        # into a shifted caustic evaluation.
+        source = inspect.getsource(st._tube_normal)
+        self.assertIn(
+            'caustic_derivatives', source,
+            '_tube_normal must build the tangent from the analytic '
+            'caustic_derivatives, not a sampled arc')
+        self.assertNotIn(
+            '_WEDGE_EPS', source,
+            'the deleted finite-difference step _WEDGE_EPS must not '
+            'reappear in _tube_normal')
+        tree = ast.parse(textwrap.dedent(source))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.BinOp) and isinstance(
+                    node.op, (ast.Add, ast.Sub)):
+                names = {n.id for n in ast.walk(node)
+                         if isinstance(n, ast.Name)}
+                self.assertNotIn(
+                    'theta', names,
+                    'a theta +- step in _tube_normal signals a '
+                    'finite-difference tangent (F044/_WEDGE_EPS regression)')
+        self._count()
+
+
+class InwardSignGoldenTableTestCase(_CuspTestCase):
+    """Gate 4b (Build 1d WP1, LOAD-BEARING): the built fold-arc
+    ``inward_sign`` equals a FROZEN golden table of +-1 literals, and each
+    frozen sign is independently the geometric two-image side.
+
+    The golden literals in `GOLDEN_INWARD_SIGN` are frozen from the shipped
+    analytic-tangent build (never `git show HEAD`), so a silent orientation
+    flip in `_tube_normal` -- the F041 failure, in this exact function --
+    flips a stored sign away from its literal and turns
+    ``test_inward_sign_matches_frozen_golden_literals`` RED even though the
+    self-consistent ``sign(dot) == inward_sign`` health invariant (which
+    recomputes from the SAME `_tube_normal`) would not notice.  The second
+    test breaks that potential circularity: it ties each frozen literal to
+    the exact fold-opening geometry AND to an INDEPENDENT four-image census
+    (`geometry.find_images`), so the frozen sign is provably the served,
+    two-image side."""
+
+    def test_inward_sign_matches_frozen_golden_literals(self):
+        for (gamma, parity), golden in GOLDEN_INWARD_SIGN.items():
+            structure = st.detect_caustic_structure(gamma, parity)
+            with self.subTest(gamma=gamma, parity=parity):
+                self.assertEqual(
+                    len(structure.arcs), len(golden),
+                    f'gamma={gamma} parity={parity:+d}: arc count '
+                    f'{len(structure.arcs)} != golden {len(golden)}')
+            for index, (arc, sign) in enumerate(zip(structure.arcs, golden)):
+                with self.subTest(gamma=gamma, parity=parity, arc=index):
+                    self.assertEqual(
+                        arc.inward_sign, sign,
+                        f'gamma={gamma} parity={parity:+d} arc {index}: '
+                        f'inward_sign {arc.inward_sign} != frozen golden '
+                        f'{sign} (silent orientation flip?)')
+                    self._count()
+
+    def test_frozen_sign_is_the_geometric_two_image_side(self):
+        for (gamma, parity), golden in GOLDEN_INWARD_SIGN.items():
+            structure = st.detect_caustic_structure(gamma, parity)
+            for index, (arc, sign) in enumerate(zip(structure.arcs, golden)):
+                with self.subTest(gamma=gamma, parity=parity, arc=index):
+                    # The frozen literal is the geometric fold-opening side...
+                    probe = _chosen_serve_theta(gamma, arc)
+                    self.assertIsNotNone(
+                        probe,
+                        f'gamma={gamma} parity={parity:+d} arc {index}: no '
+                        f'serve probe for a built arc')
+                    _theta, dot = probe
+                    self.assertEqual(
+                        1 if dot >= 0.0 else -1, sign,
+                        f'gamma={gamma} parity={parity:+d} arc {index}: '
+                        f'sign(fold_dir . serve_normal)='
+                        f'{1 if dot >= 0 else -1} != frozen {sign}')
+                    # ...and independently the four-real-image (served) side.
+                    served = _real_image_count(gamma, arc, +1, ETA_MAX)
+                    self.assertEqual(
+                        served, SERVED_IMAGE_COUNT,
+                        f'gamma={gamma} parity={parity:+d} arc {index}: '
+                        f'the frozen inward_sign side carries {served} real '
+                        f'images, not {SERVED_IMAGE_COUNT}')
+                    self._count()
+
+
 class CausticInradiusClosedFormTestCase(_CuspTestCase):
     """Spec: the caustic inradius is the closed-form ``min |y|``.
 
@@ -920,12 +1135,14 @@ class SelfFalsificationTestCase(TestCase):
             'flipping inward_sign must not still read four images')
 
     def test_below_floor_alignment_fails_serve_gate(self):
-        # The serve-alignment gate rejects a cusp-proximal / pathological
-        # fold: a manufactured |dot| = 0.05 must fail the > 0.1 floor.
+        # The independent serve-alignment HEALTH floor (NOT a production
+        # build gate -- production skips only the exact-zero tangency) flags
+        # a cusp-proximal / pathological fold: a manufactured |dot| = 0.05
+        # must fail the > 0.1 health floor.
         weak_alignment = 0.05
         self.assertLessEqual(
             weak_alignment, SERVE_ALIGN_MIN,
-            'a 0.05 alignment must fail the serve-alignment floor')
+            'a 0.05 alignment must fail the serve-alignment health floor')
 
     def test_flipped_serve_sign_breaks_inward_sign_roundtrip(self):
         # The inward_sign round-trip has teeth: a real arc's sign(dot) equals
@@ -939,6 +1156,20 @@ class SelfFalsificationTestCase(TestCase):
         self.assertNotEqual(
             flipped, arc.inward_sign,
             'a flipped serve sign must break the inward_sign round-trip')
+
+    def test_flipped_golden_literal_fails_table(self):
+        # The frozen golden inward_sign table has teeth: negating every
+        # literal (a silent orientation flip, the F041 class) disagrees with
+        # the actually-built signs, while the true table agrees.
+        gamma, parity = 0.4, 1
+        built = tuple(a.inward_sign
+                      for a in st.detect_caustic_structure(gamma, parity).arcs)
+        golden = GOLDEN_INWARD_SIGN[(gamma, parity)]
+        self.assertEqual(built, golden,
+                         'golden table must match the shipped build')
+        self.assertNotEqual(
+            built, tuple(-s for s in golden),
+            'a flipped golden literal must not match the build')
 
     def test_wrong_inradius_fails_gamma_pin(self):
         # The inradius gamma-pin has teeth: a value 1% off gamma must exceed

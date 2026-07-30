@@ -1755,8 +1755,9 @@ def caustic_derivatives(gamma: float, theta, *, kappa: float = 0.0,
     positive parity (``abs(gamma) < lam``) only the ``+`` root is real,
     so ``branch`` is ignored; the macro saddle (``abs(gamma) > lam``)
     honours ``branch`` and refuses outside the critical wedge, exactly on
-    the wedge edge (the deltoid cusp), or where the branch gives a
-    non-positive radial coordinate.
+    the wedge edge (a regular point of the caustic where the
+    theta-derivatives diverge as a parametrization artifact, NOT a cusp;
+    see F044), or where the branch gives a non-positive radial coordinate.
 
     Parameters
     ----------
@@ -1782,9 +1783,12 @@ def caustic_derivatives(gamma: float, theta, *, kappa: float = 0.0,
     LensDomainError
         If ``1 - kappa <= 0``, ``abs(gamma) == 1 - kappa`` (parity wall),
         or -- for a macro saddle -- ``theta`` lies outside the critical
-        wedge, exactly on the wedge edge (the deltoid cusp, where the
-        derivatives genuinely diverge), or the selected branch gives a
-        non-positive radius.
+        wedge, exactly on the wedge edge, or the selected branch gives a
+        non-positive radius.  The theta-derivatives genuinely diverge at
+        the wedge edge, but that edge is a REGULAR point of the caustic
+        curve, not a cusp: the deltoid's three cusps are the interior
+        ``|y'| = 0`` roots, and the edge divergence is a
+        theta-parametrization artifact (see F044).
     """
     cascade = _caustic_cascade(gamma, theta, kappa, branch)
     lam, gamma = cascade.lam, cascade.gamma

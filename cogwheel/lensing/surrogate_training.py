@@ -119,8 +119,6 @@ _SADDLE_CUSP_WIDTH_SAFETY = 2.5
 _SADDLE_CUSP_MIN_HALFWIDTH = 0.08
 #: Fractional shrink of each fold arc away from its bounding walls.
 _ARC_MARGIN_FRAC = 0.03
-#: Small offset off the saddle wedge edges when sampling a branch.
-_WEDGE_EPS = 1e-3
 #: Margin below the double-double product ceiling ``w * |y| <= 60`` used to cap
 #: each chart's ``w`` grid.  Mirrors the prior's mass coupling, which keeps
 #: ``w * |y| <= ~55`` by construction (the mass-conditioned source scale), so a
@@ -394,18 +392,20 @@ def _tube_normal(gamma: float, theta: float, branch: int
     """Caustic point and unit source-plane normal at ``(gamma, theta,
     branch)``.
 
-    The normal is the unit perpendicular to the caustic tangent (finite-
-    differenced along ``theta`` on the same branch).
+    The normal is the unit perpendicular to the EXACT analytic caustic
+    tangent ``y' / |y'|`` (no finite difference), where ``y'`` is the
+    closed-form theta-derivative from
+    :func:`~cogwheel.lensing.chang_refsdal.geometry.caustic_derivatives`.
+    Both ``y'`` and a forward difference point along increasing ``theta``,
+    so the ``(-t_y, t_x)`` rotation preserves the previous orientation.  A
+    `LensDomainError` from ``caustic_derivatives`` at the wedge edge (where
+    ``critical_point`` still succeeds) is left to propagate to the caller.
     """
     caust = np.asarray(
         geometry.critical_point(gamma, theta, 0.0, 0.0, branch).source,
         dtype=float)
-    dth = 1e-6
-    caust2 = np.asarray(
-        geometry.critical_point(gamma, theta + dth, 0.0, 0.0, branch).source,
-        dtype=float)
-    tangent = caust2 - caust
-    tangent /= np.hypot(tangent[0], tangent[1])
+    y_prime, _ = geometry.caustic_derivatives(gamma, theta, branch=branch)
+    tangent = y_prime / np.hypot(y_prime[0], y_prime[1])
     normal = np.array([-tangent[1], tangent[0]])
     return caust, normal
 
@@ -626,8 +626,8 @@ def _saddle_arcs(gamma: float, n: int
     arcs: list[FoldArc] = []
     reach = 0.0
     for center in (0.0, np.pi):
-        lo_edge = center - theta_max + _WEDGE_EPS
-        hi_edge = center + theta_max - _WEDGE_EPS
+        lo_edge = center - theta_max
+        hi_edge = center + theta_max
         for branch in (1, -1):
             thetas, speed = _branch_speed_profile(
                 gamma, branch, lo_edge, hi_edge, n, periodic=False)
@@ -1415,8 +1415,8 @@ def _caustic_points(gamma: float, parity: int, n: int) -> np.ndarray:
         theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
         segments = []
         for center in (0.0, np.pi):
-            thetas = np.linspace(center - theta_max + _WEDGE_EPS,
-                                 center + theta_max - _WEDGE_EPS, n)
+            thetas = np.linspace(center - theta_max,
+                                 center + theta_max, n)
             for branch in (1, -1):
                 segments.append((branch, thetas))
     for branch, thetas in segments:
@@ -1437,9 +1437,10 @@ def _winding_number(points: np.ndarray) -> float:
     loop is closed back to the first point.  Sums the signed angular increments
     seen from the origin, each wrapped to ``(-pi, pi]``, and divides by
     ``2 pi``.  A curve enclosing the origin returns ``+-1``; one that does not
-    returns ``0``.  Only meaningful for a genuinely ordered single loop (the
-    positive-parity astroid sweep); the disjoint saddle lobes are NOT such a
-    loop, so this is never applied to them.
+    returns ``0``.  Only meaningful for a genuinely ordered single loop: the
+    positive-parity astroid sweep, and each disjoint saddle lobe via the
+    ordered boundary that `_lobe_winding_loop` builds -- it is applied to the
+    saddle lobes at the `_SaddleLobeAdmission` interior probe test.
     """
     angles = np.arctan2(points[:, 1], points[:, 0])
     increments = np.diff(np.concatenate([angles, angles[:1]]))
@@ -1531,8 +1532,8 @@ def _closed_form_inradius(gamma: float, parity: int, n: int) -> float:
     else:
         theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
         for center in (0.0, np.pi):
-            lo_edge = center - theta_max + _WEDGE_EPS
-            hi_edge = center + theta_max - _WEDGE_EPS
+            lo_edge = center - theta_max
+            hi_edge = center + theta_max
             for branch in (1, -1):
                 candidates += _branch_inradius_candidates(
                     gamma, branch, lo_edge, hi_edge, n, periodic=False)
@@ -1990,8 +1991,8 @@ def _lobe_caustic_points(gamma: float, lens_center: float,
     nearest-caustic distance.
     """
     theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
-    thetas = np.linspace(lens_center - theta_max + _WEDGE_EPS,
-                         lens_center + theta_max - _WEDGE_EPS, n)
+    thetas = np.linspace(lens_center - theta_max,
+                         lens_center + theta_max, n)
     points: list[np.ndarray] = []
     for branch in (1, -1):
         for theta in thetas:
@@ -2015,13 +2016,16 @@ def _lobe_winding_loop(gamma: float, lens_center: float,
     vanishes.  The ordered loop is what `_winding_number` needs to test whether
     a candidate source ``p`` lies inside the lobe (translate the loop by ``-p``
     and read the winding about the origin).  Wedge-forbidden angles are
-    dropped; the loop stays approximately closed, and a point well inside the
-    lobe still winds ``+-1`` with margin against the ``0.5`` interior
-    threshold.
+    dropped.  With the wedge endpoints now sampled at the true edge, the
+    endpoint discriminant clamps to zero and both branches meet at the same
+    source-plane turnaround point, so the loop closes exactly (bit-exact
+    ``0.0`` separation between its first and last vertices); a point well
+    inside the lobe still winds ``+-1`` with margin against the ``0.5``
+    interior threshold.
     """
     theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
-    lo = lens_center - theta_max + _WEDGE_EPS
-    hi = lens_center + theta_max - _WEDGE_EPS
+    lo = lens_center - theta_max
+    hi = lens_center + theta_max
     thetas = np.linspace(lo, hi, n)
     loop: list[np.ndarray] = []
     for branch, sweep in ((1, thetas), (-1, thetas[::-1])):
@@ -2052,8 +2056,8 @@ def _lobe_cusp_source_angles(gamma: float, lens_center: float,
     uniform lobe-local tiling.
     """
     theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
-    lo = lens_center - theta_max + _WEDGE_EPS
-    hi = lens_center + theta_max - _WEDGE_EPS
+    lo = lens_center - theta_max
+    hi = lens_center + theta_max
     angles: list[float] = []
     for branch in (1, -1):
         thetas, speed = _branch_speed_profile(

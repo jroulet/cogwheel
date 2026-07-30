@@ -195,7 +195,7 @@ from cogwheel.lensing.surrogate_training import (
     _build_farfield_chart, _farfield_heldout_samples, _heldout_eps,
     _chart_gated, _gate_chart, _load_or_build, _saddle_arcs,
     _branch_speed_profile, _find_cusps, _make_arc, _caustic_reach, _capped_w_range, _build_tube_chart,
-    _tube_heldout_samples, _tube_source, _WEDGE_EPS, _CUSP_WIDTH_SAFETY,
+    _tube_heldout_samples, _tube_source, _CUSP_WIDTH_SAFETY,
     _CUSP_MIN_HALFWIDTH, _SADDLE_CUSP_WIDTH_SAFETY, _SADDLE_CUSP_MIN_HALFWIDTH,
     _DD_PRODUCT_MARGIN)
 from cogwheel.lensing.chang_refsdal.channels import ChangRefsdalChannels
@@ -966,6 +966,15 @@ _WP3_BAND = (_WP3_GAMMA - 0.03, _WP3_GAMMA + 0.03)
 #: Tube held-out eps registration bar (matches ``TrainingConfig`` default).
 _TUBE_EPS_BAR = 5e-2
 
+#: Retired production wedge inset (the deleted ``surrogate_training._WEDGE_EPS
+#: = 1e-3``, removed by WP1 "delete _WEDGE_EPS / sample the true edge").  Kept
+#: TEST-LOCAL solely to reconstruct the PRE-fix counterfactual saddle arc in
+#: `_wp3_fixoff_left_arc`, whose whole point is to stand slightly inside the
+#: wedge exactly as the old production code did.  Production now samples the
+#: true wedge edge with NO inset -- WedgeEpsDeletionTestCase (Gate 1) scans the
+#: shipped module source to prove no such ``1e-3`` survives there.
+_LEGACY_WEDGE_EPS = 1e-3
+
 #: Pre-fix pathology floor: the counterfactual (fix-disabled) arc must exceed
 #: this, proving the reproduction bites the real tail (measured ~0.43), while
 #: the Professor's headline pre-fix number was ~1.15.
@@ -1009,8 +1018,8 @@ def _wp3_fixoff_left_arc(gamma: float, n: int):
     ``_CUSP_MIN_HALFWIDTH`` and no wedge-edge exclusion (edge half-width 0).
     """
     theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
-    lo_edge = -theta_max + _WEDGE_EPS
-    hi_edge = theta_max - _WEDGE_EPS
+    lo_edge = -theta_max + _LEGACY_WEDGE_EPS
+    hi_edge = theta_max - _LEGACY_WEDGE_EPS
     branch = 1
     thetas, speed = _branch_speed_profile(
         gamma, branch, lo_edge, hi_edge, n, periodic=False)
@@ -1485,8 +1494,12 @@ class SaddleTubeTailTestCase(_CountingTestCase):
         self.assertEqual(on_arc.branch, 1)
         self.comparisons += 1
 
+        # WP1 ("delete _WEDGE_EPS"): the fixed arc's wedge-edge guard window
+        # now sits at the TRUE wedge edge ``-theta_max`` (previously inset by
+        # the retired ``_WEDGE_EPS = 1e-3``), so the edge is located with no
+        # offset here.
         theta_max = 0.5 * np.arcsin(1.0 / abs(_WP3_GAMMA))
-        edge_theta = -theta_max + _WEDGE_EPS
+        edge_theta = -theta_max
 
         def has_edge_window(arc) -> bool:
             return any(abs(theta - edge_theta) < 1e-6 and halfwidth > 0.0
@@ -2192,6 +2205,397 @@ class StableGammaBandsF041SelfFalsificationTestCase(_CountingTestCase):
             any(len(structure.arcs) == 0 for (_band, structure) in stable),
             'the injected pathology must leave a zero-arc band')
         self.comparisons += 1
+
+
+# ---------------------------------------------------------------------------
+# Build 8g WP1: delete _WEDGE_EPS, sample the true wedge edge (Gates 1-3)
+# ---------------------------------------------------------------------------
+#
+# WP1 removed the ``_WEDGE_EPS = 1e-3`` inset that stopped every macro-saddle
+# wedge sweep 1e-3 short of its true edge ``center +- theta_max`` and made
+# ``_tube_normal`` analytic.  These three gates pin the TRAINING-PATH
+# consequences with pure closed-form geometry (no engine, fast tier):
+#   Gate 1  the constant is gone and no ``1e-3`` inlined in its place; the
+#           wedge sweeps start/end at the exact edge.
+#   Gate 2  (Professor Q3) at the served endpoint the discriminant clamps to
+#           zero, the two square-root branches coincide bit-for-bit, and the
+#           lobe winding loop closes with EXACTLY zero gap (was ~0.279).
+#   Gate 3  the saddle deltoid keeps 6 cusps / 6 arcs / its reach and its
+#           served arc span does not shrink -- it grows past the pre-WP1 span.
+
+#: Strong-shear macro-saddle shears exercised by the WP1 wedge gates.  Each is
+#: ``|gamma| > 1`` (two 3-cusp deltoid lobes); F044 measured the endpoint
+#: discriminant clamp fires at each.
+_WP1_GAMMAS = (1.05, 1.3, 2.0)
+
+#: The two deltoid lobe centres on the negative-eigenvalue axis (mirror of
+#: ``surrogate_training._SADDLE_LOBE_CENTERS``); each lobe's wedge is
+#: ``center +- theta_max`` with ``theta_max = 0.5 * arcsin(1 / |gamma|)``.
+_WP1_LOBE_CENTERS = (0.0, math.pi)
+
+#: Winding-loop sample count for the closure-gap mechanism check.  The gap is
+#: the two-vertex ``|loop[0] - loop[-1]|`` and is independent of ``n``; 64
+#: keeps each lobe loop build well under a millisecond.
+_WP1_WINDING_N = 64
+
+#: Absolute closure tolerance for the (empirically unreached) branch where the
+#: endpoint discriminant lands tiny-POSITIVE instead of ``<= 0``: a few ulp of
+#: the O(1) source scale (caustic reach ~ 3 at gamma = 1.05).  When the clamp
+#: fires (disc <= 0) the gap is asserted EXACTLY 0.0, never merely below this.
+_WP1_CLOSURE_TOL = 1e-12
+
+#: Frozen PRE-WP1 (HEAD, ``_WEDGE_EPS``-inset) closure gap at the wedge
+#: endpoint, ``gamma -> gap``, measured once via the HEAD module at
+#: ``_WP1_WINDING_N`` and baked in as a literal (no live ``git show`` oracle in
+#: the gates).  WP1 drives every one to exactly 0.0; this is the incumbent
+#: context reported by Gate 2 (0.279 at gamma = 1.05).
+_WP1_INCUMBENT_CLOSURE_GAP = {1.05: 0.278958, 1.3: 0.107435, 2.0: 0.051454}
+
+#: Caustic-samples-per-branch for the Gate 3 structure build (matches the
+#: ``detect_caustic_structure`` default; 2 centres x 2 branches x 200 speed
+#: evals x 3 gammas ~ a few thousand closed-form evals, well under 1 s total).
+_WP1_STRUCTURE_SAMPLES = 200
+
+#: Golden WP1 (true-edge) saddle-deltoid invariants, ``gamma -> (cusps, arcs,
+#: reach)``, FROZEN as literals computed once with the shipped code at
+#: ``_WP1_STRUCTURE_SAMPLES``.  A drop in any of these fails Gate 3.
+_WP1_GOLDEN_STRUCTURE = {
+    1.05: (6, 6, 3.007536369149046),
+    1.3: (6, 6, 1.7143767264026),
+    2.0: (6, 6, 2.309395081301576),
+}
+
+#: Golden WP1 total served arc span (sum of ``theta_hi - theta_lo``),
+#: ``gamma -> span``; the reproduction anchor for Gate 3.
+_WP1_GOLDEN_SPAN = {
+    1.05: 2.9072886962267335,
+    1.3: 1.9837106163515006,
+    2.0: 0.923890604351195,
+}
+
+#: Frozen PRE-WP1 (HEAD) total arc span at ``_WP1_STRUCTURE_SAMPLES``,
+#: ``gamma -> span``.  WP1 samples 1e-3 nearer each true edge, so the served
+#: span STRICTLY INCREASES past every incumbent; Gate 3 asserts the current
+#: span is strictly greater (no coverage shrink -- a gain).  Measured once via
+#: the HEAD module and baked in as a literal.
+_WP1_INCUMBENT_SPAN = {
+    1.05: 2.9046151283875368,
+    1.3: 1.9809425761504962,
+    2.0: 0.920130604351196,
+}
+
+#: Matches an inline wedge inset ``theta_max +- <_WEDGE_EPS | numeric eps>`` --
+#: the retired offset pattern Gate 1 forbids at the wedge-bound sites.  A clean
+#: ``center - theta_max`` (edge line ending in ``,`` or a newline) does NOT
+#: match because no ``+``/``-`` follows ``theta_max``; ``theta_max -
+#: _CUSP_BRACKET_EPS`` (a named bracket clamp in ``_find_cusps``, not a wedge
+#: edge) also does not match (the token after ``-`` is not a digit).
+_WEDGE_INSET_RE = re.compile(r'theta_max\s*[-+]\s*(?:_WEDGE_EPS|\d)')
+
+#: Signature of the wedge half-angle formula that marks a wedge-bound site.
+_WEDGE_HALF_ANGLE_SRC = 'np.arcsin(1.0 / abs('
+
+
+def _wedge_bound_function_sources() -> list:
+    """``(name, source)`` for every ``surrogate_training`` function that
+    computes a saddle wedge edge from the half-angle ``0.5 * arcsin(1 /
+    |gamma|)``.
+
+    These are the "wedge-bound sites" Gate 1 scans.  `_find_cusps` (whose
+    local ``theta_max`` is a sampled ``thetas.max()``, not the wedge angle) is
+    excluded because its source lacks the half-angle signature.
+    """
+    sources = []
+    for name, obj in vars(training).items():
+        if not (inspect.isfunction(obj)
+                and obj.__module__ == training.__name__):
+            continue
+        try:
+            src = inspect.getsource(obj)
+        except OSError:
+            continue
+        if _WEDGE_HALF_ANGLE_SRC in src and 'theta_max' in src:
+            sources.append((name, src))
+    return sources
+
+
+class WedgeEpsDeletionTestCase(_CountingTestCase):
+    """Gate 1: ``_WEDGE_EPS`` is deleted, no ``1e-3`` is inlined in its place,
+    and the wedge sweeps run to the exact edge ``center +- theta_max``."""
+
+    def test_wedge_eps_constant_is_deleted(self) -> None:
+        """The production module no longer exposes ``_WEDGE_EPS`` at all."""
+        self.assertFalse(
+            hasattr(training, '_WEDGE_EPS'),
+            'WP1 deletes surrogate_training._WEDGE_EPS')
+        self.assertNotIn(
+            '_WEDGE_EPS', inspect.getsource(training),
+            'no _WEDGE_EPS token may survive anywhere in the module source')
+        self.comparisons += 1
+
+    def test_no_inline_inset_at_wedge_bound_sites(self) -> None:
+        """No wedge-bound site inlines a ``1e-3`` (or any eps) offset onto
+        ``theta_max`` in place of the retired constant."""
+        wedge_fns = _wedge_bound_function_sources()
+        names = {name for name, _ in wedge_fns}
+        # Guard the scan itself: the two edge-defining functions MUST be seen,
+        # else a rename would let the scan pass vacuously over zero sources.
+        self.assertIn('_saddle_arcs', names)
+        self.assertIn('_lobe_winding_loop', names)
+        for name, src in wedge_fns:
+            with self.subTest(function=name):
+                self.assertNotIn('_WEDGE_EPS', src)
+                self.assertIsNone(
+                    _WEDGE_INSET_RE.search(src),
+                    f'{name} inlines a wedge inset onto theta_max')
+                self.comparisons += 1
+
+    def test_winding_loop_endpoints_are_the_true_edge(self) -> None:
+        """The lobe winding loop's first/last vertices sit BIT-for-BIT at the
+        true wedge edges ``center -+ theta_max`` -- a 1e-3 inset would move
+        them off these exact critical points."""
+        for gamma, center in itertools.product(
+                _WP1_GAMMAS, _WP1_LOBE_CENTERS):
+            with self.subTest(gamma=gamma, center=center):
+                theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
+                lo = center - theta_max
+                hi = center + theta_max
+                loop = training._lobe_winding_loop(
+                    gamma, center, _WP1_WINDING_N)
+                self.assertGreaterEqual(len(loop), 3)
+                # loop = [+branch lo..hi, -branch hi..lo]: first vertex is the
+                # + branch at lo, last vertex the - branch back at lo, and the
+                # + branch's turnaround vertex (index n-1) is at hi.
+                lo_plus = np.asarray(geometry.critical_point(
+                    gamma, float(lo), 0.0, 0.0, 1).source, dtype=float)
+                lo_minus = np.asarray(geometry.critical_point(
+                    gamma, float(lo), 0.0, 0.0, -1).source, dtype=float)
+                hi_plus = np.asarray(geometry.critical_point(
+                    gamma, float(hi), 0.0, 0.0, 1).source, dtype=float)
+                self.assertTrue(
+                    np.array_equal(loop[0], lo_plus),
+                    'first vertex is not the exact lo wedge edge')
+                self.assertTrue(
+                    np.array_equal(loop[-1], lo_minus),
+                    'last vertex is not the exact lo wedge edge')
+                self.assertTrue(
+                    np.array_equal(loop[_WP1_WINDING_N - 1], hi_plus),
+                    'turnaround vertex is not the exact hi wedge edge')
+                self.comparisons += 1
+
+
+class WedgeClosureGapTestCase(_CountingTestCase):
+    """Gate 2 (Professor Q3): the served wedge endpoint clamps the branch
+    discriminant to zero, the two square-root branches coincide bit-for-bit,
+    and the lobe winding loop closes with EXACTLY zero gap."""
+
+    def test_endpoint_discriminant_clamps_and_branches_coincide(self) -> None:
+        """PRIMARY mechanism: at the served endpoint ``theta = center -
+        theta_max`` the discriminant ``1 - gamma^2 sin^2(2 theta_rel)`` is
+        ``<= 0``, so ``critical_point``'s ``max(., 0)`` clamps the root to 0.0
+        and branch +1 and -1 map to the SAME source point."""
+        for gamma, center in itertools.product(
+                _WP1_GAMMAS, _WP1_LOBE_CENTERS):
+            with self.subTest(gamma=gamma, center=center):
+                theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
+                lo = center - theta_max            # served terminal endpoint
+                theta_rel = lo - center            # == -theta_max
+                discriminant = 1.0 - gamma**2 * np.sin(2.0 * theta_rel)**2
+                self.assertLessEqual(
+                    discriminant, 0.0,
+                    f'endpoint discriminant {discriminant:.3e} must be <= 0 '
+                    f'so the max(., 0) clamp fires (gamma={gamma})')
+                src_plus = np.asarray(geometry.critical_point(
+                    gamma, float(lo), 0.0, 0.0, 1).source, dtype=float)
+                src_minus = np.asarray(geometry.critical_point(
+                    gamma, float(lo), 0.0, 0.0, -1).source, dtype=float)
+                self.assertTrue(
+                    np.array_equal(src_plus, src_minus),
+                    'the two square-root branches must coincide bit-for-bit '
+                    'at the clamped served edge')
+                self.comparisons += 1
+
+    def test_lobe_winding_loop_closes_exactly(self) -> None:
+        """COROLLARY (per-gamma guarded): where the endpoint discriminant is
+        ``<= 0`` (clamp fires) the loop closure gap ``|loop[0] - loop[-1]|``
+        is EXACTLY 0.0 -- a proven consequence, not a number preserved by
+        construction (pre-WP1 this gap was ~0.279 at gamma = 1.05)."""
+        for gamma, center in itertools.product(
+                _WP1_GAMMAS, _WP1_LOBE_CENTERS):
+            with self.subTest(gamma=gamma, center=center):
+                theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
+                lo = center - theta_max
+                discriminant = 1.0 - gamma**2 * np.sin(2.0 * (lo - center))**2
+                loop = training._lobe_winding_loop(
+                    gamma, center, _WP1_WINDING_N)
+                self.assertGreaterEqual(len(loop), 3)
+                gap = float(np.hypot(*(loop[0] - loop[-1])))
+                incumbent = _WP1_INCUMBENT_CLOSURE_GAP[gamma]
+                if discriminant <= 0.0:
+                    self.assertEqual(
+                        gap, 0.0,
+                        f'clamp fired (disc={discriminant:.3e}) so the loop '
+                        f'must close exactly; pre-WP1 gap here was {incumbent} '
+                        f'(0.279 at gamma=1.05)')
+                else:
+                    self.assertLess(
+                        gap, _WP1_CLOSURE_TOL,
+                        f'disc landed tiny-positive ({discriminant:.3e}); the '
+                        f'gap must be within a few ulp, not exactly 0.0')
+                self.comparisons += 1
+
+
+class WedgeCoverageNoShrinkTestCase(_CountingTestCase):
+    """Gate 3: the true-edge saddle deltoid keeps 6 cusps / 6 arcs / its reach
+    and its served arc span does not shrink below the pre-WP1 incumbent (it
+    grows past it)."""
+
+    def test_cusp_arc_counts_and_reach_preserved(self) -> None:
+        """Cusp count stays 6, arc count and caustic reach match the frozen
+        WP1 golden values; a drop in any fails the build."""
+        for gamma in _WP1_GAMMAS:
+            with self.subTest(gamma=gamma):
+                structure = training.detect_caustic_structure(
+                    gamma, -1, n_samples=_WP1_STRUCTURE_SAMPLES)
+                cusps, arcs, reach = _WP1_GOLDEN_STRUCTURE[gamma]
+                self.assertEqual(structure.detected_cusps, 6)
+                self.assertEqual(structure.detected_cusps, cusps)
+                self.assertEqual(len(structure.arcs), arcs)
+                # Reach is a deterministic sampled maximum; a real coverage
+                # shrink would be O(1e-3)+, far above this FP-reproduction
+                # tolerance.
+                self.assertAlmostEqual(
+                    structure.caustic_reach, reach,
+                    delta=abs(reach) * 1e-9,
+                    msg=f'caustic reach drifted from golden at gamma={gamma}')
+                self.comparisons += 1
+
+    def test_arc_span_grows_past_incumbent(self) -> None:
+        """The served arc span reproduces the WP1 golden and is STRICTLY
+        greater than the frozen pre-WP1 (inset) span -- WP1 recovers the
+        ~1e-3-per-edge coverage the old inset discarded, so reverting it
+        (span == incumbent) makes this gate red."""
+        for gamma in _WP1_GAMMAS:
+            with self.subTest(gamma=gamma):
+                structure = training.detect_caustic_structure(
+                    gamma, -1, n_samples=_WP1_STRUCTURE_SAMPLES)
+                span = sum(arc.theta_hi - arc.theta_lo
+                           for arc in structure.arcs)
+                incumbent = _WP1_INCUMBENT_SPAN[gamma]
+                golden = _WP1_GOLDEN_SPAN[gamma]
+                # No coverage shrink (spec floor): never below the incumbent.
+                self.assertGreaterEqual(span, incumbent)
+                # WP1 strictly increases coverage (non-coincidence teeth).
+                self.assertGreater(
+                    span, incumbent,
+                    f'span {span!r} must exceed the pre-WP1 incumbent '
+                    f'{incumbent!r} at gamma={gamma}')
+                self.assertAlmostEqual(
+                    span, golden, delta=abs(golden) * 1e-9,
+                    msg=f'span drifted from the WP1 golden at gamma={gamma}')
+                self.comparisons += 1
+
+
+class WedgeEdgeSelfFalsificationTestCase(_CountingTestCase):
+    """Prove the three WP1 gates can go RED.
+
+    Every assertion here reintroduces the retired ``_WEDGE_EPS`` inset -- as a
+    dirty source string (Gate 1), or by driving the pre-WP1 ``HEAD`` module
+    whose ``_lobe_winding_loop`` / ``detect_caustic_structure`` still carry the
+    ``+- 1e-3`` offset (Gates 2, 3) -- and shows the gate's invariant FAILS on
+    it.  This is a FAST-tier class (pure closed-form geometry and a source
+    scan; NOT ``_TRAIN_TIER_SKIP``), so the suite can go red without the
+    training engine.
+    """
+
+    def test_gate1_scan_catches_a_reintroduced_inset(self) -> None:
+        """Gate 1's ``_WEDGE_INSET_RE`` matches every way a ``theta_max``
+        inset could be reintroduced, and leaves a clean edge alone -- so a
+        silent revert cannot slip past the scan."""
+        clean = 'lo = center - theta_max\n        hi = center + theta_max'
+        self.assertIsNone(
+            _WEDGE_INSET_RE.search(clean),
+            'the scan must not false-positive on the true edge')
+        self.comparisons += 1
+        for dirty in ('center - theta_max + _WEDGE_EPS',
+                      'center + theta_max - _WEDGE_EPS',
+                      'center - theta_max + 1e-3',
+                      'lens_center - theta_max + 0.001'):
+            with self.subTest(dirty=dirty):
+                self.assertIsNotNone(
+                    _WEDGE_INSET_RE.search(dirty),
+                    f'Gate 1 scan failed to catch a reintroduced inset: '
+                    f'{dirty!r}')
+                self.comparisons += 1
+
+    def test_reverting_the_inset_reopens_the_winding_loop(self) -> None:
+        """Gate 2 reachability: the pre-WP1 (``HEAD``) ``_lobe_winding_loop``,
+        whose endpoints are inset by ``_WEDGE_EPS``, closes with a gap FAR
+        above ``_WP1_CLOSURE_TOL`` (~0.279 at gamma=1.05) -- so the current
+        ``== 0.0`` closure is a real consequence of removing the inset, not a
+        number preserved by construction."""
+        head = _head_training_module()
+        for gamma, center in itertools.product(
+                _WP1_GAMMAS, _WP1_LOBE_CENTERS):
+            with self.subTest(gamma=gamma, center=center):
+                loop = head._lobe_winding_loop(gamma, center, _WP1_WINDING_N)
+                self.assertGreaterEqual(len(loop), 3)
+                gap = float(np.hypot(*(loop[0] - loop[-1])))
+                self.assertGreater(
+                    gap, _WP1_CLOSURE_TOL,
+                    f'the inset HEAD loop must NOT close (gap={gap:.3e}); '
+                    f'this is what WP1 fixed to exactly 0.0')
+                self.comparisons += 1
+
+    def test_reverting_the_inset_shrinks_the_arc_span(self) -> None:
+        """Gate 3 reachability: the pre-WP1 (``HEAD``) served arc span is
+        STRICTLY smaller than the WP1 span and matches the frozen incumbent --
+        so ``assertGreater(span, incumbent)`` genuinely distinguishes the two
+        code states (reverting the inset makes Gate 3 red)."""
+        head = _head_training_module()
+        for gamma in _WP1_GAMMAS:
+            with self.subTest(gamma=gamma):
+                head_struct = head.detect_caustic_structure(
+                    gamma, -1, n_samples=_WP1_STRUCTURE_SAMPLES)
+                head_span = sum(arc.theta_hi - arc.theta_lo
+                                for arc in head_struct.arcs)
+                wp1_struct = training.detect_caustic_structure(
+                    gamma, -1, n_samples=_WP1_STRUCTURE_SAMPLES)
+                wp1_span = sum(arc.theta_hi - arc.theta_lo
+                               for arc in wp1_struct.arcs)
+                self.assertLess(
+                    head_span, wp1_span,
+                    f'HEAD (inset) span {head_span!r} must be below the WP1 '
+                    f'span {wp1_span!r} at gamma={gamma}')
+                self.assertAlmostEqual(
+                    head_span, _WP1_INCUMBENT_SPAN[gamma],
+                    delta=abs(_WP1_INCUMBENT_SPAN[gamma]) * 1e-9,
+                    msg='frozen incumbent span must come from the HEAD state')
+                self.comparisons += 1
+
+    def test_branches_differ_off_the_wedge_edge(self) -> None:
+        """Gate 2 specificity: WELL INSIDE the wedge the discriminant is
+        strictly positive, so the two square-root branches map to DISTINCT
+        source points -- the bit-identity Gate 2 asserts is peculiar to the
+        clamped edge, not a trivial always-equal artifact."""
+        for gamma, center in itertools.product(
+                _WP1_GAMMAS, _WP1_LOBE_CENTERS):
+            with self.subTest(gamma=gamma, center=center):
+                theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
+                theta = center + 0.3 * theta_max     # interior of the wedge
+                discriminant = 1.0 - gamma**2 * np.sin(
+                    2.0 * (theta - center))**2
+                self.assertGreater(
+                    discriminant, 0.0,
+                    'interior wedge point must have a positive discriminant')
+                src_plus = np.asarray(geometry.critical_point(
+                    gamma, float(theta), 0.0, 0.0, 1).source, dtype=float)
+                src_minus = np.asarray(geometry.critical_point(
+                    gamma, float(theta), 0.0, 0.0, -1).source, dtype=float)
+                self.assertFalse(
+                    np.array_equal(src_plus, src_minus),
+                    'the two branches must DIFFER off the clamped edge')
+                self.comparisons += 1
 
 
 if __name__ == '__main__':
