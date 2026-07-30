@@ -3181,18 +3181,33 @@ nothing tied the two names together.
    `[s]dk/build.py`. The entrypoint name was knowledge held in two places, and
    one copy rotted (DRY).
 2. *Wrong process.* `pgrep -n` takes the NEWEST match, so two concurrent builds
-   get two watchdogs both guarding the newer one.
+   get two watchdogs both guarding the newer one. Measured worse than that:
+   with two fake builds running, `-n` selected a THIRD pid — an unrelated
+   shell whose command line merely quoted the pattern. The old discovery could
+   have SIGKILLed a process that was not a build at all.
 3. *Fails open, silently.* The launcher printed `launched: <log> (watchdog
    1200s)` unconditionally. The failure evidence went to a sidecar log nobody
    reads. **This is why it survived three days**, and it is the defect worth
    generalising: a guard that reports success it did not verify is worse than
    no guard, because it also suppresses the search for one.
 
-**Fix.** `launch_build.sh` captures `$!` and passes the PID (PYBIN is the
-absolute env python, so `$!` IS the orchestrator — no conda wrapper between);
-that kills defects 1 and 2 together. The launcher then WAITS for `Watching
-orchestrator PID <pid>` in the watchdog log and prints a loud WARNING if it
-never appears, killing defect 3. `.claude/sdk/verify_watchdog.sh` is the
+**Fix.** Discovery is keyed on the LOG PATH: it is unique per build and already
+on the orchestrator's own command line, so the match is exact, race-free, and
+indifferent to how the interpreter was invoked. `launch_build.sh` also passes
+`$!` (PYBIN is the absolute env python, so `$!` IS the orchestrator here) and
+the watchdog treats a disagreement between the two as a reportable NOTE rather
+than a silent choice — that mismatch is the signature of a launcher that
+backgrounds a WRAPPER, where killing the PID leaves the build running.
+
+The log-path key came from the gw pipeline, which needs it: its launcher goes
+through `conda run`, so `$!` there is the conda wrapper, which (its own `cli.py`
+documents) "survives a subtree kill and reads as alive". A verbatim port of the
+`$!`-only fix would have given them a watchdog tracking a PID that never dies.
+**The general lesson is about porting between the two repos: a fix travels, but
+the assumption it rests on may not. Port the invariant, not the line.**
+
+The launcher then WAITS for `Watching orchestrator PID <pid>` in the watchdog
+log and prints a loud WARNING if it never appears, killing defect 3. `.claude/sdk/verify_watchdog.sh` is the
 permanent probe (11 assertions, ~12 s): a stalled fake orchestrator must really
 die (rc 137 + kill marker), a healthy one must exit 0 unkilled, a dead PID must
 be refused, and — the F055 guard — the entrypoint name extracted from

@@ -70,6 +70,45 @@ ok "launch_build.sh passes \$BUILD_PID to the watchdog" 1 \
 ok "launch_build.sh warns when attachment fails" 1 \
    "$(grep -c 'WATCHDOG DID NOT ATTACH' "$LAUNCH")"
 
+# A fake orchestrator whose ARGV looks like the real one, so log-path
+# discovery has something true to find. `exec -a` rewrites argv in place, so
+# the PID captured here is the PID pgrep will see.
+#
+# Backgrounded DIRECTLY, never via `x=$(helper)`: a background job inside
+# command substitution keeps the substitution's stdout open (the caller hangs
+# until it exits) and belongs to the subshell, so `wait` in this shell cannot
+# reap it and returns 127 instead of the 137 the test is looking for. Both
+# traps cost the gw pipeline a probe rewrite; neither announces itself,
+# because each still produces a plausible-looking result.
+_ORCH_ARGV='/env/bin/python /repo/.claude/sdk/build.py build --log'
+
+echo "=== 6. with TWO builds running, each watchdog guards ITS OWN ==="
+LA="$W/t6a.log"; LB="$W/t6b.log"; : > "$LA"; : > "$LB"
+bash -c "exec -a '$_ORCH_ARGV $LA' sleep 300" & PA=$!
+bash -c "exec -a '$_ORCH_ARGV $LB' sleep 300" & PB=$!
+sleep 1
+bash "$WD" "$LA" 3 >/dev/null 2>&1; WRC=$?          # no PID: pure discovery
+wait "$PA" 2>/dev/null; ARC=$?
+ok "watchdog killed a build (rc 2)" 2 "$WRC"
+ok "it killed the build that owns LA" 137 "$ARC"
+ok "the OTHER build is untouched" "alive" \
+   "$(kill -0 "$PB" 2>/dev/null && echo alive || echo dead)"
+ok "it named A's PID, not B's" "$PA" \
+   "$(grep -a 'Watching orchestrator PID' "$W/t6a.watchdog.log" | tail -1 |
+      sed 's/.*PID //')"
+kill -9 "$PB" 2>/dev/null; wait "$PB" 2>/dev/null
+
+echo "=== 7. NEGATIVE CONTROL: stale=0 must NOT kill a quiet build ==="
+# Without this, test 1 only shows the watchdog kills — not that it kills for
+# the stated REASON. A killer that always fires would pass test 1.
+L="$W/t7.log"; : > "$L"
+bash -c 'sleep 300' & FAKE=$!
+bash "$WD" "$L" 0 "$FAKE" >/dev/null 2>&1 & WD7=$!
+sleep 6
+ok "quiet build survives a DISABLED staleness check" "alive" \
+   "$(kill -0 "$FAKE" 2>/dev/null && echo alive || echo dead)"
+kill -9 "$WD7" "$FAKE" 2>/dev/null; wait "$WD7" "$FAKE" 2>/dev/null
+
 echo
 echo "  $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

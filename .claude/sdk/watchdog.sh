@@ -57,18 +57,38 @@ fi
 # wrong name here disarmed the watchdog on every launcher-started build from
 # 2026-07-27 to 2026-07-30 (F055) while launch_build.sh still printed
 # "(watchdog 1200s)". Prefer the PID the launcher already knows.
-if [ -n "$ORCH_PID" ]; then
-    if ! kill -0 "$ORCH_PID" 2>/dev/null; then
-        log "ERROR: orchestrator PID $ORCH_PID is not alive. Exiting."
-        exit 1
+# PRIMARY KEY: the log path. It is unique per build and already on the
+# orchestrator's own command line, so the match is exact, race-free, and
+# indifferent to HOW the interpreter was invoked. (Credit: the gw pipeline,
+# which must use it — its launcher goes through `conda run`, so $! there is
+# the conda wrapper, which "survives a subtree kill and reads as alive".)
+BY_LOG=$(pgrep -f -- "sdk/(build|cli)\.py build.*${LOG_PATH}" 2>/dev/null |
+         head -1)
+
+if [ -n "$BY_LOG" ]; then
+    if [ -n "$ORCH_PID" ] && [ "$ORCH_PID" != "$BY_LOG" ]; then
+        # Not fatal, but never silent: this is the signature of a launcher
+        # that backgrounds a WRAPPER (conda run, a shell -c) instead of the
+        # interpreter. Killing the wrapper leaves the build running.
+        log "NOTE: launcher PID $ORCH_PID != log-matched $BY_LOG — the passed"
+        log "      PID is probably a wrapper; trusting the log match."
     fi
+    ORCH_PID="$BY_LOG"
+elif [ -n "$ORCH_PID" ]; then
+    log "NOTE: no process names this log yet; using launcher PID $ORCH_PID"
 else
     ORCH_PID=$(pgrep -nf '\.claude/sdk/(build|cli)\.py build' 2>/dev/null || true)
     if [ -z "$ORCH_PID" ]; then
         log "ERROR: Could not find orchestrator process. Exiting."
         exit 1
     fi
-    log "WARNING: no PID argument; matched the NEWEST orchestrator by pattern."
+    log "WARNING: no PID and no log match; took the NEWEST orchestrator by"
+    log "         pattern — wrong build if two are running."
+fi
+
+if ! kill -0 "$ORCH_PID" 2>/dev/null; then
+    log "ERROR: orchestrator PID $ORCH_PID is not alive. Exiting."
+    exit 1
 fi
 log "Watching orchestrator PID $ORCH_PID"
 
