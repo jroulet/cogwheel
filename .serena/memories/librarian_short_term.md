@@ -1,68 +1,71 @@
-## 2026-07-30 post-commit sync — F041 arc-guard fix + salvaged 1b estimator retirement (commit 00bf8ae)
+## 2026-07-30 post-commit sync — build 1c, analytic cusp vertex + y''' (commit b9c3ed6)
 
-Scope: sync SPEC.md + COVERAGE_DESIGN.md to 00bf8ae. Diff for that commit:
-`surrogate_training.py` (M, six numerical estimators retired -> analytic
-geometry cascade), `test_lensing_caustic_cusps.py` (A, ~1182 lines, NEW),
-`test_lensing_exterior_admission.py` / `test_lensing_surrogate.py` /
-`test_lensing_surrogate_training.py` (M).
+Scope: sync SPEC.md to b9c3ed6. Diff: `geometry.py` (+ new public
+`caustic_third_derivative`; private `_caustic_cascade` refactor;
+`caustic_derivatives` 2-tuple byte-identical), `_pearcey_cusp.py`
+(`_cusp_vertex` now analytic-root via brentq on `y'.y''`, no FD scan),
+`test_lensing_airy_fold.py`/`test_lensing_caustic_derivatives.py`/
+`test_lensing_caustic_cusps.py`, `FINDINGS.md` (+F042 resolution, +F043).
 
-FIXED (NEW-MODULE gate — item 1, the only real staleness found):
-- SPEC.md row 53 (microlensing engine): appended a "Certified by
-  `test_lensing_caustic_cusps.py`" clause to the existing CERTIFIED BY
-  sentence, before "The envelope LOO stop is gamma'-keyed" — covers the
-  analytic `caustic_derivatives`/`caustic_speed`/`caustic_curvature_radius`/
-  `fold_opening_direction` certification.
-- SPEC.md row 55 (surrogate/training, TRAINING section): appended the same
-  test module after "...chart being trained wrongly." before "FAR-FIELD
-  TILING:" — covers analytic cusp-root, closed-form caustic-inradius,
-  foot-of-normal curvature value, and fold-orientation-guard certification
-  for the retired estimators (verified against the test file's own class
-  list: CuspAnalyticRootTestCase, CausticInradiusClosedFormTestCase,
-  FootOfNormalCurvatureValueTestCase, InteriorAdmissionMarginRemovalTestCase,
-  InwardSignFoldHealthTestCase, SelfFalsificationTestCase, etc.).
-- `spec_changelog.d/2026-07-29_caustic_cusps_test_coverage.md` (bump: patch)
-  -> rendered `0.26.1`. `scripts/sync_derived_docs.py --check` no longer
-  flags the module-list gate for this file (re-ran to confirm).
+FIXED (item 1, NEW-PUBLIC-NAME gate):
+- SPEC.md row 53 (microlensing engine), geometry public-name list: added
+  `caustic_third_derivative` right after `caustic_derivatives`, before
+  `caustic_speed`/`caustic_curvature_radius`/`fold_opening_direction`.
+  Verified against `geometry.caustic_third_derivative`'s actual signature
+  `(gamma, theta, *, kappa=0.0, branch=1)` and docstring (extends the
+  cascade one order via `_caustic_cascade`; `y_triple_prime` shape
+  `(2,)`/`(2,N)`). Left the "Certified by test_lensing_caustic_cusps.py"
+  clause's own `caustic_derivatives`/... list untouched — task scoped the
+  edit to the "geometry public-name list" only, not the certified-by list
+  (also confirmed `caustic_third_derivative` is in fact tested there:
+  `test_lensing_caustic_derivatives.py` STAGE 2, 40-dps mpmath oracle, mock
+  self-falsification — but did not add it to the certified-by prose since
+  not asked and that list already reads as a group label, not exhaustive).
+- New fragment `spec_changelog.d/2026-07-30_caustic_third_derivative.md`
+  (bump: minor — new public API) -> rendered `spec_version 0.29.0`.
+  `sync_derived_docs.py --check` re-ran: only pre-existing unrelated
+  `consumer_graph` warnings on `lens_amplification_surrogate` test
+  consumers (present before my edit too, not caused by it, out of scope);
+  nothing flagged for `geometry.py`/`caustic_third_derivative`.
 
-VERIFIED, NOT touched (task item 2 — SPEC row 55 "stale six-estimator"
-claim did NOT hold under inspection, contrary to the driver's framing):
-- Grepped row 55's full text for every retired-estimator name/wording
-  (`_probe_arc_side`, `_PROBE_ETA`, `_CLOUD_MARGIN_FRAC`, `np.gradient`,
-  "numerical", "differenti-", "margin" (only false positives:
-  "caustic-margin census", "MARGINALIZED"), "inradius", "winding", "probe",
-  "orientation") — zero matches. Row 55 already describes the FOOT-OF-NORMAL
-  guard and cusp detection generically (`_min_curvature_radius` mentioned
-  by name only, no implementation claim attached) and never named
-  `_caustic_inradius`/interior-admission/arc-orientation machinery at all —
-  so there was no false "numerical estimator" claim to correct. Confirmed
-  the actual code (`_min_curvature_radius`, `_find_cusps`,
-  `_branch_speed_profile`, `_caustic_inradius`) now calls
-  `geometry.caustic_curvature_radius`/`caustic_speed`/analytic root — matches
-  what little SPEC.md does say.
-- COVERAGE_DESIGN.md (task item 3): only ONE relevant mention anywhere,
-  section C6, "`_min_curvature_radius` already SKIPS a tube chart when
-  `eta_max` exceeds half the local curvature radius" — a BEHAVIORAL claim
-  (still UNCHECKED/circumstantial per its own STATUS line) that holds
-  unchanged under the analytic implementation. No edit needed.
-- FINDINGS.md F038-F042 (task item 4): all five headers exist
-  (`## F0NN — ...`, double-hash), cross-references within them (F036, F039,
-  F041) all resolve to real headers. No F0NN gaps introduced.
-- `test_lensing_surrogate_training.py` (modified, not new, in 00bf8ae) and
-  the pre-existing consumer_graph warning (`lens_amplification_surrogate`
-  serialization-test consumers not in DATA_CONTRACTS.yaml) are OUT OF SCOPE:
-  the training test file isn't in ANY SPEC.md certified-by list even before
-  this commit (pre-existing gap, not introduced by 00bf8ae, not part of the
-  NEW-MODULE gate since it's a modified not added file) and the
-  consumer_graph warning predates my edits (present on the very first
-  `sync_derived_docs.py --check` run, before any change) — flagged here,
-  not fixed, per house convention of not expanding scope beyond the synced
-  commit.
+VERIFIED, NOT touched:
+- Item 2 (Pearcey-arm prose, old FD cusp scan): grepped SPEC.md for
+  `finite.difference|speed scan|golden.section|cusp vertex|_cusp_vertex` —
+  zero matches anywhere in the file. SPEC.md's `_pearcey_cusp.py` mention
+  never described the internal cusp-finding method (FD or analytic) at
+  all, so per the task's own instruction ("if it does not describe the
+  internal method, leave it") no edit was needed. Read `_cusp_vertex`'s
+  actual body to confirm the analytic-root behavior for future reference:
+  brentq on `slope(phase) = y'.y''` in the `phase = theta - beta` frame,
+  parity-gated bracketing (astroid exact at {0, pi/2, pi, 3pi/2}; saddle
+  wedge-tip served, wedge-edge refused to None).
+- Item 3 (FINDINGS F042/F043): both headers present and correctly tagged
+  (`## F042 — ... RESOLVED, re-based (2026-07-29)`, `## F043 — ...
+  (2026-07-30)`); F042's cross-ref `[[lensing_collocation_from_local_scales]]`
+  resolves to a real, still-present todo.d fragment. Did not rewrite either
+  (hand-maintained, per scope).
+- `.claude/spec/todo.d/lensing_analytic_derivatives.md`: noticed item 1
+  (`_cusp_vertex` serving path) and the "extend cascade to y'''" paragraph
+  are now DONE by 1c, but items 2-5 (surrogate_training.py consumers:
+  `_branch_speed_profile`, `_find_cusps`, `_probe_arc_side`, `_tube_normal`)
+  are not — this is a multi-item backlog fragment, correctly stays in
+  todo.d until every item lands. Left untouched: TODO fragment authorship
+  is Architect/Coder's, not Librarian's, and the task briefing didn't ask
+  for it.
 
-Mechanics: `mcp__serena__execute_shell_command` with a heredoc is a SILENT
-NO-OP here too (rc 0, zero stdout) — same trap as the global memory notes,
-now confirmed for `python3 - <<'PY' ... PY` specifically. Fix: write the
-script to the scratchpad dir via `Write`, then `execute_shell_command
-python3 <path>`. `render_fragments.py` again left the stray
-`.claude/tidy_advisory.json` commit-hash/timestamp/touched_files diff —
-reverted via `git checkout --`, not committed (same as every prior
-session's note in `librarian_knowledge.md`).
+Post-commit mode: trigger `.claude/sync_issues.json` (untracked, not in
+`git ls-files`) present at start listing 15 pending commits back through
+b9c3ed6; committed doc fixes as `docs: post-commit sync (1c)` (staged only
+the 3 files I changed — SPEC.md, SPEC_CHANGELOG.md, the new spec_changelog.d
+fragment), then deleted the trigger file. Left
+`.claude/sdk/_retry_until_launch.sh` (pre-existing unstaged modification,
+unrelated to doc sync, a code file) untouched and unstaged — not mine to
+touch or commit.
+
+Mechanics: `render_fragments.py` again touched `.claude/tidy_advisory.json`
+(commit-hash/timestamp churn) — reverted via `git checkout --`, not
+committed, same as every prior session (see `librarian_knowledge.md`).
+`search_for_pattern` on SPEC.md returns the ENTIRE table row as one string
+(rows are single un-wrapped lines) — a multi-alternation pattern with hits
+on the same line duplicates the same full-line context per match; harmless
+but don't be surprised by "2 identical results" for 1 line.
