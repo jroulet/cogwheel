@@ -526,6 +526,30 @@ Tag conventions:
   measure it counts against: a uniform step in `theta` is not a uniform step
   in anything the envelope cares about.
 
+  ## SCOPE: all THREE chart types, both parities — the saddle is not automatic
+
+  The table above is the TUBE chart, but the coordinate work spans three build
+  paths, and getting the geometry parity-general (1a-1d) does NOT make the
+  chart coordinates parity-general on its own:
+
+  - **Tube charts** (`_build_tube_chart`) — SHARED by the positive-parity
+    astroid arcs and the macro-saddle deltoid arcs. Fixing `theta` here fixes
+    both parities' tubes at once (F042 was a saddle tube at `gamma = 1.55`).
+  - **Far-field exterior charts** (`_build_farfield_chart`, both parities) —
+    the `rho` axis IS the caustic-relative coordinate the C8 redesign builds;
+    `theta_c` and node placement still need the treatment.
+  - **Lobe-interior charts** (`_build_lobe_chart`, MACRO SADDLE ONLY) — a
+    SEPARATE build path in lobe-local `(rho_lobe, theta_local)` on an
+    axis-aligned box. `rho_lobe = |y - centroid| / r_deltoid` is already
+    caustic-relative (good), but its grid placement and interpolation
+    coordinate are its own and are NOT touched by the tube-chart work. Left
+    alone it keeps uniform grids and re-grows the F042 knife-edge near the
+    deltoid cusps. It must be enumerated explicitly or it is silently missed —
+    which is exactly the trap this note exists to prevent. Its cusp coordinate
+    is the SAME Pearcey `(x, y)` control as everywhere else (DRY, per the reuse
+    section below): the deltoid's three per-lobe cusps are cusps like any
+    other.
+
   ## PLACEMENT IS NOT ENOUGH — interpolate IN the analytic coordinate
 
   Node placement and interpolant FORM are separate, and placement alone is a
