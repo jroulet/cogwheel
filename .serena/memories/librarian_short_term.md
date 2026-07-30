@@ -1,50 +1,59 @@
-## 2026-07-30 post-commit sync (--post-commit c7e15f2)
+## 2026-07-30 post-commit sync (--post-commit d1d4cb0)
 
-Scope: 7 pending commits from `.claude/sync_issues.json` (b92f413 through
-c7e15f2 — the F043/F044/F045 HEAD-oracle-guard aftermath + build 1d
-wedge/tube-normal follow-ups + the SDK teardown-result fix). Outcome:
-**verify-only, zero doc edits** — every doc surface was already correctly
-synced by the in-DAG Librarian run (903946a) or by the commits themselves.
+Scope: 5 pending commits from `.claude/sync_issues.json` (63a9c94 through
+d1d4cb0 — the HEAD-oracle sweep retirement, the 1e-tube/farfield/lobe
+decomposition TODO fragment, the F046 use-serena.sh bracket-class hang fix,
+the F047 pre-commit parse guard, and the Tidier mechanization + monitor-exit
+build). Outcome: **verify-only, zero doc edits** — every doc surface was
+already correctly synced by the commits themselves.
 
 Checked and found current:
-- `scripts/sync_derived_docs.py` ran clean (0 diff); only its usual
-  test-file-only `lens_amplification_surrogate` consumer flags fired
-  (known benign, production-only convention — memory already covers this).
-- FINDINGS.md has F043/F044/F045; every citation of them across
-  `.claude/spec/{TODO,COMPLETED}.md`, todo.d/completed.d fragments,
-  `.claude/hooks/*`, `cogwheel/lensing/chang_refsdal/geometry.py`, and the
-  three lensing test files resolves.
-- `todo.d/sdk_head_relative_test_guard.md` was correctly retired
-  (deleted, mirrored into `completed.d/2026-07-30_sdk_head_relative_test_guard.md`);
-  `todo.d/tests_head_oracle_sweep.md` correctly stays OPEN (multi-part
-  sweep, only 3 of ~10 call sites done per its own body).
-- `df3770`'s two new todo.d fragments (lensing_caustic_relative_coordinates,
-  lensing_collocation_from_local_scales) are present in the rendered
-  TODO.md.
-- `0b99a3a`'s geometry.py change (LensDomainError message: wedge edge is
-  NOT "the deltoid cusp", per F044) is error-message prose only, no
-  signature change. Grepped "deltoid cusp" repo-wide: the only place it
-  still describes the wedge edge is FINDINGS.md's own F044 text, which
-  QUOTES the old wrong claim to refute it — correct, not stale. No
-  SPEC.md/docs/source reference to fix.
-- SPEC.md has no mention of `_tube_normal`/`_WEDGE_EPS` (implementation
-  detail, correctly left out per the "SPEC carries architecture, not
-  perf/impl detail" pattern) and no docs/source page mentions HEAD-relative
-  tests (agent-only concern, correctly absent).
-- `.claude/sdk/*`, `.claude/hooks/*`, `.claude/handoff/*`,
-  `.serena/memories/*`, `.claude/tidy_advisory.json`,
-  `.claude/agent_state/*` in the changed-files union are agent-only paths
-  outside Librarian scope (per CLAUDE.md sync-to-main exclusions + the
-  Librarian's read-only boundary on other agents' memories) — correctly
-  skipped, not silently missed.
-- `cogwheel/tests/test_guard_probe.py` and
-  `test_lensing_surrogate_training.py` changes are test-only — skipped
-  per the standard triage table.
+- `scripts/sync_derived_docs.py` ran clean (0 tracked diff); only the usual
+  test-file-only `lens_amplification_surrogate` consumer flags fired (same
+  4 flags as last run — known benign, production-only convention, already
+  covered by long-term memory). It left the usual stray untracked
+  `.claude/tidy_advisory.json` side effect — did NOT stage/commit it (long-
+  term memory already documents this pattern; this is the first time it
+  appeared as *untracked* rather than *modified*, because d1d4cb0 deleted
+  the tracked file and the script's own run regenerates it on disk).
+- FINDINGS.md has F045/F046/F047; every citation across
+  `.claude/commands/tidy.md`, `.claude/crew/tidy.md`,
+  `.claude/hooks/{use-serena.sh,verify_use_serena.sh}`,
+  `.claude/sdk/orchestrator.py`, `scripts/tidy_mechanical.py`,
+  `.claude/spec/{COMPLETED.md,completed.d/2026-07-30_head_oracle_sweep.md}`,
+  and the four lensing test files resolves correctly.
+- `todo.d/tests_head_oracle_sweep.md` is correctly gone (retired into
+  `completed.d/2026-07-30_head_oracle_sweep.md` in commit 63a9c94, which
+  is itself in this sync's commit range) — confirmed absent from the
+  current `todo.d/` listing, and COMPLETED.md's "Every `git show HEAD`
+  test oracle retired (F043 / F045)" section matches the fragment body.
+- `todo.d/lensing_collocation_from_local_scales.md` (added in 64438ba) is
+  correctly rendered into TODO.md with both `[[lensing_collocation_from_
+  local_scales]]` backlinks (from the caustic-relative-coordinates and
+  coverage-map fragments) intact.
+- `scripts/tidy_mechanical.py` is new and NOT agent-only (lives under
+  `scripts/`, not `.claude/`), but grepped `docs/source/*.rst` and
+  `README*` for `scripts/` — zero hits. `scripts/` has never been
+  documented on any doc surface (no dev-scripts page, no README section
+  listing `render_fragments.py`/`sync_derived_docs.py`/
+  `pipeline_graph.py` either) — status quo, not a gap this script created.
+  Correctly left off `api.rst` (autosummary lists `cogwheel` package
+  modules only, per driver framing and long-term memory precedent).
+- `cogwheel/lensing/chang_refsdal/operator.py`'s change in d1d4cb0 is a
+  single collapsed blank line (3 -> 2) — confirmed via `git show d1d4cb0 --
+  cogwheel/lensing/chang_refsdal/operator.py`, whitespace only, no API/
+  behavior/docstring change.
+- The bulk of the 5 commits' changed files are agent-only paths
+  (`.claude/agent_state/*`, `.claude/hooks/*`, `.claude/commands/tidy.md`,
+  `.claude/crew/tidy.md`, `.claude/sdk/*`, `.claude/tidy_advisory.json`) —
+  correctly out of Librarian scope per CLAUDE.md sync-to-main exclusions.
+- `cogwheel/tests/test_lensing_{caustic_cusps,farfield_envelope,ghost,
+  levers}.py` changes are test-only (the HEAD-oracle sweep's deletions) —
+  skipped per the standard triage table.
 
-Pattern worth flagging forward: this is the SECOND consecutive post-commit
-run (after cece16b/1c) where the in-DAG Librarian commit already closed
-out the bulk of the sync, leaving only a verify pass for the driver's
-follow-up commits. When the driver's task message names which commits are
-"already synced by the in-DAG run" vs "driver follow-ups," trust but still
-independently grep — this run confirmed the driver's framing was accurate,
-but per long-term memory that verification is never skippable.
+Pattern worth flagging forward: THIRD consecutive post-commit run that is
+pure verify (after cece16b/1c and b92f413..c7e15f2) — the in-DAG/same-commit
+authorship keeps closing its own doc obligations before the post-commit
+trigger fires. Still independently re-verified every FINDINGS citation and
+every todo.d/completed.d pairing rather than trusting the driver's summary
+at face value, per standing instruction.
