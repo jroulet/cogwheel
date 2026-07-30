@@ -1819,6 +1819,18 @@ class BuildOrchestrator:
         return result
 
     @staticmethod
+    def _is_universal_requirement(spec: str) -> bool:
+        """Whether a suiteless spec is a cross-cutting RULE, not one test.
+
+        A universal requirement ("ALL SUITES: 79 columns and ast.parse") is
+        cheap to repeat and must reach every shard. A substantive test
+        description is one test's worth of work and must be COUNTED. Only the
+        former may stay cross-suite — see `_group_test_specs` (F057).
+        """
+        return bool(re.search(r"\bALL\s+(\w+\s+){0,2}SUITES?\b", spec, re.I)
+                    or re.search(r"\bEVERY\s+SUITE\b", spec, re.I))
+
+    @staticmethod
     def _group_test_specs(specs: list[str]) -> tuple[dict[str, list[str]], list[str]]:
         """Group domain-test specs by the suite file each one names.
 
@@ -1849,6 +1861,32 @@ class BuildOrchestrator:
             # Nothing names a suite — degrade to one run with everything.
             groups["(unscoped)"] = list(cross_suite)
             cross_suite = []
+        elif len(groups) == 1 and cross_suite:
+            # cross_suite is for GENUINELY UNIVERSAL requirements ("ALL SUITES:
+            # 79 columns"), which are appended to every shard's prompt — cheap
+            # to repeat, and repeating them is the point.
+            #
+            # It was also silently absorbing SUBSTANTIVE specs whose only sin
+            # was not quoting a filename. Those are one test each, they are not
+            # cheap, and appending them to a prompt while the shard cap and the
+            # 60 + 20*n budget both stay blind is how F057 happened
+            # (1e-farfield, 2026-07-30): 10 of 11 descriptions were unscoped,
+            # the sharder logged "1 spec(s)" and budgeted 80 turns for what
+            # needed 250 across 4 shards, and two Test Developers died at
+            # error_max_turns with ZERO output. The shard cap written to
+            # prevent exactly that death never engaged, because the quantity it
+            # keys on had been collapsed upstream.
+            #
+            # With exactly one suite in play a substantive unscoped spec can
+            # only belong to it, so assign it there — which is what makes it
+            # COUNT. A universal requirement stays cross-suite: folding it into
+            # one group would apply it to a single shard instead of all of them.
+            only = next(iter(groups))
+            universal = BuildOrchestrator._is_universal_requirement
+            substantive = [s for s in cross_suite if not universal(s)]
+            if substantive:
+                groups[only].extend(substantive)
+                cross_suite = [s for s in cross_suite if universal(s)]
         return groups, cross_suite
 
     @staticmethod
@@ -1920,6 +1958,8 @@ class BuildOrchestrator:
         self._log(
             f"Step 3: Test Developer writing tests — "
             f"{len(groups)} suite(s): {sorted(groups)}"
+            + (f"; {len(cross_suite)} cross-suite requirement(s) "
+               f"(counted in every shard's budget)" if cross_suite else "")
         )
         cross_text = (
             "\n\nCross-suite requirements (apply to your suite too):\n"
@@ -1943,7 +1983,11 @@ class BuildOrchestrator:
             )
             implemented: list[str] = []  # labels of specs earlier shards did
             for shard_idx, shard_specs in enumerate(shards):
-                budget = self._test_dev_budget(len(shard_specs))
+                # Cross-suite requirements are WORK this agent must also do,
+                # so they scale the budget. Counting only the shard's own
+                # specs is how F057 handed an 11-spec load an 80-turn budget.
+                budget = self._test_dev_budget(
+                    len(shard_specs) + len(cross_suite))
                 spec_text = "\n".join(f"- {s}" for s in shard_specs)
                 extend_note = ""
                 if implemented:
