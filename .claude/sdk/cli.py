@@ -222,15 +222,42 @@ def _run_build(args):
         "ESCALATION|escalation|plan_ready|Plan written|"
         "Waiting for a decision"
     )
+    # Terminal markers: the monitor EXITS on these.  A monitor that only
+    # tails must be TaskStopped by hand and, worse, cannot tell a finished
+    # run from a hung one -- "the log stopped growing" reads identically for
+    # both.  On 2026-07-30 two sweep monitors reported STALL twenty minutes
+    # after their run had exited 0 with 1016 tests passed, which is exactly
+    # as alarming as a real hang and trains the reader to ignore the channel.
+    # So: check the TERMINAL condition first and exit on it; only consider a
+    # stall when the work is still running.
+    _terminal = "Build complete|Build failed|GATE FAILURE|KILLED|BUILD STRANDED"
+    # Health is EITHER log advancing: during the tree-wide fast gate the build
+    # log legitimately freezes for ~10 min while pytest writes to its own file.
+    _gate_log = os.path.join(project_root, ".claude", "sdk", "logs",
+                             "tree_gate.log")
+    _mon_cmd = (
+        f'L={log_path}; G={_gate_log}; p=""; m=""; s=0; '
+        'while :; do '
+        f'n=$(grep -aiE "{_mon_markers}" "$L" 2>/dev/null | tail -1); '
+        '[ -n "$n" ] && [ "$n" != "$p" ] && { echo "$n"; p="$n"; }; '
+        f'if grep -qaiE "{_terminal}" "$L" 2>/dev/null; then '
+        f'grep -aiE "{_terminal}" "$L" | tail -2; exit 0; fi; '
+        'c="$(stat -c %Y "$L" 2>/dev/null)-$(stat -c %Y "$G" 2>/dev/null)"; '
+        'if [ "$c" = "$m" ]; then s=$((s+1)); '
+        '[ "$s" -eq 5 ] && echo "STALL: build AND tree-gate logs both frozen '
+        '~10min -- investigate, do not wait"; else s=0; fi; '
+        'm="$c"; sleep 120; done'
+    )
     print(
         "AGENT: arm an event-driven Monitor now "
         "(do NOT timer-poll the log):\n"
         f"  Monitor(persistent=true, timeout_ms=3600000, "
-        f"command='tail -f {log_path} | grep -iE --line-buffered "
-        f"\"{_mon_markers}\"')\n"
-        "  TaskStop the Monitor when the build ends.\n"
-        "  Health check = log mtime advancing, NOT pgrep (the conda\n"
-        "  wrapper survives a subtree kill and reads as alive)."
+        f"command='{_mon_cmd}')\n"
+        "  It EXITS on a terminal marker, so a finished build stops the\n"
+        "  monitor by itself and never reports a false stall.\n"
+        "  Health = EITHER log advancing, NOT pgrep (the conda wrapper\n"
+        "  survives a subtree kill and reads as alive); the build log\n"
+        "  freezes legitimately while the tree gate writes to its own."
     )
 
     orchestrator = BuildOrchestrator(

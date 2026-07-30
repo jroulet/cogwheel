@@ -1606,6 +1606,32 @@ class BuildOrchestrator:
 
         return ""
 
+    def _run_mechanical_tidy(self, py_files: list[str]) -> str:
+        """Apply the deterministic style rules; return a one-line summary.
+
+        Best-effort by design: style is never worth failing a build whose
+        Coder and Test-Developer work is already done and verified, so any
+        failure here is reported and swallowed.
+        """
+        script = os.path.join(self.project_root, "scripts",
+                              "tidy_mechanical.py")
+        if not (py_files and os.path.isfile(script)):
+            return ""
+        try:
+            # `sys.executable` is the build's own conda interpreter (launch_
+            # build.sh starts us with it), matching how this file already
+            # invokes render_fragments and sync_derived_docs.
+            done = subprocess.run(
+                [sys.executable, script, *py_files],
+                cwd=self.project_root, capture_output=True, text=True,
+                timeout=120, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"mechanical pass failed ({type(exc).__name__}: {exc})"
+        changed = [ln.strip() for ln in done.stdout.splitlines()
+                   if ln.strip().startswith("CHANGED")]
+        return (f"{len(changed)} file(s) normalised" if changed
+                else "all clean")
+
     async def _run_tidier_skill(self) -> str:
         """Run Tidier skill on changed Python files."""
         # Tidier is a POST-COMMIT ADVISORY role by default (see
@@ -1642,9 +1668,38 @@ class BuildOrchestrator:
         all_files_changed = self._git_changed_files()
         py_files = [f for f in all_files_changed if f.endswith(".py")]
         self._log("Step 2: Tidier cleanup")
+        # MECHANICAL FIRST, deterministically.  Whitespace rules and dead
+        # imports need no judgment, and an agent doing them by hand is both
+        # slower than the build it follows (measured 2026-07-30: a run
+        # outlasted a full build and was still unfinished) and capable of
+        # corrupting a file -- one such pass wrote literal `\n` into
+        # operator.py and left the package un-importable (F047).  The script
+        # verifies every edit with an AST round trip, so it cannot.
+        mech = self._run_mechanical_tidy(py_files)
+        if mech:
+            self._log(f"Step 2: mechanical pass — {mech}")
+        # The AGENT keeps only what genuinely needs judgment: whether a public
+        # helper belongs above a private one, whether an import belongs to the
+        # layer it is grouped with, whether a module's organisation still
+        # matches what it does.  Naming them explicitly stops it re-doing the
+        # whitespace the script has already settled.
         tidier_task = (
-            f"Clean up the files changed by recent code work.\n"
-            f"Apply the canonical rubric: spacing, import ordering.\n"
+            f"Structural style review of the files changed by recent code "
+            f"work.\n"
+            f"The MECHANICAL rubric has ALREADY been applied deterministically "
+            f"by scripts/tidy_mechanical.py (whitespace-only lines, runs of 3+ "
+            f"blank lines, trailing whitespace, final newline). Do NOT redo it, "
+            f"and do NOT reflow blank lines.\n"
+            f"Judge only what a script cannot:\n"
+            f"  - public API before private helpers within a module;\n"
+            f"  - imports grouped in the right LAYER (stdlib / third-party / "
+            f"cogwheel layer paths), which is about layering, not sorting;\n"
+            f"  - imports that are genuinely unused (verify by reading -- a "
+            f"name may be referenced only inside an njit body or a docstring "
+            f"example);\n"
+            f"  - module organisation that no longer matches what the module "
+            f"does.\n"
+            f"If none of those apply, say so and change nothing.\n"
             f"Files to check: {py_files or '(no Python files changed)'}"
             + CHANGE_REPORT_INSTRUCTION
         )

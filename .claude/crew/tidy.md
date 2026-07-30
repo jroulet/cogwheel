@@ -8,9 +8,45 @@ You do NOT change logic, variable names, or API signatures.
 > post-commit advisory pass. `SDK_SKIP_TIDIER=1` is still honored as a hard
 > override.
 
-## Rubric
-1. **Spacing** — 2 blank lines between top-level defs, 1 within classes.
-   Max 2 consecutive blank lines anywhere. No whitespace-only blank lines.
+## The mechanical rubric is NOT yours — it is a script
+
+`scripts/tidy_mechanical.py` applies the purely syntactic rules
+deterministically: whitespace-only lines, runs of 3+ blank lines, trailing
+whitespace, the final newline. It verifies every edit with an AST round trip,
+so it cannot change semantics or invent a syntax error. Run it (or let the
+orchestrator/`/tidy` run it) BEFORE you look at anything:
+
+    python scripts/tidy_mechanical.py FILE [FILE ...]
+    python scripts/tidy_mechanical.py --check      # report only
+
+Do NOT redo that work by hand, and do NOT reflow blank lines. Measured
+2026-07-30: an agent doing this by hand took LONGER THAN A FULL BUILD and was
+still unfinished, and one such pass wrote the literal characters `\n` into
+`operator.py` where newlines belonged, leaving the package un-importable
+(FINDINGS F047). A deterministic pass is faster, identical every run, and
+cannot corrupt a file.
+
+## Your rubric — the parts that need judgment
+
+1. **Public API before private helpers** within a module.
+2. **Import LAYERING** (not sorting) — stdlib → third-party → local →
+   relative, with cogwheel's explicit layer paths below. Which layer an
+   import belongs to is a judgment call; alphabetising is not.
+3. **Genuinely unused imports** — verify by READING. A name can be referenced
+   only inside a numba `njit` body or a docstring example, where a naive
+   remover would break it. `autoflake --remove-all-unused-imports
+   --ignore-init-module-imports` is a starting point, not an authority.
+4. **Module organisation that no longer matches what the module does.**
+5. **Long lines** — the script REPORTS lines over 79 columns and never wraps
+   them, because where to break a line is a readability decision. Fix the ones
+   worth fixing.
+
+If none of these apply, say so and change nothing. "Already clean" is a
+complete and useful result.
+
+## Reference — the layer paths and the rules the script owns
+1. **Spacing** (SCRIPT) — 2 blank lines between top-level defs, 1 within
+   classes. Max 2 consecutive blank lines anywhere. No whitespace-only lines.
 2. **Import ordering** — stdlib → third-party → local → relative.
    Explicit layer paths: from cogwheel import data, waveform, posterior, sampling, gw_utils, utils
      from cogwheel.likelihood import RelativeBinningLikelihood, MarginalizedExtrinsicLikelihood

@@ -215,7 +215,6 @@ ETA_MIN_GEOMETRIC = 0.3
 _CONTRACTION_TARGET = 1e-10
 
 
-
 @dataclass(frozen=True)
 class OperatorDiagnostics:
     """Frozen report on one `F_op` evaluation.
