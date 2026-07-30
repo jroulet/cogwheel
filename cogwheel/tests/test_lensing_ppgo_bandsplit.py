@@ -1353,8 +1353,10 @@ class TruncationOnRefusalTestCase(_PpgoTestCase):
     WALL = 100.0
     W_STAR_AXIS = 90.0         #: refusal ceiling at angle 0 (loosest)
     W_STAR_DIAG = 40.0         #: refusal ceiling at angle pi/2 (tightest)
-    #: The five source angles ``_measure_cell`` sweeps for each cell.
-    ANGLES = (0.0, math.pi / 8, math.pi / 4, 3 * math.pi / 8, math.pi / 2)
+    #: The nine source angles ``_measure_cell`` sweeps for each cell,
+    #: spanning the symmetric fan ``[-pi/2, +pi/2]`` (matches the
+    #: ``angles`` tuple built in ``ppgo_map._measure_cell``).
+    ANGLES = tuple(k * math.pi / 8 for k in range(-4, 5))
 
     @classmethod
     def _w_star(cls, angle: float) -> float:

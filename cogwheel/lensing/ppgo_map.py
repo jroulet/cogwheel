@@ -670,36 +670,113 @@ def _rho_center(rho_edges: np.ndarray, ri: int) -> float:
     return 0.5 * (lo + hi)
 
 
-def caustic_geometry(gamma: float, kappa: float = 0.0, n_theta: int = 720
-                      ) -> tuple[float, np.ndarray]:
-    """Max source-plane caustic radius and its direction for ``gamma``.
+def caustic_geometry(gamma: float, kappa: float = 0.0
+                     ) -> tuple[float, np.ndarray]:
+    """Max source-plane caustic reach and its direction for ``gamma``.
 
-    Sweeps the critical curve over polar angle (both square-root branches,
-    so both parities are covered) via `geometry.critical_point`, skipping
-    the wedge-forbidden angles of a macro saddle.  Returns
-    ``(reach, unit_direction)`` where ``unit_direction`` points to the
-    farthest caustic point, so a source placed at ``rho * reach`` along it
-    is interior for ``rho < 1`` and exterior for ``rho > 1``.
+    Closed-form extremisation of the source-plane caustic radius, replacing
+    the former polar sweep over `geometry.critical_point`.  Working in the
+    mass-sheet-reduced variables ``lam = 1 - kappa`` and effective shear
+    ``e = gamma / lam``, the squared source-plane caustic radius along the
+    critical curve is a rational function of the radial coordinate
+    ``u = 1 / (lam |x|**2)`` whose stationary points form a small finite
+    candidate set: the axis cusps ``u = 1 - e`` and ``u = 1 + e`` at
+    positive parity (``e < 1``), and for a macro saddle (``e > 1``) the
+    on-axis cusp ``u = 1 + e`` plus the two off-axis deltoid extrema
+    ``u = (-1 + sqrt(4 e**2 - 3)) / 2`` and ``u = sqrt(e**2 - 1)``.  A
+    candidate competes only if it is a real critical radius: ``u > 0``
+    strictly (``u <= 0`` is the ``1 / u**2`` pole, i.e. the parity wall)
+    and the implied ``cos 2 theta = (u**2 - 1 + e**2) / (2 e u)`` lies in
+    ``[-1, 1]``.  The reach is the largest admitted caustic radius; the
+    direction points to that farthest caustic point.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    kappa : float
+        External convergence.
+
+    Returns
+    -------
+    reach : float
+        Maximum source-plane caustic radius.
+    unit_direction : np.ndarray
+        Unit vector (in the shear eigenframe) to the farthest caustic
+        point, canonicalised so its first non-zero component is
+        non-negative (the caustic's 4-fold symmetry makes the quadrant
+        physically irrelevant).  A source placed at ``rho * reach`` along
+        it is interior for ``rho < 1`` and exterior for ``rho > 1``.
+
+    Raises
+    ------
+    LensDomainError
+        If ``lam = 1 - kappa <= 0`` (over-critical / Type III) or
+        ``abs(gamma) == lam`` exactly (``det A = 0``, the parity wall
+        between the positive-parity and macro-saddle domains).
     """
     from cogwheel.lensing.chang_refsdal import geometry
 
+    lam = 1.0 - float(kappa)
+    if lam <= 0.0:
+        raise geometry.LensDomainError(
+            f'Cannot compute caustic geometry for (kappa, gamma) = '
+            f'({kappa}, {gamma}): 1 - kappa = {lam} <= 0 (over-critical '
+            f'/ Type III); the mass-sheet reduction is not real.')
+    if abs(gamma) == lam:
+        raise geometry.LensDomainError(
+            f'Cannot compute caustic geometry for (kappa, gamma) = '
+            f'({kappa}, {gamma}): |gamma| == 1 - kappa = {lam} exactly '
+            f'(det A = 0, the parity wall between the positive-parity and '
+            f'macro-saddle domains); this boundary is a named refusal.')
+
+    effective_shear = gamma / lam
+    if effective_shear < 1.0:
+        candidate_u = [1.0 - effective_shear, 1.0 + effective_shear]
+    else:
+        candidate_u = [1.0 + effective_shear]
+        radicand = 4.0 * effective_shear**2 - 3.0
+        if radicand >= 0.0:
+            u_offaxis = (-1.0 + math.sqrt(radicand)) / 2.0
+            if u_offaxis > 0.0:
+                candidate_u.append(u_offaxis)
+        candidate_u.append(math.sqrt(effective_shear**2 - 1.0))
+
     reach = 0.0
-    direction = np.array([1.0, 0.0])
-    thetas = np.linspace(0.0, 2.0 * math.pi, n_theta, endpoint=False)
-    for branch in (1, -1):
-        for theta in thetas:
-            try:
-                source = geometry.critical_point(
-                    gamma, float(theta), 0.0, kappa, branch).source
-            except geometry.LensDomainError:
-                continue
-            radius = float(math.hypot(source[0], source[1]))
-            if radius > reach:
-                reach = radius
-                direction = np.asarray(source, dtype=float) / radius
-    if reach <= 0.0:
+    u_win = None
+    for u in candidate_u:
+        if u <= 0.0:  # the 1 / u**2 pole (parity wall), never a finite reach
+            continue
+        cos_2theta = (u**2 - 1.0 + effective_shear**2) / (2.0 * effective_shear * u)
+        if abs(cos_2theta) > 1.0 + 1e-12:  # u not attained by a real theta
+            continue
+        radius_sq = lam * ((1.0 - u)**2 * (1.0 + 2.0 * u)
+                           + effective_shear**2 * (2.0 * u - 1.0)) / u**2
+        if radius_sq <= 0.0:
+            continue
+        radius = math.sqrt(radius_sq)
+        if radius > reach:
+            reach = radius
+            u_win = u
+
+    if u_win is None or reach <= 0.0:
         raise geometry.LensDomainError(
             f'No caustic reach found for gamma={gamma}, kappa={kappa}.')
+
+    cos_2theta = (u_win**2 - 1.0 + effective_shear**2) / (2.0 * effective_shear * u_win)
+    cos_2theta = min(1.0, max(-1.0, cos_2theta))
+    cos_theta = math.sqrt((1.0 + cos_2theta) / 2.0)
+    sin_theta = math.sqrt((1.0 - cos_2theta) / 2.0)
+    eig_scale = lam * (1.0 - u_win)
+    axis_a = eig_scale - gamma
+    axis_b = eig_scale + gamma
+    point = np.array([axis_a * cos_theta, axis_b * sin_theta], dtype=float)
+    direction = point / math.hypot(point[0], point[1])
+    for component in direction:  # canonicalise: first non-zero component >= 0
+        if component != 0.0:
+            if component < 0.0:
+                direction = -direction
+            break
     return reach, direction
 
 
@@ -889,7 +966,21 @@ def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
     # deltoid lobes while near-lobe angles degrade).  Certify each cell
     # against the WORST of several angles: sup of per-angle floors, min of
     # per-angle ceilings.
-    angles = (0.0, np.pi / 8, np.pi / 4, 3 * np.pi / 8, np.pi / 2)
+    #
+    # The fan is symmetric about the caustic direction, spanning
+    # ``[-pi/2, +pi/2]`` rather than only ``[0, +pi/2]``, so certification is
+    # invariant under the caustic's reflection symmetry.  `caustic_geometry`
+    # returns a farthest caustic point canonicalised only up to sign, so the
+    # unit ``direction`` may be either eigenaxis reflection of the true
+    # farthest point; a one-sided sweep would then probe two DIFFERENT angular
+    # arcs for the two reflections and certify the same physical cell
+    # differently -- over-certifying the near-wall macro saddle
+    # (``1 < gamma / (1 - kappa) < 1.177``).  A symmetric sweep removes that
+    # dependence.  It is also a superset of the one-sided probe, so the
+    # certified ``w`` is never less conservative than the one-sided result;
+    # for a positive-parity (axis-aligned) direction the two sides are mirror
+    # images with identical ppGO error, so the extra samples change nothing.
+    angles = tuple(k * np.pi / 8 for k in range(-4, 5))
     floors_cert: list = []
     floors_diag: list = []
     angle_ceilings: list = []

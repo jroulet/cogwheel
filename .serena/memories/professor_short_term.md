@@ -1,43 +1,54 @@
-# Professor short-term (session 2026-07-30, arc-length TubeChart INFERENCE REVIEW)
+# Professor short-term (F054 caustic-reach closed form consultation, 2026-07-30)
 
-Reviewed the arc-length-coordinate TubeChart build (the s-vs-theta consult I did
-earlier this session, now built). Ran fast domain tests, env
-`cogwheel-newlal` python. VERDICT: PASS (heavy engine tier operator-deferred).
+Session task: Phase-1 domain review of the closed-form caustic reach replacing
+the 720-point polar scan in `ppgo_map.caustic_geometry`. Answered 5 test-spec
+questions (admissibility, direction, kappa, parity wall, tolerances).
 
-## Fast-tier results (all green)
-- test_lensing_surrogate.py: 62 passed, 1 skipped (timing smoke). Arc-length specs:
-  - ArcLengthMapRoundTripTestCase (both parities): self-inversion |s(theta(s))-s|/s_tot
-    MEASURED ~3e-16 (positive astroid) / ~2e-16 (negative saddle) vs certified bound
-    1e-6 (ARC_ROUND_TRIP_TOL). 10 orders inside -> calibrated, not perched.
-  - ChartSplinesInArcLengthTestCase: served-vs-arc-length contraction diff = 0.0
-    (machine precision); served-vs-naive-raw-theta = 0.540 (54%). PROVES interp
-    coordinate is arc-length image s, not theta. Exactly the coord change I certified.
-  - CoordinateChangeAccuracyTestCase: worst arc rel = 1.979e-04 << 0.05 (F016 COMPLEX
-    bar); naive theta contraction = 0.542. Coord change does not move served F beyond
-    fit error.
-  - TubeChartMapSerializationTestCase + Serialization(MultiChart): npz/pickle round trip
-    bit-identical map + served values.
-  - IdentityDefaultBackCompatTestCase: served == frozen golden literals; can-go-red
-    witness present.
-  - ArcLengthSelfFalsificationTestCase: corrupted row breaks 1e-6 bound; non-monotone s
-    rejected; map-not-anchored-at-theta_lo rejected; perturbed map moves served value.
-    Tests have teeth.
-- test_lensing_surrogate_training.py fast tier:
-  - ArcLengthNodePlacementGeometryTestCase (7): nodes uniform in arc length, endpoints ==
-    arc bounds, independent polyline oracle confirms. PASS.
-  - SingleGammaMapAdequacyTestCase (5): band-edge normalized-map deviation < 0.05
-    adequacy bar; midpoint reproduces both edges; wide-parity-wall self-falsification.
-    Confirms my consult conclusion (A) band-midpoint de-correlates a topology-stable band.
+## Observations worth consolidating into topic memories (Dreamer)
 
-## Operator-deferred (correctly NOT run; my budget forbids)
-Engine-backed classes gated behind COGWHEEL_TRAIN_TIER=1 ("minutes per class, driver
-runs post-build"): ArcLengthBoundShiftMarginTestCase (knife-edge swing<5% vs incumbent
-~20%), ArcLengthNodeEfficiencyTestCase (eps(n4)<0.059 golden literal), ShippedArcLength
-TubeGridTestCase. These are the LOAD-BEARING quantitative eps claims -> driver ship gate.
-Fast-tier evidence is fully consistent with them.
+- **The reach reduces to a rational function of one variable `u`.** With
+  lam=1-kappa, e=gamma/lam, |y|^2 = lam*P(u)/u^2 where
+  P(u) = (1-u)^2(1+2u) + e^2(2u-1). The scan over 720 angles x 2 branches is
+  computing the max of this over a 1-D interval; the extremum is a root of the
+  cubic (u-1)(u^2+u+1-e^2)=0 plus endpoints. This belongs in
+  `professor/microlensing_chang_refsdal` as the closed-form reach (companion to
+  the already-recorded `saddle_caustic_max_y`/F026 macro-saddle fence and the
+  An&Evans deltoid picture). The map is: u ranges over an interval bounded by
+  the axis-cusp endpoints u=1-e (near cusp, the outer astroid cusp) and u=1+e;
+  the sqrt-branch turnaround u=sqrt(e^2-1) only exists on the saddle.
 
-## Physics judgement
-The build does what the consult asked: spline in the arc-length image, monotone
-cumulative-trapezoid map (|y'|>=0 guarantees monotone s from theta_lo for BOTH sign
-conventions), single band-midpoint gamma map. No defects found in the fast tier. Only
-caveat: the eps-improvement / knife-edge numbers themselves are engine-tier deferred.
+- **SANITY anchor confirmed dimensionally consistent** with the code's own
+  `p_i = (lam -+ gamma) - lam*u` convention in `caustic_derivatives` and
+  W=lam(1-u), A=W-gamma, B=W+gamma. At u=1-e (kappa=0): reach=2*gamma/sqrt(1-gamma),
+  =5.6921 at gamma=0.9 — matches SPEC.md cusp radius. The outer astroid cusp
+  (the reach maximiser at positive parity) sits on the shear MINOR axis: at u=1-e
+  the caustic point is on the B*sin(theta) axis => direction (0,+-1) in eigenframe.
+
+- **Parity-wall singularity is the u->0 pole, reached as e->1 (kappa=0).** At e=1
+  the near-cusp endpoint u=1-e -> 0, and |y|^2 = lam*P(u)/u^2 has P(0)=1-e^2=0 to
+  first order but the 1/u^2 makes reach ~ 2*gamma/sqrt(|1-gamma|) blow up. gamma=1
+  exactly = det A=0 = the named refusal already in critical_point/r_caustic. The
+  closed form must inherit the SAME refusal test |gamma|==lam (and lam<=0), NOT
+  compute a huge finite number. Confirms the incumbent's LensDomainError contract.
+
+- **Direction quadrant is physically IRRELEVANT to the consumers.** Both
+  call sites (test_lensing_ghost:577 `_anchor_source`, ppgo_map:881 `_measure_cell`)
+  do `rho * reach * (R(angle) @ direction)` then feed the point into the engine,
+  which is symmetric under the astroid/deltoid quadrant reflections (folding
+  invariant, per priors_and_coordinates u1/u2 astroid fold). Only the AXIS
+  ALIGNMENT and magnitude matter. Recommended canonical: eigenframe unit vector
+  with a fixed sign convention (first non-negative component), and note the
+  on-axis degenerate case (reach maximiser is on an axis => exactly (0,+-1) or
+  (+-1,0)). This is a code-observation candidate for professor_code_observations
+  too (the direction contract is looser than the incumbent's first-found value).
+
+- **Tolerance reality check:** brief asks <=1e-9 rel vs an n_theta=11520 scan that
+  itself only converges to ~1e-8 (measured at gamma=1.05). So the CLOSED FORM
+  cannot be validated to 1e-9 AGAINST THE SCAN — the scan is the looser object.
+  Correct test design: (a) closed-form-vs-scan at scan's own convergence floor
+  (~3e-8 rel, generous 1e-7); (b) the STRICT 1e-9 gate belongs on the closed
+  form's internal STATIONARITY self-check (d|y|^2/dtheta ~ 0 at returned point,
+  analytic via caustic_derivatives) — that's machine-precision-able; (c)
+  direction as an ANGLE agreement ~ scan angular resolution 2pi/11520 ~ 5.5e-4 rad.
+
+## No code was written (Phase 1 plan-mode consultation).

@@ -113,6 +113,7 @@ from cogwheel.lensing.chang_refsdal.operator import F_op, F_op_grid
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError, W_CEILING_SCHWINGER)
 from cogwheel.lensing import surrogate as surrogate_module
+from cogwheel.lensing import ppgo_map
 from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate, _rotate_to_eigenframe,
     _FARFIELD_ENVELOPE_DEFINITION, _union_cusp_nodes, _ASTROID_CUSP_ANGLES,
@@ -3567,6 +3568,575 @@ class IdentityDefaultBackCompatTestCase(SurrogateTestCase):
             float(served[w_idx].real), perturbed, places=6,
             msg='a 0.1% perturbation left the golden pin unmoved -- the '
                 'bit-exact equality gate would be vacuous')
+
+# ==========================================================================
+# WP1 (F054): caustic_geometry's 720-point critical_point scan is replaced
+# by a closed-form reach + direction.  This suite OWNS the served-value and
+# cost claims:
+#   (a) the served |F|/phase (via the surrogate serve path, which reaches
+#       `ppgo_map.caustic_geometry` only through the macro-saddle scalar
+#       reach `surrogate._caustic_reach`) is unchanged to the F016 envelope
+#       bar relative to HEAD, and where the retired 720-scan was measurably
+#       wrong (near the parity wall the source-plane caustic radius spikes
+#       and the coarse grid misses the extremum) the closed form moves the
+#       served value TOWARD the converged dense-scan value;
+#   (b) the reach path now issues ZERO `geometry.critical_point` calls per
+#       served lnlike (the retired 720-scan issued 2*720 = 1440).
+#
+# ORACLE INDEPENDENCE (F002): the converged-reach oracle is an INDEPENDENT
+# numpy-vectorised polar maximisation of the source-plane caustic radius --
+# a different method (dense grid argmax) from the production closed-form
+# extremisation of the same physical radius.  It is validated stage-1
+# against `geometry._caustic_source` (the shipping per-angle caustic point)
+# BEFORE being used, so a transcription slip cannot pass silently.
+#
+# There is deliberately NO "was 1440" witness.  Reading the retired
+# `caustic_geometry` back from ``git show HEAD`` makes the test pass only in
+# the window BEFORE its own change commits: the moment this lands, HEAD is
+# the closed form, ``n_theta`` is gone, and the test skips itself forever
+# while still reading as coverage (F043/F045).  The durable claim is the one
+# that survives the commit -- the closed form issues ZERO `critical_point`
+# calls -- and the 1440 baseline it replaced is recorded in FINDINGS F054.
+# ==========================================================================
+
+#: Gammas spanning both parities for the reach comparison, DENSIFIED just
+#: above the parity wall ``gamma = 1`` where the source-plane caustic radius
+#: develops a near-wall spike that a uniform 720-point polar grid under-
+#: resolves (the off-grid extremum the closed form recovers exactly).
+WP1_REACH_SWEEP_GAMMAS = (0.30, 0.50, 0.90, 0.99, 1.001, 1.05, 1.10, 1.20,
+                          1.30, 1.50)
+
+#: Node count of the RETIRED uniform polar grid (`caustic_geometry`'s former
+#: ``n_theta`` default); the scan swept BOTH square-root branches, so it
+#: issued ``2 * WP1_COARSE_SCAN_N`` critical-point evaluations per reach.
+WP1_COARSE_SCAN_N = 720
+
+#: Node count of the CONVERGED dense-scan oracle.  400k samples resolve the
+#: near-wall spike to ~1e-10 relative (measured), so the closed form's
+#: agreement with it is a genuine convergence check, not grid noise.
+WP1_DENSE_SCAN_N = 400_000
+
+#: Closed-form reach must sit within this relative tolerance of the dense
+#: converged scan across the whole sweep.  Measured worst ~3.8e-10 (near the
+#: wall); 1e-7 is generous and non-vacuous.
+WP1_REACH_CONVERGED_RTOL = 1e-7
+
+#: A 720-scan reach is classified "measurably wrong" when its relative
+#: deviation from the converged value exceeds this envelope-scale threshold.
+#: Measured: the sweep trips it at ``gamma in {1.001, 1.05, 1.10}`` (rel
+#: 4.5e-6 / 1.1e-4 / 2.9e-6) and is exact (rel 0) elsewhere.
+WP1_COARSE_WRONG_RTOL = 1e-6
+
+#: Ceiling on `geometry.critical_point` calls inside ONE full served
+#: reconstruction (partition + serve + telescoping).  Measured: 1 (the
+#: geometry partition), the reach path contributing 0 -- O(10) headroom.
+WP1_FULL_SERVED_CRITICAL_POINT_MAX = 10
+
+#: Saddle served configs (``gamma >= 1``: the ONLY parity whose served
+#: coordinate reaches `caustic_geometry` -- positive parity uses the
+#: directional `geometry.r_caustic`, untouched by WP1).  All inside
+#: ``SAD_BOX`` = ((1.20, 1.50), (3.70, 4.10), (2.00, 2.35)); each serves.
+WP1_SERVED_CONFIGS = (
+    dict(gamma=1.25, y1=3.80, y2=2.05),
+    dict(gamma=1.35, y1=3.90, y2=2.15),
+    dict(gamma=1.45, y1=4.00, y2=2.30),
+)
+
+#: In-band dimensionless-frequency grid for the served-value comparison
+#: (inside ``TRAIN_W_RANGE = (0.1, 20.0)``).
+WP1_SERVED_W = np.geomspace(0.30, 16.0, 40)
+
+#: Served |F|/phase computed with the closed-form reach vs the converged
+#: dense-scan reach must agree within this bar (both relative |F| and
+#: absolute phase).  Measured ~1.6e-9 (the reach itself agrees to ~1e-10,
+#: served sensitivity to reach is ~0.15x linear); 1e-6 is far below the
+#: F016 envelope reconstruction bar (`POS_RECON_TOL`/`SAD_RECON_TOL`) yet
+#: well above the measured residual.
+WP1_SERVED_CONVERGED_BAR = 1e-6
+
+#: A reach error of this fraction moves the served value well ABOVE
+#: `WP1_SERVED_CONVERGED_BAR` (measured d|F|_rel ~1.6e-4), used by the
+#: self-falsification control to prove the served comparison has teeth.
+WP1_SERVED_REACH_RED_FRAC = 1e-3
+
+
+def _wp1_caustic_radius_max(gamma: float, kappa: float,
+                            n_theta: int) -> tuple[float, float]:
+    """INDEPENDENT converged reach oracle: max source-plane caustic radius.
+
+    Vectorised polar maximisation over ``n_theta`` angles on ``[0, 2 pi)``
+    and BOTH square-root branches, transcribing the source-plane caustic
+    point ``macro_matrix @ x - x / |x|**2`` directly (NOT via production
+    `caustic_geometry`).  Angles/branches whose discriminant is negative or
+    whose radial coordinate ``u <= 0`` (the ``1/u**2`` parity-wall pole) are
+    excluded.  Returns ``(reach, argmax_theta)``.
+
+    This is validated against `geometry._caustic_source` in
+    `Wp1CausticRadiusOracleTestCase` before any consumer relies on it.
+    """
+    lam = 1.0 - kappa
+    effective_shear = gamma / lam
+    thetas = np.linspace(0.0, 2.0 * np.pi, n_theta, endpoint=False)
+    m00 = lam - gamma
+    m11 = lam + gamma
+    best_reach = 0.0
+    best_theta = 0.0
+    for branch in (1.0, -1.0):
+        disc = 1.0 - effective_shear**2 * np.sin(2.0 * thetas)**2
+        disc = np.where(disc < 0.0, np.nan, disc)
+        u = effective_shear * np.cos(2.0 * thetas) + branch * np.sqrt(disc)
+        u = np.where(u > 0.0, u, np.nan)
+        radius = 1.0 / np.sqrt(lam * u)
+        image_x = radius * np.cos(thetas)
+        image_y = radius * np.sin(thetas)
+        caustic_x = m00 * image_x - image_x / radius**2
+        caustic_y = m11 * image_y - image_y / radius**2
+        source_radius = np.hypot(caustic_x, caustic_y)
+        source_radius = np.where(np.isfinite(source_radius), source_radius,
+                                 -1.0)
+        k = int(np.nanargmax(source_radius))
+        if source_radius[k] > best_reach:
+            best_reach = float(source_radius[k])
+            best_theta = float(thetas[k])
+    return best_reach, best_theta
+
+
+class Wp1CausticRadiusOracleTestCase(SurrogateTestCase):
+    """Stage-1: the independent converged-reach oracle reproduces the
+    shipping per-angle caustic point to machine precision, so it is a valid
+    ground truth for the closed-form reach (F002 two-stage oracle)."""
+
+    def test_oracle_matches_caustic_source_pointwise(self):
+        """``_wp1_caustic_radius_max``'s underlying per-angle radius equals
+        `geometry._caustic_source` to ~1 ULP over both parities/branches."""
+        max_err = 0.0
+        for gamma in (0.30, 0.90, 1.20, 1.50):
+            lam = 1.0
+            effective_shear = gamma / lam
+            for theta in np.linspace(0.05, 1.55, 9):
+                for branch in (1.0, -1.0):
+                    disc = 1.0 - effective_shear**2 * np.sin(2.0 * theta)**2
+                    if disc < 0.0:
+                        continue
+                    u = (effective_shear * np.cos(2.0 * theta)
+                         + branch * np.sqrt(disc))
+                    if u <= 0.0:
+                        continue
+                    radius = 1.0 / np.sqrt(lam * u)
+                    ix, iy = radius * np.cos(theta), radius * np.sin(theta)
+                    mine = np.array([(lam - gamma) * ix - ix / radius**2,
+                                     (lam + gamma) * iy - iy / radius**2])
+                    ref = geometry._caustic_source(
+                        float(theta), gamma, 0.0, 0.0, branch)
+                    max_err = max(max_err,
+                                  float(np.max(np.abs(mine - ref))))
+                    self.n_checks += 1
+        self.assertLess(
+            max_err, 1e-13,
+            msg=f'independent caustic-radius oracle diverged from the '
+                f'shipping _caustic_source by {max_err:.2e}')
+
+
+class Wp1ClosedFormReachIsConvergedTestCase(SurrogateTestCase):
+    """The closed-form reach equals the converged dense-scan reach across
+    the sweep -- i.e. the served coordinate is fed the CONVERGED reach, the
+    precondition for served values being at their converged value."""
+
+    def test_closed_form_reach_matches_dense_scan(self):
+        """``ppgo_map.caustic_geometry(gamma, 0)[0]`` == dense-scan reach to
+        `WP1_REACH_CONVERGED_RTOL` over both parities."""
+        worst = 0.0
+        for gamma in WP1_REACH_SWEEP_GAMMAS:
+            closed = ppgo_map.caustic_geometry(gamma, 0.0)[0]
+            dense, _ = _wp1_caustic_radius_max(gamma, 0.0, WP1_DENSE_SCAN_N)
+            rel = abs(closed - dense) / dense
+            worst = max(worst, rel)
+            with self.subTest(gamma=gamma):
+                self.assertLess(
+                    rel, WP1_REACH_CONVERGED_RTOL,
+                    msg=f'closed reach {closed} vs dense {dense} '
+                        f'(rel {rel:.2e}) at gamma={gamma}')
+            self.n_checks += 1
+        self.assertLess(worst, WP1_REACH_CONVERGED_RTOL)
+
+    def test_surrogate_reach_is_the_same_scalar(self):
+        """`surrogate._caustic_reach` returns element 0 of
+        `caustic_geometry` BIT-for-BIT -- the served path and the reach
+        primitive share one authoritative scalar."""
+        for gamma in WP1_REACH_SWEEP_GAMMAS:
+            with self.subTest(gamma=gamma):
+                self.assertEqual(
+                    surrogate_module._caustic_reach(gamma),
+                    ppgo_map.caustic_geometry(gamma, 0.0)[0])
+            self.n_checks += 1
+
+class Wp1CoarseScanCorrectionTestCase(SurrogateTestCase):
+    """Where the retired 720-point scan was measurably wrong (the near-wall
+    caustic spike), the closed form is STRICTLY closer to the converged
+    value -- the ``moves toward the converged value'' half of spec (a)."""
+
+    def test_closed_form_beats_720_scan_where_720_wrong(self):
+        """Over the sweep, whenever the 720-scan reach deviates from the
+        converged reach by more than `WP1_COARSE_WRONG_RTOL`, the closed
+        form's deviation is smaller; quantify the largest correction."""
+        wrong_gammas = []
+        biggest_720_error = 0.0
+        biggest_improvement_factor = 0.0
+        for gamma in WP1_REACH_SWEEP_GAMMAS:
+            closed = ppgo_map.caustic_geometry(gamma, 0.0)[0]
+            coarse, _ = _wp1_caustic_radius_max(gamma, 0.0, WP1_COARSE_SCAN_N)
+            dense, _ = _wp1_caustic_radius_max(gamma, 0.0, WP1_DENSE_SCAN_N)
+            rel_coarse = abs(coarse - dense) / dense
+            rel_closed = abs(closed - dense) / dense
+            if rel_coarse > WP1_COARSE_WRONG_RTOL:
+                wrong_gammas.append((gamma, rel_coarse, rel_closed))
+                biggest_720_error = max(biggest_720_error, rel_coarse)
+                biggest_improvement_factor = max(
+                    biggest_improvement_factor,
+                    rel_coarse / max(rel_closed, 1e-18))
+                with self.subTest(gamma=gamma):
+                    self.assertLess(
+                        rel_closed, rel_coarse,
+                        msg=f'closed reach no better than the 720 scan at '
+                            f'gamma={gamma} (closed rel {rel_closed:.2e} vs '
+                            f'720 rel {rel_coarse:.2e})')
+                self.n_checks += 1
+        # Anti-vacuity for the CORRECTION claim: the sweep must actually
+        # exercise at least one near-wall config where 720 was wrong.
+        self.assertGreater(
+            len(wrong_gammas), 0,
+            msg='no sweep gamma tripped the 720-scan wrongness threshold; '
+                'the correction claim would be vacuous')
+        print(f'\n[WP1] 720-scan wrong at {len(wrong_gammas)} gammas; '
+              f'worst 720 rel-error {biggest_720_error:.2e}, closed form '
+              f'{biggest_improvement_factor:.1e}x closer to converged.')
+
+    def test_diagnostic_reach_error_vs_gamma(self):
+        """Diagnostic PNG: 720-scan vs closed-form reach relative error over
+        a dense gamma sweep straddling the parity wall."""
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        gammas = np.concatenate([
+            np.linspace(0.30, 0.98, 15),
+            np.geomspace(1.001, 1.50, 25)])
+        rel_coarse, rel_closed = [], []
+        for gamma in gammas:
+            closed = ppgo_map.caustic_geometry(float(gamma), 0.0)[0]
+            coarse, _ = _wp1_caustic_radius_max(
+                float(gamma), 0.0, WP1_COARSE_SCAN_N)
+            dense, _ = _wp1_caustic_radius_max(
+                float(gamma), 0.0, WP1_DENSE_SCAN_N)
+            rel_coarse.append(abs(coarse - dense) / dense)
+            rel_closed.append(abs(closed - dense) / dense)
+        fig, ax = plt.subplots()
+        ax.semilogy(gammas, np.maximum(rel_coarse, 1e-18), 'o-',
+                    label='retired 720-scan', ms=3)
+        ax.semilogy(gammas, np.maximum(rel_closed, 1e-18), 's-',
+                    label='closed form', ms=3)
+        ax.axhline(WP1_COARSE_WRONG_RTOL, color='k', ls=':',
+                   label='wrongness threshold')
+        ax.axvline(1.0, color='r', ls='--', alpha=0.5, label='parity wall')
+        ax.set_xlabel('gamma')
+        ax.set_ylabel('|reach - converged| / converged')
+        ax.set_title('WP1: reach error vs gamma (720 scan vs closed form)')
+        ax.legend(fontsize=8)
+        fig.savefig(OUTPUT_DIR / 'wp1_reach_error_vs_gamma.png', dpi=90)
+        plt.close(fig)
+        self.n_checks += 1
+        self.assertTrue((OUTPUT_DIR / 'wp1_reach_error_vs_gamma.png').exists())
+
+
+class Wp1ReachCallCountTestCase(SurrogateTestCase):
+    """Spec (b): the reach path now issues ZERO `geometry.critical_point`
+    calls (the retired 720-point two-branch scan issued 1440)."""
+
+    def _count_calls(self, thunk) -> int:
+        """Run ``thunk`` with `geometry.critical_point` wrapped by a counter
+        and return the call count.  The wrapper increments BEFORE delegating,
+        so a refused (raising) call still registers -- exactly what the
+        retired scan's ``try/except LensDomainError`` per angle did."""
+        original = geometry.critical_point
+        counter = {'n': 0}
+
+        def counting(*args, **kwargs):
+            counter['n'] += 1
+            return original(*args, **kwargs)
+
+        with mock.patch.object(geometry, 'critical_point', counting):
+            thunk()
+        return counter['n']
+
+    def test_closed_form_issues_zero_critical_point_calls(self):
+        """`ppgo_map.caustic_geometry` calls `critical_point` ZERO times
+        across the sweep (it is pure closed-form arithmetic)."""
+        for gamma in WP1_REACH_SWEEP_GAMMAS:
+            calls = self._count_calls(
+                lambda g=gamma: ppgo_map.caustic_geometry(g, 0.0))
+            with self.subTest(gamma=gamma):
+                self.assertEqual(
+                    calls, 0,
+                    msg=f'closed-form reach issued {calls} critical_point '
+                        f'calls at gamma={gamma} (expected 0)')
+            self.n_checks += 1
+
+    def test_surrogate_reach_path_issues_zero_calls(self):
+        """The served path's reach primitive `surrogate._caustic_reach`
+        also issues ZERO `critical_point` calls."""
+        for gamma in (1.20, 1.35, 1.50):
+            calls = self._count_calls(
+                lambda g=gamma: surrogate_module._caustic_reach(g))
+            with self.subTest(gamma=gamma):
+                self.assertEqual(calls, 0)
+            self.n_checks += 1
+
+
+def _wp1_serve_with_reach(sur: LensAmplificationSurrogate, config: dict,
+                          reach_value: float | None
+                          ) -> tuple[np.ndarray, bool]:
+    """Serve+reconstruct a config, optionally substituting the macro-saddle
+    scalar reach `surrogate._caustic_reach` with a fixed ``reach_value``.
+
+    ``reach_value=None`` uses the production (closed-form) reach.  Only the
+    serve-side ``rho`` (through `_to_caustic_fixed`) sees the substitution;
+    the engine geometry partition (delays, kernels, ``t_min``) that
+    `_reconstruct_via_surrogate` uses is untouched, so the |F| difference is
+    purely the effect of the reach on the served envelope coordinate."""
+    if reach_value is None:
+        return _reconstruct_via_surrogate(
+            sur, WP1_SERVED_W, config['gamma'], config['y1'], config['y2'],
+            0.0)
+    with mock.patch.object(surrogate_module, '_caustic_reach',
+                           lambda _gamma: float(reach_value)):
+        return _reconstruct_via_surrogate(
+            sur, WP1_SERVED_W, config['gamma'], config['y1'], config['y2'],
+            0.0)
+
+
+def _wp1_served_deviation(f_ref: np.ndarray, f_test: np.ndarray
+                          ) -> tuple[float, float]:
+    """``(max relative |F| change, max phase change)`` where the reference
+    amplitude is non-negligible (phase is meaningless at amplitude nulls)."""
+    scale = float(np.max(np.abs(f_ref)))
+    d_mag = float(np.max(np.abs(np.abs(f_test) - np.abs(f_ref))) / scale)
+    mask = np.abs(f_ref) > 0.05 * scale
+    d_phase = float(np.max(np.abs(np.angle(f_test[mask] / f_ref[mask]))))
+    return d_mag, d_phase
+
+
+class Wp1ServedValuesUnchangedTestCase(SurrogateTestCase):
+    """Spec (a): the surrogate-served |F|/phase is unchanged to the F016
+    envelope bar relative to the retired 720-scan, and sits at the CONVERGED
+    dense-scan value.  Only the macro-saddle path reaches
+    `caustic_geometry`; the positive path (`geometry.r_caustic`) is
+    WP1-invariant, verified by `test_positive_parity_ignores_caustic_geometry`.
+    """
+
+    def test_served_values_track_converged_reach(self):
+        """Serving with the closed-form reach vs the converged dense-scan
+        reach agrees in |F| AND phase within `WP1_SERVED_CONVERGED_BAR`."""
+        sur = _sad_surrogate_ship()
+        worst_mag = worst_phase = 0.0
+        for config in WP1_SERVED_CONFIGS:
+            f_closed, served_c = _wp1_serve_with_reach(sur, config, None)
+            self.assertTrue(served_c, msg=f'{config} did not serve')
+            dense_reach, _ = _wp1_caustic_radius_max(
+                config['gamma'], 0.0, WP1_DENSE_SCAN_N)
+            f_dense, served_d = _wp1_serve_with_reach(
+                sur, config, dense_reach)
+            self.assertTrue(served_d)
+            d_mag, d_phase = _wp1_served_deviation(f_dense, f_closed)
+            worst_mag = max(worst_mag, d_mag)
+            worst_phase = max(worst_phase, d_phase)
+            with self.subTest(config=config):
+                self.assertLess(d_mag, WP1_SERVED_CONVERGED_BAR)
+                self.assertLess(d_phase, WP1_SERVED_CONVERGED_BAR)
+            self.n_checks += 1
+        print(f'\n[WP1] served vs converged-reach: max d|F|_rel '
+              f'{worst_mag:.2e}, max dphase {worst_phase:.2e} '
+              f'(bar {WP1_SERVED_CONVERGED_BAR:.0e}).')
+
+    def test_served_values_unchanged_vs_retired_720_scan(self):
+        """Serving with the closed-form reach vs the retired 720-scan reach
+        agrees within `WP1_SERVED_CONVERGED_BAR` -- the "unchanged relative
+        to HEAD" claim.  At these saddle gammas the 720-scan is already
+        converged, so the served values coincide to ~machine precision."""
+        sur = _sad_surrogate_ship()
+        worst_mag = worst_phase = worst_reach_rel = 0.0
+        for config in WP1_SERVED_CONFIGS:
+            coarse_reach, _ = _wp1_caustic_radius_max(
+                config['gamma'], 0.0, WP1_COARSE_SCAN_N)
+            closed_reach = surrogate_module._caustic_reach(config['gamma'])
+            worst_reach_rel = max(
+                worst_reach_rel,
+                abs(coarse_reach - closed_reach) / closed_reach)
+            f_closed, _ = _wp1_serve_with_reach(sur, config, None)
+            f_720, served = _wp1_serve_with_reach(sur, config, coarse_reach)
+            self.assertTrue(served)
+            d_mag, d_phase = _wp1_served_deviation(f_closed, f_720)
+            worst_mag = max(worst_mag, d_mag)
+            worst_phase = max(worst_phase, d_phase)
+            with self.subTest(config=config):
+                self.assertLess(d_mag, WP1_SERVED_CONVERGED_BAR)
+                self.assertLess(d_phase, WP1_SERVED_CONVERGED_BAR)
+            self.n_checks += 1
+        print(f'\n[WP1] served closed-vs-720: max d|F|_rel {worst_mag:.2e}, '
+              f'max dphase {worst_phase:.2e}; worst reach rel-delta '
+              f'{worst_reach_rel:.2e}.')
+
+    def test_positive_parity_ignores_caustic_geometry(self):
+        """A positive-parity served value is BYTE-identical whether
+        `ppgo_map.caustic_geometry` is real or poisoned -- proving the
+        positive serve coordinate (`geometry.r_caustic`) never reaches the
+        WP1-changed reach, so WP1 cannot alter positive served values."""
+        sur = _pos_surrogate_ship()
+        config = dict(gamma=CROWN_LENS['gamma'], y1=CROWN_LENS['y1'],
+                      y2=CROWN_LENS['y2'])
+        f_real, served_real = _wp1_serve_with_reach(sur, config, None)
+        self.assertTrue(served_real, msg='positive crown config did not serve')
+
+        def _poison(*_args, **_kwargs):
+            raise AssertionError('positive serve path must not call '
+                                 'caustic_geometry')
+
+        with mock.patch.object(ppgo_map, 'caustic_geometry', _poison):
+            f_poison, served_poison = _reconstruct_via_surrogate(
+                sur, WP1_SERVED_W, config['gamma'], config['y1'],
+                config['y2'], 0.0)
+        self.assertTrue(served_poison)
+        self.assertEqual(f_real.tobytes(), f_poison.tobytes(),
+                         msg='positive served value changed when '
+                             'caustic_geometry was poisoned')
+        self.n_checks += 1
+
+    def test_full_served_reconstruction_is_reach_call_free(self):
+        """Spec (b) at the served-lnlike level: ONE full served
+        reconstruction issues at most `WP1_FULL_SERVED_CRITICAL_POINT_MAX`
+        `critical_point` calls (the reach path contributes ZERO; the former
+        720-scan contributed 1440); report the served wall time."""
+        sur = _sad_surrogate_ship()
+        config = WP1_SERVED_CONFIGS[1]
+        original = geometry.critical_point
+        counter = {'n': 0}
+
+        def counting(*args, **kwargs):
+            counter['n'] += 1
+            return original(*args, **kwargs)
+
+        with mock.patch.object(geometry, 'critical_point', counting):
+            counter['n'] = 0
+            _f, served = _reconstruct_via_surrogate(
+                sur, WP1_SERVED_W, config['gamma'], config['y1'],
+                config['y2'], 0.0)
+            full_calls = counter['n']
+            counter['n'] = 0
+            surrogate_module._caustic_reach(config['gamma'])
+            reach_calls = counter['n']
+        self.assertTrue(served)
+        self.assertEqual(reach_calls, 0,
+                         msg='reach path issued critical_point calls')
+        self.assertLessEqual(
+            full_calls, WP1_FULL_SERVED_CRITICAL_POINT_MAX,
+            msg=f'served reconstruction issued {full_calls} critical_point '
+                f'calls (> O(10)); the reach path was expected call-free')
+        start = time.perf_counter()
+        for _ in range(10):
+            _reconstruct_via_surrogate(
+                sur, WP1_SERVED_W, config['gamma'], config['y1'],
+                config['y2'], 0.0)
+        served_ms = (time.perf_counter() - start) / 10 * 1e3
+        print(f'\n[WP1] full served reconstruction: {full_calls} '
+              f'critical_point calls (reach path {reach_calls}); ~{served_ms:.2f} '
+              f'ms/serve (report only, not a timing gate; ~3 ms fast-path '
+              f'target).')
+        self.n_checks += 1
+
+class Wp1SelfFalsificationTestCase(SurrogateTestCase):
+    """The WP1 gates can go RED: each teeth-check deliberately breaks one
+    premise and asserts the corresponding gate would fail."""
+
+    def test_wrong_reach_oracle_fails_converged_check(self):
+        """A deliberately-biased reach oracle (+0.1 %) exceeds
+        `WP1_REACH_CONVERGED_RTOL`, so the converged check is non-vacuous."""
+        gamma = 1.05
+        closed = ppgo_map.caustic_geometry(gamma, 0.0)[0]
+        dense, _ = _wp1_caustic_radius_max(gamma, 0.0, WP1_DENSE_SCAN_N)
+        biased = dense * 1.001
+        self.assertGreater(
+            abs(closed - biased) / biased, WP1_REACH_CONVERGED_RTOL,
+            msg='a 0.1% reach bias slipped under the converged tolerance')
+        # positive control: the real closed form still clears the bar.
+        self.assertLess(abs(closed - dense) / dense, WP1_REACH_CONVERGED_RTOL)
+        self.n_checks += 1
+
+    def test_call_counter_catches_a_scanning_stub(self):
+        """The `critical_point` counter has teeth: a reach implementation
+        that DID scan (calls `critical_point`) registers a non-zero count,
+        so the zero-call assertion is not vacuously true."""
+        original = geometry.critical_point
+        counter = {'n': 0}
+
+        def counting(*args, **kwargs):
+            counter['n'] += 1
+            return original(*args, **kwargs)
+
+        def scanning_stub(gamma, kappa=0.0, n=5):
+            # A miniature revival of the retired scan: n critical_point calls
+            # (positive parity, so every angle is a real critical point).
+            reach = 0.0
+            for theta in np.linspace(0.0, np.pi, n):
+                try:
+                    src = geometry.critical_point(gamma, float(theta), 0.0,
+                                                  kappa, 1).source
+                except geometry.LensDomainError:
+                    continue
+                reach = max(reach, float(np.hypot(src[0], src[1])))
+            return reach
+
+        with mock.patch.object(geometry, 'critical_point', counting):
+            with mock.patch.object(ppgo_map, 'caustic_geometry',
+                                   lambda g, k=0.0: (scanning_stub(g, k), None)):
+                counter['n'] = 0
+                surrogate_module._caustic_reach(0.50)
+        self.assertGreater(
+            counter['n'], 0,
+            msg='the counter failed to register a scanning reach stub')
+        self.n_checks += 1
+
+    def test_served_comparison_catches_a_reach_error(self):
+        """A reach error of `WP1_SERVED_REACH_RED_FRAC` moves the served
+        value ABOVE `WP1_SERVED_CONVERGED_BAR`, so the served-unchanged gate
+        would fail on a genuine reach regression."""
+        sur = _sad_surrogate_ship()
+        config = WP1_SERVED_CONFIGS[1]
+        f_closed, served = _wp1_serve_with_reach(sur, config, None)
+        self.assertTrue(served)
+        closed_reach = surrogate_module._caustic_reach(config['gamma'])
+        f_wrong, served_w = _wp1_serve_with_reach(
+            sur, config, closed_reach * (1.0 + WP1_SERVED_REACH_RED_FRAC))
+        self.assertTrue(served_w)
+        d_mag, _d_phase = _wp1_served_deviation(f_closed, f_wrong)
+        self.assertGreater(
+            d_mag, WP1_SERVED_CONVERGED_BAR,
+            msg=f'a {WP1_SERVED_REACH_RED_FRAC:.0e} reach error moved the '
+                f'served |F| by only {d_mag:.2e} (<= bar); the served gate '
+                f'would be vacuous')
+        self.n_checks += 1
+
+    def test_oracle_validation_catches_a_transcription_slip(self):
+        """The stage-1 oracle gate has teeth: a sign-flipped caustic point
+        diverges from `geometry._caustic_source` far above the 1e-13 bar."""
+        gamma, theta, branch = 0.90, 0.7, 1.0
+        lam, effective_shear = 1.0, gamma
+        u = (effective_shear * np.cos(2.0 * theta)
+             + branch * np.sqrt(1.0 - effective_shear**2
+                                * np.sin(2.0 * theta)**2))
+        radius = 1.0 / np.sqrt(lam * u)
+        ix, iy = radius * np.cos(theta), radius * np.sin(theta)
+        # Sign-flipped m11 term: a deliberate transcription slip.
+        wrong = np.array([(lam - gamma) * ix - ix / radius**2,
+                          -(lam + gamma) * iy - iy / radius**2])
+        ref = geometry._caustic_source(theta, gamma, 0.0, 0.0, branch)
+        self.assertGreater(float(np.max(np.abs(wrong - ref))), 1e-13)
+        self.n_checks += 1
 
 
 if __name__ == '__main__':

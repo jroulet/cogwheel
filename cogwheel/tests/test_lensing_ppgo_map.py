@@ -80,6 +80,7 @@ from cogwheel.lensing.ppgo_map import (
     CertifiedPpgoMap, STATUS_CERTIFIED, STATUS_INVALID, UNKNOWN,
     annulus_rho, caustic_geometry)
 from cogwheel.lensing import ppgo_map
+from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.surrogate_training import (
     _coordinate_radius_bounds, _scalar_caustic_reach, _stratum_ppgo_boundary)
 
@@ -908,6 +909,868 @@ class SelfFalsificationTestCase(_GaugeTestCase):
         self.assertIsNot(w_narrowed, UNKNOWN)
         self.assertNotEqual(w_head, w_narrowed)
         self.n_compared += 1
+
+
+# ======================================================================
+# WP1: caustic_geometry's 720-point polar scan replaced by the closed-form
+# reach + direction.  The three specifications below certify the REWRITE:
+#   (1) the closed-form reach reproduces a brute high-resolution parametric
+#       scan of the caustic radius (an INDEPENDENT oracle, F026 prior art);
+#   (2) the maximiser the closed form locates is a genuine STATIONARY point
+#       of the caustic radius, confirmed by the independent analytic tangent
+#       `geometry.caustic_derivatives` (machine-precision self-check, no scan);
+#   (3) `surrogate._caustic_reach` (imported here as `_scalar_caustic_reach`)
+#       still routes bit-for-bit through the rewritten `caustic_geometry`, so
+#       no second reach copy was introduced.
+# ======================================================================
+
+#: (gamma, kappa) grid spanning both parities and the regimes the WP1 brief
+#: names: the comfortable positive-parity middle (0.6, 0.9 @ kappa=0), the
+#: near-wall macro saddle (1.001..1.2), both sides of the off-axis -> on-axis
+#: cusp switch at ``gamma ~ 1.177651`` (1.05 off-axis, 1.3 on-axis), and two
+#: ``kappa != 0`` cases whose reduced shear ``e = gamma / (1 - kappa)`` stays
+#: in a validated positive-parity range.
+_WP1_GRID: tuple[tuple[float, float], ...] = (
+    (0.6, 0.0), (0.9, 0.0),
+    (1.001, 0.0), (1.005, 0.0), (1.05, 0.0), (1.1, 0.0), (1.2, 0.0),
+    (1.3, 0.0),
+    (0.5, 0.2), (0.7, 0.2))
+
+#: Number of lens-plane polar samples for the brute parametric caustic scan.
+#: The Professor floored this at 11520; the sharpest near-wall spike
+#: (gamma=1.001, reach ~ 22) has a raw-scan discretization error of 3.1e-7 at
+#: 11520 -- above the 1e-7 bar -- but 1.3e-8 at 46080.  This is 4x the floor:
+#: still a PURE brute parametric scan (no local refinement), just dense enough
+#: that the discretization error of the oracle itself sits under the bar.
+_WP1_SCAN_N_THETA = 46080
+
+#: Relative-agreement bar between the closed-form reach and the brute scan.
+#: NOT 1e-9: the scan oracle is itself only ~1e-8 accurate (its own O(h**2)
+#: discretization error), so 1e-7 is the right bar; the MEASURED agreement is
+#: a few x 1e-8, reported by the test.
+_WP1_REACH_RTOL = 1e-7
+
+#: Stationarity bar: ``|d|y|**2 / dtheta| / |y|**2`` at the maximiser.  A
+#: genuine stationary point of the caustic radius has ``y . y' = 0``; the
+#: smooth off-axis deltoid maximisers clear this at ~1e-13.
+_WP1_STATIONARITY_RATIO_BAR = 1e-9
+
+#: Cusp-speed floor for the stationarity DISJUNCTION.  The farthest caustic
+#: point is a CUSP (astroid axis cusps at positive parity; the outer deltoid
+#: cusp at a macro saddle), where the parametric speed ``|y'|`` is analytically
+#: zero.  Its float64 evaluation is a numerical zero -- up to 1.3e-7 at the
+#: positive-parity axis cusp (gamma=0.9, where ``sin(pi) != 0`` leaks into the
+#: tangent) -- so the ratio arm can miss (gamma=0.9 lands at 4.5e-8).  A floor
+#: of 1e-4 is ~800x above that numerical zero yet ~4 orders below any genuine
+#: finite caustic speed (median |y'| over a wedge is O(1)), cleanly separating
+#: "the maximiser is a cusp" from "the maximiser is a non-stationary point".
+_WP1_CUSP_SPEED_FLOOR = 1e-4
+
+#: Wedge-turnaround candidate ``u = sqrt(e**2 - 1)`` (macro saddle): a REGULAR
+#: point of the caustic where the theta-parametrization speed DIVERGES (F044),
+#: not a stationary point -- excluded from the stationarity check.  It is never
+#: the reach maximiser (verified in the suite), so excluding it removes no
+#: admitted maximiser.
+_WP1_WEDGE_LABEL = 'wedge'
+
+#: gamma grid (both parities, kappa fixed at 0 since `_scalar_caustic_reach`
+#: takes only gamma) for the single-source bit-identity check.
+_WP1_SCALAR_GAMMAS: tuple[float, ...] = (0.3, 0.6, 0.9, 1.05, 1.2, 1.5)
+
+
+def _wp1_parametric_radius(theta: np.ndarray, gamma: float, kappa: float,
+                           branch: float) -> np.ndarray:
+    """Independent F026 |y|(theta) caustic radius, vectorised over ``theta``.
+
+    Evaluates the closed-form Chang--Refsdal caustic curve
+    ``y_i = p_i r T_i`` with ``T = (cos theta, sin theta)``,
+    ``r = 1 / sqrt(lam u)``, ``p_i = (lam -+ gamma) - lam u`` and
+    ``u = e cos 2theta + branch sqrt(1 - e**2 sin**2 2theta)``
+    (``lam = 1 - kappa``, ``e = gamma / lam``), returning ``|y|`` where the
+    point is a real caustic point (``disc >= 0`` and ``u > 0``) and ``-inf``
+    elsewhere so a ``max`` skips invalid samples.
+
+    This is the F026 parametric oracle, generated from the critical curve
+    rather than a source-plane uniform-theta ring: a ring can MISS the thin
+    near-wall reach spike, whereas the lens-plane parametrization samples the
+    whole caustic.  It shares NO code with `caustic_geometry`'s closed-form
+    u-candidate extremiser; it is validated against the production caustic
+    evaluator `geometry._caustic_source` in the suite before use.
+    """
+    lam = 1.0 - kappa
+    effective_shear = gamma / lam
+    sin_2t = np.sin(2.0 * theta)
+    cos_2t = np.cos(2.0 * theta)
+    discriminant = 1.0 - effective_shear**2 * sin_2t**2
+    valid = discriminant >= 0.0
+    radial_u = (effective_shear * cos_2t
+                + branch * np.sqrt(np.where(valid, discriminant, 0.0)))
+    valid = valid & (radial_u > 0.0)
+    safe_u = np.where(valid, radial_u, 1.0)
+    radius_scale = 1.0 / np.sqrt(lam * safe_u)
+    p_x = (lam - gamma) - lam * safe_u
+    p_y = (lam + gamma) - lam * safe_u
+    y_x = p_x * radius_scale * np.cos(theta)
+    y_y = p_y * radius_scale * np.sin(theta)
+    return np.where(valid, np.hypot(y_x, y_y), -np.inf)
+
+
+def _wp1_scan_reach(gamma: float, kappa: float,
+                    n_theta: int = _WP1_SCAN_N_THETA) -> float:
+    """Brute maximum of the parametric caustic radius over ``[0, 2 pi)``.
+
+    Positive parity (``e < 1``) has a single astroid on the ``+`` branch; a
+    macro saddle (``e > 1``) has two deltoid lobes traced by BOTH ``+-``
+    branches, so the scan maximises over both.  Independent of
+    `caustic_geometry`.
+    """
+    lam = 1.0 - kappa
+    effective_shear = gamma / lam
+    theta = np.linspace(0.0, 2.0 * np.pi, n_theta, endpoint=False)
+    branches = (1.0,) if effective_shear < 1.0 else (1.0, -1.0)
+    return max(float(np.max(_wp1_parametric_radius(theta, gamma, kappa, br)))
+               for br in branches)
+
+
+class ClosedFormReachVsParametricScanTestCase(_GaugeTestCase):
+    """WP1 spec 1: closed-form reach reproduces a converged parametric scan.
+
+    The reach element of `caustic_geometry` is compared against an INDEPENDENT
+    high-resolution parametric scan of the caustic radius (`_wp1_scan_reach`,
+    the F026 |y|(theta) parametrization -- NOT a source-plane ring, which can
+    miss the thin near-wall spike).  The scan is first validated against the
+    production caustic evaluator `geometry._caustic_source` so a transcription
+    error in the oracle cannot masquerade as agreement (two-stage oracle).
+    """
+
+    def test_parametric_radius_matches_production_caustic_source(self) -> None:
+        """Stage 1: the hand-rolled |y|(theta) equals `geometry._caustic_source`.
+
+        Before the scan is trusted as an oracle its per-theta radius must match
+        the production caustic point evaluator (a DIFFERENT code path:
+        ``macro_matrix @ x - x / |x|**2``) to ~1e-12 relative, at a spread of
+        real caustic angles on both parities and both branches.
+        """
+        self._expect_comparisons = True
+        for gamma, kappa in ((0.6, 0.0), (0.9, 0.0), (1.05, 0.0),
+                             (1.2, 0.0), (0.7, 0.2)):
+            lam = 1.0 - kappa
+            effective_shear = gamma / lam
+            branches = (1.0,) if effective_shear < 1.0 else (1.0, -1.0)
+            for branch in branches:
+                for theta in np.linspace(0.02, 0.5, 6):
+                    discriminant = (1.0 - effective_shear**2
+                                    * math.sin(2.0 * theta)**2)
+                    radial_u = (effective_shear * math.cos(2.0 * theta)
+                                + branch * math.sqrt(max(discriminant, 0.0)))
+                    if discriminant < 0.0 or radial_u <= 0.0:
+                        continue
+                    production = float(np.linalg.norm(geometry._caustic_source(
+                        theta, gamma, 0.0, kappa, branch)))
+                    mine = float(_wp1_parametric_radius(
+                        np.array([theta]), gamma, kappa, branch)[0])
+                    with self.subTest(gamma=gamma, kappa=kappa,
+                                      branch=branch, theta=theta):
+                        self.assertLess(abs(production - mine),
+                                        1e-12 * abs(production) + 1e-14)
+                    self.n_compared += 1
+
+    def test_closed_form_reach_matches_parametric_scan(self) -> None:
+        """The closed-form reach matches the brute scan to <= 1e-7 relative.
+
+        Over the full WP1 grid -- comfortable middle, the ``e < sqrt(3)/2``
+        band, the near-wall saddle spike, both sides of the cusp switch, and
+        two ``kappa != 0`` cases -- the relative disagreement is bounded by the
+        (measured, few-x-1e-8) discretization error of the scan itself.
+        """
+        self._expect_comparisons = True
+        measured: list[tuple[float, float]] = []
+        worst = 0.0
+        for gamma, kappa in _WP1_GRID:
+            closed_form = caustic_geometry(gamma, kappa)[0]
+            scan = _wp1_scan_reach(gamma, kappa)
+            rel = abs(closed_form - scan) / abs(closed_form)
+            with self.subTest(gamma=gamma, kappa=kappa):
+                self.assertLessEqual(
+                    rel, _WP1_REACH_RTOL,
+                    f'closed-form reach {closed_form!r} vs parametric scan '
+                    f'{scan!r} disagree by rel={rel:.3e} > {_WP1_REACH_RTOL} '
+                    f'at gamma={gamma}, kappa={kappa}')
+            measured.append((gamma, rel))
+            worst = max(worst, rel)
+            self.n_compared += 1
+        # The bar is 1e-7; the measured worst is a few x 1e-8 -- assert it did
+        # not silently balloon (e.g. an oracle that lost the near-wall spike
+        # would show rel ~ O(1), not ~1e-8).
+        self.assertLess(worst, 5e-8,
+                        f'measured worst reach agreement {worst:.3e} is far '
+                        f'above the expected few-x-1e-8 floor')
+        self._save_reach_plot(measured)
+
+    def _save_reach_plot(self, measured: list[tuple[float, float]]) -> None:
+        """Diagnostic: reach(gamma) across the wall, coarse ring vs parametric.
+
+        Left panel -- the closed-form reach and the dense parametric scan track
+        across the near-wall spike; a DELIBERATELY coarse scan (n_theta=360)
+        under-resolves the spike, the failure mode the parametric oracle at
+        46080 avoids.  Right panel -- the measured closed-form-vs-scan relative
+        agreement over the grid, all far below the 1e-7 bar.
+        """
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+        except ImportError:
+            return
+        _OUTPUT_DIR.mkdir(exist_ok=True)
+        gammas = np.linspace(1.0005, 1.30, 120)
+        closed = [caustic_geometry(float(g), 0.0)[0] for g in gammas]
+        dense = [_wp1_scan_reach(float(g), 0.0) for g in gammas]
+        coarse = [_wp1_scan_reach(float(g), 0.0, n_theta=360) for g in gammas]
+        fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(11, 4))
+        ax0.plot(gammas, closed, 'k-', lw=1.5, label='closed-form reach')
+        ax0.plot(gammas, dense, 'g.', ms=3,
+                 label=f'parametric scan (n={_WP1_SCAN_N_THETA})')
+        ax0.plot(gammas, coarse, 'r+', ms=5,
+                 label='coarse scan (n=360, misses spike)')
+        ax0.set_yscale('log')
+        ax0.set_xlabel('gamma')
+        ax0.set_ylabel('caustic reach')
+        ax0.set_title('near-wall reach spike')
+        ax0.legend(fontsize=8)
+        gs = [g for g, _ in measured]
+        rels = [r for _, r in measured]
+        ax1.scatter(gs, rels, s=40)
+        ax1.axhline(_WP1_REACH_RTOL, color='r', ls='--',
+                    label=f'bar {_WP1_REACH_RTOL:g}')
+        ax1.set_yscale('log')
+        ax1.set_xlabel('gamma')
+        ax1.set_ylabel('|closed-form - scan| / reach')
+        ax1.set_title('closed-form vs scan agreement')
+        ax1.legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(_OUTPUT_DIR / 'wp1_reach_closed_form_vs_scan.png', dpi=90)
+        plt.close(fig)
+
+def _wp1_winning_maximiser(gamma: float, kappa: float
+                           ) -> tuple[float, float, str, float]:
+    """Recover the analytic reach maximiser `caustic_geometry` locates.
+
+    Reproduces `caustic_geometry`'s finite candidate-``u`` extremiser and maps
+    the WINNING ``u`` back to a machine-precise ``(theta_win, branch)`` via
+    ``cos 2theta = (u**2 - 1 + e**2) / (2 e u)`` and the sign of
+    ``u - e cos 2theta`` (the ``+-`` root selector), where ``lam = 1 - kappa``
+    and ``e = gamma / lam``.  Recovering ``theta`` from the analytic ``u`` --
+    rather than from a radius-maximising scan -- gives the winning angle to
+    machine precision, so the stationarity residual is limited by the analytic
+    tangent, not by a coarse angular grid.
+
+    Returns
+    -------
+    theta_win, branch, label, reach
+        The first-quadrant winning angle (rad), its ``+-1`` branch, a label
+        (``'axis_minus'`` / ``'axis_plus'`` / ``'offaxis'`` / the wedge label),
+        and the winning caustic radius.
+    """
+    lam = 1.0 - kappa
+    effective_shear = gamma / lam
+    if effective_shear < 1.0:
+        candidates = [(1.0 - effective_shear, 'axis_minus'),
+                      (1.0 + effective_shear, 'axis_plus')]
+    else:
+        candidates = [(1.0 + effective_shear, 'axis_plus')]
+        radicand = 4.0 * effective_shear**2 - 3.0
+        if radicand >= 0.0:
+            u_offaxis = (-1.0 + math.sqrt(radicand)) / 2.0
+            if u_offaxis > 0.0:
+                candidates.append((u_offaxis, 'offaxis'))
+        candidates.append((math.sqrt(effective_shear**2 - 1.0),
+                           _WP1_WEDGE_LABEL))
+    best: tuple[float, float, str] | None = None  # (radius, u, label)
+    for u_candidate, label in candidates:
+        if u_candidate <= 0.0:
+            continue
+        cos_2theta = ((u_candidate**2 - 1.0 + effective_shear**2)
+                      / (2.0 * effective_shear * u_candidate))
+        if abs(cos_2theta) > 1.0 + 1e-12:
+            continue
+        radius_sq = lam * ((1.0 - u_candidate)**2 * (1.0 + 2.0 * u_candidate)
+                           + effective_shear**2 * (2.0 * u_candidate - 1.0)
+                           ) / u_candidate**2
+        if radius_sq <= 0.0:
+            continue
+        radius = math.sqrt(radius_sq)
+        if best is None or radius > best[0]:
+            best = (radius, u_candidate, label)
+    if best is None:
+        raise AssertionError(f'no maximiser for gamma={gamma}, kappa={kappa}')
+    reach, u_win, label = best
+    cos_2theta = min(1.0, max(-1.0, (u_win**2 - 1.0 + effective_shear**2)
+                              / (2.0 * effective_shear * u_win)))
+    theta_win = 0.5 * math.acos(cos_2theta)
+    branch = 1.0 if (u_win - effective_shear * cos_2theta) >= 0.0 else -1.0
+    return theta_win, branch, label, reach
+
+
+def _wp1_stationarity_ratio(gamma: float, kappa: float, theta: float,
+                            branch: float) -> tuple[float, float]:
+    """``|d|y|**2 / dtheta| / |y|**2`` and the caustic speed ``|y'|`` at theta.
+
+    ``y`` is the production caustic point `geometry._caustic_source` and ``y'``
+    the INDEPENDENT analytic tangent `geometry.caustic_derivatives` -- a
+    different code path from `caustic_geometry`'s extremiser.  With
+    ``d|y|**2 / dtheta = 2 (y . y')`` a genuine stationary point of the caustic
+    radius has ratio ``= 0``; a cusp additionally has ``|y'| = 0``.
+    """
+    point = geometry._caustic_source(theta, gamma, 0.0, kappa, branch)
+    y_prime, _ = geometry.caustic_derivatives(
+        gamma, theta, kappa=kappa, branch=int(branch))
+    y_prime = np.asarray(y_prime, dtype=float).reshape(2)
+    y_dot_yp = float(point[0] * y_prime[0] + point[1] * y_prime[1])
+    y_norm_sq = float(point[0]**2 + point[1]**2)
+    speed = float(math.hypot(y_prime[0], y_prime[1]))
+    return abs(2.0 * y_dot_yp) / y_norm_sq, speed
+
+
+class ReachMaximiserStationarityTestCase(_GaugeTestCase):
+    """WP1 spec 2: the located maximiser is a stationary point of the radius.
+
+    For each admitted, non-wedge maximiser across the WP1 grid the winning
+    ``(theta, branch)`` is recovered analytically and the caustic radius'
+    stationarity residual ``|d|y|**2 / dtheta| / |y|**2`` is formed from the
+    INDEPENDENT analytic tangent `geometry.caustic_derivatives`.  The bar is a
+    DISJUNCTION: the residual is ``<= 1e-9`` (smooth off-axis maximisers) OR
+    the caustic speed ``|y'|`` is below a small floor (an axis/on-axis CUSP,
+    where ``|y'|`` is analytically zero and the residual is ``0 / 0`` in the
+    limit -- its float64 evaluation is a numerical, not exact, zero).  The
+    wedge-turnaround candidate ``u = sqrt(e**2 - 1)`` is a REGULAR point where
+    the theta-parametrization speed DIVERGES (F044); it is never the maximiser
+    (asserted) so its exclusion drops no admitted point.
+    """
+
+    def test_maximiser_ties_back_to_caustic_geometry(self) -> None:
+        """The analytically recovered maximiser reproduces the WP output.
+
+        The recovered ``(theta_win, branch)`` -- evaluated through the
+        production caustic point `geometry._caustic_source` -- must reproduce
+        both the reach (radius) and the canonicalised direction that
+        `caustic_geometry` returns, confirming the stationarity check probes
+        the SAME point the closed form selected.
+        """
+        self._expect_comparisons = True
+        for gamma, kappa in _WP1_GRID:
+            reach, direction = caustic_geometry(gamma, kappa)
+            theta_win, branch, label, recovered_reach = \
+                _wp1_winning_maximiser(gamma, kappa)
+            point = np.asarray(geometry._caustic_source(
+                theta_win, gamma, 0.0, kappa, branch), dtype=float)
+            recovered_direction = point / math.hypot(point[0], point[1])
+            # The caustic's 4-fold symmetry makes the quadrant physically
+            # irrelevant (the WP docstring canonicalises it away), so the
+            # tie-back is PARALLELISM up to sign: |recovered . direction| = 1.
+            # Exact-component matching is fragile on axis cusps, where a
+            # ~1e-33 numerical x-component flips the canonical sign choice.
+            alignment = abs(float(recovered_direction @ direction))
+            with self.subTest(gamma=gamma, kappa=kappa, label=label):
+                self.assertAlmostEqual(recovered_reach, reach, places=12)
+                self.assertAlmostEqual(
+                    float(np.linalg.norm(point)), reach,
+                    delta=1e-9 * reach + 1e-12)
+                self.assertAlmostEqual(alignment, 1.0, places=9)
+            self.n_compared += 1
+
+    def test_reach_maximiser_is_stationary(self) -> None:
+        """Residual is machine-zero (ratio arm) or the point is a cusp (floor).
+
+        Both arms of the disjunction must be load-bearing over the grid: the
+        smooth off-axis maximisers clear the ratio bar (~1e-13) while the
+        axis/on-axis cusps are caught only by the speed floor.  The test fails
+        if EITHER arm is never exercised (a silently one-armed gate).
+        """
+        self._expect_comparisons = True
+        ratio_arm = 0
+        floor_arm = 0
+        diagnostic: list[tuple[float, float, float]] = []
+        for gamma, kappa in _WP1_GRID:
+            theta_win, branch, label, _ = _wp1_winning_maximiser(gamma, kappa)
+            self.assertNotEqual(
+                label, _WP1_WEDGE_LABEL,
+                f'the wedge turnaround unexpectedly won at gamma={gamma}, '
+                f'kappa={kappa}; F044 says it is not a stationary point')
+            ratio, speed = _wp1_stationarity_ratio(
+                gamma, kappa, theta_win, branch)
+            passes_ratio = ratio <= _WP1_STATIONARITY_RATIO_BAR
+            passes_floor = speed < _WP1_CUSP_SPEED_FLOOR
+            with self.subTest(gamma=gamma, kappa=kappa, label=label):
+                self.assertTrue(
+                    passes_ratio or passes_floor,
+                    f'maximiser at gamma={gamma}, kappa={kappa} is neither '
+                    f'stationary (ratio={ratio:.3e} > '
+                    f'{_WP1_STATIONARITY_RATIO_BAR}) nor a cusp '
+                    f'(|y_prime|={speed:.3e} >= {_WP1_CUSP_SPEED_FLOOR})')
+            if passes_ratio:
+                ratio_arm += 1
+            else:
+                floor_arm += 1
+            diagnostic.append((gamma, ratio, speed))
+            self.n_compared += 1
+        self.assertGreater(ratio_arm, 0, 'the ratio arm was never exercised')
+        self.assertGreater(floor_arm, 0, 'the cusp-floor arm was never '
+                           'exercised (the disjunction is one-armed)')
+        self._save_stationarity_plot(diagnostic)
+
+    def _save_stationarity_plot(
+            self, diagnostic: list[tuple[float, float, float]]) -> None:
+        """Diagnostic: stationarity ratio and caustic speed vs gamma."""
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+        except ImportError:
+            return
+        _OUTPUT_DIR.mkdir(exist_ok=True)
+        gammas = [g for g, _, _ in diagnostic]
+        ratios = [max(r, 1e-18) for _, r, _ in diagnostic]
+        speeds = [max(s, 1e-18) for _, _, s in diagnostic]
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.scatter(gammas, ratios, s=40, label='stationarity ratio')
+        ax.scatter(gammas, speeds, s=40, marker='x', label='caustic speed |y_prime|')
+        ax.axhline(_WP1_STATIONARITY_RATIO_BAR, color='r', ls='--',
+                   label=f'ratio bar {_WP1_STATIONARITY_RATIO_BAR:g}')
+        ax.axhline(_WP1_CUSP_SPEED_FLOOR, color='g', ls=':',
+                   label=f'speed floor {_WP1_CUSP_SPEED_FLOOR:g}')
+        ax.set_yscale('log')
+        ax.set_xlabel('gamma')
+        ax.set_ylabel('stationarity ratio / caustic speed')
+        ax.set_title('reach maximiser stationarity self-check')
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(_OUTPUT_DIR / 'wp1_stationarity_ratio_vs_gamma.png', dpi=90)
+        plt.close(fig)
+
+
+class SingleSourceReachEqualityTestCase(_GaugeTestCase):
+    """WP1 spec 3: `_scalar_caustic_reach` still routes through the rewrite.
+
+    `surrogate._caustic_reach` (imported as `_scalar_caustic_reach`) must
+    return the reach element of `caustic_geometry(gamma, 0.0)` BIT-FOR-BIT --
+    exact float equality, not closeness -- so that no second reach copy has
+    been introduced by the WP1 rewrite.  Any nonzero difference means the
+    scalar helper computes the reach a different way.
+    """
+
+    def test_scalar_reach_is_bit_identical_to_caustic_geometry(self) -> None:
+        self._expect_comparisons = True
+        for gamma in _WP1_SCALAR_GAMMAS:
+            routed = _scalar_caustic_reach(gamma)
+            direct = caustic_geometry(gamma, 0.0)[0]
+            with self.subTest(gamma=gamma):
+                self.assertEqual(
+                    routed, direct,
+                    f'_scalar_caustic_reach({gamma}) = {routed!r} differs from '
+                    f'caustic_geometry({gamma}, 0.0)[0] = {direct!r}: a second '
+                    f'reach copy exists')
+            self.n_compared += 1
+
+
+class Wp1SelfFalsificationTestCase(_GaugeTestCase):
+    """WP1: the reach, stationarity and single-source gates can go RED.
+
+    A numerical suite that cannot demonstrate its own failure mode is not
+    finished.  Each check below corrupts exactly one ingredient and confirms
+    the corresponding gate's assertion would fire.
+    """
+
+    def test_coarse_scan_misses_the_near_wall_spike(self) -> None:
+        """A coarse (n=360) parametric ring under-resolves the wall spike.
+
+        The reach gate's teeth are the resolution of the parametric oracle: at
+        the sharpest near-wall config (gamma=1.001) a 360-point scan disagrees
+        with the closed form by far more than the 1e-7 bar, whereas the
+        shipped 46080-point scan clears it.  This proves the comparison is not
+        vacuously satisfied by any scan density.
+        """
+        self._expect_comparisons = True
+        coarse = _wp1_scan_reach(1.001, 0.0, n_theta=360)
+        dense = _wp1_scan_reach(1.001, 0.0, n_theta=_WP1_SCAN_N_THETA)
+        closed = caustic_geometry(1.001, 0.0)[0]
+        rel_coarse = abs(closed - coarse) / abs(closed)
+        rel_dense = abs(closed - dense) / abs(closed)
+        self.assertGreater(
+            rel_coarse, _WP1_REACH_RTOL,
+            'a coarse ring should MISS the near-wall spike, but it agreed to '
+            f'rel={rel_coarse:.3e} <= {_WP1_REACH_RTOL}')
+        self.assertLessEqual(
+            rel_dense, _WP1_REACH_RTOL,
+            f'the dense scan should clear the bar (rel={rel_dense:.3e})')
+        self.n_compared += 1
+
+    def test_offset_angle_breaks_stationarity(self) -> None:
+        """Evaluating the tangent off the maximiser fails BOTH arms.
+
+        At ``theta_win + 0.12`` rad the point is neither stationary
+        (``y . y' != 0``) nor a cusp (``|y'|`` is O(1)), so the disjunction
+        used by `test_reach_maximiser_is_stationary` must reject it -- proving
+        the machine-precision gate has teeth.
+        """
+        self._expect_comparisons = True
+        for gamma, kappa in ((0.6, 0.0), (1.2, 0.0)):
+            theta_win, branch, _, _ = _wp1_winning_maximiser(gamma, kappa)
+            ratio, speed = _wp1_stationarity_ratio(
+                gamma, kappa, theta_win + 0.12, branch)
+            with self.subTest(gamma=gamma, kappa=kappa):
+                self.assertFalse(
+                    ratio <= _WP1_STATIONARITY_RATIO_BAR
+                    or speed < _WP1_CUSP_SPEED_FLOOR,
+                    f'an off-maximiser angle passed the stationarity gate '
+                    f'(ratio={ratio:.3e}, speed={speed:.3e})')
+            self.n_compared += 1
+
+    def test_one_ulp_breaks_single_source_equality(self) -> None:
+        """A single-ULP perturbation defeats the exact-equality gate.
+
+        Confirms `SingleSourceReachEqualityTestCase` demands BIT equality: the
+        next representable float above the routed reach is not equal to it.
+        """
+        self._expect_comparisons = True
+        for gamma in (0.6, 1.2):
+            routed = _scalar_caustic_reach(gamma)
+            perturbed = math.nextafter(routed, math.inf)
+            with self.subTest(gamma=gamma):
+                self.assertNotEqual(routed, perturbed)
+            self.n_compared += 1
+
+
+# ======================================================================
+# WP1 (continued): two further specifications of the closed-form rewrite.
+#   (4) SANITY LITERAL + on-axis direction.  At (gamma, kappa) = (0.9, 0)
+#       the winning candidate is the positive-parity axis cusp ``u = 1 - e``,
+#       whose caustic radius reduces ALGEBRAICALLY to ``2 gamma / sqrt(1 -
+#       gamma)`` (derived here, independent of `caustic_geometry`; kappa=0).
+#       This equals SPEC.md's recorded cusp radius 5.692100... .  The
+#       returned direction is axis-aligned in the shear eigenframe (its
+#       projection on the OTHER eigen-axis is ~0); its quadrant/sign is NOT
+#       pinned -- the caustic's 4-fold reflection symmetry makes it
+#       physically irrelevant (Professor).
+#   (5) OFF-AXIS DIRECTION agreement.  In the genuinely diagonal saddle band
+#       ``1 < gamma < 1.177651`` the reach maximiser is an off-axis deltoid
+#       extremum; the closed-form direction agrees with a converged parametric
+#       scan's farthest-point direction, compared as an angle reduced modulo
+#       the 4-fold quadrant symmetry (axis-alignment, not raw signed
+#       components), to within the scan's angular resolution ~2 pi / 11520.
+# ======================================================================
+
+#: Positive-parity gammas (kappa = 0) for the sanity sweep.  For every e < 1
+#: the ``u = 1 - e`` axis cusp wins, so the reach is ``2 gamma / sqrt(1 -
+#: gamma)`` and the direction is the second eigen-axis ``(0, +-1)`` exactly.
+_WP1_SANITY_GAMMAS: tuple[float, ...] = (0.3, 0.6, 0.9)
+
+#: Relative bar for reach == 2 gamma / sqrt(1 - gamma).  Both sides are
+#: float64 evaluations of the same algebra along different code paths; the
+#: MEASURED agreement is ~1e-16, so 1e-9 (the spec bar) is generous.
+_WP1_SANITY_REACH_RTOL = 1e-9
+
+#: SPEC.md's recorded positive-parity cusp radius at gamma = 0.9 (the literal
+#: the brief cites).  It is TRUNCATED: it differs from the exact
+#: ``2 * 0.9 / sqrt(0.1) = 5.692099788...`` by 2.1e-7, which EXCEEDS 1e-9.  So
+#: the tight 1e-9 gate is against the exact closed form; this literal is used
+#: only for a loose consistency straddle whose tolerance dwarfs its truncation.
+_WP1_SPEC_CUSP_RADIUS = 5.692100
+
+#: Loose tolerance for the SPEC-literal consistency check.  The literal's own
+#: truncation error is 2.1e-7; 1e-6 dwarfs it (per the standing rule: a
+#: brief's truncated literal is fine only where the margin swamps its error).
+_WP1_SPEC_CUSP_ATOL = 1e-6
+
+#: Axis-alignment bar: the direction's projection on the perpendicular
+#: eigen-axis, ``min(|d_0|, |d_1|)``, must not exceed this for an on-axis cusp.
+#: MEASURED value is 0.0 (the direction is ``(0, 1)`` exactly).
+_WP1_AXIS_ALIGN_ATOL = 1e-9
+
+#: Off-axis band gammas (kappa = 0), strictly inside ``(1, 1.177651)`` where
+#: the off-axis deltoid extremum is the reach maximiser (MEASURED: the winning
+#: direction's smaller eigen-component is 0.138 at 1.05, 0.285 at 1.1).
+_WP1_OFFAXIS_GAMMAS: tuple[float, ...] = (1.05, 1.1)
+
+#: Angular-agreement bar between the closed-form and converged-scan directions,
+#: reduced modulo the 4-fold symmetry: ~2 pi / 11520, the parametric scan's
+#: nominal angular resolution.  MEASURED agreement is < 1.5e-8 (the maximiser
+#: direction is a smooth function of gamma, so the converged scan pins it far
+#: tighter than one grid step), reported by the test.
+_WP1_DIRECTION_ANGLE_BAR = 2.0 * math.pi / 11520.0
+
+#: Floor on the smaller eigen-component of the closed-form direction in the
+#: off-axis band: below this the maximiser would be an on-axis cusp (which
+#: trivially satisfies any axis-reduced-angle bar), so the test asserts it is
+#: exceeded to confirm the diagonal regime is genuinely exercised.
+_WP1_OFFAXIS_DIAGONAL_FLOOR = 0.05
+
+
+def _wp1_scan_direction(gamma: float, kappa: float,
+                        n_theta: int = _WP1_SCAN_N_THETA) -> np.ndarray:
+    """Unit direction to the farthest caustic point from a brute theta scan.
+
+    Independent of `caustic_geometry`: scans the F026 parametric caustic radius
+    (`_wp1_parametric_radius`) over ``[0, 2 pi)`` on both ``+-`` branches, takes
+    the global argmax, and returns the unit direction of that farthest caustic
+    point evaluated through the production point map `geometry._caustic_source`
+    (a DIFFERENT code path from the closed-form direction assembly).  This is
+    the scan counterpart of `caustic_geometry`'s ``unit_direction``.
+    """
+    lam = 1.0 - kappa
+    effective_shear = gamma / lam
+    theta = np.linspace(0.0, 2.0 * np.pi, n_theta, endpoint=False)
+    branches = (1.0,) if effective_shear < 1.0 else (1.0, -1.0)
+    best_radius = -np.inf
+    best_theta = 0.0
+    best_branch = 1.0
+    for branch in branches:
+        radii = _wp1_parametric_radius(theta, gamma, kappa, branch)
+        idx = int(np.argmax(radii))
+        if radii[idx] > best_radius:
+            best_radius = float(radii[idx])
+            best_theta = float(theta[idx])
+            best_branch = branch
+    point = np.asarray(geometry._caustic_source(
+        best_theta, gamma, 0.0, kappa, best_branch), dtype=float)
+    return point / math.hypot(point[0], point[1])
+
+
+def _wp1_axis_reduced_angle(dir_a: np.ndarray, dir_b: np.ndarray) -> float:
+    """Angle (rad) between two unit directions, reduced modulo 4-fold symmetry.
+
+    The Chang--Refsdal caustic is invariant under reflection across either
+    shear eigen-axis (a Klein 4-group of quadrant reflections), so a direction
+    and its axis-reflections are physically identical.  Folding both vectors
+    into the first quadrant via ``abs`` (norm-preserving) collapses that
+    freedom; the returned angle is ``arccos`` of their clipped dot product.
+    """
+    a = np.abs(np.asarray(dir_a, dtype=float))
+    b = np.abs(np.asarray(dir_b, dtype=float))
+    return math.acos(min(1.0, max(-1.0, float(a @ b))))
+
+
+class CausticReachSanityLiteralTestCase(_GaugeTestCase):
+    """WP1 spec 4: the sanity cusp radius and on-axis direction.
+
+    At positive parity (``e < 1``) the reach maximiser is the ``u = 1 - e``
+    axis cusp, whose caustic radius reduces algebraically to
+    ``2 gamma / sqrt(1 - gamma)`` (kappa = 0).  This suite gates the reach
+    against that INDEPENDENT closed form to 1e-9 relative, checks the
+    canonical case gamma = 0.9 is consistent with SPEC.md's recorded literal
+    5.692100..., and confirms the returned direction is axis-aligned in the
+    eigenframe -- WITHOUT pinning its quadrant/sign, which the 4-fold caustic
+    symmetry renders physically irrelevant.
+    """
+
+    def test_reach_matches_axis_cusp_closed_form(self) -> None:
+        """reach == 2 gamma / sqrt(1 - gamma) over the positive-parity sweep.
+
+        The right-hand side is derived here from the ``u = 1 - e`` candidate's
+        squared radius, ``((1-u)^2 (1+2u) + e^2 (2u-1)) / u^2`` at u = 1 - e,
+        which simplifies to ``4 gamma^2 / (1 - gamma)`` -- an independent algebra
+        reduction, not a call into `caustic_geometry`.
+        """
+        self._expect_comparisons = True
+        for gamma in _WP1_SANITY_GAMMAS:
+            reach, _ = caustic_geometry(gamma, 0.0)
+            oracle = 2.0 * gamma / math.sqrt(1.0 - gamma)
+            rel = abs(reach - oracle) / abs(oracle)
+            with self.subTest(gamma=gamma):
+                self.assertLessEqual(
+                    rel, _WP1_SANITY_REACH_RTOL,
+                    f'reach {reach!r} at gamma={gamma} disagrees with the '
+                    f'axis-cusp closed form {oracle!r} by rel={rel:.3e}')
+            self.n_compared += 1
+
+    def test_gamma_point_nine_matches_spec_literal(self) -> None:
+        """The gamma = 0.9 reach equals the exact form and SPEC.md's literal.
+
+        Two bars: (a) the tight 1e-9 relative gate against the EXACT
+        ``2 * 0.9 / sqrt(0.1)`` (the SPEC literal 5.692100 is truncated and
+        would MISS 1e-9 by 2.1e-7); (b) a loose consistency straddle showing
+        the exact value rounds to SPEC's recorded 5.692100 within 1e-6.
+        """
+        self._expect_comparisons = True
+        reach, direction = caustic_geometry(0.9, 0.0)
+        exact = 2.0 * 0.9 / math.sqrt(1.0 - 0.9)
+        rel = abs(reach - exact) / abs(exact)
+        self.assertLessEqual(
+            rel, _WP1_SANITY_REACH_RTOL,
+            f'reach {reach!r} at gamma=0.9 disagrees with exact {exact!r} '
+            f'by rel={rel:.3e} > {_WP1_SANITY_REACH_RTOL}')
+        self.assertLessEqual(
+            abs(exact - _WP1_SPEC_CUSP_RADIUS), _WP1_SPEC_CUSP_ATOL,
+            f'exact cusp radius {exact!r} inconsistent with SPEC literal '
+            f'{_WP1_SPEC_CUSP_RADIUS} beyond {_WP1_SPEC_CUSP_ATOL}')
+        # Direction is axis-aligned (its projection on the other eigen-axis is
+        # ~0); quadrant/sign deliberately NOT asserted.
+        perpendicular_projection = min(abs(direction[0]), abs(direction[1]))
+        self.assertLessEqual(
+            perpendicular_projection, _WP1_AXIS_ALIGN_ATOL,
+            f'direction {direction} is not axis-aligned: perpendicular '
+            f'projection {perpendicular_projection:.3e} > {_WP1_AXIS_ALIGN_ATOL}')
+        self.n_compared += 1
+
+    def test_positive_parity_direction_is_axis_aligned(self) -> None:
+        """Every positive-parity cusp direction lies on an eigen-axis.
+
+        The direction is a UNIT vector (norm 1) whose projection on the
+        perpendicular eigen-axis vanishes -- i.e. it is ``(0, +-1)`` or
+        ``(+-1, 0)``.  The quadrant/sign is not pinned.
+        """
+        self._expect_comparisons = True
+        for gamma in _WP1_SANITY_GAMMAS:
+            _, direction = caustic_geometry(gamma, 0.0)
+            with self.subTest(gamma=gamma):
+                self.assertAlmostEqual(
+                    float(np.hypot(direction[0], direction[1])), 1.0, places=12)
+                self.assertLessEqual(
+                    min(abs(direction[0]), abs(direction[1])),
+                    _WP1_AXIS_ALIGN_ATOL,
+                    f'direction {direction} at gamma={gamma} is not '
+                    f'axis-aligned')
+            self.n_compared += 1
+
+
+class OffAxisDirectionAgreementTestCase(_GaugeTestCase):
+    """WP1 spec 5: off-axis direction agrees with the converged scan.
+
+    In the genuinely diagonal saddle band ``1 < gamma < 1.177651`` the reach
+    maximiser is an off-axis deltoid extremum.  The closed-form direction is
+    compared to the converged parametric scan's farthest-point direction as an
+    angle reduced modulo the 4-fold quadrant symmetry (`_wp1_axis_reduced_angle`
+    folds both into the first quadrant, so a sign/quadrant difference is not a
+    disagreement).  The bar is the scan's nominal angular resolution
+    ~2 pi / 11520; the measured agreement is far tighter.
+    """
+
+    def test_offaxis_direction_matches_converged_scan(self) -> None:
+        self._expect_comparisons = True
+        measured: list[tuple[float, float]] = []
+        worst = 0.0
+        for gamma in _WP1_OFFAXIS_GAMMAS:
+            _, closed_direction = caustic_geometry(gamma, 0.0)
+            scan_direction = _wp1_scan_direction(gamma, 0.0)
+            angle = _wp1_axis_reduced_angle(closed_direction, scan_direction)
+            smaller_component = min(abs(closed_direction[0]),
+                                    abs(closed_direction[1]))
+            with self.subTest(gamma=gamma):
+                # Confirm we are genuinely in the diagonal regime, not at an
+                # on-axis cusp that would satisfy the angle bar trivially.
+                self.assertGreater(
+                    smaller_component, _WP1_OFFAXIS_DIAGONAL_FLOOR,
+                    f'direction {closed_direction} at gamma={gamma} is not '
+                    f'genuinely off-axis (smaller component '
+                    f'{smaller_component:.3e})')
+                self.assertLessEqual(
+                    angle, _WP1_DIRECTION_ANGLE_BAR,
+                    f'closed-form direction {closed_direction} and converged '
+                    f'scan direction {scan_direction} disagree by '
+                    f'{angle:.3e} rad > {_WP1_DIRECTION_ANGLE_BAR:.3e} at '
+                    f'gamma={gamma}')
+            measured.append((gamma, angle))
+            worst = max(worst, angle)
+            self.n_compared += 1
+        # Canary: the measured agreement is < 1.5e-8; assert it did not
+        # silently balloon toward the (much looser) resolution bar.
+        self.assertLess(
+            worst, 1e-3,
+            f'measured worst direction disagreement {worst:.3e} is far above '
+            f'the expected sub-1e-7 floor')
+        self._save_direction_plot(measured)
+
+    def _save_direction_plot(self, measured: list[tuple[float, float]]) -> None:
+        """Diagnostic: overlay closed-form and scan directions on the caustic."""
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+        except ImportError:
+            return
+        _OUTPUT_DIR.mkdir(exist_ok=True)
+        gamma = _WP1_OFFAXIS_GAMMAS[-1]
+        reach, closed_direction = caustic_geometry(gamma, 0.0)
+        scan_direction = _wp1_scan_direction(gamma, 0.0)
+        theta = np.linspace(0.0, 2.0 * np.pi, 2000, endpoint=False)
+        caustic = np.array([geometry._caustic_source(float(t), gamma, 0.0, 0.0,
+                                                     branch)
+                            for branch in (1.0, -1.0) for t in theta])
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.scatter(caustic[:, 0], caustic[:, 1], s=1, color='0.7',
+                   label='caustic')
+        ax.plot([0, reach * closed_direction[0]],
+                [0, reach * closed_direction[1]], 'k-', lw=2,
+                label='closed-form direction')
+        ax.plot([0, reach * scan_direction[0]],
+                [0, reach * scan_direction[1]], 'r--', lw=1.5,
+                label='scan direction')
+        ax.set_aspect('equal')
+        ax.set_xlabel('y_1 (eigenframe)')
+        ax.set_ylabel('y_2 (eigenframe)')
+        ax.set_title(f'off-axis farthest-point direction (gamma={gamma})')
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(_OUTPUT_DIR / 'wp1_offaxis_direction_overlay.png', dpi=90)
+        plt.close(fig)
+
+
+class Wp1DirectionSelfFalsificationTestCase(_GaugeTestCase):
+    """WP1 specs 4-5: the sanity and direction gates can go RED.
+
+    Each check corrupts exactly one ingredient and confirms the corresponding
+    assertion would fire, so neither new gate is vacuously green.
+    """
+
+    def test_wrong_reach_breaks_sanity_gate(self) -> None:
+        """A 0.1%-perturbed reach fails the 1e-9 axis-cusp closed-form gate."""
+        self._expect_comparisons = True
+        gamma = 0.9
+        oracle = 2.0 * gamma / math.sqrt(1.0 - gamma)
+        perturbed = oracle * 1.001
+        rel = abs(perturbed - oracle) / abs(oracle)
+        self.assertGreater(
+            rel, _WP1_SANITY_REACH_RTOL,
+            'a 0.1%-wrong reach should fail the sanity gate')
+        self.n_compared += 1
+
+    def test_diagonal_direction_fails_axis_alignment(self) -> None:
+        """A genuinely diagonal direction is NOT axis-aligned.
+
+        Confirms the axis-alignment gate has teeth: the perpendicular
+        projection of a 45-degree direction is ~0.707, far above 1e-9.
+        """
+        self._expect_comparisons = True
+        diagonal = np.array([1.0, 1.0]) / math.sqrt(2.0)
+        perpendicular_projection = min(abs(diagonal[0]), abs(diagonal[1]))
+        self.assertGreater(
+            perpendicular_projection, _WP1_AXIS_ALIGN_ATOL,
+            'a diagonal direction should fail the axis-alignment gate')
+        self.n_compared += 1
+
+    def test_rotated_direction_breaks_angle_bar(self) -> None:
+        """Rotating the closed-form direction by 0.1 rad breaks the angle bar.
+
+        The axis-reduced angle between a 0.1-rad-rotated closed-form direction
+        and the converged scan direction is ~0.1 rad -- far above the
+        ~5.5e-4 bar -- proving the off-axis agreement gate is not vacuous.
+        """
+        self._expect_comparisons = True
+        for gamma in _WP1_OFFAXIS_GAMMAS:
+            _, closed_direction = caustic_geometry(gamma, 0.0)
+            scan_direction = _wp1_scan_direction(gamma, 0.0)
+            cos_a, sin_a = math.cos(0.1), math.sin(0.1)
+            rotated = np.array([
+                cos_a * closed_direction[0] - sin_a * closed_direction[1],
+                sin_a * closed_direction[0] + cos_a * closed_direction[1]])
+            angle = _wp1_axis_reduced_angle(rotated, scan_direction)
+            with self.subTest(gamma=gamma):
+                self.assertGreater(
+                    angle, _WP1_DIRECTION_ANGLE_BAR,
+                    f'a 0.1-rad-rotated direction passed the angle bar '
+                    f'(angle={angle:.3e}) at gamma={gamma}')
+            self.n_compared += 1
+
 
 
 if __name__ == '__main__':

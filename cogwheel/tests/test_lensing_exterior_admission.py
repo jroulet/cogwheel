@@ -97,6 +97,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.spatial import cKDTree
 
+from cogwheel.lensing import ppgo_map
 from cogwheel.lensing import prior as _lens_prior
 from cogwheel.lensing import surrogate as sg
 from cogwheel.lensing import surrogate_training as st
@@ -1127,6 +1128,198 @@ class Gamma1BoxCentreGuardTestCase(ExteriorAdmissionTestCase):
             self.assertTrue(math.isfinite(rho_back))
             self.assertGreater(rho_back, 1.0)
             self.record_comparison()
+
+
+#: Parity wall for the WP1 closed form at ``kappa = 0``: ``|gamma| == 1 - kappa``
+#: collapses to ``gamma == 1.0`` (``det A = 0``).  The single point the wall
+#: occupies -- a measure-zero refusal, NOT a neighbourhood.
+WP1_WALL_KAPPA_ZERO_GAMMA = 1.0
+
+#: An OFF-axis-in-kappa wall used to prove the refusal tracks ``|gamma| == lam``
+#: (``lam = 1 - kappa``), not a hard-coded ``gamma == 1``: at ``kappa = 0.5``,
+#: ``lam = 0.5`` so the wall sits at ``gamma == 0.5``.
+WP1_OFFAXIS_KAPPA = 0.5
+WP1_OFFAXIS_WALL_GAMMA = 0.5
+
+#: Over-critical convergences (``lam = 1 - kappa <= 0``) at which the closed
+#: form refuses BEFORE any candidate-radius algebra: ``kappa = 1`` is the exact
+#: ``lam = 0`` edge, the others are strictly super-critical (Type III).
+WP1_OVERCRITICAL_KAPPAS = (1.0, 1.5, 2.0)
+
+#: A ``gamma`` shear at which we probe the ``kappa`` sweep (any positive-parity
+#: value below the wall works; the reach is finite here for ``kappa < 1``).
+WP1_PROBE_GAMMA = 0.3
+
+#: ``gamma`` offsets away from the ``kappa = 0`` wall, most-distant first, used
+#: to certify that the reach DIVERGES monotonically as ``gamma -> 1`` from each
+#: side (the middle of the finite-divergent-finite profile).  Measured reaches
+#: at ``kappa = 0`` (2026-07-30): below -> 5.69 / 19.8 / 63.2 / 200.0;
+#: above -> 2.08 / 6.99 / 22.3 / 70.7.
+WP1_DIVERGENCE_OFFSETS = (0.1, 0.01, 0.001, 0.0001)
+
+#: Reach floor a near-wall (``|gamma - 1| = 1e-4``) evaluation must exceed, and
+#: the ceiling the far (``|gamma - 1| = 0.1``) evaluation must stay under, so
+#: the two ends are unambiguously "finite/modest" vs "divergent".
+WP1_NEAR_WALL_REACH_FLOOR = 50.0
+WP1_FAR_WALL_REACH_CEILING = 10.0
+
+#: Diagnostic figure: ``reach(gamma)`` on a log axis near ``gamma = 1`` showing
+#: the finite-divergent-finite profile with the exact hole at the wall.
+WP1_DIAGNOSTIC_PATH = OUTPUT_DIR / 'wp1_caustic_reach_hole_at_gamma_one.png'
+
+
+class Wp1ClosedFormParityWallTestCase(ExteriorAdmissionTestCase):
+    """WP1: the closed-form ``caustic_geometry`` keeps the parity-wall refusal.
+
+    Build 8h WP1 replaced the 720-point polar scan inside
+    `ppgo_map.caustic_geometry` with a closed-form extremisation of the
+    source-plane caustic radius.  This suite pins the refusal contract of the
+    NEW closed form DIRECTLY on `caustic_geometry` (the scalar
+    `surrogate._caustic_reach` is the ``kappa = 0`` wrapper the admission code
+    consumes; its single-point contract is certified by
+    `Gamma1BoxCentreGuardTestCase`, which this class does not duplicate):
+
+    * the ``det A = 0`` parity wall ``|gamma| == 1 - kappa`` is an EXACT-point
+      refusal -- ``LensDomainError`` at the point, FINITE reach and unit
+      direction one ULP to either side (a measure-zero wall, not a
+      neighbourhood), and this holds off the ``kappa = 0`` axis too;
+    * the over-critical ``lam = 1 - kappa <= 0`` domain refuses outright;
+    * the reach DIVERGES monotonically toward the wall from both sides while
+      remaining modest away from it (finite-divergent-finite);
+    * the ``kappa = 0`` scalar wrapper is bit-identical to
+      ``caustic_geometry(gamma, 0.0)[0]``.
+
+    Oracle independence: the refusal points and the divergence direction are
+    dictated by the analytic ``det A`` and ``1/u**2`` pole structure documented
+    in `caustic_geometry`, not by re-running the retired polar scan; the
+    assertions compare against those analytic facts, not against a second copy
+    of the closed form.
+    """
+
+    @staticmethod
+    def _assert_wall_refuses(gamma: float, kappa: float) -> None:
+        """Raise ``AssertionError`` unless the wall point refuses (self-falsif)."""
+        case = unittest.TestCase()
+        with case.assertRaises(geometry.LensDomainError):
+            ppgo_map.caustic_geometry(gamma, kappa)
+
+    def test_parity_wall_kappa_zero_is_exact_point_refusal(self) -> None:
+        # At kappa = 0 the wall is gamma == 1.0 exactly.
+        with self.assertRaises(geometry.LensDomainError):
+            ppgo_map.caustic_geometry(WP1_WALL_KAPPA_ZERO_GAMMA, 0.0)
+        # One ULP to EITHER side is served: finite reach and a unit direction.
+        for gamma in (np.nextafter(1.0, 2.0), np.nextafter(1.0, 0.0)):
+            reach, direction = ppgo_map.caustic_geometry(float(gamma), 0.0)
+            self.assertTrue(math.isfinite(reach))
+            self.assertGreater(reach, 0.0)
+            self.assertEqual(direction.shape, (2,))
+            self.assertAlmostEqual(float(np.hypot(*direction)), 1.0, places=12)
+            self.record_comparison()
+
+    def test_parity_wall_tracks_lam_not_hardcoded_one(self) -> None:
+        # Off the kappa = 0 axis the wall moves to |gamma| == lam = 1 - kappa,
+        # proving the refusal is the det A = 0 condition, not gamma == 1.
+        with self.assertRaises(geometry.LensDomainError):
+            ppgo_map.caustic_geometry(WP1_OFFAXIS_WALL_GAMMA, WP1_OFFAXIS_KAPPA)
+        # gamma = 1.0 is now WELL inside the macro-saddle domain -> served.
+        reach, _ = ppgo_map.caustic_geometry(1.0, WP1_OFFAXIS_KAPPA)
+        self.assertTrue(math.isfinite(reach) and reach > 0.0)
+        for gamma in (np.nextafter(WP1_OFFAXIS_WALL_GAMMA, 1.0),
+                      np.nextafter(WP1_OFFAXIS_WALL_GAMMA, 0.0)):
+            reach, _ = ppgo_map.caustic_geometry(float(gamma), WP1_OFFAXIS_KAPPA)
+            self.assertTrue(math.isfinite(reach) and reach > 0.0)
+            self.record_comparison()
+
+    def test_overcritical_lam_le_zero_refuses(self) -> None:
+        # lam = 1 - kappa <= 0 (kappa >= 1): the mass-sheet reduction is not
+        # real; the closed form must refuse before any radius algebra.
+        for kappa in WP1_OVERCRITICAL_KAPPAS:
+            with self.subTest(kappa=kappa):
+                with self.assertRaises(geometry.LensDomainError):
+                    ppgo_map.caustic_geometry(WP1_PROBE_GAMMA, kappa)
+                self.record_comparison()
+        # Just BELOW the lam = 0 edge (kappa one ULP under 1) is served, so the
+        # refusal is the sign of lam, not a coincidental candidate-set collapse.
+        kappa_below = float(np.nextafter(1.0, 0.0))
+        reach, _ = ppgo_map.caustic_geometry(WP1_PROBE_GAMMA, kappa_below)
+        self.assertTrue(math.isfinite(reach) and reach > 0.0)
+        self.record_comparison()
+
+    def test_reach_diverges_monotonically_toward_the_wall(self) -> None:
+        # finite-divergent-finite: reach grows without bound as gamma -> 1 from
+        # each side, strictly monotone in |gamma - 1| shrinking.
+        for direction_sign in (-1.0, +1.0):
+            reaches = [
+                ppgo_map.caustic_geometry(1.0 + direction_sign * offset, 0.0)[0]
+                for offset in WP1_DIVERGENCE_OFFSETS]  # most-distant first
+            for closer, farther in zip(reaches[1:], reaches[:-1]):
+                self.assertGreater(closer, farther)  # nearer the wall -> larger
+            # The near-wall end is divergent, the far end merely modest.
+            self.assertGreater(reaches[-1], WP1_NEAR_WALL_REACH_FLOOR)
+            self.assertLess(reaches[0], WP1_FAR_WALL_REACH_CEILING)
+            self.record_comparison()
+
+    def test_scalar_wrapper_is_bit_identical_to_closed_form(self) -> None:
+        # surrogate._caustic_reach(gamma) IS caustic_geometry(gamma, 0.0)[0];
+        # the admission code consumes the wrapper, so pin them bit-for-bit on
+        # either side of the wall (where reach is enormous and any drift shows).
+        for gamma in (np.nextafter(1.0, 2.0), np.nextafter(1.0, 0.0),
+                      0.30, 0.85):
+            with self.subTest(gamma=gamma):
+                wrapped = sg._caustic_reach(float(gamma))
+                direct = ppgo_map.caustic_geometry(float(gamma), 0.0)[0]
+                self.assertEqual(wrapped, direct)  # bit-identical, not close
+                self.record_comparison()
+
+    def test_diagnostic_reach_hole_at_gamma_one(self) -> None:
+        # Diagnostic: reach(gamma) near gamma = 1 -- finite-divergent-finite
+        # with an EXACT hole at the wall (no point plotted at gamma == 1.0).
+        gammas = np.concatenate([
+            np.linspace(0.90, 0.9999, 40),
+            np.linspace(1.0001, 1.10, 40)])  # deliberately skips exactly 1.0
+        reaches = np.array(
+            [ppgo_map.caustic_geometry(float(g), 0.0)[0] for g in gammas])
+        self.assertTrue(np.all(np.isfinite(reaches)))
+        # No sampled gamma is the wall, so no evaluation raised.
+        self.assertFalse(np.any(gammas == 1.0))
+        fig, axis = plt.subplots(figsize=(6.0, 4.0))
+        axis.semilogy(gammas, reaches, '.', ms=3, color='tab:blue')
+        axis.axvline(1.0, color='tab:red', ls='--', lw=1.0,
+                     label='parity wall (hole, det A = 0)')
+        axis.set_xlabel(r'$\gamma$')
+        axis.set_ylabel('caustic reach')
+        axis.set_title('WP1 closed-form reach: finite-divergent-finite')
+        axis.legend()
+        fig.tight_layout()
+        fig.savefig(WP1_DIAGNOSTIC_PATH, dpi=110)
+        plt.close(fig)
+        self.assertTrue(WP1_DIAGNOSTIC_PATH.exists())
+        self.record_comparison()
+
+
+class Wp1ParityWallSelfFalsificationTestCase(ExteriorAdmissionTestCase):
+    """The WP1 parity-wall suite can go RED -- teeth check.
+
+    A closed form that FAILED to refuse at the wall (e.g. a regression that
+    dropped the ``det A = 0`` guard and returned some finite reach) must flip
+    `Wp1ClosedFormParityWallTestCase` red.  We prove that by patching
+    `caustic_geometry` with a never-raising stub and asserting the wall-refusal
+    check then raises ``AssertionError``.
+    """
+
+    def test_never_raising_stub_flips_the_wall_check_red(self) -> None:
+        unit = np.array([1.0, 0.0])
+
+        def _stub(gamma: float, kappa: float = 0.0):
+            return 1.23, unit  # finite everywhere: no det A = 0 refusal
+
+        with mock.patch.object(ppgo_map, 'caustic_geometry', _stub):
+            with self.assertRaises(AssertionError):
+                Wp1ClosedFormParityWallTestCase._assert_wall_refuses(1.0, 0.0)
+        # Positive control: with the REAL closed form the check passes (no
+        # AssertionError escapes), so the teeth are on the refusal, not the stub.
+        Wp1ClosedFormParityWallTestCase._assert_wall_refuses(1.0, 0.0)
+        self.record_comparison()
 
 
 class CuspNoStraddleTestCase(ExteriorAdmissionTestCase):
