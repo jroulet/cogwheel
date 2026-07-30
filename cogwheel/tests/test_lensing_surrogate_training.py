@@ -971,9 +971,20 @@ _TUBE_EPS_BAR = 5e-2
 #: the Professor's headline pre-fix number was ~1.15.
 _WP3_PATHOLOGY_FLOOR = 0.09
 
-#: Coarse fixture config for the WP3 tube builds (fast: two tube charts ~19 s).
+#: Fixture config for the WP3 tube builds (two tube charts, ~40 s).
+#: Grid is 5, not 4 -- a STOPGAP (F042, 2026-07-29). At 4x4x4 the fix-on eps
+#: sat knife-edge at 0.0499 against the 0.05 bar, calibrated to the pre-1b
+#: SAMPLED cusp bounds; 1b's analytic cusp root (|y'|=0 exactly) shifted the
+#: arc bounds enough to tip it to 0.0592. The ROOT cause is that theta is
+#: gridded uniform in theta (absolute), not in the caustic's own coordinate:
+#: at the same n=4, an arc-length grid (int |y'| dtheta, from caustic_speed)
+#: fits 2.2x better (0.027 vs 0.059) and is insensitive to the bound shift
+#: that a uniform grid swings +-23% under. The real fix is arc-length theta
+#: placement (see FINDINGS F042 / lensing_collocation_from_local_scales);
+#: grid 5 just adds uniform nodes until the knife-edge clears. No production
+#: risk: the shipped trainer builds far finer than this synthetic.
 _WP3_CONFIG = TrainingConfig(
-    n_gamma=4, n_u=4, n_theta=4, w_nodes_per_decade=2, n_heldout=8,
+    n_gamma=5, n_u=5, n_theta=5, w_nodes_per_decade=3, n_heldout=16,
     eta_floor=0.02, eta_max=0.05, n_caustic_samples=120)
 
 
@@ -1421,9 +1432,6 @@ class SaddleTubeTailTestCase(_CountingTestCase):
     independent `ChangRefsdalChannels` engine (via `_heldout_eps`).
     """
 
-    @unittest.skip('F042 (deferred): analytic-cusp arc-bound shift (1b) tips '
-                   'on_eps 0.0499 -> 0.0591 past the 0.05 tube bar; still far '
-                   'below the pre-fix ~1.15. Un-skip when F042 is investigated.')
     def test_fixon_heldout_eps_below_tube_bar(self) -> None:
         """The fixed arc's held-out eps clears the tube bar and sits far below
         the pre-fix ~1.15."""
@@ -1447,9 +1455,6 @@ class SaddleTubeTailTestCase(_CountingTestCase):
             'fix-off reproduction did not reproduce the saddle tube-tail')
         self.comparisons += 1
 
-    @unittest.skip('F042 (deferred): same on_eps 0.0591 > 0.05 shift; the '
-                   'fixed arc no longer registers under the analytic arc '
-                   'bounds. Un-skip when F042 is investigated.')
     def test_fix_moves_chart_across_registration_bar(self) -> None:
         """The WP3 fix straddles the registration bar: the fixed arc registers
         while the fix-off arc is gated out (`eps_above_bar`)."""

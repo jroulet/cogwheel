@@ -2447,7 +2447,7 @@ be fixed independently. Bundling them — as the driver's first write-up of this
 finding implicitly did — invites someone to replace the difference, see the
 arcs still missing, and go looking for a third bug that is not there.
 
-## F042 — the analytic-cusp change (1b) shifts a saddle tube chart's held-out eps past the registration bar; DEFERRED (2026-07-29)
+## F042 — a knife-edge synthetic fixture tipped over 0.05 when the analytic cusp shifted its arc bounds; RESOLVED, re-based (2026-07-29)
 
 **Where:** `surrogate_training` saddle tube training; surfaced by
 `test_lensing_surrogate_training.py::SaddleTubeTailTestCase` under
@@ -2462,9 +2462,9 @@ registration bar to just over it:
 
     on_eps = 0.0591   vs   _TUBE_EPS_BAR = 0.05      (was ~0.0499 pre-1b)
 
-So a saddle tube chart that used to REGISTER now gets GATED and falls through
-to the serving ladder. `test_fixon_heldout_eps_below_tube_bar` and
-`test_fix_moves_chart_across_registration_bar` both fail on this one number.
+At the fixture's coarse grid this tipped the fix-on chart from registered to
+gated. That looked at first like a lost saddle coverage cell — the resolution
+sweep below shows it is not (the fit is fine at any real grid).
 
 **Why this was only caught now.** These are `@_TRAIN_TIER_SKIP` tests that
 build real charts (minutes/class) and run only under `COGWHEEL_TRAIN_TIER=1`
@@ -2477,13 +2477,60 @@ build) binds only below `gamma ~ 0.067` — the astroid regime. Saddle arcs are
 `gamma > 1` where `|dot| ~ 1`, untouched. This eps shift is a 1b analytic-cusp
 consequence, independent of F041.
 
-**Status: INERT and DEFERRED (owner call 2026-07-29).** No trained chart
-artifact ships (F036), so nothing served changes today. Committed with F041;
-the two failing methods carry `@expectedFailure` pointing here so the suite is
-green while the regression stays visible. Open questions for the dedicated
-look: (a) is 0.0591 the correct, more-accurate value now that the arc bounds
-are exact, i.e. should the bar/fixture re-baseline, or (b) does the analytic
-arc-bound shift genuinely degrade saddle tube fit and need the tube band or
-node placement adjusted ([[lensing_collocation_from_local_scales]])? Do NOT
-re-baseline the bar blind — the answer determines whether a real saddle
-coverage cell was lost.
+**RESOLVED (2026-07-29): a coarse-synthetic knife-edge, not a coverage loss.**
+Answer (a). A resolution sweep of the SAME production fix-on arc holds the
+saddle geometry fixed and grows only the chart grid:
+
+| grid | fix-on held-out eps | vs 0.05 |
+|---|---|---|
+| 4x4x4 (the fixture) | 0.0592 | OVER |
+| 5x5x5 | 0.0222 | UNDER |
+| 6x6x6 | 0.0132 | UNDER |
+
+eps falls 4.5x from grid 4 to 6, so the fit is fine at any real resolution;
+the shipped trainer builds far finer than this synthetic. The 0.0591 was an
+artifact of the deliberately-coarse 4x4x4 fixture being KNIFE-EDGE calibrated
+(0.0499) against the pre-1b SAMPLED cusp bounds. The analytic cusp (correct:
+`|y'| = 0` to 1.3e-16) shifted the arc bounds by ~one former sampling step,
+enough to tip the knife-edge case over 0.05 at that one coarse grid only.
+
+The analytic cusp is right, the production saddle tube chart is not at risk,
+and no coverage cell was lost. FIX: the fixture (`_WP3_CONFIG`) is re-based
+from grid 4 to grid 5, where fix-on clears the bar with margin (~0.022) and
+the fix-off pathology still sits far above it — the exact 0.05 bar semantics
+are preserved, not weakened. The two SaddleTubeTail tests are un-skipped and
+pass. No production change.
+
+**ROOT CAUSE (deeper than the knife-edge): the theta axis is placed in an
+ABSOLUTE coordinate.** The tube chart grids `(log w, gamma, u, theta)`; `u` is
+already analytic (`u = sqrt(eta)`, the fold's own variable) but `theta` is
+`linspace(theta_lo, theta_hi)` — uniform in theta, blind to the caustic. Near
+a cusp `|y'| -> 0`, so uniform-theta mis-allocates nodes relative to where the
+envelope varies. Measured at the SAME n_theta = 4 on this arc, same held-out
+set:
+
+| theta placement | eps | vs 0.05 |
+|---|---|---|
+| uniform in theta (current) | 0.0592 | OVER |
+| uniform in ARC LENGTH `s = int |y'| dtheta` | 0.0271 | UNDER |
+
+Arc-length placement fits **2.2x better at identical node count** — so this is
+node PLACEMENT, not node COUNT (grid = 5 merely throws more uniform-theta nodes
+at it). And the uniform grid is what makes the fit knife-edge: nudging the arc
+bounds by +-0.01 rad swings uniform-theta eps 0.0592 -> 0.0727 / 0.0575 (+-23%),
+which is exactly the mechanism by which the analytic cusp's small bound shift
+tipped this fixture. An arc-length grid tracks the geometry and is insensitive
+to the bound.
+
+The arc-length coordinate is `int caustic_speed dtheta` — computed from the
+SAME `geometry.caustic_speed` shipped in 1a to retire an estimator. The cascade
+that caused F042 supplies its proper fix.
+
+**So F042's real resolution is theta-axis arc-length placement**, which is
+[[lensing_collocation_from_local_scales]] (its theta item, C6 / step 2). The
+grid = 5 fixture re-base is a STOPGAP that unblocks the two SaddleTubeTail
+tests today; it is not the fix. Durable lesson: an analytic estimator strictly
+MORE accurate than its sampled predecessor can still move a knife-edge
+synthetic across a threshold when the synthetic was tuned to the old
+estimator's exact output on a grid placed in the wrong coordinate. The fix is
+the right coordinate, not more nodes.

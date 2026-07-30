@@ -37,6 +37,15 @@ section: Backlog
      geometry they sample. Better still, count against CURVATURE: `ds / R_c`
      is dimensionless, so equal-`ds/R_c` spacing puts nodes where the caustic
      actually bends. Both ingredients ship already.
+     MEASURED (F042, 2026-07-29): on a real saddle tube arc at `gamma = 1.55`,
+     at the SAME `n_theta = 4`, an arc-length grid (`int caustic_speed dtheta`)
+     gives held-out eps 0.027 vs uniform-theta's 0.059 — 2.2x better at
+     identical node count — and is insensitive to the arc-bound shift that
+     swings uniform-theta +-23%. This is the concrete evidence for the whole
+     fragment: the code currently grids `theta` uniform in `theta`
+     (`_build_tube_chart`, `theta_grid = linspace(theta_lo, theta_hi, n_theta)`)
+     while `u = sqrt(eta)` already got the analytic treatment. The `theta`
+     axis is the next one to convert, and F042 is its motivating measurement.
   2. **`eta` -> the fold's own variable.** `u = sqrt(eta)` is the one axis
      where the right instinct was already applied — it absorbs the fold's
      square-root branch — but empirically rather than derived. The principled
