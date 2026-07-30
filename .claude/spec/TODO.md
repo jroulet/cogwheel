@@ -506,6 +506,44 @@ Tag conventions:
   measure it counts against: a uniform step in `theta` is not a uniform step
   in anything the envelope cares about.
 
+  ## PLACEMENT IS NOT ENOUGH — interpolate IN the analytic coordinate
+
+  Node placement and interpolant FORM are separate, and placement alone is a
+  half-fix. If nodes are placed at arc-length points but the spline is still
+  built in RAW `theta` (knots at those thetas, cubic in theta between them),
+  the between-node error keeps the cubic-in-theta form, which does not match
+  the envelope's actual structure (Airy near a fold, the 2/3-power Pearcey
+  near a cusp). The error comes straight back between the nodes.
+
+  The complete fix is a COORDINATE CHANGE: interpolate in the coordinate where
+  the demodulated envelope is SMOOTH. Then a polynomial spline captures it AND
+  uniform nodes in that coordinate are well-placed by construction — placement
+  and form become one act. The package already has one axis done right:
+  `u = sqrt(eta)` is not node placement, it is a coordinate change — the chart
+  splines IN `u`, and the fold's sqrt-branch is smooth in `u`. Every axis below
+  must be read as "spline in this coordinate", not merely "sample at these
+  points". The principled coordinate is the catastrophe-uniformizing one (Airy
+  argument for a fold, Pearcey arguments for a cusp); arc-length / curvature is
+  the cheap first approximation of it.
+
+  CAVEAT on the F042 evidence: the 2.2x measured there came from arc-length
+  NODE PLACEMENT with the chart still interpolating in `theta`, so it is the
+  half-fix, not the ceiling. Splining in arc-length (or the uniformizing
+  coordinate) should beat it and, more importantly, remove the residual
+  between-node error this section is about.
+
+  ## ORDERING — this moves UP, ahead of the driver measurements (F042)
+
+  Originally scheduled as a step-9 (train-once) prerequisite. F042 shows that
+  is too late: step 2 and step 4 of [[lensing_caustic_relative_coordinates]]
+  are driver MEASUREMENTS of held-out eps and node cost, and F042 proves both
+  are coordinate-dependent (eps 0.059 uniform-theta vs 0.027 arc-length at the
+  same nodes). Running those measurements on uniform-theta grids derives the
+  tube-fraction constants (`f_max`, `f_floor`) and the far-zone crossover from
+  PLACEMENT ARTIFACTS, not physics. So the `theta` (and `eta`) interpolation
+  coordinate must be settled AFTER step 1's cascade is complete (1a-1d) and
+  BEFORE step 2's first measurement — not before step 9.
+
   ## What each axis should count against
 
   All four scales are now computable in closed form from the step-1 cascade;
@@ -567,6 +605,10 @@ Tag conventions:
     serving path already measures, to within its own stopping tolerance. If
     it does not, the analytic scale is wrong — the LOO result is the
     measurement.
+  - The chart INTERPOLATES in the analytic coordinate, not merely samples at
+    analytic points: held-out eps is INSENSITIVE to a small arc-bound shift
+    (the F042 knife-edge is gone). Placement-only cannot pass this; it is the
+    acceptance that separates a coordinate change from node placement.
 
 
 - **MASTER COVERAGE MAP — every held-out region and what closes it**
