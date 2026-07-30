@@ -63,7 +63,7 @@
   regime-branch decision INSIDE the new function (Build 6 saddle). Same for
   a genuinely new physical contribution (e.g. a ghost/complex-saddle term):
   build a DEDICATED kernel, never route through unrelated existing kernel/
-  delay/index helpers, plus explicit degenerate-axis refusal (Build 8h-b).
+  delay/index helpers, plus explicit degenerate-axis refusal (Build 8h-b2).
   REFINEMENT (Build saddle Born carrier): this "separate function" rule is
   for a genuinely NEW physical contribution. When instead mirroring an
   EXISTING rung to the opposite-sign/mirror-symmetric regime of the SAME
@@ -170,3 +170,26 @@
   `from_engine`) must be sequenced via depends_on, never planned to run in
   parallel — even when their changes are conceptually orthogonal, they will
   conflict on the same code region.
+- TWIN-GATE root acceptance: gate a numerically-located root on TWO
+  independent checks — a sign-crossing test on the target derivative AND a
+  magnitude/scale test against a locally-measured off-target scale — before
+  serving it; a single-condition accept risks aliasing near a divergence
+  (Build 1c analytic cusp vertex).
+- Domain-necessary refusal at a divergence: when a legacy numerical scan
+  can alias across a genuine divergence and serve a finite-but-meaningless
+  value, an analytic replacement's correct behavior is a NAMED refusal
+  (None) at that boundary, not chasing/snapping through it — a "pure
+  uniform" simplification is wrong wherever a domain refusal is physically
+  required (e.g. a macro-saddle diverging wedge edge).
+- Served-values acceptance for a serve-path swap: PRIMARY = perturb the
+  served input by measured/physical increments and assert the served
+  output moves less than the accuracy bar (insensitivity, not bug-for-bug
+  equivalence with the old code); SECONDARY = old implementation as a
+  comparison oracle, with configs where the old code was itself buggy
+  explicitly carved out and documented as an intended improvement, not a
+  regression.
+- A scalar magnitude guard on a proxy quantity can conflate an unrelated
+  property (e.g. fold transversality) with the one it's meant to gate (e.g.
+  cusp proximity) — same bug class as the retired _PROBE_ETA; prefer an
+  exact-zero/sign tripwire over a magnitude filter when the magnitude isn't
+  the actual physical quantity being gated.

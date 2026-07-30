@@ -188,3 +188,8 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   (`_train_band_charts`/`_farfield_exterior_tiles`) the fix landed in. A
   tiler-level fix cannot move an eps measured on a fixture that bypasses
   the tiler entirely.
+- QA heuristic for a served-value insensitivity/perturbation gate: check
+  the SHAPE of the response, not just its magnitude — deviation scaling
+  ~linearly with perturbation size is itself evidence of a correct frame/
+  bracketing mapping, whereas a frame or bracketing bug tends to produce a
+  perturbation-INDEPENDENT flat swing (Build 1c cusp-vertex review).

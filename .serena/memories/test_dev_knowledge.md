@@ -21,7 +21,12 @@
   lie + feed a fake result to prove the gate has teeth. "Gate RED" = refusal
   raised OR error>tol; test refusals at the production operating point.
   A function with LOCAL (call-time) imports needs patching at EACH consuming
-  module's namespace, not just where the target is defined.
+  module's namespace, not just where the target is defined. RECURSION TRAP:
+  when a test helper must call the REAL implementation from inside a test
+  that ALSO mock.patches that same name elsewhere, capture the real
+  reference (`_REAL_FN = module.fn`) at import time, before any patching,
+  and always call that captured reference — calling the module attribute
+  from inside the helper risks recursing into the patched version.
 - Detect a silent fast-path fallback by spying the fast method (call_count==0
   under assertRaises = short-circuited; not-called on a served config = fell
   back); assert fallback==direct bit-identically via float64 .tobytes().
@@ -154,3 +159,21 @@
   and the measured values show the opposite; encode the invariant that
   matches MEASURED behavior (e.g. "never easier than before") and flag the
   brief's direction error separately, rather than encoding the brief's claim.
+- TWO-STAGE oracle for a numerically-differentiated closed form: STAGE-1
+  validate the TRANSCRIBED curve itself against the shipping function's own
+  output (tight tolerance, e.g. <=1e-13) BEFORE STAGE-2 high-precision
+  differentiation of that curve — a single-stage oracle that only
+  differentiates can hide a wrong transcribed curve (a wrong sign/constant
+  survived a full round this way, F038).
+- Served-values insensitivity gate: perturb the analytic input by measured
+  physical increments and assert the served output moves less than the
+  accuracy bar; if the perturbation instead pushes the config out of the
+  served region into refusal (no "served-but-over-bar" window exists), the
+  gate's teeth become "still served (not None)", and value-sensitivity must
+  be demonstrated separately via a deliberately-wrong-value fixture.
+- mpmath dps cross-check discriminator: increasing oracle precision (e.g.
+  40dps -> 60dps) should NOT necessarily shrink a correct implementation's
+  residual once the residual is float64-limited (oracle precision >> float64)
+  — a dps-INVARIANT residual confirms the closed form is right, not wrong;
+  the pass/fail discriminator is residual MAGNITUDE against the mixed
+  atol/rtol gate, never "shrinks with dps".

@@ -78,6 +78,11 @@
   byte-identity via the ALGEBRAIC identity (abs() is identity when the
   original argument was already positive) rather than a rerun; only branch
   explicitly where the underlying physics changes sign (e.g. a Morse phase).
+  Same technique extends a validated cascade one order further: factor the
+  shared lower-order computation into a private helper returning all
+  intermediate terms, keep the existing public assembly line-for-line
+  identical, and prove byte-identity via the same side-by-side HEAD sweep
+  before adding the new public function on top (Build 1c y''' cascade).
 - SINGLE-SOURCE A CONVENTION: when you find an inline re-expression of a
   rule a primitive already owns (e.g. `np.sort(d - d.min())` beside
   `_frame_delays`), route it through the primitive. Byte-identity is proved
@@ -141,6 +146,10 @@
   angle un-rotated, an off-axis parameter yields finite-but-wrong output.
   Guard every parameter axis the emulator/approximation was trained at by
   mirroring the existing axis guard exactly (`if lens['x'] != 0: return None`).
+  Same discipline applies to a multi-step geometry pipeline that isn't
+  frame-rotated but IS branch/parity-tagged: thread the SAME branch/parity
+  value through every call (seed frame -> root-find frame -> reconstruct);
+  don't let an intermediate call re-derive or default it (Build 1c).
 - When a node-dependent carrier phase (e.g. exp(±iw t_min)) must be applied
   symmetrically on both the producer and reconstruct sides, factor it into
   ONE shared `_frame_phase(w, t_min)` helper both call — prevents a mod-2pi
@@ -171,3 +180,13 @@
   that hardcoded per-category sample counts to derive them from
   `len(category_tuple)` dynamically instead of a magic number, so future
   category additions don't silently rot the count.
+- When a plan/brief hands you a closed-form derivative formula, re-derive
+  it by hand rather than transcribing verbatim, then verify against an
+  independent multi-precision numeric oracle (e.g. mpmath) before shipping
+  — a brief's formula can carry a sign/factor typo (F038: brief said
+  p=-u, correct is p=(lam±gamma)-lam*u) that only hand-derivation catches.
+- When an old finite-epsilon numerical probe and a new exact closed form
+  disagree at a boundary config, use a higher-resolution/exact direct
+  computation (e.g. brute-force image-finding at very small epsilon) as
+  the tie-breaker oracle rather than assuming the old probe was right —
+  it may have mislabeled the boundary itself (Build 1b fold-orientation).

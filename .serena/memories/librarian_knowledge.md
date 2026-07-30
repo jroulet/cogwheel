@@ -10,7 +10,11 @@
   convention nudges toward Serena-only tools — the "USE SERENA"
   redirect targets non-exempted shell commands, not git itself.
 - `search_for_pattern`'s `paths_include_glob` takes exactly ONE glob —
-  a comma-separated list silently matches nothing.
+  a comma-separated list silently matches nothing. It also returns the
+  ENTIRE table row as one string for SPEC.md (rows are single un-wrapped
+  lines) — a multi-alternation regex with several hits on the same line
+  duplicates the same full-line context per match; harmless, don't be
+  surprised by "2 identical results" for 1 line.
 - If `docs/source/api.rst` uses `:recursive:` autosummary over the bare
   package name, new subpackages need no manual entry — verify this
   still holds before adding one by hand (reconfirmed across many builds).
@@ -41,7 +45,11 @@
   first place, a build that CHANGES that criterion creates no staleness —
   don't manufacture a sentence that wasn't there. Implementation-level
   detail (gate formulas, constants) belongs in the module docstring;
-  SPEC.md carries conventions and architecture.
+  SPEC.md carries conventions and architecture. A SPEC "public-name list"
+  row is often a representative group label, not exhaustive (e.g. omits
+  established names like critical_point/macro_matrix/r_caustic too) —
+  add a newly-shipped public name for discoverability, but don't treat a
+  pre-existing omission of an older name as staleness.
 - When SPEC gains low-level perf/implementation detail but overview.rst
   is pitched at architecture/API level, there is usually nothing to
   propagate — don't manufacture a performance blurb. While there, verify
@@ -84,3 +92,7 @@
   per-report test counts from each contributing agent's own change report
   rather than eyeballing a round total — an un-summed guess is an easy
   off-by-a-few arithmetic slip caught only by re-adding the numbers.
+- Post-commit doc-sync is triggered by an untracked `.claude/sync_
+  issues.json` file listing pending commits back through a given hash;
+  after completing the sync (committing only the doc files you changed),
+  delete the trigger file.
