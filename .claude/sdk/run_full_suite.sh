@@ -65,16 +65,25 @@ fi
   -k "not Timing and not timing" > "$LOG" 2>&1 &
 PYTEST_PID=$!
 
-LAST=0; STALLED=0
+# Poll often, ANNOUNCE a stall rarely. The slow tail (test_posterior, the
+# waveform suites) legitimately goes minutes between result lines, so a
+# one-poll stall threshold cried wolf twice on a run that was healthy at 2448%
+# worker CPU and finished green. A stall notice that fires on healthy runs
+# trains the reader to ignore the channel, which is the whole value of it.
+LAST=0; QUIET=0; STALL_ANNOUNCED=0
+STALL_AFTER="${GATE_STALL_AFTER:-300}"
 while kill -0 "$PYTEST_PID" 2>/dev/null; do
   sleep 30
   DONE=$(grep -acE '(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)' "$LOG" 2>/dev/null)
   if [[ "$DONE" -gt "$LAST" ]]; then
-    LAST=$DONE; STALLED=0
+    LAST=$DONE; QUIET=0; STALL_ANNOUNCED=0
     echo "[beat] $DONE/$COLLECTED ($(( DONE * 100 / COLLECTED ))%)"
-  elif [[ "$STALLED" -eq 0 ]]; then
-    STALLED=1
-    echo "[beat] STALL at $DONE/$COLLECTED — no progress for 30s"
+  else
+    QUIET=$(( QUIET + 30 ))
+    if [[ "$QUIET" -ge "$STALL_AFTER" ]] && [[ "$STALL_ANNOUNCED" -eq 0 ]]; then
+      STALL_ANNOUNCED=1
+      echo "[beat] STALL at $DONE/$COLLECTED — no progress for ${QUIET}s"
+    fi
   fi
 done
 wait "$PYTEST_PID"; PAR_RC=$?
