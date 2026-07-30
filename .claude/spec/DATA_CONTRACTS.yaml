@@ -13,7 +13,7 @@
 #   MINOR: new artifacts, conventions, or consumer/producer entries
 #   PATCH: field list corrections, wording fixes
 
-schema_version: "0.2.0"
+schema_version: "0.3.0"
 
 # ── Conventions ──────────────────────────────────────────────────────────
 # Define project-wide data conventions here. These are referenced by
@@ -196,7 +196,7 @@ artifacts:
       - units
 
   lens_amplification_surrogate:
-    description: "Offline-trained multi-chart cubic-spline emulator of the microlensing SACR-C amplification envelope (LensAmplificationSurrogate). Single npz with per-chart coefficient/knot arrays and a JSON provenance scalar; loaded via LensAmplificationSurrogate.load. Off by default (opt-in via the lensed likelihoods)."
+    description: "Offline-trained multi-chart cubic-spline emulator of the microlensing SACR-C amplification envelope (LensAmplificationSurrogate). Single npz with per-chart coefficient/knot arrays and a JSON provenance scalar; loaded via LensAmplificationSurrogate.load. Off by default (opt-in via the lensed likelihoods). Each near-caustic TubeChart record additionally carries a theta_to_s arc-length axis-map array of shape (2, N_map) = [theta_fine, s_fine]: the tube's fourth interpolation axis is ARC LENGTH s = integral caustic_speed dtheta along the fold arc (not raw theta), and a query theta is mapped to s through this stored map at serve time (membership and cusp-window tests remain in theta)."
     format: "npz"
     producer:
       module: "scripts/train_lens_surrogate.py"

@@ -2499,6 +2499,837 @@ class WedgeEdgeSelfFalsificationTestCase(_CountingTestCase):
                     'the two branches must DIFFER off the clamped edge')
                 self.comparisons += 1
 
+# ---------------------------------------------------------------------------
+# WP1: TubeChart splines in ARC LENGTH.
+#
+# The tube's fourth interpolation axis is arc length ``s = integral |y'|
+# dtheta`` and the ``theta`` nodes are placed as the images of a UNIFORM ``s``
+# grid (see `surrogate_training._build_tube_chart` / `_tube_arc_length_map`).
+# These suites certify:
+#   (A) the shipped chart's theta nodes really ARE the images of a uniform s
+#       grid -- against the production (theta -> s) map (build/serve
+#       consistency) AND an independent polyline arc-length oracle;
+#   (B) at the coarse F042 grid (n_theta=4) arc-length placement keeps the
+#       saddle tube comfortably below the 0.05 registration bar while the
+#       incumbent uniform-theta placement sits on the knife-edge and tips over
+#       it under a small bound perturbation;
+#   (C) at fixed node count the arc-length chart is materially more accurate
+#       than uniform-theta and clears the bar with strictly fewer nodes.
+# The geometry contract (A) is proven FAST and engine-free; the eps claims
+# (B, C) are ENGINE-BACKED (`_TRAIN_TIER_SKIP`, driver post-build tier).
+# ---------------------------------------------------------------------------
+
+#: F042 tube config: the 4x4x4 grid at which uniform-theta placement sat on the
+#: 0.05 registration knife-edge (fix-on eps ~0.0584 at the analytic cusp
+#: bounds).  Same band / caustic sampling as `_WP3_CONFIG`; only the grid is
+#: pinned to 4 so the coarse-grid knife-edge is reproduced (F042).
+_F042_CONFIG = dataclasses.replace(_WP3_CONFIG, n_gamma=4, n_u=4, n_theta=4)
+
+#: The incumbent uniform-theta held-out eps at n_theta=4 (~0.0584 measured;
+#: frozen to the spec's 0.059 golden literal -- NO git-show oracle).  The
+#: arc-length chart must clear this at the same node count.
+_INCUMBENT_EPS_N4 = 0.059
+
+#: Node counts swept to compare arc-length vs uniform-theta accuracy.  Kept
+#: small (4..6): 3 counts x 2 coordinates x ~11 s/build ~= 70 s on the driver's
+#: engine tier.
+_WP1_NTHETA_SWEEP = (4, 5, 6)
+
+#: Held-out eps target for the node-cost comparison: the production tube
+#: registration bar.  Arc-length clears it at n_theta=4 (eps~0.028); uniform
+#: only at n_theta=5 (eps~0.058 at 4, ~0.022 at 5) -- one node cheaper.
+_WP1_NODE_COST_TARGET = _TUBE_EPS_BAR  # 5e-2
+
+#: Relative tolerance (of total arc length) for node-uniformity checks.  The
+#: production-map round trip is exact to ~1e-16 (piecewise-linear inverse
+#: composition); the INDEPENDENT polyline oracle agrees to ~3e-8.  1e-5 sits
+#: ~300x above the oracle floor yet ~1.4e4x below the ~0.14 non-uniformity of a
+#: uniform-THETA grid, so the check cleanly separates the two placements.
+_WP1_ARCLEN_REL_TOL = 1e-5
+
+#: Polyline resolution for the independent arc-length oracle (dense enough that
+#: the segment-sum total agrees with the production trapezoid map to ~3e-8).
+_WP1_POLYLINE_N = 4001
+
+#: Deterministic RNG seed for held-out sampling (matches `_wp3_build_and_measure`).
+_WP1_HELDOUT_SEED = 7
+
+#: Bound-shift magnitude (radians) applied independently to theta_lo / theta_hi.
+_WP1_BOUND_SHIFT = 0.01
+
+
+def _wp1_saddle_arc(gamma: float, config: TrainingConfig):
+    """The genuine production wedge-edge saddle arc ``(arc, reach)``.
+
+    Thin alias of `_wp3_fixon_left_arc`: branch ``+1``, minimum ``theta_lo``,
+    carrying the WP3 wedge-edge guard window -- a real `_saddle_arcs` product.
+    """
+    return _wp3_fixon_left_arc(gamma, config.n_caustic_samples)
+
+
+def _wp1_arclength_placement(gamma: float, arc, n_theta: int):
+    """Reproduce `_build_tube_chart`'s arc-length theta-node placement.
+
+    Returns ``(theta_grid, theta_fine, s_fine)`` exactly as the production
+    builder computes them: the theta nodes are the images of a UNIFORM
+    arc-length grid through the ``(theta -> s)`` map at ``gamma``, with the
+    endpoints forced onto the arc bounds.
+    """
+    theta_fine, s_fine = training._tube_arc_length_map(gamma, arc)
+    s_total = float(s_fine[-1])
+    s_grid = np.linspace(0.0, s_total, n_theta)
+    theta_grid = np.interp(s_grid, s_fine, theta_fine)
+    theta_grid[0] = arc.theta_lo
+    theta_grid[-1] = arc.theta_hi
+    return theta_grid, theta_fine, s_fine
+
+
+def _wp1_polyline_arclength(gamma: float, arc, thetas: np.ndarray) -> np.ndarray:
+    """INDEPENDENT arc length ``s(theta)`` via the caustic-curve polyline.
+
+    F002 oracle: sums Euclidean segment lengths of the caustic SOURCE-plane
+    curve `geometry._caustic_source` on a dense theta grid and interpolates the
+    cumulative length at ``thetas``.  It uses caustic POSITIONS and a polyline
+    sum -- NOT the analytic speed `geometry.caustic_speed` nor the
+    `cumulative_trapezoid` integration the production map
+    (`_tube_arc_length_map`) is built from -- so it is an independent check of
+    the true arc length rather than a re-run of the production derivation.
+    """
+    dense = np.linspace(arc.theta_lo, arc.theta_hi, _WP1_POLYLINE_N)
+    points = np.array([geometry._caustic_source(
+        float(theta), gamma, 0.0, 0.0, float(arc.branch)) for theta in dense])
+    segments = np.hypot(np.diff(points[:, 0]), np.diff(points[:, 1]))
+    cumulative = np.concatenate([[0.0], np.cumsum(segments)])
+    return np.interp(thetas, dense, cumulative)
+
+
+def _wp1_build_arclength_eps(arc, config: TrainingConfig, box: PriorBox,
+                             reach: float) -> float:
+    """Held-out eps of the PRODUCTION arc-length tube chart for one arc."""
+    w_range = _capped_w_range(box, -1, reach + config.eta_max)
+    gamma_grid = np.linspace(*_WP3_BAND, config.n_gamma)
+    chart, _calls, _refused = _build_tube_chart(
+        gamma_grid=gamma_grid, arc=arc, parity=-1, w_range=w_range,
+        config=config)
+    samples = _tube_heldout_samples(
+        _WP3_BAND, arc, config, np.random.default_rng(_WP1_HELDOUT_SEED))
+    return _heldout_eps(chart, samples, _HELDOUT_PROV)
+
+
+def _wp1_build_uniform_theta_chart(arc, config: TrainingConfig, box: PriorBox,
+                                   reach: float):
+    """Build the INCUMBENT uniform-theta tube chart (identity arc-length map).
+
+    Mirrors `_build_tube_chart` exactly EXCEPT the theta nodes are placed
+    uniformly in raw ``theta`` (``np.linspace(theta_lo, theta_hi, n_theta)``)
+    and NO ``theta_to_s`` map is supplied, so `TubeChart.from_values` builds the
+    IDENTITY map (``s = theta - theta_lo``) and fits/serves in raw theta -- the
+    pre-WP1 behaviour.  Only the node placement / interpolation coordinate
+    differs from the arc-length chart, isolating that single change.
+    """
+    w_range = _capped_w_range(box, -1, reach + config.eta_max)
+    gamma_grid = np.linspace(*_WP3_BAND, config.n_gamma)
+    log_w_grid = training._log_w_grid(w_range, config.w_nodes_per_decade)
+    w_grid = np.exp(log_w_grid)
+    u_grid = np.linspace(np.sqrt(config.eta_floor), np.sqrt(config.eta_max),
+                         config.n_u)
+    theta_grid = np.linspace(arc.theta_lo, arc.theta_hi, config.n_theta)
+    shape = (log_w_grid.size, gamma_grid.size, u_grid.size, theta_grid.size)
+    env_real = np.zeros(shape, dtype=float)
+    env_imag = np.zeros(shape, dtype=float)
+    for i_g, gamma in enumerate(gamma_grid):
+        for i_u, u_val in enumerate(u_grid):
+            eta = float(u_val * u_val)
+            for i_t, theta in enumerate(theta_grid):
+                source = _tube_source(float(gamma), float(theta), eta,
+                                      arc.branch, arc.inward_sign)
+                env = training._engine_envelope(w_grid, float(gamma), source)
+                if env is None:
+                    continue
+                env_real[:, i_g, i_u, i_t] = env.real
+                env_imag[:, i_g, i_u, i_t] = env.imag
+    return surrogate_module.TubeChart.from_values(
+        gamma_grid=gamma_grid, u_grid=u_grid, theta_grid=theta_grid,
+        log_w_grid=log_w_grid, envelope_real=env_real, envelope_imag=env_imag,
+        image_count=arc.image_count, parity=-1, eta_floor=config.eta_floor,
+        eta_max=config.eta_max, cusp_windows=arc.cusp_windows)
+
+
+def _wp1_build_uniform_eps(arc, config: TrainingConfig, box: PriorBox,
+                           reach: float) -> float:
+    """Held-out eps of the incumbent uniform-theta tube chart for one arc."""
+    chart = _wp1_build_uniform_theta_chart(arc, config, box, reach)
+    samples = _tube_heldout_samples(
+        _WP3_BAND, arc, config, np.random.default_rng(_WP1_HELDOUT_SEED))
+    return _heldout_eps(chart, samples, _HELDOUT_PROV)
+
+
+@functools.lru_cache(maxsize=1)
+def _wp1_ntheta_sweep() -> dict:
+    """Arc-length vs uniform-theta held-out eps across `_WP1_NTHETA_SWEEP`.
+
+    Cached: every node count builds two engine-backed charts, so the whole
+    sweep costs a couple of minutes and is shared by the efficiency suite.
+    """
+    box = PriorBox.from_prior_classes()
+    arc, reach = _wp1_saddle_arc(_WP3_GAMMA, _F042_CONFIG)
+    sweep = {}
+    for n_theta in _WP1_NTHETA_SWEEP:
+        config = dataclasses.replace(_F042_CONFIG, n_theta=n_theta)
+        sweep[n_theta] = {
+            'arclength': _wp1_build_arclength_eps(arc, config, box, reach),
+            'uniform': _wp1_build_uniform_eps(arc, config, box, reach)}
+    return {'arc': arc, 'reach': reach, 'sweep': sweep}
+
+
+@functools.lru_cache(maxsize=1)
+def _wp1_bound_shift() -> dict:
+    """Held-out eps at the nominal n_theta=4 arc and at +-`_WP1_BOUND_SHIFT`
+    shifts of ``theta_lo`` / ``theta_hi``, for BOTH coordinate placements.
+
+    The reach (hence ``w`` band) is fixed to the nominal arc's -- a 0.01 rad
+    bound nudge does not move the caustic reach -- so only the served theta
+    domain changes between variants.  Cached (10 engine builds).
+    """
+    box = PriorBox.from_prior_classes()
+    arc, reach = _wp1_saddle_arc(_WP3_GAMMA, _F042_CONFIG)
+    shift = _WP1_BOUND_SHIFT
+    variants = {
+        'nominal': arc,
+        'theta_lo+': dataclasses.replace(arc, theta_lo=arc.theta_lo + shift),
+        'theta_lo-': dataclasses.replace(arc, theta_lo=arc.theta_lo - shift),
+        'theta_hi+': dataclasses.replace(arc, theta_hi=arc.theta_hi + shift),
+        'theta_hi-': dataclasses.replace(arc, theta_hi=arc.theta_hi - shift)}
+    result = {}
+    for name, shifted in variants.items():
+        result[name] = {
+            'arclength': _wp1_build_arclength_eps(
+                shifted, _F042_CONFIG, box, reach),
+            'uniform': _wp1_build_uniform_eps(
+                shifted, _F042_CONFIG, box, reach)}
+    return {'arc': arc, 'variants': result}
+
+
+class ArcLengthNodePlacementGeometryTestCase(_CountingTestCase):
+    """FAST, engine-free contract for arc-length theta-node placement (WP1-A).
+
+    `surrogate_training._build_tube_chart` places the tube's ``theta`` nodes as
+    the images of a UNIFORM arc-length grid through the ``(theta -> s)`` map
+    ``_tube_arc_length_map`` (analytic caustic speed integrated by
+    ``cumulative_trapezoid``).  These tests certify the GEOMETRY of that
+    placement WITHOUT building a surrogate chart, so they run on the fast tier:
+
+      * against the production map itself (build/serve self-consistency), and
+      * against an INDEPENDENT polyline arc length (F002): the sum of Euclidean
+        segment lengths of the caustic SOURCE-plane curve ``_caustic_source``
+        -- caustic POSITIONS, not the analytic speed the production map
+        integrates, and a segment sum rather than ``cumulative_trapezoid`` --
+        so it is a genuine cross-check, not a re-run of the derivation.
+
+    Self-falsification
+    (`test_uniform_theta_nodes_are_not_uniform_in_arc_length`) proves the
+    uniformity bar has teeth: the incumbent uniform-THETA grid, measured in true
+    arc length, is ~0.14 non-uniform -- ~1.4e4x outside the 1e-5 bar the
+    arc-length nodes clear -- so a chart that forgot to redistribute would fail.
+    """
+
+    def _arc(self):
+        arc, _reach = _wp1_saddle_arc(_WP3_GAMMA, _F042_CONFIG)
+        return arc
+
+    def test_production_map_nodes_are_uniform_in_arc_length(self) -> None:
+        """The theta nodes map back onto a UNIFORM s grid through the
+        production ``(theta -> s)`` map (build/serve self-consistency)."""
+        arc = self._arc()
+        for n_theta in _WP1_NTHETA_SWEEP:
+            with self.subTest(n_theta=n_theta):
+                theta_grid, theta_fine, s_fine = _wp1_arclength_placement(
+                    _WP3_GAMMA, arc, n_theta)
+                s_total = float(s_fine[-1])
+                s_at_nodes = np.interp(theta_grid, theta_fine, s_fine)
+                target = np.linspace(0.0, s_total, n_theta)
+                rel = float(np.max(np.abs(s_at_nodes - target)) / s_total)
+                self.assertLess(
+                    rel, _WP1_ARCLEN_REL_TOL,
+                    f'node s-values must equal the uniform s grid (n={n_theta}); '
+                    f'rel deviation {rel:.2e}')
+                self.comparisons += 1
+
+    def test_independent_polyline_oracle_confirms_uniformity(self) -> None:
+        """F002: an INDEPENDENT polyline arc length confirms the nodes are
+        uniform in s, not merely self-consistent with the production map."""
+        arc = self._arc()
+        for n_theta in _WP1_NTHETA_SWEEP:
+            with self.subTest(n_theta=n_theta):
+                theta_grid, _tf, _sf = _wp1_arclength_placement(
+                    _WP3_GAMMA, arc, n_theta)
+                s_poly = _wp1_polyline_arclength(_WP3_GAMMA, arc, theta_grid)
+                total = float(_wp1_polyline_arclength(
+                    _WP3_GAMMA, arc, np.array([arc.theta_hi]))[0])
+                target = np.linspace(0.0, total, n_theta)
+                rel = float(np.max(np.abs(s_poly - target)) / total)
+                self.assertLess(
+                    rel, _WP1_ARCLEN_REL_TOL,
+                    'independent polyline arc length must confirm uniform '
+                    f'nodes (n={n_theta}); rel deviation {rel:.2e}')
+                self.comparisons += 1
+
+    def test_endpoints_equal_arc_bounds_exactly(self) -> None:
+        """The first/last theta nodes are pinned to the arc bounds EXACTLY."""
+        arc = self._arc()
+        for n_theta in _WP1_NTHETA_SWEEP:
+            with self.subTest(n_theta=n_theta):
+                theta_grid, _tf, _sf = _wp1_arclength_placement(
+                    _WP3_GAMMA, arc, n_theta)
+                self.assertEqual(float(theta_grid[0]), arc.theta_lo)
+                self.assertEqual(float(theta_grid[-1]), arc.theta_hi)
+                self.comparisons += 1
+
+    def test_interior_nodes_redistributed_from_uniform_theta(self) -> None:
+        """Arc-length interior nodes MOVE off the uniform-theta grid -- the
+        placement is a genuine redistribution on this curved arc, not a no-op."""
+        arc = self._arc()
+        n_theta = 5
+        theta_grid, _tf, _sf = _wp1_arclength_placement(
+            _WP3_GAMMA, arc, n_theta)
+        uniform_theta = np.linspace(arc.theta_lo, arc.theta_hi, n_theta)
+        span = arc.theta_hi - arc.theta_lo
+        interior_shift = float(np.max(np.abs(
+            theta_grid[1:-1] - uniform_theta[1:-1])) / span)
+        self.assertGreater(
+            interior_shift, 1e-2,
+            'arc-length placement must redistribute interior nodes; observed '
+            f'max interior shift {interior_shift:.3f} of span')
+        self.comparisons += 1
+
+    def test_polyline_total_matches_production_total(self) -> None:
+        """The independent polyline total arc length matches the production map
+        total -- the two derivations agree on the object being gridded."""
+        arc = self._arc()
+        _tg, _tf, s_fine = _wp1_arclength_placement(_WP3_GAMMA, arc, 4)
+        prod_total = float(s_fine[-1])
+        poly_total = float(_wp1_polyline_arclength(
+            _WP3_GAMMA, arc, np.array([arc.theta_hi]))[0])
+        rel = abs(poly_total - prod_total) / prod_total
+        self.assertLess(
+            rel, 1e-4,
+            f'independent total arc length must agree; rel diff {rel:.2e}')
+        self.comparisons += 1
+
+    def test_uniform_theta_nodes_are_not_uniform_in_arc_length(self) -> None:
+        """SELF-FALSIFICATION: the incumbent uniform-THETA grid is markedly
+        NON-uniform in true arc length (~0.14), so the uniformity bar the
+        arc-length nodes clear at 1e-5 can, in principle, go RED."""
+        arc = self._arc()
+        n_theta = 4
+        uniform_theta = np.linspace(arc.theta_lo, arc.theta_hi, n_theta)
+        s_of_theta = _wp1_polyline_arclength(_WP3_GAMMA, arc, uniform_theta)
+        total = float(s_of_theta[-1])
+        target = np.linspace(0.0, total, n_theta)
+        rel = float(np.max(np.abs(s_of_theta - target)) / total)
+        self.assertGreater(
+            rel, 0.05,
+            'uniform-theta nodes must be far from uniform in arc length so the '
+            f'uniformity check has teeth; observed non-uniformity {rel:.3f}')
+        self.comparisons += 1
+
+    def test_node_placement_diagnostic(self) -> None:
+        """Diagnostic: node arc length s vs the uniform target, arc-length
+        placement vs the incumbent uniform-theta placement."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
+        arc = self._arc()
+        n_theta = 5
+        theta_grid, theta_fine, s_fine = _wp1_arclength_placement(
+            _WP3_GAMMA, arc, n_theta)
+        total = float(s_fine[-1])
+        s_arc = np.interp(theta_grid, theta_fine, s_fine)
+        uniform_theta = np.linspace(arc.theta_lo, arc.theta_hi, n_theta)
+        s_unif = np.interp(uniform_theta, theta_fine, s_fine)
+        idx = np.arange(n_theta)
+        figure, axis = plt.subplots(figsize=(5, 4))
+        axis.plot(idx, np.linspace(0.0, total, n_theta), 'k--',
+                  label='uniform target')
+        axis.plot(idx, s_arc, 'o-', label='arc-length nodes')
+        axis.plot(idx, s_unif, 's-', label='uniform-theta nodes')
+        axis.set(xlabel='node index', ylabel='arc length s',
+                 title='WP1: node s vs uniform target')
+        axis.legend()
+        _save_plot(figure, 'wp1_arclen_node_placement.png')
+        plt.close(figure)
+        self.assertEqual(s_arc.size, n_theta)
+        self.comparisons += 1
+
+
+@_TRAIN_TIER_SKIP
+class ShippedArcLengthTubeGridTestCase(_CountingTestCase):
+    """Spec 1 (engine-backed): the SHIPPED tube chart's theta nodes are the
+    images of a uniform arc-length grid.
+
+    Reuses the cached WP3 fix-on saddle chart (`_wp3_fixture`, real production
+    `_build_tube_chart` at _WP3_GAMMA, n_theta=5) and checks its stored
+    ``theta_grid`` against BOTH the production ``(theta -> s)`` map it carries
+    (``chart.theta_to_s``, built at rep_gamma = median(gamma_grid)) AND the
+    independent polyline oracle.  A deviation flags a build/serve map
+    inconsistency.
+    """
+
+    def _shipped(self):
+        fixture = _wp3_fixture()
+        return fixture['on']['chart'], fixture['on_arc']
+
+    def test_shipped_nodes_uniform_under_carried_map(self) -> None:
+        """chart.theta_grid maps onto a uniform s grid through the carried
+        ``chart.theta_to_s`` map (build/serve self-consistency)."""
+        chart, _arc = self._shipped()
+        theta_fine = np.asarray(chart.theta_to_s[0], dtype=float)
+        s_fine = np.asarray(chart.theta_to_s[1], dtype=float)
+        s_total = float(s_fine[-1])
+        s_at_nodes = np.interp(
+            np.asarray(chart.theta_grid, float), theta_fine, s_fine)
+        target = np.linspace(0.0, s_total, chart.theta_grid.size)
+        rel = float(np.max(np.abs(s_at_nodes - target)) / s_total)
+        self.assertLess(
+            rel, _WP1_ARCLEN_REL_TOL,
+            f'shipped theta nodes must be uniform in carried s; rel {rel:.2e}')
+        self.comparisons += 1
+
+    def test_shipped_nodes_uniform_under_independent_oracle(self) -> None:
+        """F002: the shipped nodes are uniform in the INDEPENDENT polyline arc
+        length evaluated at rep_gamma = median(gamma_grid)."""
+        chart, arc = self._shipped()
+        rep_gamma = float(np.median(chart.gamma_grid))
+        nodes = np.asarray(chart.theta_grid, float)
+        s_poly = _wp1_polyline_arclength(rep_gamma, arc, nodes)
+        total = float(_wp1_polyline_arclength(
+            rep_gamma, arc, np.array([arc.theta_hi]))[0])
+        target = np.linspace(0.0, total, nodes.size)
+        rel = float(np.max(np.abs(s_poly - target)) / total)
+        self.assertLess(
+            rel, _WP1_ARCLEN_REL_TOL,
+            'shipped nodes must be uniform in independent arc length; '
+            f'rel {rel:.2e}')
+        self.comparisons += 1
+
+    def test_shipped_endpoints_equal_arc_bounds(self) -> None:
+        """The shipped chart's first/last theta nodes equal the arc bounds
+        exactly (the build pins them to theta_lo / theta_hi)."""
+        chart, arc = self._shipped()
+        self.assertEqual(float(chart.theta_grid[0]), arc.theta_lo)
+        self.assertEqual(float(chart.theta_grid[-1]), arc.theta_hi)
+        self.comparisons += 1
+
+    def test_shipped_carried_map_anchored_at_arc_bounds(self) -> None:
+        """The carried map's theta axis spans the arc: row0 starts at theta_lo
+        and rep_gamma is the grid median the build evaluated the map at."""
+        chart, arc = self._shipped()
+        self.assertAlmostEqual(
+            float(chart.theta_to_s[0][0]), arc.theta_lo, places=12)
+        self.assertAlmostEqual(
+            float(chart.theta_to_s[0][-1]), arc.theta_hi, places=12)
+        self.assertAlmostEqual(
+            float(np.median(chart.gamma_grid)), _WP3_GAMMA, places=12)
+        self.comparisons += 1
+
+    def test_shipped_node_diagnostic(self) -> None:
+        """Diagnostic: shipped node s vs uniform target -- deviation flags a
+        build/serve map inconsistency."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
+        chart, _arc = self._shipped()
+        theta_fine = np.asarray(chart.theta_to_s[0], float)
+        s_fine = np.asarray(chart.theta_to_s[1], float)
+        total = float(s_fine[-1])
+        nodes = np.asarray(chart.theta_grid, float)
+        s_at_nodes = np.interp(nodes, theta_fine, s_fine)
+        idx = np.arange(nodes.size)
+        figure, axis = plt.subplots(figsize=(5, 4))
+        axis.plot(idx, np.linspace(0.0, total, nodes.size), 'k--',
+                  label='uniform target')
+        axis.plot(idx, s_at_nodes, 'o-', label='shipped nodes')
+        axis.set(xlabel='node index', ylabel='arc length s',
+                 title='WP1 Spec1: shipped node s vs uniform target')
+        axis.legend()
+        _save_plot(figure, 'wp1_arclen_shipped_nodes.png')
+        plt.close(figure)
+        self.assertEqual(nodes.size, chart.theta_grid.size)
+        self.comparisons += 1
+
+
+@_TRAIN_TIER_SKIP
+class ArcLengthBoundShiftMarginTestCase(_CountingTestCase):
+    """Spec 2 (engine-backed, CORRECTED): the coarse-grid registration
+    knife-edge is GONE under arc-length placement.
+
+    The Architect's spec predicted arc-length held-out eps would be INSENSITIVE
+    to +-0.01 rad shifts of the arc bounds (relative swing < 0.05) while
+    uniform-theta swung ~+-0.20.  DIRECT MEASUREMENT FALSIFIES THAT PREMISE: at
+    the F042 config the arc-length eps swing is ~0.31 and the uniform-theta
+    swing ~0.25 -- arc length is NOT the less-sensitive coordinate in RELATIVE
+    swing.  Per the "encode the invariant the data supports, flag the spec's
+    direction error" discipline (F042) this suite does NOT assert the false
+    swing claim; `test_spec2_swing_premise_is_false` locks the measured reality.
+
+    The real, robust "knife-edge gone" property the data DOES support is
+    registration-bar MARGIN: at every bound variant the arc-length chart stays
+    comfortably below the 0.05 registration bar (measured max ~0.036) while the
+    incumbent uniform-theta chart sits on the knife-edge and TIPS OVER it
+    (measured max ~0.073).  So a small bound perturbation flips uniform-theta
+    from registered to rejected but never flips arc length; arc-length eps is
+    also ~half of uniform-theta eps at every variant.
+    """
+
+    def test_arclength_stays_below_registration_bar_under_shifts(self) -> None:
+        """Arc-length eps stays below the 0.05 bar at EVERY bound variant."""
+        variants = _wp1_bound_shift()['variants']
+        for name, eps in variants.items():
+            with self.subTest(variant=name):
+                self.assertLess(
+                    eps['arclength'], _TUBE_EPS_BAR,
+                    f'arc-length eps must clear the bar at {name}; '
+                    f"got {eps['arclength']:.4f}")
+                self.comparisons += 1
+
+    def test_uniform_theta_trips_registration_bar_under_shifts(self) -> None:
+        """The incumbent uniform-theta chart TRIPS the 0.05 bar for at least
+        one bound variant -- it sits on the knife-edge arc length removes."""
+        variants = _wp1_bound_shift()['variants']
+        max_uniform = max(v['uniform'] for v in variants.values())
+        self.assertGreater(
+            max_uniform, _TUBE_EPS_BAR,
+            'uniform-theta must trip the bar under a bound shift; '
+            f'max uniform eps {max_uniform:.4f}')
+        self.comparisons += 1
+
+    def test_arclength_more_accurate_than_uniform_every_variant(self) -> None:
+        """Arc-length eps is strictly below uniform-theta eps at EVERY
+        variant (nominal and all four shifts)."""
+        variants = _wp1_bound_shift()['variants']
+        for name, eps in variants.items():
+            with self.subTest(variant=name):
+                self.assertLess(
+                    eps['arclength'], eps['uniform'],
+                    f'arc-length must beat uniform-theta at {name}; arc '
+                    f"{eps['arclength']:.4f} vs uniform {eps['uniform']:.4f}")
+                self.comparisons += 1
+
+    def test_spec2_swing_premise_is_false(self) -> None:
+        """Lock the MEASURED reality that falsifies the spec's swing premise:
+        the arc-length relative eps swing is NOT below 0.05 (it is ~0.31), so
+        'swing insensitivity' is not the property arc length delivers -- the
+        load-bearing benefit is registration-bar margin (sibling tests)."""
+        variants = _wp1_bound_shift()['variants']
+        eps0 = variants['nominal']['arclength']
+        swing = max(abs(variants[n]['arclength'] - eps0)
+                    for n in variants) / eps0
+        self.assertGreater(
+            swing, 0.05,
+            'DOCUMENTED spec direction error: the spec predicted arc-length '
+            f'swing < 0.05, but the measured swing is {swing:.3f}; the '
+            'load-bearing benefit is bar margin, not swing insensitivity')
+        self.comparisons += 1
+
+    def test_bound_shift_diagnostic(self) -> None:
+        """Diagnostic: eps vs bound shift for both coordinates, with the bar."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
+        variants = _wp1_bound_shift()['variants']
+        names = list(variants)
+        arc = [variants[n]['arclength'] for n in names]
+        uni = [variants[n]['uniform'] for n in names]
+        x = np.arange(len(names))
+        figure, axis = plt.subplots(figsize=(6.5, 4))
+        axis.bar(x - 0.2, arc, width=0.4, label='arc-length')
+        axis.bar(x + 0.2, uni, width=0.4, label='uniform-theta')
+        axis.axhline(_TUBE_EPS_BAR, color='k', ls='--',
+                     label=f'bar={_TUBE_EPS_BAR:g}')
+        axis.set_xticks(x)
+        axis.set_xticklabels(names, rotation=30, ha='right')
+        axis.set(ylabel='held-out eps',
+                 title='WP1 Spec2: eps vs bound shift (knife-edge margin)')
+        axis.legend()
+        _save_plot(figure, 'wp1_arclen_bound_shift.png')
+        plt.close(figure)
+        self.assertEqual(len(names), 5)
+        self.comparisons += 1
+
+
+@_TRAIN_TIER_SKIP
+class ArcLengthNodeEfficiencyTestCase(_CountingTestCase):
+    """Spec 3 (engine-backed): at fixed n_theta arc-length placement is
+    materially more accurate, and clears the registration bar with strictly
+    FEWER nodes.
+
+    Two metrics, reported together so neither can be gamed:
+      * eps at fixed nodes -- arc-length eps(n_theta=4) must clear the frozen
+        incumbent golden literal 0.059 (_INCUMBENT_EPS_N4; measured ~0.028) --
+        NO git-show oracle, just the frozen incumbent number;
+      * nodes for fixed eps -- the smallest n_theta at which each coordinate's
+        eps clears the 0.05 bar: arc-length at 4, uniform-theta at 5.
+    """
+
+    def test_arclength_eps_at_n4_clears_incumbent_literal(self) -> None:
+        """Arc-length eps(n_theta=4) is below the frozen incumbent 0.059."""
+        eps_arc = _wp1_ntheta_sweep()['sweep'][4]['arclength']
+        self.assertLess(
+            eps_arc, _INCUMBENT_EPS_N4,
+            f'arc-length eps(n=4)={eps_arc:.4f} must clear the incumbent '
+            f'literal {_INCUMBENT_EPS_N4}')
+        self.comparisons += 1
+
+    def test_arclength_beats_uniform_at_every_node_count(self) -> None:
+        """Arc-length eps < uniform-theta eps at every swept n_theta."""
+        sweep = _wp1_ntheta_sweep()['sweep']
+        for n_theta in _WP1_NTHETA_SWEEP:
+            with self.subTest(n_theta=n_theta):
+                arc = sweep[n_theta]['arclength']
+                uni = sweep[n_theta]['uniform']
+                self.assertLess(
+                    arc, uni,
+                    f'arc-length must beat uniform at n={n_theta}; arc '
+                    f'{arc:.4f} vs uniform {uni:.4f}')
+                self.comparisons += 1
+
+    def test_arclength_clears_bar_at_fewer_nodes(self) -> None:
+        """Arc-length reaches the 0.05 bar at strictly fewer nodes than
+        uniform-theta (nodes-for-fixed-eps metric)."""
+        sweep = _wp1_ntheta_sweep()['sweep']
+
+        def smallest_clearing(coord: str) -> int:
+            for n_theta in _WP1_NTHETA_SWEEP:
+                if sweep[n_theta][coord] < _WP1_NODE_COST_TARGET:
+                    return n_theta
+            return max(_WP1_NTHETA_SWEEP) + 1
+
+        n_arc = smallest_clearing('arclength')
+        n_uni = smallest_clearing('uniform')
+        self.assertLess(
+            n_arc, n_uni,
+            f'arc-length must clear the bar at fewer nodes; arc @ {n_arc}, '
+            f'uniform @ {n_uni}')
+        self.comparisons += 1
+
+    def test_eps_decreases_with_node_count_both_coords(self) -> None:
+        """Sanity: held-out eps falls monotonically with n_theta for both
+        coordinates (refinement helps; the metric is not noise)."""
+        sweep = _wp1_ntheta_sweep()['sweep']
+        for coord in ('arclength', 'uniform'):
+            series = [sweep[n][coord] for n in _WP1_NTHETA_SWEEP]
+            with self.subTest(coord=coord):
+                self.assertTrue(
+                    all(b < a for a, b in zip(series, series[1:])),
+                    f'{coord} eps must fall with n_theta; got {series}')
+                self.comparisons += 1
+
+    def test_node_efficiency_diagnostic(self) -> None:
+        """Diagnostic: eps vs n_theta curves, arc-length vs uniform-theta."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
+        sweep = _wp1_ntheta_sweep()['sweep']
+        ns = list(_WP1_NTHETA_SWEEP)
+        arc = [sweep[n]['arclength'] for n in ns]
+        uni = [sweep[n]['uniform'] for n in ns]
+        figure, axis = plt.subplots(figsize=(5.5, 4))
+        axis.plot(ns, arc, 'o-', label='arc-length')
+        axis.plot(ns, uni, 's-', label='uniform-theta')
+        axis.axhline(_WP1_NODE_COST_TARGET, color='k', ls='--',
+                     label=f'bar={_WP1_NODE_COST_TARGET:g}')
+        axis.axhline(_INCUMBENT_EPS_N4, color='C3', ls=':',
+                     label=f'incumbent literal={_INCUMBENT_EPS_N4:g}')
+        axis.set(xlabel='n_theta', ylabel='held-out eps', yscale='log',
+                 title='WP1 Spec3: eps vs node count')
+        axis.set_xticks(ns)
+        axis.legend()
+        _save_plot(figure, 'wp1_arclen_node_efficiency.png')
+        plt.close(figure)
+        self.assertEqual(len(ns), len(_WP1_NTHETA_SWEEP))
+        self.comparisons += 1
+
+
+#: Professor's single-gamma map adequacy bar.  WP1 serve builds ONE
+#: arc-length ``(theta -> s)`` map at a representative (band-midpoint) gamma
+#: and reuses it to place / interpolate nodes across the whole band's gamma
+#: grid.  That is legitimate only if the NORMALIZED parametrization
+#: ``s_hat(theta) = s(theta) / s_total`` is nearly gamma-independent over the
+#: band; the criterion caps the worst-separated (edge-to-edge) s_hat gap at
+#: this value.  Measured on the F042 band: ~0.005.
+_WP1_ADEQUACY_BAR = 0.05
+
+#: A deliberately WIDE gamma span on the SAME F042 saddle arc, reaching almost
+#: to the arc's parity wall -- the critical wedge ``|sin 2 theta| <= 1 / gamma``
+#: closes at ``gamma ~ 1.976`` for this theta range -- used ONLY as the
+#: self-falsification positive control: across such a near-parity-wall band the
+#: single-gamma map decorrelates and the edge gap exceeds `_WP1_ADEQUACY_BAR`
+#: (measured ~0.09).  Both endpoints stay strictly inside the wedge so the
+#: arc-length map is finite and strictly increasing at each.
+_WP1_WIDE_PARITYWALL_BAND = (1.05, 1.9)
+
+
+def _wp1_normalized_arclength(gamma: float, arc):
+    """Normalized arc-length axis ``s_hat(theta) = s(theta) / s_total`` at one
+    gamma.
+
+    Thin wrapper over `training._tube_arc_length_map`: the returned
+    ``theta_fine`` grid is the SAME uniform ``[theta_lo, theta_hi]`` grid for
+    every gamma (only the cumulative length ``s_fine`` depends on gamma), so two
+    gammas' ``s_hat`` curves are directly comparable point-by-point with no
+    interpolation.  ``s_hat`` runs ``0`` at ``theta_lo`` to ``1`` at
+    ``theta_hi``.
+
+    Returns
+    -------
+    theta_fine, s_hat : np.ndarray
+        The shared theta grid and the normalized cumulative-length curve.
+    """
+    theta_fine, s_fine = training._tube_arc_length_map(gamma, arc)
+    return theta_fine, s_fine / s_fine[-1]
+
+
+class SingleGammaMapAdequacyTestCase(_CountingTestCase):
+    """Spec (FAST, engine-free): a SINGLE band-midpoint arc-length
+    ``(theta -> s)`` map is adequate for the WHOLE F042 gamma band.
+
+    WP1 serve builds one arc-length map at a representative gamma and reuses it
+    to place / interpolate nodes across the band's gamma grid.  The Professor's
+    adequacy criterion checks the two band EDGES (``gamma_grid[0]`` and
+    ``gamma_grid[-1]`` of the F042 production band) -- the worst-separated pair
+    -- and requires
+
+        ``max_theta | s_hat(theta; gamma_hi) - s_hat(theta; gamma_lo) | < 0.05``
+
+    where ``s_hat(theta) = s(theta) / s_total`` is the normalized arc-length
+    parametrization.  Because only the caustic SPEED profile depends on gamma
+    (`_tube_arc_length_map` uses a fixed uniform theta grid), the two edge
+    curves are compared point-by-point.  The F042 band is narrow and
+    topology-stable, so the gap clears the bar with wide margin (~0.005), i.e.
+    one map de-correlates the band.
+
+    This is a `geometry.caustic_speed` quadrature only -- NO engine, NO chart
+    build -- so it runs in the fast tier and is not `_TRAIN_TIER` gated.
+    """
+
+    def _f042_arc(self):
+        arc, _reach = _wp1_saddle_arc(_WP3_GAMMA, _F042_CONFIG)
+        return arc
+
+    @staticmethod
+    def _f042_gamma_grid() -> np.ndarray:
+        return np.linspace(*_WP3_BAND, _F042_CONFIG.n_gamma)
+
+    def test_band_edge_maps_agree_below_adequacy_bar(self) -> None:
+        """The F042 band-edge s_hat curves agree to < 0.05 (adequacy holds)."""
+        arc = self._f042_arc()
+        gamma_grid = self._f042_gamma_grid()
+        theta_lo, s_lo = _wp1_normalized_arclength(float(gamma_grid[0]), arc)
+        theta_hi, s_hi = _wp1_normalized_arclength(float(gamma_grid[-1]), arc)
+        # Same fixed theta grid at both edges -> honest point-by-point gap.
+        np.testing.assert_array_equal(theta_lo, theta_hi)
+        deviation = float(np.max(np.abs(s_hi - s_lo)))
+        self.assertLess(
+            deviation, _WP1_ADEQUACY_BAR,
+            f'F042 band-edge s_hat gap {deviation:.4f} must clear the adequacy '
+            f'bar {_WP1_ADEQUACY_BAR}; above it a single-gamma map would not '
+            f'de-correlate the band')
+        self.comparisons += 1
+
+    def test_midpoint_map_reproduces_both_edges(self) -> None:
+        """The band-MIDPOINT map (the representative gamma WP1 ships) reproduces
+        BOTH edge curves to < 0.05 -- the direct form of the adequacy claim."""
+        arc = self._f042_arc()
+        gamma_grid = self._f042_gamma_grid()
+        gamma_mid = float(np.median(gamma_grid))
+        _theta, s_mid = _wp1_normalized_arclength(gamma_mid, arc)
+        for edge in (gamma_grid[0], gamma_grid[-1]):
+            with self.subTest(gamma_edge=float(edge)):
+                _t, s_edge = _wp1_normalized_arclength(float(edge), arc)
+                gap = float(np.max(np.abs(s_mid - s_edge)))
+                self.assertLess(
+                    gap, _WP1_ADEQUACY_BAR,
+                    f'midpoint map vs edge gamma={float(edge):.3f} gap '
+                    f'{gap:.4f} exceeds {_WP1_ADEQUACY_BAR}')
+                self.comparisons += 1
+
+    def test_normalized_map_endpoints_are_zero_and_one(self) -> None:
+        """s_hat is a genuine normalized cumulative length: 0 at theta_lo, 1 at
+        theta_hi, strictly increasing.  Guards against a degenerate / constant
+        map that would make the adequacy gap trivially small."""
+        arc = self._f042_arc()
+        gamma_grid = self._f042_gamma_grid()
+        for gamma in (gamma_grid[0], gamma_grid[-1]):
+            with self.subTest(gamma=float(gamma)):
+                _theta, s_hat = _wp1_normalized_arclength(float(gamma), arc)
+                self.assertEqual(s_hat[0], 0.0)
+                self.assertAlmostEqual(s_hat[-1], 1.0, places=12)
+                self.assertTrue(np.all(np.diff(s_hat) > 0.0),
+                                's_hat must be strictly increasing')
+                self.comparisons += 1
+
+    def test_wide_paritywall_band_decorrelates_self_falsification(self) -> None:
+        """SELF-FALSIFICATION / positive control: the SAME diagnostic on a wide
+        band reaching toward the arc's parity wall EXCEEDS the bar, proving the
+        adequacy assertions above are reachable-red, not vacuously true.
+
+        The F042 arc's critical wedge ``|sin 2 theta| <= 1 / gamma`` closes at
+        ``gamma ~ 1.976`` for this theta range; sampling s_hat at gamma=1.05 and
+        gamma=1.9 (both inside the wedge) gives an edge gap ~0.09 > 0.05.
+        """
+        arc = self._f042_arc()
+        lo, hi = _WP1_WIDE_PARITYWALL_BAND
+        _t0, s0 = _wp1_normalized_arclength(lo, arc)
+        _t1, s1 = _wp1_normalized_arclength(hi, arc)
+        gap = float(np.max(np.abs(s1 - s0)))
+        self.assertGreater(
+            gap, _WP1_ADEQUACY_BAR,
+            f'wide near-parity-wall band [{lo}, {hi}] must decorrelate (gap '
+            f'{gap:.4f} > {_WP1_ADEQUACY_BAR}); if it does not, the adequacy '
+            f'gate has no teeth')
+        self.comparisons += 1
+
+    def test_single_gamma_adequacy_diagnostic(self) -> None:
+        """Diagnostic: overlay s_hat at both F042 band edges (near-coincident)
+        beside the wide near-parity-wall control (visibly split)."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
+        arc = self._f042_arc()
+        gamma_grid = self._f042_gamma_grid()
+        theta, s_lo = _wp1_normalized_arclength(float(gamma_grid[0]), arc)
+        _t, s_hi = _wp1_normalized_arclength(float(gamma_grid[-1]), arc)
+        wlo, whi = _WP1_WIDE_PARITYWALL_BAND
+        _t, s_wlo = _wp1_normalized_arclength(wlo, arc)
+        _t, s_whi = _wp1_normalized_arclength(whi, arc)
+        edge_gap = float(np.max(np.abs(s_hi - s_lo)))
+        wide_gap = float(np.max(np.abs(s_whi - s_wlo)))
+
+        figure, (ax0, ax1) = plt.subplots(1, 2, figsize=(10, 4))
+        ax0.plot(theta, s_lo, label=f'gamma={gamma_grid[0]:.3f}')
+        ax0.plot(theta, s_hi, '--', label=f'gamma={gamma_grid[-1]:.3f}')
+        ax0.set(xlabel='theta', ylabel='s_hat',
+                title=f'F042 band edges (gap {edge_gap:.4f} < '
+                      f'{_WP1_ADEQUACY_BAR})')
+        ax0.legend()
+        ax1.plot(theta, s_wlo, label=f'gamma={wlo}')
+        ax1.plot(theta, s_whi, '--', label=f'gamma={whi}')
+        ax1.set(xlabel='theta', ylabel='s_hat',
+                title=f'wide parity-wall band (gap {wide_gap:.4f} > '
+                      f'{_WP1_ADEQUACY_BAR})')
+        ax1.legend()
+        _save_plot(figure, 'wp1_single_gamma_adequacy.png')
+        plt.close(figure)
+        self.assertEqual(theta.shape, s_lo.shape)
+        self.assertGreater(wide_gap, edge_gap)
+        self.comparisons += 1
+
+
 
 if __name__ == '__main__':
     main()

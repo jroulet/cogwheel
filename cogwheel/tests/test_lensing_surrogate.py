@@ -98,6 +98,7 @@ from unittest import TestCase, mock
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.integrate import cumulative_trapezoid
 
 from cogwheel import data, waveform
 from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
@@ -2814,3 +2815,743 @@ class SerializationMultiChartTestCase(SurrogateTestCase):
         self.n_checks += 1
         self.assertEqual(self.sur.provenance, reloaded.provenance,
                          'provenance dict not value-equal after round trip')
+
+
+# ==========================================================================
+# Arc-length axis map (Build WP1) -- the TubeChart's fourth interpolation
+# axis is ARC LENGTH ``s`` (``ds = |y'| d theta``), not raw ``theta``: a
+# query theta is mapped through the stored ``theta_to_s`` axis map to the
+# spline's ``s`` coordinate before contraction.  These suites pin, with
+# oracles INDEPENDENT of the surrogate's own spline (F002):
+#
+#   * the map round-trips through npz bit-for-bit and served values are
+#     unchanged (`TubeChartMapSerializationTestCase`);
+#   * the map built from a REAL fold arc (both parities, via the training
+#     module's own `_tube_arc_length_map`) is strictly monotone with the
+#     specified endpoints and self-inverts to ~machine precision
+#     (`ArcLengthMapRoundTripTestCase`); and
+#   * a served value equals the spline contracted at the ARC-LENGTH image
+#     ``s = interp(theta, map)`` and DIFFERS by a stated non-trivial margin
+#     from a naive contraction at raw ``theta`` -- proving the interpolation
+#     coordinate is the arc length, not theta
+#     (`ChartSplinesInArcLengthTestCase`).
+#
+# A dedicated `ArcLengthSelfFalsificationTestCase` proves every gate can go
+# red: the map contract rejects a non-monotone / mis-anchored table, a
+# perturbed map moves the served value, and a corrupted-row round trip
+# breaks the < 1e-6 consistency bound.
+# ==========================================================================
+
+#: Map resolution the professor certified the round-trip bound at.
+ARC_MAP_SIZE = 2001
+
+#: SHIP gate on the theta->s map self-inversion error
+#: ``max_s |s(theta(s)) - s| / s_total``.  Certified ``< 1e-6`` at
+#: ``ARC_MAP_SIZE``; MEASURED here ~3e-16 (positive astroid) and ~2e-16
+#: (saddle deltoid) -- the gate sits ten decades above the measured floor,
+#: so it is calibrated, not perched on a boundary.
+ARC_ROUND_TRIP_TOL = 1e-6
+
+#: Real fold-arc probes ``(label, parity_sign, rep_gamma, theta_window)``
+#: for the map round-trip.  The saddle window brackets the negative-theta
+#: deltoid wedge the multichart fixture also uses (`_saddle_arcs` arc0 at
+#: ``gamma = 1.30`` measures ``[-0.352, -0.132]``, inside ``[-0.39, -0.09]``).
+ARC_MAP_PROBES = (
+    ('positive_astroid', 1, 0.50, None),
+    ('saddle_deltoid', -1, 1.30, (-0.39, -0.09)),
+)
+
+#: Non-trivial serve margin (Spec C): the max over query thetas of the
+#: relative gap between the correct arc-length contraction and a naive
+#: raw-theta contraction.  MEASURED ~0.54 on the fixture below (the two
+#: contractions land on visibly different spline coordinates because the
+#: synthetic ``s(theta)`` is deliberately non-affine); the gate demands a
+#: gap of at least this margin so a regression to raw-theta interpolation
+#: would flip it red.
+SPLINE_S_MARGIN = 0.10
+
+#: Amplitude of the served-value change a 5%% map perturbation must produce
+#: (self-falsification).  MEASURED ~0.088; the gate demands a > 1e-3 move so
+#: a silently lossy map would be caught.
+ARC_PERTURB_MIN_DELTA = 1e-3
+
+#: Frequencies and query axes shared by the arc-length serve fixtures.
+ARC_LOG_W_GRID = np.log(np.geomspace(0.5, 20.0, 8))
+ARC_LOG_W_QUERY = np.log(np.geomspace(0.7, 15.0, 10))
+
+#: Fold-arc theta-node count for the coordinate-change accuracy fixture.
+#: Production-representative: an inter-cusp fold arc is sampled at O(10)
+#: nodes.  MEASURED served error at this density ~2.0e-4 (converged: the
+#: number is unchanged from n_theta=12 to 16), two decades under the gate.
+ACCURACY_N_THETA = 14
+
+#: F016 COMPLEX reconstruction bar (``max_w |F_sur - F_tgt| / max_w |F_tgt|``)
+#: for the coordinate-change accuracy gate.  The coordinate change must not
+#: move a served number beyond fit error; MEASURED ~2.0e-4 << this bar.
+ACCURACY_REL_TOL = 0.05
+
+#: Interior, cusp-free query thetas swept in the accuracy gate (strictly
+#: inside the ``[0.2, 1.2]`` arc, clear of the ``theta_lo`` cusp window).
+ACCURACY_QUERY_THETAS = np.linspace(0.30, 1.10, 21)
+
+#: The raw-theta positive control's served error must exceed this (MEASURED
+#: ~0.54): were the chart to contract at raw theta instead of arc length,
+#: the accuracy gate would be violated -- so the gate has teeth.
+ACCURACY_RAW_THETA_MIN = 0.20
+
+#: Identity-default backward-compat golden pin.  A ``TubeChart`` built via
+#: ``from_values`` WITHOUT a map (the legacy call form) fits/serves in the
+#: shifted-theta axis ``s = theta - theta_lo``, a pure translation of the
+#: raw-theta spline, so it is a byte-identical no-op seam.  These literals
+#: were FROZEN (`float.hex`, exact round-trip) from that identity-default
+#: serve on the deterministic `_identity_default_tube_chart` fixture; there
+#: is deliberately NO helper oracle and NO ``git show HEAD`` -- the frozen
+#: numbers ARE the incumbent theta-spline behaviour and lock it against
+#: silent drift.  Key = ``(gamma, eta, theta)``; value = tuple of
+#: ``(w_index_into_ARC_LOG_W_QUERY, real_hex, imag_hex)``.
+IDENTITY_GOLDEN = {
+    (0.40, 0.02, 0.50): (
+        (0, '0x1.4b4a50e765845p+0', '-0x1.a93003b631616p-3'),
+        (4, '0x1.048c5b4319ec8p+0', '0x1.165826fa09d69p-1'),
+        (9, '-0x1.b4621d5b869aap-2', '0x1.97d6fc7c68224p-1')),
+    (0.35, 0.01, 0.90): (
+        (0, '0x1.759715b89bb22p+0', '-0x1.47c5e7440d1a3p-3'),
+        (4, '0x1.25d0ce3bfbb8ap+0', '0x1.ad2562bc357fep-2'),
+        (9, '-0x1.ec1a05213f1d7p-2', '0x1.3a665b5674c60p-1')),
+    (0.45, 0.03, 0.70): (
+        (0, '0x1.6246f3e68555dp+0', '-0x1.7a951c2884ad7p-3'),
+        (4, '0x1.16a06b077acd9p+0', '0x1.efab6f34ba243p-2'),
+        (9, '-0x1.d2a97e9d3b20cp-2', '0x1.6b22ddaa0bb4cp-1')),
+}
+
+
+def _nonaffine_map(theta_lo: float, theta_hi: float,
+                   n_map: int = 513) -> tuple[np.ndarray, np.ndarray]:
+    """A deliberately NON-AFFINE ``theta -> s`` map on ``[theta_lo, theta_hi]``.
+
+    The synthetic parametric speed ``|y'| = 2 + 1.5 sin(2 pi (theta -
+    theta_lo)/width)`` stays strictly positive (so ``s`` is strictly
+    increasing) but varies by a factor ~7 across the arc, so ``s(theta)``
+    departs strongly from a straight line -- exactly the regime that
+    separates an arc-length spline from a raw-theta one.  ``s`` is the exact
+    cumulative integral of that speed (`cumulative_trapezoid`), NOT a spline
+    output, so it is an independent oracle for the serve coordinate.
+    """
+    theta_fine = np.linspace(theta_lo, theta_hi, n_map)
+    width = theta_hi - theta_lo
+    speed = 2.0 + 1.5 * np.sin(2.0 * np.pi * (theta_fine - theta_lo) / width)
+    s_fine = cumulative_trapezoid(speed, theta_fine, initial=0.0)
+    return theta_fine, s_fine
+
+
+def _smooth_in_s_tube_chart(theta_lo: float, theta_hi: float,
+                            n_map: int = 513
+                            ) -> tuple[surrogate_module.TubeChart,
+                                       np.ndarray, np.ndarray]:
+    """Build a `TubeChart` whose spline is smooth in ARC LENGTH ``s``.
+
+    Returns ``(chart, theta_fine, s_fine)``.  The envelope tensor is a
+    closed-form smooth function of ``s`` (``1 + 0.5 sin(1.3 s)`` etc.)
+    sampled at the arc-length node coordinates ``s_grid`` -- so the correct
+    served value at a query theta is the spline contracted at ``s =
+    interp(theta, map)``, and a naive contraction at raw theta lands
+    elsewhere on the same smooth-in-``s`` surface.
+    """
+    n = 6
+    gamma_grid = np.linspace(0.30, 0.50, n)
+    eta_floor, eta_max = 0.005, 0.05
+    u_grid = np.linspace(np.sqrt(eta_floor), np.sqrt(eta_max), n)
+    theta_grid = np.linspace(theta_lo, theta_hi, n)
+    theta_fine, s_fine = _nonaffine_map(theta_lo, theta_hi, n_map)
+    theta_to_s = np.vstack([theta_fine, s_fine])
+    s_grid = np.interp(theta_grid, theta_fine, s_fine)
+    grid_w, grid_g, grid_u, grid_s = np.meshgrid(
+        ARC_LOG_W_GRID, gamma_grid, u_grid, s_grid, indexing='ij')
+    real = (np.cos(0.6 * grid_w) * (1.0 + 0.3 * grid_g)
+            * np.exp(-0.4 * grid_u) * (1.0 + 0.5 * np.sin(1.3 * grid_s)))
+    imag = (np.sin(0.6 * grid_w) * (1.0 - 0.2 * grid_g)
+            * (1.0 + 0.1 * grid_u) * np.cos(1.1 * grid_s))
+    chart = surrogate_module.TubeChart.from_values(
+        gamma_grid=gamma_grid, u_grid=u_grid, theta_grid=theta_grid,
+        log_w_grid=ARC_LOG_W_GRID, envelope_real=real, envelope_imag=imag,
+        image_count=2, parity=1, eta_floor=eta_floor, eta_max=eta_max,
+        cusp_windows=[(theta_lo, 0.02)], s_grid=s_grid, theta_to_s=theta_to_s)
+    return chart, theta_fine, s_fine
+
+
+def _real_arc_map(parity_sign: int, rep_gamma: float,
+                  theta_window: tuple | None
+                  ) -> tuple[np.ndarray, np.ndarray, object]:
+    """Build the ``theta->s`` map for a REAL fold arc at ``rep_gamma``.
+
+    Uses the training module's own `_astroid_arcs` (positive parity) or
+    `_saddle_arcs` (saddle), then integrates the exact caustic speed with
+    `surrogate_training._tube_arc_length_map` -- the production build path,
+    an oracle independent of the surrogate's stored spline.  For the saddle
+    it selects the first arc lying wholly inside ``theta_window`` (the
+    negative-theta wedge); the selection is asserted to succeed by the
+    caller so a geometry change fails loudly rather than skipping.
+    """
+    if parity_sign > 0:
+        _cusps, arcs, _reach = surrogate_training._astroid_arcs(rep_gamma, 4000)
+        arc = arcs[0]
+    else:
+        _cusps, arcs, _reach = surrogate_training._saddle_arcs(rep_gamma, 4000)
+        lo_w, hi_w = theta_window
+        arc = next((a for a in arcs
+                    if lo_w <= a.theta_lo and a.theta_hi <= hi_w), None)
+        if arc is None:
+            # Let the caller's assertIsNotNone fire a clear message rather
+            # than crashing inside the map builder on a geometry change.
+            return None, None, None
+    theta_fine, s_fine = surrogate_training._tube_arc_length_map(
+        rep_gamma, arc, n_map=ARC_MAP_SIZE)
+    return theta_fine, s_fine, arc
+
+
+def _analytic_smooth_in_s(log_w, gamma, u, s):
+    """Closed-form complex envelope, SMOOTH IN ARC LENGTH ``s``.
+
+    An independent analytic oracle (products of low-frequency sinusoids and
+    an exponential) with no reference to any surrogate internal (F002).  It
+    is smooth in ``s`` but, because the ``theta -> s`` map is non-affine, it
+    is NOT smooth in raw ``theta`` -- so a raw-theta spline of nodes sampled
+    at ``s``-uniform arc positions would misplace it, while the arc-length
+    spline reconstructs it to fit error.  Broadcasts over either a meshgrid
+    tensor (chart build) or a 1-D ``log_w`` vector (per-query target).
+    """
+    real = (np.cos(0.6 * log_w) * (1.0 + 0.3 * gamma)
+            * np.exp(-0.4 * u) * (1.0 + 0.5 * np.sin(1.3 * s)))
+    imag = (np.sin(0.6 * log_w) * (1.0 - 0.2 * gamma)
+            * (1.0 + 0.1 * u) * np.cos(1.1 * s))
+    return real + 1j * imag
+
+
+def _accuracy_tube_chart(theta_lo: float, theta_hi: float, n_theta: int
+                         ) -> tuple[surrogate_module.TubeChart,
+                                    np.ndarray, np.ndarray]:
+    """Fit a `TubeChart` to the `_analytic_smooth_in_s` surface.
+
+    The envelope tensor is the analytic surface sampled at the arc-length
+    node coordinates ``s_grid``; the stored map is the non-affine
+    ``theta -> s`` (`_nonaffine_map`).  A query theta thus serves the spline
+    contracted at ``s = interp(theta, map)`` -- the correct arc-length image
+    -- so a converged spline reproduces the analytic surface within fit
+    error.  Returns ``(chart, theta_fine, s_fine)``.
+    """
+    n = 6
+    gamma_grid = np.linspace(0.30, 0.50, n)
+    eta_floor, eta_max = 0.005, 0.05
+    u_grid = np.linspace(np.sqrt(eta_floor), np.sqrt(eta_max), n)
+    theta_grid = np.linspace(theta_lo, theta_hi, n_theta)
+    theta_fine, s_fine = _nonaffine_map(theta_lo, theta_hi)
+    theta_to_s = np.vstack([theta_fine, s_fine])
+    s_grid = np.interp(theta_grid, theta_fine, s_fine)
+    grid_w, grid_g, grid_u, grid_s = np.meshgrid(
+        ARC_LOG_W_GRID, gamma_grid, u_grid, s_grid, indexing='ij')
+    env = _analytic_smooth_in_s(grid_w, grid_g, grid_u, grid_s)
+    chart = surrogate_module.TubeChart.from_values(
+        gamma_grid=gamma_grid, u_grid=u_grid, theta_grid=theta_grid,
+        log_w_grid=ARC_LOG_W_GRID, envelope_real=env.real,
+        envelope_imag=env.imag, image_count=2, parity=1,
+        eta_floor=eta_floor, eta_max=eta_max,
+        cusp_windows=[(theta_lo, 0.02)], s_grid=s_grid, theta_to_s=theta_to_s)
+    return chart, theta_fine, s_fine
+
+
+def _identity_default_tube_chart() -> surrogate_module.TubeChart:
+    """Build a `TubeChart` via the LEGACY call form: ``from_values`` with
+    NEITHER ``s_grid`` NOR ``theta_to_s`` on a uniform ``theta_grid``.
+
+    Deterministic closed-form envelope (no randomness) so the served values
+    are frozen as golden literals (`IDENTITY_GOLDEN`).  Construction takes
+    the identity-map branch, so ``s = theta - theta_grid[0]`` and the spline
+    fits/serves in a pure translation of the raw-theta axis.
+    """
+    n = 6
+    gamma_grid = np.linspace(0.30, 0.50, n)
+    eta_floor, eta_max = 0.005, 0.05
+    u_grid = np.linspace(np.sqrt(eta_floor), np.sqrt(eta_max), n)
+    theta_grid = np.linspace(0.2, 1.2, 8)
+    grid_w, grid_g, grid_u, grid_t = np.meshgrid(
+        ARC_LOG_W_GRID, gamma_grid, u_grid, theta_grid, indexing='ij')
+    real = (np.cos(0.7 * grid_w) * (1.0 + 0.3 * grid_g)
+            * np.exp(-0.4 * grid_u) * (1.0 + 0.5 * np.sin(1.1 * grid_t)))
+    imag = (np.sin(0.7 * grid_w) * (1.0 - 0.2 * grid_g)
+            * (1.0 + 0.1 * grid_u) * np.cos(0.9 * grid_t))
+    return surrogate_module.TubeChart.from_values(
+        gamma_grid=gamma_grid, u_grid=u_grid, theta_grid=theta_grid,
+        log_w_grid=ARC_LOG_W_GRID, envelope_real=real, envelope_imag=imag,
+        image_count=2, parity=1, eta_floor=eta_floor, eta_max=eta_max)
+
+
+class ArcLengthMapRoundTripTestCase(SurrogateTestCase):
+    """The theta->s map of a REAL fold arc is strictly monotone with the
+    contracted endpoints and self-inverts to ~machine precision -- for BOTH
+    parities (positive astroid, saddle deltoid).
+
+    Oracle independence (F002): the map is built from the exact caustic
+    speed via `surrogate_training._tube_arc_length_map` (the production
+    build path) -- never the surrogate's stored spline.  The round trip is a
+    plain `np.interp` inverse/forward pair, independent of the chart.
+    """
+
+    def _probe_map(self, theta_fine: np.ndarray, s_fine: np.ndarray,
+                   arc, label: str) -> float:
+        """Assert the map contract and return the self-inversion error."""
+        # Row 0 (theta) strictly ascending, anchored at the arc's lower bound.
+        self.n_checks += 1
+        self.assertTrue(np.all(np.diff(theta_fine) > 0.0),
+                        f'{label}: theta_fine not strictly increasing')
+        self.n_checks += 1
+        self.assertEqual(theta_fine[0], arc.theta_lo,
+                         f'{label}: theta_fine[0] != arc.theta_lo')
+        # Row 1 (arc length) strictly increasing from ~0.
+        self.n_checks += 1
+        self.assertTrue(np.all(np.diff(s_fine) > 0.0),
+                        f'{label}: s_fine not strictly increasing')
+        self.n_checks += 1
+        self.assertAlmostEqual(float(s_fine[0]), 0.0, places=9,
+                               msg=f'{label}: s_fine[0] not ~0')
+        # Dense self-inversion: theta(s) by inverse interp, then s(theta(s)).
+        s_total = float(s_fine[-1])
+        s_probe = np.linspace(0.0, s_total, 997)
+        theta_of_s = np.interp(s_probe, s_fine, theta_fine)
+        s_back = np.interp(theta_of_s, theta_fine, s_fine)
+        err = float(np.max(np.abs(s_back - s_probe)) / s_total)
+        self.n_checks += 1
+        self.assertLess(err, ARC_ROUND_TRIP_TOL,
+                        f'{label}: round-trip error {err:.2e} exceeds '
+                        f'{ARC_ROUND_TRIP_TOL:.0e}')
+        return err
+
+    def test_map_is_monotone_and_self_inverts_both_parities(self):
+        """Both a positive astroid arc and a negative-theta saddle deltoid
+        arc yield a strictly monotone, self-inverting theta->s map."""
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        fig, axes = plt.subplots(2, len(ARC_MAP_PROBES), figsize=(9, 6))
+        for col, (label, parity, rep_gamma, window) in enumerate(
+                ARC_MAP_PROBES):
+            with self.subTest(arc=label):
+                theta_fine, s_fine, arc = _real_arc_map(
+                    parity, rep_gamma, window)
+                self.assertIsNotNone(
+                    arc, f'{label}: no fold arc found in {window} -- the '
+                    'caustic geometry moved, retune the probe window')
+                err = self._probe_map(theta_fine, s_fine, arc, label)
+                s_total = float(s_fine[-1])
+                s_probe = np.linspace(0.0, s_total, 997)
+                theta_of_s = np.interp(s_probe, s_fine, theta_fine)
+                s_back = np.interp(theta_of_s, theta_fine, s_fine)
+                axes[0, col].plot(theta_fine, s_fine)
+                axes[0, col].set_title(f'{label}\nerr={err:.1e}')
+                axes[0, col].set_xlabel('theta'); axes[0, col].set_ylabel('s')
+                axes[1, col].plot(s_probe, s_back - s_probe)
+                axes[1, col].set_xlabel('s')
+                axes[1, col].set_ylabel('s(theta(s)) - s')
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'surrogate_arc_length_map_round_trip.png',
+                    dpi=90)
+        plt.close(fig)
+
+
+class ChartSplinesInArcLengthTestCase(SurrogateTestCase):
+    """The tube chart interpolates in ARC LENGTH ``s``, not raw ``theta``.
+
+    On a chart whose stored map encodes a DELIBERATELY non-affine
+    ``s(theta)``, the production served value (`_evaluate_chart`) must equal
+    the spline contracted at the arc-length image ``s = interp(theta, map)``
+    (path a) to machine precision, and DIFFER by a stated non-trivial margin
+    from a naive contraction at raw ``theta`` (path b).  Both paths use the
+    SAME production contraction primitive (`_contract_tensor_spline`); only
+    the fourth coordinate differs, isolating the coordinate choice.
+    """
+
+    #: Query thetas interior to the arc (avoid the cusp window at theta_lo).
+    QUERY_THETAS = (0.35, 0.60, 0.85, 1.05)
+
+    def setUp(self):
+        super().setUp()
+        self.chart, self.theta_fine, self.s_fine = _smooth_in_s_tube_chart(
+            0.2, 1.2)
+        self.gamma_q, self.eta_q = 0.40, 0.02
+
+    def _contract(self, coeffs: np.ndarray, v2: float) -> np.ndarray:
+        """Production contraction at fixed ``(gamma, sqrt(eta), v2)``."""
+        return surrogate_module._contract_tensor_spline(
+            coeffs, self.chart.knots, self.gamma_q,
+            float(np.sqrt(self.eta_q)), v2, ARC_LOG_W_QUERY)
+
+    def test_served_equals_arc_length_contraction_not_raw_theta(self):
+        """served == contraction at ``s`` (exactly); != contraction at
+        raw theta (by >= SPLINE_S_MARGIN)."""
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        max_rel_b = 0.0
+        max_abs_a = 0.0
+        served_amp, arc_amp, theta_amp = [], [], []
+        for theta in self.QUERY_THETAS:
+            with self.subTest(theta=theta):
+                served = surrogate_module._evaluate_chart(
+                    self.chart, self.gamma_q, float('nan'), float('nan'),
+                    self.eta_q, theta, ARC_LOG_W_QUERY)
+                theta_inframe = surrogate_module._theta_into_frame(
+                    theta, float(self.chart.theta_grid[0]))
+                v2_arc = float(np.interp(theta_inframe, self.chart.theta_to_s[0],
+                                         self.chart.theta_to_s[1]))
+                v2_theta = theta_inframe
+                value_a = (self._contract(self.chart.real_coeffs, v2_arc)
+                           + 1j * self._contract(self.chart.imag_coeffs,
+                                                 v2_arc))
+                value_b = (self._contract(self.chart.real_coeffs, v2_theta)
+                           + 1j * self._contract(self.chart.imag_coeffs,
+                                                 v2_theta))
+                scale = float(np.max(np.abs(served)))
+                # (a) The served value IS the arc-length contraction.
+                self.n_checks += 1
+                np.testing.assert_array_equal(
+                    served, value_a,
+                    err_msg=f'served != arc-length contraction at theta={theta}')
+                max_abs_a = max(max_abs_a,
+                                float(np.max(np.abs(served - value_a))))
+                # (b) It is NOT the raw-theta contraction.
+                rel_b = float(np.max(np.abs(served - value_b)) / scale)
+                max_rel_b = max(max_rel_b, rel_b)
+                served_amp.append(scale)
+                arc_amp.append(float(np.max(np.abs(value_a))))
+                theta_amp.append(float(np.max(np.abs(value_b))))
+        self.n_checks += 1
+        self.assertEqual(max_abs_a, 0.0,
+                         'served value is not bit-identical to the arc-length '
+                         'contraction')
+        self.n_checks += 1
+        self.assertGreater(
+            max_rel_b, SPLINE_S_MARGIN,
+            f'served value differs from raw-theta contraction by only '
+            f'{max_rel_b:.3f} < {SPLINE_S_MARGIN} -- the interpolation '
+            f'coordinate looks like theta, not arc length')
+        print(f'\n[ArcLengthSplines] max|served-arc|={max_abs_a} '
+              f'max rel(served,theta)={max_rel_b:.3f}')
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.plot(self.QUERY_THETAS, served_amp, 'o-', label='served')
+        ax.plot(self.QUERY_THETAS, arc_amp, 'x--', label='contract at s')
+        ax.plot(self.QUERY_THETAS, theta_amp, 's:', label='contract at theta')
+        ax.set_xlabel('query theta'); ax.set_ylabel('max_w |E|')
+        ax.legend(); ax.set_title('arc-length vs raw-theta contraction')
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'surrogate_arc_length_vs_theta_contraction.png',
+                    dpi=90)
+        plt.close(fig)
+
+
+class TubeChartMapSerializationTestCase(SurrogateTestCase):
+    """A ``TubeChart`` carrying a NON-trivial arc-length map round-trips
+    through the surrogate npz save/load bit-for-bit.
+
+    Pins: the reloaded ``theta_to_s`` equals the original bit-for-bit
+    (`np.array_equal`), and served complex values at a handful of
+    ``(gamma, eta, theta)`` queries are unchanged to machine precision (in
+    fact bit-identical).  A lossy serialization of the map would move the
+    served value (see `ArcLengthSelfFalsificationTestCase`).
+    """
+
+    QUERIES = ((0.40, 0.02, 0.50), (0.35, 0.01, 0.90), (0.45, 0.03, 0.70))
+
+    def setUp(self):
+        super().setUp()
+        self.chart, _theta_fine, _s_fine = _smooth_in_s_tube_chart(0.2, 1.2)
+        provenance = {'chart_count': 1, 'chart_types': ['tube'],
+                      'training_hash': 'arclenfixture0001'}
+        self.sur = LensAmplificationSurrogate([self.chart], provenance)
+
+    def test_npz_round_trip_preserves_map_and_served_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'tube_map.npz'
+            self.sur.save(path)
+            reloaded = LensAmplificationSurrogate.load(path)
+        rchart = reloaded.charts[0]
+        self.assertIsInstance(rchart, surrogate_module.TubeChart,
+                              'reloaded chart is not a TubeChart')
+        # The map survives bit-for-bit (shape and every element).
+        self.n_checks += 1
+        self.assertEqual(rchart.theta_to_s.shape, self.chart.theta_to_s.shape,
+                         'theta_to_s shape changed on round trip')
+        self.n_checks += 1
+        self.assertTrue(
+            np.array_equal(rchart.theta_to_s, self.chart.theta_to_s),
+            'theta_to_s not bit-identical after npz round trip')
+        # Served values unchanged (bit-identical) at every probe.
+        max_delta = 0.0
+        for gamma_q, eta_q, theta in self.QUERIES:
+            with self.subTest(config=(gamma_q, eta_q, theta)):
+                before = surrogate_module._evaluate_chart(
+                    self.chart, gamma_q, float('nan'), float('nan'),
+                    eta_q, theta, ARC_LOG_W_QUERY)
+                after = surrogate_module._evaluate_chart(
+                    rchart, gamma_q, float('nan'), float('nan'),
+                    eta_q, theta, ARC_LOG_W_QUERY)
+                self.n_checks += 1
+                np.testing.assert_array_equal(
+                    before, after,
+                    err_msg=f'served value changed at {(gamma_q, eta_q, theta)}')
+                max_delta = max(max_delta, float(np.max(np.abs(before - after))))
+        self.n_checks += 1
+        self.assertEqual(max_delta, 0.0,
+                         'served values not bit-identical after round trip')
+
+
+class ArcLengthSelfFalsificationTestCase(SurrogateTestCase):
+    """Proof the arc-length suite can go RED: the map contract has teeth,
+    a perturbed map moves the served value, and a corrupted-row round trip
+    breaks the self-inversion bound.
+
+    Without these, a suite that only ever built well-formed maps could read
+    green while the serve coordinate, the serialization, or the monotonicity
+    contract silently rotted.
+    """
+
+    def _valid_from_values(self, theta_to_s: np.ndarray):
+        """Attempt a `from_values` build with a caller-supplied map."""
+        n = 6
+        gamma_grid = np.linspace(0.30, 0.50, n)
+        eta_floor, eta_max = 0.005, 0.05
+        u_grid = np.linspace(np.sqrt(eta_floor), np.sqrt(eta_max), n)
+        theta_grid = np.linspace(0.2, 1.2, n)
+        theta_fine, s_fine = _nonaffine_map(0.2, 1.2)
+        s_grid = np.interp(theta_grid, theta_fine, s_fine)
+        grid_w, _g, _u, _s = np.meshgrid(
+            ARC_LOG_W_GRID, gamma_grid, u_grid, s_grid, indexing='ij')
+        real = np.cos(grid_w)
+        imag = np.sin(grid_w)
+        return surrogate_module.TubeChart.from_values(
+            gamma_grid=gamma_grid, u_grid=u_grid, theta_grid=theta_grid,
+            log_w_grid=ARC_LOG_W_GRID, envelope_real=real, envelope_imag=imag,
+            image_count=2, parity=1, eta_floor=eta_floor, eta_max=eta_max,
+            s_grid=s_grid, theta_to_s=theta_to_s)
+
+    def test_non_monotone_s_row_is_rejected(self):
+        """A non-monotone arc-length row fails the map contract."""
+        theta_fine, s_fine = _nonaffine_map(0.2, 1.2)
+        s_broken = s_fine.copy()
+        s_broken[200] = s_broken[199]  # kill strict monotonicity
+        self.n_checks += 1
+        with self.assertRaises(ValueError,
+                               msg='non-monotone s_fine was accepted'):
+            self._valid_from_values(np.vstack([theta_fine, s_broken]))
+
+    def test_map_not_anchored_at_theta_lo_is_rejected(self):
+        """A theta row not starting at ``theta_grid[0]`` fails the contract."""
+        theta_fine, s_fine = _nonaffine_map(0.2, 1.2)
+        self.n_checks += 1
+        with self.assertRaises(ValueError,
+                               msg='mis-anchored theta row was accepted'):
+            self._valid_from_values(np.vstack([theta_fine + 0.05, s_fine]))
+
+    def test_perturbed_map_moves_the_served_value(self):
+        """Perturbing the stored map (as a lossy save would) changes the
+        served value -- so the round-trip preservation gate has teeth."""
+        chart, theta_fine, s_fine = _smooth_in_s_tube_chart(0.2, 1.2)
+        perturbed = dataclasses.replace(
+            chart, theta_to_s=np.vstack([theta_fine, s_fine * 1.05]))
+        max_delta = 0.0
+        for theta in (0.5, 0.7, 0.9):
+            good = surrogate_module._evaluate_chart(
+                chart, 0.40, float('nan'), float('nan'), 0.02, theta,
+                ARC_LOG_W_QUERY)
+            bad = surrogate_module._evaluate_chart(
+                perturbed, 0.40, float('nan'), float('nan'), 0.02, theta,
+                ARC_LOG_W_QUERY)
+            max_delta = max(max_delta, float(np.max(np.abs(good - bad))))
+        self.n_checks += 1
+        self.assertGreater(
+            max_delta, ARC_PERTURB_MIN_DELTA,
+            f'a 5% map perturbation moved the served value by only '
+            f'{max_delta:.2e} -- the round-trip gate would be vacuous')
+
+    def test_corrupted_row_breaks_the_round_trip_bound(self):
+        """If the two map rows disagree (a corrupted row), the self-inversion
+        error exceeds the < 1e-6 bound -- the round-trip gate is non-vacuous."""
+        theta_fine, s_fine = _nonaffine_map(0.2, 1.2)
+        s_total = float(s_fine[-1])
+        s_probe = np.linspace(0.0, s_total, 997)
+        theta_of_s = np.interp(s_probe, s_fine, theta_fine)
+        # Forward maps through a corrupted (5%-scaled) s row.
+        s_back = np.interp(theta_of_s, theta_fine, s_fine * 1.05)
+        err = float(np.max(np.abs(s_back - s_probe)) / s_total)
+        self.n_checks += 1
+        self.assertGreater(
+            err, ARC_ROUND_TRIP_TOL,
+            f'a corrupted map row round-tripped to {err:.2e} <= '
+            f'{ARC_ROUND_TRIP_TOL:.0e} -- the bound would be vacuous')
+
+
+class CoordinateChangeAccuracyTestCase(SurrogateTestCase):
+    """The theta->arc-length coordinate change does NOT move a served number
+    beyond fit error (fast, no engine).
+
+    A chart is fit to a KNOWN analytic envelope that is smooth in arc length
+    ``s`` (`_analytic_smooth_in_s`), sampled at production-representative
+    ``ACCURACY_N_THETA`` fold-arc nodes.  On a cusp-free theta sweep the
+    production served complex ``F`` (`_evaluate_chart`) is compared to the
+    analytic target evaluated at the query's arc-length image
+    ``s = interp(theta, map)``.  The F016 COMPLEX bar is
+
+        ``max_w |F_served - F_target| / max_w |F_target| < ACCURACY_REL_TOL``.
+
+    Oracle independence (F002): the target is a closed form referencing no
+    surrogate internal; the served value is a spline FIT to that surface, so
+    the residual is pure interpolation error.  A positive control contracts
+    the SAME chart at raw ``theta`` and shows the residual then blows past
+    the bar -- the coordinate choice is load-bearing, and the gate has teeth.
+
+    (The full engine cusp-free comparison, acceptance #5, is a
+    driver-verified post-build step; this in-build gate stays on the fast
+    tier by using the analytic target.)
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.chart, self.theta_fine, self.s_fine = _accuracy_tube_chart(
+            0.2, 1.2, ACCURACY_N_THETA)
+        self.gamma_q, self.eta_q = 0.40, 0.02
+
+    def _target(self, s_q: float) -> np.ndarray:
+        """Analytic complex target over ``ARC_LOG_W_QUERY`` at arc length s."""
+        return _analytic_smooth_in_s(
+            ARC_LOG_W_QUERY, self.gamma_q, float(np.sqrt(self.eta_q)), s_q)
+
+    def test_served_matches_analytic_target_within_fit_error(self):
+        """Served F reproduces the analytic envelope to < 5% on a cusp-free
+        theta sweep; a raw-theta contraction would exceed the bar."""
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        u_q = float(np.sqrt(self.eta_q))
+        worst_arc = 0.0
+        worst_raw = 0.0
+        arc_rel, raw_rel = [], []
+        for theta in ACCURACY_QUERY_THETAS:
+            theta = float(theta)
+            with self.subTest(theta=theta):
+                theta_inframe = surrogate_module._theta_into_frame(
+                    theta, float(self.chart.theta_grid[0]))
+                s_q = float(np.interp(theta_inframe, self.chart.theta_to_s[0],
+                                      self.chart.theta_to_s[1]))
+                target = self._target(s_q)
+                scale = float(np.max(np.abs(target)))
+                served = surrogate_module._evaluate_chart(
+                    self.chart, self.gamma_q, float('nan'), float('nan'),
+                    self.eta_q, theta, ARC_LOG_W_QUERY)
+                rel_arc = float(np.max(np.abs(served - target)) / scale)
+                # Positive control: contract the SAME chart at raw theta.
+                raw = (surrogate_module._contract_tensor_spline(
+                    self.chart.real_coeffs, self.chart.knots, self.gamma_q,
+                    u_q, theta_inframe, ARC_LOG_W_QUERY)
+                    + 1j * surrogate_module._contract_tensor_spline(
+                        self.chart.imag_coeffs, self.chart.knots, self.gamma_q,
+                        u_q, theta_inframe, ARC_LOG_W_QUERY))
+                rel_raw = float(np.max(np.abs(raw - target)) / scale)
+                self.n_checks += 1
+                self.assertLess(
+                    rel_arc, ACCURACY_REL_TOL,
+                    f'served F at theta={theta:.3f} misses the analytic '
+                    f'target by {rel_arc:.2e} >= {ACCURACY_REL_TOL} -- the '
+                    f'coordinate change moved a served number beyond fit error')
+                worst_arc = max(worst_arc, rel_arc)
+                worst_raw = max(worst_raw, rel_raw)
+                arc_rel.append(rel_arc)
+                raw_rel.append(rel_raw)
+        # The gate has teeth: raw-theta serving would violate the bar.
+        self.n_checks += 1
+        self.assertGreater(
+            worst_raw, ACCURACY_RAW_THETA_MIN,
+            f'raw-theta control only reached {worst_raw:.2e} -- the fixture '
+            f'does not separate arc length from theta, so the < '
+            f'{ACCURACY_REL_TOL} gate is not discriminating')
+        print(f'\n[CoordChangeAccuracy] worst arc rel={worst_arc:.3e} '
+              f'worst raw-theta rel={worst_raw:.3e}')
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.semilogy(ACCURACY_QUERY_THETAS, arc_rel, 'o-',
+                    label='arc-length serve')
+        ax.semilogy(ACCURACY_QUERY_THETAS, raw_rel, 's:',
+                    label='raw-theta control')
+        ax.axhline(ACCURACY_REL_TOL, color='k', ls='--', label='F016 bar')
+        ax.set_xlabel('query theta'); ax.set_ylabel('relative served error')
+        ax.legend(); ax.set_title('coordinate change preserves accuracy')
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'surrogate_coord_change_accuracy.png', dpi=90)
+        plt.close(fig)
+
+
+class IdentityDefaultBackCompatTestCase(SurrogateTestCase):
+    """The identity default (``from_values`` with no map) is a byte-identical
+    no-op seam: served values match GOLDEN LITERALS frozen from the incumbent
+    theta-spline behaviour, to machine precision.
+
+    The chart is built with the legacy call form (no ``s_grid``, no
+    ``theta_to_s``), which takes the identity-map branch ``s = theta -
+    theta_grid[0]``.  We first pin that the constructed map IS the identity
+    (row 0 == ``theta_grid`` bit-for-bit, row 1 == ``theta_grid -
+    theta_grid[0]``), then reconstruct served ``F`` and compare against the
+    `IDENTITY_GOLDEN` ``float.hex`` literals (NO ``git show HEAD``, NO helper
+    oracle -- the literals themselves are the frozen incumbent behaviour).
+    """
+
+    def test_identity_default_builds_the_identity_map(self):
+        """A map-less build yields exactly the identity theta->s axis map."""
+        chart = _identity_default_tube_chart()
+        self.assertIsNotNone(chart.theta_to_s, 'identity map not built')
+        self.n_checks += 1
+        self.assertTrue(
+            np.array_equal(chart.theta_to_s[0], chart.theta_grid),
+            'identity map row 0 (theta) is not the raw theta_grid')
+        self.n_checks += 1
+        self.assertTrue(
+            np.array_equal(chart.theta_to_s[1],
+                           chart.theta_grid - chart.theta_grid[0]),
+            'identity map row 1 (s) is not theta_grid - theta_grid[0]')
+
+    def test_served_values_match_frozen_golden_literals(self):
+        """Served complex F equals the frozen incumbent literals bit-for-bit."""
+        chart = _identity_default_tube_chart()
+        max_delta = 0.0
+        for (gamma_q, eta_q, theta), probes in IDENTITY_GOLDEN.items():
+            with self.subTest(config=(gamma_q, eta_q, theta)):
+                served = surrogate_module._evaluate_chart(
+                    chart, gamma_q, float('nan'), float('nan'),
+                    eta_q, theta, ARC_LOG_W_QUERY)
+                for w_idx, real_hex, imag_hex in probes:
+                    want = complex(float.fromhex(real_hex),
+                                   float.fromhex(imag_hex))
+                    got = complex(served[w_idx])
+                    self.n_checks += 1
+                    self.assertEqual(
+                        got.real, want.real,
+                        f'real part drifted at {(gamma_q, eta_q, theta)} '
+                        f'w_idx={w_idx}')
+                    self.n_checks += 1
+                    self.assertEqual(
+                        got.imag, want.imag,
+                        f'imag part drifted at {(gamma_q, eta_q, theta)} '
+                        f'w_idx={w_idx}')
+                    max_delta = max(max_delta, abs(got - want))
+        self.assertEqual(max_delta, 0.0,
+                         'identity-default served values are not bit-identical '
+                         'to the frozen golden literals')
+
+    def test_golden_literals_can_go_red(self):
+        """Self-falsification: a served value compared to a PERTURBED literal
+        fails, so the golden pin is non-vacuous."""
+        chart = _identity_default_tube_chart()
+        gamma_q, eta_q, theta = next(iter(IDENTITY_GOLDEN))
+        served = surrogate_module._evaluate_chart(
+            chart, gamma_q, float('nan'), float('nan'),
+            eta_q, theta, ARC_LOG_W_QUERY)
+        w_idx, real_hex, _imag_hex = IDENTITY_GOLDEN[(gamma_q, eta_q, theta)][0]
+        perturbed = float.fromhex(real_hex) * 1.001
+        self.n_checks += 1
+        self.assertNotAlmostEqual(
+            float(served[w_idx].real), perturbed, places=6,
+            msg='a 0.1% perturbation left the golden pin unmoved -- the '
+                'bit-exact equality gate would be vacuous')
+
+
+if __name__ == '__main__':
+    unittest.main()

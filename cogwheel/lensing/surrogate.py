@@ -609,6 +609,38 @@ def _validate_axis(axis: np.ndarray, name: str) -> np.ndarray:
     return arr
 
 
+def _validate_theta_to_s(theta_to_s: np.ndarray,
+                         theta_grid: np.ndarray) -> np.ndarray:
+    """Return a validated ``(2, N_map)`` theta->arc-length axis map.
+
+    Row 0 is ``theta_fine`` (strictly ascending, starting at the arc's
+    lower bound ``theta_grid[0]``); row 1 is ``s_fine`` (cumulative arc
+    length, strictly increasing from ~0).  Both rows must be finite.
+    """
+    arr = np.ascontiguousarray(theta_to_s, dtype=float)
+    if arr.ndim != 2 or arr.shape[0] != 2 or arr.shape[1] < 2:
+        raise ValueError(
+            f'theta_to_s must have shape (2, N_map) with N_map >= 2; '
+            f'got shape {arr.shape}.')
+    if not np.isfinite(arr).all():
+        raise ValueError('theta_to_s must be finite.')
+    theta_fine, s_fine = arr[0], arr[1]
+    if not np.all(np.diff(theta_fine) > 0.0):
+        raise ValueError(
+            'theta_to_s row 0 (theta_fine) must be strictly increasing.')
+    if not np.isclose(theta_fine[0], theta_grid[0]):
+        raise ValueError(
+            f'theta_to_s row 0 must start at theta_grid[0]={theta_grid[0]!r}; '
+            f'got {theta_fine[0]!r}.')
+    if not np.all(np.diff(s_fine) > 0.0):
+        raise ValueError(
+            'theta_to_s row 1 (s_fine) must be strictly increasing.')
+    if not np.isclose(s_fine[0], 0.0, atol=1e-9):
+        raise ValueError(
+            f'theta_to_s row 1 (s_fine) must start at ~0; got {s_fine[0]!r}.')
+    return arr
+
+
 def _union_cusp_nodes(theta_c_grid: np.ndarray,
                       theta_c_range: tuple[float, float]) -> np.ndarray:
     """Union the astroid cusp angles into a positive-parity theta_c axis.
@@ -1284,23 +1316,39 @@ class LobeInteriorChart:
 class TubeChart:
     """Near-caustic envelope chart in caustic-adapted coordinates.
 
-    Interpolates ``E(w)`` over ``(log w, gamma, u = sqrt(eta), theta)``,
-    where ``eta`` is the source-plane distance to the caustic and
-    ``theta`` its arc position.  Fitting in ``u = sqrt(eta)`` linearizes
-    the fold's square-root branch so the interpolant is smooth through the
-    near-caustic transition; the tube covers only the image-pair-present
-    side ``eta > 0``.  ``theta`` is BOUNDED and NON-PERIODIC (a single
-    inter-cusp fold arc); cusp neighbourhoods are excluded.
+    Interpolates ``E(w)`` over ``(log w, gamma, u = sqrt(eta), s)``,
+    where ``eta`` is the source-plane distance to the caustic, ``theta``
+    its arc position, and ``s`` the cumulative ARC LENGTH along the fold
+    (``ds = |y'| d theta``) measured from the arc's lower bound.  Fitting
+    in ``u = sqrt(eta)`` linearizes the fold's square-root branch so the
+    interpolant is smooth through the near-caustic transition; the tube
+    covers only the image-pair-present side ``eta > 0``.  ``theta`` is
+    BOUNDED and NON-PERIODIC (a single inter-cusp fold arc); cusp
+    neighbourhoods are excluded.
+
+    The fourth interpolation axis is ARC LENGTH ``s`` (not raw ``theta``):
+    a query ``theta`` is mapped to ``s`` through the stored ``theta_to_s``
+    axis map at serve time before the spline is contracted.  Only the
+    interpolation coordinate changed -- all membership, range and
+    cusp-window tests still operate in ``theta``.
 
     Attributes
     ----------
     gamma_grid, u_grid, theta_grid, log_w_grid : np.ndarray
         1-D strictly increasing training axes (``u = sqrt(eta)``).
+        ``theta_grid`` holds the fold-arc angle nodes (placed uniformly in
+        arc length ``s``); the spline itself is fit against ``s``.
+    theta_to_s : np.ndarray
+        Arc-length axis map of shape ``(2, N_map)``: row 0 ``theta_fine``
+        (strictly ascending, ``row0[0] == theta_grid[0]``, in the arc's
+        wedge frame) and row 1 ``s_fine`` (arc length from 0, strictly
+        increasing).  A query ``theta`` is mapped to the spline's ``s``
+        coordinate by ``np.interp(theta, theta_fine, s_fine)``.
     real_coeffs, imag_coeffs : np.ndarray
-        Cubic B-spline coefficient tensors, axes ``(log w, gamma, u,
-        theta)``.
+        Cubic B-spline coefficient tensors, axes ``(log w, gamma, u, s)``.
     knots : tuple of np.ndarray
-        Knot vectors ``(t_logw, t_gamma, t_u, t_theta)``.
+        Knot vectors ``(t_logw, t_gamma, t_u, t_s)`` (the fourth built in
+        arc length ``s``).
     image_count : int or None
         Real-image count of the chart's region.
     parity : int or None
@@ -1318,6 +1366,7 @@ class TubeChart:
     u_grid: np.ndarray
     theta_grid: np.ndarray
     log_w_grid: np.ndarray
+    theta_to_s: np.ndarray
     real_coeffs: np.ndarray
     imag_coeffs: np.ndarray
     knots: tuple
@@ -1333,22 +1382,34 @@ class TubeChart:
                     envelope_real: np.ndarray, envelope_imag: np.ndarray,
                     image_count: int | None, parity: int | None,
                     eta_floor: float, eta_max: float,
-                    cusp_windows: tuple | None = None) -> 'TubeChart':
+                    cusp_windows: tuple | None = None,
+                    s_grid: np.ndarray | None = None,
+                    theta_to_s: np.ndarray | None = None) -> 'TubeChart':
         """Build a tube chart by fitting splines to a value tensor.
 
         Parameters
         ----------
         gamma_grid, u_grid, theta_grid, log_w_grid : np.ndarray
             1-D strictly increasing training axes (``u = sqrt(eta)``).
+            ``theta_grid`` holds the fold-arc angle nodes.
         envelope_real, envelope_imag : np.ndarray
             Shape ``(n_w, n_gamma, n_u, n_theta)`` real/imag envelope
-            values.
+            values (sampled at the ``theta_grid`` nodes).
         image_count, parity : int or None
             Region labels.
         eta_floor, eta_max : float
             Caustic-distance band served ``[eta_floor, eta_max]``.
         cusp_windows : tuple of (float, float), optional
             ``(theta_cusp, delta_theta)`` exclusion windows.
+        s_grid : np.ndarray, optional
+            The arc-length coordinates of the ``theta_grid`` nodes, used as
+            the fourth spline axis.  Required when ``theta_to_s`` is given.
+        theta_to_s : np.ndarray, optional
+            The ``(2, N_map)`` arc-length axis map ``[theta_fine, s_fine]``.
+            When omitted, an IDENTITY map is built (``theta_fine =
+            theta_grid``, ``s_fine = theta_grid - theta_grid[0]``) and the
+            spline is fit against that shifted-theta axis, so a chart built
+            without an explicit map serves identically to a raw-theta spline.
         """
         gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
         u_grid = _validate_axis(u_grid, 'u_grid')
@@ -1357,25 +1418,54 @@ class TubeChart:
         expected = (log_w_grid.size, gamma_grid.size, u_grid.size,
                     theta_grid.size)
         _check_value_shape(envelope_real, envelope_imag, expected)
+        if theta_to_s is None:
+            # Identity map: interpolate in arc length s = theta - theta_lo, a
+            # constant shift of the raw-theta axis.  Fitting and serving in the
+            # shifted coordinate is translation-equivalent to the raw-theta
+            # spline, so charts built without an explicit map are unaffected.
+            s_grid = theta_grid - theta_grid[0]
+            theta_to_s = np.vstack([theta_grid, s_grid])
+        if s_grid is None:
+            raise ValueError(
+                'from_values requires s_grid when theta_to_s is provided; the '
+                'spline is fit against the arc-length node coordinates.')
+        s_grid = _validate_axis(s_grid, 's_grid')
+        if s_grid.size != theta_grid.size:
+            raise ValueError(
+                f's_grid size {s_grid.size} must equal theta_grid size '
+                f'{theta_grid.size}.')
         real_c, imag_c, knots = _fit_tensor_spline(
-            (log_w_grid, gamma_grid, u_grid, theta_grid),
+            (log_w_grid, gamma_grid, u_grid, s_grid),
             envelope_real, envelope_imag)
         return cls._assemble(
             gamma_grid, u_grid, theta_grid, log_w_grid, real_c, imag_c, knots,
-            image_count, parity, eta_floor, eta_max, cusp_windows)
+            image_count, parity, eta_floor, eta_max, cusp_windows, theta_to_s)
 
     @classmethod
     def _assemble(cls, gamma_grid, u_grid, theta_grid, log_w_grid,
                   real_coeffs, imag_coeffs, knots, image_count, parity,
-                  eta_floor, eta_max, cusp_windows) -> 'TubeChart':
-        """Assemble a chart from prebuilt coefficient tensors and knots."""
+                  eta_floor, eta_max, cusp_windows,
+                  theta_to_s=None) -> 'TubeChart':
+        """Assemble a chart from prebuilt coefficient tensors and knots.
+
+        ``theta_to_s`` is the ``(2, N_map)`` arc-length axis map; when
+        ``None`` an identity map (``s = theta - theta_grid[0]``) derived from
+        ``theta_grid`` is used, so ``knots[3]`` (built in ``s``) and the map
+        agree.  ``s_grid`` is NOT stored separately -- ``knots[3]`` already
+        encodes it.
+        """
+        gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
+        theta_grid = _validate_axis(theta_grid, 'theta_grid')
+        if theta_to_s is None:
+            theta_to_s = np.vstack([theta_grid, theta_grid - theta_grid[0]])
         windows = tuple((float(tc), float(dt))
                         for tc, dt in (cusp_windows or ()))
         return cls(
-            gamma_grid=_validate_axis(gamma_grid, 'gamma_grid'),
+            gamma_grid=gamma_grid,
             u_grid=_validate_axis(u_grid, 'u_grid'),
-            theta_grid=_validate_axis(theta_grid, 'theta_grid'),
+            theta_grid=theta_grid,
             log_w_grid=_validate_axis(log_w_grid, 'log_w_grid'),
+            theta_to_s=_validate_theta_to_s(theta_to_s, theta_grid),
             real_coeffs=np.ascontiguousarray(real_coeffs, dtype=float),
             imag_coeffs=np.ascontiguousarray(imag_coeffs, dtype=float),
             knots=tuple(np.ascontiguousarray(t, dtype=float) for t in knots),
@@ -1683,7 +1773,9 @@ def _evaluate_chart(chart, gamma: float, rho: float, theta_c: float,
                     y2_eig: float = float('nan')) -> np.ndarray:
     """Evaluate the selected chart's complex envelope over ``log_w_query``.
 
-    A tube chart contracts on ``(sqrt(eta), theta-into-frame)``; a
+    A tube chart contracts on ``(sqrt(eta), s)`` where ``s`` is the query
+    theta mapped into the chart frame and then to arc length via the
+    chart's stored ``theta_to_s`` map; a
     far-field chart contracts on its caustic-fixed spatial axes
     ``(rho, theta_c)`` (Build 8h-b3); a lobe-interior chart contracts on
     the LOBE-LOCAL ``(rho_lobe, theta_local)`` computed from the chart's
@@ -1695,7 +1787,12 @@ def _evaluate_chart(chart, gamma: float, rho: float, theta_c: float,
     """
     if isinstance(chart, TubeChart):
         v1 = float(np.sqrt(eta))
-        v2 = _theta_into_frame(theta, float(chart.theta_grid[0]))
+        # The tube spline's fourth axis is ARC LENGTH s, so map the query
+        # theta (already gated inside the arc) into the chart frame and then
+        # onto s via the stored theta_to_s map before contracting.
+        theta_inframe = _theta_into_frame(theta, float(chart.theta_grid[0]))
+        v2 = float(np.interp(theta_inframe, chart.theta_to_s[0],
+                             chart.theta_to_s[1]))
     elif isinstance(chart, LobeInteriorChart):
         v1, v2 = _to_lobe_fixed(chart.centroid, chart.boundary_theta,
                                 chart.boundary_r, y1_eig, y2_eig)
@@ -2745,7 +2842,7 @@ def _chart_to_npz(chart, index: int) -> dict:
                 'cusp_windows': [[tc, dt] for tc, dt in chart.cusp_windows]}
         axes = (chart.log_w_grid, chart.gamma_grid, chart.u_grid,
                 chart.theta_grid)
-        arrays = {}
+        arrays = {prefix + 'theta_to_s': chart.theta_to_s}
     elif isinstance(chart, LobeInteriorChart):
         # Additive lobe branch (WP1): the persisted record carries the lobe
         # frame (centroid, other_centroid, boundary_theta/boundary_r as
@@ -2799,7 +2896,8 @@ def _chart_from_npz(data, index: int):
             imag_coeffs=imag_coeffs, knots=knots,
             image_count=meta['image_count'], parity=meta['parity'],
             eta_floor=meta['eta_floor'], eta_max=meta['eta_max'],
-            cusp_windows=[tuple(win) for win in meta['cusp_windows']])
+            cusp_windows=[tuple(win) for win in meta['cusp_windows']],
+            theta_to_s=data[prefix + 'theta_to_s'])
     if meta['kind'] == 'lobe':
         # Additive lobe branch (WP1): a lobe chart demands the lobe axis
         # schema, so a mislabeled/old artifact hard-refuses here rather than

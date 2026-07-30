@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 import numpy as np
+from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import brentq
 
 from cogwheel.lensing import prior as _lens_prior
@@ -119,6 +120,9 @@ _SADDLE_CUSP_WIDTH_SAFETY = 2.5
 _SADDLE_CUSP_MIN_HALFWIDTH = 0.08
 #: Fractional shrink of each fold arc away from its bounding walls.
 _ARC_MARGIN_FRAC = 0.03
+#: Number of theta samples used to integrate the tube's arc-length axis map
+#: ``s = integral |y'| dtheta`` across a fold arc (see `_tube_arc_length_map`).
+_TUBE_ARC_MAP_SIZE = 2001
 #: Margin below the double-double product ceiling ``w * |y| <= 60`` used to cap
 #: each chart's ``w`` grid.  Mirrors the prior's mass coupling, which keeps
 #: ``w * |y| <= ~55`` by construction (the mass-conditioned source scale), so a
@@ -2451,10 +2455,64 @@ def _budget_check(n_points: int, budget: int, name: str) -> None:
             f'budget is {budget}. Reduce the grid or raise --engine-budget.')
 
 
+def _tube_arc_length_map(gamma: float, arc: FoldArc,
+                         n_map: int = _TUBE_ARC_MAP_SIZE
+                         ) -> tuple[np.ndarray, np.ndarray]:
+    """Arc-length axis map ``theta -> s`` for one fold arc at fixed gamma.
+
+    Returns ``(theta_fine, s_fine)`` where ``theta_fine`` is a uniform,
+    strictly ascending grid of ``n_map`` points over ``[arc.theta_lo,
+    arc.theta_hi]`` (the arc's wedge frame) and ``s_fine`` is the cumulative
+    arc length ``s = integral |y'| dtheta`` from ``0`` at ``theta_lo``.
+
+    The exact caustic parametric speed ``|y'(theta)|`` is evaluated with
+    :func:`geometry.caustic_speed` on the arc's own ``branch`` and integrated
+    by the trapezoidal rule (`scipy.integrate.cumulative_trapezoid`); no
+    finite difference is used.  Because the cusp windows exclude the
+    ``|y'| -> 0`` caustic cusps, the speed stays positive over the arc, so
+    ``s_fine`` is finite and strictly increasing -- both are checked and
+    raise :class:`ValueError` on violation.
+
+    Parameters
+    ----------
+    gamma : float
+        Convergence ratio at which to evaluate the caustic speed.
+    arc : FoldArc
+        The fold arc supplying ``theta_lo``, ``theta_hi`` and ``branch``.
+    n_map : int
+        Number of theta samples (map resolution).
+
+    Returns
+    -------
+    theta_fine, s_fine : np.ndarray
+        The arc-length axis map rows (each shape ``(n_map,)``).
+    """
+    theta_fine = np.linspace(arc.theta_lo, arc.theta_hi, n_map)
+    speed = geometry.caustic_speed(gamma, theta_fine, branch=arc.branch)
+    s_fine = cumulative_trapezoid(speed, theta_fine, initial=0.0)
+    if not np.isfinite(s_fine).all():
+        raise ValueError(
+            f'Tube arc-length map is non-finite for gamma={gamma}, '
+            f'branch={arc.branch} over [{arc.theta_lo}, {arc.theta_hi}].')
+    if not np.all(np.diff(s_fine) > 0.0):
+        raise ValueError(
+            f'Tube arc-length map is not strictly increasing for gamma='
+            f'{gamma}, branch={arc.branch}; the caustic speed vanishes inside '
+            f'the arc (cusp windows should exclude the |y\'|->0 cusps).')
+    return theta_fine, s_fine
+
+
 def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
                       w_range: tuple[float, float], config: TrainingConfig
                       ) -> tuple[TubeChart, int, int]:
-    """Build one tube chart over ``(log w, gamma, u=sqrt(eta), theta)``.
+    """Build one tube chart over ``(log w, gamma, u=sqrt(eta), s)``.
+
+    The fourth axis is ARC LENGTH ``s = integral |y'| dtheta`` (not raw
+    theta): the ``theta`` nodes are placed as the images of a UNIFORM ``s``
+    grid so the envelope is sampled uniformly in the physically meaningful
+    coordinate.  The ``theta -> s`` map is built once at the band's
+    representative (median) gamma via `_tube_arc_length_map` and stored on
+    the chart (``theta_to_s``); the same map is read at serve time.
 
     Returns the chart, the number of engine calls, and the number of refused
     grid points (left as zeros in the value tensor).
@@ -2463,7 +2521,19 @@ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
     w_grid = np.exp(log_w_grid)
     u_grid = np.linspace(np.sqrt(config.eta_floor), np.sqrt(config.eta_max),
                          config.n_u)
-    theta_grid = np.linspace(arc.theta_lo, arc.theta_hi, config.n_theta)
+
+    # Arc-length node placement: build the theta -> s map at the band's
+    # representative gamma, then invert a uniform s grid back to theta so the
+    # theta nodes cluster where the fold turns fastest.  Endpoints are forced
+    # exactly onto the arc bounds (np.interp already lands there up to fp).
+    rep_gamma = float(np.median(gamma_grid))
+    theta_fine, s_fine = _tube_arc_length_map(rep_gamma, arc)
+    s_total = float(s_fine[-1])
+    s_grid = np.linspace(0.0, s_total, config.n_theta)
+    theta_grid = np.interp(s_grid, s_fine, theta_fine)
+    theta_grid[0] = arc.theta_lo
+    theta_grid[-1] = arc.theta_hi
+    theta_to_s = np.vstack([theta_fine, s_fine])
 
     n_points = gamma_grid.size * u_grid.size * theta_grid.size
     _budget_check(n_points, config.engine_budget, 'tube')
@@ -2490,7 +2560,7 @@ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
         log_w_grid=log_w_grid, envelope_real=env_real, envelope_imag=env_imag,
         image_count=arc.image_count, parity=parity,
         eta_floor=config.eta_floor, eta_max=config.eta_max,
-        cusp_windows=arc.cusp_windows)
+        cusp_windows=arc.cusp_windows, s_grid=s_grid, theta_to_s=theta_to_s)
     return chart, calls, refused
 
 
@@ -3512,6 +3582,16 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             samples = _tube_heldout_samples(band, arc, config, rng)
             eps = _heldout_eps(chart, samples,
                                {'schema': 'heldout-probe'})
+            # Single-gamma-map adequacy diagnostic (NOT a gate, per the
+            # Professor's caveat): the arc-length map is built at one
+            # representative gamma, so record how much the NORMALIZED profile
+            # s/s_total drifts between the band's gamma endpoints.  A small
+            # value means one map suffices for the whole band; a large value
+            # flags that a gamma-dependent map may be needed.
+            _, s_lo = _tube_arc_length_map(float(gamma_grid[0]), arc)
+            _, s_hi = _tube_arc_length_map(float(gamma_grid[-1]), arc)
+            s_map_dev = float(np.max(np.abs(
+                s_hi / s_hi[-1] - s_lo / s_lo[-1])))
             return chart, calls, refused, {
                 'kind': 'tube', 'branch': arc.branch,
                 'image_count': arc.image_count,
@@ -3522,7 +3602,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                         w_range, config.w_nodes_per_decade)),
                     'n_gamma': config.n_gamma, 'n_u': config.n_u,
                     'n_theta': config.n_theta},
-                'heldout_eps': eps}
+                'heldout_eps': eps,
+                's_map_gamma_endpoint_dev': s_map_dev}
 
         chart, report, reused = _load_or_build(
             path, build_tube, {'schema': 'build8c-chart', 'parity': parity})
