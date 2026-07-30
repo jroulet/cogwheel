@@ -2640,30 +2640,74 @@ and without a repeated finding — each round fixed something and surfaced
 something new. The three failures are the ones where the loop had nothing it
 could do.
 
-**Mechanism.** `SPEC.md` is the Librarian's file, so a Coder WP's `Where:` list
-never contains it. The Inspector correctly notices that SPEC.md now describes
-something the build changed. No agent inside the revision loop is scoped to
-touch it. So the loop re-inspects, re-reports the identical finding, and grinds
-to budget exhaustion — roughly $20-25 of pure re-inspection across the three,
-plus a round of wall clock and transcript depth each.
+**Mechanism — and the audit above UNDERCOUNTS it.** The revision loop does
+dispatch trivial findings, to Foreman-Lite. Foreman-Lite has full edit tools,
+`bypassPermissions` and a 75-turn budget, so it is not blocked by capability.
+It DECLINES, correctly: `SPEC.md` is the Librarian's file and the finding is
+explicitly tagged `→ Librarian:`. In 1e-tube it made exactly ONE tool call per
+round — `write_memory` — and exited in 16 s.
 
-**Two independent fixes.**
-- STRUCTURAL: the loop already knows every WP's `Where:` list. A finding whose
-  file is owned by NO WP cannot be resolved by re-inspecting — route it to the
-  Librarian or record it and move on, instead of spending a round. Cheap to
-  detect; it would have caught all three.
-- DISCIPLINE (driver): a brief that says "prose you change must be true when
-  done" must NAME every surface, not just the obvious ones. 1e-tube's brief
-  named the `TubeChart` docstring and `DATA_CONTRACTS.yaml` and omitted
-  `SPEC.md`, whose surrogate row documents the very coordinate the build
-  changed; the Architect's plan then declared "Spec update: no". Build 1a's
-  failure was the same omission in a different brief, so the driver made this
-  mistake twice without noticing the pattern until asked whether it was
-  chronic.
+What it wrote there is the whole story:
 
-**Rule.** A revision loop can only fix what some agent owns. When adding a
-gate that inspects a surface, check that the surface is inside somebody's
-write scope — otherwise the gate is a guaranteed budget burn, not a guard.
+> INS-1-001 (this session, **recurrence 14x+**) ... Declined per role
+> boundary — SPEC.md is Librarian-owned, not Foreman-Lite. No files touched.
+> ... the orchestrator routing bug (dispatching "-> Librarian"-tagged findings
+> to Foreman-Lite) **needs to be fixed upstream — recommend a pre-filter that
+> strips these before they ever reach the Foreman-Lite queue.**
+
+So the true recurrence is **14+, not 3** — the three budget exhaustions are
+only the builds where the loop ran long enough to exhaust. The agent hitting
+the bug root-caused it correctly and recommended the exact fix, in its own
+memory, at least thirteen times, and nothing upstream ever acted on it. That
+is the more damning half: the diagnosis was already in the system.
+
+**Fixed** by a Tier 0.5 pre-filter that routes findings on `.claude/spec/**`
+(or tagged `librarian`) to the LIBRARIAN before Foreman-Lite sees them, mirroring
+the existing Tier 1.5 that routes test-authorship findings to the Test
+Developer for exactly this reason. A Librarian failure there is caught: doc
+prose must never abort a build whose code work is done and verified.
+
+## F051 — three separate gates whose satisfying action lives OUTSIDE the loop that must satisfy them (2026-07-30)
+
+**Where:** the build DAG's stage order and the pre-commit gate set.
+
+F050 is one instance of a general shape. Build 1e-tube hit all three in a
+single run:
+
+1. **Librarian findings** (F050): the Inspector flags `SPEC.md`; only the
+   Librarian may edit it; the Librarian is not in the revision loop. Fixed by
+   routing.
+2. **Changelog fragments**: the pre-commit hook demands a
+   `contracts_changelog.d/` fragment when `DATA_CONTRACTS.yaml` changes.
+   Fragments are the Librarian's artifact — and the Librarian runs AFTER the
+   main commit (Coder → TestDev → Inspector → Professor → COMMIT → "docs:
+   update documentation after build"). The owning role literally cannot
+   satisfy a gate that precedes it. Papered over by
+   `_ensure_spec_doc_fragments`, a preflight that auto-stubs fragments; a
+   workaround for the ordering, not a fix. NOTE this gate did not fire in
+   1e-tube only because the hook runs correctness gates FIRST and drift
+   blocked before it was reached — both were live.
+3. **The gated-test-drift ack**: the gate correctly refuses to
+   auto-remediate, because the only honest resolution is to RUN the gated
+   tier and acknowledge. But **no pipeline stage runs the gated tier.** So any
+   build changing a signature referenced by skipped tests dies at commit
+   awaiting a human — here, 14 classes flagged for a strictly
+   backward-compatible, keyword-only, `None`-defaulted signature change, of
+   which several were name-collision false positives (`FarFieldChart.
+   from_values` never changed).
+
+**Rule.** For every gate, name the actor who can satisfy it and check that
+actor runs BEFORE the gate, inside the same loop. A gate whose remedy lives
+downstream of itself is not a guard — it is a scheduled stall. Two cheap
+follow-ups remain open: move the Librarian ahead of the main commit (or give
+the commit a Librarian pass), and let the pipeline run the gated tier for the
+specific classes a drift finding names, so it can ack from evidence instead of
+stranding the build.
+
+**Rule (F050).** A revision loop can only fix what some agent owns. When
+adding a gate that inspects a surface, check that the surface is inside
+somebody's write scope — otherwise the gate is a guaranteed budget burn, not
+a guard.
 
 ## F049 — marker strings were never checked against what the code actually emits, and a guard was placed where it could not run (2026-07-30)
 

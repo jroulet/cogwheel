@@ -2201,6 +2201,57 @@ class BuildOrchestrator:
                     elif decision == "abort":
                         raise EscalationNeeded(user_findings, revision_loops)
 
+            # Tier 0.5: findings whose remedy is a DOC/SPEC surface route to
+            # the Librarian, not Foreman-Lite.
+            #
+            # Foreman-Lite declines them on role boundary -- correctly: the
+            # spec is the Librarian's file, and its own crew prompt forbids
+            # ranging outside its scope. So the finding is re-reported every
+            # round, the loop cannot converge, and the budget burns.
+            # `foreman_short_term` recorded this diagnosis, with the exact fix
+            # recommended here, at "recurrence 14x+" -- the agent hitting the
+            # bug root-caused it repeatedly and nothing upstream acted.
+            # Measured (F050): every revision-budget exhaustion in 28 builds
+            # was this finding, on this file.
+            # Same shape as Tier 1.5 below, which routes test-authorship
+            # findings to the Test Developer for exactly this reason.
+            librarian_findings = [
+                f for f in trivial_findings
+                if (f.file and f.file.startswith('.claude/spec/'))
+                or (f.suggested_fix and 'librarian' in f.suggested_fix.lower())
+            ]
+            if librarian_findings:
+                trivial_findings = [f for f in trivial_findings
+                                    if f not in librarian_findings]
+                findings_text = "\n".join(
+                    f"- [id: {f.finding_id}] [{f.file}] {f.description}"
+                    + (f"\n  Suggested fix: {f.suggested_fix}"
+                       if f.suggested_fix else "")
+                    for f in librarian_findings)
+                self._log(
+                    f"  Routing {len(librarian_findings)} doc/spec finding(s) "
+                    f"to the Librarian (Foreman-Lite declines these on role "
+                    f"boundary; see F050)")
+                lib_task = (
+                    "## Inspector findings on documentation surfaces you own"
+                    + chr(10) * 2 + findings_text + chr(10) * 2
+                    + "Fix each one. These are YOUR files -- Foreman-Lite "
+                    "cannot touch them, so if you leave them the revision "
+                    "loop re-reports them until its budget is spent. Write "
+                    "fragments, not the generated canonical files, and run "
+                    "`python scripts/render_fragments.py` afterwards."
+                    + CHANGE_REPORT_INSTRUCTION)
+                try:
+                    lib_result, _ = await self._run_agent(
+                        'librarian', lib_task, max_turns_override=60)
+                    self._collect_change_report(lib_result)
+                except Exception as exc:                      # noqa: BLE001
+                    # Doc prose must never abort a build whose code work is
+                    # done and verified.
+                    self._log(f"  Librarian doc-finding pass failed "
+                              f"({type(exc).__name__}: {exc}); the finding "
+                              f"stays open for the driver")
+
             # Tier 1: Foreman-Lite fixes trivial findings
             if trivial_findings:
                 trivial_text = "\n".join(
