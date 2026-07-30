@@ -655,6 +655,46 @@ Tag conventions:
   coordinate must be settled AFTER step 1's cascade is complete (1a-1d) and
   BEFORE step 2's first measurement — not before step 9.
 
+  ## DECOMPOSITION — three sequential builds, ordered by what each unblocks
+
+  Surveyed 2026-07-30. `_build_tube_chart` grids `u = sqrt(eta)` (already the
+  coordinate change, the axis done right) and `theta_grid =
+  linspace(arc.theta_lo, arc.theta_hi, n_theta)` (raw). `TubeChart` stores the
+  four axes plus cubic B-spline coefficients and knot vectors, so the
+  interpolation VARIABLE for that axis is literally `theta`. Splitting by
+  which measurement each sub-build unblocks, rather than doing all three at
+  once (the brief-discipline rule: >~3 WPs means sequential builds):
+
+  - **1e-tube — blocks step 2.** The tube chart's `theta` axis, shared by both
+    parities. This is the only piece step 2's tube-fraction sweep needs.
+  - **1e-farfield — blocks step 4.** The exterior charts' `rho`/`theta_c`
+    axes, per-parity, remembering the saddle's scalar-additive `rho` is a
+    different coordinate, not a mirror of the astroid's directional one.
+  - **1e-lobe — blocks only step 9.** `_build_lobe_chart`, macro-saddle only.
+    Its lobe-local `theta_local` sweeps the wedge turnarounds, so it is also
+    where `s = sqrt(theta_max - theta)` (F044) applies.
+
+  Only 1e-tube gates the next measurement, so the sequence is not blocked on
+  all three landing.
+
+  ## THE SERVE-SIDE COST — the design question 1e-tube must answer first
+
+  A coordinate change is cheap at BUILD time (sample at `theta(s)`, spline in
+  `s`) and not obviously cheap at SERVE time: a query arrives as `theta` and
+  the spline now wants `s = int_{theta_lo}^{theta} |y'| dtheta'`. Computing
+  that quadrature per evaluation would put an integral in the likelihood's hot
+  path, which is not acceptable.
+
+  The fix is for the CHART TO CARRY ITS OWN AXIS MAP: bake a fine monotone
+  `theta -> s` table (or 1-D spline) into the chart at build time, alongside
+  the existing axes. That keeps one authoritative representation of the
+  coordinate (Part 0 / DRY), costs one extra 1-D evaluation per serve, and
+  makes the map serializable and testable on its own. NOTE this changes the
+  chart SCHEMA, so it needs a `contracts_changelog.d/` fragment and a
+  `DATA_CONTRACTS.yaml` update — harmless today precisely because nothing is
+  trained yet (the window in this fragment's parent), and expensive after
+  step 9. Another reason 1e comes before training, not after.
+
   ## What each axis should count against
 
   All four scales are now computable in closed form from the step-1 cascade;
