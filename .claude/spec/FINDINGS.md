@@ -2574,3 +2574,55 @@ is retired the moment the transition commits. The two 1c-blocking tests are
 retired (`@skip -> F043`); the durable window-width guard, if wanted, is a
 golden-value table (owed to the F040 cusp-window build, which changes the
 window rule anyway).
+
+## F044 — the macro-saddle wedge edge is a REGULAR point of the caustic; only the `theta` parametrization is singular, so `_WEDGE_EPS` buys no safety and costs coverage (2026-07-30)
+
+**Where:** `surrogate_training._WEDGE_EPS = 1e-3` (6 sites);
+`geometry.caustic_derivatives` docstring.
+
+At the wedge edge `theta_max = (1/2) arcsin(lam / |gamma|)` the discriminant
+`1 - e**2 sin**2 2theta` vanishes, so `u` has a square-root branch point and
+the theta-derivatives diverge. Measured (driver, `gamma = 1.3 / 2.0 / 5.0`,
+`dtheta = 1e-2 .. 1e-12`), the rates are exactly
+
+    |y'|  = A dtheta**(-1/2)      |y''| = (A/2) dtheta**(-3/2)
+
+with `A` constant to 5 significant figures across four decades of `dtheta`
+(`A = 0.85124 / 0.40826 / 0.14434`). Both were read as evidence of a geometric
+singularity. They are not.
+
+Reparametrise by `s = sqrt(theta_max - theta)`. Then `y(s)` converges to a
+finite limit and `|dy/ds| = |y'| * 2s` converges to a NONZERO one
+(1.70248 / 0.81652 / 0.28868, stable from `s = 1e-4` down to `1e-6`), and
+`A = |dy/ds| / 2` exactly. A curve with finite position and nonzero tangent in
+its own regular parameter is a REGULAR point — the two square-root branches
+meet in a smooth turnaround, precisely as `_saddle_arcs`' docstring says
+("walls, but not cusps"). `caustic_derivatives`' docstring calling it "the
+deltoid cusp" is wrong: the deltoid's three cusps are the interior
+`|y'| = 0` roots, and the wedge edge is not one of them.
+
+**Consequence 1 — the standoff buys no safety.** `critical_point` serves the
+edge exactly (`dtheta = 0` returns a finite point) and refuses by name
+immediately outside it (`dtheta = -1e-12` raises `LensDomainError`, no silent
+clamp); `caustic_derivatives` refuses at `dtheta <= 0`. The named refusals
+already are the guard, and every sampler already skips `LensDomainError`
+per-theta.
+
+**Consequence 2 — the standoff costs coverage, measurably.** It excises a
+sliver at both ends of every wedge sweep. `_lobe_winding_loop` is documented
+as a closed lobe boundary and is fed to `_winding_number` as the saddle
+interior-admission test (`abs(w) < 0.5` rejects a tile); with the standoff its
+closure gap is 0.279 at `gamma = 1.05` (9.3% of the lobe reach), 0.107 at 1.3,
+0.051 at 2.0. Sampling the wedge CLOSED takes the gap to exactly 0.0 and
+changes nothing else — cusp count, arc count and reach identical at every
+gamma tested, total arc span slightly LARGER. Against a standoff-free
+reference interior, the open loop rejects 1/792 interior probes at
+`gamma = 1.05`, reaching 0.059 in source-plane units INSIDE the lobe.
+
+**Rule.** Before adding an absolute standoff to keep a sampler off a
+singularity, ask whether the singularity is in the OBJECT or in the
+PARAMETER. A divergence whose rate is a clean power of the distance to a
+branch point is the signature of the latter, and the fix is the coordinate
+that removes it (here `s = sqrt(theta_max - theta)`, the same reparametrising
+move as `u = sqrt(eta)` on the fold axis), not a margin. This is the wedge
+edge's entry in [[lensing_collocation_from_local_scales]].

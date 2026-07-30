@@ -106,6 +106,18 @@ section: Backlog
     soft/hard axes from `nearest_caustic_point` and `C4` the normal-form
     coefficient. These are the smoothing coordinates near a cusp.
 
+  - MACRO-SADDLE WEDGE EDGE: `s = sqrt(theta_max − theta)` with
+    `theta_max = (1/2) arcsin(lam / |gamma|)`. Measured 2026-07-30 (F044): the
+    edge is a REGULAR point of the caustic that the `theta` parametrization
+    makes look singular — `y` and `dy/ds` are both finite and nonzero in `s`,
+    while `|y'| ~ dtheta^{-1/2}` and `|y''| ~ dtheta^{-3/2}` in `theta`. Any
+    saddle axis that runs to a wedge turnaround must be gridded and splined in
+    `s`, or its last nodes chase a divergence that is not there. This is the
+    same reparametrising move as `u = sqrt(eta)` on the fold axis, and it
+    applies to BOTH the saddle tube arcs and the lobe-interior charts, whose
+    lobe-local `theta_local` sweeps the same turnarounds. Build 1d deletes
+    `_WEDGE_EPS` on the strength of this; the coordinate itself is owed here.
+
   Arc-length `int caustic_speed dtheta` is the CHEAP STAND-IN, valid only where
   no catastrophe dominates (mid-arc, away from cusps). Where a fold or cusp
   governs the local structure, use its uniformizing map. A single authoritative

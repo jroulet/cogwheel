@@ -114,16 +114,30 @@ section: Backlog
         serve instead of ~258; `y'''` verified against the same two-stage
         oracle at the F038 tolerance.
 
-     1d. **`_WEDGE_EPS = 1e-3` — derivable, not round.** At the macro-saddle
-        wedge edge the two branches meet and `|y''|` diverges as
-        `Δθ^{-3/2}` (measured 2026-07-29: 1.3e4 at `Δθ = 1e-3`, 4.0e8 at
-        1e-6, 4.0e17 at 1e-12). `_WEDGE_EPS` is the absolute angular standoff
-        that keeps every sampler off that singularity, and its correct value
-        follows from the conditioning bound, `Δθ >= |y''|_max^{-2/3}`, not
-        from a round number. `caustic_derivatives` already REFUSES by name
-        exactly at the edge, so this is about sampling margin, not safety.
-        ACCEPTANCE: `_WEDGE_EPS` is derived from a stated `|y''|` ceiling, or
-        deleted in favour of the refusal.
+     1d. **`_WEDGE_EPS = 1e-3` — DELETE it, and close the estimator
+        inventory.** This entry asked for a conditioning bound
+        (`Δθ >= |y''|_max^{-2/3}`) on the theory that the wedge edge is a
+        singularity to stand off from. Driver measurement 2026-07-30 (F044)
+        says it is not: the edge is a REGULAR point of the caustic — `y` and
+        `dy/ds` are both finite and nonzero in `s = sqrt(θ_max − θ)` — and
+        the `Δθ^{-1/2}` / `Δθ^{-3/2}` divergences are artifacts of the `θ`
+        parametrization alone. `critical_point` serves the edge exactly and
+        refuses by name immediately outside it, so the standoff adds no
+        safety; what it does add is an excised sliver that leaves
+        `_lobe_winding_loop` open by 0.279 at `gamma = 1.05` (9.3% of lobe
+        reach) while `_winding_number` uses it as the saddle interior
+        admission test. Sampling the wedge CLOSED takes that gap to exactly
+        zero and changes nothing else. So: no derived constant — deletion,
+        per the standing rule's default.
+        Fold in the last estimator on the inventory,
+        `_tube_normal`'s `dth = 1e-6` forward difference (target 5 in
+        [[lensing_analytic_derivatives]]). It is the F041 surface, so
+        `inward_sign` is the tripwire.
+        ACCEPTANCE: `_WEDGE_EPS` gone with no inlined replacement, loop
+        closure gap exactly 0.0, no shrink in cusp/arc/reach/arc-span at any
+        saddle band; `_tube_normal` analytic with `inward_sign` unchanged on
+        every production arc. After this, nothing in the caustic geometry is
+        estimated rather than derived — the claim step 1 exists to earn.
 
      1e. **The interpolation COORDINATE — full detail in
         [[lensing_collocation_from_local_scales]].** Moved here from a step-9
