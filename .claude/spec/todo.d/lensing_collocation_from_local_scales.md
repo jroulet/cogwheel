@@ -37,7 +37,19 @@ section: Backlog
     both parities' tubes at once (F042 was a saddle tube at `gamma = 1.55`).
   - **Far-field exterior charts** (`_build_farfield_chart`, both parities) —
     the `rho` axis IS the caustic-relative coordinate the C8 redesign builds;
-    `theta_c` and node placement still need the treatment.
+    `theta_c` and node placement still need the treatment. The two parities'
+    exteriors are TOPOLOGICALLY DIFFERENT and already carry different radial
+    coordinates, so C8 and the node work must NOT assume the saddle mirrors the
+    astroid: the astroid encloses the origin (directional-MULTIPLICATIVE
+    `rho = |y| / r_caustic(theta_c)`, every ray hits once), while the two
+    saddle deltoids sit OFF-origin and enclose nothing, so a ray can miss both
+    lobes and there is no directional radius — the existing `_to_caustic_fixed`
+    uses a SCALAR ADDITIVE offset (`rho = 1 + |y| - reach`) on the saddle
+    exterior arm by design (F036). The quadrant fold (`['u1','u2']`) exploits
+    the reflection that swaps the two lobes, so only ONE deltoid is charted,
+    not two — but the folded lobe is still off-origin, so the fold removes the
+    DOUBLING, not the coordinate difference. Enumerate the saddle exterior
+    distinctly.
   - **Lobe-interior charts** (`_build_lobe_chart`, MACRO SADDLE ONLY) — a
     SEPARATE build path in lobe-local `(rho_lobe, theta_local)` on an
     axis-aligned box. `rho_lobe = |y - centroid| / r_deltoid` is already
