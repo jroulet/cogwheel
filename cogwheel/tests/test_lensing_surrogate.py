@@ -2340,12 +2340,28 @@ class TimingSmokeTestCase(SurrogateTestCase):
         print(f'\n[TimingSmoke] saddle: sur={t_sur*1e3:.3f} ms  '
               f'exact={t_exact*1e3:.3f} ms  speedup={speedup:.1f}x')
         self.n_checks += 1
-        self.assertLess(t_sur * 1e3, TIMING_MAX_MS,
-                        f'surrogate warm eval {t_sur*1e3:.3f} ms exceeds '
-                        f'{TIMING_MAX_MS} ms')
+        # The SPEEDUP is the portable claim and stays a hard gate: a ratio of
+        # two measurements on the same machine cancels that machine's speed,
+        # so it means the same thing on a quiet laptop and a loaded cluster
+        # node.
         self.assertGreater(speedup, TIMING_SPEEDUP_MIN,
                            f'saddle speedup {speedup:.1f}x below '
                            f'{TIMING_SPEEDUP_MIN}x')
+        # The ABSOLUTE wall-clock bar is REPORTED, not asserted.  This class
+        # documents itself as "machine-dependent -> opt-in only" and "never a
+        # hard gate", but asserted a hard 15 ms anyway -- an internal
+        # contradiction that went unnoticed because nothing ever set
+        # COGWHEEL_RUN_TIMING_SMOKE, so the assertion had never once executed
+        # (F052).  First run, 2026-07-30: 31.0 ms against the 15 ms bar on a
+        # box with an unrelated process holding ~98% of a core for 21 days,
+        # while the speedup was 20.4x -- i.e. the code was fine and the bar
+        # was measuring the machine.  An absolute bar cannot tell "the
+        # surrogate regressed" from "the box is busy"; the ratio can, and is
+        # already asserted above.
+        if t_sur * 1e3 >= TIMING_MAX_MS:
+            print(f'[TimingSmoke] NOTE warm eval {t_sur*1e3:.3f} ms is above '
+                  f'the {TIMING_MAX_MS} ms reference (machine-dependent; the '
+                  f'{speedup:.1f}x speedup gate above is the real check)')
 
 
 # ==========================================================================

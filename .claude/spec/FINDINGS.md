@@ -2619,6 +2619,56 @@ gamma tested, total arc span slightly LARGER. Against a standoff-free
 reference interior, the open loop rejects 1/792 interior probes at
 `gamma = 1.05`, reaching 0.059 in source-plane units INSIDE the lobe.
 
+## F053 — an absolute wall-clock bar measures the machine; the speedup ratio measures the code (2026-07-30)
+
+**Where:** `test_lensing_surrogate.py::TimingSmokeTestCase`; the new
+`.claude/sdk/timing_pass.sh`.
+
+Auditing the two never-run timing variables (F052) meant running them for the
+first time. Result, serial, 44:44 wall clock: **13 passed, 1 failed.**
+
+All four `COGWHEEL_STRICT_TIMING` branches PASSED. Every one asserts a SPEEDUP
+RATIO (brute-force time over fast-path time), and a ratio of two measurements
+on the same machine cancels that machine's speed — it means the same thing on
+a quiet laptop and a loaded cluster node.
+
+The single failure was the one ABSOLUTE bar:
+
+    [TimingSmoke] saddle: sur=31.013 ms  exact=632.012 ms  speedup=20.4x
+    AssertionError: 31.013 not less than 15.0
+
+The surrogate beat the exact path by **20.4x** — the property the test is
+named for — and failed a 15 ms wall-clock bar on a box where an unrelated
+process had held ~98% of a core for 21 days. The code was fine; the bar was
+measuring the machine.
+
+**The test contradicted itself.** Its section header says "CI-skippable, never
+a hard gate" and its class docstring says "machine-dependent -> opt-in only",
+yet it asserted the absolute bar hard. That contradiction survived because
+nothing ever set `COGWHEEL_RUN_TIMING_SMOKE`, so the assertion had never once
+executed. **An assertion that has never run is a claim nobody has checked** —
+including its author.
+
+**Fixed** by making the assertion match the documented intent: the speedup
+gate stays HARD, the absolute number is REPORTED with a note. Verified by
+falsification — forcing the speedup to 1.0x still fails with "1.0 not greater
+than 5.0", so the gate keeps its teeth.
+
+**Rule.** Prefer a RATIO to an ABSOLUTE bar for anything timed. An absolute
+bar cannot distinguish "the code regressed" from "the box is busy", so it
+either fires spuriously or gets quietly relaxed until it means nothing. Where
+an absolute number is genuinely wanted, report it and gate the ratio.
+
+**Scheduling** (the other half): this tier is SERIAL by necessity and cost
+44:44, because the strict branches time `lnlike_bruteforce` as their
+reference. That does not belong in the per-build sweep — it would nearly
+triple every build's post-step to re-check ratios that do not silently drift.
+It now lives in `.claude/sdk/timing_pass.sh`, a driver command for before a
+release or after touching the fast path. The `PARALLEL_UNSAFE` exclusion in
+the sweep is therefore right for two reasons, not one: contention would
+corrupt the measurement, AND the measurement is expensive enough to need its
+own schedule.
+
 ## F052 — the train tier holds every build's acceptance gates and NO routine job ran it (2026-07-30)
 
 **Where:** `.claude/sdk/post_build_sweeps.sh`; `_TRAIN_TIER_SKIP` in the
