@@ -2619,6 +2619,48 @@ gamma tested, total arc span slightly LARGER. Against a standoff-free
 reference interior, the open loop rejects 1/792 interior probes at
 `gamma = 1.05`, reaching 0.059 in source-plane units INSIDE the lobe.
 
+## F047 — a style pass wrote literal `\n` into operator.py, and nothing in the gate stack checked that staged Python parses (2026-07-30)
+
+**Where:** `cogwheel/lensing/chang_refsdal/operator.py` line ~215;
+`.claude/hooks/pre-commit`.
+
+Three blank lines between `_CONTRACTION_TARGET = 1e-10` and
+`@dataclass(frozen=True)` were replaced by the literal two-character sequence
+`\n`, leaving `_CONTRACTION_TARGET = 1e-10\n\n\n@dataclass(frozen=True)` on one
+line. `SyntaxError: unexpected character after line continuation character` —
+the module does not parse and the whole package is un-importable.
+
+**Attribution (circumstantial, not proven).** The leading suspect is an
+interrupted Tidier run: `operator.py` is 8th of the 32 files in
+`.claude/tidy_advisory.json`; collapsing blank lines around a top-level
+definition is precisely rubric rules 1 and 3; the corruption is the signature
+of a `replace_content` call with escaped rather than real newlines; the file's
+mtime was 05:53:26, two minutes AFTER the slow sweeps finished green; and
+`.serena/memories/tidy_short_term.md` does not exist, so whatever ran never
+reached its final mandatory memory write. The driver had reported "the Tidier
+never ran" on the strength of a harness rejection message, against the owner's
+direct observation that it ran long and unfinished — the observation was right.
+
+**The real finding is the gate gap.** Nothing in the pre-commit stack checked
+that staged Python PARSES. This commit was blocked only by coincidence: the
+corrupted region happened to swallow the name `geometric_amplification`, which
+a SKIPPED test references, so `check_gated_test_drift.py` fired. Had the
+mangled lines not mentioned a symbol some skipped test names, a non-parsing
+module would have landed on `claude-dev` with every gate green.
+
+**And the test suite could not have caught it.** The full suite (969) and the
+slow sweeps (1016, 0 failed) had both run green minutes earlier — against the
+file as it was BEFORE the edit. A green suite is evidence about the tree that
+was tested, never about the tree being committed.
+
+**Fixed:** a syntax gate now runs FIRST among the correctness gates. It reads
+the staged blob (`git show :file`), not the worktree, so a broken index entry
+cannot hide behind a clean working file — verified against that exact case.
+
+**Rule.** `git add -A` is how an unrelated broken file gets swept into a
+commit; stage explicitly. And the cheapest possible check — does it parse —
+belongs before every expensive one.
+
 ## F046 — `${var/${BASH_REMATCH[0]}/x}` spins forever on a bracket class: the Bash gate hook hung a core for 7 days (2026-07-30)
 
 **Where:** `.claude/hooks/use-serena.sh`, the three command-normalizer loops

@@ -47,6 +47,50 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 # documentation gate masked a correctness gate, and every --no-verify used to
 # get past the backlog silently skipped the correctness check too.
 
+# Staged Python must PARSE.
+# The cheapest correctness gate there is, and it was missing: on 2026-07-30 a
+# style pass rewrote three blank lines in operator.py as the literal two-char
+# sequence \n, leaving the module a SyntaxError and the package
+# un-importable. Nothing here noticed. The commit was blocked only by
+# accident, because the corruption happened to swallow a symbol name that a
+# SKIPPED test referenced, so the drift gate below fired on a coincidence.
+# Had that symbol not been mentioned, a non-parsing file would have landed on
+# claude-dev with every gate green -- the full suite had already run green
+# two minutes earlier, against the pre-corruption file.
+# Checks only ADDED/COPIED/MODIFIED staged .py content, from the INDEX
+# (`git show :file`), not the worktree, so it judges exactly what is being
+# committed.
+if [ -n "$PYTHON" ]; then
+    STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+    if [ -n "$STAGED_PY" ]; then
+        if ! printf '%s\n' "$STAGED_PY" | "$PYTHON" -c '
+import ast, subprocess, sys
+bad = []
+for path in (l.strip() for l in sys.stdin if l.strip()):
+    blob = subprocess.run(["git", "show", f":{path}"],
+                          capture_output=True, text=True)
+    if blob.returncode != 0:
+        continue
+    try:
+        ast.parse(blob.stdout, filename=path)
+    except SyntaxError as exc:
+        bad.append((path, exc.lineno, exc.msg))
+if bad:
+    print("===== PRE-COMMIT: staged Python does not parse =====")
+    for path, lineno, msg in bad:
+        print(f"  {path}:{lineno}  {msg}")
+    print()
+    print("  The staged CONTENT is broken, whatever the worktree looks like.")
+    print("  A passing test suite proves nothing here: it ran against the")
+    print("  file as it was BEFORE the edit that broke it.")
+    print("====================================================")
+    sys.exit(1)
+'; then
+            exit 1
+        fi
+    fi
+fi
+
 # Changed API still referenced by SKIPPED tests.
 # A skipped/gated/xfailed test does not run, so it cannot report that a
 # signature change or a bumped constant broke it: the suite stays green and
