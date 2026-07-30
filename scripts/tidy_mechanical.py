@@ -33,26 +33,83 @@ from __future__ import annotations
 
 import argparse
 import ast
+import io
 import json
 import pathlib
-import re
 import sys
+import tokenize
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 ADVISORY = REPO / '.claude' / 'tidy_advisory.json'
 MAX_LINE = 79
 
 
+def _protected_lines(text: str) -> set[int]:
+    """1-based line numbers whose content lives INSIDE a multi-line string.
+
+    A line-based normaliser is wrong inside a string literal: a docstring line
+    ending in a space OWNS that space as part of its value, so rstripping it
+    changes the string.  The AST guard in `tidy_file` catches that and aborts,
+    which is safe but means such a file is never tidied at all -- reported by
+    the gw driver, 2026-07-30.  Tokenising first lets the surrounding
+    whitespace be fixed while string contents are preserved byte for byte.
+
+    Only the INTERIOR lines of a multi-line string are protected; the line
+    carrying the closing quote can still have trailing whitespace stripped
+    after the quote, but treating the whole span as protected is the
+    conservative choice and costs nothing real.
+    """
+    protected: set[int] = set()
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        for tok in tokens:
+            if tok.type != tokenize.STRING:
+                continue
+            start, end = tok.start[0], tok.end[0]
+            if end > start:                      # multi-line string only
+                protected.update(range(start, end + 1))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        # Unparseable: protect nothing here -- `tidy_file` has already
+        # refused to touch a file that does not parse.
+        return set()
+    return protected
+
+
 def _normalise(text: str) -> str:
     """Apply the whitespace rules.  Pure text -> text, no file I/O."""
-    # A line of spaces is not a blank line; strip trailing whitespace too.
-    lines = ['' if line.strip() == '' else line.rstrip()
-             for line in text.split('\n')]
-    text = '\n'.join(lines)
-    # Never more than 2 consecutive blank lines.
-    text = re.sub(r'\n{4,}', '\n\n\n', text)
+    protected = _protected_lines(text)
+    out = []
+    for lineno, line in enumerate(text.split('\n'), 1):
+        if lineno in protected:
+            out.append(line)                     # string content: untouched
+        elif line.strip() == '':
+            out.append('')                       # a line of spaces is blank
+        else:
+            out.append(line.rstrip())
+    text = '\n'.join(out)
+    # Never more than 2 consecutive blank lines.  Blank runs inside a
+    # multi-line string are left alone: a collapse there would also change
+    # the string's value.
+    text = _collapse_blank_runs(text)
     # Exactly one trailing newline.
     return text.rstrip('\n') + '\n'
+
+
+def _collapse_blank_runs(text: str) -> str:
+    """Collapse 3+ consecutive blank lines to 2, outside string literals."""
+    protected = _protected_lines(text)
+    lines = text.split('\n')
+    out: list[str] = []
+    run = 0
+    for lineno, line in enumerate(lines, 1):
+        if line == '' and lineno not in protected:
+            run += 1
+            if run > 2:
+                continue
+        else:
+            run = 0
+        out.append(line)
+    return '\n'.join(out)
 
 
 def _long_lines(text: str) -> list[tuple[int, int]]:

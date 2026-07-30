@@ -2619,6 +2619,99 @@ gamma tested, total arc span slightly LARGER. Against a standoff-free
 reference interior, the open loop rejects 1/792 interior probes at
 `gamma = 1.05`, reaching 0.059 in source-plane units INSIDE the lobe.
 
+## F050 — every revision-budget exhaustion in the SDK's history is the same unfixable SPEC.md finding (2026-07-30)
+
+**Where:** the Inspector revision loop in `.claude/sdk/orchestrator.py`; the
+brief/plan surface lists that feed it.
+
+Audited all 28 builds on this box that ran a revision loop. **Three exhausted
+their budget. All three were stuck on `.claude/spec/SPEC.md`. No other file has
+ever produced a repeated finding.**
+
+| build | rounds | stuck finding |
+|---|---|---|
+| `analytic_geometry_cascade` (1a, 07-29) | 3 | `INS-1-001 SPEC.md` x3 |
+| `saddle_born_carrier` (07-28) | 3 | `INS-10-001 SPEC.md` x3 |
+| `tube_arclength_coordinate` (1e-tube, 07-30) | 3 | `INS-1-001 SPEC.md` x3 |
+
+The contrast confirms the loop itself is healthy: `born_carrier_bandsplit` ran
+8 revision rounds and `lensing_build5` ran 7, both WITHOUT exhausting budget
+and without a repeated finding — each round fixed something and surfaced
+something new. The three failures are the ones where the loop had nothing it
+could do.
+
+**Mechanism.** `SPEC.md` is the Librarian's file, so a Coder WP's `Where:` list
+never contains it. The Inspector correctly notices that SPEC.md now describes
+something the build changed. No agent inside the revision loop is scoped to
+touch it. So the loop re-inspects, re-reports the identical finding, and grinds
+to budget exhaustion — roughly $20-25 of pure re-inspection across the three,
+plus a round of wall clock and transcript depth each.
+
+**Two independent fixes.**
+- STRUCTURAL: the loop already knows every WP's `Where:` list. A finding whose
+  file is owned by NO WP cannot be resolved by re-inspecting — route it to the
+  Librarian or record it and move on, instead of spending a round. Cheap to
+  detect; it would have caught all three.
+- DISCIPLINE (driver): a brief that says "prose you change must be true when
+  done" must NAME every surface, not just the obvious ones. 1e-tube's brief
+  named the `TubeChart` docstring and `DATA_CONTRACTS.yaml` and omitted
+  `SPEC.md`, whose surrogate row documents the very coordinate the build
+  changed; the Architect's plan then declared "Spec update: no". Build 1a's
+  failure was the same omission in a different brief, so the driver made this
+  mistake twice without noticing the pattern until asked whether it was
+  chronic.
+
+**Rule.** A revision loop can only fix what some agent owns. When adding a
+gate that inspects a surface, check that the surface is inside somebody's
+write scope — otherwise the gate is a guaranteed budget burn, not a guard.
+
+## F049 — marker strings were never checked against what the code actually emits, and a guard was placed where it could not run (2026-07-30)
+
+**Where:** `.claude/sdk/cli.py` terminal markers; `.claude/sdk/orchestrator.py`
+`_run_tidier_skill`; `scripts/tidy_mechanical.py`. All found by the gw driver
+while porting these same fixes, and all real here.
+
+**1. A phantom success marker.** The monitor's terminal set contained
+`Build complete`. cogwheel emits that string **zero** times — 0 occurrences in
+both real build logs; the success path prints the `  BUILD REPORT` banner. So
+the monitor could exit on FAILURE but never on SUCCESS, leaking a 120-s polling
+subshell after every clean build. The same orphan family as the seven-day hook
+spin (F046).
+
+**2. An anchor that could not match the most important line.** The anchor was
+`^(\[[0-9:]+\])?[[:space:]]*`, but the watchdog emits
+`[2026-07-30 08:15:22] === KILLED BY WATCHDOG (...)`: the bracket holds a date
+and a space, and the marker sits behind `=== `. Both defeat that anchor, so a
+watchdog-killed build would never stop its monitor. Fixed to
+`^(\[[^]]*\])?[[:space:]]*(===[[:space:]]*)?` with the markers this repo
+actually emits, verified line by line against real logs.
+
+Together these are one mistake: **the marker set was written from memory of
+what a build log ought to say, never checked against what the code prints.**
+F048 was the same family seen from the other side — markers that matched
+something they should not. Both are cured by the same discipline: before
+keying a monitor on a string, grep the SOURCE for it and grep a REAL log for
+it. A marker that appears zero times in either is not a marker.
+
+**3. A guard placed where it could never run.** The mechanical style pass was
+called inside `_run_tidier_skill` AFTER the early return that fires when the
+in-DAG Tidier is skipped — and that skip is the DEFAULT. So the deterministic
+pass, whose entire purpose was to stop style depending on whether an expensive
+agent was scheduled, ran only when that agent was scheduled. Moved above the
+opt-in check.
+
+**4. A line-based normaliser inside string literals.** `_normalise` rstripped
+every line, including lines inside a docstring, where a trailing space is part
+of the string's VALUE. The AST guard caught it and aborted, so nothing was ever
+corrupted — but the affected file was then never tidied at all. Now tokenises
+first and protects the interior lines of multi-line strings, so surrounding
+whitespace is still fixed while string bytes are preserved.
+
+**Rule.** A defence is only as good as its trigger condition. Ask of every
+guard: what exact string fires this, does the code emit it, and is the guard
+reachable on the default path? Three of these four were failures of that
+question, not of the logic behind it.
+
 ## F048 — a log monitor that greps for markers the log's own header ECHOES reads its own instructions as results (2026-07-30, twice)
 
 **Where:** `.claude/sdk/cli.py`'s emitted Monitor command; earlier the same

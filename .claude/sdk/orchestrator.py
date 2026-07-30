@@ -1645,6 +1645,17 @@ class BuildOrchestrator:
         # as a hard override for backward compatibility.
         skip_override = os.environ.get("SDK_SKIP_TIDIER")
         run_in_dag = os.environ.get("SDK_RUN_TIDIER") == "1"
+        # MECHANICAL PASS RUNS UNCONDITIONALLY, before the opt-in check.
+        # It is deterministic, AST-verified and takes under a second, so there
+        # is no reason to gate it on the AGENT's opt-in -- and gating it there
+        # is exactly the bug this replaces: placed after the early return, it
+        # never ran at all, because the in-DAG agent is opt-out by default.
+        # The whole point of mechanizing the rubric was that style stops
+        # depending on whether an expensive agent was scheduled.
+        mech = self._run_mechanical_tidy(
+            [f for f in self._git_changed_files() if f.endswith(".py")])
+        if mech:
+            self._log(f"Step 2: mechanical style pass — {mech}")
         if skip_override or not run_in_dag:
             reason = ("SDK_SKIP_TIDIER set" if skip_override
                       else "in-DAG run is opt-in (set SDK_RUN_TIDIER=1); "
@@ -1668,16 +1679,7 @@ class BuildOrchestrator:
         all_files_changed = self._git_changed_files()
         py_files = [f for f in all_files_changed if f.endswith(".py")]
         self._log("Step 2: Tidier cleanup")
-        # MECHANICAL FIRST, deterministically.  Whitespace rules and dead
-        # imports need no judgment, and an agent doing them by hand is both
-        # slower than the build it follows (measured 2026-07-30: a run
-        # outlasted a full build and was still unfinished) and capable of
-        # corrupting a file -- one such pass wrote literal `\n` into
-        # operator.py and left the package un-importable (F047).  The script
-        # verifies every edit with an AST round trip, so it cannot.
-        mech = self._run_mechanical_tidy(py_files)
-        if mech:
-            self._log(f"Step 2: mechanical pass — {mech}")
+        # (The mechanical pass already ran above, unconditionally.)
         # The AGENT keeps only what genuinely needs judgment: whether a public
         # helper belongs above a private one, whether an import belongs to the
         # layer it is grouped with, whether a module's organisation still

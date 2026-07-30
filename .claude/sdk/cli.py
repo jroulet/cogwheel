@@ -238,9 +238,19 @@ def _run_build(args):
     # finished -- observed 2026-07-30, and the second time this session that
     # grepping a log for text the log's own header echoes produced a false
     # reading.  Real markers always begin a line; the echo never does.
-    _anchor = r"^(\[[0-9:]+\])?[[:space:]]*"
-    _terminal = (_anchor + "(Build complete|Build failed|GATE FAILURE|"
-                 "KILLED|BUILD STRANDED)")
+    # The bracket matches ANY stamp, not just [HH:MM:SS]: the watchdog emits
+    # `[2026-07-30 08:15:22] === KILLED BY WATCHDOG ...`, whose bracket holds a
+    # date and a space and whose marker sits behind `=== `.  A [0-9:]-only
+    # bracket with no `===` allowance silently fails to match the single most
+    # important terminal line -- caught by the gw driver porting this, 2026-07-30.
+    _anchor = r"^(\[[^]]*\])?[[:space:]]*(===[[:space:]]*)?"
+    # Verified against THIS repo's source, not copied: the success path prints
+    # the "  BUILD REPORT" banner (_print_report).  There is NO "Build complete"
+    # line anywhere in cogwheel -- 0 occurrences in both real build logs -- so
+    # the previous marker set could never exit on success, only on failure,
+    # leaking a polling subshell after every clean build.
+    _terminal = (_anchor + "(BUILD REPORT|Build failed|Build cancelled|"
+                 "KILLED BY WATCHDOG|GATE FAILURE|BUILD STRANDED)")
     # Health is EITHER log advancing: during the tree-wide fast gate the build
     # log legitimately freezes for ~10 min while pytest writes to its own file.
     _gate_log = os.path.join(project_root, ".claude", "sdk", "logs",
@@ -254,8 +264,14 @@ def _run_build(args):
         f'n=$(grep -av "Monitor(persistent" "$L" 2>/dev/null '
         f'| grep -aiE "{_mon_markers}" | tail -1); '
         '[ -n "$n" ] && [ "$n" != "$p" ] && { echo "$n"; p="$n"; }; '
-        f'if grep -qaiE "{_terminal}" "$L" 2>/dev/null; then '
-        f'grep -aiE "{_terminal}" "$L" | tail -2; exit 0; fi; '
+        # Belt and braces: anchoring already excludes the echo, but the echo
+        # is dropped here too so a future marker edit cannot reintroduce the
+        # self-match. NOTE no -i: "BUILD REPORT" is a banner whose case is
+        # meaningful, and a case-insensitive match would also hit prose.
+        f'if grep -av "Monitor(persistent" "$L" 2>/dev/null '
+        f'| grep -qaE "{_terminal}"; then '
+        f'grep -av "Monitor(persistent" "$L" | grep -aE "{_terminal}" '
+        f'| tail -2; exit 0; fi; '
         'c="$(stat -c %Y "$L" 2>/dev/null)-$(stat -c %Y "$G" 2>/dev/null)"; '
         'if [ "$c" = "$m" ]; then s=$((s+1)); '
         '[ "$s" -eq 5 ] && echo "STALL: build AND tree-gate logs both frozen '
