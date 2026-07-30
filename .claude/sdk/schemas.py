@@ -215,6 +215,12 @@ class BuildReport:
     revision_loops: int = 0
     escalations: list[str] = field(default_factory=list)
     commits: list[str] = field(default_factory=list)  # "sha message"
+    #: Non-fatal debts the build DEFERRED rather than died on -- currently
+    #: spec/doc discipline, which an SDK build defers because its Librarian
+    #: stage owns those surfaces. A warning here means the deferral was NOT
+    #: cleared and is now a driver task; it is the receipt that keeps
+    #: "defer it" from silently meaning "drop it".
+    warnings: list[str] = field(default_factory=list)
     total_cost: float = 0.0
 
 

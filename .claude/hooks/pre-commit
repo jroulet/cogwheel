@@ -338,6 +338,42 @@ if echo "$STAGED" | grep -q "TODO.md\|COMPLETED.md"; then
 fi
 
 # Report errors
+#
+# SDK BUILDS DEFER THIS DEBT INSTEAD OF DYING ON IT.
+# These are DOCUMENTATION-HYGIENE errors, not correctness errors (the
+# correctness gates ran first and already exited non-zero if they failed).
+# The gate's purpose is "a changelog entry never silently goes missing", NOT
+# "every individual commit is self-contained" -- and an SDK build has a
+# Librarian stage that owns exactly these surfaces. Blocking here does not get
+# the fragment written; it strands a build that passed every correctness gate
+# with all its work uncommitted in the working tree, which is a far worse
+# failure than a fragment arriving one commit later. That happened on
+# 2026-07-30 (F051) and cost a manual recovery.
+#
+# So: record the debt as a RECEIPT and let the commit through. The receipt is
+# what makes this deterministic rather than a promise -- the orchestrator
+# asserts the file is gone after the Librarian runs, and says so loudly in the
+# build report if it is not. Same shape as .claude/sync_issues.json.
+#
+# Interactive commits are unaffected: no SDK_BUILD_ACTIVE, no deferral.
+if [ -n "$errors" ] && [ -n "${SDK_BUILD_ACTIVE:-}" ]; then
+    DEBT_FILE="$REPO_ROOT/.claude/doc_debt.json"
+    {
+        printf '{\n  "recorded": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf '  "reason": "spec/doc discipline deferred for an SDK build",\n'
+        printf '  "owed": %s\n}\n' \
+            "$(printf '%s' "$errors" | sed 's/"/\\"/g' | \
+               awk 'BEGIN{printf "["} {if(NR>1)printf ","; printf "\"%s\"", $0} END{printf "]"}')"
+    } > "$DEBT_FILE"
+    echo "===== PRE-COMMIT: spec/doc debt DEFERRED (SDK build) ====="
+    echo "$errors"
+    echo ""
+    echo "  Recorded to .claude/doc_debt.json. The Librarian stage owns these"
+    echo "  surfaces and must clear it; the orchestrator checks afterwards."
+    echo "=========================================================="
+    errors=""
+fi
+
 if [ -n "$errors" ]; then
     echo "===== PRE-COMMIT: Spec/doc discipline check failed ====="
     echo "$errors"

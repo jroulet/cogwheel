@@ -12,16 +12,8 @@ at ``git commit`` on the spec/doc discipline hook.
 """
 import subprocess
 import sys
-from datetime import date
 from pathlib import Path
 
-# (marker substring emitted by .claude/hooks/pre-commit, changelog fragment dir)
-FRAG_SPECS = [
-    ("DATA_CONTRACTS.yaml modified but no changelog evidence",
-     ".claude/spec/contracts_changelog.d"),
-    ("SPEC.md modified but no changelog evidence",
-     ".claude/spec/spec_changelog.d"),
-]
 
 
 def ensure_spec_doc_fragments(project_root, message, log=print):
@@ -39,50 +31,42 @@ def ensure_spec_doc_fragments(project_root, message, log=print):
         return
 
     out = (res.stdout or "") + (res.stderr or "")
-    title = message.splitlines()[0][:70]
-    slug = "".join(
-        c if c.isalnum() else "_" for c in title.lower()
-    ).strip("_")[:40] or "build_change"
-    today = date.today().isoformat()
-    stubbed = []
 
-    for marker, frag_dir in FRAG_SPECS:
-        if marker not in out:
-            continue
-        frag = root / frag_dir / f"{today}_{slug}.md"
-        if frag.exists():
-            continue
-        frag.parent.mkdir(parents=True, exist_ok=True)
-        frag.write_text(
-            f"---\nbump: patch\n---\n\n### {title}\n\n"
-            "(Auto-generated at commit preflight because the build "
-            "staged the canonical file without a fragment; Librarian "
-            "should refine this entry from the commit diff.)\n")
-        rel = str(frag.relative_to(root))
-        subprocess.run(["git", "add", rel], cwd=root, check=True)
-        stubbed.append(rel)
-
-    if stubbed:
-        render = root / "scripts" / "render_fragments.py"
-        if render.exists():
-            subprocess.run([sys.executable, str(render)],
-                           capture_output=True, text=True, cwd=root)
-            subprocess.run(["git", "add", "-u"], cwd=root, check=True)
-        log(f"Commit preflight: auto-stubbed missing fragment(s) "
-            f"{stubbed} (Librarian should refine)")
-        res = run_hook()
-        if res.returncode == 0:
-            return
-        out = (res.stdout or "") + (res.stderr or "")
+    # The fragment AUTO-STUB that used to live here is gone (2026-07-30).
+    # It existed only because the Librarian -- which OWNS every doc surface --
+    # ran one step after the commit, so the gate was unsatisfiable by its
+    # owner. Two things fixed that properly: the doc stage now runs BEFORE the
+    # commit, and the pre-commit hook DEFERS spec/doc debt for an SDK build,
+    # recording a receipt (.claude/doc_debt.json) the orchestrator then asserts
+    # was cleared.
+    #
+    # The stub was worse than the gap it filled: it hardcoded `bump: patch`
+    # regardless of the real change (1e-tube's schema addition was minor),
+    # scraped a title from the commit subject, and rendered an
+    # "(Auto-generated ... Librarian should refine)" note into the CANONICAL
+    # changelog with nothing tracking it for refinement. It also ran
+    # `git add -u` twice, re-introducing blanket staging. Fabricating a
+    # plausible-looking wrong answer is worse than recording a debt.
 
     # Last remediation: the deterministic sync script auto-fixes SPEC
     # module lists (the "new module added but SPEC.md not updated" class
     # that killed builds 8g-b and 8h-b2). Run it, restage, re-check.
     sync = root / "scripts" / "sync_derived_docs.py"
     if sync.exists():
+        # Stage ONLY what the sync script itself changed. A blanket
+        # `git add -u` here runs INSIDE _git_commit_safe, after it has
+        # deliberately staged just the build's own output, and would
+        # re-sweep exactly the pre-existing dirt that staging fix excludes.
+        def _dirty() -> set:
+            proc = subprocess.run(["git", "diff", "--name-only"],
+                                  capture_output=True, text=True, cwd=root)
+            return {p for p in (proc.stdout or "").splitlines() if p}
+
+        before = _dirty()
         subprocess.run([sys.executable, str(sync)],
                        capture_output=True, text=True, cwd=root)
-        subprocess.run(["git", "add", "-u"], cwd=root, check=True)
+        for path in sorted(_dirty() - before):
+            subprocess.run(["git", "add", "--", path], cwd=root, check=True)
         log("Commit preflight: ran sync_derived_docs.py auto-fix, "
             "re-checking the hook")
         res = run_hook()

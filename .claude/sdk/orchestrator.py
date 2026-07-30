@@ -269,6 +269,9 @@ class BuildOrchestrator:
     _agent_count: int = field(default=0, init=False)
     _agents_that_ran: list[str] = field(default_factory=list, init=False)
     _change_reports: list[dict] = field(default_factory=list, init=False)
+    #: Doc/spec findings the revision loop deferred because Foreman-Lite
+    #: cannot touch those files; handed to the Librarian stage (F050).
+    _librarian_deferred: list = field(default_factory=list, init=False)
     _serena: Optional[SerenaManager] = field(default=None, init=False)
     _specs_text: str = field(default="", init=False)
     _inspector_result: Optional[InspectorResult] = field(default=None, init=False)
@@ -1474,12 +1477,37 @@ class BuildOrchestrator:
 
         pipeline_context = "\n\n".join(context_parts)
 
+        deferred_text = ""
+        if self._librarian_deferred:
+            deferred_text = (
+                "\n\n## Inspector findings DEFERRED to you (must be fixed)\n"
+                "The revision loop could not resolve these: they are on files "
+                "only you may edit, so Foreman-Lite declined them on role "
+                "boundary. They are yours, and nothing downstream will catch "
+                "them.\n"
+                + "\n".join(
+                    f"- [id: {f.finding_id}] [{f.file}] {f.description}"
+                    + (f"\n  Suggested fix: {f.suggested_fix}"
+                       if f.suggested_fix else "")
+                    for f in self._librarian_deferred))
+
+        # Hand over the diff as DATA rather than instructing the agent where to
+        # look for it. The doc stage runs BEFORE the commit, so `git log` shows
+        # nothing of this build; computing the diff here means the Librarian
+        # cannot look in the wrong place, instead of being told not to.
+        build_diff = subprocess.run(
+            ["git", "diff", "--stat", "HEAD"],
+            cwd=self.project_root, capture_output=True, text=True,
+        ).stdout.strip()
+
         librarian_task = (
             f"Audit documentation surfaces for staleness caused by the recent "
             f"code changes.  Update as needed.\n\n"
             f"Work packages completed: {[wp.title for wp in self.plan.work_packages]}\n\n"
+            f"Diff of this build (working tree vs HEAD):\n```\n{build_diff}\n```\n\n"
             f"Files changed in this build:\n"
             + "\n".join(f"- {f}" for f in build_changed_files)
+            + deferred_text
             + (f"\n\n{pipeline_context}" if pipeline_context else "")
             + f"\n\n**IMPORTANT**: If you edit any file under `docs/source/`, "
             f"run the Sphinx docs rebuild command before finishing."
@@ -1516,7 +1544,36 @@ class BuildOrchestrator:
             if trailing_sha:
                 report.commits.append(trailing_sha)
 
+        # ---- THE RECEIPT ---------------------------------------------------
+        # If the commit deferred spec/doc debt, the pre-commit hook wrote
+        # `.claude/doc_debt.json`.  The Librarian owns those surfaces and has
+        # now run, so the file must be gone.  This is what makes the deferral
+        # deterministic instead of a promise: a build that defers and does NOT
+        # clear says so, loudly, in its own report.
+        self._check_doc_debt_cleared(report)
+
         return report
+
+    def _check_doc_debt_cleared(self, report: BuildReport) -> None:
+        """Assert the Librarian cleared any deferred spec/doc debt."""
+        debt = Path(self.project_root) / ".claude" / "doc_debt.json"
+        if not debt.exists():
+            return
+        try:
+            owed = json.loads(debt.read_text()).get("owed", [])
+        except (OSError, ValueError):
+            owed = ["<unreadable doc_debt.json>"]
+        self._log("  DOC DEBT NOT CLEARED — the commit deferred spec/doc "
+                  "discipline and the Librarian did not resolve it:")
+        for line in owed:
+            if line.strip():
+                self._log(f"    {line.strip()}")
+        self._log("  This is a DRIVER task: write the fragment(s), run "
+                  "scripts/render_fragments.py, commit, and delete "
+                  ".claude/doc_debt.json")
+        report.warnings.append(
+            f"spec/doc debt deferred at commit and NOT cleared by the "
+            f"Librarian ({len(owed)} item(s)); see .claude/doc_debt.json")
 
     # ── DAG engine ───────────────────────────────────────────────────────
 
@@ -2225,56 +2282,38 @@ class BuildOrchestrator:
                     elif decision == "abort":
                         raise EscalationNeeded(user_findings, revision_loops)
 
-            # Tier 0.5: findings whose remedy is a DOC/SPEC surface route to
-            # the Librarian, not Foreman-Lite.
+            # Tier 0.5: DEFER doc/spec findings to the Librarian stage.
             #
             # Foreman-Lite declines them on role boundary -- correctly: the
-            # spec is the Librarian's file, and its own crew prompt forbids
-            # ranging outside its scope. So the finding is re-reported every
-            # round, the loop cannot converge, and the budget burns.
-            # `foreman_short_term` recorded this diagnosis, with the exact fix
-            # recommended here, at "recurrence 14x+" -- the agent hitting the
-            # bug root-caused it repeatedly and nothing upstream acted.
-            # Measured (F050): every revision-budget exhaustion in 28 builds
-            # was this finding, on this file.
-            # Same shape as Tier 1.5 below, which routes test-authorship
-            # findings to the Test Developer for exactly this reason.
-            librarian_findings = [
+            # spec is the Librarian's file. Left in its queue the finding is
+            # re-reported every round, the loop cannot converge, and the
+            # budget burns. `foreman_short_term` recorded that diagnosis, with
+            # the fix, at "recurrence 14x+"; measured (F050), every
+            # revision-budget exhaustion in 28 builds was this one finding on
+            # this one file.
+            #
+            # DEFER rather than spawn: the Librarian now runs after this loop
+            # and BEFORE the commit, so it will fix these anyway. An earlier
+            # version of this block spawned a Librarian here, which bought a
+            # duplicate invocation per build to solve a problem the stage
+            # reorder already solves. All the loop needs is to stop treating
+            # as blocking what it cannot fix.
+            deferred = [
                 f for f in trivial_findings
                 if (f.file and f.file.startswith('.claude/spec/'))
                 or (f.suggested_fix and 'librarian' in f.suggested_fix.lower())
             ]
-            if librarian_findings:
+            if deferred:
                 trivial_findings = [f for f in trivial_findings
-                                    if f not in librarian_findings]
-                findings_text = "\n".join(
-                    f"- [id: {f.finding_id}] [{f.file}] {f.description}"
-                    + (f"\n  Suggested fix: {f.suggested_fix}"
-                       if f.suggested_fix else "")
-                    for f in librarian_findings)
+                                    if f not in deferred]
+                for finding in deferred:
+                    open_findings.pop(finding.finding_id, None)
+                self._librarian_deferred.extend(deferred)
                 self._log(
-                    f"  Routing {len(librarian_findings)} doc/spec finding(s) "
-                    f"to the Librarian (Foreman-Lite declines these on role "
-                    f"boundary; see F050)")
-                lib_task = (
-                    "## Inspector findings on documentation surfaces you own"
-                    + chr(10) * 2 + findings_text + chr(10) * 2
-                    + "Fix each one. These are YOUR files -- Foreman-Lite "
-                    "cannot touch them, so if you leave them the revision "
-                    "loop re-reports them until its budget is spent. Write "
-                    "fragments, not the generated canonical files, and run "
-                    "`python scripts/render_fragments.py` afterwards."
-                    + CHANGE_REPORT_INSTRUCTION)
-                try:
-                    lib_result, _ = await self._run_agent(
-                        'librarian', lib_task, max_turns_override=60)
-                    self._collect_change_report(lib_result)
-                except Exception as exc:                      # noqa: BLE001
-                    # Doc prose must never abort a build whose code work is
-                    # done and verified.
-                    self._log(f"  Librarian doc-finding pass failed "
-                              f"({type(exc).__name__}: {exc}); the finding "
-                              f"stays open for the driver")
+                    f"  Deferring {len(deferred)} doc/spec finding(s) to the "
+                    f"Librarian stage (Foreman-Lite declines these on role "
+                    f"boundary; see F050): "
+                    + ", ".join(f.finding_id for f in deferred))
 
             # Tier 1: Foreman-Lite fixes trivial findings
             if trivial_findings:
