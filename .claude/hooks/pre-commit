@@ -105,6 +105,21 @@ if [ -f "$DRIFT_CHECK" ] && [ -n "$PYTHON" ]; then
     fi
 fi
 
+# A RETIRED concept reintroduced into production code.
+# The caustic-relative sequence retires constants and coordinates as it goes,
+# and its rule is "default is DELETE, not re-point -- changing 3.0 to rho* IS
+# the scar". Step 8 of that sequence makes the rule mechanical, but step 8 is
+# LAST, so ghosts would accumulate across the whole sequence first. This is
+# that step's cheap half, pulled forward: each build adds what it retired to
+# .claude/hooks/retired_concepts.json and the name cannot come back.
+# Self-skips if the checker or the registry is absent.
+RETIRED_CHECK="$REPO_ROOT/.claude/hooks/check_retired_concepts.py"
+if [ -f "$RETIRED_CHECK" ] && [ -n "$PYTHON" ]; then
+    if ! "$PYTHON" "$RETIRED_CHECK"; then
+        exit 1
+    fi
+fi
+
 # Test oracle pinned to a MOVING git HEAD.
 # A test that reconstructs the pre-change implementation via `git show HEAD:`
 # is valid only while HEAD is still the pre-change commit -- i.e. during its

@@ -1,0 +1,43 @@
+{
+  "_README": [
+    "Names of RETIRED concepts. A commit that reintroduces one into production",
+    "code fails the pre-commit guard (check_retired_concepts.py).",
+    "",
+    "WHY: the caustic-relative sequence retires constants and coordinates as it",
+    "goes, and its standing rule is 'default is DELETE, not re-point -- changing",
+    "3.0 to rho* IS the scar, it preserves the shape of the wrong idea'. Step 8",
+    "of that sequence makes the rule mechanical, but step 8 is LAST, so ghosts",
+    "would accumulate for the whole sequence first. This is step 8's cheap half,",
+    "pulled forward: every build that retires a name adds it here, and the name",
+    "cannot come back.",
+    "",
+    "SCOPE: production code only (cogwheel/**, excluding cogwheel/tests/).",
+    "Tests and docs may name a retired concept while recording its retirement;",
+    "production code may not, because there the name IS the concept.",
+    "",
+    "Add an entry when you retire something. `retired_by` is the commit, `note`",
+    "is what replaced it -- a future reader needs to know where the idea went."
+  ],
+  "retired": [
+    {
+      "name": "_WEDGE_EPS",
+      "retired_by": "145cec3",
+      "note": "F044: the macro-saddle wedge edge is a REGULAR point of the caustic; the standoff bought no safety and cost coverage. Sweeps run edge to edge."
+    },
+    {
+      "name": "_PROBE_ETA",
+      "retired_by": "1b",
+      "note": "F039: which side of a fold carries the image pair is analytic (fold_opening_direction), not a stepped probe."
+    },
+    {
+      "name": "_CLOUD_MARGIN_FRAC",
+      "retired_by": "1b",
+      "note": "existed only to absorb the discreteness of a caustic cloud that nearest_caustic_point resolves exactly."
+    },
+    {
+      "name": "_CUSP_SPEED_REL_FRAC",
+      "retired_by": "00bf8ae",
+      "note": "cusps are exact |y'|=0 roots now, so a relative speed-dip threshold has no reason to exist. NOTE the literal 0.2 survived inline in _find_cusps and goes with the F040 cusp-window build."
+    }
+  ]
+}
