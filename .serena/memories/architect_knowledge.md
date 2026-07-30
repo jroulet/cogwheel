@@ -193,3 +193,13 @@
   cusp proximity) — same bug class as the retired _PROBE_ETA; prefer an
   exact-zero/sign tripwire over a magnitude filter when the magnitude isn't
   the actual physical quantity being gated.
+- WP split when a fix spans BOTH production+its own docstring AND test-file
+  helpers/prose: one merged Coder WP (prod+docstring together, never split
+  a symbol from its own docstring) + one Test Dev WP (all test authoring +
+  test-file helper/prose fixes, routed via domain_test_descriptions) —
+  Coder never touches test files (Build 1d).
+- When a brief swaps a finite-diff derivative for an analytic closed form,
+  make orientation/SIGN agreement — not just magnitude — an explicit
+  load-bearing gate: an independent golden sign table cross-checked
+  against a non-circular construction (e.g. an image census), never mere
+  self-consistency of the same function against itself (F041, Build 1d).

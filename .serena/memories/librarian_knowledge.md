@@ -85,9 +85,11 @@
   Without `rg`, `regenerate_consumer_graph.py` hard-fails; `sync_derived_
   docs.py` still runs against the stale cached CONSUMER_GRAPH.json.
 - Running `scripts/render_fragments.py` can leave a stray unrelated diff
-  in `.claude/tidy_advisory.json` as a side effect — revert it with
-  `git checkout --` and don't commit it; "All surfaces up to date" with
-  zero real diff is a legitimate clean-backlog outcome, not a missed check.
+  in BOTH `.claude/tidy_advisory.json` AND
+  `.claude/agent_state/foreman_lite.json` as a side effect — revert both
+  with `git checkout --` and don't commit them; "All surfaces up to date"
+  with zero real diff is a legitimate clean-backlog outcome, not a missed
+  check.
 - When a changelog/TODO fragment reports "N new tests", SUM the literal
   per-report test counts from each contributing agent's own change report
   rather than eyeballing a round total — an un-summed guess is an easy
@@ -96,3 +98,16 @@
   issues.json` file listing pending commits back through a given hash;
   after completing the sync (committing only the doc files you changed),
   delete the trigger file.
+- todo.d fragments can cross-reference a SAME step between an "ordering"
+  fragment (numbered by build letter) and an "inventory" fragment
+  (numbered by target, not build letter) via `[[fragment_name]]`
+  backlinks — marking a step done means adding a DONE marker in BOTH,
+  not just the one that names the build letter; grep for backlinks
+  before considering doc-sync of a step complete.
+- Before marking a numbered todo/inventory item DONE from a grep hit
+  alone, read any "carried forward"/caveat subsection in that fragment —
+  a target symbol can still exist because it was deliberately repurposed
+  for a different later step, not because the original step is unfinished.
+- No `changelog.d` directory exists in this repo's `.claude/spec/` —
+  these internal lensing dev builds use only `completed.d`/`todo.d`
+  (COMPLETED.md/TODO.md), not CHANGELOG.md generation.

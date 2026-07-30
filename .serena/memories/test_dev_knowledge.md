@@ -119,7 +119,11 @@
   `get_symbols_overview`. `tests/output/` is hook-blocked from `list_dir`/
   `find_file` — verify generated plots via `pathlib.glob` in the conda env.
   The bash hook also blocks `cat >>` (the word "cat"): append via Serena
-  `insert_at_line` (0-based; insert at line == linecount to append).
+  `insert_at_line` (0-based; insert at line == linecount to append). Serena
+  `replace_content` can also intermittently reject a large multi-line repl
+  ("Field required repl missing" pydantic error) on identical args — just
+  retry as-is, don't reformat/shrink the repl; it can succeed verbatim on
+  the next attempt.
 - SDK caps inlined short-term memories at 24KB (tail-kept); earlier entries
   survive only in git history, not the prompt.
 - When production adds a new REQUIRED positional field to a serialized-
@@ -177,3 +181,12 @@
   — a dps-INVARIANT residual confirms the closed form is right, not wrong;
   the pass/fail discriminator is residual MAGNITUDE against the mixed
   atol/rtol gate, never "shrinks with dps".
+- MEASURE-ZERO EDGE STRADDLE: before encoding a brief's demand for
+  unconditional behavior (e.g. "always raises") at an exact analytic
+  boundary, measure BOTH sides numerically first — float round-off can
+  straddle the boundary sign (e.g. a discriminant lands <=0 on one side,
+  ~+1e-15 on the other), making the unconditional claim false on one side.
+  Encode the honest disjunction the data actually supports (e.g. raises OR
+  the quantity exceeds a divergence floor) and flag the brief's/docstring's
+  unconditional claim as aspirational rather than silently picking a side
+  (Build 1d wedge edge).

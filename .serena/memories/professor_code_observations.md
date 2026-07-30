@@ -193,3 +193,10 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   ~linearly with perturbation size is itself evidence of a correct frame/
   bracketing mapping, whereas a frame or bracketing bug tends to produce a
   perturbation-INDEPENDENT flat swing (Build 1c cusp-vertex review).
+- `geometry.caustic_derivatives` wedge-edge FP straddle (Build 1d): at
+  theta = center +/- theta_max the discriminant is a float measure-zero
+  boundary, not a clean sign — center=0 side lands disc<=0 (raises), but
+  center=pi side lands disc~+1e-15 (SERVES a divergent |y'|~7.4e7). A
+  docstring claiming "always raises exactly at the edge" is true only on
+  one side; the honest contract is a disjunction (raises OR |y'| exceeds
+  a divergence floor), not an unconditional raise.

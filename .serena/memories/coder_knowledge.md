@@ -190,3 +190,10 @@
   computation (e.g. brute-force image-finding at very small epsilon) as
   the tie-breaker oracle rather than assuming the old probe was right —
   it may have mislabeled the boundary itself (Build 1b fold-orientation).
+- Replacing a finite-diff derivative with an analytic closed form already
+  available on a sibling primitive (e.g. `geometry.caustic_derivatives`
+  for a tangent that used to be a 1e-6 forward diff): confirm the new and
+  old vectors point the SAME direction (dot/cross sign) before shipping —
+  magnitude/perpendicularity agreement alone can hide a silent orientation
+  flip that only a downstream sign-dependent consumer (inward_sign) exposes
+  (Build 1d).
