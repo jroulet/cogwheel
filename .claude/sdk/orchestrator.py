@@ -1412,15 +1412,30 @@ class BuildOrchestrator:
         # Commit (Inspector + inference-review gates passed)
         build_changed_files = self._git_changed_files()
         check_commit_allowed(self._inspector_result, BuildMode.FULL)
-        self._log("Committing changes")
         commit_msg = self._build_commit_message()
         self._run_tree_fast_gate()
-        commit_sha = self._git_commit_safe(commit_msg)
-        if commit_sha:
-            report.commits.append(commit_sha)
 
-        write_state(self.project_root, "foreman_lite", last_commit=commit_sha, status="committed")
-
+        # ---- DOC SURFACES RUN BEFORE THE COMMIT ----------------------------
+        # The Librarian OWNS every doc surface (SPEC.md, DATA_CONTRACTS.yaml,
+        # the changelog fragments, the Sphinx pages); the Inspector only owns
+        # their ACCURACY as checkable invariants.  So the role that writes a
+        # changelog fragment must run BEFORE the commit gate that demands one.
+        #
+        # It used to run one step AFTER, which made that gate unsatisfiable by
+        # its owner, and the gap was papered over by `commit_preflight`
+        # auto-stubbing a fragment: hardcoded `bump: patch` regardless of the
+        # real change (1e-tube's schema addition was `minor`), a title scraped
+        # from the commit message, and an "(Auto-generated ... Librarian should
+        # refine)" note rendered straight into the CANONICAL changelog, which
+        # nothing ever tracked for refinement. The stub also ran `git add -u`,
+        # re-introducing the blanket staging fixed elsewhere in this file.
+        #
+        # Running the owner first removes the need for any of that, and yields
+        # ONE coherent commit instead of a code commit plus `docs: update
+        # documentation after build` plus `docs: render fragments`.
+        # `commit_preflight` stays as a backstop for the case where the
+        # Librarian fails or leaves a gap -- a build must never die at the
+        # commit for a doc-prose reason.
         # Deterministic doc sync (if sync script exists)
         self._log("Step 5a: Deterministic doc sync")
         sync_script = Path(self.project_root) / "scripts" / "sync_derived_docs.py"
@@ -1472,13 +1487,9 @@ class BuildOrchestrator:
         await self._run_skill("librarian", librarian_task, max_turns=75)
         write_state(self.project_root, "librarian", status="completed")
 
-        if self._has_uncommitted_changes():
-            lib_sha = self._git_commit_safe("docs: update documentation after build")
-            if lib_sha:
-                report.commits.append(lib_sha)
-
-        # Render canonical files from fragments (Librarian may have created
-        # new changelog/todo/completed fragments that need assembly).
+        # Render canonical files from the fragments the Librarian just wrote,
+        # BEFORE the commit, so the generated files and their fragments land
+        # together rather than in a follow-up commit.
         render_script = Path(self.project_root) / "scripts" / "render_fragments.py"
         if render_script.exists():
             subprocess.run(
@@ -1486,11 +1497,24 @@ class BuildOrchestrator:
                 cwd=str(self.project_root),
                 capture_output=True,
             )
-            if self._has_uncommitted_changes():
-                render_sha = self._git_commit_safe(
-                    "docs: render fragments after librarian")
-                if render_sha:
-                    report.commits.append(render_sha)
+
+        # ---- ONE COMMIT: code + tests + docs -------------------------------
+        self._log("Committing changes")
+        commit_sha = self._git_commit_safe(commit_msg)
+        if commit_sha:
+            report.commits.append(commit_sha)
+        write_state(self.project_root, "foreman_lite",
+                    last_commit=commit_sha, status="committed")
+
+        # Backstop only: if anything doc-shaped is still uncommitted (the
+        # Librarian wrote after the render, or the render itself dirtied a
+        # generated file), take it in a follow-up rather than leaving a build's
+        # work in the working tree.
+        if self._has_uncommitted_changes():
+            trailing_sha = self._git_commit_safe(
+                "docs: trailing doc surfaces after librarian")
+            if trailing_sha:
+                report.commits.append(trailing_sha)
 
         return report
 

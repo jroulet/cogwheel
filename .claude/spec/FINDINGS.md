@@ -2679,14 +2679,30 @@ single run:
    routing.
 2. **Changelog fragments**: the pre-commit hook demands a
    `contracts_changelog.d/` fragment when `DATA_CONTRACTS.yaml` changes.
-   Fragments are the Librarian's artifact — and the Librarian runs AFTER the
-   main commit (Coder → TestDev → Inspector → Professor → COMMIT → "docs:
-   update documentation after build"). The owning role literally cannot
-   satisfy a gate that precedes it. Papered over by
-   `_ensure_spec_doc_fragments`, a preflight that auto-stubs fragments; a
-   workaround for the ordering, not a fix. NOTE this gate did not fire in
-   1e-tube only because the hook runs correctness gates FIRST and drift
-   blocked before it was reached — both were live.
+   Fragments are the LIBRARIAN's artifact — the crew contract is explicit
+   that the Inspector owns the ACCURACY of spec and contracts as checkable
+   invariants while the Librarian owns SYNC, i.e. it is the role that WRITES
+   every doc surface. And the Librarian ran one step AFTER the commit, so the
+   owning role could not satisfy a gate that preceded it.
+
+   The gap was papered over by `commit_preflight`, which auto-stubbed a
+   fragment: hardcoded `bump: patch` regardless of the real change (1e-tube's
+   schema addition was `minor`), a title scraped from the commit message
+   subject, and an "(Auto-generated ... Librarian should refine)" note
+   rendered straight into the CANONICAL changelog — with nothing tracking it
+   for refinement. It also ran `git add -u` twice, re-introducing the blanket
+   staging fixed elsewhere the same day.
+
+   FIXED (2026-07-30): the doc stage moved ahead of the commit, so the owner
+   writes its own fragments and the build produces ONE coherent commit
+   instead of a code commit plus `docs: update documentation after build`
+   plus `docs: render fragments after librarian`. `commit_preflight` stays as
+   a backstop, because a build must never die at the commit for a doc-prose
+   reason. Both fast paths are untouched (they run no Librarian).
+
+   NOTE this gate did not fire in 1e-tube only because the hook runs
+   correctness gates FIRST and drift blocked before it was reached — both
+   were live.
 3. **The gated-test-drift gate**: for a FALSE positive the remedy is an ack;
    for a GENUINE break it is updating the gated tests — the Test Developer's
    work. The Test Developer runs at Step 3; the gate fires at commit, after
