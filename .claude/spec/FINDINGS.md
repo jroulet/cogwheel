@@ -3148,3 +3148,62 @@ branch point is the signature of the latter, and the fix is the coordinate
 that removes it (here `s = sqrt(theta_max - theta)`, the same reparametrising
 move as `u = sqrt(eta)` on the fold axis), not a margin. This is the wedge
 edge's entry in [[lensing_collocation_from_local_scales]].
+
+## F055 — the build watchdog failed OPEN for three days while the launcher printed "(watchdog 1200s)" (2026-07-30)
+
+**Where:** `.claude/sdk/watchdog.sh:48`, `.claude/sdk/launch_build.sh`.
+
+    ORCH_PID=$(pgrep -nf '\.claude/sdk/cli\.py build')   # the entrypoint is build.py
+
+`build.py` is a 27-line shim that calls `sdk.cli.main()` **in-process**, so the
+orchestrator's argv reads `.../.claude/sdk/build.py build` and never contains
+`cli.py`. The watchdog therefore found nothing, logged `ERROR: Could not find
+orchestrator process` into `<log>.watchdog.log`, and exited 1 — three seconds
+after every launch.
+
+Survey of `/tmp/*.watchdog.log`: **ok through 2026-07-20, dead on every build
+from 2026-07-27 on** (`tiling_correctness`, `saddle_lobe_serve`,
+`saddle_born_carrier`, both `wedge_standoff_and_tube_normal` runs,
+`tube_arclength_coordinate`, `analytic_caustic_reach`). Six builds, including
+two run concurrently, with no kill protection.
+
+**Why it worked before and not after.** The pgrep line never changed (06-05);
+`launch_build.sh` has invoked `build.py` since it was added (07-15). Builds
+before 07-21 were HAND-launched as `python .claude/sdk/cli.py build`, which the
+pattern did match. The hook that now mandates `launch_build.sh` closed off that
+form — **the automation that replaced the manual step silently disarmed the
+guard the manual step had been feeding.** Nothing announced the change because
+nothing tied the two names together.
+
+**Three defects, one line.**
+
+1. *Wrong name.* `_retry_until_launch.sh:70` already greps the correct
+   `[s]dk/build.py`. The entrypoint name was knowledge held in two places, and
+   one copy rotted (DRY).
+2. *Wrong process.* `pgrep -n` takes the NEWEST match, so two concurrent builds
+   get two watchdogs both guarding the newer one.
+3. *Fails open, silently.* The launcher printed `launched: <log> (watchdog
+   1200s)` unconditionally. The failure evidence went to a sidecar log nobody
+   reads. **This is why it survived three days**, and it is the defect worth
+   generalising: a guard that reports success it did not verify is worse than
+   no guard, because it also suppresses the search for one.
+
+**Fix.** `launch_build.sh` captures `$!` and passes the PID (PYBIN is the
+absolute env python, so `$!` IS the orchestrator — no conda wrapper between);
+that kills defects 1 and 2 together. The launcher then WAITS for `Watching
+orchestrator PID <pid>` in the watchdog log and prints a loud WARNING if it
+never appears, killing defect 3. `.claude/sdk/verify_watchdog.sh` is the
+permanent probe (11 assertions, ~12 s): a stalled fake orchestrator must really
+die (rc 137 + kill marker), a healthy one must exit 0 unkilled, a dead PID must
+be refused, and — the F055 guard — the entrypoint name extracted from
+`launch_build.sh` must match the pattern extracted from `watchdog.sh`, with a
+non-vacuity assertion (an empty pattern makes `grep -E` match everything, so
+the test would pass loudest exactly when the pgrep line was deleted) and a
+retained contrast control asserting the old `cli.py` pattern does NOT match.
+
+**Rule.** Any guard whose arming can fail must PROVE it armed before the thing
+it guards is reported as protected, and any invariant spanning two files needs
+a test that reads BOTH files — not one that re-states the invariant a third
+time. Compare F049 (a guard placed where it could not run) and F052 (a tier no
+routine job ran): same failure class, third instance this week — the automation
+existed, was believed, and did nothing.

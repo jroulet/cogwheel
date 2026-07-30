@@ -135,6 +135,18 @@ shallow:
 - Every long run emits a countable progress stream: pytest `-v` teed to a log + a Monitor reporting percent/rate/projected finish. Zero progress across two beats = investigate with py-spy, never wait. A run without a progress monitor is unattended, not monitored.
 - MECHANICAL PAIRING: the same response that launches a background run arms its progress monitor. Launch and monitor are one action, never two. Long-running scripts additionally SELF-EMIT progress beats on stdout so observation needs no instrumentation.
 - Monitors emit on CHANGE only: a beat fires when the progress count moves, ONCE on entering a stall, and at terminal — never on an unchanged interval. Poll internally as often as needed; each EMITTED line costs a driver invocation. Scale the poll interval to the run (minutes-scale run: 1-2 min; hour-scale: 10-15 min).
+
+### SDK scripts — the driver's whole toolbox
+Nothing here needs re-deriving per run. If you are about to hand-roll a launch, a
+gate command, or a watch loop, one of these already does it.
+- `launch_build.sh <slug> <prompt_file> [stale_s]` — the ONLY sanctioned build launch. Starts the orchestrator, attaches the watchdog, verifies it attached, prints the log path and the post-build sequence.
+- `watchdog.sh <log> [stale_s] [pid]` — auto-attached by the launcher; kills the orchestrator subtree when the log stops advancing. Logs to `<log>.watchdog.log`. Do NOT invoke by hand for a launcher-started build.
+- `verify_watchdog.sh` — ~12 s probe proving the watchdog actually kills a stalled build and that its fallback pattern still matches the launcher's entrypoint. Run it after touching either script (F055: it failed open for three days while the launcher reported it armed).
+- `stale_alarm.sh <log> [stale_s]` — exits when the log goes quiet, converting silence into a task notification. Use when you want an alert but NOT a kill.
+- `run_full_suite.sh [log]` — the post-build fast gate: collect-count check, then `-n 8 --dist loadfile` with timing guards deselected, then those guards in one serial pass. Self-emits `[beat] n/N (x%)`. Slow tiers pinned OFF. `EXPECT_COLLECTED=<n>` fails the gate on a collection mismatch.
+- `post_build_sweeps.sh` — the slow tiers, one process per file. NEVER in a build.
+- `timing_pass.sh` — the serial timing guards on their own.
+- A stalled watcher and a finished one look identical. Prefer a watcher that EXITS on its terminal condition over one that reports progress forever.
 <!-- END AGENT INFRA SECTION -->
 
 ### Full-suite gate

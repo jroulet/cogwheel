@@ -98,10 +98,36 @@ fi
 
 "$PYBIN" "$REPO_ROOT/.claude/sdk/build.py" build "${APPROVE_ARGS[@]}" \
   --log "$LOG" "@$PROMPT" > /dev/null 2>&1 &
-"$REPO_ROOT/.claude/sdk/watchdog.sh" "$LOG" "$STALE" > /dev/null 2>&1 &
+BUILD_PID=$!
+# Hand the watchdog the PID we already know. It used to rediscover the
+# orchestrator by pattern, and the pattern named cli.py while the entrypoint
+# is build.py (a shim that calls cli.main() in-process, so argv never says
+# "cli.py") — every launcher-started build from 2026-07-27 ran unguarded
+# (F055). A passed PID also removes `pgrep -n`'s newest-match race, which
+# pointed both watchdogs at the same build whenever two ran at once.
+"$REPO_ROOT/.claude/sdk/watchdog.sh" "$LOG" "$STALE" "$BUILD_PID" \
+  > /dev/null 2>&1 &
+WATCHDOG_PID=$!
 disown -a
 
-echo "launched: $LOG (watchdog ${STALE}s)"
+# Verify the watchdog ATTACHED before claiming protection. The silent version
+# of this failure is what let F055 run for three days: the launcher printed
+# "(watchdog 1200s)" while the watchdog had already exited 1 into a sidecar
+# log nobody reads. Loop exits early both ways — on attach, or on its death.
+WATCHDOG_LOG="${LOG%.log}.watchdog.log"
+for _ in $(seq 1 70); do
+  grep -q "Watching orchestrator PID" "$WATCHDOG_LOG" 2>/dev/null && break
+  kill -0 "$WATCHDOG_PID" 2>/dev/null || break
+  sleep 1
+done
+if grep -q "Watching orchestrator PID $BUILD_PID" "$WATCHDOG_LOG" 2>/dev/null
+then
+  echo "launched: $LOG (watchdog ${STALE}s, guarding PID $BUILD_PID)"
+else
+  echo "launched: $LOG"
+  echo "WARNING: WATCHDOG DID NOT ATTACH — this build has no kill" \
+       "protection. See $WATCHDOG_LOG" >&2
+fi
 # The post-build SEQUENCE, not just the sweeps.  Librarian and Dreamer run
 # IN the DAG; the Tidier is the one crew role with no automated home, since
 # its in-DAG run was made opt-in on 2026-07-18 after an error_max_turns

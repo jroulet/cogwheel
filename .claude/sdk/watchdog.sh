@@ -2,11 +2,15 @@
 # .claude/sdk/watchdog.sh — kill a wedged SDK build if its log goes stale.
 #
 # Usage:
-#   watchdog.sh <log_path> [stale_seconds]
+#   watchdog.sh <log_path> [stale_seconds] [orch_pid]
 #
 # Polls <log_path> every 30s. If the file's mtime hasn't advanced in
-# <stale_seconds> (default 600 = 10 min), kills the orchestrator subtree.
+# <stale_seconds> (default 1200 = 20 min), kills the orchestrator subtree.
 # Self-exits cleanly when the orchestrator exits naturally.
+#
+# <orch_pid> is passed by launch_build.sh ($! of the build process). Omit it
+# only for hand launches; the pattern fallback then guards the NEWEST
+# orchestrator, which is the wrong one whenever two builds overlap.
 #
 # Pass stale_seconds=0 to disable the staleness check while still
 # tracking the orchestrator process.
@@ -18,10 +22,11 @@
 
 set -u
 
-LOG_PATH="${1:?usage: watchdog.sh <log_path> [stale_seconds]}"
+LOG_PATH="${1:?usage: watchdog.sh <log_path> [stale_seconds] [orch_pid]}"
 STALE_SECONDS="${2:-1200}"  # 600 killed a healthy Opus planning turn (2026-07-10)
-POLL_INTERVAL=30
-STARTUP_GRACE=60
+ORCH_PID="${3:-}"
+POLL_INTERVAL="${WATCHDOG_POLL_INTERVAL:-30}"   # overridable so the probe is fast
+STARTUP_GRACE="${WATCHDOG_STARTUP_GRACE:-60}"
 
 WATCHDOG_LOG="${LOG_PATH%.log}.watchdog.log"
 
@@ -45,11 +50,25 @@ if [ ! -f "$LOG_PATH" ]; then
     exit 1
 fi
 
-# Find the orchestrator PID
-ORCH_PID=$(pgrep -nf '\.claude/sdk/cli\.py build' 2>/dev/null || true)
-if [ -z "$ORCH_PID" ]; then
-    log "ERROR: Could not find orchestrator process. Exiting."
-    exit 1
+# Find the orchestrator PID.
+#
+# The entrypoint is build.py, a shim that calls sdk.cli.main() IN-PROCESS, so
+# argv reads ".../.claude/sdk/build.py build" and never "cli.py". Matching the
+# wrong name here disarmed the watchdog on every launcher-started build from
+# 2026-07-27 to 2026-07-30 (F055) while launch_build.sh still printed
+# "(watchdog 1200s)". Prefer the PID the launcher already knows.
+if [ -n "$ORCH_PID" ]; then
+    if ! kill -0 "$ORCH_PID" 2>/dev/null; then
+        log "ERROR: orchestrator PID $ORCH_PID is not alive. Exiting."
+        exit 1
+    fi
+else
+    ORCH_PID=$(pgrep -nf '\.claude/sdk/(build|cli)\.py build' 2>/dev/null || true)
+    if [ -z "$ORCH_PID" ]; then
+        log "ERROR: Could not find orchestrator process. Exiting."
+        exit 1
+    fi
+    log "WARNING: no PID argument; matched the NEWEST orchestrator by pattern."
 fi
 log "Watching orchestrator PID $ORCH_PID"
 
