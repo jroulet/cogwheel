@@ -1,5 +1,55 @@
 # Architect Short-Term Observations
 
+## Build: arc-guard-fix-F041 (2026-07-29)
+[re-plan 2026-07-29] Confirmed tree: _make_arc guard at line 689 still `abs(dot)<=0.1`;
+_find_cusps sig = (thetas,speed,periodic,*,gamma,branch,width_safety=,min_halfwidth=)
+so callers omitting gamma/branch fail at RUN. _branch_speed_profile STILL EXISTS (brief
+"retired" list is loose; do NOT touch it). stable_gamma_bands returns (stable,dropped);
+CausticStructure.arcs is the arc list field. Prof re-ruled (SUPERSEDES his own |dot|>0.1
+verdict): exact-zero tripwire `if dot==0.0: continue` + sign from first evaluable frac IS
+correct OPTION 1; NO gamma-stable ratio inside orientation after delete -> acceptance 2 =
+arc EXISTENCE at gamma{0.02,0.1,0.3,0.9}; frac=0.5 sign == old guard on gamma>=0.1
+(|dot|>=0.15 there); fallback-frac sign stable (two-image side is GLOBAL fold property).
+Simplifier: 1 Coder WP lean, test shards lean/watch, docs->Librarian. PLAN = 1 Coder WP
+(guard fix) + domain_test_descriptions split 2 suites (surrogate.py caller; training.py
+callers+acceptance).
+Finish crashed 1b: ONE production change in surrogate_training._make_arc.
+FIX = Professor+Simplifier ruling OPTION 1 (delete guard): replace
+`if abs(dot) <= 0.1: continue` with `if dot == 0.0: continue` (exact-zero
+tripwire only, NOT a magnitude filter — |dot| ~ 1.5*gamma is fold TRANSVERSALITY
+not cusp proximity, same category error as retired _PROBE_ETA). Keep the
+LensDomainError fallback loop; sign taken at frac=0.5 (first evaluable), 12-orders
+margin (min|dot|=4.4e-3), arc cusp-window-trimmed so |y'|/|y''|>=0.39 at midpoint.
+Prof: image_count==4 is parity constant (astroid interior, no find_images);
+soft_axis e->-e provably harmless; _tube_normal FD safe at gamma=0.02.
+Tests -> Test Developer (NOT Coder): (a) new acceptance test bands+arcs; fix stale
+_find_cusps callers test_lensing_surrogate.py ~L1068 + test_lensing_surrogate_training.py
+~L1006/1660/1661 (add kw gamma/branch); delete any removed-constant pins.
+Assert existence AND sign-stability (inward_sign identical across gamma set), NOT
+|dot| magnitude. DOC-SYNC (SPEC row55, COVERAGE_DESIGN) = post-gate Librarian, flag only.
+
+## Build: analytic-consumers-1b (2026-07-29)
+Retire 6 numerical estimators in lensing/surrogate_training.py, re-express vs 1a
+geometry fns (caustic_speed/caustic_curvature_radius/fold_opening_direction/
+nearest_caustic_point). Targets: (1)_min_curvature_radius->min caustic_curvature_radius
+endpoints INCLUDED (exact is 4.9-9.6% SMALLER, F038; do NOT assert byte-id/margin);
+(2)_branch_speed_profile->caustic_speed directly, drop np.gradient+rolled CD;
+(3)_find_cusps LOCATION only->brentq root of y'.y''=0 (caustic_speed touches 0, NOT
+sign-changing, so root-find on y'.y''=d(speed^2)/2 which IS sign-changing at the min),
+needs gamma+branch in signature; WINDOW delta_theta BYTE-IDENTICAL (keep 0.2 dip walk
+inlined/renamed, _CUSP_SPEED_REL_FRAC name gone); (4)delete _probe_arc_side+_PROBE_ETA,
+inward_sign=sign(fold_opening_direction . _tube_normal normal) [same normal serve uses],
+image_count from parity (astroid served=4, saddle served=4? Prof confirm) or 1 find_images
+at eta_max; (5)_caustic_inradius min|y| discrete->bracketed+refined min of closed form,
+KEEP winding on cloud; (6)delete _CLOUD_MARGIN_FRAC, _InteriorAdmission.admits use
+geometry.nearest_caustic_point (needs gammas field on dataclass), exterior stays byte-id.
+OUT: cusp WINDOW width rule, _pearcey_cusp, ppgo. ACCEPT: eta_max>0.5*r_min flips on NO
+band; stable_gamma_bands((0.01,0.30),+1) ZERO dropped slivers; no gradient/FD/step-const
+in 6 targets. BLAST: test file WP3 byte-identity tests (_find_cusps sig + astroid frozen
+copy) BREAK intentionally (cusp angles move to analytic root) -> Test Dev re-baseline.
+CONTRADICTION to watch: delete _CUSP_SPEED_REL_FRAC name yet keep window byte-identical
+(window uses the 0.2 threshold) -> inline 0.2 in window code, name gone.
+
 ## Build: analytic-geometry-cascade-1a (2026-07-29)
 Add 4 analytic caustic fns to chang_refsdal/geometry.py beside r_caustic:
 caustic_derivatives(gamma,theta,*,kappa=0,branch=1)->(y',y''); caustic_speed=|y'|;

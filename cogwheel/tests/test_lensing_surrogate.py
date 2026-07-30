@@ -1067,7 +1067,7 @@ class ClosedFormCuspAngleTestCase(SurrogateTestCase):
             thetas, speed = surrogate_training._branch_speed_profile(
                 gamma, 1, 0.0, 2.0 * np.pi, CUSP_DETECTOR_N, periodic=True)
             cusps = surrogate_training._find_cusps(
-                thetas, speed, periodic=True)
+                thetas, speed, periodic=True, gamma=gamma, branch=1)
             mags = []
             for theta_lens, _delta in cusps:
                 try:

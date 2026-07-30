@@ -400,8 +400,8 @@ def _covered_mask(rho: np.ndarray, theta_c: np.ndarray, tiles: list
 
 
 # --------------------------------------------------------------------------- #
-#  WP1 (cusp-aligned columns + center-direction box gate) and WP2 (interior    #
-#  200-point caustic-cloud false-admit closed by _CLOUD_MARGIN_FRAC) fixtures. #
+#  WP1 (cusp-aligned columns + center-direction box gate) and WP2 (interior   #
+#  exact nearest_caustic_point admission, no margin) fixtures.                #
 # --------------------------------------------------------------------------- #
 
 #: Band + centre gamma for the cusp-no-straddle / edge-containment structural
@@ -480,13 +480,6 @@ REFUSAL_EXACT_TOL = 1.5e-3
 #: An outer ``rho`` edge comfortably interior at ``REFUSAL_THETA_C`` whose exact
 #: nearest (~0.21) dwarfs ``eta_max``: the 10% margin must NOT over-tighten it.
 COMFORT_RHO_OUTER = 0.5
-
-#: DEFECT 3 margin sizing.  The production ``_CLOUD_MARGIN_FRAC`` must be at
-#: least 0.10, and the margin WIDTH ``eta_max * _CLOUD_MARGIN_FRAC`` (0.005)
-#: must exceed the worst measured discretization slop ``WORST_SLOP_FRAC *
-#: eta_max`` (~0.004) with headroom.
-CLOUD_MARGIN_FRAC_MIN = 0.10
-WORST_SLOP_FRAC = 0.08
 
 
 def _wrap(angle: float) -> float:
@@ -1578,122 +1571,6 @@ class InteriorTargetedRefusalTestCase(ExteriorAdmissionTestCase):
         plt.close(fig)
 
 
-class CloudMarginTestCase(ExteriorAdmissionTestCase):
-    """DEFECT 3 reachable-red + margin sizing + positive controls (WP2)."""
-
-    def test_margin_zero_admits_the_genuine_false_admit(self) -> None:
-        # Reachable-red: with the margin removed the SAME tile is ADMITTED,
-        # because the discrete cloud reads its nearest as >= eta_max even though
-        # the exact nearest is below it -- exactly the discretization
-        # false-admit the 10% margin closes.
-        admission = _admission(INTERIOR_BAND)
-        center = (REFUSAL_RHO_OUTER - REFUSAL_HALF_RHO, REFUSAL_THETA_C)
-        half = (REFUSAL_HALF_RHO, REFUSAL_HALF_THETA)
-        cloud_nearest = _cloud_nearest_over_band(
-            admission, REFUSAL_THETA_C, REFUSAL_RHO_OUTER, REFUSAL_HALF_THETA)
-        self.assertGreaterEqual(
-            cloud_nearest, ETA_MAX,
-            f'cloud nearest {cloud_nearest:.5f} is below eta_max -- the '
-            'margin-0 gate would already refuse (no discretization slop here)')
-        with mock.patch.object(st, '_CLOUD_MARGIN_FRAC', 0.0):
-            self.assertTrue(
-                admission.admits(center, half),
-                'with margin 0 the genuine false-admit tile should be ADMITTED')
-        # And the production margin closes it (contrast).
-        self.assertFalse(admission.admits(center, half))
-        self._plot(admission, cloud_nearest)
-        self.record_comparison()
-
-    def test_margin_frac_at_least_ten_percent(self) -> None:
-        self.assertGreaterEqual(st._CLOUD_MARGIN_FRAC, CLOUD_MARGIN_FRAC_MIN)
-        self.record_comparison()
-
-    def test_margin_width_exceeds_worst_measured_slop(self) -> None:
-        # The margin WIDTH eta_max * _CLOUD_MARGIN_FRAC must exceed the worst
-        # measured discretization slop (WORST_SLOP_FRAC * eta_max) with headroom.
-        margin_width = ETA_MAX * st._CLOUD_MARGIN_FRAC
-        worst_slop = WORST_SLOP_FRAC * ETA_MAX
-        self.assertGreater(
-            margin_width, worst_slop,
-            f'margin width {margin_width:.5f} does not exceed worst slop '
-            f'{worst_slop:.5f}')
-        # Independently confirm the worst slop at the probe is within the
-        # WORST_SLOP_FRAC budget (cloud reads no farther than 8% of eta beyond
-        # the exact nearest here).
-        admission = _admission(INTERIOR_BAND)
-        cloud_nearest = _cloud_nearest_over_band(
-            admission, REFUSAL_THETA_C, REFUSAL_RHO_OUTER, REFUSAL_HALF_THETA)
-        exact_nearest, _ = _exact_nearest_over_band(
-            INTERIOR_GAMMAS, REFUSAL_THETA_C, REFUSAL_RHO_OUTER)
-        measured_slop = cloud_nearest - exact_nearest
-        self.assertGreater(measured_slop, 0.0,
-                           'the cloud does not over-read here -- wrong probe')
-        self.assertLessEqual(measured_slop, worst_slop)
-        self.record_comparison()
-
-    def test_comfortably_interior_tile_still_admits(self) -> None:
-        # The margin must NOT over-tighten a genuinely interior tile whose exact
-        # clearance dwarfs eta_max.
-        admission = _admission(INTERIOR_BAND)
-        center = (COMFORT_RHO_OUTER - REFUSAL_HALF_RHO, REFUSAL_THETA_C)
-        half = (REFUSAL_HALF_RHO, REFUSAL_HALF_THETA)
-        exact_distance, _ = _exact_nearest_over_band(
-            INTERIOR_GAMMAS, REFUSAL_THETA_C, COMFORT_RHO_OUTER)
-        self.assertGreater(exact_distance, 2.5 * ETA_MAX,
-                           'the comfort probe is not comfortably interior')
-        self.assertTrue(
-            admission.admits(center, half),
-            'the 10% margin over-tightened a comfortably-interior tile')
-        self.record_comparison()
-
-    def test_exterior_admitted_set_unchanged_under_margin(self) -> None:
-        # admits_exterior does NOT use _CLOUD_MARGIN_FRAC (its ~0.35 margin
-        # dwarfs the slop), so inflating the interior margin x50 leaves the
-        # exterior admitted set byte-identical.
-        cusps = _cusp_angles(CUSP_COVERAGE_GAMMA_MID)
-        base_box = _exterior_tiles_cusp(
-            CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, BOX_CORNER, cusps)
-        base_cap = _exterior_tiles_cusp(
-            CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, REACHABLE_RED_CAP, cusps)
-        with mock.patch.object(st, '_CLOUD_MARGIN_FRAC', 5.0):
-            infl_box = _exterior_tiles_cusp(
-                CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, BOX_CORNER, cusps)
-            infl_cap = _exterior_tiles_cusp(
-                CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, REACHABLE_RED_CAP, cusps)
-        self.assertEqual(base_box, infl_box)
-        self.assertEqual(base_cap, infl_cap)
-        # Control: the INTERIOR admits DOES change (the margin is live there).
-        admission = _admission(INTERIOR_BAND)
-        center = (REFUSAL_RHO_OUTER - REFUSAL_HALF_RHO, REFUSAL_THETA_C)
-        half = (REFUSAL_HALF_RHO, REFUSAL_HALF_THETA)
-        self.assertFalse(admission.admits(center, half))
-        with mock.patch.object(st, '_CLOUD_MARGIN_FRAC', 0.0):
-            self.assertTrue(admission.admits(center, half))
-        self.record_comparison()
-
-    def _plot(self, admission, cloud_nearest) -> None:
-        rho_grid = np.linspace(0.70, 0.80, 41)
-        cloud = [_cloud_nearest_over_band(
-            admission, REFUSAL_THETA_C, float(r), REFUSAL_HALF_THETA)
-            for r in rho_grid]
-        exact = [_exact_nearest_over_band(
-            INTERIOR_GAMMAS, REFUSAL_THETA_C, float(r))[0] for r in rho_grid]
-        fig, ax = plt.subplots(figsize=(7, 4))
-        ax.plot(rho_grid, cloud, 'o-', ms=3, label='discrete cloud nearest')
-        ax.plot(rho_grid, exact, 's-', ms=3, label='exact oracle nearest')
-        ax.axhline(ETA_MAX, color='k', ls='--', label=f'eta_max={ETA_MAX}')
-        ax.axhline(ETA_MAX * (1.0 + st._CLOUD_MARGIN_FRAC), color='tab:red',
-                   ls=':', label='eta_max * (1 + margin)')
-        ax.axvline(REFUSAL_RHO_OUTER, color='tab:gray', lw=0.7)
-        ax.set_xlabel('rho_outer at theta_c = pi/2')
-        ax.set_ylabel('nearest-caustic distance')
-        ax.set_title('DEFECT 3: cloud over-reads exact near the boundary')
-        ax.legend(fontsize=8)
-        fig.tight_layout()
-        fig.savefig(OUTPUT_DIR / 'cloud_margin_false_admit.png', dpi=90)
-        plt.close(fig)
-
-
 class CuspAlignmentSelfFalsificationTestCase(ExteriorAdmissionTestCase):
     """Prove the WP1/WP2 detectors can go RED on planted defects."""
 
@@ -1727,20 +1604,6 @@ class CuspAlignmentSelfFalsificationTestCase(ExteriorAdmissionTestCase):
             CUSP_COVERAGE_BAND, CUSP_COVERAGE_N, REACHABLE_RED_CAP, cusps))
             ).sum()) / n_t
         self.assertLess(strict, relaxed)
-        self.record_comparison()
-
-    def test_margin_detector_distinguishes_admit_from_refuse(self) -> None:
-        # At the DEFECT 3 probe the production margin refuses while margin-0
-        # admits: the margin detector genuinely flips, so it is non-vacuous.
-        admission = _admission(INTERIOR_BAND)
-        center = (REFUSAL_RHO_OUTER - REFUSAL_HALF_RHO, REFUSAL_THETA_C)
-        half = (REFUSAL_HALF_RHO, REFUSAL_HALF_THETA)
-        with mock.patch.object(st, '_CLOUD_MARGIN_FRAC', 0.0):
-            margin0 = admission.admits(center, half)
-        production = admission.admits(center, half)
-        self.assertTrue(margin0)
-        self.assertFalse(production)
-        self.assertNotEqual(margin0, production)
         self.record_comparison()
 
     def test_exact_oracle_is_independent_of_cloud(self) -> None:

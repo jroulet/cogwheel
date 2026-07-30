@@ -2446,3 +2446,44 @@ wrong in EFFECT, while the `abs(dot) > 0.1` guard is wrong in effect and must
 be fixed independently. Bundling them — as the driver's first write-up of this
 finding implicitly did — invites someone to replace the difference, see the
 arcs still missing, and go looking for a third bug that is not there.
+
+## F042 — the analytic-cusp change (1b) shifts a saddle tube chart's held-out eps past the registration bar; DEFERRED (2026-07-29)
+
+**Where:** `surrogate_training` saddle tube training; surfaced by
+`test_lensing_surrogate_training.py::SaddleTubeTailTestCase` under
+`COGWHEEL_TRAIN_TIER=1`.
+
+Retiring the numerical cusp/speed/curvature estimators for their analytic
+closed forms (build 1b) moved the detected cusp ANGLES to their exact roots
+(cusps are `|y'| = 0`), which shifts each fold arc's `theta_lo/theta_hi`
+bounds by up to one former sampling step. For one synthetic saddle tube
+fixture this tips the fix-on arc's held-out eps from just under the tube
+registration bar to just over it:
+
+    on_eps = 0.0591   vs   _TUBE_EPS_BAR = 0.05      (was ~0.0499 pre-1b)
+
+So a saddle tube chart that used to REGISTER now gets GATED and falls through
+to the serving ladder. `test_fixon_heldout_eps_below_tube_bar` and
+`test_fix_moves_chart_across_registration_bar` both fail on this one number.
+
+**Why this was only caught now.** These are `@_TRAIN_TIER_SKIP` tests that
+build real charts (minutes/class) and run only under `COGWHEEL_TRAIN_TIER=1`
+as a driver post-build step. Build 1b CRASHED (API outage) before its own
+train-tier verification ran, so the consequence sat undetected in the salvaged
+tree until the F041 follow-up's driver tail ran the tier.
+
+**Attribution: NOT the F041 fix.** The F041 guard (`abs(dot) <= 0.1`, this
+build) binds only below `gamma ~ 0.067` — the astroid regime. Saddle arcs are
+`gamma > 1` where `|dot| ~ 1`, untouched. This eps shift is a 1b analytic-cusp
+consequence, independent of F041.
+
+**Status: INERT and DEFERRED (owner call 2026-07-29).** No trained chart
+artifact ships (F036), so nothing served changes today. Committed with F041;
+the two failing methods carry `@expectedFailure` pointing here so the suite is
+green while the regression stays visible. Open questions for the dedicated
+look: (a) is 0.0591 the correct, more-accurate value now that the arc bounds
+are exact, i.e. should the bar/fixture re-baseline, or (b) does the analytic
+arc-bound shift genuinely degrade saddle tube fit and need the tube band or
+node placement adjusted ([[lensing_collocation_from_local_scales]])? Do NOT
+re-baseline the bar blind — the answer determines whether a real saddle
+coverage cell was lost.

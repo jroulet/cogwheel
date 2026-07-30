@@ -1,5 +1,162 @@
 # Coder Short-Term Observations
 
+- INS-1-001 RESOLVED (F041 fix-build, test-file finding; pipeline routed
+  stale-fixture retirement to Coder). In test_lensing_caustic_cusps.py
+  deleted the 3 pre-fix-pathology pins: (1) whole class
+  StableGammaBandsSliverTestCase (pin (b): dropped astroid-onset sliver no
+  longer occurs post-F041); (2) FootOfNormalCurvatureValueTestCase::
+  test_brief_small_bands_have_no_band_wide_arc (small bands now build arcs).
+  Removed now-orphaned constants EXPECTED_DROPPED_SLIVER, STABLE_BAND_RANGE,
+  FOOT_NO_ARC_BAND, FOOT_METAMORPHOSIS_BAND (grep-confirmed unused after
+  deletions). Kept FOOT_FALSE_BANDS + FOOT_TRUE_BAND (still used by the two
+  surviving FootOfNormal tests). Updated module docstring: dropped the
+  no-arc/metamorphosis sentences from the FootOfNormal bullet + removed the
+  StableGammaBandsSliver bullet, added a one-line note that F041 retired
+  those pre-fix pins. ast.parse OK; pytest --collect-only = 25 tests, clean
+  import (did NOT run test bodies; role boundary — Inspector runs the suite).
+  OWED -> Test Dev / Inspector: SelfFalsificationTestCase::
+  test_below_floor_alignment_fails_serve_gate (+ constant SERVE_ALIGN_MIN)
+  still documents the ">0.1 serve-alignment floor" that WP1 REMOVED from
+  _make_arc. It is a tautology (assertLessEqual(0.05, SERVE_ALIGN_MIN)),
+  calls NO production code, and is GREEN, so I left it (out of INS-1-001
+  scope; deleting a passing unflagged test = over-reach). But it now proves
+  teeth of a gate that no longer exists -> stale; Test Dev should retire or
+  re-point it to the new exact-zero tripwire semantics.
+
+- WP1 (F041) DONE in surrogate_training.py _make_arc: guard
+  `if abs(dot) <= 0.1:` -> `if dot == 0.0:` (exact-zero tripwire; sign
+  now taken from first non-LensDomainError fraction, frac=0.5 nominal).
+  Rewrote comment above the orientation loop: SIGN of dot fixes served
+  two-image side (~12 orders float64 margin, min|dot|=4.4e-3 over prior);
+  |dot| = fold-opening transversality ~1.5*gamma, NOT cusp-proximity, so
+  no magnitude filter (magnitude filter WAS the F041 regression, same
+  category error as retired _PROBE_ETA); exact-zero only skips measure-
+  zero tangency (sign undefined); fallback fractions only for
+  LensDomainError skips; sign invariant across them (global fold-arc
+  property). NO new constant, NO smaller threshold. fallback tuple, sign
+  assignment, break, except, `if sign is None: return None` tail
+  byte-unchanged. ast.parse OK. Did NOT touch _branch_speed_profile,
+  _find_cusps, or any other symbol. Behavior change from HEAD: gamma
+  bands that previously failed _make_arc when |dot| fell in (0,0.1] now
+  build arcs (larger set of buildable bands; lens_amplification_surrogate
+  schema unchanged). OWED->Test Dev: any fixture asserting _make_arc
+  returns None due to small-|dot| (near-cusp step) no longer trips at 0.1;
+  re-point if such fixtures exist.
+
+- WP3 (surrogate_training.py) DONE: replaced finite-eta census probes with
+  exact geometry in fold orientation + caustic inradius.
+  (1) DELETED _probe_arc_side + _PROBE_ETA(=0.05) constant (both file-local,
+  only caller was _make_arc). (2) _make_arc: same fallback-fraction loop
+  (0.5,0.35,0.65,0.2,0.8) but per theta try fold_dir=geometry.
+  fold_opening_direction(gamma,theta,branch=branch) & _,normal=_tube_normal
+  (SAME serve normal _tube_source uses -> serve-consistent), dot=float(fold_dir
+  @normal); require abs(dot)>0.1 (near-0 = too close to cusp, step on); sign=
+  1 if dot>=0 else -1; break; except LensDomainError continue; None if no frac.
+  image_count HARDCODED 4 (parity constant, Professor Q2; astroid interior AND
+  saddle deltoid lobe at kappa=0 both = 4 real images). (3) NEW module helpers:
+  _radial_slope(gamma,branch,theta)=y.y' (=(1/2)d|y|^2/dtheta) via critical_point.
+  source + caustic_derivatives (mirror of _speed_slope, no FD). _branch_inradius_
+  candidates: (a) closed-form |y| at refined _find_cusps thetas, (b) smooth
+  interior minima = UPWARD zero-crossing of h=y.y' between adjacent in-domain
+  samples with min endpoint speed>0.2*median (skip cusp dips), brentq-refined;
+  wrap bracket (hi<=lo) skipped. _closed_form_inradius: parity==1 single periodic
+  branch [0,2pi); saddle both branches over each lobe wedge (mirrors _caustic_
+  points enumeration). (4) _caustic_inradius: winding/enclosure test on discrete
+  cloud UNCHANGED (points<4 ->(0,False) guard kept; parity!=1 -> enc False), ONLY
+  radii.min() replaced by _closed_form_inradius. No discrete-cloud min / FD /
+  step-size const remains in the six targets (_tube_normal's internal dth FD is
+  a reused pre-existing helper per plan, not a target).
+  SMOKE (real import): parse+import OK; both symbols absent. astroid inradius ==
+  gamma EXACTLY (0.10..0.95), discrete dmin biased high up to ~4e-4; saddle
+  matches dmin to 6dp, enc False. astroid arcs 2 (sign -1, img 4); saddle arcs 6
+  (img all 4, signs {1,-1}). New sign vs OLD-probe sign: MATCH for astroid all g
+  and saddle g=1.4; MISMATCH saddle g=1.6 (old=+1/img2, new=-1/img4). Direct
+  find_images at eta 0.05..1e-4 CONFIRMS new is correct: sign=-1 side has 4
+  images, +1 side has 2 -> old finite-eta probe MISLABELED the small deltoid
+  lobe (the exact census failure WP3 removes). New = physically correct.
+  BEHAVIOR CHANGE from HEAD: saddle arcs near gamma~1.6 now report inward_sign
+  flipped (+1->-1) and image_count 2->4; astroid caustic_inradius diagnostic
+  drops ~1e-4 to exact gamma.
+  OWED -> Test Dev / Inspector:
+  * test_lensing_exterior_windows.py uses st._caustic_inradius in
+    test_anisotropic_gain_admits_fat_direction_refuses_thin (line ~1805) and
+    test_isotropic_inradius_admission_loses_the_anisotropic_gain (~2694). Both
+    use RELATIONS (inradius-eta_max<0.60, 0.60/inradius>1), preserved by the
+    slightly-smaller exact inradius (astroid ir==gamma_mid<0.60) -> expected GREEN,
+    but numeric inradius value changed ~1e-4; re-verify.
+  * Any saddle fold-arc test keyed to the OLD near-gamma~1.6 inward_sign/
+    image_count (=+1/2) now sees -1/4 (correct). Re-point if such fixtures exist
+    (test_lensing_ppgo_bandsplit / arc-count suites).
+  I did NOT run test suites or edit tests (role boundary).
+
+
+- WP2 (cusp LOCATION = analytic root of y'.y''=0) DONE in
+  surrogate_training.py: added `from scipy.optimize import brentq` (after
+  numpy). New module helpers before _find_cusps: `_speed_slope(gamma,branch,
+  theta)` = float(y'[0]*y''[0]+y'[1]*y''[1]) via geometry.caustic_derivatives
+  (single-source g, no finite diff); `_refine_cusp_angle(gamma,branch,lo,hi)`
+  = brentq(lambda t:_speed_slope(...),lo,hi,xtol=4*eps). _find_cusps sig now
+  keyword-only gamma,branch (after periodic). DELETED _CUSP_SPEED_REL_FRAC
+  constant+comment; inlined `window_dip_frac=0.2` LOCAL — detection+window
+  loop (index i, lo/hi dip walk, span, delta=max(min_hw,ws*0.5*span)) kept
+  byte-identical, so delta_theta is provably identical (0.2==old const).
+  Only theta changes: per detected i, bracket lo=max(thetas[i]-step,
+  theta_min+_CUSP_BRACKET_EPS), hi=min(thetas[i]+step,theta_max-eps)
+  (step=median diff; new constant _CUSP_BRACKET_EPS=1e-9 keeps brentq off
+  diverging saddle wedge edge). TWIN GATE (Professor): accept root ONLY if
+  g(lo)<0<g(hi) (upward crossing=minimum) AND caustic_speed(root)<1e-6*
+  speed.max(); else fall back to thetas[i] (never invent). try/except
+  geometry.LensDomainError->fallback. 4 call sites pass gamma/branch:
+  _astroid_arcs & _cusp_source_angles -> gamma=gamma,branch=1; _saddle_arcs
+  & _lobe_cusp_source_angles -> gamma=gamma,branch=branch inside branch loop
+  (kept saddle width_safety/min_halfwidth kwargs).
+  Smoke (real import): parse OK, _CUSP_SPEED_REL_FRAC absent; astroid gamma
+  0.37 n=201 OFF-GRID -> 4 cusps at 0,pi/2,pi,3pi/2, root_err ~1e-16 vs
+  nearest_sample_err ~1e-2 (relocation works), speed<1e-15; saddle gamma1.6
+  cusp at 0.0 delta0.0919; _astroid_arcs 4 / _saddle_arcs 6 cusps run;
+  _cusp_source_angles=[-pi/2,0,pi/2,pi]. Did NOT touch tests.
+  OWED->Test Dev: any test invoking _find_cusps directly must now pass
+  gamma=/branch= (signature changed, keyword-only) or hits TypeError; tests
+  referencing st._CUSP_SPEED_REL_FRAC now AttributeError (retired); near-cusp
+  window fixtures unaffected (delta byte-identical) but cusp-ANGLE fixtures
+  that expected the sampled minimum now get the ~1e-10 analytic root.
+
+- WP1 (surrogate_training.py, swap FD estimators->exact geometry) DONE:
+  (1) _min_curvature_radius: deleted inlined 3-pt circumradius + area2<1e-30
+  collinearity guard; now thetas=linspace(theta_lo,theta_hi,max(n//2,32))
+  ENDPOINTS INCLUDED, r_min=min over (band[0],band[1]) of
+  geometry.caustic_curvature_radius(gamma,thetas,branch=arc.branch) (vectorised
+  over theta). inf for straight point = no constraint (replaces guard). Value is
+  4.9-9.6% SMALLER than incumbent (F038 endpoint bias) BY DESIGN. (2)
+  _branch_speed_profile: deleted np.gradient/np.roll central diff//step; per-theta
+  loop appends float(geometry.caustic_speed(gamma,theta,branch=branch)) w/
+  try/except geometry.LensDomainError skip (whole-array caustic_derivatives
+  refuses if ANY theta off-wedge -> can't vectorise). Kept periodic-vs-linspace
+  theta + `<4 pts -> good_theta,np.array([])` guard. (3) _InteriorAdmission: added
+  frozen field `gammas: tuple` (row-aligned w/ radius_grid/caustic_clouds); admits()
+  now loops `for gamma_i,radius_axis in zip(self.gammas,self.radius_grid)`, builds
+  same probes (rho_outer*radii), refuses via
+  geometry.nearest_caustic_point(gamma_i,0.0,[px,py],kappa=0.0).distance<eta_max,
+  NO margin, try/except LensDomainError->return False. admits_exterior UNTOUCHED
+  (byte-identical, still cloud-based; caustic_clouds field kept). (4)
+  _interior_admission: passes gammas=tuple(float(g) for g in band_gammas). Deleted
+  _CLOUD_MARGIN_FRAC constant + its docstring block entirely.
+  Smoke (real import): constant absent; min_curv=0.155 finite; speed 64/64 finite
+  periodic; saddle gamma1.5 drops 64->16 in-wedge both branches; gammas=(0.45,0.5,
+  0.55); admits interior True, near-caustic False. parse+import OK.
+  OWED -> Test Dev (I did NOT edit tests; they encode retired cloud+margin contract):
+  * test_lensing_exterior_admission.py: MANY tests mock.patch.object(st,
+    '_CLOUD_MARGIN_FRAC',...) / assert st._CLOUD_MARGIN_FRAC>= / margin-width vs slop
+    / _cloud_nearest_over_band cloud reproduction of admits -> now AttributeError
+    (constant gone) + admits is exact-distance no-margin. Whole margin-sizing/false-
+    admit-closure test group must be re-pointed to the exact nearest_caustic_point
+    contract (or retired). test_exterior_admitted_set_unchanged_under_margin premise
+    (interior margin doesn't move exterior) is now vacuous.
+  * test_lensing_ppgo_bandsplit.py & test_lensing_exterior_windows.py: use .admits()
+    but NOT the constant; semantics (interior admitted / exterior refused) should
+    hold under exact distance, but near-boundary fixtures may flip 4.9-9.6% (curv) /
+    margin-width (interior) — Test Dev to re-verify, not a production defect.
+
 - WP2 (fold_opening_direction) DONE: added public
   fold_opening_direction(gamma, theta, *, kappa=0.0, branch=1) to
   chang_refsdal/geometry.py immediately after WP1's

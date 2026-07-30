@@ -86,5 +86,29 @@ without depending on the per-machine `~/.claude/projects/.../memory/` path.
 - Agent failures must retain the final bounded stderr/result detail in the
   build log. A length-only message such as "partial output: 1167 chars" is not
   sufficient for provider-boundary diagnosis.
+- POST-OUTAGE CONCURRENCY DEATHS (diagnosed 2026-07-29): after an API outage,
+  builds die in Phase 1 Planning with "Fatal error in message reader: Command
+  failed with exit code 1" ~15-40s in, at "Architect planning (with Professor
+  + Simplifier subagents)". A single `claude -p` call succeeds throughout, so
+  it is CONCURRENCY limiting, not a full outage: the Architect's on-demand
+  nested Task-tool subagents (professor/simplifier, `build_phase1_subagents`)
+  spawn fresh CLI subprocesses, and a transient rate-limit failure on one of
+  those kills the Architect's message stream and the whole build.
+  KEY GAP: the orchestrator's infrastructural-death retry
+  (`_looks_infrastructural` matches "exit code 1"/"command failed";
+  `SDK_AGENT_RETRY_WAIT_SECONDS` default 300) wraps TOP-LEVEL role agents only,
+  NOT the nested planning subagents — so these deaths are never retried and
+  abort the build. Remedy in the moment is TIME (retry the whole build on a
+  ~15 min cadence until the limit clears); do NOT disable the planning
+  subagents to dodge it (that ships plans with no Professor review, which this
+  session repeatedly relied on to catch driver-brief errors). Durable fix for
+  later: extend the infra-death retry to cover nested Phase 1 subagents.
+- RETRY-LOOP DETECTION TRAP (2026-07-29): a driver retry loop that greps the
+  build LOG for survival markers ("Plan written", "plan_ready", "Coder
+  checkpoint") FALSE-POSITIVES, because `launch_build.sh` echoes a suggested
+  Monitor command into the log header containing those exact words. Key
+  survival on the ARTIFACT instead — `/tmp/<slug>_approval/plan.json` existing
+  — and death on real lines absent from that header echo ("Fatal error in
+  message reader", a line starting "Build failed:").
 - To run: `.claude/build "task"` for the unchanged Claude default, or
   `.codex/build "task"` for the Codex runtime.

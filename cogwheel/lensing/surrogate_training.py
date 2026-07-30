@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 import numpy as np
+from scipy.optimize import brentq
 
 from cogwheel.lensing import prior as _lens_prior
 from cogwheel.lensing.waveform import dimensionless_frequency
@@ -98,17 +99,12 @@ _DEFAULT_ETA_MAX = 0.05
 #: Minimum caustic distance a far-field chart serves at (tube/far-field seam).
 _DEFAULT_FARFIELD_OVERLAP = 0.05
 
-#: A cusp is a local caustic-speed minimum below this fraction of the median
-#: speed along the sampled caustic.  A RELATIVE threshold is used rather than
-#: the brief's nominal absolute ``1e-6`` because the measured dip depth scales
-#: as ``~ caustic_size / n_samples`` (a semicubical cusp has speed -> 0
-#: linearly in arc index), so at ~100-200 samples genuine cusps read
-#: ``1e-2..1e-5`` -- an absolute cut would miss them.  The relative cut tracks
-#: the same "speed collapses at a cusp" signal robustly across gamma.
-_CUSP_SPEED_REL_FRAC = 0.2
 #: Cusp-window half-width = safety factor x measured dip half-width, floored.
 _CUSP_WIDTH_SAFETY = 1.5
 _CUSP_MIN_HALFWIDTH = 0.05
+#: Inward nudge (rad) keeping the analytic-root brentq bracket strictly inside
+#: the sampled interval, so it never lands on the diverging saddle wedge edge.
+_CUSP_BRACKET_EPS = 1e-9
 #: Saddle-only cusp-exclusion widening (Build 8g WP3).  The macro-saddle
 #: deltoid lobes have shallow interior cusps and, crucially, wedge-edge
 #: turnaround walls whose foot-of-normal map is near-singular; the astroid
@@ -125,8 +121,6 @@ _SADDLE_CUSP_MIN_HALFWIDTH = 0.08
 _ARC_MARGIN_FRAC = 0.03
 #: Small offset off the saddle wedge edges when sampling a branch.
 _WEDGE_EPS = 1e-3
-#: Caustic distance used to probe which side of a fold carries the image pair.
-_PROBE_ETA = 0.05
 #: Margin below the double-double product ceiling ``w * |y| <= 60`` used to cap
 #: each chart's ``w`` grid.  Mirrors the prior's mass coupling, which keeps
 #: ``w * |y| <= ~55`` by construction (the mass-conditioned source scale), so a
@@ -142,17 +136,6 @@ _EXPECTED_CUSPS = {1: 4, -1: 6}
 #: smooth diagonal minimum interior to a cusp-aligned tile is not missed.
 _INTERIOR_BOUNDARY_NODES = 181
 _INTERIOR_EDGE_SAMPLES = 5
-#: Dimensionless safety margin on the interior caustic-cloud distance test.
-#: The shared 200-point ``_caustic_points`` cloud is discrete, so the
-#: nearest-cloud distance overshoots the exact nearest-caustic distance by ~8%
-#: of ``eta_max`` (measured at band (0.45, 0.55): exact
-#: ``nearest_caustic_point`` distance 0.0462 vs ``eta_max`` 0.05).  Inflating
-#: the interior refusal threshold by 10% rejects such near-shell tiles without
-#: densifying the shared cloud (which also feeds ``admits_exterior``) or
-#: spending extra oracle calls; the margin scales with ``eta_max``.
-#: Interior-only: the exterior path's ~0.35 caustic margin dwarfs this slop, so
-#: no margin is applied there (kept byte-identical).
-_CLOUD_MARGIN_FRAC = 0.10
 #: S2-2 per-lobe saddle interior (frozen WP7).  Lens-plane angular centres of
 #: the two macro-saddle deltoid lobes on the negative-eigenvalue (shear) axis
 #: at ``beta = 0``; each lobe is swept over its critical wedge ``|sin 2 theta|
@@ -435,89 +418,131 @@ def _tube_source(gamma: float, theta: float, eta: float, branch: int,
     return caust + sign * eta * normal
 
 
-def _probe_arc_side(gamma: float, theta: float, branch: int
-                    ) -> tuple[int, int] | None:
-    """Choose the image-pair side of a fold arc, returning ``(sign, n_img)``.
-
-    Places a test source at ``_PROBE_ETA`` on each side of the fold and keeps
-    the side whose nearest caustic point faithfully reconstructs the intended
-    ``(distance, theta)`` (so the source really sits on this fold), preferring
-    the side with more real images (where the fold image pair is present).
-    Returns ``None`` if neither side reconstructs faithfully.
-    """
-    caust, normal = _tube_normal(gamma, theta, branch)
-    matrix = geometry.macro_matrix(gamma, 0.0, 0.0)
-    best: tuple[int, int] | None = None
-    for sign in (1, -1):
-        source = caust + sign * _PROBE_ETA * normal
-        try:
-            near = geometry.nearest_caustic_point(
-                gamma, 0.0, source, kappa=0.0)
-            dtheta = abs((near.theta - theta + np.pi) % (2.0 * np.pi) - np.pi)
-            if abs(near.distance - _PROBE_ETA) > 0.25 * _PROBE_ETA \
-                    or dtheta > 0.1:
-                continue
-            n_img = len(geometry.find_images(source, matrix))
-        except geometry.LensDomainError:
-            # A refused probe (near-degenerate census, F012) means this side is
-            # not cleanly on the fold; skip it conservatively.
-            continue
-        if best is None or n_img > best[1]:
-            best = (sign, n_img)
-    return best
-
-
 def _branch_speed_profile(gamma: float, branch: int, theta_lo: float,
                           theta_hi: float, n: int, periodic: bool
                           ) -> tuple[np.ndarray, np.ndarray]:
     """Caustic ``theta`` samples and speed ``|d caustic / d theta|`` on a
     branch.
 
-    Points outside the branch's domain (saddle wedge) are dropped.
+    Exact closed-form parametric speed
+    (:func:`geometry.caustic_speed`).  Points outside the branch's domain
+    (the saddle wedge) are dropped: a whole-array ``caustic_derivatives``
+    call refuses if ANY theta is off-wedge, so each theta is evaluated
+    individually and off-domain angles are skipped.
     """
     thetas = (np.linspace(theta_lo, theta_hi, n, endpoint=False) if periodic
               else np.linspace(theta_lo, theta_hi, n))
-    good_theta, points = [], []
+    good_theta, speeds = [], []
     for theta in thetas:
         try:
-            points.append(np.asarray(
-                geometry.critical_point(gamma, theta, 0.0, 0.0, branch).source,
-                dtype=float))
-            good_theta.append(theta)
+            speed = float(
+                geometry.caustic_speed(gamma, float(theta), branch=branch))
         except geometry.LensDomainError:
             continue
+        speeds.append(speed)
+        good_theta.append(float(theta))
     good_theta = np.asarray(good_theta)
-    points = np.asarray(points)
-    if points.shape[0] < 4:
+    if good_theta.shape[0] < 4:
         return good_theta, np.array([])
-    if periodic:
-        deriv = 0.5 * (np.roll(points, -1, axis=0)
-                       - np.roll(points, 1, axis=0))
-        step = float(thetas[1] - thetas[0])
-        speed = np.hypot(deriv[:, 0], deriv[:, 1]) / step
-    else:
-        deriv = np.gradient(points, good_theta, axis=0)
-        speed = np.hypot(deriv[:, 0], deriv[:, 1])
-    return good_theta, speed
+    return good_theta, np.asarray(speeds)
+
+
+def _speed_slope(gamma: float, branch: int, theta: float) -> float:
+    """Slope of the squared caustic speed: ``g(theta) = y'(theta) . y''(theta)``.
+
+    Equals ``(1/2) d|y'|**2 / dtheta``.  It is real-analytic in ``theta``
+    through a cusp (the caustic's non-smoothness lives in arc length, not in
+    the angular parameter -- Professor) and crosses zero upward (``g' > 0``)
+    at each speed minimum, so its root pins the cusp angle.  Uses the exact
+    analytic derivatives (`geometry.caustic_derivatives`); no finite difference.
+    """
+    y_prime, y_double_prime = geometry.caustic_derivatives(
+        gamma, theta, branch=branch)
+    return float(y_prime[0] * y_double_prime[0]
+                 + y_prime[1] * y_double_prime[1])
+
+
+def _radial_slope(gamma: float, branch: int, theta: float) -> float:
+    """Slope of the squared caustic radius: ``h(theta) = y(theta) . y'(theta)``.
+
+    Equals ``(1/2) d|y|**2 / dtheta``.  Its UPWARD zero crossings mark the
+    smooth local minima of the source-plane distance ``|y|`` from the origin.
+    A cusp is a distinct kind of ``|y|`` minimum -- there ``y' -> 0`` so ``h``
+    need not vanish and a root solver degenerates; cusp angles are handled by
+    their own closed-form set, not this slope.  Uses the exact caustic point
+    and first derivative (`geometry.critical_point` / `geometry.caustic_derivatives`);
+    no finite difference.
+    """
+    y = np.asarray(
+        geometry.critical_point(gamma, theta, 0.0, 0.0, branch).source,
+        dtype=float)
+    y_prime, _ = geometry.caustic_derivatives(gamma, theta, branch=branch)
+    return float(y[0] * y_prime[0] + y[1] * y_prime[1])
+
+
+def _refine_cusp_angle(gamma: float, branch: int,
+                       theta_lo: float, theta_hi: float) -> float:
+    """Analytic cusp angle: the root of ``y'.y'' = 0`` in ``[theta_lo, theta_hi]``.
+
+    A caustic cusp is the point where the parametric speed ``|y'(theta)|``
+    reaches zero, i.e. where ``g = _speed_slope`` crosses zero.  A single
+    ``brentq`` bracketed strictly inside the sampled interval pins the angle
+    to ~1e-10.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    branch : int
+        Square-root branch ``+-1`` of the caustic parametrisation.
+    theta_lo, theta_hi : float
+        Bracket endpoints (radians); ``g`` must change sign across them.
+
+    Returns
+    -------
+    float
+        The angle ``theta`` where ``y'.y'' = 0``.
+    """
+    eps = np.finfo(float).eps
+    return brentq(lambda theta: _speed_slope(gamma, branch, theta),
+                  theta_lo, theta_hi, xtol=4.0 * eps)
 
 
 def _find_cusps(thetas: np.ndarray, speed: np.ndarray, periodic: bool, *,
+                gamma: float, branch: int,
                 width_safety: float = _CUSP_WIDTH_SAFETY,
                 min_halfwidth: float = _CUSP_MIN_HALFWIDTH
                 ) -> list[tuple[float, float]]:
     """Cusp ``(theta, delta_theta)`` pairs from caustic-speed minima.
 
-    A cusp is a local minimum of ``speed`` below `_CUSP_SPEED_REL_FRAC` of the
-    median speed; ``delta_theta`` is ``width_safety`` times the half-width of
-    the below-threshold dip around it, floored at ``min_halfwidth``.  The
-    astroid path uses the module defaults (`_CUSP_WIDTH_SAFETY`,
+    A cusp is a local minimum of ``speed``; its ANGLE is relocated to the
+    exact analytic root of ``y'.y'' = 0`` (`_refine_cusp_angle`, ``brentq``
+    bracketed strictly inside the sampled interval), and ``delta_theta`` is
+    ``width_safety`` times the half-width of the dip that falls below
+    ``window_dip_frac`` of the median speed, floored at ``min_halfwidth``.
+    The astroid path uses the module defaults (`_CUSP_WIDTH_SAFETY`,
     `_CUSP_MIN_HALFWIDTH`); the saddle path passes its wider
     `_SADDLE_CUSP_WIDTH_SAFETY` / `_SADDLE_CUSP_MIN_HALFWIDTH` (Build 8g WP3).
+
+    The analytic root is accepted only under the Professor TWIN GATE: ``g``
+    must cross zero upward across the bracket (``g(lo) < 0 < g(hi)``, so the
+    root is a speed *minimum* not a maximum) AND the caustic speed at the root
+    must be below ``1e-6`` of the peak speed.  If the gate fails (or the
+    bracket is degenerate / off-domain) the sampled minimum ``thetas[i]`` is
+    kept -- the detector never invents a cusp.
     """
     if speed.size < 4:
         return []
-    threshold = _CUSP_SPEED_REL_FRAC * float(np.median(speed))
+    # RELATIVE dip fraction: sizes the carved-out exclusion WINDOW around a
+    # detected cusp only.  It plays no part in locating the cusp angle (that
+    # is the analytic root of y'.y'' = 0 below).
+    window_dip_frac = 0.2
+    threshold = window_dip_frac * float(np.median(speed))
     n = speed.size
+    speed_peak = float(speed.max())
+    step = float(np.median(np.diff(thetas)))
+    theta_min = float(thetas.min())
+    theta_max = float(thetas.max())
     cusps: list[tuple[float, float]] = []
     for i in range(n):
         left = speed[(i - 1) % n] if periodic else speed[max(i - 1, 0)]
@@ -541,7 +566,27 @@ def _find_cusps(thetas: np.ndarray, speed: np.ndarray, periodic: bool, *,
                 break
         span = abs(thetas[i] - thetas[lo]) + abs(thetas[hi] - thetas[i])
         delta = max(min_halfwidth, width_safety * 0.5 * span)
-        cusps.append((float(thetas[i]), float(delta)))
+        # Relocate to the analytic root of y'.y'' = 0, bracketed strictly
+        # inside the sampled interval (keeps brentq off the diverging saddle
+        # wedge edge).  Twin gate: upward zero crossing (speed minimum) AND
+        # near-zero speed at the root; else keep the sampled minimum.
+        theta_cusp = float(thetas[i])
+        bracket_lo = max(theta_cusp - step, theta_min + _CUSP_BRACKET_EPS)
+        bracket_hi = min(theta_cusp + step, theta_max - _CUSP_BRACKET_EPS)
+        if bracket_lo < bracket_hi:
+            try:
+                g_lo = _speed_slope(gamma, branch, bracket_lo)
+                g_hi = _speed_slope(gamma, branch, bracket_hi)
+                if g_lo < 0.0 < g_hi:
+                    root = _refine_cusp_angle(
+                        gamma, branch, bracket_lo, bracket_hi)
+                    root_speed = float(geometry.caustic_speed(
+                        gamma, root, branch=branch))
+                    if root_speed < 1e-6 * speed_peak:
+                        theta_cusp = root
+            except geometry.LensDomainError:
+                theta_cusp = float(thetas[i])
+        cusps.append((theta_cusp, float(delta)))
     return cusps
 
 
@@ -550,7 +595,7 @@ def _astroid_arcs(gamma: float, n: int
     """Cusps and fold arcs of the positive-parity astroid (single branch)."""
     thetas, speed = _branch_speed_profile(
         gamma, 1, 0.0, 2.0 * np.pi, n, periodic=True)
-    cusps = _find_cusps(thetas, speed, periodic=True)
+    cusps = _find_cusps(thetas, speed, periodic=True, gamma=gamma, branch=1)
     cusps.sort()
     reach = _caustic_reach(gamma, 1, 0.0, 2.0 * np.pi, n)
     arcs: list[FoldArc] = []
@@ -589,7 +634,7 @@ def _saddle_arcs(gamma: float, n: int
             reach = max(reach, _caustic_reach(
                 gamma, branch, lo_edge, hi_edge, n))
             cusps = _find_cusps(
-                thetas, speed, periodic=False,
+                thetas, speed, periodic=False, gamma=gamma, branch=branch,
                 width_safety=_SADDLE_CUSP_WIDTH_SAFETY,
                 min_halfwidth=_SADDLE_CUSP_MIN_HALFWIDTH)
             cusps.sort()
@@ -623,24 +668,45 @@ def _make_arc(gamma: float, branch: int, t_lo: float, w_lo: float,
     inner_hi -= margin
     if inner_hi - inner_lo < _CUSP_MIN_HALFWIDTH:
         return None
-    # Probe several interior thetas, not just the midpoint: a mid-lobe arc's
-    # midpoint can sit in the near-axial F012 census dead zone at isolated
-    # gammas, and a single refused probe would silently drop a physically
-    # present arc (measured: deltoid branch -1 arcs vanished at gamma =
-    # 1.245/1.265/1.305/1.315 only, flickering the arc count 6 -> 4 and
-    # shredding the band splitter's stable sub-bands).
+    # Orient the arc from geometry, not a census probe: the image-pair side is
+    # the sign of the exact fold-opening direction (points toward the two-image
+    # side) projected onto the SAME serve normal `_tube_source` applies at
+    # `_tube_normal` -- so an admitted source is nudged onto the served side by
+    # construction (serve-consistency, Professor Q3).  Only the SIGN of `dot`
+    # matters: it fixes the served two-image side and carries ~12 orders of
+    # float64 margin (the minimum |dot| over the whole prior is 4.4e-3).  The
+    # magnitude |dot| measures fold-opening transversality, which scales as
+    # ~1.5*gamma; it is NOT a cusp-proximity proxy, so it must NOT be
+    # magnitude-filtered -- doing so was the F041 regression, the same category
+    # error as the retired _PROBE_ETA.  The exact-zero tripwire below only skips
+    # the measure-zero pathology where the fold-opening direction is exactly
+    # tangent to the serve normal (sign undefined).  The fallback fractions
+    # exist solely to step past LensDomainError skips; the two-image side is a
+    # global property of the fold arc, so the sign is invariant across them.
     span = inner_hi - inner_lo
-    side = None
+    sign: int | None = None
     for frac in (0.5, 0.35, 0.65, 0.2, 0.8):
-        side = _probe_arc_side(gamma, inner_lo + frac * span, branch)
-        if side is not None:
-            break
-    if side is None:
+        theta = inner_lo + frac * span
+        try:
+            fold_dir = geometry.fold_opening_direction(
+                gamma, theta, branch=branch)
+            _caust, normal = _tube_normal(gamma, theta, branch)
+        except geometry.LensDomainError:
+            continue
+        dot = float(fold_dir @ normal)
+        if dot == 0.0:
+            continue
+        sign = 1 if dot >= 0.0 else -1
+        break
+    if sign is None:
         return None
-    sign, image_count = side
+    # The served/image-pair side carries exactly four real images for BOTH the
+    # positive-parity astroid interior and the macro-saddle deltoid lobe at
+    # kappa = 0 -- a constant of parity, so no `find_images` probe is needed
+    # (Professor Q2).
     return FoldArc(branch=branch, theta_lo=float(inner_lo),
                    theta_hi=float(inner_hi), inward_sign=int(sign),
-                   image_count=int(image_count),
+                   image_count=4,
                    cusp_windows=tuple((float(t), float(w))
                                       for t, w in windows))
 
@@ -869,26 +935,20 @@ def _min_curvature_radius(band: tuple[float, float], arc: FoldArc,
                           n_samples: int) -> float:
     """Minimum caustic curvature radius over an arc, worst gamma in band.
 
-    Three-point circumradius over densely sampled caustic points at the
-    band's edge gammas (curvature is worst where the caustic is
-    smallest). Conservative floor for the foot-of-normal assertion.
+    Exact closed-form caustic curvature radius
+    (:func:`geometry.caustic_curvature_radius`), sampled across the arc's
+    ``theta`` span with endpoints included, at the band's edge gammas
+    (curvature is worst where the caustic is smallest). Conservative floor
+    for the foot-of-normal assertion. A genuinely straight caustic point
+    returns ``inf`` -- the physical infinite radius, i.e. no curvature
+    constraint -- so no collinearity guard is needed.
     """
-    r_min = np.inf
     thetas = np.linspace(arc.theta_lo, arc.theta_hi, max(n_samples // 2, 32))
+    r_min = np.inf
     for gamma in (band[0], band[1]):
-        pts = np.array([
-            geometry.critical_point(float(gamma), float(t), 0.0, 0.0,
-                                    arc.branch).source
-            for t in thetas])
-        for i in range(1, len(pts) - 1):
-            a, b, c = pts[i - 1], pts[i], pts[i + 1]
-            ab, bc, ca = (np.linalg.norm(b - a), np.linalg.norm(c - b),
-                          np.linalg.norm(a - c))
-            area2 = abs((b[0] - a[0]) * (c[1] - a[1])
-                        - (b[1] - a[1]) * (c[0] - a[0]))
-            if area2 < 1e-30:
-                continue  # collinear: infinite radius, not a constraint
-            r_min = min(r_min, ab * bc * ca / (2.0 * area2))
+        radii = geometry.caustic_curvature_radius(
+            float(gamma), thetas, branch=arc.branch)
+        r_min = min(r_min, float(np.min(radii)))
     return float(r_min)
 
 
@@ -1387,16 +1447,112 @@ def _winding_number(points: np.ndarray) -> float:
     return float(increments.sum() / (2.0 * np.pi))
 
 
+def _branch_inradius_candidates(gamma: float, branch: int, theta_lo: float,
+                                theta_hi: float, n: int, periodic: bool
+                                ) -> list[float]:
+    """Closed-form ``|y|`` candidates for the caustic inradius on one branch.
+
+    The closest source-plane approach to the origin on a caustic branch is
+    either a cusp (astroid cusps ARE the points nearest the origin) or a smooth
+    interior minimum of ``|y|(theta)``.  Both are located from exact geometry:
+
+    * refined cusp angles (`_find_cusps` -> `geometry.critical_point`), where a
+      naive ``brentq`` on ``h = y . y'`` degenerates because ``y' -> 0``;
+    * smooth interior minima -- an UPWARD zero crossing of ``h`` between two
+      adjacent in-domain samples whose caustic speed stays clear of a cusp dip,
+      refined with ``brentq`` and evaluated in closed form.
+
+    Returns the list of candidate ``|y|`` values (empty if the branch carries
+    fewer than four in-domain samples).
+    """
+    thetas, speed = _branch_speed_profile(
+        gamma, branch, theta_lo, theta_hi, n, periodic=periodic)
+    if speed.size < 4:
+        return []
+    candidates: list[float] = []
+    # (a) Refined cusp angles: evaluate |y| in closed form at each cusp.
+    for theta, _delta in _find_cusps(thetas, speed, periodic=periodic,
+                                     gamma=gamma, branch=branch):
+        try:
+            src = geometry.critical_point(
+                gamma, theta, 0.0, 0.0, branch).source
+        except geometry.LensDomainError:
+            continue
+        candidates.append(float(np.hypot(src[0], src[1])))
+    # (b) Smooth interior minima: upward zero crossings of h = y . y' that are
+    #     clear of a cusp dip (both endpoint speeds above 0.2 * median, the same
+    #     dip fraction `_find_cusps` uses to size cusp windows).
+    median_speed = float(np.median(speed))
+    h_vals: list[float] = []
+    for theta in thetas:
+        try:
+            h_vals.append(_radial_slope(gamma, branch, float(theta)))
+        except geometry.LensDomainError:
+            h_vals.append(math.nan)
+    m = thetas.shape[0]
+    n_brackets = m if periodic else m - 1
+    for k in range(n_brackets):
+        i, j = k, (k + 1) % m
+        lo, hi = float(thetas[i]), float(thetas[j])
+        if hi <= lo:
+            # Periodic wrap bracket (theta_hi -> theta_lo) is not a monotone
+            # interval; any |y| minimum at the seam is a cusp already in (a).
+            continue
+        if not (h_vals[i] < 0.0 <= h_vals[j]):
+            continue
+        if min(float(speed[i]), float(speed[j])) < 0.2 * median_speed:
+            continue
+        try:
+            root = brentq(lambda t: _radial_slope(gamma, branch, t), lo, hi)
+            src = geometry.critical_point(
+                gamma, root, 0.0, 0.0, branch).source
+        except (geometry.LensDomainError, ValueError):
+            continue
+        candidates.append(float(np.hypot(src[0], src[1])))
+    return candidates
+
+
+def _closed_form_inradius(gamma: float, parity: int, n: int) -> float:
+    """Caustic inradius (closest approach to the origin) from exact geometry.
+
+    The minimum closed-form ``|y|`` over the refined cusp angles and refined
+    smooth interior minima of every caustic branch (`_branch_inradius_candidates`):
+    the astroid is a single periodic branch over ``[0, 2 pi)``; the macro-saddle
+    deltoid is two lobes, each with two square-root branches over its critical
+    wedge.  The quadratic curvature at a minimum gives ~1e-9 relative accuracy,
+    replacing the discrete-sample ``min |y|`` which biases high by the sample
+    spacing.  Returns ``0.0`` only if no branch carries enough in-domain samples
+    (the caller's cloud guard already rejects that degenerate case).
+    """
+    candidates: list[float] = []
+    if parity == 1:
+        candidates += _branch_inradius_candidates(
+            gamma, 1, 0.0, 2.0 * np.pi, n, periodic=True)
+    else:
+        theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
+        for center in (0.0, np.pi):
+            lo_edge = center - theta_max + _WEDGE_EPS
+            hi_edge = center + theta_max - _WEDGE_EPS
+            for branch in (1, -1):
+                candidates += _branch_inradius_candidates(
+                    gamma, branch, lo_edge, hi_edge, n, periodic=False)
+    return min(candidates) if candidates else 0.0
+
+
 def _caustic_inradius(gamma: float, parity: int, n: int) -> tuple[float, bool]:
     """Minimum caustic radius and whether the caustic encloses the origin.
 
     Returns ``(inradius, encloses_origin)``.  ``inradius`` is the smallest
     source-plane radius any caustic point reaches -- the radius of the largest
     origin-centred disk that fits inside the caustic curve, which the interior
-    far-field tiles must stay within.
+    far-field tiles must stay within.  It is the minimum CLOSED-FORM ``|y|``
+    over the refined cusp angles and refined smooth interior minima of the
+    caustic branches (`_closed_form_inradius`), accurate to ~1e-9 (a quadratic
+    minimum), not a discrete-sample minimum biased high by the sample spacing.
 
     ``encloses_origin`` keys the interior admission off the caustic TOPOLOGY,
-    never a bare image count (Professor 8h-a):
+    never a bare image count (Professor 8h-a), and is still computed from the
+    winding number of the ordered discrete cloud:
 
     * The positive-parity astroid is a single closed 4-cusped curve swept over
       one continuous ``theta`` branch; it winds once around the origin, so an
@@ -1417,8 +1573,7 @@ def _caustic_inradius(gamma: float, parity: int, n: int) -> tuple[float, bool]:
     points = _caustic_points(gamma, parity, n)
     if points.shape[0] < 4:
         return 0.0, False
-    radii = np.hypot(points[:, 0], points[:, 1])
-    inradius = float(radii.min())
+    inradius = _closed_form_inradius(gamma, parity, n)
     if parity != 1:
         return inradius, False
     return inradius, abs(_winding_number(points)) >= 0.5
@@ -1442,7 +1597,7 @@ def _cusp_source_angles(gamma: float, n: int) -> list[float]:
     """
     thetas, speed = _branch_speed_profile(
         gamma, 1, 0.0, 2.0 * np.pi, n, periodic=True)
-    cusps = _find_cusps(thetas, speed, periodic=True)
+    cusps = _find_cusps(thetas, speed, periodic=True, gamma=gamma, branch=1)
     angles: list[float] = []
     for theta_lens, _delta in cusps:
         try:
@@ -1505,13 +1660,19 @@ class _InteriorAdmission:
     radius_grid : np.ndarray
         Shape ``(n_gamma, n_theta)`` directional physical caustic radii.
     caustic_clouds : tuple[np.ndarray, ...]
-        Per-gamma ``(K, 2)`` eigenframe caustic point clouds.
+        Per-gamma ``(K, 2)`` eigenframe caustic point clouds (used by
+        ``admits_exterior``).
+    gammas : tuple
+        Per-gamma shear magnitudes, aligned row-for-row with
+        ``radius_grid`` and ``caustic_clouds``; the interior distance test
+        queries the exact caustic at each of these gammas.
     """
 
     eta_max: float
     theta_axis: np.ndarray
     radius_grid: np.ndarray
     caustic_clouds: tuple[np.ndarray, ...]
+    gammas: tuple
 
     def admits(self, center: tuple[float, float],
                half: tuple[float, float]) -> bool:
@@ -1522,7 +1683,12 @@ class _InteriorAdmission:
         ``(half_rho, half_theta_c)`` in caustic-fixed coordinates.  The outer
         ``rho`` edge is probed at `_INTERIOR_EDGE_SAMPLES` polar angles across
         the tile's ``theta_c`` span. Every physical probe is reconstructed with
-        the same gamma- and angle-dependent radius as the chart.
+        the same gamma- and angle-dependent radius as the chart, then its
+        clearance is the EXACT nearest-caustic distance
+        (:func:`geometry.nearest_caustic_point`) at that gamma -- no discrete
+        cloud, no margin: a probe within ``eta_max`` of the caustic refuses the
+        tile. A domain refusal from the geometry (e.g. the parity boundary) is
+        treated conservatively as non-admission.
         """
         rho_center, theta_center = center
         half_rho, half_theta = half
@@ -1531,27 +1697,19 @@ class _InteriorAdmission:
             return False
         thetas = np.linspace(theta_center - half_theta,
                              theta_center + half_theta, _INTERIOR_EDGE_SAMPLES)
-        for radius_axis, caustic_cloud in zip(
-                self.radius_grid, self.caustic_clouds):
-            if caustic_cloud.shape[0] == 0:
-                return False
+        for gamma_i, radius_axis in zip(self.gammas, self.radius_grid):
             radii = np.interp(thetas, self.theta_axis, radius_axis)
             y_magnitudes = rho_outer * radii
             probe_x = y_magnitudes * np.cos(thetas)
             probe_y = y_magnitudes * np.sin(thetas)
-            delta_x = probe_x[:, None] - caustic_cloud[None, :, 0]
-            delta_y = probe_y[:, None] - caustic_cloud[None, :, 1]
-            nearest = np.sqrt(
-                delta_x * delta_x + delta_y * delta_y,
-            ).min(axis=1)
-            # Inflate the tube-shell refusal by _CLOUD_MARGIN_FRAC: the
-            # discrete 200-point caustic cloud reads ~8% of eta_max farther
-            # than the exact nearest-caustic distance, so without the margin a
-            # tile whose true clearance is below eta_max can be false-admitted.
-            # Interior only -- admits_exterior stays byte-identical (its ~0.35
-            # margin dwarfs the slop).
-            if np.any(nearest < self.eta_max * (1.0 + _CLOUD_MARGIN_FRAC)):
-                return False
+            for px, py in zip(probe_x, probe_y):
+                try:
+                    nearest = geometry.nearest_caustic_point(
+                        gamma_i, 0.0, np.array([px, py]), kappa=0.0).distance
+                except geometry.LensDomainError:
+                    return False
+                if nearest < self.eta_max:
+                    return False
         return True
 
     def admits_exterior(self, center: tuple[float, float],
@@ -1665,7 +1823,8 @@ def _interior_admission(band: tuple[float, float], parity: int, reach: float,
     )
     return _InteriorAdmission(
         eta_max=float(config.eta_max), theta_axis=theta_axis,
-        radius_grid=radius_grid, caustic_clouds=caustic_clouds)
+        radius_grid=radius_grid, caustic_clouds=caustic_clouds,
+        gammas=tuple(float(g) for g in band_gammas))
 
 
 def _farfield_interior_tiles(rho_extent: float, n_per_side: int, *,
@@ -1900,7 +2059,7 @@ def _lobe_cusp_source_angles(gamma: float, lens_center: float,
         thetas, speed = _branch_speed_profile(
             gamma, branch, lo, hi, n, periodic=False)
         for theta_lens, _delta in _find_cusps(
-                thetas, speed, periodic=False,
+                thetas, speed, periodic=False, gamma=gamma, branch=branch,
                 width_safety=_SADDLE_CUSP_WIDTH_SAFETY,
                 min_halfwidth=_SADDLE_CUSP_MIN_HALFWIDTH):
             try:
