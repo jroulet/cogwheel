@@ -167,14 +167,11 @@ from __future__ import annotations
 
 import dataclasses
 import functools
-import importlib.util
 import inspect
 import itertools
 import math
 import os
 import re
-import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -1558,74 +1555,13 @@ class SaddleTubeTailTestCase(_CountingTestCase):
 #: ``gamma = 1`` parity boundary so `_astroid_arcs` is the exercised path.
 _ASTROID_BYTE_GAMMAS = (0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 0.95)
 
-#: Caustic-sample counts swept alongside the gammas; both a coarse and a fine
-#: grid must reproduce HEAD exactly (the cusp-window logic is grid-sensitive).
-_ASTROID_BYTE_NSAMPLES = (120, 200)
-
-
-@functools.lru_cache(maxsize=1)
-def _head_training_module():
-    """Load the pre-WP3 ``surrogate_training`` module (``HEAD``) side-by-side.
-
-    The WP3 change is uncommitted in the working tree, so ``HEAD`` is the
-    literal *before* state: its `_find_cusps` has no ``width_safety`` /
-    ``min_halfwidth`` kwargs.  A private copy of the HEAD source is exec'd into
-    a freshly-named module (registered in ``sys.modules`` FIRST so its frozen
-    dataclasses resolve), giving an independent `_astroid_arcs` whose call
-    chain differs from the working tree ONLY in `_find_cusps` -- the four other
-    astroid dependencies (`_branch_speed_profile`, `_caustic_reach`,
-    `_make_arc`, and the `FoldArc` fields) are byte-identical across the commit
-    (verified out of band), so a nonzero table diff isolates the WP3 change.
-    """
-    repo_root = Path(__file__).resolve().parents[2]
-    src = subprocess.run(
-        ['git', 'show', 'HEAD:cogwheel/lensing/surrogate_training.py'],
-        capture_output=True, text=True, check=True,
-        cwd=str(repo_root)).stdout
-    handle = tempfile.NamedTemporaryFile(
-        'w', suffix='.py', prefix='head_surr_train_', delete=False)
-    handle.write(src)
-    handle.flush()
-    handle.close()
-    modname = 'cogwheel_head_surrogate_training_wp3'
-    spec = importlib.util.spec_from_file_location(modname, handle.name)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[modname] = module  # register FIRST so @dataclass resolves
-    spec.loader.exec_module(module)
-    return module
-
-
-def _arc_fields(arc) -> tuple:
-    """The comparable scalar/tuple fields of a `FoldArc` (cross-module safe).
-
-    Frozen dataclasses compare unequal across two module copies (they are
-    different classes), so byte-identity is asserted on the fields, not ``==``.
-    """
-    return (int(arc.branch), float(arc.theta_lo), float(arc.theta_hi),
-            int(arc.inward_sign), int(arc.image_count),
-            tuple((float(t), float(w)) for t, w in arc.cusp_windows))
-
-
-def _astroid_arcs_max_diff(cur, head) -> float:
-    """Max absolute element-wise difference between two `_astroid_arcs`
-    returns ``(cusps, arcs, reach)``; ``+inf`` on any structural mismatch."""
-    cur_cusps, cur_arcs, cur_reach = cur
-    head_cusps, head_arcs, head_reach = head
-    if len(cur_cusps) != len(head_cusps) or len(cur_arcs) != len(head_arcs):
-        return math.inf
-    worst = abs(float(cur_reach) - float(head_reach))
-    for (tc, wc), (th, wh) in zip(cur_cusps, head_cusps):
-        worst = max(worst, abs(tc - th), abs(wc - wh))
-    for a_cur, a_head in zip(cur_arcs, head_arcs):
-        fields_cur = _arc_fields(a_cur)
-        fields_head = _arc_fields(a_head)
-        if len(fields_cur[5]) != len(fields_head[5]):
-            return math.inf
-        for x, y in zip(fields_cur[:5], fields_head[:5]):
-            worst = max(worst, abs(x - y))
-        for (t1, w1), (t2, w2) in zip(fields_cur[5], fields_head[5]):
-            worst = max(worst, abs(t1 - t2), abs(w1 - w2))
-    return worst
+# `_head_training_module`, `_arc_fields` and `_astroid_arcs_max_diff` were
+# deleted 2026-07-30 (F045) with their last callers.  The first exec'd
+# `git show HEAD:...surrogate_training.py` into a side-by-side module as a
+# cross-commit oracle; it outlived the tests it served and was reused by a
+# later build, reintroducing the retired antipattern.  A cross-version oracle
+# is legitimate only as a within-build transition check, retired when the
+# transition commits.
 
 
 @_TRAIN_TIER_SKIP
@@ -1636,31 +1572,22 @@ class AstroidByteIdentityTestCase(_CountingTestCase):
     ``width_safety`` / ``min_halfwidth`` (the astroid constants); the WP3
     change added those kwargs and the saddle path passes WIDER values.  If the
     kwargs' defaults or the cusp-finding logic drifted, the validated astroid
-    cusp/arc tables would move.  Oracle: the pre-WP3 ``HEAD`` `_astroid_arcs`
-    (independent module copy) -- byte-identity means max element diff 0.0.
+    cusp/arc tables would move.  Asserted on the MECHANISM -- the `_find_cusps`
+    defaults ARE the astroid constants, and substituting the wider saddle
+    values genuinely moves the windows -- which needs no cross-commit oracle.
+    The original ``git show HEAD`` byte-identity pair was retired by 1b and
+    deleted 2026-07-30 (F045).
     """
 
-    @unittest.skip('Retired by 1b: the analytic cusp root reorders the astroid '
-                   'float path by 4.4e-16 (ULP), so exact byte-identity to '
-                   'pre-1b HEAD no longer holds. Structural cusp/arc counts '
-                   'still pass; a near-identity (<1e-12) test can replace this.')
-    def test_astroid_arcs_byte_identical_head_to_worktree(self) -> None:
-        """Cusp/arc/reach tables reproduce HEAD exactly across a gamma sweep."""
-        head = _head_training_module()
-        for gamma, n in itertools.product(
-                _ASTROID_BYTE_GAMMAS, _ASTROID_BYTE_NSAMPLES):
-            with self.subTest(gamma=gamma, n=n):
-                cur = training._astroid_arcs(float(gamma), n)
-                ref = head._astroid_arcs(float(gamma), n)
-                # Structural agreement first (same cusp / arc counts).
-                self.assertEqual(len(cur[0]), len(ref[0]),
-                                 'astroid cusp count moved vs HEAD')
-                self.assertEqual(len(cur[1]), len(ref[1]),
-                                 'astroid arc count moved vs HEAD')
-                self.assertEqual(
-                    _astroid_arcs_max_diff(cur, ref), 0.0,
-                    'WP3 perturbed the frozen astroid path (nonzero diff)')
-                self.comparisons += 1
+    # `test_astroid_arcs_byte_identical_head_to_worktree` deleted 2026-07-30
+    # (F045).  1b retired it because the analytic cusp root reorders the
+    # astroid float path by 4.4e-16, so exact byte-identity to a pre-1b HEAD
+    # no longer holds.  Left as a skipped body it kept `_head_training_module`
+    # alive, and build 1d reused that helper -- which is how the retired
+    # antipattern came back.  The surviving tests below assert the MECHANISM
+    # (the `_find_cusps` defaults ARE the astroid constants) and that widening
+    # them would move the windows, which is what the byte-identity check was
+    # really for and needs no cross-commit oracle.
 
     def test_wp3_default_kwargs_equal_frozen_astroid_constants(self) -> None:
         """The WP3 `_find_cusps` defaults ARE the astroid constants -- the
@@ -1703,31 +1630,8 @@ class AstroidByteIdentityTestCase(_CountingTestCase):
             'saddle guard params left every astroid cusp window unchanged: '
             'the byte-identity check would be vacuous')
 
-    @unittest.skip('Retired by 1b (see the sibling byte-identity test): the '
-                   'analytic-cusp float reorder gives a 4.4e-16 diff to HEAD.')
-    def test_astroid_byte_identity_diagnostic(self) -> None:
-        """Diagnostic: max |diff| of the arc theta / cusp-window tables vs HEAD
-        across the gamma sweep (all zero)."""
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-
-        head = _head_training_module()
-        gammas = list(_ASTROID_BYTE_GAMMAS)
-        diffs = [_astroid_arcs_max_diff(
-            training._astroid_arcs(float(g), 200),
-            head._astroid_arcs(float(g), 200)) for g in gammas]
-        figure, axis = plt.subplots(figsize=(6, 4))
-        axis.plot(gammas, np.maximum(diffs, 1e-18), 'o-')
-        axis.axhline(0.0, color='k', ls='--')
-        axis.set(xlabel='astroid gamma', ylabel='max |worktree - HEAD|',
-                 yscale='log',
-                 title='astroid _astroid_arcs byte-identity (WP3)')
-        _save_plot(figure, 'wp3_astroid_byte_identity_diff.png')
-        plt.close(figure)
-        self.assertEqual(max(diffs), 0.0,
-                         'astroid arc tables diverged from HEAD')
-        self.comparisons += 1
+    # `test_astroid_byte_identity_diagnostic` deleted 2026-07-30 (F045): a
+    # skipped body that still called `git show HEAD`, kept as a ghost since 1b.
 
 
 # ---------------------------------------------------------------------------
@@ -1966,29 +1870,11 @@ class SelfFalsificationTestCase(_CountingTestCase):
             (True, 'eps_above_bar'))
         self.comparisons += 1
 
-    def test_shifted_cusp_breaks_astroid_byte_identity(self) -> None:
-        """Patching `_find_cusps` to nudge a cusp makes `_astroid_arcs`
-        diverge from HEAD -- so the byte-identity check goes red under a real
-        perturbation (it is not blind to a moved astroid cusp)."""
-        head = _head_training_module()
-        gamma, n = 0.4, 200
-        ref = head._astroid_arcs(gamma, n)
-        real_find_cusps = training._find_cusps
-
-        def shifted(thetas, speed, periodic, **kwargs):
-            cusps = real_find_cusps(thetas, speed, periodic, **kwargs)
-            # Nudge the first cusp's theta by a hair -> table moves.
-            if cusps:
-                t0, w0 = cusps[0]
-                cusps[0] = (t0 + 1e-3, w0)
-            return cusps
-
-        with mock.patch.object(training, '_find_cusps', shifted):
-            perturbed = training._astroid_arcs(gamma, n)
-        self.assertGreater(
-            _astroid_arcs_max_diff(perturbed, ref), 0.0,
-            'a shifted astroid cusp left the table byte-identical to HEAD')
-        self.comparisons += 1
+    # `test_shifted_cusp_breaks_astroid_byte_identity` deleted 2026-07-30
+    # (F045).  It was the reachability control for the astroid byte-identity
+    # test, which 1b retired -- a live control for a dead claim, still driving
+    # `git show HEAD`.  It passed only because `assertGreater(diff, 0.0)` is
+    # insensitive to which commit HEAD names.
 
     def test_dropped_draw_breaks_partition_sum(self) -> None:
         """A bucket census whose counts do not sum to N trips the partition
