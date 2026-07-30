@@ -366,11 +366,31 @@ Tag conventions:
         ACCEPTANCE: `_WEDGE_EPS` is derived from a stated `|y''|` ceiling, or
         deleted in favour of the refusal.
 
-  2. **DRIVER MEASUREMENT — the tube fraction.** Sweep held-out envelope eps
-     against the DIMENSIONLESS `eta / R_c`, across gamma, both parities. Find
-     `f_max` where eps crosses `TrainingConfig.tube_eps_max = 5e-2`, and
-     `f_floor` likewise. NOT build work: the result goes inline into the step-3
-     brief. Do NOT choose `f` to reproduce the incumbent `0.05`.
+     1e. **The interpolation COORDINATE — full detail in
+        [[lensing_collocation_from_local_scales]].** Moved here from a step-9
+        prerequisite (F042): the `theta` axis is gridded and splined in an
+        ABSOLUTE coordinate, so held-out eps depends on the grid, not just the
+        geometry — measured 0.059 uniform-theta vs 0.027 arc-length at the
+        same nodes, and knife-edge under a small arc-bound shift. This MUST
+        precede step 2, because step 2 (and step 4) MEASURE held-out eps / node
+        cost, and on a uniform-theta grid they would pin `f_max`/`f_floor` and
+        the far-zone crossover to placement artifacts. It is not node placement
+        but a COORDINATE CHANGE (spline IN the coordinate where the demodulated
+        envelope is smooth, as `u = sqrt(eta)` already does for the fold axis;
+        the principled coordinate is the catastrophe-uniformizing one, arc-
+        length its cheap stand-in). Capstone of the analytic phase: the last
+        place the cascade's geometry is baked into the surrogate's own
+        coordinate system, before any measurement runs on it.
+        ACCEPTANCE: held-out eps insensitive to a small arc-bound shift (F042
+        knife-edge gone) — the property node placement alone cannot achieve.
+
+  2. **DRIVER MEASUREMENT — the tube fraction.** DEPENDS ON 1e: run only after
+     the interpolation coordinate is settled, or the eps this sweeps is a grid
+     artifact (F042). Sweep held-out envelope eps against the DIMENSIONLESS
+     `eta / R_c`, across gamma, both parities. Find `f_max` where eps crosses
+     `TrainingConfig.tube_eps_max = 5e-2`, and `f_floor` likewise. NOT build
+     work: the result goes inline into the step-3 brief. Do NOT choose `f` to
+     reproduce the incumbent `0.05`.
 
   3. **C6 — tube shell becomes curvature-relative.** `_DEFAULT_ETA_MAX` and
      `_DEFAULT_ETA_FLOOR` become `f * R_c`. Then DELETE the foot-of-normal skip
