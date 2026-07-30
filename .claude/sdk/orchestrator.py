@@ -768,6 +768,17 @@ class BuildOrchestrator:
         self._log(f"Task: {self.task}")
         self._log(f"Project: {self.project_root}")
 
+        # Snapshot pre-existing dirt so the commit stages what the BUILD
+        # produced rather than whatever happened to be dirty.  See
+        # _snapshot_worktree_baseline / _stage_build_output.
+        self._baseline = self._snapshot_worktree_baseline()
+        if self._baseline["tracked"] or self._baseline["untracked"]:
+            self._log(
+                f"  Pre-existing dirt at start: "
+                f"{len(self._baseline['tracked'])} modified, "
+                f"{len(self._baseline['untracked'])} untracked — these will "
+                f"NOT be staged unless the build changes them further")
+
         # Safety gate
         branch = check_branch_safety(self.project_root)
         self._log(f"Branch: {branch}")
@@ -3836,12 +3847,101 @@ class BuildOrchestrator:
         last = tail_txt.splitlines()[-1] if tail_txt else ''
         self._log(f'  Tree gate green: {last}')
 
+    def _snapshot_worktree_baseline(self) -> dict:
+        """Record what was already dirty before the build touched anything.
+
+        Returns ``{"tracked": {path: worktree_blob_sha}, "untracked": {paths}}``.
+
+        The blob sha lets the commit step tell "this file was dirty before and
+        the build did not touch it" (skip) from "the build changed it further"
+        (stage).  Hashing only the already-dirty files keeps this to a handful
+        of git calls even in a large tree.
+        """
+        baseline: dict = {"tracked": {}, "untracked": set()}
+        try:
+            mod = subprocess.run(
+                ["git", "diff", "--name-only"],
+                capture_output=True, text=True, cwd=self.project_root)
+            for path in [p for p in (mod.stdout or "").splitlines() if p]:
+                full = os.path.join(self.project_root, path)
+                if not os.path.isfile(full):
+                    # Deleted in the worktree; a sentinel so a later
+                    # re-creation still reads as "changed by the build".
+                    baseline["tracked"][path] = "<deleted>"
+                    continue
+                sha = subprocess.run(
+                    ["git", "hash-object", path],
+                    capture_output=True, text=True, cwd=self.project_root)
+                baseline["tracked"][path] = (sha.stdout or "").strip()
+
+            unt = subprocess.run(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                capture_output=True, text=True, cwd=self.project_root)
+            baseline["untracked"] = {
+                p for p in (unt.stdout or "").splitlines() if p}
+        except Exception as exc:                              # noqa: BLE001
+            # A baseline we could not take must never block a build; fall back
+            # to "nothing was dirty", which restores the old add -u breadth.
+            self._log(f"  baseline snapshot failed ({type(exc).__name__}); "
+                      f"staging cannot exclude pre-existing dirt")
+        return baseline
+
+    def _stage_build_output(self) -> None:
+        """Stage tracked files the build changed; leave pre-existing dirt."""
+        base_tracked = (getattr(self, "_baseline", None) or {}).get(
+            "tracked", {})
+        mod = subprocess.run(
+            ["git", "diff", "--name-only"],
+            capture_output=True, text=True, cwd=self.project_root)
+        dirty_now = [p for p in (mod.stdout or "").splitlines() if p]
+
+        staged, skipped, overlapped = [], [], []
+        for path in dirty_now:
+            if path not in base_tracked:
+                staged.append(path)                  # the build created it
+                continue
+            full = os.path.join(self.project_root, path)
+            current = "<deleted>"
+            if os.path.isfile(full):
+                sha = subprocess.run(
+                    ["git", "hash-object", path],
+                    capture_output=True, text=True, cwd=self.project_root)
+                current = (sha.stdout or "").strip()
+            if current == base_tracked[path]:
+                skipped.append(path)                 # untouched by the build
+            else:
+                staged.append(path)
+                overlapped.append(path)
+
+        for path in staged:
+            subprocess.run(["git", "add", "--", path],
+                           cwd=self.project_root, check=True)
+
+        if skipped:
+            self._log(f"  staging: left {len(skipped)} pre-existing dirty "
+                      f"file(s) UNSTAGED: {', '.join(sorted(skipped)[:6])}"
+                      + (" ..." if len(skipped) > 6 else ""))
+        if overlapped:
+            # Loud on purpose: the operator's edits ride along inside a file
+            # the build also changed, and nothing here can separate them.
+            self._log(f"  staging WARNING: {len(overlapped)} file(s) were "
+                      f"already dirty AND changed by the build, so operator "
+                      f"edits are included: {', '.join(sorted(overlapped))}")
+        self._log(f"  staging: {len(staged)} tracked file(s) staged")
+
     def _git_commit_safe(self, message: str) -> Optional[str]:
-        """Create a git commit, staging only tracked + safe new files."""
+        """Create a git commit, staging only what this build produced."""
         if not self._has_uncommitted_changes():
             return None
 
-        subprocess.run(["git", "add", "-u"], cwd=self.project_root, check=True)
+        # NOT a blanket `git add -u`, which stages every tracked modification
+        # in the tree -- so a build sweeps in whatever the operator happened
+        # to be holding uncommitted and commits it under an unrelated message.
+        # That is the same hazard that nearly committed a corrupted
+        # operator.py here (F047), and it forced a driver to park in-flight
+        # SDK edits outside the tree to keep 1e-tube's commit clean. Both
+        # repos carried it; fix shared with gw (bffd6c29).
+        self._stage_build_output()
 
         # See the sibling allowlist above (port item 25): a build-created
         # path matching no prefix is silently dropped at commit.
@@ -3854,10 +3954,30 @@ class BuildOrchestrator:
             ["git", "ls-files", "--others", "--exclude-standard"],
             capture_output=True, text=True, cwd=self.project_root,
         )
+        # Untracked files that already existed BEFORE the build are the
+        # operator's, not the build's output -- same rule as the tracked path
+        # above. Without this a build sweeps in any scratch file or
+        # half-written module sitting in a safe_dir.
+        base_untracked = (getattr(self, "_baseline", None) or {}).get(
+            "untracked", set())
         if new_files.returncode == 0 and new_files.stdout.strip():
+            pre_existing, added = [], []
             for f in new_files.stdout.strip().splitlines():
-                if any(f.startswith(d) for d in safe_dirs):
-                    subprocess.run(["git", "add", f], cwd=self.project_root, check=True)
+                if not any(f.startswith(d) for d in safe_dirs):
+                    continue
+                if f in base_untracked:
+                    pre_existing.append(f)
+                    continue
+                subprocess.run(["git", "add", "--", f],
+                               cwd=self.project_root, check=True)
+                added.append(f)
+            if pre_existing:
+                self._log(f"  staging: left {len(pre_existing)} pre-existing "
+                          f"untracked file(s) UNSTAGED: "
+                          f"{', '.join(sorted(pre_existing)[:6])}"
+                          + (" ..." if len(pre_existing) > 6 else ""))
+            if added:
+                self._log(f"  staging: {len(added)} new file(s) staged")
 
         staged = subprocess.run(
             ["git", "diff", "--cached", "--quiet"], cwd=self.project_root,
