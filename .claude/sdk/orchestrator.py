@@ -2760,6 +2760,54 @@ class BuildOrchestrator:
                 verdict = InspectorVerdict.PASS
                 break
 
+        if verdict is InspectorVerdict.ISSUES:
+            # ISSUES with an EMPTY findings list is an UNBREAKABLE revision
+            # loop.  `check_inspector_gate` keeps it spinning, and every exit
+            # requires a non-empty list to fire:
+            #
+            #   should_escalate       -> needs an IMPLEMENTATION/DESIGN finding
+            #   revision_budget_spent -> literally `bool(findings) and ...`
+            #   non-convergence       -> `if _signature and ...`, and the
+            #                            signature of [] is an empty (falsy)
+            #                            frozenset
+            #
+            # Four terminators, one empty list, and THIS parser is what
+            # manufactures it: a wedge retry resumes the session and the final
+            # message can arrive without the JSON block (2026-07-30,
+            # analytic_caustic_reach — revision 3/2, inspector-13 spawned, the
+            # build died with no report and no commit).  gates.py:204 records
+            # the same shape at revision 8/2 on 07-28; the guard added then
+            # kept the `bool(findings)` requirement, so the hole survived
+            # inside its own fix.
+            #
+            # Name the parse failure AS a finding rather than adding a fifth
+            # guard: one honest finding re-arms all four at once, and a fifth
+            # guard is just a fifth thing to forget.  Severity is
+            # IMPLEMENTATION deliberately — TRIVIAL would let
+            # `revision_budget_spent` mark the build PASS, silently shipping
+            # work whose inspection was never readable.
+            self._log(
+                f"  Inspector returned no parseable verdict block "
+                f"({len(result_text)} chars) — recording it as a finding so "
+                f"the revision loop can terminate")
+            return InspectorResult(
+                verdict=verdict,
+                findings=[Finding(
+                    severity=EscalationLevel.IMPLEMENTATION,
+                    file="(inspector output)",
+                    description=(
+                        "Inspector returned no parseable verdict block, so "
+                        "its review could not be read. This work package is "
+                        "UNINSPECTED — not clean."),
+                    suggested_fix=(
+                        "No code change is required for this finding. It "
+                        "records an unreadable inspection; the next "
+                        "inspection round supersedes it."),
+                    finding_id=f"INS-{round_number}-PARSE",
+                )],
+                summary=result_text,
+            )
+
         return InspectorResult(verdict=verdict, summary=result_text)
 
     # ── Escalation chain of command ──────────────────────────────────────

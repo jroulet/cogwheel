@@ -3222,3 +3222,54 @@ a test that reads BOTH files — not one that re-states the invariant a third
 time. Compare F049 (a guard placed where it could not run) and F052 (a tier no
 routine job ran): same failure class, third instance this week — the automation
 existed, was believed, and did nothing.
+
+## F056 — four loop terminators, one empty list: an unreadable Inspector result was an infinite build (2026-07-30)
+
+**Where:** `orchestrator.py::_parse_inspector_result` (text fallback) and
+`_run_inspector_with_loop`; `gates.py::should_escalate`,
+`revision_budget_spent`, `finding_signature`.
+
+The text fallback returned `InspectorResult(verdict=ISSUES, findings=[])`
+whenever the result text carried no JSON block and no bare `PASS` line. That
+state cannot be escaped:
+
+| terminator | why it cannot fire on `ISSUES` + `[]` |
+|---|---|
+| `check_inspector_gate` | verdict is ISSUES, so the loop is entered |
+| `should_escalate` | requires an IMPLEMENTATION/DESIGN finding |
+| `revision_budget_spent` | literally `bool(findings) and loop > MAX` |
+| non-convergence | `if _signature and ...`; `frozenset()` is falsy |
+
+Four independent exits, all keyed on the same list, and the parser's own
+failure mode manufactures exactly the value that disables all four. The
+revision counter runs past its budget with nothing to report and nothing to
+fix: `0 trivial, 0 impl, 0 design`, forever.
+
+**Observed:** `analytic_caustic_reach`, 2026-07-30. `inspector-12` hit a
+transport wedge at 15:07, retried on the resumed session, and completed TWICE
+(15:15:35 `$5.82`, 15:15:41 `$6.02`). The retry's final message arrived without
+the JSON block. The loop logged `revision 3/2 (0 trivial, 0 impl, 0 design)`,
+spawned `inspector-13`, and the build died with no terminal marker, no report,
+and no commit — ~$60 of completed work left uncommitted on disk.
+
+**The same bug, twice, and the fix carried the hole.** `gates.py:204` records
+`revision 8/2` on 07-28 (Born carrier, ~26 min and ~$24 of Inspector cycles
+with zero implementation findings). The remedy then was `revision_budget_spent`
+— which was written as `bool(findings) and loop_count > MAX_REVISION_LOOPS`.
+The new guard reproduced the exact precondition of the bug it was added to fix.
+A budget that only applies when there is something to spend it on is not a
+budget.
+
+**Fix.** Name the parse failure AS a finding (IMPLEMENTATION severity, stable
+round-invariant description) instead of adding a fifth guard: one honest
+finding re-arms all four existing exits at once, and a fifth guard is a fifth
+thing to forget. Severity matters — TRIVIAL would let `revision_budget_spent`
+flip the verdict to PASS and ship work whose inspection was never readable.
+`tests/test_inspector_parse_failure.py` pins it, including the contrast control
+that none of the four fired on the old empty result.
+
+**Rule.** When several guards all read the same value, they are ONE guard.
+Count the *distinct inputs* your terminators consume, not the terminators. And
+a retry that resumes a session can return a DIFFERENT SHAPE than the original
+call — every parser downstream of a retry needs a defined answer for "the text
+is real but the structure is missing", and that answer must never be a verdict.
