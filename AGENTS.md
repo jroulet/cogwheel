@@ -152,10 +152,13 @@ shallow:
 To launch a build as the interactive driver:
 
 1. Write the brief to `.claude/handoff/<slug>.md`.
-2. Launch with `--approval-dir` (NEVER `--yes` unless the user explicitly says so):
-   - Claude: `.claude/build "@.claude/handoff/<slug>.md" --approval-dir .claude/build/`
-   - Codex: `CODEX_THREAD_ID=<this_thread> .codex/build "@.claude/handoff/<slug>.md" --approval-dir /tmp/<slug>_approval`
-   - OpenCode: `OPENCODE_SESSION_ID=<this_session> .opencode/build "@.claude/handoff/<slug>.md" --approval-dir /tmp/<slug>_approval`
+2. Launch with `--approval-dir` (NEVER `--yes` unless the user explicitly says so).
+   Builds are long-running — detach them so they survive tool-call timeouts:
+   - Claude: Use `Bash` with `run_in_background: true`:
+     `.claude/build "@.claude/handoff/<slug>.md" --approval-dir .claude/build/`
+   - Codex/OpenCode: Wrap in `screen -dmS`:
+     `screen -dmS <slug> bash -c 'CODEX_THREAD_ID=<thread> .codex/build "@.claude/handoff/<slug>.md" --approval-dir /tmp/<slug>_approval > /tmp/<slug>_stdout.log 2>&1'`
+     `screen -dmS <slug> bash -c 'OPENCODE_SESSION_ID=<session> .opencode/build "@.claude/handoff/<slug>.md" --approval-dir /tmp/<slug>_approval > /tmp/<slug>_stdout.log 2>&1'`
 3. When `<approval-dir>/plan_ready` appears, read `plan.json` and evaluate.
 4. Approve: `touch <approval-dir>/plan_approved`.
    Reject: `echo "feedback" > <approval-dir>/plan_rejected`.
