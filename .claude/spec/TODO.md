@@ -1096,6 +1096,57 @@ Tag conventions:
   WHEN: after the ladder closes and the serving design stabilises. Do not
   restore them mid-redesign.
 
+
+- **THE TUBE MAP IS BUILT AT ONE GAMMA AND USED ACROSS A BAND** `[→ spec]` —
+  measured 2026-07-30. `_build_tube_chart` builds `theta_to_s` once at
+  `rep_gamma = float(np.median(gamma_grid))` and stores it on the chart;
+  `_evaluate_chart` reads that same map at serve. But `s(theta) = int |y'| dtheta`
+  is gamma-dependent, and the caustic's extent varies 28x across the prior and
+  diverges at the parity wall (F036).
+
+  Measured normalized coordinate drift, `max |s/s_total(gamma_edge) -
+  s/s_total(rep)|`, N_map=2001, arcs inset inside the wedge:
+
+  | band | width | parity | drift | x the map's own 1e-6 tol |
+  |---|---|---|---|---|
+  | [0.50, 0.70] | 0.20 | astroid | 2.19e-2 | 21925 |
+  | [0.80, 0.99] | 0.19 | astroid | **1.39e-1** | 138958 |
+  | [0.90, 0.95] | 0.05 | astroid | 2.60e-2 | 25988 |
+  | [1.05, 1.25] | 0.20 | saddle | 2.71e-2 | 27144 |
+  | [3.00, 3.20] | 0.20 | saddle | 7.88e-3 | 7879 |
+
+  Band refinement does NOT rescue it: a 0.05-wide band still drifts 2.6e-2.
+
+  ## This is a degradation, not a correctness bug
+
+  Train and serve share the SAME stored map, so there is no train/serve skew,
+  and `s`-at-`rep_gamma` is still a legitimate monotone reparametrization of
+  `theta` that removes most of the F042 pathology. What it is not is the RIGHT
+  coordinate away from `rep_gamma` — resolution goes where the caustic turns
+  fastest at the median gamma, not at the query's gamma. 1e-tube's bound-shift
+  acceptance may well still pass.
+
+  ## Why it matters anyway: consistency
+
+  1e-farfield's Professor called gamma-resolution FIRM on the same magnitude
+  (measured O(10-25%) at a 0.2-wide band edge) three hours after 1e-tube
+  shipped without it. Two sibling builds answered one design question two ways,
+  and [[lensing_collocation_from_local_scales]]'s whole premise is one
+  authoritative representation per coordinate.
+
+  ## Fix
+
+  Transplant 1e-farfield's gamma-resolved map: a 2-D `s(theta, gamma)` table on
+  the spline's OWN gamma nodes. No new solve and no new engine calls, since
+  gamma is already a spline axis. NOTE the serve cost: `_evaluate_chart`
+  currently does a 1-D `np.interp` on `theta_to_s`; this makes it 2-D.
+
+  Cheapest home is 1e-lobe, which already touches the same map machinery.
+
+  ACCEPTANCE: drift at both band edges falls to the map's own round-trip
+  tolerance; tube held-out eps at fixed node count does not regress; the serve
+  cost delta is measured and stated.
+
 - [ ] **Cusp fast-serving — millisecond scale EVERYWHERE (build after
   homogenization)** `[→ spec]` — OWNER RULING (2026-07-20): cusp
   neighborhoods excluded from the 8c tube chart fall through to the
@@ -1349,6 +1400,44 @@ teja-force skill + gw with the rest of the hardening.
   green 858 actively concealed it.
 
 
+- **CODER TURN BUDGETS DO NOT SCALE WITH THE WORK** `[housekeeping]` — measured
+  2026-07-30 across three builds. `_test_dev_budget` scales with spec count
+  (`min(60 + 20*n, 250)`), but a Coder WP's `max_turns` is a free-form Architect
+  estimate that does not scale with the WP's declared `where` file count. The
+  mechanism exists on one side of the DAG and not the other.
+
+  Logged tool calls vs budget, and where the agent made its FIRST write:
+
+  | agent | budget | tool calls | 1st edit at | outcome |
+  |---|---|---|---|---|
+  | F054 `coder-2` (1 file) | 75 | 12 | call 8 | ok $3.96 |
+  | 1e-ff `coder-4` | 105 | 110 | call 8 (8%) | EXHAUSTED |
+  | 1e-ff-port `coder-2` (4 files) | 95 | 156 | call 14 (15%) | EXHAUSTED |
+  | 1e-ff `test_dev-6` (11 specs) | 80 | 145 | call **61 (76%)** | EXHAUSTED |
+  | 1e-ff `test_dev-7` | 80 | 131 | call 62 (78%) | EXHAUSTED |
+
+  TWO distinct failure modes, and they need different fixes:
+
+  1. **Orientation starvation** (`test_dev-6/7`): 76-78% of the budget spent
+     reading before the first write. Root cause was F057 (11 specs counted as
+     1); the sharding fix addresses it, but the fixed orientation COST is still
+     absent from `60 + 20*n` — the constant 60 was not measured against this
+     codebase, where `surrogate.py` alone is 4000+ lines.
+  2. **Honest overrun** (`coder-4`, `coder-2`): both started editing inside 15%
+     and simply ran out doing real work. A one-file WP got 75 turns; a
+     four-file, ~60-site port got 95. A budget that barely moves while the work
+     grows fivefold is not a budget.
+
+  FIX: give the Coder the same treatment as the Test Developer — floor
+  `max_turns` at a function of `len(wp.where)` (and, if cheap, the total line
+  count of those files), keeping the Architect's estimate only when it is
+  HIGHER. Log the arming value, per F058.
+
+  ACCEPTANCE: replay the three builds' WPs through the new formula and show it
+  would have budgeted above the observed call counts; a single-file WP is
+  unchanged.
+
+
 - **Inspector has no way to file "valid, but another role owns it"**
   `[housekeeping]` — every additive-capability build burns its revision cap on
   the same doc-sync argument. Observed on the saddle lobe-serve build
@@ -1401,6 +1490,39 @@ teja-force skill + gw with the rest of the hardening.
   Worth doing before the next additive build: the cost is one wasted Inspector
   pass plus an Architect triage per revision, on every build that adds a
   capability — which is most of them.
+
+
+- **THE PLAN GATE HAS NO WIDTH CHECK** `[housekeeping]` — 2026-07-30. AGENTS.md
+  says to reject over-wide plans at the plan gate, but nothing computes width,
+  so the check happens only if the reviewer remembers to do it by eye while
+  absorbed in correctness. On 1e-farfield the driver reviewed the plan hard for
+  correctness (catching four real defects) and never checked width at all.
+
+  A working checker exists and is calibrated; it needs to move into
+  `.claude/sdk/plan_width_check.py` and be named in the launch banner beside
+  the approval instructions.
+
+  It reports: WP count vs the ~3 ceiling, per-WP `how` size and file count,
+  how many domain-test specs name a suite file vs are substantive-but-unscoped
+  (the F057 shape), the PREDICTED shard count and per-shard turn budget, and
+  whether the `test_dev` node will even run.
+
+  ## Two traps it must keep documenting
+
+  1. **`plan.json` is NOT JSON at the gate.** `gates.py:372` writes the
+     human-readable MARKDOWN summary there; `orchestrator.py:929` overwrites it
+     with real JSON only AFTER approval, for crash recovery. A checker written
+     against a post-approval file parses cleanly in testing and fails at the
+     one moment it is useful — the F058 shape again.
+  2. **Do NOT reject on `how` length.** Measured: in the plan that died, WP1
+     was 3121 chars and SUCCEEDED ($14.34, 20 min) while WP2 was 3178 chars and
+     exhausted. Length would have passed the WP that died and rejected the one
+     that lived. It stays advisory; a check that fires on healthy plans trains
+     the reader to ignore the channel.
+
+  ACCEPTANCE: run against the two archived plans and show it flags the
+  substantive-but-unscoped count on the one that died while passing the one
+  that ran; wire it into the launch banner.
 
 
 - **Consolidate duplicate routing pins in the lensing test suite
