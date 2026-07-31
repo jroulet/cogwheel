@@ -24,6 +24,7 @@ MAIN_BRANCH="main"
 EXCLUDE_PATHS=(
     ".claude/"
     ".codex/"
+    ".opencode/"
     ".agents/"
     ".serena/"
     ".mcp.json"

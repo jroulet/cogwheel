@@ -715,11 +715,12 @@ async def build_agent_options(
     disallowed_set = set(disallowed_tools)
     allowed_tools = [t for t in allowed_tools if t not in disallowed_set]
 
-    provider_options = (
-        {"codex_model_override": model_override}
-        if RUNTIME_PROVIDER == "codex"
-        else {}
-    )
+    if RUNTIME_PROVIDER == "codex":
+        provider_options = {"codex_model_override": model_override}
+    elif RUNTIME_PROVIDER == "opencode":
+        provider_options = {"opencode_model_override": model_override}
+    else:
+        provider_options = {}
     # `agent_name` is accepted only by newer claude_agent_sdk builds; the
     # pinned 0.1.53 rejects it and every Claude-path build dies at spawn
     # with TypeError (witnessed 2026-07-26, build 8h-b4). Pass it only when

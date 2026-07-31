@@ -7,9 +7,11 @@ prompts.  Now they're if/else in Python.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -106,7 +108,14 @@ def verify_plan(
     if not plan.simplifier_inputs:
         failures.append("Plan does not cite any Simplifier inputs.")
 
-    if not plan.work_packages:
+    if plan.is_test_only:
+        if plan.work_packages:
+            failures.append("Test-only plan must not contain Coder work packages.")
+        if not plan.has_domain_tests or not plan.domain_test_descriptions:
+            failures.append(
+                "Test-only plan must provide explicit Test Developer descriptions."
+            )
+    elif not plan.work_packages:
         failures.append("Plan has no work packages.")
 
     # Test-suite write-ownership must be disjoint: no test file may be routed
@@ -116,7 +125,8 @@ def verify_plan(
             f"Test-suite write-ownership conflict: the shard owning {owner} "
             f"also targets {shared}, which is another shard's suite. Each "
             f"test file must be authored by exactly one Test Developer — split "
-            f"the spec so suites are disjoint.")
+            f"the spec so suites are disjoint."
+        )
 
     for wp in plan.work_packages:
         if wp.who not in ("Coder", "Foreman-Lite"):
@@ -507,6 +517,16 @@ def _file_based_escalation(
     findings_file.write_text(json.dumps(payload, indent=2))
     ready_file.touch()
     print(f"\n[file-based] ESCALATION written to {findings_file}")
+    if _notify_codex_driver(
+        "build_escalation",
+        f"approval_dir={dir_path} findings={findings_file}",
+    ):
+        print("[file-based] Detached Codex resume callback armed.")
+    if _notify_opencode_driver(
+        "build_escalation",
+        f"approval_dir={dir_path} findings={findings_file}",
+    ):
+        print("[file-based] Detached OpenCode resume callback armed.")
     print(f"[file-based] Waiting for a decision file in {dir_path} "
           f"(escalation_accept / escalation_fix / escalation_abort) ...")
 
@@ -530,6 +550,60 @@ def _file_based_escalation(
             return "abort", ""
         # No sleep here: _gate_wait owns the poll interval and the heartbeat.
     raise AssertionError("unreachable")  # _gate_wait yields forever
+
+
+def _notify_codex_driver(event: str, detail: str) -> bool:
+    """Detach one occurrence-unique Codex callback without blocking the SDK."""
+    if os.environ.get("AGENT_PROVIDER", "claude") != "codex":
+        return False
+    if not os.environ.get("CODEX_THREAD_ID"):
+        return False
+    if os.environ.get("CODEX_EVENT_RESUME", "1") == "0":
+        return False
+
+    repo_root = Path(__file__).resolve().parents[2]
+    helper = repo_root / ".codex" / "resume_driver.sh"
+    if not helper.is_file():
+        print(f"[file-based] WARNING: Codex callback helper missing: {helper}")
+        return False
+    subprocess.Popen(
+        [str(helper), event, detail, uuid.uuid4().hex],
+        cwd=repo_root,
+        env=os.environ.copy(),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True,
+    )
+    return True
+
+
+def _notify_opencode_driver(event: str, detail: str) -> bool:
+    """Detach one occurrence-unique OpenCode callback without blocking the SDK."""
+    if os.environ.get("AGENT_PROVIDER", "claude") != "opencode":
+        return False
+    if not os.environ.get("OPENCODE_SESSION_ID"):
+        return False
+    if os.environ.get("OPENCODE_EVENT_RESUME", "1") == "0":
+        return False
+
+    repo_root = Path(__file__).resolve().parents[2]
+    helper = repo_root / ".opencode" / "resume_driver.sh"
+    if not helper.is_file():
+        print(f"[file-based] WARNING: OpenCode callback helper missing: {helper}")
+        return False
+    subprocess.Popen(
+        [str(helper), event, detail, uuid.uuid4().hex],
+        cwd=repo_root,
+        env=os.environ.copy(),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True,
+    )
+    return True
 
 
 # ── Outside Inspector merge ─────────────────────────────────────────────────

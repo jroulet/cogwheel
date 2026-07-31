@@ -253,8 +253,9 @@ def _render_versioned_changelog(frag_dir, header):
         header,
     ]
     for version, date, body in all_entries:
-        # Each entry is one bullet: - `VERSION` (DATE): BODY
-        parts.append(f"- `{version}` ({date}): {body.rstrip()}\n\n")
+        # Put the heading/body after the bullet separator, rather than after
+        # a literal trailing space on the version line.
+        parts.append(f"- `{version}` ({date}):\n{body.rstrip()}\n\n")
 
     result = "".join(parts).rstrip("\n") + "\n"
     latest_version = all_entries[0][0] if all_entries else base

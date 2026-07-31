@@ -71,7 +71,7 @@ def main():
         help="Disable Serena MCP (use built-in tools only)",
     )
     build_parser.add_argument(
-        "--provider", choices=("claude", "codex"),
+        "--provider", choices=("claude", "codex", "opencode"),
         default=os.environ.get("AGENT_PROVIDER", "claude"),
         help="Agent runtime backend (default: AGENT_PROVIDER or claude)",
     )

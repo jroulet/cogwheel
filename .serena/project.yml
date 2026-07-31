@@ -24,7 +24,17 @@ ignore_all_files_in_gitignore: true
 # Maps the language key to the options.
 # The settings are considered only if the project is trusted (see global configuration to define trusted projects).
 # See https://oraios.github.io/serena/02-usage/050_configuration.html#language-server-specific-settings
-ls_specific_settings: {}
+ls_specific_settings:
+  python:
+    # Serena's managed Pyright command otherwise omits Pyright's nodejs extra.
+    # The extra supplies Node locally instead of asking nodeenv to download it.
+    ls_base_cmd:
+      - uvx
+      - -p
+      - "3.13"
+      - --from
+      - "pyright[nodejs]==1.1.403"
+      - pyright-langserver
 
 # list of additional paths to ignore in this project.
 # Same syntax as gitignore, so you can use * and **.

@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Launch the shared build pipeline with OpenCode as the agent runtime.
+# Claude remains the default when using .claude/build directly.
+
+set -u
+
+REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+
+# Keep OpenCode's build Serena disjoint from the Claude/Codex build ports.
+# Shell value wins, then the repo's untracked .env, then 8325.
+if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${OPENCODE_SERENA_PORT:-}" ]]; then
+  OPENCODE_SERENA_PORT="$(grep -E '^OPENCODE_SERENA_PORT=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+fi
+export OPENCODE_SERENA_PORT="${OPENCODE_SERENA_PORT:-8325}"
+export AGENT_PROVIDER=opencode
+
+BUILD_ARGS=("$@")
+BUILD_LOG=""
+for (( INDEX = 0; INDEX < ${#BUILD_ARGS[@]}; INDEX++ )); do
+  case "${BUILD_ARGS[$INDEX]}" in
+    --log)
+      if (( INDEX + 1 < ${#BUILD_ARGS[@]} )); then
+        BUILD_LOG="${BUILD_ARGS[$((INDEX + 1))]}"
+      fi
+      ;;
+    --log=*) BUILD_LOG="${BUILD_ARGS[$INDEX]#--log=}" ;;
+  esac
+done
+if [[ -z "$BUILD_LOG" ]]; then
+  BUILD_LOG="/tmp/opencode_build_$(date +%Y%m%d_%H%M%S_%N).log"
+  BUILD_ARGS+=(--log "$BUILD_LOG")
+fi
+
+STALE_SECONDS="${OPENCODE_BUILD_STALE_SECONDS:-1200}"
+BUILD_EVENT_ID="${OPENCODE_BUILD_EVENT_ID:-build-$(date +%s%N)-$$-${RANDOM}}"
+
+"$REPO_ROOT/.claude/build" --provider opencode "${BUILD_ARGS[@]}" \
+  > /dev/null 2>&1 &
+BUILD_PID=$!
+"$REPO_ROOT/.claude/sdk/watchdog.sh" "$BUILD_LOG" "$STALE_SECONDS" \
+  "$BUILD_PID" > /dev/null 2>&1 &
+WATCHDOG_PID=$!
+
+WATCHDOG_LOG="${BUILD_LOG%.log}.watchdog.log"
+for _ in $(seq 1 70); do
+  grep -q "Watching orchestrator PID" "$WATCHDOG_LOG" 2>/dev/null && break
+  kill -0 "$WATCHDOG_PID" 2>/dev/null || break
+  sleep 1
+done
+if grep -q "Watching orchestrator PID" "$WATCHDOG_LOG" 2>/dev/null; then
+  echo "[opencode] launched: $BUILD_LOG (watchdog ${STALE_SECONDS}s)"
+else
+  echo "[opencode] WARNING: watchdog did not attach; see $WATCHDOG_LOG" >&2
+fi
+if [[ -n "${OPENCODE_SESSION_ID:-}" ]] && [[ "${OPENCODE_EVENT_RESUME:-1}" != "0" ]]; then
+  echo "[opencode] terminal/escalation callbacks armed for this session"
+else
+  echo "[opencode] no OPENCODE_SESSION_ID; autonomous wake-up is unavailable"
+fi
+
+STATUS=0
+wait "$BUILD_PID" || STATUS=$?
+
+if [[ -n "${OPENCODE_SESSION_ID:-}" ]] && [[ "${OPENCODE_EVENT_RESUME:-1}" != "0" ]]; then
+  nohup "$REPO_ROOT/.opencode/resume_driver.sh" build_terminal \
+    "exit_status=$STATUS log=$BUILD_LOG" "$BUILD_EVENT_ID" \
+    </dev/null >/dev/null 2>&1 &
+fi
+exit "$STATUS"

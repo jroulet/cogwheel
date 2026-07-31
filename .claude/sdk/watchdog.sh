@@ -132,6 +132,8 @@ while true; do
 
         if [ "${AGENT_PROVIDER:-claude}" = "codex" ]; then
             SERENA_PORT="${CODEX_SERENA_PORT:-8324}"
+        elif [ "${AGENT_PROVIDER:-claude}" = "opencode" ]; then
+            SERENA_PORT="${OPENCODE_SERENA_PORT:-8325}"
         else
             SERENA_PORT="${SDK_SERENA_PORT:-8322}"
         fi

@@ -95,10 +95,14 @@ class Plan:
     - Constraints/guidance → embedded in each WP's `how` field via
       the Architect's directed knowledge transfer (Coder reads these)
     - Test specifications → `domain_test_descriptions` (Test Dev reads these)
+
+    A test-only compatibility port has no Coder-authorable work package.  It
+    sets ``is_test_only`` and routes its explicit test descriptions directly
+    through Test Developer → Inspector → Professor review.
     """
     summary: str
     work_packages: list[WorkPackage]
-    has_domain_tests: bool    # TestDev writes new domain-specific tests; upgrades to Opus
+    has_domain_tests: bool    # TestDev work, including compatibility ports
     has_domain_changes: bool  # any domain-sensitive change; gates the Professor review
     has_new_public_api: bool
     has_spec_update: bool     # requires SPEC.md + CHANGELOG.md update
@@ -109,6 +113,7 @@ class Plan:
     # Traceability: which Simplifier inputs shaped the plan
     simplifier_inputs: list[str] = field(default_factory=list)
     professor_inputs: list[str] = field(default_factory=list)
+    is_test_only: bool = False
 
     def save(self, path: Path) -> None:
         """Serialize plan to JSON file for crash recovery / session agent context."""

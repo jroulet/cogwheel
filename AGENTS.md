@@ -1,4 +1,4 @@
-This is the canonical shared instruction file for Claude Code and Codex.
+This is the canonical shared instruction file for Claude Code, Codex, and OpenCode.
 `CLAUDE.md` is a compatibility symlink to this file. All rules below are
 mandatory unless flagged optional.
 
@@ -9,7 +9,7 @@ mandatory unless flagged optional.
 ## Cross-Branch / Master Safety
 - Never push to `main`/`master`. No local override permitted.
 - Never execute `scripts/sync_to_main.sh` — the user runs it manually to merge code into `main`.
-- Agent-only paths excluded from that sync (`EXCLUDE_PATHS` in `scripts/sync_to_main.sh`): `.claude/`, `.codex/`, `.agents/`, `.serena/`, `.mcp.json`, `AGENTS.md`, and `CLAUDE.md`. Keep agent-only content inside these.
+- Agent-only paths excluded from that sync (`EXCLUDE_PATHS` in `scripts/sync_to_main.sh`): `.claude/`, `.codex/`, `.opencode/`, `.agents/`, `.serena/`, `.mcp.json`, `AGENTS.md`, and `CLAUDE.md`. Keep agent-only content inside these.
 
 ## Local Override Convention
 - Tracked `AGENTS.md` stays portable and repo-relative; `CLAUDE.md` remains
@@ -65,16 +65,54 @@ Applies to **behavior changes** in `cogwheel/` (new functions, signature/logic/c
   Codex build starts one shared Serena Streamable HTTP server on
   `CODEX_SERENA_PORT` (default `8324`) and reuses its warm index for every
   build role.
-- Codex routes scientific-authority roles (Architect, Coder, Inspector,
-  Professor, ProfReview) to `gpt-5.6-sol` at high reasoning and bounded support
-  roles to `gpt-5.6-terra` at medium reasoning. `CODEX_MODEL` /
+- OpenCode uses `.opencode/opencode.json`, `.opencode/agents/`, and
+  `.opencode/plugins/`. Launch the same state machine with `.opencode/build`. An
+  OpenCode build starts one shared Serena Streamable HTTP server on
+  `OPENCODE_SERENA_PORT` (default `8325`) and reuses its warm index for every
+  build role.
+- Codex routes the Architect and planning Professor to `gpt-5.6-sol` at high
+  reasoning. Coder, Test Developer, Inspector, and ProfReview use
+  `gpt-5.6-terra` at high reasoning; administrative support roles use Terra at
+  medium reasoning. `CODEX_MODEL` /
   `CODEX_REASONING_EFFORT` override all roles; suffixed variables such as
   `CODEX_MODEL_TEST_DEV` override one role. Claude's native role map is
   unchanged.
+- OpenCode routes the Architect, Coder, Inspector, Professor, and ProfReview to
+  `claude-v4.6-opus` at high variant. Foreman-Lite, Test Developer, Librarian,
+  Tidier, Dreamer, and Simplifier use `claude-v4.6-sonnet`. `OPENCODE_MODEL` /
+  `OPENCODE_VARIANT` override all roles; suffixed variables such as
+  `OPENCODE_MODEL_TEST_DEV` override one role.
 - The orchestration state, role contracts, specs, handoffs, and memories remain
   shared under `.claude/` and `.serena/`; never fork provider-specific copies.
 - `.claude/sdk/runtime.py` is the provider boundary. `AGENT_PROVIDER` defaults
   to `claude`; normal Claude resumes therefore retain their prior behavior.
+  Set `AGENT_PROVIDER=codex` or `AGENT_PROVIDER=opencode` for those backends.
+
+### Codex quiet build monitoring
+
+- `.codex/build` is the sanctioned Codex build launcher. It attaches the same
+  shared SDK watchdog as Claude, verifies that attachment, and retains the
+  normal watchdog terminal/stale-kill behavior.
+- When `CODEX_THREAD_ID` is inherited, terminal build events and file-based
+  escalation events resume that exact thread through `.codex/resume_driver.sh`.
+  Events are occurrence-unique and serialized per thread; a queued event is
+  never discarded because another callback is active.
+- Never create a persistent Codex goal to monitor a build. Never model-poll a
+  log or wait on a timer. The driver acts only after an escalation or terminal
+  callback. Set `CODEX_EVENT_RESUME=0` only to intentionally opt out.
+
+### OpenCode quiet build monitoring
+
+- `.opencode/build` is the sanctioned OpenCode build launcher. It attaches the
+  same shared SDK watchdog as Claude/Codex, verifies that attachment, and
+  retains the normal watchdog terminal/stale-kill behavior.
+- When `OPENCODE_SESSION_ID` is inherited, terminal build events and file-based
+  escalation events resume that exact session through
+  `.opencode/resume_driver.sh`. Events are occurrence-unique and serialized per
+  session; a queued event is never discarded because another callback is active.
+- Never create a persistent OpenCode goal to monitor a build. Never model-poll a
+  log or wait on a timer. The driver acts only after an escalation or terminal
+  callback. Set `OPENCODE_EVENT_RESUME=0` only to intentionally opt out.
 
 ## SDK Build Briefs (driver discipline)
 Transcript depth is a reliability constraint: the auto-mode permission
@@ -174,13 +212,24 @@ gate command, or a watch loop, one of these already does it.
 ## Serena Tools
 Serena MCP is available (project `cogwheel`). Interactive Claude uses the
 `claude-code` context from `.mcp.json`; interactive Codex uses the `codex`
-context from `.codex/config.toml`. Builds use a separate, build-scoped Serena
-server: Claude uses SSE on `SDK_SERENA_PORT` (default `8322`, locally `8323`);
-Codex uses Streamable HTTP on `CODEX_SERENA_PORT` (default `8324`). Each server
-is shared by every role in that build. Prefer Serena for symbolic navigation, search, and edits
-because it minimizes context and preserves reference awareness. Use a
-client-native exact patch when Serena cannot represent the change. Intent ->
-tool:
+context from `.codex/config.toml`; interactive OpenCode uses the `claude-code`
+context from `.opencode/opencode.json` (OpenCode's tool surface matches Claude
+Code's, so the same Serena context applies). Builds use a separate, build-scoped
+Serena server: Claude uses SSE on `SDK_SERENA_PORT` (default `8322`, locally
+`8323`); Codex uses Streamable HTTP on `CODEX_SERENA_PORT` (default `8324`);
+OpenCode uses Streamable HTTP on `OPENCODE_SERENA_PORT` (default `8325`). Each
+server is shared by every role in that build. Prefer Serena for symbolic
+navigation, search, and edits because it minimizes context and preserves
+reference awareness. Use a client-native exact patch when Serena cannot
+represent the change. Intent -> tool:
+- If Codex has not yet surfaced `mcp__serena__*`, use its `tool_search` to
+  discover Serena tools, then call `mcp__serena__initial_instructions` before
+  code or spec work. Native Codex project tools are blocked per interactive
+  thread or build role process until their corresponding Serena initialization
+  completes.
+- OpenCode: call `mcp__serena__initial_instructions` before code or spec work.
+  The `.opencode/plugins/cogwheel-hooks.ts` plugin tracks readiness and routes
+  python commands through conda.
 - Read file / symbol body: `read_file` / `find_symbol(include_body=True)`. Never `read_file` with guessed offsets.
 - File orientation before any whole-file read: `get_symbols_overview`.
 - Text/regex search: `search_for_pattern`. Symbol-name search: `find_symbol`. File discovery: `find_file` / `list_dir`.

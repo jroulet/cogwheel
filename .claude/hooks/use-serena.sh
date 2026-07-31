@@ -66,6 +66,8 @@ deny() {
   local reason="$1"
   if [[ "${AGENT_PROVIDER:-}" == "codex" && -n "${CODEX_SERENA_URL:-}" ]]; then
     reason="${reason//mcp__serena__/mcp__serena_build__}"
+  elif [[ "${AGENT_PROVIDER:-}" == "opencode" && -n "${OPENCODE_SERENA_URL:-}" ]]; then
+    reason="${reason//mcp__serena__/mcp__serena_build__}"
   fi
   jq -n --arg reason "$reason" '{
     "hookSpecificOutput": {
@@ -186,7 +188,9 @@ All use relative paths from project root."
     # (these are our own code; they already route through the safety model).
     if [[ "$stripped" =~ ^\.claude/(sdk|hooks)/[A-Za-z0-9_.-]+\.sh([[:space:]]|$) ]] \
        || [[ "$stripped" =~ ^\.codex/build([[:space:]]|$) ]] \
-       || [[ "$stripped" =~ ^\.codex/hooks/[A-Za-z0-9_.-]+\.sh([[:space:]]|$) ]]; then
+       || [[ "$stripped" =~ ^\.codex/hooks/[A-Za-z0-9_.-]+\.sh([[:space:]]|$) ]] \
+       || [[ "$stripped" =~ ^\.opencode/build([[:space:]]|$) ]] \
+       || [[ "$stripped" =~ ^\.opencode/resume_driver\.sh([[:space:]]|$) ]]; then
       exit 0
     fi
     deny "USE SERENA for shell commands: mcp__serena__execute_shell_command (command, cwd).

@@ -253,6 +253,10 @@ if [ "${AGENT_PROVIDER:-claude}" = "codex" ]; then
     echo ""
     echo "==> Librarian sync pending ($PENDING_COUNT commit(s) queued)"
     echo "==> Ask Codex to run the librarian role for .claude/sync_issues.json"
+elif [ "${AGENT_PROVIDER:-claude}" = "opencode" ]; then
+    echo ""
+    echo "==> Librarian sync pending ($PENDING_COUNT commit(s) queued)"
+    echo "==> Ask OpenCode to run the librarian role for .claude/sync_issues.json"
 elif [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]; then
     echo ""
     echo "==> Librarian sync pending ($PENDING_COUNT commit(s) queued)"

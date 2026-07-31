@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import shutil
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Literal, Optional
 
@@ -26,10 +27,10 @@ SandboxSettings = dict[str, Any]
 # orchestrator is running through ``codex exec``.
 CODEX_ROLE_MODELS = {
     "architect": "gpt-5.6-sol",
-    "coder": "gpt-5.6-sol",
-    "inspector": "gpt-5.6-sol",
+    "coder": "gpt-5.6-terra",
+    "inspector": "gpt-5.6-terra",
     "professor": "gpt-5.6-sol",
-    "prof_review": "gpt-5.6-sol",
+    "prof_review": "gpt-5.6-terra",
     "foreman_lite": "gpt-5.6-terra",
     "test_dev": "gpt-5.6-terra",
     "librarian": "gpt-5.6-terra",
@@ -45,7 +46,7 @@ CODEX_ROLE_REASONING_EFFORTS = {
     "professor": "high",
     "prof_review": "high",
     "foreman_lite": "medium",
-    "test_dev": "medium",
+    "test_dev": "high",
     "librarian": "medium",
     "tidier": "medium",
     "dreamer": "medium",
@@ -198,6 +199,13 @@ def _effective_prompt(prompt: str, options: ClaudeAgentOptions) -> str:
         effective = effective.replace(
             "mcp__serena__", "mcp__serena_build__"
         )
+        sections = [
+            "Before any native project tool use, call tool_search to discover "
+            "mcp__serena_build__initial_instructions, then call it. "
+            "The build-role native-tool gate opens only after that call.",
+            effective,
+        ]
+        effective = "\n\n".join(sections)
     return effective
 
 
@@ -314,6 +322,11 @@ async def query(
     child_env = os.environ.copy()
     child_env.update(getattr(options, "env", {}) or {})
     child_env["AGENT_PROVIDER"] = "codex"
+    if (
+        os.environ.get("CODEX_SERENA_URL")
+        and os.environ.get("AGENT_DISABLE_SERENA") != "1"
+    ):
+        child_env["CODEX_SERENA_READY_KEY"] = uuid.uuid4().hex
 
     process = await asyncio.create_subprocess_exec(
         *command,

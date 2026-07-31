@@ -10,14 +10,29 @@ from __future__ import annotations
 import os
 
 RUNTIME_PROVIDER = os.environ.get("AGENT_PROVIDER", "claude").strip().lower()
-if RUNTIME_PROVIDER not in {"claude", "codex"}:
+if RUNTIME_PROVIDER not in {"claude", "codex", "opencode"}:
     raise ValueError(
-        "AGENT_PROVIDER must be 'claude' or 'codex', "
+        "AGENT_PROVIDER must be 'claude', 'codex', or 'opencode', "
         f"not {RUNTIME_PROVIDER!r}"
     )
 
 if RUNTIME_PROVIDER == "codex":
     from .runtime_codex import (
+        AgentDefinition,
+        AssistantMessage,
+        ClaudeAgentOptions,
+        HookJSONOutput,
+        HookMatcher,
+        PermissionMode,
+        ResultMessage,
+        SandboxSettings,
+        SystemMessage,
+        TextBlock,
+        ToolUseBlock,
+        query,
+    )
+elif RUNTIME_PROVIDER == "opencode":
+    from .runtime_opencode import (
         AgentDefinition,
         AssistantMessage,
         ClaudeAgentOptions,

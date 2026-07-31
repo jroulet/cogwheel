@@ -38,6 +38,7 @@ for f in \
     .claude/sdk/agents.py \
     .claude/sdk/runtime.py \
     .claude/sdk/runtime_codex.py \
+    .claude/sdk/runtime_opencode.py \
     .claude/sdk/cli.py \
     .claude/sdk/build.py \
     .claude/sdk/gates.py \
@@ -59,6 +60,9 @@ for f in \
     .codex/config.toml \
     .codex/hooks.json \
     .codex/build \
+    .opencode/opencode.json \
+    .opencode/build \
+    .opencode/plugins/cogwheel-hooks.ts \
     .agents/skills/cogwheel-build/SKILL.md \
     ; do
     if [ -f "$f" ]; then
@@ -79,6 +83,13 @@ if [ "$codex_agent_count" -ge 11 ]; then
     ok ".codex/agents/ has $codex_agent_count role definitions"
 else
     err ".codex/agents/ has only $codex_agent_count role definitions (need >= 11)"
+fi
+
+opencode_agent_count=$(find .opencode/agents -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+if [ "$opencode_agent_count" -ge 11 ]; then
+    ok ".opencode/agents/ has $opencode_agent_count role definitions"
+else
+    err ".opencode/agents/ has only $opencode_agent_count role definitions (need >= 11)"
 fi
 
 # Crew prompts (at least 9 required)

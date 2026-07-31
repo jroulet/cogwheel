@@ -106,23 +106,19 @@ open-ended for the Coder.
 5. Output the plan as a **raw JSON object** in your final message. No files,
    no ExitPlanMode. The orchestrator parses it automatically.
 
-## Escalation channel (zero work packages)
+## Zero-work-package routes
 
-If you cannot honestly produce work packages — infeasible gates, missing
-inputs, or a structurally inexpressible build (e.g. a tests-only build, which
-has no Coder-authorable deliverable) — do NOT emit an empty plan silently. An
-empty `work_packages` list alone reads to the orchestrator as a plain gate
-failure ("Plan has no work packages.") and hides your reason. Instead:
+A test-only compatibility port is supported: set `is_test_only: true`, emit
+zero work packages, set `has_domain_tests: true`, and provide one explicit,
+disjoint existing-test port description per target suite in
+`domain_test_descriptions`. The orchestrator routes it through Test Developer
+→ Inspector → Professor review; do not fabricate a Coder WP.
 
-- Set the plan `summary`'s **FIRST LINE** to `ESCALATION: <one-paragraph
-  reason>` stating exactly why the build cannot be decomposed and what the
-  driver must change (relax a gate, supply an input, split the build, etc.).
-- Emit **zero** work packages.
-
-The orchestrator detects the `ESCALATION:` prefix, surfaces your reason to the
-driver (writing it to `<approval_dir>/escalation.txt` for file-gated builds),
-and stops the build cleanly. Do not fabricate throwaway WPs to satisfy the
-gate.
+For every other reason you cannot honestly produce work packages — infeasible
+gates or missing inputs — do NOT emit an empty plan silently. Set the plan
+`summary`'s **FIRST LINE** to `ESCALATION: <one-paragraph reason>` stating what
+the driver must change, then emit zero work packages. The orchestrator surfaces
+that escalation to the driver and stops cleanly.
 
 ## Turn budgeting (hard requirement)
 

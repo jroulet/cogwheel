@@ -110,6 +110,10 @@ def _agent_model_label(
         from .runtime_codex import model_for_role
 
         return model_for_role(agent_name, model_override)
+    if RUNTIME_PROVIDER == "opencode":
+        from .runtime_opencode import model_for_role as oc_model_for_role
+
+        return oc_model_for_role(agent_name, model_override)
     return model_override or AGENT_MODELS[agent_name]
 
 
@@ -786,23 +790,25 @@ class BuildOrchestrator:
         branch = check_branch_safety(self.project_root)
         self._log(f"Branch: {branch}")
 
-        # Both providers share one build-scoped Serena server. Interactive
-        # Claude/Codex sessions keep their own stdio Serena processes, while
-        # every role in this build reuses this warm index. Codex gets a
-        # distinct default port so simultaneous Claude and Codex builds cannot
-        # cross-kill or bind-collide.
+        # All three providers share one build-scoped Serena server. Interactive
+        # Claude/Codex/OpenCode sessions keep their own stdio/local Serena
+        # processes, while every role in this build reuses this warm index.
+        # Non-Claude providers get distinct default ports so simultaneous builds
+        # cannot cross-kill or bind-collide.
         if self.use_serena:
-            serena_port = (
-                None if RUNTIME_PROVIDER == "claude"
-                else int(os.environ.get("CODEX_SERENA_PORT", "8324"))
-            )
+            if RUNTIME_PROVIDER == "claude":
+                serena_port = None
+            elif RUNTIME_PROVIDER == "opencode":
+                serena_port = int(os.environ.get("OPENCODE_SERENA_PORT", "8325"))
+            else:
+                serena_port = int(os.environ.get("CODEX_SERENA_PORT", "8324"))
             self._serena = SerenaManager(
                 self.project_root,
                 port=serena_port,
                 external_url=self.serena_url,
                 context=(
                     "claude-code"
-                    if RUNTIME_PROVIDER == "claude"
+                    if RUNTIME_PROVIDER in ("claude", "opencode")
                     else "codex"
                 ),
                 transport=(
@@ -823,6 +829,10 @@ class BuildOrchestrator:
                 # override, disabling the interactive stdio server and pointing
                 # every `codex exec` process at this one warm build server.
                 os.environ["CODEX_SERENA_URL"] = self._serena.url
+            elif RUNTIME_PROVIDER == "opencode":
+                # runtime_opencode.py uses this to rewrite mcp__serena__ to
+                # mcp__serena_build__ in prompts and inject the build server URL.
+                os.environ["OPENCODE_SERENA_URL"] = self._serena.url
             if not self.serena_url:
                 self._log(f"Serena ready at {self._serena.url}")
 
@@ -1022,6 +1032,7 @@ class BuildOrchestrator:
             os.environ.pop("SDK_BUILD_ACTIVE", None)
             os.environ.pop("SDK_FAST_PATH", None)
             os.environ.pop("CODEX_SERENA_URL", None)
+            os.environ.pop("OPENCODE_SERENA_URL", None)
 
     # ── Phase 1: Planning ────────────────────────────────────────────────
 
@@ -1126,7 +1137,11 @@ class BuildOrchestrator:
             f"- work_packages (list of objects with: id, title, what, where, "
             f"how, who ['Coder' or 'Foreman-Lite'], depends_on, verification, "
             f"max_turns [int — estimated turn budget for this WP])\n"
-            f"- has_domain_tests (bool) — true if new domain-specific tests\n"
+            f"- has_domain_tests (bool) — true if Test Developer work is required\n"
+            f"- is_test_only (bool) — true only for a compatibility port that edits\n"
+            f"  existing tests and has no Coder-authorable work; then emit zero WPs\n"
+            f"  and put one explicit, disjoint per-suite port description in\n"
+            f"  domain_test_descriptions for every Test Developer shard\n"
             f"- has_domain_changes (bool) — true if ANY domain-sensitive change "
             f"is made (likelihood, prior, sampler, marginalization, coordinates, "
             f"waveform conventions, numerical tolerances / formula fixes — even "
@@ -1594,11 +1609,30 @@ class BuildOrchestrator:
             return await self._run_tidier_skill()
 
         async def run_test_dev() -> str:
-            return await self._run_test_dev_agent()
+            result = await self._run_test_dev_agent()
+            if self.plan and self.plan.is_test_only:
+                self._create_coder_checkpoint()
+            return result
 
         async def run_inspector() -> str:
             await self._run_inspector_with_loop(report)
             return ""
+
+        if self.plan and self.plan.is_test_only:
+            return [
+                DAGNode(
+                    name="test_dev", kind="agent",
+                    depends_on=[],
+                    skip_when=lambda *_: False,
+                    run=run_test_dev,
+                ),
+                DAGNode(
+                    name="inspector", kind="agent",
+                    depends_on=["test_dev"],
+                    skip_when=lambda *_: False,
+                    run=run_inspector,
+                ),
+            ]
 
         return [
             DAGNode(
@@ -3446,7 +3480,7 @@ class BuildOrchestrator:
                       f"(cancel-scope RuntimeError); retrying with a "
                       f"fresh stream")
             e_for_retry = e
-            if not self.use_serena or RUNTIME_PROVIDER != "claude":
+            if not self.use_serena or RUNTIME_PROVIDER not in ("claude", "opencode"):
                 raise
             # Reuse the generic retry path by handling it here directly.
             self._log(f"[{agent_id}] MCP failed ({type(e_for_retry).__name__}: "
@@ -3498,7 +3532,7 @@ class BuildOrchestrator:
             if self._keep_result_on_teardown(agent_id, e, got_result,
                                              result_text):
                 return result_text, session_id
-            if self.use_serena and RUNTIME_PROVIDER == "claude":
+            if self.use_serena and RUNTIME_PROVIDER in ("claude", "opencode"):
                 self._log(f"[{agent_id}] MCP failed ({type(e).__name__}: {e}), retrying with built-in tools")
                 _retry_kwargs: dict = dict(
                     agent_name=agent_name,
@@ -3746,6 +3780,7 @@ class BuildOrchestrator:
             domain_test_descriptions=data.get("domain_test_descriptions", []),
             simplifier_inputs=data.get("simplifier_inputs", []),
             professor_inputs=data.get("professor_inputs", []),
+            is_test_only=data.get("is_test_only", False),
         )
 
     def _try_parse_json_plan(self, text: str) -> Plan | None:
@@ -3787,6 +3822,8 @@ class BuildOrchestrator:
     def _format_plan(self, plan: Plan) -> str:
         """Format a Plan for display."""
         lines = [f"## {plan.summary}\n"]
+        if plan.is_test_only:
+            lines.append("Execution route: Test Developer → Inspector → Professor review\n")
         for wp in plan.work_packages:
             lines.append(f"### {wp.id}: {wp.title}")
             lines.append(f"  What: {wp.what}")
@@ -3812,6 +3849,7 @@ class BuildOrchestrator:
                 lines.append(f"  - {desc}")
             lines.append("")
 
+        lines.append(f"Test-only compatibility port: {'yes' if plan.is_test_only else 'no'}")
         lines.append(f"Domain tests: {'yes' if plan.has_domain_tests else 'no'}")
         lines.append(f"Domain changes: {'yes' if plan.has_domain_changes else 'no'}")
         lines.append(f"New public API: {'yes' if plan.has_new_public_api else 'no'}")

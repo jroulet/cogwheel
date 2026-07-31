@@ -14,6 +14,16 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "Read|Grep|Glob|Edit|Write|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'exec \"$(git rev-parse --show-toplevel)/.codex/hooks/require-serena-ready.sh\"'",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "Bash|mcp__serena__execute_shell_command|mcp__serena_build__execute_shell_command",
         "hooks": [
           {
@@ -24,7 +34,7 @@
         ]
       },
       {
-        "matcher": "Bash|mcp__serena__execute_shell_command|mcp__serena_build__execute_shell_command",
+        "matcher": "Read|Grep|Glob|Edit|Write|Bash|mcp__serena__execute_shell_command|mcp__serena_build__execute_shell_command",
         "hooks": [
           {
             "type": "command",
@@ -35,6 +45,16 @@
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "mcp__serena__initial_instructions|mcp__serena_build__initial_instructions",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'exec \"$(git rev-parse --show-toplevel)/.codex/hooks/mark-serena-ready.sh\"'",
+            "timeout": 5
+          }
+        ]
+      },
       {
         "matcher": "mcp__serena__write_memory|mcp__serena_build__write_memory",
         "hooks": [

@@ -27,17 +27,23 @@ from sdk.runtime_codex import (
 
 
 class CodexRoleRoutingTests(unittest.TestCase):
-    def test_scientific_roles_use_frontier_model(self):
-        for role in ("architect", "coder", "inspector", "professor",
-                     "prof_review"):
+    def test_planning_authorities_use_frontier_model(self):
+        for role in ("architect", "professor"):
             with self.subTest(role=role), patch.dict(os.environ, {}, clear=True):
                 options = ClaudeAgentOptions(agent_name=role)
                 self.assertEqual(_model_for(options), "gpt-5.6-sol")
                 self.assertEqual(_reasoning_for(options), "high")
 
-    def test_support_roles_use_balanced_model(self):
-        for role in ("foreman_lite", "test_dev", "librarian", "tidier",
-                     "dreamer", "simplifier"):
+    def test_execution_roles_use_balanced_high_reasoning(self):
+        for role in ("coder", "test_dev", "inspector", "prof_review"):
+            with self.subTest(role=role), patch.dict(os.environ, {}, clear=True):
+                options = ClaudeAgentOptions(agent_name=role)
+                self.assertEqual(_model_for(options), "gpt-5.6-terra")
+                self.assertEqual(_reasoning_for(options), "high")
+
+    def test_support_roles_use_balanced_medium_reasoning(self):
+        for role in ("foreman_lite", "librarian", "tidier", "dreamer",
+                     "simplifier"):
             with self.subTest(role=role), patch.dict(os.environ, {}, clear=True):
                 options = ClaudeAgentOptions(agent_name=role)
                 self.assertEqual(_model_for(options), "gpt-5.6-terra")
@@ -165,6 +171,7 @@ class CodexSerenaConfigTests(unittest.TestCase):
         self.assertNotIn("mcp__serena__read_file", prompt)
         self.assertIn("mcp__serena_build__read_file", prompt)
         self.assertIn("mcp__serena_build__find_symbol", prompt)
+        self.assertIn("mcp__serena_build__initial_instructions", prompt)
 
 
 class SerenaManagerContextTests(unittest.IsolatedAsyncioTestCase):
