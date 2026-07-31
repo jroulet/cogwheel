@@ -61,15 +61,16 @@ Applies to **behavior changes** in `cogwheel/` (new functions, signature/logic/c
 - Claude Code keeps its existing native settings, `.mcp.json`, hooks, commands,
   and launch paths. `.claude/build` defaults to the Claude Agent SDK.
 - Codex uses `.codex/config.toml`, `.codex/hooks.json`, `.codex/agents/`, and
-  `.agents/skills/`. Launch the same state machine with `.codex/build`. A
-  Codex build starts one shared Serena Streamable HTTP server on
-  `CODEX_SERENA_PORT` (default `8324`) and reuses its warm index for every
-  build role.
+  `.agents/skills/`. A Codex build starts one shared Serena Streamable HTTP
+  server on `CODEX_SERENA_PORT` (default `8324`) and reuses its warm index for
+  every build role.
 - OpenCode uses `.opencode/opencode.json`, `.opencode/agents/`, and
-  `.opencode/plugins/`. Launch the same state machine with `.opencode/build`. An
-  OpenCode build starts one shared Serena Streamable HTTP server on
-  `OPENCODE_SERENA_PORT` (default `8325`) and reuses its warm index for every
-  build role.
+  `.opencode/plugins/`. An OpenCode build starts one shared Serena Streamable
+  HTTP server on `OPENCODE_SERENA_PORT` (default `8325`) and reuses its warm
+  index for every build role.
+- All providers launch builds via `.claude/sdk/launch_build.sh` with
+  `AGENT_PROVIDER=claude|codex|opencode`. There are no separate per-provider
+  build scripts.
 - Codex routes the Architect and planning Professor to `gpt-5.6-sol` at high
   reasoning. Coder, Test Developer, Inspector, and ProfReview use
   `gpt-5.6-terra` at high reasoning; administrative support roles use Terra at
@@ -90,9 +91,9 @@ Applies to **behavior changes** in `cogwheel/` (new functions, signature/logic/c
 
 ### Codex quiet build monitoring
 
-- `.codex/build` is the sanctioned Codex build launcher. It attaches the same
-  shared SDK watchdog as Claude, verifies that attachment, and retains the
-  normal watchdog terminal/stale-kill behavior.
+- Codex builds are launched via `AGENT_PROVIDER=codex .claude/sdk/launch_build.sh`.
+  The launcher attaches the shared SDK watchdog, verifies attachment, and retains
+  the normal terminal/stale-kill behavior.
 - When `CODEX_THREAD_ID` is inherited, terminal build events and file-based
   escalation events resume that exact thread through `.codex/resume_driver.sh`.
   Events are occurrence-unique and serialized per thread; a queued event is
@@ -103,9 +104,9 @@ Applies to **behavior changes** in `cogwheel/` (new functions, signature/logic/c
 
 ### OpenCode quiet build monitoring
 
-- `.opencode/build` is the sanctioned OpenCode build launcher. It attaches the
-  same shared SDK watchdog as Claude/Codex, verifies that attachment, and
-  retains the normal watchdog terminal/stale-kill behavior.
+- OpenCode builds are launched via `AGENT_PROVIDER=opencode .claude/sdk/launch_build.sh`.
+  The launcher attaches the shared SDK watchdog, verifies attachment, and retains
+  the normal terminal/stale-kill behavior.
 - When `OPENCODE_SESSION_ID` is inherited, terminal build events and file-based
   escalation events resume that exact session through
   `.opencode/resume_driver.sh`. Events are occurrence-unique and serialized per

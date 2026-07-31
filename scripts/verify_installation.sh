@@ -59,9 +59,7 @@ for f in \
     CLAUDE.md \
     .codex/config.toml \
     .codex/hooks.json \
-    .codex/build \
     .opencode/opencode.json \
-    .opencode/build \
     .opencode/plugins/cogwheel-hooks.ts \
     .agents/skills/cogwheel-build/SKILL.md \
     ; do
@@ -176,7 +174,6 @@ for f in \
     .claude/hooks/post-merge \
     .claude/hooks/install_hooks.sh \
     .claude/sdk/watchdog.sh \
-    .codex/build \
     .codex/hooks/session-start.sh \
     .codex/hooks/conda-python.sh \
     ; do

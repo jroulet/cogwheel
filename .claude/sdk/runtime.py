@@ -1,8 +1,8 @@
 """Provider boundary for the shared build orchestrator.
 
 Claude remains the default and uses the Claude Agent SDK without adaptation.
-Set ``AGENT_PROVIDER=codex`` (normally via ``.codex/build``) to use the
-Codex CLI compatibility layer instead.
+Set ``AGENT_PROVIDER=codex`` or ``AGENT_PROVIDER=opencode`` to use the
+respective CLI compatibility layer instead.
 """
 
 from __future__ import annotations

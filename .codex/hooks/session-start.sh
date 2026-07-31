@@ -4,6 +4,6 @@
 jq -n '{
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "Codex project integration is active. AGENTS.md is the canonical shared instruction file; CLAUDE.md is its compatibility symlink. Interactive Serena is configured in .codex/config.toml with the codex context. A .codex/build run starts one separate shared Serena Streamable HTTP server for all build roles; .claude/build intentionally remains Claude-default."
+    "additionalContext": "Codex project integration is active. AGENTS.md is the canonical shared instruction file; CLAUDE.md is its compatibility symlink. Interactive Serena is configured in .codex/config.toml with the codex context. Builds are launched via AGENT_PROVIDER=codex .claude/sdk/launch_build.sh (the unified launcher for all providers)."
   }
 }'

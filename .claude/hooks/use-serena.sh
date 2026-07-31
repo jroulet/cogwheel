@@ -187,9 +187,8 @@ All use relative paths from project root."
     # Allow project-owned shell scripts under .claude/sdk/ and .claude/hooks/
     # (these are our own code; they already route through the safety model).
     if [[ "$stripped" =~ ^\.claude/(sdk|hooks)/[A-Za-z0-9_.-]+\.sh([[:space:]]|$) ]] \
-       || [[ "$stripped" =~ ^\.codex/build([[:space:]]|$) ]] \
        || [[ "$stripped" =~ ^\.codex/hooks/[A-Za-z0-9_.-]+\.sh([[:space:]]|$) ]] \
-       || [[ "$stripped" =~ ^\.opencode/build([[:space:]]|$) ]] \
+       || [[ "$stripped" =~ ^\.codex/resume_driver\.sh([[:space:]]|$) ]] \
        || [[ "$stripped" =~ ^\.opencode/resume_driver\.sh([[:space:]]|$) ]]; then
       exit 0
     fi

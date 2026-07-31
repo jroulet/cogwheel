@@ -34,17 +34,7 @@ disown
 # Codex:
 nohup bash -c 'AGENT_PROVIDER=codex .claude/sdk/launch_build.sh <slug> .claude/handoff/<slug>.md' > /tmp/<slug>_stdout.log 2>&1 &
 disown
-```bash
-# OpenCode example:
-nohup bash -c 'OPENCODE_SESSION_ID=<session> .opencode/build "@.claude/handoff/<brief>.md" --approval-dir /tmp/<slug>_approval' > /tmp/<slug>_stdout.log 2>&1 &
-disown
-
-# Codex example:
-nohup bash -c 'CODEX_THREAD_ID=<thread> .codex/build "@.claude/handoff/<brief>.md" --approval-dir /tmp/<slug>_approval' > /tmp/<slug>_stdout.log 2>&1 &
-disown
 ```
-
-- `.claude/build "<task>"` only when the user explicitly wants the Claude pipeline.
 
 **Critical flags:**
 - `--approval-dir <dir>` — REQUIRED for interactive plan review. The build

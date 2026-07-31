@@ -113,7 +113,7 @@ class _TeeWriter:
     """Write to both a real stream and a shared log file simultaneously.
 
     The real stream (stdout) may be /dev/null or a broken pipe when the
-    orchestrator is backgrounded by .codex/build or .opencode/build.
+    orchestrator is backgrounded by launch_build.sh.
     The LOG is what matters; a BrokenPipeError on stdout must not kill
     the build.
     """

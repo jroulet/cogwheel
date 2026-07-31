@@ -11,7 +11,7 @@ without depending on the per-machine `~/.claude/projects/.../memory/` path.
   — do NOT hard-code either machine's absolute paths. The conda env name is
   routed through the durable `.env` idiom (mirrors gw_detection_ias): set
   `SDK_CONDA_ENV` in an untracked `.env` at the repo root (copy the tracked
-  `.env.example`); precedence is shell env > `.env` > default `cogwheel_310`.
+  `.env.example`); `.env` is always authoritative — no hardcoded fallback.
   `.claude/sdk/launch_build.sh` and `.claude/build` source it; the launcher
   then resolves the env python absolutely and fails loudly if missing.
 - The TejaForce agent build pipeline lives in a git worktree named
@@ -20,11 +20,12 @@ without depending on the per-machine `~/.claude/projects/.../memory/` path.
   `core.hooksPath=.claude/hooks` and `ALLOWED_BRANCHES=["claude-dev"]` in
   `.claude/sdk/gates.py`; a pre-push guard blocks pushes to main/master.
 - Conda env routing: the pipeline orchestrator AND agents run cogwheel code
-  in the environment selected by `SDK_CONDA_ENV`. The portable default is
-  `cogwheel_310`; this IAS worktree's untracked `.env` currently selects
+  in the environment selected by `SDK_CONDA_ENV`. There is NO hardcoded
+  fallback — `.env` must be set (copy `.env.example`). This IAS worktree uses
   **`cogwheel-newlal`** (Python 3.10, has both `cogwheel` and
   `claude-agent-sdk`) — NOT the main research env `cogwheel` (Python 3.9,
-  incompatible with `claude-agent-sdk` >=3.10).
+  incompatible with `claude-agent-sdk` >=3.10). Scripts fail loud if `.env`
+  is missing or `SDK_CONDA_ENV` is unset.
 - Installed Claude runtime: `claude-agent-sdk` is **0.1.53** in the active
   `cogwheel-newlal` environment (verified 2026-07-24, but still not declared
   as a project dependency). The 0.2.x line (e.g. 0.2.119) times out on the
@@ -45,9 +46,8 @@ without depending on the per-machine `~/.claude/projects/.../memory/` path.
   comment at the `PYBIN=` line), so BUILDS are unaffected — only ad-hoc shell
   calls are. Serena's `execute_shell_command` inherits that same PATH, so a
   bare `python` there is the uv interpreter, not the project env.
-- Read `.env` FIRST; never assume the `cogwheel_310` default from AGENTS.md.
-  That default is the portable fallback, and on this machine it resolves to a
-  nonexistent path.
+- Read `.env` FIRST; there is no fallback default. Scripts fail immediately
+  if `SDK_CONDA_ENV` cannot be resolved from `.env`.
 - Scientific extras present in `cogwheel-newlal` (verified 2026-07-29):
   mpmath 1.3.0, sympy 1.14.0, numba 0.58.1, numpy 1.26.2.
 - Docs: cogwheel uses Sphinx (`docs/source/`, RST, autosummary in `api.rst`),
@@ -110,5 +110,6 @@ without depending on the per-machine `~/.claude/projects/.../memory/` path.
   survival on the ARTIFACT instead — `/tmp/<slug>_approval/plan.json` existing
   — and death on real lines absent from that header echo ("Fatal error in
   message reader", a line starting "Build failed:").
-- To run: `.claude/build "task"` for the unchanged Claude default, or
-  `.codex/build "task"` for the Codex runtime.
+- To run: `AGENT_PROVIDER=<provider> .claude/sdk/launch_build.sh <slug> <brief>`
+  for all providers. The unified launcher handles conda, watchdog, approval-dir,
+  and disown. There are no separate per-provider build scripts.
