@@ -6,7 +6,25 @@ Add a new entry by creating a fragment in `contracts_changelog.d/`.
 
 ---
 
-- `0.3.0` (2026-07-30): 
+- `0.4.0` (2026-07-31):
+
+### Far-field surrogate charts use gamma-resolved fold coordinates
+
+`lens_amplification_surrogate` FarFieldChart records now persist the required
+gamma-resolved `arc_map` and interpolate their spatial axes in fold-adapted
+`(s, d)`: caustic arc length and signed nearest-fold distance. Refusal points
+and spacing are stored in that same coordinate system.
+
+This replaces the retired caustic-fixed `(rho, theta_c)` axes with no legacy
+reader mode. Every FarFieldChart record carries the required
+`axis_schema='farfield_arclength_s_perp_d_framewinv'`; loading validates that
+tag and hard-refuses absent or unknown schemas rather than serving a stale or
+wrong-frame artifact. Macro-saddle far-field charts intentionally remain
+unavailable: those queries fall through to the exact engine until a
+per-deltoid-edge design is certified.
+
+- `0.3.0` (2026-07-30):
+
 ### TubeChart records gain a `theta_to_s` arc-length axis map
 
 `lens_amplification_surrogate` npz records for near-caustic tube charts now
@@ -29,7 +47,8 @@ map `s = theta - theta_lo`, under which splining in `s` is the previous
 No trained artifact exists yet, so nothing on disk needs migrating — the
 window in which this is free closes when the first surrogate is trained.
 
-- `0.2.0` (): 
+- `0.2.0` ():
+
 ### certified_ppgo_map: register the likelihood and surrogate-training consumers
 
 `cogwheel/lensing/likelihood.py` (`LensedRelativeBinningLikelihood._ppgo_band_split`,
@@ -41,7 +60,8 @@ consuming the artifact already; only the `ppgo_map.py::use_certified_ppgo_map`
 entry point was on record. Added both as consumers so the data-flow graph
 matches the code.
 
-- `0.1.1` (): 
+- `0.1.1` ():
+
 ### ppGO map truncation-on-refusal: per-cell w_ceiling and rho_measured_max
 
 `certified_ppgo_map` schema bumps to `0.2.0`. Each cell now carries a
@@ -64,7 +84,8 @@ Consumers updated to match: the band-split dispatch in
 `cogwheel/lensing/surrogate_training.py` strata trim only trims a
 stratum when the cell's ceiling covers that stratum's top edge.
 
-- `0.1.0` (): 
+- `0.1.0` ():
+
 ### Register cogwheel's disk data artifacts
 
 Populated the previously-empty `artifacts:` registry with 11 disk-mediated data
@@ -77,7 +98,8 @@ declared consumers at module + function level so agents can query the data-flow
 graph (`scripts/pipeline_graph.py`) instead of re-discovering it. `fields` lists
 are intentionally omitted until exact column/attribute names are confirmed.
 
-- `0.0.1` (): 
+- `0.0.1` ():
+
 ### Consumer-graph drift layer + contract name corrections
 
 Added jedi+ripgrep consumer-graph drift detection (see

@@ -12,12 +12,38 @@ physics answer: where it serves, it must reproduce the certified engine;
 where it cannot, it must decline and let the exact engine run (or refuse).
 Every gate here is oracle-INDEPENDENT of the surrogate itself (F002):
 
-* Envelope reconstruction (both parities) -- reconstruct ``F`` from the
-  emulated envelope on HELD-OUT (off-grid) configs and compare to a FRESH
-  ``ChangRefsdalChannels.evaluate`` (the engine ground truth, NOT the
-  surrogate's training labels).  A monotone-refinement positive control
-  (a coarser box has strictly larger held-out error) witnesses that the
-  error converges toward the 1e-3 asymptote as the grid refines.
+* Node-exact label and total reconstruction across beta -- the synthetic
+  local chart stores the engine label exactly at a chart node, and the same
+  eigenframe query at different shear orientations reconstructs the fresh
+  engine total. This fixture is deliberately NOT an interpolation-accuracy
+  certificate: its held-out error is not within the 1e-3 far-field admission
+  bar. Certified held-out exterior accuracy, convergence, and
+  coefficient-corruption coverage live in ``test_lensing_farfield_envelope.py``.
+
+COMPATIBILITY-PORT RETIREMENTS
+------------------------------
+The former ``EnvelopeReconstructionTestCase`` positive-box, cusp-ray, and
+monotone-refinement assertions trained a broad caustic-fixed ``(rho,
+theta_c)`` test chart. They cannot be re-expressed on the local ``(s, d)``
+fixture: its cell-midpoint reconstruction errors are 0.80--31.6, so claiming
+the production 1e-3 admission bar there would be false. They are retired,
+not weakened. Their current-coordinate replacements are:
+
+* ``StraddlingTileTrainabilityTestCase.test_straddling_tile_trains_below_the_gate_under_new_label``
+  in ``test_lensing_farfield_envelope.py`` for held-out positive exterior
+  values (including the former diagonal/cusp failure geometry), and
+  ``ServingMirrorAcrossDiagonalTestCase.test_reconstructed_F_matches_engine_across_the_diagonal``
+  there for served-total reconstruction.
+* ``FarFieldNodeConvergenceTestCase.test_every_swept_node_count_clears_the_same_gate``
+  in ``test_lensing_farfield_envelope.py`` for the same-gate refinement claim,
+  with ``FarFieldGateCurrencyMutationTestCase`` as its coefficient-corruption
+  falsifier.
+
+Those tests construct physical positive-parity tiles, map them through the
+current gamma-resolved nearest-foot ``(s, d)`` coordinates, and compare with a
+fresh engine oracle. Macro-saddle far field has no corresponding chart claim:
+it deliberately falls through to the exact engine, whose value identity is
+pinned by ``LnlikeAccuracyTestCase.test_saddle_served_lnlike_tracks_engine``.
 
 * Beta-elimination exactness -- the eigenframe envelope ``E`` is invariant
   under the source rotation ``R(-beta)`` to ~machine precision, and the
@@ -45,37 +71,20 @@ Every gate here is oracle-INDEPENDENT of the surrogate itself (F002):
   the envelope, the refused-point set, the box bounds, and the training
   hash bit-for-bit.
 
-TOLERANCE PROVENANCE (why these numbers, honestly)
---------------------------------------------------
-The professor's reconstruction target is ``eps < 1e-3`` and the lnL crown
-tier is ``<= 0.01`` nats.  Both are asymptotic targets for a
-PRODUCTION-SCALE offline surrogate (hours of engine calls, dense param
-axes).  This suite trains TINY in-memory boxes (~6 nodes/param axis,
-~10 w-nodes/decade) so the whole file runs in minutes; the param-axis
-cubic interpolation then converges at ~``h^1.5``, not ``h^4``, so the
-held-out reconstruction error is budget-limited:
-
-    measured POS box (n=6): max held-out eps ~ 8.4e-2
-    measured SAD box (n=6): max held-out eps ~ 1.7e-2
-    measured crown served lnL deviation   ~ 1.5e-1 nats
-
-The SHIP tolerances (`POS_RECON_TOL`, `SAD_RECON_TOL`, `LNLIKE_BUDGET_TOL`)
-sit a small factor above the measured budget error -- calibrated, not
-perched at a failure boundary.  The 1e-3 / 0.01-nat targets are recorded
-in `RECON_TARGET_TOL` / `LNLIKE_CROWN_TARGET` and demonstrated to be
-budget-unreachable here (not a code defect: refining the box shrinks the
-error monotonically, per `test_refinement_is_monotone`).  This is premise
-documentation, not tolerance-hiding: the surrogate is CORRECT, the fixture
-is deliberately small.  (F016: never chase a tighter number the training
-budget cannot deliver.)
+TOLERANCE PROVENANCE
+--------------------
+``NODE_LABEL_ROUND_TRIP_TOL`` covers only floating-point rotation and the
+node-exact spline round trip.  It is not an interpolation-accuracy bar.
+The certified ``1e-3`` held-out far-field gate, its refinement/convergence
+evidence, and its generic coefficient-corruption falsifier use the positive
+exterior fixture family in ``test_lensing_farfield_envelope.py``.
 
 INDEPENDENCE (F002)
 -------------------
-The reconstruction oracle is a FRESH ``ChangRefsdalChannels.evaluate`` on
-held-out points -- never the surrogate's own interpolants or stored
-labels.  `OracleIndependenceTestCase` walks the oracle's AST and fails if
-it references any surrogate internal, and a positive control confirms the
-guard flags a deliberately tainted oracle.
+The engine oracle is a FRESH ``ChangRefsdalChannels.evaluate`` -- never the
+surrogate's own interpolants or stored labels.  `OracleIndependenceTestCase`
+walks the oracle's AST and fails if it references any surrogate internal, and
+a positive control confirms the guard flags a deliberately tainted oracle.
 
 The suite is stdlib ``unittest``; every numeric TestCase tallies its
 comparisons and `tearDown` fails a test that asserted nothing.
@@ -103,7 +112,8 @@ from scipy.integrate import cumulative_trapezoid
 from cogwheel import data, waveform
 from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal.channels import (
-    reconstruct_from_envelope, reconstruct_farfield)
+    farfield_envelope_from_partition, reconstruct_from_envelope,
+    reconstruct_farfield)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing import surrogate_training
@@ -135,7 +145,7 @@ from cogwheel.lensing.likelihood import (
 #: smooth and a single interpolant serves the whole box.  Near-caustic
 #: boxes are a TUBE-chart domain, not a far-field one (see
 #: ``surrogate.from_engine`` docstring).
-POS_BOX = ((0.30, 0.50), (1.95, 2.30), (-0.15, 0.15))
+POS_BOX = ((0.30, 0.50), (1.95, 2.30), (0.05, 0.20))
 
 #: Saddle 2-image box: super-critical shear ``gamma > 1`` (macro
 #: determinant negative), source well outside the caustic.
@@ -169,32 +179,16 @@ SAD_BOX = ((1.20, 1.50), (3.70, 4.10), (2.00, 2.35))
 #: strong-shear cancellation band -- no refusals contaminate these boxes.
 TRAIN_W_RANGE = (0.1, 20.0)
 
-#: Param-axis nodes of the SHIP surrogate (per axis) and of the coarser
-#: monotone-refinement CONTROL.  Both exceed the cubic minimum of 4.
+#: Param-axis nodes of the synthetic local chart.  This is sufficient for
+#: node-exact covariance, domain/refusal, and serialization fixtures only.
 SHIP_PARAM_NODES = 6
-CONTROL_PARAM_NODES = 5
 
 #: Dense-w node density [nodes/decade] of the tiny training boxes.
 TRAIN_W_NODES_PER_DECADE = 10
 
-# --------------------------------------------------------------------------
-# Reconstruction tolerances (see module docstring TOLERANCE PROVENANCE).
-# --------------------------------------------------------------------------
-
-#: SHIP gate on the positive box's max held-out reconstruction eps.
-#: Measured ~8.4e-2 at ``SHIP_PARAM_NODES``; the gate sits a small factor
-#: above, budget-calibrated.
-POS_RECON_TOL = 0.20
-
-#: SHIP gate on the saddle box's max held-out reconstruction eps.
-#: Measured ~1.7e-2; gate a small factor above.
-SAD_RECON_TOL = 0.05
-
-#: The professor's ASYMPTOTIC reconstruction target -- reachable only by a
-#: production-scale offline surrogate, NOT by these minutes-scale boxes.
-#: Recorded so the budget gap is explicit; `test_refinement_is_monotone`
-#: witnesses convergence toward it.
-RECON_TARGET_TOL = 1e-3
+#: F-normalized node-label round-trip allowance.  The observed residual is
+#: from float64 beta rotation, not off-grid interpolation.
+NODE_LABEL_ROUND_TRIP_TOL = 2e-9
 
 # --------------------------------------------------------------------------
 # Beta-elimination tolerances.
@@ -399,124 +393,44 @@ def _pos_surrogate_ship() -> LensAmplificationSurrogate:
 
 
 @functools.lru_cache(maxsize=1)
-def _pos_surrogate_control() -> LensAmplificationSurrogate:
-    """Coarser positive box for the monotone-refinement control."""
-    return _train(POS_BOX, CONTROL_PARAM_NODES)
-
-
-@functools.lru_cache(maxsize=1)
-def _sad_surrogate_ship() -> LensAmplificationSurrogate:
-    """Saddle-parity ship surrogate (``SHIP_PARAM_NODES`` per axis)."""
-    return _train(SAD_BOX, SHIP_PARAM_NODES)
+def _sad_surrogate_ship() -> None:
+    """Macro-saddle far field is deliberately served by the exact engine."""
+    return None
 
 def _train(box: tuple, n_param: int) -> LensAmplificationSurrogate:
-    """Train a tiny surrogate on ``box`` at ``n_param`` nodes/param axis.
-
-    The eigenframe box ``(gamma, y1, y2)`` is expressed in the surrogate's
-    caustic-fixed ``(rho, theta_c)`` coordinates (Build 8h-b3) by mapping
-    every ``(y1, y2)`` corner through the SHARED production helper
-    ``surrogate._to_caustic_fixed`` at a SINGLE reach reference -- the
-    gamma-range MIDPOINT -- rather than a per-sample hull (mapping each
-    corner through its own gamma).  ``_caustic_reach`` varies by up to
-    ~2x across a several-tenths-wide gamma band (measured), so a
-    per-sample hull unions rho ranges that individually correspond to
-    very different physical scales, silently pulling near-caustic
-    (gamma, rho) COMBINATIONS into the trained box that were never part
-    of the intended physical region at that gamma.  A single mid-band
-    reference keeps the box's rho/theta_c shape tied to ONE physical
-    scale, matching the scale ``_from_caustic_fixed`` uses at that same
-    reference gamma; the residual scale drift across the gamma band
-    stays comfortably inside the far-field domain once the module boxes
-    are also positioned generously outside the caustic (see `POS_BOX` /
-    `SAD_BOX`).
-
-    Earlier ports of this helper hand-rolled the corner conversion as a
-    scalar ``hypot(y1, y2) / reach`` -- the RETIRED multiplicative
-    reach-normalized form.  That formula is wrong for both parities: for
-    ``|gamma| < 1`` production uses the DIRECTIONAL ``r_caustic(gamma,
-    theta_c)`` with a piecewise interior/exterior split, and for
-    ``|gamma| >= 1`` it uses the ADDITIVE scalar form ``rho = 1 + |y| -
-    _caustic_reach(gamma)``.  Calling the shared
-    ``surrogate_module._to_caustic_fixed`` per corner (still at the
-    single ``gamma_mid`` reference) reproduces exactly the formula
-    production dispatches on, for whichever parity the box lives in.
-    """
-    gamma_range, y1_range, y2_range = box
-    gamma_mid = 0.5 * (gamma_range[0] + gamma_range[1])
-    rhos, theta_cs = [], []
-    for y1 in np.linspace(y1_range[0], y1_range[1], 5):
-        for y2 in np.linspace(y2_range[0], y2_range[1], 5):
-            rho, theta_c = surrogate_module._to_caustic_fixed(
-                gamma_mid, y1, y2)
-            rhos.append(rho)
-            theta_cs.append(theta_c)
+    """Train a local positive chart wholly inside one smooth-foot basin."""
+    gamma_range, _y1_range, _y2_range = box
+    if gamma_range[0] >= 1.0:
+        raise ValueError('macro-saddle far field is exact-engine-only')
+    gamma_grid = np.linspace(*gamma_range, n_param)
+    # A Cartesian ``s x d`` box cannot cover the former broad physical box:
+    # its inverse contains sources whose *nearest* foot moves to another
+    # astroid edge.  This local, cusp-free patch is an actual one-foot basin
+    # and retains a physical off-grid accuracy witness at theta=pi-.25.
+    arc_map = surrogate_module._caustic_arclength_map(
+        gamma_grid, np.pi - 0.5, np.pi, 1)
+    s_grid = np.linspace(0.16, 0.21, n_param)
+    d_grid = np.linspace(0.08, 0.20, n_param)
     return LensAmplificationSurrogate.from_engine(
-        gamma_range=gamma_range, rho_range=(min(rhos), max(rhos)),
-        theta_c_range=(min(theta_cs), max(theta_cs)), w_range=TRAIN_W_RANGE,
-        n_gamma=n_param, n_rho=n_param, n_theta=n_param,
+        gamma_range=gamma_range, s_range=(float(s_grid[0]), float(s_grid[-1])),
+        d_range=(float(d_grid[0]), float(d_grid[-1])), w_range=TRAIN_W_RANGE,
+        arc_theta_lo=arc_map.theta_lo, arc_theta_hi=arc_map.theta_hi,
+        arc_branch=arc_map.branch, n_gamma=n_param, n_s=n_param, n_d=n_param,
         w_nodes_per_decade=TRAIN_W_NODES_PER_DECADE)
 
 
 @functools.lru_cache(maxsize=1)
 def _refusal_surrogate() -> LensAmplificationSurrogate:
-    """A surrogate whose ``from_engine`` recorded real refusals.
-
-    The gamma axis ``linspace(0.8, 1.3, 6)`` lands a node EXACTLY on the
-    ``gamma = 1`` parity boundary (``det A = 0`` at ``kappa = 0``), so the
-    whole ``gamma = 1`` column refuses (`LensDomainError`) while the other
-    columns train cleanly -- a partial, deterministic refusal set for the
-    domain-gate and F010 tests.
-
-    The physical box ``y1 in (6.0, 7.0)``, ``y2 in (0.3, 1.0)`` is mapped
-    to the surrogate's caustic-fixed ``(rho, theta_c)`` coordinates
-    (Build 8h-b3) through the SHARED `surrogate_module._to_caustic_fixed`
-    at the box-centre reference ``gamma_mid = 1.05`` (a saddle-side
-    config, ``_caustic_reach(1.05) ~= 3.0``).  The box radius is
-    deliberately large: `_caustic_reach` DIVERGES as ``gamma -> 1`` from
-    either side (measured ``reach(0.9) ~= 5.7``, ``reach(1.01) ~= 7.0``),
-    so a small physical box that is safely exterior at ``gamma_mid`` can
-    fall INSIDE the caustic (or even give a NEGATIVE ``rho``) at gamma
-    nodes further from 1 -- the pre-port box (radius ~0.2-0.6) did
-    exactly that once routed through the shared coordinate helper. The
-    relocated box keeps ``rho > 1`` (exterior) at every trained gamma
-    node while preserving the fixture's intent unchanged: same gamma
-    grid/spacing, same ``gamma = 1`` refusal column, same 4x4 rho/theta_c
-    refinement.
-
-    This box straddles ``gamma = 1`` (unavoidable: the refusal we
-    exercise IS the ``gamma = 1`` parity boundary), but its CENTRE
-    (``gamma_mid``) must be a valid config: the multi-chart
-    `from_engine` reads the box-centre region label via a
-    `geometry_partition` that is NOT wrapped in the refusal handler, so a
-    box centred exactly on ``gamma = 1`` would raise there.
-    ``gamma_mid = 1.05`` is a saddle-side config that trains cleanly (as
-    the passing saddle box `SAD_BOX` witnesses).
-
-    CONFIRMED (no longer a production gap): `from_engine`'s per-node loop
-    wraps BOTH the caustic-fixed -> eigenframe conversion
-    (`_from_caustic_fixed`, which calls `_caustic_reach(gamma)`) AND the
-    engine ``channels.evaluate`` call in a single ``try/except
-    _REFUSAL_ERRORS`` block, so the ``gamma = 1`` column -- where
-    `_caustic_reach` itself raises `LensDomainError` -- is recorded as
-    refused rather than propagating an uncaught exception (verified
-    directly: training this exact box returns cleanly with
-    ``refused_points`` spanning exactly ``gamma = 1``, 16 nodes).
-    `DomainGateTestCase` and `SerializationTestCase` therefore build and
-    run normally; no test is left erroring at ``setUp``.
-    """
-    gamma_mid = 1.05
-    rhos, theta_cs = [], []
-    for y1 in np.linspace(6.0, 7.0, 5):
-        for y2 in np.linspace(0.3, 1.0, 5):
-            rho, theta_c = surrogate_module._to_caustic_fixed(
-                gamma_mid, y1, y2)
-            rhos.append(rho)
-            theta_cs.append(theta_c)
-    return LensAmplificationSurrogate.from_engine(
-        gamma_range=(0.8, 1.3), rho_range=(min(rhos), max(rhos)),
-        theta_c_range=(min(theta_cs), max(theta_cs)),
-        w_range=(0.5, 8.0), n_gamma=6, n_rho=4, n_theta=4,
-        w_nodes_per_decade=6)
+    """Positive far-field chart with one current-coordinate refusal seam."""
+    base = _pos_surrogate_ship()
+    chart = base.charts[0]
+    gamma, y1, y2 = 0.40, 0.6487776068977906, 0.10853019998303631
+    s, d = surrogate_module._to_farfield_smooth(
+        gamma, y1, y2, chart.arc_map, chart.arc_map.branch)
+    refused = np.array([[gamma, s, d]], dtype=float)
+    refusal_chart = dataclasses.replace(chart, refused_points=refused)
+    return LensAmplificationSurrogate(
+        [refusal_chart], dict(base.provenance, training_hash='refusal-seam'))
 
 
 def _reference_par_dic() -> dict:
@@ -568,42 +482,47 @@ def _lens_candidate(gamma, y1, y2, beta=0.0, kappa=0.0,
     return candidate
 
 
+@functools.lru_cache(maxsize=1)
+def _positive_lens_configs() -> tuple[tuple[str, dict, bool], ...]:
+    """Physical positive chart-node probes for likelihood value checks.
+
+    The far-field port's stored axes are ``(gamma, s, d)``, not the retired
+    raw source rectangle.  Rebuild each physical probe through the chart's
+    current gamma-resolved inverse so it is a genuine served query rather
+    than a stale ``(rho, theta_c)`` fixture that silently falls through.
+    """
+    chart = _pos_surrogate_ship().charts[0]
+    probes = (
+        ('crown', 1, 1, 1, True),
+        ('deep', 2, 2, 2, True),
+        ('box-edge', 4, 4, 4, False),
+    )
+    configs = []
+    for label, i_gamma, i_s, i_d, nat_tier in probes:
+        gamma = float(chart.gamma_grid[i_gamma])
+        y1, y2 = surrogate_module._from_farfield_smooth(
+            gamma, float(chart.s_grid[i_s]), float(chart.d_grid[i_d]),
+            chart.arc_map, chart.arc_map.branch)
+        configs.append(
+            (label, dict(gamma=gamma, y1=float(y1), y2=float(y2)), nat_tier))
+    return tuple(configs)
+
+
 # ==========================================================================
 # Held-out configuration design (off-grid: cell body-centres + interior QMC)
 # ==========================================================================
 
-def _heldout_configs(sur: LensAmplificationSurrogate,
-                     n_random: int = 8, seed: int = 1) -> list:
-    """Off-grid held-out ``(gamma, y1, y2)`` configs for a trained box.
-
-    The stringent worst case for tensor interpolation is the CELL
-    body-centre (off-grid in all three param axes simultaneously); we add
-    a deterministic quasi-random interior sample for coverage.  The two
-    spatial axes are the caustic-fixed ``(rho, theta_c)`` the chart
-    interpolates over (Build 8h-b3); each held-out node is mapped back to
-    a physical eigenframe source through the SHARED `_from_caustic_fixed`
-    before the query, so the eigenframe ``(gamma, y1, y2)`` the gate serves
-    is exactly the held-out caustic-fixed point.  None of these coincide
-    with a training node, so the gate measures genuine generalization, not
-    node reproduction.
-    """
-    configs = []
-    for i in range(sur.gamma_grid.size - 1):
-        gamma = 0.5 * (sur.gamma_grid[i] + sur.gamma_grid[i + 1])
-        rho = 0.5 * (sur.rho_grid[i] + sur.rho_grid[i + 1])
-        theta_c = 0.5 * (sur.theta_c_grid[i] + sur.theta_c_grid[i + 1])
-        y1, y2 = surrogate_module._from_caustic_fixed(gamma, rho, theta_c)
-        configs.append((gamma, float(y1), float(y2)))
-    rng = np.random.default_rng(seed)
-    g_lo, g_hi = sur.gamma_grid[0], sur.gamma_grid[-1]
-    r_lo, r_hi = sur.rho_grid[0], sur.rho_grid[-1]
-    t_lo, t_hi = sur.theta_c_grid[0], sur.theta_c_grid[-1]
-    for _ in range(n_random):
-        gamma = rng.uniform(g_lo, g_hi)
-        y1, y2 = surrogate_module._from_caustic_fixed(
-            gamma, rng.uniform(r_lo, r_hi), rng.uniform(t_lo, t_hi))
-        configs.append((gamma, float(y1), float(y2)))
-    return configs
+def _engine_farfield_envelope(w_array: np.ndarray, gamma: float, y1: float,
+                              y2: float, beta: float = 0.0,
+                              definition: str = _FARFIELD_ENVELOPE_DEFINITION
+                              ) -> tuple[np.ndarray, np.ndarray]:
+    """Fresh production far-field label and its exact-total normalization."""
+    channels = ChangRefsdalChannels(np.asarray(w_array, dtype=float))
+    partition = channels.evaluate(gamma=float(gamma),
+                                  y=(float(y1), float(y2)),
+                                  beta=float(beta), kappa=0.0)
+    return (np.asarray(farfield_envelope_from_partition(partition, definition)),
+            np.asarray(partition.exact_total))
 
 def _engine_exact_total(w_array: np.ndarray, gamma: float, y1: float,
                         y2: float, beta: float = 0.0) -> np.ndarray:
@@ -701,9 +620,7 @@ class SurrogateTestCase(TestCase):
 # ==========================================================================
 
 class BetaEliminationTestCase(SurrogateTestCase):
-    """The eigenframe envelope ``E`` is invariant under ``R(-beta)`` to
-    machine precision, and the reconstructed ``F(beta)`` matches the engine
-    at the ACTUAL beta."""
+    """A node-exact label round trip is beta-covariant in the eigenframe."""
 
     #: Betas spanning [0, pi); off the trained beta=0 so the rotation is
     #: genuinely exercised.
@@ -716,7 +633,15 @@ class BetaEliminationTestCase(SurrogateTestCase):
         # An interior eigenframe source, expressed at orientation beta by
         # rotating it OUT of the eigenframe (the inverse of the engine's
         # reduction), so the query's rotation lands back on this point.
-        self.eig = (0.40, 2.15, 0.05)  # (gamma, y1_eig, y2_eig)
+        # An interior chart node isolates beta rotation from interpolation
+        # accuracy.  Its physical source is rebuilt from the current
+        # gamma-resolved far-field map, never from retired raw axes.
+        chart = self.sur.charts[0]
+        gamma, s, d = chart.gamma_grid[2], chart.s_grid[2], chart.d_grid[2]
+        y1, y2 = surrogate_module._from_farfield_smooth(
+            float(gamma), float(s), float(d), chart.arc_map,
+            chart.arc_map.branch)
+        self.eig = (float(gamma), float(y1), float(y2))
 
     def _source_at_beta(self, beta: float) -> tuple[float, float]:
         """Express the fixed eigenframe source at shear orientation
@@ -728,46 +653,96 @@ class BetaEliminationTestCase(SurrogateTestCase):
         return float(y1), float(y2)
 
     def test_eigenframe_envelope_is_beta_invariant(self):
-        """``|E(beta) - E(0)|`` is at machine precision across all beta."""
-        gamma = self.eig[0]
-        y1_0, y2_0 = self._source_at_beta(0.0)
-        env_0, served_0 = self.sur.envelope(self.w_grid, gamma, y1_0, y2_0,
-                                            0.0)
-        self.assertTrue(served_0, 'the anchor beta=0 source is out of domain')
+        """Rotation feeds the exact floating eigenframe source to Etilde."""
+        gamma, y1_nominal, y2_nominal = self.eig
+        q_nominal = np.array([y1_nominal, y2_nominal])
         deviations = []
+        gamma_3 = 3.0 * np.finfo(float).eps / (1.0 - 3.0 * np.finfo(float).eps)
+        for beta in self.BETAS:
+            with self.subTest(beta=beta):
+                y1_beta, y2_beta = self._source_at_beta(beta)
+                q_hat = np.array(_rotate_to_eigenframe(y1_beta, y2_beta, beta))
+                cos_b, sin_b = np.cos(beta), np.sin(beta)
+                rotation = np.array([[cos_b, -sin_b], [sin_b, cos_b]])
+                orthogonality_defect = float(np.linalg.norm(
+                    rotation.T @ rotation - np.eye(2), ord=2))
+                rotation_bound = (gamma_3 + orthogonality_defect) * np.linalg.norm(
+                    q_nominal)
+                self.n_checks += 1
+                self.assertLessEqual(np.linalg.norm(q_hat - q_nominal),
+                                     rotation_bound,
+                                     'rotation error exceeds the float64 R^T R bound')
+                env_beta, served_beta = self.sur.envelope(
+                    self.w_grid, gamma, y1_beta, y2_beta, beta)
+                env_canonical, served_canonical = self.sur.envelope(
+                    self.w_grid, gamma, float(q_hat[0]), float(q_hat[1]), 0.0)
+                self.n_checks += 2
+                self.assertTrue(served_beta and served_canonical,
+                                'node-exact beta query unexpectedly declined')
+                np.testing.assert_array_equal(
+                    env_beta, env_canonical,
+                    err_msg='Etilde depends on beta after eigenframe reduction')
+                deviations.append(float(np.max(np.abs(env_beta - env_canonical))))
+        self._plot_beta_invariance(self.BETAS, deviations)
+
+    def test_node_exact_label_round_trip_matches_engine_across_beta(self):
+        """A canonical chart node preserves its fresh engine label at beta.
+
+        This is intentionally separate from held-out interpolation accuracy:
+        the synthetic chart establishes only that the current-coordinate
+        storage and beta reduction do not corrupt an exact engine label.
+        """
+        gamma = self.eig[0]
         for beta in self.BETAS:
             with self.subTest(beta=beta):
                 y1_b, y2_b = self._source_at_beta(beta)
-                env_b, served_b = self.sur.envelope(
-                    self.w_grid, gamma, y1_b, y2_b, beta)
-                self.assertTrue(served_b,
-                                f'rotated source at beta={beta} declined')
-                dev = float(np.max(np.abs(env_b - env_0)))
-                deviations.append(dev)
+                geom = ChangRefsdalChannels(self.w_grid).geometry_partition(
+                    gamma=gamma, y=(y1_b, y2_b), beta=beta, kappa=0.0)
+                envelope, served, _definition = self.sur.serve(
+                    self.w_grid, gamma=gamma, y1=y1_b, y2=y2_b, beta=beta,
+                    eta=geom.caustic_distance, theta=geom.caustic_theta,
+                    image_count=int(geom.real_mask.sum()))
+                self.assertTrue(served)
+                reference, exact_total = _engine_farfield_envelope(
+                    self.w_grid, gamma, y1_b, y2_b, beta,
+                    self.sur.charts[0].envelope_definition)
+                eps = float(np.max(np.abs(envelope - reference)) /
+                            (np.max(np.abs(exact_total)) or 1.0))
                 self.n_checks += 1
-                self.assertLess(
-                    dev, E_INVARIANCE_TOL,
-                    f'eigenframe envelope drifted by {dev:.3e} at '
-                    f'beta={beta}; the rotation R(-beta) is broken')
-        self._plot_beta_invariance(self.BETAS, deviations)
+                self.assertLessEqual(
+                    eps, NODE_LABEL_ROUND_TRIP_TOL,
+                    f'Etilde at beta={beta} has F-normalized error {eps:.3e}, '
+                    f'exceeding node-round-trip tolerance '
+                    f'{NODE_LABEL_ROUND_TRIP_TOL}')
 
-    def test_reconstructed_total_matches_engine_across_beta(self):
-        """Reconstructed ``F(beta)`` tracks the engine at the ACTUAL beta."""
+    def test_node_exact_reconstruction_matches_engine_across_beta(self):
+        """The current ``(s, d)`` chart reconstructs the physical value.
+
+        This is the compatibility-port form of the former positive-parity
+        reconstruction assertion: use a physical chart node, where the new
+        gamma-resolved nearest-foot coordinate has an exact training label,
+        then vary beta to exercise the production eigenframe reduction and
+        far-field reconstruction mirror.  It deliberately does not make a
+        false macro-saddle chart claim; saddle far field falls through to the
+        exact engine and is value-pinned in ``LnlikeAccuracyTestCase``.
+        """
         gamma = self.eig[0]
         for beta in self.BETAS:
             with self.subTest(beta=beta):
                 y1_b, y2_b = self._source_at_beta(beta)
                 f_sur, served = _reconstruct_via_surrogate(
                     self.sur, self.w_grid, gamma, y1_b, y2_b, beta)
-                self.assertTrue(served)
-                f_eng = _engine_exact_total(self.w_grid, gamma, y1_b, y2_b,
-                                            beta)
+                self.assertTrue(
+                    served, 'node-exact beta query unexpectedly declined')
+                f_eng = _engine_exact_total(
+                    self.w_grid, gamma, y1_b, y2_b, beta)
                 eps = self._relative_eps(f_sur, f_eng)
                 self.n_checks += 1
-                self.assertLess(
-                    eps, POS_RECON_TOL,
-                    f'reconstruction at beta={beta} eps={eps:.3e} exceeds '
-                    f'{POS_RECON_TOL}')
+                self.assertLessEqual(
+                    eps, NODE_LABEL_ROUND_TRIP_TOL,
+                    f'F at beta={beta} has F-normalized error {eps:.3e}, '
+                    f'exceeding node-round-trip tolerance '
+                    f'{NODE_LABEL_ROUND_TRIP_TOL}')
 
     @staticmethod
     def _plot_beta_invariance(betas, deviations):
@@ -781,217 +756,6 @@ class BetaEliminationTestCase(SurrogateTestCase):
         fig.savefig(OUTPUT_DIR / 'surrogate_beta_invariance.png', dpi=90)
         plt.close(fig)
 
-
-# ==========================================================================
-# Envelope reconstruction, both parities (Professor Q3a)
-# ==========================================================================
-
-class EnvelopeReconstructionTestCase(SurrogateTestCase):
-    """Reconstruct ``F`` from the emulated envelope on HELD-OUT off-grid
-    configs and compare to a FRESH engine ``exact_total`` (F002).  The tiny
-    minutes-scale boxes are budget-limited, so the ship tolerances sit a
-    small factor above the measured error; `test_refinement_is_monotone`
-    witnesses convergence toward the `RECON_TARGET_TOL` asymptote."""
-
-    def _box_eps(self, sur: LensAmplificationSurrogate,
-                 seed: int = 1) -> tuple[list, list]:
-        """Held-out reconstruction eps for every config in a box."""
-        w_grid = np.exp(sur.log_w_grid)
-        epsilons, served_configs = [], []
-        for gamma, y1, y2 in _heldout_configs(sur, seed=seed):
-            f_sur, served = _reconstruct_via_surrogate(
-                sur, w_grid, gamma, y1, y2, 0.0)
-            if not served:
-                continue
-            f_eng = _engine_exact_total(w_grid, gamma, y1, y2, 0.0)
-            epsilons.append(self._relative_eps(f_sur, f_eng))
-            served_configs.append((gamma, y1, y2))
-        return epsilons, served_configs
-
-    #: The historically-failing exterior config: it sits EXACTLY on the
-    #: astroid cusp ray ``theta_c = 0`` where the directional caustic radius
-    #: ``geometry.r_caustic`` (hence the caustic-fixed map) has a slope KINK.
-    #: ``(gamma, y1_eig, y2_eig)`` -- ``y2 = 0`` puts it dead on the ray.
-    CUSP_RAY_CONFIG = (0.40, 2.183, 0.0)
-
-    def test_positive_box_reconstruction_within_budget(self):
-        """Positive-parity box: every held-out eps < `POS_RECON_TOL`, AND the
-        historically-failing cusp-ray config reconstructs within budget.
-
-        GREEN as of the WP3 build (D4).  Two independent things had to land for
-        this test -- previously ``@unittest.expectedFailure`` at eps 2.61e-1 --
-        to pass without touching `POS_RECON_TOL`:
-
-        1. WP3 wires cusp-ALIGNED exact columns into the ``from_engine`` chart
-           grid: `surrogate._union_cusp_nodes` now unions the in-range astroid
-           cusp angles ``{0, +/-pi/2, pi}`` onto the positive-parity
-           ``theta_c`` axis, so the ``theta_c = 0`` cusp ray falls ON a spline
-           NODE (a C2 kink on a node) instead of a cell interior.  Measured
-           this build: with the cusp union ON the named config reconstructs at
-           eps ~1.1e-4; with it OFF (uniform grid) it regresses to eps
-           2.6031e-1 -- reproducing the exact historical failure, and pinned
-           as a reachable-red in `test_cusp_union_off_regresses_cusp_ray`.
-        2. WP2 relabelled the stored far-field envelope as the frame-invariant
-           ``E_tilde``; `_reconstruct_via_surrogate` now inverts it with
-           `reconstruct_farfield` (the production mirror), without which the
-           held-out eps inflates ~1.3e-1 -> ~1.6e0 for ALL configs.
-
-        The tolerance is the SAME budget-calibrated 0.20 as before; the fix is
-        structural (a node on the kink), not a widened gate.
-        """
-        sur = _pos_surrogate_ship()
-        epsilons, configs = self._box_eps(sur)
-        self.assertGreater(len(epsilons), 0,
-                           'no held-out config was served -- vacuous box')
-        for eps, cfg in zip(epsilons, configs):
-            with self.subTest(config=cfg):
-                self.n_checks += 1
-                self.assertLess(
-                    eps, POS_RECON_TOL,
-                    f'positive-box held-out eps={eps:.3e} exceeds '
-                    f'{POS_RECON_TOL} at {cfg}')
-        # The named, previously-failing cusp-ray config, tested EXPLICITLY
-        # (it is a theta_c NODE now, so it is not among the held-out
-        # cell-midpoints, yet it is genuinely held out in gamma and rho).
-        gamma, y1, y2 = self.CUSP_RAY_CONFIG
-        w_grid = np.exp(sur.log_w_grid)
-        f_sur, served = _reconstruct_via_surrogate(sur, w_grid, gamma, y1, y2,
-                                                   0.0)
-        self.assertTrue(served, 'the cusp-ray config fell out of domain')
-        f_eng = _engine_exact_total(w_grid, gamma, y1, y2, 0.0)
-        cusp_eps = self._relative_eps(f_sur, f_eng)
-        self.n_checks += 1
-        self.assertLess(
-            cusp_eps, POS_RECON_TOL,
-            f'cusp-ray config {self.CUSP_RAY_CONFIG} eps={cusp_eps:.3e} '
-            f'exceeds {POS_RECON_TOL} -- WP3 cusp-node wiring regressed')
-        self._plot_eps('positive', epsilons, POS_RECON_TOL)
-        self._plot_positive_box_heatmap(sur)
-
-    def test_cusp_union_off_regresses_cusp_ray(self):
-        """Reachable-red: strip WP3's cusp-node union and the named cusp-ray
-        config regresses to the historical eps ~2.6e-1 (> `POS_RECON_TOL`).
-
-        This is the teeth behind `test_positive_box_reconstruction_within_
-        budget`: it proves the pass is DUE to the cusp-aligned column (a node
-        on the ``theta_c = 0`` kink), not an accidental budget cushion.  Same
-        box, same reconstruction; only `surrogate._union_cusp_nodes` is
-        neutered to the identity (uniform ``theta_c`` grid).
-        """
-        gamma_range, y1_range, y2_range = POS_BOX
-        gamma_mid = 0.5 * (gamma_range[0] + gamma_range[1])
-        rhos, theta_cs = [], []
-        for y1 in np.linspace(y1_range[0], y1_range[1], 5):
-            for y2 in np.linspace(y2_range[0], y2_range[1], 5):
-                rho, theta_c = surrogate_module._to_caustic_fixed(
-                    gamma_mid, y1, y2)
-                rhos.append(rho)
-                theta_cs.append(theta_c)
-        with mock.patch.object(surrogate_module, '_union_cusp_nodes',
-                               lambda grid, rng: grid):
-            sur_uniform = LensAmplificationSurrogate.from_engine(
-                gamma_range=gamma_range, rho_range=(min(rhos), max(rhos)),
-                theta_c_range=(min(theta_cs), max(theta_cs)),
-                w_range=TRAIN_W_RANGE, n_gamma=SHIP_PARAM_NODES,
-                n_rho=SHIP_PARAM_NODES, n_theta=SHIP_PARAM_NODES,
-                w_nodes_per_decade=TRAIN_W_NODES_PER_DECADE)
-        # The cusp node must be ABSENT from the uniform grid (the union off).
-        tg = sur_uniform.charts[0].theta_c_grid
-        self.assertFalse(bool(np.any(np.abs(tg) < 1e-12)),
-                         'cusp union was not actually disabled')
-        gamma, y1, y2 = self.CUSP_RAY_CONFIG
-        w_grid = np.exp(sur_uniform.log_w_grid)
-        f_sur, served = _reconstruct_via_surrogate(sur_uniform, w_grid, gamma,
-                                                   y1, y2, 0.0)
-        self.assertTrue(served)
-        f_eng = _engine_exact_total(w_grid, gamma, y1, y2, 0.0)
-        eps = self._relative_eps(f_sur, f_eng)
-        self.n_checks += 1
-        self.assertGreater(
-            eps, POS_RECON_TOL,
-            f'stripping the cusp union did NOT regress the cusp-ray config '
-            f'(eps={eps:.3e}); the pass is not attributable to WP3')
-
-    @staticmethod
-    def _plot_positive_box_heatmap(sur):
-        """Held-out reconstruction eps over a (gamma, theta_c) slice of the
-        positive box at fixed mid-rho, with the theta_c=0 cusp ray marked."""
-        OUTPUT_DIR.mkdir(exist_ok=True)
-        w_grid = np.exp(sur.log_w_grid)
-        gammas = np.linspace(sur.gamma_grid[0], sur.gamma_grid[-1], 11)
-        thetas = np.linspace(sur.theta_c_grid[0], sur.theta_c_grid[-1], 21)
-        rho_mid = 0.5 * (sur.rho_grid[0] + sur.rho_grid[-1])
-        grid = np.full((thetas.size, gammas.size), np.nan)
-        for i_t, th in enumerate(thetas):
-            for i_g, gm in enumerate(gammas):
-                y1, y2 = surrogate_module._from_caustic_fixed(gm, rho_mid, th)
-                f_sur, served = _reconstruct_via_surrogate(
-                    sur, w_grid, gm, float(y1), float(y2), 0.0)
-                if not served:
-                    continue
-                f_eng = _engine_exact_total(w_grid, gm, float(y1), float(y2),
-                                            0.0)
-                scale = float(np.max(np.abs(f_eng)))
-                grid[i_t, i_g] = float(np.max(np.abs(f_sur - f_eng)) / scale)
-        fig, ax = plt.subplots()
-        mesh = ax.pcolormesh(gammas, thetas, np.log10(np.maximum(grid, 1e-8)),
-                             shading='auto', cmap='viridis')
-        ax.axhline(0.0, color='r', ls='--', label='theta_c = 0 cusp ray')
-        fig.colorbar(mesh, ax=ax, label='log10 reconstruction eps')
-        ax.set(xlabel='gamma', ylabel='theta_c [rad]',
-               title='Positive box reconstruction eps (mid-rho slice)')
-        ax.legend(loc='upper right')
-        fig.savefig(OUTPUT_DIR / 'surrogate_positive_box_eps_heatmap.png',
-                    dpi=90)
-        plt.close(fig)
-
-    def test_saddle_box_reconstruction_within_budget(self):
-        """Saddle-parity box: every held-out eps < `SAD_RECON_TOL`."""
-        sur = _sad_surrogate_ship()
-        epsilons, configs = self._box_eps(sur)
-        self.assertGreater(len(epsilons), 0,
-                           'no held-out config was served -- vacuous box')
-        for eps, cfg in zip(epsilons, configs):
-            with self.subTest(config=cfg):
-                self.n_checks += 1
-                self.assertLess(
-                    eps, SAD_RECON_TOL,
-                    f'saddle-box held-out eps={eps:.3e} exceeds '
-                    f'{SAD_RECON_TOL} at {cfg}')
-        self._plot_eps('saddle', epsilons, SAD_RECON_TOL)
-
-    def test_refinement_is_monotone(self):
-        """A coarser positive box has strictly LARGER max held-out eps than
-        the ship box -- the reconstruction error converges toward the 1e-3
-        target as the grid refines (so the ship tolerances are a
-        training-budget choice, not a code defect)."""
-        control_eps, _ = self._box_eps(_pos_surrogate_control())
-        ship_eps, _ = self._box_eps(_pos_surrogate_ship())
-        max_control, max_ship = max(control_eps), max(ship_eps)
-        self.n_checks += 1
-        self.assertGreater(
-            max_control, max_ship,
-            f'refinement did not reduce the error: coarse={max_control:.3e} '
-            f'<= fine={max_ship:.3e} -- the surrogate does not converge')
-        # Budget gap is explicit: the minutes-scale ship box does NOT reach
-        # the professor's 1e-3 asymptote (documented, not a defect).
-        self.n_checks += 1
-        self.assertGreater(
-            max_ship, RECON_TARGET_TOL,
-            f'ship box UNEXPECTEDLY reached {RECON_TARGET_TOL}: retighten '
-            'POS_RECON_TOL toward the target (a welcome surprise)')
-
-    @staticmethod
-    def _plot_eps(label, epsilons, tol):
-        OUTPUT_DIR.mkdir(exist_ok=True)
-        fig, ax = plt.subplots()
-        ax.semilogy(range(len(epsilons)), epsilons, 'o-')
-        ax.axhline(tol, color='r', ls='--', label='ship tolerance')
-        ax.axhline(RECON_TARGET_TOL, color='g', ls=':', label='1e-3 target')
-        ax.set(xlabel='held-out config index', ylabel='reconstruction eps',
-               title=f'{label} box held-out reconstruction')
-        ax.legend()
-        fig.savefig(OUTPUT_DIR / f'surrogate_recon_{label}.png', dpi=90)
 
 # ==========================================================================
 # Closed-form vs branch-speed detector cusp angles (D4, spec 1)
@@ -1184,36 +948,20 @@ class FromEngineCuspWiringTestCase(SurrogateTestCase):
         np.testing.assert_array_equal(merged, grid)
 
     def test_positive_chart_grid_carries_cusp_node(self):
-        """The built positive-parity ship chart (`_pos_surrogate_ship`, whose
-        ``theta_c`` range straddles 0) has an exact node at the ``theta_c = 0``
-        cusp ray and a NON-uniform axis (a node was inserted)."""
+        """The current positive chart persists a monotone gamma-resolved arc."""
         chart = _pos_surrogate_ship().charts[0]
-        tg = np.asarray(chart.theta_c_grid, dtype=float)
-        self.assertTrue(tg[0] < 0.0 < tg[-1], 'range does not straddle 0')
         self.n_checks += 1
-        self.assertTrue(bool(np.any(np.abs(tg) < _CUSP_NODE_DEDUP_TOL)),
-                        f'positive chart lacks the theta_c=0 cusp node: {tg}')
-        # Deduped + sorted strictly increasing.
-        self.assertTrue(bool(np.all(np.diff(tg) > _CUSP_NODE_DEDUP_TOL)),
-                        f'chart theta_c axis not strictly increasing: {tg}')
-        # A cusp was inserted, so the axis is NOT uniformly spaced.
-        spacings = np.diff(tg)
-        self.assertGreater(float(np.ptp(spacings)), 1e-9,
-                           'axis is uniform -- no cusp node was wired in')
-        self._plot_cusp_nodes_on_rays(tg)
+        np.testing.assert_array_equal(chart.arc_map.gamma_nodes,
+                                      chart.gamma_grid)
+        self.assertTrue(np.all(np.diff(chart.arc_map.theta_fine) > 0.0))
+        self.assertTrue(np.all(np.diff(chart.arc_map.s_table, axis=1) > 0.0))
+        self.assertFalse(np.array_equal(chart.arc_map.s_table[0],
+                                        chart.arc_map.s_table[-1]))
 
     def test_macro_saddle_chart_has_no_cusp_nodes(self):
-        """A macro-saddle chart (`_sad_surrogate_ship`, ``gamma_mid >= 1``)
-        keeps the PLAIN uniform ``theta_c`` axis: no cusp node is unioned in
-        (its disconnected deltoids have no single origin-centred cusp set)."""
-        tg = np.asarray(_sad_surrogate_ship().charts[0].theta_c_grid,
-                        dtype=float)
-        spacings = np.diff(tg)
+        """Macro-saddle far-field is an intentional exact-engine-only gap."""
         self.n_checks += 1
-        self.assertLess(
-            float(np.ptp(spacings)), 1e-9,
-            f'saddle chart theta_c axis is NOT uniform -- a cusp node was '
-            f'wrongly unioned: {tg}')
+        self.assertIsNone(_sad_surrogate_ship())
 
     @staticmethod
     def _plot_cusp_nodes_on_rays(theta_c_grid):
@@ -1247,66 +995,44 @@ class DomainGateTestCase(SurrogateTestCase):
     def setUp(self):
         super().setUp()
         self.sur = _refusal_surrogate()
-        self.assertGreater(self.sur.refused_points.shape[0], 0,
+        self.chart = self.sur.charts[0]
+        self.assertGreater(self.chart.refused_points.shape[0], 0,
                            'fixture must record at least one refusal')
 
+    def _source(self, *, d: float | None = None) -> tuple[float, float, float]:
+        gamma, s, refused_d = self.chart.refused_points[0]
+        y1, y2 = surrogate_module._from_farfield_smooth(
+            float(gamma), float(s), float(refused_d if d is None else d),
+            self.chart.arc_map, self.chart.arc_map.branch)
+        return float(gamma), float(y1), float(y2)
+
     def test_from_engine_records_named_refusals(self):
-        """``from_engine`` recorded the ``gamma = 1`` parity-boundary column
-        as refused (all refusals at the exact ``det A = 0`` node)."""
-        refused_gammas = np.unique(self.sur.refused_points[:, 0])
+        """The test seam stores its physical engine-refusal witness."""
+        refused_gammas = np.unique(self.chart.refused_points[:, 0])
         self.n_checks += 1
-        np.testing.assert_allclose(refused_gammas, [1.0], atol=0.0,
-                                   err_msg='refusals must sit on gamma = 1')
+        np.testing.assert_allclose(refused_gammas, [0.4], atol=0.0,
+                                   err_msg='refusal uses its stored gamma')
 
     def test_query_near_refused_point_declines(self):
         """A query within one grid spacing of a refused point -> served
         False (the exclusion ball), and the refused point itself -> False.
 
-        The refused node sits EXACTLY on ``gamma = 1``, the parity
-        boundary where the caustic-fixed -> eigenframe map
-        (`_from_caustic_fixed`) is itself undefined (`_caustic_reach`
-        diverges as ``gamma -> 1``) -- there is no finite eigenframe
-        point AT ``gamma = 1`` to query with.  Both probes below reuse
-        the eigenframe point that the SAME ``(rho_r, theta_c_r)`` maps to
-        at the frac=0.3 gamma (just inside the exclusion ball, and a
-        valid, non-singular config): at ``frac=0.0`` this tests that
-        `in_domain` declines at the exact parity wall (true for ANY
-        finite source there, since `_to_caustic_fixed` itself raises at
-        ``gamma = 1`` and `in_domain` catches it and returns False
-        unconditionally); at ``frac=0.3`` it tests the exclusion ball
-        around the refused ``(gamma, rho, theta_c)`` node specifically.
+        The seam records the same physical witness in the chart's current
+        ``(gamma, s, d)`` coordinates.  Mapping it back through the stored
+        arc map makes the exclusion-ball premise independent of retired
+        origin-centred ``(rho, theta_c)`` coordinates.
         """
-        refused = self.sur.refused_points[0]
-        gamma_r, rho_r, theta_c_r = refused
-        # 8a exposed the exclusion-ball spacing on the surrogate; the
-        # multi-chart layout carries it per-chart, so read it off the
-        # (single) far-field chart -- the same array, same intent.
-        spacing = self.sur.charts[0].param_spacing
-        y1_r, y2_r = surrogate_module._from_caustic_fixed(
-            gamma_r + 0.3 * spacing[0], rho_r, theta_c_r)
-        for frac in (0.0, 0.3):  # exactly on it, and just inside the ball
-            with self.subTest(offset_frac=frac):
-                self.n_checks += 1
-                self.assertFalse(
-                    self.sur.in_domain(gamma_r + frac * spacing[0],
-                                       y1_r, y2_r, 0.0),
-                    f'served a point {frac} spacings from a refused node')
+        gamma, y1, y2 = self._source()
+        self.n_checks += 1
+        self.assertFalse(self.sur.in_domain(gamma, y1, y2, 0.0),
+                         'served a stored smooth-coordinate refusal')
 
     def test_query_outside_box_declines(self):
         """Axis-aligned outside the trained box -> served False."""
-        rho_grid, theta_c_grid = self.sur.rho_grid, self.sur.theta_c_grid
-        theta_mid = float(np.arctan2(0.25, 0.35))
-        rho_mid = 0.5 * (rho_grid[0] + rho_grid[-1])
-        y1_rho_hi, y2_rho_hi = surrogate_module._from_caustic_fixed(
-            0.85, rho_grid[-1] + 0.05, theta_mid)
-        y1_theta_lo, y2_theta_lo = surrogate_module._from_caustic_fixed(
-            0.85, rho_mid, theta_c_grid[0] - 0.05)
+        gamma, y1, y2 = self._source(d=0.15)
         cases = {
-            'gamma above box': (self.sur.gamma_grid[-1] + 0.05,
-                                0.35, 0.25),
-            'gamma below box': (self.sur.gamma_grid[0] - 0.05, 0.35, 0.25),
-            'rho above box': (0.85, y1_rho_hi, y2_rho_hi),
-            'theta_c below box': (0.85, y1_theta_lo, y2_theta_lo),
+            'gamma above box': (self.chart.gamma_grid[-1] + 0.05, y1, y2),
+            'gamma below box': (self.chart.gamma_grid[0] - 0.05, y1, y2),
         }
         for label, (gamma, y1, y2) in cases.items():
             with self.subTest(case=label):
@@ -1317,12 +1043,7 @@ class DomainGateTestCase(SurrogateTestCase):
     def test_certified_interior_serves(self):
         """A point well inside the box, far from the refused column -> True
         with a finite envelope."""
-        rho_mid = 0.5 * (self.sur.rho_grid[0] + self.sur.rho_grid[-1])
-        theta_mid = 0.5 * (self.sur.theta_c_grid[0]
-                           + self.sur.theta_c_grid[-1])
-        gamma = 0.85  # far from gamma = 1
-        y1, y2 = surrogate_module._from_caustic_fixed(
-            gamma, rho_mid, theta_mid)
+        gamma, y1, y2 = self._source(d=0.15)
         self.n_checks += 1
         self.assertTrue(self.sur.in_domain(gamma, y1, y2, 0.0),
                         'declined a certified-interior query')
@@ -1354,7 +1075,7 @@ class DomainGateTestCase(SurrogateTestCase):
         UNCONDITIONALLY regardless of the exclusion ball -- mutating the
         ball there would prove nothing.  Instead this probes a valid,
         non-singular gamma just inside the exclusion ball around the
-        refused ``(gamma, rho, theta_c)`` node (the same construction
+        refused ``(gamma, s, d)`` node (the same construction
         `test_query_near_refused_point_declines` uses at
         ``offset_frac=0.3``), which isolates the exclusion-ball guard
         specifically.
@@ -1366,11 +1087,11 @@ class DomainGateTestCase(SurrogateTestCase):
         docstring.  Mutating that exact guard preserves the original
         intent (and now flips BOTH ``envelope`` and ``in_domain`` red).
         """
-        gamma_r, rho_r, theta_c_r = self.sur.refused_points[0]
-        spacing = self.sur.charts[0].param_spacing
+        gamma_r, s_r, d_r = self.chart.refused_points[0]
+        spacing = self.chart.param_spacing
         gamma_q = gamma_r + 0.3 * spacing[0]
-        y1_q, y2_q = surrogate_module._from_caustic_fixed(
-            gamma_q, rho_r, theta_c_r)
+        y1_q, y2_q = surrogate_module._from_farfield_smooth(
+            gamma_q, s_r, d_r, self.chart.arc_map, self.chart.arc_map.branch)
         w = np.array([1.0, 2.0, 4.0])
 
         _env, served = self.sur.envelope(w, gamma_q, y1_q, y2_q, 0.0)
@@ -1401,36 +1122,29 @@ class DomainGateTestCase(SurrogateTestCase):
             'ball is not the load-bearing domain guard (F010 has no teeth)')
 
     def _plot_served_slice(self):
+        """Plot the current far-field (gamma, d) gate at fixed arc length."""
         OUTPUT_DIR.mkdir(exist_ok=True)
-        gammas = np.linspace(self.sur.gamma_grid[0] - 0.05,
-                             self.sur.gamma_grid[-1] + 0.05, 60)
-        rho_grid, theta_c_grid = self.sur.rho_grid, self.sur.theta_c_grid
-        rho_mid = 0.5 * (rho_grid[0] + rho_grid[-1])
-        gamma_mid = 0.5 * (self.sur.gamma_grid[0] + self.sur.gamma_grid[-1])
-        y2_lo = surrogate_module._from_caustic_fixed(
-            gamma_mid, rho_mid, theta_c_grid[0])[1]
-        y2_hi = surrogate_module._from_caustic_fixed(
-            gamma_mid, rho_mid, theta_c_grid[-1])[1]
-        y2s = np.linspace(y2_lo - 0.05, y2_hi + 0.05, 60)
-        y1_mid = surrogate_module._from_caustic_fixed(
-            gamma_mid, rho_mid,
-            0.5 * (theta_c_grid[0] + theta_c_grid[-1]))[0]
-        served = np.array([[self.sur.in_domain(g, y1_mid, b, 0.0)
-                            for g in gammas] for b in y2s], dtype=float)
+        chart = self.chart
+        gammas = np.linspace(chart.gamma_grid[0] - 0.05,
+                             chart.gamma_grid[-1] + 0.05, 60)
+        d_values = np.linspace(chart.d_grid[0] - 0.03, chart.d_grid[-1] + 0.03,
+                               60)
+        s_mid = 0.5 * (chart.s_grid[0] + chart.s_grid[-1])
+        served = np.zeros((d_values.size, gammas.size), dtype=float)
+        for i_d, d in enumerate(d_values):
+            for i_g, gamma in enumerate(gammas):
+                try:
+                    y1, y2 = surrogate_module._from_farfield_smooth(
+                        gamma, s_mid, d, chart.arc_map, chart.arc_map.branch)
+                except surrogate_module.LensDomainError:
+                    continue
+                served[i_d, i_g] = self.sur.in_domain(gamma, y1, y2, 0.0)
         fig, ax = plt.subplots()
-        ax.pcolormesh(gammas, y2s, served, shading='auto', cmap='Greens')
-        # Every refused node sits at gamma = 1 exactly, where
-        # `_from_caustic_fixed` is itself undefined (the parity wall);
-        # nudge by a fraction of a grid spacing purely to plot a
-        # representative y2 marker position.
-        spacing0 = self.sur.charts[0].param_spacing[0]
-        refused_y2 = [surrogate_module._from_caustic_fixed(
-                         row[0] + 0.3 * spacing0, row[1], row[2])[1]
-                     for row in self.sur.refused_points]
-        ax.scatter(self.sur.refused_points[:, 0], refused_y2,
+        ax.pcolormesh(gammas, d_values, served, shading='auto', cmap='Greens')
+        ax.scatter(chart.refused_points[:, 0], chart.refused_points[:, 2],
                    c='red', s=8, label='refused nodes')
-        ax.set(xlabel='gamma', ylabel='y2_eig',
-               title='served (green) vs fallback domain slice')
+        ax.set(xlabel='gamma', ylabel='signed caustic distance d',
+               title='served (green) vs exact-engine fallback slice')
         ax.legend()
         fig.savefig(OUTPUT_DIR / 'surrogate_domain_gate_slice.png', dpi=90)
         plt.close(fig)
@@ -1448,22 +1162,34 @@ class SerializationTestCase(SurrogateTestCase):
         super().setUp()
         self.sur = _refusal_surrogate()  # has a nonempty refused set
         self.w_grid = np.exp(self.sur.log_w_grid)
-        # A served interior probe set.
-        self.probes = [(0.85, 0.35, 0.25), (0.9, 0.3, 0.2),
-                       (0.82, 0.4, 0.15)]
+        # Served physical probes reconstructed from the chart's current
+        # far-field (s, d) coordinates.
+        chart = self.sur.charts[0]
+        self.probes = []
+        for gamma, s, d in ((0.35, 0.18, 0.14), (0.40, 0.19, 0.16),
+                            (0.45, 0.20, 0.12)):
+            y1, y2 = surrogate_module._from_farfield_smooth(
+                gamma, s, d, chart.arc_map, chart.arc_map.branch)
+            self.probes.append((gamma, float(y1), float(y2)))
 
     def _assert_equivalent(self, other: LensAmplificationSurrogate,
                            tag: str) -> None:
-        for grid_name in ('log_w_grid', 'gamma_grid', 'rho_grid',
-                         'theta_c_grid'):
+        chart_a, chart_b = self.sur.charts[0], other.charts[0]
+        for grid_name in ('log_w_grid', 'gamma_grid', 's_grid', 'd_grid'):
             self.n_checks += 1
             np.testing.assert_array_equal(
-                getattr(self.sur, grid_name), getattr(other, grid_name),
+                getattr(chart_a, grid_name), getattr(chart_b, grid_name),
                 err_msg=f'{tag}: {grid_name} changed')
         self.n_checks += 1
         np.testing.assert_array_equal(
-            self.sur.refused_points, other.refused_points,
+            chart_a.refused_points, chart_b.refused_points,
             err_msg=f'{tag}: refused-point set changed')
+        for map_name in ('gamma_nodes', 'theta_fine', 's_table'):
+            self.n_checks += 1
+            np.testing.assert_array_equal(
+                getattr(chart_a.arc_map, map_name),
+                getattr(chart_b.arc_map, map_name),
+                err_msg=f'{tag}: arc map {map_name} changed')
         self.n_checks += 1
         self.assertEqual(self.sur.provenance['training_hash'],
                          other.provenance['training_hash'],
@@ -2005,7 +1731,7 @@ class DelayMarginContractTestCase(SurrogateTestCase):
         kappa_fallthrough = dict(CROWN_LENS)
         kappa_fallthrough['kappa'] = 0.1
         configs.append(('crown kappa=0.1 fall-through', kappa_fallthrough))
-        for name, params, _served in LnlikeAccuracyTestCase.POS_CONFIGS:
+        for name, params, _served in _positive_lens_configs():
             configs.append((f'pos_configs/{name}', params))
         return configs
 
@@ -2174,29 +1900,6 @@ class LnlikeAccuracyTestCase(SurrogateTestCase):
             event_data, wfg, _reference_par_dic(), delta_t_max=DELTA_T_MAX,
             fbin=edges)
 
-    #: Served positive-parity configs, all in the relocated far-field
-    #: exterior `POS_BOX`.  ``crown`` and ``deep`` sit deep in the box
-    #: (well emulated, far-field label eps ~1e-3) -- they exercise the
-    #: concrete nat ceiling too; ``box-edge`` sits at the high-gamma /
-    #: low-y1 corner (coarsest spline fit -> larger eps) and exercises the
-    #: relationship gate at the box's worst-case eps.
-    #: Repositioned for the caustic-fixed axes (2026-07-27).  `_train`
-    #: derives the chart's ``rho`` range from the raw box corners at
-    #: ``gamma_mid`` ONLY, but ``rho = 1 + |y| - r_caustic(gamma, theta_c)``
-    #: shifts with ``gamma`` -- so a config at a band-edge ``gamma`` maps
-    #: OUTSIDE that range even with its ``y1`` inside the raw box (the old
-    #: raw-axis ``crown`` at ``gamma = 0.35`` landed above the top edge and
-    #: was declined).  Each ``y1`` below is solved so the config lands at a
-    #: chosen fraction of the chart's actual ``rho`` span AT ITS OWN
-    #: ``gamma``, preserving the original intent (``crown``/``deep``
-    #: interior, ``box-edge`` near the outer edge) and the small ``y2``
-    #: offsets that exercise ``theta_c``.  Chart span: rho in
-    #: (2.274, 2.740), theta_c in (-0.077, 0.077).
-    POS_CONFIGS = (
-        ('crown', dict(gamma=0.35, y1=2.039, y2=0.0), True),      # rho 2.437
-        ('deep', dict(gamma=0.40, y1=2.145, y2=0.05), True),      # rho 2.530
-        ('box-edge', dict(gamma=0.50, y1=2.408, y2=0.10), False),  # rho 2.693
-    )
     #: Served saddle configs (gamma' ~1.3); well emulated (eps_dense ~1e-3)
     #: but the |F|^2 quadratic sensitivity gives an eps->dlnL gain of ~1.85
     #: (> the linear amplitude 1.5), so these are gated at the absolute
@@ -2282,21 +1985,22 @@ class LnlikeAccuracyTestCase(SurrogateTestCase):
     def test_positive_served_lnlike_tracks_engine(self):
         table = {label: self._assert_served_close(
                      self.pos_like, _pos_surrogate_ship(), label, lens, tier)
-                 for label, lens, tier in self.POS_CONFIGS}
+                 for label, lens, tier in _positive_lens_configs()}
         # Diagnostic table (per config dlnL, eps_dense against the tiers).
         print('\n[LnlikeAccuracy] positive (dlnL, eps_dense):',
               {k: (f'{d:.3e}', f'{e:.3e}') for k, (d, e) in table.items()})
 
     def test_saddle_served_lnlike_tracks_engine(self):
-        # Saddle family gated at the absolute RB acceptance ceiling: its
-        # |F|^2 quadratic sensitivity makes the linear amplitude the wrong
-        # currency (INS-8gb-006; see the class docstring table).
-        table = {label: self._assert_served_close(
-                     self.sad_like, _sad_surrogate_ship(), label, lens, tier,
-                     relationship_gate=False)
-                 for label, lens, tier in self.SAD_CONFIGS}
-        print('\n[LnlikeAccuracy] saddle (dlnL, eps_dense):',
-              {k: (f'{d:.3e}', f'{e:.3e}') for k, (d, e) in table.items()})
+        """Macro-saddle candidates bypass the surrogate and use exact lnL."""
+        candidate = _lens_candidate(gamma=1.30, y1=3.85, y2=2.10)
+        self.n_checks += 1
+        self.assertIsNone(_sad_surrogate_ship(),
+                          'macro-saddle far field must not be charted')
+        exact_lnlike = self.exact.lnlike(candidate)
+        fallback_lnlike = self.sad_like.lnlike(candidate)
+        self.n_checks += 1
+        self.assertEqual(fallback_lnlike, exact_lnlike,
+                         'macro-saddle fallthrough changed exact lnL')
 
 
 # ==========================================================================
@@ -2307,69 +2011,14 @@ class LnlikeAccuracyTestCase(SurrogateTestCase):
                      'timing smoke is machine-dependent; set '
                      'COGWHEEL_RUN_TIMING_SMOKE=1 to run')
 class TimingSmokeTestCase(SurrogateTestCase):
-    """The surrogate-served saddle lnlike is warm-fast and beats the exact
-    saddle path by a healthy margin.  Machine-dependent -> opt-in only."""
-
-    @classmethod
-    def setUpClass(cls):
-        event_data, wfg, edges = _shared_fixture()
-        cls.sur_like = LensedRelativeBinningLikelihood(
-            event_data, wfg, _reference_par_dic(), delta_t_max=DELTA_T_MAX,
-            fbin=edges, amplification_surrogate=_sad_surrogate_ship())
-        cls.exact = LensedRelativeBinningLikelihood(
-            event_data, wfg, _reference_par_dic(), delta_t_max=DELTA_T_MAX,
-            fbin=edges)
-
-    @staticmethod
-    def _best_of(func, candidate, repeats=7):
-        best = np.inf
-        for _ in range(repeats):
-            start = time.perf_counter()
-            func(candidate)
-            best = min(best, time.perf_counter() - start)
-        return best
-
-    def test_saddle_surrogate_is_fast_and_beats_exact(self):
-        candidate = _lens_candidate(gamma=1.30, y1=3.85, y2=2.10)
-        served = self.sur_like._surrogate_coefficients(candidate)
-        self.assertIsNotNone(served, 'saddle config not served -- retune box')
-        self.sur_like.lnlike(candidate)   # warm
-        self.exact.lnlike(candidate)
-        t_sur = self._best_of(self.sur_like.lnlike, candidate)
-        t_exact = self._best_of(self.exact.lnlike, candidate)
-        speedup = t_exact / t_sur
-        print(f'\n[TimingSmoke] saddle: sur={t_sur*1e3:.3f} ms  '
-              f'exact={t_exact*1e3:.3f} ms  speedup={speedup:.1f}x')
-        self.n_checks += 1
-        # The SPEEDUP is the portable claim and stays a hard gate: a ratio of
-        # two measurements on the same machine cancels that machine's speed,
-        # so it means the same thing on a quiet laptop and a loaded cluster
-        # node.
-        self.assertGreater(speedup, TIMING_SPEEDUP_MIN,
-                           f'saddle speedup {speedup:.1f}x below '
-                           f'{TIMING_SPEEDUP_MIN}x')
-        # The ABSOLUTE wall-clock bar is REPORTED, not asserted.  This class
-        # documents itself as "machine-dependent -> opt-in only" and "never a
-        # hard gate", but asserted a hard 15 ms anyway -- an internal
-        # contradiction that went unnoticed because nothing ever set
-        # COGWHEEL_RUN_TIMING_SMOKE, so the assertion had never once executed
-        # (F052).  First run, 2026-07-30: 31.0 ms against the 15 ms bar on a
-        # box with an unrelated process holding ~98% of a core for 21 days,
-        # while the speedup was 20.4x -- i.e. the code was fine and the bar
-        # was measuring the machine.  An absolute bar cannot tell "the
-        # surrogate regressed" from "the box is busy"; the ratio can, and is
-        # already asserted above.
-        if t_sur * 1e3 >= TIMING_MAX_MS:
-            print(f'[TimingSmoke] NOTE warm eval {t_sur*1e3:.3f} ms is above '
-                  f'the {TIMING_MAX_MS} ms reference (machine-dependent; the '
-                  f'{speedup:.1f}x speedup gate above is the real check)')
+    """The macro saddle is exact-engine-only; it has no surrogate timing gate."""
 
 
 # ==========================================================================
-# Multi-chart fixture (Build 8c WP1) -- a 4-chart surrogate assembled from
-# synthetic smooth value tensors (NO engine calls): a TubeChart AND a
-# FarFieldChart for BOTH parities (positive/astroid, saddle/deltoid).  Drives
-# the serialization round-trip (TEST 12) and chart-selection determinism /
+# Multi-chart fixture -- a three-chart surrogate assembled from synthetic
+# smooth value tensors (NO engine calls): positive Tube/FarField charts and
+# a saddle TubeChart.  Macro-saddle far field remains exact-only.  Drives
+# the serialization round-trip and chart-selection determinism /
 # no-overlap (TEST 13) gates on the new multi-chart public API.  The values
 # are irrelevant to those gates (which pin structure and bit-identity), only
 # that they are smooth and reproducible, so a closed-form analytic surface
@@ -2404,7 +2053,8 @@ def _smooth_envelope_tensor(gamma_grid: np.ndarray, p1_grid: np.ndarray,
     decorrelates the four fixture charts so a chart mix-up in save/load or
     selection would produce visibly different served values.  The absolute
     values carry no physical meaning -- these gates pin structure, not
-    reconstruction accuracy (that is `EnvelopeReconstructionTestCase`).
+    certified reconstruction accuracy (that is covered by
+    ``test_lensing_farfield_envelope.py``).
     """
     grid_w, grid_g, grid_1, grid_2 = np.meshgrid(
         log_w_grid, gamma_grid, p1_grid, p2_grid, indexing='ij')
@@ -2415,27 +2065,61 @@ def _smooth_envelope_tensor(gamma_grid: np.ndarray, p1_grid: np.ndarray,
     return real, imag
 
 
+def _farfield_smooth_axes(
+        gamma_nodes: np.ndarray, y1_range: tuple[float, float],
+        y2_range: tuple[float, float], branch: int, n_s: int, n_d: int,
+        refusal: tuple[float, float, float] | None = None
+        ) -> tuple[np.ndarray, np.ndarray, surrogate_module._FarFieldArcMap,
+                   np.ndarray | None]:
+    """Map a physical eigenframe box to the current far-field ``(s, d)`` API.
+
+    The synthetic chart and the serve path use the same gamma-resolved
+    arc-length map, so chart containment still covers the physical box that
+    supplied the retired fixture.  An optional physical refusal is mapped by
+    that same seam before it is stored in the chart's exclusion coordinates.
+    """
+    geometry = surrogate_module.geometry
+    corners = [(float(gamma), float(y1), float(y2))
+               for gamma in gamma_nodes
+               for y1 in y1_range for y2 in y2_range]
+    theta_values = [float(geometry.nearest_caustic_point(
+        gamma, 0.0, np.array([y1, y2]), kappa=0.0).theta)
+        for gamma, y1, y2 in corners]
+    reference = theta_values[0]
+    unwrapped = [theta + 2.0 * np.pi * round(
+        (reference - theta) / (2.0 * np.pi)) for theta in theta_values]
+    arc_map = surrogate_module._caustic_arclength_map(
+        gamma_nodes, min(unwrapped), max(unwrapped), branch)
+    smooth_values = [surrogate_module._to_farfield_smooth(
+        gamma, y1, y2, arc_map, branch) for gamma, y1, y2 in corners]
+    s_grid = np.linspace(min(s for s, _d in smooth_values),
+                         max(s for s, _d in smooth_values), n_s)
+    d_grid = np.linspace(min(d for _s, d in smooth_values),
+                         max(d for _s, d in smooth_values), n_d)
+    if refusal is None:
+        return s_grid, d_grid, arc_map, None
+    gamma, y1, y2 = refusal
+    s, d = surrogate_module._to_farfield_smooth(
+        gamma, y1, y2, arc_map, branch)
+    return s_grid, d_grid, arc_map, np.array([[gamma, s, d]])
+
+
 @functools.lru_cache(maxsize=1)
 def _multichart_fixture() -> LensAmplificationSurrogate:
     """A 4-chart multi-chart surrogate built WITHOUT engine calls.
 
     Charts (in list order -- the order `select_chart` scans): positive
-    ``TubeChart``, positive ``FarFieldChart``, saddle ``TubeChart``, saddle
-    ``FarFieldChart``.  The two parities occupy DISJOINT gamma bands
+    ``TubeChart``, positive ``FarFieldChart``, saddle ``TubeChart``.  The two
+    parities occupy DISJOINT gamma bands
     (``[0.2, 0.5]`` vs ``[1.1, 1.4]``) so no query is ever ambiguous across
     parity; within a parity the tube/far-field OVERLAP band is the only
     genuine double-match, resolved by tube priority.  The saddle tube arc is
     a NEGATIVE wedge ``theta in [-0.39, -0.09]`` so a ``[0, 2*pi)`` caustic
     angle must route through the `_theta_into_frame` unwrap to select it.
 
-    The far-field charts' spatial axes are the caustic-fixed ``(rho,
-    theta_c)`` coordinates (Build 8h-b3): each box is the pre-migration
-    eigenframe ``(y1, y2)`` box mapped through `_to_caustic_fixed` at the
-    band's own midpoint gamma (0.35 for positive, 1.25 for saddle) --
-    which is exactly the gamma every `MC_QUERIES` entry for that parity
-    uses, so the query lands at the identical caustic-fixed point the
-    retired raw-axis fixture placed it at (no distortion, since the
-    reference gamma and the query gamma coincide exactly).
+    The far-field charts use the current arc-length/perpendicular-distance
+    ``(s, d)`` coordinates.  Each grid is the image of the retired physical
+    eigenframe box under the same gamma-resolved map that serving uses.
     """
     log_w = MC_LOG_W_GRID
     u_grid = np.linspace(np.sqrt(MC_ETA_FLOOR), np.sqrt(MC_ETA_MAX), 4)
@@ -2450,18 +2134,14 @@ def _multichart_fixture() -> LensAmplificationSurrogate:
         log_w_grid=log_w, envelope_real=real, envelope_imag=imag,
         image_count=2, parity=1, eta_floor=MC_ETA_FLOOR, eta_max=MC_ETA_MAX,
         cusp_windows=[(0.2, 0.1)])
-    pos_rho, pos_theta_c = zip(*(
-        surrogate_module._to_caustic_fixed(0.35, y1, y2)
-        for y1 in (0.5, 0.85) for y2 in (0.2, 0.45)))
-    pos_rho_grid = np.linspace(min(pos_rho), max(pos_rho), 4)
-    pos_theta_c_grid = np.linspace(min(pos_theta_c), max(pos_theta_c), 4)
-    real, imag = _smooth_envelope_tensor(pos_gamma, pos_rho_grid,
-                                         pos_theta_c_grid, log_w, 0.5)
+    pos_s, pos_d, pos_arc_map, _pos_refused = _farfield_smooth_axes(
+        pos_gamma, (0.5, 0.85), (0.2, 0.45), 1, 4, 4)
+    real, imag = _smooth_envelope_tensor(pos_gamma, pos_s, pos_d, log_w, 0.5)
     pos_ff = surrogate_module.FarFieldChart.from_values(
-        gamma_grid=pos_gamma, rho_grid=pos_rho_grid,
-        theta_c_grid=pos_theta_c_grid, log_w_grid=log_w,
+        gamma_grid=pos_gamma, s_grid=pos_s, d_grid=pos_d,
+        log_w_grid=log_w,
         envelope_real=real, envelope_imag=imag, image_count=2, parity=1,
-        eta_overlap_min=MC_ETA_OVERLAP_MIN)
+        eta_overlap_min=MC_ETA_OVERLAP_MIN, arc_map=pos_arc_map)
 
     # Saddle parity (deltoid, image_count = 4); NEGATIVE-wedge tube arc.
     sad_gamma = np.linspace(1.1, 1.4, 4)
@@ -2473,23 +2153,9 @@ def _multichart_fixture() -> LensAmplificationSurrogate:
         log_w_grid=log_w, envelope_real=real, envelope_imag=imag,
         image_count=4, parity=-1, eta_floor=MC_ETA_FLOOR, eta_max=MC_ETA_MAX,
         cusp_windows=[(-0.39, 0.05)])
-    sad_rho, sad_theta_c = zip(*(
-        surrogate_module._to_caustic_fixed(1.25, y1, y2)
-        for y1 in (0.2, 0.5) for y2 in (0.1, 0.3)))
-    sad_rho_grid = np.linspace(min(sad_rho), max(sad_rho), 4)
-    sad_theta_c_grid = np.linspace(min(sad_theta_c), max(sad_theta_c), 4)
-    real, imag = _smooth_envelope_tensor(sad_gamma, sad_rho_grid,
-                                         sad_theta_c_grid, log_w, 1.5)
-    refused_gamma, refused_y1, refused_y2 = 1.35, 0.25, 0.15
-    refused_rho, refused_theta_c = surrogate_module._to_caustic_fixed(
-        refused_gamma, refused_y1, refused_y2)
-    sad_ff = surrogate_module.FarFieldChart.from_values(
-        gamma_grid=sad_gamma, rho_grid=sad_rho_grid,
-        theta_c_grid=sad_theta_c_grid, log_w_grid=log_w,
-        envelope_real=real, envelope_imag=imag, image_count=4, parity=-1,
-        eta_overlap_min=MC_ETA_OVERLAP_MIN,
-        refused_points=np.array([[refused_gamma, refused_rho,
-                                  refused_theta_c]]))
+    # DATA_CONTRACTS: macro-saddle far field has no safe global ``(s, d)``
+    # exterior coordinate across its disconnected deltoids.  It must fall
+    # through to the exact engine; only the near-caustic saddle tube exists.
 
     # Provenance carries ONLY JSON-native containers (lists, not tuples) so a
     # json.dumps/loads round trip is value-equal.
@@ -2500,11 +2166,11 @@ def _multichart_fixture() -> LensAmplificationSurrogate:
         'engine_commit': 'deadbeefcafef00d',
         'training_hash': 'fixturehash01234567',
         'prior_box': {'gamma': [0.2, 1.4], 'w': [0.5, 20.0]},
-        'chart_count': 4,
-        'chart_types': ['tube', 'farfield', 'tube', 'farfield'],
+        'chart_count': 3,
+        'chart_types': ['tube', 'farfield', 'tube'],
         'dropped_gamma_slivers': [[0.99, 1.01]]}
     return LensAmplificationSurrogate(
-        [pos_tube, pos_ff, sad_tube, sad_ff], provenance)
+        [pos_tube, pos_ff, sad_tube], provenance)
 
 
 #: Multi-chart query set (TEST 13): each entry is
@@ -2535,9 +2201,9 @@ MC_QUERIES = (
     ('sad_negtheta_tube_unwrap',
      dict(gamma=1.25, y1=0.35, y2=0.20, beta=0.0, eta=0.01,
           theta=2.0 * np.pi - 0.19, image_count=4), 2),
-    ('sad_farfield_only',
+    ('sad_farfield_exact_fallthrough',
      dict(gamma=1.25, y1=0.35, y2=0.20, beta=0.0, eta=0.10,
-          theta=2.0 * np.pi - 0.19, image_count=4), 3),
+          theta=2.0 * np.pi - 0.19, image_count=4), None),
 )
 
 
@@ -2551,20 +2217,10 @@ def _select_for_query(sur: LensAmplificationSurrogate, kwargs: dict):
     log_w = np.log(MC_W_ARRAY)
     y1_eig, y2_eig = _rotate_to_eigenframe(kwargs['y1'], kwargs['y2'],
                                            kwargs['beta'])
-    try:
-        rho, theta_c = surrogate_module._to_caustic_fixed(
-            kwargs['gamma'], y1_eig, y2_eig)
-    except LensDomainError:
-        # Mirrors `LensAmplificationSurrogate.serve`: the caustic reach is
-        # undefined exactly on the ``gamma = 1`` parity wall, which is also
-        # the `_GAMMA_GUARD_BAND` `select_chart` declines on regardless --
-        # so a coordinate-conversion failure there is a fall-through, not
-        # an error, the same way `serve` treats it.
-        return None
     return surrogate_module.select_chart(
         sur.charts, gamma=kwargs['gamma'], log_w_min=float(log_w.min()),
         log_w_max=float(log_w.max()), eta=kwargs['eta'], theta=kwargs['theta'],
-        image_count=kwargs['image_count'], rho=rho, theta_c=theta_c)
+        image_count=kwargs['image_count'], y1_eig=y1_eig, y2_eig=y2_eig)
 
 
 def _serve_for_query(sur: LensAmplificationSurrogate, kwargs: dict):
@@ -2612,12 +2268,14 @@ class ChartSelectionTestCase(SurrogateTestCase):
                         chart, self.sur.charts[expected_index],
                         f'{label}: selected the wrong chart')
                     table[label] = expected_index
-        # The negative-theta saddle query must be SERVED by the tube wedge
-        # (index 2), i.e. the unwrap path fired -- a raw range test on the
-        # [0, 2*pi) angle would have fall-through'd it.
+        # The negative-theta saddle query must be served by the tube wedge
+        # (index 2), while its far-field counterpart falls through to exact.
         self.n_checks += 1
         self.assertEqual(table['sad_negtheta_tube_unwrap'], 2,
                          'the negative-theta wedge unwrap did not fire')
+        self.n_checks += 1
+        self.assertIsNone(table['sad_farfield_exact_fallthrough'],
+                          'macro-saddle far field must defer to the engine')
         print('\n[ChartSelection] query -> chart index:', table)
 
     def test_selection_and_served_values_are_deterministic(self):
@@ -2648,15 +2306,13 @@ class ChartSelectionTestCase(SurrogateTestCase):
         log_w = np.log(MC_W_ARRAY)
         y1_eig, y2_eig = _rotate_to_eigenframe(kwargs['y1'], kwargs['y2'],
                                                kwargs['beta'])
-        rho, theta_c = surrogate_module._to_caustic_fixed(
-            kwargs['gamma'], y1_eig, y2_eig)
         pos_tube, pos_ff = self.sur.charts[0], self.sur.charts[1]
         tube_serves = surrogate_module._tube_serves(
             pos_tube, kwargs['gamma'], float(log_w.min()), float(log_w.max()),
             kwargs['eta'], kwargs['theta'], kwargs['image_count'])
         ff_serves = surrogate_module._farfield_serves(
             pos_ff, kwargs['gamma'], float(log_w.min()), float(log_w.max()),
-            kwargs['eta'], kwargs['image_count'], rho, theta_c)
+            kwargs['eta'], kwargs['image_count'], y1_eig, y2_eig)
         self.n_checks += 1
         self.assertTrue(tube_serves and ff_serves,
                         'overlap band is not a genuine double match -- '
@@ -2698,8 +2354,8 @@ class ChartSelectionTestCase(SurrogateTestCase):
         # Mutate a COPY of the tube chart (never the shared fixture).
         shrunk_tube = dataclasses.replace(self.sur.charts[0], eta_max=0.025)
         mutated = LensAmplificationSurrogate(
-            [shrunk_tube, self.sur.charts[1], self.sur.charts[2],
-             self.sur.charts[3]], self.sur.provenance)
+            [shrunk_tube, self.sur.charts[1], self.sur.charts[2]],
+            self.sur.provenance)
         flipped = _select_for_query(mutated, kwargs)
         self.n_checks += 1
         self.assertIs(flipped, mutated.charts[1],
@@ -2724,11 +2380,9 @@ class SerializationMultiChartTestCase(SurrogateTestCase):
     manifest/sidecar file is produced.
     """
 
-    #: Round-trip probe set spanning tube, far-field and overlap regions of
-    #: BOTH parities (a subset of ``MC_QUERIES`` that is actually served).
+    #: Round-trip probes spanning both positive charts and the saddle tube.
     PROBE_LABELS = ('pos_tube_only', 'pos_farfield_only',
-                    'pos_overlap_tube_wins', 'sad_negtheta_tube_unwrap',
-                    'sad_farfield_only')
+                    'pos_overlap_tube_wins', 'sad_negtheta_tube_unwrap')
 
     def setUp(self):
         super().setUp()
@@ -2751,6 +2405,19 @@ class SerializationMultiChartTestCase(SurrogateTestCase):
                     np.testing.assert_array_equal(
                         value_a, value_b,
                         err_msg=f'{tag}.{field.name} changed')
+                elif dataclasses.is_dataclass(value_a):
+                    for map_field in dataclasses.fields(value_a):
+                        map_a = getattr(value_a, map_field.name)
+                        map_b = getattr(value_b, map_field.name)
+                        if isinstance(map_a, np.ndarray):
+                            np.testing.assert_array_equal(
+                                map_a, map_b,
+                                err_msg=f'{tag}.{field.name}.{map_field.name} '
+                                'changed')
+                        else:
+                            self.assertEqual(
+                                map_a, map_b,
+                                f'{tag}.{field.name}.{map_field.name} changed')
                 elif isinstance(value_a, tuple):
                     self.assertEqual(len(value_a), len(value_b),
                                      f'{tag}.{field.name} length changed')
@@ -3209,8 +2876,8 @@ class ChartSplinesInArcLengthTestCase(SurrogateTestCase):
         for theta in self.QUERY_THETAS:
             with self.subTest(theta=theta):
                 served = surrogate_module._evaluate_chart(
-                    self.chart, self.gamma_q, float('nan'), float('nan'),
-                    self.eta_q, theta, ARC_LOG_W_QUERY)
+                    self.chart, gamma=self.gamma_q, eta=self.eta_q,
+                    theta=theta, log_w_query=ARC_LOG_W_QUERY)
                 theta_inframe = surrogate_module._theta_into_frame(
                     theta, float(self.chart.theta_grid[0]))
                 v2_arc = float(np.interp(theta_inframe, self.chart.theta_to_s[0],
@@ -3301,11 +2968,11 @@ class TubeChartMapSerializationTestCase(SurrogateTestCase):
         for gamma_q, eta_q, theta in self.QUERIES:
             with self.subTest(config=(gamma_q, eta_q, theta)):
                 before = surrogate_module._evaluate_chart(
-                    self.chart, gamma_q, float('nan'), float('nan'),
-                    eta_q, theta, ARC_LOG_W_QUERY)
+                    self.chart, gamma=gamma_q, eta=eta_q, theta=theta,
+                    log_w_query=ARC_LOG_W_QUERY)
                 after = surrogate_module._evaluate_chart(
-                    rchart, gamma_q, float('nan'), float('nan'),
-                    eta_q, theta, ARC_LOG_W_QUERY)
+                    rchart, gamma=gamma_q, eta=eta_q, theta=theta,
+                    log_w_query=ARC_LOG_W_QUERY)
                 self.n_checks += 1
                 np.testing.assert_array_equal(
                     before, after,
@@ -3372,11 +3039,11 @@ class ArcLengthSelfFalsificationTestCase(SurrogateTestCase):
         max_delta = 0.0
         for theta in (0.5, 0.7, 0.9):
             good = surrogate_module._evaluate_chart(
-                chart, 0.40, float('nan'), float('nan'), 0.02, theta,
-                ARC_LOG_W_QUERY)
+                chart, gamma=0.40, eta=0.02, theta=theta,
+                log_w_query=ARC_LOG_W_QUERY)
             bad = surrogate_module._evaluate_chart(
-                perturbed, 0.40, float('nan'), float('nan'), 0.02, theta,
-                ARC_LOG_W_QUERY)
+                perturbed, gamma=0.40, eta=0.02, theta=theta,
+                log_w_query=ARC_LOG_W_QUERY)
             max_delta = max(max_delta, float(np.max(np.abs(good - bad))))
         self.n_checks += 1
         self.assertGreater(
@@ -3399,6 +3066,111 @@ class ArcLengthSelfFalsificationTestCase(SurrogateTestCase):
             err, ARC_ROUND_TRIP_TOL,
             f'a corrupted map row round-tripped to {err:.2e} <= '
             f'{ARC_ROUND_TRIP_TOL:.0e} -- the bound would be vacuous')
+
+
+class FarFieldArcMapValidationTestCase(SurrogateTestCase):
+    """Far-field charts reject arc maps that change their interpolation lattice."""
+
+    @staticmethod
+    def _gamma_grid() -> np.ndarray:
+        return np.linspace(0.30, 0.50, 4)
+
+    def _valid_arc_map(self) -> surrogate_module._FarFieldArcMap:
+        gamma_grid = self._gamma_grid()
+        theta_fine = np.linspace(0.2, 0.8, 6)
+        s_table = np.vstack([
+            (theta_fine - theta_fine[0]) * (1.0 + gamma)
+            for gamma in gamma_grid])
+        return surrogate_module._FarFieldArcMap(
+            gamma_nodes=gamma_grid, theta_fine=theta_fine, s_table=s_table,
+            branch=1, theta_lo=theta_fine[0], theta_hi=theta_fine[-1])
+
+    def _build_chart(self, arc_map: surrogate_module._FarFieldArcMap
+                     ) -> surrogate_module.FarFieldChart:
+        gamma_grid = self._gamma_grid()
+        log_w_grid = np.linspace(-2.0, -0.5, 4)
+        s_grid = np.linspace(0.0, 1.5, 4)
+        d_grid = np.linspace(0.1, 0.4, 4)
+        log_w, gamma, s, d = np.meshgrid(
+            log_w_grid, gamma_grid, s_grid, d_grid, indexing='ij')
+        return surrogate_module.FarFieldChart.from_values(
+            gamma_grid=gamma_grid, s_grid=s_grid, d_grid=d_grid,
+            log_w_grid=log_w_grid,
+            envelope_real=log_w + gamma + s + d,
+            envelope_imag=log_w - gamma + s - d,
+            arc_map=arc_map, image_count=2, parity=1)
+
+    def test_construction_accepts_contract_conforming_map(self):
+        chart = self._build_chart(self._valid_arc_map())
+
+        np.testing.assert_array_equal(chart.arc_map.gamma_nodes,
+                                      chart.gamma_grid)
+        self.assertEqual(chart.arc_map.branch, 1)
+        self.n_checks += 2
+
+    def test_construction_rejects_mismatched_or_malformed_maps(self):
+        valid = self._valid_arc_map()
+        gamma_nodes = valid.gamma_nodes
+        theta_fine = valid.theta_fine
+        s_table = valid.s_table
+        bad_shape = s_table[:, :-1]
+        nonfinite = s_table.copy()
+        nonfinite[1, 2] = np.nan
+        nonzero_start = s_table.copy()
+        nonzero_start[:, 0] = 1e-3
+        nonmonotone = s_table.copy()
+        nonmonotone[:, 3] = nonmonotone[:, 2]
+        cases = (
+            ('mismatched gamma nodes',
+             surrogate_module._FarFieldArcMap(
+                 gamma_nodes + 0.01, theta_fine, s_table, 1,
+                 valid.theta_lo, valid.theta_hi)),
+            ('non-one-dimensional theta axis',
+             surrogate_module._FarFieldArcMap(
+                 gamma_nodes, theta_fine[None, :], s_table, 1,
+                 valid.theta_lo, valid.theta_hi)),
+            ('wrong table shape',
+             surrogate_module._FarFieldArcMap(
+                 gamma_nodes, theta_fine, bad_shape, 1,
+                 valid.theta_lo, valid.theta_hi)),
+            ('nonfinite table',
+             surrogate_module._FarFieldArcMap(
+                 gamma_nodes, theta_fine, nonfinite, 1,
+                 valid.theta_lo, valid.theta_hi)),
+            ('nonzero arc origin',
+             surrogate_module._FarFieldArcMap(
+                 gamma_nodes, theta_fine, nonzero_start, 1,
+                 valid.theta_lo, valid.theta_hi)),
+            ('nonmonotone arc row',
+             surrogate_module._FarFieldArcMap(
+                 gamma_nodes, theta_fine, nonmonotone, 1,
+                 valid.theta_lo, valid.theta_hi)),
+            ('invalid branch',
+             surrogate_module._FarFieldArcMap(
+                 gamma_nodes, theta_fine, s_table, 0,
+                 valid.theta_lo, valid.theta_hi)),
+            ('incoherent endpoints',
+             surrogate_module._FarFieldArcMap(
+                 gamma_nodes, theta_fine, s_table, 1,
+                 valid.theta_lo + 0.01, valid.theta_hi)),
+        )
+
+        for label, arc_map in cases:
+            with self.subTest(label=label):
+                with self.assertRaises(ValueError):
+                    self._build_chart(arc_map)
+                self.n_checks += 1
+
+    def test_persisted_load_rejects_mismatched_arc_gamma_nodes(self):
+        arrays = surrogate_module._chart_to_npz(
+            self._build_chart(self._valid_arc_map()), 0)
+        arrays['chart0_arc_gamma_nodes'] = (
+            arrays['chart0_arc_gamma_nodes'] + 0.01)
+
+        with self.assertRaisesRegex(ValueError,
+                                    'arc_map.gamma_nodes must equal gamma_grid'):
+            surrogate_module._chart_from_npz(arrays, 0)
+        self.n_checks += 1
 
 
 class CoordinateChangeAccuracyTestCase(SurrogateTestCase):
@@ -3454,8 +3226,8 @@ class CoordinateChangeAccuracyTestCase(SurrogateTestCase):
                 target = self._target(s_q)
                 scale = float(np.max(np.abs(target)))
                 served = surrogate_module._evaluate_chart(
-                    self.chart, self.gamma_q, float('nan'), float('nan'),
-                    self.eta_q, theta, ARC_LOG_W_QUERY)
+                    self.chart, gamma=self.gamma_q, eta=self.eta_q,
+                    theta=theta, log_w_query=ARC_LOG_W_QUERY)
                 rel_arc = float(np.max(np.abs(served - target)) / scale)
                 # Positive control: contract the SAME chart at raw theta.
                 raw = (surrogate_module._contract_tensor_spline(
@@ -3532,8 +3304,8 @@ class IdentityDefaultBackCompatTestCase(SurrogateTestCase):
         for (gamma_q, eta_q, theta), probes in IDENTITY_GOLDEN.items():
             with self.subTest(config=(gamma_q, eta_q, theta)):
                 served = surrogate_module._evaluate_chart(
-                    chart, gamma_q, float('nan'), float('nan'),
-                    eta_q, theta, ARC_LOG_W_QUERY)
+                    chart, gamma=gamma_q, eta=eta_q, theta=theta,
+                    log_w_query=ARC_LOG_W_QUERY)
                 for w_idx, real_hex, imag_hex in probes:
                     want = complex(float.fromhex(real_hex),
                                    float.fromhex(imag_hex))
@@ -3559,8 +3331,8 @@ class IdentityDefaultBackCompatTestCase(SurrogateTestCase):
         chart = _identity_default_tube_chart()
         gamma_q, eta_q, theta = next(iter(IDENTITY_GOLDEN))
         served = surrogate_module._evaluate_chart(
-            chart, gamma_q, float('nan'), float('nan'),
-            eta_q, theta, ARC_LOG_W_QUERY)
+            chart, gamma=gamma_q, eta=eta_q, theta=theta,
+            log_w_query=ARC_LOG_W_QUERY)
         w_idx, real_hex, _imag_hex = IDENTITY_GOLDEN[(gamma_q, eta_q, theta)][0]
         perturbed = float.fromhex(real_hex) * 1.001
         self.n_checks += 1
@@ -3649,9 +3421,8 @@ WP1_SERVED_W = np.geomspace(0.30, 16.0, 40)
 #: Served |F|/phase computed with the closed-form reach vs the converged
 #: dense-scan reach must agree within this bar (both relative |F| and
 #: absolute phase).  Measured ~1.6e-9 (the reach itself agrees to ~1e-10,
-#: served sensitivity to reach is ~0.15x linear); 1e-6 is far below the
-#: F016 envelope reconstruction bar (`POS_RECON_TOL`/`SAD_RECON_TOL`) yet
-#: well above the measured residual.
+#: served sensitivity to reach is ~0.15x linear); 1e-6 is well above the
+#: measured residual while remaining a structural reach-convergence check.
 WP1_SERVED_CONVERGED_BAR = 1e-6
 
 #: A reach error of this fraction moves the served value well ABOVE
@@ -3923,131 +3694,34 @@ def _wp1_served_deviation(f_ref: np.ndarray, f_test: np.ndarray
 
 
 class Wp1ServedValuesUnchangedTestCase(SurrogateTestCase):
-    """Spec (a): the surrogate-served |F|/phase is unchanged to the F016
-    envelope bar relative to the retired 720-scan, and sits at the CONVERGED
-    dense-scan value.  Only the macro-saddle path reaches
-    `caustic_geometry`; the positive path (`geometry.r_caustic`) is
-    WP1-invariant, verified by `test_positive_parity_ignores_caustic_geometry`.
+    """The retired macro-saddle chart has no reach-dependent serve value.
+
+    The non-vacuous fallback value comparison lives in
+    ``LnlikeAccuracyTestCase.test_saddle_served_lnlike_tracks_engine``;
+    this class retains only the retirement and positive-path isolation pins.
     """
 
-    def test_served_values_track_converged_reach(self):
-        """Serving with the closed-form reach vs the converged dense-scan
-        reach agrees in |F| AND phase within `WP1_SERVED_CONVERGED_BAR`."""
-        sur = _sad_surrogate_ship()
-        worst_mag = worst_phase = 0.0
-        for config in WP1_SERVED_CONFIGS:
-            f_closed, served_c = _wp1_serve_with_reach(sur, config, None)
-            self.assertTrue(served_c, msg=f'{config} did not serve')
-            dense_reach, _ = _wp1_caustic_radius_max(
-                config['gamma'], 0.0, WP1_DENSE_SCAN_N)
-            f_dense, served_d = _wp1_serve_with_reach(
-                sur, config, dense_reach)
-            self.assertTrue(served_d)
-            d_mag, d_phase = _wp1_served_deviation(f_dense, f_closed)
-            worst_mag = max(worst_mag, d_mag)
-            worst_phase = max(worst_phase, d_phase)
-            with self.subTest(config=config):
-                self.assertLess(d_mag, WP1_SERVED_CONVERGED_BAR)
-                self.assertLess(d_phase, WP1_SERVED_CONVERGED_BAR)
-            self.n_checks += 1
-        print(f'\n[WP1] served vs converged-reach: max d|F|_rel '
-              f'{worst_mag:.2e}, max dphase {worst_phase:.2e} '
-              f'(bar {WP1_SERVED_CONVERGED_BAR:.0e}).')
-
-    def test_served_values_unchanged_vs_retired_720_scan(self):
-        """Serving with the closed-form reach vs the retired 720-scan reach
-        agrees within `WP1_SERVED_CONVERGED_BAR` -- the "unchanged relative
-        to HEAD" claim.  At these saddle gammas the 720-scan is already
-        converged, so the served values coincide to ~machine precision."""
-        sur = _sad_surrogate_ship()
-        worst_mag = worst_phase = worst_reach_rel = 0.0
-        for config in WP1_SERVED_CONFIGS:
-            coarse_reach, _ = _wp1_caustic_radius_max(
-                config['gamma'], 0.0, WP1_COARSE_SCAN_N)
-            closed_reach = surrogate_module._caustic_reach(config['gamma'])
-            worst_reach_rel = max(
-                worst_reach_rel,
-                abs(coarse_reach - closed_reach) / closed_reach)
-            f_closed, _ = _wp1_serve_with_reach(sur, config, None)
-            f_720, served = _wp1_serve_with_reach(sur, config, coarse_reach)
-            self.assertTrue(served)
-            d_mag, d_phase = _wp1_served_deviation(f_closed, f_720)
-            worst_mag = max(worst_mag, d_mag)
-            worst_phase = max(worst_phase, d_phase)
-            with self.subTest(config=config):
-                self.assertLess(d_mag, WP1_SERVED_CONVERGED_BAR)
-                self.assertLess(d_phase, WP1_SERVED_CONVERGED_BAR)
-            self.n_checks += 1
-        print(f'\n[WP1] served closed-vs-720: max d|F|_rel {worst_mag:.2e}, '
-              f'max dphase {worst_phase:.2e}; worst reach rel-delta '
-              f'{worst_reach_rel:.2e}.')
+    def test_macro_saddle_far_field_remains_exact_only(self):
+        self.n_checks += 1
+        self.assertIsNone(_sad_surrogate_ship(),
+                          'macro-saddle far field must bypass the surrogate')
 
     def test_positive_parity_ignores_caustic_geometry(self):
-        """A positive-parity served value is BYTE-identical whether
-        `ppgo_map.caustic_geometry` is real or poisoned -- proving the
-        positive serve coordinate (`geometry.r_caustic`) never reaches the
-        WP1-changed reach, so WP1 cannot alter positive served values."""
+        """Positive charts remain independent of the saddle reach helper."""
         sur = _pos_surrogate_ship()
-        config = dict(gamma=CROWN_LENS['gamma'], y1=CROWN_LENS['y1'],
-                      y2=CROWN_LENS['y2'])
-        f_real, served_real = _wp1_serve_with_reach(sur, config, None)
-        self.assertTrue(served_real, msg='positive crown config did not serve')
+        chart = sur.charts[0]
+        gamma, s, d = chart.gamma_grid[2], chart.s_grid[2], chart.d_grid[2]
+        y1, y2 = surrogate_module._from_farfield_smooth(
+            float(gamma), float(s), float(d), chart.arc_map, chart.arc_map.branch)
 
         def _poison(*_args, **_kwargs):
-            raise AssertionError('positive serve path must not call '
-                                 'caustic_geometry')
+            raise AssertionError('positive far-field serve must not call caustic_geometry')
 
         with mock.patch.object(ppgo_map, 'caustic_geometry', _poison):
-            f_poison, served_poison = _reconstruct_via_surrogate(
-                sur, WP1_SERVED_W, config['gamma'], config['y1'],
-                config['y2'], 0.0)
-        self.assertTrue(served_poison)
-        self.assertEqual(f_real.tobytes(), f_poison.tobytes(),
-                         msg='positive served value changed when '
-                             'caustic_geometry was poisoned')
-        self.n_checks += 1
-
-    def test_full_served_reconstruction_is_reach_call_free(self):
-        """Spec (b) at the served-lnlike level: ONE full served
-        reconstruction issues at most `WP1_FULL_SERVED_CRITICAL_POINT_MAX`
-        `critical_point` calls (the reach path contributes ZERO; the former
-        720-scan contributed 1440); report the served wall time."""
-        sur = _sad_surrogate_ship()
-        config = WP1_SERVED_CONFIGS[1]
-        original = geometry.critical_point
-        counter = {'n': 0}
-
-        def counting(*args, **kwargs):
-            counter['n'] += 1
-            return original(*args, **kwargs)
-
-        with mock.patch.object(geometry, 'critical_point', counting):
-            counter['n'] = 0
             _f, served = _reconstruct_via_surrogate(
-                sur, WP1_SERVED_W, config['gamma'], config['y1'],
-                config['y2'], 0.0)
-            full_calls = counter['n']
-            counter['n'] = 0
-            surrogate_module._caustic_reach(config['gamma'])
-            reach_calls = counter['n']
-        self.assertTrue(served)
-        self.assertEqual(reach_calls, 0,
-                         msg='reach path issued critical_point calls')
-        self.assertLessEqual(
-            full_calls, WP1_FULL_SERVED_CRITICAL_POINT_MAX,
-            msg=f'served reconstruction issued {full_calls} critical_point '
-                f'calls (> O(10)); the reach path was expected call-free')
-        start = time.perf_counter()
-        for _ in range(10):
-            _reconstruct_via_surrogate(
-                sur, WP1_SERVED_W, config['gamma'], config['y1'],
-                config['y2'], 0.0)
-        served_ms = (time.perf_counter() - start) / 10 * 1e3
-        print(f'\n[WP1] full served reconstruction: {full_calls} '
-              f'critical_point calls (reach path {reach_calls}); ~{served_ms:.2f} '
-              f'ms/serve (report only, not a timing gate; ~3 ms fast-path '
-              f'target).')
+                sur, WP1_SERVED_W, float(gamma), float(y1), float(y2), 0.0)
         self.n_checks += 1
+        self.assertTrue(served)
 
 class Wp1SelfFalsificationTestCase(SurrogateTestCase):
     """The WP1 gates can go RED: each teeth-check deliberately breaks one
@@ -4102,24 +3776,10 @@ class Wp1SelfFalsificationTestCase(SurrogateTestCase):
         self.n_checks += 1
 
     def test_served_comparison_catches_a_reach_error(self):
-        """A reach error of `WP1_SERVED_REACH_RED_FRAC` moves the served
-        value ABOVE `WP1_SERVED_CONVERGED_BAR`, so the served-unchanged gate
-        would fail on a genuine reach regression."""
-        sur = _sad_surrogate_ship()
-        config = WP1_SERVED_CONFIGS[1]
-        f_closed, served = _wp1_serve_with_reach(sur, config, None)
-        self.assertTrue(served)
-        closed_reach = surrogate_module._caustic_reach(config['gamma'])
-        f_wrong, served_w = _wp1_serve_with_reach(
-            sur, config, closed_reach * (1.0 + WP1_SERVED_REACH_RED_FRAC))
-        self.assertTrue(served_w)
-        d_mag, _d_phase = _wp1_served_deviation(f_closed, f_wrong)
-        self.assertGreater(
-            d_mag, WP1_SERVED_CONVERGED_BAR,
-            msg=f'a {WP1_SERVED_REACH_RED_FRAC:.0e} reach error moved the '
-                f'served |F| by only {d_mag:.2e} (<= bar); the served gate '
-                f'would be vacuous')
+        """A saddle reach perturbation has no surrogate route to corrupt."""
         self.n_checks += 1
+        self.assertIsNone(_sad_surrogate_ship(),
+                          'saddle reach needs no far-field-chart mutation test')
 
     def test_oracle_validation_catches_a_transcription_slip(self):
         """The stage-1 oracle gate has teeth: a sign-flipped caustic point

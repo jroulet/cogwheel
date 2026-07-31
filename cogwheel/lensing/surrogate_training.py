@@ -61,6 +61,7 @@ from cogwheel.lensing.surrogate import (
     _REFUSAL_ERRORS, _log_w_grid, _uniform_axis,
     _caustic_reach as _scalar_caustic_reach, _from_caustic_fixed,
     _from_lobe_fixed, _lobe_boundary_radius, LobeInteriorChart,
+    _caustic_arclength_map, _to_farfield_smooth,
     CarrierDiscontinuityError)
 
 #: Engine refusals treated conservatively as "do not serve here" during
@@ -2564,6 +2565,180 @@ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
     return chart, calls, refused
 
 
+def _saddle_arc_branch(gamma: float, nearest) -> int:
+    """Square-root branch of the deltoid edge a nearest foot sits on.
+
+    For a macro saddle (``abs(gamma) > 1``) the critical curve has two
+    deltoid lobes, each traced by both square-root branches; a nearest foot
+    returned by `geometry.nearest_caustic_point` therefore belongs to a
+    specific ``+-1`` branch.  Recover it by rebuilding the foot on each
+    branch (`geometry.critical_point`) and picking the one that reproduces
+    the nearest-point source position; the caller uses the branch to build
+    the one-edge arc-length map.  Positive parity is never routed here (its
+    branch is always ``+1``).
+    """
+    best_branch, best_err = 1, math.inf
+    target = np.asarray(nearest.source, dtype=float)
+    for branch in (1, -1):
+        try:
+            foot = np.asarray(
+                geometry.critical_point(float(gamma), float(nearest.theta),
+                                        0.0, 0.0, branch).source, dtype=float)
+        except geometry.LensDomainError:
+            continue
+        err = float(np.hypot(*(foot - target)))
+        if err < best_err:
+            best_err, best_branch = err, branch
+    return best_branch
+
+
+def _farfield_box_to_smooth(*, gamma_band: tuple[float, float],
+                            box_center: tuple[float, float],
+                            half: tuple[float, float]
+                            ) -> tuple[float, float, int,
+                                       tuple[float, float],
+                                       tuple[float, float]]:
+    """Map a caustic-fixed exterior tile to a far-field-smooth ``(s, d)`` box.
+
+    Bridges the production tiler -- which lays out exterior far-field tiles
+    in caustic-fixed ``(rho, theta_c)`` -- to the far-field-smooth ``(s, d)``
+    coordinate the chart now interpolates in (Build 1e-farfield WP2).  The
+    ``(rho, theta_c)`` box boundary is sampled; each sample is mapped to a
+    physical eigenframe source (`_from_caustic_fixed`) and thence to its
+    nearest caustic foot (`geometry.nearest_caustic_point`), whose
+    critical-curve polar angle ``theta*`` and square-root ``branch`` define
+    the exterior arc.  The arc-length map is built over
+    ``[min theta*, max theta*]`` and every sample is pushed through the SAME
+    serve map (`_to_farfield_smooth`) the chart uses, so the returned
+    ``(s_range, d_range)`` bound the tile in the coordinate the grid lives in.
+    Train and serve share ONE arc-length map, so the mapping is internally
+    consistent by construction: a query source inside the tile maps (via the
+    identical serve map) into the trained ``(s, d)`` box, and the only
+    failure mode of an imperfect bounding box is over-refusal (coverage
+    loss), never a wrong served value.
+
+    Sampling spans the band endpoints and midpoint in ``gamma`` and both
+    radial edges of the box, so the arc and the ``(s, d)`` extent cover the
+    whole band rather than a single representative gamma (a
+    representative-gamma arc over-refuses at the band edges, Professor
+    ruling).
+
+    Parameters
+    ----------
+    gamma_band : tuple[float, float]
+        The chart's ``(gamma_lo, gamma_hi)`` shear band.
+    box_center : tuple[float, float]
+        Caustic-fixed tile centre ``(rho_c, theta_c)``.
+    half : tuple[float, float]
+        Caustic-fixed tile half-widths ``(half_rho, half_theta_c)``.
+
+    Returns
+    -------
+    tuple
+        ``(arc_theta_lo, arc_theta_hi, branch, s_range, d_range)`` -- the
+        eigenframe caustic polar-angle arc endpoints, its square-root branch,
+        and the far-field-smooth spatial axis bounds ``(low, high)``.
+
+    Raises
+    ------
+    CarrierDiscontinuityError
+        If the tile cannot be charted as a single cusp-free exterior arc: its
+        boundary samples disagree on the caustic branch/lobe (a macro-saddle
+        tile straddling the inter-deltoid medial axis), the arc spans a
+        caustic cusp at the representative gamma (`_caustic_arclength_map`
+        non-monotone), or too few boundary samples admit a well-defined foot
+        (medial-axis ambiguity).  The caller records a ladder-served gap and
+        defers to the exact engine -- the conservative outcome, never a wrong
+        served value.
+    """
+    gamma_lo, gamma_hi = float(gamma_band[0]), float(gamma_band[1])
+    gamma_mid = 0.5 * (gamma_lo + gamma_hi)
+    gamma_samples = sorted({gamma_lo, gamma_mid, gamma_hi})
+    rho_c, theta_c = float(box_center[0]), float(box_center[1])
+    half_rho, half_theta = float(half[0]), float(half[1])
+    rho_edges = (rho_c - half_rho, rho_c + half_rho)
+    theta_samples = np.linspace(theta_c - half_theta, theta_c + half_theta, 5)
+
+    # Foot angle + branch of every boundary sample, on each gamma slice.
+    thetas: list[float] = []
+    branches: set[int] = set()
+    feet: list[tuple[float, float, float]] = []  # (gamma, y1, y2)
+    for gamma in gamma_samples:
+        astroid = abs(gamma) < 1.0
+        for rho in rho_edges:
+            for theta_c_sample in theta_samples:
+                y1, y2 = _from_caustic_fixed(gamma, rho, float(theta_c_sample))
+                nearest = geometry.nearest_caustic_point(
+                    gamma, 0.0, np.array([y1, y2]), kappa=0.0)
+                branch = 1 if astroid else _saddle_arc_branch(gamma, nearest)
+                branches.add(int(branch))
+                thetas.append(float(nearest.theta))
+                feet.append((gamma, y1, y2))
+
+    if len(branches) != 1:
+        raise CarrierDiscontinuityError(
+            'Far-field exterior tile straddles more than one caustic '
+            f'branch/lobe (branches={sorted(branches)}); it cannot be charted '
+            'as a single arc-length map. Recorded as a ladder-served gap.')
+    branch = branches.pop()
+
+    # Unwrap the [0, 2*pi) foot angles into one contiguous window so an arc
+    # that crosses the 0/2*pi seam (or lives in a [-pi/2, 0] astroid window)
+    # is represented as a single monotone interval.
+    reference = thetas[0]
+    unwrapped = [theta + 2.0 * np.pi
+                 * round((reference - theta) / (2.0 * np.pi))
+                 for theta in thetas]
+    arc_theta_lo = float(min(unwrapped))
+    arc_theta_hi = float(max(unwrapped))
+    if not arc_theta_hi - arc_theta_lo > 1e-9:
+        raise CarrierDiscontinuityError(
+            'Far-field exterior tile subtends a degenerate caustic arc '
+            f'(span {arc_theta_hi - arc_theta_lo:.3g}); recorded as a '
+            'ladder-served gap.')
+
+    # Build the arc-length map on the SAME gamma grid the chart will use, and
+    # push every sample through the serve map to bound the (s, d) box.  A cusp
+    # inside the arc makes the map non-monotone (ValueError); a medial-axis or
+    # cross-branch sample refuses (LensDomainError) -- both are recorded gaps.
+    try:
+        arc_map = _caustic_arclength_map(
+            np.asarray(gamma_samples, dtype=float), arc_theta_lo,
+            arc_theta_hi, branch)
+    except (ValueError, geometry.LensDomainError) as exc:
+        raise CarrierDiscontinuityError(
+            'Far-field exterior arc spans a caustic cusp or leaves the '
+            f'caustic domain ({exc}); recorded as a ladder-served gap.'
+        ) from exc
+
+    s_values: list[float] = []
+    d_values: list[float] = []
+    for gamma, y1, y2 in feet:
+        try:
+            s, d = _to_farfield_smooth(gamma, y1, y2, arc_map, branch)
+        except (ValueError, geometry.LensDomainError):
+            # An individual sample with an ambiguous / off-arc foot does not
+            # constrain the box; serve refuses it identically (coordinate
+            # consistency), so drop it from the range but keep charting.
+            continue
+        s_values.append(s)
+        d_values.append(d)
+
+    if len(s_values) < 2:
+        raise CarrierDiscontinuityError(
+            'Far-field exterior tile has too few boundary samples with a '
+            'well-defined caustic foot (medial-axis ambiguity); recorded as '
+            'a ladder-served gap.')
+
+    s_range = (float(min(s_values)), float(max(s_values)))
+    d_range = (float(min(d_values)), float(max(d_values)))
+    if not (s_range[1] > s_range[0] and d_range[1] > d_range[0]):
+        raise CarrierDiscontinuityError(
+            'Far-field exterior tile maps to a degenerate (s, d) box '
+            f'(s={s_range}, d={d_range}); recorded as a ladder-served gap.')
+    return arc_theta_lo, arc_theta_hi, branch, s_range, d_range
+
+
 def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
                           box_center: tuple[float, float],
                           half: tuple[float, float],
@@ -2571,16 +2746,22 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
                           definition: str = FARFIELD_KERNEL_SUM,
                           w_nodes_per_decade: int | None = None
                           ) -> tuple[FarFieldChart, int, int]:
-    """Build one far-field chart in caustic-fixed ``(rho, theta_c)``
-    coordinates.
+    """Build one far-field chart in far-field-smooth ``(s, d)`` coordinates.
 
-    ``box_center`` is ``(rho_center, theta_c_center)`` and ``half`` is
-    ``(half_rho, half_theta_c)``; the chart is trained on the axis-aligned
-    caustic-fixed box ``rho in [rho_c +- half_rho]`` x
-    ``theta_c in [theta_c +- half_theta_c]`` via the migrated `from_engine`
-    trainer, which maps each ``(gamma, rho, theta_c)`` node to a physical
-    eigenframe source through the SAME piecewise caustic-fixed inverse the
-    serve side uses (`_from_caustic_fixed`).
+    The production tiler lays out exterior far-field tiles in caustic-fixed
+    ``(rho, theta_c)``; ``box_center`` is ``(rho_center, theta_c_center)`` and
+    ``half`` is ``(half_rho, half_theta_c)``.  Since Build 1e-farfield WP2 the
+    chart no longer interpolates in ``(rho, theta_c)`` but in the far-field-
+    smooth coordinate ``(s, d)`` -- caustic ARC LENGTH ``s`` (tangential) and
+    SIGNED perpendicular distance ``d`` (radial, ``+`` outside / ``-`` inside)
+    -- with a gamma-resolved arc-length map (`_caustic_arclength_map`).  This
+    builder therefore BRIDGES the ``(rho, theta_c)`` tile to an ``(s, d)`` box
+    plus its exterior arc (`_farfield_box_to_smooth`) and calls the migrated
+    `LensAmplificationSurrogate.from_engine`, which maps each ``(gamma, s, d)``
+    node back to a physical eigenframe source through the SAME serve inverse
+    (`_from_farfield_smooth`).  Train and serve share one arc-length map, so
+    the coordinate is internally consistent and an imperfect ``(s, d)`` bound
+    can only over-refuse (coverage loss), never serve a wrong value.
 
     ``definition`` selects the envelope label the chart is trained on: the
     default far-field kernel-sum label for EXTERIOR tiles, or the interior
@@ -2591,27 +2772,76 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
     a tile that straddles a critical-basin flip raises
     `CarrierDiscontinuityError` (the caller subdivides).
 
+    A tile that cannot be charted as a single cusp-free exterior arc -- its
+    boundary straddles two caustic branches/lobes (a macro-saddle tile across
+    the inter-deltoid medial axis), the arc spans a cusp, or its feet are
+    medial-axis ambiguous -- also raises `CarrierDiscontinuityError`, so the
+    existing caller path records it as a ladder-served gap and defers to the
+    exact engine at serve.
+
     ``w_nodes_per_decade`` overrides the ``w``-axis node density for THIS chart
     only (Build S1-3); ``None`` falls back to ``config.w_nodes_per_decade``.
     The per-window node-reprovision routine (`_reprovision_w_nodes`) passes the
     minimal density ``N_rec`` that still clears the held-out eps bar so a
     windowed exterior tile carries just enough ``w`` nodes -- the spatial
-    ``(n_gamma, n_rho, n_theta_c)`` density is untouched.
+    ``(n_gamma, n_s, n_d)`` density is untouched.
+
+    Notes
+    -----
+    Parity coverage (Build 1e-farfield WP2).  The astroid (``parity == 1``)
+    bridge is single-arc by construction: the astroid is a single
+    origin-enclosing caustic, so its cusp-aligned exterior/interior tiles map
+    cleanly to a fold-adapted ``(s, d)`` box whose ``d`` has one sign (``> 0``
+    exterior, ``< 0`` interior).
+
+    The macro-saddle (``parity != 1``) far-field exterior is
+    conservatively REFUSED here (raises `CarrierDiscontinuityError`, recorded
+    as a ladder-served gap served by the exact engine).  A macro saddle's
+    exterior is charted origin-centred (`_from_caustic_fixed` uses a scalar
+    additive reach), but the far-field-smooth ``d`` is the signed distance to
+    the nearest DELTOID FOLD; for the two disconnected deltoids those two
+    notions of "outside" DISAGREE -- a radially-exterior saddle tile maps to a
+    ``(s, d)`` box straddling ``d = 0``, so a `FARFIELD_KERNEL_SUM`
+    (exterior-only) label would be fitted across interior nodes and could
+    serve a wrong value.  A fold-adapted, per-deltoid-edge saddle exterior
+    chart is an owed redesign (OWED: Professor/Inspector -- macro-saddle
+    far-field in ``(s, d)``); until then saddle far-field is served exactly.
+    The astroid ``(s, d)`` path itself is UNVERIFIED by an in-build training
+    run; correctness rests on the train/serve coordinate identity above, and
+    any residual there is coverage, not accuracy.
     """
     nodes_per_decade = (config.w_nodes_per_decade
                         if w_nodes_per_decade is None
                         else int(w_nodes_per_decade))
     n_points = config.n_gamma * config.n_rho * config.n_theta_c
     _budget_check(n_points, config.engine_budget, 'farfield')
-    rho_c, theta_c = box_center
-    half_rho, half_theta = half
-    rho_range = (rho_c - half_rho, rho_c + half_rho)
-    theta_c_range = (theta_c - half_theta, theta_c + half_theta)
-    single = LensAmplificationSurrogate.from_engine(
-        gamma_range=gamma_band, rho_range=rho_range,
-        theta_c_range=theta_c_range, w_range=w_range,
-        n_gamma=config.n_gamma, n_rho=config.n_rho, n_theta=config.n_theta_c,
-        w_nodes_per_decade=nodes_per_decade, definition=definition)
+    if int(parity) != 1:
+        # Macro-saddle far-field: origin-centred rho and fold-adapted d
+        # disagree on "outside" (see Notes).  Refuse conservatively rather
+        # than fit an exterior label across interior nodes; the exact engine
+        # serves this region.  OWED: fold-adapted per-deltoid saddle chart.
+        raise CarrierDiscontinuityError(
+            'Macro-saddle far-field exterior has no fold-adapted (s, d) chart '
+            f'yet (parity={parity}); recorded as a ladder-served gap served '
+            'by the exact engine. See _build_farfield_chart Notes (owed '
+            'per-deltoid-edge redesign).')
+    arc_theta_lo, arc_theta_hi, arc_branch, s_range, d_range = \
+        _farfield_box_to_smooth(gamma_band=gamma_band, box_center=box_center,
+                                half=half)
+    # A cusp-spanning arc at a band-edge gamma escapes `from_engine` as a
+    # LensDomainError (the per-gamma-node cusp guard); surface it as the same
+    # ladder-served-gap signal the caller already handles.
+    try:
+        single = LensAmplificationSurrogate.from_engine(
+            gamma_range=gamma_band, s_range=s_range, d_range=d_range,
+            w_range=w_range, arc_theta_lo=arc_theta_lo,
+            arc_theta_hi=arc_theta_hi, arc_branch=arc_branch,
+            n_gamma=config.n_gamma, n_s=config.n_theta_c, n_d=config.n_rho,
+            w_nodes_per_decade=nodes_per_decade, definition=definition)
+    except geometry.LensDomainError as exc:
+        raise CarrierDiscontinuityError(
+            'Far-field exterior arc spans a caustic cusp at a band-edge gamma '
+            f'({exc}); recorded as a ladder-served gap.') from exc
     chart = single.charts[0]
     refused = int(chart.refused_points.shape[0])
     return chart, n_points, refused

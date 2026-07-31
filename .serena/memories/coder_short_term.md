@@ -1,5 +1,16 @@
 # Coder Short-Term Observations
 
+- WP1 farfield-port RESTORE (Build 1e): `git checkout refs/sdk/farfield_port_wip
+  -- cogwheel/lensing/ cogwheel/tests/ .claude/spec/DATA_CONTRACTS.yaml` laid
+  down the (s,d) FarFieldChart. 7 files restored (worktree == ref, empty diff):
+  surrogate.py, surrogate_census.py, surrogate_training.py, DATA_CONTRACTS.yaml,
+  + 3 already-ported tests (exterior_windows, farfield_envelope, surrogate_census).
+  import cogwheel.lensing.surrogate OK; pytest --collect-only == 1171, 0 errors.
+  NOTE reconstruct_farfield lives in chang_refsdal/channels.py:1106 (7 args incl
+  t_min), NOT surrogate.py. FarFieldChart.from_values is keyword-only w/ arc_map
+  (_FarFieldArcMap, REQUIRED) + gamma_grid/s_grid/d_grid axes. select_chart adds
+  y1_eig/y2_eig eigenframe kwargs. NO test body or impl edited by me — pure restore.
+
 - WP1 caustic_geometry (ppgo_map.py): replaced 2x720 polar sweep over
   geometry.critical_point with closed-form (lam,e) extremisation. Candidate
   u-set: e<1 -> {1-e,1+e}; e>1 -> {1+e, (-1+sqrt(4e^2-3))/2 if >0,
@@ -52,3 +63,6 @@
 - Diagnostic s_map_gamma_endpoint_dev recorded in the build_tube CLOSURE report
   dict (the actual build report), NOT in _build_tube_chart's return, to avoid
   changing its 3-tuple contract (test unpacks it at test_..._training.py:1043).
+
+- Arc-map contract fix (2026-07-31): FarFieldChart._assemble now validates and normalizes _FarFieldArcMap before storing it, so both construction and _chart_from_npz hard-refuse any map whose gamma_nodes are not byte-equal to the chart gamma_grid. The validator also requires finite/increasing gamma and theta axes, correctly shaped finite cumulative s_table rows anchored at exact zero and strictly increasing, and coherent branch/endpoints. Focused FarFieldArcMapValidationTestCase passed (3 tests).
+\n- 2026-07-31 far-field `(s, d)` port: old raw/caustic-fixed positive likelihood fixtures decline under current chart containment. Rebuild physical probes through `_from_farfield_smooth` at stored chart nodes. Macro-saddle far field is intentionally exact-engine-only; retain a non-vacuous exact-lnlike fallback pin. Node-exact far-field reconstruction across beta clears the existing 2e-9 label round-trip bar; broad tiny-chart cell midpoints are not a valid 1e-3 interpolation certificate (measured 31.55 down to 0.80).\n

@@ -321,16 +321,16 @@ def classify_fallthrough(
                 return 'cusp-window'
 
     # refusal-ball: a far-field chart blocked ONLY by its exclusion ball.
-    # The far-field containment/exclusion test is in the chart's caustic-fixed
-    # ``(rho, theta_c)`` axes (Build 8h-b3), so map the eigenframe source to
-    # those axes via the shared scalar-reach normalisation first.
-    rho, theta_c = _surrogate._to_caustic_fixed(gamma, y1_eig, y2_eig)
+    # The far-field containment/exclusion test is in the chart's far-field-
+    # smooth ``(s, d)`` axes (Build 1e-farfield WP2); `_farfield_serves` maps
+    # the eigenframe source to those axes at the query's OWN gamma through the
+    # chart's stored ``arc_map``, so pass the eigenframe source straight in.
     for chart in surrogate.charts:
         if isinstance(chart, _surrogate.FarFieldChart):
             relaxed = dataclasses.replace(chart, refused_points=_EMPTY_REFUSED)
             if _surrogate._farfield_serves(relaxed, gamma, log_w_min,
                                            log_w_max, eta, image_count,
-                                           rho, theta_c):
+                                           y1_eig, y2_eig):
                 return 'refusal-ball'
 
     return 'out-of-box'
@@ -403,7 +403,6 @@ def characterize_sample(
     log_w = np.log(w_grid)
     log_w_min, log_w_max = float(log_w.min()), float(log_w.max())
     y1_eig, y2_eig = _surrogate._rotate_to_eigenframe(y1, y2, 0.0)
-    rho, theta_c = _surrogate._to_caustic_fixed(gamma, y1_eig, y2_eig)
 
     record = SampleRecord(
         gamma=float(gamma), m_lens_msun=float(m_lens_msun), y1=float(y1),
@@ -430,7 +429,7 @@ def characterize_sample(
     chart = _surrogate.select_chart(
         surrogate.charts, gamma=gamma, log_w_min=log_w_min,
         log_w_max=log_w_max, eta=eta, theta=theta, image_count=image_count,
-        rho=rho, theta_c=theta_c)
+        y1_eig=y1_eig, y2_eig=y2_eig)
 
     if chart is not None:
         record.served = True

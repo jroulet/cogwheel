@@ -1,5 +1,39 @@
 # Test Dev Short-Term Observations
 
+- WP1 ((s,d) far-field coord RESTORE) PORT of test_lensing_exterior_admission.py:
+  the ONLY breakage was Gamma1BoxCentreGuardTestCase's `_build_guard_chart`
+  calling `from_engine(rho_range=,theta_c_range=,n_rho=,n_theta=)` -- retired
+  kwargs (new sig: gamma_range,s_range,d_range,w_range,arc_theta_lo/hi,arc_branch,
+  n_gamma/n_s/n_d). MEASURED (scratch): the 3 `_build_guard_chart` methods are
+  UNPORTABLE-without-changing-assertion (brief acceptance #3), NOT a mechanical
+  kwarg swap: (a) new from_engine builds ONE arc-length map over the whole
+  gamma grid + runs `_reject_if_cusp_spanning` PER gamma node BEFORE the node
+  loop; at gamma=1.0 both RAISE LensDomainError (det A=0 wall) which propagates
+  OUT of from_engine -> gamma=1.0 is NOT recorded in refused_points (refusal
+  moved to tiler's except in surrogate_training._build_farfield_chart -> ladder
+  gap). So no chart-with-refused-gamma=1.0-slab exists. (b) (s,d) is astroid-only:
+  _build_farfield_chart REFUSES parity!=1; _reject_if_cusp_spanning(1.3,arc)
+  raises (arc outside wedge |sin2th|<=1/gamma); parity==-1 saddle chart has no
+  (s,d) analogue. (c) teeth mocked sg._from_caustic_fixed, not on (s,d) path
+  (which uses _from_farfield_smooth). RESOLUTION: REMOVED the 3 methods
+  (test_box_centre_gamma_one_yields_none_labels /
+  test_node_at_gamma_one_is_recorded_refused /
+  test_guard_catches_lens_domain_error_specifically) + dead `_build_guard_chart`
+  helper + dead GUARD_*/GAMMA1_* consts; KEPT the 2 surviving methods
+  (test_caustic_reach_raises_only_exactly_at_one +
+  test_guard_is_stable_across_the_boundary_not_a_knife_edge) which exercise the
+  STILL-EXISTING scalar `_caustic_reach`/`_to_caustic_fixed`/`_from_caustic_fixed`
+  (WP1 did NOT remove them). Rewrote class docstring + added RETIRED note above
+  `_rcaustic_table`. NOTE: WP1 kept `_to_caustic_fixed` so the vectorized-vs-
+  scalar cross-check (`test_rho_map_vectorisation_matches_production` ~L862,
+  `_to_caustic_fixed_vec` vs sg._to_caustic_fixed) is NOT a farfield_smooth
+  oracle -> passed, no value finding. Round-trip/Jacobian tests (rho=1 on
+  caustic, drho/d|y|=1) ALSO pass (still on the scalar caustic-fixed coord, not
+  farfield). File 45->42 tests, 42 passed 3:13, 0 anti-vacuity. Neighbor suites
+  (test_lensing_surrogate/ppgo_bandsplit/surrogate_census) STILL use retired
+  rho_range from_engine API -> pre-broken by WP1, owned by OTHER runs, NOT
+  touched/run (my change is test-only, cannot regress them).
+
 - WP1 (closed-form caustic reach+direction replaces 720-pt scan)
   test_lensing_surrogate.py OWNED suite (served-values + cost claim): appended
   ~530 lines, 6 classes + 3 helpers + WP1_* constants before __main__. KEY
@@ -239,3 +273,12 @@
   literal to shift); tightest gate exterior_windows:783 places=12 is SELF-
   referential (both sides = same rewritten fn). Ran ghost 31p/1xf 4.2s +
   exterior_windows reach/caustic subset 14p 12s -> green. Nothing to fix.
+
+- Current WP1 far-field compatibility port (`test_lensing_surrogate.py`, `test_lensing_surrogate_lobe.py`): migrated the synthetic multi-chart fixture from retired `(rho, theta_c)` tensors to physical-box-derived `(s, d)` axes plus a gamma-resolved `_FarFieldArcMap`; mapped the stored physical refusal through the same serve map; changed `select_chart` / `_farfield_serves` calls to pass eigenframe source coordinates only. `ChartSelectionTestCase` 5 passed and `LobeExclusivityTestCase` 2 passed under `cogwheel-newlal` (only h5py HDF5 warning). The lobe golden chart’s old axis artifact/digest literals remain deliberately untouched pending Professor direction: current `(s,d,arc_map)` serialization necessarily changes that frozen artifact, so do not regenerate/weaken literals without approval.
+
+- Professor-directed lobe golden rebaseline (current `(s,d)` FarFieldChart): retained the incumbent analytic field as `_positive_physical_envelope(logw, gamma, y1_eig, y2_eig)`, deriving retired rho/theta from every physical point; sampled it at `(_POS_GAMMA_GRID, _POS_S_GRID, _POS_D_GRID)` inverse-map nodes on a gamma-resolved astroid map. Fixed source is off-grid exterior `(s,d)=(0.422949...,0.15)`, physical spline residual 5.46e-3 under 2e-2 bar. New frozen served hex and content digest `d5c81aaf...d80e388`; 11 focused lobe checks (golden + lobe exclusivity) passed in 18.50s. Added current schema/strict map/non-identical gamma rows, save/load bit fidelity, and current-schema node/map perturbation teeth tests.
+
+- Current far-field `(s,d)` test port: macro-saddle `FarFieldChart` is forbidden by DATA_CONTRACTS; synthetic multi-chart fixture now has positive Tube/FarField + saddle Tube only, and saddle far-field query asserts exact fallthrough. Domain refusal seam and serialization use chart `(gamma,s,d)` + gamma-resolved arc_map, no raw rho/theta. Professor beta oracle: compare Etilde(beta) bitwise to Etilde(q_hat, beta=0) for the actual floating rotated eigenframe source; separately bound q_hat-q_nominal from float64 rotation/orthogonality, never widen legacy 1e-12 envelope delta. Physical off-grid witness has F-normalized label error ~7.08 under the narrow one-foot chart, so the 1e-3 held-out assertion is held for Professor/production direction; do not lower it.
+
+
+- Professor-certified synthetic-chart separation: in `test_lensing_surrogate.py`, removed the obsolete `POS_RECON_TOL=0.2`/saddle `0.05` and the synthetic chart's held-out/refinement assertions (measured off-grid label eps ~7.083, not certifiable). The local `(s,d,arc_map)` fixture now explicitly covers only node-exact beta covariance, a fresh-engine node-label round trip (F-normalized <=2e-9; measured max 1.21e-9 across beta), domain/refusal, serialization, and macro-saddle exact fallthrough. Certified 1e-3 off-grid positive exterior held-out accuracy, node convergence/refinement, and real-coefficient corruption falsifier stay in `test_lensing_farfield_envelope.py` (`EXTERIOR_TILE_CENTER=(1.5,1.5) +/- .2`, gamma .02-.06). Focused node-label test passed under `cogwheel-newlal`; `py_compile` and collect-only passed (71 tests).

@@ -1,120 +1,75 @@
-# Build 1e-farfield-port — restore the (s,d) coordinate and make the suite green
+# Build 1e-farfield-port — finish the `(s, d)` test port
 
 ## Mission
 
-The far-field `(s, d)` coordinate is already IMPLEMENTED. It is preserved at
-the git ref `refs/sdk/coder_checkpoint` (commit `df176fdf`), written by a build
-that died before any test was authored. Restore it and port the construction
-sites the API change broke, until the full suite is green.
+Finish the existing port of far-field construction and selection sites to the
+implemented caustic-relative `(s, d)` API. This is a compatibility port, not a
+physics redesign: preserve each test's oracle and tolerance. It is a test-only
+build: set `is_test_only: true`, emit zero Coder WPs, and partition the listed
+existing test files into explicit disjoint Test Developer descriptions. Complete
+the Inspector and Professor review plus required fast verification, then leave
+the tree ready for the driver post-build full fast-suite gate.
 
-This build writes NO new acceptance tests. Those are the NEXT build
-(1e-farfield-accept). Splitting them is deliberate: the previous attempt
-bundled the port with 11 acceptance specs, and its Test Developer died twice at
-`error_max_turns` with zero output.
+## Current facts
 
-## Restore first — HALF THE PORT IS ALREADY DONE
-
-A previous attempt restored the implementation and ported three of the six test
-files before the watchdog killed it mid-escalation (F059, now fixed). That work
-is preserved. Start from it:
-
-    git checkout refs/sdk/farfield_port_wip -- \
-        cogwheel/lensing/ cogwheel/tests/ .claude/spec/DATA_CONTRACTS.yaml
-
-ALREADY PORTED — do not redo, but DO re-verify they still pass:
-    test_lensing_farfield_envelope.py, test_lensing_surrogate_census.py,
-    test_lensing_exterior_windows.py
-
-REMAINING:
-    test_lensing_exterior_admission.py
-    test_lensing_surrogate.py
-    test_lensing_surrogate_lobe.py
-    test_lensing_surrogate_training.py  <- SEE BELOW, this one is not optional
-
-## test_lensing_surrogate_training.py is IN scope (the last plan got this wrong)
-
-The previous plan scoped it out because the gate showed 0 failures there. Its
-tests are SKIPPED (gated tier), so they CANNOT fail — that is the whole reason
-the drift hook exists. Five classes reference the changed API and are silently
-broken:
-
-    ServeFractionTestCase             select_chart, from_values
-    EpsRegistrationGateTestCase       select_chart
-    SelfFalsificationTestCase         select_chart, from_values
-    ArcLengthBoundShiftMarginTestCase from_values
-    ArcLengthNodeEfficiencyTestCase   from_values
-
-Run `python .claude/hooks/check_gated_test_drift.py` with the port staged to
-get the current authoritative list; port every entry it names.
-
-Read the restored code before changing it. It is a real implementation, not a
-sketch: `_caustic_arclength_map` (gamma-RESOLVED, a 2-D `s(theta, gamma)` table
-on the spline's own gamma nodes), `_to_farfield_smooth` / `_from_farfield_smooth`,
-cusp-span and near-tied-foot rejection guards, and `_evaluate_chart` dispatching
-the far-field branch through `_to_farfield_smooth` at the query's OWN gamma.
-
-## Measured facts — the exact failure surface (2026-07-30, full gate)
-
-Collection is CLEAN at 1171. The code imports and the suite collects; it is the
-old construction sites that break.
-
-    59 failed, and every one is a construction-site failure:
-      68  TypeError    — FarFieldChart.from_values() / select_chart() signatures
-      58  AssertionError — anti-vacuity guards ("the test made zero
-                           comparisons"), i.e. a fixture could not BUILD, so
-                           the test body asserted nothing and the guard
-                           correctly refused to let it pass silently
-       0  numerical mismatches — nothing disagrees on a VALUE, anywhere
-
-    failures by file:
-      29  cogwheel/tests/test_lensing_surrogate.py
-       9  cogwheel/tests/test_lensing_surrogate_census.py
-       8  cogwheel/tests/test_lensing_exterior_windows.py
-       6  cogwheel/tests/test_lensing_surrogate_lobe.py
-       4  cogwheel/tests/test_lensing_farfield_envelope.py
-       3  cogwheel/tests/test_lensing_exterior_admission.py
-
-Zero numerical failures is the load-bearing fact: this is a PORT, not a
-physics repair. If a ported test fails on a VALUE, that is a real finding —
-stop and report it rather than adjusting the expectation.
+- Worktree source and test changes already equal
+  `refs/sdk/farfield_port_live` (`f587dc9`). Do **not** restore any older ref
+  and do not discard staged work.
+- That snapshot contains the restored implementation and the port of
+  `test_lensing_exterior_admission.py`, `test_lensing_exterior_windows.py`,
+  `test_lensing_farfield_envelope.py`, and
+  `test_lensing_surrogate_census.py`.
+- A later porter investigated `test_lensing_surrogate.py` but made no source
+  or test edit. `scratch_ff_probe*.py` are diagnostic artifacts only; do not
+  use them as test oracles and do not delete unrelated worktree files.
+- The prior build's lobe and training porters never ran: its Claude CLI message
+  reader failed, followed by an unreviewed Inspector loop. This is an SDK
+  interruption, not a code finding.
+- The changed API is real: `FarFieldChart.from_values` no longer accepts
+  `rho_grid`; `LensAmplificationSurrogate.from_engine` no longer accepts
+  `rho_range`; `select_chart` no longer accepts `rho`; the old top-level
+  `rho_grid` and `theta_c_grid` accessors are gone; and `_evaluate_chart` /
+  `_farfield_serves` have the new coordinate arguments.
+- Current gated-drift output is authoritative. It names skipped references in
+  the four already-touched files and in
+  `test_lensing_surrogate_training.py` and
+  `test_lensing_ppgo_bandsplit.py`; a passing ordinary fast tier cannot clear
+  those. Run `python .claude/hooks/check_gated_test_drift.py` against the
+  staged port and resolve every named stale reference.
+- The last full collection baseline was 1171. Any numerical value mismatch is
+  a finding: stop and report it rather than loosening a tolerance or changing
+  an oracle.
 
 ## Scope
 
-IN — port the ~60 construction/selection sites to the `(s, d)` API across those
-six files; keep each test's ORIGINAL claim intact (same oracle, same tolerance,
-same thing asserted); the `contracts_changelog.d/` fragment for the
-`DATA_CONTRACTS.yaml` change the restored code carries.
+IN: all remaining construction/selection call sites for the new far-field API,
+including `test_lensing_surrogate.py`,
+`test_lensing_surrogate_lobe.py`,
+`test_lensing_surrogate_training.py`,
+`test_lensing_ppgo_bandsplit.py`, and the specific skipped sites reported by
+the gated-drift check in already-touched suites. Keep the original test claim;
+only translate how its fixture constructs, projects, or selects a chart.
 
-OUT — the 11 acceptance tests (next build); any change to the restored
-coordinate implementation beyond what porting demands; tube charts; lobe
-charts; the `w` and `gamma` node measures; any training or engine sweep.
-
-If porting a site is impossible without changing what it asserts, that site is
-telling you something. Report it; do not weaken the assertion.
+OUT: new acceptance tests; any change to the `(s, d)` implementation except a
+demonstrated port blocker; coordinate-policy changes; chart retraining; engine
+or physics campaigns; slow accuracy/timing sweeps; unrelated scratch cleanup.
 
 ## Acceptance
 
-1. Full suite GREEN, 1171 collected, driver-verified post-build.
-2. No test's claim was weakened to achieve it. For every ported test, the
-   oracle and tolerance are unchanged; only the construction call changed.
-3. Any test that CANNOT be ported without changing its claim is reported
-   explicitly, with the reason, rather than edited into passing.
-4. `contracts_changelog.d/` fragment present with `bump:`;
-   `python scripts/render_fragments.py` run.
-5. No anti-vacuity guard is left tripped anywhere.
+1. Targeted changed-suite fast tests pass and no anti-vacuity guard remains.
+2. The gated-drift check is clean, or every still-named skipped test was run in
+   its own tier and acknowledged specifically—never blanket-bypassed.
+3. Existing numerical claims, reference oracles, and tolerances are unchanged.
+4. The `DATA_CONTRACTS.yaml` change has its required changelog fragment and
+   rendered generated outputs are current.
+5. The build review reaches a parseable clean verdict. The driver will run the
+   full 1171-collection fast gate afterward; slow tiers remain post-build only.
 
 ## Constraints
 
-- Branch `claude-dev`.
-- **Every domain-test description MUST name its target suite file**
-  (`test_<x>.py`) in its text. A description that names no file is routed to
-  cross-suite and, with several suites in play, is appended to every agent's
-  prompt without being counted by the shard cap or the `60 + 20*n` budget
-  (F057 — that is precisely how the previous attempt died).
-- Slow tiers stay empty in-build; fast tests only. Agents verify ONLY the
-  tests they changed; the driver runs the full tally once.
-- Assert VALUES, not code paths. No `git show HEAD` oracle (pre-commit
-  enforced) — note this build legitimately reads a git REF to restore source,
-  which is not an oracle; no TEST may read a ref.
-- Keep the WP count at or below 3. This build is a port; it does not need a
-  wide decomposition, and an over-wide plan will be rejected at the gate.
+- Branch `claude-dev`; preserve the current staged WIP and other users' files.
+- Keep the plan to at most three focused work packages. This is a port.
+- Test only files changed by a role, with small/synthetic fixtures. Do not run
+  slow sweeps or a bulk campaign inside the build.
+- No `git show HEAD` test oracle. A historical ref may establish restoration
+  provenance but must not participate in a committed test.

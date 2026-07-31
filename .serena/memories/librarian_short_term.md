@@ -1,3 +1,24 @@
+## 2026-07-31 far-field `(s, d)` port workflow closure
+
+Scope: documentation/spec closure only for the completed positive-parity
+1e-farfield compatibility port. The parent coordinate and collocation TODO
+fragments remain active because 1e-lobe and the eta/w/gamma node-measure
+substeps are still owed.
+
+Current-state sync: `lens_amplification_surrogate` records the required
+gamma-resolved fold-adapted `(s, d)` axes and far-field schema tag; the
+contract changelog fragment was already present in the worktree. Added the
+completion, specification, and public changelog fragments, then rendered all
+canonical outputs. `SPEC.md` now states that positive-parity far-field charts
+use the serialized arc map at load while legacy `(rho, theta_c)` remains only
+for tile proposal/admission; macro-saddle far-field remains exact-engine
+fall-through.
+
+Fragile cross-reference: the two parent TODO fragments both name 1e-farfield;
+update both together when substep state changes. `scripts/render_fragments.py`
+also carries an unrelated formatting repair that rewrites historical version
+entries in generated changelogs; preserve that coherent generated delta.
+
 ## 2026-07-30 post-commit sync (--post-commit 7f0d4bf)
 
 Scope: 9 pending commits from `.claude/sync_issues.json` (cb1ed99 through

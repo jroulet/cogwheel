@@ -35,21 +35,13 @@ section: Backlog
   - **Tube charts** (`_build_tube_chart`) — SHARED by the positive-parity
     astroid arcs and the macro-saddle deltoid arcs. Fixing `theta` here fixes
     both parities' tubes at once (F042 was a saddle tube at `gamma = 1.55`).
-  - **Far-field exterior charts** (`_build_farfield_chart`, both parities) —
-    the `rho` axis IS the caustic-relative coordinate the C8 redesign builds;
-    `theta_c` and node placement still need the treatment. The two parities'
-    exteriors are TOPOLOGICALLY DIFFERENT and already carry different radial
-    coordinates, so C8 and the node work must NOT assume the saddle mirrors the
-    astroid: the astroid encloses the origin (directional-MULTIPLICATIVE
-    `rho = |y| / r_caustic(theta_c)`, every ray hits once), while the two
-    saddle deltoids sit OFF-origin and enclose nothing, so a ray can miss both
-    lobes and there is no directional radius — the existing `_to_caustic_fixed`
-    uses a SCALAR ADDITIVE offset (`rho = 1 + |y| - reach`) on the saddle
-    exterior arm by design (F036). The quadrant fold (`['u1','u2']`) exploits
-    the reflection that swaps the two lobes, so only ONE deltoid is charted,
-    not two — but the folded lobe is still off-origin, so the fold removes the
-    DOUBLING, not the coordinate difference. Enumerate the saddle exterior
-    distinctly.
+  - **Far-field exterior charts** (`_build_farfield_chart`) — **1e-farfield
+    DONE (2026-07-31) for positive parity.** Their spline axes are the
+    gamma-resolved fold-adapted `(s, d)` coordinate: caustic arc length and
+    signed nearest-fold distance. The legacy caustic-fixed `(rho, theta_c)`
+    coordinates remain only for tile proposal and admission, not interpolation
+    or serving. Macro-saddle far-field charts deliberately remain exact-engine
+    fall-through until a per-deltoid-edge coordinate design is certified.
   - **Lobe-interior charts** (`_build_lobe_chart`, MACRO SADDLE ONLY) — a
     SEPARATE build path in lobe-local `(rho_lobe, theta_local)` on an
     axis-aligned box. `rho_lobe = |y - centroid| / r_deltoid` is already
@@ -150,9 +142,9 @@ section: Backlog
 
   - **1e-tube — blocks step 2.** The tube chart's `theta` axis, shared by both
     parities. This is the only piece step 2's tube-fraction sweep needs.
-  - **1e-farfield — blocks step 4.** The exterior charts' `rho`/`theta_c`
-    axes, per-parity, remembering the saddle's scalar-additive `rho` is a
-    different coordinate, not a mirror of the astroid's directional one.
+  - **1e-farfield — DONE (2026-07-31).** Positive-parity exterior charts
+    interpolate in gamma-resolved nearest-fold `(s, d)` coordinates; the
+    planned macro-saddle per-deltoid-edge design remains out of scope.
   - **1e-lobe — blocks only step 9.** `_build_lobe_chart`, macro-saddle only.
     Its lobe-local `theta_local` sweeps the wedge turnarounds, so it is also
     where `s = sqrt(theta_max - theta)` (F044) applies.
@@ -182,8 +174,8 @@ section: Backlog
 
   Only 1e-tube gates the next measurement, so the sequence is not blocked on
   all six landing. But step 9 IS: it names this fragment as a prerequisite,
-  and the spatial axes alone do not satisfy it. Order: 1e-farfield (gates
-  step 4) -> 1e-lobe -> steps 2-5 -> 1e-gamma (after C8) -> 1e-eta -> 1e-w ->
+  and the spatial axes alone do not satisfy it. With 1e-farfield complete,
+  order: 1e-lobe -> steps 2-5 -> 1e-gamma (after C8) -> 1e-eta -> 1e-w ->
   steps 6-8 -> step 9.
 
   Two acceptance items above belong to the whole 1e family, not to any one

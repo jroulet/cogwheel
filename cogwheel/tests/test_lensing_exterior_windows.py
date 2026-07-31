@@ -455,14 +455,16 @@ def _make_farfield_chart(envelope_definition: str, n: int = 4
     reconstruction accuracy (which is covered on real partitions elsewhere).
     """
     gamma_grid = np.linspace(0.35, 0.55, n)
-    rho_grid = np.linspace(1.2, 2.0, n)
-    theta_c_grid = np.linspace(-3.0, 3.0, n)
+    s_grid = np.linspace(0.5, 3.0, n)
+    d_grid = np.linspace(1.0, 4.0, n)
     log_w_grid = np.log(np.geomspace(3.0, 40.0, n))
+    arc_map = surrogate._caustic_arclength_map(gamma_grid, 0.2, 1.2, branch=1)
     values = np.ones((n, n, n, n), dtype=float)
     return surrogate.FarFieldChart.from_values(
-        gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
+        gamma_grid=gamma_grid, s_grid=s_grid, d_grid=d_grid,
         log_w_grid=log_w_grid, envelope_real=values, envelope_imag=0.2 * values,
-        image_count=2, parity=1, envelope_definition=envelope_definition)
+        arc_map=arc_map, image_count=2, parity=1,
+        envelope_definition=envelope_definition)
 
 
 def _lobe_local(lobe: 'st._SaddleLobeAdmission',
@@ -529,12 +531,17 @@ def _interior_chart(gamma: float, definition: str) -> 'surrogate.FarFieldChart':
     engine time and every gamma is probed by more than one test.
     """
     band = (gamma - SACRC_BAND_HALF, gamma + SACRC_BAND_HALF)
+    # Bridge the caustic-fixed (rho, theta_c) interior tile to the far-field-
+    # smooth (s, d) box + exterior arc the migrated from_engine now consumes
+    # (Build 1e-farfield), through the SAME production bridge the trainer uses.
+    arc_lo, arc_hi, branch, s_range, d_range = st._farfield_box_to_smooth(
+        gamma_band=band, box_center=(SACRC_RHO_C, 0.0),
+        half=(SACRC_HALF_RHO, SACRC_HALF_THETA))
     surro = surrogate.LensAmplificationSurrogate.from_engine(
-        gamma_range=band,
-        rho_range=(SACRC_RHO_C - SACRC_HALF_RHO, SACRC_RHO_C + SACRC_HALF_RHO),
-        theta_c_range=(-SACRC_HALF_THETA, SACRC_HALF_THETA),
-        w_range=SACRC_W_RANGE, n_gamma=SACRC_N_GAMMA, n_rho=SACRC_N_RHO,
-        n_theta=SACRC_N_THETA, w_nodes_per_decade=SACRC_WNPD,
+        gamma_range=band, s_range=s_range, d_range=d_range,
+        arc_theta_lo=arc_lo, arc_theta_hi=arc_hi, arc_branch=branch,
+        w_range=SACRC_W_RANGE, n_gamma=SACRC_N_GAMMA, n_s=SACRC_N_RHO,
+        n_d=SACRC_N_THETA, w_nodes_per_decade=SACRC_WNPD,
         definition=definition)
     return surro.charts[0]
 
@@ -578,7 +585,7 @@ def _interior_heldout_eps(chart: 'surrogate.FarFieldChart', gamma: float,
         if not np.all(np.isfinite(env)):
             continue
         image_count = int(np.asarray(part.real_mask).sum())
-        emul = surrogate._evaluate_chart(chart, g, rho, th, 0.1, 0.0, log_w)
+        emul = surrogate._evaluate_chart(chart, g, 0.1, 0.0, log_w, y1, y2)
         errs.append(float(np.max(np.abs(emul - env)) / den))
     return (max(errs) if errs else float('nan')), image_count
 
@@ -743,7 +750,6 @@ REAL_IMAGE_FIXTURES: tuple[dict, ...] = (
         'kernels': [('0x1.5b7c25343cddbp+0', '-0x1.0bd4892fa2195p-13'), ('0x1.9dc4b6a4eccbep-8', '-0x1.369416f5da0c0p-2')],
     },
 )
-
 
 
 class ExteriorWindowsTestCase(unittest.TestCase):
@@ -2203,8 +2209,9 @@ class WholeInteriorSacrcTestCase(ExteriorWindowsTestCase):
                 chart = _interior_chart(gamma, ch.INTERIOR_SACR_C)
                 self.assertEqual(chart.envelope_definition, ch.INTERIOR_SACR_C)
                 w = np.geomspace(*SACRC_W_RANGE, 8)
+                y1, y2 = surrogate._from_caustic_fixed(gamma, SACRC_RHO_C, 0.0)
                 env = surrogate._evaluate_chart(
-                    chart, gamma, SACRC_RHO_C, 0.0, 0.1, 0.0, np.log(w))
+                    chart, gamma, 0.1, 0.0, np.log(w), y1, y2)
                 self.assertTrue(np.all(np.isfinite(env)),
                                 'SACR-C interior envelope is non-finite')
                 self.assertGreater(float(np.max(np.abs(env))), 0.0)

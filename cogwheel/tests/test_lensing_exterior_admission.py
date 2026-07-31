@@ -215,39 +215,43 @@ SADDLE_ROUNDTRIP_TOL = 1e-12
 #: with slope IDENTICALLY 1, so ``rho - |y|`` is invariant up to a few ulp.
 SADDLE_JACOBIAN_ULP = 16.0
 
-#: Gamma range whose ARITHMETIC box centre ``0.5*(lo + hi)`` is exactly ``1.0``
-#: (the crash path guarded by `_box_region_labels`).
-GAMMA1_CENTRE_RANGE = (0.5, 1.5)
-
-#: Gamma range whose ``n = 4`` uniform axis lands a NODE exactly on
-#: ``gamma = 1.0`` (nodes ``1.0, 1.2, 1.4, 1.6``): the c28408b node-loop fix.
-GAMMA1_NODE_RANGE = (1.0, 1.6)
-
-#: Minimal exterior training box + ``w`` window for the cheap WP2b chart
-#: builds (~3.5 s each): exterior ``rho``, a modest ``theta_c`` slab, one decade.
-GUARD_RHO_RANGE = (1.05, 1.30)
-GUARD_THETA_C_RANGE = (0.3, 0.9)
-GUARD_W_RANGE = (1.0, 3.0)
-GUARD_N_NODES = 4
-GUARD_W_NODES_PER_DECADE = 4
-
-
-def _build_guard_chart(gamma_range: tuple[float, float]) -> 'sg.FarFieldChart':
-    """Build one cheap exterior far-field chart over ``gamma_range`` (WP2b).
-
-    These tests assert refusal BOOKKEEPING at the ``gamma = 1`` parity wall
-    (``image_count``/``parity``/``refused_points``).  The chart is coarse on
-    purpose; it no longer needs to bypass the carrier guard, which since F022
-    measures re/im increments rather than ``arg`` and so does not fire on the
-    amplitude nulls this box contains.
-    """
-    single = sg.LensAmplificationSurrogate.from_engine(
-        gamma_range=gamma_range, rho_range=GUARD_RHO_RANGE,
-        theta_c_range=GUARD_THETA_C_RANGE, w_range=GUARD_W_RANGE,
-        n_gamma=GUARD_N_NODES, n_rho=GUARD_N_NODES, n_theta=GUARD_N_NODES,
-        w_nodes_per_decade=GUARD_W_NODES_PER_DECADE,
-        definition=sg._FARFIELD_ENVELOPE_DEFINITION)
-    return single.charts[0]
+# ---------------------------------------------------------------------------
+# RETIRED (Build 1e-farfield WP1 -- (s, d) far-field coordinate restored).
+#
+# The three ``_build_guard_chart``-based tests that lived here asserted the
+# gamma = 1 parity-wall refusal BOOKKEEPING of the OLD caustic-fixed
+# ``(rho, theta_c)`` far-field CHART construction: a box spanning gamma = 1.0
+# survived, and the gamma = 1.0 node loop was recorded in the chart's
+# ``refused_points`` (a GUARD_N_NODES**2 slab), while the saddle box centre
+# yielded ``parity == -1`` labels.
+#
+# WP1 restored the far-field-smooth ``(s, d)`` coordinate.  Measured against
+# the restored production code, that bookkeeping mechanism is GONE and the
+# three tests are UNPORTABLE while keeping the SAME thing asserted (brief
+# acceptance #3 -- reported, NOT re-invented with a new claim):
+#
+#   * ``from_engine`` now builds ONE gamma-resolved arc-length map over the
+#     whole gamma grid and runs ``_reject_if_cusp_spanning`` per gamma node
+#     BEFORE the node loop.  At a gamma = 1.0 node both raise
+#     ``LensDomainError`` (``det A = 0`` parity wall) which PROPAGATES OUT of
+#     ``from_engine`` -- the wall is no longer recorded in ``refused_points``
+#     (the refusal moved to the tiler's ``except LensDomainError -> record a
+#     ladder-served gap`` in ``surrogate_training._build_farfield_chart``,
+#     covered by the training/windows suites).  So no chart with a refused
+#     gamma = 1.0 slab can be produced.
+#   * The (s, d) coordinate is astroid-only (positive parity).  Production
+#     ``_build_farfield_chart`` REFUSES ``parity != 1`` far-field exteriors
+#     outright, and ``_reject_if_cusp_spanning`` at a saddle gamma raises
+#     (arc outside the critical wedge |sin 2theta| <= 1/|gamma|).  The
+#     ``parity == -1`` saddle-chart assertion has no (s, d) analogue.
+#   * The teeth mocked ``sg._from_caustic_fixed``; the (s, d) build path uses
+#     ``sg._from_farfield_smooth`` instead.
+#
+# The SURVIVING scalar caustic-fixed coordinate primitives (``_caustic_reach``,
+# ``_to_caustic_fixed`` / ``_from_caustic_fixed``) still exist and STILL guard
+# the gamma = 1 parity wall; the two methods that exercise them directly are
+# kept below (``Gamma1BoxCentreGuardTestCase``).
+# ---------------------------------------------------------------------------
 
 
 def _rcaustic_table(gamma: float) -> tuple[np.ndarray, np.ndarray]:
@@ -414,15 +418,14 @@ WP1_CUSP_GAMMA_MID = 0.45
 #: Absolute tolerance (rad) on the cusp-ray / tile-edge geometry (DEFECT 1).
 CUSP_EDGE_TOL = 1e-9
 
-#: The centre gamma whose astroid cusp on the ``y1`` axis (``theta_c = 0``) is
-#: the SOURCE-plane ray of the ``test_lensing_surrogate`` positive-box RED
-#: config ``(gamma = 0.40, y1 = 2.183, y2 = 0)``.  With cusp-aligned exterior
-#: columns that ray becomes a tile EDGE, so the held-out probe no longer sits
-#: in a cell interior across the ``r_caustic`` slope kink -- the STRUCTURAL
-#: cause of the eps collapse (2.6e-1 -> ~1.5e-4).  The eps-VALUE green-check of
-#: `EnvelopeReconstructionTestCase.test_positive_box_reconstruction_within_budget`
-#: is owned by ``test_lensing_surrogate.py`` (a heavy reconstruction suite this
-#: run must not edit); here we certify only its mechanism.
+#: Historical centre gamma for the caustic-fixed cusp-ray failure.  That
+#: ``(rho, theta_c)`` fixture was retired with the far-field ``(s, d)`` port:
+#: its raw-angle kink is no longer an interpolation axis. Current-coordinate
+#: held-out value coverage is
+#: ``StraddlingTileTrainabilityTestCase.test_straddling_tile_trains_below_the_gate_under_new_label``
+#: in ``test_lensing_farfield_envelope.py``; its served-total companion is
+#: ``ServingMirrorAcrossDiagonalTestCase.test_reconstructed_F_matches_engine_across_the_diagonal``.
+#: Here we retain only the historical structural mechanism.
 ONCUSP_GAMMA = 0.40
 
 #: DEFECT 2 coverage-rises: the previously-dead high band, production tile
@@ -1043,14 +1046,24 @@ class SaddleRefusalAbsenceTestCase(ExteriorAdmissionTestCase):
 
 
 class Gamma1BoxCentreGuardTestCase(ExteriorAdmissionTestCase):
-    """WP2b: the ``gamma = 1`` parity wall is guarded, not a crash path.
+    """The ``gamma = 1`` parity wall is a named refusal of the scalar
+    caustic-fixed coordinate, not a crash path.
 
-    ``_caustic_reach(1.0)`` raises ``LensDomainError`` (the ``det A = 0`` parity
-    wall).  Chart construction must survive both a box whose CENTRE gamma is
-    exactly 1.0 (labels become ``None``) and a grid NODE that lands exactly on
-    1.0 (that node is recorded refused), and the guard must catch
-    ``LensDomainError`` SPECIFICALLY -- never a bare ``Exception`` that would
-    mask an unrelated failure as a benign refusal.
+    ``_caustic_reach(1.0)`` and ``_from_caustic_fixed(1.0, ...)`` raise
+    ``LensDomainError`` (the ``det A = 0`` parity wall) EXACTLY on the wall, and
+    a machine-scale step either side is served (finite, exterior).  These two
+    methods exercise the surviving scalar ``(rho, theta_c)`` primitives
+    directly.
+
+    NOTE (Build 1e-farfield WP1 (s, d) restore): the three former methods that
+    built a far-field CHART over a gamma range containing ``gamma = 1.0`` and
+    asserted its ``refused_points`` node-loop bookkeeping / ``parity == -1``
+    saddle labels were REMOVED as unportable -- the (s, d) ``from_engine``
+    RAISES ``LensDomainError`` out of its pre-node-loop arc-length-map build at
+    a ``gamma = 1.0`` node (the wall is no longer recorded in ``refused_points``;
+    the tiler records a ladder-served gap instead), and the (s, d) coordinate
+    charts no saddle far-field exterior.  See the RETIRED note above
+    ``_rcaustic_table`` for the full rationale.
     """
 
     def test_caustic_reach_raises_only_exactly_at_one(self) -> None:
@@ -1060,56 +1073,6 @@ class Gamma1BoxCentreGuardTestCase(ExteriorAdmissionTestCase):
         for gamma in (np.nextafter(1.0, 2.0), np.nextafter(1.0, 0.0)):
             self.assertTrue(math.isfinite(sg._caustic_reach(float(gamma))))
             self.record_comparison()
-
-    def test_box_centre_gamma_one_yields_none_labels(self) -> None:
-        lo, hi = GAMMA1_CENTRE_RANGE
-        # The arithmetic box centre must be bit-exactly 1.0 (the crash path).
-        self.assertEqual(0.5 * (lo + hi), 1.0)
-        chart = _build_guard_chart(GAMMA1_CENTRE_RANGE)
-        # Exact pair asserted so a refactor returning (0, 0) instead fails.
-        self.assertIs(chart.image_count, None)
-        self.assertIs(chart.parity, None)
-        self.record_comparison()
-
-    def test_node_at_gamma_one_is_recorded_refused(self) -> None:
-        lo, hi = GAMMA1_NODE_RANGE
-        # The n=4 uniform axis lands a node exactly on gamma = 1.0.
-        axis = np.linspace(lo, hi, GUARD_N_NODES)
-        self.assertIn(1.0, axis.tolist())
-        chart = _build_guard_chart(GAMMA1_NODE_RANGE)
-        refused = chart.refused_points
-        self.assertGreater(refused.shape[0], 0, 'no refused points recorded')
-        # Every gamma = 1.0 node (one full rho x theta_c slab) must be refused.
-        self.assertTrue(
-            bool(np.any(refused[:, 0] == 1.0)),
-            'the gamma = 1.0 node loop was not recorded refused '
-            '(regression of the c28408b node-loop fix)')
-        self.assertEqual(int(np.sum(refused[:, 0] == 1.0)),
-                         GUARD_N_NODES * GUARD_N_NODES)
-        # The saddle box centre (1.3) is a normal region -> real labels.
-        self.assertIsNotNone(chart.image_count)
-        self.assertEqual(chart.parity, -1)
-        self.record_comparison()
-
-    def test_guard_catches_lens_domain_error_specifically(self) -> None:
-        # Structural: only the named engine refusals are swallowed.
-        self.assertIn(geometry.LensDomainError, sg._REFUSAL_ERRORS)
-        self.assertNotIn(Exception, sg._REFUSAL_ERRORS)
-        self.assertNotIn(BaseException, sg._REFUSAL_ERRORS)
-        # Behavioural positive control: a LensDomainError at EVERY node is
-        # swallowed -> the build succeeds with all points refused.
-        with mock.patch.object(sg, '_from_caustic_fixed',
-                               side_effect=geometry.LensDomainError('planted')):
-            chart = _build_guard_chart(GAMMA1_NODE_RANGE)
-        self.assertEqual(chart.refused_points.shape[0],
-                         GUARD_N_NODES ** 3)
-        # Behavioural teeth: a NON-refusal exception must PROPAGATE, not be
-        # silently treated as a benign refusal.
-        with mock.patch.object(sg, '_from_caustic_fixed',
-                               side_effect=KeyError('boom')):
-            with self.assertRaises(KeyError):
-                _build_guard_chart(GAMMA1_NODE_RANGE)
-        self.record_comparison()
 
     def test_guard_is_stable_across_the_boundary_not_a_knife_edge(self) -> None:
         # WP2b(4): a machine-scale step off 1.0 is SERVED (finite reach, no
@@ -1429,14 +1392,14 @@ class BackwardCompatTilingTestCase(ExteriorAdmissionTestCase):
 class OnCuspColumnEdgeTestCase(ExteriorAdmissionTestCase):
     """DEFECT 1 on-cusp eps-drop MECHANISM (structural, in-scope).
 
-    The ``test_lensing_surrogate`` positive-box RED config
-    ``(gamma = 0.40, y1 = 2.183, y2 = 0)`` sits EXACTLY on the ``theta_c = 0``
-    cusp ray, where the caustic-fixed map has a slope kink the cubic spline
-    cannot represent when the ray falls in a cell interior (eps 2.6e-1).  With
-    cusp-aligned exterior columns the ray becomes a column EDGE, so the held-out
-    probe lands on a C2-safe node boundary (eps collapses to ~1.5e-4).  This
-    test certifies that structural cause; the eps-VALUE green-check of
-    `EnvelopeReconstructionTestCase` is owned by ``test_lensing_surrogate.py``.
+    The historical caustic-fixed positive-box RED config sat on the
+    ``theta_c = 0`` cusp ray, where the raw-angle spline kinked inside a cell.
+    The `(s, d)` port retires that chart claim; its current-coordinate
+    held-out value gates are
+    ``StraddlingTileTrainabilityTestCase.test_straddling_tile_trains_below_the_gate_under_new_label``
+    and ``ServingMirrorAcrossDiagonalTestCase.test_reconstructed_F_matches_engine_across_the_diagonal``
+    in ``test_lensing_farfield_envelope.py``. This test retains only the
+    historical structural mechanism.
     """
 
     def test_gamma040_y1_axis_cusp_is_a_column_edge(self) -> None:

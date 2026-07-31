@@ -158,7 +158,8 @@ section: Backlog
         coordinate system, before any measurement runs on it.
         ACCEPTANCE: held-out eps insensitive to a small arc-bound shift (F042
         knife-edge gone) — the property node placement alone cannot achieve.
-        SIX sub-builds, not three: 1e-tube (DONE), 1e-farfield, 1e-lobe cover
+        SIX sub-builds, not three: 1e-tube (DONE), 1e-farfield (DONE
+        2026-07-31), 1e-lobe cover
         the SPATIAL axis only. The `eta`, `w` and `gamma` node measures are
         equally part of step 9's prerequisite and were scheduled nowhere until
         2026-07-30; they are now 1e-eta, 1e-w and 1e-gamma in

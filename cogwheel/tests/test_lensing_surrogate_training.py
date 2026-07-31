@@ -580,11 +580,12 @@ _SERVE_REACH = surrogate_module._caustic_reach(
 def _serve_fixture() -> dict:
     """Build the synthetic tiled far-field chart set once.
 
-    One `FarFieldChart` per admitted tile of the low astroid stratum, each
-    covering exactly its tile box.  The charts' ``w`` grids are padded to
-    contain every in-stratum draw's whole band, so the serve/None decision is
-    dominated by the tile-box GEOMETRY -- which is the additive serving
-    contract under test.
+    Each candidate tile is either represented by one `FarFieldChart` or is
+    recorded as an explicit exact-engine gap when it cannot define a single
+    cusp-free smooth arc.  The charts' ``w`` grids are padded to contain every
+    in-stratum draw's whole band, so the serve/None decision is dominated by
+    the tile-box GEOMETRY -- which is the additive serving contract under
+    test.
 
     Tiles are now the caustic-fixed ``(rho, theta_c)`` ANNULUS
     `_farfield_tiles` returns (Build 8h-b3) -- production retired the raw
@@ -612,17 +613,36 @@ def _serve_fixture() -> dict:
     log_w_grid = np.log(np.geomspace(w_lo * 0.8, w_hi * 1.25, 4))
     gamma_grid = np.linspace(_SERVE_GAMMA_BAND[0], _SERVE_GAMMA_BAND[1], 4)
     charts = []
-    for (rho_c, theta_c), (half_rho, half_theta), _i, _j in tiles:
+    charted_tiles = []
+    exact_engine_gaps = []
+    for tile in tiles:
+        (rho_c, theta_c), (half_rho, half_theta), _i, _j = tile
+        try:
+            arc_theta_lo, arc_theta_hi, branch, s_range, d_range = \
+                training._farfield_box_to_smooth(
+                    gamma_band=_SERVE_GAMMA_BAND,
+                    box_center=(rho_c, theta_c),
+                    half=(half_rho, half_theta))
+        except surrogate_module.CarrierDiscontinuityError as exc:
+            # The current far-field chart is one cusp-free caustic arc.  A
+            # caustic-fixed tile that cannot define one therefore becomes a
+            # deliberate exact-engine gap, exactly as production records it.
+            exact_engine_gaps.append({'tile': tile, 'reason': str(exc)})
+            continue
+        arc_map = surrogate_module._caustic_arclength_map(
+            gamma_grid, arc_theta_lo, arc_theta_hi, branch)
         envelope = np.ones((4, 4, 4, 4))
         charts.append(FarFieldChart.from_values(
             gamma_grid=gamma_grid,
-            rho_grid=np.linspace(rho_c - half_rho, rho_c + half_rho, 4),
-            theta_c_grid=np.linspace(theta_c - half_theta,
-                                     theta_c + half_theta, 4),
+            s_grid=np.linspace(*s_range, 4),
+            d_grid=np.linspace(*d_range, 4),
             log_w_grid=log_w_grid, envelope_real=envelope,
             envelope_imag=envelope, image_count=2, parity=1,
-            eta_overlap_min=0.05))
-    return {'charts': charts, 'tiles': tiles, 'y_extent': y_extent,
+            eta_overlap_min=0.05, arc_map=arc_map))
+        charted_tiles.append(tile)
+    return {'charts': charts, 'candidate_tiles': tiles,
+            'charted_tiles': charted_tiles,
+            'exact_engine_gaps': exact_engine_gaps, 'y_extent': y_extent,
             'gamma_band': _SERVE_GAMMA_BAND, 'm_range': (m_lo, m_hi),
             'log_w_grid': log_w_grid, 'reach': _SERVE_REACH,
             'exclusion_rho': exclusion_rho, 'rho_outer': rho_outer}
@@ -680,24 +700,22 @@ class ServeFractionTestCase(_CountingTestCase):
     at >= 90%, outside-support draws return ``None`` 100% of the time."""
 
     def _serve(self, fixture: dict, draw: dict):
-        rho, theta_c = surrogate_module._to_caustic_fixed(
-            draw['gamma'], draw['y1'], draw['y2'])
         return select_chart(
             fixture['charts'], gamma=draw['gamma'],
             log_w_min=math.log(draw['band_lo']),
             log_w_max=math.log(draw['band_hi']),
             eta=5.0, theta=0.0, image_count=2,
-            rho=rho, theta_c=theta_c)
+            y1_eig=draw['y1'], y2_eig=draw['y2'])
 
     def test_inside_support_draws_serve_at_least_ninety_percent(self) -> None:
-        """Draws whose source lands in an admitted tile serve at >= 90%."""
+        """Draws in a charted candidate tile serve at >= 90%."""
         fixture = _serve_fixture()
         rng = np.random.default_rng(20240722)
         draws = _draw_support_samples(
             rng, 700, fixture['gamma_band'], fixture['m_range'])
         inside = [d for d in draws
                   if _point_in_tiles(d['y1'], d['y2'], d['gamma'],
-                                     fixture['tiles'])]
+                                     fixture['charted_tiles'])]
         self.assertGreater(len(inside), 50, 'too few inside draws to test')
         served = sum(self._serve(fixture, d) is not None for d in inside)
         fraction = served / len(inside)
@@ -714,15 +732,61 @@ class ServeFractionTestCase(_CountingTestCase):
         rng = np.random.default_rng(31415926)
         draws = _draw_support_samples(
             rng, 900, fixture['gamma_band'], fixture['m_range'])
-        outside = [d for d in draws
-                   if not _point_in_tiles(d['y1'], d['y2'], d['gamma'],
-                                          fixture['tiles'])]
-        self.assertGreater(len(outside), 5, 'too few interior-hole draws')
-        for draw in outside:
+        hole_draws = [
+            draw for draw in draws
+            if surrogate_module._to_caustic_fixed(
+                draw['gamma'], draw['y1'], draw['y2'])[0]
+            < fixture['exclusion_rho']]
+        self.assertGreater(len(hole_draws), 5, 'too few interior-hole draws')
+        for draw in hole_draws:
             with self.subTest(y1=round(draw['y1'], 3), y2=round(draw['y2'], 3)):
                 self.assertIsNone(
                     self._serve(fixture, draw),
-                    'an outside draw served (additive-contract violation)')
+                    'an interior-hole draw served (additive-contract violation)')
+                self.comparisons += 1
+
+    def test_discontinuous_tiles_are_recorded_exact_engine_gaps(self) -> None:
+        """Every candidate tile is charted or explicitly falls through.
+
+        A single far-field smooth chart owns one cusp-free arc.  Candidate
+        tiles that cannot establish such an arc must remain visible as named
+        exact-engine gaps, never be silently reclassified as interior-hole
+        samples or disappear from the coverage accounting.
+        """
+        fixture = _serve_fixture()
+        candidate_ids = {tile[2:] for tile in fixture['candidate_tiles']}
+        charted_ids = {tile[2:] for tile in fixture['charted_tiles']}
+        gap_ids = {record['tile'][2:]
+                   for record in fixture['exact_engine_gaps']}
+        self.assertTrue(gap_ids, 'fixture must exercise a discontinuous tile')
+        self.comparisons += 1
+        self.assertFalse(charted_ids & gap_ids,
+                         'a candidate cannot be both charted and a gap')
+        self.comparisons += 1
+        self.assertEqual(charted_ids | gap_ids, candidate_ids,
+                         'a candidate tile was silently dropped')
+        self.comparisons += 1
+        self.assertTrue(
+            all(record['reason'] for record in fixture['exact_engine_gaps']),
+            'every exact-engine gap must carry its discontinuity reason')
+        self.comparisons += 1
+
+        m_mid = math.sqrt(fixture['m_range'][0] * fixture['m_range'][1])
+        draw_band = {'gamma': 0.35, 'band_lo': _w_indep(20.0, m_mid),
+                     'band_hi': _w_indep(1024.0, m_mid)}
+        for record in fixture['exact_engine_gaps']:
+            (rho, theta), _half, tile_i, tile_j = record['tile']
+            y1, y2 = surrogate_module._from_caustic_fixed(
+                draw_band['gamma'], rho, theta)
+            draw = {**draw_band, 'y1': float(y1), 'y2': float(y2)}
+            with self.subTest(tile=(tile_i, tile_j)):
+                self.assertTrue(_point_in_tiles(
+                    y1, y2, draw_band['gamma'], fixture['candidate_tiles']))
+                self.assertFalse(_point_in_tiles(
+                    y1, y2, draw_band['gamma'], fixture['charted_tiles']))
+                self.assertIsNone(
+                    self._serve(fixture, draw),
+                    'an explicit exact-engine gap served through a chart')
                 self.comparisons += 1
 
     def test_beyond_box_draws_never_serve(self) -> None:
@@ -750,7 +814,7 @@ class ServeFractionTestCase(_CountingTestCase):
             draw = {**band, 'y1': float(y1), 'y2': float(y2)}
             # Defensive: the point is genuinely outside every tile box.
             self.assertFalse(
-                _point_in_tiles(y1, y2, gamma, fixture['tiles']))
+                _point_in_tiles(y1, y2, gamma, fixture['candidate_tiles']))
             self.assertIsNone(
                 self._serve(fixture, draw),
                 'a beyond-annulus draw served (additive-contract violation)')
@@ -1193,10 +1257,12 @@ class EpsRegistrationGateTestCase(_CountingTestCase):
                                  + healthy_chart.log_w_grid[-1]))
 
         def serve_at(center: tuple[float, float]):
+            y1_eig, y2_eig = surrogate_module._from_caustic_fixed(
+                0.35, *center)
             return select_chart(
                 registered, gamma=0.35, log_w_min=mid_log_w,
                 log_w_max=mid_log_w, eta=5.0, theta=0.0, image_count=2,
-                rho=center[0], theta_c=center[1])
+                y1_eig=y1_eig, y2_eig=y2_eig)
 
         self.assertIsNotNone(
             serve_at(fixture['healthy']['center']),
@@ -1793,37 +1859,42 @@ class SelfFalsificationTestCase(_CountingTestCase):
 
         The "hole" is the un-tiled disk ``rho < exclusion_rho`` around the
         origin (Build 8h-b3: `_farfield_tiles` tiles only the exterior
-        annulus).  The origin itself (``y1_eig = y2_eig = 0``) maps to
-        ``rho = 0`` at ANY ``gamma`` and an ARBITRARY ``theta_c`` (``atan2``
-        of a zero vector; caustic-fixed ``theta_c`` is undefined exactly at
-        the origin, so the bad chart's box must cover the FULL angular
-        range, not just a wedge, to genuinely "cover the hole").
+        annulus).  The probe is deliberately off the origin: its nearest
+        caustic foot is unique, so its current far-field-smooth ``(s, d)``
+        coordinate is defined rather than declining at the medial-axis tie.
         """
         fixture = _serve_fixture()
         log_w_grid = fixture['log_w_grid']
         gamma_grid = np.linspace(_SERVE_GAMMA_BAND[0], _SERVE_GAMMA_BAND[1], 4)
         envelope = np.ones((4, 4, 4, 4))
-        # A far-field chart whose box COVERS the un-tiled interior disk: all
-        # of rho in [0, 1.5 * exclusion_rho] (comfortably past the hole's
-        # outer edge) at every theta_c.
+        gamma = 0.35
+        hole_source = surrogate_module._from_caustic_fixed(
+            gamma, 0.5 * fixture['exclusion_rho'], 0.6)
+        arc_map = surrogate_module._caustic_arclength_map(
+            gamma_grid, 0.2, 1.2, branch=1)
+        hole_s, hole_d = surrogate_module._to_farfield_smooth(
+            gamma, *hole_source, arc_map, branch=1)
+        # A far-field chart whose smooth-coordinate box covers a source in
+        # the un-tiled interior hole.
         bad_chart = FarFieldChart.from_values(
             gamma_grid=gamma_grid,
-            rho_grid=np.linspace(0.0, 1.5 * fixture['exclusion_rho'], 4),
-            theta_c_grid=np.linspace(-math.pi, math.pi, 4),
+            s_grid=np.linspace(hole_s - 0.2, hole_s + 0.2, 4),
+            d_grid=np.linspace(hole_d - 0.2, hole_d + 0.2, 4),
             log_w_grid=log_w_grid, envelope_real=envelope,
             envelope_imag=envelope, image_count=2, parity=1,
-            eta_overlap_min=0.05)
+            eta_overlap_min=0.05, arc_map=arc_map)
         mid_log_w = float(0.5 * (log_w_grid[0] + log_w_grid[-1]))
         served = select_chart(
-            [bad_chart], gamma=0.35, log_w_min=mid_log_w, log_w_max=mid_log_w,
-            eta=5.0, theta=0.0, image_count=2, rho=0.0, theta_c=0.0)
+            [bad_chart], gamma=gamma, log_w_min=mid_log_w,
+            log_w_max=mid_log_w, eta=5.0, theta=0.0, image_count=2,
+            y1_eig=hole_source[0], y2_eig=hole_source[1])
         self.assertIsNotNone(
             served, 'a chart over the hole must serve the hole point')
         # And the honest fixture (hole not covered) must NOT serve it.
         clean = select_chart(
-            fixture['charts'], gamma=0.35, log_w_min=mid_log_w,
+            fixture['charts'], gamma=gamma, log_w_min=mid_log_w,
             log_w_max=mid_log_w, eta=5.0, theta=0.0, image_count=2,
-            rho=0.0, theta_c=0.0)
+            y1_eig=hole_source[0], y2_eig=hole_source[1])
         self.assertIsNone(clean, 'the honest fixture leaves the hole unserved')
         self.comparisons += 1
 
@@ -1848,10 +1919,11 @@ class SelfFalsificationTestCase(_CountingTestCase):
         center = fixture['poisoned']['center']
         mid_log_w = float(0.5 * (poisoned.log_w_grid[0]
                                  + poisoned.log_w_grid[-1]))
+        y1_eig, y2_eig = surrogate_module._from_caustic_fixed(0.35, *center)
         served = select_chart(
             [poisoned], gamma=0.35, log_w_min=mid_log_w, log_w_max=mid_log_w,
             eta=5.0, theta=0.0, image_count=2,
-            rho=center[0], theta_c=center[1])
+            y1_eig=y1_eig, y2_eig=y2_eig)
         self.assertIsNotNone(
             served, 'the poisoned window is live; only the gate removes it')
         self.comparisons += 1

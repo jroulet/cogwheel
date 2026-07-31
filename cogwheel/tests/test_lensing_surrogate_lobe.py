@@ -578,14 +578,11 @@ class LobeExclusivityTestCase(LobeTestCase):
         log_w = np.log(_W_ARRAY)
         for iy, y2 in enumerate(y2_axis):
             for ix, y1 in enumerate(y1_axis):
-                rho, theta_c = surrogate_module._to_caustic_fixed(
-                    _SERVE_GAMMA, float(y1), float(y2))
                 chart = surrogate_module.select_chart(
                     charts, gamma=_SERVE_GAMMA, log_w_min=float(log_w.min()),
                     log_w_max=float(log_w.max()), eta=_SERVE_ETA, theta=0.0,
                     image_count=surrogate_module._MACRO_SADDLE_IMAGE_COUNT,
-                    rho=rho, theta_c=theta_c, y1_eig=float(y1),
-                    y2_eig=float(y2))
+                    y1_eig=float(y1), y2_eig=float(y2))
                 if chart is chart_a:
                     served_id[iy, ix] = 1
                 elif chart is chart_b:
@@ -1336,8 +1333,9 @@ class EngineLobeSelfFalsificationTestCase(TestCase):
 # complex envelope bits and the saved-artifact content digest EQUAL the frozen
 # constants.  It imports nothing from HEAD, compares against no self-recomputed
 # oracle, and touches no engine -- so it stays meaningful across every future
-# refactor: a change in the far-field spline fit, the caustic-fixed source map
-# (`_to_caustic_fixed` / `_rotate_to_eigenframe`), the reconstruction, or the
+# refactor: a change in the far-field spline fit, the gamma-resolved smooth
+# source map (`_to_farfield_smooth` / `_rotate_to_eigenframe`), the
+# reconstruction, or the
 # npz record shape flips it RED with a frozen witness.
 #
 # The npz digest is taken over the LOADED array contents in sorted-key order
@@ -1352,13 +1350,26 @@ class EngineLobeSelfFalsificationTestCase(TestCase):
 #: decline on the parity guard band.
 _POS_GAMMA: float = 0.6
 
-#: Frozen synthetic far-field training axes.  ``rho_grid`` straddles the
-#: caustic (``rho = 1``); ``theta_c_grid`` spans the full ``(-pi, pi]`` circle;
-#: each axis has >= 4 nodes for the cubic tensor spline.
+#: Frozen current far-field axes.  ``s`` is arc length along one astroid arc
+#: and ``d > 0`` is its outward perpendicular coordinate.  They intentionally
+#: have unequal sizes and non-symmetric values so an old ``(rho, theta_c)``
+#: tensor cannot be relabelled into this fixture.
 _POS_GAMMA_GRID: np.ndarray = np.linspace(0.5, 0.7, 4)
-_POS_RHO_GRID: np.ndarray = np.linspace(0.2, 1.8, 5)
-_POS_THETA_C_GRID: np.ndarray = np.linspace(-np.pi, np.pi, 6)
+_POS_S_GRID: np.ndarray = np.array([0.05, 0.17, 0.32, 0.48, 0.63])
+_POS_D_GRID: np.ndarray = np.array([0.03, 0.08, 0.13, 0.23, 0.43, 0.62])
 _POS_LOG_W_GRID: np.ndarray = np.linspace(-2.0, 1.0, 4)
+
+#: Cusp-free positive-parity arc ending at (but never crossing) the ``pi``
+#: cusp.  The map rows are intentionally gamma-resolved rather than copied
+#: from a representative shear.
+_POS_ARC_THETA_LO: float = 2.4
+_POS_ARC_THETA_HI: float = np.pi
+_POS_ARC_BRANCH: int = 1
+
+#: The physical-oracle comparison is an interpolation claim, not the frozen
+#: bit claim.  This bar is deliberately looser than bit equality but tight
+#: enough to reject a raw-axis relabel or wrong physical coordinate map.
+_POS_PHYSICAL_ORACLE_RTOL: float = 2.0e-2
 
 #: Frozen region labels for the synthetic positive-parity chart (2-image
 #: exterior region, macro-image parity ``+1``).
@@ -1368,57 +1379,102 @@ _POS_PARITY: int = 1
 #: Frozen golden serve inputs (shear-frame source, orientation, caustic
 #: distance, gauge angle, frequencies).  ``eta`` sits above the default
 #: caustic floor so the far-field priority gate serves; ``theta`` is the gauge
-#: angle (far-field serve ignores it).  The source maps to caustic-fixed
-#: ``(rho ~ 1.233, theta_c ~ 0.118)`` -- comfortably inside the grid.
+#: angle (far-field serve ignores it).  Its eigenframe coordinate is the
+#: off-grid smooth point ``(s, d) ~= (0.423, 0.150)`` -- strictly inside the
+#: chart and on the exterior ``d > 0`` side of the caustic.
 _POS_BETA: float = 0.3
 _POS_ETA: float = 0.3
 _POS_THETA: float = 0.7
-_POS_Y1: float = 0.9
-_POS_Y2: float = 0.4
+_POS_Y1: float = 0.593338111837024
+_POS_Y2: float = 0.5084710618023962
 _POS_W_ARRAY: np.ndarray = np.array([0.6, 1.0, 1.7])
 
 #: Frozen golden served envelope, as exact ``float.hex()`` (real, imag) pairs
 #: so the fixture round-trips to the last bit and the comparison is BIT-EXACT.
 _POS_GOLDEN_ENVELOPE_HEX: tuple[tuple[str, str], ...] = (
-    ('0x1.254b15681a696p-1', '-0x1.dfc2fe33bb3a0p-2'),
-    ('0x1.08d197ebbefbap-1', '-0x1.c7dee836f60efp-2'),
-    ('0x1.dc586b9d027f6p-2', '-0x1.b0503c20aa997p-2'),
+    ('0x1.11863b3a8f20bp-2', '-0x1.a344ce6e63c10p-3'),
+    ('0x1.edf027978afc6p-3', '-0x1.8e63e50ea2764p-3'),
+    ('0x1.bc3cf4db0efabp-3', '-0x1.79cda085d4502p-3'),
 )
 
 #: Frozen SHA-256 content digest of the saved gamma<1 surrogate artifact
 #: (sorted-key hash of the loaded arrays; see the section note above).
 _POS_GOLDEN_NPZ_DIGEST: str = (
-    '581d1a355eca18ccdd5fc3da658f7cbc72f73388b4318b9a14dd1931d892a0b2')
+    'd5c81aaf3f860f1c53eacac61758f1c987d42eee066a5ba156ed14cdbd80e388')
 
 
-def _positive_golden_envelope() -> tuple[np.ndarray, np.ndarray]:
-    """Deterministic (real, imag) envelope tensor for the golden chart.
+def _positive_golden_arc_map() -> surrogate_module._FarFieldArcMap:
+    """Gamma-resolved smooth coordinate map for the frozen exterior chart."""
+    return surrogate_module._caustic_arclength_map(
+        _POS_GAMMA_GRID, _POS_ARC_THETA_LO, _POS_ARC_THETA_HI,
+        _POS_ARC_BRANCH)
 
-    A smooth analytic function of the four training axes -- reproduced here
-    VERBATIM from the one-shot generator so the fitted spline (and hence every
-    served bit) is fully determined by this file, not by any engine call.
+
+def _positive_physical_envelope(log_w: np.ndarray, gamma: float,
+                                y1_eig: float, y2_eig: float
+                                ) -> np.ndarray:
+    """The incumbent synthetic field ``E(logw, gamma, y1_eig, y2_eig)``.
+
+    Its definition remains the prior ``(rho, theta_c)`` analytic surface, but
+    those coordinates are DERIVED from each physical source.  Thus the field
+    is fixed in physical source coordinates while its current chart samples it
+    on ``(s, d)`` nodes.
     """
-    log_w = _POS_LOG_W_GRID[:, None, None, None]
-    gamma = _POS_GAMMA_GRID[None, :, None, None]
-    rho = _POS_RHO_GRID[None, None, :, None]
-    theta_c = _POS_THETA_C_GRID[None, None, None, :]
-    env_real = (np.cos(1.3 * theta_c + 0.7 * rho)
-                * np.exp(-0.2 * log_w) * (1.0 + 0.1 * gamma))
-    env_imag = (np.sin(0.9 * theta_c - 0.5 * rho)
-                * np.exp(-0.1 * log_w) * (0.8 + 0.2 * gamma))
-    return env_real, env_imag
+    rho, theta_c = surrogate_module._to_caustic_fixed(gamma, y1_eig, y2_eig)
+    log_w = np.asarray(log_w, dtype=float)
+    real = (np.cos(1.3 * theta_c + 0.7 * rho)
+            * np.exp(-0.2 * log_w) * (1.0 + 0.1 * gamma))
+    imag = (np.sin(0.9 * theta_c - 0.5 * rho)
+            * np.exp(-0.1 * log_w) * (0.8 + 0.2 * gamma))
+    return real + 1j * imag
+
+
+def _positive_golden_envelope(
+        arc_map: surrogate_module._FarFieldArcMap
+        ) -> tuple[np.ndarray, np.ndarray]:
+    """Sample the unchanged physical field on current ``(s, d)`` nodes."""
+    shape = (_POS_LOG_W_GRID.size, _POS_GAMMA_GRID.size,
+             _POS_S_GRID.size, _POS_D_GRID.size)
+    envelope = np.empty(shape, dtype=complex)
+    for gamma_index, gamma in enumerate(_POS_GAMMA_GRID):
+        for s_index, s in enumerate(_POS_S_GRID):
+            for d_index, d in enumerate(_POS_D_GRID):
+                y1_eig, y2_eig = surrogate_module._from_farfield_smooth(
+                    float(gamma), float(s), float(d), arc_map,
+                    _POS_ARC_BRANCH)
+                envelope[:, gamma_index, s_index, d_index] = (
+                    _positive_physical_envelope(
+                        _POS_LOG_W_GRID, float(gamma), y1_eig, y2_eig))
+    return envelope.real, envelope.imag
+
+
+def _positive_golden_chart(
+        envelope_real: np.ndarray, envelope_imag: np.ndarray,
+        arc_map: surrogate_module._FarFieldArcMap
+        ) -> surrogate_module.FarFieldChart:
+    """Construct the current-schema golden chart from fixed physical values."""
+    return surrogate_module.FarFieldChart.from_values(
+        gamma_grid=_POS_GAMMA_GRID, s_grid=_POS_S_GRID, d_grid=_POS_D_GRID,
+        log_w_grid=_POS_LOG_W_GRID, envelope_real=envelope_real,
+        envelope_imag=envelope_imag, arc_map=arc_map,
+        image_count=_POS_IMAGE_COUNT, parity=_POS_PARITY)
 
 
 def _positive_golden_surrogate() -> surrogate_module.LensAmplificationSurrogate:
-    """The frozen synthetic positive-parity (gamma < 1) served surrogate."""
-    env_real, env_imag = _positive_golden_envelope()
-    chart = surrogate_module.FarFieldChart.from_values(
-        gamma_grid=_POS_GAMMA_GRID, rho_grid=_POS_RHO_GRID,
-        theta_c_grid=_POS_THETA_C_GRID, log_w_grid=_POS_LOG_W_GRID,
-        envelope_real=env_real, envelope_imag=env_imag,
-        image_count=_POS_IMAGE_COUNT, parity=_POS_PARITY)
+    """The frozen synthetic positive-parity current-schema surrogate."""
+    arc_map = _positive_golden_arc_map()
+    envelope_real, envelope_imag = _positive_golden_envelope(arc_map)
     return surrogate_module.LensAmplificationSurrogate(
-        [chart], {'schema': 'pos-golden'})
+        [_positive_golden_chart(envelope_real, envelope_imag, arc_map)],
+        {'schema': 'pos-golden'})
+
+
+def _positive_query_oracle() -> np.ndarray:
+    """Unchanged physical-field value at the frozen served source."""
+    y1_eig, y2_eig = surrogate_module._rotate_to_eigenframe(
+        _POS_Y1, _POS_Y2, _POS_BETA)
+    return _positive_physical_envelope(
+        np.log(_POS_W_ARRAY), _POS_GAMMA, y1_eig, y2_eig)
 
 
 def _golden_envelope_array() -> np.ndarray:
@@ -1477,8 +1533,53 @@ class PositiveParityGoldenTestCase(LobeTestCase):
         self.assertEqual(
             np.asarray(emulated, dtype=complex).tobytes(), golden.tobytes(),
             'served envelope departed from the committed golden bits; the '
-            'positive-parity serve path changed (spline fit, caustic-fixed '
-            'source map, or reconstruction)')
+            'positive-parity serve path changed (spline fit, gamma-resolved '
+            'smooth source map, or reconstruction)')
+
+    def test_current_schema_and_offgrid_exterior_query(self) -> None:
+        """The golden fixture is genuinely current ``(s, d)`` data."""
+        surrogate = _positive_golden_surrogate()
+        chart = surrogate.charts[0]
+        env_real, env_imag = _positive_golden_envelope(chart.arc_map)
+        expected_shape = (_POS_LOG_W_GRID.size, _POS_GAMMA_GRID.size,
+                          _POS_S_GRID.size, _POS_D_GRID.size)
+        self.assertEqual(env_real.shape, expected_shape)
+        self.assertEqual(env_imag.shape, expected_shape)
+        self.assertNotEqual(chart.s_grid.size, chart.d_grid.size)
+        self.assertFalse(np.allclose(chart.s_grid, chart.d_grid[:chart.s_grid.size]))
+        np.testing.assert_array_equal(chart.arc_map.gamma_nodes, chart.gamma_grid)
+        self.assertTrue(np.all(np.diff(chart.arc_map.theta_fine) > 0.0))
+        self.assertTrue(np.all(np.diff(chart.arc_map.s_table, axis=1) > 0.0))
+        self.assertFalse(np.array_equal(chart.arc_map.s_table[0],
+                                        chart.arc_map.s_table[-1]))
+        y1_eig, y2_eig = surrogate_module._rotate_to_eigenframe(
+            _POS_Y1, _POS_Y2, _POS_BETA)
+        s, d = surrogate_module._to_farfield_smooth(
+            _POS_GAMMA, y1_eig, y2_eig, chart.arc_map, _POS_ARC_BRANCH)
+        self.assertGreater(d, 0.0)
+        self.assertTrue(chart.s_grid[0] < s < chart.s_grid[-1])
+        self.assertTrue(chart.d_grid[0] < d < chart.d_grid[-1])
+        self.assertFalse(np.any(np.isclose(s, chart.s_grid)))
+        self.assertFalse(np.any(np.isclose(d, chart.d_grid)))
+        _env, served, _definition = surrogate.serve(
+            _POS_W_ARRAY, gamma=_POS_GAMMA, y1=_POS_Y1, y2=_POS_Y2,
+            beta=_POS_BETA, eta=_POS_ETA, theta=_POS_THETA,
+            image_count=_POS_IMAGE_COUNT)
+        self.n_checks += 1
+        self.assertTrue(served, 'the off-grid exterior query must be served')
+
+    def test_served_value_tracks_unchanged_physical_oracle(self) -> None:
+        """The current-coordinate spline still approximates the old field."""
+        surrogate = _positive_golden_surrogate()
+        emulated, served, _definition = surrogate.serve(
+            _POS_W_ARRAY, gamma=_POS_GAMMA, y1=_POS_Y1, y2=_POS_Y2,
+            beta=_POS_BETA, eta=_POS_ETA, theta=_POS_THETA,
+            image_count=_POS_IMAGE_COUNT)
+        self.assertTrue(served)
+        self.n_checks += 1
+        np.testing.assert_allclose(emulated, _positive_query_oracle(),
+                                   rtol=_POS_PHYSICAL_ORACLE_RTOL,
+                                   atol=1e-12)
 
     def test_saved_surrogate_content_digest_matches_committed(self) -> None:
         """Saving the frozen surrogate reproduces the committed npz digest."""
@@ -1513,6 +1614,26 @@ class PositiveParityGoldenTestCase(LobeTestCase):
                              _npz_content_digest(second),
                              'the content digest must be save-reproducible')
 
+    def test_load_preserves_current_axes_and_arc_map_bits(self) -> None:
+        """Saved current axes and every gamma-resolved map row survive load."""
+        surrogate = _positive_golden_surrogate()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'positive_golden.npz'
+            surrogate.save(path)
+            restored = surrogate_module.LensAmplificationSurrogate.load(path)
+        original = surrogate.charts[0]
+        chart = restored.charts[0]
+        np.testing.assert_array_equal(chart.s_grid, original.s_grid)
+        np.testing.assert_array_equal(chart.d_grid, original.d_grid)
+        np.testing.assert_array_equal(chart.arc_map.gamma_nodes,
+                                      original.arc_map.gamma_nodes)
+        np.testing.assert_array_equal(chart.arc_map.theta_fine,
+                                      original.arc_map.theta_fine)
+        np.testing.assert_array_equal(chart.arc_map.s_table,
+                                      original.arc_map.s_table)
+        self.n_checks += 1
+        self.assertEqual(chart.arc_map.branch, original.arc_map.branch)
+
 
 class PositiveParityGoldenSelfFalsificationTestCase(TestCase):
     """Prove the golden gates can FAIL (this block can go red).
@@ -1539,17 +1660,34 @@ class PositiveParityGoldenSelfFalsificationTestCase(TestCase):
             'would be vacuous otherwise')
 
     def test_perturbed_envelope_breaks_golden_digest(self) -> None:
-        """A one-node envelope tweak changes both the bits and the digest."""
-        env_real, env_imag = _positive_golden_envelope()
+        """An influential current-schema node changes served bytes and digest."""
+        arc_map = _positive_golden_arc_map()
+        env_real, env_imag = _positive_golden_envelope(arc_map)
         env_real = env_real.copy()
-        env_real[0, 0, 0, 0] += 1.0  # perturb a single training sample
-        chart = surrogate_module.FarFieldChart.from_values(
-            gamma_grid=_POS_GAMMA_GRID, rho_grid=_POS_RHO_GRID,
-            theta_c_grid=_POS_THETA_C_GRID, log_w_grid=_POS_LOG_W_GRID,
-            envelope_real=env_real, envelope_imag=env_imag,
-            image_count=_POS_IMAGE_COUNT, parity=_POS_PARITY)
+        baseline = _positive_golden_surrogate()
+        y1_eig, y2_eig = surrogate_module._rotate_to_eigenframe(
+            _POS_Y1, _POS_Y2, _POS_BETA)
+        s, d = surrogate_module._to_farfield_smooth(
+            _POS_GAMMA, y1_eig, y2_eig, arc_map, _POS_ARC_BRANCH)
+        node = (np.argmin(abs(_POS_LOG_W_GRID - np.log(_POS_W_ARRAY[1]))),
+                np.argmin(abs(_POS_GAMMA_GRID - _POS_GAMMA)),
+                np.argmin(abs(_POS_S_GRID - s)),
+                np.argmin(abs(_POS_D_GRID - d)))
+        env_real[node] += 1.0
         surrogate = surrogate_module.LensAmplificationSurrogate(
-            [chart], {'schema': 'pos-golden'})
+            [_positive_golden_chart(env_real, env_imag, arc_map)],
+            {'schema': 'pos-golden'})
+        original, original_served, _ = baseline.serve(
+            _POS_W_ARRAY, gamma=_POS_GAMMA, y1=_POS_Y1, y2=_POS_Y2,
+            beta=_POS_BETA, eta=_POS_ETA, theta=_POS_THETA,
+            image_count=_POS_IMAGE_COUNT)
+        perturbed, perturbed_served, _ = surrogate.serve(
+            _POS_W_ARRAY, gamma=_POS_GAMMA, y1=_POS_Y1, y2=_POS_Y2,
+            beta=_POS_BETA, eta=_POS_ETA, theta=_POS_THETA,
+            image_count=_POS_IMAGE_COUNT)
+        self.assertTrue(original_served and perturbed_served)
+        self.assertNotEqual(np.asarray(perturbed).tobytes(),
+                            np.asarray(original).tobytes())
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / 'perturbed.npz'
             surrogate.save(path)
@@ -1558,6 +1696,46 @@ class PositiveParityGoldenSelfFalsificationTestCase(TestCase):
             digest, _POS_GOLDEN_NPZ_DIGEST,
             'a perturbed envelope must change the saved digest; the digest '
             'gate would be vacuous otherwise')
+
+    def test_monotone_arc_map_perturbation_breaks_bits_and_digest(self) -> None:
+        """A bracketing-safe map-row move changes the physical serve result."""
+        arc_map = _positive_golden_arc_map()
+        s_table = arc_map.s_table.copy()
+        y1_eig, y2_eig = surrogate_module._rotate_to_eigenframe(
+            _POS_Y1, _POS_Y2, _POS_BETA)
+        theta = surrogate_module.geometry.nearest_caustic_point(
+            _POS_GAMMA, 0.0, np.array([y1_eig, y2_eig]), kappa=0.0).theta
+        index = int(np.searchsorted(arc_map.theta_fine, theta))
+        index = min(max(index, 1), arc_map.theta_fine.size - 2)
+        for row in range(s_table.shape[0]):
+            lower = s_table[row, index] - s_table[row, index - 1]
+            upper = s_table[row, index + 1] - s_table[row, index]
+            s_table[row, index] += 0.25 * min(lower, upper)
+        self.assertTrue(np.all(np.diff(s_table, axis=1) > 0.0))
+        perturbed_map = dataclasses.replace(arc_map, s_table=s_table)
+        env_real, env_imag = _positive_golden_envelope(arc_map)
+        baseline = _positive_golden_surrogate()
+        perturbed = surrogate_module.LensAmplificationSurrogate(
+            [_positive_golden_chart(env_real, env_imag, perturbed_map)],
+            {'schema': 'pos-golden'})
+        baseline_env, baseline_served, _ = baseline.serve(
+            _POS_W_ARRAY, gamma=_POS_GAMMA, y1=_POS_Y1, y2=_POS_Y2,
+            beta=_POS_BETA, eta=_POS_ETA, theta=_POS_THETA,
+            image_count=_POS_IMAGE_COUNT)
+        perturbed_env, perturbed_served, _ = perturbed.serve(
+            _POS_W_ARRAY, gamma=_POS_GAMMA, y1=_POS_Y1, y2=_POS_Y2,
+            beta=_POS_BETA, eta=_POS_ETA, theta=_POS_THETA,
+            image_count=_POS_IMAGE_COUNT)
+        self.assertTrue(baseline_served and perturbed_served)
+        self.assertNotEqual(np.asarray(perturbed_env).tobytes(),
+                            np.asarray(baseline_env).tobytes())
+        with tempfile.TemporaryDirectory() as tmp:
+            original_path = pathlib.Path(tmp) / 'original.npz'
+            perturbed_path = pathlib.Path(tmp) / 'perturbed.npz'
+            baseline.save(original_path)
+            perturbed.save(perturbed_path)
+            self.assertNotEqual(_npz_content_digest(perturbed_path),
+                                _npz_content_digest(original_path))
 
 
 

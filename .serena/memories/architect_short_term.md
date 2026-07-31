@@ -1,5 +1,26 @@
 # Architect Short-Term Observations
 
+Build 1e-farfield-port (2026-07-31): PURE PORT — restore (s,d) far-field
+coordinate on FarFieldChart from git ref refs/sdk/farfield_port_wip (production
++ 3 already-ported test files + DATA_CONTRACTS.yaml), then Test Dev ports ~38
+remaining construction sites (from_values/select_chart signature change) across
+4 files keeping every oracle/tolerance IDENTICAL. 0 numerical changes; a VALUE
+failure = real finding, STOP. Structure: 1 Coder WP (restore+collect-verify at
+1171, NO memo per Simplifier) + 4 Test-Dev domain_test_descriptions (one per
+REMAINING file, each NAMES its file to dodge F057 cross-suite budget blowup that
+killed prior attempt). contracts_changelog + render = doc-sync (NOT a WP).
+Professor watch-for: A1 axis order/meaning swap (SILENT, keyword-call every arg)
++ A2 envelope_definition tag (serve dispatches on it) = top masqueraders; A3
+eta_overlap_min default drift; A4 image_count/parity transpose; A5 DON'T
+regenerate envelope tensors (reuse original oracle values); Q2 per-gamma s-map
+must match gamma_grid (single-gamma passes guard, breaks claim); Q3 gated file:
+SelfFalsification negative fixture must still CONSTRUCT (rejection exercised, not
+constructor); rho=1-on-caustic normalization does NOT carry to (s,d) -> if a site
+asserts it, report as unportable (accept #3), don't weaken. surrogate_training.py
+is GATED/slow: verify via check_gated_test_drift.py exit 0, do NOT run slow tier
+in-build.
+
+
 Build analytic_caustic_reach (F054, 2026-07-30): replace 720-pt polar scan in
 ppgo_map.caustic_geometry (1440 critical_point calls/serve, 90% of surrogate
 serve) with closed form |y|^2 = lam*[(1-u)^2(1+2u)+e^2(2u-1)]/u^2, lam=1-kappa,
