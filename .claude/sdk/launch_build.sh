@@ -35,6 +35,39 @@ if [[ -z "${AGENT_PROVIDER:-}" && -f "$REPO_ROOT/.env" ]]; then
 fi
 export AGENT_PROVIDER="${AGENT_PROVIDER:-claude}"
 
+# Auto-start opencode serve if needed for callbacks. The serve API is how the
+# resume driver injects messages that trigger agent turns. Without it, builds
+# complete but can't notify the interactive driver.
+if [[ "$AGENT_PROVIDER" == "opencode" ]]; then
+  SERVE_PORT="${OPENCODE_SERVE_PORT:-4096}"
+  if ! curl -sf "http://localhost:$SERVE_PORT/global/health" -u "${OPENCODE_SERVER_USERNAME:-opencode}:${OPENCODE_SERVER_PASSWORD:-}" >/dev/null 2>&1; then
+    if [[ -z "${OPENCODE_SERVER_PASSWORD:-}" ]]; then
+      echo "WARNING: OPENCODE_SERVER_PASSWORD not set — serve API callbacks won't work" >&2
+    else
+      echo "Starting opencode serve on port $SERVE_PORT..."
+      OPENCODE_SERVER_PASSWORD="${OPENCODE_SERVER_PASSWORD}" \
+        opencode serve --port "$SERVE_PORT" --hostname 127.0.0.1 \
+        > /tmp/opencode_serve.log 2>&1 &
+      _SERVE_PID=$!
+      disown $_SERVE_PID
+      # Wait briefly for it to come up
+      for _ in $(seq 1 10); do
+        curl -sf "http://localhost:$SERVE_PORT/global/health" \
+          -u "${OPENCODE_SERVER_USERNAME:-opencode}:${OPENCODE_SERVER_PASSWORD}" \
+          >/dev/null 2>&1 && break
+        sleep 1
+      done
+      if curl -sf "http://localhost:$SERVE_PORT/global/health" \
+          -u "${OPENCODE_SERVER_USERNAME:-opencode}:${OPENCODE_SERVER_PASSWORD}" \
+          >/dev/null 2>&1; then
+        echo "opencode serve ready (PID $_SERVE_PID, port $SERVE_PORT)"
+      else
+        echo "WARNING: opencode serve failed to start — callbacks may not work" >&2
+      fi
+    fi
+  fi
+fi
+
 if [[ ! -f "$PROMPT" ]]; then
   echo "ERROR: prompt file not found: $PROMPT" >&2
   exit 1
