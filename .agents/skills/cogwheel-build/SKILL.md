@@ -16,14 +16,24 @@ deep implementation build, or resume a build driven by the shared SDK.
 
 ## Launching a build
 
-Use the provider-appropriate launcher. Builds are long-running and MUST be
-detached from the interactive shell so they survive tool-call timeouts:
+Use `.claude/sdk/launch_build.sh` — the ONLY sanctioned build launcher for all
+providers. It handles conda resolution, watchdog attachment, `--approval-dir`
+defaulting, depth guards, `disown`, and provider routing automatically.
 
-- **Claude Code**: Use `Bash` with `run_in_background: true` (native feature).
-- **OpenCode/Codex**: Use `nohup ... & disown` so the build survives
-  independently. Do NOT call the build script directly from a bash tool
-  call — the tool timeout will kill it.
+Builds are long-running — detach them so they survive tool-call timeouts:
 
+- **Claude Code**: Use `Bash` with `run_in_background: true`:
+  `.claude/sdk/launch_build.sh <slug> .claude/handoff/<slug>.md`
+- **OpenCode/Codex**: Use `nohup ... & disown`:
+
+```bash
+# OpenCode:
+nohup bash -c 'AGENT_PROVIDER=opencode .claude/sdk/launch_build.sh <slug> .claude/handoff/<slug>.md' > /tmp/<slug>_stdout.log 2>&1 &
+disown
+
+# Codex:
+nohup bash -c 'AGENT_PROVIDER=codex .claude/sdk/launch_build.sh <slug> .claude/handoff/<slug>.md' > /tmp/<slug>_stdout.log 2>&1 &
+disown
 ```bash
 # OpenCode example:
 nohup bash -c 'OPENCODE_SESSION_ID=<session> .opencode/build "@.claude/handoff/<brief>.md" --approval-dir /tmp/<slug>_approval' > /tmp/<slug>_stdout.log 2>&1 &

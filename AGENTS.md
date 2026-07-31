@@ -152,13 +152,14 @@ shallow:
 To launch a build as the interactive driver:
 
 1. Write the brief to `.claude/handoff/<slug>.md`.
-2. Launch with `--approval-dir` (NEVER `--yes` unless the user explicitly says so).
-   Builds are long-running — detach them so they survive tool-call timeouts:
+2. Launch via `launch_build.sh` (NEVER pass `--auto` unless the user explicitly
+   says to auto-approve). It handles watchdog, approval-dir, disown, and
+   provider routing (`AGENT_PROVIDER` env var) in one command:
    - Claude: Use `Bash` with `run_in_background: true`:
-     `.claude/build "@.claude/handoff/<slug>.md" --approval-dir .claude/build/`
+     `.claude/sdk/launch_build.sh <slug> .claude/handoff/<slug>.md`
    - Codex/OpenCode: Use `nohup ... & disown`:
-     `nohup bash -c 'CODEX_THREAD_ID=<thread> .codex/build "@..." --approval-dir /tmp/<slug>_approval' > /tmp/<slug>_stdout.log 2>&1 & disown`
-     `nohup bash -c 'OPENCODE_SESSION_ID=<session> .opencode/build "@..." --approval-dir /tmp/<slug>_approval' > /tmp/<slug>_stdout.log 2>&1 & disown`
+     `nohup .claude/sdk/launch_build.sh <slug> .claude/handoff/<slug>.md > /tmp/<slug>_stdout.log 2>&1 & disown`
+   Set `AGENT_PROVIDER=codex` or `AGENT_PROVIDER=opencode` before the call.
 3. When `<approval-dir>/plan_ready` appears, read `plan.json` and evaluate.
 4. Approve: `touch <approval-dir>/plan_approved`.
    Reject: `echo "feedback" > <approval-dir>/plan_rejected`.

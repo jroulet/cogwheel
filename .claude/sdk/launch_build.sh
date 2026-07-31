@@ -19,12 +19,21 @@
 set -u
 
 USAGE="usage: launch_build.sh <task_slug> <prompt_file> [stale_seconds] [--auto]"
+USAGE="  env: AGENT_PROVIDER=claude|codex|opencode (default: claude)"
 SLUG="${1:?$USAGE}"
 PROMPT="${2:?$USAGE}"
 STALE="${3:-1200}"
 AUTO="${4:-}"
 
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+
+# Provider selection — defaults to claude; set AGENT_PROVIDER in the shell
+# or in .env to use codex/opencode. Exports so build.py inherits it.
+if [[ -z "${AGENT_PROVIDER:-}" && -f "$REPO_ROOT/.env" ]]; then
+  _prov="$(grep -E '^AGENT_PROVIDER=' "$REPO_ROOT/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  [[ -n "$_prov" ]] && AGENT_PROVIDER="$_prov"
+fi
+export AGENT_PROVIDER="${AGENT_PROVIDER:-claude}"
 
 if [[ ! -f "$PROMPT" ]]; then
   echo "ERROR: prompt file not found: $PROMPT" >&2
@@ -61,6 +70,19 @@ if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${SDK_SERENA_PORT:-}" ]]; then
 fi
 export SDK_SERENA_PORT="${SDK_SERENA_PORT:-8322}"
 
+# Provider-specific Serena ports (distinct so simultaneous builds don't collide).
+if [[ "$AGENT_PROVIDER" == "codex" ]]; then
+  if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${CODEX_SERENA_PORT:-}" ]]; then
+    CODEX_SERENA_PORT="$(grep -E '^CODEX_SERENA_PORT=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  fi
+  export CODEX_SERENA_PORT="${CODEX_SERENA_PORT:-8324}"
+elif [[ "$AGENT_PROVIDER" == "opencode" ]]; then
+  if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${OPENCODE_SERENA_PORT:-}" ]]; then
+    OPENCODE_SERENA_PORT="$(grep -E '^OPENCODE_SERENA_PORT=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  fi
+  export OPENCODE_SERENA_PORT="${OPENCODE_SERENA_PORT:-8325}"
+fi
+
 # Orchestrator reliability knobs, same .env precedence (shell > .env >
 # orchestrator default). INTER_MESSAGE_TIMEOUT: the 300s default
 # misclassifies long single-turn deliberation as a stall and killed
@@ -96,8 +118,8 @@ if [[ ! -x "$PYBIN" ]]; then
   exit 1
 fi
 
-"$PYBIN" "$REPO_ROOT/.claude/sdk/build.py" build "${APPROVE_ARGS[@]}" \
-  --log "$LOG" "@$PROMPT" > /dev/null 2>&1 &
+"$PYBIN" "$REPO_ROOT/.claude/sdk/build.py" build --provider "$AGENT_PROVIDER" \
+  "${APPROVE_ARGS[@]}" --log "$LOG" "@$PROMPT" > /dev/null 2>&1 &
 BUILD_PID=$!
 # Hand the watchdog the PID we already know. It used to rediscover the
 # orchestrator by pattern, and the pattern named cli.py while the entrypoint
