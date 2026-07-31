@@ -24,7 +24,10 @@ if [[ -f "$repo_root/.env" ]]; then
   _env_val="$(grep -E '^SDK_CONDA_ENV=' "$repo_root/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
   [[ -n "$_env_val" ]] && env_name="$_env_val"
 fi
-env_name="${env_name:-cogwheel_310}"
+if [[ -z "$env_name" ]]; then
+  echo "ERROR: SDK_CONDA_ENV not set and .env missing or empty. Copy .env.example to .env." >&2
+  exit 0  # fail open — don't block the tool call, just skip conda wrapping
+fi
 
 jq -n --arg command "conda run -n $env_name $command" '{
   "hookSpecificOutput": {

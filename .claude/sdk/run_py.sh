@@ -11,7 +11,7 @@ REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${SDK_CONDA_ENV:-}" ]]; then
   SDK_CONDA_ENV="$(grep -E '^SDK_CONDA_ENV=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
 fi
-ENV_NAME="${SDK_CONDA_ENV:-cogwheel_310}"
+ENV_NAME="${SDK_CONDA_ENV:?SDK_CONDA_ENV is not set — copy .env.example to .env and set it}"
 PYBIN="$(conda info --base 2>/dev/null)/envs/$ENV_NAME/bin/python"
 if [[ ! -x "$PYBIN" ]]; then
   echo "ERROR: $PYBIN not found; check SDK_CONDA_ENV" >&2

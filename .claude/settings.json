@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "ENV_NAME=\"${SDK_CONDA_ENV:-}\"; if [ -z \"$ENV_NAME\" ]; then RR=\"$(git rev-parse --show-toplevel 2>/dev/null)\"; if [ -f \"$RR/.env\" ]; then ENV_NAME=\"$(grep -E '^SDK_CONDA_ENV=' \"$RR/.env\" | cut -d= -f2- | tr -d '\"' | tr -d \"'\")\"; fi; fi; ENV_NAME=\"${ENV_NAME:-cogwheel_310}\"; jq -e --arg env \"$ENV_NAME\" 'select(.tool_input.command | test(\"(^|\\\\s)(python3?|pip3?)\\\\b\")) | select(.tool_input.command | test(\"^conda |conda run\") | not) | .tool_input.command as $cmd | {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"updatedInput\":{\"command\":(\"conda run -n \" + $env + \" \" + $cmd)}}}' || true",
+            "command": "RR=\"$(git rev-parse --show-toplevel 2>/dev/null)\"; ENV_NAME=\"\"; if [ -f \"$RR/.env\" ]; then ENV_NAME=\"$(grep -E '^SDK_CONDA_ENV=' \"$RR/.env\" | cut -d= -f2- | tr -d '\"' | tr -d \"'\")\"; fi; [ -z \"$ENV_NAME\" ] && ENV_NAME=\"${SDK_CONDA_ENV:-}\"; [ -z \"$ENV_NAME\" ] && exit 0; jq -e --arg env \"$ENV_NAME\" 'select(.tool_input.command | test(\"(^|\\\\s)(python3?|pip3?)\\\\b\")) | select(.tool_input.command | test(\"^conda |conda run\") | not) | .tool_input.command as $cmd | {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"updatedInput\":{\"command\":(\"conda run -n \" + $env + \" \" + $cmd)}}}' || true",
             "timeout": 5
           }
         ]

@@ -50,7 +50,7 @@ fi
 if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${SDK_CONDA_ENV:-}" ]]; then
   SDK_CONDA_ENV="$(grep -E '^SDK_CONDA_ENV=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
 fi
-ENV_NAME="${SDK_CONDA_ENV:-cogwheel_310}"
+ENV_NAME="${SDK_CONDA_ENV:?SDK_CONDA_ENV is not set — copy .env.example to .env and set it}"
 
 # Per-repo Serena SSE port, same .env precedence (shell > .env > 8322).
 # Sibling pipelines (gw) hardcode 8322 and their watchdogs kill any 8322

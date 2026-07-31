@@ -25,7 +25,7 @@ function getCondaEnv(): string {
   // Priority: process.env.SDK_CONDA_ENV (if set by user), then .env file,
   // then fallback. Never hardcode a machine-specific default.
   const fromEnv = process.env.SDK_CONDA_ENV;
-  if (fromEnv && fromEnv !== "cogwheel_310") {
+  if (fromEnv) {
     _condaEnv = fromEnv;
     return _condaEnv;
   }
@@ -38,7 +38,9 @@ function getCondaEnv(): string {
       return _condaEnv;
     }
   } catch {}
-  _condaEnv = fromEnv || "cogwheel_310";
+  // No .env, no shell var — can't wrap python in conda. Return empty
+  // so the conda-routing code skips wrapping (bare python passes through).
+  _condaEnv = "";
   return _condaEnv;
 }
 
@@ -174,10 +176,12 @@ export default (async ({ client, project, directory, $ }) => {
           !/(?:^|\s)conda(?:\s+run)?(?:\s|$)/.test(command)
         ) {
           const envName = getCondaEnv();
-          output.args = {
-            ...toolArgs,
-            command: `conda run -n ${envName} ${command}`,
-          };
+          if (envName) {
+            output.args = {
+              ...toolArgs,
+              command: `conda run -n ${envName} ${command}`,
+            };
+          }
         }
         return;
       }
@@ -193,10 +197,12 @@ export default (async ({ client, project, directory, $ }) => {
           !/(?:^|\s)conda(?:\s+run)?(?:\s|$)/.test(command)
         ) {
           const envName = getCondaEnv();
-          output.args = {
-            ...toolArgs,
-            command: `conda run -n ${envName} ${command}`,
-          };
+          if (envName) {
+            output.args = {
+              ...toolArgs,
+              command: `conda run -n ${envName} ${command}`,
+            };
+          }
         }
         return;
       }
