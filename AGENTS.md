@@ -158,9 +158,10 @@ To launch a build as the interactive driver:
    provider routing (`AGENT_PROVIDER` env var) in one command:
    - Claude: Use `Bash` with `run_in_background: true`:
      `.claude/sdk/launch_build.sh <slug> .claude/handoff/<slug>.md`
-   - Codex/OpenCode: Use `nohup ... & disown`:
-     `nohup .claude/sdk/launch_build.sh <slug> .claude/handoff/<slug>.md > /tmp/<slug>_stdout.log 2>&1 & disown`
-   Set `AGENT_PROVIDER=codex` or `AGENT_PROVIDER=opencode` before the call.
+   - Codex: `nohup bash -c 'AGENT_PROVIDER=codex .claude/sdk/launch_build.sh <slug> <brief>' > /tmp/<slug>_stdout.log 2>&1 & disown`
+     (`CODEX_THREAD_ID` is ambient in the Codex shell — flows through automatically.)
+   - OpenCode: `nohup bash -c 'AGENT_PROVIDER=opencode OPENCODE_SESSION_ID=<id> .claude/sdk/launch_build.sh <slug> <brief>' > /tmp/<slug>_stdout.log 2>&1 & disown`
+     (OpenCode does not expose session ID in env — pass it explicitly.)
 3. When `<approval-dir>/plan_ready` appears, read `plan.json` and evaluate.
 4. Approve: `touch <approval-dir>/plan_approved`.
    Reject: `echo "feedback" > <approval-dir>/plan_rejected`.

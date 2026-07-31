@@ -27,26 +27,23 @@ Builds are long-running — detach them so they survive tool-call timeouts:
 - **OpenCode/Codex**: Use `nohup ... & disown`:
 
 ```bash
-# OpenCode:
-nohup bash -c 'AGENT_PROVIDER=opencode .claude/sdk/launch_build.sh <slug> .claude/handoff/<slug>.md' > /tmp/<slug>_stdout.log 2>&1 &
+# OpenCode (pass OPENCODE_SESSION_ID so the resume callback can wake you):
+nohup bash -c 'AGENT_PROVIDER=opencode OPENCODE_SESSION_ID=<this_session> .claude/sdk/launch_build.sh <slug> .claude/handoff/<slug>.md' > /tmp/<slug>_stdout.log 2>&1 &
 disown
 
-# Codex:
+# Codex (CODEX_THREAD_ID is ambient in the Codex shell — just pass it through):
 nohup bash -c 'AGENT_PROVIDER=codex .claude/sdk/launch_build.sh <slug> .claude/handoff/<slug>.md' > /tmp/<slug>_stdout.log 2>&1 &
 disown
 ```
 
-**Critical flags:**
-- `--approval-dir <dir>` — REQUIRED for interactive plan review. The build
-  blocks until you approve or reject.
-- `--fast` — skip Phase 1 planning (trivial tasks only).
-- `--plan-only` — plan + approval then stop (dry run).
-- `--log <file>` — explicit log path (auto-generated if omitted).
-- `OPENCODE_SESSION_ID=<this_session>` or `CODEX_THREAD_ID=<this_thread>` —
-  set so terminal/escalation callbacks resume this session automatically.
+**Note on callbacks:** Codex automatically has `CODEX_THREAD_ID` in its shell
+env — it flows through `nohup bash -c` naturally. OpenCode does NOT have its
+session ID in the env, so you must pass `OPENCODE_SESSION_ID` explicitly
+(get it from `opencode session list` or the session header). Without it, the
+build still runs but cannot notify you on completion/escalation.
 
-**Do NOT pass `--yes`** unless the user explicitly says to auto-approve.
-The default is interactive plan review.
+**Do NOT pass `--auto`** to `launch_build.sh` unless the user explicitly says
+to auto-approve. The default is interactive plan review via `--approval-dir`.
 
 ## Plan review workflow
 
