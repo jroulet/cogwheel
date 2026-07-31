@@ -219,9 +219,10 @@ TILE_N_GAMMA, TILE_N_Y1, TILE_N_Y2, TILE_N_W = 4, 4, 7, 14
 #: flip line ``y2 = 1.25`` (the case the OLD label cannot fit).
 STRADDLING_TILE_CENTER = (1.30, 1.26)
 
-#: A tile whose ``y2`` box ``[1.42, 1.48]`` sits away from any flip line
-#: (the on-axis control for the trainability histogram).
-ON_AXIS_TILE_CENTER = (1.30, 1.45)
+#: A source box whose nearest foot collapses to one astroid cusp. It cannot
+#: define a nondegenerate far-field ``(s, d)`` chart and is a named refusal
+#: control, not an on-axis trainability tile.
+DEGENERATE_CUSP_TILE_CENTER = (1.30, 1.45)
 
 #: The astroid diagonal flip line the straddling tile crosses; held-out
 #: points on both sides of it certify the "across the diagonal" claim.
@@ -229,8 +230,7 @@ DIAGONAL_FLIP_Y2 = 1.25
 
 #: Production far-field gate (``surrogate_training.farfield_eps_max``): the
 #: held-out F-normalized envelope error a chart must clear to be served.
-#: The NEW label clears it on BOTH tiles (measured ~1.6e-4 straddling,
-#: ~1.4e-4 on-axis).
+#: The NEW straddling label clears it (measured ~1.6e-4).
 FARFIELD_EPS_GATE = 1.0e-3
 
 #: Reachable-red floor the OLD label's held-out eps must EXCEED on the
@@ -310,6 +310,11 @@ def _box_to_farfield_smooth(y1_range: tuple[float, float],
                                              / (2.0 * np.pi))
                  for theta in thetas]
     arc_theta_lo, arc_theta_hi = float(min(unwrapped)), float(max(unwrapped))
+    if not arc_theta_hi - arc_theta_lo > 1e-9:
+        raise surrogate_module.CarrierDiscontinuityError(
+            'Far-field tile subtends a degenerate caustic arc '
+            f'(span {arc_theta_hi - arc_theta_lo:.3g}); refuse it rather '
+            'than fitting a zero-width (s, d) chart.')
     arc_map = surrogate_module._caustic_arclength_map(
         np.asarray(arc_gamma_nodes, dtype=float),
         arc_theta_lo, arc_theta_hi, branch=1)
@@ -833,8 +838,9 @@ class StraddlingTileTrainabilityTestCase(FarfieldEnvelopeTestCase):
     engine grid, identical spline fit) and measures the held-out
     F-normalized eps.  The NEW label clears the production gate
     ``1e-3``; the OLD label -- whose lobe-flip discontinuity sits inside
-    the box -- is orders of magnitude worse.  An on-axis tile confirms the
-    NEW label is uniformly good, not tuned to one box.
+    the box -- is orders of magnitude worse. The independent cusp-projected
+    box is a named discontinuity refusal (tested separately), rather than a
+    false zero-width ``(s, d)`` chart.
     """
 
     @classmethod
@@ -843,10 +849,6 @@ class StraddlingTileTrainabilityTestCase(FarfieldEnvelopeTestCase):
             _held_out_eps_list(STRADDLING_TILE_CENTER, 'new'))
         cls.straddling_old = np.array(
             _held_out_eps_list(STRADDLING_TILE_CENTER, 'old'))
-        cls.on_axis_new = np.array(
-            _held_out_eps_list(ON_AXIS_TILE_CENTER, 'new'))
-        cls.on_axis_old = np.array(
-            _held_out_eps_list(ON_AXIS_TILE_CENTER, 'old'))
         cls._plot()
 
     @classmethod
@@ -858,12 +860,8 @@ class StraddlingTileTrainabilityTestCase(FarfieldEnvelopeTestCase):
         bins = np.logspace(-5, 3, 33)
         ax.hist(cls.straddling_new, bins=bins, alpha=0.6,
                 label='NEW, straddling', color='C0')
-        ax.hist(cls.on_axis_new, bins=bins, alpha=0.6,
-                label='NEW, on-axis', color='C2')
         ax.hist(cls.straddling_old, bins=bins, alpha=0.6,
                 label='OLD, straddling', color='C3')
-        ax.hist(cls.on_axis_old, bins=bins, alpha=0.6,
-                label='OLD, on-axis', color='C1')
         ax.axvline(FARFIELD_EPS_GATE, color='k', ls='--',
                    label=f'gate {FARFIELD_EPS_GATE:g}')
         ax.set_xscale('log')
@@ -901,12 +899,23 @@ class StraddlingTileTrainabilityTestCase(FarfieldEnvelopeTestCase):
             ratio, NEW_OVER_OLD_RATIO_MIN,
             f'NEW beat OLD by only {ratio:.2e}x on the straddling tile')
 
-    def test_new_label_also_trains_below_the_gate_on_axis(self):
-        """NEW is uniformly good: an on-axis tile also clears the gate."""
-        self.assert_within(
-            float(self.on_axis_new.max()), FARFIELD_EPS_GATE,
-            f'NEW on-axis tile failed the gate: max eps '
-            f'{self.on_axis_new.max():.3e}')
+
+
+class DegenerateCuspTileRefusalTestCase(FarfieldEnvelopeTestCase):
+    """A cusp-projected physical box must not create a zero-width chart."""
+
+    def test_cusp_projected_tile_refuses_before_training(self):
+        gamma_grid = np.linspace(*TILE_GAMMA_BAND, TILE_N_GAMMA)
+        center = DEGENERATE_CUSP_TILE_CENTER
+        with self.assertRaisesRegex(
+                surrogate_module.CarrierDiscontinuityError,
+                'degenerate caustic arc'):
+            _box_to_farfield_smooth(
+                (center[0] - TILE_HALF, center[0] + TILE_HALF),
+                (center[1] - TILE_HALF, center[1] + TILE_HALF),
+                TILE_N_Y1, TILE_N_Y2, gamma_grid,
+                tuple(np.linspace(*TILE_GAMMA_BAND, 5)))
+        self.comparisons += 1
 
 
 #: ENGINE-BACKED TIER (opt-in).  Classes marked `_TRAIN_TIER_SKIP` build REAL
@@ -2047,18 +2056,85 @@ def _synthetic_farfield_chart() -> FarFieldChart:
         envelope_imag=0.1 * values, arc_map=arc_map, image_count=2, parity=1)
 
 
+def _servable_synthetic_farfield_chart() -> FarFieldChart:
+    """A synthetic chart whose current-coordinate query is physically valid."""
+    gamma_grid = np.linspace(0.02, 0.06, 4)
+    arc_map = surrogate_module._caustic_arclength_map(
+        gamma_grid, 0.2, 1.2, branch=1)
+    s_grid = np.linspace(0.01, 0.04, 4)
+    # The chart arc is deliberately local.  Larger normal offsets can move
+    # the geometric nearest foot to the adjacent cusp instead, so keep this
+    # synthetic selection control in the same local coordinate patch.
+    d_grid = np.linspace(1.e-3, 4.e-3, 4)
+    log_w_grid = np.linspace(np.log(5.0), np.log(60.0), 5)
+    shape = (log_w_grid.size, gamma_grid.size, s_grid.size, d_grid.size)
+    values = np.ones(shape)
+    return FarFieldChart.from_values(
+        gamma_grid=gamma_grid, s_grid=s_grid, d_grid=d_grid,
+        log_w_grid=log_w_grid, envelope_real=values,
+        envelope_imag=0.1 * values, arc_map=arc_map, image_count=2, parity=1)
+
+
+class MacroSaddleFarFieldFallthroughTestCase(FarfieldEnvelopeTestCase):
+    """Manual and loaded macro-saddle far-field records defer to exact.
+
+    The ``(s, d)`` far-field coordinate is positive-parity-only.  A stale
+    artifact may still deserialize for inspection, but it must never serve a
+    plausible envelope: it falls through to the exact engine.  The positive
+    control below proves that the same otherwise-valid record would serve if
+    it carried the certified positive-parity label.
+    """
+
+    def test_manual_and_loaded_macro_saddle_chart_fall_through(self):
+        positive = _servable_synthetic_farfield_chart()
+        macro = dataclasses.replace(positive, parity=-1)
+        gamma = float(positive.gamma_grid[1])
+        y1, y2 = surrogate_module._from_farfield_smooth(
+            gamma, float(positive.s_grid[1]), float(positive.d_grid[1]),
+            positive.arc_map, positive.arc_map.branch)
+        w = np.exp(positive.log_w_grid[1:3])
+        query = dict(gamma=gamma, y1=float(y1), y2=float(y2), beta=0.0,
+                     eta=0.2, theta=0.0, image_count=2)
+        selection_query = dict(gamma=gamma, eta=0.2, theta=0.0,
+                               image_count=2, y1_eig=float(y1),
+                               y2_eig=float(y2))
+
+        self.comparisons += 1
+        self.assertIs(
+            surrogate_module.select_chart(
+                [positive], log_w_min=float(np.log(w).min()),
+                log_w_max=float(np.log(w).max()), **selection_query),
+            positive, 'positive control did not reach its valid far-field chart')
+        manual = LensAmplificationSurrogate([macro], {})
+        envelope, served, definition = manual.serve(w, **query)
+        self.comparisons += 3
+        self.assertFalse(served, 'manual macro-saddle far-field chart served')
+        self.assertIsNone(definition)
+        np.testing.assert_array_equal(envelope, np.zeros_like(envelope))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = pathlib.Path(tmpdir) / 'macro_farfield.npz'
+            manual.save(path)
+            loaded = LensAmplificationSurrogate.load(path)
+            envelope, served, definition = loaded.serve(w, **query)
+        self.comparisons += 3
+        self.assertFalse(served, 'loaded macro-saddle far-field chart served')
+        self.assertIsNone(definition)
+        np.testing.assert_array_equal(envelope, np.zeros_like(envelope))
+
+
 class StaleFarfieldAxisSchemaRefusalTestCase(FarfieldEnvelopeTestCase):
     """D3: a chart stamped with the OLD axis schema hard-refuses at load.
 
-    Positive-parity far-field charts are queried on caustic-fixed
-    ``(rho, theta_c)`` axes.  Build 8h-d2 bumped the ``axis_schema`` tag from
-    the frame-DEPENDENT ``'caustic_radial_offset_rho_theta'`` to the
-    frame-invariant ``..._framewinv`` value, so a chart trained under the OLD
-    label would be reconstructed in the wrong frame and could return a
-    finite-but-WRONG amplification.  `_validate_farfield_axis_schema` must
-    therefore refuse any chart whose tag is absent or not in the current
-    known set, at load, naming the chart and instructing a rebuild -- never a
-    silent mis-serve.  A contract test: the assertions are boolean.
+    Positive-parity far-field charts are queried in gamma-resolved
+    far-field-smooth ``(s, d)`` coordinates and require
+    ``'farfield_arclength_s_perp_d_framewinv'``. The OLD
+    ``'caustic_radial_offset_rho_theta'`` tag describes retired,
+    frame-dependent caustic-fixed coordinates, so a chart carrying it could
+    be reconstructed in the wrong convention and return a finite-but-WRONG
+    amplification. `_validate_farfield_axis_schema` must therefore refuse at
+    load every absent or unknown tag, name the chart, and instruct a rebuild --
+    never silently mis-serve. A contract test: the assertions are boolean.
     """
 
     def setUp(self) -> None:

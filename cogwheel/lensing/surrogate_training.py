@@ -261,9 +261,9 @@ class TrainingConfig:
     n_gamma: int = 4
     n_u: int = 4
     n_theta: int = 4
-    # Caustic-fixed far-field node counts (Build 8h-b3): a far-field chart's
-    # two spatial axes are the piecewise caustic-fixed ``rho`` from
-    # `_to_caustic_fixed` and the eigenframe polar angle ``theta_c``.
+    # Caustic-fixed far-field TILE counts: production proposes exterior
+    # regions in ``(rho, theta_c)`` before bridging each accepted tile to the
+    # FarFieldChart's current gamma-resolved ``(s, d)`` spline axes.
     # ``n_theta_c`` is DISTINCT from the tube's along-caustic ``n_theta``.
     n_rho: int = 4
     n_theta_c: int = 4
@@ -3231,15 +3231,15 @@ def _farfield_heldout_samples(gamma_band: tuple[float, float],
                               config: TrainingConfig,
                               rng: np.random.Generator
                               ) -> list[tuple[float, float, float]]:
-    """Random held-out sources inside a far-field chart's caustic-fixed box.
+    """Random held-out sources inside a candidate tile's proposal box.
 
-    Draws ``(gamma, rho, theta_c)`` uniformly inside the chart's caustic-fixed
-    box and maps each draw to a PHYSICAL eigenframe source ``(y1, y2)`` through
-    `_from_caustic_fixed`, matching the per-``gamma`` mapping the trainer
-    applied at each grid node. The returned
-    ``(gamma, y1, y2)`` points are what `_heldout_eps` serves through the full
-    guard stack, so the probe exercises the exact train/serve coordinate round
-    trip.
+    Production still proposes exterior regions in caustic-fixed
+    ``(rho, theta_c)`` tile coordinates. It maps each draw to a PHYSICAL
+    eigenframe source ``(y1, y2)`` through `_from_caustic_fixed`; the full
+    far-field serve guard then maps that source into the chart's current
+    gamma-resolved ``(s, d)`` spline coordinates. The returned
+    ``(gamma, y1, y2)`` points therefore validate the placement-to-serve
+    bridge, not a retired chart-axis round trip.
     """
     rho_c, theta_c = box_center
     half_rho, half_theta = half
