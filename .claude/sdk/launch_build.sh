@@ -130,6 +130,26 @@ BUILD_PID=$!
 "$REPO_ROOT/.claude/sdk/watchdog.sh" "$LOG" "$STALE" "$BUILD_PID" \
   > /dev/null 2>&1 &
 WATCHDOG_PID=$!
+
+# Terminal callback sidecar: waits for the build to exit and fires the
+# provider-appropriate resume driver so the interactive agent is notified.
+# Must be spawned BEFORE disown so it can wait on BUILD_PID (its sibling).
+_RESUME_HELPER=""
+if [[ "$AGENT_PROVIDER" == "codex" && -n "${CODEX_THREAD_ID:-}" && "${CODEX_EVENT_RESUME:-1}" != "0" ]]; then
+  _RESUME_HELPER="$REPO_ROOT/.codex/resume_driver.sh"
+elif [[ "$AGENT_PROVIDER" == "opencode" && -n "${OPENCODE_SESSION_ID:-}" && "${OPENCODE_EVENT_RESUME:-1}" != "0" ]]; then
+  _RESUME_HELPER="$REPO_ROOT/.opencode/resume_driver.sh"
+fi
+if [[ -n "$_RESUME_HELPER" && -f "$_RESUME_HELPER" ]]; then
+  _RESUME_EVENT_ID="build-$(date +%s%N)-$$-${RANDOM}"
+  (
+    wait "$BUILD_PID" 2>/dev/null
+    _STATUS=$?
+    "$_RESUME_HELPER" build_terminal \
+      "exit_status=$_STATUS log=$LOG" "$_RESUME_EVENT_ID"
+  ) </dev/null >/dev/null 2>&1 &
+fi
+
 disown -a
 
 # Verify the watchdog ATTACHED before claiming protection. The silent version
@@ -149,6 +169,9 @@ else
   echo "launched: $LOG"
   echo "WARNING: WATCHDOG DID NOT ATTACH — this build has no kill" \
        "protection. See $WATCHDOG_LOG" >&2
+fi
+if [[ -n "$_RESUME_HELPER" ]]; then
+  echo "terminal callback armed ($AGENT_PROVIDER)"
 fi
 # The post-build SEQUENCE, not just the sweeps.  Librarian and Dreamer run
 # IN the DAG; the Tidier is the one crew role with no automated home, since
@@ -184,3 +207,4 @@ if [[ "$AUTO" != "--auto" ]]; then
   echo "  reject:  write feedback to $APPROVAL_DIR/plan_rejected"
   echo "Respond promptly: the watchdog staleness clock runs during the wait."
 fi
+
