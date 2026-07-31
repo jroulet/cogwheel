@@ -192,10 +192,6 @@ INTER_MESSAGE_TIMEOUT_SECONDS: Optional[int] = (
 # agent, where a multi-minute message gap really does indicate a wedge.
 PROFESSOR_INTER_MESSAGE_TIMEOUT = 1800
 
-# The Architect (Opus on complex codebases) can legitimately think for >5min
-# after reading a large symbols overview before emitting its plan. Same class
-# of false wedge as the Professor — a long think, not a transport death.
-ARCHITECT_INTER_MESSAGE_TIMEOUT = 900
 
 
 # ── Infrastructural agent-death retry ────────────────────────────────────────
@@ -1197,9 +1193,7 @@ class BuildOrchestrator:
         result_text = ""
         all_text_blocks: list[str] = []
         session_id = None
-        async for message in self._iter_query_with_timeout(
-                query(prompt=architect_task, options=options), agent_id,
-                timeout=ARCHITECT_INTER_MESSAGE_TIMEOUT):
+        async for message in query(prompt=architect_task, options=options):
             if isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
@@ -1281,9 +1275,7 @@ class BuildOrchestrator:
         result_text = ""
         all_text_blocks: list[str] = []
         session_id = None
-        async for message in self._iter_query_with_timeout(
-                query(prompt=prompt, options=options), agent_id,
-                timeout=ARCHITECT_INTER_MESSAGE_TIMEOUT):
+        async for message in query(prompt=prompt, options=options):
             if isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
