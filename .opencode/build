@@ -14,6 +14,14 @@ fi
 export OPENCODE_SERENA_PORT="${OPENCODE_SERENA_PORT:-8325}"
 export AGENT_PROVIDER=opencode
 
+# Conda env: read from .env unconditionally (the interactive session's
+# shell.env hook may have set SDK_CONDA_ENV to the default before us).
+if [[ -f "$REPO_ROOT/.env" ]]; then
+  _env_val="$(grep -E '^SDK_CONDA_ENV=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  [[ -n "$_env_val" ]] && SDK_CONDA_ENV="$_env_val"
+fi
+export SDK_CONDA_ENV="${SDK_CONDA_ENV:-cogwheel_310}"
+
 BUILD_ARGS=("$@")
 BUILD_LOG=""
 for (( INDEX = 0; INDEX < ${#BUILD_ARGS[@]}; INDEX++ )); do

@@ -18,9 +18,11 @@ if grep -Eq '(^|[[:space:]])conda([[:space:]]+run)?([[:space:]]|$)' <<< "$comman
 fi
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+# .env is authoritative — always read it (a stale shell export may be wrong).
 env_name="${SDK_CONDA_ENV:-}"
-if [[ -z "$env_name" && -f "$repo_root/.env" ]]; then
-  env_name="$(grep -E '^SDK_CONDA_ENV=' "$repo_root/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+if [[ -f "$repo_root/.env" ]]; then
+  _env_val="$(grep -E '^SDK_CONDA_ENV=' "$repo_root/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  [[ -n "$_env_val" ]] && env_name="$_env_val"
 fi
 env_name="${env_name:-cogwheel_310}"
 

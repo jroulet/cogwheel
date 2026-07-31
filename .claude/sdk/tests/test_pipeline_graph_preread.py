@@ -4,7 +4,7 @@ Exercises `_pre_read_pipeline_graph`'s matching / shared-producer expansion /
 formatting / ~4 KB cap against a stub PipelineGraph, so the ported logic is
 verified without coupling to the live DATA_CONTRACTS.yaml.
 
-Run: conda run -n cogwheel_310 python -m unittest \
+Run: conda run -n $SDK_CONDA_ENV python -m unittest \
     discover -s .claude/sdk/tests -p 'test_*.py'
 """
 import os

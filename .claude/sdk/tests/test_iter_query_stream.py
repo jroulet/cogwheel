@@ -8,7 +8,7 @@ exit a cancel scope in a foreign task — the build-killing RuntimeError of
 relay mid-stream exceptions, convert wedges to TimeoutError, clean up on
 early caller exit.
 
-Run: conda run -n cogwheel_310 python -m unittest \
+Run: conda run -n $SDK_CONDA_ENV python -m unittest \
     discover -s .claude/sdk/tests -p 'test_*.py'
 """
 import asyncio

@@ -10,8 +10,10 @@
 #
 # Contract: the caller MUST have REPO_ROOT set before sourcing. On return,
 # $PYTHON points at the resolved interpreter and $ENV_NAME names the conda env.
-if [ -z "${SDK_CONDA_ENV:-}" ] && [ -f "$REPO_ROOT/.env" ]; then
-    SDK_CONDA_ENV="$(grep -E '^SDK_CONDA_ENV=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+# .env is authoritative for this machine — always read it.
+if [ -f "$REPO_ROOT/.env" ]; then
+    _env_val="$(grep -E '^SDK_CONDA_ENV=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+    [ -n "$_env_val" ] && SDK_CONDA_ENV="$_env_val"
 fi
 ENV_NAME="${SDK_CONDA_ENV:-cogwheel_310}"
 CONDA_PREFIX_LOCAL="$(conda info --base 2>/dev/null)/envs/$ENV_NAME"

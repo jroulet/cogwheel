@@ -81,7 +81,7 @@ not share an author. Never name a suite after a module that does not exist.
    `mcp__serena__edit_memory`.
 
 ## Hard requirements
-- Use full conda Python path: /Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python
+- Use bare `python` — the conda hook wraps it in `conda run -n $SDK_CONDA_ENV` automatically
 - Do NOT modify production code.
 - Do NOT commit.
 

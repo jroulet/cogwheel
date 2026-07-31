@@ -3,7 +3,7 @@
 Deterministic — builds a temporary DATA_CONTRACTS.yaml fixture and exercises
 the in-process query methods. Run:
 
-    conda run -n cogwheel_310 python -m unittest \
+    conda run -n $SDK_CONDA_ENV python -m unittest \
         discover -s .claude/sdk/tests -p 'test_*.py'
 """
 import importlib.util

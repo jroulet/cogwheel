@@ -83,7 +83,7 @@ cogwheel uses Sphinx (sources under `docs/source/`, config `docs/source/conf.py`
 built on Read the Docs). Whenever any file under `docs/source/` is edited — or a
 docstring that the API docs surface changes — rebuild the docs to confirm they
 still build cleanly before finishing:
-  `/Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python -m sphinx -b html docs/source docs/build`
+  `python -m sphinx -b html docs/source docs/build`
 (run from the repo root; `docs/build/` is gitignored).
 """
 

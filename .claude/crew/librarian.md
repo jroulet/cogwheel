@@ -93,7 +93,7 @@ Every finding reference (F001, F035, etc.) must resolve. Every module attributio
 ### Step 4: Rebuild if docs changed
 If any file under `docs/source/` was edited, rebuild the Sphinx docs and confirm a clean build:
 ```
-/Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python -m sphinx -b html docs/source docs/build
+python -m sphinx -b html docs/source docs/build
 # or, equivalently: make -C docs html
 ```
 Zero warnings required, counting only warnings that originate IN THIS REPO

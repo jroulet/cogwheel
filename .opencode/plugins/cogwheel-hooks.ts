@@ -12,12 +12,35 @@
  */
 
 import { execSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { resolve, relative } from "path";
 
 // Track whether Serena has been initialized in this session
 let serenaReady = false;
 let projectRoot = "";
+let _condaEnv: string | null = null;
+
+function getCondaEnv(): string {
+  if (_condaEnv !== null) return _condaEnv;
+  // Priority: process.env.SDK_CONDA_ENV (if set by user), then .env file,
+  // then fallback. Never hardcode a machine-specific default.
+  const fromEnv = process.env.SDK_CONDA_ENV;
+  if (fromEnv && fromEnv !== "cogwheel_310") {
+    _condaEnv = fromEnv;
+    return _condaEnv;
+  }
+  try {
+    const root = getProjectRoot();
+    const envFile = readFileSync(resolve(root, ".env"), "utf-8");
+    const match = envFile.match(/^SDK_CONDA_ENV=["']?([^"'\n]+)["']?/m);
+    if (match) {
+      _condaEnv = match[1];
+      return _condaEnv;
+    }
+  } catch {}
+  _condaEnv = fromEnv || "cogwheel_310";
+  return _condaEnv;
+}
 
 function getProjectRoot() {
   if (!projectRoot) {
@@ -150,7 +173,7 @@ export default (async ({ client, project, directory, $ }) => {
           /(?:^|\s)(python3?|pip3?)(?:\s|$)/.test(command) &&
           !/(?:^|\s)conda(?:\s+run)?(?:\s|$)/.test(command)
         ) {
-          const envName = process.env.SDK_CONDA_ENV || "cogwheel_310";
+          const envName = getCondaEnv();
           output.args = {
             ...toolArgs,
             command: `conda run -n ${envName} ${command}`,
@@ -169,7 +192,7 @@ export default (async ({ client, project, directory, $ }) => {
           /(?:^|\s)(python3?|pip3?)(?:\s|$)/.test(command) &&
           !/(?:^|\s)conda(?:\s+run)?(?:\s|$)/.test(command)
         ) {
-          const envName = process.env.SDK_CONDA_ENV || "cogwheel_310";
+          const envName = getCondaEnv();
           output.args = {
             ...toolArgs,
             command: `conda run -n ${envName} ${command}`,
@@ -232,12 +255,13 @@ export default (async ({ client, project, directory, $ }) => {
     },
 
     "shell.env": (input, output) => {
-      // Inject conda env and AGENT_PROVIDER into shell environment
-      const envName = process.env.SDK_CONDA_ENV || "cogwheel_310";
-      output.env.SDK_CONDA_ENV = envName;
+      // Inject AGENT_PROVIDER into shell environment
       if (process.env.AGENT_PROVIDER) {
         output.env.AGENT_PROVIDER = process.env.AGENT_PROVIDER;
       }
+      // Do NOT set SDK_CONDA_ENV here — the build scripts read it from
+      // .env themselves. Setting a hardcoded default here pollutes child
+      // processes with the wrong env name when .env says otherwise.
     },
   };
 }) satisfies any;

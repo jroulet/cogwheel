@@ -66,7 +66,7 @@ widening remains a separate ticket). NO tolerance widening anywhere.
 
 ## Environment facts
 
-- Suite interpreter: /Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python
+- Suite interpreter: python
 - Ignore test_gw_prior/test_posterior/test_waveform (pre-existing
   IMRPhenomXODE optional-dep gap, not this build's concern).
 - Current suite state (2026-07-17, HEAD): 174 passed + 193 subtests,

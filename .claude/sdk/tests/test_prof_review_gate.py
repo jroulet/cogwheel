@@ -4,7 +4,7 @@ Deterministic (no live agent): monkeypatch `_run_agent` to return a canned
 verdict block and assert `_run_prof_review` parses it and that a FAIL verdict
 raises GateFailure (the commit-blocking gate). Run under the pipeline env:
 
-    conda run -n cogwheel_310 python -m unittest \
+    conda run -n $SDK_CONDA_ENV python -m unittest \
         discover -s .claude/sdk/tests -p 'test_*.py'
 """
 import asyncio

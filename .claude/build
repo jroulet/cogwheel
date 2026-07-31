@@ -9,8 +9,13 @@ REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 # Conda env routing via the durable .env idiom: shell SDK_CONDA_ENV wins,
 # then .env at the repo root, then the default. Copy .env.example to .env
 # to set it per machine.
-if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${SDK_CONDA_ENV:-}" ]]; then
-  SDK_CONDA_ENV="$(grep -E '^SDK_CONDA_ENV=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+# .env is authoritative for this machine — always read it, even if the shell
+# already has SDK_CONDA_ENV (a stale export or plugin hook may have set the
+# wrong value). Shell override only wins if you set it intentionally in the
+# same command line (e.g., SDK_CONDA_ENV=foo .claude/build ...).
+if [[ -f "$REPO_ROOT/.env" ]]; then
+  _env_val="$(grep -E '^SDK_CONDA_ENV=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  [[ -n "$_env_val" ]] && SDK_CONDA_ENV="$_env_val"
 fi
 ENV_NAME="${SDK_CONDA_ENV:-cogwheel_310}"
 

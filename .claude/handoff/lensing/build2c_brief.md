@@ -149,7 +149,7 @@ domain_test_descriptions:
 
 ## Environment facts (pre-answered)
 
-- Suite interpreter: /Users/tejaswi/miniconda3/envs/cogwheel_310/bin/python.
+- Suite interpreter: python.
 - test_waveform/test_gw_prior/test_posterior fail COLLECTION for a
   pre-existing optional-dependency gap (IMRPhenomXODE symlink absent in
   cogwheel_310) — ignore them; not this build's concern.
