@@ -62,8 +62,35 @@ for DELAY in "${RETRY_DELAYS[@]}"; do
   {
     printf '\n[%s] event=%s event_id=%s session=%s\n' \
       "$(date --iso-8601=seconds)" "$EVENT" "$EVENT_ID" "$SESSION_ID"
-    cd "$REPO_ROOT"
-    opencode run --session "$SESSION_ID" --continue --auto -- "$PROMPT"
+
+    # Use the serve API to inject a message that triggers a full agent turn.
+    # Falls back to opencode run --continue if the serve API is unreachable.
+    SERVE_PORT="${OPENCODE_SERVE_PORT:-4096}"
+    SERVE_USER="${OPENCODE_SERVER_USERNAME:-opencode}"
+    SERVE_PASS="${OPENCODE_SERVER_PASSWORD:-}"
+    PAYLOAD="$(printf '{"parts":[{"type":"text","text":"%s"}]}' \
+      "$(printf '%s' "$PROMPT" | sed 's/"/\\"/g' | tr '\n' ' ')")"
+
+    if [[ -n "$SERVE_PASS" ]]; then
+      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        -u "$SERVE_USER:$SERVE_PASS" \
+        "http://localhost:$SERVE_PORT/session/$SESSION_ID/message" \
+        -X POST -H "Content-Type: application/json" \
+        -d "$PAYLOAD" 2>/dev/null)
+    else
+      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "http://localhost:$SERVE_PORT/session/$SESSION_ID/message" \
+        -X POST -H "Content-Type: application/json" \
+        -d "$PAYLOAD" 2>/dev/null)
+    fi
+
+    if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "202" ]]; then
+      printf 'serve API injection succeeded (HTTP %s)\n' "$HTTP_CODE"
+    else
+      printf 'serve API failed (HTTP %s), falling back to opencode run\n' "$HTTP_CODE"
+      cd "$REPO_ROOT"
+      opencode run --session "$SESSION_ID" --continue --auto -- "$PROMPT"
+    fi
   } >>"$LOG_FILE" 2>&1
   STATUS=$?
   if (( STATUS == 0 )); then
