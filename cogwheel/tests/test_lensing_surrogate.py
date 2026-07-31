@@ -126,8 +126,8 @@ from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing import ppgo_map
 from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate, _rotate_to_eigenframe,
-    _FARFIELD_ENVELOPE_DEFINITION, _union_cusp_nodes, _ASTROID_CUSP_ANGLES,
-    _CUSP_NODE_DEDUP_TOL, CarrierDiscontinuityError)
+    _FARFIELD_ENVELOPE_DEFINITION, _ASTROID_CUSP_ANGLES,
+    CarrierDiscontinuityError)
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, LensedBinningError,
     dimensionless_frequency)
@@ -878,107 +878,6 @@ class ClosedFormCuspAngleTestCase(SurrogateTestCase):
                  title='Cusp magnitude vs gamma (varies)')
         fig.tight_layout()
         fig.savefig(OUTPUT_DIR / 'surrogate_cusp_angles_vs_gamma.png', dpi=90)
-        plt.close(fig)
-
-
-# ==========================================================================
-# from_engine cusp-node presence + WP3/WP2 wiring (D4, spec 2)
-# ==========================================================================
-
-class FromEngineCuspWiringTestCase(SurrogateTestCase):
-    """`_union_cusp_nodes` places an exact spline node on every in-range
-    astroid cusp for a positive-parity axis (deduplicated, sorted, strictly
-    increasing), a macro-saddle chart gets NONE, and `from_engine` actually
-    wires this into the built chart's ``theta_c`` grid.  A reachable-red pins
-    that the un-neutered WP2 carrier-continuity guard really raises on the
-    coarse exterior box these fixtures build.
-    """
-
-    def test_union_inserts_cusp_node_when_range_straddles_zero(self):
-        """A uniform axis straddling ``theta_c = 0`` gains an exact node at 0,
-        and the result stays sorted and strictly increasing."""
-        grid = np.linspace(-0.20, 0.25, 4)
-        rng = (-0.20, 0.25)
-        merged = _union_cusp_nodes(grid, rng)
-        self.n_checks += 1
-        self.assertTrue(bool(np.any(np.abs(merged) < _CUSP_NODE_DEDUP_TOL)),
-                        f'no cusp node at 0 was inserted: {merged}')
-        self.assertTrue(bool(np.all(np.diff(merged) > 0.0)),
-                        f'merged axis is not strictly increasing: {merged}')
-        # Every original node survives (union, not replacement).
-        for node in grid:
-            self.assertTrue(bool(np.any(np.abs(merged - node) < 1e-12)),
-                            f'original node {node} was dropped')
-
-    def test_union_inserts_all_in_range_cusps(self):
-        """A wide range picks up every in-range cusp (0, pi/2, pi) and NOT the
-        out-of-range one (-pi/2)."""
-        rng = (-0.1, np.pi + 0.1)
-        grid = np.linspace(rng[0], rng[1], 5)
-        merged = _union_cusp_nodes(grid, rng)
-        for ray in (0.0, np.pi / 2, np.pi):
-            with self.subTest(ray=ray):
-                self.n_checks += 1
-                self.assertTrue(
-                    bool(np.any(np.abs(merged - ray) < _CUSP_NODE_DEDUP_TOL)),
-                    f'in-range cusp {ray} not unioned into {merged}')
-        self.assertFalse(
-            bool(np.any(np.abs(merged + np.pi / 2) < _CUSP_NODE_DEDUP_TOL)),
-            f'out-of-range cusp -pi/2 was wrongly inserted: {merged}')
-
-    def test_union_dedups_coincident_cusp(self):
-        """A cusp angle coincident (within `_CUSP_NODE_DEDUP_TOL`) with an
-        existing uniform node is NOT doubled: the axis stays strictly
-        increasing and gains no length."""
-        # A grid whose first node is exactly the cusp 0.0.
-        grid = np.linspace(0.0, 0.4, 5)
-        merged = _union_cusp_nodes(grid, (0.0, 0.4))
-        self.n_checks += 1
-        self.assertTrue(bool(np.all(np.diff(merged) > _CUSP_NODE_DEDUP_TOL)),
-                        f'dedup failed -- near-coincident nodes remain: '
-                        f'{merged}')
-        self.assertEqual(merged.size, grid.size,
-                         'a coincident cusp added a duplicate node')
-
-    def test_union_is_noop_without_in_range_cusp(self):
-        """A range with no cusp inside returns the axis unchanged (identity)."""
-        grid = np.linspace(0.5, 1.0, 4)
-        merged = _union_cusp_nodes(grid, (0.5, 1.0))
-        self.n_checks += 1
-        np.testing.assert_array_equal(merged, grid)
-
-    def test_positive_chart_grid_carries_cusp_node(self):
-        """The current positive chart persists a monotone gamma-resolved arc."""
-        chart = _pos_surrogate_ship().charts[0]
-        self.n_checks += 1
-        np.testing.assert_array_equal(chart.arc_map.gamma_nodes,
-                                      chart.gamma_grid)
-        self.assertTrue(np.all(np.diff(chart.arc_map.theta_fine) > 0.0))
-        self.assertTrue(np.all(np.diff(chart.arc_map.s_table, axis=1) > 0.0))
-        self.assertFalse(np.array_equal(chart.arc_map.s_table[0],
-                                        chart.arc_map.s_table[-1]))
-
-    def test_macro_saddle_chart_has_no_cusp_nodes(self):
-        """Macro-saddle far-field is an intentional exact-engine-only gap."""
-        self.n_checks += 1
-        self.assertIsNone(_sad_surrogate_ship())
-
-    @staticmethod
-    def _plot_cusp_nodes_on_rays(theta_c_grid):
-        OUTPUT_DIR.mkdir(exist_ok=True)
-        fig, ax = plt.subplots()
-        for ray in CLOSED_FORM_CUSP_ANGLES:
-            ax.axvline(ray, color='r', ls='--', lw=0.8)
-        ax.plot(theta_c_grid, np.zeros_like(theta_c_grid), 'o', color='C0',
-                label='chart theta_c nodes')
-        ax.axvline(CLOSED_FORM_CUSP_ANGLES[1], color='r', ls='--', lw=0.8,
-                   label='astroid cusp rays')
-        ax.set(xlabel='theta_c [rad]', yticks=[],
-               title='Positive chart nodes vs cusp rays')
-        ax.legend(loc='upper right')
-        fig.savefig(OUTPUT_DIR / 'surrogate_cusp_nodes_on_rays.png', dpi=90)
-        plt.close(fig)
-
         plt.close(fig)
 
 

@@ -228,8 +228,9 @@ _KNOWN_FARFIELD_DEFINITIONS = KNOWN_FARFIELD_DEFINITIONS
 # and fails generically inside the caustic (eps ~ 6e-2 at mid-gamma), whereas
 # the SACR-C label switches the near-merged pair INTO the bounded envelope and
 # carries no ``1/(tau_a - tau_c)`` or ``Im tau_c`` denominator.  Interior
-# charts stay in the SAME caustic-fixed ``(rho, theta_c)`` coordinate the
-# far-field charts use; only the ENVELOPE LABEL differs, so they are still
+# charts stay in the SAME far-field-smooth ``(s, d)`` coordinate used by
+# positive-parity exterior far-field charts; only the ENVELOPE LABEL differs,
+# so they are still
 # ``FarFieldChart`` objects distinguished purely by this tag.  The single
 # authoritative interior tag frozenset lives in `channels`
 # (`KNOWN_INTERIOR_DEFINITIONS`), extended atomically with its reconstruction
@@ -459,8 +460,7 @@ class _FarFieldArcMap:
     (Build 1e-farfield WP1), the same move
     `surrogate_training._tube_arc_length_map` made for the tube charts'
     ``theta`` axis.  ``s`` is smooth across the C2 curvature kinks the raw
-    angle produced, so a cubic spline in ``s`` needs no cusp-node bolt-on
-    (`_union_cusp_nodes`).
+    angle produced, so a cubic spline in ``s`` needs no cusp-node bolt-on.
 
     The map is 2-D: one cumulative-arc-length row per gamma node, because a
     single representative-gamma map is O(10-25%) wrong at a 0.2-wide band
@@ -1266,6 +1266,74 @@ def _validate_axis(axis: np.ndarray, name: str) -> np.ndarray:
     return arr
 
 
+def _validate_farfield_arc_map(arc_map: _FarFieldArcMap,
+                               gamma_grid: np.ndarray) -> _FarFieldArcMap:
+    """Return a far-field arc map validated against its chart gamma grid.
+
+    The arc-length rows are a coordinate transform for the chart's spline,
+    not an independently sampled approximation. Consequently their gamma
+    nodes must be the chart's own gamma axis exactly.
+    """
+    if not isinstance(arc_map, _FarFieldArcMap):
+        raise TypeError(
+            'FarFieldChart requires a _FarFieldArcMap arc_map; got '
+            f'{type(arc_map).__name__}.')
+
+    gamma_nodes = np.ascontiguousarray(arc_map.gamma_nodes, dtype=float)
+    theta_fine = np.ascontiguousarray(arc_map.theta_fine, dtype=float)
+    s_table = np.ascontiguousarray(arc_map.s_table, dtype=float)
+    if gamma_nodes.ndim != 1 or gamma_nodes.size != gamma_grid.size:
+        raise ValueError(
+            'arc_map.gamma_nodes must be a 1-D array with the same number '
+            'of nodes as gamma_grid.')
+    if not np.isfinite(gamma_nodes).all():
+        raise ValueError('arc_map.gamma_nodes must be finite.')
+    if not np.all(np.diff(gamma_nodes) > 0.0):
+        raise ValueError('arc_map.gamma_nodes must be strictly increasing.')
+    if not np.array_equal(gamma_nodes, gamma_grid):
+        raise ValueError(
+            'arc_map.gamma_nodes must equal gamma_grid; a far-field arc map '
+            'cannot define a second gamma lattice.')
+    if theta_fine.ndim != 1 or theta_fine.size < 2:
+        raise ValueError(
+            'arc_map.theta_fine must be a 1-D array with at least 2 nodes.')
+    if not np.isfinite(theta_fine).all():
+        raise ValueError('arc_map.theta_fine must be finite.')
+    if not np.all(np.diff(theta_fine) > 0.0):
+        raise ValueError('arc_map.theta_fine must be strictly increasing.')
+    if s_table.shape != (gamma_nodes.size, theta_fine.size):
+        raise ValueError(
+            'arc_map.s_table must have shape '
+            '(arc_map.gamma_nodes.size, arc_map.theta_fine.size); got '
+            f'{s_table.shape}.')
+    if not np.isfinite(s_table).all():
+        raise ValueError('arc_map.s_table must be finite.')
+    if not np.all(s_table[:, 0] == 0.0):
+        raise ValueError('Every arc_map.s_table row must start at zero.')
+    if not np.all(np.diff(s_table, axis=1) > 0.0):
+        raise ValueError(
+            'Every arc_map.s_table row must be strictly increasing.')
+
+    branch = arc_map.branch
+    if isinstance(branch, bool) or not isinstance(branch, (int, np.integer)):
+        raise ValueError('arc_map.branch must be either +1 or -1.')
+    branch = int(branch)
+    if branch not in (-1, 1):
+        raise ValueError('arc_map.branch must be either +1 or -1.')
+    theta_lo = float(arc_map.theta_lo)
+    theta_hi = float(arc_map.theta_hi)
+    if not (np.isfinite(theta_lo) and np.isfinite(theta_hi)
+            and theta_lo < theta_hi):
+        raise ValueError(
+            'arc_map endpoints must be finite with theta_lo < theta_hi.')
+    if theta_fine[0] != theta_lo or theta_fine[-1] != theta_hi:
+        raise ValueError(
+            'arc_map.theta_fine endpoints must equal arc_map.theta_lo and '
+            'arc_map.theta_hi.')
+    return _FarFieldArcMap(gamma_nodes, theta_fine, s_table, branch,
+                           theta_lo, theta_hi)
+
+
 def _validate_theta_to_s(theta_to_s: np.ndarray,
                          theta_grid: np.ndarray) -> np.ndarray:
     """Return a validated ``(2, N_map)`` theta->arc-length axis map.
@@ -1297,43 +1365,6 @@ def _validate_theta_to_s(theta_to_s: np.ndarray,
             f'theta_to_s row 1 (s_fine) must start at ~0; got {s_fine[0]!r}.')
     return arr
 
-
-def _union_cusp_nodes(theta_c_grid: np.ndarray,
-                      theta_c_range: tuple[float, float]) -> np.ndarray:
-    """Union the astroid cusp angles into a positive-parity theta_c axis.
-
-    Adds an exact spline node at every source-plane cusp angle
-    (`_ASTROID_CUSP_ANGLES`) that lies within ``theta_c_range`` so a cubic
-    chart places a node ON each C2 curvature kink rather than smoothing
-    across it (a cusp column is a curvature discontinuity, and a cubic
-    spline needs a node on the kink).  A cusp angle coincident with an
-    existing uniform node (within `_CUSP_NODE_DEDUP_TOL`) is dropped so the
-    axis stays strictly increasing for the spline fit.
-
-    Parameters
-    ----------
-    theta_c_grid : np.ndarray
-        Strictly increasing uniform ``theta_c`` axis to augment.
-    theta_c_range : tuple[float, float]
-        ``(low, high)`` chart bounds; only cusp angles inside are unioned.
-
-    Returns
-    -------
-    np.ndarray
-        Strictly increasing ``theta_c`` axis with the in-range cusp angles
-        unioned in and sorted ascending.
-    """
-    low, high = float(theta_c_range[0]), float(theta_c_range[1])
-    cusp_angles = [a for a in _ASTROID_CUSP_ANGLES if low <= a <= high]
-    if not cusp_angles:
-        return theta_c_grid
-    merged = np.sort(np.concatenate(
-        [theta_c_grid, np.array(cusp_angles, dtype=float)]))
-    # Keep the first node of every near-coincident cluster: a cusp angle
-    # within the dedup tolerance of a uniform node must not double it.
-    keep = np.concatenate(
-        ([True], np.diff(merged) > _CUSP_NODE_DEDUP_TOL))
-    return merged[keep]
 
 
 def _fit_tensor_spline(axis_grids: tuple[np.ndarray, ...],
@@ -1496,28 +1527,28 @@ def _assert_carrier_continuity(critical_sources: np.ndarray,
     Parameters
     ----------
     critical_sources : np.ndarray
-        Shape ``(n_gamma, n_rho, n_theta, 2)`` parked-carrier
+        Shape ``(n_gamma, n_s, n_d, 2)`` parked-carrier
         ``critical_source`` per node; ``NaN`` rows mark refused nodes and
         are skipped (a refused neighbour cannot certify continuity but is
         not itself a flip).
     gamma_grid : np.ndarray
         The ``n_gamma`` gamma axis, for the per-gamma caustic reach.
     shape : tuple[int, int, int]
-        The ``(n_gamma, n_rho, n_theta)`` node-grid shape.
+        The ``(n_gamma, n_s, n_d)`` node-grid shape.
 
     Raises
     ------
     CarrierDiscontinuityError
         If a basin flip is detected between adjacent nodes.
     """
-    n_gamma, n_rho, n_theta = shape
+    n_gamma, n_s, n_d = shape
     grid = np.asarray(critical_sources, dtype=float).reshape(*shape, 2)
     # Per-gamma caustic reach, broadcast to the full node grid (the reach
     # varies with gamma only).
     reach = np.array([_caustic_reach(float(g)) for g in gamma_grid])
     reach_grid = np.broadcast_to(
-        reach[:, None, None], (n_gamma, n_rho, n_theta))
-    # Compare adjacent nodes along each spatial axis (gamma, rho, theta_c).
+        reach[:, None, None], (n_gamma, n_s, n_d))
+    # Compare adjacent nodes along each spatial axis (gamma, s, d).
     for axis in range(3):
         n_axis = shape[axis]
         if n_axis < 2:
@@ -1595,8 +1626,8 @@ def _assert_farfield_carrier_continuity(env_grid: np.ndarray,
     Parameters
     ----------
     env_grid : np.ndarray
-        Complex far-field label per node, shape ``(n_w, n_gamma, n_rho,
-        n_theta)``.  Refused/unfilled nodes are exactly zero (`from_engine`
+        Complex far-field label per node, shape ``(n_w, n_gamma, n_s,
+        n_d)``.  Refused/unfilled nodes are exactly zero (`from_engine`
         leaves the value arrays zero there) and are skipped: a refused
         neighbour is a hole in the grid, not a discontinuity.
     w_max : float
@@ -1606,7 +1637,7 @@ def _assert_farfield_carrier_continuity(env_grid: np.ndarray,
         The ``n_gamma`` gamma axis, carried for parallelism with the interior
         guard; length-checked against ``shape``.
     shape : tuple[int, int, int]
-        The ``(n_gamma, n_rho, n_theta)`` spatial node-grid shape.
+        The ``(n_gamma, n_s, n_d)`` spatial node-grid shape.
 
     Raises
     ------
@@ -1616,7 +1647,7 @@ def _assert_farfield_carrier_continuity(env_grid: np.ndarray,
     ValueError
         If ``gamma_grid`` length disagrees with ``shape[0]``.
     """
-    n_gamma, _n_rho, _n_theta = shape
+    n_gamma, _n_s, _n_d = shape
     if gamma_grid.shape[0] != n_gamma:
         raise ValueError(
             f'gamma_grid length {gamma_grid.shape[0]} does not match '
@@ -1632,7 +1663,7 @@ def _assert_farfield_carrier_continuity(env_grid: np.ndarray,
         return
     top = grid[-1]
     magnitude = np.abs(top)
-    # Compare adjacent nodes along each spatial axis (gamma, rho, theta_c).
+    # Compare adjacent nodes along each spatial axis (gamma, s, d).
     for axis in range(3):
         n_axis = shape[axis]
         if n_axis < 2:
@@ -1672,7 +1703,7 @@ class FarFieldChart:
     source's nearest caustic foot and the SIGNED PERPENDICULAR DISTANCE ``d``
     to the caustic (``d > 0`` outside, ``d < 0`` inside).  ``s`` is smooth
     across the C2 curvature kinks the raw ``theta_c`` angle produced, so a
-    cubic spline in ``s`` needs no cusp-node bolt-on (`_union_cusp_nodes`).
+    cubic spline in ``s`` needs no cusp-node bolt-on.
     The chart carries the gamma-resolved arc-length map ``arc_map`` that
     defines the ``theta <-> s`` transform at every gamma; serve maps a query
     eigenframe source to ``(s, d)`` at the query's OWN gamma via
@@ -1797,25 +1828,26 @@ class FarFieldChart:
                   ) -> 'FarFieldChart':
         """Assemble a chart from prebuilt coefficient tensors and knots.
 
-        ``param_spacing`` is the mean spacing of the ``(gamma, s, d)`` grids;
-        because ``s_grid`` / ``d_grid`` are uniform linspaces the mean
-        spacing equals the grid spacing, so the exclusion-ball metric --
-        ``refused_points`` and queries are both in ``(gamma, s, d)`` -- is
-        meaningful by construction (Build 1e-farfield WP2).
+        param_spacing is the mean spacing of the (gamma, s, d) grids;
+        because s_grid / d_grid are uniform linspaces the mean spacing equals
+        the grid spacing, so the exclusion-ball metric -- refused_points and
+        queries are both in (gamma, s, d) -- is meaningful by construction
+        (Build 1e-farfield WP2).
         """
-        if not isinstance(arc_map, _FarFieldArcMap):
-            raise TypeError(
-                'FarFieldChart requires a _FarFieldArcMap arc_map; got '
-                f'{type(arc_map).__name__}.')
+        gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
+        s_grid = _validate_axis(s_grid, 's_grid')
+        d_grid = _validate_axis(d_grid, 'd_grid')
+        log_w_grid = _validate_axis(log_w_grid, 'log_w_grid')
+        arc_map = _validate_farfield_arc_map(arc_map, gamma_grid)
         param_spacing = np.array([
             float(np.mean(np.diff(gamma_grid))),
             float(np.mean(np.diff(s_grid))),
             float(np.mean(np.diff(d_grid)))])
         return cls(
-            gamma_grid=_validate_axis(gamma_grid, 'gamma_grid'),
-            s_grid=_validate_axis(s_grid, 's_grid'),
-            d_grid=_validate_axis(d_grid, 'd_grid'),
-            log_w_grid=_validate_axis(log_w_grid, 'log_w_grid'),
+            gamma_grid=gamma_grid,
+            s_grid=s_grid,
+            d_grid=d_grid,
+            log_w_grid=log_w_grid,
             real_coeffs=np.ascontiguousarray(real_coeffs, dtype=float),
             imag_coeffs=np.ascontiguousarray(imag_coeffs, dtype=float),
             knots=tuple(np.ascontiguousarray(t, dtype=float) for t in knots),
@@ -2265,6 +2297,13 @@ def _farfield_serves(chart: FarFieldChart, gamma: float, log_w_min: float,
                      y1_eig: float, y2_eig: float) -> bool:
     """Whether a far-field chart serves this candidate (steps 1,3,5,7).
 
+    Far-field ``(s, d)`` charts are certified only for positive parity.
+    A manually assembled or loaded macro-saddle-labelled `FarFieldChart`
+    therefore DECLINES here, even if its array bounds happen to match; the
+    caller falls through to the exact engine.  This is a safe compatibility
+    response for a stale artifact, while construction remains available for
+    inspection/migration rather than turning artifact loading into a crash.
+
     The source containment test is in the chart's far-field-smooth
     ``(s, d)`` axes (Build 1e-farfield WP2): the query eigenframe source is
     mapped to ``(s, d)`` at the query's OWN gamma through the chart's stored
@@ -2273,6 +2312,8 @@ def _farfield_serves(chart: FarFieldChart, gamma: float, log_w_min: float,
     deltoid edge/lobe, or a gamma outside the map) raises `LensDomainError`
     and the chart cleanly DECLINES -- the caller defers to the exact engine.
     """
+    if chart.parity != 1:
+        return False
     # (1a) gamma / log-w box containment (cheap, coordinate-free) first.
     if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
         return False
@@ -3197,8 +3238,9 @@ class LensAmplificationSurrogate:
         if chart is None:
             return np.zeros(w.shape, dtype=complex), False, None
 
-        env_flat = _evaluate_chart(chart, gamma, eta, theta,
-                                   log_w, y1_eig, y2_eig)
+        env_flat = _evaluate_chart(
+            chart, gamma=gamma, eta=eta, theta=theta, log_w_query=log_w,
+            y1_eig=y1_eig, y2_eig=y2_eig)
         definition = (chart.envelope_definition
                       if isinstance(chart, (FarFieldChart, LobeInteriorChart))
                       else None)
@@ -3248,6 +3290,10 @@ class LensAmplificationSurrogate:
         """
         for chart in self.charts:
             if not isinstance(chart, FarFieldChart):
+                continue
+            # Macro-saddle far-field charts are exact-engine-only, including
+            # stale manual/loaded records that carry otherwise valid arrays.
+            if chart.parity != 1:
                 continue
             if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
                 continue
@@ -3308,9 +3354,9 @@ class LensAmplificationSurrogate:
                 (w_flat >= w_min) & (w_flat <= w_max)):
             return np.zeros(w.shape, dtype=complex), False
 
-        env_flat = _evaluate_chart(chart, gamma, float('nan'),
-                                   float('nan'), np.log(w_flat),
-                                   y1_eig, y2_eig)
+        env_flat = _evaluate_chart(
+            chart, gamma=gamma, eta=float('nan'), theta=float('nan'),
+            log_w_query=np.log(w_flat), y1_eig=y1_eig, y2_eig=y2_eig)
         return env_flat.reshape(w.shape), True
 
     # ---- Serialization ------------------------------------------------
@@ -3503,10 +3549,12 @@ def _validate_farfield_axis_schema(tag, artifact_label: str) -> str:
     """Hard-refuse a far-field chart with an absent or unknown axis schema.
 
     Thin wrapper over `_validate_axis_schema` binding the far-field known
-    set.  Positive-parity far-field charts use piecewise caustic-fixed
-    ``(rho, theta_c)`` coordinates; a chart trained on raw eigenframe axes,
-    scalar-reach rho, or multiplicative directional rho would be queried at
-    the wrong coordinate and could return a finite-but-wrong amplification.
+    set. Positive-parity far-field charts require
+    ``'farfield_arclength_s_perp_d_framewinv'`` and use the gamma-resolved
+    far-field-smooth ``(s, d)`` transform. A chart trained on raw eigenframe
+    or retired caustic-fixed axes, or with a frame-dependent stored label,
+    would be queried or reconstructed in the wrong convention and could
+    return a finite-but-wrong amplification.
     """
     return _validate_axis_schema(
         tag, _KNOWN_FARFIELD_AXIS_SCHEMAS, f'Far-field {artifact_label}')
@@ -3518,9 +3566,9 @@ def _validate_lobe_axis_schema(tag, artifact_label: str) -> str:
     Thin wrapper over `_validate_axis_schema` binding the lobe known set.
     Macro-saddle lobe-interior charts are queried on lobe-local
     ``(rho_lobe, theta_local)`` coordinates centred on the lobe centroid; a
-    chart stamped with the far-field caustic-fixed tag, an origin-centred
-    axis, or an old lobe tag would be reconstructed at the wrong coordinate
-    and must hard-refuse at load.
+    chart stamped with the far-field smooth tag, an origin-centred axis, or
+    an old lobe tag would be reconstructed at the wrong coordinate and must
+    hard-refuse at load.
     """
     return _validate_axis_schema(
         tag, _KNOWN_LOBE_AXIS_SCHEMAS, f'Lobe-interior {artifact_label}')
