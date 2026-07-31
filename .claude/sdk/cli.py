@@ -110,20 +110,32 @@ def main():
 
 
 class _TeeWriter:
-    """Write to both a real stream and a shared log file simultaneously."""
+    """Write to both a real stream and a shared log file simultaneously.
+
+    The real stream (stdout) may be /dev/null or a broken pipe when the
+    orchestrator is backgrounded by .codex/build or .opencode/build.
+    The LOG is what matters; a BrokenPipeError on stdout must not kill
+    the build.
+    """
 
     def __init__(self, real_stream, log_file):
         self._real = real_stream
         self._log = log_file
 
     def write(self, text: str) -> int:
-        self._real.write(text)
+        try:
+            self._real.write(text)
+        except (BrokenPipeError, OSError):
+            pass
         self._log.write(text)
         self._log.flush()
         return len(text)
 
     def flush(self) -> None:
-        self._real.flush()
+        try:
+            self._real.flush()
+        except (BrokenPipeError, OSError):
+            pass
         self._log.flush()
 
 
