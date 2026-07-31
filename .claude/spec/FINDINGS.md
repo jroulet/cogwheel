@@ -3273,3 +3273,106 @@ Count the *distinct inputs* your terminators consume, not the terminators. And
 a retry that resumes a session can return a DIFFERENT SHAPE than the original
 call — every parser downstream of a retry needs a defined answer for "the text
 is real but the structure is missing", and that answer must never be a verdict.
+
+## F057 — a test spec that names no file was free work with no budget (2026-07-30)
+
+**Where:** `orchestrator.py::_group_test_specs`, `_test_dev_budget`.
+
+Any domain-test description not literally quoting a `test_<x>.py` filename was
+routed to `cross_suite` — appended to the agent's prompt as REAL WORK, counted
+by neither the shard cap nor the `60 + 20*n` budget.
+
+1e-farfield's approved plan carried 11 substantive descriptions; **10 named no
+file.** The sharder logged `1 spec(s) in 1 shard(s) (cap 3/agent)` and budgeted
+**80 turns for a load needing 250 across 4 shards**. `test_dev-6` and
+`test_dev-7` each burned 80 turns and returned ZERO characters; the build died
+with 1352 lines of production code written and not one test authored.
+
+Measured from the logs: `test_dev-6` made its first WRITE at tool call **61 of
+80** (76% of budget spent orienting), `test_dev-7` at call 62. They were starved
+before they began. The shard cap exists precisely to prevent that death — its
+own comment cites 7b, the 8a near-miss and 8b-levers — and never engaged,
+because the quantity it keys on had been collapsed upstream.
+
+**Fix.** `cross_suite` is for genuinely UNIVERSAL rules ("ALL SUITES: 79
+columns"), cheap to repeat and needing to reach every shard. A substantive
+description is one test's worth of work: with exactly one suite in play it can
+only belong there, so it is assigned and COUNTED. Cross-suite specs now scale
+every shard's budget. The first attempt folded ALL unscoped specs in, which
+would have applied a universal style guard to one shard instead of all —
+`test_test_dev_split` caught it, so the distinction is now an explicit
+predicate with tests on both sides.
+
+**Not just test_dev.** The same logs show `coder-4` (110 tool calls / 105
+turns) and `coder-2` (156 / 95) exhausting while making their first edit at 8%
+and 15% — they started fast and ran out doing real work. Coder budgets are a
+free-form Architect estimate that does not scale with the WP's declared file
+count, while `_test_dev_budget` scales with spec count. The mechanism exists on
+one side of the DAG and not the other.
+
+## F058 — every guard that failed today was disarmed by a quantity its producer controlled (2026-07-30)
+
+Three guards failed in one day. Each was correctly written, each had a passing
+test, and each was silently disabled by an upstream detail nobody had connected
+to it.
+
+| | the guard | keyed on | who could collapse it |
+|---|---|---|---|
+| F055 | watchdog kills a wedged build | the orchestrator's process NAME | `launch_build.sh` chose the entrypoint |
+| F056 | 4 revision-loop exits | a non-empty `findings` list | the Inspector parser's fallback |
+| F057 | shard cap + turn budget | a filename appearing in prose | the Architect writing the description |
+
+    guard_engages = f(X)
+    ...where X is produced upstream, incidentally, by something that does not
+    know the guard exists.
+
+No alarm fires when `X` reaches the disabling value, because staying quiet IS
+the guard's success state. Silence means both "working" and "disarmed", and the
+two are indistinguishable from outside.
+
+**What made each expensive was the false assurance, not the defect.**
+`launch_build.sh` PRINTED `(watchdog 1200s)`. The revision loop PRINTED
+`revision 3/2` as though a budget were enforced. The sharder PRINTED
+`1 spec(s) in 1 shard(s) (cap 3/agent)` — quoting the cap it was failing to
+apply. Each told the reader the guard was working, in the moment it was not.
+
+**Rule.** Do not key a guard on a quantity the upstream producer sets
+incidentally. Prefer one it cannot avoid emitting (a log path is unique per
+build and already on the command line; an absent finding is representable as a
+synthesized finding). Where that is impossible, the guard must ANNOUNCE ITS OWN
+ARMING with the value it armed on — `guarding PID 1494873`, not
+`(watchdog 1200s)` — so the log carries evidence rather than assertion.
+
+**Corollary.** Each of these had a test built from the author's IDEA of the
+upstream input; none used the shape the real producer emits. A guard's test
+needs one case constructed by the REAL upstream path. Compare F049 (a guard
+placed where it could not run) and F052 (a tier no routine job ran).
+
+## F059 — a build waiting on a human decision is indistinguishable from a wedge (2026-07-30)
+
+**Where:** `gates.py::_file_based_approval`, `_file_based_escalation`.
+
+Both gates polled for a decision file in SILENCE. The watchdog's only liveness
+signal is log mtime, so a healthy build blocked on the driver looks exactly
+like a hang. At 21:55:22 the watchdog killed `1e_farfield_port` mid-escalation,
+after precisely 1200s — the time it took the driver to diagnose the finding the
+build was asking about.
+
+`launch_build.sh` had carried the warning in prose for weeks: "Respond
+promptly: the watchdog staleness clock runs during the wait." That asks a human
+to be fast; it does not resolve the conflict. It went unnoticed because the
+watchdog had been dead since 07-27 (F055) — **repairing one guard exposed a
+latent conflict with another, and the first healthy build the fixed watchdog
+ever saw is the one it killed.**
+
+**Fix.** `_gate_wait` owns both poll loops and emits a heartbeat every 4
+minutes: `still waiting for <what> (Nm elapsed) — build is alive, not stale`.
+The log advances, and the wait becomes VISIBLE with elapsed time instead of
+reading as silence. `tests/test_gate_heartbeat.py` asserts what the watchdog
+actually reads — that something reaches stdout well inside the 1200s window,
+that beats repeat, that a promptly-answered gate stays quiet — with a contrast
+control proving the old loop emitted nothing across the entire kill window.
+
+**Rule.** Any state where the pipeline BLOCKS on an external decision must emit
+a liveness beat, or every watchdog downstream will read it as death. Waiting is
+not idling.

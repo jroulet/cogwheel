@@ -12,16 +12,40 @@ This build writes NO new acceptance tests. Those are the NEXT build
 bundled the port with 11 acceptance specs, and its Test Developer died twice at
 `error_max_turns` with zero output.
 
-## Restore first
+## Restore first — HALF THE PORT IS ALREADY DONE
 
-    git checkout refs/sdk/coder_checkpoint -- \
-        cogwheel/lensing/surrogate.py \
-        cogwheel/lensing/surrogate_census.py \
-        cogwheel/lensing/surrogate_training.py \
-        .claude/spec/DATA_CONTRACTS.yaml
+A previous attempt restored the implementation and ported three of the six test
+files before the watchdog killed it mid-escalation (F059, now fixed). That work
+is preserved. Start from it:
 
-Do NOT restore `cogwheel/tests/test_lensing_surrogate.py` from the ref
-wholesale — inspect that diff and take only what the signature change requires.
+    git checkout refs/sdk/farfield_port_wip -- \
+        cogwheel/lensing/ cogwheel/tests/ .claude/spec/DATA_CONTRACTS.yaml
+
+ALREADY PORTED — do not redo, but DO re-verify they still pass:
+    test_lensing_farfield_envelope.py, test_lensing_surrogate_census.py,
+    test_lensing_exterior_windows.py
+
+REMAINING:
+    test_lensing_exterior_admission.py
+    test_lensing_surrogate.py
+    test_lensing_surrogate_lobe.py
+    test_lensing_surrogate_training.py  <- SEE BELOW, this one is not optional
+
+## test_lensing_surrogate_training.py is IN scope (the last plan got this wrong)
+
+The previous plan scoped it out because the gate showed 0 failures there. Its
+tests are SKIPPED (gated tier), so they CANNOT fail — that is the whole reason
+the drift hook exists. Five classes reference the changed API and are silently
+broken:
+
+    ServeFractionTestCase             select_chart, from_values
+    EpsRegistrationGateTestCase       select_chart
+    SelfFalsificationTestCase         select_chart, from_values
+    ArcLengthBoundShiftMarginTestCase from_values
+    ArcLengthNodeEfficiencyTestCase   from_values
+
+Run `python .claude/hooks/check_gated_test_drift.py` with the port staged to
+get the current authoritative list; port every entry it names.
 
 Read the restored code before changing it. It is a real implementation, not a
 sketch: `_caustic_arclength_map` (gamma-RESOLVED, a 2-D `s(theta, gamma)` table
