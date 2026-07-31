@@ -35,6 +35,12 @@ if [[ -z "${AGENT_PROVIDER:-}" && -f "$REPO_ROOT/.env" ]]; then
 fi
 export AGENT_PROVIDER="${AGENT_PROVIDER:-claude}"
 
+# Ensure provider CLIs are on PATH (opencode installs to ~/.opencode/bin,
+# codex to ~/.local/bin or similar — non-interactive shells may miss them).
+for _bindir in "$HOME/.opencode/bin" "$HOME/.local/bin"; do
+  [[ -d "$_bindir" ]] && [[ ":$PATH:" != *":$_bindir:"* ]] && export PATH="$_bindir:$PATH"
+done
+
 # Auto-start opencode serve if needed for callbacks. The serve API is how the
 # resume driver injects messages that trigger agent turns. Without it, builds
 # complete but can't notify the interactive driver.
