@@ -362,6 +362,33 @@ def prompt_user_approval(
         print("Please enter 'y' to approve, 'n' to reject, or 'q' to quit.")
 
 
+def _gate_wait(what: str, dir_path: Path, poll: int = 5, beat: int = 240):
+    """Poll a decision gate, EMITTING A HEARTBEAT so the build reads as alive.
+
+    A build blocked on a human decision is not stale — it is waiting. But the
+    watchdog's only liveness signal is log mtime, so a silent poll loop looks
+    identical to a wedge. On 2026-07-30 the escalation gate sat quiet for
+    1200s while the driver diagnosed the finding, and the watchdog killed a
+    healthy build mid-decision (F059). `launch_build.sh` had warned about this
+    in prose for weeks — "Respond promptly: the watchdog staleness clock runs
+    during the wait" — which is a request that a human be fast, not a fix.
+
+    The heartbeat also makes the WAIT VISIBLE: an unanswered gate now says so
+    every few minutes, with elapsed time, instead of looking like a hang.
+
+    Yields forever; the caller returns out of the loop when a decision lands.
+    """
+    waited = 0
+    while True:
+        yield waited
+        time.sleep(poll)
+        waited += poll
+        if waited % beat == 0:
+            print(f"[file-based] still waiting for {what} "
+                  f"({waited // 60}m elapsed) — build is alive, not stale",
+                  flush=True)
+
+
 def _file_based_approval(plan_summary: str, dir_path: Path) -> tuple[bool, str]:
     """Write plan and poll for approval/rejection signal files."""
     dir_path.mkdir(parents=True, exist_ok=True)
@@ -375,7 +402,7 @@ def _file_based_approval(plan_summary: str, dir_path: Path) -> tuple[bool, str]:
     print(f"\n[file-based] Plan written to {plan_file}")
     print(f"[file-based] Waiting for approval signal in {dir_path} ...")
 
-    while True:
+    for beat in _gate_wait("plan approval", dir_path):
         if approved_file.exists():
             approved_file.unlink()
             ready_file.unlink(missing_ok=True)
@@ -387,7 +414,7 @@ def _file_based_approval(plan_summary: str, dir_path: Path) -> tuple[bool, str]:
             ready_file.unlink(missing_ok=True)
             print(f"[file-based] Plan rejected. Feedback: {feedback or '(none)'}")
             return False, feedback
-        time.sleep(5)
+    raise AssertionError("unreachable")  # _gate_wait yields forever
 
 
 # ── Escalation decision gate ────────────────────────────────────────────────
@@ -483,7 +510,7 @@ def _file_based_escalation(
     print(f"[file-based] Waiting for a decision file in {dir_path} "
           f"(escalation_accept / escalation_fix / escalation_abort) ...")
 
-    while True:
+    for _ in _gate_wait("an escalation decision", dir_path):
         if accept_file.exists():
             accept_file.unlink()
             ready_file.unlink(missing_ok=True)
@@ -501,7 +528,8 @@ def _file_based_escalation(
             ready_file.unlink(missing_ok=True)
             print("[file-based] Escalation aborted.")
             return "abort", ""
-        time.sleep(5)
+        # No sleep here: _gate_wait owns the poll interval and the heartbeat.
+    raise AssertionError("unreachable")  # _gate_wait yields forever
 
 
 # ── Outside Inspector merge ─────────────────────────────────────────────────
