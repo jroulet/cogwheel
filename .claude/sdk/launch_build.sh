@@ -181,9 +181,17 @@ elif [[ "$AGENT_PROVIDER" == "opencode" && -n "${OPENCODE_SESSION_ID:-}" && "${O
 fi
 if [[ -n "$_RESUME_HELPER" && -f "$_RESUME_HELPER" ]]; then
   _RESUME_EVENT_ID="build-$(date +%s%N)-$$-${RANDOM}"
+  # Can't use `wait` — after disown the build PID is no longer a child.
+  # Poll /proc/<pid> instead (lightweight, no busy-wait — 2s interval).
   (
-    wait "$BUILD_PID" 2>/dev/null
-    _STATUS=$?
+    while kill -0 "$BUILD_PID" 2>/dev/null; do sleep 2; done
+    # Recover exit status from the log's terminal marker if possible.
+    if grep -qaE "^(\[[^]]*\])?\s*(===\s*)?(BUILD REPORT|Build failed|Build cancelled|KILLED BY WATCHDOG)" "$LOG" 2>/dev/null; then
+      _STATUS=0
+      grep -qa "Build failed\|KILLED BY WATCHDOG\|Build cancelled" "$LOG" 2>/dev/null && _STATUS=1
+    else
+      _STATUS=1
+    fi
     "$_RESUME_HELPER" build_terminal \
       "exit_status=$_STATUS log=$LOG" "$_RESUME_EVENT_ID"
   ) </dev/null >/dev/null 2>&1 &
