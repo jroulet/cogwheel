@@ -410,6 +410,16 @@ def _file_based_approval(plan_summary: str, dir_path: Path) -> tuple[bool, str]:
     plan_file.write_text(plan_summary)
     ready_file.touch()
     print(f"\n[file-based] Plan written to {plan_file}")
+    if _notify_codex_driver(
+        "plan_ready",
+        f"approval_dir={dir_path} plan={plan_file}",
+    ):
+        print("[file-based] Detached Codex plan-ready callback armed.")
+    if _notify_opencode_driver(
+        "plan_ready",
+        f"approval_dir={dir_path} plan={plan_file}",
+    ):
+        print("[file-based] Detached OpenCode plan-ready callback armed.")
     print(f"[file-based] Waiting for approval signal in {dir_path} ...")
 
     for beat in _gate_wait("plan approval", dir_path):

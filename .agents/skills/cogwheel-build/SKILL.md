@@ -69,10 +69,11 @@ How to know when the build needs attention (plan approval, terminal event):
 - **Claude Code**: Use the native Monitor tool to watch for `plan_ready` or
   terminal markers in the log. Event-driven — no polling.
 - **Codex**: The `CODEX_THREAD_ID` resume callback injects a message into
-  this thread when the build escalates or finishes.
-- **OpenCode**: No native Monitor tool or reliable message injection. Check
-  the build status (approval dir + log tail) at the start of each user
-  interaction. Do NOT poll in a bash loop.
+  this thread on plan_ready, escalation, and terminal.
+- **OpenCode**: The `OPENCODE_SESSION_ID` resume callback injects a message
+  via the serve API (POST /session/<id>/message) on plan_ready, escalation,
+  and terminal. Requires `opencode serve` running with
+  `OPENCODE_SERVER_PASSWORD` set. Fully autonomous — no polling needed.
 
 Health = log mtime advancing, NOT pgrep. The watchdog kills stalled builds at
 the configured threshold (default 1200s).
