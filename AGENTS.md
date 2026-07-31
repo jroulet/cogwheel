@@ -156,9 +156,9 @@ To launch a build as the interactive driver:
    Builds are long-running — detach them so they survive tool-call timeouts:
    - Claude: Use `Bash` with `run_in_background: true`:
      `.claude/build "@.claude/handoff/<slug>.md" --approval-dir .claude/build/`
-   - Codex/OpenCode: Wrap in `screen -dmS`:
-     `screen -dmS <slug> bash -c 'CODEX_THREAD_ID=<thread> .codex/build "@.claude/handoff/<slug>.md" --approval-dir /tmp/<slug>_approval > /tmp/<slug>_stdout.log 2>&1'`
-     `screen -dmS <slug> bash -c 'OPENCODE_SESSION_ID=<session> .opencode/build "@.claude/handoff/<slug>.md" --approval-dir /tmp/<slug>_approval > /tmp/<slug>_stdout.log 2>&1'`
+   - Codex/OpenCode: Use `nohup ... & disown`:
+     `nohup bash -c 'CODEX_THREAD_ID=<thread> .codex/build "@..." --approval-dir /tmp/<slug>_approval' > /tmp/<slug>_stdout.log 2>&1 & disown`
+     `nohup bash -c 'OPENCODE_SESSION_ID=<session> .opencode/build "@..." --approval-dir /tmp/<slug>_approval' > /tmp/<slug>_stdout.log 2>&1 & disown`
 3. When `<approval-dir>/plan_ready` appears, read `plan.json` and evaluate.
 4. Approve: `touch <approval-dir>/plan_approved`.
    Reject: `echo "feedback" > <approval-dir>/plan_rejected`.

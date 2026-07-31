@@ -20,16 +20,18 @@ Use the provider-appropriate launcher. Builds are long-running and MUST be
 detached from the interactive shell so they survive tool-call timeouts:
 
 - **Claude Code**: Use `Bash` with `run_in_background: true` (native feature).
-- **OpenCode/Codex**: Wrap in `screen -dmS <name> bash -c '...'` so the build
-  runs in a detached screen session. Do NOT call the build script directly from
-  a bash tool call — the tool timeout will kill it.
+- **OpenCode/Codex**: Use `nohup ... & disown` so the build survives
+  independently. Do NOT call the build script directly from a bash tool
+  call — the tool timeout will kill it.
 
 ```bash
 # OpenCode example:
-screen -dmS build_1b bash -c 'OPENCODE_SESSION_ID=<session> .opencode/build "@.claude/handoff/<brief>.md" --approval-dir /tmp/<slug>_approval > /tmp/<slug>_stdout.log 2>&1; echo "EXIT: $?" >> /tmp/<slug>_stdout.log'
+nohup bash -c 'OPENCODE_SESSION_ID=<session> .opencode/build "@.claude/handoff/<brief>.md" --approval-dir /tmp/<slug>_approval' > /tmp/<slug>_stdout.log 2>&1 &
+disown
 
 # Codex example:
-screen -dmS build_1b bash -c 'CODEX_THREAD_ID=<thread> .codex/build "@.claude/handoff/<brief>.md" --approval-dir /tmp/<slug>_approval > /tmp/<slug>_stdout.log 2>&1; echo "EXIT: $?" >> /tmp/<slug>_stdout.log'
+nohup bash -c 'CODEX_THREAD_ID=<thread> .codex/build "@.claude/handoff/<brief>.md" --approval-dir /tmp/<slug>_approval' > /tmp/<slug>_stdout.log 2>&1 &
+disown
 ```
 
 - `.claude/build "<task>"` only when the user explicitly wants the Claude pipeline.
