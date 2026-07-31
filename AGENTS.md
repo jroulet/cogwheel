@@ -147,6 +147,27 @@ shallow:
   build-killer (deep transcripts) and an unverifiable gate (inspectors
   cannot run it).
 
+### Build launch protocol (all providers)
+
+To launch a build as the interactive driver:
+
+1. Write the brief to `.claude/handoff/<slug>.md`.
+2. Launch with `--approval-dir` (NEVER `--yes` unless the user explicitly says so):
+   - Claude: `.claude/build "@.claude/handoff/<slug>.md" --approval-dir .claude/build/`
+   - Codex: `CODEX_THREAD_ID=<this_thread> .codex/build "@.claude/handoff/<slug>.md" --approval-dir /tmp/<slug>_approval`
+   - OpenCode: `OPENCODE_SESSION_ID=<this_session> .opencode/build "@.claude/handoff/<slug>.md" --approval-dir /tmp/<slug>_approval`
+3. When `<approval-dir>/plan_ready` appears, read `plan.json` and evaluate.
+4. Approve: `touch <approval-dir>/plan_approved`.
+   Reject: `echo "feedback" > <approval-dir>/plan_rejected`.
+   Escalate to user: only if genuinely unsure.
+5. Monitor Phase 2 via log tail. The watchdog kills stalled builds.
+6. On terminal, assess the result and report to the user.
+
+The driver (you, the interactive agent) reviews plans autonomously. Only
+escalate to the human user when your own judgment is insufficient — this
+should be rare. The human is in the chain of command but not in the
+approval loop for routine plans.
+
 <!-- END AGENT INFRA SECTION -->
 
 ## Testing
