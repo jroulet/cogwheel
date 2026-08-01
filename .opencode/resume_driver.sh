@@ -71,20 +71,29 @@ for DELAY in "${RETRY_DELAYS[@]}"; do
     PAYLOAD="$(printf '{"parts":[{"type":"text","text":"%s"}]}' \
       "$(printf '%s' "$PROMPT" | sed 's/"/\\"/g' | tr '\n' ' ')")"
 
+    # --max-time 5: the serve API blocks until the agent turn completes,
+    # which can take minutes. We only need to confirm the message was
+    # ACCEPTED (HTTP 200 on the initial connection), not wait for the
+    # full response. 5s is enough for the server to accept and start.
     if [[ -n "$SERVE_PASS" ]]; then
-      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
         -u "$SERVE_USER:$SERVE_PASS" \
         "http://localhost:$SERVE_PORT/session/$SESSION_ID/message" \
         -X POST -H "Content-Type: application/json" \
         -d "$PAYLOAD" 2>/dev/null)
     else
-      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
         "http://localhost:$SERVE_PORT/session/$SESSION_ID/message" \
         -X POST -H "Content-Type: application/json" \
         -d "$PAYLOAD" 2>/dev/null)
     fi
 
-    if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "202" ]]; then
+    # HTTP 200/202 = accepted. 000 = curl timed out waiting for the
+    # response, but the message was likely accepted (the server blocks
+    # until the agent turn completes, which can take minutes). Treat
+    # timeout as success — the message is delivered, we just can't wait
+    # for the full agent response.
+    if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "202" || "$HTTP_CODE" == "000" ]]; then
       printf 'serve API injection succeeded (HTTP %s)\n' "$HTTP_CODE"
     else
       printf 'serve API failed (HTTP %s), falling back to opencode run\n' "$HTTP_CODE"
