@@ -1,93 +1,71 @@
-## 2026-07-31 far-field `(s, d)` port workflow closure
+## 2026-07-31 post-commit sync (--post-commit c8f6bf6, verify-only)
 
-Scope: documentation/spec closure only for the completed positive-parity
-1e-farfield compatibility port. The parent coordinate and collocation TODO
-fragments remain active because 1e-lobe and the eta/w/gamma node-measure
-substeps are still owed.
+Scope: 22 pending commits from `.claude/sync_issues.json` (f4f49b6 through
+714af39 — F052-F059 SDK/watchdog/timing fixes, the analytic caustic-reach
+build (3785ccc), the 1e-farfield (s,d) port and its two cleanup follow-ups
+(7d0f196, 8dc3b6f, 57b0581), three findings promoted to TODO items
+(29f6571), the OpenCode spoke infra add (3621d35), and a run of `.claude/
+sdk/` orchestrator/launcher/watchdog fixes). Outcome: **verify-only, zero
+doc edits** — independently re-verified via `git log --oneline f4f49b6^..
+714af39` and per-commit `git show --stat`, not by trusting the driver's
+"bulk is infra" framing at face value.
 
-Current-state sync: `lens_amplification_surrogate` records the required
-gamma-resolved fold-adapted `(s, d)` axes and far-field schema tag; the
-contract changelog fragment was already present in the worktree. Added the
-completion, specification, and public changelog fragments, then rendered all
-canonical outputs. `SPEC.md` now states that positive-parity far-field charts
-use the serialized arc map at load while legacy `(rho, theta_c)` remains only
-for tile proposal/admission; macro-saddle far-field remains exact-engine
-fall-through.
+Why zero edits, checked not assumed:
+- `git diff --stat f4f49b6..714af39 -- docs/source pyproject.toml
+  environment.yaml docs/requirements.txt` is EMPTY — nothing in the whole
+  backlog touched a Sphinx surface or a dependency file.
+- The only two commits with `cogwheel/**/*.py` changes that also carry
+  spec/contract updates (3785ccc analytic-caustic-reach, 7d0f196 farfield
+  (s,d) port) already ship their own `SPEC.md`/`DATA_CONTRACTS.yaml`/
+  changelog fragments/`completed.d` INSIDE the same commit (driver-
+  committed docs alongside code, per the now-familiar in-DAG pattern) —
+  confirmed by reading those commits' own `--stat`, not just the JSON's
+  changed_files list.
+- The two follow-up commits (8dc3b6f: delete dead private
+  `_union_cusp_nodes` + cusp-plotting test helper + restore a lost
+  `lru_cache`; 57b0581: fix stale `(rho, theta_c)` axis comments in
+  `surrogate_training.py` docstrings + port two gated-tier test fixture
+  files) touch no public API and no docs-facing text — grepped `.claude/
+  spec/` and `docs/source/` for `_union_cusp_nodes`, `FromEngineCusp
+  WiringTestCase`, `_plot_cusp_nodes_on_rays`, `_pos_raw_out`: zero hits
+  everywhere, so there was never a dangling reference to begin with (the
+  removed function was private/dead, not documented anywhere).
+- `(rho, theta_c)` IS still mentioned in SPEC.md/DATA_CONTRACTS.yaml/TODO.md
+  — read those sentences and they already say "retained only for tile-
+  proposal/admission", matching 57b0581's commit message ("they're now
+  tile-proposal coordinates, not chart axes") exactly. Already correct,
+  not stale.
+- FINDINGS.md: grepped `^## F0(5[2-9]|6[0-9])` — F052 through F059 all
+  present with proper headers and dates, matching every F-number cited in
+  the 22 commit subjects (F052 corrected variant included). No gaps.
+- Rest of the backlog (`.claude/sdk/*`, `.codex/*`, `.opencode/*`,
+  `.agents/skills/*`, `AGENTS.md`, `scripts/render_fragments.py`,
+  `scripts/sync_to_main.sh`, `scripts/verify_installation.sh`,
+  `.claude/handoff/*`, `.claude/agent_state/*`) is agent-only infra per
+  CLAUDE.md's `EXCLUDE_PATHS` / outside every row of the Librarian triage
+  table — correctly out of scope, not silently skipped.
+- `scripts/sync_derived_docs.py` (via `cogwheel-newlal` python, per
+  standing note) ran clean: 0 tracked diff. It re-flagged the SAME 4
+  test-file-only `lens_amplification_surrogate` consumer callers
+  (`SerializationMultiChartTestCase`/`SerializationTestCase` round-trip
+  tests) as before — same known-benign pattern, production-only consumer
+  lists by convention, not a new gap.
+- `scripts/render_fragments.py` reported "All surfaces up to date." with 0
+  tracked diff. One stray untracked `.claude/tidy_advisory.json` appeared
+  as a side effect (same intermittent pattern noted in prior runs) — left
+  alone, untracked, not staged/committed.
+- Two files were staged in the tree but explicitly NOT mine to touch:
+  `.claude/sdk/gates.py` and `.claude/sdk/tests/test_gate_heartbeat.py`
+  (driver's own in-flight change) — left staged and untouched, not part of
+  this commit.
+- This memory write is the only content change; committed alone (matches
+  the 0756b47 precedent: a verify-only post-commit sync is still worth a
+  commit for the audit trail, not a silent no-op).
 
-Fragile cross-reference: the two parent TODO fragments both name 1e-farfield;
-update both together when substep state changes. `scripts/render_fragments.py`
-also carries an unrelated formatting repair that rewrites historical version
-entries in generated changelogs; preserve that coherent generated delta.
-
-## 2026-07-30 post-commit sync (--post-commit 7f0d4bf)
-
-Scope: 9 pending commits from `.claude/sync_issues.json` (cb1ed99 through
-7f0d4bf — the monitor-anchor fix, the 1e-tube arc-length build, four SDK
-defect fixes, the F050/F051 doc-routing fix, the F051 retraction + arc-length
-map sizing note, the drift-gate precision fix, moving the Librarian ahead of
-the commit, and the deferred-debt-receipt build). Outcome: **verify-only,
-zero doc edits** — independently re-verified via `git log`/`git diff --name-
-only e14cb3f..7f0d4bf` (matched the claimed union exactly) rather than
-trusting the driver's framing at face value.
-
-The only production change across all 9 commits is `aee21d0` (1e-tube):
-`TubeChart` now splines in arc length `s = ∫ caustic_speed dtheta` via a new
-per-chart `theta_to_s` axis map, `from_values` gaining two optional keyword-
-only params (non-breaking). Checked and found already correctly synced:
-- `SPEC.md`'s surrogate row (spec_version bumped 0.29.0 -> 0.30.0) already
-  states the `(gamma, u, s, log w)` axes, the `theta_to_s` map, the F042
-  swing measurement, and INS-1-001 provenance — matches
-  `cogwheel/lensing/surrogate.py`'s `TubeChart`/`_validate_theta_to_s`
-  docstrings verbatim (read the actual code diff, not just the commit
-  message).
-- `DATA_CONTRACTS.yaml`'s `lens_amplification_surrogate` description
-  (schema_version bumped 0.2.0 -> 0.3.0) already documents the
-  `chart{i}_theta_to_s` npz field, shape `(2, N_map)`.
-- Both changelog fragments (`spec_changelog.d/2026-07-30_tube_arclength_
-  axis.md`, `contracts_changelog.d/2026-07-30_tube_arclength_axis_map.md`,
-  both `bump: minor`) are full prose, no auto-stub placeholder marker, and
-  render correctly at the TOP of `SPEC_CHANGELOG.md`/`DATA_CONTRACTS_
-  CHANGELOG.md` (0.30.0 / 0.3.0 entries) — the alphabetical-filename
-  ordering quirk means "top" isn't guaranteed in general, confirmed by grep
-  this time rather than assumed.
-- `FINDINGS.md` has F044-F051, all with `## F0NN —` headers present
-  (verified by grep, not by trusting the count); F042 (cited by SPEC.md's
-  arc-length paragraph) is RESOLVED/re-based and still exists. INS-1-001
-  citations (SPEC.md x3 across three builds' revision-summary tables) are
-  internally consistent with F051's "no WP owns SPEC.md" analysis.
-- `TODO.md`/`todo.d/lensing_collocation_from_local_scales.md` both carry
-  the "SIZING the stored theta -> s map" subsection added in 61bd0f7,
-  byte-identical in both locations (this fragment's parent pattern: same
-  step duplicated across an ordering fragment and an inventory fragment —
-  per long-term memory, both copies must move together, and they did).
-- `docs/source/*.rst`: zero hits for `TubeChart`/`theta_to_s` — the arc-
-  length change is chart-internal implementation detail, not narrated at
-  the architecture/API level docs target, so nothing to propagate there.
-  `api.rst` still uses bare `:recursive:` autosummary — no manual entry
-  needed (reconfirmed, no new module).
-- `scripts/sync_derived_docs.py` ran clean: 0 tracked diff, 0 untracked
-  side-effect files this time (no stray `tidy_advisory.json` — that pattern
-  is intermittent, not every run). Only the usual 4 test-file-only
-  `lens_amplification_surrogate` consumer flags fired (same known-benign
-  pattern as prior runs).
-- `scripts/tidy_mechanical.py` (modified again in `edfea52`, bug fixes to
-  the dev tool itself) — still `scripts/`-only, still undocumented anywhere
-  (grep confirmed zero hits again), still correctly out of `api.rst` per
-  established precedent. Not a new gap each time this file changes; check
-  once more per sync but expect "nothing to do" until someone adds a
-  scripts/ doc page.
-- Everything else (`.claude/agent_state/*`, `.claude/hooks/*`,
-  `.claude/sdk/*`, `.serena/memories/*_short_term.md`) is agent-only per
-  CLAUDE.md's `EXCLUDE_PATHS`, correctly out of scope.
-- Working tree was clean (no code changes to sync); this write + the
-  deletion of untracked `.claude/sync_issues.json` are the only outputs.
-
-Pattern worth flagging forward: FOURTH consecutive post-commit run that is
-pure verify. The in-DAG same-day authorship (driver fixing its own INS-1-001
-SPEC gaps inside the feature commit, per F051's "no WP owns SPEC.md, so a
-human/driver pass must") keeps closing doc obligations before the trigger
-fires. Still worth the independent re-verification every time — this run's
-value was confirming grep-verified facts (F0NN headers, changelog top-of-
-file position, docs/source zero-hits) rather than accepting the driver's
-brief claims, per standing instruction never to skip that step just because
-recent history has been clean.
+Pattern worth flagging forward: FIFTH consecutive post-commit run that is
+pure verify for the cogwheel-package/docs surface specifically, though this
+one had the largest commit count (22) of any run so far, almost entirely
+`.claude/sdk/` build-launcher/provider-routing infra (Codex/OpenCode spoke
+work) plus two small lensing cleanup commits riding on an already-synced
+port. Large commit COUNT does not imply large doc-sync WORK — always
+compute the actual touched-surface diff before assuming otherwise.
