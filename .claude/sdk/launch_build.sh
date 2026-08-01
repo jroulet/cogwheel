@@ -51,8 +51,10 @@ if [[ "$AGENT_PROVIDER" == "opencode" ]]; then
       echo "WARNING: OPENCODE_SERVER_PASSWORD not set — serve API callbacks won't work" >&2
     else
       echo "Starting opencode serve on port $SERVE_PORT..."
-      OPENCODE_SERVER_PASSWORD="${OPENCODE_SERVER_PASSWORD}" \
-        opencode serve --port "$SERVE_PORT" --hostname 127.0.0.1 \
+      # Must run from REPO_ROOT so it loads .opencode/opencode.json
+      # (MCP/Serena config, permissions, instructions).
+      (cd "$REPO_ROOT" && OPENCODE_SERVER_PASSWORD="${OPENCODE_SERVER_PASSWORD}" \
+        opencode serve --port "$SERVE_PORT" --hostname 127.0.0.1) \
         > /tmp/opencode_serve.log 2>&1 &
       _SERVE_PID=$!
       disown $_SERVE_PID
