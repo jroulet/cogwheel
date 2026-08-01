@@ -131,9 +131,12 @@ def model_for_role(
 ) -> str:
     """Resolve the effective Codex model for one build role."""
 
+    override = (explicit_override or "").strip()
+    if override:
+        # Translate Claude model names to Codex equivalents.
+        return _CLAUDE_TO_CODEX_MODEL.get(override, override)
     return (
-        (explicit_override or "").strip()
-        or _role_override("CODEX_MODEL", role)
+        _role_override("CODEX_MODEL", role)
         or os.environ.get("CODEX_MODEL", "").strip()
         or CODEX_ROLE_MODELS.get(role, "")
     )

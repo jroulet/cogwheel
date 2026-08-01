@@ -142,9 +142,12 @@ def model_for_role(
 ) -> str:
     """Resolve the effective OpenCode model for one build role."""
 
+    override = (explicit_override or "").strip()
+    if override:
+        # Translate Claude model names to OpenCode equivalents.
+        return _CLAUDE_TO_OPENCODE_MODEL.get(override, override)
     return (
-        (explicit_override or "").strip()
-        or _role_override("OPENCODE_MODEL", role)
+        _role_override("OPENCODE_MODEL", role)
         or os.environ.get("OPENCODE_MODEL", "").strip()
         or OPENCODE_ROLE_MODELS.get(role, "")
     )
