@@ -200,3 +200,13 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   docstring claiming "always raises exactly at the edge" is true only on
   one side; the honest contract is a disjunction (raises OR |y'| exceeds
   a divergence floor), not an unconditional raise.
+- `reconstruct_farfield` lives in `chang_refsdal/channels.py` (7 args incl
+  t_min), NOT surrogate.py. `FarFieldChart.from_values` is keyword-only
+  with required `arc_map` (_FarFieldArcMap) + gamma_grid/s_grid/d_grid axes.
+- `LobeInteriorChart` sqrt-edge coordinate (Build 1e-lobe): s = sqrt(span)
+  - sqrt(theta_max - theta) in surrogate.py; V1 schema has theta_to_s=None
+  (identity path); current schema requires theta_to_s key in npz. Round-
+  trip error at machine epsilon (~3e-17). F042 knife-edge sensitivity IS a
+  production phenomenon at cusp-adjacent tiles (12+ nodes); smoke-scale
+  tests (7 nodes, ~0.37rad span) show ~0.138 eps for BOTH coords (not cusp-
+  adjacent) — do not read smoke-scale swing as evidence of knife-edge.

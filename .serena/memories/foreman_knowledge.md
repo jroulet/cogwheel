@@ -43,3 +43,7 @@
 - When the working tree already has unrelated uncommitted changes (e.g.
   from parallel sessions), confirm your fix touched ONLY the intended
   lines via `git diff` before considering the finding resolved.
+- When verifying a fix that adds negative-angle entries to a min-over-angles
+  ceiling: confirm each added angle's w_star exceeds the wall constant to
+  prove the minimum is unaffected; if _w_star uses raw (non-abs) angle,
+  negative angles in the lossy regime are non-restricting by design.

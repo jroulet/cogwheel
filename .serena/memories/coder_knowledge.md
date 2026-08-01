@@ -197,3 +197,25 @@
   magnitude/perpendicularity agreement alone can hide a silent orientation
   flip that only a downstream sign-dependent consumer (inward_sign) exposes
   (Build 1d).
+- A brief giving reach and direction as SEPARATE formulas (with e.g. an
+  |eigenframe_point|^2 ≠ reach^2 because of a positive factor) is correct
+  by design — the normalized direction is unaffected by the factor. Don't
+  unify them into a single formula unless the brief explicitly endorses it.
+- When a probe fan must be reflection-invariant (e.g. min-over-angles
+  w_cert where the underlying geometry has a reflection symmetry), make the
+  angle set symmetric: tuple(k*pi/8 for k in range(-4,5)) rather than a
+  one-sided [0..pi/2] sweep — proof: symmetric set is invariant under R, so
+  min is R-invariant and direction-canonicalization no longer matters.
+- Identity default for an arc-length map is NOT bit-identical to HEAD
+  raw-theta spline (matches ~5e-15 due to B-spline translation invariance);
+  fine for tolerance-based suites but a bit-exact-vs-stored-HEAD assertion
+  would drift — document this seam, don't assert bit-identity vs HEAD.
+- When a new required field changes the semantics of other stored fields
+  (e.g. knots now in s vs raw theta after an arc-length reparametrization),
+  an identity-map fallback on load is WRONG — old artifacts must hard-refuse
+  (KeyError) and be retrained. Do NOT add a fallback that silently serves
+  at the wrong coordinate offset.
+- Cell midpoints of tiny synthetic test charts are not valid interpolation
+  certificates for production accuracy bars — only node-exact round-trips
+  and physical off-grid witnesses with matching chart coverage are valid
+  certificates.

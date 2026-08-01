@@ -203,3 +203,15 @@
   load-bearing gate: an independent golden sign table cross-checked
   against a non-circular construction (e.g. an image census), never mere
   self-consistency of the same function against itself (F041, Build 1d).
+- PURE PORT builds (0 numerical changes): assign ONE domain_test_description
+  per owned file rather than aggregating, to dodge F057 cross-suite budget
+  blowup from a single file importing multiple heavy suites; a VALUE failure
+  in a pure port is a real finding, STOP.
+- Near-wall oracle for a caustic-reach scan MUST use the parametric caustic
+  radius r(u) = |y(u)| (F026 bracket-refine), NOT a source-plane ring sweep
+  — a ring misses the thin near-wall spike and gives a systematically low
+  oracle.
+- Arc-length reparametrization design: use rep_gamma = median(gamma_grid)
+  to minimize worst-case effective excursion; a single-gamma map is adequate
+  for topology-stable bands (degrades only near parity wall where other
+  guards already bound the regime).

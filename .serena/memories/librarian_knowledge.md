@@ -111,3 +111,12 @@
 - No `changelog.d` directory exists in this repo's `.claude/spec/` —
   these internal lensing dev builds use only `completed.d`/`todo.d`
   (COMPLETED.md/TODO.md), not CHANGELOG.md generation.
+- SPEC.md replacements involving `\|` pipe-escape characters must be done
+  via Python's `str.replace` called through the shell — Serena regex mode
+  double-escapes backslashes on return, causing "No matches" or corrupt
+  text joins. Always verify SPEC.md edits by checking raw bytes (Python
+  snippet) rather than Serena's `read_file` view (which un-escapes
+  backslashes in the display).
+- Constant names cited in SPEC.md and DATA_CONTRACTS.yaml become fragile
+  cross-references: if `_LOBE_AXIS_SCHEMA*` or any schema constant is
+  renamed in code, BOTH doc surfaces need updating simultaneously.

@@ -190,3 +190,40 @@
   the quantity exceeds a divergence floor) and flag the brief's/docstring's
   unconditional claim as aspirational rather than silently picking a side
   (Build 1d wedge edge).
+- PORTING TESTS TO A NEW COORD SYSTEM: tests that exercise behaviors tied
+  to the OLD coordinate system (e.g. rho=1-on-caustic normalization, a
+  gamma=1.0 refused-point-in-chart assumption) are UNPORTABLE — remove
+  them rather than weakening. The surviving tests should explicitly certify
+  the STILL-EXISTING scalar path. Removal is the correct outcome; note it
+  with a RETIRED comment above the dead constants.
+- When a closed-form improvement (e.g. 720-scan -> analytic) doesn't change
+  served values at shipped gammas (scan already converged), the
+  insensitivity gate's TEETH come from demonstrating the improvement at
+  UN-SHIPPED near-wall gammas where the scan was wrong — assert the closed
+  form is closer to the dense-scan oracle there.
+- A SPEC.md literal can be TRUNCATED with error >> 1e-9 (e.g. 5.692100 vs
+  exact 5.692099788303083, error 2.1e-7) — gate tight tests on the EXACT
+  closed form (1e-9); use the SPEC literal only for a loose straddle check
+  (1e-6) that the tolerance margin dwarfs the truncation error.
+- The s(theta(s)) np.interp round-trip is ~0 for ANY monotone table — its
+  teeth come from the strictly-increasing/endpoint assertions PLUS a
+  MISMATCHED-row round trip (forward uses s*1.05, inverse uses s) which
+  yields a detectable error of ~0.05; use the mismatched-row test to give
+  the bound reachable-red teeth.
+- Positive control for coordinate accuracy: fit a chart at raw theta and
+  assert the served relative error >> 0.20 (large) — this proves the
+  coordinate choice is load-bearing; keep it as a separate red-when-wrong
+  companion to the arc-length accuracy (green-when-right) test.
+- A production accuracy phenomenon (e.g. knife-edge F042 bound-shift
+  sensitivity) may be unreproducible at smoke scale (7-node tile vs 12+
+  nodes at a cusp-adjacent tile) — encode the MEASURED reality: assert the
+  SWING (sqrtedge swing < 0.01 across ±0.01rad shifts, measured ~0.003)
+  rather than claiming a dramatic sensitivity the smoke fixture cannot show.
+- SkipTest guard for a git-show-based oracle: guard with `if not
+  subprocess.run(['git','show','HEAD:file'],…).returncode==0` so the
+  test degrades gracefully in detached/fresh checkouts.
+- Parity-wall gate checklist for a closed-form reach function: (a) exact-
+  point refusal at wall, (b) both nextafter(wall,±) finite, (c) wall
+  tracks lam not hardcoded, (d) over-critical (lam<=0) refuses, (e) reach
+  diverges monotone approaching wall from both sides, (f) scalar wrapper
+  bit-identical to full function.

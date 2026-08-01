@@ -123,3 +123,8 @@
   re-read the actual SPEC paragraph and the actual code symbol byte-for-
   byte each pass to confirm the divergence still holds before deciding
   resolved vs still-open.
+- When a spline is fit on a reparametrized axis (e.g. s) and serve maps
+  through an interp table (theta→s, ~6e-9 error at 2001 nodes), the
+  node-exact tolerance must budget for the interp error — widening
+  _NODE_EXACT_TOL from 1e-10 to 1e-7 is justified; verify the budget
+  arithmetic is commented at the constant's definition.
