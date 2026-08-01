@@ -1969,7 +1969,18 @@ class BuildOrchestrator:
         """
         assert self.plan is not None
         wp_summary = [wp.id + ": " + wp.title for wp in self.plan.work_packages]
-        model = "claude-opus-4-8" if self.plan.has_domain_tests else None
+        # Domain tests get the strongest model available for this provider.
+        # None = use the role's default from the provider's model map.
+        model = None
+        if self.plan.has_domain_tests:
+            if RUNTIME_PROVIDER == "codex":
+                from .runtime_codex import CODEX_ROLE_MODELS
+                model = CODEX_ROLE_MODELS.get("test_dev")
+            elif RUNTIME_PROVIDER == "opencode":
+                from .runtime_opencode import OPENCODE_ROLE_MODELS
+                model = OPENCODE_ROLE_MODELS.get("test_dev")
+            else:
+                model = "claude-opus-4-8"
 
         if not self.plan.domain_test_descriptions:
             self._log("Step 3: Test Developer writing tests")

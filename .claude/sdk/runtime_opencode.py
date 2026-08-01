@@ -62,6 +62,17 @@ OPENCODE_ROLE_VARIANTS = {
     "simplifier":   "medium",
 }
 
+# Map Claude model names to OpenCode equivalents. The orchestrator hardcodes
+# Claude model names in ad-hoc calls (triage, fill_max_turns, skills); this
+# map translates them to models available on the configured provider.
+_CLAUDE_TO_OPENCODE_MODEL = {
+    "claude-opus-4-8":   "my-custom-provider/claude-v4.6-opus",
+    "claude-opus-4":     "my-custom-provider/claude-v4.6-opus",
+    "claude-sonnet-5":   "my-custom-provider/claude-v4.6-sonnet",
+    "claude-sonnet-4-6": "my-custom-provider/claude-v4.6-sonnet",
+    "claude-haiku-3-5":  "my-custom-provider/claude-v4.5-haiku",
+}
+
 DEFAULT_OPENCODE_JSON_STREAM_LIMIT = 8 * 1024 * 1024
 
 
@@ -140,12 +151,21 @@ def model_for_role(
 
 
 def _model_for(options: ClaudeAgentOptions) -> str:
-    """Resolve OpenCode model with explicit, environment, then default precedence."""
+    """Resolve OpenCode model with explicit, environment, then default precedence.
 
-    return model_for_role(
+    Falls back to translating Claude model names via _CLAUDE_TO_OPENCODE_MODEL
+    when no role-based resolution produces a result (ad-hoc calls like triage
+    that pass model= directly without agent_name).
+    """
+    resolved = model_for_role(
         getattr(options, "agent_name", ""),
         getattr(options, "opencode_model_override", None),
     )
+    if resolved:
+        return resolved
+    # No role-based resolution — translate the hardcoded Claude model name.
+    claude_model = getattr(options, "model", "")
+    return _CLAUDE_TO_OPENCODE_MODEL.get(claude_model, claude_model)
 
 
 def _json_stream_limit() -> int:
