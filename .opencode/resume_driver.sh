@@ -39,9 +39,16 @@ LOCK_FILE="$STATE_DIR/session-$SESSION_KEY.lock"
 DONE_FILE="$STATE_DIR/session-$SESSION_KEY-event-$EVENT_KEY.done"
 
 exec 9>"$LOCK_FILE"
-# Queue distinct events. A non-blocking flock silently discarded the second
-# escalation in Build 8h-b3 when the first callback still held the lock.
-flock 9
+# Queue distinct events, but with a timeout — a stuck curl (pre --max-time
+# fix) must not block all future callbacks forever. 30s is generous for the
+# curl (5s max-time) + script overhead.
+flock -w 30 9 || {
+  echo "WARN: flock timed out after 30s — stale lock holder? Proceeding anyway." >&2
+  # Force-break: remove the lock and re-acquire
+  rm -f "$LOCK_FILE"
+  exec 9>"$LOCK_FILE"
+  flock -w 5 9 || true
+}
 [[ -f "$DONE_FILE" ]] && exit 0
 
 PROMPT="A detached Cogwheel build emitted event '$EVENT' (id '$EVENT_ID'): $DETAIL
