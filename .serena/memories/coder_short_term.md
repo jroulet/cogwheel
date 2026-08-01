@@ -65,4 +65,20 @@
   changing its 3-tuple contract (test unpacks it at test_..._training.py:1043).
 
 - Arc-map contract fix (2026-07-31): FarFieldChart._assemble now validates and normalizes _FarFieldArcMap before storing it, so both construction and _chart_from_npz hard-refuse any map whose gamma_nodes are not byte-equal to the chart gamma_grid. The validator also requires finite/increasing gamma and theta axes, correctly shaped finite cumulative s_table rows anchored at exact zero and strictly increasing, and coherent branch/endpoints. Focused FarFieldArcMapValidationTestCase passed (3 tests).
-\n- 2026-07-31 far-field `(s, d)` port: old raw/caustic-fixed positive likelihood fixtures decline under current chart containment. Rebuild physical probes through `_from_farfield_smooth` at stored chart nodes. Macro-saddle far field is intentionally exact-engine-only; retain a non-vacuous exact-lnlike fallback pin. Node-exact far-field reconstruction across beta clears the existing 2e-9 label round-trip bar; broad tiny-chart cell midpoints are not a valid 1e-3 interpolation certificate (measured 31.55 down to 0.80).\n
+\n- 2026-07-31 far-field `(s, d)` port: old raw/caustic-fixed positive likelihood fixtures decline under current chart containment. Rebuild physical probes through `_from_farfield_smooth` at stored chart nodes. Macro-saddle far field is intentionally exact-engine-only; retain a non-vacuous exact-lnlike fallback pin. Node-exact far-field reconstruction across beta clears the existing 2e-9 label round-trip bar; broad tiny-chart cell midpoints are not a valid 1e-3 interpolation certificate (measured 31.55 down to 0.80).
+
+- WP1 lobe-interior wedge-edge s-coordinate (Build 1e-lobe): REVIEWED AND
+  DELIVERED as-is (no new code authored). Diff verified against all 7
+  acceptance criteria: (a) from_lobe_engine builds monotonically-increasing
+  s = sqrt(span) - sqrt(theta_max - theta) with exact endpoint clamping;
+  (b) from_lobe_values routes spline to s_grid when both provided, raises
+  on exactly-one-None; (c) _evaluate_chart maps theta_local -> s via
+  np.interp when theta_to_s not None, identity fallback otherwise;
+  (d) _chart_to_npz stamps _LOBE_AXIS_SCHEMA vs V1 based on theta_to_s
+  presence; (e) _chart_from_npz V1 tolerates absent theta_to_s, current
+  requires it (KeyError = hard-refuse); (f) _validate_theta_to_s checks
+  (2,N) shape, finite, strict mono both rows, s[0]~0, theta[0]=grid[0];
+  (g) _LOBE_ARC_MAP_SIZE=2001, schema tag has 'sqrtedge', both in
+  _KNOWN_LOBE_AXIS_SCHEMAS. No _WEDGE_EPS in production code. No import
+  changes needed. Tests referencing _LOBE_AXIS_SCHEMA still resolve to
+  current schema (which is now the sqrtedge tag). ast.parse + import OK.

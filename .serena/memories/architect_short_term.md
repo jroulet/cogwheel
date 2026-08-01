@@ -1,5 +1,44 @@
 # Architect Short-Term Observations
 
+Build 1e-lobe (2026-07-31): Replace lobe-interior chart's uniform theta_local
+grid with s = sqrt(theta_max - theta_local) reparametrization. theta_max = upper
+bound of theta_local tile (coincides with cusp ray). s DECREASES as theta
+increases (s=0 at theta_max, s=s_max at theta_min). Spline fit in s (increasing
+axis); training nodes uniform in s -> clustered near theta_max. Store
+theta_local_to_s (2,N_map) map per brief requirement; use np.interp at serve.
+Key: spline built at rep_gamma's theta_max; same theta_max MUST be used at serve
+(stored on map, not recomputed from query gamma — avoids train/serve skew).
+Professor: theta_max per tile = tile upper bound (a cusp ray geometrically derived
+from wedge half-angle); one-sided regularization (upper edge). Simplifier: the
+formula is algebraic (no quadrature) so a (2,N) table is over-engineering, but
+brief explicitly requires stored map for testability/validation; also need stored
+theta_max to avoid train/serve skew. Acceptance: arc-length bar-margin pattern
+(s-coord stays below 0.05 bar under bound shifts, uniform trips it). Files:
+surrogate.py (LobeInteriorChart dataclass + from_lobe_values + _assemble +
+_evaluate_chart + serialization + schema bump), surrogate_training.py
+(_build_lobe_chart node placement + map construction). 1 Coder WP.
+
+
+Build 1e-lobe (2026-08-01, PLAN FINAL): Production code ALREADY in working tree
+(surrogate.py uncommitted diff ~104 ins). 1 Coder WP: review-and-commit only
+(no new code to write). Tests via domain_test_descriptions (Test Dev):
+(1) coordinate round-trip (theta→s→theta, tolerance ~1e-4 rad, closed-form
+oracle s = sqrt(span)-sqrt(theta_max-theta)),
+(2) NPZ persistence (add theta_to_s bit-identity assertion to existing
+LobePersistenceTestCase),
+(3) bound-shift margin (same structure as tube's ArcLengthBoundShiftMarginTestCase:
+shift theta_local bounds ±0.01 rad, assert sqrt-edge eps < 0.05 bar, uniform
+trips it — encode measured invariant, not swing claim per F042 lesson),
+(4) V1 identity-path byte-identity (synthetic V1 chart with theta_to_s=None
+serves identically to pre-build behavior — no-regression guard).
+Professor: formula correct (s increases monotonically, dy/ds finite at edge),
+gamma-independent map (simpler than tube), round-trip tol ~1e-4 near edge,
+endpoint np.interp clamping safe. Simplifier: lean plan, (2,2001) map justified
+by brief mandate + train/serve anti-skew, test (b) can be narrowed to add
+assertion to existing LobePersistenceTestCase rather than new class.
+
+
+
 Build 1e-farfield-port (2026-07-31): PURE PORT — restore (s,d) far-field
 coordinate on FarFieldChart from git ref refs/sdk/farfield_port_wip (production
 + 3 already-ported test files + DATA_CONTRACTS.yaml), then Test Dev ports ~38

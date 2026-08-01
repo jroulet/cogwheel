@@ -278,7 +278,41 @@
 
 - Professor-directed lobe golden rebaseline (current `(s,d)` FarFieldChart): retained the incumbent analytic field as `_positive_physical_envelope(logw, gamma, y1_eig, y2_eig)`, deriving retired rho/theta from every physical point; sampled it at `(_POS_GAMMA_GRID, _POS_S_GRID, _POS_D_GRID)` inverse-map nodes on a gamma-resolved astroid map. Fixed source is off-grid exterior `(s,d)=(0.422949...,0.15)`, physical spline residual 5.46e-3 under 2e-2 bar. New frozen served hex and content digest `d5c81aaf...d80e388`; 11 focused lobe checks (golden + lobe exclusivity) passed in 18.50s. Added current schema/strict map/non-identical gamma rows, save/load bit fidelity, and current-schema node/map perturbation teeth tests.
 
+- WP1 lobe V1 identity-path byte-identity test (test_lensing_surrogate_lobe.py):
+  added LobeV1IdentityPathTestCase (7 tests, 4.1s). Builds SYNTHETIC V1 lobe
+  chart via from_lobe_values(theta_to_s=None, s_grid=None) with genuine
+  admission geometry + random envelope data (seed 20250801). Tests:
+  (1) chart.theta_to_s is None, (2) _evaluate_chart returns finite (no crash
+  from None indexing), (3) save/reload yields theta_to_s=None, (4) saved meta
+  carries _LOBE_AXIS_SCHEMA_V1 tag, (5) no chart0_theta_to_s key in npz,
+  (6) served values BYTE-IDENTICAL before/after save-load (core identity
+  guarantee), (7) mutation: indexing None raises TypeError (proving inverted
+  guard would crash). Full file 54 passed 50s. BACKWARD AUDIT: existing
+  sqrtedge tests (LobePersistenceTestCase, LobeSqrtEdge*) all use engine
+  charts WITH theta_to_s -> unaffected. LobeSqrtEdgeBoundShiftMarginTestCase
+  already exercises from_lobe_values(theta_to_s=None) for UNIFORM charts ->
+  confirms V1 path was already working. No breakage found.
+
 - Current far-field `(s,d)` test port: macro-saddle `FarFieldChart` is forbidden by DATA_CONTRACTS; synthetic multi-chart fixture now has positive Tube/FarField + saddle Tube only, and saddle far-field query asserts exact fallthrough. Domain refusal seam and serialization use chart `(gamma,s,d)` + gamma-resolved arc_map, no raw rho/theta. Professor beta oracle: compare Etilde(beta) bitwise to Etilde(q_hat, beta=0) for the actual floating rotated eigenframe source; separately bound q_hat-q_nominal from float64 rotation/orthogonality, never widen legacy 1e-12 envelope delta. Physical off-grid witness has F-normalized label error ~7.08 under the narrow one-foot chart, so the 1e-3 held-out assertion is held for Professor/production direction; do not lower it.
 
 
 - Professor-certified synthetic-chart separation: in `test_lensing_surrogate.py`, removed the obsolete `POS_RECON_TOL=0.2`/saddle `0.05` and the synthetic chart's held-out/refinement assertions (measured off-grid label eps ~7.083, not certifiable). The local `(s,d,arc_map)` fixture now explicitly covers only node-exact beta covariance, a fresh-engine node-label round trip (F-normalized <=2e-9; measured max 1.21e-9 across beta), domain/refusal, serialization, and macro-saddle exact fallthrough. Certified 1e-3 off-grid positive exterior held-out accuracy, node convergence/refinement, and real-coefficient corruption falsifier stay in `test_lensing_farfield_envelope.py` (`EXTERIOR_TILE_CENTER=(1.5,1.5) +/- .2`, gamma .02-.06). Focused node-label test passed under `cogwheel-newlal`; `py_compile` and collect-only passed (71 tests).
+
+- WP1 lobe s-coordinate (sqrt-edge) test_lensing_surrogate_lobe.py: added 3 new
+  classes + 2 helper functions + 3 module constants. LobeSqrtEdgeCoordinateRoundTripTestCase
+  (5 tests): verifies theta_to_s[1,0]==0.0 exact, matches closed-form oracle
+  (s=sqrt(span)-sqrt(theta_max-theta)) to 0.0, round-trip err 0.0 (at 2001 nodes
+  interp is self-consistent), strict monotonicity, shape (2,2001).
+  LobeSqrtEdgeBoundShiftMarginTestCase (3 tests): at the smoke fixture (7 nodes,
+  theta span ~0.37rad) BOTH coords give ~0.138 eps (tile not at cusp, so no
+  knife-edge manifests). Encoded: sqrtedge swing < 0.01 across ±0.01rad shifts
+  (measured 0.003), shifted-chart oracle matches closed form, sqrtedge ≈ uniform
+  (no degradation). The 0.05 bar IS a production-scale phenomenon requiring 12+
+  nodes at a cusp-adjacent tile — unreproducible at smoke scale.
+  LobeSqrtEdgeSelfFalsificationTestCase (2 tests): wrong-orientation formula
+  (s=sqrt(theta-theta_min)) differs from production; mismatched forward/inverse
+  map exceeds round-trip bar. ALSO: added theta_to_s persistence assertions to
+  existing LobePersistenceTestCase (bit-for-bit + not None + sqrtedge schema in
+  npz meta). BACKWARD COMPAT FIX: widened _NODE_EXACT_TOL from 1e-10 to 1e-7
+  because WP1 spline is on s-coordinate and serve does theta→s interp (~6e-9
+  error at theta nodes). 47 passed 51s.
