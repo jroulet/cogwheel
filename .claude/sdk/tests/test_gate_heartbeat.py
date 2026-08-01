@@ -60,7 +60,21 @@ class GateEmitsAHeartbeat(unittest.TestCase):
 
     def test_beats_repeat_so_a_long_wait_keeps_the_log_moving(self):
         out = _run_gate(1200)
-        self.assertGreaterEqual(len(out.strip().splitlines()), 4)
+        self.assertGreaterEqual(len(out.strip().splitlines()), 2)
+
+    def test_the_beat_BACKS_OFF_on_a_very_long_wait(self):
+        # A fixed 4-minute beat emitted 270 notifications across an 18-hour
+        # wait. Keep the first beat early, then double to an hourly ceiling.
+        out = _run_gate(18 * 3600)
+        n = len(out.strip().splitlines())
+        self.assertLess(n, 25, f"{n} beats over 18h is a notification flood")
+        self.assertGreater(n, 8, f"{n} beats over 18h is too quiet to trust")
+
+    def test_the_flood_is_what_the_old_cadence_did(self):
+        # Contrast control: the pre-backoff rule, at the same duration.
+        fixed = (18 * 3600) // 240
+        self.assertEqual(fixed, 270)
+        self.assertLess(len(_run_gate(18 * 3600).strip().splitlines()), fixed)
 
     def test_the_beat_says_the_build_is_alive_not_hung(self):
         # The line exists to be READ by a driver who is deciding whether to

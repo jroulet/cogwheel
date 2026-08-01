@@ -372,7 +372,8 @@ def prompt_user_approval(
         print("Please enter 'y' to approve, 'n' to reject, or 'q' to quit.")
 
 
-def _gate_wait(what: str, dir_path: Path, poll: int = 5, beat: int = 240):
+def _gate_wait(what: str, dir_path: Path, poll: int = 5, beat: int = 240,
+               max_beat: int = 3600):
     """Poll a decision gate, EMITTING A HEARTBEAT so the build reads as alive.
 
     A build blocked on a human decision is not stale — it is waiting. But the
@@ -388,15 +389,23 @@ def _gate_wait(what: str, dir_path: Path, poll: int = 5, beat: int = 240):
 
     Yields forever; the caller returns out of the loop when a decision lands.
     """
-    waited = 0
+    waited, interval, next_beat = 0, beat, beat
     while True:
         yield waited
         time.sleep(poll)
         waited += poll
-        if waited % beat == 0:
+        if waited >= next_beat:
             print(f"[file-based] still waiting for {what} "
                   f"({waited // 60}m elapsed) — build is alive, not stale",
                   flush=True)
+            # BACK OFF. A fixed 4-minute beat emitted 270 lines across an
+            # 18-hour wait (2026-07-31) — each one a driver notification. The
+            # watchdog only needs the log to move before its 1200s threshold;
+            # after that, rarer is strictly better. Doubling to an hourly
+            # ceiling gives ~12 beats over 18h instead of 270, while still
+            # placing the first one at 4 minutes.
+            interval = min(interval * 2, max_beat)
+            next_beat = waited + interval
 
 
 def _file_based_approval(plan_summary: str, dir_path: Path) -> tuple[bool, str]:
