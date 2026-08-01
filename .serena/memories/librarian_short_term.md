@@ -69,3 +69,21 @@ one had the largest commit count (22) of any run so far, almost entirely
 work) plus two small lensing cleanup commits riding on an already-synced
 port. Large commit COUNT does not imply large doc-sync WORK — always
 compute the actual touched-surface diff before assuming otherwise.
+
+PROCESS HAZARD hit this run, now fixed but worth guarding against next
+time: when other staged-but-uncommitted files (not mine — e.g. a driver's
+own in-flight `git add`) sit in the index alongside my memory-write staging,
+a bare `git commit -m "..."` commits the WHOLE index, silently sweeping
+those files into MY commit. `git add <only-my-file>` is not protection —
+the other files were ALREADY staged before I touched anything. The fix is
+`git commit -m "..." -- <path-to-my-file-only>` (pathspec must come AFTER
+the `-m` message argument, or after `--`; pathspec before `-m` errors as
+"did not match any files"), which commits only the given paths' staged
+changes and leaves everything else in the index untouched for its owner.
+Caught it here because `git show <sha> --stat` after committing listed
+`.claude/sdk/gates.py` and `.claude/sdk/tests/test_gate_heartbeat.py` I
+never touched — fixed via `git reset --soft HEAD^` (safe, no push yet) then
+re-committing with the explicit pathspec. ALWAYS run `git status` right
+before the commit command and diff it against what you intend to commit,
+not just before staging — the gap between "I staged my file" and "I ran
+git commit" is exactly where another agent's staged files ride along.
