@@ -53,8 +53,11 @@ if [[ "$AGENT_PROVIDER" == "opencode" ]]; then
       echo "Starting opencode serve on port $SERVE_PORT..."
       # Must run from REPO_ROOT so it loads .opencode/opencode.json
       # (MCP/Serena config, permissions, instructions).
-      (cd "$REPO_ROOT" && OPENCODE_SERVER_PASSWORD="${OPENCODE_SERVER_PASSWORD}" \
-        opencode serve --port "$SERVE_PORT" --hostname 127.0.0.1) \
+      # Use setsid to create a new process group — the calling shell's
+      # tool timeout kills the foreground process GROUP, and without setsid
+      # the serve process is in that group and dies with it.
+      setsid bash -c "cd '$REPO_ROOT' && OPENCODE_SERVER_PASSWORD='${OPENCODE_SERVER_PASSWORD}' \
+        opencode serve --port $SERVE_PORT --hostname 127.0.0.1" \
         > /tmp/opencode_serve.log 2>&1 &
       _SERVE_PID=$!
       disown $_SERVE_PID
