@@ -1,6 +1,6 @@
 ---
-spec_version: 0.31.0
-last_updated: 2026-07-31
+spec_version: 0.31.1
+last_updated: 2026-08-01
 ---
 
 # cogwheel — Project Specification
