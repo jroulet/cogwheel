@@ -415,7 +415,15 @@ async def query(
             if event_type == "text":
                 text = part.get("text", "")
                 if text:
+                    # Each text event is a complete message (not a chunk) —
+                    # but multi-step conversations produce multiple text events
+                    # across steps. Keep only the LAST step's text as the final
+                    # result (same as Codex: item.completed agent_message).
+                    # However, within a single step the text is already complete,
+                    # so overwriting is correct per-step. The orchestrator reads
+                    # ALL text blocks via AssistantMessage/TextBlock yields below.
                     final_text = text
+                yield AssistantMessage(content=[TextBlock(text=text)])
                 continue
 
             if event_type == "step_finish":
