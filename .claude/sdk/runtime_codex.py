@@ -52,6 +52,16 @@ CODEX_ROLE_REASONING_EFFORTS = {
     "dreamer": "medium",
     "simplifier": "medium",
 }
+# Map Claude model names to Codex equivalents. The orchestrator hardcodes
+# Claude model names in ad-hoc calls; this translates them.
+_CLAUDE_TO_CODEX_MODEL = {
+    "claude-opus-4-8":   "gpt-5.6-sol",
+    "claude-opus-4":     "gpt-5.6-sol",
+    "claude-sonnet-5":   "gpt-5.6-terra",
+    "claude-sonnet-4-6": "gpt-5.6-terra",
+    "claude-haiku-3-5":  "gpt-5.6-terra",
+}
+
 DEFAULT_CODEX_JSON_STREAM_LIMIT = 8 * 1024 * 1024
 
 
@@ -130,12 +140,19 @@ def model_for_role(
 
 
 def _model_for(options: ClaudeAgentOptions) -> str:
-    """Resolve Codex model with explicit, environment, then default precedence."""
+    """Resolve Codex model with explicit, environment, then default precedence.
 
-    return model_for_role(
+    Falls back to translating Claude model names via _CLAUDE_TO_CODEX_MODEL
+    when no role-based resolution produces a result.
+    """
+    resolved = model_for_role(
         getattr(options, "agent_name", ""),
         getattr(options, "codex_model_override", None),
     )
+    if resolved:
+        return resolved
+    claude_model = getattr(options, "model", "")
+    return _CLAUDE_TO_CODEX_MODEL.get(claude_model, claude_model)
 
 
 def _json_stream_limit() -> int:
