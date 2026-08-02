@@ -3109,6 +3109,11 @@ def _reprovision_w_nodes(*, band: tuple[float, float], parity: int,
             trace.append({'n_w_per_decade': int(n_w), 'eps': None,
                           'status': 'engine_refused'})
             return None
+        except CarrierDiscontinuityError as exc:
+            trace.append({'n_w_per_decade': int(n_w), 'eps': None,
+                          'status': 'carrier_discontinuity',
+                          'detail': str(exc)})
+            return None
         eps = _heldout_eps(chart, samples, {'schema': 'heldout-probe'})
         finite = bool(math.isfinite(eps))
         eps_at[int(n_w)] = eps if finite else float('nan')

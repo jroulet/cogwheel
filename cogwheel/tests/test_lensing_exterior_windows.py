@@ -1720,6 +1720,60 @@ class ReprovisionNodeCountTestCase(ExteriorWindowsTestCase):
                              config.w_nodes_per_decade)
             self.record_comparison()
 
+    def test_reprovision_catches_carrier_discontinuity_error(self) -> None:
+        """CarrierDiscontinuityError in _build_farfield_chart does not propagate.
+
+        When the engine raises CarrierDiscontinuityError (e.g. a degenerate arc
+        where the tile straddles a critical-basin flip), `_eps_for` catches it
+        and returns None for eps_start.  The outer function then returns early
+        with status='engine_refused' and the full node density (never a guessed
+        reduction).  The trace records the carrier_discontinuity status and
+        the exception's detail string.
+
+        Diagnostic: without the except-CarrierDiscontinuityError clause in
+        `_eps_for`, this test raises the uncaught exception instead of
+        returning the (n_start, report) tuple.
+        """
+        config = dataclasses.replace(
+            st.TrainingConfig(), w_nodes_per_decade=REPROV_N_START)
+        tile = {'center': (1.3, 0.6), 'half': (0.08, 0.15)}
+        window = (2.0, 20.0)
+
+        with mock.patch.object(
+                st, '_build_farfield_chart',
+                side_effect=surrogate.CarrierDiscontinuityError(
+                    'degenerate arc test')), \
+                mock.patch.object(st, '_farfield_heldout_samples',
+                                  return_value=[]):
+            n_rec, report = st._reprovision_w_nodes(
+                band=INTERIOR_BAND, parity=1, tile=tile, window=window,
+                config=config, rng=np.random.default_rng(0))
+
+        # (1) n_rec == config.w_nodes_per_decade (full density, never reduced).
+        self.assertEqual(n_rec, config.w_nodes_per_decade)
+        self.record_comparison()
+
+        # (2) Status is 'engine_refused' (the outer early-return path).
+        self.assertEqual(report['status'], 'engine_refused')
+        self.record_comparison()
+
+        # (3) report['n_rec'] == n_start.
+        self.assertEqual(report['n_rec'], config.w_nodes_per_decade)
+        self.record_comparison()
+
+        # (4) Trace contains at least one carrier_discontinuity entry with
+        # a non-empty detail string.
+        carrier_entries = [
+            row for row in report['trace']
+            if row.get('status') == 'carrier_discontinuity']
+        self.assertGreaterEqual(len(carrier_entries), 1)
+        for entry in carrier_entries:
+            with self.subTest(entry=entry):
+                self.assertIn('detail', entry)
+                self.assertTrue(len(entry['detail']) > 0)
+                self.assertIn('degenerate arc test', entry['detail'])
+                self.record_comparison()
+
 
 class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
     """Spec 8 (S2-1): caustic-fixed interior directional-radius admission.
