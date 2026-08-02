@@ -1,41 +1,41 @@
 # Professor Short-Term Observations
 
-## Ghost decay gate domain review (2026-08-02)
+## Ghost gate orthogonality witness review (2026-08-02)
 
-- **test_lensing_ghost_decay_gate.py**: 18/18 pass (14s). All five specified
-  tests certified:
-  1. **Decay refusal** (near-axis, gamma=1.6, theta=0.02): Im(tau_c)=0.044 < 0.4
-     threshold → GhostDomainError. Separation=0.94 > 0.7 → separation gate ADMITS.
-     The two gates are provably independent.
-  2. **Well-decayed admit** (gamma=1.5, y=(2,2)): Im(tau_c)=0.825 > 0.4 → admits.
-     |G| decays from 9.07e-2 to 7.52e-5 across band (factor ~800×, exponential).
-  3. **Few-images refusal**: real_images=[] raises GhostDomainError (no images to
-     separate from).
-  4. **Protective refusal (self-falsification)**: forcing ghost into refused config
-     worsens residual by 37.5% (norm_with/norm_without = 1.375). The gate IS
-     protective, not overprotective.
-  5. **Train/serve skew impossibility**: both w-grids (0.5..10 and 2..10) give
-     identical ADMIT decision on the same config; both give identical REFUSE on
-     the near-axis config. The gate is provably w-independent (no frequency in
-     the criterion Im(tau_c) >= constant).
+- **test_lensing_ghost_gate.py**: 17/18 pass, 1 pre-existing failure (17s).
+  All 5 orthogonality-witness tests (`GhostGateOrthogonalityWitnessTestCase`)
+  certified PASS:
+  1. **Decay gate passes**: Im(tau_c)=0.502 > 0.4, margin=0.102 > 0.05 minimum.
+  2. **Separation gate refuses**: GhostDomainError raised with "separation" in
+     message, confirming the code reached past the decay gate.
+  3. **Separation independently below**: sep=0.600 < 0.7, margin=0.100 > 0.05.
+  4. **Disabling sep gate admits**: with _GHOST_SEPARATION_MIN=0.0, the config
+     admits (decay gate is the only remaining guard), proving independence.
+  5. **Scatter diagnostic**: plot produced showing non-nested refusal regions.
+     Green star at (Im(tau_c)=0.50, sep=0.60) is in the "orthogonal quadrant"
+     (decay passes, sep refuses), distinct from the refuse-both (red) and
+     admit-both (blue) clusters.
 
-- **test_lensing_ghost.py**: 31/31 pass + 1 xfail (9.3s). Ghost primitives,
-  selection, guards, self-falsification all clean.
-- **test_lensing_chang_refsdal_ghost_frame.py**: 12/12 pass (3.5s). Frame
-  conventions bit-identical.
-- **test_lensing_ghost_gate.py**: 12/13 pass (12s). 1 FAILURE in
-  `GhostSeparationConstantReachableRedTestCase.test_raising_constant_to_two_refuses_an_admit_config`
-  — pre-existing issue: ADMIT_CONFIGS[0] has sep=2.58 > 2.0 so patching MIN to 2.0
-  doesn't flip it. This is a test design issue in the SEPARATION gate reachable-red
-  (not the new decay gate). Not a regression from the current build.
+- **Physics certification**: At positive parity (gamma < 1), Im(tau_c) and
+  separation are strongly correlated — both driven by the geodesic distance
+  from the caustic in the Fermat potential. Sweep confirms NO positive-parity
+  config exists with Im(tau_c)>=0.4 AND sep<0.7 simultaneously. At saddle
+  parity (gamma=5.0 > 1), the critical-point topology changes (deltoid
+  caustics, two lobes) and the coupling breaks: the ghost can decay (high
+  Im(tau_c), meaning large imaginary part of the Fermat delay at the complex
+  stationary point — exponential suppression e^{-w*Im(tau_c)}) while remaining
+  spatially close to a real image (low separation, meaning the single-saddle
+  expansion has overlapping contributions and is INVALID). The separation gate
+  is therefore independently load-bearing: without it, the decay gate alone
+  would wrongly admit configs where the stationary-phase approximation fails.
 
-- **Physics**: The decay gate `Im(tau_c) >= 0.4` is the correct criterion.
-  Near a principal axis of the Chang–Refsdal macro matrix, the critical point
-  approaches the real axis (Re axis of the Fermat surface), Im(tau_c) → 0, and
-  the ghost contribution e^{iw tau_c} oscillates rather than decaying — it is
-  NOT a small correction to the kernel sum. The threshold 0.4 = 2.0/5.0 derives
-  from requiring at least _FARFIELD_WINDOW_RADIANS of attenuation at the chart
-  band floor w ~ 5. The criterion is a pure lens-configuration property (no w)
-  so train/serve skew is structurally impossible.
+- **Pre-existing failure**: `test_raising_constant_to_two_refuses_an_admit_config`
+  — ADMIT_CONFIGS[0] has actual separation=2.012, so patching threshold to 2.0
+  doesn't flip it. Test design issue (comment says "sep~1.98" but measured 2.01).
+  Not a regression from the current build; unrelated to the orthogonality witness.
+
+- **test_lensing_ghost_decay_gate.py**: 18/18 pass (8s). All decay gate tests
+  clean. The two test files together certify the two gates are independent,
+  non-redundant, and each load-bearing for its own failure mode.
 
 - Heavy full-sampling validation is operator-deferred.

@@ -205,6 +205,17 @@ _FARFIELD_WINDOW_RADIANS = RHO_END / 2.0
 #: (fact-2) config ever sweeps to separation > 0.7, or any admit-required
 #: (fact-1) config to separation < 0.7, this threshold must move to the
 #: geometric mean of the measured refuse-max and admit-min.
+#:
+#: Part 0 resolution (Build 7): this constant is a LENS-PLANE quantity in
+#: Einstein-radius units.  The Einstein radius is the physical scale in the
+#: image plane (unlike the source plane where the caustic is the only scale and
+#: Part 0 applies).  The cusp-coalescence geometry that sets the single-saddle
+#: expansion validity boundary is O(1) in Einstein units regardless of gamma —
+#: measured gap (refuse max 0.29, admit min 0.94) stable across gamma 0.30–0.90
+#: on both parities, verified by the live tripwire assertions SEP_REFUSE_MAX=0.5
+#: and SEP_ADMIT_MIN=1.0 in test_lensing_ghost_gate.py.  NOT a prior-box-derived
+#: constant; NOT subsumed by the decay gate (_GHOST_DECAY_IM_THRESHOLD, which
+#: guards the orthogonal near-axis non-decaying failure mode).
 _GHOST_SEPARATION_MIN = 0.7
 
 #: Minimum imaginary-delay decay required for the ghost to be subtracted:

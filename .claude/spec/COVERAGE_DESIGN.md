@@ -226,7 +226,7 @@ Constants with length units, and what sets them:
 | `_SADDLE_CUSP_MIN_HALFWIDTH` | 0.08 | absolute floor | **VIOLATION** — should scale with the cusp's own scale |
 | `GAMMA_FENCE` (3/4) | derived | from `ANNULUS_INNER_RADIUS` | consequence of the first violation; dissolves with it |
 | saddle fence (1.0502342) | derived | same | same |
-| `_GHOST_SEPARATION_MIN` | 0.7 | absolute, lens-plane | SUSPECT — never binds on the saddle (F027); needs the same question asked |
+| `_GHOST_SEPARATION_MIN` | 0.7 | absolute, lens-plane | OK — lens-plane Einstein-radius-normalized; Einstein radius is the physical scale in the image plane (not caustic-relative); measured gap (refuse 0.29, admit 0.94) stable across gamma; traces to geometry, not the prior box (Build 7) |
 | `_INTERLOBE_CORRIDOR_ETA_SCALE` | x `eta_max` | relative | OK — already relative |
 | `rho`, `rho_lobe` | — | caustic-relative by construction | OK |
 | `min_gamma_band` | 0.02 | gamma-axis, not a length | out of scope for Part 0; see C9 |

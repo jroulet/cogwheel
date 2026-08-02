@@ -1,5 +1,30 @@
 # Test Dev Short-Term Observations
 
+## C12 build: test_lensing_ghost_gate.py — orthogonality witness
+
+- Added GhostGateOrthogonalityWitnessTestCase (5 tests, ~3.7 s) proving the
+  separation gate is NOT subsumed by the decay gate.
+- Key finding: at positive parity (gamma<1), Im(tau_c)>=0.4 physically implies
+  separation>=1.2 (exhaustive scan gamma 0.10-0.99, all angles/offsets). The
+  orthogonality witness requires saddle parity (gamma=5.0, y=(5.2,1.5)) where
+  Im(tau_c)=0.502>=0.4 but separation=0.600<0.7. The gate function itself is
+  parity-agnostic (no parity check inside farfield_ghost_term).
+- Config: ORTH_GAMMA=5.0, ORTH_SOURCE=np.array([5.2, 1.5])
+  - Im(tau_c) = 0.5016, margin = 0.1016 above threshold 0.4
+  - separation = 0.6001, margin = 0.0999 below threshold 0.7
+  - GhostDomainError message correctly says "separation" not "decay"
+- test_disabling_separation_gate_admits_the_config: patches only
+  _GHOST_SEPARATION_MIN to 0 (decay gate stays live) → config admits,
+  proving the gates are independent.
+- Diagnostic scatter plot saved: ghost_gate_orthogonality_scatter.png
+- Pre-existing failure: test_raising_constant_to_two_refuses_an_admit_config
+  (ADMIT_CONFIGS[0] has sep=2.012, so MIN=2.0 doesn't refuse it). NOT caused
+  by WP1 changes (confirmed via git stash test on prior commit).
+- Backward-compat audit: WP1 is pure documentation (added Part 0 resolution
+  comments to _GHOST_SEPARATION_MIN). No API/value/signature changes. All
+  existing tests referencing these constants use unchanged values. The
+  pre-existing failure is unrelated to WP1.
+
 ## C11 build (extension): test_lensing_ghost_decay_gate.py — protective refusal + skew impossibility
 
 - Extended suite from 11 to 18 tests (5.4 s total runtime).

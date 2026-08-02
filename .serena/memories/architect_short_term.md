@@ -1,17 +1,17 @@
 # Architect Short-Term Observations
 
+## Build 7 — _GHOST_SEPARATION_MIN Part 0 Resolution
+
+Planning complete. Resolution: the constant 0.7 does NOT violate Part 0
+(it is a lens-plane quantity in Einstein-radius units — the Einstein radius
+IS the physical scale in the lens plane; the measured gap is stable across
+gamma 0.30–0.90; the constant traces to geometry/cusp-coalescence, not the
+prior box). The decay gate (step 6) does NOT subsume it — orthogonal failure
+modes (decay = near-axis; separation = near-cusp). Existing test suite
+already mechanizes the Part 0 argument (tripwire bounds, reachable-red,
+do-nothing control, train/serve agreement). Work = update docstrings/comments
+to formally resolve SUSPECT status + update COVERAGE_DESIGN table. Single
+Foreman-Lite WP, no value change, no test changes needed. One domain test
+description for orthogonality witness (config passing decay, failing separation).
+
 ## Build 6 (C5) — Ghost Decay Gate
-
-Planning complete. Single WP: add decay gate to `farfield_ghost_term` in
-channels.py. Gate formula: `Im(tau_c) >= min_delay_separation` (the
-geometric form of the retired `w_floor * Im tau_c >= 2.0`, proven
-algebraically equivalent since w_floor = 2.0/min_sep). Professor confirmed
-threshold 2.0 is physics-correct (resolution argument, not amplitude); the
-simplified geometric form is frequency-independent and provably skew-free.
-Simplifier endorsed single-WP scope, recommended inline delay computation
-(not `_min_delay_separation` with synthetic mask), and flagged stale
-`GhostContribution.delay` docstring note for update.
-
-Key ordering: ghost_kernel → resolve images → decay gate → separation gate.
-All 3 production callers catch GhostDomainError, so the new gate refuses
-gracefully on all paths.

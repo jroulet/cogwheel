@@ -1,5 +1,10 @@
 # Coder Short-Term Observations
 
+- WP1 Build 7: Added Part 0 resolution paragraph to _GHOST_SEPARATION_MIN
+  comment block in channels.py (lines 207-217, 11 new comment lines).
+  Updated COVERAGE_DESIGN.md table entry from SUSPECT to OK. No behavioral
+  change — value 0.7 unchanged, all 22 test references untouched.
+
 - INS-7-001 FIX (Build 6 C5, pass 4): Updated 3 test files to accommodate
   the new decay gate (_GHOST_DECAY_IM_THRESHOLD = 0.4):
   (a) test_lensing_ghost_gate.py: ADMIT_CONFIGS[0] offset 0.60→0.65 for

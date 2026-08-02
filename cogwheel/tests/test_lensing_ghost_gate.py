@@ -470,6 +470,209 @@ class GhostSeparationConstantReachableRedTestCase(GhostGateTestCase):
         self.comparisons += 1
 
 
+#: ─── Orthogonality witness constants ─────────────────────────────────────────
+#: A saddle-parity config (gamma > 1) where the two gates DISAGREE: the
+#: decay gate PASSES (Im(tau_c) = 0.502 >= 0.4) but the separation gate
+#: REFUSES (sep = 0.600 < 0.7).  At positive parity (gamma < 1) these
+#: two quantities are physically correlated (Im(tau_c) >= 0.4 => sep >= 1.2
+#: on any coarse sweep), so the witness requires saddle parity where they
+#: decouple.  The gate function ``farfield_ghost_term`` treats both parities
+#: identically — no parity check inside — so the orthogonality is a property
+#: of the gate logic itself, not of one parity.
+ORTH_GAMMA = 5.0
+ORTH_SOURCE = np.array([5.2, 1.5])
+
+#: Minimum margin: how far the witness must sit on the CORRECT side of each
+#: threshold to survive floating-point jitter.  Both margins are > 0.09.
+ORTH_DECAY_MARGIN_MIN = 0.05   #: Im(tau_c) - 0.4 must exceed this
+ORTH_SEP_MARGIN_MIN = 0.05     #: 0.7 - separation must exceed this
+
+
+class GhostGateOrthogonalityWitnessTestCase(GhostGateTestCase):
+    """The separation gate is NOT subsumed by the decay gate.
+
+    Constructs a config at gamma=5.0 (saddle parity) where:
+      - Im(tau_c) = 0.502 >= _GHOST_DECAY_IM_THRESHOLD (0.4) — decay passes
+      - min_a |x_a - x_c| = 0.600 < _GHOST_SEPARATION_MIN (0.7) — separation refuses
+
+    This proves the separation gate is independently load-bearing: the decay
+    gate alone would WRONGLY admit this config (the ghost has decayed but
+    remains spatially inseparable from a real image).  The gate's refusal
+    error message must reference "separation" (not "decay"), confirming the
+    code reaches the separation branch.
+
+    At positive parity (gamma < 1) the two quantities are physically
+    coupled (high Im(tau_c) => high separation), so orthogonality can only
+    be witnessed at saddle parity where the coupling breaks.  The gate
+    function itself is parity-agnostic — proven by the fact that it fires
+    on the separation branch, having already passed the decay branch.
+    """
+
+    def test_decay_gate_passes_for_orthogonal_config(self):
+        """Im(tau_c) is above _GHOST_DECAY_IM_THRESHOLD with adequate margin.
+
+        The oracle is the independent geometry primitive
+        ``ghost_kernel(...).delay.imag``, not the gate's decision branch.
+        """
+        matrix = geometry.macro_matrix(ORTH_GAMMA, 0.0, 0.0)
+        contribution = geometry.ghost_kernel(GATE_W, ORTH_SOURCE, matrix)
+        im_tau_c = float(contribution.delay.imag)
+        threshold = channels._GHOST_DECAY_IM_THRESHOLD
+
+        self.assertGreaterEqual(
+            im_tau_c, threshold,
+            f'Im(tau_c)={im_tau_c:.6f} < threshold={threshold}: the '
+            f'orthogonal witness does not actually pass the decay gate')
+        margin = im_tau_c - threshold
+        self.assertGreater(
+            margin, ORTH_DECAY_MARGIN_MIN,
+            f'Im(tau_c) margin={margin:.4f} is too thin (< '
+            f'{ORTH_DECAY_MARGIN_MIN}); the witness is fragile')
+        self.comparisons += 1
+
+    def test_separation_gate_refuses_for_orthogonal_config(self):
+        """``farfield_ghost_term`` raises GhostDomainError on separation.
+
+        The error message must contain "separation" (not "decay"),
+        confirming execution passed the decay gate and was stopped by the
+        separation gate specifically.
+        """
+        matrix = geometry.macro_matrix(ORTH_GAMMA, 0.0, 0.0)
+        with self.assertRaises(geometry.GhostDomainError) as ctx:
+            farfield_ghost_term(GATE_W, ORTH_SOURCE, matrix)
+        msg = str(ctx.exception).lower()
+        self.assertIn(
+            'separation', msg,
+            'GhostDomainError raised but not for the separation reason; '
+            'the decay gate may have fired first (orthogonality broken)')
+        self.assertNotIn(
+            'decay', msg,
+            'GhostDomainError mentions "decay" — the witness config does '
+            'not actually pass the decay gate')
+        self.comparisons += 1
+
+    def test_separation_independently_below_threshold(self):
+        """The independently-recomputed separation is below 0.7 with margin.
+
+        The separation oracle is independent of the gate's decision branch:
+        ``ghost_kernel(...).position`` for x_c and ``find_images(...)`` for
+        x_a, with a plain complex Euclidean norm.
+        """
+        matrix = geometry.macro_matrix(ORTH_GAMMA, 0.0, 0.0)
+        separation = _ghost_separation(ORTH_SOURCE, matrix)
+        self.assertLess(
+            separation, GHOST_SEPARATION_MIN,
+            f'separation={separation:.6f} >= {GHOST_SEPARATION_MIN}: the '
+            f'witness does not actually fail the separation gate')
+        margin = GHOST_SEPARATION_MIN - separation
+        self.assertGreater(
+            margin, ORTH_SEP_MARGIN_MIN,
+            f'separation margin={margin:.4f} is too thin (< '
+            f'{ORTH_SEP_MARGIN_MIN}); the witness is fragile')
+        self.comparisons += 1
+
+    def test_disabling_separation_gate_admits_the_config(self):
+        """With only the separation gate zeroed, the config admits.
+
+        Confirms the decay gate is the ONLY remaining guard once the
+        separation gate is disabled — proving the gates are independent
+        and non-redundant.
+        """
+        matrix = geometry.macro_matrix(ORTH_GAMMA, 0.0, 0.0)
+        # Precondition: config genuinely refuses at production thresholds.
+        self.assertFalse(
+            _ghost_admits(GATE_W, ORTH_SOURCE, matrix),
+            'precondition: the orthogonal config must refuse at production '
+            'thresholds')
+        # Disable ONLY the separation gate; the decay gate stays live.
+        with mock.patch.object(channels, '_GHOST_SEPARATION_MIN', 0.0):
+            admitted = _ghost_admits(GATE_W, ORTH_SOURCE, matrix)
+        self.assertTrue(
+            admitted,
+            'with separation gate zeroed the config must admit (the decay '
+            'gate passes); the two gates are not independent')
+        self.comparisons += 1
+
+    def test_orthogonality_scatter_diagnostic(self):
+        """Scatter plot of (Im(tau_c), separation) for a sweep of configs.
+
+        Visual proof that the two refusal regions are non-nested: some configs
+        pass decay but fail separation (the orthogonal witness), while the
+        existing REFUSE_CONFIGS fail both.
+        """
+        # Collect data points for the scatter
+        im_tau_c_vals = []
+        sep_vals = []
+        labels = []
+
+        # Existing refuse configs (both gates fail)
+        for gamma, theta_deg, offset in REFUSE_CONFIGS:
+            source, matrix = _source_and_matrix(gamma, theta_deg, offset)
+            contribution = geometry.ghost_kernel(GATE_W, source, matrix)
+            im_tau_c = float(contribution.delay.imag)
+            sep = _ghost_separation(source, matrix)
+            im_tau_c_vals.append(im_tau_c)
+            sep_vals.append(sep)
+            labels.append('refuse_both')
+
+        # Existing admit configs (both gates pass)
+        for gamma, theta_deg, offset in ADMIT_CONFIGS:
+            source, matrix = _source_and_matrix(gamma, theta_deg, offset)
+            contribution = geometry.ghost_kernel(GATE_W, source, matrix)
+            im_tau_c = float(contribution.delay.imag)
+            sep = _ghost_separation(source, matrix)
+            im_tau_c_vals.append(im_tau_c)
+            sep_vals.append(sep)
+            labels.append('admit_both')
+
+        # The orthogonal witness (decay passes, separation refuses)
+        matrix_orth = geometry.macro_matrix(ORTH_GAMMA, 0.0, 0.0)
+        contribution_orth = geometry.ghost_kernel(GATE_W, ORTH_SOURCE,
+                                                  matrix_orth)
+        im_orth = float(contribution_orth.delay.imag)
+        sep_orth = _ghost_separation(ORTH_SOURCE, matrix_orth)
+        im_tau_c_vals.append(im_orth)
+        sep_vals.append(sep_orth)
+        labels.append('orthogonal')
+
+        # Plot
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots(figsize=(7, 5))
+        colors = {'refuse_both': 'r', 'admit_both': 'b', 'orthogonal': 'g'}
+        markers = {'refuse_both': 'x', 'admit_both': 'o', 'orthogonal': '*'}
+        for label in ('refuse_both', 'admit_both', 'orthogonal'):
+            idx = [i for i, l in enumerate(labels) if l == label]
+            ax.scatter(
+                [im_tau_c_vals[i] for i in idx],
+                [sep_vals[i] for i in idx],
+                c=colors[label], marker=markers[label], s=100, label=label,
+                zorder=3)
+        # Gate threshold lines
+        ax.axvline(channels._GHOST_DECAY_IM_THRESHOLD, color='orange',
+                   ls='--', label=f'decay threshold={channels._GHOST_DECAY_IM_THRESHOLD}')
+        ax.axhline(GHOST_SEPARATION_MIN, color='purple', ls='--',
+                   label=f'separation threshold={GHOST_SEPARATION_MIN}')
+        # Quadrant labels
+        ax.text(0.01, 0.35, 'BOTH REFUSE\n(near-cusp near-axis)',
+                fontsize=8, color='r', ha='left')
+        ax.text(0.5, 1.2, 'BOTH ADMIT\n(far-from-cusp)',
+                fontsize=8, color='b', ha='left')
+        ax.text(0.5, 0.35, 'ORTHOGONAL\n(decay passes,\nsep refuses)',
+                fontsize=8, color='g', ha='left')
+        ax.set_xlabel(r'Im($\tau_c$)')
+        ax.set_ylabel(r'separation $\min_a |x_a - x_c|$')
+        ax.set_title('Ghost gate orthogonality: two gates are non-nested')
+        ax.legend(loc='upper left', fontsize=8)
+        fig.tight_layout()
+        fig.savefig(
+            _OUTPUT_DIR / 'ghost_gate_orthogonality_scatter.png', dpi=110)
+        plt.close(fig)
+        # At least one point is in the orthogonal quadrant.
+        self.assertGreaterEqual(im_orth, channels._GHOST_DECAY_IM_THRESHOLD)
+        self.assertLess(sep_orth, GHOST_SEPARATION_MIN)
+        self.comparisons += 1
+
+
 class _Sentinel(Exception):
     """Marker raised by the spy so the beta-guard test can catch it."""
 
