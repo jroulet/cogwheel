@@ -236,3 +236,12 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   ValueError or LensDomainError) — existing except clauses in
   `_surrogate_coefficients` that catch ValueError/LensDomainError will miss
   this; add explicit ZeroDivisionError to the except clause (INS-11-001).
+- `_eps_for` in `_reprovision_w_nodes` (surrogate_training.py): when a tile
+  straddles a carrier-basin flip, `_build_farfield_chart` raises
+  CarrierDiscontinuityError — the probe cannot meaningfully measure
+  interpolation error in this degenerate topology. Correct conservative
+  default = keep full node density n_start (return None from `_eps_for`),
+  never guess a reduction. CarrierDiscontinuityError is NOT in
+  `_ENGINE_REFUSALS` (it's ValueError but not LensDomainError/
+  SchwingerCertificationError/HypergeometricDomainError) so a SEPARATE
+  except clause after the existing `_ENGINE_REFUSALS` catch is required.
