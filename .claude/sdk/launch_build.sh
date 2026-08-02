@@ -187,22 +187,9 @@ fi
 if [[ -n "$_RESUME_HELPER" && -f "$_RESUME_HELPER" ]]; then
   _RESUME_EVENT_ID="build-$(date +%s%N)-$$-${RANDOM}"
   # Can't use `wait` — after disown the build PID is no longer a child.
-  # Poll /proc/<pid> AND log staleness. A zombie/stuck process keeps its PID
-  # alive but stops writing — the sidecar must detect that too (step 8 failure:
-  # "can't start new thread" left the PID alive but the log frozen for 45 min).
+  # Poll /proc/<pid> instead (lightweight, no busy-wait — 2s interval).
   (
-    _STALE_LIMIT=1200  # same as watchdog default
-    while kill -0 "$BUILD_PID" 2>/dev/null; do
-      sleep 2
-      # Check log staleness — if log hasn't advanced in _STALE_LIMIT seconds,
-      # the process is stuck (zombie/resource-exhausted). Treat as dead.
-      if [[ -f "$LOG" ]]; then
-        _LOG_AGE=$(( $(date +%s) - $(stat -c %Y "$LOG" 2>/dev/null || echo 0) ))
-        if (( _LOG_AGE > _STALE_LIMIT )); then
-          break
-        fi
-      fi
-    done
+    while kill -0 "$BUILD_PID" 2>/dev/null; do sleep 2; done
     # Recover exit status from the log's terminal marker if possible.
     if grep -qaE "^(\[[^]]*\])?\s*(===\s*)?(BUILD REPORT|Build failed|Build cancelled|KILLED BY WATCHDOG)" "$LOG" 2>/dev/null; then
       _STATUS=0
