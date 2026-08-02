@@ -85,19 +85,15 @@ DEFAULT_F_HI_HZ = 1024.0
 _POSITIVE_W_CEILING = 480.0
 _SADDLE_W_CEILING = 58.0
 
-#: Tube caustic-distance band ``[eta_floor, eta_max]`` (source-plane units).
-#: Below ``eta_floor`` the fold sharpens and queries fall through to the exact
-#: engine; above ``eta_max`` the far-field charts take over.
-_DEFAULT_ETA_FLOOR = 0.02
-#: The tube's outer eta wall.  MUST stay well inside the local caustic
-#: curvature radius: the tube coordinate map (theta, eta) -> source =
-#: caustic(theta) + eta * normal(theta) is only inverted by the query-time
-#: nearest-caustic projection (theta* = theta, eta* = eta, the
-#: foot-of-normal property) for eta below that radius -- and the radius
-#: collapses toward cusps.  At 0.30 the map leaves its validity tube
-#: (measured: astroid held-out eps 0.52, saddle queries land on foreign
-#: arcs and never serve); 0.05 is the design value from the build plan.
-_DEFAULT_ETA_MAX = 0.05
+#: Tube shell sizing as dimensionless fractions of the LOCAL curvature radius
+#: ``R_c``.  The absolute tube band ``[eta_floor, eta_max]`` is computed
+#: per-arc as ``f * R_c`` in ``_train_band_charts``, so the shell scales with
+#: geometry: tight where cusps sharpen, broad where the fold is gentle.
+#: ``f_floor / f_max = 0.4`` preserves the original 0.02/0.05 design ratio.
+_DEFAULT_F_FLOOR = 0.16
+#: Outer fraction of curvature radius.  The foot-of-normal invertibility
+#: invariant requires ``f_max < 0.5`` (asserted at training time).
+_DEFAULT_F_MAX = 0.40
 #: Minimum caustic distance a far-field chart serves at (tube/far-field seam).
 _DEFAULT_FARFIELD_OVERLAP = 0.05
 
@@ -268,8 +264,8 @@ class TrainingConfig:
     n_rho: int = 4
     n_theta_c: int = 4
     w_nodes_per_decade: int = 4
-    eta_floor: float = _DEFAULT_ETA_FLOOR
-    eta_max: float = _DEFAULT_ETA_MAX
+    f_floor: float = _DEFAULT_F_FLOOR
+    f_max: float = _DEFAULT_F_MAX
     farfield_overlap: float = _DEFAULT_FARFIELD_OVERLAP
     gamma_band_halfwidth: float = 0.1
     min_gamma_band: float = 0.02
@@ -1800,7 +1796,8 @@ class _InteriorAdmission:
 
 
 def _interior_admission(band: tuple[float, float], parity: int, reach: float,
-                        config: 'TrainingConfig') -> _InteriorAdmission:
+                        config: 'TrainingConfig',
+                        eta_max: float) -> _InteriorAdmission:
     """Precompute the directional interior-admission geometry for one band.
 
     The retained ``reach`` argument is ignored for call-site compatibility:
@@ -1828,7 +1825,7 @@ def _interior_admission(band: tuple[float, float], parity: int, reach: float,
         for gamma in band_gammas
     )
     return _InteriorAdmission(
-        eta_max=float(config.eta_max), theta_axis=theta_axis,
+        eta_max=eta_max, theta_axis=theta_axis,
         radius_grid=radius_grid, caustic_clouds=caustic_clouds,
         gammas=tuple(float(g) for g in band_gammas))
 
@@ -2272,7 +2269,8 @@ class _SaddleLobeAdmission:
 
 
 def _saddle_lobe_admissions(band: tuple[float, float],
-                            config: 'TrainingConfig'
+                            config: 'TrainingConfig',
+                            eta_max: float
                             ) -> list[_SaddleLobeAdmission]:
     """Build the two per-lobe interior admissions for a macro-saddle band
     (S2-2).
@@ -2316,7 +2314,7 @@ def _saddle_lobe_admissions(band: tuple[float, float],
         centroids.append(centroid)
         clouds.append(cloud)
         loops_per_lobe.append(loops)
-    corridor_half = _INTERLOBE_CORRIDOR_ETA_SCALE * float(config.eta_max)
+    corridor_half = _INTERLOBE_CORRIDOR_ETA_SCALE * eta_max
     admissions: list[_SaddleLobeAdmission] = []
     for k in range(len(_SADDLE_LOBE_CENTERS)):
         centroid = centroids[k]
@@ -2327,7 +2325,7 @@ def _saddle_lobe_admissions(band: tuple[float, float],
         boundary_theta, boundary_r = boundaries[k]
         admissions.append(_SaddleLobeAdmission(
             centroid=centroid, other_centroid=centroids[1 - k],
-            reach=reach, eta_max=float(config.eta_max),
+            reach=reach, eta_max=eta_max,
             corridor_half=corridor_half, loops=loops_per_lobe[k],
             caustic_cloud=cloud, boundary_theta=boundary_theta,
             boundary_r=boundary_r))
@@ -2504,7 +2502,8 @@ def _tube_arc_length_map(gamma: float, arc: FoldArc,
 
 
 def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
-                      w_range: tuple[float, float], config: TrainingConfig
+                      w_range: tuple[float, float], config: TrainingConfig,
+                      eta_max: float, eta_floor: float
                       ) -> tuple[TubeChart, int, int]:
     """Build one tube chart over ``(log w, gamma, u=sqrt(eta), s)``.
 
@@ -2520,7 +2519,7 @@ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
     """
     log_w_grid = _log_w_grid(w_range, config.w_nodes_per_decade)
     w_grid = np.exp(log_w_grid)
-    u_grid = np.linspace(np.sqrt(config.eta_floor), np.sqrt(config.eta_max),
+    u_grid = np.linspace(np.sqrt(eta_floor), np.sqrt(eta_max),
                          config.n_u)
 
     # Arc-length node placement: build the theta -> s map at the band's
@@ -2560,7 +2559,7 @@ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
         gamma_grid=gamma_grid, u_grid=u_grid, theta_grid=theta_grid,
         log_w_grid=log_w_grid, envelope_real=env_real, envelope_imag=env_imag,
         image_count=arc.image_count, parity=parity,
-        eta_floor=config.eta_floor, eta_max=config.eta_max,
+        eta_floor=eta_floor, eta_max=eta_max,
         cusp_windows=arc.cusp_windows, s_grid=s_grid, theta_to_s=theta_to_s)
     return chart, calls, refused
 
@@ -3212,13 +3211,14 @@ def _gate_chart(kind: str, report: dict, config: TrainingConfig
 
 
 def _tube_heldout_samples(gamma_band: tuple[float, float], arc: FoldArc,
-                          config: TrainingConfig, rng: np.random.Generator
+                          config: TrainingConfig, rng: np.random.Generator,
+                          eta_max: float, eta_floor: float
                           ) -> list[tuple[float, float, float]]:
     """Random served-interior held-out sources for a tube chart."""
     samples: list[tuple[float, float, float]] = []
     for _ in range(config.n_heldout):
         gamma = float(rng.uniform(*gamma_band))
-        eta = float(rng.uniform(config.eta_floor, config.eta_max))
+        eta = float(rng.uniform(eta_floor, eta_max))
         theta = float(rng.uniform(arc.theta_lo, arc.theta_hi))
         source = _tube_source(gamma, theta, eta, arc.branch, arc.inward_sign)
         samples.append((gamma, float(source[0]), float(source[1])))
@@ -3777,39 +3777,39 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     gamma_grid = _uniform_axis(band, config.n_gamma, f'gamma_{label}')
 
     # -- Tube charts (per fold arc, resumable) --
+    # Pre-compute per-arc minimum curvature radii (worst over gamma band).
+    # The absolute tube band [eta_floor, eta_max] is f * R_c per arc.
+    arc_r_min = [_min_curvature_radius(band, arc, config.n_caustic_samples)
+                 for arc in structure.arcs[:config.max_tube_arcs]]
+    max_eta_max = (config.f_max * max(arc_r_min)
+                   if arc_r_min else config.f_max * 0.05)
     # Cap the tube w grid by the largest source magnitude it samples
     # (caustic reach plus the outer eta wall), so w * |y| stays below the
     # engine's double-double ceiling -- mirroring the prior's mass coupling.
     tube_w_range = _capped_w_range(
-        box, parity, structure.caustic_reach + config.eta_max)
+        box, parity, structure.caustic_reach + max_eta_max)
     for idx, arc in enumerate(structure.arcs[:config.max_tube_arcs]):
-        # FOOT-OF-NORMAL ASSERTION (owner-mandated, checked not
-        # remembered): the tube map (theta, eta) -> caustic + eta*normal
-        # is invertible by the query-time nearest-point projection only
-        # for eta below the local caustic curvature radius. A band whose
-        # minimum curvature radius over the arc cannot support eta_max is
-        # SKIPPED with a loud record (far-field charts + the serving
-        # ladder cover it) -- never trained wrongly (the eta_max=0.3
-        # failure class, size-induced at small gamma).
-        r_min = _min_curvature_radius(band, arc, config.n_caustic_samples)
-        if config.eta_max > 0.5 * r_min:
-            chart_reports.append({
-                'name': f'chart_{label}_tube_{idx}',
-                'parity': parity, 'skipped': 'foot_of_normal',
-                'min_curvature_radius': round(float(r_min), 6),
-                'eta_max': config.eta_max,
-                'theta_range': [round(arc.theta_lo, 5),
-                                round(arc.theta_hi, 5)]})
-            continue
+        # Per-arc curvature-relative tube shell sizing.
+        r_min = arc_r_min[idx]
+        assert config.f_max < 0.5, (
+            f'f_max={config.f_max} must be < 0.5 (foot-of-normal)')
+        eta_max = config.f_max * r_min
+        eta_floor = config.f_floor * r_min
+        assert eta_max >= 1e-3, (
+            f'eta_max={eta_max} too small (R_c={r_min})')
         tag = f'chart_{label}_tube_{idx}'
         path = outdir / f'{tag}.npz'
 
         def build_tube(arc=arc, band=band, gamma_grid=gamma_grid,
-                       w_range=tube_w_range):
+                       w_range=tube_w_range, eta_max=eta_max,
+                       eta_floor=eta_floor):
             chart, calls, refused = _build_tube_chart(
                 gamma_grid=gamma_grid, arc=arc, parity=parity,
-                w_range=w_range, config=config)
-            samples = _tube_heldout_samples(band, arc, config, rng)
+                w_range=w_range, config=config,
+                eta_max=eta_max, eta_floor=eta_floor)
+            samples = _tube_heldout_samples(band, arc, config, rng,
+                                            eta_max=eta_max,
+                                            eta_floor=eta_floor)
             eps = _heldout_eps(chart, samples,
                                {'schema': 'heldout-probe'})
             # Single-gamma-map adequacy diagnostic (NOT a gate, per the
@@ -3877,7 +3877,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     gamma_mid = 0.5 * (band[0] + band[1])
     reach_scalar = _scalar_caustic_reach(gamma_mid)
     coordinate_radius_min, reach_max = _coordinate_radius_bounds(band, parity)
-    physical_exclusion_radius = reach_max + config.eta_max
+    physical_exclusion_radius = reach_max + max_eta_max
     # Additive scalar/directional caustic-fixed inner edge for BOTH parities:
     # ``rho = 1 + |y| - coordinate_radius_min`` is the exact inverse of the
     # serve map's exterior arm (`_from_caustic_fixed`), giving ``rho = 1`` at
@@ -3911,7 +3911,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     exterior_tiles: list | None = None
     if parity == 1:
         exterior_admission = _interior_admission(
-            band, 1, reach_scalar, config)
+            band, 1, reach_scalar, config, eta_max=max_eta_max)
         # Cusp-align the exterior ``theta_c`` columns to the SAME source-plane
         # astroid cusp rays as the interior (WP1 defect 1): the exterior
         # ``rho > 1`` arm is a theta-independent affine push-out of
@@ -4112,7 +4112,11 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         # ``(rho_lobe, theta_local)`` coordinates and the persisted lobe frame
         # (centroid, boundary) maps a served node back to its true physical
         # source, so the lobe interiors are now served (not just recorded).
-        lobe_admissions = _saddle_lobe_admissions(band, config)
+        # Saddle eta_max for lobe corridor: use the band's max eta_max
+        # (widest tube shell among all fold arcs in this band).
+        saddle_eta_max = max_eta_max
+        lobe_admissions = _saddle_lobe_admissions(band, config,
+                                                  eta_max=saddle_eta_max)
         for lobe_index, (lens_center, lobe) in enumerate(
                 zip(_SADDLE_LOBE_CENTERS, lobe_admissions)):
             lobe_cusps = _lobe_cusp_source_angles(
@@ -4155,7 +4159,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             interior_skip = 'saddle_lobes_zero_admission'
     elif not encloses:
         interior_skip = 'caustic_not_origin_enclosing'
-    elif reach_scalar <= config.eta_max:
+    elif reach_scalar <= max_eta_max:
         # The eta_max tube shell fills the whole caustic (the reach is within
         # one shell of the origin); no interior point clears the shell.
         interior_skip = 'tube_shell_fills_interior'
@@ -4163,7 +4167,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         # Directional admission geometry for the whole band (frozen WP6):
         # band-minimum directional caustic radius + nearest-caustic cloud +
         # source-plane cusp rays (built once, reused across strata).
-        admission = _interior_admission(band, parity, reach_scalar, config)
+        admission = _interior_admission(band, parity, reach_scalar, config,
+                                        eta_max=max_eta_max)
         cusp_angles = _cusp_source_angles(gamma_mid, config.n_caustic_samples)
         int_rho = 0.0  # near-origin: the hardest interior region (Build 8h-a)
         int_boundary = _stratum_ppgo_boundary(
