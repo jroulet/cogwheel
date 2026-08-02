@@ -123,8 +123,8 @@ DO_NOTHING_SLACK = 1.0e-12
 #: source at |y| = r_caustic(gamma, theta_c) + offset.  REFUSE configs sit
 #: just outside the astroid caustic near a cusp (offset bisected on |y| so the
 #: separation lands well below 0.5; Im(tau_c) also small ~0.001 near axis).
-#: ADMIT configs are far-from-cusp exterior points (separation ~1.4-2.9,
-#: Im(tau_c) in 0.40-0.87 > _GHOST_DECAY_IM_THRESHOLD).
+#: ADMIT configs are far-from-cusp exterior points (separation ~1.7-4.1,
+#: Im(tau_c) in 0.49-1.71 > _GHOST_DECAY_IM_THRESHOLD).
 #: Offsets for admit configs verified to satisfy both gates (2026-08-01).
 REFUSE_CONFIGS = (
     (0.30, 0.3, 0.04),
@@ -133,7 +133,7 @@ REFUSE_CONFIGS = (
     (0.90, 0.3, 0.06),
 )
 ADMIT_CONFIGS = (
-    (0.50, 45.0, 0.65),   # Im(tau_c)~0.43, sep~1.98 (offset raised for margin above 0.4 threshold)
+    (0.90, 45.0, 0.80),   # Im(tau_c)=0.492, sep=1.704 (below 2.0; reachable-red target)
     (0.90, 45.0, 1.00),   # Im(tau_c)=0.690, sep=1.819
     (0.30, 45.0, 0.80),   # Im(tau_c)=0.873, sep=2.877
     (0.30, 20.0, 1.50),   # Im(tau_c)=1.714, sep=4.070

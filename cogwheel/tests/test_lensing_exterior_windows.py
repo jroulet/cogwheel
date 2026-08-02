@@ -654,16 +654,14 @@ def _max_adjacent_carrier_jump(grid: np.ndarray) -> float:
 #: Positive parity, ``beta = kappa = 0``, source at ``|y| = r_caustic + offset``
 #: (caustic-fixed ``rho = 1 + offset``; see `surrogate._from_caustic_fixed`).
 #: ``w_min`` is chosen just above each probe's ghost gate ``2 / Im tau_c``
-#: (measured gate values 2.23 / 2.22 / 2.16, all clearing ``GHOST_GATE = 2``)
 #: so the ghost is materially resolved AT the band bottom -- exactly where the
-#: raw-frame carrier error is largest -- and stays well below 60.  ``Im tau_c``
-#: is 0.319 / 0.404 / 0.187: the ``theta = 75 deg`` probe sits nearest a
-#: principal axis (slowest ghost decay, hardest collapse), which is why its
-#: ``w_min`` must be the largest to clear the gate.
+#: raw-frame carrier error is largest -- and stays well below 60.  All probes
+#: satisfy ``Im tau_c >= _GHOST_DECAY_IM_THRESHOLD = 0.4`` (measured values
+#: 0.446 / 0.404 / 0.462) so the step-6 decay gate admits them.
 COLLAPSE_PROBES: tuple[tuple[float, float, float, float], ...] = (
-    (0.90, 45.0, 0.60, 7.0),
+    (0.90, 45.0, 0.75, 5.0),
     (0.50, 45.0, 0.60, 5.5),
-    (0.90, 75.0, 0.60, 11.5))
+    (0.70, 55.0, 0.75, 4.6))
 
 #: Common upper edge (< 60) and node count of the mid-band collapse grid.
 COLLAPSE_WMAX: float = 55.0
@@ -688,7 +686,7 @@ COLLAPSE_RAW_FLOOR: float = 1e-2
 #: correctly-framed ghost still makes the label WORSE than subtracting
 #: nothing (``(gamma, theta_c_deg, offset)``).  Measured 2026-07-27:
 #: fixed 4.31e-2 vs bare 4.03e-3, i.e. 10.7x worse.  The `COLLAPSE_PROBES`
-#: all sit at ``theta_c`` 45/45/75 deg -- the angular sweet spot -- so this
+#: all sit at ``theta_c`` 45/45/55 deg -- the angular sweet spot -- so this
 #: probe exists to stop that sample being read as a global claim.
 NEAR_AXIS_PROBE: tuple[float, float, float] = (0.30, 85.0, 1.00)
 COLLAPSE_RATIO_FLOOR: float = 10.0
