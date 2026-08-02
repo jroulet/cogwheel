@@ -1,94 +1,40 @@
 # Test Dev Long-Term Knowledge
 
-- Premise repair, not tolerance repair: fix fixtures to a case where the
-  physical premise holds; keep the original as a companion test PREDICTING
-  its nonzero offset via an independent closed form.
-- If the WP under test never landed, write an honest contract suite with an
-  @expectedFailure hasattr guard that goes RED when the API lands.
-  @expectedFailure covers the test body NOT tearDown — bump anti-vacuity
-  counters BEFORE the assertion.
-- Oracle independence (F002): AST name-forbidding guards MUST walk
-  ast.Name.id / ast.Attribute.attr (never a source-substring — a production
-  symbol can be a substring of the oracle's own name); extend the guard for
-  every new oracle/mutation helper; add a positive control (a tainted oracle
-  calling the module-under-test flips it red). Pure-mpmath oracles for phase
-  gates; regularize singular integrands with a DIFFERENT scheme than the code.
-- Mocking/falsification kit: inject buggy/old variants by patching the MODULE
-  GLOBAL the fn resolves; patch an except-branch's exception NAME in consumer
-  globals so the real refusal escapes; reach untriggerable states via mock
-  side_effect / SimpleNamespace fakes reusing real sub-objects; under numba
-  patch the FULL .py_func chain (F010); a serve gate: patch its in_domain to
-  lie + feed a fake result to prove the gate has teeth. "Gate RED" = refusal
-  raised OR error>tol; test refusals at the production operating point.
-  A function with LOCAL (call-time) imports needs patching at EACH consuming
-  module's namespace, not just where the target is defined. RECURSION TRAP:
-  when a test helper must call the REAL implementation from inside a test
-  that ALSO mock.patches that same name elsewhere, capture the real
-  reference (`_REAL_FN = module.fn`) at import time, before any patching,
-  and always call that captured reference — calling the module attribute
-  from inside the helper risks recursing into the patched version.
-- Detect a silent fast-path fallback by spying the fast method (call_count==0
-  under assertRaises = short-circuited; not-called on a served config = fell
-  back); assert fallback==direct bit-identically via float64 .tobytes().
-  Byte-identity vs HEAD: exec `git show HEAD:file` into a module registered in
-  sys.modules FIRST, compare lnL + fiducial nodes max|diff|=0, red-check via
-  np.nextafter. For a module with numba @njit(cache=True) decorators, the HEAD
-  copy MUST be a REAL temp .py file loaded via
-  `importlib.util.spec_from_file_location` — numba needs a real file locator.
-  When the change under test is still UNCOMMITTED, `git worktree add /tmp/x
-  HEAD` IS the pre-change baseline — the cheapest proof that a neighbor
-  suite's red is pre-existing rather than caused by the WP.
-- Freeze bit-identity fixtures as `float.hex()` STRINGS (exact round-trip) and
-  rebuild the fixture's inputs FROM the stored hex, so the guard isolates the
-  functions under test from upstream drift in whatever generated the config.
-- When a production-scale absolute tolerance (eps<1e-3, nat tiers) is
-  UNREACHABLE in a minutes-scale fixture, gate on a BUDGET-INDEPENDENT
-  relationship: for lnL-from-envelope error use dlnL <= AMP * eps_dense *
-  |lnL_exact| PAIRED with a monotone-refinement positive control witnessing
-  eps->target as nodes increase. A fixed nat budget is the WRONG currency.
-  Never widen a real production gate — keep it RED/xfail with a green
-  converged control. lru_cache trained surrogates (one train/process).
-- SUBTRACTIVE-TERM ACCEPTANCE (do-nothing control): the certifying oracle is
-  the F-normalized residual vs the exact total — assert resid(WITH the term)
-  <= resid(WITHOUT it) + tiny on every ADMITTED config (config-agnostic, no
-  tolerance table). Reachable-red = patch the admission threshold to 0.0 to
-  force-admit a genuinely refused config and assert the ratio exceeds 1.
-- A train==serve (boolean decision equality) assertion is VACUOUS unless the
-  suite also carries a foil config on which the RETIRED mechanism disagreed
-  between the two grids — construct the near-threshold config explicitly.
-- Never anchor a suite on a brief's named refuse/admit configs without
-  measuring them first: named coordinates routinely miss the intended regime
-  (the "near-cusp" configs at theta_c=15/85 deg did NOT refuse — cusps sit
-  near the theta=0/90 axes, so refusal needed theta_c~0.3 deg). Record the
-  measured quantity in the test, not the brief's number. Same applies to a
-  brief's cited constant/root: derive the EXACT closed form yourself for a
-  tight gate (a brief's truncated literal can miss by ~1e-6, well inside a
-  tight tolerance); the brief's literal is fine only for a serve/refuse
-  straddle check where the tolerance margin dwarfs the literal's own error.
-- When constructing a fixture meant to reveal a correction term's effect,
-  sweep the coordinate the term actually DEPENDS ON (e.g. angular for an
-  angular-cosine term), not one it's insensitive to — a radial sweep can
-  hide a break that an azimuthal sweep reveals (same node count either side).
-- Gate each path at its OWN numerical floor (aggregate can pass while a
-  component fails). Identity gates across DIFFERENT node grids floor at engine
-  reproducibility ~1e-11 not eps. _snap lattice anchors are NOT bit-exact —
-  assertAlmostEqual + idempotence, never assertEqual. Probing internals via
-  reduced outputs: prove the reproduction reduces bit-identically first.
-- Phase/frame tests: `np.unwrap(np.angle(ratio))` has an intercept defined
-  only MOD 2pi (the principal branch can give -2pi where 0 is meant) — wrap
-  the fitted intercept into (-pi, pi] before comparing to 0; the SLOPE is the
-  unambiguous quantity (equals -t_min for a min-subtracted frame).
-- Timing: structural gates (speedup ratio, subdominance); absolute ms only
-  arithmetic-derived. Stochastic QMC lnlike is NOT bit-repeatable — pin
-  determinism/JSON round-trip at the deterministic SUB-layer
-  (_get_dh_hh_timeshift) with assert_array_equal, never the stochastic top.
-- Conditional-vs-marginalized round-trip: a single plain draw sits ~25-30 nats
-  ABOVE lnL_marg (extrinsic Occam), so the consistency gate is a LOWER bound.
-  Get in-support vectors under Fixed*Prior by sampling the unit cube until
-  lnposterior is finite.
-- Phase-loss: np.exp(1j*x) range-reduces accurately — float64 loss lives in
-  the w*tau MULTIPLICATION; demos need irrational-scaled factors or synthetic
-  inputs checked vs an independent oracle.
+- Smoke/staging fixture design: use named tuple constants for every
+  threshold/seed; derive fixture grids from those constants so rescaling
+  doesn't scatter magic numbers. A "shared generator" pattern (one
+  setUp builds a heavy chart then all tests in a class share it) is the
+  standard approach for expensive builds; "smoke=True" switch is the
+  standard way to gate expensive sub-steps.
+- Pin tests anchor produced values against a single stored reference —
+  they are sensitive to layout/method renames but NOT to refactors that
+  preserve the computation. Remove or update them proactively when
+  renaming code paths (stale pins -> silent false greens or loud false
+  reds).
+- Reachable-red tests must call the shipping code path, not a
+  reconstructed version (Build 8h-b5); a guard isolated by fixing an
+  unrelated parameter at its trivial-satisfy point ensures that guard
+  alone trips.
+- Never mix "self-oracle" (same-function) and independent-oracle
+  assertions within the same test; mark them distinct test methods.
+- Smoke-scale (4×4×4 grid) eps for tube charts is ~0.4-0.45
+  (interpolation sparsity); the production bar <0.05 applies to
+  12×8×12 or denser grids — never gate production accuracy against a
+  smoke-fixture measurement.
+- For a GATE-CONTRACT SWAP build (old TrainingConfig field moved to
+  explicit function arg), the Test Dev PORT pattern is:
+  (1) add module-level constants for the old field's values (e.g.
+  `_ETA_MAX = 0.05`, `_ETA_FLOOR = 0.02`), (2) remove the dead field
+  from any TrainingConfig() constructor calls in the test, (3) pass the
+  constants as explicit kwargs to every affected function call site,
+  (4) rename any pin tests referencing the old config field to reference
+  the new constant. One file at a time; verify each to completion before
+  the next.
+- A production assertion (`assert f_max < 0.5`) that replaces a
+  skip-guard (`if eta_max > ...`) means: no chart is ever skipped; tests
+  must delete the old guard-fires test and add both a universality test
+  (ratio max/min < 10 across bands) and an assertion-fires test
+  (f_max=0.55). Add self-falsification helpers confirming each has teeth.
 - cogwheel lensing gotchas: ChangRefsdalChannels needs a >=2-pt strictly-
   increasing positive w grid (no scalar fixtures); _lens_dic has beta as the
   4th positional (pass lens params by keyword). Mass-sheet twin lnL invariance
@@ -227,3 +173,9 @@
   tracks lam not hardcoded, (d) over-critical (lam<=0) refuses, (e) reach
   diverges monotone approaching wall from both sides, (f) scalar wrapper
   bit-identical to full function.
+- A single draw from prior sits ~25-30 nats ABOVE lnL_marg (extrinsic
+  Occam), so the consistency gate is a LOWER bound. Get in-support vectors
+  under Fixed*Prior by sampling the unit cube until lnposterior is finite.
+- Phase-loss: np.exp(1j*x) range-reduces accurately — float64 loss lives in
+  the w*tau MULTIPLICATION; demos need irrational-scaled factors or synthetic
+  inputs checked vs an independent oracle.

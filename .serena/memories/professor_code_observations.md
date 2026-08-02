@@ -210,3 +210,13 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   production phenomenon at cusp-adjacent tiles (12+ nodes); smoke-scale
   tests (7 nodes, ~0.37rad span) show ~0.138 eps for BOTH coords (not cusp-
   adjacent) — do not read smoke-scale swing as evidence of knife-edge.
+- `surrogate_training.py` C6 (Build 3, 2026-08-01): `TrainingConfig.eta_max`
+  and `TrainingConfig.eta_floor` fields were REMOVED; tube-shell exclusion
+  geometry is now controlled by explicit kwargs `eta_max` and `eta_floor`
+  passed to `_build_tube_chart`, `_tube_heldout_samples`,
+  `_saddle_lobe_admissions`, and `_interior_admission`. The standard
+  operating-point value is `eta_max = f_max * R_c` per arc (curvature-
+  relative); the legacy test-fixture constant 0.05 (Einstein radii) at the
+  default f_max=0.40 design point is still correct and must be passed as an
+  explicit kwarg. This is a pure call-interface refactor — no change to the
+  underlying admission geometry.

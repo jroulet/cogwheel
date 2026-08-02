@@ -27,7 +27,10 @@
 - `SPEC_CHANGELOG.md` version numbers can read out of order:
   `render_fragments.py` assigns bumps by alphabetical filename order
   within `spec_changelog.d/`, not by fragment date or build sequence —
-  a known rendering quirk; flag, don't "fix".
+  a known rendering quirk; flag, don't "fix". Within a SINGLE date,
+  alphabetical filename order determines which fragment gets the lower
+  version suffix (e.g. `2026-08-01_c6_...` gets .1 and `2026-08-01_lobe_...`
+  gets .2 even if lobe landed first chronologically).
 - SPEC ENTRIES THAT CITE A FUNCTION BY NAME GO STALE SILENTLY: a LATER
   commit in the SAME backlog can refactor that function's role (e.g.
   `_frame_t_min` demoted to a thin accessor once `_frame_delays` became
@@ -120,3 +123,6 @@
 - Constant names cited in SPEC.md and DATA_CONTRACTS.yaml become fragile
   cross-references: if `_LOBE_AXIS_SCHEMA*` or any schema constant is
   renamed in code, BOTH doc surfaces need updating simultaneously.
+- `sync_derived_docs.py` reporting "some issues auto-fixed" with no actual
+  git diff is likely an internal state flush (a no-op) — trust `git diff`
+  as the source of truth, not the script's exit message.

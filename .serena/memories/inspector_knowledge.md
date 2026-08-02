@@ -128,3 +128,7 @@
   node-exact tolerance must budget for the interp error — widening
   _NODE_EXACT_TOL from 1e-10 to 1e-7 is justified; verify the budget
   arithmetic is commented at the constant's definition.
+- After a production interface change (e.g. a TrainingConfig field moved
+  to an explicit function arg), verify ALL callers across ALL suites, not
+  just the directly-touched test file — a gate-contract swap can break
+  every sibling suite that passed args via the old config field.

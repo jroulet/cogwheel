@@ -21,6 +21,10 @@
   Developer, never Coder. When a WP is deliberately redirected off the
   default agent, NAME the executing agent inside coder_instructions — an
   implicit redirect silently mis-routes back to the default.
+- Inspector SPEC-staleness findings caused by a completed build (not a
+  Coder defect) should be OVERRIDDEN as Librarian-routed at triage rather
+  than surfaced as Coder work; include the exact suggested replacement text
+  in the override note so Librarian can apply it without re-analyzing.
 - Don't escalate a perf/accuracy floor measured on a defective build —
   fix, retune, re-measure, then escalate. Unreachable target: document the
   measured floor honestly, escalate; never widen tolerances. Timing
