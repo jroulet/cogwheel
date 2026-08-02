@@ -55,7 +55,7 @@ from cogwheel.lensing.chang_refsdal.channels import (
     INTERIOR_SACR_C, FARFIELD_KERNEL_SUM)
 from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
 from cogwheel.lensing.ppgo_map import (
-    CertifiedPpgoMap, UNKNOWN, annulus_rho, get_certified_ppgo_map)
+    CertifiedPpgoMap, UNKNOWN, caustic_rho, get_certified_ppgo_map)
 from cogwheel.lensing.surrogate import (
     FarFieldChart, TubeChart, LensAmplificationSurrogate,
     _REFUSAL_ERRORS, _log_w_grid, _uniform_axis,
@@ -3929,7 +3929,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             if exterior_tiles else exclusion_rho)
     else:
         region_exclusion_rho = exclusion_rho
-    # ppGO annulus inner edge (WP1 defect 1).  Derive it from the NARROWED
+    # caustic-relative inner edge (WP1 defect 1).  Derive it from the NARROWED
     # served region ``region_exclusion_rho`` -- NOT the pre-narrowing outer
     # annulus -- so the certified-ppGO trim below reads ``w_trust`` /
     # ``w_ceiling`` from the annulus cell the region actually covers.  The
@@ -3937,7 +3937,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # edge closer to the caustic than the scalar exclusion disk; reading the
     # farther-out cell would report an easier (lower-``w_cert``) certification
     # than the inner columns actually enjoy, capping/dropping charts where ppGO
-    # is not in fact certified.  ``annulus_rho`` is the ONE authoritative
+    # is not in fact certified.  ``caustic_rho`` is the ONE authoritative
     # converter into the scalar-reach ppGO gauge; feed it the physical ``|y|``
     # recovered by inverting the additive exterior gauge
     # (``rho = 1 + |y| - coordinate_radius_min`` => ``|y| = rho - 1 +
@@ -3948,18 +3948,18 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # scalar-reach edge: their additive exterior gauge collapses to scalar
     # reach, so ``region_exclusion_rho == exclusion_rho`` and the physical
     # exclusion radius is already the authoritative inner edge.  Both branches
-    # nonetheless obtain ``rho`` through ``annulus_rho`` so the ppGO gauge
+    # nonetheless obtain ``rho`` through ``caustic_rho`` so the ppGO gauge
     # lives
     # in exactly ONE place (``_scalar_caustic_reach == caustic_geometry(gamma,
     # 0)[0]`` bit-exact, so the saddle result is byte-identical to the former
     # hand-rolled ``physical_exclusion_radius / reach_scalar``).
     if parity == 1:
-        ppgo_exclusion_rho = annulus_rho(
+        ppgo_exclusion_rho = caustic_rho(
             gamma_mid,
             region_exclusion_rho - 1.0 + coordinate_radius_min,
             kappa=0.0)
     else:
-        ppgo_exclusion_rho = annulus_rho(
+        ppgo_exclusion_rho = caustic_rho(
             gamma_mid, physical_exclusion_radius, kappa=0.0)
     # -- Exterior far-field: ONE fixed [w_floor, w_trust] window (S1-3) --
     # Build S1-3 replaces the per-mass-stratum ``w`` partitioning of the

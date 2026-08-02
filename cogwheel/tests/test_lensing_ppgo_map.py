@@ -1,26 +1,26 @@
 """
-Tests for the authoritative ppGO annulus converter `ppgo_map.annulus_rho`
+Tests for the authoritative caustic-relative converter `ppgo_map.caustic_rho`
 and the monotonic-conservatism invariant of the ppGO exclusion gauge it
 feeds (`surrogate_training` WP1, defects D1 + D2).
 
 Two things are certified here.
 
-D2 -- the extraction changed no numbers.  `annulus_rho(gamma, |y|, kappa)`
+D2 -- the extraction changed no numbers.  `caustic_rho(gamma, |y|, kappa)`
 was lifted verbatim out of an inline expression that read the SCALAR
 caustic reach (element 0 of `caustic_geometry`) and divided the physical
-source magnitude by it.  `AnnulusRhoByteEquivalenceTestCase` reconstructs
+source magnitude by it.  `CausticRhoByteEquivalenceTestCase` reconstructs
 that legacy expression INDEPENDENTLY inside the test -- ``np.hypot(y1, y2)
 / caustic_geometry(gamma, 0.0)[0]`` -- and demands EXACT equality
 (``max |diff| == 0.0``), not closeness: a reach-index slip (element 1
 instead of 0) or a stray normalisation would leave a nonzero residual that
 a tolerance would hide.  Because `caustic_geometry` is deterministic, the
 two independent calls return a bit-identical reach, so exact equality is
-the right bar.  `AnnulusRhoGuardTestCase` pins the two input guards.
+the right bar.  `CausticRhoGuardTestCase` pins the two input guards.
 
 D1 -- the ppGO exclusion read point moved conservatively.  The stale
-gauge derived the ppGO annulus coordinate from the PRE-narrowing outer
+gauge derived the caustic-relative coordinate from the PRE-narrowing outer
 annulus (``rho = physical_exclusion_radius / reach``); the fix derives it
-from the NARROWED served region via `annulus_rho`, feeding a source
+from the NARROWED served region via `caustic_rho`, feeding a source
 magnitude ``|y|_fix = region_exclusion_rho - 1 + coordinate_radius_min``
 that never exceeds the HEAD physical radius.  Both gauges divide by the
 SAME reach (`_scalar_caustic_reach == caustic_geometry(gamma, 0)[0]`), so
@@ -78,7 +78,7 @@ import numpy as np
 
 from cogwheel.lensing.ppgo_map import (
     CertifiedPpgoMap, STATUS_CERTIFIED, STATUS_INVALID, UNKNOWN,
-    annulus_rho, caustic_geometry)
+    caustic_rho, caustic_geometry)
 from cogwheel.lensing import ppgo_map
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.surrogate_training import (
@@ -104,7 +104,7 @@ _ETA_MAX = 0.05
 _NARROWING = 0.30
 
 #: (gamma, |y|) grid for the D2 byte-equivalence sweep.  4 gammas x 3
-#: magnitudes = 12 ``annulus_rho`` calls, each recomputing
+#: magnitudes = 12 ``caustic_rho`` calls, each recomputing
 #: ``caustic_geometry`` (~1 s), so ~12 s for the sweep -- well under the
 #: 60 s per-test ceiling.
 _D2_GAMMAS = (0.3, 0.5, 0.7, 0.9)
@@ -250,8 +250,8 @@ class _GaugeTestCase(TestCase):
             self.fail('the test asserted nothing: zero comparisons ran')
 
 
-class AnnulusRhoByteEquivalenceTestCase(_GaugeTestCase):
-    """D2: `annulus_rho` reproduces the legacy inline expression exactly."""
+class CausticRhoByteEquivalenceTestCase(_GaugeTestCase):
+    """D2: `caustic_rho` reproduces the legacy inline expression exactly."""
 
     def _legacy_rho(self, gamma: float, y1: float, y2: float) -> float:
         """The pre-extraction inline expression, reconstructed here.
@@ -264,11 +264,11 @@ class AnnulusRhoByteEquivalenceTestCase(_GaugeTestCase):
         return math.hypot(y1, y2) / reach
 
     def test_matches_legacy_inline_expression_exactly(self) -> None:
-        """``max |legacy - annulus_rho| == 0`` over the (gamma, |y|) grid.
+        """``max |legacy - caustic_rho| == 0`` over the (gamma, |y|) grid.
 
         The magnitude ``|y|`` is realised as a 2-vector ``(y1, y2)`` so the
         test exercises the ``np.hypot`` reconstruction, then fed to
-        `annulus_rho` as a scalar magnitude.  Exact (not ``almostEqual``)
+        `caustic_rho` as a scalar magnitude.  Exact (not ``almostEqual``)
         equality: a reach-index or normalisation slip leaves a nonzero
         residual a tolerance would swallow.
         """
@@ -280,18 +280,18 @@ class AnnulusRhoByteEquivalenceTestCase(_GaugeTestCase):
             y1 = magnitude * math.cos(math.radians(30.0))
             y2 = magnitude * math.sin(math.radians(30.0))
             legacy = self._legacy_rho(gamma, y1, y2)
-            produced = annulus_rho(gamma, math.hypot(y1, y2), 0.0)
+            produced = caustic_rho(gamma, math.hypot(y1, y2), 0.0)
             with self.subTest(gamma=gamma, magnitude=magnitude):
                 self.assertEqual(
                     produced, legacy,
-                    f'annulus_rho({gamma}, {magnitude}) = {produced!r} != '
+                    f'caustic_rho({gamma}, {magnitude}) = {produced!r} != '
                     f'legacy {legacy!r}')
             residuals.append((gamma, legacy - produced))
             self.n_compared += 1
         self._save_residual_plot(residuals)
 
     def test_is_pure_scaling_by_reciprocal_reach(self) -> None:
-        """``annulus_rho`` is linear in ``|y|``: doubling ``|y|`` doubles rho.
+        """``caustic_rho`` is linear in ``|y|``: doubling ``|y|`` doubles rho.
 
         A cheap structural cross-check that the converter carries no hidden
         offset or nonlinearity -- ``rho`` is exactly ``|y| / reach``.
@@ -301,13 +301,13 @@ class AnnulusRhoByteEquivalenceTestCase(_GaugeTestCase):
             reach = caustic_geometry(gamma, 0.0)[0]
             for magnitude in _D2_MAGNITUDES:
                 with self.subTest(gamma=gamma, magnitude=magnitude):
-                    self.assertEqual(annulus_rho(gamma, magnitude, 0.0),
+                    self.assertEqual(caustic_rho(gamma, magnitude, 0.0),
                                      magnitude / reach)
-                    self.assertEqual(annulus_rho(gamma, 0.0, 0.0), 0.0)
+                    self.assertEqual(caustic_rho(gamma, 0.0, 0.0), 0.0)
                 self.n_compared += 1
 
     def _save_residual_plot(self, residuals: list[tuple[float, float]]) -> None:
-        """Scatter of (legacy - annulus_rho) vs gamma -- the D2 diagnostic."""
+        """Scatter of (legacy - caustic_rho) vs gamma -- the D2 diagnostic."""
         try:
             import matplotlib
             matplotlib.use('Agg')
@@ -321,20 +321,20 @@ class AnnulusRhoByteEquivalenceTestCase(_GaugeTestCase):
         ax.scatter(gammas, diffs, s=40)
         ax.axhline(0.0, color='k', lw=0.5)
         ax.set_xlabel('gamma')
-        ax.set_ylabel('legacy - annulus_rho')
+        ax.set_ylabel('legacy - caustic_rho')
         ax.set_title('D2 byte-equivalence residual (must be identically 0)')
-        fig.savefig(_OUTPUT_DIR / 'annulus_rho_byte_equivalence_residual.png',
+        fig.savefig(_OUTPUT_DIR / 'caustic_rho_byte_equivalence_residual.png',
                     dpi=90)
         plt.close(fig)
 
 
-class AnnulusRhoGuardTestCase(_GaugeTestCase):
-    """D2: `annulus_rho` fails loudly on invalid inputs."""
+class CausticRhoGuardTestCase(_GaugeTestCase):
+    """D2: `caustic_rho` fails loudly on invalid inputs."""
 
     def test_negative_magnitude_raises_naming_the_argument(self) -> None:
         """A negative ``y_magnitude`` raises ``ValueError`` naming it."""
         with self.assertRaises(ValueError) as caught:
-            annulus_rho(0.5, -1.0, 0.0)
+            caustic_rho(0.5, -1.0, 0.0)
         self.assertIn('y_magnitude', str(caught.exception))
 
     def test_nonpositive_reach_raises_naming_reach(self) -> None:
@@ -343,21 +343,21 @@ class AnnulusRhoGuardTestCase(_GaugeTestCase):
         Real ``caustic_geometry`` never RETURNS a non-positive reach -- it
         raises `LensDomainError` first -- so this guard is reachable only
         through a degenerate reach.  Patch the module-level
-        ``caustic_geometry`` name that `annulus_rho` resolves so a reach of
+        ``caustic_geometry`` name that `caustic_rho` resolves so a reach of
         ``0.0`` reaches the guard; the message must name the reach and the
         offending gamma.
         """
         stub = mock.Mock(return_value=(0.0, np.array([1.0, 0.0])))
         with mock.patch.object(ppgo_map, 'caustic_geometry', stub):
             with self.assertRaises(ValueError) as caught:
-                annulus_rho(0.5, 2.0, 0.0)
+                caustic_rho(0.5, 2.0, 0.0)
         message = str(caught.exception)
         self.assertIn('reach', message)
         self.assertIn('0.5', message)
 
     def test_zero_magnitude_is_allowed(self) -> None:
         """``|y| = 0`` (source at the caustic centre) is valid, rho = 0."""
-        self.assertEqual(annulus_rho(0.5, 0.0, 0.0), 0.0)
+        self.assertEqual(caustic_rho(0.5, 0.0, 0.0), 0.0)
 
 
 class PpgoExclusionMonotonicConservatismTestCase(_GaugeTestCase):
@@ -377,7 +377,7 @@ class PpgoExclusionMonotonicConservatismTestCase(_GaugeTestCase):
 
         ``rho_head`` is the pre-fix outer-annulus gauge
         (``physical_exclusion_radius / reach``); ``rho_fix`` is
-        `annulus_rho` of the source magnitude recovered by inverting the
+        `caustic_rho` of the source magnitude recovered by inverting the
         additive exterior gauge on the NARROWED served region.  Both share
         the same reach, so their ordering follows the source magnitudes.
         """
@@ -388,21 +388,21 @@ class PpgoExclusionMonotonicConservatismTestCase(_GaugeTestCase):
         coordinate_radius_min = scalars['coordinate_radius_min']
         # HEAD gauge: outer-annulus scalar reach.
         rho_head = physical / scalars['reach']
-        # Fixed gauge: narrowed served region -> annulus_rho.
+        # Fixed gauge: narrowed served region -> caustic_rho.
         region_exclusion_rho = exclusion_rho - narrowing
         y_fix = region_exclusion_rho - 1.0 + coordinate_radius_min
-        rho_fix = annulus_rho(gamma_mid, y_fix, 0.0)
+        rho_fix = caustic_rho(gamma_mid, y_fix, 0.0)
         return {
             'gamma_mid': gamma_mid, 'physical': physical,
             'exclusion_rho': exclusion_rho,
             'region_exclusion_rho': region_exclusion_rho,
             'y_fix': y_fix, 'rho_head': rho_head, 'rho_fix': rho_fix}
 
-    def test_head_gauge_equals_annulus_rho_of_full_physical_radius(self) -> None:
-        """The HEAD outer-annulus gauge IS `annulus_rho` of the full radius.
+    def test_head_gauge_equals_caustic_rho_of_full_physical_radius(self) -> None:
+        """The HEAD outer-annulus gauge IS `caustic_rho` of the full radius.
 
         ``physical_exclusion_radius / reach`` is bit-identical to
-        ``annulus_rho(gamma_mid, physical_exclusion_radius, 0)`` because
+        ``caustic_rho(gamma_mid, physical_exclusion_radius, 0)`` because
         both divide by the same deterministic reach.  This pins the claim
         that the two gauges differ ONLY in the source magnitude they feed.
         """
@@ -411,7 +411,7 @@ class PpgoExclusionMonotonicConservatismTestCase(_GaugeTestCase):
         gauges = self._gauges(_NARROWING)
         self.assertEqual(
             gauges['rho_head'],
-            annulus_rho(gauges['gamma_mid'], gauges['physical'], 0.0))
+            caustic_rho(gauges['gamma_mid'], gauges['physical'], 0.0))
 
     def test_narrowed_region_is_strictly_inside_outer_annulus(self) -> None:
         """Premise: the served region is strictly inside the outer annulus.
@@ -496,7 +496,7 @@ class PpgoExclusionMonotonicConservatismTestCase(_GaugeTestCase):
                    label=f"rho_head={gauges['rho_head']:.3f} (HEAD, easier)")
         ax.axvline(gauges['rho_fix'], color='tab:green', ls='--',
                    label=f"rho_fix={gauges['rho_fix']:.3f} (fixed, harder)")
-        ax.set_xlabel('ppGO annulus rho')
+        ax.set_xlabel('caustic-relative rho')
         ax.set_ylabel('w_cert')
         ax.set_title('D1: fixed gauge reads inward -> higher w_cert cell')
         ax.legend()
@@ -508,11 +508,11 @@ class PpgoExclusionMonotonicConservatismTestCase(_GaugeTestCase):
 class PpgoOrderingReachableRedTestCase(_GaugeTestCase):
     """D1 defect-1 reachable-red guard: the ordering bug reads an easier cell.
 
-    The defect was an ORDERING bug: the ppGO annulus coordinate was derived
+    The defect was an ORDERING bug: the caustic-relative coordinate was derived
     from the PRE-narrowing outer annulus (``exclusion_rho``) instead of the
     NARROWED served region (``region_exclusion_rho``) that the positive-parity
     per-``theta_c``-column admission actually covers.  Both orderings feed the
-    SAME authoritative converter `annulus_rho` and divide by the SAME reach --
+    SAME authoritative converter `caustic_rho` and divide by the SAME reach --
     they differ ONLY in the source magnitude, hence in the read-point ``rho``.
 
     This case reproduces both orderings from the real band scalars and pins
@@ -555,7 +555,7 @@ class PpgoOrderingReachableRedTestCase(_GaugeTestCase):
         return scalars['exclusion_rho'] - 1.0 + scalars['coordinate_radius_min']
 
     def _read_rho(self, ordering: str) -> float:
-        """ppGO annulus read-point for the two orderings (`annulus_rho`)."""
+        """Caustic-relative read-point for the two orderings (`caustic_rho`)."""
         scalars = _band_gauge_scalars()
         if ordering == 'fixed':
             magnitude = self._served_inner_magnitude()
@@ -563,7 +563,7 @@ class PpgoOrderingReachableRedTestCase(_GaugeTestCase):
             magnitude = self._outer_magnitude()
         else:
             raise ValueError(f'unknown ordering {ordering!r}')
-        return annulus_rho(scalars['gamma_mid'], magnitude, 0.0)
+        return caustic_rho(scalars['gamma_mid'], magnitude, 0.0)
 
     def _assert_not_easier(self, ordering: str,
                            ppgo: CertifiedPpgoMap) -> tuple[float, float]:
@@ -655,7 +655,7 @@ class PpgoOrderingReachableRedTestCase(_GaugeTestCase):
         ax.axvline(self._read_rho('fixed'), color='tab:green', ls='--',
                    label=f"rho_fixed={self._read_rho('fixed'):.3f} "
                          f"(served inner edge)")
-        ax.set_xlabel('ppGO annulus rho')
+        ax.set_xlabel('caustic-relative rho')
         ax.set_ylabel('w_cert')
         ax.set_title('D1 defect-1: buggy ordering reads the easier outer cell')
         ax.legend()
@@ -672,8 +672,8 @@ class SaddleBranchByteIdentityTestCase(_GaugeTestCase):
     exclusion_rho``) and the ppGO gauge stays on the HEAD scalar-reach
     expression ``ppgo_exclusion_rho = physical_exclusion_radius / reach``.
 
-    The independent HEAD oracle is `annulus_rho` evaluated on the FULL
-    physical exclusion radius: `annulus_rho` divides by
+    The independent HEAD oracle is `caustic_rho` evaluated on the FULL
+    physical exclusion radius: `caustic_rho` divides by
     ``caustic_geometry(gamma, 0)[0]``, which is bit-identical to the scalar
     reach `_scalar_caustic_reach` the branch divides by (verified in the
     suite's probe), so equality is EXACT -- a reach-index slip or a stray
@@ -692,23 +692,23 @@ class SaddleBranchByteIdentityTestCase(_GaugeTestCase):
     def _head_oracle_rho(self) -> float:
         """HEAD gauge via the authoritative converter on the full radius."""
         scalars = _saddle_gauge_scalars()
-        return annulus_rho(scalars['gamma_mid'],
+        return caustic_rho(scalars['gamma_mid'],
                            scalars['physical_exclusion_radius'], 0.0)
 
     def _narrowed_foil_rho(self, narrowing: float) -> float:
         """What a saddle would read IF it wrongly narrowed like positive parity.
 
         Feeds the additive-inverted magnitude of a narrowed region through
-        `annulus_rho`; used only to witness that the saddle branch does NOT
+        `caustic_rho`; used only to witness that the saddle branch does NOT
         do this (its read-point is strictly larger).
         """
         scalars = _saddle_gauge_scalars()
         region = scalars['exclusion_rho'] - narrowing
         magnitude = region - 1.0 + scalars['coordinate_radius_min']
-        return annulus_rho(scalars['gamma_mid'], magnitude, 0.0)
+        return caustic_rho(scalars['gamma_mid'], magnitude, 0.0)
 
     def test_saddle_branch_is_byte_identical_to_head(self) -> None:
-        """``physical / reach`` equals `annulus_rho` of the full radius EXACTLY.
+        """``physical / reach`` equals `caustic_rho` of the full radius EXACTLY.
 
         Exact equality (not ``almostEqual``): the saddle branch must read the
         OLD value to the last bit.
@@ -790,14 +790,14 @@ class SelfFalsificationTestCase(_GaugeTestCase):
         The exact-equality bar is only meaningful if a wrong reach makes it
         fail.  An oracle that divides by ``reach * (1 + 1e-9)`` (a stand-in
         for a normalisation / reach-index slip) must differ from
-        ``annulus_rho`` -- otherwise byte-equality would pass vacuously.
+        ``caustic_rho`` -- otherwise byte-equality would pass vacuously.
         """
         self._expect_comparisons = True
         differ = 0
         for gamma, magnitude in itertools.product(_D2_GAMMAS, _D2_MAGNITUDES):
             reach = caustic_geometry(gamma, 0.0)[0]
             tainted = magnitude / (reach * (1.0 + 1.0e-9))
-            if annulus_rho(gamma, magnitude, 0.0) != tainted:
+            if caustic_rho(gamma, magnitude, 0.0) != tainted:
                 differ += 1
             self.n_compared += 1
         self.assertEqual(differ, len(_D2_GAMMAS) * len(_D2_MAGNITUDES),
@@ -900,7 +900,7 @@ class SelfFalsificationTestCase(_GaugeTestCase):
         gamma_mid = scalars['gamma_mid']
         head_rho = scalars['physical_exclusion_radius'] / scalars['reach']
         region = scalars['exclusion_rho'] - _NARROWING
-        narrowed_rho = annulus_rho(
+        narrowed_rho = caustic_rho(
             gamma_mid, region - 1.0 + scalars['coordinate_radius_min'], 0.0)
         w_head = ppgo.w_cert('saddle', gamma_mid, head_rho)
         w_narrowed = ppgo.w_cert('saddle', gamma_mid, narrowed_rho)
@@ -1770,7 +1770,6 @@ class Wp1DirectionSelfFalsificationTestCase(_GaugeTestCase):
                     f'a 0.1-rad-rotated direction passed the angle bar '
                     f'(angle={angle:.3e}) at gamma={gamma}')
             self.n_compared += 1
-
 
 
 if __name__ == '__main__':

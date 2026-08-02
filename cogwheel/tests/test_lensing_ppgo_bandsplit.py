@@ -2083,7 +2083,7 @@ class OuterAnnulusRhoCapTestCase(_PpgoTestCase):
         ax.set_title('Outer-annulus cap: UNKNOWN step at measured rho')
         ax.legend(loc='center right', fontsize=8)
         fig.tight_layout()
-        fig.savefig(_OUTPUT_DIR / 'outer_annulus_rho_cap_step.png', dpi=110)
+        fig.savefig(_OUTPUT_DIR / 'outer_caustic_rho_cap_step.png', dpi=110)
         plt.close(fig)
 
     def test_in_range_rho_returns_certified_floors(self):
@@ -2213,7 +2213,6 @@ class OuterAnnulusRhoCapTestCase(_PpgoTestCase):
                                   f'global {name} certified beyond measured')
         finally:
             set_certified_ppgo_map(saved)
-
 
 
 if __name__ == '__main__':

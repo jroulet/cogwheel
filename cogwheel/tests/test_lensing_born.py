@@ -1,11 +1,12 @@
-"""Independent gates for the Chang-Refsdal Born (weak-deflection) annulus rung.
+"""Independent gates for the Chang-Refsdal Born (weak-deflection) carrier rung.
 
 This suite blesses three work packages of the build:
 
 * ``_born.py`` -- the ``b1`` sign fix, the added real ``a0`` correction, the
-  lead-only serve carrier ``born_lead_carrier``, the ``gamma < 3/4`` exterior
-  fence, and guard A re-keyed to the band-split invariant
-  ``w * Delta_tau >= RHO_END``.
+  lead-only serve carrier ``born_lead_carrier``, the two-sided parity-wall
+  margin (guard B), and guard A re-keyed to the band-split invariant
+  ``w * Delta_tau >= RHO_END``.  C8 retired the exterior gamma fences;
+  born_gate now admits any gamma within the wall margin on both parities.
 * ``channels.born_carrier_from_partition`` -- the band-split assembler
   (lead-only below the split, ppGO + ghost above).
 * ``surrogate_census.classify_fallthrough`` -- the ``'born'`` fall-through
@@ -135,16 +136,10 @@ SPLIT_COMPANION_THETA = 0.3
 SPLIT_COMPANION_TOL = 0.20
 
 # --------------------------------------------------------------------------- #
-# Acceptance #6 -- exterior fence.
+# RETIRED: Acceptance #6 (exterior fence) — DELETED by C8 build.
+# The positive-parity gamma fence (gamma < 3/4) no longer exists;
+# born_gate admits any gamma within the parity-wall margin.
 # --------------------------------------------------------------------------- #
-#: Annulus radius for the fence probe.
-FENCE_ABSY = 3.6
-#: Shears the fence must SERVE (below 3/4).
-FENCE_SERVE_GAMMAS = (0.70, 0.74)
-#: Shears the fence must REFUSE (at/above 3/4).
-FENCE_REFUSE_GAMMAS = (0.75, 0.80)
-#: Tolerance on the astroid closed form 2*gamma/sqrt(1-gamma) == 3 at 3/4.
-FENCE_ASTROID_TOL = 1e-10
 
 # --------------------------------------------------------------------------- #
 # Acceptance #7 -- ghost raises, assembler still serves.
@@ -186,13 +181,15 @@ NODE_EPS_FRAC = 4e-3
 # --------------------------------------------------------------------------- #
 # Acceptance #8 -- 'born' census reachable-red.
 # --------------------------------------------------------------------------- #
-#: Non-served positive-parity annulus draw that must classify as 'born'.
+#: Non-served positive-parity exterior draw that must classify as 'born'.
+#: caustic_reach(0.45, 0) ≈ 1.214; |y| = 3.6 -> rho ≈ 2.97 > 1.
 CENSUS_GAMMA = 0.45
-CENSUS_Y1_EIG = 3.6   # |y| in (3.0, 3*sqrt(2)] -> born annulus.
+CENSUS_Y1_EIG = 3.6
 CENSUS_Y2_EIG = 0.0
 CENSUS_THETA = 0.4
-#: Non-annulus draw (|y| < 3) that born must NOT touch.
-CENSUS_NONANNULUS_Y1_EIG = 2.0
+#: Interior draw (|y| < caustic_reach ≈ 1.214) that born must NOT touch.
+#: rho = 0.5 / 1.214 ≈ 0.41 < 1 at gamma = 0.45.
+CENSUS_NONANNULUS_Y1_EIG = 0.5
 #: Category the born branch flips FROM when disabled.
 CENSUS_BORN_CATEGORY = 'born'
 CENSUS_FALLBACK_CATEGORY = 'out-of-box'
@@ -518,54 +515,6 @@ def _plot_currency_ratio(axis) -> None:
     axis.set_title('split-currency coincidence breaks off positive parity')
 
 
-class ExteriorFenceTestCase(BornTestCase):
-    """Acceptance #6: gamma < 3/4 serves; gamma >= 3/4 refuses with gamma."""
-
-    def test_serve_gammas_pass(self) -> None:
-        for gamma in FENCE_SERVE_GAMMAS:
-            with self.subTest(gamma=gamma):
-                self.comparisons += 1
-                try:
-                    _born.born_gate(0.01, FENCE_ABSY, 0.0, gamma, 0.0, 0.0)
-                except _born.BornDomainError as exc:  # pragma: no cover
-                    self.fail(f'gamma={gamma} should serve, refused: {exc}')
-
-    def test_refuse_gammas_raise_named_error_with_gamma(self) -> None:
-        for gamma in FENCE_REFUSE_GAMMAS:
-            with self.subTest(gamma=gamma):
-                self.comparisons += 1
-                with self.assertRaises(_born.BornDomainError) as ctx:
-                    _born.born_gate(0.01, FENCE_ABSY, 0.0, gamma, 0.0, 0.0)
-                self.assertIn(
-                    str(gamma), str(ctx.exception),
-                    'refusal message must name the offending gamma')
-
-    def test_astroid_closed_form_hits_inner_edge_at_three_quarters(self) -> None:
-        # Cross-check the fence's closed form against F025: at gamma = 3/4 the
-        # caustic max|y| = 2 gamma / sqrt(1 - gamma) equals the inner edge 3.
-        value = 2.0 * 0.75 / math.sqrt(1.0 - 0.75)
-        self.assert_within(
-            value - _born.ANNULUS_INNER_RADIUS, FENCE_ASTROID_TOL,
-            'astroid max|y| at gamma=3/4 != annulus inner edge')
-        _save_plot(
-            'exterior_fence_astroid.png',
-            lambda ax: _plot_astroid(ax))
-
-
-def _plot_astroid(axis) -> None:
-    """Diagnostic: astroid max|y| vs gamma, marking the 3.0 crossing."""
-    gammas = np.linspace(0.1, 0.74, 60)
-    max_y = 2.0 * gammas / np.sqrt(1.0 - gammas)
-    axis.plot(gammas, max_y)
-    axis.axhline(_born.ANNULUS_INNER_RADIUS, ls='--', color='red',
-                 label='inner edge 3.0')
-    axis.axvline(0.75, ls=':', color='grey', label='gamma = 3/4')
-    axis.set_xlabel('gamma')
-    axis.set_ylabel('caustic max|y|')
-    axis.legend()
-    axis.set_title('exterior fence: caustic reaches the annulus at 3/4')
-
-
 class GhostRaisesStillServesTestCase(BornTestCase):
     """Acceptance #7: a raising ghost does not refuse the band-split serve.
 
@@ -680,39 +629,41 @@ class ResidualNodeCountTestCase(BornTestCase):
 
 
 class BornCensusReachableRedTestCase(BornTestCase):
-    """Acceptance #8: a born-annulus draw classifies 'born'; disabling flips it."""
+    """Acceptance #8: an exterior draw (rho > 1) classifies 'born'; disabling flips it."""
 
     @staticmethod
-    def _classify(gamma: float, y1_eig: float, *, fence: float | None = None):
+    def _classify(gamma: float, y1_eig: float, *, disable_born: bool = False):
         surrogate = types.SimpleNamespace(charts=[])
         kwargs = dict(
             gamma=gamma, log_w_min=-5.0, log_w_max=-1.0, eta=1.0,
             theta=CENSUS_THETA, image_count=2, y1_eig=y1_eig,
             y2_eig=CENSUS_Y2_EIG, dropped_slivers=())
-        if fence is None:
+        if not disable_born:
             return surrogate_census.classify_fallthrough(surrogate, **kwargs)
-        with mock.patch.object(_born, 'GAMMA_FENCE', fence):
+        # Disable born by patching caustic_rho to return 0.0 (interior).
+        with mock.patch('cogwheel.lensing.surrogate_census.caustic_rho',
+                        lambda gamma, abs_y, kappa=0.0: 0.0):
             return surrogate_census.classify_fallthrough(surrogate, **kwargs)
 
-    def test_born_annulus_draw_classifies_born(self) -> None:
+    def test_born_exterior_draw_classifies_born(self) -> None:
         category = self._classify(CENSUS_GAMMA, CENSUS_Y1_EIG)
         self.comparisons += 1
         self.assertEqual(category, CENSUS_BORN_CATEGORY)
 
     def test_disabling_born_flips_draw_to_out_of_box(self) -> None:
-        # Reachable-red: with the born branch disabled (fence -> 0 so the
-        # annulus draw fails gamma < fence) the SAME draw falls through to
-        # 'out-of-box'.
-        category = self._classify(CENSUS_GAMMA, CENSUS_Y1_EIG, fence=0.0)
+        # Reachable-red: with the born branch disabled (caustic_rho -> 0.0
+        # so rho < 1 always) the SAME draw falls through to 'out-of-box'.
+        category = self._classify(CENSUS_GAMMA, CENSUS_Y1_EIG,
+                                  disable_born=True)
         self.comparisons += 1
         self.assertEqual(category, CENSUS_FALLBACK_CATEGORY)
 
-    def test_non_annulus_draw_unaffected_by_born(self) -> None:
-        # A |y| < 3 draw is outside the born annulus: enabling or disabling
-        # born must not change its category.
+    def test_interior_draw_unaffected_by_born(self) -> None:
+        # A draw with |y| below the caustic reach (rho < 1) is interior:
+        # enabling or disabling born must not change its category.
         enabled = self._classify(CENSUS_GAMMA, CENSUS_NONANNULUS_Y1_EIG)
         disabled = self._classify(
-            CENSUS_GAMMA, CENSUS_NONANNULUS_Y1_EIG, fence=0.0)
+            CENSUS_GAMMA, CENSUS_NONANNULUS_Y1_EIG, disable_born=True)
         self.comparisons += 1
         self.assertEqual(enabled, disabled)
         self.assertEqual(enabled, CENSUS_FALLBACK_CATEGORY)
@@ -737,10 +688,12 @@ class SelfFalsificationTestCase(BornTestCase):
         self.comparisons += 1
         self.assertGreater(abs(abs(amp) / sqrt_mu - 1.0), F009_REL_TOL)
 
-    def test_refuse_gamma_actually_raises(self) -> None:
+    def test_parity_wall_margin_actually_raises(self) -> None:
+        # Guard B: gamma=0.998 -> gamma_p=0.998, |gamma_p - 1| = 0.002
+        # <= DELTA_GAMMA_P = 0.005, so it must raise BornDomainError.
         self.comparisons += 1
         with self.assertRaises(_born.BornDomainError):
-            _born.born_gate(0.01, FENCE_ABSY, 0.0, 0.80, 0.0, 0.0)
+            _born.born_gate(0.01, 3.6, 0.0, 0.998, 0.0, 0.0)
 
     def test_node_counter_discriminates_oscillation(self) -> None:
         # A rapidly oscillating residual needs strictly more nodes than a flat
@@ -754,16 +707,68 @@ class SelfFalsificationTestCase(BornTestCase):
             _greedy_node_count(x, flat, 1e-3))
 
 
+class C8FenceRetirementTestCase(BornTestCase):
+    """Acceptance C8: born_gate admits any gamma within parity-wall margin.
+
+    After the C8 build, the positive-parity gamma fence (3/4) and the saddle
+    fence (1.0502342..3) are deleted.  born_gate now admits ANY gamma as long
+    as (a) the parity-wall margin holds (|gamma_p - 1| > DELTA_GAMMA_P) and
+    (b) the band split does not fire (w * Delta_tau < RHO_END).
+
+    These gammas would have been REFUSED by the old fences:
+    - gamma=0.80 (positive, was >= 3/4)
+    - gamma=0.90 (positive, was >= 3/4)
+    - gamma=1.04 (saddle, was < saddle fence root 1.0502342)
+    """
+
+    #: Gammas the old fences would have refused but C8 admits.
+    _FORMERLY_FENCED_GAMMAS = (0.80, 0.90, 1.04)
+    #: Small frequency so guard A (band split) does NOT fire.
+    _SMALL_W = 0.001
+    #: Source well outside the caustic (exterior) so two real images exist.
+    _EXT_ABSY = 4.0
+
+    def test_formerly_fenced_gammas_now_admitted(self) -> None:
+        """born_gate does NOT raise for gammas the old fences would refuse."""
+        for gamma in self._FORMERLY_FENCED_GAMMAS:
+            with self.subTest(gamma=gamma):
+                self.comparisons += 1
+                try:
+                    _born.born_gate(self._SMALL_W, self._EXT_ABSY, 0.0,
+                                    gamma, 0.0, 0.0)
+                except _born.BornDomainError as exc:
+                    self.fail(
+                        f'C8: gamma={gamma} should now be admitted, '
+                        f'but born_gate raised: {exc}')
+
+    def test_parity_wall_still_refuses(self) -> None:
+        """Guard B still fires at the parity wall (|gamma_p - 1| <= 0.005)."""
+        # gamma=0.998 -> gamma_p = 0.998, |gamma_p - 1| = 0.002 <= 0.005.
+        self.comparisons += 1
+        with self.assertRaises(_born.BornDomainError):
+            _born.born_gate(self._SMALL_W, self._EXT_ABSY, 0.0,
+                            0.998, 0.0, 0.0)
+
+    def test_band_split_still_refuses_large_w(self) -> None:
+        """Guard A still fires when w * Delta_tau >= RHO_END (large w)."""
+        # Use gamma=0.80 (formerly fenced) with a LARGE w to trigger the split.
+        # Delta_tau for gamma=0.80 at |y|=4.0 is ~ 5-10, so w=2.0 should
+        # give w*Delta_tau >> RHO_END = 4.
+        self.comparisons += 1
+        with self.assertRaises(_born.BornDomainError):
+            _born.born_gate(2.0, self._EXT_ABSY, 0.0, 0.80, 0.0, 0.0)
+
+
 # ======================================================================= #
-# SADDLE-BRANCH acceptances (WP1: macro-saddle lead-only carrier + fence).
+# SADDLE-BRANCH acceptances (WP1: macro-saddle lead-only carrier).
 #
-# The three blocks below bless the SADDLE half of WP1 (det A < 0,
+# The blocks below bless the SADDLE half of WP1 (det A < 0,
 # gamma > 1 - kappa), which the positive-parity classes above do not touch:
 #
 #   * the lead-only carrier's Morse phase ``-1j`` and magnitude
-#     ``sqrt(|mu_macro|)`` on the saddle (Acceptance saddle-#1/#2), and
-#   * the exterior fence being the exact BAND ``1.0502342 < gamma < 3``
-#     via the F026 closed form `saddle_caustic_max_y` (Acceptance saddle-#3).
+#     ``sqrt(|mu_macro|)`` on the saddle (Acceptance saddle-#1/#2).
+#   * After C8, the exterior gamma fences are retired; born_gate admits any
+#     gamma within the parity-wall margin on both parities.
 #
 # Tolerance justification (saddle).
 #   * Saddle carrier vs the independent matrix-solve oracle: the ONLY
@@ -812,24 +817,10 @@ SADDLE_F009_WS = (1e-3, 1e-2, 0.05, 1.0, 8.0)
 SADDLE_F009_REL_TOL = 1e-12
 
 # --------------------------------------------------------------------------- #
-# Acceptance saddle-#3 -- the fence is the exact band 1.0502342 < gamma < 3.
+# RETIRED: Acceptance saddle-#3 (exterior fence) — DELETED by C8 build.
+# The saddle gamma fence no longer exists; born_gate uses only guard B
+# (parity-wall margin) and guard A (band split) on both parities.
 # --------------------------------------------------------------------------- #
-#: Exact off-axis inner-edge root gamma = sqrt((189 - 15 sqrt(105)) / 32) at
-#: kappa = 0, where saddle_caustic_max_y == 3.0 (the module's own self-check).
-SADDLE_FENCE_ROOT = math.sqrt((189.0 - 15.0 * math.sqrt(105.0)) / 32.0)
-#: The brief's 7-digit literal pivot used for the serve/refuse straddle.
-SADDLE_FENCE_ROOT_LITERAL = 1.0502342
-#: Upper band edge: saddle_caustic_max_y(3.0, 0) == 3.0 (on-axis candidate).
-SADDLE_FENCE_UPPER = 3.0
-#: Tolerance on the closed form == annulus inner edge (3.0) at the exact root.
-SADDLE_FENCE_MAXY_TOL = 1e-10
-#: Small offset used to straddle each band edge (serve vs refuse).
-SADDLE_FENCE_EPS = 1e-6
-#: Annulus radius / azimuth / frequency for the gate straddle (outer edge,
-#: safely exterior to the caustic -> two real images; w below the band split).
-SADDLE_FENCE_ANNULUS_ABSY = 4.2426
-SADDLE_FENCE_THETA = 0.3
-SADDLE_FENCE_W = 1e-3
 
 
 def _saddle_carrier_independent(w: float, y1: float, y2: float, gamma: float,
@@ -862,21 +853,6 @@ def _saddle_carrier_independent(w: float, y1: float, y2: float, gamma: float,
     return carrier, float(mu_macro)
 
 
-def _saddle_off_on_axis(gamma: float, kappa: float) -> tuple[float, float]:
-    """Independent (off_axis, on_axis) astroid extent candidates on the saddle.
-
-    Re-derives the two ``u = 1/|x|**2`` cusp radicands of the F026 closed form
-    without calling `saddle_caustic_max_y`, so the test can assert WHICH
-    candidate the ``max(...)`` selects at a given root.
-    """
-    lam = 1.0 - kappa
-    gp = gamma / lam
-    u_c = (math.sqrt(4.0 * gp ** 2 - 3.0) - 1.0) / 2.0
-    off_axis = 4.0 * u_c + 1.0 / u_c - 2.0
-    on_axis = 4.0 * gp ** 2 / (gp + 1.0)
-    return off_axis, on_axis
-
-
 def _plot_saddle_magnitude(axis, w_grid, mags, sqrt_mu) -> None:
     """Diagnostic: |F_carrier| vs log w on the saddle -- any slope is the bug."""
     axis.semilogx(w_grid, mags, 'o-', label='|F_carrier|')
@@ -885,23 +861,6 @@ def _plot_saddle_magnitude(axis, w_grid, mags, sqrt_mu) -> None:
     axis.set_ylabel('|F_carrier|')
     axis.legend()
     axis.set_title('saddle F009 pin: magnitude is w-independent')
-
-
-def _plot_saddle_fence(axis) -> None:
-    """Diagnostic: saddle_caustic_max_y vs gamma over (1.05, 3.2)."""
-    gammas = np.linspace(1.051, 3.2, 200)
-    max_y = np.array([_born.saddle_caustic_max_y(g, 0.0) for g in gammas])
-    axis.plot(gammas, max_y)
-    axis.axhline(_born.ANNULUS_INNER_RADIUS, ls='--', color='red',
-                 label='inner edge 3.0')
-    axis.axvline(SADDLE_FENCE_ROOT, ls=':', color='grey',
-                 label='root 1.0502')
-    axis.axvline(3.0, ls=':', color='green', label='gamma = 3')
-    axis.plot([1.1777], [1.5961], 'k*', label='min 1.5961')
-    axis.set_xlabel('gamma')
-    axis.set_ylabel('saddle caustic max|y|')
-    axis.legend()
-    axis.set_title('saddle fence: band 1.0502342 < gamma < 3')
 
 
 class SaddleCarrierClosedFormTestCase(BornTestCase):
@@ -1011,83 +970,6 @@ class SaddleLeadCarrierF009PinTestCase(BornTestCase):
             'saddle carrier total phase must drift with w (F009-S)')
 
 
-class SaddleExteriorFenceTestCase(BornTestCase):
-    """Acceptance saddle-#3: the fence is the exact band 1.0502342 < gamma < 3.
-
-    Pins (i) the F026 closed form at the off-axis inner-edge root, (ii) the
-    serve/refuse straddle at the lower edge, and (iii) the refusal at the
-    upper edge ``gamma >= 3`` -- reachable-red near both edges.
-    """
-
-    def _gate(self, gamma: float) -> None:
-        """Call born_gate on the annulus straddle fixture (may raise)."""
-        y1 = SADDLE_FENCE_ANNULUS_ABSY * math.cos(SADDLE_FENCE_THETA)
-        y2 = SADDLE_FENCE_ANNULUS_ABSY * math.sin(SADDLE_FENCE_THETA)
-        _born.born_gate(SADDLE_FENCE_W, y1, y2, gamma, 0.0, 0.0)
-
-    def test_closed_form_hits_inner_edge_at_off_axis_root(self) -> None:
-        # (i) saddle_caustic_max_y(root, 0) == 3.0 to 1e-10, and the max is
-        # taken from the OFF-AXIS candidate there (off_axis >= on_axis).
-        value = _born.saddle_caustic_max_y(SADDLE_FENCE_ROOT, 0.0)
-        self.assert_within(
-            value - _born.ANNULUS_INNER_RADIUS, SADDLE_FENCE_MAXY_TOL,
-            'saddle max|y| at the root != annulus inner edge')
-        off_axis, on_axis = _saddle_off_on_axis(SADDLE_FENCE_ROOT, 0.0)
-        self.comparisons += 1
-        self.assertGreaterEqual(
-            off_axis, on_axis,
-            f'at the inner-edge root the outermost extent must come from the '
-            f'OFF-AXIS candidate (off={off_axis:.4f}, on={on_axis:.4f})')
-        _save_plot('saddle_fence_maxy.png', _plot_saddle_fence)
-
-    def test_upper_edge_selects_on_axis_candidate(self) -> None:
-        # Companion to (i): by gamma = 3 the outermost extent has switched to
-        # the ON-AXIS candidate (the F026 switch near gamma ~ 1.1777), and the
-        # closed form again equals the inner edge 3.0.
-        value = _born.saddle_caustic_max_y(SADDLE_FENCE_UPPER, 0.0)
-        self.assert_within(
-            value - _born.ANNULUS_INNER_RADIUS, SADDLE_FENCE_MAXY_TOL,
-            'saddle max|y| at gamma=3 != annulus inner edge')
-        off_axis, on_axis = _saddle_off_on_axis(SADDLE_FENCE_UPPER, 0.0)
-        self.comparisons += 1
-        self.assertGreater(
-            on_axis, off_axis,
-            f'at gamma=3 the outermost extent must come from the ON-AXIS '
-            f'candidate (off={off_axis:.4f}, on={on_axis:.4f})')
-
-    def test_lower_edge_refuses_below_serves_above(self) -> None:
-        # (ii) refuse at root - 1e-6 (caustic breaches), serve at root + 1e-6.
-        with self.subTest(edge='lower', side='refuse'):
-            self.comparisons += 1
-            with self.assertRaises(_born.BornDomainError):
-                self._gate(SADDLE_FENCE_ROOT_LITERAL - SADDLE_FENCE_EPS)
-        with self.subTest(edge='lower', side='serve'):
-            self.comparisons += 1
-            try:
-                self._gate(SADDLE_FENCE_ROOT_LITERAL + SADDLE_FENCE_EPS)
-            except _born.BornDomainError as exc:  # pragma: no cover
-                self.fail(
-                    f'gamma just above the root should serve, refused: {exc}')
-
-    def test_upper_edge_refuses_at_three_serves_just_below(self) -> None:
-        # (iii) refuse at gamma = 3.0 (and 3.0 exactly hits the inner edge),
-        # serve at 3.0 - 1e-6 (still inside the band).
-        with self.subTest(edge='upper', side='refuse'):
-            self.comparisons += 1
-            with self.assertRaises(_born.BornDomainError) as ctx:
-                self._gate(SADDLE_FENCE_UPPER)
-            self.assertIn(
-                str(SADDLE_FENCE_UPPER), str(ctx.exception),
-                'refusal message must name the offending gamma')
-        with self.subTest(edge='upper', side='serve'):
-            self.comparisons += 1
-            try:
-                self._gate(SADDLE_FENCE_UPPER - SADDLE_FENCE_EPS)
-            except _born.BornDomainError as exc:  # pragma: no cover
-                self.fail(
-                    f'gamma just below 3 should serve, refused: {exc}')
-
-
 class SaddleSelfFalsificationTestCase(BornTestCase):
     """House idiom: prove the saddle gates above can actually go RED."""
 
@@ -1113,19 +995,14 @@ class SaddleSelfFalsificationTestCase(BornTestCase):
             _born.born_amplification(0.05, SADDLE_F009_ABSY, 0.0,
                                      SADDLE_F009_GAMMA)
 
-    def test_fence_serve_side_is_genuinely_reachable_red(self) -> None:
-        # Prove the lower-edge serve assertion is not vacuous: a gamma well
-        # BELOW the root (deeper into 1 < gamma < root, caustic breaching)
-        # must refuse, so the serve/refuse boundary is real.
+    def test_parity_wall_still_refuses_saddle(self) -> None:
+        # Guard B (parity-wall margin) still fires on the saddle: gamma=1.003
+        # -> gamma_p = 1.003, |gamma_p - 1| = 0.003 <= DELTA_GAMMA_P = 0.005.
+        gamma = 1.003
+        y1, y2 = 4.2426 * math.cos(0.3), 4.2426 * math.sin(0.3)
         self.comparisons += 1
         with self.assertRaises(_born.BornDomainError):
-            self._deep_refuse_gate()
-
-    def _deep_refuse_gate(self) -> None:
-        gamma = 1.02  # gamma_p = 1.02: past guard B, below the inner-edge root.
-        y1 = SADDLE_FENCE_ANNULUS_ABSY * math.cos(SADDLE_FENCE_THETA)
-        y2 = SADDLE_FENCE_ANNULUS_ABSY * math.sin(SADDLE_FENCE_THETA)
-        _born.born_gate(SADDLE_FENCE_W, y1, y2, gamma, 0.0, 0.0)
+            _born.born_gate(1e-3, y1, y2, gamma, 0.0, 0.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -1207,12 +1084,11 @@ SADDLE_FOIL_INFLATION_MIN = 100.0
 # --------------------------------------------------------------------------- #
 # Acceptance #7 -- census 'born' SADDLE arm (reachable-red).
 # --------------------------------------------------------------------------- #
-#: Macro-saddle annulus draw the saddle Born arm must classify as 'born'.
+#: Macro-saddle exterior draw the saddle Born arm must classify as 'born'.
 #: gamma = 1.2 -> det A = 1 - 1.2**2 = -0.44 < 0 (macro image is a saddle, so
-#: the positive-parity arm's ``det A > 0`` first clause fails outright), sits in
-#: the exterior fence band 1.0502342 < gamma < 3, and |y| = 3.5 lands in the
-#: annulus (3.0, 3 sqrt(2) = 4.2426].  saddle_caustic_max_y(1.2, 0) = 1.618 < 3
-#: (measured) so the whole caustic is interior and the annulus is exterior.
+#: the positive-parity arm's ``det A > 0`` first clause fails outright).
+#: caustic_reach(1.2, 0) ≈ 1.618; |y| = 3.5 -> rho = 3.5/1.618 ≈ 2.16 > 1,
+#: so this source is exterior to the caustic and must classify as 'born'.
 SADDLE_CENSUS_GAMMA = 1.2
 SADDLE_CENSUS_Y1_EIG = 3.5
 SADDLE_CENSUS_Y2_EIG = 0.0
@@ -1220,17 +1096,18 @@ SADDLE_CENSUS_Y2_EIG = 0.0
 #: annulus test) is fixed by y1_eig, and the empty chart list means theta never
 #: reaches a chart-serve predicate.
 SADDLE_CENSUS_THETA = 0.4
-#: Non-annulus saddle draw (|y| = 2.0 < 3): outside the born annulus, so the
-#: saddle arm must NOT claim it (it falls through to 'out-of-box').
-SADDLE_CENSUS_NONANNULUS_Y1_EIG = 2.0
-#: Small saddle-annulus tally grid.  All gammas are macro-saddle (>1, det A < 0)
-#: and inside the fence band with saddle_caustic_max_y < 3 (measured: 2.08, 1.62,
-#: 1.81, 1.98, 2.15); all radii lie in (3, 4.2426].  5 x 3 x 2 = 30 closed-form
-#: classifications, each on an empty chart list -- sub-millisecond, no engine.
+#: Interior saddle draw (|y| = 1.0 < caustic_reach ≈ 1.618): rho ≈ 0.62 < 1,
+#: so the born branch must NOT claim it (it falls through to 'out-of-box').
+SADDLE_CENSUS_NONANNULUS_Y1_EIG = 1.0
+#: Small saddle-exterior tally grid.  All gammas are macro-saddle (>1, det A < 0);
+#: all radii are exterior to their respective caustic (rho > 1).  The caustic
+#: reaches for (1.1, 1.2, 1.4, 1.6, 1.8) at kappa=0 are approximately
+#: (2.08, 1.62, 1.81, 1.98, 2.15), and the radii (3.05, 3.5, 4.2) give
+#: rho >> 1 for all.  5 x 3 x 2 = 30 closed-form classifications, each on
+#: an empty chart list -- sub-millisecond, no engine.
 SADDLE_CENSUS_GRID_GAMMAS = (1.1, 1.2, 1.4, 1.6, 1.8)
 SADDLE_CENSUS_GRID_ABSY = (3.05, 3.5, 4.2)
 SADDLE_CENSUS_GRID_THETAS = (0.2, 0.9)
-
 
 
 def _polar_source(absy: float, theta: float) -> np.ndarray:
@@ -1624,13 +1501,13 @@ def _classify_saddle(gamma: float, y1_eig: float, *,
     """Classify a fall-through draw via the production census predicate.
 
     A stateless ``surrogate`` with no charts isolates the analytic Born arms
-    (`_born`) from the chart-serve relaxation probes, exactly as
+    from the chart-serve relaxation probes, exactly as
     `BornCensusReachableRedTestCase` does for the positive-parity arm.
 
-    When ``disable_saddle_arm`` is set, `_born.saddle_caustic_max_y` is patched
-    to ``+inf`` so the saddle branch's ``max_y < ANNULUS_INNER_RADIUS`` clause
-    is always False -- reproducing the PRE-BUILD positive-only predicate, in
-    which the saddle arm simply did not exist.
+    When ``disable_saddle_arm`` is set, ``caustic_rho`` in
+    `surrogate_census` is patched to always return 0.0 (interior), so the
+    born branch never fires — reproducing the PRE-BUILD positive-only
+    predicate, in which the saddle arm simply did not exist.
     """
     surrogate = types.SimpleNamespace(charts=[])
     kwargs = dict(
@@ -1639,8 +1516,8 @@ def _classify_saddle(gamma: float, y1_eig: float, *,
         y2_eig=SADDLE_CENSUS_Y2_EIG, dropped_slivers=(), kappa=0.0)
     if not disable_saddle_arm:
         return surrogate_census.classify_fallthrough(surrogate, **kwargs)
-    with mock.patch.object(
-            _born, 'saddle_caustic_max_y', lambda gamma, kappa: math.inf):
+    with mock.patch('cogwheel.lensing.surrogate_census.caustic_rho',
+                    lambda gamma, abs_y, kappa=0.0: 0.0):
         return surrogate_census.classify_fallthrough(surrogate, **kwargs)
 
 
@@ -1653,16 +1530,15 @@ def _plot_saddle_census_tally(axis, tally: dict[str, int]) -> None:
 
 
 class SaddleCensusReachableRedTestCase(BornTestCase):
-    """Acceptance #7: a macro-saddle annulus draw classifies 'born'.
+    """Acceptance #7: a macro-saddle exterior draw (rho > 1) classifies 'born'.
 
-    The saddle arm mirrors the positive-parity arm but keys the exterior fence
-    on `_born.saddle_caustic_max_y` (single-source with `_born.born_gate`).  The
-    reachable-red foil disables that arm and shows the SAME draw falls through
-    to 'out-of-box' -- because ``det A = 1 - gamma**2 < 0`` fails the positive
-    arm's first clause outright, there is nothing else to catch it.
+    After C8 the census classify_fallthrough uses caustic_rho > 1 on both
+    parities (no gamma fence). The reachable-red foil disables the born arm
+    via a caustic_rho patch and shows the SAME draw falls through to
+    'out-of-box'.
     """
 
-    def test_saddle_annulus_draw_classifies_born(self) -> None:
+    def test_saddle_exterior_draw_classifies_born(self) -> None:
         # Guard the premise: this witness is genuinely a macro-saddle
         # (det A < 0), not the positive-parity arm under test elsewhere.
         det_a_macro = (1.0 - 0.0) ** 2 - SADDLE_CENSUS_GAMMA ** 2
@@ -1672,34 +1548,32 @@ class SaddleCensusReachableRedTestCase(BornTestCase):
         self.comparisons += 1
         self.assertEqual(category, CENSUS_BORN_CATEGORY)
 
-    def test_prebuild_positive_only_predicate_returns_out_of_box(self) -> None:
-        # Reachable-red: with the saddle arm removed (pre-build positive-only
-        # predicate) the identical saddle draw fails the positive arm's
-        # det A > 0 clause and falls through to 'out-of-box'.
+    def test_disabling_born_arm_returns_out_of_box(self) -> None:
+        # Reachable-red: with the born branch disabled (caustic_rho -> 0.0
+        # so rho < 1 always) the identical saddle draw falls through to
+        # 'out-of-box'.
         category = _classify_saddle(
             SADDLE_CENSUS_GAMMA, SADDLE_CENSUS_Y1_EIG, disable_saddle_arm=True)
         self.comparisons += 1
         self.assertEqual(category, CENSUS_FALLBACK_CATEGORY)
 
-    def test_non_annulus_saddle_draw_not_born(self) -> None:
-        # A |y| = 2.0 < 3 saddle draw is inside the annulus inner edge: the
-        # saddle arm's radius clause fails, so it must NOT be claimed 'born'.
+    def test_non_exterior_saddle_draw_not_born(self) -> None:
+        # A |y| < caustic_reach draw is interior (rho < 1): the born branch
+        # must NOT claim it (it falls through to 'out-of-box').
         category = _classify_saddle(
             SADDLE_CENSUS_GAMMA, SADDLE_CENSUS_NONANNULUS_Y1_EIG)
         self.comparisons += 1
         self.assertNotEqual(category, CENSUS_BORN_CATEGORY)
         self.assertEqual(category, CENSUS_FALLBACK_CATEGORY)
 
-    def test_saddle_annulus_grid_all_born_none_out_of_box(self) -> None:
-        # Diagnostic tally: every in-band saddle-annulus draw lands in 'born',
+    def test_saddle_exterior_grid_all_born_none_out_of_box(self) -> None:
+        # Diagnostic tally: every exterior saddle draw lands in 'born',
         # and none fall through to 'out-of-box'.
         tally: dict[str, int] = {}
         for gamma, absy, theta in itertools.product(
                 SADDLE_CENSUS_GRID_GAMMAS, SADDLE_CENSUS_GRID_ABSY,
                 SADDLE_CENSUS_GRID_THETAS):
             with self.subTest(gamma=gamma, absy=absy, theta=theta):
-                # y2_eig = 0 pins |y| = absy; theta is carried only for the
-                # (empty) chart-serve probes, so re-key y1_eig = absy.
                 category = _classify_saddle(gamma, absy)
                 self.comparisons += 1
                 self.assertEqual(category, CENSUS_BORN_CATEGORY)
@@ -1714,36 +1588,95 @@ class SaddleCensusReachableRedTestCase(BornTestCase):
 
 
 class SaddleCensusSelfFalsificationTestCase(BornTestCase):
-    """Reachable-red: the saddle census arm CAN go red, so #7 is not vacuous.
+    """Reachable-red: the born census classification CAN go red.
 
     A numerical/decision suite without a self-falsification class is not
     finished.  These foils prove the 'born' verdicts above are not trivially
     true for every input the arm sees.
     """
 
-    def test_pushing_gamma_above_the_fence_upper_edge_refuses(self) -> None:
-        # gamma >= 3 breaches the exterior fence (saddle_caustic_max_y >= 3),
-        # so an otherwise-identical saddle annulus draw is NOT 'born'.
-        self.assertGreaterEqual(
-            _born.saddle_caustic_max_y(3.0, 0.0), _born.ANNULUS_INNER_RADIUS,
-            'premise: gamma = 3 caustic reaches the annulus inner edge')
-        category = _classify_saddle(3.0, SADDLE_CENSUS_Y1_EIG)
+    def test_interior_saddle_draw_is_not_born(self) -> None:
+        # A source INTERIOR to the caustic (rho < 1) must NOT classify as
+        # 'born' — proving the exterior threshold is load-bearing.
+        # gamma=1.2 (macro saddle), |y|=1.0 -> rho ~ 0.62 < 1.
+        category = _classify_saddle(SADDLE_CENSUS_GAMMA,
+                                    SADDLE_CENSUS_NONANNULUS_Y1_EIG)
         self.comparisons += 1
         self.assertNotEqual(category, CENSUS_BORN_CATEGORY)
 
-    def test_positive_parity_gamma_takes_the_positive_arm_not_saddle(
-            self) -> None:
-        # A det A > 0 draw (gamma < 1) is served by the POSITIVE arm; disabling
-        # the SADDLE arm must leave that verdict untouched -- proving the two
-        # arms are independent and the saddle patch is not a global kill-switch.
-        pos_gamma = CENSUS_GAMMA  # 0.45 < 3/4 fence, det A > 0.
-        with_saddle = _classify_saddle(pos_gamma, CENSUS_Y1_EIG)
-        without_saddle = _classify_saddle(
-            pos_gamma, CENSUS_Y1_EIG, disable_saddle_arm=True)
+    def test_disabling_born_flips_exterior_to_out_of_box(self) -> None:
+        # Reachable-red: with the born branch disabled (caustic_rho -> 0.0)
+        # the SAME exterior draw that normally classifies as 'born' falls
+        # through to 'out-of-box' — proving the born branch is the sole
+        # cause of the 'born' classification.
+        with_born = _classify_saddle(SADDLE_CENSUS_GAMMA, SADDLE_CENSUS_Y1_EIG)
+        without_born = _classify_saddle(
+            SADDLE_CENSUS_GAMMA, SADDLE_CENSUS_Y1_EIG, disable_saddle_arm=True)
         self.comparisons += 1
-        self.assertEqual(with_saddle, CENSUS_BORN_CATEGORY)
-        self.assertEqual(without_saddle, CENSUS_BORN_CATEGORY)
+        self.assertEqual(with_born, CENSUS_BORN_CATEGORY)
+        self.assertEqual(without_born, CENSUS_FALLBACK_CATEGORY)
 
+
+class CausticRelativeClassificationTestCase(BornTestCase):
+    """Acceptance C8: classify_fallthrough uses caustic-relative rho > 1.
+
+    After the C8 build, classify_fallthrough's 'born' classification is
+    determined SOLELY by caustic_rho > 1 (exterior to caustic), regardless
+    of the parity (positive vs saddle).  This replaces the old fixed-radius
+    annulus (|y| > 3.0).
+
+    For positive parity (gamma=0.5, kappa=0): caustic_reach ≈ 1.414.
+        - |y|=2.0 -> rho ≈ 1.41 > 1 -> 'born'
+        - |y|=0.5 -> rho ≈ 0.35 < 1 -> NOT 'born'
+
+    For saddle parity (gamma=1.3, kappa=0): caustic_reach ≈ 1.70.
+        - |y|=2.5 -> rho ≈ 1.47 > 1 -> 'born'
+        - |y|=1.0 -> rho ≈ 0.59 < 1 -> NOT 'born'
+    """
+
+    @staticmethod
+    def _classify(gamma: float, y1_eig: float) -> str:
+        surrogate = types.SimpleNamespace(charts=[])
+        return surrogate_census.classify_fallthrough(
+            surrogate,
+            gamma=gamma, log_w_min=-5.0, log_w_max=-1.0, eta=1.0,
+            theta=0.4, image_count=2, y1_eig=y1_eig,
+            y2_eig=0.0, dropped_slivers=(), kappa=0.0)
+
+    def test_positive_exterior_classifies_born(self) -> None:
+        # gamma=0.5 (positive parity), |y|=2.0, rho ≈ 1.41 > 1.
+        category = self._classify(0.5, 2.0)
+        self.comparisons += 1
+        self.assertEqual(category, 'born')
+
+    def test_positive_interior_not_born(self) -> None:
+        # gamma=0.5, |y|=0.5, rho ≈ 0.35 < 1.
+        category = self._classify(0.5, 0.5)
+        self.comparisons += 1
+        self.assertNotEqual(category, 'born')
+
+    def test_saddle_exterior_classifies_born(self) -> None:
+        # gamma=1.3 (saddle, det A < 0), |y|=2.5, rho ≈ 1.47 > 1.
+        det_a = 1.0 - 1.3 ** 2
+        self.assertLess(det_a, 0.0, 'premise: gamma=1.3 is macro-saddle')
+        category = self._classify(1.3, 2.5)
+        self.comparisons += 1
+        self.assertEqual(category, 'born')
+
+    def test_saddle_interior_not_born(self) -> None:
+        # gamma=1.3, |y|=1.0, rho ≈ 0.59 < 1.
+        category = self._classify(1.3, 1.0)
+        self.comparisons += 1
+        self.assertNotEqual(category, 'born')
+
+    def test_parity_does_not_affect_born_classification(self) -> None:
+        # Both parities use the same rho > 1 threshold.  Exterior on both
+        # -> 'born' on both.
+        pos_cat = self._classify(0.5, 2.0)
+        sad_cat = self._classify(1.3, 2.5)
+        self.comparisons += 1
+        self.assertEqual(pos_cat, 'born')
+        self.assertEqual(sad_cat, 'born')
 
 
 if __name__ == '__main__':

@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 from cogwheel.lensing.chang_refsdal import channels
-from cogwheel.lensing.ppgo_map import annulus_rho
+from cogwheel.lensing.ppgo_map import caustic_rho
 
 # Configuration
 GAMMAS = np.array([0.05, 0.10, 0.15, 0.20, 0.25])  # positive parity only (gamma < 3/4)
@@ -73,7 +73,7 @@ def main():
                 except Exception as e:
                     pass  # skip failed points
 
-            rho = annulus_rho(gamma, y_mag, kappa=KAPPA)
+            rho = caustic_rho(gamma, y_mag, kappa=KAPPA)
             results[gamma].append((rho, max_err))
             marker = " *" if max_err < EPS_BAR else ""
             print(f"    |y|={y_mag:.2f} rho={rho:.2f} err={max_err:.4f}{marker}",

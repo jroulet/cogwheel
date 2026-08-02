@@ -52,7 +52,8 @@ import pandas as pd
 from cogwheel.lensing import surrogate as _surrogate
 from cogwheel.lensing.chang_refsdal import (ChangRefsdalChannels,
                                             farfield_envelope_from_partition)
-from cogwheel.lensing.chang_refsdal import _born
+from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
+from cogwheel.lensing.ppgo_map import caustic_rho
 from cogwheel.lensing.prior import (FixedLensGeometryPrior,
                                     UniformLensMassPrior,
                                     UniformReducedShearPrior,
@@ -101,17 +102,10 @@ _ENGINE_REFUSALS = _surrogate._REFUSAL_ERRORS
 _EMPTY_REFUSED = np.empty((0, 3), dtype=float)
 
 # The six mutually-exclusive surrogate fall-through categories.  ``born`` sits
-# between ``dropped-sliver`` and the relaxed-guard probes (Professor Q5): a
-# far-annulus positive-parity draw the analytic Born carrier rung serves.
+# between ``dropped-sliver`` and the relaxed-guard probes (Professor Q5): an
+# exterior-to-caustic draw the analytic Born carrier rung serves (rho > 1).
 _FALLTHROUGH_CATEGORIES = ('gamma-guard', 'dropped-sliver', 'born',
                            'cusp-window', 'refusal-ball', 'out-of-box')
-
-# Outer edge of the Born rung's target annulus ``3.0 < |y| <= 3 * sqrt(2)``.
-# The inner edge is the Born module's `_born.ANNULUS_INNER_RADIUS`; the outer
-# edge is the corner of the [-3, 3]^2 source-position sampling box (half-width
-# 3.0), |y| = 3 * sqrt(2) ~ 4.2426 -- the farthest a boxed source can sit.
-_BORN_ANNULUS_OUTER_RADIUS = 3.0 * math.sqrt(2.0)
-
 
 class CensusError(RuntimeError):
     """Raised when a defensive census invariant is violated."""
@@ -240,17 +234,9 @@ def classify_fallthrough(
     1. ``gamma-guard``  -- ``|gamma - 1| < _GAMMA_GUARD_BAND`` (checked first).
     2. ``dropped-sliver`` -- ``gamma`` inside a training-dropped metamorphosis
        band (a subset of ``out-of-box`` on the gamma axis, so checked first).
-    3. ``born``         -- a far-annulus draw the analytic Born carrier rung
-       serves (`_born`).  Claimed here (Professor Q5) -- before the
-       relaxed-guard probes -- via an INDEPENDENT geometric predicate, NOT a
-       `_born.born_gate` call (which needs ``w`` and an engine-built band
-       split).  Two arms share the annulus ``3 < |y| <= 3 sqrt(2)``: a
-       positive-parity arm (``det A > 0``, the ``gamma < 3/4`` exterior fence)
-       and a macro-saddle arm (``det A < 0``) that mirrors it, keying the
-       exterior fence on the shared closed-form helper
-       ``_born.saddle_caustic_max_y < _born.ANNULUS_INNER_RADIUS`` instead of
-       the scalar ``gamma < 3/4`` -- the whole caustic inside ``|y| < 3``, so
-       the annulus stays exterior (single-source with `_born.born_gate`).
+    3. ``born`` — exterior to the caustic, ``rho = |y| / caustic_reach > 1``.
+       After C8 the Born carrier's admission is unbounded on the gamma axis
+       (no fences); the caustic-relative coordinate is the sole spatial gate.
     4. ``cusp-window``  -- some TUBE chart would serve but for its cusp
        exclusion (detected by relaxing ``cusp_windows`` to empty and
        re-calling `surrogate._tube_serves`).  Per Professor Q7 a near-cusp
@@ -265,9 +251,8 @@ def classify_fallthrough(
     Parameters
     ----------
     kappa : float, optional
-        External convergence (default ``0.0``, which production pins).  Kept
-        as a parameter so the parity determinant ``det A = (1 - kappa)**2 -
-        gamma**2`` stays correct for the later saddle branch.
+        External convergence (default ``0.0``, which production pins).
+        Passed to `caustic_rho` so the caustic reach accounts for kappa.
 
     Returns
     -------
@@ -283,33 +268,17 @@ def classify_fallthrough(
         if lo <= gamma <= hi:
             return 'dropped-sliver'
 
-    # born: a far-annulus positive-parity draw the analytic Born carrier rung
-    # serves.  Independent geometric predicate mirroring the Born rung's
-    # admission region (NOT a `_born.born_gate` call -- that needs w and an
-    # engine-built band split): positive parity det A > 0 (macro image is a
-    # minimum, not a saddle), the gamma < 3/4 exterior fence (whole annulus
-    # lies outside the caustic), and the target annulus 3 < |y| <= 3 sqrt(2).
-    # |y| is the eigenframe source radius; rotation preserves the norm, so this
-    # equals the lens-plane |y| without re-solving geometry.  kappa-aware for
-    # the later saddle branch; production pins kappa = 0.
-    det_a_macro = (1.0 - kappa) ** 2 - gamma ** 2
+    # born: exterior to the caustic — the Born carrier rung's admission
+    # domain in caustic-relative coordinates.  After the C8 annulus
+    # retirement, this is simply rho > 1 on both parities (Professor
+    # ruling: two regimes per parity — caustic-attached and exterior).
+    # The gamma-guard fires earlier, so caustic_rho's reach is safe.
     abs_y = math.hypot(y1_eig, y2_eig)
-    if (det_a_macro > 0.0
-            and gamma < _born.GAMMA_FENCE
-            and _born.ANNULUS_INNER_RADIUS < abs_y <= _BORN_ANNULUS_OUTER_RADIUS):
-        return 'born'
-
-    # born (saddle arm): a far-annulus NEGATIVE-parity (macro-saddle) draw the
-    # same Born carrier rung serves.  Mirrors the positive arm but keys the
-    # exterior fence on the shared closed-form saddle helper instead of the
-    # gamma < 3/4 scalar: the whole astroid caustic lies inside |y| < 3 (so the
-    # annulus is fully exterior) iff `_born.saddle_caustic_max_y` < the inner
-    # radius, which reproduces the serve band 1.0502342 < gamma < 3 without
-    # inlining the closed form (single-source with `_born.born_gate`).  The
-    # gamma-guard band near det A = 0 is checked earlier and shields the wall.
-    if (det_a_macro < 0.0
-            and _born.saddle_caustic_max_y(gamma, kappa) < _born.ANNULUS_INNER_RADIUS
-            and _born.ANNULUS_INNER_RADIUS < abs_y <= _BORN_ANNULUS_OUTER_RADIUS):
+    try:
+        rho = caustic_rho(gamma, abs_y, kappa)
+    except (ValueError, LensDomainError):
+        rho = 0.0  # degenerate reach -> not exterior
+    if rho > 1.0:
         return 'born'
 
     # cusp-window: a tube chart blocked ONLY by its cusp exclusion.

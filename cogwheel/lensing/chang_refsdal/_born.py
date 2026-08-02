@@ -2,7 +2,7 @@
 
 WHAT
     The last rung of the Chang-Refsdal serving ladder for the far
-    annulus ``3.0 < |y| <= 4.2426`` at positive parity (``gamma < 3/4``).
+    exterior region (caustic-relative coordinates).
     The served object is an *analytic carrier*; a driver-trained chart
     interpolates the cheap RESIDUAL ``F_exact - F_carrier`` (the same
     carrier + interpolated-remainder decomposition as SACR-C and the
@@ -15,8 +15,8 @@ WHAT
     * `born_amplification` -- the resolved-image (``w*Delta_tau >> 1``)
       two-term diagnostic ``F_born`` expanded about ``sqrt(mu_macro)``,
       carrying the real ``a0`` and imaginary ``b1`` corrections;
-    * `born_gate` -- the measured validity boundary as a named refusal
-      (the ``gamma < 3/4`` exterior fence and the band-split guard);
+    * `born_gate` -- the validity boundary as a named refusal
+      (parity-wall margin and band-split guard);
     * `born_envelope` -- the demodulated far-field envelope of the
       diagnostic total, built with the SAME `switched_analytic_channels`
       projection the trained far-field charts use; and
@@ -84,13 +84,6 @@ from cogwheel.lensing.chang_refsdal import geometry, channels, operator
 #: ``w * Delta_tau >= RHO_END``, the same band split SACR-C switches on.
 RHO_END = operator.RHO_END
 
-#: Inner edge of the target annulus ``3.0 < |y| <= 4.2426``.  The
-#: exterior fence refuses when the caustic's maximum extent reaches it:
-#: the astroid ``max|y|`` closed form (below) equals ``3.0`` exactly at
-#: ``gamma = 3/4``, so serving is confined to ``gamma < 3/4`` where the
-#: whole annulus lies OUTSIDE the caustic.
-ANNULUS_INNER_RADIUS = 3.0
-
 #: EPS_BORN was the RETIRED T1 accuracy bar of the standalone two-term
 #: series (guard A's old ``O(w**2 / Q2r**2)`` estimate vs 1e-4).  The
 #: production criterion is no longer that the standalone series hits an
@@ -103,67 +96,6 @@ ANNULUS_INNER_RADIUS = 3.0
 #: wall ``gamma_p = 1`` (``det A = 0``).  The series' convergence radius
 #: IS the parity wall, so the macro image degenerates as ``gamma_p -> 1``.
 DELTA_GAMMA_P = 5e-3
-
-#: The ``gamma < 3/4`` exterior fence.  On the astroid caustic the maximum
-#: source extent is ``max|y| = 2 * gamma / sqrt(1 - gamma)`` (kappa = 0),
-#: or ``sqrt(lam) * 2 * gp / sqrt(1 - gp)`` with ``gp = gamma / lam`` and
-#: ``lam = 1 - kappa`` in general.  At ``gamma = 3/4`` (kappa = 0) this is
-#: exactly ``3.0`` -- the annulus inner edge -- so ``gamma >= 3/4`` lets
-#: the caustic breach the annulus (fold crossings in the tile: a different,
-#: interior geometry, out of this rung's scope).
-GAMMA_FENCE = 0.75
-
-# Self-check: the astroid max|y| closed form hits the annulus inner edge
-# exactly at the fence (kappa = 0).  2 * 0.75 / sqrt(0.25) == 1.5 / 0.5.
-assert math.isclose(
-    2.0 * GAMMA_FENCE / math.sqrt(1.0 - GAMMA_FENCE),
-    ANNULUS_INNER_RADIUS, rel_tol=0.0, abs_tol=1e-12), \
-    'exterior-fence closed form must equal the annulus inner edge at gamma=3/4'
-
-
-def saddle_caustic_max_y(gamma: float, kappa: float) -> float:
-    """Exact maximum source extent of the astroid caustic on the SADDLE.
-
-    The F026 closed form for the macro-saddle branch (``gamma > 1 -
-    kappa``, ``det A < 0``).  The caustic radius is stationary in
-    ``u = 1 / |x|**2`` at the on-axis cusp ``u = 1`` and the off-axis cusp
-    ``u_c = (sqrt(4*gp**2 - 3) - 1) / 2`` (real iff ``gp = gamma / lam >
-    1``), and the OUTERMOST point switches from the off-axis to the
-    on-axis candidate at ``gp ~ 1.1777`` -- so the ``max(...)`` of the two
-    candidates is load-bearing, not decorative (F026, correcting F024's
-    measured extent table).
-
-    Parameters
-    ----------
-    gamma : float
-        External shear magnitude.
-    kappa : float
-        Convergence.
-
-    Returns
-    -------
-    float
-        The maximum ``|y|`` reached by the astroid caustic, in Einstein
-        radii.  On the saddle band this exceeds ``3.0`` iff the caustic
-        breaches the target annulus inner edge.
-    """
-    lam = 1.0 - kappa
-    gp = gamma / lam
-    u_c = (math.sqrt(4.0 * gp ** 2 - 3.0) - 1.0) / 2.0
-    off_axis = 4.0 * u_c + 1.0 / u_c - 2.0
-    on_axis = 4.0 * gp ** 2 / (gp + 1.0)
-    return math.sqrt(lam) * math.sqrt(max(off_axis, on_axis))
-
-
-# Self-check: at kappa = 0 the saddle max|y| closed form hits the annulus
-# inner edge (3.0) exactly at the off-axis inner-edge root
-# gamma = sqrt((189 - 15*sqrt(105)) / 32) = 1.0502342 (F026).
-assert math.isclose(
-    saddle_caustic_max_y(
-        math.sqrt((189.0 - 15.0 * math.sqrt(105.0)) / 32.0), 0.0),
-    ANNULUS_INNER_RADIUS, rel_tol=0.0, abs_tol=1e-10), \
-    'saddle-fence closed form must equal the annulus inner edge at the ' \
-    'off-axis inner-edge root gamma = 1.0502342'
 
 
 class BornDomainError(geometry.LensDomainError):
@@ -401,9 +333,9 @@ def born_lead_carrier(w: float, y1: float, y2: float, gamma: float,
 
 def born_gate(w: float, y1: float, y2: float, gamma: float,
               beta: float, kappa: float) -> None:
-    """Refuse configurations outside the measured Born validity region.
+    """Refuse configurations outside the Born validity region.
 
-    Three physically distinct, load-bearing guards, all raising
+    Two physically distinct, load-bearing guards, all raising
     `BornDomainError` (a named refusal, never a silent ``nan``):
 
     * **Guard B -- two-sided parity-wall margin.**  The reduced shear
@@ -413,21 +345,7 @@ def born_gate(w: float, y1: float, y2: float, gamma: float,
       parity wall ``gamma_p = 1`` (``det A = 0``), where the macro image
       degenerates on both parities; the wall strip is refused so the
       positive branch (``gamma_p < 1``) and the saddle branch
-      (``gamma_p > 1``) each see ``det A`` safely away from zero.  NOT made
-      redundant by the fences (it also catches ``kappa``-driven approaches
-      to the wall away from the fence edges).
-    * **Exterior fence -- parity-split caustic extent.**  On the astroid
-      caustic the maximum source extent must stay below the annulus inner
-      edge `ANNULUS_INNER_RADIUS`.  At positive parity (``gamma_p < 1``)
-      it is ``max|y| = sqrt(lam) * 2 * gp / sqrt(1 - gp)``
-      (``gp = gamma / lam``, ``lam = 1 - kappa``), equal to ``3.0`` exactly
-      at ``gamma = 3/4`` (kappa = 0).  On the macro saddle
-      (``gamma_p > 1``) it is the F026 closed form `saddle_caustic_max_y`,
-      equal to ``3.0`` at the off-axis inner-edge root
-      ``gamma = 1.0502342`` (kappa = 0); the saddle serving band is the
-      exterior annulus ``1.0502342 < gamma < 3``.  When either extent
-      reaches `ANNULUS_INNER_RADIUS` the caustic breaches the annulus (a
-      different, interior fold geometry out of this rung's scope) -- refuse.
+      (``gamma_p > 1``) each see ``det A`` safely away from zero.
     * **Guard A -- band split (re-keyed).**  Refuse once the two real
       images are RESOLVED, ``w * Delta_tau >= RHO_END``, with
       ``Delta_tau`` the difference of their FULL Fermat delays
@@ -456,8 +374,7 @@ def born_gate(w: float, y1: float, y2: float, gamma: float,
         Degenerate macro axis (``1 - kappa <= 0`` or
         ``|gamma| == 1 - kappa``), from `geometry.macro_matrix`.
     BornDomainError
-        Guard B (two-sided parity-wall margin), the exterior/saddle
-        fence (caustic breaches the annulus), or guard A (band split).
+        Guard B (two-sided parity-wall margin) or guard A (band split).
     """
     # Degenerate-axis refusal, shared with every other wave-branch path;
     # its matrix is reused by the band-split image finder below.
@@ -481,36 +398,6 @@ def born_gate(w: float, y1: float, y2: float, gamma: float,
             f'converges only inside the positive-parity margin; the macro '
             f'image degenerates at the parity wall gamma_p = 1.')
 
-    if gamma_p < 1.0:
-        # Exterior fence (positive parity): refuse when the caustic's
-        # maximum source extent reaches the annulus inner edge
-        # (equivalently gamma >= 3/4 at kappa = 0).  gamma_p < 1 here, so
-        # the sqrt is safe.
-        caustic_max_y = math.sqrt(lam) * 2.0 * gamma_p / math.sqrt(1.0 - gamma_p)
-        if caustic_max_y >= ANNULUS_INNER_RADIUS:
-            raise BornDomainError(
-                f'Born rung refuses (kappa, gamma) = ({kappa}, {gamma}): '
-                f'caustic max|y| = sqrt(lam) * 2 gp / sqrt(1 - gp) = '
-                f'{caustic_max_y} >= annulus inner edge = '
-                f'{ANNULUS_INNER_RADIUS} (gamma >= 3/4 at kappa = 0). The '
-                f'caustic breaches the annulus; that interior fold geometry is '
-                f'out of the Born rung scope.')
-    else:
-        # Saddle fence (gamma_p > 1, det A < 0): refuse when the astroid
-        # caustic's exact maximum extent (F026 closed form) reaches the
-        # annulus inner edge.  Serving is confined to the exterior saddle
-        # band 1.0502342 < gamma < 3 (kappa = 0), where the whole annulus
-        # 3.0 < |y| <= 4.2426 lies OUTSIDE the caustic.
-        saddle_max_y = saddle_caustic_max_y(gamma, kappa)
-        if saddle_max_y >= ANNULUS_INNER_RADIUS:
-            raise BornDomainError(
-                f'Born rung refuses (kappa, gamma) = ({kappa}, {gamma}): '
-                f'saddle caustic max|y| = {saddle_max_y} >= annulus inner '
-                f'edge = {ANNULUS_INNER_RADIUS}. The macro-saddle serving '
-                f'band is the exterior annulus 1.0502342 < gamma < 3 '
-                f'(kappa = 0); outside it the caustic breaches the annulus '
-                f'(interior fold geometry, out of the Born rung scope).')
-
     # Guard A: band split.  Delta_tau is the FULL Fermat-delay difference
     # of the two real images (includes -ln|x|); resolved => decline.
     source = np.array([float(y1), float(y2)], dtype=float)
@@ -520,8 +407,8 @@ def born_gate(w: float, y1: float, y2: float, gamma: float,
             f'Born rung refuses (w, y1, y2, gamma) = '
             f'({w}, {y1}, {y2}, {gamma}): the band split needs the two '
             f'real images, but geometry.find_images returned '
-            f'{len(images)}. The far annulus at gamma < 3/4 is exterior to '
-            f'the caustic and should yield two real images.')
+            f'{len(images)}. The configuration should yield two real '
+            f'images for the Born carrier to serve.')
     delays = [geometry.delay(image, source, matrix) for image in images]
     delta_tau = max(delays) - min(delays)
     if float(w) * delta_tau >= RHO_END:

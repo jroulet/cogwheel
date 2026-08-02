@@ -100,7 +100,7 @@ from cogwheel.lensing.chang_refsdal.geometry import (
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
 from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
-                                       annulus_rho,
+                                       caustic_rho,
                                        get_certified_ppgo_map)
 
 __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
@@ -1343,7 +1343,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         cell from ONE derivation (DRY: one caustic-reach convention).
 
         The caustic-frame annulus coordinate is obtained from the single
-        authoritative converter `ppgo_map.annulus_rho`, which returns
+        authoritative converter `ppgo_map.caustic_rho`, which returns
         ``rho = |y| / caustic_reach`` with ``caustic_reach`` from
         `ppgo_map.caustic_geometry` -- the SAME authoritative reach the map
         was built with.  ``kappa`` is assumed ``0`` (the caller has already
@@ -1372,7 +1372,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # guard band and returns UNKNOWN, so no split is attempted there.
         parity = 'positive' if gamma < 1.0 else 'saddle'
         try:
-            rho = annulus_rho(
+            rho = caustic_rho(
                 gamma, float(np.hypot(lens['y1'], lens['y2'])), kappa=0.0)
         except LensDomainError:
             return None

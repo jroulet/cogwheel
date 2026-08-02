@@ -112,7 +112,7 @@ import numpy as np
 __all__ = ['CertifiedPpgoMap', 'UNKNOWN',
            'set_certified_ppgo_map', 'get_certified_ppgo_map',
            'use_certified_ppgo_map', 'certified_w_cert', 'certified_w_trust',
-           'certified_w_ceiling', 'caustic_geometry', 'annulus_rho',
+           'certified_w_ceiling', 'caustic_geometry', 'caustic_rho',
            'build_map', 'save_map', 'map_summary',
            'CERTIFICATION_BAR', 'DIAGNOSTIC_BAR',
            'W_TRUST_MULTIPLIER', 'W_TRUST_ADDITIVE', 'MAX_CELL_JUMP',
@@ -780,11 +780,11 @@ def caustic_geometry(gamma: float, kappa: float = 0.0
     return reach, direction
 
 
-def annulus_rho(gamma: float, y_magnitude: float, kappa: float = 0.0) -> float:
-    """Authoritative ppGO annulus coordinate ``rho`` for a source magnitude.
+def caustic_rho(gamma: float, y_magnitude: float, kappa: float = 0.0) -> float:
+    """Authoritative caustic-relative coordinate ``rho`` for a source magnitude.
 
     Converts a physical source-plane offset magnitude ``|y|`` into the ONE
-    scalar-reach ppGO annulus gauge in which the certified-ppGO map is built
+    scalar-reach caustic-relative gauge in which the certified-ppGO map is built
     and queried::
 
         rho = |y| / caustic_reach(gamma, kappa)
@@ -795,7 +795,7 @@ def annulus_rho(gamma: float, y_magnitude: float, kappa: float = 0.0) -> float:
     caustic sits at ``rho = 1``, the interior at ``rho < 1`` and the exterior
     at ``rho > 1``.
 
-    This is the SINGLE authoritative converter into the ppGO annulus gauge.
+    This is the SINGLE authoritative converter into the caustic-relative gauge.
     It is DISTINCT from the additive directional interior/exterior gauge used
     by the far-field charts (``rho = 1 + |y| - r_caustic``); the two gauges
     must not be conflated.  Both `likelihood._ppgo_cell_coords` and
@@ -817,7 +817,7 @@ def annulus_rho(gamma: float, y_magnitude: float, kappa: float = 0.0) -> float:
     Returns
     -------
     float
-        The ppGO annulus coordinate ``rho``.
+        The caustic-relative coordinate ``rho``.
 
     Raises
     ------
