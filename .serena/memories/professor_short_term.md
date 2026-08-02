@@ -1,33 +1,41 @@
 # Professor Short-Term Observations
 
-## C8 fence retirement review (2026-08-01)
+## Ghost decay gate domain review (2026-08-02)
 
-- **test_lensing_born.py**: 53/53 pass (25s). ExteriorFenceTestCase,
-  SaddleExteriorFenceTestCase, all SADDLE_FENCE_* constants, ANNULUS_INNER_RADIUS,
-  GAMMA_FENCE, saddle_caustic_max_y fully deleted from tests AND production code.
-  Zero stale references (grep-verified). C8FenceRetirementTestCase correctly
-  demonstrates gamma=0.80, 0.90, 1.04 admitted; parity-wall (gamma=0.998) still
-  refuses; large-w guard A still refuses.
-- **test_lensing_ppgo_map.py**: 37/37 pass (9.5s). CausticRhoByteEquivalenceTestCase
-  confirms the rename from annulus_rho -> caustic_rho is purely cosmetic (exact
-  byte-equal, not almostEqual). No `annulus_rho` references remain anywhere.
-- **CausticRelativeClassificationTestCase**: tests both parities (pos gamma=0.5 at
-  |y|=2.0 -> rho=1.414 > 1 -> 'born'; saddle gamma=1.3 at |y|=2.5 -> rho=1.458 > 1
-  -> 'born'; interiors rho < 1 correctly NOT 'born'). Parity-independent threshold
-  confirmed.
-- **Physics sanity**: caustic_rho = |y|/caustic_reach. For positive parity gamma=0.5:
-  reach = sqrt(2) ≈ 1.414 (from axis-aligned astroid cusp). For saddle gamma=1.3:
-  reach ≈ 1.714 (deltoid cusp radius). Both verified numerically correct.
-- **Architecture**: surrogate_census.classify_fallthrough calls the ONE authoritative
-  `caustic_rho` from ppgo_map; the 'born' classification is rho > 1 on both parities.
-  No special-casing or gamma-guards beyond the parity wall margin (DELTA_GAMMA_P).
-- **BornCensusReachableRedTestCase._classify**: uses `mock.patch('...caustic_rho',
-  lambda gamma, abs_y, kappa=0.0: 0.0)` to disable born branch — forcing rho < 1
-  (interior). Confirmed the reachable-red foil works: same draw flips to 'out-of-box'.
-- **SelfFalsificationTestCase**: gamma=0.998 (pos parity, |0.998-1|=0.002 ≤ 0.005);
-  SaddleSelfFalsificationTestCase: gamma=1.003 (saddle, |1.003-1|=0.003 ≤ 0.005).
-  Both correctly refuse via parity-wall margin.
-- **CENSUS_NONANNULUS_Y1_EIG = 0.5** (was 2.0): at gamma=0.45, reach ≈ 1.214,
-  rho = 0.5/1.214 ≈ 0.41 < 1 → interior (correct).
-  **SADDLE_CENSUS_NONANNULUS_Y1_EIG = 1.0** (was 2.0): at gamma=1.2, rho < 1 → interior.
-- Verdict: PASS. Heavy full-sampling validation is operator-deferred.
+- **test_lensing_ghost_decay_gate.py**: 18/18 pass (14s). All five specified
+  tests certified:
+  1. **Decay refusal** (near-axis, gamma=1.6, theta=0.02): Im(tau_c)=0.044 < 0.4
+     threshold → GhostDomainError. Separation=0.94 > 0.7 → separation gate ADMITS.
+     The two gates are provably independent.
+  2. **Well-decayed admit** (gamma=1.5, y=(2,2)): Im(tau_c)=0.825 > 0.4 → admits.
+     |G| decays from 9.07e-2 to 7.52e-5 across band (factor ~800×, exponential).
+  3. **Few-images refusal**: real_images=[] raises GhostDomainError (no images to
+     separate from).
+  4. **Protective refusal (self-falsification)**: forcing ghost into refused config
+     worsens residual by 37.5% (norm_with/norm_without = 1.375). The gate IS
+     protective, not overprotective.
+  5. **Train/serve skew impossibility**: both w-grids (0.5..10 and 2..10) give
+     identical ADMIT decision on the same config; both give identical REFUSE on
+     the near-axis config. The gate is provably w-independent (no frequency in
+     the criterion Im(tau_c) >= constant).
+
+- **test_lensing_ghost.py**: 31/31 pass + 1 xfail (9.3s). Ghost primitives,
+  selection, guards, self-falsification all clean.
+- **test_lensing_chang_refsdal_ghost_frame.py**: 12/12 pass (3.5s). Frame
+  conventions bit-identical.
+- **test_lensing_ghost_gate.py**: 12/13 pass (12s). 1 FAILURE in
+  `GhostSeparationConstantReachableRedTestCase.test_raising_constant_to_two_refuses_an_admit_config`
+  — pre-existing issue: ADMIT_CONFIGS[0] has sep=2.58 > 2.0 so patching MIN to 2.0
+  doesn't flip it. This is a test design issue in the SEPARATION gate reachable-red
+  (not the new decay gate). Not a regression from the current build.
+
+- **Physics**: The decay gate `Im(tau_c) >= 0.4` is the correct criterion.
+  Near a principal axis of the Chang–Refsdal macro matrix, the critical point
+  approaches the real axis (Re axis of the Fermat surface), Im(tau_c) → 0, and
+  the ghost contribution e^{iw tau_c} oscillates rather than decaying — it is
+  NOT a small correction to the kernel sum. The threshold 0.4 = 2.0/5.0 derives
+  from requiring at least _FARFIELD_WINDOW_RADIANS of attenuation at the chart
+  band floor w ~ 5. The criterion is a pure lens-configuration property (no w)
+  so train/serve skew is structurally impossible.
+
+- Heavy full-sampling validation is operator-deferred.

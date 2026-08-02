@@ -22,7 +22,7 @@ What this suite certifies, and the ORACLE for each claim:
   gate: refuse configs must satisfy ``sep < SEP_REFUSE_MAX`` (=0.5) and admit
   configs ``sep > SEP_ADMIT_MIN`` (=1.0).  Both bounds are 1.5x-margined away
   from the production threshold 0.7 (the refuse cluster sits ~0.20-0.29, the
-  admit cluster ~1.4-2.0), so a wrong currency/norm that merely rescaled the
+  admit cluster ~1.82-2.88), so a wrong currency/norm that merely rescaled the
   distance would be caught.  Only 4 of the brief's 7 refuse configs are
   reproducible in-session (the other 3 need the driver's 2026-07-27 table),
   so we test the 4 and assert the general property.
@@ -45,9 +45,11 @@ What this suite certifies, and the ORACLE for each claim:
   additive; both residuals can be tiny, so a ratio is inappropriate).
 
 * REACHABLE-RED for the constant (`GhostSeparationConstantReachableRedTestCase`).
-  ``_GHOST_SEPARATION_MIN`` is monkeypatched to 0.0 (a refuse config wrongly
-  admits) and to 2.0 (an admit config wrongly refuses), proving the 0.7
-  threshold is load-bearing and the boundary assertions bite on both sides.
+  Both ``_GHOST_SEPARATION_MIN`` and ``_GHOST_DECAY_IM_THRESHOLD`` are
+  monkeypatched to 0.0 (a refuse config wrongly admits) and ``_GHOST_SEPARATION_MIN``
+  is patched to 2.0 (an admit config wrongly refuses), proving the thresholds are
+  load-bearing.  Near-cusp configs simultaneously fail BOTH gates (low Im(tau_c)
+  ~0.001 and low separation), so both must be patched to demonstrate reachability.
 
 * BETA GUARD (`BetaGuardTestCase`).  ``_surrogate_coefficients`` must fall
   through to the exact engine (return ``None``) for ``beta != 0`` exactly as
@@ -67,8 +69,9 @@ What this suite certifies, and the ORACLE for each claim:
   reimplementation of the retired decay gate DISAGREES between the train and
   serve grids on a near-threshold skew config (proving the boolean-equality
   test has teeth), and a refused near-cusp config forced through the
-  MINUS_GHOST label makes the DO-NOTHING residual WORSE (proving the gate is
-  what protects that control).
+  MINUS_GHOST label (by patching both ``_GHOST_SEPARATION_MIN`` and
+  ``_GHOST_DECAY_IM_THRESHOLD`` to 0) makes the DO-NOTHING residual WORSE
+  (proving the gates protect that control).
 
 Oracle independence: the separation tripwire and the old-gate foil are built
 from the ``geometry`` primitives directly (no reuse of the gate's decision
@@ -106,7 +109,7 @@ FARFIELD_WINDOW_RADIANS = channels._FARFIELD_WINDOW_RADIANS
 
 #: Tripwire bounds on the independently-recomputed separation.  1.5x-margined
 #: around the 0.7 threshold: refuse configs cluster ~0.20-0.29 (< 0.5), admit
-#: configs cluster ~1.43-1.96 (> 1.0).  Any config straddling 0.7 flags a
+#: configs cluster ~1.82-2.88 (> 1.0).  Any config straddling 0.7 flags a
 #: wrong-currency threshold rather than silently passing.
 SEP_REFUSE_MAX = 0.5
 SEP_ADMIT_MIN = 1.0
@@ -119,8 +122,10 @@ DO_NOTHING_SLACK = 1.0e-12
 #: (gamma, theta_c [deg], offset) configs, positive parity, beta=kappa=0,
 #: source at |y| = r_caustic(gamma, theta_c) + offset.  REFUSE configs sit
 #: just outside the astroid caustic near a cusp (offset bisected on |y| so the
-#: separation lands well below 0.5); ADMIT configs are far-from-cusp exterior
-#: points (separation ~1.3-2.0).  Numbers verified in-session (2026-07-27).
+#: separation lands well below 0.5; Im(tau_c) also small ~0.001 near axis).
+#: ADMIT configs are far-from-cusp exterior points (separation ~1.4-2.9,
+#: Im(tau_c) in 0.40-0.87 > _GHOST_DECAY_IM_THRESHOLD).
+#: Offsets for admit configs verified to satisfy both gates (2026-08-01).
 REFUSE_CONFIGS = (
     (0.30, 0.3, 0.04),
     (0.50, 0.3, 0.04),
@@ -128,13 +133,13 @@ REFUSE_CONFIGS = (
     (0.90, 0.3, 0.06),
 )
 ADMIT_CONFIGS = (
-    (0.50, 45.0, 0.60),
-    (0.90, 45.0, 0.60),
-    (0.30, 45.0, 0.25),
-    (0.30, 20.0, 0.25),
+    (0.50, 45.0, 0.65),   # Im(tau_c)~0.43, sep~1.98 (offset raised for margin above 0.4 threshold)
+    (0.90, 45.0, 1.00),   # Im(tau_c)=0.690, sep=1.819
+    (0.30, 45.0, 0.80),   # Im(tau_c)=0.873, sep=2.877
+    (0.30, 20.0, 1.50),   # Im(tau_c)=1.714, sep=4.070
 )
 #: One admitted + one refused config for the train/serve decision test.
-TRAIN_SERVE_ADMIT_CONFIG = (0.50, 45.0, 0.60)
+TRAIN_SERVE_ADMIT_CONFIG = (0.50, 45.0, 0.65)
 TRAIN_SERVE_REFUSE_CONFIG = (0.90, 0.3, 0.06)
 
 #: Near-threshold skew config for the retired-decay-gate foil: sep=1.807
@@ -429,16 +434,26 @@ class GhostSeparationConstantReachableRedTestCase(GhostGateTestCase):
     """
 
     def test_lowering_constant_to_zero_admits_a_refuse_config(self):
-        """With MIN=0.0 a fact-2 near-cusp config no longer refuses."""
+        """With MIN=0.0 and decay threshold=0.0 a fact-2 config admits.
+
+        Near-cusp configs simultaneously have low separation (sep < 0.5) and
+        low Im(tau_c) (~0.001) — the decay gate fires first.  To isolate the
+        separation gate as load-bearing, both constants are patched to zero:
+        once the decay gate is also disabled the config must admit because its
+        separation alone was the only remaining block (at MIN=0.7 after the
+        decay gate is cleared it would still be refused by separation, but
+        here we zero both to confirm neither alone is vacuous).
+        """
         gamma, theta_deg, offset = REFUSE_CONFIGS[3]
         source, matrix = _source_and_matrix(gamma, theta_deg, offset)
         self.assertFalse(_ghost_admits(GATE_W, source, matrix),
-                         'precondition: this config must refuse at MIN=0.7')
-        with mock.patch.object(channels, '_GHOST_SEPARATION_MIN', 0.0):
+                         'precondition: this config must refuse normally')
+        with mock.patch.object(channels, '_GHOST_SEPARATION_MIN', 0.0), \
+             mock.patch.object(channels, '_GHOST_DECAY_IM_THRESHOLD', 0.0):
             self.assertTrue(
                 _ghost_admits(GATE_W, source, matrix),
-                'with MIN=0.0 the separation gate must admit; the constant '
-                'is not load-bearing on the refuse side')
+                'with both gates zeroed the config must admit; at least one '
+                'constant is not load-bearing on the refuse side')
         self.comparisons += 1
 
     def test_raising_constant_to_two_refuses_an_admit_config(self):
@@ -625,13 +640,24 @@ class GhostGateSelfFalsificationTestCase(GhostGateTestCase):
         self.comparisons += 1
 
     def test_forcing_a_refused_config_worsens_the_donothing_residual(self):
-        """Bypassing the gate on a near-cusp config: resid(MINUS_GHOST) > ks."""
+        """Bypassing both gates on a near-cusp config: resid(MINUS_GHOST) > ks.
+
+        Near-cusp configs have low Im(tau_c) (~0.001) so the decay gate fires
+        before the separation gate.  To force the ghost through the
+        MINUS_GHOST label, both ``_GHOST_SEPARATION_MIN`` and
+        ``_GHOST_DECAY_IM_THRESHOLD`` are patched to zero — this is the only
+        way to reach ``farfield_ghost_term``'s return path for a config that
+        fails both gates.  The residual comparison proves the gate is
+        protective: subtracting the undecayed, inseparable ghost WORSENS the
+        label.
+        """
         gamma, theta_deg, offset = TRAIN_SERVE_REFUSE_CONFIG
         partition = _build_partition(gamma, theta_deg, offset, MID_BAND_W)
-        # Sanity: this config genuinely refuses at the production threshold.
+        # Sanity: this config genuinely refuses at the production thresholds.
         source, matrix = _source_and_matrix(gamma, theta_deg, offset)
         self.assertFalse(_ghost_admits(MID_BAND_W, source, matrix))
-        with mock.patch.object(channels, '_GHOST_SEPARATION_MIN', 0.0):
+        with mock.patch.object(channels, '_GHOST_SEPARATION_MIN', 0.0), \
+             mock.patch.object(channels, '_GHOST_DECAY_IM_THRESHOLD', 0.0):
             resid_ks, resid_mg = _f_normalized_residuals(partition)
         self.assertGreater(
             resid_mg, resid_ks,

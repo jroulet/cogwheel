@@ -1,13 +1,17 @@
 # Architect Short-Term Observations
 
-## Build 5 (C8) — Annulus Retirement Plan (Re-delivery)
+## Build 6 (C5) — Ghost Decay Gate
 
-Build 5 C8 is FULLY EXECUTED (coder completed WP1-3, test dev completed,
-inspector PASS). Re-delivered plan matches the landed code:
-- WP1: annulus_rho → caustic_rho rename (Serena rename_symbol + manual docstring)
-- WP2: Delete fences from _born.py (ANNULUS_INNER_RADIUS, GAMMA_FENCE, saddle fence, saddle_caustic_max_y)
-- WP3: Census rho>1 rewrite in surrogate_census.py
-- Test Dev: retired ExteriorFenceTestCase/SaddleExteriorFenceTestCase, added
-  C8FenceRetirementTestCase + CausticRelativeClassificationTestCase
-- Professor confirmed rho=1 (caustic circumscribed circle) is the correct
-  physics boundary; Simplifier confirmed all WPs are already no-ops.
+Planning complete. Single WP: add decay gate to `farfield_ghost_term` in
+channels.py. Gate formula: `Im(tau_c) >= min_delay_separation` (the
+geometric form of the retired `w_floor * Im tau_c >= 2.0`, proven
+algebraically equivalent since w_floor = 2.0/min_sep). Professor confirmed
+threshold 2.0 is physics-correct (resolution argument, not amplitude); the
+simplified geometric form is frequency-independent and provably skew-free.
+Simplifier endorsed single-WP scope, recommended inline delay computation
+(not `_min_delay_separation` with synthetic mask), and flagged stale
+`GhostContribution.delay` docstring note for update.
+
+Key ordering: ghost_kernel → resolve images → decay gate → separation gate.
+All 3 production callers catch GhostDomainError, so the new gate refuses
+gracefully on all paths.

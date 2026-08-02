@@ -1,49 +1,86 @@
 # Inspector Short-Term Observations
 
-## Build 5 C8 — Far Zone Becomes Caustic-Relative (2026-08-02, pass 7)
+## Build 6 C5 — Ghost Decay Gate, Pass 4 (2026-08-xx)
 
 ### Scope
-Re-reviewed (pass 7, same diff): Annulus retirement (delete ANNULUS_INNER_RADIUS,
-GAMMA_FENCE, saddle fence 1.0502342; rename annulus_rho → caustic_rho; re-express
-census classify_fallthrough in caustic-relative coordinates).
+Re-review after Coder's FOURTH attempt at WP1: add ghost decay gate to
+`farfield_ghost_term` (F027) and update affected test suites. The production
+code is correct (fixed constant 0.4, w-independent, physics-aligned). Coder
+updated test_lensing_ghost_gate.py ADMIT_CONFIGS, test_lensing_born.py theta
+range, and parts of test_lensing_exterior_windows.py — but left residual
+test breakage.
 
-### Findings
-1. **INS-5-001 STILL OPEN (flag to Librarian)**: SPEC.md lines 53 (engine table)
-   and 97-137 still reference the old annulus (far annulus 3.0<|y|<=4.2426,
-   gamma<3/4 exterior fence, saddle_caustic_max_y, serving band 1.0502342<gamma<3,
-   "three guards", "shared closed-form fences" in census, "Born far-annulus carrier").
-   Code correctly deletes these; SPEC needs sync.
+### Assessment of Previous Findings
 
-2. **INS-5-003 STILL OPEN (flag to Librarian)**: DATA_CONTRACTS.yaml line 228
-   uses 'caustic-frame annulus rho' and 'annulus radius' terminology; code now
-   uses 'caustic-relative rho'. Functionally identical definition
-   (rho = |y|/caustic_reach), purely cosmetic.
+**INS-7-001 — PARTIALLY RESOLVED.** Down from 11 failures + 8 errors to
+5 failures + 4 errors. The following remain:
+
+1. `test_lensing_ghost_gate.py::test_raising_constant_to_two_refuses_an_admit_config`
+   — ADMIT_CONFIGS[0]=(0.50,45.0,0.65) has separation=2.0116 (not "~1.98" as
+   the inline comment claims), so patching MIN=2.0 doesn't refuse it (2.0116 >= 2.0
+   is True). Reachable-red is inert.
+2. `test_lensing_born.py::test_admitting_ghost_inflates_residual_and_node_count`
+   — narrowed theta range (0.20,0.6) excludes the low-theta ghost-inflation
+   region; now nodes_ghost == nodes_ppgo == 2.
+3. `test_lensing_exterior_windows.py::GhostFrameCollapseTestCase` (2 tests +
+   1 diagnostic plot): COLLAPSE_PROBES[0] Im(tau_c)=0.319 and [2] Im(tau_c)=0.187
+   are below 0.4 → GhostDomainError from farfield_envelope_from_partition.
+4. `test_lensing_exterior_windows.py::SelfFalsificationTestCase::test_raw_frame_ghost_leaves_residual_uncollapsed`
+   — uses COLLAPSE_PROBES[0], same Im(tau_c)=0.319 failure.
+
+**INS-7-002 — RESOLVED.** The cherry-picked "Im tau_c >= 0.9" docstring has
+been replaced with the accurate "e.g. 0.69–0.87 at typical admitted test
+configs; on-axis near-cusp configs have Im tau_c ~ 0.001".
+
+### New Findings (this pass)
+
+**INS-8-001 (BUG — test breakage)**: test_lensing_ghost_gate.py
+`test_raising_constant_to_two_refuses_an_admit_config` fails because
+ADMIT_CONFIGS[0]=(0.50, 45.0, 0.65) has actual separation=2.0116, not
+"~1.98" as the inline comment says. Patching MIN=2.0 doesn't cause a refusal.
+Fix: use a different ADMIT_CONFIG with sep between 0.7 and 2.0 (e.g. use
+ADMIT_CONFIGS[1] which has sep=1.82), or raise the patched value to 2.1.
+
+**INS-8-002 (BUG — test breakage)**: test_lensing_born.py
+`test_admitting_ghost_inflates_residual_and_node_count` fails because
+the narrowed theta range (0.20, 0.6) no longer contains the ghost-inflation
+region that creates extra spline nodes. nodes_ghost == nodes_ppgo == 2.
+Fix: either (a) widen theta range lower bound to include a region where the
+ghost actually inflates the node count (possibly theta < 0.20 but above the
+decay gate), or (b) restructure the test to check residual magnitude
+inflation only (which does pass, as shown by the assertGreater on inflation
+not failing).
+
+**INS-8-003 (BUG — test breakage)**: test_lensing_exterior_windows.py
+COLLAPSE_PROBES[0] (gamma=0.9, theta=45, offset=0.6, Im(tau_c)=0.319) and
+COLLAPSE_PROBES[2] (gamma=0.9, theta=75, offset=0.6, Im(tau_c)=0.187) are
+below the decay threshold. This breaks:
+- GhostFrameCollapseTestCase.test_fixed_frame_collapses_where_raw_frame_is_wrong
+- GhostFrameCollapseTestCase.test_collapse_diagnostic_plot
+- SelfFalsificationTestCase.test_raw_frame_ghost_leaves_residual_uncollapsed
+
+Fix: COLLAPSE_PROBES need configs with Im(tau_c) > 0.4. Since these tests
+exercise the ghost FRAME COLLAPSE behavior (fixed vs raw frame), they need
+configs the decay gate admits. Raise the offsets to push Im(tau_c) above 0.4,
+or pick entirely new configs. The affected probes MUST have the ghost
+admitted so the minus-ghost label assembles.
+
+### Carried Forward
+- INS-5-001: SPEC.md lines 53/97-137 still reference old annulus — Librarian.
+- INS-5-003: DATA_CONTRACTS.yaml line 228 'caustic-frame annulus rho' — Librarian.
+
+### Pattern
+Same as last pass: the GATE-CONTRACT swap breaks sibling suites that encode
+the old contract. The Coder fixed ~60% of the breakage but left the remaining
+~40% — specifically the exterior-windows COLLAPSE_PROBES (unchanged), the
+ghost_gate reachable-red test (wrong separation estimate for the new config),
+and the born test's node-count assertion (theta range too narrow to exercise
+the ghost inflation).
+
+### Production Code Assessment
+The production code (channels.py decay gate + geometry.py docstring) is
+CORRECT and complete. All findings are test-only.
 
 ### Verdict
-PASS. All changed code is correct. Rename is complete (zero residual `annulus_rho`
-in .py). Tests pass: test_lensing_born (53), test_lensing_ppgo_map (37),
-test_lensing_ppgo_bandsplit (62+4skip), test_lensing_surrogate_census (14+13skip).
-born_gate correctly reduced from 3 guards to 2. Census classify_fallthrough
-correctly uses caustic_rho > 1 on both parities (with proper exception handling
-for degenerate gamma). No production impact (serve slot is NOT wired). Edge
-cases verified:
-- gamma=0.80 (positive, formerly fenced): now admitted by born_gate.
-- gamma=0.90 (positive, formerly fenced): now admitted by born_gate.
-- gamma=1.04 (saddle, formerly under fence root 1.0502342): now admitted.
-- gamma=0.998 (parity wall): correctly refused by Guard B.
-- gamma=1.003 (parity wall, saddle): correctly refused by Guard B.
-- CENSUS_NONANNULUS_Y1_EIG reduced from 2.0 to 0.5 (rho=0.41 < 1 at gamma=0.45).
-- SADDLE_CENSUS_NONANNULUS_Y1_EIG reduced from 2.0 to 1.0 (rho=0.62 < 1 at gamma=1.2).
-- C8FenceRetirementTestCase (new, 3 tests) correctly pins the fence deletion.
-- CausticRelativeClassificationTestCase (new, 5 tests) correctly pins rho>1
-  on both parities.
-- All `caustic_rho` consumers use correct (gamma, |y|, kappa) arg order.
-- Pipeline graph confirms all certified_ppgo_map consumers are intact.
-- Exception handling in census: (ValueError, LensDomainError) -> rho=0.0
-  is correct — gamma-guard fires first for degenerate gammas, so the reach
-  exception path is only reachable for very rare edge cases.
-- All imports verified successfully.
-
-### Convention / pattern learned
-- gitignored auto-generated doc stubs do NOT constitute a committed staleness
-  finding — they regenerate from the live module on the next Sphinx build.
+**ISSUES** — 5 test failures + 4 anti-vacuity errors remain. The decay gate
+implementation itself is correct; the test fixture updates are incomplete.

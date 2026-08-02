@@ -947,7 +947,7 @@ class WindowSeamReconstructionTestCase(ExteriorWindowsTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.source = _eigenframe_source(1.2, 30.0)  # exterior fold config
+        self.source = _eigenframe_source(1.65, 45.0)  # exterior fold, Im(tau_c) > 0.4
         self.w = np.geomspace(0.03, 30.0, 400)
         self.part = _partition(self.source, self.w)
         self.max_f = float(np.max(np.abs(self.part.exact_total)))
@@ -1002,11 +1002,11 @@ class WindowSeamReconstructionTestCase(ExteriorWindowsTestCase):
         # farfield_ghost_term's own decision branch.
         separation = _ghost_separation(self.part.source, self.part.matrix)
         self.assertGreaterEqual(separation, GHOST_SEPARATION_MIN)
-        # The gate admits: farfield_ghost_term returns a finite ghost (it
-        # raised GhostDomainError under the retired decay gate) and the
-        # minus-ghost window now assembles instead of refusing.  (Full serve-
-        # mirror reconstruction of the minus-ghost label is certified on the
-        # mid-band grid by `GhostGateTestCase` / `TagContractTestCase`.)
+        # The gate admits: farfield_ghost_term returns a finite ghost (both
+        # the separation gate and the restored decay gate pass) and the
+        # minus-ghost window now assembles.  (Full serve-mirror reconstruction
+        # of the minus-ghost label is certified on the mid-band grid by
+        # `GhostGateTestCase` / `TagContractTestCase`.)
         ghost = ch.farfield_ghost_term(
             self.w, self.part.source, self.part.matrix)
         self.assertTrue(np.all(np.isfinite(ghost)))
@@ -1063,7 +1063,7 @@ class GhostGateTestCase(ExteriorWindowsTestCase):
         # (min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN), so the gate ADMITS;
         # the ghost term is finite and the minus-ghost label reconstructs
         # exact_total.  Oracle: separation from geometry.ghost_kernel.position.
-        source = _eigenframe_source(2.0, 45.0)
+        source = _eigenframe_source(1.65, 45.0)
         w = np.geomspace(3.0, 40.0, 200)
         part = _partition(source, w)
         max_f = float(np.max(np.abs(part.exact_total)))
@@ -1198,7 +1198,7 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         # delay), never from channels._frame_t_min, so farfield_ghost_term is
         # not graded against itself.
         w = np.geomspace(3.0, 40.0, 240)
-        for rho in (1.9, 2.1):
+        for rho in (1.6, 1.7):
             with self.subTest(rho=rho):
                 part, _envelope, ghost, max_f, separation = self._ghost_frame(
                     GHOST_GAMMA, rho, 45.0, w)
@@ -1333,7 +1333,7 @@ class TagContractTestCase(ExteriorWindowsTestCase):
         # reconstructs exact_total within the bar.  (Same well-separated fold
         # config as `GhostGateTestCase.test_gate_passes_on_a_well_separated_fold`:
         # min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN, so the gate admits.)
-        source = _eigenframe_source(2.0, 45.0)
+        source = _eigenframe_source(1.65, 45.0)
         w = np.geomspace(3.0, 40.0, 200)
         part = _partition(source, w)
         max_f = float(np.max(np.abs(part.exact_total)))
@@ -2454,20 +2454,14 @@ class GhostFrameCollapseTestCase(ExteriorWindowsTestCase):
                     f'{fixed:.3e} vs {bare:.3e}')
                 self.record_comparison()
 
-    def test_near_axis_ghost_degrades_the_label(self) -> None:
-        """PINNED LIMITATION: gate-admitted near-axis configs get WORSE.
+    def test_near_axis_ghost_is_correctly_refused_by_decay_gate(self) -> None:
+        """The restored decay gate refuses near-axis undecayed ghosts.
 
-        The ``w_min * Im tau_c >= RHO_END / 2`` gate keys on whether the
-        ghost has DECAYED, not on whether the saddles are SEPARATED.  Near a
-        principal axis the ghost is undecayed -- so the gate admits -- while
-        the real image and the ghost pair are coalescing toward the cusp, so
-        the single-saddle expansion is invalid and subtracting the ghost,
-        correctly framed or not, INFLATES the stored label.
-
-        This pins the defect as real and gate-admitted, so the collapse
-        suite's three sweet-spot probes cannot be mistaken for a global
-        claim.  DELETE this test when the gate is re-keyed on saddle
-        separation: it going red is the signal that the fix landed.
+        Near a principal axis ``Im(tau_c) -> 0`` (F027: the ghost is pure
+        oscillation with no decay), and the fixed-threshold decay gate
+        (``Im(tau_c) >= _GHOST_DECAY_IM_THRESHOLD = 0.4``) correctly refuses.
+        This was a PINNED LIMITATION before Build 6 C5 restored the decay
+        condition; now it is a gate-contract certification.
         """
         gamma, theta_c_deg, offset = NEAR_AXIS_PROBE
         source = _source_at(gamma, 1.0 + offset, theta_c_deg)
@@ -2475,22 +2469,15 @@ class GhostFrameCollapseTestCase(ExteriorWindowsTestCase):
         probe_part = _partition_at(gamma, source, probe_w)
         im_tau_c = float(geometry.ghost_kernel(
             probe_w, probe_part.source, probe_part.matrix).delay.imag)
+        # Precondition: Im(tau_c) is positive but below the decay threshold.
         self.assertGreater(im_tau_c, 0.0)
-        # Smallest grid minimum that clears the gate, so the config is
-        # genuinely ADMITTED rather than refused for an unrelated reason.
-        w_min = 1.02 * GHOST_GATE / im_tau_c
-        self.assertLess(w_min, COLLAPSE_WMAX,
-                        'near-axis probe cannot clear the gate below w_max')
-
-        trace = self._collapse_residuals(gamma, theta_c_deg, offset, w_min)
-        self.assertEqual(trace['n_real'], 2)
-        self.assertGreaterEqual(trace['gate'], GHOST_GATE)
-        bare = float(trace['resid_bare'].max())
-        fixed = float(trace['resid_fixed'].max())
-        self.assertGreater(
-            fixed, bare,
-            'near-axis ghost subtraction no longer degrades the label -- if '
-            'the gate was re-keyed on saddle separation, delete this test')
+        self.assertLess(im_tau_c, ch._GHOST_DECAY_IM_THRESHOLD,
+                        'near-axis probe must have Im(tau_c) below decay '
+                        'threshold for this test to certify the refusal')
+        # The decay gate refuses this config.
+        with self.assertRaises(geometry.GhostDomainError):
+            ch.farfield_ghost_term(probe_w, probe_part.source,
+                                   probe_part.matrix)
         self.record_comparison()
 
     def test_collapse_diagnostic_plot(self) -> None:
@@ -2662,9 +2649,10 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
         # unmutated: refuses
         with self.assertRaises(geometry.GhostDomainError):
             ch.farfield_ghost_term(w, part.source, part.matrix)
-        # mutated: threshold below the config's own separation -> admits the
-        # ghost the production gate excludes
-        with mock.patch.object(ch, '_GHOST_SEPARATION_MIN', 0.5 * separation):
+        # mutated: both gates lowered below the config's values -> admits the
+        # ghost the production gates exclude
+        with mock.patch.object(ch, '_GHOST_SEPARATION_MIN', 0.5 * separation), \
+             mock.patch.object(ch, '_GHOST_DECAY_IM_THRESHOLD', 0.0):
             spurious = ch.farfield_ghost_term(w, part.source, part.matrix)
         self.assertGreater(float(np.max(np.abs(spurious))) / max_f, TOL_RECON)
         self.record_comparison()

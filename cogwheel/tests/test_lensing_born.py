@@ -1038,10 +1038,12 @@ SADDLE_GHOST_ABSY = 4.243
 SADDLE_GHOST_WGRID = (4.9, 5.0)
 SADDLE_GHOST_WIDX = 1
 SADDLE_GHOST_NTHETA = 65
-#: Azimuthal arc restricted so the WHOLE sweep stays above the band split (the
-#: ghost is admitted at every point); a wider arc dips below-split near
-#: theta ~ 0.9 and contaminates both variants (compaction finding).
-SADDLE_GHOST_THETA_RANGE = (0.02, 0.6)
+#: Azimuthal arc restricted so the WHOLE sweep stays above the band split AND
+#: the ghost decay gate admits (Im(tau_c) >= _GHOST_DECAY_IM_THRESHOLD = 0.4).
+#: At theta < ~0.15, Im(tau_c) drops below the decay threshold (F027: near a
+#: principal axis the ghost is pure oscillation); a wider arc dips below-split
+#: near theta ~ 0.9 and contaminates both variants (compaction finding).
+SADDLE_GHOST_THETA_RANGE = (0.20, 0.6)
 #: Absolute residual resolution target (brief's eps = 4e-3).
 SADDLE_GHOST_EPS = 4e-3
 #: The shipped ppGO-only residual splines trivially (measured N = 2); gate at a

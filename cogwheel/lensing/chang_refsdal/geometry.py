@@ -2050,8 +2050,9 @@ class GhostContribution(NamedTuple):
     delay : complex
         Complex Fermat delay ``tau_c`` of the decaying ghost.  Its real
         part is the oscillation phase and ``Im tau_c >= 0`` controls the
-        exponential suppression ``exp(-w * Im tau_c)``.  Exposed so a
-        future build can gate the ghost on ``w * Im tau_c``.
+        exponential suppression ``exp(-w * Im tau_c)``.  The decay gate
+        in `channels.farfield_ghost_term` refuses where
+        ``Im(tau_c) < _GHOST_DECAY_IM_THRESHOLD`` (F027).
     position : np.ndarray
         Complex ghost image position ``x_c`` (shape (2,)) in the lens
         frame.

@@ -175,11 +175,11 @@ _FARFIELD_KERNEL_FAMILY = frozenset({
     FARFIELD_KERNEL_SUM, FARFIELD_KERNEL_SUM_MINUS_GHOST})
 
 #: Half the SACR-C resolution scale ``RHO_END`` (in radians of accumulated
-#: phase), shared by the ``w_floor`` window boundary and the mid-band ghost
-#: gate: ``w_floor`` is the smallest ``w`` resolving the closest real image
-#: pair (``w * min|tau_a - tau_b| >= RHO_END/2``), and the ghost is subtracted
-#: only where ``w_min * Im tau_c >= RHO_END/2``.  A PHYSICS constant derived
-#: from geometry, not a fit knob.
+#: phase), used by the ``w_floor`` window boundary and as the numerator in
+#: the ghost decay threshold ``_GHOST_DECAY_IM_THRESHOLD``.  The window
+#: boundary: ``w_floor`` is the smallest ``w`` resolving the closest
+#: real-image pair (``w * min|tau_a - tau_b| >= RHO_END/2``).  A PHYSICS
+#: constant derived from geometry, not a fit knob.
 _FARFIELD_WINDOW_RADIANS = RHO_END / 2.0
 
 #: Minimum lens-plane separation between the decaying complex-saddle ('ghost')
@@ -206,6 +206,21 @@ _FARFIELD_WINDOW_RADIANS = RHO_END / 2.0
 #: (fact-1) config to separation < 0.7, this threshold must move to the
 #: geometric mean of the measured refuse-max and admit-min.
 _GHOST_SEPARATION_MIN = 0.7
+
+#: Minimum imaginary-delay decay required for the ghost to be subtracted:
+#: ``Im(tau_c) >= _GHOST_DECAY_IM_THRESHOLD``.  This is the frequency-
+#: INDEPENDENT form of the retired condition ``w_min * Im tau_c >=
+#: _FARFIELD_WINDOW_RADIANS``, pinning ``w_min`` to the chart band floor
+#: (approximately ``5``, the typical lowest dimensionless frequency at which
+#: exterior charts are defined).  The threshold
+#: ``_FARFIELD_WINDOW_RADIANS / 5 = 2.0 / 5.0 = 0.4`` catches the near-axis
+#: pathology (F027: ``Im tau_c -> 0`` means pure oscillation, no decay) while
+#: admitting off-axis configs where the ghost has genuinely decayed (well
+#: off-axis configs typically have ``Im tau_c > 0.4``, e.g. 0.69–0.87 at
+#: typical admitted test configs; on-axis near-cusp configs have
+#: ``Im tau_c ~ 0.001``).  Being a FIXED constant it is identical at train
+#: and serve — no ``w``-array skew is possible.
+_GHOST_DECAY_IM_THRESHOLD = _FARFIELD_WINDOW_RADIANS / 5.0
 
 #: Floor added to every channel's envelope weight ``1 - S_a`` so that a
 #: fully resolved channel (``S_a = 1``) still carries a small, non-zero
@@ -996,11 +1011,30 @@ def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
     fold) is caught earlier and independently by ``_GHOST_DET_FLOOR``
     inside `geometry._ghost_kernel`.
 
+    A complementary DECAY gate ensures the ghost has actually decayed:
+
+    ::
+
+        Im(tau_c) >= _GHOST_DECAY_IM_THRESHOLD,
+
+    a FIXED constant (``_FARFIELD_WINDOW_RADIANS / 5.0 = 0.4``), derived
+    by pinning the retired condition ``w_min * Im tau_c >=
+    _FARFIELD_WINDOW_RADIANS`` to the chart band floor (``w ~ 5``, the
+    typical lowest dimensionless frequency of exterior charts).  Being a
+    pure constant, this gate is a property of the CONFIGURATION alone —
+    it reads nothing from the ``w`` array, so the training label and the
+    serve mirror reach a provably identical admit/refuse decision for a
+    fixed ``(source, matrix)``, with no ``w``-array skew by construction.
+    Near a principal axis ``Im(tau_c) -> 0`` and the ghost is pure
+    oscillation, no longer a small exponentially-decaying correction
+    (F027).
+
     Parameters
     ----------
     w : np.ndarray
         Dimensionless frequency grid (1-D); builds the ghost kernel and
-        carrier but does NOT enter the admit/refuse gate.
+        carrier.  Does NOT enter the admit/refuse gate (the decay gate
+        uses the fixed constant ``_GHOST_DECAY_IM_THRESHOLD``).
     source : np.ndarray
         Shape ``(2,)`` source position.
     matrix : np.ndarray
@@ -1016,7 +1050,10 @@ def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
     ------
     geometry.GhostDomainError
         If no complex-saddle pair exists, the continuation is degenerate
-        (both from `geometry.ghost_kernel`), or the separation gate
+        (both from `geometry.ghost_kernel`), the decay gate
+        ``Im(tau_c) >= _GHOST_DECAY_IM_THRESHOLD`` fails (the ghost has
+        not decayed enough to be a small correction — F027), or the
+        separation gate
         ``min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN`` fails (the ghost is
         inseparable from a real image near a cusp, so the single-saddle
         expansion is invalid and it must not be subtracted).  Subclasses
@@ -1044,6 +1081,19 @@ def farfield_ghost_term(w: np.ndarray, source: np.ndarray,
             f'No real image for source ({source[0]!r}, {source[1]!r}) to '
             f'separate the ghost from: the single-saddle expansion cannot '
             f'be validated, so the ghost must not be subtracted.')
+    # Decay gate (F027): the ghost must have decayed at least
+    # _GHOST_DECAY_IM_THRESHOLD of imaginary delay.  This is the frequency-
+    # INDEPENDENT form: a pure property of the configuration, identical at
+    # train and serve, with no w-array skew.  Near a principal axis
+    # Im(tau_c)->0 and the ghost is pure oscillation, no longer a small
+    # correction.
+    im_tau_c = float(contribution.delay.imag)
+    if not im_tau_c >= _GHOST_DECAY_IM_THRESHOLD:
+        raise geometry.GhostDomainError(
+            f'Ghost decay Im(tau_c) = {im_tau_c!r} is below the '
+            f'threshold {_GHOST_DECAY_IM_THRESHOLD!r}: the ghost has '
+            f'not decayed enough to be a small correction, so it must '
+            f'not be subtracted (F027).')
     separation = min(
         float(np.sqrt(np.sum(np.abs(x_a - x_c) ** 2))) for x_a in real_images)
     if not separation >= _GHOST_SEPARATION_MIN:
