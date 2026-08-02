@@ -1,3 +1,3 @@
 # Architect Short-Term Observations
 
-(empty — last consolidated by Dreamer on 2026-08-01)
+Build brief_ppgo_interior_certification: Certify interior cells (rho < 1) in the ppGO map via envelope-extrapolation fallback. The Schwinger wall at w=60 is a HARD precision limit (e^{pi*w/4} cancellation exceeds double-double mantissa). For interior cells, eta < 0.3 forces wave branch which caps at w=60. ppGO error decays as w^{-1} (fold) or w^{-3/4} (cusp). Professor confirms: power-law envelope extrapolation is physically sound when α ∈ [3/4, 3/2], ≥3 peaks, R²>0.9. The fold Airy arm can't serve as an alternative reference because fold_amplification only handles ONE merging pair (interior has TWO), and extending it requires new infrastructure (second-nearest caustic point etc). Simplest sound approach: envelope extrapolation as fallback in _measure_cell for BEYOND_WALL interior cells.

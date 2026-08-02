@@ -195,6 +195,16 @@ STATUS_CERTIFIED = 0.0
 STATUS_BEYOND_WALL = 1.0      # ppGO error never clears the bar below the wall
 STATUS_INVALID = 2.0          # engine refusal / parity-gamma mismatch / no ref
 
+#: Envelope-extrapolation constants for interior cells whose error envelope
+#: follows a power law ``error ~ C * w^{-alpha}`` in the high-w tail but the
+#: measured w range doesn't reach certification bar.  Extrapolating the
+#: power-law fit gives a conservative estimated w_cert.
+_EXTRAP_ALPHA_MIN = 0.75       # cusp lower bound on decay exponent
+_EXTRAP_ALPHA_MAX = 1.5        # upper bound on decay exponent
+_EXTRAP_R2_MIN = 0.9           # goodness-of-fit threshold (R² in log-log)
+_EXTRAP_MAX_RATIO = 5.0        # max w_cert_extrap / w_max_measured
+_EXTRAP_W_CERT_DEFLATION = 2.0  # conservative safety factor (inflates floor)
+
 #: Default caustic-frame annulus edges ``rho = |y| / caustic_reach``.  The
 #: single ``1.0`` edge splits the interior 4-image band (``0.9 <= rho < 1``)
 #: from the exterior 2-image band (``1 <= rho < 1.5``): interior and exterior
@@ -863,6 +873,82 @@ def _sup_over_w_floor(w_nodes: np.ndarray, error: np.ndarray, bar: float
     return float(w_nodes[last + 1])
 
 
+def _extrapolate_floor(w_nodes: np.ndarray, error: np.ndarray,
+                       bar: float) -> float | None:
+    """Extrapolate a power-law envelope tail to estimate w_cert beyond wall.
+
+    When the measured error envelope ``error ~ C * w^{-alpha}`` decays as a
+    clean power law in the high-w tail but has not yet crossed below ``bar``
+    within the measured range, this function fits the tail in log-log space
+    and extrapolates to find the crossing.
+
+    Parameters
+    ----------
+    w_nodes : np.ndarray
+        Ascending w-grid (from geomspace).
+    error : np.ndarray
+        F-normalized error at each w-node (same length as w_nodes).
+    bar : float
+        Certification bar to cross (e.g. CERTIFICATION_BAR).
+
+    Returns
+    -------
+    float or None
+        Extrapolated w_cert (deflated by safety factor), or None if the
+        fit is poor, slope is non-physical, or extrapolation is excessive.
+    """
+    n = len(w_nodes)
+    tail_len = max(6, n // 2)
+
+    # Use the TAIL where the decay regime is established; skip leading
+    # nodes where error >= 1.0 (unresolved transient).
+    w_tail = w_nodes[-tail_len:]
+    err_tail = error[-tail_len:]
+
+    # Keep only nodes with valid positive error (skip NaN, <= 0, >= 1.0
+    # transient at the start of the tail window).
+    valid = (err_tail > 0.0) & np.isfinite(err_tail) & (err_tail < 1.0)
+    if np.count_nonzero(valid) < 6:
+        return None
+
+    log_w = np.log(w_tail[valid])
+    log_err = np.log(err_tail[valid])
+
+    # Degree-1 polyfit in log-log: log_err = slope * log_w + intercept
+    # where slope = -alpha.
+    coeffs = np.polyfit(log_w, log_err, 1)
+    alpha = -coeffs[0]
+
+    # Slope must be in the physical cusp-decay range.
+    if not (_EXTRAP_ALPHA_MIN <= alpha <= _EXTRAP_ALPHA_MAX):
+        return None
+
+    # Goodness of fit: R² in log-log space.
+    residuals = log_err - np.polyval(coeffs, log_w)
+    ss_res = float(np.sum(residuals**2))
+    ss_tot = float(np.var(log_err) * len(log_err))
+    if ss_tot == 0.0:
+        return None
+    r2 = 1.0 - ss_res / ss_tot
+    if r2 < _EXTRAP_R2_MIN:
+        return None
+
+    # Extrapolate: C * w_cert^{-alpha} = bar => w_cert = (C / bar)^{1/alpha}
+    C = math.exp(coeffs[1])
+    if C <= 0.0 or bar <= 0.0:
+        return None
+    w_cert_extrap = (C / bar) ** (1.0 / alpha)
+
+    # Guard against excessive extrapolation beyond the measured range.
+    w_max_measured = float(w_nodes[-1])
+    if w_cert_extrap / w_max_measured > _EXTRAP_MAX_RATIO:
+        return None
+
+    # Apply conservative deflation (inflate the floor to be safe).
+    w_cert_extrap *= _EXTRAP_W_CERT_DEFLATION
+    return w_cert_extrap
+
+
 def _max_accepted_prefix(evaluate, n_nodes: int, refusal_types: tuple):
     """Largest accepted ``w``-prefix length by bisection on the prefix index.
 
@@ -939,6 +1025,11 @@ def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
     accepted prefix) or a failed caustic placement still yields
     ``STATUS_INVALID``; an angle whose accepted prefix never clears
     `CERTIFICATION_BAR` yields ``STATUS_BEYOND_WALL``.
+
+    For interior cells (``rho_center < 1.0``), angles that would otherwise
+    be beyond-wall are eligible for envelope extrapolation: if the error
+    tail follows a clean power law ``error ~ C * w^{-alpha}``, the crossing
+    w_cert is extrapolated and deflated conservatively.
     """
     from cogwheel.lensing.chang_refsdal import geometry
     from cogwheel.lensing.chang_refsdal.channels import ChangRefsdalChannels
@@ -984,6 +1075,8 @@ def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
     floors_cert: list = []
     floors_diag: list = []
     angle_ceilings: list = []
+    # Store per-angle measurement data for the extrapolation fallback.
+    per_angle_data: list[tuple[np.ndarray, np.ndarray]] = []
     for angle in angles:
         cos_a, sin_a = np.cos(angle), np.sin(angle)
         rot = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
@@ -1026,6 +1119,7 @@ def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
         floors_diag.append(
             _sup_over_w_floor(w_prefix, error, DIAGNOSTIC_BAR))
         angle_ceilings.append(float(w_prefix[-1]))
+        per_angle_data.append((w_prefix, error))
 
     # The cell is trusted only up to the tightest per-angle ceiling.
     w_ceiling = min(angle_ceilings)
@@ -1037,14 +1131,34 @@ def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
         diagnostic = math.nan
     else:
         diagnostic = max(floors_diag)
+
+    # --- Extrapolation fallback for interior cells ---
+    # For interior cells (rho_center < 1.0), angles whose floor is None
+    # (envelope never cleared the bar within the measured range) are eligible
+    # for power-law envelope extrapolation.  The error tail at high w
+    # follows error ~ C * w^{-alpha}; fitting in log-log gives a
+    # conservative extrapolated w_cert.
+    if any(f is None for f in floors_cert) and rho_center < 1.0:
+        for i, fc in enumerate(floors_cert):
+            if fc is not None:
+                continue
+            w_prefix_i, error_i = per_angle_data[i]
+            extrap = _extrapolate_floor(w_prefix_i, error_i, CERTIFICATION_BAR)
+            if extrap is not None:
+                floors_cert[i] = extrap
+
     if any(f is None for f in floors_cert):
         return STATUS_BEYOND_WALL, math.nan, diagnostic, w_ceiling
     floor = max(floors_cert)
     # Degenerate interplay: the worst angle only clears above a w that the
     # tightest-ceiling angle no longer accepts, so no w is simultaneously
-    # certified for all angles -- the certified interval is empty.  Refuse
-    # (uncertified), never certify an empty range.
-    if floor > w_ceiling:
+    # certified for all angles -- the certified interval is empty.
+    # For EXTERIOR cells (rho_center >= 1.0), this means uncertified.
+    # For INTERIOR cells (rho_center < 1.0), floor > w_ceiling is expected
+    # and valid when the floor was extrapolated: the ceiling constrains where
+    # the exact REFERENCE was measured, not where ppGO is trustworthy; ppGO
+    # serves above w_ceiling via extrapolation.
+    if floor > w_ceiling and rho_center >= 1.0:
         return STATUS_BEYOND_WALL, math.nan, diagnostic, w_ceiling
     return STATUS_CERTIFIED, floor, diagnostic, w_ceiling
 
