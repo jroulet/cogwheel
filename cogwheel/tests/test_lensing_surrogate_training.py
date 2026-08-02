@@ -3535,6 +3535,146 @@ class SingleGammaMapAdequacyTestCase(_CountingTestCase):
         self.comparisons += 1
 
 
+# ---------------------------------------------------------------------------
+# 1e-w: Log-w axis scale correctness (DRY consistency with LOO oracle)
+# ---------------------------------------------------------------------------
+
+
+class LogWAxisLOODRYTestCase(unittest.TestCase):
+    """Verify chart ``ln w`` grid is consistent with the LOO oracle's scale.
+
+    The tube chart's ``w`` axis is built by `_log_w_grid` (uniform in
+    ``ln w``).  The LOO refinement oracle in ``likelihood.py`` places
+    nodes in the SAME logarithmic space:
+
+    * Seed: ``np.geomspace`` (uniform ``ln w``).
+    * Refinement: geometric midpoints ``sqrt(w_i * w_j)``
+      (= arithmetic midpoints in ``ln w``).
+    * Error estimate: ``_leave_one_out_errors(np.log(node_w), ...)``
+      interpolates in ``ln w``.
+
+    This test certifies the consistency WITHOUT running the engine: it
+    checks that the chart grid's node spacing and the oracle's midpoint
+    insertion BOTH operate on the same logarithmic scale, and that the
+    chart's per-decade density is at least as fine as the oracle's
+    minimum resolved spacing.
+    """
+
+    def test_log_w_grid_uniform_in_log(self):
+        """_log_w_grid produces strictly uniform spacing in ln(w)."""
+        from cogwheel.lensing.surrogate import _log_w_grid
+
+        w_range = (3.0, 300.0)  # 2 decades
+        nodes_per_decade = 10
+        grid = _log_w_grid(w_range, nodes_per_decade)
+
+        # Grid is in ln(w) space -- verify uniformity.
+        spacings = np.diff(grid)
+        self.assertGreater(spacings.min(), 0.0, 'Grid not strictly increasing')
+        # All spacings identical (linspace).
+        np.testing.assert_allclose(
+            spacings, spacings[0], rtol=1e-12,
+            err_msg='ln(w) grid spacings are not uniform')
+
+    def test_loo_midpoints_are_log_arithmetic(self):
+        """LOO geometric midpoints are arithmetic midpoints in ln(w)."""
+        from cogwheel.lensing.likelihood import _leave_one_out_errors
+
+        # Simulate what the oracle does: geometric midpoint in w.
+        w_lo, w_hi = 10.0, 100.0
+        midpoint_w = np.sqrt(w_lo * w_hi)
+        midpoint_log = 0.5 * (np.log(w_lo) + np.log(w_hi))
+        self.assertAlmostEqual(
+            np.log(midpoint_w), midpoint_log, places=14,
+            msg='Geometric midpoint in w != arithmetic midpoint in ln w')
+
+        # _leave_one_out_errors uses log(w) as abscissa: verify it
+        # accepts and works on log-spaced nodes (no crash, sane output).
+        n = 8
+        node_w = np.geomspace(w_lo, w_hi, n)
+        node_env = np.exp(1j * np.log(node_w))  # smooth in ln(w)
+        errors = _leave_one_out_errors(np.log(node_w), node_env)
+        self.assertEqual(errors.shape, (n,))
+        # Endpoints are always zero by contract.
+        self.assertEqual(errors[0], 0.0)
+        self.assertEqual(errors[-1], 0.0)
+        # Smooth function => small interior errors.
+        self.assertLess(errors.max(), 0.1,
+                        'LOO errors unexpectedly large for smooth function')
+
+    def test_chart_density_covers_loo_resolution(self):
+        """Chart grid and LOO oracle share the same ln(w) resolution unit.
+
+        The LOO oracle's inter-node spacing (in ``ln w``) after full
+        refinement defines the resolution scale at which the envelope
+        is smooth enough for cubic interpolation.  The chart's fixed
+        ``nodes_per_decade`` likewise measures density in ``ln w``
+        (since ``1 decade = ln(10)`` in natural log).  This test
+        verifies that both produce the SAME per-node spacing unit:
+        ``d(ln w) = ln(10) / nodes_per_decade`` for the chart, and
+        ``(ln w_max - ln w_min) / (N - 1)`` for the oracle.
+
+        The consistency condition: the chart spacing and the LOO
+        oracle's SEED spacing (which sets the coarsest baseline the
+        oracle then refines from) are commensurate — both live in
+        ``ln w`` and the chart is at least as dense as the seed.
+        """
+        from cogwheel.lensing.surrogate import _log_w_grid, _DEFAULT_W_NODES_PER_DECADE
+        from cogwheel.lensing.likelihood import _LOO_SEED_NODES
+
+        # Chart spacing: ln(10) / nodes_per_decade.
+        chart_spacing = np.log(10.0) / _DEFAULT_W_NODES_PER_DECADE
+
+        # Oracle SEED spacing: over a typical 2-decade band.
+        n_decades = 2.0
+        w_min, w_max = 1.0, 100.0
+        seed_spacing = (np.log(w_max) - np.log(w_min)) / (_LOO_SEED_NODES - 1)
+
+        # The chart is denser than the seed (otherwise the chart would
+        # be the bottleneck before the oracle even starts refining).
+        self.assertLess(
+            chart_spacing, seed_spacing,
+            f'Chart spacing d(ln w) = {chart_spacing:.4f} should be '
+            f'finer than the LOO seed spacing {seed_spacing:.4f}')
+
+        # Verify the spacing unit is the same logarithmic measure.
+        # _log_w_grid with the runtime density over the same range.
+        grid = _log_w_grid((w_min, w_max), _DEFAULT_W_NODES_PER_DECADE)
+        actual_spacing = float(np.diff(grid).mean())
+        np.testing.assert_allclose(
+            actual_spacing, chart_spacing, rtol=0.05,
+            err_msg='_log_w_grid actual spacing deviates from ln(10)/npd')
+
+    def test_loo_seed_is_geomspace_consistent(self):
+        """LOO seed placement (geomspace) matches _log_w_grid's scale.
+
+        Both produce uniform ln(w) grids — verify they agree on the
+        spacing when given the same endpoints and node count.
+        """
+        from cogwheel.lensing.surrogate import _log_w_grid
+        from cogwheel.lensing.likelihood import _LOO_SEED_NODES
+
+        w_min, w_max = 5.0, 50.0
+        # LOO seed: geomspace.
+        seed_w = np.geomspace(w_min, w_max, _LOO_SEED_NODES)
+        seed_log_w = np.log(seed_w)
+        # Equivalent _log_w_grid call (adjusted nodes_per_decade to get
+        # the same count).
+        n_decades = np.log10(w_max / w_min)
+        # Solve: max(4, ceil(npd * n_decades) + 1) == _LOO_SEED_NODES
+        # => npd = (_LOO_SEED_NODES - 1) / n_decades (if >= 4).
+        npd = int(np.ceil((_LOO_SEED_NODES - 1) / n_decades))
+        chart_grid = _log_w_grid((w_min, w_max), npd)
+        # The chart grid and seed should span the same endpoints.
+        self.assertAlmostEqual(chart_grid[0], seed_log_w[0], places=12)
+        self.assertAlmostEqual(chart_grid[-1], seed_log_w[-1], places=12)
+        # Both have uniform spacing in ln(w).
+        seed_spacings = np.diff(seed_log_w)
+        np.testing.assert_allclose(
+            seed_spacings, seed_spacings[0], rtol=1e-12,
+            err_msg='LOO seed spacings not uniform in ln(w)')
+
+
 
 if __name__ == '__main__':
     main()

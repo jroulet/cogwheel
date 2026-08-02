@@ -1195,6 +1195,30 @@ def _log_w_grid(w_range: tuple[float, float],
                 nodes_per_decade: int) -> np.ndarray:
     """Build a natural-log-uniform ``ln w`` grid over ``w_range``.
 
+    Why log-w is the correct collocation axis
+    ------------------------------------------
+    The tube chart splines the DEMODULATED envelope ``E(w)`` — the slowly
+    varying complex weight remaining after the analytic carrier
+    ``exp(i w Delta_tau)`` has been factored out.  While the raw
+    amplification ``F(w)`` oscillates on the scale ``Delta w ~ 1/Delta_tau``
+    (linear in ``w``), the demodulated envelope varies on a LOGARITHMIC
+    scale: the Airy diffraction pattern governing a fold caustic
+    modulates a geometric series of fringes whose successive widths grow
+    by a constant factor in ``w`` (each fringe spans a fixed interval
+    in ``ln w``).  Consequently:
+
+    * Uniform ``ln w`` spacing gives each fringe-envelope feature the
+      same number of collocation nodes — resolution tracks structure.
+    * The LOO refinement oracle (`_leave_one_out_errors` in
+      ``likelihood.py``) uses ``np.log(node_w)`` as its abscissa and
+      inserts geometric midpoints ``sqrt(w_i * w_j)`` (arithmetic
+      midpoints in ``ln w``), so the oracle's self-certified node
+      placement is natively log-uniform.
+
+    The chart's fixed ``nodes_per_decade`` density and the oracle's
+    adaptive placement therefore share the same underlying scale by
+    construction: both measure interpolation quality per unit ``ln w``.
+
     Parameters
     ----------
     w_range : tuple[float, float]
