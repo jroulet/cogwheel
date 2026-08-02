@@ -14,4 +14,18 @@ to formally resolve SUSPECT status + update COVERAGE_DESIGN table. Single
 Foreman-Lite WP, no value change, no test changes needed. One domain test
 description for orthogonality witness (config passing decay, failing separation).
 
+## Build 8 Step 8 — Part 0 Mechanical Test
+
+Test-only build: new test file `test_lensing_part0_mechanical.py` enforcing
+four Part 0 structural invariants (no prior-box constants, no retired names,
+no discretization absorbers, no stepping for closed forms). Zero Coder WPs —
+all work routed to Test Developer via domain_test_descriptions. Pre-commit
+hook and retired_concepts.json already exist. Key decisions: (1) AST scan
+module-level Assign nodes only, not expressions/comments; (2) 4.2426 flagged
+unconditionally within 1e-2 tol; 3.0 flagged only if name contains box-shaped
+fragments; (3) np.diff/gradient scan TRIMMED per Simplifier (100% false
+positive rate); (4) discretization absorber check uses explicit allowlist for
+_*_EPS/_MARGIN/_FRAC constants; (5) test reads retired_concepts.json directly,
+no hook import.
+
 ## Build 6 (C5) — Ghost Decay Gate

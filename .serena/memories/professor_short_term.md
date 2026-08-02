@@ -1,41 +1,40 @@
 # Professor Short-Term Observations
 
-## Ghost gate orthogonality witness review (2026-08-02)
+## Part 0 mechanical invariant tests review (2026-08-02)
 
-- **test_lensing_ghost_gate.py**: 17/18 pass, 1 pre-existing failure (17s).
-  All 5 orthogonality-witness tests (`GhostGateOrthogonalityWitnessTestCase`)
-  certified PASS:
-  1. **Decay gate passes**: Im(tau_c)=0.502 > 0.4, margin=0.102 > 0.05 minimum.
-  2. **Separation gate refuses**: GhostDomainError raised with "separation" in
-     message, confirming the code reached past the decay gate.
-  3. **Separation independently below**: sep=0.600 < 0.7, margin=0.100 > 0.05.
-  4. **Disabling sep gate admits**: with _GHOST_SEPARATION_MIN=0.0, the config
-     admits (decay gate is the only remaining guard), proving independence.
-  5. **Scatter diagnostic**: plot produced showing non-nested refusal regions.
-     Green star at (Im(tau_c)=0.50, sep=0.60) is in the "orthogonal quadrant"
-     (decay passes, sep refuses), distinct from the refuse-both (red) and
-     admit-both (blue) clusters.
+- **test_lensing_part0_mechanical.py**: 13/13 pass (0.47s). All four test classes
+  (TestNoPriorBoxConstants, TestNoRetiredConceptNames, TestNoNewDiscretizationAbsorbers,
+  TestSelfFalsification) green.
 
-- **Physics certification**: At positive parity (gamma < 1), Im(tau_c) and
-  separation are strongly correlated — both driven by the geodesic distance
-  from the caustic in the Fermat potential. Sweep confirms NO positive-parity
-  config exists with Im(tau_c)>=0.4 AND sep<0.7 simultaneously. At saddle
-  parity (gamma=5.0 > 1), the critical-point topology changes (deltoid
-  caustics, two lobes) and the coupling breaks: the ghost can decay (high
-  Im(tau_c), meaning large imaginary part of the Fermat delay at the complex
-  stationary point — exponential suppression e^{-w*Im(tau_c)}) while remaining
-  spatially close to a real image (low separation, meaning the single-saddle
-  expansion has overlapping contributions and is INVALID). The separation gate
-  is therefore independently load-bearing: without it, the decay gate alone
-  would wrongly admit configs where the stationary-phase approximation fails.
+### Verification details:
 
-- **Pre-existing failure**: `test_raising_constant_to_two_refuses_an_admit_config`
-  — ADMIT_CONFIGS[0] has actual separation=2.012, so patching threshold to 2.0
-  doesn't flip it. Test design issue (comment says "sep~1.98" but measured 2.01).
-  Not a regression from the current build; unrelated to the orthogonality witness.
+1. **Anti-vacuity**: 22 lensing .py files scanned, 136 module-level numeric constants
+   found — well above the thresholds (>10 files, >20 constants).
 
-- **test_lensing_ghost_decay_gate.py**: 18/18 pass (8s). All decay gate tests
-  clean. The two test files together certify the two gates are independent,
-  non-redundant, and each load-bearing for its own failure mode.
+2. **Prior-box diagonal (≈4.2426)**: No constants with |value − 3√2| < 0.01 found
+   in the lensing tree. Correct.
+
+3. **Prior-box half-width by name**: No constants with value=3.0 AND a box-name
+   fragment (BOX, RANGE, EXTENT, etc.) found outside the allowlist. 4 allowlisted
+   constants (_Y_SCALE_CAP, _SPLIT_BASE, two _SPLINE_DEGREE) correctly exempted.
+
+4. **Retired concepts**: 4 entries in retired_concepts.json (_WEDGE_EPS, _PROBE_ETA,
+   _CLOUD_MARGIN_FRAC, _CUSP_SPEED_REL_FRAC). None appear in lensing source.
+   Registry well-formed (no duplicates, all required fields present).
+
+5. **Absorber constants**: 5 constants matching `^_[A-Z][A-Z0-9_]*(_EPS|_MARGIN|_FRAC|_STANDOFF|_SAFETY)$`
+   found, all in the allowlist. NOTE: The allowlist contains 10 entries but only 5 match
+   the pattern — the others (_DEFAULT_FARFIELD_OVERLAP, _INTERLOBE_CORRIDOR_ETA_SCALE,
+   CROWN_CAUSTIC_MARGIN, _MARKER_SCALE_FLOOR, _U_MARGIN_CONST) have names that don't
+   match the regex. This is dead allowlist code — harmless but slightly over-specified.
+   It doesn't compromise test safety (only means those 5 were never needed in the allowlist).
+
+6. **Self-falsification**: All 5 mutation-detection tests pass, proving the detectors
+   have teeth against synthetic violations.
+
+### Minor concern:
+- The absorber allowlist is broader than the regex catches (5 dead entries out of 10).
+  This is spec–implementation drift — the spec may have anticipated a broader suffix set.
+  No correctness impact.
 
 - Heavy full-sampling validation is operator-deferred.

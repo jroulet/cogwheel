@@ -1,5 +1,22 @@
 # Test Dev Short-Term Observations
 
+## Current build: test_lensing_part0_mechanical.py — structural invariant scanner
+
+- Created `cogwheel/tests/test_lensing_part0_mechanical.py` (13 tests, 0.66 s).
+- Pure AST/text scanning — no lensing module imports, no numerical computation.
+- TestNoPriorBoxConstants: scans for diagonal ≈ 4.2426 and box-named 3.0
+  constants. Includes anti-vacuity assertion (>10 files, >20 constants).
+- TestNoRetiredConceptNames: loads .claude/hooks/retired_concepts.json,
+  checks __all__ exports, top-level symbols, and full source lines against
+  word-boundary patterns. Exclusion carveout for commentary lines.
+- TestNoNewDiscretizationAbsorbers: regex `^_[A-Z][A-Z0-9_]*(_EPS|_MARGIN|
+  _FRAC|_STANDOFF|_SAFETY)$` — currently 5 matches, all allowlisted in
+  surrogate_training.py.
+- TestSelfFalsification: 5 tests proving each detector fires on synthetic
+  violations.
+- Backward-compat audit: no WP changes this build (empty list), no
+  production changes to audit against.
+
 ## C12 build: test_lensing_ghost_gate.py — orthogonality witness
 
 - Added GhostGateOrthogonalityWitnessTestCase (5 tests, ~3.7 s) proving the
