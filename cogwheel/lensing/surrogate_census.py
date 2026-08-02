@@ -53,7 +53,8 @@ from cogwheel.lensing import surrogate as _surrogate
 from cogwheel.lensing.chang_refsdal import (ChangRefsdalChannels,
                                             farfield_envelope_from_partition)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
-from cogwheel.lensing.ppgo_map import caustic_rho
+from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
+                                       caustic_rho, get_certified_ppgo_map)
 from cogwheel.lensing.prior import (FixedLensGeometryPrior,
                                     UniformLensMassPrior,
                                     UniformReducedShearPrior,
@@ -373,6 +374,35 @@ def characterize_sample(
     log_w_min, log_w_max = float(log_w.min()), float(log_w.max())
     y1_eig, y2_eig = _surrogate._rotate_to_eigenframe(y1, y2, 0.0)
 
+    # Band-split logic mirroring _surrogate_coefficients (Build 8h-a WP2):
+    # when a certified ppGO map provides a w_trust floor for this draw's
+    # cell, only the sub-band [log_w_min, log(w_trust)] needs to be served
+    # by the chart; nodes above w_trust are served by bare ppGO.  Narrow
+    # the chart band accordingly so select_chart sees the same sub-band
+    # as the production likelihood.
+    chart_log_w_max = log_w_max  # default: whole band (no split)
+    ppgo_map = get_certified_ppgo_map()
+    if ppgo_map is not None:
+        parity = 'positive' if gamma < 1.0 else 'saddle'
+        try:
+            rho = caustic_rho(gamma, float(np.hypot(y1, y2)), kappa=0.0)
+        except (ValueError, LensDomainError):
+            rho = None
+        if rho is not None:
+            w_trust = ppgo_map.w_trust(parity, gamma, rho)
+            if w_trust is not UNKNOWN:
+                w_trust = float(w_trust)
+                w_lo = float(w_grid.min())
+                w_hi = float(w_grid.max())
+                # Beyond-ceiling guard (Build 8h-b): suppress band-split
+                # if w_hi exceeds the effective ceiling.
+                wall = ASTROID_WALL if gamma < 1.0 else SADDLE_WALL
+                cell_ceiling = ppgo_map.w_ceiling(parity, gamma, rho)
+                eff_ceiling = (wall if cell_ceiling is UNKNOWN
+                               else min(wall, float(cell_ceiling)))
+                if w_hi <= eff_ceiling and w_lo < w_trust < w_hi:
+                    chart_log_w_max = min(log_w_max, math.log(w_trust))
+
     record = SampleRecord(
         gamma=float(gamma), m_lens_msun=float(m_lens_msun), y1=float(y1),
         y2=float(y2), log_w_min=log_w_min, log_w_max=log_w_max, served=False)
@@ -397,19 +427,20 @@ def characterize_sample(
 
     chart = _surrogate.select_chart(
         surrogate.charts, gamma=gamma, log_w_min=log_w_min,
-        log_w_max=log_w_max, eta=eta, theta=theta, image_count=image_count,
-        y1_eig=y1_eig, y2_eig=y2_eig)
+        log_w_max=chart_log_w_max, eta=eta, theta=theta,
+        image_count=image_count, y1_eig=y1_eig, y2_eig=y2_eig)
 
     if chart is not None:
         record.served = True
         record.chart_index = _chart_index(surrogate.charts, chart)
-        record.band_edge = _is_band_edge(chart, log_w_min, log_w_max)
+        record.band_edge = _is_band_edge(chart, log_w_min, chart_log_w_max)
         return record
 
     record.category = classify_fallthrough(
-        surrogate, gamma=gamma, log_w_min=log_w_min, log_w_max=log_w_max,
-        eta=eta, theta=theta, image_count=image_count, y1_eig=y1_eig,
-        y2_eig=y2_eig, dropped_slivers=dropped_slivers)
+        surrogate, gamma=gamma, log_w_min=log_w_min,
+        log_w_max=chart_log_w_max, eta=eta, theta=theta,
+        image_count=image_count, y1_eig=y1_eig, y2_eig=y2_eig,
+        dropped_slivers=dropped_slivers)
     return record
 
 
