@@ -38,4 +38,26 @@ Key findings:
   Absorbs one power of (1-gamma) in the chain-rule derivative.
 - Simplifier: use np.interp on a fine grid (not brentq), single WP.
 
+## Build: Born Residual Wiring
+
+Planning complete. Key decisions:
+- New optional `born_residual_chart` attribute on LensedRBLikelihood (None default)
+- Fact-4 slot wiring: check chart present, compute rho via caustic_rho, check
+  covers(gamma, rho), build carrier via born_carrier_from_partition with a
+  SimpleNamespace adapter (geom lacks source/gamma/matrix), add residual,
+  project through reconstruct_farfield(FARFIELD_KERNEL_SUM) for per-channel kernels
+- NO born_gate call at serve time (box containment is sufficient — Professor Q3)
+- Accuracy gate in F-normalized residual currency (training-time, not serve-time)
+- No census schema change (served=True count rises; 'born' fallthrough stays
+  meaning "no chart covered it")
+- Frame: both carrier and residual in min-relative delay frame; residual stored
+  as R = exact_total - carrier at training time (both already demodulated)
+- Reconstruction: envelope = (carrier+residual - ppgo) * exp(+i*w*t_min),
+  then reconstruct_farfield gives per-channel kernels. Telescopes exactly.
+- Angular (theta) axis NOT needed on chart (Professor Q4: residual's angular
+  variation is O(1/|y'|^2) — suppressed in exterior)
+- BornResidualChart: frozen dataclass with gamma_grid, rho_grid, log_w_grid,
+  spline coeffs, evaluate(w, gamma, rho)->complex, covers(gamma, rho)->bool
+- Test tolerance for mock: 1e-14 relative (no interpolation error in mock)
+
 ## Build 6 (C5) — Ghost Decay Gate

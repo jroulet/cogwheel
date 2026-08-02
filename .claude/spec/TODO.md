@@ -224,22 +224,17 @@ Tag conventions:
   `surrogate_census.classify_fallthrough` (annulus draws no longer
   mis-attributed to `out-of-box`). What remains is the LAST step only:
 
-  **BLOCKED ON C8 — do NOT train the residual chart yet.** The annulus this
-  rung is defined over (`3.0 < |y| <= 4.2426`) is a prior-box artifact being
-  retired; F036 shows no `|y|` threshold can bound the caustic. A chart trained
-  now would be trained in coordinates that are about to change, and training is
-  what closes the cheap-edit window (see
-  [[lensing_caustic_relative_coordinates]]). The carrier, gate and census
-  arithmetic are correct and stay; only the REGION they are keyed to moves. Do
-  the steps below AFTER C8 lands, restated in `rho`.
+  **C8 blocker discharged.** Coordinates restated in `rho`; annulus region
+  artifact retired. **C11 landed** (2026-08-01): `BornResidualChart` frozen
+  dataclass (`cogwheel/lensing/born_residual_chart.py`) defined; fact-4 slot
+  in `likelihood._surrogate_coefficients` wired to conditionally serve when
+  a chart is attached. When chart is `None` (default), annulus still falls
+  through to exact engine — correct.
 
-  Once the residual chart `F_exact - F_carrier` is driver-trained
-  (TRAIN_TIER artifact — not yet built), re-derive the registration/accuracy
-  gate in the residual currency and remove the fall-through at the fact-4
-  slot in `likelihood.py::_surrogate_coefficients` (the comment there marks
-  it), wiring the trained reconstruction through
-  `channels.born_carrier_from_partition`. Until then the annulus stays
-  exact-served — correct, just not zero-quadrature.
+  **What remains — TRAIN_TIER only:** once the residual chart
+  `F_exact - F_carrier` is driver-trained, attach the `BornResidualChart`
+  instance to the likelihood object to enable zero-quadrature serving. The
+  fall-through is the correct behavior until then.
 
   Saddle branch: see [[lensing_saddle_born]].
 
@@ -1039,11 +1034,11 @@ Tag conventions:
      real physics and SURVIVES — it is the fence built on top of it that goes.
      See [[lensing_caustic_relative_coordinates]].
 
-  4. Wire the saddle branch (together with the positive-parity branch —
-     same blocker) through the fact-4 slot in
-     `likelihood.py::_surrogate_coefficients`, once the driver-trained
-     residual chart exists. See [[lensing_born_b1_derivation]] for the
-     shared TRAIN_TIER blocker.
+  4. **C11 landed** (2026-08-01): wiring infrastructure in place via
+     `BornResidualChart` (see [[lensing_born_b1_derivation]]). The fact-4
+     slot in `likelihood.py::_surrogate_coefficients` serves both parities
+     when a chart is attached. Remaining: TRAIN_TIER — train the residual
+     chart and attach it.
 
   Recorded 2026-07-28 after the owner noticed it was missing from the plan
   list; carrier/gate/census landed the same day.

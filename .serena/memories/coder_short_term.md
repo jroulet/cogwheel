@@ -1,5 +1,24 @@
 # Coder Short-Term Observations
 
+- WP1 Born Residual Chart wiring: Created cogwheel/lensing/born_residual_chart.py
+  (frozen BornResidualChart dataclass with covers/evaluate methods, lazy-cached
+  RegularGridInterpolator on (gamma, rho, log_w) grid). Wired into likelihood.py:
+  added FARFIELD_KERNEL_SUM to channels import, added `import math` + `import types`,
+  added born_residual_chart=None optional kwarg to __init__ (stored as attribute,
+  rides pickle in __dict__), extended get_init_dict (pop when None, raise
+  NotImplementedError when set — same pattern as amplification_surrogate). Replaced
+  fact-4 slot's bare `return None` with the Born residual serve path: guards
+  (born_chart is None, caustic_rho ValueError/LensDomainError, rho<=1.0, covers()),
+  SimpleNamespace adapter duck-typing born_carrier_from_partition, deferred import
+  of born_carrier_from_partition inside the slot, carrier+residual=f_total, far-field
+  reconstruction via reconstruct_farfield with FARFIELD_KERNEL_SUM definition and
+  geom.t_min. Both files parse clean (ast.parse + import OK). The slot only fires
+  when amplification_surrogate is not None AND surrogate.serve() declines
+  (served=False), so born_residual_chart=None is byte-identical to HEAD.
+  UNVERIFIED: runtime correctness of the reconstruction telescoping (carrier +
+  residual - ppgo gives the correct far-field envelope for reconstruct_farfield).
+
+
 - WP1 Build 1e-gamma: Added `_log_reach_gamma_axis` function (lines 1273-1331)
   to cogwheel/lensing/surrogate.py as a peer of `_uniform_axis`. Function places
   gamma nodes equispaced in log(caustic_reach) space via 200-point fine sweep +

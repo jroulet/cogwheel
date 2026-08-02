@@ -37,11 +37,11 @@ section: Backlog
      real physics and SURVIVES — it is the fence built on top of it that goes.
      See [[lensing_caustic_relative_coordinates]].
 
-  4. Wire the saddle branch (together with the positive-parity branch —
-     same blocker) through the fact-4 slot in
-     `likelihood.py::_surrogate_coefficients`, once the driver-trained
-     residual chart exists. See [[lensing_born_b1_derivation]] for the
-     shared TRAIN_TIER blocker.
+  4. **C11 landed** (2026-08-01): wiring infrastructure in place via
+     `BornResidualChart` (see [[lensing_born_b1_derivation]]). The fact-4
+     slot in `likelihood.py::_surrogate_coefficients` serves both parities
+     when a chart is attached. Remaining: TRAIN_TIER — train the residual
+     chart and attach it.
 
   Recorded 2026-07-28 after the owner noticed it was missing from the plan
   list; carrier/gate/census landed the same day.

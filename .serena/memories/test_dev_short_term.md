@@ -1,5 +1,58 @@
 # Test Dev Short-Term Observations
 
+## Current build: test_lensing_born_residual_wiring.py — WP1 Born residual chart wiring (EXTENDED)
+
+- Extended suite from 18 to 34 tests (4.7 s total runtime).
+- KappaBetaGuardPrecedenceTestCase (6 tests): proves kappa!=0 and beta!=0
+  guards at lines ~1554-1575 fire BEFORE the Born residual slot.
+  Uses _BornResidualProbe with born_residual_chart attached; config has
+  gamma=0.5, |y| giving rho~3.0 (inside chart grid). Control test proves
+  same config with kappa=beta=0 reaches the Born path (non-None), while
+  kappa=0.1 or beta=0.3 yields None. Sweeps multiple kappa/beta values.
+- BornResidualChartCoversTestCase (10 tests): verifies axis-aligned box
+  containment on spec-prescribed grids (gamma=[0.3..0.7], rho=[1.5..5.0]).
+  Tests: interior point, all 4 corners, all 4 mid-edges (all True);
+  gamma_below/above, rho_below/above (all False); machine-epsilon boundary
+  (1e-10 outside each edge → False).
+- Backward-compat audit: WP1 is purely additive (new module, defaulted kwarg,
+  code behind `if not served:`). All existing tests pass born_residual_chart
+  default (None). Searched: _surrogate_coefficients (5 files),
+  BornResidualChart (0 hits outside new test), LensedRelativeBinningLikelihood(
+  (12 files, all use default). No changes needed to existing tests.
+
+
+- Created `cogwheel/tests/test_lensing_born_residual_wiring.py` (18 tests, ~4.4 s).
+- NoChartByteIdentityTestCase (3 tests): verifies _surrogate_coefficients
+  returns None when born_residual_chart=None and surrogate declines.
+  Uses _BornResidualProbe (lightweight class binding real methods from
+  LensedRelativeBinningLikelihood without heavy event/waveform construction).
+- MockChartServePathTestCase (4 tests): verifies Born path fires with a
+  synthetic BornResidualChart (residual = 0.01*exp(-rho)*(1+0.001j)). Config:
+  gamma=0.5, rho~3.0, w in [0.5,20], M_lens=100 Msun, z_lens=0.5.
+  Reconstruction identity: k0/k1 from _surrogate_coefficients match
+  independently-computed carrier+residual through reconstruct_farfield to
+  <1e-13 relative. Diagnostic plot saved.
+- OutOfBoxFallthroughTestCase (5 tests): three sub-cases (rho>5.0 above grid,
+  1.0<rho<1.5 below grid, rho<1.0 interior) + gamma outside grid. All return
+  None. The rho<=1.0 guard fires independently of chart.covers.
+- SelfFalsificationTestCase (5 tests): chart.covers rejects/accepts correctly;
+  rho guard fires even when chart would cover; mock surrogate declines;
+  wrong residual (1000x) produces detectable k0 difference (>1e-3 relative).
+- Anti-vacuity: every test class has setUp/tearDown n_checks guard.
+- Key design: _BornResidualProbe binds _surrogate_coefficients,
+  _reduce_dense_kernels, _image_delays, _lens_params, _ppgo_band_split from
+  the real class. _MockSurrogate passes may_serve but refuses serve. No engine
+  needed — geometry_partition is analytic.
+- Backward-compat audit: WP1 adds born_residual_chart=None (keyword, defaulted)
+  to __init__. All existing tests pass the default. The Born path only fires
+  when born_residual_chart is non-None AND surrogate declines (served=False).
+  No existing test exercises that combination. Searched: _surrogate_coefficients
+  (5 files), born_residual_chart (0 hits outside new test), caustic_rho
+  (unchanged function), born_carrier_from_partition (unchanged function).
+  No changes needed to existing tests.
+
+
+
 ## Current build: test_lensing_log_reach_gamma.py — WP1 log-reach gamma axis
 
 - Created `cogwheel/tests/test_lensing_log_reach_gamma.py` (23 tests, ~20 s

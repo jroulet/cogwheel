@@ -128,15 +128,15 @@ Docs). Packaging: setuptools + setuptools_scm, GPL-3.0-or-later, Python >=3.9.
   0` is not a regime `farfield_ghost_term`'s sqrt branch is derived for).
   The census (`surrogate_census.classify_fallthrough`) attributes both
   arms to the `'born'` category via the same shared closed-form fences,
-  independent of `born_gate` (no `w` available at census time). It is
-  STILL NOT wired into the serve path on either parity: the served object
-  is `F_carrier` minus a driver-trained residual chart
-  (`F_exact - F_carrier`), and that chart is a TRAIN_TIER artifact that
-  does not yet exist. Draws in the annulus therefore still fall through to
-  the exact engine via `likelihood._surrogate_coefficients`, which is
-  certifiable there (`w * |y| <= 60` never binds inside the prior). Wiring
-  requires the trained residual chart, not a coefficient derivation — that
-  blocker is discharged for both parities.
+  independent of `born_gate` (no `w` available at census time). The
+  fact-4 slot in `likelihood._surrogate_coefficients` is now wired: when
+  a `BornResidualChart` (frozen 3-D interpolation dataclass in
+  `cogwheel/lensing/born_residual_chart.py`) is attached to the likelihood
+  object, the slot reconstructs `F_carrier + R(w; gamma, rho)` and returns
+  the surrogate coefficient array. When the chart is `None` (default),
+  draws in the annulus fall through to the exact engine — correct, just not
+  zero-quadrature. The chart itself is a TRAIN_TIER artifact (not yet
+  trained); once trained, attaching it completes the serve path.
 - **Lensing delay frame.** Every channel kernel in `chang_refsdal` is carried in
   the partition's *min-subtracted* frame: `ChangRefsdalPartition` subtracts
   `t_min = min(absolute real-image Fermat delays)` from every delay, so

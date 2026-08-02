@@ -81,6 +81,8 @@ Frequencies in Hz, times in GPS seconds, delays in seconds; lens mass
 """
 from __future__ import annotations
 
+import math
+import types
 from dataclasses import dataclass
 
 import numpy as np
@@ -93,8 +95,8 @@ from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal.channels import (
     _channel_switch, _physical_kernels, reconstruct_from_envelope,
     reconstruct_farfield, farfield_ghost_term, FARFIELD_DIFFRACTIVE,
-    FARFIELD_KERNEL_SUM_MINUS_GHOST, KNOWN_FARFIELD_DEFINITIONS,
-    KNOWN_INTERIOR_DEFINITIONS)
+    FARFIELD_KERNEL_SUM, FARFIELD_KERNEL_SUM_MINUS_GHOST,
+    KNOWN_FARFIELD_DEFINITIONS, KNOWN_INTERIOR_DEFINITIONS)
 from cogwheel.lensing.chang_refsdal.geometry import (
     LensDomainError, GhostDomainError, macro_matrix)
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
@@ -751,7 +753,8 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                  delta_t_max, *, fbin=None, pn_phase_tol=None,
                  spline_degree=3, bin_delay_tol=_DEFAULT_BIN_DELAY_TOL,
                  kernel_subsamples=_DEFAULT_KERNEL_SUBSAMPLES,
-                 amplification_surrogate=None):
+                 amplification_surrogate=None,
+                 born_residual_chart=None):
         if isinstance(waveform_generator, LensedWaveformGenerator):
             base_generator = waveform_generator.waveform_generator
         else:
@@ -771,6 +774,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # name so `JSONMixin.get_init_dict` reads it back (see the
         # `get_init_dict` override for the None-vs-fitted serialization).
         self.amplification_surrogate = amplification_surrogate
+        # Optional trained Born-annulus residual chart; same serialization
+        # pattern as `amplification_surrogate` (see `get_init_dict`).
+        self.born_residual_chart = born_residual_chart
 
         # Populated by ``_set_summary`` (triggered by the ``fbin`` setter
         # inside ``super().__init__``).
@@ -846,6 +852,13 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 'is deferred to a later build; pickle preserves it for '
                 'sampler workers.  Serialize with `amplification_surrogate='
                 'None` or omit the surrogate for JSON round-trips.')
+        if init_dict.get('born_residual_chart') is None:
+            init_dict.pop('born_residual_chart', None)
+        else:
+            raise NotImplementedError(
+                'JSON serialization of a fitted `born_residual_chart` '
+                'is deferred to the training-driver build; pickle '
+                'preserves it for sampler workers.')
         return init_dict
 
     # -- Parameters ------------------------------------------------------
@@ -1648,18 +1661,57 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             theta=geom.caustic_theta,
             image_count=int(geom.real_mask.sum()))
         if not served:
-            # Fact-4 slot (Build 8h-c1): the analytic Born (weak-deflection)
-            # rung is NOT wired here.  Its lead-only carrier
-            # (``_born.born_lead_carrier``) and band-split gate
-            # (``_born.born_gate``) ship as correct primitives, but the
-            # served object is ``F_carrier`` MINUS a trained residual chart,
-            # and that residual chart is a TRAIN_TIER driver artifact that
-            # has not yet been trained.  Until it exists, fall through to the
-            # exact engine, which is certifiable throughout the annulus
-            # (``w * |y| <= 60``).  Re-enable this slot only once the
-            # driver-trained residual chart lands and its reconstruction is
-            # wired here.
-            return None
+            # Fact-4 slot (Born weak-deflection rung): serve the analytic
+            # carrier + trained residual chart for configurations in the
+            # far annulus (rho > 1.0).  Falls through to the exact engine
+            # when the chart is not attached or doesn't cover the config.
+            born_chart = self.born_residual_chart
+            if born_chart is None:
+                return None
+            abs_y = math.hypot(lens['y1'], lens['y2'])
+            try:
+                rho = caustic_rho(lens['gamma'], abs_y, lens['kappa'])
+            except (ValueError, LensDomainError):
+                return None
+            if rho <= 1.0 or not born_chart.covers(lens['gamma'], rho):
+                return None
+            # Build a duck-typed namespace adapter for
+            # born_carrier_from_partition (which reads attributes by name).
+            partition_ns = types.SimpleNamespace(
+                w=dense_w,
+                source=np.array([lens['y1'], lens['y2']]),
+                gamma=lens['gamma'],
+                beta=lens['beta'],
+                kappa=lens['kappa'],
+                matrix=macro_matrix(
+                    lens['gamma'], lens['beta'], lens['kappa']),
+                t_min=geom.t_min,
+                delays=geom.delays,
+                saddle_kernels=geom.saddle_kernels,
+                real_mask=geom.real_mask,
+                images=geom.images)
+            # Deferred import avoids cycle risk (born_carrier_from_partition's
+            # module imports channels which may circle back at module load).
+            from cogwheel.lensing.chang_refsdal.channels import (
+                born_carrier_from_partition)
+            carrier = born_carrier_from_partition(partition_ns)
+            residual = born_chart.evaluate(dense_w, lens['gamma'], rho)
+            f_total = carrier + residual
+            # Reconstruct channel kernels via the far-field reconstruction
+            # path: extract the far-field envelope by subtracting the
+            # resolved ppGO channels and demodulating.
+            real = np.asarray(geom.real_mask, dtype=bool)
+            ppgo = np.sum(
+                geom.saddle_kernels[:, real]
+                * np.exp(1j * dense_w[:, None] * geom.delays[real][None, :]),
+                axis=1)
+            envelope = (f_total - ppgo) * np.exp(1j * dense_w * geom.t_min)
+            kernels, _total = reconstruct_farfield(
+                dense_w, envelope, geom.delays, geom.saddle_kernels,
+                geom.real_mask, FARFIELD_KERNEL_SUM, geom.t_min)
+            k0, k1 = self._reduce_dense_kernels(kernels)
+            delays = self._image_delays(lens, geom)
+            return delays, k0, k1, geom
 
         if definition in KNOWN_FARFIELD_DEFINITIONS:
             # Far-field serve mirror (Build 8h-b3-fin S1-2): reconstruct
