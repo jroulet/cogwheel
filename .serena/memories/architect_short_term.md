@@ -16,16 +16,26 @@ description for orthogonality witness (config passing decay, failing separation)
 
 ## Build 8 Step 8 — Part 0 Mechanical Test
 
-Test-only build: new test file `test_lensing_part0_mechanical.py` enforcing
-four Part 0 structural invariants (no prior-box constants, no retired names,
-no discretization absorbers, no stepping for closed forms). Zero Coder WPs —
-all work routed to Test Developer via domain_test_descriptions. Pre-commit
-hook and retired_concepts.json already exist. Key decisions: (1) AST scan
-module-level Assign nodes only, not expressions/comments; (2) 4.2426 flagged
-unconditionally within 1e-2 tol; 3.0 flagged only if name contains box-shaped
-fragments; (3) np.diff/gradient scan TRIMMED per Simplifier (100% false
-positive rate); (4) discretization absorber check uses explicit allowlist for
-_*_EPS/_MARGIN/_FRAC constants; (5) test reads retired_concepts.json directly,
-no hook import.
+(archived — see git history)
+
+## Build 1e-gamma — Gamma Axis Collocation
+
+Plan: replace uniform gamma grid with log-reach-collocated grid.
+Key findings:
+- 3 call sites: _train_band_charts (line 3776 surrogate_training.py),
+  from_engine (line 2804 surrogate.py), from_lobe_engine (line 2990).
+- `_uniform_axis` stays for other axes; new `_log_reach_gamma_axis` is a peer.
+- Implementation: fine 200-point grid of _caustic_reach(gamma) → log →
+  linspace in log-reach → np.interp back to gamma. No brentq needed.
+- Both parities handled: positive parity reach is increasing, saddle
+  reach is decreasing. In both cases the resulting gamma nodes are
+  ascending (Professor verified).
+- Spline/serve path needs NO changes: `make_interp_spline` handles
+  non-uniform grids, `_validate_axis` only requires strictly ascending.
+- `_caustic_arclength_map` receives gamma_nodes directly, uses linear
+  gamma interpolation via searchsorted — handles non-uniform correctly.
+- Professor: log(reach) is the correct measure, NOT 1/reach or det(A).
+  Absorbs one power of (1-gamma) in the chain-rule derivative.
+- Simplifier: use np.interp on a fine grid (not brentq), single WP.
 
 ## Build 6 (C5) — Ghost Decay Gate

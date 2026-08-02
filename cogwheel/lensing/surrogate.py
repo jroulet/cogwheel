@@ -1271,6 +1271,67 @@ def _validate_axis(axis: np.ndarray, name: str) -> np.ndarray:
     return arr
 
 
+def _log_reach_gamma_axis(gamma_range: tuple[float, float], n_nodes: int,
+                          name: str) -> np.ndarray:
+    """Build a gamma axis with nodes equispaced in log-caustic-reach.
+
+    Compared to a uniform gamma grid, this concentrates nodes where the
+    caustic reach varies most steeply (near gamma → 0 or gamma → 1),
+    improving interpolation fidelity for a fixed node budget.
+
+    Parameters
+    ----------
+    gamma_range : tuple[float, float]
+        ``(low, high)`` with ``low < high``.
+    n_nodes : int
+        Number of nodes; must be at least 4 for cubic interpolation.
+    name : str
+        Axis name, used in error messages and downstream validation.
+
+    Returns
+    -------
+    np.ndarray
+        1-D strictly increasing gamma axis of length ``n_nodes`` with exact
+        endpoint values ``gamma_range[0]`` and ``gamma_range[1]``.
+
+    Raises
+    ------
+    ValueError
+        If the range is not increasing or ``n_nodes < 4``.
+    """
+    lo, hi = float(gamma_range[0]), float(gamma_range[1])
+    if not lo < hi:
+        raise ValueError(
+            f'{name} range must satisfy low < high; got {gamma_range}.')
+    if n_nodes < 4:
+        raise ValueError(
+            f'{name} needs at least 4 nodes for cubic interpolation; '
+            f'got {n_nodes}.')
+
+    # Fine uniform gamma sweep to tabulate log(caustic_reach).
+    g_fine = np.linspace(lo, hi, 200)
+    t_fine = np.log(np.array([_caustic_reach(g) for g in g_fine]))
+
+    # Place n_nodes uniformly in log-reach space.
+    t_grid = np.linspace(t_fine[0], t_fine[-1], n_nodes)
+
+    # Invert: np.interp requires ascending xp.  log-reach is increasing
+    # for positive parity (gamma < 1) and decreasing for saddle (gamma > 1).
+    if t_fine[-1] >= t_fine[0]:
+        gamma_grid = np.interp(t_grid, t_fine, g_fine)
+    else:
+        gamma_grid = np.interp(t_grid, t_fine[::-1], g_fine[::-1])
+
+    # Defensive sort (should already be ascending from the interp).
+    gamma_grid.sort()
+
+    # Pin exact endpoints to avoid floating-point drift.
+    gamma_grid[0] = lo
+    gamma_grid[-1] = hi
+
+    return _validate_axis(gamma_grid, name)
+
+
 def _validate_farfield_arc_map(arc_map: _FarFieldArcMap,
                                gamma_grid: np.ndarray) -> _FarFieldArcMap:
     """Return a far-field arc map validated against its chart gamma grid.
@@ -2802,7 +2863,7 @@ class LensAmplificationSurrogate:
         arc_theta_lo = float(arc_theta_lo)
         arc_theta_hi = float(arc_theta_hi)
         log_w_grid = _log_w_grid(w_range, w_nodes_per_decade)
-        gamma_grid = _uniform_axis(gamma_range, n_gamma, 'gamma')
+        gamma_grid = _log_reach_gamma_axis(gamma_range, n_gamma, 'gamma')
         s_grid = _uniform_axis(s_range, n_s, 's')
         d_grid = _uniform_axis(d_range, n_d, 'd')
         # Cusp/wedge-edge rejection: the arc-length coordinate is only
@@ -2988,7 +3049,7 @@ class LensAmplificationSurrogate:
         boundary_r = np.ascontiguousarray(admission.boundary_r, dtype=float)
 
         log_w_grid = _log_w_grid(w_range, w_nodes_per_decade)
-        gamma_grid = _uniform_axis(gamma_range, n_gamma, 'gamma')
+        gamma_grid = _log_reach_gamma_axis(gamma_range, n_gamma, 'gamma')
         rho_lobe_grid = _uniform_axis(rho_lobe_range, n_rho, 'rho_lobe')
 
         # Wedge-edge s-coordinate: theta_local nodes are placed as images of

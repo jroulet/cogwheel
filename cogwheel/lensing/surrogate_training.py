@@ -58,7 +58,7 @@ from cogwheel.lensing.ppgo_map import (
     CertifiedPpgoMap, UNKNOWN, caustic_rho, get_certified_ppgo_map)
 from cogwheel.lensing.surrogate import (
     FarFieldChart, TubeChart, LensAmplificationSurrogate,
-    _REFUSAL_ERRORS, _log_w_grid, _uniform_axis,
+    _REFUSAL_ERRORS, _log_w_grid, _uniform_axis, _log_reach_gamma_axis,
     _caustic_reach as _scalar_caustic_reach, _from_caustic_fixed,
     _from_lobe_fixed, _lobe_boundary_radius, LobeInteriorChart,
     _caustic_arclength_map, _to_farfield_smooth,
@@ -3774,7 +3774,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                        chart_reports: list[dict],
                        ppgo_map: CertifiedPpgoMap | None = None) -> None:
     """Build the tube + far-field charts of one topology-stable gamma band."""
-    gamma_grid = _uniform_axis(band, config.n_gamma, f'gamma_{label}')
+    gamma_grid = _log_reach_gamma_axis(band, config.n_gamma, f'gamma_{label}')
 
     # -- Tube charts (per fold arc, resumable) --
     # Pre-compute per-arc minimum curvature radii (worst over gamma band).

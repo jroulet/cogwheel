@@ -1,5 +1,17 @@
 # Coder Short-Term Observations
 
+- WP1 Build 1e-gamma: Added `_log_reach_gamma_axis` function (lines 1273-1331)
+  to cogwheel/lensing/surrogate.py as a peer of `_uniform_axis`. Function places
+  gamma nodes equispaced in log(caustic_reach) space via 200-point fine sweep +
+  np.interp inversion, handles both increasing (positive parity) and decreasing
+  (saddle) log-reach monotonicity. Replaced all 3 gamma-axis `_uniform_axis` calls:
+  from_engine (line 2865), from_lobe_engine (line 3051), and _train_band_charts
+  (surrogate_training.py line 3776). Added import to surrogate_training.py line 60.
+  `_uniform_axis` left unchanged for s, d, rho_lobe axes. Test file
+  test_lensing_surrogate_lobe.py line 1973 deliberately uses _uniform_axis for gamma
+  (testing uniform behavior) — NOT changed per WP scope.
+  Both files parse clean (ast.parse OK). No LSP diagnostics.
+
 - WP1 Build 7: Added Part 0 resolution paragraph to _GHOST_SEPARATION_MIN
   comment block in channels.py (lines 207-217, 11 new comment lines).
   Updated COVERAGE_DESIGN.md table entry from SUSPECT to OK. No behavioral

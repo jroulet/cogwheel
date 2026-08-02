@@ -1,5 +1,36 @@
 # Test Dev Short-Term Observations
 
+## Current build: test_lensing_log_reach_gamma.py — WP1 log-reach gamma axis
+
+- Created `cogwheel/tests/test_lensing_log_reach_gamma.py` (23 tests, ~20 s
+  with COGWHEEL_TRAIN_TIER=1; 17 pass + 6 skip without it, ~3 s).
+- LogReachStructuralTestCase (12 tests): array size, strict ascending,
+  endpoint pinning (1e-14), log-reach round-trip (5e-4 tol — the 200-pt
+  internal linspace gives ~3e-6 positive, ~1e-4 saddle), node clustering
+  direction (last<first near wall for positive; first<last for saddle),
+  validation errors (reversed range, <4 nodes).
+- LogReachComparativeAccuracyTestCase (4 tests, engine-backed): builds two
+  7×4×4 tube charts on (0.90, 0.98) with SHARED spatial grids and w-grid,
+  differing ONLY in gamma placement (uniform vs log-reach). Evaluates at
+  30 off-grid gamma × on-grid (u, theta) to isolate gamma interpolation.
+  Asserts log-reach max eps < 0.7 × uniform max eps AND < 5e-2 absolute.
+  KEY DESIGN: with 4 spatial nodes, random-spatial probes have ~0.30-0.45
+  eps (dominated by spatial interpolation), masking the gamma benefit.
+  Using on-grid spatial coords isolates gamma-only error (~0.003-0.02).
+- LogReachRegressionTestCase (2 tests, engine-backed): tube chart on
+  (0.35, 0.65) with log-reach nodes; gamma-only held-out eps < 5e-3
+  (measured ~1.2e-3). Confirms no degradation on smooth interior bands.
+- LogReachSelfFalsificationTestCase (5 tests): proves clustering detector
+  fires on uniform grid; proves round-trip detector fires on wrong grid;
+  proves endpoint detector fires on perturbed array.
+- Anti-vacuity: every test class has setUp/tearDown n_checks guard.
+- Backward-compat audit: WP1 changed `from_engine`/`from_lobe_engine` to
+  use `_log_reach_gamma_axis` instead of `np.linspace`. No existing test
+  asserts gamma-grid uniformity or specific node values from from_engine.
+  Tests that build grids manually (via `np.linspace` + `_build_tube_chart`
+  or `FarFieldChart.from_values`) are unaffected. No changes needed to
+  existing tests.
+
 ## Current build: test_lensing_part0_mechanical.py — structural invariant scanner
 
 - Created `cogwheel/tests/test_lensing_part0_mechanical.py` (13 tests, 0.66 s).
