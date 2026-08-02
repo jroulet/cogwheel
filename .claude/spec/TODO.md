@@ -417,18 +417,13 @@ Tag conventions:
      work: the result goes inline into the step-3 brief. Do NOT choose `f` to
      reproduce the incumbent `0.05`.
 
-  3. **C6 — tube shell becomes curvature-relative.** `_DEFAULT_ETA_MAX` and
-     `_DEFAULT_ETA_FLOOR` become `f * R_c`. Then DELETE the foot-of-normal skip
-     guard: with eta_max a fixed fraction of `R_c` it is vacuous by
-     construction, so it becomes an assertion, not a branch. This converts a
-     refusal into a serve.
-     ACCEPTANCE: no chart skipped for curvature at any gamma in the prior;
-     held-out eps under bar at both gamma extremes; the same `f` serves every
-     gamma. The small-gamma collar (coverage-map region 3) closes HERE, but
-     only because step 1b already removed its other two causes: F037 measures
-     the collar as three stacked failures, and C6 owns just the foot-of-normal
-     skips (`0.0281..0.0462`, `0.0644..0.1550`). If step 1b has not shipped,
-     this acceptance is not achievable — do not weaken it, run 1b.
+  3. **DONE (2026-08-01). C6 — tube shell becomes curvature-relative.**
+     `TrainingConfig.eta_max`/`eta_floor` renamed to `f_max`/`f_floor`;
+     per-arc `eta_max = f_max * R_c` computed in `_train_band_charts` and
+     threaded to `_build_tube_chart`, `_tube_heldout_samples`,
+     `_interior_admission`, `_saddle_lobe_admissions`. The foot-of-normal skip
+     guard deleted; replaced by `assert f_max < 0.5`. No chart is skipped for
+     curvature — the old branch becomes vacuous by construction.
 
   4. **DRIVER MEASUREMENT — the far-zone crossover.** Sweep carrier / ppGO /
      chart node cost INWARD in `rho` from the box corner, per gamma, both
@@ -848,7 +843,7 @@ Tag conventions:
   |---|---|---|---|
   | 1 | Caustic interior, astroid (`gamma < 1`) | interior SACR-C charts | OPEN at the high-gamma CROWN band — `interior_eps_max = 5e-2` was set with crown reachability explicitly UNMEASURED; a P2 pilot recorded 0% pass at eps 3.4 |
   | 2 | Caustic interior, saddle lobes (`gamma > 1`) | `LobeInteriorChart` | CLOSED (shipped `04f9f5c`), except the INTER-LOBE CORRIDOR, which `_lobe_serves` refuses for both lobes — whether the saddle exterior charts pick it up is UNKNOWN |
-  | 3 | Near-caustic shell (fold tubes) | `TubeChart`, `eta in [eta_floor, eta_max]` | OPEN below `gamma = 0.155` — measured, THREE stacked causes (F037), not one. Two bands are SKIPPED by the foot-of-normal guard because `eta_max = 0.05` is ABSOLUTE (the code already computes the right scale and uses it to REFUSE rather than to SCALE) — owned by C6 of [[lensing_caustic_relative_coordinates]]. Two more are DROPPED as topology slivers by `stable_gamma_bands`, which C6 does NOT fix — those are `_PROBE_ETA` (F039) and close in step 1b, the analytic sweep. Both prerequisites are in the same plan; the row closes only when 1b and C6 have both shipped |
+  | 3 | Near-caustic shell (fold tubes) | `TubeChart`, `eta in [eta_floor, eta_max]` | OPEN below `gamma = 0.155` — measured, THREE stacked causes (F037), not one. The foot-of-normal skip cause is CLOSED (C6 shipped 2026-08-01: `eta_max = f_max * R_c` per arc, skip guard replaced by assertion). Two bands are still DROPPED as topology slivers by `stable_gamma_bands` — those are `_PROBE_ETA` (F039) and close in step 1b, the analytic sweep. The row closes only when 1b has shipped |
   | 4 | Cusp neighbourhoods | excluded from tubes -> quadrature | OPEN, both parities. Saddle exclusions are WIDER (`_SADDLE_CUSP_WIDTH_SAFETY = 2.5`, min half-width 0.08) because deltoid cusps are shallow and the wedge-edge turnarounds are near-singular |
   | 5 | Exterior far-field | `FarFieldChart` | CLOSED (per-column admission since 8h-b4) |
   | 6-9 | ~~Far annulus `3.0 < \|y\| <= 4.2426`, and its three gamma fences~~ | — | **DISSOLVING — do not work these rows.** All four existed only because `\|y\| = 3` (the PRIOR BOX half-width) was treated as a physical boundary. F036 measures that no `\|y\|` threshold can bound the caustic at all: `r_caustic` diverges at the parity wall (19.8 at `gamma = 0.99` vs a 4.2426 box corner). `GAMMA_FENCE = 3/4` and the saddle fence `1.0502342` are CONSEQUENCES of the annulus radius, not independent physics, and are deleted with it. These four rows collapse into ONE caustic-relative exterior region. See [[lensing_caustic_relative_coordinates]] |
@@ -886,11 +881,10 @@ Tag conventions:
      widths across the prior. The count is data-dependent and unmeasured, and
      that number decides whether this is a rounding error or a real hole.
      [[lensing_dropped_gamma_slivers]]
-  6. **Small-gamma collar** (region 3). Closed by making the tube shell
-     CURVATURE-RELATIVE (`eta_max = f * R_c`), which is step C6 of
-     [[lensing_caustic_relative_coordinates]] — not a separate treatment and
-     not a weak-shear special case. The collar is a symptom of the same
-     absolute-length defect as regions 6-9.
+  6. **Small-gamma collar** (region 3). The foot-of-normal skip cause is
+     CLOSED (C6 shipped 2026-08-01). Remaining cause: topology slivers from
+     `stable_gamma_bands` (`_PROBE_ETA`, F039) — closes with step 1b of
+     [[lensing_caustic_relative_coordinates]].
   7. **Crown-band measurement** (region 1). Measure whether the high-gamma
      astroid interior reaches an acceptable eps at all before deciding it needs
      a treatment. Currently a clause inside

@@ -21,7 +21,6 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import dataclasses
 import numpy as np
 import time
 from cogwheel.lensing.surrogate_training import (
@@ -87,9 +86,7 @@ def measure_one(gamma: float, parity: int, f: float):
             return gamma, parity, f, None, (
                 f"eta_max={eta_max:.4f} out of range (R_c={r_c:.4f})")
 
-        # Build a training config with the adjusted eta bounds.
-        config = dataclasses.replace(_BASE_CONFIG, eta_max=eta_max,
-                                     eta_floor=eta_floor)
+        config = _BASE_CONFIG
 
         # Compute w_range using a physical prior box (same as the test file).
         box = PriorBox.from_prior_classes()
@@ -102,11 +99,13 @@ def measure_one(gamma: float, parity: int, f: float):
         # Build the tube chart.
         chart, _calls, _refused = _build_tube_chart(
             gamma_grid=gamma_grid, arc=arc, parity=parity,
-            w_range=w_range, config=config)
+            w_range=w_range, config=config,
+            eta_max=eta_max, eta_floor=eta_floor)
 
         # Generate held-out samples and compute eps.
         rng = np.random.default_rng(42)
-        samples = _tube_heldout_samples(band, arc, config, rng)
+        samples = _tube_heldout_samples(band, arc, config, rng,
+                                         eta_max=eta_max, eta_floor=eta_floor)
         eps = _heldout_eps(chart, samples, _TUBE_PROV)
 
         return gamma, parity, f, eps, None

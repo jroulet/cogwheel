@@ -104,8 +104,8 @@ from cogwheel.lensing import surrogate_training as st
 from cogwheel.lensing.chang_refsdal import geometry
 
 #: Physical caustic-distance margin below which the far-field surrogate is
-#: untrained (dimensionless source-plane units); asserted against the live
-#: ``TrainingConfig`` default in `ConstantsTestCase`.
+#: untrained (dimensionless source-plane units); test fixture operating point
+#: for tube-shell geometry (0.05 at the default f_max=0.40 design point).
 ETA_MAX = 0.05
 
 #: Largest per-region physical source magnitude (``_source_scale`` at the
@@ -333,7 +333,7 @@ def _beyond_eta_shell(gamma: float, y1: np.ndarray, y2: np.ndarray
 def _admission(band: tuple[float, float]) -> 'st._InteriorAdmission':
     """Cached positive-parity directional admission geometry for one band."""
     reach = sg._caustic_reach(0.5 * (band[0] + band[1]))
-    return st._interior_admission(band, 1, reach, st.TrainingConfig())
+    return st._interior_admission(band, 1, reach, st.TrainingConfig(), eta_max=ETA_MAX)
 
 
 @functools.lru_cache(maxsize=None)
@@ -636,8 +636,9 @@ class ExteriorAdmissionTestCase(unittest.TestCase):
 class ConstantsTestCase(ExteriorAdmissionTestCase):
     """Pin the module constants to the live production defaults."""
 
-    def test_eta_max_matches_training_config(self) -> None:
-        self.assertEqual(ETA_MAX, st.TrainingConfig().eta_max)
+    def test_f_max_matches_training_config(self) -> None:
+        self.assertEqual(0.40, st.TrainingConfig().f_max)
+        self.assertEqual(0.16, st.TrainingConfig().f_floor)
         self.record_comparison()
 
     def test_source_scale_min_matches_prior(self) -> None:

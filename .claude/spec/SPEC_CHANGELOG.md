@@ -6,12 +6,22 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.31.1` (2026-08-01):
+- `0.31.2` (2026-08-01):
 
 Lobe-interior charts gain optional `theta_to_s` axis map for wedge-edge
 reparametrization (`s = sqrt(span) - sqrt(theta_max - theta)`). New
 `_LOBE_AXIS_SCHEMA` tag and `_LOBE_ARC_MAP_SIZE` constant. V1 charts
 (theta_to_s=None) retain byte-identical behavior.
+
+- `0.31.1` (2026-08-01):
+
+C6: tube shell is now curvature-relative. `TrainingConfig.eta_max`/`eta_floor`
+renamed to `f_max`/`f_floor`; per-arc `eta_max = f_max * R_c` computed in
+`_train_band_charts` and threaded to `_build_tube_chart`,
+`_tube_heldout_samples`, `_interior_admission`, and `_saddle_lobe_admissions`.
+The foot-of-normal skip guard is replaced by `assert f_max < 0.5` — vacuous by
+construction so no chart is ever skipped for curvature. SPEC.md updated to
+reflect the skip is replaced by an assertion.
 
 - `0.31.0` (2026-07-31):
 

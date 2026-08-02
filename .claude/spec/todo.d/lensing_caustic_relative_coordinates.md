@@ -175,18 +175,13 @@ section: Backlog
      work: the result goes inline into the step-3 brief. Do NOT choose `f` to
      reproduce the incumbent `0.05`.
 
-  3. **C6 — tube shell becomes curvature-relative.** `_DEFAULT_ETA_MAX` and
-     `_DEFAULT_ETA_FLOOR` become `f * R_c`. Then DELETE the foot-of-normal skip
-     guard: with eta_max a fixed fraction of `R_c` it is vacuous by
-     construction, so it becomes an assertion, not a branch. This converts a
-     refusal into a serve.
-     ACCEPTANCE: no chart skipped for curvature at any gamma in the prior;
-     held-out eps under bar at both gamma extremes; the same `f` serves every
-     gamma. The small-gamma collar (coverage-map region 3) closes HERE, but
-     only because step 1b already removed its other two causes: F037 measures
-     the collar as three stacked failures, and C6 owns just the foot-of-normal
-     skips (`0.0281..0.0462`, `0.0644..0.1550`). If step 1b has not shipped,
-     this acceptance is not achievable — do not weaken it, run 1b.
+  3. **DONE (2026-08-01). C6 — tube shell becomes curvature-relative.**
+     `TrainingConfig.eta_max`/`eta_floor` renamed to `f_max`/`f_floor`;
+     per-arc `eta_max = f_max * R_c` computed in `_train_band_charts` and
+     threaded to `_build_tube_chart`, `_tube_heldout_samples`,
+     `_interior_admission`, `_saddle_lobe_admissions`. The foot-of-normal skip
+     guard deleted; replaced by `assert f_max < 0.5`. No chart is skipped for
+     curvature — the old branch becomes vacuous by construction.
 
   4. **DRIVER MEASUREMENT — the far-zone crossover.** Sweep carrier / ppGO /
      chart node cost INWARD in `rho` from the box corner, per gamma, both

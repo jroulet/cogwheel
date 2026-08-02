@@ -55,8 +55,6 @@ import os
 import pathlib
 import tempfile
 from types import SimpleNamespace
-import dataclasses
-
 import numpy as np
 
 try:
@@ -96,6 +94,10 @@ from cogwheel.lensing.surrogate import LensAmplificationSurrogate
 from cogwheel.lensing.likelihood import LensedRelativeBinningLikelihood
 
 _OUTPUT_DIR = pathlib.Path(__file__).resolve().parent / 'output'
+
+#: Test fixture operating point for tube geometry (eta_max is no longer a
+#: TrainingConfig field — passed explicitly to _interior_admission).
+_PPGO_ETA_MAX = 0.05
 
 
 # ======================================================================
@@ -612,7 +614,7 @@ class InteriorAdmissionTestCase(_PpgoTestCase):
         cls.config = st.TrainingConfig()
         cls.reach = surrogate._caustic_reach(cls.GAMMA_MID)
         cls.admission = st._interior_admission(
-            cls.BAND, 1, cls.reach, cls.config)
+            cls.BAND, 1, cls.reach, cls.config, eta_max=_PPGO_ETA_MAX)
         cls.cusp_angles = st._cusp_source_angles(
             cls.GAMMA_MID, cls.config.n_caustic_samples)
         cls.tiles = _farfield_interior_tiles(
@@ -697,14 +699,13 @@ class InteriorAdmissionTestCase(_PpgoTestCase):
 
         def admitted_count(eta_max):
             admission = st._interior_admission(
-                self.BAND, 1, self.reach,
-                dataclasses.replace(self.config, eta_max=eta_max))
+                self.BAND, 1, self.reach, self.config, eta_max=eta_max)
             return sum(
                 admission.admits((float(r), float(t)), (1e-9, 1e-9))
                 for t in thetas for r in rhos)
 
-        wide_shell = admitted_count(3.0 * self.config.eta_max)
-        narrow_shell = admitted_count(self.config.eta_max)
+        wide_shell = admitted_count(3.0 * _PPGO_ETA_MAX)
+        narrow_shell = admitted_count(_PPGO_ETA_MAX)
         self.comparisons += 1
         self.assertLess(
             wide_shell, narrow_shell,

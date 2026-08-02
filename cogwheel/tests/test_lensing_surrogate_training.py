@@ -1053,9 +1053,14 @@ _WP3_PATHOLOGY_FLOOR = 0.09
 #: placement (see FINDINGS F042 / lensing_collocation_from_local_scales);
 #: grid 5 just adds uniform nodes until the knife-edge clears. No production
 #: risk: the shipped trainer builds far finer than this synthetic.
+#: Tube-geometry operating-point eta bounds (no longer TrainingConfig fields;
+#: passed explicitly to _build_tube_chart / _tube_heldout_samples).
+_WP3_ETA_MAX = 0.05
+_WP3_ETA_FLOOR = 0.02
+
 _WP3_CONFIG = TrainingConfig(
     n_gamma=5, n_u=5, n_theta=5, w_nodes_per_decade=3, n_heldout=16,
-    eta_floor=0.02, eta_max=0.05, n_caustic_samples=120)
+    n_caustic_samples=120)
 
 
 def _wp3_fixon_left_arc(gamma: float, n: int):
@@ -1104,12 +1109,14 @@ def _wp3_fixoff_left_arc(gamma: float, n: int):
 def _wp3_build_and_measure(box: PriorBox, config: TrainingConfig, arc,
                            reach: float) -> dict:
     """Build a saddle tube chart for one arc and measure its held-out eps."""
-    w_range = _capped_w_range(box, -1, reach + config.eta_max)
+    w_range = _capped_w_range(box, -1, reach + _WP3_ETA_MAX)
     chart, _calls, _refused = _build_tube_chart(
         gamma_grid=np.linspace(*_WP3_BAND, config.n_gamma), arc=arc,
-        parity=-1, w_range=w_range, config=config)
+        parity=-1, w_range=w_range, config=config,
+        eta_max=_WP3_ETA_MAX, eta_floor=_WP3_ETA_FLOOR)
     samples = _tube_heldout_samples(
-        _WP3_BAND, arc, config, np.random.default_rng(7))
+        _WP3_BAND, arc, config, np.random.default_rng(7),
+        eta_max=_WP3_ETA_MAX, eta_floor=_WP3_ETA_FLOOR)
     eps = _heldout_eps(chart, samples, _HELDOUT_PROV)
     return {'chart': chart, 'eps': eps, 'arc': arc, 'w_range': w_range}
 
@@ -1585,7 +1592,7 @@ class SaddleTubeTailTestCase(_CountingTestCase):
         import matplotlib.pyplot as plt
 
         fixture = _wp3_fixture()
-        eta = 0.5 * (_WP3_CONFIG.eta_floor + _WP3_CONFIG.eta_max)
+        eta = 0.5 * (_WP3_ETA_FLOOR + _WP3_ETA_MAX)
         on_theta, on_true, on_emul = _wp3_overlay(
             fixture['on']['chart'], fixture['on_arc'], _WP3_GAMMA, eta, 60)
         off_theta, off_true, off_emul = _wp3_overlay(
@@ -2678,13 +2685,14 @@ def _wp1_polyline_arclength(gamma: float, arc, thetas: np.ndarray) -> np.ndarray
 def _wp1_build_arclength_eps(arc, config: TrainingConfig, box: PriorBox,
                              reach: float) -> float:
     """Held-out eps of the PRODUCTION arc-length tube chart for one arc."""
-    w_range = _capped_w_range(box, -1, reach + config.eta_max)
+    w_range = _capped_w_range(box, -1, reach + _WP3_ETA_MAX)
     gamma_grid = np.linspace(*_WP3_BAND, config.n_gamma)
     chart, _calls, _refused = _build_tube_chart(
         gamma_grid=gamma_grid, arc=arc, parity=-1, w_range=w_range,
-        config=config)
+        config=config, eta_max=_WP3_ETA_MAX, eta_floor=_WP3_ETA_FLOOR)
     samples = _tube_heldout_samples(
-        _WP3_BAND, arc, config, np.random.default_rng(_WP1_HELDOUT_SEED))
+        _WP3_BAND, arc, config, np.random.default_rng(_WP1_HELDOUT_SEED),
+        eta_max=_WP3_ETA_MAX, eta_floor=_WP3_ETA_FLOOR)
     return _heldout_eps(chart, samples, _HELDOUT_PROV)
 
 
@@ -2699,11 +2707,11 @@ def _wp1_build_uniform_theta_chart(arc, config: TrainingConfig, box: PriorBox,
     pre-WP1 behaviour.  Only the node placement / interpolation coordinate
     differs from the arc-length chart, isolating that single change.
     """
-    w_range = _capped_w_range(box, -1, reach + config.eta_max)
+    w_range = _capped_w_range(box, -1, reach + _WP3_ETA_MAX)
     gamma_grid = np.linspace(*_WP3_BAND, config.n_gamma)
     log_w_grid = training._log_w_grid(w_range, config.w_nodes_per_decade)
     w_grid = np.exp(log_w_grid)
-    u_grid = np.linspace(np.sqrt(config.eta_floor), np.sqrt(config.eta_max),
+    u_grid = np.linspace(np.sqrt(_WP3_ETA_FLOOR), np.sqrt(_WP3_ETA_MAX),
                          config.n_u)
     theta_grid = np.linspace(arc.theta_lo, arc.theta_hi, config.n_theta)
     shape = (log_w_grid.size, gamma_grid.size, u_grid.size, theta_grid.size)
@@ -2723,8 +2731,8 @@ def _wp1_build_uniform_theta_chart(arc, config: TrainingConfig, box: PriorBox,
     return surrogate_module.TubeChart.from_values(
         gamma_grid=gamma_grid, u_grid=u_grid, theta_grid=theta_grid,
         log_w_grid=log_w_grid, envelope_real=env_real, envelope_imag=env_imag,
-        image_count=arc.image_count, parity=-1, eta_floor=config.eta_floor,
-        eta_max=config.eta_max, cusp_windows=arc.cusp_windows)
+        image_count=arc.image_count, parity=-1, eta_floor=_WP3_ETA_FLOOR,
+        eta_max=_WP3_ETA_MAX, cusp_windows=arc.cusp_windows)
 
 
 def _wp1_build_uniform_eps(arc, config: TrainingConfig, box: PriorBox,
@@ -2732,7 +2740,8 @@ def _wp1_build_uniform_eps(arc, config: TrainingConfig, box: PriorBox,
     """Held-out eps of the incumbent uniform-theta tube chart for one arc."""
     chart = _wp1_build_uniform_theta_chart(arc, config, box, reach)
     samples = _tube_heldout_samples(
-        _WP3_BAND, arc, config, np.random.default_rng(_WP1_HELDOUT_SEED))
+        _WP3_BAND, arc, config, np.random.default_rng(_WP1_HELDOUT_SEED),
+        eta_max=_WP3_ETA_MAX, eta_floor=_WP3_ETA_FLOOR)
     return _heldout_eps(chart, samples, _HELDOUT_PROV)
 
 

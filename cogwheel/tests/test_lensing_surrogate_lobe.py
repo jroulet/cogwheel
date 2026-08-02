@@ -92,6 +92,10 @@ from cogwheel.lensing.chang_refsdal.channels import (  # noqa: E402
 #: astroid admission does not apply.
 _SADDLE_BAND: tuple[float, float] = (1.5, 1.7)
 
+#: Absolute ``eta_max`` passed to lobe admission builders (mirrors production
+#: ``config.f_max * R_c``; here a simple test-local constant).
+_LOBE_ETA_MAX: float = 0.05
+
 #: Interior serve query shear used throughout (inside the band, clear of
 #: the ``gamma = 1`` guard band).
 _SERVE_GAMMA: float = 1.6
@@ -133,7 +137,8 @@ def _admissions(band: tuple[float, float]
     evaluation, so it is cheap and cacheable across the whole file.
     """
     config = training_module.TrainingConfig()
-    lobe_a, lobe_b = training_module._saddle_lobe_admissions(band, config)
+    lobe_a, lobe_b = training_module._saddle_lobe_admissions(
+        band, config, eta_max=_LOBE_ETA_MAX)
     return lobe_a, lobe_b
 
 
@@ -772,7 +777,7 @@ def _engine_lobe_fixture() -> _EngineLobeFixture:
     """
     config = training_module.TrainingConfig()
     lobe_a, _lobe_b = training_module._saddle_lobe_admissions(
-        _ENGINE_BAND, config)
+        _ENGINE_BAND, config, eta_max=_LOBE_ETA_MAX)
     gamma_mid = 0.5 * (_ENGINE_BAND[0] + _ENGINE_BAND[1])
     lens_center = training_module._SADDLE_LOBE_CENTERS[0]
     lobe_cusps = training_module._lobe_cusp_source_angles(

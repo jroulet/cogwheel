@@ -162,9 +162,9 @@ from cogwheel.lensing.chang_refsdal import geometry  # noqa: E402
 #: Shear magnitude of the positive-parity (astroid) exterior fixtures.
 GAMMA: float = 0.5
 
-#: Exterior-admission margin (mirrors `TrainingConfig.eta_max`); asserted
-#: against the live default in `ExteriorTilerReachTestCase` so the constant
-#: cannot silently drift from production.
+#: Exterior-admission margin (test fixture operating point for tube geometry);
+#: asserted against the live default in `ExteriorTilerReachTestCase` so the
+#: constant cannot silently drift from production.
 ETA_MAX: float = 0.05
 
 #: F-normalised reconstruction / seam bar (`TrainingConfig.farfield_eps_max`).
@@ -780,9 +780,9 @@ class ExteriorWindowsTestCase(unittest.TestCase):
 class ExteriorTilerReachTestCase(ExteriorWindowsTestCase):
     """Spec 1: caustic-fixed tiler geometry, notch exclusion, reach parity."""
 
-    def test_eta_max_constant_matches_training_default(self) -> None:
+    def test_f_max_constant_matches_training_default(self) -> None:
         # Guard the module constant against production drift.
-        self.assertEqual(ETA_MAX, st.TrainingConfig().eta_max)
+        self.assertEqual(0.40, st.TrainingConfig().f_max)
         self.record_comparison()
 
     def test_scalar_reach_is_shared_between_map_and_surrogate(self) -> None:
@@ -873,7 +873,7 @@ class ExteriorTilerReachTestCase(ExteriorWindowsTestCase):
         # ... so the per-column exterior admission refuses a tile there.
         band = (GAMMA - 0.01, GAMMA + 0.01)
         admission = st._interior_admission(
-            band, 1, reach, st.TrainingConfig())
+            band, 1, reach, st.TrainingConfig(), eta_max=ETA_MAX)
         self.assertFalse(admission.admits_exterior(
             (rho_scalar, theta_serve), (1e-9, 1e-9), 10.0))
         # the engine confirms it is a two-image (exterior) point, not 4-image
@@ -1459,7 +1459,8 @@ class FixedWindowContainmentTestCase(ExteriorWindowsTestCase):
         self.config = st.TrainingConfig()
         self.parity = 1
         self.reach = surrogate._caustic_reach(GAMMA)
-        self.exclusion_rho = 1.0 + self.config.eta_max / self.reach
+        self.eta_max = ETA_MAX
+        self.exclusion_rho = 1.0 + self.eta_max / self.reach
         self.band = (0.4, 0.6)
         self.rho_outer = self.box.y_reach / self.reach
         self.window, self.action, self.report = st._farfield_region_window(
@@ -1761,7 +1762,7 @@ class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
         self.band_gammas = (INTERIOR_BAND[0], INTERIOR_GAMMA_MID,
                             INTERIOR_BAND[1])
         self.admission = st._interior_admission(
-            INTERIOR_BAND, 1, self.reach, self.config)
+            INTERIOR_BAND, 1, self.reach, self.config, eta_max=ETA_MAX)
 
     def _rho_boundary(self, theta: float) -> float:
         """Largest band-safe interior ``rho`` at ``theta``, from the EXACT oracle.
@@ -1791,7 +1792,7 @@ class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
                                    magnitude * math.sin(theta)])
                 distance = float(geometry.nearest_caustic_point(
                     gamma, 0.0, source).distance)
-                if distance < self.config.eta_max:
+                if distance < ETA_MAX:
                     return False
             return True
 
@@ -1815,7 +1816,7 @@ class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
         inradius, encloses = st._caustic_inradius(
             INTERIOR_GAMMA_MID, 1, self.config.n_caustic_samples)
         self.assertTrue(encloses)  # astroid encloses the origin
-        old_admit_magnitude = inradius - self.config.eta_max
+        old_admit_magnitude = inradius - ETA_MAX
         # The gain point is outside the interior the old isotropic disk kept.
         self.assertGreater(INTERIOR_GAIN_MAGNITUDE, old_admit_magnitude)
         tiny = (1e-9, 1e-9)
@@ -1897,7 +1898,7 @@ class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
                             geometry.nearest_caustic_point(
                                 gamma, 0.0,
                                 np.asarray(src, dtype=float)).distance))
-                    self.assertLess(min(distances), self.config.eta_max)
+                    self.assertLess(min(distances), ETA_MAX)
                 self.record_comparison()
 
     def test_tube_shell_excludes_radially_interior_near_cusp_point(self) -> None:
@@ -1916,12 +1917,12 @@ class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
         self.assertEqual(_signed_morse_sum(INTERIOR_GAMMA_MID, src)[0], 4)
         radial_gap = (1.0 - INTERIOR_TUBE_RHO) * geometry.r_caustic(
             INTERIOR_GAMMA_MID, theta)
-        self.assertGreater(radial_gap, 2.0 * self.config.eta_max)
+        self.assertGreater(radial_gap, 2.0 * ETA_MAX)
         # The production predicate's own per-gamma caustic clouds ...
         nearest_cloud = min(
             float(np.hypot(cloud[:, 0] - src[0], cloud[:, 1] - src[1]).min())
             for cloud in self.admission.caustic_clouds)
-        self.assertLess(nearest_cloud, self.config.eta_max)
+        self.assertLess(nearest_cloud, ETA_MAX)
         # ... agreeing with the exact independent oracle.
         nearest_exact = min(
             float(geometry.nearest_caustic_point(
@@ -1929,7 +1930,7 @@ class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
                 np.asarray(surrogate._from_caustic_fixed(gamma, *center),
                            dtype=float)).distance)
             for gamma in self.band_gammas)
-        self.assertLess(nearest_exact, self.config.eta_max)
+        self.assertLess(nearest_exact, ETA_MAX)
         self.assertFalse(self.admission.admits(center, (1e-9, 1e-9)))
         self.record_comparison()
 
@@ -2002,9 +2003,9 @@ class SaddleLobeAdmissionTestCase(ExteriorWindowsTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.config = dataclasses.replace(
-            st.TrainingConfig(), eta_max=SADDLE_ETA_MAX)
-        self.lobes = st._saddle_lobe_admissions(SADDLE_BAND, self.config)
+        self.config = st.TrainingConfig()
+        self.lobes = st._saddle_lobe_admissions(
+            SADDLE_BAND, self.config, eta_max=SADDLE_ETA_MAX)
         self.assertEqual(len(self.lobes), 2)
 
     def _admits(self, lobe: 'st._SaddleLobeAdmission',
@@ -2719,7 +2720,7 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
         config = st.TrainingConfig()
         reach = surrogate._caustic_reach(INTERIOR_GAMMA_MID)
         admission = st._interior_admission(
-            INTERIOR_BAND, 1, reach, config)
+            INTERIOR_BAND, 1, reach, config, eta_max=ETA_MAX)
         inradius, _enc = st._caustic_inradius(
             INTERIOR_GAMMA_MID, 1, config.n_caustic_samples)
         isotropic = dataclasses.replace(
@@ -2741,9 +2742,8 @@ class SelfFalsificationTestCase(ExteriorWindowsTestCase):
         # Reachable-red (Spec 9): if the per-lobe winding membership test were
         # broken (always reads 0), a lobe would refuse even its OWN centroid --
         # the topological interior test is load-bearing.
-        config = dataclasses.replace(
-            st.TrainingConfig(), eta_max=SADDLE_ETA_MAX)
-        lobes = st._saddle_lobe_admissions(SADDLE_BAND, config)
+        config = st.TrainingConfig()
+        lobes = st._saddle_lobe_admissions(SADDLE_BAND, config, eta_max=SADDLE_ETA_MAX)
         lobe_a = lobes[0]
         center = _lobe_local(lobe_a, lobe_a.centroid)
         self.assertTrue(lobe_a.admits(center, (1e-9, 1e-9)))
