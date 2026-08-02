@@ -132,3 +132,21 @@
   to an explicit function arg), verify ALL callers across ALL suites, not
   just the directly-touched test file — a gate-contract swap can break
   every sibling suite that passed args via the old config field.
+- SHARED-PHASE-HELPER CONVENTION: when two code sites demodulate/
+  remodulate with the SAME phase function (e.g. `_frame_phase(w, t_min)`),
+  both must import and use the SHARED helper — one side using np.exp
+  inline while the other calls the helper is a convention violation even
+  if libm handles the large-argument range-reduction correctly. Flag as a
+  finding (non-blocking if functionally safe), require import+use of the
+  shared helper on both sides (INS-12-001 pattern).
+- EXCEPTION COVERAGE AT DEGENERATE INPUTS: when an except clause names
+  ValueError+LensDomainError for a caustic-geometry call, audit whether
+  degenerate parameter values (e.g. gamma=0 for caustic_rho) can raise
+  ZeroDivisionError instead — LensDomainError IS-A ValueError but
+  ZeroDivisionError is NOT; a missing ZeroDivisionError catch is a latent
+  production crash at the gamma=0 boundary (INS-11-001 pattern).
+- CHART COVERAGE CONTRACT: a `covers(gamma, rho)` gate that checks only
+  2 axes but not the w-axis is correct IFF the chart's w-band coverage is
+  a training-driver-responsibility contract (chart built to span the full
+  w band). Flag if the contract is only implicit; it is not a production
+  bug but a design fragility to document.

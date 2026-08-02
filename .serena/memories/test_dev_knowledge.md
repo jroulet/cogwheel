@@ -179,3 +179,22 @@
 - Phase-loss: np.exp(1j*x) range-reduces accurately — float64 loss lives in
   the w*tau MULTIPLICATION; demos need irrational-scaled factors or synthetic
   inputs checked vs an independent oracle.
+- GATE ORTHOGONALITY WITNESS: to prove two guards are NOT subsumed by each
+  other, find a config where one fires and the other does NOT. For the ghost
+  decay/separation pair this requires SADDLE parity (gamma>1): at positive
+  parity (gamma<1), Im(tau_c)>=0.4 physically implies separation>=1.2
+  (exhaustive scan), so no positive-parity config can pass the decay gate
+  while failing the separation gate. The orthogonality witness must use a
+  saddle-parity config (e.g. gamma=5.0). The gate function itself need not be
+  parity-aware; the constraint is on the fixture.
+- PROTECTIVE REFUSAL TEST PATTERN: to certify a gate that subtracts a
+  term is genuinely protective (never makes things worse when admitted):
+  build the full partition for a REFUSED config, bypass the gate to
+  force-compute the subtracted term, and assert mean|residual_with_term|
+  > mean|residual_without_term| — the gate refuses exactly the configs
+  where the subtraction worsens the result.
+- FREQUENCY-INDEPENDENT GATE SKEW TEST: to prove a gate cannot skew
+  between train and serve, show the gate function contains no w: test
+  that both a train-time w-grid and a serve-time w-grid give the SAME
+  admit/refuse decision for the SAME geometric config; optionally confirm
+  ghost values are bit-identical on shared w-points.

@@ -219,3 +219,9 @@
   certificates for production accuracy bars — only node-exact round-trips
   and physical off-grid witnesses with matching chart coverage are valid
   certificates.
+- SIMPLENS ADAPTER PATTERN: when a serve path needs to call a helper that
+  expects a rich partition-like namespace (with source/gamma/matrix etc.)
+  but the available object (e.g. a geom struct) lacks those fields, wrap it
+  in a `types.SimpleNamespace` with the required fields explicitly set —
+  do NOT add those fields to the geom object itself. Document which fields
+  the helper reads so the adapter is an exhaustive contract, not a guess.

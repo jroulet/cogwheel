@@ -41,3 +41,13 @@
 - For stale-comment fixes (e.g. a literal count in a comment after a
   constant was reduced), a single `replace_content` call is sufficient —
   no structural changes needed; verify via read-only check before and after.
+- TWO-GATE CORRELATION near cusps: near-axis/near-cusp configs have Im(tau_c)
+  → 0 AND image separation → 0 simultaneously — the two guards are physically
+  correlated. Isolating `_GHOST_SEPARATION_MIN` reachability tests requires
+  patching BOTH `_GHOST_DECAY_IM_THRESHOLD` AND `_GHOST_SEPARATION_MIN` to
+  zero; patching only the separation constant leaves the decay gate blocking.
+- ADMIT CONFIG CRITERION: a valid ghost-ADMIT fixture must satisfy all three:
+  (1) decay gate passes, (2) separation gate passes, AND (3) ghost subtraction
+  actually helps (resid(MINUS_GHOST) <= resid(KERNEL_SUM) — the DoNothing
+  check). A config passing both gates can still have counterproductive ghost
+  subtraction — verify criterion 3 empirically when selecting ADMIT fixtures.

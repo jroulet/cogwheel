@@ -220,3 +220,19 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   default f_max=0.40 design point is still correct and must be passed as an
   explicit kwarg. This is a pure call-interface refactor — no change to the
   underlying admission geometry.
+- BornResidualChart serve path (Build born-residual-wiring, 2026-08-01,
+  PASS): `likelihood._surrogate_coefficients` fact-4 slot wiring verified:
+  kappa/beta guards fire before the Born slot (physics-mandatory — chart
+  trained on kappa=0, beta=0 surface); rho>1.0 guard is correct (interior
+  rho<1 has 4-image topology, Born carrier formula does not apply);
+  reconstruction algebra `(f_total - ppgo) * exp(1j*w*t_min)` demodulates,
+  `reconstruct_farfield` re-modulates via `_frame_phase` — round-trip
+  cancels to machine precision (tested 1e-13). `covers(gamma, rho)` checks
+  only (gamma, rho) axes — w-band coverage is a training-driver-
+  responsibility contract. INS-12-001 (MINOR): producer side uses
+  np.exp(1j*w*t_min) inline instead of `_frame_phase` — functionally safe
+  (libm handles large arguments), convention violation only.
+- `caustic_rho(gamma, source)` raises ZeroDivisionError at gamma=0 (not
+  ValueError or LensDomainError) — existing except clauses in
+  `_surrogate_coefficients` that catch ValueError/LensDomainError will miss
+  this; add explicit ZeroDivisionError to the except clause (INS-11-001).

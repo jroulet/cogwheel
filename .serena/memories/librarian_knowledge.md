@@ -126,3 +126,9 @@
 - `sync_derived_docs.py` reporting "some issues auto-fixed" with no actual
   git diff is likely an internal state flush (a no-op) — trust `git diff`
   as the source of truth, not the script's exit message.
+- SPEC STATUS SENTENCES STALE SILENTLY: a sentence like "X is STILL NOT
+  wired/done" goes stale the moment X gets wired/done in code, with no
+  automatic doc update. On every doc sync pass, scan for status-
+  description sentences (patterns: "not yet", "STILL NOT", "remains
+  unwired", "currently disabled") and verify each against the actual code
+  before deciding whether to flip or preserve it.
