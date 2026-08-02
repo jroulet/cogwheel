@@ -2519,6 +2519,26 @@ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
     """
     log_w_grid = _log_w_grid(w_range, config.w_nodes_per_decade)
     w_grid = np.exp(log_w_grid)
+    # --- Eta-axis uniformizing coordinate: u = sqrt(eta) ---
+    # The Airy fold's uniformizing control is xi = (3 w DeltaTau / 4)^{2/3}.
+    # At fixed eta (caustic distance), xi ~ eta^{3/2} * w^{2/3}: the
+    # demodulated envelope (carrier removed) is smooth in xi because the
+    # Airy function's oscillatory/decay structure is parameterized by xi.
+    #
+    # Since the tube chart splines over MULTIPLE w values on a separate log-w
+    # axis, the eta axis must use a w-INDEPENDENT projection of xi.  The
+    # correct choice is u = sqrt(eta): the fold's singular sqrt-branch
+    # (magnification ~ 1/sqrt(eta)) is smooth in u, and u^2 = eta linearizes
+    # the Airy transition region.  Concretely, the envelope's dependence on
+    # eta enters through DeltaTau ~ eta^{3/2}, giving xi ~ (w * eta^{3/2})^{2/3}
+    # = w^{2/3} * eta; at fixed w, xi is linear in eta = u^2, so uniform-in-u
+    # places nodes quadratically in eta -- denser near the caustic (small eta)
+    # where the Airy fringe structure varies fastest.
+    #
+    # Near CUSPS this breaks: the Pearcey catastrophe's control (x, y) takes
+    # over and u = sqrt(eta) is no longer the correct uniformizing coordinate.
+    # The cusp-window exclusion (cusp_windows on the chart) handles this by
+    # excising theta intervals where the Pearcey regime dominates.
     u_grid = np.linspace(np.sqrt(eta_floor), np.sqrt(eta_max),
                          config.n_u)
 
