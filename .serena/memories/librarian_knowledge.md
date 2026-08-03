@@ -138,3 +138,10 @@
   no changes to the `cogwheel/` public API. Doc surfaces (SPEC, DATA_CONTRACTS,
   overview.rst) are only affected when scripts introduce disk-persisted
   formats or new public symbols.
+- "DO NOT CLOSE BY LOWERING" ADVISORY UPDATE RULE: when a TODO fragment
+  contains an explicit advisory such as "Do NOT close this by lowering
+  `min_gamma_band`", and a build deliberately does that lowering, the
+  advisory wording must be updated (not just the value). The TODO stays
+  OPEN if other conditions remain (e.g. mass measurement, treatment
+  decision). Update the advisory from "do not close by lowering" to reflect
+  the new state, and note why the TODO remains open.

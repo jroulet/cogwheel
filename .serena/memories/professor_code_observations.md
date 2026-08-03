@@ -270,6 +270,9 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   ValueError or LensDomainError) — existing except clauses in
   `_surrogate_coefficients` that catch ValueError/LensDomainError will miss
   this; add explicit ZeroDivisionError to the except clause (INS-11-001).
+- `retired_concepts.json` (2026-08-03): currently 4 entries — _WEDGE_EPS,
+  _PROBE_ETA, _CLOUD_MARGIN_FRAC, _CUSP_SPEED_REL_FRAC. MISSING: 'annulus'/
+  'ANNULUS_INNER_RADIUS' (per spec diagnostic). Coverage gap; deferred.
 - `_eps_for` in `_reprovision_w_nodes` (surrogate_training.py): when a tile
   straddles a carrier-basin flip, `_build_farfield_chart` raises
   CarrierDiscontinuityError — the probe cannot meaningfully measure

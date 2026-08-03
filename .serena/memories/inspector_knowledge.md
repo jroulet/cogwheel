@@ -212,3 +212,12 @@
   brief's r_min for conservative bounding), document as an approved deviation in
   the review findings, not as a code defect. Explicitly note "correct deviation
   from the brief" so future reviewers don't revert it.
+- BRIEF ACCEPTANCE CRITERION GAP (INS-1-001 pattern): when a brief's stated
+  acceptance metric (e.g. "dropped fraction < 1e-3") is NOT achieved by the
+  implementation, distinguish between a code defect and a brief estimation
+  error — if the code correctly implements what was asked (e.g. reduce
+  threshold to 0.005) and the residual drops are genuine physics (real
+  topology boundaries narrower than min_width), classify as a brief
+  estimation error, not an implementation defect. Carry forward as a
+  non-blocking open issue with a note; do NOT demand the code be changed to
+  match an aspirational metric that the physics does not allow.

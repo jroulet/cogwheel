@@ -1,1 +1,3 @@
-Last build: WP1 min_gamma_band threshold 0.02→0.005. Created test_lensing_min_gamma_band.py (9 tests, 3 classes, 18s). Key finding: positive-parity drops (0,0.0039) width=0.0039 even at 0.005; negative drops (1.0057,1.0104) width=0.0047. Spec's "empty dropped" claim was wrong — adjusted to "fewer dropped than at old threshold" + "all dropped < min_width". Backward-compat audit: all existing F041 tests pass min_width explicitly (=0.02) — no breakage. No production edits.
+# Test Dev Short-Term Observations
+
+(empty — last consolidated by Dreamer on 2026-08-03)
