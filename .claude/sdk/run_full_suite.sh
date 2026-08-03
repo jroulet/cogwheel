@@ -59,9 +59,11 @@ then
   exit 2
 fi
 
-# 2. Parallel pass. -v so progress is countable; loadfile so same-file tests
+# 2. Parallel pass. -v so progress is countable; loadscope so same-scope tests
 #    share a worker (module-scope fixtures and the numba cache).
-"$PYBIN" -m pytest cogwheel/tests/ -v -n 8 --dist loadfile \
+#    -n 4 (not 8): 8 workers hit OOM during numba JIT compilation, crashing
+#    xdist with INTERNALERROR/MemoryError (diagnosed 2026-08-03 in tree_gate.log).
+"$PYBIN" -m pytest cogwheel/tests/ -v -n 4 --dist loadscope \
   -k "not Timing and not timing" > "$LOG" 2>&1 &
 PYTEST_PID=$!
 

@@ -4055,53 +4055,77 @@ class BuildOrchestrator:
         8e refusal pins passed a zero-finding Inspector, failed the
         tree gate). Runs the gated fast suite and blocks the commit on
         any red. Skippable via SDK_SKIP_TREE_GATE=1.
+
+        Resilience: if xdist crashes (INTERNALERROR — a recurring infra
+        issue with worker OOM during numba JIT), retries once at -n 2.
+        If that also crashes, falls back to serial (no xdist).  A gate
+        crash is NOT a code failure; treating it as one blocks every
+        build on an infra flake.
         """
         if os.environ.get("SDK_SKIP_TREE_GATE"):
             self._log("  Tree gate SKIPPED (SDK_SKIP_TREE_GATE)")
             return
-        # STREAM to a file rather than capturing silently: this gate is an
-        # embarrassingly parallel pytest run that has taken 45+ minutes when
-        # a build ships a heavy acceptance test, and `capture_output=True`
-        # made it a total black box for its whole runtime — no way to answer
-        # "how far along is it?" without py-spy forensics. pytest -q emits
-        # "[ NN%]" progress, so a tailable log turns the gate into something
-        # the driver can actually monitor (owner-requested 2026-07-27).
         gate_log = Path(self.project_root) / ".claude/sdk/logs/tree_gate.log"
         self._log(f"  Tree-wide fast gate (commit precondition) — progress: "
                   f"tail -f {gate_log}")
         runner = str(Path(self.project_root) / ".claude/sdk/run_py.sh")
-        try:
-            gate_log.parent.mkdir(parents=True, exist_ok=True)
-            stream = open(gate_log, "w", encoding="utf-8", buffering=1)
-        except OSError:
-            stream = None
-        try:
-            if stream is not None:
-                proc = subprocess.run(
-                    [runner, "-m", "pytest", "cogwheel/tests/", "-q",
-                     "-p", "no:cacheprovider", "-n", "8", "--dist", "loadfile",
-                     "-k", "not Timing and not timing"],
-                    stdout=stream, stderr=subprocess.STDOUT, text=True,
-                    cwd=self.project_root, timeout=3600)
-                stdout_txt = gate_log.read_text(encoding="utf-8", errors="replace")
-            else:
-                proc = subprocess.run(
-                    [runner, "-m", "pytest", "cogwheel/tests/", "-q",
-                     "-p", "no:cacheprovider", "-n", "8", "--dist", "loadfile",
-                     "-k", "not Timing and not timing"],
-                    capture_output=True, text=True, cwd=self.project_root,
-                    timeout=3600)
-                stdout_txt = proc.stdout or ""
-        finally:
-            if stream is not None:
-                stream.close()
-        tail_txt = chr(10).join(stdout_txt.splitlines()[-25:])
-        if proc.returncode != 0:
+
+        # Tiered parallelism: try -n 4 first, then -n 2, then serial.
+        tiers = [
+            ["-n", "4", "--dist", "loadscope"],
+            ["-n", "2", "--dist", "loadscope"],
+            [],  # serial fallback
+        ]
+        base_cmd = [runner, "-m", "pytest", "cogwheel/tests/", "-q",
+                    "-p", "no:cacheprovider",
+                    "-k", "not Timing and not timing"]
+
+        for tier_idx, xdist_args in enumerate(tiers):
+            cmd = base_cmd + xdist_args
+            try:
+                gate_log.parent.mkdir(parents=True, exist_ok=True)
+                stream = open(gate_log, "w", encoding="utf-8", buffering=1)
+            except OSError:
+                stream = None
+            try:
+                if stream is not None:
+                    proc = subprocess.run(
+                        cmd, stdout=stream, stderr=subprocess.STDOUT,
+                        text=True, cwd=self.project_root, timeout=3600)
+                    stdout_txt = gate_log.read_text(
+                        encoding="utf-8", errors="replace")
+                else:
+                    proc = subprocess.run(
+                        cmd, capture_output=True, text=True,
+                        cwd=self.project_root, timeout=3600)
+                    stdout_txt = proc.stdout or ""
+            finally:
+                if stream is not None:
+                    stream.close()
+
+            # Detect xdist infra crash (INTERNALERROR) vs real test failure.
+            is_infra_crash = ("INTERNALERROR" in stdout_txt
+                             or "worker_workerfinished" in stdout_txt
+                             or "node down" in stdout_txt)
+
+            if proc.returncode == 0:
+                last = stdout_txt.splitlines()[-1] if stdout_txt else ''
+                tier_label = f"-n {xdist_args[1]}" if xdist_args else "serial"
+                self._log(f'  Tree gate green ({tier_label}): {last}')
+                return
+
+            if is_infra_crash and tier_idx < len(tiers) - 1:
+                next_label = (f"-n {tiers[tier_idx+1][1]}"
+                              if tiers[tier_idx+1] else "serial")
+                self._log(f"  Tree gate xdist crash (tier {tier_idx}) — "
+                          f"retrying at {next_label}")
+                continue
+
+            # Real failure or final tier exhausted.
+            tail_txt = chr(10).join(stdout_txt.splitlines()[-25:])
             raise GateFailure(
                 'Tree-wide fast gate RED -- commit blocked. Tail:' + chr(10)
                 + tail_txt)
-        last = tail_txt.splitlines()[-1] if tail_txt else ''
-        self._log(f'  Tree gate green: {last}')
 
     def _snapshot_worktree_baseline(self) -> dict:
         """Record what was already dirty before the build touched anything.
