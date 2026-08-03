@@ -41,6 +41,18 @@ for _bindir in "$HOME/.opencode/bin" "$HOME/.local/bin"; do
   [[ -d "$_bindir" ]] && [[ ":$PATH:" != *":$_bindir:"* ]] && export PATH="$_bindir:$PATH"
 done
 
+# OpenCode session and auth from .env (same precedence: shell > .env > default).
+# OPENCODE_SESSION_ID is REQUIRED for the callback sidecar to know where to
+# inject the terminal event. Without it, builds complete silently.
+if [[ "$AGENT_PROVIDER" == "opencode" && -f "$REPO_ROOT/.env" ]]; then
+  for _VAR in OPENCODE_SESSION_ID OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD OPENCODE_SERVE_PORT; do
+    if [[ -z "$(eval echo "\${$_VAR:-}")" ]]; then
+      _VAL="$(grep -E "^$_VAR=" "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+      [[ -n "$_VAL" ]] && export "$_VAR=$_VAL"
+    fi
+  done
+fi
+
 # Auto-start opencode serve if needed for callbacks. The serve API is how the
 # resume driver injects messages that trigger agent turns. Without it, builds
 # complete but can't notify the interactive driver.
