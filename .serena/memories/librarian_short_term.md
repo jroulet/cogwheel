@@ -1,54 +1,45 @@
 # Librarian Short-Term Observations
 
-## Run: 2026-08-03 — post-commit audit after "docs+tidy: post-commit sync (DD ceiling + arc-length axis)" (d17f42e)
+## Run: 2026-08-03 — post-commit audit for commits d17f42e and 2e291bc
 
 ### Scope
 
-sync_issues.json covered commit d17f42e: a "docs+tidy" commit that contained:
-- `cogwheel/lensing/surrogate.py`: 3-line tidy fix (inline `_ARC_MAP_NODES = 2001` deduplicated
-  to module-level `_FARFIELD_ARC_MAP_SIZE`). No public API change, no new behavior.
-- `cogwheel/tests/test_lensing_wedge_dd_arclength.py`: 12-line tidy fix (inline import hoisting).
-  Test-only → skipped per triage rule.
-- `.claude/spec/contracts_changelog.d/2026-08-03_interior_wedge_dd_ceiling_arclength.md`: NEW fragment
-  added (bump: patch). This was NOT accompanied by a re-render of `DATA_CONTRACTS_CHANGELOG.md`
-  in that commit.
-- `CHANGELOG.md`: already rendered in the commit itself.
+sync_issues.json (which contained d17f42e + 2e291bc) was already DELETED by the
+prior librarian run (commit 11b4804: "docs: post-commit sync (render DATA_CONTRACTS_CHANGELOG
+after fragment addition)"). The current invocation found no sync_issues.json on disk.
 
 ### What was stale
 
-**DATA_CONTRACTS_CHANGELOG.md** — the new contracts_changelog fragment
-`2026-08-03_interior_wedge_dd_ceiling_arclength.md` was not rendered into
-`DATA_CONTRACTS_CHANGELOG.md`. Ran `render_fragments.py` to add it as version `0.2.2`
-(alphabetically between `interior_wedge_chart` and `wedge_dd_arclength_contracts`).
-The existing `0.2.2` became `0.2.3` (re-numbering is the known rendering quirk,
-not a bug to fix).
-
-### What was NOT stale (verified)
-
-- `docs/source/overview.rst` / `api.rst` / `crash_course.rst`: no public API change from tidy fix.
-- SPEC.md "Certified by" line: already updated in prior post-commit run (283d435).
-- `sync_derived_docs.py` consumer-graph warnings: pre-existing test-file-only callers,
-  excluded by convention (stay off in DATA_CONTRACTS.yaml consumer lists).
-- `tidy_advisory.json`: `sync_derived_docs.py` produces a spurious diff here; reverted with
-  `git checkout --`.
+**Nothing.** Both pending commits were resolved:
+- d17f42e: handled by prior librarian run (11b4804). DATA_CONTRACTS_CHANGELOG.md was
+  rendered and committed.
+- 2e291bc (fix(sdk): xdist tree-gate resilience): `.claude/sdk/orchestrator.py` +
+  `.claude/sdk/run_full_suite.sh` only — SDK infra, no cogwheel/ code. Zero doc surfaces
+  to update per triage rules.
 
 ### Files changed
 
-- `.claude/spec/DATA_CONTRACTS_CHANGELOG.md` — rendered from new fragment
+None. No commit made (nothing to fix).
+
+### Uncommitted librarian.json
+
+`.claude/agent_state/librarian.json` is dirty in the working tree: the prior librarian
+run updated `last_commit` from 283d435 to 11b4804 but did not include this file in
+commit 11b4804. Left uncommitted here too (no doc changes = no commit). Next librarian
+run that DOES fix something should include this file in its commit to keep state current.
 
 ### Pattern identified
 
-A "docs+tidy" commit that adds a `contracts_changelog.d/` fragment may NOT include the
-rendered `DATA_CONTRACTS_CHANGELOG.md` if rendering was missed. Always check whether
-`render_fragments.py` output matches the fragment count in `contracts_changelog.d/`.
-The quick check: `grep -c "^- \`0\." DATA_CONTRACTS_CHANGELOG.md` should equal the number
-of fragments in `contracts_changelog.d/`.
+When a sync_issues.json has N commits and the prior librarian run processes all doc-
+relevant ones, it deletes the ENTIRE file. If an SDK-only commit appears in the same
+queue, it rides along silently (correctly — no action needed). The next librarian
+invocation finds no sync_issues.json and confirms via triage that no action was needed.
 
 ### Fragile cross-references (continued from prior run)
 
 - `_DD_PRODUCT_MARGIN = 58.0` duplicated in surrogate.py and surrogate_training.py —
   a value change needs both files AND the w-ceiling description in SPEC.md and DATA_CONTRACTS.
-- `_FARFIELD_ARC_MAP_SIZE` now used as arc-length map size for wedge tiles too
-  (the tidy fix that motivated this run) — if renamed, the wedge arc-map resolution changes silently.
+- `_FARFIELD_ARC_MAP_SIZE` now used as arc-length map size for wedge tiles too —
+  if renamed, the wedge arc-map resolution changes silently.
 - `lensing_remaining_coverage_gaps.md` items 1 and 2 remain open `[→ spec]` —
   watch commits touching ppGO paths or `from_wedge_engine` w-ceiling serving logic.
