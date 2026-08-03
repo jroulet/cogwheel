@@ -51,3 +51,18 @@
   actually helps (resid(MINUS_GHOST) <= resid(KERNEL_SUM) — the DoNothing
   check). A config passing both gates can still have counterproductive ghost
   subtraction — verify criterion 3 empirically when selecting ADMIT fixtures.
+- XDIST TREE-GATE CRASH (recurring infra, NOT code): pytest-xdist workers
+  can crash with an `AssertionError: worker_workerfinished` during parallel
+  test collection/distribution. This is a known xdist race condition when
+  workers die during tree-gating. Symptoms: random test abort mid-suite,
+  non-reproducible, usually on larger test files. Mitigation: re-run the
+  failing suite without -n (serial); if it passes serial, it's this bug.
+  Not a code defect — do not chase.
+- SIDECAR CALLBACK SILENT DEATH (>1hr builds): the sidecar callback (used
+  for build progress/heartbeat monitoring) dies silently on builds exceeding
+  ~1 hour. Cause unknown — possibly a timeout/keepalive expiry in the
+  callback transport. Symptoms: build continues to completion but no
+  progress updates after the ~1hr mark; final result IS returned. Not a
+  correctness issue (build output unaffected) but a monitoring gap. No fix
+  landed; workaround: check build logs directly for long builds rather than
+  relying on callback heartbeats.

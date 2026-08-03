@@ -150,3 +150,27 @@
   a training-driver-responsibility contract (chart built to span the full
   w band). Flag if the contract is only implicit; it is not a production
   bug but a design fragility to document.
+- InteriorWedgeChart REVIEW CHECKLIST (Build interior_wedge_chart, 40 tests
+  PASS): (1) Coordinate math: D2 fold abs(y1),abs(y2) -> theta=atan2 is
+  correct quotient. Round-trip residual < 1e-15. (2) Axis ordering:
+  coefficients (log_w, gamma, r, theta_wedge) contract consistently.
+  (3) NPZ persistence: all 14 fields round-trip bitwise (max|diff|=0.0).
+  (4) select_chart dispatch: wedge is lowest priority (tube>farfield>lobe>
+  wedge). (5) Duck typing: chart.log_w_grid/gamma_grid used by census
+  _chart_log_w_range, _chart_index, _is_band_edge, heldout_envelope_eps —
+  all present on InteriorWedgeChart. (6) Validator:
+  _validate_wedge_caustic_map checks gamma equality, theta span [0,pi/2],
+  finite positive r_table. (7) OPEN: DATA_CONTRACTS.yaml + SPEC.md do NOT
+  describe InteriorWedgeChart (Librarian scope).
+- FOLD-ppGO MOCK PATTERN (INS-c8-001): when production replaces
+  `geometric_amplification` with `fold_ppgo_correction` via a DEFERRED
+  import, existing test mocks on geometric_amplification miss the new path.
+  Fix: additionally patch `_airy_fold_module.fold_ppgo_correction` (the
+  MODULE OBJECT, not the string) so the deferred import picks up the stub.
+  Pattern: `mock.patch.object(_airy_fold_module, 'fold_ppgo_correction',
+  _stub)`.
+- INTERIOR TRAINING CONFIG WIRING: `_subdivide_farfield_tile` must mirror
+  the main tiler's eff_w_nodes 3-way logic (tile override -> interior uses
+  config.interior_w_nodes_per_decade -> else config.w_nodes_per_decade).
+  A stale ternary in the subdivision path is a recurring bug pattern
+  (INS-2-001).

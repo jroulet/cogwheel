@@ -1,57 +1,48 @@
 # Librarian Short-Term Observations
 
-## Run: 2026-08-03 — post-commit audit after InteriorWedgeChart
+## Run: 2026-08-03 — post-commit audit after lensing_remaining_coverage_gaps TODO filing
 
 ### Scope
 
-sync_issues.json covered commit ff06b8a: `InteriorWedgeChart` class (812
-insertions into surrogate.py), new test file (skipped), binary npz update,
-agent-state and memory files (agent-only, skipped).
+sync_issues.json covered commit 7dbae47: "spec: file remaining coverage gap TODOs".
+Changed files: `.claude/spec/TODO.md` (regenerated) and
+`.claude/spec/todo.d/lensing_remaining_coverage_gaps.md` (new fragment).
 
-### What went stale and why
+### Outcome: no-op — all surfaces clean
 
-**SPEC.md row 55 (surrogate chart collection)** — the surrogate section listed
-three chart types: TubeChart, FarFieldChart, LobeInteriorChart. A fourth type,
-`InteriorWedgeChart` (positive-parity astroid interior), was added in this
-commit but not mentioned. Pattern: a new class added to surrogate.py that
-covers a previously un-charted region (astroid interior, gamma < 1) creates a
-new SPEC row entry. The flag is "new public class that's not in SPEC's chart
-collection list" — scan symbols_overview for new Classes whenever surrogate.py
-has large insertions.
+The commit added five new TODO items to the backlog:
+- Far-field d-axis normalization by curvature radius `[→ spec]`
+- ppGO handoff above chart w-ceiling for interior draws `[→ spec]`
+- ppGO interior certification fix `[research]`
+- Sidecar callback silent death `[housekeeping]`
+- xdist tree-gate infra fix `[housekeeping]`
 
-**DATA_CONTRACTS.yaml lens_amplification_surrogate** — the description
-ended with LobeInteriorChart axis-schema tags but did not mention
-`InteriorWedgeChart`'s `axis_schema='wedge_caustic_relative_v1'`
-(`_WEDGE_AXIS_SCHEMA`). Pattern: whenever a new chart class is added with a new
-axis_schema constant, the DATA_CONTRACTS.yaml description needs a matching
-entry for the record format, fields, and tag semantics.
+None of these items were **completed** — they were only **added**. The
+`[→ spec]` tag means SPEC.md updates are required when these items are
+finished, not when they are filed. No cogwheel/*.py code changed; no
+SPEC.md changed; no API signatures changed; no disk artifacts added.
 
-### Surfaces checked and found clean
+Triage conclusion: zero downstream doc surfaces are stale. No doc fixes,
+no commit. Trigger file deleted.
 
-- overview.rst: no chart implementation names cited; no update needed.
-- api.rst: no new top-level cogwheel module/subpackage; `:recursive:` autosummary
-  covers lensing subpackage without manual entry.
-- DATA_CONTRACTS.yaml `certified_ppgo_map`: already has a complete entry (binary
-  npz changed but schema/description unchanged — just retraining result).
-- todo.d fragments: lensing_coverage_map.md region 1 still correctly OPEN (the
-  chart type exists but training quality at high-gamma crown band is unmeasured).
-  No todo fragment to close.
-- sync_derived_docs.py: "5 checks run, some issues auto-fixed" with no actual
-  git diff → no-op per institutional memory rule. Consumer-graph warnings about
-  test-file callers of lens_amplification_surrogate: skipped per convention
-  (test-only callers stay off the consumer list).
-- `.claude/tidy_advisory.json` untracked: stray artifact from render_fragments.py,
-  NOT committed per institutional memory.
+### Pattern identified
 
-### Fragile cross-references to watch next run
+TODO-only commits (adding fragments, regenerating TODO.md) are the most
+common no-op post-commit trigger. The triage shortcut: if changed_files
+contains ONLY `.claude/spec/TODO.md` + `.claude/spec/todo.d/*.md` (and no
+code, SPEC.md, or `completed.d/` files), the answer is always no-op — the
+`[→ spec]`/`[→ docs]` tags only fire on completion, not filing.
 
-- `_WEDGE_AXIS_SCHEMA = 'wedge_caustic_relative_v1'` is now cited in both
-  SPEC.md and DATA_CONTRACTS.yaml. If this constant is renamed in code, both
-  doc surfaces need simultaneous updating.
-- `_WedgeCausticMap` is cited in SPEC.md. If renamed or removed, SPEC.md goes
-  stale silently.
-- lensing_coverage_map.md region 1 stays "OPEN at the high-gamma CROWN band"
-  until a training run actually measures eps at that band.
-- The InteriorWedgeChart certification test is `test_lensing_interior_wedge_chart.py`
-  (1400 lines). If the test file is renamed, the SPEC.md CERTIFIED BY citation
-  goes stale.
+### Fragile cross-references carried forward from last run
+
+- `_WEDGE_AXIS_SCHEMA = 'wedge_caustic_relative_v1'` cited in SPEC.md +
+  DATA_CONTRACTS.yaml — rename in code requires both doc updates.
+- `_WedgeCausticMap` cited in SPEC.md — rename/removal goes stale silently.
+- lensing_coverage_map.md region 1 remains OPEN (high-gamma crown band
+  measurement not yet done).
+- `test_lensing_interior_wedge_chart.py` cited in SPEC.md — rename breaks
+  the CERTIFIED BY citation.
+- New fragile ref: once the `[→ spec]` items above are completed, SPEC.md
+  will need d-axis normalization and ppGO-handoff architecture described.
+  Watch for commits touching `FarFieldChart`, `InteriorWedgeChart`, or
+  `fold_ppgo_correction` as triggers.

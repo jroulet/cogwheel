@@ -119,6 +119,13 @@ _REFUSAL_ERRORS = (LensDomainError, SchwingerCertificationError)
 _DEFAULT_W_NODES_PER_DECADE = 15
 _DEFAULT_PARAM_NODES = 7
 
+# Maximum dimensionless-delay product ``w * |y|`` the Chang-Refsdal engine
+# evaluates without refusing.  Training grids cap ``w_max`` so no node
+# exceeds this.  Matches surrogate_training._DD_PRODUCT_MARGIN; duplicated
+# because surrogate.py is the lower module.
+_DD_PRODUCT_MARGIN = 58.0
+
+
 # Source-plane cusp angles of the astroid caustic (eigenframe polar angle
 # ``theta_c``, radians).  Closed form and gamma-INDEPENDENT: only the cusp
 # MAGNITUDE (reach) scales with the external shear ``gamma``, not the angle
@@ -3743,8 +3750,7 @@ class LensAmplificationSurrogate:
             If the tile straddles a critical-basin flip
             (`_assert_carrier_continuity`); the tile must be subdivided.
         """
-        # --- Build training grids ---
-        log_w_grid = _log_w_grid(w_range, w_nodes_per_decade)
+        # --- Build parameter grids ---
         gamma_grid = _log_reach_gamma_axis(gamma_range, n_gamma, 'gamma')
         r_grid = _uniform_axis(r_range, n_r, 'r')
         theta_wedge_grid = _uniform_axis(theta_wedge_range, n_theta_wedge,
@@ -3760,6 +3766,36 @@ class LensAmplificationSurrogate:
         wedge_map = _WedgeCausticMap(gamma_nodes=gamma_grid,
                                      theta_nodes=map_theta_nodes,
                                      r_table=r_table)
+
+        # --- Apply DD-product w-ceiling (feature 1) ---
+        # The constraint w * |y| <= _DD_PRODUCT_MARGIN with |y| = r * reach
+        # is tightest at the largest r in the grid.  Cap the global w_max
+        # so no training node violates the engine's DD ceiling.
+        theta_mask = ((wedge_map.theta_nodes >= theta_wedge_range[0])
+                      & (wedge_map.theta_nodes <= theta_wedge_range[1]))
+        reach_max = float(wedge_map.r_table[:, theta_mask].max())
+        dd_w_cap = _DD_PRODUCT_MARGIN / (float(r_grid[-1]) * reach_max)
+        w_range = (w_range[0], min(w_range[1], dd_w_cap))
+
+        # --- Build log-w grid (AFTER the DD cap) ---
+        log_w_grid = _log_w_grid(w_range, w_nodes_per_decade)
+
+        # --- Build caustic arc-length map (feature 2) ---
+        # Use median gamma as the representative for the arc-length
+        # parametrisation (adequate for typical narrow-gamma tiles).
+        rep_gamma = float(np.median(gamma_grid))
+        _ARC_MAP_NODES = 2001  # Same density as _FARFIELD_ARC_MAP_SIZE.
+        arc_theta_fine = np.linspace(
+            float(theta_wedge_range[0]), float(theta_wedge_range[1]),
+            _ARC_MAP_NODES)
+        arc_speed = np.asarray(
+            geometry.caustic_speed(rep_gamma, arc_theta_fine, branch=1),
+            dtype=float)
+        arc_s_fine = cumulative_trapezoid(arc_speed, arc_theta_fine,
+                                          initial=0.0)
+        theta_to_s = np.vstack([arc_theta_fine, arc_s_fine])
+        # s-coordinate nodes: images of theta_wedge_grid through the map.
+        s_grid = np.interp(theta_wedge_grid, arc_theta_fine, arc_s_fine)
 
         # --- Allocate storage ---
         w_grid = np.exp(log_w_grid)
@@ -3825,7 +3861,8 @@ class LensAmplificationSurrogate:
             wedge_map=wedge_map,
             eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
             refused_points=refused_points,
-            envelope_definition=definition)
+            envelope_definition=definition,
+            theta_to_s=theta_to_s, s_grid=s_grid)
         provenance = cls._build_wedge_provenance(
             gamma_range, r_range, theta_wedge_range, w_range, shape,
             envelope_real, envelope_imag)

@@ -210,6 +210,46 @@
   raw-theta spline (matches ~5e-15 due to B-spline translation invariance);
   fine for tolerance-based suites but a bit-exact-vs-stored-HEAD assertion
   would drift — document this seam, don't assert bit-identity vs HEAD.
+- INTERIOR WEDGE CHART IMPLEMENTATION (Build interior_wedge_chart): pattern
+  for adding a new chart type to `cogwheel/lensing/surrogate.py`: (1) Add
+  axis schema constant + known-schemas set. (2) Add map dataclass (frozen,
+  holds precomputed tables) + validator. (3) Add _to_fixed / _from_fixed
+  coordinate transforms (must be exact inverses — verify round-trip to
+  ~1e-16). (4) Add chart dataclass (frozen) with `from_*_values` classmethod
+  (fits tensor spline) + `_assemble` classmethod (NPZ load, no re-fit).
+  (5) Add `_*_serves` gate function (cheapest-first gate ordering). (6) Add
+  loop in `select_chart` at appropriate priority. (7) Add branch in
+  `_evaluate_chart`. (8) Update `LensAmplificationSurrogate.__init__`
+  isinstance tuple (EASY TO FORGET — causes ValueError on construction).
+  (9) Add `_chart_to_npz` / `_chart_from_npz` branches. (10) Add
+  `from_*_engine` training entry point. (11) Add provenance builder.
+  The D₂ fold (abs(y1), abs(y2)) is the correct quotient for the astroid
+  caustic symmetry; theta_wedge = atan2(|y2|, |y1|) in [0, pi/2].
+- FOLD-CORRECTED ppGO (Build fold_corrected_ppgo): `fold_ppgo_correction`
+  in `chang_refsdal/_airy_fold.py` replaces raw `geometric_amplification`
+  for degenerate-delay pairs near folds. Design: structural-gates-only (no
+  error-estimate or ETA_MAX gate) — falls back to raw ppGO on any gate miss.
+  Uses LAZY import of `geometric_amplification` from `operator` to break the
+  circular import (_airy_fold is imported by operator at module level).
+  Wiring: (1) `_measure_cell` in ppgo_map.py uses fold_ppgo_correction
+  (deferred import inside the evaluate closure). (2) `born_carrier_from_
+  partition` in channels.py adds an additive fold correction in the
+  above-split non-saddle else-branch, AFTER ppgo_plus_ghost assignment.
+  On any structural refusal the correction is silently skipped (carrier
+  stays byte-identical to uncorrected). Non-finite airy values guarded with
+  np.where(finite_mask, ...).
+- ppGO INTERIOR EXTRAPOLATION (Build ppgo_interior_certification):
+  `_extrapolate_floor` in ppgo_map.py uses power-law error decay
+  (log-log linear fit) to extrapolate the w_floor for interior cells
+  (rho_center < 1.0). Constants: _EXTRAP_MIN_NODES, _EXTRAP_R2_THRESHOLD
+  (0.9), _EXTRAP_MAX_RATIO (5.0), _EXTRAP_W_CERT_DEFLATION, _EXTRAP_N_FIT.
+  Self-falsification: refuses when R-squared < threshold (beat aliasing) or
+  extrapolated ratio > MAX_RATIO (wild extrapolation). Interior cells get
+  a relaxed `floor > w_ceiling` guard (extrapolation can push floor beyond
+  the DD product ceiling). `interior_w_nodes_per_decade` field on
+  TrainingConfig (default 15) wires through _train_band_charts via a 3-way
+  if/elif/else (tile override -> interior -> else config.w_nodes_per_decade).
+  Fixed _subdivide_farfield_tile to use same 3-way pattern.
 - When a new required field changes the semantics of other stored fields
   (e.g. knots now in s vs raw theta after an arc-length reparametrization),
   an identity-map fallback on load is WRONG — old artifacts must hard-refuse

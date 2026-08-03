@@ -203,6 +203,40 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
 - `reconstruct_farfield` lives in `chang_refsdal/channels.py` (7 args incl
   t_min), NOT surrogate.py. `FarFieldChart.from_values` is keyword-only
   with required `arc_map` (_FarFieldArcMap) + gamma_grid/s_grid/d_grid axes.
+- InteriorWedgeChart PHYSICS (Build interior_wedge_chart, reviewed PASS):
+  coordinate system design is correct. `_to_wedge_fixed` exploits D2
+  (dihedral-4) symmetry of the astroid caustic (reflections across both
+  eigenvalue axes). The fold abs(y1),abs(y2) -> atan2(|y2|,|y1|) is the
+  correct D2 quotient. The radial coordinate r = |y|/r_caustic(gamma,theta)
+  normalises by the direction-dependent caustic reach — r<1 equivalent to
+  "inside the caustic" (4-image Chang-Refsdal). Bilinear interpolation of
+  r_caustic at 101 theta nodes x 5 gamma nodes introduces O(h^2) error
+  where h ~ pi/200 ~ 0.016, well below any physical scale. The carrier
+  continuity check correctly implements the "single nearest-caustic basin"
+  requirement: a jump > 50% of local caustic reach signals a basin boundary
+  crossing that would make the demodulated envelope discontinuous. The
+  tensor-product cubic B-spline exactly reproduces training values at grid
+  nodes (verified to machine precision).
+- fold_ppgo_correction PHYSICS: Airy fold correction replaces raw ppGO
+  (geometric_amplification) for DEGENERATE-DELAY image pairs near caustic
+  folds. The correction term = (airy_value - pair_ppgo) * exp(-1j*w*t_min).
+  Structural gates: _merging_fold_pair identifies the degenerate pair,
+  _soft_axis_cubic smooths the fold contribution, _fold_amplitudes computes
+  the Airy approximation. Falls back to raw ppGO on any gate miss (no
+  error-estimate or ETA_MAX gate — DO-NOTHING control design). The
+  correction is significant (4-40%) at w=5..15 where fold divergence
+  dominates; at w>25 diffractive error drops below Airy residual. The
+  xi=0 case (exactly on the fold) returns error_estimate=0.0 (Airy is
+  exact on the fold). Relaxation from `if not (xi > 0.0): return None`
+  to `if xi < 0.0: return None; if xi == 0.0: return 0.0` is physically
+  correct.
+- ppGO INTERIOR CERTIFICATION: envelope extrapolation for power-law error
+  decay in interior cells (rho < 1.0). The physical basis: ppGO error
+  decays as a power law in w (stationary-phase correction terms scale as
+  w^{-n}), so log(error) vs log(w) is approximately linear in the high-w
+  tail. Extrapolation to find the w_floor where error crosses the bar is
+  justified ONLY in the power-law regime (R^2 > 0.9 requirement rejects
+  beat-aliased cells where the power law breaks down).
 - `LobeInteriorChart` sqrt-edge coordinate (Build 1e-lobe): s = sqrt(span)
   - sqrt(theta_max - theta) in surrogate.py; V1 schema has theta_to_s=None
   (identity path); current schema requires theta_to_s key in npz. Round-

@@ -151,6 +151,43 @@
   exact 5.692099788303083, error 2.1e-7) — gate tight tests on the EXACT
   closed form (1e-9); use the SPEC literal only for a loose straddle check
   (1e-6) that the tolerance margin dwarfs the truncation error.
+- InteriorWedgeChart TEST PATTERNS (test_lensing_interior_wedge_chart.py,
+  40 tests, 8 classes): (1) CoordinateRoundTrip: verify _to/_from_wedge_
+  fixed inverse to ~1e-15 AND D2 symmetry (all 4 quadrants identical).
+  (2) NpzRoundTrip: 14 fields max|diff|=0.0 + spline evaluation bitwise.
+  (3) WedgeServesGuard: 1 accept + 8 independent refusal gates. (4)
+  SelectChartDispatch: select returns wedge + _evaluate_chart finite +
+  D2 reflected identical + wrong image_count refuses. (5) Carrier
+  ContinuityGate: smooth passes, jump raises, NaN no false flip, engine
+  tile passes. (6) EnvelopeAccuracy: nodes succeeded count + spline
+  reproduces nodes to 1e-10 + fresh engine matches. KEY FINDINGS:
+  (a) _validate_axis requires >= 4 nodes per axis (2-node grids infeasible).
+  (b) _WedgeCausticMap gamma_nodes MUST equal chart.gamma_grid exactly.
+  (c) envelope_definition tag must be 'interior_sacr_c_envelope' for NPZ
+  round-trip (validated against KNOWN_INTERIOR_DEFINITIONS).
+- fold_ppgo_correction TEST PATTERNS (test_lensing_fold_ppgo_correction.py,
+  23 tests, 7 classes): (1) MonotoneImprovement: use w=5..15 where fold
+  divergence dominates (NOT w>25 where diffractive error < Airy residual).
+  (2) LargeXiNoOp: rho=3.5 triggers structural fallback (b3=0) — test as
+  byte-identical. (3) AxisAngleCorrection: 4-40% oscillation (carrier
+  phase interference). (4) UniformErrorEstimateRelaxation: xi=0 returns
+  0.0 (exact on fold), xi<0 returns None. (5) FallbackIdentity: scalar vs
+  array paths differ by ~1 ULP (5e-17j) due to FP reduction order — assert
+  byte-identity against the ARRAY path (which is what the internal
+  _fallback() computes). (6) Schwinger ceiling at w=60 prevents using
+  ChangRefsdalChannels as oracle for w>=100 near the caustic.
+- ppGO EXTRAPOLATION TEST PATTERNS (test_lensing_extrapolate_floor.py,
+  10+4 tests): spec's geomspace(1,60,24) with bar=1e-4 hits BOTH R² guard
+  and MAX_RATIO guard (beat aliasing) — use geomspace(10,2000,50) for clean
+  power-law fit (R²=0.91, ratio=0.53). Engine-backed tests gated by
+  COGWHEEL_TRAIN_TIER. Bandsplit test uses stubbed error=0.0 so
+  extrapolation never triggers (backward compat preserved).
+- INTERIOR_W_NODES_PER_DECADE TESTING: the Architect spec's falsification
+  claim ("WNPD=6 fails the 0.05 bar at gamma=0.65") is FALSE at the
+  existing smoke geometry — measured eps is 0.0002 even at WNPD=6 because
+  SACR-C envelope is dominated by spatial smoothness. Replace with a wiring
+  test + node-count test proving the field is load-bearing (different node
+  counts) and correctly wired.
 - The s(theta(s)) np.interp round-trip is ~0 for ANY monotone table — its
   teeth come from the strictly-increasing/endpoint assertions PLUS a
   MISMATCHED-row round trip (forward uses s*1.05, inverse uses s) which

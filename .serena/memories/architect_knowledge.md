@@ -215,6 +215,33 @@
   radius r(u) = |y(u)| (F026 bracket-refine), NOT a source-plane ring sweep
   — a ring misses the thin near-wall spike and gives a systematically low
   oracle.
+- INTERIOR WEDGE CHART DESIGN (Build interior_wedge_chart): caustic-relative
+  (r, theta_wedge) coordinates for 4-image interior sources, replacing the
+  old FarFieldChart-in-interior approach. Key decisions: (1) Symmetry is D₂
+  (Klein four-group — two axis reflections), NOT Z₄ or D₄; quadrant fold
+  via (|y₁|, |y₂|). (2) Separate dataclass InteriorWedgeChart (spatial axes
+  semantically different from FarFieldChart). (3) r = |y|/r_caustic(gamma,
+  theta) normalises by the direction-dependent caustic reach (r<1 ≡ inside).
+  (4) theta_to_s arc-length remap for angular axis (same pattern as
+  LobeInteriorChart). (5) _WedgeCausticMap precomputed bilinear table for
+  serve-time r_caustic interpolation. (6) Dispatch priority: tube > farfield
+  > lobe > wedge (lowest). (7) from_wedge_engine training entry on
+  LensAmplificationSurrogate. (8) NPZ persistence with kind='wedge' +
+  _WEDGE_AXIS_SCHEMA versioning.
+- DD PRODUCT BOTTLENECK: far-field charts (and all Schwinger-backed
+  evaluations) are limited to w <= DD_PRODUCT_CEILING ≈ 60 because
+  double-double arithmetic in the Schwinger integrand can hold 1e-10
+  precision only to w~64 (cancellation law L_S = pi*w/4). This CAPS the
+  w-range of any chart tile. Fix direction: r-DEPENDENT w ceiling — tiles
+  at larger |y| (weaker lensing) converge faster and can extend to higher w,
+  while near-caustic tiles stay capped. The ppGO serving ladder below
+  w_cert covers the gap where charts cannot reach.
+- CENSUS BAND-SPLIT CONSISTENCY: `characterize_sample` (census) must
+  replicate the SAME band-split logic that the production serve path uses.
+  A discrepancy (e.g. census using a simpler band edge while production uses
+  the chart's stored w_cert) causes the census to attribute samples to the
+  wrong rung, inflating mis-serve statistics. Fix: share the identical
+  band-edge accessor between census and serve.
 - Arc-length reparametrization design: use rep_gamma = median(gamma_grid)
   to minimize worst-case effective excursion; a single-gamma map is adequate
   for topology-stable bands (degrades only near parity wall where other

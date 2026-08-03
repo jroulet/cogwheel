@@ -107,3 +107,30 @@
   branches in select_chart, _evaluate_chart, _chart_to_npz/_chart_from_npz
   only trigger for InteriorWedgeChart. No existing test references wedge
   symbols. No regressions found in existing test infrastructure.
+
+- Created `cogwheel/tests/test_lensing_wedge_dd_arclength.py` for WP1's
+  DD w-ceiling and arc-length axis features in from_wedge_engine.
+  20 tests across 4 classes (DDWCeilingTestCase 6 tests,
+  ArcLengthAxisTestCase 7 tests, NoDDCapLowWTestCase 4 tests,
+  SelfFalsificationTestCase 3 tests). All green in 80s.
+  KEY FINDINGS:
+  (1) The spec's n_gamma=3/n_r=3/n_theta=3 violates the >= 4 minimum
+  required by _validate_axis for cubic spline interpolation. Used 4.
+  (2) The spec's ">=50% nodes succeed" claim is FALSE for the given
+  geometry. At r_range=(0.15,0.70), gamma=(0.30,0.50), the DD cap gives
+  w_max=121.6, but the Schwinger certification ceiling fires at w~60-80
+  for most nodes, yielding only 4/64 = 6.25% success. The DD cap's
+  purpose is to prevent DD-product violations (w*r*reach <= 58), NOT to
+  improve success rates beyond the Schwinger limit. Adapted tests to
+  verify the FORMULA (DD product invariant) rather than success rate.
+  (3) The arc-length axis (theta_to_s) is always active and correctly
+  nonlinear (max polyfit residual >> 1e-4 confirming caustic curvature).
+  Node-exact accuracy < 1e-9 verified against fresh engine calls.
+  (4) The LensAmplificationSurrogate.__init__ isinstance check now
+  includes InteriorWedgeChart (the bug noted in prior builds is fixed).
+  from_wedge_engine works end-to-end.
+  BACKWARD-COMPAT AUDIT: WP1 is purely ADDITIVE -- new constant
+  _DD_PRODUCT_MARGIN, new optional theta_to_s/s_grid params with None
+  defaults, new elif branch in _evaluate_chart. All existing tests
+  pass unchanged (40 tests in test_lensing_interior_wedge_chart.py
+  confirmed green).

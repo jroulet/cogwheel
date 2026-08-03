@@ -1,45 +1,37 @@
 # Inspector Short-Term Observations
 
-## Review: 2026-08-03 (pass 4) — InteriorWedgeChart implementation review — PASS
+## Review: 2026-08-03 (pass 7) — DD w-ceiling + arc-length axis (re-review, unchanged diff) — PASS
 
 ### Scope
-Re-review of uncommitted changes to `cogwheel/lensing/surrogate.py` (~812 lines added) and the untracked test file `cogwheel/tests/test_lensing_interior_wedge_chart.py` (40 tests).
+Re-review of uncommitted changes to `cogwheel/lensing/surrogate.py` (43 lines added/modified) and new untracked test file `cogwheel/tests/test_lensing_wedge_dd_arclength.py` (20 tests). Diff is byte-identical to pass 6.
 
-### What Changed (identical to pass 3)
-- New `_WedgeCausticMap` dataclass holding a precomputed `r_caustic(gamma, theta)` table.
-- New `_interp_r_caustic` bilinear interpolation of the caustic-radius table.
-- New `_to_wedge_fixed` / `_from_wedge_fixed` coordinate transforms (eigenframe ↔ wedge-fixed).
-- New `_validate_wedge_caustic_map` validator.
-- New `InteriorWedgeChart` frozen dataclass with `from_wedge_values` and `_assemble` class methods.
-- New `_wedge_serves` guard function (cheapest-first gate ordering).
-- Updated `select_chart` with a fourth loop for `InteriorWedgeChart` (lowest priority).
-- Updated `_evaluate_chart` with wedge branch computing (r, theta_wedge) and optional theta_to_s remap.
-- Updated `LensAmplificationSurrogate.__init__` to accept `InteriorWedgeChart`.
-- Updated `serve` method's `definition` extraction to include `InteriorWedgeChart`.
-- New `from_wedge_engine` training entry point.
-- New `_build_wedge_provenance` provenance builder.
-- Updated `_chart_to_npz` / `_chart_from_npz` with wedge branch for persistence.
-- New `_WEDGE_AXIS_SCHEMA` tag for artifact versioning.
+### What Changed (unchanged from pass 6)
+- New module-level constant `_DD_PRODUCT_MARGIN = 58.0` (line 125), matching `surrogate_training._DD_PRODUCT_MARGIN`.
+- `from_wedge_engine` restructured: `_log_w_grid()` call moved AFTER the DD cap computation.
+- DD ceiling computation: `theta_mask` on wedge_map.theta_nodes within theta_wedge_range, `reach_max = max(r_table[:, theta_mask])`, `dd_w_cap = 58.0 / (r_grid[-1] * reach_max)`, `w_range` capped.
+- Arc-length map: `rep_gamma = median(gamma_grid)`, `arc_theta_fine = linspace(theta_wedge_range[0], ..., 2001)`, `caustic_speed(..., branch=1)`, `cumulative_trapezoid(...)`, `theta_to_s = vstack(...)`, `s_grid = np.interp(theta_wedge_grid, ...)`.
+- Updated `from_wedge_values(...)` call to pass `theta_to_s=theta_to_s, s_grid=s_grid`.
+- New test file with 4 test classes (DDWCeilingTestCase, ArcLengthAxisTestCase, NoDDCapLowWTestCase, SelfFalsificationTestCase) = 20 tests total.
 
-### Correctness Assessment
-- **Coordinate math**: `_to_wedge_fixed` correctly implements D2 fold via `abs(y1)`, `abs(y2)`, `theta = atan2(|y2|, |y1|)`, `r = hypot / r_caustic`. Round-trip verified algebraically.
-- **Axis ordering**: Consistent throughout. Coefficients `(log_w, gamma, r, theta_wedge)` → `_contract_tensor_spline(gamma, r, theta_wedge, log_w_query)` ✓.
-- **NPZ persistence**: Correct: save axes as `(log_w, gamma, r, theta_wedge)` → load reads `(log_w_grid, gamma_grid, p1_grid=r, p2_grid=theta_wedge)` ✓.
-- **select_chart dispatch**: Wedge charts have lowest priority (tube > farfield > lobe > wedge). No overlap risk.
-- **Consumer chain**: `serve`, census `_chart_log_w_range`, `_chart_index`, `_is_band_edge`, `heldout_envelope_eps` all use duck typing on `chart.log_w_grid` / `chart.gamma_grid` — all present on `InteriorWedgeChart`. Census eps measurement's else-branch (non-FarField → `partition.envelope`) is correct for wedge charts.
-- **Validator**: `_validate_wedge_caustic_map` checks gamma equality, theta span [0, π/2], finite positive r_table.
-- **All 40 wedge tests pass** (36s).
-- **All 69 existing surrogate tests pass** (2m19s).
-- **All 54 lobe tests pass** (58s).
-- **Import check**: `from cogwheel.lensing.surrogate import InteriorWedgeChart, _WedgeCausticMap` — OK.
+### Correctness Re-Assessment
+- **DD formula**: Correct. `w_max * r_max * reach_max <= 58` guaranteed. Conservative (uses worst-case over all gamma/theta in range). Edge case (cap < w_min) raises ValueError cleanly from `_log_w_grid`.
+- **Brief vs code**: Brief erroneously suggests `DD_MARGIN / (r_min * reach_max)` but this is the LEAST conservative cap. Code correctly uses `r_grid[-1]` (r_max) for the tightest global bound. Correct deviation from the brief.
+- **Arc-length map**: Correct. `arc_theta_fine` and `theta_wedge_grid` share exact endpoints (both from `theta_wedge_range`), so no extrapolation in `np.interp`. `s_grid` nodes are exact images of `theta_wedge_grid` through the same map. `branch=1` correct for positive-parity interior.
+- **Serve-time plumbing**: Already existed — `_evaluate_chart`'s InteriorWedgeChart branch correctly checks `theta_to_s is not None` and remaps `theta_wedge -> s` via `np.interp`.
+- **NPZ persistence**: Existing code already saves/loads `theta_to_s` for wedge charts.
+- **Backward compatibility**: `from_wedge_values` accepts `theta_to_s=None, s_grid=None` defaults — existing tests (40) pass unchanged.
+- **All 20 new tests PASS** (76s).
+- **All 40 existing wedge tests PASS** (39s).
+- **Import check**: `from cogwheel.lensing.surrogate import _DD_PRODUCT_MARGIN` — OK.
 
-### Findings
+### Findings (trivial only — carried forward)
 
-1. **INS-w2-001 (trivial, NOT RESOLVED)**: Test file `test_lensing_interior_wedge_chart.py` lines 882 and 1039 still contain stale comments stating "Since from_wedge_engine has a bug (LensAmplificationSurrogate.__init__ doesn't accept InteriorWedgeChart)". This bug is now fixed. The tests are functionally correct (they use the manual path for test isolation) but the docstring justification is misleading.
+1. **INS-w3-001 (trivial, still open)**: Local variable `_ARC_MAP_NODES = 2001` at line 3786 duplicates the value of module-level `_FARFIELD_ARC_MAP_SIZE = 2001` (line 151). Could reference it directly. Comment notes the match; harmless.
 
 ### Open Issues Carried Forward (pre-existing, not from this diff)
-- INS-w-004 (design — Librarian scope): DATA_CONTRACTS.yaml does not describe InteriorWedgeChart. Still present.
-- INS-w-005 (design — Librarian scope): SPEC.md does not mention InteriorWedgeChart. Still present.
-- INS-1-001 (unreachable `C <= 0.0` guard in ppgo_map.py): STILL PRESENT. Trivial.
-- INS-1-002 (DATA_CONTRACTS empty-range semantics): STILL PRESENT. Trivial / Librarian scope.
-- INS-1-003 (misleading `_EXTRAP_W_CERT_DEFLATION` name): STILL PRESENT. Trivial.
+- INS-w2-001 (trivial): Stale comments in test_lensing_interior_wedge_chart.py (lines 882, 1039) referencing a "bug" that was already fixed.
+- INS-w-004 (design — Librarian scope): DATA_CONTRACTS.yaml does not describe InteriorWedgeChart.
+- INS-w-005 (design — Librarian scope): SPEC.md does not mention InteriorWedgeChart.
+- INS-1-001 (trivial): Unreachable `C <= 0.0` guard in ppgo_map.py.
+- INS-1-002 (trivial): DATA_CONTRACTS empty-range semantics.
+- INS-1-003 (trivial): Misleading `_EXTRAP_W_CERT_DEFLATION` name.
