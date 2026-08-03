@@ -332,7 +332,7 @@ Tag conventions:
         windows — measured `|y'|/|y''|` over arc half-span stays >= 0.39
         everywhere sampled. If a guard is kept, it must be the ratio.
 
-     1c. **The serving path, plus third order.** `_pearcey_cusp._cusp_vertex`
+     1c. **DONE (2026-07-30, commit `b9c3ed6`). The serving path, plus third order.** `_pearcey_cusp._cusp_vertex`
         locates a cusp by differencing caustic speed at a hardcoded
         `delta = 1e-4` over a 129-point scan plus a golden-section refine. A
         cusp is `|y'| = 0`, a root. Separate build because it SERVES: it needs
