@@ -66,3 +66,6 @@
   correctness issue (build output unaffected) but a monitoring gap. No fix
   landed; workaround: check build logs directly for long builds rather than
   relying on callback heartbeats.
+- `stable_gamma_bands` return type: returns `(stable, dropped)` where each
+  entry in `dropped` is a `(lo, hi)` float tuple; sum dropped widths with a
+  generator expression `sum(hi - lo for lo, hi in dropped)`.
