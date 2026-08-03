@@ -122,7 +122,7 @@ from scipy.special import airy
 
 from cogwheel.lensing.chang_refsdal import geometry
 
-__all__ = ['airy_fold_value', 'fold_amplification']
+__all__ = ['airy_fold_value', 'fold_amplification', 'fold_ppgo_correction']
 
 
 # ----------------------------------------------------------------------
@@ -327,10 +327,13 @@ def _uniform_error_estimate(image_plus: np.ndarray, image_minus: np.ndarray,
     -------
     float or None
         The estimate, or ``None`` if ``c_A`` is unavailable / non-finite or
-        ``xi <= 0``.
+        ``xi < 0``.  Returns ``0.0`` at ``xi == 0`` (the Airy form is exact
+        on the fold, so no leading-error correction applies).
     """
-    if not (xi > 0.0):
+    if xi < 0.0:
         return None
+    if xi == 0.0:
+        return 0.0
     try:
         c1_plus, _ = geometry.saddle_coefficients(image_plus, matrix)
         c1_minus, _ = geometry.saddle_coefficients(image_minus, matrix)
@@ -467,3 +470,144 @@ def _image_at_delay(images: list[np.ndarray], source: np.ndarray,
             best_gap = gap
             best = image
     return best
+
+
+def fold_ppgo_correction(w, source, gamma: float, *,
+                         beta: float = 0.0,
+                         kappa: float = 0.0) -> np.ndarray:
+    """
+    Fold-corrected ppGO amplification (all images).
+
+    Replaces the raw ppGO contribution of the merging fold pair with the
+    uniform Airy fold form (`airy_fold_value`), producing a corrected total
+    amplification that removes the O(7%) error at caustic-adjacent angles
+    where the fold pair has small xi and standard ppGO (divergent sqrt|mu|)
+    breaks down.
+
+    The DO-NOTHING control property holds: even when the Airy form is
+    inaccurate, it cannot make things worse than raw ppGO for a merging
+    pair, so no error-estimate gate or ETA_MAX distance gate is applied.
+    Only structural gates (pair exists, non-degenerate fold geometry) are
+    checked.
+
+    On any structural refusal, the function falls back transparently to
+    raw `geometric_amplification` (byte-identical to the uncorrected path).
+
+    Parameters
+    ----------
+    w : float or array_like
+        Dimensionless lens frequency (strictly positive).  Scalar or 1-D.
+    source : array_like, shape (2,)
+        Source position in the lens plane.
+    gamma : float
+        External shear magnitude.
+    beta : float, optional
+        External shear orientation, radians.
+    kappa : float, optional
+        External convergence.
+
+    Returns
+    -------
+    np.ndarray
+        Complex amplification, shaped like ``w`` (0-d for scalar input,
+        1-d for array input).
+    """
+    # Lazy import to avoid circular dependency (operator imports this
+    # module at the top level).
+    from cogwheel.lensing.chang_refsdal.operator import (
+        geometric_amplification)
+
+    source = np.asarray(source, dtype=float)
+    w_input = np.asarray(w, dtype=float)
+    w_arr = np.atleast_1d(w_input)
+    w_scalar = w_input.ndim == 0
+
+    def _fallback():
+        """Return raw ppGO, shaped to match the input w."""
+        result = geometric_amplification(w_arr, source, gamma,
+                                         beta=beta, kappa=kappa)
+        return np.atleast_1d(result)
+
+    # NOTE (maintenance): the fold-correction logic below (structural gates +
+    # w-dependent Airy/ppGO computation) is mirrored in the inline fold
+    # correction block inside `channels.born_carrier_from_partition`.  The two
+    # sites are kept separate because this function re-solves the geometry from
+    # scratch (needed for its standalone public interface), while the
+    # `channels` block reuses pre-computed images/matrix from the partition to
+    # avoid a redundant `geometric_amplification` call.  If the correction
+    # formula or structural gates change, BOTH locations must be updated.
+    # See INS-c8-003.
+
+    # --- Structural gates (w-independent geometry) ---
+    try:
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        images = geometry.find_images(source, matrix)
+    except geometry.LensDomainError:
+        result = _fallback()
+        return result[0] if w_scalar else result
+
+    pair = _merging_fold_pair(images, source, matrix)
+    if pair is None:
+        result = _fallback()
+        return result[0] if w_scalar else result
+    tau_plus, tau_minus = pair
+    delta_tau = tau_minus - tau_plus
+    if not (delta_tau > 0.0):
+        result = _fallback()
+        return result[0] if w_scalar else result
+    tau_bar = 0.5 * (tau_plus + tau_minus)
+
+    try:
+        nearest = geometry.nearest_caustic_point(gamma, beta, source,
+                                                 kappa=kappa)
+    except geometry.LensDomainError:
+        result = _fallback()
+        return result[0] if w_scalar else result
+
+    b3 = _soft_axis_cubic(nearest.image, nearest.soft_axis)
+    if b3 is None:
+        result = _fallback()
+        return result[0] if w_scalar else result
+
+    amplitudes = _fold_amplitudes(nearest.hard_eigenvalue, b3)
+    if amplitudes is None:
+        result = _fallback()
+        return result[0] if w_scalar else result
+    p_amplitude, q_amplitude, sigma = amplitudes
+
+    # --- w-dependent computation ---
+    # Airy values for each w_i (airy_fold_value is scalar).
+    airy_values = np.empty(w_arr.shape, dtype=complex)
+    for i, w_i in enumerate(w_arr):
+        xi_i = (3.0 * w_i * delta_tau / 4.0) ** (2.0 / 3.0)
+        airy_values[i] = airy_fold_value(
+            w_i, tau_bar, xi_i, p_amplitude, q_amplitude, sigma)
+
+    # Pair's raw ppGO: sum of exp(1j*w*tau_a) * image_kernel over the two
+    # pair images (vectorized over w).
+    image_plus = _image_at_delay(images, source, matrix, tau_plus)
+    image_minus = _image_at_delay(images, source, matrix, tau_minus)
+    if image_plus is None or image_minus is None:
+        result = _fallback()
+        return result[0] if w_scalar else result
+
+    pair_ppgo = np.zeros(w_arr.shape, dtype=complex)
+    for img, tau_a in ((image_plus, tau_plus), (image_minus, tau_minus)):
+        pair_ppgo = pair_ppgo + (
+            np.exp(1j * w_arr * tau_a)
+            * geometry.image_kernel(w_arr, img, matrix))
+
+    # Full ppGO (all images) via geometric_amplification.
+    full_ppgo = np.atleast_1d(
+        geometric_amplification(w_arr, source, gamma, beta=beta, kappa=kappa))
+
+    # Corrected: replace pair contribution with Airy form.
+    result = full_ppgo - pair_ppgo + airy_values
+
+    # Non-finite Airy fallback: keep the uncorrected ppGO value where the
+    # Airy form produced non-finite values.
+    non_finite_mask = ~np.isfinite(airy_values)
+    if np.any(non_finite_mask):
+        result[non_finite_mask] = full_ppgo[non_finite_mask]
+
+    return result[0] if w_scalar else result

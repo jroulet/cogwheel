@@ -1101,7 +1101,9 @@ def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
             # be spuriously beyond-wall).  After alignment the residual is
             # the genuine geometric-optics defect (-> machine precision at
             # high w).
-            ppgo = np.asarray(geometric_amplification(
+            from cogwheel.lensing.chang_refsdal._airy_fold import (
+                fold_ppgo_correction)
+            ppgo = np.asarray(fold_ppgo_correction(
                 w_prefix, source, gamma, beta=0.0, kappa=kappa))
             ppgo = ppgo * np.exp(-1j * w_prefix * float(partition.t_min))
             return w_prefix, np.asarray(partition.exact_total), ppgo

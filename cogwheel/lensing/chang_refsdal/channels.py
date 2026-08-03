@@ -1573,6 +1573,94 @@ def born_carrier_from_partition(
                 partition.real_mask, FARFIELD_KERNEL_SUM_MINUS_GHOST, t_min)
             carrier[above] = ppgo_plus_ghost[above]
 
+            # --- Fold correction (additive) ---
+            # Replace the merging fold pair's ppGO contribution with the
+            # uniform Airy form.  The correction is
+            #   (F_airy - F_ppgo_pair) * exp(-1j * w * t_min)
+            # where both F_airy and F_ppgo_pair are in the ABSOLUTE delay
+            # frame, and the exp(-1j*w*t_min) demodulates to the min-relative
+            # frame that carrier[] lives in.  On any structural refusal the
+            # correction is zero (carrier stays as-is, byte-identical to the
+            # uncorrected path).
+            #
+            # NOTE (maintenance): this block duplicates the fold-correction
+            # logic of `_airy_fold.fold_ppgo_correction`.  The duplication is
+            # intentional: `fold_ppgo_correction` re-solves the geometry from
+            # scratch (needed for its standalone public interface), whereas this
+            # block reuses pre-computed ``partition.images`` / ``partition.matrix``
+            # to avoid a redundant `geometric_amplification` call.  If the
+            # correction formula or its structural gates change, BOTH locations
+            # must be updated together.  See INS-c8-003.
+            from cogwheel.lensing.chang_refsdal._airy_fold import (
+                _merging_fold_pair, _image_at_delay,
+                _fold_amplitudes, _soft_axis_cubic, airy_fold_value)
+
+            try:
+                matrix = partition.matrix
+                images = partition.images
+                pair = _merging_fold_pair(images, source, matrix)
+                if pair is not None:
+                    tau_plus, tau_minus = pair
+                    fold_delta_tau = tau_minus - tau_plus
+                    if fold_delta_tau > 0.0:
+                        tau_bar = 0.5 * (tau_plus + tau_minus)
+
+                        nearest = geometry.nearest_caustic_point(
+                            gamma, beta, source, kappa=kappa)
+                        b3 = _soft_axis_cubic(nearest.image, nearest.soft_axis)
+                        if b3 is not None:
+                            amplitudes = _fold_amplitudes(
+                                nearest.hard_eigenvalue, b3)
+                            if amplitudes is not None:
+                                p_amplitude, q_amplitude, sigma = amplitudes
+
+                                # Airy values (absolute frame) for above-split
+                                # frequencies only.
+                                w_above = w[above]
+                                airy_vals = np.empty(
+                                    w_above.shape, dtype=complex)
+                                for idx, w_i in enumerate(w_above):
+                                    xi_i = (3.0 * w_i * fold_delta_tau
+                                            / 4.0) ** (2.0 / 3.0)
+                                    airy_vals[idx] = airy_fold_value(
+                                        w_i, tau_bar, xi_i,
+                                        p_amplitude, q_amplitude, sigma)
+
+                                # Pair ppGO in absolute frame.
+                                image_plus = _image_at_delay(
+                                    images, source, matrix, tau_plus)
+                                image_minus = _image_at_delay(
+                                    images, source, matrix, tau_minus)
+                                if (image_plus is not None
+                                        and image_minus is not None):
+                                    pair_ppgo = np.zeros(
+                                        w_above.shape, dtype=complex)
+                                    for img, tau_a in (
+                                            (image_plus, tau_plus),
+                                            (image_minus, tau_minus)):
+                                        pair_ppgo += (
+                                            np.exp(1j * w_above * tau_a)
+                                            * geometry.image_kernel(
+                                                w_above, img, matrix))
+
+                                    # Correction demodulated to min-relative.
+                                    correction = (
+                                        (airy_vals - pair_ppgo)
+                                        * np.exp(-1j * w_above * t_min))
+
+                                    # Guard non-finite Airy: keep carrier
+                                    # untouched where airy produced non-finite.
+                                    finite_mask = np.isfinite(airy_vals)
+                                    if finite_mask.any():
+                                        carrier[above] = np.where(
+                                            finite_mask,
+                                            carrier[above] + correction,
+                                            carrier[above])
+            except (geometry.LensDomainError, ValueError,
+                    ZeroDivisionError):
+                # Structural refusal: no correction, carrier unchanged.
+                pass
+
     return carrier
 
 

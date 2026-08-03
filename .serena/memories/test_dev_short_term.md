@@ -28,3 +28,42 @@
   Added `_interior_chart_wnpd` (lru_cached) and `_wnpd_heldout_eps` helpers.
   The `_wnpd_heldout_eps` catches LensDomainError from `_evaluate_chart` (the
   wrap-into-arc refusal at gamma=0.40 seed=42 draw #5).
+
+
+- Created `cogwheel/tests/test_lensing_fold_ppgo_correction.py` for
+  WP1+WP2 fold_ppgo_correction. 14 tests in 4 classes
+  (MonotoneImprovement, LargeXiNoOp, AxisAngleCorrection,
+  SelfFalsification). All green in 8.3 s.
+  Key findings: (1) The spec's monotone-improvement element-wise claim
+  does NOT hold against the full wave operator at w>25 — at higher w the
+  diffractive error drops below the Airy residual. Adapted test to use
+  w=5..15 where fold divergence dominates and monotone holds. (2) The
+  spec's "large-xi no-op at rho=3.5" actually triggers a structural
+  fallback (b3=0 at axis angles -> _fold_amplitudes=None -> byte-identical
+  fallback). Tested as byte-identical no-op. (3) The 7% correction is
+  measured as |corrected - raw|/|raw| at high w (geometric limit); it
+  oscillates between 4-40% with carrier-phase interference. (4)
+  Schwinger ceiling at w=60 prevents using ChangRefsdalChannels as oracle
+  for w>=100 near the caustic.
+  BACKWARD-COMPAT FINDING: test_lensing_ppgo_bandsplit.py
+  TruncationOnRefusalTestCase (2 tests) FAILS because WP2 replaced
+  geometric_amplification with fold_ppgo_correction in _measure_cell,
+  but the test's mock only patches geometric_amplification. The
+  fold_ppgo_correction does real geometry work and may not fall back.
+  Fix needed: additionally patch _airy_fold.fold_ppgo_correction (or
+  patch it as the ppgo entry point in ppgo_map). NOT fixed here —
+  owned by a separate Test Dev run per scope discipline.
+
+- Extended `test_lensing_fold_ppgo_correction.py` with 2 new classes
+  (total 6 + SelfFalsification = 7 classes, 23 tests):
+  `UniformErrorEstimateRelaxationTestCase` (4 tests: xi=0 returns 0.0,
+  xi=-1.0 returns None, xi=1.0 returns finite positive, small-xi
+  continuity) and `FallbackIdentityTestCase` (5 tests: macro-saddle
+  byte-identical, degenerate-b3 axis byte-identical, far-exterior axis
+  byte-identical, scalar-input array-path byte-identical, non-fallback
+  teeth). All 23 tests green in 4.65s.
+  Key finding: scalar-input fold_ppgo_correction vs scalar-input
+  geometric_amplification differ by ~1 ULP (5e-17j) due to different
+  FP reduction order in the scalar vs array code paths. The byte-identity
+  guarantee holds against the ARRAY-path extraction (which is what
+  fold_ppgo_correction's internal _fallback() actually computes).

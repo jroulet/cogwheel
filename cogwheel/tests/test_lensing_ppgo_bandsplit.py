@@ -69,7 +69,8 @@ import unittest
 from unittest import TestCase, main, mock, expectedFailure
 
 from cogwheel.lensing.chang_refsdal import (
-    geometry, channels as _channels, operator as _operator)
+    geometry, channels as _channels, operator as _operator,
+    _airy_fold as _airy_fold_module)
 from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels, farfield_envelope_from_partition,
     reconstruct_farfield, FARFIELD_KERNEL_SUM)
@@ -1410,6 +1411,9 @@ class TruncationOnRefusalTestCase(_PpgoTestCase):
                 _channels, 'ChangRefsdalChannels', _StubChannels),
             mock.patch.object(
                 _operator, 'geometric_amplification', _stub_amplification),
+            mock.patch.object(
+                _airy_fold_module, 'fold_ppgo_correction',
+                _stub_amplification),
         ]
         for patcher in patchers:
             patcher.start()
