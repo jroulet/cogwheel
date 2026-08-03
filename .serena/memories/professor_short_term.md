@@ -1,78 +1,72 @@
 # Professor Short-Term Observations
 
-## 2026-08-03: fold_ppgo_correction build review — PASS (with concerns)
+## 2026-08-04: InteriorWedgeChart domain correctness review — PASS
 
 ### Tests executed:
-- `test_lensing_fold_ppgo_correction.py`: 23/23 passed (5.4s)
-- `test_lensing_airy_fold.py`: 63/63 passed + 7 skipped + 2 xfailed (28.3s)
-- `test_lensing_ppgo_bandsplit.py`: 62/62 passed + 4 skipped (26.5s)
-- `test_lensing_ppgo_map.py`: 37/37 passed (10.7s)
-- **Total: 185 passed, 0 failures** — full domain test suite clean.
+- `test_lensing_interior_wedge_chart.py`: 40/40 passed (34.99s)
+- Independent verification scripts: all pass
 
 ### Spec verification results:
 
-1. **DO-NOTHING CONTROL (monotone improvement)**:
-   - PASSES at the test suite's w_low=[5,8,10,12,15] (xi<0.65) with 2.8-9.6x improvement.
-   - FAILS at the brief's spec w=[30,54] for config (a) rho=0.7 pi/2: at w=30 (xi≈1.03)
-     improvement=0.77; at w=54 (xi≈1.52) improvement=0.07.
-   - Config (c) rho=1.1 pi/2: passes trivially (b3 degenerate → byte-identical fallback).
-   - The test suite uses a LOWER w range than the spec's w-array, correctly targeting
-     the regime where the Airy form IS beneficial. The spec's w-array spans BOTH the
-     beneficial (xi<1) and detrimental (xi>1) regimes.
+1. **Coordinate round-trip** (Test 1):
+   - theta_wedge always in [0, π/2]: PASS (all four quadrants fold correctly)
+   - r in [0, 1) for interior sources: PASS
+   - Round-trip residual: measured 1.67e-16, far below 1e-12 tolerance. PASS.
+     (Expected: forward/inverse use the SAME interpolant → cancels to float64 noise)
+   - D2 symmetry: max diff = 0.0 exactly (abs() fold is bitwise symmetric). PASS.
 
-2. **LARGE-XI NO-OP**: 
-   - At axis angles (pi/2, pi/3, pi/6): byte-identical fallback (b3 degenerate). PASS.
-   - At off-axis angle (pi/4) with rho=3.5: correction applied, 99.8% relative diff
-     (NOT <1% as spec expects). This is because q_amplitude=0 makes the Airy form's
-     large-xi asymptotics incorrect.
-   - The test suite tests bounded ratio [0.1, 10] rather than <0.01 convergence.
+2. **NPZ round-trip** (Test 2):
+   - All 14 fields (4 axes, 2 coeff arrays, 4 knot vectors, 3 wedge_map arrays,
+     refused_points) have max|diff| = 0.0. PASS.
+   - Scalars (image_count, parity, eta_overlap_min, envelope_definition): identical. PASS.
+   - Spline evaluation at 5 random query points: bitwise identical. PASS.
 
-3. **AXIS-ANGLE ACCURACY (7% witness)**:
-   - High-w correction magnitude: [0.038, 0.071, 0.128, 0.071, 0.070, 0.133, 0.093]
-     — correctly in the 4-13% range at w=30-50000. PASS.
-   - Low-w error reduction vs oracle: PASS at w=5-15. FAILS at w=30+ (see above).
-   - The corrected error < 0.01 (spec assertion) verified at the test's w range. NOT at
-     the spec's full w=[30,54,100,200] range.
+3. **_wedge_serves guard logic** (Test 3):
+   - 1 accept case: True. PASS.
+   - 8 refusal gates tested independently (non-finite, gamma OOB, log_w OOB, origin,
+     r OOB, theta_wedge OOB, wrong image_count, eta below floor): all return False. PASS.
+   - Self-falsification proves _wedge_serves can return True (not vacuous). PASS.
 
-4. **UNIFORM-ERROR-ESTIMATE RELAXATION at xi=0**: PASS.
-   - xi=0.0 → 0.0 (not None). Correct.
-   - xi=-1.0 → None (refused). Correct.
-   - xi=1.0 → 1.057 (finite positive). Correct.
+4. **select_chart dispatch + D2 evaluate** (Test 4):
+   - select_chart returns InteriorWedgeChart for valid source: PASS.
+   - _evaluate_chart returns finite complex array of length 3: PASS.
+   - D2 fold: second-quadrant source = first-quadrant reflected source (max|diff|=0.0): PASS.
+   - All four quadrants produce identical evaluations: PASS.
+   - select_chart returns None for wrong image_count: PASS.
 
-5. **FALL-BACK IDENTITY**: PASS.
-   - Macro-saddle (gamma=1.5, |y|=3.0): byte-identical. Correct.
-   - Degenerate b3 (gamma=0.5, pi/2, rho=1.1): byte-identical. Correct.
-   - Near cusp (angle=0, rho=1.0): byte-identical. Correct.
+5. **Carrier continuity gate** (Test 5):
+   - Synthetic continuous carrier: no error. PASS.
+   - Synthetic discontinuous carrier (jump > 0.5*reach): CarrierDiscontinuityError. PASS.
+   - NaN (refused) nodes do not trigger false flips: PASS.
+   - Engine-derived small safe tile (r∈[0.1,0.3]): 75/75 nodes finite, passes. PASS.
+
+6. **Envelope accuracy at grid nodes** (Test 6):
+   - 64/64 training nodes succeeded (full grid populated).
+   - At 5 interior grid nodes: max|diff| = 8.88e-16 (tolerance 1e-10). PASS.
+   - Fresh engine oracle comparison: max|diff| = 2.22e-16. PASS.
+     (Expected: cubic B-spline exactly reproduces training values at knots → machine eps)
 
 ### Physics assessment:
 
-The Airy fold correction with q=0 (leading-order only, subleading Ai' term absent)
-has a **limited domain of validity in xi**: it correctly captures the fold caustic's
-uniform approximation for xi < ~1 (near-fold regime where images are merging), but
-its large-xi asymptotics do NOT converge to the ppGO pair. Specifically:
-- Ai(-xi) ~ xi^{-1/4} cos(2/3 xi^{3/2} - pi/4) for large xi
-- The two saddle-point contributions from this asymptotic should reconstruct the
-  two ppGO images independently, but with q=0 and only the leading p-amplitude
-  from local fold curvature, the RELATIVE PHASE between the Airy carrier and the
-  individual image carriers is not correctly tracked at large xi.
-- Result: at xi>1, the Airy form introduces O(7-100%) errors rather than removing them.
+The coordinate system design is correct:
+- `_to_wedge_fixed` exploits the D2 (dihedral-4) symmetry of the astroid caustic
+  (reflections across both eigenvalue axes) to reduce the full plane to one wedge
+  θ ∈ [0, π/2]. The fold is `abs(y1), abs(y2)` → `atan2(|y2|, |y1|)` which is
+  the correct D2 quotient for the astroid.
+- The radial coordinate `r = |y|/r_caustic(γ, θ)` normalises by the direction-dependent
+  caustic reach, making `r < 1` equivalent to "inside the caustic" — the fundamental
+  domain for 4-image Chang-Refsdal configurations.
+- The bilinear interpolation of r_caustic at 101 θ nodes × 5 γ nodes introduces only
+  O(h²) error where h ~ π/200 ≈ 0.016; this is well below any physical scale.
 
-**Mitigating factors**:
-1. The structural fallback (b3 degenerate at axis angles) protects the most common
-   exterior configs from corruption.
-2. The interior configs where the correction genuinely helps (rho~0.9-0.95, xi<1)
-   are precisely the configs where the ppGO error is LARGEST (fold divergence), so
-   the correction provides its greatest value where most needed.
-3. The code documents this as "future quartic (b4) refinement" — explicitly noted
-   as a known limitation.
-4. In the channels path (born_carrier_from_partition), the correction is applied to
-   the above-split w range. If w_split is high enough, xi is small and the correction
-   is in its valid regime.
+The tensor-product spline (cubic B-spline on 4 axes: log w, γ, r, θ_wedge) is the
+correct interpolation structure for a smooth function on a box domain. The spline
+exactly reproduces training values at grid nodes (verified to machine precision).
 
-**Net assessment**: The code is correct in implementation. The test suite correctly
-validates the regime where the Airy form IS beneficial. The spec's broader claims
-(monotone improvement at the full w=[10,30,54,100,200]) are not satisfied because
-they span both the beneficial and detrimental xi regimes. This is a **known physics
-limitation** (not a code bug) documented as "future quartic refinement."
+The carrier continuity check correctly implements the "single nearest-caustic basin"
+requirement for SACR-C demodulation: a jump in the critical_source carrier between
+adjacent nodes exceeding 50% of the local caustic reach signals a basin boundary crossing
+that would make the demodulated envelope discontinuous (and thus uninterpolable by a
+smooth spline).
 
 Heavy full-sampling validation is operator-deferred.

@@ -292,6 +292,15 @@ _LOBE_AXIS_SCHEMA_V1 = 'lobe_local_offset_rholobe_thetalocal_framewinv'
 _LOBE_AXIS_SCHEMA = 'lobe_local_offset_rholobe_thetalocal_sqrtedge_framewinv'
 _KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA_V1, _LOBE_AXIS_SCHEMA})
 
+# Wedge (caustic-relative interior) axis-schema tag.  The caustic-relative
+# interior chart uses (r, theta_wedge) coordinates normalised by the caustic
+# radius function r_caustic(gamma, theta); a chart carrying this tag can ONLY
+# be queried in wedge-fixed coordinates.  An old absolute-coordinate interior
+# artifact must hard-refuse at load.
+_WEDGE_AXIS_SCHEMA = 'wedge_caustic_relative_v1'
+_KNOWN_WEDGE_AXIS_SCHEMAS = frozenset({_WEDGE_AXIS_SCHEMA})
+
+
 # Real-image count of a macro-saddle deltoid-lobe INTERIOR (``gamma > 1``).
 # A candidate strictly inside one lobe images into four real geometric-optics
 # images; a lobe-interior training node whose engine partition reports a
@@ -504,6 +513,39 @@ class _FarFieldArcMap:
     branch: int
     theta_lo: float
     theta_hi: float
+
+
+@dataclass(frozen=True, eq=False)
+class _WedgeCausticMap:
+    """Precomputed caustic-radius table ``r_caustic(gamma, theta_wedge)``.
+
+    The interior wedge chart normalises the radial source-plane coordinate
+    by the caustic reach along the query direction:
+    ``r = |y_eig| / r_caustic(gamma, theta_wedge)``.  This map stores the
+    precomputed 2-D table; at serve time bilinear interpolation gives
+    ``r_caustic`` at any ``(gamma, theta_wedge)`` without calling the full
+    ``geometry.r_caustic`` routine.
+
+    SIMPLER than `_FarFieldArcMap` -- no cumulative integration, no
+    ``cumtrapz``.  The table is the raw caustic radius evaluated on the
+    (gamma, theta) grid directly.
+
+    Attributes
+    ----------
+    gamma_nodes : np.ndarray
+        Shape ``(n_gamma,)`` strictly ascending shear magnitudes; the
+        chart's own gamma grid.
+    theta_nodes : np.ndarray
+        Shape ``(n_theta,)`` strictly ascending wedge-angle grid over
+        ``[0, pi/2]``.
+    r_table : np.ndarray
+        Shape ``(n_gamma, n_theta)`` precomputed
+        ``geometry.r_caustic(gamma, theta)`` values.
+    """
+
+    gamma_nodes: np.ndarray
+    theta_nodes: np.ndarray
+    r_table: np.ndarray
 
 
 def _caustic_arclength_map(gamma_nodes, theta_lo: float, theta_hi: float,
@@ -1191,6 +1233,126 @@ def _to_lobe_fixed(centroid: np.ndarray, boundary_theta: np.ndarray,
     return rho_lobe, theta_local
 
 
+def _interp_r_caustic(gamma: float, theta_wedge: float,
+                      wedge_map: _WedgeCausticMap) -> float:
+    """Bilinear interpolation of the caustic radius from a wedge map.
+
+    First interpolates along the gamma axis at each theta node to produce
+    a 1-D column, then interpolates along theta.  Both axes use linear
+    ``np.interp`` (no extrapolation: values are clipped to edge nodes).
+
+    Parameters
+    ----------
+    gamma : float
+        Shear magnitude query.
+    theta_wedge : float
+        Wedge angle query in ``[0, pi/2]``.
+    wedge_map : _WedgeCausticMap
+        Precomputed caustic-radius table.
+
+    Returns
+    -------
+    float
+        Interpolated ``r_caustic(gamma, theta_wedge)``.
+    """
+    gamma_nodes = wedge_map.gamma_nodes
+    theta_nodes = wedge_map.theta_nodes
+    r_table = wedge_map.r_table
+    # Interpolate along gamma for each theta node -> 1-D column.
+    # For a 2-D table: interpolate along gamma for every theta column,
+    # then interp along theta.
+    n_theta = theta_nodes.size
+    r_column = np.empty(n_theta)
+    for j in range(n_theta):
+        r_column[j] = np.interp(gamma, gamma_nodes, r_table[:, j])
+    return float(np.interp(theta_wedge, theta_nodes, r_column))
+
+
+def _to_wedge_fixed(gamma: float, y1_eig: float, y2_eig: float,
+                    wedge_map: _WedgeCausticMap) -> tuple[float, float]:
+    """Map an eigenframe source into wedge-fixed ``(r, theta_wedge)``.
+
+    The D2 (4-fold) symmetry of the astroid caustic means ONE wedge
+    ``[0, pi/2]`` tiles the full interior by reflections.  This function
+    folds the source into the canonical first quadrant, computes the
+    wedge angle and the radial coordinate normalised by the caustic reach
+    along that direction.
+
+    Parameters
+    ----------
+    gamma : float
+        Shear magnitude.
+    y1_eig, y2_eig : float
+        Eigenframe source position (dimensionless).
+    wedge_map : _WedgeCausticMap
+        Precomputed caustic-radius table for bilinear interpolation.
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(r, theta_wedge)`` where ``r = |y| / r_caustic(gamma, theta)``
+        and ``theta_wedge = atan2(|y2|, |y1|)`` in ``[0, pi/2]``.
+
+    Raises
+    ------
+    ValueError
+        If the source is exactly at the origin (``r`` is undefined there,
+        same degenerate-query refusal as `_to_lobe_fixed`).
+    """
+    # Fold into the canonical first quadrant via D2 symmetry.
+    y1_abs = abs(float(y1_eig))
+    y2_abs = abs(float(y2_eig))
+    if y1_abs == 0.0 and y2_abs == 0.0:
+        raise ValueError(
+            'Wedge-fixed coordinate is undefined at the origin '
+            '(theta_wedge = atan2(0, 0)); this degenerate query is refused.')
+    theta_wedge = float(np.arctan2(y2_abs, y1_abs))
+    r_caustic_at_theta = _interp_r_caustic(gamma, theta_wedge, wedge_map)
+    r = float(np.hypot(y1_abs, y2_abs)) / r_caustic_at_theta
+    return r, theta_wedge
+
+
+def _from_wedge_fixed(gamma: float, r: float, theta_wedge: float,
+                      wedge_map: _WedgeCausticMap) -> tuple[float, float]:
+    """Map wedge-fixed ``(r, theta_wedge)`` back to eigenframe source.
+
+    Exact inverse of `_to_wedge_fixed` for sources in the canonical first
+    quadrant (positive y1, y2).  Used at training time to evaluate the
+    engine at grid nodes.
+
+    Parameters
+    ----------
+    gamma : float
+        Shear magnitude.
+    r : float
+        Radial coordinate normalised by caustic reach (must be >= 0).
+    theta_wedge : float
+        Wedge angle in ``[0, pi/2]``.
+    wedge_map : _WedgeCausticMap
+        Precomputed caustic-radius table.
+
+    Returns
+    -------
+    tuple[float, float]
+        The eigenframe source ``(y1_eig, y2_eig)`` in the CANONICAL first
+        quadrant (both positive).
+
+    Raises
+    ------
+    ValueError
+        If ``r`` is negative.
+    """
+    r = float(r)
+    if r < 0.0:
+        raise ValueError(f'r must be non-negative; got {r}.')
+    theta_wedge = float(theta_wedge)
+    r_caustic_at_theta = _interp_r_caustic(gamma, theta_wedge, wedge_map)
+    y_mag = r * r_caustic_at_theta
+    y1_eig = y_mag * float(np.cos(theta_wedge))
+    y2_eig = y_mag * float(np.sin(theta_wedge))
+    return y1_eig, y2_eig
+
+
 def _log_w_grid(w_range: tuple[float, float],
                 nodes_per_decade: int) -> np.ndarray:
     """Build a natural-log-uniform ``ln w`` grid over ``w_range``.
@@ -1422,6 +1584,65 @@ def _validate_farfield_arc_map(arc_map: _FarFieldArcMap,
             'arc_map.theta_hi.')
     return _FarFieldArcMap(gamma_nodes, theta_fine, s_table, branch,
                            theta_lo, theta_hi)
+
+
+def _validate_wedge_caustic_map(wedge_map: _WedgeCausticMap,
+                                gamma_grid: np.ndarray) -> _WedgeCausticMap:
+    """Return a wedge caustic map validated against its chart gamma grid.
+
+    Analogous to `_validate_farfield_arc_map`: the map's gamma nodes must
+    equal the chart's own gamma axis exactly, the theta grid must span
+    ``[0, pi/2]``, and the r_table must be finite and positive (caustic
+    radius is always positive).
+    """
+    if not isinstance(wedge_map, _WedgeCausticMap):
+        raise TypeError(
+            'InteriorWedgeChart requires a _WedgeCausticMap wedge_map; got '
+            f'{type(wedge_map).__name__}.')
+
+    gamma_nodes = np.ascontiguousarray(wedge_map.gamma_nodes, dtype=float)
+    theta_nodes = np.ascontiguousarray(wedge_map.theta_nodes, dtype=float)
+    r_table = np.ascontiguousarray(wedge_map.r_table, dtype=float)
+    if gamma_nodes.ndim != 1 or gamma_nodes.size != gamma_grid.size:
+        raise ValueError(
+            'wedge_map.gamma_nodes must be a 1-D array with the same number '
+            'of nodes as gamma_grid.')
+    if not np.isfinite(gamma_nodes).all():
+        raise ValueError('wedge_map.gamma_nodes must be finite.')
+    if not np.all(np.diff(gamma_nodes) > 0.0):
+        raise ValueError('wedge_map.gamma_nodes must be strictly increasing.')
+    if not np.array_equal(gamma_nodes, gamma_grid):
+        raise ValueError(
+            'wedge_map.gamma_nodes must equal gamma_grid; a wedge caustic map '
+            'cannot define a second gamma lattice.')
+    if theta_nodes.ndim != 1 or theta_nodes.size < 2:
+        raise ValueError(
+            'wedge_map.theta_nodes must be a 1-D array with at least 2 '
+            'nodes.')
+    if not np.isfinite(theta_nodes).all():
+        raise ValueError('wedge_map.theta_nodes must be finite.')
+    if not np.all(np.diff(theta_nodes) > 0.0):
+        raise ValueError(
+            'wedge_map.theta_nodes must be strictly increasing.')
+    if not np.isclose(theta_nodes[0], 0.0, atol=1e-12):
+        raise ValueError(
+            f'wedge_map.theta_nodes must start at 0; got {theta_nodes[0]!r}.')
+    if not np.isclose(theta_nodes[-1], np.pi / 2, atol=1e-12):
+        raise ValueError(
+            f'wedge_map.theta_nodes must end at pi/2; got '
+            f'{theta_nodes[-1]!r}.')
+    if r_table.shape != (gamma_nodes.size, theta_nodes.size):
+        raise ValueError(
+            'wedge_map.r_table must have shape '
+            '(wedge_map.gamma_nodes.size, wedge_map.theta_nodes.size); got '
+            f'{r_table.shape}.')
+    if not np.isfinite(r_table).all():
+        raise ValueError('wedge_map.r_table must be finite.')
+    if not np.all(r_table > 0.0):
+        raise ValueError(
+            'wedge_map.r_table must be strictly positive (caustic radius > 0 '
+            'at all interior directions).')
+    return _WedgeCausticMap(gamma_nodes, theta_nodes, r_table)
 
 
 def _validate_theta_to_s(theta_to_s: np.ndarray,
@@ -2161,6 +2382,193 @@ class LobeInteriorChart:
 
 
 @dataclass(frozen=True, eq=False)
+class InteriorWedgeChart:
+    """Caustic-relative wedge-coordinate interior chart for the astroid region.
+
+    Interpolates ``E(w)`` over ``(log w, gamma, r, theta_wedge)`` for the
+    astroid interior (``gamma < 1`` typically, positive-parity images), where
+    the two spatial axes are the WEDGE-FIXED polar coordinates:
+
+    - ``r = |y_eig| / r_caustic(gamma, theta_wedge)`` — radial distance
+      normalised by the caustic reach along the query direction.  ``r = 0``
+      is the centre, ``r = 1`` is the caustic boundary.
+    - ``theta_wedge = atan2(|y2_eig|, |y1_eig|)`` — the wedge angle in
+      ``[0, pi/2]``, exploiting D2 (4-fold) symmetry.
+
+    In these coordinates the DD product cap (``w × |y| < 58``) translates
+    to ``w × r × r_caustic < 58``, which is exactly known at each grid
+    point, eliminating the DD bottleneck for high-w draws at small |y|.
+
+    The envelope is the ``tau_c``-demodulated INTERIOR_SACR_C label.
+
+    Attributes
+    ----------
+    gamma_grid, r_grid, theta_wedge_grid, log_w_grid : np.ndarray
+        1-D strictly increasing training axes.
+    real_coeffs, imag_coeffs : np.ndarray
+        Cubic B-spline coefficient tensors, axes ``(log w, gamma, r,
+        theta_wedge)``.
+    knots : tuple of np.ndarray
+        Knot vectors ``(t_logw, t_gamma, t_r, t_theta_wedge)``.
+    image_count : int or None
+        Real-image count for this interior region.
+    parity : int or None
+        Macro-image parity (always ``1`` for positive-parity interior).
+    eta_overlap_min : float
+        Minimum caustic distance the chart serves at.
+    refused_points : np.ndarray
+        Shape ``(n, 3)`` wedge-fixed ``(gamma, r, theta_wedge)`` training
+        points the engine refused.
+    param_spacing : np.ndarray
+        Shape ``(3,)`` mean spacing of ``(gamma, r, theta_wedge)`` for the
+        exclusion-ball normalization.
+    wedge_map : _WedgeCausticMap
+        Precomputed caustic-radius table for the coordinate transform.
+    envelope_definition : str
+        Tag naming the label the chart's envelope encodes.
+    theta_to_s : np.ndarray or None
+        Optional ``(2, N_map)`` theta_wedge→s axis reparametrization map.
+        Row 0 is the dense ``theta_wedge`` grid; row 1 is the corresponding
+        ``s`` coordinate.  When ``None``, the spline is on raw
+        ``theta_wedge``.
+    """
+
+    gamma_grid: np.ndarray
+    r_grid: np.ndarray
+    theta_wedge_grid: np.ndarray
+    log_w_grid: np.ndarray
+    real_coeffs: np.ndarray
+    imag_coeffs: np.ndarray
+    knots: tuple
+    image_count: int | None
+    parity: int | None
+    eta_overlap_min: float
+    refused_points: np.ndarray
+    param_spacing: np.ndarray
+    wedge_map: _WedgeCausticMap
+    envelope_definition: str
+    theta_to_s: np.ndarray | None
+
+    @classmethod
+    def from_wedge_values(cls, *, gamma_grid: np.ndarray,
+                          r_grid: np.ndarray,
+                          theta_wedge_grid: np.ndarray,
+                          log_w_grid: np.ndarray,
+                          envelope_real: np.ndarray,
+                          envelope_imag: np.ndarray,
+                          image_count: int | None,
+                          parity: int | None,
+                          wedge_map: _WedgeCausticMap,
+                          eta_overlap_min: float = _DEFAULT_CAUSTIC_FLOOR,
+                          refused_points: np.ndarray | None = None,
+                          envelope_definition: str
+                          = _INTERIOR_ENVELOPE_DEFINITION,
+                          theta_to_s: np.ndarray | None = None,
+                          s_grid: np.ndarray | None = None
+                          ) -> 'InteriorWedgeChart':
+        """Build a wedge-interior chart by fitting splines to a value tensor.
+
+        Parameters
+        ----------
+        gamma_grid, r_grid, theta_wedge_grid, log_w_grid : np.ndarray
+            1-D strictly increasing training axes.
+        envelope_real, envelope_imag : np.ndarray
+            Shape ``(n_w, n_gamma, n_r, n_theta_wedge)`` real/imag envelope
+            values (the ``tau_c``-demodulated interior label).
+        image_count, parity : int or None
+            Region labels (``None`` if unrecorded).
+        wedge_map : _WedgeCausticMap
+            Precomputed caustic-radius table.
+        eta_overlap_min : float, optional
+            Minimum caustic distance served (default the caustic floor).
+        refused_points : np.ndarray, optional
+            Refused wedge-fixed ``(gamma, r, theta_wedge)`` training points.
+        envelope_definition : str, optional
+            Tag naming the label the chart's envelope encodes.
+        theta_to_s : np.ndarray or None, optional
+            ``(2, N_map)`` theta_wedge→s axis reparametrization map.  When
+            provided together with ``s_grid``, the spline's fourth axis
+            is ``s`` (not raw ``theta_wedge``).
+        s_grid : np.ndarray or None, optional
+            1-D strictly increasing s-coordinate nodes (same length as
+            ``theta_wedge_grid``).  Required when ``theta_to_s`` is given.
+        """
+        gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
+        r_grid = _validate_axis(r_grid, 'r_grid')
+        theta_wedge_grid = _validate_axis(theta_wedge_grid,
+                                          'theta_wedge_grid')
+        log_w_grid = _validate_axis(log_w_grid, 'log_w_grid')
+        expected = (log_w_grid.size, gamma_grid.size, r_grid.size,
+                    theta_wedge_grid.size)
+        _check_value_shape(envelope_real, envelope_imag, expected)
+        # When both theta_to_s and s_grid are provided, the spline's fourth
+        # axis is s instead of raw theta_wedge.
+        if theta_to_s is not None and s_grid is not None:
+            theta_to_s = _validate_theta_to_s(theta_to_s, theta_wedge_grid)
+            s_grid = _validate_axis(s_grid, 's_grid')
+            if s_grid.size != theta_wedge_grid.size:
+                raise ValueError(
+                    f's_grid length ({s_grid.size}) must equal '
+                    f'theta_wedge_grid length ({theta_wedge_grid.size}).')
+            spline_axes = (log_w_grid, gamma_grid, r_grid, s_grid)
+        elif theta_to_s is None and s_grid is None:
+            # Identity path: byte-identical to raw theta_wedge.
+            spline_axes = (log_w_grid, gamma_grid, r_grid, theta_wedge_grid)
+        else:
+            raise ValueError(
+                'theta_to_s and s_grid must both be None or both provided.')
+        real_c, imag_c, knots = _fit_tensor_spline(
+            spline_axes, envelope_real, envelope_imag)
+        return cls._assemble(
+            gamma_grid, r_grid, theta_wedge_grid, log_w_grid,
+            real_c, imag_c, knots, image_count, parity, eta_overlap_min,
+            refused_points, wedge_map,
+            envelope_definition=envelope_definition,
+            theta_to_s=theta_to_s)
+
+    @classmethod
+    def _assemble(cls, gamma_grid, r_grid, theta_wedge_grid, log_w_grid,
+                  real_coeffs, imag_coeffs, knots, image_count, parity,
+                  eta_overlap_min, refused_points, wedge_map,
+                  envelope_definition=_INTERIOR_ENVELOPE_DEFINITION,
+                  theta_to_s=None
+                  ) -> 'InteriorWedgeChart':
+        """Assemble a wedge chart from prebuilt coefficient tensors and knots.
+
+        Load-bearing for `_chart_from_npz`: rebuilds the frozen chart from
+        the persisted axes, coefficients, knots and wedge map without
+        re-fitting.
+        """
+        gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
+        r_grid = _validate_axis(r_grid, 'r_grid')
+        theta_wedge_grid = _validate_axis(theta_wedge_grid,
+                                          'theta_wedge_grid')
+        log_w_grid = _validate_axis(log_w_grid, 'log_w_grid')
+        wedge_map = _validate_wedge_caustic_map(wedge_map, gamma_grid)
+        param_spacing = np.array([
+            float(np.mean(np.diff(gamma_grid))),
+            float(np.mean(np.diff(r_grid))),
+            float(np.mean(np.diff(theta_wedge_grid)))])
+        return cls(
+            gamma_grid=gamma_grid,
+            r_grid=r_grid,
+            theta_wedge_grid=theta_wedge_grid,
+            log_w_grid=log_w_grid,
+            real_coeffs=np.ascontiguousarray(real_coeffs, dtype=float),
+            imag_coeffs=np.ascontiguousarray(imag_coeffs, dtype=float),
+            knots=tuple(np.ascontiguousarray(t, dtype=float) for t in knots),
+            image_count=None if image_count is None else int(image_count),
+            parity=None if parity is None else int(parity),
+            eta_overlap_min=float(eta_overlap_min),
+            refused_points=_normalize_refused(refused_points),
+            param_spacing=param_spacing,
+            wedge_map=wedge_map,
+            envelope_definition=str(envelope_definition),
+            theta_to_s=(np.ascontiguousarray(theta_to_s, dtype=float)
+                        if theta_to_s is not None else None))
+
+
+@dataclass(frozen=True, eq=False)
 class TubeChart:
     """Near-caustic envelope chart in caustic-adapted coordinates.
 
@@ -2338,19 +2746,21 @@ def _check_value_shape(value_real: np.ndarray, value_imag: np.ndarray,
 # ---- Chart selection (deterministic guard stack) ----------------------
 
 
-def _in_exclusion_ball(chart: 'FarFieldChart | LobeInteriorChart',
-                       gamma: float, p1: float, p2: float) -> bool:
+def _in_exclusion_ball(
+        chart: 'FarFieldChart | LobeInteriorChart | InteriorWedgeChart',
+        gamma: float, p1: float, p2: float) -> bool:
     """Whether the chart's spatial ``(gamma, p1, p2)`` is within a refusal
     ball.
 
     ``refused_points`` and ``param_spacing`` are both in the chart's own
     spatial coordinate -- far-field-smooth ``(gamma, s, d)`` for a
-    `FarFieldChart` (Build 1e-farfield WP2) or lobe-local ``(gamma,
-    rho_lobe, theta_local)`` for a `LobeInteriorChart`, which shares this
-    exact normalized-ball form -- so the test is coordinate-agnostic:
-    ``(p1, p2)`` are the chart's own two spatial coordinates.  Tiles are
-    sub-arcs in the tangential axis (they never wrap), so no angular-wrap
-    handling is needed: refused points and queries share the tile's range.
+    `FarFieldChart` (Build 1e-farfield WP2), lobe-local ``(gamma,
+    rho_lobe, theta_local)`` for a `LobeInteriorChart`, or wedge-fixed
+    ``(gamma, r, theta_wedge)`` for an `InteriorWedgeChart` -- so the test
+    is coordinate-agnostic: ``(p1, p2)`` are the chart's own two spatial
+    coordinates.  Tiles are sub-arcs in the tangential axis (they never
+    wrap), so no angular-wrap handling is needed: refused points and
+    queries share the tile's range.
     """
     refused = chart.refused_points
     if refused.shape[0] == 0:
@@ -2559,6 +2969,75 @@ def _lobe_serves(chart: 'LobeInteriorChart', gamma: float, log_w_min: float,
     return True
 
 
+def _wedge_serves(chart: 'InteriorWedgeChart', gamma: float, log_w_min: float,
+                  log_w_max: float, eta: float, image_count: int,
+                  y1_eig: float, y2_eig: float) -> bool:
+    """Whether a caustic-relative wedge-interior chart serves this candidate.
+
+    The wedge chart lives in the caustic-normalised polar coordinates
+    ``(r, theta_wedge)`` in the canonical first quadrant (D2 fold), so the
+    containment test folds the eigenframe source before checking bounds.
+
+    Gate order (mirrors `_lobe_serves` pattern, cheapest/most-discriminating
+    first): (a) precondition — isfinite eigenframe; (b) gamma box; (c) ln-w
+    band inside; (d) fold source into canonical first quadrant and compute
+    wedge-fixed coordinates — origin raises ValueError → refuse; (e) box
+    containment on (r, theta_wedge); (f) exclusion ball; (g) image-count
+    guard; (h) eta floor.
+
+    Parameters
+    ----------
+    chart : InteriorWedgeChart
+        The wedge-interior chart under test.
+    gamma : float
+        External shear magnitude.
+    log_w_min, log_w_max : float
+        Bounds of the query's ``ln w`` band.
+    eta : float
+        Caustic distance ``partition.caustic_distance``.
+    image_count : int
+        Real-image count ``int(partition.real_mask.sum())``.
+    y1_eig, y2_eig : float
+        Eigenframe source position (dimensionless).
+
+    Returns
+    -------
+    bool
+        ``True`` when this wedge chart serves the candidate.
+    """
+    # (a) Precondition: a usable eigenframe source.
+    if not (np.isfinite(y1_eig) and np.isfinite(y2_eig)):
+        return False
+    # (b) Gamma box containment.
+    if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
+        return False
+    # (c) Log-w band inside.
+    if not _log_w_band_inside(chart, log_w_min, log_w_max):
+        return False
+    # (d) Fold source into canonical first quadrant and compute (r,
+    # theta_wedge).  Origin raises ValueError — refuse gracefully.
+    try:
+        r, theta_wedge = _to_wedge_fixed(gamma, y1_eig, y2_eig,
+                                         chart.wedge_map)
+    except ValueError:
+        return False
+    # (e) Box containment on (r, theta_wedge).
+    if not (chart.r_grid[0] <= r <= chart.r_grid[-1]
+            and chart.theta_wedge_grid[0] <= theta_wedge
+            <= chart.theta_wedge_grid[-1]):
+        return False
+    # (f) Exclusion ball in wedge-fixed coordinates.
+    if _in_exclusion_ball(chart, gamma, r, theta_wedge):
+        return False
+    # (g) Image-count guard.
+    if chart.image_count is not None and image_count != chart.image_count:
+        return False
+    # (h) Eta floor.
+    if eta <= chart.eta_overlap_min:
+        return False
+    return True
+
+
 def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
                  eta: float, theta: float, image_count: int,
                  y1_eig: float = float('nan'),
@@ -2572,20 +3051,23 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
     caller uses the exact engine.
 
     Order: (2) gamma guard band near ``gamma = 1`` -> fall through; then
-    TUBE charts have priority over FAR-FIELD charts, and FAR-FIELD over
-    LOBE-INTERIOR charts (step 7).  Box containment is mutually exclusive
-    across the three kinds -- a positive-parity far-field box and a
-    macro-saddle lobe box never overlap in ``gamma`` -- so the scan order
-    is deterministic, not arbitrating overlap.  Per chart: (1) certified-box
-    containment on ``(gamma, log w)`` and the far-field-smooth source
-    ``(s, d)``; (3) far-field engine-refusal exclusion balls; (5)
-    image-count match; (6) cusp exclusion / ``eta`` floor; (7) tube when
-    ``eta in [eta_floor, eta_max]``, else far-field when ``eta >
-    eta_overlap_min``, else a lobe chart when the source falls in that lobe.
+    TUBE charts have priority over FAR-FIELD charts, FAR-FIELD over
+    LOBE-INTERIOR charts, and LOBE-INTERIOR over WEDGE-INTERIOR charts
+    (step 7).  Box containment is mutually exclusive across the kinds
+    -- a positive-parity far-field box and a macro-saddle lobe box never
+    overlap in ``gamma`` -- so the scan order is deterministic, not
+    arbitrating overlap.  Per chart: (1) certified-box containment on
+    ``(gamma, log w)`` and the chart-specific source coordinates; (3)
+    engine-refusal exclusion balls; (5) image-count match; (6) cusp
+    exclusion / ``eta`` floor; (7) tube when ``eta in [eta_floor,
+    eta_max]``, else far-field when ``eta > eta_overlap_min``, else a lobe
+    chart when the source falls in that lobe, else a wedge chart for
+    interior sources.
 
     Parameters
     ----------
-    charts : sequence of TubeChart, FarFieldChart or LobeInteriorChart
+    charts : sequence of TubeChart, FarFieldChart, LobeInteriorChart or
+        InteriorWedgeChart
         The surrogate's charts.
     gamma : float
         External shear magnitude.
@@ -2602,19 +3084,20 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
         Eigenframe source position.  Threaded to the far-field guard
         `_farfield_serves` (mapped to far-field-smooth ``(s, d)`` at the
         query's own gamma, Build 1e-farfield WP2) and to the lobe-interior
-        guard `_lobe_serves`.  Defaults are non-finite: a caller that does
-        not thread the source declines every far-field and lobe chart
-        cleanly (only the tube dispatch is exercised).
+        guard `_lobe_serves` and wedge guard `_wedge_serves`.  Defaults
+        are non-finite: a caller that does not thread the source declines
+        every far-field, lobe, and wedge chart cleanly (only the tube
+        dispatch is exercised).
 
     Returns
     -------
-    TubeChart, FarFieldChart, LobeInteriorChart or None
+    TubeChart, FarFieldChart, LobeInteriorChart, InteriorWedgeChart or None
         The selected chart, or ``None`` to fall through to the engine.
     """
     # (2) gamma guard band around the det-A = 0 parity boundary.
     if abs(gamma - 1.0) < _GAMMA_GUARD_BAND:
         return None
-    # (7) priority: tube charts first, then far-field, then lobe-interior.
+    # (7) priority: tube > far-field > lobe-interior > wedge-interior.
     for chart in charts:
         if isinstance(chart, TubeChart) and _tube_serves(
                 chart, gamma, log_w_min, log_w_max, eta, theta, image_count):
@@ -2626,6 +3109,11 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
             return chart
     for chart in charts:
         if isinstance(chart, LobeInteriorChart) and _lobe_serves(
+                chart, gamma, log_w_min, log_w_max, eta, image_count,
+                y1_eig, y2_eig):
+            return chart
+    for chart in charts:
+        if isinstance(chart, InteriorWedgeChart) and _wedge_serves(
                 chart, gamma, log_w_min, log_w_max, eta, image_count,
                 y1_eig, y2_eig):
             return chart
@@ -2647,9 +3135,12 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
     contracts on the LOBE-LOCAL ``(rho_lobe, v2)`` where ``v2`` is either
     the raw ``theta_local`` (when ``theta_to_s is None``) or the wedge-edge
     ``s`` coordinate mapped from ``theta_local`` via the chart's stored
-    ``theta_to_s`` map (same pattern as tube charts).  ``y1_eig`` / ``y2_eig``
-    are the eigenframe source, required for a `FarFieldChart` or
-    `LobeInteriorChart` and ignored for a tube chart.
+    ``theta_to_s`` map (same pattern as tube charts); a wedge-interior chart
+    contracts on ``(r, v2)`` where ``v2`` is either the raw ``theta_wedge``
+    or an s-coordinate mapped from ``theta_wedge`` via the chart's stored
+    ``theta_to_s`` map.  ``y1_eig`` / ``y2_eig`` are the eigenframe source,
+    required for a `FarFieldChart`, `LobeInteriorChart`, or
+    `InteriorWedgeChart` and ignored for a tube chart.
 
     A caller reaches this only after `select_chart` picked ``chart``; for a
     far-field chart that means `_to_farfield_smooth` already succeeded on
@@ -2676,6 +3167,19 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
                                  chart.theta_to_s[1]))
         else:
             v2 = theta_local
+    elif isinstance(chart, InteriorWedgeChart):
+        # Wedge-interior chart: fold source into canonical first quadrant
+        # and compute (r, theta_wedge) via the chart's wedge map.
+        r, theta_wedge = _to_wedge_fixed(gamma, y1_eig, y2_eig,
+                                         chart.wedge_map)
+        v1 = r
+        if chart.theta_to_s is not None:
+            # Remap theta_wedge -> s via the stored dense map before
+            # contracting the spline (same theta_to_s pattern as tube/lobe).
+            v2 = float(np.interp(theta_wedge, chart.theta_to_s[0],
+                                 chart.theta_to_s[1]))
+        else:
+            v2 = theta_wedge
     else:
         # Far-field chart: far-field-smooth (s, d) at the query's own gamma.
         v1, v2 = _to_farfield_smooth(gamma, y1_eig, y2_eig, chart.arc_map,
@@ -2723,10 +3227,11 @@ class LensAmplificationSurrogate:
             raise ValueError('A surrogate needs at least one chart.')
         for chart in charts:
             if not isinstance(chart, (FarFieldChart, TubeChart,
-                                      LobeInteriorChart)):
+                                      LobeInteriorChart,
+                                      InteriorWedgeChart)):
                 raise ValueError(
-                    'charts must be FarFieldChart, TubeChart or '
-                    'LobeInteriorChart instances; '
+                    'charts must be FarFieldChart, TubeChart, '
+                    'LobeInteriorChart or InteriorWedgeChart instances; '
                     f'got {type(chart).__name__}.')
         self.charts = charts
         self.provenance = dict(provenance)
@@ -3180,6 +3685,152 @@ class LensAmplificationSurrogate:
             corridor_half)
         return cls([chart], provenance)
 
+    @classmethod
+    def from_wedge_engine(cls, *, gamma_range: tuple[float, float],
+                          r_range: tuple[float, float],
+                          theta_wedge_range: tuple[float, float],
+                          w_range: tuple[float, float],
+                          n_gamma: int = _DEFAULT_PARAM_NODES,
+                          n_r: int = _DEFAULT_PARAM_NODES,
+                          n_theta_wedge: int = _DEFAULT_PARAM_NODES,
+                          w_nodes_per_decade: int = _DEFAULT_W_NODES_PER_DECADE,
+                          definition: str = _INTERIOR_ENVELOPE_DEFINITION
+                          ) -> 'LensAmplificationSurrogate':
+        """Train a caustic-relative wedge-interior surrogate on a dense grid.
+
+        The positive-parity (``gamma < 1``) astroid-interior counterpart of
+        `from_lobe_engine`, in WEDGE-FIXED caustic-normalised coordinates.
+        For each grid node ``(gamma, r, theta_wedge)`` the wedge-fixed frame
+        maps the node to a physical eigenframe source via `_from_wedge_fixed`
+        (canonical first-quadrant, positive y1/y2), evaluates
+        `ChangRefsdalChannels.evaluate` at ``beta = 0``, ``kappa = 0`` on the
+        full dense ``w`` grid, and stores the ``tau_c``-demodulated
+        INTERIOR_SACR_C ``partition.envelope``.  A node that refuses at any
+        ``w`` or returns a non-finite envelope is recorded refused (in
+        wedge-fixed coordinates) and left as zeros.
+
+        The wedge caustic map is built from a dense 101-point theta grid over
+        ``[0, pi/2]`` for each gamma node, ensuring bilinear interpolation
+        accuracy far exceeds the spline's theta_wedge_grid resolution.
+
+        Parameters
+        ----------
+        gamma_range : tuple[float, float]
+            External-shear axis bounds ``(low, high)``; typically ``gamma < 1``
+            for the positive-parity astroid interior.
+        r_range : tuple[float, float]
+            Radial axis bounds ``(low, high)``; ``r`` is in ``[0, 1)`` for
+            the interior (normalised by caustic reach).
+        theta_wedge_range : tuple[float, float]
+            Wedge-angle axis bounds ``(low, high)`` within ``[0, pi/2]``.
+        w_range : tuple[float, float]
+            Dimensionless-frequency bounds ``(w_min, w_max)``, both positive.
+        n_gamma, n_r, n_theta_wedge : int, optional
+            Nodes per parameter axis (default 7).
+        w_nodes_per_decade : int, optional
+            Density of the dense log-w training axis (default 15).
+        definition : str, optional
+            Envelope-definition tag (default INTERIOR_SACR_C).
+
+        Returns
+        -------
+        LensAmplificationSurrogate
+            The trained single-chart wedge-interior surrogate.
+
+        Raises
+        ------
+        CarrierDiscontinuityError
+            If the tile straddles a critical-basin flip
+            (`_assert_carrier_continuity`); the tile must be subdivided.
+        """
+        # --- Build training grids ---
+        log_w_grid = _log_w_grid(w_range, w_nodes_per_decade)
+        gamma_grid = _log_reach_gamma_axis(gamma_range, n_gamma, 'gamma')
+        r_grid = _uniform_axis(r_range, n_r, 'r')
+        theta_wedge_grid = _uniform_axis(theta_wedge_range, n_theta_wedge,
+                                         'theta_wedge')
+
+        # --- Build wedge caustic map ---
+        # Dense theta grid for the bilinear interpolation table (101 nodes).
+        map_theta_nodes = np.linspace(0.0, np.pi / 2, 101)
+        r_table = np.empty((gamma_grid.size, map_theta_nodes.size))
+        for i_g, gamma in enumerate(gamma_grid):
+            for i_th, th in enumerate(map_theta_nodes):
+                r_table[i_g, i_th] = geometry.r_caustic(float(gamma), float(th))
+        wedge_map = _WedgeCausticMap(gamma_nodes=gamma_grid,
+                                     theta_nodes=map_theta_nodes,
+                                     r_table=r_table)
+
+        # --- Allocate storage ---
+        w_grid = np.exp(log_w_grid)
+        shape = (log_w_grid.size, gamma_grid.size, r_grid.size,
+                 theta_wedge_grid.size)
+        envelope_real = np.zeros(shape, dtype=float)
+        envelope_imag = np.zeros(shape, dtype=float)
+        refused: list[tuple[float, float, float]] = []
+        # Parked-carrier critical_source per node for basin-continuity.
+        carrier = np.full((gamma_grid.size, r_grid.size,
+                           theta_wedge_grid.size, 2), np.nan, dtype=float)
+        image_count: int | None = None
+        parity: int | None = None
+
+        # --- Nested training loop ---
+        for i_g, gamma in enumerate(gamma_grid):
+            for i_r, r in enumerate(r_grid):
+                for i_th, theta_wedge in enumerate(theta_wedge_grid):
+                    channels = ChangRefsdalChannels(w_grid)
+                    try:
+                        y1_eig, y2_eig = _from_wedge_fixed(
+                            float(gamma), float(r), float(theta_wedge),
+                            wedge_map)
+                        partition = channels.evaluate(
+                            gamma=float(gamma), y=(y1_eig, y2_eig),
+                            beta=0.0, kappa=0.0)
+                    except _REFUSAL_ERRORS:
+                        refused.append((float(gamma), float(r),
+                                        float(theta_wedge)))
+                        continue
+                    env = partition.envelope
+                    if not np.all(np.isfinite(env)):
+                        refused.append((float(gamma), float(r),
+                                        float(theta_wedge)))
+                        continue
+                    count = int(partition.real_mask.sum())
+                    if image_count is None:
+                        image_count = count
+                        # Astroid interior typically has 4 images, parity +1.
+                        parity = 1
+                    elif count != image_count:
+                        # Node straddles a region boundary; record refused.
+                        refused.append((float(gamma), float(r),
+                                        float(theta_wedge)))
+                        continue
+                    envelope_real[:, i_g, i_r, i_th] = env.real
+                    envelope_imag[:, i_g, i_r, i_th] = env.imag
+                    carrier[i_g, i_r, i_th] = partition.critical_source
+
+        # --- Interior interpolator hygiene (same guard as from_lobe_engine /
+        # from_engine interior branch, unchanged -- F022) ---
+        _assert_carrier_continuity(
+            carrier, gamma_grid,
+            (gamma_grid.size, r_grid.size, theta_wedge_grid.size))
+
+        refused_points = (np.array(refused, dtype=float) if refused
+                          else np.empty((0, 3), dtype=float))
+        chart = InteriorWedgeChart.from_wedge_values(
+            gamma_grid=gamma_grid, r_grid=r_grid,
+            theta_wedge_grid=theta_wedge_grid, log_w_grid=log_w_grid,
+            envelope_real=envelope_real, envelope_imag=envelope_imag,
+            image_count=image_count, parity=parity,
+            wedge_map=wedge_map,
+            eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
+            refused_points=refused_points,
+            envelope_definition=definition)
+        provenance = cls._build_wedge_provenance(
+            gamma_range, r_range, theta_wedge_range, w_range, shape,
+            envelope_real, envelope_imag)
+        return cls([chart], provenance)
+
     @staticmethod
     def _box_region_labels(gamma_grid: np.ndarray, s_grid: np.ndarray,
                            d_grid: np.ndarray, arc_map: _FarFieldArcMap,
@@ -3293,6 +3944,42 @@ class LensAmplificationSurrogate:
             'chart_types': ['lobe'],
             'training_hash': hasher.hexdigest()[:12]}
 
+    @staticmethod
+    def _build_wedge_provenance(gamma_range: tuple[float, float],
+                                r_range: tuple[float, float],
+                                theta_wedge_range: tuple[float, float],
+                                w_range: tuple[float, float],
+                                shape: tuple[int, int, int, int],
+                                envelope_real: np.ndarray,
+                                envelope_imag: np.ndarray) -> dict:
+        """Build the provenance dict for a caustic-relative wedge-interior chart.
+
+        The wedge counterpart of `_build_provenance` / `_build_lobe_provenance`.
+        The spatial ranges are the WEDGE-FIXED ``(r, theta_wedge)`` axis bounds;
+        the ``axis_schema`` tag records the wedge-caustic-relative convention so
+        a stale absolute-coordinate interior artifact is distinguishable (and
+        hard-refused) at load.
+        """
+        hasher = hashlib.sha1()
+        hasher.update(np.ascontiguousarray(envelope_real).tobytes())
+        hasher.update(np.ascontiguousarray(envelope_imag).tobytes())
+        n_w, n_gamma, n_r, n_theta = shape
+        return {
+            'gamma_range': [float(gamma_range[0]), float(gamma_range[1])],
+            'r_range': [float(r_range[0]), float(r_range[1])],
+            'theta_wedge_range': [float(theta_wedge_range[0]),
+                                  float(theta_wedge_range[1])],
+            'axis_schema': _WEDGE_AXIS_SCHEMA,
+            'w_range': [float(w_range[0]), float(w_range[1])],
+            'resolution': {'n_w': int(n_w), 'n_gamma': int(n_gamma),
+                           'n_r': int(n_r),
+                           'n_theta_wedge': int(n_theta)},
+            'beta': 0.0,
+            'kappa': 0.0,
+            'chart_count': 1,
+            'chart_types': ['wedge'],
+            'training_hash': hasher.hexdigest()[:12]}
+
     # ---- Query --------------------------------------------------------
 
     def may_serve(self, gamma: float, log_w_min: float,
@@ -3366,13 +4053,13 @@ class LensAmplificationSurrogate:
             the caller must fall back to the exact engine.
         definition : str or None
             The served chart's envelope-definition tag when a
-            `FarFieldChart` or `LobeInteriorChart` is served (the
-            serving-side reconstruction dispatches on it -- a lobe chart's
-            INTERIOR_SACR_C label reconstructs by the interior mirror in the
-            query geometry's ``tau_c`` frame, identical to an origin-centred
-            interior chart, Professor Q3), ``None`` for a `TubeChart` or
-            when not served.  The persisted tag is the single dispatch
-            signal -- no parallel flag.
+            `FarFieldChart`, `LobeInteriorChart`, or `InteriorWedgeChart`
+            is served (the serving-side reconstruction dispatches on it --
+            a lobe/wedge chart's INTERIOR_SACR_C label reconstructs by the
+            interior mirror in the query geometry's ``tau_c`` frame,
+            identical to an origin-centred interior chart, Professor Q3),
+            ``None`` for a `TubeChart` or when not served.  The persisted
+            tag is the single dispatch signal -- no parallel flag.
         """
         w = np.asarray(w_array, dtype=float)
         w_flat = np.atleast_1d(w).ravel()
@@ -3398,7 +4085,8 @@ class LensAmplificationSurrogate:
             chart, gamma=gamma, eta=eta, theta=theta, log_w_query=log_w,
             y1_eig=y1_eig, y2_eig=y2_eig)
         definition = (chart.envelope_definition
-                      if isinstance(chart, (FarFieldChart, LobeInteriorChart))
+                      if isinstance(chart, (FarFieldChart, LobeInteriorChart,
+                                            InteriorWedgeChart))
                       else None)
         return env_flat.reshape(w.shape), True, definition
 
@@ -3764,6 +4452,25 @@ def _chart_to_npz(chart, index: int) -> dict:
                   prefix + 'boundary_r': chart.boundary_r}
         if chart.theta_to_s is not None:
             arrays[prefix + 'theta_to_s'] = chart.theta_to_s
+    elif isinstance(chart, InteriorWedgeChart):
+        # Wedge (caustic-relative interior) branch: the spatial axes are the
+        # caustic-normalised radius ``r`` and the wedge angle ``theta_wedge``.
+        # The wedge_map table (gamma_nodes, theta_nodes, r_table) persists
+        # alongside them so the coordinate transform is self-contained.
+        wedge_schema = _WEDGE_AXIS_SCHEMA
+        meta = {'kind': 'wedge', 'image_count': chart.image_count,
+                'parity': chart.parity,
+                'eta_overlap_min': chart.eta_overlap_min,
+                'envelope_definition': chart.envelope_definition,
+                'axis_schema': wedge_schema}
+        axes = (chart.log_w_grid, chart.gamma_grid, chart.r_grid,
+                chart.theta_wedge_grid)
+        arrays = {prefix + 'refused': chart.refused_points,
+                  prefix + 'wedge_gamma_nodes': chart.wedge_map.gamma_nodes,
+                  prefix + 'wedge_theta_nodes': chart.wedge_map.theta_nodes,
+                  prefix + 'wedge_r_table': chart.wedge_map.r_table}
+        if chart.theta_to_s is not None:
+            arrays[prefix + 'theta_to_s'] = chart.theta_to_s
     else:
         # Far-field exterior branch (Build 1e-farfield WP2): the spatial axes
         # are the far-field-smooth arc length ``s`` and signed perpendicular
@@ -3842,6 +4549,35 @@ def _chart_from_npz(data, index: int):
             corridor_half=meta['corridor_half'],
             boundary_theta=data[prefix + 'boundary_theta'],
             boundary_r=data[prefix + 'boundary_r'],
+            envelope_definition=definition,
+            theta_to_s=theta_to_s)
+    if meta['kind'] == 'wedge':
+        # Wedge (caustic-relative interior) branch: validate axis schema and
+        # rebuild the wedge_map from persisted gamma/theta nodes and r_table.
+        _validate_axis_schema(
+            meta.get('axis_schema'), _KNOWN_WEDGE_AXIS_SCHEMAS,
+            f'Wedge-interior chart {index}')
+        definition = _validate_farfield_definition(
+            meta.get('envelope_definition'), f'chart {index}')
+        # theta_to_s loading: optional; when absent the spline is on raw
+        # theta_wedge.
+        key = prefix + 'theta_to_s'
+        theta_to_s = data[key] if key in data else None
+        wedge_map = _WedgeCausticMap(
+            gamma_nodes=np.ascontiguousarray(
+                data[prefix + 'wedge_gamma_nodes'], dtype=float),
+            theta_nodes=np.ascontiguousarray(
+                data[prefix + 'wedge_theta_nodes'], dtype=float),
+            r_table=np.ascontiguousarray(
+                data[prefix + 'wedge_r_table'], dtype=float))
+        return InteriorWedgeChart._assemble(
+            gamma_grid=gamma_grid, r_grid=p1_grid,
+            theta_wedge_grid=p2_grid, log_w_grid=log_w_grid,
+            real_coeffs=real_coeffs, imag_coeffs=imag_coeffs, knots=knots,
+            image_count=meta['image_count'], parity=meta['parity'],
+            eta_overlap_min=meta['eta_overlap_min'],
+            refused_points=data[prefix + 'refused'],
+            wedge_map=wedge_map,
             envelope_definition=definition,
             theta_to_s=theta_to_s)
     definition = _validate_farfield_definition(

@@ -67,3 +67,43 @@
   FP reduction order in the scalar vs array code paths. The byte-identity
   guarantee holds against the ARRAY-path extraction (which is what
   fold_ppgo_correction's internal _fallback() actually computes).
+- Created `cogwheel/tests/test_lensing_interior_wedge_chart.py` for
+  WP1+WP2 InteriorWedgeChart coordinate infrastructure + serve dispatch.
+  25 tests in 4 classes: CoordinateRoundTripTestCase (6 tests),
+  NpzRoundTripTestCase (7 tests), WedgeServesGuardTestCase (9 tests),
+  SelfFalsificationTestCase (3 tests). All 25 green in 14.6s.
+  Key findings: (1) The envelope_definition tag must be
+  'interior_sacr_c_envelope' (not 'interior_sacr_c') for NPZ round-trip
+  to pass — the validator checks against KNOWN_INTERIOR_DEFINITIONS.
+  (2) _validate_axis requires >= 4 nodes per axis; the spec's suggested
+  gamma=[0.25,0.45] (2 nodes) is infeasible; expanded to 4-node grids.
+  (3) Round-trip residual measured < 1e-15 (exact cancellation through
+  same bilinear interpolant), far below the 1e-12 tolerance.
+  (4) The _WedgeCausticMap gamma_nodes MUST equal the chart's gamma_grid
+  exactly (validated by _validate_wedge_caustic_map).
+  Backward-compat audit: WP1+WP2 are purely ADDITIVE — new elif branches
+  in _chart_to_npz/_chart_from_npz, new isinstance checks in dispatch.
+  No existing test references the wedge symbols; no regressions found.
+
+- Extended `cogwheel/tests/test_lensing_interior_wedge_chart.py` with 3 new
+  classes + 1 self-falsification class (total 8 classes, 40 tests):
+  `SelectChartDispatchTestCase` (5 tests: select_chart returns wedge chart,
+  _evaluate_chart returns finite complex, D2 reflected source identical,
+  all 4 quadrants identical, wrong image_count refuses);
+  `CarrierContinuityGateTestCase` (4 tests: smooth carrier passes, jump
+  raises CarrierDiscontinuityError, NaN nodes don't trigger false flip,
+  engine-derived small tile passes);
+  `EnvelopeAccuracyTestCase` (3 tests: enough nodes succeeded, spline
+  reproduces training values at nodes <1e-10, fresh engine call matches
+  served); `DispatchSelfFalsificationTestCase` (3 tests: theta-varying
+  envelope detects asymmetry, carrier jump fires error, corrupted coeffs
+  detected). All 40 green in 38.8s.
+  KEY FINDING: `LensAmplificationSurrogate.__init__` does NOT include
+  `InteriorWedgeChart` in its isinstance check — `from_wedge_engine` would
+  crash with ValueError. Worked around by calling `select_chart([chart],...)`
+  directly and building charts via `from_wedge_values`. This is a production
+  bug that should be flagged for the Coder.
+  Backward-compat audit: WP1+WP2 changes are purely ADDITIVE — new isinstance
+  branches in select_chart, _evaluate_chart, _chart_to_npz/_chart_from_npz
+  only trigger for InteriorWedgeChart. No existing test references wedge
+  symbols. No regressions found in existing test infrastructure.

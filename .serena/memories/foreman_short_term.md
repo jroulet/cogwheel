@@ -20,3 +20,17 @@
   function and its counterpart → `replace_content` (literal, multi-line needle) →
   `ast.parse` syntax check → import smoke-test. Total: 4 Serena calls + 2 shell
   commands; no read-file needed beyond the initial symbol fetches.
+
+## Session: INS-w-002/003 (surrogate.py dead-code + tautological ternary)
+
+- **Dead-code deletion via `delete_lines`**: read the exact 0-based line range first
+  (`read_file` with start/end), confirm the dead statement, then `delete_lines` with
+  those same indices. No symbol-level tool needed for a pure line deletion that doesn't
+  affect any structural boundary.
+
+- **Tautological ternary simplification**: `x = (A if cond else A)` → `x = A`. A
+  `replace_content` with a literal multi-line needle (the full ternary) and a one-line
+  replacement is the cleanest approach; no ambiguity risk since the pattern is unique.
+
+- Both fixes in one file; a single `ast.parse` after the second edit suffices to cover
+  both changes simultaneously.
