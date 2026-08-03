@@ -200,7 +200,9 @@ STATUS_INVALID = 2.0          # engine refusal / parity-gamma mismatch / no ref
 #: measured w range doesn't reach certification bar.  Extrapolating the
 #: power-law fit gives a conservative estimated w_cert.
 _EXTRAP_ALPHA_MIN = 0.75       # cusp lower bound on decay exponent
-_EXTRAP_ALPHA_MAX = 1.5        # upper bound on decay exponent
+_EXTRAP_ALPHA_MAX = 3.5        # upper bound on decay exponent (measured up to ~2.8
+                               # at mid-gamma interior points where multi-image
+                               # interference destructively cancels the correction)
 _EXTRAP_R2_MIN = 0.9           # goodness-of-fit threshold (R² in log-log)
 _EXTRAP_MAX_RATIO = 5.0        # max w_cert_extrap / w_max_measured
 _EXTRAP_W_CERT_DEFLATION = 2.0  # conservative safety factor (inflates floor)
@@ -1143,7 +1145,14 @@ def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
             if fc is not None:
                 continue
             w_prefix_i, error_i = per_angle_data[i]
-            extrap = _extrapolate_floor(w_prefix_i, error_i, CERTIFICATION_BAR)
+            # Use the upper envelope (running max from right) to remove
+            # 4-image beating non-monotonicity.  The envelope correctly
+            # captures the average power-law decay of the error, ignoring
+            # oscillatory modulation from multi-image interference (Professor
+            # analysis: interior 4-image configs have non-monotone F-normalized
+            # error due to beating between images at different delays).
+            envelope_i = np.maximum.accumulate(error_i[::-1])[::-1]
+            extrap = _extrapolate_floor(w_prefix_i, envelope_i, CERTIFICATION_BAR)
             if extrap is not None:
                 floors_cert[i] = extrap
 
