@@ -404,6 +404,14 @@ njit nearest-caustic search; certified by the new
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
 
+- `0.9.4` ():
+
+Fix stale "Born far-annulus carrier" label in the engine row's leading module
+list. The C8 build updated the Born rung description body (annulus -> exterior
+rung, rho > 1 criterion) but left the short summary phrase in the opening
+sentence unchanged. Corrected to "Born exterior rung carrier" to match the
+body and completed.d/2026-08-02_c8_caustic_relative_extern.md.
+
 - `0.9.3` ():
 
 C5: ghost decay gate added to `farfield_ghost_term` (`channels.py`).
