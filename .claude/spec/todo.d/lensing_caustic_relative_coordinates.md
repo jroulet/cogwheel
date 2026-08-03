@@ -188,7 +188,7 @@ section: Backlog
      parities, for the real P5/P6 crossover `rho*`. This is an engine run:
      quote unit count x measured per-unit cost before launching.
 
-  5. **C8 — far zone becomes caustic-relative; the annulus is retired.**
+  5. **DONE (2026-08-02, commit 65eebcb). C8 — far zone becomes caustic-relative; the annulus is retired.**
      `ANNULUS_INNER_RADIUS` -> measured `rho*`. DELETE `GAMMA_FENCE = 3/4` and
      the saddle fence `1.0502342`; both are consequences of the annulus radius,
      not independent physics. Do not port them, do not replace them with new
@@ -199,11 +199,11 @@ section: Backlog
      region; regime count is TWO per parity; coverage-map regions 6-9 collapse
      to one row.
 
-  6. **C5 — ghost decay gate.** Independent of the coordinate work and owed on
+  6. **DONE (2026-08-02, commit e456871). C5 — ghost decay gate.** Independent of the coordinate work and owed on
      both branches regardless (F027): the ghost branch needs a decay gate, not
      just a separation test.
 
-  7. **`_GHOST_SEPARATION_MIN = 0.7` — the suspect.** Ask the Part 0 question.
+  7. **DONE (2026-08-02, commit e5b56b8). `_GHOST_SEPARATION_MIN = 0.7` — cleared through Part 0 (Build 7):** Ask the Part 0 question.
      F027 showed it never binds on the saddle. Re-derive as relative, or
      delete. The test-heavy step: 22 references across
      `test_lensing_ghost_gate.py` and `test_lensing_exterior_windows.py`.

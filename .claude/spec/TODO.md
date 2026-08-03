@@ -425,7 +425,7 @@ Tag conventions:
      parities, for the real P5/P6 crossover `rho*`. This is an engine run:
      quote unit count x measured per-unit cost before launching.
 
-  5. **C8 — far zone becomes caustic-relative; the annulus is retired.**
+  5. **DONE (2026-08-02, commit 65eebcb). C8 — far zone becomes caustic-relative; the annulus is retired.**
      `ANNULUS_INNER_RADIUS` -> measured `rho*`. DELETE `GAMMA_FENCE = 3/4` and
      the saddle fence `1.0502342`; both are consequences of the annulus radius,
      not independent physics. Do not port them, do not replace them with new
@@ -436,11 +436,11 @@ Tag conventions:
      region; regime count is TWO per parity; coverage-map regions 6-9 collapse
      to one row.
 
-  6. **C5 — ghost decay gate.** Independent of the coordinate work and owed on
+  6. **DONE (2026-08-02, commit e456871). C5 — ghost decay gate.** Independent of the coordinate work and owed on
      both branches regardless (F027): the ghost branch needs a decay gate, not
      just a separation test.
 
-  7. **`_GHOST_SEPARATION_MIN = 0.7` — the suspect.** Ask the Part 0 question.
+  7. **DONE (2026-08-02, commit e5b56b8). `_GHOST_SEPARATION_MIN = 0.7` — cleared through Part 0 (Build 7):** Ask the Part 0 question.
      F027 showed it never binds on the saddle. Re-derive as relative, or
      delete. The test-heavy step: 22 references across
      `test_lensing_ghost_gate.py` and `test_lensing_exterior_windows.py`.
@@ -660,7 +660,7 @@ Tag conventions:
   - **1e-farfield — DONE (2026-07-31).** Positive-parity exterior charts
     interpolate in gamma-resolved nearest-fold `(s, d)` coordinates; the
     planned macro-saddle per-deltoid-edge design remains out of scope.
-  - **1e-lobe — blocks only step 9.** `_build_lobe_chart`, macro-saddle only.
+  - **DONE (2026-08-01). 1e-lobe** `_build_lobe_chart`, macro-saddle only.
     Its lobe-local `theta_local` sweeps the wedge turnarounds, so it is also
     where `s = sqrt(theta_max - theta)` (F044) applies.
 
@@ -668,12 +668,12 @@ Tag conventions:
   three are named in this fragment's own acceptance and in step 9's
   prerequisite, and were scheduled NOWHERE until 2026-07-30:
 
-  - **1e-eta — blocks step 9.** Axis 2. Derive `xi = (3 w Delta_tau / 4)^{2/3}`
+  - **DONE (2026-08-02). 1e-eta** Axis 2. Derive `xi = (3 w Delta_tau / 4)^{2/3}`
     and state `u = sqrt(eta)` as its `w`-independent shadow. Mostly
     explanatory: the incumbent axis already works, so the deliverable is WHY
     it works and WHERE it does not, plus the DRY test below. Cheapest of the
     three.
-  - **1e-w — blocks step 9.** Axis 3. The `w` axis is uniform in `log w`, which
+  - **DONE (2026-08-02). 1e-w** Axis 3. The `w` axis is uniform in `log w`, which
     this fragment calls a guess; the envelope varies on `w * Delta_tau`. This
     is the one sub-build with a falsifiable oracle ALREADY in the tree: the
     serving path's leave-one-out envelope refinement (`_LOO_SEED_NODES = 8`,
@@ -681,7 +681,7 @@ Tag conventions:
     error. The analytic rule must REPRODUCE those node counts to within the
     LOO stopping tolerance; if it does not, the analytic scale is wrong,
     because the LOO result is the measurement.
-  - **1e-gamma — blocks step 9.** Axis 4. Uniform in `gamma` cannot be right
+  - **DONE (2026-08-02, commit 6185506). 1e-gamma** Axis 4. Uniform in `gamma` cannot be right
     when the caustic's extent varies 28x across the prior and DIVERGES at the
     parity wall (F036). The measure is the same caustic-relative coordinate
     the redesign already moves to, so this one composes with step 5 (C8)
@@ -1027,7 +1027,7 @@ Tag conventions:
 
   Owed, still open:
 
-  0. **BLOCKED ON C8 — do not train, do not wire yet.** The saddle exterior
+  0. **UNBLOCKED (C8 done 2026-08-02, C5 done 2026-08-02). The saddle exterior
      fence `1.0502342 < gamma < 3` is derived from `ANNULUS_INNER_RADIUS`, a
      prior-box length being retired (F036); it dissolves with the annulus
      rather than being ported. The F026 closed form `saddle_caustic_max_y` is

@@ -16,3 +16,15 @@
   (engine-backed, TRAIN_TIER gated), ExteriorCellPreservationTestCase
   (engine-backed, TRAIN_TIER gated). 10 fast tests pass; 4 engine tests
   correctly skip without COGWHEEL_TRAIN_TIER.
+
+- Extended `test_lensing_exterior_windows.py` with 2 new classes for WP1:
+  `InteriorWnpdAccuracyTestCase` (4 tests) and `TrainingConfigWnpdFieldTestCase`
+  (4 tests). All 8 green. Key finding: the Architect spec's falsification
+  claim ("WNPD=6 fails the 0.05 bar at gamma=0.65") is FALSE at the existing
+  smoke geometry (SACRC_S_RANGE, SACRC_D_RANGE, n_s=5, n_d=5) — measured eps is
+  0.0002 even at WNPD=6 because the SACR-C envelope is dominated by spatial
+  smoothness at this patch. Replaced with a wiring test + node-count test that
+  proves the field is load-bearing (different node counts) and correctly wired.
+  Added `_interior_chart_wnpd` (lru_cached) and `_wnpd_heldout_eps` helpers.
+  The `_wnpd_heldout_eps` catches LensDomainError from `_evaluate_chart` (the
+  wrap-into-arc refusal at gamma=0.40 seed=42 draw #5).

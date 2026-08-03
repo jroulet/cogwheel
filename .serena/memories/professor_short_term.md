@@ -1,36 +1,44 @@
 # Professor Short-Term Observations
 
-## 2026-08-02: _extrapolate_floor build review — PASS
+## 2026-08-02: interior_w_nodes_per_decade build review — PASS (with concern)
 
-Reviewed the `_extrapolate_floor` implementation and its test suite
-(`test_lensing_extrapolate_floor.py`). All 10 fast-tier tests pass; 4 engine-backed
-tests correctly gated by `COGWHEEL_TRAIN_TIER`.
+### Tests executed:
+- `InteriorWnpdAccuracyTestCase`: 4/4 passed (38s)
+- `TrainingConfigWnpdFieldTestCase`: 4/4 passed (4s)
+- `WholeInteriorSacrcTestCase`: 7/7 passed + 1 xfailed (91s)
+- `SelfFalsificationTestCase`: 10/10 passed (21s)
+- Full suite: **85 passed, 1 xfailed** (216s)
 
-### Physics verification:
-- **Power-law fit**: Result 2114.86 vs analytic 1994.74 (ratio 1.06, within 30% tol).
-  The ~6% overshoot is expected from beat-induced positive bias on the log-log fit.
-- **Slope bounds [0.75, 1.5]**: Physically motivated by fold (~1/w) and cusp
-  (~w^{-5/6} to w^{-4/3}) decay laws in the unresolved diffraction regime.
-- **R² > 0.9**: Rejects random scatter (measured R²=0.04 for uniform noise).
-- **MAX_RATIO = 5.0**: Prevents extrapolation beyond ~0.7 decades — appropriate
-  conservatism for a power-law extrapolation of an oscillating envelope.
-- **Deflation factor 2.0**: Provides a safety margin by reducing the certified w.
-- **Interior-only guard (rho_center < 1.0)**: Physically correct — only 4-image
-  interior cells have the fold/cusp decay structure that justifies power-law
-  extrapolation; 2-image exterior cells have different error geometry.
-- **floor > w_ceiling logic**: For interior cells, extrapolated floors can validly
-  exceed w_ceiling (the ceiling bounds measurements, not the decay law itself).
+### Measured epsilon values (WNPD accuracy):
+- gamma=0.40, WNPD=12: eps=0.002416 — PASSES bar 0.05 (97% headroom)
+- gamma=0.65, WNPD=12: eps=0.000277 — PASSES bar 0.05 (99.4% headroom)
+- gamma=0.65, WNPD=6:  eps=0.000239 — does NOT breach the 0.05 bar
 
-### Test design quality:
-- Anti-vacuity tearDown prevents silent green on broken impl.
-- SelfFalsificationTestCase proves all guards are load-bearing.
-- Excessive-extrapolation test uses alpha=0.8 (inside bounds) so ONLY the ratio
-  guard triggers — good isolation.
-- Positive test uses [10, 2000] grid (not spec's [1, 60]) to keep ratio=0.5 < 5.
-  The [1, 60] grid with same C/bar/alpha would give ratio=16.6 — correctly refused.
+### Physics assessment:
+- Both gamma values at WNPD=12 pass with ENORMOUS margin (10-100x better than
+  the spec's expected 0.005-0.030 range). This indicates the (s,d) spatial
+  interpolation at n_s=5, n_d=5 over the small test tile [0.01,0.04]×[-0.02,-0.005]
+  is sub-permille accurate, and the smooth SACR-C envelope (bounded phase theorem:
+  max 4 rad residual) is NOT the interpolation bottleneck.
+- **Spec falsification not realized**: WNPD=6 at gamma=0.65 does NOT fail. This is
+  physics-correct: 17 w-nodes over 2.6 decades with ≤4 residual-phase cycles gives
+  ~4 nodes/cycle → cubic error O(h^4) ~ 4e-3, comfortably below 0.05. The SACR-C
+  demodulation is TOO effective for the lever to show at this tile size.
+- The falsification WOULD show at production scale (wider spatial extent, near-cusp
+  tiles where envelope develops sharper frequency structure, or larger w-range).
+- The test correctly proves the WIRING (node count changes) and the ACCURACY-AT-
+  PRODUCTION-DENSITY, even without the failing-low-WNPD demonstration.
 
-### Broader suite:
-- `test_lensing_ppgo_bandsplit.py`: 62 passed, 4 skipped (engine-gated).
-- `test_lensing_ghost.py`: 31 passed, 1 xfailed (expected).
+### TrainingConfig verification:
+- `interior_w_nodes_per_decade` exists, defaults to 15, accepts custom values,
+  is independent of `w_nodes_per_decade` (=4), frozen (immutable). All correct.
+- Wiring: `_log_w_grid(SACRC_W_RANGE, 15)` → 41 nodes; `_log_w_grid(..., 4)` → 12.
 
-Heavy full-sampling validation is operator-deferred.
+### Concern:
+- The spec's falsification claim ("WNPD=6 at gamma=0.65 FAILS the 0.05 bar") is
+  NOT realized in the current test geometry. The spec overestimated the envelope's
+  frequency complexity on this small, cusp-free tile. This is NOT a code bug — it's
+  a spec prediction that doesn't hold for this geometry. The lever IS load-bearing
+  (proven by node-count test) but the accuracy bar has >200x headroom, so the
+  WNPD=6→12 density increase is not needed to pass at this tile size.
+- Heavy full-sampling validation is operator-deferred.

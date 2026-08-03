@@ -8,6 +8,28 @@ Archived from `TODO.md`. Items retain their original section classification and 
 ## Backlog
 
 
+C5 (ghost decay gate, F027) from lensing_caustic_relative_coordinates, step 6.
+_GHOST_DECAY_IM_THRESHOLD = _FARFIELD_WINDOW_RADIANS / 5.0 = 0.4 added to
+channels.py. farfield_ghost_term refuses when Im(tau_c) < 0.4: near a
+principal axis the ghost is pure oscillation, not an exponentially-decaying
+correction, and must not be subtracted. The threshold is a fixed constant
+(frequency-independent), so the training label and serve mirror reach an
+identical admit/refuse decision for any fixed configuration. Tested by
+test_lensing_ghost_decay_gate.py. _GHOST_SEPARATION_MIN = 0.7 cleared through
+Part 0 (Build 7): confirmed as a lens-plane Einstein-unit quantity, not a
+prior-box constant; SEP_REFUSE_MAX/SEP_ADMIT_MIN tripwire assertions added.
+
+
+C8 (far zone becomes caustic-relative; annulus retired) from
+lensing_caustic_relative_coordinates, step 5.
+ANNULUS_INNER_RADIUS, GAMMA_FENCE = 3/4, and saddle_caustic_max_y() all
+deleted from _born.py. born_gate reduced from three guards to two (guard B:
+parity-wall margin; guard A: band split). surrogate_census.classify_fallthrough
+now uses rho > 1 (exterior-to-caustic) for the born category; constant
+_BORN_ANNULUS_OUTER_RADIUS deleted. ppgo_map.annulus_rho renamed caustic_rho.
+SPEC.md updated to reflect exterior region, two guards, and rho > 1 criterion.
+
+
 C6 (tube shell curvature-relative) from `lensing_caustic_relative_coordinates`.
 `TrainingConfig.eta_max`/`eta_floor` → `f_max`/`f_floor`; per-arc absolute
 `eta_max = f_max * R_c` computed in `_train_band_charts` and threaded to four

@@ -30,7 +30,7 @@ section: Backlog
 
   Owed, still open:
 
-  0. **BLOCKED ON C8 — do not train, do not wire yet.** The saddle exterior
+  0. **UNBLOCKED (C8 done 2026-08-02, C5 done 2026-08-02). The saddle exterior
      fence `1.0502342 < gamma < 3` is derived from `ANNULUS_INNER_RADIUS`, a
      prior-box length being retired (F036); it dissolves with the annulus
      rather than being ported. The F026 closed form `saddle_caustic_max_y` is

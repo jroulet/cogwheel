@@ -264,6 +264,10 @@ class TrainingConfig:
     n_rho: int = 4
     n_theta_c: int = 4
     w_nodes_per_decade: int = 4
+    # Interior (inside-caustic) tiles need higher w-axis density because the
+    # SACR-C envelope carries more oscillation cycles per decade than the
+    # exterior far-field remainder (Build interior-SACRC brief).
+    interior_w_nodes_per_decade: int = 15
     f_floor: float = _DEFAULT_F_FLOOR
     f_max: float = _DEFAULT_F_MAX
     farfield_overlap: float = _DEFAULT_FARFIELD_OVERLAP
@@ -3651,10 +3655,15 @@ def _subdivide_farfield_tile(
     si, m_lo, m_hi = tile['si'], tile['m_lo'], tile['m_hi']
     # Children inherit the parent's reprovisioned ``w``-node density (Build
     # S1-3, ``N_rec``) verbatim along with its w-window; interior parents carry
-    # no such key and fall back to ``config.w_nodes_per_decade``.
+    # no such key and fall back to ``config.interior_w_nodes_per_decade``
+    # (higher density for interior SACR-C oscillations; WP1).
     w_nodes = tile.get('w_nodes_per_decade')
-    eff_w_nodes = (config.w_nodes_per_decade if w_nodes is None
-                   else int(w_nodes))
+    if w_nodes is not None:
+        eff_w_nodes = int(w_nodes)
+    elif region in ('interior', 'lobe_interior'):
+        eff_w_nodes = config.interior_w_nodes_per_decade
+    else:
+        eff_w_nodes = config.w_nodes_per_decade
     # Children inherit the parent's envelope label / registration kind: an
     # interior parent's children are interior SACR-C tiles (Build S2-3), gated
     # against the interior eps bar; exterior children keep the far-field label.
@@ -4313,12 +4322,17 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         region = tile['region']
         # Exterior tiles carry a per-window reprovisioned ``w``-node density
         # (Build S1-3, ``N_rec``); interior tiles have no such key and fall
-        # back to ``config.w_nodes_per_decade``.  Only the ``w`` axis is
-        # affected -- the spatial ``(n_gamma, n_rho, n_theta_c)`` density is
-        # untouched.
+        # back to ``config.interior_w_nodes_per_decade`` (higher density for
+        # the SACR-C envelope oscillations) or ``config.w_nodes_per_decade``
+        # for exterior remainder.  Only the ``w`` axis is affected -- the
+        # spatial ``(n_gamma, n_rho, n_theta_c)`` density is untouched.
         tile_w_nodes = tile.get('w_nodes_per_decade')
-        eff_w_nodes = (config.w_nodes_per_decade if tile_w_nodes is None
-                       else int(tile_w_nodes))
+        if tile_w_nodes is not None:
+            eff_w_nodes = int(tile_w_nodes)
+        elif region in ('interior', 'lobe_interior'):
+            eff_w_nodes = config.interior_w_nodes_per_decade
+        else:
+            eff_w_nodes = config.w_nodes_per_decade
         # Interior (4-image) tiles reuse the identical build/serve path, but
         # store the SACR-C ``tau_c``-demodulated envelope label
         # (`INTERIOR_SACR_C`) instead of the divergent-kernel-subtracting
@@ -4343,7 +4357,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             def build_lobe(band=band, center=center, half=half,
                            w_range=w_range, si=si, m_lo=m_lo, m_hi=m_hi,
                            region=region, lobe=lobe, eff_w_nodes=eff_w_nodes,
-                           w_nodes=tile_w_nodes):
+                           w_nodes=eff_w_nodes):
                 chart, calls, refused = _build_lobe_chart(
                     gamma_band=band, parity=parity, lobe=lobe,
                     box_center=center, half=half, w_range=w_range,
@@ -4408,7 +4422,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
 
         def build_ff(band=band, center=center, half=half, w_range=w_range,
                      si=si, m_lo=m_lo, m_hi=m_hi, region=region, kind=kind,
-                     definition=definition, w_nodes=tile_w_nodes,
+                     definition=definition, w_nodes=eff_w_nodes,
                      eff_w_nodes=eff_w_nodes):
             chart, calls, refused = _build_farfield_chart(
                 gamma_band=band, parity=parity, box_center=center,

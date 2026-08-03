@@ -145,7 +145,7 @@ section: Backlog
   - **1e-farfield — DONE (2026-07-31).** Positive-parity exterior charts
     interpolate in gamma-resolved nearest-fold `(s, d)` coordinates; the
     planned macro-saddle per-deltoid-edge design remains out of scope.
-  - **1e-lobe — blocks only step 9.** `_build_lobe_chart`, macro-saddle only.
+  - **DONE (2026-08-01). 1e-lobe** `_build_lobe_chart`, macro-saddle only.
     Its lobe-local `theta_local` sweeps the wedge turnarounds, so it is also
     where `s = sqrt(theta_max - theta)` (F044) applies.
 
@@ -153,12 +153,12 @@ section: Backlog
   three are named in this fragment's own acceptance and in step 9's
   prerequisite, and were scheduled NOWHERE until 2026-07-30:
 
-  - **1e-eta — blocks step 9.** Axis 2. Derive `xi = (3 w Delta_tau / 4)^{2/3}`
+  - **DONE (2026-08-02). 1e-eta** Axis 2. Derive `xi = (3 w Delta_tau / 4)^{2/3}`
     and state `u = sqrt(eta)` as its `w`-independent shadow. Mostly
     explanatory: the incumbent axis already works, so the deliverable is WHY
     it works and WHERE it does not, plus the DRY test below. Cheapest of the
     three.
-  - **1e-w — blocks step 9.** Axis 3. The `w` axis is uniform in `log w`, which
+  - **DONE (2026-08-02). 1e-w** Axis 3. The `w` axis is uniform in `log w`, which
     this fragment calls a guess; the envelope varies on `w * Delta_tau`. This
     is the one sub-build with a falsifiable oracle ALREADY in the tree: the
     serving path's leave-one-out envelope refinement (`_LOO_SEED_NODES = 8`,
@@ -166,7 +166,7 @@ section: Backlog
     error. The analytic rule must REPRODUCE those node counts to within the
     LOO stopping tolerance; if it does not, the analytic scale is wrong,
     because the LOO result is the measurement.
-  - **1e-gamma — blocks step 9.** Axis 4. Uniform in `gamma` cannot be right
+  - **DONE (2026-08-02, commit 6185506). 1e-gamma** Axis 4. Uniform in `gamma` cannot be right
     when the caustic's extent varies 28x across the prior and DIVERGES at the
     parity wall (F036). The measure is the same caustic-relative coordinate
     the redesign already moves to, so this one composes with step 5 (C8)
