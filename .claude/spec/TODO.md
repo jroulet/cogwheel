@@ -119,7 +119,7 @@ Tag conventions:
   direction (`y''`), so third order closes the set: after it, no quantity in
   this package's caustic geometry is estimated rather than derived.
 
-  1. **`_pearcey_cusp._cusp_vertex` — SERVING PATH, highest priority.** Finds
+  1. **DONE (2026-07-30, commit `b9c3ed6`, build 1c). `_pearcey_cusp._cusp_vertex` — SERVING PATH, highest priority.** Finds
      the cusp vertex by computing caustic speed with a hardcoded central
      difference `delta = 1e-4`, scanning 129 thetas over a `pi` window (~258
      `critical_point` calls), then golden-section refining the minimum. A cusp
