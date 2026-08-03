@@ -272,7 +272,7 @@ class TrainingConfig:
     f_max: float = _DEFAULT_F_MAX
     farfield_overlap: float = _DEFAULT_FARFIELD_OVERLAP
     gamma_band_halfwidth: float = 0.1
-    min_gamma_band: float = 0.02
+    min_gamma_band: float = 0.005
     engine_budget: int = 400
     max_tube_arcs: int = 1
     # ``None`` = no cap (the production default: the tiling itself bounds the
@@ -849,7 +849,7 @@ def band_caustic_structure(band: tuple[float, float], parity: int, *,
 
 
 def stable_gamma_bands(band: tuple[float, float], parity: int, *,
-                       n_samples: int = 200, min_width: float = 0.02,
+                       n_samples: int = 200, min_width: float = 0.005,
                        refine_near_one_window: float = 0.0,
                        refine_near_one_width: float = 0.05
                        ) -> tuple[list[tuple[tuple[float, float],
@@ -862,8 +862,8 @@ def stable_gamma_bands(band: tuple[float, float], parity: int, *,
     tube grid cannot span such a metamorphosis.  Bands failing the
     `band_caustic_structure` consistency guard are bisected; slivers
     narrower than ``min_width`` that still straddle a change are DROPPED
-    (refusal-conservative: those gammas fall through to far-field/exact
-    serving, mirroring the ``gamma = 1`` guard band) and returned in the
+    (refusal-conservative: those gammas receive no chart and fall through
+    to the exact engine, mirroring the ``gamma = 1`` guard band) and returned in the
     second list so the caller can record them.
 
     When ``refine_near_one_window > 0``, every topology-stable band whose
@@ -3474,7 +3474,7 @@ def train(*, outdir: str | Path,
         # The fold-arc partition can change at discrete gammas (cusp/wall
         # metamorphoses on the deltoid); tube grids are rectangular, so the
         # band is bisected into topology-stable sub-bands and metamorphosis
-        # slivers are dropped (they fall through to far-field/exact serving).
+        # slivers are dropped (they receive no chart and fall through to the exact engine).
         sub_bands, dropped = stable_gamma_bands(
             band, parity, n_samples=config.n_caustic_samples,
             min_width=config.min_gamma_band,

@@ -8,7 +8,7 @@ section: Backlog
   written down.
 
   `surrogate_training.py` calls `stable_gamma_bands(..., min_width=
-  config.min_gamma_band)` (default `0.02`) and DISCARDS every topology-stable
+  config.min_gamma_band)` (default `0.005`) and DISCARDS every topology-stable
   gamma sub-band narrower than that. The training loop then calls
   `_train_band_charts` only over the SURVIVING sub-bands — and
   `_train_band_charts` is what builds BOTH the tube charts AND the
@@ -35,7 +35,7 @@ section: Backlog
   never been measured.
 
   Owed, in order:
-  1. MEASURE it first. Each sliver is at most `min_gamma_band = 0.02` wide, but
+  1. MEASURE it first. Each sliver is at most `min_gamma_band = 0.005` wide, but
      the COUNT is data-dependent (it is whatever the astroid/deltoid
      metamorphosis structure produces across `gamma` in (0, 1.6) on both
      parities) and has never been counted. Total prior mass in dropped slivers
@@ -49,6 +49,9 @@ section: Backlog
      it an explicit named refusal so it is counted rather than silently
      exact-served.
 
-  Do NOT close this by lowering `min_gamma_band`: the threshold exists because
-  a topology-unstable band cannot be tiled coherently. The question is what
-  serves the sliver, not how to make the sliver disappear.
+  Lowering `min_gamma_band` (now 0.005, reduced from 0.02 in build WP1) retains
+  more edge slivers and fixes the in-code comment (items 2 and partial of 1),
+  but does NOT close this item: slivers below 0.005 still exist (measured:
+  positive parity (0, 0.0039), negative parity (1.0057, 1.0104)), total prior
+  mass is still unmeasured at the new threshold, and the treatment decision
+  (widen, serve from neighbour, or named refusal) is still owed.

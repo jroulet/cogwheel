@@ -839,7 +839,7 @@ Tag conventions:
   | 4 | Cusp neighbourhoods | excluded from tubes -> quadrature | OPEN, both parities. Saddle exclusions are WIDER (`_SADDLE_CUSP_WIDTH_SAFETY = 2.5`, min half-width 0.08) because deltoid cusps are shallow and the wedge-edge turnarounds are near-singular |
   | 5 | Exterior far-field | `FarFieldChart` | CLOSED (per-column admission since 8h-b4) |
   | 6-9 | ~~Far annulus `3.0 < \|y\| <= 4.2426`, and its three gamma fences~~ | — | **DISSOLVING — do not work these rows.** All four existed only because `\|y\| = 3` (the PRIOR BOX half-width) was treated as a physical boundary. F036 measures that no `\|y\|` threshold can bound the caustic at all: `r_caustic` diverges at the parity wall (19.8 at `gamma = 0.99` vs a 4.2426 box corner). `GAMMA_FENCE = 3/4` and the saddle fence `1.0502342` are CONSEQUENCES of the annulus radius, not independent physics, and are deleted with it. These four rows collapse into ONE caustic-relative exterior region. See [[lensing_caustic_relative_coordinates]] |
-  | 10 | DROPPED GAMMA SLIVERS (any `\|y\|`, any `w`) | NOTHING | OPEN. `min_gamma_band = 0.02`; a dropped sliver gets no chart of any kind. Total prior mass NEVER MEASURED |
+  | 10 | DROPPED GAMMA SLIVERS (any `\|y\|`, any `w`) | NOTHING | OPEN. `min_gamma_band = 0.005` (lowered from 0.02 in WP1); a dropped sliver gets no chart of any kind. Total prior mass at new threshold NEVER MEASURED |
   | 11 | `w` above the certified ceiling (saddle `w > 60`) | — | OPEN and STRUCTURALLY DIFFERENT: no exact evaluator exists there, so charts cannot be TRAINED, not merely are not |
   | 12 | `gamma = 1` parity wall (`det A = 0`) | named refusal | ACCEPTED — measure zero, not a hole |
 
@@ -922,7 +922,7 @@ Tag conventions:
   written down.
 
   `surrogate_training.py` calls `stable_gamma_bands(..., min_width=
-  config.min_gamma_band)` (default `0.02`) and DISCARDS every topology-stable
+  config.min_gamma_band)` (default `0.005`) and DISCARDS every topology-stable
   gamma sub-band narrower than that. The training loop then calls
   `_train_band_charts` only over the SURVIVING sub-bands — and
   `_train_band_charts` is what builds BOTH the tube charts AND the
@@ -949,7 +949,7 @@ Tag conventions:
   never been measured.
 
   Owed, in order:
-  1. MEASURE it first. Each sliver is at most `min_gamma_band = 0.02` wide, but
+  1. MEASURE it first. Each sliver is at most `min_gamma_band = 0.005` wide, but
      the COUNT is data-dependent (it is whatever the astroid/deltoid
      metamorphosis structure produces across `gamma` in (0, 1.6) on both
      parities) and has never been counted. Total prior mass in dropped slivers
@@ -963,9 +963,12 @@ Tag conventions:
      it an explicit named refusal so it is counted rather than silently
      exact-served.
 
-  Do NOT close this by lowering `min_gamma_band`: the threshold exists because
-  a topology-unstable band cannot be tiled coherently. The question is what
-  serves the sliver, not how to make the sliver disappear.
+  Lowering `min_gamma_band` (now 0.005, reduced from 0.02 in build WP1) retains
+  more edge slivers and fixes the in-code comment (items 2 and partial of 1),
+  but does NOT close this item: slivers below 0.005 still exist (measured:
+  positive parity (0, 0.0039), negative parity (1.0057, 1.0104)), total prior
+  mass is still unmeasured at the new threshold, and the treatment decision
+  (widen, serve from neighbour, or named refusal) is still owed.
 
 
 - **Tighten the fold arm's caustic fence; the `b4` route is CLOSED

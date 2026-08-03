@@ -229,7 +229,7 @@ Constants with length units, and what sets them:
 | `_GHOST_SEPARATION_MIN` | 0.7 | absolute, lens-plane | OK — lens-plane Einstein-radius-normalized; Einstein radius is the physical scale in the image plane (not caustic-relative); measured gap (refuse 0.29, admit 0.94) stable across gamma; traces to geometry, not the prior box (Build 7) |
 | `_INTERLOBE_CORRIDOR_ETA_SCALE` | x `eta_max` | relative | OK — already relative |
 | `rho`, `rho_lobe` | — | caustic-relative by construction | OK |
-| `min_gamma_band` | 0.02 | gamma-axis, not a length | out of scope for Part 0; see C9 |
+| `min_gamma_band` | 0.005 | gamma-axis, not a length | out of scope for Part 0; see C9 |
 
 **Order of work implied by the audit:** C6 first (it is unchecked, it is the
 highest-value, and it converts a refusal into a serve), then C8 (it re-derives
