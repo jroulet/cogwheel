@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "ff06b8a4b9394e767eb56b2e1a8255619fb9577d",
-  "timestamp": "2026-08-03T13:55:41Z",
+  "commit": "56a223a4856e7794ce6133a92e06b8a6f445a31b",
+  "timestamp": "2026-08-03T15:50:47Z",
   "touched_files": [
     "cogwheel/lensing/born_residual_chart.py",
     "cogwheel/lensing/chang_refsdal/__init__.py",
@@ -32,6 +32,7 @@
     "cogwheel/tests/test_lensing_surrogate.py",
     "cogwheel/tests/test_lensing_surrogate_census.py",
     "cogwheel/tests/test_lensing_surrogate_lobe.py",
-    "cogwheel/tests/test_lensing_surrogate_training.py"
+    "cogwheel/tests/test_lensing_surrogate_training.py",
+    "cogwheel/tests/test_lensing_wedge_dd_arclength.py"
   ]
 }

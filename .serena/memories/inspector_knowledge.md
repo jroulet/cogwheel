@@ -174,3 +174,41 @@
   config.interior_w_nodes_per_decade -> else config.w_nodes_per_decade).
   A stale ternary in the subdivision path is a recurring bug pattern
   (INS-2-001).
+- DD-CAP FORMULA REVIEW (Build wedge_followup, 56a223a): when reviewing a
+  DD-product ceiling, verify the code uses `r_grid[-1]` (r_max), NOT r_min.
+  r_max gives the tightest conservative global bound (`w_max * r_max *
+  reach_max <= DD_MARGIN`). A brief that says r_min is a brief error — the
+  code's deviation is correct and should be noted as an approved deviation,
+  not a finding. Confirm `_log_w_grid()` is called AFTER the cap (not before)
+  so the grid is built from the already-capped w_range.
+- DD-CAP SUCCESS-RATE INTERPRETATION: do NOT assess the DD cap by measuring
+  what fraction of training nodes succeed. The cap's job is to prevent
+  `w * |y| > DD_MARGIN` (impossible requests); whether nodes pass the engine's
+  independent Schwinger ceiling (~w~60 at large |y|) is a separate question.
+  Tests should verify the FORMULA invariant (`w_max * r_max * reach_max <=
+  DD_MARGIN` to float64 precision) and that `w_max` was actually reduced below
+  the requested ceiling when the cap is binding. A 6% success rate at the
+  correct cap is physics-expected and not a defect.
+- ARC-LENGTH MAP REVIEW CHECKLIST (Build wedge_followup, 56a223a): (1)
+  `theta_to_s` shape is (2, N) with N >= 100 (typically 2001). (2) Row 0 spans
+  `[theta_wedge_grid[0], theta_wedge_grid[-1]]` EXACTLY (to ~12 digits) — if
+  not, `np.interp` extrapolates and can produce wrong s values. (3) Row 1 starts
+  at 0.0 and is strictly increasing (verify min positive diff). (4) Map is
+  genuinely nonlinear (max residual from linear fit >> 1e-4 — confirms caustic
+  curvature near cusps). (5) Grid-node accuracy after remap < 1e-9 (budget:
+  ~6e-9 interp error at 2001 nodes). (6) Self-falsification: a perturbed
+  `theta_to_s` should measurably degrade served accuracy vs. fresh engine.
+- AXIS NODE COUNT CONSTRAINT: `_validate_axis` requires >= 4 nodes per axis for
+  cubic spline interpolation. Brief/spec suggestions of n=3 grids
+  (e.g. gamma=[0.25,0.45] → 2 nodes) are infeasible. Always use >= 4-node grids
+  in test fixtures, and flag any spec that suggests fewer.
+- LOCAL CONSTANT DUPLICATION PATTERN (INS-w3-001): a local variable
+  `_ARC_MAP_NODES = 2001` that duplicates the value of a module-level constant
+  `_FARFIELD_ARC_MAP_SIZE = 2001` is a trivial finding (harmless, but should
+  reference the module constant). Flag as trivial/non-blocking when reviewing
+  similar patterns.
+- BRIEF-VS-CODE APPROVED DEVIATION: when production code correctly deviates from
+  the build brief for physical correctness reasons (e.g. using r_max instead of
+  brief's r_min for conservative bounding), document as an approved deviation in
+  the review findings, not as a code defect. Explicitly note "correct deviation
+  from the brief" so future reviewers don't revert it.

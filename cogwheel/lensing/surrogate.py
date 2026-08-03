@@ -3784,10 +3784,9 @@ class LensAmplificationSurrogate:
         # Use median gamma as the representative for the arc-length
         # parametrisation (adequate for typical narrow-gamma tiles).
         rep_gamma = float(np.median(gamma_grid))
-        _ARC_MAP_NODES = 2001  # Same density as _FARFIELD_ARC_MAP_SIZE.
         arc_theta_fine = np.linspace(
             float(theta_wedge_range[0]), float(theta_wedge_range[1]),
-            _ARC_MAP_NODES)
+            _FARFIELD_ARC_MAP_SIZE)
         arc_speed = np.asarray(
             geometry.caustic_speed(rep_gamma, arc_theta_fine, branch=1),
             dtype=float)

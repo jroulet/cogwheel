@@ -210,6 +210,47 @@
   raw-theta spline (matches ~5e-15 due to B-spline translation invariance);
   fine for tolerance-based suites but a bit-exact-vs-stored-HEAD assertion
   would drift — document this seam, don't assert bit-identity vs HEAD.
+- DD-PRODUCT CEILING PATTERN (Build wedge_followup, 56a223a): cap `w_range[1]`
+  in `from_wedge_engine` via `dd_w_cap = _DD_PRODUCT_MARGIN / (r_grid[-1] *
+  reach_max)` where `reach_max = max(r_table[:, theta_mask])` over gamma_grid ×
+  theta nodes within the tile's theta_wedge_range. Use `r_grid[-1]` (r_max),
+  NOT r_min — r_max gives the tightest (most conservative) global bound ensuring
+  `w_max * r_max * reach_max <= 58` at the worst-case corner node. The brief may
+  say r_min; this is a brief error — the correct deviation is to use r_max.
+  Move `_log_w_grid()` AFTER this cap so the grid is built from the already-
+  capped w_range. If cap < w_min, `_log_w_grid` raises ValueError cleanly.
+  Mirror the constant: surrogate.py cannot import from surrogate_training.py,
+  so define a LOCAL `_DD_PRODUCT_MARGIN = 58.0` with a comment noting it mirrors
+  the training module's constant.
+- ARC-LENGTH MAP PATTERN (Build wedge_followup, 56a223a): in `from_wedge_engine`,
+  compute theta→s map via: `rep_gamma = np.median(gamma_grid)`, `arc_theta_fine =
+  np.linspace(theta_wedge_range[0], theta_wedge_range[1], 2001)`, `arc_speed =
+  geometry.caustic_speed(rep_gamma, arc_theta_fine, branch=1)`, `arc_s_fine =
+  cumulative_trapezoid(arc_speed, arc_theta_fine, initial=0.0)`, `theta_to_s =
+  np.vstack([arc_theta_fine, arc_s_fine])`, then `s_grid = np.interp(
+  theta_wedge_grid, arc_theta_fine, arc_s_fine)`. Key invariant: `arc_theta_fine`
+  and `theta_wedge_grid` share EXACT endpoints (both from `theta_wedge_range`),
+  so `np.interp` never extrapolates. Pass `theta_to_s=theta_to_s, s_grid=s_grid`
+  to `from_wedge_values`. The 2001-node fine grid matches `_FARFIELD_ARC_MAP_SIZE`;
+  avoid introducing a separate local constant that silently duplicates it
+  (INS-w3-001: local `_ARC_MAP_NODES = 2001` harmless but should reference the
+  module constant).
+- SCHWINGER CEILING IS INDEPENDENT OF DD CAP: the DD cap prevents training nodes
+  from exceeding `w * |y| = 58` (the diffraction-delay product above which double-
+  double quadrature cannot maintain 1e-10 accuracy). However, the engine has its
+  own Schwinger certification ceiling (~w~60 at large |y|) that can refuse nodes
+  even below the DD cap. Success rate depends on both; the DD cap's job is solely
+  to prevent IMPOSSIBLE requests, not to guarantee all nodes pass the engine's
+  independent Schwinger gate. Do NOT interpret a low success rate (e.g. 6%) as a
+  failure of the DD cap formula — verify the FORMULA (DD product invariant) rather
+  than the success rate.
+- ARC-LENGTH REMAP SERVE-TIME CONSISTENCY: both training and serving use the SAME
+  monotone `theta_to_s` table, so the spline's grid-node exactness property is
+  preserved through the remap (training stores `s_grid = interp(theta_wedge_grid,
+  theta_fine, s_fine)`, serving computes `s = interp(theta_query, theta_fine,
+  s_fine)` using the saved table). Node-exact accuracy budget: ~6e-9 interp error
+  at 2001 nodes, so widen `_NODE_EXACT_TOL` from 1e-10 to 1e-7 and document the
+  budget arithmetic at the constant's definition.
 - INTERIOR WEDGE CHART IMPLEMENTATION (Build interior_wedge_chart): pattern
   for adding a new chart type to `cogwheel/lensing/surrogate.py`: (1) Add
   axis schema constant + known-schemas set. (2) Add map dataclass (frozen,

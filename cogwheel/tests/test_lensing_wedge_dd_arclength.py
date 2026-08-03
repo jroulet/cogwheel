@@ -28,10 +28,14 @@ yielding ~6 w-nodes per decade over [5, 30] ≈ 5 points.  Total:
 """
 from __future__ import annotations
 
+import copy
 import unittest
 
 import numpy as np
+from scipy.integrate import cumulative_trapezoid
 
+from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
+from cogwheel.lensing.chang_refsdal.geometry import caustic_speed, r_caustic
 from cogwheel.lensing.surrogate import (
     InteriorWedgeChart,
     LensAmplificationSurrogate,
@@ -72,7 +76,7 @@ NODE_ATOL: float = 1e-9
 
 
 class _WedgeDDTestCase(unittest.TestCase):
-    """Base class with anti-vacuity tearDown."""
+    """Base class with anti-vacuity tearDown that fails if no comparisons ran."""
 
     _class_comparison_count: int = 0
 
@@ -390,7 +394,6 @@ class ArcLengthAxisTestCase(_WedgeDDTestCase):
                 f'Non-finite result at node ({ig},{ir},{it}).')
 
             # Compare against a fresh engine call at the same source.
-            from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
             w_grid = np.exp(chart.log_w_grid)
             ch = ChangRefsdalChannels(w_grid)
             partition = ch.evaluate(gamma=gamma, y=(y1, y2),
@@ -505,7 +508,6 @@ class NoDDCapLowWTestCase(_WedgeDDTestCase):
                 y1_eig=y1, y2_eig=y2)
 
             # Fresh engine oracle.
-            from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
             w_grid = np.exp(chart.log_w_grid)
             ch = ChangRefsdalChannels(w_grid)
             partition = ch.evaluate(gamma=gamma, y=(y1, y2),
@@ -552,7 +554,6 @@ class SelfFalsificationTestCase(_WedgeDDTestCase):
         """
         r_max = DD_R_RANGE[1]
         # Approximate reach_max (known from our measurements to be ~0.68).
-        from cogwheel.lensing.chang_refsdal.geometry import r_caustic
         # reach at gamma=0.5, theta=0 (axis) is the max for this range.
         reach_approx = max(
             r_caustic(0.5, th)
@@ -581,8 +582,6 @@ class SelfFalsificationTestCase(_WedgeDDTestCase):
             residual, 1e-10,
             'Linear map residual is not ~0 — polyfit control broken.')
         # Now check that a REAL arc-length map has curvature.
-        from cogwheel.lensing.chang_refsdal.geometry import caustic_speed
-        from scipy.integrate import cumulative_trapezoid
         gamma = 0.4  # representative
         speed = np.asarray(caustic_speed(gamma, theta, branch=1), dtype=float)
         s_real = cumulative_trapezoid(speed, theta, initial=0.0)
@@ -639,7 +638,6 @@ class SelfFalsificationTestCase(_WedgeDDTestCase):
                             y1_eig=y1, y2_eig=y2)
 
                         # Perturb the chart's theta_to_s map.
-                        import copy
                         bad_chart = copy.copy(chart)
                         perturbed_map = chart.theta_to_s.copy()
                         perturbed_map[1] *= 1.1  # stretch s by 10%
