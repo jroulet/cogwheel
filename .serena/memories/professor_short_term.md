@@ -1,40 +1,15 @@
-# Session: FarFieldChart d/R_c A/B test-spec ruling
+# Session: Part 0 Mechanical test review (test_lensing_part0_mechanical.py)
 
-Context: EVALUATION build for optional in-memory d/R_c normalization on FarFieldChart
-(d_normalized flag on from_engine, per-(gamma,s) rc_table, one divide in serve +
-box gate, NO NPZ persistence this build). A/B comparison test authored by Test-Dev.
-Honest outcome may be "no benefit."
+## Build under review
+Two new test additions:
+1. `test_no_retired_names_in_live_docs` on `TestNoRetiredConceptNames` — scans 3 live spec docs for retired concept names
+2. `TestNoDocstringAbsorberLanguage` — AST-scans surrogate files for forbidden docstring phrases on constants
 
-## Ruling given
-1. Endorsed A/B-as-measurement: hard-gate correctness invariants only; RECORD (not
-   gate) the near-wall/far-tail eps comparison. The driver's ≥2x near-wall promotion
-   gate stays OUT of the test — it's a benefit threshold, not correctness.
-   BUT added one hard NON-REGRESSION FLOOR: eps_norm ≤ 1.1·eps_raw in BOTH strata.
-   Rationale: a correct smooth positive-scalar reparameterization cannot make the
-   envelope materially worse at equal node count; a transposed/off-by-one rc_table
-   would. This is the tripwire for silent "normalized worse" bugs that a null-result
-   build would otherwise wave through. 1.1 loose enough for noise + honest null.
+Plus self-falsification companions: `test_live_doc_detector_fires` and `test_docstring_absorber_detector_fires` in `TestSelfFalsification`.
 
-2. Node-exactness gate on NORMALIZED chart is valid IFF the test queries at nodes of
-   the grid the normalized chart actually STORES. Two cases flagged to Test-Dev:
-   (a) node locations rescaled too (d_i/R_c) → node maps to node, exactness holds;
-   (b) fixed normalized d-grid → physical nodes differ per cell, must query in
-   normalized node coords and map back to physical for engine ref, else spurious fail.
-   Pure serve-time output divide with same node set → trivially preserved. Test-Dev
-   MUST state which the implementation does.
-
-3. (A) list sound, nothing to demote (all exact-arithmetic / discrete-decision
-   invariants, provable from the map being a smooth positive bijection — right smell
-   test for a hard gate). Additions:
-   - Cross-coordinate BOX-GATE CONSISTENCY: pass/reject set identical whether gate
-     computed pre- vs post-normalization on shared point set (divide must not move
-     the box boundary). Confirm subsumed by train/serve parity or add explicitly.
-   - Sharpen min-R_c gate to an ABSOLUTE FLOOR (> floor, not just > 0): R_c near
-     machine-eps blows up d/R_c and is a near-cusp the chart is mandated to exclude.
-
-## Note for Dreamer
-Recurring pattern in these lensing-chart builds: distinguish BENEFIT thresholds
-(never hard-gate on evaluation builds — false RED on honest null) from CORRECTNESS
-/ NON-REGRESSION thresholds (hard-gate; provable from the map's properties). The
-worse-not-better tripwire (loose ratio ≤ 1.1) is the general trick to catch silent
-reparameterization bugs without gating on the benefit itself.
+## Verdict: PASS
+- All 18 tests pass in 0.92s (well within budget).
+- `test_no_retired_names_in_live_docs`: All 3 live doc files exist (640 lines total); scans against 4 registered retired concepts; 0 violations. Self-falsification `test_live_doc_detector_fires` proves detector fires on synthetic tempfile injection.
+- `TestNoDocstringAbsorberLanguage`: Both target files (surrogate_training.py 226KB, surrogate.py 220KB) are parsed. Zero constant-docstrings found (files use `#:` Sphinx comments, not `Assign → Expr(str)` pattern). This is correct — the test is a regression guard for the specific docstring-on-constant convention. Anti-vacuity checks file parsing succeeded. Self-falsification proves the detector fires on synthetic input.
+- Minor note: spec's diagnostic recommends adding 'annulus', 'ANNULUS_INNER_RADIUS' to retired_concepts.json — currently not present (registry has 4 entries: _WEDGE_EPS, _PROBE_ETA, _CLOUD_MARGIN_FRAC, _CUSP_SPEED_REL_FRAC). This doesn't affect test correctness but would broaden coverage. Deferred to a future build.
+- The test structure is logically sound: the docstring absorber test catches a specific bug-class (constants whose docstrings admit they exist to absorb artifacts), while being vacuously true now — the correct posture for a guard test.

@@ -1,51 +1,46 @@
 # Librarian Short-Term Observations
 
-## Run: 2026-08-03 — post-commit sync for commit 9cefb88 (finding: d-axis normalization evaluated and rejected)
+## Run: 2026-08-03 — build audit for step-2/step-4 script rewrites
 
 ### Scope
 
-sync_issues.json listed one pending commit: 9cefb88 "finding: d-axis normalization evaluated and rejected".
+Work packages: "Update step 2 script parameters and fix step 8 allowlist" and
+"Rewrite step 4 script for geometric tiling-coverage verification".
 
-Changed files in that commit:
-- `.claude/spec/completed.d/2026-08-03_d_normalization_evaluation.md` — added
-- `.claude/spec/todo.d/lensing_remaining_coverage_gaps.md` — updated (d-norm item marked RESOLVED)
-- Agent state and memory files (no doc action needed)
+Changed files:
+- `scripts/measure_tube_fraction.py` — parameter grid update (brief specs: 5+4 gammas,
+  12-step linspace fractions, n_gamma=1/n_u=6/n_theta=6/w_nodes_per_decade=6)
+- `scripts/measure_far_zone_crossover.py` — full rewrite: Born-carrier-accuracy measurement
+  → geometric tube+far-field tiling coverage verification at C8 boundary
+- `cogwheel/tests/test_lensing_part0_mechanical.py` — new mechanical tests
+  (test_no_retired_names_in_live_docs, TestNoDocstringAbsorberLanguage, self-falsification companions)
+- Agent state files and memories (no doc action)
 
 ### What was stale
 
-1. **COMPLETED.md** — not regenerated after `completed.d/` fragment was added. Fixed by
-   running `render_fragments.py` (now includes d-normalization evaluation entry).
-2. **TODO.md** — not regenerated after `todo.d/lensing_remaining_coverage_gaps.md` was updated
-   to mark d-normalization as RESOLVED. Fixed by same `render_fragments.py` run.
-3. **FINDINGS.md** — the commit was titled "finding:" and the evaluation produced a
-   permanent architecture insight (d/R_c normalization is wrong physics, wrong chart,
-   breaks separability). Added F060 directly to FINDINGS.md.
+**Nothing.** All changed files are in `scripts/` or `cogwheel/tests/`:
+- `scripts/` changes: not `cogwheel/` source modules, so no module list, API, or overview staleness.
+- `cogwheel/tests/` changes: test-only → skip entirely per triage rules.
+- No new serialization artifacts in `scripts/`.
+- No `pyproject.toml`/`environment.yaml` changes.
 
-### Files changed in this commit
+`sync_derived_docs.py` ran cleanly. The 4 test-file-only consumer warnings
+(`LensAmplificationSurrogate.load` in `test_lensing_surrogate.py`) are pre-existing and
+excluded by convention (test-only callers stay off DATA_CONTRACTS.yaml consumer lists).
+Script's "some issues auto-fixed" produced zero git diff — confirmed internal state flush.
 
-- `.claude/spec/COMPLETED.md` — added d_normalization_evaluation entry from completed.d fragment
-- `.claude/spec/FINDINGS.md` — added F060 (d-axis normalization evaluation/rejection)
-- `.claude/spec/TODO.md` — d-norm item now shows as RESOLVED/strikethrough
-- `.serena/memories/librarian_short_term.md` — this file
-- `.claude/sync_issues.json` — deleted (trigger file consumed)
+### Files changed in this run
+
+- `.serena/memories/librarian_short_term.md` — this file only (no doc edits needed)
 
 ### Pattern
 
-"finding:" commits that place their fragment in `completed.d/` (not `findings.d/`) create
-THREE stale surfaces simultaneously: COMPLETED.md (not re-rendered), TODO.md (item not yet
-resolved in generated file), and FINDINGS.md (physics/design insight not recorded as a finding).
-All three need attention on the same sync pass.
+`scripts/` rewrites (even large ones like measure_far_zone_crossover.py +188 lines) don't
+touch doc surfaces unless they introduce new serialization artifacts or change the cogwheel
+public API. A complete scripts/ rewrite that stays in `scripts/` is a legitimate no-op for
+the librarian.
 
-The prompt's diff stat showed `findings.d/` for this fragment; `git show --name-only` confirmed
-it was actually `completed.d/`. Trust `git show --name-only` over the diff stat in the brief.
-
-### sync_derived_docs.py output
-
-Reported 4 test-file-only callers of `LensAmplificationSurrogate.load` not in
-DATA_CONTRACTS.yaml consumers list. Per convention (and librarian_knowledge), test-file-only
-callers are excluded — no action taken.
-
-### Fragile cross-references (continued)
+### Fragile cross-references (carried forward)
 
 - F060 cites `cogwheel/lensing/surrogate.py` for the far-field chart d-axis — watch for
   module reorganization.

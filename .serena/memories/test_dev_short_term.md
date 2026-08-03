@@ -1,1 +1,1 @@
-Last build: wedge follow-up DD+arclength (56a223a). Clean.
+Last build: steps 2/4/8 scripts + allowlist (aa8e1e7). Added test_no_retired_names_in_live_docs + TestNoDocstringAbsorberLanguage to test_lensing_part0_mechanical.py. 18 tests pass in 0.70s. No production API changes in WPs — no audit fixes needed.

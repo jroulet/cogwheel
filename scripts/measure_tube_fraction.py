@@ -8,10 +8,10 @@ across gamma, both parities, to find f_max (where eps crosses tube_eps_max
 Output: prints f_max and f_floor suitable for inlining into the step 3 brief.
 
 COST ESTIMATE:
-  - 14 gamma values x 8 fractions = 112 chart builds
+  - 9 gamma values x 12 fractions = 108 chart builds
   - Sequential (numba uses all cores internally per chart)
   - First chart: ~30s (JIT warmup); subsequent: ~3-5s each
-  - Total wall time: ~30s + 111*4s ≈ 8 minutes
+  - Total wall time: ~30s + 107*4s ≈ 8 minutes
 
 Usage:
     conda run -n $SDK_CONDA_ENV python scripts/measure_tube_fraction.py
@@ -32,9 +32,9 @@ from cogwheel.lensing.surrogate_training import (
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-GAMMA_POSITIVE = np.linspace(0.03, 0.28, 7)
-GAMMA_SADDLE = np.linspace(1.05, 1.80, 7)
-FRACTION_GRID = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
+GAMMA_POSITIVE = np.array([0.05, 0.1, 0.2, 0.4, 0.7])
+GAMMA_SADDLE = np.array([1.1, 1.3, 1.5, 2.0])
+FRACTION_GRID = np.linspace(0.05, 0.6, 12)
 EPS_BAR = 0.05
 N_CAUSTIC_SAMPLES = 200
 
@@ -43,7 +43,7 @@ _TUBE_PROV = {'envelope_definition': 'kernel_sum'}
 
 #: Base training config (smoke-scale grids, fast builds).
 _BASE_CONFIG = TrainingConfig(
-    n_gamma=5, n_u=5, n_theta=5, w_nodes_per_decade=3,
+    n_gamma=1, n_u=6, n_theta=6, w_nodes_per_decade=6,
     n_heldout=30, n_caustic_samples=N_CAUSTIC_SAMPLES,
 )
 
@@ -152,7 +152,7 @@ def main():
         else:
             print(f"  [{i+1:3d}/{len(tasks)}] gamma={gamma:.3f} p={parity:+d} "
                   f"f={f:.1f} SKIP: {err} ({dt:.1f}s)", flush=True)
-    
+
     elapsed = time.time() - t_start
     print(f"\n  Total elapsed: {elapsed:.0f}s")
 

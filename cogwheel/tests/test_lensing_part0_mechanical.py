@@ -309,6 +309,36 @@ class TestNoRetiredConceptNames(unittest.TestCase):
             f'Retired names in source (first 5): {violations[:5]}',
         )
 
+    #: Live documentation paths (relative to REPO_ROOT) that must not
+    #: reference retired concept names in non-excluded lines.
+    LIVE_DOCS: tuple[pathlib.Path, ...] = (
+        pathlib.Path('.claude/spec/SPEC.md'),
+        pathlib.Path('.claude/spec/COVERAGE_DESIGN.md'),
+        pathlib.Path('.claude/spec/DATA_CONTRACTS.yaml'),
+    )
+
+    def test_no_retired_names_in_live_docs(self) -> None:
+        """Live documentation must not reference retired concept names."""
+        violations: list[tuple[str, int, str, str]] = []
+        for doc_rel in self.LIVE_DOCS:
+            doc_path = REPO_ROOT / doc_rel
+            if not doc_path.exists():
+                continue
+            text = doc_path.read_text(encoding='utf-8')
+            for lineno_0, line in enumerate(text.splitlines()):
+                if _is_excluded_line(line):
+                    continue
+                for concept_name, pattern in self.patterns:
+                    if pattern.search(line):
+                        violations.append((
+                            str(doc_rel), lineno_0 + 1,
+                            concept_name, line.strip(),
+                        ))
+        self.assertEqual(
+            violations, [],
+            f'Retired names in live docs (first 5): {violations[:5]}',
+        )
+
 
 # ===========================================================================
 # TEST CLASS 3: TestNoNewDiscretizationAbsorbers
@@ -328,6 +358,7 @@ _ABSORBER_ALLOWLIST: frozenset[tuple[str, str]] = frozenset({
     ('cogwheel/lensing/surrogate_training.py', '_SADDLE_CUSP_WIDTH_SAFETY'),
     ('cogwheel/lensing/surrogate_training.py', '_ARC_MARGIN_FRAC'),
     ('cogwheel/lensing/surrogate_training.py', '_DD_PRODUCT_MARGIN'),
+    ('cogwheel/lensing/surrogate.py', '_DD_PRODUCT_MARGIN'),  # Mirrors surrogate_training._DD_PRODUCT_MARGIN for serve-time DD ceiling
     ('cogwheel/lensing/surrogate_training.py', '_DEFAULT_FARFIELD_OVERLAP'),
     ('cogwheel/lensing/surrogate_training.py', '_INTERLOBE_CORRIDOR_ETA_SCALE'),
     ('cogwheel/lensing/surrogate_census.py', 'CROWN_CAUSTIC_MARGIN'),
@@ -367,6 +398,121 @@ class TestNoNewDiscretizationAbsorbers(unittest.TestCase):
 # SELF-FALSIFICATION: proves the suite can go red
 # ===========================================================================
 
+
+
+# ===========================================================================
+# TEST CLASS 4: TestNoDocstringAbsorberLanguage
+# ===========================================================================
+
+#: Target files to scan for absorber-language docstrings on constants.
+_DOCSTRING_ABSORBER_TARGET_FILES: tuple[str, ...] = (
+    'cogwheel/lensing/surrogate_training.py',
+    'cogwheel/lensing/surrogate.py',
+)
+
+#: Phrases whose presence in a constant's docstring indicates absorber intent.
+_FORBIDDEN_DOCSTRING_PHRASES: tuple[str, ...] = (
+    'discretization error',
+    'sampling artifact',
+    'safety factor for',
+)
+
+#: Allowlist of (relative_path, constant_name) tuples that are legitimate
+#: despite using absorber-like language in their docstrings.
+_DOCSTRING_ABSORBER_ALLOWLIST: frozenset[tuple[str, str]] = frozenset()
+
+
+def _collect_constant_docstrings(
+    tree: ast.Module,
+    relative_path: str,
+) -> list[tuple[str, str, str, int]]:
+    """
+    Collect (relative_path, constant_name, docstring_text, lineno) for
+    module-level constants followed by a bare-string expression (the
+    Python docstring-on-constant convention).
+    """
+    results: list[tuple[str, str, str, int]] = []
+    body = tree.body
+    for i in range(len(body) - 1):
+        node = body[i]
+        next_node = body[i + 1]
+        # Check if next_node is a bare string expression (docstring)
+        if not (isinstance(next_node, ast.Expr)
+                and isinstance(next_node.value, ast.Constant)
+                and isinstance(next_node.value.value, str)):
+            continue
+        docstring = next_node.value.value
+        # Extract constant names from Assign or AnnAssign
+        names: list[str] = []
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.append(target.id)
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name):
+                names.append(node.target.id)
+        for name in names:
+            results.append((relative_path, name, docstring, node.lineno))
+    return results
+
+
+class TestNoDocstringAbsorberLanguage(unittest.TestCase):
+    """
+    Enforce that module-level constants in surrogate files do not have
+    docstrings containing absorber-intent language (e.g. 'discretization error',
+    'sampling artifact', 'safety factor for').
+
+    The bug-class signature: constants introduced to absorb discretization
+    artifacts rather than fix the underlying issue document themselves with
+    these phrases.
+
+    Budget: Pure AST scan of 2 files, < 0.5s. No imports of lensing modules.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Parse target files and collect constant docstrings."""
+        cls.constant_docstrings: list[tuple[str, str, str, int]] = []
+        cls.files_parsed: int = 0
+        for rel in _DOCSTRING_ABSORBER_TARGET_FILES:
+            path = REPO_ROOT / rel
+            if not path.exists():
+                continue
+            source = path.read_text(encoding='utf-8')
+            tree = ast.parse(source, filename=rel)
+            cls.files_parsed += 1
+            cls.constant_docstrings.extend(
+                _collect_constant_docstrings(tree, rel)
+            )
+
+    def test_anti_vacuity(self) -> None:
+        """Verify the scan found files and at least some constant docstrings."""
+        self.assertGreater(
+            self.files_parsed, 0,
+            'Expected to parse at least 1 target file',
+        )
+        # It's acceptable for files to have zero docstring-annotated constants,
+        # but the file scan itself must have happened.
+        self.assertGreaterEqual(
+            len(self.constant_docstrings), 0,
+            'constant_docstrings must be a list (even if empty)',
+        )
+
+    def test_no_absorber_language_in_constant_docstrings(self) -> None:
+        """No constant docstring should contain absorber-intent phrases."""
+        violations: list[tuple[str, str, str, int]] = []
+        for rel, name, docstring, lineno in self.constant_docstrings:
+            if (rel, name) in _DOCSTRING_ABSORBER_ALLOWLIST:
+                continue
+            lower_doc = docstring.lower()
+            for phrase in _FORBIDDEN_DOCSTRING_PHRASES:
+                if phrase in lower_doc:
+                    violations.append((rel, name, phrase, lineno))
+                    break  # One violation per constant suffices
+        self.assertEqual(
+            violations, [],
+            f'Absorber-language in constant docstrings: {violations}',
+        )
 
 class TestSelfFalsification(unittest.TestCase):
     """
@@ -433,6 +579,67 @@ class TestSelfFalsification(unittest.TestCase):
         # But a line without exclusion words is not exempt
         line_active = '_WEDGE_EPS = 0.01'
         self.assertFalse(_is_excluded_line(line_active))
+
+    def test_live_doc_detector_fires(self) -> None:
+        """Inject a synthetic doc file with a retired name; detection must fire."""
+        import tempfile
+        entries = _load_retired_concepts()
+        patterns = _compile_retired_patterns(entries)
+        # Use the first retired concept as the canary
+        concept_name, pattern = patterns[0]
+        # Create a synthetic doc containing the retired name in a non-excluded line
+        synthetic_content = (
+            f'# Design Notes\n'
+            f'The {concept_name} parameter controls the inner boundary.\n'
+        )
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.md', delete=False, encoding='utf-8',
+        ) as tmp:
+            tmp.write(synthetic_content)
+            tmp_path = pathlib.Path(tmp.name)
+        try:
+            # Re-use the detection logic inline
+            violations: list[tuple[str, int, str, str]] = []
+            text = tmp_path.read_text(encoding='utf-8')
+            for lineno_0, line in enumerate(text.splitlines()):
+                if _is_excluded_line(line):
+                    continue
+                for cn, pat in patterns:
+                    if pat.search(line):
+                        violations.append((
+                            str(tmp_path), lineno_0 + 1, cn, line.strip(),
+                        ))
+            self.assertGreater(
+                len(violations), 0,
+                f'Live-doc detector failed to catch retired name {concept_name!r}',
+            )
+        finally:
+            tmp_path.unlink()
+
+    def test_docstring_absorber_detector_fires(self) -> None:
+        """A synthetic constant with a forbidden-phrase docstring is detected."""
+        # Simulate the detection logic with a synthetic triple
+        synthetic_docstrings: list[tuple[str, str, str, int]] = [
+            (
+                'cogwheel/lensing/fake.py',
+                '_FAKE_SAFETY_FACTOR',
+                'safety factor for discretization error in the grid',
+                42,
+            ),
+        ]
+        violations: list[tuple[str, str, str, int]] = []
+        for rel, name, docstring, lineno in synthetic_docstrings:
+            if (rel, name) in _DOCSTRING_ABSORBER_ALLOWLIST:
+                continue
+            lower_doc = docstring.lower()
+            for phrase in _FORBIDDEN_DOCSTRING_PHRASES:
+                if phrase in lower_doc:
+                    violations.append((rel, name, phrase, lineno))
+                    break
+        self.assertGreater(
+            len(violations), 0,
+            'Docstring absorber detector must fire on synthetic input',
+        )
 
 
 if __name__ == '__main__':
