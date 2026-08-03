@@ -293,7 +293,7 @@ Tag conventions:
         `|y'|` at the astroid cusp = 1.3e-16 (cusps are now exact roots). See
         `completed.d/2026-07-29_analytic_caustic_derivatives_1a.md`.
 
-     1b. **The training-path consumers.** Retire, against 1a:
+     1b. **DONE (2026-07-29, commit `00bf8ae`). The training-path consumers.** Retired against 1a:
         `_min_curvature_radius`'s three-point circumradius and its
         `area2 < 1e-30` guard; `_branch_speed_profile`'s `np.gradient`;
         `_find_cusps`'s speed-minimum detection with its relative threshold and
