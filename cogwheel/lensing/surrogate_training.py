@@ -272,7 +272,7 @@ class TrainingConfig:
     f_max: float = _DEFAULT_F_MAX
     farfield_overlap: float = _DEFAULT_FARFIELD_OVERLAP
     gamma_band_halfwidth: float = 0.1
-    min_gamma_band: float = 0.005
+    min_gamma_band: float = 1e-6
     engine_budget: int = 400
     max_tube_arcs: int = 1
     # ``None`` = no cap (the production default: the tiling itself bounds the
@@ -849,7 +849,7 @@ def band_caustic_structure(band: tuple[float, float], parity: int, *,
 
 
 def stable_gamma_bands(band: tuple[float, float], parity: int, *,
-                       n_samples: int = 200, min_width: float = 0.005,
+                       n_samples: int = 200, min_width: float = 1e-6,
                        refine_near_one_window: float = 0.0,
                        refine_near_one_width: float = 0.05
                        ) -> tuple[list[tuple[tuple[float, float],
@@ -3473,8 +3473,10 @@ def train(*, outdir: str | Path,
         w_range = box.w_range(parity)
         # The fold-arc partition can change at discrete gammas (cusp/wall
         # metamorphoses on the deltoid); tube grids are rectangular, so the
-        # band is bisected into topology-stable sub-bands and metamorphosis
-        # slivers are dropped (they receive no chart and fall through to the exact engine).
+        # band is bisected into topology-stable sub-bands.  With min_gamma_band=0.0,
+        # bisection continues to float resolution and no slivers are dropped; any
+        # topology-straddling band resolves once narrow enough for all three sample
+        # gammas to agree.
         sub_bands, dropped = stable_gamma_bands(
             band, parity, n_samples=config.n_caustic_samples,
             min_width=config.min_gamma_band,

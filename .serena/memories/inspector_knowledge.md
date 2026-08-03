@@ -221,3 +221,8 @@
   estimation error, not an implementation defect. Carry forward as a
   non-blocking open issue with a note; do NOT demand the code be changed to
   match an aspirational metric that the physics does not allow.
+- SADDLE-LOBE INTERIOR FOLD FALLTHROUGH: fold-ppGO correctly falls through for
+  saddle-lobe interior (gamma > 1) because `_merging_fold_pair` returns None
+  when no (Morse 0, Morse 1) adjacent pair exists. For saddle-lobe configs that
+  DO have a fold pair the correction is valid and will serve correctly — the
+  image_count==4 census restriction is physically correct.

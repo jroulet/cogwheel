@@ -235,3 +235,16 @@
   that both a train-time w-grid and a serve-time w-grid give the SAME
   admit/refuse decision for the SAME geometric config; optionally confirm
   ghost values are bit-identical on shared w-points.
+- FOLD-PPGO HANDOFF TEST PATTERNS (test_lensing_fold_ppgo_handoff.py):
+  (1) Gate-refusal fixture: the xi < 4.0 refusal regime requires rho CLOSE
+  to caustic (e.g. rho=0.7 at gamma=0.5 gives xi~2.15 at w=45) — near-axis
+  theta alone does NOT force xi<4 at rho=0.3 (delta_tau stays 0.26-0.33
+  for all angles). (2) Fine gate fixture: gamma=0.85, rho=0.5 near meta
+  morphosis: xi~5.85 (coarse admits), error~0.066 >> 1e-4 (fine refuses;
+  margin ~660x). (3) DefaultPathUnaffectedTestCase: mock_chart must be IN
+  surrogate.charts for _chart_index identity match — select_chart returning
+  a chart takes priority over fold block. (4) CensusRecordsPpgoFold: use
+  M_lens=20e6 Msun (w_min~49500, xi~531, error~8.2e-5 < 1e-4) with patches
+  select_chart→None + get_certified_ppgo_map→None; use REAL geometry_partition.
+  Backward-compat: existing test fixtures with w < 20 have xi < 4.0 even
+  at rho=0.3, so the coarse gate refuses and falls through — no regression.

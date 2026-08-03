@@ -306,3 +306,7 @@
   in a `types.SimpleNamespace` with the required fields explicitly set —
   do NOT add those fields to the geom object itself. Document which fields
   the helper reads so the adapter is an exhaustive contract, not a guess.
+- GEOMETRY DATA TYPE GOTCHA: `geom.images` is a LIST not ndarray (despite
+  the type annotation suggesting otherwise) — use `list(geom.images)` not
+  shape-based indexing. The `macro_matrix` is NOT stored on geom — reconstruct
+  it via the `macro_matrix(...)` function from the partition.

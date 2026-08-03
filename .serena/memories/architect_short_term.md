@@ -1,5 +1,15 @@
 # Architect Short-Term Observations
 
+- 2026-08-XX: brief_remove_min_gamma_band — set min_gamma_band=0.0 in THREE
+  sites: TrainingConfig.min_gamma_band (L274), stable_gamma_bands default
+  (L851), scripts/measure_dropped_slivers.py MIN_WIDTH (L36). Also update
+  the call-site comment (L3476) noting no slivers are dropped with 0.0.
+  Simplifier: lean one-WP Foreman-Lite, no infinite-bisection risk (topology
+  converges at sub-eps widths). Existing tests unaffected (use explicit
+  min_width= args). Test-file naming staleness (_NEW_DEFAULT_MIN_WIDTH) is
+  cosmetic, not gating.
+
+
 (last consolidated by Dreamer on 2026-08-05)
 
 - 2026-08-XX: brief_analytic_cusp_serving.md is a STALE handoff — build 1c already

@@ -2,7 +2,7 @@
 """Measure coverage hole from dropped gamma slivers (region 10).
 
 Calls ``stable_gamma_bands`` over the full prior sub-range for each
-parity with production ``min_width=0.005``, sums dropped-sliver widths,
+parity with production ``min_width=1e-6``, sums dropped-sliver widths,
 and reports the fraction relative to the full prior range [0, 1.6].
 
 Professor domain assessment: zero topology metamorphoses exist in the
@@ -34,7 +34,7 @@ BAND_POSITIVE: tuple[float, float] = (0.0, 0.999)
 BAND_SADDLE: tuple[float, float] = (1.001, 1.6)
 
 #: Production minimum sliver width (matching TrainingConfig default).
-MIN_WIDTH: float = 0.005
+MIN_WIDTH: float = 1e-6
 
 #: Full prior range denominator [0, 1.6].
 PRIOR_RANGE: float = 1.6

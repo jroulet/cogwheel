@@ -244,3 +244,13 @@
   `_saddle_arcs` from surrogate_training and geometry.nearest_caustic_point
   for exact distance. exclusion_rho = 1.0 + (reach_max + eta_max_max) -
   coord_radius_min (matches production formula exactly).
+- FOLD-PPGO INTERIOR HANDOFF DESIGN (Build ppgo_interior_handoff): dual-gate
+  serve path in `_surrogate_coefficients` for rho<1 draws above InteriorWedge
+  Chart w-ceiling. Coarse gate: ξ_min >= 4.0 (Chester-Friedman-Ursell param,
+  ensures ~2 full Airy oscillations). Fine gate: c_A * ξ^{-3/2} < CERT_BAR
+  (1e-4) — correctly admits only at large w (e.g. census xi~528). DO-NOTHING
+  property: fold_ppgo_correction works on ALL regimes (calls geometric_ampli
+  fication for all 4 images), so it can never be WORSE than raw ppGO. Census
+  category 'ppgo_fold' with served=True skips fallthrough bucket. Mirror
+  _XI_FOLD_THRESHOLD as a LOCAL constant in census.py (same pattern as
+  DD_PRODUCT_MARGIN). One WP pattern: likelihood.py + surrogate_census.py.
