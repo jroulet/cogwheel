@@ -70,11 +70,8 @@ section: Backlog
      docstring already concedes the threshold had to be relative "because the
      measured dip depth scales as ~caustic_size/n_samples" — a sampling
      artifact, described as if it were physics.
-  4. **`surrogate_training._probe_arc_side` / `_PROBE_ETA`** — F039. An
-     absolute `0.05` step decides which side of a fold carries the image pair,
-     and the answer moves with the step. Analytic replacement is `D2y[e,e]`,
-     the same cascade as the rest. Build 1b, alongside the other
-     training-path consumers.
+  4. **DONE (2026-07-29, commit `00bf8ae`, build 1b).** `surrogate_training._probe_arc_side` / `_PROBE_ETA` — F039.
+     Retired alongside the other training-path consumers.
 
   5. **DONE (2026-07-30, commit `145cec3`, build 1d).**
      `surrogate_training._tube_normal` (added 2026-07-29 — MISSED by the
