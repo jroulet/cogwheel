@@ -23,7 +23,7 @@ section: Backlog
   | 4 | Cusp neighbourhoods | excluded from tubes -> quadrature | OPEN, both parities. Saddle exclusions are WIDER (`_SADDLE_CUSP_WIDTH_SAFETY = 2.5`, min half-width 0.08) because deltoid cusps are shallow and the wedge-edge turnarounds are near-singular |
   | 5 | Exterior far-field | `FarFieldChart` | CLOSED (per-column admission since 8h-b4) |
   | 6-9 | ~~Far annulus `3.0 < \|y\| <= 4.2426`, and its three gamma fences~~ | — | **DISSOLVING — do not work these rows.** All four existed only because `\|y\| = 3` (the PRIOR BOX half-width) was treated as a physical boundary. F036 measures that no `\|y\|` threshold can bound the caustic at all: `r_caustic` diverges at the parity wall (19.8 at `gamma = 0.99` vs a 4.2426 box corner). `GAMMA_FENCE = 3/4` and the saddle fence `1.0502342` are CONSEQUENCES of the annulus radius, not independent physics, and are deleted with it. These four rows collapse into ONE caustic-relative exterior region. See [[lensing_caustic_relative_coordinates]] |
-  | 10 | DROPPED GAMMA SLIVERS (any `\|y\|`, any `w`) | NOTHING | OPEN. `min_gamma_band = 0.005` (lowered from 0.02 in WP1); a dropped sliver gets no chart of any kind. Total prior mass at new threshold NEVER MEASURED |
+  | 10 | DROPPED GAMMA SLIVERS (any `\|y\|`, any `w`) | — | CLOSED — `min_gamma_band = 1e-6` (2026-08-03, commit `70affbb`); bisection continues to near-float resolution, total dropped prior mass ~1e-6 fraction, negligible. See `completed.d/2026-08-03_min_gamma_band_zero.md` |
   | 11 | `w` above the certified ceiling (saddle `w > 60`) | — | OPEN and STRUCTURALLY DIFFERENT: no exact evaluator exists there, so charts cannot be TRAINED, not merely are not |
   | 12 | `gamma = 1` parity wall (`det A = 0`) | named refusal | ACCEPTED — measure zero, not a hole |
 
@@ -53,10 +53,8 @@ section: Backlog
      saddle" — a POSITIVE-PARITY statement. On the macro saddle both real
      images are already index-1. Blocks admitting the complex ghost on the
      saddle branch.
-  5. **Dropped-sliver treatment** (region 10). MEASURE FIRST: sum the dropped
-     widths across the prior. The count is data-dependent and unmeasured, and
-     that number decides whether this is a rounding error or a real hole.
-     [[lensing_dropped_gamma_slivers]]
+  5. ~~**Dropped-sliver treatment** (region 10).~~ **CLOSED** (2026-08-03, commit `70affbb`) — `min_gamma_band = 1e-6`; total dropped prior mass ~1e-6 fraction, negligible.
+     See `completed.d/2026-08-03_min_gamma_band_zero.md`.
   6. **Small-gamma collar** (region 3). The foot-of-normal skip cause is
      CLOSED (C6 shipped 2026-08-01). Remaining cause: topology slivers from
      `stable_gamma_bands` (`_PROBE_ETA`, F039) — closes with step 1b of

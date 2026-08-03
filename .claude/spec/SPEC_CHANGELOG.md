@@ -404,12 +404,20 @@ njit nearest-caustic search; certified by the new
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
 
-- `0.9.8` ():
+- `0.9.9` ():
 
 Add `test_lensing_wedge_dd_arclength.py` to InteriorWedgeChart certified-by
 list in SPEC.md. The new 666-line suite pins the DD-product w-ceiling formula
 (`w_max <= _DD_PRODUCT_MARGIN / (r_max * reach_max)`) and the theta_to_s
 arc-length axis construction added to `from_wedge_engine` in commit 56a223a.
+
+- `0.9.8` ():
+
+Update training section to reflect `min_gamma_band = 1e-6` default: bisection
+now continues to near-float resolution with negligible dropped prior mass
+(~1e-6 fraction). Update `test_lensing_min_gamma_band.py` cert blurb to
+describe threshold-discriminant invariants at explicit non-zero widths (the
+production default is 1e-6). Close region 10 in the coverage-map TODO fragment.
 
 - `0.9.7` ():
 
