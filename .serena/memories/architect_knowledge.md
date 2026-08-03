@@ -216,33 +216,31 @@
   — a ring misses the thin near-wall spike and gives a systematically low
   oracle.
 - INTERIOR WEDGE CHART DESIGN (Build interior_wedge_chart): caustic-relative
-  (r, theta_wedge) coordinates for 4-image interior sources, replacing the
-  old FarFieldChart-in-interior approach. Key decisions: (1) Symmetry is D₂
-  (Klein four-group — two axis reflections), NOT Z₄ or D₄; quadrant fold
-  via (|y₁|, |y₂|). (2) Separate dataclass InteriorWedgeChart (spatial axes
-  semantically different from FarFieldChart). (3) r = |y|/r_caustic(gamma,
-  theta) normalises by the direction-dependent caustic reach (r<1 ≡ inside).
-  (4) theta_to_s arc-length remap for angular axis (same pattern as
-  LobeInteriorChart). (5) _WedgeCausticMap precomputed bilinear table for
-  serve-time r_caustic interpolation. (6) Dispatch priority: tube > farfield
-  > lobe > wedge (lowest). (7) from_wedge_engine training entry on
-  LensAmplificationSurrogate. (8) NPZ persistence with kind='wedge' +
-  _WEDGE_AXIS_SCHEMA versioning.
-- DD PRODUCT BOTTLENECK: far-field charts (and all Schwinger-backed
-  evaluations) are limited to w <= DD_PRODUCT_CEILING ≈ 60 because
-  double-double arithmetic in the Schwinger integrand can hold 1e-10
-  precision only to w~64 (cancellation law L_S = pi*w/4). This CAPS the
-  w-range of any chart tile. Fix direction: r-DEPENDENT w ceiling — tiles
-  at larger |y| (weaker lensing) converge faster and can extend to higher w,
-  while near-caustic tiles stay capped. The ppGO serving ladder below
-  w_cert covers the gap where charts cannot reach.
-- CENSUS BAND-SPLIT CONSISTENCY: `characterize_sample` (census) must
-  replicate the SAME band-split logic that the production serve path uses.
-  A discrepancy (e.g. census using a simpler band edge while production uses
-  the chart's stored w_cert) causes the census to attribute samples to the
-  wrong rung, inflating mis-serve statistics. Fix: share the identical
+  (r, theta_wedge) coordinates for 4-image interior sources; D₂ symmetry
+  (Klein four-group); from_wedge_engine entry; kind='wedge' NPZ.
+  See coder_knowledge for full implementation checklist.
+- DD PRODUCT BOTTLENECK: far-field charts capped at w <= ~60 (double-double
+  precision limit). Fix direction: r-dependent w ceiling; ppGO serves below
+  w_cert. See coder_knowledge for cap formula.
+- CENSUS BAND-SPLIT CONSISTENCY: `characterize_sample` must replicate the
+  SAME band-split logic as the production serve path; share the identical
   band-edge accessor between census and serve.
 - Arc-length reparametrization design: use rep_gamma = median(gamma_grid)
   to minimize worst-case effective excursion; a single-gamma map is adequate
-  for topology-stable bands (degrades only near parity wall where other
-  guards already bound the regime).
+  for topology-stable bands.
+- D-NORM-EVAL DESIGN (Build d-norm-eval): implement d/R_c normalization as
+  IN-MEMORY-ONLY opt-in (d_normalized flag on from_engine; per-(gamma,s)
+  rc_table stored on chart; one divide in serve transform + box gate). NO
+  NPZ persistence/schema bump in the eval build (deferred to promotion build
+  — OWED). R_c MUST be per-(gamma-node, s-node); a single-theta R_c repeats
+  the arc-map mistake. A/B test = MEASUREMENT not decision-oracle: gate hard
+  correctness invariants (round-trip bijection, min R_c>floor, train/serve
+  box parity, node-exact on stored grid, default byte-identical,
+  eps_norm<=1.1*eps_raw). Record stratified near-wall/far-tail eps for
+  driver's >=2x promotion gate (never gate in-build on this).
+- GEOMETRIC COVERAGE SCRIPT PATTERN (scripts/measure_far_zone_crossover.py):
+  measure tube+far-field tiling coverage at the C8 boundary using
+  `_coordinate_radius_bounds`, `_min_curvature_radius`, `_astroid_arcs`,
+  `_saddle_arcs` from surrogate_training and geometry.nearest_caustic_point
+  for exact distance. exclusion_rho = 1.0 + (reach_max + eta_max_max) -
+  coord_radius_min (matches production formula exactly).

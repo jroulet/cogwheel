@@ -1,1 +1,3 @@
-Last build: wp2 step-4 geometric coverage script. Rewrote scripts/measure_far_zone_crossover.py from Born-carrier-accuracy measurement to geometric tube+far-field tiling coverage check. Uses _coordinate_radius_bounds, _min_curvature_radius, _astroid_arcs, _saddle_arcs from surrogate_training + geometry.nearest_caustic_point for exact distance. exclusion_rho formula matches production: 1.0 + (reach_max + eta_max_max) - coord_radius_min. Removed _scalar_caustic_reach import (unused after refactor). Clean parse + import verified.
+# Coder Short-Term Observations
+
+(empty — last consolidated by Dreamer on 2026-08-03)

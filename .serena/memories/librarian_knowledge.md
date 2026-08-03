@@ -132,3 +132,9 @@
   description sentences (patterns: "not yet", "STILL NOT", "remains
   unwired", "currently disabled") and verify each against the actual code
   before deciding whether to flip or preserve it.
+- SCRIPTS/ REWRITE NO-OP RULE: a complete rewrite of a `scripts/` file
+  (even +100s of lines) is a legitimate librarian no-op when it stays
+  within `scripts/`, introduces no new serialization artifacts, and makes
+  no changes to the `cogwheel/` public API. Doc surfaces (SPEC, DATA_CONTRACTS,
+  overview.rst) are only affected when scripts introduce disk-persisted
+  formats or new public symbols.
