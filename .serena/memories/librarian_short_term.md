@@ -1,51 +1,71 @@
 # Librarian Short-Term Observations
 
-## Run: 2026-08-03 — WP1 min_gamma_band threshold reduction (0.02 → 0.005)
+## Run: 2026-08-03 — Fold-ppGO interior handoff (Build ppgo_interior_handoff)
 
-**Scope:** Build reduced `TrainingConfig.min_gamma_band` default and
-`stable_gamma_bands` default `min_width` from 0.02 to 0.005, added 9-test
-suite in `test_lensing_min_gamma_band.py`, fixed two comments in
-`surrogate_training.py`.
+**Scope:** Build added a new serve path in `likelihood._surrogate_coefficients`
+for positive-parity interior draws above the `InteriorWedgeChart` w-ceiling,
+mirrored gate logic in `surrogate_census.characterize_sample` (category
+`ppgo_fold`), and added 17 tests in `test_lensing_fold_ppgo_handoff.py`.
 
 **What was stale and why:**
-Three doc surfaces cited `min_gamma_band = 0.02` as the *current default*:
-1. `.claude/spec/todo.d/lensing_dropped_gamma_slivers.md` — two occurrences
-   of "default `0.02`" and a "Do NOT close by lowering" note that needed
-   updating since the threshold was lowered (but the TODO is still OPEN:
-   mass measurement and treatment decision remain owed).
-2. `.claude/spec/todo.d/lensing_coverage_map.md` — row 10 cited
-   `min_gamma_band = 0.02`.
-3. `.claude/spec/COVERAGE_DESIGN.md` — audit table entry for `min_gamma_band`
-   listed 0.02.
+1. SPEC.md "Microlensed waveform & likelihood" row — missing description of the
+   fold-ppGO interior handoff path. The row described the fact-4/Born slot but
+   did not mention that `_surrogate_coefficients` now has a separate interior
+   (rho <= 1.0) serve path for draws above the `InteriorWedgeChart` w-ceiling.
+   Inspector flagged this as INS-1-001 (trivial).
+2. SPEC.md census description said "6-way MECE fall-through breakdown" — now 7-way
+   with `ppgo_fold` as a new category (served, not a fall-through, but tracked
+   distinctly by `characterize_sample`).
+3. `lensing_remaining_coverage_gaps.md` TODO fragment — had an OPEN `[→ spec]`
+   item for the ppGO handoff; the build implemented option (b) (xi threshold
+   gate), so the item needed to be marked DONE.
+4. `doc_debt.json` — recorded an owed entry about `test_lensing_min_gamma_band.py`
+   not being cited in SPEC.md. Added it to the training "Certified by" section.
 
-SPEC.md itself does NOT pin the specific value — it names the concept and
-references the mechanism without a literal constant, so it was not stale
-(confirmed by inspector memory's note).
+**Fixes applied:**
+- SPEC.md: Added "FOLD-PPGO INTERIOR HANDOFF" paragraph after the Born fact-4
+  slot sentence in the likelihood row (via Python str.replace — pipe-escape rule).
+- SPEC.md: Updated census "6-way" → "7-way fall-through breakdown" with `ppgo_fold`.
+- SPEC.md: Added `test_lensing_fold_ppgo_handoff.py` cert to the new FOLD-PPGO
+  paragraph.
+- SPEC.md: Added `test_lensing_min_gamma_band.py` cert to the training section
+  (after the `test_lensing_caustic_cusps.py` reference).
+- `todo.d/lensing_remaining_coverage_gaps.md`: Marked ppGO handoff item DONE.
+- Created `completed.d/2026-08-03_fold_ppgo_interior_handoff.md`.
+- Created `spec_changelog.d/2026-08-03_fold_ppgo_interior_handoff.md` (bump: patch).
+- Deleted `.claude/doc_debt.json` (item addressed).
+- Deleted `.claude/sync_issues.json` (prior scripts-only no-op commit).
 
-FINDINGS.md and historical handoff briefs cite 0.02 as empirical measurement
-values taken at the old threshold — those are historical facts, not stale.
+**Docs/source NOT touched:** No Sphinx RST changes needed — changes are
+SPEC.md architecture table only, not public Python API or install instructions.
 
 **Pattern confirmed:**
-- SCRIPTS/ REWRITE NO-OP RULE: `scripts/measure_dropped_slivers.py` change
-  was internal to scripts/ with no new disk artifacts → librarian no-op.
-- Test-only file (`test_lensing_min_gamma_band.py`) → no doc surface updates.
-- The "Do NOT close by lowering" advisory in a TODO fragment needs to be
-  updated when a build does lower it, even if the TODO stays open.
+- The TODO fragment's `[→ spec]` tag is the trigger for a spec_changelog.d
+  fragment; verify it's there before closing the TODO.
+- When SPEC.md describes "N-way MECE breakdown", a new census category in
+  `characterize_sample` always stalens that count — grep for the category name
+  in SPEC.md immediately.
+- `doc_debt.json` can carry owed work from prior builds; read it at the start
+  of each doc sync (it was overlooked in prior runs — now tracked).
+- The SPEC.md "fact-4 slot" description appears in TWO places: (1) the main
+  table row for "Microlensed waveform & likelihood" (updated here) and (2) the
+  design-note bullet under "Born rung" (lines ~134–145). The note describes the
+  Born-specific path only; it does NOT need to describe fold-ppGO.
 
 **Fragile cross-references to watch:**
-- `lensing_dropped_gamma_slivers.md` — TODO is still OPEN. Row 10 in
-  `lensing_coverage_map.md` tracks this too. When sliver mass is finally
-  measured and treatment decided, both fragments need DONE markers.
-- `COVERAGE_DESIGN.md` C9 section still references the OLD `min_width = 0.02`
-  measurement narrative ("at min_width = 0.02 the saddle drops 40.6%") as a
-  historical measurement fact — this is intentionally left as-is (it records
-  a past measurement, not the current default).
+- `ppgo_fold` category is now in SPEC.md census description, code constants,
+  and TODO fragment. If the category string changes in code, update both SPEC.md
+  occurrences and any test that pins it.
+- The `_XI_FOLD_THRESHOLD = 4.0` and `CERTIFICATION_BAR` constants are now
+  cited by name in SPEC.md — if they're renamed, update SPEC.md.
+- `lensing_remaining_coverage_gaps.md` still has two OPEN items:
+  "ppGO interior certification fix" (research) and infrastructure items.
 
 **Surprises:**
-- The `lensing_dropped_gamma_slivers.md` fragment explicitly said "Do NOT
-  close this by lowering `min_gamma_band`" — so the build did something the
-  fragment advised against. The TODO is correctly kept open with updated wording.
-- COVERAGE_DESIGN.md's C9 section cites "measured 2026-07-28 — at min_width
-  = 0.02 the saddle drops 40.6%" as a historical measurement; that measurement
-  text is accurate and should NOT be updated (it describes a past empirical
-  run, not the current config).
+- The `doc_debt.json` file was untracked (not in git) but had actionable content
+  about a previously missed SPEC.md test-file citation. Deleting it after
+  addressing the item is the correct outcome.
+- The census description "MECE" was not quite accurate after adding `ppgo_fold`
+  (which is a SERVED category, not a fall-through). Updated description to
+  "7-way fall-through breakdown" with a clarifying parenthetical that
+  `ppgo_fold` is served but tracked distinctly.

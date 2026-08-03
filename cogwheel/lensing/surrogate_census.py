@@ -54,7 +54,8 @@ from cogwheel.lensing.chang_refsdal import (ChangRefsdalChannels,
                                             farfield_envelope_from_partition)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
 from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
-                                       caustic_rho, get_certified_ppgo_map)
+                                       CERTIFICATION_BAR, caustic_rho,
+                                       get_certified_ppgo_map)
 from cogwheel.lensing.prior import (FixedLensGeometryPrior,
                                     UniformLensMassPrior,
                                     UniformReducedShearPrior,
@@ -107,6 +108,11 @@ _EMPTY_REFUSED = np.empty((0, 3), dtype=float)
 # exterior-to-caustic draw the analytic Born carrier rung serves (rho > 1).
 _FALLTHROUGH_CATEGORIES = ('gamma-guard', 'dropped-sliver', 'born',
                            'cusp-window', 'refusal-ball', 'out-of-box')
+
+#: Minimum Airy parameter xi for the fold-ppGO interior handoff gate.
+#: Mirrors the canonical definition in cogwheel.lensing.likelihood.
+_XI_FOLD_THRESHOLD = 4.0
+
 
 class CensusError(RuntimeError):
     """Raised when a defensive census invariant is violated."""
@@ -435,6 +441,45 @@ def characterize_sample(
         record.chart_index = _chart_index(surrogate.charts, chart)
         record.band_edge = _is_band_edge(chart, log_w_min, chart_log_w_max)
         return record
+
+    # --- Fold-ppGO interior handoff (Build ppgo_interior_handoff) ---
+    # Mirrors _surrogate_coefficients: interior draws (4 images, rho <= 1.0)
+    # above the wedge chart's w-ceiling are served when the merging fold
+    # pair is well-resolved (xi_min >= _XI_FOLD_THRESHOLD) AND the uniform
+    # error estimate is below CERTIFICATION_BAR.  Census evaluates only the
+    # GATE (no expensive fold_ppgo_correction call).
+    if image_count == 4:  # interior positive parity
+        try:
+            from cogwheel.lensing.chang_refsdal._airy_fold import (
+                _merging_fold_pair, _uniform_error_estimate, _image_at_delay)
+            from cogwheel.lensing.chang_refsdal import geometry as _geom_mod
+            source_arr = np.array([y1, y2], dtype=float)
+            matrix = _geom_mod.macro_matrix(gamma, 0.0, 0.0)
+            images_raw = _geom_mod.find_images(source_arr, matrix)
+            images_list = list(images_raw)
+            pair = _merging_fold_pair(images_list, source_arr, matrix)
+            if pair is not None:
+                tau_plus, tau_minus = pair
+                delta_tau = tau_minus - tau_plus
+                if delta_tau > 0.0:
+                    xi_min = (3.0 * float(w_grid.min()) * delta_tau
+                              / 4.0) ** (2.0 / 3.0)
+                    if xi_min >= _XI_FOLD_THRESHOLD:
+                        image_plus = _image_at_delay(
+                            images_list, source_arr, matrix, tau_plus)
+                        image_minus = _image_at_delay(
+                            images_list, source_arr, matrix, tau_minus)
+                        if (image_plus is not None
+                                and image_minus is not None):
+                            error_est = _uniform_error_estimate(
+                                image_plus, image_minus, matrix, xi_min)
+                            if (error_est is not None
+                                    and error_est <= CERTIFICATION_BAR):
+                                record.served = True
+                                record.category = 'ppgo_fold'
+                                return record
+        except (ValueError, ZeroDivisionError, LensDomainError):
+            pass
 
     record.category = classify_fallthrough(
         surrogate, gamma=gamma, log_w_min=log_w_min,

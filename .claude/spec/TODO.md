@@ -1005,15 +1005,12 @@ Tag conventions:
   breaks tensor-product separability. Proceed with absolute d. See
   `completed.d/2026-08-03_d_normalization_evaluation.md`.
 
-- **ppGO handoff above chart w-ceiling for interior draws** `[→ spec]` —
-  the InteriorWedgeChart has a finite w-ceiling (DD product cap). Above it,
-  nothing serves interior draws. The fold-corrected ppGO (`fold_ppgo_correction`)
-  IS physically correct at high w but the ppGO certification map doesn't certify
-  positive-parity interior cells (persistent ~7% error at axis angles within
-  the Schwinger-measurable range). Options: (a) loosen the certification bar
-  for band-split above the chart ceiling, (b) trust ppGO when the fold pair's
-  `ξ = (3wΔτ/4)^{2/3}` exceeds a threshold (geometric resolution criterion),
-  (c) use `fold_amplification` directly as the high-w serve path for interior.
+- ~~**ppGO handoff above chart w-ceiling for interior draws**~~ `[DONE — 2026-08-03]` —
+  Landed option (b): `_surrogate_coefficients` now serves interior draws above
+  the `InteriorWedgeChart` w-ceiling when `xi_min >= _XI_FOLD_THRESHOLD = 4.0`
+  AND the per-pair `_uniform_error_estimate` is below `CERTIFICATION_BAR`.
+  Census tracks these as category `ppgo_fold`. SPEC.md updated.
+  See `completed.d/2026-08-03_fold_ppgo_interior_handoff.md`.
 
 - **ppGO interior certification fix** `[research]` — the envelope-extrapolation
   code in `_measure_cell` produces identical artifacts despite being wired.

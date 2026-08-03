@@ -404,14 +404,14 @@ njit nearest-caustic search; certified by the new
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
 
-- `0.9.7` ():
+- `0.9.8` ():
 
 Add `test_lensing_wedge_dd_arclength.py` to InteriorWedgeChart certified-by
 list in SPEC.md. The new 666-line suite pins the DD-product w-ceiling formula
 (`w_max <= _DD_PRODUCT_MARGIN / (r_max * reach_max)`) and the theta_to_s
 arc-length axis construction added to `from_wedge_engine` in commit 56a223a.
 
-- `0.9.6` ():
+- `0.9.7` ():
 
 ### InteriorWedgeChart: DD-product w-ceiling and arc-length angular axis
 
@@ -447,7 +447,7 @@ time." — this was accurate for the class API but did not document that
 construction method (cumulative trapezoid of `caustic_speed`), or that `s_grid`
 is derived from the map and used as the spline axis.
 
-- `0.9.5` ():
+- `0.9.6` ():
 
 ### Add InteriorWedgeChart to SPEC.md surrogate chart collection
 
@@ -456,6 +456,16 @@ the positive-parity astroid-interior chart type added in surrogate.py. Covers
 the caustic-normalised wedge-polar coordinates `(r, theta_wedge)`, D2 symmetry
 fold, `_WEDGE_AXIS_SCHEMA = 'wedge_caustic_relative_v1'` tag, `_wedge_serves`
 dispatch, `_WedgeCausticMap`, and `from_wedge_engine` training entry point.
+
+- `0.9.5` ():
+
+### Fold-ppGO interior handoff serve path
+
+SPEC.md "Microlensed waveform & likelihood" row updated to describe the new
+fold-ppGO interior handoff path in `_surrogate_coefficients`: interior positive-parity
+draws above the `InteriorWedgeChart` w-ceiling are now served when `xi_min >= 4.0`
+and the uniform error estimate passes `CERTIFICATION_BAR`. Census breakdown updated
+from 6-way to 7-way (new category: `ppgo_fold`).
 
 - `0.9.4` ():
 

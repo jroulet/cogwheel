@@ -102,7 +102,7 @@ from cogwheel.lensing.chang_refsdal.geometry import (
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
 from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
-                                       caustic_rho,
+                                       CERTIFICATION_BAR, caustic_rho,
                                        get_certified_ppgo_map)
 
 __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
@@ -234,6 +234,12 @@ _LENS_PARAMS = ('m_lens_msun', 'z_lens', 'y1', 'y2', 'gamma', 'beta',
                 'kappa')
 
 _TWO_PI_I = 2j * np.pi
+
+#: Minimum Airy parameter xi = (3*w*Δτ/4)^(2/3) below which the fold-
+#: corrected ppGO is not accurate enough to serve.  The fold-ppGO interior
+#: handoff requires xi_min >= this threshold (well-resolved fold pair)
+#: combined with a per-pair uniform error estimate below CERTIFICATION_BAR.
+_XI_FOLD_THRESHOLD = 4.0
 
 
 def _snap(x, dx):
@@ -1674,6 +1680,84 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             except (ValueError, LensDomainError):
                 return None
             if rho <= 1.0 or not born_chart.covers(lens['gamma'], rho):
+                # --- Fold-ppGO interior handoff (Build ppgo_interior_handoff) ---
+                # Interior draws (rho <= 1.0) above the wedge chart's w-ceiling:
+                # the fold-corrected ppGO is accurate when all images are well-
+                # resolved (xi_min >= _XI_FOLD_THRESHOLD) AND the per-pair error
+                # estimate is below CERTIFICATION_BAR.  Reconstruction mirrors the
+                # Born rung (reconstruct_farfield with FARFIELD_KERNEL_SUM).
+                if rho is not None and rho <= 1.0:
+                    try:
+                        from cogwheel.lensing.chang_refsdal._airy_fold import (
+                            fold_ppgo_correction, _merging_fold_pair,
+                            _uniform_error_estimate, _image_at_delay)
+                        source = np.array([lens['y1'], lens['y2']],
+                                          dtype=float)
+                        matrix = macro_matrix(
+                            lens['gamma'], lens['beta'], lens['kappa'])
+                        images = list(geom.images)
+                        pair = _merging_fold_pair(images, source, matrix)
+                        if pair is not None:
+                            tau_plus, tau_minus = pair
+                            delta_tau = tau_minus - tau_plus
+                            if delta_tau > 0.0:
+                                w_min = float(dense_w.min())
+                                xi_min = (3.0 * w_min * delta_tau
+                                          / 4.0) ** (2.0 / 3.0)
+                                if xi_min >= _XI_FOLD_THRESHOLD:
+                                    # Fine gate: error estimate on the
+                                    # fold pair.
+                                    image_plus = _image_at_delay(
+                                        images, source, matrix, tau_plus)
+                                    image_minus = _image_at_delay(
+                                        images, source, matrix, tau_minus)
+                                    if (image_plus is not None
+                                            and image_minus is not None):
+                                        error_est = (
+                                            _uniform_error_estimate(
+                                                image_plus, image_minus,
+                                                matrix, xi_min))
+                                        if (error_est is not None
+                                                and error_est
+                                                <= CERTIFICATION_BAR):
+                                            # All gates pass -- serve via
+                                            # fold_ppgo_correction.
+                                            f_total = np.atleast_1d(
+                                                fold_ppgo_correction(
+                                                    dense_w, source,
+                                                    lens['gamma']))
+                                            f_minrel = f_total * np.exp(
+                                                -1j * dense_w * geom.t_min)
+                                            real = np.asarray(
+                                                geom.real_mask, dtype=bool)
+                                            ppgo_sum = np.sum(
+                                                geom.saddle_kernels[:, real]
+                                                * np.exp(
+                                                    1j * dense_w[:, None]
+                                                    * geom.delays[real]
+                                                    [None, :]),
+                                                axis=1)
+                                            envelope = (
+                                                (f_minrel - ppgo_sum)
+                                                * np.exp(1j * dense_w
+                                                         * geom.t_min))
+                                            kernels, _total = (
+                                                reconstruct_farfield(
+                                                    dense_w, envelope,
+                                                    geom.delays,
+                                                    geom.saddle_kernels,
+                                                    geom.real_mask,
+                                                    FARFIELD_KERNEL_SUM,
+                                                    geom.t_min))
+                                            k0, k1 = (
+                                                self._reduce_dense_kernels(
+                                                    kernels))
+                                            delays = self._image_delays(
+                                                lens, geom)
+                                            return delays, k0, k1, geom
+                    except (LensDomainError, ValueError,
+                            ZeroDivisionError):
+                        pass  # Structural refusal: fall through.
                 return None
             # Build a duck-typed namespace adapter for
             # born_carrier_from_partition (which reads attributes by name).
