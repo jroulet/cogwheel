@@ -3376,3 +3376,34 @@ control proving the old loop emitted nothing across the entire kill window.
 **Rule.** Any state where the pipeline BLOCKS on an external decision must emit
 a liveness beat, or every watchdog downstream will read it as death. Waiting is
 not idling.
+
+## F060 — normalizing the far-field `d` axis by curvature radius is wrong physics, wrong chart, and breaks separability (2026-08-03)
+
+**Where:** `cogwheel/lensing/surrogate.py` — far-field chart `d`-axis grid design.
+
+A Professor+Simplifier evaluation (build `eval_d_norm`, 2026-08-03) tested
+whether normalizing the far-field `d` grid by the caustic curvature radius
+`R_c(gamma, theta)` would reduce interpolation error. Rejected on five
+independent grounds:
+
+1. **Wrong physics.** The Airy transition scale is `ξ = (3wΔτ/4)^{2/3}`,
+   not `d/R_c`. Normalizing by `R_c` alone cannot collapse the fold structure,
+   which also depends on `w`, `b₃`, and `λ_h`.
+2. **Wrong chart.** The far-field chart operates at `d >> R_c`; the regime
+   where `d ~ R_c` is served by the tube chart. There is no interpolation
+   benefit to relativizing `d` to a length scale the far-field chart never
+   approaches.
+3. **Breaks tensor-product separability.** `R_c(gamma, theta)` couples the
+   spatial and parameter axes. The surrogate architecture requires a
+   separable spline grid; mixing axes is architecturally forbidden.
+4. **Numerical instability near cusps.** `R_c` diverges near cusp points,
+   introducing instability in regions the chart already excludes via cusp
+   windows.
+5. **Non-problem.** The current 4 `d`-nodes achieve `eps < 1e-3`. The
+   `~2×` `R_c` variation within a gamma band is smooth monotone drift
+   absorbed by the `γ`-axis directly.
+
+**Rule.** If accuracy tightens to `eps < 1e-4`, add 1–2 `d`-nodes (50%
+training cost, zero serve cost, no architecture change) before considering
+any axis redefinition. Never redefine a grid axis by a quantity that couples
+to a perpendicular axis.

@@ -999,14 +999,11 @@ Tag conventions:
   higher-order uniform form, not a patched cubic one.
 
 
-- **Normalize the far-field `d` axis by curvature radius** `[→ spec]` —
-  the far-field chart's perpendicular-distance axis `d` is in absolute
-  source-plane units. At low gamma the Airy fringe compresses into d ~ 0.01;
-  at high gamma it spans d ~ 0.1. A spline in absolute `d` needs different
-  node density at each gamma. Normalizing by `R_c` (or using the Airy control
-  `ξ`) makes the fold structure O(1) regardless of gamma — same node count,
-  same accuracy everywhere. Same principle as `u = sqrt(eta)` (1e-eta),
-  arc-length theta (1e-tube), log-reach gamma (1e-gamma).
+- ~~**Normalize the far-field `d` axis by curvature radius**~~ `[RESOLVED]` —
+  Evaluated 2026-08-03 (build `eval_d_norm`). Rejected: wrong physics (Airy
+  transition is ξ not d/R_c), wrong chart (far-field operates at d >> R_c),
+  breaks tensor-product separability. Proceed with absolute d. See
+  `completed.d/2026-08-03_d_normalization_evaluation.md`.
 
 - **ppGO handoff above chart w-ceiling for interior draws** `[→ spec]` —
   the InteriorWedgeChart has a finite w-ceiling (DD product cap). Above it,
