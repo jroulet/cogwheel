@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "14a15edcb5f97edfca61f85df462dcf73999efe0",
-  "timestamp": "2026-08-03T20:32:16Z",
+  "commit": "d9e88a2c148b3fde349dabbe75a28bb5d5daa3fa",
+  "timestamp": "2026-08-03T22:44:18Z",
   "touched_files": [
     "cogwheel/lensing/born_residual_chart.py",
     "cogwheel/lensing/chang_refsdal/__init__.py",
@@ -22,6 +22,7 @@
     "cogwheel/tests/test_lensing_extrapolate_floor.py",
     "cogwheel/tests/test_lensing_farfield_envelope.py",
     "cogwheel/tests/test_lensing_fold_ppgo_correction.py",
+    "cogwheel/tests/test_lensing_fold_ppgo_handoff.py",
     "cogwheel/tests/test_lensing_ghost_decay_gate.py",
     "cogwheel/tests/test_lensing_ghost_gate.py",
     "cogwheel/tests/test_lensing_interior_wedge_chart.py",
