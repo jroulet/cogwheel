@@ -237,7 +237,8 @@ def classify_draw(gamma: float, y_abs: float, theta: float, w: float
     return 'exact_engine'
 
 
-def main():
+def main() -> None:
+    """Parse arguments, draw prior samples, classify each, and print summary."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--n-samples', type=int, default=10000,
                         help='Number of prior draws (default: 10000)')
@@ -254,11 +255,11 @@ def main():
     print("=" * 70)
     print(f"  N samples:  {n}")
     print(f"  Seed:       {seed}")
-    print(f"  Prior:")
-    print(f"    gamma ~ U(0.001, 1.599)")
-    print(f"    |y|   ~ U(0.01, 4.2426)")
-    print(f"    theta ~ U(0, 2π)")
-    print(f"    w     ~ LogU(5, 148)")
+    print("  Prior:")
+    print("    gamma ~ U(0.001, 1.599)")
+    print("    |y|   ~ U(0.01, 4.2426)")
+    print("    theta ~ U(0, 2π)")
+    print("    w     ~ LogU(5, 148)")
     print(f"  DD product margin: {_DD_PRODUCT_MARGIN}")
     print(f"  Xi fold threshold: {_XI_FOLD_THRESHOLD}")
     print(f"  Cusp arm coverage: {_CUSP_ARM_COVERAGE} rad")

@@ -3203,11 +3203,12 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
         # Far-field chart: far-field-smooth (s, d) at the query's own gamma.
         v1, v2 = _to_farfield_smooth(gamma, y1_eig, y2_eig, chart.arc_map,
                                      chart.arc_map.branch)
-    # Low-w flat extrapolation: clamp below the chart's w_min.
-    # The envelope is smooth and nearly constant below the first Airy
-    # fringe, so evaluating the spline at w_min for queries below it
-    # is accurate to O(w_min^2).  The high end is never clamped (the
-    # guard stack rejects queries above the chart's w_max).
+    # Low-w flat extrapolation: clamp the query band to the chart's w
+    # range before passing to the spline.  The low end is the intentional
+    # extrapolation: the envelope is smooth and nearly constant below the
+    # first Airy fringe, so pinning to w_min is accurate to O(w_min^2).
+    # The high end clip is defensive only — the serveable guard already
+    # ensures log_w_max <= chart.log_w_grid[-1] before we reach this point.
     log_w_clamped = np.clip(log_w_query, chart.log_w_grid[0],
                             chart.log_w_grid[-1])
     real = _contract_tensor_spline(chart.real_coeffs, chart.knots,

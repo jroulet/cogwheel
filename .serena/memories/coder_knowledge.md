@@ -310,3 +310,73 @@
   the type annotation suggesting otherwise) — use `list(geom.images)` not
   shape-based indexing. The `macro_matrix` is NOT stored on geom — reconstruct
   it via the `macro_matrix(...)` function from the partition.
+- LOW-W FLAT EXTRAPOLATION PATTERN (Build low_w_extrapolation): to serve
+  draws with w < chart.w_min via flat extrapolation, (1) add a
+  `_log_w_band_serveable` gate that checks ONLY the high end
+  (`log_w_max <= chart.log_w_grid[-1]`), replacing the old bilateral
+  `_log_w_band_inside` at all 5 call sites; (2) clamp with `np.clip` in
+  `_evaluate_chart` BEFORE the B-spline call (`log_w_query = np.clip(
+  log_w_query, chart.log_w_grid[0], chart.log_w_grid[-1])`). Use
+  `np.clip` (not `np.maximum`) for the one-sided low-end clamp so the
+  high-end guard stays strict. The physics justification: KERNEL_SUM
+  envelope → 0 as w → 0; DIFFRACTIVE/INTERIOR → sqrt(mu_macro); flat
+  clamp is O(w_min²) error. scipy BSpline extrapolates polynomially
+  off-grid — the clamp MUST precede the spline call, not follow it.
+  Accuracy bar: w_min/2 within 3e-3 of max|F|.
+- BORN RESIDUAL SPARSE-GRID TRAINING PATTERN: the Born residual chart is
+  trained on a sparse grid (not the full Born grid) because the residual
+  (exact F − Born) is smooth and well-resolved by fewer nodes. Training
+  entry point follows the same `from_*_engine` / `from_*_values` pattern
+  as other charts. The sparse grid must still satisfy >= 4 nodes per axis
+  (axis node count constraint). Census classifies residual-served draws
+  with `served=True` and a residual-specific `serve_method` indicator.
+- CUSP ARM BINARY-SEARCH BOUNDARY MEASUREMENT PATTERN (Build
+  cusp_arm_boundary): measure the actual serve/refuse boundary of
+  `cusp_amplification` by calling it directly (not an R-gate formula).
+  Use `max(all_refused)` not `last-consecutive` to find the conservative
+  boundary (monotonicity mostly holds but may break locally). Floor result
+  to 2 decimal places (conservative direction) and set `_CUSP_ARM_COVERAGE`
+  in surrogate.py. Script outputs delta_theta in radians (same units as
+  `_tube_serves` consumption). Refinement pass: re-run at worst-case config
+  with N=10000. Exclude saddle parity (converges to 0 due to deep-interior
+  images). After enabling `_CUSP_ARM_COVERAGE=0.07`, existing cusp_window
+  tests are unaffected because residual = max(0, window - 0.07) still
+  blocks queries at exact cusp vertex (delta=0).
+- MPMATH LAZY IMPORT + PAIRED N/2N CERTIFICATION PATTERN (Build
+  schwinger_qd): for an mpmath quadrature extension above a DD ceiling:
+  (1) lazy-import mpmath inside the function body (`import mpmath as mp`
+  at first call) to keep it an optional dependency; list under
+  `[project.optional-dependencies] training` in pyproject.toml. (2) Set
+  `dps = 30 + ceil(w)` for the working precision. (3) Certify on
+  RECONSTRUCTED F (not the raw integral value) via paired N/2N
+  evaluation: `|F(2N) - F(N)| / |F(N)| < tol`. (4) Dispatch in the
+  public function: check QD ceiling (150) first, then DD ceiling (60);
+  fallthrough to double-double. (5) W_CEILING_SCHWINGER_QD=150.0 exported.
+  KEY BUG: `mp.linspace` must receive `mpf` endpoints — passing `float()`
+  casts causes catastrophic precision loss and ~1e4 magnitude errors.
+  Training pipeline: `_SADDLE_W_CEILING` raised to 148.0 (2 below QD
+  ceiling as safety margin); routing pivot in `_saddle_grid` /
+  `_positive_parity_grid` changed from DD ceiling (60) to QD ceiling (150).
+  Sequential batch (not parallel) for the mpmath band: `f_schwinger`
+  dispatches internally so the call site is unchanged.
+- MIN_GAMMA_BAND = 1e-6 (NOT 0.0): setting `min_gamma_band = 0.0` in
+  `stable_gamma_bands` triggers near-infinite bisection at degenerate
+  boundaries — the function terminates via float-resolution bisection (1066+
+  iterations for a width-0.004 sliver at gamma=0 or saddle near-gamma=1
+  topology transitions). Use `min_gamma_band = 1e-6` as the production
+  value; this closes region 10 (phantom slivers) without the bisection
+  blowup. F041 test constant `_F041_MIN_WIDTH = 0.02` intentionally stays
+  (tests the arc-guard fix, not this threshold). The 3 edit sites are:
+  `TrainingConfig.min_gamma_band` default, `stable_gamma_bands` default
+  arg, and `scripts/measure_dropped_slivers.py` MIN_WIDTH constant.
+- CENSUS DRY-RUN METHODOLOGY (census_dry_run): a geometry-only coverage
+  audit without trained charts. Sample N=10K draws from the full parameter
+  space (gamma, |y|, θ, w log-uniform). Use `geometry_partition` (cheap
+  quartic, no engine) with minimal w_grid (2 pts). Classify each draw by
+  structural gate only: born (rho>1), tube_feasible (eta in
+  f_floor*Rc..f_max*Rc), wedge_feasible (rho<1, w*|y|<=58),
+  ppgo_fold (rho<1, 4 images, ξ>=4), cusp_arm (within cusp window above
+  coverage threshold), exact_engine (residual). Stream counts into
+  threshold-grid histograms (not per-sample arrays). 100% structural
+  coverage means every draw reaches at least one gate — confirms no
+  uncovered region before launching production training.

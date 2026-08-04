@@ -226,3 +226,28 @@
   when no (Morse 0, Morse 1) adjacent pair exists. For saddle-lobe configs that
   DO have a fold pair the correction is valid and will serve correctly — the
   image_count==4 census restriction is physically correct.
+- STALE BRIEF DETECTION — 0-WP ESCALATION PATTERN (Architect): before
+  designing a multi-WP build, verify that the brief's claimed state of the
+  code is actually current (grep/find_symbol the named symbols). Two
+  confirmed stale-brief patterns this session: (a) `brief_saddle_born_carrier`
+  — all 5 in-scope items had shipped in commits 31ee133 + 65eebcb; escalated
+  as 0-WP. (b) `brief_analytic_cusp_serving` — build 1c shipped in b9c3ed6;
+  escalated as 0-WP. Both saved the full cost of a multi-WP design cycle.
+  Trigger: architect cross-checks brief's "TODO" list against HEAD before
+  writing a plan — if the named symbols/constants are already present and
+  the named tests pass, the brief is stale.
+- INTER-LOBE CORRIDOR PROBE RESULT: for saddle-regime gammas (1.1–2.0),
+  the inter-lobe corridor has 0.0% area overlap with either lobe interior.
+  The two deltoid lobes are STRICTLY separated (lobe A at x ∈ [-1.52,-0.59]
+  at gamma=1.1; lobe B symmetric). Despite corridor width/sep ratio being
+  up to ~17% near the gamma=1 bifurcation, the corridor (x ∈ [-0.16,+0.16])
+  is entirely outside both lobes. Region 2 CLOSED. No code change needed;
+  the inter-lobe exact-engine fallback is purely an efficiency non-issue.
+- CENSUS DRY-RUN REVIEW CHECKLIST: (1) classification gates must be
+  structural-only (no engine calls, no chart artifact on disk); (2) born
+  = rho>1 subsumes farfield; (3) ppgo_fold uses actual `_merging_fold_pair`
+  (not a proxy); (4) each draw gets a fresh geometry object (label-
+  continuation safety); (5) n_freq=2 is sufficient for structural-only;
+  (6) 100% structural coverage = zero draws reaching `exact_engine` residual
+  bucket confirms production training can proceed. If any non-trivial
+  fraction lands in exact_engine, review gate ordering before launching.

@@ -35,6 +35,14 @@ from cogwheel.lensing.chang_refsdal.geometry import r_caustic
 
 
 def main() -> None:
+    """Build, evaluate, and save the Born residual chart to disk.
+
+    Constructs the tensor-product grid, calls ``ChangRefsdalChannels`` for
+    the exact total and ``born_lead_carrier`` for the carrier at every grid
+    point, computes the residual ``R = F_exact - F_carrier_demod``, assembles
+    a ``BornResidualChart``, runs a self-check, and writes the result to
+    ``cogwheel/data/born_residual_chart.npz``.
+    """
     # --- Grid definition ---
     gamma_grid = np.geomspace(0.05, 0.9, 7)
     rho_grid = np.linspace(2.0, 4.0, 5)
