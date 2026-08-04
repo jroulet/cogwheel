@@ -1368,9 +1368,9 @@ def born_carrier_from_partition(
         partition: 'ChangRefsdalPartition', *,
         split_constant: float = RHO_END,
         lead_carrier: Callable[..., complex] | None = None) -> np.ndarray:
-    """Band-split analytic carrier ``F_carrier`` for the far annulus.
+    """Band-split analytic carrier ``F_carrier`` for the exterior region.
 
-    The training/serve carrier of the Born (weak-deflection) annulus rung
+    The training/serve carrier of the Born (weak-deflection) exterior rung
     (``3.0 < |y| <= 4.2426`` at positive parity, ``gamma < 3/4``): the
     analytic object a driver-trained chart interpolates the RESIDUAL
     ``F_exact - F_carrier`` against, the same carrier + interpolated-remainder
@@ -1461,7 +1461,7 @@ def born_carrier_from_partition(
     ------
     ValueError
         If the partition carries fewer than two real images, so the
-        two-real-image band split ``Delta_tau`` is undefined (the far annulus
+        two-real-image band split ``Delta_tau`` is undefined (the exterior region
         at ``gamma < 3/4`` is exterior to the caustic and must yield two).
     geometry.LensDomainError
         Propagated from `geometric_amplification` / `reconstruct_farfield` if
@@ -1502,7 +1502,7 @@ def born_carrier_from_partition(
         raise ValueError(
             f'born_carrier_from_partition needs two real images to form the '
             f'band-split Delta_tau, but the partition has {real_delays.size} '
-            f'real channel(s).  The far annulus at gamma < 3/4 is exterior to '
+            f'real channel(s).  The exterior region at gamma < 3/4 is exterior to '
             f'the caustic and should yield two real images.')
     delta_tau = float(real_delays.max() - real_delays.min())
 

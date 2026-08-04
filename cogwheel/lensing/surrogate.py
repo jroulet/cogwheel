@@ -266,7 +266,7 @@ _KNOWN_ENVELOPE_DEFINITIONS = (
 # gamma-resolved arc-length map (`_FarFieldArcMap`), which is persisted
 # alongside the axes; the axes are meaningless without it, which is why they
 # carry their own schema tag.  The certified-ppGO map retains its separate
-# scalar annulus coordinate.  The loader hard-refuses a far-field chart whose
+# scalar rho coordinate.  The loader hard-refuses a far-field chart whose
 # axis-schema tag is absent or unknown (mirroring the 8g-b envelope-definition
 # hard-refuse): a stale caustic-fixed, raw-coordinate or scalar-reach artifact
 # fails loudly.
@@ -366,7 +366,7 @@ def _caustic_reach(gamma: float) -> float:
     """Maximum source-plane caustic reach used by conservative disk guards.
 
     Returns the SAME authoritative ``kappa = 0`` caustic reach the
-    certified-ppGO map uses (`ppgo_map.caustic_geometry`). The map's annulus
+    certified-ppGO map uses (`ppgo_map.caustic_geometry`). The map's rho
     coordinate, saddle chart fallback, and physical exterior-disk guards
     remain scalar-reach based. Positive-parity charts use the actual
     directional boundary from `geometry.r_caustic`.

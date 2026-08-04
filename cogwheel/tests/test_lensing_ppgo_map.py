@@ -19,7 +19,7 @@ the right bar.  `CausticRhoGuardTestCase` pins the two input guards.
 
 D1 -- the ppGO exclusion read point moved conservatively.  The stale
 gauge derived the caustic-relative coordinate from the PRE-narrowing outer
-annulus (``rho = physical_exclusion_radius / reach``); the fix derives it
+rho-band (``rho = physical_exclusion_radius / reach``); the fix derives it
 from the NARROWED served region via `caustic_rho`, feeding a source
 magnitude ``|y|_fix = region_exclusion_rho - 1 + coordinate_radius_min``
 that never exceeds the HEAD physical radius.  Both gauges divide by the
@@ -48,7 +48,7 @@ conservatism MECHANISM the fix relies on.
 
 Two further D1 cases sharpen the fix's guarantees.
 `PpgoOrderingReachableRedTestCase` reproduces the exact ORDERING bug
-(deriving the ppGO coordinate from the pre-narrowing outer annulus instead
+(deriving the ppGO coordinate from the pre-narrowing outer rho-band instead
 of the narrowed served region) and shows the production "read no easier than
 the served inner edge" invariant PASSES under the fixed ordering yet RAISES
 under the buggy ordering -- a reachable-red guard, not a vacuous one.
@@ -98,7 +98,7 @@ _BAND: tuple[float, float] = (0.45, 0.55)
 _ETA_MAX = 0.05
 
 #: Amount (in additive-exterior rho units) by which the served region is
-#: narrowed inside the pre-narrowing outer annulus for the D1 fixture --
+#: narrowed inside the pre-narrowing outer rho-band for the D1 fixture --
 #: mimics the per-``theta_c``-column admission pulling the served inner
 #: edge closer to the caustic.  Strictly positive so the narrowing is real.
 _NARROWING = 0.30
@@ -117,7 +117,7 @@ def _band_gauge_scalars() -> dict:
     Reproduces exactly the quantities `surrogate_training` computes when it
     builds a positive-parity exterior region: the authoritative scalar
     reach, the per-angle minimum critical-curve radius, the band-maximum
-    reach, and the derived physical exclusion radius and outer-annulus
+    reach, and the derived physical exclusion radius and outer-rho-band
     ``exclusion_rho``.  Cached so the whole suite pays the ~5 s geometry
     sweep once.
     """
@@ -159,7 +159,7 @@ def _saddle_gauge_scalars() -> dict:
     Mirrors exactly what `surrogate_training` computes for a macro-saddle
     exterior region: the scalar reach, the band-minimum scalar reach used as
     the caustic-fixed inner radius, the band-maximum reach, the physical
-    exclusion radius and the additive outer-annulus ``exclusion_rho``.  For a
+    exclusion radius and the additive outer-rho-band ``exclusion_rho``.  For a
     macro saddle there are NO positive-parity exterior tiles, so the served
     region is NOT narrowed: ``region_exclusion_rho == exclusion_rho`` and the
     ppGO gauge collapses to the HEAD scalar-reach expression
@@ -189,7 +189,7 @@ _saddle_gauge_scalars._cache = None  # type: ignore[attr-defined]
 
 #: Fine rho-band edges for the synthetic ppGO map: rho_fix (~0.98) and
 #: rho_head (~1.19) must fall in DIFFERENT cells so the w_cert comparison
-#: discriminates.  Last edge ``inf`` mirrors the open outer annulus.
+#: discriminates.  Last edge ``inf`` mirrors the open outer rho-band.
 _SYNTH_RHO_EDGES = (0.0, 0.5, 0.9, 1.0, 1.1, 1.3, 1.5, 2.5, 4.0, math.inf)
 
 
@@ -366,7 +366,7 @@ class PpgoExclusionMonotonicConservatismTestCase(_GaugeTestCase):
     Reproduces both gauges from the real band scalars and checks, against a
     synthetic monotone map, that the narrowed-region gauge reads a cell that
     is never easier (a higher-or-equal dispatch floor) than the HEAD
-    outer-annulus gauge.
+    outer-rho-band gauge.
     """
 
     #: Parity string the ppGO map keys positive-parity cells under.
@@ -375,7 +375,7 @@ class PpgoExclusionMonotonicConservatismTestCase(_GaugeTestCase):
     def _gauges(self, narrowing: float) -> dict:
         """The HEAD and fixed ppGO exclusion rho for a given narrowing.
 
-        ``rho_head`` is the pre-fix outer-annulus gauge
+        ``rho_head`` is the pre-fix outer-rho-band gauge
         (``physical_exclusion_radius / reach``); ``rho_fix`` is
         `caustic_rho` of the source magnitude recovered by inverting the
         additive exterior gauge on the NARROWED served region.  Both share
@@ -386,7 +386,7 @@ class PpgoExclusionMonotonicConservatismTestCase(_GaugeTestCase):
         physical = scalars['physical_exclusion_radius']
         exclusion_rho = scalars['exclusion_rho']
         coordinate_radius_min = scalars['coordinate_radius_min']
-        # HEAD gauge: outer-annulus scalar reach.
+        # HEAD gauge: outer-rho-band scalar reach.
         rho_head = physical / scalars['reach']
         # Fixed gauge: narrowed served region -> caustic_rho.
         region_exclusion_rho = exclusion_rho - narrowing
@@ -399,7 +399,7 @@ class PpgoExclusionMonotonicConservatismTestCase(_GaugeTestCase):
             'y_fix': y_fix, 'rho_head': rho_head, 'rho_fix': rho_fix}
 
     def test_head_gauge_equals_caustic_rho_of_full_physical_radius(self) -> None:
-        """The HEAD outer-annulus gauge IS `caustic_rho` of the full radius.
+        """The HEAD outer-rho-band gauge IS `caustic_rho` of the full radius.
 
         ``physical_exclusion_radius / reach`` is bit-identical to
         ``caustic_rho(gamma_mid, physical_exclusion_radius, 0)`` because
@@ -413,8 +413,8 @@ class PpgoExclusionMonotonicConservatismTestCase(_GaugeTestCase):
             gauges['rho_head'],
             caustic_rho(gauges['gamma_mid'], gauges['physical'], 0.0))
 
-    def test_narrowed_region_is_strictly_inside_outer_annulus(self) -> None:
-        """Premise: the served region is strictly inside the outer annulus.
+    def test_narrowed_region_is_strictly_inside_outer_rho_band(self) -> None:
+        """Premise: the served region is strictly inside the outer rho-band.
 
         ``region_exclusion_rho < exclusion_rho`` and the fed magnitude is
         strictly below the HEAD physical radius -- otherwise the invariant
@@ -509,7 +509,7 @@ class PpgoOrderingReachableRedTestCase(_GaugeTestCase):
     """D1 defect-1 reachable-red guard: the ordering bug reads an easier cell.
 
     The defect was an ORDERING bug: the caustic-relative coordinate was derived
-    from the PRE-narrowing outer annulus (``exclusion_rho``) instead of the
+    from the PRE-narrowing outer rho-band (``exclusion_rho``) instead of the
     NARROWED served region (``region_exclusion_rho``) that the positive-parity
     per-``theta_c``-column admission actually covers.  Both orderings feed the
     SAME authoritative converter `caustic_rho` and divide by the SAME reach --
@@ -544,7 +544,7 @@ class PpgoOrderingReachableRedTestCase(_GaugeTestCase):
         return region_exclusion_rho - 1.0 + scalars['coordinate_radius_min']
 
     def _outer_magnitude(self) -> float:
-        """Physical ``|y|`` of the PRE-narrowing outer annulus (the bug).
+        """Physical ``|y|`` of the PRE-narrowing outer rho-band (the bug).
 
         ``|y| = exclusion_rho - 1 + coordinate_radius_min`` which is exactly
         the full ``physical_exclusion_radius`` -- the magnitude the buggy
@@ -592,7 +592,7 @@ class PpgoOrderingReachableRedTestCase(_GaugeTestCase):
         """Diagnostic: the buggy outer read-point exceeds the fixed inner one.
 
         Under the real ``_NARROWING`` the served region is pulled strictly
-        inside the outer annulus, so ``rho_buggy > rho_fixed`` -- the two
+        inside the outer rho-band, so ``rho_buggy > rho_fixed`` -- the two
         orderings cannot land in the same cell, which is what makes the
         reachable-red below non-trivial.
         """
@@ -807,7 +807,7 @@ class SelfFalsificationTestCase(_GaugeTestCase):
         """Regressing to the HEAD gauge loses the strict "harder" property.
 
         If the code reverted to reading the ppGO cell at ``rho_head`` (the
-        pre-fix outer-annulus gauge), the "strictly harder" assertion would
+        pre-fix outer-rho-band gauge), the "strictly harder" assertion would
         fail: ``w_cert(head)`` is strictly LESS than ``w_cert(fix)`` under
         narrowing, so the HEAD read is easier.  Asserting that the strict
         comparison flips proves the D1 test has teeth against a regression.

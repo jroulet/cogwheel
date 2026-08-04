@@ -51,7 +51,7 @@ does) to within 10% in magnitude and 3.5 deg in phase.  The gap is
 physically the residual-of-the-residual ``R / E ~ 4-6%``, so these bars
 are deliberately loose; the tight correctness check is the oracle test.
 
-`GhostDecayingSelectionTestCase` sweeps the off-axis fold annulus
+`GhostDecayingSelectionTestCase` sweeps the off-axis fold exterior
 (``gamma in {0.2, 0.4}``, off-cusp ``rho in [1.2, 1.8]``, several angles
 off both principal axes) and certifies that the extractor always returns
 the DECAYING conjugate member (``Im tau_c > 0``): it re-derives both
@@ -912,7 +912,7 @@ class GhostDecayingSelectionTestCase(GhostTestCase):
     """
     The extractor always returns the DECAYING conjugate member.
 
-    Over the off-axis fold annulus (``gamma in {0.2, 0.4}``, off-cusp
+    Over the off-axis fold exterior (``gamma in {0.2, 0.4}``, off-cusp
     ``rho in [1.2, 1.8]``, several angles off both principal axes) the
     quartic yields a complex-conjugate ghost pair with equal-and-opposite
     ``Im tau_c``.  The module must select the ``Im tau_c > 0`` member (the

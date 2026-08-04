@@ -587,7 +587,7 @@ def _serve_fixture() -> dict:
     the tile-box GEOMETRY -- which is the additive serving contract under
     test.
 
-    Tiles are now the caustic-fixed ``(rho, theta_c)`` ANNULUS
+    Tiles are now the caustic-fixed ``(rho, theta_c)`` EXTERIOR REGION
     `_farfield_tiles` returns (Build 8h-b3) -- production retired the raw
     Cartesian-square-with-dropped-centre tiling this fixture originally
     mimicked (`_farfield_tiles(y_extent, exclusion_radius, n_per_side)` no
@@ -596,7 +596,7 @@ def _serve_fixture() -> dict:
     (-pi, pi]``).  The certification INTENT is unchanged and preserved
     exactly: an inner disk (``rho < exclusion_rho``, the caustic + eta_max
     shell) is never tiled (the "interior hole"), a ring of tiles covers the
-    admitted exterior annulus, and points beyond the annulus's outer edge
+    admitted exterior region, and points beyond the region's outer edge
     fall through -- only the tile SHAPE (annular wedges, not a dropped
     Cartesian centre cell) changed.
     """
@@ -790,14 +790,14 @@ class ServeFractionTestCase(_CountingTestCase):
                 self.comparisons += 1
 
     def test_beyond_box_draws_never_serve(self) -> None:
-        """Draws beyond the annulus's outer edge return ``None`` 100%.
+        """Draws beyond the exterior region's outer edge return ``None`` 100%.
 
         Ported from the retired square-box "MAX norm" criterion (the
         Cartesian tiling this fixture originally mimicked no longer exists
         -- see `_serve_fixture`).  The tiled region is now the caustic-fixed
-        annulus ``rho in [exclusion_rho, rho_outer]``, so "beyond" is
+        exterior region ``rho in [exclusion_rho, rho_outer]``, so "beyond" is
         unambiguously ``rho > rho_outer`` at every ``theta_c`` -- the
-        annulus has no corners, so no max-norm subtlety is needed.
+        region has no corners, so no max-norm subtlety is needed.
         """
         fixture = _serve_fixture()
         rng = np.random.default_rng(2718281)
@@ -817,7 +817,7 @@ class ServeFractionTestCase(_CountingTestCase):
                 _point_in_tiles(y1, y2, gamma, fixture['candidate_tiles']))
             self.assertIsNone(
                 self._serve(fixture, draw),
-                'a beyond-annulus draw served (additive-contract violation)')
+                'a beyond-exterior draw served (additive-contract violation)')
             self.comparisons += 1
 
     def test_serve_fraction_diagnostic_plot(self) -> None:
@@ -1866,7 +1866,7 @@ class SelfFalsificationTestCase(_CountingTestCase):
 
         The "hole" is the un-tiled disk ``rho < exclusion_rho`` around the
         origin (Build 8h-b3: `_farfield_tiles` tiles only the exterior
-        annulus).  The probe is deliberately off the origin: its nearest
+        region).  The probe is deliberately off the origin: its nearest
         caustic foot is unique, so its current far-field-smooth ``(s, d)``
         coordinate is defined rather than declining at the medial-axis tie.
         """

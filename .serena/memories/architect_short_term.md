@@ -87,3 +87,15 @@
   is geometrically thin (3-10% of centroid sep), O(1-5%) of lobe prior mass near gamma=1,
   NO accuracy concern (exact engine fallback), purely an efficiency issue. Minimal
   quantities: centroid_sep, eta_max, corridor_width/sep, area_fraction (MC). One WP ~25 turns.
+
+- 2026-08-XX: brief_cusp_arm_boundary — Write measurement script
+  scripts/measure_cusp_arm_actual_boundary.py that calls cusp_amplification
+  directly (not the R-gate formula) to binary-search for the actual
+  serve/refuse boundary. Then set _CUSP_ARM_COVERAGE in surrogate.py to
+  the measured min (floor to 2 dp, conservative). ONE WP. Professor:
+  search direction correct (arm serves AWAY from cusp), use plain bisection
+  (xtol=1e-4), monotonicity mostly holds but verify post-hoc, extend grid
+  to gamma near parity boundary and high w. Simplifier: LEAN on one WP +
+  direct calls; WATCH on monotonicity (dense sweep or post-hoc check);
+  safety margin = floor to 2dp (conservative direction); TRIM F_op cross-
+  check from this script (existing script already has it).

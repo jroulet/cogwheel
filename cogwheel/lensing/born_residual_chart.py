@@ -20,7 +20,7 @@ frame rotation is needed at serve time.
 
 WHY
 ---
-The exact Chang--Refsdal engine is certifiable over the Born annulus
+The exact Chang--Refsdal engine is certifiable over the Born exterior
 (``w * |y| <= 60``) but expensive.  The carrier alone captures the leading
 behaviour; this chart interpolates the smooth, bounded RESIDUAL so the sum
 ``carrier + residual`` reproduces the exact amplification to chart accuracy
@@ -37,7 +37,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 @dataclass(frozen=True)
 class BornResidualChart:
-    """Frozen 3-D interpolation chart for the Born-annulus residual.
+    """Frozen 3-D interpolation chart for the Born residual.
 
     Fields
     ------

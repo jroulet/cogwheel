@@ -5,7 +5,7 @@ WHAT
 ----
 `CertifiedPpgoMap` is a load-time, hash-pinned lookup table of the
 *certified-ppGO frequency floor* ``w_cert`` per
-``(parity, gamma-band, caustic-frame annulus)`` cell.  ``w_cert`` is the
+``(parity, gamma-band, caustic-frame rho-band)`` cell.  ``w_cert`` is the
 smallest dimensionless frequency at (and above) which the bare
 point-mass geometric-optics reconstruction -- the plain image-kernel sum
 ``geometric_amplification`` (``sum_a exp(1j w tau_a) * image_kernel_a``,
@@ -69,12 +69,12 @@ UNKNOWN** -- never extrapolated.  A genuine refusal at the *lowest* ``w``
 
 OUTER-ANNULUS MEASURED-RHO CAP
 ------------------------------
-The outermost annulus ``[4.0, inf)`` is sampled at a single finite
+The outermost rho-band ``[4.0, inf)`` is sampled at a single finite
 representative radius (``rho = lo * 1.5``), yet its open outer edge would
 imply certification out to ``rho = inf`` -- unsound from one finite
 sample (the same soundness rule as an uncertified ``w`` ceiling).  Each
 cell therefore carries a finite ``rho_measured_max`` (the finite band top
-edge for inner annuli; the sampled radius for the open outer annulus), and
+edge for inner rho-bands; the sampled radius for the open outer rho-band), and
 *every* cell accessor returns `UNKNOWN` for a query ``rho`` beyond it via
 the same out-of-grid fall-through (no new sentinel).  A
 Professor-certified monotone-outward argument may later replace this cap;
@@ -83,7 +83,7 @@ until then the infinite tail is UNKNOWN.
 SERIALIZATION AND INTEGRITY
 ---------------------------
 The artifact is a single ``.npz`` of plain float64 arrays (the parity
-codes, the gamma-band and annulus edges, and the per-cell ``w_cert``,
+codes, the gamma-band and rho-band edges, and the per-cell ``w_cert``,
 diagnostic ``w_cert`` at the 1e-3 probe bar, measured ``w_ceiling``,
 status codes, interpolability flags, and measured-``rho`` cap
 ``rho_measured_max``) plus a JSON provenance scalar carrying the grid
@@ -159,7 +159,7 @@ _DEFAULT_MAP_NAME = 'certified_ppgo_map.npz'
 
 #: Provenance schema version for the artifact.  Bumped 0.1.0 -> 0.2.0 with
 #: the per-cell ``w_ceiling`` (truncation-on-refusal) and
-#: ``rho_measured_max`` (outer-annulus cap) grids; old ceiling-less
+#: ``rho_measured_max`` (outer-rho-band cap) grids; old ceiling-less
 #: artifacts lack these arrays and the loader hard-refuses them.
 _SCHEMA_VERSION = '0.2.0'
 
@@ -207,7 +207,7 @@ _EXTRAP_R2_MIN = 0.9           # goodness-of-fit threshold (R² in log-log)
 _EXTRAP_MAX_RATIO = 5.0        # max w_cert_extrap / w_max_measured
 _EXTRAP_W_CERT_DEFLATION = 2.0  # conservative safety factor (inflates floor)
 
-#: Default caustic-frame annulus edges ``rho = |y| / caustic_reach``.  The
+#: Default caustic-frame rho-band edges ``rho = |y| / caustic_reach``.  The
 #: single ``1.0`` edge splits the interior 4-image band (``0.9 <= rho < 1``)
 #: from the exterior 2-image band (``1 <= rho < 1.5``): interior and exterior
 #: are DIFFERENT reconstruction objects and never share a cell.
@@ -271,7 +271,7 @@ class CertifiedPpgoMap:
         Strictly increasing gamma-band edges (an edge sits exactly at the
         parity boundary ``gamma = 1.0`` so no band spans it).
     rho_edges : ndarray, shape (n_rho + 1,)
-        Strictly increasing caustic-frame annulus edges (last edge ``inf``).
+        Strictly increasing caustic-frame rho-band edges (last edge ``inf``).
     w_cert_grid : ndarray, shape (2, n_gamma, n_rho)
         Raw measured sup-over-w floor per cell (``nan`` where uncertified;
         read `cell_status_grid`, not ``nan``, to decide UNKNOWN).
@@ -289,9 +289,9 @@ class CertifiedPpgoMap:
         else ``0.0`` (WP2 must not interpolate across a flagged cell).
     rho_measured_max_grid : ndarray, same shape
         Finite ``rho`` upper bound at which the cell was actually sampled
-        (the finite band top edge for inner annuli; ``lo * 1.5`` for the
-        open outer annulus).  Every accessor returns UNKNOWN for a query
-        ``rho`` above this bound -- an infinite annulus is never certified
+        (the finite band top edge for inner rho-bands; ``lo * 1.5`` for the
+        open outer rho-band).  Every accessor returns UNKNOWN for a query
+        ``rho`` above this bound -- an infinite rho-band is never certified
         from one finite sample.
     provenance : dict
         Grid bounds, certification bar, safety-margin rule, walls,
@@ -473,7 +473,7 @@ class CertifiedPpgoMap:
         """``(p, gi, ri)`` index of the cell, or ``None`` if out of grid.
 
         A query ``rho`` above the cell's finite ``rho_measured_max`` (the
-        open outer annulus was sampled at one finite radius) returns
+        open outer rho-band was sampled at one finite radius) returns
         ``None`` via the same out-of-grid fall-through -- the infinite
         tail is never certified from that single sample, so every accessor
         yields UNKNOWN there.
@@ -505,7 +505,7 @@ class CertifiedPpgoMap:
         gamma : float
             External shear magnitude.
         rho : float
-            Caustic-frame annulus coordinate ``|y| / caustic_reach``.
+            Caustic-frame rho coordinate ``|y| / caustic_reach``.
         """
         cell = self._cell(parity, gamma, rho)
         if cell is None:
@@ -548,7 +548,7 @@ class CertifiedPpgoMap:
         gamma : float
             External shear magnitude.
         rho : float
-            Caustic-frame annulus coordinate ``|y| / caustic_reach``.
+            Caustic-frame rho coordinate ``|y| / caustic_reach``.
         """
         cell = self._cell(parity, gamma, rho)
         if cell is None:
@@ -673,7 +673,7 @@ def _gamma_band_valid(parity: str, lo: float, hi: float) -> bool:
 
 
 def _rho_center(rho_edges: np.ndarray, ri: int) -> float:
-    """Representative annulus radius for band ``ri`` (midpoint; ``lo*1.5``
+    """Representative rho-band radius for band ``ri`` (midpoint; ``lo*1.5``
     for the open outer band)."""
     lo = float(rho_edges[ri])
     hi = float(rho_edges[ri + 1])
@@ -1206,14 +1206,14 @@ def build_map(*, kappa: float = 0.0, astroid_wall: float = ASTROID_WALL,
               rho_edges: Sequence[float] | None = None) -> CertifiedPpgoMap:
     """Run the offline validation sweep and assemble a `CertifiedPpgoMap`.
 
-    For each ``(parity, gamma band, annulus)`` cell a representative
+    For each ``(parity, gamma band, rho-band)`` cell a representative
     below-the-wall config is measured (`_measure_cell`): the sup-over-w
     floor at `CERTIFICATION_BAR`, the diagnostic floor at `DIAGNOSTIC_BAR`,
     the measured ``w_ceiling`` (truncation-on-refusal), and a status code.
     Parity-invalid gamma bands (a positive-parity band above ``1.0`` or a
     saddle band below it) stay ``STATUS_INVALID``.  Each cell also records
     ``rho_measured_max`` -- the finite radius at which it was sampled (the
-    band top edge for inner annuli; ``lo * 1.5`` for the open outer annulus)
+    band top edge for inner rho-bands; ``lo * 1.5`` for the open outer rho-band)
     -- so the accessors never certify the infinite tail beyond it.
 
     Parameters
@@ -1245,9 +1245,9 @@ def build_map(*, kappa: float = 0.0, astroid_wall: float = ASTROID_WALL,
     w_ceiling_grid = np.full(shape, np.nan, dtype=np.float64)
     cell_status_grid = np.full(shape, STATUS_INVALID, dtype=np.float64)
 
-    # Per-cell finite rho cap: the band top edge for inner annuli; the
-    # finite sampled radius (``_rho_center``) for the open outer annulus.
-    # Depends only on the annulus index, but is stored per cell (in the
+    # Per-cell finite rho cap: the band top edge for inner rho-bands; the
+    # finite sampled radius (``_rho_center``) for the open outer rho-band.
+    # Depends only on the rho-band index, but is stored per cell (in the
     # (2, n_gamma, n_rho) grid family) and hashed like ``w_ceiling``.
     rho_measured_max_grid = np.empty(shape, dtype=np.float64)
     for ri in range(n_rho):
@@ -1288,9 +1288,9 @@ def build_map(*, kappa: float = 0.0, astroid_wall: float = ASTROID_WALL,
                           'certified cell is trusted only on '
                           '[w_cert, w_ceiling], beyond it is UNKNOWN',
         'rho_measured_max_rule': 'finite sampled-rho cap: band top edge for '
-                                 'inner annuli, lo*1.5 for the open outer '
-                                 'annulus; queries beyond it return UNKNOWN '
-                                 '(no infinite-annulus certification from one '
+                                 'inner rho-bands, lo*1.5 for the open outer '
+                                 'rho-band; queries beyond it return UNKNOWN '
+                                 '(no infinite-rho-band certification from one '
                                  'finite sample)',
         'max_cell_jump': MAX_CELL_JUMP,
         'astroid_wall': float(astroid_wall),

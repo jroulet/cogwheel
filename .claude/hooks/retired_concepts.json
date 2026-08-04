@@ -38,6 +38,21 @@
       "name": "_CUSP_SPEED_REL_FRAC",
       "retired_by": "00bf8ae",
       "note": "cusps are exact |y'|=0 roots now, so a relative speed-dip threshold has no reason to exist. NOTE the literal 0.2 survived inline in _find_cusps and goes with the F040 cusp-window build."
+    },
+    {
+      "name": "ANNULUS_INNER_RADIUS",
+      "retired_by": "65eebcb",
+      "note": "Replaced by caustic-relative rho. The annulus was a prior-box boundary, not physics."
+    },
+    {
+      "name": "GAMMA_FENCE",
+      "retired_by": "65eebcb",
+      "note": "Consequence of the annulus radius, not independent physics. Deleted with C8."
+    },
+    {
+      "name": "_SADDLE_GAMMA_FENCE",
+      "retired_by": "65eebcb",
+      "note": "The saddle fence 1.0502342, same as GAMMA_FENCE."
     }
   ]
 }

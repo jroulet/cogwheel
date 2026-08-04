@@ -74,7 +74,7 @@ COEFF_GAMMAS = (0.10, 0.25, 0.45, 0.60, 0.70)
 COEFF_BETAS = (0.0, 0.7, 1.3)
 #: Convergences.
 COEFF_KAPPAS = (0.0, 0.2)
-#: Source radii spanning the far annulus (inner edge, mid, outer 3*sqrt(2)).
+#: Source radii spanning the Born exterior (inner edge, mid, outer 3*sqrt(2)).
 COEFF_ABSY = (3.05, 3.6, 4.2426)
 #: Source azimuths (radians).
 COEFF_THETAS = (0.3, 0.9, 1.35)
@@ -86,7 +86,7 @@ COEFF_POINTMASS_TOL = 1e-15
 # --------------------------------------------------------------------------- #
 # Acceptance #3 -- F009 pin on the served (lead-only) path.
 # --------------------------------------------------------------------------- #
-#: Annulus shears for the F009 magnitude pin.
+#: Exterior shears for the F009 magnitude pin.
 F009_GAMMAS = (0.25, 0.60)
 #: Source radius (on the y1 axis).
 F009_ABSY = 3.6
@@ -104,8 +104,8 @@ F009_A0_OFFSET_MIN = 1e-3
 INFLATE_GAMMA = 0.45
 #: Source radius.  |y| = 3.05 (inner edge) is where the a0 break is cleanest;
 #: at |y| = 3.6 the ratio is a knife-edge 4.95x (below the 5x bar), so the
-#: brief's "|y| fixed in the annulus" is pinned to the *measured* worst case
-#: rather than a coincidental mid-annulus radius (measured ratio 6.45x).
+#: brief's "|y| fixed in the exterior region" is pinned to the *measured* worst case
+#: rather than a coincidental mid-region radius (measured ratio 6.45x).
 INFLATE_ABSY = 3.05
 #: Frequency (inside the certified w*|y| <= 60 band).
 INFLATE_W = 0.01
@@ -128,7 +128,7 @@ SPLIT_W = 0.05
 #: The band-split threshold.
 SPLIT_CONSTANT = operator.RHO_END
 #: Positive-parity companion where w*Delta_tau ~ w*r0_sq/2 (the F024
-#: coincidence): a low-shear annulus config.
+#: coincidence): a low-shear exterior config.
 SPLIT_COMPANION_GAMMA = 0.25
 SPLIT_COMPANION_ABSY = 3.6
 SPLIT_COMPANION_THETA = 0.3
@@ -164,7 +164,7 @@ NODE_LOW_BAND = (1e-3, 0.05)
 NODE_LOGW_N = 17
 #: 2x the low-band ceiling 5.
 NODE_LOGW_MAX = 10
-#: y-axis sweep (w fixed) across the annulus.
+#: y-axis sweep (w fixed) across the exterior region.
 NODE_Y_W = 0.01
 NODE_Y_N = 17
 #: 2x the y-axis ceiling 4.
@@ -189,7 +189,7 @@ CENSUS_Y2_EIG = 0.0
 CENSUS_THETA = 0.4
 #: Interior draw (|y| < caustic_reach ≈ 1.214) that born must NOT touch.
 #: rho = 0.5 / 1.214 ≈ 0.41 < 1 at gamma = 0.45.
-CENSUS_NONANNULUS_Y1_EIG = 0.5
+CENSUS_INTERIOR_Y1_EIG = 0.5  # Historical: annulus retired in C8
 #: Category the born branch flips FROM when disabled.
 CENSUS_BORN_CATEGORY = 'born'
 CENSUS_FALLBACK_CATEGORY = 'out-of-box'
@@ -462,7 +462,7 @@ class SplitCurrencyTestCase(BornTestCase):
 
     Pure geometry -- no exact-engine call.  The saddle-side witness
     (``gamma=1.2``, out of serve scope) exhibits the clean mis-split; the
-    positive-parity annulus is documented as the F024 coincidence where the
+    positive-parity exterior is documented as the F024 coincidence where the
     two currencies happen to agree (Delta_tau ~ r0_sq/2).
     """
 
@@ -484,7 +484,7 @@ class SplitCurrencyTestCase(BornTestCase):
             f'split decisions')
 
     def test_positive_parity_currencies_coincide(self) -> None:
-        # F024 coincidence: at gamma < 3/4 in the annulus Delta_tau ~ r0_sq/2.
+        # F024 coincidence: at gamma < 3/4 in the exterior Delta_tau ~ r0_sq/2.
         _n, delta_tau, r0_sq = _delta_tau_and_r0_sq(
             SPLIT_COMPANION_GAMMA, SPLIT_COMPANION_ABSY, SPLIT_COMPANION_THETA)
         rel = abs(delta_tau - r0_sq / 2.0) / delta_tau
@@ -661,9 +661,9 @@ class BornCensusReachableRedTestCase(BornTestCase):
     def test_interior_draw_unaffected_by_born(self) -> None:
         # A draw with |y| below the caustic reach (rho < 1) is interior:
         # enabling or disabling born must not change its category.
-        enabled = self._classify(CENSUS_GAMMA, CENSUS_NONANNULUS_Y1_EIG)
+        enabled = self._classify(CENSUS_GAMMA, CENSUS_INTERIOR_Y1_EIG)
         disabled = self._classify(
-            CENSUS_GAMMA, CENSUS_NONANNULUS_Y1_EIG, disable_born=True)
+            CENSUS_GAMMA, CENSUS_INTERIOR_Y1_EIG, disable_born=True)
         self.comparisons += 1
         self.assertEqual(enabled, disabled)
         self.assertEqual(enabled, CENSUS_FALLBACK_CATEGORY)
@@ -794,7 +794,7 @@ class C8FenceRetirementTestCase(BornTestCase):
 # --------------------------------------------------------------------------- #
 #: Macro-saddle shears (all in the serving band 1.0502342 < gamma < 3, det<0).
 SADDLE_CARRIER_GAMMAS = (1.1, 1.2, 1.4, 1.6)
-#: Annulus radii (inner edge, outer 3*sqrt(2)).
+#: Exterior radii (inner edge, outer 3*sqrt(2)).
 SADDLE_CARRIER_ABSY = (3.05, 4.2426)
 #: Source azimuths (radians).
 SADDLE_CARRIER_THETAS = (0.3, 0.9, 1.35)
@@ -867,7 +867,7 @@ class SaddleCarrierClosedFormTestCase(BornTestCase):
     """Acceptance saddle-#1: saddle carrier matches an independent oracle.
 
     Sweeps the macro-saddle band ``gamma in {1.1, 1.2, 1.4, 1.6}`` at the
-    annulus edges, several azimuths and ``w in {1e-3, 0.05, 8}``, comparing
+    rho-band edges, several azimuths and ``w in {1e-3, 0.05, 8}``, comparing
     `born_lead_carrier` (Morse phase ``-1j``, magnitude ``sqrt(|mu_macro|)``)
     to a matrix-solve reconstruction that shares no algebra with ``_born``.
     """
@@ -1097,12 +1097,12 @@ SADDLE_CENSUS_GAMMA = 1.2
 SADDLE_CENSUS_Y1_EIG = 3.5
 SADDLE_CENSUS_Y2_EIG = 0.0
 #: theta is arbitrary here: with y2_eig = 0 the eigenframe radius (and hence the
-#: annulus test) is fixed by y1_eig, and the empty chart list means theta never
+#: exterior test) is fixed by y1_eig, and the empty chart list means theta never
 #: reaches a chart-serve predicate.
 SADDLE_CENSUS_THETA = 0.4
 #: Interior saddle draw (|y| = 1.0 < caustic_reach ≈ 1.618): rho ≈ 0.62 < 1,
 #: so the born branch must NOT claim it (it falls through to 'out-of-box').
-SADDLE_CENSUS_NONANNULUS_Y1_EIG = 1.0
+SADDLE_CENSUS_INTERIOR_Y1_EIG = 1.0  # Historical: annulus retired in C8
 #: Small saddle-exterior tally grid.  All gammas are macro-saddle (>1, det A < 0);
 #: all radii are exterior to their respective caustic (rho > 1).  The caustic
 #: reaches for (1.1, 1.2, 1.4, 1.6, 1.8) at kappa=0 are approximately
@@ -1415,7 +1415,7 @@ class SaddleLowBandResidualNodeCountTestCase(BornTestCase):
                     f'{SADDLE_NODE_MAX}')
 
     def test_azimuthal_node_count(self) -> None:
-        # NON-NEGOTIABLE (F025): sweep theta at fixed |y| in the annulus.
+        # NON-NEGOTIABLE (F025): sweep theta at fixed |y| in the exterior.
         thetas = np.linspace(*SADDLE_NODE_AZ_THETA_RANGE, SADDLE_NODE_AZ_N)
         points = np.column_stack(
             [SADDLE_NODE_AZ_ABSY * np.cos(thetas),
@@ -1526,11 +1526,11 @@ def _classify_saddle(gamma: float, y1_eig: float, *,
 
 
 def _plot_saddle_census_tally(axis, tally: dict[str, int]) -> None:
-    """Bar chart of the saddle-annulus category tally (diagnostic only)."""
+    """Bar chart of the saddle-exterior category tally (diagnostic only)."""
     labels = list(tally)
     axis.bar(labels, [tally[k] for k in labels], color='steelblue')
     axis.set_ylabel('draws')
-    axis.set_title('saddle-annulus fall-through tally (all must be born)')
+    axis.set_title('saddle-exterior fall-through tally (all must be born)')
 
 
 class SaddleCensusReachableRedTestCase(BornTestCase):
@@ -1565,7 +1565,7 @@ class SaddleCensusReachableRedTestCase(BornTestCase):
         # A |y| < caustic_reach draw is interior (rho < 1): the born branch
         # must NOT claim it (it falls through to 'out-of-box').
         category = _classify_saddle(
-            SADDLE_CENSUS_GAMMA, SADDLE_CENSUS_NONANNULUS_Y1_EIG)
+            SADDLE_CENSUS_GAMMA, SADDLE_CENSUS_INTERIOR_Y1_EIG)
         self.comparisons += 1
         self.assertNotEqual(category, CENSUS_BORN_CATEGORY)
         self.assertEqual(category, CENSUS_FALLBACK_CATEGORY)
@@ -1604,7 +1604,7 @@ class SaddleCensusSelfFalsificationTestCase(BornTestCase):
         # 'born' — proving the exterior threshold is load-bearing.
         # gamma=1.2 (macro saddle), |y|=1.0 -> rho ~ 0.62 < 1.
         category = _classify_saddle(SADDLE_CENSUS_GAMMA,
-                                    SADDLE_CENSUS_NONANNULUS_Y1_EIG)
+                                    SADDLE_CENSUS_INTERIOR_Y1_EIG)
         self.comparisons += 1
         self.assertNotEqual(category, CENSUS_BORN_CATEGORY)
 
@@ -1627,7 +1627,7 @@ class CausticRelativeClassificationTestCase(BornTestCase):
     After the C8 build, classify_fallthrough's 'born' classification is
     determined SOLELY by caustic_rho > 1 (exterior to caustic), regardless
     of the parity (positive vs saddle).  This replaces the old fixed-radius
-    annulus (|y| > 3.0).
+    exterior region (rho > 1).  (Historical: annulus retired in C8.)
 
     For positive parity (gamma=0.5, kappa=0): caustic_reach ≈ 1.414.
         - |y|=2.0 -> rho ≈ 1.41 > 1 -> 'born'

@@ -189,7 +189,7 @@ def _synthetic_map(*, parity: str, gamma: float, rho: float, w_cert: float,
     do not exercise the ceiling guard see HEAD-identical behaviour; the
     cell-ceiling band-split / strata tests pass a finite ceiling BELOW the
     Schwinger wall on purpose.  ``rho_measured_max`` is ``inf`` for every
-    cell (the finite-annulus cap is not under test here), so a query at the
+    cell (the finite-rho-band cap is not under test here), so a query at the
     requested ``rho`` always lands in the cell.
     """
     gamma_edges = np.array([0.2, 1.0, 1.6], dtype=float)
@@ -279,11 +279,11 @@ def _saveable_ceiling_map(*, gamma: float, rho: float, w_cert: float,
 
 def _finite_rho_map(*, rho_measured_max: float, w_cert: float,
                     w_ceiling: float, gamma: float = 0.5) -> CertifiedPpgoMap:
-    """One-cell map whose OPEN outer rho annulus was measured to a finite rho.
+    """One-cell map whose OPEN outer rho-band was measured to a finite rho.
 
-    The outermost rho band is ``[4.0, inf)`` (Build 8h-b WP1 outer-annulus
+    The outermost rho band is ``[4.0, inf)`` (Build 8h-b WP1 outer-rho-band
     cap); its positive-parity cell is certified with a FINITE
-    ``rho_measured_max`` -- the single representative radius the open annulus
+    ``rho_measured_max`` -- the single representative radius the open rho-band
     was actually sampled at.  A query ``rho`` inside ``[4.0, rho_measured_max]``
     lands in the cell and every accessor returns the stored certified value;
     a query beyond ``rho_measured_max`` falls out of grid
@@ -2021,13 +2021,13 @@ class StrataTrimCeilingSweepTestCase(_PpgoTestCase):
 
 
 # ======================================================================
-# Test #11 -- OUTERMOST RHO ANNULUS CAPPED AT ITS MEASURED RHO (WP1).
+# Test #11 -- OUTERMOST RHO-BAND CAPPED AT ITS MEASURED RHO (WP1).
 # ======================================================================
 
-class OuterAnnulusRhoCapTestCase(_PpgoTestCase):
-    """The open outer rho annulus certifies only up to its measured radius.
+class OuterRhoBandCapTestCase(_PpgoTestCase):
+    """The open outer rho-band certifies only up to its measured radius.
 
-    Build 8h-b WP1 outer-annulus cap: the outermost rho band ``[4.0, inf)``
+    Build 8h-b WP1 outer-rho-band cap: the outermost rho band ``[4.0, inf)``
     was measured at a SINGLE finite representative radius
     ``rho_measured_max`` (here ``6.0``).  A ``w_cert`` / ``w_trust`` /
     ``w_ceiling`` query at a ``rho`` inside the measured range returns the
@@ -2084,7 +2084,7 @@ class OuterAnnulusRhoCapTestCase(_PpgoTestCase):
                    label='rho_measured_max')
         ax.set_xlabel('query rho')
         ax.set_ylabel('w_cert (NaN == UNKNOWN)')
-        ax.set_title('Outer-annulus cap: UNKNOWN step at measured rho')
+        ax.set_title('Outer-rho-band cap: UNKNOWN step at measured rho')
         ax.legend(loc='center right', fontsize=8)
         fig.tight_layout()
         fig.savefig(_OUTPUT_DIR / 'outer_caustic_rho_cap_step.png', dpi=110)

@@ -276,7 +276,7 @@ def classify_fallthrough(
             return 'dropped-sliver'
 
     # born: exterior to the caustic — the Born carrier rung's admission
-    # domain in caustic-relative coordinates.  After the C8 annulus
+    # domain in caustic-relative coordinates.  After the C8 exterior-region
     # retirement, this is simply rho > 1 on both parities (Professor
     # ruling: two regimes per parity — caustic-attached and exterior).
     # The gamma-guard fires earlier, so caustic_rho's reach is safe.

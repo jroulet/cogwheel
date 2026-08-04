@@ -47,7 +47,7 @@ _OUTPUT_DIR = pathlib.Path(__file__).parent / 'output'
 _M_LENS_MSUN: float = 100.0
 _Z_LENS: float = 0.5
 
-#: Shear for the positive-parity Born annulus (well below astroid wall).
+#: Shear for the positive-parity Born exterior (well below astroid wall).
 _GAMMA: float = 0.5
 
 #: kappa = 0 (the Born chart and surrogate are kappa=0 surfaces).
@@ -216,7 +216,7 @@ class NoChartByteIdentityTestCase(unittest.TestCase):
         self.n_checks += 1
 
     def test_no_chart_multiple_configs(self):
-        """Several Born-annulus configs all return None with no chart."""
+        """Several Born-exterior configs all return None with no chart."""
         probe = _BornResidualProbe(born_residual_chart=None)
         reach, _ = caustic_geometry(_GAMMA, _KAPPA)
         # Test rho = 2.0, 3.0, 4.5 — all exterior

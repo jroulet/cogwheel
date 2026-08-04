@@ -280,7 +280,7 @@ class TrainingConfig:
     # count); an int caps admitted tiles with a loud truncation record.
     max_farfield_regions: int | None = None
     # Tile-grid side for the mass-stratified far-field tiling in caustic-fixed
-    # coordinates (Build 8h-b3): each stratum's exterior annulus uses the
+    # coordinates (Build 8h-b3): each stratum's exterior region uses the
     # additive physical radial offset arm of ``rho`` and
     # ``theta_c in (-pi, pi]``.  It is split into
     # ``n_farfield_tiles_per_side^2`` rectangular tiles (the inner rho edge
@@ -1160,9 +1160,9 @@ def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int
                     ) -> list[tuple[tuple[float, float],
                                     tuple[float, float], int, int]]:
     """Rectangular exterior tiles of a caustic-fixed ``(rho, theta_c)``
-    annulus.
+    region.
 
-    Lays a uniform ``n_per_side x n_per_side`` grid over the exterior annulus
+    Lays a uniform ``n_per_side x n_per_side`` grid over the exterior region
     ``rho in [rho_inner, rho_outer]`` x ``theta_c in [-pi, pi]`` and returns
     one tile per grid cell. The caller derives ``rho_inner`` from the physical
     ``reach_max + eta_max`` exclusion disk and the band's minimum coordinate
@@ -1172,7 +1172,7 @@ def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int
     The ``theta_c`` axis is tiled over ``[-pi, pi]`` so tile edges fall exactly
     on ``+-pi``; no tile spans the ``atan2`` branch cut at ``theta_c = +-pi``
     (the serve side derives ``theta_c = atan2(y2, y1) in (-pi, pi]``).  When
-    the annulus is empty (``rho_outer <= rho_inner`` -- a high-mass stratum
+    the region is empty (``rho_outer <= rho_inner`` -- a high-mass stratum
     whose whole ``y``-support box lies inside the caustic disk) no tile is
     emitted; those near-caustic draws are served by the tube + serving ladder.
 
@@ -1190,7 +1190,7 @@ def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int
     list[tuple[tuple[float, float], tuple[float, float], int, int]]
         ``((rho_center, theta_c_center), (half_rho, half_theta_c), i, j)`` for
         each tile, in row-major grid order (deterministic).  ``i`` indexes the
-        ``rho`` axis, ``j`` the ``theta_c`` axis.  Empty when the annulus is
+        ``rho`` axis, ``j`` the ``theta_c`` axis.  Empty when the region is
         empty.
     """
     if rho_outer <= rho_inner:
@@ -1908,7 +1908,7 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
                              cusp_angles: list[float] | None = None
                              ) -> list[tuple[tuple[float, float],
                                              tuple[float, float], int, int]]:
-    """Per-``theta_c``-column exterior tiles of the caustic-fixed annulus.
+    """Per-``theta_c``-column exterior tiles of the caustic-fixed region.
 
     Positive-parity companion to `_farfield_tiles` that replaces the single
     over-conservative scalar ``exclusion_rho`` inner edge (built from the
@@ -3910,7 +3910,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # the directional caustic. Subtracting the band's MINIMUM caustic radius
     # from the physical exclusion disk yields a rho floor safe for every chart
     # node. The ppGO map remains scalar-reach based and receives its own
-    # annulus coordinate below. Macro saddles retain scalar-reach rho.
+    # rho coordinate below. Macro saddles retain scalar-reach rho.
     gamma_mid = 0.5 * (band[0] + band[1])
     reach_scalar = _scalar_caustic_reach(gamma_mid)
     coordinate_radius_min, reach_max = _coordinate_radius_bounds(band, parity)
@@ -3968,8 +3968,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         region_exclusion_rho = exclusion_rho
     # caustic-relative inner edge (WP1 defect 1).  Derive it from the NARROWED
     # served region ``region_exclusion_rho`` -- NOT the pre-narrowing outer
-    # annulus -- so the certified-ppGO trim below reads ``w_trust`` /
-    # ``w_ceiling`` from the annulus cell the region actually covers.  The
+    # rho-band -- so the certified-ppGO trim below reads ``w_trust`` /
+    # ``w_ceiling`` from the rho-band cell the region actually covers.  The
     # positive-parity per-column admission (above) can pull the served inner
     # edge closer to the caustic than the scalar exclusion disk; reading the
     # farther-out cell would report an easier (lower-``w_cert``) certification
@@ -4006,11 +4006,11 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # physics threshold (`_farfield_region_w_floor`); ``w_trust`` is the
     # ppGO-trimmed top (`_farfield_region_window`).  The geometry-admitted tile
     # loop (`_farfield_tiles`) is UNCHANGED -- tiles are admitted by geometry,
-    # never by mass -- but the whole exterior annulus is now tiled ONCE over
+    # never by mass -- but the whole exterior region is now tiled ONCE over
     # the union source extent (largest ``|y|`` at the smallest reachable lens
     # mass), not once per stratum.  The certified-ppGO trim uses
     # ``ppgo_exclusion_rho`` derived (above) from the region's OWN served inner
-    # edge, so the drop certifies the annulus the region actually covers and
+    # edge, so the drop certifies the rho-band the region actually covers and
     # never over-clears.
     ext_boundary = _stratum_ppgo_boundary(
         parity, gamma_mid, ppgo_exclusion_rho, ppgo_map)
@@ -4066,7 +4066,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 # lies inside the prior box for its direction.
                 tiles = exterior_tiles
             else:
-                # Macro saddle: unchanged scalar-reach annulus tiler.
+                # Macro saddle: unchanged scalar-reach exterior tiler.
                 tiles = _farfield_tiles(
                     exclusion_rho, rho_outer_region,
                     config.n_farfield_tiles_per_side)

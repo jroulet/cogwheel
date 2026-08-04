@@ -780,7 +780,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # name so `JSONMixin.get_init_dict` reads it back (see the
         # `get_init_dict` override for the None-vs-fitted serialization).
         self.amplification_surrogate = amplification_surrogate
-        # Optional trained Born-annulus residual chart; same serialization
+        # Optional trained Born residual chart; same serialization
         # pattern as `amplification_surrogate` (see `get_init_dict`).
         self.born_residual_chart = born_residual_chart
 
@@ -1356,12 +1356,12 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         ``(parity, gamma, rho)`` locating this draw in the ppGO map grid,
         or ``None``.
 
-        The parity / shear / caustic-frame annulus coordinate shared by the
+        The parity / shear / caustic-frame rho coordinate shared by the
         two per-cell map queries -- `_ppgo_band_split` reads ``w_trust`` and
         `_ppgo_cell_ceiling` reads ``w_ceiling`` -- so both land in the SAME
         cell from ONE derivation (DRY: one caustic-reach convention).
 
-        The caustic-frame annulus coordinate is obtained from the single
+        The caustic-frame rho coordinate is obtained from the single
         authoritative converter `ppgo_map.caustic_rho`, which returns
         ``rho = |y| / caustic_reach`` with ``caustic_reach`` from
         `ppgo_map.caustic_geometry` -- the SAME authoritative reach the map
@@ -1669,7 +1669,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         if not served:
             # Fact-4 slot (Born weak-deflection rung): serve the analytic
             # carrier + trained residual chart for configurations in the
-            # far annulus (rho > 1.0).  Falls through to the exact engine
+            # Born exterior (rho > 1.0).  Falls through to the exact engine
             # when the chart is not attached or doesn't cover the config.
             born_chart = self.born_residual_chart
             if born_chart is None:

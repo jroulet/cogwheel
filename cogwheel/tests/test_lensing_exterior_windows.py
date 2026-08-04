@@ -39,7 +39,7 @@ Three Architect specifications are certified here:
    bound (Professor R3) guards against a collapsed/zeroed fit.
 
 4. **Mid-window ghost subtraction is helpful-outside / harmful-inside the
-   cusp window.**  Outside the cusp (fold annulus, ``gamma = 0.4``,
+   cusp window.**  Outside the cusp (fold exterior, ``gamma = 0.4``,
    off-cusp ``theta_c ~ 45 deg``, ``rho in [1.9, 2.1]``, ``w in [3, 40]``)
    the re-keyed geometric gate ``min_a |x_a - x_c| >= _GHOST_SEPARATION_MIN``
    (Build 8h-d1) ADMITS: the complex ghost saddle is well separated from
@@ -199,8 +199,8 @@ N_PER_SIDE: int = 5
 #: Directory for diagnostic plots (created on demand).
 OUTPUT_DIR: Path = Path(__file__).parent / 'output'
 
-#: Shear of the mid-window ghost fold-annulus fixtures (Spec 4).  The gate
-#: passes for the fold annulus and refuses on the cusp axis at this shear.
+#: Shear of the mid-window ghost fold-exterior fixtures (Spec 4).  The gate
+#: passes for the fold exterior and refuses on the cusp axis at this shear.
 GHOST_GAMMA: float = 0.4
 
 #: Force-apply growth factor (Spec 4 harmful): inside the cusp window the
@@ -917,7 +917,7 @@ class ExteriorTilerReachTestCase(ExteriorWindowsTestCase):
             self.assertGreaterEqual(edge, exclusion_rho - 1e-12)
             self.record_comparison()
 
-    def test_empty_annulus_emits_no_tiles(self) -> None:
+    def test_empty_exterior_region_emits_no_tiles(self) -> None:
         # A high-mass stratum whose whole y-support lies inside the caustic
         # (rho_outer <= rho_inner) emits nothing -- served by the tube ladder.
         self.assertEqual(st._farfield_tiles(1.5, 1.5, N_PER_SIDE), [])
@@ -1270,8 +1270,8 @@ class MidWindowGhostTestCase(ExteriorWindowsTestCase):
         separation = _ghost_separation(part.source, part.matrix)
         return part, envelope, ghost, max_f, separation
 
-    def test_helpful_fold_annulus_gate_applies_and_ghost_is_bounded(self):
-        # Outside the cusp (fold annulus) the gate ADMITS (the ghost saddle is
+    def test_helpful_fold_exterior_gate_applies_and_ghost_is_bounded(self):
+        # Outside the cusp (fold exterior) the gate ADMITS (the ghost saddle is
         # separated from every real image) and the resolved ghost is a finite
         # O(1e-2) mid-band term.  Oracle: the RAW carrier
         # kernel * exp(1j*w*tau_c) from geometry.ghost_kernel, re-framed by the
@@ -1587,7 +1587,7 @@ class FixedWindowContainmentTestCase(ExteriorWindowsTestCase):
     def test_no_strata_bookkeeping_invoked_on_fixed_window_path(self):
         # The fixed-window path replaces the mass-strata bookkeeping: neither
         # _mass_strata nor _stratum_w_range is called while building the
-        # window, checking containment, and tiling the annulus.
+        # window, checking containment, and tiling the exterior region.
         with mock.patch.object(st, '_mass_strata') as strata_spy, \
                 mock.patch.object(st, '_stratum_w_range') as stratum_spy:
             window, _action, _report = st._farfield_region_window(

@@ -5,8 +5,8 @@ from the lens physics, not from what the repository currently implements. Part
 IV then audits the repo against it. Where the two disagree, this document is
 the claim and the repo is the defendant.
 
-Motivation for writing it this way: the far-annulus rung was scoped around
-`ANNULUS_INNER_RADIUS = 3.0`, which is `_Y_SCALE_CAP` — the PRIOR BOX half
+Motivation for writing it this way: the far-exterior rung was scoped around
+`ANNULUS_INNER_RADIUS = 3.0` (retired in C8), which is `_Y_SCALE_CAP` — the PRIOR BOX half
 width — not any physical scale. Two gamma fences and a refusal band were then
 derived to defend that boundary. The physics question was never asked.
 
@@ -220,11 +220,11 @@ Constants with length units, and what sets them:
 
 | constant | value | set by | verdict |
 |---|---|---|---|
-| `ANNULUS_INNER_RADIUS` | 3.0 | `_Y_SCALE_CAP`, the PRIOR BOX half-width | **VIOLATION** — a sampling bound used as a physical boundary |
+| `ANNULUS_INNER_RADIUS` (retired) | 3.0 | `_Y_SCALE_CAP`, the PRIOR BOX half-width | **VIOLATION** — a sampling bound used as a physical boundary |
 | `_DEFAULT_ETA_MAX` | 0.05 | absolute | **VIOLATION** — should be a fraction of `R_c` (C6) |
 | `_DEFAULT_ETA_FLOOR` | 0.02 | absolute | **VIOLATION** — same |
 | `_SADDLE_CUSP_MIN_HALFWIDTH` | 0.08 | absolute floor | **VIOLATION** — should scale with the cusp's own scale |
-| `GAMMA_FENCE` (3/4) | derived | from `ANNULUS_INNER_RADIUS` | consequence of the first violation; dissolves with it |
+| `GAMMA_FENCE` (retired) | derived | from `ANNULUS_INNER_RADIUS` (retired) | consequence of the first violation; dissolves with it |
 | saddle fence (1.0502342) | derived | same | same |
 | `_GHOST_SEPARATION_MIN` | 0.7 | absolute, lens-plane | OK — lens-plane Einstein-radius-normalized; Einstein radius is the physical scale in the image plane (not caustic-relative); measured gap (refuse 0.29, admit 0.94) stable across gamma; traces to geometry, not the prior box (Build 7) |
 | `_INTERLOBE_CORRIDOR_ETA_SCALE` | x `eta_max` | relative | OK — already relative |

@@ -1,4 +1,4 @@
-"""Born (weak-deflection) analytic carrier for the far annulus.
+"""Born (weak-deflection) analytic carrier for the exterior region.
 
 WHAT
     The last rung of the Chang-Refsdal serving ladder for the far
@@ -33,7 +33,7 @@ WHY
     RESOLVED-IMAGE expansion, keyed on ``w * Delta_tau`` (the Fermat-delay
     difference of the two real images), NOT on ``w`` or ``|y|`` alone.
     Born is needed for prior-universality, NOT because the oracle fails
-    -- every claim in the target annulus is certifiable against the exact
+    -- every claim in the target exterior region is certifiable against the exact
     engine (``w * |y| <= 60``).
 
 STATUS -- CARRIER SHIPS; LIVE SERVE AWAITS THE TRAINED RESIDUAL CHART.
@@ -41,7 +41,7 @@ STATUS -- CARRIER SHIPS; LIVE SERVE AWAITS THE TRAINED RESIDUAL CHART.
     and shippable primitives, but the residual chart that the carrier is
     subtracted from is a TRAIN_TIER driver artifact that has not yet been
     trained.  Until it exists, `likelihood._surrogate_coefficients` does
-    NOT wire this slot: the far annulus falls through to the exact engine,
+    NOT wire this slot: the Born exterior falls through to the exact engine,
     which is certifiable throughout (``w * |y| <= 60``).  ``a0``/``b1``
     are the correct resolved-image physics and the macro-limit diagnostic
     (`born_amplification`); they are deliberately kept OUT of the serve
@@ -275,7 +275,7 @@ def born_lead_carrier(w: float, y1: float, y2: float, gamma: float,
                       beta: float = 0.0, kappa: float = 0.0) -> complex:
     """Lead-only Born carrier ``morse * sqrt(|mu_macro|) * exp(1j*w*phi_geo)``.
 
-    THE SERVE OBJECT for the far annulus.  It carries ONLY the analytic
+    THE SERVE OBJECT for the Born exterior.  It carries ONLY the analytic
     lead term -- NO ``a0``/``b1`` resolved-image correction -- because a
     driver-trained chart interpolates the residual ``F_exact - F_carrier``
     and the lead-only carrier is what makes that residual splinable
