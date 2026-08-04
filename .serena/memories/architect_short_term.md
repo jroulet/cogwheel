@@ -38,3 +38,22 @@
   regimes (it calls geometric_amplification for all 4 images), and the ξ≥4
   gate ensures all images are well-resolved. One WP (likelihood.py +
   surrogate_census.py).
+
+- 2026-08-XX: brief_cusp_arm_table — Ship pearcey_table.npz + enable _CUSP_ARM_COVERAGE.
+  Already implemented: PearceyTable, build_table, derive_box, save_table in _pearcey_table.py;
+  cusp_amplification in _pearcey_cusp.py; train_pearcey_table.py script. Missing: the actual
+  .npz artifact, coverage constant is 0.0, no measurement script. Professor: R-gate is the
+  binding constraint for reach; calibration passes generically at large R; oracle is F_op;
+  reach at minimum w (5-10) is the worst case; expect 0.02-0.04 rad. Simplifier: formula-
+  based reach is sufficient (R_min inversion through geometry), but brief explicitly asks for
+  a comparison script. Compromise: write script that computes reach analytically + verifies
+  ~20 boundary points vs F_op. One merged WP (generate table + measure + set constant).
+
+- 2026-08-XX: brief_interlobe_corridor — Pure measurement script (no code changes).
+  Task: write scripts/probe_interlobe_corridor.py that computes corridor geometry for
+  saddle gammas and reports whether the inter-lobe gap is negligible. Simplifier: drop
+  select_chart (no surrogate artifact on disk), compute geometry directly from
+  _lobe_caustic_points + _INTERLOBE_CORRIDOR_ETA_SCALE + f_max * R_c. Professor: corridor
+  is geometrically thin (3-10% of centroid sep), O(1-5%) of lobe prior mass near gamma=1,
+  NO accuracy concern (exact engine fallback), purely an efficiency issue. Minimal
+  quantities: centroid_sep, eta_max, corridor_width/sep, area_fraction (MC). One WP ~25 turns.
