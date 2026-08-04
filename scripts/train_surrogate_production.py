@@ -75,6 +75,32 @@ def main():
     print(flush=True)
 
     t0 = time.time()
+
+    # Progress callback: print each chart as it's built.
+    import functools
+    from pathlib import Path
+
+    _chart_count = [0]
+    _orig_train_band = None
+
+    def _progress_wrapper(original_fn):
+        """Wrap _train_band_charts to print progress per band."""
+        @functools.wraps(original_fn)
+        def wrapper(*args, **kwargs):
+            _chart_count[0] += 1
+            band = args[0] if args else kwargs.get('band', '?')
+            parity = args[1] if len(args) > 1 else kwargs.get('parity', '?')
+            elapsed_min = (time.time() - t0) / 60
+            print(f"  [{elapsed_min:6.1f}m] Band {_chart_count[0]}: "
+                  f"gamma={band}, parity={parity}", flush=True)
+            return original_fn(*args, **kwargs)
+        return wrapper
+
+    # Monkey-patch for progress visibility
+    import cogwheel.lensing.surrogate_training as _st
+    if hasattr(_st, '_train_band_charts'):
+        _st._train_band_charts = _progress_wrapper(_st._train_band_charts)
+
     surrogate, report = train(
         outdir=OUTDIR,
         config=config,
