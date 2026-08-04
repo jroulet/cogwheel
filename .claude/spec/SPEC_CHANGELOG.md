@@ -404,7 +404,7 @@ njit nearest-caustic search; certified by the new
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
 
-- `0.9.10` ():
+- `0.9.11` ():
 
 ### Schwinger quad-double extension — mpmath path for w > 60
 
@@ -415,6 +415,12 @@ paired N/2N certification) for `60 < w <= W_CEILING_SCHWINGER_QD = 150`;
 refusal above 150. F019 note extended to three distinct ceilings.
 `_SADDLE_W_CEILING` raised from 58 to 148 in `surrogate_training.py` to
 match the new QD engine ceiling.
+
+- `0.9.10` ():
+
+Replace "draws in the annulus fall through" with "exterior draws fall through"
+in the born-residual-chart description in SPEC.md — current-behavior prose
+left using a retired code identifier after the terminology-retirement commit.
 
 - `0.9.9` ():
 

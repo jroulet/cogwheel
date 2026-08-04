@@ -136,7 +136,7 @@ Docs). Packaging: setuptools + setuptools_scm, GPL-3.0-or-later, Python >=3.9.
   `cogwheel/lensing/born_residual_chart.py`) is attached to the likelihood
   object, the slot reconstructs `F_carrier + R(w; gamma, rho)` and returns
   the surrogate coefficient array. When the chart is `None` (default),
-  draws in the annulus fall through to the exact engine — correct, just not
+  exterior draws fall through to the exact engine — correct, just not
   zero-quadrature. The chart itself is a TRAIN_TIER artifact (not yet
   trained); once trained, attaching it completes the serve path.
 - **Lensing delay frame.** Every channel kernel in `chang_refsdal` is carried in
