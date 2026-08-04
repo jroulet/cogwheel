@@ -1,46 +1,53 @@
 # Librarian Short-Term Observations
 
-## Run: 2026-08-04 — Retire stale 'annulus' terminology (commit abd4ce40)
+## Run: 2026-08-04 — Cusp arm coverage enabled (commit ddd8980)
 
-**Scope:** Post-commit sync for commit `abd4ce40` (chore: retire stale 'annulus' terminology
-across codebase — 97 code references updated: 'far annulus' → 'Born exterior' / 'exterior region',
-'annulus rung' → 'exterior rung', 'Born-annulus' → 'Born residual', 'annulus coordinate' → 'rho coordinate').
+**Scope:** Post-commit sync for commit `ddd8980` (feat(lensing): enable cusp arm
+coverage — `_CUSP_ARM_COVERAGE = 0.07 rad`).
 
 **Changed files of doc relevance (from commit):**
-- `cogwheel/lensing/` Python files (born_residual_chart.py, _born.py, channels.py, likelihood.py,
-  ppgo_map.py, surrogate.py, surrogate_census.py, surrogate_training.py)
-- `.claude/spec/COVERAGE_DESIGN.md` — already updated by the commit itself (8 changes)
-- `.claude/hooks/retired_concepts.json` — ANNULUS_INNER_RADIUS, GAMMA_FENCE, _SADDLE_GAMMA_FENCE added
+- `cogwheel/lensing/surrogate.py` — `_CUSP_ARM_COVERAGE` changed from 0.0 to 0.07;
+  `_tube_serves` comment updated
 
-**Stale surface found and fixed:**
-- `SPEC.md` line 138 (Key abstractions → BornResidualChart bullet): "draws in the annulus fall
-  through to the exact engine" → "exterior draws fall through to the exact engine"
-  — was using the retired 'annulus' term to describe current behavior of the exterior region.
+**Stale surfaces found and fixed:**
+
+1. **SPEC.md** — Chart selection description contained "cusp neighborhoods are EXCLUDED
+   (2/3-power singularity; served exact until the cusp fast-serving build)". This was a
+   forward-looking status sentence. Updated to describe current behavior: draws within
+   `_CUSP_ARM_COVERAGE = 0.07 rad` of the cusp vertex are now served by the Pearcey arm;
+   residual window beyond the arm's certified reach falls through to the exact engine.
+   Created `spec_changelog.d/2026-08-04_cusp-arm-coverage.md` (bump: patch).
+
+2. **FINDINGS.md F040** — The finding said "`_CUSP_ARM_COVERAGE` was never going to be
+   pinned by a census." Added addendum noting it was pinned at 0.07 rad by direct boundary
+   sweep (not census, not analytic derivation). The core finding (w-dependent delta_theta)
+   remains open.
+
+3. **`todo.d/likelihood_cusp-fast-serving.md`** — Deleted; this build discharged the
+   cusp fast-serving TODO. Created `completed.d/2026-08-04_cusp-arm-coverage.md`.
+
+4. **`todo.d/lensing_coverage_map.md`** — Row 4 (cusp neighbourhoods) updated from
+   "OPEN, both parities" to "PARTIALLY CLOSED (ddd8980, 2026-08-04)". Section B item 3
+   (Cusp fast-serving) marked DONE with commit reference.
 
 **Surfaces confirmed NOT stale:**
-- `SPEC.md` line 101: "The prior-box annulus `3.0 < |y| <= 4.2426`... were retired in C8 (F036)"
-  — historical record of the retired concept; appropriate to name the old term.
-- `SPEC.md` line 55 (FAR-FIELD TILING): "the ~98% of the annulus that is genuinely exterior"
-  — geometric/colloquial noun describing a ring-shaped region, not a code identifier; left as-is.
-- `COVERAGE_DESIGN.md` lines 192, 194, 235: all in historical audit section describing what
-  existed before C8 retired the annulus concept ("retires the annulus concept") — appropriate.
-- `FINDINGS.md`: all 10+ references are historical findings with time-stamped context — left as-is.
-- `docs/source/**/*.rst`: zero annulus references — confirmed clean.
-
-**sync_derived_docs.py output:** "5 checks run, some issues auto-fixed" — confirmed no-op
-(only tidy_advisory.json dirtied as stray side-effect; reverted before commit).
+- `docs/source/` — no RST pages cover `_CUSP_ARM_COVERAGE` or cusp arm serving detail
+- `DATA_CONTRACTS.yaml` — no new disk artifact (the constant is applied at query time,
+  not stored; `pearcey_table.npz` contract already existed from c715bcd)
+- `COVERAGE_DESIGN.md` — had no cusp arm status sentences to update
+- `CHANGELOG.md` — no `changelog.d/` directory in this repo's `.claude/spec/`
 
 **Stale pattern this commit reveals:**
-- TERMINOLOGY RETIREMENTS PROPAGATE INCOMPLETELY: a commit that sweeps code identifiers often
-  misses isolated doc-surface uses of the same term in current-behavior sentences. Pattern:
-  search SPEC.md for the retired term AFTER any terminology-retirement commit; the code sweep
-  won't touch .claude/spec/SPEC.md.
-- Three-way distinction matters: (1) current-behavior uses of retired term → must update;
-  (2) historical-context sentences naming the retired concept → correct to keep old name;
-  (3) geometric/mathematical use as plain noun → acceptable, judgement call.
+- STATUS SENTENCES IN SPEC that say "until the X build" go stale the moment X ships.
+  Pattern: after any build that closes an explicitly named "pending build" reference in SPEC,
+  grep SPEC.md for that build name and update the sentence.
+- FINDINGS that pre-diagnose why a measurement "can't happen" go partially stale when the
+  measurement happens via a different route. Add addendum rather than removing — the core
+  finding may still be valid (as here: F040's w-scaling thesis is still open).
 
 **Fragile cross-references to watch:**
-- SPEC.md "born exterior" / "exterior region" language — next rename commit that touches
-  these must also sweep SPEC.md.
-- `.claude/hooks/retired_concepts.json` is now the canonical list of retired names; if
-  SPEC.md grows new references to ANNULUS_INNER_RADIUS or GAMMA_FENCE, those are violations.
+- SPEC.md now cites `_CUSP_ARM_COVERAGE = 0.07 rad` — if this constant changes, SPEC.md
+  must be updated.
+- `lensing_coverage_map.md` row 4 status "PARTIALLY CLOSED" — closes fully once a census
+  confirms near-zero cusp-window fall-through.
+- F040 addendum references commit ddd8980 and the measurement script — stable references.

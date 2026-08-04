@@ -404,7 +404,7 @@ njit nearest-caustic search; certified by the new
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
 
-- `0.9.11` ():
+- `0.9.12` ():
 
 ### Schwinger quad-double extension — mpmath path for w > 60
 
@@ -416,11 +416,17 @@ refusal above 150. F019 note extended to three distinct ceilings.
 `_SADDLE_W_CEILING` raised from 58 to 148 in `surrogate_training.py` to
 match the new QD engine ceiling.
 
-- `0.9.10` ():
+- `0.9.11` ():
 
 Replace "draws in the annulus fall through" with "exterior draws fall through"
 in the born-residual-chart description in SPEC.md — current-behavior prose
 left using a retired code identifier after the terminology-retirement commit.
+
+- `0.9.10` ():
+
+Update SPEC.md chart selection description: cusp arm coverage enabled
+(`_CUSP_ARM_COVERAGE = 0.07 rad`); replace the "served exact until the cusp
+fast-serving build" forward reference with current Pearcey arm serving behavior.
 
 - `0.9.9` ():
 

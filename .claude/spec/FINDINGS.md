@@ -2359,6 +2359,14 @@ defaults to `0.0` "until the census pins a nonzero coverage", but the quantity
 it stands for is a FUNCTION of `w` and the local derivatives, not a constant a
 census could report. That is why the measurement never happened.
 
+**Addendum (2026-08-04):** `_CUSP_ARM_COVERAGE` was pinned at 0.07 rad by a
+direct arm boundary sweep (`scripts/measure_cusp_arm_actual_boundary.py`,
+commit ddd8980): the minimum angular offset from the cusp vertex at which
+`cusp_amplification` actually serves, over gamma=[0.1..1.5], w=[10..40],
+floored to 2 dp (conservative). This is a measured floor, NOT the analytic
+w-dependent derivation F040 describes — the analytic derivation of the cusp
+exclusion half-width `delta_theta` (w^{-1/4} scaling) remains open.
+
 **Requires `y'''`, which build 1a does NOT deliver** — 1a exports `y'` and
 `y''` only. Extend the cascade to third order before the cusp-window work.
 

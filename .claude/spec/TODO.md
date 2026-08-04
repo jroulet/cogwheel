@@ -836,7 +836,7 @@ Tag conventions:
   | 1 | Caustic interior, astroid (`gamma < 1`) | interior SACR-C charts | OPEN at the high-gamma CROWN band — `interior_eps_max = 5e-2` was set with crown reachability explicitly UNMEASURED; a P2 pilot recorded 0% pass at eps 3.4 |
   | 2 | Caustic interior, saddle lobes (`gamma > 1`) | `LobeInteriorChart` | CLOSED (shipped `04f9f5c`), except the INTER-LOBE CORRIDOR, which `_lobe_serves` refuses for both lobes — whether the saddle exterior charts pick it up is UNKNOWN |
   | 3 | Near-caustic shell (fold tubes) | `TubeChart`, `eta in [eta_floor, eta_max]` | OPEN below `gamma = 0.155` — measured, THREE stacked causes (F037), not one. The foot-of-normal skip cause is CLOSED (C6 shipped 2026-08-01: `eta_max = f_max * R_c` per arc, skip guard replaced by assertion). Two bands are still DROPPED as topology slivers by `stable_gamma_bands` — those are `_PROBE_ETA` (F039) and close in step 1b, the analytic sweep. The row closes only when 1b has shipped |
-  | 4 | Cusp neighbourhoods | excluded from tubes -> quadrature | OPEN, both parities. Saddle exclusions are WIDER (`_SADDLE_CUSP_WIDTH_SAFETY = 2.5`, min half-width 0.08) because deltoid cusps are shallow and the wedge-edge turnarounds are near-singular |
+  | 4 | Cusp neighbourhoods | excluded from tubes -> Pearcey arm -> quadrature | PARTIALLY CLOSED (ddd8980, 2026-08-04). Draws within `_CUSP_ARM_COVERAGE = 0.07 rad` of the cusp vertex are now served by the Pearcey arm. Residual exclusion window beyond the arm's certified reach still falls through to exact engine. Saddle exclusions are WIDER (`_SADDLE_CUSP_WIDTH_SAFETY = 2.5`, min half-width 0.08); arm coverage applies uniformly |
   | 5 | Exterior far-field | `FarFieldChart` | CLOSED (per-column admission since 8h-b4) |
   | 6-9 | ~~Far annulus `3.0 < \|y\| <= 4.2426`, and its three gamma fences~~ | — | **DISSOLVING — do not work these rows.** All four existed only because `\|y\| = 3` (the PRIOR BOX half-width) was treated as a physical boundary. F036 measures that no `\|y\|` threshold can bound the caustic at all: `r_caustic` diverges at the parity wall (19.8 at `gamma = 0.99` vs a 4.2426 box corner). `GAMMA_FENCE = 3/4` and the saddle fence `1.0502342` are CONSEQUENCES of the annulus radius, not independent physics, and are deleted with it. These four rows collapse into ONE caustic-relative exterior region. See [[lensing_caustic_relative_coordinates]] |
   | 10 | DROPPED GAMMA SLIVERS (any `\|y\|`, any `w`) | — | CLOSED — `min_gamma_band = 1e-6` (2026-08-03, commit `70affbb`); bisection continues to near-float resolution, total dropped prior mass ~1e-6 fraction, negligible. See `completed.d/2026-08-03_min_gamma_band_zero.md` |
@@ -857,12 +857,12 @@ Tag conventions:
      accurate, when the boundary itself is the defect (F036). The per-theta_c
      PATTERN stays correct and is reused by the caustic-relative exterior
      region; only this application of it is cancelled.
-  3. **Cusp fast-serving** (region 4). Prerequisite DISCHARGED (Schwinger
-     homogenization shipped as Build 8d, 2026-07-21). The engine-side machinery
-     exists (8e Pearcey arm, 8f table); what is owed is measuring the arm's
-     angular reach, pinning `_CUSP_ARM_COVERAGE` off `0.0`, and shipping a
-     `pearcey_table.npz` so the arm is not itself quadrature.
-     [[likelihood_cusp-fast-serving]]
+  3. ~~**Cusp fast-serving** (region 4).~~ **DONE (2026-08-04, commit ddd8980)**
+     — `_CUSP_ARM_COVERAGE = 0.07 rad`, measured by direct arm boundary sweep
+     (`scripts/measure_cusp_arm_actual_boundary.py`). Draws within 0.07 rad of
+     the cusp vertex are now served by the Pearcey arm; residual window beyond
+     the arm's certified reach still falls through to exact engine.
+     See `completed.d/2026-08-04_cusp-arm-coverage.md`.
   4. **`ghost_kernel`'s Morse branch reference for `det A < 0`.** Its sqrt
      branch is pinned by `reference_amplitude = exp(-0.5j*pi)`, justified in
      its own docstring by "the two real images continue into a Morse-index-1
@@ -1109,28 +1109,6 @@ Tag conventions:
   ACCEPTANCE: drift at both band edges falls to the map's own round-trip
   tolerance; tube held-out eps at fixed node count does not regress; the serve
   cost delta is measured and stated.
-
-- [ ] **Cusp fast-serving — millisecond scale EVERYWHERE (build after
-  homogenization)** `[→ spec]` — OWNER RULING (2026-07-20): cusp
-  neighborhoods excluded from the 8c tube chart fall through to the
-  exact engine, i.e. the ~100 ms – 1 s quadrature path ("wdym 'serving
-  exact' near cusps... I would absolutely have a build where it is
-  millisecond scale everywhere!"). The exclusion balls are small in
-  prior volume but are magnification peaks — samplers CONCENTRATE
-  there, so they are hot regions, not corners. This build closes them:
-  every in-domain query serves at ms scale. Candidate mechanisms (converging
-  with the Schwinger homogenization, which SHIPPED as Build 8d — the
-  quadrature is now the exact evaluator on both parities): Pearcey-function
-  uniform
-  asymptotics in cusp-adapted coordinates (2/3-power scaling; the
-  uniform form IS the known structure at the fixed transition), a
-  precomputed Pearcey table + smooth correction charts, or dense local
-  charts in the scaled coordinates. Refusal contract unchanged: the
-  fast path must be certified-or-fall-through, and the fall-through
-  budget after this build should be ~zero in the census.
-  ORDERING (owner, 2026-07-20): 8c (chart machinery) -> homogenization
-  -> THIS BUILD -> only then the expensive full-box training run
-  (train exactly once, on the final engine + final chart set).
 
 # Envelope surrogate + micro-levers — close the lensed/unlensed per-eval gap [→ spec]
 
