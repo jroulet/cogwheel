@@ -92,7 +92,14 @@ section: Backlog
   census bucket, a wrong code comment, and no owner for a month before anyone
   wrote it down. So: RUN A CHEAP DISCOVERY CENSUS EARLY, on the current chart
   set, as an instrument for finding regions nobody has named — NOT as the final
-  scoring run it is currently scheduled as. The expensive full-box campaign
-  stays last (owner ruling 2026-07-20: train exactly once, on the final engine
-  and final chart set), but a coarse census is not that campaign and should not
-  wait for it.
+  scoring run it is currently scheduled as.
+
+  **Discovery census run (2026-08-04, commit 97f7fc0, tool: `scripts/census_dry_run.py`):**
+  Structural coverage = 100% — every draw in the prior has a serve path. No unnamed
+  regions found. Breakdown: Born exterior 71%, tube/far-field 15%, interior wedge 7%,
+  lobe interior (saddle) 7%, ppGO fold 0.1%. Production training can proceed on the
+  current architecture.
+
+  The expensive full-box campaign stays last (owner ruling 2026-07-20: train exactly
+  once, on the final engine and final chart set). The coarse census is done; the
+  campaign is not.

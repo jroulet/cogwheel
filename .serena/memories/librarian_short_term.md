@@ -1,53 +1,43 @@
 # Librarian Short-Term Observations
 
-## Run: 2026-08-04 — Cusp arm coverage enabled (commit ddd8980)
+## Run: 2026-08-04 — census_dry_run.py addition (commit 97f7fc0)
 
-**Scope:** Post-commit sync for commit `ddd8980` (feat(lensing): enable cusp arm
-coverage — `_CUSP_ARM_COVERAGE = 0.07 rad`).
+**Scope:** Post-commit sync for commit `97f7fc0` (scripts: census_dry_run.py —
+structural coverage = 100%).
 
-**Changed files of doc relevance (from commit):**
-- `cogwheel/lensing/surrogate.py` — `_CUSP_ARM_COVERAGE` changed from 0.0 to 0.07;
-  `_tube_serves` comment updated
+**Changed file:** `scripts/census_dry_run.py` — new script, 366 lines.
 
-**Stale surfaces found and fixed:**
+**Triage result:**
 
-1. **SPEC.md** — Chart selection description contained "cusp neighborhoods are EXCLUDED
-   (2/3-power singularity; served exact until the cusp fast-serving build)". This was a
-   forward-looking status sentence. Updated to describe current behavior: draws within
-   `_CUSP_ARM_COVERAGE = 0.07 rad` of the cusp vertex are now served by the Pearcey arm;
-   residual window beyond the arm's certified reach falls through to the exact engine.
-   Created `spec_changelog.d/2026-08-04_cusp-arm-coverage.md` (bump: patch).
+The script stays entirely in `scripts/`, writes no disk artifacts (stdout only),
+and introduces no new `cogwheel/` public API. The SCRIPTS/ REWRITE NO-OP RULE applies
+for SPEC.md, DATA_CONTRACTS.yaml, and docs/source/.
 
-2. **FINDINGS.md F040** — The finding said "`_CUSP_ARM_COVERAGE` was never going to be
-   pinned by a census." Added addendum noting it was pinned at 0.07 rad by direct boundary
-   sweep (not census, not analytic derivation). The core finding (w-dependent delta_theta)
-   remains open.
+The one stale surface found: `todo.d/lensing_coverage_map.md` Section D, which
+contained the action directive "RUN A CHEAP DISCOVERY CENSUS EARLY". That census
+has now been run — `census_dry_run.py` is the tool and the commit message reports
+the result (100% structural coverage, breakdown by serve path). Section D was
+updated to record:
+- Census run on 2026-08-04, commit 97f7fc0, tool `scripts/census_dry_run.py`
+- Result: 100% structural coverage, no unnamed regions
+- Breakdown: Born exterior 71%, tube/far-field 15%, interior wedge 7%, lobe interior 7%, ppGO fold 0.1%
+- Full-box campaign still stays last
 
-3. **`todo.d/likelihood_cusp-fast-serving.md`** — Deleted; this build discharged the
-   cusp fast-serving TODO. Created `completed.d/2026-08-04_cusp-arm-coverage.md`.
-
-4. **`todo.d/lensing_coverage_map.md`** — Row 4 (cusp neighbourhoods) updated from
-   "OPEN, both parities" to "PARTIALLY CLOSED (ddd8980, 2026-08-04)". Section B item 3
-   (Cusp fast-serving) marked DONE with commit reference.
+`render_fragments.py` was run; `TODO.md` was updated.
 
 **Surfaces confirmed NOT stale:**
-- `docs/source/` — no RST pages cover `_CUSP_ARM_COVERAGE` or cusp arm serving detail
-- `DATA_CONTRACTS.yaml` — no new disk artifact (the constant is applied at query time,
-  not stored; `pearcey_table.npz` contract already existed from c715bcd)
-- `COVERAGE_DESIGN.md` — had no cusp arm status sentences to update
-- `CHANGELOG.md` — no `changelog.d/` directory in this repo's `.claude/spec/`
+- SPEC.md — no reference to discovery census or structural coverage
+- DATA_CONTRACTS.yaml — no new disk artifacts in the script
+- docs/source/ — scripts/ is not a cogwheel module; no API page needed
+- FINDINGS.md — no new finding, no old finding invalidated
 
 **Stale pattern this commit reveals:**
-- STATUS SENTENCES IN SPEC that say "until the X build" go stale the moment X ships.
-  Pattern: after any build that closes an explicitly named "pending build" reference in SPEC,
-  grep SPEC.md for that build name and update the sentence.
-- FINDINGS that pre-diagnose why a measurement "can't happen" go partially stale when the
-  measurement happens via a different route. Add addendum rather than removing — the core
-  finding may still be valid (as here: F040's w-scaling thesis is still open).
+- Coverage map Section D's "RUN X EARLY" imperatives are action calls; when
+  the action lands, check Section D and record the outcome. Specifically:
+  the pattern "RUN A CHEAP X EARLY ... should not wait for it" signals a
+  pending discovery-style step that will go stale on completion.
 
 **Fragile cross-references to watch:**
-- SPEC.md now cites `_CUSP_ARM_COVERAGE = 0.07 rad` — if this constant changes, SPEC.md
-  must be updated.
-- `lensing_coverage_map.md` row 4 status "PARTIALLY CLOSED" — closes fully once a census
-  confirms near-zero cusp-window fall-through.
-- F040 addendum references commit ddd8980 and the measurement script — stable references.
+- lensing_coverage_map.md Section D now cites commit 97f7fc0 and
+  `scripts/census_dry_run.py` as the discovery census record. If that script
+  is renamed or removed, update Section D.
