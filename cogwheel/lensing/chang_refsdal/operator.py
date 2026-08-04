@@ -109,10 +109,12 @@ dispatch (not through `select_branch`, whose positive-parity call stays
 byte-identical): a saddle node takes the stationary-phase
 `geometric_amplification` (over the real images of the indefinite
 matrix) ONLY when it is BOTH resolved (``w * delta_min >= RHO_END``,
-``delta_min`` the real-image delay separation) AND above the wave
-ceiling ``w > _schwinger.W_CEILING_SCHWINGER`` (= 60); otherwise it
-takes the Schwinger wave branch.  Because `_schwinger.f_schwinger` also
-hard-refuses ``w > 60`` internally, an UNRESOLVED saddle above the
+``delta_min`` the real-image delay separation) AND above the QD wave
+ceiling ``w > _schwinger.W_CEILING_SCHWINGER_QD`` (= 150); otherwise it
+takes the Schwinger wave branch.  The wave branch covers two regimes:
+``w <= 60`` uses the double-double parallel batch, and ``60 < w <= 150``
+uses the mpmath sequential path.  Because `_schwinger.f_schwinger` also
+hard-refuses ``w > 150`` internally, an UNRESOLVED saddle above the QD
 ceiling propagates `_schwinger.SchwingerCertificationError` rather than
 returning a wrong value.  ``cancellation_exponent`` is untouched and
 still refuses saddles: the saddle wave path takes ``w`` directly and
@@ -403,7 +405,7 @@ def _uniform_arm_value(w: float, y: np.ndarray, gamma: float, *,
     """Uniform-asymptotic rung of the per-node serving ladder, or ``None``.
 
     Offered at a node the geometric and Schwinger paths have already
-    declined -- ``w > _schwinger.W_CEILING_SCHWINGER`` and not
+    declined -- ``w > _schwinger.W_CEILING_SCHWINGER_QD`` and not
     geometric-resolved -- BEFORE the existing named
     `_schwinger.SchwingerCertificationError` refusal fires.  Tries the
     near-fold uniform Airy arm (`_airy_fold.fold_amplification`) first,
@@ -540,7 +542,8 @@ def _schwinger_wave_grid_values(
         w_nodes: np.ndarray, y_eig: np.ndarray, gamma_prime: float,
         lam: float, kappa: float, s: float
         ) -> tuple[np.ndarray, np.ndarray]:
-    """Byte-identical node-parallel batch of the ``w <= ceiling`` wave nodes.
+    """Byte-identical node-parallel batch of the ``w <= W_CEILING_SCHWINGER``
+    (DD ceiling, w <= 60) wave nodes.
 
     The Python wrapper around `_schwinger_raw_integral_map`.  Given the
     ``w <= W_CEILING_SCHWINGER`` wave-branch frequencies of a single lens
@@ -567,12 +570,17 @@ def _schwinger_wave_grid_values(
     are byte-identity-critical.  If `f_schwinger`'s setup or certification
     ever changes, this wrapper must change in lockstep (the byte-identity
     test suite is the guard).  The heavy `_raw_t_integral_core` math itself
-    is reused, not reimplemented.
+    is reused, not reimplemented.  Nodes with ``w > W_CEILING_SCHWINGER``
+    (the mpmath range, ``60 < w <= 150``) are NOT handled here; they are
+    evaluated sequentially by the grid wrappers (`_saddle_grid`,
+    `_positive_parity_grid`) through `f_schwinger` directly.
 
     Parameters
     ----------
     w_nodes : np.ndarray
-        ``(m,)`` float frequencies with ``0 < w <= W_CEILING_SCHWINGER``.
+        ``(m,)`` float frequencies with ``0 < w <= W_CEILING_SCHWINGER``
+        (the DD ceiling, = 60).  Nodes above this ceiling must use the
+        mpmath path via `f_schwinger` directly.
     y_eig : np.ndarray
         Shape ``(2,)`` eigenframe source position (soft/hard axes).
     gamma_prime : float
@@ -745,36 +753,38 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     ``strongly_cancelling`` leg vacuously true so ONLY the resolution
     leg is live: ``select_branch(w, delta_min, inf) == 'geometric'``
     holds iff ``w*delta_min >= RHO_END``.  This PRESERVES the historical
-    saddle boundary ``(resolved AND w > W_CEILING_SCHWINGER) ->
+    saddle boundary ``(resolved AND w > W_CEILING_SCHWINGER_QD) ->
     geometric`` EXACTLY -- the routing is behaviour-preserving and the
     boundary did not move.  Whether the saddle ADDITIONALLY needs a
     geometric-onset gate (the positive-parity ``L > L_MAX`` accuracy leg
     that `select_branch` normally enforces) is an OPEN, UNMEASURED
     question: every driver sweep behind F028 and the gate comparison was
     positive-parity only, so there is no saddle data on that leg.  Note
-    that ceiling exhaustion above ``w = 60`` explains only wave
+    that ceiling exhaustion above ``w = 150`` explains only wave
     UNAVAILABILITY, not geometric accuracy, so it does not settle the
     accuracy question.  ``resolved`` uses the frequency-independent
     real-image ``delta_min`` (computed once, only when some node exceeds
     the ceiling).  Because `_schwinger.f_schwinger` ALSO hard-refuses
-    ``w > W_CEILING_SCHWINGER`` internally, an unresolved saddle above the
+    ``w > W_CEILING_SCHWINGER_QD`` internally, an unresolved saddle above the
     ceiling is first offered to the uniform arms (`_uniform_arm_value`:
     fold Airy then cusp Pearcey); only if BOTH arms refuse does the node
     propagate `_schwinger.SchwingerCertificationError` from the wave
     branch rather than returning a wrong value.  The arm intercept fires
     ONLY on this previously-refusing branch, so resolved (geometric) and
-    ``w <= W_CEILING_SCHWINGER`` nodes are byte-identical to the exact
+    ``w <= W_CEILING_SCHWINGER_QD`` nodes are byte-identical to the exact
     path.
 
     NODE-PARALLEL EXACT EVALUATION (Build 8f lever 3).  A Python pre-pass
     classifies each node into its branch (geometric / arm / exact wave /
-    refuse) and gathers the independent ``w <= ceiling`` exact wave nodes;
-    those are evaluated across cores by `_schwinger_wave_grid_values` (an
-    njit ``prange`` PURE MAP over `_schwinger_raw_integral_map`, the frozen
-    `_schwinger._raw_t_integral_core` unchanged).  The per-node value is
-    byte-identical to the serial `f_schwinger` path (fastmath off, no
-    cross-node reduction in the parallel region, the ``w``-independent
-    eigenframe reduction done once here); the named
+    refuse) and gathers the independent ``w <= W_CEILING_SCHWINGER`` (DD
+    ceiling) exact wave nodes; those are evaluated across cores by
+    `_schwinger_wave_grid_values` (an njit ``prange`` PURE MAP over
+    `_schwinger._raw_t_integral_core`, the frozen
+    `_schwinger._raw_t_integral_core` unchanged).  Nodes with
+    ``w in (60, 150]`` are evaluated SEQUENTIALLY through
+    `_schwinger.f_schwinger` (which dispatches to the mpmath path
+    internally for ``w > 60``).  The per-node value is byte-identical to
+    the serial `f_schwinger` path; the named
     `_schwinger.SchwingerCertificationError` never crosses a thread
     boundary -- it is reduced over the full node ordering and raised by the
     Python wrapper with the lowest-index refuser's authentic message
@@ -806,7 +816,7 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
         and `_saddle_mass_sheet_map`.
     _schwinger.SchwingerCertificationError
         If any node cannot be certified by the paired Gauss-Legendre
-        rules, or an unresolved node exceeds ``W_CEILING_SCHWINGER``.
+        rules, or an unresolved node exceeds ``W_CEILING_SCHWINGER_QD``.
     ValueError
         If ``y`` does not have shape ``(2,)`` or ``w_array`` is not 1-D.
     """
@@ -832,11 +842,11 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
 
     # Resolution and caustic distance are both frequency-independent;
     # compute each once and only if some node could take the geometric
-    # branch (w > ceiling).  A refusing caustic search gives eta = 0.0 ->
+    # branch (w > QD ceiling).  A refusing caustic search gives eta = 0.0 ->
     # 'wave', the conservative direction.
     delta_min = 0.0
     eta = 0.0
-    if np.any(w_array > _schwinger.W_CEILING_SCHWINGER):
+    if np.any(w_array > _schwinger.W_CEILING_SCHWINGER_QD):
         delta_min = _real_delay_min_separation(source, matrix)
         try:
             eta = float(geometry.nearest_caustic_point(
@@ -849,19 +859,20 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
 
     # Python PRE-PASS over the nodes in index order (Build 8f lever 3):
     # classify each into its serving branch and GATHER the expensive
-    # ``w <= ceiling`` exact wave nodes for the node-parallel batch.  The
-    # geometric and arm branches stay in Python; only the pure Schwinger
-    # inner map is parallelized.  The geometric-vs-wave choice above the
+    # exact wave nodes for the node-parallel batch.  The geometric and arm
+    # branches stay in Python; the pure Schwinger inner map is
+    # parallelized (DD path, w <= 60) and the mpmath path (60 < w <= 150)
+    # runs sequentially.  The geometric-vs-wave choice above the QD
     # ceiling is routed through the authoritative `select_branch` with an
     # infinite cancellation exponent, so ONLY its resolution leg is live
-    # and the historical ``w > 60 AND resolved`` saddle boundary is
-    # preserved exactly (see the function docstring).
-    batch_index: list[int] = []
+    # and the historical saddle boundary is preserved exactly.
+    batch_index: list[int] = []          # w <= W_CEILING_SCHWINGER (DD batch)
+    mpmath_batch_index: list[int] = []   # W_CEILING_SCHWINGER < w <= QD
     ceiling_refusers: list[int] = []
     for node in range(n_nodes):
         w_node = float(w_array[node])
-        if w_node > _schwinger.W_CEILING_SCHWINGER:
-            # Above the wave ceiling.  The cancellation exponent is
+        if w_node > _schwinger.W_CEILING_SCHWINGER_QD:
+            # Above the QD ceiling.  The cancellation exponent is
             # positive-parity bookkeeping and has no saddle analogue, so
             # `inf` leaves that leg vacuously true; the resolution and
             # `eta` legs are live.  The `eta` leg is NOT inherited from
@@ -883,20 +894,37 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
                     values[node] = arm_value
                 else:
                     ceiling_refusers.append(node)
+        elif w_node > _schwinger.W_CEILING_SCHWINGER:
+            # w in (60, 150]: the mpmath path (evaluated sequentially).
+            mpmath_batch_index.append(node)
         else:
-            # w <= ceiling exact wave node: the parallel batch (byte-
+            # w <= 60: exact wave node via the DD parallel batch (byte-
             # identical to the serial `f_schwinger` path per node).
             batch_index.append(node)
 
+    # --- DD parallel batch (w <= 60) ---
     batch_index_arr = np.array(batch_index, dtype=np.int64)
     batch_values, batch_cert = _schwinger_wave_grid_values(
         w_array[batch_index_arr], y_eig, gamma_prime, lam, kappa, s)
+
+    # --- mpmath sequential batch (60 < w <= 150) ---
+    mpmath_refusers: list[int] = []
+    for node in mpmath_batch_index:
+        w_node = float(w_array[node])
+        try:
+            f_pure = _schwinger.f_schwinger(w_node, y_eig, gamma_prime)
+            mass_sheet_phase = np.exp(
+                0.5j * w_node * np.log(lam)
+                - 0.5j * w_node * float(kappa) * s)
+            values[node] = complex(mass_sheet_phase * f_pure / lam)
+        except _schwinger.SchwingerCertificationError:
+            mpmath_refusers.append(node)
 
     # Reduce the named refusal ACROSS THE FULL node ordering in the Python
     # wrapper (never across a thread boundary): any node refuses -> the
     # whole grid refuses, raised with the authentic message of the
     # LOWEST-index refuser (serial first-refuser identity).
-    refusers = list(ceiling_refusers)
+    refusers = list(ceiling_refusers) + list(mpmath_refusers)
     for pos, node in enumerate(batch_index):
         if batch_cert[pos]:
             values[node] = batch_values[pos]
@@ -954,7 +982,7 @@ def _positive_parity_grid(
     * ``gamma' > 0`` (every sheared positive-parity host -- the whole
       sampled prior box): each node is evaluated by `f_schwinger` in the
       pure-shear eigenframe and reconstructed with the mass-sheet
-      identity.  A ``w > _schwinger.W_CEILING_SCHWINGER`` node (the set
+      identity.  A ``w > _schwinger.W_CEILING_SCHWINGER_QD`` node (the set
       the exact wave evaluator refuses) is routed by the AUTHORITATIVE
       gate `select_branch` -- the SAME predicate `channels._exact_total`
       and `_saddle_grid` use, so the wave/geometric decision has one home:
@@ -974,8 +1002,12 @@ def _positive_parity_grid(
         -- the named refusal still stands; there is NO legacy fallback
         catch (that would re-introduce a parallel production path).
 
-      A ``w <= ceiling`` node never reaches the ceiling classifier, so it
-      is byte-identical to the exact path.
+      Nodes with ``w <= W_CEILING_SCHWINGER`` (= 60) go through the DD
+      parallel batch (byte-identical to serial `f_schwinger`).  Nodes with
+      ``60 < w <= W_CEILING_SCHWINGER_QD`` (= 150) are evaluated
+      SEQUENTIALLY through `f_schwinger` (which dispatches internally to
+      the mpmath arbitrary-precision path).  Both are byte-identical to
+      the serial evaluator.
 
     * ``gamma' == 0`` (the shear-free point lens; measure-zero in the
       prior but reachable in unit tests and by direct callers): the 1D
@@ -994,13 +1026,15 @@ def _positive_parity_grid(
 
     NODE-PARALLEL EXACT EVALUATION (Build 8f lever 3).  On the
     ``gamma' > 0`` route a Python pre-pass gathers the independent
-    ``w <= ceiling`` exact wave nodes and evaluates them across cores via
-    `_schwinger_wave_grid_values` (the njit ``prange`` PURE MAP over the
-    frozen `_schwinger._raw_t_integral_core`); each per-node value is
+    ``w <= W_CEILING_SCHWINGER`` (DD ceiling) exact wave nodes and
+    evaluates them across cores via `_schwinger_wave_grid_values` (the
+    njit ``prange`` PURE MAP over the frozen
+    `_schwinger._raw_t_integral_core`); each per-node value is
     byte-identical to the serial `f_schwinger` path, and the named
     refusal is reduced over the full node ordering and raised by the
     Python wrapper (never across a thread boundary) with the lowest-index
-    refuser's authentic message.
+    refuser's authentic message.  Nodes with ``60 < w <= 150`` are
+    evaluated SEQUENTIALLY through `f_schwinger` (mpmath path).
 
     Parameters and returns match `_saddle_grid`.  The caller
     guarantees positive parity (``1 - kappa > |gamma|``), so the
@@ -1010,7 +1044,7 @@ def _positive_parity_grid(
     ------
     _schwinger.SchwingerCertificationError
         If a ``gamma' > 0`` node cannot certify its paired-rule
-        quadrature, or lies above ``_schwinger.W_CEILING_SCHWINGER``.
+        quadrature, or lies above ``_schwinger.W_CEILING_SCHWINGER_QD``.
     geometry.LensDomainError, _hyp1f1.HypergeometricDomainError
         Propagated from the point-mass kernel on the ``gamma' == 0``
         closed-form route.
@@ -1084,11 +1118,11 @@ def _positive_parity_grid(
     delta_min = 0.0
     # `eta` (distance to the caustic) is the third leg of the authoritative
     # gate and, like `delta_min`, is w-INDEPENDENT -- so it is computed once
-    # per grid call and only when some node exceeds the ceiling.  A refusing
-    # caustic search means no geometric admission: `eta = 0.0` sends every
-    # node to 'wave', which is the conservative direction.
+    # per grid call and only when some node exceeds the QD ceiling.  A
+    # refusing caustic search means no geometric admission: `eta = 0.0`
+    # sends every node to 'wave', which is the conservative direction.
     eta = 0.0
-    if np.any(w_array > _schwinger.W_CEILING_SCHWINGER):
+    if np.any(w_array > _schwinger.W_CEILING_SCHWINGER_QD):
         matrix = geometry.macro_matrix(gamma, beta, kappa)
         delta_min = _real_delay_min_separation(source, matrix)
         try:
@@ -1101,17 +1135,19 @@ def _positive_parity_grid(
     values = np.empty(n_nodes, dtype=complex)
 
     # Python PRE-PASS over the nodes in index order (Build 8f lever 3):
-    # gather the expensive ``w <= ceiling`` exact wave nodes for the
-    # node-parallel batch; the arm-served / above-ceiling-refusing nodes
-    # stay in Python.  A served node carries zero operator-series
-    # diagnostics like the Schwinger nodes (the diagnostic arrays below are
-    # uniformly zero / True).
-    batch_index: list[int] = []
+    # gather the expensive exact wave nodes for the node-parallel batch
+    # (DD, w <= 60) and the sequential mpmath batch (60 < w <= 150);
+    # the arm-served / above-QD-ceiling-refusing nodes stay in Python.
+    # A served node carries zero operator-series diagnostics like the
+    # Schwinger nodes (the diagnostic arrays below are uniformly
+    # zero / True).
+    batch_index: list[int] = []          # w <= W_CEILING_SCHWINGER (DD batch)
+    mpmath_batch_index: list[int] = []   # W_CEILING_SCHWINGER < w <= QD
     ceiling_refusers: list[int] = []
     for node in range(n_nodes):
         w_node = float(w_array[node])
-        if w_node > _schwinger.W_CEILING_SCHWINGER:
-            # Above the wave ceiling: the AUTHORITATIVE gate decides
+        if w_node > _schwinger.W_CEILING_SCHWINGER_QD:
+            # Above the QD ceiling: the AUTHORITATIVE gate decides
             # geometric vs wave, so the predicate has ONE home shared with
             # `channels._exact_total` and `_saddle_grid` (F028).  ``L`` is
             # reconstructed as ``w_node * |y'|`` from the cached
@@ -1142,20 +1178,37 @@ def _positive_parity_grid(
                     values[node] = arm_value
                 else:
                     ceiling_refusers.append(node)
+        elif w_node > _schwinger.W_CEILING_SCHWINGER:
+            # w in (60, 150]: the mpmath path (evaluated sequentially).
+            mpmath_batch_index.append(node)
         else:
-            # w <= ceiling exact wave node: the parallel batch (byte-
+            # w <= 60: exact wave node via the DD parallel batch (byte-
             # identical to the serial `f_schwinger` path per node).
             batch_index.append(node)
 
+    # --- DD parallel batch (w <= 60) ---
     batch_index_arr = np.array(batch_index, dtype=np.int64)
     batch_values, batch_cert = _schwinger_wave_grid_values(
         w_array[batch_index_arr], y_eig, gamma_prime, lam, kappa, s)
+
+    # --- mpmath sequential batch (60 < w <= 150) ---
+    mpmath_refusers: list[int] = []
+    for node in mpmath_batch_index:
+        w_node = float(w_array[node])
+        try:
+            f_pure = _schwinger.f_schwinger(w_node, y_eig, gamma_prime)
+            mass_sheet_phase = np.exp(
+                0.5j * w_node * np.log(lam)
+                - 0.5j * w_node * float(kappa) * s)
+            values[node] = complex(mass_sheet_phase * f_pure / lam)
+        except _schwinger.SchwingerCertificationError:
+            mpmath_refusers.append(node)
 
     # Reduce the named refusal ACROSS THE FULL node ordering in the Python
     # wrapper (never across a thread boundary): any node refuses -> the
     # whole grid refuses, raised with the authentic message of the
     # LOWEST-index refuser (serial first-refuser identity).
-    refusers = list(ceiling_refusers)
+    refusers = list(ceiling_refusers) + list(mpmath_refusers)
     for pos, node in enumerate(batch_index):
         if batch_cert[pos]:
             values[node] = batch_values[pos]
@@ -1201,7 +1254,7 @@ def F_op_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     raises a named refusal, so a single uncertifiable node refuses the
     whole grid rather than returning a finite-but-uncertified value.  For
     ``gamma' > 0`` the refusal is `_schwinger.SchwingerCertificationError`
-    (including every ``w > _schwinger.W_CEILING_SCHWINGER``); the
+    (including every ``w > _schwinger.W_CEILING_SCHWINGER_QD``); the
     shear-free ``gamma' == 0`` closed form refuses only through the
     kernel's own `_hyp1f1.HypergeometricDomainError`.
 
@@ -1236,8 +1289,8 @@ def F_op_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     _schwinger.SchwingerCertificationError
         Positive-parity ``gamma' > 0`` route: if a node cannot certify
         its paired-rule Schwinger quadrature, or lies above
-        ``_schwinger.W_CEILING_SCHWINGER`` (``w > 60``, where the named
-        refusal stands).  This is the production refusal for every
+        ``_schwinger.W_CEILING_SCHWINGER_QD`` (``w > 150``, where the
+        named refusal stands).  This is the production refusal for every
         sheared positive-parity host (`_positive_parity_grid`).
     _hyp1f1.HypergeometricDomainError
         Propagated from the kernel above its certified ``w`` or
@@ -1312,8 +1365,8 @@ def F_op(w: float, y: np.ndarray, gamma: float, *,
         paired Gauss-Legendre rules cannot certify the Schwinger
         quadrature -- on the saddle branch, or on any sheared
         positive-parity (``gamma' > 0``) node -- or a node (or an
-        unresolved saddle) exceeds ``_schwinger.W_CEILING_SCHWINGER``
-        (``w > 60``).
+        unresolved saddle) exceeds ``_schwinger.W_CEILING_SCHWINGER_QD``
+        (``w > 150``).
     _hyp1f1.HypergeometricDomainError
         Shear-free ``gamma' == 0`` legacy route: propagated from the
         kernel above its certified ``w`` ceiling or cancellation-exponent

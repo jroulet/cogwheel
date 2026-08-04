@@ -447,10 +447,11 @@ _SUB_CEILING_W = 50.0
 #: controls' ``w^{1/2}`` / ``w^{3/4}`` exponents are fit.
 _SCALING_WS = (30.0, 40.0, 50.0, 60.0)
 
-#: A frequency above the Schwinger ceiling: here the geometric and
-#: Schwinger rungs have already declined, so the uniform arm is the only
-#: server and its refusal falls through to the NAMED Schwinger refusal.
-_ABOVE_CEILING_W = 100.0
+#: A frequency above the Schwinger QD ceiling (W_CEILING_SCHWINGER_QD=150):
+#: here the geometric and Schwinger rungs have already declined, so the
+#: uniform arm is the only server and its refusal falls through to the
+#: NAMED Schwinger refusal.
+_ABOVE_CEILING_W = 160.0
 
 #: Envelope-match bar of the cusp arm against the exact engine along the
 #: fold arcs (spec: <= 1e-2; measured 1e-3..7e-3 for the gamma=0.7
@@ -472,6 +473,9 @@ _CUSP_NODE_GAMMA = 0.5
 _CUSP_NODE_RADIUS = 0.18
 _CUSP_NODE_ANGLE = 0.3 * math.pi
 _CUSP_NODE_W = 80.0
+# Frequency above the QD ceiling (150) for fall-through tests that expect
+# SchwingerCertificationError — the mpmath path now serves w in (60, 150].
+_CUSP_FALLTHROUGH_W = 151.0
 
 
 # ----------------------------------------------------------------------
@@ -1726,7 +1730,10 @@ class UniformArmFallThroughTestCase(_FoldArmTestCase):
                 'cusp arm certified under a zero certificate tolerance')
             self.n_checks += 1
             with self.assertRaises(_schwinger.SchwingerCertificationError):
-                self._grid_value(source)
+                # w above QD ceiling (150) to trigger the hard refuse.
+                operator.F_op_grid(
+                    np.array([_CUSP_FALLTHROUGH_W]), source,
+                    _CUSP_NODE_GAMMA)[0][0]
 
     def test_nan_primitive_falls_through_to_named_refusal(self):
         """
@@ -1743,7 +1750,10 @@ class UniformArmFallThroughTestCase(_FoldArmTestCase):
                 'cusp arm served a NaN primitive')
             self.n_checks += 1
             with self.assertRaises(_schwinger.SchwingerCertificationError):
-                self._grid_value(source)
+                # w above QD ceiling (150) to trigger the hard refuse.
+                operator.F_op_grid(
+                    np.array([_CUSP_FALLTHROUGH_W]), source,
+                    _CUSP_NODE_GAMMA)[0][0]
 
     def test_moving_error_const_threshold_flips_a_fixed_node(self):
         """
@@ -1971,10 +1981,12 @@ class PearceyCuspSelfFalsificationTestCase(_FoldArmTestCase):
 # arms' own arithmetic (covered above).
 # ======================================================================
 
-#: Frequency ceiling of the exact Schwinger engine.  A node with
-#: ``w > _W_CEILING`` that is not geometric-resolved is offered to the
-#: uniform arms before the named refusal stands.
-_W_CEILING = _schwinger.W_CEILING_SCHWINGER
+#: Frequency ceiling of the Schwinger engine (including the mpmath QD
+#: extension).  A node with ``w > _W_CEILING`` that is not
+#: geometric-resolved is offered to the uniform arms before the named
+#: refusal stands.  Nodes at ``w <= 150`` are exact-wave-served (DD for
+#: w<=60, mpmath for 60<w<=150).
+_W_CEILING = _schwinger.W_CEILING_SCHWINGER_QD
 
 #: Geometric-resolution threshold: a saddle node is resolved when
 #: ``w * delta_min >= _RHO_END``.
@@ -1988,12 +2000,13 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
 
 #: One node per serving rung, spanning every regime the ladder resolves:
 #: ``(label, w, radius, angle, gamma, beta, kappa)``.  Grounded against
-#: the live ladder: the Schwinger node certifies at ``w = 40 <= 60``; the
-#: geometric node is a resolved macro saddle (``gamma = 1.5``,
-#: ``w * delta_min >= RHO_END``); the fold and cusp nodes are the
-#: near-fold / near-cusp uniform corners (empirically served by exactly
-#: one arm each); the refusal node is a near-caustic unresolved node both
-#: arms decline.
+#: the live ladder: the Schwinger node certifies at ``w = 40 <= 60`` (DD
+#: path); the geometric node is a resolved macro saddle (``gamma = 1.5``,
+#: ``w = 200 > W_CEILING_SCHWINGER_QD``, ``w * delta_min >= RHO_END``);
+#: the fold and cusp nodes are the near-fold / near-cusp uniform corners
+#: (empirically served by exactly one arm each); the refusal node is a
+#: near-caustic unresolved node above the QD ceiling that both arms
+#: decline.
 #:
 #: F028 re-point: the fold node's radius is kept small
 #: (``L = w*|y'| = 500*0.06 = 30 < L_MAX``) so it stays on the WAVE branch
@@ -2005,7 +2018,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
 #: longer exercises the fold rung, so it is pulled back below the handoff.
 _LADDER_NODES = (
     ('schwinger', 40.0, 0.20, 0.25 * math.pi, 0.5, 0.0, 0.0),
-    ('geometric', 100.0, 1.20, _RAY_ANGLE, 1.5, 0.0, 0.0),
+    ('geometric', 200.0, 1.20, _RAY_ANGLE, 1.5, 0.0, 0.0),
     ('fold', 500.0, 0.06, _RAY_ANGLE, _GAMMA, 0.0, 0.0),
     ('cusp', _CUSP_NODE_W, _CUSP_NODE_RADIUS, _CUSP_NODE_ANGLE,
      _CUSP_NODE_GAMMA, 0.0, 0.0),

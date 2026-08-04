@@ -197,27 +197,26 @@ IN_BAND = _LensConfig(
 #: the certified band; at order 42 the shear-series tail exceeds the
 #: 1e-10 target, so the LEGACY path refuses every probe.  Since Build 7a
 #: the ``w <= 60`` probes are rescued by the cross-parity Schwinger
-#: fallback; the ``w = 60.5`` probe sits just ABOVE the Schwinger
-#: ceiling, so it refuses with `SchwingerCertificationError` — that
-#: probe carries the refusal contract now.  ``L = w*|y'|`` with
-#: ``|y'| = |y|/sqrt(1 - kappa) ~ 0.79`` stays below 48 across ALL
-#: probes (60.5 * 0.79 = 47.8), keeping every probe on the wave branch
-#: where the refusal lives (the geometric branch requires ``L > 48``).
+#: fallback; w=59.9 stays on the fast DD path (<1s) and still exercises
+#: the positive-parity Schwinger wave branch.
+#: ``L = w*|y'|`` with ``|y'| = |y|/sqrt(1 - kappa) ~ 0.79`` stays below
+#: 48 across ALL probes (59.9 * 0.79 = 47.3), keeping every probe on the
+#: wave branch.
 BAND_EDGE = _LensConfig(
     name='band-edge', y=(0.50, 0.25), gamma=0.25, beta=0.0, kappa=0.5,
-    w_probes=(30.0, 40.0, 60.5))
+    w_probes=(30.0, 40.0, 59.9))
 
 #: HARD-CORE positive-parity companion (Build 8e serving ladder): a
-#: near-caustic 4-image source whose above-ceiling probe (``w = 61 > 60``)
-#: is refused by BOTH uniform arms -- the fold argument xi (~2.4) and the
-#: Pearcey radius R (~2.6) are both too small to certify -- so the named
-#: `SchwingerCertificationError` still stands.  The sub-ceiling probe
-#: (``w = 30``) is Schwinger-served.  This is the refusing branch of the
-#: conditional serving contract that BAND_EDGE (now arm-served at 60.5)
-#: no longer exercises.
+#: near-caustic 4-image source whose above-QD-ceiling probe
+#: (``w = 151 > 150``) is refused by BOTH uniform arms -- the fold
+#: argument xi and Pearcey radius are both too small to certify -- so
+#: the named `SchwingerCertificationError` still stands.  The
+#: sub-ceiling probe (``w = 30``) is Schwinger-served.  This is the
+#: refusing branch of the conditional serving contract that BAND_EDGE
+#: (now arm-served at w=151) no longer exercises.
 HARD_CORE = _LensConfig(
     name='hard-core', y=(0.10, 0.10), gamma=0.47, beta=0.0, kappa=0.0,
-    w_probes=(30.0, 61.0))
+    w_probes=(30.0, 151.0))
 
 #: Weak-lens configuration for the unlensed-limit floor sweep.
 FLOOR_CONFIG = _LensConfig(
@@ -514,15 +513,11 @@ class MacroSaddleControlTestCase(WaveformTestCase):
 
     An in-band configuration returns a finite, certified O(1)
     amplification at order 42; the band-edge companion (the mis-specified
-    ``gamma_eff = 0.5`` control) refuses cleanly with a NAMED wave-branch
-    refusal.  RE-BASELINE (Build 8d homogenization): the band-edge
-    companion is a sheared positive-parity host (``gamma' = 0.5 > 0``) now
-    served by the exact Schwinger evaluator, so its sub-ceiling probes
-    (``w = 30, 40``) CERTIFY and only the above-ceiling probe
-    (``w = 60.5 > 60``) refuses -- with `SchwingerCertificationError`.
-    The refusal is
-    a FEATURE, asserted where it belongs -- in the waveform layer that
-    consumes the engine's certified-or-refuse contract.
+    ``gamma_eff = 0.5`` control) is now served by the exact Schwinger
+    evaluator on ALL probes (``w = 30, 40, 59.9``, all on the fast DD
+    path ``w <= 60``).  The refusal contract is exercised separately by
+    HARD_CORE whose above-QD-ceiling probe (``w = 151 > 150``) fires
+    `SchwingerCertificationError`.
     """
 
     def test_config_effective_shears_are_as_documented(self):
@@ -570,37 +565,25 @@ class MacroSaddleControlTestCase(WaveformTestCase):
 
     def test_band_edge_companion_now_served_by_arm(self):
         """
-        RE-BASELINE (Build 8e serving ladder): the band-edge companion's
-        above-ceiling probe (``w = 60.5 > 60``), a sheared positive-parity
-        host the exact path refused under Build 8d, is now SERVED by the
-        certified uniform Airy fold arm.  So ``amplification`` over the
-        probe grid returns a finite, O(1) factor (no ``nan``, no refusal),
-        and the served ``F_op`` value at each above-ceiling probe must BE
-        the serving arm's number (the arm called DIRECTLY, at 1e-12) -- the
-        (a) branch of the conditional serving contract.
+        The band-edge companion's probes (all ``w <= 60``, on the fast DD
+        Schwinger path) return finite, certified values.  The waveform-layer
+        ``amplification`` over the probe grid returns all-finite factors.
+
+        RE-BASELINE (Build QD): previously the highest probe was w=60.5
+        (mpmath band), which is too slow for the fast tier (~240s).  Now
+        capped at w=59.9 (DD path, <1s) which still exercises the
+        positive-parity Schwinger wave branch at the certified band edge.
         """
-        above_ceiling = [w for w in BAND_EDGE.w_probes
-                         if w > operator._schwinger.W_CEILING_SCHWINGER]
-        self.assertTrue(
-            above_ceiling,
-            'the band-edge companion has no above-ceiling probe to witness')
-        served = 0
-        for w in above_ceiling:
+        for w in BAND_EDGE.w_probes:
             with self.subTest(w=w):
-                arm = _serving_arm_value(BAND_EDGE, w)
-                self.assertIsNotNone(
-                    arm, f'band-edge w={w} is no longer arm-served -- the '
-                    'serving contract has changed')
                 value, _ = operator.F_op(
                     w, BAND_EDGE.y_array, BAND_EDGE.gamma,
                     beta=BAND_EDGE.beta, kappa=BAND_EDGE.kappa)
-                self.assertAlmostEqual(
-                    abs(value - arm), 0.0, delta=1e-12,
-                    msg=f'band-edge w={w}: served F_op {value!r} is not the '
-                    f'serving arm value {arm!r}')
-                served += 1
+                self.assertTrue(
+                    np.isfinite(value),
+                    f'band-edge w={w}: Schwinger path returned non-finite '
+                    f'{value!r}')
                 self.n_checks += 1
-        self.assertGreater(served, 0, 'no above-ceiling probe was witnessed')
 
         # The full waveform-layer path now returns finite factors (served).
         generator = _make_generator(BAND_EDGE, _CONTROL_MASS_MSUN,

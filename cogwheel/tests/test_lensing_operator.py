@@ -417,26 +417,21 @@ class OperatorOracleTestCase(OperatorTestCase):
     def test_sheared_host_above_ceiling_refuses_schwinger(self):
         """
         NEW-contract pin (Build 8d homogenization): a sheared
-        positive-parity host (``gamma' > 0``) above the Schwinger ceiling
-        (``w > _schwinger.W_CEILING_SCHWINGER``) that is NOT
-        geometric-resolved is served by the exact 1D Schwinger evaluator,
-        which refuses by name with `SchwingerCertificationError` -- with
-        NO legacy fallback (the ``w > 60`` non-geometric corner refuses by
-        name until Build 8e serves it via a uniform arm).  This replaces
-        the old expectation that the 1F1 kernel error propagates here; the
-        kernel is no longer reached for a sheared host.
+        positive-parity host (``gamma' > 0``) above the QD Schwinger
+        ceiling (``w > _schwinger.W_CEILING_SCHWINGER_QD = 150``) that is
+        NOT geometric-resolved is served by the exact 1D Schwinger
+        evaluator, which refuses by name with
+        `SchwingerCertificationError` -- with NO legacy fallback.  The
+        mpmath extension (Build QD) serves ``60 < w <= 150``; only
+        ``w > 150`` is unconditionally refused.
 
         F028 re-point: both fixtures are small-radius on-axis sources
         (``|y| = 0.05`` and ``0.08``) that are genuinely hard-core --
         unresolved (``w*delta_min < RHO_END``) and declined by BOTH
         uniform arms -- so `select_branch` stays on the WAVE branch and
-        the named refusal fires.  The former ``y = [1.0, 0.0]`` fixture is
-        now resolved AND strongly cancelling (``L = 70 > L_MAX``,
-        ``w*delta_min >= RHO_END``), so since Build 8f WP1 the
-        authoritative gate serves it with the F028 geometric asymptote
-        instead of refusing.
+        the named refusal fires.
         """
-        w_above = _schwinger.W_CEILING_SCHWINGER + 10.0
+        w_above = _schwinger.W_CEILING_SCHWINGER_QD + 10.0
         for y in (np.array([0.05, 0.0]), np.array([0.08, 0.0])):
             with self.subTest(y=tuple(y)):
                 with self.assertRaises(
@@ -665,10 +660,13 @@ ONEHOME_SADDLE = tuple(  # (gamma, kappa, y, beta)
     for beta in (0.0, 0.7))
 
 #: ``w`` nodes: below the wave ceiling, astride it, and deep.  The
-#: above-ceiling nodes include both resolved and unresolved cases so both
-#: routing outcomes appear.  (Below the ceiling there is no branch
-#: decision at all, so those nodes are skipped by the routing sweep.)
-ONEHOME_WS = (5.0, 40.0, 59.0, 61.0, 70.0, 150.0, 500.0)
+#: above-QD-ceiling nodes (w > W_CEILING_SCHWINGER_QD = 150) include both
+#: resolved and unresolved cases so both routing outcomes appear.  (Below
+#: the QD ceiling the Schwinger evaluator serves every node — DD for w<=60,
+#: mpmath for 60<w<=150 — so there is no branch decision and those nodes
+#: are skipped by the routing sweep.)  Nodes in (60, 150] are excluded to
+#: avoid invoking the slow mpmath path in the fast-tier test.
+ONEHOME_WS = (5.0, 40.0, 59.0, 500.0, 1000.0)
 
 
 class BranchGateTestCase(OperatorTestCase):
@@ -868,8 +866,8 @@ class BranchGateTestCase(OperatorTestCase):
         n_geometric = n_wave = 0
         for gamma, kappa, y, beta in configs:
             for w in ONEHOME_WS:
-                if w <= _schwinger.W_CEILING_SCHWINGER:
-                    continue  # no branch decision below the ceiling
+                if w <= _schwinger.W_CEILING_SCHWINGER_QD:
+                    continue  # no branch decision below the QD ceiling
                 with self.subTest(parity=parity_name, gamma=gamma,
                                   kappa=kappa, y=y, beta=beta, w=w):
                     predicted = self._predicate_branch(w, y, gamma, beta,
@@ -916,7 +914,7 @@ class BranchGateTestCase(OperatorTestCase):
             matrix = geometry.macro_matrix(gamma, beta, kappa)
             delta_min = operator._real_delay_min_separation(source, matrix)
             for w in ONEHOME_WS:
-                if w <= _schwinger.W_CEILING_SCHWINGER:
+                if w <= _schwinger.W_CEILING_SCHWINGER_QD:
                     continue
                 two_leg = operator.select_branch(
                     w, delta_min,

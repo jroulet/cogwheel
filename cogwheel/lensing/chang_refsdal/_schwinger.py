@@ -106,7 +106,7 @@ from cogwheel.lensing.chang_refsdal._dd import (dd_add, dd_complex_add,
                                                 dd_mul, dd_sub)
 
 __all__ = ['f_schwinger', 'SchwingerCertificationError',
-           'W_CEILING_SCHWINGER']
+           'W_CEILING_SCHWINGER', 'W_CEILING_SCHWINGER_QD']
 
 #: ``2 * pi`` as a double-double, for the mod-2*pi phase reduction
 #: (identical limbs to `_hyp1f1._reduced_phase`; the low limb is twice
@@ -118,6 +118,13 @@ _TWO_PI_LO = 2.4492935982947064e-16
 #: Above it the ``e^{pi w/4}`` cancellation (F001-S) outruns the
 #: double-double mantissa and the evaluator refuses rather than return.
 W_CEILING_SCHWINGER = 60.0
+
+#: Performance ceiling for the mpmath (arbitrary-precision) quadrature path.
+#: ``dps = 30 + ceil(w)`` never runs out of PRECISION — the ceiling is
+#: RUNTIME: cost scales as ``O(w * dps^2)`` and exceeds the per-node
+#: training budget above ``w ~ 150``.  ``w > 150`` is an unconditional
+#: hard refuse from `f_schwinger`.
+W_CEILING_SCHWINGER_QD = 150.0
 
 #: Paired-rule relative-difference threshold on the RAW ``t``-integral.
 _CERTIFICATION_TOL = 3e-10
@@ -162,16 +169,22 @@ _CANCEL_SCALE = 0.25 * math.pi
 #: certified band.
 _U_MARGIN_CONST = 34.0
 
+# Lazy-loaded mpmath module reference.  The import fires only when the
+# QD path (w > W_CEILING_SCHWINGER) is actually invoked, so the core
+# lensing package incurs no mpmath import overhead.
+_mpmath = None
+
 
 class SchwingerCertificationError(RuntimeError):
     """
     The saddle wave branch could not be certified at this point.
 
-    Raised for the two refusals the evaluator owns: the unconditional
-    ``w > W_CEILING_SCHWINGER`` ceiling, and a paired-rule quadrature
-    relative difference exceeding `_CERTIFICATION_TOL` on the raw
-    ``t``-integral (e.g. approaching the ``|a| -> 0`` parity boundary,
-    where the ``t = 0`` branch point pinches the contour).
+    Raised for the refusals the evaluator owns: the unconditional
+    ``w > W_CEILING_SCHWINGER_QD`` (= 150) hard ceiling, and a
+    paired-rule quadrature relative difference exceeding
+    `_CERTIFICATION_TOL` -- on the raw ``t``-integral (DD path,
+    ``w <= 60``) or on the reconstructed ``F`` (mpmath path,
+    ``60 < w <= 150``).
     """
 
 
@@ -741,6 +754,138 @@ def _reconstruct(w: float, y_eig: np.ndarray, integral: complex) -> complex:
     return prefactor * exp_y * inv_gamma * integral
 
 
+def _f_schwinger_mpmath(w: float, y_eig: np.ndarray,
+                        gamma_prime: float) -> complex:
+    """
+    Evaluate the 1D Schwinger integral using mpmath arbitrary-precision
+    quadrature for ``w > W_CEILING_SCHWINGER``.
+
+    Follows the IDENTICAL IBP structure as the double-double path:
+    split at ``T = w (|a| + |b| + 2) / 2``, integration by parts on
+    ``[0, T]`` (removing the ``t^{s-1}`` singularity), direct tail on
+    ``[T, inf)``, both in ``u = ln t``.  The composite-panel breakpoints
+    are fed to `mpmath.quad` (tanh-sinh) at ``maxdegree=5`` per panel.
+
+    Certification is N/2N paired-rule on the RECONSTRUCTED ``F``:
+    if ``|F_N - F_2N| / |F_2N| > _CERTIFICATION_TOL``, raises
+    `SchwingerCertificationError`.
+
+    Parameters
+    ----------
+    w, y_eig, gamma_prime : same semantics as `f_schwinger`.
+
+    Returns
+    -------
+    complex
+        The pure-shear amplification ``F_{0, gamma'}(w, y_eig)``.
+
+    Raises
+    ------
+    SchwingerCertificationError
+        If the paired N/2N rules disagree above `_CERTIFICATION_TOL`.
+    ImportError
+        If mpmath is not installed.
+    """
+    global _mpmath
+    if _mpmath is None:
+        try:
+            import mpmath as _mpmath
+        except ImportError:
+            raise ImportError(
+                'mpmath is required for Schwinger evaluation at w > 60; '
+                'install with: pip install cogwheel[training]') from None
+
+    mp = _mpmath
+
+    # Set working precision: 30 base digits + ceil(w) for the
+    # e^{pi w/4} cancellation (each unit of w costs ~0.8 digits).
+    mp.mp.dps = 30 + int(math.ceil(w))
+
+    a = 1.0 - gamma_prime
+    b = 1.0 + gamma_prime
+
+    # mpmath constants for the kernel
+    w_ = mp.mpf(w)
+    s = mp.mpc(0, w_ / 2)
+    branch_a = mp.mpc(0, w_ * mp.mpf(a) / 2)
+    branch_b = mp.mpc(0, w_ * mp.mpf(b) / 2)
+    amp1 = (w_ * mp.mpf(y_eig[0])) ** 2 / 4
+    amp2 = (w_ * mp.mpf(y_eig[1])) ** 2 / 4
+
+    def kernel(t):
+        """h(t) = exp(-amp1/da - amp2/db) / (sqrt(da) * sqrt(db))."""
+        da = t - branch_a
+        db = t - branch_b
+        return (mp.exp(-amp1 / da - amp2 / db)
+                / (mp.sqrt(da) * mp.sqrt(db)))
+
+    def kernel_derivative(t):
+        """h'(t) = h(t) * G(t) with G = amp1/da^2 + amp2/db^2 - 1/2/da - 1/2/db."""
+        da = t - branch_a
+        db = t - branch_b
+        return kernel(t) * (amp1 / da ** 2 + amp2 / db ** 2
+                            - 1 / (2 * da) - 1 / (2 * db))
+
+    # IBP split point and u-range (identical formulas to the DD path)
+    t_cap = w_ * (abs(mp.mpf(a)) + abs(mp.mpf(b)) + 2) / 2
+    u_mid = mp.log(t_cap)
+    margin = mp.pi * w_ / 4 + _U_MARGIN_CONST
+
+    # Panel count: same formula as _panel_count
+    wavelength = 4 * mp.pi / w_
+    n_panels = max(
+        _MIN_PANELS,
+        int(mp.ceil(margin / (_WAVELENGTHS_PER_PANEL * wavelength))))
+
+    def _raw_integral_mp(n_side):
+        """Compute the raw t-integral with n_side panels per side."""
+        # Part A: Int_{u_lo}^{u_mid} t^{s+1} h'(t) du  (IBP piece)
+        u_lo = u_mid - margin
+        breakpoints_a = mp.linspace(u_lo, u_mid, n_side + 1)
+        part_a = mp.quad(
+            lambda u: (mp.exp((s + 1) * u)
+                       * kernel_derivative(mp.exp(u))),
+            breakpoints_a, maxdegree=5)
+
+        # Tail B: Int_{u_mid}^{u_hi} t^s h(t) du
+        u_hi = u_mid + margin
+        breakpoints_b = mp.linspace(u_mid, u_hi, n_side + 1)
+        tail = mp.quad(
+            lambda u: mp.exp(s * u) * kernel(mp.exp(u)),
+            breakpoints_b, maxdegree=5)
+
+        # Endpoint: T^s h(T) / s
+        endpoint = t_cap ** s * kernel(t_cap) / s
+
+        # IBP combination: endpoint - (1/s)*A + B
+        raw = endpoint - part_a / s + tail
+        return raw
+
+    # Paired N/2N certification
+    raw_n = _raw_integral_mp(n_panels)
+    raw_2n = _raw_integral_mp(2 * n_panels)
+
+    # Reconstruct F from each raw integral and compare
+    integral_n = complex(raw_n)
+    integral_2n = complex(raw_2n)
+    f_n = _reconstruct(w, y_eig, integral_n)
+    f_2n = _reconstruct(w, y_eig, integral_2n)
+
+    ref_mag = abs(f_2n)
+    diff_mag = abs(f_n - f_2n)
+
+    if ref_mag == 0.0 or diff_mag > _CERTIFICATION_TOL * ref_mag:
+        relative = math.inf if ref_mag == 0.0 else diff_mag / ref_mag
+        raise SchwingerCertificationError(
+            f'Saddle wave branch (mpmath QD path) refused at w = {w}, '
+            f'y_eig = ({y_eig[0]}, {y_eig[1]}), '
+            f'gamma_prime = {gamma_prime}: paired N/2N rules disagree by '
+            f'{relative:.3e} on the reconstructed F, above the '
+            f'{_CERTIFICATION_TOL:.0e} threshold.')
+
+    return f_2n
+
+
 def _dd_complex_magnitude(value: tuple[float, float, float, float]) -> float:
     """Return the float64 magnitude of a dd-complex ``(re_hi, re_lo, ...)``."""
     return math.hypot(value[0] + value[1], value[2] + value[3])
@@ -754,8 +899,10 @@ def f_schwinger(w: float, y_eig, gamma_prime: float) -> complex:
     ----------
     w : float
         Dimensionless lens frequency ``w = 8 pi G M_L (1 + z_L) f / c^3``,
-        strictly positive.  ``w > 60`` (`W_CEILING_SCHWINGER`) is an
-        unconditional hard refuse.
+        strictly positive.  ``w <= 60`` uses the double-double path;
+        ``60 < w <= 150`` dispatches to the mpmath arbitrary-precision
+        path; ``w > 150`` (`W_CEILING_SCHWINGER_QD`) is an unconditional
+        hard refuse.
     y_eig : array_like, shape (2,)
         Source position in the SHEAR EIGENFRAME (``e1`` = soft axis,
         ``e2`` = hard axis), dimensionless.
@@ -774,21 +921,23 @@ def f_schwinger(w: float, y_eig, gamma_prime: float) -> complex:
         If ``w <= 0``, ``gamma_prime <= 0``, or ``y_eig`` is not a finite
         shape-``(2,)`` position.
     SchwingerCertificationError
-        If ``w > W_CEILING_SCHWINGER``, or the paired ``N``/``2N``
-        Gauss-Legendre rules disagree by more than `_CERTIFICATION_TOL`
-        (relative) on the raw ``t``-integral.
+        If ``w > W_CEILING_SCHWINGER_QD``, or the paired ``N``/``2N``
+        rules disagree by more than `_CERTIFICATION_TOL` (relative):
+        on the raw ``t``-integral (DD path, ``w <= 60``) or on the
+        reconstructed ``F`` (mpmath path, ``60 < w <= 150``).
     """
     w = float(w)
     gamma_prime = float(gamma_prime)
     y_eig = np.asarray(y_eig, dtype=np.float64)
     _validate_inputs(w, y_eig, gamma_prime)
 
-    if w > W_CEILING_SCHWINGER:
+    if w > W_CEILING_SCHWINGER_QD:
         raise SchwingerCertificationError(
-            f'Saddle wave branch refused: w = {w} exceeds the certified '
-            f'ceiling W_CEILING_SCHWINGER = {W_CEILING_SCHWINGER} (the '
-            f'e^{{pi w/4}} cancellation outruns the double-double '
-            f'mantissa above it).')
+            f'Saddle wave branch refused: w = {w} exceeds the QD '
+            f'ceiling W_CEILING_SCHWINGER_QD = {W_CEILING_SCHWINGER_QD} '
+            f'(mpmath runtime O(w * dps^2) exceeds training budget).')
+    if w > W_CEILING_SCHWINGER:
+        return _f_schwinger_mpmath(w, y_eig, gamma_prime)
 
     a = 1.0 - gamma_prime
     b = 1.0 + gamma_prime

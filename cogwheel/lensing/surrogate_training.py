@@ -81,9 +81,10 @@ DEFAULT_F_LO_HZ = 20.0
 DEFAULT_F_HI_HZ = 1024.0
 
 #: Per-parity ``w`` ceilings with margin below the engine's hard limits
-#: (operator wave branch ``w <= 500``; saddle Schwinger ``w <= 60``).
+#: (operator wave branch ``w <= 500``; saddle Schwinger QD ``w <= 150``).
 _POSITIVE_W_CEILING = 480.0
-_SADDLE_W_CEILING = 58.0
+# 2 below W_CEILING_SCHWINGER_QD (150); the mpmath path handles w ∈ (60, 150].
+_SADDLE_W_CEILING = 148.0
 
 #: Tube shell sizing as dimensionless fractions of the LOCAL curvature radius
 #: ``R_c``.  The absolute tube band ``[eta_floor, eta_max]`` is computed

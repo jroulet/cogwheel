@@ -12,6 +12,25 @@
 
 (last consolidated by Dreamer on 2026-08-05)
 
+- 2026-08-XX: brief_schwinger_qd — extend Schwinger evaluator above w=60 via
+  mpmath quadrature. TWO WPs: (1) engine extension in _schwinger.py (add
+  _f_schwinger_mpmath, paired N/2N cert, W_CEILING_SCHWINGER_QD=150, lazy
+  mpmath import), (2) training pipeline wiring in operator.py + surrogate_training.py
+  (raise _SADDLE_W_CEILING, adjust _saddle_grid/_positive_parity_grid routing to
+  handle w∈(60,150] via sequential f_schwinger calls). Professor confirmed:
+  dps=30+ceil(w) sufficient, practical ceiling ~150 (runtime-limited), paired N/2N
+  cert recommended, no mathematical ill-posedness at high w. Simplifier: split into
+  two WPs (engine vs training pipeline), lazy import pattern, must measure ceiling
+  empirically (hardcoding 150 analytically is borderline — formula ceiling ~139).
+
+- 2026-08-XX: brief_saddle_born_carrier.md is a STALE handoff — all five in-scope
+  items shipped in commits 31ee133 (2026-07-28, Born carrier+band split+saddle) and
+  65eebcb (2026-08-02, C8 caustic-relative admission replacing gamma fences). The
+  saddle fence (1.0502342 < gamma < 3) was added then architecturally superseded by
+  per-point `caustic_rho > 1` which is physically exact (Professor confirmed). All
+  53 tests pass in test_lensing_born.py including comprehensive saddle test classes.
+  Escalated as zero-WP plan.
+
 - 2026-08-XX: brief_analytic_cusp_serving.md is a STALE handoff — build 1c already
   shipped in commit b9c3ed6 (2026-07-30), ancestor of HEAD. _cusp_vertex uses brentq
   on analytic derivatives (no FD/scan/golden); caustic_third_derivative exists with
@@ -48,6 +67,17 @@
   based reach is sufficient (R_min inversion through geometry), but brief explicitly asks for
   a comparison script. Compromise: write script that computes reach analytically + verifies
   ~20 boundary points vs F_op. One merged WP (generate table + measure + set constant).
+
+- 2026-08-XX: INS-1-005 triage (schwinger_qd build): CODER_FIX. ONEHOME_WS=(5,40,59,61,70,150,500) includes w=61,70,150 in (60,150] → mpmath path → ~120s/call for wave nodes. _observed_branch catches SchwingerCertificationError to identify wave; with mpmath succeeding instead, F_op actually evaluates (correctly, but slowly). Fix: update ONEHOME_WS to replace {61,70,150} with values that stay ≤60 or ≥W_CEILING_SCHWINGER_QD+epsilon (>150) so wave nodes above the old ceiling still raise SchwingerCertificationError rather than invoking mpmath. w=500 already does this (>150). Equivalent for XOR_BAND_LS: top is L=59.4, so max w=59.4/0.9=66—within mpmath band. Fix: cap XOR_BAND_LS top at L=54 (w=60) or use CERT_SQRT_S such that max w ≤ 60, OR mock the mpmath path. Routing-purpose option (b) is Test-Dev scope. Best fix: adjust ONEHOME_WS to remove 61,70,150 or replace with w=500+ alternatives that stay above W_CEILING_SCHWINGER_QD; and adjust XOR_BAND_LS top to stay ≤ W_CEILING_SCHWINGER.
+
+- 2026-08-XX: INS-2-001/INS-1-002 triage (schwinger_qd build): CODER_FIX (both).
+  BAND_EDGE.w_probes=(30.0,40.0,60.5) routes w=60.5 through slow mpmath (~240s
+  F_op + ~120s diagnostic_scatter = ~360-480s), busting the 5-min fast-tier ceiling.
+  Fix: change 60.5→59.9 in the BAND_EDGE _LensConfig constant and update the
+  fixture docstring (remove the "w=60.5 served by mpmath" sentence). w=59.9 stays
+  on the DD path (<1s), same wave branch, same isfinite assertions pass identically.
+  Same pattern as INS-1-005 (ONEHOME_WS/XOR_BAND_LS). INS-1-002 is fully subsumed
+  by INS-2-001 — single fix resolves both.
 
 - 2026-08-XX: brief_interlobe_corridor — Pure measurement script (no code changes).
   Task: write scripts/probe_interlobe_corridor.py that computes corridor geometry for

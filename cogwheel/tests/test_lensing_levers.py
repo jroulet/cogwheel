@@ -103,8 +103,8 @@ NORM_UNDERFLOW_FLOOR = 1e-6
 NORM_ABS_TOL = 1e-11
 
 #: Dimensionless frequencies spanning the exact-wave band (``w <= 60``,
-#: the parallel batch), the ceiling, and the arm/refusal branch (61).
-W_SWEEP = (5.0, 18.0, 40.0, 55.0, 59.0, 61.0)
+#: the parallel batch), the DD ceiling, the mpmath band, and refusal (151).
+W_SWEEP = (5.0, 18.0, 40.0, 55.0, 59.0, 80.0, 151.0)
 
 #: Positive-parity shears (``1 - kappa > |gamma|`` at ``kappa = 0``);
 #: 0.5 is the cancellation band the Professor flagged.
@@ -1358,7 +1358,7 @@ class LMaxEnforcementBracketTestCase(_LeverTestCase):
                 self.record_comparison()
         with self.assertRaises(_schwinger.SchwingerCertificationError):
             _schwinger.f_schwinger(
-                LEVER5_KERNEL_CEILING + 1.0, source, gamma)
+                _schwinger.W_CEILING_SCHWINGER_QD + 1.0, source, gamma)
         self.record_comparison()
 
     def test_diagnostic_rel_err_vs_L(self) -> None:

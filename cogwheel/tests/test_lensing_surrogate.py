@@ -121,7 +121,8 @@ from cogwheel.lensing.chang_refsdal import operator as operator_module
 from cogwheel.lensing.chang_refsdal import _schwinger as schwinger_module
 from cogwheel.lensing.chang_refsdal.operator import F_op, F_op_grid
 from cogwheel.lensing.chang_refsdal._schwinger import (
-    SchwingerCertificationError, W_CEILING_SCHWINGER)
+    SchwingerCertificationError, W_CEILING_SCHWINGER,
+    W_CEILING_SCHWINGER_QD)
 from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing import ppgo_map
 from cogwheel.lensing.surrogate import (
@@ -356,10 +357,11 @@ FLIP_CONFIGS = (
     ('sub-critical', dict(gamma=0.35, y1=0.50, y2=0.30)),
 )
 
-#: Positive-parity gamma' > 0 config driven PAST the Schwinger arithmetic
-#: ceiling (``w > W_CEILING_SCHWINGER = 60``): the production path must
-#: refuse with a NAMED `SchwingerCertificationError`, never a silent nan.
-FLIP_REFUSAL_W = 68.0
+#: Positive-parity gamma' > 0 config driven PAST the Schwinger QD
+#: ceiling (``w > W_CEILING_SCHWINGER_QD = 150``): the production path
+#: must refuse with a NAMED `SchwingerCertificationError`, never a
+#: silent nan.  (The mpmath extension serves 60 < w <= 150.)
+FLIP_REFUSAL_W = 160.0
 FLIP_REFUSAL_CONFIG = dict(gamma=0.20, y1=0.20, y2=0.00)
 
 #: Shear-free point lens (``gamma == 0`` exactly -> ``gamma' == 0``): the
@@ -1415,8 +1417,8 @@ class CrownContractFlipWitnessTestCase(SurrogateTestCase):
         fallback."""
         cfg = FLIP_REFUSAL_CONFIG
         y = np.array([cfg['y1'], cfg['y2']])
-        self.assertGreater(FLIP_REFUSAL_W, W_CEILING_SCHWINGER,
-                           'the refusal probe must sit above the ceiling')
+        self.assertGreater(FLIP_REFUSAL_W, W_CEILING_SCHWINGER_QD,
+                           'the refusal probe must sit above the QD ceiling')
         self.n_checks += 1
         with self.assertRaises(SchwingerCertificationError):
             F_op(FLIP_REFUSAL_W, y, cfg['gamma'], beta=0.0, kappa=0.0)

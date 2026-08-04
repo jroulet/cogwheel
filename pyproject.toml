@@ -54,6 +54,9 @@ dev = [
 full = [
   "pymultinest",
 ]
+training = [
+  "mpmath",
+]
 docs = [
   "sphinx",
   "numpydoc",

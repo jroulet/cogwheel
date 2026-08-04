@@ -1,72 +1,92 @@
 # Inspector Short-Term Observations
 
-## 2025-08-03: Build ppgo_interior_handoff review (RE-REVIEW #2)
+## 2025-08-03: Build schwinger_qd review (third pass — final)
 
 ### Scope
-WP1: Add a fold-ppGO serve path for interior draws (rho < 1) above the
-InteriorWedgeChart w-ceiling. When the chart declines (w > DD cap) and
-the fold pair's Airy parameter ξ_min >= 4.0 AND the per-pair uniform
-error estimate <= CERTIFICATION_BAR (1e-4), serve via fold_ppgo_correction
-instead of falling through to exact quadrature.
+WP1: Add _f_schwinger_mpmath() in _schwinger.py for w > 60 (up to 150)
+with paired N/2N certification, lazy mpmath import.
+WP2: Raise _SADDLE_W_CEILING from 58→148 in surrogate_training.py;
+update operator.py routing to use W_CEILING_SCHWINGER_QD as the
+geometric/arm threshold.
 
-Files changed:
-- cogwheel/lensing/likelihood.py (new _XI_FOLD_THRESHOLD=4.0, new
-  fold-ppGO handoff block inside _surrogate_coefficients after the
-  `rho <= 1.0 or not born_chart.covers(...)` condition)
-- cogwheel/lensing/surrogate_census.py (new _XI_FOLD_THRESHOLD=4.0,
-  new ppgo_fold census classification block between select_chart and
-  classify_fallthrough)
-- cogwheel/tests/test_lensing_fold_ppgo_handoff.py (new test file,
-  17 tests: 14 pass, 3 skipped behind COGWHEEL_TRAIN_TIER)
+Files changed (production):
+- cogwheel/lensing/chang_refsdal/_schwinger.py (new W_CEILING_SCHWINGER_QD=150,
+  new _f_schwinger_mpmath, updated f_schwinger dispatch)
+- cogwheel/lensing/chang_refsdal/operator.py (routing pivot moved from
+  W_CEILING_SCHWINGER to W_CEILING_SCHWINGER_QD, new mpmath sequential batch)
+- cogwheel/lensing/surrogate_training.py (_SADDLE_W_CEILING 58→148)
+- pyproject.toml (new [training] extra with mpmath)
 
-### Findings
-- **PASS** — Implementation is correct and complete.
-- Gate structure is conservative: xi coarse gate → fine error-estimate
-  gate → serve. Multiple structural refusals via _merging_fold_pair
-  returning None, delta_tau <= 0, images not found, error_est > bar.
-- Reconstruction mirrors the Born rung exactly: demodulate, extract
-  envelope, reconstruct_farfield with FARFIELD_KERNEL_SUM.
-- fold_ppgo_correction returns in ABSOLUTE frame; correctly demodulated
-  by exp(-1j*dense_w*geom.t_min) to min-relative frame.
-- All exception types (LensDomainError, ValueError, ZeroDivisionError)
-  are caught, matching the inspector knowledge pattern.
-- beta=0 and kappa=0 guaranteed by upstream guards in _surrogate_coefficients.
-- Census code correctly restricts to image_count==4 (astroid interior
-  or saddle lobe interior — physically correct for fold pairs).
-- _XI_FOLD_THRESHOLD duplicated between likelihood.py and census.py
-  with explicit mirror comment — follows established DD_PRODUCT_MARGIN
-  pattern.
-- SPEC.md does NOT describe this new fold-ppGO interior handoff serve
-  path (it says draws above the DD ceiling fall through to exact). This
-  is expected for a new feature — Librarian scope to update.
-- No DATA_CONTRACTS impact (runtime serve decision, no new artifact).
-- All existing test suites pass (test_lensing_born_residual_wiring 34/34,
-  test_lensing_ghost_gate 18/18, test_lensing_surrogate 69/69,
-  test_lensing_surrogate_census 14 pass 13 skip, test_lensing_ppgo_bandsplit
-  62 pass 4 skip, new test 14 pass 3 skip).
-- Census MECE invariant preserved: ppgo_fold records have served=True,
-  so they don't enter the fallthrough bucket.
-- New test suite has good coverage: accuracy vs exact engine (skipped
-  in fast tier), xi gate refusal geometry (fast), round-trip identity
-  (fast), self-falsification (fast), error-estimate fine gate (fast),
-  census integration (fast), default-path-unaffected (fast).
-- `rho is not None` check at line 1688 is defensive-correct (rho cannot
-  be None at that point since the except block returns early). Harmless.
-- Saddle-lobe interior (gamma > 1) case: fold-ppGO correctly falls through
-  because _merging_fold_pair returns None when no (Morse 0, Morse 1)
-  adjacent pair exists. For saddle-lobe configs that DO have a fold pair,
-  the correction is valid and will serve correctly.
-- Phase convention verified: fold_ppgo_correction returns absolute-frame
-  total, demodulated to min-relative by exp(-1j*w*t_min), envelope
-  extracted by exp(+1j*w*t_min), fed to reconstruct_farfield which
-  internally re-modulates via _frame_phase. Consistent with the Born rung.
-- External callers (Born rung and fold-ppGO block) both use raw `w*t_min`
-  for pre-call demodulation, NOT _frame_phase. This is consistent — the
-  _frame_phase helper is internal to reconstruct_farfield.
+Files changed (tests):
+- cogwheel/tests/test_lensing_schwinger.py (new test classes, updated fixtures)
+- cogwheel/tests/test_lensing_operator.py (ONEHOME_WS updated, ceiling references)
+- cogwheel/tests/test_lensing_batched_operator.py (XOR_BAND_LS capped, XOR_REFUSING_W)
+- cogwheel/tests/test_lensing_waveform.py (BAND_EDGE w→59.9, HARD_CORE w→151)
+- cogwheel/tests/test_lensing_surrogate.py (FLIP_REFUSAL_W→160)
+- cogwheel/tests/test_lensing_airy_fold.py (_ABOVE_CEILING_W→160, _W_CEILING→QD,
+  geometric node w→200)
 
-### No new bug patterns discovered.
-### Open issues carried forward:
-- INS-1-001: SPEC.md does not describe the fold-ppGO interior handoff
-  serve path. Librarian scope, trivial doc debt, not a code defect.
-  STILL OPEN — SPEC.md has zero mentions of fold_ppgo/ppgo_fold/interior
-  handoff (confirmed by grep).
+### Previous findings RESOLVED
+- INS-1-002: RESOLVED. BAND_EDGE w_probes now (30, 40, 59.9), all DD path.
+  HARD_CORE w=151 correctly refuses. test_lensing_waveform.py: 26 PASS, 8.83s.
+- INS-2-001: RESOLVED. Same fix; file runs in 8.83s, well below 5-min ceiling.
+- INS-2-002: STILL OPEN (Librarian scope). SPEC.md not updated for QD ceiling.
+
+### NEW FINDINGS
+
+#### BUG: test_lensing_airy_fold.py — 2 tests FAIL (INS-3-001)
+`UniformArmFallThroughTestCase::test_corrupted_certificate_falls_through_to_named_refusal`
+and `test_nan_primitive_falls_through_to_named_refusal` both FAIL.
+These tests use `_CUSP_NODE_W = 80.0`. Previously w=80 > 60 (old ceiling)
+meant the Schwinger evaluator refused after both arms declined. Now w=80
+is in the mpmath band (60 < w <= 150) and evaluates successfully.
+The tests expect SchwingerCertificationError but get a successful result.
+File was modified in this build (updating other constants) but _CUSP_NODE_W
+was missed.
+FIX: Either change _CUSP_NODE_W to 151.0 (above QD ceiling), OR
+separate the fixture for the fall-through tests from the arm-serve tests
+(since those at w=80 exercise the arm correctly at w<150).
+
+#### BUG: test_lensing_levers.py — 1 test FAILS (INS-3-002)
+`LMaxEnforcementBracketTestCase::test_wave_branch_serves_below_ceiling_refuses_above`
+FAILS. Test uses `LEVER5_KERNEL_CEILING = _schwinger.W_CEILING_SCHWINGER = 60`
+and expects refusal at `LEVER5_KERNEL_CEILING + 1 = 61`. But w=61 is now in
+the mpmath band and evaluates successfully. File was NOT modified in this
+build but the production change broke it.
+FIX: Change the above-ceiling probe from `LEVER5_KERNEL_CEILING + 1.0` to
+`_schwinger.W_CEILING_SCHWINGER_QD + 1.0` (= 151.0).
+
+#### TRIVIAL: SPEC.md not updated for W_CEILING_SCHWINGER_QD (INS-2-002, carried)
+SPEC.md says: "oracle-certified to the 1e-10 bar (F005) up to its ceiling
+w <= W_CEILING_SCHWINGER = 60, above which it refuses by name". This is
+now incorrect — f_schwinger evaluates up to w=150 via mpmath. The spec
+should describe the two-tier ceiling (DD=60, QD=150). Librarian scope.
+
+### Math and correctness verified:
+- IBP structure in _f_schwinger_mpmath matches _raw_t_integral_core exactly
+- Certification on reconstructed F (post-prefactor) is deliberate and safe
+  for mpmath precision (dps = 30 + ceil(w) >> needed digits)
+- Mass-sheet phase formula in mpmath batch identical to DD batch
+- Refusal ordering (lowest-index-first) preserved across DD + mpmath + ceiling
+- DD path byte-identity confirmed by DdPathByteIdentityTestCase (golden hex)
+- Lazy import pattern structurally verified by MpmathLazyImportTestCase
+- Operator routing: 3-way split (DD w<=60 / mpmath 60<w<=150 / above-QD w>150)
+  is correct in both _saddle_grid and _positive_parity_grid
+
+### Passing test files:
+- test_lensing_schwinger.py: 66 passed, 3 skipped, 229s
+- test_lensing_waveform.py: 26 passed, 8.83s
+- test_lensing_operator.py: 15 passed, 50s
+- test_lensing_batched_operator.py: 14 passed, 83s
+- test_lensing_surrogate.py: 69 passed, 125s
+- test_lensing_saddle_geometry.py: 30 passed, 7s
+- test_lensing_chang_refsdal_ghost_frame.py: 12 passed, 4s
+
+### Failing test files:
+- test_lensing_airy_fold.py: 2 FAIL (INS-3-001)
+- test_lensing_levers.py: 1 FAIL (INS-3-002)
+
+### Open issues:
+- INS-3-001: test_lensing_airy_fold.py 2 test failures (bug)
+- INS-3-002: test_lensing_levers.py 1 test failure (bug)
+- INS-2-002: SPEC.md not updated (Librarian scope, trivial)

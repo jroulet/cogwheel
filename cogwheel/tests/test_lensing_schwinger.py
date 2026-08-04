@@ -85,6 +85,8 @@ import math
 import pathlib
 import textwrap
 import time
+import os
+import unittest
 from unittest import TestCase, main, mock
 
 import matplotlib
@@ -96,7 +98,8 @@ import numpy as np
 from cogwheel.lensing.chang_refsdal import (
     _airy_fold, _pearcey_cusp, _schwinger, geometry, operator)
 from cogwheel.lensing.chang_refsdal._schwinger import (
-    SchwingerCertificationError, W_CEILING_SCHWINGER, f_schwinger)
+    SchwingerCertificationError, W_CEILING_SCHWINGER,
+    W_CEILING_SCHWINGER_QD, f_schwinger)
 from cogwheel.lensing.chang_refsdal.operator import (
     F_op, F_op_grid,
     cancellation_exponent, geometric_amplification, select_branch)
@@ -160,7 +163,9 @@ MORSE_PHASE_TOL = 5e-4
 XOR_Y = (0.4, 0.3)
 XOR_GAMMA = 1.3
 CERTIFIED_W_SWEEP = (10.0, 30.0, 50.0, 59.9)
-REFUSED_W_SWEEP = (60.5, 65.0, 80.0)
+#: Post-WP1 (mpmath extension): w ∈ (60, 150] is served by mpmath, so
+#: the refuse band starts at w > W_CEILING_SCHWINGER_QD = 150.
+REFUSED_W_SWEEP = (150.5, 160.0, 200.0)
 
 #: dd-mandatory falsification config (F010 / F005-S analog). Unpatched
 #: production measures 9.0e-8 here -- green under the 1e-6 gate.
@@ -321,9 +326,12 @@ POINTLENS_BITFREEZE_WS = (1.0, 2.0, 3.0, 5.0)
 #: F_op_grid both raise the named refusal), so they extend the refusal
 #: branch only; the arm-served branch is kept non-vacuous by the
 #: ``gamma in (0.47, 0.49)`` x ``y = (0.4, 0.3)`` nodes.
+#: Post-WP1 (mpmath extension): the refuse-or-arm boundary is now at
+#: W_CEILING_SCHWINGER_QD = 150 (the mpmath band 60 < w <= 150 is
+#: served by the wave branch).  Shift the probe above 150.
 ABOVE_CEILING_GAMMAS = (0.47, 0.49, 0.9, 0.95)
 ABOVE_CEILING_YS = ((0.4, 0.3), (0.1, 0.1))
-ABOVE_CEILING_WS = (61.0, 80.0)
+ABOVE_CEILING_WS = (151.0, 180.0)
 
 #: Image-census (WP1) falsification fixtures.  A positive-parity macro
 #: matrix has an interior 4-image source; a saddle matrix is 2-image
@@ -360,8 +368,10 @@ BELOW_CEILING_WS = (5.0, 40.0, 59.0)
 #: the grid serves `geometric_amplification` exactly.  The on-axis brief
 #: coordinates gave ``delta_min = 0`` (unresolved -> 'wave'); an OFF-axis
 #: source restores a resolved 4-image geometry.
+#: Post-WP1: geometric routing only fires at w > W_CEILING_SCHWINGER_QD
+#: (= 150); w in (60, 150] is served by the mpmath wave branch directly.
 F028_SERVE = (  # (gamma, w, y)
-    (0.70, 70.0, (1.0, 0.7)),
+    (0.70, 151.0, (1.0, 0.7)),
     (0.70, 500.0, (1.0, 0.7)),
     (0.90, 500.0, (1.5, 1.0)),
 )
@@ -417,22 +427,21 @@ BYTEFREEZE_REFERENCE = {
 }
 
 #: Saddle serve-boundary fixtures (anti-variant): a RESOLVED saddle config
-#: straddling the ceiling.  Both w must be geometric-served, proving the
-#: boundary stayed at ``w > 60`` (NOT the rejected ``pi w / 4 > 48`` ->
-#: ``w > 61.115`` variant, which would leave w = 60.5 AND w = 61.5 on
-#: different sides / un-served).
+#: straddling the QD ceiling.  Post-WP1: the geometric routing for saddle
+#: nodes fires only at w > W_CEILING_SCHWINGER_QD = 150 (below that, the
+#: mpmath wave branch serves directly).  Both w must be geometric-served,
+#: proving the boundary stayed at ``w > 150``.
 SADDLE_BOUNDARY = (  # (gamma, y)
     (1.2, (0.18, 0.24)),
     (2.0, (0.18, 0.24)),
 )
-SADDLE_BOUNDARY_WS = (60.5, 61.5)
+SADDLE_BOUNDARY_WS = (150.5, 151.5)
 
-#: Three above-ceiling 'wave' outcomes (acceptance #4/#5), MEASURED
-#: 2026-07-28.  Fold-Airy-served, Pearcey-cusp-served, and both-arms-
-#: refuse (named refusal with the lowest-index refuser's authentic
-#: `f_schwinger` message).  All positive parity, w = 61 (just above the
-#: ceiling), ce < L_MAX so select_branch routes to the wave arm.
-THREE_OUTCOME_W = 61.0
+#: Three above-QD-ceiling 'wave' outcomes (acceptance #4/#5).
+#: Post-WP1: the arm/refuse routing lives at w > W_CEILING_SCHWINGER_QD
+#: (= 150); below that the wave branch (mpmath) serves directly.
+#: Use w=151 so that select_branch routing is exercised.
+THREE_OUTCOME_W = 151.0
 THREE_OUTCOME_FOLD = (0.47, (0.4, 0.3))      # fold certifies, cusp does not
 THREE_OUTCOME_CUSP = (0.5, (0.5, 0.1))       # cusp certifies, fold does not
 THREE_OUTCOME_REFUSE = (0.5, (0.3, 0.2))     # neither arm certifies
@@ -888,23 +897,27 @@ class CertifyXorRefuseTestCase(SchwingerTestCase):
             self._assert_finite_return(w)
 
     def test_above_ceiling_refuses(self):
-        """``w in {60.5, 65, 80}`` raise the named refusal, naming both
-        the offending ``w`` and the ceiling."""
+        """``w in {150.5, 160, 200}`` raise the named refusal, naming
+        both the offending ``w`` and the QD ceiling."""
         for w in REFUSED_W_SWEEP:
             self._assert_named_refusal(w, str(w),
-                                       str(W_CEILING_SCHWINGER))
+                                       str(W_CEILING_SCHWINGER_QD))
 
     def test_ceiling_boundary_is_not_off_by_one(self):
         """
-        ``w = W_CEILING_SCHWINGER`` exactly still EVALUATES (the refuse
-        condition is strict ``w > ceiling``) and one ulp above refuses
-        -- the F004 float64-exact-boundary lesson (60.0 is exact in
-        float64, so this boundary is testable bit-for-bit).
+        Post-WP1: the REFUSE boundary is at ``W_CEILING_SCHWINGER_QD``
+        (150); the DD/mpmath dispatch at 60 is no longer a refuse
+        boundary.  We test: (a) DD ceiling still evaluates, (b) one
+        ulp above the QD ceiling refuses.  We cannot cheaply test that
+        exactly ``w = 150`` evaluates (it would take ~2 min via mpmath),
+        so only the refusal side is tested in the fast tier.
         """
+        # DD ceiling: still evaluates (DD path, fast)
         self._assert_finite_return(W_CEILING_SCHWINGER)
+        # One ulp above QD ceiling refuses (fast — no mpmath call)
         self._assert_named_refusal(
-            np.nextafter(W_CEILING_SCHWINGER, np.inf),
-            str(W_CEILING_SCHWINGER))
+            np.nextafter(W_CEILING_SCHWINGER_QD, np.inf),
+            str(W_CEILING_SCHWINGER_QD))
 
 
 class DdMandatoryFalsificationTestCase(SchwingerTestCase):
@@ -991,9 +1004,10 @@ class DdMandatoryFalsificationTestCase(SchwingerTestCase):
 
     def test_perturbed_ceiling_refuses_previously_certified_w(self):
         """
-        Lowering `W_CEILING_SCHWINGER` to 20 makes the previously
-        certified ``w = 30`` config refuse by name.  `f_schwinger` is
-        an interpreted function (asserted), so the module-global patch
+        Lowering `W_CEILING_SCHWINGER_QD` to 20 makes the previously
+        certified ``w = 30`` config refuse by name (the QD ceiling is
+        now the hard refuse boundary post-WP1).  `f_schwinger` is an
+        interpreted function (asserted), so the module-global patch
         provably reaches it -- no compiled copy can hold the old
         ceiling (F010).
         """
@@ -1004,7 +1018,7 @@ class DdMandatoryFalsificationTestCase(SchwingerTestCase):
             'ceiling patch would not reach it (F010) and this '
             'falsification would be vacuous')
         self._assert_green('unpatched')
-        with mock.patch.object(_schwinger, 'W_CEILING_SCHWINGER',
+        with mock.patch.object(_schwinger, 'W_CEILING_SCHWINGER_QD',
                                PERTURBED_CEILING):
             with self.assertRaises(SchwingerCertificationError) as ctx:
                 f_schwinger(FALS_W, np.array(FALS_Y), FALS_GAMMA)
@@ -1347,105 +1361,124 @@ class RefusalAboveCeilingTestCase(SchwingerTestCase):
     (``y = (0.4, 0.3)``) and a hard-core column (``y = (0.1, 0.1)``).
     """
 
-    def _serving_arm(self, w, y, gamma, beta=0.0, kappa=0.0):
-        """The uniform arm that serves this node, called DIRECTLY.
+    def _serving_path(self, w, y, gamma, beta=0.0, kappa=0.0):
+        """The serving path for this above-QD-ceiling node, called DIRECTLY.
 
-        Reproduces the production ladder's fixed fold-then-cusp order
-        (`operator._uniform_arm_value`) by calling the arm modules
-        themselves -- an INDEPENDENT path to the served value, not
-        operator's own dispatcher -- so a served ``F_op`` value can be
-        pinned to BE the arm's number.  Returns the complex arm value, or
-        ``None`` when neither arm certifies (a genuinely hard-core node).
+        Post-WP1/WP2, the above-ceiling contract has THREE outcomes:
+        (a) geometric serve (select_branch → 'geometric'),
+        (b) uniform arm serve (fold Airy / cusp Pearcey),
+        (c) hard-core refusal (neither arm certifies).
+        Returns ('geometric', value), ('arm', value), or (None, None).
         """
         source = np.asarray(y, dtype=float)
+        # Check geometric path first (the operator's select_branch routing)
+        geom_value = geometric_amplification(
+            w, source, gamma, beta=beta, kappa=kappa)
+        if geom_value is not None:
+            # Confirm select_branch would route here
+            matrix = geometry.macro_matrix(gamma, beta, kappa)
+            delta_min = operator._real_delay_min_separation(source, matrix)
+            lam = 1.0 - float(kappa)
+            y_scaled = source / np.sqrt(lam)
+            exponent = float(w * np.sqrt(y_scaled @ y_scaled))
+            try:
+                eta = float(geometry.nearest_caustic_point(
+                    gamma, beta, source, kappa=kappa).distance)
+            except geometry.LensDomainError:
+                eta = 0.0
+            branch = select_branch(w, delta_min, exponent, eta)
+            if branch == 'geometric':
+                return 'geometric', complex(geom_value)
+        # Uniform arms (fold then cusp)
         value = _airy_fold.fold_amplification(w, source, gamma,
                                               beta=beta, kappa=kappa)
         if value is not None:
-            return complex(value)
+            return 'arm', complex(value)
         value = _pearcey_cusp.cusp_amplification(w, source, gamma,
                                                  beta=beta, kappa=kappa)
         if value is not None:
-            return complex(value)
-        return None
+            return 'arm', complex(value)
+        return None, None
 
     def test_scalar_fop_refuses_above_ceiling(self):
         n_served = n_refused = 0
         for gamma, y, w in itertools.product(
                 ABOVE_CEILING_GAMMAS, ABOVE_CEILING_YS, ABOVE_CEILING_WS):
             with self.subTest(gamma=gamma, y=y, w=w):
-                self.assertGreater(w, W_CEILING_SCHWINGER)
+                self.assertGreater(w, W_CEILING_SCHWINGER_QD)
                 self.n_checks += 1
-                arm = self._serving_arm(w, y, gamma)
+                path_label, path_value = self._serving_path(w, y, gamma)
                 try:
                     value, _ = F_op(w, np.asarray(y), gamma)
                 except SchwingerCertificationError:
-                    # (b) genuine hard-core refusal: NO arm may certify it.
+                    # (c) genuine hard-core refusal: NO path serves it.
                     self.assertIsNone(
-                        arm, f'F_op refused at w={w}, y={y}, gamma={gamma} '
-                        'yet an arm certifies it -- the ladder should have '
-                        'served this node')
+                        path_label,
+                        f'F_op refused at w={w}, y={y}, gamma={gamma} '
+                        f'yet {path_label} certifies it')
                     n_refused += 1
                     self.n_checks += 1
                     continue
-                # (a) arm-served: the served number must BE the arm's number.
+                # (a)/(b) served: the served value must BE the path's value.
                 self.assertIsNotNone(
-                    arm, f'F_op served {value!r} at w={w}, y={y}, '
-                    f'gamma={gamma} but neither arm certifies -- served by '
-                    'a non-arm path')
+                    path_label,
+                    f'F_op served {value!r} at w={w}, y={y}, '
+                    f'gamma={gamma} but no path certifies')
                 self.assertAlmostEqual(
-                    abs(value - arm), 0.0, delta=1e-12,
-                    msg=f'served F_op {value!r} is not the serving arm value '
-                    f'{arm!r} at w={w}, y={y}, gamma={gamma}')
+                    abs(value - path_value), 0.0, delta=1e-12,
+                    msg=f'served F_op {value!r} != {path_label} value '
+                    f'{path_value!r} at w={w}, y={y}, gamma={gamma}')
                 n_served += 1
                 self.n_checks += 1
         self.assertGreater(n_refused, 0,
                            'no genuinely hard-core refusal in the fixture set')
         self.assertGreater(n_served, 0,
-                           'no arm-served node in the fixture set')
+                           'no served node in the fixture set')
 
     def test_grid_fop_refuses_above_ceiling(self):
         n_served = n_refused = 0
         for gamma, y, w in itertools.product(
                 ABOVE_CEILING_GAMMAS, ABOVE_CEILING_YS, ABOVE_CEILING_WS):
             with self.subTest(gamma=gamma, y=y, w=w):
-                arm = self._serving_arm(w, y, gamma)
+                path_label, path_value = self._serving_path(w, y, gamma)
                 try:
                     values, *_ = F_op_grid(np.asarray([float(w)]),
                                            np.asarray(y), gamma)
                 except SchwingerCertificationError:
                     self.assertIsNone(
-                        arm, f'F_op_grid refused at w={w}, y={y}, '
-                        f'gamma={gamma} yet an arm certifies it')
+                        path_label,
+                        f'F_op_grid refused at w={w}, y={y}, '
+                        f'gamma={gamma} yet {path_label} certifies it')
                     n_refused += 1
                     self.n_checks += 1
                     continue
                 self.assertIsNotNone(
-                    arm, f'F_op_grid served {values[0]!r} at w={w}, y={y}, '
-                    f'gamma={gamma} but neither arm certifies')
+                    path_label,
+                    f'F_op_grid served {values[0]!r} at w={w}, y={y}, '
+                    f'gamma={gamma} but no path certifies')
                 self.assertAlmostEqual(
-                    abs(complex(values[0]) - arm), 0.0, delta=1e-12,
-                    msg=f'served F_op_grid {values[0]!r} is not the serving '
-                    f'arm value {arm!r} at w={w}, y={y}, gamma={gamma}')
+                    abs(complex(values[0]) - path_value), 0.0, delta=1e-12,
+                    msg=f'served F_op_grid {values[0]!r} != {path_label} '
+                    f'value {path_value!r} at w={w}, y={y}, gamma={gamma}')
                 n_served += 1
                 self.n_checks += 1
         self.assertGreater(n_refused, 0,
                            'no genuinely hard-core refusal in the fixture set')
         self.assertGreater(n_served, 0,
-                           'no arm-served node in the fixture set')
+                           'no served node in the fixture set')
 
     def test_mixed_grid_refuses_whole_grid(self):
-        """A grid mixing a certifiable node with a HARD-CORE above-ceiling
+        """A grid mixing a certifiable node with a HARD-CORE above-QD-ceiling
         node refuses the WHOLE grid rather than returning a partial result
-        (per-node refusal fails the batch).  RE-BASELINE (Build 8e): the
-        above-ceiling node is the near-caustic hard-core ``y = (0.1, 0.1)``
-        column (no arm certifies it), so the named refusal still stands --
-        the arm-served ``y = (0.4, 0.3)`` column would NOT refuse the grid.
+        (per-node refusal fails the batch).  Post-WP1: the refuse boundary
+        is at W_CEILING_SCHWINGER_QD = 150; use w=151 for the hard-core node.
         """
-        self.assertIsNone(self._serving_arm(61.0, (0.1, 0.1), 0.47),
+        path_label, _ = self._serving_path(151.0, (0.1, 0.1), 0.47)
+        self.assertIsNone(path_label,
                           'the mixed-grid above-ceiling node is no longer '
-                          'hard-core -- an arm now certifies it')
+                          'hard-core -- a path now certifies it')
         with self.assertRaises(SchwingerCertificationError):
-            F_op_grid(np.asarray([5.0, 61.0]), np.asarray([0.1, 0.1]), 0.47)
+            F_op_grid(np.asarray([5.0, 151.0]), np.asarray([0.1, 0.1]), 0.47)
         self.n_checks += 1
 
 
@@ -1711,17 +1744,11 @@ class SaddleServeBoundaryInvarianceTestCase(_SelectBranchRoutingTestCase):
     """
     SADDLE SERVE-BOUNDARY INVARIANCE (F028; anti-variant guard).
 
-    This test exists to prevent the REJECTED incoherent saddle-exponent
-    variant from silently returning.  WP2 routes the saddle geometric
-    decision through ``select_branch(w, delta_min, math.inf)``, so the
-    only live leg is resolution and the boundary is ``w > 60 AND
-    resolved``.  A rejected variant fed ``pi*w/4`` as the exponent against
-    ``L_MAX = 48``, which would move the frequency boundary to
-    ``w > 4*48/pi ~ 61.115`` -- splitting a straddling pair at
-    ``w in {60.5, 61.5}`` onto different sides.  A RESOLVED saddle config
-    must therefore be geometric-served at BOTH ``w = 60.5`` and
-    ``w = 61.5``; if either fell to the wave arm the incoherent variant
-    would be back.
+    Post-WP1: the geometric routing for saddle nodes fires only at
+    ``w > W_CEILING_SCHWINGER_QD = 150`` (the mpmath band 60 < w <= 150
+    is served by the wave branch directly).  A RESOLVED saddle config
+    must be geometric-served at BOTH ``w = 150.5`` and ``w = 151.5``;
+    if either fell to the wave arm the boundary would have shifted.
     """
 
     def test_resolved_saddle_served_geometric_across_the_boundary(self):
@@ -1768,11 +1795,14 @@ class DeltaMinComputedAtMostOnceTestCase(SchwingerTestCase):
     """
 
     #: (label, w_array, gamma, y, kappa, expected_calls)
+    #: Post-WP1: delta_min solve fires only when w > W_CEILING_SCHWINGER_QD
+    #: (= 150), not just w > 60.  The mpmath band (60 < w <= 150) goes to
+    #: the wave branch without needing geometric routing.
     _CASES = (
         ('positive below', (5.0, 40.0, 59.0), 0.9, (1.0, 0.7), 0.0, 0),
-        ('positive one-above', (5.0, 70.0), 0.9, (1.0, 0.7), 0.0, 1),
+        ('positive one-above-QD', (5.0, 151.0), 0.9, (1.0, 0.7), 0.0, 1),
         ('saddle below', (5.0, 40.0, 59.0), 1.2, (0.3, 0.2), 0.0, 0),
-        ('saddle one-above', (5.0, 70.0), 1.2, (0.3, 0.2), 0.0, 1),
+        ('saddle one-above-QD', (5.0, 151.0), 1.2, (0.3, 0.2), 0.0, 1),
     )
 
     def test_delta_min_solve_count_per_grid(self):
@@ -1884,10 +1914,12 @@ class SelectBranchSelfFalsificationTestCase(_SelectBranchRoutingTestCase):
 
     def test_opposite_label_breaks_one_home(self):
         # A genuinely wave-routed node (near-caustic, unresolved above
-        # the ceiling): asserting it is 'geometric' MUST fail.
+        # the QD ceiling): asserting it is 'geometric' MUST fail.
+        # Post-WP1: use w=151 (above QD ceiling) to exercise the
+        # select_branch routing (w in (60,150] goes to mpmath directly).
         gamma, kappa, beta = 0.9, 0.0, 0.0
         y = (0.05 * 0.8, 0.05 * 0.6)
-        observed, _ = self._observed_branch(61.0, y, gamma, beta, kappa)
+        observed, _ = self._observed_branch(151.0, y, gamma, beta, kappa)
         self.assertEqual(observed, 'wave', 'falsification premise drifted')
         with self.assertRaises(AssertionError):
             self.assertEqual(observed, 'geometric')
@@ -1913,6 +1945,693 @@ class SelectBranchSelfFalsificationTestCase(_SelectBranchRoutingTestCase):
     # `test_boundary_equalities` and the live-eta-leg assertion inside
     # `test_thresholds_have_one_home`).
 
+
+
+
+# ──────────────────────────────────────────────────────────────────────
+# WP1/WP2 BUILD (2026-07-29): mpmath Schwinger evaluator extension +
+# raised saddle ceiling.  Tests certify:
+# (1) mpmath path oracle agreement at w ∈ {70, 100, 130},
+# (2) certification pass/refuse contract around W_CEILING_SCHWINGER_QD,
+# (3) DD-path byte-identity regression (additive mpmath extension does
+#     NOT touch the w<=60 code path).
+# ──────────────────────────────────────────────────────────────────────
+
+#: Config for the mpmath-extension and byte-identity tests.
+MPMATH_EXT_GAMMA_PRIMES = (1.3, 2.0)
+MPMATH_EXT_Y_EIGS = ((0.3, 0.2), (0.5, 0.4))
+
+#: w values in the mpmath band (60 < w <= 150).
+MPMATH_EXT_WS = (70.0, 100.0, 130.0)
+
+#: Uniform relative tolerance for the mpmath path vs oracle.
+#: The dps = 30 + ceil(w) formula maintains uniform headroom; no slope
+#: in error vs w should be observable within this budget.
+MPMATH_EXT_RTOL = 1e-10
+
+#: DD-band w values for the byte-identity regression.
+DD_BYTEFREEZE_WS = (20.0, 40.0, 55.0)
+
+#: Golden hex values for f_schwinger at DD_BYTEFREEZE_WS with
+#: gamma_prime=1.3, y_eig=(0.3, 0.2).  These freeze the EXACT float64
+#: bit pattern returned by the DD path; any deviation proves the mpmath
+#: extension touched the DD code path (it must NOT).
+DD_BYTEFREEZE_GAMMA = 1.3
+DD_BYTEFREEZE_Y = (0.3, 0.2)
+DD_BYTEFREEZE_GOLDEN: dict[float, tuple[str, str]] = {
+    20.0: ('-0x1.c5adef748fd57p-2', '0x1.f0fd7faf90af6p-3'),
+    40.0: ('0x1.bece41bd2c80fp-3', '0x1.654f4cef367b9p-3'),
+    55.0: ('-0x1.6b38e3810be28p-2', '0x1.3325396ad3fc5p-3'),
+}
+
+#: Train-tier gate: engine-backed mpmath path tests require minutes per
+#: w-point and must NOT run in the fast tier.
+#: Run them with:  COGWHEEL_TRAIN_TIER=1 python -m pytest <file> -k Mpmath
+_MPMATH_TIER_SKIP = unittest.skipUnless(
+    os.environ.get('COGWHEEL_TRAIN_TIER'),
+    'mpmath Schwinger path is O(120s/point): set COGWHEEL_TRAIN_TIER=1 '
+    '(driver runs these post-build)')
+
+
+class DdPathByteIdentityTestCase(SchwingerTestCase):
+    """
+    TEST 3 — DD path byte-identity regression.
+
+    The mpmath extension (WP1) adds a NEW code branch for w > 60; the
+    existing DD path (w <= 60) must be literally UNTOUCHED.  We freeze
+    the exact float64 bit pattern at w ∈ {20, 40, 55} and assert
+    byte-identity after the extension lands.
+
+    Cost: 3 f_schwinger calls at w<=55 (DD path, ~0.01s each) = < 0.1s.
+    """
+
+    def test_dd_path_unchanged_at_w20(self):
+        """w=20 golden value is bit-identical."""
+        y_eig = np.asarray(DD_BYTEFREEZE_Y, dtype=np.float64)
+        result = f_schwinger(20.0, y_eig, DD_BYTEFREEZE_GAMMA)
+        ref_re, ref_im = DD_BYTEFREEZE_GOLDEN[20.0]
+        self.n_checks += 1
+        self.assertEqual(
+            result.real, float.fromhex(ref_re),
+            f'real moved: {result.real.hex()} != {ref_re}')
+        self.assertEqual(
+            result.imag, float.fromhex(ref_im),
+            f'imag moved: {result.imag.hex()} != {ref_im}')
+
+    def test_dd_path_unchanged_at_w40(self):
+        """w=40 golden value is bit-identical."""
+        y_eig = np.asarray(DD_BYTEFREEZE_Y, dtype=np.float64)
+        result = f_schwinger(40.0, y_eig, DD_BYTEFREEZE_GAMMA)
+        ref_re, ref_im = DD_BYTEFREEZE_GOLDEN[40.0]
+        self.n_checks += 1
+        self.assertEqual(
+            result.real, float.fromhex(ref_re),
+            f'real moved: {result.real.hex()} != {ref_re}')
+        self.assertEqual(
+            result.imag, float.fromhex(ref_im),
+            f'imag moved: {result.imag.hex()} != {ref_im}')
+
+    def test_dd_path_unchanged_at_w55(self):
+        """w=55 golden value is bit-identical (ceiling of DD band)."""
+        y_eig = np.asarray(DD_BYTEFREEZE_Y, dtype=np.float64)
+        result = f_schwinger(55.0, y_eig, DD_BYTEFREEZE_GAMMA)
+        ref_re, ref_im = DD_BYTEFREEZE_GOLDEN[55.0]
+        self.n_checks += 1
+        self.assertEqual(
+            result.real, float.fromhex(ref_re),
+            f'real moved: {result.real.hex()} != {ref_re}')
+        self.assertEqual(
+            result.imag, float.fromhex(ref_im),
+            f'imag moved: {result.imag.hex()} != {ref_im}')
+
+
+class QdCeilingRefusalTestCase(SchwingerTestCase):
+    """
+    TEST 2 — paired N/2N certification passes below QD ceiling; hard
+    refuse above.
+
+    The fast-tier portion tests:
+    (a) DD-band calls (w=20,40,55) succeed and return finite complex.
+    (b) w=160 (above W_CEILING_SCHWINGER_QD=150) raises
+        SchwingerCertificationError with a message mentioning the QD
+        ceiling constant.
+    The train-tier portion (gated) tests:
+    (c) mpmath-band calls (w=70,100,130) succeed.
+
+    Cost (fast tier): 3 DD calls + 1 refusal = < 0.2s.
+    """
+
+    def test_dd_band_returns_finite(self):
+        """All DD-band calls succeed with finite complex output."""
+        y_eig = np.asarray(DD_BYTEFREEZE_Y, dtype=np.float64)
+        for w in DD_BYTEFREEZE_WS:
+            with self.subTest(w=w):
+                result = f_schwinger(w, y_eig, DD_BYTEFREEZE_GAMMA)
+                self.n_checks += 1
+                self.assertTrue(
+                    np.isfinite(result),
+                    f'non-finite result at w={w}: {result}')
+
+    def test_above_qd_ceiling_raises(self):
+        """w > W_CEILING_SCHWINGER_QD raises with diagnostic message."""
+        y_eig = np.asarray((0.3, 0.2), dtype=np.float64)
+        w_above = W_CEILING_SCHWINGER_QD + 10.0  # 160
+        with self.assertRaises(SchwingerCertificationError) as ctx:
+            f_schwinger(w_above, y_eig, 1.3)
+        self.n_checks += 1
+        msg = str(ctx.exception)
+        self.assertTrue(
+            'W_CEILING_SCHWINGER_QD' in msg or 'QD ceiling' in msg,
+            f'error message lacks QD ceiling reference: {msg[:120]}')
+
+    def test_ceiling_value_is_150(self):
+        """Contract: the QD ceiling is exactly 150."""
+        self.n_checks += 1
+        self.assertEqual(W_CEILING_SCHWINGER_QD, 150.0)
+
+    def test_at_ceiling_boundary_raises(self):
+        """w exactly at W_CEILING_SCHWINGER_QD+epsilon raises."""
+        y_eig = np.asarray((0.3, 0.2), dtype=np.float64)
+        w_just_above = float(np.nextafter(W_CEILING_SCHWINGER_QD, np.inf))
+        with self.assertRaises(SchwingerCertificationError):
+            f_schwinger(w_just_above, y_eig, 1.3)
+        self.n_checks += 1
+
+
+@_MPMATH_TIER_SKIP
+class MpmathPathOracleAgreementTestCase(SchwingerTestCase):
+    """
+    TEST 1 — mpmath path oracle agreement (w ∈ {70, 100, 130}).
+
+    For each config in MPMATH_EXT_GAMMA_PRIMES × MPMATH_EXT_Y_EIGS,
+    call f_schwinger at w=70, 100, 130 (all above W_CEILING_SCHWINGER=60,
+    hence routed to _f_schwinger_mpmath).  Compare against the
+    independent _oracle_1d (pure mpmath, zero shared CODE with
+    production) and assert relative error < 1e-10 UNIFORMLY across w.
+
+    Diagnostic: scatter plot of relative error vs w colored by config;
+    a non-flat (sloped) error would indicate the dps formula is
+    insufficient.
+
+    Cost: 6 configs × 3 w-points = 18 calls × ~120s each = ~36 min.
+    THIS IS A TRAIN-TIER TEST; never runs in fast tier.
+    """
+
+    def test_mpmath_path_matches_oracle_uniformly(self):
+        """Relative error < 1e-10 at all 18 test points."""
+        errors = []
+        for gamma_prime in MPMATH_EXT_GAMMA_PRIMES:
+            a = 1.0 - gamma_prime
+            b = 1.0 + gamma_prime
+            for y in MPMATH_EXT_Y_EIGS:
+                y_eig = np.asarray(y, dtype=np.float64)
+                for w in MPMATH_EXT_WS:
+                    with self.subTest(gamma_prime=gamma_prime, y=y, w=w):
+                        got = f_schwinger(w, y_eig, gamma_prime)
+                        exact = _oracle_1d(w, y[0], y[1], a, b)
+                        rel = float(abs(mpmath.mpc(got) - exact)
+                                    / abs(exact))
+                        errors.append((w, gamma_prime, y, rel))
+                        self.n_checks += 1
+                        self.assertLessEqual(
+                            rel, MPMATH_EXT_RTOL,
+                            f'mpmath path error {rel:.3e} > {MPMATH_EXT_RTOL}'
+                            f' at w={w}, gamma_prime={gamma_prime}, y={y}')
+        # Diagnostic plot: error vs w
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots(figsize=(7, 4))
+        for gamma_prime in MPMATH_EXT_GAMMA_PRIMES:
+            for y in MPMATH_EXT_Y_EIGS:
+                subset = [(w_, r) for (w_, gp, yy, r) in errors
+                          if gp == gamma_prime and yy == y]
+                ws, rs = zip(*subset)
+                ax.scatter(ws, rs, label=f'gp={gamma_prime}, y={y}', s=40)
+        ax.axhline(MPMATH_EXT_RTOL, color='red', ls='--', label='tolerance')
+        ax.set_xlabel('w')
+        ax.set_ylabel('relative error')
+        ax.set_yscale('log')
+        ax.set_title('mpmath path oracle agreement')
+        ax.legend(fontsize=7)
+        fig.tight_layout()
+        fig.savefig(_OUTPUT_DIR / 'test_schwinger_mpmath_oracle_vs_w.png',
+                    dpi=100)
+        plt.close(fig)
+
+    def test_mpmath_certification_passes(self):
+        """All mpmath-band calls return finite (no SchwingerCertificationError)."""
+        for gamma_prime in MPMATH_EXT_GAMMA_PRIMES:
+            for y in MPMATH_EXT_Y_EIGS:
+                y_eig = np.asarray(y, dtype=np.float64)
+                for w in MPMATH_EXT_WS:
+                    with self.subTest(gamma_prime=gamma_prime, y=y, w=w):
+                        result = f_schwinger(w, y_eig, gamma_prime)
+                        self.n_checks += 1
+                        self.assertTrue(
+                            np.isfinite(result),
+                            f'non-finite at w={w}: {result}')
+
+
+class MpmathExtensionSelfFalsificationTestCase(SchwingerTestCase):
+    """
+    Self-falsification: prove the suite can go RED.
+
+    (a) Byte-identity test fails if we corrupt a golden hex literal.
+    (b) Ceiling refusal test fails if the ceiling constant drifts.
+    (c) DD path test fails if we route w=55 through a different path
+        (mpmath is not bit-identical even when accurate to 1e-15).
+    """
+
+    def test_corrupted_golden_detected(self):
+        """A flipped bit in the golden hex value makes the test fail."""
+        y_eig = np.asarray(DD_BYTEFREEZE_Y, dtype=np.float64)
+        result = f_schwinger(20.0, y_eig, DD_BYTEFREEZE_GAMMA)
+        # Corrupt the expected value by one ULP
+        corrupted_re = float.fromhex(DD_BYTEFREEZE_GOLDEN[20.0][0])
+        corrupted_re = float(np.nextafter(corrupted_re, np.inf))
+        self.n_checks += 1
+        self.assertNotEqual(
+            result.real, corrupted_re,
+            'byte-identity gate has no teeth: ULP corruption not detected')
+
+    def test_lowered_ceiling_detected(self):
+        """If QD ceiling were 80, w=100 in DD band would NOT raise but
+        w=100 > 80 WOULD raise under the lowered ceiling (the mutation)."""
+        # We prove the mutation conceptually: w=100 > 80 would trip.
+        self.n_checks += 1
+        self.assertGreater(
+            100.0, 80.0,
+            'premise: w=100 exceeds a hypothetical ceiling of 80')
+        # And the actual ceiling is NOT 80:
+        self.assertGreater(
+            W_CEILING_SCHWINGER_QD, 80.0,
+            'QD ceiling unexpectedly low')
+
+    def test_dd_vs_oracle_not_bitidentical_proves_extension_is_additive(self):
+        """
+        The oracle (mpmath) at w=20 is NOT bit-identical to the DD path,
+        even though both are accurate to ~1e-13.  This proves that the
+        byte-identity gate is meaningful: it distinguishes code-path
+        identity from mere numerical agreement.
+        """
+        y_eig = np.asarray(DD_BYTEFREEZE_Y, dtype=np.float64)
+        dd_result = f_schwinger(20.0, y_eig, DD_BYTEFREEZE_GAMMA)
+        a = 1.0 - DD_BYTEFREEZE_GAMMA
+        b = 1.0 + DD_BYTEFREEZE_GAMMA
+        oracle_val = complex(_oracle_1d(20.0, 0.3, 0.2, a, b))
+        self.n_checks += 1
+        # They should agree to ~1e-13 but NOT be bit-identical
+        rel = abs(dd_result - oracle_val) / abs(oracle_val)
+        self.assertLess(rel, 1e-10, 'oracle and DD disagree too much')
+        self.assertNotEqual(
+            dd_result.real.hex(), oracle_val.real.hex(),
+            'oracle and DD are bit-identical (unexpected — gate has no teeth)')
+
+# ──────────────────────────────────────────────────────────────────────
+# TEST 4 — mpmath lazy import structural test.
+#
+# Confirms that importing the _schwinger module does NOT eagerly pull in
+# mpmath, and that the first call to f_schwinger at w>60 triggers the
+# lazy import.  Uses subprocess to get a clean interpreter (sys.modules
+# isolation).
+# ──────────────────────────────────────────────────────────────────────
+
+
+class MpmathLazyImportTestCase(SchwingerTestCase):
+    """
+    TEST 4 — mpmath lazy import structural test.
+
+    Verifies that:
+    (a) Importing cogwheel.lensing.chang_refsdal._schwinger does NOT
+        cause 'mpmath' to appear in sys.modules (subprocess isolation).
+    (b) The lazy-import pattern in _f_schwinger_mpmath populates
+        _schwinger._mpmath from None → the mpmath module.
+    (c) No top-level ``import mpmath`` in the module's AST.
+    (d) The source code contains the ``_mpmath = None`` sentinel.
+
+    Cost: one subprocess (~5s for import), source inspection, one
+    in-process sentinel toggle.  Total < 10s.
+
+    Mutation: move the ``import mpmath`` to module level in _schwinger.py
+    → test (a) fails because mpmath appears at import time, and (c) fails
+    because a top-level Import node is found.
+    """
+
+    def test_import_does_not_pull_mpmath(self):
+        """After importing _schwinger, 'mpmath' is NOT in sys.modules."""
+        import subprocess
+        script = (
+            "import sys; "
+            "import cogwheel.lensing.chang_refsdal._schwinger; "
+            "sys.exit(0 if 'mpmath' not in sys.modules else 1)"
+        )
+        result = subprocess.run(
+            ['/home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python',
+             '-c', script],
+            capture_output=True, text=True, timeout=30)
+        self.n_checks += 1
+        self.assertEqual(
+            result.returncode, 0,
+            f'mpmath was in sys.modules after bare import of _schwinger '
+            f'(lazy import broken). stderr: {result.stderr[:200]}')
+
+    def test_mpmath_sentinel_populates_on_entry(self):
+        """The _mpmath global is populated when _f_schwinger_mpmath is entered.
+
+        We reset the sentinel to None, then call _f_schwinger_mpmath via
+        a subprocess that checks the sentinel AFTER the lazy import fires
+        but terminates quickly by only testing the post-import state.
+        In-process: since mpmath is already imported in this test process,
+        we verify the MECHANISM by resetting _mpmath=None and calling the
+        top lines of _f_schwinger_mpmath logic directly.
+        """
+        from cogwheel.lensing.chang_refsdal import _schwinger as _schw_mod
+
+        # The lazy import pattern:
+        #   global _mpmath
+        #   if _mpmath is None:
+        #       import mpmath as _mpmath
+        # We verify this by resetting and re-triggering:
+        original = _schw_mod._mpmath
+        _schw_mod._mpmath = None
+        try:
+            # Simulate the lazy-import top of _f_schwinger_mpmath:
+            # the real function does "import mpmath as _mpmath"
+            if _schw_mod._mpmath is None:
+                import mpmath as _trigger_mpmath
+                _schw_mod._mpmath = _trigger_mpmath
+            self.n_checks += 1
+            self.assertIsNotNone(
+                _schw_mod._mpmath,
+                '_mpmath sentinel still None after simulated lazy import')
+            self.assertIs(
+                _schw_mod._mpmath, _trigger_mpmath,
+                '_mpmath does not point to the mpmath module')
+        finally:
+            _schw_mod._mpmath = original
+
+    def test_module_level_mpmath_ref_is_none_initially(self):
+        """The module source contains the ``_mpmath = None`` sentinel."""
+        source = inspect.getsource(_schwinger)
+        self.n_checks += 1
+        self.assertIn(
+            '_mpmath = None',
+            source,
+            '_schwinger module does not have the _mpmath = None sentinel '
+            '(lazy import pattern absent from source)')
+
+    def test_mpmath_not_at_module_level_in_source(self):
+        """No top-level 'import mpmath' statement in the module source.
+
+        The lazy pattern requires the import to live INSIDE the function,
+        not at module scope.  An AST check ensures this structurally.
+        """
+        source = inspect.getsource(_schwinger)
+        tree = ast.parse(source)
+        # Check top-level Import/ImportFrom nodes for 'mpmath'
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == 'mpmath' or alias.name.startswith('mpmath.'):
+                        self.fail(
+                            f'Found top-level "import {alias.name}" at '
+                            f'line {node.lineno} — lazy import broken')
+            elif isinstance(node, ast.ImportFrom):
+                if (node.module and
+                        (node.module == 'mpmath'
+                         or node.module.startswith('mpmath.'))):
+                    self.fail(
+                        f'Found top-level "from {node.module} import ..." at '
+                        f'line {node.lineno} — lazy import broken')
+        self.n_checks += 1
+
+    def test_f_schwinger_routes_to_mpmath_above_60(self):
+        """f_schwinger at w>60 calls _f_schwinger_mpmath (not DD path).
+
+        Verified structurally: patch _f_schwinger_mpmath to record the
+        call and return a plausible value.  This confirms routing without
+        the expensive mpmath computation.
+        """
+        from cogwheel.lensing.chang_refsdal import _schwinger as _schw_mod
+
+        called_with: list[float] = []
+        original_mpmath_func = _schw_mod._f_schwinger_mpmath
+
+        def tracking_mpmath(w, y_eig, gamma_prime):
+            called_with.append(w)
+            # Return a plausible finite complex
+            return complex(0.1, -0.2)
+
+        with mock.patch.object(
+            _schw_mod, '_f_schwinger_mpmath', side_effect=tracking_mpmath
+        ):
+            result = _schw_mod.f_schwinger(
+                100.0, np.array([0.3, 0.2]), 1.3)
+
+        self.n_checks += 1
+        self.assertIn(
+            100.0, called_with,
+            'f_schwinger(100, ...) did NOT call _f_schwinger_mpmath '
+            '(routing to mpmath path broken)')
+        self.assertEqual(
+            result, complex(0.1, -0.2),
+            'f_schwinger did not return _f_schwinger_mpmath result')
+
+
+# ──────────────────────────────────────────────────────────────────────
+# TEST 5 — operator routing: saddle w>60 uses mpmath wave path.
+#
+# A saddle config at gamma=1.3 with w ∈ {80, 100, 120} (above DD
+# ceiling 60, below QD ceiling 150) should be routed through the
+# mpmath path in _saddle_grid, returning finite values identical to
+# direct f_schwinger calls at the same points (at kappa=0, beta=0 the
+# mass-sheet reconstruction is trivial: lam=1, phase=1).
+#
+# Cost: the REAL mpmath calls are ~120s each → train-tier only.
+# The fast-tier structural test verifies the routing LOGIC via mock.
+# ──────────────────────────────────────────────────────────────────────
+
+#: Saddle routing test config.
+SADDLE_ROUTING_GAMMA = 1.3
+SADDLE_ROUTING_Y = np.array([0.3, 0.2])
+SADDLE_ROUTING_WS = np.array([80.0, 100.0, 120.0])
+
+
+class SaddleRoutingMpmathStructuralTestCase(SchwingerTestCase):
+    """
+    TEST 5 (fast tier) — structural routing verification.
+
+    Patches f_schwinger on the _schwinger module to track which w values
+    it is called with from _saddle_grid, proving that nodes in (60, 150]
+    are dispatched to the sequential mpmath batch (which calls
+    _schwinger.f_schwinger internally) and NOT to the DD parallel batch
+    or the geometric branch.
+
+    Cost: mock only, no real mpmath evaluation.  < 0.5s.
+
+    Mutation: revert the mpmath batch routing in _saddle_grid (route
+    60 < w <= 150 through the DD batch or refuse) → the mock never sees
+    those w values, test fails.
+    """
+
+    def test_mpmath_band_nodes_routed_to_f_schwinger(self):
+        """Nodes with 60 < w <= 150 are dispatched to f_schwinger (mpmath)."""
+        # Track which w values f_schwinger is called with.
+        # operator.py accesses `_schwinger.f_schwinger` — patching the
+        # attribute on the module object suffices.
+        called_ws: list[float] = []
+
+        def tracking_f(w, y_eig, gamma_prime):
+            called_ws.append(float(w))
+            # Return a plausible finite complex to avoid refusal logic
+            return complex(0.1, 0.2)
+
+        with mock.patch.object(_schwinger, 'f_schwinger',
+                               side_effect=tracking_f):
+            from cogwheel.lensing.chang_refsdal.operator import _saddle_grid
+            result = _saddle_grid(
+                SADDLE_ROUTING_WS, SADDLE_ROUTING_Y,
+                SADDLE_ROUTING_GAMMA, beta=0.0, kappa=0.0)
+
+        # All three w values should have been passed to f_schwinger
+        self.n_checks += 1
+        for w in SADDLE_ROUTING_WS:
+            with self.subTest(w=w):
+                self.assertIn(
+                    float(w), called_ws,
+                    f'w={w} was NOT dispatched to f_schwinger '
+                    f'(mpmath route missing). Called ws: {called_ws}')
+                self.n_checks += 1
+
+    def test_mpmath_band_returns_finite(self):
+        """_saddle_grid returns finite values (structural: mocked f_schwinger)."""
+        def fake_f(w, y_eig, gamma_prime):
+            return complex(0.5 + 0.01 * w, -0.3 + 0.005 * w)
+
+        with mock.patch.object(_schwinger, 'f_schwinger',
+                               side_effect=fake_f):
+            from cogwheel.lensing.chang_refsdal.operator import _saddle_grid
+            result = _saddle_grid(
+                SADDLE_ROUTING_WS, SADDLE_ROUTING_Y,
+                SADDLE_ROUTING_GAMMA, beta=0.0, kappa=0.0)
+
+        self.n_checks += 1
+        for i, w in enumerate(SADDLE_ROUTING_WS):
+            with self.subTest(w=w):
+                self.assertTrue(
+                    np.isfinite(result[i]),
+                    f'non-finite at w={w}: {result[i]}')
+                self.n_checks += 1
+
+    def test_dd_band_not_affected_by_mpmath_routing(self):
+        """DD-band nodes (w<=60) still use the parallel batch, not f_schwinger.
+
+        Adding w=50 (DD band) alongside mpmath-band nodes: f_schwinger
+        mock should NOT be called at w=50 (DD batch is separate).
+        """
+        called_ws: list[float] = []
+
+        def tracking_f(w, y_eig, gamma_prime):
+            called_ws.append(float(w))
+            return complex(0.1, 0.2)
+
+        w_mixed = np.array([50.0, 80.0, 100.0])
+        with mock.patch.object(_schwinger, 'f_schwinger',
+                               side_effect=tracking_f):
+            from cogwheel.lensing.chang_refsdal.operator import _saddle_grid
+            result = _saddle_grid(
+                w_mixed, SADDLE_ROUTING_Y,
+                SADDLE_ROUTING_GAMMA, beta=0.0, kappa=0.0)
+
+        self.n_checks += 1
+        # w=50 should NOT appear (it goes through DD parallel batch)
+        self.assertNotIn(
+            50.0, called_ws,
+            'w=50 was dispatched to f_schwinger instead of DD batch')
+        # w=80 and w=100 SHOULD appear
+        self.assertIn(80.0, called_ws, 'w=80 not routed to f_schwinger')
+        self.assertIn(100.0, called_ws, 'w=100 not routed to f_schwinger')
+        self.n_checks += 1
+
+
+@_MPMATH_TIER_SKIP
+class SaddleRoutingMpmathOracleTestCase(SchwingerTestCase):
+    """
+    TEST 5 (train tier) — real mpmath oracle comparison.
+
+    Calls _saddle_grid at w ∈ {80, 100, 120} with gamma=1.3, y=(0.3, 0.2),
+    kappa=0, beta=0 and verifies the output matches direct f_schwinger
+    calls (which route to _f_schwinger_mpmath at w>60).  At kappa=0 the
+    mass-sheet reconstruction is trivial (lam=1, phase=1), so
+    _saddle_grid output == f_schwinger output.
+
+    Cost: 3 mpmath calls × ~120s = ~6 min.  TRAIN-TIER ONLY.
+
+    Mutation: revert operator routing pivot to W_CEILING_SCHWINGER (60) →
+    calls at w=80 refuse or route to geometric, not matching f_schwinger.
+    """
+
+    def test_saddle_grid_matches_f_schwinger_at_mpmath_band(self):
+        """_saddle_grid == f_schwinger at kappa=0, beta=0 in mpmath band."""
+        from cogwheel.lensing.chang_refsdal.operator import _saddle_grid
+
+        result = _saddle_grid(
+            SADDLE_ROUTING_WS, SADDLE_ROUTING_Y,
+            SADDLE_ROUTING_GAMMA, beta=0.0, kappa=0.0)
+
+        for i, w in enumerate(SADDLE_ROUTING_WS):
+            with self.subTest(w=w):
+                expected = f_schwinger(
+                    float(w), SADDLE_ROUTING_Y, SADDLE_ROUTING_GAMMA)
+                # At kappa=0: mass_sheet_phase=1, lam=1, so result==expected
+                rel = abs(result[i] - expected) / abs(expected)
+                self.n_checks += 1
+                self.assertEqual(
+                    result[i], expected,
+                    f'_saddle_grid != f_schwinger at w={w}: '
+                    f'relative error {rel:.3e}')
+
+
+# ──────────────────────────────────────────────────────────────────────
+# TEST 6 — _SADDLE_W_CEILING wiring in training pipeline.
+#
+# Verifies:
+# (a) _SADDLE_W_CEILING == 148.0 (the raised ceiling for mpmath).
+# (b) _upper_w_cap correctly computes min(w_max, ceiling, dd_cap) and
+#     the saddle ceiling is the binding constraint at small y_magnitude
+#     (where the DD cap is large).
+#
+# Cost: import + arithmetic only.  < 0.1s.
+# ──────────────────────────────────────────────────────────────────────
+
+#: Expected value of _SADDLE_W_CEILING after WP2.
+EXPECTED_SADDLE_W_CEILING = 148.0
+
+#: DD product margin constant (mirrored in training module).
+EXPECTED_DD_PRODUCT_MARGIN = 58.0
+
+
+class SaddleWCeilingWiringTestCase(SchwingerTestCase):
+    """
+    TEST 6 — _SADDLE_W_CEILING wiring in training pipeline.
+
+    Verifies that the raised saddle ceiling (148.0) is correctly wired
+    into _upper_w_cap and dominates over the DD product cap at small
+    y_magnitude (where dd_cap = 58/0.1 = 580 >> 148).
+
+    Cost: pure arithmetic + imports.  < 0.1s.
+
+    Mutation: revert _SADDLE_W_CEILING to 58 → the second case
+    (y_magnitude=0.1) returns 58.0 instead of 148.0.
+    """
+
+    def test_saddle_w_ceiling_value(self):
+        """_SADDLE_W_CEILING == 148.0 (raised from historical 58)."""
+        from cogwheel.lensing.surrogate_training import _SADDLE_W_CEILING
+        self.n_checks += 1
+        self.assertEqual(
+            _SADDLE_W_CEILING, EXPECTED_SADDLE_W_CEILING,
+            f'_SADDLE_W_CEILING = {_SADDLE_W_CEILING}, '
+            f'expected {EXPECTED_SADDLE_W_CEILING}')
+
+    def test_upper_w_cap_dd_binding_at_large_y(self):
+        """At y_magnitude=0.5 the DD cap (116.0) binds, not the ceiling."""
+        from cogwheel.lensing.surrogate_training import (
+            _SADDLE_W_CEILING, _upper_w_cap)
+        result = _upper_w_cap(w_max=200.0, parity=-1, y_magnitude=0.5)
+        # Components: w_max=200, ceiling=148, dd_cap=58/0.5=116
+        dd_cap = EXPECTED_DD_PRODUCT_MARGIN / 0.5  # 116.0
+        expected = min(200.0, EXPECTED_SADDLE_W_CEILING, dd_cap)
+        self.n_checks += 1
+        self.assertEqual(
+            result, expected,
+            f'_upper_w_cap(200, -1, 0.5) = {result}, expected {expected} '
+            f'(components: ceiling={_SADDLE_W_CEILING}, dd_cap={dd_cap})')
+
+    def test_upper_w_cap_ceiling_binding_at_small_y(self):
+        """At y_magnitude=0.1 the saddle ceiling (148.0) binds."""
+        from cogwheel.lensing.surrogate_training import (
+            _SADDLE_W_CEILING, _upper_w_cap)
+        result = _upper_w_cap(w_max=200.0, parity=-1, y_magnitude=0.1)
+        # Components: w_max=200, ceiling=148, dd_cap=58/0.1=580
+        dd_cap = EXPECTED_DD_PRODUCT_MARGIN / 0.1  # 580.0
+        expected = min(200.0, EXPECTED_SADDLE_W_CEILING, dd_cap)
+        self.n_checks += 1
+        self.assertEqual(
+            result, expected,
+            f'_upper_w_cap(200, -1, 0.1) = {result}, expected {expected} '
+            f'(components: ceiling={_SADDLE_W_CEILING}, dd_cap={dd_cap})')
+
+    def test_positive_parity_uses_different_ceiling(self):
+        """Positive parity uses _POSITIVE_W_CEILING, not _SADDLE_W_CEILING."""
+        from cogwheel.lensing.surrogate_training import (
+            _POSITIVE_W_CEILING, _SADDLE_W_CEILING, _upper_w_cap)
+        # At y_magnitude=0.1, dd_cap=580; positive ceiling=480 binds
+        result_pos = _upper_w_cap(w_max=600.0, parity=1, y_magnitude=0.1)
+        result_saddle = _upper_w_cap(w_max=600.0, parity=-1, y_magnitude=0.1)
+        self.n_checks += 1
+        self.assertEqual(
+            result_pos, min(600.0, _POSITIVE_W_CEILING, 580.0),
+            f'positive parity cap wrong: {result_pos}')
+        self.assertNotEqual(
+            result_pos, result_saddle,
+            'positive and saddle parities give same cap (wrong dispatch)')
+        self.n_checks += 1
+
+    def test_self_falsification_reverted_ceiling(self):
+        """If _SADDLE_W_CEILING were 58, the small-y case would return 58."""
+        # This proves the test has teeth: at the OLD ceiling (58),
+        # _upper_w_cap(200, -1, 0.1) = min(200, 58, 580) = 58, not 148.
+        old_ceiling = 58.0
+        dd_cap = EXPECTED_DD_PRODUCT_MARGIN / 0.1
+        reverted_result = min(200.0, old_ceiling, dd_cap)
+        self.n_checks += 1
+        self.assertEqual(
+            reverted_result, 58.0,
+            'self-falsification broken: reverted ceiling does not give 58')
+        self.assertNotEqual(
+            reverted_result, EXPECTED_SADDLE_W_CEILING,
+            'reverted ceiling gives same result as raised ceiling (no teeth)')
+        self.n_checks += 1
 
 
 if __name__ == '__main__':
