@@ -6,6 +6,32 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
+- `0.32.0` (2026-08-04):
+
+### Born residual chart trained and shipped; low-w flat extrapolation documented
+
+Two new surrogate behaviors documented (commits `849e580` and `afff8e7`,
+no prior librarian pass).
+
+**Born residual chart shipped:** both SPEC.md locations that described the
+Born residual chart as a pending TRAIN_TIER artifact updated to reflect that
+`cogwheel/data/born_residual_chart.npz` is now shipped as package data
+(≈ 8 KB; 3-D tensor-product cubic spline of
+`R = F_exact_demod − F_carrier_demod` over a 7 gamma × 5 rho × 10 w grid,
+min-relative delay frame; produced by `scripts/train_born_residual.py`).
+The engine row banner updated from "carrier + wiring infrastructure landed;
+residual chart pending training" to "carrier + wiring + trained residual chart
+shipped". Attaching via `BornResidualChart.load(...)` completes the
+zero-quadrature exterior serve path for `rho > 2`.
+
+**Low-w flat extrapolation:** `_log_w_band_serveable` now uses a one-sided
+high-end check (low end open); `_evaluate_chart` clips `log_w_query` to
+`log_w_grid[0]` before the spline call. All five serve call sites updated.
+Physics rationale (Professor-confirmed): envelope is `O(w_min^2)` flat below
+the first Airy fringe. Certified by `test_lensing_low_w_extrapolation.py`.
+
+- `0.9.12` — `0.9.5` entries unchanged below.
+
 - `0.31.2` (2026-08-01):
 
 Lobe-interior charts gain optional `theta_to_s` axis map for wedge-edge
