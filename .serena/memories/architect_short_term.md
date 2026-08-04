@@ -12,6 +12,18 @@
 
 (last consolidated by Dreamer on 2026-08-05)
 
+- 2026-08-XX: brief_low_w_extrapolation — serve draws with w < chart.w_min via
+  flat extrapolation (clamp log_w_query to log_w_grid[0]) instead of falling
+  through to exact engine. ONE WP: add _log_w_band_serveable function (only
+  checks high end), replace _log_w_band_inside in all 5 call sites, clamp
+  log_w_query inside _evaluate_chart before spline eval. Professor confirmed:
+  KERNEL_SUM envelope → 0 as w→0, DIFFRACTIVE/INTERIOR → sqrt(mu_macro); flat
+  clamp is O(w_min²) error for diffractive/interior; kernel-sum charts are not
+  the main beneficiary (they hand off to diffractive below w_floor anyway).
+  Simplifier: one WP correct, new function not mutate old, clamp BEFORE spline
+  (scipy BSpline extrapolates polynomially), use np.clip not np.maximum, keep
+  high-end guard strict. Test: w_min/2 accuracy within 3e-3 of max|F|.
+
 - 2026-08-XX: brief_schwinger_qd — extend Schwinger evaluator above w=60 via
   mpmath quadrature. TWO WPs: (1) engine extension in _schwinger.py (add
   _f_schwinger_mpmath, paired N/2N cert, W_CEILING_SCHWINGER_QD=150, lazy
@@ -102,3 +114,16 @@
   scan from 200 to 50 pts; use max(all_refused) not last-consecutive.
   Coordinate confirmed: delta_theta (theta-radians on critical curve) is
   consumed directly in _tube_serves, so script outputs in same units.
+
+- 2026-08-XX: brief_census_dry_run — standalone script scripts/census_dry_run.py,
+  structural coverage audit without trained charts. ONE WP. Samples 10K draws
+  from (gamma∈[0,1.6], |y|∈[0,4.2426], θ∈[0,2π], w log-uniform [5,148]).
+  Uses geometry_partition (cheap quartic, no engine) with minimal w_grid (2 pts).
+  Classification: born (rho>1), tube_feasible (eta in f_floor*Rc..f_max*Rc),
+  wedge_feasible (rho<1, w*|y|≤58), ppgo_fold (rho<1, 4 images, ξ≥4), cusp_arm
+  (within cusp window above coverage threshold), exact_engine (residual).
+  Professor: ALL exterior served by Born; interior gap at DD cap with ξ<4 is
+  the main structural hole; gamma guard band and near-cusp vertex core are the
+  other gaps. Simplifier: collapse farfield_possible into born; use actual
+  _merging_fold_pair for ppGO (cheap, O(16)); single WP, fresh ChangRefsdal
+  per draw for label-continuation safety; n_freq=2 for structural-only.

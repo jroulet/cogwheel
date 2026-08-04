@@ -1,43 +1,36 @@
 # Librarian Short-Term Observations
 
-## Run: 2026-08-04 — census_dry_run.py addition (commit 97f7fc0)
+## Run: 2026-08-04 — train_surrogate_production.py addition (commit c5b8a4a)
 
-**Scope:** Post-commit sync for commit `97f7fc0` (scripts: census_dry_run.py —
-structural coverage = 100%).
+**Scope:** Post-commit sync for commit `c5b8a4a` (scripts: production training
+launcher — DD band, w <= 60).
 
-**Changed file:** `scripts/census_dry_run.py` — new script, 366 lines.
+**Changed file:** `scripts/train_surrogate_production.py` — new 94-line launcher.
 
-**Triage result:**
-
-The script stays entirely in `scripts/`, writes no disk artifacts (stdout only),
-and introduces no new `cogwheel/` public API. The SCRIPTS/ REWRITE NO-OP RULE applies
-for SPEC.md, DATA_CONTRACTS.yaml, and docs/source/.
-
-The one stale surface found: `todo.d/lensing_coverage_map.md` Section D, which
-contained the action directive "RUN A CHEAP DISCOVERY CENSUS EARLY". That census
-has now been run — `census_dry_run.py` is the tool and the commit message reports
-the result (100% structural coverage, breakdown by serve path). Section D was
-updated to record:
-- Census run on 2026-08-04, commit 97f7fc0, tool `scripts/census_dry_run.py`
-- Result: 100% structural coverage, no unnamed regions
-- Breakdown: Born exterior 71%, tube/far-field 15%, interior wedge 7%, lobe interior 7%, ppGO fold 0.1%
-- Full-box campaign still stays last
-
-`render_fragments.py` was run; `TODO.md` was updated.
+**Triage result:** SCRIPTS/ REWRITE NO-OP RULE applies. Full justification:
+- Script stays entirely in `scripts/`, never touches `cogwheel/`.
+- Output path `OUTDIR = "/tmp/surrogate_production_dd"` is transient; not a
+  committed artifact. `train()` from `cogwheel.lensing.surrogate_training`
+  does the actual serialization (tracked separately if at all in DATA_CONTRACTS).
+- No `cogwheel/` public API changes.
+- No dependency/install changes.
+- Not a notebook or test change.
 
 **Surfaces confirmed NOT stale:**
-- SPEC.md — no reference to discovery census or structural coverage
-- DATA_CONTRACTS.yaml — no new disk artifacts in the script
-- docs/source/ — scripts/ is not a cogwheel module; no API page needed
-- FINDINGS.md — no new finding, no old finding invalidated
+- SPEC.md — no reference to training launcher; launcher is config-only.
+- DATA_CONTRACTS.yaml — no new committed disk artifacts.
+- docs/source/ — scripts/ is not a cogwheel module; no API page needed.
+- lensing_coverage_map.md — Section D already records "Production training can
+  proceed on the current architecture" (written 2026-08-04 after census run).
+  The launcher's existence doesn't require a new note in the coverage map.
+- TODO fragments — no fragment references a "production launcher needs to be
+  written" as an action item. Script is a standalone artifact.
+- FINDINGS.md — no new finding, no old finding invalidated.
+
+**Action taken:** No doc changes. Deleted `.claude/sync_issues.json` (gitignored).
 
 **Stale pattern this commit reveals:**
-- Coverage map Section D's "RUN X EARLY" imperatives are action calls; when
-  the action lands, check Section D and record the outcome. Specifically:
-  the pattern "RUN A CHEAP X EARLY ... should not wait for it" signals a
-  pending discovery-style step that will go stale on completion.
-
-**Fragile cross-references to watch:**
-- lensing_coverage_map.md Section D now cites commit 97f7fc0 and
-  `scripts/census_dry_run.py` as the discovery census record. If that script
-  is renamed or removed, update Section D.
+- Pure-launcher scripts in `scripts/` (even with `/tmp/` output paths) are
+  routinely no-ops for doc sync as long as they don't commit new artifacts.
+  The key distinction: does the script CREATE a committed artifact or call an
+  existing function that already owns the artifact contract?

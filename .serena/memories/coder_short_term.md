@@ -62,3 +62,11 @@
   test_band_edge_companion_now_served_by_arm to verify all probes return
   finite values (all now on DD path, no above-ceiling filter). Updated
   MacroSaddleControlTestCase class docstring to reflect new contract.
+
+- wp1 (low_w_extrapolation): Added _log_w_band_serveable function (checks
+  only high end: log_w_max <= chart.log_w_grid[-1]) after _log_w_band_inside.
+  Replaced _log_w_band_inside with _log_w_band_serveable at all 5 call sites
+  (_tube_serves, _farfield_serves, _lobe_serves, _wedge_serves, may_serve).
+  Added np.clip clamp in _evaluate_chart before _contract_tensor_spline calls
+  (clamps log_w_query to [chart.log_w_grid[0], chart.log_w_grid[-1]]).
+  _log_w_band_inside preserved as documentation/future-use but unreferenced.

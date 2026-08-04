@@ -2784,6 +2784,18 @@ def _log_w_band_inside(chart, log_w_min: float, log_w_max: float) -> bool:
             and log_w_max <= chart.log_w_grid[-1])
 
 
+def _log_w_band_serveable(chart, log_w_min: float, log_w_max: float) -> bool:
+    """Whether the chart can serve this w band.
+
+    Allows low-end flat extrapolation: queries with w < chart.w_min are
+    clamped to the chart's lowest grid point (the envelope is smooth and
+    nearly constant below the first Airy fringe — O(w_min^2) correction
+    to the geometric limit).  The HIGH end remains strict: no upward
+    extrapolation (the envelope is oscillatory above w_max).
+    """
+    return log_w_max <= chart.log_w_grid[-1]
+
+
 def _theta_into_frame(theta: float, frame_lo: float) -> float:
     """Unwrap a ``[0, 2*pi)`` caustic angle into a chart's theta frame.
 
@@ -2804,7 +2816,7 @@ def _tube_serves(chart: TubeChart, gamma: float, log_w_min: float,
     # (1) certified-box containment on gamma and log w.
     if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
         return False
-    if not _log_w_band_inside(chart, log_w_min, log_w_max):
+    if not _log_w_band_serveable(chart, log_w_min, log_w_max):
         return False
     # (5) image-count guard.
     if chart.image_count is not None and image_count != chart.image_count:
@@ -2860,7 +2872,7 @@ def _farfield_serves(chart: FarFieldChart, gamma: float, log_w_min: float,
     # (1a) gamma / log-w box containment (cheap, coordinate-free) first.
     if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
         return False
-    if not _log_w_band_inside(chart, log_w_min, log_w_max):
+    if not _log_w_band_serveable(chart, log_w_min, log_w_max):
         return False
     # (1b) map the source to the chart's far-field-smooth (s, d) at the
     # query's own gamma; decline on any refusal from the smooth map.
@@ -2939,7 +2951,7 @@ def _lobe_serves(chart: 'LobeInteriorChart', gamma: float, log_w_min: float,
     if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
         return False
     # (b) ln w band inside.
-    if not _log_w_band_inside(chart, log_w_min, log_w_max):
+    if not _log_w_band_serveable(chart, log_w_min, log_w_max):
         return False
     # (c) inter-lobe corridor test in the chart's stored source-plane frame:
     # serve only when strictly closer to THIS centroid than to the other by
@@ -3019,7 +3031,7 @@ def _wedge_serves(chart: 'InteriorWedgeChart', gamma: float, log_w_min: float,
     if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
         return False
     # (c) Log-w band inside.
-    if not _log_w_band_inside(chart, log_w_min, log_w_max):
+    if not _log_w_band_serveable(chart, log_w_min, log_w_max):
         return False
     # (d) Fold source into canonical first quadrant and compute (r,
     # theta_wedge).  Origin raises ValueError — refuse gracefully.
@@ -3191,10 +3203,17 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
         # Far-field chart: far-field-smooth (s, d) at the query's own gamma.
         v1, v2 = _to_farfield_smooth(gamma, y1_eig, y2_eig, chart.arc_map,
                                      chart.arc_map.branch)
+    # Low-w flat extrapolation: clamp below the chart's w_min.
+    # The envelope is smooth and nearly constant below the first Airy
+    # fringe, so evaluating the spline at w_min for queries below it
+    # is accurate to O(w_min^2).  The high end is never clamped (the
+    # guard stack rejects queries above the chart's w_max).
+    log_w_clamped = np.clip(log_w_query, chart.log_w_grid[0],
+                            chart.log_w_grid[-1])
     real = _contract_tensor_spline(chart.real_coeffs, chart.knots,
-                                   gamma, v1, v2, log_w_query)
+                                   gamma, v1, v2, log_w_clamped)
     imag = _contract_tensor_spline(chart.imag_coeffs, chart.knots,
-                                   gamma, v1, v2, log_w_query)
+                                   gamma, v1, v2, log_w_clamped)
     return real + 1j * imag
 
 
@@ -4045,7 +4064,7 @@ class LensAmplificationSurrogate:
             return False
         for chart in self.charts:
             if (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]
-                    and _log_w_band_inside(chart, log_w_min, log_w_max)):
+                    and _log_w_band_serveable(chart, log_w_min, log_w_max)):
                 return True
         return False
 
