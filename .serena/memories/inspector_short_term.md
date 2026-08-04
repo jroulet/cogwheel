@@ -1,92 +1,66 @@
 # Inspector Short-Term Observations
 
-## 2025-08-03: Build schwinger_qd review (third pass — final)
+## 2025-08-04: Build cusp_arm_boundary review (re-confirmed)
 
 ### Scope
-WP1: Add _f_schwinger_mpmath() in _schwinger.py for w > 60 (up to 150)
-with paired N/2N certification, lazy mpmath import.
-WP2: Raise _SADDLE_W_CEILING from 58→148 in surrogate_training.py;
-update operator.py routing to use W_CEILING_SCHWINGER_QD as the
-geometric/arm threshold.
+WP1: Cusp arm actual boundary sweep + enable coverage constant.
+- `scripts/measure_cusp_arm_actual_boundary.py` (new): Measures the
+  actual accept/refuse boundary of cusp_amplification by sampling
+  random source positions and finding minimum image-theta offset from
+  cusp vertex where the arm serves.
+- `cogwheel/lensing/surrogate.py`: `_CUSP_ARM_COVERAGE` changed from
+  0.0 to 0.07 (measured, floored to 2dp conservative).
+- `cogwheel/tests/test_lensing_cusp_arm_coverage.py` (new): 11 tests
+  certifying the constant's value, near-vertex refusal, served-source
+  coverage bound, transition monotonicity, and self-falsification.
 
-Files changed (production):
-- cogwheel/lensing/chang_refsdal/_schwinger.py (new W_CEILING_SCHWINGER_QD=150,
-  new _f_schwinger_mpmath, updated f_schwinger dispatch)
-- cogwheel/lensing/chang_refsdal/operator.py (routing pivot moved from
-  W_CEILING_SCHWINGER to W_CEILING_SCHWINGER_QD, new mpmath sequential batch)
-- cogwheel/lensing/surrogate_training.py (_SADDLE_W_CEILING 58→148)
-- pyproject.toml (new [training] extra with mpmath)
+### Findings summary
+NO BUGS found. All 11 new tests PASS (5.97s). All 69 existing
+surrogate tests PASS (121s). Existing census cusp-window tests PASS.
+Exterior windows tests PASS (85 passed, 1 xfailed, 219s).
 
-Files changed (tests):
-- cogwheel/tests/test_lensing_schwinger.py (new test classes, updated fixtures)
-- cogwheel/tests/test_lensing_operator.py (ONEHOME_WS updated, ceiling references)
-- cogwheel/tests/test_lensing_batched_operator.py (XOR_BAND_LS capped, XOR_REFUSING_W)
-- cogwheel/tests/test_lensing_waveform.py (BAND_EDGE w→59.9, HARD_CORE w→151)
-- cogwheel/tests/test_lensing_surrogate.py (FLIP_REFUSAL_W→160)
-- cogwheel/tests/test_lensing_airy_fold.py (_ABOVE_CEILING_W→160, _W_CEILING→QD,
-  geometric node w→200)
+### Detailed analysis
 
-### Previous findings RESOLVED
-- INS-1-002: RESOLVED. BAND_EDGE w_probes now (30, 40, 59.9), all DD path.
-  HARD_CORE w=151 correctly refuses. test_lensing_waveform.py: 26 PASS, 8.83s.
-- INS-2-001: RESOLVED. Same fix; file runs in 8.83s, well below 5-min ceiling.
-- INS-2-002: STILL OPEN (Librarian scope). SPEC.md not updated for QD ceiling.
+#### Existing test impact of coverage=0.07:
+- cusp_windows=[(0.2, 0.1)]: residual = max(0, 0.1-0.07) = 0.03.
+  Tests querying theta=0.2 (exact cusp) still blocked (delta=0 < 0.03). ✓
+- cusp_windows=[(-0.39, 0.05)]: residual = max(0, 0.05-0.07) = 0.0.
+  Window fully absorbed. No test queries that relied on this window for blocking.
+- cusp_windows=[(theta_lo, 0.02)]: residual = max(0, 0.02-0.07) = 0.0.
+  Window fully absorbed. Tests avoid querying at theta_lo. ✓
+- MutationFalsificationTestCase (skipped/TRAIN_TIER): cusp_windows=((0.7, 0.2)),
+  query theta=0.7: residual = max(0, 0.2-0.07) = 0.13, |0.7-0.7|=0 < 0.13
+  → still blocked → test logic preserved. ✓
 
-### NEW FINDINGS
+#### API usage verified:
+- cusp_amplification(w: float, source, gamma) — correct scalar w usage
+- _cusp_vertex(gamma, beta=0.0, kappa=0.0, source, seed_theta, branch=1) — correct
+- nearest_caustic_point(gamma, beta=0.0, source, kappa=0.0) — correct
+- find_images(source, matrix) — correct
+- use_pearcey_table() — correct (no-arg, returns bool)
+- critical_point(gamma, 0.0, beta=0.0, kappa=0.0, branch=1) — correct
+- macro_matrix(gamma, 0.0, 0.0) — correct
 
-#### BUG: test_lensing_airy_fold.py — 2 tests FAIL (INS-3-001)
-`UniformArmFallThroughTestCase::test_corrupted_certificate_falls_through_to_named_refusal`
-and `test_nan_primitive_falls_through_to_named_refusal` both FAIL.
-These tests use `_CUSP_NODE_W = 80.0`. Previously w=80 > 60 (old ceiling)
-meant the Schwinger evaluator refused after both arms declined. Now w=80
-is in the mpmath band (60 < w <= 150) and evaluates successfully.
-The tests expect SchwingerCertificationError but get a successful result.
-File was modified in this build (updating other constants) but _CUSP_NODE_W
-was missed.
-FIX: Either change _CUSP_NODE_W to 151.0 (above QD ceiling), OR
-separate the fixture for the fall-through tests from the arm-serve tests
-(since those at w=80 exercise the arm correctly at w<150).
+#### Script methodology:
+- Random source sampling in disk of radius 2*max(|gamma|, 0.5)
+- For each served source: finds nearest cusp vertex, then image nearest
+  to vertex, computes angular offset
+- Reports minimum across positive-parity configs, floors to 2dp
+- Saddle parity excluded (converges to 0 due to deep-interior images)
+- Refinement pass at worst-case config with N=10000
 
-#### BUG: test_lensing_levers.py — 1 test FAILS (INS-3-002)
-`LMaxEnforcementBracketTestCase::test_wave_branch_serves_below_ceiling_refuses_above`
-FAILS. Test uses `LEVER5_KERNEL_CEILING = _schwinger.W_CEILING_SCHWINGER = 60`
-and expects refusal at `LEVER5_KERNEL_CEILING + 1 = 61`. But w=61 is now in
-the mpmath band and evaluates successfully. File was NOT modified in this
-build but the production change broke it.
-FIX: Change the above-ceiling probe from `LEVER5_KERNEL_CEILING + 1.0` to
-`_schwinger.W_CEILING_SCHWINGER_QD + 1.0` (= 151.0).
-
-#### TRIVIAL: SPEC.md not updated for W_CEILING_SCHWINGER_QD (INS-2-002, carried)
-SPEC.md says: "oracle-certified to the 1e-10 bar (F005) up to its ceiling
-w <= W_CEILING_SCHWINGER = 60, above which it refuses by name". This is
-now incorrect — f_schwinger evaluates up to w=150 via mpmath. The spec
-should describe the two-tier ceiling (DD=60, QD=150). Librarian scope.
-
-### Math and correctness verified:
-- IBP structure in _f_schwinger_mpmath matches _raw_t_integral_core exactly
-- Certification on reconstructed F (post-prefactor) is deliberate and safe
-  for mpmath precision (dps = 30 + ceil(w) >> needed digits)
-- Mass-sheet phase formula in mpmath batch identical to DD batch
-- Refusal ordering (lowest-index-first) preserved across DD + mpmath + ceiling
-- DD path byte-identity confirmed by DdPathByteIdentityTestCase (golden hex)
-- Lazy import pattern structurally verified by MpmathLazyImportTestCase
-- Operator routing: 3-way split (DD w<=60 / mpmath 60<w<=150 / above-QD w>150)
-  is correct in both _saddle_grid and _positive_parity_grid
-
-### Passing test files:
-- test_lensing_schwinger.py: 66 passed, 3 skipped, 229s
-- test_lensing_waveform.py: 26 passed, 8.83s
-- test_lensing_operator.py: 15 passed, 50s
-- test_lensing_batched_operator.py: 14 passed, 83s
-- test_lensing_surrogate.py: 69 passed, 125s
-- test_lensing_saddle_geometry.py: 30 passed, 7s
-- test_lensing_chang_refsdal_ghost_frame.py: 12 passed, 4s
-
-### Failing test files:
-- test_lensing_airy_fold.py: 2 FAIL (INS-3-001)
-- test_lensing_levers.py: 1 FAIL (INS-3-002)
+#### SPEC consistency:
+- SPEC says "cusp neighborhoods are EXCLUDED (2/3-power singularity;
+  served exact until the cusp fast-serving build)". This is now partially
+  stale — the cusp arm IS serving (Pearcey), and the exclusion window is
+  shrunk by _CUSP_ARM_COVERAGE=0.07. Librarian scope (trivial).
 
 ### Open issues:
-- INS-3-001: test_lensing_airy_fold.py 2 test failures (bug)
-- INS-3-002: test_lensing_levers.py 1 test failure (bug)
-- INS-2-002: SPEC.md not updated (Librarian scope, trivial)
+- INS-4-001: SPEC.md cusp window description stale (Librarian scope, trivial)
+- INS-2-002: SPEC.md not updated for QD ceiling (Librarian scope, trivial, carried)
+
+### Passing test files:
+- test_lensing_cusp_arm_coverage.py: 11 passed, 5.97s
+- test_lensing_surrogate.py: 69 passed, 121s
+- test_lensing_surrogate_census.py (targeted cusp): 2 passed, 1 skipped
+- test_lensing_exterior_windows.py: 85 passed, 1 xfailed, 219s

@@ -98,4 +98,7 @@
   to gamma near parity boundary and high w. Simplifier: LEAN on one WP +
   direct calls; WATCH on monotonicity (dense sweep or post-hoc check);
   safety margin = floor to 2dp (conservative direction); TRIM F_op cross-
-  check from this script (existing script already has it).
+  check from this script (existing script already has it). TRIM coarse
+  scan from 200 to 50 pts; use max(all_refused) not last-consecutive.
+  Coordinate confirmed: delta_theta (theta-radians on critical curve) is
+  consumed directly in _tube_serves, so script outputs in same units.

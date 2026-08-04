@@ -324,10 +324,10 @@ _MACRO_SADDLE_IMAGE_COUNT = 4
 # gate), so the window shrinks to ``max(0, delta_theta - coverage)`` -- the
 # complement of the arm's certified reach.  A query still inside the
 # shrunken window falls through to the arm, then the exact engine.
-# Default 0.0 keeps the 8c windows byte-identical and enables no new
-# serving by default; a nonzero value must be pinned by the corner census
-# against the arm's measured angular coverage (UNVERIFIED until then).
-_CUSP_ARM_COVERAGE = 0.0
+# Measured by scripts/measure_cusp_arm_actual_boundary.py: minimum
+# image-theta offset from cusp at which cusp_amplification serves,
+# across (gamma, w) grid, floored to 2dp (conservative).
+_CUSP_ARM_COVERAGE = 0.07
 
 # Default package-data artifact name (under ``cogwheel/data/``).  The
 # trained global artifact is shipped here once training lands; until then
@@ -2825,10 +2825,10 @@ def _tube_serves(chart: TubeChart, gamma: float, log_w_min: float,
         # outer part of the cusp neighbourhood, so only the residual
         # near-vertex core still excludes the tube.  A query inside this
         # residual window returns False and falls through to the arm, then
-        # the engine.  ``_CUSP_ARM_COVERAGE`` defaults to 0.0, so the
-        # window is unchanged (byte-identical) until the census pins a
-        # nonzero coverage.  The chart schema is untouched -- the shrink is
-        # applied at query time from the module constant, not stored.
+        # the engine.  ``_CUSP_ARM_COVERAGE`` (measured 0.07 rad) shrinks
+        # each window by that amount.  The chart schema is untouched --
+        # the shrink is applied at query time from the module constant,
+        # not stored.
         residual = max(0.0, delta_theta - _CUSP_ARM_COVERAGE)
         if abs((theta - theta_cusp + np.pi) % two_pi - np.pi) < residual:
             return False
