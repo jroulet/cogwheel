@@ -25,6 +25,10 @@ section: Backlog
   retraining, no value churn, no byte-identity gate. **It stops being true the
   moment anything is trained. Do not train until step 9.**
 
+  ## STATUS (2026-08-05): steps 1-8 COMPLETE. Only step 9 (train) remains.
+  Bookkeeping for steps 2, 4 and 8 lagged their commits and was corrected
+  on 2026-08-05; the per-step notes below are now authoritative.
+
   ## Steps, in series
 
   1. **THE ANALYTIC SWEEP — go through the geometry with a fine-toothed comb
@@ -167,7 +171,19 @@ section: Backlog
         1e-gamma runs AFTER step 5 (C8), since it uses the caustic-relative
         coordinate C8 establishes.
 
-  2. **DRIVER MEASUREMENT — the tube fraction.** DEPENDS ON 1e: run only after
+  2. **DONE (2026-08-03). DRIVER MEASUREMENT — the tube fraction.**
+     Ran as `scripts/measure_tube_fraction.py` (grids brought to brief spec
+     in `a4c3fc1`); the result was consumed by step 3 (C6, `1b0a38c`,
+     which records `f_max=0.40`). Shipped as `_DEFAULT_F_MAX = 0.40`.
+     OPEN QUESTION, do not lose: `_DEFAULT_F_FLOOR = 0.16` carries the
+     comment "`f_floor / f_max = 0.4` preserves the original 0.02/0.05
+     design ratio" — i.e. it reads as RATIO-PRESERVING, not measured,
+     whereas this step asked for `f_floor` to be found "likewise" and said
+     explicitly: do NOT choose `f` to reproduce the incumbent. Confirm
+     `f_floor` against the sweep before step 9 bakes it in, or record why
+     the ratio is the right answer.
+     Original spec follows.
+     DEPENDS ON 1e: run only after
      the interpolation coordinate is settled, or the eps this sweeps is a grid
      artifact (F042). Sweep held-out envelope eps against the DIMENSIONLESS
      `eta / R_c`, across gamma, both parities. Find `f_max` where eps crosses
@@ -183,7 +199,11 @@ section: Backlog
      guard deleted; replaced by `assert f_max < 0.5`. No chart is skipped for
      curvature — the old branch becomes vacuous by construction.
 
-  4. **DRIVER MEASUREMENT — the far-zone crossover.** Sweep carrier / ppGO /
+  4. **DONE (2026-08-01, commit `124772a`). DRIVER MEASUREMENT — the
+     far-zone crossover.** Ran as `scripts/measure_far_zone_crossover.py`;
+     `rho*` measured at the 5% carrier bar and consumed by step 5 (C8,
+     `65eebcb`). Original spec follows.
+     Sweep carrier / ppGO /
      chart node cost INWARD in `rho` from the box corner, per gamma, both
      parities, for the real P5/P6 crossover `rho*`. This is an engine run:
      quote unit count x measured per-unit cost before launching.
@@ -208,7 +228,9 @@ section: Backlog
      delete. The test-heavy step: 22 references across
      `test_lensing_ghost_gate.py` and `test_lensing_exterior_windows.py`.
 
-  8. **Make Part 0 mechanical.** A test asserting that no length-unit float in
+  8. **DONE (2026-08-02, commit `0c764aa`). Make Part 0 mechanical.**
+     Shipped as `cogwheel/tests/test_lensing_part0_mechanical.py`.
+     Original spec follows. A test asserting that no length-unit float in
      `cogwheel/lensing/` traces to the prior box, and that no live document or
      public symbol names a retired concept. Extend it to the METHOD form of
      the question: no constant in the geometry or training path may exist to
