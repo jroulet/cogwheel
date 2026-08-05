@@ -7,130 +7,6 @@
 
 ---
 
-## 2026-08-04
-
-
-### Lensing surrogate: low-w flat extrapolation — clamp below chart w_min
-
-`LensAmplificationSurrogate` now serves draws whose `w` lies **below** a
-chart's trained `w_min` by clamping `log_w_query` to `log_w_grid[0]` before
-the spline evaluation (flat extrapolation). The envelope is smooth and
-nearly constant below the first Airy fringe — the correction is
-`O(w_min^2)` relative to the geometric limit (Professor-confirmed), so the
-clamped value is accurate.
-
-`_log_w_band_serveable(chart, log_w_min, log_w_max)` now uses a one-sided
-high-end check: a query band whose *upper* edge exceeds `chart.w_max`
-still fails; a query band whose lower edge falls below `chart.w_min` is
-admitted and clamped. `_evaluate_chart` applies
-`np.clip(log_w_query, chart.log_w_grid[0], ...)` before the spline call.
-Five call sites updated: `_tube_serves`, `_farfield_serves`,
-`_lobe_serves`, `_wedge_serves`, and `may_serve`.
-
-New test file `cogwheel/tests/test_lensing_low_w_extrapolation.py`
-(220 lines; synthetic charts, no engine dependency).
-
----
-
-
-### Born residual chart trained and shipped (far exterior rho > 2)
-
-The Born exterior rung is now a **complete, zero-quadrature serve path**
-for exterior-to-caustic draws (`rho > 2`) on both parities. The fact-4
-slot in `likelihood._surrogate_coefficients` was already wired; it now has
-a trained artifact to attach.
-
-`cogwheel/data/born_residual_chart.npz` (≈ 8 KB) is the shipped artifact:
-a 3-D tensor-product cubic spline of the Born residual
-`R(w; gamma, rho) = F_exact_demod(w) − F_carrier_demod(w)` over a
-7 gamma × 5 rho × 10 w sparse grid in the min-relative delay frame.
-Training runtime ≈ 11 s; artifact is package-data.
-
-Training driver: `scripts/train_born_residual.py` (141 lines).
-
-When `LensedRelativeBinningLikelihood` is constructed with
-`born_residual_chart=BornResidualChart.load(...)`, exterior draws are
-served `F_carrier + R` from the chart. The default
-(`born_residual_chart=None`) is unchanged.
-
----
-
-
-### Lensing surrogate: cusp arm coverage enabled (_CUSP_ARM_COVERAGE = 0.07 rad)
-
-`_CUSP_ARM_COVERAGE` in `cogwheel/lensing/surrogate.py` is set to
-`0.07 rad`. The value was derived by sweeping `delta_theta` from each cusp
-vertex across `gamma = [0.1..1.5]`, `w = [10..40]` and reading the minimum
-angle at which `cusp_amplification` accepts a node (measured by
-`scripts/measure_cusp_arm_actual_boundary.py`). With the Pearcey table
-artifact registered, draws within 0.07 rad of the cusp vertex are now
-served by the certified Pearcey arm instead of the exact engine.
-
-New files: `cogwheel/tests/test_lensing_cusp_arm_coverage.py` (393 lines),
-`scripts/measure_cusp_arm_actual_boundary.py` (239 lines).
-
----
-
-
-### Schwinger quad-double extension — mpmath path for 60 < w ≤ 150
-
-The exact Schwinger wave evaluator gains a second tier for
-`60 < w <= W_CEILING_SCHWINGER_QD = 150`: `_schwinger._f_schwinger_mpmath`
-(lazy-imported mpmath, `dps = 30 + ceil(w)`, paired N/2N certification).
-`operator.py` routes `w ∈ (60, 150]` to sequential mpmath evaluations;
-`surrogate_training._SADDLE_W_CEILING` raised from 58 to 148. Above
-`w = 150` the evaluator still refuses by name (`SchwingerCertificationError`).
-
-There are now **three distinct ceilings** (F019 — extended):
-`W_CEILING_SCHWINGER = 60` (dd-quadrature), `DD_PRODUCT_CEILING = 60`
-(1F1 product `w*sqrt(s)`), `W_CEILING_SCHWINGER_QD = 150` (mpmath hard
-bound) — all separate variables.
-
----
-
-
-### Fixed: set min_gamma_band=1e-6 (log-reach spacing makes large floor redundant)
-
-`surrogate_training.stable_gamma_bands` default bisection floor reduced
-from `0.005` to `1e-6`. The log-reach gamma axis (`1 - gamma`) places
-nodes well inside any finite-width band; the 0.005 floor was a legacy
-guard for the retired uniform-gamma axis. Setting the floor to `1e-6`
-lets bisection proceed to near-float resolution. Total dropped prior
-mass ≈ 1.5e-6 (fraction ≈ 1e-6). Region 10 ("dropped slivers") in the
-coverage-map TODO is **closed**.
-
----
-
-
-### Measurement: interlobe corridor is geometrically negligible (region 2 closed)
-
-`scripts/probe_interlobe_corridor.py` measures the inter-lobe corridor
-geometry at `gamma = 1.1, 1.3, 1.5, 2.0`: corridor width/centroid-sep
-ratio 6–17 %; lobe-interior area fraction in corridor **0.00 %** at all
-gammas. Region 2 ("interlobe corridor") in the coverage-map TODO is
-**closed**. No follow-up wiring is needed.
-
----
-
-
-### Lensing: fold-ppGO interior handoff serve path
-
-Interior positive-parity draws (`rho <= 1.0`) above the `InteriorWedgeChart`
-DD-product w-ceiling are now served by `likelihood._surrogate_coefficients`
-(fold-ppGO handoff) when `xi_min >= _XI_FOLD_THRESHOLD = 4.0` AND the
-per-pair uniform error estimate is below `CERTIFICATION_BAR`. Draws failing
-either gate still fall through to the exact engine.
-
-`surrogate_census.characterize_sample` records the new category
-`'ppgo_fold'`, extending the census breakdown from 6-way to **7-way** MECE
-(`gamma-guard / dropped-sliver / born / cusp-window / refusal-ball /
-out-of-box / ppgo_fold`).
-
-New test file `cogwheel/tests/test_lensing_fold_ppgo_handoff.py`
-(897 lines).
-
----
-
 ## 2026-08-03
 
 
@@ -1040,3 +916,211 @@ table corners, raising `IndexError` on every `F_op` call with `max_order >= 1`;
 out-of-range cells are now clamped (they carry zero coefficients, so the
 clamped lookup is multiplied away). Both found by the independent test suites'
 mpmath oracles. See FINDINGS F005 for the remaining open gap at `L > ~30`.
+
+---
+
+## 0000-00-00
+
+## 2026-08-04
+
+### Born residual chart trained and shipped (far exterior rho > 2)
+
+The Born exterior rung is now a **complete, zero-quadrature serve path**
+for exterior-to-caustic draws (`rho > 2`) on both parities.  The
+fact-4 slot in `likelihood._surrogate_coefficients` was already wired; it
+now has a trained artifact to attach.
+
+**Shipped artifact:** `cogwheel/data/born_residual_chart.npz` (≈ 8 KB).
+The chart is a 3-D tensor-product cubic spline of the Born residual
+
+    R(w; gamma, rho) = F_exact_demod(w) − F_carrier_demod(w)
+
+over a 7 gamma × 5 rho × 10 w sparse grid, all in the min-relative delay
+frame.  Training runtime ≈ 11 s; artifact is package-data and
+content-hash-verified at load.
+
+**Training driver:** `scripts/train_born_residual.py` (141 lines).
+Produces the npz from the exact engine directly; no intermediate steps.
+
+When `LensedRelativeBinningLikelihood` is constructed with
+`born_residual_chart=BornResidualChart.load(...)`, exterior draws that
+were previously handed to the exact engine are now served
+`F_carrier + R` from the chart.  The default (`born_residual_chart=None`)
+is unchanged — exterior draws continue to fall through to the exact engine.
+
+Commit: `849e580`
+
+---
+
+## 2026-08-04
+
+### Lensing surrogate: cusp arm coverage enabled (_CUSP_ARM_COVERAGE = 0.07 rad)
+
+The `_CUSP_ARM_COVERAGE` constant in `cogwheel/lensing/surrogate.py` is now
+set to `0.07 rad`, enabling the Pearcey arm to serve draws within that
+angular distance of each cusp vertex.
+
+**Background:** the surrogate's `select_chart` previously excluded a
+generous cusp window from tube charts and served those draws with the exact
+quadrature engine.  The new constant was derived by sweeping
+`delta_theta` from each cusp vertex across `gamma = [0.1..1.5]`,
+`w = [10..40]` and reading the minimum angle at which
+`cusp_amplification` actually *accepts* a node (measured by
+`scripts/measure_cusp_arm_actual_boundary.py`).  The minimum measured
+boundary is 0.07 rad across all configurations.
+
+With the Pearcey table artifact (shipped in commit `c715bcd`) registered
+and `_CUSP_ARM_COVERAGE = 0.07 rad`, draws within 0.07 rad of the cusp
+vertex are now served by the certified Pearcey arm instead of the exact
+engine.  The residual exclusion window beyond the arm's certified reach
+continues to fall through to the exact engine.
+
+**New files:**
+- `cogwheel/tests/test_lensing_cusp_arm_coverage.py` (393 lines)
+- `scripts/measure_cusp_arm_actual_boundary.py` (239 lines)
+
+Commit: `ddd8980`
+
+---
+
+## 2026-08-04
+
+### Lensing: fold-ppGO interior handoff serve path
+
+Interior positive-parity draws (`rho <= 1.0`) that fall above the
+`InteriorWedgeChart` DD-product w-ceiling — where no trained chart covers
+the point — are now served directly by
+`likelihood._surrogate_coefficients` (the "fold-ppGO handoff") when two
+conditions are simultaneously met:
+
+1. The merging fold pair is well-resolved:
+   `xi_min = (3 * w_min * Delta_tau / 4)^{2/3} >= _XI_FOLD_THRESHOLD = 4.0`
+2. The per-pair uniform error estimate (`_uniform_error_estimate`) is below
+   `CERTIFICATION_BAR`.
+
+Reconstruction mirrors the Born rung path (`reconstruct_farfield` with
+`FARFIELD_KERNEL_SUM`).  Draws failing either gate still fall through to
+the exact engine as before.
+
+`surrogate_census.characterize_sample` mirrors the same gate and records
+the new category `'ppgo_fold'` for qualifying draws, extending the census
+breakdown from 6-way to **7-way** MECE
+(`gamma-guard / dropped-sliver / born / cusp-window / refusal-ball /
+out-of-box / ppgo_fold`).
+
+**New test file:** `cogwheel/tests/test_lensing_fold_ppgo_handoff.py`
+(897 lines; 10 tests covering accuracy vs exact engine at high xi, xi gate
+refusal for near-caustic sources, envelope reconstruction round-trip,
+self-falsification witnesses, c_A fine gate refusal, default path
+unaffected, census `ppgo_fold` recording).
+
+Commit: `d9e88a2`
+
+---
+
+## 2026-08-04
+
+### Lensing surrogate: low-w flat extrapolation — clamp below chart w_min
+
+`LensAmplificationSurrogate` now serves draws whose `w` lies **below** a
+chart's trained `w_min` by clamping `log_w_query` to `log_w_grid[0]` before
+the spline evaluation (flat extrapolation).  The envelope is smooth and
+nearly constant below the first Airy fringe — the correction is
+`O(w_min^2)` relative to the geometric limit (Professor-confirmed), so the
+clamped value is accurate.
+
+**Changes in `cogwheel/lensing/surrogate.py`:**
+
+- `_log_w_band_serveable(chart, log_w_min, log_w_max)`: the low-end check
+  is now **open** (a query band whose *upper* edge exceeds `chart.w_max`
+  still fails; a query band whose lower edge is below `chart.w_min` is
+  admitted).
+- `_evaluate_chart`: applies `np.clip(log_w_query, chart.log_w_grid[0], ...)` 
+  before the spline call so the grid is never under-shot.
+- Five call sites updated: `_tube_serves`, `_farfield_serves`,
+  `_lobe_serves`, `_wedge_serves`, and `may_serve`.
+
+**New test file:** `cogwheel/tests/test_lensing_low_w_extrapolation.py`
+(220 lines; synthetic charts, no engine dependency).
+
+Commit: `afff8e7`
+
+---
+
+## 2026-08-04
+
+### Fixed: set min_gamma_band=1e-6 (log-reach spacing makes large floor redundant)
+
+`surrogate_training.stable_gamma_bands` (and its caller
+`band_caustic_structure`) now use `min_gamma_band = 1e-6` as the default
+bisection floor, replacing the previous `0.005`.
+
+**Why:** the log-reach gamma axis (`1 - gamma`) places nodes well inside
+ANY finite-width band regardless of raw-gamma bandwidth; the 0.005 floor
+was a legacy guard for the retired uniform-gamma axis.  Setting the floor
+to `1e-6` lets bisection proceed to near-float resolution, which is where
+the degenerate `gamma = 0` origin produces numerical-noise bands (~1e-10
+scale) that the new floor safely discards.
+
+**Effect:** total dropped prior mass ≈ 1.5e-6 (fraction ≈ 1e-6) — Region 10
+("dropped slivers") in the coverage-map TODO is now **closed**.
+
+No surrogate geometry, serve path, or chart format is affected; this is a
+training-time parameter change only.
+
+Commit: `70affbb`
+
+---
+
+## 2026-08-04
+
+### Measurement: interlobe corridor is geometrically negligible (region 2 closed)
+
+`scripts/probe_interlobe_corridor.py` (402 lines) measures the inter-lobe
+corridor geometry for the macro-saddle surrogate at
+`gamma = 1.1, 1.3, 1.5, 2.0`:
+
+- Corridor width / centroid-separation ratio: **6–17 %** depending on gamma.
+- Area fraction of lobe interior captured by the corridor: **0.00 %** at
+  all measured gammas.
+
+**Conclusion:** the corridor exists geometrically but captures zero prior
+mass from lobe interiors.  Region 2 ("interlobe corridor") in the
+coverage-map TODO is **closed**; the exact-engine fallback handles the
+negligible corridor with no accuracy or efficiency concern, and no
+follow-up wiring is needed.
+
+Commit: `de1aebd`
+
+---
+
+## 2026-08-04
+
+### Schwinger quad-double extension — mpmath path for 60 < w ≤ 150
+
+The exact Schwinger wave evaluator gains a second tier for
+`60 < w <= W_CEILING_SCHWINGER_QD = 150`:
+
+- **`_schwinger._f_schwinger_mpmath`**: lazy-imported `mpmath` evaluated at
+  `dps = 30 + ceil(w)`, with paired N/2N certification at the same 3e-10
+  tolerance as the dd path.
+- **`operator.py`**: the per-node routing in both `_positive_parity_grid`
+  and `_saddle_grid` now forwards `w ∈ (60, 150]` to sequential mpmath
+  evaluations rather than issuing a named refusal.
+- **`surrogate_training.py`**: `_SADDLE_W_CEILING` raised from 58 to 148
+  to match the new engine ceiling.
+- Above `w = 150` the evaluator still refuses by name
+  (`SchwingerCertificationError`).
+
+There are now **three distinct ceilings** (F019 — extended):
+`W_CEILING_SCHWINGER = 60` (dd-quadrature frequency domain),
+`DD_PRODUCT_CEILING = 60` (1F1 product `w*sqrt(s)`), and
+`W_CEILING_SCHWINGER_QD = 150` (hard mpmath upper bound) — all three are
+separate variables, none implies the others.
+
+Tests in `test_lensing_schwinger.py`, `test_lensing_batched_operator.py`,
+`test_lensing_operator.py`, and `test_lensing_airy_fold.py` updated to
+probe `w = 151` (above the QD ceiling) for refusal tests that previously
+used `w = 61/80` (now served by the mpmath path).
+
+Commit: `2e387c9`

@@ -210,31 +210,6 @@ Tag conventions:
     saddle variants are deleted or re-derived from geometry — never retuned.
     Any that survive carry a one-line reason that names a physical scale.
 
-- **Wire the Born carrier + band-split residual charts into the serve path**
-  `[→ spec]` — derivation AND implementation landed 2026-07-28 (commit
-  `31ee133`, FINDINGS F023-F026): `_born_factors` returns the derived
-  closed-form `b1`/`a0`; `born_lead_carrier` is the lead-only serve object;
-  `channels.born_carrier_from_partition` assembles the band split at
-  `w * Delta_tau = RHO_END` (read from the partition, never recomputed);
-  guard A is re-keyed to that same split and the module gains the exact
-  `gamma < 3/4` exterior fence; the `'born'` census category is landed in
-  `surrogate_census.classify_fallthrough` (annulus draws no longer
-  mis-attributed to `out-of-box`). What remains is the LAST step only:
-
-  **C8 blocker discharged.** Coordinates restated in `rho`; annulus region
-  artifact retired. **C11 landed** (2026-08-01): `BornResidualChart` frozen
-  dataclass (`cogwheel/lensing/born_residual_chart.py`) defined; fact-4 slot
-  in `likelihood._surrogate_coefficients` wired to conditionally serve when
-  a chart is attached. When chart is `None` (default), annulus still falls
-  through to exact engine — correct.
-
-  **What remains — TRAIN_TIER only:** once the residual chart
-  `F_exact - F_carrier` is driver-trained, attach the `BornResidualChart`
-  instance to the likelihood object to enable zero-quadrature serving. The
-  fall-through is the correct behavior until then.
-
-  Saddle branch: see [[lensing_saddle_born]].
-
 
 - **CAUSTIC-RELATIVE COORDINATES — retire every prior-box length from the
   serving design** `[→ spec]` — the coverage map's regions are carved by
@@ -1022,11 +997,11 @@ Tag conventions:
      real physics and SURVIVES — it is the fence built on top of it that goes.
      See [[lensing_caustic_relative_coordinates]].
 
-  4. **C11 landed** (2026-08-01): wiring infrastructure in place via
-     `BornResidualChart` (see [[lensing_born_b1_derivation]]). The fact-4
-     slot in `likelihood.py::_surrogate_coefficients` serves both parities
-     when a chart is attached. Remaining: TRAIN_TIER — train the residual
-     chart and attach it.
+  4. ~~**DONE (2026-08-04, commit `849e580`).**~~ `BornResidualChart` wiring
+     in place (C11, 2026-08-01); residual chart trained and shipped as
+     package data `cogwheel/data/born_residual_chart.npz`.  Both parities
+     served when a chart instance is attached.  See
+     `completed.d/2026-08-04_born-residual-chart-train-ship.md`.
 
   Recorded 2026-07-28 after the owner noticed it was missing from the plan
   list; carrier/gate/census landed the same day.

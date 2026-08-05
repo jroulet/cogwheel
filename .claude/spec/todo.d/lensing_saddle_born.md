@@ -37,11 +37,11 @@ section: Backlog
      real physics and SURVIVES — it is the fence built on top of it that goes.
      See [[lensing_caustic_relative_coordinates]].
 
-  4. **C11 landed** (2026-08-01): wiring infrastructure in place via
-     `BornResidualChart` (see [[lensing_born_b1_derivation]]). The fact-4
-     slot in `likelihood.py::_surrogate_coefficients` serves both parities
-     when a chart is attached. Remaining: TRAIN_TIER — train the residual
-     chart and attach it.
+  4. ~~**DONE (2026-08-04, commit `849e580`).**~~ `BornResidualChart` wiring
+     in place (C11, 2026-08-01); residual chart trained and shipped as
+     package data `cogwheel/data/born_residual_chart.npz`.  Both parities
+     served when a chart instance is attached.  See
+     `completed.d/2026-08-04_born-residual-chart-train-ship.md`.
 
   Recorded 2026-07-28 after the owner noticed it was missing from the plan
   list; carrier/gate/census landed the same day.
