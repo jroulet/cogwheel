@@ -2989,8 +2989,8 @@ def _build_wedge_chart(*, gamma_band: tuple[float, float], parity: int,
     the ``tau_c``-demodulated `INTERIOR_SACR_C` envelope on an
     `InteriorWedgeChart`.  ``from_wedge_engine`` applies the DD-product
     ``w``-ceiling (``w * r * r_caustic <= _DD_PRODUCT_MARGIN``) and builds the
-    caustic arc-length ``theta_wedge -> s`` map INTERNALLY -- neither is
-    re-derived here.
+    cusp-adapted angular (``u = d**(2/3)``) ``theta_wedge -> u`` map INTERNALLY
+    -- neither is re-derived here.
 
     Only positive-parity (``parity == 1``) bands have an origin-enclosing
     astroid interior; a macro-saddle call is a programming error (the saddle

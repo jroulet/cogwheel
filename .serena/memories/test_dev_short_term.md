@@ -1,5 +1,45 @@
 # Test Dev Short-Term Observations
 
+- WP1/WP2 SHARD B REWRITE of test_lensing_wedge_dd_arclength.py (retired
+  arc-length axis -> cusp-adapted u-axis). Full file 38s: 13 passed / 6
+  skipped (DDWCeiling train-tier). RETIRED ArcLengthAxisTestCase; dropped
+  imports cumulative_trapezoid/caustic_speed/NODE_ATOL; added
+  _wedge_cusp_axis_map, _wedge_theta_waist, _log_reach_gamma_axis,
+  _FARFIELD_ARC_MAP_SIZE. Only the module docstring still NAMES the retired
+  class (as prose noting removal) — no stale code/imports (grep clean).
+  CuspAdaptedAxisTestCase (7 tests, 2 engine builds ~one per waist side):
+  setUpClass computes rep_gamma=median(_log_reach_gamma_axis(...)) and
+  waist=_wedge_theta_waist(rep_gamma) IDENTICALLY to production so LOW range
+  (max(1e-2,waist-0.35),waist-0.05) and HIGH (waist+0.05,min(pi/2-1e-2,
+  waist+0.35)) reliably land on the intended sides. Independent oracle
+  _reconstruct_u: LOW u=theta^(2/3)-theta_lo^(2/3); HIGH u=(pi/2-theta_lo)
+  ^(2/3)-(pi/2-theta)^(2/3), theta_lo=theta_fine[0]. Tests: shape (2,2001)
+  + endpoints; bit-for-bit vs _wedge_cusp_axis_map; u-row strictly
+  increasing from ~0; per-side closed-form match <1e-9 + wrong-side teeth
+  >1e-3; uniform-in-u (max|du-mean|<1e-9); node clustering toward cusp (LOW
+  theta-diff monotone increasing, HIGH monotone decreasing); diagnostic PNGs
+  cusp_adapted_axis_{low,high}.png.
+  DDWCeilingTestCase kept VERBATIM (DD-product cap untouched by WP1/WP2),
+  train-tier gated. NoDDCapLowWTestCase kept (method renamed
+  test_arc_length_still_active -> test_cusp_axis_still_active).
+  SelfFalsificationTestCase rewritten: test_perturbed_umap_degrades_serve
+  corrupts row-1 (u) over central band (0.05,0.95) by +0.30*u_max across 27
+  cell-midpoint queries (gmids x rmids x tmids = 3x3x3). serve does
+  v2=np.interp(theta,theta_to_s[0],theta_to_s[1]) so corrupting row-1 is
+  load-bearing; np.interp safe (xp=theta_fine stays monotone). MEASURED
+  distribution: clean eps p50=2.79e-2/p90=5.09e-2/max=7.06e-2; degraded
+  p50=3.63e-1/p90=5.49e-1; move p50=3.56e-1 — all >> 5e-2 bar. Asserts
+  median(clean)<bar, median(bad)>bar, median(move)>bar, median(bad)>
+  median(clean). Report to self_falsification_umap_eps.txt (p50/p90/max,
+  NOT a bare max). GOTCHA: pass LOG w to _evaluate_chart, LINEAR w to
+  ChangRefsdalChannels (same as prior memory). Passed FIRST run, no tuning.
+  BACKWARD-COMPAT: my change is TEST-ONLY; grep confirms nothing outside the
+  file imports its symbols (only unrelated method-name collision
+  test_unlensed_bins_reconstruct_unity in test_lensing_waveform.py). Cannot
+  regress neighbors. This CLOSES the prior "stale prose, not broken" flag on
+  this file — it is now fully migrated to the u-axis, not just tolerant of it.
+
+
 - WP1/WP2 SHARD A T4/T5/T6 EXTENSION of test_lensing_interior_wedge_chart.py
   (77 -> 92 tests, full file 79s green). Added 3 classes + a self-contained
   helper each.
