@@ -51,7 +51,48 @@ Last session: 2026-08-04 production batch. Clean.
   (consumers=8) -> Librarian post-build changelog note (no training in-build).
 
 2026-08-06 brief_mpmath_band_tests [PLAN DONE]: is_test_only=true, 0 Coder
-  WPs, 3 mandated shards. Prof levers: (1)DDW dd_cap=58/(r_max*reach_max)
+  WPs, 3 mandated shards. Prof levers: 2026-08-06 brief_wedge_cusp_axis_and_subdivision (PLAN, Prof+Simp):
+- 2 WPs (WP1 surrogate.py, WP2 surrogate_training.py; WP2 dep WP1).
+  Reuse theta_to_s field/serve UNCHANGED (table-driven np.interp) — only
+  change what from_wedge_engine WRITES: arc-length s -> cusp-adapted
+  u=d^(2/3), d=dist to near cusp, OFFSET to 0 at theta_lo (Prof Q1:
+  offset harmless, np.interp translation-invariant; do NOT store raw
+  d^(2/3) — high side decreasing). Low side u=theta^(2/3)-theta_lo^(2/3);
+  high side u=(pi/2-theta_lo)^(2/3)-(pi/2-theta)^(2/3).
+- Split at theta_waist=argmin_theta r_caustic (NOT pi/4). Shared helper
+  _wedge_theta_waist via scipy minimize_scalar on TRUE geometry.r_caustic
+  (no closed form — numerical ray inversion). Oracle: pin VALUE
+  |r_caustic(g,waist)-g|<1e-6 (NOT theta_waist itself; flat min).
+- THREAD axis_origin (0 or pi/2) as tile attr -> _build_wedge_chart ->
+  from_wedge_engine (Prof Q3: explicit, not re-derived; belt assert vs
+  midpoint-vs-waist). from_wedge_engine param default None = internal
+  fallback for existing test callers.
+- Prof Q4: build FINE map grid uniform-in-U (theta_fine=images of uniform
+  u) so np.interp err equidistributed near cusp (u''~theta^-4/3). Keep
+  theta-uniform spline NODES (brief's 6.88e-4 used theta-uniform samples).
+  _NODE_EXACT_TOL 1e-7 ok.
+- Schema bump v1->v2, drop v1 from _KNOWN_WEDGE_AXIS_SCHEMAS -> stale
+  s-axis hard-refuse (Simp E lean). Keep _validate_theta_to_s SHARED/
+  unchanged (tube+lobe use it, start-at-0 real for arc len) -> OFFSET not
+  relax (override Simp F option-2).
+- WP2: _wedge_interior_tiles(gamma,r_extent,n_per_side) emits 2 angular
+  cols (one/side, split waist) x n_per_side radial; carry axis_origin.
+  NEW _subdivide_wedge_tile (single-level, halve in (r,u); u-MIDPOINT not
+  theta-mid; rebuild _build_wedge_chart; re-gate). Wire: gated wedge tile
+  -> subdivide (was ladder gap). Mirror interior_w_nodes 3-way (INS-2-001).
+- Tests disjoint: A=test_lensing_interior_wedge_chart.py (transverse cut
+  u<theta<s & u<1e-3; tiler >=2 cols@waist + value oracle; u-mid split;
+  coarse->subdiv->pass feedback @tiny grids <10s; node-exact+off-node;
+  v1 refuse). B=test_lensing_wedge_dd_arclength.py (retire ArcLengthAxis
+  -> CuspAdaptedAxis map monotone/offset/sign; keep DDWCeiling; update
+  SelfFalsification). Report p50/p90/max + worst locus (never bare max).
+- Residual (Prof Q7): waist migrates ~0.01rad in 0.04 band; band-edge tile
+  could get wrong-cusp sliver — known small residual, first suspect if
+  axis tile fails near band edge.
+- Doc-sync (SPEC axis schema, DATA_CONTRACTS wedge tag, arc-len retired
+  for wedge) = POST-GATE Librarian, NOT a Coder WP.
+
+2026-08-06 brief_mpmath_band_tests: (1)DDW dd_cap=58/(r_max*reach_max)
   monotone-dec; r_max<1 hard (interior), so ALSO widen DD_GAMMA_RANGE up
   (reach grows w/ shear, stay <1) to get r_max*reach>1 => dd_cap<60; keep
   DD_W_RANGE[1]=500 above cap so it still binds; keep some nodes unrefused;

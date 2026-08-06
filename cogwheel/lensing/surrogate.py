@@ -97,6 +97,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
 from scipy.interpolate import BSpline, make_interp_spline
+from scipy.optimize import minimize_scalar
 
 from cogwheel.lensing.chang_refsdal import (
     ChangRefsdalChannels, farfield_envelope_from_partition, geometry)
@@ -304,7 +305,13 @@ _KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA_V1, _LOBE_AXIS_SCHEMA})
 # radius function r_caustic(gamma, theta); a chart carrying this tag can ONLY
 # be queried in wedge-fixed coordinates.  An old absolute-coordinate interior
 # artifact must hard-refuse at load.
-_WEDGE_AXIS_SCHEMA = 'wedge_caustic_relative_v1'
+#
+# v2 (this build): the angular spline axis is the cusp-adapted coordinate
+# u = d**(2/3) (d = angular distance to the near astroid cusp), NOT the
+# retired arc-length ``s`` of v1.  The coordinate SEMANTICS changed, so v1 is
+# dropped from the known set: a stale v1 (arc-length) artifact hard-refuses at
+# load rather than being served at the wrong angular coordinate.
+_WEDGE_AXIS_SCHEMA = 'wedge_caustic_relative_v2'
 _KNOWN_WEDGE_AXIS_SCHEMAS = frozenset({_WEDGE_AXIS_SCHEMA})
 
 
@@ -553,6 +560,123 @@ class _WedgeCausticMap:
     gamma_nodes: np.ndarray
     theta_nodes: np.ndarray
     r_table: np.ndarray
+
+
+def _wedge_theta_waist(gamma: float) -> float:
+    """Locate the astroid caustic waist ``argmin_theta r_caustic(gamma, theta)``.
+
+    The astroid's two cusps sit at the wedge edges ``theta_wedge = 0`` and
+    ``pi/2``, where the directional caustic reach ``r_caustic`` is largest;
+    the reach is smallest at the WAIST, the regular caustic point between the
+    cusps.  The waist migrates up to ~30% away from ``pi/4`` as the shear
+    stretches the astroid (worst at large ``gamma``), so it must be found
+    numerically, NOT hard-coded to ``pi/4``.  The waist splits the wedge into
+    a low-cusp side (``d = theta``) and a high-cusp side (``d = pi/2 - theta``)
+    for the cusp-adapted angular map.
+
+    ``r_caustic`` has no closed form (it inverts the critical curve by ray
+    refinement), so the minimum is found with a bounded scalar minimiser over
+    the open interval ``(0, pi/2)``.  The minimum is FLAT (``r_caustic`` is
+    quadratic in ``theta`` about the waist), so ``theta_waist`` itself is only
+    loosely determined; the exact physical invariant used to certify this
+    helper is the VALUE ``r_caustic(gamma, theta_waist) == gamma`` (the waist
+    radius equals the shear), which the flat minimum pins to well below 1e-6.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude (positive-parity astroid, ``0 < gamma < 1``).
+
+    Returns
+    -------
+    float
+        The wedge angle ``theta_waist`` in ``(0, pi/2)`` at which the
+        directional caustic reach is minimal.
+    """
+    half_pi = np.pi / 2.0
+    # Pad the endpoints off the cusps so the minimiser never probes the
+    # ray-inversion exactly at a cusp; the waist is well interior (~0.55-0.74).
+    result = minimize_scalar(
+        lambda theta: geometry.r_caustic(float(gamma), float(theta)),
+        bounds=(1e-4, half_pi - 1e-4), method='bounded',
+        options={'xatol': 1e-6})
+    return float(result.x)
+
+
+def _wedge_cusp_axis_map(theta_lo: float, theta_hi: float, origin: str
+                         ) -> tuple[np.ndarray, np.ndarray]:
+    """Build the cusp-adapted angular spline-axis map for one wedge tile.
+
+    Reparametrises the wedge angular coordinate by ``u = d**(2/3)`` where
+    ``d`` is the angular distance to the NEAR astroid cusp (``theta_wedge = 0``
+    for ``origin='low'``; ``pi/2`` for ``origin='high'``).  The ``2/3``
+    exponent is the exact, gamma-universal caustic-reach cusp scaling
+    (``r_caustic ~ const - c * d**(2/3)``), so charting the interior envelope
+    in ``u`` absorbs that power and keeps the spline coordinate smooth instead
+    of diverging as ``d**(-1/3)`` along the raw ``theta`` axis.
+
+    Both per-side forms are monotone INCREASING in ``theta`` and offset so
+    ``u(theta_lo) = 0`` (the offset is harmless: ``np.interp`` is translation-
+    invariant in the tabulated ordinate).  The fine map is built UNIFORM IN
+    ``u`` -- its ``theta`` nodes are the inverse images of an evenly spaced
+    ``u`` grid -- so the serve-time ``np.interp`` error is equidistributed
+    near the cusp, where ``u'' ~ d**(-4/3)`` is largest.
+
+    Parameters
+    ----------
+    theta_lo, theta_hi : float
+        Wedge-angle tile bounds, radians, ``0 <= theta_lo < theta_hi <= pi/2``.
+    origin : str
+        ``'low'`` (near cusp at ``theta = 0``, ``d = theta``) or ``'high'``
+        (near cusp at ``theta = pi/2``, ``d = pi/2 - theta``).
+
+    Returns
+    -------
+    theta_fine : np.ndarray
+        Shape ``(_FARFIELD_ARC_MAP_SIZE,)`` strictly increasing wedge angles
+        spanning ``[theta_lo, theta_hi]`` exactly at the endpoints.
+    u_fine : np.ndarray
+        Matching strictly increasing cusp-adapted coordinate with
+        ``u_fine[0] = 0``.
+
+    Raises
+    ------
+    ValueError
+        If ``origin`` is not ``'low'`` or ``'high'``, or the bounds are
+        malformed.
+    """
+    theta_lo = float(theta_lo)
+    theta_hi = float(theta_hi)
+    if not theta_lo < theta_hi:
+        raise ValueError(
+            f'theta_lo ({theta_lo}) must be strictly below theta_hi '
+            f'({theta_hi}).')
+    exponent = 2.0 / 3.0
+    if origin == 'low':
+        # d = theta; u(theta) = theta**(2/3) - theta_lo**(2/3).
+        # Inverse of a uniform-u node: theta = (u + theta_lo**(2/3))**(3/2).
+        base_lo = theta_lo ** exponent
+        u_max = theta_hi ** exponent - base_lo
+        u_fine = np.linspace(0.0, u_max, _FARFIELD_ARC_MAP_SIZE)
+        theta_fine = (u_fine + base_lo) ** 1.5
+    elif origin == 'high':
+        # d = pi/2 - theta;
+        # u(theta) = (pi/2 - theta_lo)**(2/3) - (pi/2 - theta)**(2/3).
+        # Inverse: theta = pi/2 - ((pi/2 - theta_lo)**(2/3) - u)**(3/2).
+        half_pi = np.pi / 2.0
+        base_lo = (half_pi - theta_lo) ** exponent
+        u_max = base_lo - (half_pi - theta_hi) ** exponent
+        u_fine = np.linspace(0.0, u_max, _FARFIELD_ARC_MAP_SIZE)
+        # Clip the (physically >= 0) inversion base against FP round-off before
+        # the 3/2 power so a boundary node cannot yield a NaN.
+        theta_fine = half_pi - np.clip(base_lo - u_fine, 0.0, None) ** 1.5
+    else:
+        raise ValueError(f"origin must be 'low' or 'high'; got {origin!r}.")
+    # Force exact endpoints so the serve-time np.interp never extrapolates
+    # (FP round-off in the (2/3)->(3/2) round-trip is ~1e-16 relative).
+    theta_fine[0] = theta_lo
+    theta_fine[-1] = theta_hi
+    return theta_fine, u_fine
 
 
 def _caustic_arclength_map(gamma_nodes, theta_lo: float, theta_hi: float,
@@ -3721,7 +3845,8 @@ class LensAmplificationSurrogate:
                           n_r: int = _DEFAULT_PARAM_NODES,
                           n_theta_wedge: int = _DEFAULT_PARAM_NODES,
                           w_nodes_per_decade: int = _DEFAULT_W_NODES_PER_DECADE,
-                          definition: str = _INTERIOR_ENVELOPE_DEFINITION
+                          definition: str = _INTERIOR_ENVELOPE_DEFINITION,
+                          axis_origin: str | None = None
                           ) -> 'LensAmplificationSurrogate':
         """Train a caustic-relative wedge-interior surrogate on a dense grid.
 
@@ -3758,6 +3883,14 @@ class LensAmplificationSurrogate:
             Density of the dense log-w training axis (default 15).
         definition : str, optional
             Envelope-definition tag (default INTERIOR_SACR_C).
+        axis_origin : str or None, optional
+            Near-cusp side for the cusp-adapted angular map: ``'low'`` (cusp
+            at ``theta_wedge = 0``) or ``'high'`` (cusp at ``pi/2``).  When
+            ``None`` (default) the origin is derived internally from the tile
+            midpoint relative to the caustic waist ``_wedge_theta_waist``.
+            When supplied it MUST agree with that classification (an internal
+            assertion guards against train/serve skew, this repo's #1 bug
+            class); a mismatch raises ``ValueError``.
 
         Returns
         -------
@@ -3800,21 +3933,42 @@ class LensAmplificationSurrogate:
         # --- Build log-w grid (AFTER the DD cap) ---
         log_w_grid = _log_w_grid(w_range, w_nodes_per_decade)
 
-        # --- Build caustic arc-length map (feature 2) ---
-        # Use median gamma as the representative for the arc-length
-        # parametrisation (adequate for typical narrow-gamma tiles).
+        # --- Build cusp-adapted angular map (WP1) ---
+        # Replace the retired arc-length axis (which made the cusp singularity
+        # WORSE: caustic_speed vanishes linearly at a cusp, so s ~ theta**2 and
+        # the envelope behaved as f(s**(1/3))) with the cusp-adapted coordinate
+        # u = d**(2/3), d = angular distance to the NEAR astroid cusp.  The map
+        # is coordinate-agnostic on serve (carried in the theta_to_s/s_grid
+        # fields), so nothing downstream changes.
         rep_gamma = float(np.median(gamma_grid))
-        arc_theta_fine = np.linspace(
-            float(theta_wedge_range[0]), float(theta_wedge_range[1]),
-            _FARFIELD_ARC_MAP_SIZE)
-        arc_speed = np.asarray(
-            geometry.caustic_speed(rep_gamma, arc_theta_fine, branch=1),
-            dtype=float)
-        arc_s_fine = cumulative_trapezoid(arc_speed, arc_theta_fine,
-                                          initial=0.0)
-        theta_to_s = np.vstack([arc_theta_fine, arc_s_fine])
-        # s-coordinate nodes: images of theta_wedge_grid through the map.
-        s_grid = np.interp(theta_wedge_grid, arc_theta_fine, arc_s_fine)
+        theta_lo = float(theta_wedge_range[0])
+        theta_hi = float(theta_wedge_range[1])
+        theta_mid = 0.5 * (theta_lo + theta_hi)
+        # Split at the true caustic WAIST, not pi/4: the two cusps are not
+        # equivalent (the shear stretches the astroid), so the waist migrates
+        # with gamma.  A tile below the waist is nearest the low cusp
+        # (theta = 0); above it, the high cusp (pi/2).
+        theta_waist = _wedge_theta_waist(rep_gamma)
+        derived_origin = 'low' if theta_mid <= theta_waist else 'high'
+        # Single-source the origin and (belt-and-suspenders against train/serve
+        # skew) verify a caller-supplied axis_origin agrees with the geometry.
+        if axis_origin is not None:
+            if axis_origin not in ('low', 'high'):
+                raise ValueError(
+                    f"axis_origin must be 'low', 'high' or None; got "
+                    f'{axis_origin!r}.')
+            if axis_origin != derived_origin:
+                raise ValueError(
+                    f'axis_origin={axis_origin!r} disagrees with the '
+                    f'midpoint-vs-waist classification {derived_origin!r} '
+                    f'(theta_mid={theta_mid:.6f}, '
+                    f'theta_waist={theta_waist:.6f}); the wedge angular map '
+                    f'origin is single-sourced from the caustic waist.')
+        origin = axis_origin if axis_origin is not None else derived_origin
+        theta_fine, u_fine = _wedge_cusp_axis_map(theta_lo, theta_hi, origin)
+        theta_to_s = np.vstack([theta_fine, u_fine])
+        # u-coordinate nodes: images of theta_wedge_grid through the map.
+        s_grid = np.interp(theta_wedge_grid, theta_fine, u_fine)
 
         # --- Allocate storage ---
         w_grid = np.exp(log_w_grid)
