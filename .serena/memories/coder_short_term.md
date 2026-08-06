@@ -26,6 +26,53 @@ Last session: 2026-08-04 production batch. Clean.
   test_lensing_ppgo_bandsplit.py ~L89/L620 import/use deleted
   _farfield_interior_tiles.
 
+2026-08-06 WP2 wedge tiler waist-split columns + adaptive u-subdivision
+(surrogate_training.py ONLY):
+- Imports: added _wedge_theta_waist, _wedge_cusp_axis_map to the existing
+  `from cogwheel.lensing.surrogate import (...)` block.
+- _wedge_interior_tiles: signature now (gamma, r_extent, n_per_side); returns
+  5-tuples (center, half, i, j, axis_origin). Emits TWO angular columns per
+  radial row split at _wedge_theta_waist(gamma) (NOT pi/4): low col
+  [0, waist] j=0 axis_origin='low'; high col [waist, pi/2] j=1
+  axis_origin='high'. NO cusp-edge exclusion strip (u=d^(2/3) absorbs cusp
+  scaling; centre-exclusion _WEDGE_R_MIN has no angular analog). Radial rows
+  unchanged (uniform in [_WEDGE_R_MIN, r_extent]).
+- _build_wedge_chart: added axis_origin:str|None=None kwarg, threaded verbatim
+  into from_wedge_engine(axis_origin=...). Single-sourced; engine asserts it vs
+  its own midpoint-vs-waist derivation.
+- NEW _subdivide_wedge_tile (single level, no recursion; mirrors
+  _subdivide_farfield_tile but in wedge (r,u) coords). Halves r at plain
+  r-midpoint AND theta at the u-MIDPOINT mapped back to theta via
+  _wedge_cusp_axis_map + np.interp(u_mid, u_fine, theta_fine) (NEVER
+  theta-midpoint -> near-cusp child narrower in theta). Up to 4 children, each
+  rebuilt via _build_wedge_chart carrying parent axis_origin, re-gated on
+  interior bar (_gate_chart('interior')). 3-way eff_w_nodes (tile override ->
+  interior_w_nodes_per_decade -> w_nodes_per_decade); passes RESOLVED
+  eff_w_nodes to _build_wedge_chart (NOT raw None -> avoids exterior-density
+  fallback). Passing->charts; gated/carrier-flip->ladder_served_gap recorded
+  not packed. Returns summary w/ 'packed' count + 'theta_split'.
+- Call site (~4569): compute gamma_rep = median(_log_reach_gamma_axis(band,
+  config.n_gamma,'gamma')) — EXACT match to from_wedge_engine's rep_gamma so
+  tiler waist == engine waist (no assert misfire). Pass gamma_rep first.
+  admitted dict gains 'axis_origin'. tile-unpack loop `for center,half,i,j in`
+  -> `...,j,axis_origin in`. Main tile loop binds axis_origin=tile.get(
+  'axis_origin') (None non-wedge), build_wedge closure passes it.
+- Wedge gated branch (~4825): REPLACED ladder_served_gap+continue with
+  subdivided=True + _subdivide_wedge_tile(...) call; ladder_served_gap =
+  (subdivision['packed']==0). Carrier-flip except path LEFT as ladder gap
+  (out of WP2 eps-feedback scope).
+- Smoke: ast.parse OK + import OK + numeric: gamma=0.3 -> 4 tiles, waist
+  0.71011 (0.90x pi/4), axis_origin matches derived both cols, low-col u-split
+  theta=0.251 vs theta-mid 0.355 (narrower near cusp). Diagnostics clean.
+  UNVERIFIED: _subdivide_wedge_tile build_child path (engine call) NOT run per
+  no-training-run constraint -> subdivision end-to-end UNVERIFIED.
+- OWED TEST BREAKAGE (Test Dev): test_lensing_interior_wedge_chart.py
+  (WedgeInteriorTilesContractTestCase, ...CapFalsificationTestCase,
+  WedgeTilesSelfFalsificationTestCase, _unpack_tile ~L2168,
+  test_single_angular_column_spans_full_wedge premise now WRONG — 2 cols) and
+  test_lensing_ppgo_bandsplit.py L633 all call _wedge_interior_tiles with OLD
+  2-arg (r_extent,n) + unpack 4-tuples; need (gamma,r_extent,n) + 5-tuples.
+
 2026-08-06 WP1 cusp-adapted wedge angular axis (surrogate.py ONLY):
 - Schema bump v1->v2: _WEDGE_AXIS_SCHEMA='wedge_caustic_relative_v2',
   _KNOWN_WEDGE_AXIS_SCHEMAS={v2} (v1 DROPPED). Stored in chart's OWN meta

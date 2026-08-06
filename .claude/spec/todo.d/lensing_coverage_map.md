@@ -66,7 +66,7 @@ section: Backlog
   8. **Schwinger qd extension** (region 11). Extends the certified ceiling
      `w ~ 60 -> ~155`. Cannot be deferred past the full-box campaign, because
      it is what makes training possible up there at all.
-     [[schwinger_qd-extension]]
+     [[2026-08-04_schwinger-qd-extension]]
   9. **Inter-lobe corridor** (region 2). Settle by probe: do `gamma > 1` draws
      between the two deltoid centroids come back served or `out-of-box`?
 

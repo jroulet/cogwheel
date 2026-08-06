@@ -484,6 +484,35 @@ def write_if_changed(target_path, content, check_only=False):
     return True
 
 
+def check_wiki_links():
+    """Return [(source_fragment, missing_target)] for unresolved [[links]].
+
+    A fragment references another by its filename stem, `[[some_slug]]`.  Both
+    the open todo.d set and the completed.d archive are valid targets: work
+    that shipped keeps its record, and links to it stay meaningful.
+    """
+    known = set()
+    sources = []
+    for surface in ("todo", "completed"):
+        frag_dir = SURFACES[surface]["frag_dir"]
+        if not os.path.isdir(frag_dir):
+            continue
+        for name in sorted(os.listdir(frag_dir)):
+            if not name.endswith(".md"):
+                continue
+            known.add(name[:-3])
+            sources.append((surface, frag_dir, name))
+
+    dangling = []
+    for _surface, frag_dir, name in sources:
+        with open(os.path.join(frag_dir, name), encoding="utf-8") as handle:
+            text = handle.read()
+        for target in re.findall(r"\[\[([^\]]+)\]\]", text):
+            if target not in known:
+                dangling.append((name, target))
+    return dangling
+
+
 def main():
     args = sys.argv[1:]
     check_only = "--check" in args
@@ -566,8 +595,27 @@ def main():
                 label = "would change" if check_only else "updated"
                 print(f"  {SURFACES['todo']['target']}: {label}")
 
-    if check_only and changed:
-        print("\nFragment render check: files are stale.", file=sys.stderr)
+    # ── Cross-reference integrity ──
+    # Fragments link each other with [[stem]].  A link whose target has been
+    # deleted still RENDERS FINE, so the graph rots silently: four such links
+    # accumulated unnoticed across earlier sessions, every one pointing at a
+    # fragment retired when its work completed.  Nothing was checking.
+    dangling = check_wiki_links()
+    if dangling:
+        print("\n  DANGLING [[wiki-links]] "
+              f"({len(dangling)}) — target fragment does not exist:",
+              file=sys.stderr)
+        for source, target in dangling:
+            print(f"    {source} -> [[{target}]]", file=sys.stderr)
+        print("  Repoint to the completed.d record if the work shipped, "
+              "or drop the link.", file=sys.stderr)
+
+    if check_only and (changed or dangling):
+        if changed:
+            print("\nFragment render check: files are stale.", file=sys.stderr)
+        if dangling:
+            print("Fragment render check: dangling cross-references.",
+                  file=sys.stderr)
         sys.exit(1)
     elif not changed:
         print("  All surfaces up to date.")

@@ -9,7 +9,7 @@ section: Backlog
   Landed:
 
   1. `b1`/`a0` closed form for positive parity — done earlier (F023,
-     see [[lensing_born_b1_derivation]]).
+     see [[2026-08-04_born-residual-chart-train-ship]]).
   2. Saddle expansion origin + its own convergence guard: `born_lead_carrier`
      applies the exact Morse phase `-1j` at the saddle image origin
      (F024/F009-S, NOT `cmath.exp(-1j*pi/2)` — that injects a ~6e-17 real

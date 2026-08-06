@@ -505,7 +505,7 @@ Tag conventions:
   `test_lensing_ghost_gate.py`, `test_lensing_exterior_windows.py`.
   Spec: `SPEC.md`, `COVERAGE_DESIGN.md` (Parts I and IV), `DATA_CONTRACTS.yaml`,
   `data_registry.yaml`, and the fragments [[lensing_coverage_map]],
-  [[lensing_born_b1_derivation]], [[lensing_saddle_born]],
+  [[2026-08-04_born-residual-chart-train-ship]], [[lensing_saddle_born]],
   [[surrogate_component-representation-8hb]].
   Docs: `docs/source/generated/cogwheel.lensing.ppgo_map.annulus_rho.rst`
   follows the rename in step 5.
@@ -879,7 +879,7 @@ Tag conventions:
   8. **Schwinger qd extension** (region 11). Extends the certified ceiling
      `w ~ 60 -> ~155`. Cannot be deferred past the full-box campaign, because
      it is what makes training possible up there at all.
-     [[schwinger_qd-extension]]
+     [[2026-08-04_schwinger-qd-extension]]
   9. **Inter-lobe corridor** (region 2). Settle by probe: do `gamma > 1` draws
      between the two deltoid centroids come back served or `out-of-box`?
 
@@ -1451,7 +1451,7 @@ Tag conventions:
   Landed:
 
   1. `b1`/`a0` closed form for positive parity — done earlier (F023,
-     see [[lensing_born_b1_derivation]]).
+     see [[2026-08-04_born-residual-chart-train-ship]]).
   2. Saddle expansion origin + its own convergence guard: `born_lead_carrier`
      applies the exact Morse phase `-1j` at the saddle image origin
      (F024/F009-S, NOT `cmath.exp(-1j*pi/2)` — that injects a ~6e-17 real
@@ -2066,7 +2066,7 @@ tolerance widening; fallback-to-exact preserves certified-or-refuse).
      TubeChart stores per-chart bounds (computation swap, no schema/
      serving rework) and the production run is sequenced after
      8d/8e; the guard removes the dependence on that luck.
-  Links: [[likelihood_cusp-fast-serving]], [[likelihood_envelope-surrogate]].
+  Links: [[2026-08-04_cusp-arm-coverage]], [[likelihood_envelope-surrogate]].
   (Schwinger homogenization shipped as Build 8d; its fragment is retired.)
 
 # Standard RB zero-noise floor (8.96e-3) — fix upstream [→ docs]

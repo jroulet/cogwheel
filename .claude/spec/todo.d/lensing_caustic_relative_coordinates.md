@@ -296,7 +296,7 @@ section: Backlog
   `test_lensing_ghost_gate.py`, `test_lensing_exterior_windows.py`.
   Spec: `SPEC.md`, `COVERAGE_DESIGN.md` (Parts I and IV), `DATA_CONTRACTS.yaml`,
   `data_registry.yaml`, and the fragments [[lensing_coverage_map]],
-  [[lensing_born_b1_derivation]], [[lensing_saddle_born]],
+  [[2026-08-04_born-residual-chart-train-ship]], [[lensing_saddle_born]],
   [[surrogate_component-representation-8hb]].
   Docs: `docs/source/generated/cogwheel.lensing.ppgo_map.annulus_rho.rst`
   follows the rename in step 5.

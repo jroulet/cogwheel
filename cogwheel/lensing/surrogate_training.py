@@ -4824,12 +4824,27 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                             'file': str(wedge_path), 'reused': reused,
                             **report}
             if gated:
-                # A gated wedge tile is a ladder-served gap: no subdivision.
+                # WP2: a gated wedge tile is halved ONCE (single level, no
+                # recursion) in (r, u) into up to four children -- the angular
+                # split at the u-MIDPOINT mapped back to theta (equal steps in
+                # the cusp-adapted u the spline sees, NEVER the cusp-singular
+                # theta), each rebuilt via `_build_wedge_chart` carrying the
+                # parent's axis_origin and re-gated on the SAME interior eps
+                # bar.  Only if NO child clears the bar does the window fall
+                # back to a ladder-served gap.  Restoring this eps feedback
+                # loop is the point: a tiler with no feedback cannot discover
+                # it needs more tiles (removing it hid the axis-adjacent
+                # under-resolution for a day -- see the build brief).
                 chart_report['gated'] = True
                 chart_report['gate_reason'] = gate_reason
-                chart_report['subdivided'] = False
-                chart_report['ladder_served_gap'] = True
+                chart_report['subdivided'] = True
                 chart_reports.append(chart_report)
+                subdivision = _subdivide_wedge_tile(
+                    tile=tile, parent_tag=wedge_tag, band=band, parity=parity,
+                    config=config, rng=rng, outdir=outdir,
+                    charts=charts, chart_reports=chart_reports)
+                chart_report['subdivision'] = subdivision
+                chart_report['ladder_served_gap'] = subdivision['packed'] == 0
                 continue
             charts.append(chart)
             chart_reports.append(chart_report)
