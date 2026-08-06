@@ -21,9 +21,11 @@ Build 8h-a closes the zero-quadrature gap with four levers, gated here:
   never falling through to numerical quadrature.
 
 * WP3 -- interior (4-image) far-field tiles + strata trimming
-  (`cogwheel.lensing.surrogate_training`): the interior admission geometry
-  (`_farfield_interior_tiles`) admits a tile wholly inside the caustic
-  disk minus the tube shell and rejects one straddling it; the far-field
+  (`cogwheel.lensing.surrogate_training`): the interior admission gate
+  (`_interior_admission`) refuses an exterior config beyond the directional
+  caustic boundary, while the wedge-fixed interior tiler
+  (`_wedge_interior_tiles`) lays a single radial column of genuine 4-image
+  interior tiles wholly inside the caustic; the far-field
   ``E_ff`` telescoping identity holds for an interior 4-image config to
   ``1e-12 * max|F|``; the real-image mask tracks the morse/physical image
   set (4 near a cusp, dropping to 2 across the caustic), so a hardcoded
@@ -87,7 +89,7 @@ from cogwheel.lensing.ppgo_map import (
     MAX_CELL_JUMP, STATUS_CERTIFIED, STATUS_BEYOND_WALL, STATUS_INVALID,
     ASTROID_WALL, SADDLE_WALL, _PARITY_CODES)
 from cogwheel.lensing.surrogate_training import (
-    _farfield_interior_tiles, _stratum_ppgo_boundary, _apply_ppgo_trim,
+    _stratum_ppgo_boundary, _apply_ppgo_trim,
     _stratum_ppgo_ceiling)
 from cogwheel.lensing import surrogate_training as st
 from cogwheel.lensing import surrogate
@@ -591,24 +593,35 @@ class InteriorTelescopingTestCase(_PpgoTestCase):
 # ======================================================================
 
 class InteriorAdmissionTestCase(_PpgoTestCase):
-    """`_farfield_interior_tiles` admits interior tiles, rejects the rest.
+    """`_interior_admission` gates configs; `_wedge_interior_tiles` lays them.
 
-    Ported to the caustic-fixed directional-radius admission (S2-1): the
-    retired isotropic scalar ``admit_radius = caustic_inradius - eta_max``
-    is replaced by the band-minimum directional caustic boundary
-    ``min_gamma r_caustic(gamma, theta) / reach`` carried by an
-    `_InteriorAdmission`, minus the ``eta_max`` nearest-caustic tube shell.
-    A caustic-fixed ``(rho, theta)`` tile is admitted iff it lies wholly
-    inside that directional boundary and clear of the shell, so an admitted
-    tile is a genuine 4-image interior config by construction; tiles that
-    straddle the boundary/shell (or a cusp ray) are dropped.  The same
-    physical certification intent as the retired scalar-circle version,
-    expressed in the coordinates the tiler now uses.
+    PORTED off the retired `_farfield_interior_tiles` (ffin retirement,
+    WP1).  Two still-meaningful concerns survive the retirement and are
+    re-expressed here against the symbols that replaced it:
+
+    * The directional caustic-boundary admission `_interior_admission`
+      (still live) refuses a config beyond the boundary and admits strictly
+      fewer configs as the ``eta_max`` tube shell widens -- unchanged, since
+      those assertions only ever touched `admission`, not the tiler.
+    * The wedge-fixed interior tiler `_wedge_interior_tiles` replaces the
+      admission-filtered, cusp-aligned far-field interior tiler.  Its tiles
+      are pure geometry in wedge-fixed ``(r, theta_wedge)`` coordinates
+      (``r = |y| / r_caustic`` in ``[0, 1)``), a SINGLE angular column over
+      ``[0, pi/2]`` with NO cusp-alignment split (the D2 fold + smooth SACR-C
+      carrier serve the other three quadrants).  The like-for-like interior
+      expectation -- every tile lies wholly inside the caustic and is a
+      genuine 4-image interior config -- is re-checked against an independent
+      engine oracle (`geometry.find_images`); the retired cusp-ray
+      straddle guard is deliberately gone (the tiler no longer splits on
+      cusp rays by design, so there is nothing to straddle-check).
     """
 
     BAND = (0.45, 0.55)
     GAMMA_MID = 0.5
     N_PER_SIDE = 5
+    #: Outer radial bound (caustic-relative) for the wedge column; capped
+    #: strictly below one so every tile is interior (r < 1) by construction.
+    R_EXTENT = 0.6
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -618,62 +631,70 @@ class InteriorAdmissionTestCase(_PpgoTestCase):
             cls.BAND, 1, cls.reach, cls.config, eta_max=_PPGO_ETA_MAX)
         cls.cusp_angles = st._cusp_source_angles(
             cls.GAMMA_MID, cls.config.n_caustic_samples)
-        cls.tiles = _farfield_interior_tiles(
-            1.0, cls.N_PER_SIDE, admission=cls.admission,
-            cusp_angles=cls.cusp_angles)
-
-    @staticmethod
-    def _straddles_ray(center, half, rays, tol=1e-9):
-        """Whether a ``(rho, theta)`` tile strictly contains any cusp ray."""
-        lo, hi = center[1] - half[1], center[1] + half[1]
-        for ray in rays:
-            for wrap in (-2.0 * math.pi, 0.0, 2.0 * math.pi):
-                if lo + tol < ray + wrap < hi - tol:
-                    return True
-        return False
+        cls.tiles = st._wedge_interior_tiles(cls.R_EXTENT, cls.N_PER_SIDE)
 
     @staticmethod
     def _n_images(gamma, rho, theta):
-        """Independent engine oracle: image count at a caustic-fixed node."""
+        """Independent engine oracle: image count at a caustic-fixed node.
+
+        For ``rho <= 1`` and ``gamma < 1`` the caustic-fixed map coincides
+        exactly with the wedge-fixed map (both scale ``|y|`` by the
+        directional ``r_caustic(gamma, theta)``), so this is the correct
+        oracle for a wedge-fixed ``(r, theta_wedge)`` node too.
+        """
         source = surrogate._from_caustic_fixed(gamma, rho, theta)
         matrix = geometry.macro_matrix(gamma)
         return len(geometry.find_images(np.asarray(source, dtype=float),
                                         matrix))
 
-    def test_admitted_tiles_are_wholly_inside_admit_radius(self):
-        """Every admitted tile is inside the directional boundary/shell and
+    def test_wedge_tiles_are_wholly_interior_and_four_image(self):
+        """Every wedge tile is a contiguous radial row wholly inside the
+        caustic (``r < 1``, clear of the degenerate centre) and its centre
         is a genuine 4-image interior config (independent engine oracle)."""
         for center, half, _i, _j in self.tiles:
+            r_c, _theta_c = center
+            half_r, _half_theta = half
+            # Wholly interior: the outer edge stays below the caustic edge
+            # (r = 1) and the inner edge clears the excluded degenerate centre.
             self.assert_within(
-                0.0 if self.admission.admits(center, half) else 1.0, 0.0,
-                f'tile at rho={center[0]:.3f} theta={center[1]:.3f} '
-                f'half={half} straddles the directional admission boundary')
+                r_c + half_r, self.R_EXTENT + 1e-12,
+                f'tile at r={r_c:.4f} half_r={half_r:.4f} spills past the '
+                f'wedge extent {self.R_EXTENT} (into the Airy caustic edge)')
+            self.comparisons += 1
+            self.assertGreaterEqual(
+                r_c - half_r, st._WEDGE_R_MIN - 1e-12,
+                f'tile at r={r_c:.4f} half_r={half_r:.4f} reaches into the '
+                f'excluded degenerate astroid centre (r < _WEDGE_R_MIN)')
             self.comparisons += 1
             self.assertEqual(
-                self._n_images(self.GAMMA_MID, center[0], center[1]), 4,
-                f'admitted tile centre rho={center[0]:.3f} '
-                f'theta={center[1]:.3f} is not a 4-image interior config')
+                self._n_images(self.GAMMA_MID, r_c, _theta_c), 4,
+                f'wedge tile centre r={r_c:.4f} theta_wedge={_theta_c:.4f} '
+                f'is not a 4-image interior config')
 
-    def test_some_tiles_are_admitted_where_geometry_permits(self):
-        """'admitted > 0 where geometry permits' -- the loud assert."""
+    def test_wedge_tiles_nonempty_where_geometry_permits(self):
+        """'admitted > 0 where geometry permits' -- the loud assert, ported:
+        the wedge column lays exactly ``N_PER_SIDE`` interior rows."""
         self.comparisons += 1
-        self.assertGreater(
-            len(self.tiles), 0,
-            'no interior tile admitted where the caustic permits some')
+        self.assertEqual(
+            len(self.tiles), self.N_PER_SIDE,
+            f'wedge tiler laid {len(self.tiles)} rows, expected '
+            f'{self.N_PER_SIDE} where the caustic permits an interior column')
 
-    def test_straddling_and_exterior_tiles_are_rejected(self):
-        """A point beyond the directional boundary is refused, and no
-        admitted tile straddles an astroid cusp ray."""
+    def test_admission_refuses_exterior_and_wedge_is_single_column(self):
+        """The admission gate refuses a config beyond the directional
+        caustic boundary (4 cusp rays exposed), and the wedge tiler lays a
+        SINGLE angular column spanning ``[0, pi/2]`` (no cusp-aligned split).
+
+        The retired 'no tile straddles a cusp ray' guard is intentionally
+        gone: `_wedge_interior_tiles` carries no cusp-alignment logic -- its
+        one column deliberately spans the cusp rays at ``theta_wedge in
+        {0, pi/2}``, with the D2 fold serving the other quadrants.
+        """
         self.comparisons += 1
         self.assertEqual(len(self.cusp_angles), 4,
                          'astroid interior must expose four cusp rays')
         # A concrete exterior straddler: 1.2x the directional boundary at an
         # off-cusp angle is a 2-image exterior config, and must be refused.
-        # `_InteriorAdmission` has NO ``rho_boundary`` attribute -- that name
-        # appears only in a module comment.  Positive-parity rho is normalised
-        # by the DIRECTIONAL caustic radius at the same (gamma, theta_c)
-        # (`surrogate._to_caustic_fixed`), so the directional boundary IS
-        # rho = 1 in every direction and 1.2x it is simply rho = 1.2.
         theta = math.radians(30.0)
         rho_out = 1.2
         self.comparisons += 1
@@ -684,11 +705,16 @@ class InteriorAdmissionTestCase(_PpgoTestCase):
         self.assertEqual(
             self._n_images(self.GAMMA_MID, rho_out, theta), 2,
             'the exterior probe is not a 2-image config -- retune')
-        straddlers = [(c, h) for c, h, _i, _j in self.tiles
-                      if self._straddles_ray(c, h, self.cusp_angles)]
-        self.comparisons += 1
-        self.assertEqual(straddlers, [],
-                         'a tile straddling an astroid cusp ray was admitted')
+        # Wedge structural contract: one angular column, theta_center = pi/4,
+        # half_theta = pi/4 (spans [0, pi/2] exactly), no split.
+        for center, half, _i, j in self.tiles:
+            self.comparisons += 1
+            self.assertEqual(
+                j, 0, 'wedge tiler produced more than one angular column')
+            self.assertAlmostEqual(center[1], 0.25 * math.pi, places=12,
+                                   msg='wedge column not centred on pi/4')
+            self.assertAlmostEqual(half[1], 0.25 * math.pi, places=12,
+                                   msg='wedge column does not span [0, pi/2]')
 
     def test_tighter_radius_admits_strictly_fewer(self):
         """A wider ``eta_max`` tube shell (more exclusion) admits strictly
@@ -958,8 +984,9 @@ class StrataTrimmingTestCase(_PpgoTestCase):
 #: `test_lensing_farfield_envelope.py`.
 #:
 #: NOTE: `InteriorAdmissionTestCase` is deliberately NOT gated despite costing
-#: 14.7s.  It builds no charts -- it exercises `_farfield_interior_tiles` and
-#: the directional caustic-boundary admission, i.e. pure tiler geometry.  It is
+#: several seconds.  It builds no charts -- it exercises `_wedge_interior_tiles`
+#: and the directional caustic-boundary admission, i.e. pure tiler geometry.  It
+#: is
 #: a genuine unit test that happens to be slow (caustic sweeps), and gating it
 #: behind a flag named for engine-backed TRAINING would mislabel it.  If its
 #: cost becomes a problem the fix is a cheaper caustic sample count, not a tier.

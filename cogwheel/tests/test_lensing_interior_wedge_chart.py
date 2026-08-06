@@ -19,6 +19,7 @@ cancellation up to float64 arithmetic, ~1e-15 each step).
 from __future__ import annotations
 
 import itertools
+import inspect
 import json
 import tempfile
 import unittest
@@ -26,9 +27,12 @@ from pathlib import Path
 
 import numpy as np
 
+from cogwheel.lensing import surrogate_training
 from cogwheel.lensing.surrogate import (
     CarrierDiscontinuityError,
+    FarFieldChart,
     InteriorWedgeChart,
+    LensAmplificationSurrogate,
     _WedgeCausticMap,
     _assert_carrier_continuity,
     _caustic_reach,
@@ -41,6 +45,14 @@ from cogwheel.lensing.surrogate import (
     _to_wedge_fixed,
     _wedge_serves,
     select_chart,
+)
+from cogwheel.lensing.surrogate_training import (
+    _WEDGE_R_MIN,
+    _build_farfield_chart,
+    _build_wedge_chart,
+    _farfield_exterior_tiles,
+    _interior_admission,
+    _wedge_interior_tiles,
 )
 from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal.geometry import r_caustic
@@ -513,15 +525,23 @@ class WedgeServesGuardTestCase(_WedgeTestCase):
         self.assertFalse(self._call_serves(gamma=0.60))  # above
 
     def test_gate_c_log_w_outside_band_refuses(self):
-        """Gate (c): log_w band not fully inside chart band → False."""
+        """Gate (c): only the HIGH end of the log_w band is gated.
+
+        The low-w flat-extrapolation change to `_log_w_band_serveable`
+        clamps queries with ``w < chart.w_min`` to the lowest grid point
+        (the envelope is smooth below the first Airy fringe), so a
+        ``log_w_min`` below the chart band STILL SERVES.  Only upward
+        extrapolation (``log_w_max`` above the band) is refused, because
+        the envelope is oscillatory above ``w_max``.
+        """
         self._tick()
-        # log_w_min below chart's range.
-        self.assertFalse(self._call_serves(
-            log_w_min=SERVES_LOG_W_GRID[0] - 1.0))
-        self._tick()
-        # log_w_max above chart's range.
+        # log_w_max above chart's range -> refuse (no upward extrapolation).
         self.assertFalse(self._call_serves(
             log_w_max=SERVES_LOG_W_GRID[-1] + 1.0))
+        self._tick()
+        # log_w_min below chart's range -> STILL SERVES via flat extrapolation.
+        self.assertTrue(self._call_serves(
+            log_w_min=SERVES_LOG_W_GRID[0] - 1.0))
 
     def test_gate_d_source_at_origin_refuses(self):
         """Gate (d): source at origin (y1=0, y2=0) → False."""
@@ -1394,6 +1414,772 @@ class DispatchSelfFalsificationTestCase(unittest.TestCase):
             diff, ENVELOPE_NODE_ATOL,
             'Self-falsification: corrupted coefficients should cause '
             f'detectable residual; got {diff:.2e}')
+
+
+# ===========================================================================
+# Tests 7-9: held-out accuracy, D2 fold exactness, medial-axis serving.
+#
+# These three suites are engine-backed: they train ONE small
+# InteriorWedgeChart via `from_wedge_engine` (WP1 wired this into the
+# training/serving stack, retiring the far-field-interior "ffin" path) and
+# then interrogate the SERVED value against a fresh single-point engine
+# oracle.  The chart is built once at module scope (`_shared_wedge_surrogate`)
+# and shared by all three classes to keep the file well under the fast-tier
+# ceiling.
+#
+# Tolerance justification (HELDOUT_EPS_FLOOR = 5e-2): the SACR-C
+# (tau_c-demodulated) interior envelope is a smooth function of (r,
+# theta_wedge), so a 5x5x5 tensor-spline reproduces held-out interior
+# points to ~1e-2 (measured worst case ~1.5e-2 across the query fan).  The
+# 5e-2 bar is the Professor-set ABSOLUTE in-build floor: loose enough that
+# the coarse smoke grid clears it with ~3x headroom, tight enough to catch a
+# gross fold/indexing/coordinate error.  It is NOT the production accuracy
+# bar (which applies to the denser production grid).
+# ===========================================================================
+
+#: Training-grid bounds for the shared held-out wedge chart.
+HELDOUT_GAMMA_RANGE: tuple[float, float] = (0.30, 0.45)
+HELDOUT_R_RANGE: tuple[float, float] = (0.15, 0.60)
+HELDOUT_THETA_WEDGE_RANGE: tuple[float, float] = (0.15, 1.35)
+HELDOUT_W_RANGE: tuple[float, float] = (5.0, 15.0)
+
+#: Nodes per parameter axis (>= 4 for cubic-spline validity; 5 gives the
+#: smooth SACR-C envelope ~1e-2 held-out accuracy).
+HELDOUT_N_GAMMA: int = 5
+HELDOUT_N_R: int = 5
+HELDOUT_N_THETA: int = 5
+
+#: Dense log-w training-axis density.
+HELDOUT_W_NODES_PER_DECADE: int = 10
+
+#: Off-NODE query gamma (interior to the training gamma grid, not a node).
+HELDOUT_QUERY_GAMMA: float = 0.37
+
+#: Professor-set absolute in-build accuracy floor for held-out interior
+#: points, normalised by max|E| (the interior currency).
+HELDOUT_EPS_FLOOR: float = 5e-2
+
+#: Off-node interior query points ``(r, theta_wedge)``.  Deliberately
+#: includes a near-caustic-centre point (small r) and a diagonal point
+#: (theta_wedge ~= pi/4) per the spec, kept clear of the grid corner where
+#: coarse-grid interpolation error is largest.
+HELDOUT_QUERY_POINTS: tuple[tuple[float, float], ...] = (
+    (0.20, 0.60),
+    (0.30, np.pi / 4),   # diagonal (medial axis)
+    (0.22, 0.50),
+    (0.40, 0.90),
+    (0.35, 1.05),
+    (0.25, 0.40),
+    (0.45, 0.70),
+    (0.18, 1.10),        # near caustic centre (small r)
+)
+
+#: Directory for diagnostic plots.
+OUTPUT_DIR: Path = Path(__file__).resolve().parent / 'output'
+
+#: Module-level cache for the shared engine-trained wedge surrogate.
+_SHARED_WEDGE_SURROGATE: LensAmplificationSurrogate | None = None
+
+
+def _shared_wedge_surrogate() -> LensAmplificationSurrogate:
+    """Build (once) and return a small engine-trained wedge surrogate.
+
+    Cost: 5x5x5 = 125 training nodes, each a `ChangRefsdalChannels.evaluate`
+    over a ~6-point log-w grid (~30ms) -> ~12s total, incurred once and
+    shared by Tests 7-9.
+    """
+    global _SHARED_WEDGE_SURROGATE
+    if _SHARED_WEDGE_SURROGATE is None:
+        _SHARED_WEDGE_SURROGATE = LensAmplificationSurrogate.from_wedge_engine(
+            gamma_range=HELDOUT_GAMMA_RANGE,
+            r_range=HELDOUT_R_RANGE,
+            theta_wedge_range=HELDOUT_THETA_WEDGE_RANGE,
+            w_range=HELDOUT_W_RANGE,
+            n_gamma=HELDOUT_N_GAMMA,
+            n_r=HELDOUT_N_R,
+            n_theta_wedge=HELDOUT_N_THETA,
+            w_nodes_per_decade=HELDOUT_W_NODES_PER_DECADE)
+    return _SHARED_WEDGE_SURROGATE
+
+
+def _served_and_engine(chart, gamma: float, r: float, theta_wedge: float,
+                       log_w: np.ndarray
+                       ) -> tuple[np.ndarray, np.ndarray, float, float, int]:
+    """Serve and independently evaluate the INTERIOR_SACR_C envelope.
+
+    Maps ``(gamma, r, theta_wedge)`` to the eigenframe source via
+    `_from_wedge_fixed`, serves the chart's envelope over ``log_w`` (LOG
+    space), and independently re-evaluates a FRESH `ChangRefsdalChannels`
+    partition at the SAME source over ``exp(log_w)`` (LINEAR space).
+
+    Returns ``(served, engine_envelope, y1_eig, y2_eig, image_count)``.
+
+    Note (gotcha): `_evaluate_chart` takes ``log_w_query`` in LOG space and
+    clamps to the chart's log-w band, whereas `ChangRefsdalChannels` takes a
+    LINEAR w grid.  Passing linear w to `_evaluate_chart` clamps every point
+    to the band edge and yields a spurious O(1) residual.
+    """
+    y1, y2 = _from_wedge_fixed(float(gamma), float(r), float(theta_wedge),
+                               chart.wedge_map)
+    served = _evaluate_chart(chart, float(gamma), eta=0.5, theta=0.7,
+                             log_w_query=log_w, y1_eig=y1, y2_eig=y2)
+    partition = ChangRefsdalChannels(np.exp(log_w)).evaluate(
+        gamma=float(gamma), y=(y1, y2), beta=0.0, kappa=0.0)
+    return (served, partition.envelope, y1, y2,
+            int(partition.real_mask.sum()))
+
+
+class WedgeHeldOutAccuracyTestCase(_WedgeTestCase):
+    """Held-out (off-node) interior accuracy against the engine oracle.
+
+    SPEC: draw off-node interior query points inside the tile -- including
+    one near the caustic centre (small r) and one on the diagonal
+    (theta_wedge ~= pi/4) -- map each to the eigenframe via
+    `_from_wedge_fixed`, serve the envelope, and compare against a fresh
+    single-point engine evaluation of the SAME INTERIOR_SACR_C envelope.
+    Residual normalised by max|E| must be < HELDOUT_EPS_FLOOR at every
+    point.  Values are asserted against the engine oracle + tolerance; the
+    test never asserts which code branch produced the value.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.surrogate = _shared_wedge_surrogate()
+        cls.chart = cls.surrogate.charts[0]
+        # Genuinely held-out interior log-w band (not the training nodes).
+        cls.query_log_w = np.linspace(
+            float(cls.chart.log_w_grid[0]) + 0.05,
+            float(cls.chart.log_w_grid[-1]) - 0.05, 6)
+
+    def test_offnode_envelope_within_floor(self):
+        """Every off-node interior query serves within the eps floor.
+
+        Cost: 8 query points x 1 engine call each (~30ms) = ~0.25s.
+        """
+        records: list[tuple[float, float, float]] = []
+        for r, theta_wedge in HELDOUT_QUERY_POINTS:
+            served, engine, _y1, _y2, image_count = _served_and_engine(
+                self.chart, HELDOUT_QUERY_GAMMA, r, theta_wedge,
+                self.query_log_w)
+            scale = float(np.max(np.abs(engine)))
+            eps = float(np.max(np.abs(served - engine))) / scale
+            records.append((float(r), float(theta_wedge), eps))
+            self._tick()
+            with self.subTest(r=r, theta_wedge=theta_wedge):
+                self.assertTrue(
+                    np.all(np.isfinite(served)),
+                    f'Served envelope non-finite at (r={r}, '
+                    f'theta_wedge={theta_wedge}).')
+                self.assertEqual(
+                    image_count, self.chart.image_count,
+                    f'Query point image count {image_count} != chart '
+                    f'{self.chart.image_count}; not the same regime.')
+                self.assertLess(
+                    eps, HELDOUT_EPS_FLOOR,
+                    f'Held-out eps {eps:.3e} exceeds floor '
+                    f'{HELDOUT_EPS_FLOOR:.0e} at (r={r:.3f}, '
+                    f'theta_wedge={theta_wedge:.3f}).')
+        self._save_diagnostic(records)
+
+    def _save_diagnostic(self, records: list[tuple[float, float, float]]
+                         ) -> None:
+        """Scatter eps vs (r, theta_wedge); a spike localises a resolution
+        failure at small r or a spurious pi/4 carrier seam."""
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+        except Exception:
+            return
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        r_vals = [rec[0] for rec in records]
+        th_vals = [rec[1] for rec in records]
+        eps_vals = [rec[2] for rec in records]
+        fig, ax = plt.subplots(figsize=(6, 4.5))
+        sc = ax.scatter(r_vals, th_vals, c=eps_vals, s=120,
+                        cmap='viridis', edgecolors='k')
+        ax.axhline(np.pi / 4, color='r', ls='--', lw=0.8,
+                   label=r'$\theta_w=\pi/4$ diagonal')
+        ax.set_xlabel('r (caustic-normalised radius)')
+        ax.set_ylabel(r'$\theta_{wedge}$')
+        ax.set_title(f'Held-out wedge eps (floor={HELDOUT_EPS_FLOOR:.0e})')
+        ax.legend(loc='best', fontsize=8)
+        fig.colorbar(sc, ax=ax, label='relative eps')
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'wedge_heldout_accuracy_eps_scatter.png',
+                    dpi=110)
+        plt.close(fig)
+
+
+# ===========================================================================
+# Test 8: D2 (4-fold astroid) fold exactness at the SERVED level.
+# ===========================================================================
+
+#: Off-node interior source used for the D2 fold test, given directly in
+#: wedge-fixed ``(r, theta_wedge)`` (canonical first quadrant) then mapped
+#: to a positive eigenframe ``(y1, y2)`` with y1 != 0 and y2 != 0.
+D2_SOURCE_R: float = 0.30
+D2_SOURCE_THETA_WEDGE: float = 0.60
+
+#: A DIFFERENT (non-mirror) interior source, used to prove the equality
+#: test has teeth (the served value is not a theta-independent constant).
+D2_OTHER_R: float = 0.45
+D2_OTHER_THETA_WEDGE: float = 1.10
+
+#: Fold-exactness tolerance.  The D2 fold takes ``abs(y1)``, ``abs(y2)``
+#: (exact float negation) before ``atan2``, so the four mirror magnitudes
+#: are bit-identical; 1e-12 is a defensive fallback for any atan2 round-off.
+D2_ATOL: float = 1e-12
+
+
+class WedgeD2FoldExactnessTestCase(_WedgeTestCase):
+    """D2 (4-fold astroid) reflection symmetry of the SERVED envelope.
+
+    The wedge coordinate exploits the astroid caustic's D2 symmetry by
+    folding a source into the canonical first quadrant
+    (theta_wedge = atan2(|y2|, |y1|), r = |y| / r_caustic).  So the four D2
+    mirror images (+-y1, +-y2) of any interior source MUST serve identical
+    magnitudes.  This exercises that `_evaluate_chart` (not just the
+    coordinate helper) applies the fold: any missing abs on y1 vs y2, or an
+    axis swap, would break the equality.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.surrogate = _shared_wedge_surrogate()
+        cls.chart = cls.surrogate.charts[0]
+        cls.log_w = cls.chart.log_w_grid
+        # Canonical first-quadrant source (positive y1, y2).
+        cls.y1, cls.y2 = _from_wedge_fixed(
+            HELDOUT_QUERY_GAMMA, D2_SOURCE_R, D2_SOURCE_THETA_WEDGE,
+            cls.chart.wedge_map)
+
+    def _served_magnitude(self, y1: float, y2: float) -> np.ndarray:
+        """Serve |envelope| at eigenframe source (y1, y2)."""
+        served = _evaluate_chart(
+            self.chart, HELDOUT_QUERY_GAMMA, eta=0.5, theta=0.7,
+            log_w_query=self.log_w, y1_eig=y1, y2_eig=y2)
+        return np.abs(served)
+
+    def test_source_is_off_axis(self):
+        """Precondition: the chosen source has y1 != 0 AND y2 != 0.
+
+        A D2 fold test is only meaningful for a genuinely off-axis source
+        (otherwise some mirrors coincide).
+        """
+        self._tick()
+        self.assertGreater(abs(self.y1), 1e-6)
+        self.assertGreater(abs(self.y2), 1e-6)
+
+    def test_four_mirrors_serve_identical_magnitude(self):
+        """The four D2 mirrors (+-y1, +-y2) serve bit-identical magnitudes.
+
+        Cost: 4 spline evaluations (no engine calls) -> < 10ms.
+        """
+        y1a, y2a = abs(self.y1), abs(self.y2)
+        mirror_mags = {}
+        for s1, s2 in QUADRANT_SIGNS:
+            mirror_mags[(s1, s2)] = self._served_magnitude(s1 * y1a, s2 * y2a)
+        reference = mirror_mags[(+1, +1)]
+        max_pairwise = 0.0
+        for (s1, s2), mag in mirror_mags.items():
+            diff = float(np.max(np.abs(mag - reference)))
+            max_pairwise = max(max_pairwise, diff)
+            self._tick()
+            with self.subTest(s1=s1, s2=s2):
+                self.assertLessEqual(
+                    diff, D2_ATOL,
+                    f'D2 mirror ({s1:+d},{s2:+d}) magnitude differs by '
+                    f'{diff:.2e} from the (+,+) reference; a missing abs or '
+                    f'axis swap in the fold.')
+        # Diagnostic: report the four values and the worst pairwise diff.
+        print(f'\n[D2 fold] |E| at w={np.exp(self.log_w)[0]:.2f}: '
+              + ', '.join(f'({s1:+d},{s2:+d})={mirror_mags[(s1, s2)][0]:.6f}'
+                          for s1, s2 in QUADRANT_SIGNS)
+              + f'  max pairwise diff={max_pairwise:.2e}')
+
+    def test_non_mirror_source_differs(self):
+        """SELF-FALSIFICATION: a non-D2-related source serves a DIFFERENT
+        magnitude, proving the equality test is not vacuously true.
+
+        If the chart returned a theta-independent constant, the four-mirror
+        equality would pass trivially; here a genuinely different interior
+        source must move the served magnitude well above D2_ATOL.
+        """
+        y1_other, y2_other = _from_wedge_fixed(
+            HELDOUT_QUERY_GAMMA, D2_OTHER_R, D2_OTHER_THETA_WEDGE,
+            self.chart.wedge_map)
+        reference = self._served_magnitude(abs(self.y1), abs(self.y2))
+        other = self._served_magnitude(y1_other, y2_other)
+        diff = float(np.max(np.abs(other - reference)))
+        self._tick()
+        self.assertGreater(
+            diff, 1e-3,
+            f'Self-falsification: a non-mirror source produced an almost '
+            f'identical magnitude (diff={diff:.2e}); the served value is '
+            f'suspiciously insensitive to (r, theta_wedge).')
+
+
+# ===========================================================================
+# Test 9: Medial-axis serving (the ffin regression fix).
+# ===========================================================================
+
+#: Medial-axis query points ``(name, r, theta_wedge)`` that the retired
+#: far-field-interior ("ffin") FarFieldChart path refused: a near-centre
+#: small-r point and the theta_wedge = pi/4 diagonal.  On the astroid the
+#: medial axis runs along the diagonals and through the centre.
+MEDIAL_QUERY_POINTS: tuple[tuple[str, float, float], ...] = (
+    ('near_centre', 0.17, 0.60),
+    ('diagonal_pi4', 0.30, np.pi / 4),
+    ('tiny_r', 0.155, 0.90),
+)
+
+#: Serving-accuracy floor for medial-axis points (same absolute in-build
+#: floor as the held-out accuracy test).
+MEDIAL_EPS_FLOOR: float = HELDOUT_EPS_FLOOR
+
+
+class MedialAxisServingTestCase(_WedgeTestCase):
+    """Medial-axis queries SERVE and are accurate (the ffin regression fix).
+
+    HISTORICAL CAUSE: the retired far-field-interior ("ffin") FarFieldChart
+    charted the astroid interior in far-field-smooth (s, d) coordinates
+    keyed off the NEAREST caustic foot.  On the medial axis -- the locus
+    equidistant from two or more caustic feet (the diagonals and the centre)
+    -- the nearest-foot assignment is degenerate/discontinuous, so ffin
+    REFUSED near-centre and theta_wedge = pi/4 diagonal sources, leaving a
+    blind spot.  The wedge coordinate (D2 fold to the canonical first
+    quadrant, r = |y| / r_caustic) has no nearest-foot dependence, so those
+    same medial-axis points now serve.
+
+    This test asserts served-AND-accurate: `select_chart` returns the wedge
+    chart (finite envelope within the eps floor of a fresh engine oracle).
+    A refusal is reported with its (r, theta_wedge) to localise any residual
+    blind spot.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.surrogate = _shared_wedge_surrogate()
+        cls.chart = cls.surrogate.charts[0]
+        cls.log_w_min = float(cls.chart.log_w_grid[0]) + 0.05
+        cls.log_w_max = float(cls.chart.log_w_grid[-1]) - 0.05
+        cls.log_w = np.linspace(cls.log_w_min, cls.log_w_max, 6)
+
+    def _serve_via_select(self, r: float, theta_wedge: float):
+        """Serve a medial-axis point through the real `select_chart` gate.
+
+        Returns ``(selected_chart_or_None, served, engine_envelope, eta)``
+        using the HONEST partition eta / image-count (not hand-picked
+        pass-through values).
+        """
+        chart = self.chart
+        y1, y2 = _from_wedge_fixed(HELDOUT_QUERY_GAMMA, r, theta_wedge,
+                                   chart.wedge_map)
+        partition = ChangRefsdalChannels(np.exp(self.log_w)).evaluate(
+            gamma=HELDOUT_QUERY_GAMMA, y=(y1, y2), beta=0.0, kappa=0.0)
+        eta = float(partition.caustic_distance)
+        image_count = int(partition.real_mask.sum())
+        theta_gauge = float(partition.critical_theta)
+        selected = select_chart(
+            self.surrogate.charts, gamma=HELDOUT_QUERY_GAMMA,
+            log_w_min=self.log_w_min, log_w_max=self.log_w_max, eta=eta,
+            theta=theta_gauge, image_count=image_count,
+            y1_eig=y1, y2_eig=y2)
+        served = _evaluate_chart(
+            chart, HELDOUT_QUERY_GAMMA, eta=eta, theta=theta_gauge,
+            log_w_query=self.log_w, y1_eig=y1, y2_eig=y2)
+        return selected, served, partition.envelope, eta
+
+    def test_medial_points_serve_finite(self):
+        """Each medial-axis point is SERVED by the wedge chart (not None).
+
+        Cost: 3 points x 1 engine call each -> ~0.1s.
+        """
+        for name, r, theta_wedge in MEDIAL_QUERY_POINTS:
+            selected, served, _engine, eta = self._serve_via_select(
+                r, theta_wedge)
+            self._tick()
+            with self.subTest(point=name, r=r, theta_wedge=theta_wedge):
+                self.assertIs(
+                    selected, self.chart,
+                    f'Medial-axis point {name} (r={r:.3f}, '
+                    f'theta_wedge={theta_wedge:.3f}, eta={eta:.3f}) REFUSED; '
+                    f'the medial axis is still a blind spot.')
+                self.assertTrue(
+                    np.all(np.isfinite(served)),
+                    f'Served envelope non-finite for {name}.')
+
+    def test_medial_points_accurate(self):
+        """Served medial-axis envelope matches the engine within the floor.
+
+        Cost: 3 points x 1 engine call each -> ~0.1s.
+        """
+        for name, r, theta_wedge in MEDIAL_QUERY_POINTS:
+            _selected, served, engine, _eta = self._serve_via_select(
+                r, theta_wedge)
+            eps = (float(np.max(np.abs(served - engine)))
+                   / float(np.max(np.abs(engine))))
+            self._tick()
+            with self.subTest(point=name, r=r, theta_wedge=theta_wedge):
+                self.assertLess(
+                    eps, MEDIAL_EPS_FLOOR,
+                    f'Medial-axis {name} eps {eps:.3e} exceeds floor '
+                    f'{MEDIAL_EPS_FLOOR:.0e} at (r={r:.3f}, '
+                    f'theta_wedge={theta_wedge:.3f}).')
+
+
+# ===========================================================================
+# Test 10: _wedge_interior_tiles structural contract
+#
+# WP1 wires the wedge-caustic interior tiler into `_train_band_charts` and
+# retires the far-field-interior ("ffin") path.  These tests pin the tiler's
+# STRUCTURAL contract directly (no engine): a single angular column spanning
+# the whole [0, pi/2] wedge (no pi/4 cusp split), uniform radial rows strictly
+# inside (0, r_extent] with r_extent < 1 (the Airy caustic edge is left to the
+# tube chart), and a row count equal to the requested n_per_side.
+# ===========================================================================
+
+#: Representative outer radial extent (in caustic-relative ``r`` units) for
+#: the structural-contract tests.  The production caller caps ``r_extent``
+#: below one; 0.85 is a representative in-range value.
+WEDGE_TILE_R_EXTENT: float = 0.85
+
+#: Radial-row count for the structural test (mirrors the production
+#: ``TrainingConfig.n_farfield_tiles_per_side`` default of 5).
+WEDGE_TILE_N_PER_SIDE: int = 5
+
+#: Row counts swept in the row-count contract test.
+WEDGE_TILE_N_SWEEP: tuple[int, ...] = (1, 2, 3, 5, 8)
+
+#: Canonical single-column wedge centre / half-width (radians): the whole
+#: [0, pi/2] quadrant is one column, so centre = pi/4 and half = pi/4.
+WEDGE_THETA_CENTER: float = 0.25 * np.pi
+WEDGE_THETA_HALF: float = 0.25 * np.pi
+
+#: Tolerance for the exact angular-column geometry (radians).
+WEDGE_THETA_ATOL: float = 1e-12
+
+#: Representative positive-parity band coordinate-radius floor used to
+#: reconstruct the production r_extent cap
+#: ``r_extent = 1 - max_eta_max / coordinate_radius_min``.
+WEDGE_CAP_COORD_RADIUS_MIN: float = 0.30
+
+#: Small / large eta caps for the r_extent-cap falsification: a LARGER
+#: ``max_eta_max`` must SHRINK ``r_extent``.
+WEDGE_CAP_ETA_SMALL: float = 0.02
+WEDGE_CAP_ETA_LARGE: float = 0.10
+
+#: Sweep of ``max_eta_max`` values for the unit-band invariant.
+WEDGE_CAP_ETA_SWEEP: tuple[float, ...] = (0.005, 0.02, 0.05, 0.10, 0.20, 0.28)
+
+
+def _unpack_tile(tile: tuple) -> tuple[float, float, float, float, int, int]:
+    """Unpack a wedge-interior tile into its scalar components.
+
+    A tile is ``((r_center, theta_wedge_center), (half_r, half_theta_wedge),
+    i, j)``.
+    """
+    (r_c, th_c), (half_r, half_th), i, j = tile
+    return float(r_c), float(th_c), float(half_r), float(half_th), int(i), int(j)
+
+
+def _wedge_r_extent_cap(max_eta_max: float, coordinate_radius_min: float,
+                        grid_rho_extent: float = 1.0) -> float:
+    """Reconstruct the production wedge ``r_extent`` cap.
+
+    Mirrors the single expression in `_train_band_charts`:
+    ``r_extent = min(grid_rho_extent, 1 - max_eta_max / coordinate_radius_min)``.
+    A LARGER ``max_eta_max`` (a wider tube shell reserved for the tube chart)
+    pushes ``r_extent`` inward, away from the caustic edge.
+    """
+    return min(grid_rho_extent,
+               1.0 - max_eta_max / coordinate_radius_min)
+
+
+class WedgeInteriorTilesContractTestCase(_WedgeTestCase):
+    """Structural contract of `_wedge_interior_tiles` (no engine).
+
+    Cost: pure-python tile construction, O(us) per call.
+    """
+
+    def test_single_angular_column_spans_full_wedge(self):
+        """Every tile is the SAME single column spanning [0, pi/2].
+
+        No pi/4 cusp subdivision: theta_wedge centre = pi/4, half = pi/4,
+        column index j = 0 for every radial row.
+        """
+        tiles = _wedge_interior_tiles(WEDGE_TILE_R_EXTENT,
+                                      WEDGE_TILE_N_PER_SIDE)
+        self.assertEqual(len(tiles), WEDGE_TILE_N_PER_SIDE)
+        for tile in tiles:
+            _r_c, th_c, _half_r, half_th, _i, j = _unpack_tile(tile)
+            self._tick()
+            self.assertEqual(j, 0, 'wedge interior must be a SINGLE column '
+                                   '(j == 0); a nonzero j means a spurious '
+                                   'angular subdivision.')
+            self.assertAlmostEqual(th_c, WEDGE_THETA_CENTER,
+                                   delta=WEDGE_THETA_ATOL)
+            self.assertAlmostEqual(half_th, WEDGE_THETA_HALF,
+                                   delta=WEDGE_THETA_ATOL)
+            # The column spans exactly the whole wedge [0, pi/2].
+            self.assertAlmostEqual(th_c - half_th, 0.0, delta=WEDGE_THETA_ATOL)
+            self.assertAlmostEqual(th_c + half_th, 0.5 * np.pi,
+                                   delta=WEDGE_THETA_ATOL)
+
+    def test_radial_rows_uniform_and_strictly_inside(self):
+        """Radial rows are uniform and lie strictly within (0, r_extent].
+
+        r_min = _WEDGE_R_MIN > 0 (astroid centre excluded); the outermost row
+        edge equals r_extent < 1 (Airy edge left to the tube chart); every
+        radial row has the SAME half-width (uniform spacing).
+        """
+        tiles = _wedge_interior_tiles(WEDGE_TILE_R_EXTENT,
+                                      WEDGE_TILE_N_PER_SIDE)
+        halfs = {round(_unpack_tile(t)[2], 15) for t in tiles}
+        self.assertEqual(len(halfs), 1,
+                         f'Radial rows NOT uniform: half-widths {halfs}.')
+        edges = [(_unpack_tile(t)[0] - _unpack_tile(t)[2],
+                  _unpack_tile(t)[0] + _unpack_tile(t)[2]) for t in tiles]
+        # Innermost edge is exactly _WEDGE_R_MIN (> 0); outermost is r_extent.
+        self.assertAlmostEqual(edges[0][0], _WEDGE_R_MIN, places=12)
+        self.assertGreater(_WEDGE_R_MIN, 0.0)
+        self.assertAlmostEqual(edges[-1][1], WEDGE_TILE_R_EXTENT, places=12)
+        self.assertLess(WEDGE_TILE_R_EXTENT, 1.0)
+        # Rows are contiguous, ascending, and never touch 0 or 1.
+        prev_hi = _WEDGE_R_MIN
+        for lo, hi in edges:
+            self._tick()
+            self.assertAlmostEqual(lo, prev_hi, places=12,
+                                   msg='radial rows must be contiguous.')
+            self.assertGreater(lo, 0.0, 'no row edge at r <= 0.')
+            self.assertLess(hi, 1.0, 'no row edge at r >= 1.')
+            self.assertGreater(hi, lo)
+            prev_hi = hi
+
+    def test_row_count_matches_n_per_side(self):
+        """The number of radial rows equals the requested n_per_side."""
+        for n in WEDGE_TILE_N_SWEEP:
+            tiles = _wedge_interior_tiles(WEDGE_TILE_R_EXTENT, n)
+            self._tick()
+            with self.subTest(n_per_side=n):
+                self.assertEqual(len(tiles), n)
+                # Deterministic radial-row indices 0..n-1, single column j=0.
+                self.assertEqual([_unpack_tile(t)[4] for t in tiles],
+                                 list(range(n)))
+                self.assertTrue(all(_unpack_tile(t)[5] == 0 for t in tiles))
+
+    def test_empty_when_extent_below_floor(self):
+        """r_extent <= _WEDGE_R_MIN yields no tiles (ladder-served interior).
+
+        The degenerate astroid centre is excluded, so a non-positive usable
+        extent produces an empty list rather than a zero/negative-width row.
+        """
+        self._tick()
+        self.assertEqual(
+            _wedge_interior_tiles(_WEDGE_R_MIN, WEDGE_TILE_N_PER_SIDE), [])
+        self.assertEqual(
+            _wedge_interior_tiles(0.5 * _WEDGE_R_MIN, WEDGE_TILE_N_PER_SIDE), [])
+        self.assertEqual(
+            _wedge_interior_tiles(-0.5, WEDGE_TILE_N_PER_SIDE), [])
+
+    def test_diagnostic_dump_of_tile_ranges(self):
+        """DIAGNOSTIC: dump each tile's (r_range, theta_wedge_range).
+
+        Writes a small text file to tests/output/ and asserts every dumped
+        range is inside the unit band.
+        """
+        tiles = _wedge_interior_tiles(WEDGE_TILE_R_EXTENT,
+                                      WEDGE_TILE_N_PER_SIDE)
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        lines = []
+        for tile in tiles:
+            r_c, th_c, half_r, half_th, i, j = _unpack_tile(tile)
+            r_range = (r_c - half_r, r_c + half_r)
+            th_range = (th_c - half_th, th_c + half_th)
+            lines.append(f'row={i} col={j} r_range={r_range} '
+                         f'theta_wedge_range={th_range}')
+            self._tick()
+            self.assertGreater(r_range[0], 0.0)
+            self.assertLess(r_range[1], 1.0)
+        (OUTPUT_DIR / 'wedge_interior_tiles_ranges.txt').write_text(
+            '\n'.join(lines) + '\n')
+
+
+class WedgeInteriorTilesCapFalsificationTestCase(_WedgeTestCase):
+    """The r_extent cap perturbation shrinks the tiler's outer edge.
+
+    Reconstructs the production cap and shows that forcing ``max_eta_max``
+    larger shrinks ``r_extent`` (and hence the outermost radial row), while no
+    admissible cap ever emits a row at r <= 0 or r >= 1.  Cost: O(us).
+    """
+
+    def test_larger_eta_max_shrinks_extent_and_outer_row(self):
+        """A larger max_eta_max gives a smaller r_extent and outer-row edge."""
+        extent_small = _wedge_r_extent_cap(
+            WEDGE_CAP_ETA_SMALL, WEDGE_CAP_COORD_RADIUS_MIN)
+        extent_large = _wedge_r_extent_cap(
+            WEDGE_CAP_ETA_LARGE, WEDGE_CAP_COORD_RADIUS_MIN)
+        self._tick()
+        self.assertLess(extent_large, extent_small,
+                        'A larger tube-shell reservation (max_eta_max) must '
+                        'push the wedge r_extent inward.')
+        tiles_small = _wedge_interior_tiles(extent_small,
+                                            WEDGE_TILE_N_PER_SIDE)
+        tiles_large = _wedge_interior_tiles(extent_large,
+                                            WEDGE_TILE_N_PER_SIDE)
+        outer_small = _unpack_tile(tiles_small[-1])[0] + \
+            _unpack_tile(tiles_small[-1])[2]
+        outer_large = _unpack_tile(tiles_large[-1])[0] + \
+            _unpack_tile(tiles_large[-1])[2]
+        self.assertLess(outer_large, outer_small)
+        self.assertAlmostEqual(outer_small, extent_small, places=12)
+        self.assertAlmostEqual(outer_large, extent_large, places=12)
+
+    def test_capped_tiles_stay_strictly_in_unit_band(self):
+        """Across an eta sweep, r_extent < 1 and every row edge in (0, 1)."""
+        for eta in WEDGE_CAP_ETA_SWEEP:
+            extent = _wedge_r_extent_cap(eta, WEDGE_CAP_COORD_RADIUS_MIN)
+            with self.subTest(max_eta_max=eta):
+                self.assertLess(extent, 1.0,
+                                'the cap always leaves the Airy edge to the '
+                                'tube chart (r_extent < 1).')
+                tiles = _wedge_interior_tiles(extent, WEDGE_TILE_N_PER_SIDE)
+                for tile in tiles:
+                    r_c, _th_c, half_r, _half_th, _i, _j = _unpack_tile(tile)
+                    self._tick()
+                    self.assertGreater(r_c - half_r, 0.0)
+                    self.assertLess(r_c + half_r, 1.0)
+
+
+# ===========================================================================
+# Test 11: ffin (far-field interior) retirement invariants
+#
+# WP1 removed `_farfield_interior_tiles` and routes the positive-parity
+# astroid interior through `_wedge_interior_tiles` + `_build_wedge_chart`
+# (InteriorWedgeChart, INTERIOR_SACR_C label).  `_interior_admission` survives
+# because the EXTERIOR tiler still consumes its directional-admission geometry.
+# ===========================================================================
+
+class FfinRetirementInvariantsTestCase(unittest.TestCase):
+    """Static invariants proving the ffin path is retired but the exterior
+    admission survives.  Cost: source inspection only, O(ms).
+    """
+
+    def test_farfield_interior_tiles_removed(self):
+        """`_farfield_interior_tiles` no longer exists on the module."""
+        self.assertFalse(
+            hasattr(surrogate_training, '_farfield_interior_tiles'),
+            'The retired ffin tiler `_farfield_interior_tiles` must be gone.')
+
+    def test_interior_admission_still_present_and_callable(self):
+        """`_interior_admission` survives and is callable (exterior use)."""
+        self.assertTrue(hasattr(surrogate_training, '_interior_admission'))
+        self.assertTrue(callable(_interior_admission))
+
+    def test_exterior_tiler_consumes_interior_admission(self):
+        """The exterior tiler takes an `admission` (built by
+        `_interior_admission`) and `_train_band_charts` still wires it."""
+        sig = inspect.signature(_farfield_exterior_tiles)
+        self.assertIn('admission', sig.parameters,
+                      '_farfield_exterior_tiles must consume the '
+                      '_InteriorAdmission geometry.')
+        train_src = inspect.getsource(surrogate_training._train_band_charts)
+        self.assertIn('_interior_admission(', train_src,
+                      'the positive-parity exterior branch must still build '
+                      'the interior-admission geometry.')
+        self.assertIn('_farfield_exterior_tiles(', train_src)
+
+    def test_interior_branch_builds_wedge_not_farfield_label(self):
+        """The interior is built by `_build_wedge_chart` on INTERIOR_SACR_C;
+        `_build_farfield_chart` never trains on the interior label."""
+        wedge_src = inspect.getsource(_build_wedge_chart)
+        ff_src = inspect.getsource(_build_farfield_chart)
+        self.assertIn('definition=INTERIOR_SACR_C', wedge_src,
+                      'the wedge builder must store the INTERIOR_SACR_C '
+                      'envelope.')
+        self.assertIn('definition=FARFIELD_KERNEL_SUM', ff_src,
+                      'the far-field builder must store FARFIELD_KERNEL_SUM.')
+        self.assertNotIn('definition=INTERIOR_SACR_C', ff_src,
+                         'no FarFieldChart may be trained on the interior '
+                         'INTERIOR_SACR_C label after ffin retirement.')
+
+    def test_train_band_charts_routes_interior_through_wedge_builder(self):
+        """`_train_band_charts` builds the wedge_interior region via
+        `_build_wedge_chart` (not `_build_farfield_chart`)."""
+        train_src = inspect.getsource(surrogate_training._train_band_charts)
+        self.assertIn('_wedge_interior_tiles(', train_src)
+        self.assertIn('_build_wedge_chart(', train_src)
+        self.assertIn("'wedge_interior'", train_src)
+
+
+class WedgeTrainingPathProducesWedgeChartsTestCase(unittest.TestCase):
+    """End-to-end: the wedge training path yields InteriorWedgeChart charts,
+    never FarFieldChart.
+
+    Reuses the module-shared engine-trained surrogate (no extra engine cost)
+    to assert every produced interior chart is an InteriorWedgeChart and none
+    is a FarFieldChart carrying the retired interior far-field label.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.surrogate = _shared_wedge_surrogate()
+
+    def test_all_charts_are_interior_wedge_charts(self):
+        """Every chart produced by the wedge path is an InteriorWedgeChart."""
+        chart_types = [type(c).__name__ for c in self.surrogate.charts]
+        self.assertGreater(len(self.surrogate.charts), 0,
+                           f'wedge training produced no charts: {chart_types}')
+        for chart in self.surrogate.charts:
+            with self.subTest(chart_type=type(chart).__name__):
+                self.assertIsInstance(chart, InteriorWedgeChart)
+                self.assertNotIsInstance(chart, FarFieldChart)
+
+
+class WedgeTilesSelfFalsificationTestCase(unittest.TestCase):
+    """Prove the structural-contract assertions have teeth.
+
+    These meta-tests feed deliberately-malformed tiles / caps through the
+    SAME numeric conditions the contract tests use and confirm they trip.
+    """
+
+    def test_split_column_would_fail_single_column_check(self):
+        """A pi/4-split (two-column) tile violates the full-wedge span check."""
+        bad_tile = ((0.4, 0.125 * np.pi), (0.1, 0.125 * np.pi), 0, 1)
+        _r_c, th_c, _half_r, half_th, _i, j = _unpack_tile(bad_tile)
+        # The genuine tiler emits j == 0 and half_th == pi/4; this bad tile
+        # would fail BOTH the column-index and the full-wedge-span assertions.
+        self.assertNotEqual(j, 0)
+        self.assertGreater(abs(half_th - WEDGE_THETA_HALF), WEDGE_THETA_ATOL)
+        self.assertGreater(abs((th_c + half_th) - 0.5 * np.pi),
+                           WEDGE_THETA_ATOL)
+
+    def test_nonuniform_rows_would_fail_uniformity_check(self):
+        """Rows with differing half-widths break the single-half-width set."""
+        bad_tiles = [((0.2, WEDGE_THETA_CENTER), (0.10, WEDGE_THETA_HALF), 0, 0),
+                     ((0.6, WEDGE_THETA_CENTER), (0.25, WEDGE_THETA_HALF), 1, 0)]
+        halfs = {round(_unpack_tile(t)[2], 15) for t in bad_tiles}
+        self.assertGreater(len(halfs), 1,
+                           'non-uniform rows must present >1 half-width.')
+
+    def test_over_unit_extent_emits_forbidden_row(self):
+        """Passing r_extent >= 1 (a caller-cap violation) yields a row that
+        the unit-band check rejects — proving the check discriminates."""
+        tiles = _wedge_interior_tiles(1.2, WEDGE_TILE_N_PER_SIDE)
+        outer_hi = _unpack_tile(tiles[-1])[0] + _unpack_tile(tiles[-1])[2]
+        self.assertGreaterEqual(outer_hi, 1.0,
+                                'an over-unit extent MUST breach r < 1, so the '
+                                'contract test genuinely constrains the cap.')
+
+    def test_cap_shrink_direction_has_teeth(self):
+        """Equal eta gives equal extent (the strict-shrink assert would fail);
+        larger eta strictly shrinks it."""
+        same = _wedge_r_extent_cap(0.05, WEDGE_CAP_COORD_RADIUS_MIN)
+        same2 = _wedge_r_extent_cap(0.05, WEDGE_CAP_COORD_RADIUS_MIN)
+        self.assertEqual(same, same2)
+        bigger_eta = _wedge_r_extent_cap(0.15, WEDGE_CAP_COORD_RADIUS_MIN)
+        self.assertLess(bigger_eta, same)
 
 
 if __name__ == '__main__':

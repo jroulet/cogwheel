@@ -1030,6 +1030,7 @@ class LnlTierTestCase(CensusTestCase):
             return (sur_like.lnlike(par_dic), exact.lnlike(par_dic))
         return pair
 
+    @_TRAIN_TIER_SKIP
     def test_real_likelihood_tiers_within_bars(self):
         """Real `LensedRelativeBinningLikelihood`: a served crown config, a
         strong-shear config and a rescued-flagged config land inside their

@@ -61,6 +61,7 @@ from cogwheel.lensing.surrogate import (
     _REFUSAL_ERRORS, _log_w_grid, _uniform_axis, _log_reach_gamma_axis,
     _caustic_reach as _scalar_caustic_reach, _from_caustic_fixed,
     _from_lobe_fixed, _lobe_boundary_radius, LobeInteriorChart,
+    InteriorWedgeChart, _from_wedge_fixed,
     _caustic_arclength_map, _to_farfield_smooth,
     CarrierDiscontinuityError)
 
@@ -126,6 +127,14 @@ _TUBE_ARC_MAP_SIZE = 2001
 #: ``w * |y| <= ~55`` by construction (the mass-conditioned source scale), so a
 #: chart never samples the (large-w, large-|y|) corner the engine refuses.
 _DD_PRODUCT_MARGIN = 58.0
+#: Innermost radial floor of the positive-parity wedge-interior tiler
+#: (`_wedge_interior_tiles`), in caustic-relative ``r`` units (``r = |y| /
+#: r_caustic``).  The degenerate astroid centre ``r -> 0`` -- where the wedge
+#: angle ``theta_wedge`` is undefined and the four folds are equidistant (a
+#: carrier-continuity trap) -- is excluded from every trained wedge chart and
+#: served by the exact engine.  One percent of the caustic reach is a
+#: negligible coverage sliver.
+_WEDGE_R_MIN = 1e-2
 
 #: Expected cusp counts by parity (astroid / deltoid, both lobes summed).
 _EXPECTED_CUSPS = {1: 4, -1: 6}
@@ -1835,73 +1844,6 @@ def _interior_admission(band: tuple[float, float], parity: int, reach: float,
         gammas=tuple(float(g) for g in band_gammas))
 
 
-def _farfield_interior_tiles(rho_extent: float, n_per_side: int, *,
-                             admission: '_InteriorAdmission',
-                             cusp_angles: list[float]
-                             ) -> list[tuple[tuple[float, float],
-                                             tuple[float, float], int, int]]:
-    """Cusp-aligned interior tiles of the caustic-fixed ``(rho, theta_c)``
-    disk.
-
-    Companion to `_farfield_tiles` for the caustic INTERIOR (frozen WP6, S2-1).
-    Lays ``n_per_side`` uniform ``rho`` rows over the origin-centred disk
-    ``rho in [0, rho_extent]`` and, on the ``theta_c`` axis, cusp-aligned
-    sub-tiles (`_cusp_aligned_theta_tiles`) so no tile straddles an astroid
-    cusp-ray kink or the ``+-pi`` branch cut.  A tile is ADMITTED iff its
-    farthest point -- its outer ``rho`` edge, probed across the tile's
-    ``theta_c`` span -- is inside the band-minimum DIRECTIONAL caustic radius
-    ``rho < min_gamma r_caustic(gamma, theta_c) / reach`` for every gamma in
-    the band AND at least ``eta_max`` from the nearest caustic point
-    (`_InteriorAdmission.admits`).
-
-    This replaces the isotropic inscribed-disk admission (a single scalar
-    ``rho_admit = (caustic_inradius - eta_max) / reach``), which discarded the
-    anisotropic interior between the inradius and the directional radius -- the
-    near-cusp "notch" the exterior scalar-``rho > 1`` tiler leaves uncovered
-    (Professor R3).  The directional admission covers it exactly, with no
-    band-edge waste.
-
-    NOTE (Build 8h-b3): the innermost ``rho`` row touches the caustic-fixed
-    origin ``rho = 0`` where ``theta_c`` is degenerate (all angles map to the
-    same physical point).  For the origin-enclosing astroid this is a benign
-    single 4-image point; the per-lobe saddle interiors are S2-2.
-
-    Parameters
-    ----------
-    rho_extent : float
-        Outer radius of the tiled disk in directional caustic-fixed ``rho``
-        units.  ``rho = 1`` is the caustic boundary in every direction; the
-        source-magnitude support may cap it below one.
-    n_per_side : int
-        Number of ``rho`` rows and of ``theta_c`` sub-tiles per cusp sector.
-    admission : _InteriorAdmission
-        The band's directional-admission geometry (`_interior_admission`).
-    cusp_angles : list of float
-        Source-plane cusp-ray angles (`_cusp_source_angles`); ``theta_c`` tile
-        edges are aligned to them.
-
-    Returns
-    -------
-    list[tuple[tuple[float, float], tuple[float, float], int, int]]
-        ``((rho_center, theta_c_center), (half_rho, half_theta_c), i, j)`` for
-        each admitted tile, in row-major order (deterministic).  ``i`` indexes
-        the ``rho`` row, ``j`` the cusp-aligned ``theta_c`` sub-tile.
-    """
-    if rho_extent <= 0.0:
-        return []
-    half_rho = 0.5 * rho_extent / n_per_side
-    rho_centers = [half_rho * (2 * k + 1) for k in range(n_per_side)]
-    theta_tiles = _cusp_aligned_theta_tiles(cusp_angles, n_per_side)
-    tiles: list[tuple[tuple[float, float], tuple[float, float], int, int]] = []
-    for i, rho_c in enumerate(rho_centers):
-        for j, (theta_c, half_theta) in enumerate(theta_tiles):
-            center = (float(rho_c), float(theta_c))
-            half = (float(half_rho), float(half_theta))
-            if admission.admits(center, half):
-                tiles.append((center, half, i, j))
-    return tiles
-
-
 def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
                              admission: '_InteriorAdmission',
                              source_magnitude_max: float,
@@ -1916,8 +1858,8 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
     ``gamma >= 0.85``) with a per-column DIRECTIONAL admission
     (`_InteriorAdmission.admits_exterior`).  Per column, ``n_per_side`` ``rho``
     rows over ``[1, rho_outer]`` (``rho = 1`` is the caustic in every
-    direction).  The ``theta_c`` columns are cusp-aligned EXACTLY like the
-    interior tiler (`_farfield_interior_tiles`): when ``cusp_angles`` is
+    direction).  The ``theta_c`` columns follow the same cusp-alignment
+    convention as the interior tiler: when ``cusp_angles`` is
     supplied the columns come from `_cusp_aligned_theta_tiles` so no admitted
     tile straddles an astroid cusp ray (an ``r_caustic`` slope kink) or the
     ``+-pi`` branch cut -- the positive-parity exterior ``rho > 1`` arm of
@@ -2369,6 +2311,59 @@ def _lobe_interior_tiles(admission: _SaddleLobeAdmission,
     return tiles
 
 
+def _wedge_interior_tiles(r_extent: float, n_per_side: int
+                          ) -> list[tuple[tuple[float, float],
+                                          tuple[float, float], int, int]]:
+    """Minimal radial-row tiles of the positive-parity astroid interior.
+
+    The wedge-caustic counterpart of `_lobe_interior_tiles`, in WEDGE-FIXED
+    caustic-relative coordinates ``(r, theta_wedge)`` (``r = |y| /
+    r_caustic(gamma, theta_wedge)`` in ``[0, 1)``; ``theta_wedge =
+    atan2(|y2|, |y1|)`` in ``[0, pi/2]``).  Because ``r_caustic`` is exactly
+    four-fold symmetric, the ``[0, pi/2]`` wedge is one quadrant of the
+    interior and the D2 fold serves the other three by symmetry; the SACR-C
+    carrier is smooth across the ``theta_wedge = pi/4`` diagonal (empirically
+    confirmed by ``test_lensing_wedge_dd_arclength``), so a SINGLE angular
+    column spans the whole wedge -- no cusp-alignment split.
+
+    Lays ``n_per_side`` UNIFORM radial rows over ``r in [_WEDGE_R_MIN,
+    r_extent]`` (``r_min`` strictly positive: the degenerate astroid centre
+    is excluded and served by the exact engine -- see `_WEDGE_R_MIN`).  Unlike
+    the directional far-field tiler this helper carries NO admission or
+    cusp-alignment logic: the wedge coordinate is global inside the caustic
+    (``r < 1`` in every direction) and the caller caps ``r_extent`` below one
+    so the Airy caustic edge is left to the tube chart.
+
+    Parameters
+    ----------
+    r_extent : float
+        Outer radial bound in caustic-relative ``r`` units (capped below one
+        by the caller).
+    n_per_side : int
+        Number of radial rows.
+
+    Returns
+    -------
+    list[tuple[tuple[float, float], tuple[float, float], int, int]]
+        ``((r_center, theta_wedge_center), (half_r, half_theta_wedge), i, j)``
+        for each tile in radial order (deterministic).  ``i`` indexes the
+        radial row; ``j`` is always ``0`` (the single angular column).
+    """
+    if r_extent <= _WEDGE_R_MIN:
+        return []
+    half_r = 0.5 * (r_extent - _WEDGE_R_MIN) / n_per_side
+    r_centers = [_WEDGE_R_MIN + half_r * (2 * k + 1)
+                 for k in range(n_per_side)]
+    theta_center = 0.25 * np.pi
+    half_theta = 0.25 * np.pi
+    tiles: list[tuple[tuple[float, float], tuple[float, float], int, int]] = []
+    for i, r_c in enumerate(r_centers):
+        center = (float(r_c), float(theta_center))
+        half = (float(half_r), float(half_theta))
+        tiles.append((center, half, i, 0))
+    return tiles
+
+
 def _stratum_ppgo_boundary(parity: int, gamma: float, rho: float,
                            ppgo_map: CertifiedPpgoMap | None
                            ) -> float | None:
@@ -2767,7 +2762,6 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
                           box_center: tuple[float, float],
                           half: tuple[float, float],
                           w_range: tuple[float, float], config: TrainingConfig,
-                          definition: str = FARFIELD_KERNEL_SUM,
                           w_nodes_per_decade: int | None = None
                           ) -> tuple[FarFieldChart, int, int]:
     """Build one far-field chart in far-field-smooth ``(s, d)`` coordinates.
@@ -2787,14 +2781,11 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
     the coordinate is internally consistent and an imperfect ``(s, d)`` bound
     can only over-refuse (coverage loss), never serve a wrong value.
 
-    ``definition`` selects the envelope label the chart is trained on: the
-    default far-field kernel-sum label for EXTERIOR tiles, or the interior
-    SACR-C label (`INTERIOR_SACR_C`) for INTERIOR tiles (Build S2-3), which
-    stores the ``tau_c``-demodulated caustic-region envelope instead of the
-    divergent-kernel-subtracting far-field label.  The tag rides through to
-    `from_engine` and is stamped on the chart.  Building an interior chart on
-    a tile that straddles a critical-basin flip raises
-    `CarrierDiscontinuityError` (the caller subdivides).
+    The chart is always trained on the exterior far-field kernel-sum label
+    (`FARFIELD_KERNEL_SUM`); since WP1 the astroid interior is charted in wedge
+    caustic-relative coordinates by `_build_wedge_chart` / `InteriorWedgeChart`
+    and no far-field chart is ever built on the interior `INTERIOR_SACR_C`
+    label.
 
     A tile that cannot be charted as a single cusp-free exterior arc -- its
     boundary straddles two caustic branches/lobes (a macro-saddle tile across
@@ -2861,7 +2852,8 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
             w_range=w_range, arc_theta_lo=arc_theta_lo,
             arc_theta_hi=arc_theta_hi, arc_branch=arc_branch,
             n_gamma=config.n_gamma, n_s=config.n_theta_c, n_d=config.n_rho,
-            w_nodes_per_decade=nodes_per_decade, definition=definition)
+            w_nodes_per_decade=nodes_per_decade,
+            definition=FARFIELD_KERNEL_SUM)
     except geometry.LensDomainError as exc:
         raise CarrierDiscontinuityError(
             'Far-field exterior arc spans a caustic cusp at a band-edge gamma '
@@ -2940,6 +2932,74 @@ def _build_lobe_chart(*, gamma_band: tuple[float, float], parity: int,
     return chart, n_points, refused
 
 
+def _build_wedge_chart(*, gamma_band: tuple[float, float], parity: int,
+                       box_center: tuple[float, float],
+                       half: tuple[float, float],
+                       w_range: tuple[float, float], config: TrainingConfig,
+                       w_nodes_per_decade: int | None = None
+                       ) -> tuple['InteriorWedgeChart', int, int]:
+    """Build one positive-parity astroid-interior chart in wedge coordinates.
+
+    The wedge-interior counterpart of `_build_lobe_chart`, for the
+    positive-parity (``parity == 1``) astroid interior.  ``box_center`` is
+    ``(r_center, theta_wedge_center)`` and ``half`` is
+    ``(half_r, half_theta_wedge)``; the chart is trained on the axis-aligned
+    wedge-fixed box ``r in [r_center +- half_r]`` x ``theta_wedge in
+    [theta_wedge_center +- half_theta_wedge]`` via
+    `LensAmplificationSurrogate.from_wedge_engine`, which maps each
+    ``(gamma, r, theta_wedge)`` node to a physical eigenframe source through
+    the wedge frame (`_from_wedge_fixed`, canonical first quadrant) and stores
+    the ``tau_c``-demodulated `INTERIOR_SACR_C` envelope on an
+    `InteriorWedgeChart`.  ``from_wedge_engine`` applies the DD-product
+    ``w``-ceiling (``w * r * r_caustic <= _DD_PRODUCT_MARGIN``) and builds the
+    caustic arc-length ``theta_wedge -> s`` map INTERNALLY -- neither is
+    re-derived here.
+
+    Only positive-parity (``parity == 1``) bands have an origin-enclosing
+    astroid interior; a macro-saddle call is a programming error (the saddle
+    interior is charted per lobe by `_build_lobe_chart`).
+    ``w_nodes_per_decade`` overrides the ``w``-axis node density for THIS chart
+    only; ``None`` falls back to ``config.w_nodes_per_decade``.
+
+    Returns
+    -------
+    tuple[InteriorWedgeChart, int, int]
+        The built `InteriorWedgeChart` (unwrapped from the single-chart
+        surrogate `from_wedge_engine` returns), the engine node count, and the
+        number of refused nodes.
+
+    Raises
+    ------
+    ValueError
+        If ``parity != 1`` (macro-saddle interiors have no astroid wedge).
+    CarrierDiscontinuityError
+        If the tile straddles a critical-basin flip (caller records the gap).
+    """
+    if parity != 1:
+        raise ValueError(
+            'wedge-interior charts exist only for the positive-parity '
+            f'(parity == 1) astroid interior; got parity={parity}.')
+    nodes_per_decade = (config.w_nodes_per_decade
+                        if w_nodes_per_decade is None
+                        else int(w_nodes_per_decade))
+    n_points = config.n_gamma * config.n_rho * config.n_theta_c
+    _budget_check(n_points, config.engine_budget, 'wedge')
+    r_c, theta_wedge_c = box_center
+    half_r, half_theta = half
+    r_range = (r_c - half_r, r_c + half_r)
+    theta_wedge_range = (theta_wedge_c - half_theta,
+                         theta_wedge_c + half_theta)
+    single = LensAmplificationSurrogate.from_wedge_engine(
+        gamma_range=gamma_band, r_range=r_range,
+        theta_wedge_range=theta_wedge_range, w_range=w_range,
+        n_gamma=config.n_gamma, n_r=config.n_rho,
+        n_theta_wedge=config.n_theta_c, w_nodes_per_decade=nodes_per_decade,
+        definition=INTERIOR_SACR_C)
+    chart = single.charts[0]
+    refused = int(chart.refused_points.shape[0])
+    return chart, n_points, refused
+
+
 def _engine_envelope(w_grid: np.ndarray, gamma: float, source: np.ndarray
                      ) -> np.ndarray | None:
     """Exact SACR-C envelope ``E(w)`` at a point, or ``None`` if refused.
@@ -2964,7 +3024,8 @@ def _engine_envelope(w_grid: np.ndarray, gamma: float, source: np.ndarray
 # Held-out accuracy
 # ---------------------------------------------------------------------------
 
-def _heldout_eps(chart: TubeChart | FarFieldChart | LobeInteriorChart,
+def _heldout_eps(chart: TubeChart | FarFieldChart | LobeInteriorChart
+                 | InteriorWedgeChart,
                  samples: Sequence[tuple[float, float, float]],
                  provenance: dict) -> float:
     """Max relative envelope error of a chart over held-out geometry points.
@@ -2974,8 +3035,7 @@ def _heldout_eps(chart: TubeChart | FarFieldChart | LobeInteriorChart,
     skipped.  Returns ``nan`` when no held-out point is served.
 
     The reference envelope and its normalization depend on the chart's
-    ENVELOPE LABEL, matching the label each chart is trained on (Build 8g-b,
-    interior label added Build S2-3):
+    ENVELOPE LABEL, matching the label each chart is trained on (Build 8g-b):
 
     - a far-field `FarFieldChart` (a far-field-tag `envelope_definition`) is
       trained on its window-class far-field label, so the reference is
@@ -2985,20 +3045,22 @@ def _heldout_eps(chart: TubeChart | FarFieldChart | LobeInteriorChart,
       ``max|exact_total|`` (``max|E_ff| ~ 1e-4`` is too tiny a denominator);
       a held-out point the ghost gate refuses (kernel-sum-minus-ghost only)
       is skipped, mirroring the training-time gate;
-    - an INTERIOR `FarFieldChart` (`INTERIOR_SACR_C` tag) is trained on the
-      caustic-region ``partition.envelope`` (the ``tau_c``-demodulated SACR-C
-      envelope), so its reference is that envelope normalized by ``max|E|`` --
-      the same currency as a tube chart;
-    - a `TubeChart` keeps the caustic-region ``partition.envelope`` reference
-      normalized by ``max|E|`` -- byte-identical to HEAD.
+    - an `InteriorWedgeChart` (positive-parity astroid interior in wedge
+      caustic-relative coordinates, WP1) is trained on the caustic-region
+      ``partition.envelope`` (the ``tau_c``-demodulated SACR-C envelope), so
+      its reference is that envelope normalized by ``max|E|`` -- the same
+      currency as a tube / lobe-interior chart;
+    - a `TubeChart` (and a `LobeInteriorChart`) keeps the caustic-region
+      ``partition.envelope`` reference normalized by ``max|E|``.
     """
     surrogate = LensAmplificationSurrogate([chart], provenance)
     w_grid = np.exp(chart.log_w_grid)
-    # An interior SACR-C chart is a FarFieldChart trained on the caustic-region
-    # envelope, so it uses the SACR-C reference/normalization, not the
-    # far-field one; a tube chart likewise.
-    is_farfield_label = (isinstance(chart, FarFieldChart)
-                         and chart.envelope_definition != INTERIOR_SACR_C)
+    # Only a far-field `FarFieldChart` uses the far-field reference /
+    # normalization; every other chart type (tube, lobe-interior, and the
+    # WP1 wedge-interior) uses the caustic-region ``partition.envelope``
+    # (``max|E|`` currency).  After WP1 no FarFieldChart carries the interior
+    # SACR-C label, so a bare isinstance check suffices.
+    is_farfield_label = isinstance(chart, FarFieldChart)
     errors: list[float] = []
     for gamma, y1, y2 in samples:
         channels = ChangRefsdalChannels(w_grid)
@@ -3108,7 +3170,7 @@ def _reprovision_w_nodes(*, band: tuple[float, float], parity: int,
         try:
             chart, _calls, _refused = _build_farfield_chart(
                 gamma_band=band, parity=parity, box_center=center, half=half,
-                w_range=window, config=config, definition=FARFIELD_KERNEL_SUM,
+                w_range=window, config=config,
                 w_nodes_per_decade=n_w)
         except _ENGINE_REFUSALS:
             trace.append({'n_w_per_decade': int(n_w), 'eps': None,
@@ -3326,8 +3388,8 @@ def _lobe_heldout_samples(gamma_band: tuple[float, float],
 
 def _load_or_build(path: Path, build_fn: Callable[[], tuple],
                    provenance: dict
-                   ) -> tuple[TubeChart | FarFieldChart | LobeInteriorChart,
-                              dict, bool]:
+                   ) -> tuple[TubeChart | FarFieldChart | LobeInteriorChart
+                              | InteriorWedgeChart, dict, bool]:
     """Load a per-chart file if present, else build it and save it.
 
     Returns ``(chart, chart_report, reused)``.  Resumability is a plain file
@@ -3581,10 +3643,12 @@ def _subdivide_farfield_tile(
     - a macro-saddle exterior parent (no ``exterior_admission``) admits a child
       iff its inner ``rho`` edge stays outside the scalar-reach caustic + tube
       shell, ``rho_c_child - half_rho/2 >= exclusion_rho`` (mirrors
-      `_farfield_tiles`);
-    - an interior parent admits a child iff its farthest edge passes the SAME
-      directional caustic-radius + nearest-caustic-distance test the tiler used
-      (``interior_admission.admits`` -- mirrors `_farfield_interior_tiles`).
+      `_farfield_tiles`).
+
+    (Interior tiles are never subdivided since WP1 -- the astroid interior is
+    charted in wedge caustic-relative coordinates and its gated tiles are
+    recorded as ladder-served gaps -- so this subdivider handles only the two
+    exterior cases above.)
 
     The ``theta_c`` split never crosses the ``+-pi`` branch cut (children are
     sub-intervals of the parent's ``theta_c`` range, itself within
@@ -3622,10 +3686,9 @@ def _subdivide_farfield_tile(
         Conservative exterior admission floor in directional caustic-fixed
         ``rho`` units.
     interior_admission : _InteriorAdmission or None
-        The band's directional interior-admission geometry
-        (`_interior_admission`), used to re-admit interior children exactly as
-        the tiler did.  ``None`` for exterior-only parents (never dereferenced
-        because an exterior tile carries ``region == 'exterior'``).
+        Vestigial since WP1 (interior tiles are no longer subdivided); always
+        passed ``None`` by both call sites and never dereferenced.  Retained
+        for call-site signature stability.
     charts : list
         Packed-chart accumulator; passing children are appended in place.
     chart_reports : list of dict
@@ -3667,14 +3730,13 @@ def _subdivide_farfield_tile(
         eff_w_nodes = config.interior_w_nodes_per_decade
     else:
         eff_w_nodes = config.w_nodes_per_decade
-    # Children inherit the parent's envelope label / registration kind: an
-    # interior parent's children are interior SACR-C tiles (Build S2-3), gated
-    # against the interior eps bar; exterior children keep the far-field label.
-    interior = region == 'interior'
-    child_kind = 'interior' if interior else 'farfield'
-    child_definition = INTERIOR_SACR_C if interior else FARFIELD_KERNEL_SUM
-    child_bar = (config.interior_eps_max if interior
-                 else config.farfield_eps_max)
+    # After WP1 this subdivider is only reached for EXTERIOR far-field tiles:
+    # the astroid interior is charted in wedge caustic-relative coordinates
+    # (`InteriorWedgeChart`) and its tiles are recorded as ladder-served gaps
+    # rather than subdivided, so every child here keeps the exterior far-field
+    # kernel-sum label and is gated against the far-field eps bar.
+    child_kind = 'farfield'
+    child_bar = config.farfield_eps_max
 
     children_summary: list[dict] = []
     ci = 0
@@ -3683,18 +3745,11 @@ def _subdivide_farfield_tile(
             child_rho = float(rho_c) + s_rho * child_half_rho
             child_theta = float(theta_c) + s_theta * child_half_theta
             # Re-admit through the PARENT's region predicate (carried
-            # verbatim -- Professor guard (e)).  Interior children re-run the
-            # SAME directional caustic-radius + nearest-distance test the tiler
-            # used; positive-parity exterior children re-run the SAME
-            # per-column directional `admits_exterior` test; macro-saddle
-            # exterior children the scalar-rho exclusion floor.
-            if region == 'interior':
-                admitted_child = (
-                    interior_admission is not None
-                    and interior_admission.admits(
-                        (child_rho, child_theta),
-                        (child_half_rho, child_half_theta)))
-            elif (exterior_admission is not None
+            # verbatim -- Professor guard (e)): positive-parity exterior
+            # children re-run the SAME per-column directional `admits_exterior`
+            # test; macro-saddle exterior children the scalar-rho exclusion
+            # floor.  (Interior parents are never subdivided since WP1.)
+            if (exterior_admission is not None
                   and source_magnitude_max is not None):
                 # Positive-parity exterior (WP1): re-admit through the SAME
                 # per-``theta_c``-column directional predicate the tiler used
@@ -3731,12 +3786,11 @@ def _subdivide_farfield_tile(
             def build_child(center=child_center, half=child_half,
                             w_range=w_range, si=si, m_lo=m_lo, m_hi=m_hi,
                             region=region, child_kind=child_kind,
-                            child_definition=child_definition,
                             w_nodes=w_nodes, eff_w_nodes=eff_w_nodes):
                 chart, calls, refused = _build_farfield_chart(
                     gamma_band=band, parity=parity, box_center=center,
                     half=half, w_range=w_range, config=config,
-                    definition=child_definition, w_nodes_per_decade=w_nodes)
+                    w_nodes_per_decade=w_nodes)
                 samples = _farfield_heldout_samples(
                     band, center, half, config, rng)
                 eps = _heldout_eps(chart, samples,
@@ -3759,10 +3813,10 @@ def _subdivide_farfield_tile(
                     child_path, build_child,
                     {'schema': 'build8c-chart', 'parity': parity})
             except CarrierDiscontinuityError as exc:
-                # A subdivided interior child STILL straddles a basin flip.
+                # A subdivided exterior child STILL straddles a basin flip.
                 # Subdivision is single-level (no recursion), so record the
                 # child as a carrier-flip gap served by the ladder -- never
-                # fitted with a phase-kinked envelope (Build S2-3).
+                # fitted with a phase-kinked envelope.
                 children_summary.append({
                     'ci': ci,
                     'center': [round(child_rho, 6), round(child_theta, 6)],
@@ -4201,12 +4255,21 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         # one shell of the origin); no interior point clears the shell.
         interior_skip = 'tube_shell_fills_interior'
     else:
-        # Directional admission geometry for the whole band (frozen WP6):
-        # band-minimum directional caustic radius + nearest-caustic cloud +
-        # source-plane cusp rays (built once, reused across strata).
-        admission = _interior_admission(band, parity, reach_scalar, config,
-                                        eta_max=max_eta_max)
-        cusp_angles = _cusp_source_angles(gamma_mid, config.n_caustic_samples)
+        # Positive-parity astroid interior in WEDGE caustic-relative
+        # coordinates (WP1): the origin-enclosing astroid interior is charted
+        # by ``InteriorWedgeChart`` (built via ``from_wedge_engine``) instead
+        # of the retired far-field ``ffin`` tiling.  ``r`` is normalised by the
+        # directional caustic reach and ``theta_wedge = atan2(|y2|, |y1|)``
+        # spans one canonical quadrant ``[0, pi/2]`` (the astroid D2 fold maps
+        # the other three quadrants onto it).  The wedge tiler is a MINIMAL
+        # single-angular-column, uniform-radial-rows family; DD-product
+        # ``w``-capping and the arc-length ``theta_wedge -> s`` map are applied
+        # INSIDE ``from_wedge_engine`` per tile, and no cusp-alignment or
+        # directional admission geometry is needed -- the caustic-relative
+        # frame absorbs the caustic shape.  ``coordinate_radius_min`` /
+        # ``reach_max`` are the band-level bounds already computed above
+        # (bit-identical to ``np.min(admission.radius_grid)``, so no per-band
+        # ``_interior_admission`` object is built here).
         int_rho = 0.0  # near-origin: the hardest interior region (Build 8h-a)
         int_boundary = _stratum_ppgo_boundary(
             parity, gamma_mid, int_rho, ppgo_map)
@@ -4217,7 +4280,6 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             # The directional interior reaches the full caustic at ``rho=1``,
             # capped conservatively by the stratum source support divided by
             # the smallest physical directional radius in the band.
-            coordinate_radius_min = float(np.min(admission.radius_grid))
             grid_rho_extent = min(
                 1.0, float(y_extent) / coordinate_radius_min,
             )
@@ -4228,7 +4290,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 int_w_range, int_boundary, int_ceiling)
             if action == 'drop':
                 dropped_strata.append({
-                    'stratum_index': si, 'region': 'interior',
+                    'stratum_index': si, 'region': 'wedge_interior',
                     'mass_range': [round(m_lo, 3), round(m_hi, 3)],
                     'w_range': [round(int_w_range[0], 6),
                                 round(int_w_range[1], 6)],
@@ -4236,15 +4298,20 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     'reason': 'ppGO certified over the whole stratum w-band'})
                 continue
             int_w_range = trimmed_w_range
-            tiles = _farfield_interior_tiles(
-                grid_rho_extent, config.n_farfield_tiles_per_side,
-                admission=admission, cusp_angles=cusp_angles)
+            # Cap the wedge radial extent one tube-shell inside the caustic so
+            # the Airy caustic edge (r -> 1) is left to the tube chart; a
+            # non-positive extent yields no tiles (ladder-served interior).
+            r_extent = min(
+                grid_rho_extent, 1.0 - max_eta_max / coordinate_radius_min)
+            tiles = _wedge_interior_tiles(
+                r_extent, config.n_farfield_tiles_per_side)
             interior_admitted += len(tiles)
             interior_records.append({
                 'stratum_index': si,
                 'mass_range': [round(m_lo, 3), round(m_hi, 3)],
                 'grid_extent': round(float(grid_extent), 6),
                 'grid_rho_extent': round(float(grid_rho_extent), 6),
+                'r_extent': round(float(r_extent), 6),
                 'w_range': [round(int_w_range[0], 6),
                             round(int_w_range[1], 6)],
                 'ppgo_capped': bool(action == 'cap'),
@@ -4253,7 +4320,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 admitted.append({
                     'si': si, 'i': i, 'j': j, 'center': center, 'half': half,
                     'm_lo': m_lo, 'm_hi': m_hi, 'w_range': int_w_range,
-                    'region': 'interior'})
+                    'region': 'wedge_interior'})
 
     # Loud interior summary.  Where geometry permits an interior region (origin
     # enclosed, reach clears the tube shell) admission MUST be non-empty; a
@@ -4264,7 +4331,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         'parity': parity, 'interior_summary': True,
         'origin_enclosed': bool(encloses),
         'admission': ('per_lobe_winding' if parity != 1
-                      else 'directional_r_caustic'),
+                      else 'wedge_caustic_relative'),
         'caustic_inradius': round(float(inradius), 6),
         'caustic_reach': round(float(reach_scalar), 6),
         'n_cusp_rays': len(cusp_angles),
@@ -4332,7 +4399,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         tile_w_nodes = tile.get('w_nodes_per_decade')
         if tile_w_nodes is not None:
             eff_w_nodes = int(tile_w_nodes)
-        elif region in ('interior', 'lobe_interior'):
+        elif region in ('interior', 'lobe_interior', 'wedge_interior'):
             eff_w_nodes = config.interior_w_nodes_per_decade
         else:
             eff_w_nodes = config.w_nodes_per_decade
@@ -4416,21 +4483,106 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             chart_reports.append(chart_report)
             continue
 
-        interior = region == 'interior'
-        kind = 'interior' if interior else 'farfield'
-        definition = INTERIOR_SACR_C if interior else FARFIELD_KERNEL_SUM
-        infix = 'ffin' if interior else 'ff'
-        tag = f'chart_{label}_s{si}_{infix}_{i}_{j}'
+        if region == 'wedge_interior':
+            # Positive-parity astroid-interior tile (WP1): trained in WEDGE
+            # caustic-relative ``(r, theta_wedge)`` coordinates via
+            # ``from_wedge_engine`` (inside ``_build_wedge_chart``), storing the
+            # ``INTERIOR_SACR_C`` ``tau_c``-demodulated envelope on an
+            # ``InteriorWedgeChart``.  Gated on the SAME interior eps bar as the
+            # origin-centred / lobe interior paths; the held-out probe maps
+            # through the chart's own wedge frame (``chart.wedge_map`` +
+            # ``_from_wedge_fixed``), never the retired ``_from_caustic_fixed``.
+            # A gated or carrier-flipped wedge tile is a ladder-served gap (NO
+            # subdivision -- the far-field subdivider is origin-centred and
+            # cannot resubdivide a caustic-relative box; mirrors the lobe path).
+            wedge_tag = f'chart_{label}_s{si}_ffwedge_{i}_{j}'
+            wedge_path = outdir / f'{wedge_tag}.npz'
+
+            def build_wedge(band=band, center=center, half=half,
+                            w_range=w_range, si=si, m_lo=m_lo, m_hi=m_hi,
+                            region=region, eff_w_nodes=eff_w_nodes,
+                            w_nodes=eff_w_nodes):
+                chart, calls, refused = _build_wedge_chart(
+                    gamma_band=band, parity=parity, box_center=center,
+                    half=half, w_range=w_range, config=config,
+                    w_nodes_per_decade=w_nodes)
+                # Held-out probe INLINE (task step D): draw
+                # ``(gamma, r, theta_wedge)`` uniformly inside the tile's
+                # wedge-fixed box and map each draw to a PHYSICAL eigenframe
+                # source through the chart's OWN ``wedge_map`` -- transcribes
+                # ``_lobe_heldout_samples`` for the wedge frame.
+                r_c, theta_wedge_c = center
+                half_r, half_theta = half
+                samples: list[tuple[float, float, float]] = []
+                for _ in range(config.n_heldout):
+                    gamma = float(rng.uniform(*band))
+                    r = float(rng.uniform(r_c - half_r, r_c + half_r))
+                    theta_wedge = float(rng.uniform(
+                        theta_wedge_c - half_theta,
+                        theta_wedge_c + half_theta))
+                    y1_eig, y2_eig = _from_wedge_fixed(
+                        gamma, r, theta_wedge, chart.wedge_map)
+                    samples.append((gamma, float(y1_eig), float(y2_eig)))
+                eps = _heldout_eps(chart, samples,
+                                   {'schema': 'heldout-probe'})
+                return chart, calls, refused, {
+                    'kind': 'interior', 'region': region,
+                    'image_count': chart.image_count,
+                    'stratum_index': si,
+                    'stratum_mass_range': [round(m_lo, 3), round(m_hi, 3)],
+                    'rho_theta_box': [list(center), list(half)],
+                    'w_range': [round(w_range[0], 6), round(w_range[1], 6)],
+                    'node_counts': {'n_gamma': config.n_gamma,
+                                    'n_rho': config.n_rho,
+                                    'n_theta_c': config.n_theta_c,
+                                    'n_w_per_decade': int(eff_w_nodes)},
+                    'heldout_eps': eps}
+
+            try:
+                chart, report, reused = _load_or_build(
+                    wedge_path, build_wedge,
+                    {'schema': 'build8c-chart', 'parity': parity})
+            except CarrierDiscontinuityError as exc:
+                # The wedge tile straddles a critical-basin (``tau_c``) flip;
+                # recorded as a ladder-served gap (not subdivided).
+                chart_reports.append({
+                    'name': wedge_tag, 'parity': parity,
+                    'file': str(wedge_path), 'region': region,
+                    'carrier_flip': True, 'carrier_flip_detail': str(exc),
+                    'subdivided': False, 'ladder_served_gap': True})
+                continue
+            gated, gate_reason = _gate_chart('interior', report, config)
+            chart_report = {'name': wedge_tag, 'parity': parity,
+                            'file': str(wedge_path), 'reused': reused,
+                            **report}
+            if gated:
+                # A gated wedge tile is a ladder-served gap: no subdivision.
+                chart_report['gated'] = True
+                chart_report['gate_reason'] = gate_reason
+                chart_report['subdivided'] = False
+                chart_report['ladder_served_gap'] = True
+                chart_reports.append(chart_report)
+                continue
+            charts.append(chart)
+            chart_reports.append(chart_report)
+            continue
+
+        # Exterior far-field remainder tile: the ``FARFIELD_KERNEL_SUM``
+        # envelope in ``(s, d)`` coordinates.  After WP1 the astroid interior
+        # is charted by the wedge branch above, so this final branch is
+        # exterior-only (``region == 'exterior'``) -- no ``INTERIOR_SACR_C``
+        # far-field chart is ever built.
+        kind = 'farfield'
+        tag = f'chart_{label}_s{si}_ff_{i}_{j}'
         path = outdir / f'{tag}.npz'
 
         def build_ff(band=band, center=center, half=half, w_range=w_range,
                      si=si, m_lo=m_lo, m_hi=m_hi, region=region, kind=kind,
-                     definition=definition, w_nodes=eff_w_nodes,
-                     eff_w_nodes=eff_w_nodes):
+                     w_nodes=eff_w_nodes, eff_w_nodes=eff_w_nodes):
             chart, calls, refused = _build_farfield_chart(
                 gamma_band=band, parity=parity, box_center=center,
                 half=half, w_range=w_range, config=config,
-                definition=definition, w_nodes_per_decade=w_nodes)
+                w_nodes_per_decade=w_nodes)
             samples = _farfield_heldout_samples(
                 band, center, half, config, rng)
             eps = _heldout_eps(chart, samples,
@@ -4452,13 +4604,13 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             chart, report, reused = _load_or_build(
                 path, build_ff, {'schema': 'build8c-chart', 'parity': parity})
         except CarrierDiscontinuityError as exc:
-            # Interpolator hygiene (Build S2-3): the interior SACR-C tile
-            # straddles a critical-basin (``tau_c``) flip, so a single spline
-            # cannot represent the phase-kinked envelope.  Resolve by the
-            # plan's reseat-via-SUBDIVISION -- halve the tile so each sub-tile
-            # lands in one nearest-caustic basin -- recorded loudly.  A flip is
-            # generically absent for the cusp-aligned single-basin interior
-            # tiles, so this is the exceptional path.
+            # Interpolator hygiene: the exterior far-field tile straddles a
+            # critical-basin (``tau_c``) flip, so a single spline cannot
+            # represent the phase-kinked envelope.  Resolve by
+            # reseat-via-SUBDIVISION -- halve the tile so each sub-tile lands in
+            # one nearest-caustic basin -- recorded loudly.  A flip is
+            # generically absent for well-separated exterior tiles, so this is
+            # the exceptional path.
             flip_report = {'name': tag, 'parity': parity, 'file': str(path),
                            'region': region, 'carrier_flip': True,
                            'carrier_flip_detail': str(exc), 'subdivided': True}
@@ -4467,7 +4619,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 tile=tile, parent_tag=tag, band=band, parity=parity,
                 config=config, rng=rng, outdir=outdir,
                 exclusion_rho=exclusion_rho,
-                interior_admission=admission,
+                interior_admission=None,
                 charts=charts, chart_reports=chart_reports,
                 exterior_admission=(exterior_admission if parity == 1
                                     else None),
@@ -4494,7 +4646,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 tile=tile, parent_tag=tag, band=band, parity=parity,
                 config=config, rng=rng, outdir=outdir,
                 exclusion_rho=exclusion_rho,
-                interior_admission=admission,
+                interior_admission=None,
                 charts=charts, chart_reports=chart_reports,
                 exterior_admission=(exterior_admission if parity == 1
                                     else None),

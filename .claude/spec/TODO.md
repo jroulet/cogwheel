@@ -511,6 +511,98 @@ Tag conventions:
   follows the rename in step 5.
 
 
+- **THE FAST FULL-SUITE GATE CANNOT COMPLETE — tests fall into the mpmath
+  branch** `[housekeeping]` — diagnosed 2026-08-06 by py-spy on a gate run
+  frozen at 99% for SIX HOURS with four workers spinning at ~120% CPU each.
+  ONE of the two offenders is FIXED; the other is not yet identified.
+
+  `.claude/sdk/run_full_suite.sh /tmp/gate_at_head_171802.log` started
+  2026-08-05 17:18, last wrote its log at 19:59, and was still "running" at
+  01:58 the next morning. Log growth zero for 6h while CPU stayed pegged —
+  the signature CLAUDE.md's detached-run health rule calls a kill. Killed
+  2026-08-06 02:05.
+
+  ## What py-spy found
+
+  Both stuck workers were inside `mpmath.quad` summation, reached through
+  `_raw_integral_mp` -> `_f_schwinger_mpmath` -> `f_schwinger`
+  (`cogwheel/lensing/chang_refsdal/_schwinger.py:845/866/940`):
+
+  - worker `gw2`: `test_lensing_surrogate_census.py::LnlTierTestCase::
+    test_real_likelihood_tiers_within_bars` -> `_dense_farfield_source` ->
+    `_pos_farfield_dense` -> `FarFieldChart.from_engine` -> `_exact_total` ->
+    `_positive_parity_grid`;
+  - the other worker: the same `_f_schwinger_mpmath` leaf reached through
+    `Posterior.lnposterior` -> `lensing/posterior.py:81` ->
+    `marginalized_extrinsic.lnlike_and_metadata` -> `_get_dh_hh_timeshift`
+    -> `_amplification_coefficients` -> `_evaluate_envelope` ->
+    `_exact_total` -> `_saddle_grid` (`operator.py:915`). The py-spy dump was
+    truncated above the pytest frames, so the TEST is unidentified.
+
+  ## DONE
+
+  `LnlTierTestCase.test_real_likelihood_tiers_within_bars` now carries
+  `@_TRAIN_TIER_SKIP` (the file's existing `COGWHEEL_TRAIN_TIER` gate, line
+  535). It was the only unguarded method in that file touching
+  `_dense_farfield_source`, and every other engine-backed class there
+  (`EndToEndPartitionTestCase`, `HeldoutEnvelopeEpsTestCase`,
+  `TubeBeatsRawTestCase`, `FoldApproachRayTestCase`,
+  `MutationFalsificationTestCase`) was already guarded — so this was a plain
+  oversight, not a design choice. Applied per-METHOD, not per-class: the two
+  siblings (`test_assign_tier_is_theta_independent`,
+  `test_tiers_aggregate_with_a_mock_pair`) are cheap and stay in the fast
+  tier. VERIFIED: the class now runs 2 passed / 1 skipped in 3.70 s.
+
+  ## NOT DONE — the second offender is still unidentified
+
+  Ruled out by measurement, not inference:
+  - `test_posterior.py` — the obvious suspect (it evaluates
+    `lnposterior_pardic_and_metadata` over every prior x likelihood pair).
+    Runs clean in 52.07 s. NOT the offender.
+  The gate log cannot name it: under xdist the start line and the result are
+  emitted together, so an in-flight test leaves no trace (all 1457 started
+  tests in that log also completed).
+
+  Remaining candidates, all reaching a MARGINALIZED lensed posterior — the
+  stack's `marginalized_extrinsic` frame is the discriminator:
+  `test_lensing_marginalized_likelihood.py` (builds
+  `LensedPosterior(marg_prior, lensed_marg)` at :321; unguarded classes
+  `RefusalContractTestCase`, `BinGuardTestCase`,
+  `RegistrationPairingSerializationTestCase`), `test_lensing_prior.py`
+  (`LensedPosterior` at :303), `test_lensing_saddle_likelihood.py` (all six
+  classes unguarded).
+
+  ## Work
+
+  - Install `pytest-timeout` (NOT currently available — `--timeout` is an
+    unrecognized argument) and add a per-test timeout to
+    `run_full_suite.sh`. This is the highest-value item and must come FIRST:
+    with it, the next gate run NAMES the hung test instead of requiring a
+    py-spy autopsy, and an unbounded test fails the gate LOUDLY instead of
+    pinning cores overnight. The script self-emits `[beat] n/N` on progress,
+    which is exactly why six hours of no beats read as "still running".
+  - Then re-run the gate on a CLEAN tree to identify the second offender, and
+    gate or shrink it the same way.
+  - Establish which condition in `f_schwinger` (`_schwinger.py:940`) routes to
+    `_f_schwinger_mpmath` rather than the fast branch, and whether these
+    fixtures cross it by design or by accident (a dense far-field source at
+    high `w` is the suspect — the DD product cap and the mpmath ceiling are
+    different thresholds and may disagree). Prefer shrinking a fixture over
+    tier-gating it where the test is a genuine fast-tier smoke check: a
+    smoke test moved behind an opt-in env var stops guarding anything.
+
+  ## Consequence to remember
+
+  The post-build tally for the Born residual chart build (`849e580`, shipped
+  2026-08-04) was never actually verified — the gate meant to verify it is
+  the run killed here. A test that never terminates is not a slow test, it is
+  an ABSENT gate.
+
+  ACCEPTANCE: `run_full_suite.sh` completes end to end and reports a tally;
+  no fast-tier test enters `_f_schwinger_mpmath` (assert it directly — patch
+  the symbol and fail if called during the fast tier).
+
+
 - **COLLOCATION FROM LOCAL SCALES — place chart nodes by the function's own
   analytically-computed scale, not uniformly in whatever coordinate the code
   happens to use** `[→ spec]` — the same principle that fixed the guards
@@ -984,6 +1076,65 @@ Tag conventions:
   current fence already gives up ~10% of draws (measured over 2500), and
   tightening to 0.1 will give up more. Recovering that region needs a
   higher-order uniform form, not a patched cubic one.
+
+
+- **THE TIER-GATED TRAINING SUITE IS BROKEN AT HEAD — 16 failed, 16 errors,
+  every one vacuous** `[housekeeping]` — measured 2026-08-06, PRE-EXISTING
+  (not caused by the interior-wedge build).
+
+  `COGWHEEL_TRAIN_TIER=1 pytest cogwheel/tests/test_lensing_surrogate_training.py
+  -k "EpsRegistrationGateTestCase or EpsGateResumeTestCase or
+  SelfFalsificationTestCase"` gives **16 failed, 11 passed, 16 errors in 94 s**.
+
+  All 16 failures are the same assertion:
+
+      AssertionError: 0 not greater than 0 :
+      anti-vacuity: this test asserted nothing (zero comparisons).
+
+  So `_wp1_gate_fixture()` (~:908) is yielding ZERO charts, and every test
+  built on it is a no-op. The fixture's own anti-vacuity guard is the only
+  thing reporting it — which is exactly what that guard is for.
+
+  ## Provenance — established by A/B, not by inference
+
+  Run against the pre-build tree (`c08f506`) in an isolated worktree and
+  against the post-build tree: **the failing/erroring sets are IDENTICAL**
+  (16 vs 16, set equality, zero new, zero fixed). The interior-wedge wiring
+  did not cause this and did not fix it.
+
+  This matters because the pre-commit gated-drift guard flagged these three
+  classes when `_build_farfield_chart` lost its keyword-only `definition`
+  parameter. That flag was CORRECT to fire (skipped tests cannot report their
+  own breakage) but the breakage it pointed at is older than the change that
+  triggered it. The commit was made with
+  `GATED_DRIFT_ACK="EpsRegistrationGateTestCase,EpsGateResumeTestCase,SelfFalsificationTestCase"`
+  on the strength of the A/B above.
+
+  ## Why this is worse than an ordinary red test
+
+  These are TIER-GATED, so a default run skips them and the suite reports
+  green. They have presumably been vacuous for some time without anyone
+  noticing: a test that asserts nothing and a test that passes look the same
+  in a skip-heavy summary. Every guarantee these classes were written to
+  provide — eps-gate registration, resume determinism, the poisoned-chart
+  self-falsification set — is currently UNENFORCED.
+
+  ## Work
+
+  - Find why `_wp1_gate_fixture()` produces no charts. It builds three real
+    engine-backed far-field charts via `_build_farfield_chart` with
+    `_GATE_GAMMA_BAND` / `_GATE_HALF = (0.25, 0.2)` (~:941); the likely
+    suspects are a tile that no longer admits under current thresholds, or a
+    `half` that is now out of range for the `(s, d)` bridge.
+  - Restore the assertions, then confirm non-vacuity by mutation: poison a
+    chart and check the test actually FAILS.
+  - Then consider whether these belong in the training tier at all — 94 s for
+    the class set is fast enough that the gate may be costing more coverage
+    than it saves.
+
+  ACCEPTANCE: the three classes pass under `COGWHEEL_TRAIN_TIER=1` with a
+  non-zero comparison count, and a deliberately poisoned chart makes them
+  fail.
 
 
 - **THE INTERIOR WEDGE CHART IS BUILT, SERVE-WIRED, TESTED — AND NEVER

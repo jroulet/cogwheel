@@ -1,5 +1,28 @@
 # Test Dev Short-Term Observations
 
+- InteriorWedgeChart WP1 (ffin retirement) test extension
+  (test_lensing_interior_wedge_chart.py, now 46 tests): added 3 classes.
+  (1) WedgeHeldOutAccuracyTestCase: 5-node/axis chart via
+  LensAmplificationSurrogate.from_wedge_engine (NOT InteriorWedgeChart —
+  from_wedge_engine is a classmethod on the SURROGATE), 8 off-node interior
+  queries incl small-r + theta_wedge=pi/4 diagonal; eps<5e-2 floor, worst
+  measured eps=1.45e-2 at 5 nodes (4 nodes gave a corner eps=5.9e-2 OVER
+  floor — use 5). Diagnostic scatter saved to tests/output/.
+  (2) WedgeD2FoldExactnessTestCase: 4 D2 mirrors (+-y1,+-y2) served |F|
+  identical to EXACTLY 0.0 diff (fold is abs() = exact float negation);
+  atol 1e-12 fallback unused. Self-falsification: different source diff>1e-3.
+  (3) MedialAxisServingTestCase: near-centre + pi/4 diagonal points that the
+  retired ffin FarFieldChart refused (nearest-caustic-foot degeneracy) now
+  SERVE via select_chart==self.chart, image_count=4, honest eta 0.26-0.31.
+  CRITICAL GOTCHA: _evaluate_chart takes LOG w (it clamps to the log_w band);
+  ChangRefsdalChannels takes LINEAR w. Passing np.exp(log_w) to
+  _evaluate_chart gives eps=0.96 (clamp saturates); pass LOG w to the chart
+  and exp(log_w) to the engine -> eps~7e-3.
+  BACKWARD-COMPAT FIX (own file): test_gate_c_log_w_outside_band_refuses was
+  stale — _log_w_band_serveable now gates ONLY the high end (low-w flat
+  extrapolation), so a below-range log_w_min SERVES. New body: assert
+  high-end refuses AND low-end serves. Matches test_lensing_low_w_extrapolation.
+
 - Fold-ppGO handoff test (test_lensing_fold_ppgo_handoff.py): the spec's
   claim that near-axis theta forces xi < 4 at gamma=0.5, rho=0.3 is FALSE
   — delta_tau remains ~0.26-0.33 for all angles at that rho. The gate
@@ -53,6 +76,21 @@
   returns min(w_max, 148, 58/y_mag). At y_mag=0.5 DD cap (116) binds;
   at y_mag=0.1 saddle ceiling (148) binds. Self-falsification: old ceiling
   58 would give 58 at y_mag=0.1 (proves test has teeth).
+- InteriorWedgeChart wiring / ffin retirement (WP1) PORT of
+  test_lensing_exterior_windows.py: (1) removed the single retired test
+  test_interior_tiles_are_nonempty_and_cusp_aligned (used deleted
+  st._farfield_interior_tiles) PLUS its orphaned _plot_admission_map helper
+  (dead code, only that test called it). (2) BACKWARD-COMPAT: the WP also
+  dropped the `definition` kwarg from st._build_farfield_chart (it now
+  hardcodes FARFIELD_KERNEL_SUM internally since interior is charted via
+  InteriorWedgeChart, not a far-field chart). Removed `definition=
+  st.FARFIELD_KERNEL_SUM,` from BOTH call sites in
+  ReprovisionNodeCountTestCase.test_reprovision_recommendation_forwarded_to_node_density
+  — semantically equivalent. Audit confirmed all other st.* symbols the file
+  uses still exist (_interior_admission KEPT at L1811, _cusp_source_angles,
+  _lobe_cusp_source_angles, _lobe_interior_tiles, _saddle_lobe_admissions,
+  _farfield_box_to_smooth, interior_w_nodes_per_decade field=15). Full file
+  green: 84 passed, 1 xfailed (was 83 passed/1 failed/1 error/1 retired).
 - BACKWARD-COMPAT AUDIT (WP1/WP2 mpmath extension):
   BROKEN (out of scope): test_lensing_operator.py
   `test_sheared_host_above_ceiling_refuses_schwinger` (w=70 now succeeds
@@ -63,3 +101,56 @@
   test_lensing_schwinger.py: all constants already updated (REFUSED_W_SWEEP
   at 150.5+, ABOVE_CEILING_WS at 151+, THREE_OUTCOME_W=151, F028_SERVE
   at 151+, DeltaMinComputedAtMostOnce uses w=151).
+
+- ffin retirement WP1 PORT of test_lensing_ppgo_bandsplit.py (was a HARD
+  ImportError at collection -> now 62 passed/4 skipped). Removed the
+  `_farfield_interior_tiles` import (was on the surrogate_training import
+  line); rewrote InteriorAdmissionTestCase.setUpClass to build tiles via
+  `st._wedge_interior_tiles(R_EXTENT=0.6, N_PER_SIDE=5)` (pure geometry, no
+  admission/cusp args). KEY: for r<=1 & gamma<1, surrogate._from_caustic_fixed
+  == wedge-fixed map (both scale |y| by directional r_caustic), so the
+  existing _n_images(gamma, rho=r, theta=theta_wedge) engine oracle works
+  unchanged on wedge tiles. Ported tests: (1) wholly-interior + 4-image per
+  tile (r_c+half_r<=R_EXTENT<1, r_c-half_r>=_WEDGE_R_MIN, find_images==4);
+  (2) nonempty -> len==N_PER_SIDE; (3) admission exterior-refusal (rho=1.2
+  @30deg -> 2 images, admits False) + wedge single-column contract (j==0,
+  theta_center==half_theta==pi/4). RETIRED the cusp-ray straddle guard (wedge
+  tiler has NO cusp-alignment split by design). test_tighter_radius_admits_
+  strictly_fewer kept verbatim (uses admission only). Removed orphaned
+  _straddles_ray helper. Kept `cls.admission`/`cls.cusp_angles`
+  (_interior_admission + _cusp_source_angles both still live). Updated module
+  docstring (~L24) + the InteriorAdmissionTestCase cost-NOTE (~L960) to name
+  _wedge_interior_tiles. This closes the report-only flag from the prior run.
+
+- ffin retirement WP1 EXTENSION of test_lensing_interior_wedge_chart.py
+  (46 -> 63 tests, +17, file runs 43s). Added 5 classes:
+  (1) WedgeInteriorTilesContractTestCase: `_wedge_interior_tiles(r_extent,
+      n_per_side)` is a SINGLE angular column (j==0, theta_center=pi/4,
+      half=pi/4 -> spans [0,pi/2] exactly, NO pi/4 split); uniform radial
+      rows contiguous in (_WEDGE_R_MIN=1e-2, r_extent], r_extent<1; row count
+      == n_per_side; r_extent<=_WEDGE_R_MIN -> []. Diagnostic dump to
+      tests/output/wedge_interior_tiles_ranges.txt.
+  (2) WedgeInteriorTilesCapFalsificationTestCase: reconstruct production cap
+      `r_extent = min(grid_rho_extent, 1 - max_eta_max/coordinate_radius_min)`
+      (the ONE expression in _train_band_charts ~L4303). Larger max_eta_max
+      shrinks r_extent AND outer row edge; eta sweep keeps every edge in (0,1).
+  (3) FfinRetirementInvariantsTestCase: hasattr(st,'_farfield_interior_tiles')
+      is False; _interior_admission survives+callable; _farfield_exterior_tiles
+      sig has 'admission' param; _build_wedge_chart src has
+      'definition=INTERIOR_SACR_C', _build_farfield_chart has
+      'definition=FARFIELD_KERNEL_SUM' and NOT INTERIOR_SACR_C.
+  (4) WedgeTrainingPathProducesWedgeChartsTestCase: reuses shared
+      _shared_wedge_surrogate() (no extra engine cost) - all charts are
+      InteriorWedgeChart, none FarFieldChart.
+  (5) WedgeTilesSelfFalsification: split-column / non-uniform / over-unit-
+      extent(1.2) / equal-eta cases prove the contract asserts have teeth.
+  GOTCHA: check FarFieldChart via string 'definition=INTERIOR_SACR_C' NOT
+  bare 'INTERIOR_SACR_C' — the _build_farfield_chart DOCSTRING mentions the
+  token in prose, so a naive `not in` would false-fail.
+- BACKWARD-COMPAT AUDIT (ffin retirement, OUT OF SCOPE / report-only):
+  test_lensing_ppgo_bandsplit.py has a MODULE-LEVEL import of the retired
+  `_farfield_interior_tiles` (line 89) + a call (line 620) + a whole test
+  class FarfieldInteriorTiles... -> HARD ImportError at collection (entire
+  file fails to collect, 0 tests). Owned by another Test Dev run; the OWNER
+  must migrate it to `_wedge_interior_tiles` or delete the ffin-specific
+  test. Flag to driver.

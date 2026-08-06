@@ -1791,7 +1791,6 @@ class ReprovisionNodeCountTestCase(ExteriorWindowsTestCase):
             st._build_farfield_chart(
                 gamma_band=INTERIOR_BAND, parity=1, box_center=(1.3, 0.6),
                 half=(0.08, 0.15), w_range=(2.0, 20.0), config=config,
-                definition=st.FARFIELD_KERNEL_SUM,
                 w_nodes_per_decade=REPROV_N_REC)
             self.assertEqual(captured['w_nodes_per_decade'], REPROV_N_REC)
             self.assertNotEqual(REPROV_N_REC, config.w_nodes_per_decade)
@@ -1800,7 +1799,7 @@ class ReprovisionNodeCountTestCase(ExteriorWindowsTestCase):
             st._build_farfield_chart(
                 gamma_band=INTERIOR_BAND, parity=1, box_center=(1.3, 0.6),
                 half=(0.08, 0.15), w_range=(2.0, 20.0), config=config,
-                definition=st.FARFIELD_KERNEL_SUM, w_nodes_per_decade=None)
+                w_nodes_per_decade=None)
             self.assertEqual(captured['w_nodes_per_decade'],
                              config.w_nodes_per_decade)
             self.record_comparison()
@@ -2070,55 +2069,6 @@ class InteriorDirectionalAdmissionTestCase(ExteriorWindowsTestCase):
         self.assertLess(nearest_exact, ETA_MAX)
         self.assertFalse(self.admission.admits(center, (1e-9, 1e-9)))
         self.record_comparison()
-
-    def test_interior_tiles_are_nonempty_and_cusp_aligned(self) -> None:
-        # The interior tiler produces admitted tiles and none of them straddles
-        # an astroid cusp ray (theta edges are cusp-aligned).
-        cusp_angles = st._cusp_source_angles(
-            INTERIOR_GAMMA_MID, self.config.n_caustic_samples)
-        self.assertEqual(len(cusp_angles), 4)  # four astroid cusps
-        tiles = st._farfield_interior_tiles(
-            1.0, N_PER_SIDE, admission=self.admission, cusp_angles=cusp_angles)
-        self.assertGreater(len(tiles), 0)
-        straddling = [(center, half) for center, half, _i, _j in tiles
-                      if _straddles_ray(center, half, cusp_angles)]
-        self.assertEqual(straddling, [])
-        self._plot_admission_map(cusp_angles)
-        self.record_comparison()
-
-    def _plot_admission_map(self, cusp_angles: list[float]) -> None:
-        """Admission map over ``(|y|, theta)`` vs the true directional caustic."""
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        thetas = np.linspace(-math.pi, math.pi, 181)
-        rhos = np.linspace(0.02, 1.05, 60)
-        admit_theta: list[float] = []
-        admit_rho: list[float] = []
-        refuse_theta: list[float] = []
-        refuse_rho: list[float] = []
-        for theta in thetas:
-            for rho in rhos:
-                if self.admission.admits((float(rho), float(theta)),
-                                         (1e-9, 1e-9)):
-                    admit_theta.append(theta)
-                    admit_rho.append(rho)
-                else:
-                    refuse_theta.append(theta)
-                    refuse_rho.append(rho)
-        fig, ax = plt.subplots(figsize=(8.0, 4.0))
-        ax.scatter(refuse_theta, refuse_rho, s=4, c='lightgrey',
-                   label='refused')
-        ax.scatter(admit_theta, admit_rho, s=4, c='tab:blue', label='admitted')
-        ax.axhline(1.0, color='r', lw=1.5,
-                   label=r'caustic ($\rho = 1$, every direction)')
-        for angle in cusp_angles:
-            ax.axvline(angle, color='k', ls=':', lw=0.7)
-        ax.set_xlabel(r'$\theta$ [rad]')
-        ax.set_ylabel(r'$\rho = |y| / r_{\rm caustic}(\gamma, \theta)$')
-        ax.set_title('S2-1 interior directional-radius admission')
-        ax.legend(loc='upper right', fontsize=8)
-        fig.tight_layout()
-        fig.savefig(OUTPUT_DIR / 'interior_admission_map.png', dpi=110)
-        plt.close(fig)
 
 
 class SaddleLobeAdmissionTestCase(ExteriorWindowsTestCase):
