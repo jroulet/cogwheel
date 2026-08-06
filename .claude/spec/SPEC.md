@@ -90,6 +90,15 @@ Docs). Packaging: setuptools + setuptools_scm, GPL-3.0-or-later, Python >=3.9.
 - Units: frequencies Hz, times GPS seconds, masses solar masses, distances Mpc,
   angles radians.
 - Tests live in `cogwheel/tests/` (stdlib `unittest`), not a top-level `tests/`.
+- `cogwheel/tests/conftest.py` bounds every FAST-TIER test at 900 s wall clock,
+  so a test that stops terminating fails loudly and names itself instead of
+  pinning a worker. The ceiling lifts entirely when any slow tier is requested
+  (`COGWHEEL_BRUTE_ACCURACY`, `COGWHEEL_TRAIN_TIER`, `COGWHEEL_STRICT_TIMING`,
+  `COGWHEEL_RUN_TIMING_SMOKE`), an explicit `--timeout` overrides it, and it is
+  a no-op without `pytest-timeout` — the plugin is never a hard dependency.
+  Motivated by F061: above `w = 60` one `f_schwinger` call costs ~85-120 s
+  rather than ~0.2 s, and four such tests stranded a build by exhausting the
+  tree gate's whole 3600 s ceiling without naming themselves.
 - `largedata/` (top-level) holds large run outputs, injection HDF5, and detector
   `.gwf` frame files used by tutorials — not part of the installed package.
 - Numerically hot paths (relative binning, coherent-score marginalization) use
