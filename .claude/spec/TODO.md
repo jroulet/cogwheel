@@ -511,98 +511,6 @@ Tag conventions:
   follows the rename in step 5.
 
 
-- **THE FAST FULL-SUITE GATE CANNOT COMPLETE — tests fall into the mpmath
-  branch** `[housekeeping]` — diagnosed 2026-08-06 by py-spy on a gate run
-  frozen at 99% for SIX HOURS with four workers spinning at ~120% CPU each.
-  ONE of the two offenders is FIXED; the other is not yet identified.
-
-  `.claude/sdk/run_full_suite.sh /tmp/gate_at_head_171802.log` started
-  2026-08-05 17:18, last wrote its log at 19:59, and was still "running" at
-  01:58 the next morning. Log growth zero for 6h while CPU stayed pegged —
-  the signature CLAUDE.md's detached-run health rule calls a kill. Killed
-  2026-08-06 02:05.
-
-  ## What py-spy found
-
-  Both stuck workers were inside `mpmath.quad` summation, reached through
-  `_raw_integral_mp` -> `_f_schwinger_mpmath` -> `f_schwinger`
-  (`cogwheel/lensing/chang_refsdal/_schwinger.py:845/866/940`):
-
-  - worker `gw2`: `test_lensing_surrogate_census.py::LnlTierTestCase::
-    test_real_likelihood_tiers_within_bars` -> `_dense_farfield_source` ->
-    `_pos_farfield_dense` -> `FarFieldChart.from_engine` -> `_exact_total` ->
-    `_positive_parity_grid`;
-  - the other worker: the same `_f_schwinger_mpmath` leaf reached through
-    `Posterior.lnposterior` -> `lensing/posterior.py:81` ->
-    `marginalized_extrinsic.lnlike_and_metadata` -> `_get_dh_hh_timeshift`
-    -> `_amplification_coefficients` -> `_evaluate_envelope` ->
-    `_exact_total` -> `_saddle_grid` (`operator.py:915`). The py-spy dump was
-    truncated above the pytest frames, so the TEST is unidentified.
-
-  ## DONE
-
-  `LnlTierTestCase.test_real_likelihood_tiers_within_bars` now carries
-  `@_TRAIN_TIER_SKIP` (the file's existing `COGWHEEL_TRAIN_TIER` gate, line
-  535). It was the only unguarded method in that file touching
-  `_dense_farfield_source`, and every other engine-backed class there
-  (`EndToEndPartitionTestCase`, `HeldoutEnvelopeEpsTestCase`,
-  `TubeBeatsRawTestCase`, `FoldApproachRayTestCase`,
-  `MutationFalsificationTestCase`) was already guarded — so this was a plain
-  oversight, not a design choice. Applied per-METHOD, not per-class: the two
-  siblings (`test_assign_tier_is_theta_independent`,
-  `test_tiers_aggregate_with_a_mock_pair`) are cheap and stay in the fast
-  tier. VERIFIED: the class now runs 2 passed / 1 skipped in 3.70 s.
-
-  ## NOT DONE — the second offender is still unidentified
-
-  Ruled out by measurement, not inference:
-  - `test_posterior.py` — the obvious suspect (it evaluates
-    `lnposterior_pardic_and_metadata` over every prior x likelihood pair).
-    Runs clean in 52.07 s. NOT the offender.
-  The gate log cannot name it: under xdist the start line and the result are
-  emitted together, so an in-flight test leaves no trace (all 1457 started
-  tests in that log also completed).
-
-  Remaining candidates, all reaching a MARGINALIZED lensed posterior — the
-  stack's `marginalized_extrinsic` frame is the discriminator:
-  `test_lensing_marginalized_likelihood.py` (builds
-  `LensedPosterior(marg_prior, lensed_marg)` at :321; unguarded classes
-  `RefusalContractTestCase`, `BinGuardTestCase`,
-  `RegistrationPairingSerializationTestCase`), `test_lensing_prior.py`
-  (`LensedPosterior` at :303), `test_lensing_saddle_likelihood.py` (all six
-  classes unguarded).
-
-  ## Work
-
-  - Install `pytest-timeout` (NOT currently available — `--timeout` is an
-    unrecognized argument) and add a per-test timeout to
-    `run_full_suite.sh`. This is the highest-value item and must come FIRST:
-    with it, the next gate run NAMES the hung test instead of requiring a
-    py-spy autopsy, and an unbounded test fails the gate LOUDLY instead of
-    pinning cores overnight. The script self-emits `[beat] n/N` on progress,
-    which is exactly why six hours of no beats read as "still running".
-  - Then re-run the gate on a CLEAN tree to identify the second offender, and
-    gate or shrink it the same way.
-  - Establish which condition in `f_schwinger` (`_schwinger.py:940`) routes to
-    `_f_schwinger_mpmath` rather than the fast branch, and whether these
-    fixtures cross it by design or by accident (a dense far-field source at
-    high `w` is the suspect — the DD product cap and the mpmath ceiling are
-    different thresholds and may disagree). Prefer shrinking a fixture over
-    tier-gating it where the test is a genuine fast-tier smoke check: a
-    smoke test moved behind an opt-in env var stops guarding anything.
-
-  ## Consequence to remember
-
-  The post-build tally for the Born residual chart build (`849e580`, shipped
-  2026-08-04) was never actually verified — the gate meant to verify it is
-  the run killed here. A test that never terminates is not a slow test, it is
-  an ABSENT gate.
-
-  ACCEPTANCE: `run_full_suite.sh` completes end to end and reports a tally;
-  no fast-tier test enters `_f_schwinger_mpmath` (assert it directly — patch
-  the symbol and fail if called during the fast tier).
-
-
 - **COLLOCATION FROM LOCAL SCALES — place chart nodes by the function's own
   analytically-computed scale, not uniformly in whatever coordinate the code
   happens to use** `[→ spec]` — the same principle that fixed the guards
@@ -1050,6 +958,76 @@ Tag conventions:
   removes the interior from `FarFieldChart` and shrinks the rename's scope.
 
 
+- **THE FAST FULL-SUITE GATE CANNOT COMPLETE — FOUR tests hang in mpmath**
+  `[housekeeping]` — diagnosed 2026-08-06 by py-spy, twice: on a gate run
+  frozen at 99% for six hours, and on a controlled reproduction that stalled
+  at 89% with ALL FOUR xdist workers wedged.
+
+  This is NOT "a test forgot its tier gate" (the framing of the first
+  diagnosis, now superseded). Four tests in four different files reach
+  `_f_schwinger_mpmath` and never return:
+
+  | test | file:line |
+  |---|---|
+  | `test_prior_draws_are_finite_or_exact_neg_inf` | `test_lensing_marginalized_likelihood.py:839` |
+  | `test_mutation_narrowing_except_turns_neginf_red` | `test_lensing_prior.py:1064` |
+  | `test_band_limit_refusal_precedes_coherent_score` | `test_lensing_saddle_likelihood.py:463` |
+  | `setUpClass` (whole class dies) | `test_lensing_wedge_dd_arclength.py:119` |
+
+  All four sit in `mpmath.quad` summation under
+  `_raw_integral_mp` -> `_f_schwinger_mpmath` -> `f_schwinger`
+  (`cogwheel/lensing/chang_refsdal/_schwinger.py:845/866/940`), reached
+  variously through `_saddle_grid`, `_positive_parity_grid` and
+  `Posterior.lnposterior` -> `_evaluate_envelope` -> `_exact_total`.
+
+  Because four independent tests land there, the defect is in `f_schwinger`'s
+  ROUTING, not in any one fixture: some parameter regime these tests naturally
+  produce selects arbitrary-precision quadrature, which is unbounded here.
+
+  ## FIXED so far (one of five)
+
+  `test_lensing_surrogate_census.py::LnlTierTestCase::
+  test_real_likelihood_tiers_within_bars` now carries `@_TRAIN_TIER_SKIP` (the
+  file's existing `COGWHEEL_TRAIN_TIER` gate at :535). Applied per-METHOD: its
+  two siblings are cheap and stay in the fast tier. VERIFIED: that class went
+  from unbounded to 2 passed / 1 skipped in 3.70 s.
+
+  ## Why this is the highest-priority item in the repo
+
+  The tree-wide fast gate is the COMMIT PRECONDITION for every SDK build. On
+  2026-08-06 it hit its own 3600 s timeout at ~88% and STRANDED the
+  interior-wedge build, which had already passed Inspector and Professor. So
+  this is not merely wasted CPU: it blocks shipping.
+
+  It also means "full suite green" has not been established for some time.
+  The post-build tally for the Born residual chart build (`849e580`, shipped
+  2026-08-04) was never obtained — the gate meant to verify it is the run
+  killed here. See [[lensing_serving_ladder_guards_are_red]] for 11 real
+  failures that went unnoticed behind this.
+
+  ## Work, in order
+
+  1. Install `pytest-timeout` (NOT currently available — `--timeout` is an
+     unrecognized argument) and add a per-test timeout to
+     `.claude/sdk/run_full_suite.sh` AND to the SDK's tree gate. Highest
+     value: an unbounded test then fails LOUDLY and NAMES ITSELF instead of
+     needing a py-spy autopsy. The gate self-emits `[beat] n/N` on progress,
+     which is exactly why hours of no beats read as "still running".
+  2. Establish which condition in `f_schwinger` (`_schwinger.py:940`) selects
+     `_f_schwinger_mpmath` over the fast branch, and why these four cross it.
+     The DD product cap and the mpmath ceiling are different thresholds and
+     may disagree.
+  3. Fix at the routing level if the regime is legitimate but the
+     implementation is unbounded; otherwise shrink the four fixtures. Prefer
+     shrinking a fixture over tier-gating it: `setUpClass` of a whole class
+     and a `prior draws are finite` smoke check are fast-tier guarantees, and
+     a test moved behind an opt-in env var stops guarding anything.
+
+  ACCEPTANCE: `run_full_suite.sh` completes end to end and reports a tally;
+  no fast-tier test enters `_f_schwinger_mpmath` (assert it directly — patch
+  the symbol and fail if called during the fast tier).
+
+
 - **Tighten the fold arm's caustic fence; the `b4` route is CLOSED
   [→ spec].** F028 defect 2. Defect 1 (admission routing) closed by the
   authoritative-gate work; the arm is now fenced to `eta < _ETA_MAX_FOLD`
@@ -1319,6 +1297,89 @@ Tag conventions:
 
   Recorded 2026-07-28 after the owner noticed it was missing from the plan
   list; carrier/gate/census landed the same day.
+
+
+- **ELEVEN SERVING-LADDER / CERTIFICATION GUARDS ARE RED AT HEAD — and have
+  been shipping unnoticed** `[→ spec]` — measured 2026-08-06, PRE-EXISTING
+  (established by A/B, not inferred).
+
+  ## Provenance
+
+  Ran the four affected files on the post-build tree (`034fcf7`) and on
+  pre-build `c08f506` in an isolated worktree, same selection, same env:
+
+      POST-BUILD: 11 failed, 122 passed, 21 skipped, 3 xfailed, 1 error  (1796 s)
+      PRE-BUILD : 11 failed, 122 passed, 21 skipped, 3 xfailed, 1 error  (1802 s)
+      failing sets: IDENTICAL.  New: 0.  Fixed: 0.
+
+  The interior-wedge build (`034fcf7`) neither caused nor fixed any of them.
+
+  ## The failures
+
+  - `test_lensing_airy_fold.py` (6): `ServingLadderDeterminismTestCase`
+    (`test_fixed_priority_fold_tried_before_cusp`,
+    `test_route_and_value_reproduce_across_all_regimes`,
+    `test_served_value_equals_labelled_rung_bitwise`),
+    `UniformArmFallThroughTestCase`
+    (`test_moving_error_const_threshold_flips_a_fixed_node`,
+    `test_served_node_is_bit_identical_to_the_cusp_arm`),
+    `CertifiedPathByteIdentityTestCase::test_geometric_node_is_byte_identical`
+  - `test_lensing_fast_path.py` (3): `OperatorFusionByteIdentityTestCase`
+    (`test_fop_grid_schwinger_arm_flip_witness`,
+    `test_fop_scalar_schwinger_arm_flip_witness`),
+    `NumbaOperatorPreservationTestCase::test_fop_refuses_uncertifiable_contractions`
+  - `test_lensing_levers.py` (1 + the 1 error):
+    `LMaxSelfFalsificationTestCase::test_too_high_L_MAX_loses_geometric_availability`
+  - `test_lensing_marginalized_likelihood.py` (1):
+    `RefusalContractTestCase::test_refusal_precedes_coherent_score`
+
+  ## They are ONE cluster, not eleven bugs
+
+  The messages describe a serving ladder whose routing and whose refusal
+  thresholds have both drifted away from what the witnesses pin:
+
+      SchwingerCertificationError not raised                              (x2)
+      node did not refuse above the threshold crossing (the threshold is
+          dead code)
+      grid served w=63 but it is neither the geometric rung nor an arm --
+          served by a non-ladder path
+      served grid value is not bit-identical to the cusp arm
+      cusp node served value differs from its own rung
+      the geometric node value drifted from HEAD
+      no config refused; the above-ceiling arm was not exercised
+      Anti-vacuity: no value comparison ran in this test
+
+  Read together: values are no longer bit-identical between the ladder's
+  rungs and the arms that should produce them, AND the guards that should
+  refuse above threshold no longer fire. Two of the messages say the pinned
+  threshold is now DEAD CODE. So both halves of the certification contract —
+  what gets served, and what gets refused — are unenforced.
+
+  ## Why nobody noticed
+
+  These are fast-tier tests that genuinely run and genuinely fail. They went
+  unseen because the tree gate has been unable to COMPLETE (see
+  [[lensing_fast_tier_hangs_in_mpmath]]) — it wedges around 88%, so its
+  summary never prints and the red never surfaces. A gate that cannot finish
+  hides ordinary failures as effectively as it hides the hang.
+
+  ## Work
+
+  - Do [[lensing_fast_tier_hangs_in_mpmath]] FIRST — without a completing
+    gate there is no way to confirm a fix here.
+  - Then bisect: these witnesses were green when written, so `git log` on
+    `_schwinger.py` / `operator.py` / the serving-ladder thresholds since the
+    last known-green gate will localize the change. The recent Schwinger-qd
+    and cusp-arm builds are the first place to look.
+  - Decide per test whether the WITNESS is stale (thresholds legitimately
+    moved and the pin was not updated) or the BEHAVIOR regressed. Do not
+    re-point the pins wholesale — that is exactly how a dead threshold gets
+    blessed. `test_thresholds_have_one_home` is the model: one canonical pin
+    per decision, in the file that owns the predicate.
+
+  ACCEPTANCE: all 11 green with a non-zero comparison count, and for each
+  refusal guard a mutation check showing it still FAILS when the threshold is
+  moved.
 
 - **Restore the surrogate structural tests once the serving schema settles**
   `[housekeeping]` — three classes were DELETED from
