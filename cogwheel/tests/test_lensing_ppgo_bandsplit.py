@@ -606,14 +606,15 @@ class InteriorAdmissionTestCase(_PpgoTestCase):
     * The wedge-fixed interior tiler `_wedge_interior_tiles` replaces the
       admission-filtered, cusp-aligned far-field interior tiler.  Its tiles
       are pure geometry in wedge-fixed ``(r, theta_wedge)`` coordinates
-      (``r = |y| / r_caustic`` in ``[0, 1)``), a SINGLE angular column over
-      ``[0, pi/2]`` with NO cusp-alignment split (the D2 fold + smooth SACR-C
-      carrier serve the other three quadrants).  The like-for-like interior
+      (``r = |y| / r_caustic`` in ``[0, 1)``), TWO angular columns meeting
+      at the caustic waist ``argmin_theta r_caustic(gamma, theta)`` -- each
+      adapted to its own cusp via the ``u ~ d^(2/3)`` axis (the D2 fold
+      serves the other three quadrants).  The like-for-like interior
       expectation -- every tile lies wholly inside the caustic and is a
       genuine 4-image interior config -- is re-checked against an independent
       engine oracle (`geometry.find_images`); the retired cusp-ray
-      straddle guard is deliberately gone (the tiler no longer splits on
-      cusp rays by design, so there is nothing to straddle-check).
+      straddle guard is superseded: the tiler now splits at the WAIST, and
+      the cusps sit on the column OUTER edges where the u-axis is adapted.
     """
 
     BAND = (0.45, 0.55)
@@ -631,7 +632,9 @@ class InteriorAdmissionTestCase(_PpgoTestCase):
             cls.BAND, 1, cls.reach, cls.config, eta_max=_PPGO_ETA_MAX)
         cls.cusp_angles = st._cusp_source_angles(
             cls.GAMMA_MID, cls.config.n_caustic_samples)
-        cls.tiles = st._wedge_interior_tiles(cls.R_EXTENT, cls.N_PER_SIDE)
+        cls.theta_waist = surrogate._wedge_theta_waist(cls.GAMMA_MID)
+        cls.tiles = st._wedge_interior_tiles(
+            cls.GAMMA_MID, cls.R_EXTENT, cls.N_PER_SIDE)
 
     @staticmethod
     def _n_images(gamma, rho, theta):
@@ -651,7 +654,7 @@ class InteriorAdmissionTestCase(_PpgoTestCase):
         """Every wedge tile is a contiguous radial row wholly inside the
         caustic (``r < 1``, clear of the degenerate centre) and its centre
         is a genuine 4-image interior config (independent engine oracle)."""
-        for center, half, _i, _j in self.tiles:
+        for center, half, _i, _j, _origin in self.tiles:
             r_c, _theta_c = center
             half_r, _half_theta = half
             # Wholly interior: the outer edge stays below the caustic edge
@@ -676,19 +679,23 @@ class InteriorAdmissionTestCase(_PpgoTestCase):
         the wedge column lays exactly ``N_PER_SIDE`` interior rows."""
         self.comparisons += 1
         self.assertEqual(
-            len(self.tiles), self.N_PER_SIDE,
-            f'wedge tiler laid {len(self.tiles)} rows, expected '
-            f'{self.N_PER_SIDE} where the caustic permits an interior column')
+            len(self.tiles), 2 * self.N_PER_SIDE,
+            f'wedge tiler laid {len(self.tiles)} tiles, expected '
+            f'{2 * self.N_PER_SIDE} = {self.N_PER_SIDE} radial rows x 2 '
+            f'angular columns (split at the caustic waist)')
 
-    def test_admission_refuses_exterior_and_wedge_is_single_column(self):
-        """The admission gate refuses a config beyond the directional
-        caustic boundary (4 cusp rays exposed), and the wedge tiler lays a
-        SINGLE angular column spanning ``[0, pi/2]`` (no cusp-aligned split).
+    def test_admission_refuses_exterior_and_wedge_splits_at_the_waist(self):
+        """The admission gate refuses a config beyond the directional caustic
+        boundary, and the wedge tiler lays TWO angular columns meeting at the
+        caustic WAIST -- not at ``pi/4``.
 
-        The retired 'no tile straddles a cusp ray' guard is intentionally
-        gone: `_wedge_interior_tiles` carries no cusp-alignment logic -- its
-        one column deliberately spans the cusp rays at ``theta_wedge in
-        {0, pi/2}``, with the D2 fold serving the other quadrants.
+        The waist is where the two cusps' influence balances; it is NOT the
+        bisector of the angular range, because the shear stretches the astroid
+        and the asymmetry grows with gamma (``r_c(pi/2)/r_c(0)`` runs 1.23 at
+        gamma=0.2 to 4.35 at gamma=0.9, moving the waist to 0.70x pi/4).  The
+        physical oracle pins it: ``r_caustic(gamma, theta_waist) == gamma``
+        exactly, and the radius has a FLAT minimum there, so the VALUE is
+        tight while the angle itself is loosely determined -- assert the value.
         """
         self.comparisons += 1
         self.assertEqual(len(self.cusp_angles), 4,
@@ -705,16 +712,42 @@ class InteriorAdmissionTestCase(_PpgoTestCase):
         self.assertEqual(
             self._n_images(self.GAMMA_MID, rho_out, theta), 2,
             'the exterior probe is not a 2-image config -- retune')
-        # Wedge structural contract: one angular column, theta_center = pi/4,
-        # half_theta = pi/4 (spans [0, pi/2] exactly), no split.
-        for center, half, _i, j in self.tiles:
-            self.comparisons += 1
-            self.assertEqual(
-                j, 0, 'wedge tiler produced more than one angular column')
-            self.assertAlmostEqual(center[1], 0.25 * math.pi, places=12,
-                                   msg='wedge column not centred on pi/4')
-            self.assertAlmostEqual(half[1], 0.25 * math.pi, places=12,
-                                   msg='wedge column does not span [0, pi/2]')
+        # The waist, pinned on the VALUE not the angle.
+        self.comparisons += 1
+        self.assertAlmostEqual(
+            geometry.r_caustic(self.GAMMA_MID, self.theta_waist),
+            self.GAMMA_MID, places=5,
+            msg='r_caustic at the waist must equal gamma')
+        self.comparisons += 1
+        self.assertNotAlmostEqual(
+            self.theta_waist, 0.25 * math.pi, places=2,
+            msg='the waist must NOT coincide with pi/4 -- the cusps differ')
+        # Exactly two angular columns, meeting at the waist, covering [0, pi/2].
+        # No rounding: every radial row in a column shares the SAME centre and
+        # half, so exact dedup is correct -- and rounding here would inject an
+        # error larger than the tolerance the assertions below use.
+        columns = sorted({(c[1], h[1], o) for c, h, _i, _j, o in self.tiles})
+        self.comparisons += 1
+        self.assertEqual(len(columns), 2,
+                         f'expected 2 angular columns, got {len(columns)}: '
+                         f'{columns}')
+        (lo_c, lo_h, lo_o), (hi_c, hi_h, hi_o) = columns
+        self.comparisons += 1
+        self.assertAlmostEqual(lo_c + lo_h, self.theta_waist, places=9,
+                               msg='low column does not end at the waist')
+        self.comparisons += 1
+        self.assertAlmostEqual(hi_c - hi_h, self.theta_waist, places=9,
+                               msg='high column does not start at the waist')
+        self.comparisons += 1
+        self.assertAlmostEqual(lo_c - lo_h, 0.0, places=9,
+                               msg='low column does not start at theta = 0')
+        self.comparisons += 1
+        self.assertAlmostEqual(hi_c + hi_h, 0.5 * math.pi, places=9,
+                               msg='high column does not end at theta = pi/2')
+        # Each column carries the axis_origin of the cusp it is adapted to.
+        self.comparisons += 1
+        self.assertNotEqual(lo_o, hi_o,
+                            'the two columns must carry distinct axis_origin')
 
     def test_tighter_radius_admits_strictly_fewer(self):
         """A wider ``eta_max`` tube shell (more exclusion) admits strictly
