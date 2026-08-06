@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "034fcf76bf427bc9b8629709ac322bebddf60adf",
-  "timestamp": "2026-08-06T09:06:41Z",
+  "commit": "dff3417d992e449eedba6232111a29336fdb8163",
+  "timestamp": "2026-08-06T11:46:53Z",
   "touched_files": [
     "cogwheel/lensing/born_residual_chart.py",
     "cogwheel/lensing/chang_refsdal/__init__.py",
@@ -14,6 +14,7 @@
     "cogwheel/lensing/surrogate.py",
     "cogwheel/lensing/surrogate_census.py",
     "cogwheel/lensing/surrogate_training.py",
+    "cogwheel/tests/conftest.py",
     "cogwheel/tests/test_lensing_born.py",
     "cogwheel/tests/test_lensing_born_residual_wiring.py",
     "cogwheel/tests/test_lensing_caustic_cusps.py",

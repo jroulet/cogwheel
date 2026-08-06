@@ -81,6 +81,22 @@ plumbing is already done (both gates now pass `--timeout`); do not re-do it.
 3. Never delete an assertion to make a test fast. If coverage must move
    tiers, say so explicitly in the docstring with the reason.
 
+## Suite ownership — assign shards EXACTLY like this
+
+This is a TEST-ONLY change touching five suites, so suite ownership IS the
+decomposition. Each test file must be authored by exactly ONE Test Developer;
+a previous plan was rejected at the gate for giving two shards a claim on
+`test_lensing_schwinger.py`. Use these three disjoint shards and no others:
+
+  - shard 1 — `cogwheel/tests/test_lensing_wedge_dd_arclength.py`
+  - shard 2 — `cogwheel/tests/test_lensing_marginalized_likelihood.py`
+    AND `cogwheel/tests/test_lensing_prior.py`
+  - shard 3 — `cogwheel/tests/test_lensing_saddle_likelihood.py`
+    AND `cogwheel/tests/test_lensing_schwinger.py`
+
+No shard may name a file owned by another. The acceptance-2 guard belongs to
+shard 3, because that shard already owns `test_lensing_schwinger.py`.
+
 ## Acceptance
 
 1. All four run to completion in the fast tier (or are correctly slow-tiered),
