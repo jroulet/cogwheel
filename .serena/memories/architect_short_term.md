@@ -1,5 +1,55 @@
 Last session: 2026-08-04 production batch. Clean.
 
+2026-08-06 brief_wedge_cusp_axis_and_subdivision [PLAN DONE]: 2 Coder WPs +
+  domain tests. Replace wedge chart's cusp-singular ARC-LENGTH angular axis
+  with per-tile cusp-adapted u=d^(2/3); give _wedge_interior_tiles >=2 angular
+  columns (split at pi/4) + adaptive subdivision in u on eps fail.
+  KEY DESIGN (Prof+Simplifier concur):
+  - REUSE existing theta_to_s (2,N) field/np.interp/spline/serialize/serve
+    machinery to store the u-map (theta_fine, u_fine); serve is GENERIC in
+    theta_to_s (zero serve-code change). Only map CONTENTS + schema string +
+    load-tightening change. (Simplifier LEAN; new field = 4 touch points for 0
+    correctness.)
+  - Build u from PURE ANGLE, NO caustic_speed (Prof): lower tile [.,pi/4]
+    u=theta^(2/3); upper [pi/4,.] u=-(pi/2-theta)^(2/3); then u-=u[0] (affine
+    shift -> validator-clean: strictly incr, starts~0). Gamma-INDEPENDENT ->
+    kills the rep_gamma approximation the arc map had. Existing
+    _validate_theta_to_s passes UNCHANGED (theta_fine[0]==theta_grid[0],
+    s_fine[0]~0). Side chosen by theta_wedge_range midpoint vs pi/4.
+  - Schema bump _WEDGE_AXIS_SCHEMA v1->v2 + shrink _KNOWN set to {v2} so stale
+    s-axis artifacts HARD-REFUSE at load (mechanism already wired). Tighten
+    wedge load: theta_to_s REQUIRED (not optional) under new schema.
+  - Node placement: STAY uniform-theta (Simplifier TRIM; Prof: uniform-u is
+    2nd-order nice-to-have, uniform-theta reaches 3.42e-4 floor @9 nodes).
+  - Subdivider: NEW wedge fn (mirror _subdivide_farfield_tile, DON'T generalize
+    -246-line ff subdivider is exterior-(rho,theta_c)-specific). Split at
+    u-midpoint -> theta_mid=inverse(u_mid) (lower theta_mid=u_mid^1.5; upper
+    theta_mid=pi/2-(u_mid_d)^1.5), 2 children each rebuilt via _build_wedge_chart
+    with own theta_wedge_range (auto-gets correct side map). Angular-only
+    (defect is provably angular; radial rows already pass 3.82e-4). Single-level;
+    re-fail or basin-flip child -> ladder-served gap (mirror lobe).
+  - Tiler emits THETA bounds; subdivider converts to u internally (Simplifier).
+  - pi/4 CLOSED-HALF seam: own diagonal once, no double/zero serve; add seam-
+    continuity test (lower vs upper served value at pi/4 agree within eps).
+  TOLERANCES (Prof authority; SACR-C interior ~0.4ms/w-node batched):
+    grid n_gamma=2,n_r=3,n_theta in {5,9,17},n_w~12,n_heldout~40 -> seconds.
+    Accuracy gate p90<=3.42e-4 (ffin baseline); CONTRAST eps_s/eps_u>=50 on
+    same samples (proves AXIS is the lever). Subdivision: parent~5e-3
+    (parent/bar in [10,30]) fails -> both children<=3.42e-4. Node-exact ON-node
+    <=1e-7 (interp-map budget NOT 6.33e-16), OFF-node within eps bar. Report
+    p50/p90/max + WORST-SAMPLE LOCUS never bare max.
+  WPs: WP1 surrogate.py (from_wedge_engine u-map + schema + load + docstrings;
+  serve unchanged). WP2 surrogate_training.py (_wedge_interior_tiles 2 cols +
+  wedge subdivider + wire into build loop). WP2 depends_on WP1.
+  Test shards (disjoint, each names file, F057): A=test_lensing_wedge_dd_arclength.py
+  (axis: u-map shape/monotone/orientation/gamma-indep, contrast, node-exact,
+  v1-hard-refuse; PORT existing arc-length tests, keep DD-ceiling). B=
+  test_lensing_interior_wedge_chart.py (tiler >=2 cols, subdivision, seam,
+  accuracy p50/p90/max). C=test_lensing_ppgo_bandsplit.py (reconcile
+  _wedge_interior_tiles consumer to multi-col; derive counts dynamically).
+  has_domain_changes=true. DATA_CONTRACTS: axis_schema is on SHIPPED surrogate
+  (consumers=8) -> Librarian post-build changelog note (no training in-build).
+
 2026-08-06 brief_mpmath_band_tests [PLAN DONE]: is_test_only=true, 0 Coder
   WPs, 3 mandated shards. Prof levers: (1)DDW dd_cap=58/(r_max*reach_max)
   monotone-dec; r_max<1 hard (interior), so ALSO widen DD_GAMMA_RANGE up
