@@ -80,6 +80,25 @@ section: Backlog
      region with no natural centroid — neither lobe's polar frame is right —
      so it may want its own coordinate or explicit ladder service.
 
+  f. **Is the ghost path valid for the saddle at all?** MECHANICALLY yes,
+     UNVALIDATED in fact, and its branch pin is positive-parity reasoning.
+     `ghost_kernel` has NO parity gate — it works off the macro matrix,
+     extracts the complex-conjugate quartic-root pair, and refuses only when
+     none exists. But **no test calls `ghost_kernel` at `gamma > 1`** (eight
+     test files touch "ghost"; none exercises it at saddle gamma), while the
+     `+-sqrt` branch is pinned by an explicitly positive-parity argument
+     (`geometry.py:2343-2344`): "the real merged saddle, which the two real
+     images continue into across the fold ... has Morse index 1, i.e.
+     amplitude phase `exp(-0.5j*pi)`". For a macro saddle the merged pair's
+     Morse indices differ, so that pin may be wrong — and a wrong branch is a
+     SIGN ERROR in the subtracted term, not a small inaccuracy.
+
+     CONSEQUENCE for [[lensing_exterior_followup_four_items]] item 1: do NOT
+     assume a wired `MINUS_GHOST` carries to the saddle. Re-derive the branch
+     selection for `det A < 0` and pin it with a saddle-gamma test before
+     enabling it there. Currently harmless only because the label is never
+     stamped for either parity.
+
   Note the provenance: the wedge path was a DEGRADED COPY of the lobe path.
   The brief said "transcribe the lobe path"; the plan gate then trimmed the
   cusp alignment the lobe actually has. So the lobe is better than the wedge
