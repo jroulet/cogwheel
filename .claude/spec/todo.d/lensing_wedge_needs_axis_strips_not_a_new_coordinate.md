@@ -79,6 +79,37 @@ section: Backlog
   excluding 59% of the quadrant. That trade is not worth making — and `ffin`
   parity was never the requirement. **The gate is 5e-2.**
 
+  ## The degenerate BOUNDARY NODE is real but is NOT the mechanism (tested)
+
+  The production tiler emits ONE angular column per radial row, each spanning
+  the full `[0, pi/2]`, so every tile touches BOTH axes; and the chart grid
+  includes its endpoints, so boundary nodes land exactly on `theta_wedge` = 0
+  and `pi/2`. There, `min delay gap = 0.000e+00` exactly (mirror images are
+  exactly degenerate, `y1 = 3.9e-17`), and 1e-9 off the axis the engine
+  REFUSES with `LensDomainError` while both the axis itself and 1e-6 away
+  succeed.
+
+  That looked like a poisoned boundary node -- which would give O(h) error
+  across the tile and explain the first-order convergence. TESTED AND
+  REFUTED: holding the span at `[eps, pi/2 - eps]` with `n_theta` = 7,
+
+      offset 0      (node ON axis)  eps 3.9271e-1
+      offset 1e-6   (node off)      eps 3.9270e-1
+      offset 1e-4                   eps 3.9228e-1
+      offset 1e-3                   eps 3.8845e-1
+      offset 1e-2                   eps 3.4993e-1
+      offset 3e-2                   eps 2.7903e-1
+
+  Moving the node off the degeneracy changes nothing; improvement appears only
+  once the offset becomes a real width reduction. Do not re-attempt a node
+  nudge, an endpoint clamp, or a "skip the degenerate node" fix.
+
+  What DOES matter is DISTANCE FROM THE AXIS, not width alone: a tile of
+  half-width 0.196 touching the axis gives 1.29e-1, while one of half-width
+  0.171 set back 0.10 rad gives 7.64e-3 -- 17x better for a 13% width change.
+  The envelope varies rapidly within ~0.1 rad of the reflection axis and a
+  tile must be both narrow AND set back.
+
   ## RECOMMENDED CONFIGURATION
 
   - strip half-width **0.10 rad (5.7 deg)** at BOTH axes -> worst-tile eps
