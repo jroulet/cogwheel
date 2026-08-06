@@ -1,5 +1,48 @@
 # Test Dev Short-Term Observations
 
+- WP1/WP2 SHARD A T4/T5/T6 EXTENSION of test_lensing_interior_wedge_chart.py
+  (77 -> 92 tests, full file 79s green). Added 3 classes + a self-contained
+  helper each.
+  T4 WedgeSubdivisionFeedbackLoopTestCase (4 tests, 34.8s): drives the REAL
+  gate->subdivide->re-gate loop. TIGHTEN interior_eps_max=3e-3 (below the
+  smoothness-dominated parent eps ~7.9e-3, above every child eps <1e-3) so
+  _gate_chart('interior',{'heldout_eps':peps},config) gates the coarse parent
+  -> _subdivide_wedge_tile emits 4 (r,u) children, packed=4, all strictly
+  below parent. Config: n_gamma=n_rho=n_theta_c=4, w_range=(5,8), n_w=4,
+  n_heldout=6, band=(0.28,0.32), center=(0.35,0.20), half=(0.15,0.15),
+  axis_origin='low'. _t4_build_parent_and_subdivide mirrors _train_band_charts
+  wedge branch. Diagnostic t4_subdivision_feedback.txt. COST arithmetic: 5
+  engine chart builds (parent + 4 children) ~31s, one setUpClass, shared.
+  GOTCHA: subdivide children summary entries can lack 'eps' (carrier_flip) —
+  guard c.get('eps') is not None.
+  T5 WedgeNodeExactAndNpzV2TestCase (8 tests, reuses _shared_wedge_surrogate,
+  +~1s): MEASURED node-exact residual max=5.7e-16 (~6e-16 spec figure EXACT)
+  — because theta_wedge->u remap (np.interp on s_grid) lands on the fit knot
+  and the engine is deterministic, so the interpolating spline reproduces the
+  engine value to machine precision. Off-node witnesses max=1.2e-2 < 5e-2 bar.
+  Constants: T5_NODE_EXACT_MAX=1e-14 (17x margin over 5.7e-16), T5_OFF_EPS_MAX
+  =5e-2. Teeth: assert node_max*1e6 < min(off_res) (node >=1e6x tighter than
+  off-node, else "node-exact" is hollow). NPZ round-trip of theta_to_s (2,2001)
+  bitwise max|diff|=0 + all fields + meta axis_schema=='wedge_caustic_relative
+  _v2'. GOTCHA: refused_points is ZERO-SIZE on the shared chart -> np.max on
+  empty raises; guard orig.size==0 -> shape-match only. The shared engine chart
+  (unlike NpzRoundTripTestCase's synthetic chart) HAS a real theta_to_s u-map.
+  Diagnostic t5_node_exact_residuals.txt.
+  T6 WedgeStaleSchemaRefusalTestCase (4 tests, reuses shared, <1s): mutate a
+  REAL persisted wedge NPZ meta (chart0_meta is a json.dumps string in the
+  arrays dict) to axis_schema='wedge_caustic_relative_v1' -> _chart_from_npz
+  raises ValueError naming the tag (via _validate_axis_schema against
+  _KNOWN_WEDGE_AXIS_SCHEMAS={v2}). Also axis_schema=None raises (msg contains
+  'None'). Self-falsification: untouched-v2 and explicit-v2 round-trips load
+  cleanly (InteriorWedgeChart). Helper _wedge_npz_with_meta(chart, override).
+  Imports ADDED: surrogate {_KNOWN_WEDGE_AXIS_SCHEMAS,_WEDGE_AXIS_SCHEMA};
+  surrogate_training {TrainingConfig,_gate_chart,_heldout_eps,
+  _subdivide_wedge_tile}. Change is TEST-ONLY (no production edits).
+  BACKWARD-COMPAT: neighbor test_lensing_wedge_dd_arclength.py still 14 pass/
+  6 skip. test_lensing_ppgo_bandsplit.py remains BROKEN by WP2's
+  _wedge_interior_tiles 3-arg/5-tuple change (documented prior, OUT OF SCOPE,
+  owned by another run) — my test-only edit cannot have caused it.
+
 - InteriorWedgeChart WP1 (ffin retirement) test extension
   (test_lensing_interior_wedge_chart.py, now 46 tests): added 3 classes.
   (1) WedgeHeldOutAccuracyTestCase: 5-node/axis chart via

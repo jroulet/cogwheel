@@ -1,57 +1,84 @@
-"""Tests for InteriorWedgeChart DD w-ceiling and arc-length axis features.
+"""Tests for InteriorWedgeChart DD w-ceiling and cusp-adapted angular axis.
 
-This suite verifies WP1's two new capabilities added to ``from_wedge_engine``:
+This suite verifies two capabilities of ``from_wedge_engine``:
 
 1. **DD-product w-ceiling** — the dimensionless-frequency upper limit is
    capped at ``_DD_PRODUCT_MARGIN / (r_max * reach_max)`` so no training
-   node violates the engine's diffraction-delay ceiling.
+   node violates the engine's diffraction-delay ceiling.  This block is
+   UNTOUCHED by WP1/WP2; ``DDWCeilingTestCase`` re-confirms the cap still
+   binds and the wedge build still succeeds under it.
 
-2. **Caustic arc-length axis** — the chart's spline fourth axis uses the
-   arc-length ``s`` parametrisation (via ``theta_to_s``) rather than raw
-   ``theta_wedge``, improving interpolation fidelity near cusps.
+2. **Cusp-adapted angular axis (WP1/WP2)** — the chart's spline angular
+   axis is reparametrised by ``u = d**(2/3)`` where ``d`` is the angular
+   distance to the NEAR astroid cusp (``theta_wedge = 0`` on the LOW side
+   of the caustic waist, ``pi/2`` on the HIGH side).  The ``2/3`` exponent
+   is the exact caustic-reach cusp scaling (``r_caustic ~ const - c *
+   d**(2/3)``), so the spline coordinate stays smooth instead of diverging
+   as ``d**(-1/3)`` on the raw ``theta`` axis.  The dense ``theta -> u`` map
+   is stored as the chart's ``theta_to_s`` ``(2, N)`` table (row 0 =
+   ``theta_fine``, row 1 = ``u_fine``) and consumed at serve time via
+   ``np.interp`` (see ``_evaluate_chart``).  This replaces the retired
+   arc-length axis (``ArcLengthAxisTestCase`` is gone).
 
 Tolerance justification
 -----------------------
-Node-exact accuracy (< 1e-10): the cubic B-spline exactly reproduces its
-training values at grid nodes (up to O(eps_mach) from the fit residual).
-The theta_to_s remap does not degrade this because both training and
-serving use the same monotone map (theta → s) — the s-coordinate at a
-grid node is looked up through the SAME table on both sides.
+Closed-form axis match (< 1e-9): ``theta_to_s`` row 1 is the algebraic
+image of row 0 under the per-side closed form
+``u = theta**(2/3) - theta_lo**(2/3)`` (LOW) /
+``u = (pi/2 - theta_lo)**(2/3) - (pi/2 - theta)**(2/3)`` (HIGH); FP
+round-off in the ``(2/3)->(3/2)`` round trip is ~1e-16 relative, so the
+1e-9 bar carries ~7 orders of margin.  Uniform-in-u (< 1e-9): row 1 is
+``np.linspace(0, u_max, N)`` so successive differences are constant to
+machine precision, which forces the ``theta`` nodes to cluster near the
+cusp (``theta ~ (u + base)**(3/2)``).
+
+Serve degradation (> 5e-2): the interior off-node accuracy bar.  A clean
+u-map serves within it; corrupting a fraction of the stored row moves the
+served envelope past it, proving the map is load-bearing on the serve path
+(``SelfFalsificationTestCase``).
 
 Cost budget
 -----------
-4×4×4 = 64 nodes per build.  Most of this suite stays in the fast tier: its
-builds cap ``w`` below the Schwinger double-double ceiling (60), where an
-evaluation costs ~0.2 s.
+The fast-tier classes build 4x4x4 = 64-node charts at ``w <= 20`` (below
+the Schwinger double-double ceiling, ~0.2 s/eval): ``CuspAdaptedAxisTestCase``
+builds two (LOW + HIGH sides, ~16 s), ``NoDDCapLowWTestCase`` one (~8 s),
+and ``SelfFalsificationTestCase`` one (~8 s) plus ~27 fast engine oracle
+calls.  Whole file stays under the 5-minute fast-tier ceiling.
 
-`DDWCeilingTestCase` is the exception and is SLOW-TIERED.  Its DD cap lands
-at ``w_max ~ 121.6`` — the DD product cap (``w * |y| < 58``) and the
-Schwinger dispatch ceiling (``w <= 60``) are DIFFERENT thresholds, and for
-the astroid the former cannot be pushed below the latter (``reach_max <
-~0.7`` with ``r_max < 1`` bounds the cap at ~88).  Nodes above 60 therefore
-take the mpmath path at ~85-120 s EACH (F061), not the ~30 ms an earlier
-version of this note assumed, so that class alone is hours rather than
-seconds.  Its DD-cap-formula coverage now runs under ``COGWHEEL_TRAIN_TIER``;
-no assertion was weakened or removed.
+``DDWCeilingTestCase`` is the exception and is SLOW-TIERED
+(``COGWHEEL_TRAIN_TIER``): its DD cap lands at ``w_max ~ 121.6`` — above
+the Schwinger ceiling (60) — so its capped-w nodes take the mpmath path at
+~85-120 s EACH (F061).  No assertion in it was weakened; only its gate is
+train-tier.
 """
 from __future__ import annotations
 
 import copy
 import os
 import unittest
+from pathlib import Path
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import numpy as np
-from scipy.integrate import cumulative_trapezoid
 
 from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
-from cogwheel.lensing.chang_refsdal.geometry import caustic_speed, r_caustic
+from cogwheel.lensing.chang_refsdal.geometry import r_caustic
 from cogwheel.lensing.surrogate import (
     InteriorWedgeChart,
     LensAmplificationSurrogate,
     _DD_PRODUCT_MARGIN,
+    _FARFIELD_ARC_MAP_SIZE,
     _evaluate_chart,
     _from_wedge_fixed,
+    _log_reach_gamma_axis,
+    _wedge_cusp_axis_map,
+    _wedge_theta_waist,
 )
+
+#: Diagnostic-plot / report output directory (created on demand).
+OUTPUT_DIR = Path(__file__).resolve().parent / 'output'
 
 # ---------------------------------------------------------------------------
 #: Module-level test constants — DD-cap-triggering fixture
@@ -79,9 +106,6 @@ DD_W_NODES_PER_DECADE: int = 8
 
 #: The DD margin constant (duplicated here for the test's oracle).
 DD_MARGIN: float = 58.0
-
-#: Node-exact accuracy tolerance.
-NODE_ATOL: float = 1e-9
 
 
 class _WedgeDDTestCase(unittest.TestCase):
@@ -129,6 +153,10 @@ class DDWCeilingTestCase(_WedgeDDTestCase):
     the requested 500 but above the Schwinger ceiling (~60).  Most
     refusals at the capped w_max are Schwinger-related (not DD),
     so we verify the FORMULA not the success rate.
+
+    This block is UNCHANGED by WP1/WP2 (the cusp-axis build); it is
+    re-run to confirm the w*r*reach_max<=58 cap still binds and the
+    wedge build still succeeds under the cap.
 
     Cost: 4×4×4 = 64 nodes × ~13 w-points.  Nodes at the capped w_max sit
     ABOVE the Schwinger ceiling (60) and cost ~85-120 s each on the mpmath
@@ -213,7 +241,7 @@ class DDWCeilingTestCase(_WedgeDDTestCase):
             f'DD product w*r*reach = {product:.2f} exceeds margin {DD_MARGIN}.')
 
     def test_refused_fewer_than_total(self):
-        """Some nodes must succeed — not all refused."""
+        """Some nodes must succeed — not all refused (build succeeds)."""
         chart = self._surrogate.charts[0]
         total_nodes = DD_N_GAMMA * DD_N_R * DD_N_THETA
         self._tick()
@@ -223,20 +251,297 @@ class DDWCeilingTestCase(_WedgeDDTestCase):
 
 
 # ---------------------------------------------------------------------------
-#: Module-level constants — arc-length axis fixture (low-w, all nodes pass)
+#: Module-level constants — cusp-adapted angular axis fixture (WP1/WP2)
 # ---------------------------------------------------------------------------
 
-#: Gamma range for the arc-length test (same as DD).
+#: Gamma range for the cusp-axis test (positive-parity interior).
+CUSP_GAMMA_RANGE: tuple[float, float] = (0.30, 0.50)
+
+#: R range — moderate interior, away from the caustic boundary.
+CUSP_R_RANGE: tuple[float, float] = (0.20, 0.50)
+
+#: Low w so every node sits below the Schwinger double-double ceiling.
+CUSP_W_RANGE: tuple[float, float] = (5.0, 20.0)
+
+#: Nodes per spatial axis (>= 4 for cubic-spline validation).
+CUSP_N_GAMMA: int = 4
+CUSP_N_R: int = 4
+CUSP_N_THETA: int = 4
+
+#: W nodes per decade (sparse for speed).
+CUSP_W_NODES_PER_DECADE: int = 8
+
+#: Closed-form reconstruction tolerance (spec: within 1e-9).
+CUSP_FORM_ATOL: float = 1e-9
+
+#: Uniform-in-u tolerance: successive u-differences constant to ~1e-9.
+CUSP_UNIFORM_ATOL: float = 1e-9
+
+#: The wrong-side closed form must differ from row 1 by at least this much
+#: (teeth: proves the per-side form check discriminates LOW from HIGH).
+CUSP_WRONG_SIDE_MIN: float = 1e-3
+
+#: Expected dense-map node count (serve-time interpolation table).
+CUSP_MAP_NODES: int = _FARFIELD_ARC_MAP_SIZE  # 2001
+
+
+def _reconstruct_u(theta_fine: np.ndarray, origin: str) -> np.ndarray:
+    """Closed-form cusp coordinate ``u(theta)`` for one wedge side.
+
+    LOW  (near cusp ``theta = 0``):
+        ``u = theta**(2/3) - theta_lo**(2/3)``
+    HIGH (near cusp ``pi/2``):
+        ``u = (pi/2 - theta_lo)**(2/3) - (pi/2 - theta)**(2/3)``
+
+    with ``theta_lo = theta_fine[0]``.  Both are monotone increasing with
+    ``u(theta_lo) = 0``.  This is an INDEPENDENT re-derivation of the
+    production ``_wedge_cusp_axis_map`` form (its oracle), written from the
+    cusp-scaling physics rather than transcribed from the function body.
+
+    Parameters
+    ----------
+    theta_fine : np.ndarray
+        Strictly increasing wedge angles spanning ``[theta_lo, theta_hi]``.
+    origin : str
+        ``'low'`` or ``'high'``.
+
+    Returns
+    -------
+    np.ndarray
+        The cusp-adapted coordinate ``u`` at each ``theta_fine`` node.
+    """
+    theta_fine = np.asarray(theta_fine, dtype=float)
+    theta_lo = float(theta_fine[0])
+    exponent = 2.0 / 3.0
+    if origin == 'low':
+        return theta_fine ** exponent - theta_lo ** exponent
+    if origin == 'high':
+        half_pi = np.pi / 2.0
+        return ((half_pi - theta_lo) ** exponent
+                - (half_pi - theta_fine) ** exponent)
+    raise ValueError(f"origin must be 'low' or 'high'; got {origin!r}.")
+
+
+class CuspAdaptedAxisTestCase(_WedgeDDTestCase):
+    """Verify the cusp-adapted angular axis (``u = d**(2/3)``) on both sides.
+
+    Spec (SHARD B): build the wedge u-map for a tile on each side of the
+    caustic waist (``axis_origin`` LOW and HIGH), then inspect the stored
+    ``theta_to_s`` map rows.  Row 1 (the ``u`` values) must be strictly
+    increasing and offset so it starts at ~0; the per-side closed form must
+    reconstruct it within 1e-9; and the fine grid must be uniform-in-u so
+    the ``theta`` nodes cluster near the near cusp.
+
+    The two tiles are placed relative to the waist for the SAME
+    ``rep_gamma`` production uses (``median`` of the log-reach gamma axis),
+    so ``from_wedge_engine``'s midpoint-vs-waist classification is
+    deterministic and matches the side each chart is checked against.
+
+    Cost: two 4×4×4 = 64-node charts at w<=20 (~16 s), shared across all
+    tests via ``setUpClass``; every test only inspects the stored map (no
+    per-test engine calls).
+    """
+
+    _sides: dict[str, InteriorWedgeChart] = {}
+    _waist: float = float('nan')
+    _rep_gamma: float = float('nan')
+
+    @classmethod
+    def setUpClass(cls):
+        """Build one LOW-side and one HIGH-side wedge chart across the waist."""
+        gamma_grid = _log_reach_gamma_axis(
+            CUSP_GAMMA_RANGE, CUSP_N_GAMMA, 'gamma')
+        rep_gamma = float(np.median(gamma_grid))
+        waist = _wedge_theta_waist(rep_gamma)
+        cls._rep_gamma = rep_gamma
+        cls._waist = waist
+        # LOW tile: midpoint = waist - 0.20 (< waist -> near cusp theta=0).
+        low_range = (max(1e-2, waist - 0.35), waist - 0.05)
+        # HIGH tile: midpoint = waist + 0.20 (> waist -> near cusp pi/2).
+        high_range = (waist + 0.05, min(np.pi / 2.0 - 1e-2, waist + 0.35))
+        cls._sides = {}
+        for name, rng in (('low', low_range), ('high', high_range)):
+            surr = LensAmplificationSurrogate.from_wedge_engine(
+                gamma_range=CUSP_GAMMA_RANGE,
+                r_range=CUSP_R_RANGE,
+                theta_wedge_range=rng,
+                w_range=CUSP_W_RANGE,
+                n_gamma=CUSP_N_GAMMA,
+                n_r=CUSP_N_R,
+                n_theta_wedge=CUSP_N_THETA,
+                w_nodes_per_decade=CUSP_W_NODES_PER_DECADE)
+            cls._sides[name] = surr.charts[0]
+
+    def _chart(self, side: str) -> InteriorWedgeChart:
+        return self._sides[side]
+
+    def test_stored_theta_to_s_shape_and_endpoints(self):
+        """theta_to_s is a (2, 2001) table with exact tile-bound endpoints."""
+        for side in ('low', 'high'):
+            with self.subTest(side=side):
+                chart = self._chart(side)
+                t2s = chart.theta_to_s
+                self.assertEqual(
+                    t2s.shape, (2, CUSP_MAP_NODES),
+                    f'theta_to_s shape {t2s.shape} != (2, {CUSP_MAP_NODES}).')
+                self.assertAlmostEqual(
+                    float(t2s[0, 0]), float(chart.theta_wedge_grid[0]),
+                    places=12,
+                    msg='theta_to_s row-0 start != theta_wedge_grid[0].')
+                self.assertAlmostEqual(
+                    float(t2s[0, -1]), float(chart.theta_wedge_grid[-1]),
+                    places=12,
+                    msg='theta_to_s row-0 end != theta_wedge_grid[-1].')
+                self._tick()
+
+    def test_storage_matches_direct_cusp_map(self):
+        """Stored theta_to_s == vstack(_wedge_cusp_axis_map(...)) bit-for-bit.
+
+        Proves the training path wires the cusp map (for the origin the
+        waist classification selects) straight into the chart with no
+        re-derivation drift.  Bit-identity also confirms the chart got the
+        SIDE we placed it on (a wrong-origin build would mismatch loudly).
+        """
+        for side in ('low', 'high'):
+            with self.subTest(side=side):
+                chart = self._chart(side)
+                theta_lo = float(chart.theta_wedge_grid[0])
+                theta_hi = float(chart.theta_wedge_grid[-1])
+                theta_fine, u_fine = _wedge_cusp_axis_map(
+                    theta_lo, theta_hi, side)
+                expected = np.vstack([theta_fine, u_fine])
+                max_diff = float(np.max(np.abs(chart.theta_to_s - expected)))
+                self._tick()
+                self.assertEqual(
+                    max_diff, 0.0,
+                    f'Stored theta_to_s differs from _wedge_cusp_axis_map '
+                    f'by {max_diff:.2e} on the {side} side.')
+
+    def test_u_row_increasing_from_zero(self):
+        """Row 1 (u) is strictly increasing and starts at ~0."""
+        for side in ('low', 'high'):
+            with self.subTest(side=side):
+                u_row = self._chart(side).theta_to_s[1]
+                self.assertAlmostEqual(
+                    float(u_row[0]), 0.0, places=12,
+                    msg=f'u_row[0] = {u_row[0]:.2e}, expected ~0.0.')
+                diffs = np.diff(u_row)
+                self.assertTrue(
+                    np.all(diffs > 0),
+                    f'u row not strictly increasing (min diff '
+                    f'{float(diffs.min()):.2e}).')
+                self._tick()
+
+    def test_u_row_matches_per_side_closed_form(self):
+        """Row 1 == per-side closed form to <1e-9; wrong side mismatches.
+
+        LOW: u = theta**(2/3) - theta_lo**(2/3).
+        HIGH: u = (pi/2 - theta_lo)**(2/3) - (pi/2 - theta)**(2/3).
+        """
+        for side, other in (('low', 'high'), ('high', 'low')):
+            with self.subTest(side=side):
+                chart = self._chart(side)
+                theta_fine = chart.theta_to_s[0]
+                u_row = chart.theta_to_s[1]
+
+                u_expected = _reconstruct_u(theta_fine, side)
+                max_err = float(np.max(np.abs(u_row - u_expected)))
+                self.assertLess(
+                    max_err, CUSP_FORM_ATOL,
+                    f'{side}-side u row deviates from the closed form by '
+                    f'{max_err:.2e} (> {CUSP_FORM_ATOL:.0e}).')
+
+                # Teeth: the WRONG-side form must not spuriously match.
+                u_wrong = _reconstruct_u(theta_fine, other)
+                wrong_err = float(np.max(np.abs(u_row - u_wrong)))
+                self.assertGreater(
+                    wrong_err, CUSP_WRONG_SIDE_MIN,
+                    f'{other}-side form matches the {side} row too closely '
+                    f'({wrong_err:.2e}); the form check has no teeth.')
+                self._tick()
+
+    def test_grid_uniform_in_u(self):
+        """Successive u-differences are constant to ~1e-9 (uniform-in-u)."""
+        for side in ('low', 'high'):
+            with self.subTest(side=side):
+                u_row = self._chart(side).theta_to_s[1]
+                du = np.diff(u_row)
+                spread = float(np.max(np.abs(du - du.mean())))
+                self.assertLess(
+                    spread, CUSP_UNIFORM_ATOL,
+                    f'{side}-side u grid not uniform: max|du - mean| = '
+                    f'{spread:.2e} (> {CUSP_UNIFORM_ATOL:.0e}).')
+                self._tick()
+
+    def test_theta_nodes_cluster_toward_cusp(self):
+        """theta node spacing tightens toward the near cusp, monotonically.
+
+        LOW (cusp at theta=0): spacing smallest at theta_lo, growing away
+        from the cusp -> np.diff(theta_fine) is monotone increasing.
+        HIGH (cusp at pi/2): spacing smallest at theta_hi -> np.diff is
+        monotone decreasing.
+        """
+        for side in ('low', 'high'):
+            with self.subTest(side=side):
+                theta_fine = self._chart(side).theta_to_s[0]
+                dtheta = np.diff(theta_fine)
+                if side == 'low':
+                    self.assertLess(
+                        dtheta[0], dtheta[-1],
+                        'LOW spacing does not tighten toward theta=0.')
+                    self.assertTrue(
+                        np.all(np.diff(dtheta) > -1e-12),
+                        'LOW spacing not monotone increasing away from cusp.')
+                else:
+                    self.assertLess(
+                        dtheta[-1], dtheta[0],
+                        'HIGH spacing does not tighten toward pi/2.')
+                    self.assertTrue(
+                        np.all(np.diff(dtheta) < 1e-12),
+                        'HIGH spacing not monotone decreasing toward cusp.')
+                self._tick()
+
+    def test_diagnostic_plot_written(self):
+        """Save u-vs-theta overlays for both sides (visual clustering check)."""
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        for side in ('low', 'high'):
+            with self.subTest(side=side):
+                chart = self._chart(side)
+                theta_fine = chart.theta_to_s[0]
+                u_row = chart.theta_to_s[1]
+                fig, ax = plt.subplots(figsize=(6, 4))
+                ax.plot(theta_fine, u_row, '-', lw=1.0, color='navy',
+                        label='u(theta)')
+                # Sparse node markers reveal theta clustering toward the cusp.
+                ax.plot(theta_fine[::100], u_row[::100], 'o', ms=3,
+                        color='crimson', label='every 100th node')
+                ax.set_xlabel('theta_wedge [rad]')
+                ax.set_ylabel('u = d**(2/3)')
+                ax.set_title(
+                    f'Cusp-adapted wedge axis ({side} side, '
+                    f'waist={self._waist:.3f})')
+                ax.legend(loc='best', fontsize=8)
+                fig.tight_layout()
+                out = OUTPUT_DIR / f'cusp_adapted_axis_{side}.png'
+                fig.savefig(out, dpi=90)
+                plt.close(fig)
+                self.assertTrue(
+                    out.exists(), f'Diagnostic plot not written: {out}.')
+                self._tick()
+
+
+# ---------------------------------------------------------------------------
+#: Module-level constants — non-DD-cap fixture shared by NoDDCap + falsify
+# ---------------------------------------------------------------------------
+
+#: Gamma range (positive-parity interior).
 ARC_GAMMA_RANGE: tuple[float, float] = (0.30, 0.50)
 
-#: R range — moderate, away from caustic boundary.
+#: R range — moderate, away from the caustic boundary.
 ARC_R_RANGE: tuple[float, float] = (0.20, 0.50)
 
 #: Theta wedge range.
 ARC_THETA_RANGE: tuple[float, float] = (0.30, 1.20)
-
-#: Low w_range that does NOT trigger Schwinger or DD issues.
-ARC_W_RANGE: tuple[float, float] = (5.0, 30.0)
 
 #: Nodes per spatial axis.
 ARC_N_GAMMA: int = 4
@@ -245,196 +550,6 @@ ARC_N_THETA: int = 4
 
 #: W nodes per decade.
 ARC_W_NODES_PER_DECADE: int = 10
-
-#: Minimum number of arc-length map nodes (spec: >= 100).
-ARC_MIN_MAP_NODES: int = 100
-
-
-class ArcLengthAxisTestCase(_WedgeDDTestCase):
-    """Verify the arc-length axis is active and correctly wired.
-
-    Spec: Build a wedge chart via from_wedge_engine at low w where all
-    nodes succeed.  The chart's theta_to_s attribute must be populated,
-    have the correct shape, span the theta range, and yield node-exact
-    accuracy through the s-remap.
-
-    Cost: 4×4×4 = 64 nodes × ~4 w-points × 30ms ≈ 8s build +
-    3 evaluation calls.
-    """
-
-    _surrogate: LensAmplificationSurrogate | None = None
-
-    @classmethod
-    def setUpClass(cls):
-        """Build a low-w surrogate where all/most nodes succeed."""
-        cls._surrogate = LensAmplificationSurrogate.from_wedge_engine(
-            gamma_range=ARC_GAMMA_RANGE,
-            r_range=ARC_R_RANGE,
-            theta_wedge_range=ARC_THETA_RANGE,
-            w_range=ARC_W_RANGE,
-            n_gamma=ARC_N_GAMMA,
-            n_r=ARC_N_R,
-            n_theta_wedge=ARC_N_THETA,
-            w_nodes_per_decade=ARC_W_NODES_PER_DECADE)
-
-    def test_theta_to_s_not_none(self):
-        """The chart must have a theta_to_s attribute (arc-length active)."""
-        chart = self._surrogate.charts[0]
-        self._tick()
-        self.assertIsNotNone(
-            chart.theta_to_s,
-            'theta_to_s is None — arc-length axis was not built.')
-
-    def test_theta_to_s_shape(self):
-        """theta_to_s must have shape (2, N) with N >= 100."""
-        chart = self._surrogate.charts[0]
-        theta_to_s = chart.theta_to_s
-        self._tick()
-        self.assertEqual(
-            theta_to_s.ndim, 2,
-            f'theta_to_s.ndim = {theta_to_s.ndim}, expected 2.')
-        self.assertEqual(
-            theta_to_s.shape[0], 2,
-            f'theta_to_s.shape[0] = {theta_to_s.shape[0]}, expected 2.')
-        self._tick()
-        self.assertGreaterEqual(
-            theta_to_s.shape[1], ARC_MIN_MAP_NODES,
-            f'theta_to_s has only {theta_to_s.shape[1]} columns; '
-            f'expected >= {ARC_MIN_MAP_NODES}.')
-
-    def test_theta_row_spans_grid(self):
-        """Row 0 must start at theta_wedge_grid[0], end at grid[-1]."""
-        chart = self._surrogate.charts[0]
-        theta_row = chart.theta_to_s[0]
-        self._tick()
-        self.assertAlmostEqual(
-            float(theta_row[0]), float(chart.theta_wedge_grid[0]),
-            places=12,
-            msg='theta_to_s row 0 start != theta_wedge_grid[0].')
-        self._tick()
-        self.assertAlmostEqual(
-            float(theta_row[-1]), float(chart.theta_wedge_grid[-1]),
-            places=12,
-            msg='theta_to_s row 0 end != theta_wedge_grid[-1].')
-
-    def test_s_row_starts_near_zero(self):
-        """Row 1 (arc-length) must start at ~0.0."""
-        chart = self._surrogate.charts[0]
-        s_row = chart.theta_to_s[1]
-        self._tick()
-        self.assertAlmostEqual(
-            float(s_row[0]), 0.0, places=10,
-            msg=f's_row[0] = {s_row[0]:.2e}, expected ~0.0.')
-
-    def test_s_row_strictly_increasing(self):
-        """Row 1 must be strictly increasing (valid arc-length)."""
-        chart = self._surrogate.charts[0]
-        s_row = chart.theta_to_s[1]
-        diffs = np.diff(s_row)
-        self._tick()
-        self.assertTrue(
-            np.all(diffs > 0),
-            f'Arc-length row is not strictly increasing. '
-            f'Min diff = {float(diffs.min()):.2e}.')
-
-    def test_s_row_not_linear(self):
-        """Arc-length must NOT be linear in theta (proves curvature present).
-
-        A linear s(theta) would mean raw theta was used (identity map).
-        The astroid caustic speed varies with theta, so the arc-length
-        parametrisation must be nonlinear.
-        """
-        chart = self._surrogate.charts[0]
-        theta_row = chart.theta_to_s[0]
-        s_row = chart.theta_to_s[1]
-        # Linear fit residual: if s = a*theta + b exactly, the map is trivial.
-        coeffs = np.polyfit(theta_row, s_row, 1)
-        linear_pred = np.polyval(coeffs, theta_row)
-        residual = float(np.max(np.abs(s_row - linear_pred)))
-        self._tick()
-        self.assertGreater(
-            residual, 1e-4,
-            f'Arc-length is nearly linear (max residual={residual:.2e}). '
-            f'This suggests the curvature-based remap is not active.')
-
-    def test_grid_node_accuracy(self):
-        """Served envelope at grid nodes matches training to < 1e-9.
-
-        The cubic B-spline reproduces training values at grid nodes.
-        The theta→s remap does not degrade this because both training
-        and serving use the same map.  Cost: 3 evaluations.
-        """
-        chart = self._surrogate.charts[0]
-        total = DD_N_GAMMA * DD_N_R * DD_N_THETA
-        refused_set = set()
-        if chart.refused_points.shape[0] > 0:
-            for row in chart.refused_points:
-                refused_set.add(tuple(np.round(row, 10)))
-
-        # Find 3 succeeded interior nodes.
-        succeeded_nodes: list[tuple[int, int, int]] = []
-        for ig in range(1, chart.gamma_grid.size - 1):
-            for ir in range(1, chart.r_grid.size - 1):
-                for it in range(1, chart.theta_wedge_grid.size - 1):
-                    pt = (float(chart.gamma_grid[ig]),
-                          float(chart.r_grid[ir]),
-                          float(chart.theta_wedge_grid[it]))
-                    # Check if refused.
-                    is_refused = False
-                    for row in chart.refused_points:
-                        if (abs(row[0] - pt[0]) < 1e-8
-                                and abs(row[1] - pt[1]) < 1e-8
-                                and abs(row[2] - pt[2]) < 1e-8):
-                            is_refused = True
-                            break
-                    if not is_refused:
-                        succeeded_nodes.append((ig, ir, it))
-                    if len(succeeded_nodes) >= 3:
-                        break
-                if len(succeeded_nodes) >= 3:
-                    break
-            if len(succeeded_nodes) >= 3:
-                break
-
-        self.assertGreaterEqual(
-            len(succeeded_nodes), 1,
-            'No interior succeeded nodes found for accuracy test.')
-
-        for ig, ir, it in succeeded_nodes[:3]:
-            gamma = float(chart.gamma_grid[ig])
-            r = float(chart.r_grid[ir])
-            theta_w = float(chart.theta_wedge_grid[it])
-
-            # Evaluate chart at this node.
-            y1, y2 = _from_wedge_fixed(gamma, r, theta_w, chart.wedge_map)
-            result = _evaluate_chart(
-                chart, gamma, eta=0.5, theta=0.7,
-                log_w_query=chart.log_w_grid,
-                y1_eig=y1, y2_eig=y2)
-
-            # The result must be finite.
-            self.assertTrue(
-                np.all(np.isfinite(result)),
-                f'Non-finite result at node ({ig},{ir},{it}).')
-
-            # Compare against a fresh engine call at the same source.
-            w_grid = np.exp(chart.log_w_grid)
-            ch = ChangRefsdalChannels(w_grid)
-            partition = ch.evaluate(gamma=gamma, y=(y1, y2),
-                                    beta=0.0, kappa=0.0)
-            engine_env = partition.envelope
-            max_diff = float(np.max(np.abs(result - engine_env)))
-            self._tick()
-            with self.subTest(ig=ig, ir=ir, it=it):
-                self.assertLess(
-                    max_diff, NODE_ATOL,
-                    f'Grid-node residual {max_diff:.2e} exceeds '
-                    f'{NODE_ATOL:.0e} at node ({ig},{ir},{it}).')
-
-
-# ---------------------------------------------------------------------------
-#: Module-level constants — non-triggering DD cap fixture
-# ---------------------------------------------------------------------------
 
 #: Low w_range that does NOT trigger the DD cap.
 NODD_W_RANGE: tuple[float, float] = (5.0, 15.0)
@@ -445,10 +560,10 @@ class NoDDCapLowWTestCase(_WedgeDDTestCase):
 
     Spec: Build a wedge chart with a low w_range (5-15) that does not
     trigger the DD cap.  The chart's w_max should equal the requested 15
-    (not capped).  The arc-length axis is still active, and grid-node
+    (not capped).  The cusp-adapted axis is still active, and grid-node
     accuracy remains < 1e-10.
 
-    Cost: same as ArcLengthAxisTestCase (~8s build + 3 evals).
+    Cost: one 4×4×4 = 64-node chart at w<=15 (~8s build + 3 evals).
     """
 
     _surrogate: LensAmplificationSurrogate | None = None
@@ -476,20 +591,21 @@ class NoDDCapLowWTestCase(_WedgeDDTestCase):
             msg=f'Chart w_max={w_max_chart:.4f} != requested '
                 f'{NODD_W_RANGE[1]}. DD cap should not be binding.')
 
-    def test_arc_length_still_active(self):
-        """theta_to_s must still be populated even without DD cap."""
+    def test_cusp_axis_still_active(self):
+        """theta_to_s must still be populated even without the DD cap."""
         chart = self._surrogate.charts[0]
         self._tick()
         self.assertIsNotNone(
             chart.theta_to_s,
-            'theta_to_s is None at low w_range — arc-length should always '
-            'be active regardless of DD cap.')
+            'theta_to_s is None at low w_range — the cusp-adapted axis '
+            'should always be active regardless of the DD cap.')
 
     def test_node_accuracy_preserved(self):
-        """Grid-node accuracy < 1e-10 even with arc-length remap.
+        """Grid-node accuracy < 1e-10 even with the cusp-axis remap.
 
-        The s-remap does not degrade node-exact reproduction because
-        training and serving use the same theta_to_s table.
+        The theta->u remap does not degrade node-exact reproduction because
+        training and serving use the same theta_to_s table, and a grid
+        node's theta lands on a knot of the u-axis.
         """
         chart = self._surrogate.charts[0]
 
@@ -543,7 +659,7 @@ class NoDDCapLowWTestCase(_WedgeDDTestCase):
                 self.assertLess(
                     max_diff, 1e-10,
                     f'Grid-node residual {max_diff:.2e} exceeds 1e-10 '
-                    f'at node ({ig},{ir},{it}) — arc-length remap '
+                    f'at node ({ig},{ir},{it}) — the cusp-axis remap '
                     f'degraded node-exact accuracy.')
 
     def test_most_nodes_succeed_at_low_w(self):
@@ -560,14 +676,57 @@ class NoDDCapLowWTestCase(_WedgeDDTestCase):
             f'at low w. Expected >= 80% when Schwinger is not binding.')
 
 
-class SelfFalsificationTestCase(_WedgeDDTestCase):
-    """Prove the suite can go red: reachable-red tests for each claim.
+# ---------------------------------------------------------------------------
+#: Module-level constants — u-map load-bearing falsification
+# ---------------------------------------------------------------------------
 
-    Each test verifies that the corresponding assertion in the main
-    classes WOULD fail if the feature were broken.  Without these, the
-    suite could pass vacuously (e.g., if from_wedge_engine silently
-    skipped the DD cap or the arc-length map).
+#: Interior off-node accuracy bar (absolute max|F| residual over the w-grid).
+#: A clean u-map serves within it; a corrupted one must exceed it.
+INTERIOR_EPS_BAR: float = 5e-2
+
+#: Central fraction [start, stop] of the dense map whose row-1 (u) values are
+#: corrupted.  Wide enough that every interior cell midpoint (theta at
+#: ~1/6..5/6 of the tile span) falls inside the corrupted theta window.
+CORRUPT_BAND: tuple[float, float] = (0.05, 0.95)
+
+#: Corruption offset added to the corrupted u values, as a fraction of the
+#: u-axis span u_max.  Large enough to shift serve-time v2 well off the
+#: clean interpolant.
+CORRUPT_OFFSET_FRACTION: float = 0.30
+
+
+class SelfFalsificationTestCase(_WedgeDDTestCase):
+    """Prove the suite can go red: DD-cap teeth + load-bearing u-map serve.
+
+    Two independent falsifications:
+
+    1. ``test_dd_cap_teeth_uncapped_would_exceed`` — without the DD cap the
+       requested w_max would blow past the DD product margin, so the
+       ``DDWCeilingTestCase`` assertions are not vacuous.
+
+    2. ``test_perturbed_umap_degrades_serve`` — corrupting a fraction of the
+       stored ``theta_to_s`` row 1 (the ``u`` values) moves the served
+       envelope past the interior accuracy bar relative to a fresh engine,
+       proving the map is load-bearing on the SERVE path.  The clean-vs-
+       degraded eps is reported as a distribution (p50/p90/max), not a bare
+       max.
     """
+
+    _chart: InteriorWedgeChart | None = None
+
+    @classmethod
+    def setUpClass(cls):
+        """Build one low-w chart shared by the serve-degradation test."""
+        surr = LensAmplificationSurrogate.from_wedge_engine(
+            gamma_range=ARC_GAMMA_RANGE,
+            r_range=ARC_R_RANGE,
+            theta_wedge_range=ARC_THETA_RANGE,
+            w_range=NODD_W_RANGE,
+            n_gamma=ARC_N_GAMMA,
+            n_r=ARC_N_R,
+            n_theta_wedge=ARC_N_THETA,
+            w_nodes_per_decade=ARC_W_NODES_PER_DECADE)
+        cls._chart = surr.charts[0]
 
     def test_dd_cap_teeth_uncapped_would_exceed(self):
         """If we DON'T apply the DD cap, w_max would exceed the formula.
@@ -577,8 +736,7 @@ class SelfFalsificationTestCase(_WedgeDDTestCase):
         500 * 0.7 * 0.68 ≈ 238 >> 58.
         """
         r_max = DD_R_RANGE[1]
-        # Approximate reach_max (known from our measurements to be ~0.68).
-        # reach at gamma=0.5, theta=0 (axis) is the max for this range.
+        # Approximate reach_max (max directional caustic reach over the band).
         reach_approx = max(
             r_caustic(0.5, th)
             for th in np.linspace(DD_THETA_RANGE[0], DD_THETA_RANGE[1], 20))
@@ -589,99 +747,117 @@ class SelfFalsificationTestCase(_WedgeDDTestCase):
             f'Uncapped product {uncapped_product:.1f} <= {DD_MARGIN}. '
             f'The DD cap would be non-binding (test has no teeth).')
 
-    def test_arc_length_teeth_linear_would_fail(self):
-        """If theta_to_s were an identity (linear), the nonlinearity test fails.
+    @staticmethod
+    def _write_eps_report(eps_clean: np.ndarray, eps_bad: np.ndarray,
+                          move: np.ndarray) -> None:
+        """Dump the clean/degraded/move eps distributions to a diagnostic."""
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        out = OUTPUT_DIR / 'self_falsification_umap_eps.txt'
+        lines = [
+            'Self-falsification: stored u-map is load-bearing on serve.',
+            f'interior eps bar = {INTERIOR_EPS_BAR:.2e}',
+            f'n comparisons    = {eps_clean.size}',
+            '',
+            'distribution        p50         p90         max',
+        ]
+        for label, arr in (('clean eps', eps_clean),
+                           ('degraded eps', eps_bad),
+                           ('|degraded-clean|', move)):
+            lines.append(
+                f'{label:<18} {np.percentile(arr, 50):.3e}  '
+                f'{np.percentile(arr, 90):.3e}  {arr.max():.3e}')
+        out.write_text('\n'.join(lines) + '\n')
 
-        Teeth: a perfectly linear s = a*theta + b has zero residual from
-        a degree-1 polyfit.  The real arc-length has curvature > 1e-4.
+    def test_perturbed_umap_degrades_serve(self):
+        """Corrupting stored row-1 (u) degrades the serve past the eps bar.
+
+        Off-node interior queries (cell midpoints in gamma, r, theta_wedge)
+        are served with the intact chart and with a chart whose row 1 is
+        corrupted over its central band.  The clean serve stays within the
+        interior accuracy bar vs a fresh engine; the corrupted serve moves
+        past it, and the served value shifts by more than the bar.
         """
-        # Synthesize a linear map.
-        theta = np.linspace(0.3, 1.2, 2001)
-        s_linear = theta - theta[0]  # identity shift
-        coeffs = np.polyfit(theta, s_linear, 1)
-        pred = np.polyval(coeffs, theta)
-        residual = float(np.max(np.abs(s_linear - pred)))
-        self._tick()
-        self.assertLess(
-            residual, 1e-10,
-            'Linear map residual is not ~0 — polyfit control broken.')
-        # Now check that a REAL arc-length map has curvature.
-        gamma = 0.4  # representative
-        speed = np.asarray(caustic_speed(gamma, theta, branch=1), dtype=float)
-        s_real = cumulative_trapezoid(speed, theta, initial=0.0)
-        coeffs_real = np.polyfit(theta, s_real, 1)
-        pred_real = np.polyval(coeffs_real, theta)
-        residual_real = float(np.max(np.abs(s_real - pred_real)))
-        self._tick()
+        chart = self._chart
+
+        # Off-node interior queries: cell midpoints on each spatial axis.
+        gmids = 0.5 * (chart.gamma_grid[:-1] + chart.gamma_grid[1:])
+        rmids = 0.5 * (chart.r_grid[:-1] + chart.r_grid[1:])
+        tmids = 0.5 * (chart.theta_wedge_grid[:-1] + chart.theta_wedge_grid[1:])
+        w_lin = np.exp(chart.log_w_grid)
+
+        # Corrupt a central fraction of row 1 (the u values).
+        t2s = chart.theta_to_s
+        n_map = t2s.shape[1]
+        u_max = float(t2s[1, -1])
+        i0 = int(CORRUPT_BAND[0] * n_map)
+        i1 = int(CORRUPT_BAND[1] * n_map)
+        bad_map = t2s.copy()
+        bad_map[1, i0:i1] += CORRUPT_OFFSET_FRACTION * u_max
+        bad_chart = copy.copy(chart)
+        object.__setattr__(bad_chart, 'theta_to_s', bad_map)
+
+        eps_clean: list[float] = []
+        eps_bad: list[float] = []
+        move: list[float] = []
+        for gamma in gmids:
+            for r in rmids:
+                for th in tmids:
+                    gamma_f = float(gamma)
+                    r_f = float(r)
+                    th_f = float(th)
+                    y1, y2 = _from_wedge_fixed(
+                        gamma_f, r_f, th_f, chart.wedge_map)
+
+                    ch = ChangRefsdalChannels(w_lin)
+                    partition = ch.evaluate(
+                        gamma=gamma_f, y=(y1, y2), beta=0.0, kappa=0.0)
+                    engine = partition.envelope
+
+                    clean = _evaluate_chart(
+                        chart, gamma_f, eta=0.5, theta=0.7,
+                        log_w_query=chart.log_w_grid, y1_eig=y1, y2_eig=y2)
+                    bad = _evaluate_chart(
+                        bad_chart, gamma_f, eta=0.5, theta=0.7,
+                        log_w_query=chart.log_w_grid, y1_eig=y1, y2_eig=y2)
+
+                    if not (np.all(np.isfinite(engine))
+                            and np.all(np.isfinite(clean))
+                            and np.all(np.isfinite(bad))):
+                        continue
+                    eps_clean.append(float(np.max(np.abs(clean - engine))))
+                    eps_bad.append(float(np.max(np.abs(bad - engine))))
+                    move.append(float(np.max(np.abs(bad - clean))))
+                    self._tick()
+
+        eps_clean_arr = np.asarray(eps_clean)
+        eps_bad_arr = np.asarray(eps_bad)
+        move_arr = np.asarray(move)
         self.assertGreater(
-            residual_real, 1e-4,
-            f'Real arc-length residual {residual_real:.2e} too small — '
-            f'curvature test would not distinguish arc-length from linear.')
+            eps_clean_arr.size, 0,
+            'No finite comparisons collected — cannot assess degradation.')
+        self._write_eps_report(eps_clean_arr, eps_bad_arr, move_arr)
 
-    def test_node_accuracy_teeth_wrong_map_degrades(self):
-        """If we evaluate a grid node with a WRONG theta_to_s, accuracy degrades.
-
-        Teeth: perturbing the theta→s map (scaling s by 1.1) causes the
-        spline to be queried at the wrong coordinate, yielding a non-zero
-        residual at what was a grid node.
-        """
-        # Use the ArcLengthAxisTestCase surrogate if available, else build.
-        surr = LensAmplificationSurrogate.from_wedge_engine(
-            gamma_range=ARC_GAMMA_RANGE,
-            r_range=ARC_R_RANGE,
-            theta_wedge_range=ARC_THETA_RANGE,
-            w_range=NODD_W_RANGE,
-            n_gamma=ARC_N_GAMMA,
-            n_r=ARC_N_R,
-            n_theta_wedge=ARC_N_THETA,
-            w_nodes_per_decade=ARC_W_NODES_PER_DECADE)
-        chart = surr.charts[0]
-
-        # Find a succeeded interior node.
-        for ig in range(1, chart.gamma_grid.size - 1):
-            for ir in range(1, chart.r_grid.size - 1):
-                for it in range(1, chart.theta_wedge_grid.size - 1):
-                    is_refused = False
-                    for row in chart.refused_points:
-                        if (abs(row[0] - chart.gamma_grid[ig]) < 1e-8
-                                and abs(row[1] - chart.r_grid[ir]) < 1e-8
-                                and abs(row[2] - chart.theta_wedge_grid[it]) < 1e-8):
-                            is_refused = True
-                            break
-                    if not is_refused:
-                        gamma = float(chart.gamma_grid[ig])
-                        r = float(chart.r_grid[ir])
-                        theta_w = float(chart.theta_wedge_grid[it])
-                        y1, y2 = _from_wedge_fixed(gamma, r, theta_w,
-                                                   chart.wedge_map)
-
-                        # Normal evaluation (should be accurate).
-                        result_ok = _evaluate_chart(
-                            chart, gamma, eta=0.5, theta=0.7,
-                            log_w_query=chart.log_w_grid,
-                            y1_eig=y1, y2_eig=y2)
-
-                        # Perturb the chart's theta_to_s map.
-                        bad_chart = copy.copy(chart)
-                        perturbed_map = chart.theta_to_s.copy()
-                        perturbed_map[1] *= 1.1  # stretch s by 10%
-                        object.__setattr__(bad_chart, 'theta_to_s',
-                                           perturbed_map)
-
-                        result_bad = _evaluate_chart(
-                            bad_chart, gamma, eta=0.5, theta=0.7,
-                            log_w_query=chart.log_w_grid,
-                            y1_eig=y1, y2_eig=y2)
-
-                        diff = float(np.max(np.abs(result_ok - result_bad)))
-                        self._tick()
-                        self.assertGreater(
-                            diff, 1e-6,
-                            f'Perturbed theta_to_s gives same result — '
-                            f'the map is not load-bearing (diff={diff:.2e}).')
-                        return  # one node is enough
-
-        self.fail('No succeeded interior node found for falsification test.')
+        # Clean u-map serves within the interior bar (median over queries).
+        self.assertLess(
+            float(np.median(eps_clean_arr)), INTERIOR_EPS_BAR,
+            f'Clean serve median eps {np.median(eps_clean_arr):.2e} already '
+            f'exceeds the bar {INTERIOR_EPS_BAR:.0e}; the fixture is too '
+            f'coarse to attribute degradation to the corruption.')
+        # Corrupted u-map degrades past the bar (median over queries).
+        self.assertGreater(
+            float(np.median(eps_bad_arr)), INTERIOR_EPS_BAR,
+            f'Corrupted serve median eps {np.median(eps_bad_arr):.2e} did '
+            f'not exceed the bar {INTERIOR_EPS_BAR:.0e}; the stored u-map '
+            f'is not load-bearing on serve.')
+        # The served value moves by more than the bar (map is consumed).
+        self.assertGreater(
+            float(np.median(move_arr)), INTERIOR_EPS_BAR,
+            f'Median |degraded - clean| {np.median(move_arr):.2e} <= bar '
+            f'{INTERIOR_EPS_BAR:.0e}; corrupting row-1 did not move serve.')
+        # Corruption strictly worsens accuracy (not merely a lateral shift).
+        self.assertGreater(
+            float(np.median(eps_bad_arr)), float(np.median(eps_clean_arr)),
+            'Corrupted serve is not worse than clean at the median.')
 
 
 if __name__ == '__main__':
