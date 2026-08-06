@@ -1637,6 +1637,56 @@ Tag conventions:
   checked in-build is a reason to check it FIRST post-build, not a reason to
   carry it.
 
+  ## DIAGNOSED — not a bug, not under-resolution: the coordinate does not
+  ## make the envelope smooth
+
+  Measured on one mid-radius tile (`r = 0.455 +- 0.089`, band 0), refining in
+  place with identical held-out samples:
+
+  | test | result |
+  |---|---|
+  | eps AT the chart's own nodes | **6.33e-16** |
+  | eps off-node, full angular width `[0, pi/2]` | 3.93e-1 -> 2.08e-1 (n 7->13), **p ~ 1.0** |
+  | eps off-node, half angular width | 7.15e-2 -> 5.38e-2 (n 7->13), **p ~ 0.35-0.55** |
+  | `ffin` baseline, same region | 3.42e-4, 106/106 pass |
+
+  1. **No wiring bug.** Node exactness at 6.3e-16 proves train and serve agree;
+     the chart reproduces its own training values to machine precision. A
+     train/serve convention mismatch would have floored the node error too.
+  2. **Not merely under-resolved.** A smooth object gives `p ~ 4`. `p ~ 1`
+     is the signature of a KINK (continuous value, discontinuous first
+     derivative) inside the tile; `p < 1` at half width means uniform
+     refinement is not resolving it at all.
+  3. **The difficulty is angular but not removable.** Halving the angular
+     width cuts the error 5.5x, so the error concentrates near the diagonal.
+     But closing the 200x gap to the `ffin` baseline needs ~3 halvings = 8x
+     more angular tiles, taking 12 charts to ~96 -- essentially `ffin`'s 106.
+
+  **Conclusion: the wedge coordinate yields NO net chart-count saving once
+  accuracy is matched.** The genuine 4x from the exact D2 fold is cancelled by
+  the finer angular resolution the kink demands. `(r, theta_wedge)` relocates
+  the difficulty rather than removing it.
+
+  This also re-reads `ffin`'s 106 charts: that was an adaptive tiler paying in
+  chart count to chase a kink, which is the correct behaviour. The earlier
+  "21x fewer charts" framing had it backwards -- those charts were doing work.
+
+  ## RECOMMENDATION
+
+  REVERT the wedge wiring and restore `ffin`, which passes 106/106 at 3.42e-4.
+  Keep `InteriorWedgeChart` in the codebase as an UNWIRED research object with
+  these measurements attached, so the experiment is not repeated blindly.
+
+  The audit premise that motivated the change was sound -- `select_chart`
+  dispatched to a chart class training never produced -- but the correct
+  resolution is the opposite of the one taken: retire the unused CLASS, or
+  fix its convergence, rather than retire the working PATH.
+
+  Before any retry, identify WHAT is kinked. Candidates: the parked critical
+  carrier `tau_c` switching image identity across the diagonal (the same
+  mechanism that raises `CarrierDiscontinuityError` at `r -> 0`), or the
+  nearest-caustic basin boundary crossing the tile.
+
   ## Work
 
   - Refine the wedge tiling until eps passes: more radial rows, more nodes per
