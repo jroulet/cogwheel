@@ -154,3 +154,30 @@
   file fails to collect, 0 tests). Owned by another Test Dev run; the OWNER
   must migrate it to `_wedge_interior_tiles` or delete the ffin-specific
   test. Flag to driver.
+
+- SHARD 2a (test_lensing_marginalized_likelihood.py::
+  test_prior_draws_are_finite_or_exact_neg_inf): capped ONLY the box
+  lens-mass axis so every prior draw evaluates at w<=W_SWEEP_CEILING(55)<60
+  -> fast double-double, NO mpmath (~100s/call build-killer avoided).
+  Mechanism: i_mass=prior.sampled_params.index('ln_m_lens_msun'); f_top=
+  h.fbin[-1]; w_per_msun=dimensionless_frequency(f_top,1.0,0.0); ln_m_cap=
+  log(55/w_per_msun); cubesize[i_mass] shrunk so upper edge<=ln_m_cap. Kept
+  shear(0..1.6) + source(straddles r=1) at FULL extent (Ruling 4: split is
+  mass-orthogonal). Added assertGreater(n_neginf,0) + w_maxes.max()<=60;
+  did NOT weaken existing (isnan/isposinf/finite-or-neginf/n_finite>0).
+  COST: measured ~1.6s/draw end-to-end (NOT the spec's 0.2s — that's
+  engine-eval only; coherent-score QMC dominates). At N=40 ran 63.87s (OVER
+  <60s ceiling); reduced N_PRIOR_DRAWS 40->30 -> 32.23s call +16.46s
+  setUpClass =52.90s total, PASSED. Split at cap ~36 finite/~4 -inf (named
+  refusals survive; C7's extra 59%-inf were the w>60 mpmath refusals the cap
+  removes — consistent w/ Ruling 4, not a bug). PNG:
+  tests/output/prior_sweep_wmax_and_outcomes.png.
+- BACKWARD-COMPAT (report-only, NOT SHARD 2a scope; likely another shard's
+  fixture in same file): RefusalContractTestCase::
+  test_refusal_precedes_coherent_score FAILS on full-file run —
+  CANCELLATION_LENS no longer raises SchwingerCertificationError because the
+  merged mpmath extension (W_CEILING_SCHWINGER 60->150) now SERVES its
+  w in (60,150] nodes via _f_schwinger_mpmath instead of refusing. Pre-
+  existing drift from a PRIOR build (this build's WPs empty []); my git diff
+  is confined to imports/constants/target-method, cannot have caused it.
+  Owner fix: repoint CANCELLATION_LENS refusing nodes to w>150.

@@ -1,6 +1,39 @@
 Last session: 2026-08-04 production batch. Clean.
 
-2026-08-06 brief_mpmath_band_tests:
+2026-08-06 brief_mpmath_band_tests [PLAN DONE]: is_test_only=true, 0 Coder
+  WPs, 3 mandated shards. Prof levers: (1)DDW dd_cap=58/(r_max*reach_max)
+  monotone-dec; r_max<1 hard (interior), so ALSO widen DD_GAMMA_RANGE up
+  (reach grows w/ shear, stay <1) to get r_max*reach>1 => dd_cap<60; keep
+  DD_W_RANGE[1]=500 above cap so it still binds; keep some nodes unrefused;
+  file has STALE cost-budget docstring. (2)marg: lower m_lens_msun<90 (w prop
+  M), non-vacuity survives (gamma-driven refusal unchanged), leave margin
+  over 200 draws. (3)prior mutation: steer refusal-search to gamma~1 det-A
+  STRUCTURAL refusal (no Schwinger call) — cheapest. (4)saddle band-limit:
+  try near-fold geom + modest |y| + mass x2-3 so LensedBinningError trips at
+  w<=60 (binning cares w*dtau span, Schwinger w*|y| offset — decouplable);
+  slow-tier behind COGWHEEL_TRAIN_TIER w/ ~100s cost comment if it can't land
+  in 2 iters. Simplifier: guard=Candidate C (patch _f_schwinger_mpmath raise,
+  exercise ONLY the 4 offending fixtures, assert calls==0; NOT whole-file
+  rerun, NOT subprocess). Cost-comment fix = inline part of each shard, not a
+  separate deliverable. No standalone verify-suite WP (driver/Inspector job).
+2026-08-06 brief_mpmath_band_tests (PLAN v2, Prof rulings):
+- Prof Ruling 1: DDWCeiling geometry-to-cap<60 is likely INFEASIBLE
+  (astroid reach_max<~0.7, r_max<1 => min cap ~88, cannot reach <60).
+  Give shard1 PRIMARY geometry attempt + PROMINENT FALLBACK = slow-tier
+  the setUpClass (COGWHEEL_TRAIN_TIER) w/ corrected ~100s cost comment;
+  class purpose intrinsically involves w>60 (brief rule 2).
+- Prof Ruling 2 (DECISIVE, verified _schwinger.py:938-980):
+  SchwingerCertificationError FIRES in FAST double-double band (w<=60)
+  at |a|=|1-gamma'|->0 parity pinch. So shard2 prior test: push gamma'
+  ->1 at LOW mass, keep all draws w<=60, still collect the vocabulary.
+- Prof Ruling 3: LensedBinningError(w*dtau) vs Schwinger(w,|y|) decouple
+  near a fold; try near-fold low-mass first (~2 iters) else slow-tier.
+- Prof Ruling 4: keep box straddling certified/refused via gamma'/source
+  (mass only sets w) so both finite & -inf present (C7: ~41/59).
+- Prof Ruling 5: assert DD product vs chart's OWN interpolated reach_max
+  (bilinear O(h^2)); loosen product tol ~1e-3 if oracle recomputes reach.
+- Simplifier: trim patch-guard OVERRIDDEN (Acceptance #2 mandates it).
+- Route: is_test_only=true, 0 WPs, 3 disjoint shards. Prior notes:
 - Four fast-tier tests wander into f_schwinger mpmath band w in (60,150]
   (~85-120s/eval, F061). NO production change (f_schwinger + both ceilings
   frozen). ALL fixes are in TEST FILES (fixtures/geometry/cost comments)

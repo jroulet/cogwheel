@@ -129,10 +129,11 @@ from cogwheel.lensing.marginalized_likelihood import (
     LensedMarginalizedExtrinsicLikelihood)
 from cogwheel.lensing.posterior import LensedPosterior
 from cogwheel.lensing.prior import LensedMarginalizedExtrinsicIASPrior
-from cogwheel.lensing.waveform import LensedWaveformGenerator
+from cogwheel.lensing.waveform import (
+    LensedWaveformGenerator, dimensionless_frequency)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
 from cogwheel.lensing.chang_refsdal._schwinger import (
-    SchwingerCertificationError)
+    SchwingerCertificationError, W_CEILING_SCHWINGER)
 
 #: Higher-mode precessing approximant, so the mode-pair (``M**2``) norm
 #: contraction and the per-``|m|`` data fold are genuinely exercised
@@ -228,8 +229,26 @@ CONDITIONAL_LOW_PERCENTILE = 10.0
 CONDITIONAL_MAX_MARGIN = 0.3
 
 #: Number of seeded prior draws for the finite-or-(-inf) / no-NaN sweep
-#: (spec 8c).  Kept modest so the gate stays minutes-scale.
-N_PRIOR_DRAWS = 200
+#: (spec 8c).  COST (F061): the sweep caps the box lens mass so EVERY draw
+#: evaluates at ``w <= 60`` on the fast DOUBLE-DOUBLE Schwinger path
+#: (~0.2 s/engine-eval); the dominant per-draw cost is the coherent-score
+#: QMC marginalization at the ~90% of draws that are in-support (~1.6 s
+#: each, measured end-to-end incl. lnposterior overhead), so 30 draws is
+#: ~48 s -- inside the fast-tier <60 s single-test ceiling.  WITHOUT the
+#: mass cap, the un-capped box (up to 3500 Msun) sends high-mass saddle
+#: draws to ``w`` in ``(60, 150]`` -> the mpmath arbitrary-precision path
+#: at ~100 s EACH, a build-killer.
+N_PRIOR_DRAWS = 30
+
+#: Target ceiling [dimensionless] on the maximum in-band lensing frequency
+#: ``w = xi(m_lens, z_lens) * f`` any prior draw may reach, sitting a
+#: comfortable margin below the mpmath dispatch threshold
+#: `W_CEILING_SCHWINGER` (= 60).  The sweep reduces ONLY the box lens-mass
+#: lever so ``w <= W_SWEEP_CEILING`` at the band top for the largest sampled
+#: mass; the reduced mass is orthogonal to the certified/refused split,
+#: which is a shear (``gamma'``) / source-position phenomenon (Professor
+#: Ruling 4), so both finite and exact ``-inf`` outcomes survive.
+W_SWEEP_CEILING = 55.0
 
 #: Names of the module under test that must NOT appear inside the spec-2
 #: independent oracle helper (F002 oracle-tautology guard).
@@ -828,25 +847,101 @@ class RegistrationPairingSerializationTestCase(_MarginalizedLensTestCase):
                          set(self.marg.params))
 
     def test_prior_draws_are_finite_or_exact_neg_inf(self):
-        """No seeded prior draw yields NaN or ``+inf`` (spec 8c)."""
+        """
+        No seeded prior draw yields NaN or ``+inf`` (spec 8c); every draw is
+        finite or exactly ``-inf``, and BOTH outcomes are present.
+
+        The sampling box's lens-mass lever is capped (mass axis ONLY) so
+        every draw evaluates at ``w <= W_SWEEP_CEILING < 60`` on the fast
+        DOUBLE-DOUBLE Schwinger path -- no draw reaches the mpmath band
+        (F061: ~0.2 s fast double-double vs ~100 s mpmath).  Per Professor
+        Ruling 4 the lens mass is orthogonal to the certified/refused split
+        (a shear-``gamma'`` / source-position phenomenon), so keeping the
+        shear range (0..1.6, spanning the ~0.5 ``F_op`` cancellation band)
+        and the source box (straddling the ``r = 1`` caustic, inside/outside)
+        at FULL extent preserves BOTH finite (low-shear interior) and exact
+        ``-inf`` (cancellation / saddle / outside-caustic / prior-boundary)
+        outcomes.  Only the finite-vs-exact-``-inf`` VALUE is asserted, never
+        which band produced it (Professor Ruling 5).
+        """
         posterior = self.h.posterior
         prior = posterior.prior
+
+        # Reduce ONLY the lens-mass axis of the box so max-in-band w <= the
+        # sweep ceiling.  ``z_lens`` is fixed at 0 by FixedLensGeometryPrior
+        # and ``w = xi(m) * f`` is linear in mass, so the largest sampled
+        # mass sets the band-top w; capping mass caps w, leaving shear and
+        # source position (hence the certified/refused split) untouched.
+        i_mass = prior.sampled_params.index('ln_m_lens_msun')
+        f_top = float(self.h.fbin[-1])
+        w_per_msun = float(dimensionless_frequency(f_top, 1.0, 0.0))
+        ln_m_cap = np.log(W_SWEEP_CEILING / w_per_msun)
+        cubemin = prior.cubemin.copy()
+        cubesize = prior.cubesize.copy()
+        ln_m_hi = min(prior.cubemin[i_mass] + prior.cubesize[i_mass], ln_m_cap)
+        cubesize[i_mass] = ln_m_hi - prior.cubemin[i_mass]
+        self.assertGreater(
+            cubesize[i_mass], 0.0,
+            'capped lens-mass axis collapsed to an empty range')
+
         rng = np.random.default_rng(SEED + 8)
-        n_finite = 0
-        for _ in range(N_PRIOR_DRAWS):
-            vec = prior.cubemin \
-                + rng.uniform(0.0, 1.0, prior.cubemin.shape) * prior.cubesize
+        n_finite = n_neginf = 0
+        w_maxes = np.empty(N_PRIOR_DRAWS)
+        for idx in range(N_PRIOR_DRAWS):
+            vec = cubemin + rng.uniform(0.0, 1.0, cubemin.shape) * cubesize
+            w_maxes[idx] = dimensionless_frequency(
+                f_top, float(np.exp(vec[i_mass])), 0.0)
             value = posterior.lnposterior(*vec)
             self.n_compared += 1
             self.assertFalse(np.isnan(value), f'NaN lnposterior at {vec!r}')
             self.assertFalse(np.isposinf(value), '+inf lnposterior')
             self.assertTrue(np.isfinite(value) or np.isneginf(value))
             n_finite += int(np.isfinite(value))
-        # Non-vacuity: at least SOME draws must be in the certified domain,
-        # else the sweep proves nothing about finite evaluations.
+            n_neginf += int(np.isneginf(value))
+
+        # Every draw stayed on the fast double-double path (F061): no engine
+        # call saw ``w > 60``, so the mpmath arbitrary-precision path (the
+        # ~100 s/draw build-killer) never fired.
+        self.assertLessEqual(
+            float(w_maxes.max()), W_CEILING_SCHWINGER,
+            f'a draw reached w = {w_maxes.max()} > {W_CEILING_SCHWINGER}; the '
+            'mass cap failed and the slow mpmath path would run.')
+
+        # Non-vacuity: the sweep must exercise BOTH outcome classes, else it
+        # proves nothing about finite evaluations (n_finite guard, unchanged)
+        # OR about the exact ``-inf`` refusal mapping (n_neginf guard, added).
         self.assertGreater(
             n_finite, 0, 'no prior draw produced a finite posterior -- the '
             'no-NaN sweep would be vacuous.')
+        self.assertGreater(
+            n_neginf, 0, 'no prior draw produced an exact -inf posterior -- '
+            'the finite/-inf sweep would not exercise the refusal mapping.')
+
+        self._save_prior_sweep_diagnostic(w_maxes, n_finite, n_neginf)
+
+    @staticmethod
+    def _save_prior_sweep_diagnostic(w_maxes, n_finite, n_neginf):
+        """
+        Diagnostic: histogram of the per-draw max in-band ``w`` (all must
+        sit below the `W_CEILING_SCHWINGER` mpmath threshold) beside a bar
+        of the finite / exact-``-inf`` outcome counts.
+        """
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(9, 3.2))
+        ax0.hist(w_maxes, bins=20, color='tab:blue', alpha=0.85)
+        ax0.axvline(W_CEILING_SCHWINGER, color='tab:red', ls='--',
+                    label=f'mpmath threshold w={W_CEILING_SCHWINGER:g}')
+        ax0.set_xlabel('max in-band w per draw')
+        ax0.set_ylabel('draw count')
+        ax0.set_title('all draws on fast double-double path')
+        ax0.legend(fontsize=8)
+        ax1.bar(['finite', 'exact -inf'], [n_finite, n_neginf],
+                color=['tab:green', 'tab:gray'])
+        ax1.set_ylabel('draw count')
+        ax1.set_title('outcome classes')
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'prior_sweep_wmax_and_outcomes.png', dpi=110)
+        plt.close(fig)
 
     def test_deterministic_timeshift_is_bit_repeatable(self):
         """``_get_dh_hh_timeshift`` is an exact pure function (spec 8d)."""

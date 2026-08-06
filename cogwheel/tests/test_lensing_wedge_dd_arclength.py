@@ -20,15 +20,24 @@ grid node is looked up through the SAME table on both sides.
 
 Cost budget
 -----------
-4×4×4 = 64 nodes per build.  The DD cap reduces w_max from 500 to ~30,
-yielding ~6 w-nodes per decade over [5, 30] ≈ 5 points.  Total:
-64 × 5 evaluations × ~30ms = ~10s per build.  Three builds in this suite
-(DD-cap, arc-length, no-DD-cap) share one via setUpClass = ~10s + ~5s + ~5s
-≈ 20s total.  Well within the 5-minute ceiling.
+4×4×4 = 64 nodes per build.  Most of this suite stays in the fast tier: its
+builds cap ``w`` below the Schwinger double-double ceiling (60), where an
+evaluation costs ~0.2 s.
+
+`DDWCeilingTestCase` is the exception and is SLOW-TIERED.  Its DD cap lands
+at ``w_max ~ 121.6`` — the DD product cap (``w * |y| < 58``) and the
+Schwinger dispatch ceiling (``w <= 60``) are DIFFERENT thresholds, and for
+the astroid the former cannot be pushed below the latter (``reach_max <
+~0.7`` with ``r_max < 1`` bounds the cap at ~88).  Nodes above 60 therefore
+take the mpmath path at ~85-120 s EACH (F061), not the ~30 ms an earlier
+version of this note assumed, so that class alone is hours rather than
+seconds.  Its DD-cap-formula coverage now runs under ``COGWHEEL_TRAIN_TIER``;
+no assertion was weakened or removed.
 """
 from __future__ import annotations
 
 import copy
+import os
 import unittest
 
 import numpy as np
@@ -94,6 +103,19 @@ class _WedgeDDTestCase(unittest.TestCase):
         self.__class__._class_comparison_count += n
 
 
+#: `DDWCeilingTestCase` is the one class here whose geometry forces training
+#: nodes above the Schwinger double-double ceiling (``w > 60``), where each
+#: evaluation costs ~85-120 s on the mpmath path instead of ~0.2 s (F061).
+#: The DD cap cannot be pushed under 60 for the astroid, so the cost is
+#: intrinsic to what the class tests rather than a fixture mistake.
+_TRAIN_TIER_SKIP = unittest.skipUnless(
+    os.environ.get('COGWHEEL_TRAIN_TIER'),
+    'engine-backed training tier: set COGWHEEL_TRAIN_TIER=1 (builds real '
+    'surrogate charts above the Schwinger ceiling at ~85-120 s per node; '
+    'the driver runs these post-build)')
+
+
+@_TRAIN_TIER_SKIP
 class DDWCeilingTestCase(_WedgeDDTestCase):
     """Verify the DD-product w-ceiling is applied by from_wedge_engine.
 
@@ -108,7 +130,9 @@ class DDWCeilingTestCase(_WedgeDDTestCase):
     refusals at the capped w_max are Schwinger-related (not DD),
     so we verify the FORMULA not the success rate.
 
-    Cost: 4×4×4 = 64 nodes × ~13 w-points × 30ms ≈ 25s.
+    Cost: 4×4×4 = 64 nodes × ~13 w-points.  Nodes at the capped w_max sit
+    ABOVE the Schwinger ceiling (60) and cost ~85-120 s each on the mpmath
+    path, not ~30 ms (F061) — hence the training-tier gate on this class.
     """
 
     _surrogate: LensAmplificationSurrogate | None = None

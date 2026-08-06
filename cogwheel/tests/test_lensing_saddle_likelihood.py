@@ -450,10 +450,17 @@ class SaddleRefusalPrecedenceTestCase(_SaddleTestCase):
         self.cs = self.marg.coherent_score
         self.posterior = self.h.posterior
 
+    @_brute_accuracy_tier
     def test_band_limit_refusal_precedes_coherent_score(self):
         """
         The scaled saddle raises `LensedBinningError` with the coherent
         score never consulted (refusal before the extrinsic integral).
+
+        SLOW TIER: `BAND_LIMIT_LENS` scales the lens mass x8 to breach the
+        coarse-bin band limit, which incidentally pushes the engine above
+        the Schwinger double-double ceiling (``w > 60``) where a single
+        call costs ~85-120 s on the mpmath path instead of ~0.2 s (F061).
+        The precedence assertion is unchanged.
         """
         candidate = _intrinsic_lens_point(self.marg, self.BAND_LIMIT_LENS)
         with mock.patch.object(

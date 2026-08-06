@@ -970,6 +970,17 @@ class MassSheetDegeneracyTestCase(_LensSuiteTestCase):
         plt.close(fig)
 
 
+#: Gated at CLASS level, not per method: the cost is in `setUpClass`, whose
+#: `_collect_cancellation_proposals` scan evaluates configs above the
+#: Schwinger double-double ceiling (``w > 60``) at ~85-120 s per engine call
+#: on the mpmath path instead of ~0.2 s (F061). A method-level skip does NOT
+#: prevent `setUpClass` from running, so every test in the class would still
+#: pay the scan and time out -- measured: 5 errors at setup, 906 s.
+@unittest.skipUnless(
+    os.environ.get('COGWHEEL_BRUTE_ACCURACY'),
+    'brute-force accuracy tier: set COGWHEEL_BRUTE_ACCURACY=1 — the '
+    'setUpClass refusal scan evaluates above the Schwinger ceiling '
+    '(w > 60), ~85-120 s per engine call on the mpmath path (F061)')
 class RefusalNetTestCase(_LensSuiteTestCase):
     """C6 -- the posterior maps NAMED engine refusals to exactly ``-inf``.
 
