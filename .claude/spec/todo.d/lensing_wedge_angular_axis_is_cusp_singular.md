@@ -4,8 +4,10 @@ section: Backlog
 
 - **THE WEDGE ANGULAR AXIS IS CUSP-SINGULAR — and the arc-length remap makes it
   WORSE. Fix is `u ~ theta^(2/3)`** `[→ spec]` — Professor review + measurement,
-  2026-08-06. SUPERSEDES the "NOT the coordinate" claim in
-  [[lensing_wedge_needs_axis_strips_not_a_new_coordinate]], which was wrong.
+  2026-08-06. CONSOLIDATES three earlier fragments that reached wrong diagnoses
+  (coordinate-relocates-difficulty, cusp-diffraction, exclusion-strips); their
+  measurements are folded in below and the refuted hypotheses are listed so
+  they are not re-attempted. git is the archive.
 
   ## Mechanism
 
@@ -81,6 +83,60 @@ section: Backlog
   replaced it with "record a ladder-served gap", so the tiler cannot discover
   it needs more tiles and cannot fail toward correctness. That is why this
   stayed invisible until the eps distribution was inspected a day later.
+
+  ## Chart-level measurements (the evidence this rests on)
+
+  Retired `ffin` path vs the wedge path, same region, production config:
+
+  | interior path | charts | median eps | PASS (bar 5e-2) |
+  |---|---|---|---|
+  | `ffin` (retired) | 106 | 3.42e-4 | 106/106 |
+  | wedge, as shipped | 12 | 5.38e-1 | **0/12** |
+
+  Localisation — same band, same radial tile, same `n_theta` = 7, varying ONLY
+  the angular tile POSITION:
+
+  | angular tiles | tile TOUCHING an axis | INTERIOR tile |
+  |---|---|---|
+  | 4 | 1.29e-1 | **3.82e-4** |
+  | 8 | 6.48e-2 | **3.27e-4** |
+  | 12 | 3.96e-2 | — |
+
+  Interior tiles are ~340x better at identical width and node count, and are
+  already at the noise floor. Axis-adjacent tiles converge at exactly FIRST
+  ORDER in width (3.93e-1, 2.34e-1, 1.29e-1, 6.48e-2, 3.96e-2) — the classic
+  signature of an edge singularity, now identified as the `theta^(2/3)` cusp
+  above.
+
+  Exclusion strips were measured as a workaround before the cause was known.
+  The HARD axis binds, ~6x worse than the soft at every width (0.10 rad:
+  7.64e-3 hard vs 1.21e-3 soft; the 2.05x singular-coefficient ratio is the
+  same asymmetry). **Strips are NO LONGER RECOMMENDED** — they worked by
+  keeping tiles away from a singularity that the `u` axis removes outright,
+  and they cost 12.7% of the quadrant.
+
+  ## Hypotheses TESTED AND REFUTED — do not re-attempt
+
+  Recorded because each cost real time and each is superficially plausible.
+
+  1. **"The coordinate relocates the difficulty; revert to `ffin`."** Wrong.
+     Radial converges at 1.31e-4 on FIVE nodes; transverse away from the axes
+     at p ~ 3.6. Only the ANGULAR map near the edges is bad.
+  2. **Cusp DIFFRACTION (Pearcey territory).** Wrong locus: the failure is at
+     `r ~ 0.45`, nowhere near the cusp POINT at `r = 1`. The cusp enters
+     through `r_caustic(theta)` in the NORMALISATION, not through the local
+     field.
+  3. **A poisoned boundary NODE.** The grid does place nodes exactly on the
+     degeneracy (`min delay gap = 0.000e+00`, `y1 = 3.9e-17`) and the engine
+     refuses 1e-9 away. But offsetting the node changes nothing:
+     3.9271e-1 (node on axis) vs 3.9270e-1 (1e-6 offset). Not the mechanism.
+  4. **The delay-degenerate mirror pair's interference BEAT.** Real and
+     measured (`d_tau ~ 0.021 per degree` off the axis, ~2.8 cycles across the
+     span at `w_max`) but NOT binding: at 30 nodes/cycle a cubic spline should
+     reach ~1e-6, while axis-adjacent tiles sit at 4e-2 and converge at first
+     order.
+  5. **SACR-C switch / carrier / ordering defects.** All three refuted against
+     the code — see "Theory is UNAFFECTED" below.
 
   ## Theory is UNAFFECTED
 

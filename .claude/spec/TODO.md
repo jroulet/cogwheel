@@ -1281,8 +1281,7 @@ Tag conventions:
   - Validate against the retired `ffin` baseline (106/106 charts at median
     3.42e-4), not merely against the 5e-2 bar.
 
-  SUPERSEDES the wedge approach in
-  [[lensing_wedge_charts_fail_the_eps_bar]]. Note this is a NEW chart class,
+  RELATED: [[lensing_wedge_angular_axis_is_cusp_singular]]. Note this is a NEW chart class,
   not a repair of `InteriorWedgeChart`.
 
 
@@ -1661,8 +1660,10 @@ Tag conventions:
 
 - **THE WEDGE ANGULAR AXIS IS CUSP-SINGULAR — and the arc-length remap makes it
   WORSE. Fix is `u ~ theta^(2/3)`** `[→ spec]` — Professor review + measurement,
-  2026-08-06. SUPERSEDES the "NOT the coordinate" claim in
-  [[lensing_wedge_needs_axis_strips_not_a_new_coordinate]], which was wrong.
+  2026-08-06. CONSOLIDATES three earlier fragments that reached wrong diagnoses
+  (coordinate-relocates-difficulty, cusp-diffraction, exclusion-strips); their
+  measurements are folded in below and the refuted hypotheses are listed so
+  they are not re-attempted. git is the archive.
 
   ## Mechanism
 
@@ -1738,6 +1739,60 @@ Tag conventions:
   replaced it with "record a ladder-served gap", so the tiler cannot discover
   it needs more tiles and cannot fail toward correctness. That is why this
   stayed invisible until the eps distribution was inspected a day later.
+
+  ## Chart-level measurements (the evidence this rests on)
+
+  Retired `ffin` path vs the wedge path, same region, production config:
+
+  | interior path | charts | median eps | PASS (bar 5e-2) |
+  |---|---|---|---|
+  | `ffin` (retired) | 106 | 3.42e-4 | 106/106 |
+  | wedge, as shipped | 12 | 5.38e-1 | **0/12** |
+
+  Localisation — same band, same radial tile, same `n_theta` = 7, varying ONLY
+  the angular tile POSITION:
+
+  | angular tiles | tile TOUCHING an axis | INTERIOR tile |
+  |---|---|---|
+  | 4 | 1.29e-1 | **3.82e-4** |
+  | 8 | 6.48e-2 | **3.27e-4** |
+  | 12 | 3.96e-2 | — |
+
+  Interior tiles are ~340x better at identical width and node count, and are
+  already at the noise floor. Axis-adjacent tiles converge at exactly FIRST
+  ORDER in width (3.93e-1, 2.34e-1, 1.29e-1, 6.48e-2, 3.96e-2) — the classic
+  signature of an edge singularity, now identified as the `theta^(2/3)` cusp
+  above.
+
+  Exclusion strips were measured as a workaround before the cause was known.
+  The HARD axis binds, ~6x worse than the soft at every width (0.10 rad:
+  7.64e-3 hard vs 1.21e-3 soft; the 2.05x singular-coefficient ratio is the
+  same asymmetry). **Strips are NO LONGER RECOMMENDED** — they worked by
+  keeping tiles away from a singularity that the `u` axis removes outright,
+  and they cost 12.7% of the quadrant.
+
+  ## Hypotheses TESTED AND REFUTED — do not re-attempt
+
+  Recorded because each cost real time and each is superficially plausible.
+
+  1. **"The coordinate relocates the difficulty; revert to `ffin`."** Wrong.
+     Radial converges at 1.31e-4 on FIVE nodes; transverse away from the axes
+     at p ~ 3.6. Only the ANGULAR map near the edges is bad.
+  2. **Cusp DIFFRACTION (Pearcey territory).** Wrong locus: the failure is at
+     `r ~ 0.45`, nowhere near the cusp POINT at `r = 1`. The cusp enters
+     through `r_caustic(theta)` in the NORMALISATION, not through the local
+     field.
+  3. **A poisoned boundary NODE.** The grid does place nodes exactly on the
+     degeneracy (`min delay gap = 0.000e+00`, `y1 = 3.9e-17`) and the engine
+     refuses 1e-9 away. But offsetting the node changes nothing:
+     3.9271e-1 (node on axis) vs 3.9270e-1 (1e-6 offset). Not the mechanism.
+  4. **The delay-degenerate mirror pair's interference BEAT.** Real and
+     measured (`d_tau ~ 0.021 per degree` off the axis, ~2.8 cycles across the
+     span at `w_max`) but NOT binding: at 30 nodes/cycle a cubic spline should
+     reach ~1e-6, while axis-adjacent tiles sit at 4e-2 and converge at first
+     order.
+  5. **SACR-C switch / carrier / ordering defects.** All three refuted against
+     the code — see "Theory is UNAFFECTED" below.
 
   ## Theory is UNAFFECTED
 
@@ -1859,353 +1914,6 @@ Tag conventions:
   MEASURED CONTEXT: the wedge path is a 56x interior speedup (5 charts /
   1.8 min versus the retired ffin path's 106 charts / 100.7 min for the same
   region), so a modest gamma subdivision of ONE tile is affordable.
-
-
-- **REGRESSION: every wedge interior chart fails the eps bar — the astroid
-  interior is now UNSERVED** `[→ spec]` — measured 2026-08-06 from the first
-  completed training run on the wedge path (`034fcf7`).
-
-  | interior path | charts | median eps | max eps | PASS (bar 5e-2) |
-  |---|---|---|---|---|
-  | retired `ffin` | 106 | 3.42e-4 | 2.80e-2 | **106/106** |
-  | new wedge      |  12 | 5.38e-1 | 7.16e-1 | **0/12** |
-
-  Best wedge chart is 2.99e-1 — 6x over the bar. Median is ~1600x worse than
-  the path it replaced. All 12 are gated out, so after `034fcf7` NOTHING
-  charts the astroid interior; queries there fall through to the serving
-  ladder.
-
-  ## The "56x speedup" was mostly under-resolution
-
-  Reported earlier: the wedge path builds the interior in 1.8 min / 5 tiles
-  versus `ffin`'s 100.7 min / 106 charts. That measurement was real but the
-  conclusion was wrong, because it counted BUILD TIME and CHART COUNT and
-  never checked ACCURACY. 12 charts cover what 106 covered at the SAME
-  7x7x7 node grid, so each wedge chart spans ~9x more area at identical
-  resolution.
-
-  Decomposing the 21x chart reduction: the D2 fold over
-  `theta_wedge in [0, pi/2]` is a genuine 4x from exact symmetry; the
-  remaining ~5x is pure coarsening. Expect a correctly-resolved wedge tiling
-  to land near 106/4 ~ 26 charts, i.e. a real speedup of ~4x, not 56x.
-
-  ## Why it shipped
-
-  The build's acceptance criterion was right -- "interior held-out eps no
-  worse than the `ffin` baseline at equal or lower chart count" -- but the
-  plan DEFERRED it to a post-build driver step, because `ffin` was deleted in
-  the same build and an in-build relative check would have been a forbidden
-  measure-then-decide against removed code. The deferral was defensible; not
-  running it immediately after the build was not. A criterion that cannot be
-  checked in-build is a reason to check it FIRST post-build, not a reason to
-  carry it.
-
-  ## DIAGNOSED — not a bug, not under-resolution: the coordinate does not
-  ## make the envelope smooth
-
-  Measured on one mid-radius tile (`r = 0.455 +- 0.089`, band 0), refining in
-  place with identical held-out samples:
-
-  | test | result |
-  |---|---|
-  | eps AT the chart's own nodes | **6.33e-16** |
-  | eps off-node, full angular width `[0, pi/2]` | 3.93e-1 -> 2.08e-1 (n 7->13), **p ~ 1.0** |
-  | eps off-node, half angular width | 7.15e-2 -> 5.38e-2 (n 7->13), **p ~ 0.35-0.55** |
-  | `ffin` baseline, same region | 3.42e-4, 106/106 pass |
-
-  1. **No wiring bug.** Node exactness at 6.3e-16 proves train and serve agree;
-     the chart reproduces its own training values to machine precision. A
-     train/serve convention mismatch would have floored the node error too.
-  2. **Not merely under-resolved.** A smooth object gives `p ~ 4`. `p ~ 1`
-     is the signature of a KINK (continuous value, discontinuous first
-     derivative) inside the tile; `p < 1` at half width means uniform
-     refinement is not resolving it at all.
-  3. **The difficulty is angular but not removable.** Halving the angular
-     width cuts the error 5.5x, so the error concentrates near the diagonal.
-     But closing the 200x gap to the `ffin` baseline needs ~3 halvings = 8x
-     more angular tiles, taking 12 charts to ~96 -- essentially `ffin`'s 106.
-
-  **Conclusion: the wedge coordinate yields NO net chart-count saving once
-  accuracy is matched.** The genuine 4x from the exact D2 fold is cancelled by
-  the finer angular resolution the kink demands. `(r, theta_wedge)` relocates
-  the difficulty rather than removing it.
-
-  This also re-reads `ffin`'s 106 charts: that was an adaptive tiler paying in
-  chart count to chase a kink, which is the correct behaviour. The earlier
-  "21x fewer charts" framing had it backwards -- those charts were doing work.
-
-  ## RECOMMENDATION
-
-  REVERT the wedge wiring and restore `ffin`, which passes 106/106 at 3.42e-4.
-  Keep `InteriorWedgeChart` in the codebase as an UNWIRED research object with
-  these measurements attached, so the experiment is not repeated blindly.
-
-  The audit premise that motivated the change was sound -- `select_chart`
-  dispatched to a chart class training never produced -- but the correct
-  resolution is the opposite of the one taken: retire the unused CLASS, or
-  fix its convergence, rather than retire the working PATH.
-
-  Before any retry, identify WHAT is kinked. Candidates: the parked critical
-  carrier `tau_c` switching image identity across the diagonal (the same
-  mechanism that raises `CarrierDiscontinuityError` at `r -> 0`), or the
-  nearest-caustic basin boundary crossing the tile.
-
-  ## Work
-
-  - Refine the wedge tiling until eps passes: more radial rows, more nodes per
-    axis, or both. The tiling helper is `_wedge_interior_tiles(r_extent,
-    n_per_side)` and the node counts come from `TrainingConfig.n_rho` /
-    `n_theta_c`. Target the `ffin` baseline (median 3.4e-4), not merely the
-    bar.
-  - Establish the convergence rate first: if eps falls ~h^4 the fix is node
-    counts; if far slower, `(r, theta_wedge)` is no better a coordinate than
-    `(s, d)` was, and the interior needs rethinking rather than refining.
-  - Until it passes, the interior is a coverage HOLE. Either restore a served
-    interior or make the gap explicit at serve time -- a surrogate that
-    silently ladder-serves the whole interior is slower than the `ffin`
-    artifact it replaced.
-  - Re-check `origin_enclosed`/`n_cusp_rays: 0` in the run's
-    `farfield_interior` summary: with 0 cusp rays the tiler may not be
-    cusp-aligning at all, which would compound the resolution problem.
-
-  MEASURED CONTEXT for the same run: exterior charts also fail badly (57
-  built, 35 fail the 1e-3 bar, max eps 64.2), and 51 of 77 charts total were
-  gated. See [[lensing_farfield_sd_coordinate_degenerates]].
-
-  ACCEPTANCE: wedge interior charts pass 5e-2 with median at or below the
-  `ffin` baseline of 3.4e-4, at a chart count materially below 106; and a
-  medial-axis query serves to tolerance.
-
-
-- **THE WEDGE CHART FAILS ONLY AT THE CUSP AXIS AT HIGH `w` — the coordinate is
-  fine; the tiler never excludes a cusp window** `[→ spec]` — measured
-  2026-08-06. SUPERSEDES the diagnosis in
-  [[lensing_wedge_charts_fail_the_eps_bar]], which blamed the coordinate.
-
-  ## Axis-by-axis, one tile (`r = 0.455 +- 0.089`, band 0)
-
-  | axis refined | eps |
-  |---|---|
-  | gamma 7 -> 13 | 3.9271e-1 UNCHANGED to 4 digits (p = 0) |
-  | `w` 40 -> 168 nodes | 3.9271e-1 -> 3.9220e-1 (p = 0) |
-  | spatial 7 -> 13 | 3.93e-1 -> 2.08e-1 (p ~ 1, MAX metric) |
-
-  1-D cuts of the real `partition.envelope`, splined in normalised arc length:
-
-  | direction | 5 nodes | 7 nodes | 25 nodes | order |
-  |---|---|---|---|---|
-  | RADIAL (theta = pi/4) | 1.31e-4 | 1.83e-5 | 7.19e-8 | steep |
-  | TRANSVERSE (r = 0.7) | 1.96e-1 | 1.04e-1 | 6.05e-4 | p ~ 3.6 |
-
-  So radial is superb, transverse converges at essentially CUBIC ORDER, and
-  neither `gamma` nor `w` contributes anything.
-
-  ## The max metric hid a localised failure
-
-  `_heldout_eps` returns the MAX over 60 samples. Its distribution:
-
-  | | n = 7 | n = 13 |
-  |---|---|---|
-  | median | 6.45e-2 | 1.94e-2 |
-  | max | 3.93e-1 | 2.08e-1 |
-  | max / median | 6.1 | 10.7 |
-  | fraction under the 5e-2 bar | 40% | 70% |
-
-  The bulk converges (median p ~ 1.9 and improving); the max does not, because
-  it is one locus. **All five worst samples at BOTH node counts sit at
-  `theta_wedge` in [1.44, 1.50]** (`pi/2 = 1.5708`) **and at `w = 8.933`, the
-  TOP of the w range.** Every one.
-
-  That is the cusp axis at the highest frequency — cusp-diffraction territory,
-  which `_pearcey_cusp.py` already exists to handle.
-
-  ## Root cause
-
-  The run's `farfield_interior` summary records **`n_cusp_rays: 0`**: the wedge
-  tiler performs no cusp alignment and excludes no cusp window. The retired
-  `ffin` path did both. The wedge tile therefore spans right up to the cusp
-  axis and is asked to spline the cusp-diffraction structure with 7 angular
-  nodes at `w_max`.
-
-  This was a deliberate simplification at the plan gate ("Do NOT add
-  cusp-alignment or admission logic to this helper (Simplifier: trim)"), on
-  the reasoning that the astroid cusps sit at the wedge's angular EDGES so no
-  alignment is needed. That is true for ALIGNMENT and false for EXCLUSION:
-  putting the singularity on the boundary does not remove it from the domain.
-
-  ## Corrected recommendation — do NOT revert
-
-  Earlier fragments recommended reverting to `ffin` on the grounds that the
-  wedge coordinate "relocates the difficulty". That is now measured to be
-  wrong. The coordinate is fine on every axis; the tiler is missing one
-  feature.
-
-  - Add a cusp window at `theta_wedge -> 0` and `-> pi/2`, handing those
-    neighbourhoods to the existing Pearcey cusp machinery, exactly as the
-    `ffin` path did.
-  - Re-measure eps on the remaining wedge domain. With 70% of samples already
-    under the bar at n = 13 BEFORE excluding the cusp, and transverse
-    convergence at p ~ 3.6, the target is reachable at modest cost: from
-    1.0e-1 at 7 angular nodes, matching `ffin`'s 3.42e-4 needs ~4.5x more
-    angular resolution, i.e. roughly 5 angular tiles at n = 7 -> ~25 charts
-    versus `ffin`'s 106. That is the genuine ~4x the exact D2 fold promises.
-  - Keep the `w_max` end under review: the worst samples are all at the top of
-    the band, so the cusp window may need to widen with `w`.
-
-  ACCEPTANCE: with a cusp window in place, wedge interior charts pass 5e-2
-  with median at or below `ffin`'s 3.42e-4, at a chart count materially below
-  106; and the worst-sample locus is no longer the cusp axis.
-
-
-- **THE WEDGE PATH WORKS — the failure is thin strips along the reflection
-  axes; exclude them and it beats `ffin` 5:1** `[→ spec]` — measured
-  2026-08-06. SUPERSEDES the diagnoses in
-  [[lensing_wedge_charts_fail_the_eps_bar]] (blamed the coordinate) and
-  [[lensing_wedge_fails_only_at_the_cusp_axis]] (blamed cusp diffraction).
-
-  ## The decisive measurement
-
-  Same band, same radial tile (`r = 0.455 +- 0.089`), same `n_theta = 7`, only
-  the angular tile POSITION differs:
-
-  | angular tiles | eps, tile TOUCHING an axis | eps, INTERIOR tile |
-  |---|---|---|
-  | 4 | 1.29e-1 | **3.82e-4** |
-  | 8 | 6.48e-2 | **3.27e-4** |
-  | 12 | 3.96e-2 | — |
-
-  Interior tiles are **~340x more accurate** than axis-adjacent ones at
-  identical width and node count. They reach the `ffin` baseline (3.42e-4) at
-  just FOUR angular tiles, and barely improve beyond that (3.82e-4 -> 3.27e-4)
-  — i.e. they are already at the noise floor, fully converged.
-
-  Axis-adjacent tiles converge at exactly FIRST ORDER (each halving of width
-  halves eps: 3.93e-1, 2.34e-1, 1.29e-1, 6.48e-2, 3.96e-2). At first order,
-  matching `ffin` by global refinement would need ~116x more tiles — hopeless.
-  The whole failure is in the strips.
-
-  ## What this means
-
-  `4 angular x 5 radial = 20 charts` at `ffin` accuracy, against `ffin`'s
-  **106** for the same region — a genuine **5x** saving, comfortably better
-  than the 4x the exact D2 fold alone predicts (the wedge also needs fewer
-  radial tiles: the radial direction is superb, 1.31e-4 at FIVE nodes).
-
-  ## What it is NOT (four hypotheses killed by measurement)
-
-  - NOT the coordinate. Radial converges at 1.3e-4 on 5 nodes; transverse at
-    p ~ 3.6. The owner's `d_tau^(2/3)` matches wedge `r` to ~10% (they are
-    affinely related: `distance = r_caustic(theta) * (1 - r)`), so neither is
-    at fault and neither is better.
-  - NOT a wiring bug. Node exactness is 6.33e-16.
-  - NOT gamma or w resolution. Refining gamma 7->13 leaves eps unchanged to 4
-    digits; refining w from 40 to 168 nodes likewise.
-  - NOT cusp diffraction. The locus is `theta_wedge -> pi/2` at `r ~ 0.45`,
-    nowhere near the cusp POINT at `r = 1`.
-
-  The interference beat between the two delay-degenerate images IS real
-  (`d_tau ~ 0.021 per degree` off the axis, ~2.8 cycles across the span at
-  `w_max`) but is NOT the binding constraint: at 30 nodes/cycle a cubic spline
-  should reach ~1e-6, and axis-adjacent tiles are still at 4e-2 and converging
-  at first order. First order means a genuine non-smooth feature on the axis,
-  whose mechanism is still unidentified.
-
-  ## Strip width — MEASURED, and the two axes are NOT equivalent
-
-  eps of the tile adjacent to the excluded strip, 4 angular tiles, `n_theta`=7:
-
-  | strip half-width | % of quadrant | SOFT axis (`theta`=0) | HARD axis (`theta`=pi/2) |
-  |---|---|---|---|
-  | 0.00 | 0% | 4.50e-2 | **1.29e-1 FAIL** |
-  | 0.03 (1.7 deg) | 3.8% | 9.49e-3 | 3.61e-2 |
-  | 0.06 (3.4 deg) | 7.6% | 3.74e-3 | 1.74e-2 |
-  | 0.10 (5.7 deg) | 12.7% | 1.21e-3 | **7.64e-3** |
-  | 0.16 (9.2 deg) | 20.4% | 4.27e-4 | 2.47e-3 |
-
-  The HARD axis is ~6x worse at every width and is the binding constraint —
-  a real physical asymmetry between the shear eigen-directions, not a probe
-  artifact. (An earlier probe reported 4.50e-2 at `delta`=0 where a previous
-  sweep reported 1.29e-1: the sweep maxed over BOTH axes, the strip probe
-  silently measured only the soft one. Same class of error as the max-metric
-  problem — a summary that hides which of two things it describes.)
-
-  The hard axis does NOT reach `ffin` parity at any affordable width:
-  extrapolating its ~`delta^-1.8` falloff, 3.42e-4 needs `delta` ~ 0.46 rad,
-  excluding 59% of the quadrant. That trade is not worth making — and `ffin`
-  parity was never the requirement. **The gate is 5e-2.**
-
-  ## The degenerate BOUNDARY NODE is real but is NOT the mechanism (tested)
-
-  The production tiler emits ONE angular column per radial row, each spanning
-  the full `[0, pi/2]`, so every tile touches BOTH axes; and the chart grid
-  includes its endpoints, so boundary nodes land exactly on `theta_wedge` = 0
-  and `pi/2`. There, `min delay gap = 0.000e+00` exactly (mirror images are
-  exactly degenerate, `y1 = 3.9e-17`), and 1e-9 off the axis the engine
-  REFUSES with `LensDomainError` while both the axis itself and 1e-6 away
-  succeed.
-
-  That looked like a poisoned boundary node -- which would give O(h) error
-  across the tile and explain the first-order convergence. TESTED AND
-  REFUTED: holding the span at `[eps, pi/2 - eps]` with `n_theta` = 7,
-
-      offset 0      (node ON axis)  eps 3.9271e-1
-      offset 1e-6   (node off)      eps 3.9270e-1
-      offset 1e-4                   eps 3.9228e-1
-      offset 1e-3                   eps 3.8845e-1
-      offset 1e-2                   eps 3.4993e-1
-      offset 3e-2                   eps 2.7903e-1
-
-  Moving the node off the degeneracy changes nothing; improvement appears only
-  once the offset becomes a real width reduction. Do not re-attempt a node
-  nudge, an endpoint clamp, or a "skip the degenerate node" fix.
-
-  What DOES matter is DISTANCE FROM THE AXIS, not width alone: a tile of
-  half-width 0.196 touching the axis gives 1.29e-1, while one of half-width
-  0.171 set back 0.10 rad gives 7.64e-3 -- 17x better for a 13% width change.
-  The envelope varies rapidly within ~0.1 rad of the reflection axis and a
-  tile must be both narrow AND set back.
-
-  ## RECOMMENDED CONFIGURATION
-
-  - strip half-width **0.10 rad (5.7 deg)** at BOTH axes -> worst-tile eps
-    **7.64e-3**, a 6.5x margin under the 5e-2 bar, excluding 12.7% of the
-    quadrant;
-  - **4 angular x 5 radial = 20 charts** for the region, against `ffin`'s
-    **106** — a 5x saving at 6.5x bar margin;
-  - if more margin is wanted, 0.16 rad gives 2.47e-3 (20x margin) at 20.4%
-    exclusion; if coverage matters more, 0.03 rad still passes at 3.61e-2.
-
-  Note the margin trade honestly: `ffin` ran ~100x under the bar, this runs
-  ~6.5x under it. That is a real reduction in headroom, bought for 5x fewer
-  charts. If the bar ever tightens, this configuration is the first thing that
-  breaks.
-
-  ## Work
-
-  - Exclude a strip of half-width `delta` at `theta_wedge = 0` and `= pi/2`;
-    tile the remainder with ~4 angular x 5 radial. The minimum `delta` for
-    `ffin` parity is being measured; interior tiles at `delta >= 0.196 rad`
-    already pass, so the exclusion costs at most ~25% of the quadrant and
-    probably far less.
-  - Route the excluded strips to a rung that covers them, and VERIFY it serves
-    them to tolerance — an exclusion that nothing covers converts an accuracy
-    bug into a coverage hole.
-  - `_wedge_serves` must refuse inside the same strips via the SAME predicate
-    the tiler uses. Train/serve skew is the recurring bug class here.
-  - Report the eps DISTRIBUTION (p50/p90/max) and the WORST-SAMPLE LOCUS in
-    the training report. The max-metric summary hid this localisation for a
-    full day; the argmax location identified it in ten minutes once printed.
-  - SEPARATE QUESTION worth its own investigation: what IS the non-smooth
-    feature on the reflection axis? Two images are exactly delay-degenerate
-    there (mirror pair), and the SACR-C switch keys on `|tau_a - tau_c|`, so a
-    switch or carrier-assignment change across the degeneracy is the obvious
-    suspect — but the four hypotheses above were all obvious too, and all
-    wrong. Measure before theorising.
-
-  ACCEPTANCE: with axis strips excluded, wedge interior charts reach median
-  eps at or below `ffin`'s 3.42e-4 at ~20 charts for the region; the strips
-  are served to tolerance by a named rung; and the worst-sample locus is no
-  longer the reflection axis.
 
 
 - **The wedge's cusp-adapted `u` map is stored in fields named for ARC LENGTH**

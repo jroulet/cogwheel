@@ -91,6 +91,5 @@ section: Backlog
   - Validate against the retired `ffin` baseline (106/106 charts at median
     3.42e-4), not merely against the 5e-2 bar.
 
-  SUPERSEDES the wedge approach in
-  [[lensing_wedge_charts_fail_the_eps_bar]]. Note this is a NEW chart class,
+  RELATED: [[lensing_wedge_angular_axis_is_cusp_singular]]. Note this is a NEW chart class,
   not a repair of `InteriorWedgeChart`.

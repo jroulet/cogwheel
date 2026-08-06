@@ -62,6 +62,7 @@ from cogwheel.lensing.surrogate import (
     _caustic_reach as _scalar_caustic_reach, _from_caustic_fixed,
     _from_lobe_fixed, _lobe_boundary_radius, LobeInteriorChart,
     InteriorWedgeChart, _from_wedge_fixed,
+    _wedge_theta_waist, _wedge_cusp_axis_map,
     _caustic_arclength_map, _to_farfield_smooth,
     CarrierDiscontinuityError)
 
@@ -2311,31 +2312,53 @@ def _lobe_interior_tiles(admission: _SaddleLobeAdmission,
     return tiles
 
 
-def _wedge_interior_tiles(r_extent: float, n_per_side: int
+def _wedge_interior_tiles(gamma: float, r_extent: float, n_per_side: int
                           ) -> list[tuple[tuple[float, float],
-                                          tuple[float, float], int, int]]:
-    """Minimal radial-row tiles of the positive-parity astroid interior.
+                                          tuple[float, float], int, int, str]]:
+    """Radial-row x waist-split angular-column tiles of the astroid interior.
 
     The wedge-caustic counterpart of `_lobe_interior_tiles`, in WEDGE-FIXED
     caustic-relative coordinates ``(r, theta_wedge)`` (``r = |y| /
     r_caustic(gamma, theta_wedge)`` in ``[0, 1)``; ``theta_wedge =
     atan2(|y2|, |y1|)`` in ``[0, pi/2]``).  Because ``r_caustic`` is exactly
     four-fold symmetric, the ``[0, pi/2]`` wedge is one quadrant of the
-    interior and the D2 fold serves the other three by symmetry; the SACR-C
-    carrier is smooth across the ``theta_wedge = pi/4`` diagonal (empirically
-    confirmed by ``test_lensing_wedge_dd_arclength``), so a SINGLE angular
-    column spans the whole wedge -- no cusp-alignment split.
+    interior and the D2 fold serves the other three by symmetry.
 
-    Lays ``n_per_side`` UNIFORM radial rows over ``r in [_WEDGE_R_MIN,
-    r_extent]`` (``r_min`` strictly positive: the degenerate astroid centre
-    is excluded and served by the exact engine -- see `_WEDGE_R_MIN`).  Unlike
-    the directional far-field tiler this helper carries NO admission or
-    cusp-alignment logic: the wedge coordinate is global inside the caustic
-    (``r < 1`` in every direction) and the caller caps ``r_extent`` below one
-    so the Airy caustic edge is left to the tube chart.
+    The astroid's two cusps sit at the wedge EDGES ``theta_wedge = 0`` and
+    ``pi/2`` (where ``r_caustic`` is largest); its regular WAIST -- the angular
+    minimum ``theta_waist = argmin_theta r_caustic(gamma, theta)`` -- sits
+    between them.  The chart's cusp-adapted angular spline axis ``u =
+    d**(2/3)`` (``d`` = distance to the NEAR cusp) is per-tile monotone, so
+    each angular column must lie entirely on ONE side of the waist and carry
+    the matching near-cusp origin.  This helper therefore emits TWO angular
+    columns per radial row, split at ``theta_waist`` -- NOT at ``pi/4``: the
+    external shear stretches the astroid, so the two cusps are inequivalent and
+    the waist migrates up to ~30% away from ``pi/4`` as ``gamma`` grows (worst
+    exactly where the asymmetry is largest; see `_wedge_theta_waist`).  The low
+    column ``theta_wedge in [0, theta_waist]`` carries ``axis_origin='low'``
+    (near cusp at ``0``, ``d = theta``); the high column ``theta_wedge in
+    [theta_waist, pi/2]`` carries ``axis_origin='high'`` (near cusp at ``pi/2``,
+    ``d = pi/2 - theta``).
+
+    The angular columns span the cusp EDGES with NO exclusion strip: unlike the
+    degenerate astroid CENTRE (``r = 0``, where ``theta_wedge`` is undefined --
+    excluded by `_WEDGE_R_MIN` and served by the exact engine), the cusp edges
+    ARE chartable because ``u = d**(2/3)`` absorbs the ``r_caustic ~ const -
+    c * d**(2/3)`` cusp scaling that otherwise makes the raw-``theta`` spline
+    diverge as ``d**(-1/3)`` -- there is no angular analogue of the centre
+    exclusion.  ``n_per_side`` UNIFORM radial rows tile ``r in [_WEDGE_R_MIN,
+    r_extent]`` (``r_min`` strictly positive); the caller caps ``r_extent``
+    below one so the Airy caustic edge (``r -> 1``) is left to the tube chart.
 
     Parameters
     ----------
+    gamma : float
+        Band-representative external shear, used ONLY to locate the caustic
+        waist ``theta_waist`` at which the two angular columns split.  Callers
+        pass the SAME representative `from_wedge_engine` uses internally (the
+        ``median`` of the log-reach gamma grid) so the tiler's split boundary
+        and the engine's per-tile near-cusp classification agree exactly (no
+        train/serve skew, this repo's #1 bug class).
     r_extent : float
         Outer radial bound in caustic-relative ``r`` units (capped below one
         by the caller).
@@ -2344,23 +2367,36 @@ def _wedge_interior_tiles(r_extent: float, n_per_side: int
 
     Returns
     -------
-    list[tuple[tuple[float, float], tuple[float, float], int, int]]
-        ``((r_center, theta_wedge_center), (half_r, half_theta_wedge), i, j)``
-        for each tile in radial order (deterministic).  ``i`` indexes the
-        radial row; ``j`` is always ``0`` (the single angular column).
+    list[tuple[tuple[float, float], tuple[float, float], int, int, str]]
+        ``((r_center, theta_wedge_center), (half_r, half_theta_wedge), i, j,
+        axis_origin)`` for each tile in ``(radial row, angular column)`` order
+        (deterministic).  ``i`` indexes the radial row; ``j`` is ``0`` for the
+        low column and ``1`` for the high column; ``axis_origin`` is ``'low'``
+        or ``'high'`` (the near-cusp side, threaded unchanged into
+        `_build_wedge_chart` -> `from_wedge_engine`).
     """
     if r_extent <= _WEDGE_R_MIN:
         return []
     half_r = 0.5 * (r_extent - _WEDGE_R_MIN) / n_per_side
     r_centers = [_WEDGE_R_MIN + half_r * (2 * k + 1)
                  for k in range(n_per_side)]
-    theta_center = 0.25 * np.pi
-    half_theta = 0.25 * np.pi
-    tiles: list[tuple[tuple[float, float], tuple[float, float], int, int]] = []
+    # Split the wedge at the true caustic waist (NOT pi/4): the two cusps are
+    # inequivalent under the shear and the waist migrates with gamma.
+    theta_waist = _wedge_theta_waist(float(gamma))
+    half_pi = 0.5 * np.pi
+    # (theta_lo, theta_hi, axis_origin, j) per angular column.  No cusp-edge
+    # exclusion strip: the u = d**(2/3) spline axis absorbs the cusp scaling.
+    columns = ((0.0, theta_waist, 'low', 0),
+               (theta_waist, half_pi, 'high', 1))
+    tiles: list[tuple[tuple[float, float], tuple[float, float],
+                      int, int, str]] = []
     for i, r_c in enumerate(r_centers):
-        center = (float(r_c), float(theta_center))
-        half = (float(half_r), float(half_theta))
-        tiles.append((center, half, i, 0))
+        for theta_lo, theta_hi, axis_origin, j in columns:
+            theta_center = 0.5 * (theta_lo + theta_hi)
+            half_theta = 0.5 * (theta_hi - theta_lo)
+            center = (float(r_c), float(theta_center))
+            half = (float(half_r), float(half_theta))
+            tiles.append((center, half, i, j, axis_origin))
     return tiles
 
 
@@ -2936,7 +2972,8 @@ def _build_wedge_chart(*, gamma_band: tuple[float, float], parity: int,
                        box_center: tuple[float, float],
                        half: tuple[float, float],
                        w_range: tuple[float, float], config: TrainingConfig,
-                       w_nodes_per_decade: int | None = None
+                       w_nodes_per_decade: int | None = None,
+                       axis_origin: str | None = None
                        ) -> tuple['InteriorWedgeChart', int, int]:
     """Build one positive-parity astroid-interior chart in wedge coordinates.
 
@@ -2959,7 +2996,12 @@ def _build_wedge_chart(*, gamma_band: tuple[float, float], parity: int,
     astroid interior; a macro-saddle call is a programming error (the saddle
     interior is charted per lobe by `_build_lobe_chart`).
     ``w_nodes_per_decade`` overrides the ``w``-axis node density for THIS chart
-    only; ``None`` falls back to ``config.w_nodes_per_decade``.
+    only; ``None`` falls back to ``config.w_nodes_per_decade``.  ``axis_origin``
+    (``'low'`` / ``'high'`` / ``None``) is the near-cusp side for the chart's
+    cusp-adapted angular map; it is single-sourced from the tile (the waist-split
+    tiler / subdivider) and threaded UNCHANGED into `from_wedge_engine`, which
+    asserts it agrees with its own midpoint-vs-waist classification (guarding
+    train/serve skew).  ``None`` lets the engine derive the origin itself.
 
     Returns
     -------
@@ -2994,7 +3036,7 @@ def _build_wedge_chart(*, gamma_band: tuple[float, float], parity: int,
         theta_wedge_range=theta_wedge_range, w_range=w_range,
         n_gamma=config.n_gamma, n_r=config.n_rho,
         n_theta_wedge=config.n_theta_c, w_nodes_per_decade=nodes_per_decade,
-        definition=INTERIOR_SACR_C)
+        definition=INTERIOR_SACR_C, axis_origin=axis_origin)
     chart = single.charts[0]
     refused = int(chart.refused_points.shape[0])
     return chart, n_points, refused
@@ -3858,6 +3900,221 @@ def _subdivide_farfield_tile(
             'children': children_summary}
 
 
+def _subdivide_wedge_tile(
+        *, tile: dict, parent_tag: str, band: tuple[float, float],
+        parity: int, config: TrainingConfig, rng: np.random.Generator,
+        outdir: Path, charts: list, chart_reports: list[dict]) -> dict:
+    """Halve one eps-gated wedge-interior tile into up to four children (WP2).
+
+    The astroid-interior counterpart of `_subdivide_farfield_tile`, in the
+    WEDGE chart's own caustic-relative ``(r, u)`` coordinates -- NOT the
+    caustic-fixed ``(rho, theta_c)`` coordinates the far-field subdivider uses
+    (those cannot represent a normalised wedge box).  Single-level, no
+    recursion: a wedge tile whose held-out eps failed the interior registration
+    bar is split into up to four children by halving BOTH axes.
+
+    The radial split is at the plain ``r`` midpoint.  The ANGULAR split is at
+    the ``u``-MIDPOINT mapped back to ``theta_wedge`` -- ``theta_split`` is the
+    angle at ``u = (u_lo + u_hi) / 2`` on the parent's own cusp-adapted map
+    (`_wedge_cusp_axis_map`, the SAME map `from_wedge_engine` fits and serves)
+    -- NEVER the ``theta`` midpoint.  Equal steps in the cusp-adapted ``u`` are
+    what the angular spline sees; bisecting in the cusp-singular ``theta``
+    instead would forfeit the whole benefit of the ``u`` axis (a child abutting
+    the cusp edge would still carry the ``theta**(2/3)`` gradient the coarse
+    parent could not resolve).  The two angular children therefore have UNEQUAL
+    ``theta`` widths -- the near-cusp child is narrower in ``theta`` -- which is
+    exactly the point.
+
+    Each child inherits the parent's ``axis_origin`` verbatim (both children of
+    a ``'low'`` parent stay below the waist and remain nearest the ``theta = 0``
+    cusp; symmetrically for ``'high'``), is rebuilt via `_build_wedge_chart`
+    (which threads ``axis_origin`` into `from_wedge_engine`, whose DD-product
+    ``w``-ceiling caps a capped child's ``w``-band cleanly), and is re-gated on
+    the SAME interior eps bar (`config.interior_eps_max`) via
+    `_gate_chart('interior', ...)`.  A passing child is appended to ``charts``
+    and recorded in ``chart_reports`` (tag ``{parent_tag}_c{ci}``,
+    ``subdivided_from`` field) exactly like a normal admitted wedge tile; a
+    still-failing child is recorded as a ladder-served gap but NOT packed -- its
+    windows fall to the serving ladder, which the ladder census attributes.  A
+    child that straddles a critical-basin (``tau_c``) flip
+    (`CarrierDiscontinuityError`) is likewise recorded as a ladder-served gap
+    (single-level: no re-subdivision).
+
+    Children are iterated in a fixed row-major order (radial sub-row outer,
+    angular sub-column inner) so the report is reproducible.  Unlike the
+    far-field subdivider there is NO admission predicate: every child is a
+    sub-box of an already-admitted interior tile and is always built.
+
+    Parameters
+    ----------
+    tile : dict
+        The gated parent tile record (``center`` = ``(r_c, theta_wedge_c)``,
+        ``half`` = ``(half_r, half_theta_wedge)``, ``axis_origin``,
+        ``w_range``, ``region``, ``si``, ``m_lo``, ``m_hi``).
+    parent_tag : str
+        The parent chart's tag, used to name children ``{parent_tag}_c{ci}``.
+    band, parity, config, rng, outdir
+        Threaded through unchanged from `_train_band_charts`.
+    charts : list
+        Packed-chart accumulator; passing children are appended in place.
+    chart_reports : list of dict
+        Per-chart report accumulator; every child (packed or still-gated) is
+        appended in place.
+
+    Returns
+    -------
+    dict
+        Subdivision summary (parent tag, region, axis_origin, theta_split,
+        per-child eps vs bar, packed count) for the ladder census to attribute
+        cleared-vs-still-gated windows.
+    """
+    r_c, theta_wedge_c = tile['center']
+    half_r, half_theta = tile['half']
+    axis_origin = tile['axis_origin']
+    region = tile['region']
+    w_range = tile['w_range']
+    si, m_lo, m_hi = tile['si'], tile['m_lo'], tile['m_hi']
+    theta_lo = float(theta_wedge_c) - float(half_theta)
+    theta_hi = float(theta_wedge_c) + float(half_theta)
+    r_lo = float(r_c) - float(half_r)
+    r_hi = float(r_c) + float(half_r)
+    child_half_r = 0.5 * float(half_r)
+
+    # Angular split at the u-MIDPOINT mapped back to theta, on the parent's own
+    # cusp-adapted map (single-sourced -- the same map from_wedge_engine fits
+    # and serves), NOT the theta midpoint.  u_fine[0] == 0 by construction.
+    theta_fine, u_fine = _wedge_cusp_axis_map(theta_lo, theta_hi, axis_origin)
+    u_mid = 0.5 * (float(u_fine[0]) + float(u_fine[-1]))
+    theta_split = float(np.interp(u_mid, u_fine, theta_fine))
+
+    # Interior children inherit the interior w-node density (3-way: tile
+    # override -> config.interior_w_nodes_per_decade -> config.w_nodes_per_decade)
+    # -- mirrors the main tiler and _subdivide_farfield_tile exactly (INS-2-001:
+    # a stale ternary in the subdivision path is a recurring bug).
+    w_nodes = tile.get('w_nodes_per_decade')
+    if w_nodes is not None:
+        eff_w_nodes = int(w_nodes)
+    elif region in ('interior', 'lobe_interior', 'wedge_interior'):
+        eff_w_nodes = config.interior_w_nodes_per_decade
+    else:
+        eff_w_nodes = config.w_nodes_per_decade
+    child_bar = config.interior_eps_max
+
+    # Radial sub-rows (plain r midpoint) x angular sub-columns (u-midpoint
+    # theta_split): up to four children, deterministic row-major order.
+    r_children = ((r_lo, 0.5 * (r_lo + r_hi)),
+                  (0.5 * (r_lo + r_hi), r_hi))
+    theta_children = ((theta_lo, theta_split), (theta_split, theta_hi))
+
+    children_summary: list[dict] = []
+    packed = 0
+    ci = 0
+    for child_r_lo, child_r_hi in r_children:
+        for child_theta_lo, child_theta_hi in theta_children:
+            child_r_c = 0.5 * (child_r_lo + child_r_hi)
+            child_theta_c = 0.5 * (child_theta_lo + child_theta_hi)
+            child_half_theta = 0.5 * (child_theta_hi - child_theta_lo)
+            child_center = (float(child_r_c), float(child_theta_c))
+            child_half = (float(child_half_r), float(child_half_theta))
+            child_tag = f'{parent_tag}_c{ci}'
+            child_path = outdir / f'{child_tag}.npz'
+
+            def build_child(center=child_center, half=child_half,
+                            w_range=w_range, si=si, m_lo=m_lo, m_hi=m_hi,
+                            region=region, axis_origin=axis_origin,
+                            eff_w_nodes=eff_w_nodes):
+                chart, calls, refused = _build_wedge_chart(
+                    gamma_band=band, parity=parity, box_center=center,
+                    half=half, w_range=w_range, config=config,
+                    w_nodes_per_decade=eff_w_nodes, axis_origin=axis_origin)
+                # Held-out probe INLINE (mirrors the main wedge branch): draw
+                # (gamma, r, theta_wedge) uniformly inside the child's
+                # wedge-fixed box and map each draw to a PHYSICAL eigenframe
+                # source through the child chart's OWN wedge_map.
+                r_cen, theta_cen = center
+                half_r_c, half_theta_c = half
+                samples: list[tuple[float, float, float]] = []
+                for _ in range(config.n_heldout):
+                    gamma = float(rng.uniform(*band))
+                    r = float(rng.uniform(r_cen - half_r_c, r_cen + half_r_c))
+                    theta_wedge = float(rng.uniform(
+                        theta_cen - half_theta_c, theta_cen + half_theta_c))
+                    y1_eig, y2_eig = _from_wedge_fixed(
+                        gamma, r, theta_wedge, chart.wedge_map)
+                    samples.append((gamma, float(y1_eig), float(y2_eig)))
+                eps = _heldout_eps(chart, samples,
+                                   {'schema': 'heldout-probe'})
+                return chart, calls, refused, {
+                    'kind': 'interior', 'region': region,
+                    'image_count': chart.image_count,
+                    'stratum_index': si,
+                    'stratum_mass_range': [round(m_lo, 3), round(m_hi, 3)],
+                    'rho_theta_box': [list(center), list(half)],
+                    'w_range': [round(w_range[0], 6), round(w_range[1], 6)],
+                    'node_counts': {'n_gamma': config.n_gamma,
+                                    'n_rho': config.n_rho,
+                                    'n_theta_c': config.n_theta_c,
+                                    'n_w_per_decade': int(eff_w_nodes)},
+                    'heldout_eps': eps}
+
+            try:
+                chart, report, reused = _load_or_build(
+                    child_path, build_child,
+                    {'schema': 'build8c-chart', 'parity': parity})
+            except CarrierDiscontinuityError as exc:
+                # A subdivided wedge child STILL straddles a basin flip.
+                # Single-level subdivision (no recursion): record the child as
+                # a carrier-flip gap served by the ladder.
+                child_report = {
+                    'name': child_tag, 'parity': parity,
+                    'file': str(child_path), 'region': region,
+                    'subdivided_from': parent_tag, 'carrier_flip': True,
+                    'carrier_flip_detail': str(exc),
+                    'subdivided': False, 'ladder_served_gap': True}
+                chart_reports.append(child_report)
+                children_summary.append({
+                    'ci': ci,
+                    'center': [round(child_r_c, 6), round(child_theta_c, 6)],
+                    'half': [round(child_half_r, 6),
+                             round(child_half_theta, 6)],
+                    'result': 'carrier_flip'})
+                ci += 1
+                continue
+
+            gated, gate_reason = _gate_chart('interior', report, config)
+            child_eps = float(report.get('heldout_eps', float('nan')))
+            child_report = {'name': child_tag, 'parity': parity,
+                            'file': str(child_path), 'reused': reused,
+                            'subdivided_from': parent_tag, **report}
+            if gated:
+                child_report['gated'] = True
+                child_report['gate_reason'] = gate_reason
+                child_report['subdivided'] = False
+                child_report['ladder_served_gap'] = True
+                chart_reports.append(child_report)
+                result = 'recorded_gated'
+            else:
+                charts.append(chart)
+                chart_reports.append(child_report)
+                packed += 1
+                result = 'packed'
+            children_summary.append({
+                'ci': ci,
+                'center': [round(child_r_c, 6), round(child_theta_c, 6)],
+                'half': [round(child_half_r, 6), round(child_half_theta, 6)],
+                'eps': (None if math.isnan(child_eps)
+                        else round(child_eps, 8)),
+                'bar': child_bar,
+                'gate_reason': gate_reason, 'result': result})
+            ci += 1
+
+    return {'parent_tag': parent_tag, 'region': region,
+            'axis_origin': axis_origin,
+            'theta_split': round(theta_split, 6),
+            'child_half_r': round(child_half_r, 6),
+            'packed': packed, 'children': children_summary}
+
+
 def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                        rng: np.random.Generator, outdir: Path, parity: int,
                        label: str, band: tuple[float, float],
@@ -4303,8 +4560,15 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             # non-positive extent yields no tiles (ladder-served interior).
             r_extent = min(
                 grid_rho_extent, 1.0 - max_eta_max / coordinate_radius_min)
+            # Locate the caustic waist at the SAME band-representative gamma
+            # `from_wedge_engine` uses internally (median of the log-reach
+            # gamma grid over this band), so the tiler's angular split boundary
+            # and the engine's per-tile near-cusp classification agree exactly
+            # (no train/serve skew -- the engine asserts on disagreement).
+            gamma_rep = float(np.median(
+                _log_reach_gamma_axis(band, config.n_gamma, 'gamma')))
             tiles = _wedge_interior_tiles(
-                r_extent, config.n_farfield_tiles_per_side)
+                gamma_rep, r_extent, config.n_farfield_tiles_per_side)
             interior_admitted += len(tiles)
             interior_records.append({
                 'stratum_index': si,
@@ -4316,11 +4580,11 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                             round(int_w_range[1], 6)],
                 'ppgo_capped': bool(action == 'cap'),
                 'admitted_tiles': len(tiles)})
-            for center, half, i, j in tiles:
+            for center, half, i, j, axis_origin in tiles:
                 admitted.append({
                     'si': si, 'i': i, 'j': j, 'center': center, 'half': half,
                     'm_lo': m_lo, 'm_hi': m_hi, 'w_range': int_w_range,
-                    'region': 'wedge_interior'})
+                    'region': 'wedge_interior', 'axis_origin': axis_origin})
 
     # Loud interior summary.  Where geometry permits an interior region (origin
     # enclosed, reach clears the tube shell) admission MUST be non-empty; a
@@ -4390,6 +4654,10 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         center, half, w_range = tile['center'], tile['half'], tile['w_range']
         m_lo, m_hi = tile['m_lo'], tile['m_hi']
         region = tile['region']
+        # Near-cusp side of the wedge angular map (None for non-wedge tiles);
+        # single-sourced from the waist-split tiler, threaded unchanged into
+        # `_build_wedge_chart` -> `from_wedge_engine`.
+        axis_origin = tile.get('axis_origin')
         # Exterior tiles carry a per-window reprovisioned ``w``-node density
         # (Build S1-3, ``N_rec``); interior tiles have no such key and fall
         # back to ``config.interior_w_nodes_per_decade`` (higher density for
@@ -4500,12 +4768,12 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
 
             def build_wedge(band=band, center=center, half=half,
                             w_range=w_range, si=si, m_lo=m_lo, m_hi=m_hi,
-                            region=region, eff_w_nodes=eff_w_nodes,
-                            w_nodes=eff_w_nodes):
+                            region=region, axis_origin=axis_origin,
+                            eff_w_nodes=eff_w_nodes, w_nodes=eff_w_nodes):
                 chart, calls, refused = _build_wedge_chart(
                     gamma_band=band, parity=parity, box_center=center,
                     half=half, w_range=w_range, config=config,
-                    w_nodes_per_decade=w_nodes)
+                    w_nodes_per_decade=w_nodes, axis_origin=axis_origin)
                 # Held-out probe INLINE (task step D): draw
                 # ``(gamma, r, theta_wedge)`` uniformly inside the tile's
                 # wedge-fixed box and map each draw to a PHYSICAL eigenframe
