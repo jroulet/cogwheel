@@ -60,12 +60,37 @@ radius); delay enters no ordering, pairing or dedup. `channels.py`,
 Replace the wedge chart's angular spline coordinate.
 
 `u = d^(2/3)` where `d` is the angular distance to THE CUSP THAT TILE IS NEAR.
-Split the wedge at `theta = pi/4`: a tile in `[0, pi/4]` uses `d = theta`; a
-tile in `[pi/4, pi/2]` uses `d = pi/2 - theta`. Do NOT use "distance to the
+
+SPLIT AT THE CAUSTIC WAIST, **NOT** at `pi/4`. The two cusps are NOT
+equivalent — the shear stretches the astroid, and the asymmetry grows sharply
+with gamma:
+
+    gamma   r_c(0) soft   r_c(pi/2) hard   ratio   argmin theta   vs pi/4
+    0.200      0.36492          0.44685    1.225        0.73513     0.94x
+    0.300      0.52593          0.71650    1.362        0.71000     0.90x
+    0.495      0.80925          1.39160    1.720        0.66052     0.84x
+    0.700      1.07323          2.55207    2.378        0.60633     0.77x
+    0.900      1.30526          5.67376    4.347        0.55214     0.70x
+
+So the waist `theta_waist(gamma) = argmin_theta r_caustic(gamma, theta)`
+migrates up to 30% away from `pi/4`, worst exactly where the cusp asymmetry is
+largest. A `pi/4` split would put the boundary progressively in the wrong
+place. Use `theta_waist` at the BAND CENTRE (over a 0.04-wide gamma band the
+waist moves ~0.01 rad, far below a tile width — but do not hard-code `pi/4`).
+
+`_WedgeCausticMap` already holds `r_caustic(gamma, theta)`, so the argmin is
+cheap and needs no new machinery.
+
+FREE ORACLE, exact to printed precision at every gamma tested:
+`r_caustic(gamma, theta_waist) == gamma`. Use it to pin the split in a test.
+
+A tile in `[0, theta_waist]` uses `d = theta`; a tile in
+`[theta_waist, pi/2]` uses `d = pi/2 - theta`. Do NOT use "distance to the
 nearer axis" as a single global map — `min(theta, pi/2 - theta)` has a KINK at
-`pi/4`, which would trade an edge singularity for an interior one. Per-tile
-monotone maps have no such kink, and the carrier IS smooth across `pi/4`
-(the original ruling, independently reconfirmed).
+the crossover, which would trade an edge singularity for an interior one.
+Per-tile monotone maps have no such kink. The waist is a REGULAR point of the
+caustic (not a cusp), so the envelope is smooth there and a tile boundary is
+safe.
 
 - The map is gamma-independent (only the exponent matters for smoothness), so
   it needs no new table beyond `_WedgeCausticMap`.
