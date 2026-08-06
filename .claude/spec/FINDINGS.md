@@ -3415,3 +3415,68 @@ independent grounds:
 training cost, zero serve cost, no architecture change) before considering
 any axis redefinition. Never redefine a grid axis by a quantity that couples
 to a perpendicular axis.
+
+## F061 — `f_schwinger` above `w = 60` costs 250x more per call, and four tests walked into it (2026-08-06)
+
+**Measured**, calling the shipping `f_schwinger` at `y_eig = (0.30, 0.15)`,
+`gamma' = 0.42`:
+
+| `w` | path | seconds/call |
+|---|---|---|
+| 10.0 | double-double | 0.172 |
+| 40.0 | double-double | 0.187 |
+| 59.0 | double-double | 0.336 |
+| **61.0** | **mpmath** | **84.536** |
+| **70.0** | **mpmath** | **111.352** |
+
+The routing (`_schwinger.py:940`) is deliberate and documented: `w <= 60`
+(`W_CEILING_SCHWINGER`) takes the double-double path, `60 < w <= 150`
+(`W_CEILING_SCHWINGER_QD`) dispatches to `_f_schwinger_mpmath`, and `w > 150`
+is an unconditional refuse whose stated reason is that "mpmath runtime
+`O(w * dps^2)` exceeds training budget".
+
+**The trap is the middle band, not the ceiling.** The ceiling at 150 implies
+runtime below it is affordable. It is not: the cliff is at 60, and it is a
+factor of ~250 at the very BOTTOM of the mpmath band. Nothing refuses in
+`(60, 150]` — it serves, slowly, forever.
+
+**How it bit.** `test_lensing_wedge_dd_arclength.py::DDWCeilingTestCase` says
+in its own docstring:
+
+> the DD cap gives `w_max ~ 121.6`, which is below the requested 500 but
+> above the Schwinger ceiling (~60). Most refusals at the capped `w_max` are
+> Schwinger-related (not DD) ...
+> Cost: 4x4x4 = 64 nodes x ~13 w-points x 30ms ~ 25s.
+
+Both halves are wrong in the same way: the author expected `w in (60, 150]`
+to REFUSE (cheap) and budgeted 30 ms per evaluation. It SERVES at ~85-120 s
+per evaluation, so a fixture budgeted at 25 s is hours of work. Three other
+tests reached the same band by other routes
+(`test_lensing_marginalized_likelihood.py:839`, `test_lensing_prior.py:1064`,
+`test_lensing_saddle_likelihood.py:463`).
+
+**Two thresholds, one gap.** The DD product cap (`w * |y| < 58`) and the
+Schwinger DD ceiling (`w <= 60`) are different quantities. A geometry can
+satisfy the DD cap at `w_max = 121.6` while every node above 60 falls into
+mpmath. Any fixture that derives its `w` range from the DD cap alone will
+walk into the expensive band without noticing.
+
+**Rules.**
+1. A fast-tier test must keep `w <= W_CEILING_SCHWINGER`. If a test's PURPOSE
+   is the mpmath band, it belongs in a slow tier, and its cost must be
+   budgeted at ~100 s per evaluation, not 30 ms.
+2. Never infer "cheap" from "a ceiling exists above me". Check which side of
+   the *dispatch* threshold you are on, not the refusal threshold.
+3. Cost comments in fixtures are load-bearing and rot silently. `~30ms` here
+   was off by 3-4 orders of magnitude and nothing checked it.
+
+**Consequence.** Because the tree gate had no per-test timeout, these four
+tests did not fail — they pinned workers until the gate burned its 3600 s
+ceiling at ~88% and STRANDED a build that had already passed Inspector and
+Professor, without naming a single test. Both gates now pass
+`--timeout --timeout-method=signal` (`run_full_suite.sh`,
+`orchestrator.py`'s tree gate). Verified: the previously-unbounded
+`DDWCeilingTestCase` now errors in 92 s naming all six tests, while the other
+14 tests in its file pass. A gate that cannot COMPLETE hides ordinary red as
+effectively as it hides the hang — 11 unrelated failures were sitting behind
+this one (see `todo.d/lensing_serving_ladder_guards_are_red.md`).

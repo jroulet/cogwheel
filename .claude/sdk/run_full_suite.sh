@@ -63,7 +63,18 @@ fi
 #    share a worker (module-scope fixtures and the numba cache).
 #    -n 4 (not 8): 8 workers hit OOM during numba JIT compilation, crashing
 #    xdist with INTERNALERROR/MemoryError (diagnosed 2026-08-03 in tree_gate.log).
+#
+#    --timeout: an unbounded test must FAIL LOUDLY AND NAME ITSELF, not pin
+#    workers until something else gives up. On 2026-08-05 four tests entered
+#    f_schwinger's mpmath band and never returned; the gate sat at 99% for six
+#    hours and the next run's tree gate hit its own 3600s ceiling and STRANDED
+#    a build. Neither run named a single test -- both needed a py-spy autopsy.
+#    method=signal (not thread): SIGALRM interrupts the offending test only and
+#    the run continues; thread kills the whole worker process, losing the rest
+#    of its scope. The mpmath path is pure Python, so SIGALRM lands.
+TEST_TIMEOUT="${GATE_TEST_TIMEOUT:-600}"
 "$PYBIN" -m pytest cogwheel/tests/ -v -n 4 --dist loadscope \
+  --timeout="$TEST_TIMEOUT" --timeout-method=signal \
   -k "not Timing and not timing" > "$LOG" 2>&1 &
 PYTEST_PID=$!
 

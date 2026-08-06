@@ -4076,8 +4076,19 @@ class BuildOrchestrator:
             ["-n", "2", "--dist", "loadscope"],
             [],  # serial fallback
         ]
+        # --timeout: an unbounded test must FAIL LOUDLY AND NAME ITSELF. On
+        # 2026-08-06 four tests entered f_schwinger's mpmath band (w > 60 costs
+        # ~85-120 s PER CALL vs ~0.2 s on the double-double path) and never
+        # returned. This gate burned its whole 3600 s ceiling at ~88% and
+        # STRANDED a build that had already passed Inspector and Professor --
+        # without naming a single test, because -q prints its summary only on
+        # completion. method=signal fails just the offending test and lets the
+        # gate finish; thread would kill the worker and lose its whole scope.
+        test_timeout = os.environ.get("SDK_GATE_TEST_TIMEOUT", "600")
         base_cmd = [runner, "-m", "pytest", "cogwheel/tests/", "-q",
                     "-p", "no:cacheprovider",
+                    "--timeout", test_timeout,
+                    "--timeout-method", "signal",
                     "-k", "not Timing and not timing"]
 
         for tier_idx, xdist_args in enumerate(tiers):
