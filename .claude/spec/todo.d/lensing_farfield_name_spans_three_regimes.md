@@ -2,10 +2,11 @@
 section: Backlog
 ---
 
-- **`FarFieldChart` IS NOT A FAR-FIELD OBJECT — the name spans three regimes**
-  `[housekeeping]` — audited 2026-08-06. DEFERRED DELIBERATELY: the confusion
-  is endemic and the rename touches a large surface. Recorded so it is not
-  rediscovered.
+- **`FarFieldChart` IS NOT A FAR-FIELD OBJECT — the name spans two regimes**
+  `[housekeeping]` — audited 2026-08-06, scope corrected 2026-08-06 (was
+  three regimes until the interior-wedge wiring landed the same day, see
+  below). DEFERRED DELIBERATELY: the confusion is endemic and the rename
+  touches a large surface. Recorded so it is not rediscovered.
 
   The exterior splits physically into an INTERMEDIATE field (ghost weakly
   damped, `Im tau_g` small, ghost still contributing) and a TRUE far field
@@ -16,9 +17,11 @@ section: Backlog
   the ghost term is subtracted from the LABEL; nothing downstream treats the
   two regimes differently in accuracy bar, node budget, or tiling.
 
-  Worse, the class ALSO currently hosts interior tiles (see
-  [[lensing_interior_wedge_chart_unwired]]), so one name covers intermediate
-  field, far field, and interior.
+  Until 2026-08-06 (`034fcf7`) the class ALSO hosted interior tiles carrying
+  `INTERIOR_SACR_C` (the `ffin` path); that pairing is now retired --
+  `InteriorWedgeChart` trains and serves the astroid interior instead
+  (`completed.d/2026-08-06_interior-wedge-chart-wired.md`). The name-scope
+  problem below still stands on its own two regimes.
 
   This is the failure mode step 5 of [[lensing_caustic_relative_coordinates]]
   names: "a public symbol named for a retired concept is how the concept
@@ -38,5 +41,8 @@ section: Backlog
   (`drho/d|y|` is `1/r_caustic` inside and `1` outside); harmless only because
   no chart straddles `rho = 1`.
 
-  DO NOT start this before the interior-wedge wiring lands: that change
-  removes the interior from `FarFieldChart` and shrinks the rename's scope.
+  The interior-wedge wiring landed 2026-08-06 (`034fcf7`), removing the
+  interior from `FarFieldChart` and shrinking the rename's scope to the two
+  remaining regimes (intermediate field, true far field) -- this can now be
+  started; it is still DEFERRED DELIBERATELY per the opening line, not
+  blocked.
