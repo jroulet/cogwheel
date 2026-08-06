@@ -55,6 +55,45 @@ section: Backlog
   at first order. First order means a genuine non-smooth feature on the axis,
   whose mechanism is still unidentified.
 
+  ## Strip width — MEASURED, and the two axes are NOT equivalent
+
+  eps of the tile adjacent to the excluded strip, 4 angular tiles, `n_theta`=7:
+
+  | strip half-width | % of quadrant | SOFT axis (`theta`=0) | HARD axis (`theta`=pi/2) |
+  |---|---|---|---|
+  | 0.00 | 0% | 4.50e-2 | **1.29e-1 FAIL** |
+  | 0.03 (1.7 deg) | 3.8% | 9.49e-3 | 3.61e-2 |
+  | 0.06 (3.4 deg) | 7.6% | 3.74e-3 | 1.74e-2 |
+  | 0.10 (5.7 deg) | 12.7% | 1.21e-3 | **7.64e-3** |
+  | 0.16 (9.2 deg) | 20.4% | 4.27e-4 | 2.47e-3 |
+
+  The HARD axis is ~6x worse at every width and is the binding constraint —
+  a real physical asymmetry between the shear eigen-directions, not a probe
+  artifact. (An earlier probe reported 4.50e-2 at `delta`=0 where a previous
+  sweep reported 1.29e-1: the sweep maxed over BOTH axes, the strip probe
+  silently measured only the soft one. Same class of error as the max-metric
+  problem — a summary that hides which of two things it describes.)
+
+  The hard axis does NOT reach `ffin` parity at any affordable width:
+  extrapolating its ~`delta^-1.8` falloff, 3.42e-4 needs `delta` ~ 0.46 rad,
+  excluding 59% of the quadrant. That trade is not worth making — and `ffin`
+  parity was never the requirement. **The gate is 5e-2.**
+
+  ## RECOMMENDED CONFIGURATION
+
+  - strip half-width **0.10 rad (5.7 deg)** at BOTH axes -> worst-tile eps
+    **7.64e-3**, a 6.5x margin under the 5e-2 bar, excluding 12.7% of the
+    quadrant;
+  - **4 angular x 5 radial = 20 charts** for the region, against `ffin`'s
+    **106** — a 5x saving at 6.5x bar margin;
+  - if more margin is wanted, 0.16 rad gives 2.47e-3 (20x margin) at 20.4%
+    exclusion; if coverage matters more, 0.03 rad still passes at 3.61e-2.
+
+  Note the margin trade honestly: `ffin` ran ~100x under the bar, this runs
+  ~6.5x under it. That is a real reduction in headroom, bought for 5x fewer
+  charts. If the bar ever tightens, this configuration is the first thing that
+  breaks.
+
   ## Work
 
   - Exclude a strip of half-width `delta` at `theta_wedge = 0` and `= pi/2`;
