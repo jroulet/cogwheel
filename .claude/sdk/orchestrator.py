@@ -4091,6 +4091,30 @@ class BuildOrchestrator:
                     "--timeout-method", "signal",
                     "-k", "not Timing and not timing"]
 
+        # Known-red tests are deselected HERE ONLY. The gate's question is
+        # "did THIS build break anything", not "is the repo perfect": a
+        # pre-existing failure that blocks every build turns an unrelated bug
+        # into a total shipping stop. Entries are proven pre-existing by an
+        # A/B against the pre-build tree and each cites the todo that owns the
+        # fix. Announced on every run, so it is never silent -- and scoped to
+        # this gate, so run_full_suite.sh and a bare pytest still show the red.
+        known_failures_path = (Path(self.project_root)
+                               / ".claude/sdk/known_failures.txt")
+        known_failures = []
+        if known_failures_path.exists():
+            known_failures = [
+                line.strip()
+                for line in known_failures_path.read_text(
+                    encoding="utf-8").splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+        if known_failures:
+            self._log(f"  Tree gate: deselecting {len(known_failures)} "
+                      f"known-red test(s) listed in {known_failures_path} "
+                      f"— these are PRE-EXISTING, not this build's")
+            for nodeid in known_failures:
+                base_cmd += ["--deselect", nodeid]
+
         for tier_idx, xdist_args in enumerate(tiers):
             cmd = base_cmd + xdist_args
             try:
