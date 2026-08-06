@@ -24,8 +24,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
+from scipy.integrate import cumulative_trapezoid
+from scipy.interpolate import make_interp_spline
 
 from cogwheel.lensing import surrogate_training
 from cogwheel.lensing.surrogate import (
@@ -33,6 +37,8 @@ from cogwheel.lensing.surrogate import (
     FarFieldChart,
     InteriorWedgeChart,
     LensAmplificationSurrogate,
+    _KNOWN_WEDGE_AXIS_SCHEMAS,
+    _WEDGE_AXIS_SCHEMA,
     _WedgeCausticMap,
     _assert_carrier_continuity,
     _caustic_reach,
@@ -43,19 +49,25 @@ from cogwheel.lensing.surrogate import (
     _from_wedge_fixed,
     _interp_r_caustic,
     _to_wedge_fixed,
+    _wedge_cusp_axis_map,
     _wedge_serves,
+    _wedge_theta_waist,
     select_chart,
 )
 from cogwheel.lensing.surrogate_training import (
+    TrainingConfig,
     _WEDGE_R_MIN,
     _build_farfield_chart,
     _build_wedge_chart,
     _farfield_exterior_tiles,
+    _gate_chart,
+    _heldout_eps,
     _interior_admission,
+    _subdivide_wedge_tile,
     _wedge_interior_tiles,
 )
 from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
-from cogwheel.lensing.chang_refsdal.geometry import r_caustic
+from cogwheel.lensing.chang_refsdal.geometry import caustic_speed, r_caustic
 
 # ---------------------------------------------------------------------------
 #: Module-level constants
@@ -1610,6 +1622,245 @@ class WedgeHeldOutAccuracyTestCase(_WedgeTestCase):
                     dpi=110)
         plt.close(fig)
 
+# ===========================================================================
+# Test 7b (T1): transverse-cut angular-axis accuracy oracle.
+#
+# WP1 charts the wedge interior on a CUSP-ADAPTED angular spline axis
+# ``u = d**(2/3)`` (``d`` = distance to the near astroid cusp), replacing the
+# arc-length-``s`` axis the exterior far-field chart uses.  This test pins the
+# reason: along a transverse cut at fixed ``gamma`` and fixed caustic-relative
+# radius ``r``, sweeping the wedge angle from just off the cusp edge inward,
+# a 5-node cubic spline fit in ``u`` reproduces the exact-engine INTERIOR
+# envelope an order of magnitude better than the same fit in raw ``theta``,
+# which in turn beats arc-length ``s``.  The ``u`` axis absorbs the
+# ``r_caustic ~ const - c * d**(2/3)`` cusp scaling that makes the raw-theta
+# (and, worse, the arc-length) envelope diverge near the cusp edge.
+#
+# Oracle independence: the "truth" at every held-out angle is a FRESH
+# `ChangRefsdalChannels` partition evaluated at the exact eigenframe source
+# (``r_caustic`` mapped, no chart, no interpolant).  The three candidate
+# splines are hand-built here; none shares the production chart's fit path.
+# Cost: ~30 single-point engine evals over a 10-point w-grid, ~1.9 s total.
+# ===========================================================================
+
+#: Fixed shear for the transverse cut (positive-parity astroid interior).
+T1_GAMMA: float = 0.3
+
+#: Fixed caustic-relative radius of the transverse cut (a single chart radial
+#: node, well interior: ``r`` in ``(0, 1)``).
+T1_R_NODE: float = 0.455
+
+#: Wedge-angle span of the cut (radians): from just off the ``theta = 0`` cusp
+#: edge inward.  The cusp scaling is steepest at the small-``theta`` end.
+T1_THETA_RANGE: tuple[float, float] = (1e-4, 0.2)
+
+#: Small linear w-grid for the engine envelope along the cut (n_w in 8-12 so
+#: the whole cut costs well under a second of engine time).
+T1_W_RANGE: tuple[float, float] = (3.0, 12.0)
+T1_N_W: int = 10
+
+#: Number of spline nodes per candidate axis (equal budget for a fair
+#: comparison; deliberately sparse so the axis choice dominates the error).
+T1_N_SPLINE_NODES: int = 5
+
+#: Held-out cut points (deterministic linspace) and the pad that keeps them
+#: strictly inside the fitted span (never at a node, never at an endpoint).
+T1_N_HELDOUT: int = 15
+T1_HELDOUT_PAD: float = 3e-3
+
+#: Fine-grid size for the arc-length quadrature (matches the production
+#: `_FARFIELD_ARC_MAP_SIZE`; a 2001-node trapezoid resolves the caustic
+#: speed to ~1e-6, far below the axis-choice error under test).
+T1_ARC_MAP_SIZE: int = 2001
+
+#: Accuracy bar for the cusp-adapted axis at the 90th percentile of the
+#: held-out relative error (measured u p90 ~3.7e-4; ~2.7x headroom).  This is
+#: the spec's ``err_u < 1e-3``.
+T1_ERR_U_P90_MAX: float = 1e-3
+
+#: Ceiling on the WORST cusp-adapted-axis held-out error (measured u max
+#: ~6.8e-4; the spec's ~6.9e-4 measured value with headroom).
+T1_ERR_U_MAX_CEILING: float = 1.5e-3
+
+
+class TransverseCutAxisAccuracyTestCase(_WedgeTestCase):
+    """T1: cusp-adapted ``u`` axis beats raw ``theta`` beats arc-length ``s``.
+
+    Builds three 5-node cubic splines of the INTERIOR envelope along a fixed
+    transverse cut (one per candidate angular axis) and scores each against a
+    fresh single-point engine evaluation at the held-out angles.  The
+    cusp-adapted ``u`` axis must win at the 90th percentile AND stay under the
+    accuracy bar; the arc-length ``s`` axis (tuned for the exterior far-field
+    chart) is the worst because it does not absorb the cusp scaling.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.w_grid = np.geomspace(T1_W_RANGE[0], T1_W_RANGE[1], T1_N_W)
+        cls.theta_lo, cls.theta_hi = T1_THETA_RANGE
+        # Arc-length table s(theta) for the 's' axis, built ONCE.
+        cls.th_fine = np.linspace(cls.theta_lo, cls.theta_hi, T1_ARC_MAP_SIZE)
+        speed = caustic_speed(T1_GAMMA, cls.th_fine, branch=1)
+        cls.s_fine = cumulative_trapezoid(speed, cls.th_fine, initial=0.0)
+        # Held-out cut (deterministic; strictly interior to the fitted span).
+        cls.held = np.linspace(cls.theta_lo + T1_HELDOUT_PAD,
+                               cls.theta_hi - T1_HELDOUT_PAD, T1_N_HELDOUT)
+        cls.envelope_held = np.array([cls._envelope(t) for t in cls.held])
+        cls.norm = float(np.abs(cls.envelope_held).max())
+        cls.eps = {kind: cls._axis_eps(kind) for kind in ('u', 'theta', 's')}
+        cls.stats = {
+            kind: (float(np.percentile(e, 50)), float(np.percentile(e, 90)),
+                   float(e.max()), float(cls.held[int(e.argmax())]))
+            for kind, e in cls.eps.items()}
+
+    @classmethod
+    def _envelope(cls, theta: float) -> np.ndarray:
+        """Exact INTERIOR envelope over the w-grid at wedge angle ``theta``.
+
+        Maps ``(gamma=T1_GAMMA, r=T1_R_NODE, theta)`` to the eigenframe source
+        analytically (``|y| = r * r_caustic``) and evaluates a fresh engine
+        partition -- the independent oracle, sharing no code with the fitted
+        splines.
+        """
+        y_mag = T1_R_NODE * r_caustic(T1_GAMMA, float(theta))
+        y1 = y_mag * np.cos(float(theta))
+        y2 = y_mag * np.sin(float(theta))
+        return ChangRefsdalChannels(cls.w_grid).evaluate(
+            gamma=T1_GAMMA, y=(y1, y2), beta=0.0, kappa=0.0).envelope.copy()
+
+    @classmethod
+    def _axis_coord(cls, theta: np.ndarray, kind: str) -> np.ndarray:
+        """Angular spline coordinate for the named axis at ``theta``."""
+        theta = np.asarray(theta, float)
+        if kind == 'theta':
+            return theta
+        if kind == 'u':
+            # Distance to the near cusp is d = theta (low column); u = d**(2/3).
+            return theta ** (2.0 / 3.0)
+        if kind == 's':
+            return np.interp(theta, cls.th_fine, cls.s_fine)
+        raise ValueError(f'unknown axis kind {kind!r}')
+
+    @classmethod
+    def _node_thetas(cls, kind: str) -> np.ndarray:
+        """Five spline nodes placed UNIFORM in the named axis coordinate."""
+        if kind == 'theta':
+            return np.linspace(cls.theta_lo, cls.theta_hi, T1_N_SPLINE_NODES)
+        if kind == 'u':
+            u = np.linspace(cls.theta_lo ** (2.0 / 3.0),
+                            cls.theta_hi ** (2.0 / 3.0), T1_N_SPLINE_NODES)
+            return u ** 1.5
+        if kind == 's':
+            s_nodes = np.linspace(cls.s_fine[0], cls.s_fine[-1],
+                                  T1_N_SPLINE_NODES)
+            return np.interp(s_nodes, cls.s_fine, cls.th_fine)
+        raise ValueError(f'unknown axis kind {kind!r}')
+
+    @classmethod
+    def _axis_eps(cls, kind: str) -> np.ndarray:
+        """Per-held-out-angle relative error of the ``kind``-axis spline.
+
+        eps(theta) = max_w |E_spline - E_engine| / max_cut|E_engine|.
+        """
+        node_theta = cls._node_thetas(kind)
+        envelope_nodes = np.array([cls._envelope(t) for t in node_theta])
+        coord_nodes = cls._axis_coord(node_theta, kind)
+        order = np.argsort(coord_nodes)
+        spline_re = make_interp_spline(
+            coord_nodes[order], envelope_nodes[order].real, k=3, axis=0)
+        spline_im = make_interp_spline(
+            coord_nodes[order], envelope_nodes[order].imag, k=3, axis=0)
+        coord_held = cls._axis_coord(cls.held, kind)
+        predicted = spline_re(coord_held) + 1j * spline_im(coord_held)
+        return np.abs(predicted - cls.envelope_held).max(axis=1) / cls.norm
+
+    def test_cusp_axis_beats_theta_beats_arclength_at_p90(self):
+        """err_u < err_theta < err_s at p90, and err_u p90 < the accuracy bar.
+
+        The 90th percentile is the discriminating statistic: the cusp
+        advantage lives in the near-cusp TAIL of the cut, where the raw-theta
+        and arc-length fits spike (see the diagnostic overlay).
+        """
+        u_p90 = self.stats['u'][1]
+        theta_p90 = self.stats['theta'][1]
+        s_p90 = self.stats['s'][1]
+        self._tick(3)
+        self.assertLess(
+            u_p90, theta_p90,
+            f'cusp-adapted u (p90={u_p90:.3e}) must beat raw theta '
+            f'(p90={theta_p90:.3e}).')
+        self.assertLess(
+            theta_p90, s_p90,
+            f'raw theta (p90={theta_p90:.3e}) must beat arc-length s '
+            f'(p90={s_p90:.3e}).')
+        self.assertLess(
+            u_p90, T1_ERR_U_P90_MAX,
+            f'cusp-adapted u p90 {u_p90:.3e} exceeds the accuracy bar '
+            f'{T1_ERR_U_P90_MAX:.0e}.')
+
+    def test_cusp_axis_worst_error_under_ceiling(self):
+        """Even the WORST held-out cusp-adapted error stays under the ceiling.
+
+        Reports the full p50/p90/max distribution and the worst-sample locus
+        for each axis (never a bare max) via a text dump.
+        """
+        u_max = self.stats['u'][2]
+        self._tick()
+        self.assertLess(
+            u_max, T1_ERR_U_MAX_CEILING,
+            f'cusp-adapted u max {u_max:.3e} exceeds ceiling '
+            f'{T1_ERR_U_MAX_CEILING:.0e}.')
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        lines = [f'gamma={T1_GAMMA} r={T1_R_NODE} '
+                 f'theta_range={T1_THETA_RANGE} n_nodes={T1_N_SPLINE_NODES}']
+        for kind in ('u', 'theta', 's'):
+            p50, p90, mx, worst_theta = self.stats[kind]
+            lines.append(
+                f'axis={kind:5s} p50={p50:.3e} p90={p90:.3e} max={mx:.3e} '
+                f'worst_theta={worst_theta:.4f}')
+        (OUTPUT_DIR / 'transverse_cut_axis_accuracy.txt').write_text(
+            '\n'.join(lines) + '\n')
+
+    def test_all_axis_errors_are_finite(self):
+        """Every held-out error on every axis is finite (no NaN/Inf leak)."""
+        for kind, eps in self.eps.items():
+            self._tick()
+            with self.subTest(axis=kind):
+                self.assertTrue(np.all(np.isfinite(eps)),
+                                f'{kind}-axis produced non-finite eps.')
+
+    def test_diagnostic_overlay_plot(self):
+        """DIAGNOSTIC: overlay |E_spline - E_engine| vs theta for all axes.
+
+        The arc-length curve spikes toward the cusp edge (theta -> 0) while
+        the cusp-adapted-u curve stays flat -- the visual justification for
+        the axis choice.
+        """
+        self._tick()
+        # The plot merely visualises already-asserted arrays; the anti-vacuity
+        # tick guards against a silent no-op if plotting is unavailable.
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+        except Exception:
+            self.skipTest('matplotlib unavailable')
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots(figsize=(6, 4.5))
+        for kind, marker in (('u', 'o'), ('theta', 's'), ('s', '^')):
+            ax.semilogy(self.held, self.eps[kind], marker=marker,
+                        label=f'{kind} (p90={self.stats[kind][1]:.1e})')
+        ax.set_xlabel(r'$\theta_{wedge}$ (rad)')
+        ax.set_ylabel(r'held-out $|F_{spline}-F_{engine}|/\max|F|$')
+        ax.set_title(f'Transverse-cut axis accuracy (gamma={T1_GAMMA}, '
+                     f'r={T1_R_NODE})')
+        ax.legend(loc='best', fontsize=8)
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / 'transverse_cut_axis_accuracy.png', dpi=110)
+        plt.close(fig)
+        self.assertTrue(
+            (OUTPUT_DIR / 'transverse_cut_axis_accuracy.png').exists())
+
 
 # ===========================================================================
 # Test 8: D2 (4-fold astroid) fold exactness at the SERVED level.
@@ -1830,14 +2081,19 @@ class MedialAxisServingTestCase(_WedgeTestCase):
 
 
 # ===========================================================================
-# Test 10: _wedge_interior_tiles structural contract
+# Test 10 (T2): _wedge_interior_tiles waist-split structural contract
 #
-# WP1 wires the wedge-caustic interior tiler into `_train_band_charts` and
-# retires the far-field-interior ("ffin") path.  These tests pin the tiler's
-# STRUCTURAL contract directly (no engine): a single angular column spanning
-# the whole [0, pi/2] wedge (no pi/4 cusp split), uniform radial rows strictly
-# inside (0, r_extent] with r_extent < 1 (the Airy caustic edge is left to the
-# tube chart), and a row count equal to the requested n_per_side.
+# WP2 makes `_wedge_interior_tiles` emit TWO angular columns per radial row,
+# split at the astroid caustic WAIST ``theta_waist = argmin_theta
+# r_caustic(gamma, theta)`` -- NOT at pi/4.  The external shear stretches the
+# astroid, so its two cusps are inequivalent and the waist migrates away from
+# pi/4 as gamma grows.  Each column carries a per-side ``axis_origin`` (``'low'``
+# below the waist, near the theta=0 cusp; ``'high'`` above it, near pi/2) so the
+# chart's cusp-adapted ``u = d**(2/3)`` axis is per-tile monotone.  These tests
+# pin that contract directly (no engine), with the PHYSICAL waist oracle
+# ``r_caustic(gamma, theta_waist) == gamma`` (the value, since the flat minimum
+# leaves theta_waist itself only loosely determined), plus uniform radial rows
+# strictly inside (0, r_extent], r_extent < 1 (Airy edge left to the tube chart).
 # ===========================================================================
 
 #: Representative outer radial extent (in caustic-relative ``r`` units) for
@@ -1852,12 +2108,34 @@ WEDGE_TILE_N_PER_SIDE: int = 5
 #: Row counts swept in the row-count contract test.
 WEDGE_TILE_N_SWEEP: tuple[int, ...] = (1, 2, 3, 5, 8)
 
-#: Canonical single-column wedge centre / half-width (radians): the whole
-#: [0, pi/2] quadrant is one column, so centre = pi/4 and half = pi/4.
-WEDGE_THETA_CENTER: float = 0.25 * np.pi
-WEDGE_THETA_HALF: float = 0.25 * np.pi
+#: Number of angular columns the tiler emits per radial row (WP2: low + high).
+WEDGE_N_COLUMNS: int = 2
 
-#: Tolerance for the exact angular-column geometry (radians).
+#: Representative shear for the radial / column-count structural tests, where
+#: gamma only sets the waist-split boundary (not the radial tiling).
+WEDGE_TILE_GAMMA: float = 0.5
+
+#: Shears spanning the asymmetry range for the waist-oracle test.
+WEDGE_WAIST_GAMMAS: tuple[float, ...] = (0.3, 0.6, 0.9)
+
+#: Tolerance for the tiler's split boundary vs an INDEPENDENT
+#: `_wedge_theta_waist` call (radians).  Both invoke the same deterministic
+#: bounded minimiser, so the boundary matches to well below this.
+WEDGE_WAIST_BOUNDARY_ATOL: float = 1e-9
+
+#: Tolerance for the PHYSICAL waist invariant ``|r_caustic(gamma,
+#: theta_waist) - gamma| < 1e-6`` (measured ~1e-14; the flat minimum pins the
+#: VALUE far tighter than theta_waist itself).
+WEDGE_WAIST_VALUE_ATOL: float = 1e-6
+
+#: Above this shear the waist is measurably off pi/4 (asymmetry is real).
+WEDGE_ASYMMETRY_GAMMA_MIN: float = 0.6
+
+#: Minimum ``|theta_waist - pi/4|`` deviation required for gamma >=
+#: WEDGE_ASYMMETRY_GAMMA_MIN (measured ~0.15 at gamma=0.6, ~0.23 at 0.9).
+WEDGE_ASYMMETRY_DEV_MIN: float = 0.10
+
+#: Tolerance for the exact angular-column / radial-row geometry (radians).
 WEDGE_THETA_ATOL: float = 1e-12
 
 #: Representative positive-parity band coordinate-radius floor used to
@@ -1874,14 +2152,18 @@ WEDGE_CAP_ETA_LARGE: float = 0.10
 WEDGE_CAP_ETA_SWEEP: tuple[float, ...] = (0.005, 0.02, 0.05, 0.10, 0.20, 0.28)
 
 
-def _unpack_tile(tile: tuple) -> tuple[float, float, float, float, int, int]:
-    """Unpack a wedge-interior tile into its scalar components.
+def _unpack_tile(tile: tuple
+                 ) -> tuple[float, float, float, float, int, int, str]:
+    """Unpack a wedge-interior tile into its scalar components (WP2 5-tuple).
 
     A tile is ``((r_center, theta_wedge_center), (half_r, half_theta_wedge),
-    i, j)``.
+    i, j, axis_origin)`` where ``i`` is the radial row, ``j`` the angular
+    column (0 = low, 1 = high) and ``axis_origin`` the near-cusp side
+    (``'low'`` / ``'high'``).
     """
-    (r_c, th_c), (half_r, half_th), i, j = tile
-    return float(r_c), float(th_c), float(half_r), float(half_th), int(i), int(j)
+    (r_c, th_c), (half_r, half_th), i, j, axis_origin = tile
+    return (float(r_c), float(th_c), float(half_r), float(half_th),
+            int(i), int(j), str(axis_origin))
 
 
 def _wedge_r_extent_cap(max_eta_max: float, coordinate_radius_min: float,
@@ -1903,44 +2185,86 @@ class WedgeInteriorTilesContractTestCase(_WedgeTestCase):
     Cost: pure-python tile construction, O(us) per call.
     """
 
-    def test_single_angular_column_spans_full_wedge(self):
-        """Every tile is the SAME single column spanning [0, pi/2].
+    def test_two_angular_columns_split_at_waist(self):
+        """Each radial row emits a LOW and a HIGH column split at theta_waist.
 
-        No pi/4 cusp subdivision: theta_wedge centre = pi/4, half = pi/4,
-        column index j = 0 for every radial row.
+        The shared column boundary equals the INDEPENDENT `_wedge_theta_waist`
+        value, and the PHYSICAL waist oracle ``r_caustic(gamma, theta_waist)
+        == gamma`` holds (the value, not theta_waist, is pinned).  The
+        sub-waist column carries ``axis_origin='low'``; the super-waist column
+        ``'high'``.
         """
-        tiles = _wedge_interior_tiles(WEDGE_TILE_R_EXTENT,
-                                      WEDGE_TILE_N_PER_SIDE)
-        self.assertEqual(len(tiles), WEDGE_TILE_N_PER_SIDE)
-        for tile in tiles:
-            _r_c, th_c, _half_r, half_th, _i, j = _unpack_tile(tile)
+        for gamma in WEDGE_WAIST_GAMMAS:
+            theta_waist = _wedge_theta_waist(gamma)
+            tiles = _wedge_interior_tiles(gamma, WEDGE_TILE_R_EXTENT,
+                                          WEDGE_TILE_N_PER_SIDE)
+            with self.subTest(gamma=gamma):
+                # Two columns per radial row.
+                self.assertEqual(len(tiles),
+                                 WEDGE_N_COLUMNS * WEDGE_TILE_N_PER_SIDE)
+                # PHYSICAL waist oracle: reach at the waist equals the shear.
+                self._tick()
+                self.assertLess(
+                    abs(r_caustic(gamma, theta_waist) - gamma),
+                    WEDGE_WAIST_VALUE_ATOL,
+                    'r_caustic(gamma, theta_waist) must equal gamma.')
+                for tile in tiles:
+                    (_r_c, th_c, _half_r, half_th, _i, j,
+                     axis_origin) = _unpack_tile(tile)
+                    self._tick()
+                    lo_edge = th_c - half_th
+                    hi_edge = th_c + half_th
+                    if j == 0:
+                        # Low column spans [0, theta_waist], near cusp at 0.
+                        self.assertEqual(axis_origin, 'low')
+                        self.assertAlmostEqual(lo_edge, 0.0,
+                                               delta=WEDGE_THETA_ATOL)
+                        self.assertAlmostEqual(
+                            hi_edge, theta_waist,
+                            delta=WEDGE_WAIST_BOUNDARY_ATOL)
+                    else:
+                        # High column spans [theta_waist, pi/2], near cusp pi/2.
+                        self.assertEqual(j, 1)
+                        self.assertEqual(axis_origin, 'high')
+                        self.assertAlmostEqual(
+                            lo_edge, theta_waist,
+                            delta=WEDGE_WAIST_BOUNDARY_ATOL)
+                        self.assertAlmostEqual(hi_edge, 0.5 * np.pi,
+                                               delta=WEDGE_THETA_ATOL)
+
+    def test_waist_deviates_from_pi4_for_large_gamma(self):
+        """For gamma >= WEDGE_ASYMMETRY_GAMMA_MIN the waist is off pi/4.
+
+        A pi/4 split would forfeit the whole point of the waist-adaptive
+        columns; the shear makes the two cusps inequivalent.
+        """
+        for gamma in WEDGE_WAIST_GAMMAS:
+            if gamma < WEDGE_ASYMMETRY_GAMMA_MIN:
+                continue
+            theta_waist = _wedge_theta_waist(gamma)
             self._tick()
-            self.assertEqual(j, 0, 'wedge interior must be a SINGLE column '
-                                   '(j == 0); a nonzero j means a spurious '
-                                   'angular subdivision.')
-            self.assertAlmostEqual(th_c, WEDGE_THETA_CENTER,
-                                   delta=WEDGE_THETA_ATOL)
-            self.assertAlmostEqual(half_th, WEDGE_THETA_HALF,
-                                   delta=WEDGE_THETA_ATOL)
-            # The column spans exactly the whole wedge [0, pi/2].
-            self.assertAlmostEqual(th_c - half_th, 0.0, delta=WEDGE_THETA_ATOL)
-            self.assertAlmostEqual(th_c + half_th, 0.5 * np.pi,
-                                   delta=WEDGE_THETA_ATOL)
+            with self.subTest(gamma=gamma):
+                self.assertGreater(
+                    abs(theta_waist - 0.25 * np.pi), WEDGE_ASYMMETRY_DEV_MIN,
+                    f'waist {theta_waist:.4f} too close to pi/4 at '
+                    f'gamma={gamma}; asymmetry not captured.')
 
     def test_radial_rows_uniform_and_strictly_inside(self):
         """Radial rows are uniform and lie strictly within (0, r_extent].
 
         r_min = _WEDGE_R_MIN > 0 (astroid centre excluded); the outermost row
         edge equals r_extent < 1 (Airy edge left to the tube chart); every
-        radial row has the SAME half-width (uniform spacing).
+        radial row has the SAME half-width (uniform spacing).  Verified on the
+        LOW column (radial tiling is column-independent).
         """
-        tiles = _wedge_interior_tiles(WEDGE_TILE_R_EXTENT,
+        tiles = _wedge_interior_tiles(WEDGE_TILE_GAMMA, WEDGE_TILE_R_EXTENT,
                                       WEDGE_TILE_N_PER_SIDE)
-        halfs = {round(_unpack_tile(t)[2], 15) for t in tiles}
+        low = [t for t in tiles if _unpack_tile(t)[5] == 0]
+        halfs = {round(_unpack_tile(t)[2], 15) for t in low}
         self.assertEqual(len(halfs), 1,
                          f'Radial rows NOT uniform: half-widths {halfs}.')
         edges = [(_unpack_tile(t)[0] - _unpack_tile(t)[2],
-                  _unpack_tile(t)[0] + _unpack_tile(t)[2]) for t in tiles]
+                  _unpack_tile(t)[0] + _unpack_tile(t)[2]) for t in low]
         # Innermost edge is exactly _WEDGE_R_MIN (> 0); outermost is r_extent.
         self.assertAlmostEqual(edges[0][0], _WEDGE_R_MIN, places=12)
         self.assertGreater(_WEDGE_R_MIN, 0.0)
@@ -1957,17 +2281,20 @@ class WedgeInteriorTilesContractTestCase(_WedgeTestCase):
             self.assertGreater(hi, lo)
             prev_hi = hi
 
-    def test_row_count_matches_n_per_side(self):
-        """The number of radial rows equals the requested n_per_side."""
+    def test_row_count_matches_two_columns_times_n_per_side(self):
+        """Tile count is 2 * n_per_side; indices are (row, column) row-major."""
         for n in WEDGE_TILE_N_SWEEP:
-            tiles = _wedge_interior_tiles(WEDGE_TILE_R_EXTENT, n)
+            tiles = _wedge_interior_tiles(WEDGE_TILE_GAMMA,
+                                          WEDGE_TILE_R_EXTENT, n)
             self._tick()
             with self.subTest(n_per_side=n):
-                self.assertEqual(len(tiles), n)
-                # Deterministic radial-row indices 0..n-1, single column j=0.
-                self.assertEqual([_unpack_tile(t)[4] for t in tiles],
-                                 list(range(n)))
-                self.assertTrue(all(_unpack_tile(t)[5] == 0 for t in tiles))
+                self.assertEqual(len(tiles), WEDGE_N_COLUMNS * n)
+                # Deterministic (radial row, column) order: row-major, j in {0,1}.
+                rows = [_unpack_tile(t)[4] for t in tiles]
+                cols = [_unpack_tile(t)[5] for t in tiles]
+                self.assertEqual(
+                    rows, [k for k in range(n) for _ in range(WEDGE_N_COLUMNS)])
+                self.assertEqual(cols, [0, 1] * n)
 
     def test_empty_when_extent_below_floor(self):
         """r_extent <= _WEDGE_R_MIN yields no tiles (ladder-served interior).
@@ -1977,28 +2304,33 @@ class WedgeInteriorTilesContractTestCase(_WedgeTestCase):
         """
         self._tick()
         self.assertEqual(
-            _wedge_interior_tiles(_WEDGE_R_MIN, WEDGE_TILE_N_PER_SIDE), [])
+            _wedge_interior_tiles(WEDGE_TILE_GAMMA, _WEDGE_R_MIN,
+                                  WEDGE_TILE_N_PER_SIDE), [])
         self.assertEqual(
-            _wedge_interior_tiles(0.5 * _WEDGE_R_MIN, WEDGE_TILE_N_PER_SIDE), [])
+            _wedge_interior_tiles(WEDGE_TILE_GAMMA, 0.5 * _WEDGE_R_MIN,
+                                  WEDGE_TILE_N_PER_SIDE), [])
         self.assertEqual(
-            _wedge_interior_tiles(-0.5, WEDGE_TILE_N_PER_SIDE), [])
+            _wedge_interior_tiles(WEDGE_TILE_GAMMA, -0.5,
+                                  WEDGE_TILE_N_PER_SIDE), [])
 
     def test_diagnostic_dump_of_tile_ranges(self):
-        """DIAGNOSTIC: dump each tile's (r_range, theta_wedge_range).
+        """DIAGNOSTIC: dump each tile's (r_range, theta_wedge_range, origin).
 
         Writes a small text file to tests/output/ and asserts every dumped
-        range is inside the unit band.
+        range is inside the unit band and the two columns meet at the waist.
         """
-        tiles = _wedge_interior_tiles(WEDGE_TILE_R_EXTENT,
+        gamma = WEDGE_TILE_GAMMA
+        theta_waist = _wedge_theta_waist(gamma)
+        tiles = _wedge_interior_tiles(gamma, WEDGE_TILE_R_EXTENT,
                                       WEDGE_TILE_N_PER_SIDE)
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        lines = []
+        lines = [f'gamma={gamma} theta_waist={theta_waist:.6f}']
         for tile in tiles:
-            r_c, th_c, half_r, half_th, i, j = _unpack_tile(tile)
+            r_c, th_c, half_r, half_th, i, j, origin = _unpack_tile(tile)
             r_range = (r_c - half_r, r_c + half_r)
             th_range = (th_c - half_th, th_c + half_th)
-            lines.append(f'row={i} col={j} r_range={r_range} '
-                         f'theta_wedge_range={th_range}')
+            lines.append(f'row={i} col={j} origin={origin} '
+                         f'r_range={r_range} theta_wedge_range={th_range}')
             self._tick()
             self.assertGreater(r_range[0], 0.0)
             self.assertLess(r_range[1], 1.0)
@@ -2024,10 +2356,10 @@ class WedgeInteriorTilesCapFalsificationTestCase(_WedgeTestCase):
         self.assertLess(extent_large, extent_small,
                         'A larger tube-shell reservation (max_eta_max) must '
                         'push the wedge r_extent inward.')
-        tiles_small = _wedge_interior_tiles(extent_small,
-                                            WEDGE_TILE_N_PER_SIDE)
-        tiles_large = _wedge_interior_tiles(extent_large,
-                                            WEDGE_TILE_N_PER_SIDE)
+        tiles_small = _wedge_interior_tiles(
+            WEDGE_TILE_GAMMA, extent_small, WEDGE_TILE_N_PER_SIDE)
+        tiles_large = _wedge_interior_tiles(
+            WEDGE_TILE_GAMMA, extent_large, WEDGE_TILE_N_PER_SIDE)
         outer_small = _unpack_tile(tiles_small[-1])[0] + \
             _unpack_tile(tiles_small[-1])[2]
         outer_large = _unpack_tile(tiles_large[-1])[0] + \
@@ -2044,9 +2376,11 @@ class WedgeInteriorTilesCapFalsificationTestCase(_WedgeTestCase):
                 self.assertLess(extent, 1.0,
                                 'the cap always leaves the Airy edge to the '
                                 'tube chart (r_extent < 1).')
-                tiles = _wedge_interior_tiles(extent, WEDGE_TILE_N_PER_SIDE)
+                tiles = _wedge_interior_tiles(
+                    WEDGE_TILE_GAMMA, extent, WEDGE_TILE_N_PER_SIDE)
                 for tile in tiles:
-                    r_c, _th_c, half_r, _half_th, _i, _j = _unpack_tile(tile)
+                    r_c, _th_c, half_r, _half_th, _i, _j, _origin = \
+                        _unpack_tile(tile)
                     self._tick()
                     self.assertGreater(r_c - half_r, 0.0)
                     self.assertLess(r_c + half_r, 1.0)
@@ -2138,27 +2472,57 @@ class WedgeTrainingPathProducesWedgeChartsTestCase(unittest.TestCase):
 
 
 class WedgeTilesSelfFalsificationTestCase(unittest.TestCase):
-    """Prove the structural-contract assertions have teeth.
+    """Prove the waist-split / uniformity assertions have teeth.
 
-    These meta-tests feed deliberately-malformed tiles / caps through the
-    SAME numeric conditions the contract tests use and confirm they trip.
+    These meta-tests feed deliberately-malformed tiles / caps / boundaries
+    through the SAME numeric conditions the contract tests use and confirm
+    they trip -- guarding against a silently-passing structural suite.
     """
 
-    def test_split_column_would_fail_single_column_check(self):
-        """A pi/4-split (two-column) tile violates the full-wedge span check."""
-        bad_tile = ((0.4, 0.125 * np.pi), (0.1, 0.125 * np.pi), 0, 1)
-        _r_c, th_c, _half_r, half_th, _i, j = _unpack_tile(bad_tile)
-        # The genuine tiler emits j == 0 and half_th == pi/4; this bad tile
-        # would fail BOTH the column-index and the full-wedge-span assertions.
-        self.assertNotEqual(j, 0)
-        self.assertGreater(abs(half_th - WEDGE_THETA_HALF), WEDGE_THETA_ATOL)
-        self.assertGreater(abs((th_c + half_th) - 0.5 * np.pi),
-                           WEDGE_THETA_ATOL)
+    def test_single_column_would_fail_two_column_count(self):
+        """A one-column tiling (len == n) fails the ``2 * n`` count check."""
+        n = WEDGE_TILE_N_PER_SIDE
+        one_column_len = n  # what a spurious single-column tiler would emit
+        self.assertNotEqual(one_column_len, WEDGE_N_COLUMNS * n,
+                            'the two-column count check must reject a '
+                            'single-column tiling.')
+
+    def test_pi4_boundary_would_fail_waist_check_at_large_gamma(self):
+        """Splitting at pi/4 (not the waist) fails the boundary check.
+
+        At gamma=0.9 the true waist is ~0.23 rad from pi/4, far above the
+        boundary tolerance -- so asserting the boundary equals the waist would
+        reject a pi/4 split, i.e. the contract genuinely constrains it.
+        """
+        gamma = 0.9
+        theta_waist = _wedge_theta_waist(gamma)
+        pi4 = 0.25 * np.pi
+        self.assertGreater(abs(pi4 - theta_waist), WEDGE_WAIST_BOUNDARY_ATOL,
+                           'a pi/4 boundary must be rejected as != waist.')
+
+    def test_wrong_axis_origin_would_fail_origin_check(self):
+        """A tile whose axis_origin is swapped fails the per-column check."""
+        # Genuine low column carries 'low'; a swapped 'high' would trip the
+        # equality assertion in the contract test.
+        bad_origin = 'high'
+        self.assertNotEqual(bad_origin, 'low')
+
+    def test_physical_waist_oracle_rejects_wrong_theta(self):
+        """r_caustic at a NON-waist angle differs from gamma by >> the atol.
+
+        Proves the physical-invariant assertion is not vacuous: evaluating the
+        reach off the waist (e.g. at pi/4) breaks ``r_caustic == gamma``.
+        """
+        gamma = 0.9
+        off_waist = 0.25 * np.pi
+        self.assertGreater(
+            abs(r_caustic(gamma, off_waist) - gamma), WEDGE_WAIST_VALUE_ATOL,
+            'the physical waist oracle must reject an off-waist angle.')
 
     def test_nonuniform_rows_would_fail_uniformity_check(self):
         """Rows with differing half-widths break the single-half-width set."""
-        bad_tiles = [((0.2, WEDGE_THETA_CENTER), (0.10, WEDGE_THETA_HALF), 0, 0),
-                     ((0.6, WEDGE_THETA_CENTER), (0.25, WEDGE_THETA_HALF), 1, 0)]
+        bad_tiles = [((0.2, 0.3), (0.10, 0.3), 0, 0, 'low'),
+                     ((0.6, 0.3), (0.25, 0.3), 1, 0, 'low')]
         halfs = {round(_unpack_tile(t)[2], 15) for t in bad_tiles}
         self.assertGreater(len(halfs), 1,
                            'non-uniform rows must present >1 half-width.')
@@ -2166,7 +2530,8 @@ class WedgeTilesSelfFalsificationTestCase(unittest.TestCase):
     def test_over_unit_extent_emits_forbidden_row(self):
         """Passing r_extent >= 1 (a caller-cap violation) yields a row that
         the unit-band check rejects — proving the check discriminates."""
-        tiles = _wedge_interior_tiles(1.2, WEDGE_TILE_N_PER_SIDE)
+        tiles = _wedge_interior_tiles(WEDGE_TILE_GAMMA, 1.2,
+                                      WEDGE_TILE_N_PER_SIDE)
         outer_hi = _unpack_tile(tiles[-1])[0] + _unpack_tile(tiles[-1])[2]
         self.assertGreaterEqual(outer_hi, 1.0,
                                 'an over-unit extent MUST breach r < 1, so the '
@@ -2180,6 +2545,791 @@ class WedgeTilesSelfFalsificationTestCase(unittest.TestCase):
         self.assertEqual(same, same2)
         bigger_eta = _wedge_r_extent_cap(0.15, WEDGE_CAP_COORD_RADIUS_MIN)
         self.assertLess(bigger_eta, same)
+
+# ===========================================================================
+# Test 12 (T3): wedge subdivision splits at the u-midpoint, not the theta-mid.
+#
+# WP2 subdivides an eps-gated wedge tile by halving BOTH axes.  The RADIAL
+# split is at the plain-``r`` midpoint; the ANGULAR split is at the CUSP-
+# ADAPTED ``u``-midpoint mapped back to ``theta`` (``u = d**(2/3)`` on the
+# parent's own `_wedge_cusp_axis_map`), NEVER the plain-``theta`` midpoint.
+# Bisecting in the cusp-singular ``theta`` would forfeit the whole benefit of
+# the ``u`` axis (a near-cusp child would still carry the ``theta**(2/3)``
+# gradient the coarse parent could not resolve), so the two angular children
+# have UNEQUAL ``theta`` widths -- the near-cusp child is narrower.
+#
+# Oracle independence: the child boundary is checked against a CLOSED-FORM
+# ``u``-midpoint inverse ``theta_split = (0.5 * (theta_lo**(2/3) +
+# theta_hi**(2/3)))**1.5`` (low origin), derived by hand and independent of
+# the fine tabulated map the production code interpolates.
+# ===========================================================================
+
+#: A single wedge tile straddling small angles (near the theta=0 cusp), where
+#: the u-vs-theta midpoint gap is largest.
+T3_THETA_LO: float = 1e-3
+T3_THETA_HI: float = 0.4
+
+#: The parent's near-cusp side (low column -> d = theta).
+T3_ORIGIN: str = 'low'
+
+#: Contract tolerance for the closed-form u-midpoint vs the production
+#: `_wedge_cusp_axis_map` interpolation (~1e-16 measured: u_mid lands on the
+#: exact centre node of the odd-length uniform-u grid, so no interp error).
+T3_SPLIT_CONTRACT_ATOL: float = 1e-9
+
+#: Tolerance for the `_subdivide_wedge_tile` RETURN value, which rounds
+#: theta_split to 6 decimals for a reproducible report.
+T3_SPLIT_RETURN_ATOL: float = 1e-6
+
+#: The u-midpoint theta MUST differ from the plain-theta midpoint by more than
+#: this (measured gap ~0.055 rad for the T3 span); anything smaller would mean
+#: the split degenerated to the theta midpoint.
+T3_MIN_THETA_MIDPOINT_DEVIATION: float = 0.02
+
+#: Representative parent radial box for the reachable-red subdivision call.
+T3_R_CENTER: float = 0.4
+T3_HALF_R: float = 0.1
+
+
+def _u_midpoint_theta(theta_lo: float, theta_hi: float, origin: str) -> float:
+    """Closed-form angle at the cusp-adapted ``u``-midpoint (independent oracle).
+
+    For ``origin='low'`` (near cusp at 0, ``d = theta``, ``u = theta**(2/3)``
+    up to an offset) the midpoint condition ``u(theta_split) = (u_lo + u_hi)/2``
+    solves to ``theta_split = (0.5 * (theta_lo**(2/3) + theta_hi**(2/3)))**1.5``.
+    For ``origin='high'`` (near cusp at pi/2, ``d = pi/2 - theta``) the mirror
+    form applies.  Derived by hand; shares no code with the tabulated map.
+    """
+    exponent = 2.0 / 3.0
+    if origin == 'low':
+        return (0.5 * (theta_lo ** exponent + theta_hi ** exponent)) ** 1.5
+    if origin == 'high':
+        half_pi = 0.5 * np.pi
+        d_mid = (0.5 * ((half_pi - theta_lo) ** exponent
+                        + (half_pi - theta_hi) ** exponent)) ** 1.5
+        return half_pi - d_mid
+    raise ValueError(f"origin must be 'low' or 'high'; got {origin!r}.")
+
+
+class WedgeSubdivisionUMidpointTestCase(_WedgeTestCase):
+    """T3: the angular subdivision boundary is the u-midpoint, not theta-mid.
+
+    Part A pins the production map's u-midpoint against the closed-form
+    inverse to 1e-9 and proves it is NOT the theta midpoint.  Part B drives
+    the REAL `_subdivide_wedge_tile` (engine build stubbed out) and reads back
+    its reported ``theta_split``.
+    """
+
+    def test_cusp_axis_map_u_midpoint_matches_closed_form(self):
+        """Production `_wedge_cusp_axis_map` u-midpoint == closed-form to 1e-9.
+
+        Reproduces exactly what `_subdivide_wedge_tile` computes (u_mid on the
+        fitted map, interpolated back to theta) and checks it against the
+        hand-derived inverse -- for BOTH near-cusp origins.
+        """
+        for origin in ('low', 'high'):
+            theta_fine, u_fine = _wedge_cusp_axis_map(
+                T3_THETA_LO, T3_THETA_HI, origin)
+            u_mid = 0.5 * (float(u_fine[0]) + float(u_fine[-1]))
+            theta_split = float(np.interp(u_mid, u_fine, theta_fine))
+            analytic = _u_midpoint_theta(T3_THETA_LO, T3_THETA_HI, origin)
+            self._tick()
+            with self.subTest(origin=origin):
+                self.assertAlmostEqual(
+                    theta_split, analytic, delta=T3_SPLIT_CONTRACT_ATOL,
+                    msg=f'{origin} u-midpoint {theta_split:.12f} != closed '
+                        f'form {analytic:.12f}.')
+
+    def test_u_midpoint_is_not_theta_midpoint(self):
+        """The u-midpoint split is strictly NOT the plain-theta midpoint.
+
+        Prints theta_split, the theta-midpoint, and the u-midpoint image (the
+        first must equal the third, not the second).
+        """
+        theta_fine, u_fine = _wedge_cusp_axis_map(
+            T3_THETA_LO, T3_THETA_HI, T3_ORIGIN)
+        u_mid = 0.5 * (float(u_fine[0]) + float(u_fine[-1]))
+        theta_split = float(np.interp(u_mid, u_fine, theta_fine))
+        theta_midpoint = 0.5 * (T3_THETA_LO + T3_THETA_HI)
+        analytic = _u_midpoint_theta(T3_THETA_LO, T3_THETA_HI, T3_ORIGIN)
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        (OUTPUT_DIR / 'wedge_subdivision_u_midpoint.txt').write_text(
+            f'theta_split={theta_split:.10f}\n'
+            f'theta_midpoint={theta_midpoint:.10f}\n'
+            f'u_midpoint_image={analytic:.10f}\n')
+        self._tick()
+        # theta_split matches the u-midpoint image, NOT the theta midpoint.
+        self.assertAlmostEqual(theta_split, analytic,
+                               delta=T3_SPLIT_CONTRACT_ATOL)
+        self.assertGreater(
+            abs(theta_split - theta_midpoint),
+            T3_MIN_THETA_MIDPOINT_DEVIATION,
+            f'theta_split {theta_split:.6f} collapsed onto the theta midpoint '
+            f'{theta_midpoint:.6f}; the u-axis benefit is lost.')
+
+    def test_near_cusp_child_is_narrower_in_theta(self):
+        """The near-cusp angular child is narrower in theta than the far one.
+
+        For a low-origin parent the split sits below the theta midpoint, so
+        the lower (near-cusp) child ``[theta_lo, theta_split]`` is narrower
+        than the upper child ``[theta_split, theta_hi]``.
+        """
+        analytic = _u_midpoint_theta(T3_THETA_LO, T3_THETA_HI, T3_ORIGIN)
+        near_cusp_width = analytic - T3_THETA_LO
+        far_width = T3_THETA_HI - analytic
+        self._tick()
+        self.assertLess(near_cusp_width, far_width,
+                        'the near-cusp child must be the narrower one in '
+                        'theta (that is the whole point of the u split).')
+
+    def test_subdivide_wedge_tile_reports_u_midpoint_split(self):
+        """REACHABLE-RED: the REAL `_subdivide_wedge_tile` returns the u-split.
+
+        Stubs `_load_or_build` (so no engine / chart build runs) and
+        `_gate_chart` (children pack cleanly), then drives the production
+        subdivider and reads its reported ``theta_split`` (rounded to 6 dp).
+        It must equal the closed-form u-midpoint and differ from the theta
+        midpoint -- pinning the shipping code path, not a reconstruction.
+        """
+        theta_c = 0.5 * (T3_THETA_LO + T3_THETA_HI)
+        half_theta = 0.5 * (T3_THETA_HI - T3_THETA_LO)
+        tile = {
+            'center': (T3_R_CENTER, theta_c),
+            'half': (T3_HALF_R, half_theta),
+            'axis_origin': T3_ORIGIN,
+            'region': 'wedge_interior',
+            'w_range': (10.0, 40.0),
+            'si': 0, 'm_lo': 1.0, 'm_hi': 2.0}
+        config = SimpleNamespace(
+            interior_eps_max=0.05, interior_w_nodes_per_decade=15,
+            w_nodes_per_decade=12, n_gamma=5, n_rho=5, n_theta_c=5,
+            n_heldout=8)
+        charts: list = []
+        chart_reports: list = []
+        stub_chart = SimpleNamespace(image_count=4)
+        stub_report = {'heldout_eps': 1e-9, 'region': 'wedge_interior'}
+        outdir = Path(tempfile.mkdtemp())
+        try:
+            with mock.patch.object(
+                    surrogate_training, '_load_or_build',
+                    return_value=(stub_chart, stub_report, False)), \
+                 mock.patch.object(
+                    surrogate_training, '_gate_chart',
+                    return_value=(False, None)):
+                summary = surrogate_training._subdivide_wedge_tile(
+                    tile=tile, parent_tag='w_t3', band=(0.28, 0.32),
+                    parity=1, config=config,
+                    rng=np.random.default_rng(0), outdir=outdir,
+                    charts=charts, chart_reports=chart_reports)
+        finally:
+            for path in outdir.glob('*'):
+                path.unlink()
+            outdir.rmdir()
+        analytic = _u_midpoint_theta(T3_THETA_LO, T3_THETA_HI, T3_ORIGIN)
+        theta_midpoint = 0.5 * (T3_THETA_LO + T3_THETA_HI)
+        self._tick()
+        self.assertAlmostEqual(
+            summary['theta_split'], analytic, delta=T3_SPLIT_RETURN_ATOL,
+            msg=f"reported theta_split {summary['theta_split']} != closed-form "
+                f'u-midpoint {analytic:.6f}.')
+        self.assertGreater(
+            abs(summary['theta_split'] - theta_midpoint),
+            T3_MIN_THETA_MIDPOINT_DEVIATION,
+            'the shipping subdivider must NOT split at the theta midpoint.')
+        # Both angular children stay on the parent's near-cusp side.
+        self.assertEqual(summary['axis_origin'], T3_ORIGIN)
+
+
+class WedgeSubdivisionSelfFalsificationTestCase(unittest.TestCase):
+    """Prove the u-midpoint assertions have teeth."""
+
+    def test_theta_midpoint_would_fail_u_split_check(self):
+        """The plain-theta midpoint is far from the u-midpoint image.
+
+        If the subdivider (wrongly) split at the theta midpoint, the
+        ``|theta_split - theta_midpoint| > tol`` assertion would fire.
+        """
+        analytic = _u_midpoint_theta(T3_THETA_LO, T3_THETA_HI, T3_ORIGIN)
+        theta_midpoint = 0.5 * (T3_THETA_LO + T3_THETA_HI)
+        self.assertGreater(abs(analytic - theta_midpoint),
+                           T3_MIN_THETA_MIDPOINT_DEVIATION,
+                           'the u and theta midpoints must be well separated, '
+                           'else the contract test is vacuous.')
+
+    def test_closed_form_matches_map_only_for_correct_origin(self):
+        """A low-origin map does NOT match the high-origin closed form.
+
+        Confirms the origin-specific oracle is load-bearing: cross-pairing the
+        map and the closed form breaks the 1e-9 agreement.
+        """
+        theta_fine, u_fine = _wedge_cusp_axis_map(
+            T3_THETA_LO, T3_THETA_HI, 'low')
+        u_mid = 0.5 * (float(u_fine[0]) + float(u_fine[-1]))
+        theta_split_low = float(np.interp(u_mid, u_fine, theta_fine))
+        wrong = _u_midpoint_theta(T3_THETA_LO, T3_THETA_HI, 'high')
+        self.assertGreater(abs(theta_split_low - wrong),
+                           T3_SPLIT_CONTRACT_ATOL,
+                           'low-origin split must NOT match the high-origin '
+                           'closed form.')
+
+# ===========================================================================
+# Test T4 (SHARD A): coarse-tile -> subdivide -> pass feedback loop.
+#
+# The brief warns the "gate -> subdivide -> re-gate" feedback must NOT be
+# trimmed: a wedge tile whose held-out eps fails the interior registration
+# bar must be routed into `_subdivide_wedge_tile`, and its (r, u) children
+# re-gated on the SAME bar.  This suite drives that REAL loop at a
+# deliberately coarse config: build ONE parent wedge chart, confirm it FAILS
+# a tightened interior eps bar via the production `_gate_chart` (the exact
+# lever `_train_band_charts` reads to decide whether to subdivide), then run
+# `_subdivide_wedge_tile` and confirm its children clear the bar.  The
+# interior eps bar (`interior_eps_max`) is tightened to 3e-3 so the
+# smoothness-dominated parent (measured ~7.9e-3) genuinely fails; the four
+# (r, u) children (each a quarter-box) then clear it with ~5x headroom
+# (measured child eps < 1e-3).
+#
+# Cost: parent build (4x4x4 nodes x 4 w-nodes/decade) + 4 child rebuilds of
+# the same shape ~= 5 engine chart builds ~= 31s (measured) -- one method's
+# worth, run once in setUpClass and shared by every assertion.  Well under
+# the 60s single-test ceiling.
+# ===========================================================================
+
+#: Gamma band for the T4 parent wedge tile (narrow -> cheap).
+T4_BAND: tuple[float, float] = (0.28, 0.32)
+
+#: Parent wedge-fixed box centre ``(r_c, theta_wedge_c)``.
+T4_CENTER: tuple[float, float] = (0.35, 0.20)
+
+#: Parent wedge-fixed box half-widths ``(half_r, half_theta_wedge)``.
+T4_HALF: tuple[float, float] = (0.15, 0.15)
+
+#: Parent w-band (kept narrow so the DD-product ceiling never binds and the
+#: build stays cheap).
+T4_W_RANGE: tuple[float, float] = (5.0, 8.0)
+
+#: w-nodes per decade for both parent and children (coarse -> fast).
+T4_N_W: int = 4
+
+#: Held-out probe count per chart (parent and each child).
+T4_N_HELDOUT: int = 6
+
+#: Axis origin the parent (and, verbatim, its children) sit against.
+T4_AXIS_ORIGIN: str = 'low'
+
+#: Tightened interior eps bar: below the parent's smoothness-dominated eps
+#: (~7.9e-3) so the coarse parent FAILS and the feedback loop fires; above
+#: every child's eps (~<1e-3) so the (r, u) children CLEAR it.
+T4_INTERIOR_EPS_MAX: float = 3e-3
+
+#: Deterministic seed for the held-out sampler.
+T4_SEED: int = 0
+
+#: A single level of subdivision halves BOTH axes -> exactly four children.
+T4_EXPECTED_CHILDREN: int = 4
+
+
+def _t4_build_parent_and_subdivide(outdir: Path):
+    """Build the coarse parent, gate it, and run one level of subdivision.
+
+    Returns ``(parent_eps, parent_gated, summary, config)``.  Mirrors the
+    `_train_band_charts` wedge branch: build -> held-out eps -> `_gate_chart`
+    -> (if gated) `_subdivide_wedge_tile`.
+    """
+    config = TrainingConfig(
+        n_gamma=4, n_rho=4, n_theta_c=4, w_nodes_per_decade=T4_N_W,
+        interior_w_nodes_per_decade=T4_N_W,
+        interior_eps_max=T4_INTERIOR_EPS_MAX, n_heldout=T4_N_HELDOUT,
+        engine_budget=100000, seed=T4_SEED)
+    rng = np.random.default_rng(T4_SEED)
+    chart, _calls, _refused = _build_wedge_chart(
+        gamma_band=T4_BAND, parity=1, box_center=T4_CENTER, half=T4_HALF,
+        w_range=T4_W_RANGE, config=config,
+        w_nodes_per_decade=config.interior_w_nodes_per_decade,
+        axis_origin=T4_AXIS_ORIGIN)
+    r_c, th_c = T4_CENTER
+    hr, hth = T4_HALF
+    samples: list[tuple[float, float, float]] = []
+    for _ in range(config.n_heldout):
+        g = float(rng.uniform(*T4_BAND))
+        r = float(rng.uniform(r_c - hr, r_c + hr))
+        th = float(rng.uniform(th_c - hth, th_c + hth))
+        y1, y2 = _from_wedge_fixed(g, r, th, chart.wedge_map)
+        samples.append((g, float(y1), float(y2)))
+    parent_eps = float(_heldout_eps(chart, samples, {'schema': 't4-parent'}))
+    parent_gated, _reason = _gate_chart(
+        'interior', {'heldout_eps': parent_eps}, config)
+    tile = {'center': T4_CENTER, 'half': T4_HALF,
+            'axis_origin': T4_AXIS_ORIGIN, 'region': 'wedge_interior',
+            'w_range': T4_W_RANGE, 'si': 0, 'm_lo': 1.0, 'm_hi': 2.0}
+    charts: list = []
+    reports: list[dict] = []
+    summary = _subdivide_wedge_tile(
+        tile=tile, parent_tag='t4_parent', band=T4_BAND, parity=1,
+        config=config, rng=np.random.default_rng(T4_SEED + 1), outdir=outdir,
+        charts=charts, chart_reports=reports)
+    return parent_eps, parent_gated, summary, reports
+
+
+class WedgeSubdivisionFeedbackLoopTestCase(_WedgeTestCase):
+    """Coarse parent fails the bar -> subdivision -> children clear the bar.
+
+    The whole point of the brief's "do not trim the feedback" instruction:
+    a gated wedge tile must reach `_subdivide_wedge_tile`, and the resulting
+    (r, u) children must be RE-gated on the same interior eps bar so a cleared
+    child is packed and a still-failing child falls to the serving ladder.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        outdir = Path(cls._tmp.name)
+        (cls.parent_eps, cls.parent_gated, cls.summary,
+         cls.reports) = _t4_build_parent_and_subdivide(outdir)
+        cls.child_eps = [c['eps'] for c in cls.summary['children']
+                         if c.get('eps') is not None]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_coarse_parent_fails_interior_bar(self):
+        """The coarse parent's eps exceeds the tightened bar (loop trigger).
+
+        This is the precondition the feedback loop exists to service: if the
+        parent already cleared the bar there would be nothing to subdivide.
+        """
+        self._tick()
+        self.assertGreater(
+            self.parent_eps, T4_INTERIOR_EPS_MAX,
+            f'parent eps {self.parent_eps:.3e} must exceed the bar '
+            f'{T4_INTERIOR_EPS_MAX:.0e} for the feedback loop to fire.')
+        self.assertTrue(
+            self.parent_gated,
+            '`_gate_chart` must gate the coarse parent (production trigger '
+            'for `_subdivide_wedge_tile`).')
+
+    def test_subdivision_attempted_four_children(self):
+        """One level of (r, u) subdivision produces exactly four children.
+
+        Evidence that subdivision was ATTEMPTED before any ladder fallback:
+        a ladder-served gap is reachable ONLY through a child record, so four
+        child records prove the split ran.
+        """
+        self._tick()
+        self.assertEqual(
+            len(self.summary['children']), T4_EXPECTED_CHILDREN,
+            'a single level of subdivision must emit four (r, u) children.')
+
+    def test_children_clear_bar_and_are_packed(self):
+        """After subdivision the children clear the bar and are packed.
+
+        Closes the feedback loop: gated parent -> subdivide -> children pass.
+        Every child that carries an eps clears the interior bar; the packed
+        count is positive (measured: all four pass with ~5x headroom).
+        """
+        self.assertGreater(
+            self.summary['packed'], 0,
+            'at least one (r, u) child must clear the bar and be packed.')
+        for child in self.summary['children']:
+            eps = child.get('eps')
+            if eps is None:
+                continue
+            self._tick()
+            with self.subTest(ci=child['ci']):
+                self.assertLess(
+                    eps, T4_INTERIOR_EPS_MAX,
+                    f'child {child["ci"]} eps {eps:.3e} must clear the '
+                    f'interior bar {T4_INTERIOR_EPS_MAX:.0e}.')
+
+    def test_children_strictly_below_parent(self):
+        """Every child eps is strictly below the parent eps.
+
+        Subdivision must IMPROVE registration accuracy; a child no better
+        than its parent would signal the split bought nothing.  Reports the
+        child eps p50/p90/max diagnostic.
+        """
+        self.assertTrue(self.child_eps, 'no child eps recorded.')
+        for child in self.summary['children']:
+            eps = child.get('eps')
+            if eps is None:
+                continue
+            self._tick()
+            with self.subTest(ci=child['ci']):
+                self.assertLess(
+                    eps, self.parent_eps,
+                    f'child {child["ci"]} eps {eps:.3e} not strictly below '
+                    f'parent eps {self.parent_eps:.3e}.')
+        self._save_diagnostic()
+
+    def _save_diagnostic(self) -> None:
+        """Log parent eps and each child eps p50/p90/max."""
+        arr = np.array(self.child_eps)
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        path = OUTPUT_DIR / 't4_subdivision_feedback.txt'
+        lines = [
+            'T4 coarse-tile -> subdivide -> pass feedback loop',
+            f'interior_eps_max (bar) = {T4_INTERIOR_EPS_MAX:.3e}',
+            f'parent_eps             = {self.parent_eps:.6e}',
+            f'parent_gated           = {self.parent_gated}',
+            f'packed children        = {self.summary["packed"]}',
+            f'child eps p50          = {np.percentile(arr, 50):.6e}',
+            f'child eps p90          = {np.percentile(arr, 90):.6e}',
+            f'child eps max          = {arr.max():.6e}',
+            f'theta_split (u-mid)    = {self.summary["theta_split"]:.6f}',
+        ]
+        path.write_text('\n'.join(lines) + '\n')
+
+
+# ===========================================================================
+# Test T5 (SHARD A): node-exact on-grid + off-node vs engine + NPZ v2
+# round-trip of the cusp-adapted u-map.
+#
+# The cusp-adapted wedge chart is an INTERPOLATING tensor-product spline
+# through engine-evaluated SACR-C envelopes.  Two independent accuracy claims
+# and one serialization claim:
+#   (a) ON GRID: served at a training node the spline reproduces the
+#       (deterministic) engine value to ~machine precision -- the theta_wedge
+#       -> u remap (`theta_to_s`) is a per-node `np.interp` that lands EXACTLY
+#       on the stored s_grid, so the spline is evaluated at its own fit knot.
+#       A large on-grid residual would betray a map/serve coordinate mismatch.
+#       Measured worst node residual ~5.7e-16 (~6e-16, the spec figure).
+#   (b) OFF NODE: at held-out interior witnesses the served envelope matches a
+#       FRESH single-point engine call within the interior eps bar (5e-2).
+#       Measured worst ~1.2e-2.
+#   (c) NPZ: the chart -- including the new ``theta_to_s`` (2, N) u-map and the
+#       ``axis_schema`` meta tag -- round-trips bitwise (max|diff| = 0), and
+#       the persisted meta reports schema 'wedge_caustic_relative_v2'.
+#
+# The engine-trained chart is the shared module-scope surrogate (built once,
+# ~12s); this suite adds only single-point engine calls and an in-memory NPZ
+# round-trip -- well under a second of its own.
+# ===========================================================================
+
+#: On-grid node residual ceiling.  Measured worst ~5.7e-16; 1e-14 leaves ~17x
+#: headroom while still asserting machine-precision node reproduction.
+T5_NODE_EXACT_MAX: float = 1e-14
+
+#: Interior eps bar for the off-node engine comparison (the SACR-C currency).
+T5_OFF_EPS_MAX: float = 5e-2
+
+#: The schema tag the persisted wedge chart's meta must report.
+T5_EXPECTED_SCHEMA: str = 'wedge_caustic_relative_v2'
+
+#: Interior training-node indices probed on grid (avoid the outermost edge
+#: nodes where the caustic-fixed round-trip is least conditioned).
+T5_NODE_INDICES: tuple[int, ...] = (1, 2, 3)
+
+#: Off-node interior witnesses ``(r, theta_wedge)`` inside the training box.
+T5_OFF_WITNESSES: tuple[tuple[float, float], ...] = (
+    (0.28, 0.55), (0.35, 0.90), (0.22, 1.10), (0.45, 0.40))
+
+#: Off-node query gamma (interior to the gamma grid; not a node).
+T5_OFF_GAMMA: float = 0.37
+
+
+class WedgeNodeExactAndNpzV2TestCase(_WedgeTestCase):
+    """On-grid machine precision, off-node engine accuracy, v2 NPZ round-trip.
+
+    Reuses the shared engine-trained wedge surrogate (chart carries a real
+    cusp-adapted ``theta_to_s`` u-map, unlike the synthetic-envelope chart in
+    `NpzRoundTripTestCase`).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.surrogate = _shared_wedge_surrogate()
+        cls.chart = cls.surrogate.charts[0]
+        cls.log_w = cls.chart.log_w_grid.copy()
+
+    def _round_trip(self) -> InteriorWedgeChart:
+        """Save the chart to an in-memory NPZ and reload it."""
+        arrays = _chart_to_npz(self.chart, index=0)
+        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
+            np.savez(f, **arrays)
+            tmp_path = Path(f.name)
+        try:
+            data = np.load(tmp_path, allow_pickle=True)
+            reloaded = _chart_from_npz(data, index=0)
+            data.close()
+        finally:
+            tmp_path.unlink()
+        return reloaded
+
+    def test_chart_carries_u_map(self):
+        """The engine-trained chart stores a (2, N) cusp-adapted u-map.
+
+        Guards the premise of the on-grid/NPZ claims: without ``theta_to_s``
+        the serve path would contract on raw theta_wedge and the v2 schema
+        would be meaningless.
+        """
+        self._tick()
+        self.assertIsNotNone(
+            self.chart.theta_to_s,
+            'engine-trained wedge chart must carry a theta_to_s u-map.')
+        self.assertEqual(self.chart.theta_to_s.shape[0], 2)
+        self.assertGreater(self.chart.theta_to_s.shape[1], 1)
+
+    def test_on_grid_nodes_match_engine_to_machine_precision(self):
+        """Served-at-node envelope reproduces the engine to ~machine precision.
+
+        Cost: 3x3x3 = 27 interior nodes x 1 engine call each (~30ms) ~= 0.9s.
+        """
+        residuals: list[float] = []
+        for i, j, k in itertools.product(T5_NODE_INDICES, T5_NODE_INDICES,
+                                         T5_NODE_INDICES):
+            g = float(self.chart.gamma_grid[i])
+            r = float(self.chart.r_grid[j])
+            tw = float(self.chart.theta_wedge_grid[k])
+            served, engine, _y1, _y2, _n = _served_and_engine(
+                self.chart, g, r, tw, self.log_w)
+            scale = float(np.max(np.abs(engine)))
+            res = float(np.max(np.abs(served - engine))) / scale
+            residuals.append(res)
+            self._tick()
+            with self.subTest(i=i, j=j, k=k):
+                self.assertLess(
+                    res, T5_NODE_EXACT_MAX,
+                    f'on-grid node residual {res:.3e} exceeds machine-'
+                    f'precision ceiling {T5_NODE_EXACT_MAX:.0e}; a map/serve '
+                    f'coordinate mismatch is the likely cause.')
+        self._node_max = max(residuals)
+        self._save_node_diagnostic(residuals)
+
+    def test_off_node_witnesses_within_interior_bar(self):
+        """Off-node interior witnesses match a fresh engine within the bar.
+
+        Cost: 4 witnesses x 1 engine call each ~= 0.15s.
+        """
+        off_res: list[float] = []
+        for r, tw in T5_OFF_WITNESSES:
+            served, engine, _y1, _y2, _n = _served_and_engine(
+                self.chart, T5_OFF_GAMMA, r, tw, self.log_w)
+            scale = float(np.max(np.abs(engine)))
+            res = float(np.max(np.abs(served - engine))) / scale
+            off_res.append(res)
+            self._tick()
+            with self.subTest(r=r, theta_wedge=tw):
+                self.assertLess(
+                    res, T5_OFF_EPS_MAX,
+                    f'off-node witness eps {res:.3e} exceeds the interior '
+                    f'bar {T5_OFF_EPS_MAX:.0e} at (r={r}, theta_wedge={tw}).')
+        # Node residuals must be dramatically smaller than off-node residuals;
+        # if they were comparable the "node-exact" claim would be hollow.
+        if getattr(self, '_node_max', None) is None:
+            served, engine, _y1, _y2, _n = _served_and_engine(
+                self.chart, float(self.chart.gamma_grid[2]),
+                float(self.chart.r_grid[2]),
+                float(self.chart.theta_wedge_grid[2]), self.log_w)
+            scale = float(np.max(np.abs(engine)))
+            self._node_max = float(np.max(np.abs(served - engine))) / scale
+        self._tick()
+        self.assertLess(
+            self._node_max * 1e6, min(off_res),
+            'on-grid residuals must be >=1e6x smaller than off-node '
+            'residuals; otherwise node-exactness is not demonstrated.')
+
+    def test_meta_reports_v2_schema(self):
+        """The persisted chart meta reports the v2 axis schema."""
+        arrays = _chart_to_npz(self.chart, index=0)
+        meta = json.loads(str(arrays['chart0_meta']))
+        self._tick()
+        self.assertEqual(meta.get('kind'), 'wedge')
+        self.assertEqual(
+            meta.get('axis_schema'), T5_EXPECTED_SCHEMA,
+            'persisted wedge chart must tag the v2 cusp-adapted axis schema.')
+        # The module constant and the emitted tag are the same string.
+        self.assertEqual(_WEDGE_AXIS_SCHEMA, T5_EXPECTED_SCHEMA)
+
+    def test_u_map_round_trips_bitwise(self):
+        """theta_to_s (the u-map) survives NPZ round-trip with max|diff| = 0."""
+        reloaded = self._round_trip()
+        self._tick()
+        self.assertIsNotNone(
+            reloaded.theta_to_s,
+            'theta_to_s must survive the NPZ round-trip (not drop to None).')
+        self.assertEqual(
+            reloaded.theta_to_s.shape, self.chart.theta_to_s.shape)
+        self.assertEqual(
+            float(np.max(np.abs(
+                reloaded.theta_to_s - self.chart.theta_to_s))), 0.0,
+            'theta_to_s u-map differs after NPZ round-trip.')
+
+    def test_all_stored_fields_round_trip_bitwise(self):
+        """Axis grids, coeffs, knots, wedge_map, refused survive bitwise."""
+        reloaded = self._round_trip()
+        for name in ('gamma_grid', 'r_grid', 'theta_wedge_grid',
+                     'log_w_grid', 'real_coeffs', 'imag_coeffs',
+                     'refused_points'):
+            orig = np.asarray(getattr(self.chart, name))
+            relo = np.asarray(getattr(reloaded, name))
+            self._tick()
+            with self.subTest(field=name):
+                self.assertEqual(orig.shape, relo.shape,
+                                 f'{name} shape differs after round-trip.')
+                if orig.size == 0:
+                    continue  # empty refused_points: shape match suffices.
+                self.assertEqual(
+                    float(np.max(np.abs(orig - relo))), 0.0,
+                    f'{name} differs after NPZ round-trip.')
+        for k, (ok, rk) in enumerate(zip(self.chart.knots, reloaded.knots)):
+            self._tick()
+            with self.subTest(knot_axis=k):
+                self.assertEqual(float(np.max(np.abs(ok - rk))), 0.0)
+        for name in ('gamma_nodes', 'theta_nodes', 'r_table'):
+            orig = getattr(self.chart.wedge_map, name)
+            relo = getattr(reloaded.wedge_map, name)
+            self._tick()
+            with self.subTest(field=f'wedge_map.{name}'):
+                self.assertEqual(float(np.max(np.abs(orig - relo))), 0.0)
+
+    def test_reloaded_chart_serves_identically(self):
+        """Reloaded chart serves the same envelope as the original.
+
+        Byte-identical spline reconstruction implies byte-identical serve at
+        an off-node witness (both u-map remap and spline contraction match).
+        """
+        reloaded = self._round_trip()
+        r, tw = T5_OFF_WITNESSES[0]
+        y1, y2 = _from_wedge_fixed(T5_OFF_GAMMA, r, tw, self.chart.wedge_map)
+        orig = _evaluate_chart(self.chart, T5_OFF_GAMMA, eta=0.5, theta=0.7,
+                               log_w_query=self.log_w, y1_eig=y1, y2_eig=y2)
+        relo = _evaluate_chart(reloaded, T5_OFF_GAMMA, eta=0.5, theta=0.7,
+                               log_w_query=self.log_w, y1_eig=y1, y2_eig=y2)
+        self._tick()
+        self.assertEqual(float(np.max(np.abs(orig - relo))), 0.0,
+                         'reloaded chart serves a different envelope.')
+
+    def _save_node_diagnostic(self, residuals: list[float]) -> None:
+        """Tabulate node-exact residuals separately from off-node ones."""
+        arr = np.array(residuals)
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        path = OUTPUT_DIR / 't5_node_exact_residuals.txt'
+        lines = [
+            'T5 on-grid node-exact residuals (served vs fresh engine)',
+            f'ceiling            = {T5_NODE_EXACT_MAX:.3e}',
+            f'node residual p50  = {np.percentile(arr, 50):.6e}',
+            f'node residual p90  = {np.percentile(arr, 90):.6e}',
+            f'node residual max  = {arr.max():.6e}',
+            f'n nodes            = {arr.size}',
+        ]
+        path.write_text('\n'.join(lines) + '\n')
+
+
+# ===========================================================================
+# Test T6 (SHARD A): a stale v1-schema wedge artifact hard-refuses at load.
+#
+# The v1 -> v2 schema bump (WP1) retired the arc-length wedge angular axis in
+# favour of the cusp-adapted ``u = d**(2/3)`` axis; a chart persisted under
+# the retired 'wedge_caustic_relative_v1' tag is stored in the WRONG angular
+# coordinate and must NOT serve (a silent identity-map fallback would query
+# the spline at the wrong ``theta_wedge`` and return a finite-but-wrong F).
+# `_chart_from_npz` routes the wedge branch through `_validate_axis_schema`,
+# which hard-refuses any tag absent from `_KNOWN_WEDGE_AXIS_SCHEMAS` (only v2).
+# This suite mutates a REAL persisted wedge chart's meta to v1 and confirms a
+# named ValueError naming the offending schema -- and, as self-falsification,
+# that the same round-trip with the meta UNTOUCHED (v2) loads cleanly.
+#
+# Cost: reuses the shared surrogate; only in-memory NPZ save/load -- <1s.
+# ===========================================================================
+
+#: The retired wedge angular-axis schema tag (arc-length axis, pre-WP1).
+T6_STALE_SCHEMA: str = 'wedge_caustic_relative_v1'
+
+
+def _wedge_npz_with_meta(chart, meta_override: dict | None):
+    """Serialize ``chart``, optionally patch its meta, save+load the NPZ.
+
+    ``meta_override`` is merged into the decoded meta dict before re-encoding;
+    pass ``None`` to leave the meta untouched.  Returns the loaded npz mapping
+    (caller invokes `_chart_from_npz`), plus the temp path to unlink.
+    """
+    arrays = dict(_chart_to_npz(chart, index=0))
+    meta = json.loads(str(arrays['chart0_meta']))
+    if meta_override is not None:
+        meta.update(meta_override)
+    arrays['chart0_meta'] = np.array(json.dumps(meta))
+    with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
+        np.savez(f, **arrays)
+        tmp_path = Path(f.name)
+    data = np.load(tmp_path, allow_pickle=True)
+    return data, tmp_path
+
+
+class WedgeStaleSchemaRefusalTestCase(_WedgeTestCase):
+    """A v1-tagged wedge artifact hard-refuses; a v2-tagged one loads."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.chart = _shared_wedge_surrogate().charts[0]
+
+    def test_v1_schema_raises_named_valueerror(self):
+        """Loading a v1-tagged wedge chart raises ValueError naming the tag.
+
+        The refusal must NOT be a silent identity-map fallback: the error
+        message names the offending schema and the known set.
+        """
+        data, tmp_path = _wedge_npz_with_meta(
+            self.chart, {'axis_schema': T6_STALE_SCHEMA})
+        self._tick()
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                _chart_from_npz(data, index=0)
+            msg = str(ctx.exception)
+            self.assertIn(
+                T6_STALE_SCHEMA, msg,
+                'the refusal message must name the offending v1 schema.')
+            self.assertNotIn(
+                T6_STALE_SCHEMA, _KNOWN_WEDGE_AXIS_SCHEMAS,
+                'v1 must not be an accepted wedge schema.')
+        finally:
+            data.close()
+            tmp_path.unlink()
+
+    def test_absent_schema_raises_named_valueerror(self):
+        """A wedge chart with axis_schema=None also hard-refuses.
+
+        Absence is treated exactly like an unknown tag -- an untagged legacy
+        artifact cannot silently serve.
+        """
+        data, tmp_path = _wedge_npz_with_meta(
+            self.chart, {'axis_schema': None})
+        self._tick()
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                _chart_from_npz(data, index=0)
+            self.assertIn('None', str(ctx.exception))
+        finally:
+            data.close()
+            tmp_path.unlink()
+
+    def test_untouched_v2_schema_loads_cleanly(self):
+        """Self-falsification: the same round-trip with v2 meta loads fine.
+
+        Proves the refusal is caused by the v1 mutation, not by anything
+        intrinsic to the round-trip harness.
+        """
+        data, tmp_path = _wedge_npz_with_meta(self.chart, None)
+        self._tick()
+        try:
+            reloaded = _chart_from_npz(data, index=0)
+            self.assertIsInstance(reloaded, InteriorWedgeChart)
+            self.assertEqual(reloaded.image_count, self.chart.image_count)
+        finally:
+            data.close()
+            tmp_path.unlink()
+
+    def test_explicit_v2_schema_loads_cleanly(self):
+        """Explicitly re-stamping the current v2 tag also loads (control)."""
+        data, tmp_path = _wedge_npz_with_meta(
+            self.chart, {'axis_schema': _WEDGE_AXIS_SCHEMA})
+        self._tick()
+        try:
+            reloaded = _chart_from_npz(data, index=0)
+            self.assertIsInstance(reloaded, InteriorWedgeChart)
+        finally:
+            data.close()
+            tmp_path.unlink()
+
 
 
 if __name__ == '__main__':

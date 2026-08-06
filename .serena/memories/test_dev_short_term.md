@@ -181,3 +181,64 @@
   existing drift from a PRIOR build (this build's WPs empty []); my git diff
   is confined to imports/constants/target-method, cannot have caused it.
   Owner fix: repoint CANCELLATION_LENS refusing nodes to w>150.
+
+- WP1/WP2 cusp-adapted wedge axis + waist-split tiler (SHARD A) into
+  test_lensing_interior_wedge_chart.py (63 -> 77 tests, full file 47s).
+  T1 TransverseCutAxisAccuracyTestCase (4 tests, 5.7s): at gamma=0.3,
+  r=0.455, theta in [1e-4,0.2], w-grid geomspace(3,12,10) — fit spline on
+  arc-length s / raw theta / cusp u=theta^(2/3) axes at 5 nodes, eval
+  held-out vs fresh ChangRefsdalChannels. Ordering err_u<err_theta<err_s
+  holds at ALL percentiles ONLY with this w-window; geomspace(5,40,10)
+  broke p50 (u worse than theta) and pushed u p90 to 7.8e-3. Assert on P90
+  (u_p90<1e-3, robust; advantage is a near-cusp TAIL effect) + u_max<1.5e-3
+  (measured 6.83e-4, matches spec's 6.9e-4; s~4.9e-2). Report p50/p90/max +
+  worst locus to transverse_cut_axis_accuracy.txt; overlay .png.
+  T2 rewrite of WedgeInteriorTilesContractTestCase + constants: tiler is now
+  3-ARG `_wedge_interior_tiles(gamma, r_extent, n_per_side)` and emits
+  5-TUPLES `((r_c,th_c),(half_r,half_th),i,j,axis_origin)` (was 2-arg /
+  4-tuple / single pi/4 column). Two angular columns per radial row: j==0
+  'low' spans [0,waist], j==1 'high' [waist,pi/2]; shared boundary ==
+  _wedge_theta_waist(gamma) (INDEPENDENT argmin oracle). Physical waist pin:
+  |r_caustic(gamma,theta_waist)-gamma|<1e-6 (VALUE, min is flat — do NOT pin
+  the angle). gamma>=0.6 -> |theta_waist-pi/4|>0.10 (asymmetry real).
+  Removed WEDGE_THETA_CENTER/HALF (no longer pi/4-based). len==2*n_per_side.
+  T3 WedgeSubdivisionUMidpointTestCase (reachable-red): child boundary
+  theta_split == u-midpoint image, NOT theta-midpoint. Production
+  _subdivide_wedge_tile (surrogate_training) computes theta_split via
+  np.interp(u_mid, u_fine, theta_fine) with u_mid=0.5*(u[0]+u[-1]); u lands
+  on the EXACT centre node of the odd uniform-u grid so interp err ~1e-16
+  (contract tol 1e-9). RETURN rounds 6dp -> return-check tol 1e-6. Closed-
+  form oracle _u_midpoint_theta (low: (0.5*(tl^(2/3)+th^(2/3)))^1.5; high:
+  pi/2-(0.5*((pi/2-tl)^(2/3)+(pi/2-th)^(2/3)))^1.5) — matches production
+  _wedge_cusp_axis_map (verified surrogate.py L605-680). REACHABLE-RED mocks
+  surrogate_training._load_or_build + _gate_chart so the REAL subdivider
+  runs without engine.
+- CONFIRMED: from_wedge_engine (surrogate.py L3966-3970) now stores
+  theta_to_s = vstack([theta_fine, u_fine]) from _wedge_cusp_axis_map — the
+  chart's theta_to_s ROW 1 is now the u-coordinate, NOT arc-length s. Schema
+  bumped to 'wedge_caustic_relative_v2' (_KNOWN_WEDGE_AXIS_SCHEMAS = {v2}
+  only; old v1 hard-refuses at load). No test hardcodes the wedge schema
+  string (grep 'wedge_caustic_relative' in tests -> empty).
+- BACKWARD-COMPAT AUDIT (WP1/WP2, OUT OF SCOPE / report-only):
+  (1) BROKEN: test_lensing_ppgo_bandsplit.py WedgeInteriorTilesTestCase
+      (~L595-690). setUpClass L633 calls st._wedge_interior_tiles(R_EXTENT,
+      N_PER_SIDE) — OLD 2-arg -> TypeError (missing gamma/n_per_side). Also
+      `for center,half,_i,_j in self.tiles` unpacks 4 but tiles are 5-tuples
+      -> ValueError. Also asserts len==N_PER_SIDE (now 2*N) and "single
+      angular column [0,pi/2] no split" — the whole class premise is retired
+      by WP2's two-column waist split. OWNER must migrate: gamma-first call,
+      5-tuple unpack, expect 2 columns split at _wedge_theta_waist, drop the
+      single-column contract. This is the SAME file+class I ported in the
+      prior ffin build (then 2-arg/single-column was current); WP2 changed
+      the API from under it.
+  (2) NOT broken (only stale prose): test_lensing_wedge_dd_arclength.py —
+      every assert is STRUCTURAL (theta_to_s not None, shape (2,2001),
+      endpoints==theta_wedge_grid, both rows monotone, s-row nonlinear via
+      polyfit residual>1e-4, perturbed-map degrades). All hold for the u-map
+      too (u strictly increasing + nonlinear). It builds its OWN arc-length
+      reference only as a self-contained teeth control, never compares the
+      chart's row to arc-length values. Docstrings say "arc-length" (now
+      misleading) but no functional break. Not my scope to rename.
+  Only _wedge_interior_tiles/_subdivide_wedge_tile/_wedge_theta_waist/
+  _wedge_cusp_axis_map callers in tests/: my own file + ppgo_bandsplit (the
+  broken one). Confirmed via grep.
