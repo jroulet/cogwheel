@@ -27,6 +27,24 @@ section: Backlog
   one is the parked critical carrier `tau_c` HOPS BASIN partway through the
   gamma band.
 
+  ## CORRECTION — `theta_wedge` is DEGENERATE at the centre
+
+  `r -> 0` is the polar singularity of the wedge coordinate: every
+  `theta_wedge` maps to the SAME physical point, so the angular axis carries
+  no information in the innermost tile. Two consequences:
+
+  - The pi/4 experiment below was measuring a degenerate coordinate, not a
+    physical soft-axis/hard-axis asymmetry. Do not read it as evidence about
+    the diagonal.
+  - Subdividing in GAMMA does not fix a COORDINATE SINGULARITY. The centre is
+    exactly where all four nearest-caustic basins meet, so no single-basin
+    tile can contain the origin at ANY gamma or angular width. The carrier
+    flip is the guard correctly reporting that fact.
+
+  The real options are therefore: exclude a small disc `r < r_min` and let the
+  serving ladder cover it, or chart the centre in a NON-POLAR patch. The
+  gamma-subdivision idea recorded below is superseded.
+
   ## The pi/4 split is a symptom, not the fix
 
   Splitting only the innermost tile at the diagonal:
