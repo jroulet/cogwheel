@@ -1,7 +1,7 @@
 ---
 description: Updates documentation, specs, and changelog after code changes.
 mode: subagent
-model: my-custom-provider/claude-v4.6-sonnet
+model: deepseek-v4-flash
 variant: medium
 permission:
   edit: allow

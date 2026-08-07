@@ -1,7 +1,7 @@
 ---
 description: Lightweight code fixer — applies small targeted fixes from inspector findings.
 mode: subagent
-model: my-custom-provider/claude-v4.6-sonnet
+model: deepseek-v4-flash
 variant: high
 permission:
   edit: allow

@@ -1,7 +1,7 @@
 ---
 description: Implements one owned work package in the Cogwheel scientific Python codebase.
 mode: subagent
-model: my-custom-provider/claude-v4.6-opus
+model: deepseek-v4-pro
 variant: high
 permission:
   edit: allow

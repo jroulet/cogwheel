@@ -1,7 +1,7 @@
 ---
 description: Domain expert in GW parameter estimation — likelihood, prior, sampler, marginalization physics.
 mode: subagent
-model: my-custom-provider/claude-v4.6-opus
+model: deepseek-v4-pro
 variant: high
 permission:
   edit: deny

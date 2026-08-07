@@ -1,7 +1,7 @@
 ---
 description: Writes domain-specific tests with tolerance-based accuracy assertions.
 mode: subagent
-model: my-custom-provider/claude-v4.6-opus
+model: deepseek-v4-pro
 variant: high
 permission:
   edit: allow

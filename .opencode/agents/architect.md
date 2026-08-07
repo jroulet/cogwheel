@@ -1,7 +1,7 @@
 ---
 description: Decomposes approved Cogwheel work into a narrow, dependency-aware implementation plan.
 mode: subagent
-model: my-custom-provider/claude-v4.6-opus
+model: deepseek-v4-pro
 variant: high
 permission:
   edit: deny
