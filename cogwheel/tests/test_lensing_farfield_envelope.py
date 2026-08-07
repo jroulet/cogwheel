@@ -147,7 +147,7 @@ from cogwheel.lensing.chang_refsdal._schwinger import (
 from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate, ExteriorPolarChart, TubeChart,
     _FARFIELD_ENVELOPE_DEFINITION, _KNOWN_FARFIELD_DEFINITIONS,
-    _FARFIELD_AXIS_SCHEMA)
+    _EXTERIOR_POLAR_AXIS_SCHEMA)
 from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing import surrogate_training
 
@@ -1033,7 +1033,7 @@ def _legacy_single_box_arrays(chart: ExteriorPolarChart, tag: str | None
         'knot_log_w': knot_log_w, 'knot_gamma': knot_gamma,
         'knot_rho': knot_rho, 'knot_theta_c': knot_theta_c,
         'refused_points': chart.refused_points,
-        'axis_schema': np.array(_FARFIELD_AXIS_SCHEMA),
+        'axis_schema': np.array(_EXTERIOR_POLAR_AXIS_SCHEMA),
         'provenance': np.array(json.dumps({}))}
     if tag is not None:
         arrays['envelope_definition'] = np.array(tag)
@@ -1777,7 +1777,7 @@ CARRIER_STEP_MAX = 1.0
 #: The OLD (pre-8h-d2) far-field axis-schema tag: the frame-DEPENDENT
 #: caustic-fixed coordinate, before the ``framewinv`` demodulation.  A chart
 #: stamped with it must hard-refuse at load under the current known set.
-OLD_FARFIELD_AXIS_SCHEMA = 'caustic_radial_offset_rho_theta'
+OLD_EXTERIOR_POLAR_AXIS_SCHEMA = 'caustic_radial_offset_rho_theta'
 
 
 # RETIRED (2026-07-28): the branch-vs-HEAD byte-equivalence apparatus.
@@ -2109,12 +2109,12 @@ class StaleFarfieldAxisSchemaRefusalTestCase(FarfieldEnvelopeTestCase):
         """A chart stamped with the OLD schema raises, naming the tag."""
         corrupt = self._restamp(
             'old_schema.npz',
-            lambda meta: {**meta, 'axis_schema': OLD_FARFIELD_AXIS_SCHEMA})
+            lambda meta: {**meta, 'axis_schema': OLD_EXTERIOR_POLAR_AXIS_SCHEMA})
         self.comparisons += 1
         with self.assertRaises(ValueError) as ctx:
             LensAmplificationSurrogate.load(corrupt)
         message = str(ctx.exception)
-        self.assertIn(OLD_FARFIELD_AXIS_SCHEMA, message)
+        self.assertIn(OLD_EXTERIOR_POLAR_AXIS_SCHEMA, message)
         self.assertIn('rebuild', message)
 
     def test_absent_axis_schema_refuses_at_load(self):
@@ -2139,11 +2139,11 @@ class StaleFarfieldAxisSchemaRefusalTestCase(FarfieldEnvelopeTestCase):
     def test_old_schema_is_not_in_the_known_set(self):
         """The OLD tag is genuinely retired; the current tag is known."""
         self.comparisons += 1
-        self.assertNotIn(OLD_FARFIELD_AXIS_SCHEMA,
-                         surrogate_module._KNOWN_FARFIELD_AXIS_SCHEMAS)
+        self.assertNotIn(OLD_EXTERIOR_POLAR_AXIS_SCHEMA,
+                         surrogate_module._KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS)
         self.comparisons += 1
-        self.assertIn(_FARFIELD_AXIS_SCHEMA,
-                      surrogate_module._KNOWN_FARFIELD_AXIS_SCHEMAS)
+        self.assertIn(_EXTERIOR_POLAR_AXIS_SCHEMA,
+                      surrogate_module._KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS)
 
 
 if __name__ == '__main__':
