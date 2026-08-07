@@ -878,12 +878,13 @@ Tag conventions:
      the astroid interior, split at the caustic waist, plus a tiler that emits
      angular columns and subdivides on eps failure.
      [[lensing_wedge_angular_axis_is_cusp_singular]]
-  2. NEXT — coordinate-layer cleanup, one build:
-     [[lensing_r_caustic_should_root_find_not_scan]] (brentq instead of a
-     720-point scan; 0.32% error at gamma=0.9 propagates into the wedge radius)
-     and [[lensing_wedge_u_map_stored_in_arclength_fields]] (retire the
-     arc-length field names). Must land AFTER step 1: it moves the normaliser
-     under that build's eps acceptance.
+  2. DONE (2026-08-07) — coordinate-layer cleanup plus bounded subdivision
+     recursion, shipped together:
+     [[2026-08-07_subdivision-recursion-wedge-v3-r-caustic]]. NOTE the
+     `r_caustic` item's premise was STALE — there was no 0.32% error to fix
+     (the branch-selection fix had already landed); what shipped is a 10.6x
+     speedup that does not move any value beyond 7.6e-15. See
+     [[lensing_brief_premises_are_unverified]].
   3. EXTERIOR — [[lensing_exterior_should_chart_in_polar_not_sd]]: retire the
      `(s, d)` bridge for the bulk, chart in the tiler's native polar
      `(rho, theta_c)`, keep `(s, d)` only for the thin near-fold tube.
@@ -1798,68 +1799,6 @@ Tag conventions:
   artifact is labelled as a pilot.
 
 
-- **`r_caustic` scans 720 points to invert a smooth monotone map — root-find
-  instead** `[housekeeping]` — measured 2026-08-06.
-
-  `r_caustic(gamma, theta, *, kappa=0.0, n_sample=720)` returns the distance
-  from the origin to the caustic along a SOURCE-plane direction. The caustic
-  itself is available EXACTLY and analytically from `critical_point(gamma,
-  theta_lens)`, but that parametrises by the LENS-plane angle, and
-  `phi(theta_lens)` has no closed-form inverse — hence the scan.
-
-  Scanning 720 points and interpolating is the wrong way to invert a smooth
-  monotone map. A `brentq` root-find on `phi(theta_lens) = phi_target` reaches
-  machine precision in ~10-15 exact `critical_point` evaluations.
-
-  ## Cost of the status quo
-
-  - ACCURACY: `r_caustic(0.9, pi/2) = 5.67376` against the exact
-    `|critical_point(0.9, pi/2).source| = 5.69210` — **0.32% error**, growing
-    with gamma as the cusps sharpen (agrees to 5 decimals at gamma=0.3). This
-    propagates straight into the wedge chart's radial coordinate, which is
-    `r = |y| / r_caustic(gamma, theta)`.
-  - SPEED: 200 evaluations take 1.85 s. Because `r_caustic` is called per grid
-    point in several places, this dominated a driver probe badly enough to
-    need rewriting around a precomputed table (a 260x260 grid implies ~48M
-    inner evaluations).
-
-  ## A closed form was tried and is WRONG — do not retry it
-
-  The Chang-Refsdal caustic is NOT the algebraic astroid
-  `(x/A)^(2/3) + (y/B)^(2/3) = 1` with `A`, `B` the cusp radii. Fitted at the
-  axes (where it is exact by construction) it errs in between:
-
-      gamma = 0.2   0.5%
-      gamma = 0.495 3.5%
-      gamma = 0.9   21%
-
-  That form is a low-gamma approximation that fails as the cusps sharpen.
-
-  ## Exact structure that DOES hold, and is worth deriving properly
-
-  `r_caustic(gamma, theta_waist) == gamma` EXACTLY at every gamma tested
-  (0.200, 0.300, 0.495, 0.700, 0.900 — dead on), where
-  `theta_waist = argmin_theta r_caustic`. The rejected astroid approximation
-  does NOT reproduce it (0.201, 0.304, 0.512, 0.756, 1.062), so this is a real
-  property of the exact curve. Use it as a test oracle; it also suggests more
-  closed-form structure is available than the driver found by guessing.
-
-  ## Work
-
-  - Replace the scan with a `brentq` inversion of the exact parametrisation;
-    keep the signature, drop `n_sample` (or keep it as an ignored deprecated
-    kwarg if callers pass it).
-  - Pin with the waist oracle above and against `critical_point` at the axes.
-  - MUST NOT land while a build is measuring eps against the wedge coordinate:
-    changing this normaliser moves `r = |y|/r_caustic` under any in-flight eps
-    acceptance. Sequence it after
-    [[lensing_wedge_angular_axis_is_cusp_singular]] lands.
-
-  ACCEPTANCE: `r_caustic` agrees with `|critical_point(...).source|` to machine
-  precision at the axes and satisfies the waist relation to ~1e-12; a 200-call
-  benchmark is at least an order of magnitude faster than the 1.85 s scan.
-
-
 - ~~**Normalize the far-field `d` axis by curvature radius**~~ `[RESOLVED]` —
   Evaluated 2026-08-03 (build `eval_d_norm`). Rejected: wrong physics (Airy
   transition is ξ not d/R_c), wrong chart (far-field operates at d >> R_c),
@@ -2061,89 +2000,6 @@ Tag conventions:
   restore them mid-redesign.
 
 
-- **BOTH SUBDIVIDERS ARE SINGLE-LEVEL — a tile needing two halvings gets one
-  and is abandoned** `[→ spec]` — measured 2026-08-06 against the shipping
-  `_subdivide_wedge_tile`.
-
-  `_subdivide_wedge_tile` and `_subdivide_farfield_tile` are both documented
-  "Single-level, no recursion": a child that still fails the eps bar becomes a
-  ladder-served gap rather than being split again. So the eps feedback loop is
-  allowed exactly ONE iteration.
-
-  ## Measured on the astroid interior (band 0, gamma_mid = 0.495)
-
-  First pass, the shipped waist-split tiler (10 tiles, 2 angular columns):
-
-  | column | charts | result |
-  |---|---|---|
-  | `low` (soft cusp) | 5 | 5/5 PASS, p50 4.0e-5 .. 8.2e-4 |
-  | `high` (hard cusp) | 4 | 0/4 PASS, degrading outward 5.9e-2 -> 3.3e-1 |
-  | centre (`r = 0.099`, high) | 1 | BUILD FAILED, `CarrierDiscontinuityError` |
-
-  Calling the SHIPPING subdivider on the four failing `high` tiles (tile dict
-  constructed as `surrogate_training.py:4583` builds it; the subdivider's OWN
-  reported per-child eps, not a recomputation):
-
-  | parent `r` | packed | residual gaps |
-  |---|---|---|
-  | 0.277 | 4/4 | — |
-  | 0.455 | 4/4 | — |
-  | 0.633 | 3/4 | 6.50e-2 |
-  | 0.811 | 2/4 | 6.70e-2, 5.95e-2 |
-
-  **13/16 children clear.** The three that do not are MARGINAL — 1.19x, 1.30x
-  and 1.34x the 5e-2 bar — while each halving has been buying 2-5x. One more
-  level would clear them.
-
-  ## Total, against the retired baseline
-
-  | | charts | median eps | wall |
-  |---|---|---|---|
-  | `ffin` (retired) | 106 | 3.42e-4 | 100.7 min |
-  | wedge, cusp-adapted + 1 subdivision level | **18** | 5.47e-4 | ~10.5 min |
-
-  So the cusp-adapted axis plus one level already gives ~6x fewer charts at
-  ~10x less wall time, with the median within 1.6x of `ffin`. The residual is
-  three marginal gaps and the centre build failure.
-
-  ## The fix is bounded RECURSION, not a cleverer initial tiling
-
-  An asymmetric initial tiling (more columns on the hard side, whose cusp
-  coefficient is 2.05x the soft side's) was considered and REJECTED: adaptive
-  subdivision already adds resolution where it is needed, by construction. The
-  defect is purely that it stops after one halving. Seeding asymmetrically
-  would only reduce the number of rounds, at the cost of over-tiling where the
-  first pass already passes.
-
-  Give both subdividers a bounded depth (subdivide until the child clears or a
-  depth cap is reached) and record the achieved depth per tile so a runaway is
-  visible.
-
-  ## This likely explains the EXTERIOR too
-
-  The exterior shows 84% subdivision children AND 35 of 57 charts still failing
-  the 1e-3 bar — numbers that never sat together. Single-level subdivision
-  explains both at once: every marginal tile gets exactly one halving and is
-  then abandoned, so the child count is high AND the failure count is high. It
-  also raises the value of the polar re-chart
-  ([[lensing_exterior_should_chart_in_polar_not_sd]]): a re-chart that halves
-  the difficulty is worth much more once subdivision can actually converge.
-
-  ## Also found
-
-  `_wedge_cusp_axis_map(theta_lo, theta_hi, origin)` returns a SILENTLY COMPLEX
-  array when `theta > pi/2` for `origin='high'`, because `(pi/2 - theta)**(2/3)`
-  takes a negative base. It does not raise and does not clamp; the failure
-  surfaces several frames later inside `np.interp`. `theta_wedge > pi/2` is
-  meaningless in a folded quadrant, so the contract should be enforced at the
-  boundary.
-
-  ACCEPTANCE: with bounded recursion, the three marginal interior gaps close;
-  the achieved subdivision depth is reported per tile; and the exterior chart
-  count and failure count are re-measured under recursion before the polar
-  re-chart, so the two effects are not confounded.
-
-
 - **`_train_band_charts` cannot be run for ONE region, so every measurement
   reimplements it** `[housekeeping]` — identified 2026-08-06 after it caused a
   concrete error.
@@ -2186,8 +2042,9 @@ Tag conventions:
 
   ACCEPTANCE: an interior-only band run completes in interior-scale time
   (~minutes, not ~40), produces the same charts and chart_reports as the full
-  path restricted to that region, and the wedge probes in
-  [[lensing_subdividers_are_single_level]] can be re-expressed as calls to it.
+  path restricted to that region, and the wedge probes described in
+  [[2026-08-07_subdivision-recursion-wedge-v3-r-caustic]] can be re-expressed
+  as calls to it.
 
 
 - **THE TUBE MAP IS BUILT AT ONE GAMMA AND USED ACROSS A BAND** `[→ spec]` —
@@ -2499,57 +2356,28 @@ Tag conventions:
   region), so a modest gamma subdivision of ONE tile is affordable.
 
 
-- **The wedge's cusp-adapted `u` map is stored in fields named for ARC LENGTH**
-  `[→ spec]` — naming debt knowingly incurred 2026-08-06, to be retired with
-  [[lensing_r_caustic_should_root_find_not_scan]] in the same follow-up build.
-
-  After the cusp-axis change the wedge chart's angular spline coordinate is
-  `u = d^(2/3)` (angular distance to that tile's cusp), NOT arc length. But it
-  is stored in the existing fields `theta_to_s` (a 2xN array
-  `[theta_fine, u_fine]`) and `s_grid`, and validated by the SHARED
-  `_validate_theta_to_s`.
-
-  Reusing the fields was the right call FOR THAT BUILD: it keeps the serve path
-  coordinate-agnostic (`_evaluate_chart` reads the stored map and splines in
-  whatever it holds, so no serve change was needed at all), and the
-  `axis_schema` tag `wedge_caustic_relative_v2` disambiguates the semantics at
-  load. Nothing is incorrect.
-
-  It is nonetheless the exact failure mode this repo has already been bitten
-  by, recorded in [[lensing_farfield_name_spans_three_regimes]]: **a name that
-  records a symbol's FIRST USE rather than its role**. `FarFieldChart` came to
-  span intermediate field, far field and interior; `theta_to_s` now holds
-  something that is not `s`. The next reader who trusts the field name will be
-  wrong, and the `axis_schema` tag only protects the LOADER, not the reader.
-
-  ## Why it is not a one-line rename
-
-  `_validate_theta_to_s` is SHARED by the tube, lobe-interior and far-field
-  arc-length maps, which legitimately do hold arc length. So retiring the name
-  for the wedge means either
-
-  - a wedge-specific validator plus wedge-specific field names
-    (`theta_to_u` / `u_grid`), leaving the arc-length users untouched; or
-  - a neutral name for the shared machinery (`theta_to_axis` / `axis_grid`)
-    with the meaning carried entirely by `axis_schema`.
-
-  The second is DRYer and matches how the loader already works, but touches
-  every chart class and their serialized field names — i.e. it is a schema
-  change for tube/lobe/far-field too, and would need its own version bump on
-  each. Prefer the first unless the second is being done anyway.
-
-  ## Work
-
-  - Pick one of the two options above and apply it.
-  - Whichever is chosen, the `axis_schema` tag remains the authority on
-    semantics; the rename is for READERS, and must not become a second source
-    of truth about what the axis means.
-  - Land with the `r_caustic` root-find so the coordinate layer is touched
-    once, not twice.
-
-  ACCEPTANCE: no field or validator in the wedge path is named for arc length;
-  the arc-length users keep theirs; serve remains coordinate-agnostic; and a
-  stale artifact still hard-refuses on `axis_schema`, not on a field name.
+- **EVERY WEDGE CHART BUILT BEFORE 2026-08-07 IS UNLOADABLE, SO ANY
+  MEASUREMENT RESTING ON ONE MUST BE RE-RUN** `[housekeeping]` — the
+  `InteriorWedgeChart` schema bump to `wedge_caustic_relative_v3`
+  (`5084e93`) drops BOTH v1 and v2 from the known set and makes `theta_to_u`
+  required, so a stale artifact hard-refuses at load by design rather than
+  being served on a mislabelled axis. That is the correct behaviour, and it
+  invalidates the charts built during the 2026-08-06 coordinate probes.
+  AFFECTED, specifically: the 18-chart / median 5.47e-4 / ~10.5 min interior
+  result and the 13/16-children subdivision result, both measured with probe
+  scripts under the scratchpad against v2 charts. The CONCLUSIONS are very
+  likely unchanged — v2 and v3 store the identical `u = d**(2/3)` array under
+  different field names, and serve is coordinate-agnostic through the stored
+  map — but "very likely" is not measured, and these numbers are the
+  justification for the recursion cap and for the interior's eps acceptance.
+  ACTION: re-run the interior probe against v3 before quoting those figures
+  again, or before they are used as a baseline for the production training
+  run. Cheap (~10 min) relative to what rests on them.
+  This is a specific instance of the general problem in
+  [[lensing_training_path_cannot_be_run_per_region]]: the probes exist only
+  because the training path cannot be invoked per region, so every schema
+  change re-invalidates hand-rolled probe measurements instead of a cached
+  region run.
 
 # Envelope surrogate + micro-levers — close the lensed/unlensed per-eval gap [→ spec]
 
@@ -2809,6 +2637,29 @@ teja-force skill + gw with the rest of the hardening.
   unchanged.
 
 
+- **A DRIVER DECISION AND AN OWNER DECISION ARE INDISTINGUISHABLE IN THE BUILD
+  LOG** `[housekeeping]` — `gates.py` writes `User: accepted remaining
+  findings — proceeding past the Inspector gate` for every file-based
+  escalation decision, regardless of who created the decision file. The driver
+  resolves routine escalations under standing authorization; the owner
+  resolves the rare ones. Both render as `User:`.
+  MEASURED (2026-08-07, `subdivision_recursion`): the driver accepted
+  INS-1-001 — a real finding, shipping a stale `DATA_CONTRACTS.yaml` until the
+  driver fixed it post-build — and the build record attributes that call to
+  the owner. On a build that shipped a schema change, "who approved this" is
+  exactly the question a log is for.
+  Same defect class the SDK already fixed once for commit attribution: build
+  commits were hardcoded to a model tier no role is ever assigned, writing a
+  false authorization trail into git history (`orchestrator.py` now derives
+  the trailer from `AGENT_MODELS`). This is the same false trail in the build
+  log instead of the commit.
+  FIX: the decision file's author is knowable — the driver writes
+  `escalation_accept` itself, whereas an owner decision arrives through the
+  interactive path. Label them distinctly (`Driver:` / `Owner:`), or record
+  the provenance in the file and echo it. Cheap; the value is that an audit
+  can tell delegated calls from human ones.
+
+
 - **Inspector has no way to file "valid, but another role owns it"**
   `[housekeeping]` — every additive-capability build burns its revision cap on
   the same doc-sync argument. Observed on the saddle lobe-serve build
@@ -2861,6 +2712,31 @@ teja-force skill + gw with the rest of the hardening.
   Worth doing before the next additive build: the cost is one wasted Inspector
   pass plus an Architect triage per revision, on every build that adds a
   capability — which is most of them.
+
+
+- **KILLING A BUILD DOES NOT STOP ITS MONITOR, SO DEAD LOGS KEEP FIRING FALSE
+  STALLS** `[housekeeping]` — the launch protocol pairs launch with arming a
+  progress monitor (MECHANICAL PAIRING, in AGENTS.md). There is no matching
+  pairing on the way down. A killed or relaunched build leaves its monitor
+  watching a log that will never advance again, which then reports a stall
+  that means nothing.
+  MEASURED (2026-08-06/07): four stale monitors accumulated in one session,
+  each firing against a dead log, at one driver invocation per emission. One
+  of them was still reporting on the FIRST launch's log after the build had
+  been killed and relaunched — so the driver was reading progress for a run
+  that no longer existed while the live run went unwatched.
+  This compounds a hazard already recorded in memory: a stalled monitor and a
+  finished one look identical, so the guidance is to prefer a watcher that
+  EXITS on its terminal condition. A watcher on a dead log can never reach
+  its terminal condition, so it is the worst case of that shape — permanently
+  indistinguishable from a hung build.
+  FIX: make teardown symmetric with launch. Either (a) the kill path stops the
+  monitor for that log, same action, never two; or (b) monitors self-terminate
+  when the build process for their log is gone — the terminal check already
+  greps `pgrep -f "sdk/[b]uild.py"`, so a monitor can exit on "log frozen AND
+  no build process" instead of reporting a stall forever.
+  (b) is strictly better: it needs no cooperation from whoever does the
+  killing, which is where the discipline actually failed.
 
 
 - **THE PLAN GATE HAS NO WIDTH CHECK** `[housekeeping]` — 2026-07-30. AGENTS.md

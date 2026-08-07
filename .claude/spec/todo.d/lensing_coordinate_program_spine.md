@@ -27,12 +27,13 @@ section: Backlog
      the astroid interior, split at the caustic waist, plus a tiler that emits
      angular columns and subdivides on eps failure.
      [[lensing_wedge_angular_axis_is_cusp_singular]]
-  2. NEXT — coordinate-layer cleanup, one build:
-     [[lensing_r_caustic_should_root_find_not_scan]] (brentq instead of a
-     720-point scan; 0.32% error at gamma=0.9 propagates into the wedge radius)
-     and [[lensing_wedge_u_map_stored_in_arclength_fields]] (retire the
-     arc-length field names). Must land AFTER step 1: it moves the normaliser
-     under that build's eps acceptance.
+  2. DONE (2026-08-07) — coordinate-layer cleanup plus bounded subdivision
+     recursion, shipped together:
+     [[2026-08-07_subdivision-recursion-wedge-v3-r-caustic]]. NOTE the
+     `r_caustic` item's premise was STALE — there was no 0.32% error to fix
+     (the branch-selection fix had already landed); what shipped is a 10.6x
+     speedup that does not move any value beyond 7.6e-15. See
+     [[lensing_brief_premises_are_unverified]].
   3. EXTERIOR — [[lensing_exterior_should_chart_in_polar_not_sd]]: retire the
      `(s, d)` bridge for the bulk, chart in the tiler's native polar
      `(rho, theta_c)`, keep `(s, d)` only for the thin near-fold tube.

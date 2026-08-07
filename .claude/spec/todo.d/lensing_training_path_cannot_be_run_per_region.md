@@ -44,5 +44,6 @@ section: Backlog
 
   ACCEPTANCE: an interior-only band run completes in interior-scale time
   (~minutes, not ~40), produces the same charts and chart_reports as the full
-  path restricted to that region, and the wedge probes in
-  [[lensing_subdividers_are_single_level]] can be re-expressed as calls to it.
+  path restricted to that region, and the wedge probes described in
+  [[2026-08-07_subdivision-recursion-wedge-v3-r-caustic]] can be re-expressed
+  as calls to it.
