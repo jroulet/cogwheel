@@ -45,7 +45,7 @@ done
 # OPENCODE_SESSION_ID is REQUIRED for the callback sidecar to know where to
 # inject the terminal event. Without it, builds complete silently.
 if [[ "$AGENT_PROVIDER" == "opencode" && -f "$REPO_ROOT/.env" ]]; then
-  for _VAR in OPENCODE_SESSION_ID OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD OPENCODE_SERVE_PORT; do
+  for _VAR in OPENCODE_SESSION_ID OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD OPENCODE_SERVE_PORT OPENCODE_MODEL_PROVIDER; do
     if [[ -z "$(eval echo "\${$_VAR:-}")" ]]; then
       _VAL="$(grep -E "^$_VAR=" "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
       [[ -n "$_VAL" ]] && export "$_VAR=$_VAL"

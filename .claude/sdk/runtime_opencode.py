@@ -28,27 +28,37 @@ HookJSONOutput = dict[str, Any]
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 SandboxSettings = dict[str, Any]
 
-# Provider-specific cost/quality routing.  Claude keeps its established
-# AGENT_MODELS map in agents.py; these defaults apply only when the shared
-# orchestrator is running through ``opencode run``.
+# ── Model routing ───────────────────────────────────────────────────────
 #
-# OpenCode uses the "provider/model" format. The provider configured in the
-# project opencode.json is "my-custom-provider" pointing at AI Commons.
-OPENCODE_ROLE_MODELS = {
-    "architect":    "my-custom-provider/claude-v4.6-opus",
-    "coder":        "my-custom-provider/claude-v4.6-opus",
-    "inspector":    "my-custom-provider/claude-v4.6-opus",
-    "professor":    "my-custom-provider/claude-v4.6-opus",
-    "prof_review":  "my-custom-provider/claude-v4.6-opus",
-    "foreman_lite": "my-custom-provider/claude-v4.6-sonnet",
-    "test_dev":     "my-custom-provider/claude-v4.6-opus",
-    "librarian":    "my-custom-provider/claude-v4.6-sonnet",
-    "tidier":       "my-custom-provider/claude-v4.6-sonnet",
-    "dreamer":      "my-custom-provider/claude-v4.6-sonnet",
-    "simplifier":   "my-custom-provider/claude-v4.6-sonnet",
+# Two model providers are supported, selected by OPENCODE_MODEL_PROVIDER
+# (unset/empty = AI Commons; "go" = OpenCode Go native models).  Each has
+# its own role → model map so the orchestrator's agent-type assignments
+# ("opus" vs "sonnet" roles) are cleanly separated from the provider.
+#
+# Roles follow the two-tier convention:
+#   opus-tier:  architect, coder, inspector, professor, prof_review, test_dev
+#   sonnet-tier: foreman_lite, librarian, tidier, dreamer, simplifier
+
+# ── AI Commons ──
+
+_AI_COMMONS_OPUS = "my-custom-provider/claude-v4.6-opus"
+_AI_COMMONS_SONNET = "my-custom-provider/claude-v4.6-sonnet"
+
+AI_COMMONS_ROLE_MODELS = {
+    "architect":    _AI_COMMONS_OPUS,
+    "coder":        _AI_COMMONS_OPUS,
+    "inspector":    _AI_COMMONS_OPUS,
+    "professor":    _AI_COMMONS_OPUS,
+    "prof_review":  _AI_COMMONS_OPUS,
+    "foreman_lite": _AI_COMMONS_SONNET,
+    "test_dev":     _AI_COMMONS_OPUS,
+    "librarian":    _AI_COMMONS_SONNET,
+    "tidier":       _AI_COMMONS_SONNET,
+    "dreamer":      _AI_COMMONS_SONNET,
+    "simplifier":   _AI_COMMONS_SONNET,
 }
 
-OPENCODE_ROLE_VARIANTS = {
+AI_COMMONS_ROLE_VARIANTS = {
     "architect":    "high",
     "coder":        "high",
     "inspector":    "high",
@@ -62,16 +72,61 @@ OPENCODE_ROLE_VARIANTS = {
     "simplifier":   "medium",
 }
 
-# Map Claude model names to OpenCode equivalents. The orchestrator hardcodes
-# Claude model names in ad-hoc calls (triage, fill_max_turns, skills); this
-# map translates them to models available on the configured provider.
-_CLAUDE_TO_OPENCODE_MODEL = {
-    "claude-opus-4-8":   "my-custom-provider/claude-v4.6-opus",
-    "claude-opus-4":     "my-custom-provider/claude-v4.6-opus",
-    "claude-sonnet-5":   "my-custom-provider/claude-v4.6-sonnet",
-    "claude-sonnet-4-6": "my-custom-provider/claude-v4.6-sonnet",
+_AI_COMMONS_CLAUDEMAP = {
+    "claude-opus-4-8":   _AI_COMMONS_OPUS,
+    "claude-opus-4":     _AI_COMMONS_OPUS,
+    "claude-sonnet-5":   _AI_COMMONS_SONNET,
+    "claude-sonnet-4-6": _AI_COMMONS_SONNET,
     "claude-haiku-3-5":  "my-custom-provider/claude-v4.5-haiku",
 }
+
+# ── OpenCode Go (open native models) ──
+
+_GO_OPUS = "deepseek-v4-pro"
+_GO_SONNET = "deepseek-v4-flash"
+
+GO_ROLE_MODELS = {
+    "architect":    _GO_OPUS,
+    "coder":        _GO_OPUS,
+    "inspector":    _GO_OPUS,
+    "professor":    _GO_OPUS,
+    "prof_review":  _GO_OPUS,
+    "foreman_lite": _GO_SONNET,
+    "test_dev":     _GO_OPUS,
+    "librarian":    _GO_SONNET,
+    "tidier":       _GO_SONNET,
+    "dreamer":      _GO_SONNET,
+    "simplifier":   _GO_SONNET,
+}
+
+# Variants don't apply to Go native models (DeepSeek uses reasoning tokens
+# via the model itself, not a separate variant flag).  Keep an empty map so
+# callers that iterate roles do not crash.
+GO_ROLE_VARIANTS = {role: "" for role in GO_ROLE_MODELS}
+
+# When the orchestrator hardcodes a Claude name (triage, skills, etc.),
+# translate it to the corresponding Go model.  For non-matching names the
+# caller's string is passed through unchanged.
+_GO_CLAUDEMAP = {
+    "claude-opus-4-8":   _GO_OPUS,
+    "claude-opus-4":     _GO_OPUS,
+    "claude-sonnet-5":   _GO_SONNET,
+    "claude-sonnet-4-6": _GO_SONNET,
+    "claude-haiku-3-5":  _GO_SONNET,
+}
+
+# ── Active selection ──
+#
+# Set OPENCODE_MODEL_PROVIDER=go in the environment (or in .env) to use
+# the Go native models.  Unset or empty retains the AI Commons mappings.
+
+_GO_MODE = os.environ.get("OPENCODE_MODEL_PROVIDER", "").strip() == "go"
+
+OPENCODE_ROLE_MODELS = GO_ROLE_MODELS if _GO_MODE else AI_COMMONS_ROLE_MODELS
+OPENCODE_ROLE_VARIANTS = (
+    GO_ROLE_VARIANTS if _GO_MODE else AI_COMMONS_ROLE_VARIANTS)
+_CLAUDE_TO_OPENCODE_MODEL = (
+    _GO_CLAUDEMAP if _GO_MODE else _AI_COMMONS_CLAUDEMAP)
 
 DEFAULT_OPENCODE_JSON_STREAM_LIMIT = 8 * 1024 * 1024
 
